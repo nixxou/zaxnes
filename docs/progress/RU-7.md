@@ -17,8 +17,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 2 | Curvature (AMD-043, AMD-046) | done — `9ffb3b7` |
 | 3 | The voxel grid and the pixel shadows | done — `6872645` |
 | 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — `d678e46` |
-| 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — this commit (its clippy fix and its design: `9ef1447`) |
-| 4c | The reflections of REQ-SCN-084 and the floor mask | todo |
+| 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — `46f3174` (its clippy fix and its design: `9ef1447`) |
+| 4c | The reflections of REQ-SCN-084 and the floor mask | done — this commit |
 | 4d | The MSVO estimator and its runtime fallback | todo |
 | 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | todo |
 | 5 | The parity measurements and the costs | todo |
@@ -870,6 +870,181 @@ suites, **68 passed, 0 failed** (17 of them `parity_wgpu_tests`). `-p zax-golden
 `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
 -D warnings` clean.
 
+### Step 4c — the reflections of REQ-SCN-084 and the floor mask
+
+The second screen effect, and the one with the most moving parts: a scene-pipeline variant that
+lays a mask down, a march that reads the frame's own colour, and a blend that puts it back.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `shaders/ssr.wgsl` (new) | the twin of `shaders/ssr.frag`: the quadratic march on positions fitted to the longest ray, the bisection, the thickness test, the spiral blur and the two attenuations |
+| `shaders/ssr_composite.wgsl` (new) | the twin of `ssr_composite.frag`: the trace sampled back up through the filtered sampler, multiplied by the mask at full resolution |
+| `shaders/scene.wgsl` | the `ZAX_FLOOR_MASK` variant — the `scene_normal` varying (the normal **before** the curvature) and an `fs_main` that is REQ-SCN-084's `+Y ≥ 0,9` test, with the ordinary one moved into the `//#else` branch |
+| `shaders/screen_depth.wgsl` | `zax_load1`, the second source slot |
+| `wgpu_backend/screen_effects.rs` | the `Reflections` half: the trace and composite pipelines, the `R8Unorm` mask at the frame's size, the `Rgba16Float` trace at the quality's, two more uniform blocks, `mask_target`, `trace`, `composite_reflections` |
+| `wgpu_backend/renderer.rs` | `ShaderVariant.floor_mask` and `ShaderVariant::mask()`; `mask_modules`, `mask_pipelines`, `Layouts::mask_pipeline`, `mask_pipeline()`; `prepare_mask`; `mark_floors`; the floor runs in `upload_draws`; `draw_floor_mask`; the mask pass and the reflections in `run_screen_effects`; the floor vertical in the frame block; **the Q-104 diagnostic line and `style_reported` are gone** |
+| `zax-render/tests/common/mod.rs` | `WgpuFixture` — a headless `wgpu` device with a target of the same shape as `GlFixture`'s, so that one `Built` scene can be drawn through both backends; and `close_up_r`/`is_cube`, moved here from `amd055_reflection_tests.rs` because two binaries now want them |
+| `zax-render/src/wgpu_backend/headless.rs` | `HeadlessGpu::size`, which a reader of `read_pixels` needs to index rows |
+| `zax-render/tests/amd055_parity_tests.rs` (new) | seven tests — the file the reflections are measured in, for the reason below |
+| `zax-render/tests/amd055_style_tests.rs` | the two-sided Q-104 test now reads "every effect but the multi-scale estimator" |
+| `zax-harness/tests/parity_wgpu_tests.rs` | three more tests |
+| `zax-app/src/graphics.rs`, `zax-harness/src/render/engine.rs` | one comment each: Q-104's subject is answered, so the two `// Q-104` notes about the unrendered style go. **Comment-only**, inside the `#[cfg(feature = "wgpu")]` arm |
+
+#### The synthetic set has no floor at all, and that is why this step has a test file of its own
+
+The first thing this step measured, and it changes where the evidence lives. On the **OpenGL**
+backend, `spl.reflections` = 1 against Classic leaves **all eleven synthetic captures
+byte-identical**. Not one instance of the set is a floor surface, and that is REQ-SCN-084 as
+written: a floor needs a bounding box of at least `6 × échelle de scène` in both dimensions of the
+floor plane **and** a face whose scene normal is `+Y ≥ 0,9`. The widest flat thing in the set is
+the backdrop, 256 × 240 × **1** — which Q-093 (a) already records as not a floor.
+
+So the harness, whose parity file is this lot's, cannot measure what the reflections *do*. The
+frame that can is the **close-up R of §2.5**, which `amd055_reflection_tests.rs` builds in-process
+for the OpenGL invariants. Hence two changes:
+
+- `common::WgpuFixture`, a headless `wgpu` device beside `common::GlFixture`, so that one `Built`
+  scene is drawn through both backends and compared. It is this lot's most reusable piece of test
+  support: step 5's §2.4 invariants on the `wgpu` side need exactly the same thing.
+- `close_up_r` moved from the one test binary into `common`, so the fixture is written once.
+
+The harness file keeps three tests of the reflections all the same, and they are **not**
+redundant: they exercise the plumbing at the frame's own scale — a mask pass opened over a frame of
+1 926 opaque runs, a trace reading 307 200 zero texels, the three passes submitted for it — and
+one of them is a **negative** parity test that asserts the frame is untouched where there is no
+floor. That test is what would have caught the bug below.
+
+#### The bug: `glPolygonOffset`'s two arguments cross over into `DepthBiasState`
+
+The one real defect of this step, and the parity file found it.
+
+The floor mask is drawn with the frame's own depth attached, `LEQUAL`, depth writes off, and a bias
+that pulls the geometry a hair towards the eye — without it the pass loses the depth test to
+itself, and with a *resolved multisampled* depth an exact `LEQUAL` marks nothing at all (the
+OpenGL side recorded that: "a mask that was empty on every multisampled frame is what found
+this"). The OpenGL call is `polygon_offset(-1.0, -16.0)`.
+
+`glPolygonOffset(factor, units)` offsets by `m × factor + r × units`, where `m` is the depth slope
+of the primitive and `r` the smallest resolvable difference. So GL's **first** argument is wgpu's
+`slope_scale` and its **second** is wgpu's `constant`. Written the obvious way round —
+`DepthBiasState { constant: -1, slope_scale: -16.0 }` — the slope term is sixteen times too large,
+and a steeply-seen face then wins `LessEqual` against surfaces in front of it. Measured on the
+close-up R:
+
+| | pixels the mask let through that should not have been there |
+|---|---|
+| `constant: -1, slope_scale: -16.0` (wrong) | the top of the red cube marked where OpenGL leaves it alone; 1 709 pixels differ from OpenGL, box reaching 54 rows above OpenGL's |
+| `constant: -16, slope_scale: -1.0` (right) | 1 350, then 1 236 once the figures settled; the box agrees |
+
+Worth stating plainly: this is the **second** defect of this lot that only a device could find, and
+like `fwidth` in step 3 it was invisible in both shaders — the bug is in a pipeline field, not in
+any WGSL. It is also the second one where the two APIs agreed with each other and both differed
+from OpenGL, which is why the OpenGL-reference comparison and not the Vulkan-against-DX12 one is
+the assertion that caught it.
+
+#### Three places where the port could not be a transcription
+
+1. **The mask's module carries no texture chunk, and its pipeline layout has two groups.** The
+   mask's fragment stage reads no texture, so the module is built from `[SCENE]` alone rather than
+   `[SCENE, TEXTURES_BOUND]`, and `Layouts::mask_pipeline` binds `[frame, draw]` and not
+   `[frame, draw, textures]` — otherwise the pass would have to bind a group of textures it never
+   reads. That is the shape the OpenGL side has for free (a program simply has no such uniforms)
+   and that `wgpu` makes explicit.
+2. **The floor vertical rides in the frame block's spare slots.** The GLSL has `uFloorUp` as a
+   `vec3` uniform of its own. Here it goes into `style.yzw`, the three slots the voxel cell left
+   spare in a `vec4` the block already had — so `FRAME_BYTES` stays at the 288 of step 2, and a
+   Classic frame copies no more bytes for the reflections than it already did.
+3. **The floor runs are a fourth bucket of the draw blocks.** `lay_out_floor` appends their
+   placements at offsets of their own (shared code, with this backend's 64-byte alignment instead
+   of the OpenGL one's 256). What this side has to add is a draw block and a `run_of` entry per
+   floor run, after the opaque, transparent and HUD runs — and an indirect-arguments entry in the
+   same order, so the batched path multi-draws them. Empty on every frame that does not ask for the
+   reflections, so the loop is one `is_empty` in Classic.
+
+#### Parity, measured — and a different kind of residual
+
+The reflections are the first effect of this lot whose per-pixel result is **discontinuous in the
+depth buffer**. The curvature, the grid, the pixel shadows and the occlusion are all smooth
+functions of the frame, so two correct implementations differ by their compilers' rounding and land
+on the Classic control's own figure. A screen-space march is not: the hit is decided by `>`
+comparisons on reconstructed view depths, and one step of difference in where the bisection lands
+makes the pixel reflect a **different texel of the frame**. On the close-up R that texel is often
+across the boundary between the red cube and the grey floor, so the colour jump is large even where
+the march agreed.
+
+So the whole-frame share is the wrong instrument, and the right one is the **reflected pixel set**.
+Release, 640 × 480, anti-aliasing off, `ssr.quality` High:
+
+| | pixels |
+|---|---|
+| reflected by **both** backends | **5 259** (DX12: 5 261) |
+| reflected by OpenGL alone | 204 (DX12 column: 202) |
+| reflected by Vulkan alone | 241 (DX12: 241) |
+| of the common set, differing by more than 2 levels | 740, **worst 35** |
+| outside every reflection yet differing by more than 2 | 44 — the control's own silhouette noise |
+
+**The fringe is symmetric** — 3.88 % of the common set on OpenGL's side against 4.58 % on
+Vulkan's — and that is the figure that says it is the march's hit/miss boundary rather than one
+backend reflecting something the other cannot see. A mask that marked an extra face, or a ray sent
+the wrong way by the `y` mirror of `screen_depth.wgsl`, would put the whole of that face on one
+side of the table; the wrong depth bias above did exactly that, and the fringe was what showed it.
+The worst difference **inside** the common set, 35 levels, is far under the **118** the unreflected
+control already carries on this scene.
+
+The whole-frame shares, for the record, and the control they are read against:
+
+| Configuration | max channel | pixels differing | within 2 levels |
+|---|---|---|---|
+| the close-up R, reflections **off** (the control) | 118 | 0.0479 % | **99.9521 %** |
+| `spl.reflections` = 1, `ssr.quality` High (half resolution) | 118 | 0.4395 % | **99.5999 %** |
+| the same at `ssr.quality` Ultra (full resolution) | 118 | 0.1507 % | **99.8493 %** |
+| with the occlusion of REQ-SCN-083 as well | 108 | 20.9860 % | **99.1045 %** |
+| **Vulkan against DX12**, reflections on | **38** | — | **99.9993 %** |
+
+Ultra reads better than High by exactly the half-resolution trace's upsample, which is the
+expected ordering. The last row is the two `wgpu` APIs against each other: not byte-identical any
+more — the first configuration of this lot where they are not — and the reason is the same
+discontinuity, on **two or three pixels** (5 259 against 5 261 reflected). The occlusion row's
+20.99 % of differing pixels is the occlusion doing its job on a frame that is almost entirely
+floor; its `within 2` is what matters and it is the occlusion's own figure.
+
+And the effect is real and the same size on each backend: the reflections move **1.7783 %** of the
+close-up R on OpenGL, **1.7904 %** on Vulkan and **1.7910 %** on DX12 — 5 463 pixels of the floor
+at the foot of the cube and of the cube's own top face, which the extent test also admits (8 units
+in both dimensions of the floor plane, over the 6 the requirement asks).
+
+#### What a Classic `wgpu` frame pays for this step
+
+- `scene_pass` gains one `is_some_and` on `self.screen_effects` (the `reflects` test), whose
+  result selects neither `mark_floors` nor `prepare_mask`;
+- `upload_draws` gains one loop over `self.plan.floor_runs`, which is empty;
+- `frame_bytes` writes three more floats into a `vec4` it was already writing.
+
+No module is built, no pipeline is added, no target is allocated and no pass is submitted. The four
+instruction counts are still **2231 / 1095 / 3401 / 159**, and the only OpenGL-side diff of this
+step is the two comments listed above.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-084's four constants, the march, the premultiplied result, the composite's mask and the floor test are in the WGSL; **nothing of the MSVO estimator is** | `amd055_style_tests.rs` `q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator` (rewritten) |
+| the close-up R with the reflections off — the control | `amd055_parity_tests.rs` `ru_7_the_close_up_r_agrees_between_the_backends_with_the_reflections_off` |
+| REQ-SCN-084 at the default quality, and at Ultra where the divisor is 1 | `req_scn_084_the_reflections_agree_between_the_backends`, `..._the_full_resolution_trace_...` |
+| **the reflected pixel set**: the common set, the two fringes, and their symmetry | `req_scn_084_the_two_backends_reflect_the_same_pixels` — the assertion that constrains the port |
+| the reflections move as much of the frame on each backend | `req_scn_084_the_reflections_change_as_much_of_the_frame_on_each_backend` |
+| REQ-SCN-080's order: the reflections before the occlusion, on one frame that has both | `req_scn_080_the_reflections_run_before_the_occlusion_on_both_backends` |
+| Vulkan against DX12 with the reflections on | `ru_7_vulkan_and_dx12_agree_on_the_reflections` |
+| the synthetic set agrees with the reflections on, **and nothing of it is a floor** — the negative test the depth-bias bug would have failed | `parity_wgpu_tests.rs` `req_scn_084_the_reflections_agree_between_the_backends`, `req_scn_084_nothing_of_the_synthetic_set_is_a_floor` |
+| three passes and 921 600 bytes on each backend, plus the one this API needs under anti-aliasing | `req_scn_084_the_reflections_cost_the_same_passes_and_bytes_on_each_backend` |
+
+`cargo test --release -p zax-render --features wgpu`: 34 suites, **321 passed, 0 failed**, 1
+ignored (314 at step 4b, plus this step's seven). `-p zax-harness --features wgpu`: 13 suites,
+**71 passed, 0 failed** (20 of them `parity_wgpu_tests`). `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets --features zax-app/wgpu -- -D warnings` clean.
+
 ### The design 4b was built from, and what is left after it
 
 Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
@@ -961,7 +1136,7 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 | Step | What |
 |---|---|
 | ~~4b~~ | ~~`wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics~~ — **landed**, see its own section above |
-| 4c | `ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment |
+| ~~4c~~ | ~~`ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment~~ — **landed**, see its own section above |
 | 4d | `msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line |
 | 4e | `backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075, the step the owner added between the two sessions (see the checklist) |
 | — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |

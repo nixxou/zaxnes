@@ -110,11 +110,20 @@ fn zax_window_depth(uv: vec2<f32>) -> f32 {
     return textureLoad(zax_frame_depth, vec2<i32>(at), 0);
 }
 
-// One texel of `source`, the same way.
+// One texel of the first source, the same way — which is also the filter the OpenGL backend gives
+// the frame's linear colour and the floor mask, both `NEAREST` (`gl/linear_buffer.rs`,
+// `allocate_mask`).
 fn zax_load0(uv: vec2<f32>) -> vec4<f32> {
     let size = vec2<f32>(textureDimensions(zax_source0));
     let at = clamp(floor(uv * screen.drawn.xy * size), vec2<f32>(0.0), size - 1.0);
     return textureLoad(zax_source0, vec2<i32>(at), 0);
+}
+
+// And of the second.
+fn zax_load1(uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(zax_source1));
+    let at = clamp(floor(uv * screen.drawn.xy * size), vec2<f32>(0.0), size - 1.0);
+    return textureLoad(zax_source1, vec2<i32>(at), 0);
 }
 
 // The view-space `z` of a window depth, which is **negative** in front of the eye.

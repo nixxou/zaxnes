@@ -568,6 +568,134 @@ fn req_scn_080_the_occlusion_costs_the_same_passes_and_bytes_on_each_backend() {
     }
 }
 
+// ----------------------------------------------------- AMD-055, the reflections of REQ-SCN-084
+
+/// The settings that turn the floor reflections of REQ-SCN-084 on.
+const REFLECTIONS: [&str; 4] = ["--style", "enhanced", "--style-param", "spl.reflections=1"];
+
+/// AMD-055 REQ-SCN-084 over the synthetic set, which has **no floor at all**: the floor mask comes
+/// out empty, the trace leaves every pixel at zero and the composite blends nothing — so the
+/// picture must be the Classic one on both backends, and the two must agree as the Classic frame
+/// does.
+///
+/// That the set has no floor is measured rather than assumed, below, and it is why the figures for
+/// what the reflections actually *do* are in `zax-render/tests/amd055_parity_tests.rs`, on the
+/// close-up R of §2.5. What this test covers that the other cannot is the plumbing at the frame's
+/// own scale: the mask pass opened over 1 926 opaque runs' worth of frame, the trace reading a
+/// mask of 307 200 zero texels, and the three passes submitted for it.
+#[test]
+fn req_scn_084_the_reflections_agree_between_the_backends() {
+    let Some((share, channel)) = parity("reflections", &REFLECTIONS) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the reflections agree on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "reflections: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// And the measurement that says why: on **either** backend, turning the reflections on leaves the
+/// whole synthetic set untouched, because not one instance of it is a floor surface — a floor needs
+/// a bounding box of at least `6 × échelle de scène` in both dimensions of the floor plane *and* a
+/// face whose scene normal is `+Y ≥ 0,9`, and the backdrop, the widest flat thing in the set, is
+/// 256 × 240 × **1** (Q-093 (a) records exactly that reading).
+///
+/// So this is a **negative** parity test, and it is worth having: a port whose mask marked a face
+/// it should not, or whose trace returned something where the mask is 0, would reflect a wall or
+/// tint the frame here. That is not hypothetical — the first version of this step did mark an extra
+/// face, from a depth bias written with its two arguments crossed over.
+#[test]
+fn req_scn_084_nothing_of_the_synthetic_set_is_a_floor() {
+    let classic = capture("floorless-classic", None, &[]).expect("OpenGL always renders");
+    let reflected = capture("floorless-ssr", None, &REFLECTIONS).expect("OpenGL always renders");
+    for scene in SCENES {
+        let figures = figures(&load(&classic, scene), &load(&reflected, scene));
+        assert_eq!(
+            figures.max_channel, 0,
+            "REQ-SCN-084 moved `{scene}` on OpenGL by up to {} levels, so the set now has a floor \
+             and this file's reading of it is stale",
+            figures.max_channel
+        );
+    }
+
+    for backend in backends() {
+        let Some(flat) = capture("floorless-classic", Some(backend), &[]) else {
+            continue;
+        };
+        let on = capture("floorless-ssr", Some(backend), &REFLECTIONS).unwrap();
+        for scene in SCENES {
+            let figures = figures(&load(&flat, scene), &load(&on, scene));
+            println!(
+                "reflections on {backend}, `{scene}`: max {} levels, {:.4} % of pixels differ",
+                figures.max_channel,
+                figures.differing * 100.0
+            );
+            assert!(
+                figures.differing < 0.0002,
+                "the reflections moved {:.4} % of `{scene}` on {backend}, where there is no floor",
+                figures.differing * 100.0
+            );
+        }
+        fs::remove_dir_all(&flat).unwrap();
+        fs::remove_dir_all(&on).unwrap();
+    }
+    fs::remove_dir_all(&classic).unwrap();
+    fs::remove_dir_all(&reflected).unwrap();
+}
+
+/// What the reflections asked of each backend, read off `render.json`: three passes — the mask,
+/// the trace and the composite — and the same target bytes, with the one extra pass this API needs
+/// for the depth resolve when the frame is multisampled.
+#[test]
+fn req_scn_084_the_reflections_cost_the_same_passes_and_bytes_on_each_backend() {
+    for (level, extra) in [("0", 0_u32), ("1", 1)] {
+        let mut arguments = vec!["--anti-alias", level];
+        arguments.extend_from_slice(&REFLECTIONS);
+        let reference = capture("ssr-counts", None, &arguments).expect("OpenGL always renders");
+        let counters = |folder: &PathBuf| {
+            let records = read_render(&folder.join("render.json")).unwrap();
+            let scene = records
+                .iter()
+                .find(|record| record.scene == "framing")
+                .expect("the synthetic set has a `framing` scene");
+            (
+                scene.screen_effect_passes.expect("Enhanced writes the key"),
+                scene.screen_effect_bytes.expect("Enhanced writes the key"),
+            )
+        };
+        let (gl_passes, gl_bytes) = counters(&reference);
+        assert_eq!(gl_passes, 3, "the mask, the trace and the composite");
+        for backend in backends() {
+            let Some(capture) = capture("ssr-counts", Some(backend), &arguments) else {
+                continue;
+            };
+            let (passes, bytes) = counters(&capture);
+            println!(
+                "reflections, anti_alias {level} on {backend}: {passes} passes and {bytes} bytes, \
+                 OpenGL {gl_passes} and {gl_bytes}"
+            );
+            assert_eq!(
+                passes,
+                gl_passes + extra,
+                "anti_alias {level} on {backend} submitted {passes} screen passes, OpenGL \
+                 {gl_passes} plus the {extra} this API needs for the depth resolve"
+            );
+            assert_eq!(
+                bytes, gl_bytes,
+                "anti_alias {level} on {backend} allocated {bytes} bytes of screen targets, \
+                 OpenGL {gl_bytes}"
+            );
+            fs::remove_dir_all(&capture).unwrap();
+        }
+        fs::remove_dir_all(&reference).unwrap();
+    }
+}
+
 // ------------------------------------------------------------- AMD-032, the anti-aliasing levels
 
 /// AMD-032 §2 and AMD-052 REQ-PERS-089: `video.anti_alias` 0, 1 and 2 mean no anti-aliasing,

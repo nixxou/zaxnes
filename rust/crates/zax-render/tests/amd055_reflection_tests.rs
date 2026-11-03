@@ -25,70 +25,13 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::{solid, Capture, GlFixture, SceneFixture};
+use common::{close_up_r, is_cube, solid, Capture, GlFixture, SceneFixture};
 use zax_engine3d::draw_list::DrawTile;
 use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::Vec3;
 use zax_profiles::enums::ProfileLayer;
 use zax_render::numerics::Vector3;
 use zax_render::style::{AmbientOcclusion, StyleSettings};
-
-/// The close-up R as this side can build it: a floor of `tiles` × `tiles` full tiles of `D` = 8
-/// turned by `rot = (90, 0, 0)` — so its visible face has the scene normal (0, 1, 0) and its `xz`
-/// box measures `8 × tiles` in both dimensions — and a red cube of `sizeZ` = 8 standing on it.
-///
-/// `rotate` false is the **variant R-m**: the same shape without rotation, whose front face has
-/// the scene normal (0, 0, −1) and which no reflection may touch. `scale_z` 0.5 is the second
-/// half of the **variant R-s**: the same block four units deep, which is not a floor at all.
-///
-/// The cube is a **sprite**, not a background tile: one screen cell carries one background tile,
-/// so a background cube over the floor would replace the floor's own tile there and leave a hole
-/// (the finding step 5 of this lot recorded). A sprite coexists with the tile it covers
-/// (REQ-CORE-043).
-fn close_up_r(rotate: bool, tiles: i32, scale_z: f32, beside: f32) -> common::Built {
-    let half = tiles / 2;
-    let mut built = SceneFixture::new()
-        .background(0x0F)
-        // NES 0x00 is (120, 128, 132): a floor as dark as the criterion's (124, 124, 124).
-        .palette(1, 0x00)
-        // NES 0x16 is (252, 56, 0), the red of the cube. Byte 22 is sprite table 1, colour 2 —
-        // which is what a sprite drawn with palette 1 of a tile of colour 2 reads.
-        .palette(22, 0x16)
-        .pattern_block(solid(1, 0), tiles, tiles, 8, ProfileLayer::L2, 1.0)
-        .rect(solid(1, 0), 16 - half, 15 - half, tiles, tiles)
-        .pattern(solid(2, 7), 8, ProfileLayer::L1)
-        .sprite(solid(2, 7), 15 * 8, 14 * 8, 1, false)
-        .build();
-
-    // The floor's top face ends up eight units above its own centre, so the cube stands on it
-    // with an offset of +4 on `y` once the tile grid's own −4 is undone.
-    for id in built.instances(is_cube) {
-        built.instance_mut(id).offset = Vec3::new(4.0 + beside, 4.0, 4.0);
-    }
-    for id in built.instances(|tile| !is_cube(tile)) {
-        let instance = built.instance_mut(id);
-        if rotate {
-            instance.rotation = Vec3::new(90.0, 0.0, 0.0);
-        }
-        instance.scale = Vec3::new(1.0, 1.0, scale_z);
-    }
-    built.rebuild_draw_list();
-
-    built.scene.settings.shadows = false;
-    built.scene.light.direction = Vector3::new(1.0, -1.0, 1.0);
-    built.scene.camera.set_fov(70.0);
-    let setpoint = built.scene.camera.current_mut();
-    setpoint.angles = Vector3::new(30.0, 35.0, 0.0);
-    setpoint.target = Vector3::new(128.0, 128.0, 12.0);
-    setpoint.set_distance(40.0);
-    built.scene.camera.snap_to_setpoints();
-    built
-}
-
-/// The cube is the frame's one sprite; the floor is its background tiles.
-fn is_cube(tile: &DrawTile) -> bool {
-    tile.sprite
-}
 
 /// The Enhanced style with the reflections on, every other effect at the default of REQ-SCN-079.
 fn with_reflections(style: StyleSettings) -> StyleSettings {

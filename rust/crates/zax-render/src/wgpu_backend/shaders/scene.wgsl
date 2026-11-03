@@ -20,8 +20,12 @@ struct Frame {
     bend_f: vec4<f32>,
     bend_h: vec4<f32>,
     bend_on: vec4<f32>,
-    // AMD-055: x the voxel cell side of REQ-SCN-081 (`SceneConstants::voxel_cell`). Written
-    // whatever the variant, read only by ZAX_VOXEL_GRID.
+    // AMD-055: x the voxel cell side of REQ-SCN-081 (`SceneConstants::voxel_cell`), yzw the
+    // vertical the floor definition of REQ-SCN-084 is written against (`style::floor_vertical`).
+    // Both written whatever the variant, read only by ZAX_VOXEL_GRID and ZAX_FLOOR_MASK: the floor
+    // vertical rides in the three spare slots of a `vec4` the block already had, so the frame
+    // block does **not** grow for the reflections and a Classic frame copies no more bytes than it
+    // copied after step 2.
     style: vec4<f32>,
 }
 
@@ -86,6 +90,14 @@ struct VertexOut {
     @location(9) @interpolate(flat) model_row2: vec3<f32>,
     @location(10) @interpolate(flat) deform_tile: vec3<f32>,
 //#endif
+//#ifdef ZAX_FLOOR_MASK
+    // AMD-055 REQ-SCN-084: the normal in the scene frame **before the curvature**, which is the
+    // frame the floor definition is written in ("la normale, exprimée dans le repère de scène
+    // avant courbure"). The curvature overwrites `normal` below (REQ-SCN-068 transports it), so
+    // the mask pass takes its own copy of the value that requirement judges. Emitted by no other
+    // variant.
+    @location(11) scene_normal: vec3<f32>,
+//#endif
 }
 
 @vertex
@@ -125,6 +137,10 @@ fn vs_main(
     out.model_row2 = instance.rows[2].xyz;
     out.deform_tile = instance.deform_tile.xyz;
 //#endif
+//#ifdef ZAX_FLOOR_MASK
+    // Before the curvature, and after the normal matrix: the scene normal of REQ-SCN-084.
+    out.scene_normal = out.normal;
+//#endif
 //#ifdef ZAX_BEND
     // REQ-SCN-067, applied last: after the animated deformation and after the object's own
     // transform, so on the final position in the scene (REQ-SCN-068). REQ-SCN-068 transports the
@@ -141,6 +157,39 @@ fn vs_main(
 //#endif
     return out;
 }
+
+//#ifdef ZAX_FLOOR_MASK
+// The floor mask of AMD-055 REQ-SCN-084 (shaders/floor_mask.frag): where the reflections of §2.5
+// may act at all.
+//
+// **Why there is a pass at all.** The requirement's definition of a floor surface is the
+// conjunction of two tests, and the invariants of §2.5 forbid either from standing alone:
+//
+//   - the instance's bounding box in the floor plane, before curvature, at least `6 × échelle de
+//     scène` in both dimensions — the variant R-s puts the same block at `scale = (1 ; 1 ; 0,5)`
+//     beside itself, and the two show the same pixels, at the same depth, with the same normal, so
+//     no reconstruction from the depth buffer can tell them apart. That half is decided on the CPU
+//     (`frame_plan::FramePlan::mark_floor_surfaces`) and reaches this pass as *which runs are
+//     drawn*;
+//   - the face's own normal, `+Y ≥ 0,9` in the scene frame before curvature — the variant R-m is
+//     the same shape without rotation, so its `xz` box measures 64 × 8 and **passes** the extent
+//     test, and not one pixel of its front face may be modified. That half is this entry point.
+//
+// The vertex stage is the scene's own with `ZAX_FLOOR_MASK` defined, so the mask is laid down by
+// exactly the geometry, the animated deformation, the placement and the curvature that drew the
+// frame — it cannot drift from the depth it is tested against.
+
+// `style::FLOOR_NORMAL_THRESHOLD`, the "+Y ≥ 0,9" of REQ-SCN-084.
+const ZAX_FLOOR_NORMAL_THRESHOLD: f32 = 0.9;
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    // `style::floor_vertical`: `+Y`, or the image plane's normal (0, 0, -1) under the local camera
+    // of REQ-SCN-009 (AMD-055 v1.4, Q-096). Decided once a frame, on the CPU.
+    let up = dot(normalize(in.scene_normal), frame.style.yzw);
+    return vec4<f32>(step(ZAX_FLOOR_NORMAL_THRESHOLD, up), 0.0, 0.0, 1.0);
+}
+//#else
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
@@ -251,3 +300,4 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lit = albedo_linear * (vec3<f32>(frame.light_ambient.w) + ndl * frame.light_ambient.xyz * shadow);
     return vec4<f32>(min(lit, vec3<f32>(1.0)), draw.flat_alpha.w * texel_alpha);
 }
+//#endif

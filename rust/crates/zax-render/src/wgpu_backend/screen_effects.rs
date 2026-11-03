@@ -27,8 +27,15 @@ use super::preprocess;
 /// The format of the occlusion targets and of the floor mask: one channel of eight bits.
 const OCCLUSION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
-/// Bytes one texel of an occlusion target occupies.
+/// Bytes one texel of an occlusion target or of the floor mask occupies.
 const OCCLUSION_BYTES_PER_TEXEL: u64 = 1;
+
+/// The format of the reflections' trace target: a linear colour, as the linear buffer's own
+/// (REQ-SCN-084).
+const REFLECTION_FORMAT: wgpu::TextureFormat = super::renderer::LINEAR_FORMAT;
+
+/// Bytes one texel of it occupies: four half-float channels.
+const REFLECTION_BYTES_PER_TEXEL: u64 = 8;
 
 /// Bytes of the [`Screen`](shaders/screen_depth.wgsl) block: seven `vec4`.
 const SCREEN_BYTES: usize = 7 * 16;
@@ -46,16 +53,23 @@ enum Slot {
     Occlusion,
     /// The composite of REQ-SCN-083, at the frame's resolution.
     OcclusionComposite,
+    /// The trace of REQ-SCN-084, at the quality's resolution.
+    Reflections,
+    /// The composite of REQ-SCN-084, at the frame's resolution.
+    ReflectionsComposite,
 }
 
 impl Slot {
-    const COUNT: u64 = 2;
+    const COUNT: u64 = 4;
 
     const fn offset(self) -> u64 {
-        match self {
-            Self::Occlusion => 0,
-            Self::OcclusionComposite => SCREEN_SLOT,
-        }
+        SCREEN_SLOT
+            * match self {
+                Self::Occlusion => 0,
+                Self::OcclusionComposite => 1,
+                Self::Reflections => 2,
+                Self::ReflectionsComposite => 3,
+            }
     }
 }
 
@@ -70,6 +84,8 @@ pub struct ScreenFrame<'a> {
     /// The frame's depth, single-sample (REQ-SCN-080's last bullet): the frame's own texture
     /// without anti-aliasing, and what [`ScreenEffects::resolve_depth`] wrote with it.
     pub depth: &'a wgpu::TextureView,
+    /// The frame's linear colour, resolved: what the reflections of REQ-SCN-084 reflect.
+    pub color: &'a wgpu::TextureView,
     /// The size of the attachments, which the targets follow.
     pub size: (u32, u32),
     /// Which allocation of the frame's attachments these views belong to, so that a resize
@@ -122,6 +138,26 @@ struct Occlusion {
     estimator: Estimator,
 }
 
+/// The reflections of REQ-SCN-084: the trace, its composite, the `R8` floor mask at the frame's
+/// own size and the `Rgba16Float` trace target at the quality's resolution.
+///
+/// The **mask pipeline is not here**: its vertex stage is the scene's, so it lives with the other
+/// scene pipelines in the renderer and is counted there — the same split the OpenGL module makes
+/// for the same reason.
+#[derive(Debug)]
+struct Reflections {
+    trace: wgpu::RenderPipeline,
+    composite: wgpu::RenderPipeline,
+    mask: Option<Target>,
+    traced: Option<Target>,
+    /// The bind groups of the trace and of the composite, rebuilt with the targets.
+    groups: Option<[wgpu::BindGroup; 2]>,
+    /// 1 at `ssr.quality` Ultra, 2 otherwise (REQ-SCN-084: "sauf en Ultra").
+    divisor: u32,
+    /// The frame allocation the mask and [`Self::groups`] were built against.
+    generation: u64,
+}
+
 /// The depth resolve of REQ-SCN-080's last bullet, which only a multisampled frame needs: built
 /// the first time one runs a screen pass, and kept after that.
 #[derive(Debug)]
@@ -146,6 +182,7 @@ pub struct ScreenEffects {
     /// what it already has.
     modules: FastMap<&'static str, wgpu::ShaderModule>,
     occlusion: Option<Occlusion>,
+    reflections: Option<Reflections>,
     depth_resolve: Option<DepthResolve>,
 }
 
@@ -225,6 +262,7 @@ impl ScreenEffects {
             }),
             modules: FastMap::default(),
             occlusion: None,
+            reflections: None,
             depth_resolve: None,
             layout,
             pipeline_layout,
@@ -280,6 +318,41 @@ impl ScreenEffects {
         } else {
             self.occlusion = None;
         }
+
+        if style.reflections_active() {
+            if self.reflections.is_none() {
+                let trace = self.screen_pipeline(device, "zax ssr", SSR, REFLECTION_FORMAT, None);
+                // REQ-SCN-084: the trace holds `rgb = w * c` and `a = w`, so `src + dst * (1 - a)`
+                // is the `(1 - i) * surface + i * reflet` of the requirement, in place. The OpenGL
+                // path's `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`, spelled for this API.
+                let over = wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                };
+                let composite = self.screen_pipeline(
+                    device,
+                    "zax ssr composite",
+                    SSR_COMPOSITE,
+                    super::renderer::LINEAR_FORMAT,
+                    Some(wgpu::BlendState {
+                        color: over,
+                        alpha: over,
+                    }),
+                );
+                self.reflections = Some(Reflections {
+                    trace,
+                    composite,
+                    mask: None,
+                    traced: None,
+                    groups: None,
+                    divisor: 0,
+                    generation: u64::MAX,
+                });
+            }
+        } else {
+            self.reflections = None;
+        }
     }
 
     /// Whether the occlusion of REQ-SCN-083 is in this module.
@@ -287,32 +360,46 @@ impl ScreenEffects {
         self.occlusion.is_some()
     }
 
+    /// Whether the reflections of REQ-SCN-084 are.
+    pub const fn reflects(&self) -> bool {
+        self.reflections.is_some()
+    }
+
     /// Whether anything in this module has a pass to run this frame.
     pub const fn active(&self) -> bool {
-        self.occludes()
+        self.occludes() || self.reflects()
     }
 
     /// How many pipelines this module holds, for `RenderStatistics::style_programs`: the shared
-    /// composite plus its estimator's two, as the OpenGL module counts its programs.
+    /// composite plus its estimator's two, and two for the reflections (the trace and its
+    /// composite) — as the OpenGL module counts its programs, and with the floor mask counted by
+    /// the renderer there as here.
     pub fn pipelines(&self) -> u32 {
-        self.occlusion.as_ref().map_or(0, |occlusion| {
+        let occlusion = self.occlusion.as_ref().map_or(0, |occlusion| {
             1 + match &occlusion.estimator {
                 Estimator::Depth(_) => 2,
             }
-        })
+        });
+        occlusion + if self.reflections.is_some() { 2 } else { 0 }
     }
 
     /// Bytes its targets occupy, for `RenderStatistics::screen_effect_bytes`; 0 until a pass has
     /// run once.
     pub fn bytes(&self) -> u64 {
-        self.occlusion
+        let occlusion = self
+            .occlusion
             .as_ref()
             .map_or(0, |occlusion| match &occlusion.estimator {
                 Estimator::Depth(depth) => {
                     bytes(depth.raw.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
                         + bytes(depth.blurred.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
                 }
-            })
+            });
+        let reflections = self.reflections.as_ref().map_or(0, |reflections| {
+            bytes(reflections.mask.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
+                + bytes(reflections.traced.as_ref(), REFLECTION_BYTES_PER_TEXEL)
+        });
+        occlusion + reflections
     }
 
     // ------------------------------------------------- REQ-SCN-080, the resolved depth
@@ -422,6 +509,189 @@ impl ScreenEffects {
         1
     }
 
+    // ------------------------------------------------------- REQ-SCN-084, the reflections
+
+    /// The floor mask of REQ-SCN-084 as a draw target, allocated if need be. The caller then opens
+    /// a pass over it with the frame's **own depth** attached and depth writes off, clears it to 0
+    /// and redraws the floor-eligible runs through the mask pipeline; `None` when there are no
+    /// reflections this frame, and the caller draws nothing.
+    ///
+    /// The depth attachment is what makes a floor hidden behind something not be marked, and
+    /// keeping the frame's own — rather than a copy — is what makes the mask land exactly where
+    /// the frame drew. The view is handed back by value because the caller needs it while it also
+    /// borrows this module to run the trace.
+    pub fn mask_target(
+        &mut self,
+        device: &wgpu::Device,
+        frame: ScreenFrame<'_>,
+    ) -> Option<wgpu::TextureView> {
+        let reflections = self.reflections.as_mut()?;
+        if reflections.generation != frame.generation
+            || !matches!(&reflections.mask, Some(mask) if mask.size == frame.size)
+        {
+            reflections.mask = Some(allocate(
+                device,
+                "zax floor mask",
+                frame.size,
+                OCCLUSION_FORMAT,
+            ));
+            reflections.generation = frame.generation;
+            reflections.groups = None;
+        }
+        reflections.mask.as_ref().map(|mask| mask.view.clone())
+    }
+
+    /// Traces the reflected rays of REQ-SCN-084 into this module's own target, and says how many
+    /// passes that took.
+    pub fn trace(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: ScreenFrame<'_>,
+        style: &StyleSettings,
+        scene_scale: f32,
+    ) -> u32 {
+        if self.reflections.is_none() {
+            return 0;
+        }
+        let divisor = if style.ssr_half_resolution() { 2 } else { 1 };
+        let size = scaled(frame.size, divisor);
+        #[allow(clippy::cast_precision_loss)] // Sizes far below 2^24.
+        let block = ScreenBlock {
+            frame: frame.size,
+            target: size,
+            divisor,
+            projection: frame.projection,
+            ssr: [
+                style.ssr_intensity(),
+                style.ssr_max_length(scene_scale),
+                // The longest ray any setting can ask for, which the march's positions are fitted
+                // to.
+                StyleSettings::ssr_longest(scene_scale),
+                style.ssr_blur_fraction(),
+            ],
+            // (height / width, 1): turns a radius given as a fraction of the screen height into
+            // one in viewport coordinates, which are normalised per axis.
+            blur_aspect: [frame.size.1.max(1) as f32 / frame.size.0.max(1) as f32, 1.0],
+            steps: style.ssr_steps(),
+            refinements: style.ssr_refinements(),
+            blur_taps: style.ssr_blur_taps(),
+            ..ScreenBlock::default()
+        };
+        queue.write_buffer(&self.uniforms, Slot::Reflections.offset(), &block.bytes());
+        queue.write_buffer(
+            &self.uniforms,
+            Slot::ReflectionsComposite.offset(),
+            &ScreenBlock {
+                target: frame.size,
+                divisor: 1,
+                ..block
+            }
+            .bytes(),
+        );
+
+        let (layout, sampler, dummy, uniforms) =
+            (&self.layout, &self.sampler, &self.dummy, &self.uniforms);
+        let Some(reflections) = &mut self.reflections else {
+            return 0;
+        };
+        if reflections.divisor != divisor
+            || !matches!(&reflections.traced, Some(target) if target.size == size)
+        {
+            reflections.traced = Some(allocate(device, "zax ssr", size, REFLECTION_FORMAT));
+            reflections.divisor = divisor;
+            reflections.groups = None;
+        }
+        if reflections.groups.is_none() {
+            let (Some(mask), Some(traced)) = (&reflections.mask, &reflections.traced) else {
+                return 0;
+            };
+            let group = |slot: Slot, sources: [&wgpu::TextureView; 3]| {
+                screen_group(
+                    device,
+                    layout,
+                    uniforms,
+                    slot,
+                    sampler,
+                    frame.depth,
+                    sources,
+                )
+            };
+            let groups = [
+                // The trace reads the frame's colour and the mask, both texel by texel.
+                group(Slot::Reflections, [frame.color, &mask.view, dummy]),
+                // The composite samples the trace back up to the frame's size through the filtered
+                // sampler, and reads the mask texel by texel at that size.
+                group(
+                    Slot::ReflectionsComposite,
+                    [&traced.view, &mask.view, dummy],
+                ),
+            ];
+            reflections.groups = Some(groups);
+        }
+        let (Some(traced), Some(groups)) = (&reflections.traced, &reflections.groups) else {
+            return 0;
+        };
+
+        // The trace writes every texel of its target, so there is nothing to clear.
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("zax ssr"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &traced.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&reflections.trace);
+        pass.set_bind_group(0, &groups[0], &[]);
+        pass.draw(0..3, 0..1);
+        1
+    }
+
+    /// Blends the traced reflection into `target` (REQ-SCN-084). One pass.
+    pub fn composite_reflections(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) -> u32 {
+        let Some(reflections) = &self.reflections else {
+            return 0;
+        };
+        let Some(groups) = &reflections.groups else {
+            return 0;
+        };
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("zax ssr composite"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&reflections.composite);
+        pass.set_bind_group(0, &groups[1], &[]);
+        pass.draw(0..3, 0..1);
+        1
+    }
+
     // ------------------------------------------------------- REQ-SCN-083, the occlusion
 
     /// Runs the occlusion of REQ-SCN-083 over `frame` into this module's own targets, and says how
@@ -451,6 +721,7 @@ impl ScreenEffects {
             // little to hide a contact — a voxel is one scene unit.
             ao: [radius, style.ao_ceiling(), (0.01 * radius).max(0.02), 0.0],
             samples: style.ao_samples(),
+            ..ScreenBlock::default()
         };
         queue.write_buffer(&self.uniforms, Slot::Occlusion.offset(), &block.bytes());
         // The composite runs at the frame's own resolution, so its target size is the frame's and
@@ -663,6 +934,14 @@ struct ScreenBlock {
     /// `x` the radius, `y` the ceiling, `z` the bias.
     ao: [f32; 4],
     samples: i32,
+    /// `x` the intensity, `y` the longest ray this setting asks for, `z` the longest any setting
+    /// can ask for, `w` the blur as a fraction of the ray (REQ-SCN-084).
+    ssr: [f32; 4],
+    /// The aspect the blur spiral is stretched by.
+    blur_aspect: [f32; 2],
+    steps: i32,
+    refinements: i32,
+    blur_taps: i32,
 }
 
 impl ScreenBlock {
@@ -688,9 +967,12 @@ impl ScreenBlock {
             ],
         );
         push(&mut data, self.ao);
-        push(&mut data, [0.0; 4]);
-        push(&mut data, [0.0; 4]);
-        for value in [self.samples, 0, 0, 0] {
+        push(&mut data, self.ssr);
+        push(
+            &mut data,
+            [self.blur_aspect[0], self.blur_aspect[1], 0.0, 0.0],
+        );
+        for value in [self.samples, self.steps, self.refinements, self.blur_taps] {
             data.extend_from_slice(&value.to_ne_bytes());
         }
         data
@@ -795,6 +1077,8 @@ const SCREEN_DEPTH: &str = include_str!("shaders/screen_depth.wgsl");
 const AO: &str = include_str!("shaders/ao.wgsl");
 const AO_BLUR: &str = include_str!("shaders/ao_blur.wgsl");
 const AO_COMPOSITE: &str = include_str!("shaders/ao_composite.wgsl");
+const SSR: &str = include_str!("shaders/ssr.wgsl");
+const SSR_COMPOSITE: &str = include_str!("shaders/ssr_composite.wgsl");
 const DEPTH_RESOLVE: &str = include_str!("shaders/depth_resolve.wgsl");
 
 #[cfg(test)]
@@ -813,6 +1097,11 @@ mod tests {
             projection: Vector4::new(1.0, 2.0, 3.0, 4.0),
             ao: [0.5, 0.25, 0.01, 0.0],
             samples: 10,
+            ssr: [0.3, 90.0, 360.0, 0.05],
+            blur_aspect: [0.75, 1.0],
+            steps: 24,
+            refinements: 5,
+            blur_taps: 8,
         };
         assert_eq!(block.bytes().len(), SCREEN_BYTES);
     }

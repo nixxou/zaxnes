@@ -126,6 +126,126 @@ impl GlFixture {
     }
 }
 
+/// The close-up R of AMD-055 §2.5 as this side can build it: a floor of `tiles` × `tiles` full
+/// tiles of `D` = 8 turned by `rot = (90, 0, 0)` — so its visible face has the scene normal
+/// (0, 1, 0) and its `xz` box measures `8 × tiles` in both dimensions — and a red cube of
+/// `sizeZ` = 8 standing on it.
+///
+/// `rotate` false is the **variant R-m**: the same shape without rotation, whose front face has
+/// the scene normal (0, 0, −1) and which no reflection may touch. `scale_z` 0.5 is the second half
+/// of the **variant R-s**: the same block four units deep, which is not a floor at all.
+///
+/// The cube is a **sprite**, not a background tile: one screen cell carries one background tile,
+/// so a background cube over the floor would replace the floor's own tile there and leave a hole
+/// (the finding step 5 of RU-5 recorded). A sprite coexists with the tile it covers
+/// (REQ-CORE-043).
+///
+/// **Here rather than in one test binary** because two of them want it: `amd055_reflection_tests`
+/// asserts the invariants of §2.5 on the OpenGL backend, and `amd055_parity_tests` (RU-7) draws
+/// the same scene through both backends — the synthetic set of the harness has **no floor at all**,
+/// so it is the only frame either side has that the reflections act on.
+pub fn close_up_r(rotate: bool, tiles: i32, scale_z: f32, beside: f32) -> Built {
+    let half = tiles / 2;
+    let mut built = SceneFixture::new()
+        .background(0x0F)
+        // NES 0x00 is (120, 128, 132): a floor as dark as the criterion's (124, 124, 124).
+        .palette(1, 0x00)
+        // NES 0x16 is (252, 56, 0), the red of the cube. Byte 22 is sprite table 1, colour 2 —
+        // which is what a sprite drawn with palette 1 of a tile of colour 2 reads.
+        .palette(22, 0x16)
+        .pattern_block(solid(1, 0), tiles, tiles, 8, ProfileLayer::L2, 1.0)
+        .rect(solid(1, 0), 16 - half, 15 - half, tiles, tiles)
+        .pattern(solid(2, 7), 8, ProfileLayer::L1)
+        .sprite(solid(2, 7), 15 * 8, 14 * 8, 1, false)
+        .build();
+
+    // The floor's top face ends up eight units above its own centre, so the cube stands on it with
+    // an offset of +4 on `y` once the tile grid's own −4 is undone.
+    for id in built.instances(is_cube) {
+        built.instance_mut(id).offset = zax_engine3d::vectors::Vec3::new(4.0 + beside, 4.0, 4.0);
+    }
+    for id in built.instances(|tile| !is_cube(tile)) {
+        let instance = built.instance_mut(id);
+        if rotate {
+            instance.rotation = zax_engine3d::vectors::Vec3::new(90.0, 0.0, 0.0);
+        }
+        instance.scale = zax_engine3d::vectors::Vec3::new(1.0, 1.0, scale_z);
+    }
+    built.rebuild_draw_list();
+
+    built.scene.settings.shadows = false;
+    built.scene.light.direction = zax_render::numerics::Vector3::new(1.0, -1.0, 1.0);
+    built.scene.camera.set_fov(70.0);
+    let setpoint = built.scene.camera.current_mut();
+    setpoint.angles = zax_render::numerics::Vector3::new(30.0, 35.0, 0.0);
+    setpoint.target = zax_render::numerics::Vector3::new(128.0, 128.0, 12.0);
+    setpoint.set_distance(40.0);
+    built.scene.camera.snap_to_setpoints();
+    built
+}
+
+/// The cube of [`close_up_r`] is the frame's one sprite; the floor is its background tiles.
+pub fn is_cube(tile: &DrawTile) -> bool {
+    tile.sprite
+}
+
+/// A headless `wgpu` device with a target of the same shape, so that a test can draw one scene
+/// through **both** backends and compare the two pictures (RU-7, Q-104).
+///
+/// It is an `Option` on purpose: a machine with no Vulkan and no DirectX 12 driver answers nothing,
+/// and a test that cannot reach an adapter has to skip with the reason printed rather than fail —
+/// the behaviour `zax-harness/tests/render_wgpu_tests.rs` already has.
+#[cfg(feature = "wgpu")]
+pub struct WgpuFixture {
+    gpu: zax_render::wgpu_backend::headless::HeadlessGpu,
+}
+
+#[cfg(feature = "wgpu")]
+impl WgpuFixture {
+    /// A device of `api` with a 640 × 480 target, or `None` when no such adapter answers here.
+    pub fn new(api: zax_render::wgpu_backend::headless::GpuApi) -> Option<Self> {
+        Self::create(api, 640, 480)
+    }
+
+    /// The same at a given size.
+    pub fn create(
+        api: zax_render::wgpu_backend::headless::GpuApi,
+        width: u32,
+        height: u32,
+    ) -> Option<Self> {
+        match zax_render::wgpu_backend::headless::HeadlessGpu::new(api, width, height) {
+            Ok(gpu) => Some(Self { gpu }),
+            Err(error) => {
+                eprintln!("skipped: {error}");
+                None
+            }
+        }
+    }
+
+    /// Renders a built synthetic frame and reads the capture back, top row first.
+    pub fn render_built(&mut self, built: &Built) -> Capture {
+        self.render(&built.scene, &built.frame())
+    }
+
+    /// Renders and reads the capture back, top row first.
+    pub fn render(&mut self, scene: &SceneState, frame: &SceneFrame<'_>) -> Capture {
+        self.gpu.render(scene, frame).expect("render");
+        self.gpu.finish();
+        let (width, height) = self.gpu.size();
+        #[allow(clippy::cast_possible_wrap)] // Test sizes.
+        Capture {
+            pixels: self.gpu.read_pixels(),
+            width: width as i32,
+            height: height as i32,
+        }
+    }
+
+    /// What the adapter is, for the printed figures.
+    pub fn adapter(&self) -> String {
+        self.gpu.adapter().name.clone()
+    }
+}
+
 /// One capture, as rows of RGBA bytes with the top row first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {

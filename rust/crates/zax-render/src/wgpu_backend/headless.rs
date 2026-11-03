@@ -160,6 +160,12 @@ impl HeadlessGpu {
         &self.adapter
     }
 
+    /// The target's size in pixels, which a reader of [`Self::read_pixels`] needs to index rows.
+    #[must_use]
+    pub const fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
     /// Waits until the GPU has executed everything submitted so far.
     pub fn finish(&self) {
         let _ = self.renderer.device().poll(wgpu::PollType::Wait {

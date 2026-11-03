@@ -180,8 +180,9 @@ impl Engine {
     pub fn take_diagnostics(&mut self) -> Vec<String> {
         match self {
             Self::Gl { renderer, .. } => renderer.take_diagnostics(),
-            // Q-104: one subject of its own, the Enhanced style of AMD-055, which this backend
-            // does not render — so `--backend vulkan --style enhanced` says so in the report.
+            // The backend's own channel. Q-104's subject — the Enhanced style of AMD-055, not
+            // rendered here — is answered by RU-7, so `--backend vulkan --style enhanced` has
+            // nothing to report about the style any more.
             #[cfg(feature = "wgpu")]
             Self::Wgpu(gpu) => gpu.renderer().take_diagnostics(),
         }

@@ -158,6 +158,10 @@ struct ShaderVariant {
     /// AMD-058 REQ-SCN-065: `uv` interpolated at the centroid of the covered samples, which is
     /// only ever asked for when the buffer is multisampled.
     centroid: bool,
+    /// AMD-055 REQ-SCN-084: the floor mask, whose vertex stage is the scene's and whose fragment
+    /// stage is the `+Y >= 0,9` test of the floor definition. Never a *frame's* variant — only
+    /// [`Self::mask`] sets it, for the one pass that lays the mask down.
+    floor_mask: bool,
 }
 
 impl ShaderVariant {
@@ -167,6 +171,7 @@ impl ShaderVariant {
         voxel_grid: false,
         pixel_shadow: false,
         centroid: false,
+        floor_mask: false,
     };
 
     /// The defines [`preprocess::compose`] expands this variant's sources with.
@@ -183,6 +188,9 @@ impl ShaderVariant {
         }
         if self.centroid {
             defines.push("ZAX_CENTROID");
+        }
+        if self.floor_mask {
+            defines.push("ZAX_FLOOR_MASK");
         }
         defines
     }
@@ -210,6 +218,7 @@ impl ShaderVariant {
             (self.voxel_grid, " grid"),
             (self.pixel_shadow, " pixel-shadow"),
             (self.centroid, " centroid"),
+            (self.floor_mask, " floor-mask"),
         ] {
             if on {
                 suffix.push_str(name);
@@ -228,6 +237,22 @@ impl ShaderVariant {
             voxel_grid: false,
             pixel_shadow: false,
             centroid: false,
+            floor_mask: false,
+        }
+    }
+
+    /// The variant the **floor mask** of AMD-055 REQ-SCN-084 asks for: the curvature and the mask
+    /// itself, and nothing else — which is exactly the key `shaders::floor_mask(bend)` has on the
+    /// OpenGL side. The mask's fragment stage reads neither the albedo nor the shadow, so neither
+    /// REQ-SCN-081 nor REQ-SCN-082 has any part in it, and the pass is single-sample, so AMD-058's
+    /// centroid has none either.
+    const fn mask(self) -> Self {
+        Self {
+            bend: self.bend,
+            voxel_grid: false,
+            pixel_shadow: false,
+            centroid: false,
+            floor_mask: true,
         }
     }
 }
@@ -262,6 +287,7 @@ struct Layouts {
     sky: wgpu::BindGroupLayout,
     resolve: wgpu::BindGroupLayout,
     scene_pipeline: wgpu::PipelineLayout,
+    mask_pipeline: wgpu::PipelineLayout,
     shadow_pipeline: wgpu::PipelineLayout,
     sky_pipeline: wgpu::PipelineLayout,
     resolve_pipeline: wgpu::PipelineLayout,
@@ -393,8 +419,15 @@ pub struct WgpuSceneRenderer {
     shadow_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
     /// And for the batched scene module, which differs only in how it reaches its textures.
     batched_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
+    /// AMD-055 REQ-SCN-084: the floor-mask module of each curvature asked for so far, built the
+    /// first time a frame wants the reflections and no sooner. Built from the scene source alone,
+    /// without either texture chunk: the mask's fragment stage reads no texture.
+    mask_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
     sky_module: wgpu::ShaderModule,
     scene_pipelines: FastMap<SceneKey, wgpu::RenderPipeline>,
+    /// The mask pipelines, by `(cull, mirrored, variant)` — the same two state axes the scene
+    /// pipelines carry, since the mask is drawn by the scene's own geometry (Q-069).
+    mask_pipelines: FastMap<(bool, bool, ShaderVariant), wgpu::RenderPipeline>,
     shadow_pipelines: FastMap<(bool, ShaderVariant), wgpu::RenderPipeline>,
     sky_pipelines: FastMap<(bool, u32), wgpu::RenderPipeline>,
     resolve_pipeline: wgpu::RenderPipeline,
@@ -445,12 +478,10 @@ pub struct WgpuSceneRenderer {
     statistics: RenderStatistics,
     last_view: CameraView,
     group_opaque: bool,
-    /// Q-104: the diagnostic lines this backend has to hand the host. Today there is exactly one
-    /// subject — the Enhanced style of AMD-055, which this backend does not render — and it is
-    /// written at most once per renderer.
+    /// The diagnostic lines this backend has to hand the host (AMD-051's channel). The one
+    /// subject Q-104 recorded — the Enhanced style of AMD-055, which this backend did not render —
+    /// is gone with RU-7: the style is rendered here now, so there is nothing to say about it.
     diagnostics: Vec<String>,
-    /// Whether that line has been written.
-    style_reported: bool,
 }
 
 /// The stores the plan asks for the resident meshes and textures.
@@ -598,6 +629,7 @@ impl WgpuSceneRenderer {
             wide_picture_cells: interop::subdivision_for(false),
             plan: FramePlan::default(),
             scene_pipelines: FastMap::default(),
+            mask_pipelines: FastMap::default(),
             shadow_pipelines: FastMap::default(),
             sky_pipelines: FastMap::default(),
             resolve_pipeline,
@@ -640,13 +672,13 @@ impl WgpuSceneRenderer {
             last_view: CameraView::default(),
             group_opaque: false,
             diagnostics: Vec::new(),
-            style_reported: false,
             layouts,
             scene_modules: [(ShaderVariant::PLAIN, scene_module)].into_iter().collect(),
             shadow_modules: [(ShaderVariant::PLAIN, shadow_module)]
                 .into_iter()
                 .collect(),
             batched_modules,
+            mask_modules: FastMap::default(),
             sky_module,
             device,
             queue,
@@ -718,6 +750,9 @@ impl WgpuSceneRenderer {
             // the fallback draws the same pixels. With `video.anti_alias` = 0 nothing is built,
             // which is what keeps the handheld default on the module of before this amendment.
             centroid: scene.settings.anti_alias_samples() > 1,
+            // Never a frame's variant: `ShaderVariant::mask` is what sets it, for the one pass of
+            // REQ-SCN-084 that lays the mask down.
+            floor_mask: false,
         };
         self.ensure_modules(variant);
         // REQ-SCN-081: the HUD never takes the grid, and it draws with the flat variant of
@@ -777,6 +812,36 @@ impl WgpuSceneRenderer {
         effects.select(&self.device, &scene.settings.style);
     }
 
+    /// Builds the floor-mask module and pipelines of AMD-055 REQ-SCN-084 for this frame, on a
+    /// frame whose Enhanced style asks for the reflections and on no other.
+    ///
+    /// The mask's vertex stage is the scene's, so it belongs here with the other scene variants
+    /// rather than in [`ScreenEffects`] — exactly the split the OpenGL backend makes, and for the
+    /// same reason. Like them, it is built the first time a frame asks for it, for the curvature
+    /// that frame draws with and no other.
+    ///
+    /// Both windings are prepared whatever the floor runs hold: a mirrored placement winds the
+    /// other way round (Q-069), and the mask must land on the same pixels the frame drew.
+    #[inline(never)]
+    fn prepare_mask(&mut self, cull: bool, variant: ShaderVariant) {
+        let mask = variant.mask();
+        if !self.mask_modules.contains_key(&mask) {
+            // The scene source alone: the mask's `fs_main` reads no texture, so neither texture
+            // chunk is prepended and group 2 never reaches the module.
+            let module = build_module(&self.device, "zax floor mask", &[SCENE], mask);
+            self.mask_modules.insert(mask, module);
+            self.style_modules += 1;
+        }
+        let module = &self.mask_modules[&mask];
+        for mirrored in [false, true] {
+            self.mask_pipelines
+                .entry((cull, mirrored, mask))
+                .or_insert_with(|| {
+                    mask_pipeline(&self.device, &self.layouts, module, cull, mirrored)
+                });
+        }
+    }
+
     /// The device the renderer draws with.
     #[must_use]
     pub const fn device(&self) -> &wgpu::Device {
@@ -821,9 +886,9 @@ impl WgpuSceneRenderer {
 
     /// The diagnostic lines this backend has for the host, as `SceneRenderer::take_diagnostics`.
     ///
-    /// Q-104: one subject, the Enhanced style of AMD-055 — selected in the settings, read back as
-    /// selected, and **not rendered** here. The line is written once per renderer, the first time
-    /// a frame asks for it.
+    /// Q-104's one subject — the Enhanced style selected, read back as selected, and **not
+    /// rendered** here — is answered by RU-7 and the line it wrote is gone. What reaches this
+    /// channel now is what the renderer itself finds on a frame.
     pub fn take_diagnostics(&mut self) -> Vec<String> {
         std::mem::take(&mut self.diagnostics)
     }
@@ -1169,21 +1234,11 @@ impl WgpuSceneRenderer {
         }
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32);
-        // Q-104, what is left of the gap: the curvature of AMD-043, the voxel grid of REQ-SCN-081,
-        // the pixel shadows of REQ-SCN-082 and the occlusion of REQ-SCN-083 are rendered here now
-        // (RU-7 steps 2, 3 and 4b). The reflections of REQ-SCN-084 are not yet, so the line says
-        // that and no more, and it goes with step 4c. The setting is kept and read back as set
-        // whatever this backend draws (REQ-SCN-078 is a requirement on the *setting*).
-        if scene.settings.style.reflections_active() && !self.style_reported {
-            self.style_reported = true;
-            self.diagnostics.push(
-                "the floor reflections of the Enhanced visual style are not rendered by this \
-                 graphics backend; everything else of the style is (AMD-055 REQ-SCN-084, Q-104)"
-                    .to_owned(),
-            );
-        }
-        self.queue
-            .write_buffer(&self.frame_buffer, 0, &frame_bytes(&constants));
+        self.queue.write_buffer(
+            &self.frame_buffer,
+            0,
+            &frame_bytes(&constants, scene.camera.local_camera),
+        );
 
         let sky_kind = scene.settings.skybox;
         let sky = matches!(sky_kind, SkyboxKind::Gradient | SkyboxKind::Fantasy);
@@ -1200,9 +1255,22 @@ impl WgpuSceneRenderer {
 
         let drawing = !self.plan.lists.nothing_to_draw();
         let batched = drawing && self.prepare_texture_arrays();
+        // AMD-055 REQ-SCN-084: which instances are floors, and the runs the mask pass redraws.
+        // Only on a frame whose Enhanced style asks for the reflections — in Classic this is one
+        // `is_some_and` on an `Option` that is already `None`.
+        let reflects = self
+            .screen_effects
+            .as_ref()
+            .is_some_and(ScreenEffects::reflects);
         if drawing {
             self.plan
                 .lay_out_instances(self.group_opaque, AFFINE_BYTES, AFFINE_PLACEMENT);
+            // After `lay_out_instances`, which fixes the order of the opaque bucket the marks are
+            // indexed by, and before the draw blocks are uploaded.
+            if reflects {
+                mark_floors(&mut self.plan, scene.camera.local_camera);
+                self.prepare_mask(scene.settings.cull_back_faces, variant);
+            }
             self.upload_draws(&constants, batched);
             self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched, variant);
             // REQ-SCN-080: with a screen pass the transparent objects and the HUD draw into the
@@ -1296,16 +1364,18 @@ impl WgpuSceneRenderer {
         // The screen-space passes of AMD-055 REQ-SCN-080, between the opaque objects and the
         // transparent ones, in the order that requirement fixes.
         if effects && drawing {
-            if let Some(effects) = &mut self.screen_effects {
-                self.statistics.screen_effect_passes = run_screen_effects(
-                    effects,
+            if let Some(screen) = &mut self.screen_effects {
+                run_screen_effects(
+                    screen,
                     &self.device,
                     &self.queue,
                     encoder,
                     linear,
                     self.linear_generation,
-                    &scene.settings.style,
-                    view,
+                    (&buckets, &scene.settings.style, view),
+                    &self.mask_pipelines,
+                    &self.plan.floor_runs,
+                    &mut self.statistics,
                 );
             }
             let Some(depth_single) = &linear.depth_single else {
@@ -1517,12 +1587,28 @@ impl WgpuSceneRenderer {
                 entry += 1;
             }
         }
+        // AMD-055 REQ-SCN-084: and the floor runs after them, each with the draw block of an
+        // opaque run — which is what it is, redrawn into the mask. `lay_out_floor` has already
+        // appended their placements at offsets of their own, so their `run_of` entries land past
+        // the three buckets' and nothing of the frame's own draws moves. Empty on every frame that
+        // does not ask for the reflections, so this loop is one `is_empty` in Classic.
+        for run in &self.plan.floor_runs {
+            let look = DrawLook {
+                hud: false,
+                opaque: true,
+                shadow_enabled,
+            };
+            push_draw(draws, deforms, &lists.opaque[run.first], look);
+            push_run_of(run_of, run, entry);
+            entry += 1;
+        }
         if let (Some(batching), true) = (&mut self.batching, batched) {
             batching.data.clear();
             for (items, runs) in [
                 (&lists.opaque, &lists.opaque_runs),
                 (&lists.transparent, &lists.transparent_runs),
                 (&lists.hud, &lists.hud_runs),
+                (&lists.opaque, &self.plan.floor_runs),
             ] {
                 for run in runs {
                     push_indirect(&mut batching.data, &self.meshes, items[run.first].mesh, run);
@@ -1852,6 +1938,82 @@ fn draw_buckets(
     }
 }
 
+/// The two steps AMD-055 REQ-SCN-084 asks of the draw list: which instances are floors, and the
+/// runs the mask pass redraws.
+///
+/// **`#[inline(never)]` for the reason the OpenGL twin carries it**: none of it runs on a frame
+/// that does not ask for the reflections, and `scene_pass` should pay the one `is_some_and` that
+/// decides not to call it rather than carry the body.
+///
+/// The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of
+/// (`SceneConstants::voxel_cell` and the occlusion's radius read it the same way).
+#[inline(never)]
+fn mark_floors(plan: &mut FramePlan<MeshHandle, TextureHandle>, local_camera: bool) {
+    plan.mark_floor_surfaces(local_camera, 1.0);
+    plan.lay_out_floor(AFFINE_BYTES, AFFINE_PLACEMENT);
+}
+
+/// The floor-mask pass of AMD-055 REQ-SCN-084: the floor-eligible opaque runs redrawn into the
+/// mask target the caller has opened a pass over, through the pipeline whose fragment stage is the
+/// `+Y ≥ 0,9` test of the floor definition.
+///
+/// The geometry is the frame's own — the same meshes, the same placements, the same animated
+/// deformation and the same curvature — so the mask cannot land anywhere the frame did not draw.
+/// The pipeline is keyed on the winding (Q-069) and switched the way the shadow pass switches its
+/// own, which is also what stretches the batched draws into multi-draws.
+fn draw_floor_mask(
+    pass: &mut wgpu::RenderPass<'_>,
+    scene: &BucketScene<'_>,
+    pipelines: &FastMap<(bool, bool, ShaderVariant), wgpu::RenderPipeline>,
+    floor_runs: &[InstanceRun],
+    base: usize,
+    statistics: &mut RenderStatistics,
+) {
+    pass.set_bind_group(0, scene.frame_group, &[]);
+    pass.set_bind_group(1, scene.draw_group, &[]);
+    let (vertices, indices) = scene.meshes.buffers();
+    pass.set_vertex_buffer(0, vertices.slice(..));
+    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+    let indirect = match (scene.batching, scene.batched) {
+        (Some(batching), true) => Some(&batching.indirect.buffer),
+        _ => None,
+    };
+    let mask = scene.variant.mask();
+
+    let mut current = None;
+    let mut pending = base..base;
+    for (index, run) in floor_runs.iter().enumerate() {
+        let item = &scene.lists.opaque[run.first];
+        let mirrored = interop::normal_matrix(&item.model).1 < 0.0;
+        if current != Some(mirrored) {
+            if let Some(indirect) = indirect {
+                multi_draw(pass, indirect, &pending);
+            }
+            pending = base + index..base + index;
+            pass.set_pipeline(&pipelines[&(scene.cull, mirrored, mask)]);
+            current = Some(mirrored);
+        }
+        let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
+        if indirect.is_some() {
+            pending.end = base + index + 1;
+        } else {
+            let (first_index, base_vertex) = scene.meshes.range(item.mesh);
+            let first = instance_base(run);
+            pass.draw_indexed(
+                first_index..first_index + item.mesh.index_count,
+                base_vertex,
+                first..first + instances,
+            );
+        }
+        statistics.batches += 1;
+        statistics.draw_calls += instances;
+        statistics.triangles += u64::from(item.mesh.index_count / 3) * u64::from(instances);
+    }
+    if let Some(indirect) = indirect {
+        multi_draw(pass, indirect, &pending);
+    }
+}
+
 /// Runs the screen-space passes of AMD-055 REQ-SCN-080 over the frame drawn so far, and says how
 /// many passes that took.
 ///
@@ -1873,11 +2035,13 @@ fn run_screen_effects(
     encoder: &mut wgpu::CommandEncoder,
     linear: &LinearTargets,
     generation: u64,
-    style: &StyleSettings,
-    view: &CameraView,
-) -> u32 {
+    (scene, style, view): (&BucketScene<'_>, &StyleSettings, &CameraView),
+    mask_pipelines: &FastMap<(bool, bool, ShaderVariant), wgpu::RenderPipeline>,
+    floor_runs: &[InstanceRun],
+    statistics: &mut RenderStatistics,
+) {
     let Some(depth) = &linear.depth_single else {
-        return 0;
+        return;
     };
     let mut submitted = 0;
     // REQ-SCN-080's last bullet: the passes work on the **resolved** colour and depth. The colour
@@ -1889,6 +2053,7 @@ fn run_screen_effects(
     }
     let frame = ScreenFrame {
         depth,
+        color: &linear.resolved,
         size: (linear.width, linear.height),
         generation,
         projection: crate::renderer::projection_terms(view),
@@ -1896,11 +2061,60 @@ fn run_screen_effects(
     // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of, so a
     // length in scene units is a length in view units (`SceneConstants::voxel_cell` reads the same
     // scale the same way).
+
+    // 2a. The reflections of REQ-SCN-084, **first**, so that what they reflect is the scene the
+    // occlusion has not yet darkened.
+    if effects.reflects() {
+        if let Some(mask) = effects.mask_target(device, frame) {
+            let lists = scene.lists;
+            let base =
+                lists.opaque_runs.len() + lists.transparent_runs.len() + lists.hud_runs.len();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("zax floor mask"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &mask,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                // The frame's **own** depth decides what is marked, and nothing may write to it:
+                // the mask is laid on the surfaces the frame already drew.
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            draw_floor_mask(
+                &mut pass,
+                scene,
+                mask_pipelines,
+                floor_runs,
+                base,
+                statistics,
+            );
+            drop(pass);
+            submitted += 1;
+        }
+        submitted += effects.trace(device, queue, encoder, frame, style, 1.0);
+        submitted += effects.composite_reflections(encoder, &linear.resolved);
+    }
+
+    // 2b. The occlusion of REQ-SCN-083.
     if effects.occludes() {
         submitted += effects.occlude(device, queue, encoder, frame, style, 1.0);
         submitted += effects.composite_occlusion(encoder, &linear.resolved);
     }
-    submitted
+    statistics.screen_effect_passes = submitted;
 }
 
 /// Issues the draws of the scene buckets: one draw call per run, or, with indirect arguments,
@@ -2142,6 +2356,10 @@ impl Layouts {
         };
         Self {
             scene_pipeline: pipeline("zax scene", &[Some(&frame), Some(&draw), Some(&textures)]),
+            // AMD-055 REQ-SCN-084: the mask's fragment stage is the floor test and reads no
+            // texture at all, so its module never declares group 2 and its layout does not carry
+            // it — which also means the pass binds two groups rather than three.
+            mask_pipeline: pipeline("zax floor mask", &[Some(&frame), Some(&draw)]),
             shadow_pipeline: pipeline("zax shadow", &[Some(&shadow_frame), Some(&draw)]),
             sky_pipeline: pipeline("zax sky", &[Some(&sky)]),
             resolve_pipeline: pipeline("zax resolve", &[Some(&resolve)]),
@@ -2308,6 +2526,78 @@ fn scene_pipeline(
                 format: LINEAR_FORMAT,
                 blend,
                 write_mask,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The floor-mask pipeline of AMD-055 REQ-SCN-084: the scene's geometry into one `R8` channel,
+/// with the frame's own depth tested and not written.
+///
+/// Single-sample whatever the frame's anti-aliasing, because REQ-SCN-080 has the screen passes
+/// work on the resolved depth and this pass is tested against exactly the depth they read.
+///
+/// **The depth bias is the OpenGL path's `polygon_offset(-1.0, -16.0)`**, and it is there for a
+/// measured reason: the depth the pass is tested against is a *resolved* multisampled depth — one
+/// sample's, not the fragment centre's — so an exact `LessEqual` marks nothing at all. A mask that
+/// was empty on every multisampled frame is what found that on the other side, and the bias is in
+/// depth units of the last place, far too small to let a hidden floor through.
+///
+/// **The two numbers cross over between the APIs, and getting that wrong is a real bug this step
+/// made and measured.** `glPolygonOffset(factor, units)` offsets by `m × factor + r × units`,
+/// where `m` is the depth slope and `r` the smallest resolvable difference — so GL's *first*
+/// argument is wgpu's `slope_scale` and its *second* is wgpu's `constant`. Written the other way
+/// round (`constant: -1, slope_scale: -16.0`) the slope term is sixteen times too large, and a
+/// steeply-seen face then wins `LessEqual` against surfaces in front of it: the mask marked the
+/// top of the red cube where OpenGL left it alone, and 1 709 pixels of the close-up R came out
+/// reflected that should not have been. `amd055_parity_tests` is what found it.
+fn mask_pipeline(
+    device: &wgpu::Device,
+    layouts: &Layouts,
+    module: &wgpu::ShaderModule,
+    cull: bool,
+    mirrored: bool,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("zax floor mask"),
+        layout: Some(&layouts.mask_pipeline),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: front_face(mirrored),
+            cull_mode: cull.then_some(wgpu::Face::Back),
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState {
+                constant: -16,
+                slope_scale: -1.0,
+                clamp: 0.0,
+            },
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::R8Unorm,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
         multiview_mask: None,
@@ -2677,6 +2967,7 @@ const fn hud_variant(variant: ShaderVariant) -> ShaderVariant {
         voxel_grid: false,
         pixel_shadow: false,
         centroid: variant.centroid,
+        floor_mask: false,
     }
 }
 
@@ -2695,7 +2986,7 @@ fn push_bend(data: &mut Vec<u8>, bend: SpaceBend) {
     push_vec4(data, vec3(bend.active().into(), 0.0));
 }
 
-fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
+fn frame_bytes(constants: &SceneConstants, local_camera: bool) -> Vec<u8> {
     let mut data = Vec::new();
     push_matrix(&mut data, &constants.view_projection);
     push_matrix(&mut data, &constants.light_view_projection);
@@ -2713,9 +3004,13 @@ fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
     push_vec4(&mut data, vec3(constants.light_direction, 0.0));
     push_vec4(&mut data, vec3(constants.hud_light_direction, 0.0));
     push_bend(&mut data, constants.bend);
-    // AMD-055 REQ-SCN-081: the voxel cell side. Written whatever the variant, for the reason
-    // `push_bend` gives, and in Classic it is the cell of `spl.voxel_grid` = 0.
-    push_vec4(&mut data, [constants.voxel_cell, 0.0, 0.0, 0.0]);
+    // AMD-055 REQ-SCN-081: the voxel cell side, and REQ-SCN-084's floor vertical in the three
+    // slots that `vec4` had spare. Written whatever the variant, for the reason `push_bend` gives,
+    // and in Classic they are the cell of `spl.voxel_grid` = 0 and the ordinary `+Y`. Putting the
+    // vertical here rather than in a `vec4` of its own is what keeps `FRAME_BYTES` at the 288 of
+    // step 2: a Classic frame copies no more bytes for the reflections than it already did.
+    let up = crate::style::floor_vertical(local_camera);
+    push_vec4(&mut data, [constants.voxel_cell, up[0], up[1], up[2]]);
     data
 }
 

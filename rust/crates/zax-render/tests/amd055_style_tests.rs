@@ -146,24 +146,23 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     assert_ne!(classic.pixels, flat.pixels, "60° changes the picture");
 }
 
-/// Q-104, being answered (RU-7): the two **shader** effects of the Enhanced style and the
-/// **occlusion** of REQ-SCN-083 are in the `wgpu` backend, and the **reflections** of
-/// REQ-SCN-084 are not yet.
+/// Q-104, answered (RU-7): **all four effects of the Enhanced style are in the `wgpu` backend**,
+/// and what is left of the gap is the multi-scale estimator of REQ-SCN-083's *Mode MSVO*, which
+/// falls back on Depth (the declared fallback **(D)**) rather than being missing.
 ///
-/// This test used to assert that not one of the four effects was in the WGSL — the known gap, so
-/// that a half-done parity failed loudly rather than passing unnoticed. Step 3 ported the voxel
-/// grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082, which are variants of the scene
-/// module; step 4b ported the occlusion of REQ-SCN-083 and the architecture its passes live in.
-/// So the assertion stays **two-sided**, and the second list is what keeps the remaining gap
-/// pinned: the day the reflections land, it empties and the diagnostic line of
-/// `wgpu_backend/renderer.rs` goes with it.
+/// This test used to assert that not one of the four was in the WGSL — the known gap, so that a
+/// half-done parity failed loudly rather than passing unnoticed. Step 3 ported the voxel grid of
+/// REQ-SCN-081 and the pixel shadows of REQ-SCN-082; step 4b the occlusion of REQ-SCN-083 and the
+/// architecture its passes live in; step 4c the reflections of REQ-SCN-084 and the floor mask. The
+/// diagnostic line of `wgpu_backend/renderer.rs` went with that last one, as this test's own
+/// message had instructed. The second list below is what keeps the one remaining piece pinned.
 ///
 /// Whether the WGSL compiles and whether the two backends agree is not a question this side can
 /// answer — naga validates at module creation. That is
-/// `zax-harness/tests/parity_wgpu_tests.rs`.
+/// `zax-harness/tests/parity_wgpu_tests.rs` and `amd055_parity_tests.rs`.
 #[cfg(feature = "wgpu")]
 #[test]
-fn q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections() {
+fn q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator() {
     const COMMON: &str = include_str!("../src/wgpu_backend/shaders/common.wgsl");
     const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
     const SHADOW: &str = include_str!("../src/wgpu_backend/shaders/shadow.wgsl");
@@ -175,6 +174,8 @@ fn q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections() {
     const AO_BLUR: &str = include_str!("../src/wgpu_backend/shaders/ao_blur.wgsl");
     const AO_COMPOSITE: &str = include_str!("../src/wgpu_backend/shaders/ao_composite.wgsl");
     const DEPTH_RESOLVE: &str = include_str!("../src/wgpu_backend/shaders/depth_resolve.wgsl");
+    const SSR: &str = include_str!("../src/wgpu_backend/shaders/ssr.wgsl");
+    const SSR_COMPOSITE: &str = include_str!("../src/wgpu_backend/shaders/ssr_composite.wgsl");
 
     // REQ-SCN-081: the grooves, with the five constants of the requirement.
     assert!(VOXEL_GRID.contains("fn zax_voxel_grid("));
@@ -213,8 +214,30 @@ fn q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections() {
     assert!(DEPTH_RESOLVE.contains("texture_depth_multisampled_2d"));
     assert!(DEPTH_RESOLVE.contains("@builtin(frag_depth)"));
 
-    // And the half that is still to come: nothing of the reflections of REQ-SCN-084, nor of the
-    // multi-scale estimator of REQ-SCN-083's *Mode MSVO*, is in any WGSL source yet.
+    // REQ-SCN-084: the march, the bisection, the thickness test, the two attenuations and the
+    // premultiplied result the composite's blend relies on.
+    assert!(SSR.contains("fn zax_blurred_colour("));
+    for name in [
+        "ZAX_SSR_SURFACE_BIAS: f32 = 0.05",
+        "ZAX_SSR_THICKNESS: f32 = 2.0",
+        "ZAX_SSR_FADE_FROM: f32 = 0.45",
+        "ZAX_SSR_EDGE: f32 = 0.06",
+    ] {
+        assert!(SSR.contains(name), "REQ-SCN-084: {name}");
+    }
+    assert!(SSR.contains("reflect(normalize(p), normal)"));
+    assert!(SSR.contains("vec4<f32>(colour * weight, weight)"));
+    assert!(SSR_COMPOSITE.contains("reflection * mask"));
+    // And the floor mask, whose fragment stage is the `+Y >= 0,9` test of the floor definition and
+    // which reads the scene normal **before** the curvature.
+    assert!(SCENE.contains("//#ifdef ZAX_FLOOR_MASK"));
+    assert!(SCENE.contains("ZAX_FLOOR_NORMAL_THRESHOLD: f32 = 0.9"));
+    assert!(SCENE.contains("scene_normal: vec3<f32>"));
+    assert!(SCENE.contains("out.scene_normal = out.normal;"));
+
+    // And the one piece that is still to come: nothing of the multi-scale estimator of
+    // REQ-SCN-083's *Mode MSVO* — the four-level pyramid RU-6 ported on the OpenGL side — is in
+    // any WGSL source yet.
     //
     // The names here are **functions** rather than words: the sources above say "MSVO" and
     // "reflections" in their prose, because each explains which requirement it serves and which
@@ -232,6 +255,8 @@ fn q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections() {
         AO_BLUR,
         AO_COMPOSITE,
         DEPTH_RESOLVE,
+        SSR,
+        SSR_COMPOSITE,
     ] {
         for name in [
             "fn zax_trace",
