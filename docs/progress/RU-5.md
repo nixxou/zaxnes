@@ -14,7 +14,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
 | 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — this commit |
-| 6 | REQ-SCN-084: the floor reflections | todo |
+| 6 | REQ-SCN-084: the floor reflections | todo — design sharpened, split 6a/6b proposed |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
@@ -909,6 +909,84 @@ quantity (`ao_radius_units`, `ao_ceiling`, `ao_samples`, `ao_half_resolution`). 
 is rendered as Depth, the declared fallback **(D)**, until the MIT port of REQ-SCN-083 exists;
 `ao.thickness` therefore has no observable effect and is greyed, and `third_party/README.md` gains
 no entry in this lot.
+
+### Step 6, sharpened — read against the code after step 5 landed
+
+The design below ("Step 6 — REQ-SCN-084, the reflections") still holds. What follows is what
+reading REQ-SCN-084 against `frame_plan.rs`, `camera.rs` and the step-5 pass settled, so that it
+is not re-derived. **None of it is committed code.** Suggested split, because the step is the
+largest left: **6a** the floor definition (no GL, unit-testable), **6b** the passes.
+
+#### The floor test needs *two* tests, and that is what fixes the shape
+
+The invariants decide this, and neither test can be dropped:
+
+- **Variante R-s** puts an 8 × 8 × 8 block and the *same block at `scale = (1 ; 1 ; 0,5)`* (4 units
+  in `z`) side by side: the first reflects, the second must not. Both have a top face of normal
+  (0, 1, 0), and both are the same pixels of the same depth buffer — so **no reconstruction from
+  depth can tell them apart**. The eligibility is a property of the **instance**, and it has to be
+  computed on the CPU, where the placement is.
+- **Variante R-m** is the same 8 × 8-tile shape *without rotation*: its `xz` box measures 64 × 8,
+  so it **passes** the bounding-box test, and its front face has the scene normal (0, 0, −1). Not
+  one of its pixels may be modified. So the **+Y ≥ 0,9 test is per fragment** and is what excludes
+  it — a per-instance mask alone would reflect the wall.
+
+So the pass needs a **floor mask** that is the *conjunction* of a per-instance flag and a
+per-fragment normal test. That rules out the two cheap shortcuts and leaves two honest options:
+
+1. **A second colour attachment** written by the scene program during the opaque pass, under a new
+   variant axis — but that changes the framebuffer the Classic path allocates and the MRT setup of
+   both the single-sample and the multisampled attachments, which is a lot of machinery pressed
+   against the brief's point 1.
+2. **A mask pass of its own**, after the opaque pass: bind an `R8` target with the frame's **depth
+   texture** as its depth attachment (which step 5 already allocates on demand), depth test
+   `LEQUAL` with depth writes off, and re-draw **only the floor-eligible runs** with a fragment
+   stage that writes 1 where the pre-curvature scene normal has `+Y ≥ 0,9`. Nothing of the Classic
+   framebuffer changes, and the pass does not exist when `spl.reflections` = 0.
+
+**Option 2 is the one to take.** Its cost is one extra geometry pass over the floor instances only,
+paid only when the effect is on, which is exactly what point 2 of the brief asks; and it reuses the
+depth texture and the `ScreenEffects` lifecycle step 5 built rather than widening `begin_pass`
+again.
+
+#### Where each quantity already is
+
+| What REQ-SCN-084 needs | Where it is today |
+|---|---|
+| the instance's `xz` box **before curvature** | `DrawItem::bounds_min`/`bounds_max` (the mesh's local box) through `DrawItem::model` (local → scene, curvature **excluded** — REQ-E3D-406, DEC-R2-T4). Accumulate per `DrawItem::instance` over the **opaque** bucket |
+| the per-fragment pre-curvature scene normal | the scene normal the vertex stage already computes before the bend; the grid of step 3 emits `vLocalNormal` under its guard, and the same shape serves |
+| the local-camera swap of v1.4 (`+Y` → `(0, 0, −1)`, footprint in `xy`) | `CameraSetpoint::local_camera` (`camera.rs:162`) |
+| every normative number | `style.rs` already: `ssr_intensity`, `ssr_max_length`, `ssr_blur_fraction`, `ssr_steps`, `ssr_refinements`, `ssr_half_resolution` — all published and unit-tested in step 2 |
+| the lifecycle, the targets, the composite blend | `gl/screen_effects.rs` (step 5); `ScreenEffects::PROGRAMS` becomes a value, not a constant, the day AO and SSR can be on independently — its doc comment says so |
+
+**`6 × scene scale` is a threshold on both dimensions, and `z` is the object's depth.** The
+amendment is explicit that the same shape at `D` = 3, or at `scale = (1 ; 1 ; 0,5)`, measures 3 or
+4 units in `z` and does not reflect. So the test is `min(extent_x, extent_z) ≥ 6 × scale`, on the
+**scene-space** box, and `D` reaches it through the mesh's own bounds (`−D/2 … +D/2`, the step-4
+finding) and the instance's scale.
+
+#### Three clauses easy to get wrong
+
+1. **Only the already-rendered scene may be reflected**, and the pass runs before the transparent
+   objects and the HUD — so they are neither reflected nor reflective, which falls out of
+   REQ-SCN-080's order for free, exactly as it did for the occlusion. The shadow-only tiles of
+   REQ-SCN-041 are not drawn at all, so they are not reflected either.
+2. **The two attenuations must have no sharp edge** — towards the ray's maximum length and towards
+   the screen edge. The amendment leaves their width and shape free but forbids a visible edge,
+   which is a review criterion; a `smoothstep` on both is the cheap honest answer.
+3. **The order between the two screen passes**: the reflections run **first**, then the occlusion
+   (the step-5 notes and the comment already in `render_scene` say so). The composite of the
+   reflections therefore darkens nothing the occlusion has not yet seen.
+
+#### What R0 keeps on this requirement
+
+The close-up R wants two **direct-format** textures — the floor at (124, 124, 124) and the cube at
+(255, 0, 0) — at 1920 × 1080, which the synthetic fixture cannot make, the same limit steps 3, 4
+and 5 recorded. The **ratios and the masks** are measurable here: R-m (no pixel of the wall moves),
+R-s (the 8-unit block moves, the 4-unit one does not), the monotonicity of `ssr.shine` and
+`ssr.length`, `spl.reflections` = 0 being Classic to the pixel, and R-h (the skybox and the HUD do
+not move). The **+10 % red channel** at the contact is the one invariant that wants the absolute
+albedos, and its own Note computes the margin (a factor of 4,9, so 30 % of the full red suffices).
 
 ### Step 6 — REQ-SCN-084, the reflections
 
