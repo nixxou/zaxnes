@@ -250,9 +250,12 @@ Chaque paramètre est une ligne avec un libellé à gauche et un contrôle à dr
 | `TV Region` | liste : `NTSC`, `PAL`, `DENDY` | région vidéo (SPEC-07) |
 | `TV Box` | liste : `None`, `TV 1`, `TV 2`, `TV 3` | habillage TV (SPEC-06) |
 | `Skybox` | liste : `Default`, `Color`, `Gradient`, `Fantasy`, plus un bouton de couleur | fond (SPEC-06), voir REQ-UI-063 |
+| `Style` (AMD-055 §3 point 6) | liste : `Classic`, `Enhanced` | style visuel (SPEC-06 REQ-SCN-078) |
 | `Full Screen` | case à cocher | mode plein écran de la fenêtre (REQ-UI-064) |
 
-- Critère d'acceptation : FOV sur +2 donne 80°. Light sur 50 donne une intensité de 1,0. Les douze libellés sont présents, et aucun autre paramètre n'apparaît.
+Quand `Style` = `Enhanced`, les douze paramètres de SPEC-06 REQ-SCN-079 apparaissent **à la suite de la ligne `Style`**, dans un groupe repliable « Style », avec les libellés d'AMD-055 §4 et les règles de visibilité de REQ-SCN-079 (les réglages `ao.*` seulement si `spl.ao` ≠ 0, les réglages `ssr.*` seulement si `spl.reflections` = 1). La ligne `Style` et le groupe sont une addition de Zaxnes au panneau décrit ici **(D)** : le programme d'origine les place ailleurs dans son interface, que SPEC-10 ne décrit pas.
+
+- Critère d'acceptation (amendé par AMD-055 §3 point 6) : FOV sur +2 donne 80°. Light sur 50 donne une intensité de 1,0. Les douze libellés sont présents, plus la ligne `Style` et, quand `Style` = `Enhanced`, les douze paramètres de SPEC-06 REQ-SCN-079 **apparaissant selon ses règles de visibilité** (quatre avec les valeurs par défaut — occlusion, ombres pixel, grille, reflets —, les douze avec `spl.ao` ≠ 0 et `spl.reflections` = 1) ; aucun autre paramètre n'apparaît.
 
 **REQ-UI-062** (P1) — Les réglages suivants de l'original ne DOIVENT PAS apparaître sur desktop, car ils y étaient cachés ou relèvent de la VR ; ils restent présents dans le modèle de réglages (SPEC-09), avec leur persistance et, le cas échéant, leur exposition libretro : `Graphic` (Low / Medium / High, portée P, DEC-09-Q1), `Anti Alias` (None / FFAA / SMAA), le choix d'algorithme de rendu (`Normal` / `Retina`), `Runtime`, `Control`, `Mirror` et `Scale`. Le choix de méthode de rendu (`Direct` / `Render Tex`) et `Tex Scale` (`Native`, `2/3`, `1/2`, `1/3`, `1/4`) ne sont pas affichés non plus (voir Q-2).
 - Critère d'acceptation : aucun de ces libellés n'est présent dans l'onglet.

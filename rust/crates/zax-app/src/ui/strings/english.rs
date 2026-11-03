@@ -255,6 +255,85 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Light intensity"),
     ("setting.scene.skybox", "Background (skybox)"),
     ("setting.scene.custom_bg_color", "Background colour"),
+    // The "Style" group of AMD-055 §3 point 6: the thirteen labels and the thirteen help
+    // sentences of its §4 table, in the amendment's own words. The group comes right after the
+    // Skybox row, which is where SPEC-10 REQ-UI-061 as amended puts it.
+    ("group.style", "Style"),
+    ("setting.render.visual_style", "Style"),
+    (
+        "help.render.visual_style",
+        "Classic keeps the original look. Enhanced adds optional effects.",
+    ),
+    ("setting.render.style.ao", "Ambient Occlusion"),
+    (
+        "help.render.style.ao",
+        "Soft shade in corners and hollows.",
+    ),
+    ("option.MSVO", "MSVO"),
+    ("option.Depth", "Depth"),
+    ("setting.render.style.ao_strength", "Strength"),
+    (
+        "help.render.style.ao_strength",
+        "How dark the shading gets.",
+    ),
+    ("setting.render.style.ao_radius", "Radius"),
+    ("help.render.style.ao_radius", "How far the shading reaches."),
+    ("setting.render.style.ao_thickness", "Thickness"),
+    (
+        "help.render.style.ao_thickness",
+        "No effect with Depth occlusion.",
+    ),
+    (
+        "hint.style.thickness_no_effect",
+        "no effect with Depth occlusion",
+    ),
+    ("setting.render.style.ao_quality", "AO Quality"),
+    (
+        "help.render.style.ao_quality",
+        "More samples, smoother shading.",
+    ),
+    ("option.Low", "Low"),
+    ("option.Medium", "Medium"),
+    ("option.High", "High"),
+    ("option.Ultra", "Ultra"),
+    ("setting.render.style.pixel_shadow", "Pixel Shadows"),
+    (
+        "help.render.style.pixel_shadow",
+        "Shadows that follow the game's pixel grid.",
+    ),
+    ("setting.render.style.voxel_grid", "Voxel Grid"),
+    (
+        "help.render.style.voxel_grid",
+        "Grooves every 2, 4 or 8 voxels, like toy bricks.",
+    ),
+    ("option.Every 2 voxels", "Every 2 voxels"),
+    ("option.Every 4 voxels", "Every 4 voxels"),
+    ("option.Every 8 voxels", "Every 8 voxels"),
+    ("setting.render.style.reflections", "Reflections"),
+    (
+        "help.render.style.reflections",
+        "The floor reflects the scene like a polished surface.",
+    ),
+    ("setting.render.style.ssr_shine", "Floor Shine"),
+    (
+        "help.render.style.ssr_shine",
+        "How strong the reflection is.",
+    ),
+    ("setting.render.style.ssr_clarity", "Clarity"),
+    (
+        "help.render.style.ssr_clarity",
+        "Higher values keep the reflection sharp.",
+    ),
+    ("setting.render.style.ssr_length", "Length"),
+    (
+        "help.render.style.ssr_length",
+        "How far the reflection reaches.",
+    ),
+    ("setting.render.style.ssr_quality", "Reflection Quality"),
+    (
+        "help.render.style.ssr_quality",
+        "More steps, fewer gaps in the reflection.",
+    ),
     // The "Geometry" group of AMD-043 §6 and AMD-046 §3: the labels and the help sentences, as
     // the two amendments write them.
     ("group.geometry", "Geometry"),

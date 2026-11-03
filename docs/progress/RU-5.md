@@ -16,9 +16,11 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — `1f3d8ec` |
 | 6a | REQ-SCN-084: the floor definition, on the CPU | done — `276b98a` |
 | 6b | REQ-SCN-084: the mask, the trace and the composite | done — `86a810f` |
-| 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
+| 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — hash in the next commit |
+| 7b | The harness options (`--style`, `--style-param`) | todo |
+| 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | todo |
 | 8 | The per-effect measurements | todo |
-| 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
+| 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
 
 **The checklist went from 10 steps to 9 after step 2**, so the commit of step 3 says "3/9" while
 steps 1 and 2 say "/10". The reason is written out under "The checklist was renumbered" below.
@@ -1010,6 +1012,116 @@ easy to repeat:
 `lay_out_instances` so that `floor_surfaces` is index-aligned with the reordered opaque bucket,
 and the mask pass re-draws the marked items — contiguous sub-ranges of each opaque run, so a
 sub-range maps to a contiguous range of the instance data and needs no second upload.
+
+### Step 7a — REQ-UI-061 and REQ-SCN-079: the desktop group, the labels, the handheld page
+
+**Step 7 is split into three**, because its four deliverables touch three different crates and the
+protocol of this lot wants small committed steps: **7a** the interface (`zax-settings`,
+`zax-app`), **7b** the harness options (`zax-harness`), **7c** the capability finding and the
+`wgpu` line (`zax-render`, the tickets and the documents).
+
+| Piece | What landed |
+|---|---|
+| `zax-settings/src/table.rs` | `STYLE_PARAMETERS`, a table of its own; the four lists given their named rungs with `with_labels` |
+| `zax-render/src/style.rs` | `MSVO_PORTED` and `thickness_acts` — the one constant the occlusion pass and the options window have to agree on |
+| `zax-app/src/ui/options.rs` | the thirteen out of `EXCLUDED`; `STYLE`, `SWITCHES`, `style_heading`, `is_style_row`, `style_group_shown`, `style_row_visible`, `style_inert_note`, `style_help_of`; `move_style_after_skybox` |
+| `zax-app/src/ui/zax_ui/options.rs` | the collapsible group, the skipped rows, the greyed row with its note, `draw_switch` |
+| `zax-app/src/ui/keys.rs`, `strings/english.rs`, `strings/french.rs` | the group title, the thirteen labels, the thirteen help sentences, the nine new value labels, the note — both languages |
+| `zax-app/src/ui/handheld/advanced.rs` | `is_named_list` and `cycle`, so a whole-number list with no bounds can be stepped |
+| `zax-app/src/ui/handheld/defaults.rs` | the two quality rungs on their cheap setting |
+| `docs/spec/SPEC-10-ui.md` | REQ-UI-061 written out as AMD-055 §3 point 6 amends it |
+
+#### Four decisions, and what forced each
+
+1. **The four lists are a stepped domain with named rungs, never `Domain::choice`.** REQ-SCN-079's
+   first criterion is a *normalisation* criterion — `ao.strength` 9 → 5, `spl.voxel_grid` 4 → 3,
+   `spl.ao` 1,4 → 1 — and `Domain::choice` sends a value outside its set to the **default**, which
+   would answer 3, 0 and 0. `Domain::stepped(…).with_labels(…)` keeps the bounds, the step and the
+   `Snap` rule and only names the rungs: the idiom `scene.arc_center` already uses. The eight
+   ladders of 1 to 5 keep their numeric rungs, §4 giving them no value labels.
+2. **The panel's order is not the catalogue's, and only the panel moves.** REQ-UI-061 as amended
+   puts the `Style` row **after the `Skybox` row**; the catalogue has `render.visual_style` long
+   before `scene.skybox`, because the catalogue's order is the order of the **settings file**.
+   `move_style_after_skybox` reorders the built list of the Video tab — five lines, one tab, once
+   at start-up — rather than moving the keys in the catalogue, which would change the order of
+   every written settings file for a presentation reason. The `Skybox` row carries its colour
+   button with it (REQ-UI-063 makes them one row), so the style goes after the pair.
+3. **The two switches are check boxes over whole numbers.** §4 shows `spl.pixel_shadow` and
+   `spl.reflections` as a "case"; the model keeps them as the 0 and 1 Lua reads and writes
+   (`Setting:SetVisualStyleParameter(4, "spl.reflections", 1)`), so what the check box changes is
+   only the widget (`options::SWITCHES`, `draw_switch`).
+4. **`ao.thickness` is greyed by one constant, not by a comment.** REQ-SCN-079 greys it "sauf en
+   mode MSVO effectif", and REQ-SCN-083's fallback **(D)** makes that mode never effective for
+   now. Two very distant places have to agree on that — the occlusion pass, which renders MSVO as
+   Depth, and the options window, which greys the row — so `style::MSVO_PORTED` says it once and
+   `style::thickness_acts` reads it. The day the MIT port lands, that constant is what changes,
+   and the test asserts its value so that whoever changes it is sent to the greying rule.
+
+#### The handheld side: two findings
+
+- **The page needed code after all.** The handheld's advanced page picks up every *steppable*
+  setting of the four desktop tabs by construction, and RU-4b's note said that would be enough
+  here too. It was not: `render.visual_style` is an `aliased_choice` (the values 0 and 4, with 1
+  accepted), which has **no minimum and no maximum**, so the page's filter — "a number whose
+  maximum is above its minimum" — dropped it, and its numeric step would have clamped it to 0.
+  `is_named_list` admits a whole number whose domain publishes named values but no bounds, and
+  `cycle` steps it as a list, writing a number rather than a choice. The twelve parameters are
+  *not* in that case: their domain is stepped, so they were picked up unchanged.
+- **The handheld shows all thirteen rows**, without REQ-SCN-079's visibility rules. Those rules
+  are written for "la grille de paramètres **desktop**", the page's rows are a static list that
+  its selection indexes, and the page already lists several dozen settings of four tabs. Filtering
+  them per value would mean making `rows()` depend on the model and keeping the selection stable
+  across a change — machinery for a page that is explicitly the advanced one.
+
+#### The handheld defaults
+
+Classic is the default on a handheld **because it is the setting's own default** (REQ-SCN-078), and
+at Classic the whole amendment costs nothing; the four effect switches are off by REQ-SCN-079's own
+defaults, so none of them needs a handheld default either. What does need one is the two
+**qualities**: they cost nothing while their effect is off, but they decide what the effect costs
+the moment a player turns it on, so a handheld lands on the cheap rung — `ao.quality` Low (6
+samples at half resolution against Medium's 10) and `ssr.quality` Low (12 march steps and 2
+refinements against High's 48 and 5). The desktop keeps the amendment's 1 and 2.
+
+#### Tests (10 in `zax-app/tests/amd055_style_options_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| REQ-UI-061: the thirteen are rows of the window, in the §4 order, on the Video tab | `req_ui_061_the_thirteen_settings_are_rows_of_the_options_window` |
+| REQ-UI-061: the `Style` row is right after the `Skybox` row and its colour, the twelve follow it — and the catalogue's own order is the other one | `req_ui_061_the_style_row_comes_after_the_skybox_row` |
+| §3 point 6: one row opens the collapsible group, titled "Style" in both languages, and only in Enhanced (identifier 4 **and** the accepted 1) | `req_ui_061_only_the_first_parameter_opens_the_collapsible_group` |
+| REQ-SCN-079's visibility rules and the amended criterion: 0 in Classic, **four** at the defaults, eight with `spl.ao` ≠ 0, **twelve** with both | `req_scn_079_four_parameters_are_visible_by_default_and_twelve_with_both_effects_on` |
+| REQ-SCN-079: `ao.thickness` greyed at all three `spl.ao` values while MSVO is not ported, the only row that is, the note in both languages — and the value still bounded and read back | `req_scn_079_the_thickness_is_greyed_while_msvo_is_rendered_as_depth` |
+| §4: the thirteen labels and the thirteen help sentences, in both languages | `req_scn_079_the_labels_and_the_help_come_from_the_amendment` |
+| §4 and REQ-PERS-081: the four lists name their rungs, the ladders keep their numbers, the snapping survives (4 → 3), the translations | `req_scn_079_the_four_lists_name_their_values_and_keep_their_rungs` |
+| §4: the two switches are check boxes over whole numbers of domain 0 to 1 | `req_scn_079_the_two_switches_are_check_boxes_over_whole_numbers` |
+| the window **draws** the group: the header, the two check boxes and the greyed row, and no value moves by being drawn | `req_ui_061_the_window_draws_the_style_group` |
+| the brief's handheld condition: the thirteen are on the advanced page, each steppable, the named values shown | `req_scn_078_the_handheld_advanced_page_offers_the_style_and_its_parameters` |
+
+Two existing suites enforce the rest for free: `ui_language_tests`
+`amd_035_every_command_and_every_shown_setting_has_a_label` requires a `setting.<key>` in **both**
+tables for every shown row — which is what makes a label forgotten here a failure rather than a key
+on screen — and `amd_035_every_published_key_is_in_both_tables` does the same for the group title,
+the thirteen help sentences and the note, which are in `keys::PUBLISHED`.
+
+`cargo test --release -p zax-app --features bundled`: **all suites pass, 0 failed** (the 10 new
+ones included); `-p zax-settings`: 230 passed, 0 failed. fmt and workspace clippy (`--all-targets
+-- -D warnings`) clean.
+
+Two clippy ceilings were hit by the additions and dealt with rather than silenced: the twelve-row
+table pushed `render_style` past the 100-line limit, so the rows became the module-level
+`STYLE_PARAMETERS` and the builder is a loop of ten lines; and that constant's own type tripped
+`type_complexity`, so it has a name (`StyleParameter`).
+
+#### What this step does **not** do, and why
+
+**The `wgpu` backend is not greyed in the options window.** The brief's point 6 asks for the style
+to read back as set and render as Classic there, *with one log line* — which is step 7c — and not
+for the rows to be greyed. Greying them would need the **live** renderer's verdict in the window,
+and the window has only the settings model: `video.backend` is a wish read at start-up that falls
+back to OpenGL when no Vulkan driver answers (`application::open_window`), so the setting alone
+cannot say what is drawing. Plumbing the live backend into the options window is more machinery
+than point 6 asks for; the log line says it instead.
 
 ## Where this session stopped, and what the next one picks up
 

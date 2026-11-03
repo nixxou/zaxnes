@@ -1,6 +1,6 @@
 //! The options window (REQ-UI-202): one tab per theme, one widget per setting.
 
-use imgui::{ColorEditFlags, Condition, TabItem, TabItemFlags, Ui, WindowFlags};
+use imgui::{ColorEditFlags, Condition, TabItem, TabItemFlags, TreeNodeFlags, Ui, WindowFlags};
 use zax_settings::meta::{SettingEffect, SettingKind};
 use zax_settings::values::{Color, SettingValue};
 
@@ -57,13 +57,29 @@ impl ZaxUi {
                     let forced = host
                         .session()
                         .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+                    // AMD-055 §3 point 6: the twelve style parameters live in a collapsible
+                    // group, shown only while the style is Enhanced. Read once for the whole tab.
+                    let style_group = options::style_group_shown(host.settings());
+                    let mut style_open = false;
                     for row in self.options.rows(tab).to_vec() {
+                        let id = row.descriptor.id();
                         // AMD-043 §6: the curvature settings are shown in a group of their own,
                         // opened by a heading. One comparison per row, and only the first
                         // setting of the group answers.
-                        if let Some(heading) = options::geometry_heading(row.descriptor.id()) {
+                        if let Some(heading) = options::geometry_heading(id) {
                             ui.separator();
                             ui.text_disabled(heading);
+                        }
+                        if let Some(heading) = options::style_heading(id).filter(|_| style_group) {
+                            // Open the first time it is shown: a player who has just picked
+                            // Enhanced is looking for exactly these rows. It stays collapsible,
+                            // which is what AMD-055 §3 point 6 asks for.
+                            style_open = ui.collapsing_header(heading, TreeNodeFlags::DEFAULT_OPEN);
+                        }
+                        if options::STYLE.contains(&id)
+                            && !(style_open && options::style_row_visible(id, host.settings()))
+                        {
+                            continue;
                         }
                         if options::is_folder(&row) {
                             self.draw_folder_row(ui, host, &row);
@@ -120,7 +136,11 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     // greyed out rather than hidden, with the reason spelled out beside it.
     let inert = id == SettingId::VideoResScale
         && !render_scaling::scale_applies(host.settings().render_method());
-    let disabled = ui.begin_disabled(inert);
+    // AMD-055 REQ-SCN-079: `ao.thickness` is greyed while the MSVO mode is rendered as Depth
+    // (REQ-SCN-083's fallback **(D)**), with the reason spelled out beside it. The row is kept
+    // and the setting persists, exactly as the resolution-scale row above is kept.
+    let style_note = options::style_inert_note(id, host.settings());
+    let disabled = ui.begin_disabled(inert || style_note.is_some());
     // A setting whose domain is a finite list gets a drop-down whatever its shape:
     // video.frame_rate is a whole number out of {60, 90, 120} (SPEC-09 §4.1.1), and SPEC-10
     // REQ-UI-061 shows it as a list.
@@ -131,6 +151,10 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
         && matches!(descriptor.kind(), SettingKind::Enum | SettingKind::Int);
     let changed = if descriptor.kind() == SettingKind::Text {
         draw_text(ui, host, row)
+    } else if options::SWITCHES.contains(&id) {
+        // AMD-055 §4 shows `spl.pixel_shadow` and `spl.reflections` as a check box; the model
+        // keeps them as the whole numbers 0 and 1, which is what Lua reads and writes.
+        draw_switch(ui, host, row)
     } else if enumerated {
         draw_enum(ui, host, row)
     } else {
@@ -164,12 +188,23 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
         ui.same_line();
         ui.text_disabled(text::res_scale_needs_render_texture());
     }
+    if let Some(note) = style_note {
+        ui.same_line();
+        ui.text_disabled(note);
+    }
     // Q-103: the Run-ahead row says so while the running game holds it at 0. The row stays live —
     // the setting is kept and applies again to the next game.
     if let Some(note) = options::forced_run_ahead_note(id, run_ahead_forced) {
         ui.same_line();
         ui.text_disabled(note);
     }
+}
+
+/// A whole number of 0 or 1 drawn as a check box (AMD-055 §4).
+fn draw_switch(ui: &Ui, host: &AppHost, row: &OptionsRow) -> Option<SettingValue> {
+    let mut on = host.settings().get(row.descriptor.id()).as_int() != 0;
+    ui.checkbox(row.label(), &mut on)
+        .then_some(SettingValue::Int(i32::from(on)))
 }
 
 fn draw_row_hint(ui: &Ui, row: &OptionsRow) {

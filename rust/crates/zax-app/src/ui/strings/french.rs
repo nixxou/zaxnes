@@ -256,6 +256,82 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Intensité lumineuse"),
     ("setting.scene.skybox", "Fond (skybox)"),
     ("setting.scene.custom_bg_color", "Couleur de fond"),
+    // Le groupe « Style » d'AMD-055 §3 point 6 : les treize libellés et les treize aides de son
+    // §4, tels que l'amendement les écrit. Le groupe vient juste après la ligne Skybox, où
+    // SPEC-10 REQ-UI-061 amendée le place.
+    ("group.style", "Style"),
+    ("setting.render.visual_style", "Style"),
+    (
+        "help.render.visual_style",
+        "Classic garde l'aspect d'origine. Enhanced ajoute des effets optionnels.",
+    ),
+    ("setting.render.style.ao", "Occlusion ambiante"),
+    (
+        "help.render.style.ao",
+        "Ombre douce dans les coins et les creux.",
+    ),
+    ("option.MSVO", "MSVO"),
+    ("option.Depth", "Depth"),
+    ("setting.render.style.ao_strength", "Force"),
+    (
+        "help.render.style.ao_strength",
+        "Intensité de l'assombrissement.",
+    ),
+    ("setting.render.style.ao_radius", "Rayon"),
+    (
+        "help.render.style.ao_radius",
+        "Portée de l'assombrissement.",
+    ),
+    ("setting.render.style.ao_thickness", "Épaisseur"),
+    (
+        "help.render.style.ao_thickness",
+        "Sans effet avec l'occlusion Depth.",
+    ),
+    (
+        "hint.style.thickness_no_effect",
+        "sans effet avec l'occlusion Depth",
+    ),
+    ("setting.render.style.ao_quality", "Qualité de l'occlusion"),
+    (
+        "help.render.style.ao_quality",
+        "Plus d'échantillons, ombre plus lisse.",
+    ),
+    ("option.Low", "Faible"),
+    ("option.Medium", "Moyenne"),
+    ("option.High", "Élevée"),
+    ("option.Ultra", "Ultra"),
+    ("setting.render.style.pixel_shadow", "Ombres pixel"),
+    (
+        "help.render.style.pixel_shadow",
+        "Des ombres qui suivent la grille de pixels du jeu.",
+    ),
+    ("setting.render.style.voxel_grid", "Grille de voxels"),
+    (
+        "help.render.style.voxel_grid",
+        "Des rainures tous les 2, 4 ou 8 voxels, comme des briques de jouet.",
+    ),
+    ("option.Every 2 voxels", "Tous les 2 voxels"),
+    ("option.Every 4 voxels", "Tous les 4 voxels"),
+    ("option.Every 8 voxels", "Tous les 8 voxels"),
+    ("setting.render.style.reflections", "Reflets"),
+    (
+        "help.render.style.reflections",
+        "Le sol reflète la scène comme une surface polie.",
+    ),
+    ("setting.render.style.ssr_shine", "Brillance du sol"),
+    ("help.render.style.ssr_shine", "Intensité du reflet."),
+    ("setting.render.style.ssr_clarity", "Netteté"),
+    (
+        "help.render.style.ssr_clarity",
+        "Une valeur élevée garde le reflet net.",
+    ),
+    ("setting.render.style.ssr_length", "Longueur"),
+    ("help.render.style.ssr_length", "Portée du reflet."),
+    ("setting.render.style.ssr_quality", "Qualité des reflets"),
+    (
+        "help.render.style.ssr_quality",
+        "Plus de pas, moins de trous dans le reflet.",
+    ),
     // Le groupe « Géométrie » d'AMD-043 §6 et d'AMD-046 §3 : les libellés et les aides, tels que
     // les deux amendements les écrivent.
     ("group.geometry", "Géométrie"),

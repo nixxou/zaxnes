@@ -21,6 +21,23 @@ const TABS: [OptionsTab; 4] = [
     OptionsTab::Emulation,
 ];
 
+/// Whether the setting is a whole number the page has to step as a **list** rather than as a
+/// number: its domain publishes named values but no bounds, so there is no step to move by.
+///
+/// `render.visual_style` is the one such setting (AMD-055 REQ-SCN-078: the two values 0 and 4,
+/// with 1 accepted in a write — an `aliased_choice`, which has no minimum and no maximum). The
+/// twelve style parameters are *not* in this case: their domain is stepped, so the page moves
+/// them one rung at a time like any other number.
+fn is_named_list(row: &OptionsRow) -> bool {
+    row.descriptor.kind() == SettingKind::Int
+        && row.maximum <= row.minimum
+        && row
+            .descriptor
+            .domain()
+            .options()
+            .is_some_and(|options| options.len() > 1)
+}
+
 /// The settings of those tabs a pad can step: switches, choices and bounded numbers. The
 /// renderer's backend is the desktop's alone.
 static SETTINGS: LazyLock<Vec<OptionsRow>> = LazyLock::new(|| {
@@ -32,7 +49,9 @@ static SETTINGS: LazyLock<Vec<OptionsRow>> = LazyLock::new(|| {
                 && !desktop::is_folder(row)
                 && match row.descriptor.kind() {
                     SettingKind::Bool | SettingKind::Enum => true,
-                    SettingKind::Int | SettingKind::Float => row.maximum > row.minimum,
+                    SettingKind::Int | SettingKind::Float => {
+                        row.maximum > row.minimum || is_named_list(row)
+                    }
                     _ => false,
                 }
         })
@@ -109,32 +128,49 @@ pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
     }
 }
 
+/// Moves the selection of an enumerated setting by `step`, wrapping at both ends. `whole` writes
+/// the value as a number rather than as a choice, which is what a whole-number list wants
+/// (`render.visual_style`, and what Lua reads).
+fn cycle(id: SettingId, settings: &mut SettingsModel, step: i32, whole: bool) {
+    let choices = choices(id);
+    if choices.is_empty() {
+        return;
+    }
+    let current = settings.get(id).as_int();
+    let at = choices
+        .iter()
+        .position(|(value, _)| *value == current)
+        .unwrap_or(0);
+    let count = i32::try_from(choices.len()).unwrap_or(1);
+    let at = i32::try_from(at).unwrap_or(0);
+    let next = usize::try_from((at + step).rem_euclid(count)).unwrap_or(0);
+    let picked = choices[next].0;
+    settings.set(
+        id,
+        if whole {
+            SettingValue::Int(picked)
+        } else {
+            SettingValue::Enum(picked)
+        },
+    );
+}
+
 /// Steps the setting `id` by `step`: a switch flips, a choice cycles, a number moves by its
 /// step (a twentieth of its range when it has none) and stops at its bounds.
 pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
     let Some(row) = row_of(id) else {
         return;
     };
+    if is_named_list(row) {
+        cycle(id, settings, step, true);
+        return;
+    }
     match row.descriptor.kind() {
         SettingKind::Bool => {
             let on = settings.get(id).as_bool();
             settings.set(id, SettingValue::Bool(!on));
         }
-        SettingKind::Enum => {
-            let choices = choices(id);
-            if choices.is_empty() {
-                return;
-            }
-            let current = settings.get(id).as_int();
-            let at = choices
-                .iter()
-                .position(|(value, _)| *value == current)
-                .unwrap_or(0);
-            let count = i32::try_from(choices.len()).unwrap_or(1);
-            let at = i32::try_from(at).unwrap_or(0);
-            let next = usize::try_from((at + step).rem_euclid(count)).unwrap_or(0);
-            settings.set(id, SettingValue::Enum(choices[next].0));
-        }
+        SettingKind::Enum => cycle(id, settings, step, false),
         kind => {
             let increment = if row.step > 0.0 {
                 row.step

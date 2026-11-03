@@ -148,6 +148,26 @@ pub const HELP_BEND_2D_MODE: &str = "help.scene.bend_2d_mode";
 /// wording — the original has no such setting — so this is Zaxnes's own, like the setting.
 pub const HELP_BACKDROP_LIGHTING: &str = "help.render.backdrop_lighting";
 
+// ------------------------------- the Style group (AMD-055 §3 point 6 and §4)
+/// The title of the collapsible group that holds the style and its twelve parameters.
+pub const GROUP_STYLE: &str = "group.style";
+/// The thirteen help sentences of AMD-055 §4, shown as tooltips.
+pub const HELP_VISUAL_STYLE: &str = "help.render.visual_style";
+pub const HELP_STYLE_AO: &str = "help.render.style.ao";
+pub const HELP_STYLE_AO_STRENGTH: &str = "help.render.style.ao_strength";
+pub const HELP_STYLE_AO_RADIUS: &str = "help.render.style.ao_radius";
+pub const HELP_STYLE_AO_THICKNESS: &str = "help.render.style.ao_thickness";
+pub const HELP_STYLE_AO_QUALITY: &str = "help.render.style.ao_quality";
+pub const HELP_STYLE_PIXEL_SHADOW: &str = "help.render.style.pixel_shadow";
+pub const HELP_STYLE_VOXEL_GRID: &str = "help.render.style.voxel_grid";
+pub const HELP_STYLE_REFLECTIONS: &str = "help.render.style.reflections";
+pub const HELP_STYLE_SSR_SHINE: &str = "help.render.style.ssr_shine";
+pub const HELP_STYLE_SSR_CLARITY: &str = "help.render.style.ssr_clarity";
+pub const HELP_STYLE_SSR_LENGTH: &str = "help.render.style.ssr_length";
+pub const HELP_STYLE_SSR_QUALITY: &str = "help.render.style.ssr_quality";
+/// Why `ao.thickness` is greyed: REQ-SCN-079's "grisé" under the fallback **(D)** of REQ-SCN-083.
+pub const HINT_THICKNESS_NO_EFFECT: &str = "hint.style.thickness_no_effect";
+
 // ------------------------------------------------------- fields, columns
 pub const FIELD_SEARCH: &str = "field.search";
 pub const COLUMN_ACTION: &str = "column.action";
@@ -533,6 +553,22 @@ pub const PUBLISHED: &[&str] = &[
     HINT_AT_NEXT_START,
     HINT_AT_NEXT_LOAD,
     HINT_PROFILE_SETTING,
+    // AMD-055 §4: the group, its thirteen help sentences and the note on the greyed Thickness.
+    GROUP_STYLE,
+    HELP_VISUAL_STYLE,
+    HELP_STYLE_AO,
+    HELP_STYLE_AO_STRENGTH,
+    HELP_STYLE_AO_RADIUS,
+    HELP_STYLE_AO_THICKNESS,
+    HELP_STYLE_AO_QUALITY,
+    HELP_STYLE_PIXEL_SHADOW,
+    HELP_STYLE_VOXEL_GRID,
+    HELP_STYLE_REFLECTIONS,
+    HELP_STYLE_SSR_SHINE,
+    HELP_STYLE_SSR_CLARITY,
+    HELP_STYLE_SSR_LENGTH,
+    HELP_STYLE_SSR_QUALITY,
+    HINT_THICKNESS_NO_EFFECT,
     FIELD_SEARCH,
     COLUMN_ACTION,
     COLUMN_KEYBOARD,

@@ -17,8 +17,23 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 11] {
+fn defaults() -> [(SettingId, SettingValue); 13] {
     [
+        // AMD-055 REQ-SCN-079, the two quality rungs. The style itself is **Classic** on a
+        // handheld as on the desktop — that is the setting's own default (REQ-SCN-078) and at
+        // Classic the whole amendment costs nothing: no variant is compiled, no pass runs, no
+        // target is allocated. The same holds for the four effect switches, which REQ-SCN-079
+        // defaults to off, so none of them needs a handheld default of its own.
+        //
+        // The two **qualities** do need one. They cost nothing while their effect is off, but
+        // they decide what the effect costs the moment a player turns it on, and a handheld
+        // should land on the cheap rung rather than on the desktop's: `ao.quality` Low is 6
+        // samples at half resolution against Medium's 10, and `ssr.quality` Low is 12 march steps
+        // and 2 refinements against High's 48 and 5. The desktop keeps the defaults of the
+        // amendment (1 and 2); the figures of each rung are in `docs/PERFORMANCE-HISTORY.md` for
+        // the owner to revisit on a real device.
+        (SettingId::RenderStyleAoQuality, SettingValue::Int(0)),
+        (SettingId::RenderStyleSsrQuality, SettingValue::Int(0)),
         // AMD-049 REQ-SCN-075 is a fragment cost on a surface that can fill the picture, so the
         // handheld keeps the diffuse term of REQ-SCN-048, which the amendment's priority clause
         // T-1 leaves valid and which costs nothing. The desktop follows the spec and has it on.
@@ -97,8 +112,34 @@ mod tests {
         assert_eq!(2, model.get(SettingId::VideoMsaa20).as_int());
         assert_eq!(90, model.get(SettingId::VrRefreshRate).as_int());
         assert_eq!(0, model.get(SettingId::UiLibraryView).as_int());
+        // AMD-055: Classic on a handheld as on the desktop, the four effects off, the graded
+        // parameters at the amendment's defaults — and the two qualities on their cheap rung,
+        // which is the only handheld default this amendment needs.
         assert_eq!(0, model.get(SettingId::RenderVisualStyle).as_int());
         assert_eq!(3, model.get(SettingId::RenderStyleAoStrength).as_int());
+        for id in [
+            SettingId::RenderStyleAo,
+            SettingId::RenderStylePixelShadow,
+            SettingId::RenderStyleVoxelGrid,
+            SettingId::RenderStyleReflections,
+        ] {
+            assert_eq!(0, model.get(id).as_int(), "{id:?}");
+            assert_eq!(0, SettingsModel::new().get(id).as_int(), "{id:?} desktop");
+        }
+        assert_eq!(0, model.get(SettingId::RenderStyleAoQuality).as_int());
+        assert_eq!(0, model.get(SettingId::RenderStyleSsrQuality).as_int());
+        assert_eq!(
+            1,
+            SettingsModel::new()
+                .get(SettingId::RenderStyleAoQuality)
+                .as_int()
+        );
+        assert_eq!(
+            2,
+            SettingsModel::new()
+                .get(SettingId::RenderStyleSsrQuality)
+                .as_int()
+        );
         // AMD-043 REQ-SCN-066: the four curvature settings are 0 on a handheld as on the
         // desktop, which is their own default. At 0 the curvature costs nothing anywhere — no
         // shader variant is compiled, no surface is subdivided — so there is nothing to turn off

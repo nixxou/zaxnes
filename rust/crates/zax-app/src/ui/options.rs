@@ -1,6 +1,7 @@
 //! The options window as data: the tabs, the rows of each tab and the bounds of their widgets
 //! (AMD-010 REQ-UI-202, AMD-035 §1). It draws nothing, so a test can check it without a window.
 
+use zax_render::style::{AmbientOcclusion, StyleSettings};
 use zax_settings::catalogue::{self, SettingId};
 use zax_settings::meta::SettingDescriptor;
 use zax_settings::meta::{SettingKind, SettingScope, SettingTheme};
@@ -59,7 +60,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 32] = [
+pub const EXCLUDED: [SettingId; 19] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -86,27 +87,14 @@ pub const EXCLUDED: [SettingId; 32] = [
     // by nothing else. `vr.refresh_rate` needs no line, the Vr theme having no tab.
     SettingId::UiLibraryView,
     SettingId::VideoMsaa20,
-    // The settings the Lua members of 3dSen 2.0 stand for whose effect belongs to a later lot
-    // (RU-2: Lua surface only). Each one leaves this list in the lot that makes it act, which
-    // is also the lot that writes its row of the options window:
-    // `render.visual_style` and the twelve `render.style.*` in the Enhanced lot.
-    // `video.max_queued_frames` left it in RU-3a, which gave it the GPU frame queue of AMD-052
-    // REQ-LOOP-077; `emu.run_ahead` in RU-3b, which gave it the run-ahead of AMD-041
-    // REQ-LOOP-064; and the four curvature keys in RU-4a, which gave them the curvature of
-    // AMD-043 REQ-SCN-067 — they are now rows of the "Geometry" group (`GEOMETRY`).
-    SettingId::RenderVisualStyle,
-    SettingId::RenderStyleAo,
-    SettingId::RenderStyleAoStrength,
-    SettingId::RenderStyleAoRadius,
-    SettingId::RenderStyleAoThickness,
-    SettingId::RenderStyleAoQuality,
-    SettingId::RenderStylePixelShadow,
-    SettingId::RenderStyleVoxelGrid,
-    SettingId::RenderStyleReflections,
-    SettingId::RenderStyleSsrShine,
-    SettingId::RenderStyleSsrClarity,
-    SettingId::RenderStyleSsrLength,
-    SettingId::RenderStyleSsrQuality,
+    // The settings the Lua members of 3dSen 2.0 stand for whose effect belonged to a later lot
+    // (RU-2: Lua surface only). Each one left this list in the lot that made it act, which is
+    // also the lot that wrote its row of the options window: `video.max_queued_frames` in RU-3a,
+    // which gave it the GPU frame queue of AMD-052 REQ-LOOP-077; `emu.run_ahead` in RU-3b, which
+    // gave it the run-ahead of AMD-041 REQ-LOOP-064; the four curvature keys in RU-4a, which gave
+    // them the curvature of AMD-043 REQ-SCN-067 — they are now rows of the "Geometry" group
+    // (`GEOMETRY`); and `render.visual_style` with the twelve `render.style.*` in RU-5, which
+    // gave them the Enhanced style of AMD-055 — they are now the "Style" group (`STYLE`).
 ];
 
 /// The "Geometry" group of AMD-043 §6 and AMD-046 §3, in the order the two amendments give it:
@@ -132,10 +120,118 @@ pub fn geometry_heading(id: SettingId) -> Option<String> {
     (id == GEOMETRY[0]).then(|| strings::get(keys::GROUP_GEOMETRY))
 }
 
-/// The help sentence AMD-043 §6 and AMD-046 §3 give for `id`, shown as a tooltip, or `None` for
-/// a setting they give none for.
+/// The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079), in the order of its table
+/// and of §4: the five of the occlusion, the pixel shadows, the voxel grid, then the four of the
+/// reflections behind their switch.
+///
+/// They are a **collapsible group** titled "Style" (SPEC-10 REQ-UI-061 as amended by AMD-055 §3
+/// point 6), opened by [`style_heading`] and placed right after the `Style` row itself, which is
+/// placed right after the `Skybox` row ([`OptionsModel::new`]). Which of the twelve a frame shows
+/// is [`style_row_visible`]'s answer, not this list's: REQ-SCN-079 shows the occlusion's four
+/// settings only while `spl.ao` ≠ 0 and the reflections' four only while `spl.reflections` = 1.
+pub const STYLE: [SettingId; 12] = [
+    SettingId::RenderStyleAo,
+    SettingId::RenderStyleAoStrength,
+    SettingId::RenderStyleAoRadius,
+    SettingId::RenderStyleAoThickness,
+    SettingId::RenderStyleAoQuality,
+    SettingId::RenderStylePixelShadow,
+    SettingId::RenderStyleVoxelGrid,
+    SettingId::RenderStyleReflections,
+    SettingId::RenderStyleSsrShine,
+    SettingId::RenderStyleSsrClarity,
+    SettingId::RenderStyleSsrLength,
+    SettingId::RenderStyleSsrQuality,
+];
+
+/// The two style parameters AMD-055 §4 shows as a check box rather than as a list or a slider
+/// (`spl.pixel_shadow` and `spl.reflections`, "case" in its UI column).
+///
+/// They stay whole numbers in the model — their domain is the stepped 0 to 1 that carries the
+/// normalisation of REQ-SCN-079, and Lua reads and writes them as numbers — so what a check box
+/// changes is only how the window draws them.
+pub const SWITCHES: [SettingId; 2] = [
+    SettingId::RenderStylePixelShadow,
+    SettingId::RenderStyleReflections,
+];
+
+/// The heading of the collapsible "Style" group, to draw **before** the row of `id`, or `None`
+/// for a row that opens no group (AMD-055 §3 point 6).
+///
+/// Only the first setting of [`STYLE`] opens it, so a tab costs one comparison per row — the
+/// shape [`geometry_heading`] established.
+#[must_use]
+pub fn style_heading(id: SettingId) -> Option<String> {
+    (id == STYLE[0]).then(|| strings::get(keys::GROUP_STYLE))
+}
+
+/// Whether `id` is a row of the "Style" group: the style itself or one of the twelve.
+#[must_use]
+pub fn is_style_row(id: SettingId) -> bool {
+    id == SettingId::RenderVisualStyle || STYLE.contains(&id)
+}
+
+/// Whether the collapsible group is drawn at all: only while `Style` = `Enhanced`, which is what
+/// REQ-UI-061 as amended says ("quand `Style` = `Enhanced`, les douze paramètres apparaissent à
+/// la suite, dans un groupe repliable « Style »"). The `Style` row itself is always a row.
+#[must_use]
+pub fn style_group_shown(model: &SettingsModel) -> bool {
+    StyleSettings::style_of(model.get(SettingId::RenderVisualStyle).as_int())
+}
+
+/// Whether the window shows the style row `id`, given the values in force (REQ-SCN-079's
+/// visibility rules, and the amended acceptance criterion of REQ-UI-061).
+///
+/// `true` for every row that is not one of the twelve, so the drawing site can test it on each
+/// row of a tab without asking first. With the default values and `Style` = `Enhanced` exactly
+/// four of the twelve are shown — the occlusion, the pixel shadows, the grid and the reflections —
+/// and the twelve with `spl.ao` ≠ 0 and `spl.reflections` = 1, which is what the criterion counts.
+#[must_use]
+pub fn style_row_visible(id: SettingId, model: &SettingsModel) -> bool {
+    if !STYLE.contains(&id) {
+        return true;
+    }
+    if !StyleSettings::style_of(model.get(SettingId::RenderVisualStyle).as_int()) {
+        return false;
+    }
+    match id {
+        SettingId::RenderStyleAoStrength
+        | SettingId::RenderStyleAoRadius
+        | SettingId::RenderStyleAoThickness
+        | SettingId::RenderStyleAoQuality => model.get(SettingId::RenderStyleAo).as_int() != 0,
+        SettingId::RenderStyleSsrShine
+        | SettingId::RenderStyleSsrClarity
+        | SettingId::RenderStyleSsrLength
+        | SettingId::RenderStyleSsrQuality => {
+            model.get(SettingId::RenderStyleReflections).as_int() != 0
+        }
+        _ => true,
+    }
+}
+
+/// Why the style row `id` is shown greyed out, or `None` while it is live.
+///
+/// One row answers: `ao.thickness`, which REQ-SCN-079 presents "grisé **(D)**" for as long as the
+/// *Mode MSVO* is rendered as Depth — REQ-SCN-083's declared fallback, and
+/// [`zax_render::style::MSVO_PORTED`] is the one constant that says so. The setting itself is kept
+/// and persisted (a write of 4 still reads back 4): what is greyed is the widget, and the note
+/// beside it says why, as the resolution-scale row does under the direct render method.
+#[must_use]
+pub fn style_inert_note(id: SettingId, model: &SettingsModel) -> Option<String> {
+    let thickness = id == SettingId::RenderStyleAoThickness
+        && !zax_render::style::thickness_acts(AmbientOcclusion::of(
+            model.get(SettingId::RenderStyleAo).as_int(),
+        ));
+    thickness.then(|| strings::get(keys::HINT_THICKNESS_NO_EFFECT))
+}
+
+/// The help sentence AMD-043 §6, AMD-046 §3 and AMD-055 §4 give for `id`, shown as a tooltip, or
+/// `None` for a setting they give none for.
 #[must_use]
 pub fn help_of(id: SettingId) -> Option<String> {
+    if let Some(key) = style_help_of(id) {
+        return Some(strings::get(key));
+    }
     let key = match id {
         SettingId::SceneBendLr => keys::HELP_BEND_LR,
         SettingId::SceneBendTb => keys::HELP_BEND_TB,
@@ -149,6 +245,27 @@ pub fn help_of(id: SettingId) -> Option<String> {
         _ => return None,
     };
     Some(strings::get(key))
+}
+
+/// The help key AMD-055 §4 gives for the style and each of its twelve parameters — the thirteen
+/// sentences of its label table, which are the amendment's own words and not Zaxnes's.
+fn style_help_of(id: SettingId) -> Option<&'static str> {
+    Some(match id {
+        SettingId::RenderVisualStyle => keys::HELP_VISUAL_STYLE,
+        SettingId::RenderStyleAo => keys::HELP_STYLE_AO,
+        SettingId::RenderStyleAoStrength => keys::HELP_STYLE_AO_STRENGTH,
+        SettingId::RenderStyleAoRadius => keys::HELP_STYLE_AO_RADIUS,
+        SettingId::RenderStyleAoThickness => keys::HELP_STYLE_AO_THICKNESS,
+        SettingId::RenderStyleAoQuality => keys::HELP_STYLE_AO_QUALITY,
+        SettingId::RenderStylePixelShadow => keys::HELP_STYLE_PIXEL_SHADOW,
+        SettingId::RenderStyleVoxelGrid => keys::HELP_STYLE_VOXEL_GRID,
+        SettingId::RenderStyleReflections => keys::HELP_STYLE_REFLECTIONS,
+        SettingId::RenderStyleSsrShine => keys::HELP_STYLE_SSR_SHINE,
+        SettingId::RenderStyleSsrClarity => keys::HELP_STYLE_SSR_CLARITY,
+        SettingId::RenderStyleSsrLength => keys::HELP_STYLE_SSR_LENGTH,
+        SettingId::RenderStyleSsrQuality => keys::HELP_STYLE_SSR_QUALITY,
+        _ => return None,
+    })
 }
 
 /// The settings the window edits as a folder: a field and a button that picks it.
@@ -199,7 +316,9 @@ impl Default for OptionsModel {
 }
 
 impl OptionsModel {
-    /// Builds the rows from the catalogue: one per shown setting, in the catalogue's order.
+    /// Builds the rows from the catalogue: one per shown setting, in the catalogue's order — and
+    /// then the one place where the panel's order and the catalogue's differ (see
+    /// [`move_style_after_skybox`]).
     #[must_use]
     pub fn new() -> Self {
         let mut rows: Vec<(OptionsTab, Vec<OptionsRow>)> =
@@ -210,6 +329,11 @@ impl OptionsModel {
             };
             if let Some((_, list)) = rows.iter_mut().find(|(candidate, _)| *candidate == tab) {
                 list.push(build_row(descriptor));
+            }
+        }
+        for (tab, list) in &mut rows {
+            if *tab == OptionsTab::Video {
+                move_style_after_skybox(list);
             }
         }
         Self { rows }
@@ -306,6 +430,42 @@ pub fn is_folder(row: &OptionsRow) -> bool {
 #[must_use]
 pub fn forced_run_ahead_note(id: SettingId, forced: bool) -> Option<String> {
     (forced && id == SettingId::EmuRunAhead).then(text::run_ahead_forced_to_zero)
+}
+
+/// Moves the thirteen rows of the style to just after the `Skybox` row, keeping their own order
+/// (SPEC-10 REQ-UI-061 as amended: "la grille de paramètres desktop reçoit, **après la ligne
+/// `Skybox`**, une ligne `Style` … les douze paramètres apparaissent à la suite").
+///
+/// The catalogue's order is the order of the settings **file**, where the render keys come long
+/// before the scene's; the panel's order is this requirement's, and the two have no reason to be
+/// the same. This is the only place they differ, which is why it is a function of five lines over
+/// the built list rather than a reshuffle of the catalogue — moving `render.visual_style` there
+/// would change the order of every written settings file for a presentation reason.
+///
+/// The `Skybox` row carries the custom background colour with it: REQ-UI-061 makes the colour
+/// button part of that same row (REQ-UI-063, "le bouton de couleur placé à droite de la liste
+/// `Skybox`"), so the style goes after the pair.
+fn move_style_after_skybox(list: &mut Vec<OptionsRow>) {
+    let style: Vec<OptionsRow> = list
+        .iter()
+        .filter(|row| is_style_row(row.descriptor.id()))
+        .copied()
+        .collect();
+    if style.is_empty() {
+        return;
+    }
+    list.retain(|row| !is_style_row(row.descriptor.id()));
+    // After the pair, or at the end of the tab when a build shows neither of them.
+    let after = list
+        .iter()
+        .rposition(|row| {
+            matches!(
+                row.descriptor.id(),
+                SettingId::SceneSkybox | SettingId::SceneCustomBgColor
+            )
+        })
+        .map_or(list.len(), |last| last + 1);
+    list.splice(after..after, style);
 }
 
 fn is_editable(descriptor: &SettingDescriptor) -> bool {

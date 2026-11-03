@@ -22,6 +22,25 @@ pub const ENHANCED: i32 = 4;
 /// 3dSen 2.0 numbers it 4.
 pub const ENHANCED_ALIAS: i32 = 1;
 
+/// Whether the *Mode MSVO* of REQ-SCN-083 is ported, which is what decides whether `spl.ao` = 1
+/// is anything other than `spl.ao` = 2 and whether `ao.thickness` does anything at all.
+///
+/// **False**, which is the declared fallback **(D)** of REQ-SCN-083: MSVO is rendered as Depth
+/// until the MIT port named in AMD-055 §3 point 11 exists, and `third_party/README.md` carries no
+/// such entry. One constant rather than a sprinkling of comments, because two very distant places
+/// have to agree on it: the occlusion pass, which renders MSVO as Depth, and the options window,
+/// which greys `ao.thickness` for exactly as long ([`thickness_acts`]). The day the port lands,
+/// this is what changes.
+pub const MSVO_PORTED: bool = false;
+
+/// Whether `ao.thickness` has an observable effect, given the occlusion mode in force
+/// (REQ-SCN-079: "sans effet observable hors du mode MSVO", and REQ-SCN-083's fallback **(D)**
+/// makes that mode never effective for now — see [`MSVO_PORTED`]).
+#[must_use]
+pub const fn thickness_acts(ao: AmbientOcclusion) -> bool {
+    MSVO_PORTED && matches!(ao, AmbientOcclusion::Msvo)
+}
+
 /// The ambient-occlusion mode of `spl.ao` (REQ-SCN-079).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AmbientOcclusion {
@@ -29,8 +48,8 @@ pub enum AmbientOcclusion {
     #[default]
     Off = 0,
     /// 1 — the multi-scale occlusion of REQ-SCN-083's *Mode MSVO*. Rendered exactly as
-    /// [`Self::Depth`] until that port exists: the declared fallback **(D)** of REQ-SCN-083, the
-    /// label staying exposed and read back.
+    /// [`Self::Depth`] until that port exists ([`MSVO_PORTED`]): the declared fallback **(D)** of
+    /// REQ-SCN-083, the label staying exposed and read back.
     Msvo = 1,
     /// 2 — the hemisphere occlusion of REQ-SCN-083 reconstructed from depth.
     Depth = 2,

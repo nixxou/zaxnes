@@ -97,10 +97,11 @@ fn video(out: &mut Vec<SettingDescriptor>) {
 /// never taken from a profile and never exposed in libretro.
 ///
 /// They are persisted and reachable from Lua (`Setting.VisualStyle`,
-/// `Setting:Get/SetVisualStyleParameter`) from this lot on; the rendering they ask for is the
-/// Enhanced lot's. Until then they are left out of the options window
-/// (`zax_app::ui::options::EXCLUDED`): an option that moves and changes nothing would be worse
-/// than no option.
+/// `Setting:Get/SetVisualStyleParameter`) since RU-2, they act on the rendering since RU-5, and
+/// they are rows of the options window since the step of RU-5 that gave them the "Style" group of
+/// SPEC-10 REQ-UI-061 as amended (`zax_app::ui::options::STYLE`). They left
+/// `zax_app::ui::options::EXCLUDED` with it: an option that moves and changes nothing would have
+/// been worse than no option, which is why they waited for their effect.
 fn render_style(out: &mut Vec<SettingDescriptor>) {
     out.push(
         SettingDescriptor::new(
@@ -126,41 +127,120 @@ fn render_style(out: &mut Vec<SettingDescriptor>) {
         .with_lua("VisualStyle")
         .with_label("Style"),
     );
+    style_parameters(out);
+}
 
-    // The graded parameters of REQ-SCN-079: eight ladders of 1 to 5 and four lists. The step is
-    // what carries the rounding of AMD-040 §3 (`Domain::snap`).
-    for (id, default, minimum, maximum, label) in [
-        (SettingId::RenderStyleAo, 0, 0.0, 2.0, "Ambient Occlusion"),
-        (SettingId::RenderStyleAoStrength, 3, 1.0, 5.0, "Strength"),
-        (SettingId::RenderStyleAoRadius, 3, 1.0, 5.0, "Radius"),
-        (SettingId::RenderStyleAoThickness, 3, 1.0, 5.0, "Thickness"),
-        (SettingId::RenderStyleAoQuality, 1, 0.0, 2.0, "AO Quality"),
-        (
-            SettingId::RenderStylePixelShadow,
-            0,
-            0.0,
-            1.0,
-            "Pixel Shadows",
-        ),
-        (SettingId::RenderStyleVoxelGrid, 0, 0.0, 3.0, "Voxel Grid"),
-        (
-            SettingId::RenderStyleReflections,
-            0,
-            0.0,
-            1.0,
-            "Reflections",
-        ),
-        (SettingId::RenderStyleSsrShine, 3, 1.0, 5.0, "Floor Shine"),
-        (SettingId::RenderStyleSsrClarity, 3, 1.0, 5.0, "Clarity"),
-        (SettingId::RenderStyleSsrLength, 3, 1.0, 5.0, "Length"),
-        (
-            SettingId::RenderStyleSsrQuality,
-            2,
-            0.0,
-            3.0,
-            "Reflection Quality",
-        ),
-    ] {
+/// One row of [`STYLE_PARAMETERS`]: the key, its default, its lower and upper bound, its label,
+/// and the names of its rungs (empty for a setting whose rungs are numbers).
+type StyleParameter = (
+    SettingId,
+    i32,
+    f64,
+    f64,
+    &'static str,
+    &'static [&'static str],
+);
+
+/// The twelve parameters of REQ-SCN-079 — eight ladders of 1 to 5, which have no named rungs,
+/// and four lists, which do.
+///
+/// The step is always 1 and carries the rounding of AMD-040 §3 (`Domain::snap`).
+///
+/// The four lists publish the named values of AMD-055 §4 (REQ-PERS-081), and they do it the way
+/// `scene.arc_center` does: a **stepped** domain whose rungs are named, never `Domain::choice`.
+/// The bounds, the step and the `Snap` rule stay the domain's, which is what keeps a write of
+/// `ao.strength` = 9 at 5 and of `spl.voxel_grid` = 4 at 3 (REQ-SCN-079's first criterion) where
+/// a finite choice would send both to the default. The two switches keep their numeric rungs:
+/// §4 shows them as a check box, and the interface draws one (`ui::options::SWITCHES`).
+const STYLE_PARAMETERS: [StyleParameter; 12] = [
+    (
+        SettingId::RenderStyleAo,
+        0,
+        0.0,
+        2.0,
+        "Ambient Occlusion",
+        &["Off", "MSVO", "Depth"],
+    ),
+    (
+        SettingId::RenderStyleAoStrength,
+        3,
+        1.0,
+        5.0,
+        "Strength",
+        &[],
+    ),
+    (SettingId::RenderStyleAoRadius, 3, 1.0, 5.0, "Radius", &[]),
+    (
+        SettingId::RenderStyleAoThickness,
+        3,
+        1.0,
+        5.0,
+        "Thickness",
+        &[],
+    ),
+    (
+        SettingId::RenderStyleAoQuality,
+        1,
+        0.0,
+        2.0,
+        "AO Quality",
+        &["Low", "Medium", "High"],
+    ),
+    (
+        SettingId::RenderStylePixelShadow,
+        0,
+        0.0,
+        1.0,
+        "Pixel Shadows",
+        &[],
+    ),
+    (
+        SettingId::RenderStyleVoxelGrid,
+        0,
+        0.0,
+        3.0,
+        "Voxel Grid",
+        &["Off", "Every 2 voxels", "Every 4 voxels", "Every 8 voxels"],
+    ),
+    (
+        SettingId::RenderStyleReflections,
+        0,
+        0.0,
+        1.0,
+        "Reflections",
+        &[],
+    ),
+    (
+        SettingId::RenderStyleSsrShine,
+        3,
+        1.0,
+        5.0,
+        "Floor Shine",
+        &[],
+    ),
+    (
+        SettingId::RenderStyleSsrClarity,
+        3,
+        1.0,
+        5.0,
+        "Clarity",
+        &[],
+    ),
+    (SettingId::RenderStyleSsrLength, 3, 1.0, 5.0, "Length", &[]),
+    (
+        SettingId::RenderStyleSsrQuality,
+        2,
+        0.0,
+        3.0,
+        "Reflection Quality",
+        &["Low", "Medium", "High", "Ultra"],
+    ),
+];
+
+/// The twelve parameters of the Enhanced style, from [`STYLE_PARAMETERS`].
+fn style_parameters(out: &mut Vec<SettingDescriptor>) {
+    for (id, default, minimum, maximum, label, values) in STYLE_PARAMETERS {
+        let domain = Domain::stepped(minimum, maximum, 1.0, 0);
         out.push(
             SettingDescriptor::new(
                 id,
@@ -170,7 +250,11 @@ fn render_style(out: &mut Vec<SettingDescriptor>) {
                 SettingEffect::Immediate,
                 SettingTheme::Render,
             )
-            .with_domain(Domain::stepped(minimum, maximum, 1.0, 0))
+            .with_domain(if values.is_empty() {
+                domain
+            } else {
+                domain.with_labels(values)
+            })
             .with_label(label),
         );
     }
