@@ -265,6 +265,81 @@ fn level_odd(level: i32) -> f32 {
     2.0 * level - 1.0
 }
 
+/// The component along the vertical a face's **scene-space normal before curvature** must reach
+/// for the face to be a floor surface (REQ-SCN-084: "une composante +Y ≥ 0,9").
+pub const FLOOR_NORMAL_THRESHOLD: f32 = 0.9;
+
+/// How many scene units, times the scene scale, an instance's bounding box must measure in
+/// **both** dimensions of the floor plane for its faces to reflect (REQ-SCN-084).
+pub const FLOOR_EXTENT_UNITS: f32 = 6.0;
+
+/// The vertical the floor definition of REQ-SCN-084 is written against: `+Y` ordinarily, and the
+/// **image plane's normal turned towards the camera** — `(0, 0, −1)` in the scene frame before
+/// curvature — when the profile activates the local camera of REQ-SCN-009.
+///
+/// The local-camera clause is v1.4's (Q-096): the NES plane is laid flat and stands in for the
+/// floor, **whatever the camera's inclination**, which is why this reads the profile's flag and
+/// not the camera's angles.
+#[must_use]
+pub const fn floor_vertical(local_camera: bool) -> [f32; 3] {
+    if local_camera {
+        [0.0, 0.0, -1.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    }
+}
+
+/// The two axes of [`floor_vertical`]'s plane, as indices of a scene-space triple: `x` and `z`
+/// ordinarily, `x` and `y` under the local camera ("l'emprise se mesure de même dans le plan
+/// `xy`").
+#[must_use]
+pub const fn floor_plane_axes(local_camera: bool) -> [usize; 2] {
+    if local_camera {
+        [0, 1]
+    } else {
+        [0, 2]
+    }
+}
+
+/// Whether a face whose scene-space normal **before curvature** is `normal` faces up enough to be
+/// a floor surface (REQ-SCN-084). `normal` need not be unit; a null one is no face.
+///
+/// This is the **per-fragment** half of the definition, and it cannot be dropped: the wall of the
+/// variant R-m is the same shape as the floor without its rotation, so its `xz` box measures
+/// 64 × 8 and **passes** the extent test below — only its front face's normal `(0, 0, −1)` keeps
+/// it from reflecting.
+#[must_use]
+pub fn is_floor_normal(normal: [f32; 3], local_camera: bool) -> bool {
+    let squared = (normal[0] * normal[0]) + (normal[1] * normal[1]) + (normal[2] * normal[2]);
+    if squared <= 1e-12 {
+        return false;
+    }
+
+    let up = floor_vertical(local_camera);
+    let dot = (normal[0] * up[0]) + (normal[1] * up[1]) + (normal[2] * up[2]);
+    dot >= FLOOR_NORMAL_THRESHOLD * squared.sqrt()
+}
+
+/// Whether the instance's bounding box in the scene frame **before curvature**, `min` to `max`,
+/// is wide enough in both dimensions of the floor plane (REQ-SCN-084).
+///
+/// This is the **per-instance** half, and it cannot be dropped either: the block of the variant
+/// R-s and the same block at `scale = (1 ; 1 ; 0,5)` present the same pixels of the same depth
+/// buffer with the same normal, so nothing reconstructed from depth can tell them apart. The
+/// extent is a property of the placement, which is why it is computed where the placement is
+/// (`frame_plan::FramePlan::mark_floor_surfaces`).
+///
+/// The amendment is explicit that the `z` dimension is the object's **depth**: the same shape at
+/// `D` = 3, or at `scale = (1 ; 1 ; 0,5)`, measures 3 or 4 units and does not reflect. The box
+/// carries that by construction — a mesh runs `−D/2 … +D/2` on `z` (REQ-E3D-504) and the scale
+/// multiplies it.
+#[must_use]
+pub fn is_floor_extent(min: [f32; 3], max: [f32; 3], local_camera: bool, scene_scale: f32) -> bool {
+    let threshold = FLOOR_EXTENT_UNITS * scene_scale;
+    let [first, second] = floor_plane_axes(local_camera);
+    (max[first] - min[first]) >= threshold && (max[second] - min[second]) >= threshold
+}
+
 /// Half-width of a groove, as a fraction of a cell (REQ-SCN-081).
 pub const GROOVE_HALF_WIDTH: f32 = 0.035;
 
@@ -590,6 +665,54 @@ mod tests {
             0.0,
             voxel_center([0.0, 0.0, 0.4], [1.0, 0.0, 0.0], voxel_z_offset(1))[2]
         );
+    }
+
+    /// REQ-SCN-084's floor definition, both halves: the normal threshold, the two axes of the
+    /// plane, and the 6 units the extent needs in each of them.
+    #[test]
+    fn req_scn_084_the_two_halves_of_the_floor_definition() {
+        // The vertical, and the local-camera swap of v1.4.
+        assert_eq!([0.0, 1.0, 0.0], floor_vertical(false));
+        assert_eq!([0.0, 0.0, -1.0], floor_vertical(true));
+        assert_eq!([0, 2], floor_plane_axes(false));
+        assert_eq!([0, 1], floor_plane_axes(true));
+
+        // A face pointing straight up is a floor; the front face of the wall of R-m is not.
+        assert!(is_floor_normal([0.0, 1.0, 0.0], false));
+        assert!(!is_floor_normal([0.0, 0.0, -1.0], false));
+        // And the other way round under the local camera.
+        assert!(is_floor_normal([0.0, 0.0, -1.0], true));
+        assert!(!is_floor_normal([0.0, 1.0, 0.0], true));
+
+        // The threshold is on the **unit** normal, so a non-unit one is measured the same way.
+        assert!(is_floor_normal([0.0, 3.0, 0.0], false));
+        // 0,9 exactly passes, a hair under does not (25,84° of tilt is the limit).
+        let tilt = |degrees: f32| {
+            let radians = degrees.to_radians();
+            [radians.sin(), radians.cos(), 0.0]
+        };
+        assert!(is_floor_normal(tilt(25.0), false));
+        assert!(!is_floor_normal(tilt(26.5), false));
+        assert!(!is_floor_normal([0.0, 0.0, 0.0], false));
+
+        // The block of the variant R-s: 8 × 8 × 8 units reflects, the same block at
+        // `scale = (1 ; 1 ; 0,5)` — 4 units on `z` — does not.
+        assert!(is_floor_extent([0.0; 3], [8.0, 8.0, 8.0], false, 1.0));
+        assert!(!is_floor_extent([0.0; 3], [8.0, 8.0, 4.0], false, 1.0));
+        // 6 exactly is enough ("au moins"), just under is not.
+        assert!(is_floor_extent([0.0; 3], [6.0, 1.0, 6.0], false, 1.0));
+        assert!(!is_floor_extent([0.0; 3], [6.0, 1.0, 5.9], false, 1.0));
+        // The scene scale multiplies the threshold.
+        assert!(!is_floor_extent([0.0; 3], [8.0, 8.0, 8.0], false, 2.0));
+        assert!(is_floor_extent([0.0; 3], [12.0, 8.0, 12.0], false, 2.0));
+        // Under the local camera the pair measured is `xy`, and the two readings part company on
+        // one shape: 8 × 8 tiles of `D` = 3 laid flat measure 64 × 3 × 64, a floor for an
+        // ordinary camera and not for a local one; standing up they measure 64 × 64 × 3, the
+        // other way round.
+        assert!(is_floor_extent([0.0; 3], [64.0, 3.0, 64.0], false, 1.0));
+        assert!(!is_floor_extent([0.0; 3], [64.0, 3.0, 64.0], true, 1.0));
+        assert!(!is_floor_extent([0.0; 3], [64.0, 64.0, 3.0], false, 1.0));
+        assert!(is_floor_extent([0.0; 3], [64.0, 64.0, 3.0], true, 1.0));
     }
 
     /// `spl.ao` reads its three values and nothing else.

@@ -14,7 +14,8 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
 | 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — this commit |
-| 6 | REQ-SCN-084: the floor reflections | todo — design sharpened, split 6a/6b proposed |
+| 6a | REQ-SCN-084: the floor definition, on the CPU | done — this commit |
+| 6b | REQ-SCN-084: the mask, the trace and the composite | todo |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
@@ -749,7 +750,107 @@ step 2). fmt and workspace clippy clean.
    `ao.thickness` has no observable effect; step 7 greys it, and `third_party/README.md` gains no
    entry in this lot.
 
+### Step 6a — REQ-SCN-084, the floor definition on the CPU
+
+The step the "Step 6, sharpened" notes below asked for: the half of the floor definition that
+**cannot** be computed on the GPU, with no GL code and no change to any per-frame path.
+
+| Piece | What landed |
+|---|---|
+| `style.rs` | `FLOOR_NORMAL_THRESHOLD`, `FLOOR_EXTENT_UNITS`, `floor_vertical`, `floor_plane_axes`, `is_floor_normal`, `is_floor_extent` |
+| `frame_plan.rs` | `FramePlan::floor_surfaces` (per opaque item) and `floor_boxes` (the reused accumulator); `mark_floor_surfaces(local_camera, scene_scale)` |
+| `scene_export.rs` | `ExportedObject::floor`, so §2.5's criteria are measurable without a GL context |
+
+#### Why the definition has to be two tests, and why neither can move
+
+The invariants decide it, and the test file says so at the top:
+
+- **R-s** puts a block of 8 × 8 × 8 units beside the same block at `scale = (1 ; 1 ; 0,5)`. Both
+  show the same pixels, at the same depth, with the same normal (0, 1, 0) — so **nothing
+  reconstructed from the depth buffer can tell them apart**. The extent is a property of the
+  placement and is computed where the placement is.
+- **R-m** is the same 8 × 8-tile shape without rotation: its `xz` box measures 64 × 8, both over
+  6, so it **passes** the extent test, and no pixel of its front face (0, 0, −1) may move. So the
+  normal is tested **per fragment** — a per-instance mask alone would reflect the wall.
+
+That is the whole shape of the requirement: a per-instance flag **and** a per-fragment normal
+test, which is what makes the mask pass of step 6b necessary rather than a convenience.
+
+#### Four readings settled here, each with its reason
+
+1. **The box is the instance's, not the tile's.** A shape is drawn one item per tile record (the
+   finding that cost the first run of these tests: an 8 × 8 block exports **64** objects, not
+   one), so the boxes are accumulated per `DrawItem::instance` and then read back per item. The
+   discriminating fixture is a floor of 8 × 1 tiles at `scale = (0,5 ; 1 ; 1)`: its tiles are 4
+   units wide, under the threshold, and its instance is 32, over it. Only the accumulation
+   answers right.
+2. **The backdrop is an object of its own** — `Q-093 (a)`, **answered** by R1 on 2026-11-01, so no
+   new ticket. It carries no instance, so `None` is its key in the accumulator. At its default
+   size of 256 × 240 × 1 its `z` dimension is 1, under the threshold, so by default it is not a
+   floor and the reading is not observable; a test pins both halves, default and `Size.z` = 6.
+3. **Over the opaque bucket alone.** Only what is already drawn can be reflected: the transparent
+   objects and the HUD come after the pass (REQ-SCN-080) and the shadow-only tiles of REQ-SCN-041
+   are not drawn at all. A translucent floor and a floor on the interface layer are therefore
+   never marked, which a test asserts on the same shape as the close-up R's floor.
+4. **The local camera swaps the vertical, not the camera's angles** (v1.4, Q-094 then Q-096):
+   `(0, 0, −1)` and the `xy` footprint, "quelle que soit l'inclinaison". The discriminating pair
+   is **one** shape at **one** depth — 8 × 8 tiles of `D` = 3 is a floor laid flat for an ordinary
+   camera (box 64 × 3 × 64) and not for a local one, and standing up (64 × 64 × 3) it is the other
+   way round. Tilting the camera to the −60° of the Punch-Out!! measurement changes nothing.
+
+#### The brief's point 1
+
+Nothing of this step runs in a frame. `mark_floor_surfaces` has no caller in the renderer yet
+(step 6b wires it, behind `reflections_active`), `FramePlan`'s two new fields allocate nothing
+(`Vec::new`, `FastMap::default`) and no per-frame path reads them. Measured, post-LTO, against the
+step-5 figures: `Ppu2C02::run_dots` **2231**, `DrawListBuilder::build` **1095**,
+`SceneRenderer::render_scene` **3382**, `Construction::segment` **159** — all four **identical**.
+
+#### Tests (9 in `zax-render/tests/amd055_reflection_floor_tests.rs`, 1 unit test in `style.rs`)
+
+| Criterion | Test |
+|---|---|
+| the close-up R's floor: `rot = (90, 0, 0)`, `xz` box 64 × 64, a face of scene normal (0, 1, 0) | `req_scn_084_the_floor_of_the_close_up_is_a_floor_surface` |
+| the box is the instance's: tiles 4 units wide, instance 32 | `req_scn_084_the_box_is_the_instances_and_not_the_tiles` |
+| **R-s**, all three cases: 8 units reflects, `scale = (1 ; 1 ; 0,5)` does not, `D` = 3 does not | `req_scn_084_the_block_of_eight_units_reflects_and_a_shallower_one_does_not` |
+| **R-m**: the wall passes the extent and is excluded by its face alone | `req_scn_084_the_wall_passes_the_extent_and_is_excluded_by_its_face` |
+| the local camera, both directions on one shape, and the −60° tilt | `req_scn_084_the_local_camera_lays_the_image_plane_flat` |
+| Q-093 (a): the backdrop at its default size and at `Size.z` = 6 | `req_scn_084_the_backdrop_is_an_object_of_its_own` |
+| "dès que sa profondeur atteint 6 unités": 5 no, 6 yes, 8 yes | `req_scn_084_a_game_floor_crosses_the_threshold_at_a_depth_of_six` |
+| the order clause: the box is taken before curvature, so 60° and 90° mark the same instances | `req_scn_080_the_floor_definition_is_measured_before_the_curvature` |
+| the scope: a transparent object and the HUD are never floor surfaces | `req_scn_080_a_transparent_object_and_the_hud_are_never_floor_surfaces` |
+| the two thresholds, the two verticals, the two axis pairs, the scene scale | `style.rs` `req_scn_084_the_two_halves_of_the_floor_definition` |
+
+One assertion of mine was wrong and the code was right, worth recording because it is the same
+trap as step 3's: **a tile is 8 units wide, so a full tile always passes the extent test on both
+screen axes.** The first draft tried to contrast the ordinary and the local camera on a `D` = 8
+shape, where both answer yes; the discriminating depth is **3**, which is under the threshold and
+therefore moves with the pair of axes measured.
+
+`cargo test --release -p zax-render`: **271 passed, 0 failed**, 1 ignored (261 at the close of
+step 5). fmt and workspace clippy clean. One pre-existing clippy ceiling was hit and is recorded
+rather than worked around: `ExportedObject` passes the four-bool limit, the same `allow`
+`SceneVariant` and `ProgramKey` carry.
+
+The AMD-055 question tickets this lot implements against — **Q-092 to Q-100**, all answered — are
+copied into `docs/spec/changes/` with this step, which rounds out the spec copy steps 1 to 5 cited
+but had not taken.
+
+#### What step 6b owes this one
+
+`mark_floor_surfaces` is called from `render_scene` only when `reflections_active()`, **after**
+`lay_out_instances` so that `floor_surfaces` is index-aligned with the reordered opaque bucket,
+and the mask pass re-draws the marked items — contiguous sub-ranges of each opaque run, so a
+sub-range maps to a contiguous range of the instance data and needs no second upload.
+
 ## Where this session stopped, and what the next one picks up
+
+**Steps 1 to 5 and 6a are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`,
+`1f3d8ec`, and step 6a in this commit); **step 6b and steps 7 to 9 are not started.** The step-6
+design below ("Step 6, sharpened" and "Step 6 — REQ-SCN-084") still holds for 6b, with the
+handoff under "What step 6b owes this one" above.
+
+*(Historical note, left as written: the paragraph below was the step-5 handoff.)*
 
 **Steps 1 to 5 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, and step 5 in
 this commit); **steps 6 to 9 are not started.** The step-6 design below ("Step 6 — REQ-SCN-084")

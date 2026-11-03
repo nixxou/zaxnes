@@ -26,6 +26,11 @@ use crate::scene::{SceneFrame, SceneState};
 /// One object of an exported frame: where its vertices land in the scene, before and after the
 /// curvature of REQ-SCN-068.
 #[derive(Debug, Clone, PartialEq)]
+// One bool per independent clause of the export — which bucket the object is in, whether the
+// curvature reaches it, whether the clipping judges it, whether its instance is a floor. The same
+// `allow` `SceneVariant` and `ProgramKey` carry, for the same reason: an enum per clause would say
+// less, not more.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ExportedObject {
     /// Whether the object belongs to the HUD plane of REQ-SCN-045, which stays flat.
     pub hud: bool,
@@ -33,6 +38,14 @@ pub struct ExportedObject {
     pub bent: bool,
     /// Whether the visible rectangle of REQ-SCN-036 applies to it.
     pub clipped: bool,
+    /// AMD-055 REQ-SCN-084: whether the object's instance passes the **extent** half of the floor
+    /// definition — its bounding box in the floor plane, before curvature, measuring at least
+    /// `6 × échelle de scène` in both dimensions. False for everything but an opaque object: only
+    /// the already-drawn opaque geometry can carry reflections (REQ-SCN-080).
+    ///
+    /// The other half, the face's normal, is per face and is in [`Self::normals`]
+    /// ([`crate::style::is_floor_normal`] judges it); a face reflects when both hold.
+    pub floor: bool,
     /// The final scene positions, curvature included.
     pub positions: Vec<Vec3>,
     /// The same vertices before the curvature, which the clipping is judged on (REQ-SCN-068,
@@ -87,14 +100,19 @@ pub fn objects(
     // The collect of the plan only fails when a residency refuses a mesh, which this one never
     // does; an error would leave the lists as they are, which is an empty export.
     let _ = plan.collect(&mut residency, fixed, scene, frame, view);
+    // AMD-055 REQ-SCN-084: the extent half of the floor definition, which the exported objects
+    // carry so that the criteria of §2.5 can be read without a GL context. The scene scale of
+    // REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of — the same reading
+    // `SceneConstants::voxel_cell` and the occlusion's radius already take.
+    plan.mark_floor_surfaces(scene.camera.local_camera, 1.0);
 
     let mut exported = Vec::new();
-    for (hud, items) in [
-        (false, &plan.lists.opaque),
-        (false, &plan.lists.transparent),
-        (true, &plan.lists.hud),
+    for (hud, opaque, items) in [
+        (false, true, &plan.lists.opaque),
+        (false, false, &plan.lists.transparent),
+        (true, false, &plan.lists.hud),
     ] {
-        for item in items {
+        for (index, item) in items.iter().enumerate() {
             let Some(mesh) = residency.meshes.get(item.mesh) else {
                 continue;
             };
@@ -106,6 +124,7 @@ pub fn objects(
                 hud,
                 bends && !hud,
                 item.clip,
+                opaque && plan.floor_surfaces.get(index).copied().unwrap_or(false),
             ));
         }
     }
@@ -113,6 +132,7 @@ pub fn objects(
 }
 
 /// One object's vertices placed by `model` and then, when `curved`, by `bend`.
+#[allow(clippy::fn_params_excessive_bools)] // One flag per clause of the export, each independent.
 fn export_one(
     mesh: &Arc<TileMesh>,
     model: Mat4,
@@ -120,6 +140,7 @@ fn export_one(
     hud: bool,
     curved: bool,
     clipped: bool,
+    floor: bool,
 ) -> ExportedObject {
     let (normals, determinant) = crate::interop::normal_matrix(&model);
     // Q-069: a mirrored placement's cofactor matrix points the normal inwards, and the shader
@@ -130,6 +151,7 @@ fn export_one(
         hud,
         bent: curved,
         clipped,
+        floor,
         positions: Vec::with_capacity(count),
         unbent: Vec::with_capacity(count),
         normals: Vec::with_capacity(count),

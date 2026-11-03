@@ -229,6 +229,16 @@ pub struct FramePlan<M, T> {
     pub caster_data: Vec<u8>,
     /// The bounded diagnostics of AMD-051 (REQ-E3D-644, REQ-E3D-646), which the host logs.
     pub diagnostics: RenderDiagnostics,
+    /// AMD-055 REQ-SCN-084: for each item of [`DrawLists::opaque`], at the same index, whether it
+    /// belongs to an instance whose bounding box makes it a floor. **Empty on every frame that
+    /// does not ask for it** — [`Self::mark_floor_surfaces`] is called only when
+    /// `spl.reflections` = 1, so Classic and Enhanced-without-reflections neither fill it nor
+    /// walk the bucket a second time.
+    pub floor_surfaces: Vec<bool>,
+    /// The bounding boxes [`Self::mark_floor_surfaces`] accumulates, kept from frame to frame so
+    /// that the pass costs no allocation once it has run once. `None` is the key of the backdrop,
+    /// which is an object of its own (Q-093 (a)).
+    floor_boxes: FastMap<Option<FrameInstanceId>, (Vector3, Vector3)>,
     /// Rendered frames since the plan was created, the clock the summary of REQ-E3D-644 uses.
     frame: u64,
     scratch: OpaqueScratch<M, T>,
@@ -243,6 +253,8 @@ impl<M, T> Default for FramePlan<M, T> {
             caster_runs: Vec::new(),
             caster_data: Vec::new(),
             diagnostics: RenderDiagnostics::default(),
+            floor_surfaces: Vec::new(),
+            floor_boxes: FastMap::default(),
             frame: 0,
             scratch: OpaqueScratch::default(),
         }
@@ -513,6 +525,65 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             ..DrawItem::plain(resident, model, (unit.bounds_min(), unit.bounds_max()))
         });
         Ok(())
+    }
+
+    /// Marks the opaque items whose instance is a **floor** in the sense of AMD-055 REQ-SCN-084,
+    /// filling [`Self::floor_surfaces`] at the indices of [`DrawLists::opaque`].
+    ///
+    /// **Only the extent half of the definition is decided here.** The requirement asks for a
+    /// face whose scene-space normal before curvature has `+Y ≥ 0,9` *and* whose instance's box
+    /// in the floor plane measures at least `6 × échelle de scène` in both dimensions; the first
+    /// clause varies from face to face — the wall of the variant R-m passes the box test and only
+    /// its normal keeps it from reflecting — so it is tested per fragment, by the mask pass. What
+    /// belongs here is the second clause, because an instance's extent is a property of the
+    /// **placement**, and no reconstruction from the depth buffer can recover it: the block of
+    /// the variant R-s and the same block at `scale = (1 ; 1 ; 0,5)` present the same pixels with
+    /// the same normal and differ only in their depth.
+    ///
+    /// The box is accumulated **before curvature** ("boîte englobante dans le plan `xz` du repère
+    /// de scène, avant courbure"), which `DrawItem::model` gives directly: the curvature is
+    /// applied by the vertex stage, after the placement (REQ-E3D-406, DEC-R2-T4).
+    ///
+    /// Over the **opaque** bucket alone, because that is the geometry the pass reads: only what is
+    /// already drawn can be reflected (REQ-SCN-084), the transparent objects and the HUD come
+    /// after the pass, and the shadow-only tiles of REQ-SCN-041 are not drawn at all.
+    ///
+    /// The backdrop carries no instance and is measured **as an object of its own** (Q-093 (a),
+    /// answered): at its default size of 256 × 240 × 1 its `z` dimension is 1, under the
+    /// threshold of 6, so by default it is not a floor and the reading is not observable.
+    pub fn mark_floor_surfaces(&mut self, local_camera: bool, scene_scale: f32) {
+        let Self {
+            lists,
+            floor_surfaces,
+            floor_boxes,
+            ..
+        } = self;
+        floor_surfaces.clear();
+        floor_boxes.clear();
+
+        for item in &lists.opaque {
+            let (low, high) = occlusion::box_bounds(item.bounds_min, item.bounds_max, &item.model);
+            floor_boxes
+                .entry(item.instance)
+                .and_modify(|(min, max)| {
+                    *min = Vector3::min(*min, low);
+                    *max = Vector3::max(*max, high);
+                })
+                .or_insert((low, high));
+        }
+
+        floor_surfaces.reserve(lists.opaque.len());
+        for item in &lists.opaque {
+            let floor = floor_boxes.get(&item.instance).is_some_and(|(min, max)| {
+                crate::style::is_floor_extent(
+                    [min.x, min.y, min.z],
+                    [max.x, max.y, max.z],
+                    local_camera,
+                    scene_scale,
+                )
+            });
+            floor_surfaces.push(floor);
+        }
     }
 
     /// The light's view of the casters (REQ-SCN-030), or [`ShadowVolume::EMPTY`] when the
