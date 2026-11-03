@@ -109,5 +109,10 @@ local SPIKE_ROW_Z = { 0, 8, 16 }
 * A class picked by place catches its neighbours: filter by palette and only take tiles no class
   has yet; add the picks after the precise ones (a ladder caught in a wall pick goes flat).
 * A tile used by two levels: let one level own it and handle the other in Lua.
+* `Pattern.GetPatternWithTag` matches a pattern's whole tag string: a pattern made to be
+  found from Lua carries one word only (`"grassslice_3"`), while `string.find` on `TagStr`
+  sees each word of a longer one.
+* Two patterns with the same tile picture are one tile for the game: a pattern made for Lua
+  (with its own `texture`) needs a picture of its own, never one of the game's tiles.
 * The 2D view (F11) hides the 3D effects; `status` says `two_dimensional`.
 * Fast reload starts the scripts on the frame on screen; step one frame before judging.
