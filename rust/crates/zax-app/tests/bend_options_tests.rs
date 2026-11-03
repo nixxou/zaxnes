@@ -130,17 +130,31 @@ fn req_scn_066_the_labels_and_the_help_come_from_the_amendments() {
     assert_eq!(None, options::help_of(SettingId::CameraFov));
 }
 
-/// AMD-043 §6: the arc centre is a list of two named values, not a number — the idiom of
-/// `emu.run_ahead`, which keeps the domain's bounds and step and only names its rungs.
+/// AMD-043 §6: the arc centre is a list of **named** values, not a number — the idiom of
+/// `emu.run_ahead`, which keeps the domain's bounds and only names its rungs.
+///
+/// RO-5 part 2 (owner decision, Q-107 §8): the amendment's two values become five, the three new
+/// ones being the quarters between the two heights. The two the amendment names keep their labels,
+/// their values and their places at the two ends of the list, which is what keeps a 3dSen profile
+/// and a settings file written before this lot behaving exactly as they did.
 #[test]
-fn req_scn_066_the_arc_centre_is_a_list_of_two_named_values() {
+fn req_scn_066_the_arc_centre_is_a_list_of_named_values() {
     let descriptor = zax_settings::catalogue::descriptor(SettingId::SceneArcCenter);
-    let options = descriptor.domain().options().expect("two rungs");
-    assert_eq!(2, options.len());
-    assert_eq!("Screen Center", options[0].label);
-    assert_eq!("Screen Edge", options[1].label);
-    assert_eq!(0.0, options[0].value);
-    assert_eq!(1.0, options[1].value);
+    let options = descriptor.domain().options().expect("five rungs");
+    assert_eq!(5, options.len());
+    for (index, (value, label)) in [
+        (0.0, "Screen Center"),
+        (0.25, "25%"),
+        (0.5, "50%"),
+        (0.75, "75%"),
+        (1.0, "Screen Edge"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(label, options[index].label, "rung {index}");
+        assert_eq!(value, options[index].value, "rung {index}");
+    }
 
     for (language, centre, edge) in [
         (UiLanguage::English, "Screen Center", "Screen Edge"),
@@ -149,6 +163,10 @@ fn req_scn_066_the_arc_centre_is_a_list_of_two_named_values() {
         strings::set_language(language);
         assert_eq!(centre, zax_app::ui::text::label_of_option("Screen Center"));
         assert_eq!(edge, zax_app::ui::text::label_of_option("Screen Edge"));
+        // The three new ones read the same in both languages: a percentage is not a word.
+        for (label, shown) in [("25%", "25 %"), ("50%", "50 %"), ("75%", "75 %")] {
+            assert_eq!(shown, zax_app::ui::text::label_of_option(label), "{label}");
+        }
     }
     strings::set_language(UiLanguage::English);
 
@@ -228,10 +246,52 @@ fn req_scn_066_the_handheld_advanced_page_offers_the_five() {
     advanced::step(SettingId::SceneBend2dMode, &mut model, 1);
     assert!(!model.get(SettingId::SceneBend2dMode).as_bool(), "toggled");
 
-    // The value the page shows for the arc centre is the named one, not the number.
-    advanced::step(SettingId::SceneArcCenter, &mut model, 1);
+    // The value the page shows for the arc centre is the named one, not the number — and since
+    // RO-5 part 2 the pad walks the five rungs a quarter at a time and stops at the far end.
+    for expected in ["25 %", "50 %", "75 %", "Screen Edge", "Screen Edge"] {
+        advanced::step(SettingId::SceneArcCenter, &mut model, 1);
+        assert_eq!(
+            expected,
+            advanced::value_text(SettingId::SceneArcCenter, &model)
+        );
+    }
+    for expected in ["75 %", "50 %", "25 %", "Screen Center", "Screen Center"] {
+        advanced::step(SettingId::SceneArcCenter, &mut model, -1);
+        assert_eq!(
+            expected,
+            advanced::value_text(SettingId::SceneArcCenter, &model)
+        );
+    }
+}
+
+/// RO-5 part 2: the desktop window draws the arc centre as a **drop-down of its five names**, not
+/// as a slider over a real, and a stepped real labelled with its own numbers is not caught by the
+/// same rule (`options::LABELLED_FRACTIONS`).
+#[test]
+fn ro_5_the_arc_centre_is_drawn_as_a_named_list_and_the_other_reals_are_not() {
+    assert!(options::is_labelled_fraction(SettingId::SceneArcCenter));
+    for id in [
+        SettingId::AudioVolume,
+        SettingId::CameraFov,
+        SettingId::LightIntensity,
+    ] {
+        assert!(!options::is_labelled_fraction(id), "{id:?} stays a slider");
+    }
+
+    // The row is still on the Geometry group of the 3D rendering tab, with the other four.
     assert_eq!(
-        "Screen Edge",
-        advanced::value_text(SettingId::SceneArcCenter, &model)
+        Some(OptionsTab::Render3d),
+        options::tab_of(SettingId::SceneArcCenter)
     );
+
+    // And every rung has a name in both languages, which is what makes a drop-down readable.
+    let descriptor = zax_settings::catalogue::descriptor(SettingId::SceneArcCenter);
+    for language in [UiLanguage::English, UiLanguage::French] {
+        strings::set_language(language);
+        for option in descriptor.domain().options().expect("five rungs") {
+            let shown = zax_app::ui::text::label_of_option(&option.label);
+            assert!(!shown.is_empty() && shown != "0" && shown != "1", "{shown}");
+        }
+    }
+    strings::set_language(UiLanguage::English);
 }

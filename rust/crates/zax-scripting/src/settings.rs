@@ -6,6 +6,7 @@ use zax_engine3d::settings::{ConversionSettings, RenderAlgorithm, ZAlignment, ZL
 use zax_engine3d::vectors::Vec3;
 use zax_profiles::values::Vec4F;
 use zax_settings::catalogue::{Layer, Port, SettingId};
+use zax_settings::meta::SettingKind;
 use zax_settings::model::{SettingLayer, SettingsModel};
 use zax_settings::styles;
 use zax_settings::values::{Color, SettingValue, Vector3};
@@ -488,9 +489,14 @@ impl ScriptSettings {
     /// The value of the style parameter `id` of style `style`, or its default when it has never
     /// been written (REQ-LUA-114). 0 when the style or the identifier is unknown — which is why
     /// a script cannot tell "unknown" from "zero" by reading, as the requirement intends.
+    ///
+    /// The value is read as a **double**, not as an integer. For the fifteen whole-number
+    /// parameters that is the same number bit for bit (`SettingValue::as_double` of an `Int` is
+    /// `f64::from(i32)`); `spl.arc_center` needs it since RO-5 part 2, its rungs being 0, 0.25,
+    /// 0.5, 0.75 and 1 — an integer read would give back 1 for a setting holding 0.5.
     #[must_use]
     pub fn visual_style_parameter(&self, style: i32, id: &str) -> f64 {
-        styles::parameter(style, id).map_or(0.0, |key| f64::from(self.int(key)))
+        styles::parameter(style, id).map_or(0.0, |key| self.model.get(key).as_double())
     }
 
     /// Records `value`, normalised as AMD-040 §3 requires, in the setting the parameter stands
@@ -511,7 +517,15 @@ impl ScriptSettings {
             return false;
         };
 
-        self.write_int(key, number_format::to_i32(styles::snap_write(key, value)));
+        let snapped = styles::snap_write(key, value);
+        // A parameter whose setting is a real keeps the snapped value as it is; the other fifteen
+        // go through the integer path they always went through, `to_i32` and all — RO-5 part 2
+        // changes `spl.arc_center` and must change nothing else to the bit.
+        if zax_settings::catalogue::descriptor(key).kind() == SettingKind::Float {
+            self.write_real(key, number_format::to_f32(snapped));
+        } else {
+            self.write_int(key, number_format::to_i32(snapped));
+        }
 
         // AMD-059 REQ-LUA-116: a call that answers true adds the parameter to the log, or leaves
         // it where it is when it is already there — the order is that of the **first** write.
@@ -534,10 +548,13 @@ impl ScriptSettings {
     pub fn reset_visual_style_parameters(&mut self, style: i32) {
         let canonical = styles::canonical_style(style);
         for (_, key) in styles::parameters_of(style) {
+            // The descriptor's own default value, whatever its shape: for the fifteen whole
+            // numbers that is the `Int` the integer path used to write, and for the real one
+            // (`spl.arc_center` since RO-5 part 2) it is the `Float` an integer would have lost.
             let default = zax_settings::catalogue::descriptor(*key)
                 .default_value()
-                .as_int();
-            self.write_int(*key, default);
+                .clone();
+            self.write(*key, default);
         }
 
         self.written_styles.retain(|position| {
@@ -564,7 +581,9 @@ impl ScriptSettings {
     pub fn written_style_parameters(&self) -> impl Iterator<Item = (u8, u8)> + '_ {
         self.written_styles.iter().filter_map(|position| {
             let (_, _, key) = styles::parameter_of_position(usize::from(*position))?;
-            let rung = styles::rung_of(key, f64::from(self.int(key)));
+            // As a double, for the reason given on `visual_style_parameter`: the rung of a value
+            // of 0.5 is not the rung of 1.
+            let rung = styles::rung_of(key, self.model.get(key).as_double());
             Some((*position, u8::try_from(rung).unwrap_or(u8::MAX)))
         })
     }
@@ -790,6 +809,87 @@ mod tests {
                 "{coarse}"
             );
         }
+    }
+
+    /// RO-5 part 2 (owner decision): `spl.arc_center` takes five rungs — 0, 0.25, 0.5, 0.75, 1.
+    /// What a 3dSen profile does is unchanged, it being able to write only 0 or 1, and a read of
+    /// either gives back the same number it always gave; a value in between lands on the nearest
+    /// quarter, ties away from zero.
+    #[test]
+    fn ro_5_a_script_writes_and_reads_the_five_rungs_of_the_arc_centre() {
+        let mut settings = settings();
+
+        // The compatibility that matters: 0 and 1, written and read back, exactly as before.
+        for end in [0.0, 1.0] {
+            assert!(settings.set_visual_style_parameter(4, "spl.arc_center", end));
+            assert_eq!(end, settings.visual_style_parameter(4, "spl.arc_center"));
+        }
+
+        for (written, expected) in [
+            (0.0, 0.0),
+            (0.25, 0.25),
+            (0.5, 0.5),
+            (0.75, 0.75),
+            (1.0, 1.0),
+            (0.1, 0.0),
+            (0.4, 0.5),
+            (0.6, 0.5),
+            (0.9, 1.0),
+            // A tie goes away from zero.
+            (0.125, 0.25),
+            (0.875, 1.0),
+            // Out of range, as before.
+            (7.0, 1.0),
+            (-7.0, 0.0),
+        ] {
+            assert!(settings.set_visual_style_parameter(4, "spl.arc_center", written));
+            assert_eq!(
+                expected,
+                settings.visual_style_parameter(4, "spl.arc_center"),
+                "{written}"
+            );
+        }
+
+        // A read of what the **player** chose in the menu, which a script never wrote: 0.5 reads
+        // back as 0.5 and not as the 1 an integer read would have given. A model of its own,
+        // because a script's write above went to the session layer, which masks the user's.
+        let mut menu = ScriptSettings::new(SettingsModel::new(), ScriptLight::Model);
+        for chosen in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+            menu.model_mut()
+                .set(SettingId::SceneArcCenter, SettingValue::Float(chosen));
+            assert_eq!(
+                f64::from(chosen),
+                menu.visual_style_parameter(4, "spl.arc_center"),
+                "{chosen}"
+            );
+        }
+    }
+
+    /// RO-5 part 2: a reset takes the arc centre back to 0, its own default, through the write of a
+    /// real — an integer write would have worked too, but only by luck, the default being 0.
+    #[test]
+    fn ro_5_a_reset_takes_the_arc_centre_back_to_the_screen_centre() {
+        let mut settings = settings();
+        assert!(settings.set_visual_style_parameter(4, "spl.arc_center", 0.75));
+        assert_eq!(0.75, settings.visual_style_parameter(4, "spl.arc_center"));
+        settings.reset_visual_style_parameters(4);
+        assert_eq!(0.0, settings.visual_style_parameter(4, "spl.arc_center"));
+    }
+
+    /// AMD-059 REQ-LUA-116, with the five rungs of RO-5 part 2: the write log reports the rung the
+    /// setting really holds, and putting the list back restores the quarter **exactly**.
+    #[test]
+    fn ro_5_the_write_log_carries_an_intermediate_arc_centre_there_and_back() {
+        let mut settings = settings();
+        assert!(settings.set_visual_style_parameter(4, "spl.arc_center", 0.75));
+        let log: Vec<(u8, u8)> = settings.written_style_parameters().collect();
+        // `spl.arc_center` is the fourth parameter of the table and 0.75 is its fourth rung.
+        assert_eq!(vec![(3_u8, 3_u8)], log);
+
+        settings.reset_all_visual_style_parameters();
+        assert_eq!(0.0, settings.visual_style_parameter(4, "spl.arc_center"));
+        settings.restore_visual_style_parameters(&log);
+        assert_eq!(0.75, settings.visual_style_parameter(4, "spl.arc_center"));
     }
 
     /// A script **read** gives back whatever the player chose, fine rung included — which it did

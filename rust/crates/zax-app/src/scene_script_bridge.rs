@@ -196,7 +196,9 @@ pub fn bend_of(model: &SettingsModel) -> SpaceBend {
         degrees(SettingId::SceneBendLr),
         degrees(SettingId::SceneBendTb),
         degrees(SettingId::SceneArcH),
-        model.get(SettingId::SceneArcCenter).as_int() != 0,
+        // RO-5 part 2: a fraction of the way between the two heights of REQ-SCN-066, not a flag.
+        // Read as a real, 0.5 being one of the five rungs the setting now publishes.
+        model.get(SettingId::SceneArcCenter).as_float(),
         // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of.
         1.0,
     )

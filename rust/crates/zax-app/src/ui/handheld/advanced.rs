@@ -165,6 +165,15 @@ fn choices(id: SettingId) -> Vec<(i32, String)> {
 #[must_use]
 pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
     let value = settings.get(id);
+    // RO-5 part 2: `scene.arc_center` is a real whose five rungs carry names, so it reads
+    // "Screen Center", "50 %", "Screen Edge" and not "0", "0.5", "1". The list is the window's
+    // own (`crate::ui::options::LABELLED_FRACTIONS`), so the two interfaces cannot disagree.
+    if crate::ui::options::is_labelled_fraction(id) {
+        let current = value.as_double();
+        if let Some(label) = catalogue::descriptor(id).domain().label_of(current) {
+            return text::label_of_option(label);
+        }
+    }
     match catalogue::descriptor(id).kind() {
         SettingKind::Bool => text::label_of_option(if value.as_bool() {
             "enabled"

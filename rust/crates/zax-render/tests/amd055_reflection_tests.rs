@@ -555,7 +555,7 @@ fn req_scn_080_the_reflections_work_on_the_bent_depth() {
     let gl = GlFixture::new();
     let mut renderer = gl.renderer();
     let mut built = close_up_r(true, 8, 1.0, 0.0);
-    built.scene.bend = SpaceBend::new(20.0, 0.0, 0.0, false, 1.0);
+    built.scene.bend = SpaceBend::new(20.0, 0.0, 0.0, 0.0, 1.0);
 
     let off = gl.render_built(&mut renderer, &built);
     built.scene.settings.style = with_reflections(StyleSettings::default());

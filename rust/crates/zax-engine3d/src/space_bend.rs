@@ -31,6 +31,10 @@ pub const ANGLE_THRESHOLD: f32 = 1e-4;
 
 /// The arc pivot when the centre is the bottom edge of the reference frame: `−120 · s` relative
 /// to `C`, that is `y = 0`, eight units below the bottom of the NES image (REQ-SCN-066).
+///
+/// RO-5 part 2 (owner decision): `scene.arc_center` is a **fraction** of this offset, so the pivot
+/// is `EDGE_PIVOT_OFFSET · s · c` with `c` one of 0, 0.25, 0.5, 0.75, 1. At `c = 0` and `c = 1`
+/// the arithmetic is bit-exact, so the two heights REQ-SCN-066 names are unchanged to the pixel.
 pub const EDGE_PIVOT_OFFSET: f32 = -120.0;
 
 /// The centre `C = (128, 120, 0)` of the reference frame, which is the fixed point of every axis
@@ -74,14 +78,18 @@ impl SpaceBend {
     /// `bend_left_right` (`scene.bend_lr`), `bend_top_bottom` (`scene.bend_tb`) and
     /// `arc_horizontal` (`scene.arc_h`) are in degrees: a positive angle pushes the edges away
     /// (bulged), a negative one brings them closer (wrapping around the player).
-    /// `arc_at_edge` is `scene.arc_center`: false for the screen centre, true for the bottom edge
-    /// of the reference frame. `scene_scale` is the scene scale `s` of REQ-SCN-002, 1 on desktop.
+    /// `arc_center` is `scene.arc_center`: 0 for the screen centre, 1 for the bottom edge of the
+    /// reference frame, and since RO-5 part 2 any fraction between the two, which places the pivot
+    /// at the matching linear interpolation of the two heights. A value outside `[0, 1]`, or one
+    /// that is not a number, is brought back into the range — the setting's domain never produces
+    /// one, but `--bend` and a Lua write reach this constructor too.
+    /// `scene_scale` is the scene scale `s` of REQ-SCN-002, 1 on desktop.
     #[must_use]
     pub fn new(
         bend_left_right: f32,
         bend_top_bottom: f32,
         arc_horizontal: f32,
-        arc_at_edge: bool,
+        arc_center: f32,
         scene_scale: f32,
     ) -> Self {
         let scale = if scene_scale > 0.0 && scene_scale <= f32::MAX {
@@ -89,15 +97,26 @@ impl SpaceBend {
         } else {
             1.0
         };
+        let fraction = if arc_center.is_finite() {
+            arc_center.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        // `x * 1.0 == x`, so the far end is bit for bit the `−120 · s` the boolean of AMD-043
+        // REQ-SCN-066 gave. The near end is written out rather than multiplied, a product by zero
+        // of a negative number being `−0.0`: numerically the same pivot everywhere it is used, but
+        // this way the uniform the renderer uploads is the very bit pattern it uploaded before.
+        // The branch costs nothing — this runs when a curvature setting changes, never per frame.
+        let pivot = if fraction <= 0.0 {
+            0.0
+        } else {
+            EDGE_PIVOT_OFFSET * scale * fraction
+        };
         Self {
             left_right: Axis::new(bend_left_right, HORIZONTAL_LENGTH, scale),
             top_bottom: Axis::new(bend_top_bottom, VERTICAL_LENGTH, scale),
             arc: Axis::new(arc_horizontal, HORIZONTAL_LENGTH, scale),
-            pivot: if arc_at_edge {
-                EDGE_PIVOT_OFFSET * scale
-            } else {
-                0.0
-            },
+            pivot,
         }
     }
 

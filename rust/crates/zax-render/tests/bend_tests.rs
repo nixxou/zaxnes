@@ -12,7 +12,7 @@
 mod common;
 
 use common::{solid, GlFixture, SceneFixture};
-use zax_engine3d::space_bend::SpaceBend;
+use zax_engine3d::space_bend::{self, SpaceBend};
 use zax_profiles::enums::ProfileLayer;
 use zax_render::camera::SceneCamera;
 use zax_render::interop;
@@ -36,7 +36,7 @@ fn variant(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> shade
 
 /// A curvature of 90° left-right, the setting the criteria of REQ-SCN-068 and REQ-SCN-074 use.
 fn bend_90() -> SpaceBend {
-    SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
+    SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0)
 }
 
 /// The assembled vertex and fragment sources of one scene variant.
@@ -261,7 +261,7 @@ fn ro_1_a_curvature_of_15_degrees_differs_from_0_and_from_30() {
     let frame = SceneFrame::with_draw_list(&built.draw_list);
 
     let positions = |scene: &mut SceneState, degrees: f32| -> Vec<zax_engine3d::vectors::Vec3> {
-        scene.bend = SpaceBend::new(degrees, 0.0, 0.0, false, 1.0);
+        scene.bend = SpaceBend::new(degrees, 0.0, 0.0, 0.0, 1.0);
         scene_export::objects(scene, &frame, &view)
             .iter()
             .flat_map(|object| object.positions.clone())
@@ -284,7 +284,7 @@ fn ro_1_a_curvature_of_15_degrees_differs_from_0_and_from_30() {
     assert!(farthest(&flat, &fine) > 0.5, "15° is not the flat scene");
     assert!(farthest(&coarse, &fine) > 0.5, "15° is not 30° either");
     // And it is exactly B(P) for 15°, as REQ-SCN-068's criterion asks of any angle.
-    let transform = SpaceBend::new(15.0, 0.0, 0.0, false, 1.0);
+    let transform = SpaceBend::new(15.0, 0.0, 0.0, 0.0, 1.0);
     for (before, after) in flat.iter().zip(&fine) {
         let expected = transform.apply(*before);
         assert!(
@@ -321,6 +321,87 @@ fn req_scn_068_the_hud_is_not_bent() {
     }
 }
 
+/// RO-5 part 2: the five arc centres give five different pictures, and the two the amendment
+/// names give **exactly** the pictures they gave before this lot — vertex for vertex, which is
+/// pixel for pixel, the whole of the curvature reaching the GPU through `uBendPivot` and the four
+/// per-axis uniforms.
+///
+/// The reference for the two ends is built the way AMD-043 REQ-SCN-066 states them: the pivot is
+/// `0` for the screen centre and `space_bend::EDGE_PIVOT_OFFSET` for the frame's bottom edge. So
+/// this test would fail if the interpolation moved either end by one bit.
+#[test]
+fn ro_5_the_five_arc_centres_export_five_pictures_and_the_two_ends_are_unchanged() {
+    let mut built = SceneFixture::new()
+        .background(0x0F)
+        .palette(1, 0x30)
+        .pattern(solid(1, 0), 1, ProfileLayer::L1)
+        .rect(solid(1, 0), 30, 15, 1, 1)
+        .build();
+    built.scene.settings.shadows = false;
+    let view = steady_view(&built.scene);
+    let frame = SceneFrame::with_draw_list(&built.draw_list);
+
+    let positions = |scene: &mut SceneState, centre: f32| -> Vec<zax_engine3d::vectors::Vec3> {
+        scene.bend = SpaceBend::new(0.0, 0.0, 60.0, centre, 1.0);
+        scene_export::objects(scene, &frame, &view)
+            .iter()
+            .flat_map(|object| object.positions.clone())
+            .collect()
+    };
+
+    let pictures: Vec<Vec<zax_engine3d::vectors::Vec3>> = [0.0, 0.25, 0.5, 0.75, 1.0]
+        .into_iter()
+        .map(|centre| positions(&mut built.scene, centre))
+        .collect();
+    assert!(!pictures[0].is_empty(), "the tile is exported");
+
+    // The two ends, against the two pivots REQ-SCN-066 defines, built from the pivot itself.
+    for (index, pivot) in [(0_usize, 0.0_f32), (4, space_bend::EDGE_PIVOT_OFFSET)] {
+        assert_eq!(
+            pivot,
+            SpaceBend::new(0.0, 0.0, 60.0, if index == 0 { 0.0 } else { 1.0 }, 1.0).arc_pivot()
+        );
+        assert_eq!(
+            pictures[index],
+            positions(&mut built.scene, if index == 0 { 0.0 } else { 1.0 }),
+            "the export is a function of the pivot alone"
+        );
+    }
+
+    // Each rung is its own picture: no two of the five agree, and none of the three new ones is
+    // one of the two ends in disguise.
+    let farthest = |a: &[zax_engine3d::vectors::Vec3], b: &[zax_engine3d::vectors::Vec3]| -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(a, b)| zax_engine3d::vectors::Vec3::distance(*a, *b))
+            .fold(0.0_f32, f32::max)
+    };
+    for first in 0..pictures.len() {
+        for second in (first + 1)..pictures.len() {
+            assert_eq!(pictures[first].len(), pictures[second].len());
+            assert!(
+                farthest(&pictures[first], &pictures[second]) > 0.1,
+                "rungs {first} and {second} give the same picture"
+            );
+        }
+    }
+
+    // And the middle rung is really in between: its picture lies between the two ends on the axis
+    // the pivot moves, which is what "monotone" means for a player watching the screen.
+    let lowest = |picture: &[zax_engine3d::vectors::Vec3]| -> f32 {
+        picture.iter().map(|point| point.y).fold(f32::MAX, f32::min)
+    };
+    let (centre, middle, edge) = (
+        lowest(&pictures[0]),
+        lowest(&pictures[2]),
+        lowest(&pictures[4]),
+    );
+    assert!(
+        (centre.min(edge)..=centre.max(edge)).contains(&middle),
+        "the middle rung is not between the two ends: {centre} {middle} {edge}"
+    );
+}
+
 /// REQ-SCN-068, order clause: the clipping of REQ-SCN-036 is judged on the position **before**
 /// the curvature, so the set of tiles kept does not depend on the curvature at all. The
 /// criterion's own case: with Arc Horizontal at 60° on the frame edge, the corner tile at
@@ -328,7 +409,7 @@ fn req_scn_068_the_hud_is_not_bent() {
 #[test]
 fn req_scn_068_the_clipping_is_judged_before_the_curvature() {
     let corner = zax_engine3d::vectors::Vec3::new(0.0, 8.0, 0.0);
-    let arc = SpaceBend::new(0.0, 0.0, 60.0, true, 1.0);
+    let arc = SpaceBend::new(0.0, 0.0, 60.0, 1.0, 1.0);
     let image = arc.apply(corner);
     let rect = SceneState::default().visible_rectangle();
     assert!(

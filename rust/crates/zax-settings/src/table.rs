@@ -58,6 +58,29 @@ fn curvature_options() -> Vec<SettingOption> {
         .collect()
 }
 
+/// The rungs of `scene.arc_center`: the two heights AMD-043 §6 names, 0 for the screen centre and
+/// 1 for the bottom edge of the reference frame, and the three quarters between them that RO-5
+/// part 2 adds (owner decision, Q-107 §8).
+///
+/// The fraction multiplies `space_bend::EDGE_PIVOT_OFFSET`, so a rung *is* the height of the
+/// pivot: nothing has to be mapped anywhere.
+pub(crate) const ARC_CENTER_RUNGS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+/// The label of each rung of [`ARC_CENTER_RUNGS`]. The two ends keep the names AMD-043 §6 gives
+/// them, which is what the libretro option stores and what `option.<label>` translates; the three
+/// new ones are read as percentages, there being no name for a point part of the way down.
+pub(crate) const ARC_CENTER_LABELS: [&str; 5] =
+    ["Screen Center", "25%", "50%", "75%", "Screen Edge"];
+
+/// [`ARC_CENTER_RUNGS`] as a libretro option list, each rung under its label.
+fn arc_center_options() -> Vec<SettingOption> {
+    ARC_CENTER_RUNGS
+        .iter()
+        .zip(ARC_CENTER_LABELS)
+        .map(|(value, label)| SettingOption::new(*value, label))
+        .collect()
+}
+
 /// Every setting of §4.1, in the order of the specification's tables.
 pub(crate) fn build() -> Vec<SettingDescriptor> {
     let mut all = Vec::new();
@@ -712,25 +735,43 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
             .with_libretro(curvature_options()),
         );
     }
-    // The arc centre is the same stepped domain with two rungs, published as the two named
-    // values AMD-043 §6 gives ("Screen Center" / "Screen Edge"): the bounds, the step and the
-    // `Snap` rule stay the domain's, only the labels change, and the interface translates them
-    // through `option.<label>` (the idiom of `emu.run_ahead`, AMD-041 §3).
+    // The arc centre names the height of the arc's pivot: AMD-043 §6 gives it two values, the
+    // screen centre and the bottom edge of the reference frame, published as the two named rungs
+    // "Screen Center" / "Screen Edge" — the idiom of `emu.run_ahead` (AMD-041 §3), the interface
+    // translating each label through `option.<label>`.
+    //
+    // RO-5 part 2 (owner decision, a divergence recorded in `docs/OPTIONS-LAYOUT.md`): the two
+    // become **five**, the three new ones placing the pivot at the matching fraction of the way
+    // between the two heights (`zax_engine3d::space_bend::SpaceBend::new`). Three consequences,
+    // and the reason for each:
+    //
+    //   * the kind is `Float`, because `Domain::coerce` rebuilds an `Int` value with
+    //     `truncate_to_i32` and so cannot hold 0.25 at all. The settings file is **unchanged** for
+    //     the two values that existed: `json::float_json` writes the shortest text that reads back
+    //     as the same float, which is `0` and `1`, exactly what an `Int` wrote, and the `Float`
+    //     branch of `from_json` reads any JSON number, so an older file loads as it always did.
+    //     SPEC-09 §4.1 gives the key the type "entier"; that is the divergence.
+    //   * the domain is a `Domain::grid`, not a `Domain::stepped`: the owner asks for the nearest
+    //     rung with **ties away from zero**, which is what `grid` does and what RO-2 part 3 gave
+    //     the three angles. `stepped` rounds ties to the even rung, so 0.125 would give 0 and
+    //     0.375 would give 0.5. `grid` answers no single `step()`, which costs nothing here:
+    //     `ui::options::bounds` takes the step from the libretro list, and that list has one.
+    //   * the libretro list grows from two values to five. No persisted choice is lost —
+    //     `core_options::try_apply` matches a value by **label**, and the two old labels are
+    //     still there — and it has to grow, being what the console page steps by.
+    // Q-107 §8
     out.push(
         SettingDescriptor::new(
             SettingId::SceneArcCenter,
-            SettingKind::Int,
-            SettingValue::Int(0),
+            SettingKind::Float,
+            SettingValue::Float(0.0),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Scene,
         )
-        .with_domain(
-            Domain::stepped(0.0, 1.0, 1.0, 0).with_labels(&["Screen Center", "Screen Edge"]),
-        )
+        .with_domain(Domain::grid(&ARC_CENTER_RUNGS, 2).with_labels(&ARC_CENTER_LABELS))
         .with_label("Arc Center")
-        // AMD-043 §6: "option, 2 valeurs".
-        .with_libretro(vec![opt(0, "Screen Center"), opt(1, "Screen Edge")]),
+        .with_libretro(arc_center_options()),
     );
     // AMD-046 REQ-SCN-074: the rectangle of the 2D mode bends like the game scene, which is what
     // the original program does, and this setting is how Zaxnes lets a player keep it flat — a

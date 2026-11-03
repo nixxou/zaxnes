@@ -339,8 +339,8 @@ fn req_scn_080_the_floor_definition_is_measured_before_the_curvature() {
     let flat = flags(SpaceBend::default());
     assert_eq!(64, flat.len(), "the floor's sixty-four tile records");
     assert!(flat.iter().all(|floor| *floor));
-    assert_eq!(flat, flags(SpaceBend::new(60.0, 0.0, 0.0, false, 1.0)));
-    assert_eq!(flat, flags(SpaceBend::new(0.0, 90.0, 0.0, false, 1.0)));
+    assert_eq!(flat, flags(SpaceBend::new(60.0, 0.0, 0.0, 0.0, 1.0)));
+    assert_eq!(flat, flags(SpaceBend::new(0.0, 90.0, 0.0, 0.0, 1.0)));
 }
 
 /// REQ-SCN-080, 4th bullet, and the scope clause of REQ-SCN-084: the transparent objects do not

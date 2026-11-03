@@ -590,7 +590,7 @@ fn req_scn_080_the_grid_is_painted_on_the_geometry_not_on_the_screen() {
     let straight = gl.render_built(&mut renderer, &flat);
 
     let mut bent = surface(2);
-    bent.scene.bend = SpaceBend::new(90.0, 0.0, 0.0, false, 1.0);
+    bent.scene.bend = SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0);
     let curved = gl.render_built(&mut renderer, &bent);
 
     assert_ne!(

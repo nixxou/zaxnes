@@ -422,10 +422,18 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.scene.arc_center", "Arc Center"),
     (
         "help.scene.arc_center",
-        "Where the arc bends around: the centre of the screen, or its bottom edge.",
+        // AMD-043 §6's own sentence, with the quarters RO-5 part 2 adds appended to it rather
+        // than replacing it.
+        "Where the arc bends around: the centre of the screen, or its bottom edge, or one of the \
+         quarters between the two.",
     ),
     ("option.Screen Center", "Screen Center"),
     ("option.Screen Edge", "Screen Edge"),
+    // RO-5 part 2: the three quarters between those two heights. The label the domain and the
+    // libretro option carry is "25%"; what the user reads has a space, as a percentage should.
+    ("option.25%", "25 %"),
+    ("option.50%", "50 %"),
+    ("option.75%", "75 %"),
     // AMD-046 §3, a setting of Zaxnes's own: the flat picture of the 2D mode follows the
     // curvature of AMD-043 unless this is turned off.
     ("setting.scene.bend_2d_mode", "Bend 2D Mode"),
@@ -817,28 +825,29 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          bend is worth tuning, and 30 degrees beyond, out to ±180. The whole level is bent, and \
          the camera and the Zapper aim follow it. It costs a little per vertex while any of the \
          three angles is not 0, and nothing at all while all three are 0. A script reaches it as \
-         spl.bend_zx, and a script's write still lands on a multiple of 30 as it did in 3dSen. \
-         Default: 0.",
+         spl.bend_zx, and a script's write lands on the same steps the menu offers. Default: 0.",
     ),
     (
         "detail.scene.bend_tb",
         "Degrees; 0 is a flat scene. The steps are 5 degrees between −30 and 30 and 30 degrees \
          beyond, out to ±180. It costs a little per vertex while any of the three angles is not 0, \
          and nothing at all while all three are 0. A script reaches it as spl.bend_zy, and a \
-         script's write still lands on a multiple of 30 as it did in 3dSen. Default: 0.",
+         script's write lands on the same steps the menu offers. Default: 0.",
     ),
     (
         "detail.scene.arc_h",
         "Degrees; 0 is a flat scene. The steps are 5 degrees between −30 and 30 and 30 degrees \
          beyond, out to ±180. The Arc Center row below chooses what the level bends around. A \
-         script reaches it as spl.arc_yx, and a script's write still lands on a multiple of 30 as \
-         it did in 3dSen. Default: 0.",
+         script reaches it as spl.arc_yx, and a script's write lands on the same steps the menu \
+         offers. Default: 0.",
     ),
     (
         "detail.scene.arc_center",
-        "Whether the arc bends around the middle of the screen or around its bottom edge. It does \
-         nothing while Arc Horizontal is 0. A script reaches it as spl.arc_center. Default: Screen \
-         Center.",
+        "The height the arc bends around: the middle of the screen, its bottom edge — eight units \
+         below the picture — or one of the three quarters between the two, which put the pivot \
+         that fraction of the way down. It does nothing while Arc Horizontal is 0. A script \
+         reaches it as spl.arc_center, where 0 and 1 are the two ends, exactly as in 3dSen, and a \
+         value in between lands on the nearest quarter. Default: Screen Center.",
     ),
     (
         "detail.scene.bend_2d_mode",

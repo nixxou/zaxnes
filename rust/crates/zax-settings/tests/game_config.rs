@@ -230,3 +230,39 @@ fn ro_2_the_new_options_of_a_game_survive_a_restart() {
         assert_eq!(Some(value.as_int()), found, "{id:?}");
     }
 }
+
+/// RO-5 part 2: a game's own arc centre survives a restart at **any** of its five rungs,
+/// the three new ones included. The key's JSON is a number either way — `0` and `1` for the two
+/// values AMD-043 names, `0.25` and the rest for the quarters — so the file format of the key is
+/// unchanged for everything an older Zaxnes could have written.
+#[test]
+fn ro_5_an_intermediate_arc_centre_of_a_game_survives_a_restart() {
+    let rom = r"D:\roms\zelda2.nes";
+    for (written, expected) in [(0.0_f32, "0"), (0.25, "0.25"), (0.75, "0.75"), (1.0, "1")] {
+        let mut first = GameConfigFile::new(MemoryStorage::new());
+        first.set_options_for(
+            rom,
+            vec![(SettingId::SceneArcCenter, SettingValue::Float(written))],
+        );
+        first.save().expect("the store accepts the write");
+
+        let text = first
+            .storage()
+            .text(GameConfigFile::<MemoryStorage>::DEFAULT_NAME)
+            .expect("the file was written");
+        assert!(
+            text.contains(&format!("\"scene.arc_center\": {expected}\n")),
+            "{written} should be written as {expected}: {text}"
+        );
+
+        let mut second = GameConfigFile::new(first.storage().clone());
+        assert_eq!(second.load(now()).status, SettingsLoadStatus::Loaded);
+        let read = second.options_for(rom);
+        assert_eq!(1, read.len(), "{written}");
+        assert!(
+            (read[0].1.as_float() - written).abs() < f32::EPSILON,
+            "{written} read back as {:?}",
+            read[0].1
+        );
+    }
+}

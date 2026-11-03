@@ -256,11 +256,15 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     // A setting whose domain is a finite list gets a drop-down whatever its shape:
     // video.frame_rate is a whole number out of {60, 90, 120} (SPEC-09 §4.1.1), and SPEC-10
     // REQ-UI-061 shows it as a list.
+    // RO-5 part 2: a real whose rungs carry names is a list too (`scene.arc_center`), but only the
+    // ones `options::LABELLED_FRACTIONS` names — a stepped real labelled with its own numbers
+    // (the volume, the field of view, the light) stays a slider.
     let enumerated = descriptor
         .domain()
         .options()
         .is_some_and(|options| !options.is_empty())
-        && matches!(descriptor.kind(), SettingKind::Enum | SettingKind::Int);
+        && (matches!(descriptor.kind(), SettingKind::Enum | SettingKind::Int)
+            || options::is_labelled_fraction(id));
     let changed = if descriptor.kind() == SettingKind::Text {
         draw_text(ui, host, row)
     } else if options::SWITCHES.contains(&id) {
@@ -392,8 +396,16 @@ fn draw_enum_labelled(
     if !ui.combo(label, &mut index, &labels, |label| label.as_str().into()) {
         return None;
     }
+    let value = options.get(index).map_or(0.0, |option| option.value);
+    // RO-5 part 2: a rung of `scene.arc_center` is a quarter, so the drop-down of a real-valued
+    // setting writes the rung itself. `SettingsModel::write` coerces to the declared kind anyway,
+    // but writing an `Int` here would have truncated the quarter before it got there.
+    if descriptor.kind() == SettingKind::Float {
+        #[allow(clippy::cast_possible_truncation)] // a published rung of the domain
+        return Some(SettingValue::Float(value as f32));
+    }
     #[allow(clippy::cast_possible_truncation)] // the C# `(int)options[index].Value`
-    let picked = options.get(index).map_or(0, |option| option.value as i32);
+    let picked = value as i32;
     Some(if descriptor.kind() == SettingKind::Int {
         SettingValue::Int(picked)
     } else {

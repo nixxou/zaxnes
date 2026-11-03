@@ -8,8 +8,12 @@ use zax_engine3d::vectors::Vec3;
 /// The tolerance of the vector table of REQ-SCN-067, ±0.05 unit.
 const TOLERANCE: f32 = 0.05;
 
+/// The amendment's own two-value view of the arc centre: REQ-SCN-066 gives it the screen centre
+/// and the bottom edge, and the thirteen test vectors of REQ-SCN-067 are stated for those two. The
+/// fractions RO-5 part 2 adds have a test of their own
+/// ([`ro_5_the_pivot_is_linear_between_the_two_heights`]).
 fn bend(lr: f32, tb: f32, arc: f32, at_edge: bool) -> SpaceBend {
-    SpaceBend::new(lr, tb, arc, at_edge, 1.0)
+    SpaceBend::new(lr, tb, arc, if at_edge { 1.0 } else { 0.0 }, 1.0)
 }
 
 fn close(expected: f32, actual: f32, tolerance: f32, what: &str) {
@@ -80,7 +84,7 @@ fn req_scn_067_no_angle_at_all_is_the_identity() {
     assert!(none.is_identity());
     assert_eq!(SpaceBend::NONE, none);
     assert_eq!(SpaceBend::default(), none);
-    assert!(SpaceBend::new(0.0, 0.0, 0.0, true, 1.0).is_identity());
+    assert!(SpaceBend::new(0.0, 0.0, 0.0, 1.0, 1.0).is_identity());
 
     for point in [
         Vec3::new(128.0, 120.0, 0.0),
@@ -249,8 +253,8 @@ fn req_scn_068_the_normal_is_transported_by_the_curvature() {
 /// by the same angle over its own width. A scale that is not a positive finite number reads as 1.
 #[test]
 fn req_scn_067_the_scene_scale_divides_the_curvature() {
-    let desktop = SpaceBend::new(90.0, 0.0, 0.0, false, 1.0);
-    let half = SpaceBend::new(90.0, 0.0, 0.0, false, 0.5);
+    let desktop = SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0);
+    let half = SpaceBend::new(90.0, 0.0, 0.0, 0.0, 0.5);
     // k = θ / (L · s): halving the scale doubles the curvature, so the same angle is swept over
     // half the width.
     assert!(
@@ -263,7 +267,7 @@ fn req_scn_067_the_scene_scale_divides_the_curvature() {
     for bad in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
         assert_eq!(
             desktop.curvature().x,
-            SpaceBend::new(90.0, 0.0, 0.0, false, bad).curvature().x,
+            SpaceBend::new(90.0, 0.0, 0.0, 0.0, bad).curvature().x,
             "a scale of {bad} reads as 1"
         );
     }
@@ -275,7 +279,83 @@ fn req_scn_067_the_scene_scale_divides_the_curvature() {
 fn req_scn_066_the_arc_centre_picks_the_pivot() {
     assert_eq!(0.0, bend(0.0, 0.0, 60.0, false).arc_pivot());
     assert_eq!(-120.0, bend(0.0, 0.0, 60.0, true).arc_pivot());
-    assert_eq!(-60.0, SpaceBend::new(0.0, 0.0, 60.0, true, 0.5).arc_pivot());
+    assert_eq!(-60.0, SpaceBend::new(0.0, 0.0, 60.0, 1.0, 0.5).arc_pivot());
+}
+
+/// RO-5 part 2 (owner decision): the arc centre is a **fraction** of the way between the two
+/// heights REQ-SCN-066 names, so the pivot is linear in it and monotone — and the two ends are the
+/// very bit patterns the boolean produced, so a capture at 0 or at 1 is pixel-identical to the one
+/// of before this lot.
+#[test]
+fn ro_5_the_pivot_is_linear_between_the_two_heights() {
+    // The two ends, bit for bit (`to_bits`, not `==`, which would let `−0.0` through).
+    assert_eq!(
+        0.0_f32.to_bits(),
+        SpaceBend::new(0.0, 0.0, 60.0, 0.0, 1.0)
+            .arc_pivot()
+            .to_bits()
+    );
+    assert_eq!(
+        (space_bend::EDGE_PIVOT_OFFSET).to_bits(),
+        SpaceBend::new(0.0, 0.0, 60.0, 1.0, 1.0)
+            .arc_pivot()
+            .to_bits()
+    );
+    // And the whole struct is equal to what the two values gave before, so every uniform the
+    // renderer uploads — not the pivot alone — is unchanged at both ends.
+    assert_eq!(
+        bend(10.0, -20.0, 60.0, false),
+        SpaceBend::new(10.0, -20.0, 60.0, 0.0, 1.0)
+    );
+    assert_eq!(
+        bend(10.0, -20.0, 60.0, true),
+        SpaceBend::new(10.0, -20.0, 60.0, 1.0, 1.0)
+    );
+
+    // The five rungs the setting offers, at the desktop scale: linear, strictly monotone.
+    let pivots: Vec<f32> = [0.0, 0.25, 0.5, 0.75, 1.0]
+        .into_iter()
+        .map(|centre| SpaceBend::new(0.0, 0.0, 60.0, centre, 1.0).arc_pivot())
+        .collect();
+    assert_eq!(vec![0.0, -30.0, -60.0, -90.0, -120.0], pivots);
+    for pair in pivots.windows(2) {
+        assert!(
+            pair[1] < pair[0],
+            "the pivot only ever goes down: {pivots:?}"
+        );
+    }
+
+    // The scene scale divides it as it divides the two ends (REQ-SCN-067).
+    assert_eq!(-30.0, SpaceBend::new(0.0, 0.0, 60.0, 0.5, 0.5).arc_pivot());
+
+    // A value outside the range, or not a number, is brought back in: `--bend` and a Lua write
+    // reach this constructor without the domain's snapping.
+    for (centre, expected) in [
+        (-1.0_f32, 0.0_f32),
+        (2.0, space_bend::EDGE_PIVOT_OFFSET),
+        (f32::NAN, 0.0),
+        (f32::INFINITY, 0.0),
+    ] {
+        assert_eq!(
+            expected,
+            SpaceBend::new(0.0, 0.0, 60.0, centre, 1.0).arc_pivot(),
+            "a centre of {centre}"
+        );
+    }
+
+    // An intermediate pivot really moves the picture: the arc is wrapped around `p − v`, so the
+    // image of a point differs at every rung.
+    let point = Vec3::new(40.0, 60.0, 0.0);
+    let images: Vec<Vec3> = [0.0, 0.25, 0.5, 0.75, 1.0]
+        .into_iter()
+        .map(|centre| SpaceBend::new(0.0, 0.0, 60.0, centre, 1.0).apply(point))
+        .collect();
+    for (first, second) in images.iter().zip(images.iter().skip(1)) {
+        assert!(
+            Vec3::distance(*first, *second) > 0.5,
+            "two neighbouring rungs give the same picture: {images:?}"
+        );
+    }
 }
 
 /// REQ-SCN-067 step 1: the per-axis constants the shader reads are `k = θ / (L · s)`,

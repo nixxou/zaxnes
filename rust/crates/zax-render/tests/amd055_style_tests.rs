@@ -129,7 +129,7 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     let fixture = GlFixture::new();
     let mut renderer = fixture.renderer();
     let mut built = scene();
-    built.scene.bend = zax_engine3d::space_bend::SpaceBend::new(60.0, 0.0, 0.0, false, 1.0);
+    built.scene.bend = zax_engine3d::space_bend::SpaceBend::new(60.0, 0.0, 0.0, 0.0, 1.0);
 
     let classic = fixture.render_built(&mut renderer, &built);
     built.scene.settings.style.enhanced = true;

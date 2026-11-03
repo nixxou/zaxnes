@@ -785,7 +785,7 @@ fn req_scn_080_the_snapping_happens_before_the_curvature() {
     // Ten degrees of left-right curvature: enough to move every pixel of the floor, and little
     // enough that the shadow of the fixture still falls across the middle of the floor, where
     // its edges can be seen to cut cells with the effect off.
-    let bend = SpaceBend::new(10.0, 0.0, 0.0, false, 1.0);
+    let bend = SpaceBend::new(10.0, 0.0, 0.0, 0.0, 1.0);
 
     let mut bent_off = floor_and_caster(false, false);
     bent_off.scene.bend = bend;

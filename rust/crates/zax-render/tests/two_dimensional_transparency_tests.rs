@@ -287,7 +287,7 @@ fn req_scn_076_the_transparency_holds_bent_as_well_as_flat() {
     let picture = transparent_picture();
     for bend in [
         zax_engine3d::space_bend::SpaceBend::NONE,
-        zax_engine3d::space_bend::SpaceBend::new(90.0, 0.0, 0.0, false, 1.0),
+        zax_engine3d::space_bend::SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0),
     ] {
         let mut scene = scene();
         scene.bend = bend;

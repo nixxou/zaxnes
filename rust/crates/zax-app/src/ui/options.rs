@@ -453,6 +453,23 @@ pub const SWITCHES: [SettingId; 2] = [
     SettingId::RenderStyleReflections,
 ];
 
+/// The settings whose value is a **fraction** and whose rungs carry names, so that both interfaces
+/// show the name rather than the number (RO-5 part 2: `scene.arc_center`'s five positions, from
+/// "Screen Center" to "Screen Edge" by quarters).
+///
+/// An explicit list rather than "a real whose domain publishes rungs": `audio.volume`,
+/// `camera.fov` and `light.intensity` are stepped reals too, and their rungs are labelled with
+/// their own numbers, so that rule would turn each of them into a drop-down of twenty entries.
+// Q-107 §8
+pub const LABELLED_FRACTIONS: [SettingId; 1] = [SettingId::SceneArcCenter];
+
+/// Whether `id` is drawn as a named list although its value is a real
+/// ([`LABELLED_FRACTIONS`]).
+#[must_use]
+pub fn is_labelled_fraction(id: SettingId) -> bool {
+    LABELLED_FRACTIONS.contains(&id)
+}
+
 /// Whether `id` is one of the twelve style parameters or the style itself.
 #[must_use]
 pub fn is_style_row(id: SettingId) -> bool {

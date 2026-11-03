@@ -710,7 +710,7 @@ fn req_scn_080_the_occlusion_works_on_the_bent_depth() {
     let gl = GlFixture::create(640, 480);
     let mut renderer = gl.renderer();
     let mut built = close_up_a(true);
-    built.scene.bend = SpaceBend::new(40.0, 0.0, 0.0, false, 1.0);
+    built.scene.bend = SpaceBend::new(40.0, 0.0, 0.0, 0.0, 1.0);
 
     let (off, _) = shot(&gl, &mut renderer, &mut built, StyleSettings::default());
     let (on, statistics) = shot(

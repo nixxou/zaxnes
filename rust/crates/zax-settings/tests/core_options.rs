@@ -273,9 +273,34 @@ fn the_curvature_options_are_the_ones_the_amendments_publish() {
         }
     }
 
+    // AMD-043 §6 writes "option, 2 valeurs"; RO-5 part 2 makes it five, the three new ones being
+    // the quarters between the two heights (owner decision, Q-107 §8). The libretro list is also
+    // what the console's page steps by, so the two have to agree. No persisted choice is lost: a
+    // value is applied by its **label**, and the two the amendment names are still there.
     let centre = core_options::find("zaxnes_scene_arc_center").expect("arc centre");
-    assert_eq!(["Screen Center", "Screen Edge"], centre.values.as_slice());
+    assert_eq!(
+        ["Screen Center", "25%", "50%", "75%", "Screen Edge"],
+        centre.values.as_slice()
+    );
     assert_eq!("Screen Center", centre.default_value);
+    for (label, expected) in [
+        ("Screen Center", 0.0),
+        ("25%", 0.25),
+        ("50%", 0.5),
+        ("75%", 0.75),
+        ("Screen Edge", 1.0),
+    ] {
+        let mut model = SettingsModel::new();
+        assert!(core_options::try_apply(
+            &mut model,
+            "zaxnes_scene_arc_center",
+            label
+        ));
+        assert!(
+            (f64::from(model.get(SettingId::SceneArcCenter).as_float()) - expected).abs() < 1e-9,
+            "{label}"
+        );
+    }
 
     let flat = core_options::find("zaxnes_scene_bend_2d_mode").expect("bend 2D mode");
     assert_eq!(["enabled", "disabled"], flat.values.as_slice());

@@ -346,7 +346,7 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
 
 /// A curvature of 90° left-right, the one the ROM criterion of REQ-INP-124 uses.
 fn bend_90() -> SpaceBend {
-    SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
+    SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0)
 }
 
 /// Where the pointer has to be for the ray to pass through the scene point `target`.
@@ -375,7 +375,9 @@ fn req_inp_124_a_ray_through_the_bent_image_aims_at_the_point_it_came_from(
     #[case] at_edge: bool,
     #[case] point: (f32, f32, f32),
 ) {
-    let bend = SpaceBend::new(bend_lr, bend_tb, arc_h, at_edge, 1.0);
+    // The amendment's two heights; RO-5 part 2 made the parameter a fraction, and the inverse of
+    // REQ-INP-124 is a function of the pivot alone, so a quarter needs no case of its own here.
+    let bend = SpaceBend::new(bend_lr, bend_tb, arc_h, f32::from(u8::from(at_edge)), 1.0);
     let point = zax_engine3d::vectors::Vec3::new(point.0, point.1, point.2);
     let view = default_view(None);
     // The aim plane is z₀ = z of P, which the Zapper offset carries.
@@ -430,7 +432,7 @@ fn req_inp_124_a_candidate_outside_the_window_is_passed_unbounded() {
     // window. A gentle curvature is used on purpose: at 90° the scene wraps far enough that a
     // ray aimed at the far left also crosses the plane inside the window, and REQ-INP-124 then
     // prefers that nearer in-window candidate — which is the requirement, not a failure.
-    let bend = SpaceBend::new(30.0, 0.0, 0.0, false, 1.0);
+    let bend = SpaceBend::new(30.0, 0.0, 0.0, 0.0, 1.0);
     let view = default_view(None);
     let far = zax_engine3d::vectors::Vec3::new(-220.0, 120.0, 0.0);
     let pointer = pointer_at(&view, bend.apply(far));

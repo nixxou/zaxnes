@@ -1,6 +1,6 @@
 # RO-5 — honest anti-aliasing labels, and finer steps for the arc centre
 
-Branch `reworkoptions`, from RO-4 (`32adb08`). Two owner requests, independent of each other:
+Branch `reworkoptions`, from RO-3 (`72c3f33`). Two owner requests, independent of each other:
 
 1. the **anti-aliasing labels** say what the renderer really does — MSAA 4× and MSAA 8× instead of
    the specification's names FFAA and SMAA — everywhere the user reads them, and **nothing** else
@@ -18,22 +18,42 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 
 | # | Step | State |
 |---|---|---|
-| 1 | The map of both parts, the decisions they force, the test plan | done — `db41949` |
-| 2 | Part 1: the labels | done — this commit |
-| 3 | Part 2: the arc centre | todo |
+| 1 | The map of both parts, the decisions they force, the test plan | done — `e3a7b9d` |
+| 2 | Part 1: the labels | done — `7cd57f7` |
+| 3 | Part 2: the arc centre | done — this commit |
 | 4 | Closing: the notes, Q-107, `OPTIONS-LAYOUT.md`, fmt, clippy, the full tests, the release build | todo |
 
 ## Notes
 
 ### Uncommitted work found at the start (step 1)
 
-`git status` showed the same three untracked things RO-1 to RO-4 each found and left alone, for the
+`git status` showed the same three untracked things RO-1 to RO-3 each found and left alone, for the
 same reasons: `tests/` at the repository root (the .NET test tree, removed by `d3680e4` and still
 on disk) and the two scratch probes `rust/crates/zax-render/tests/dump_sources_tmp.rs` and
 `probe_tmp.rs`, both headed "Scratch probe, not committed" and gated on `ZAX_PROBE`. Nothing of
 RO-5 was found half-done. A wildcard `git add` under `rust/` sweeps the two probes into the index
-every time (RO-1, RO-2 and RO-4 each had to take them back out in a commit of their own), so this
+every time (RO-1 and RO-2 each had to take them back out in a commit of their own), so this
 lot stages files **by name**.
+
+### The base the lot sits on, and the withdrawn lot (step 3)
+
+The lot was first written on top of RO-4. The owner **withdrew RO-4** (patches always hooked); R0
+reset the branch to RO-3's head `72c3f33`, kept RO-4 on `ro4-abandoned`, cherry-picked steps 1 and
+2 as `e3a7b9d` and `7cd57f7`, and re-applied the working tree of step 3, which applied cleanly.
+Checked before continuing, as R0 asked:
+
+- `emu.patches_always_hooked` and every spelling of it: **nowhere** in `impl/` — not in the
+  catalogue, not in `SettingKeys.reference.txt`, not in the two goldens, not in these notes;
+- `docs/progress/RO-4.md` and `docs/spec/changes/Q-108.md` are gone with the reset;
+- `git diff 72c3f33 HEAD` is the two string tables, `anti_alias_labels_tests.rs` and this file and
+  **nothing else**, so the key lists and the two goldens are letter for letter RO-3's;
+- the three places in these notes that named RO-4 — the base commit above and two sentences about
+  the untracked files — are rewritten; the base commit that the measurements of part 2 compare
+  against is `72c3f33`, which is the commit the pivot arithmetic is bit-compared with.
+
+The step-2 note below records "zax-app: 759 passed". That figure was measured on the RO-4 base,
+whose `patches_always_hooked_tests.rs` is 677 lines of tests now withdrawn; on this base the same
+suite is **748 passed, 0 failed** with part 2 included. Nothing was lost — the figure's base moved.
 
 ### Step 1 — part 1: where the anti-aliasing labels come from
 
@@ -117,9 +137,87 @@ Lua path untouched; the settings file still holding `"SMAA"` and a file holding 
 `try_apply("SMAA")` still applying; the tooltip naming all four of FFAA, SMAA, MSAA 4× and MSAA 8×.
 
 `zax-app`: **759 passed, 0 failed** (753 before, plus the 6 new). `cargo fmt --check` and
-`cargo clippy -p zax-app --all-targets -- -D warnings` clean.
+`cargo clippy -p zax-app --all-targets -- -D warnings` clean. (Figure measured on the RO-4 base;
+see "The base the lot sits on" above — 748 on this base, the withdrawn lot's tests being gone.)
 
-### Step 1 — part 2: what `scene.arc_center` is at `32adb08`
+### Step 3 — part 2 as built, and the two surprises
+
+The nine decisions of step 1 were carried out as written; nothing had to be reopened. The shape of
+the change, file by file:
+
+| File | What it does |
+|---|---|
+| `zax-settings/src/table.rs` | `ARC_CENTER_RUNGS` / `ARC_CENTER_LABELS`, the kind `Float`, the default `Float(0.0)`, the domain `Domain::grid(&RUNGS, 2).with_labels(..)`, the libretro list from the same two arrays |
+| `zax-engine3d/src/space_bend.rs` | `arc_at_edge: bool` → `arc_center: f32`; the pivot is `EDGE_PIVOT_OFFSET · scale · fraction`, the fraction clamped and a non-number read as 0 |
+| `zax-app/src/scene_script_bridge.rs` | `as_int() != 0` → `as_float()` |
+| `zax-app/src/ui/options.rs` | `LABELLED_FRACTIONS` and `is_labelled_fraction` |
+| `zax-app/src/ui/zax_ui/options.rs` | the `enumerated` predicate takes the list in; `draw_enum_labelled` writes a `Float` when the kind is `Float` |
+| `zax-app/src/ui/handheld/advanced.rs` | `value_text` shows the rung's name for a labelled fraction |
+| `zax-scripting/src/settings.rs` | the three reads become `as_double()`; `set_visual_style_parameter` and `reset_visual_style_parameters` write a `Float` when the descriptor is one |
+| `zax-scripting/src/values.rs` | `number_format::to_f32`, the `(float)` cast beside the `(int)` one |
+| `zax-harness/src/render/mod.rs` | `--bend`'s fourth part parses a number in `[0, 1]` |
+
+**Surprise 1: the near end needed writing out, not multiplying.** `EDGE_PIVOT_OFFSET · s · 0.0` is
+**`−0.0`**, the offset being negative. Numerically that is the same pivot everywhere it is used —
+`−0.0 == 0.0`, and the shader's arithmetic agrees — but the uniform the renderer uploads would have
+carried a different bit pattern than before the lot, which is not what "pixel-identical at 0 and 1"
+should have to rest on. So `fraction <= 0.0` yields a literal `0.0`, and the test compares
+`to_bits()`, not `==`, at both ends. The far end needs nothing: `x · 1.0 == x` exactly.
+
+**Surprise 2: the two goldens did not move at all.** The test plan expected the RO-3 option tree
+golden to gain the new values. `rust/goldens/handheld-option-tree.txt` and
+`desktop-options-shown.txt` hold **keys**, never values (`scene.arc_center` appears three times
+across the two, bare), so five rungs read exactly as two did. Nothing to update, and the two
+goldens' own tests confirm it.
+
+The one call-site cost step 1 predicted came due: 32 `SpaceBend::new(…, false|true, …)` in the
+tests of four crates became `0.0` / `1.0`. Two of them read better as a conversion than as a
+literal — `space_bend_tests.rs`'s own `bend()` helper, which keeps the amendment's two-value view
+for the thirteen vectors of REQ-SCN-067, and the `#[case]` list of `zapper_input_tests.rs`, whose
+`at_edge: bool` cases are REQ-INP-124's own.
+
+#### What the tests check, and what they found
+
+New: `space_bend_tests::ro_5_the_pivot_is_linear_between_the_two_heights` (both ends bit for bit
+and the whole struct equal to the boolean's, the five pivots `0, −30, −60, −90, −120` strictly
+monotone, the scene scale still dividing them, the clamping of a value out of range or not a
+number, and two neighbouring rungs never giving the same image);
+`bend_tests::ro_5_the_five_arc_centres_export_five_pictures_and_the_two_ends_are_unchanged` (the
+exported vertices at the two ends identical to those built from the two pivots REQ-SCN-066 states,
+the ten pairs of rungs all distinct, the middle rung's lowest vertex between the two ends');
+`two_zero_settings::ro_5_the_arc_centre_snaps_on_the_quarters` (the whole table of decision 6,
+0 and 1 exact, the ties away from zero, and the script's grid equal to the menu's at 201 probes
+from −0.5 to 1.5); `settings::ro_5_a_script_writes_and_reads_the_five_rungs_of_the_arc_centre`,
+`ro_5_a_reset_takes_the_arc_centre_back_to_the_screen_centre`,
+`ro_5_the_write_log_carries_an_intermediate_arc_centre_there_and_back` (REQ-LUA-116's round trip
+putting 0.75 back exactly, at rung 3 of 5); `bend_options_tests::ro_5_…_named_list…` and the two
+rewritten cases there (the five rungs, their labels in both languages, the pad walking the five a
+quarter at a time and stopping at each end, the three other stepped reals staying sliders);
+`bend_settings_tests::ro_5_a_stored_arc_centre_loads_unchanged_and_the_quarters_survive_a_restart`
+(the file still reading `"scene.arc_center": 1`, each quarter surviving a save and a load, a
+hand-edited 0.4 landing on 0.5); `game_config::ro_5_an_intermediate_arc_centre_of_a_game_survives_a_restart`
+(`0`, `0.25`, `0.75`, `1` as the exact JSON text, read back through `games.json`);
+`core_options` extended (the five values, the default still `Screen Center`, and each of the five
+labels applying through `try_apply`); `render_report_tests::ro_5_the_bend_centre_takes_any_fraction`
+(the quarters, a 0.1 off the grid, and `1.5` / `-0.1` / `edge` / empty all refused).
+
+The decisive compatibility check is the settings file's: `"scene.arc_center": 1` is still the text
+written, so a profile, a `games.json` or a settings file from before this lot is read back bit for
+bit — which is what decision 1 promised and the one thing a `Float` kind could have broken.
+
+Release tests of every touched crate, one at a time, foreground: `zax-settings` **255 passed**,
+`zax-engine3d` **235 passed, 6 ignored**, `zax-scripting` **170 passed, 12 ignored**, `zax-app`
+**748 passed, 1 ignored**, `zax-harness` **49 passed**, `zax-render` **287 passed, 1 ignored** —
+**0 failed** anywhere. `cargo fmt --check` and
+`cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` clean.
+
+Per-frame cost: none. `SpaceBend::new` runs when a curvature setting changes
+(`scene_script_bridge::bend_of`), the pivot it computes is the uniform `uBendPivot` that was
+already uploaded once per change, and the three shader paths the brief names — the scene pass, the
+shadow pass and the 2D-mode rectangle — read that one uniform, so **no shader source changed**.
+The clamp and the branch are two instructions on a path taken when a menu row moves.
+
+### Step 1 — part 2: what `scene.arc_center` is at `72c3f33`
 
 | | |
 |---|---|
@@ -177,7 +275,7 @@ clamped to `[0, 1]`. Two reasons for one constructor rather than a second one:
   fraction reaches all three with **no shader change and no new per-frame work** — which is what
   the brief's "the pivot height is a uniform computed when the setting changes" asks for;
 - at 0.0 and 1.0 the arithmetic is bit-exact (`x * 1.0 == x`, `x * 0.0 == 0.0` for a finite `x`),
-  so the two ends are **pixel-identical** to `32adb08` by construction, not by measurement.
+  so the two ends are **pixel-identical** to `72c3f33` by construction, not by measurement.
 
 The price is that every `SpaceBend::new(…, false, …)` in the tests becomes `0.0` and `true` becomes
 `1.0`: 30-odd call sites, all mechanical, none of them a behaviour change.
@@ -264,7 +362,7 @@ angles already took anything, on or off the grid, deliberately.
 | 1 | `Video.AntiAlias` and `Setting.Msaa` read and write the same numbers; `goldens/lua-api.txt` byte for byte | existing (`two_zero_api_tests`, `lua_api_tests`) |
 | 1 | the tooltip and the help say MSAA 4×/8× and name FFAA/SMAA as 3dSen's names | `anti_alias_labels_tests.rs` |
 | 2 | the domain is five rungs 0, 0.25, 0.5, 0.75, 1 with the five labels, in both languages | `bend_options_tests.rs` |
-| 2 | the pivot at 0 and at 1 is bit-identical to `32adb08` (0 and `−120 · s`), and the exported scene at both is unchanged | `space_bend_tests.rs`, `bend_tests.rs` |
+| 2 | the pivot at 0 and at 1 is bit-identical to `72c3f33` (0 and `−120 · s`), and the exported scene at both is unchanged | `space_bend_tests.rs`, `bend_tests.rs` |
 | 2 | the pivot is **monotone** and linear in the setting: 0.25 → −30, 0.5 → −60, 0.75 → −90 | `space_bend_tests.rs` |
 | 2 | an intermediate value really bends differently: the exported positions at 0.5 are between those at 0 and at 1 and equal to neither | `bend_tests.rs` |
 | 2 | a Lua write of 0 or 1 behaves exactly as before; the whole table of decision 6 | `zax-scripting::settings::tests`, `two_zero_settings.rs` |

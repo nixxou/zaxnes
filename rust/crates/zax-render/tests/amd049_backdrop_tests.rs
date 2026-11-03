@@ -528,7 +528,7 @@ fn req_scn_075_the_backdrop_model_bends_with_the_scene() {
     // A curvature of 90° left-right, the setting the criteria of REQ-SCN-068 use. The box is
     // subdivided and bent, so the normals it shades with are the transported ones — the centre
     // of the picture still faces the eye, so it keeps its colour.
-    built.scene.bend = zax_engine3d::space_bend::SpaceBend::new(90.0, 0.0, 0.0, false, 1.0);
+    built.scene.bend = zax_engine3d::space_bend::SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0);
     let bent = gl.render_built(&mut renderer, &built);
     assert!(
         (centre(&bent).0 - 26).abs() <= 3,

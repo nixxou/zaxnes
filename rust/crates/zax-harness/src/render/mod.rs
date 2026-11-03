@@ -103,7 +103,8 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --no-nes-bg-color        scene.use_nes_bg_color false, so --bg-color shows behind the scene
                            (the conditioning AMD-050 REQ-SCN-076 needs to be observable)
   --bend <lr>,<tb>,<arc>[,<centre>]  the curvature of AMD-043 REQ-SCN-066, in degrees; the
-                           centre is 0 for the screen centre (default) or 1 for its bottom edge.
+                           centre is 0 for the screen centre (default), 1 for its bottom edge,
+                           or any fraction between (RO-5 part 2: the setting offers quarters).
                            All 0 by default, which is the capture of before the amendment.
                            Any angle is taken, on or off the grid the settings offer (RO-1
                            point 7: 5 degrees between -30 and 30, 30 beyond)
@@ -402,9 +403,10 @@ impl Options {
         match key {
             "--frames" => self.frames = parse_frames(value),
             // AMD-043 REQ-SCN-066: the three angles in degrees and, optionally, the arc centre
-            // (0 the screen centre, 1 its bottom edge). The values go through `SpaceBend::new`
-            // as they are, without the 30-degree snapping of the setting's domain, so that R0
-            // can capture an angle between two rungs if it wants one.
+            // (0 the screen centre, 1 its bottom edge, and since RO-5 part 2 any fraction
+            // between). The values go through `SpaceBend::new` as they are, without the snapping
+            // of the setting's domain, so that R0 can capture an angle or a pivot between two
+            // rungs if it wants one.
             "--bend" => self.bend = parse_bend(value)?,
             "--rom" => self.rom = Some(PathBuf::from(value)),
             "--run" => self.run_frames = integer(value)?,
@@ -571,8 +573,10 @@ impl Options {
 /// applies, so that a capture can be taken at an angle between two rungs. Since RO-1 point 7 the
 /// grid the settings offer is finer near 0 — 5 degrees between −30 and 30, 30 degrees beyond — and
 /// this parser is still the one that takes anything, which is what a comparison of 0, 15 and 30
-/// degrees needs. The centre is 0 for the screen centre (the default) or 1 for the bottom edge of
-/// the frame.
+/// degrees needs. The centre is 0 for the screen centre (the default), 1 for the bottom edge of
+/// the frame, and — since RO-5 part 2, which gave the setting the rungs 0, 0.25, 0.5, 0.75 and 1 —
+/// any fraction between the two, snapping included none, so that a capture can be taken at a pivot
+/// the menu does not offer.
 fn parse_bend(value: &str) -> Result<SpaceBend, String> {
     let parts: Vec<&str> = value.split(',').collect();
     if !(3..=4).contains(&parts.len()) {
@@ -584,18 +588,19 @@ fn parse_bend(value: &str) -> Result<SpaceBend, String> {
             .parse::<f32>()
             .map_err(|_| format!("--bend: '{}' is not a number", parts[index]))
     };
-    let at_edge = match parts.get(3).map(|centre| centre.trim()) {
-        None | Some("0") => false,
-        Some("1") => true,
-        Some(other) => return Err(format!("--bend centre: 0 or 1, got '{other}'")),
+    let centre = match parts.get(3).map(|centre| centre.trim()) {
+        None => 0.0,
+        Some(text) => {
+            let parsed = text
+                .parse::<f32>()
+                .map_err(|_| format!("--bend centre: a number from 0 to 1, got '{text}'"))?;
+            if !(0.0..=1.0).contains(&parsed) {
+                return Err(format!("--bend centre: a number from 0 to 1, got '{text}'"));
+            }
+            parsed
+        }
     };
-    Ok(SpaceBend::new(
-        angle(0)?,
-        angle(1)?,
-        angle(2)?,
-        at_edge,
-        1.0,
-    ))
+    Ok(SpaceBend::new(angle(0)?, angle(1)?, angle(2)?, centre, 1.0))
 }
 
 /// `--style <classic|enhanced>`: the value `render.visual_style` holds (AMD-055 REQ-SCN-078).

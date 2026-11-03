@@ -393,10 +393,16 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.scene.arc_center", "Centre de l'arc"),
     (
         "help.scene.arc_center",
-        "Autour de quoi l'arc se courbe : le centre de l'écran, ou son bord bas.",
+        // La phrase d'AMD-043 §6, à laquelle RO-5 partie 2 ajoute les quarts sans la remplacer.
+        "Autour de quoi l'arc se courbe : le centre de l'écran, son bord bas, ou l'un des quarts \
+         entre les deux.",
     ),
     ("option.Screen Center", "Centre de l'écran"),
     ("option.Screen Edge", "Bord de l'écran"),
+    // RO-5 partie 2 : les trois quarts entre ces deux hauteurs.
+    ("option.25%", "25 %"),
+    ("option.50%", "50 %"),
+    ("option.75%", "75 %"),
     // AMD-046 §3, réglage propre à Zaxnes : l'image plate du mode 2D suit la courbure
     // d'AMD-043 sauf si on le désactive.
     ("setting.scene.bend_2d_mode", "Courber le mode 2D"),
@@ -807,28 +813,31 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          légère courbure vaut d'être réglée finement, et de 30 degrés au-delà, jusqu'à ±180. Tout \
          le niveau est courbé, et la caméra comme la visée du Zapper le suivent. Cela coûte un peu \
          par sommet dès qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. \
-         Un script y accède sous le nom spl.bend_zx, et l'écriture d'un script tombe toujours sur \
-         un multiple de 30 comme dans 3dSen. Par défaut : 0.",
+         Un script y accède sous le nom spl.bend_zx, et l'écriture d'un script tombe sur les mêmes \
+         crans que ceux du menu. Par défaut : 0.",
     ),
     (
         "detail.scene.bend_tb",
         "En degrés ; 0 donne une scène plate. Les pas sont de 5 degrés entre −30 et 30 et de 30 \
          degrés au-delà, jusqu'à ±180. Cela coûte un peu par sommet dès qu'un des trois angles \
          n'est pas 0, et rien du tout quand les trois sont 0. Un script y accède sous le nom \
-         spl.bend_zy, et l'écriture d'un script tombe toujours sur un multiple de 30 comme dans \
-         3dSen. Par défaut : 0.",
+         spl.bend_zy, et l'écriture d'un script tombe sur les mêmes crans que ceux du menu. \
+         Par défaut : 0.",
     ),
     (
         "detail.scene.arc_h",
         "En degrés ; 0 donne une scène plate. Les pas sont de 5 degrés entre −30 et 30 et de 30 \
          degrés au-delà, jusqu'à ±180. La ligne Centre de l'arc ci-dessous choisit autour de quoi \
          le niveau se courbe. Un script y accède sous le nom spl.arc_yx, et l'écriture d'un script \
-         tombe toujours sur un multiple de 30 comme dans 3dSen. Par défaut : 0.",
+         tombe sur les mêmes crans que ceux du menu. Par défaut : 0.",
     ),
     (
         "detail.scene.arc_center",
-        "Si l'arc se courbe autour du milieu de l'écran ou autour de son bord inférieur. Cela ne \
-         fait rien tant qu'Arc horizontal vaut 0. Un script y accède sous le nom spl.arc_center. \
+        "La hauteur autour de laquelle l'arc se courbe : le milieu de l'écran, son bord inférieur \
+         — huit unités sous l'image — ou l'un des trois quarts entre les deux, qui placent le \
+         pivot d'autant plus bas. Cela ne fait rien tant qu'Arc horizontal vaut 0. Un script y \
+         accède sous le nom spl.arc_center, où 0 et 1 sont les deux extrêmes, exactement comme \
+         dans 3dSen, et une valeur intermédiaire tombe sur le quart le plus proche. \
          Par défaut : centre de l'écran.",
     ),
     (

@@ -345,3 +345,63 @@ fn req_scn_080_the_harness_captures_each_effect_separately() {
     assert!(counter(&occlusion, "screenEffectBytes") > 0);
     assert_eq!(3, counter(&occlusion, "screenEffectPasses"));
 }
+
+/// RO-5 part 2: `--bend`'s fourth part is the arc centre, and it now takes any fraction from 0 to
+/// 1 — the five rungs the setting offers and the values between them, so that a capture campaign
+/// can compare pivots the menu does not offer, as it already could with the angles.
+///
+/// The two values AMD-043 REQ-SCN-066 names are unchanged, and so is the default when the part is
+/// left out.
+#[test]
+fn ro_5_the_bend_centre_takes_any_fraction() {
+    let parse = |values: &[&str]| {
+        let arguments: Vec<String> = ["--out", "x"]
+            .iter()
+            .chain(values)
+            .map(|&value| value.to_owned())
+            .collect();
+        Options::parse(&arguments).expect("the arguments parse")
+    };
+    let pivot = |centre: &str| {
+        parse(&["--bend", &format!("0,0,60,{centre}")])
+            .bend
+            .arc_pivot()
+    };
+
+    // The amendment's two, and the default.
+    assert_eq!(0.0, pivot("0"));
+    assert_eq!(zax_engine3d::space_bend::EDGE_PIVOT_OFFSET, pivot("1"));
+    assert_eq!(0.0, parse(&["--bend", "0,0,60"]).bend.arc_pivot());
+
+    // The three rungs RO-5 adds, and a value off the grid, which this parser takes as it is.
+    for (centre, expected) in [
+        ("0.25", -30.0),
+        ("0.5", -60.0),
+        ("0.75", -90.0),
+        ("0.1", -12.0),
+    ] {
+        assert!(
+            (pivot(centre) - expected).abs() < 1e-4,
+            "{centre} gave {}",
+            pivot(centre)
+        );
+    }
+
+    let bad = |centre: &str| {
+        let arguments: Vec<String> = ["--out", "x", "--bend", &format!("0,0,60,{centre}")]
+            .iter()
+            .map(|&value| value.to_owned())
+            .collect();
+        Options::parse(&arguments)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default()
+    };
+    for centre in ["1.5", "-0.1", "edge", ""] {
+        assert!(
+            bad(centre).contains("a number from 0 to 1"),
+            "{centre}: {}",
+            bad(centre)
+        );
+    }
+}

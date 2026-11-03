@@ -179,6 +179,14 @@ pub mod number_format {
     pub fn to_i32(value: f64) -> i32 {
         truncate(value).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
     }
+
+    /// The narrowing to a single float the settings model stores, as the C# `(float)` cast and as
+    /// `zax_settings`'s own `num::to_f32` (which is crate-private).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // The C# `(float)` cast.
+    pub fn to_f32(value: f64) -> f32 {
+        value as f32
+    }
 }
 
 #[cfg(test)]

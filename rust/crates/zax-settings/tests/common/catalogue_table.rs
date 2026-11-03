@@ -197,7 +197,12 @@ fn camera_to_layer_rows() -> Vec<CatalogueRow> {
         row("scene.bend_lr", None, Whole, "0", U, Imm),
         row("scene.bend_tb", None, Whole, "0", U, Imm),
         row("scene.arc_h", None, Whole, "0", U, Imm),
-        row("scene.arc_center", None, Whole, "0", U, Imm),
+        // RO-5 part 2 (owner decision, Q-107 §8): §4.1 gives the arc centre the type "entier",
+        // its two values being 0 and 1. It now takes the quarters between them, which an `Int`
+        // value cannot hold (`Domain::coerce` rebuilds one with `truncate_to_i32`), so the kind
+        // is `Real`. The **key** and the file format of its two old values are unchanged: a
+        // `Float` of 0 or 1 writes the same JSON number an `Int` wrote.
+        row("scene.arc_center", None, Real, "0", U, Imm),
         // AMD-046 REQ-SCN-074: no Lua access, the original program has no such setting.
         row("scene.bend_2d_mode", None, Flag, "true", U, Imm),
         // §4.1.5 Clipping: index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1)

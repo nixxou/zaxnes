@@ -23,7 +23,7 @@ const HEIGHT: usize = 240;
 
 /// A curvature of 90° left-right, the setting every criterion of REQ-SCN-074 uses.
 fn bend_90() -> SpaceBend {
-    SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
+    SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0)
 }
 
 /// A picture of `index` everywhere, every pixel **opaque**: AMD-050 REQ-CORE-049 puts the
@@ -117,8 +117,8 @@ fn req_scn_074_the_rectangle_stays_flat_when_the_setting_is_off() {
     let picture = picture(0x30);
     for bend in [
         bend_90(),
-        SpaceBend::new(180.0, -150.0, 120.0, true, 1.0),
-        SpaceBend::new(-30.0, 30.0, -30.0, false, 1.0),
+        SpaceBend::new(180.0, -150.0, 120.0, 1.0, 1.0),
+        SpaceBend::new(-30.0, 30.0, -30.0, 0.0, 1.0),
     ] {
         let scene = two_dimensional(bend, false);
         let exported = rectangle(&scene, &picture);

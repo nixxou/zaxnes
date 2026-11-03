@@ -54,7 +54,7 @@ fn req_scn_066_writing_45_gives_60_and_the_scene_gets_that_curvature() {
 
     let mut scene = SceneState::default();
     scene_script_bridge::push_settings(&model, &mut scene);
-    assert_eq!(SpaceBend::new(60.0, 0.0, 0.0, false, 1.0), scene.bend);
+    assert_eq!(SpaceBend::new(60.0, 0.0, 0.0, 0.0, 1.0), scene.bend);
 
     // The vector of REQ-SCN-067 for (60, 0, 0, middle) and P = (256, 120, 0).
     let image = scene.bend.apply(Vec3::new(256.0, 120.0, 0.0));
@@ -75,22 +75,22 @@ fn req_scn_066_a_change_of_each_setting_reaches_the_scene() {
         (
             SettingId::SceneBendLr,
             90,
-            SpaceBend::new(90.0, 0.0, 0.0, false, 1.0),
+            SpaceBend::new(90.0, 0.0, 0.0, 0.0, 1.0),
         ),
         (
             SettingId::SceneBendTb,
             -60,
-            SpaceBend::new(90.0, -60.0, 0.0, false, 1.0),
+            SpaceBend::new(90.0, -60.0, 0.0, 0.0, 1.0),
         ),
         (
             SettingId::SceneArcH,
             30,
-            SpaceBend::new(90.0, -60.0, 30.0, false, 1.0),
+            SpaceBend::new(90.0, -60.0, 30.0, 0.0, 1.0),
         ),
         (
             SettingId::SceneArcCenter,
             1,
-            SpaceBend::new(90.0, -60.0, 30.0, true, 1.0),
+            SpaceBend::new(90.0, -60.0, 30.0, 1.0, 1.0),
         ),
     ] {
         model.set(id, SettingValue::Int(value));
@@ -187,10 +187,62 @@ fn ro_1_a_stored_curvature_loads_unchanged_or_snaps_to_the_nearest_rung() {
     edited.set(SettingId::SceneArcH, SettingValue::Int(-99));
     assert_eq!(15, edited.get(SettingId::SceneBendLr).as_int());
     assert_eq!(-90, edited.get(SettingId::SceneArcH).as_int());
-    assert_eq!(
-        SpaceBend::new(15.0, 0.0, -90.0, false, 1.0),
-        bend_of(&edited)
+    assert_eq!(SpaceBend::new(15.0, 0.0, -90.0, 0.0, 1.0), bend_of(&edited));
+}
+
+/// RO-5 part 2: a settings file written by an older Zaxnes, which could only ever hold 0 or 1 for
+/// the arc centre, loads **unchanged** — the key's JSON is a number either way, and the two values
+/// AMD-043 names are still rungs — and the three quarters the lot adds survive a restart as
+/// themselves, giving the pivot of their own height.
+#[test]
+fn ro_5_a_stored_arc_centre_loads_unchanged_and_the_quarters_survive_a_restart() {
+    let folder = TemporaryRoot::new("zax-arc-centre-");
+    let paths = UserDataPaths::resolve(Some(folder.path()), None, None);
+
+    // A file from before the lot: the arc centre written as the whole number 1, and the arc on so
+    // that the pivot is read at all.
+    let mut before = SettingsModel::new();
+    before.set(SettingId::SceneArcH, SettingValue::Int(60));
+    before.set(SettingId::SceneArcCenter, SettingValue::Int(1));
+    SettingsStore::new(&paths).save(&before);
+    let text = std::fs::read_to_string(&paths.settings_file).expect("the file was written");
+    assert!(
+        text.contains("\"scene.arc_center\": 1"),
+        "the file format of the key is unchanged: {text}"
     );
+
+    let mut restarted = SettingsModel::new();
+    SettingsStore::new(&paths).load(&mut restarted, at(0));
+    assert_eq!(1, restarted.get(SettingId::SceneArcCenter).as_int());
+    assert_eq!(bend_of(&before), bend_of(&restarted));
+    assert_eq!(
+        zax_engine3d::space_bend::EDGE_PIVOT_OFFSET,
+        bend_of(&restarted).arc_pivot()
+    );
+
+    // Each quarter, written, reloaded and turned into the pivot of its own height.
+    for (chosen, pivot) in [(0.25_f32, -30.0_f32), (0.5, -60.0), (0.75, -90.0)] {
+        let mut model = SettingsModel::new();
+        model.set(SettingId::SceneArcH, SettingValue::Int(60));
+        model.set(SettingId::SceneArcCenter, SettingValue::Float(chosen));
+        SettingsStore::new(&paths).save(&model);
+        let mut reloaded = SettingsModel::new();
+        SettingsStore::new(&paths).load(&mut reloaded, at(0));
+        assert!(
+            (reloaded.get(SettingId::SceneArcCenter).as_float() - chosen).abs() < f32::EPSILON,
+            "{chosen} read back as {:?}",
+            reloaded.get(SettingId::SceneArcCenter)
+        );
+        assert_eq!(bend_of(&model), bend_of(&reloaded));
+        assert_eq!(pivot, bend_of(&reloaded).arc_pivot(), "{chosen}");
+    }
+
+    // A hand-edited value off the grid lands on the nearest quarter, ties away from zero.
+    let mut edited = SettingsModel::new();
+    edited.set(SettingId::SceneArcCenter, SettingValue::Float(0.4));
+    assert!((edited.get(SettingId::SceneArcCenter).as_float() - 0.5).abs() < f32::EPSILON);
+    edited.set(SettingId::SceneArcCenter, SettingValue::Float(0.125));
+    assert!((edited.get(SettingId::SceneArcCenter).as_float() - 0.25).abs() < f32::EPSILON);
 }
 
 /// REQ-SCN-074 note: the setting has **no Lua access** — the original program has none — so it

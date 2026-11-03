@@ -74,10 +74,66 @@ fn ro_2_the_three_angles_round_alike_from_a_script(#[case] id: SettingId) {
             "{id:?} at {written}"
         );
     }
-    // The arc centre is not an angle and keeps its two rungs.
-    assert!((styles::snap_write(SettingId::SceneArcCenter, 0.4) - 0.0).abs() < 1e-9);
-    assert!((styles::snap_write(SettingId::SceneArcCenter, 0.6) - 1.0).abs() < 1e-9);
+    // The arc centre is not an angle and has a grid of its own
+    // (`ro_5_the_arc_centre_snaps_on_the_quarters`), out of range to the same bounds as before.
     assert!((styles::snap_write(SettingId::SceneArcCenter, 7.0) - 1.0).abs() < 1e-9);
+    assert!((styles::snap_write(SettingId::SceneArcCenter, -7.0) - 0.0).abs() < 1e-9);
+}
+
+/// RO-5 part 2 (owner decision): `spl.arc_center` takes the five rungs 0, 0.25, 0.5, 0.75 and 1,
+/// and a value between two of them lands on the nearest, **ties away from zero** — the rule RO-2
+/// part 3 gave the three angles, which is `Domain::grid`'s and not `Domain::stepped`'s.
+///
+/// What a script written for 3dSen does is the first thing checked: 0 and 1 are rungs, so they go
+/// through untouched, which is the whole of the compatibility this lot owes.
+#[test]
+fn ro_5_the_arc_centre_snaps_on_the_quarters() {
+    /// Exact equality: a rung is a published value, not the result of arithmetic.
+    #[allow(clippy::float_cmp, reason = "published rungs, compared exactly")]
+    fn assert_exact(actual: f64, expected: f64) {
+        assert_eq!(actual, expected);
+    }
+    let snap = |value: f64| styles::snap_write(SettingId::SceneArcCenter, value);
+
+    // A 3dSen profile can only ever write 0 or 1, and both are left exactly where they are.
+    assert_exact(snap(0.0), 0.0);
+    assert_exact(snap(1.0), 1.0);
+
+    for (written, expected) in [
+        // The five rungs themselves.
+        (0.0, 0.0),
+        (0.25, 0.25),
+        (0.5, 0.5),
+        (0.75, 0.75),
+        (1.0, 1.0),
+        // The nearest rung.
+        (0.1, 0.0),
+        (0.2, 0.25),
+        (0.4, 0.5),
+        (0.6, 0.5),
+        (0.9, 1.0),
+        // Ties: away from zero, so halfway between two rungs goes to the lower height of the two
+        // (the one of greater magnitude on the 0-to-1 scale is the larger number).
+        (0.125, 0.25),
+        (0.375, 0.5),
+        (0.625, 0.75),
+        (0.875, 1.0),
+        // Out of range, clamped to the bounds as before.
+        (7.0, 1.0),
+        (-7.0, 0.0),
+        (-0.3, 0.0),
+    ] {
+        assert_exact(snap(written), expected);
+    }
+
+    // And the menu's grid and the script's grid are the same function, rung for rung — the
+    // invariant RO-2 part 3 established for every style parameter.
+    let domain = catalogue::descriptor(SettingId::SceneArcCenter).domain();
+    let mut probe = -0.5;
+    while probe <= 1.5 {
+        assert_exact(snap(probe), domain.snap(probe));
+        probe += 0.01;
+    }
 }
 
 /// RO-1 point 7: the **domain** — which is what the options window, the console's advanced page
