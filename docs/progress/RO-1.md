@@ -18,7 +18,7 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 | 4 | The remaining tooltip texts in both languages, and their completeness test | done — `baac780` |
 | 5a | Compact overscan rows (point 6) | done — `c38c663` |
 | 5b | The finer curvature grid (point 7) | done — `fd8fe82` |
-| 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | done — `PENDING6` |
+| 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | done — `263c93e` |
 
 ## Notes
 
