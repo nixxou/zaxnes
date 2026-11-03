@@ -574,21 +574,47 @@ fn req_scn_068_the_shadow_pass_takes_the_curvature() {
     );
 }
 
-/// Q-104: the curvature landed in the OpenGL backend only. This asserts the **known gap** so
-/// that a half-done parity fails loudly instead of passing unnoticed; when the wgpu backend
-/// gains the curvature, this test is what has to be deleted.
+/// Q-104, answered (RU-7 step 2): the curvature is in the `wgpu` backend too.
+///
+/// This test used to assert the **known gap** — that no WGSL source named `zax_bend` — so that a
+/// half-done parity would fail loudly rather than pass unnoticed. It is now its own opposite, and
+/// holds the three things the port cannot be right without: the wrapping and the normal transport
+/// of REQ-SCN-067/068 exist in WGSL, the **shadow** pass reads them (REQ-SCN-068), and both are
+/// behind the `ZAX_BEND` marker so that a frame at curvature 0 is still handed the module of
+/// before the amendment.
+///
+/// What it does **not** check is that the WGSL compiles or that the two backends agree: naga
+/// validates at module creation, so only a live adapter can say. That is
+/// `zax-harness/tests/parity_wgpu_tests.rs`, which renders the same scenes through both backends
+/// and compares them.
 #[cfg(feature = "wgpu")]
 #[test]
-fn q_104_the_wgpu_backend_carries_nothing_of_the_curvature_yet() {
-    const COMMON: &str = include_str!("../src/wgpu_backend/shaders/common.wgsl");
+fn q_104_the_wgpu_backend_carries_the_curvature() {
+    const BEND: &str = include_str!("../src/wgpu_backend/shaders/bend.wgsl");
     const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
     const SHADOW: &str = include_str!("../src/wgpu_backend/shaders/shadow.wgsl");
 
-    for source in [COMMON, SCENE, SHADOW] {
+    // B(P) of REQ-SCN-067, its wrapping E, and the normal transport of REQ-SCN-068.
+    assert!(BEND.contains("fn zax_bend(scene: vec3<f32>) -> ZaxBend"));
+    assert!(BEND.contains("fn zax_wrap("));
+    assert!(BEND.contains("fn zax_bend_normal("));
+    // The centre and the depth bound of REQ-SCN-067, the same two numbers as bend.glsl.
+    assert!(BEND.contains("vec3<f32>(128.0, 120.0, 0.0)"));
+    assert!(BEND.contains("ZAX_BEND_DEPTH_LIMIT = 0.95"));
+
+    // Both stages bend, and the shadow pass with them (REQ-SCN-068).
+    for source in [SCENE, SHADOW] {
         assert!(
-            !source.contains("zax_bend"),
-            "the wgpu shaders have gained the curvature: Q-104 is answered, so this test and \
-             the note in wgpu_backend/renderer.rs go"
+            source.contains("zax_bend("),
+            "the pass applies the curvature"
+        );
+        assert!(
+            source.contains("//#ifdef ZAX_BEND"),
+            "and only in the ZAX_BEND variant, so curvature 0 costs nothing"
         );
     }
+    // REQ-SCN-068: the shadow lookup of the scene pass starts from the **bent** position.
+    assert!(SCENE.contains("in.bent + n * frame.params.w"));
+    // And the clipping of REQ-SCN-036 is still judged on the position before the curvature.
+    assert!(SCENE.contains("in.scene.x < rect.x"));
 }

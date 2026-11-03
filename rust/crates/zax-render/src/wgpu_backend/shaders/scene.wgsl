@@ -13,11 +13,27 @@ struct Frame {
     params: vec4<f32>,
     // The light direction of the scene buckets, then the HUD's.
     light: array<vec4<f32>, 2>,
+    // AMD-043 REQ-SCN-067: the per-axis curvature constants, xyz each, the arc pivot in bend_k.w
+    // and "this axis bends" as 1 or 0 in bend_on. Written by `frame_bytes` whatever the variant,
+    // because the frame block has one layout; read only by the ZAX_BEND variant below.
+    bend_k: vec4<f32>,
+    bend_f: vec4<f32>,
+    bend_h: vec4<f32>,
+    bend_on: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var palette: texture_2d<f32>;
 @group(0) @binding(2) var shadow_map: texture_depth_2d;
+
+//#ifdef ZAX_BEND
+// What bend.wgsl reads its constants through: the chunk is shared with the shadow module, whose
+// frame block is a different struct under a different name.
+fn frame_bend_k() -> vec4<f32> { return frame.bend_k; }
+fn frame_bend_f() -> vec4<f32> { return frame.bend_f; }
+fn frame_bend_h() -> vec4<f32> { return frame.bend_h; }
+fn frame_bend_on() -> vec4<f32> { return frame.bend_on; }
+//#endif
 
 // The textures of group 2 and zax_index_texel / zax_color_texel come from textures_bound.wgsl
 // or textures_bindless.wgsl, appended by the renderer.
@@ -28,6 +44,13 @@ struct VertexOut {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) @interpolate(flat) run: u32,
+//#ifdef ZAX_BEND
+    // The position the curvature of REQ-SCN-067 placed this vertex at, which the shadow lookup
+    // reads (the shadow map holds the bent geometry, REQ-SCN-068). Without the variant the
+    // fragment stage reads `scene`, exactly as before the amendment, and this varying does not
+    // exist — which is the whole point of its being a variant (`preprocess.rs`).
+    @location(4) bent: vec3<f32>,
+//#endif
 }
 
 @vertex
@@ -53,7 +76,20 @@ fn vs_main(
     out.normal = draw.tilting.z * zax_place_normal(instance, normal);
     out.uv = uv;
     out.run = run;
+//#ifdef ZAX_BEND
+    // REQ-SCN-067, applied last: after the animated deformation and after the object's own
+    // transform, so on the final position in the scene (REQ-SCN-068). REQ-SCN-068 transports the
+    // normal with it. `out.scene` keeps the position **before** the curvature, because
+    // REQ-SCN-068 has the clipping of REQ-SCN-036 evaluated there — a tile the margins keep stays
+    // visible wherever its bent image lands.
+    let placed = zax_bend(scene);
+    out.normal = zax_bend_normal(placed.jacobian, out.normal);
+    out.bent = placed.scene;
+    out.position = zax_clip(frame.view_projection
+        * vec4<f32>(placed.scene.x, placed.scene.y, -placed.scene.z, 1.0));
+//#else
     out.position = zax_clip(frame.view_projection * vec4<f32>(scene.x, scene.y, -scene.z, 1.0));
+//#endif
     return out;
 }
 
@@ -103,7 +139,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var shadow = 1.0;
     if (draw.modes.w != 0) {
         // REQ-SCN-031: a normal offset and a depth bias of about 0.02 unit.
+        // REQ-SCN-068: the shadow map holds the **bent** geometry, so the lookup starts from the
+        // bent position; without the variant there is only the one position.
+//#ifdef ZAX_BEND
+        let biased = in.bent + n * frame.params.w;
+//#else
         let biased = in.scene + n * frame.params.w;
+//#endif
         let light = frame.light_view_projection * vec4<f32>(biased.x, biased.y, -biased.z, 1.0);
         let projected = light.xyz / light.w * 0.5 + 0.5;
         if (projected.x >= 0.0 && projected.x <= 1.0

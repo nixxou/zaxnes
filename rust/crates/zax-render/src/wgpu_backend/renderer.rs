@@ -22,8 +22,10 @@ use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
 use zax_engine3d::hashing::FastMap;
 use zax_engine3d::palette::{FramePalette, Rgb24};
+use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::{Mat4, Vec3};
 
+use super::preprocess;
 use super::resources::{self, MeshHandle, MeshStore, TextureHandle, TextureStore, VERTEX_STRIDE};
 use crate::camera::CameraView;
 use crate::color;
@@ -67,10 +69,12 @@ const AFFINE_PLACEMENT: AffinePlacement = AffinePlacement;
 
 /// Bytes of a deformation (`Deform` in common.wgsl), which only deformed runs have.
 const DEFORM_BYTES: u64 = 128;
-/// Bytes of the frame block (`Frame` in scene.wgsl).
-const FRAME_BYTES: u64 = 256;
-/// Bytes of the shadow frame block (`ShadowFrame` in shadow.wgsl).
-const SHADOW_FRAME_BYTES: u64 = 80;
+/// Bytes of the frame block (`Frame` in scene.wgsl): two matrices and five `vec4`, then the four
+/// curvature `vec4` of AMD-043 REQ-SCN-067, rounded up to the alignment.
+const FRAME_BYTES: u64 = 288;
+/// Bytes of the shadow frame block (`ShadowFrame` in shadow.wgsl): the matrix, the time, and the
+/// same four curvature `vec4` (REQ-SCN-068 bends this pass too).
+const SHADOW_FRAME_BYTES: u64 = 144;
 /// Bytes of the sky block (`Sky` in sky.wgsl).
 const SKY_BYTES: u64 = 19 * 16;
 /// Bytes of the indirect arguments of one run (index count, instance count, first index, base
@@ -123,6 +127,54 @@ struct SceneKey {
     samples: u32,
     /// The pipeline of the batched draws, which reads the texture arrays.
     batched: bool,
+    /// Which WGSL variant the pipeline's module was built from.
+    variant: ShaderVariant,
+}
+
+/// Which variant of the scene and shadow modules a draw asks for — the `ProgramKey` of
+/// `gl/shaders.rs` for the axes this backend has, and read by [`preprocess`] as its defines.
+///
+/// One named field per axis the specification names. **Every field false is the module of before
+/// RU-7**, built in [`WgpuSceneRenderer::new`] and the only one a Classic frame at the default
+/// curvature ever asks for: the others are built the first time a frame wants them and cost a
+/// frame that does not nothing at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+struct ShaderVariant {
+    /// The curvature of AMD-043 REQ-SCN-067, which also places the vertex and transports the
+    /// normal (REQ-SCN-068), and bends the shadow pass with it.
+    bend: bool,
+}
+
+impl ShaderVariant {
+    /// Every field false: the modules of before RU-7.
+    const PLAIN: Self = Self { bend: false };
+
+    /// The defines [`preprocess::compose`] expands this variant's sources with.
+    fn defines(self) -> Vec<&'static str> {
+        let mut defines = Vec::new();
+        if self.bend {
+            defines.push("ZAX_BEND");
+        }
+        defines
+    }
+
+    /// The chunks that go before a body for this variant.
+    fn chunks(self) -> Vec<&'static str> {
+        let mut chunks = vec![COMMON];
+        if self.bend {
+            chunks.push(BEND);
+        }
+        chunks
+    }
+
+    /// What the module labels say, so that a `naga` message names the variant it came from.
+    fn suffix(self) -> &'static str {
+        if self.bend {
+            " bend"
+        } else {
+            ""
+        }
+    }
 }
 
 /// The linear buffer and its depth, multisampled when anti-aliasing is on.
@@ -196,7 +248,6 @@ impl GrowingBuffer {
 /// arrays themselves (with the texture revision they were built on) and the indirect arguments.
 #[derive(Debug)]
 struct Batching {
-    module: wgpu::ShaderModule,
     textures: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     group: Option<(u64, wgpu::BindGroup)>,
@@ -206,7 +257,7 @@ struct Batching {
 }
 
 impl Batching {
-    fn new(device: &wgpu::Device, layouts: &Layouts, module: wgpu::ShaderModule) -> Self {
+    fn new(device: &wgpu::Device, layouts: &Layouts) -> Self {
         let array = |binding, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -238,7 +289,6 @@ impl Batching {
             )
         };
         Self {
-            module,
             textures,
             pipeline_layout,
             group: None,
@@ -260,15 +310,28 @@ pub struct WgpuSceneRenderer {
     textures: TextureStore,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
+    /// REQ-SCN-068: the backdrop box with each face cut into 32 × 32 cells, built the first time
+    /// something bends and kept after that.
+    unit_box_bent: Option<Arc<TileMesh>>,
+    /// REQ-SCN-074: the 2D-mode rectangle, subdivided the same way, built the first time a 2D
+    /// frame bends.
+    picture_quad_bent: Option<Arc<TileMesh>>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
     wide_picture_quad: Option<interop::WidePictureQuad>,
+    /// How many cells the cached widescreen quad was built with, so that the curvature going on
+    /// or off rebuilds it (REQ-SCN-074).
+    wide_picture_cells: u16,
     plan: FramePlan<MeshHandle, TextureHandle>,
     layouts: Layouts,
-    scene_module: wgpu::ShaderModule,
-    shadow_module: wgpu::ShaderModule,
+    /// The scene module of each variant asked for so far, the plain one built in [`Self::new`].
+    scene_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
+    /// The same for the shadow pass, whose only axis is the curvature (REQ-SCN-068).
+    shadow_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
+    /// And for the batched scene module, which differs only in how it reaches its textures.
+    batched_modules: FastMap<ShaderVariant, wgpu::ShaderModule>,
     sky_module: wgpu::ShaderModule,
     scene_pipelines: FastMap<SceneKey, wgpu::RenderPipeline>,
-    shadow_pipelines: FastMap<bool, wgpu::RenderPipeline>,
+    shadow_pipelines: FastMap<(bool, ShaderVariant), wgpu::RenderPipeline>,
     sky_pipelines: FastMap<(bool, u32), wgpu::RenderPipeline>,
     resolve_pipeline: wgpu::RenderPipeline,
     frame_buffer: wgpu::Buffer,
@@ -365,18 +428,8 @@ impl WgpuSceneRenderer {
         let max_samples = max_samples(adapter, &device);
         let layouts = Layouts::new(&device);
 
-        let module = |label: &'static str, parts: &[&str]| {
-            let mut source = format!("const ZAX_SRGB_DOUBLE: f32 = {:?};\n", sky::SRGB_DOUBLE);
-            source.push_str(COMMON);
-            for part in parts {
-                source.push('\n');
-                source.push_str(part);
-            }
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(source.into()),
-            })
-        };
+        let module =
+            |label: &str, parts: &[&str]| build_module(&device, label, parts, ShaderVariant::PLAIN);
         let scene_module = module("zax scene", &[SCENE, TEXTURES_BOUND]);
         let shadow_module = module("zax shadow", &[SHADOW]);
         let sky_module = module("zax sky", &[SKY]);
@@ -440,12 +493,15 @@ impl WgpuSceneRenderer {
         );
         let sky_group = single_buffer_group(&device, &layouts.sky, &sky_buffer, None);
         let resolve_pipeline = resolve_pipeline(&device, &layouts, &resolve_module, target_format);
-        let batching = batching_supported(adapter, &device).then(|| {
-            let arrays =
-                TEXTURES_BINDLESS.replace("ZAX_BINDLESS_TEXTURES", &BINDLESS_TEXTURES.to_string());
-            let module = module("zax scene batched", &[SCENE, &arrays]);
-            Batching::new(&device, &layouts, module)
-        });
+        let batches = batching_supported(adapter, &device);
+        let mut batched_modules = FastMap::default();
+        if batches {
+            batched_modules.insert(
+                ShaderVariant::PLAIN,
+                module("zax scene batched", &[SCENE, &bindless_textures()]),
+            );
+        }
+        let batching = batches.then(|| Batching::new(&device, &layouts));
 
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let statistics = RenderStatistics {
@@ -460,7 +516,10 @@ impl WgpuSceneRenderer {
             textures: TextureStore::default(),
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
+            unit_box_bent: None,
+            picture_quad_bent: None,
             wide_picture_quad: None,
+            wide_picture_cells: interop::subdivision_for(false),
             plan: FramePlan::default(),
             scene_pipelines: FastMap::default(),
             shadow_pipelines: FastMap::default(),
@@ -504,12 +563,73 @@ impl WgpuSceneRenderer {
             diagnostics: Vec::new(),
             style_reported: false,
             layouts,
-            scene_module,
-            shadow_module,
+            scene_modules: [(ShaderVariant::PLAIN, scene_module)].into_iter().collect(),
+            shadow_modules: [(ShaderVariant::PLAIN, shadow_module)]
+                .into_iter()
+                .collect(),
+            batched_modules,
             sky_module,
             device,
             queue,
         })
+    }
+
+    /// The scene, shadow and batched modules of `variant`, built the first time it is asked for.
+    ///
+    /// Called once a frame, and at the default curvature it is one hash lookup that hits: the
+    /// plain variant is in all three maps from [`Self::new`] onwards.
+    fn ensure_modules(&mut self, variant: ShaderVariant) {
+        if !self.scene_modules.contains_key(&variant) {
+            let module = build_module(&self.device, "zax scene", &[SCENE, TEXTURES_BOUND], variant);
+            self.scene_modules.insert(variant, module);
+        }
+        if !self.shadow_modules.contains_key(&variant) {
+            let module = build_module(&self.device, "zax shadow", &[SHADOW], variant);
+            self.shadow_modules.insert(variant, module);
+        }
+        if self.batching.is_some() && !self.batched_modules.contains_key(&variant) {
+            let module = build_module(
+                &self.device,
+                "zax scene batched",
+                &[SCENE, &bindless_textures()],
+                variant,
+            );
+            self.batched_modules.insert(variant, module);
+        }
+    }
+
+    /// The variant this frame draws with (AMD-043 REQ-SCN-067), and the subdivided meshes
+    /// REQ-SCN-068 and REQ-SCN-074 ask for while something bends.
+    ///
+    /// The twin of `SceneRenderer::select_bend_variant`, and like it **one `is_identity` test**
+    /// at the default settings: no module is built, no pipeline is added, no mesh is subdivided
+    /// and the frame block's four curvature fields are written as the zeros they already were.
+    ///
+    /// # Errors
+    ///
+    /// [`WgpuRenderError::Mesh`] when a subdivided mesh cannot be built. The frame then draws
+    /// with the meshes it has, flat, rather than not at all.
+    fn select_bend_variant(
+        &mut self,
+        scene: &SceneState,
+    ) -> Result<ShaderVariant, WgpuRenderError> {
+        let bend = !scene.effective_bend().is_identity();
+        let variant = ShaderVariant { bend };
+        self.ensure_modules(variant);
+        if bend {
+            let cells = interop::subdivision_for(true);
+            if self.unit_box_bent.is_none() {
+                // REQ-SCN-068: a plane large enough to curve visibly is subdivided, the backdrop
+                // into at least 32 × 32 cells per face.
+                self.unit_box_bent = Some(Arc::new(interop::unit_box_subdivided(cells)?));
+            }
+            if self.picture_quad_bent.is_none() && scene.two_dimensional_mode {
+                // REQ-SCN-074: at least 32 × 32 cells, so at least a 33 × 33 grid of vertices.
+                self.picture_quad_bent =
+                    Some(Arc::new(interop::picture_quad_subdivided(0, 0, cells)?));
+            }
+        }
+        Ok(variant)
     }
 
     /// The device the renderer draws with.
@@ -578,6 +698,11 @@ impl WgpuSceneRenderer {
             return Err(WgpuRenderError::Target(target.width, target.height));
         }
 
+        // REQ-SCN-067: the curvature decides which module variant draws the frame, once here,
+        // never per vertex — the same choice, in the same place in the frame, as
+        // `SceneRenderer::select_bend_variant` makes on the OpenGL side.
+        let variant = self.select_bend_variant(scene)?;
+
         self.statistics.begin_frame();
         self.meshes.begin_frame();
         self.textures.begin_frame();
@@ -602,14 +727,30 @@ impl WgpuSceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
         };
-        self.wide_picture_quad = interop::wide_quad_for(
+        // AMD-046 REQ-SCN-074: the rectangle of the 2D mode is subdivided while it bends, and
+        // only then. `select_bend_variant` has already folded the setting in, so in 2D mode this
+        // flag *is* "the rectangle bends".
+        let cells = interop::subdivision_for(variant.bend);
+        if cells != self.wide_picture_cells {
+            self.wide_picture_quad = None;
+            self.wide_picture_cells = cells;
+        }
+        self.wide_picture_quad = interop::wide_quad_for_subdivided_cached(
             frame.nes_picture,
             frame.nes_picture_height,
+            cells,
             self.wide_picture_quad.take(),
         )?;
         let fixed = FixedMeshes {
-            unit_box: &self.unit_box,
-            picture_quad: &self.picture_quad,
+            // REQ-SCN-068: the subdivided box only while something bends.
+            unit_box: match &self.unit_box_bent {
+                Some(subdivided) if variant.bend => subdivided,
+                _ => &self.unit_box,
+            },
+            picture_quad: match &self.picture_quad_bent {
+                Some(subdivided) if variant.bend => subdivided,
+                _ => &self.picture_quad,
+            },
             wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let Ok(()) = self
@@ -623,8 +764,8 @@ impl WgpuSceneRenderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("zax frame"),
             });
-        let volume = self.shadow_pass(&mut encoder, scene, &view);
-        self.scene_pass(&mut encoder, target, scene, frame, &view, &volume);
+        let volume = self.shadow_pass(&mut encoder, scene, &view, variant);
+        self.scene_pass(&mut encoder, target, scene, frame, &view, &volume, variant);
         self.queue.submit([encoder.finish()]);
 
         let statistics = &mut self.statistics;
@@ -644,6 +785,7 @@ impl WgpuSceneRenderer {
         encoder: &mut wgpu::CommandEncoder,
         scene: &SceneState,
         view: &CameraView,
+        variant: ShaderVariant,
     ) -> ShadowVolume {
         if !scene.settings.shadows || self.plan.lists.casters.is_empty() {
             return ShadowVolume::EMPTY;
@@ -664,6 +806,8 @@ impl WgpuSceneRenderer {
         let mut frame = Vec::new();
         push_matrix(&mut frame, &volume.view_projection);
         push_vec4(&mut frame, [scene.emulated_time, 0.0, 0.0, 0.0]);
+        // REQ-SCN-068: the shadow pass bends with the scene, so it reads the same constants.
+        push_bend(&mut frame, scene.effective_bend());
         self.queue
             .write_buffer(&self.shadow_frame_buffer, 0, &frame);
 
@@ -736,12 +880,11 @@ impl WgpuSceneRenderer {
                 .write_buffer(&self.shadow_deforms.buffer, 0, &self.deform_data);
         }
 
+        let module = &self.shadow_modules[&variant];
         for mirrored in [false, true] {
-            if !self.shadow_pipelines.contains_key(&mirrored) {
-                let pipeline =
-                    shadow_pipeline(&self.device, &self.layouts, &self.shadow_module, mirrored);
-                self.shadow_pipelines.insert(mirrored, pipeline);
-            }
+            self.shadow_pipelines
+                .entry((mirrored, variant))
+                .or_insert_with(|| shadow_pipeline(&self.device, &self.layouts, module, mirrored));
         }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -780,7 +923,7 @@ impl WgpuSceneRenderer {
                     multi_draw(&mut pass, indirect, &pending);
                 }
                 pending = entry..entry;
-                pass.set_pipeline(&self.shadow_pipelines[&mirrored]);
+                pass.set_pipeline(&self.shadow_pipelines[&(mirrored, variant)]);
                 current = Some(mirrored);
             }
             let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
@@ -832,7 +975,12 @@ impl WgpuSceneRenderer {
 
     // ----------------------------------------------------------------- scene passes
 
-    #[allow(clippy::too_many_lines)] // The passes of REQ-SCN-058 in their order.
+    #[allow(clippy::too_many_lines)]
+    // The passes of REQ-SCN-058 in their order.
+    // The frame's inputs, one parameter each: what to draw into, what to draw, where the eye and
+    // the light are, and which variant the curvature chose. Bundling them into a struct would
+    // only move the list.
+    #[allow(clippy::too_many_arguments)]
     fn scene_pass(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -841,6 +989,7 @@ impl WgpuSceneRenderer {
         frame: &SceneFrame<'_>,
         view: &CameraView,
         volume: &ShadowVolume,
+        variant: ShaderVariant,
     ) {
         #[allow(clippy::cast_sign_loss)] // anti_alias_samples() is at least 1.
         let wanted = geometry::clamp_anti_alias_samples(
@@ -873,12 +1022,6 @@ impl WgpuSceneRenderer {
                     .to_owned(),
             );
         }
-        // Q-104: `constants.bend` is **not** read here. The curvature of AMD-043 REQ-SCN-067
-        // landed in the OpenGL backend only (the one SPEC-06 REQ-SCN-056 requires, the one of the
-        // default build and of R0's captures); this backend keeps drawing the scene flat, as it
-        // did before the amendment. `frame_bytes` carries no per-axis constant, so a game played
-        // on Vulkan or DirectX 12 with a curvature set shows a flat scene. The ticket asks
-        // whether to port it, and whether to say so in the interface meanwhile.
         self.queue
             .write_buffer(&self.frame_buffer, 0, &frame_bytes(&constants));
 
@@ -901,7 +1044,7 @@ impl WgpuSceneRenderer {
             self.plan
                 .lay_out_instances(self.group_opaque, AFFINE_BYTES, AFFINE_PLACEMENT);
             self.upload_draws(&constants, batched);
-            self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched);
+            self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched, variant);
             if !batched {
                 self.prepare_texture_groups();
             }
@@ -985,6 +1128,7 @@ impl WgpuSceneRenderer {
                 statistics: &mut self.statistics,
                 cull,
                 samples: wanted,
+                variant,
                 current: None,
                 bound_textures: None,
                 indirect,
@@ -1007,7 +1151,8 @@ impl WgpuSceneRenderer {
                     transparent_base,
                 );
             }
-            // 3. HUD (REQ-SCN-044).
+            // 3. HUD (REQ-SCN-044), which never bends (REQ-SCN-068).
+            draw.variant = hud_variant(variant);
             for group in &lists.hud_objects {
                 draw.blended(&lists.hud, &lists.hud_runs, group.runs, hud_base);
             }
@@ -1203,10 +1348,19 @@ impl WgpuSceneRenderer {
         }
     }
 
-    fn prepare_pipelines(&mut self, cull: bool, samples: u32, batched: bool) {
+    fn prepare_pipelines(
+        &mut self,
+        cull: bool,
+        samples: u32,
+        batched: bool,
+        variant: ShaderVariant,
+    ) {
         let lists = &self.plan.lists;
         let mut wanted = Vec::new();
-        let mut want = |items: &[WgpuDrawItem], runs: &[InstanceRun], modes: &[SceneMode]| {
+        let mut want = |items: &[WgpuDrawItem],
+                        runs: &[InstanceRun],
+                        modes: &[SceneMode],
+                        variant: ShaderVariant| {
             for run in runs {
                 let mirrored = interop::normal_matrix(&items[run.first].model).1 < 0.0;
                 for &mode in modes {
@@ -1216,19 +1370,39 @@ impl WgpuSceneRenderer {
                         mirrored,
                         samples,
                         batched,
+                        variant,
                     });
                 }
             }
         };
-        want(&lists.opaque, &lists.opaque_runs, &[SceneMode::Opaque]);
+        want(
+            &lists.opaque,
+            &lists.opaque_runs,
+            &[SceneMode::Opaque],
+            variant,
+        );
         let blended = [SceneMode::DepthOnly, SceneMode::ColorEqual];
-        want(&lists.transparent, &lists.transparent_runs, &blended);
-        want(&lists.hud, &lists.hud_runs, &blended);
+        want(
+            &lists.transparent,
+            &lists.transparent_runs,
+            &blended,
+            variant,
+        );
+        // REQ-SCN-068: the HUD never bends, so it asks for the plain variant — which the OpenGL
+        // backend does by clearing the bit in `draw_hud`, and which is why that variant's
+        // pipelines have to exist even on a frame that bends everything else.
+        want(&lists.hud, &lists.hud_runs, &blended, hud_variant(variant));
         for key in wanted {
             if !self.scene_pipelines.contains_key(&key) {
                 let (layout, module) = match (&self.batching, key.batched) {
-                    (Some(batching), true) => (&batching.pipeline_layout, &batching.module),
-                    _ => (&self.layouts.scene_pipeline, &self.scene_module),
+                    (Some(batching), true) => (
+                        &batching.pipeline_layout,
+                        &self.batched_modules[&key.variant],
+                    ),
+                    _ => (
+                        &self.layouts.scene_pipeline,
+                        &self.scene_modules[&key.variant],
+                    ),
                 };
                 let pipeline = scene_pipeline(&self.device, layout, module, key);
                 self.scene_pipelines.insert(key, pipeline);
@@ -1355,6 +1529,8 @@ struct Drawer<'p, 'a> {
     statistics: &'p mut RenderStatistics,
     cull: bool,
     samples: u32,
+    /// The variant the runs drawn now ask for; the HUD puts the plain one back (REQ-SCN-068).
+    variant: ShaderVariant,
     current: Option<SceneKey>,
     bound_textures: Option<(Option<TextureHandle>, Option<TextureHandle>)>,
     /// The indirect arguments of the runs when the draws are batched.
@@ -1373,6 +1549,7 @@ impl Drawer<'_, '_> {
             mirrored: interop::normal_matrix(&item.model).1 < 0.0,
             samples: self.samples,
             batched: self.indirect.is_some(),
+            variant: self.variant,
         };
         let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
         self.statistics.batches += 1;
@@ -1455,6 +1632,11 @@ fn multi_draw(
     );
 }
 
+/// The bindless texture chunk with the array length of this build substituted in.
+fn bindless_textures() -> String {
+    TEXTURES_BINDLESS.replace("ZAX_BINDLESS_TEXTURES", &BINDLESS_TEXTURES.to_string())
+}
+
 /// Whether the batched draws can be used: the device has their features, executes indirect
 /// draws and takes texture arrays as long as theirs. `ZAXNES_WGPU_BATCHING=0` turns them off.
 fn batching_supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
@@ -1472,6 +1654,8 @@ fn batching_supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
 // --------------------------------------------------------------------- shaders
 
 const COMMON: &str = include_str!("shaders/common.wgsl");
+/// The space bending of AMD-043 REQ-SCN-067, prepended to the `ZAX_BEND` variants only.
+const BEND: &str = include_str!("shaders/bend.wgsl");
 const SCENE: &str = include_str!("shaders/scene.wgsl");
 const TEXTURES_BOUND: &str = include_str!("shaders/textures_bound.wgsl");
 const TEXTURES_BINDLESS: &str = include_str!("shaders/textures_bindless.wgsl");
@@ -1575,6 +1759,39 @@ impl Layouts {
             resolve,
         }
     }
+}
+
+/// One shader module: the sRGB constant of the sky, the variant's chunks and `parts` as its body,
+/// every source expanded with the variant's defines (`preprocess`).
+///
+/// A marker the expander cannot read is a fault in a source of this crate, so it is pushed into
+/// the WGSL as a `const_assert` that names it: `naga` then fails module creation with the bad
+/// line in its message, which is both louder and nearer the cause than a silent miss.
+fn build_module(
+    device: &wgpu::Device,
+    label: &str,
+    parts: &[&str],
+    variant: ShaderVariant,
+) -> wgpu::ShaderModule {
+    let defines = variant.defines();
+    let mut chunks = variant.chunks();
+    chunks.extend_from_slice(parts);
+    let composed = preprocess::compose(&chunks, &defines);
+    let mut source = format!("const ZAX_SRGB_DOUBLE: f32 = {:?};\n", sky::SRGB_DOUBLE);
+    source.push_str(&composed.wgsl);
+    if let Some(problem) = &composed.problem {
+        use std::fmt::Write as _;
+        let _ = write!(
+            source,
+            "\n// unreadable variant marker in a WGSL source of this crate:\n\
+             const_assert false; // {}\n",
+            problem.replace('\n', " ")
+        );
+    }
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&format!("{label}{}", variant.suffix())),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    })
 }
 
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
@@ -2029,6 +2246,27 @@ const fn vec4(value: Vector4) -> [f32; 4] {
     [value.x, value.y, value.z, value.w]
 }
 
+/// The variant the HUD draws with: `variant` with every axis REQ-SCN-068 and AMD-055 exclude the
+/// HUD from cleared. The twin of what `draw_hud` does on the OpenGL side.
+const fn hud_variant(_variant: ShaderVariant) -> ShaderVariant {
+    ShaderVariant::PLAIN
+}
+
+/// The four curvature `vec4` of AMD-043 REQ-SCN-067, the arc pivot riding in the `w` of the
+/// first: the layout `bend.wgsl` reads, and the same five values `bind_bend` sets as uniforms on
+/// the OpenGL side.
+///
+/// Written on **every** frame, bending or not — the block has one layout, and at curvature 0
+/// `SpaceBend::NONE` makes these four writes sixteen zeros, which is what the buffer already
+/// held. No branch, and nothing for a Classic frame to pay beyond the 64 bytes of the copy it is
+/// already making.
+fn push_bend(data: &mut Vec<u8>, bend: SpaceBend) {
+    push_vec4(data, vec3(bend.curvature().into(), bend.arc_pivot()));
+    push_vec4(data, vec3(bend.recentring().into(), 0.0));
+    push_vec4(data, vec3(bend.offset().into(), 0.0));
+    push_vec4(data, vec3(bend.active().into(), 0.0));
+}
+
 fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
     let mut data = Vec::new();
     push_matrix(&mut data, &constants.view_projection);
@@ -2046,6 +2284,7 @@ fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
     );
     push_vec4(&mut data, vec3(constants.light_direction, 0.0));
     push_vec4(&mut data, vec3(constants.hud_light_direction, 0.0));
+    push_bend(&mut data, constants.bend);
     data
 }
 

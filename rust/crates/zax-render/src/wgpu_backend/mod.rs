@@ -3,6 +3,7 @@
 //! and a target without any window, for the harness and the tests.
 
 pub mod headless;
+mod preprocess;
 mod renderer;
 mod resources;
 

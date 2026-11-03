@@ -13,8 +13,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | The gate: why the `wgpu` tests skip, fixed or proven; the map against `gl/`; the test plan | done — this commit |
-| 2 | Curvature (AMD-043, AMD-046) | todo |
+| 1 | The gate: why the `wgpu` tests skip, fixed or proven; the map against `gl/`; the test plan | done — `f46feea` |
+| 2 | Curvature (AMD-043, AMD-046) | done — this commit |
 | 3 | The voxel grid and the pixel shadows | todo |
 | 4 | The screen passes: Depth AO, MSVO, SSR, their targets and lifecycle, the AA resolve | todo |
 | 5 | The parity measurements and the costs | todo |
@@ -214,3 +214,153 @@ columns of every comparison in this lot.
 
 Nothing else. The gate is a finding, and the finding is that the premise of Q-104 §2 does not hold
 here, so the lot continues at step 2.
+
+### Step 2 — the curvature
+
+#### WGSL has no preprocessor, and six axes to mirror
+
+The one real design decision of this step, made before a line of shader was written. The OpenGL
+backend's `ZAX_BEND` is a **compile-time** variant and `bend.glsl`'s own header says why: at
+curvature 0 "there is no uniform tested per vertex", and no varying for the bent position. The
+brief asks the same of this side ("with the Classic style and no curvature, the `wgpu` frame does
+no new work"). A `if (frame.bend_on.x != 0.0)` in one module would fail that.
+
+WGSL has no `#ifdef`, so three shapes were available:
+
+1. a run-time branch on a frame field — rejected, it makes Classic pay;
+2. one chunk per variant defining `VertexOut` and a few hook functions — works for one axis, but
+   the map of step 1 lists **six** (`bend`, `centroid`, `voxel_grid`, `pixel_shadow`, `floor_mask`,
+   and the backdrop that is out of scope), and a chunk that has to define the varyings struct for
+   each combination is 2⁵ chunks;
+3. a preprocessor.
+
+So `wgpu_backend/preprocess.rs`: `//#ifdef`, `//#ifndef`, `//#if A || B`, `//#else`, `//#endif`,
+nesting, 11 unit tests. The markers are **WGSL line comments**, so every source stays a valid
+WGSL file that an editor and `naga` can still read whole, and the three condition forms are
+exactly the three the GLSL sources use between them. A marker it cannot read is a fault in a
+source of this crate, not input, so it is reported and turned into a `const_assert false` carrying
+the bad line — module creation then fails with it in the message, rather than silently dropping
+code. What the expander deliberately does **not** do is substitute anything inside a line:
+everything the two APIs disagree about (0..1 clip depth, top-left texture origin, the binding
+model) stays hand-written, which is what the brief asks.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `wgpu_backend/preprocess.rs` (new) | the variant mechanism above, with its 11 unit tests |
+| `wgpu_backend/shaders/bend.wgsl` (new) | `zax_wrap` (E of REQ-SCN-067 step 2), `zax_bend` (B, the three axes in their order, the Jacobians composed), `zax_bend_normal` (the cofactor transport of REQ-SCN-068) — the twin of `shaders/bend.glsl`, read through four accessor functions so the chunk serves the scene *and* the shadow module, whose frame blocks are different structs |
+| `shaders/scene.wgsl` | `Frame` gains the four curvature `vec4`; `VertexOut` gains `bent` **in the variant only**; `vs_main` places the vertex and transports the normal; `fs_main` starts the shadow lookup from the bent position and keeps judging REQ-SCN-036 on the unbent one |
+| `shaders/shadow.wgsl` | `ShadowFrame` gains the same four, and the pass bends (REQ-SCN-068) |
+| `wgpu_backend/renderer.rs` | `ShaderVariant` (one named field per axis, `PLAIN` the module of before RU-7); `build_module`; `scene_modules` / `shadow_modules` / `batched_modules` keyed by variant and built on demand; `SceneKey.variant`; the shadow pipeline key; `select_bend_variant`; `push_bend`; `FRAME_BYTES` 256 → 288 and `SHADOW_FRAME_BYTES` 80 → 144; the subdivided box and rectangle of REQ-SCN-068/074 with the widescreen quad's cell count; `hud_variant`; **the `// Q-104` curvature comment is gone** |
+| `zax-render/tests/bend_tests.rs` | `q_104_the_wgpu_backend_carries_nothing_of_the_curvature_yet` → `q_104_the_wgpu_backend_carries_the_curvature`, its own opposite, as its message instructed |
+| `zax-harness/tests/parity_wgpu_tests.rs` (new) | the parity file of the test plan, five tests |
+
+`Batching` lost its `module` field — the batched module is now one per variant in the renderer,
+beside the other two.
+
+#### The things the port had to get right that a text substitution would not
+
+1. **`mat3x3<f32>(a, b, c)` takes three columns**, and GLSL's `mat3(...)` takes three columns too,
+   so each of the three Jacobian factors is written with the same nine numbers in the same nine
+   places. Had either been row-major the normals would be wrong only where two axes bend at once
+   — which is why `req_scn_068_the_three_axes_together_agree_between_the_backends` exists.
+2. **The arc pivot rides in `bend_k.w`.** The GLSL has it as a `float` uniform of its own; the
+   frame block wants `vec4`s, and 13 floats fit in four of them with one `w` spare. A port that
+   dropped it would pass the left-right test and fail the arc one, so there is a test per axis.
+3. **`out` parameters do not exist in WGSL.** `zaxWrap` and `zaxBend` each return two things, so
+   each returns a struct (`ZaxWrap`, `ZaxBend`) instead.
+4. **`select(a, b, c)` is `c ? b : a`** — the operand order is the reverse of a ternary's, and it
+   is used three times here (the depth bound's two arms and the degenerate-Jacobian fallback).
+5. **The HUD never bends** (REQ-SCN-068). The OpenGL backend clears the bit in `draw_hud`; here
+   `hud_variant` puts `ShaderVariant::PLAIN` back before the HUD runs, which also means the plain
+   pipelines have to be prepared on a frame that bends everything else. Measured below: the HUD
+   moves by **0 levels** under a 90° curvature on both backends.
+
+#### The frame block grew, and a Classic frame pays 64 bytes of memcpy for it
+
+`frame_bytes` wrote 208 bytes into a 256-byte block; the curvature needs four more `vec4`, so the
+block is 288 and the shadow block 144. `push_bend` writes them on **every** frame, bending or not,
+because the block has one layout — and at curvature 0 `SpaceBend::NONE` makes those four writes
+sixteen zeros, which is what the buffer already held. That is the one new cost a Classic `wgpu`
+frame carries from this step: 64 bytes added to a `write_buffer` it was already making, once a
+frame, no branch. No new pass is submitted and no new pipeline is switched to, which is what the
+brief's check names.
+
+#### Parity, measured
+
+`parity_wgpu_tests.rs`, release, this machine, 640 × 480, anti-aliasing off. Each row is the worst
+of four scenes (`framing`, `shadow`, `heavy`, `hud`). Vulkan and DX12 returned **identical figures
+to the fourth decimal** in every row, so they share one column.
+
+| Configuration | max channel | pixels differing | within 2 levels |
+|---|---|---|---|
+| **Classic, the control** | 223 | 0.3577 % | **99.6423 %** |
+| `--bend 90,0,0` | 250 | 0.1299 % | **99.8701 %** |
+| `--bend 0,0,60,1` (the arc, centre moved) | 237 | 0.4062 % | **99.5938 %** |
+| `--bend 45,30,20` (all three axes) | 254 | 0.1953 % | **99.8047 %** |
+
+**The control is the figure to read the others against, and it is the point of having one.** The
+two backends already disagreed on 0.36 % of `heavy` with a max channel difference of 223 levels
+*before* this step — that is silhouette rasterisation on a frame of 1926 overlapping tile boxes,
+where a pixel either takes a box's face or the one behind it. The curvature's rows sit on either
+side of the control (0.13 % at 90°, 0.41 % on the arc) rather than above it, and the max channel
+difference is the same 220-to-250 all along, including in Classic. So the residual is not the
+curvature's: **the curvature adds no measurable disagreement at all.** On `framing` and `shadow`,
+where silhouettes do not pile up, every configuration is at 99.97 % or better and the bent shadow
+pass reads 99.9967 %.
+
+Two figures carry the other half of the check — that the shader is not quietly compiling to
+nothing:
+
+- the curvature moves **62.24 %** of `framing` on OpenGL, **62.24 %** on Vulkan and **62.24 %** on
+  DX12 (the test holds them to within 1 point of each other);
+- the HUD moves by **0 levels** on both backends (REQ-SCN-068).
+
+And read scene by scene, bent against flat, the two backends agree on how much they move to within
+0.02 of a percentage point: `framing` 40.061 % (GL) against 40.059 % (Vulkan) of pixels still
+within 2 levels, `heavy` 44.950 % against 44.938 %.
+
+#### The OpenGL backend did not move
+
+- `git diff --name-only faced2a` over `gl/`, `src/shaders/`, `renderer.rs`, `zax-engine3d/` and
+  `zax-app/` is **empty**: not one file of the OpenGL path is touched by this step. The five
+  changed files are the two WGSL sources, `wgpu_backend/renderer.rs`, `wgpu_backend/mod.rs` and
+  the harness test.
+- **The four instruction counts are unchanged**, re-measured with the same script:
+
+| Symbol | `faced2a` | step 2 |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3401 | **3401** |
+| `Construction::segment` | 159 | **159** |
+
+  The byte-identical synthetic-render check against a `faced2a` worktree is step 6's, where one
+  throwaway build pays for the whole lot.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| the variant mechanism: the five markers, nesting, a malformed marker reported and kept | 11 unit tests in `preprocess.rs` |
+| REQ-SCN-067/068 exist in WGSL, in both stages, behind the marker; the shadow lookup reads the bent position; REQ-SCN-036 still reads the unbent one | `bend_tests.rs` `q_104_the_wgpu_backend_carries_the_curvature` (rewritten) |
+| the Classic control | `parity_wgpu_tests.rs` `ru_7_the_classic_frame_agrees_between_the_backends` |
+| REQ-SCN-067/068, left-right at 90° | `req_scn_067_the_curvature_agrees_between_the_backends` |
+| REQ-SCN-066's arc and its centre — the axis that reads the pivot | `req_scn_066_the_arc_and_its_centre_agree_between_the_backends` |
+| REQ-SCN-068's composed Jacobians, three axes at once | `req_scn_068_the_three_axes_together_agree_between_the_backends` |
+| the effect is real and the same size on each backend; the HUD is not bent | `req_scn_067_the_curvature_moves_as_much_of_the_frame_on_each_backend` |
+
+`cargo test --release -p zax-render --features wgpu`: 33 suites, **312 passed, 0 failed**, 1
+ignored (the committed suite, the four scratch probes moved out for the run and put back; RU-6
+closed at 300 without `--features wgpu`, and the 11 new ones of `preprocess.rs` plus the `wgpu`
+suites make up the difference).
+`-p zax-harness --features wgpu --test parity_wgpu_tests`: 5 passed.
+`--test render_wgpu_tests`: 2 passed. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets --features zax-app/wgpu -- -D warnings` clean.
+
+#### What is left of the curvature for step 3 and after
+
+REQ-SCN-074's 2D mode is **ported** — `picture_quad_bent`, the widescreen quad's cell count and
+`--no-bend-2d` all reach the `wgpu` path — but it is not *measured* above, because no scene of the
+synthetic set is a 2D-mode frame. The 2D rectangle is read in step 5, with a frame of its own.
