@@ -16,7 +16,9 @@ struct Draw {
     tilting: vec4<f32>,
     // Colour mode, palette table, clip, receive shadow.
     modes: vec4<i32>,
-    // x: the deformation of the run in `deforms`, or -1; y: the texture of the batched draws.
+    // x: the deformation of the run in `deforms`, or -1; y: the texture of the batched draws;
+    // z: the voxel z offset of AMD-055 REQ-SCN-082, an `f32` carried as its bits (`bitcast`);
+    // w: spare.
     modes2: vec4<i32>,
 }
 

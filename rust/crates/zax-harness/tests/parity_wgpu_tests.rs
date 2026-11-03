@@ -21,6 +21,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use zax_harness::compare::matching_share;
 use zax_harness::render::{self, Options};
@@ -69,11 +70,17 @@ fn figures(a: &[u8], b: &[u8]) -> Figures {
 
 /// Renders the synthetic set with `extra`, on `backend` (`None` for the OpenGL reference), into a
 /// folder of its own. `None` when the backend has no adapter here.
+///
+/// The folder name carries a counter as well as the label and the process: the tests of this file
+/// run in parallel and two of them may ask for the same label and backend, in which case one
+/// would delete the folder the other is still reading.
 fn capture(label: &str, backend: Option<&str>, extra: &[&str]) -> Option<PathBuf> {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let output = std::env::temp_dir().join(format!(
-        "zax-parity-{label}-{}-{}",
+        "zax-parity-{label}-{}-{}-{}",
         backend.unwrap_or("gl"),
-        std::process::id()
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let mut arguments = vec![
         "--out".to_owned(),
@@ -220,6 +227,151 @@ fn req_scn_068_the_three_axes_together_agree_between_the_backends() {
         "the three axes agree on only {:.4} % of pixels",
         share * 100.0
     );
+}
+
+// ------------------------------------------------------------------ AMD-055, the shader effects
+
+/// AMD-055 REQ-SCN-081: the voxel grid modulates the albedo, on its own — REQ-SCN-079 switches it
+/// and the pixel shadows separately, so each is measured without the other.
+#[test]
+fn req_scn_081_the_voxel_grid_agrees_between_the_backends() {
+    let Some((share, channel)) = parity(
+        "voxel-grid",
+        &["--style", "enhanced", "--style-param", "spl.voxel_grid=3"],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the voxel grid agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "voxel grid: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// AMD-055 REQ-SCN-082: the shadow read at the centre of the fragment's voxel, on its own.
+#[test]
+fn req_scn_082_the_pixel_shadows_agree_between_the_backends() {
+    let Some((share, channel)) = parity(
+        "pixel-shadow",
+        &["--style", "enhanced", "--style-param", "spl.pixel_shadow=1"],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the pixel shadows agree on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "pixel shadows: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// The two together, and with the curvature on top: REQ-SCN-081 and REQ-SCN-082 both evaluate in
+/// the mesh's local frame **before** the curvature, and the pixel shadows then place the snapped
+/// point through it (REQ-SCN-082 point 3, REQ-SCN-068). That ordering is the one thing this
+/// configuration checks and the three above cannot.
+#[test]
+fn req_scn_082_the_two_effects_and_the_curvature_agree_between_the_backends() {
+    let Some((share, _)) = parity(
+        "grid-shadow-bend",
+        &[
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.voxel_grid=3,spl.pixel_shadow=1",
+            "--bend",
+            "60,0,0",
+        ],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the two effects under curvature agree on only {:.4} % of pixels",
+        share * 100.0
+    );
+}
+
+/// Each of the two effects has to **do** something on the `wgpu` side, and the same something —
+/// the half of the check a share cannot make, since two pictures without the effect agree
+/// perfectly. And neither touches the HUD (REQ-SCN-081, REQ-SCN-082).
+///
+/// Each effect is read on the scene that shows it, and the floor is the share that effect moves
+/// on the **OpenGL** backend, measured here rather than assumed. The two are four orders of
+/// magnitude apart, and the reason is the fixtures rather than the port:
+///
+/// - the grid modulates the albedo of every face, so it moves **32.25 %** of `framing`;
+/// - the pixel shadows move the point a shadow is *read* at, and the synthetic set's shadows
+///   cover a sliver of the frame — **0.0091 %** of `shadow`, about 28 pixels of 307 200, and
+///   nothing at all of `framing`, which has no cast shadow for them to move.
+///
+/// So this test is weak evidence for REQ-SCN-082 and strong evidence for REQ-SCN-081, and the
+/// floor is set just under each measured value rather than at a round number that would flatter
+/// one of them. What carries REQ-SCN-082 on this side is the agreement figure of
+/// `req_scn_082_the_pixel_shadows_agree_between_the_backends` together with the OpenGL unit tests
+/// of `amd055_style_tests.rs`; a fixture with a large cast shadow would be the thing to add.
+#[test]
+fn req_scn_079_each_shader_effect_moves_as_much_of_the_frame_on_each_backend() {
+    let effects = [
+        ("voxel-grid", "spl.voxel_grid=3", "framing", 0.15),
+        ("pixel-shadow", "spl.pixel_shadow=1", "shadow", 0.00005),
+    ];
+    for (label, parameter, scene, least) in effects {
+        let classic = capture("moves-classic", None, &[]).expect("OpenGL always renders");
+        let enhanced = capture(
+            label,
+            None,
+            &["--style", "enhanced", "--style-param", parameter],
+        )
+        .expect("OpenGL always renders");
+        let reference = figures(&load(&classic, scene), &load(&enhanced, scene)).differing;
+        assert!(
+            reference > least,
+            "{label} moved only {:.4} % of `{scene}` on OpenGL",
+            reference * 100.0
+        );
+
+        for backend in backends() {
+            let Some(flat) = capture("moves-classic", Some(backend), &[]) else {
+                continue;
+            };
+            let on = capture(
+                label,
+                Some(backend),
+                &["--style", "enhanced", "--style-param", parameter],
+            )
+            .unwrap();
+            let moved = figures(&load(&flat, scene), &load(&on, scene)).differing;
+            println!(
+                "{label} on {backend}: moves {:.4} % of `{scene}`, OpenGL {:.4} %",
+                moved * 100.0,
+                reference * 100.0
+            );
+            assert!(
+                (moved - reference).abs() < 0.01,
+                "{label} on {backend} moved {:.4} % against OpenGL's {:.4} %",
+                moved * 100.0,
+                reference * 100.0
+            );
+
+            let hud = figures(&load(&flat, "hud"), &load(&on, "hud"));
+            assert_eq!(
+                hud.max_channel, 0,
+                "{label} on {backend} changed the HUD by up to {} levels",
+                hud.max_channel
+            );
+            fs::remove_dir_all(&flat).unwrap();
+            fs::remove_dir_all(&on).unwrap();
+        }
+        fs::remove_dir_all(&classic).unwrap();
+        fs::remove_dir_all(&enhanced).unwrap();
+    }
 }
 
 /// The curvature has to **do** something on the `wgpu` side, and the same something: the bent

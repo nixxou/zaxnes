@@ -14,8 +14,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | # | Step | Status |
 |---|---|---|
 | 1 | The gate: why the `wgpu` tests skip, fixed or proven; the map against `gl/`; the test plan | done — `f46feea` |
-| 2 | Curvature (AMD-043, AMD-046) | done — this commit |
-| 3 | The voxel grid and the pixel shadows | todo |
+| 2 | Curvature (AMD-043, AMD-046) | done — `9ffb3b7` |
+| 3 | The voxel grid and the pixel shadows | done — this commit |
 | 4 | The screen passes: Depth AO, MSVO, SSR, their targets and lifecycle, the AA resolve | todo |
 | 5 | The parity measurements and the costs | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
@@ -364,3 +364,141 @@ suites make up the difference).
 REQ-SCN-074's 2D mode is **ported** — `picture_quad_bent`, the widescreen quad's cell count and
 `--no-bend-2d` all reach the `wgpu` path — but it is not *measured* above, because no scene of the
 synthetic set is a 2D-mode frame. The 2D rectangle is read in step 5, with a frame of its own.
+
+### Step 3 — the voxel grid and the pixel shadows
+
+The two shader effects of AMD-055, each its own axis of `ShaderVariant` because REQ-SCN-079
+switches `spl.voxel_grid` and `spl.pixel_shadow` separately — "a player who turns the grid on does
+not pay for the voxel snapping, nor the other way round", which is the OpenGL backend's own
+reasoning and now this one's.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `shaders/voxel_grid.wgsl` (new) | `zax_voxel_grid`, the twin of `voxel_grid.glsl`: the alignment factor, the axis weights, the groove and bright bands, the corner product |
+| `shaders/pixel_shadow.wgsl` (new) | `zax_voxel_center` (the axis left alone, the `z` offset), `zax_place_linear`, `zax_voxel_shadow_point` (the deformation then the placement then the curvature, in REQ-E3D-406's order) |
+| `shaders/scene.wgsl` | `Frame.style.x` the voxel cell; `local` and `local_normal` under `ZAX_VOXEL_GRID \|\| ZAX_PIXEL_SHADOW`; three flat placement rows and the deform tile under `ZAX_PIXEL_SHADOW`; the grid on the **linear** albedo; the snapped shadow origin |
+| `shaders/common.wgsl` | the `Draw.modes2` comment: `z` now carries the voxel `z` offset |
+| `wgpu_backend/renderer.rs` | two more fields on `ShaderVariant` with their defines and chunks; `ShaderVariant::shadow()`; `select_bend_variant` grown into the twin of `select_style_variants` too; the voxel cell in `frame_bytes`; the per-run `z` offset in `push_draw`; `storage(3)` visible to both stages |
+| `wgpu_backend/resources.rs` | `MeshHandle.build_depth`, as `GpuMesh` carries it |
+| `zax-render/tests/amd055_style_tests.rs` | the Q-104 known-gap test is now **two-sided**: the two shader effects must be in the WGSL, the two screen passes must not be yet |
+| `zax-harness/tests/parity_wgpu_tests.rs` | four more tests |
+
+#### Four places where the WGSL could not be the GLSL
+
+1. **The grid multiplies the *linear* albedo.** `scene.frag` keeps `albedoLinear` throughout and
+   the OpenGL indexed path reads an already-linear palette; `scene.wgsl` kept the albedo in sRGB
+   until the lighting line and linearised there (its equivalent of the `ZAX_SRGB_PALETTE`
+   variant). REQ-SCN-081 modulates the albedo "before any lighting calculation", and the
+   reference does it in linear space — so the fragment now computes `albedo_linear` first and the
+   grid multiplies that. Applied to the sRGB value instead, the grooves would have come out the
+   wrong depth.
+2. **The `z` offset rides in a spare integer slot.** The GLSL has `uVoxelZOffset` as a uniform of
+   its own, set per run. The `wgpu` per-run block had two unused `i32` slots, so the offset goes
+   into `modes2.z` as its bits and `pixel_shadow.wgsl` reads it back with `bitcast<f32>`. The
+   exact value `style::voxel_z_offset` returns, no rule duplicated in the shader, and the block
+   does not grow by 16 bytes for **every** draw of **every** variant (on `heavy`, 1926 runs).
+3. **`MeshHandle` had to grow a `build_depth`.** It is where that offset comes from, and the
+   OpenGL `GpuMesh` already carries it for the same reason — so the draw path reads it from the
+   handle it has. The depth itself and not the `D/2` the shader wants: the handle is a key of the
+   draw list (`Eq + Hash`) and a float is neither.
+4. **The deformations had to become fragment-visible.** REQ-SCN-082 point 3 applies the animated
+   deformation to the snapped voxel centre, and the snapping is a *fragment* computation — so
+   `storage(3)` went from `VERTEX` to `VERTEX_FRAGMENT`. The OpenGL path's `deformation.glsl` is a
+   chunk of both stages already, so this is the faithful shape; it is a static layout property, so
+   no Classic frame does any new work for it. The **placements** of binding 1 stayed vertex-only:
+   only the linear part of one instance's is wanted, and nine floats of flat varyings in the
+   pixel-shadow variant are cheaper than making the whole buffer visible — which is the same
+   choice, and the same nine floats, the GLSL makes.
+
+#### `fwidth` is not `fwidth`, and the measurement that found it
+
+The one real bug this step turned up, and the parity test is what caught it. With a plain
+`fwidth(d)` in the grid — a literal transcription of the GLSL — the figures came out:
+
+| | `framing` | `framing` + curvature |
+|---|---|---|
+| Vulkan | 99.9834 % | 99.9795 % |
+| **DX12** | **99.8675 %** | **99.0124 %** |
+
+DX12 alone, and worse the more the geometry was foreshortened. The cause is that the precision of
+a plain `fwidth` is implementation-chosen in all three languages: naga emits SPIR-V `OpFwidth` for
+Vulkan and HLSL `fwidth` for DirectX 12, and on this NVIDIA driver the second is quad-**coarse**.
+The grid uses the derivative only to set the smoothing width of the 3.5 % band, so a coarse
+derivative widens every groove edge by about a pixel — many pixels off by a little, concentrated
+on the grooves, and the max channel difference large wherever an edge moved a whole step.
+
+Asking for the fine derivative by name (`fwidthFine`) takes **both** backends to 99.983 %, which
+also says what the OpenGL driver's GLSL `fwidth` is. REQ-SCN-081 fixes the smoothing only as
+"about one pixel", so naming the variant changes nothing the requirement states. The finding is
+written out in `voxel_grid.wgsl`'s header with both columns.
+
+Two things worth drawing from it. First, **the DX12 column earns its place**: Vulkan alone would
+have passed this step and shipped the defect to every DirectX 12 player. Second, this is precisely
+the class of fault Q-104 §2 said could not be found without a device — and it could not have been
+found by reading either shader.
+
+#### Parity, measured
+
+Same method as step 2 — worst of four scenes, release, 640 × 480, anti-aliasing off. Vulkan and
+DX12 agree to the fourth decimal in every row once the derivative is named.
+
+| Configuration | max channel | pixels differing | within 2 levels |
+|---|---|---|---|
+| Classic, the control | 223 | 0.3577 % | 99.6423 % |
+| `spl.voxel_grid` = 3 | 229 | 0.3597 % | **99.6423 %** |
+| `spl.pixel_shadow` = 1 | 223 | 0.3577 % | **99.6423 %** |
+| both, with `--bend 60,0,0` | 255 | 0.1689 % | **99.8324 %** |
+
+**All three sit on the control, to the fourth decimal.** The two effects add no disagreement that
+the flat Classic frame did not already have, and the combined row with the curvature is *better*
+than the control for the reason step 2 gave — bent geometry pulls silhouettes apart.
+
+That each effect does something, and the same something:
+
+| Effect | scene | OpenGL moves | Vulkan | DX12 |
+|---|---|---|---|---|
+| `spl.voxel_grid` = 3 | `framing` | 32.2497 % | 32.2565 % | 32.2565 % |
+| `spl.pixel_shadow` = 1 | `shadow` | 0.0091 % | 0.0091 % | 0.0091 % |
+
+And the HUD moves by **0 levels** under either effect, on both backends (REQ-SCN-081,
+REQ-SCN-082).
+
+#### The pixel shadows are weakly exercised by this fixture set, and that is stated
+
+0.0091 % of `shadow` is about **28 pixels** of 307 200, and the effect moves **nothing at all** of
+`framing`, which has no cast shadow for it to move. That is the synthetic set's doing and not the
+port's — REQ-SCN-082 moves the point a shadow is *read* at, and these scenes' shadows cover a
+sliver of the frame. So the honest reading is that this step's evidence for REQ-SCN-082 is the
+agreement figure plus the OpenGL unit tests, not the "it moves something" figure; the test says so
+in its own doc comment, with the number. A fixture with a large cast shadow is what would
+strengthen it, and it is listed for R0 at the end of this file.
+
+#### The OpenGL backend still did not move
+
+`git diff --name-only faced2a` over `gl/`, `src/shaders/`, `renderer.rs`, `zax-engine3d/` and
+`zax-app/` is **still empty**, and the four instruction counts are still 2231 / 1095 / 3401 / 159.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-081's five constants and REQ-SCN-082's two functions are in the WGSL, each behind its own marker; **and nothing of REQ-SCN-083 or REQ-SCN-084 is yet** | `amd055_style_tests.rs` `q_104_the_wgpu_backend_carries_the_two_shader_effects_and_not_yet_the_two_passes` (rewritten) |
+| REQ-SCN-081 on its own | `parity_wgpu_tests.rs` `req_scn_081_the_voxel_grid_agrees_between_the_backends` |
+| REQ-SCN-082 on its own | `req_scn_082_the_pixel_shadows_agree_between_the_backends` |
+| the two together **and** under curvature — the ordering of REQ-SCN-082 point 3 with REQ-SCN-068 | `req_scn_082_the_two_effects_and_the_curvature_agree_between_the_backends` |
+| each effect moves as much of the frame on each backend, and neither touches the HUD | `req_scn_079_each_shader_effect_moves_as_much_of_the_frame_on_each_backend` |
+
+`cargo test --release -p zax-render --features wgpu`: 33 suites, **312 passed, 0 failed**, 1
+ignored. `-p zax-harness --features wgpu`: 13 suites, **60 passed, 0 failed** (9 of them this
+file's). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features
+zax-app/wgpu -- -D warnings` clean.
+
+#### A bug in this file's own tests, fixed
+
+The nine parity tests run in parallel and name their temporary folders after the label, the
+backend and the process — so `req_scn_081`'s `voxel-grid` folder and the one
+`req_scn_079` renders under the same label were **the same path**, and whichever finished first
+deleted the other's captures. Found by the suite failing only when run without
+`--test-threads=1`. The folder name now carries a counter as well.

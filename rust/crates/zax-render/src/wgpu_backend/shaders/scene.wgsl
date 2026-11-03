@@ -20,6 +20,9 @@ struct Frame {
     bend_f: vec4<f32>,
     bend_h: vec4<f32>,
     bend_on: vec4<f32>,
+    // AMD-055: x the voxel cell side of REQ-SCN-081 (`SceneConstants::voxel_cell`). Written
+    // whatever the variant, read only by ZAX_VOXEL_GRID.
+    style: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -51,6 +54,27 @@ struct VertexOut {
     // exist — which is the whole point of its being a variant (`preprocess.rs`).
     @location(4) bent: vec3<f32>,
 //#endif
+//#if ZAX_VOXEL_GRID || ZAX_PIXEL_SHADOW
+    // AMD-055 REQ-SCN-081 and REQ-SCN-082: the position and the normal in the **mesh's local
+    // frame** (REQ-E3D-504 for GREEDY and GREEDY_MULTICOLOR, REQ-E3D-522 for MARCHING), before
+    // the animated deformation, before the object's transform and before the curvature. That is
+    // the frame both requirements evaluate in, and it is why the grooves and the shadow squares
+    // follow the object's scale, its rotation and the curved surface.
+    @location(5) local: vec3<f32>,
+    @location(6) local_normal: vec3<f32>,
+//#endif
+//#ifdef ZAX_PIXEL_SHADOW
+    // AMD-055 REQ-SCN-082: the placement the fragment stage needs to transform a voxel centre
+    // like a vertex. The snapping varies **across** a face, so it cannot be done in the vertex
+    // stage; and the placements are a storage buffer the fragment stage cannot see, so the linear
+    // part of this instance's travels. Only the **linear part**, nine floats rather than sixteen:
+    // the placement is affine, so the translation cancels in the difference between the snapped
+    // point and the fragment's own. `flat` because a placement is one value per instance.
+    @location(7) @interpolate(flat) model_row0: vec3<f32>,
+    @location(8) @interpolate(flat) model_row1: vec3<f32>,
+    @location(9) @interpolate(flat) model_row2: vec3<f32>,
+    @location(10) @interpolate(flat) deform_tile: vec3<f32>,
+//#endif
 }
 
 @vertex
@@ -76,6 +100,20 @@ fn vs_main(
     out.normal = draw.tilting.z * zax_place_normal(instance, normal);
     out.uv = uv;
     out.run = run;
+//#if ZAX_VOXEL_GRID || ZAX_PIXEL_SHADOW
+    // The untouched attributes: `position` is the voxel-grid position of REQ-E3D-504 and `normal`
+    // the mesh normal there — the face normal in GREEDY and GREEDY_MULTICOLOR, the triangle's
+    // flat normal in MARCHING (REQ-E3D-522), which makes it constant over a triangle and so
+    // unchanged by the interpolation.
+    out.local = position;
+    out.local_normal = normal;
+//#endif
+//#ifdef ZAX_PIXEL_SHADOW
+    out.model_row0 = instance.rows[0].xyz;
+    out.model_row1 = instance.rows[1].xyz;
+    out.model_row2 = instance.rows[2].xyz;
+    out.deform_tile = instance.deform_tile.xyz;
+//#endif
 //#ifdef ZAX_BEND
     // REQ-SCN-067, applied last: after the animated deformation and after the object's own
     // transform, so on the final position in the scene (REQ-SCN-068). REQ-SCN-068 transports the
@@ -132,6 +170,22 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         }
     }
 
+    // The albedo, linear. The OpenGL path reads the indexed albedo from an already-linear palette
+    // and this one linearises per fragment (its `ZAX_SRGB_PALETTE` variant), which is why the
+    // conversion is here rather than at the three places the albedo is read.
+    var albedo_linear = zax_to_linear3(albedo);
+//#ifdef ZAX_VOXEL_GRID
+    // REQ-SCN-081: the grid modulates the **albedo**, before any lighting calculation
+    // (REQ-SCN-028) — so on the linear albedo, as `scene.frag` does it. For a tile the position
+    // is the one in the mesh's local frame; for the backdrop (colour mode 2) it is the scene
+    // position of REQ-SCN-081's second paragraph. The test is uniform over a whole draw, not a
+    // per-fragment switch between having the effect and not having it: that one is the variant.
+    albedo_linear *= zax_voxel_grid(
+        select(in.local, in.scene, color_mode == 2),
+        normalize(in.local_normal),
+        frame.style.x);
+//#endif
+
     let n = normalize(in.normal);
     let l = normalize(-frame.light[i32(draw.tilting.w)].xyz);
     let ndl = max(0.0, dot(n, l));
@@ -142,9 +196,30 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // REQ-SCN-068: the shadow map holds the **bent** geometry, so the lookup starts from the
         // bent position; without the variant there is only the one position.
 //#ifdef ZAX_BEND
-        let biased = in.bent + n * frame.params.w;
+        var biased = in.bent + n * frame.params.w;
 //#else
-        let biased = in.scene + n * frame.params.w;
+        var biased = in.scene + n * frame.params.w;
+//#endif
+//#ifdef ZAX_PIXEL_SHADOW
+        // REQ-SCN-082: on an opaque **tile**, the shadow is read at the centre of the fragment's
+        // voxel instead. The bias and the normal offset of REQ-SCN-031 are applied to that
+        // displaced point and not to the fragment, or the shadow acne REQ-SCN-031 avoids comes
+        // back (REQ-SCN-082, Notes). Colour mode 2 is the backdrop, which the requirement leaves
+        // alone ("sans objet sur le backdrop"); the test reads the run's own block, constant over
+        // the whole draw, as the grid's is. The HUD and the transparent objects carry
+        // `modes.w` = 0, so they are already out.
+        if (color_mode != 2) {
+            biased = zax_voxel_shadow_point(
+                draw,
+                in.scene,
+                in.local,
+                normalize(in.local_normal),
+                in.model_row0,
+                in.model_row1,
+                in.model_row2,
+                in.deform_tile,
+                frame.params.x) + n * frame.params.w;
+        }
 //#endif
         let light = frame.light_view_projection * vec4<f32>(biased.x, biased.y, -biased.z, 1.0);
         let projected = light.xyz / light.w * 0.5 + 0.5;
@@ -162,6 +237,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     // REQ-SCN-028: albedo_lin * (ambient_lin + max(0, N.L) * light_lin * S).
-    let lit = zax_to_linear3(albedo) * (vec3<f32>(frame.light_ambient.w) + ndl * frame.light_ambient.xyz * shadow);
+    let lit = albedo_linear * (vec3<f32>(frame.light_ambient.w) + ndl * frame.light_ambient.xyz * shadow);
     return vec4<f32>(min(lit, vec3<f32>(1.0)), draw.flat_alpha.w * texel_alpha);
 }

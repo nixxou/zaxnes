@@ -146,41 +146,53 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     assert_ne!(classic.pixels, flat.pixels, "60° changes the picture");
 }
 
-/// Q-104, extended to AMD-055 by point 6 of this lot's brief: the Enhanced style landed in the
-/// **OpenGL** backend only — the one SPEC-06 REQ-SCN-056 requires, the one of the default build,
-/// of R0's captures and of the two portable targets. Under `wgpu` the style is read back as set
-/// and the scene is drawn in Classic, with one log line.
+/// Q-104, being answered (RU-7): the two **shader** effects of the Enhanced style are in the
+/// `wgpu` backend, and the two **screen passes** are not yet.
 ///
-/// This asserts the **known gap**, so that a half-done parity fails loudly rather than passing
-/// unnoticed: not one of the four effects is in the WGSL. When that backend gains them, this test
-/// and the note in `wgpu_backend/renderer.rs` are what have to go. The log line itself is the
-/// observable half and needs a device, which no test on this side is guaranteed one.
+/// This test used to assert that not one of the four effects was in the WGSL — the known gap, so
+/// that a half-done parity failed loudly rather than passing unnoticed. RU-7 step 3 ported the
+/// voxel grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082, which are variants of the
+/// scene module; the occlusion of REQ-SCN-083 and the reflections of REQ-SCN-084 are passes of
+/// their own and are step 4's. So the assertion is now **two-sided**, and it is what keeps the
+/// remaining half of the gap pinned: the day the screen passes land, the second list empties and
+/// the diagnostic line of `wgpu_backend/renderer.rs` goes with it.
+///
+/// Whether the WGSL compiles and whether the two backends agree is not a question this side can
+/// answer — naga validates at module creation. That is
+/// `zax-harness/tests/parity_wgpu_tests.rs`.
 #[cfg(feature = "wgpu")]
 #[test]
-fn q_104_the_wgpu_backend_carries_nothing_of_the_enhanced_style_yet() {
-    const SOURCES: [&str; 4] = [
-        include_str!("../src/wgpu_backend/shaders/common.wgsl"),
-        include_str!("../src/wgpu_backend/shaders/scene.wgsl"),
-        include_str!("../src/wgpu_backend/shaders/shadow.wgsl"),
-        include_str!("../src/wgpu_backend/shaders/resolve.wgsl"),
-    ];
+fn q_104_the_wgpu_backend_carries_the_two_shader_effects_and_not_yet_the_two_passes() {
+    const COMMON: &str = include_str!("../src/wgpu_backend/shaders/common.wgsl");
+    const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
+    const SHADOW: &str = include_str!("../src/wgpu_backend/shaders/shadow.wgsl");
+    const RESOLVE: &str = include_str!("../src/wgpu_backend/shaders/resolve.wgsl");
+    const VOXEL_GRID: &str = include_str!("../src/wgpu_backend/shaders/voxel_grid.wgsl");
+    const PIXEL_SHADOW: &str = include_str!("../src/wgpu_backend/shaders/pixel_shadow.wgsl");
 
-    for source in SOURCES {
-        // `msvo` joined the list with RU-6, which ported the multi-scale occlusion of
-        // REQ-SCN-083's *Mode MSVO* into the OpenGL backend and left this one drawing Classic:
-        // the gap Q-104 records is the same gap, one effect wider.
-        for name in [
-            "voxel",
-            "pixel_shadow",
-            "occlusion",
-            "reflect",
-            "ssr",
-            "msvo",
-        ] {
+    // REQ-SCN-081: the grooves, with the five constants of the requirement.
+    assert!(VOXEL_GRID.contains("fn zax_voxel_grid("));
+    for number in ["0.38 + 0.24 * t", "0.20 - 0.10 * t", "0.16 - d", "0.035"] {
+        assert!(VOXEL_GRID.contains(number), "REQ-SCN-081: {number}");
+    }
+    // REQ-SCN-082: the voxel centre, and the point placed like a vertex.
+    assert!(PIXEL_SHADOW.contains("fn zax_voxel_center("));
+    assert!(PIXEL_SHADOW.contains("fn zax_voxel_shadow_point("));
+    // Both reach the scene pass, each behind its own marker (REQ-SCN-079 switches them apart).
+    assert!(SCENE.contains("//#ifdef ZAX_VOXEL_GRID"));
+    assert!(SCENE.contains("//#ifdef ZAX_PIXEL_SHADOW"));
+    assert!(SCENE.contains("albedo_linear *= zax_voxel_grid("));
+    assert!(SCENE.contains("zax_voxel_shadow_point("));
+
+    // And the half that is still to come: nothing of the two screen passes of REQ-SCN-083 and
+    // REQ-SCN-084 is in any WGSL source yet.
+    for source in [COMMON, SCENE, SHADOW, RESOLVE, VOXEL_GRID, PIXEL_SHADOW] {
+        for name in ["occlusion", "reflect", "ssr", "msvo"] {
             assert!(
                 !source.to_ascii_lowercase().contains(name),
-                "the wgpu shaders mention '{name}': the Enhanced style is being ported, so \
-                 Q-104, this test and the note in wgpu_backend/renderer.rs go together"
+                "the wgpu shaders mention '{name}': the screen passes of REQ-SCN-083 and \
+                 REQ-SCN-084 are being ported, so this second list, the diagnostic line of \
+                 wgpu_backend/renderer.rs and the Q-104 notes go together"
             );
         }
     }

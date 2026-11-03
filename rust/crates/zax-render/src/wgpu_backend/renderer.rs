@@ -143,17 +143,33 @@ struct ShaderVariant {
     /// The curvature of AMD-043 REQ-SCN-067, which also places the vertex and transports the
     /// normal (REQ-SCN-068), and bends the shadow pass with it.
     bend: bool,
+    /// The voxel grid of AMD-055 REQ-SCN-081, which modulates the albedo.
+    voxel_grid: bool,
+    /// The pixel shadows of AMD-055 REQ-SCN-082, which read the shadow at the voxel's centre.
+    /// Independent of the grid: REQ-SCN-079 switches the two separately, so a player who turns
+    /// the grid on must not pay for the snapping, nor the other way round.
+    pixel_shadow: bool,
 }
 
 impl ShaderVariant {
     /// Every field false: the modules of before RU-7.
-    const PLAIN: Self = Self { bend: false };
+    const PLAIN: Self = Self {
+        bend: false,
+        voxel_grid: false,
+        pixel_shadow: false,
+    };
 
     /// The defines [`preprocess::compose`] expands this variant's sources with.
     fn defines(self) -> Vec<&'static str> {
         let mut defines = Vec::new();
         if self.bend {
             defines.push("ZAX_BEND");
+        }
+        if self.voxel_grid {
+            defines.push("ZAX_VOXEL_GRID");
+        }
+        if self.pixel_shadow {
+            defines.push("ZAX_PIXEL_SHADOW");
         }
         defines
     }
@@ -164,15 +180,39 @@ impl ShaderVariant {
         if self.bend {
             chunks.push(BEND);
         }
+        if self.voxel_grid {
+            chunks.push(VOXEL_GRID);
+        }
+        if self.pixel_shadow {
+            chunks.push(PIXEL_SHADOW);
+        }
         chunks
     }
 
     /// What the module labels say, so that a `naga` message names the variant it came from.
-    fn suffix(self) -> &'static str {
-        if self.bend {
-            " bend"
-        } else {
-            ""
+    fn suffix(self) -> String {
+        let mut suffix = String::new();
+        for (on, name) in [
+            (self.bend, " bend"),
+            (self.voxel_grid, " grid"),
+            (self.pixel_shadow, " pixel-shadow"),
+        ] {
+            if on {
+                suffix.push_str(name);
+            }
+        }
+        suffix
+    }
+
+    /// The variant the **shadow** pass asks for: the curvature alone. REQ-SCN-081 and
+    /// REQ-SCN-082 are about the albedo and about where the shadow is *read*, neither of which
+    /// the depth-only pass has any part in, so a frame with the grid on does not build or switch
+    /// to a second shadow module.
+    const fn shadow(self) -> Self {
+        Self {
+            bend: self.bend,
+            voxel_grid: false,
+            pixel_shadow: false,
         }
     }
 }
@@ -583,9 +623,10 @@ impl WgpuSceneRenderer {
             let module = build_module(&self.device, "zax scene", &[SCENE, TEXTURES_BOUND], variant);
             self.scene_modules.insert(variant, module);
         }
-        if !self.shadow_modules.contains_key(&variant) {
-            let module = build_module(&self.device, "zax shadow", &[SHADOW], variant);
-            self.shadow_modules.insert(variant, module);
+        let shadow = variant.shadow();
+        if !self.shadow_modules.contains_key(&shadow) {
+            let module = build_module(&self.device, "zax shadow", &[SHADOW], shadow);
+            self.shadow_modules.insert(shadow, module);
         }
         if self.batching.is_some() && !self.batched_modules.contains_key(&variant) {
             let module = build_module(
@@ -598,12 +639,18 @@ impl WgpuSceneRenderer {
         }
     }
 
-    /// The variant this frame draws with (AMD-043 REQ-SCN-067), and the subdivided meshes
+    /// The variant this frame draws with — the curvature of AMD-043 REQ-SCN-067, the voxel grid
+    /// of AMD-055 REQ-SCN-081 and the pixel shadows of REQ-SCN-082 — and the subdivided meshes
     /// REQ-SCN-068 and REQ-SCN-074 ask for while something bends.
     ///
-    /// The twin of `SceneRenderer::select_bend_variant`, and like it **one `is_identity` test**
-    /// at the default settings: no module is built, no pipeline is added, no mesh is subdivided
-    /// and the frame block's four curvature fields are written as the zeros they already were.
+    /// The twin of `SceneRenderer::select_bend_variant` and `select_style_variants`, and like
+    /// them **three boolean tests** at the default settings: no module is built, no pipeline is
+    /// added, no mesh is subdivided, and the frame block's curvature and style fields are written
+    /// as the zeros they already were.
+    ///
+    /// Neither of the two style axes applies in **2D mode**: the frame then holds one object, the
+    /// rectangle of AMD-046 §2, which REQ-SCN-081 and REQ-SCN-082 both exclude — the same reading
+    /// the OpenGL backend applies, and it costs nothing.
     ///
     /// # Errors
     ///
@@ -614,8 +661,19 @@ impl WgpuSceneRenderer {
         scene: &SceneState,
     ) -> Result<ShaderVariant, WgpuRenderError> {
         let bend = !scene.effective_bend().is_identity();
-        let variant = ShaderVariant { bend };
+        let style = &scene.settings.style;
+        let flat = scene.two_dimensional_mode;
+        let variant = ShaderVariant {
+            bend,
+            voxel_grid: style.voxel_grid_active() && !flat,
+            pixel_shadow: style.pixel_shadow_active() && !flat,
+        };
         self.ensure_modules(variant);
+        // REQ-SCN-081: the HUD never takes the grid, and it draws with the flat variant of
+        // REQ-SCN-068 — so the plain modules have to be there for it whatever this frame asks.
+        if variant != ShaderVariant::PLAIN {
+            self.ensure_modules(hud_variant(variant));
+        }
         if bend {
             let cells = interop::subdivision_for(true);
             if self.unit_box_bent.is_none() {
@@ -880,10 +938,13 @@ impl WgpuSceneRenderer {
                 .write_buffer(&self.shadow_deforms.buffer, 0, &self.deform_data);
         }
 
-        let module = &self.shadow_modules[&variant];
+        // REQ-SCN-081 and REQ-SCN-082 are without object on a depth-only pass, so the shadow
+        // module and its two pipelines are keyed on the curvature alone.
+        let shadow_variant = variant.shadow();
+        let module = &self.shadow_modules[&shadow_variant];
         for mirrored in [false, true] {
             self.shadow_pipelines
-                .entry((mirrored, variant))
+                .entry((mirrored, shadow_variant))
                 .or_insert_with(|| shadow_pipeline(&self.device, &self.layouts, module, mirrored));
         }
 
@@ -923,7 +984,7 @@ impl WgpuSceneRenderer {
                     multi_draw(&mut pass, indirect, &pending);
                 }
                 pending = entry..entry;
-                pass.set_pipeline(&self.shadow_pipelines[&(mirrored, variant)]);
+                pass.set_pipeline(&self.shadow_pipelines[&(mirrored, shadow_variant)]);
                 current = Some(mirrored);
             }
             let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
@@ -1656,6 +1717,10 @@ fn batching_supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
 const COMMON: &str = include_str!("shaders/common.wgsl");
 /// The space bending of AMD-043 REQ-SCN-067, prepended to the `ZAX_BEND` variants only.
 const BEND: &str = include_str!("shaders/bend.wgsl");
+/// The voxel grid of AMD-055 REQ-SCN-081, prepended to the `ZAX_VOXEL_GRID` variants only.
+const VOXEL_GRID: &str = include_str!("shaders/voxel_grid.wgsl");
+/// The pixel shadows of AMD-055 REQ-SCN-082, prepended to the `ZAX_PIXEL_SHADOW` variants only.
+const PIXEL_SHADOW: &str = include_str!("shaders/pixel_shadow.wgsl");
 const SCENE: &str = include_str!("shaders/scene.wgsl");
 const TEXTURES_BOUND: &str = include_str!("shaders/textures_bound.wgsl");
 const TEXTURES_BINDLESS: &str = include_str!("shaders/textures_bindless.wgsl");
@@ -1720,7 +1785,13 @@ impl Layouts {
                 storage(0, both),
                 storage(1, wgpu::ShaderStages::VERTEX),
                 storage(2, wgpu::ShaderStages::VERTEX),
-                storage(3, wgpu::ShaderStages::VERTEX),
+                // AMD-055 REQ-SCN-082 point 3 applies the animated deformation to the snapped
+                // voxel centre, and the snapping is a **fragment** computation — so the
+                // deformations are visible to both stages, as the OpenGL path's deformation
+                // uniforms have always been (`deformation.glsl` is a chunk of both stages). The
+                // placements of binding 1 are not: only the linear part of one instance's is
+                // wanted there, and it travels as flat varyings in the pixel-shadow variant.
+                storage(3, both),
             ],
         );
         let textures = layout(
@@ -2247,7 +2318,9 @@ const fn vec4(value: Vector4) -> [f32; 4] {
 }
 
 /// The variant the HUD draws with: `variant` with every axis REQ-SCN-068 and AMD-055 exclude the
-/// HUD from cleared. The twin of what `draw_hud` does on the OpenGL side.
+/// HUD from cleared. The twin of what `draw_hud` does on the OpenGL side, which clears all three
+/// of the same bits — so the answer is the plain variant whatever came in, and the parameter is
+/// kept so that an axis the HUD *does* take would be added here and nowhere else.
 const fn hud_variant(_variant: ShaderVariant) -> ShaderVariant {
     ShaderVariant::PLAIN
 }
@@ -2285,6 +2358,9 @@ fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
     push_vec4(&mut data, vec3(constants.light_direction, 0.0));
     push_vec4(&mut data, vec3(constants.hud_light_direction, 0.0));
     push_bend(&mut data, constants.bend);
+    // AMD-055 REQ-SCN-081: the voxel cell side. Written whatever the variant, for the reason
+    // `push_bend` gives, and in Classic it is the cell of `spl.voxel_grid` = 0.
+    push_vec4(&mut data, [constants.voxel_cell, 0.0, 0.0, 0.0]);
     data
 }
 
@@ -2349,7 +2425,11 @@ fn push_draw(data: &mut Vec<u8>, deforms: &mut Vec<u8>, item: &WgpuDrawItem, loo
         i32::from(look.shadow_enabled && item.receive_shadow),
         deform,
         texture_slot(item),
-        0,
+        // AMD-055 REQ-SCN-082: the voxel z offset of this run's mesh, the `uVoxelZOffset` uniform
+        // of the OpenGL path. It rides in this spare integer slot and `pixel_shadow.wgsl` reads it
+        // back with `bitcast`, which keeps the exact value `style::voxel_z_offset` returns without
+        // growing the per-run block — the block every draw of every variant uploads.
+        i32::from_ne_bytes(crate::style::voxel_z_offset(item.mesh.build_depth).to_ne_bytes()),
         0,
     ];
     let mut block = [0_u8; DRAW_BLOCK];

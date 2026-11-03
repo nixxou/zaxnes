@@ -22,6 +22,14 @@ pub const VERTEX_STRIDE: u64 = VERTEX_BYTES as u64;
 pub struct MeshHandle {
     pub slot: u32,
     pub index_count: u32,
+    /// [`TileMesh::build_depth`]: the depth `D` of the voxel field the mesh was built from, which
+    /// is where the voxel edges of its local frame fall on `z` (REQ-E3D-504). Carried here for
+    /// the reason `GpuMesh` carries it on the OpenGL side — so the draw path reads it from the
+    /// handle it already has rather than from a field per tile of the list — and read **only**
+    /// while the pixel-shadow variant of AMD-055 REQ-SCN-082 is in use. The depth itself and not
+    /// the `D/2` the shader wants: this handle is a key of the draw list
+    /// (`Residency::Mesh: Eq + Hash`), and a float is neither.
+    pub build_depth: i32,
 }
 
 /// A resident texture: its slot in the store.
@@ -145,7 +153,11 @@ impl MeshStore {
             last_used: self.frame,
         };
         let slot = place(&mut self.slots, &mut self.free, entry);
-        let handle = MeshHandle { slot, index_count };
+        let handle = MeshHandle {
+            slot,
+            index_count,
+            build_depth: mesh.build_depth(),
+        };
         self.by_address.insert(key, handle);
         self.uploads += 1;
         Some(handle)
