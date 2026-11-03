@@ -14,8 +14,8 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 |---|---|---|
 | 1 | Inventory of every shown desktop setting, the golden list, the "nothing disappears" test | done — `4e3221e` |
 | 2 | The new tab/group layout, with the dependency greying | done — `58407a7` |
-| 3 | Tooltip infrastructure and the texts of the first tabs | done — `PENDING3` |
-| 4 | The remaining tooltip texts in both languages, and their completeness test | todo |
+| 3 | Tooltip infrastructure and the texts of the first tabs | done — `b0570ef` |
+| 4 | The remaining tooltip texts in both languages, and their completeness test | done — `PENDING4` |
 | 5 | Compact overscan rows (point 6) and the finer curvature steps (point 7) | todo |
 | 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | todo |
 
@@ -249,8 +249,40 @@ a desktop default of 5, which AMD-052 REQ-LOOP-074 took to 2 (`table.rs`), and
 `emu.lua_experimental` a handheld default of off, which `ui/handheld/defaults.rs` sets to **on**.
 The tooltips follow the code.
 
+### Step 4 — the remaining 27 texts, and four tests
+
+Light and shadows (9), Camera (1), Audio (1), Emulation (6), Interface (5) and RetroAchievements
+(5), in both languages. 71 `detail.*` keys in all, one per shown row.
+
+Four things the reading turned up and the texts say:
+
+- `emu.auto_tv_mode`'s catalogue default is `false`, but `application.rs` sets an **environment
+  default of `true`** for every build, so the effective desktop default is **on** — a divergence
+  from 3dSen that the tooltip now names.
+- `emu.tv_mode`: `MULTI` is run as NTSC (`TvRegionSetting::region`), and `Dendy` is its own region.
+  Both are offered in the drop-down, `table.rs`'s "MULTI is not offered by the UI" notwithstanding —
+  `draw_enum` lists every rung of the domain, so the text explains MULTI rather than pretending it
+  is absent.
+- `emu.game_speed` is differential, not symmetric: `k = 1 + s/4` above 0 and `1/(1 − s/4)` below,
+  so +8 is ×3 and −8 is ×1/3, and Fast forward always uses its own +2 (×1.5).
+- `audio.volume` is drawn as a 0.00 to 1.00 slider, not a percentage: `bounds` takes the libretro
+  discretisation (0 to 1 in steps of 0.05) and a step under 1 gives the continuous slider.
+
+Tests added to `desktop_options_golden_tests.rs`:
+
+1. every shown row has a `detail.*` entry in **both** tables, its tooltip is over 80 characters,
+   it is not just the label, it never leaks a raw key, and where an amendment wrote a sentence the
+   tooltip **starts with it word for word** and is at least 80 characters longer — which is what
+   "extend rather than duplicate" means, mechanically;
+2. no `detail.*` key is left behind by a row that was removed or renamed;
+3. the only files that *call* `tooltip_of` or `keys::detail` are `ui/options.rs` and
+   `ui/zax_ui/options.rs` — nothing under `ui/handheld/`, nothing in the Android shell, so the
+   tooltips are desktop-only by construction and not by convention. (Comment lines are skipped: the
+   two string tables name `tooltip_of` in the comment that explains their entries.)
+4. the greying test of step 2 and the layout test cover the rest.
+
+715 tests pass in `zax-app`.
+
 ### Next step
 
-Step 4: the remaining 27 texts (Light and shadows, Camera, Audio, Emulation, Interface,
-RetroAchievements) and the completeness test — every shown setting has a non-empty tooltip in both
-languages, and every `detail.*` key belongs to a shown setting.
+Step 5: the two compact overscan rows (point 6) and the finer curvature grid (point 7).

@@ -830,6 +830,205 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          Default: GREEDY.",
     ),
 
+    // --------------------------------------------------- Light and shadows tab
+    (
+        "detail.light.intensity",
+        "How bright the one directional light of the scene is. The slider covers 0.5 to 1.5, 1 \
+         being the light as the profile set it; a script or an imported profile may ask for more, \
+         and a value of 2 set here survives a profile load. The direction and the colour of the \
+         light belong to the profile and have no row. Default: 1.",
+    ),
+    (
+        "detail.render.shadow",
+        "Casts the shadow of the scene's shapes from the light, through one shadow map. Off, the \
+         shadow pass is not run at all and nothing receives a shadow, which also leaves the pixel \
+         shadows below with nothing to change. Which layers cast and which receive belongs to the \
+         profile. Default: on on the desktop, off on a handheld, where the pass is worth the frame \
+         it costs.",
+    ),
+    (
+        "detail.render.backdrop_lighting",
+        "Only some profiles put a backdrop behind the scene at all — it is turned on by a script, \
+         and off by default — so on most games this switch shows nothing. Where there is one, the \
+         sheen lifts a black surface to about sRGB 26 and gives it the light's tint. It is a \
+         per-fragment cost on a surface that can fill the picture: free within the noise on a \
+         desktop GPU at 640 × 480 and 1280 × 720, which is why the handheld default is the cheaper \
+         one. Default: on on the desktop, off on a handheld.",
+    ),
+    (
+        "detail.render.style.pixel_shadow",
+        "Snaps the shadow edge to the game's own pixel grid instead of letting it fall where the \
+         geometry says, so a shadow looks drawn rather than computed. It does not add a shadow: it \
+         changes how the shadows the switch above casts are drawn, and has nothing to do while \
+         those are off. Needs the Enhanced style. Default: off.",
+    ),
+    (
+        "detail.render.style.ao",
+        "Darkens the corners and the hollows the light does not really reach, which is a different \
+         effect from the shadows above — it needs no light direction and no shadow map. Off costs \
+         nothing. MSVO is the original's own method and Depth a cheaper one that works from the \
+         depth buffer; this version renders both as Depth, which is why Thickness below is greyed. \
+         Needs the Enhanced style. Default: Off.",
+    ),
+    (
+        "detail.render.style.ao_strength",
+        "1 to 5: how dark the darkest corner gets. It changes the look, not the cost. Needs ambient \
+         occlusion. Default: 3.",
+    ),
+    (
+        "detail.render.style.ao_radius",
+        "1 to 5: how far from a corner the shading still reaches. A larger radius spreads the same \
+         samples wider, so the shading gets coarser rather than more expensive. Needs ambient \
+         occlusion. Default: 3.",
+    ),
+    (
+        "detail.render.style.ao_thickness",
+        "1 to 5: how thick a surface is assumed to be when deciding whether it occludes what is \
+         behind it. Only the MSVO method uses it, and this version renders MSVO as Depth, so the \
+         row is greyed; the value is kept and persisted all the same. Default: 3.",
+    ),
+    (
+        "detail.render.style.ao_quality",
+        "How many samples each pixel takes and at what resolution, which is what the occlusion \
+         actually costs: Low is 6 samples at half resolution, Medium 10. This is the row to lower \
+         first on a small machine. Needs ambient occlusion. Default: Medium on the desktop, Low on \
+         a handheld.",
+    ),
+
+    // -------------------------------------------------------------- Camera tab
+    (
+        "detail.camera.fov",
+        "The field of view of the 3D camera, in degrees: a small angle flattens the scene and a \
+         large one exaggerates its depth. The slider covers 45 to 95 in steps of 5; a script may \
+         ask for anything from 10 to 150. Changing it plays no validation sound, the value moving \
+         continuously under the mouse. Default: 70.",
+    ),
+
+    // --------------------------------------------------------------- Audio tab
+    (
+        "detail.audio.volume",
+        "The gain applied to everything Zaxnes plays, from 0.00 to 1.00. Mute, in the Audio menu, \
+         silences the sound without touching this value, so turning mute off brings the same volume \
+         back. Changing it plays no validation sound. Default: 1.00.",
+    ),
+
+    // ----------------------------------------------------------- Emulation tab
+    (
+        "detail.emu.game_speed",
+        "Runs the game faster or slower, 0 being its normal speed. The scale is not symmetric: the \
+         factor is 1 + s/4 above 0 and 1 / (1 − s/4) below, so +8 is three times as fast and −8 a \
+         third as fast. The sound follows. There is no separate slow-motion mode — the negative \
+         half is it — and the Fast forward shortcut always uses its own +2 (one and a half times), \
+         whatever is set here. The value goes back to 0 when a game ends. Changing it plays no \
+         validation sound. Default: 0.",
+    ),
+    (
+        "detail.emu.run_ahead",
+        "Hides the console's own input delay by emulating one, two or three frames beyond the one \
+         on screen and showing the last of them, so a button press takes effect sooner. Each frame \
+         asked for costs a whole extra emulated frame plus a state saved and loaded, every \
+         displayed frame — which is why a handheld has it off. A game whose profile scripts write \
+         to the console is held at 0 while it runs, and the row says so beside it. Default: 1 frame \
+         on the desktop, off on a handheld.",
+    ),
+    (
+        "detail.emu.auto_tv_mode",
+        "Reads the region out of the ROM header when a game is loaded and writes it into the row \
+         below, so that a European dump runs at 50 Hz on its own. It is Zaxnes's own default — \
+         3dSen has it off — and turning it off is what makes the row below yours to choose. Takes \
+         effect at the next ROM load. Default: on.",
+    ),
+    (
+        "detail.emu.tv_mode",
+        "Which console the game is emulated as. NTSC runs at about 60 frames per second and PAL at \
+         50, with the different timing and sound that go with them; MULTI is run as NTSC; Dendy is \
+         the Soviet-era clone, which runs at 50 with a timing of its own. It also chooses which of \
+         the two sets of overscan margins applies. It is a profile setting, so loading a profile \
+         overwrites it, and so does the automatic detection above while that is on.",
+    ),
+    (
+        "detail.input.emulated_menu_button",
+        "A 3dSen setting Zaxnes keeps so that a settings file and a script written for 3dSen read \
+         back exactly what they wrote. Nothing in Zaxnes acts on it: the console interface reaches \
+         its own menu by holding Select and Start, which is not this setting. Default: off.",
+    ),
+    (
+        "detail.emu.core",
+        "Which emulation core runs the game, in a version that has more than one. This one has a \
+         single core, so the value is taken modulo 1: anything written here reads back as 0 and \
+         nothing uses it. The row is kept because the key is part of the settings file and of the \
+         script surface (Setting.Core). Default: 0.",
+    ),
+
+    // ----------------------------------------------------------- Interface tab
+    (
+        "detail.ui.language",
+        "The language of the whole interface — the menus, the windows, the notifications and this \
+         tooltip. The change applies at once, with no restart, and is kept for the next launch. A \
+         text a translation is missing falls back to English. The console log and the command line \
+         stay in English whatever is chosen. Default: the language of the system on a fresh user \
+         folder, English where that is not French.",
+    ),
+    (
+        "detail.ui.roms_folder",
+        "Which folder the console mode lists games from. Empty means the roms folder beside your \
+         Zaxnes data, which is what the field shows in grey, and the --roms option on the command \
+         line wins over both. It is written when you press Enter or leave the field; the button \
+         beside it opens a folder picker. Nothing else in Zaxnes reads it.",
+    ),
+    (
+        "detail.ui.sort_option",
+        "The order the library lists games in: A-Z by title, Recent first by the last time each \
+         was played, or Favorites first — the games marked as favourites at the top, each group \
+         then by title. Default: A-Z.",
+    ),
+    (
+        "detail.ui.show_fps",
+        "Shows a frame counter in a corner of the picture: the displayed frames per second, which \
+         is the render rate and not the speed of the game. Costs nothing worth measuring. \
+         Default: off.",
+    ),
+    (
+        "detail.ui.profiler",
+        "Measures what each stage of a frame costs — the core, the conversion, the scripts, the \
+         draw list, the drawing — and writes the figures beside the frame counter and into \
+         logs/zaxnes.log every two seconds. It is a diagnostic, not a setting to play with: the \
+         measuring itself takes a little time and the log grows while it is on. Default: off.",
+    ),
+
+    // ---------------------------------------------------- RetroAchievements tab
+    (
+        "detail.achievements.enabled",
+        "Turns RetroAchievements on: the ROM of each game you start is identified against the \
+         server, its achievements are fetched, and unlocks are sent as you earn them. Zaxnes plays \
+         in softcore only, so save states, rollback and fast forward all stay allowed and the \
+         unlocks count as softcore. Nothing happens until you sign in, above. The four rows below \
+         do nothing while this is off. Default: off.",
+    ),
+    (
+        "detail.achievements.sound",
+        "Plays a short sound when an achievement unlocks, over the pop-up that announces it. Needs \
+         RetroAchievements. Default: on.",
+    ),
+    (
+        "detail.achievements.challenges",
+        "Shows a small icon in a corner of the picture for each challenge the game has started — a \
+         timed or conditional achievement you are in the middle of. Needs RetroAchievements. \
+         Default: off.",
+    ),
+    (
+        "detail.achievements.unofficial",
+        "Also loads the achievements the site keeps as unofficial: ones under test, or retired. \
+         They can fire wrongly, which is why they are not part of a normal session. Read when a \
+         game loads, so it takes a reload to change. Needs RetroAchievements. Default: off.",
+    ),
+    (
+        "detail.achievements.encore",
+        "Arms the achievements you have already unlocked again, so that they fire a second time as \
+         you replay a game. The server is told as usual; nothing is lost. Read when a game loads, \
+         so it takes a reload to change. Needs RetroAchievements. Default: off.",
+    ),
+
     // ------------------------------------------- handheld interface (Rust-only)
     (keys::HANDHELD_GAMES_TITLE, "Games"),
     (keys::HANDHELD_ROMS_EMPTY, "No ROM found. Copy .nes files to {0}"),

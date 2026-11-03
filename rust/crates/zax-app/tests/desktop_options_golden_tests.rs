@@ -11,11 +11,17 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)] // test code
 
+mod common;
+mod ui_harness;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use ui_harness::UiLanguageScope;
 use zax_app::ui::handheld::advanced;
+use zax_app::ui::keys;
 use zax_app::ui::options::{self, OptionsModel};
+use zax_app::ui::strings::{self, UiLanguage};
 use zax_settings::catalogue::{self, SettingId};
 use zax_settings::meta::SettingKind;
 
@@ -270,6 +276,115 @@ fn ro_1_a_row_is_greyed_only_while_its_dependency_is_unmet() {
     model.set(SettingId::EmuAutoTvMode, SettingValue::Bool(true));
     model.set(SettingId::EmuTvMode, SettingValue::Enum(1));
     assert_eq!(1, model.get(SettingId::EmuTvMode).as_int());
+}
+
+/// RO-1 point 3: **every** setting the desktop window shows has a detailed tooltip, in English and
+/// in French — several sentences, not a label repeated.
+///
+/// The parity test of AMD-035 already forbids a key in one table and not the other; what this one
+/// adds is that no shown row is left without a paragraph, and that the paragraph is the amendment's
+/// sentence *plus* the detail where the amendment wrote one.
+#[test]
+fn ro_1_every_shown_setting_has_a_detailed_tooltip_in_both_languages() {
+    let _language = UiLanguageScope::keep();
+    let model = OptionsModel::new();
+
+    for language in [UiLanguage::English, UiLanguage::French] {
+        strings::set_language(language);
+        for row in model.all_rows() {
+            let id = row.descriptor.id();
+            let key = keys::detail(&row.descriptor.key());
+            assert!(
+                strings::lookup(language, &key).is_some(),
+                "{key} is missing from the {language:?} table"
+            );
+
+            let tooltip = options::tooltip_of(id);
+            assert!(
+                tooltip.len() > 80,
+                "{language:?} {}: a tooltip of {} characters is not a few sentences — {tooltip:?}",
+                row.descriptor.key(),
+                tooltip.len()
+            );
+            // It says more than the label does.
+            assert_ne!(tooltip.trim(), row.label(), "{}", row.descriptor.key());
+            // And it never shows a raw key.
+            assert!(!tooltip.contains(keys::DETAIL_PREFIX), "{tooltip}");
+            assert!(!tooltip.contains("help."), "{tooltip}");
+
+            // Where an amendment gave a sentence, the tooltip opens with it, word for word, and
+            // the detail follows after a blank line rather than replacing it.
+            if let Some(help) = options::help_of(id) {
+                assert!(
+                    tooltip.starts_with(&help),
+                    "{}: the amendment's sentence is no longer first",
+                    row.descriptor.key()
+                );
+                assert!(
+                    tooltip.len() > help.len() + 80,
+                    "{}: the amendment's sentence was not extended",
+                    row.descriptor.key()
+                );
+            }
+        }
+    }
+    strings::set_language(UiLanguage::English);
+}
+
+/// RO-1 point 3: and no `detail.*` key is left behind either — one that no longer names a shown
+/// setting is a text nobody will ever read, and the sign of a row that was removed or renamed.
+#[test]
+fn ro_1_every_detail_text_belongs_to_a_shown_setting() {
+    let shown: BTreeSet<String> = OptionsModel::new()
+        .all_rows()
+        .map(|row| keys::detail(&row.descriptor.key()))
+        .collect();
+
+    let orphans: Vec<&str> = strings::english_table()
+        .iter()
+        .map(|(key, _)| *key)
+        .filter(|key| key.starts_with(keys::DETAIL_PREFIX) && !shown.contains(*key))
+        // The graphics API has its text in every build; only a `wgpu` build shows the row.
+        .filter(|key| *key != "detail.video.backend")
+        .collect();
+    assert_eq!(Vec::<&str>::new(), orphans);
+}
+
+/// RO-1 point 3: nothing of the tooltips reaches the console pages or Android. They are read
+/// through `detail.*`, and the only caller is the desktop window.
+#[test]
+fn ro_1_the_detailed_tooltips_are_desktop_only() {
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut callers: Vec<String> = Vec::new();
+    for entry in walkdir::WalkDir::new(&sources)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
+    {
+        let text = std::fs::read_to_string(entry.path()).expect("a source file");
+        // Code, not prose: the two string tables name `tooltip_of` in the comment that explains
+        // what their `detail.*` entries are for, and that is not a caller.
+        let calls = text
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| !line.starts_with("//"))
+            .any(|line| line.contains("tooltip_of") || line.contains("keys::detail("));
+        if calls {
+            callers.push(
+                entry
+                    .path()
+                    .strip_prefix(&sources)
+                    .expect("under src")
+                    .display()
+                    .to_string()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+    callers.sort();
+    // `ui/options.rs` builds the text and `ui/zax_ui/options.rs` is the desktop window that shows
+    // it. Nothing under `ui/handheld/`, and nothing in the Android shell.
+    assert_eq!(vec!["ui/options.rs", "ui/zax_ui/options.rs"], callers);
 }
 
 /// RO-1 point 2: the console's "Advanced options" page shows exactly the rows it showed before,

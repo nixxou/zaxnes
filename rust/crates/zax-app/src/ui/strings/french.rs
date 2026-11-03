@@ -824,6 +824,218 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          sur celui-ci. Par défaut : GREEDY.",
     ),
 
+    // --------------------------------------------- onglet Lumière et ombres
+    (
+        "detail.light.intensity",
+        "La force de l'unique lumière directionnelle de la scène. Le curseur va de 0,5 à 1,5, 1 \
+         étant la lumière telle que le profil l'a réglée ; un script ou un profil importé peut en \
+         demander davantage, et une valeur de 2 réglée ici survit à un chargement de profil. La \
+         direction et la couleur de la lumière appartiennent au profil et n'ont pas de ligne. \
+         Par défaut : 1.",
+    ),
+    (
+        "detail.render.shadow",
+        "Projette l'ombre des formes de la scène depuis la lumière, au moyen d'une seule carte \
+         d'ombres. Désactivées, la passe d'ombres n'est pas exécutée du tout et rien ne reçoit \
+         d'ombre, ce qui laisse aussi les ombres pixel ci-dessous sans rien à modifier. Quels \
+         calques projettent et lesquels reçoivent appartient au profil. Par défaut : activées sur \
+         le bureau, désactivées sur une console portable, où la passe coûte l'image qu'elle vaut.",
+    ),
+    (
+        "detail.render.backdrop_lighting",
+        "Seuls certains profils placent un décor derrière la scène — il est allumé par un script, \
+         et éteint par défaut — si bien que sur la plupart des jeux cet interrupteur ne montre \
+         rien. Là où il y en a un, le lustre fait passer une surface noire à environ sRGB 26 et lui \
+         donne la teinte de la lumière. C'est un coût par fragment sur une surface qui peut remplir \
+         l'image : gratuit dans le bruit de mesure sur un GPU de bureau en 640 × 480 et 1280 × 720, \
+         d'où la valeur par défaut plus économe des consoles portables. Par défaut : activé sur le \
+         bureau, désactivé sur une console portable.",
+    ),
+    (
+        "detail.render.style.pixel_shadow",
+        "Aligne le bord de l'ombre sur la grille de pixels du jeu au lieu de le laisser tomber là \
+         où la géométrie le veut, si bien que l'ombre a l'air dessinée plutôt que calculée. Cela \
+         n'ajoute pas d'ombre : cela change la façon de dessiner les ombres que l'interrupteur \
+         ci-dessus projette, et n'a rien à faire quand celles-ci sont désactivées. Nécessite le \
+         style Enhanced. Par défaut : désactivées.",
+    ),
+    (
+        "detail.render.style.ao",
+        "Assombrit les coins et les creux que la lumière n'atteint pas vraiment, ce qui est un \
+         effet différent des ombres ci-dessus — il n'a besoin ni d'une direction de lumière ni \
+         d'une carte d'ombres. Désactivée, elle ne coûte rien. MSVO est la méthode du programme \
+         d'origine et Depth une méthode moins chère qui travaille depuis le tampon de profondeur ; \
+         cette version dessine les deux comme Depth, et c'est pourquoi Épaisseur ci-dessous est \
+         grisée. Nécessite le style Enhanced. Par défaut : désactivée.",
+    ),
+    (
+        "detail.render.style.ao_strength",
+        "De 1 à 5 : à quel point le coin le plus sombre s'assombrit. Cela change l'aspect, pas le \
+         coût. Nécessite l'occlusion ambiante. Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ao_radius",
+        "De 1 à 5 : jusqu'à quelle distance d'un coin l'assombrissement porte encore. Un rayon plus \
+         grand étale les mêmes échantillons plus loin, si bien que l'assombrissement devient plus \
+         grossier plutôt que plus coûteux. Nécessite l'occlusion ambiante. Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ao_thickness",
+        "De 1 à 5 : quelle épaisseur on suppose à une surface pour décider si elle masque ce qui \
+         est derrière elle. Seule la méthode MSVO s'en sert, et cette version dessine MSVO comme \
+         Depth : la ligne est donc grisée, la valeur étant tout de même conservée et enregistrée. \
+         Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ao_quality",
+        "Combien d'échantillons chaque pixel prend et à quelle résolution, ce qui est le coût réel \
+         de l'occlusion : Low vaut 6 échantillons en demi-résolution, Medium 10. C'est la ligne à \
+         baisser en premier sur une petite machine. Nécessite l'occlusion ambiante. Par défaut : \
+         Medium sur le bureau, Low sur une console portable.",
+    ),
+
+    // ---------------------------------------------------------- onglet Caméra
+    (
+        "detail.camera.fov",
+        "Le champ de vision de la caméra 3D, en degrés : un angle faible aplatit la scène, un angle \
+         large exagère sa profondeur. Le curseur va de 45 à 95 par pas de 5 ; un script peut \
+         demander n'importe quoi entre 10 et 150. Le changer ne joue pas le son de validation, la \
+         valeur bougeant continûment sous la souris. Par défaut : 70.",
+    ),
+
+    // ----------------------------------------------------------- onglet Audio
+    (
+        "detail.audio.volume",
+        "Le gain appliqué à tout ce que Zaxnes joue, de 0,00 à 1,00. Muet, dans le menu Audio, \
+         coupe le son sans toucher à cette valeur, si bien que désactiver Muet rend le même volume. \
+         Le changer ne joue pas le son de validation. Par défaut : 1,00.",
+    ),
+
+    // -------------------------------------------------------- onglet Émulation
+    (
+        "detail.emu.game_speed",
+        "Fait tourner le jeu plus vite ou plus lentement, 0 étant sa vitesse normale. L'échelle \
+         n'est pas symétrique : le facteur vaut 1 + s/4 au-dessus de 0 et 1 / (1 − s/4) en dessous, \
+         si bien que +8 va trois fois plus vite et −8 trois fois moins. Le son suit. Il n'y a pas de \
+         mode ralenti séparé — la moitié négative en tient lieu — et le raccourci Avance rapide \
+         emploie toujours son propre +2 (une fois et demie), quoi qu'il y ait ici. La valeur revient \
+         à 0 à la fin d'une partie. Le changer ne joue pas le son de validation. Par défaut : 0.",
+    ),
+    (
+        "detail.emu.run_ahead",
+        "Masque le délai d'entrée de la console en émulant une, deux ou trois images au-delà de \
+         celle affichée et en montrant la dernière, si bien qu'un appui sur un bouton agit plus \
+         tôt. Chaque image demandée coûte une image émulée de plus, plus un état sauvegardé et \
+         rechargé, à chaque image affichée — d'où la désactivation sur une console portable. Un jeu \
+         dont les scripts de profil écrivent dans la console est maintenu à 0 pendant qu'il tourne, \
+         et la ligne l'indique à côté. Par défaut : 1 image sur le bureau, désactivé sur une \
+         console portable.",
+    ),
+    (
+        "detail.emu.auto_tv_mode",
+        "Lit la région dans l'en-tête de la ROM au chargement d'un jeu et l'écrit dans la ligne \
+         ci-dessous, de sorte qu'un dump européen tourne de lui-même à 50 Hz. C'est une valeur par \
+         défaut propre à Zaxnes — 3dSen l'a désactivée — et la désactiver est ce qui rend la ligne \
+         ci-dessous à votre main. Prend effet au prochain chargement de ROM. Par défaut : activée.",
+    ),
+    (
+        "detail.emu.tv_mode",
+        "En quelle console le jeu est émulé. NTSC tourne à environ 60 images par seconde et PAL à \
+         50, avec le minutage et le son qui vont avec ; MULTI est exécuté comme NTSC ; Dendy est le \
+         clone soviétique, qui tourne à 50 avec un minutage qui lui est propre. Cela choisit aussi \
+         laquelle des deux séries de marges d'overscan s'applique. C'est un réglage de profil : \
+         charger un profil l'écrase, et la détection automatique ci-dessus aussi tant qu'elle est \
+         active.",
+    ),
+    (
+        "detail.input.emulated_menu_button",
+        "Un réglage de 3dSen que Zaxnes conserve afin qu'un fichier de réglages et un script écrits \
+         pour 3dSen relisent exactement ce qu'ils ont écrit. Rien dans Zaxnes n'en tient compte : \
+         l'interface des consoles atteint son menu en maintenant Select et Start, ce qui n'est pas \
+         ce réglage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.core",
+        "Quel cœur d'émulation exécute le jeu, dans une version qui en aurait plusieurs. Celle-ci \
+         n'en a qu'un, si bien que la valeur est prise modulo 1 : tout ce qu'on écrit ici se relit \
+         comme 0 et rien ne s'en sert. La ligne est conservée parce que la clé fait partie du \
+         fichier de réglages et de la surface de script (Setting.Core). Par défaut : 0.",
+    ),
+
+    // -------------------------------------------------------- onglet Interface
+    (
+        "detail.ui.language",
+        "La langue de toute l'interface — les menus, les fenêtres, les notifications et cette \
+         infobulle. Le changement s'applique aussitôt, sans redémarrage, et il est conservé pour le \
+         prochain lancement. Un texte qui manque à une traduction se rabat sur l'anglais. Le journal \
+         de la console et la ligne de commande restent en anglais quel que soit ce choix. \
+         Par défaut : la langue du système sur un dossier utilisateur neuf, l'anglais quand ce n'est \
+         pas le français.",
+    ),
+    (
+        "detail.ui.roms_folder",
+        "Dans quel dossier le mode console liste les jeux. Vide signifie le dossier roms à côté de \
+         vos données Zaxnes, ce que le champ montre en gris, et l'option --roms de la ligne de \
+         commande l'emporte sur les deux. Il est écrit quand vous appuyez sur Entrée ou quittez le \
+         champ ; le bouton à côté ouvre un sélecteur de dossier. Rien d'autre dans Zaxnes ne le lit.",
+    ),
+    (
+        "detail.ui.sort_option",
+        "Dans quel ordre la bibliothèque liste les jeux : A-Z par titre, Récents d'abord par la \
+         dernière partie jouée, ou Favoris d'abord — les jeux marqués comme favoris en tête, chaque \
+         groupe ensuite par titre. Par défaut : A-Z.",
+    ),
+    (
+        "detail.ui.show_fps",
+        "Affiche un compteur d'images dans un coin de l'image : les images affichées par seconde, \
+         c'est-à-dire la cadence de rendu et non la vitesse du jeu. Ne coûte rien de mesurable. \
+         Par défaut : désactivé.",
+    ),
+    (
+        "detail.ui.profiler",
+        "Mesure ce que coûte chaque étape d'une image — le cœur, la conversion, les scripts, la \
+         liste de dessin, le rendu — et écrit les chiffres à côté du compteur d'images et dans \
+         logs/zaxnes.log toutes les deux secondes. C'est un outil de diagnostic, pas un réglage de \
+         confort : la mesure elle-même prend un peu de temps et le journal grossit tant qu'elle est \
+         active. Par défaut : désactivé.",
+    ),
+
+    // ------------------------------------------------- onglet RetroAchievements
+    (
+        "detail.achievements.enabled",
+        "Active RetroAchievements : la ROM de chaque jeu que vous lancez est identifiée auprès du \
+         serveur, ses succès sont récupérés, et les déblocages sont envoyés au fur et à mesure. \
+         Zaxnes ne joue qu'en softcore : les sauvegardes d'état, le retour en arrière et l'avance \
+         rapide restent permis, et les déblocages comptent comme softcore. Rien ne se passe avant \
+         que vous ne soyez connecté, ci-dessus. Les quatre lignes ci-dessous ne font rien tant que \
+         ceci est désactivé. Par défaut : désactivé.",
+    ),
+    (
+        "detail.achievements.sound",
+        "Joue un son bref au déblocage d'un succès, par-dessus la fenêtre qui l'annonce. Nécessite \
+         RetroAchievements. Par défaut : activé.",
+    ),
+    (
+        "detail.achievements.challenges",
+        "Affiche une petite icône dans un coin de l'image pour chaque défi que le jeu a entamé — un \
+         succès chronométré ou conditionnel dont vous êtes au milieu. Nécessite RetroAchievements. \
+         Par défaut : désactivé.",
+    ),
+    (
+        "detail.achievements.unofficial",
+        "Charge aussi les succès que le site garde comme non officiels : ceux qui sont à l'essai, \
+         ou retirés. Ils peuvent se déclencher à tort, et c'est pourquoi ils ne font pas partie \
+         d'une partie normale. Lu au chargement d'un jeu, il faut donc recharger pour en changer. \
+         Nécessite RetroAchievements. Par défaut : désactivé.",
+    ),
+    (
+        "detail.achievements.encore",
+        "Réarme les succès que vous avez déjà débloqués, de sorte qu'ils se déclenchent une seconde \
+         fois quand vous rejouez un jeu. Le serveur en est informé comme d'habitude ; rien n'est \
+         perdu. Lu au chargement d'un jeu, il faut donc recharger pour en changer. Nécessite \
+         RetroAchievements. Par défaut : désactivé.",
+    ),
+
     // ------------------------------------------- handheld interface (Rust-only)
     (keys::HANDHELD_GAMES_TITLE, "Jeux"),
     (keys::HANDHELD_ROMS_EMPTY, "Aucune ROM trouvée. Copiez des fichiers .nes dans {0}"),
