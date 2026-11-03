@@ -19,8 +19,8 @@ Build directory: `rust/target-ro`. `CARGO_TARGET_DIR=<impl>/rust/target-ro`,
 | # | Step | Status |
 |---|---|---|
 | 1 | Map: the .NET lots read, the requirement map, the test plan, the "before" figures | done — `1e0d8cf` |
-| 2 | The MSVO pass: the module, the resources, the lifecycle, the whole chain, the mode switched on, and the invariants of §2.4 in it | done — this commit |
-| 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | todo |
+| 2 | The MSVO pass: the module, the resources, the lifecycle, the whole chain, the mode switched on, and the invariants of §2.4 in it | done — `d9bd07a` |
+| 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | done — this commit |
 | 4 | The comparisons with the figures of the .NET lots and of Q-100 | todo |
 | 5 | The cost of the pass at 1080p, per quality, beside Depth's | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-100 appendix, fmt, clippy, full tests, release build | todo |
@@ -350,3 +350,57 @@ sent straight to them.
 `cargo test --release -p zax-render`: **300 passed, 0 failed**, 1 ignored (287 at the start of the
 lot). `-p zax-app --test amd055_style_options_tests --features bundled`: 10 passed.
 `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` clean.
+
+### Step 3 — the handheld and the GLES side
+
+Point 4 of the brief is **almost entirely already true**, and what this step adds is the finding,
+the two comments that record it, and the one line of Q-104's test that keeps the gap pinned.
+
+| Clause of point 4 | State |
+|---|---|
+| "the console default keeps AO off" | **already true** — `ui/handheld/defaults.rs` sets nothing for `spl.ao`, because REQ-SCN-079's own default is 0 and the four effect switches need no handheld default of their own |
+| "the handheld options page only offers it as an advanced option if useful" | **already true** — RO-3 put `ao.thickness` under *Advanced options › Light and shadows › Ambient occlusion* (`handheld/options.rs` `LIGHT_SHADOWS_ROWS`), and the port is exactly what makes it useful |
+| "if MSVO cannot run on GLES 3.0 … it falls back to Depth there" | **landed in step 2**, and tested there: `req_scn_083_an_implementation_that_refuses_the_pyramid_renders_msvo_as_depth` |
+| "says so in the console page as RU-5 does for unsupported effects" | **RU-5 does nothing in the console page**, and for the same reason this lot does nothing: see below |
+
+#### What the brief's "as RU-5 does" actually resolves to
+
+RU-5's step 7c answered the same conditional and found that no capability was new, so there was
+nothing to grey out and nothing to say: its fallback is a **render diagnostic** line, not a UI
+state, and `options::inert_reason` — the greying rule RO-1 established — is read only by the
+desktop window (`ui/zax_ui/options.rs`), never by the console tree. Greying a console row would be
+a change to RO-3's tree and to the greying rule's single call site, which is beyond this lot and
+would be the wrong shape anyway: the refusal is discovered by the **renderer**, on the first frame
+that asks for the mode, and the settings model has no way to know of it.
+
+So the fallback says so where RU-5's says so: one line through AMD-051's bounded diagnostics
+channel, named after REQ-SCN-083 (`diagnostics::msvo_unavailable`), once per game. The brief's
+condition — "**if** MSVO cannot run on GLES 3.0 with the capability probing of RU-5" — does not
+hold in any case:
+
+| Format the mode needs | Required renderable where |
+|---|---|
+| `R8` (the four occlusion targets per level) | colour-renderable in OpenGL 3.3 core, **required** renderable in GLES 3.0 — RU-5's own occlusion already uses it |
+| `R16F` (the four pyramid levels) | colour-renderable in OpenGL 3.3 core; on GLES 3.0 through `EXT_color_buffer_float` or `EXT_color_buffer_half_float`, the very extensions that already make the `RGBA16F` of `LinearColorBuffer` renderable on **every** frame — a driver that gives one gives the other |
+| the sampled `DEPTH_COMPONENT24` | the frame's own, allocated by RU-5 |
+
+And there is no probe at context creation, deliberately, for the reason RU-5 recorded: a probe has
+to allocate something to be worth anything, and the brief forbids Classic allocating anything the
+amendment needs. The first frame that asks for the mode *is* the probe, and a refusal is handled
+rather than predicted.
+
+#### What landed
+
+| Piece | What changed |
+|---|---|
+| `ui/handheld/defaults.rs` | the comment on `ao.quality` now covers **both** estimators — at `spl.ao` = 1 the rung chooses the sample pattern (four of the seven checkerboard pairs at Low) rather than a sample count, the half-resolution clause is the same, and the pyramid keeps its four levels at every rung (Q-097) so that a handheld gets a *cheaper* effect and not a lighter one |
+| `ui/handheld/defaults.rs` test | three assertions: `spl.ao` is 0 on a handheld, and `ao.thickness` keeps the amendment's default on both platforms — it is one uniform of the MSVO shader and costs nothing at any rung, so there is no economical value to prefer |
+| `amd055_style_tests.rs` | `msvo` joined the five names Q-104's known-gap test forbids in the `wgpu` WGSL, so the gap stays pinned one effect wider |
+
+Nothing else of point 5 of the brief was needed: the `wgpu` backend still draws Classic, Q-104 §5
+already describes that gap for the whole of AMD-055, and the port added no WGSL.
+
+`cargo test --release -p zax-app --lib --features bundled`: 131 passed. The six option suites of
+`zax-app` (`amd055_style_options`, `app_options`, `desktop_options_golden`, `handheld_tree`,
+`handheld_ui`, `options_window`): 70 passed, 0 failed, 1 ignored.
+`cargo test --release -p zax-render --features wgpu --test amd055_style_tests`: 5 passed.

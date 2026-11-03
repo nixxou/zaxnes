@@ -32,6 +32,15 @@ fn defaults() -> [(SettingId, SettingValue); 13] {
         // and 2 refinements against High's 48 and 5. The desktop keeps the defaults of the
         // amendment (1 and 2); the figures of each rung are in `docs/PERFORMANCE-HISTORY.md` for
         // the owner to revisit on a real device.
+        //
+        // `ao.quality` now grades **two** estimators, since RU-6 ported the *Mode MSVO* of
+        // REQ-SCN-083: at `spl.ao` = 1 the rung chooses the sample pattern rather than a sample
+        // count — Low takes four of the seven pairs of the MiniEngine checkerboard — and the
+        // half-resolution clause is the same. The pyramid keeps its four levels at every rung
+        // (`zax_render::style::MSVO_LEVELS`, Q-097): the coarsest level is what carries the wide
+        // half of a multi-scale estimate, and a handheld that dropped it would get a *lighter*
+        // effect rather than a cheaper one. So Low is still the cheap rung for both modes, and
+        // `spl.ao` is still 0 by default, which is what makes either of them free here.
         (SettingId::RenderStyleAoQuality, SettingValue::Int(0)),
         (SettingId::RenderStyleSsrQuality, SettingValue::Int(0)),
         // AMD-049 REQ-SCN-075 is a fragment cost on a surface that can fill the picture, so the
@@ -128,6 +137,19 @@ mod tests {
         }
         assert_eq!(0, model.get(SettingId::RenderStyleAoQuality).as_int());
         assert_eq!(0, model.get(SettingId::RenderStyleSsrQuality).as_int());
+        // RU-6, point 4 of its brief: the console default keeps the ambient occlusion **off**, so
+        // neither estimator of REQ-SCN-083 exists on a handheld unless the player asks for one —
+        // and when they do, `ao.quality` Low is what they get. `ao.thickness` keeps the
+        // amendment's own default: it is one uniform of the MSVO shader and costs nothing at any
+        // rung, so there is no economical value to prefer.
+        assert_eq!(0, model.get(SettingId::RenderStyleAo).as_int());
+        assert_eq!(3, model.get(SettingId::RenderStyleAoThickness).as_int());
+        assert_eq!(
+            3,
+            SettingsModel::new()
+                .get(SettingId::RenderStyleAoThickness)
+                .as_int()
+        );
         assert_eq!(
             1,
             SettingsModel::new()
