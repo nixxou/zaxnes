@@ -25,7 +25,32 @@
 //! The line count never changes, so the line numbers of the Lua messages stay those of the file.
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
+
+/// Whether the blocks are read at all: off, the scripts run as 3dSen runs them (the editor's
+/// "3D 3dSen" view).
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Reads the blocks (true, the default) or leaves the scripts as 3dSen sees them (false).
+pub fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether the blocks are read.
+#[must_use]
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+/// The host conditions besides `zaxnes`.
+#[must_use]
+pub fn host_conditions() -> Vec<String> {
+    HOST_CONDITIONS
+        .read()
+        .map(|held| held.clone())
+        .unwrap_or_default()
+}
 
 /// The host conditions besides `zaxnes`, set once by the program (`handheld` or `desktop`).
 static HOST_CONDITIONS: RwLock<Vec<String>> = RwLock::new(Vec::new());
@@ -67,7 +92,7 @@ fn condition_holds(text: &str, host: &[String]) -> bool {
 /// `source` with its Zaxnes blocks read for the host's conditions; borrowed when it has none.
 #[must_use]
 pub fn expand(source: &str) -> Cow<'_, str> {
-    if !source.contains("#zax") {
+    if !enabled() || !source.contains("#zax") {
         return Cow::Borrowed(source);
     }
     let host = HOST_CONDITIONS

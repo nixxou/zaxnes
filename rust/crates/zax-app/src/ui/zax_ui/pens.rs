@@ -11,6 +11,7 @@ use imgui::{Condition, MouseButton, Ui, WindowFlags};
 
 use crate::application::AppHost;
 use crate::emulation::annotations::Pen;
+use crate::emulation::commands::{Command, CommandArgs};
 use crate::ui::{keys, strings};
 
 /// The side of a pen's button.
@@ -128,6 +129,8 @@ fn tool_box(ui: &Ui, host: &mut AppHost, height: f32) {
         }
     }
     ui.separator();
+    view_buttons(ui, host);
+    ui.separator();
     if ui.button_with_size("<##undo", [BUTTON, BUTTON]) {
         host.annotations_mut().undo();
     }
@@ -136,6 +139,89 @@ fn tool_box(ui: &Ui, host: &mut AppHost, height: f32) {
         host.annotations_mut().clear();
     }
     tooltip(ui, keys::PENS_CLEAR);
+}
+
+/// The views the editor switches between: the NES picture, the 3D as Zaxnes draws it on a
+/// desktop, as 3dSen draws it (the scripts' Zaxnes blocks left as comments) and as Zaxnes draws
+/// it on a handheld (the `handheld` condition of the blocks).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EditorView {
+    TwoDimensional,
+    Zaxnes,
+    ThreeDSen,
+    Handheld,
+}
+
+/// Whether the scripts are read with the `handheld` condition.
+fn reads_handheld() -> bool {
+    zax_scripting::macros::host_conditions()
+        .iter()
+        .any(|condition| condition == "handheld")
+}
+
+fn current_view(host: &AppHost) -> EditorView {
+    if host.showing_two_dimensional() {
+        EditorView::TwoDimensional
+    } else if !zax_scripting::macros::enabled() {
+        EditorView::ThreeDSen
+    } else if reads_handheld() {
+        EditorView::Handheld
+    } else {
+        EditorView::Zaxnes
+    }
+}
+
+/// The four view buttons; a change of the scripts' reading reloads them.
+fn view_buttons(ui: &Ui, host: &mut AppHost) {
+    let current = current_view(host);
+    let views = [
+        (EditorView::TwoDimensional, "2D", keys::PENS_VIEW_2D),
+        (EditorView::Zaxnes, "3D", keys::PENS_VIEW_ZAXNES),
+        (EditorView::ThreeDSen, "3S", keys::PENS_VIEW_3DSEN),
+        (EditorView::Handheld, "HH", keys::PENS_VIEW_HANDHELD),
+    ];
+    for (view, label, tip) in views {
+        let clicked = ui.button_with_size(format!("{label}##view"), [BUTTON, BUTTON]);
+        if view == current {
+            frame_item(ui);
+        }
+        tooltip(ui, tip);
+        if !clicked || view == current {
+            continue;
+        }
+        let two_dimensional = view == EditorView::TwoDimensional;
+        if two_dimensional != host.showing_two_dimensional() {
+            host.enqueue(Command::ToggleTwoDimensional, CommandArgs::default());
+        }
+        if two_dimensional {
+            continue;
+        }
+        let reading = (view != EditorView::ThreeDSen, view == EditorView::Handheld);
+        let before = (zax_scripting::macros::enabled(), reads_handheld());
+        if reading != before {
+            zax_scripting::macros::set_enabled(reading.0);
+            zax_scripting::macros::set_host_conditions(&[if reading.1 {
+                "handheld"
+            } else {
+                "desktop"
+            }]);
+            host.enqueue(Command::ReloadScript, CommandArgs::default());
+        }
+    }
+}
+
+/// Frames the last item drawn, as the button in hand.
+fn frame_item(ui: &Ui) {
+    let min = ui.item_rect_min();
+    let max = ui.item_rect_max();
+    ui.get_window_draw_list()
+        .add_rect(
+            [min[0] - 2.0, min[1] - 2.0],
+            [max[0] + 2.0, max[1] + 2.0],
+            [1.0, 0.85, 0.0, 1.0],
+        )
+        .thickness(2.0)
+        .build();
 }
 
 /// A button of the tool box, framed while it is the one in hand; `pen` none for the hand.
@@ -157,16 +243,7 @@ fn selectable_button(ui: &Ui, id: &str, pen: Option<Pen>, chosen: bool, tip: &st
         None => ui.button_with_size(format!("M{id}"), [BUTTON, BUTTON]),
     };
     if chosen {
-        let min = ui.item_rect_min();
-        let max = ui.item_rect_max();
-        ui.get_window_draw_list()
-            .add_rect(
-                [min[0] - 2.0, min[1] - 2.0],
-                [max[0] + 2.0, max[1] + 2.0],
-                [1.0, 0.85, 0.0, 1.0],
-            )
-            .thickness(2.0)
-            .build();
+        frame_item(ui);
     }
     tooltip(ui, tip);
     clicked

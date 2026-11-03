@@ -190,6 +190,10 @@ pub const PENS_RED: &str = "pens.red";
 pub const PENS_BLUE: &str = "pens.blue";
 pub const PENS_BLACK: &str = "pens.black";
 pub const PENS_WHITE: &str = "pens.white";
+pub const PENS_VIEW_2D: &str = "pens.view_2d";
+pub const PENS_VIEW_ZAXNES: &str = "pens.view_zaxnes";
+pub const PENS_VIEW_3DSEN: &str = "pens.view_3dsen";
+pub const PENS_VIEW_HANDHELD: &str = "pens.view_handheld";
 
 // ------------------------------------------------------- profile chooser
 pub const PROFILE_TWO_DIMENSIONAL: &str = "profile.two_dimensional";
@@ -575,6 +579,10 @@ pub const PUBLISHED: &[&str] = &[
     PENS_BLUE,
     PENS_BLACK,
     PENS_WHITE,
+    PENS_VIEW_2D,
+    PENS_VIEW_ZAXNES,
+    PENS_VIEW_3DSEN,
+    PENS_VIEW_HANDHELD,
     PROFILE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_DEFAULT_THREE_D,
