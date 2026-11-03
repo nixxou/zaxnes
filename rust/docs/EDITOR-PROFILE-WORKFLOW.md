@@ -58,6 +58,8 @@ game does not draw (a coin's true face, a 3D model's colours).
 * **From Lua**, `Offset`, `Rot` and `Scale` work on matched shapes; `sizeZ` does not change the
   volume of a pattern-matched shape: give the depth in the pattern, flatten with `Scale.z`
   (the scale keeps the block's middle: `Offset.z = target + newDepth/2 - depth/2`).
+  `Offset.z` takes the place of the pattern's offset: the same formula holds for a pattern that
+  has one.
 * **Shapes**: touching tiles are joined into one shape, which `UpdateS` sees once. A depth per
   tile is only possible by pattern. `Setting.SameBgPalette = true` keeps tiles of different
   palettes apart.
