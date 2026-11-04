@@ -973,3 +973,143 @@ fn req_scn_080_an_implementation_that_refuses_the_passes_draws_the_classic_frame
     assert_eq!(0, statistics.screen_effect_passes);
     assert!(renderer.take_diagnostics().is_empty(), "one line, once");
 }
+
+/// RU-7, the three invariants of §2.4 read off a **`wgpu`** capture, with the OpenGL ones beside
+/// them in the same run: the isolated plane at 1,00, the contact ratio `< 1` and `>= 0,10`, and
+/// the five `ao.strength` rungs.
+///
+/// The brief of that lot asks for exactly these three figures on the second backend, and this is
+/// where they belong: the close-up A and the ratio helpers of §2.4 are this file's, and a reviewer
+/// reading an invariant wants the two columns in one place. The share figures of the two
+/// pictures — a different question — are in `zax-harness/tests/parity_wgpu_tests.rs` and
+/// `amd055_parity_tests.rs`.
+///
+/// Skips with the reason printed where no adapter answers, as every `wgpu` test does.
+#[cfg(feature = "wgpu")]
+#[test]
+// The three invariants of §2.4 in one body, on each reachable API: they share the two captures
+// the ratios are taken between, and splitting them would render the reference twice per API.
+#[allow(clippy::too_many_lines)]
+fn req_scn_083_the_invariants_of_2_4_hold_on_the_wgpu_backend_too() {
+    use zax_render::wgpu_backend::headless::GpuApi;
+
+    let apis: &[(&str, GpuApi)] = if cfg!(windows) {
+        &[("vulkan", GpuApi::Vulkan), ("dx12", GpuApi::Dx12)]
+    } else {
+        &[("vulkan", GpuApi::Vulkan)]
+    };
+    for &(name, api) in apis {
+        let Some(mut fixture) = common::WgpuFixture::create(api, 640, 480) else {
+            return;
+        };
+
+        // The first invariant: a plane alone, with no cube.
+        let mut alone = close_up_a(false);
+        alone.scene.settings.style = StyleSettings::default();
+        let off = fixture.render_built(&alone);
+        let shade = plane_shade(&off);
+        alone.scene.settings.style = with_occlusion(AmbientOcclusion::Depth);
+        let on = fixture.render_built(&alone);
+        assert_eq!(
+            3,
+            fixture.statistics().screen_effect_passes,
+            "{name}: the pass did run"
+        );
+        let (worst, x, y, count) = worst_plane_ratio(&off, &on, shade);
+        // How many of the plane's pixels are darkened at all, and where the worst one is: a
+        // handful at the silhouette is the depth buffer's own quantisation, and a band is a port
+        // fault. Printed rather than asserted, because the invariant is the ratio.
+        let mut touched = 0;
+        for py in 0..off.height {
+            for px in 0..off.width {
+                if off.packed(px, py) == shade && ratio_at(&off, &on, px, py) < 0.995 {
+                    touched += 1;
+                }
+            }
+        }
+        println!(
+            "{name}: a plane alone reads {worst:.4} at ({x}, {y}); {touched} of {count} pixels              darkened by more than 0.5 %"
+        );
+        assert!(
+            worst >= 0.98,
+            "{name}: a plane alone is not darkened: {worst:.4} at ({x}, {y}) over {count} pixels"
+        );
+
+        // The second: the foot of the cube is darkened, and never past the ceiling.
+        let mut built = close_up_a(true);
+        built.scene.settings.style = StyleSettings::default();
+        let off = fixture.render_built(&built);
+        let shade = plane_shade(&off);
+        built.scene.settings.style = with_occlusion(AmbientOcclusion::Depth);
+        let on = fixture.render_built(&built);
+        let (contact, contact_x, contact_y, _) = worst_plane_ratio(&off, &on, shade);
+        println!("{name}: the contact reads {contact:.4} at ({contact_x}, {contact_y})");
+        assert!(
+            contact < 1.0,
+            "{name}: the foot of the cube is darkened, got {contact:.4}"
+        );
+        assert!(
+            contact >= 0.10,
+            "{name}: and never below the ceiling: {contact:.4}"
+        );
+
+        // And the plane `2r` from the cube is untouched.
+        let view = built
+            .scene
+            .camera
+            .build_view(built.scene.view_clipping(), 640.0 / 480.0);
+        let mut far = 0;
+        for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let point = Vector3::new(
+                CENTRE.x + dx * FAR_FROM_THE_CUBE,
+                CENTRE.y + dy * FAR_FROM_THE_CUBE,
+                PLANE_Z,
+            );
+            let Some((px, py)) = project(&view, point, off.width, off.height) else {
+                continue;
+            };
+            if off.packed(px, py) != shade {
+                continue;
+            }
+            far += 1;
+            let ratio = ratio_at(&off, &on, px, py);
+            assert!(
+                (ratio - 1.0).abs() <= 0.02,
+                "{name}: 40 units from the cube the plane is untouched, got {ratio:.4}"
+            );
+        }
+        assert!(far >= 2, "{name}: at least two far points, saw {far}");
+
+        // The third: the five rungs of `ao.strength`.
+        let mut at_contact = Vec::new();
+        for strength in 1..=5 {
+            let style = StyleSettings {
+                ao_strength: strength,
+                ..with_occlusion(AmbientOcclusion::Depth)
+            };
+            built.scene.settings.style = style;
+            let on = fixture.render_built(&built);
+            let (worst, x, y, _) = worst_plane_ratio(&off, &on, shade);
+            let floor = 1.0 - f64::from(style.ao_ceiling());
+            assert!(
+                worst >= floor - 0.006,
+                "{name}: ao.strength {strength} must stay at or above {floor:.2}, \
+                 got {worst:.4} at ({x}, {y})"
+            );
+            at_contact.push(ratio_at(&off, &on, contact_x, contact_y));
+        }
+        println!("{name}: the five ao.strength rungs read {at_contact:?}");
+        for rung in 1..5 {
+            assert!(
+                at_contact[rung] <= at_contact[rung - 1] + 1e-9,
+                "{name}: non-increasing in ao.strength: {at_contact:?}"
+            );
+        }
+        for rung in 1..4 {
+            assert!(
+                at_contact[rung] < at_contact[rung - 1],
+                "{name}: and strictly decreasing from 1 to 4: {at_contact:?}"
+            );
+        }
+    }
+}

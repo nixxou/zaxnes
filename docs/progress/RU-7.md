@@ -20,8 +20,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — `46f3174` (its clippy fix and its design: `9ef1447`) |
 | 4c | The reflections of REQ-SCN-084 and the floor mask | done — `0a763dd` |
 | 4d | The MSVO estimator and its runtime fallback | done — `2664c78` |
-| 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | done — this commit |
-| 5 | The parity measurements and the costs | todo |
+| 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | done — `b3dc146` |
+| 5 | The parity measurements and the costs | done — this commit |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -1327,6 +1327,265 @@ depth helpers, REQ-SCN-080's frame order, the lazy lifecycle, the anti-aliasing 
 backdrop model this step records as out of scope and the owner put back in. What is left of the lot
 is measurement and closing.
 
+### Step 5 — the parity measurements and the costs
+
+The lot's figures gathered in one place: the per-effect agreement tables, the §2.4 invariants read
+off a `wgpu` capture, the OpenGL renders shown byte-identical to `faced2a`, and the GPU cost of
+every Enhanced effect at 1080p on the three backends in one session.
+
+#### Parity, every effect of the lot, in one table
+
+Release, 640 × 480, anti-aliasing off unless the row says otherwise, worst of the scenes each
+effect is read on. **Vulkan and DX12 agree to the fourth decimal in every row** of this table, so
+they share one column; the places they do not are named below it.
+
+| Configuration | within 2 levels | max channel | read on |
+|---|---|---|---|
+| **Classic, the control** | **99.6423 %** | 223 | worst of four scenes (`heavy`) |
+| curvature `--bend 90,0,0` | 99.8701 % | 250 | the same four |
+| the arc, centre moved (`0,0,60,1`) | 99.5938 % | 237 | the same four |
+| all three axes (`45,30,20`) | 99.8047 % | 254 | the same four |
+| voxel grid, `spl.voxel_grid` = 3 | 99.6423 % | 229 | the same four |
+| pixel shadows, `spl.pixel_shadow` = 1 | 99.6423 % | 223 | the same four |
+| both, under `--bend 60,0,0` | 99.8324 % | 255 | the same four |
+| occlusion Depth, Medium | 99.6423 % | 223 | the same four |
+| occlusion Depth, High | 99.6423 % | 223 | the same four |
+| occlusion **MSVO**, Medium | 99.6410 % | 223 | the same four |
+| occlusion **MSVO**, High | 99.6423 % | 223 | the same four |
+| reflections, `ssr.quality` High | **99.5999 %** | 118 | the close-up R of §2.5 |
+| reflections, Ultra | 99.8493 % | 118 | the same |
+| reflections **and** the occlusion | 99.1045 % | 108 | the same |
+| **backdrop lighting**, AMD-049 | 99.9990 % | 107 | `backdrop` + three controls |
+| the same under curvature and the grid | 99.9993 % | 103 | the same |
+| `video.anti_alias` = 0 | 99.6423 % | 223 | the same four |
+| `video.anti_alias` = 1 (MSAA 4×) | 99.1084 % | 223 | the same four |
+| `video.anti_alias` = 2 (MSAA 8×) | 98.9489 % | 223 | the same four |
+| occlusion Depth under MSAA 4× | 99.1084 % | 223 | the same four |
+
+**How to read it.** Every row but five sits on the Classic control's own figure, 99.6423 %, and
+that is the point of having a control: the two backends already disagreed on 0.36 % of `heavy` —
+1 926 overlapping tile boxes, so silhouette edge everywhere — **before this lot touched anything**.
+An effect whose row equals the control added no measurable disagreement at all.
+
+The five rows that are not the control's, and why each is where it is:
+
+1. **The two multisampled rows** (99.1084 % and 98.9489 %) are MSAA sample positions, which are
+   implementation-defined in all three APIs. Step 4a's decisive figure: under MSAA 4× on `heavy`,
+   **Vulkan and DX12 agree with each other on 100.0000 % of the pixels, max channel 0**, and both
+   differ from OpenGL by exactly the same amount. More samples let the two patterns diverge
+   further, which is why 8× reads below 4×.
+2. **The reflections** (99.5999 % at High) are the one effect of the lot whose per-pixel result is
+   *discontinuous in the depth buffer*; the instrument that constrains them is the reflected pixel
+   set, in step 4c, and it reads 5 259 pixels reflected by both backends against a symmetric fringe
+   of 204 and 241.
+3. **The reflections with the occlusion** (99.1045 %) is the occlusion's own figure on a frame that
+   is almost entirely floor, not a compounding: 20.99 % of that capture's pixels differ *at all*
+   and the share within 2 levels is what matters.
+4. **The arc row** (99.5938 %) is below the control by 0.05 of a point and was so at step 2: bent
+   geometry pulls some silhouettes apart and pushes others together, and the arc is the axis that
+   does most of the second.
+5. **The backdrop rows** (99.9990 %) are *above* the control, because they are read on `backdrop`
+   and its controls rather than on `heavy`.
+
+**Where the two `wgpu` APIs do not agree exactly**, which is worth naming because everywhere else
+they are byte-identical: the reflections (99.9993 % against each other, max 38 — two or three
+pixels of the march, step 4c) and the MSVO contact ratio (0.1430 against 0.1348, the minimum
+sitting one pixel over). Both are the same cause, a discontinuous estimator read at its minimum.
+
+#### Each effect does something, and the same something
+
+The half of the check a share cannot make. Measured on the scene that shows each effect, as the
+share of pixels the effect moves against the same capture with it off:
+
+| Effect | scene | OpenGL | Vulkan | DX12 |
+|---|---|---|---|---|
+| curvature 90° | `framing` | 62.24 % | 62.24 % | 62.24 % |
+| voxel grid `N` = 8 | `framing` | 32.2497 % | 32.2565 % | 32.2565 % |
+| pixel shadows | `shadow` | 0.0091 % | 0.0091 % | 0.0091 % |
+| occlusion Depth | `shadow` | 1.7624 % | 1.8206 % | 1.8206 % |
+| reflections | the close-up R | 1.7783 % | 1.7904 % | 1.7910 % |
+| **backdrop lighting** | `backdrop` | **41.0690 %** | **41.0690 %** | **41.0690 %** |
+| every one of them | `hud` | 0 levels | 0 levels | 0 levels |
+
+And the negatives, each measured rather than assumed, each an assertion in its own test:
+
+- the occlusion moves **nothing at all** of `framing` or `heavy` — those scenes are flat facades
+  with no occluder inside the radius, which is REQ-SCN-083 as written;
+- the reflections move **nothing at all** of any of the eleven synthetic captures — not one
+  instance of the set is a floor surface, which is REQ-SCN-084 as written;
+- the backdrop model moves **nothing at all** of any capture but `backdrop`;
+- no effect of the lot moves the HUD by one level, on either backend (REQ-SCN-068, REQ-SCN-081,
+  REQ-SCN-082, and for the occlusion and the reflections the frame order of REQ-SCN-080).
+
+#### The invariants of AMD-055 §2.4 on the `wgpu` side
+
+The brief asks for these three on the second backend. They are asserted where their fixture and
+their ratio helpers already live — beside their OpenGL twins, in `amd055_occlusion_tests.rs` and
+`amd055_msvo_tests.rs` — so that a reviewer reading an invariant sees both columns at once.
+
+| Invariant | OpenGL | Vulkan | DX12 |
+|---|---|---|---|
+| **Depth**, a plane alone (1,00 ± 0,02) | **exactly 1** over 144 094 pixels | **0.9827** | **0.9827** |
+| Depth, the contact (`< 1`, `>= 0,10`) | — | **0.4337** | 0.4337 |
+| Depth, the five `ao.strength` rungs | strictly down 1→4, flat 4→5 | 0.8113 / 0.6251 / 0.4337 / 0.4023 / 0.4023 | identical |
+| **MSVO**, a plane alone, nine configurations | **exactly 1** | **0.99565** | 0.99565 |
+| MSVO, the contact | — | **0.1430** | 0.1348 |
+| MSVO, the five rungs | strictly down 1→4, flat 4→5 | 0.7182 / 0.4257 / 0.1430 / 0.0977 / 0.0977 | 0.7075 / 0.4231 / 0.1348 / 0.0869 / 0.0869 |
+
+Every one holds. Two things in that table are worth stating rather than passing over.
+
+**The lone plane reads 0.9827 here where OpenGL reads exactly 1.** The invariant allows 1,00 ±
+0,02, so it passes with 0.0027 to spare — thin, and the thinness is the interesting part. Measured:
+**33 of the plane's 144 094 pixels** are darkened by more than 0.5 %, the worst by 1.73 %, and the
+worst is at (229, 417) — on the plane's own lower silhouette. One kernel sample of ten contributing
+a fraction is 0 to 9 % of darkening, so 1.73 % is one sample's partial `smoothstep`: a boundary
+case of `ao.wgsl`'s bias comparison.
+
+The cause is the `y` mirror of `screen_depth.wgsl`, and it is **not** a fault. The two backends
+compute the *same* NDC through different expressions — `g * 2 - 1` on one side and `1 - (1 - g) * 2`
+on the other, which is the same number in real arithmetic and differs in the last bits in `f32`.
+Thirty-three pixels of the plane's edge sit on the knife edge of the comparison that decides
+whether a sample occludes, and they fall the other way. The requirement's ±0,02 exists for exactly
+this class of difference; it is the same class the whole parity table is made of, read at its
+sharpest point.
+
+**MSVO reads 0.99565 against the Depth estimator's 0.9827 on the same invariant** — the multi-scale
+chain is the *better*-behaved of the two here, because its output has been through four `SmartBlur`
+passes and three bilateral upsamples and a blur is what turns a boundary case into a fraction of a
+level. That is the same ordering step 4d's share figures gave, from the other side.
+
+#### The OpenGL backend is byte-identical to `faced2a`
+
+The lot's hardest check, and the one the previous steps deferred to a worktree. A throwaway
+worktree at `faced2a`, its own release harness built in its own target directory, both binaries
+rendering the synthetic set, and `sha256sum` over the eleven PNGs and `render.json`:
+
+| Configuration | result |
+|---|---|
+| `--anti-alias 0` | **byte-identical**, 11 captures |
+| `--anti-alias 1` (MSAA 4×) | **byte-identical**, 11 captures |
+| `--anti-alias 2` (MSAA 8×) | **byte-identical**, 11 captures |
+| Enhanced, `spl.ao` = 2, MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+| Enhanced, `spl.ao` = 1 (MSVO), MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+| Enhanced, `spl.reflections` = 1, MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+| Enhanced, grid 3 + pixel shadows, MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+| the backdrop model on, MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+| `--bend 60,20,30`, MSAA 4× | **byte-identical**, 11 captures + `render.json` |
+
+`render.json` being identical says more than the pixels do: the draw calls, the triangles, the
+resident meshes, the screen-effect passes and the screen-effect bytes of every OpenGL frame of
+every one of those configurations are the numbers `faced2a` produced. The worktree is removed.
+
+Together with the four instruction counts — **2231 / 1095 / 3401 / 159** at every step of this lot
+— that is the brief's "the OpenGL backend must not change at all", measured three ways: the source
+diff (one word, step 4b's `pub(crate)`, plus two comments in step 4c), the instruction counts, and
+the renders.
+
+#### What a Classic `wgpu` frame costs, measured
+
+The brief's "wgpu Classic unchanged in cost: with the Classic style and no curvature, the `wgpu`
+frame does no new work (no new pass submitted, no new pipeline switched to)". Asserted rather than
+argued, by the twin of the OpenGL test that does the same:
+
+- `style_programs`, `screen_effect_bytes`, `screen_effect_passes` and `occlusion_levels` are all
+  **0** in Classic *and* in Enhanced with the four switches at the defaults of REQ-SCN-079;
+- the two captures are **identical to the pixel** (REQ-SCN-080);
+- and the two frames do the same work: **10 pipeline bindings** each, the same draw calls, the same
+  triangles, the same resident meshes, the same shadow casters — on Vulkan and on DX12.
+
+`batches` is how many times a pipeline was bound, so two frames with the same `batches` switched to
+the same pipelines. That is the "no new pipeline switched to" clause as a number.
+
+What a Classic frame does carry from this lot, in full, and none of it measurable: 80 bytes added
+to a `write_buffer` it was already making once a frame (64 for the curvature in step 2, 16 for the
+eye in step 4e), four `is_some`/`is_some_and` tests on `Option`s that are `None`, one
+`color_mode == 2` comparison per opaque run whose two arms are the same value, and one loop over an
+empty `floor_runs`.
+
+#### The GPU cost of each effect at 1080p, on the three backends in one session
+
+`--bench 60`, median of 60 frames, `framing` at 1920 × 1080, anti-aliasing off, this machine
+(RTX 3050). **Each backend's deltas are against its own Classic baseline**, which is the only way
+the columns mean anything: the three APIs do not start from the same place.
+
+| | OpenGL | Vulkan | DX12 | passes | target bytes |
+|---|---|---|---|---|---|
+| **Classic baseline** | **0.549 ms** | **0.519 ms** | **0.780 ms** | — | 0 |
+| voxel grid `N` = 4 | +0.06 | +0.07 | +0.07 | 0 | 0 |
+| pixel shadows | +0.02 | +0.14 | +0.14 | 0 | 0 |
+| occlusion Depth, Medium | +0.42 | +0.58 | +0.51 | 3 | 1 036 800 |
+| occlusion Depth, High | +1.13 | +1.59 | +1.45 | 3 | 4 147 200 |
+| occlusion **MSVO**, Medium | +0.61 | +0.82 | +0.98 | 20 | 3 434 160 |
+| occlusion **MSVO**, High | +2.16 | +2.63 | +2.67 | 20 | 13 737 600 |
+| reflections, High (see below) | +0.04 | +0.15 | +0.17 | 3 | 6 220 800 |
+| all four effects on | +0.41 | +0.77 | +0.63 | 6 | 7 257 600 |
+
+The reflections row of that table is **not a figure for the effect**, and RU-5 recorded why: on
+`framing` at the default camera no instance has a face of pre-curvature normal `+Y ≥ 0,9` on a box
+reaching 6 units in both dimensions of the floor plane, so **no pixel is marked** and the trace
+returns at its mask test. What it measures is the mask pass and that early-out. Its own table used
+`heavy` at 45° of elevation, and so does this one:
+
+| `heavy`, 45° of elevation | OpenGL | Vulkan | DX12 | target bytes |
+|---|---|---|---|---|
+| **Classic baseline** | **1.119 ms** | **1.270 ms** | **1.635 ms** | 0 |
+| reflections, `ssr.quality` High | +0.85 | +0.85 | +1.01 | 6 220 800 |
+| reflections, Ultra | +1.04 | +0.86 | +1.36 | 18 662 400 |
+
+And the backdrop model of AMD-049, on the one scene of the set that has a backdrop:
+
+| `backdrop` | OpenGL | Vulkan | DX12 |
+|---|---|---|---|
+| **baseline, diffuse term** | **0.251 ms** | **0.289 ms** | **0.475 ms** |
+| the model of REQ-SCN-075 | **+0.050** | **+0.006** | **+0.032** |
+
+**What the table says, and what it does not.**
+
+1. **No effect is dearer on `wgpu` than the shape of the OpenGL figures predicts.** Every row is
+   within a factor of 1.4 of the OpenGL delta, the ordering of the rungs is identical on all three
+   backends, and the pass and byte columns are *the same numbers* — which is the stronger statement:
+   the three renderers submit the same passes and allocate the same targets, so the time differences
+   are the drivers' and not the ports'.
+2. **The two `wgpu` APIs are slower on the screen passes than OpenGL by 15 to 40 %**, consistently.
+   The cause is visible in the architecture rather than in the shaders: a screen effect on this
+   backend submits **one render pass per step** where the OpenGL path rebinds a framebuffer inside
+   one, plus the depth resolve that has no OpenGL counterpart at all. Twenty passes of the MSVO
+   chain are twenty `begin_render_pass`/end pairs, and that is what the +0.82 against +0.61 at
+   Medium is. It is intrinsic to the API, not a choice this lot made.
+3. **DX12's Classic baseline is 50 % above Vulkan's on this machine** (0.780 against 0.519), and
+   its deltas are then comparable to Vulkan's. The baseline difference is this driver's
+   command-submission cost and has nothing to do with AMD-055.
+4. **MSVO costs 1.3 to 1.9 times Depth at the same rung** here, against the 2.3 to 2.7 RU-6
+   measured on its own machine, and the twenty-against-three pass column is the same explanation in
+   both. The ratio differs because the machines do; the *ordering* — Medium the rung to offer, High
+   ×3.5 of it — is the same.
+5. **The backdrop model is the cheapest effect of the lot anywhere**: +0.006 ms on Vulkan, inside
+   the measurement spread, for a reflection model evaluated on one run of one frame.
+6. **The effects add up and do not multiply**: all four on costs +0.77 ms on Vulkan against the
+   +0.79 the sum of the deltas predicts, which is RU-5's own finding reproduced on the other
+   backend.
+
+**On comparing with RU-5 and RU-6.** Those tables were measured on their own machines, which is
+why step 1 of this lot re-measured the instruction counts rather than inheriting them. The OpenGL
+column above is this session's and is what the two `wgpu` columns are to be read against; RU-5's
+and RU-6's figures are comparable in *shape* (the ordering of the rungs, the ratio between the two
+estimators, the memory, the pass counts) and not in milliseconds. The OpenGL column does reproduce
+their shape: Depth Medium → High is ×2.7 here against RU-5's ×3.7 and RU-6's ×4.4, and the memory
+and pass columns are identical to the byte.
+
+#### Tests this step added
+
+| Criterion | Test |
+|---|---|
+| the three invariants of §2.4 on the `wgpu` side, Depth | `amd055_occlusion_tests.rs` `req_scn_083_the_invariants_of_2_4_hold_on_the_wgpu_backend_too` |
+| the same in the MSVO mode, over nine quality × radius configurations | `amd055_msvo_tests.rs` `req_scn_083_the_msvo_invariants_of_2_4_hold_on_the_wgpu_backend_too` |
+| a Classic `wgpu` frame does no new work: four counters at 0, the same picture, the same pipeline bindings | `amd055_style_tests.rs` `ru_7_a_classic_wgpu_frame_does_no_new_work` |
+
+`cargo test --release -p zax-render --features wgpu`: 34 suites, **326 passed, 0 failed**, 1
+ignored. `-p zax-harness --features wgpu`: 13 suites, **77 passed, 0 failed**.
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean.
+
 ### The design 4b was built from, and what is left after it
 
 Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
@@ -1422,7 +1681,7 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 | ~~4d~~ | ~~`msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line~~ — **landed**, see its own section above |
 | ~~4e~~ | ~~`backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075~~ — **landed**: not a file of its own in the end, but a variant of `scene.wgsl`, see its own section above |
 | — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
-| 5 | the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures |
+| ~~5~~ | ~~the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures~~ — **landed**, see its own section above |
 | 6 | the close: `PERFORMANCE-HISTORY.md`, the Q-104 closing section answering its questions 1, 3 and 4, the full suite, the release build with `zax-app/bundled,zax-app/wgpu` |
 
 Two notes 4b leaves for the steps after it:

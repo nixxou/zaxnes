@@ -299,3 +299,63 @@ fn q_104_the_wgpu_backend_carries_every_effect_of_the_enhanced_style() {
         assert!(!source.contains("const_assert"), "a source carries one");
     }
 }
+
+/// RU-7's own check, on the second backend: **a Classic `wgpu` frame does no new work**, and
+/// neither does an Enhanced one with the four switches at the defaults of REQ-SCN-079.
+///
+/// The twin of `req_scn_080_enhanced_with_every_effect_off_allocates_and_submits_nothing` above,
+/// counter for counter. It is the brief's "no new pass submitted, no new pipeline switched to"
+/// read off the statistics rather than argued: `batches` is how many times a pipeline was bound,
+/// so two frames with the same `batches` switched to the same pipelines, and
+/// `screen_effect_passes` is how many passes AMD-055 added.
+///
+/// Skips with the reason printed where no adapter answers.
+#[cfg(feature = "wgpu")]
+#[test]
+fn ru_7_a_classic_wgpu_frame_does_no_new_work() {
+    use zax_render::wgpu_backend::headless::GpuApi;
+
+    let apis: &[(&str, GpuApi)] = if cfg!(windows) {
+        &[("vulkan", GpuApi::Vulkan), ("dx12", GpuApi::Dx12)]
+    } else {
+        &[("vulkan", GpuApi::Vulkan)]
+    };
+    for &(name, api) in apis {
+        let Some(mut fixture) = common::WgpuFixture::new(api) else {
+            return;
+        };
+        let mut built = scene();
+
+        assert!(!built.scene.settings.style.enhanced, "Classic by default");
+        let classic_pixels = fixture.render_built(&built);
+        let classic = fixture.statistics();
+        assert_eq!(0, classic.style_programs, "{name}: no variant is built");
+        assert_eq!(0, classic.screen_effect_bytes, "{name}: no target");
+        assert_eq!(0, classic.screen_effect_passes, "{name}: no pass");
+        assert_eq!(0, classic.occlusion_levels, "{name}: no pyramid");
+
+        built.scene.settings.style.enhanced = true;
+        let enhanced_pixels = fixture.render_built(&built);
+        let enhanced = fixture.statistics();
+        assert_eq!(0, enhanced.style_programs);
+        assert_eq!(0, enhanced.screen_effect_bytes);
+        assert_eq!(0, enhanced.screen_effect_passes);
+        assert_eq!(0, enhanced.occlusion_levels);
+
+        // REQ-SCN-080: the two captures are the same picture, to the pixel.
+        assert_eq!(
+            classic_pixels.pixels, enhanced_pixels.pixels,
+            "{name}: every effect off, Enhanced is Classic to the pixel"
+        );
+        // And the same work: the same pipeline bindings, draws, triangles and meshes.
+        assert_eq!(classic.batches, enhanced.batches, "{name}: pipelines bound");
+        assert_eq!(classic.draw_calls, enhanced.draw_calls);
+        assert_eq!(classic.triangles, enhanced.triangles);
+        assert_eq!(classic.resident_meshes, enhanced.resident_meshes);
+        assert_eq!(classic.shadow_casters, enhanced.shadow_casters);
+        println!(
+            "{name}: Classic and Enhanced-all-off both bind {} pipelines and submit 0 screen passes",
+            classic.batches
+        );
+    }
+}

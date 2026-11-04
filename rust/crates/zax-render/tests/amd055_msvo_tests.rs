@@ -934,3 +934,140 @@ fn req_scn_083_the_msvo_mode_finds_a_laterally_wide_occluder() {
         "beyond 2 r the floor is untouched: {msvo:?}, {depth:?}"
     );
 }
+
+/// RU-7, the three invariants of §2.4 read off a **`wgpu`** capture in the **MSVO** mode, with the
+/// OpenGL ones beside them: the isolated plane at 1,00 over every quality and every radius, the
+/// contact ratio `< 1` and `>= 0,10`, and the five `ao.strength` rungs.
+///
+/// The first of the three is the one that found the port's three sampling choices on the OpenGL
+/// side (the access headroom, the point-sampled pyramid, the sample outside the rectangle), so it
+/// is also the one that says whether this backend inherited all three — and the two row mirrors of
+/// `msvo_downsample.wgsl` and `msvo_occlude.wgsl` with them.
+///
+/// Skips with the reason printed where no adapter answers, as every `wgpu` test does.
+#[cfg(feature = "wgpu")]
+#[test]
+// The three invariants of §2.4 in one body, on each reachable API: they share the two captures
+// the ratios are taken between, and splitting them would render the reference twice per API.
+#[allow(clippy::too_many_lines)]
+fn req_scn_083_the_msvo_invariants_of_2_4_hold_on_the_wgpu_backend_too() {
+    use zax_render::wgpu_backend::headless::GpuApi;
+
+    let apis: &[(&str, GpuApi)] = if cfg!(windows) {
+        &[("vulkan", GpuApi::Vulkan), ("dx12", GpuApi::Dx12)]
+    } else {
+        &[("vulkan", GpuApi::Vulkan)]
+    };
+    for &(name, api) in apis {
+        let Some(mut fixture) = common::WgpuFixture::create(api, 640, 480) else {
+            return;
+        };
+
+        // The first invariant, over the extremes of the two tables: the sampling choices of the
+        // port all bite harder as the sphere covers fewer texels.
+        let mut alone = close_up_a(false);
+        alone.scene.settings.style = StyleSettings::default();
+        let off = fixture.render_built(&alone);
+        let shade = plane_shade(&off);
+        let mut worst_alone = 2.0_f64;
+        for quality in 0..=2 {
+            for radius in [1, 3, 5] {
+                alone.scene.settings.style = StyleSettings {
+                    ao_quality: quality,
+                    ao_radius: radius,
+                    ..with_occlusion(AmbientOcclusion::Msvo)
+                };
+                let on = fixture.render_built(&alone);
+                assert_eq!(
+                    style::MSVO_LEVELS,
+                    i32::try_from(fixture.statistics().occlusion_levels).unwrap(),
+                    "{name}: the multi-scale estimator ran"
+                );
+                let (worst, x, y, count) = worst_plane_ratio(&off, &on, shade);
+                assert!(
+                    worst >= 0.98,
+                    "{name}, ao.quality {quality}, ao.radius {radius}: a plane alone is not \
+                     darkened, got {worst:.5} at ({x}, {y}) over {count} pixels"
+                );
+                worst_alone = worst_alone.min(worst);
+            }
+        }
+        println!("{name}: a plane alone reads {worst_alone:.5} over the nine configurations");
+
+        // The second: the foot of the cube, and the plane `2r` away.
+        let mut built = close_up_a(true);
+        built.scene.settings.style = StyleSettings::default();
+        let off = fixture.render_built(&built);
+        let shade = plane_shade(&off);
+        built.scene.settings.style = with_occlusion(AmbientOcclusion::Msvo);
+        let on = fixture.render_built(&built);
+        let (contact, contact_x, contact_y, _) = worst_plane_ratio(&off, &on, shade);
+        println!("{name}: the contact reads {contact:.4} at ({contact_x}, {contact_y})");
+        assert!(
+            contact < 1.0,
+            "{name}: the foot is darkened, got {contact:.4}"
+        );
+        assert!(
+            contact >= 0.10,
+            "{name}: and never below the ceiling: {contact:.4}"
+        );
+
+        let view = built
+            .scene
+            .camera
+            .build_view(built.scene.view_clipping(), 640.0 / 480.0);
+        let mut far = 0;
+        for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let point = Vector3::new(
+                CENTRE.x + dx * FAR_FROM_THE_CUBE,
+                CENTRE.y + dy * FAR_FROM_THE_CUBE,
+                PLANE_Z,
+            );
+            let Some((px, py)) = project(&view, point, off.width, off.height) else {
+                continue;
+            };
+            if off.packed(px, py) != shade {
+                continue;
+            }
+            far += 1;
+            let ratio = ratio_at(&off, &on, px, py);
+            assert!(
+                (ratio - 1.0).abs() <= 0.02,
+                "{name}: 40 units from the cube the plane is untouched, got {ratio:.4}"
+            );
+        }
+        assert!(far >= 2, "{name}: at least two far points, saw {far}");
+
+        // The third: the five rungs of `ao.strength`.
+        let mut at_contact = Vec::new();
+        for strength in 1..=5 {
+            let style = StyleSettings {
+                ao_strength: strength,
+                ..with_occlusion(AmbientOcclusion::Msvo)
+            };
+            built.scene.settings.style = style;
+            let on = fixture.render_built(&built);
+            let (worst, x, y, _) = worst_plane_ratio(&off, &on, shade);
+            let floor = 1.0 - f64::from(style.ao_ceiling());
+            assert!(
+                worst >= floor - 0.006,
+                "{name}: ao.strength {strength} must stay at or above {floor:.2}, \
+                 got {worst:.4} at ({x}, {y})"
+            );
+            at_contact.push(ratio_at(&off, &on, contact_x, contact_y));
+        }
+        println!("{name}: the five ao.strength rungs read {at_contact:?}");
+        for rung in 1..5 {
+            assert!(
+                at_contact[rung] <= at_contact[rung - 1] + 1e-9,
+                "{name}: non-increasing in ao.strength: {at_contact:?}"
+            );
+        }
+        for rung in 1..4 {
+            assert!(
+                at_contact[rung] < at_contact[rung - 1],
+                "{name}: and strictly decreasing from 1 to 4: {at_contact:?}"
+            );
+        }
+    }
+}
