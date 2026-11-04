@@ -1,6 +1,8 @@
-//! The MMC5's expansion audio (REQ-CORE-075, AMD-054): two square channels, the PCM channel,
-//! $5010 and $5015, and the way their output `M` joins the APU's `A` in the mixer
-//! (REQ-CORE-073), read at the test point of REQ-CORE-076.
+//! The MMC5's expansion audio (REQ-CORE-075, AMD-054 as amended by **AMD-061 §6**): two square
+//! channels, the PCM channel, $5010 and $5015, and the way their output `M` is **subtracted**
+//! from the APU's `A` in the mixer (REQ-CORE-073), read at the test point of REQ-CORE-076.
+//!
+//! The numbered criteria are §6.5's, which replace AMD-054's 4 623 / 8 000 / 3 968.
 
 // Register values and periods are small literals.
 #![allow(
@@ -69,141 +71,277 @@ fn read(core: &mut NesCore, address: u16) -> u8 {
 
 // ---------------------------------------------------------------- REQ-CORE-075, levels
 
-/// REQ-CORE-075 (AMD-054), first criterion: one square channel at volume 15 gives `M` = 4 623,
-/// the two of them 8 000, and a PCM level of 128 gives 3 968.
+/// AMD-061 §6.5, first two criteria: a single MMC5 square at volume 15 contributes exactly what
+/// a single APU pulse at volume 15 does, and the two of them exactly what two APU pulses do —
+/// "the sound output of the square channels are equivalent in volume to the corresponding APU
+/// channels" (nesdev, "MMC5 audio"). `M` is reported as a positive quantity; §6.2's reversed
+/// polarity is what the mixer then does with it, and
+/// `amd_061_the_board_output_is_subtracted_from_the_apu` pins that.
 #[test]
-fn req_core_075_the_board_produces_the_documented_integers() {
+fn amd_061_the_squares_contribute_the_opposite_of_the_apu_pulses() {
     let mut one = core();
     start_square(&mut one, 0, 100);
-    assert_eq!(4623, peak_expansion(&mut one, 4000));
+    assert_eq!(mixer::PULSE_TABLE[15], peak_expansion(&mut one, 4000));
 
     let mut other = core();
     start_square(&mut other, 1, 100);
-    assert_eq!(4623, peak_expansion(&mut other, 4000));
+    assert_eq!(mixer::PULSE_TABLE[15], peak_expansion(&mut other, 4000));
 
-    // Both squares on the same period and started in phase.
+    // Both squares on the same period and started in phase: one table index of 30, not two of
+    // 15, which is the whole point of a non-linear mixer.
     let mut both = core();
     start_both_squares(&mut both, 100);
-    assert_eq!(8000, peak_expansion(&mut both, 4000));
+    assert_eq!(mixer::PULSE_TABLE[30], peak_expansion(&mut both, 4000));
 
-    let mut pcm = core();
-    pcm.write_memory(0x5011, 128);
-    pcm.bus_mut().tick();
-    assert_eq!(3968, pcm.apu().mixer_expansion());
-    assert_eq!(31 * 128, pcm.apu().mixer_expansion());
+    // And those are the APU's own numbers, from REQ-CORE-073's criterion.
+    assert_eq!(4890, mixer::PULSE_TABLE[15]);
+    assert_eq!(8462, mixer::PULSE_TABLE[30]);
 }
 
-/// REQ-CORE-075 (AMD-054) — `Km = 8000 / P(30)`, so the table the board's squares use is the
-/// pulse function of REQ-CORE-073 scaled to top out at 8 000 instead of at the APU's 8 462, and
-/// the PCM channel steps by 31 per unit.
+/// AMD-061 §6.4 — the PCM channel is "equivalent in volume to the APU with equivalent input …
+/// but using the extra high bit of input it can become twice as loud", so it reads the APU's own
+/// triangle/noise/DMC curve over a whole byte: the first 203 entries of its table *are*
+/// `TND_TABLE`, and the 53 above them are the eighth bit the DMC has no room for. The
+/// reference's step of 31 per unit is gone.
 #[test]
-fn req_core_075_the_board_table_is_the_pulse_function_scaled_to_eight_thousand() {
-    assert_eq!(31, mixer::MMC5_PULSE_TABLE.len());
-    assert_eq!(0, mixer::MMC5_PULSE_TABLE[0]);
-    assert_eq!(4623, mixer::MMC5_PULSE_TABLE[15]);
-    assert_eq!(mixer::MMC5_FULL_SCALE, mixer::MMC5_PULSE_TABLE[30]);
+fn amd_061_the_pcm_channel_follows_the_dmc_curve_over_a_full_byte() {
+    assert_eq!(256, mixer::MMC5_PCM_TABLE.len());
+    assert_eq!(0, mixer::MMC5_PCM_TABLE[0]);
 
-    let km = 8000.0 / mixer::pulse(30);
-    assert!((mixer::MMC5_NORMALISATION - km).abs() < 1e-6);
-    assert!((mixer::MMC5_NORMALISATION - 30_949.798).abs() < 1e-3);
+    // The DMC's range, byte for byte.
+    for i in 0..mixer::TND_TABLE.len() {
+        assert_eq!(mixer::TND_TABLE[i], mixer::MMC5_PCM_TABLE[i], "index {i}");
+    }
 
-    for i in 0..=30 {
+    // The whole table is `r(K · T(i))` on the APU's own `K`, the eighth bit included.
+    for i in 0..mixer::MMC5_PCM_TABLE.len() {
         assert_eq!(
-            mixer::round_to_even(mixer::MMC5_NORMALISATION * mixer::pulse(i)),
-            mixer::MMC5_PULSE_TABLE[i]
+            mixer::round_to_even(mixer::NORMALISATION * mixer::tnd(i)),
+            mixer::MMC5_PCM_TABLE[i],
+            "index {i}"
         );
     }
 
-    assert_eq!(31, mixer::MMC5_PCM_STEP);
+    // Monotonic and strictly above the DMC's full scale at the top.
+    assert!(mixer::MMC5_PCM_TABLE[255] > mixer::TND_TABLE[127]);
+
+    // And a level written to $5011 is read back at that entry.
+    let mut pcm = core();
+    pcm.write_memory(0x5011, 128);
+    pcm.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[128], pcm.apu().mixer_expansion());
 }
 
-/// REQ-CORE-073 (AMD-054) — `M` is added to `A` and the sum is clipped to 32 767, never
-/// wrapped: the board's full scale on top of the APU's would reach 48 672.
+/// AMD-061 §6.5, third criterion: "une voie carrée MMC5 de période 4 produit un signal non nul".
+/// §6.1 takes the cut below period 8 off the board's squares — "frequency values less than 8 do
+/// not silence the MMC5 pulse channels; they can output ultrasonic frequencies" — and leaves it
+/// on the APU's pulses.
 #[test]
-fn req_core_073_the_board_output_is_added_to_the_apu_and_the_sum_is_clipped() {
+fn amd_061_a_square_below_period_eight_is_not_silenced() {
+    for period in [0, 1, 4, 7] {
+        let mut core = core();
+        start_square(&mut core, 0, period);
+        assert!(
+            peak_expansion(&mut core, 400) > 0,
+            "period {period} must still be audible"
+        );
+    }
+
+    // The APU's own pulse keeps its cut, which is the other half of §6.1.
+    let mut apu = core();
+    apu.write_memory(0x4015, 0x01);
+    apu.write_memory(0x4000, 0xBF);
+    apu.write_memory(0x4001, 0x08);
+    apu.write_memory(0x4002, 4);
+    apu.write_memory(0x4003, 0xF8);
+    let mut peak = 0;
+    for _ in 0..400 {
+        apu.bus_mut().tick();
+        peak = peak.max(apu.apu().mixer_apu());
+    }
+    assert_eq!(0, peak, "an APU pulse below period 8 is still muted");
+}
+
+/// AMD-061 §6.2 — `M` is **subtracted** from `A`, and `S` is clipped to `-32 768..=32 767`
+/// instead of `0..=32 767`: "the polarity of all MMC5 channels is reversed compared to the APU"
+/// (nesdev, "MMC5 audio").
+#[test]
+fn amd_061_the_board_output_is_subtracted_from_the_apu() {
     let mut core = core();
 
-    // A DMC level written through $4011 is a pure step, so `A` sits still and the sum is easy
-    // to read: A = T(100), M = 31 x 100.
+    // A DMC level written through $4011 is a pure step, so `A` sits still and the difference is
+    // easy to read: A = T(100), M = T(100) as well, so the two cancel exactly. That the same
+    // index gives the same magnitude on both sides is §6.4 restated.
     core.write_memory(0x4011, 100);
     core.write_memory(0x5011, 100);
     core.bus_mut().tick();
 
     assert_eq!(mixer::TND_TABLE[100], core.apu().mixer_apu());
-    assert_eq!(3100, core.apu().mixer_expansion());
-    assert_eq!(
-        core.apu().mixer_apu() + 3100,
-        core.apu().mixer_output(),
-        "S = A + M below full scale"
-    );
+    assert_eq!(mixer::MMC5_PCM_TABLE[100], core.apu().mixer_expansion());
+    assert_eq!(0, core.apu().mixer_output(), "S = A - M, and here A = M");
+
+    // With the APU silent, `S` goes negative, which AMD-054's clip to 0 could not express.
+    core.write_memory(0x4011, 0);
+    core.bus_mut().tick();
+    assert_eq!(0, core.apu().mixer_apu());
+    assert_eq!(-mixer::MMC5_PCM_TABLE[100], core.apu().mixer_output());
     assert!(
         (f64::from(core.apu().mixer_output()) / 32_768.0 - core.apu().mixed_level()).abs() < 1e-12
     );
 
-    // Both pulses at volume 15 on top of a DMC level of 127 take `A` to 8 462 + 18 376, and a
-    // PCM level of 255 takes `M` to 7 905: the sum is past full scale, where REQ-CORE-073 asks
-    // for a clip rather than a wrap.
-    core.write_memory(0x4015, 0x03);
-    core.write_memory(0x4000, 0xBF);
-    core.write_memory(0x4001, 0x08); // Negate with a shift of 0: the sweep never mutes.
-    core.write_memory(0x4002, 100);
-    core.write_memory(0x4003, 0xF8);
-    core.write_memory(0x4004, 0xBF);
-    core.write_memory(0x4005, 0x08);
-    core.write_memory(0x4006, 100);
-    core.write_memory(0x4007, 0xF8);
-    core.write_memory(0x4011, 127);
+    // The clip is a floor, not a wrap: the board's full scale under a silent APU is past
+    // -32 768, where §6.2 asks for the floor.
     core.write_memory(0x5011, 255);
-
-    let mut peak_apu = 0;
-    let mut peak_output = 0;
-    let mut peak_level = 0.0;
+    start_both_squares(&mut core, 100);
+    let mut trough = 0;
+    let mut peak_expansion = 0;
     for _ in 0..4000 {
         core.bus_mut().tick();
-        if core.apu().mixer_apu() > peak_apu {
-            peak_apu = core.apu().mixer_apu();
-            peak_output = core.apu().mixer_output();
-            peak_level = core.apu().mixed_level();
-        }
+        trough = trough.min(core.apu().mixer_output());
+        peak_expansion = peak_expansion.max(core.apu().mixer_expansion());
     }
 
     assert_eq!(
-        mixer::PULSE_TABLE[30] + mixer::TND_TABLE[127],
-        peak_apu,
-        "A at the peak"
+        mixer::PULSE_TABLE[30] + mixer::MMC5_PCM_TABLE[255],
+        peak_expansion,
+        "M at the peak"
     );
-    assert_eq!(31 * 255, core.apu().mixer_expansion());
-    assert!(peak_apu + (31 * 255) > mixer::FULL_SCALE);
-    assert_eq!(mixer::FULL_SCALE, peak_output);
-    assert!((0.999_96..=1.0).contains(&peak_level), "{peak_level}");
+    assert!(peak_expansion > -mixer::MIN_SCALE, "{peak_expansion}");
+    assert_eq!(mixer::MIN_SCALE, trough);
+}
+
+/// AMD-061 §6.2 — a game **without** expansion audio is untouched by the new polarity: `M` is 0,
+/// so `S` is `A` exactly, and the clip never bites because `A` cannot leave `0..=32 767`.
+#[test]
+fn amd_061_the_mix_of_a_game_without_expansion_audio_is_unchanged() {
+    assert_eq!(0, mixer::clip(0, 0));
+    assert_eq!(1234, mixer::clip(1234, 0));
+    assert_eq!(mixer::FULL_SCALE, mixer::clip(mixer::FULL_SCALE, 0));
+    assert_eq!(
+        mixer::FULL_SCALE,
+        mixer::PULSE_TABLE[30] + mixer::TND_TABLE[202],
+        "A at full scale is exactly 32 767, so the upper clip is unreachable"
+    );
 }
 
 // ---------------------------------------------------------------- REQ-CORE-075, registers
 
-/// REQ-CORE-075 (AMD-054), first criterion, second half: a write of 0 to $5011 leaves the level
-/// alone and raises the PCM IRQ flag; a read of $5010 then returns $80 and the next one $00.
-/// The flag never pulls the CPU's IRQ line (an accepted divergence).
+/// REQ-CORE-075 (AMD-054) — a write of 0 to $5011 leaves the level alone and raises the PCM IRQ
+/// flag; a read of $5010 then returns $80 and the next one $00. **AMD-061 §6.3**: while bit 7 of
+/// $5010 allows it, that flag now pulls the CPU's IRQ line, and the read that acknowledges it
+/// releases it.
 #[test]
-fn req_core_075_a_write_of_zero_to_5011_keeps_the_level_and_raises_the_pcm_irq() {
+fn amd_061_the_pcm_irq_flag_pulls_the_cpu_irq_line() {
     let mut core = core();
 
     core.write_memory(0x5010, 0x80); // PCM IRQ enabled, write mode.
     core.write_memory(0x5011, 200);
     core.bus_mut().tick();
-    assert_eq!(31 * 200, core.apu().mixer_expansion());
+    assert_eq!(mixer::MMC5_PCM_TABLE[200], core.apu().mixer_expansion());
     assert_eq!(0x00, read(&mut core, 0x5010));
+    assert!(!CpuBus::irq_asserted(core.bus()), "no flag, no IRQ");
 
     core.write_memory(0x5011, 0x00);
     core.bus_mut().tick();
 
-    // The level is unchanged, and the flag is up.
-    assert_eq!(31 * 200, core.apu().mixer_expansion());
+    // The level is unchanged, the flag is up, and the line is down.
+    assert_eq!(mixer::MMC5_PCM_TABLE[200], core.apu().mixer_expansion());
+    assert!(CpuBus::irq_asserted(core.bus()), "the flag drives /IRQ");
     assert_eq!(0x80, read(&mut core, 0x5010));
 
-    // Reading it acknowledged it.
+    // Reading it acknowledged it, which also released the line.
     assert_eq!(0x00, read(&mut core, 0x5010));
+    assert!(!CpuBus::irq_asserted(core.bus()));
+}
 
-    // And it is not the CPU's IRQ line.
+/// AMD-061 §6.3 — `Cart /IRQ line = NOT(irqTrip AND irqEnable)` (nesdev's own pseudocode): with
+/// bit 7 of $5010 clear the flag still latches and still reads back, but it drives nothing.
+#[test]
+fn amd_061_the_pcm_irq_needs_bit_7_of_5010_to_reach_the_cpu() {
+    let mut core = core();
+
+    core.write_memory(0x5010, 0x00); // Write mode, IRQ *not* enabled.
+    core.write_memory(0x5011, 0x00);
+    core.bus_mut().tick();
+
+    assert!(!CpuBus::irq_asserted(core.bus()), "disabled, so no IRQ");
+    assert_eq!(0x80, read(&mut core, 0x5010), "but the flag is there");
+    assert_eq!(0x00, read(&mut core, 0x5010));
+}
+
+/// AMD-061 §6.3, the read mode of $5010: with bit 0 set, "une lecture CPU dans $8000-$BFFF place
+/// l'octet lu dans le niveau PCM ; une lecture de valeur 0 lève le drapeau d'IRQ PCM". A read
+/// outside that window does neither, and the byte the read returns is unchanged.
+#[test]
+fn amd_061_read_mode_takes_the_pcm_level_from_a_read_of_8000_bfff() {
+    let mut core = core();
+
+    // The image numbers each 8 KiB PRG bank with its own index, so banking a known ROM bank
+    // into each window makes the byte a read returns known too. Bit 7 of $511x selects ROM
+    // over RAM, and the board powers on in PRG mode 3, four 8 KiB windows.
+    core.write_memory(0x5114, 0x80 | 3); // $8000-$9FFF: bank 3.
+    core.write_memory(0x5115, 0x80 | 5); // $A000-$BFFF: bank 5.
+    core.write_memory(0x5116, 0x80 | 6); // $C000-$DFFF: bank 6, outside the window.
+    assert_eq!(3, core.read_memory(0x8000));
+    assert_eq!(5, core.read_memory(0xA000));
+    assert_eq!(6, core.read_memory(0xC000));
+
+    // Out of read mode the read changes nothing.
+    core.write_memory(0x5010, 0x00);
+    assert_eq!(3, read(&mut core, 0x8000));
+    core.bus_mut().tick();
+    assert_eq!(0, core.apu().mixer_expansion());
+
+    // In read mode it becomes the level, and the read still returns the same byte.
+    core.write_memory(0x5010, 0x01);
+    assert_eq!(3, read(&mut core, 0x8000));
+    core.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[3], core.apu().mixer_expansion());
+
+    // The whole of $8000-$BFFF feeds it, not just the first window.
+    assert_eq!(5, read(&mut core, 0xA000));
+    core.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[5], core.apu().mixer_expansion());
+
+    // $C000-$FFFF is outside the window: the level stays where the last $8000-$BFFF read put it.
+    assert_eq!(6, read(&mut core, 0xC000));
+    core.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[5], core.apu().mixer_expansion());
+
+    // And a write to $5011 is not how a level is set in read mode on real hardware, but
+    // AMD-054's clause on it is unamended, so it still takes: this pins what we do, not what
+    // the board does (see Q-115).
+    core.write_memory(0x5011, 40);
+    core.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[40], core.apu().mixer_expansion());
+}
+
+/// AMD-061 §6.3 — in read mode, a byte of 0 read from $8000-$BFFF raises the PCM IRQ flag and
+/// leaves the level alone, exactly as a write of 0 does in write mode.
+#[test]
+fn amd_061_read_mode_raises_the_pcm_irq_on_a_byte_of_zero() {
+    let mut core = core();
+
+    // Bank 3 at $8000 to park a non-zero level, then bank 0 — whose every byte is 0, the image
+    // numbering each bank with its index — to read the byte that trips the flag.
+    core.write_memory(0x5010, 0x81); // Read mode, PCM IRQ enabled.
+    core.write_memory(0x5114, 0x80 | 3);
+    assert_eq!(3, read(&mut core, 0x8000));
+    core.bus_mut().tick();
+    assert_eq!(mixer::MMC5_PCM_TABLE[3], core.apu().mixer_expansion());
+    assert!(!CpuBus::irq_asserted(core.bus()));
+
+    core.write_memory(0x5114, 0x80);
+    assert_eq!(0, read(&mut core, 0x8000));
+    core.bus_mut().tick();
+
+    // The level is unchanged and the flag is up, exactly as for a write of 0 in write mode.
+    assert_eq!(mixer::MMC5_PCM_TABLE[3], core.apu().mixer_expansion());
+    assert!(
+        CpuBus::irq_asserted(core.bus()),
+        "a byte of 0 trips the IRQ"
+    );
+    assert_eq!(0x80, read(&mut core, 0x5010));
     assert!(!CpuBus::irq_asserted(core.bus()));
 }
 
@@ -239,7 +377,7 @@ fn req_core_075_5015_enables_the_squares_and_reports_their_length_counters() {
     core.bus_mut().tick();
 
     assert_eq!(0x02, read(&mut core, 0x5015));
-    assert_eq!(4623, peak_expansion(&mut core, 4000));
+    assert_eq!(mixer::PULSE_TABLE[15], peak_expansion(&mut core, 4000));
 
     core.write_memory(0x5015, 0x00);
     core.bus_mut().tick();
@@ -248,27 +386,22 @@ fn req_core_075_5015_enables_the_squares_and_reports_their_length_counters() {
     assert_eq!(0, peak_expansion(&mut core, 4000));
 }
 
-/// REQ-CORE-075 (AMD-054) — the squares take the duty, the timer and the muting of periods
-/// below 8 from the APU's pulses, and have **no sweep unit**: writing the register an APU pulse
-/// would read as a sweep setting changes nothing, and in particular a period above $3FF — which
-/// an APU pulse with a zeroed sweep register mutes — stays audible.
+/// REQ-CORE-075 (AMD-054) — the squares take the duty and the timer from the APU's pulses, and
+/// have **no sweep unit**: writing the register an APU pulse would read as a sweep setting
+/// changes nothing, and in particular a period above $3FF — which an APU pulse with a zeroed
+/// sweep register mutes — stays audible. Since AMD-061 §6.1 a period *below* 8 is audible too,
+/// which `amd_061_a_square_below_period_eight_is_not_silenced` is about.
 #[test]
 fn req_core_075_the_squares_have_no_sweep_unit() {
-    for (period, audible) in [
-        (7, false), // Below 8: muted, as on an APU pulse.
-        (8, true),
-        (0x400, true), // An APU pulse with $4001 = 0 would mute this one.
-        (0x7FF, true),
-    ] {
+    for period in [7, 8, 0x400, 0x7FF] {
         let mut core = core();
         start_square(&mut core, 0, period);
         core.write_memory(0x5001, 0x00); // The APU's sweep register: ignored by the board.
 
         let cycles = 8 * 2 * (period as usize + 1);
-        assert_eq!(
-            audible,
+        assert!(
             peak_expansion(&mut core, cycles) > 0,
-            "period {period}"
+            "period {period} must be audible"
         );
     }
 }
@@ -312,9 +445,9 @@ fn duty_fraction(duty: u8, expected: f64) {
 
 // ---------------------------------------------------------------- REQ-CORE-075, cadence
 
-/// Shortest timer period that is not muted (REQ-CORE-075 keeps the APU's cut below 8), so that
-/// one turn of the duty sequencer is as short as possible and the cadence tests can read the
-/// envelope's volume often.
+/// A short timer period, so that one turn of the duty sequencer is quick and the cadence tests
+/// can read the envelope's volume often. AMD-061 §6.1 would allow a shorter one — the board has
+/// no cut below 8 any more — but 8 keeps these two tests comparable with their AMD-054 versions.
 const SHORT_PERIOD: i32 = 8;
 
 /// CPU cycles one turn of the duty sequencer takes at [`SHORT_PERIOD`]: eight steps of nine APU
@@ -327,7 +460,7 @@ const SEQUENCE_CYCLES: i64 = 8 * (SHORT_PERIOD as i64 + 1) * 2;
 fn step_one_sequence(core: &mut NesCore) -> i32 {
     let peak = peak_expansion(core, SEQUENCE_CYCLES as usize);
     for volume in 0..=15i32 {
-        if mixer::MMC5_PULSE_TABLE[volume as usize] == peak {
+        if mixer::PULSE_TABLE[volume as usize] == peak {
             return volume;
         }
     }
@@ -363,7 +496,7 @@ fn envelope_cadence(frame_counter: u8) {
     core.write_memory(0x5015, 0x01);
     core.write_memory(0x5000, 0x80); // Duty 2, envelope mode, period 0, no loop.
     core.write_memory(0x5002, SHORT_PERIOD as u8);
-    core.write_memory(0x5003, 0x08); // Length index 1 (254 steps at 120 Hz), envelope restart.
+    core.write_memory(0x5003, 0x08); // Length index 1 (254 steps at 240 Hz), envelope restart.
 
     // Wait for the first envelope clock, which loads the decay with 15, then time the fifteen
     // clocks that take it back to 0.
@@ -394,11 +527,21 @@ fn envelope_cadence(frame_counter: u8) {
     );
 }
 
-/// REQ-CORE-075 (AMD-054) — the length counter runs at 120 Hz, one envelope clock in two: a
-/// counter loaded with 10 steps therefore silences the channel after 10 / 120 s.
+/// AMD-061 §6.5, fifth criterion: the length counter runs at **240 Hz**, the envelope's own
+/// cadence, so a counter loaded with 10 steps silences the channel after 10 / 240 s whatever
+/// `$4017` holds. §6.3 withdraws AMD-054's 120 Hz divergence: "Length counter operates twice as
+/// fast as the APU length counter", both "fixed to a 240Hz update rate" (nesdev, "MMC5 audio").
 #[test]
-fn req_core_075_the_length_counter_runs_at_half_the_envelope_cadence() {
+fn amd_061_the_length_counter_runs_at_240_hz_whatever_4017_holds() {
+    for frame_counter in [0x00, 0x80, 0xC0] {
+        length_cadence(frame_counter);
+    }
+}
+
+fn length_cadence(frame_counter: u8) {
     let mut core = core();
+
+    core.write_memory(0x4017, frame_counter);
 
     core.write_memory(0x5015, 0x01);
     core.write_memory(0x5000, 0x9F); // Duty 2, constant volume 15, length running.
@@ -419,10 +562,10 @@ fn req_core_075_the_length_counter_runs_at_half_the_envelope_cadence() {
     assert_eq!(0x00, read(&mut core, 0x5015));
 
     let measured = seconds(&core, silent);
-    let expected = 10.0 / 120.0;
+    let expected = 10.0 / 240.0;
     assert!(
         (expected * 0.95..=expected * 1.05).contains(&measured),
-        "{measured} s vs {expected} s"
+        "$4017 = {frame_counter:#04X}: {measured} s vs {expected} s"
     );
 }
 

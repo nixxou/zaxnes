@@ -5,21 +5,17 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// One of the MMC5's two square channels, $5000-$5003 and $5004-$5007 (REQ-CORE-075).
 ///
-/// REQ-CORE-075 takes the waveform, the duty, the timer, the envelope, the length counter and
-/// the muting of periods below 8 straight from the APU's pulse channels, and drops the sweep
-/// unit: the board has none, so nothing here recomputes a sweep target and nothing can mute the
-/// channel on account of one. That is the one real difference from
-/// [`PulseChannel`](super::pulse_channel::PulseChannel), and it is why the two are separate
-/// types rather than one with a flag — an APU pulse with its sweep register left at 0 mutes
-/// itself above period $3FF, which an MMC5 channel must not do.
+/// REQ-CORE-075 takes the waveform, the duty, the timer, the envelope and the length counter
+/// straight from the APU's pulse channels, and drops **two** units the APU pulse has: the sweep,
+/// which the board does not carry at all, and the cut below period 8 (AMD-061 §6.1). Both are
+/// why this is a separate type rather than `PulseChannel` with a flag: an APU pulse with its
+/// sweep register left at 0 mutes itself above period $3FF and goes silent below period 8, and an
+/// MMC5 channel must do neither. Keeping the two types apart is also what keeps the difference
+/// off the APU pulse's own per-cycle path, which every game runs.
 ///
 /// The envelope and the length counter are **not** clocked from the APU's frame sequencer: the
-/// board has no equivalent of it, and [`Mmc5Audio`](super::mmc5_audio::Mmc5Audio) drives them at
-/// a fixed cadence instead.
-///
-/// The public documentation notes that a period below 8 does *not* silence an MMC5 channel, as
-/// it does an APU pulse; REQ-CORE-075 asks for the APU's behaviour here, which is the
-/// reference's, and records the divergence.
+/// board has no equivalent of it, and [`Mmc5Audio`](super::mmc5_audio::Mmc5Audio) drives both at
+/// the same fixed 240 Hz instead (AMD-061 §6.3).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Mmc5PulseChannel {
     duty: usize,
@@ -32,11 +28,14 @@ pub(crate) struct Mmc5PulseChannel {
 
 impl Mmc5PulseChannel {
     /// Current output, 0 to 15.
+    ///
+    /// AMD-061 §6.1: there is **no cut below period 8** here, where an APU pulse has one.
+    /// "Frequency values less than 8 do not silence the MMC5 pulse channels; they can output
+    /// ultrasonic frequencies" (nesdev, "MMC5 audio"). The cut stays in
+    /// [`PulseChannel`](super::pulse_channel::PulseChannel), which is a separate type, so the
+    /// APU's own pulses keep theirs and no game without an MMC5 is affected by this line.
     pub fn output(&self) -> i32 {
-        if self.timer_period < 8
-            || !self.length.active()
-            || DUTY_SEQUENCES[(self.duty * 8) + self.sequence_position] == 0
-        {
+        if !self.length.active() || DUTY_SEQUENCES[(self.duty * 8) + self.sequence_position] == 0 {
             0
         } else {
             i32::from(self.envelope.volume())

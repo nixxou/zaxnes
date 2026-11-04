@@ -386,9 +386,9 @@ impl Apu2A03 {
         self.level_expansion
     }
 
-    /// `S = min(A + M, 32 767)` of REQ-CORE-073 on the cycle just stepped, before the
-    /// conversion to floating point and before the DC blocker. Part of the test point of
-    /// REQ-CORE-076.
+    /// `S = A − M` of REQ-CORE-073, clipped to `-32 768..=32 767` (AMD-061 §6.2), on the cycle
+    /// just stepped, before the conversion to floating point and before the DC blocker. Part of
+    /// the test point of REQ-CORE-076.
     #[must_use]
     pub const fn mixer_output(&self) -> i32 {
         self.mixer_output

@@ -182,11 +182,14 @@ fn req_core_073_the_integer_output_becomes_the_float_of_req_core_071() {
         assert!((f64::from(apu.mixer_output()) / 32_768.0 - apu.mixed_level()).abs() < 1e-12);
     }
 
-    // The clipping of REQ-CORE-073 is a minimum, not a wrap; `A` on its own never reaches it,
-    // the two roundings being chosen so that full scale is exactly 32 767.
-    assert_eq!(mixer::FULL_SCALE, mixer::clip(mixer::FULL_SCALE, 5000));
-    assert_eq!(mixer::FULL_SCALE, mixer::clip(30_000, 5000));
+    // The clipping of REQ-CORE-073, as AMD-061 §6.2 amends it: `M` is subtracted and the floor
+    // is -32 768. `A` on its own never reaches either bound, the two roundings being chosen so
+    // that full scale is exactly 32 767, so a game without expansion audio sees `S = A`.
+    assert_eq!(mixer::FULL_SCALE, mixer::clip(mixer::FULL_SCALE, 0));
+    assert_eq!(25_000, mixer::clip(30_000, 5000));
     assert_eq!(30_000, mixer::clip(30_000, 0));
+    assert_eq!(-5000, mixer::clip(0, 5000));
+    assert_eq!(mixer::MIN_SCALE, mixer::clip(0, 40_000));
 }
 
 /// REQ-CORE-076 — silence reads `A = M = S = 0` at the test point.
@@ -220,11 +223,11 @@ fn req_core_076_a_move_of_m_alone_reaches_the_mixer() {
         apu.run_cpu_cycles(1);
 
         // Every channel is silent, so `A` is 0, the key is 0 on each of the five passes, and
-        // `S = min(0 + M, 32 767)` is `M` itself.
+        // `S = 0 − M` is `−M` — AMD-061 §6.2's reversed polarity, where AMD-054 read `+M`.
         assert_eq!(0, apu.mixer_apu());
         assert_eq!(level, apu.mixer_expansion());
-        assert_eq!(level, apu.mixer_output());
-        assert_eq!(f64::from(level) / 32_768.0, apu.mixed_level());
+        assert_eq!(-level, apu.mixer_output());
+        assert_eq!(f64::from(-level) / 32_768.0, apu.mixed_level());
     }
 }
 

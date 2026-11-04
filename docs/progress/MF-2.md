@@ -29,7 +29,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 1/10 — step 0: give back what MF-1 cost on the MMC1 CHR path
 - [x] 2/10 — step 1: AMD-061 §2 and §4 — mapper 15 mode 1, mapper 101, the AMD-021 criteria
 - [x] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
-- [ ] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
+- [x] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
 - [ ] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
 - [ ] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
 - [ ] 7/10 — step 6: MR-5-2, MR-5-4 — MMC5 ExRAM writes, and in-frame detection by bus sniffing
@@ -49,6 +49,12 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | AMD-061 §2 (mapper 15 mode 1) | `multicart.rs:139-146` (`bank \| 0x07`) | `amd_061_mapper_15_acceptance_vectors` | none: one OR inside `Mapper015::update_banks`, which runs on a register write to a mapper-15 cartridge | the mapper-15 multicarts, and only an image **larger than 128 KiB** running in mode 1 |
 | AMD-061 §4 (mapper 101) | `multicart.rs:619-630` (8-bit field), `:659-672` (the range) | `amd_061_mapper_101_takes_eight_bits_from_6000_7fff` | none: both changes are in `JalecoJ87`, which only mapper 87 and 101 reach, and the range test got *simpler* (one `contains`, no branch on the board) | mapper-101 images with more than 32 KiB of CHR; mapper 87 does not move at all |
 | AMD-061 §3 and §5, MR-28-3 (Q-112) | `multicart.rs:558-570` (`Action53::reset` keeps the five registers) | `amd_061_mapper_28_keeps_its_registers_across_a_reset`, `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | none: `Mapper::reset` runs on a power cycle or a RESET, never per cycle. Five assignments **removed**, nothing added | the Action 53 multicarts, and only across a reset; no other board moves |
+| AMD-061 §6.1 (no cut below period 8) | `mmc5_pulse_channel.rs:38-48` | `amd_061_a_square_below_period_eight_is_not_silenced` | none: `Mmc5PulseChannel` is a **separate type** from `PulseChannel`, so the APU's own pulses keep their cut and their per-cycle code is untouched | MMC5 titles driving a square below period 8 |
+| AMD-061 §6.2 (reversed polarity, signed clip) | `mixer.rs:163-180` (`clip`), `mixer.rs:46-48` (`MIN_SCALE`) | `amd_061_the_board_output_is_subtracted_from_the_apu`, `amd_061_the_mix_of_a_game_without_expansion_audio_is_unchanged` | `clip` is on the APU's per-cycle path for **every** game: it is now one `sub` and one clamp where it was one `add` and one clamp — **the same three instructions**, the upper arm being unreachable once `M` is subtracted | every MMC5 title (the sign of its contribution); no other game, where `M` is 0 and `S` is still `A` |
+| AMD-061 §6.3 (240 Hz length counter) | `mmc5_audio.rs:119-131` | `amd_061_the_length_counter_runs_at_240_hz_whatever_4017_holds` | none, and `Mmc5::on_cpu_cycle` is 6 instructions **shorter**: a field and a branch removed | MMC5 titles whose squares use the length counter |
+| AMD-061 §6.3 ($5010 read mode) | `mmc5.rs:433-450` (`cpu_read_override`), `mmc5_audio.rs:77-92` | `amd_061_read_mode_takes_the_pcm_level_from_a_read_of_8000_bfff`, `amd_061_read_mode_raises_the_pcm_irq_on_a_byte_of_zero` | none for any other board: `Mmc5::rom_windows` already returns `NO_ROM_WINDOW` for all four windows, so MMC5 reads of $8000-$FFFF came through `cpu_read_override` already. `Board::cpu_read_override` is 50 instructions **smaller** | MMC5 titles that drive PCM from reads |
+| AMD-061 §6.3 (PCM IRQ on the CPU line) | `mmc5.rs:55-65` (`irq_line`), `:188-192` (`refresh_irq_line`) | `amd_061_the_pcm_irq_flag_pulls_the_cpu_irq_line`, `amd_061_the_pcm_irq_needs_bit_7_of_5010_to_reach_the_cpu` | `Board::irq_asserted` is on the CPU's per-cycle interrupt check for every board: the line is **latched in a field**, so the MMC5 arm stays one `movzbl` like the other 25 and the function is 24 instructions where it was 25 | MMC5 titles enabling the PCM IRQ |
+| AMD-061 §6.4 (levels) | `mixer.rs:137-142` (`MMC5_PCM_TABLE`), `mmc5_audio.rs:69-75` | `amd_061_the_squares_contribute_the_opposite_of_the_apu_pulses`, `amd_061_the_pcm_channel_follows_the_dmc_curve_over_a_full_byte` | none: the change is inside `Mmc5Audio::output`, which only an MMC5 cartridge reaches, and it is 8 instructions **shorter** (`Mmc5::expansion_audio_output` 56 → 48) | **every MMC5 title**: both the square and the PCM levels move. See Q-115 |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -281,3 +287,134 @@ registers in the same order. A state written before this lot loads unchanged.
 
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: **561 passed** (the two new ones), 0 failed, 11 ignored.
+
+## Step 3 — AMD-061 §6, the MMC5 audio
+
+Six changes, every one of them a divergence the amendment withdraws. The board's own files are
+`apu/mmc5_audio.rs` and `apu/mmc5_pulse_channel.rs`; `apu/mixer.rs` and
+`cartridges/mappers/mmc5.rs` are shared, and the paragraphs below say what that cost.
+
+### §6.1 — no cut below period 8
+
+"Frequency values less than 8 do not silence the MMC5 pulse channels; they can output ultrasonic
+frequencies" (nesdev, "MMC5 audio"). The test drops out of `Mmc5PulseChannel::output`, which is a
+**separate type** from `PulseChannel`: the APU's own pulses keep their cut, and nothing on their
+per-cycle path moves. That separation already existed for the sweep unit, and this is now its
+second reason.
+
+### §6.2 — reversed polarity and the signed clip
+
+"The polarity of all MMC5 channels is reversed compared to the APU", so `S = A − M` with `M` a
+positive quantity, clipped to `-32 768..=32 767`.
+
+**This is the one change on a path every game runs, and it costs nothing.** `mixer::clip` was
+`min(A + M, 32767)`: an `add`, a `cmp` and a `cmov`. It is now `max(A − M, -32768)`: a `sub`, a
+`cmp` and a `cmov`. The upper arm is *gone, not skipped*: `A` is two table entries that total at
+most 32 767 and `M` is non-negative, so `A − M ≤ 32 767` for every pair the mixer can produce,
+and emitting the test would be dead code. A game without expansion audio has `M = 0`, so `S` is
+`A` exactly as before, and `amd_061_the_mix_of_a_game_without_expansion_audio_is_unchanged` pins
+it.
+
+### §6.3 — the three AMD-054 divergences on the MMC5, withdrawn
+
+- **The length counters go to 240 Hz**, the envelope's own cadence ("Length counter operates
+  twice as fast as the APU length counter"; both "fixed to a 240Hz update rate"). The
+  `length_turn` field that used to select every other clock is **removed**, so
+  `Mmc5::on_cpu_cycle` is six instructions shorter than before.
+- **The read mode of $5010 is emulated.** A CPU read of $8000-$BFFF feeds the byte to the PCM
+  level, and a byte of 0 raises the PCM IRQ flag instead. The hook costs no other board anything,
+  because `Mmc5::rom_windows` already answers `NO_ROM_WINDOW` for all four windows (the board
+  decodes its own PRG), so every MMC5 read of $8000-$FFFF already came through
+  `Mapper::cpu_read_override` rather than through `Cartridge::read_rom_window`'s fast path. Out
+  of read mode the guard is one bool test, on the MMC5's own path.
+- **The PCM IRQ drives the CPU's /IRQ line**, `Cart /IRQ line = NOT(irqTrip AND irqEnable)`, and
+  the read of $5010 that acknowledges the flag releases it.
+
+### §6.4 — the levels, and why Mesen was not needed
+
+`M = r(K · P(q1 + q2)) + r(K · T(pcm))`, on the APU's own two curves and its own `K`. The 8 000
+and the 31 of AMD-054 are gone, with `MMC5_FULL_SCALE`, `MMC5_PCM_STEP`, `MMC5_NORMALISATION` and
+`MMC5_PULSE_TABLE`.
+
+§6.4 says to take Mesen 2's PCM ratio *if the public documentation fixes none*. **It fixes one**,
+so Mesen's is not used:
+
+> the PCM channel is equivalent in volume to the APU with equivalent input, and inverted, but
+> using the extra high bit of input it can become twice as loud
+
+"The APU with equivalent input" is the DMC, whose level enters `T`; "the extra high bit" is the
+eighth bit of $5011, which the seven-bit DMC has not got. So the PCM channel reads `T` over a
+whole byte — `MMC5_PCM_TABLE`, whose first 203 entries are `TND_TABLE` itself and whose 53 others
+are that eighth bit. No new constant, no fitted ratio.
+
+**§6.4 and §6.5 contradict each other, and Q-115 carries it.** §6.4's parenthesis says `P` is
+"appliquée voie par voie", which gives 4 890 + 4 890 = 9 780 for two squares at volume 15; §6.5's
+second criterion asks for the 8 462 that two APU pulses give, which is `P` on the summed index.
+The criteria are what the amendment declares normative, and one shared index is also what
+"equivalent in volume to the corresponding APU channels" means for a *pair* of APU pulses, so the
+fix evaluates `P` once on `q1 + q2`. The ticket also records that **Mesen satisfies neither**
+criterion — its board mix is linear, `-(sq1 + sq2 + pcm)` then `× 43`, calibrated so that *two*
+squares match two APU pulses and leaving *one* square 13 % low — so it could not have been the
+oracle here anyway; and it asks what a $5011 write should do in read mode, where the amendment
+leaves AMD-054's clause unamended and Mesen ignores the write.
+
+### §6.5 — the criteria
+
+`mmc5_audio_tests.rs` is rewritten to them. AMD-054's `req_core_075_the_board_produces_the_documented_integers`
+(4 623 / 8 000 / 3 968) and `req_core_075_the_board_table_is_the_pulse_function_scaled_to_eight_thousand`
+are gone, and in their place: the squares' two equalities with the APU's pulses, the PCM channel's
+identity with the DMC's curve, a square of period 4 (and 0, 1 and 7) still audible with the APU's
+own pulse still muted beside it, the subtraction and its floor, the 240 Hz length counter under
+each of `$4017` = $00 / $80 / $C0, and the two IRQ paths. The envelope cadence test (15 to 0 in
+15 × 1/240 s ± 5 %) is maintained as §6.5 requires, unchanged.
+
+### The second instance of step 0's trap, caught by the same measure
+
+`Mmc5::irq_asserted` was first written as `(irq_pending && irq_enabled) || audio.irq_asserted()`.
+That reads four bytes and branches, where the other twenty-five arms of `Board::irq_asserted` are
+a single `movzbl` each, and it grew that function from 25 to 32 instructions — enough to change
+the inliner's mind inside `Cpu6502::step`, which went from 244 instructions to 1 331 as `execute`,
+`resolve`, `pull`, `push` and `indexed` were folded into it and `end_cycle` was pushed out. That
+is on **every game's** per-instruction path.
+
+The board therefore **latches its /IRQ line** in one `bool`, `Mmc5::irq_line`, refreshed by
+`refresh_irq_line` wherever one of its four inputs moves: the $5204 write, the $5204 read, the
+$5010/$5015 read, the read-mode feed, a sound-register write, the scanline IRQ, `reset` and
+`load_registers`. That is also closer to the hardware, which has one line and not a disjunction.
+With it, no symbol appears or disappears against step 0's build, `Board::irq_asserted` is **24**
+instructions where it was 25, and every CPU function is slightly *smaller* (`step` 244 → 240,
+`execute` 2 720 → 2 674, `resolve` 1 279 → 1 251, `branch` 345 → 339).
+
+### What else moved, and what did not
+
+| symbol | step 0 | step 3 | why |
+| --- | --- | --- | --- |
+| `Board::ppu_peek` / `ppu_read` | 240 / 241 | 240 / 241 | untouched |
+| `Board::try_read_prg` | 155 | 155 | untouched |
+| `Board::irq_asserted` | 25 | **24** | the MMC5 arm is one load like the rest |
+| `Board::cpu_read_override` | 125 | **75** | the MMC5 arm went out of line |
+| `Board::on_ppu_scanline` | 36 | 44 | the MMC5 arm only; the non-MMC5 path is the same `movzbl` / `cmpb` / `ja` |
+| `Ppu2C02::step_dot` | 1401 | 1409 | the inlined MMC5 scanline arm, behind that same tag check |
+| `Mmc5::on_cpu_cycle` | 114 | **108** | `length_turn` gone |
+| `Mmc5::expansion_audio_output` | 56 | **48** | one table read instead of a table read and a multiply |
+
+### Save states
+
+**No format version bump.** `Mmc5Audio` lost `length_turn` and `Mmc5` gained `irq_line`, and
+neither moves the block:
+
+- the byte `length_turn` occupied is still written and still read, as a reserved `false`, so the
+  layout is identical in both directions — a state written now still loads on a pre-MF-2 build,
+  which would read it as a `length_turn` that no longer matters;
+- `irq_line` and `background_uses_set_b` are **derived**, so `save_registers` does not write them
+  and `load_registers` recomputes both from registers the block already carries.
+
+`req_core_090_the_board_sound_survives_a_savestate_round_trip` and
+`req_core_091_a_block_written_before_the_board_sound_still_loads` both pass unchanged.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **566 passed**, 0 failed, 11 ignored.
+`cargo check --workspace --exclude zax-app --all-targets` clean, so removing the four MMC5 mixer
+constants breaks no other crate.

@@ -13,22 +13,24 @@ pub const ENVELOPE_CYCLES: i32 = 7458;
 /// points the page leaves open or where the reference differs.
 ///
 /// **No frame sequencer.** The board has no equivalent of the APU's frame counter: the envelopes
-/// of its two squares are clocked at a fixed cadence of about 240 Hz, every [`ENVELOPE_CYCLES`]
-/// CPU cycles, and their length counters every other time, so at about 120 Hz. Neither follows
-/// `$4017`, which is the difference a game would hear if the APU's sequencer were reused — hence
-/// the dedicated divider below. The public documentation gives the length counters 240 Hz as
-/// well; REQ-CORE-075 asks for 120 Hz, which is the reference's, and records the divergence.
+/// of its two squares *and* their length counters are clocked together at a fixed cadence of
+/// about 240 Hz, every [`ENVELOPE_CYCLES`] CPU cycles. Neither follows `$4017`, which is the
+/// difference a game would hear if the APU's sequencer were reused — hence the dedicated divider
+/// below. AMD-061 §6.3 withdraws AMD-054's 120 Hz divergence on the length counters: "Length
+/// counter operates twice as fast as the APU length counter" and both are "fixed to a 240Hz
+/// update rate" (nesdev, "MMC5 audio").
 ///
-/// **PCM channel.** Write mode only. A non-zero write to $5011 sets the level; a write of 0
-/// leaves the level alone and raises the PCM IRQ flag instead. Reading $5010 returns that flag
-/// in bit 7 and clears it. The flag never pulls the CPU's /IRQ line — REQ-CORE-075 records that
-/// as a divergence too, and it is what keeps a game that enables the IRQ from looping in a
-/// handler the spec gives no other way out of. The read mode of $5010 (bit 0 set), where reads
-/// of $8000-$BFFF feed the converter, is not emulated: the level simply stays at the last value
-/// written.
+/// **PCM channel.** Both modes, selected by bit 0 of $5010 (AMD-061 §6.3). In write mode a
+/// non-zero write to $5011 sets the level and a write of 0 leaves the level alone and raises the
+/// PCM IRQ flag; in read mode a CPU read of $8000-$BFFF puts the byte read into the level, and a
+/// byte of 0 raises the flag. Reading $5010 returns the flag in bit 7 and acknowledges it. When
+/// bit 7 of $5010 allows it, the flag **drives the CPU's /IRQ line**: nesdev's own pseudocode is
+/// `Cart /IRQ line = NOT(irqTrip AND irqEnable)`, and §6.3 withdraws AMD-054's divergence that
+/// had it drive nothing.
 ///
-/// **Output.** `M = r(Km · P(q1 + q2)) + 31 · pcm`, which the APU adds to its own `A` before the
-/// sum is clipped to 32 767 (REQ-CORE-073).
+/// **Output.** `M = r(K · P(q1 + q2)) + r(K · T(pcm))`, on the APU's own two curves and its own
+/// `K` (AMD-061 §6.4); the APU **subtracts** it from its `A`, because the board's polarity is
+/// reversed (§6.2). See [`mixer`] for both.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)] // Mirrors the board's independent hardware flags.
 pub(crate) struct Mmc5Audio {
@@ -38,11 +40,6 @@ pub(crate) struct Mmc5Audio {
     cycles: i64,
     half_rate: bool,
     divider: i32,
-    /// Whether the next envelope clock also clocks the length counters. It starts `true` so
-    /// that the first one does **not**: the counters then fall on the even envelope clocks,
-    /// every 2 x [`ENVELOPE_CYCLES`] cycles from power-on, which is the phase the APU's own
-    /// half-frame signal has relative to its quarter-frame signal.
-    length_turn: bool,
 
     pcm: u8,
     read_mode: bool,
@@ -53,19 +50,52 @@ pub(crate) struct Mmc5Audio {
 impl Mmc5Audio {
     /// A board's sound at power-on, silent (REQ-CORE-004).
     pub fn new() -> Self {
-        Self {
-            length_turn: true,
-            ..Self::default()
+        Self::default()
+    }
+
+    /// `M` of REQ-CORE-073: the board's output in the mixer's integer units, a **positive**
+    /// quantity the APU subtracts (REQ-CORE-075 as amended by AMD-061 §6.2 and §6.4).
+    ///
+    /// The two squares read the APU's own pulse table on their own summed index, so one of them
+    /// at volume 15 contributes what one APU pulse at volume 15 does and the two of them what
+    /// two APU pulses do (§6.5's first two criteria); the PCM level reads the APU's own
+    /// triangle/noise/DMC table, which is the DMC's curve, over a full byte.
+    ///
+    /// Q-115: §6.4's parenthesis says the pulse table is "appliquée voie par voie", which would
+    /// give 9 780 for two squares at volume 15 where §6.5's second criterion asks for 8 462.
+    /// The criteria win — they are what the amendment declares normative, and one index shared
+    /// by both squares is what "equivalent in volume to the corresponding APU channels" means
+    /// for a pair of APU pulses. The ticket carries the contradiction.
+    pub fn output(&self) -> i32 {
+        let index = self.pulse1.output() + self.pulse2.output();
+        mixer::PULSE_TABLE[usize::try_from(index)
+            .unwrap_or(0)
+            .min(mixer::PULSE_INDEX_MAX)]
+            + mixer::MMC5_PCM_TABLE[usize::from(self.pcm)]
+    }
+
+    /// Whether $5010 put the PCM channel in read mode, where the board takes its level from the
+    /// CPU's reads of $8000-$BFFF instead of from writes to $5011 (AMD-061 §6.3).
+    pub const fn pcm_read_mode(&self) -> bool {
+        self.read_mode
+    }
+
+    /// Feeds the PCM channel the byte a CPU read of $8000-$BFFF put on the bus, which read mode
+    /// turns into the level; a byte of 0 raises the PCM IRQ flag instead, exactly as a write of
+    /// 0 does in write mode (AMD-061 §6.3).
+    pub fn feed_pcm_read(&mut self, value: u8) {
+        if value == 0 {
+            self.irq_flag = true;
+        } else {
+            self.pcm = value;
         }
     }
 
-    /// `M` of REQ-CORE-073: the board's output in the mixer's integer units (REQ-CORE-075).
-    pub fn output(&self) -> i32 {
-        let index = self.pulse1.output() + self.pulse2.output();
-        mixer::MMC5_PULSE_TABLE[usize::try_from(index)
-            .unwrap_or(0)
-            .min(mixer::PULSE_INDEX_MAX)]
-            + (mixer::MMC5_PCM_STEP * i32::from(self.pcm))
+    /// Whether the PCM IRQ is pulling the CPU's /IRQ line: nesdev's
+    /// `Cart /IRQ line = NOT(irqTrip AND irqEnable)` (AMD-061 §6.3, which withdraws AMD-054's
+    /// divergence that had the flag drive nothing).
+    pub const fn irq_asserted(&self) -> bool {
+        self.irq_flag && self.irq_enabled
     }
 
     /// Back to the power-on state, silent (REQ-CORE-004).
@@ -91,15 +121,13 @@ impl Mmc5Audio {
             return;
         }
 
+        // AMD-061 §6.3: the length counters are clocked on *every* envelope clock, at the same
+        // 240 Hz, where AMD-054 clocked them every other one at 120 Hz.
         self.divider = 0;
         self.pulse1.envelope.clock();
         self.pulse2.envelope.clock();
-
-        self.length_turn = !self.length_turn;
-        if self.length_turn {
-            self.pulse1.length.clock(self.cycles);
-            self.pulse2.length.clock(self.cycles);
-        }
+        self.pulse1.length.clock(self.cycles);
+        self.pulse2.length.clock(self.cycles);
     }
 
     /// Writes one of the board's sound registers, $5000 to $5015.
@@ -113,7 +141,13 @@ impl Mmc5Audio {
             }
             0x5011 => {
                 // A write of 0 does not change the level; it raises the PCM IRQ flag
-                // (REQ-CORE-075). Writes keep working in read mode, which is not emulated.
+                // (REQ-CORE-075).
+                //
+                // Q-115: AMD-061 §6.3 adds the read mode but leaves this clause of AMD-054
+                // unamended, so the write still takes even in read mode. Mesen ignores it there
+                // (`if(!_pcmReadMode)`), which is probably closer to the hardware; no known game
+                // writes $5011 while in read mode, so the ticket records the choice rather than
+                // guessing against the requirement's own words.
                 if value == 0 {
                     self.irq_flag = true;
                 } else {
@@ -161,7 +195,11 @@ impl Mmc5Audio {
         writer.write_i64(self.cycles);
         writer.write_bool(self.half_rate);
         writer.write_i32(self.divider);
-        writer.write_bool(self.length_turn);
+        // Reserved. AMD-061 §6.3 put the length counters on the envelope's own 240 Hz, so the
+        // `length_turn` flag that used to pick every other clock is gone; its byte is kept so
+        // that the block layout — and with it the savestate format version — does not move, in
+        // either direction (REQ-CORE-091).
+        writer.write_bool(false);
         writer.write_u8(self.pcm);
         writer.write_bool(self.read_mode);
         writer.write_bool(self.irq_enabled);
@@ -179,7 +217,7 @@ impl Mmc5Audio {
         self.cycles = reader.read_i64()?;
         self.half_rate = reader.read_bool()?;
         self.divider = reader.read_i32()?;
-        self.length_turn = reader.read_bool()?;
+        reader.read_bool()?; // The reserved byte; see `save_state`.
         self.pcm = reader.read_u8()?;
         self.read_mode = reader.read_bool()?;
         self.irq_enabled = reader.read_bool()?;

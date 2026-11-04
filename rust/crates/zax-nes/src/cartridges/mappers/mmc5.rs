@@ -52,6 +52,17 @@ pub struct Mmc5 {
     irq_target: i32,
     irq_enabled: bool,
     irq_pending: bool,
+    /// The board's single /IRQ line, latched rather than recomputed on every read: both the
+    /// scanline IRQ of $5203/$5204 and the PCM IRQ of $5010 pull it (AMD-061 §6.3).
+    ///
+    /// It is a field, and `irq_asserted` is one load of it, because that method sits on the
+    /// CPU's per-cycle interrupt check for **every** board. `Board::irq_asserted` is a jump
+    /// table whose other twenty-five arms are a single `movzbl` each; an arm that instead read
+    /// four bytes and branched grew the function by seven instructions, which was enough to
+    /// change the inliner's mind inside `Cpu6502::step` and move work onto every game's
+    /// per-instruction path. See `docs/progress/MF-2.md`, step 0, for the same trap on the CHR
+    /// path, and [`Mmc5::refresh_irq_line`] for the five places this is kept up to date.
+    irq_line: bool,
     in_frame: bool,
     scanline_counter: i32,
     multiplicand: u8,
@@ -88,6 +99,7 @@ impl Mmc5 {
             irq_target: 0,
             irq_enabled: false,
             irq_pending: false,
+            irq_line: false,
             in_frame: false,
             scanline_counter: 0,
             multiplicand: 0,
@@ -137,7 +149,10 @@ impl Mmc5 {
             }
             0x5130 => self.chr_upper = v & 0x03,
             0x5203 => self.irq_target = v,
-            0x5204 => self.irq_enabled = value & 0x80 != 0,
+            0x5204 => {
+                self.irq_enabled = value & 0x80 != 0;
+                self.refresh_irq_line();
+            }
             0x5205 => self.multiplicand = value,
             0x5206 => self.multiplier = value,
             _ => {}
@@ -178,6 +193,12 @@ impl Mmc5 {
                 self.banks.map_prg_ram_8k(slot + i, (first + step) & 0x07);
             }
         }
+    }
+
+    /// Recomputes [`Mmc5::irq_line`] from its four inputs: the scanline IRQ's flag and enable,
+    /// and the PCM IRQ's. Called wherever one of them moves, never on a CPU cycle.
+    fn refresh_irq_line(&mut self) {
+        self.irq_line = (self.irq_pending && self.irq_enabled) || self.audio.irq_asserted();
     }
 
     /// Recomputes [`Mmc5::background_uses_set_b`] from the three inputs MR-5-1 names. Called
@@ -332,8 +353,10 @@ impl Mapper for Mmc5 {
             // after a reset, and the game's next write to $5000-$5015 sets it up again.
             self.audio.reset();
         }
-        // Derived from the three bools just read, so no older block has to carry it.
+        // Both are derived from registers the block already carries, so no older block has to
+        // carry them and no format version moves.
         self.refresh_background_chr_set();
+        self.refresh_irq_line();
         Ok(())
     }
 
@@ -349,8 +372,11 @@ impl Mapper for Mmc5 {
         5
     }
 
+    /// The scanline IRQ of $5203/$5204, and — since AMD-061 §6.3 — the PCM IRQ of $5010 as
+    /// well: nesdev gives the board one /IRQ line, `NOT(irqTrip AND irqEnable)`, and both
+    /// sources pull it. Latched in [`Mmc5::irq_line`], which that field's comment explains.
     fn irq_asserted(&self) -> bool {
-        self.irq_pending && self.irq_enabled
+        self.irq_line
     }
 
     fn ppu_irq_horizon(&self) -> Option<i64> {
@@ -403,6 +429,7 @@ impl Mapper for Mmc5 {
         self.irq_target = 0;
         self.irq_enabled = false;
         self.irq_pending = false;
+        self.irq_line = false;
         self.in_frame = false;
         self.scanline_counter = 0;
         self.multiplicand = 0;
@@ -416,11 +443,35 @@ impl Mapper for Mmc5 {
             0x5204 => {
                 let value = self.status();
                 self.irq_pending = false;
+                self.refresh_irq_line();
                 Some(Some(value))
             }
             // Reading $5010 acknowledges the PCM IRQ flag (REQ-CORE-075), so the host
             // accessor must not take this path (REQ-CORE-081).
-            0x5010 | 0x5015 => Some(self.audio.read(address)),
+            0x5010 | 0x5015 => {
+                let value = self.audio.read(address);
+                self.refresh_irq_line();
+                Some(value)
+            }
+            // AMD-061 §6.3, the read mode of $5010: "une lecture CPU dans $8000-$BFFF place
+            // l'octet lu dans le niveau PCM ; une lecture de valeur 0 lève le drapeau d'IRQ
+            // PCM". The byte is the one the board would have driven anyway, so the read is
+            // answered exactly as before and only observed on the way past.
+            //
+            // This costs no other board anything, and the MMC5 nothing it was not already
+            // paying: `Mmc5::rom_windows` returns `NO_ROM_WINDOW` for all four windows, so
+            // every MMC5 read of $8000-$FFFF already came through here rather than through
+            // `Cartridge::read_rom_window`. Out of read mode — which is every MMC5 game that
+            // does not drive PCM from reads — the guard is one bool test on that path.
+            0x8000..=0xBFFF if self.audio.pcm_read_mode() => {
+                let value = self.try_read_prg(memory, address);
+                if let Some(byte) = value {
+                    self.audio.feed_pcm_read(byte);
+                    self.refresh_irq_line();
+                }
+
+                Some(value)
+            }
             _ => self.cpu_peek_override(memory, address),
         }
     }
@@ -462,6 +513,7 @@ impl Mapper for Mmc5 {
         if (0x5000..=0x5015).contains(&address) {
             // The board's own sound registers (REQ-CORE-075).
             self.audio.write(address, value);
+            self.refresh_irq_line();
             return true;
         }
 
@@ -554,6 +606,7 @@ impl Mapper for Mmc5 {
         // "Value $00 is a special case that will not produce IRQ pending conditions" ($5203).
         if self.irq_target != 0 && self.scanline_counter == self.irq_target {
             self.irq_pending = true;
+            self.refresh_irq_line();
         }
     }
 
