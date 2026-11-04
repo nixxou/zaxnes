@@ -27,14 +27,15 @@ pub struct Mmc3 {
 impl Mmc3 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         let header = memory.rom().header();
+        let is_mmc6 = header.is_nes20 && header.submapper == 1;
         Self {
             banks: windows_for(memory),
             a12: A12Watcher::new(),
             bank: [0; 8],
-            is_mmc6: header.is_nes20 && header.submapper == 1,
+            is_mmc6,
             four_screen: header.mirroring == NametableMirroring::FourScreen,
             select: 0,
-            protect: 0x80,
+            protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,
             irq_counter: 0,
             irq_reload: false,
@@ -43,16 +44,44 @@ impl Mmc3 {
         }
     }
 
-    fn mmc6_offset(memory: &CartridgeMemory, address: u16) -> usize {
-        usize::from(address & 0x03FF) % memory.prg_ram().len()
+    /// The power-on $A001.
+    ///
+    /// MR-4-5: the MMC3's is not documented, and enabled-and-writable is the only value that
+    /// lets a game, or blargg's MMC3 test ROMs which never write $A001, use the RAM out of a
+    /// cold start. The MMC6's *is* documented: $8000 powers on at 0, so the RAM is disabled,
+    /// so the chip holds $A001 at $00 (MR-4-7) and no half is readable or writable yet.
+    const fn power_on_protect(is_mmc6: bool) -> u8 {
+        if is_mmc6 {
+            0x00
+        } else {
+            0x80
+        }
     }
 
+    /// MR-4-6: the MMC6's own PRG-RAM, "1 KB PRG RAM, mirrored" over $7000-$7FFF. The size is
+    /// settled at load by `registry::board_memory_sizes`, so the address mask alone is the
+    /// offset and no division is left on the access path.
+    pub(crate) const MMC6_PRG_RAM_SIZE: usize = 0x0400;
+
+    fn mmc6_offset(address: u16) -> usize {
+        usize::from(address & 0x03FF)
+    }
+
+    /// $A001 of an MMC6 is `HhLl xxxx` (nesdev, "MMC6"): bit 4 enables writing and bit 5
+    /// reading the $7000-$71FF half, bit 6 writing and bit 7 reading the $7200-$73FF half
+    /// (MR-4-1 — we had each pair the other way round).
     fn mmc6_half_readable(&self, address: u16) -> bool {
-        self.protect & if address & 0x0200 != 0 { 0x40 } else { 0x10 } != 0
+        self.protect & if address & 0x0200 != 0 { 0x80 } else { 0x20 } != 0
     }
 
     fn mmc6_half_writable(&self, address: u16) -> bool {
-        self.protect & if address & 0x0200 != 0 { 0x80 } else { 0x20 } != 0
+        self.protect & if address & 0x0200 != 0 { 0x40 } else { 0x10 } != 0
+    }
+
+    /// Whether either half answers a read, which is what decides between a value and open bus
+    /// on this window (MR-4-8).
+    const fn mmc6_any_half_readable(&self) -> bool {
+        self.protect & 0xA0 != 0
     }
 
     fn update_banks(&mut self) {
@@ -178,6 +207,10 @@ impl Mapper for Mmc3 {
         }
     }
 
+    /// The MMC3's reading of $A001: bit 7 enables the RAM, bit 6 write-protects it. An MMC6
+    /// never gets here — it decodes the whole of $6000-$7FFF itself in `intercept_cpu_write`,
+    /// half by half, so the generic PRG-RAM path is unreachable on that chip — which is why
+    /// bit 6 keeps its MMC3 meaning here and not the MMC6's "enable writing the high half".
     fn prg_ram_writable(&self) -> bool {
         self.prg_ram_enabled() && self.protect & 0x40 == 0
     }
@@ -186,10 +219,7 @@ impl Mapper for Mmc3 {
         self.bank = [0; 8];
         self.bank[7] = 1;
         self.select = 0;
-        // The power-on value of $A001 is not documented; PRG-RAM enabled and writable is the
-        // only choice that lets a game, or blargg's MMC3 test ROMs which never write $A001,
-        // use the RAM out of a cold start.
-        self.protect = 0x80;
+        self.protect = Self::power_on_protect(self.is_mmc6);
         self.irq_latch = 0;
         self.irq_counter = 0;
         self.irq_reload = false;
@@ -204,12 +234,16 @@ impl Mapper for Mmc3 {
             return None;
         }
 
-        if address < 0x7000 || !self.prg_ram_enabled() {
-            return Some((address >= 0x7000).then_some(0));
+        // $6000-$6FFF is not decoded on this board, and MR-4-8, nesdev ("MMC6"): "If neither
+        // bank is enabled for reading, the $7000-$7FFF area is open bus." The RAM being
+        // disabled through $8000 holds $A001 at zero (MR-4-7), so it is the same case.
+        if address < 0x7000 || !self.prg_ram_enabled() || !self.mmc6_any_half_readable() {
+            return Some(None);
         }
 
+        // "If only one bank is enabled for reading, the other reads back as zero."
         Some(Some(if self.mmc6_half_readable(address) {
-            memory.prg_ram()[Self::mmc6_offset(memory, address)]
+            memory.prg_ram()[Self::mmc6_offset(address)]
         } else {
             0
         }))
@@ -226,7 +260,7 @@ impl Mapper for Mmc3 {
         }
 
         if address >= 0x7000 && self.prg_ram_enabled() && self.mmc6_half_writable(address) {
-            let offset = Self::mmc6_offset(memory, address);
+            let offset = Self::mmc6_offset(address);
             memory.prg_ram_mut()[offset] = value;
         }
 
@@ -256,7 +290,14 @@ impl Mapper for Mmc3 {
                     });
                 }
             }
-            0xA001 => self.protect = value,
+            // MR-4-7, nesdev ("MMC6"): "When PRG RAM is disabled via $8000, the mapper
+            // continuously sets $A001 to $00, and so all writes to $A001 are ignored." The
+            // MMC3 proper has no such gate.
+            0xA001 => {
+                if !self.is_mmc6 || self.select & 0x20 != 0 {
+                    self.protect = value;
+                }
+            }
             0xC000 => self.irq_latch = value,
             0xC001 => {
                 self.irq_counter = 0;

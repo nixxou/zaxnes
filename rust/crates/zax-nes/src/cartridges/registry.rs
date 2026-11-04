@@ -13,6 +13,7 @@ use super::mappers::{
     Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{Board, CartridgeMemory};
+use crate::rom::InesHeader;
 
 /// Mapper numbers this build can run, in ascending order (REQ-CORE-102). 116 is optional in
 /// REQ-CORE-101 and not implemented.
@@ -27,13 +28,37 @@ pub fn is_supported(mapper: i32) -> bool {
     SUPPORTED_MAPPERS.contains(&mapper)
 }
 
-/// PRG-RAM the board of `mapper` needs at least, whatever the header says.
+/// The sizes the *board* dictates for the volatile memories, settled once at load time
+/// (REQ-CORE-100).
+///
+/// `prg_ram` and `chr_ram` are exact: the board carries that much RAM and the header cannot
+/// say otherwise. `min_prg_ram` is the floor for boards that bank *more* than the header's
+/// 8 KiB without fixing a size (MMC1 SOROM and SXROM, MMC5).
+// The three fields name the three memories; the `_ram` they share is the point.
+#[allow(clippy::struct_field_names)]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BoardMemorySizes {
+    pub prg_ram: Option<usize>,
+    pub chr_ram: Option<usize>,
+    pub min_prg_ram: usize,
+}
+
+/// The volatile-memory sizes of `mapper`'s board for `header`.
 #[must_use]
-pub(crate) const fn minimum_prg_ram_size(mapper: i32) -> usize {
-    if mapper == 5 {
-        Mmc5::MAX_PRG_RAM_SIZE
-    } else {
-        0
+pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemorySizes {
+    match mapper {
+        // MR-4-6, nesdev ("MMC6"): the chip "contains 1 KB of internal PRG RAM", at "CPU
+        // $7000-$7FFF: 1 KB PRG RAM, mirrored". The header of a StarTropics dump describes
+        // the 8 KiB every other mapper-4 board has.
+        4 if header.is_nes20 && header.submapper == 1 => BoardMemorySizes {
+            prg_ram: Some(Mmc3::MMC6_PRG_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        5 => BoardMemorySizes {
+            min_prg_ram: Mmc5::MAX_PRG_RAM_SIZE,
+            ..BoardMemorySizes::default()
+        },
+        _ => BoardMemorySizes::default(),
     }
 }
 

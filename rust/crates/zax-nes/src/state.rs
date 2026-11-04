@@ -444,6 +444,26 @@ impl<'a> StateReader<'a> {
         self.read_into(destination)
     }
 
+    /// Reads a length-prefixed blob into `destination` without requiring the stored length to
+    /// match: the bytes that fit are kept, any excess is dropped, and a shorter blob leaves
+    /// the tail of `destination` as it was.
+    ///
+    /// Only the cartridge's volatile memories use it, because their size depends on the board
+    /// and lot MF-1 cut three of them down to what the board really carries (MR-4-6: the
+    /// MMC6's 1 KiB of PRG-RAM; MR-13-1: CPROM's 16 KiB of CHR-RAM; MR-30-2: UNROM 512's
+    /// absent work RAM). A state written before that lot stores the header's larger blob for
+    /// those boards and has to stay loadable (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block holds fewer bytes than its own length prefix announces.
+    pub fn read_blob_prefix_into(&mut self, destination: &mut [u8]) -> Result<(), InvalidState> {
+        let count = self.read_usize()?;
+        let stored = self.read_raw(count)?;
+        let shared = count.min(destination.len());
+        destination[..shared].copy_from_slice(&stored[..shared]);
+        Ok(())
+    }
+
     /// Reads a length-prefixed blob as a new vector.
     ///
     /// # Errors

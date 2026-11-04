@@ -18,7 +18,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 ## Steps
 
 - [x] 1/10 — Caltron 6-in-1: MR-41-1, MR-41-2, MR-41-3
-- [ ] 2/10 — MMC6: MR-4-1, MR-4-7, MR-4-6, MR-4-8
+- [x] 2/10 — MMC6: MR-4-1, MR-4-7, MR-4-6, MR-4-8
 - [ ] 3/10 — RAMBO-1 PRG mode: MR-64-7
 - [ ] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
 - [ ] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
@@ -47,6 +47,11 @@ because a step cannot write its own commit hash.
 | MR-41-2 | `multicart.rs:267` (`outer & 0x20`) | `mr_41_2_caltron_mirroring_comes_from_address_bit_5` | Caltron 6-in-1 |
 | MR-41-3 | `multicart.rs:318` (gate on `outer & 0x04`) | `mr_41_3_caltron_inner_chr_is_gated_on_the_prg_bank` | Caltron 6-in-1 |
 
+| MR-4-1 | `mmc3.rs:63`, `:67` (the two masks swap) | `mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped` | StarTropics, Zoda's Revenge (their saves) |
+| MR-4-7 | `mmc3.rs:294` ($A001 gated on $8000 bit 5) | `mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled` | StarTropics, Zoda's Revenge |
+| MR-4-6 | `registry.rs:53` + `mmc3.rs:55` (1 KiB) | `mr_4_6_mmc6_carries_one_kib_of_prg_ram`, `mr_4_6_a_plain_mmc3_keeps_its_eight_kib` | StarTropics, Zoda's Revenge (battery-RAM and save-state size only) |
+| MR-4-8 | `mmc3.rs:236-243` (`Some(None)`) | `mr_4_8_mmc6_window_is_open_bus_when_no_half_is_readable` | none known |
+
 ### Step 1 notes
 
 - The outer register now keeps six address bits instead of five
@@ -58,3 +63,26 @@ because a step cannot write its own commit hash.
   the `..MC CPPP` one; it asserts the same windows as before. No other test touches mapper 41.
 - `SPEC-02-coeur-nes.md:414` lists mapper 41 with an empty behaviour column, so REQ-CORE-100's
   "comportement documenté sur nesdev" governs and no Q ticket is needed.
+
+### Step 2 notes
+
+- **The per-board RAM-size hook.** `registry::board_memory_sizes(mapper, header)` replaces
+  `minimum_prg_ram_size`: it returns an *exact* PRG-RAM or CHR-RAM size for a board whose RAM
+  the header cannot describe, and keeps the old floor for the MMC5. It is read once in
+  `CartridgeMemory::new`. This is MR-1's shared-infrastructure item 2, and step 9's MR-13-1
+  and MR-30-2 reuse it.
+- **Save states.** The MMC6's PRG-RAM goes from 8 KiB to 1 KiB, so a state written before this
+  lot stores a larger blob than the board now holds. `Cartridge::load_state` therefore reads
+  its two memory blobs with the new `StateReader::read_blob_prefix_into` (`state.rs:447`)
+  instead of `read_blob_into`: the prefix that fits is kept and the excess dropped, in both
+  directions. Pinned by `mf_1_a_state_written_with_a_larger_board_ram_still_loads` and its
+  twin. No save-state version bump: no board gained a register.
+- **The MMC6 power-on $A001 is now 0**, not the MMC3's 0x80 (`Mmc3::power_on_protect`). MR-4-5
+  says the MMC6's value *is* documented — $8000 powers on at 0, so the RAM is disabled, so the
+  chip holds $A001 at $00 — and without this MR-4-7's gate would leave 0x80 standing as "high
+  half readable" the moment a game enabled the RAM. The MMC3 proper keeps 0x80 and its
+  rationale.
+- `mmc6_offset` lost its `% memory.prg_ram().len()`: on a 1 KiB allocation the mask is the
+  offset. That is one division *removed* from the MMC6 access path, as MR-4-6 predicted.
+- MR-4-1 and MR-4-8 move no byte any other board reads: both functions are behind
+  `self.is_mmc6`, which is a load-time field.

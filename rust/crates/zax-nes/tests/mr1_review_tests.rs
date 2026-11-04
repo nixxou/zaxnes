@@ -335,7 +335,6 @@ fn mr_1_4_mmc1_submapper_5_has_fixed_prg() {
 /// Observed by storing a byte with both bits set, then clearing the one that is really the
 /// write enable: the byte must still read back.
 #[test]
-#[ignore = "MR-1: MR-4-1"]
 fn mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped() {
     let mut core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
 
@@ -369,7 +368,6 @@ fn mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped() {
 /// to $00, and so all writes to $A001 are ignored." We store the value unconditionally
 /// (`mmc3.rs:259`), so it takes effect as soon as the game sets bit 5 of $8000.
 #[test]
-#[ignore = "MR-1b: MR-4-7"]
 fn mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled() {
     let mut core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
 
@@ -384,6 +382,88 @@ fn mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled() {
         core.read_memory(0x7000),
         "an $A001 written while the RAM was disabled must not grant access"
     );
+}
+
+/// MR-4-6. The MMC6 "contains 1 KB of internal PRG RAM", at "CPU $7000-$7FFF: 1 KB PRG RAM,
+/// mirrored" (nesdev, "MMC6"); Mesen's `GetSaveRamSize() = 0x400` is the same number. We took
+/// the header's 8 KiB, which changed no byte a game could read — `mmc6_offset` masks with
+/// `0x03FF` — but exposed and saved eight times the cartridge's RAM.
+///
+/// MR-1b called this test missing for want of a per-board RAM-size hook; the hook is
+/// `registry::board_memory_sizes`, added with this fix.
+#[test]
+fn mr_4_6_mmc6_carries_one_kib_of_prg_ram() {
+    let core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
+
+    assert_eq!(
+        0x0400,
+        core.cartridge().unwrap().memory().prg_ram().len(),
+        "the MMC6 carries 1 KiB of internal PRG RAM"
+    );
+}
+
+/// A plain MMC3 keeps the header's 8 KiB: the fix of MR-4-6 must not reach it.
+#[test]
+fn mr_4_6_a_plain_mmc3_keeps_its_eight_kib() {
+    let core = MapperRom::new(4).prg(8).chr(16).load();
+
+    assert_eq!(0x2000, core.cartridge().unwrap().memory().prg_ram().len());
+}
+
+/// The save-state guarantee the MR-4-6 family of fixes needs: a blob written when the board's
+/// RAM was larger still loads into the smaller one. MR-4-6 (MMC6, 8 KiB -> 1 KiB), MR-13-1
+/// (CPROM, 32 KiB -> 16 KiB of CHR-RAM) and MR-30-2 (UNROM 512, 8 KiB -> none) all shrink a
+/// memory `Cartridge::save_state` writes as a length-prefixed blob.
+#[test]
+fn mf_1_a_state_written_with_a_larger_board_ram_still_loads() {
+    let mut writer = zax_nes::state::StateWriter::with_capacity(0x2000);
+    writer.write_blob(&vec![0x5A; 0x2000]);
+    let bytes = writer.into_vec();
+
+    let mut reader = zax_nes::state::StateReader::new(&bytes, 0).unwrap();
+    let mut smaller = vec![0u8; 0x0400];
+    reader.read_blob_prefix_into(&mut smaller).unwrap();
+
+    assert_eq!(vec![0x5A; 0x0400], smaller, "the prefix that fits is kept");
+}
+
+/// And the other way round: a blob written when the RAM was *smaller* leaves the rest of the
+/// larger one at its power-on value.
+#[test]
+fn mf_1_a_state_written_with_a_smaller_board_ram_still_loads() {
+    let mut writer = zax_nes::state::StateWriter::with_capacity(0x0400);
+    writer.write_blob(&vec![0x5A; 0x0400]);
+    let bytes = writer.into_vec();
+
+    let mut larger = vec![0u8; 0x2000];
+    let mut reader = zax_nes::state::StateReader::new(&bytes, 0).unwrap();
+    reader.read_blob_prefix_into(&mut larger).unwrap();
+
+    assert_eq!([0x5A, 0x5A], [larger[0], larger[0x03FF]]);
+    assert_eq!([0x00, 0x00], [larger[0x0400], larger[0x1FFF]]);
+}
+
+/// MR-4-8. nesdev ("MMC6"): "If neither bank is enabled for reading, the $7000-$7FFF area is
+/// open bus." We answered a driven `0` there. $6000-$6FFF, which the board does not decode at
+/// all, was already open bus.
+#[test]
+fn mr_4_8_mmc6_window_is_open_bus_when_no_half_is_readable() {
+    let mut core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
+
+    // RAM disabled: $A001 is held at $00, so neither half reads.
+    assert_eq!(None, core.cartridge().unwrap().try_cpu_peek(0x7000));
+    assert_eq!(None, core.cartridge().unwrap().try_cpu_peek(0x6000));
+
+    // RAM enabled, but $A001 still $00: still no readable half.
+    core.mapper_write(0x8000, 0x20);
+    assert_eq!(None, core.cartridge().unwrap().try_cpu_peek(0x7000));
+
+    // Only the high half readable ($A001 bit 7): it answers, and the low half "reads back as
+    // zero" rather than leaving the bus open.
+    core.mapper_write(0xA001, 0xC0);
+    core.write_memory(0x7200, 0x5A);
+    assert_eq!(Some(0x5A), core.cartridge().unwrap().try_cpu_peek(0x7200));
+    assert_eq!(Some(0x00), core.cartridge().unwrap().try_cpu_peek(0x7000));
 }
 
 // ================================================================ mapper 64, RAMBO-1

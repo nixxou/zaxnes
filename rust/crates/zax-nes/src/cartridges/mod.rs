@@ -46,16 +46,17 @@ pub struct CartridgeMemory {
 }
 
 impl CartridgeMemory {
-    /// Initialises the shared cartridge state from `rom`; `minimum_prg_ram_size` is for
-    /// boards that carry more than 8 KiB of PRG-RAM and bank it (MMC1 SOROM and SXROM,
-    /// MMC5).
-    fn new(rom: RomImage, minimum_prg_ram_size: usize) -> Self {
-        let prg_ram_size = rom
-            .header()
-            .prg_ram_size
-            .max(InesHeader::DEFAULT_PRG_RAM_SIZE)
-            .max(minimum_prg_ram_size);
-        let chr_ram_size = rom.header().chr_ram_size;
+    /// Initialises the shared cartridge state from `rom`, with the volatile-memory sizes the
+    /// board dictates (see [`registry::BoardMemorySizes`]): an exact size for a board whose
+    /// RAM the header cannot describe, a floor for one that banks more than 8 KiB.
+    fn new(rom: RomImage, sizes: registry::BoardMemorySizes) -> Self {
+        let prg_ram_size = sizes.prg_ram.unwrap_or_else(|| {
+            rom.header()
+                .prg_ram_size
+                .max(InesHeader::DEFAULT_PRG_RAM_SIZE)
+                .max(sizes.min_prg_ram)
+        });
+        let chr_ram_size = sizes.chr_ram.unwrap_or(rom.header().chr_ram_size);
         let mirroring = rom.header().mirroring;
         let mut memory = Self {
             rom,
@@ -205,7 +206,8 @@ impl Cartridge {
             ));
         }
 
-        let memory = CartridgeMemory::new(rom, registry::minimum_prg_ram_size(mapper));
+        let sizes = registry::board_memory_sizes(mapper, rom.header());
+        let memory = CartridgeMemory::new(rom, sizes);
         let Some(board) = registry::create_board(mapper, &memory) else {
             return Err(RomLoadError::new(
                 RomLoadFailure::UnsupportedMapper,
@@ -553,8 +555,12 @@ impl Cartridge {
     /// # Errors
     /// [`InvalidState`] when the block is truncated or holds an impossible value.
     pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
-        reader.read_blob_into(&mut self.memory.prg_ram)?;
-        reader.read_blob_into(&mut self.memory.chr_ram)?;
+        // The two memories are read as prefixes rather than exact blobs: their size is the
+        // board's, and lot MF-1 shrank three boards' RAM to the size of the real cartridge
+        // (see [`StateReader::read_blob_prefix_into`]), so a state written before that lot
+        // carries a larger blob for them and must still load (REQ-CORE-091).
+        reader.read_blob_prefix_into(&mut self.memory.prg_ram)?;
+        reader.read_blob_prefix_into(&mut self.memory.chr_ram)?;
         let mirroring = reader.read_u8()?;
         self.memory.mirroring = NametableMirroring::from_u8(mirroring).ok_or_else(|| {
             InvalidState::corrupt(format!(
