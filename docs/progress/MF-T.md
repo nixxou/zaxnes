@@ -18,7 +18,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 - [x] 2/10 — screen readers: nametable → text through the ROM's own CHR font, and the
   documented pass/fail screens of the non-blargg suites.
 - [x] 3/10 — Holy Mapperel reader: detected board and the four detailed nibbles.
-- [ ] 4/10 — AccuracyCoin reader: Start at the menu top, then the `$0400-$0498` result
+- [x] 4/10 — AccuracyCoin reader: Start at the menu top, then the `$0400-$0498` result
   table and the pass tally.
 - [ ] 5/10 — `--markdown` report generator, with the reference column taken from
   `nes-test-roms/status.txt`.
@@ -120,6 +120,43 @@ matches the header, and the sizes it measures match the file.
   right to say so. Only the four detailed digits and an explicit `BAD` decide the verdict,
   which is what the README commits to ("Zero is normal; anything else reflects something
   unexpected").
+
+### AccuracyCoin, step 4
+
+**89 of 147 pass, 22 fail, 36 are blocked.** The run takes 6.5 s.
+
+The ROM is fully automatable: the cursor starts at the top of page 1 (`menuCursorYPos = $FF`),
+so a single Start runs every test and each test writes one byte between `$0403` and `$0498`.
+The 147 test names, their result addresses and their menu coordinates were taken from the
+`TestPages:` and `TableTable` tables of the `AccuracyCoin.asm` the ROM ships with. The five
+`DRAW` entries share `result_DrawTest` at `$03FF` and are excluded from the ROM's own tally,
+which is why the total is 147 and not 152.
+
+**Two different blockages, and the second one is a wall.**
+
+1. `Interrupt flag latency` (page "CPU Interrupts") **never returns**: the ROM's own test
+   counter stops advancing and nothing after it runs. Without a remedy this alone costs 66 of
+   the 147 results and 96 s of wall-clock.
+2. From `PPU Register Mirroring` (page "PPU Behavior") on, **every one of the 36 remaining
+   tests takes the run out of the all-test loop** — `RunningAllTests` goes back to zero with
+   no result written.
+
+The harness does what the README tells a person to do — "Pressing B will mark the highlighted
+test to be skipped. [...] This is useful if any tests are crashing the console or emulator and
+you still want to see the table of results" — by power-cycling, walking the menu to the stuck
+test, pressing B and running again. That recovers the whole middle of the table past blockage
+1. It was verified once, with the skip limit raised to 40, that blockage 2 is **one wall and
+not 36 defects**: retiring all 36 one at a time (37 attempts, 46 s) yields 89 pass / 22 fail /
+36 blocked, exactly the same counts, and not one of the 36 ever produces a result. The drive
+therefore stops after three consecutive non-hanging retirements and reports where the wall
+starts, which is the honest reading and costs 6.5 s instead of 46.
+
+Likely single root cause to investigate in a later lot, **not** 36 separate ones: the ROM's
+NMI and IRQ vectors point at RAM ("This allows me to create tests that have different NMI/IRQ
+routines"), and every blocked page is a PPU/NMI-timing page.
+
+The 22 genuine failures group cleanly: all five `SH*` stores (`SHA`, `SHS`, `SHY`, `SHX`) with
+code 7, `Open Bus`, and most of the DMA and APU-timing page.
 
 ### Campaign runs
 

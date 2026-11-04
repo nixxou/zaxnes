@@ -23,6 +23,7 @@
 //! `run_frame`, `soft_reset` — so nothing was added to a per-cycle or per-access path.
 
 pub mod blargg;
+pub mod coin;
 pub mod mapperel;
 pub mod screen;
 
@@ -377,6 +378,7 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
         },
         Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
         Protocol::Mapperel => mapperel::run(&mut core, result.mapper, plan.frames),
+        Protocol::AccuracyCoin => coin::run(&mut core, plan.frames),
     };
 
     result.protocol = verdict.protocol;
@@ -443,6 +445,8 @@ enum Protocol {
     Screen,
     /// Holy Mapperel: a screen with a documented layout, read field by field.
     Mapperel,
+    /// `AccuracyCoin`: press Start at the menu's top, then read its 147 result bytes.
+    AccuracyCoin,
 }
 
 /// The reader and the frame budget of one ROM.
@@ -460,7 +464,9 @@ impl Plan {
     /// budget only decides how long a hang is given before it is called a timeout.
     fn of(name: &str, frame_cap: Option<u32>) -> Self {
         let lower = name.to_ascii_lowercase();
-        let (protocol, frames) = if lower.contains("holy-mapperel") {
+        let (protocol, frames) = if lower.contains("accuracycoin") {
+            (Protocol::AccuracyCoin, screen::frame_budget(&lower))
+        } else if lower.contains("holy-mapperel") {
             (Protocol::Mapperel, screen::frame_budget(&lower))
         } else if screen::is_screen_rom(&lower) {
             (Protocol::Screen, screen::frame_budget(&lower))
