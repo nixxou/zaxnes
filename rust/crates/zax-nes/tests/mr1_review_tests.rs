@@ -518,3 +518,67 @@ fn mr_64_3_rambo1_a12_filter_is_30_dots() {
         "a 20-dot low is too short for RAMBO-1's filter: the counter never moves"
     );
 }
+
+// ================================================================ mapper 5, MMC5
+
+/// MR-5-1. With 8x8 sprites the PPU uses the "A" CHR register set for everything; the
+/// last-written-set rule applies only while the PPU is *not* rendering.
+///
+/// Mesen (`Mappers/Nintendo/MMC5.h:192`):
+///
+///     bool chrA = !largeSprites
+///              || (_splitTileNumber >= 32 && _splitTileNumber < 40)
+///              || (!_ppuInFrame && _lastChrReg <= 0x5127);
+///
+/// The first clause makes 8x8 mode unconditionally set A. We use the last-written set as
+/// *the* 8x8 rule instead (`mmc5.rs:163-167`):
+///
+///     let use_b = if self.sprite_size16 { fetch == ChrFetch::Background }
+///                 else { self.last_set_was_b };
+///
+/// so a game in 8x8 mode that last wrote $5128-$512B renders from set B throughout.
+#[test]
+#[ignore = "MR-1: MR-5-1"]
+fn mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a() {
+    let mut core = MapperRom::new(5).prg(8).chr(64).load();
+    // Sprite size is 8x8 at power-on (`sprite_size16` false), the case under test.
+
+    core.mapper_write(0x5127, 0x03); // Set A, 8 KiB bank 3.
+    core.mapper_write(0x512B, 0x05); // Set B, 8 KiB bank 5 — written last.
+
+    assert_eq!(
+        [24, 25, 26, 27, 28, 29, 30, 31],
+        core.chr_windows(),
+        "8x8 sprites render from set A (bank 3), not from the last-written set B"
+    );
+}
+
+/// MR-5-2. In ExRAM modes 0 and 1 the CPU can only store a byte while the PPU is
+/// rendering; a write outside rendering stores **zero**.
+///
+/// Mesen overrides `WriteRam` for exactly this (`MMC5.h:420-426`):
+///
+///     if(addr >= 0x5C00 && addr <= 0x5FFF && _extendedRamMode <= 1 && !_ppuInFrame) {
+///         //Mode 0/1 - ... can only be written while the PPU is rendering
+///         //(otherwise, 0 is written)
+///         value = 0;
+///     }
+///
+/// We store the value in every mode but 3 (`mmc5.rs:412-418`) with no rendering test. The
+/// byte is observable through the nametable path, since modes 0 and 1 are the ones that show
+/// ExRAM to the PPU.
+#[test]
+#[ignore = "MR-1: MR-5-2"]
+fn mr_5_2_mmc5_exram_write_outside_rendering_stores_zero() {
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+
+    core.mapper_write(0x5104, 0x00); // ExRAM mode 0.
+    core.mapper_write(0x5105, 0x02); // Nametable 0 reads ExRAM.
+    core.write_memory(0x5C00, 0x5A); // The PPU is not rendering.
+
+    assert_eq!(
+        0,
+        core.cartridge().unwrap().read_nametable(0x2000),
+        "a mode-0 ExRAM write outside rendering stores zero, not the value"
+    );
+}

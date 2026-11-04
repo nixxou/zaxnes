@@ -17,9 +17,9 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
 - [x] 3/10 done `5c9eaca4` — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
 - [x] 4/10 done `b8eebc27` — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
 - [x] 5/10 done `b8eebc27` — MMC2 / MMC4 (mappers 9, 10)
-- [x] 6/10 done — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
-- [ ] 7/10 in progress — MMC5 (mapper 5) and its expansion audio + mix
-- [ ] 8/10 todo — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
+- [x] 6/10 done `161f1650` — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
+- [x] 7/10 done — MMC5 (mapper 5) and its expansion audio + mix
+- [ ] 8/10 in progress — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
 - [ ] 9/10 todo — Shared infrastructure the next lots need; summary table; report pass
 - [ ] 10/10 todo — `cargo fmt --check`, `clippy -D warnings`,
@@ -97,3 +97,19 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   MR-64-5 (`_forceClock` on leaving cycle mode, Skull & Crossbones). One point where Mesen
   looks wrong and we are right: its $8000 does not re-map.
   5 new ignored tests (18 total), each confirmed failing for the stated reason.
+- **Step 7** — MMC5 and its audio. Checking the spec first removed three drafted findings:
+  REQ-CORE-100 makes ExRAM extended attributes and the vertical split **P2**, so their
+  absence is a recorded gap, not a bug (no Q ticket needed), and AMD-054 pins the audio mix
+  constants as deliberately unlike public documentation.
+  PRG banking and PRG-RAM are equivalent, including the non-obvious one: Mesen decides
+  ROM-vs-RAM per *register* ($5117 always ROM) and we decide per *window* (the one reaching
+  $FFFF), which is the same predicate in all four modes.
+  Findings: MR-5-1 (**8x8 sprites must use CHR set A** — we use the last-written set, so a
+  whole screen can render from B; visible), MR-5-2 (ExRAM modes 0/1 store zero when written
+  outside rendering), MR-5-3 (scanline counter off by one vs Mesen — unknown, no test since
+  a test would assert one of two conventions), MR-5-4 (in-frame detection from the PPU bus
+  vs our PPU signal — deliberate simplification), MR-5-5 (ExRAM CPU reads should be open
+  bus). 2 new ignored tests (20 total).
+  **Q-111** filed: AMD-054 contradicts nesdev and Mesen on the period-below-8 cutoff and on
+  the output polarity, and these are the only two audio points it does *not* mark (D) while
+  marking three others. Polarity is the audible one. No code change — the spec prevails.

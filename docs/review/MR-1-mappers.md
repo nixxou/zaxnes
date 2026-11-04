@@ -734,4 +734,127 @@ does call `UpdateState` from `$8000` (`MMC3.h:214-216`), and the bank selection 
 combinational on hardware, so a mode change should be visible at once — which is what we do
 (`rambo1.rs:156-159`). Recorded as **Mesen in error**; no change on our side.
 
-<!-- sections for steps 7..8 are appended as the review progresses -->
+## Mapper 5 — MMC5 (ExROM)
+
+`mmc5.rs` and `apu/mmc5_audio.rs` against `Mappers/Nintendo/MMC5.h` and
+`Mappers/Audio/Mmc5Audio.h`.
+
+### What the spec already settles
+
+Two large pieces of this board are governed by the spec rather than by Mesen, and checking
+that first removed three findings I had drafted:
+
+- **ExRAM extended attributes and the vertical split are P2**, not missing features.
+  REQ-CORE-100's mapper-5 row reads "au minimum : modes de banques PRG et CHR, PRG-RAM, IRQ
+  de ligne. ExRAM, attributs étendus, split vertical : P2". Mesen implements the split in
+  full (`MMC5.h:481-520`, `_verticalSplitEnabled`, `_splitTileNumber`, `$5200-$5202`) and we
+  implement none of it. That is a prioritised gap the spec itself records, so it is neither a
+  bug nor a question. The board's own doc comment says so (`mmc5.rs:8-9`).
+- **the expansion audio is pinned to the integer by AMD-054**, including constants the
+  amendment says outright are the reference program's and unlike public documentation.
+
+### PRG banking and PRG-RAM — equivalent
+
+Checked in detail and agreeing with Mesen, which is worth recording because the two
+expressions are structurally different:
+
+- all four PRG modes and their masks. Mesen masks per mode at the call site
+  (`value & 0x7C` for the 32 KiB window, `& 0xFE` / `& 0x7E` for the 16 KiB ones,
+  `MMC5.h:160-170`); we derive the same masks from the window count in `map_prg_window`
+  (`mmc5.rs:150`, `first = bank & !(windows - 1)`).
+- **which window can show RAM.** Mesen's rule is register-based: RAM when
+  `((bankNumber & 0x80) == 0 && reg != 0x5117) || reg == 0x5113` (`MMC5.h:80`), so $5117 is
+  always ROM. Ours is window-based: `register & 0x80 != 0 || slot + windows == PRG_WINDOWS`
+  (`mmc5.rs:144`). These are the same predicate, because the window that reaches $FFFF is
+  exactly the one fed by $5117 in every one of the four modes. Equivalent.
+- the $5113 RAM bank masked to three bits, the $5102/$5103 write-protect pair
+  (`protect1 & 3 == 2 && protect2 & 3 == 1`, `mmc5.rs:338`, matching `MMC5.h:82`), and
+  $6000-$7FFF always readable.
+- **the 64 KiB PRG-RAM.** We force 64 KiB regardless of the header
+  (`registry.rs:33-35`, `Mmc5::MAX_PRG_RAM_SIZE`); for a plain iNES MMC5 image Mesen does
+  the same thing by a different route — "Emulate as if a single 64k block of work/save ram
+  existed" (`MMC5.h:305-330`). Equivalent for iNES. For an NES 2.0 image Mesen honours the
+  declared sizes and adds an "empty socket" rule returning open bus for banks 4-7 when the
+  board is not exactly 2x8 KiB (`MMC5.h:96-110`); we ignore both. Recorded as a difference,
+  severity cosmetic, not pursued — no licensed MMC5 board does this, as Mesen's own comment
+  notes.
+
+### Findings
+
+- **MR-5-1 — our bug, severity visible.** With 8x8 sprites the PPU must use the "A" CHR
+  register set for everything; the last-written-set rule is the *not-rendering* rule, not the
+  8x8 rule. Mesen's predicate (`MMC5.h:192`) is
+  `!largeSprites || (sprite fetch window) || (!_ppuInFrame && _lastChrReg <= 0x5127)` — three
+  separate clauses. We collapsed it to two (`mmc5.rs:163-167`), using `last_set_was_b` where
+  the first clause belongs, so an 8x8-sprite game that last wrote $5128-$512B renders its
+  whole screen from set B. Test `mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a`. The fix is to
+  restore the third clause and gate it on `in_frame`, which we already track.
+- **MR-5-2 — our bug, severity subtle.** In ExRAM modes 0 and 1 a CPU write to
+  $5C00-$5FFF outside rendering stores **zero**, not the value (`MMC5.h:420-426`). We store
+  the value in every mode but 3 (`mmc5.rs:412-418`). Observable through the nametable path,
+  since those are the modes that show ExRAM to the PPU. Test
+  `mr_5_2_mmc5_exram_write_outside_rendering_stores_zero`.
+- **MR-5-3 — unknown, severity subtle.** The scanline counter is off by one against Mesen.
+  Mesen's first in-frame detection sets `_scanlineCounter = 0` and each later line
+  increments it (`MMC5.h:430-445`), so target 1 fires on the second detected line; we set
+  `scanline_counter = scanline + 1` from the PPU's own signal (`mmc5.rs:487`), so target 1
+  fires on visible line 0. One of the two is a line early. I cannot settle it here:
+  REQ-CORE-100 asks only for "IRQ de ligne" on this board and pins no line, unlike
+  REQ-CORE-114 for the MMC3. A later lot should settle it against a split-screen title
+  (*Castlevania III*, *Just Breed*) or an MMC5 test ROM. No test, because a test would have
+  to assert one of the two conventions.
+- **MR-5-4 — unknown, severity subtle.** The in-frame detection mechanism differs. Mesen
+  infers it from the PPU address bus — three identical nametable reads then the attribute
+  fetch (`DetectScanlineStart`, `MMC5.h:429-457`) — plus a `_ppuIdleCounter` that drops
+  `_ppuInFrame` after three idle CPU cycles and an `$FFFA-$FFFB` read hook
+  (`MMC5.h:333`) to catch the frame end. We are told directly by the PPU through
+  `on_ppu_scanline(scanline, rendering)` (`mmc5.rs:480-494`). For a game that renders
+  normally the two agree; they diverge when rendering is toggled mid-frame or driven by
+  `$2006` writes, which is precisely what the MMC5's bus-sniffing design exists to survive.
+  Ours is much simpler and is the design the rest of our PPU interface assumes; recorded so
+  that a later lot knows the mechanism is a deliberate simplification, not an oversight.
+- **MR-5-5 — our bug, severity cosmetic.** ExRAM reads from the CPU in modes 0 and 1 return
+  **open bus** on Mesen (its mapping has no read access), while we drive a 0
+  (`mmc5.rs:395-399` returns `Some(Some(0))` where `Some(None)` is our open-bus answer).
+  One-line fix; same family as MR-30-2.
+
+### Expansion audio
+
+Our implementation follows **AMD-054** (REQ-CORE-075 amended) to the integer, and the
+existing `tests/mmc5_audio_tests.rs` covers its numeric criteria. Compared with Mesen:
+
+| point | AMD-054 (and our code) | Mesen `Mmc5Audio.h` | status |
+| --- | --- | --- | --- |
+| envelope cadence | 240 Hz, every 7458 CPU cycles | 240 Hz (`masterClockRate / 240`) | equivalent |
+| length-counter cadence | 120 Hz (every other envelope tick) | 240 Hz, same tick | **spec deviation, already marked (D)** |
+| no sweep unit | yes | yes (`InitializeSweep` empty) | equivalent |
+| $5011 write of 0 | keeps the level, raises the PCM IRQ flag | keeps the level (IRQ a TODO) | equivalent on the level |
+| $5010 read mode | not emulated | not emulated (TODO) | equivalent |
+| PCM IRQ on the CPU line | never asserted | not implemented | **spec deviation, already marked (D)** |
+| mix | `M = r(Km·P(q1+q2)) + 31·pcm`, `Km = 8000/P(30)` | delta mixer, squares at APU pulse volume, PCM added 1:1 | **spec deviation, covered by AMD-054's note** |
+| period below 8 | silences the channel | does **not** silence | **Q-111** |
+| polarity | positive, added to `A` | negated | **Q-111** |
+
+The last two are the only audio points where AMD-054 contradicts nesdev and Mesen **without**
+carrying a `(D)` mark or a note, while the amendment is otherwise scrupulous about flagging
+exactly that. Mesen quotes the nesdev sentences verbatim in both places
+(`Mmc5Audio.h:35` and `:78-79`) and even carries an `_isMmc5Square` flag through its shared
+pulse class to disable the period-8 cutoff for this board specifically; we get the cutoff
+because our MMC5 squares reuse `PulseChannel`, whose `muted()` tests `timer_period < 8`
+(`apu/pulse_channel.rs:66-68`). Filed as `spec/changes/Q-111.md`. The spec prevails, so no
+code changes and no tests: if the answer keeps AMD-054, only the `(D)` marks are missing.
+
+Polarity is the one of the two with audible consequences: an inverted expansion channel
+subtracts from the APU's mix instead of adding to it, so a passage where both sound partly
+cancels rather than reinforcing. AMD-054's numeric criteria are positive, so it cannot be
+flipped without reopening the amendment and REQ-CORE-073's `S = A + M`.
+
+### Save state
+
+Ours covers every register, the 1 KiB ExRAM, both CHR register sets, the IRQ state and the
+audio, with the audio appended **last** specifically so that a pre-AMD-054 block still loads
+(`mmc5.rs:264-266`, `:300-307`) — a versioning care Mesen does not need and we do.
+Equivalent coverage to Mesen's `Serialize`, which additionally keeps the split-screen fields
+we have no equivalent of.
+
+<!-- section for step 8 is appended as the review progresses -->
