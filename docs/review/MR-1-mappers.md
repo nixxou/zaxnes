@@ -1674,3 +1674,187 @@ selects which of two comparisons `clock_irq_counter` makes.
   resulting 2 KiB bank, which our `map_chr_2k(slot, b >> 1)` gets right. **Still
   equivalent.** The RAMBO-1 entry below shows why this detail is worth stating twice: the
   same masking question has the *opposite* answer on that board, and nesdev says so for both.
+
+## Mapper 64 — Tengen RAMBO-1
+
+This is the board the sources change the most, in both directions. Everything below comes from
+*RAMBO-1* (<https://www.nesdev.org/wiki/RAMBO-1>), its talk page
+(<https://www.nesdev.org/wiki/Talk:RAMBO-1>) and the hardware thread *RAMBO-1 Mapper
+Investigation* (<https://forums.nesdev.org/viewtopic.php?t=19565>, the capture-by-capture
+pages). NesCartDB has **five** mapper-64 titles — *Klax*, *Skull & Crossbones*, *Shinobi*,
+*Rolling Thunder* and the *Hard Drivin'* prototype — plus *Alien Syndrome* on the 800037
+board; that is the whole blast radius of every finding here.
+
+The page carries **two** descriptions of the IRQ: an older register-by-register one, and a
+cycle-level pseudo-code model in terms of a 4-bit filter counter and the 8-bit IRQ counter,
+both clocked on M2 falling edges. They do not agree with each other, and the talk page records
+that two different emulator implementations are each "claimed to work with games like Klax,
+Skull & Crossbones, and Hard Drivin'". That is the context for the two re-classifications
+below.
+
+### MR-64-1 — the counter algorithm
+
+**MR-1 verdict: our bug (visible). New verdict: unknown — and the weight of the evidence is
+on our side. Leaves `our bug`.**
+
+Sources:
+
+- *RAMBO-1*, the pseudo-code model, on the 8-bit counter being clocked — "If value = 0: If
+  IRQ is enabled, trigger IRQ ... Always reload counter with value in $C000. Else value--",
+  and on a $C001 write — "Reload 8-bit counter with value in $C000. Set 4-bit counter to 17".
+- *RAMBO-1*, the older register description, as a three-branch list: if $C001 was written
+  since the previous clock, "reload IRQ counter with IRQ reload value; if non zero, this value
+  is **ORed with 1**"; else if the counter is 0, reload it with the latch; **else** "Decrement
+  IRQ counter by 1". The page adds that it "remains undiscovered" how the OR works.
+
+Two things follow, and both cut against MR-1. First, the decrement sits in its own `else`
+branch in *both* descriptions, so a clock that reloads does **not** also decrement — which is
+our structure (`rambo1.rs:72-83`) and not Mesen's "reload then always `_irqCounter--`".
+Second, under the pseudo-code model a latch of L fires on the (L+1)-th clock after a $C001
+write, which is exactly what our code does; Mesen's `latch + 2` fires on the (L+2)-th, so if
+anything it is Mesen that is a scanline *late*, not us that are early. The one point where the
+sources do not back us is the `ORed with 1`, which would lengthen the first period after a
+$C001 write by one clock for an **even** latch only — and that is the clause the page itself
+says nobody understands.
+
+**Test change: withdrawn.** `mr_64_1_rambo1_counter_always_decrements` asserted Mesen's
+`+2/+1` reload, which neither description supports. A fix built from MR-1's recommendation
+would have made four Tengen titles *worse*.
+
+What would settle it: the *Hard Drivin'* case Mesen's comment names, captured on hardware —
+the first IRQ line after a $C001 write with an even latch — or the hardware capture in the
+investigation thread read against both models. Until then, no change.
+
+**Cost: none** — no fix. Had the `| 1` been adopted, it would be one OR inside
+`clock_irq_counter`, which runs per A12 rise on a board already off the fast span:
+**negligible**.
+
+### MR-64-2 — bit 0 of a 2 KiB CHR register
+
+**MR-1 verdict: our bug (visible). New verdict: leaves `our bug` — nesdev says the bit *is*
+ignored, and Mesen is wrong.**
+
+Source: *RAMBO-1* — "With 2KiB banks (where K=0), only even-numbered CHR banks can be
+selected. The lowest bit in the register is ignored and instead passes PPU A10 directly
+through to CHR A10."
+
+That is our `map_chr_2k(slot, b(0) >> 1)` (`rambo1.rs:63-64`) described in hardware terms: A10
+coming straight from the PPU is what makes the two kilobytes of the window consecutive and
+even-aligned. Mesen's `_registers[0] + 1` (`Rambo1.h:112-113`) shows an odd pair, and MR-1 read
+Mesen's deliberate difference from its own MMC3 as evidence the asymmetry was real. It is the
+other way round: the MMC3 and the RAMBO-1 behave the same here and the wiki says so for both.
+
+**Test change: withdrawn.** `mr_64_2_rambo1_2kib_chr_window_keeps_bit_0` asserted Mesen's
+pair. Removed with the quote left in the file, because this is the one finding in the lot
+where applying MR-1's fix would have broken a currently-correct board in all five games.
+
+**Cost: none** — no fix.
+
+### MR-64-3 — the A12 filter length
+
+**MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed, and the figure is neither
+ours nor Mesen's.**
+
+Source: *RAMBO-1*, the pseudo-code, on each M2 falling edge — while PA12 = 0, "If 4-bit
+counter < 16: 4-bit counter++"; on PA12 = 1, "If 4-bit counter = 16: Clock the 8-bit counter.
+Always reset 4-bit counter to 0".
+
+So the board requires A12 to have been low across **sixteen M2 falling edges** — about 48 PPU
+dots — where we require ten dots (`a12_watcher.rs:27`) and Mesen 31. Ours is roughly five
+times too permissive: we count rises this board ignores and the scanline counter runs fast
+whenever A12 dips briefly, which is the normal case for a game with both pattern tables in the
+upper half of CHR. Mesen's 30 is much closer but still short.
+
+**Test:** re-aimed and renamed — `mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles`. Its 20-dot
+pulse train is below both the documented 48 dots and Mesen's 31, so the assertion is unchanged;
+only the figure it cites and its name are.
+
+**Cost: negligible, with one structural caveat.** The threshold becomes a construction
+parameter of `A12Watcher` (MR-1's infrastructure item 5): one `i64` field read in `rose()`
+instead of an associated constant, on boards already off the fast span, and
+`Mmc3` keeps its own value so no MMC3 game changes. The caveat is
+`A12Watcher::MIN_RISE_INTERVAL`, which is an associated *constant* feeding
+`Mmc3::ppu_irq_horizon` (`mmc3.rs:170`); it has to become an instance method, and RAMBO-1 —
+which returns `None` for the horizon today (`rambo1.rs:132-134`) and therefore steps the PPU
+every cycle — could then *gain* a horizon worth 48 dots per clock, which would make this fix a
+performance **win** for the five Tengen games rather than a cost.
+
+### MR-64-4 — the IRQ assertion delay
+
+**MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed, with both figures.**
+
+Source: *RAMBO-1* — in scanline mode "the actual interrupt triggers slightly later.
+Specifically, it is delayed until M2 falls twice after the PPU A12 rise"; in cycle mode it
+"triggers one M2 cycle later than one would naively expect".
+
+Two and one CPU cycles, exactly Mesen's `PpuIrqDelay` / `CpuIrqDelay` pair. We set
+`irq_pending` at once (`rambo1.rs:81`). The visible consequence is at most two CPU cycles of
+raster position on a split, so `subtle` is right.
+
+**Test:** still none. The fixture has no cycle-level IRQ probe, and a test would have to
+assert the CPU's view of the IRQ line two cycles apart; that belongs with the fix.
+
+**Cost: negligible.** A small countdown decremented on the board's existing per-CPU-cycle
+step. RAMBO-1 is already stepped every CPU cycle (`PERFORMANCE-HISTORY.md` §5.1: "Rambo1 and
+MMC5 still step every cycle"), so the counter adds one compare-and-branch to a path these five
+games already pay for, and nothing to any other board.
+
+### MR-64-5 — the extra divider clock when leaving cycle mode
+
+**MR-1 verdict: our bug (visible). New verdict: unknown. Leaves `our bug`.**
+
+Sources: *RAMBO-1*, $C001 — the write "clears the IRQ counter" and "The prescaler in cycle
+mode also resets, so the subsequent clock occurs 4 cycles later"; *Talk:RAMBO-1* — two
+alternative IRQ implementations are each claimed to work with *Klax*, *Skull & Crossbones* and
+*Hard Drivin'*.
+
+The wiki documents the prescaler reset but says nothing about an extra clock being granted
+when the mode bit goes from 1 to 0. Mesen's `_forceClock` rests on a forum quote attributed to
+FHorse and on "Fixes Skull & Crossbones", which is a statement about one game's symptom, not a
+hardware measurement — and the talk page's note that two different implementations both work
+is exactly the situation where a game-driven fix cannot be promoted to a specification. Our
+resetting the divider on **every** $C001 write rather than only when entering cycle mode is a
+smaller difference than MR-1 implied and is at least consistent with the sentence quoted
+above.
+
+**Test:** none (MR-1 wrote none), and none added.
+
+What would settle it: a hardware capture of the M2 counter across a $C001 write that clears
+bit 0 while in cycle mode — the measurement the investigation thread was set up to make.
+
+**Cost if adopted: negligible** — one bool consulted in the same per-CPU-cycle step as
+MR-64-4, and one more field in the save state.
+
+### MR-64-6 — Mesen's $8000 does not re-map
+
+**MR-1 verdict: Mesen in error. New verdict: unchanged — Mesen in error.**
+
+Nothing in *RAMBO-1* suggests a $8000 write is latched until the next $8001: the register's
+bits are described as selecting the layout, and the selection on hardware is combinational.
+Our immediate `update_banks` (`rambo1.rs:156-159`) is right. No test, no cost.
+
+### MR-64-7 — the PRG mode swaps R6 and R15, it does not rotate the three windows (new)
+
+**New finding. Verdict: our bug, severity visible. Mesen shares it.**
+
+Sources:
+
+- *RAMBO-1*, PRG banking — with P ($8000 & $40) = $00 the windows are R6 at $8000-$9FFF, R7 at
+  $A000-$BFFF, RF at $C000-$DFFF; with P = $40 they are **RF at $8000-$9FFF, R7 at
+  $A000-$BFFF, R6 at $C000-$DFFF** (last bank fixed at $E000 in both).
+- *RAMBO-1 Mapper Investigation*, page 6 — Krzysiobal reports a wiki error in the banking
+  modes, "when P=1, $A000=R7, $C000=R6" rather than the configuration previously documented,
+  and Ben Boldt confirms it with a spreadsheet of banking tests.
+  <https://forums.nesdev.org/viewtopic.php?p=246861>
+
+So the mode bit **swaps** R6 with R15 and leaves R7 where it is. We rotate all three
+(`rambo1.rs:42-50`: R15, R6, R7), which is also what Mesen does (`Rambo1.h:97-105`) — which is
+why MR-1, comparing only against Mesen, called this part "equivalent" and even checked the
+rotation carefully. The wiki has since been corrected from hardware tests. A mapper-64 game
+that sets the mode bit therefore sees two of its three switchable 8 KiB windows exchanged on
+our side: wrong code at $A000 and $C000, i.e. a crash rather than a glitch if the game runs
+code there, which is why it is `visible` and not `subtle`.
+
+**Test:** added — `mr_64_7_rambo1_prg_mode_swaps_r6_and_r15`.
+
+**Cost: none.** Two indices exchange in `update_banks`, which runs on a $8000 or $8001 write.

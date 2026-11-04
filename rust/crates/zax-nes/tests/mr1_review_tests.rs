@@ -411,88 +411,38 @@ fn mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled() {
 
 // ================================================================ mapper 64, RAMBO-1
 
-/// Feeds one A12 rise wide enough for both filters (40 dots low, well over Mesen's
-/// `minDelay = 30` for this board).
-fn rambo_rise(core: &mut zax_nes::NesCore, at: i64) {
-    let cart = core.cartridge_mut().unwrap();
-    cart.on_ppu_address_bus(0x0000, at);
-    cart.on_ppu_address_bus(0x1000, at + 40);
-}
+// MR-1's `rambo_rise` helper went with the two tests below that used it.
 
-/// MR-64-1. RAMBO-1 does not use the MMC3 counter algorithm: it *always* decrements, and
-/// the reload loads the latch plus two (plus one when the latch is 0 or 1), so the period
-/// is one clock longer than the MMC3's.
+// MR-64-1's test (`mr_64_1_rambo1_counter_always_decrements`) was withdrawn by lot MR-1b. It
+// asserted Mesen's `latch + 2` reload with an unconditional decrement. Both descriptions of
+// the counter on nesdev ("RAMBO-1") put the decrement in its own `else` branch — a clock that
+// reloads does not also decrement, which is our structure — and under the page's cycle-level
+// pseudo-code a latch of L fires on the (L+1)-th clock after a $C001 write, as ours does,
+// where Mesen's fires on the (L+2)-th. The only clause that would favour Mesen is the
+// "ORed with 1" of the older description, of which the page says it "remains undiscovered"
+// how it works. See `docs/review/MR-1-mappers.md`, MR-1b section.
+
+// MR-64-2's test (`mr_64_2_rambo1_2kib_chr_window_keeps_bit_0`) was withdrawn by lot MR-1b,
+// and this is the one finding of MR-1 whose proposed fix would have broken a board that is
+// right today. nesdev ("RAMBO-1"): "With 2KiB banks (where K=0), only even-numbered CHR banks
+// can be selected. The lowest bit in the register is ignored and instead passes PPU A10
+// directly through to CHR A10." That is our `map_chr_2k(slot, b(0) >> 1)`; Mesen's
+// `_registers[0] + 1` is the error.
+
+/// MR-64-3. RAMBO-1's A12 filter is much longer than the MMC3's — and longer than Mesen's
+/// figure for it too.
 ///
-/// Mesen (`Mappers/Tengen/Rambo1.h:76-91`):
+/// nesdev ("RAMBO-1"), the cycle-level pseudo-code, on each M2 falling edge: while PA12 = 0,
+/// "If 4-bit counter < 16: 4-bit counter++"; on PA12 = 1, "If 4-bit counter = 16: Clock the
+/// 8-bit counter." So A12 must have been low across **sixteen M2 falling edges**, about 48
+/// PPU dots. We require ten dots (`a12_watcher.rs:27`) and Mesen 31 (`Rambo1.h:166`,
+/// `UpdateVramAddress<30>`), so we count rises this board ignores.
 ///
-///     if(_needReload) {
-///         if(_irqReloadValue <= 1) { _irqCounter = _irqReloadValue + 1; }
-///         else { _irqCounter = _irqReloadValue + 2; }   // Fixes Hard Drivin'
-///         _needReload = false;
-///     } else if(_irqCounter == 0) { _irqCounter = _irqReloadValue + 1; }
-///     _irqCounter--;
-///
-/// We reuse the MMC3 shape, assigning the latch without the decrement
-/// (`rambo1.rs:72-83`), so the IRQ arrives one scanline early. With a latch of 3 the fifth
-/// rise is the one that fires; ours fires on the fourth.
+/// Twenty dots of low is over our threshold and under both of the others, so no number of
+/// such pulses may ever clock the counter.
 #[test]
-#[ignore = "MR-1: MR-64-1"]
-fn mr_64_1_rambo1_counter_always_decrements() {
-    let mut core = MapperRom::new(64).prg(8).chr(16).load();
-    core.mapper_write(0xC000, 0x03); // Latch 3.
-    core.mapper_write(0xC001, 0x00); // Scanline mode, reload pending.
-    core.mapper_write(0xE001, 0x00); // IRQs on.
-
-    for i in 0..4 {
-        rambo_rise(&mut core, 1000 + i * 100);
-    }
-
-    assert!(
-        !core.cartridge().unwrap().irq_asserted(),
-        "with a latch of 3 the counter still holds 1 after four rises"
-    );
-
-    rambo_rise(&mut core, 2000);
-    assert!(core.cartridge().unwrap().irq_asserted(), "the fifth fires");
-}
-
-/// MR-64-2. RAMBO-1's 2 KiB CHR windows do not ignore bit 0 of the register: the pair is
-/// `reg` and `reg + 1`, not `reg & 0xFE` and `(reg & 0xFE) + 1`.
-///
-/// Mesen is deliberately different from its own MMC3 here — `MMC3.h:89-90` masks with
-/// `0xFE` while `Rambo1.h:112-113` does not:
-///
-///     SelectChrPage(1 ^ a12Inversion, _registers[0] + 1);
-///
-/// We route the register through `map_chr_2k(slot, b(0) >> 1)` (`rambo1.rs:63`), which
-/// drops the low bit. An odd register therefore shows the wrong kilobyte pair.
-#[test]
-#[ignore = "MR-1: MR-64-2"]
-fn mr_64_2_rambo1_2kib_chr_window_keeps_bit_0() {
-    let mut core = MapperRom::new(64).prg(8).chr(16).load();
-
-    core.mapper_write(0x8000, 0x00); // Register 0, 2 KiB CHR mode, no inversion.
-    core.mapper_write(0x8001, 0x05); // An odd 1 KiB bank number.
-
-    let windows = core.chr_windows();
-    assert_eq!(
-        [5, 6],
-        [windows[0], windows[1]],
-        "the 2 KiB window is banks 5 and 6, not 4 and 5"
-    );
-}
-
-/// MR-64-3. RAMBO-1's A12 filter is much longer than the MMC3's: Mesen instantiates the
-/// shared watcher with `minDelay = 30` for this board (`Rambo1.h:166`,
-/// `_a12Watcher.UpdateVramAddress<30>(...)`) against the default 10 used elsewhere. We
-/// share one `A12Watcher` with a fixed 10-dot filter (`a12_watcher.rs:27`), so we count
-/// rises RAMBO-1 ignores and the counter runs fast.
-///
-/// Twenty dots of low is over our threshold and under Mesen's, so under Mesen no number of
-/// such pulses ever clocks the counter.
-#[test]
-#[ignore = "MR-1: MR-64-3"]
-fn mr_64_3_rambo1_a12_filter_is_30_dots() {
+#[ignore = "MR-1b: MR-64-3"]
+fn mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles() {
     let mut core = MapperRom::new(64).prg(8).chr(16).load();
     core.mapper_write(0xC000, 0x01);
     core.mapper_write(0xC001, 0x00);
@@ -507,6 +457,36 @@ fn mr_64_3_rambo1_a12_filter_is_30_dots() {
     assert!(
         !cart.irq_asserted(),
         "a 20-dot low is too short for RAMBO-1's filter: the counter never moves"
+    );
+}
+
+/// MR-64-7. The PRG mode bit **swaps** R6 with R15 and leaves R7 at $A000; it does not
+/// rotate the three switchable windows.
+///
+/// nesdev ("RAMBO-1"), PRG banking: with P ($8000 & $40) = $00 the windows are R6, R7, RF;
+/// with P = $40 they are RF, R7, R6. The correction comes from the hardware tests of the
+/// "RAMBO-1 Mapper Investigation" thread ("when P=1, $A000=R7, $C000=R6"), so Mesen carries
+/// the old, wrong table too (`Rambo1.h:97-105`) and MR-1 found our rotation "equivalent"
+/// against it. Ours is `rambo1.rs:42-50`.
+#[test]
+#[ignore = "MR-1b: MR-64-7"]
+fn mr_64_7_rambo1_prg_mode_swaps_r6_and_r15() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+
+    core.mapper_write(0x8000, 6); // Register 6.
+    core.mapper_write(0x8001, 2);
+    core.mapper_write(0x8000, 7); // Register 7.
+    core.mapper_write(0x8001, 3);
+    core.mapper_write(0x8000, 15); // Register 15.
+    core.mapper_write(0x8001, 4);
+    assert_eq!([2, 3, 4, 7], core.prg_windows(), "mode 0: R6, R7, RF, fixed");
+
+    core.mapper_write(0x8000, 0x40); // PRG mode on, register select back to 0.
+
+    assert_eq!(
+        [4, 3, 2, 7],
+        core.prg_windows(),
+        "mode 1 swaps R6 and RF: RF, R7, R6, fixed"
     );
 }
 
