@@ -18,13 +18,19 @@ pub struct Rambo1 {
     irq_reload: bool,
     irq_enabled: bool,
     irq_pending: bool,
+    /// CPU cycles still to run before the counter's zero reaches the /IRQ line (MR-64-4), or 0
+    /// when nothing is armed. nesdev ("RAMBO-1"): in scanline mode "the actual interrupt
+    /// triggers slightly later. Specifically, it is delayed until M2 falls twice after the PPU
+    /// A12 rise", and in cycle mode it "triggers one M2 cycle later than one would naively
+    /// expect".
+    irq_delay: i32,
 }
 
 impl Rambo1 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
-            a12: A12Watcher::new(),
+            a12: A12Watcher::new(A12Watcher::RAMBO1_FILTER_DOTS),
             bank: [0; 16],
             select: 0,
             irq_latch: 0,
@@ -34,6 +40,7 @@ impl Rambo1 {
             irq_reload: false,
             irq_enabled: false,
             irq_pending: false,
+            irq_delay: 0,
         }
     }
 
@@ -73,6 +80,9 @@ impl Rambo1 {
         }
     }
 
+    /// Clocks the 8-bit counter and, when it lands on zero with IRQs enabled, **arms** the
+    /// delayed assertion of MR-64-4 rather than pulling the line at once: two M2 cycles in
+    /// scanline mode, one in cycle mode.
     fn clock_irq_counter(&mut self) {
         if self.irq_counter == 0 || self.irq_reload {
             self.irq_counter = i32::from(self.irq_latch);
@@ -82,7 +92,7 @@ impl Rambo1 {
         }
 
         if self.irq_counter == 0 && self.irq_enabled {
-            self.irq_pending = true;
+            self.irq_delay = if self.cycle_mode { 1 } else { 2 };
         }
     }
 }
@@ -101,6 +111,10 @@ impl Mapper for Rambo1 {
         writer.write_bool(self.irq_enabled);
         writer.write_bool(self.irq_pending);
         self.a12.save_state(writer);
+        // Written last, so a state from before this lot loads with no delay armed: the board
+        // comes back with whatever `irq_pending` it had, which is where the countdown was
+        // heading anyway (REQ-CORE-091).
+        writer.write_i32(self.irq_delay);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -114,6 +128,11 @@ impl Mapper for Rambo1 {
         self.irq_enabled = reader.read_bool()?;
         self.irq_pending = reader.read_bool()?;
         self.a12.load_state(reader)?;
+        self.irq_delay = if reader.remaining() > 0 {
+            reader.read_i32()?
+        } else {
+            0
+        };
         Ok(())
     }
 
@@ -133,8 +152,23 @@ impl Mapper for Rambo1 {
         self.irq_pending
     }
 
+    /// MR-64-3's dividend. The board returned `None` — "catch the PPU up on every cycle" — and
+    /// can now bound the wait exactly as the MMC3 does, over an A12 filter five times as long.
+    ///
+    /// In **cycle mode** the counter is clocked by M2 and not by the PPU at all, so no amount of
+    /// PPU lag can move this line and the horizon is unbounded. In scanline mode the counter
+    /// only moves on an A12 rise, and those come at least `min_rise_interval` dots apart.
     fn ppu_irq_horizon(&self) -> Option<i64> {
-        None
+        if self.cycle_mode || self.irq_pending || !self.irq_enabled {
+            return Some(i64::MAX);
+        }
+
+        let clocks_to_zero = if self.irq_counter == 0 || self.irq_reload {
+            1 + i64::from(self.irq_latch)
+        } else {
+            i64::from(self.irq_counter)
+        };
+        Some((clocks_to_zero - 1) * self.a12.min_rise_interval())
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
@@ -147,6 +181,7 @@ impl Mapper for Rambo1 {
         self.irq_reload = false;
         self.irq_enabled = false;
         self.irq_pending = false;
+        self.irq_delay = 0;
         self.a12.reset();
         self.update_banks();
     }
@@ -179,6 +214,9 @@ impl Mapper for Rambo1 {
             0xE000 => {
                 self.irq_enabled = false;
                 self.irq_pending = false;
+                // An acknowledgement disarms a delay that had not landed yet: the chip has
+                // nothing left to assert.
+                self.irq_delay = 0;
             }
             0xE001 => self.irq_enabled = true,
             _ => {}
@@ -192,6 +230,16 @@ impl Mapper for Rambo1 {
     }
 
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        // MR-64-4. The countdown runs in **both** modes, because a scanline-mode counter is
+        // armed by an A12 rise and lands two M2 cycles later. One compare and one branch on a
+        // path the five mapper-64 games already pay for, and nothing at all on any other board.
+        if self.irq_delay > 0 {
+            self.irq_delay -= 1;
+            if self.irq_delay == 0 {
+                self.irq_pending = true;
+            }
+        }
+
         if !self.cycle_mode {
             return;
         }

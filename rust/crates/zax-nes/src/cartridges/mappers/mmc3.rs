@@ -32,7 +32,7 @@ impl Mmc3 {
         let is_mmc6 = header.is_nes20 && header.submapper == 1;
         Self {
             banks: windows_for(memory),
-            a12: A12Watcher::new(),
+            a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
             bank: [0; 8],
             is_mmc6,
             // MR-4-9, nesdev ("NES 2.0 submappers"), mapper 4: "Submapper 2: MMC3C with
@@ -191,7 +191,7 @@ impl Mapper for Mmc3 {
     }
 
     /// The line only rises when the counter reaches 0 with IRQs on, and the counter only
-    /// moves on an A12 rise, which come at least `MIN_RISE_INTERVAL` dots apart.
+    /// moves on an A12 rise, which come at least `min_rise_interval` dots apart.
     fn ppu_irq_horizon(&self) -> Option<i64> {
         if self.irq_pending || !self.irq_enabled {
             return Some(i64::MAX);
@@ -202,7 +202,7 @@ impl Mapper for Mmc3 {
         } else {
             i64::from(self.irq_counter)
         };
-        Some((clocks_to_zero - 1) * A12Watcher::MIN_RISE_INTERVAL)
+        Some((clocks_to_zero - 1) * self.a12.min_rise_interval())
     }
 
     fn prg_ram_enabled(&self) -> bool {

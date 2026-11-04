@@ -31,7 +31,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
 - [x] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
 - [x] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
-- [ ] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
+- [x] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
 - [ ] 7/10 — step 6: MR-5-2, MR-5-4 — MMC5 ExRAM writes, and in-frame detection by bus sniffing
 - [ ] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
 - [ ] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
@@ -56,6 +56,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | AMD-061 §6.3 (PCM IRQ on the CPU line) | `mmc5.rs:55-65` (`irq_line`), `:188-192` (`refresh_irq_line`) | `amd_061_the_pcm_irq_flag_pulls_the_cpu_irq_line`, `amd_061_the_pcm_irq_needs_bit_7_of_5010_to_reach_the_cpu` | `Board::irq_asserted` is on the CPU's per-cycle interrupt check for every board: the line is **latched in a field**, so the MMC5 arm stays one `movzbl` like the other 25 and the function is 24 instructions where it was 25 | MMC5 titles enabling the PCM IRQ |
 | AMD-061 §6.4 (levels) | `mixer.rs:137-142` (`MMC5_PCM_TABLE`), `mmc5_audio.rs:69-75` | `amd_061_the_squares_contribute_the_opposite_of_the_apu_pulses`, `amd_061_the_pcm_channel_follows_the_dmc_curve_over_a_full_byte` | none: the change is inside `Mmc5Audio::output`, which only an MMC5 cartridge reaches, and it is 8 instructions **shorter** (`Mmc5::expansion_audio_output` 56 → 48) | **every MMC5 title**: both the square and the PCM levels move. See Q-115 |
 | MR-BUS-1, MR-66-1, MR-34-2 (bus-conflict half) | `registry.rs:113-140` (`has_bus_conflicts`), `mod.rs:417-430` (`cpu_write`), `mod.rs:178-184` (the field) | `mr_bus_1_*` x4, `mr_66_1_*`, `mr_34_2_*` | `Cartridge::cpu_write`, which only a CPU write to $4020-$FFFF reaches: **two instructions** (`cmpb` + `je`) for a board without conflicts, and the `>= $8000` half folded into the range test already there, for free | mappers 2/3/7 **submapper-2 dumps only**, 11, 30 (submapper 0 without battery, or 2), 34 BNROM, 66. No golden-core entry is on any of them |
+| MR-64-3 | `a12_watcher.rs:17-78` (the filter is a field), `rambo1.rs:30` (48 dots), `rambo1.rs:146-162` (the horizon) | `mr_64_3_*` x2 | `A12Watcher::rose` reads a field instead of a constant, on the two boards that watch A12; the MMC3 passes its own 10 and **did not change size**. A **win** for mapper 64: the board can now declare a `ppu_irq_horizon` where it returned `None`, so `NesBus::catch_up_ppu` is 25 instructions smaller | the five Tengen mapper-64 titles: their splits move, the filter being 5x longer |
+| MR-64-4 | `rambo1.rs:76-96` (arm), `rambo1.rs:216-224` (`on_cpu_cycle`) | `mr_64_4_*` x2 | `Board::on_cpu_cycle`: prologue and every non-stepping arm **instruction-identical**; one compare and one branch inside the RAMBO-1 arm, which already stepped every cycle | the five Tengen titles, by at most two CPU cycles of raster position |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -528,3 +530,98 @@ register writes, which is the fix.
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: **572 passed**, 0 failed, **9 ignored** — two fewer than at
 step 3, the two MR-BUS-1 tests having come off `#[ignore]`.
+
+## Step 5 — MR-64-3 and MR-64-4, the RAMBO-1's IRQ
+
+### MR-64-3 — the A12 filter is sixteen M2 cycles, not three
+
+nesdev's *RAMBO-1* pseudo-code counts M2 falling edges while PA12 is low — "If 4-bit counter
+< 16: 4-bit counter++" — and on a rise clocks the 8-bit counter only "If 4-bit counter = 16".
+So A12 must have been low across **sixteen** M2 falls, about 48 dots, where we required ten and
+Mesen requires 31. Ours was five times too permissive: it counted rises this board ignores, and
+the scanline counter ran fast whenever A12 dipped briefly — the normal case for a game with both
+pattern tables in the upper half of CHR.
+
+`A12Watcher::FILTER_DOTS` was an associated constant and is now a **field**, chosen when the
+board is built, with the two values named on the type:
+`A12Watcher::MMC3_FILTER_DOTS` = 10 and `A12Watcher::RAMBO1_FILTER_DOTS` = 48.
+`MIN_RISE_INTERVAL` becomes the method `min_rise_interval(&self)`. **The MMC3 is untouched**: it
+passes its own constant and `Mmc3::ppu_irq_horizon` did not change size.
+
+### MR-64-3 is a net win, as MR-1b predicted
+
+`Rambo1::ppu_irq_horizon` returned `None`, which means "catch the PPU up on every cycle", so the
+five Tengen games never got the PPU batching of `NesBus::defer_ppu`. With a per-board filter it
+can bound the wait exactly as the MMC3 does, over an interval five times as long:
+
+- **cycle mode** → `Some(i64::MAX)`: the counter is clocked by M2 and not by the PPU at all, so
+  no amount of PPU lag can move the line;
+- **scanline mode** → `(clocks_to_zero - 1) * min_rise_interval()`, the MMC3's own formula with
+  49 dots in place of 11.
+
+When `clocks_to_zero` is 1 the horizon is 0, which `NesBus::ppu_horizon` clamps to 1, so the PPU
+still runs in step on the clock that matters — the same guarantee the MMC3 relies on, and what
+makes the batching exact rather than approximate. `NesBus::catch_up_ppu` came out 25 instructions
+*smaller* and `Cartridge::ppu_irq_horizon` became a tail call. **R0 measures the win; this lot
+measures nothing.**
+
+### MR-64-4 — the assertion is delayed
+
+nesdev: in scanline mode the interrupt "is delayed until M2 falls twice after the PPU A12 rise",
+and in cycle mode it "triggers one M2 cycle later than one would naively expect". We pulled the
+line inside `clock_irq_counter`.
+
+`Rambo1::irq_delay` is a small countdown armed there — 2 in scanline mode, 1 in cycle mode — and
+decremented in `on_cpu_cycle`. It runs in **both** modes, because a scanline-mode counter is
+armed by a PPU event and lands two CPU cycles later, so the countdown cannot live under the
+`cycle_mode` early return. A write to $E000 disarms it along with the flag: an acknowledged chip
+has nothing left to assert.
+
+### Cost
+
+`Board::on_cpu_cycle` is the per-CPU-cycle dispatch of **every** board, so it is the one to
+watch. Its prologue is the same ten instructions as before and the arm of a board that does not
+step is the same single `retq`: the dispatch and every other board are **instruction-identical**.
+The whole of MR-64-4's cost is one compare and one branch inside the RAMBO-1 arm, on a path
+`PERFORMANCE-HISTORY.md` §5.1 already lists as stepping every cycle ("Rambo1 and MMC5 still step
+every cycle").
+
+Everything the asm comparison against step 4 reports is in RAMBO-1 or in the two dispatchers'
+RAMBO-1 arms, and no symbol appeared or disappeared:
+
+| symbol | step 4 | step 5 |
+| --- | --- | --- |
+| `Board::on_cpu_cycle` | 92 | 99 (the RAMBO-1 arm) |
+| `Board::ppu_irq_horizon` | 31 | 47 (the RAMBO-1 arm) |
+| `Cartridge::ppu_irq_horizon` | 31 | **2** |
+| `NesBus::catch_up_ppu` | 193 | **168** |
+| `Mmc3::ppu_irq_horizon`, `Mmc3::*` | — | unchanged |
+
+### Save states
+
+`irq_delay` is written **last** in `Rambo1::save_registers` and read only when
+`StateReader::remaining` says the block still has bytes, the pattern `Multicart225` used in MF-1.
+A mapper-64 state written before this lot therefore loads with no delay armed, coming back with
+whatever `irq_pending` it had — which is where the countdown was heading. No format version bump.
+`A12Watcher::filter_dots` is wiring and not state: it is not saved, and `reset` leaves it alone.
+
+### Tests
+
+- `mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles` — **un-ignored**, unchanged, and passing: a
+  20-dot low never clocks the counter.
+- `mr_64_3_rambo1_accepts_a_low_of_sixteen_m2_cycles` **new** — the other side of the threshold,
+  so the filter is long and not infinite.
+- `mr_64_4_rambo1_asserts_two_m2_cycles_after_the_a12_rise` **new** — the line is up on the rise,
+  up one M2 fall later, and down on the second. This is the cycle-level IRQ probe MR-1b said the
+  fixture lacked; it is built from `Cartridge::on_ppu_address_bus` and single `bus.tick()`s with
+  rendering off, so the PPU drives no A12 of its own.
+- `mr_64_4_rambo1_cycle_mode_asserts_one_m2_cycle_later` **new** — the counter lands on a multiple
+  of four cycles after the $C001 write and the line follows one cycle later, so the cycle it
+  asserts on is never a multiple of four.
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **576 passed**, 0 failed, **8 ignored**.
+`cargo test --release -p zax-nes --no-fail-fast -- --ignored` leaves **one** failure,
+`mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value`, which is step 6's; the
+1 200-frame golden test (`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`)
+passes, which is the check that the new PPU horizon did not make the batching inexact.

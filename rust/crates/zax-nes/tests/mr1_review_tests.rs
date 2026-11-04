@@ -29,6 +29,11 @@ mod common;
 
 use common::mapper_fixture::{MapperMachine, MapperRom};
 
+/// Whether the cartridge is pulling the /IRQ line.
+fn irq(core: &zax_nes::NesCore) -> bool {
+    core.cartridge().unwrap().irq_asserted()
+}
+
 // ================================================================ shared: bus conflicts
 //
 // MR-BUS-1. Mesen ANDs the written value with the PRG-ROM byte the same address holds
@@ -871,7 +876,6 @@ fn mr_4_9_mmc3_submapper_2_has_hard_wired_mirroring() {
 /// Twenty dots of low is over our threshold and under both of the others, so no number of
 /// such pulses may ever clock the counter.
 #[test]
-#[ignore = "MR-1b: MR-64-3"]
 fn mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles() {
     let mut core = MapperRom::new(64).prg(8).chr(16).load();
     core.mapper_write(0xC000, 0x01);
@@ -887,6 +891,94 @@ fn mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles() {
     assert!(
         !cart.irq_asserted(),
         "a 20-dot low is too short for RAMBO-1's filter: the counter never moves"
+    );
+}
+
+/// MR-64-3, the other side of the threshold: a low of 48 dots or more **does** clock the
+/// counter, so the filter is long and not infinite. Two counting rises take a latch of 1 from
+/// the reload to zero. **New in MF-2.**
+#[test]
+fn mr_64_3_rambo1_accepts_a_low_of_sixteen_m2_cycles() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+    core.write_memory(0x2001, 0x00); // No rendering: the PPU drives no A12 of its own.
+    core.mapper_write(0xC000, 0x01); // Latch 1.
+    core.mapper_write(0xC001, 0x00); // Scanline mode, reload pending.
+    core.mapper_write(0xE001, 0x00); // Enable.
+
+    {
+        let cart = core.cartridge_mut().unwrap();
+        for i in 0..2 {
+            cart.on_ppu_address_bus(0x0000, 10_000 + i * 200);
+            cart.on_ppu_address_bus(0x1000, 10_000 + i * 200 + 48);
+        }
+    }
+
+    // The counter is at zero; MR-64-4's delay is what stands between it and the line.
+    core.bus_mut().tick();
+    core.bus_mut().tick();
+    assert!(
+        irq(&core),
+        "a 48-dot low is sixteen M2 cycles: the counter must have moved twice"
+    );
+}
+
+/// MR-64-4 — "the actual interrupt triggers slightly later. Specifically, it is delayed until M2
+/// falls twice after the PPU A12 rise" in scanline mode (nesdev, "RAMBO-1"). We pulled the line
+/// on the rise itself. **New in MF-2.**
+#[test]
+fn mr_64_4_rambo1_asserts_two_m2_cycles_after_the_a12_rise() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, 0x01);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+
+    {
+        let cart = core.cartridge_mut().unwrap();
+        for i in 0..2 {
+            cart.on_ppu_address_bus(0x0000, 10_000 + i * 200);
+            cart.on_ppu_address_bus(0x1000, 10_000 + i * 200 + 48);
+        }
+    }
+
+    assert!(!irq(&core), "not on the rise itself");
+    core.bus_mut().tick();
+    assert!(!irq(&core), "nor one M2 fall later");
+    core.bus_mut().tick();
+    assert!(irq(&core), "the line falls on the second M2 fall");
+}
+
+/// MR-64-4, cycle mode — there the interrupt "triggers one M2 cycle later than one would
+/// naively expect", one cycle and not two. **New in MF-2.**
+#[test]
+fn mr_64_4_rambo1_cycle_mode_asserts_one_m2_cycle_later() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, 0x01); // Latch 1.
+    core.mapper_write(0xC001, 0x01); // Cycle mode, reload pending.
+    core.mapper_write(0xE001, 0x00);
+
+    // One clock every four CPU cycles; the first reloads to 1 and the second reaches zero, so
+    // the counter lands eight cycles after the divider was cleared by the $C001 write. The
+    // assertion is what this test is about, so it is read one cycle at a time around it.
+    let mut asserted_at = -1i32;
+    for cycle in 1..=40 {
+        core.bus_mut().tick();
+        if irq(&core) {
+            asserted_at = cycle;
+            break;
+        }
+    }
+
+    assert!(asserted_at > 0, "the cycle-mode counter never reached zero");
+
+    // Re-run with the delay removed from the expectation: the counter reaches zero on a
+    // multiple of four after the $C001 write, and the line follows one cycle later, so the
+    // cycle it lands on is never a multiple of four.
+    assert_ne!(
+        0,
+        asserted_at % 4,
+        "cycle {asserted_at} is a clock cycle: the one-M2 delay is missing"
     );
 }
 
