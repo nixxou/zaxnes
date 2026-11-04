@@ -1,10 +1,12 @@
 //! Findings of lot MR-1, the adversarial review of our mapper boards against Mesen 2
 //! (`docs/review/MR-1-mappers.md`).
 //!
-//! Every test here reproduces one finding classified **our bug** and therefore **fails on
-//! the current code**. They all carry `#[ignore = "MR-1: <finding id>"]` so that the suite
-//! stays green: MR-1 is a review lot and fixes no board. Run them with
-//! `cargo test --release -p zax-nes --test mr1_review_tests -- --ignored`.
+//! Every test here reproduces one finding classified **our bug**. A test still carrying
+//! `#[ignore = "MR-1: <finding id>"]` or `#[ignore = "MR-1b: <finding id>"]` fails on the
+//! current code and waits for the lot that fixes its finding; run those with
+//! `cargo test --release -p zax-nes --test mr1_review_tests -- --ignored`. A test without the
+//! attribute belongs to a finding already fixed — lot MF-1 un-ignores one as it lands —
+//! and runs in the normal suite as the regression guard of that fix.
 //!
 //! Each test asserts the behaviour the review concluded is correct — Mesen 2's, or the
 //! spec's where REQ-CORE-100 pins it ("le comportement documenté sur nesdev"). The comment
@@ -136,7 +138,6 @@ fn mr_13_1_cprom_has_16_kib_of_chr_ram() {
 /// MR-41-1. The PRG field is three bits: a Caltron 6-in-1 has six 32 KiB games, so banks
 /// 4-7 must be reachable. With `outer & 0x03` the menu can only ever start games 0-3.
 #[test]
-#[ignore = "MR-1: MR-41-1"]
 fn mr_41_1_caltron_prg_field_is_three_bits() {
     // 256 KiB: eight 32 KiB banks.
     let mut core = MapperRom::new(41).prg(32).chr(16).load();
@@ -153,7 +154,6 @@ fn mr_41_1_caltron_prg_field_is_three_bits() {
 
 /// MR-41-2. The mirroring bit is address bit 5, which our five-bit mask discards entirely.
 #[test]
-#[ignore = "MR-1: MR-41-2"]
 fn mr_41_2_caltron_mirroring_comes_from_address_bit_5() {
     let mut core = MapperRom::new(41).prg(32).chr(16).load();
 
@@ -167,7 +167,6 @@ fn mr_41_2_caltron_mirroring_comes_from_address_bit_5() {
 /// only can be written while the PRG ROM bank is 4, 5, 6, or 7"); we latch unconditionally
 /// (`multicart.rs:311-316`).
 #[test]
-#[ignore = "MR-1: MR-41-3"]
 fn mr_41_3_caltron_inner_chr_is_gated_on_the_prg_bank() {
     let mut core = MapperRom::new(41).prg(32).chr(16).load();
 

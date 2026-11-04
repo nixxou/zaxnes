@@ -257,11 +257,14 @@ impl Caltron6In1 {
         }
     }
 
+    // The outer register is the address of the write, `..MC CPPP` (nesdev, "INES Mapper 041"):
+    // bits 0-2 the 32 KiB PRG bank of a 256 KiB image (MR-41-1), bits 3-4 the outer CHR bank,
+    // bit 5 the mirroring, 1 = horizontal (MR-41-2).
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
-        self.banks.map_prg_32k(i32::from(self.outer & 0x03));
+        self.banks.map_prg_32k(i32::from(self.outer & 0x07));
         self.banks
             .map_chr_8k(i32::from((((self.outer >> 3) & 0x03) << 2) | self.chr_low));
-        memory.set_mirroring(horizontal_if(self.outer & 0x04 != 0));
+        memory.set_mirroring(horizontal_if(self.outer & 0x20 != 0));
     }
 }
 
@@ -300,7 +303,7 @@ impl Mapper for Caltron6In1 {
         _value: u8,
     ) -> bool {
         if (0x6000..=0x67FF).contains(&address) {
-            self.outer = (address & 0x1F) as u8; // Masked to 5 bits.
+            self.outer = (address & 0x3F) as u8; // PRG, outer CHR and mirroring.
             self.update_banks(memory);
             return true;
         }
@@ -309,7 +312,10 @@ impl Mapper for Caltron6In1 {
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if address >= 0x8000 {
+        // MR-41-3: "The Inner CHR Bank Select only can be written while the PRG ROM bank is 4,
+        // 5, 6, or 7." Address bit 2 of the outer write is both the top PRG bit and the `E`
+        // enable, so the two readings of the gate are the same condition.
+        if address >= 0x8000 && self.outer & 0x04 != 0 {
             self.chr_low = value & 0x03;
             self.update_banks(memory);
         }

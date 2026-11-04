@@ -701,7 +701,10 @@ fn req_core_100_nina001_has_its_registers_at_the_top_of_the_prg_ram_window() {
 #[test]
 fn req_core_100_caltron_takes_the_prg_bank_from_the_address_and_the_chr_from_the_data() {
     let mut core = MapperRom::new(41).prg(16).chr(64).load();
-    core.write_memory(0x6002 | 0x04 | 0x08, 0x00); // PRG 32 KiB bank 2, horizontal, CHR high 1.
+    // `..MC CPPP` (MR-41-1/2): bits 0-2 the PRG bank, bits 3-4 the outer CHR bank, bit 5 the
+    // mirroring. PRG 32 KiB bank 6, which wraps to 2 in a 128 KiB image; horizontal; CHR high
+    // 1. Bank 6 also opens the inner CHR register, which bank 2 alone would not (MR-41-3).
+    core.write_memory(0x6006 | 0x20 | 0x08, 0x00);
     core.write_memory(0x8000, 0x01);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
     assert_eq!(((1 << 2) | 1) * 8, core.chr_bank(0x0000));
