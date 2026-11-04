@@ -737,18 +737,35 @@ fn amd_021_r2_001_action53_takes_the_single_screen_bit_from_a_chr_write() {
 fn req_core_100_unrom512_switches_prg_chr_ram_and_mirroring() {
     // The battery bit is how a submapper-0 UNROM 512 declares that it does *not* have bus
     // conflicts (MR-BUS-1, nesdev "UNROM 512"); byte 6 keeps bits 3 and 0, so the arrangement
-    // is the same `%....1..0` as before.
+    // is the same `%....1..0` as before. That also makes it self-flashable, so the bank latch
+    // is at $C000-$FFFF and $8000-$BFFF is the flash write window (Q-117).
     let mut core = MapperRom::new(30)
         .prg(32)
         .chr(0)
         .mirroring(0x08)
         .battery()
         .load();
-    core.write_memory(0x8000, 0x45); // PRG bank 5, CHR-RAM bank 2, screen A.
+    core.write_memory(0xC000, 0x45); // PRG bank 5, CHR-RAM bank 2, screen A.
     assert_eq!([10, 11, 30, 31], core.prg_windows());
     assert_eq!(Nm::SingleScreenA, core.mirroring());
-    core.write_memory(0x8000, 0xC5);
+    core.write_memory(0xC000, 0xC5);
     assert_eq!(Nm::SingleScreenB, core.mirroring());
+}
+
+/// Q-117 — and a configuration that is **not** self-flashable keeps the latch over the whole of
+/// $8000-$FFFF, which is what the page's unqualified `A~[1... .... .... ....]` says. Submapper 0
+/// without the battery bit is that case (it has bus conflicts), so the write goes through a
+/// bank filled with $FF.
+#[test]
+fn q_117_unrom512_without_self_flashing_keeps_the_latch_over_8000_ffff() {
+    let mut core = MapperRom::new(30)
+        .prg(32)
+        .chr(0)
+        .mirroring(0x08)
+        .prg_bank_all_ones(0)
+        .load();
+    core.write_memory(0x8000, 0x05);
+    assert_eq!([10, 11, 30, 31], core.prg_windows());
 }
 
 #[test]

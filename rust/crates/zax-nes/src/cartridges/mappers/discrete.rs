@@ -422,20 +422,28 @@ enum UnRom512Mirroring {
 /// iNES mapper 30, UNROM 512: 16 KiB PRG, 8 KiB CHR-RAM bank and a nametable select from one
 /// register.
 ///
-/// NES 2.0 submapper 4 is "No bus conflicts, an additional register controls LEDs inside the
-/// cartridge shell", at `D~[BYGR bygr] A~[10.. .... .... ....]`, i.e. $8000-$BFFF — so on that
-/// board the bank register is only at $C000-$FFFF (MR-30-5).
+/// **Where the register is depends on the configuration (Q-117).** nesdev ("UNROM 512") gives it
+/// as `D~[NCCP PPPP] A~[1... .... .... ....]` — all of $8000-$FFFF — and then: "For
+/// self-flashable configurations, the address range shifts to `$C000-$FFFF`" with
+/// `A~[11.. .... .... ....]`, $8000-$BFFF becoming the flash write window. A self-flashable
+/// configuration is one without bus conflicts, since they "interfere with the self-flashing
+/// procedure": submapper 0 with the battery bit, and submappers 1, 3 and 4. That is the same set
+/// `registry::has_bus_conflicts` already decides, so one load-time value says both things.
+///
+/// MR-30-5 falls out of it: submapper 4's LED register is at `D~[BYGR bygr]
+/// A~[10.. .... .... ....]`, $8000-$BFFF, which is where that board's flash window is too, and
+/// its bank register is at $C000-$FFFF like every other self-flashable board's. Nothing in the
+/// engine lights, so an LED write is just a write the latch does not take.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnRom512 {
     banks: BankWindows,
     mirroring_control: UnRom512Mirroring,
-    /// Submapper 4: $8000-$BFFF is the LED register, not the bank register.
-    has_led_register: bool,
-    /// Whether the board can erase and program its own PRG-ROM (MR-30-4). Decided at load:
-    /// submapper 2's bus conflicts "interfere with the self-flashing procedure", and a
-    /// submapper-0 dump without the battery bit has those conflicts too (see
-    /// [`super::super::registry::has_bus_conflicts`]).
-    can_flash: bool,
+    /// First CPU address the bank latch answers: $C000 on a self-flashable configuration,
+    /// $8000 otherwise (Q-117). Decided at load, and it decides the flash window with it —
+    /// everything in $8000-$FFFF *below* this address goes to the flash chip, which on a
+    /// non-flashable board is nothing at all. One compare in `write_register` for both
+    /// questions, and the field replaces MF-2's `can_flash` and `has_led_register` bools.
+    latch_base: u16,
     /// Where the board is in an SST39SF040 command sequence: 0 when none is open, then one
     /// step per byte of the prologue (MR-30-4).
     flash_step: u8,
@@ -486,10 +494,14 @@ impl UnRom512 {
                 .chr_ram()
                 .len()
                 .saturating_sub(Self::CARTRIDGE_VRAM_SIZE),
-            has_led_register: submapper == 4,
-            // MR-30-4 and MR-BUS-1 are interlocked: a board whose ROM goes on driving the data
-            // bus during a write cannot run the command sequences at all.
-            can_flash: !super::super::registry::has_bus_conflicts(30, header),
+            // Q-117, MR-30-4 and MR-BUS-1 are interlocked: a board whose ROM goes on driving the
+            // data bus during a write cannot run the command sequences at all, and it is exactly
+            // the boards that can which move their latch up to $C000.
+            latch_base: if super::super::registry::has_bus_conflicts(30, header) {
+                0x8000
+            } else {
+                0xC000
+            },
             flash_step: 0,
             flash_erasing: false,
             register: 0,
@@ -503,33 +515,56 @@ impl UnRom512 {
         self.cartridge_vram_base + (address & 0x1FFF) as usize
     }
 
-    /// Advances the SST39SF040 command state machine on a CPU write to $8000-$FFFF, and runs
-    /// the command when its last byte lands (MR-30-4).
+    /// The address the flash chip sees for a CPU write in its window: "bank × $4000 +
+    /// (address & $3FFF)", the latch driving the chip's upper address lines (Q-117, R0's answer).
+    const fn chip_address(&self, address: u16) -> u32 {
+        (self.register & 0x1F) as u32 * 0x4000 + (address & 0x3FFF) as u32
+    }
+
+    /// The two SST39SF040 command addresses, on the **chip's** address lines (Q-117).
+    const UNLOCK_5555: u32 = 0x5555;
+    const UNLOCK_2AAA: u32 = 0x2AAA;
+
+    /// Advances the SST39SF040 command state machine on a CPU write to the flash window, and
+    /// runs the command when its last byte lands (MR-30-4, Q-117).
     ///
-    /// nesdev ("UNROM 512") gives the two sequences: erase a 4 KiB sector with $AA to $9555,
-    /// $55 to $AAAA, $80 to $9555, $AA to $9555, $55 to $AAAA and $30 to an address in the
-    /// sector; program a byte with $AA to $9555, $55 to $AAAA, $A0 to $9555 and the byte to its
-    /// address. Either completes before the CPU can look, so the verification reads the page
+    /// nesdev ("UNROM 512") gives the two sequences with their bank writes, which is what makes
+    /// them work at all:
+    ///
+    /// * erase a 4 KiB sector — `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`;
+    ///   `$C000:$01, $9555:$80`; `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`;
+    ///   `$C000:BANK, ADDR:$30`;
+    /// * program a byte — `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`;
+    ///   `$C000:$01, $9555:$A0`; `$C000:BANK, ADDR:DATA`.
+    ///
+    /// Each unlock write is preceded by the bank that puts it on the chip address the chip
+    /// expects: bank 1 at $9555 is chip $5555, bank 0 at $AAAA is chip $2AAA. **So the chip
+    /// recognises its sequences on chip addresses, not on CPU addresses** — this is the
+    /// substance of R0's answer to Q-117, and it is why the state machine below matches
+    /// [`Self::chip_address`]. The bank writes land at $C000, outside the window, so they never
+    /// perturb the state machine; what MF-2 had to reason about — the latch moving under the
+    /// chip's feet — simply does not happen.
+    ///
+    /// A side effect a real driver has to live with: `$C000:$01` and `$C000:$00` also set the
+    /// CHR-RAM bank (bits 5-6) to 0 and the arrangement bit (bit 7) to 0, because they are
+    /// writes to the whole register. That is the hardware.
+    ///
+    /// Either command completes before the CPU can look, so the verification reads the page
     /// describes ("read the written location twice until you get $FF twice", and the same for
     /// the data) succeed at once and the board never has to answer a read with status — which
-    /// is what keeps `rom_windows` a plain window and this fix off every other board's read
-    /// path.
-    ///
-    /// **Q-117.** Every byte of a sequence is also a write to the mapper's own latch, so the
-    /// 16 KiB window the chip sees when the last byte lands is the one the *previous* byte
-    /// chose. The page says nothing about that interaction, and taken literally it puts every
-    /// byte-write in bank 0 and every erase in bank 21. The chip is given the window in force,
-    /// which is what the register diagram and the write cycle's own order imply, and the ticket
-    /// records the two other readings. Persistence of a reprogrammed ROM is also out of scope
-    /// there: the flash is changed in memory and a reload loses it.
+    /// is what keeps `rom_windows` a plain window and this off every other board's read path.
+    /// Persistence of a reprogrammed ROM stays out of scope (Q-117, to be settled with
+    /// REQ-CORE-095): the flash is changed in memory and a reload loses it.
     fn step_flash(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        match (self.flash_step, address, value) {
-            (0 | 3, 0x9555, 0xAA) | (1 | 4, 0xAAAA, 0x55) => self.flash_step += 1,
-            (2, 0x9555, 0x80) => {
+        match (self.flash_step, self.chip_address(address), value) {
+            (0 | 3, Self::UNLOCK_5555, 0xAA) | (1 | 4, Self::UNLOCK_2AAA, 0x55) => {
+                self.flash_step += 1;
+            }
+            (2, Self::UNLOCK_5555, 0x80) => {
                 self.flash_erasing = true;
                 self.flash_step = 3;
             }
-            (2, 0x9555, 0xA0) => {
+            (2, Self::UNLOCK_5555, 0xA0) => {
                 self.flash_erasing = false;
                 self.flash_step = 6;
             }
@@ -541,7 +576,7 @@ impl UnRom512 {
                 self.program_byte(memory, address, value);
                 self.flash_step = 0;
             }
-            // Anything else aborts the sequence. A plain bank write is the common case.
+            // Anything else aborts the sequence.
             _ => self.flash_step = 0,
         }
     }
@@ -654,25 +689,16 @@ impl Mapper for UnRom512 {
             return;
         }
 
-        // MR-30-4. The flash chip sees every write to $8000-$FFFF, whatever the mapper latch
-        // does with the same write: the command sequences deliberately run through addresses
-        // that also move the bank, which is why a flashing routine lives in the fixed window.
-        // One `bool` test for a board that cannot flash, and no other board reaches this line.
-        if self.can_flash {
+        // Q-117. The latch and the flash chip split $8000-$FFFF between them, at `latch_base`:
+        // on a self-flashable configuration the chip has $8000-$BFFF and the latch $C000-$FFFF,
+        // and on every other one the latch has the lot and there is no chip to write. One
+        // compare decides, and no other board reaches this line.
+        if address < self.latch_base {
             self.step_flash(memory, address, value);
+            return;
         }
 
-        // MR-30-5: on a submapper-4 board $8000-$BFFF is the LED register, which drives four
-        // colour pairs inside the cartridge shell and no bank. Nothing in the engine lights,
-        // so the write is simply not a bank write; the bank register is at $C000-$FFFF.
-        let first = if self.has_led_register {
-            0xC000
-        } else {
-            0x8000
-        };
-        if address >= first {
-            self.register = value;
-            self.update_banks(memory);
-        }
+        self.register = value;
+        self.update_banks(memory);
     }
 }

@@ -26,7 +26,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 ## Steps
 
 - [x] 1/9 — MMC1 SNROM: bit 4 of the CHR bank register disables the work RAM
-- [ ] 2/9 — Q-117: the UNROM 512 bank latch is decoded by configuration
+- [x] 2/9 — Q-117: the UNROM 512 bank latch is decoded by configuration
 - [ ] 3/9 — mapper 69, Sunsoft FME-7 (banks, CPU-cycle IRQ, $6000 RAM/ROM switching)
 - [ ] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
 - [ ] 5/9 — mapper 118, TxSROM
@@ -72,6 +72,7 @@ Before the lot (`7cbd9c52`):
 | item | fix (file:line) | test | hot path touched, and why other games do not pay | commercial games whose output changes |
 | --- | --- | --- | --- | --- |
 | MF-T, `M1_P128K` / `M1_P128K_CR8K` detailed `4000` (SNROM work-RAM disable) | `mmc1.rs:29-38` (two fields), `:72-104` (`is_snrom`), `:105-116` (`refresh_prg_ram_disable`), `:118-119` (`update_banks`), `:200-201` (`load_registers`), `:211-215` (`prg_ram_enabled`) | `req_core_100_mmc1_snrom_disables_prg_ram_with_bit_4_of_the_chr_register`, `req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enable`; the two Holy Mapperel rows in `test_roms_tests.rs` | **none.** The whole-crate asm diff is three symbols, all off every hot path: `Mmc1::update_banks` 137 → 148, `Mmc1::load_registers` 89 → 118, `Cartridge::create` 3435 → 3471 (the load-time decision). `Board::prg_ram_enabled` is **byte-identical** — the answer is a precomputed `bool`, so the $6000-$7FFF decode is the same load and test as before | mapper-1 images on an SNROM-shaped board (CHR-ROM ≤ 8 KiB, PRG-RAM 8 KiB, PRG-ROM ≤ 256 KiB) **that set bit 4 of `$A000`**: on real SNROM hardware that disables the RAM, so no shipped game does it while using the RAM. The golden-core set has mapper 1; *Mega Man 2* and *Zelda II* are both on this shape and neither writes that bit with the RAM live |
+| Q-117 (R0's answer): the UNROM 512 latch is at `$C000-$FFFF` on a self-flashable configuration, `$8000-$BFFF` being the flash write window, and the chip recognises its sequences on **chip** addresses | `discrete.rs:422-446` (the type doc and the `latch_base` field), `:496-503` (the load-time decision), `:514-526` (`chip_address`, the two unlock constants), `:528-585` (`step_flash`), `:688-698` (`write_register`) | `q_117_unrom512_programs_a_byte_of_its_own_flash` (was `mr_30_4_…`, rewritten with the page's sequences verbatim), `q_117_unrom512_flashes_the_bank_the_driver_selects`, `q_117_unrom512_unlocks_only_on_the_chips_own_command_addresses`, `q_117_unrom512_without_self_flashing_keeps_the_latch_over_8000_ffff`, `mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing`, `mr_30_4_unrom512_with_bus_conflicts_cannot_flash`, `mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register` (unchanged, and now implied by the new rule) | **none, and it is a win.** `UnRom512::write_register` 116 → **106** (one compare replaces a `bool` test plus a second compare) and `Cartridge::create` 3471 → **3462** (one `u16` replaces two `bool`s). Nothing else in the crate moved. The read path is untouched: `rom_windows` is still a plain window, so no board pays anything on a read | self-flashing UNROM 512 homebrew, and **every** mapper-30 image on a no-bus-conflict configuration: its bank latch has moved from `$8000-$FFFF` to `$C000-$FFFF`. No golden-core entry is on mapper 30 |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -152,3 +153,96 @@ Registers in `$4020-$5FFF`: none — the MMC1 decodes `$8000-$FFFF` only.
 * Generated code: `Board::ppu_peek` 240, `Board::ppu_read` 241,
   `Ppu2C02::read_pattern_planes` 106, `Ppu2C02::read_nametable_as` 107 — all four unchanged, and
   the whole-crate diff is the three load-time / register-commit symbols in the table above.
+
+## Step 2 — Q-117, the UNROM 512 bank latch
+
+### What R0 answered
+
+Q-117 asked which bank the flash chip sees, given that — as MF-2 read the page — every byte of
+a command sequence is also a write to the bank latch. R0 reread the NESdev *UNROM 512* page and
+none of the ticket's three readings was right:
+
+> **sur une configuration reprogrammable (sous-mappeur 0 avec le bit de pile, sous-mappeurs 1, 3
+> et 4), le verrou de banque est en `$C000-$FFFF` seulement**, et `$8000-$BFFF` est la fenêtre
+> d'écriture de la flash.
+
+The page says it in the register diagram itself: `D~[NCCP PPPP] A~[1... .... .... ....]`, and
+then "For self-flashable configurations, the address range shifts to `$C000-$FFFF`" with
+`A~[11.. .... .... ....]`. And the sequences it gives put a bank write in front of **every**
+command byte:
+
+* erase — `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`; `$C000:$01, $9555:$80`;
+  `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`; `$C000:BANK, ADDR:$30`;
+* program — `$C000:$01, $9555:$AA`; `$C000:$00, $AAAA:$55`; `$C000:$01, $9555:$A0`;
+  `$C000:BANK, ADDR:DATA`.
+
+The chip sees `bank × $4000 + (ADDR & $3FFF)`, so bank 1 at `$9555` is chip `$5555` and bank 0
+at `$AAAA` is chip `$2AAA` — the SST39SF040's own command addresses — and the **last** write of
+each sequence reaches the bank the driver named. The interaction MF-2 had to reason about does
+not exist: the bank writes are at `$C000`, outside the window, so they never touch the state
+machine.
+
+### What changed
+
+Three things, and the first pays for the other two:
+
+1. **`can_flash` and `has_led_register` collapse into one `latch_base: u16`**, $C000 on a
+   self-flashable configuration and $8000 otherwise. "Self-flashable" is "no bus conflicts",
+   since they "interfere with the self-flashing procedure" — the set
+   `registry::has_bus_conflicts` already decides, so there is no new load-time predicate. The
+   whole of `write_register` becomes
+
+       if address < self.latch_base { self.step_flash(…); return; }
+       self.register = value;
+       self.update_banks(memory);
+
+   One compare answers both "is this the flash window?" and "is this the latch?", and on a
+   non-flashable board `address < 0x8000` is unreachable after the guard above it, so
+   `step_flash` is simply never entered.
+2. **`step_flash` matches on `chip_address(address)`** — `(register & $1F) × $4000 +
+   (address & $3FFF)` — against `$5555` and `$2AAA` instead of on the CPU addresses `$9555` and
+   `$AAAA`.
+3. **MR-30-5 falls out of the new rule.** Submapper 4's LED register is at `A~[10..]`, which is
+   where its flash window is; its bank register is at `$C000-$FFFF` like every other
+   self-flashable board's. The special case is gone and
+   `mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register` passes unchanged.
+
+A side effect of the page's own sequences, worth writing down: `$C000:$01` and `$C000:$00` also
+set the CHR-RAM bank bits to 0 and the arrangement bit to 0, because they are writes to the
+whole register. A real driver lives with that; so does ours.
+
+### The tests
+
+`mr_30_4_unrom512_programs_a_byte_of_its_own_flash` is replaced by
+`q_117_unrom512_programs_a_byte_of_its_own_flash`, which drives the page's sequences verbatim
+through two helpers (`erase_sector`, `program_byte`) that write the `$C000` bank in front of
+every byte. Two new tests pin what the answer buys: the sequences reach **the bank the driver
+selects** (erase the same offset in banks 1 and 3, program into 1 and not 3), and an unlock on
+the wrong chip address — `$9555` latched to bank 2, chip `$1555` — programs nothing. A fourth,
+in `mapper_tests.rs`, pins the other side: a configuration that is not self-flashable keeps the
+latch over the whole of `$8000-$FFFF`.
+
+Four existing tests moved their bank writes from `$8000` to `$C000`, because their images are
+self-flashable configurations: `req_core_100_unrom512_switches_prg_chr_ram_and_mirroring`,
+`mr_30_1_unrom512_byte6_08_is_switchable_one_screen`,
+`mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical`, and the battery arm of
+`mr_bus_1_unrom512_conflicts_follow_the_submapper_and_the_battery_bit`. The non-flashable arms
+of that last one still write `$8100`, which is the point.
+
+### Save states and the $4020-$5FFF rule
+
+`latch_base` is derived at load, as `can_flash` and `has_led_register` were, so **no savestate
+byte changed**: a mapper-30 state written before this lot loads unchanged (`register`,
+`flash_step`, `flash_erasing`, in that order).
+
+Registers in `$4020-$5FFF`: none. The UNROM 512 decodes `$8000-$FFFF` only, and REQ-CORE-100
+gives the board no PRG-RAM at all (MR-30-2).
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed.
+* Generated code: `Board::ppu_peek` 240, `Board::ppu_read` 241,
+  `Ppu2C02::read_pattern_planes` 106, `Ppu2C02::read_nametable_as` 107 — unchanged. The only two
+  symbols in the whole-crate diff both **shrank**: `UnRom512::write_register` 116 → 106,
+  `Cartridge::create` 3471 → 3462.

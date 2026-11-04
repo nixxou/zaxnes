@@ -158,9 +158,10 @@ fn mr_bus_1_unrom512_conflicts_follow_the_submapper_and_the_battery_bit() {
     plain.mapper_write(0x8100, 0x01);
     assert_eq!([0, 1, 14, 15], plain.prg_windows());
 
-    // Submapper 0 *with* a battery is how such a dump says "no conflicts".
+    // Submapper 0 *with* a battery is how such a dump says "no conflicts" — and with that it is
+    // self-flashable, so Q-117 puts its latch at $C000-$FFFF and $8100 is the flash window.
     let mut battery = MapperRom::new(30).prg(16).chr(0).battery().load();
-    battery.mapper_write(0x8100, 0x01);
+    battery.mapper_write(0xC100, 0x01);
     assert_eq!([2, 3, 14, 15], battery.prg_windows());
 
     // Submapper 2 has them whatever the battery bit says.
@@ -440,13 +441,15 @@ fn mr_30_2_unrom512_does_not_drive_6000_7fff() {
 /// nametable arrangement": bit 7 of the register picks H or V, not screen A or B.
 #[test]
 fn mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical() {
+    // Submapper 3 has no bus conflicts, so it is self-flashable and its latch is at
+    // $C000-$FFFF (Q-117).
     let mut core = MapperRom::new(30).prg(8).chr(0).submapper(3).load();
     assert_eq!(zax_nes::NametableMirroring::Vertical, core.mirroring());
 
-    core.mapper_write(0x8000, 0x80);
+    core.mapper_write(0xC000, 0x80);
     assert_eq!(zax_nes::NametableMirroring::Horizontal, core.mirroring());
 
-    core.mapper_write(0x8000, 0x00);
+    core.mapper_write(0xC000, 0x00);
     assert_eq!(zax_nes::NametableMirroring::Vertical, core.mirroring());
 }
 
@@ -458,7 +461,7 @@ fn mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical() {
 /// present" (nesdev, "UNROM 512"), and without it the zero-filled PRG bank 0 at $8000 would pull
 /// the written $80 down to $00. Byte 6 stays `%....1.1.0` on bits 3 and 0, so the arrangement
 /// this test is about is unchanged; what the bit buys is a register write that reaches the
-/// register.
+/// register. It also makes the board self-flashable, so Q-117 puts its latch at $C000-$FFFF.
 #[test]
 fn mr_30_1_unrom512_byte6_08_is_switchable_one_screen() {
     let mut core = MapperRom::new(30)
@@ -469,47 +472,77 @@ fn mr_30_1_unrom512_byte6_08_is_switchable_one_screen() {
         .load();
     assert_eq!(zax_nes::NametableMirroring::SingleScreenA, core.mirroring());
 
-    core.mapper_write(0x8000, 0x80);
+    core.mapper_write(0xC000, 0x80);
     assert_eq!(zax_nes::NametableMirroring::SingleScreenB, core.mirroring());
 }
 
-/// MR-30-4 — the board carries flash, not mask ROM, and a game can program it: "Write a
-/// sequence of bytes here for writing to flash ROM". nesdev ("UNROM 512") gives the SST39SF040
-/// "Write a byte" sequence as $AA to $9555, $55 to $AAAA, $A0 to $9555 and then the byte to its
-/// address, and the verification as "read the written location twice until you get DATA twice".
-/// **New in MF-2.**
-/// Every byte of the sequence is also a write to the mapper's own latch, as on hardware — the
-/// register is `D~[NCCP PPPP] A~[1... .... .... ....]` — so the 16 KiB window in force when the
-/// last byte lands is the one the flash chip sees, and it is the *previous* byte of the sequence
-/// that chose it. The two sequences therefore reach two different banks, which is what the
-/// explicit re-selections below read back through. See Q-117.
-#[test]
-fn mr_30_4_unrom512_programs_a_byte_of_its_own_flash() {
-    // Submapper 1 is "No bus conflicts", which is what the self-flashing procedure needs. The
-    // image is 64 KiB, four 16 KiB banks, and 8 KiB bank 0 is filled with $FF so that a
-    // programmed byte — flash can only clear bits — is observable without erasing first.
-    let mut core = MapperRom::new(30)
+/// A self-flashable UNROM 512 image: submapper 1, "No bus conflicts", which is what the
+/// self-flashing procedure needs. 64 KiB of PRG — four 16 KiB banks — and 8 KiB PRG bank 0 is
+/// filled with $FF so that a programmed byte (flash can only clear bits) is observable without
+/// erasing first.
+fn flashable_unrom512() -> zax_nes::NesCore {
+    MapperRom::new(30)
         .prg(8)
         .chr(0)
         .submapper(1)
         .prg_bank_all_ones(0)
-        .load();
+        .load()
+}
 
-    // Erase: $AA/$9555, $55/$AAAA, $80/$9555, $AA/$9555, $55/$AAAA, $30/<sector>. The byte
-    // before the last is $55, which latches 16 KiB bank 21 mod 4 = 1, so the sector erased is
-    // the one $9000 shows through bank 1 — filled with $02 by the fixture.
-    for (address, value) in [
-        (0x9555u16, 0xAAu8),
-        (0xAAAA, 0x55),
-        (0x9555, 0x80),
-        (0x9555, 0xAA),
-        (0xAAAA, 0x55),
+/// nesdev ("UNROM 512"), erase a 4 KiB sector, verbatim: `$C000:$01, $9555:$AA`;
+/// `$C000:$00, $AAAA:$55`; `$C000:$01, $9555:$80`; `$C000:$01, $9555:$AA`;
+/// `$C000:$00, $AAAA:$55`; `$C000:BANK, ADDR:$30`.
+fn erase_sector(core: &mut zax_nes::NesCore, bank: u8, target: u16) {
+    for (unlock_bank, address, value) in [
+        (0x01u8, 0x9555u16, 0xAAu8),
+        (0x00, 0xAAAA, 0x55),
+        (0x01, 0x9555, 0x80),
+        (0x01, 0x9555, 0xAA),
+        (0x00, 0xAAAA, 0x55),
     ] {
+        core.mapper_write(0xC000, unlock_bank);
         core.mapper_write(address, value);
     }
-    core.mapper_write(0x9000, 0x30);
 
-    core.mapper_write(0x8000, 0x01); // Back to bank 1 to read it.
+    core.mapper_write(0xC000, bank);
+    core.mapper_write(target, 0x30);
+}
+
+/// nesdev ("UNROM 512"), program one byte, verbatim: `$C000:$01, $9555:$AA`;
+/// `$C000:$00, $AAAA:$55`; `$C000:$01, $9555:$A0`; `$C000:BANK, ADDR:DATA`.
+fn program_byte(core: &mut zax_nes::NesCore, bank: u8, target: u16, data: u8) {
+    for (unlock_bank, address, value) in [
+        (0x01u8, 0x9555u16, 0xAAu8),
+        (0x00, 0xAAAA, 0x55),
+        (0x01, 0x9555, 0xA0),
+    ] {
+        core.mapper_write(0xC000, unlock_bank);
+        core.mapper_write(address, value);
+    }
+
+    core.mapper_write(0xC000, bank);
+    core.mapper_write(target, data);
+}
+
+/// MR-30-4 and **Q-117 as R0 answered it** — the board carries flash, not mask ROM, and a game
+/// can program it, in the bank of its choosing.
+///
+/// On a self-flashable configuration the bank latch is at $C000-$FFFF only and $8000-$BFFF is
+/// the flash write window, so the page's sequences can put a bank write in front of every
+/// command byte without disturbing the chip. The chip then sees `bank × $4000 +
+/// (address & $3FFF)`: the unlocks land on chip $5555 (bank 1, $9555) and chip $2AAA (bank 0,
+/// $AAAA), the SST39SF040's own command addresses, and the last write of each sequence reaches
+/// **the bank the driver chose**. MF-2's reading had every byte-write fall in bank 0 and every
+/// erase in bank 21; this is the one the page's own sequences imply.
+#[test]
+fn q_117_unrom512_programs_a_byte_of_its_own_flash() {
+    let mut core = flashable_unrom512();
+
+    // Erase the 4 KiB sector that $9000 shows through 16 KiB bank 1 — 8 KiB bank 2 of the
+    // fixture, filled with $02.
+    erase_sector(&mut core, 0x01, 0x9000);
+
+    core.mapper_write(0xC000, 0x01); // Back to bank 1 to read it.
     assert_eq!(
         0xFF,
         core.read_memory(0x9000),
@@ -520,42 +553,83 @@ fn mr_30_4_unrom512_programs_a_byte_of_its_own_flash() {
     assert_eq!(0x02, core.read_memory(0x8000));
     assert_eq!(0x03, core.read_memory(0xB000));
 
-    // Program one byte: $AA/$9555, $55/$AAAA, $A0/$9555, then the data. $A0 latches bank 0,
-    // which is the $FF-filled one, so the byte written shows through.
-    core.mapper_write(0x9555, 0xAA);
-    core.mapper_write(0xAAAA, 0x55);
-    core.mapper_write(0x9555, 0xA0);
-    core.mapper_write(0x9000, 0x5A);
+    // Program one byte into 16 KiB bank 0, whose first half the fixture filled with $FF.
+    program_byte(&mut core, 0x00, 0x9000, 0x5A);
 
-    core.mapper_write(0x8000, 0x00); // Back to bank 0 to read it.
+    core.mapper_write(0xC000, 0x00);
     assert_eq!(0x5A, core.read_memory(0x9000), "the byte is programmed");
     assert_eq!(
         0xFF,
         core.read_memory(0x9001),
-        "and only that byte: its neighbour is still erased"
+        "and only that byte: its neighbour is untouched"
     );
 }
 
-/// MR-30-4 — a sequence the chip does not recognise leaves the ROM alone, and an aborted one
-/// does not carry over: the state machine must not be left half-open by a plain bank write.
-/// **New in MF-2.**
+/// Q-117 — the two sequences reach whichever bank the driver names, which is the whole point of
+/// the latch being out of the window: a board that can only ever program bank 0 could not
+/// reprogram itself.
 #[test]
-fn mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing() {
-    let mut core = MapperRom::new(30)
-        .prg(8)
-        .chr(0)
-        .submapper(1)
-        .prg_bank_all_ones(0)
-        .load();
+fn q_117_unrom512_flashes_the_bank_the_driver_selects() {
+    let mut core = flashable_unrom512();
 
-    // The prologue of a byte write, then a plain bank write instead of the data: the sequence
-    // aborts, and the bank write must not be taken as the data byte.
-    core.mapper_write(0x9555, 0xAA);
-    core.mapper_write(0xAAAA, 0x55);
-    core.mapper_write(0x8000, 0x00); // Not $A0 at $9555: abort.
+    // Erase the same offset in two different 16 KiB banks, 1 and 3.
+    erase_sector(&mut core, 0x01, 0x9000);
+    erase_sector(&mut core, 0x03, 0x9000);
+
+    for (bank, expected) in [(0x01u8, 0xFFu8), (0x03, 0xFF), (0x02, 0x04)] {
+        core.mapper_write(0xC000, bank);
+        assert_eq!(expected, core.read_memory(0x9000), "16 KiB bank {bank}");
+    }
+
+    // And a byte programmed into bank 1 is not a byte programmed into bank 3.
+    program_byte(&mut core, 0x01, 0x9000, 0x3C);
+    core.mapper_write(0xC000, 0x01);
+    assert_eq!(0x3C, core.read_memory(0x9000));
+    core.mapper_write(0xC000, 0x03);
+    assert_eq!(0xFF, core.read_memory(0x9000));
+}
+
+/// Q-117 — the chip recognises its sequences on **chip** addresses. The same CPU address with
+/// another bank latched is another chip address and unlocks nothing: $9555 in bank 0 is chip
+/// $1555, not $5555.
+#[test]
+fn q_117_unrom512_unlocks_only_on_the_chips_own_command_addresses() {
+    let mut core = flashable_unrom512();
+
+    // The byte-program prologue with every bank write replaced by bank 2: the CPU addresses are
+    // the page's, the chip addresses are not.
+    for (address, value) in [(0x9555u16, 0xAAu8), (0xAAAA, 0x55), (0x9555, 0xA0)] {
+        core.mapper_write(0xC000, 0x02);
+        core.mapper_write(address, value);
+    }
+    core.mapper_write(0xC000, 0x00);
     core.mapper_write(0x9000, 0x5A);
 
-    core.mapper_write(0x8000, 0x00);
+    core.mapper_write(0xC000, 0x00);
+    assert_eq!(
+        0xFF,
+        core.read_memory(0x9000),
+        "an unlock on the wrong chip address must program nothing"
+    );
+}
+
+/// MR-30-4 — an aborted sequence does not carry over: the state machine must not be left
+/// half-open. **New in MF-2**, rewritten for Q-117.
+#[test]
+fn mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing() {
+    let mut core = flashable_unrom512();
+
+    // The prologue of a byte write, then an unrecognised write instead of the $A0: the sequence
+    // aborts, and the data write that follows must not be taken as the byte to program.
+    core.mapper_write(0xC000, 0x01);
+    core.mapper_write(0x9555, 0xAA);
+    core.mapper_write(0xC000, 0x00);
+    core.mapper_write(0xAAAA, 0x55);
+    core.mapper_write(0xC000, 0x00);
+    core.mapper_write(0x9000, 0x00); // Not $A0 at chip $5555: abort.
+    core.mapper_write(0x9000, 0x5A);
+
+    core.mapper_write(0xC000, 0x00);
     assert_eq!(
         0xFF,
         core.read_memory(0x9000),
@@ -564,29 +638,25 @@ fn mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing() {
 }
 
 /// MR-30-4 — and a board **with** bus conflicts cannot flash at all, because they "interfere
-/// with the self-flashing procedure" (nesdev, "UNROM 512", submapper 2). **New in MF-2.**
+/// with the self-flashing procedure" (nesdev, "UNROM 512", submapper 2). On that configuration
+/// the latch keeps the whole of $8000-$FFFF (Q-117), so every byte of the sequence is a bank
+/// write and nothing else. **New in MF-2.**
 #[test]
 fn mr_30_4_unrom512_with_bus_conflicts_cannot_flash() {
     let mut core = MapperRom::new(30).prg(8).chr(0).submapper(2).load();
 
     // The same erase sequence, which a conflicting board must not act on. The written values
     // are ANDed with the ROM anyway, so the sequence could never be recognised on hardware.
-    for (address, value) in [
-        (0x9555u16, 0xAAu8),
-        (0xAAAA, 0x55),
-        (0x9555, 0x80),
-        (0x9555, 0xAA),
-        (0xAAAA, 0x55),
-    ] {
-        core.mapper_write(address, value);
-    }
-    core.mapper_write(0x9000, 0x30);
+    // Every one of those writes is ANDed with the zero-filled PRG bank 0 at $8000, so the
+    // register never moves and the windows stay [0, 1, 6, 7].
+    erase_sector(&mut core, 0x01, 0x9000);
 
     assert_eq!(
         0x00,
         core.read_memory(0x9000),
         "a submapper-2 board must not erase its own ROM"
     );
+    assert_eq!(0x01, core.read_memory(0xB000));
 }
 
 /// MR-30-6 — "The cartridge VRAM for the '4-screen with cartridge VRAM' comes from the last
