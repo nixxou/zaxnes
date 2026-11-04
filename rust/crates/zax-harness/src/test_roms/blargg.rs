@@ -67,8 +67,31 @@ pub fn frame_budget(lower: &str) -> u32 {
     }
 }
 
+/// Frames a ROM is given to arm the protocol before the reader gives up on it.
+///
+/// Half of the community collection predates `$6000`: the 2005 PPU, sprite-hit and
+/// sprite-overflow suites report on screen only. A ROM that does implement the protocol writes
+/// `$80` in its first frames, so ten seconds of emulated time is a generous bound and keeps the
+/// screen-only ROMs from each burning a two-minute budget.
+const PROBE: u32 = 600;
+
+/// What the reader could make of a ROM.
+#[derive(Debug, Clone)]
+pub enum Read {
+    /// The protocol spoke.
+    Verdict(Verdict),
+    /// The ROM never armed the protocol; `frames` is what the probe spent.
+    NoProtocol {
+        /// Frames run before the reader gave up.
+        frames: u32,
+    },
+}
+
 /// Runs `core` until the protocol gives a result or `budget` frames have been run.
-pub fn run(core: &mut NesCore, budget: u32) -> Verdict {
+///
+/// Returns [`Read::NoProtocol`] — after only [`PROBE`] frames — when the ROM never writes `$80`
+/// at `$6000` behind the signature, so the caller can read its screen instead.
+pub fn run(core: &mut NesCore, budget: u32) -> Read {
     let mut seen_running = false;
     let mut resets = 0u32;
     let mut reset_at: Option<u32> = None;
@@ -90,42 +113,42 @@ pub fn run(core: &mut NesCore, budget: u32) -> Verdict {
             }
         }
 
-        if !signed(core) {
-            continue;
+        if signed(core) {
+            match core.read_memory(0x6000) {
+                RUNNING => seen_running = true,
+                NEEDS_RESET if seen_running && reset_at.is_none() => {
+                    reset_at = Some(frame + RESET_DELAY);
+                }
+                NEEDS_RESET => {}
+                status if seen_running => {
+                    return Read::Verdict(finish(core, status, frame, resets))
+                }
+                _ => {}
+            }
         }
 
-        match core.read_memory(0x6000) {
-            RUNNING => seen_running = true,
-            NEEDS_RESET if seen_running && reset_at.is_none() => {
-                reset_at = Some(frame + RESET_DELAY);
-            }
-            NEEDS_RESET => {}
-            status if seen_running => return finish(core, status, frame, resets),
-            _ => {}
+        if frame >= PROBE && !seen_running && resets == 0 {
+            return Read::NoProtocol { frames: frame };
         }
     }
 
+    let text = one_line(&text_of(core));
     let mut verdict = Verdict::new(
         "blargg",
         Outcome::Timeout,
-        if seen_running {
-            let text = one_line(&text_of(core));
-            if text.is_empty() {
-                "no result after the frame budget".to_owned()
-            } else {
-                format!("no result after the frame budget; last text: {text}")
-            }
+        if text.is_empty() {
+            "no result after the frame budget".to_owned()
         } else {
-            "the $6000 protocol never started (no $80 at $6000 with the DE B0 61 signature)"
-                .to_owned()
+            format!(
+                "no result after the frame budget; last text: {}",
+                tail(&text)
+            )
         },
         budget,
     );
-    verdict
-        .detail
-        .insert("signature".into(), json!(signed(core)));
+    verdict.detail.insert("text".into(), json!(text));
     verdict.detail.insert("resets".into(), json!(resets));
-    verdict
+    Read::Verdict(verdict)
 }
 
 /// Whether a ROM uses the protocol at all, used to decide between this reader and the screen
@@ -133,6 +156,19 @@ pub fn run(core: &mut NesCore, budget: u32) -> Verdict {
 #[must_use]
 pub fn signed(core: &NesCore) -> bool {
     (0..3).all(|offset| core.read_memory(0x6001 + offset) == SIGNATURE[usize::from(offset)])
+}
+
+/// Whether a finished ROM said "Done" rather than "Passed".
+///
+/// `tests_done` in blargg's own `common/testing.s` prints "Done" and exits with code 0 when the
+/// ROM never called `set_test`, and the readme says of exactly those ROMs: "Only a test which
+/// prints 'done' at the end requires that you watch/listen while it runs in order to determine
+/// whether it passed. Such tests involve things which the CPU cannot directly test." Code 0
+/// therefore does **not** mean the ROM passed; it means the ROM finished and has nothing to
+/// say about it, so the row is `manual` and the PNG is the evidence.
+fn says_done(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("done") && !lower.contains("passed")
 }
 
 /// The zero-terminated text the ROM wrote from `$6004`.
@@ -147,16 +183,20 @@ pub fn text_of(core: &NesCore) -> String {
 
 fn finish(nes: &NesCore, status: u8, frame: u32, resets: u32) -> Verdict {
     let text = one_line(&text_of(nes));
-    let outcome = if status == 0 {
-        Outcome::Pass
-    } else {
-        Outcome::Fail
+    let outcome = match status {
+        0 if says_done(&text) => Outcome::Manual,
+        0 => Outcome::Pass,
+        _ => Outcome::Fail,
     };
-    let message = match (status, text.is_empty()) {
-        (0, true) => "passed".to_owned(),
-        (0, false) => text.clone(),
+    let short = tail(&text);
+    let message = match (outcome, short.is_empty()) {
+        (Outcome::Manual, _) => {
+            format!("{short} — the readme says a \"done\" test has to be watched or heard")
+        }
+        (_, true) if status == 0 => "passed".to_owned(),
+        (_, false) if status == 0 => short,
         (_, true) => format!("failed with code {status}"),
-        (_, false) => format!("{text} (code {status})"),
+        (_, false) => format!("{short} (code {status})"),
     };
 
     let mut verdict = Verdict::new("blargg", outcome, message, frame);
@@ -164,4 +204,20 @@ fn finish(nes: &NesCore, status: u8, frame: u32, resets: u32) -> Verdict {
     verdict.detail.insert("text".into(), json!(text));
     verdict.detail.insert("resets".into(), json!(resets));
     verdict
+}
+
+/// The end of a ROM's output: its last three lines.
+///
+/// A blargg ROM prints everything it has to say and finishes with the name the failing
+/// `set_test` gave, the ROM's own filename and `Passed` or `Failed #<code>`. The whole text is
+/// kept in `detail.text`; a row of the report wants the conclusion, which is that tail. The
+/// multi-test builds put the failing sub-test's name there too, so nothing is lost.
+fn tail(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .split(" / ")
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let start = lines.len().saturating_sub(3);
+    lines[start..].join(" / ")
 }

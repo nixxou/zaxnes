@@ -15,7 +15,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 
 - [x] 1/10 — `test-roms` subcommand skeleton: ROM discovery, header/mapper triage, frame
   budget loop, blargg `$6000` reader, JSON rows, final-frame PNGs.
-- [ ] 2/10 — screen readers: nametable → text through the ROM's own CHR font, and the
+- [x] 2/10 — screen readers: nametable → text through the ROM's own CHR font, and the
   documented pass/fail screens of the non-blargg suites.
 - [ ] 3/10 — Holy Mapperel reader: detected board and the four detailed nibbles.
 - [ ] 4/10 — AccuracyCoin reader: Start at the menu top, then the `$0400-$0498` result
@@ -75,6 +75,33 @@ failures) and stages nothing.
   resets and `cpu_reset/registers` reported a bogus `Failed #3`. The reader now also forgets
   that `$80` was seen, so it waits for the ROM to re-arm the protocol. Both ROMs pass with one
   reset each. **This was a harness bug, not an emulation one** — nothing in the core changed.
+
+### What step 2 found out about the collection
+
+* **Half of `nes-test-roms/` predates the `$6000` protocol.** `sprite_hit_tests_2005.10.05`,
+  `sprite_overflow_tests` and `blargg_ppu_tests_2005.09.15b` never write `$80`, and nothing in
+  a file says which era a ROM belongs to. The reader therefore probes for 600 frames and falls
+  back to the screen, instead of calling 21 ROMs `timeout` and burning two minutes of budget on
+  each. All 21 now read: 20 `pass`, one `fail`.
+* **Code 0 is not always a pass.** `tests_done` in blargg's `common/testing.s` prints "Done"
+  and exits with 0 when the ROM never called `set_test`, and the readme says exactly those
+  ROMs "require that you watch/listen". Those rows are `manual`, not `pass`.
+* **The newer builds colour their text with ANSI escapes.** `cpu_dummy_writes` writes
+  `ESC [ 0 ; 3 7 m` before every line; a CSI sequence is now dropped whole.
+* **Nametable choice has to follow PPUCTRL, not character count.**
+  `blargg_ppu_tests_2005.09.15b/vram_access` draws `$01` on the page it shows and leaves the
+  debris of its own VRAM test on the other physical page; picking the page with the most text
+  read the debris (`R  R               4`) instead of the result.
+* **Two fonts, both read off the ROMs' own CHR.** Holy Mapperel masks ASCII to six bits (tile
+  `$01` is `A`, `$0D` is `M`, `$30` is `0`, `$3F` is `?`); the pre-`$6000` blargg builds put
+  each glyph at its ASCII code. The reader decodes with both and keeps the screen with more
+  letters and digits, and records which font won in the row.
+* Screen bytes come from `Ppu2C02::read_nametable_byte`, not from `vram()` directly, so a board
+  that serves its own nametables (MMC5 `ExRAM`, fill mode) reads correctly. The accessor is
+  documented as side-effect free and is the one the tile capture already uses.
+* `blargg_ppu_tests_2005.09.15b/power_up_palette` reports `$02`, "Palette differs from table".
+  Its readme says the reference values "are probably unique to my NES", so the report must note
+  that and not read it as a plain emulation defect.
 
 ### Campaign runs
 

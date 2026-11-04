@@ -365,8 +365,16 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
     core.reset();
     let plan = Plan::of(name, frame_cap);
     let verdict = match plan.protocol {
-        Protocol::Blargg => blargg::run(&mut core, plan.frames),
-        Protocol::Screen => screen::run(&mut core, plan.frames),
+        Protocol::BlarggThenScreen => match blargg::run(&mut core, plan.frames) {
+            blargg::Read::Verdict(verdict) => verdict,
+            // The ROM never armed the protocol, so it is one of the suites that only draws its
+            // result. The frames already spent probing count towards the budget.
+            blargg::Read::NoProtocol { frames } => {
+                screen::run(&mut core, plan.frames.saturating_sub(frames), plan.screen)
+                    .after(frames)
+            }
+        },
+        Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
     };
 
     result.protocol = verdict.protocol;
@@ -412,12 +420,24 @@ impl Verdict {
             detail: Map::new(),
         }
     }
+
+    /// The same verdict, with `frames` added to its own count: what a reader that took over
+    /// from another returns, so the row says how long the whole run was.
+    #[must_use]
+    pub fn after(mut self, frames: u32) -> Self {
+        self.frames = self.frames.saturating_add(frames);
+        self
+    }
 }
 
 /// Which reader runs a ROM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Protocol {
-    Blargg,
+    /// Try the `$6000` protocol first and fall back to the screen: half of the community
+    /// collection predates the protocol (the 2005 PPU, sprite-hit and sprite-overflow suites
+    /// report on screen only), and nothing in a file says which era a ROM belongs to.
+    BlarggThenScreen,
+    /// A ROM known to report on screen only.
     Screen,
 }
 
@@ -425,24 +445,26 @@ enum Protocol {
 #[derive(Debug, Clone, Copy)]
 struct Plan {
     protocol: Protocol,
+    screen: screen::Kind,
     frames: u32,
 }
 
 impl Plan {
     /// The plan of the ROM at relative path `name`.
     ///
-    /// The budgets are what each suite needs, measured in step 7 of the lot: a blargg ROM stops
-    /// as soon as `$6000` leaves `$80`, so its cap only matters when something hangs.
+    /// A ROM that uses the `$6000` protocol stops as soon as its status leaves `$80`, so a
+    /// budget only decides how long a hang is given before it is called a timeout.
     fn of(name: &str, frame_cap: Option<u32>) -> Self {
         let lower = name.to_ascii_lowercase();
         let (protocol, frames) = if screen::is_screen_rom(&lower) {
             (Protocol::Screen, screen::frame_budget(&lower))
         } else {
-            (Protocol::Blargg, blargg::frame_budget(&lower))
+            (Protocol::BlarggThenScreen, blargg::frame_budget(&lower))
         };
 
         Self {
             protocol,
+            screen: screen::Kind::of(&lower),
             frames: frame_cap.map_or(frames, |cap| cap.min(frames).max(1)),
         }
     }
@@ -517,11 +539,30 @@ fn elapsed_ms(started: Instant) -> u64 {
 
 /// The text a test ROM wrote, cleaned up for one line of JSON: runs of control characters
 /// become a single `/`, and anything outside printable ASCII a `?`.
+///
+/// The newer blargg builds colour their output with ANSI escapes — `cpu_dummy_writes` writes
+/// `ESC [ 0 ; 3 7 m` before every line — so a CSI sequence is dropped whole. Keeping the
+/// letters of the escape instead would scatter `0;37m` through every message.
 #[must_use]
 pub fn one_line(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut pending = false;
-    for character in text.chars() {
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\u{1B}' {
+            // CSI: `ESC [` then parameter and intermediate bytes, ended by a final byte in
+            // `@`..`~`. Anything else after ESC is a two-character sequence.
+            if characters.peek() == Some(&'[') {
+                characters.next();
+                while characters
+                    .next_if(|next| !matches!(next, '\u{40}'..='\u{7E}'))
+                    .is_some()
+                {}
+            }
+            characters.next();
+            continue;
+        }
+
         if character.is_ascii_graphic() || character == ' ' {
             if pending && !out.is_empty() {
                 out.push_str(" / ");
