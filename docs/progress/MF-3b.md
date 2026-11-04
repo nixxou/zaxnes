@@ -396,3 +396,111 @@ functions do not move either, so the other call sites of `read_nametable_as` cos
 `cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
 clean, `cargo test --release -p zax-nes -p zax-harness`: **680 passed, 0 failed, 7 ignored**,
 unchanged from step 2. An inlining attribute cannot change what the function reads.
+
+## Step 4 — the residual PPU delta, and the lot measured end to end
+
+### `Board::ppu_read` (+1.99 M) and `catch_up_ppu` (+1.96 M)
+
+Neither is a regression of its own.
+
+**`Board::ppu_read`.** Its prologue is the *same* niche-tag jump table at `7cbd9c52` and now (this
+dispatch already had one before MF-3), and its MMC1 arm is instruction for instruction what it
+was — the arm reached through jump-table slot 1, on both the CHR-ROM path Zelda II takes and the
+CHR-RAM path Mega Man 2 takes:
+
+    .LBB505_5:  (7cbd9c52)                .LBB511_7:  (now)
+      movq  64(%rdx), %r9                   movq  64(%rdx), %r9
+      testq %r9, %r9                        testq %r9, %r9
+      jne   .LBB505_39                      jne   .LBB511_44
+      movq  208(%rdx), %r9                  movq  208(%rdx), %r9
+      addq  $200, %rdx                      addq  $200, %rdx
+      testq %r9, %r9                        testq %r9, %r9
+      jne   .LBB505_48                      jne   .LBB511_46
+      jmp   .LBB505_41                      jmp   .LBB511_43
+      ... addq 8(%rcx,%r8), %rax            ... addq 8(%rcx,%r8), %rax
+      cmpq  %r9, %rax                       cmpq  %r9, %rax
+
+Same registers, same displacements (64, 208, 200, 56, 8), same shifts and masks. What differs is
+only which arms share the bounds-check tail and which duplicate it — `7cbd9c52` labels it
+`.LBB505_49` and the current build falls through to it. That is the tail-merging / tail-duplication
+flip MF-1, MF-2 and MF-3 all met on this family of functions, and MF-2 step 0 established which
+way round is cheaper: *duplication*, which is what the current build has. R0's +1.99 M over ~6.3 M
+calls is +0.3 instructions per call — an average over arms, not a cost on a path, and below what
+a static count can resolve. There is nothing to fix here and nothing was changed.
+
+**`catch_up_ppu`** is 168 instructions at `7cbd9c52` and 168 now, byte for byte. Its +1.96 M was
+the *inclusive* cost of the callees above propagating up, exactly as MF-2 step 0 showed for
+`read_pattern_planes` ("its +32 per call is 16 × (+2), the inclusive cost of the callee"). The
+same goes for `background_fetch` −5.7 M and `run_dots` −3.4 M: code moving with
+`on_ppu_address_bus`, not work appearing or disappearing.
+
+### No new out-of-line call anywhere
+
+`#[inline(always)]` on `end_cycle` made the CPU interpreter re-outline one level deeper:
+`Cpu6502::execute` is now folded into `step`, and `execute_without_operand` (which existed before
+and was inlined into `execute`) became a symbol of its own. Checked, because trading one
+per-instruction call for another would have been pointless:
+
+| | `7cbd9c52` | now |
+| --- | --- | --- |
+| `Cpu6502::execute` | 2 674 instructions, **1 call site** | folded into `step` |
+| `Cpu6502::execute_without_operand` | inlined, no symbol | 2 248 instructions, **1 call site** |
+
+One out-of-line boundary per instruction before, one after — and now only for the opcodes that
+reach `execute_without_operand`, where before *every* instruction paid `callq execute`. The
+interpreter's call count per instruction is unchanged or lower, and the per-CPU-*cycle* call
+(`end_cycle`) is gone, which was the whole point.
+
+### The lot's static table, `7cbd9c52` → MF-3 → now
+
+| function | `7cbd9c52` | MF-3 | MF-3b | |
+| --- | ---: | ---: | ---: | --- |
+| `Cpu6502::end_cycle` | *inlined* | **76, 75 calls** | *inlined* | the core regression, undone |
+| `Ppu2C02::read_nametable_as` | 107 (inlined by LTO) | 107 (**called**) | *inlined* | step 3 |
+| `Ppu2C02::read_nametable_inner` | 11 | 11 | 132 | absorbed its callee; still `inline(never)` |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 | **106** | MF-2's shield intact |
+| `Board::ppu_read` | 241 | 236 | 236 | MMC1 arm instruction-identical |
+| `Board::ppu_peek` | 240 | 235 | 235 | likewise |
+| `Board::on_ppu_address_bus` | 106 | 155 | 155 | now unreachable for 26 of 29 boards |
+| `Ppu2C02::catch_up_ppu` | 168 | 168 | **168** | byte-identical |
+| `Ppu2C02::run_dots` | 559 | 559 | **559** | byte-identical |
+| `Ppu2C02::step_dot` | 1 409 | 1 403 | 1 413 | +4: the latch tests of step 2 |
+| `Ppu2C02::background_fetch` | 187 | — | 194 | +7: likewise |
+
+The `step_dot` +4 and `background_fetch` +7 are the **cheap half of step 2's trade**: a `cmpb` and
+a not-taken `jne` inlined at each call site, in exchange for a `callq`, a niche prologue, a
+jump-table indirect jump and a `retq` that no longer happen. Static size up, executed instructions
+sharply down.
+
+### Wall clock, as corroboration
+
+`zax-harness bench-core <rom> --frames 3600 --warmup 300`, `core run_frame`, three runs each,
+against the figures MF-3 step 9 recorded on this same host with this same command:
+
+| ROM | before the boards (MF-3 step 2) | MF-3's end | **MF-3b** |
+| --- | ---: | ---: | ---: |
+| `M0_P32K_C8K_V` (NROM) | 0.819 | 0.860 | **0.789 / 0.795 / 0.800** |
+| `M1_P128K` (mapper 1) | 0.826 | 0.861 | **0.792 / 0.805 / 0.806** |
+| `M4_P128K` (mapper 4) | 0.997 | 1.042 | **1.001 / 1.002 / 0.998** |
+
+MF-3's +4 % is gone. Mapper 1 and NROM land *below* the pre-lot figure, which is step 2 being an
+improvement rather than a restoration; mapper 4 lands on its pre-lot figure, so the +2 instructions
+per fetch that step 2 costs an MMC3 do not show above this host's noise.
+
+**The caveat, stated rather than buried:** these are not interleaved runs against a
+freshly-built baseline binary — the two left-hand columns are MF-3's recorded numbers, taken on
+this host at another time, and a `git archive` build of `7cbd9c52`'s whole dependency tree needs
+~3.4 GB against 6.4 GB free on G:. So this table is corroboration, not proof. **The generated code
+above is the proof**, and callgrind is R0's instrument.
+
+### What R0 should see
+
+| R0's measurement | expected |
+| --- | --- |
+| Mega Man 2 / Zelda II **core** | back to `7cbd9c52` exactly; the +20.5 M was `end_cycle` and nothing else |
+| `Cpu6502::end_cycle` exclusive | 159.9 M → **0** (no such function) |
+| `Ppu2C02::read_nametable_as` exclusive | 3.18 M → **0**, and `read_nametable_inner` −0.84 M |
+| `Board::on_ppu_address_bus` | not +4.84 M but a **large negative**: 26 of 29 boards no longer call it at all, ~9 instructions a fetch |
+| Mega Man 2 / Zelda II **PPU** | **below** `7cbd9c52`, by roughly what that last row is worth |
+| `Board::ppu_read` | the +1.99 M may partly remain: placement, not work (see above) |
+| golden-core | unchanged; no board's behaviour was touched |
