@@ -1171,3 +1171,160 @@ If a later lot takes only part of this:
 **MR-71-1 is the one open question worth closing cheaply**: our mirroring polarity and
 Mesen's are exact opposites, so one of us is certainly wrong and *Fire Hawk* shows it. One
 look at the nesdev register table settles it.
+
+---
+
+# MR-1b — sourced re-check
+
+Role R3, clean side. Lot MR-1b. **This lot changes no emulation behaviour either**: the only
+code it touches is the `#[ignore]`d tests of MR-1 (some withdrawn, some re-aimed, some added).
+
+Lot MR-1 compared our boards with Mesen 2 *without web access*. It could therefore record a
+contradiction but not settle it, and in several places it took Mesen for the hardware. This
+lot re-examines all 50 of its findings against the public sources — the NESdev wiki page of
+the board or chip with its register table, the forum threads that carry the hardware tests,
+the test-ROM documentation, and NesCartDB for which cartridges use a board — and says for
+each which side the evidence supports.
+
+Rules applied, in this order:
+
+1. **The spec still prevails.** Where a source contradicts a normative REQ or amendment, the
+   entry is a spec question, not a bug.
+2. A finding becomes `our bug` **only** with a cited source or a test-ROM fact, and leaves
+   `our bug` the same way.
+3. `unknown` is kept only where the public sources genuinely do not settle the point, and the
+   entry then says what would — a specific hardware test or cartridge.
+4. Every `our bug` carries a **performance cost class**, derived by reading the code path:
+   **none** (load or rare write only), **negligible** (a predictable branch on a rare path),
+   **measurable** (a per-access or per-cycle path, for affected games only), **risk** (a path
+   every game runs). For `measurable` and `risk`, the cheapest confinement is given.
+
+The summary table at the end of this section **replaces** MR-1's, which is marked superseded.
+
+## Severity and cost vocabulary
+
+Severity is unchanged from MR-1 (`crash/hang` > `visible` > `subtle` > `cosmetic`). The cost
+classes are judged against `PERFORMANCE-HISTORY.md` section 5.1 and section 10, whose
+relevant facts are:
+
+- **a cartridge write is already a PPU sync point** (5.1, "PPU caught up in batches"), and
+  `Cartridge::cpu_write` (`mod.rs:390-410`) already calls `refresh_rom_windows()` after every
+  one of them. Work added on a register write is therefore cheap by construction;
+- `Cartridge::read_rom_window` (`mod.rs:343-353`) is `#[inline]` and indexes a cached
+  `rom_windows[address >> 13]`, so the ROM byte a bus conflict needs is one load away;
+- `Mapper::chr_view` returning `Some` is what buys a board the fast span
+  (`run_visible_span`); a board that gains a side effect on a CHR fetch drops to
+  `run_visible_span_through_bus`. MMC2/MMC4, MMC3 and compatibles, RAMBO-1 and MMC5 are
+  **already** on the through-bus path, so changes inside their `ppu_read` cost nothing new;
+- `A12Watcher::MIN_RISE_INTERVAL` feeds `Mmc3::ppu_irq_horizon` (`mmc3.rs:167`): a per-board
+  threshold has to move both together or the PPU is observed late;
+- expansion audio forces `apu_quiet = 0`, and only the MMC5 has any, so MMC5 audio already
+  runs per CPU cycle;
+- `NesBus::tick`'s prologue is pinned in the post-LTO assembly (section 10): nothing
+  board-specific may be inlined into it.
+
+---
+
+## Shared: bus conflicts (MR-BUS-1)
+
+**MR-1 verdict: our bug. New verdict: our bug — confirmed, and the AND is normative rather
+than "undefined behaviour".**
+
+Sources:
+
+- *NES 2.0 submappers*, mappers 2/3/7 submapper 2 — "Bus conflicts occur, producing the
+  bitwise AND of the written value and the value in ROM"; submapper 1 — "Bus conflicts do not
+  occur". <https://www.nesdev.org/wiki/NES_2.0_submappers>
+- *Color Dreams* (board page) — commercial releases take the AND of the written value and the
+  ROM content at that address; the *Free Fall* prototype has conflict-prevention logic.
+  <https://www.nesdev.org/wiki/Color_Dreams>
+- *INES Mapper 011* — "All commercially-released games are subject to bus conflicts
+  (submapper 2)". <https://www.nesdev.org/wiki/INES_Mapper_011>
+- *UNROM 512*, submapper list — submapper 0: "The Battery bit must be specified if the game
+  relies on bus conflicts not being present"; submapper 2: "Bus conflicts present".
+  <https://www.nesdev.org/wiki/UNROM_512>
+- *Bus conflict* — "Most ASIC based mappers include logic to disable the ROM's output enable
+  during writes". <https://www.nesdev.org/wiki/Bus_conflict>
+
+The submapper definitions settle the two things MR-1 could only infer from Mesen: that the
+result is the bitwise AND, and that the gate is the submapper. They also confirm Mesen's
+per-board conditions, including the unusual mapper-30 one — submapper 0 *without* battery,
+because on that board the battery bit is what a submapper-0 dump uses to say "no conflicts".
+The *Bus conflict* page's "Programmers must not rely on this undefined behavior" is advice to
+ROM authors about relying on a clean AND, not licence for an emulator to skip it.
+
+**Test change:** none. `mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte` and
+`mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte` stay as MR-1 wrote them,
+re-labelled `MR-1b`. The non-ignored guard
+`mr_bus_1_uxrom_without_a_submapper_has_no_conflict` keeps pinning plain mapper 2.
+
+**Cost: negligible.** The AND runs on a CPU write to $8000-$FFFF on a board that declares
+conflicts — the rarest write path there is, and already a PPU sync point. The byte comes from
+`read_rom_window`, one load from a cached window base. Confinement: a `bus_conflicts: bool`
+resolved **at load** into `Cartridge` (three fields today), so `cpu_write` gains one test of a
+hot-in-cache bool that is `false` for 27 of our 32 mapper numbers and for every submapper-0
+dump of the other five. No `Mapper` method is consulted per write and the `Board` enum
+dispatch is untouched; nothing reaches the PPU or CPU stepping.
+
+## Shared: bank-window wrapping
+
+**MR-1 verdict: equivalent. New verdict: equivalent — unchanged.**
+
+No public source specifies what a board does with a PRG size that is not a multiple of its
+page size, because no such dump exists: the NESdev *iNES* page expresses PRG size in 16 KiB
+units and *NES 2.0* as a size exponent with a multiplier, and every commercial dump is a power
+of two. MR-1's two edge cases are therefore unreachable rather than undecided, and its
+algebraic argument stands on its own. No test.
+
+## Shared: the A12 filter (MR-A12-1)
+
+**MR-1 verdict: unknown. New verdict: equivalent in practice for the MMC3 — and the sources
+settle the *unit*: the filter counts M2 cycles, not PPU dots.**
+
+Sources:
+
+- *MMC3*, IRQ section — the counter is clocked by "PPU A12, triggered on a rising edge after
+  the line has remained low for three falling edges of M2".
+  <https://www.nesdev.org/wiki/MMC3>
+- *RAMBO-1*, scanline-mode pseudo-code, on each M2 falling edge — while PA12 = 0, "If 4-bit
+  counter < 16: 4-bit counter++"; on PA12 = 1, "If 4-bit counter = 16: Clock the 8-bit
+  counter". <https://www.nesdev.org/wiki/RAMBO-1>
+
+The real filter on both boards counts **M2 falling edges while A12 is low** — three on the
+MMC3, sixteen on the RAMBO-1 — which is why Mesen's own MMC3 detector works in CPU cycles
+while its shared `A12Watcher` works in dots: the dot figure is a conversion, not the
+specification. Our `FILTER_DOTS = 10` is 3.33 CPU cycles, so for the MMC3 it brackets the
+documented three falls: it rejects every dip shorter than three falls and accepts every low
+longer than four, and the only lows it could misjudge are 7 to 9 dots, a length no rendering
+pattern produces (the dips of the fetch pipeline are 4 dots; the next-shortest low is the
+20-dot-plus prefetch gap). `mmc3_test_2` tests 1-5 pass, as REQ-CORE-114 requires.
+
+What would settle the residue: a ROM that walks $2006 to make an A12 low of exactly 7, 8 and
+9 dots and reports whether the counter clocked. No public test ROM does that today.
+
+**Test change:** none (MR-1 wrote none).
+
+**Cost of the only change worth making** — passing the threshold in at construction, which
+MR-64-3 needs anyway: **negligible**. `A12Watcher` gains one `i64` field in place of an
+associated constant, read on the same cache line as `low_since` inside `rose()`, which is
+called only from boards already off the fast span. The catch is structural, not arithmetic:
+`MIN_RISE_INTERVAL` is an associated *constant* feeding `Mmc3::ppu_irq_horizon`, so it has to
+become a method and the horizon has to be recomputed from the instance.
+
+## Shared: the power-on bank layout (MR-PWR-1), and MR-4-4
+
+**MR-1 verdict: unknown (both). New verdict: neither side is wrong — the sources say the
+power-on values are unspecified. Both become `equivalent`.**
+
+Source: *MMC3* — "Because the values in R6, R7, and $8000 are unspecified at power on, the
+reset vector must point into $E000-$FFFF, and code must initialize these before jumping out
+of $E000-$FFFF". <https://www.nesdev.org/wiki/MMC3>
+
+That sentence is the authority for MR-1's whole family of power-on differences, not just the
+MMC3's: the hardware does not define the values, the documentation says so, and it tells the
+ROM author to program them. Our linear layout, Mesen's zeros and Mesen's randomisable
+`GetPowerOnByte()` are all conforming, and the "last bank fixed at $E000" argument MR-1 made
+is exactly the invariant the wiki leans on. There is nothing left to discover, so these stop
+being `unknown`.
+
+**Test change:** none. No fix, so no cost.

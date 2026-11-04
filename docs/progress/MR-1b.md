@@ -27,7 +27,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 
 - [x] 1/12 — Setup: progress file, re-read MR-1's report, Q-110/Q-111, the test file and the
       fixture; source-gathering plan per board
-- [ ] 2/12 — Shared: MR-BUS-1, bank-window wrapping, MR-PWR-1, MR-A12-1
+- [x] 2/12 — Shared: MR-BUS-1, bank-window wrapping, MR-PWR-1, MR-A12-1
 - [ ] 3/12 — MMC1 (MR-1-1, MR-1-2, MR-1-3, MR-1-4) and the three non-findings
 - [ ] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
 - [ ] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
@@ -86,3 +86,16 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
       already on a per-cycle path;
     - `NesBus::tick`'s prologue is pinned in the post-LTO assembly (§10): nothing
       board-specific may be inlined into it.
+
+- **Step 2** — the shared findings. MR-BUS-1 **confirmed and strengthened**: the NES 2.0
+  submapper page states the result is "the bitwise AND of the written value and the value in
+  ROM", so the AND is normative and the submapper is the gate; mapper 11's page adds that
+  every commercial Color Dreams release is submapper 2, and UNROM 512's that submapper 0
+  without the battery bit means conflicts (Mesen's odd condition, now sourced). Cost
+  negligible: a `bus_conflicts` bool resolved at load, one branch in `cpu_write`, which is
+  already a PPU sync point.
+  Two `unknown`s **closed as equivalent**: the A12 filter is specified in **M2 falling edges**
+  (three on the MMC3, sixteen on the RAMBO-1) and our 10-dot constant brackets the MMC3
+  figure; and the power-on bank values are documented as *unspecified*, so MR-PWR-1 and
+  MR-4-4 have nothing to discover.
+  Bank-window wrapping stays equivalent.
