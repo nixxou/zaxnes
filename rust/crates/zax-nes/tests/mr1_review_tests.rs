@@ -560,6 +560,29 @@ fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
     );
 }
 
+// ================================================================ mapper 156, Daou Infosys
+
+/// MR-156-1. $C014 is a two-bit field with three states, not a single H/V bit.
+///
+/// nesdev ("INES Mapper 156"): the register holds "00: Vertical, 01: Horizontal, 1x:
+/// One-screen, page 0", and "Mirroring defaults to one-screen". We read bit 0 only
+/// (`daou306.rs:74-78`), as does Mesen (`DaouInfosys.h:64`), so a board that has left
+/// one-screen can never return to it.
+#[test]
+#[ignore = "MR-1b: MR-156-1"]
+fn mr_156_1_daou306_mirroring_is_a_two_bit_field() {
+    let mut core = MapperRom::new(156).prg(8).chr(16).load();
+
+    core.mapper_write(0xC014, 0x01); // Horizontal.
+    core.mapper_write(0xC014, 0x02); // One-screen, page 0.
+
+    assert_eq!(
+        zax_nes::NametableMirroring::SingleScreenA,
+        core.mirroring(),
+        "a $C014 value of 2 selects one-screen page 0, not vertical"
+    );
+}
+
 // ================================================================ mappers 21-27, VRC2/VRC4
 
 // Our `register_index` (`vrc2_vrc4.rs:52-59`) always uses the **OR'd heuristic** wiring

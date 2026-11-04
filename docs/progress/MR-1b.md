@@ -34,7 +34,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
 - [x] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
 - [x] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
-- [ ] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
+- [x] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
 - [ ] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
 - [ ] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
       table, the test changes, any Q ticket
@@ -205,3 +205,26 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   of CHR-RAM" with scratch RAM at $3000-$3EFF that MR-1 had missed. MR-30-4 is `measurable`
   and interlocks with MR-BUS-1 ("bus conflicts interfere with the self-flashing procedure"),
   so the two must be fixed together; MR-30-6 needs the `read_nametable` signature change.
+- **Step 9** — the multicarts, and the step that answers Q-110. MR-34-1 and the three MR-41
+  findings **confirmed**: BNROM "has no registers at those addresses", and the Caltron diagram
+  gives PRG three address bits, mirroring bit 5 ("0=Vertical, 1=Horizontal", our polarity) and
+  the inner-CHR gate as the same bit as the top PRG bit.
+  **Q-110 answered on four of its seven points, two each way.** Mapper 15: the 6-bit `B`
+  ("PRG A19..A14") and the ignored bit 7 outside SS=2 are **AMD-021's**; mode 1's "PRG
+  A14..16=111 when CPU A14=1" leaves A17-A19 from `B`, so the fixed bank is the block's, which
+  is **Mesen's**. Mapper 28's conditional mirroring bit is **AMD-021's** ("If the current
+  mirroring mode is one of the 1-screen modes ... change bit 0 of the mirroring mode to D4").
+  Mapper 101's $6000-$7FFF-only range and 8-bit field are **Mesen's**. Addendum written into
+  `spec/changes/Q-110.md`.
+  **MR-28-2 closes as equivalent** — "The rest of the state is unspecified" — and the next
+  sentence of that page, "The mapper state is unchanged on reset", contradicts REQ-CORE-004,
+  so **Q-112 is filed** (MR-28-3).
+  **Four new findings** from pages MR-1 had only one line for: MR-15-1 (CHR-RAM
+  write-protected in modes 0 and 3 — AMD-021 is silent, so it is a bug and not a Q point),
+  MR-34-2 (BNROM has no work RAM, and its register has bus conflicts — MR-BUS-1 gains mapper
+  34), MR-225-1 (the four nibbles of RAM at $5800-$5803), MR-156-1 (visible: $C014 is a
+  two-bit field with three states and we read one bit, as Mesen does — test added).
+  Mapper 87's crossed CHR bits and mapper 228's whole field map **confirmed equivalent** from
+  the diagrams; mapper 225's missing $6000-$7FFF RAM is settled in our favour; mapper 228's
+  "Chip 2 does not exist ... will result in open bus" recorded as a note, since the 3-to-2 fold
+  is right for every real dump.

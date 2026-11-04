@@ -2336,3 +2336,267 @@ changes a trait signature every board implements, which is the kind of change
 `PERFORMANCE-HISTORY.md` §10 flags for the `Board` enum — but the call is once per nametable
 fetch on a board that already answers `SERVED_BY_CARTRIDGE` only when asked, and the MMC5 is
 the only other user.
+
+## Mapper 34 — BNROM and NINA-001
+
+Source: *INES Mapper 034* (<https://www.nesdev.org/wiki/INES_Mapper_034>).
+
+### MR-34-1 — BNROM has no register at $7FFD-$7FFF
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed, and the board-resolution
+rule is documented too.**
+
+Sources: *INES Mapper 034* gives NINA-001/NINA-002 the registers "PRG Bank Select: $7FFD, CHR
+Bank Select 0: $7FFE, CHR Bank Select 1: $7FFF" and says **BNROM has no registers at those
+addresses**, its register spanning "$8000-$FFFF, write". The resolution rule is explicit: "In
+the absence of valid submapper information, mapper 34 .NES files should be considered BNROM
+when the CHR-ROM size is 0-8 KiB, and NINA-001/NINA-002 when the CHR-ROM size is above 8 KiB",
+with "Submapper 1 denotes the NINA-001/NINA-002 circuit board" and "Submapper 2 denotes the
+I-IM/BNROM circuit board".
+
+We decode $7FFD-$7FFF unconditionally (`multicart.rs:80-89`), so on a BNROM image an ordinary
+work-RAM write to one of those three bytes switches the 32 KiB PRG bank. Two refinements the
+source adds to MR-1's proposed fix: the threshold is "0-8 KiB" of CHR-ROM, not "empty"
+(`multicart.rs:37-42` tests `is_empty`, which differs for an 8 KiB CHR-ROM BNROM image — such
+a dump exists, since BNROM carries "fixed 8 KiB CHR-ROM/RAM"), and **the submapper takes
+precedence over the size** when present.
+
+**Test:** unchanged — `mr_34_1_bnrom_has_no_register_at_7ffd`.
+
+**Cost: none.** The board resolves to one of two variants at load — the natural shape is the
+`Board` enum gaining the distinction the boards already make internally — and the decode then
+tests a field instead of a range. `intercept_cpu_write` keeps the same shape.
+
+### MR-34-2 — BNROM has no work RAM, and its register has bus conflicts (new)
+
+**New finding. Verdict: our bug, severity subtle (two parts).**
+
+Source: *INES Mapper 034* — "CPU $6000-$7FFF: 8 KiB of unbanked PRG-RAM" exists on the NINA
+boards while BNROM lacks it entirely; and for BNROM's own register, "the effective value is
+the value being written bitwise-AND'd with the PRG-ROM content".
+
+Two things follow. The work-RAM half is the same family as MR-30-2 and MR-4-8: we give every
+board the header's 8 KiB, so a BNROM cartridge answers reads at $6000-$7FFF that should be
+open bus. The bus-conflict half **extends MR-BUS-1 to mapper 34**, which MR-1's summary table
+did not list (its narrative mentioned `BnRom.h:10` but the board never reached the row); and it
+interacts with MR-34-1, because a BNROM write to $7FFD is a *RAM* write on a board that has no
+RAM, while a BNROM write to $8000 is a register write that must be ANDed.
+
+**Test:** none added. Both halves are covered by the tests the two shared fixes will bring
+(MR-BUS-1 already has two, and the work-RAM override has `mr_30_2_...`); a third variation
+would test the same two mechanisms.
+
+**Cost: none beyond MR-BUS-1's.** Adding mapper 34 to the boards that declare conflicts is one
+more `true` from a load-time predicate; the work RAM is the same load-time size override as
+MR-13-1, MR-4-6 and MR-30-2.
+
+## Mapper 41 — Caltron 6-in-1
+
+**MR-1 verdict: three `our bug` findings. New verdict: all three confirmed, from the nesdev
+register diagram.**
+
+Source: *INES Mapper 041* (<https://www.nesdev.org/wiki/INES_Mapper_041>), the outer register,
+decoded from the **address** in $6000-$67FF:
+
+```
+15      bit       0 (address lines)
+---- ---- ---- ----
+0110 0... ..MC CEPP
+            || ||||
+            || |+++-- Select 32 KiB PRG ROM bank for CPU $8000-$FFFF
+            || ||
+            || |+---- If high, enable Inner Bank Select
+            |+-+----- Select 32 KiB outer CHR bank
+            +-------- Mirroring (0=Vertical, 1=Horizontal)
+```
+
+with "The Inner CHR Bank Select only can be written while the PRG ROM bank is 4, 5, 6, or 7",
+"PRG ROM size: 256 KiB" and "CHR capacity: 128 KiB ROM".
+
+- **MR-41-1 — our bug, confirmed.** The PRG field is address bits 0-2 (three `+` under `PPP`),
+  and 256 KiB is eight 32 KiB banks. Our `outer & 0x03` (`multicart.rs:261`) is two bits, so
+  banks 4-7 fold back and the menu cannot start games 5 and 6. **Severity crash/hang**
+  stands, and it remains the worst finding of either lot.
+- **MR-41-2 — our bug, confirmed, with the polarity.** Mirroring is address bit 5, and
+  "0=Vertical, 1=Horizontal" — the same polarity our `horizontal_if` applies, so the fix is
+  only the bit position (we read bit 2 after masking the address to five bits,
+  `multicart.rs:264`).
+- **MR-41-3 — our bug, confirmed verbatim.** The gate is the quoted sentence, and the diagram
+  shows *why*: bit 2 is simultaneously the top PRG bit and the `E` enable, so "PRG bank 4-7"
+  and "E high" are the same condition. We latch unconditionally (`multicart.rs:311-316`).
+
+The CHR outer field stays **equivalent**: address bits 3-4 land on CHR bank bits 2-3, as our
+`((outer >> 3) & 0x03) << 2` does.
+
+**Tests:** all three unchanged — `mr_41_1_caltron_prg_field_is_three_bits`,
+`mr_41_2_caltron_mirroring_comes_from_address_bit_5`,
+`mr_41_3_caltron_inner_chr_is_gated_on_the_prg_bank`.
+
+**Cost: none.** One rewrite of `intercept_cpu_write` / `update_banks` that keeps the full
+address instead of masking it to five bits, plus one comparison in `write_register`. All of it
+on a register write.
+
+## Mappers 15, 28 and 101 — the Q-110 boards, now with sources
+
+MR-1 could only record that AMD-021 and Mesen disagreed. The sources settle **four of the
+seven points**, and they do not all go the same way — which is the useful result: AMD-021 is
+right twice, Mesen is right twice.
+
+### Mapper 15 (AMD-021 R2-002)
+
+Source: *INES Mapper 015* (<https://www.nesdev.org/wiki/INES_Mapper_015>), which describes the
+register in terms of address lines: bits 5-0 of the value are "PRG A19..A14", bit 6 is the
+mirroring bit, bit 7 is "PRG A13 if SS=2, ignored otherwise", and the mode SS comes from
+address bits 8-9.
+
+| point | AMD-021 (and us) | Mesen | the source says |
+| --- | --- | --- | --- |
+| width of `B` | 6 bits | 7 bits, folding the mirroring bit in | **AMD-021**: bits 5-0 are PRG A19..A14, and bit 6 is the mirroring bit |
+| mode 0 XOR by `h` | none | `(2B + i) ^ h` | **AMD-021**: bit 7 is "ignored" unless SS=2 |
+| mode 1's fixed bank | last 16 KiB of the **ROM** | last 16 KiB of the current 128 KiB **block** (`bank \| 0x0E`) | **Mesen**: "PRG A14..16=111 when CPU A14=1" leaves A17-A19 coming from `B`, which is the block, not the image |
+| CHR-RAM write protect | silent | read-only in modes 0 and 3 | **Mesen**: "CHR-RAM is write-protected in PRG banking modes 0 and 3, and write-enabled in modes 1 and 2" |
+
+So the two points where AMD-021 looked most suspicious to MR-1 (the 6-bit field, the missing
+XOR) are the amendment's, and the one MR-1 called "the heaviest" (mode 1) is Mesen's. These go
+to Q-110 as answers to its questions 1 and 2, not as bugs: the amendment is normative and only
+its owner can change mode 1.
+
+**MR-15-1 — the CHR-RAM write protection is a new finding, not a Q-110 point.** AMD-021 is
+*silent* on it rather than contradicting the source, so REQ-CORE-100's "comportement documenté
+sur nesdev" applies directly and the absence is **our bug, severity cosmetic**: a mapper-15
+game that writes CHR-RAM in mode 0 or 3 corrupts patterns the hardware would have protected.
+
+**Test:** none added. It needs the board to refuse a `ppu_write`, which no existing MR-1b test
+exercises, and the fix is one condition; it belongs with whichever lot answers Q-110, since
+that lot will be in this file anyway.
+
+**Cost: none.** One `self.mode` test in `Mapper::ppu_write`, which runs on a PPU write to
+CHR — a path only CHR-RAM boards take and only when the CPU writes $2007.
+
+### Mapper 28, Action 53 (AMD-021 R2-001)
+
+Source: *INES Mapper 028* (<https://www.nesdev.org/wiki/INES_Mapper_028>) — "If the current
+mirroring mode is one of the 1-screen modes (0 or 1), writes to registers $00 and $01 change
+bit 0 of the mirroring mode to D4 of the written value", and for modes 2-3 "D4 is ignored";
+also "While the mirroring mode is 0 or 1 (1-screen), bit 0 can be written in three places:
+bit 0 of $80, bit 4 of $00, or bit 4 of $01". On power-on: "At power on, the last 16 KiB of the
+ROM is mapped into $C000-$FFFF. The rest of the state is unspecified. The mapper state is
+unchanged on reset."
+
+- **the mirroring bit: AMD-021 R2-001 is right.** The captured bit lives *in* the mode
+  register and is only written while the mode is one-screen — our `take_mirroring_bit`
+  (`multicart.rs:417-421`) exactly. Mesen's separate always-updated `_mirroringBit` is the
+  error. This answers Q-110's question 3.
+- **MR-28-2 (the power-on state) becomes `equivalent`, not "Mesen in error".** The source
+  fixes only the last 16 KiB at $C000 and calls the rest "unspecified", so AMD-021's
+  outer = 63 / inner = 15 and Mesen's zeros are both conforming. MR-1's reasoning (the menu
+  lives at the end of the image) is still a good reason to keep ours; it is no longer a point
+  against Mesen.
+- **MR-28-3 — a new finding, and it is a spec question: `Q-112`.** "The mapper state is
+  unchanged on reset" contradicts **REQ-CORE-004**, which requires a reset to be equivalent to
+  a power-on with the "mapper revenu dans son état initial". Our `Caltron`-style
+  `Mapper::reset` (`multicart.rs:484-490`) follows the REQ. Filed as
+  `spec/changes/Q-112.md`; the same question covers every board whose documentation describes
+  a reset-preserving mapper, and the MMC1 note of this lot's MMC1 section is its other half.
+
+### Mapper 101 (AMD-021 R2-003)
+
+Source: *INES Mapper 101* (<https://www.nesdev.org/wiki/INES_Mapper_101>) — the CHR bank
+register is decoded at "$6000-$7FFF" and uses **8 bits** of the written value ("This will
+select an 8 KB CHR ROM bank for PPU $0000-$1FFF"); the board is "the same as J87 but with the
+bits in order".
+
+**Mesen is right on both points**, and AMD-021 R2-003 is wrong on both: the range is
+$6000-$7FFF only, not also $E000-$FFFF, and the field is the whole byte, not `value & 3`. That
+answers Q-110's question 4 — and it is the one where the amendment's reading actively costs
+something, since `value & 3` caps CHR at 32 KiB on a board the source describes as an
+"oversize extension" of J87. Still a spec question, not a bug: R2-003 carries an acceptance
+criterion.
+
+## The four multicarts MR-1 called equivalent outright
+
+Each of these got one line in MR-1 on the strength of a code comparison. Re-read against its
+own wiki page, three stay equivalent and three new findings fall out of the pages' margins.
+
+### Mapper 87 — equivalent, confirmed
+
+Source: *INES Mapper 087* (<https://www.nesdev.org/wiki/INES_Mapper_087>), register at
+"$6000-$7FFF":
+
+```
+7  bit  0
+---- ----
+xxxx xxLH
+       ||
+       |+- High CHR bit
+       +-- Low CHR bit
+```
+
+Bit 0 of the value is the **high** bank bit and bit 1 the low one — the fields *are* crossed,
+which is what our `((value & 0x01) << 1) | ((value >> 1) & 0x01)` (`multicart.rs:552-553`)
+does and what Mesen's `JalecoJfxx(false)` arm does. **Equivalent**, now from the diagram
+rather than from Mesen.
+
+### Mapper 225 — equivalent, plus one new finding
+
+Source: *INES Mapper 225* (<https://www.nesdev.org/wiki/INES_Mapper_225>) — the register at
+$8000-$FFFF is `A~[.HMO PPPP PPCC CCCC]`, with H the extra high bit of both the PRG and CHR
+registers, M the mirroring ("0=Vertical, 1=Horizontal"), O the PRG mode (32 KiB, or the same
+16 KiB bank mirrored at $8000 and $C000), P six bits and C six bits.
+
+That is our decode and Mesen's, so the banking is **equivalent** — and the page settles one of
+MR-1's two "cosmetic differences" in our favour: it describes **no PRG-RAM at $6000-$7FFF**, so
+disabling that window (which we do) is right and Mesen's leaving it mapped is the error.
+
+**MR-225-1 — new finding. Verdict: our bug, severity cosmetic.** The page documents "16 bits
+of RAM -- 4 bits in each of the 4 regs" at $5800-$5803, mirrored through $5FFF. We implement
+nothing there, so those addresses read as open bus. The page itself notes that emulator support
+varies (Nestopia omits it, FCEUX dropped it), which is why no game is known to need it; mapper
+255 is the number where the same RAM is not optional.
+
+**Test:** none added — a four-nibble RAM with no known user does not earn one ahead of the
+findings above.
+
+**Cost: none.** Four nibbles of state and one range in `intercept_cpu_write` /
+`cpu_peek_override`, on a board whose games are already decoded there.
+
+### Mapper 228 — equivalent, plus one note
+
+Source: *INES Mapper 228* (<https://www.nesdev.org/wiki/INES_Mapper_228>) — address
+`A~[..MH HPPP PPO. CCCC]` with data `[.... ..CC]`, M the mirroring ("0: Vertical mirroring;
+1: Horizontal mirroring"), HH the chip select, PPPPP the 16 KiB page, O the mode ("0: Put bank
+with bit 0 false in $8000 and bank with bit 0 true in $C000" / "1: Put same 16 KiB bank in
+$8000 and $C000") and the six CHR bits split across the two buses.
+
+Every field matches ours, so **equivalent** stands.
+
+**MR-228-1 — new note rather than a finding.** The page adds that the two chip-select bits
+"select the PRG chip. Each chip is 512k in size. Chip 2 does not exist, and when selected, will
+result in open bus", and that Action 52 uses chips 0, 1 and 3. Our fold of 3 to 2 (which Mesen
+also does) is the right thing for a dump that concatenates the three existing chips in order,
+but it means a write selecting chip **2** reads chip 3's data where the hardware reads open
+bus. No game selects chip 2, so this is recorded for completeness and not as a bug to fix;
+anyone who does fix it should keep the fold for chip 3.
+
+### Mapper 156 — one new finding, and the rest equivalent
+
+Source: *INES Mapper 156* (<https://www.nesdev.org/wiki/INES_Mapper_156>) — CHR bank selection
+at "$C000-$C00F", PRG at "$C010" ("Select 16 KiB PRG-ROM bank at CPU $8000-$BFFF"), mirroring
+at "$C014" holding a **two-bit** field: "00: Vertical, 01: Horizontal, 1x: One-screen, page
+0", and "Mirroring defaults to one-screen".
+
+The register map, the 16 KiB PRG window, the fixed last bank and the one-screen power-on all
+agree with ours (`daou306.rs:58-78`), and the CHR field being 9 bits on the page where we and
+Mesen build 16 is **equivalent** for any value a real write carries.
+
+**MR-156-1 — new finding. Verdict: our bug, severity visible. Mesen shares it.** $C014 is a
+two-bit field with **three** states, and we read one bit (`daou306.rs:74-78`): a write of 2 or
+3 asks for one-screen page 0 and we give Vertical. Mesen does the same
+(`DaouInfosys.h:64`), which is why MR-1 found the two "agree". The board powers on one-screen,
+so a game that sets H or V and then returns to one-screen cannot — and that return is exactly
+what a title menu does.
+
+**Test:** added — `mr_156_1_daou306_mirroring_is_a_two_bit_field`.
+
+**Cost: none.** One `match value & 0x03` in place of one `if value & 0x01`, on a write to a
+single address.
