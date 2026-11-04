@@ -718,8 +718,9 @@ fn req_core_100_rambo1_maps_three_prg_banks_and_a_1_kib_chr_mode() {
     core.mmc3_bank(7, 5);
     core.mmc3_bank(15, 9);
     assert_eq!([3, 5, 9, 15], core.prg_windows());
-    core.mapper_write(0x8000, 0x40); // PRG mode 1 rotates the three windows.
-    assert_eq!([9, 3, 5, 15], core.prg_windows());
+    // MR-64-7: PRG mode 1 swaps R6 with R15 and leaves R7 at $A000.
+    core.mapper_write(0x8000, 0x40);
+    assert_eq!([9, 5, 3, 15], core.prg_windows());
     // In the 1 KiB CHR mode, registers 8 and 9 fill the odd kilobytes of the first two
     // windows. The bank registers go in first, since selecting one clears the mode bits.
     core.mmc3_bank(0, 16);

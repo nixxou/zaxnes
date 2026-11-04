@@ -526,7 +526,6 @@ fn mr_64_3_rambo1_a12_filter_is_sixteen_m2_cycles() {
 /// the old, wrong table too (`Rambo1.h:97-105`) and MR-1 found our rotation "equivalent"
 /// against it. Ours is `rambo1.rs:42-50`.
 #[test]
-#[ignore = "MR-1b: MR-64-7"]
 fn mr_64_7_rambo1_prg_mode_swaps_r6_and_r15() {
     let mut core = MapperRom::new(64).prg(8).chr(16).load();
 

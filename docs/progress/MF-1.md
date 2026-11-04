@@ -19,7 +19,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 
 - [x] 1/10 — Caltron 6-in-1: MR-41-1, MR-41-2, MR-41-3
 - [x] 2/10 — MMC6: MR-4-1, MR-4-7, MR-4-6, MR-4-8
-- [ ] 3/10 — RAMBO-1 PRG mode: MR-64-7
+- [x] 3/10 — RAMBO-1 PRG mode: MR-64-7
 - [ ] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
 - [ ] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
 - [ ] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
@@ -51,6 +51,7 @@ because a step cannot write its own commit hash.
 | MR-4-7 | `mmc3.rs:294` ($A001 gated on $8000 bit 5) | `mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled` | StarTropics, Zoda's Revenge |
 | MR-4-6 | `registry.rs:53` + `mmc3.rs:55` (1 KiB) | `mr_4_6_mmc6_carries_one_kib_of_prg_ram`, `mr_4_6_a_plain_mmc3_keeps_its_eight_kib` | StarTropics, Zoda's Revenge (battery-RAM and save-state size only) |
 | MR-4-8 | `mmc3.rs:236-243` (`Some(None)`) | `mr_4_8_mmc6_window_is_open_bus_when_no_half_is_readable` | none known |
+| MR-64-7 | `rambo1.rs:46-48` (R15, R7, R6) | `mr_64_7_rambo1_prg_mode_swaps_r6_and_r15` | the five mapper-64 titles, whichever of them sets $8000 bit 6 (Klax, Rolling Thunder, Shinobi, Skull & Crossbones, Xybots) |
 
 ### Step 1 notes
 
@@ -86,3 +87,15 @@ because a step cannot write its own commit hash.
   offset. That is one division *removed* from the MMC6 access path, as MR-4-6 predicted.
 - MR-4-1 and MR-4-8 move no byte any other board reads: both functions are behind
   `self.is_mmc6`, which is a load-time field.
+
+### Step 3 notes
+
+- One index pair exchanged in `Rambo1::update_banks`; R7 stays at $A000 in both modes. Mesen
+  cannot be the oracle here — MR-1b records that it carries the same old wiki table — so the
+  authority is the corrected nesdev page plus the hardware tests of the "RAMBO-1 Mapper
+  Investigation" thread that produced the correction.
+- `req_core_100_rambo1_maps_three_prg_banks_and_a_1_kib_chr_mode` (`mapper_tests.rs:714`)
+  asserted the rotation and now asserts the swap; its CHR half is untouched. MR-1b's withdrawn
+  MR-64-2 (the 2 KiB CHR window) and MR-64-1 (the counter) are **not** applied, and the two
+  tests that asserted them stay removed.
+- No state, no new branch: `select & 0x40` was already the condition.

@@ -39,10 +39,14 @@ impl Rambo1 {
 
     fn update_banks(&mut self) {
         let b = |i: usize| i32::from(self.bank[i]);
+        // MR-64-7. The PRG mode bit *swaps* R6 with R15 and leaves R7 at $A000; it does not
+        // rotate the three switchable windows. nesdev ("RAMBO-1") gives R6/R7/RF for P = $00
+        // and RF/R7/R6 for P = $40, corrected from the hardware tests of the "RAMBO-1 Mapper
+        // Investigation" thread ("when P=1, $A000=R7, $C000=R6"). Mesen carries the old table.
         if self.select & 0x40 != 0 {
             self.banks.map_prg_8k(0, b(15));
-            self.banks.map_prg_8k(1, b(6));
-            self.banks.map_prg_8k(2, b(7));
+            self.banks.map_prg_8k(1, b(7));
+            self.banks.map_prg_8k(2, b(6));
         } else {
             self.banks.map_prg_8k(0, b(6));
             self.banks.map_prg_8k(1, b(7));
