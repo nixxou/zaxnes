@@ -474,8 +474,10 @@ fn req_core_100_cprom_fixes_the_first_4_kib_of_chr_ram() {
 
 #[test]
 fn req_core_100_mapper_15_has_four_prg_layouts() {
-    // AMD-021 R2-002: layout 1 fixes the last 16 KiB bank of the whole image at $C000, not
-    // the last bank of a 64 KiB block.
+    // AMD-061 §2: layout 1 fixes the last 16 KiB bank of the 128 KiB block B selects, i.e.
+    // `B | 7`. This image is exactly one 128 KiB block, so its last bank is both, and the
+    // vectors are the same as under AMD-021 R2-002; `amd_061_mapper_15_acceptance_vectors`
+    // is the one that tells the two readings apart.
     let cases: [(u16, [u8; 4]); 4] = [
         (0, [4, 5, 6, 7]),
         (1, [4, 5, 14, 15]),
@@ -502,19 +504,23 @@ fn req_core_100_mapper_15_carries_mirroring_in_bit_6() {
 }
 
 #[test]
-fn amd_021_r2_002_mapper_15_acceptance_vectors() {
-    // A numbered 1 MiB image, 64 banks of 16 KiB, so 16 KiB bank n is the pair of 8 KiB banks
-    // (2n, 2n + 1).
+fn amd_061_mapper_15_acceptance_vectors() {
+    // AMD-061 §2's criterion, which replaces AMD-021 R2-002's. A numbered 1 MiB image, 64
+    // banks of 16 KiB, so 16 KiB bank n is the pair of 8 KiB banks (2n, 2n + 1).
     let mut core = MapperRom::new(15).prg(128).chr(8).load();
     // Power-on shows the first 32 KiB.
     assert_eq!([0, 1, 2, 3], core.prg_windows());
-    // $8001 <- $05: layout 1, B = 5 -> 5 / 63 (the last 16 KiB bank of the image).
+    // "$8001 <- $05 -> 5 / 7": layout 1, B = 5, and the fixed window is `5 | 7` = 7 — the last
+    // 16 KiB of B's own 128 KiB block, not bank 63 at the end of the image.
     core.write_memory(0x8001, 0x05);
-    assert_eq!([10, 11, 126, 127], core.prg_windows());
-    // $8002 <- $85: layout 2, B = 5, h = 1 -> 8 KiB bank 11 in all four windows.
+    assert_eq!([10, 11, 14, 15], core.prg_windows());
+    // "$8001 <- $0A -> 10 / 15": B = 10 is in the second block, so `10 | 7` = 15 stays there.
+    core.write_memory(0x8001, 0x0A);
+    assert_eq!([20, 21, 30, 31], core.prg_windows());
+    // "$8002 <- $85 -> 8 KiB bank 11 everywhere": layout 2, B = 5, h = 1.
     core.write_memory(0x8002, 0x85);
     assert_eq!([11, 11, 11, 11], core.prg_windows());
-    // $8000 <- $40: bit 6 set -> horizontal.
+    // "$8000 <- $40 -> horizontal mirroring": bit 6.
     core.write_memory(0x8000, 0x40);
     assert_eq!(Nm::Horizontal, core.mirroring());
 }
@@ -779,22 +785,25 @@ fn req_core_100_jaleco_j87_swaps_the_two_bits_of_its_chr_bank() {
 }
 
 #[test]
-fn amd_021_r2_003_mapper_101_decodes_address_bits_13_and_14() {
-    // A numbered 32 KiB CHR image: 8 KiB CHR bank n is the run of 1 KiB banks starting at 8n.
-    let mut core = MapperRom::new(101).prg(4).chr(32).load();
-    // $6000 <- $06 -> bank 6 & 3 = 2.
+fn amd_061_mapper_101_takes_eight_bits_from_6000_7fff() {
+    // AMD-061 §4's criterion, which replaces AMD-021 R2-003's: a numbered 64 KiB CHR image,
+    // eight 8 KiB banks, and 8 KiB CHR bank n is the run of 1 KiB banks starting at 8n.
+    let mut core = MapperRom::new(101).prg(4).chr(64).load();
+    // "$6000 <- $06 -> bank 6": the whole byte, where R2-003 took `value & 3` = 2.
     core.write_memory(0x6000, 0x06);
-    assert_eq!(2 * 8, core.chr_bank(0x0000));
-    // $E000 <- $03 -> bank 3: bits 13 and 14 of $E000 are both set.
+    assert_eq!(6 * 8, core.chr_bank(0x0000));
+    // "$7FFF <- $0D -> bank 5": the top of the window still decodes, and 13 modulo 8 is 5.
+    core.write_memory(0x7FFF, 0x0D);
+    assert_eq!(5 * 8, core.chr_bank(0x0000));
+    // "$E000 <- $03 -> no change": $8000-$FFFF is not decoded at all, where R2-003 took the
+    // writes whose address carried bits 13 and 14.
     core.write_memory(0xE000, 0x03);
-    assert_eq!(3 * 8, core.chr_bank(0x0000));
-    // $8000 <- $01: bits 13 and 14 clear, no change.
+    assert_eq!(5 * 8, core.chr_bank(0x0000));
+    // Nor is any other address above the register window.
     core.write_memory(0x8000, 0x01);
-    assert_eq!(3 * 8, core.chr_bank(0x0000));
-    // $A000 and $C000 carry only one of the two bits, so they are not decoded either.
     core.write_memory(0xA000, 0x01);
     core.write_memory(0xC000, 0x02);
-    assert_eq!(3 * 8, core.chr_bank(0x0000));
+    assert_eq!(5 * 8, core.chr_bank(0x0000));
 }
 
 #[test]

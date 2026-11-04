@@ -27,7 +27,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief step *k-1*.
 
 - [x] 1/10 — step 0: give back what MF-1 cost on the MMC1 CHR path
-- [ ] 2/10 — step 1: AMD-061 §2 and §4 — mapper 15 mode 1, mapper 101, the AMD-021 criteria
+- [x] 2/10 — step 1: AMD-061 §2 and §4 — mapper 15 mode 1, mapper 101, the AMD-021 criteria
 - [ ] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
 - [ ] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
 - [ ] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
@@ -46,6 +46,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | finding / § | fix (file:line) | test | hot path touched, and why other games do not pay | games whose output changes |
 | --- | --- | --- | --- | --- |
 | step 0 (no finding: MF-1's cost) | `mmc5.rs:177-186` (`refresh_background_chr_set`), `:41-48` (the field), `:196-199` (`chr_address`) | the MF-1 MR-5-1 tests, unchanged | `Board::ppu_peek` / `ppu_read`: **restored instruction-for-instruction** on the MMC1 arm; `Mmc5::ppu_peek` is 3 instructions *shorter* than at `74ce9bc` | none — behaviour is identical to MF-1 |
+| AMD-061 §2 (mapper 15 mode 1) | `multicart.rs:139-146` (`bank \| 0x07`) | `amd_061_mapper_15_acceptance_vectors` | none: one OR inside `Mapper015::update_banks`, which runs on a register write to a mapper-15 cartridge | the mapper-15 multicarts, and only an image **larger than 128 KiB** running in mode 1 |
+| AMD-061 §4 (mapper 101) | `multicart.rs:619-630` (8-bit field), `:659-672` (the range) | `amd_061_mapper_101_takes_eight_bits_from_6000_7fff` | none: both changes are in `JalecoJ87`, which only mapper 87 and 101 reach, and the range test got *simpler* (one `contains`, no branch on the board) | mapper-101 images with more than 32 KiB of CHR; mapper 87 does not move at all |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -188,3 +190,54 @@ it already reads. A state written before this lot — or before MF-1 — loads u
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: **559 passed, 0 failed, 11 ignored** — the same counts MF-1
 closed with, the behaviour being identical.
+
+## Step 1 — AMD-061 §2 and §4
+
+### Mapper 15, mode 1 (§2)
+
+`Mapper015::update_banks` fixed **the last 16 KiB bank of the image** at `$C000` in mode 1
+(`map_prg_16k(2, -1)`). AMD-061 §2 replaces that with the last 16 KiB of the 128 KiB block `B`
+selects: the register's bits 5-0 are PRG A19..A14, so forcing A14-A16 high and leaving A17-A19
+to `B` is `B | 7` in 16 KiB bank numbers. That is Mesen's reading, which MR-1b's table had
+already recorded as the sourced one; only the amendment's owner could change it, and §2 does.
+
+- The other three modes, the 6-bit `B` field, the absent XOR by `h` and the mirroring bit are
+  explicitly **maintained** by §2, and none of them is touched.
+- MF-1's MR-15-1 CHR-RAM write protection (modes 0 and 3) is what §2 now requires in so many
+  words, and it is left exactly as MF-1 wrote it.
+- `req_core_100_mapper_15_has_four_prg_layouts` keeps its four vectors unchanged: its image is
+  128 KiB, i.e. *one* block, so the last bank of the image and the last bank of the block are
+  the same bank. Only its comment moves. The 1 MiB acceptance test is what separates the two
+  readings, and it now carries §2's two new vectors (`$05` → 5 / 7 and `$0A` → 10 / 15) in place
+  of R2-002's single `$05` → 5 / 63.
+
+### Mapper 101 (§4)
+
+Two changes, both of which MR-1b had found Mesen right about and R2-003 wrong about:
+
+- **the range**: `$6000-$7FFF` only. The board shared `JalecoJ87` with mapper 87 and took an
+  extra arm for mapper 101, `address & 0x6000 == 0x6000`, which also matched `$E000-$FFFF`.
+  Both boards now use the one `(0x6000..=0x7FFF)` test, so the decode no longer branches on the
+  board at all.
+- **the width**: the whole byte, not `value & 3`. `BankWindows::map_chr_8k` already wraps on the
+  CHR size, which is §4's "modulo la taille de la CHR", so no masking is needed. R2-003's
+  `value & 3` capped the board at 32 KiB of CHR, on a board the source calls an "oversize
+  extension" of the J87.
+
+Mapper 87 keeps its own two swapped bits and its own range, so no mapper-87 dump moves.
+`req_core_100_jaleco_j87_swaps_the_two_bits_of_its_chr_bank` is untouched and still passes.
+
+`swap_bits` now means only "the J87 bit order", not "the J87 address decode"; it stays a
+load-time field.
+
+### Save states
+
+No new field on either board and no change of meaning for an existing one: `Mapper015` still
+saves `mode` and `value`, `JalecoJ87` still saves `register`. A state written before this lot
+loads and plays identically, except that a mapper-15 state in mode 1 on an image larger than
+128 KiB now shows the block's last bank at `$C000` — which is the fix.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: 559 passed, 0 failed, 11 ignored.

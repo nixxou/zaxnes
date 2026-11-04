@@ -138,8 +138,11 @@ impl Mapper015 {
             }
             1 => {
                 self.banks.map_prg_16k(0, bank);
-                // -1 counts back from the end: the last 16 KiB bank of the image.
-                self.banks.map_prg_16k(2, -1);
+                // AMD-061 §2, replacing AMD-021 R2-002's "last 16 KiB bank of the ROM": the
+                // fixed window is the last 16 KiB of the 128 KiB *block* B selects. The
+                // register's bits 5-0 are PRG A19..A14 (nesdev, "INES Mapper 015"), so forcing
+                // A14-A16 high and leaving A17-A19 to B is `B | 7` in 16 KiB bank numbers.
+                self.banks.map_prg_16k(2, bank | 0x07);
             }
             2 => {
                 for slot in 0..BankWindows::PRG_WINDOWS {
@@ -618,10 +621,14 @@ impl JalecoJ87 {
 
     fn update_banks(&mut self) {
         self.banks.map_prg_32k(0);
+        // Mapper 87 has "the bits in order" reversed, and uses two of them; mapper 101 is the
+        // "oversize extension" and takes the whole byte (AMD-061 §4, replacing AMD-021
+        // R2-003's `value & 3`; nesdev, "INES Mapper 101"). `map_chr_8k` wraps on the CHR size,
+        // which is the amendment's "modulo la taille de la CHR".
         self.banks.map_chr_8k(i32::from(if self.swap_bits {
             ((self.register & 0x01) << 1) | ((self.register >> 1) & 0x01)
         } else {
-            self.register & 0x03
+            self.register
         }));
     }
 }
@@ -651,19 +658,17 @@ impl Mapper for JalecoJ87 {
         self.update_banks();
     }
 
-    // Mapper 87 decodes $6000-$7FFF only; mapper 101 decodes bits 13 and 14 of the address,
-    // which adds $E000-$FFFF (R2-003).
+    // Both boards decode $6000-$7FFF and nothing else: a write in $8000-$FFFF is ignored
+    // (AMD-061 §4, replacing AMD-021 R2-003's extra $E000-$FFFF arm; nesdev, "INES Mapper 101",
+    // gives the register as "$6000-$7FFF" and the board as "the same as J87 but with the bits
+    // in order").
     fn intercept_cpu_write(
         &mut self,
         _memory: &mut CartridgeMemory,
         address: u16,
         value: u8,
     ) -> bool {
-        let selected = if self.swap_bits {
-            (0x6000..=0x7FFF).contains(&address)
-        } else {
-            address & 0x6000 == 0x6000
-        };
+        let selected = (0x6000..=0x7FFF).contains(&address);
         if selected {
             self.register = value;
             self.update_banks();
