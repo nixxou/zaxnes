@@ -199,10 +199,15 @@ pub fn frame_budget(lower: &str) -> u32 {
 /// How a suite's documentation says its screen is to be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// The ROM draws `PASSED` or `FAILED #n`.
+    /// The ROM draws `PASSED`, or `FAILED` with its code.
     ///
-    /// `sprite_hit_tests_2005.10.05` and `sprite_overflow_tests`: "Each test ROM runs several
-    /// tests and reports the result on screen and by beeping a number of times."
+    /// This is blargg's own wording, and the same text his `$6000` protocol carries: the
+    /// readmes say "Tests generally print information on screen, but also report the final
+    /// result audibly, and output text to memory", so the screen and `$6000` say the same
+    /// thing. `sprite_hit_tests_2005.10.05` and `sprite_overflow_tests` predate `$6000` and
+    /// have only the screen; `read_joy3/thorough_test` draws it without ever arming the
+    /// protocol. A screen holding neither word is `manual`, so this reading never invents a
+    /// verdict for a ROM that is not reporting one.
     Word,
     /// The ROM draws a hexadecimal result code, `$01` meaning every test passed.
     ///
@@ -210,21 +215,16 @@ pub enum Kind {
     /// on screen and by beeping a number of times. A result code of 1 always indicates that
     /// all tests were passed."
     HexCode,
-    /// No documented way to read this screen: the row stays `manual` and the PNG is the
-    /// evidence.
-    Unknown,
 }
 
 impl Kind {
     /// How the ROM at relative path `lower` (lower-cased) reports.
     #[must_use]
     pub fn of(lower: &str) -> Self {
-        if lower.contains("sprite_hit_tests") || lower.contains("sprite_overflow_tests") {
-            Self::Word
-        } else if lower.contains("blargg_ppu_tests") {
+        if lower.contains("blargg_ppu_tests") {
             Self::HexCode
         } else {
-            Self::Unknown
+            Self::Word
         }
     }
 
@@ -242,7 +242,7 @@ impl Kind {
                 Some(code) => (Outcome::Fail, Some(code)),
                 None => (Outcome::Manual, None),
             },
-            Self::Word | Self::Unknown => (Outcome::Manual, None),
+            Self::Word => (Outcome::Manual, None),
         }
     }
 }

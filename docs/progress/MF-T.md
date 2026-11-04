@@ -22,7 +22,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
   table and the pass tally.
 - [x] 5/10 — `--markdown` report generator, with the reference column taken from
   `nes-test-roms/status.txt`.
-- [ ] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
+- [x] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
 - [ ] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
 - [ ] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
 - [ ] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
@@ -157,6 +157,28 @@ routines"), and every blocked page is a PPU/NMI-timing page.
 
 The 22 genuine failures group cleanly: all five `SH*` stores (`SHA`, `SHS`, `SHY`, `SHX`) with
 code 7, `Open Bus`, and most of the DMA and APU-timing page.
+
+### Step 6, the filtered probes
+
+Run on subsets, not on the whole directory, so neither of the two campaign runs is spent.
+
+* The suites feared slow are not: `cpu_interrupts_v2` (6/6 pass), `ppu_vbl_nmi` (11/11),
+  `instr_timing` (3/3), `cpu_exec_space` (2/2), `oam_stress` (1/1 in 1.1 s),
+  `ppu_read_buffer` (1/1 in 1.4 s). Every one stops the instant `$6000` leaves `$80`, so the
+  long budgets are only there for a hang.
+* **The `PASSED`/`FAILED` screen reading is not specific to the 2005 suites.** The readmes say
+  "Tests generally print information on screen, but also report the final result audibly, and
+  output text to memory" — the screen and `$6000` carry the same words. `read_joy3/thorough_test`
+  draws `Passed` without ever arming the protocol, and was `manual` while the word reader was
+  restricted by path. It is now the default for a screen-read ROM, with the hexadecimal code
+  of `blargg_ppu_tests_2005.09.15b` the one exception. A screen holding neither word is still
+  `manual`, so nothing is invented.
+* `read_joy3/count_errors` and `count_errors_fast` draw `Conflicts: 0/1000` and `Errors:
+  0/1000`. Nothing in the collection states the threshold, so they stay `manual` — but it is
+  worth noting in the report that `status.txt` records NESICIDE and Nestopia at 72/1000 and
+  7/1000 respectively, both marked FAIL, where Zaxnes shows 0.
+* `stress/NEStress.NES` and the `other/` directory are interactive demos and menus, correctly
+  `manual`.
 
 ### Campaign runs
 
