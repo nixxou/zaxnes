@@ -1,3 +1,8 @@
+// Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+//
+// `chr_address`'s choice between the two CHR register sets is Mesen's `chrA` expression
+// (`Core/NES/Mappers/Nintendo/MMC5.h`), read back as "use set B"; see THIRD-PARTY-NOTICES.md.
+
 use super::{windows_for, Mapper};
 use crate::apu::Mmc5Audio;
 use crate::cartridges::{wrap_offset, BankWindows, CartridgeMemory, ChrFetch};

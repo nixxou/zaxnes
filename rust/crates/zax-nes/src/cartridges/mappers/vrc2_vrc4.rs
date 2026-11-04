@@ -1,3 +1,8 @@
+// Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+//
+// The OR'd heuristic `Vrc2Vrc4::new` falls back on when the NES 2.0 submapper is absent is
+// Mesen's `TranslateAddress` (`Core/NES/Mappers/Konami/VRC2_4.h`); see THIRD-PARTY-NOTICES.md.
+
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};

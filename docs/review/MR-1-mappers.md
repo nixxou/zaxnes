@@ -1374,6 +1374,8 @@ game believes it has cleared.
 `write_register`, which already runs on exactly these writes; no field is added, no path is
 widened, and the serial register is not read anywhere else.
 
+**Fixed in MF-1 (b00e7d69).**
+
 ### MR-1-2 — the 512 KiB outer bank and the "last written" CHR register
 
 **MR-1 verdict: our bug (subtle). New verdict: neither side is right — and both are
@@ -1430,6 +1432,8 @@ PRG-RAM-heavy games. It is avoidable: the shift and mask depend only on
 `ram_bank_shift: u32` and `ram_bank_mask: u8` and the hot path keeps exactly the one shift and
 one mask it has today.
 
+**Fixed in MF-1 (b00e7d69).**
+
 ### MR-1-4 — submapper 5, fixed PRG
 
 **MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed, with a named game.**
@@ -1446,6 +1450,8 @@ the PRG register at all would bank a 32 KiB image into halves on our side.
 
 **Cost: none.** The submapper is read at construction into a `fixed_prg: bool`; `update_banks`
 gains one branch, and `update_banks` runs only on a committed serial write.
+
+**Fixed in MF-1 (b00e7d69).**
 
 ### MR-1-5 — only one of SOROM's two RAM chips is battery-backed (new)
 
@@ -1464,6 +1470,8 @@ scratch, so a game could in principle read stale data it expects to be garbage.
 
 **Cost: none.** The battery half is a sub-slice chosen at load — Mesen's `GetSaveRamSize()` /
 `GetWorkRamSize()` split, which the shared-infrastructure item 2 of MR-1 already calls for.
+
+**Fixed in MF-1 (b00e7d69).**
 
 ### The three MMC1 notes MR-1 left open
 
@@ -1515,6 +1523,8 @@ MR-1's "save corruption rather than a glitch" reading stands.
 **Cost: none.** Two constants swap inside `mmc6_half_readable` / `mmc6_half_writable`. Those
 run on CPU accesses to $6000-$7FFF of an MMC6 — two cartridges in the library — and the
 instruction count does not change at all.
+
+**Fixed in MF-1 (d76ad9d3).**
 
 ### MR-4-2 — "A12 must fall before the first rise counts"
 
@@ -1610,6 +1620,8 @@ shared-infrastructure item 2).
 also *removes* work from the hot path: `mmc6_offset`'s `% memory.prg_ram().len()` becomes the
 identity on a 1 KiB allocation and can go away.
 
+**Fixed in MF-1 (d76ad9d3).**
+
 ### MR-4-7 — the MMC6 holds $A001 at zero while RAM is disabled (new)
 
 **New finding. Verdict: our bug, severity subtle.**
@@ -1628,6 +1640,8 @@ difference is in which 512-byte half answers a read immediately after the RAM is
 **Cost: none.** One condition on the $A001 arm of `write_register`, which runs only on a write
 to $A001, and only the MMC6 branch of it.
 
+**Fixed in MF-1 (d76ad9d3).**
+
 ### MR-4-8 — the MMC6 window is open bus when no half is readable (new)
 
 **New finding. Verdict: our bug, severity cosmetic.**
@@ -1645,6 +1659,8 @@ which `MapperMachine::prg_windows` does not expose; the three open-bus findings 
 tested together by the lot that fixes them.
 
 **Cost: none.** Two returns change value in a function that only MMC6 dumps enter.
+
+**Fixed in MF-1 (d76ad9d3).**
 
 ### MR-4-9 — submappers 2 and 4 of mapper 4 are not handled (new)
 
@@ -1668,6 +1684,8 @@ worth a test ahead of the submapper dispatch MR-1's infrastructure item 3 calls 
 
 **Cost: none.** Both are load-time flags; submapper 2 widens an existing branch, submapper 4
 selects which of two comparisons `clock_irq_counter` makes.
+
+**Fixed in MF-1 (969c1b2e) — submapper 2 only; submapper 4 is the rev A IRQ REQ-CORE-100 forbids, filed as Q-114.**
 
 ### The two MMC3 non-findings, re-checked
 
@@ -1864,6 +1882,8 @@ code there, which is why it is `visible` and not `subtle`.
 
 **Cost: none.** Two indices exchange in `update_banks`, which runs on a $8000 or $8001 write.
 
+**Fixed in MF-1 (3e3b0001).**
+
 ## Mapper 5 — MMC5
 
 Sources: *MMC5* (<https://www.nesdev.org/wiki/MMC5>) and *MMC5 audio*
@@ -1893,6 +1913,8 @@ already pays per fetch through the bus path (`chr_view` is `None` for this board
 the third clause replaces one bool read with one bool read and an `in_frame` test already in
 the struct; it adds no state and no new call site, and the MMC5 is already excluded from the
 fast span.
+
+**Fixed in MF-1 (564cf15b).**
 
 ### MR-5-2 — an ExRAM write outside rendering, in modes 0 and 1
 
@@ -1940,6 +1962,8 @@ and the wiki's, so MR-1's "one of two conventions" is settled.
 keep, in `on_ppu_scanline` — one call per scanline, 240 per frame, on a board with six
 cartridges' worth of games. Nothing moves to a per-cycle or per-fetch path.
 
+**Fixed in MF-1 (564cf15b).**
+
 ### MR-5-4 — how the in-frame flag is detected
 
 **MR-1 verdict: unknown ("a deliberate simplification"). New verdict: our bug, severity
@@ -1984,6 +2008,8 @@ answer). Same family as MR-4-8 and MR-30-2.
 adds the open-bus answers, and the fixture has no view of the bus's last value.
 
 **Cost: none.** One returned value changes in `cpu_peek_override`.
+
+**Fixed in MF-1 (564cf15b).**
 
 ### Q-111 — the two audio points, verified at first hand
 
@@ -2044,6 +2070,8 @@ address decodes a different register. *Twinbee* and *Gradius* are the mapper-22 
 rather than on the mapper number. It runs on a cartridge register write, already a PPU sync
 point, and the arms get *simpler*: an exact wiring is two shifts where the heuristic is four.
 
+**Fixed in MF-1 (053ee9ee).**
+
 ### MR-21-2 — the VRC2 has no PRG swap mode
 
 **MR-1 verdict: our bug (visible). New verdict: our bug — confirmed verbatim.**
@@ -2059,6 +2087,8 @@ then runs the wrong bank at $8000.
 **Test:** unchanged — `mr_21_2_vrc2a_has_no_prg_swap_mode`.
 
 **Cost: none.** One more arm of the same load-time variant match, on the same path.
+
+**Fixed in MF-1 (053ee9ee).**
 
 ### MR-21-3 — mapper 27 and every submapper
 
@@ -2082,6 +2112,8 @@ and the right test is table-driven over all nine variants, which belongs with it
 **Cost: none.** Everything is decided at load from the mapper number and the submapper; the
 hot paths lose branches rather than gain them, because `has_irq` and `chr_shift` stop being
 derived from a number and become fields of the resolved variant.
+
+**Fixed in MF-1 (053ee9ee).**
 
 ### Three VRC notes, re-checked
 
@@ -2157,6 +2189,8 @@ argument. We allocate the header's 32 KiB default (`ines_header.rs:154`).
 infrastructure item 2). It makes the save state 16 KiB smaller per frame of rollback, so if
 anything it is a small win for run-ahead.
 
+**Fixed in MF-1 (969c1b2e).**
+
 ### MR-13-2 — is the mirroring hard-wired vertical?
 
 **MR-1 verdict: unknown (severity "visible if it bites"). New verdict: our bug, severity
@@ -2178,6 +2212,8 @@ exist yet and would read as two findings at once next to MR-13-1. Left to the fi
 
 **Cost: none.** One `set_mirroring` call at construction, next to the CHR-RAM size override
 MR-13-1 needs.
+
+**Fixed in MF-1 (969c1b2e).**
 
 ## Mapper 71 — Camerica / Codemasters
 
@@ -2256,6 +2292,8 @@ genuinely four-screen image loses its four nametables.
 **Cost: none.** Keeping `byte6` on `InesHeader` is one `u8` on a struct built once per load,
 and the decode moves from two tests to a four-way match in the same place.
 
+**Fixed in MF-1 (969c1b2e).**
+
 ### MR-30-2 — no work RAM
 
 **MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
@@ -2266,6 +2304,8 @@ Source: *UNROM 512* — "PRG RAM capacity: None".
 
 **Cost: none.** The same load-time size override as MR-13-1 and MR-4-6, and it *removes* the
 `$6000-$7FFF` branch's work for this board.
+
+**Fixed in MF-1 (969c1b2e).**
 
 ### MR-30-3 — submapper 3 toggles vertical/horizontal
 
@@ -2278,6 +2318,8 @@ nametable arrangement".
 
 **Cost: none** — a load-time submapper flag chooses which of two `set_mirroring` calls the
 register write makes.
+
+**Fixed in MF-1 (969c1b2e).**
 
 ### MR-30-4 — the flash
 
@@ -2318,6 +2360,8 @@ write moves the PRG bank.
 **Test:** none; one more arm of the same load-time submapper switch.
 
 **Cost: none.**
+
+**Fixed in MF-1 (969c1b2e).**
 
 ### MR-30-6 — four-screen from CHR-RAM
 
@@ -2372,6 +2416,8 @@ precedence over the size** when present.
 `Board` enum gaining the distinction the boards already make internally — and the decode then
 tests a field instead of a range. `intercept_cpu_write` keeps the same shape.
 
+**Fixed in MF-1 (b64de407).**
+
 ### MR-34-2 — BNROM has no work RAM, and its register has bus conflicts (new)
 
 **New finding. Verdict: our bug, severity subtle (two parts).**
@@ -2394,6 +2440,8 @@ would test the same two mechanisms.
 **Cost: none beyond MR-BUS-1's.** Adding mapper 34 to the boards that declare conflicts is one
 more `true` from a load-time predicate; the work RAM is the same load-time size override as
 MR-13-1, MR-4-6 and MR-30-2.
+
+**Fixed in MF-1 (b64de407) — the work-RAM half only; the bus-conflict half extends MR-BUS-1 and waits for lot MF-2.**
 
 ## Mapper 41 — Caltron 6-in-1
 
@@ -2422,13 +2470,16 @@ with "The Inner CHR Bank Select only can be written while the PRG ROM bank is 4,
   and 256 KiB is eight 32 KiB banks. Our `outer & 0x03` (`multicart.rs:261`) is two bits, so
   banks 4-7 fold back and the menu cannot start games 5 and 6. **Severity crash/hang**
   stands, and it remains the worst finding of either lot.
+  **Fixed in MF-1 (1e789ca4).**
 - **MR-41-2 — our bug, confirmed, with the polarity.** Mirroring is address bit 5, and
   "0=Vertical, 1=Horizontal" — the same polarity our `horizontal_if` applies, so the fix is
   only the bit position (we read bit 2 after masking the address to five bits,
   `multicart.rs:264`).
+  **Fixed in MF-1 (1e789ca4).**
 - **MR-41-3 — our bug, confirmed verbatim.** The gate is the quoted sentence, and the diagram
   shows *why*: bit 2 is simultaneously the top PRG bit and the `E` enable, so "PRG bank 4-7"
   and "E high" are the same condition. We latch unconditionally (`multicart.rs:311-316`).
+  **Fixed in MF-1 (1e789ca4).**
 
 The CHR outer field stays **equivalent**: address bits 3-4 land on CHR bank bits 2-3, as our
 `((outer >> 3) & 0x03) << 2` does.
@@ -2477,6 +2528,8 @@ that lot will be in this file anyway.
 
 **Cost: none.** One `self.mode` test in `Mapper::ppu_write`, which runs on a PPU write to
 CHR — a path only CHR-RAM boards take and only when the CPU writes $2007.
+
+**Fixed in MF-1 (969c1b2e).**
 
 ### Mapper 28, Action 53 (AMD-021 R2-001)
 
@@ -2565,6 +2618,8 @@ findings above.
 **Cost: none.** Four nibbles of state and one range in `intercept_cpu_write` /
 `cpu_peek_override`, on a board whose games are already decoded there.
 
+**Fixed in MF-1 (969c1b2e).**
+
 ### Mapper 228 — equivalent, plus one note
 
 Source: *INES Mapper 228* (<https://www.nesdev.org/wiki/INES_Mapper_228>) — address
@@ -2606,6 +2661,8 @@ what a title menu does.
 **Cost: none.** One `match value & 0x03` in place of one `if value & 0x01`, on a write to a
 single address.
 
+**Fixed in MF-1 (97c274ff).**
+
 ## Mapper 16 — Bandai FCG
 
 Source: *INES Mapper 016* (<https://www.nesdev.org/wiki/INES_Mapper_016>).
@@ -2627,6 +2684,8 @@ it is only safe as long as every game disables counting first.
 
 **Cost: none.** A load-time submapper flag and one branch in the $x00A/$x00B/$x00C arms of a
 register write.
+
+**Fixed in MF-1 (97c274ff).**
 
 ### MR-16-2 — the PRG outer bank on images of 512 KiB or more
 
@@ -2709,6 +2768,8 @@ hold the board in one-screen with PRG mode 0. We have no submapper handling on t
 The register width MR-1 left as "equivalent in practice" is confirmed: the page gives both PRG
 registers as five bits ("P PPPP"), and the G-101 tops out at 256 KiB, where our eight bits and
 the modulo give the same bank. **Equivalent.**
+
+**Fixed in MF-1 (97c274ff).**
 
 ## Mappers 9 and 10 — MMC2 and MMC4
 
