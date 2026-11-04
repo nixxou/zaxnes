@@ -38,8 +38,8 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
 - [x] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
       table, the test changes, any Q ticket
-- [ ] 12/12 — `cargo fmt --check`, `clippy -p zax-nes --all-targets -D warnings`,
-      `cargo test --release -p zax-nes`; journal; close
+- [x] 12/12 — `cargo fmt --check`, `clippy -p zax-nes --all-targets -D warnings`,
+      `cargo test --release -p zax-nes`; journal; close. **Lot complete.**
 
 ## Notes
 
@@ -256,3 +256,38 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   withdrawn MR-64-1. The lot's headline warning: **do not apply MR-1's fixes for MR-64-1,
   MR-64-2, MR-11-1 or MR-4-2** — two of them would break boards that are correct today.
   Tickets: Q-112 written, Q-110 given a sourced addendum, Q-111 confirmed as filed.
+- **Step 12** — checks and closing.
+  - `cargo fmt --check` clean (one reformat needed in the test file, applied).
+  - `cargo clippy -p zax-nes --all-targets -- -D warnings` clean. **Not** the workspace: the
+    same pre-existing limitation as MR-1, `zax-app/src/demo_game.rs` `include_bytes!`es a
+    gitignored `.nes`.
+  - `cargo test --release -p zax-nes`: **0 failures**, 23 ignored (this lot's findings);
+    `mr1_review_tests` reports `1 passed; 0 failed; 23 ignored`.
+  - `cargo test --release -p zax-nes --test mr1_review_tests -- --ignored`: **23 failed,
+    0 passed** — every ignored test was confirmed to fail for the reason claimed, including
+    the four added (MR-4-7, MR-5-3, MR-64-7, MR-156-1) and the two re-aimed (MR-64-3, MR-5-2).
+  - Journal entry appended to `cleanroom/journal/JOURNAL.md` (R3, 2026-11-04).
+  - Q tickets written outside the worktree: `spec/changes/Q-112.md` (new), and the MR-1b
+    addendum inside `spec/changes/Q-110.md`.
+  - **Machine note for the owner**: the C: volume filled up during the lot (0 bytes free,
+    of which about 4.7 GiB under `AppData/Local/Temp/claude`). Every cargo command here ran
+    with `TMP` and `TEMP` pointed at `rust/target-mr/tmp` on G:, which is why they worked.
+    Nothing of the lot depends on it, but the next session on this machine will need space.
+
+## Closing state
+
+Deliverables: the "MR-1b — sourced re-check" section of `docs/review/MR-1-mappers.md` (one
+entry per finding with its sources, reasoning, test change and cost class, plus the new
+authoritative summary table that supersedes MR-1's), `rust/crates/zax-nes/tests/mr1_review_tests.rs`
+(24 tests, 23 ignored: 6 of MR-1's removed, 4 added, 2 re-aimed), `spec/changes/Q-112.md`, the
+addendum in `spec/changes/Q-110.md`, and this file.
+
+No board was changed. No `rust/crates/zax-render/tests/*_tmp.rs`, no root `tests/`, no
+`.claude/` and no `CLAUDE.md` was ever staged; `rust/target-mr/` is build output and was never
+staged.
+
+For whoever fixes these: start at the revised "three to fix first" (MR-41-1/2/3, MR-4-1,
+MR-64-7) and read the lot's warning first — **MR-1's fixes for MR-64-1, MR-64-2, MR-11-1 and
+MR-4-2 must not be applied**, two of them would break boards that are right today. Mesen is a
+good oracle for the ASICs and a poor one for the discrete boards and for RAMBO-1; where this
+lot cites a wiki sentence against Mesen, the sentence wins.

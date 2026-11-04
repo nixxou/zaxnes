@@ -457,7 +457,11 @@ fn mr_64_7_rambo1_prg_mode_swaps_r6_and_r15() {
     core.mapper_write(0x8001, 3);
     core.mapper_write(0x8000, 15); // Register 15.
     core.mapper_write(0x8001, 4);
-    assert_eq!([2, 3, 4, 7], core.prg_windows(), "mode 0: R6, R7, RF, fixed");
+    assert_eq!(
+        [2, 3, 4, 7],
+        core.prg_windows(),
+        "mode 0: R6, R7, RF, fixed"
+    );
 
     core.mapper_write(0x8000, 0x40); // PRG mode on, register select back to 0.
 
