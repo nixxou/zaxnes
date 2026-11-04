@@ -298,6 +298,14 @@ any game reads. The boards **not** in the table must not move at all.
   question MR-4-9 identified; submapper 2 is implemented, submapper 4 is not. The ticket also
   carries MR-4-3's MC-ACC (submapper 3), which raises the same priority question.
 
+**AMD-061 landed while this lot was running** and closes Q-110, Q-111 and Q-112. Its §2 states
+MR-15-1 in so many words — "CHR-RAM protégée en écriture dans les modes 0 et 3, inscriptible
+dans les modes 1 et 2 (constat MR-15-1, déjà exigé par REQ-CORE-100)" — so the fix of step 9 is
+what the amendment now requires. Everything else the amendment settles (mapper 15's mode 1,
+mapper 101, mapper 28's reset, the MMC5 audio) it assigns to **lot MF-2**, which is where this
+lot's brief already left it. Its general rule — the public hardware documentation outranks the
+original program for the NES core — is the rule every fix in this lot followed.
+
 No other finding of this lot contradicted the spec: `SPEC-02-coeur-nes.md:414` lists mapper 41
 with an empty behaviour column, AMD-021 R2-004 already accepts the two VRC divergences the fix
 keeps, and AMD-021 R2-002 is silent on MR-15-1 rather than contradicting it.
