@@ -36,7 +36,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
 - [x] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
 - [x] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
-- [ ] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
+- [x] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
       table, the test changes, any Q ticket
 - [ ] 12/12 — `cargo fmt --check`, `clippy -p zax-nes --all-targets -D warnings`,
       `cargo test --release -p zax-nes`; journal; close
@@ -246,3 +246,13 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   **One more new finding, MR-66-1**: the GxROM board table gives the board **bus conflicts**,
   which neither Mesen nor MR-1 had. MR-BUS-1 now covers mappers 2, 3, 7, 11, 30, 34 and 66.
   Mapper 66's two-bit fields and mapper 32's five-bit PRG registers confirmed equivalent.
+- **Step 11** — the authoritative table, MR-1's marked superseded. Final shape of the lot:
+  **41 `our bug`** (23 with a failing ignored test, plus the one non-ignored guard), **9 of
+  MR-1's `our bug` verdicts withdrawn** (6 tests removed), **12 new findings**, **5 of 8
+  `unknown`s closed**, **3 `unknown`s left** (MR-64-1, MR-64-5, MR-18-1 — all IRQ cycle-level,
+  all leaning ours, each with what would settle it). Costs: 35 none, 4 negligible, 2
+  measurable (MR-30-4, MR-5-4), **none `risk`**, and MR-64-3 may be a net win.
+  "The three to fix first" revised: MR-41-1/2/3, MR-4-1, and now **MR-64-7** in place of the
+  withdrawn MR-64-1. The lot's headline warning: **do not apply MR-1's fixes for MR-64-1,
+  MR-64-2, MR-11-1 or MR-4-2** — two of them would break boards that are correct today.
+  Tickets: Q-112 written, Q-110 given a sourced addendum, Q-111 confirmed as filed.

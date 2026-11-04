@@ -1104,6 +1104,11 @@ outright (0, 66, 87, 156, 225, 228, and MMC2/MMC4 as a pair).
 
 ### Findings
 
+> **SUPERSEDED by lot MR-1b.** This table is kept as the record of what the Mesen-only
+> comparison concluded. The authoritative table is "MR-1b — the authoritative findings table"
+> at the end of this file: it re-classifies nine of the rows below against the public sources,
+> closes five `unknown`s, and adds twelve findings MR-1 could not see.
+
 | id | board | severity | class | games likely affected | evidence (ours / Mesen) | test | proposed fix |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | MR-41-1 | 41 | **crash/hang** | our bug | Caltron 6-in-1, games 5-6 | `multicart.rs:261` / `Caltron41.h:33` | `mr_41_1_caltron_prg_field_is_three_bits` | PRG field is address bits 0-2, not 0-1 |
@@ -2772,3 +2777,139 @@ listed only 2, 3, 7, 11 and 30.
 to source beyond the 16 KiB image appearing twice, which both sides do and which REQ-CORE-100's
 table pins. Not re-fetched, and recorded here so the next reader knows it was considered and
 not forgotten.
+
+---
+
+## MR-1b — the authoritative findings table
+
+This replaces MR-1's table, which is marked superseded above.
+
+Columns: **sev** is the severity, **class** the verdict after the sourced re-check, **cost**
+the performance class of the fix (none / negligible / measurable / risk) with its confinement
+in the per-finding entry above.
+
+### Our bug — confirmed or newly found
+
+| id | board | sev | games affected | source (short) | test | cost |
+| --- | --- | --- | --- | --- | --- | --- |
+| MR-41-1 | 41 | **crash/hang** | Caltron 6-in-1, games 5-6 | mapper 41 diagram: PRG is address bits 0-2, 256 KiB | `mr_41_1_...` | none |
+| MR-4-1 | 4 | **visible** | StarTropics, Zoda's Revenge (saves) | MMC6 $A001 `HhLl xxxx`: bit 4 writes / bit 5 reads | `mr_4_1_...` | none |
+| MR-41-2 | 41 | **visible** | Caltron 6-in-1 | mapper 41 diagram: mirroring is address bit 5, 1=Horizontal | `mr_41_2_...` | none |
+| MR-41-3 | 41 | **visible** | Caltron 6-in-1 | "only can be written while the PRG ROM bank is 4, 5, 6, or 7" | `mr_41_3_...` | none |
+| MR-64-7 | 64 | **visible** | all five mapper-64 titles using PRG mode 1 | RAMBO-1 table: P=$40 gives RF, R7, R6 — a swap, not a rotation | `mr_64_7_...` **new** | none |
+| MR-5-1 | 5 | **visible** | any 8x8-sprite MMC5 title | "$5128-$512B are completely ignored" with 8x8 sprites | `mr_5_1_...` | none |
+| MR-5-3 | 5 | **visible** | Castlevania III, Just Breed | counter "reset to zero" then "incremented, then compared" | `mr_5_3_...` **new** | none |
+| MR-1-1 | 1 | **visible** | Shinsenden | "the bit 7 reset is never ignored" | `mr_1_1_...` | none |
+| MR-34-1 | 34 | **visible** | BNROM titles using work RAM near $7FFF | "BNROM has no registers at those addresses" | `mr_34_1_...` | none |
+| MR-30-1 | 30 | **visible** | four-screen UNROM 512 homebrew | byte-6 table: `%....1..1` = "4-Screen with cartridge VRAM" | `mr_30_1_...` | none |
+| MR-30-4 | 30 | **visible** | self-flashing UNROM 512 homebrew | SST39SF040 sequences; submapper 1/2 battery rules | — | **measurable** |
+| MR-30-6 | 30 | **visible** | four-screen UNROM 512 homebrew | "comes from the last 8 KiB of CHR-RAM", scratch at $3000-$3EFF | — | measurable |
+| MR-21-1 | 22 | **visible** | Twinbee, Gradius | variant table: VRC2a is "A1, A0", no OR term | `mr_21_1_...` | none |
+| MR-21-2 | 22 | **visible** | VRC2a titles | "VRC2 does not have a Swap Mode" | `mr_21_2_...` | none |
+| MR-32-1 | 32 | **visible** | Major League | "$9000 is entirely disabled: the game can only request 'PRG mode 0'" | `mr_32_1_...` | none |
+| MR-156-1 | 156 | **visible** | the Daou Infosys titles | $C014 is "00: Vertical, 01: Horizontal, 1x: One-screen" | `mr_156_1_...` **new** | none |
+| MR-BUS-1 | 2,3,7,11,30,**34**,**66** | subtle | Color Dreams titles; submapper-2 dumps; BNROM; GxROM | submapper 2 = "the bitwise AND of the written value and the value in ROM" | `mr_bus_1_...` x2 | negligible |
+| MR-1-3 | 1 | subtle | Genghis Khan, Nobunaga's Ambition | "The SOROM board only implements the upper `S` bit" | — (fixture gap) | none if precomputed |
+| MR-64-3 | 64 | subtle | the five Tengen titles | "If 4-bit counter = 16: Clock the 8-bit counter", per M2 fall | `mr_64_3_...` re-aimed | negligible (may be a win) |
+| MR-64-4 | 64 | subtle | the five Tengen titles | "delayed until M2 falls twice after the PPU A12 rise" | — | negligible |
+| MR-5-2 | 5 | subtle | MMC5 titles using ExRAM as a nametable | "writes are only allowed when the PPU is rendering" | `mr_5_2_...` re-aimed | negligible |
+| MR-5-4 | 5 | subtle | MMC5 titles toggling rendering mid-frame | "three consecutive PPU reads from the same nametable address" | — | **measurable** |
+| MR-16-1 | 16 | subtle | Famicom Jump II (FCG-1/2 dumps) | "writing to these two registers directly modifies the counter itself" | `mr_16_1_...` | none |
+| MR-21-3 | 21,23,25,27 | subtle | mapper 27; submapper-tagged 21/23/25; VRC2b/c dumps | variant table, incl. VRC4c on "A6, A7" | — | none |
+| MR-34-2 | 34 | subtle | BNROM titles | BNROM lacks the NINA work RAM; its register is "AND'd with the PRG-ROM content" | — **new** | none |
+| MR-4-7 | 4 | subtle | StarTropics, Zoda's Revenge | "the mapper continuously sets $A001 to $00, and so all writes to $A001 are ignored" | `mr_4_7_...` **new** | none |
+| MR-66-1 | 66 | subtle | GxROM titles | the GxROM board table gives the board bus conflicts | — **new** | none |
+| MR-13-1 | 13 | cosmetic | Videomation (save-state size) | "16 KiB RAM (in two 8KiB RAMs)"; REQ-CORE-100 pins it | `mr_13_1_...` | none |
+| MR-13-2 | 13 | cosmetic | Videomation (a mis-headered dump) | the board's arrangement is "Vertical", with no solder pad | — | none |
+| MR-1-4 | 1 | cosmetic | Dr. Mario (SEROM) | submapper 5 = "a fixed 32k PRG ROM with no banking support" | `mr_1_4_...` | none |
+| MR-1-5 | 1 | cosmetic | SOROM/SXROM saves | "The first RAM chip will not retain its data, but the second one will" | — **new** | none |
+| MR-30-2 | 30 | cosmetic | UNROM 512 homebrew | "PRG RAM capacity: None" | `mr_30_2_...` | none |
+| MR-30-3 | 30 | cosmetic | submapper-3 UNROM 512 | submapper 3 = "mapper-controlled horizontal/vertical nametable arrangement" | — | none |
+| MR-30-5 | 30 | cosmetic | submapper-4 UNROM 512 | submapper 4 = "an additional register controls LEDs inside the cartridge shell" | — | none |
+| MR-4-3 | 4 | cosmetic | The Incredible Crash Dummies, Mickey's Safari in Letterland | MC-ACC "uses a ÷8 prescaler instead of filtering A12, clocked by falling edges" | — | none (new board) |
+| MR-4-6 | 4 | cosmetic | MMC6 (exposed RAM size) | "1 KB of internal PRG RAM" | — | none |
+| MR-4-8 | 4 | cosmetic | none known | "If neither bank is enabled for reading, the $7000-$7FFF area is open bus" | — **new** | none |
+| MR-4-9 | 4 | cosmetic | submapper-2 and submapper-4 dumps | "MMC3C with hard-wired mirroring"; "NEC MMC3 (Loading latch with 0 disables IRQ)" | — **new** | none |
+| MR-5-5 | 5 | cosmetic | none known | ExRAM modes 0/1: a CPU read "returns open bus" | — | none |
+| MR-15-1 | 15 | cosmetic | mapper-15 multicarts | "CHR-RAM is write-protected in PRG banking modes 0 and 3" | — **new** | none |
+| MR-225-1 | 225 | cosmetic | none known | "16 bits of RAM -- 4 bits in each of the 4 regs" at $5800-$5803 | — **new** | none |
+
+### Left `our bug` — the sources do not support the charge
+
+| id | board | new class | why | test change |
+| --- | --- | --- | --- | --- |
+| MR-64-2 | 64 | **Mesen in error** | "The lowest bit in the register is ignored and instead passes PPU A10 directly through to CHR A10" — ours exactly | **removed** |
+| MR-4-2 | 4 | **Mesen in error** | the filter is "a rising edge after the line has remained low for three falling edges of M2", satisfied at power-on | **removed** |
+| MR-11-1 | 11 | Mesen differs | the latch is `CCCC LLPP`: two PRG bits, bits 2-3 "Used for lockout defeat", board holds 128 KiB | **removed** |
+| MR-16-2 | 16 | Mesen differs | no outer bank on mapper 16; the CHR-register trick belongs to mappers 153/157 | none existed |
+| MR-16-3 | 16 | Mesen differs | mapper 16 is a CHR-ROM board; 153/157 "use CHR-RAM instead" | none existed |
+| MR-1-2 | 1 | equivalent in practice | in 4 KiB CHR mode both registers' `P`/`S` bits must match "or the PRG-ROM and/or RAM will be bankswitched/enabled as the PPU renders" — neither side's model, and unreachable | **removed** |
+| MR-64-1 | 64 | unknown, leaning ours | the decrement is in its own `else` branch in both of the page's descriptions; the `ORed with 1` clause "remains undiscovered" | **removed** |
+| MR-64-5 | 64 | unknown | the page documents the prescaler reset, not an extra clock on leaving cycle mode; two implementations are each "claimed to work" | none existed |
+| MR-18-1 | 18 | unknown, leaning ours | "When it wraps, an IRQ is generated" — the wrap is the clock that decrements a zero, which is ours | **removed** |
+
+### `unknown` closed
+
+| id | board | new class | why |
+| --- | --- | --- | --- |
+| MR-71-1 | 71 | **Mesen in error** | "Select 1 KiB CIRAM bank for PPU $2000-$2FFF": M=1 is the second nametable, our `SingleScreenB` |
+| MR-13-2 | 13 | promoted to our bug | see the table above |
+| MR-5-3 | 5 | promoted to our bug | see the table above |
+| MR-5-4 | 5 | promoted to our bug | see the table above |
+| MR-A12-1 | shared | equivalent in practice | the filter counts M2 falls (three on the MMC3); our 10 dots brackets it, and only a 7-9 dot low could differ |
+| MR-4-4 | 4 | equivalent | "the values in R6, R7, and $8000 are unspecified at power on" |
+| MR-4-5 | 4 | equivalent | no power-on value for $A001 in the sources; the MMC6 case is settled by MR-4-7 |
+| MR-PWR-1 | 1,18,22,32,64 | equivalent | same sentence as MR-4-4; both layouts conform |
+| MMC2/MMC4 latch | 9,10 | **Mesen in error** | the trigger is a pattern-table fetch: "the latch is updated after either pattern table byte is fetched" |
+| MMC1 soft reset | 1 | still unknown | no public source describes the MMC1 on the reset line; REQ-CORE-004 governs our side. See Q-112 |
+
+### Mesen in error, equivalent, notes and spec questions
+
+| id | board | class | note |
+| --- | --- | --- | --- |
+| MR-64-6 | 64 | Mesen in error | unchanged: a $8000 write re-maps at once; banking is combinational |
+| MR-28-2 | 28 | **now equivalent** | "The rest of the state is unspecified", so AMD-021's 63/15/0 and Mesen's zeros both conform |
+| MR-71-2 | 71 | equivalent | the bank register is at $C000-$FFFF, as we decode; Mesen's extra arm is leniency |
+| MR-228-1 | 228 | note | "Chip 2 does not exist, and when selected, will result in open bus"; our 3→2 fold is right for every real dump |
+| mappers 0, 66, 87, 225, 228, 156 core | — | equivalent | re-checked against each page's own register diagram |
+| bank-window wrapping | shared | equivalent | no source specifies a non-power-of-two PRG size, and no such dump exists |
+| **Q-110** | 15, 28, 101 | spec question | **four of seven points answered**: AMD-021 right on mapper 15's 6-bit `B` and missing XOR and on mapper 28's conditional mirroring bit; Mesen right on mapper 15's mode 1 and on mapper 101's range and width. Addendum written into the ticket |
+| **Q-111** | 5 (audio) | spec question | both nesdev sentences verified at first hand; AMD-054's marked (D) is accurate. Ticket stands |
+| **Q-112** | 28 (and 1) | spec question **new** | "The mapper state is unchanged on reset" contradicts REQ-CORE-004's "mapper revenu dans son état initial" (finding MR-28-3) |
+
+### Totals
+
+- **41 findings classified `our bug`**, of which **23 carry a failing `#[ignore]`d test** in
+  `rust/crates/zax-nes/tests/mr1_review_tests.rs`. One further test is not ignored
+  (`mr_bus_1_uxrom_without_a_submapper_has_no_conflict`) and pins behaviour a fix must keep.
+- **9 of MR-1's `our bug` verdicts did not survive**: 2 become "Mesen in error", 3 "Mesen
+  differs", 1 "equivalent in practice" and 3 `unknown`. Six of their tests were removed.
+- **12 findings are new** (MR-1-5, MR-4-7, MR-4-8, MR-4-9, MR-15-1, MR-34-2, MR-64-7,
+  MR-66-1, MR-156-1, MR-225-1, plus the MR-28-3 spec question and the MR-228-1 note), and
+  four of them came out of boards MR-1 had called equivalent in a single line.
+- **5 of MR-1's 8 `unknown`s are closed**, 3 to `our bug` and 2 to `equivalent`; MR-71-1 and
+  the MMC2 latch close as "Mesen in error". **3 `unknown`s remain** (MR-64-1, MR-64-5,
+  MR-18-1), all three on IRQ cycle-level behaviour, all three leaning our way, and each entry
+  says what would settle it.
+- **Cost: 35 of the 41 `our bug` fixes cost nothing** on any hot path — they are load-time
+  decisions or register-write arithmetic. **4 are negligible** (MR-BUS-1, MR-64-3, MR-64-4,
+  MR-5-2). **Two are measurable and both are on mapper 30 or 5** (MR-30-4's flash state
+  machine, MR-5-4's bus-sniffed in-frame flag, with MR-30-6 close behind), each confined to
+  the board's own games. **None is in the `risk` class**, and MR-64-3 may be a net *win*,
+  because a per-board A12 threshold would let RAMBO-1 declare the `ppu_irq_horizon` it
+  currently returns `None` for.
+
+### The three to fix first, revised
+
+MR-1 nominated MR-41-1/2/3, MR-4-1 and MR-64-1. The last of those is now withdrawn, and the
+sources add one that is worse than it looked:
+
+1. **MR-41-1/2/3** — unchanged, and now sourced from the register diagram. The Caltron 6-in-1
+   cannot start half its cartridge. Smallest fix, worst symptom.
+2. **MR-4-1** — unchanged. The MMC6 writes saves through a bit that should only enable reads.
+3. **MR-64-7** — new. The RAMBO-1's PRG mode swaps two registers we rotate, so a mapper-64
+   game that sets the mode runs the wrong bank at $A000 and $C000. Two indices, and Mesen
+   cannot be used as the oracle because it has the same error.
+
+And the warning this lot exists to produce: **do not apply MR-1's fixes for MR-64-1, MR-64-2,
+MR-11-1 or MR-4-2.** Two of them would break boards that are correct today.
