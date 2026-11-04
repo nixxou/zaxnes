@@ -32,7 +32,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
 - [x] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
 - [x] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
-- [ ] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
+- [x] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
 - [ ] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
 - [ ] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
 - [ ] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
@@ -173,3 +173,16 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   not silence the MMC5 pulse channels", "the polarity of all MMC5 channels is reversed
   compared to the APU") read on the page itself rather than through Mesen's quotes of them,
   and AMD-054's marked (D) on the 240 Hz length counter is accurate too. No new ticket.
+- **Step 7** — VRC2/VRC4. The nesdev variant table lists each chip with the two **address
+  lines** that feed the register index, and the submapper picks the row. All three findings
+  **confirmed**: MR-21-1 (VRC2a is "A1, A0", no OR term), MR-21-2 verbatim ("VRC2 does not
+  have a Swap Mode and the bank this register will switch is always the $8000-$9FFF bank"),
+  MR-21-3 — and that last one is *wider* than MR-1 thought: VRC4c decodes **A6 and A7**, which
+  no OR of A0-A3 can produce, and VRC2b/VRC2c live on mappers 23 and 25, so a correctly
+  headered dump of either gets an IRQ the chip does not have. All three cost nothing: the
+  variant is resolved at load and the exact wirings are *fewer* operations than the heuristic.
+  The microwire latch stays cosmetic ("Konami never used it, seemingly due to a defect") and
+  the VRC2a CHR shift is one special case we already had right.
+  **Note on this step: the C: volume filled up (356 KiB free), so drafts are no longer written
+  to the session scratchpad; the remaining sections are edited straight into the report.** The
+  cargo checks of step 12 must point `TMP`/`TEMP` at the G: volume.

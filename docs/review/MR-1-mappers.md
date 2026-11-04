@@ -2002,3 +2002,94 @@ quotes of them; the spec prevails and no code changes. Were the answer to drop t
 cost would be **negligible and already mapped**: a per-channel flag in `PulseChannel::muted`,
 which `PERFORMANCE-HISTORY.md` §5.1 (RU-3a-fix) says must not become a second comparison in
 the level cache — the flag belongs in the channel, not in the cache key.
+
+## Mappers 21, 22, 23, 25, 27 — Konami VRC2 and VRC4
+
+Source: *VRC2 and VRC4* (<https://www.nesdev.org/wiki/VRC2_and_VRC4>). Its variant table is
+the thing MR-1 needed and could not read: each chip is listed with the two **address lines**
+that supply the low two bits of the register index —
+
+| chip | mapper | lines |
+| --- | --- | --- |
+| VRC2a | 22 | A1, A0 |
+| VRC2b | 23 | A0, A1 |
+| VRC2c | 25 | A1, A0 |
+| VRC4a | 21 | A1, A2 |
+| VRC4b | 25 | A1, A0 |
+| VRC4c | 21 | A6, A7 |
+| VRC4d | 25 | A3, A2 |
+| VRC4e | 23 | A2, A3 |
+| VRC4f | 23 | A0, A1 |
+
+and the NES 2.0 submapper is what picks the row within a mapper number.
+
+### MR-21-1 — mapper 22 is VRC2a and its wiring is exact
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed.**
+
+The table gives VRC2a the pair "A1, A0": the register's bit 0 comes from address line A1 and
+its bit 1 from A0, with no OR term — which is Mesen's `A0 = (addr >> 1) & 1`,
+`A1 = addr & 1`. We route mapper 22 through the mapper-25 heuristic (`vrc2_vrc4.rs:57`),
+whose `(a >> 1) | (a >> 3)` and `a | (a >> 2)` let address bits 2 and 3 leak in, so the same
+address decodes a different register. *Twinbee* and *Gradius* are the mapper-22 titles.
+
+**Test:** unchanged — `mr_21_1_vrc2a_uses_the_exact_register_wiring`.
+
+**Cost: none.** The variant is resolved at load and `register_index` becomes a match on it
+rather than on the mapper number. It runs on a cartridge register write, already a PPU sync
+point, and the arms get *simpler*: an exact wiring is two shifts where the heuristic is four.
+
+### MR-21-2 — the VRC2 has no PRG swap mode
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed verbatim.**
+
+Source: *VRC2 and VRC4* — "VRC2 does not have a Swap Mode and the bank this register will
+switch is always the $8000-$9FFF bank"; on the VRC2 the whole of $9000-$9003 is the
+nametable-arrangement register.
+
+We split $9002-$9003 off as the mode on every variant (`vrc2_vrc4.rs:191-200`), so on a
+mapper-22 cartridge a write meant to set mirroring swaps the PRG layout instead and the game
+then runs the wrong bank at $8000.
+
+**Test:** unchanged — `mr_21_2_vrc2a_has_no_prg_swap_mode`.
+
+**Cost: none.** One more arm of the same load-time variant match, on the same path.
+
+### MR-21-3 — mapper 27 and every submapper
+
+**MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed, and wider than MR-1
+thought.**
+
+Two things the table shows that the Mesen comparison did not:
+
+- **VRC4c (mapper 21, submapper 2) decodes A6 and A7.** No OR of A0-A3 can produce that, so
+  for that submapper our heuristic does not merely approximate the wiring, it decodes an
+  unrelated register. VRC4d (A3, A2) and VRC4e (A2, A3) are likewise outside the pair our
+  mapper-25 and mapper-23 arms OR together.
+- **VRC2b and VRC2c are mappers 23 and 25.** We decide "this is a VRC2" from the mapper number
+  alone (`vrc2_vrc4.rs:34-36`: `has_irq: mapper_number != 22`, `chr_shift: mapper_number ==
+  22`), so a correctly headered VRC2b or VRC2c dump gets a VRC4 IRQ the chip does not have,
+  and misses the CHR shift it does.
+
+**Test:** none added. The fix is one `DetectVariant` equivalent (MR-1's infrastructure item 3)
+and the right test is table-driven over all nine variants, which belongs with it.
+
+**Cost: none.** Everything is decided at load from the mapper number and the submapper; the
+hot paths lose branches rather than gain them, because `has_irq` and `chr_shift` stop being
+derived from a number and become fields of the resolved variant.
+
+### Three VRC notes, re-checked
+
+- **the microwire latch at $6000-$6FFF.** Source: *VRC2 and VRC4* — "The VRC2 was supposed to
+  have shipped with a Microwire interface for save games. However, Konami never used it,
+  seemingly due to a defect", the interface being a "1-bit latch value (r/w)". The latch is
+  real but no commercial cartridge uses it, so our giving the window 8 KiB of PRG-RAM instead
+  stays **cosmetic**, as MR-1 had it.
+- **the VRC2a CHR shift.** Source: *VRC2 and VRC4* — "On VRC2a (mapper 22), the low bit is
+  ignored (right shift value by 1)". We already do it (`vrc2_vrc4.rs:36`), which is worth
+  recording because it is the one VRC2a special case we got right without a submapper.
+  **Equivalent.**
+- **AMD-021 R2-004** still governs mapper 27's eight-bit CHR high field and the VRC2
+  mirroring mask, which it lists as accepted divergences. The sources describe the Konami
+  parts and mapper 27 is a pirate board, so they do not contradict the amendment and there is
+  nothing to add to Q-110.
