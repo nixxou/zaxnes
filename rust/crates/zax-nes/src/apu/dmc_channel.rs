@@ -37,6 +37,9 @@ pub(crate) struct DmcChannel {
     output: i32,
     /// Whether the channel is pulling /IRQ low (bit 7 of $4015).
     irq_flag: bool,
+    /// CPU cycles left before a sample started by a `$4015` write may ask for its first byte,
+    /// two or three depending on the parity of the write's cycle (see [`Self::set_enabled`]).
+    start_delay: i32,
 }
 
 impl Default for DmcChannel {
@@ -44,7 +47,8 @@ impl Default for DmcChannel {
         Self {
             rates: &NTSC_RATES,
             rate_index: 0,
-            timer: 0,
+            // One full period before the first bit, not zero: see `reset`.
+            timer: NTSC_RATES[0] - 1,
             irq_enabled: false,
             looping: false,
             sample_address: 0xC000,
@@ -58,6 +62,7 @@ impl Default for DmcChannel {
             silence: true,
             output: 0,
             irq_flag: false,
+            start_delay: 0,
         }
     }
 }
@@ -78,9 +83,11 @@ impl DmcChannel {
         self.bytes_remaining > 0
     }
 
-    /// Whether the memory reader wants a byte: the sample buffer is empty and bytes remain.
+    /// Whether the memory reader wants a byte: the sample buffer is empty, bytes remain, and a
+    /// sample just started by a `$4015` write has served its start delay (see
+    /// [`Self::set_enabled`]).
     pub const fn needs_sample_fetch(&self) -> bool {
-        self.buffer_empty && self.bytes_remaining > 0
+        self.buffer_empty && self.bytes_remaining > 0 && self.start_delay == 0
     }
 
     /// Address the next DMA fetch reads.
@@ -119,16 +126,28 @@ impl DmcChannel {
     /// Applies bit 4 of a $4015 write: starts the sample when it is set and nothing is
     /// playing, stops it when it is clear. A $4015 write always clears the DMC IRQ flag
     /// (nesdev).
-    pub fn set_enabled(&mut self, enabled: bool) {
+    ///
+    /// The **load** fetch a start asks for is not asked for on the write's own cycle: it waits
+    /// two cycles when the write lands on an even CPU cycle and three when it lands on an odd
+    /// one, which is what makes a load DMA "typically take 3 cycles" against a reload's four
+    /// (nesdev, "DMA"). `apu_cycle` is this core's name for that parity — it is the same bit the
+    /// `$4017` write delay reads (`apu_reset/4017_timing`). Mesen 2 does the same, from
+    /// `AccuracyCoin`'s "Delta Modulation Channel" page; without it blargg's `sync_dmc` locks onto
+    /// a phase three cycles away from the hardware's and `sprdma_and_dmc_dma` measures the DMC
+    /// fetch in the wrong place.
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    pub fn set_enabled(&mut self, enabled: bool, apu_cycle: bool) {
         self.irq_flag = false;
 
         if !enabled {
             self.bytes_remaining = 0;
+            self.start_delay = 0;
             return;
         }
 
         if self.bytes_remaining == 0 {
             self.restart();
+            self.start_delay = if apu_cycle { 2 } else { 3 };
         }
     }
 
@@ -136,22 +155,33 @@ impl DmcChannel {
     /// returns `false` on each of them.
     #[allow(clippy::cast_sign_loss)] // Checked non-negative.
     pub const fn quiet_clocks(&self) -> u32 {
-        if self.timer > 0 {
-            self.timer as u32
-        } else {
-            0
+        let quiet = if self.timer > 0 { self.timer as u32 } else { 0 };
+        if self.start_delay > 0 {
+            // The cycle the delay runs out on is not quiet: it is where the fetch is asked for.
+            let left = (self.start_delay - 1) as u32;
+            if left < quiet {
+                return left;
+            }
         }
+        quiet
     }
 
     /// Counts the timer down by `clocks`, at most [`Self::quiet_clocks`].
     #[allow(clippy::cast_possible_wrap)] // At most a timer period.
     pub fn skip_quiet_clocks(&mut self, clocks: u32) {
         self.timer -= clocks as i32;
+        if self.start_delay > 0 {
+            self.start_delay -= clocks as i32;
+        }
     }
 
     /// Clocks the output unit's timer; called once per CPU cycle.
     /// Clocks the timer; `true` when a bit was played (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {
+        if self.start_delay > 0 {
+            self.start_delay -= 1;
+        }
+
         if self.timer > 0 {
             self.timer -= 1;
             return false;
@@ -217,10 +247,27 @@ impl DmcChannel {
     }
 
     /// Back to the power-on state; the rate table stays with the region.
+    ///
+    /// The timer starts a **whole period** from its first bit rather than firing on the first
+    /// CPU cycle, which fixes the output unit's phase — and with it the phase of every sample
+    /// fetch the memory reader asks for, since every entry of both rate tables is even.
+    ///
+    /// That phase is what decides whether a reload fetch needs its alignment cycle: a request
+    /// raised on an odd CPU cycle is served three cycles later, one raised on an even cycle
+    /// four (see [`NesBus::run_dma`]). The hardware takes four, which is what blargg's
+    /// `sync_dmc` counts on — its fine-synchronisation loop is written to be one cycle longer
+    /// than the DMC's 3424-cycle byte so that it drifts into alignment ("3421+4 clocks per
+    /// iter"). Three would make the loop exactly 3424 and it would never converge, which hangs
+    /// every ROM of `dmc_dma_during_read4` and `sprdma_and_dmc_dma`. Mesen 2 sets the same
+    /// phase at reset for the same reason.
+    ///
+    /// [`NesBus::run_dma`]: crate::NesBus
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     pub fn reset(&mut self) {
         let rates = self.rates;
         *self = Self::default();
         self.rates = rates;
+        self.timer = rates[0] - 1;
     }
 
     /// The documented *after reset* state of the DMC (AMD-044 REQ-CORE-122): the output level
@@ -273,6 +320,9 @@ impl DmcChannel {
         self.silence = reader.read_bool()?;
         self.output = reader.read_i32()?;
         self.irq_flag = reader.read_bool()?;
+        // Not in the format: it lives for at most three cycles and a state is written between
+        // instructions, so there is never one in flight to save (REQ-CORE-091).
+        self.start_delay = 0;
         Ok(())
     }
 }

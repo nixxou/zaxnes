@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use common::{machine_with, minimal};
 use zax_nes::apu::mixer;
+use zax_nes::cpu::CpuBus;
 use zax_nes::{NesBus, NesCore, NesRegion};
 
 /// Level a lone pulse at `volume` mixes to (REQ-CORE-073, AMD-054). The law is non-linear, so
@@ -46,7 +47,7 @@ fn core() -> NesCore {
 
 fn tick(core: &mut NesCore, cycles: usize) {
     for _ in 0..cycles {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
     }
 }
 
@@ -57,7 +58,7 @@ fn level(core: &NesCore) -> f64 {
 fn peak(core: &mut NesCore, cycles: usize) -> f64 {
     let mut peak = f64::NEG_INFINITY;
     for _ in 0..cycles {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         peak = peak.max(level(core));
     }
     peak
@@ -66,7 +67,7 @@ fn peak(core: &mut NesCore, cycles: usize) -> f64 {
 fn high_fraction(core: &mut NesCore, cycles: usize) -> f64 {
     let mut high = 0;
     for _ in 0..cycles {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         if level(core) > 0.0 {
             high += 1;
         }
@@ -78,7 +79,7 @@ fn transitions(core: &mut NesCore, cycles: usize) -> i32 {
     let mut previous = level(core);
     let mut changes = 0;
     for _ in 0..cycles {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         if level(core) != previous {
             changes += 1;
             previous = level(core);
@@ -133,7 +134,7 @@ fn req_core_073_a_pulse_at_volume_fifteen_swings_between_zero_and_its_step_value
 
     let mut levels = HashSet::new();
     for _ in 0..4000 {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         levels.insert(level(&core).to_bits());
     }
 
@@ -243,7 +244,7 @@ fn req_core_073_the_triangle_walks_its_staircase_in_steps_of_one() {
 
     let mut levels: Vec<f64> = Vec::new();
     for _ in 0..40 * 51 {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         levels.push(level(&core));
     }
     levels.sort_by(f64::total_cmp);
@@ -290,7 +291,7 @@ fn req_core_073_the_triangle_is_held_when_its_period_is_ultrasonic() {
 /// One sample per shift at the shortest period (4 CPU cycles).
 fn noise_pattern(core: &mut NesCore, shifts: usize) -> Vec<bool> {
     let mut pattern = vec![false; shifts];
-    core.bus_mut().tick();
+    core.bus_mut().read(0x8000);
     pattern[0] = level(core) > 0.0;
 
     for slot in pattern.iter_mut().skip(1) {
@@ -364,7 +365,7 @@ fn req_core_015_the_noise_period_table_follows_the_region() {
 fn cycles_to_next_transition(core: &mut NesCore) -> i32 {
     let start = level(core);
     for cycles in 1..=400_000 {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
         if level(core) != start {
             return cycles;
         }
@@ -379,12 +380,12 @@ fn req_core_073_a_write_to_4011_loads_the_dmc_output_level_directly() {
     let mut core = core();
 
     core.write_memory(0x4011, 64);
-    core.bus_mut().tick();
+    core.bus_mut().read(0x8000);
 
     assert_near(level(&core), dmc_level(64));
 
     core.write_memory(0x4011, 0xFF); // Only the low seven bits are kept.
-    core.bus_mut().tick();
+    core.bus_mut().read(0x8000);
 
     assert_near(level(&core), dmc_level(127));
 }
@@ -399,8 +400,11 @@ fn start_dmc(core: &mut NesCore, rate: u8, length: u8, irq: bool, looping: bool)
     core.write_memory(0x4015, 0x10);
 }
 
+/// A DMC sample fetch costs the CPU four cycles — halt, dummy, alignment, read — or three when
+/// the halt already lands so that the cycle after the dummy read is a get cycle (nesdev, "DMA";
+/// REQ-CORE-113). The CPU reads on every cycle here, so the halt is never delayed by a write.
 #[test]
-fn req_core_113_a_dmc_sample_fetch_steals_four_cpu_cycles() {
+fn req_core_113_a_dmc_sample_fetch_steals_three_or_four_cpu_cycles() {
     const TICKS: i64 = 4000;
     let mut core = core();
     start_dmc(&mut core, 15, 2, false, false);
@@ -409,10 +413,20 @@ fn req_core_113_a_dmc_sample_fetch_steals_four_cpu_cycles() {
     tick(&mut core, TICKS as usize);
 
     let stolen = core.cycle_count() - before - TICKS;
+    let fetches = core.bus().dmc_dma_count();
 
-    assert!(core.bus().dmc_dma_count() > 0);
+    assert!(fetches > 1, "{fetches}");
+    assert!(
+        stolen >= i64::from(NesBus::DMC_DMA_CYCLES_ALIGNED) * fetches
+            && stolen <= i64::from(NesBus::DMC_DMA_CYCLES) * fetches,
+        "{stolen} stolen for {fetches} fetches"
+    );
+
+    // The one the $4015 write starts is a "load" fetch and is the only one that may be short:
+    // every reload after it is asked for on the same parity and costs the full four.
     assert_eq!(
-        i64::from(NesBus::DMC_DMA_CYCLES) * core.bus().dmc_dma_count(),
+        i64::from(NesBus::DMC_DMA_CYCLES) * (fetches - 1)
+            + i64::from(NesBus::DMC_DMA_CYCLES_ALIGNED),
         stolen
     );
 }
@@ -445,7 +459,7 @@ fn cycles_to_dmc_irq(region: NesRegion, length: u8) -> i64 {
 
     let before = core.cycle_count();
     while !core.apu().irq_asserted() && core.cycle_count() - before < 200_000 {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
     }
 
     assert!(core.apu().irq_asserted());
@@ -463,7 +477,7 @@ fn req_core_113_4015_reports_the_dmc_and_its_irq() {
     assert_eq!(0x10, core.apu().peek_status() & 0x10); // Bit 4: a sample is playing.
 
     while !core.apu().irq_asserted() {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
     }
 
     assert_eq!(0x80, core.apu().peek_status() & 0x80); // Bit 7: the DMC IRQ.
@@ -499,7 +513,7 @@ fn req_core_113_clearing_the_dmc_irq_enable_bit_clears_a_pending_irq() {
     start_dmc(&mut core, 15, 0, true, false);
 
     while !core.apu().irq_asserted() {
-        core.bus_mut().tick();
+        core.bus_mut().read(0x8000);
     }
 
     core.write_memory(0x4010, 0x0F); // IRQ enable cleared.
@@ -519,7 +533,7 @@ fn req_core_004_reset_silences_every_channel() {
     assert!(peak(&mut core, 1000) > 0.0);
 
     core.reset();
-    core.bus_mut().tick();
+    core.bus_mut().read(0x8000);
 
     assert_eq!(0.0, level(&core));
     assert_eq!(0x00, core.apu().peek_status());

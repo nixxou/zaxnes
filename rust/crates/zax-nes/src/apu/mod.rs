@@ -593,7 +593,7 @@ impl Apu2A03 {
         self.pulse2.length.set_enabled(false);
         self.triangle.length.set_enabled(false);
         self.noise.length.set_enabled(false);
-        self.dmc.set_enabled(false);
+        self.dmc.set_enabled(false, self.apu_cycle);
 
         self.triangle.reset_phase();
         self.dmc.soft_reset();
@@ -927,7 +927,7 @@ impl Apu2A03 {
                 self.pulse2.length.set_enabled((value & 0x02) != 0);
                 self.triangle.length.set_enabled((value & 0x04) != 0);
                 self.noise.length.set_enabled((value & 0x08) != 0);
-                self.dmc.set_enabled((value & 0x10) != 0);
+                self.dmc.set_enabled((value & 0x10) != 0, self.apu_cycle);
             }
             0x4017 => self.write_frame_counter(value),
             _ => {}
