@@ -268,3 +268,52 @@ for byte: nothing to compare. `cargo fmt --check` clean, clippy clean,
 `cargo test --release -p zax-nes -p zax-harness`: **683 passed, 0 failed, 7 ignored**.
 
 No game's output moves: no behaviour changed.
+
+## Step 3 — AccuracyCoin's DMA page
+
+### What step 1 moved
+
+`AccuracyCoin` is one ROM of 147 tests run in one pass, so the figure that matters is the
+per-test table in the JSON, not the single row in the campaign. Against `b39eaba4`:
+
+| test | before | after step 1 |
+| --- | --- | --- |
+| `APU Registers and DMA tests / DMA + $2002 Read` | fail 2 | **pass** |
+| `APU Registers and DMA tests / DMA + $2007 Read` | fail 2 | **pass** |
+| `APU Registers and DMA tests / DMA + $2007 Write` | fail 1 | **pass** |
+| `APU Registers and DMA tests / DMA + $4015 Read` | fail 2 | **pass** |
+| `APU Registers and DMA tests / DMA + $4016 Read` | fail 1 | **pass** |
+| `APU Registers and DMA tests / DMC DMA + OAM DMA` | fail 2 | **pass** |
+| `APU Tests / Delta Modulation Channel` | fail 15 | **pass** |
+| `CPU Interrupts / Interrupt flag latency` | hung, took the run out of the loop | fail E — it returns now |
+| **total** | **89 / 147** | **93 / 147** |
+
+Seven of the eight rows that moved are the DMA page itself, and the eighth is the DMC. The set
+of tests that block the run is the same before and after (32 never run, from
+`Palette RAM Quirks` on), so nothing was traded for them.
+
+### What still fails, and why
+
+| test | code | diagnosis |
+| --- | --- | --- |
+| `DMC DMA Bus Conflicts` | 2 | the byte a DMA read returns when the 2A03's own decoder answers *and* the external bus does. `NesBus::dma_read` ANDs the two, which is the plain two-drivers-on-a-bus answer; Mesen 2 keeps the external value on the pins the `$4016`/`$4017` port leaves open and ANDs only the rest. Doing that needs an open-bus mask per controller port, which `InputPorts` does not have — a controller-port change, not a DMA one. |
+| `Explicit DMA Abort` | 2 | a `$4015` write that takes a fetch back **after** its halt cycle has already run. The halt is dropped but the cycle is still stolen. This core cannot reach that state: `run_dma` owns every cycle from the halt onwards, and a `$4015` write is a write cycle, so the only abort it can see is one *before* the halt, which it does handle (`after_apu_write`). Reaching the other one means the two-or-three-cycle `$4015` disable delay plus an abort check inside the DMA loop. |
+| `Implicit DMA Abort` | 2 | same mechanism, with the sample ending rather than a write. |
+| `DMA Landing on Write` | hangs | it was `fail 5` before the lot and now does not return. The rule itself is implemented and tested (`req_core_111_the_oam_transfer_waits_for_a_read_cycle`, and the two `dmc_dma_timing_tests`); what the test measures beyond it is unknown without its source. |
+| `DMC Reload Timing`, `DMC Playback Rate` | hang | both were **blocked** before the lot — they are reached now, and hang. Same family as the two aborts: the `$4015` delays. |
+| `Open Bus`, the five `SH*` stores, `Internal Data Bus`, `Implied Dummy Reads` | 7, 3 | **out of scope**: the brief gives the `SH*` stores and PPU open bus to lot MF-4b. |
+| `Interrupt flag latency` | E | **out of scope**, lot MF-4b. |
+| `Frame Counter IRQ`, `APU Register Activation`, `Controller Strobing` | 7, 6, 4 | APU register edges, not DMA. |
+
+The three abort rows share one missing piece: a `$4015` write's effect on the DMC's **stop**
+is delayed two or three cycles the way its effect on the start is, and a fetch caught inside
+that window is dropped after its halt cycle rather than before it. That was written, measured,
+and **taken back out**: it moved no AccuracyCoin row, it changes what `$4015` bit 4 reads back
+for two to three cycles after a disable, and nothing in the suites pins the new behaviour — so
+it would have been unverified behaviour on the APU's hottest register. It belongs with a lot
+that can check it, and the diagnosis is recorded here so that lot does not have to find it
+again.
+
+### Hot path
+
+No file under `src/` changed in this step. 683 tests, unchanged; the campaign unchanged.
