@@ -24,7 +24,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
 - [x] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
 - [x] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
-- [ ] 8/10 — MR-32-1, MR-156-1, MR-16-1
+- [x] 8/10 — MR-32-1, MR-156-1, MR-16-1
 - [ ] 9/10 — MR-13-1, MR-13-2, MR-15-1, MR-225-1, MR-4-9, MR-30-1, MR-30-2, MR-30-3, MR-30-5
 - [ ] 10/10 — full suite, the `--ignored` list, the R0 table and the review annotations
 
@@ -61,6 +61,9 @@ because a step cannot write its own commit hash.
 | MR-1-5 | `registry.rs:75-81` + `mod.rs:330-345` | `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed`, `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` | **Genghis Khan, Nobunaga's Ambition**: the battery file shrinks from 16 KiB to 8 |
 | MR-21-1 | `vrc2_vrc4.rs:138-147` (the variant's lines) | `mr_21_1_vrc2a_uses_the_exact_register_wiring`, `mr_21_3_every_vrc_variant_decodes_its_own_address_lines` | **Twinbee, Gradius** (mapper 22) |
 | MR-21-2 | `vrc2_vrc4.rs:229-241` (`is_vrc2`) | `mr_21_2_vrc2a_has_no_prg_swap_mode`, `req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two` | **Twinbee, Gradius**; any VRC2a title writing $9002-$9003 |
+| MR-32-1 | `iremg101.rs:24` + `:85-93` | `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen` | **Major League** (NES 2.0 submapper 1 dumps only) |
+| MR-156-1 | `daou306.rs:74-81` | `mr_156_1_daou306_mirroring_is_a_two_bit_field` | the Daou Infosys titles (Metal Force, Buzz & Waldog) |
+| MR-16-1 | `bandai_fcg.rs:28` + `:44-57`, `:133-144` | `mr_16_1_bandai_submapper_4_writes_the_counter_directly` | **Famicom Jump II** and the other FCG-1/2 dumps, submapper 4 only |
 | MR-34-1 | `registry.rs:30-41` + `multicart.rs:30-55`, `:92-101` | `mr_34_1_bnrom_has_no_register_at_7ffd`, `mr_34_1_the_board_comes_from_the_submapper_then_from_the_chr_size` | BNROM titles that write near $7FFF (Deadly Towers, Mashou-like CHR-RAM dumps); an 8 KiB-CHR-ROM mapper-34 dump now resolves to BNROM |
 | MR-34-2 (work-RAM half only) | `registry.rs:55-60` (`prg_ram: Some(0)`) | `mr_34_1_bnrom_has_no_register_at_7ffd` | BNROM titles reading $6000-$7FFF |
 | MR-21-3 | `vrc2_vrc4.rs:6-64` (the variant table) | `mr_21_3_every_vrc_variant_decodes_its_own_address_lines`, `mr_21_3_submapper_zero_keeps_the_ord_heuristic`, `mr_21_3_a_declared_vrc2b_has_no_irq_counter` | only submapper-tagged 21/23/25 dumps, and mapper 27 (now the exact VRC4\_27 wiring instead of the mapper-23 heuristic) |
@@ -205,3 +208,18 @@ because a step cannot write its own commit hash.
   fixes both.
 - No state added. A BNROM save state written before this lot carries an 8 KiB PRG-RAM blob,
   which `read_blob_prefix_into` (step 2) drops into a zero-length buffer without complaining.
+
+### Step 8 notes
+
+- **MR-32-1 is one condition, not two.** The nesdev sentence makes the hard-wired one-screen
+  mirroring and the disabled $9000 the same fact, so submapper 1 sets `SingleScreenA` at reset
+  and then returns from the $9000 arm without touching either the mirroring or `swap_prg` —
+  which leaves the board in PRG mode 0, the only mode the sentence allows.
+- **MR-156-1** widens $C014 from one bit to two. Mesen reads bit 0 only and is wrong here as
+  well, which MR-1b records; the authority is the register diagram.
+- **MR-16-1** routes $x00B/$x00C through `write_irq_value`, which picks the counter on an
+  FCG-1/2 and the latch on an LZ93D50, and makes $x00A's latch-to-counter copy conditional.
+  An undeclared mapper-16 dump stays an LZ93D50, which is both the common board and what we
+  did before, so no existing dump moves.
+- All three flags are load-time; the three existing tests of these boards use submapper 0 and
+  are untouched.

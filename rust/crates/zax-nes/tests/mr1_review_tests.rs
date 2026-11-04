@@ -790,7 +790,6 @@ fn mr_5_5_mmc5_exram_reads_are_open_bus_in_the_nametable_modes() {
 /// (`daou306.rs:74-78`), as does Mesen (`DaouInfosys.h:64`), so a board that has left
 /// one-screen can never return to it.
 #[test]
-#[ignore = "MR-1b: MR-156-1"]
 fn mr_156_1_daou306_mirroring_is_a_two_bit_field() {
     let mut core = MapperRom::new(156).prg(8).chr(16).load();
 
@@ -951,7 +950,6 @@ fn mr_21_3_a_declared_vrc2b_has_no_irq_counter() {
 /// We have no submapper handling on this board (`iremg101.rs`), so *Major League* takes its
 /// mirroring from the header and then from every $9000 write.
 #[test]
-#[ignore = "MR-1: MR-32-1"]
 fn mr_32_1_irem_g101_submapper_1_is_fixed_one_screen() {
     let core = MapperRom::new(32).prg(8).chr(16).submapper(1).load();
 
@@ -985,7 +983,6 @@ fn tick(core: &mut zax_nes::NesCore, cycles: usize) {
 /// game sets the value *before* enabling — which is why this has not shown up — but diverge
 /// the moment a value is written while the counter is running.
 #[test]
-#[ignore = "MR-1: MR-16-1"]
 fn mr_16_1_bandai_submapper_4_writes_the_counter_directly() {
     let mut core = MapperRom::new(16).prg(8).chr(16).submapper(4).load();
 

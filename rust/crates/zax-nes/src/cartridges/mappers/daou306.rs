@@ -71,10 +71,13 @@ impl Mapper for Daou306 {
             0xC008..=0xC00B => self.chr_low[4 + slot] = value,
             0xC00C..=0xC00F => self.chr_high[4 + slot] = value,
             0xC010 => self.prg = value,
-            0xC014 => memory.set_mirroring(if value & 0x01 != 0 {
-                NametableMirroring::Horizontal
-            } else {
-                NametableMirroring::Vertical
+            // MR-156-1, nesdev ("INES Mapper 156"): the field is two bits with three states,
+            // "00: Vertical, 01: Horizontal, 1x: One-screen, page 0". Reading bit 0 alone — as
+            // Mesen does too — leaves a board that has left one-screen unable to return to it.
+            0xC014 => memory.set_mirroring(match value & 0x03 {
+                0 => NametableMirroring::Vertical,
+                1 => NametableMirroring::Horizontal,
+                _ => NametableMirroring::SingleScreenA,
             }),
             _ => return,
         }

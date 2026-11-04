@@ -4,6 +4,9 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 32, Irem G-101: two 8 KiB PRG banks, eight 1 KiB CHR banks, PRG swap mode.
+///
+/// NES 2.0 submapper 1 is *Major League*, whose board ties CIRAM A10 high and leaves $9000
+/// undecoded (MR-32-1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IremG101 {
     banks: BankWindows,
@@ -11,16 +14,20 @@ pub struct IremG101 {
     prg0: u8,
     prg1: u8,
     swap_prg: bool,
+    /// Submapper 1, decided at load.
+    major_league: bool,
 }
 
 impl IremG101 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+        let header = memory.rom().header();
         Self {
             banks: windows_for(memory),
             chr: [0; 8],
             prg0: 0,
             prg1: 1,
             swap_prg: false,
+            major_league: header.is_nes20 && header.submapper == 1,
         }
     }
 
@@ -63,11 +70,15 @@ impl Mapper for IremG101 {
         32
     }
 
-    fn reset(&mut self, _memory: &mut CartridgeMemory) {
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.chr = [0; 8];
         self.prg0 = 0;
         self.prg1 = 1;
         self.swap_prg = false;
+        if self.major_league {
+            memory.set_mirroring(NametableMirroring::SingleScreenA);
+        }
+
         self.update_banks();
     }
 
@@ -75,6 +86,14 @@ impl Mapper for IremG101 {
         match address & 0xF000 {
             0x8000 => self.prg0 = value,
             0x9000 => {
+                // MR-32-1, nesdev ("INES Mapper 032"): "Major League wants hardwired 1-screen
+                // mirroring. (CIRAM A10 is tied to +5V on this game). Additionally, the
+                // register at $9000 is entirely disabled: the game can only request 'PRG mode
+                // 0'." One condition covers both halves, since PRG mode 0 is `swap_prg` false.
+                if self.major_league {
+                    return;
+                }
+
                 memory.set_mirroring(if value & 0x01 != 0 {
                     NametableMirroring::Horizontal
                 } else {
