@@ -30,7 +30,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 2/12 — Shared: MR-BUS-1, bank-window wrapping, MR-PWR-1, MR-A12-1
 - [x] 3/12 — MMC1 (MR-1-1, MR-1-2, MR-1-3, MR-1-4) and the three non-findings
 - [x] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
-- [ ] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
+- [x] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
 - [ ] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
 - [ ] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
 - [ ] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
@@ -131,3 +131,27 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   test added), MR-4-8 (the MMC6 window is open bus when no half is readable, we drive 0),
   MR-4-9 (submappers 2 and 4 unhandled; submapper 4 wants rev A where REQ-CORE-100 pins
   rev B). All three cost nothing.
+- **Step 5** — RAMBO-1, the board the sources change most. The nesdev page carries **two**
+  IRQ descriptions (an older register-by-register one, and a cycle-level pseudo-code with a
+  4-bit M2 filter counter driving the 8-bit counter) and the talk page records two emulator
+  implementations each claimed to work with the games.
+  **MR-64-1 withdrawn to `unknown`**: the decrement sits in its own `else` branch in both
+  descriptions — our structure, not Mesen's — and under the pseudo-code a latch of L fires on
+  the (L+1)-th clock, as ours does, where Mesen's fires on the (L+2)-th. MR-1's proposed fix
+  would have made four Tengen titles worse.
+  **MR-64-2 withdrawn**: "The lowest bit in the register is ignored and instead passes PPU
+  A10 directly through to CHR A10" — ours is right and Mesen's `reg + 1` is the error. This
+  is the one finding whose fix would have broken a board that is correct today.
+  **MR-64-3 confirmed with a new figure**: sixteen M2 falling edges, about 48 dots, neither
+  our 10 nor Mesen's 31. Test re-aimed and renamed. The fix could *gain* RAMBO-1 the IRQ
+  horizon it lacks, so it may be a performance win rather than a cost.
+  **MR-64-4 confirmed** ("delayed until M2 falls twice after the PPU A12 rise"; one M2 cycle
+  in cycle mode). **MR-64-5 to `unknown`**: the wiki documents the prescaler reset but no
+  extra clock on leaving cycle mode; Mesen rests on a forum quote and a game symptom.
+  MR-64-6 unchanged (Mesen in error).
+  One **new finding, MR-64-7** (visible, test added): the PRG mode bit **swaps** R6 with R15
+  and leaves R7 at $A000, where we and Mesen rotate all three windows. The wiki was corrected
+  from the investigation thread's banking tests; Mesen still carries the old table, which is
+  exactly why MR-1 called our rotation equivalent.
+  Blast radius of the whole board: the five NesCartDB titles (Klax, Skull & Crossbones,
+  Shinobi, Rolling Thunder, the Hard Drivin' prototype) plus Alien Syndrome.
