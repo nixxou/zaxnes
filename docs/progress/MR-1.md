@@ -1,0 +1,59 @@
+# MR-1 — adversarial review of our mapper boards against Mesen 2
+
+Role R3 (clean-side reviewer). Branch `mapper-review`, worktree plays `impl/`.
+**No emulation behaviour changes.** The only code added is `#[ignore]`d tests that
+document a finding, plus the report `docs/review/MR-1-mappers.md`.
+
+Reference: `third_party/mesen2/` (GPL v3, commit `b9fa69d`), `Core/NES/Mappers/...`.
+Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
+(next free number is Q-110).
+
+## Checklist (n = 10)
+
+- [x] 1/10 done — Inventory: our board -> Mesen file mapping table; shared
+      infrastructure read (`registry.rs`, `board.rs`, `banked.rs`, `mappers/mod.rs`,
+      `a12_watcher.rs`, `cartridges/mod.rs`, header/submapper handling, `BaseMapper`)
+- [x] 2/10 done — Discrete boards, part 1: 0, 2, 3, 7, 11, 13, 66, 71
+- [ ] 3/10 todo — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
+- [ ] 4/10 todo — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
+- [ ] 5/10 todo — MMC2 / MMC4 (mappers 9, 10)
+- [ ] 6/10 todo — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
+- [ ] 7/10 todo — MMC5 (mapper 5) and its expansion audio + mix
+- [ ] 8/10 todo — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
+      Jaleco SS88006 (18), Irem G-101 (32)
+- [ ] 9/10 todo — Shared infrastructure the next lots need; summary table; report pass
+- [ ] 10/10 todo — `cargo fmt --check`, `clippy -D warnings`,
+      `cargo test --release -p zax-nes`; journal; close
+
+## Notes
+
+- `CARGO_TARGET_DIR=<worktree>/rust/target-mr` for every cargo invocation,
+  foreground, one at a time (CLAUDE.md headless rule).
+- Findings are numbered `MR-<board>-<n>` where `<board>` is the iNES mapper number,
+  e.g. `MR-4-1`. Shared-infrastructure findings use `MR-A12-<n>` / `MR-HDR-<n>`.
+- Ignored tests carry `#[ignore = "MR-1: MR-<board>-<n>"]` so the suite stays green.
+- The step-1 mapping table lives in the report, section "Board inventory".
+
+### Step notes
+
+- **Step 1** — inventory in the report. `third_party/` lives at
+  `cleanroom/third_party/`, not inside the worktree. Next free Q number confirmed: Q-110.
+  REQ-CORE-100 makes *nesdev-documented* behaviour normative and pins some details itself
+  (mapper 13 CHR-RAM 16 KiB, mapper 4 "rev B", mapper 16 EEPROM = P3, mapper 30 CHR-RAM
+  32 KiB); REQ-CORE-114 lets `mmc3_test_2` test 6 ("MMC3 alt", rev A) fail. That decides
+  several comparisons before any code is read.
+- **Known limitation of the checks**: `cargo clippy --workspace --all-targets` cannot
+  build in this worktree — `zax-app/src/demo_game.rs` `include_bytes!`es
+  `demo/FlappyZaxNes.nes` and `demo/flappyzaxnes.3dn`, which `.gitignore:71` (`*.nes`)
+  keeps out of the repository. Pre-existing, unrelated to MR-1, and not fixable without
+  adding a ROM. Clippy is therefore run as `-p zax-nes --all-targets -D warnings`, which
+  covers every file this lot touches.
+- **Step 2** — 8 boards. Findings: MR-BUS-1 (bus conflicts absent, shared by mappers
+  2/3/7/11/30, our bug), MR-11-1 (Color Dreams PRG field is 4 bits not 2, our bug),
+  MR-13-1 (CPROM CHR-RAM 16 KiB not 32, our bug, spec-pinned), MR-13-2 (CPROM forced
+  vertical mirroring, unknown), MR-71-1 (mirroring bit polarity inverted vs Mesen,
+  unknown — deliberately not called a bug, see the report), MR-71-2 (decode range,
+  equivalent). Mappers 0, 3, 7, 66 otherwise equivalent.
+  4 ignored tests in `tests/mr1_review_tests.rs`, all confirmed failing for the stated
+  reason; 1 non-ignored guard test. No `mapper_3` protect finding: Mesen's CNROM-with-diodes
+  is mapper 185, out of scope.
