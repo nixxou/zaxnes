@@ -26,9 +26,10 @@ fn req_core_100_mapper_0_is_implemented() {
 
 #[test]
 fn req_core_102_an_unimplemented_mapper_is_refused_by_name() {
-    // Everything outside the REQ-CORE-100 table is refused with the message of
-    // REQ-CORE-011.
-    for mapper in [6, 19, 69, 200] {
+    // Everything the registry does not implement is refused with the message of REQ-CORE-011 —
+    // which is everything outside the REQ-CORE-100 table except the numbers REQ-CORE-102 lets
+    // this build add (156, 69); see `req_core_100_every_required_mapper_is_registered`.
+    for mapper in [6, 19, 68, 200] {
         assert!(!Cartridge::is_supported(mapper));
         let mut image = minimal();
         image[6] = (image[6] & 0x0F) | (((mapper & 0x0F) as u8) << 4);

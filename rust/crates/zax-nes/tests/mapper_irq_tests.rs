@@ -236,3 +236,78 @@ fn req_core_100_the_mmc5_scanline_irq_stays_quiet_without_rendering() {
     core.write_memory(0x5204, 0x80);
     assert_eq!(-1, tick_until_irq(&mut core, 120_000));
 }
+
+// ---------------------------------------------------------------- Sunsoft FME-7 (69)
+
+/// Invokes FME-7 command `command` with `parameter` (nesdev, "Sunsoft FME-7": the command
+/// register is $8000-$9FFF, and writing the parameter at $A000-$BFFF "invokes the command").
+fn fme7(core: &mut NesCore, command: u8, parameter: u8) {
+    core.write_memory(0x8000, command);
+    core.write_memory(0xA000, parameter);
+}
+
+/// "When the IRQ counter is decremented from $0000 to $FFFF an IRQ is generated", the counter
+/// running off M2 — one step per CPU cycle — while command $D's `C` bit allows it
+/// (REQ-CORE-100).
+#[test]
+fn req_core_100_the_fme7_counter_counts_down_on_the_cpu_clock() {
+    let mut core = MapperRom::new(69).chr(32).load();
+    fme7(&mut core, 0x0E, 0x40); // Counter low.
+    fme7(&mut core, 0x0F, 0x00); // Counter high: $0040.
+    fme7(&mut core, 0x0D, 0x81); // `C` and `T`.
+
+    let cycles = tick_until_irq(&mut core, 1000);
+    // $0040 steps to reach $0000 and one more to wrap to $FFFF, less the cycles the four
+    // register writes above consumed between the counter being set and the counting starting.
+    assert!((0x30..=0x41).contains(&cycles), "cycles {cycles}");
+}
+
+/// "Writes to the IRQ counter registers directly set the lower or upper eight bits of the
+/// counter": commands $E and $F are halves of one 16-bit counter, not a latch and a reload.
+#[test]
+fn req_core_100_the_fme7_counter_is_sixteen_bits_set_half_at_a_time() {
+    let mut core = MapperRom::new(69).chr(32).load();
+    fme7(&mut core, 0x0E, 0x00);
+    fme7(&mut core, 0x0F, 0x01); // $0100: far more than the low byte alone would give.
+    fme7(&mut core, 0x0D, 0x81);
+
+    let cycles = tick_until_irq(&mut core, 2000);
+    assert!((0xF0..=0x101).contains(&cycles), "cycles {cycles}");
+}
+
+/// Command $D is `C... ...T`: `T` enables the IRQ and `C` the decrement, and the two are
+/// independent. The wrap is not latched into a flag a later `T` could reveal.
+#[test]
+fn req_core_100_the_fme7_needs_both_command_d_bits() {
+    // `C` without `T`: the counter runs and wraps, the line stays low.
+    let mut counting = MapperRom::new(69).chr(32).load();
+    fme7(&mut counting, 0x0E, 0x08);
+    fme7(&mut counting, 0x0D, 0x80);
+    assert_eq!(-1, tick_until_irq(&mut counting, 2000));
+    // And enabling `T` afterwards does not reveal the wrap that already happened.
+    fme7(&mut counting, 0x0D, 0x81);
+    assert!(!irq(&counting));
+
+    // `T` without `C`: the counter does not move, so it never reaches the wrap.
+    let mut frozen = MapperRom::new(69).chr(32).load();
+    fme7(&mut frozen, 0x0E, 0x08);
+    fme7(&mut frozen, 0x0D, 0x01);
+    assert_eq!(-1, tick_until_irq(&mut frozen, 2000));
+}
+
+/// "All writes to this register acknowledge an active IRQ" — command $D and nothing else.
+#[test]
+fn req_core_100_a_write_to_fme7_command_d_acknowledges_the_irq() {
+    let mut core = MapperRom::new(69).chr(32).load();
+    fme7(&mut core, 0x0E, 0x08);
+    fme7(&mut core, 0x0D, 0x81);
+    assert!(tick_until_irq(&mut core, 1000) > 0);
+
+    // Another command does not clear it.
+    fme7(&mut core, 0x0C, 0x00);
+    assert!(irq(&core));
+
+    // Command $D does, even when it leaves both bits set.
+    fme7(&mut core, 0x0D, 0x81);
+    assert!(!irq(&core));
+}

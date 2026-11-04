@@ -12,11 +12,12 @@
 //!   answer to Q-114 restates it for REQ-CORE-114). `5-MMC3`, the revision B half, passes. If
 //!   6 ever started passing, 5 would have stopped, and that would be a regression against the
 //!   spec rather than a fix.
-//! * six Holy Mapperel boards are `unsupported` because mappers 69, 78.3, 118 and 180 are not
-//!   in the registry. Adding one of them should flip its row, and the test says so out loud.
+//! * four Holy Mapperel boards are `unsupported` because mappers 78.3, 118 and 180 are not in
+//!   the registry. Adding one of them should flip its row, and the test says so out loud.
 //!
-//! The two Holy Mapperel SNROM boards used to fail here on `$A000` bit 4 not disabling the work
-//! RAM; MF-3 step 1 made them pass.
+//! Two rows MF-3 has already flipped: the SNROM boards used to fail on `$A000` bit 4 not
+//! disabling the work RAM (step 1), and the two mapper-69 boards were `unsupported` before the
+//! FME-7 was added (step 3).
 
 // A test: a missing ROM or an unreadable directory should fail it outright.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -248,14 +249,13 @@ fn holy_mapperel_detects_every_supported_board() {
         ("holy-mapperel/testroms/M4_P128K_CR8K.nes", Outcome::Pass),
         ("holy-mapperel/testroms/M4_P256K_C256K.nes", Outcome::Pass),
         ("holy-mapperel/testroms/M66_P64K_C16K_V.nes", Outcome::Pass),
-        // Mapper 69 (JLROM/JSROM, FME-7) is not in the registry.
         (
             "holy-mapperel/testroms/M69_P128K_C64K_S8K.nes",
-            Outcome::Unsupported,
+            Outcome::Pass,
         ),
         (
             "holy-mapperel/testroms/M69_P128K_C64K_W8K.nes",
-            Outcome::Unsupported,
+            Outcome::Pass,
         ),
         // Mapper 78 submapper 3 (IF-12) is not in the registry.
         (

@@ -24,18 +24,40 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 
 #[test]
 fn req_core_100_every_required_mapper_is_registered() {
-    let required: [i32; 32] = [
+    // REQ-CORE-100's own table.
+    let required: [i32; 31] = [
         0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 25, 27, 28, 30, 32, 34, 41, 64,
-        66, 71, 87, 101, 156, 225, 228,
+        66, 71, 87, 101, 225, 228,
     ];
-    assert_eq!(&required[..], Cartridge::SUPPORTED_MAPPERS);
+    for mapper in required {
+        assert!(
+            Cartridge::SUPPORTED_MAPPERS.contains(&mapper),
+            "mapper {mapper} of REQ-CORE-100 is not registered"
+        );
+    }
+
+    // "Ajouter des mappers au-delà de la liste est permis" (REQ-CORE-102), and these are the
+    // ones this build adds. Listed so that an accidental addition is caught as surely as an
+    // accidental removal.
+    //
+    // * 156, Daou 306, which runs Metal Force (Korea), a widescreen target;
+    // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3).
+    let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
+        .iter()
+        .copied()
+        .filter(|mapper| !required.contains(mapper))
+        .collect();
+    assert_eq!(vec![69, 156], extra);
+
+    // Ascending, which is what the registry's own comment promises.
+    assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
 }
 
 #[test]
 fn req_core_102_any_other_mapper_is_refused() {
     // 116 is the one REQ-CORE-101 leaves optional: not implemented, so refused with the
     // message of REQ-CORE-011 like any other number outside the table.
-    for mapper in [6usize, 19, 69, 116, 200] {
+    for mapper in [6usize, 19, 116, 200] {
         assert!(!Cartridge::is_supported(mapper as i32));
         let mut core = zax_nes::NesCore::new();
         let load = core.load_rom(&MapperRom::new(mapper).image(), "Other.nes");
@@ -493,6 +515,124 @@ fn req_core_100_mmc4_only_needs_the_row_of_the_tile_to_move_its_latch() {
         .unwrap()
         .ppu_read(0x0FD9, ChrFetch::Background);
     assert_eq!(4, peek(&mmc4, 0x0000));
+}
+
+// ---------------------------------------------------------------- Sunsoft FME-7 (69)
+
+/// Invokes FME-7 command `command` with `parameter`: the command register is at $8000-$9FFF and
+/// "Writing here invokes the command with the specified parameter byte" at $A000-$BFFF (nesdev,
+/// "Sunsoft FME-7").
+fn fme7(core: &mut NesCore, command: u8, parameter: u8) {
+    core.write_memory(0x8000, command);
+    core.write_memory(0xA000, parameter);
+}
+
+#[test]
+fn req_core_100_fme7_switches_three_prg_banks_and_wires_the_last() {
+    let mut core = MapperRom::new(69).prg(16).chr(32).load();
+    // Commands $9, $A, $B are $8000-$9FFF, $A000-$BFFF and $C000-$DFFF; $E000-$FFFF is absent
+    // from the page's table because the last bank is wired there.
+    fme7(&mut core, 0x09, 3);
+    fme7(&mut core, 0x0A, 5);
+    fme7(&mut core, 0x0B, 9);
+    assert_eq!([3, 5, 9, 15], core.prg_windows());
+
+    // Six bank bits, `..bB BBBB`: bits 6 and 7 are not part of the number.
+    fme7(&mut core, 0x09, 0xC2);
+    assert_eq!([2, 5, 9, 15], core.prg_windows());
+}
+
+#[test]
+fn req_core_100_fme7_switches_eight_one_kib_chr_banks() {
+    let mut core = MapperRom::new(69).prg(16).chr(32).load();
+    for slot in 0..8u8 {
+        fme7(&mut core, slot, 24 + slot);
+    }
+
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());
+}
+
+#[test]
+fn req_core_100_fme7_command_c_picks_one_of_four_arrangements() {
+    let mut core = MapperRom::new(69).prg(16).chr(32).load();
+    for (value, expected) in [
+        (0x00, Nm::Vertical),
+        (0x01, Nm::Horizontal),
+        (0x02, Nm::SingleScreenA),
+        (0x03, Nm::SingleScreenB),
+        // `.... ..MM`: the upper bits are not decoded.
+        (0xFC, Nm::Vertical),
+    ] {
+        fme7(&mut core, 0x0C, value);
+        assert_eq!(expected, core.mirroring(), "parameter {value:#04X}");
+    }
+}
+
+/// Command $8 is `ERbB BBBB`: `E` is the RAM chip's enable, `R` picks "0=ROM, 1=RAM" and the
+/// rest is the 8 KiB bank (nesdev, "Sunsoft FME-7"). All three states are observable.
+#[test]
+fn req_core_100_fme7_puts_ram_or_rom_or_nothing_at_6000() {
+    let mut core = MapperRom::new(69).prg(16).chr(32).battery().load();
+
+    // `R` and `E` set: the work RAM answers.
+    fme7(&mut core, 0x08, 0xC0);
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    // `R` set, `E` clear: the chip is deselected and the window is open bus.
+    fme7(&mut core, 0x08, 0x40);
+    assert_eq!(0, core.read_memory(0x6000));
+    core.write_memory(0x6000, 0xA5); // Must not reach the RAM either.
+
+    // `R` clear: a plain 8 KiB PRG-ROM bank, which the fixture numbers.
+    fme7(&mut core, 0x08, 0x05);
+    assert_eq!(0x05, core.read_memory(0x6000));
+    assert_eq!(0x05, core.read_memory(0x7FFF));
+    fme7(&mut core, 0x08, 0x0B);
+    assert_eq!(0x0B, core.read_memory(0x6000));
+    // A write to the ROM window changes nothing.
+    core.write_memory(0x6000, 0x00);
+    assert_eq!(0x0B, core.read_memory(0x6000));
+
+    // And the RAM kept what it held while the window was elsewhere.
+    fme7(&mut core, 0x08, 0xC0);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+}
+
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` covers every board of
+/// `SUPPORTED_MAPPERS`, this board included, through the two addresses every other board uses.
+/// The FME-7 needs its own: writing $8000 and $A000 the way that test does only ever invokes
+/// command $1, so the $6000 window, the arrangement and the IRQ counter would never move
+/// (REQ-CORE-090, REQ-CORE-091).
+#[test]
+fn req_core_090_the_fme7_state_survives_a_save_and_restore() {
+    let mut core = MapperRom::new(69).prg(16).chr(32).load();
+    for slot in 0..8u8 {
+        fme7(&mut core, slot, 24 + slot);
+    }
+
+    fme7(&mut core, 0x09, 3);
+    fme7(&mut core, 0x0A, 5);
+    fme7(&mut core, 0x0B, 9);
+    fme7(&mut core, 0x08, 0x07); // ROM bank 7 at $6000.
+    fme7(&mut core, 0x0C, 0x02); // One-screen A.
+    fme7(&mut core, 0x0E, 0x34);
+    fme7(&mut core, 0x0F, 0x12); // Counter $1234.
+    fme7(&mut core, 0x0D, 0x81); // Counting, IRQ enabled.
+
+    let state = core.save_state(true).unwrap();
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!([3, 5, 9, 15], core.prg_windows());
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());
+    assert_eq!(0x07, core.read_memory(0x6000));
+    assert_eq!(Nm::SingleScreenA, core.mirroring());
+    // Re-saving gives the same bytes, so the counter and the two enables came back too.
+    assert_eq!(state, core.save_state(true).unwrap());
 }
 
 // ---------------------------------------------------------------- the small boards

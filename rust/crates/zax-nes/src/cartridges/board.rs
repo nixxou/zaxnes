@@ -3,13 +3,29 @@
 
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    Daou306, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034, Mmc1, Mmc2,
-    Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
+    Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034, Mmc1,
+    Mmc2, Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The mapper of a cartridge, with its registers (REQ-CORE-100).
+///
+/// **A new board is appended, never inserted.** The variants up to `Action52` are in mapper-number
+/// order because that is the order they were written in; from MF-3 on, a board added to this enum
+/// goes at the **end**, whatever its number. Two reasons, both measured:
+///
+/// * `Mmc5` must stay at index 5. `Board`'s largest variant is the MMC5 (its 1 KiB of `ExRAM`),
+///   so rustc gives the enum a *niche-filling* layout whose tag lives inside that variant, and
+///   every dispatch prologue is `movzbl 1355(%rcx); subb $2; movl $5; cmovael` — a literal 5.
+///   Inserting a variant before it rewrites that prologue for all 27 arms (MF-2 step 0 is the
+///   story of what such a reshape costs).
+/// * The discriminants of the existing boards are their slots in the jump table of every
+///   dispatch below. Appending leaves them where they are, so LLVM lays the existing arms out in
+///   the same order; inserting in the middle shuffles them. Checked on `Board::ppu_peek` for
+///   MF-3's mapper 69: appended, the arms before it are instruction-identical and only the
+///   function's shared bounds-check tail changes shape; inserted after `GxRom`, four arms move
+///   and their operand offsets change with them.
 // Created once at load time, so the size of the MMC5 variant (its ExRAM) costs nothing.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +82,9 @@ pub enum Board {
     Multicart225(Multicart225),
     /// Mapper 228.
     Action52(Action52),
+    // Appended from MF-3 on, in the order the boards were added; see the note above.
+    /// Mapper 69, Sunsoft FME-7 / 5A / 5B.
+    Fme7(Fme7),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -98,6 +117,7 @@ macro_rules! dispatch {
             Board::Daou306($b) => $body,
             Board::Multicart225($b) => $body,
             Board::Action52($b) => $body,
+            Board::Fme7($b) => $body,
         }
     };
 }

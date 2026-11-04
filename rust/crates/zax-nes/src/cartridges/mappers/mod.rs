@@ -23,6 +23,7 @@ macro_rules! banked {
 mod bandai_fcg;
 mod daou306;
 mod discrete;
+mod fme7;
 mod iremg101;
 mod jaleco_ss88006;
 mod mmc1;
@@ -37,6 +38,7 @@ mod vrc2_vrc4;
 pub use bandai_fcg::BandaiFcg;
 pub use daou306::Daou306;
 pub use discrete::{AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, UnRom512, UxRom};
+pub use fme7::Fme7;
 pub use iremg101::IremG101;
 pub use jaleco_ss88006::JalecoSs88006;
 pub use mmc1::Mmc1;
