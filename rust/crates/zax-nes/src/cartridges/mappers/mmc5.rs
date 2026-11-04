@@ -38,6 +38,17 @@ pub struct Mmc5 {
     protect2: i32,
     last_set_was_b: bool,
     sprite_size16: bool,
+    /// Which CHR register set a *background* fetch reads, as one bool instead of the three
+    /// MR-5-1 rules recomputed per fetch (see [`Mmc5::refresh_background_chr_set`]). Derived
+    /// from `sprite_size16`, `in_frame` and `last_set_was_b`, so it is not part of the
+    /// savestate; [`Mapper::load_registers`] recomputes it.
+    ///
+    /// It must stay *before* `in_frame` in this struct, and `chr_address` must read it rather
+    /// than `in_frame`: `in_frame` is the last `bool` of the board, so it is the niche rustc
+    /// fills with [`super::super::board::Board`]'s discriminant. A `chr_address` that reads
+    /// that byte reads the enum tag, which costs every other board 1-2 instructions per CHR
+    /// fetch — see `docs/progress/MF-2.md`, step 0.
+    background_uses_set_b: bool,
     irq_target: i32,
     irq_enabled: bool,
     irq_pending: bool,
@@ -73,6 +84,7 @@ impl Mmc5 {
             protect2: 0,
             last_set_was_b: false,
             sprite_size16: false,
+            background_uses_set_b: false,
             irq_target: 0,
             irq_enabled: false,
             irq_pending: false,
@@ -116,10 +128,12 @@ impl Mmc5 {
             0x5120..=0x5127 => {
                 self.chr_a[usize::from(address - 0x5120)] = v | (self.chr_upper << 8);
                 self.last_set_was_b = false;
+                self.refresh_background_chr_set();
             }
             0x5128..=0x512B => {
                 self.chr_b[usize::from(address - 0x5128)] = v | (self.chr_upper << 8);
                 self.last_set_was_b = true;
+                self.refresh_background_chr_set();
             }
             0x5130 => self.chr_upper = v & 0x03,
             0x5203 => self.irq_target = v,
@@ -166,17 +180,23 @@ impl Mmc5 {
         }
     }
 
-    fn chr_address(&self, address: u16, fetch: ChrFetch) -> usize {
-        let index = i32::from(address & 0x1FFF);
+    /// Recomputes [`Mmc5::background_uses_set_b`] from the three inputs MR-5-1 names. Called
+    /// at each of the five places one of them changes, never on a fetch.
+    fn refresh_background_chr_set(&mut self) {
         // MR-5-1. Three separate rules, not one (nesdev, "MMC5"): with 8x8 sprites
         // "$5128-$512B are completely ignored", so set A serves everything; with 8x16 sprites
         // the chip "keeps track of whether the PPU is fetching background tiles or sprite
         // tiles", and the sprite fetches take set A; and only outside rendering does "the last
         // set of registers written to" decide. We had been using the last-written set as *the*
         // 8x8 rule, so an 8x8 game that last wrote $5128-$512B rendered from set B throughout.
-        let use_b = self.sprite_size16
-            && fetch == ChrFetch::Background
-            && (self.in_frame || self.last_set_was_b);
+        self.background_uses_set_b = self.sprite_size16 && (self.in_frame || self.last_set_was_b);
+    }
+
+    fn chr_address(&self, address: u16, fetch: ChrFetch) -> usize {
+        let index = i32::from(address & 0x1FFF);
+        // The three MR-5-1 rules, precomputed: everything but the fetch kind is known before
+        // the fetch. One bool load, and not the one holding `Board`'s tag (see the field).
+        let use_b = self.background_uses_set_b && fetch == ChrFetch::Background;
         let offset = match self.chr_mode {
             0 => {
                 let bank = if use_b { self.chr_b[3] } else { self.chr_a[7] };
@@ -312,6 +332,8 @@ impl Mapper for Mmc5 {
             // after a reset, and the game's next write to $5000-$5015 sets it up again.
             self.audio.reset();
         }
+        // Derived from the three bools just read, so no older block has to carry it.
+        self.refresh_background_chr_set();
         Ok(())
     }
 
@@ -385,6 +407,7 @@ impl Mapper for Mmc5 {
         self.scanline_counter = 0;
         self.multiplicand = 0;
         self.multiplier = 0;
+        self.refresh_background_chr_set();
         self.update_banks();
     }
 
@@ -509,6 +532,7 @@ impl Mapper for Mmc5 {
         if !rendering || scanline >= RegionTiming::VISIBLE_SCANLINES {
             self.in_frame = false;
             self.scanline_counter = 0;
+            self.refresh_background_chr_set();
             return;
         }
 
@@ -522,6 +546,7 @@ impl Mapper for Mmc5 {
         if !self.in_frame {
             self.in_frame = true;
             self.scanline_counter = 0;
+            self.refresh_background_chr_set();
             return;
         }
 
@@ -534,5 +559,6 @@ impl Mapper for Mmc5 {
 
     fn on_ppu_control(&mut self, control: u8) {
         self.sprite_size16 = control & 0x20 != 0;
+        self.refresh_background_chr_set();
     }
 }
