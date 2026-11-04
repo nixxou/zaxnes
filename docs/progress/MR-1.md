@@ -19,10 +19,10 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
 - [x] 5/10 done `b8eebc27` — MMC2 / MMC4 (mappers 9, 10)
 - [x] 6/10 done `161f1650` — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
 - [x] 7/10 done `3706fa29` — MMC5 (mapper 5) and its expansion audio + mix
-- [x] 8/10 done — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
+- [x] 8/10 done `4d24ac21` — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
-- [ ] 9/10 in progress — Shared infrastructure the next lots need; summary table; report pass
-- [ ] 10/10 todo — `cargo fmt --check`, `clippy -D warnings`,
+- [x] 9/10 done — Shared infrastructure the next lots need; summary table; report pass
+- [ ] 10/10 in progress — `cargo fmt --check`, `clippy -D warnings`,
       `cargo test --release -p zax-nes`; journal; close
 
 ## Notes
@@ -133,3 +133,13 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   Mesen uses zeros — unknown, cosmetic, flagged so a later screenshot comparison does not
   read it as a bug.
   5 new ignored tests (25 total), each confirmed failing for the stated reason.
+- **Step 9** — shared-infrastructure list (13 items, 5 marked blocking because more than
+  one of this lot's own fixes needs them) and the summary table. The biggest structural gap
+  is the absence of an MMC3 variant base: Mesen has ~30 boards subclassing MMC3 with
+  overridable mapping/IRQ hooks, and our `Mmc3` has no extension points while `Board` is a
+  closed enum — mapper 116 (the one REQ-CORE-101 leaves optional) and TxSROM both land
+  there. Also recorded: `chr_view`/`chr_latch_state` have no Mesen counterpart and exist
+  for REQ-CORE-033/039, so porting a board from Mesen means re-deriving the side-effect
+  split (its `NotifyVramAddressChange` work belongs in our `ppu_read`, never `ppu_peek`).
+  Totals: 31 our-bug findings (25 with a failing ignored test), 7 unknown, 2 Mesen-in-error,
+  9 spec questions across Q-110/Q-111, 7 boards equivalent outright.

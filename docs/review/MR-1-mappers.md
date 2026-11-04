@@ -1005,4 +1005,169 @@ One difference left as **equivalent in practice**: Mesen masks both PRG register
 bits (`& 0x1F`) and we keep all eight (`iremg101.rs:79`, `:83`). The G-101 tops out at
 256 KiB, where our modulo gives the same bank; only an oversized image would diverge.
 
-<!-- shared-infrastructure list and summary table follow -->
+---
+
+## Shared infrastructure Mesen has and we lack
+
+REQ-CORE-102 permits adding mappers beyond the required list, and REQ-CORE-101 leaves
+mapper 116 optional. Everything below is machinery Mesen factors out and we would have to
+build; the ones marked **blocking** are needed by more than one of this lot's own fixes, so
+they are worth building first.
+
+1. **An MMC3 variant base** — *blocking for breadth, the single biggest gap*.
+   `Core/NES/Mappers/Mmc3Variants/` holds roughly thirty boards that subclass `MMC3` and
+   override `UpdatePrgMapping`, `UpdateChrMapping`, `UpdateMirroring`, `TriggerIrq` or
+   `ForceMmc3RevAIrqs` (mappers 12, 14, 37, 44, 45, 47, 49, 52, 114, 115, 118, 119, 165,
+   182, 189, 245, 249, 250 and more). Our `Mmc3` is a concrete struct with no extension
+   points, and `Board` is a closed enum. Any future MMC3-derived mapper means either copying
+   `mmc3.rs` or giving it hooks. Mapper 116 (REQ-CORE-101) and TxSROM (118) both land here.
+2. **Per-board memory-size overrides** — *blocking*: four of this lot's findings need it
+   (MR-13-1, MR-30-2, MR-4-6, and the MMC5 NES 2.0 note). Mesen has `GetChrRamSize()`,
+   `GetWorkRamSize()`, `GetSaveRamSize()` and `GetSaveRamPageSize()` as virtuals consulted
+   before the memories are allocated. We take everything from the header plus one
+   special case, `registry::minimum_prg_ram_size`, that exists only for the MMC5.
+   A `Mapper`-level override consulted by `CartridgeMemory::new` would serve all four.
+3. **Submapper dispatch** — *blocking*: eight findings are submapper handling
+   (MR-1-4, MR-4-3, MR-21-3, MR-32-1, MR-16-1, MR-30-3, MR-30-5 and the gating of
+   MR-BUS-1). We parse `submapper` in `ines_header.rs:132` and only `Mmc3` ever reads it
+   (`mmc3.rs:34`). Mesen threads `_romInfo.SubMapperID` into every board and sometimes into
+   `MapperFactory` itself (mapper 4 submapper 3 selects a different class entirely).
+4. **A bus-conflict hook** — *blocking* for MR-BUS-1 across five boards. One
+   `Mapper::has_bus_conflicts()` plus three lines in `Cartridge::cpu_write`.
+5. **An `A12Watcher` with a per-board threshold** — *blocking* for MR-64-3. Mesen's class
+   takes the delay as a template parameter because its users disagree (10 dots shared,
+   3 CPU cycles in MMC3's own detector, 30 dots in RAMBO-1). Mappers 35, 116, 117, 222 and
+   the Waixing FK23C all use it. Note that `MIN_RISE_INTERVAL` feeds
+   `Mmc3::ppu_irq_horizon`, so the two must change together.
+6. **The shared VRC IRQ** — `Mappers/Konami/VrcIrq.h`, used by VRC2/4, VRC6, VRC7 and by
+   mapper 116's VRC2 emulation. Ours is inlined in `Vrc2Vrc4` (`vrc2_vrc4.rs:61-78`,
+   `:228-245`) and is otherwise a faithful copy, so lifting it out is mechanical — and
+   mapper 116 is the one optional mapper the spec names.
+7. **A generic expansion-audio path** — Mesen has `BaseExpansionAudio` (a `ClockAudio`
+   virtual) and `NesApu::AddExpansionAudioDelta(channel, delta)`, a per-channel *delta*
+   mixer, with five boards built on it (`Mappers/Audio/`: MMC5, VRC6, VRC7, Namco 163,
+   Sunsoft 5B). We have a single `Mapper::expansion_audio_output() -> Option<i32>` polled
+   each cycle, which REQ-CORE-073's `S = A + M` model wants and which is right for one
+   board. REQ-CORE-075 leaves VRC6/VRC7/Namco/Sunsoft/FDS optional, so this is only needed
+   if a later lot takes one on; the shape to add is a per-board `M` contribution, not
+   Mesen's delta queue, because AMD-054 defines `M` as an absolute level.
+8. **Serial EEPROM** — `BaseEeprom24C0X.h`, `Eeprom24C01.h`, `Eeprom24C02.h`, needed by
+   mapper 16 submapper 5 (P3 in REQ-CORE-100, so optional) and by mapper 157 (Datach, with
+   its barcode reader). Nothing on our side.
+9. **Open bus as a distinct answer from a driven zero.** We already have the shape —
+   `cpu_peek_override` returning `Some(None)` means "handled, drives nothing" — but several
+   boards drive a 0 where the cartridge is absent (MR-5-5, MR-30-2, and the MMC6 window
+   below $7000 gets this right already). Worth a pass once per-board RAM sizes exist.
+10. **A nametable that can point at CHR-RAM.** `SetPpuMemoryMapping(0x2000, 0x3FFF,
+    ChrMemoryType::ChrRam, ...)` is how Mesen does mapper 30's four-screen variation
+    (MR-30-6) and TxSROM's (mapper 118) mirroring. Our `nametable_page` returns a console
+    VRAM page, `FOLLOW_MIRRORING`, or `SERVED_BY_CARTRIDGE`; the third could carry it, but
+    `read_nametable` would need the CHR memory passed in, which it currently is not.
+11. **Flash emulation** — `Homebrew/FlashSST39SF040.h`, for MR-30-4 and for the
+    self-flashing homebrew boards generally. Needs a ROM-diff save path
+    (`SerializeRomDiff`) we have no equivalent of.
+12. **A PPU register tap wider than PPUCTRL.** The MMC5 needs to see writes to
+    $2000-$2007 (`Mmc5MemoryHandler.h`); we expose only `on_ppu_control` (PPUCTRL). The
+    MMC5 vertical split, P2 in REQ-CORE-100, would need $2001/$2005/$2006 as well.
+13. **A game database.** `GameDatabase.cpp` carries per-ROM overrides for bus conflicts,
+    CHR-RAM sizing, the MMC3 revision (`MMC3A`), the MMC1 revision (`MMC1A`/`MMC1B`) and
+    MMC5 RAM sizes. We have none, and that is a defensible choice — but it shapes several
+    comparisons in this report, because Mesen falls back to the same behaviour we have
+    whenever a ROM is not listed. Any finding that cites a database-gated Mesen path is
+    marked **equivalent for unlisted ROMs** above, not a bug.
+
+One piece of our own infrastructure has **no Mesen counterpart** and should be kept in mind
+by anyone touching these boards: `Mapper::chr_view` / `chr_peek_view` /
+`chr_latch_state` / `advance_chr_latch` exist for REQ-CORE-033 and REQ-CORE-039 — the tile
+emitter must read pattern data without disturbing the machine. Mesen has no such
+requirement, so when porting a board from Mesen the side-effect split has to be re-derived:
+anything Mesen does in `NotifyVramAddressChange` or `MapperReadVram` belongs in our
+`ppu_read` / `on_ppu_address_bus`, never in `ppu_peek`.
+
+---
+
+## Summary
+
+27 boards reviewed (32 mapper numbers), plus the shared bank windows, A12 watcher, IRQ
+paths, PRG-RAM and battery handling, header and submapper handling, MMC5 audio and mix, and
+each board's save state.
+
+**31 differences classified as our bug**, of which **25 carry a failing `#[ignore]`d test**
+in `rust/crates/zax-nes/tests/mr1_review_tests.rs`. Every one of those 25 was run and
+confirmed to fail for the reason claimed. One additional test is *not* ignored
+(`mr_bus_1_uxrom_without_a_submapper_has_no_conflict`): it passes today and pins behaviour a
+fix must not break. **No board was changed.**
+
+Also: 7 differences classified **unknown**, 2 where **Mesen looks like the one in error**,
+9 recorded as **spec questions** (`Q-110`, `Q-111`), and 7 boards found **equivalent**
+outright (0, 66, 87, 156, 225, 228, and MMC2/MMC4 as a pair).
+
+### Findings
+
+| id | board | severity | class | games likely affected | evidence (ours / Mesen) | test | proposed fix |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| MR-41-1 | 41 | **crash/hang** | our bug | Caltron 6-in-1, games 5-6 | `multicart.rs:261` / `Caltron41.h:33` | `mr_41_1_caltron_prg_field_is_three_bits` | PRG field is address bits 0-2, not 0-1 |
+| MR-4-1 | 4 | **visible** | our bug | StarTropics, Zoda's Revenge (saves) | `mmc3.rs:51-57` / `MMC3.h:142-144` | `mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped` | swap the read/write bit in each $A001 pair |
+| MR-64-1 | 64 | **visible** | our bug | Klax, Skull & Crossbones, Rolling Thunder, Hard Drivin' | `rambo1.rs:72-83` / `Rambo1.h:76-91` | `mr_64_1_rambo1_counter_always_decrements` | always decrement; reload to latch+2 (+1 when latch <= 1) |
+| MR-64-2 | 64 | **visible** | our bug | all RAMBO-1 titles using odd 2 KiB banks | `rambo1.rs:63-64` / `Rambo1.h:112` | `mr_64_2_rambo1_2kib_chr_window_keeps_bit_0` | map `reg` and `reg + 1`, do not mask bit 0 |
+| MR-64-5 | 64 | **visible** | our bug | Skull & Crossbones | `rambo1.rs:170-174` / `Rambo1.h:137-142` | — | add `force_clock` when leaving cycle mode |
+| MR-5-1 | 5 | **visible** | our bug | any 8x8-sprite MMC5 title | `mmc5.rs:163-167` / `MMC5.h:192` | `mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a` | restore the three-clause predicate, gate the last on `in_frame` |
+| MR-1-1 | 1 | **visible** | our bug | Shinsenden | `mmc1.rs:146-151` / `MMC1.h:208-213` | `mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter` | test bit 7 before the two-cycle filter |
+| MR-34-1 | 34 | **visible** | our bug | BNROM titles using work RAM near $7FFF | `multicart.rs:80-89` / `BnRom.h` vs `Nina01.h:11` | `mr_34_1_bnrom_has_no_register_at_7ffd` | branch the decode on CHR-ROM presence |
+| MR-41-2 | 41 | **visible** | our bug | Caltron 6-in-1 | `multicart.rs:264` / `Caltron41.h:37` | `mr_41_2_caltron_mirroring_comes_from_address_bit_5` | mirroring is address bit 5 |
+| MR-41-3 | 41 | **visible** | our bug | Caltron 6-in-1 | `multicart.rs:311-316` / `Caltron41.h:41-45` | `mr_41_3_caltron_inner_chr_is_gated_on_the_prg_bank` | gate the inner CHR write on `prg_bank >= 4` |
+| MR-30-1 | 30 | **visible** | our bug | four-screen UNROM 512 homebrew | `ines_header.rs:170` / `UnRom512.h:45-50` | `mr_30_1_unrom512_byte6_09_is_four_screen` | decode byte 6 bits 3+0 together; keep `byte6` on the header |
+| MR-30-4 | 30 | **visible** | our bug | self-flashing UNROM 512 homebrew | — / `UnRom512.h:16`, `:107` | — | emulate the SST39SF040 (see infra 11) |
+| MR-30-6 | 30 | **visible** | our bug | four-screen UNROM 512 homebrew | `mmc5.rs`-style nametable path absent / `UnRom512.h:53-57` | — | last 8 KiB of CHR-RAM over $2000-$3FFF (see infra 10) |
+| MR-21-1 | 22 | **visible** | our bug | VRC2a titles (Twinbee, Gradius) | `vrc2_vrc4.rs:52-59` / `VRC2_4.h:252-256` | `mr_21_1_vrc2a_uses_the_exact_register_wiring` | use the exact wiring when the variant is known |
+| MR-21-2 | 22 | **visible** | our bug | VRC2a titles | `vrc2_vrc4.rs:191-200` / `VRC2_4.h:165-166` | `mr_21_2_vrc2a_has_no_prg_swap_mode` | no PRG mode on VRC2; all $9000-$9003 is mirroring |
+| MR-32-1 | 32 | **visible** | our bug | Major League | `iremg101.rs` / `IremG101.h:23-27`, `:60-62` | `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen` | submapper 1: one-screen, PRG mode forced 0 |
+| MR-BUS-1 | 2,3,7,11,30 | subtle | our bug | Color Dreams titles; submapper-2 dumps | `mod.rs:390-410` / `BaseMapper.cpp:884-896` | `mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte`, `mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte` | AND the value with the ROM byte (see infra 4) |
+| MR-11-1 | 11 | subtle | our bug | oversized Color Dreams images | `discrete.rs:283` / `ColorDreams.h:22` | `mr_11_1_color_dreams_prg_field_is_four_bits` | mask PRG with `0x0F` |
+| MR-1-2 | 1 | subtle | our bug | SUROM/SXROM in 4 KiB CHR mode | `mmc1.rs:37-41`, `:129-131` / `MMC1.h:124`, `:136` | `mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register` | track the last CHR register written |
+| MR-1-3 | 1 | subtle | our bug | SOROM battery saves | `mmc1.rs:127-133` / `MMC1.h:134-150` | — (fixture lacks a PRG-RAM-size knob) | 16 KiB uses CHR bit 3; 32 KiB bits 2-3 |
+| MR-4-2 | 4 | subtle | our bug | any MMC3 title's first programmed IRQ | `a12_watcher.rs:36-39`, `:45` / `MMC3.h:288` | `mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise` | require a fall before the first rise counts |
+| MR-64-3 | 64 | subtle | our bug | RAMBO-1 titles | `a12_watcher.rs:27` / `Rambo1.h:166` | `mr_64_3_rambo1_a12_filter_is_30_dots` | per-board filter threshold (see infra 5) |
+| MR-64-4 | 64 | subtle | our bug | RAMBO-1 titles | `rambo1.rs:81` / `Rambo1.h:13-14`, `:55-60` | — | delay the assertion 2 cycles (A12) / 1 (CPU) |
+| MR-5-2 | 5 | subtle | our bug | MMC5 titles using ExRAM as a nametable | `mmc5.rs:412-418` / `MMC5.h:420-426` | `mr_5_2_mmc5_exram_write_outside_rendering_stores_zero` | modes 0/1 store 0 unless `in_frame` |
+| MR-16-1 | 16 | subtle | our bug | Famicom Jump II (FCG-1/2 dumps) | `bandai_fcg.rs:114-121` / `BandaiFcg.h` submapper-4 guards | `mr_16_1_bandai_submapper_4_writes_the_counter_directly` | submapper 4: $x00B/$x00C write the counter |
+| MR-16-3 | 16 | subtle | our bug | CHR-RAM mapper-16 boards | `bandai_fcg.rs:106-109` / `BandaiFcg.h:174-176` | — | do not bank CHR on a CHR-RAM board |
+| MR-18-1 | 18 | subtle | our bug | SS88006 titles (Moero Pro Yakyuu) | `jaleco_ss88006.rs:171-179` / `JalecoSs88006.h:91-100` | `mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier` | fire when the decrement yields 0 |
+| MR-21-3 | 27 + submappers | subtle | our bug | mapper 27 dumps; submapper-tagged 21/23/25 | `vrc2_vrc4.rs:52-59` / `VRC2_4.h:249-305` | — | a `DetectVariant` equivalent (see infra 3) |
+| MR-13-1 | 13 | cosmetic | our bug | Videomation (save-state size only) | `ines_header.rs:154` / `CpRom.h:9` | `mr_13_1_cprom_has_16_kib_of_chr_ram` | CHR-RAM override (see infra 2); REQ-CORE-100 pins 16 KiB |
+| MR-1-4 | 1 | cosmetic | our bug | SEROM/SHROM/SH1ROM dumps | `mmc1.rs` / `MMC1.h:152-156` | `mr_1_4_mmc1_submapper_5_has_fixed_prg` | submapper 5: fixed 32 KiB |
+| MR-30-2 | 30 | cosmetic | our bug | UNROM 512 homebrew | `mod.rs:52-57`, `:378-387` / `UnRom512.h:21-22` | `mr_30_2_unrom512_does_not_drive_6000_7fff` | no work RAM on this board (see infra 2) |
+| MR-30-3 | 30 | cosmetic | our bug | submapper-3 UNROM 512 | `discrete.rs:416-422` / `UnRom512.h:62-66` | — | submapper 3 toggles vertical/horizontal |
+| MR-30-5 | 30 | cosmetic | our bug | submapper-4 UNROM 512 | `discrete.rs:447-452` / `UnRom512.h:76-79` | — | submapper 4: no banking in $8000-$BFFF |
+| MR-4-3 | 4 | cosmetic | our bug | Acclaim MC-ACC dumps | `registry.rs:48` / `MapperFactory.cpp:285-290` | — | submapper 3 is a different board |
+| MR-4-6 | 4 | cosmetic | our bug | MMC6 (exposed RAM size only) | `mmc3.rs:45-47` / `MMC3.h:184-185` | — | 1 KiB save RAM (see infra 2) |
+| MR-16-2 | 16 | cosmetic | our bug | none commercial (mapper 153 territory) | `bandai_fcg.rs` / `BandaiFcg.h:165-173` | — | PRG outer bank from the CHR registers' bit 0 |
+| MR-5-5 | 5 | cosmetic | our bug | none known | `mmc5.rs:395-399` / `MMC5.h` mapping | — | ExRAM modes 0/1 read as open bus |
+| MR-13-2 | 13 | visible | unknown | Videomation | `discrete.rs:254-257` / `CpRom.h:15` | — | decide whether CPROM hardwires vertical |
+| MR-71-1 | 71 | visible | unknown | Fire Hawk | `discrete.rs:381` / `BF909x.h:37` | — | **polarity is inverted between us and Mesen; one side is wrong** |
+| MR-5-3 | 5 | subtle | unknown | Castlevania III, Just Breed | `mmc5.rs:487` / `MMC5.h:430-445` | — | settle the scanline counter's off-by-one |
+| MR-5-4 | 5 | subtle | unknown | MMC5 titles toggling rendering mid-frame | `mmc5.rs:480-494` / `MMC5.h:429-457` | — | in-frame from the PPU bus vs our PPU signal |
+| MR-A12-1 | shared | subtle | unknown | MMC3 titles | `a12_watcher.rs:27` / three Mesen thresholds | — | the 10-dot constant is an approximation; `mmc3_test_2` 1-5 pass |
+| MR-4-4 | 4 | cosmetic | unknown | none (pre-init frames) | `mmc3.rs:180-181` / `MMC3.h:63-70` | — | power-on bank registers |
+| MR-4-5 | 4 | cosmetic | unknown | blargg MMC3 ROMs | `mmc3.rs:176-178` / `MMC3.h:57` | — | power-on $A001; our rationale is in the code |
+| MR-PWR-1 | 1,18,22,32,64 | cosmetic | unknown | none | see the power-on section | — | linear vs all-zero power-on bank layout |
+| MR-64-6 | 64 | subtle | **Mesen in error** | — | `rambo1.rs:156-159` / `Rambo1.h:122-124` | — | Mesen's $8000 does not re-map; banking is combinational. No change |
+| MR-28-2 | 28 | cosmetic | **Mesen in error** | — | `multicart.rs:484-490` / `Action53.h:18-21` | — | AMD-021 R2-001 fixes outer=63/inner=15; Mesen zeroes. No change |
+| MR-71-2 | 71 | cosmetic | equivalent | — | `discrete.rs:379-386` / `BF909x.h:34-38` | — | decode range differs, unreachable in practice |
+| Q-110 | 15, 28, 101 | subtle | spec question | none known | `spec/changes/Q-110.md` | — | AMD-021 R2-001/002/003 contradict Mesen on 7 points |
+| Q-111 | 5 (audio) | visible | spec question | none (no MMC5-audio profile) | `spec/changes/Q-111.md` | — | AMD-054 contradicts nesdev on the period-8 cutoff and the polarity, unmarked |
+
+### The three to fix first
+
+If a later lot takes only part of this:
+
+1. **MR-41-1/2/3** — the Caltron 6-in-1 cannot run half its cartridge. Smallest fix, worst
+   symptom.
+2. **MR-4-1** — the MMC6 writes saves through a bit that should only enable reads, so
+   *StarTropics* corrupts its own save file.
+3. **MR-64-1** — every RAMBO-1 IRQ is a scanline early, visible in four Tengen titles, and
+   the fix is eight lines.
+
+**MR-71-1 is the one open question worth closing cheaply**: our mirroring polarity and
+Mesen's are exact opposites, so one of us is certainly wrong and *Fire Hawk* shows it. One
+look at the nesdev register table settles it.
