@@ -311,3 +311,143 @@ fn req_core_100_a_write_to_fme7_command_d_acknowledges_the_irq() {
     fme7(&mut core, 0x0D, 0x81);
     assert!(!irq(&core));
 }
+
+// ---------------------------------------------------------------- the Acclaim MC-ACC (4.3)
+
+/// Moves the PPU's VRAM address across $1000 and back, with cycles on either side, which is one
+/// complete A12 cycle — a rise and a fall — driven by hand the way `mmc3_test` does.
+fn toggle_a12(core: &mut NesCore) {
+    core.write_memory(0x2006, 0x10);
+    core.write_memory(0x2006, 0x00);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    core.write_memory(0x2006, 0x00);
+    core.write_memory(0x2006, 0x00);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+}
+
+/// A mapper-4 image on NES 2.0 submapper 3, with its IRQ armed for **two** clocks — a latch of
+/// 1, so the first clock reloads and the second lands on zero — and rendering off, so that only
+/// the hand-driven A12 moves the counter.
+///
+/// Two clocks and not one, because the prescaler clocks on the **first** fall of each group of
+/// eight: "Counter clocking happens once per 8 A12 cycles at first cycle" (MR-4-3, after
+/// krikzz's research, which is also what Mesen 2 implements). One clock would fire on the first
+/// fall on both boards and measure nothing.
+fn mc_acc_armed(submapper: u8) -> NesCore {
+    let mut core = MapperRom::new(4).chr(32).submapper(submapper).load();
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, 1);
+    core.mapper_write(0xC001, 0x00); // Reload on the next clock.
+    core.mapper_write(0xE001, 0x00); // Enable.
+    core
+}
+
+/// MR-4-3, nesdev ("MMC3"): "Acclaim's MC-ACC chip is their own variant of the MMC3 ... The only
+/// known difference is that the scanline counter uses a ÷8 prescaler instead of filtering A12,
+/// clocked by falling edges." So eight A12 cycles are needed where the MMC3 needs one
+/// (REQ-CORE-100, *NES 2.0 submappers* "Submapper 3: MC-ACC chip variant").
+#[test]
+fn mr_4_3_the_mc_acc_clocks_once_per_eight_a12_falls() {
+    let mut core = mc_acc_armed(3);
+
+    // Fall 1 is the first of its group, so it clocks — and reloads the counter to the latch.
+    // Falls 2 to 8 are swallowed by the prescaler.
+    for fall in 1..9 {
+        toggle_a12(&mut core);
+        assert!(!irq(&core), "fired after {fall} falls");
+    }
+
+    // Fall 9 opens the next group and clocks the counter to zero.
+    toggle_a12(&mut core);
+    assert!(irq(&core), "the ninth fall must clock the counter again");
+}
+
+/// And a plain mapper-4 image — no submapper, or any submapper but 3 — is an MMC3: one filtered
+/// A12 **rise** clocks it, so the very first toggle fires.
+#[test]
+fn mr_4_3_a_plain_mapper_4_image_is_not_an_mc_acc() {
+    let mut core = MapperRom::new(4).chr(32).load();
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, 1);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+
+    // Every filtered rise clocks it, so the two clocks the latch needs are two toggles.
+    toggle_a12(&mut core);
+    assert!(!irq(&core));
+    toggle_a12(&mut core);
+    assert!(irq(&core), "an MMC3 clocks on every filtered rise");
+    assert_eq!(4, core.cartridge().unwrap().mapper_number());
+
+    // The same two toggles leave an MC-ACC silent: it is seven falls short of its second clock.
+    let mut acc = mc_acc_armed(3);
+    toggle_a12(&mut acc);
+    toggle_a12(&mut acc);
+    assert!(!irq(&acc));
+
+    // And an MC-ACC still says it is mapper 4: the submapper is the only thing that tells them
+    // apart, and REQ-CORE-011's message names the number.
+    let acc = mc_acc_armed(3);
+    assert_eq!(4, acc.cartridge().unwrap().mapper_number());
+}
+
+/// MR-4-3: on an MC-ACC "writing to $C001 resets pulse counter", which is how a game puts the
+/// prescaler back in phase. Seven falls then a `$C001` write means eight more are needed.
+#[test]
+fn mr_4_3_writing_c001_resets_the_mc_acc_prescaler() {
+    let mut core = mc_acc_armed(3);
+    // Five falls: one clock, then four swallowed. Three more would reach the next group.
+    for _ in 0..5 {
+        toggle_a12(&mut core);
+    }
+
+    // The write puts the prescaler back to zero, so the next fall opens a fresh group and eight
+    // more are needed after it.
+    core.mapper_write(0xC001, 0x00);
+    for fall in 1..9 {
+        toggle_a12(&mut core);
+        assert!(!irq(&core), "fired {fall} falls after the reset");
+    }
+
+    toggle_a12(&mut core);
+    assert!(irq(&core));
+}
+
+/// The prescaler is part of the board's state, so a savestate taken mid-group restores it — and
+/// a mapper-4 state is **byte-identical** to one written before this lot, the prescaler byte
+/// being written only by the clone (REQ-CORE-090, REQ-CORE-091).
+#[test]
+fn req_core_090_the_mc_acc_prescaler_survives_a_save_and_restore() {
+    let mut core = mc_acc_armed(3);
+    // One clock then four swallowed falls: the prescaler holds 3.
+    for _ in 0..5 {
+        toggle_a12(&mut core);
+    }
+
+    let state = core.save_state(true).unwrap();
+    for fall in 1..4 {
+        toggle_a12(&mut core);
+        assert!(!irq(&core), "fired {fall} falls after the save");
+    }
+
+    toggle_a12(&mut core);
+    assert!(irq(&core), "the fourth fall opens the next group");
+
+    core.try_load_state(&state, 0).unwrap();
+    assert!(!irq(&core));
+    for fall in 1..4 {
+        toggle_a12(&mut core);
+        assert!(!irq(&core), "fired {fall} falls after the restore");
+    }
+
+    toggle_a12(&mut core);
+    assert!(
+        irq(&core),
+        "the restored prescaler still had three falls to go"
+    );
+}

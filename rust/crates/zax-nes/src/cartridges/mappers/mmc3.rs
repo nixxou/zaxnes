@@ -15,9 +15,22 @@ use crate::NametableMirroring;
 /// $C000-$E001 (nesdev, "MMC3"), PRG-RAM protection at $A001. MMC6 (NES 2.0 submapper 1)
 /// has 1 KiB of RAM in two halves with their own enable bits. **TxSROM** (TKSROM and TLSROM,
 /// mapper 118) is the same chip with CHR A17 wired to CIRAM A10, so bit 7 of the CHR bank
-/// registers picks the nametable; see [`Mmc3::refresh_nametable_pages`].
+/// registers picks the nametable; see [`Mmc3Board::refresh_nametable_pages`].
+///
+/// **`MC_ACC` is Acclaim's clone, and it is a type parameter and not a field** (MR-4-3). nesdev
+/// ("MMC3"): "Acclaim's MC-ACC chip is their own variant of the MMC3 ... The only known
+/// difference is that the scanline counter uses a ÷8 prescaler instead of filtering A12, clocked
+/// by falling edges", and *NES 2.0 submappers* gives mapper 4 "Submapper 3: MC-ACC chip variant".
+/// Mesen 2 builds a separate board for it (`MapperFactory.cpp:285-290` → `McAcc`), and so does
+/// this — but a separate *monomorphisation* of the same code and not a second copy of it:
+/// [`Mmc3`] is `Mmc3Board<false>`, [`McAcc`] is `Mmc3Board<true>`, they share every method body,
+/// and the four places the clone differs are `if MC_ACC` branches a `const` parameter folds away.
+/// The plain MMC3 therefore comes out of the compiler **instruction for instruction as it was**,
+/// which a field could not have given it: `on_ppu_address_bus` runs on every PPU fetch, where
+/// comparing `address & $1000` against a field instead of against zero would have cost two
+/// instructions, and MR-4-3's own conclusion was that "no MMC3 game pays a branch".
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mmc3 {
+pub struct Mmc3Board<const MC_ACC: bool> {
     banks: BankWindows,
     a12: A12Watcher,
     bank: [u8; 8],
@@ -43,6 +56,9 @@ pub struct Mmc3 {
     /// (MR-4-9, AMD-061 §8 closing Q-114). Chosen at load; every other mapper-4 image, iNES
     /// 1.0 included, keeps revision B and with it REQ-CORE-114's `mmc3_test_2` test 6.
     irq_revision_a: bool,
+    /// MR-4-3: A12 falls left before the next clock of the scanline counter, counting down from
+    /// 7. Only `MC_ACC` reads it, and only `MC_ACC` writes it to the savestate.
+    irq_prescaler: u8,
     select: u8,
     protect: u8,
     irq_latch: u8,
@@ -52,14 +68,27 @@ pub struct Mmc3 {
     irq_pending: bool,
 }
 
-impl Mmc3 {
+/// The MMC3 and the MMC6, mapper 4 and mapper 118 (`Mmc3Board<false>`).
+pub type Mmc3 = Mmc3Board<false>;
+
+/// The Acclaim MC-ACC, mapper 4 submapper 3 (`Mmc3Board<true>`).
+pub type McAcc = Mmc3Board<true>;
+
+impl<const MC_ACC: bool> Mmc3Board<MC_ACC> {
     pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let header = memory.rom().header();
         let is_txsrom = mapper_number == 118;
         let is_mmc6 = !is_txsrom && header.is_nes20 && header.submapper == 1;
+        // The MC-ACC filters nothing and counts the other edge, so it gets a watcher that only
+        // tracks A12's level; `on_ppu_address_bus` calls `fell` on it instead of `rose`.
+        let a12 = if MC_ACC {
+            A12Watcher::new(0)
+        } else {
+            A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS)
+        };
         Self {
             banks: windows_for(memory),
-            a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
+            a12,
             bank: [0; 8],
             mapper_number,
             is_mmc6,
@@ -75,6 +104,7 @@ impl Mmc3 {
             // défaut". Submapper 4 is "NEC MMC3 (Loading latch with 0 disables IRQ)" (nesdev,
             // "NES 2.0 submappers"), which is the revision A counter.
             irq_revision_a: !is_txsrom && header.is_nes20 && header.submapper == 4,
+            irq_prescaler: 0,
             select: 0,
             protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,
@@ -201,7 +231,7 @@ impl Mmc3 {
     }
 }
 
-impl Mapper for Mmc3 {
+impl<const MC_ACC: bool> Mapper for Mmc3Board<MC_ACC> {
     banked!();
 
     fn save_registers(&self, writer: &mut StateWriter) {
@@ -214,6 +244,9 @@ impl Mapper for Mmc3 {
         writer.write_bool(self.irq_enabled);
         writer.write_bool(self.irq_pending);
         self.a12.save_state(writer);
+        if MC_ACC {
+            writer.write_u8(self.irq_prescaler);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -226,6 +259,10 @@ impl Mapper for Mmc3 {
         self.irq_enabled = reader.read_bool()?;
         self.irq_pending = reader.read_bool()?;
         self.a12.load_state(reader)?;
+        if MC_ACC {
+            self.irq_prescaler = reader.read_u8()?;
+        }
+
         // The windows again from the registers, over the PRG-ROM loaded: a state of the same
         // game made with a PRG-ROM of another size (a widescreen hack that added banks, its
         // fixed ones moved to the end) maps the fixed banks of this one. It brings the TxSROM's
@@ -286,7 +323,16 @@ impl Mapper for Mmc3 {
         } else {
             i64::from(self.irq_counter)
         };
-        Some((clocks_to_zero - 1) * self.a12.min_rise_interval())
+        // MR-4-3's warning: eight falls per clock is not `A12Watcher::min_rise_interval`, and a
+        // horizon copied from the MMC3's would make the PPU late. A fall needs two dots — one
+        // high and one low — so eight dots per clock is a safe floor, which is what a horizon
+        // has to be.
+        let dots_per_clock = if MC_ACC {
+            8
+        } else {
+            self.a12.min_rise_interval()
+        };
+        Some((clocks_to_zero - 1) * dots_per_clock)
     }
 
     fn prg_ram_enabled(&self) -> bool {
@@ -315,6 +361,7 @@ impl Mapper for Mmc3 {
         self.irq_reload = false;
         self.irq_enabled = false;
         self.irq_pending = false;
+        self.irq_prescaler = 0;
         self.a12.reset();
         self.update_banks();
     }
@@ -392,6 +439,11 @@ impl Mapper for Mmc3 {
             0xC001 => {
                 self.irq_counter = 0;
                 self.irq_reload = true;
+                // MR-4-3: on an MC-ACC "writing to $C001 resets pulse counter", which is how a
+                // game puts the ÷8 prescaler back in phase.
+                if MC_ACC {
+                    self.irq_prescaler = 0;
+                }
             }
             0xE000 => {
                 self.irq_enabled = false;
@@ -401,8 +453,30 @@ impl Mapper for Mmc3 {
         }
     }
 
+    /// Clocks the scanline counter on the edge this board counts: an A12 rise past the filter on
+    /// an MMC3, and every eighth A12 fall on an MC-ACC (MR-4-3). Both arms of each `if MC_ACC`
+    /// are compile-time dead on one of the two boards, so the MMC3 keeps exactly the two lines it
+    /// had.
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, clock: i64) {
-        if self.a12.rose(address, clock) {
+        let edge = if MC_ACC {
+            self.a12.fell(address)
+        } else {
+            self.a12.rose(address, clock)
+        };
+        if !edge {
+            return;
+        }
+
+        if MC_ACC {
+            // "Counter clocking happens once per 8 A12 cycles at first cycle": the first fall of
+            // each group of eight, which is the phase a `$C001` write restarts from.
+            if self.irq_prescaler == 0 {
+                self.irq_prescaler = 7;
+                self.clock_irq_counter();
+            } else {
+                self.irq_prescaler -= 1;
+            }
+        } else {
             self.clock_irq_counter();
         }
     }

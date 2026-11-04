@@ -15,6 +15,14 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 /// stay low for some number of CPU cycles before it will accept a rise, and that number is
 /// **not the same on every board**, so it is a field here and not a constant: see
 /// [`A12Watcher::MMC3_FILTER_DOTS`] and [`A12Watcher::RAMBO1_FILTER_DOTS`].
+///
+/// One board counts the **other** edge and filters nothing at all: the Acclaim MC-ACC, whose
+/// "scanline counter uses a ÷8 prescaler instead of filtering A12, clocked by falling edges"
+/// (nesdev, "MMC3"; MR-4-3). [`A12Watcher::fell`] is its clock source, and it is a **second
+/// method** rather than a mode inside [`A12Watcher::rose`] so that the two boards which count
+/// rises keep the code they had: a field to compare `address & $1000` against, instead of the
+/// test against zero the `and` itself performs, would have cost them two instructions on every
+/// PPU fetch. Which method a board calls is a compile-time constant — see `Mmc3Board`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct A12Watcher {
     high: bool,
@@ -67,6 +75,16 @@ impl A12Watcher {
 
         self.high = high;
         rose
+    }
+
+    /// Feeds the address and reports whether A12 **fell**, with no filtering whatsoever: the
+    /// MC-ACC divides its falls by eight instead of filtering them (MR-4-3). `low_since` is the
+    /// filter's and is left alone — no board both filters and counts falls.
+    pub fn fell(&mut self, address: u16) -> bool {
+        let high = (address & 0x1000) != 0;
+        let fell = !high && self.high;
+        self.high = high;
+        fell
     }
 
     /// Returns the watcher to its power-on state. `filter_dots` is the board's and survives:

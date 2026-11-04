@@ -10,7 +10,7 @@ use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mapper078,
-    Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
+    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -164,6 +164,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         1 => Board::Mmc1(Mmc1::new(memory)),
         2 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
         3 => Board::CnRom(CnRom::new(memory)),
+        // MR-4-3: mapper 4 submapper 3 is Acclaim's MC-ACC, the same board with a ÷8 prescaler
+        // on A12's falling edges. It is the same code, monomorphised with the difference as a
+        // `const` parameter, so the MMC3 proper pays nothing (see `Mmc3Board`).
+        4 if memory.rom().header().is_nes20 && memory.rom().header().submapper == 3 => {
+            Board::McAcc(McAcc::new(memory, mapper))
+        }
         4 | 118 => Board::Mmc3(Mmc3::new(memory, mapper)),
         5 => Board::Mmc5(Mmc5::new(memory)),
         7 => Board::AxRom(AxRom::new(memory)),

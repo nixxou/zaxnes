@@ -32,7 +32,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 5/9 — mapper 118, TxSROM
 - [x] 6/9 — mapper 180, UNROM with the switchable bank at $C000
 - [x] 7/9 — mapper 78, submappers 1 and 3
-- [ ] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
+- [x] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
 - [ ] 9/9 — re-run the suites, the campaign document, and the close of the lot
 
 ## Out of scope (from the brief)
@@ -78,6 +78,7 @@ Before the lot (`7cbd9c52`):
 | mapper 118, TxSROM — **a variant of the MMC3 board chosen at load**, no new `Board` variant | `mmc3.rs:12-41` (the doc and three fields), `:56-78` (the load-time facts), `:136-156` (`refresh_nametable_pages`), `:158-159` (`update_banks`), `:260-270` (`mapper_number`, `nametable_page`), `:374` (`ignore_a000`), `registry.rs:20-23` + `:160`, `cartridges/mod.rs:194-196` + `:256` (`nametable_pages_vary`) | `req_core_100_txsrom_*` x4 and `req_core_090_the_txsrom_nametables_come_back_with_its_banks`; `M118_P128K_C64K` now **passes** with `detailed 0000` | **none, and the two fetch dispatches came out smaller than before the lot**: `Board::ppu_peek` 251 → **235**, `ppu_read` 252 → **236** (240/241 at `7bcd...`), prologue and niche unchanged, `read_pattern_planes` / `read_nametable_as` byte-identical, `Ppu2C02::step_dot` back to its pre-lot 1409. `Board::nametable_page` 28 → 33 for the new arm, which is a clamped load from a field — and `Cartridge` caches the four answers, re-reading them after a CPU write only for mappers 5 and 118 | **none.** Mapper 4 is byte-identical in behaviour: `is_txsrom` is false, the four pages stay `FOLLOW_MIRRORING`, `$A000` still drives the arrangement, and no savestate byte moved. The golden-core set has mapper 4 and it does not move |
 | mapper 180, UNROM with the fixed **first** bank — **a wiring of the UxROM board chosen at load**, no new `Board` variant | `discrete.rs:8-49` (the doc, two fields, `update_banks`), `:63-65` (`mapper_number`), `registry.rs:20-23` + `:144-148` (`has_bus_conflicts`) + `:158` | `req_core_100_mapper_180_fixes_the_first_bank_and_switches_at_c000`, `req_core_100_mapper_2_keeps_the_fixed_last_bank`; `M180_P128K_CR8K_H` and `M180_P128K_H` now **pass** with `detailed 0000` | **none, and a small win.** All four named functions **byte-identical**. Seven symbols moved and five shrank: the branch made `UxRom::update_banks` worth outlining, which took 36 instructions out of `Board::write_register` and 30 out of `Board::reset` | **none.** Mapper 2 does not move: `fixed_first` is false, its conflicts stay gated on submapper 2 (MR-BUS-1), and no savestate byte moved. No golden-core entry is on mapper 180 |
 | mapper 78, both wirings (submapper 1 *Uchuusen*, submapper 3 *Holy Diver*) with the iNES-1.0 heuristic — a **new board** and the lot's second and last new `Board` variant | `discrete.rs:185-283` (`Mapper078`, new), `board.rs:72-73` + `:107` (the appended variant), `registry.rs:20-23` + `:144-150` (`has_bus_conflicts`) + `:183`, `mappers/mod.rs:39-41` | `req_core_100_mapper_78_*` x4; `M78.3_P128K_C64K` now **passes** with `detailed 0000` | **none.** All four named functions **byte-identical**, same prologue and niche — the second appended variant cost the fetch dispatches nothing where the first cost +11 and then gave it back, which is what settles step 3's measurement as placement. +2 to +7 on the five `Board` dispatches that gained an arm; the crowd of renamed `discrete.rs` symbols is the mangled disambiguator shifting, not a change | **none.** A board that did not load before. No golden-core entry is on mapper 78 |
+| MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3) — **the MMC3's own code, monomorphised**: `Mmc3Board<const MC_ACC: bool>`, `Mmc3 = Mmc3Board<false>`, `McAcc = Mmc3Board<true>` | `mmc3.rs:11-33` (the doc), `:46-49` (the prescaler field), `:58-62` (the two aliases), `:69-76` (the watcher), `:233-236` + `:248-251` (the savestate byte), `:316-327` (`ppu_irq_horizon`), `:430-437` (`$C001`), `:443-471` (`on_ppu_address_bus`), `a12_watcher.rs:19-30` + `:72-80` (`fell`), `board.rs:74-77` + `:109`, `registry.rs:155-162` | `mr_4_3_the_mc_acc_clocks_once_per_eight_a12_falls`, `mr_4_3_a_plain_mapper_4_image_is_not_an_mc_acc`, `mr_4_3_writing_c001_resets_the_mc_acc_prescaler`, `req_core_090_the_mc_acc_prescaler_survives_a_save_and_restore` | **none, and the one claim in the lot that had to be exact.** `Board::on_ppu_address_bus` runs on every PPU fetch: the MMC3's arm is **character for character** what it was, all three of its paths, and the dispatch that reaches it got **one instruction shorter** (a jump table replaced a bitset-plus-compare chain). The four named functions are byte-identical. A field-based mode was written first, measured at **+2 instructions per fetch** for mappers 4 and 64, and thrown away — which is why `MC_ACC` is a `const` parameter | **none.** A plain mapper-4 or mapper-118 image takes the same instructions and writes the same savestate bytes; only an NES 2.0 submapper-3 dump changes, and it did not run as an MC-ACC before. *The Incredible Crash Dummies* and *Mickey's Safari in Letterland* are the titles; neither is in the golden-core set |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -717,3 +718,101 @@ One new board with one register byte, and nothing added to any existing board's 
   64K CHR ROM OK, detailed 0000`.
 * `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed. **All
   forty Holy Mapperel rows are now `pass`**, which is what this lot set out to do for that suite.
+
+## Step 8 — MR-4-3, the Acclaim MC-ACC
+
+### The finding
+
+nesdev, *MMC3*: "Acclaim's MC-ACC chip is their own variant of the MMC3 ... The only known
+difference is that the scanline counter uses a ÷8 prescaler instead of filtering A12, clocked by
+falling edges", and *NES 2.0 submappers* gives mapper 4 "Submapper 3: MC-ACC chip variant".
+MR-1b's own analysis adds the two details that make it implementable, from krikzz's research by
+way of Mesen 2's `McAcc`: the clock lands on the **first** fall of each group of eight ("Counter
+clocking happens once per 8 A12 cycles at first cycle"), and "writing to `$C001` resets pulse
+counter". *The Incredible Crash Dummies* and *Mickey's Safari in Letterland* are the titles named
+in public discussion of the chip; a dump is recognised by its submapper.
+
+Everything else is the MMC3's, revision B included — submapper 3 is neither submapper 1 (MMC6)
+nor submapper 4 (the NEC/Sharp revision A of AMD-061 §8), so those two stay `false`.
+
+### `MC_ACC` is a type parameter, not a field
+
+This is the one decision of the step, and MR-4-3 had already stated the requirement: the right
+shape must be one where "no MMC3 game pays a branch", because `on_ppu_address_bus` runs on
+**every PPU fetch** and the MMC3 is in the golden-core set.
+
+A field would have cost two instructions there. `A12Watcher::rose` opens with
+`let high = (address & 0x1000) != 0`, which compiles to a single `andw $4096, %r8w` whose own
+flags answer the question; comparing against a field instead — `== self.high_value`, the obvious
+way to make one watcher count either edge — needs the field loaded and a `cmpw` as well. That
+version was written, measured at **+2 instructions per fetch for every mapper-4 and mapper-64
+game**, and thrown away.
+
+What is committed instead is `Mmc3Board<const MC_ACC: bool>`, with `Mmc3 = Mmc3Board<false>` and
+`McAcc = Mmc3Board<true>`. Both boards share **every method body**; the four places the clone
+differs are `if MC_ACC` branches that the `const` parameter folds away at compile time:
+
+* the watcher it is built with, and whether `on_ppu_address_bus` asks it for a rise or a fall
+  (`A12Watcher::fell`, a second method rather than a mode inside `rose`, for the reason above);
+* the ÷8 prescaler around `clock_irq_counter`;
+* the `$C001` reset of that prescaler;
+* `ppu_irq_horizon`'s dots-per-clock, and the prescaler byte in the savestate.
+
+Mesen 2 writes a separate class for the same reason (`MapperFactory.cpp:285-290` → `McAcc`); the
+difference is that this shares the code instead of copying it, so the TxSROM, the MMC6, the two
+IRQ revisions and the MC-ACC cannot drift apart.
+
+### What the generated code says
+
+| function | step 7 | step 8 |
+| --- | ---: | ---: |
+| `Board::ppu_peek` | 235 | 235 (byte-identical) |
+| `Board::ppu_read` | 236 | 236 (byte-identical) |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 (byte-identical) |
+| `Ppu2C02::read_nametable_as` | 107 | 107 (byte-identical) |
+
+And the function this step is actually about, `Board::on_ppu_address_bus`, **where it matters**:
+the MMC3's own arm is
+
+    movzbl 40(%rcx), %eax    ; self.high
+    andw   $4096, %r8w
+    jne    L
+    testb  %al, %al
+    je     L
+    movq   %r9, 24(%rcx)     ; low_since = ppu_clock
+    movzwl %r8w, %eax
+    shrl   $12, %eax
+    movb   %al, 40(%rcx)
+    retq
+
+**character for character what it was at step 7**, and so are its two other paths (the filtered
+rise and the clock). The dispatch that reaches it got *shorter*: with a fourth real arm LLVM
+switched from a bitset-plus-compare chain to a jump table, so an MMC3 fetch now runs
+6 prologue + 4 table instructions where it ran 6 + 5, and the two correctly-predicted conditional
+branches became one indirect jump whose target is constant for the life of a cartridge. The
+function as a whole is 106 → 155 because the MC-ACC's arm is new code beside it.
+
+The usual lottery moved elsewhere in the same build — `Ppu2C02::step_dot` 1419 → 1403, and the CPU
+interpreter reshuffled its inlining again (`Cpu6502::resolve` 1293 → 584, `step` 829 → 1331, four
+helpers folded in). Step 9 measures the lot end to end with `bench-core` rather than arguing about
+those.
+
+### Save states
+
+The prescaler byte is written **only** when `MC_ACC`, so a mapper-4 or mapper-118 block is
+byte-identical to one written before this step — `req_core_090_the_mapper_state_survives_a_save_and_restore`
+compares the re-saved bytes and holds — and an MC-ACC state carries its prescaler
+(`req_core_090_the_mc_acc_prescaler_survives_a_save_and_restore`).
+
+Registers in `$4020-$5FFF`: **none**, as for every MMC3.
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed, with four new tests — the ÷8
+  prescaler (eight falls where the MMC3 needs one rise), a plain mapper-4 image not being one, the
+  `$C001` reset, and the savestate. The MC-ACC still reports mapper number 4.
+* No test ROM covers this board: Holy Mapperel has no mapper-4 submapper-3 image and
+  `mmc3_test` is an iNES 1.0 suite, so the behaviour is pinned by the unit tests alone, which is
+  what MR-4-3 expected ("the fix is a new board, not a branch, so the test belongs to the lot that
+  adds it").

@@ -4,7 +4,8 @@
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
-    Mapper078, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
+    Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom,
+    Vrc2Vrc4,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -87,6 +88,9 @@ pub enum Board {
     Fme7(Fme7),
     /// Mapper 78, the Irem IF-12 and the Jaleco board of Uchuusen.
     Mapper078(Mapper078),
+    /// Mapper 4 submapper 3, the Acclaim MC-ACC: the MMC3's code, with its ÷8 prescaler on A12's
+    /// falling edges folded in at compile time (MR-4-3).
+    McAcc(McAcc),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -121,6 +125,7 @@ macro_rules! dispatch {
             Board::Action52($b) => $body,
             Board::Fme7($b) => $body,
             Board::Mapper078($b) => $body,
+            Board::McAcc($b) => $body,
         }
     };
 }
