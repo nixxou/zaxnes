@@ -26,7 +26,32 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 - [x] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
 - [x] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
 - [x] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
-- [ ] 10/10 — journal entry and close.
+- [x] 10/10 — journal entry and close.
+
+## The lot is closed (step 10)
+
+Ten commits, `4b29c3f` to this one. The journal entry is in `cleanroom/journal/JOURNAL.md`
+(outside this repository), dated 2026-11-04, role R3.
+
+**Deliverables, against the brief:**
+
+1. `zax-harness test-roms <roms dir> <out.json> [--filter <substring>]` — runs every `.nes`
+   headless, stops early on a verdict, records `pass` / `fail` (with code and message) /
+   `timeout` / `unsupported` / `manual`, and writes a PNG of the final frame per ROM
+   (`--shots <dir>`, default beside the JSON). Each suite read as its own documentation says.
+2. `--markdown <file>` — a table per suite with ROM, result, message and a passed/total line,
+   plus the reference columns quoted from the collection's own `status.txt` with its source
+   URL. No Mesen 2 column, because no published table covers these ROMs row by row.
+3. Run on the whole directory; `docs/review/MF-T-test-roms.md` committed, with one line of
+   diagnosis per `fail` naming the subsystem and, where it is clear, the REQ or amendment.
+4. `tests/test_roms_tests.rs`, 62 ROMs, gated on `ZAXNES_TEST_ROMS`, skipped without it.
+
+**Rules kept:** no change to emulation behaviour or performance, and no accessor added — every
+reader uses what the core already had. Safe Rust, no `unsafe`. `cargo fmt --check`, `clippy -p
+zax-harness -p zax-nes --all-targets -D warnings` and `cargo test --release -p zax-harness -p
+zax-nes` run in the foreground, one at a time, green at every step (53 binaries, 0 failures).
+Nothing staged from `rust/target-*`, the ROMs, `.claude/` or `CLAUDE.md`. Two full campaign
+runs, no more.
 
 ## The gated test (step 9)
 
