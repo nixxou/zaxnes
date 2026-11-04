@@ -10,12 +10,12 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
 
 ## Checklist (n = 10)
 
-- [x] 1/10 done — Inventory: our board -> Mesen file mapping table; shared
+- [x] 1/10 done `42c158ec` — Inventory: our board -> Mesen file mapping table; shared
       infrastructure read (`registry.rs`, `board.rs`, `banked.rs`, `mappers/mod.rs`,
       `a12_watcher.rs`, `cartridges/mod.rs`, header/submapper handling, `BaseMapper`)
-- [x] 2/10 done — Discrete boards, part 1: 0, 2, 3, 7, 11, 13, 66, 71
-- [ ] 3/10 todo — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
-- [ ] 4/10 todo — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
+- [x] 2/10 done `42c158ec` — Discrete boards, part 1: 0, 2, 3, 7, 11, 13, 66, 71
+- [x] 3/10 done —  — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
+- [ ] 4/10 in progress — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
 - [ ] 5/10 todo — MMC2 / MMC4 (mappers 9, 10)
 - [ ] 6/10 todo — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
 - [ ] 7/10 todo — MMC5 (mapper 5) and its expansion audio + mix
@@ -57,3 +57,16 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   4 ignored tests in `tests/mr1_review_tests.rs`, all confirmed failing for the stated
   reason; 1 non-ignored guard test. No `mapper_3` protect finding: Mesen's CNROM-with-diodes
   is mapper 185, out of scope.
+- **Step 3** — 9 boards. The decisive discovery: amendment **AMD-021** (points R2-001,
+  R2-002, R2-003) specifies mappers 28, 15 and 101 normatively, and our code follows it to
+  the letter while **Mesen contradicts it** on seven observable points. Those are therefore
+  spec questions, not bugs: filed as `spec/changes/Q-110.md`. Three "our bug" findings I
+  had drafted for mappers 15 and 28 were withdrawn on reading the amendment — check
+  `spec/changes/` for the board *before* classifying anything.
+  Real findings: MR-34-1 (BNROM decodes $7FFD-$7FFF as registers where it is PRG-RAM;
+  visible/crash), MR-41-1/2/3 (Caltron 6-in-1 has the `..MC CPPP` field layout shifted by
+  one: PRG 2 bits instead of 3, mirroring read from a PRG bit, inner CHR gate missing —
+  games 5 and 6 of the cartridge cannot start), MR-30-1..6 (UNROM 512: byte-6 $09
+  four-screen collapsed, work RAM that should not exist, submapper 3/4, flash, four-screen
+  CHR-RAM window). Mappers 87, 225, 228, 156 equivalent — one line each.
+  6 new ignored tests (10 total), all confirmed failing for the stated reason.
