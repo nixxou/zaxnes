@@ -177,3 +177,41 @@ fn req_core_070_one_frame_produces_the_documented_number_of_samples() {
         RegionTiming::for_region(NesRegion::Multi).samples_per_frame(48_000)
     );
 }
+
+/// The 2A07's four-step sequence closes two CPU cycles later than this core used to think, and
+/// the whole of `pal_apu_tests` 04 to 08, 10 and 11 hangs on it (REQ-CORE-015, REQ-CORE-111).
+///
+/// The nesdev "APU Frame Counter" page gives each console's steps in **APU** cycles, and a CPU
+/// cycle is half of one: the 2A03's 14914 / 14914.5 / 14915 are CPU 29828 / 29829 / 29830, and
+/// the 2A07's 16626 / 16626.5 / 16627 are CPU 33252 / 33253 / 33254. This measures the period
+/// end to end rather than reading the table back, so a table edited by hand cannot satisfy it
+/// without being right.
+#[test]
+fn req_core_015_each_region_closes_its_four_step_sequence_where_nesdev_says() {
+    for (region, period) in [
+        (NesRegion::Ntsc, 29830),
+        (NesRegion::Pal, 33254),
+        (NesRegion::Dendy, 29830), // The 2A03's APU, on a 312-line console.
+        (NesRegion::Multi, 29830),
+    ] {
+        let mut core = NesCore::new();
+        core.set_region(region);
+        assert!(core.load_rom(&minimal(), "Apu.nes").success);
+        core.set_region(region);
+
+        // Four-step mode, IRQ enabled. The reset lands three or four cycles after the write.
+        core.write_memory(0x4017, 0x00);
+        core.bus_mut().apu_mut().read_status(0);
+
+        let mut cycles = 0;
+        while !core.apu().irq_asserted() && cycles < 2 * period {
+            core.bus_mut().tick();
+            cycles += 1;
+        }
+
+        // The $4017 poke leaves the sequencer reset pending, and the CPU sees the flag on the
+        // cycle after the one it is raised on; both offsets are the same for every region, so
+        // the count is the region's period plus one.
+        assert_eq!(period + 1, cycles, "{region:?}");
+    }
+}

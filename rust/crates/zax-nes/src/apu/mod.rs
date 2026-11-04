@@ -88,7 +88,14 @@ const NTSC_FOUR_STEP: [i32; 6] = [7457, 14913, 22371, 29828, 29829, 29830];
 const NTSC_FIVE_STEP: [i32; 6] = [7457, 14913, 22371, 29829, 37281, 37282];
 
 /// Four-step frame sequencer, PAL CPU cycles.
-const PAL_FOUR_STEP: [i32; 6] = [8313, 16627, 24939, 33250, 33251, 33252];
+///
+/// The nesdev page gives the 2A07's steps in APU cycles — 4156.5, 8313.5, 12469.5, then
+/// 16626, 16626.5 and 16627 for the three on which the IRQ flag is held — and a CPU cycle is
+/// half an APU cycle, so the sequence closes at 33252, 33253 and 33254. It used to close at
+/// 33250, two cycles early, which is the whole of `pal_apu_tests` 04 to 08, 10 and 11: every
+/// one of them measures something against the end of the mode 0 sequence, and 06 does so too
+/// because it synchronises on the mode 0 frame IRQ before switching to mode 1.
+const PAL_FOUR_STEP: [i32; 6] = [8313, 16627, 24939, 33252, 33253, 33254];
 
 /// Five-step frame sequencer, PAL CPU cycles.
 const PAL_FIVE_STEP: [i32; 6] = [8313, 16627, 24939, 33253, 41565, 41566];

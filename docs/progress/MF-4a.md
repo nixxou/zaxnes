@@ -317,3 +317,72 @@ again.
 ### Hot path
 
 No file under `src/` changed in this step. 683 tests, unchanged; the campaign unchanged.
+
+## Step 4 — the frame sequencer on a PAL console
+
+### The fix, which is three numbers
+
+`apu/mod.rs:90-98`. The nesdev "APU Frame Counter" page gives each console's steps in **APU**
+cycles, and a CPU cycle is half of one. For the 2A07's mode 0 those are 4156.5, 8313.5, 12469.5,
+then 16626, 16626.5 and 16627 for the three cycles on which the IRQ flag is held — so the
+sequence closes at CPU 33252, 33253, 33254. The table said 33250, 33251, 33252: **two cycles
+early**, and nothing else in the four tables was wrong.
+
+| table | before | after |
+| --- | --- | --- |
+| `NTSC_FOUR_STEP` | 7457, 14913, 22371, 29828, 29829, 29830 | unchanged |
+| `NTSC_FIVE_STEP` | 7457, 14913, 22371, 29829, 37281, 37282 | unchanged |
+| **`PAL_FOUR_STEP`** | 8313, 16627, 24939, **33250, 33251, 33252** | 8313, 16627, 24939, **33252, 33253, 33254** |
+| `PAL_FIVE_STEP` | 8313, 16627, 24939, 33253, 41565, 41566 | unchanged |
+
+That one row is all seven failures. Six of them — 04, 05, 07, 08, 10 and 11 — measure something
+against the end of the mode 0 sequence directly. The seventh, `06.len_timing_mode1`, measures
+mode 1, whose table was already right: it fails because it **synchronises on the mode 0 frame
+IRQ** before switching, so a sequence that closes two cycles early moves its whole measurement.
+That is why it was the odd one out in the campaign's diagnosis.
+
+### The ROMs
+
+| suite | before | after |
+| --- | --- | --- |
+| `nes-test-roms/pal_apu_tests` | 3 / 10 | **10 / 10** |
+| `nes-test-roms/apu_test` | 9 / 9 | 9 / 9 |
+| `nes-test-roms/blargg_apu_2005.07.30` | 11 / 11 | 11 / 11 |
+| `nes-test-roms/apu_reset` | 6 / 6 | 6 / 6 |
+| `nes-test-roms/apu_mixer` | 4 / 4 | 4 / 4 |
+| whole campaign | 207 pass, 12 fail | **214 pass, 5 fail** |
+
+The five failures left are `AccuracyCoin`, `power_up_palette` — whose own readme says its
+reference values "are probably unique to my NES" — and the three MMC3 revision A ROMs the
+campaign marks **required to fail** under REQ-CORE-100.
+
+### The test
+
+`apu_frame_counter_tests::req_core_015_each_region_closes_its_four_step_sequence_where_nesdev_says`
+times the sequence **end to end**, on all four regions, rather than reading the table back: it
+writes `$4017`, counts CPU cycles until the frame IRQ asserts, and requires 29830 for NTSC,
+33254 for PAL and 29830 for Dendy and Multi, which use the 2A03's APU. A table edited by hand
+cannot satisfy it without being right, and the two regions that borrow the NTSC sequence are
+pinned too.
+
+### Hot path, and the NTSC guarantee
+
+`Apu2A03::run_cpu_cycles` — which is where `step_frame_counter` and the `sequence()` lookup are
+inlined — is **byte for byte** the step 1 commit's, 880 instructions, in the post-LTO dump of
+the whole binary; `NesBus::tick` likewise, 74; and the whole-binary call-site table is
+unchanged, symbol for symbol. A constant in a `static` table moved and nothing else did.
+
+**An NTSC game executes exactly the instructions it did**: the PAL table is only reached through
+`sequence()`, behind `timing.uses_pal_noise_and_dmc_periods`, which is true for
+`NesRegion::Pal` alone — Dendy and Multi take the NTSC tables, as REQ-CORE-015 says and as the
+new test now checks.
+
+### Games whose output may move
+
+PAL games only, and all of them: the frame sequencer's last quarter and half frame, and its IRQ,
+arrive two cycles later. That is two cycles per 33254 on every envelope, sweep and length
+counter of a PAL title, and on the frame IRQ of a PAL game that uses it. No NTSC, Dendy or
+Multi game moves by one cycle.
+
+`cargo fmt --check` clean, clippy clean, `cargo test --release -p zax-nes -p zax-harness`:
+**684 passed, 0 failed, 7 ignored**.
