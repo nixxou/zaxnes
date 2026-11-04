@@ -35,7 +35,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
 - [x] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
 - [x] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
-- [ ] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
+- [x] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
 - [ ] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
       table, the test changes, any Q ticket
 - [ ] 12/12 — `cargo fmt --check`, `clippy -p zax-nes --all-targets -D warnings`,
@@ -228,3 +228,21 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   the diagrams; mapper 225's missing $6000-$7FFF RAM is settled in our favour; mapper 228's
   "Chip 2 does not exist ... will result in open bus" recorded as a note, since the 3-to-2 fold
   is right for every real dump.
+- **Step 10** — boards 16, 18, 32, MMC2/MMC4 and the last equivalents.
+  **Confirmed verbatim**: MR-16-1 ("writing to these two registers directly modifies the
+  counter itself; all such games therefore disable counting before changing the counter
+  value") and MR-32-1, whose two halves turn out to be one sentence — "the register at $9000
+  is **entirely disabled**: the game can only request 'PRG mode 0'" — so the fix is to ignore
+  $9000 rather than to special-case two bits.
+  **Three more findings leave `our bug`**: MR-16-2 and MR-16-3 (the page describes only the
+  one switchable bank and says the CHR-RAM variants are mappers 153 and 157, so both of
+  Mesen's paths are its own accommodations) and MR-18-1 → `unknown` leaning ours ("When it
+  wraps, an IRQ is generated" is the wrap our code fires on; Mesen fires a cycle earlier).
+  Test withdrawn.
+  **MMC2/MMC4's one `unknown` resolves in our favour**: the page describes the trigger as a
+  pattern-table *fetch* ("the latch is updated after either pattern table byte is fetched"),
+  so our `ppu_read` hook is right and Mesen's address-bus hook — which flips on a bare $2006
+  write — is wrong. That also vindicates the REQ-CORE-033/039 split.
+  **One more new finding, MR-66-1**: the GxROM board table gives the board **bus conflicts**,
+  which neither Mesen nor MR-1 had. MR-BUS-1 now covers mappers 2, 3, 7, 11, 30, 34 and 66.
+  Mapper 66's two-bit fields and mapper 32's five-bit PRG registers confirmed equivalent.

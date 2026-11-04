@@ -2600,3 +2600,175 @@ what a title menu does.
 
 **Cost: none.** One `match value & 0x03` in place of one `if value & 0x01`, on a write to a
 single address.
+
+## Mapper 16 — Bandai FCG
+
+Source: *INES Mapper 016* (<https://www.nesdev.org/wiki/INES_Mapper_016>).
+
+### MR-16-1 — submapper 4 writes the counter directly
+
+**MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed verbatim, including the
+reason games get away with it.**
+
+Source: for the FCG-1/2 (submapper 4), "writing to these two registers directly modifies the
+counter itself; all such games therefore disable counting before changing the counter value",
+where the LZ93D50 (submapper 5) instead latches and transfers on a write to $x00A.
+
+We always write the latch and always reload on $x00A (`bandai_fcg.rs:114-121`). The second half
+of the quoted sentence is why this has never shown up — and also why it should still be fixed:
+it is only safe as long as every game disables counting first.
+
+**Test:** unchanged — `mr_16_1_bandai_submapper_4_writes_the_counter_directly`.
+
+**Cost: none.** A load-time submapper flag and one branch in the $x00A/$x00B/$x00C arms of a
+register write.
+
+### MR-16-2 — the PRG outer bank on images of 512 KiB or more
+
+**MR-1 verdict: our bug (cosmetic). New verdict: leaves `our bug` — Mesen differs, with no
+source behind it.**
+
+The page describes only "the basic 16 KiB switchable PRG bank at $8000-$BFFF and fixed bank at
+$C000-$FFFF" and says the related boards that differ are mappers **153** and **157**. There is
+no outer bank built from the CHR registers on mapper 16, so Mesen's
+`GetPrgPageCount() >= 0x20` path is its own accommodation of oversized images — exactly as
+MR-1 suspected when it wrote "the feature belongs to mapper 153, out of scope", but it then
+classified the entry as our bug anyway. Nothing to fix.
+
+**Test:** none existed. **Cost: none** — no fix.
+
+### MR-16-3 — the CHR registers on a CHR-RAM board
+
+**MR-1 verdict: our bug (subtle). New verdict: leaves `our bug` — Mesen differs; a CHR-RAM
+mapper-16 image is not a mapper-16 board.**
+
+The page states that mapper 16 uses CHR-ROM and that it is mappers "153 and 157" that "use
+CHR-RAM instead of CHR-ROM". Mesen's `!HasChrRam()` gate is therefore defensive coding for an
+image the board cannot be, not a documented behaviour, and our banking unconditionally is
+harmless: with no CHR-ROM there is nothing to bank and the windows address CHR-RAM that a
+correct dump does not have. Nothing to fix.
+
+**Test:** none existed. **Cost: none** — no fix.
+
+The **EEPROM** remains P3 under REQ-CORE-100, and the sources do not change that.
+
+## Mapper 18 — Jaleco SS88006
+
+### MR-18-1 — when the IRQ fires
+
+**MR-1 verdict: our bug (subtle). New verdict: unknown, leaning ours. Leaves `our bug`.**
+
+Source: *INES Mapper 018* (<https://www.nesdev.org/wiki/INES_Mapper_018>) — the four $E000-$E003
+nibbles "represent a 16-bit reload value, split into four four-bit numbers, least significant
+four bits first", $F000 "will immediately reload the IRQ counter from the above reload value
+and acknowledge the IRQ", $F001's width bits are such that "F overrides E overrides T. If none
+are set, the counter is 16 bits wide" — and, on the firing point, "**When it wraps, an IRQ is
+generated**".
+
+A counter wraps on the clock that decrements a zero, which is exactly our model: at
+`counted == 0` we raise the IRQ and set the field to all-ones
+(`jaleco_ss88006.rs:174-179`). Mesen's `if(--counter == 0)` raises it one CPU cycle earlier,
+when the counter leaves 1. So the one sentence the page offers points away from Mesen, and the
+finding cannot stay `our bug`; but the sentence sits in the page's notes rather than in a
+cycle-level description, so `unknown` is the honest verdict rather than "Mesen in error".
+
+**Test change: withdrawn.** `mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier` asserted
+Mesen's cycle. What would settle it: a hardware capture of the IRQ line against the counter on
+*Moero Pro Yakyuu*, or any ROM that reloads a 4-bit width and counts the cycles to the IRQ.
+
+**Cost: none** — no fix. Had Mesen's model been adopted, it would have been free: the same
+comparison, moved.
+
+The board's **expansion audio at $F003** stays optional under REQ-CORE-075; neither side
+emulates it and the sources do not make it required.
+
+## Mapper 32 — Irem G-101
+
+### MR-32-1 — submapper 1, *Major League*
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed, and both halves are in
+one sentence.**
+
+Source: *INES Mapper 032* (<https://www.nesdev.org/wiki/INES_Mapper_032>) — "Major League wants
+hardwired 1-screen mirroring. (CIRAM A10 is tied to +5V on this game). Additionally, the
+register at $9000 is entirely disabled: the game can only request 'PRG mode 0'."
+
+So the fix is not two special cases but one: on submapper 1, **ignore $9000 altogether** and
+hold the board in one-screen with PRG mode 0. We have no submapper handling on this board, so
+*Major League* takes its mirroring from the header and can then swap its PRG layout.
+
+**Test:** unchanged — `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen`.
+
+**Cost: none.** One load-time flag tested in the $9000 arm of `write_register`.
+
+The register width MR-1 left as "equivalent in practice" is confirmed: the page gives both PRG
+registers as five bits ("P PPPP"), and the G-101 tops out at 256 KiB, where our eight bits and
+the modulo give the same bank. **Equivalent.**
+
+## Mappers 9 and 10 — MMC2 and MMC4
+
+**MR-1 verdict: equivalent, with one `unknown` (does the latch move on a bare $2006 write?).
+New verdict: equivalent — and the `unknown` resolves in our favour.**
+
+Source: *MMC2* (<https://www.nesdev.org/wiki/MMC2>) — latch 0 is set to $FD when "PPU reads
+$0FD8" and to $FE when "PPU reads $0FE8"; latch 1 is set to $FD when "PPU reads $1FD8 through
+$1FDF" and to $FE when "PPU reads $1FE8 through $1FEF"; the mechanism is described in terms of
+pattern-table **fetches**, and "the latch is updated *after* either pattern table byte is
+fetched".
+
+Three things fall out:
+
+- the **asymmetry** MR-1 verified against Mesen is the documented one: exact addresses for the
+  left table, eight-address ranges for the right. Our `move_latches` (`mmc2.rs:49-73`)
+  reproduces it, including the MMC4 widening.
+- the trigger is a **read of the pattern table**, not an address appearing on the PPU bus. Our
+  `ppu_read` hook is therefore right and Mesen's `NotifyVramAddressChange`, which flips the
+  latch on a bare $2006 write with no fetch, is wrong. MR-1 recorded this as `unknown` because
+  it could not tell a PPU-bus question from a fetch question; the page answers it, and it also
+  vindicates the REQ-CORE-033 / REQ-CORE-039 split that forced our design (`ppu_peek` must not
+  move a latch).
+- "updated *after* ... fetched" is the ordering our `ppu_read` already has (read through
+  `ppu_peek`, then move the latches, `mmc2.rs:160-164`), which is the point MR-1 argued at
+  length against Mesen's deferred `_needChrUpdate`. **Equivalent**, and now for a documented
+  reason rather than a traced one.
+
+The power-on state of the latches is **not** specified by the page, so our powering on with
+both selecting the $FE register is one conforming choice among two; it agrees with Mesen.
+No test, no fix, no cost.
+
+## Mapper 66 — GxROM
+
+**MR-1 verdict: equivalent. New verdict: equivalent on the banking — and one new finding.**
+
+Source: *GxROM* (<https://www.nesdev.org/wiki/GxROM>) — the register is
+
+```
+7  bit  0
+---- ----
+xxPP xxCC
+  ||   ||
+  ||   ++- Select 8 KB CHR ROM bank for PPU $0000-$1FFF
+  ++------ Select 32 KB PRG ROM bank for CPU $8000-$FFFF
+```
+
+for 128 KiB of PRG and 32 KiB of CHR, both fields two bits — exactly our decode
+(`discrete.rs:165-214`). **Equivalent.**
+
+**MR-66-1 — new finding. Verdict: our bug, severity subtle.** The same page's board table
+gives GxROM **bus conflicts**, which Mesen does not implement for this board and which MR-1
+therefore recorded as "no bus conflicts on either". Mapper 66 joins MR-BUS-1's list.
+
+**Test:** none added — MR-BUS-1's two tests exercise the mechanism, and the gating for this
+board is unconditional, like Color Dreams'.
+
+**Cost: none beyond MR-BUS-1's** — one more `true` from the same load-time predicate.
+
+So after this lot **MR-BUS-1 covers mappers 2, 3, 7, 11, 30, 34 (BNROM) and 66**, where MR-1
+listed only 2, 3, 7, 11 and 30.
+
+## Mapper 0 — NROM
+
+**MR-1 verdict: equivalent. New verdict: equivalent.** The board has no register and nothing
+to source beyond the 16 KiB image appearing twice, which both sides do and which REQ-CORE-100's
+table pins. Not re-fetched, and recorded here so the next reader knows it was considered and
+not forgotten.

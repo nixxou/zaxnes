@@ -706,30 +706,10 @@ fn mr_16_1_bandai_submapper_4_writes_the_counter_directly() {
 
 // ================================================================ mapper 18, Jaleco SS88006
 
-/// MR-18-1. The SS88006 IRQ fires on the cycle whose decrement *produces* zero, not on the
-/// cycle that observes a zero already there — our counter is one CPU cycle late.
-///
-/// Mesen (`Mappers/Jaleco/JalecoSs88006.h:91-100`):
-///
-///     uint16_t counter = _irqCounter & _irqMask[_irqCounterSize];
-///     if(--counter == 0) { SetIrqSource(...); }
-///
-/// We test the counter before decrementing and fire when it is already zero
-/// (`jaleco_ss88006.rs:171-179`), which adds a cycle to every period. With a reload value of
-/// 3 the third cycle fires; ours needs a fourth.
-#[test]
-#[ignore = "MR-1: MR-18-1"]
-fn mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier() {
-    let mut core = MapperRom::new(18).prg(8).chr(16).load();
-
-    core.mapper_write(0xE000, 0x03); // IRQ latch nibble 0 = 3.
-    core.mapper_write(0xF000, 0x00); // Reload the counter from the latch.
-    core.mapper_write(0xF001, 0x01); // Enable, 16-bit counter.
-
-    tick(&mut core, 3);
-
-    assert!(
-        core.cartridge().unwrap().irq_asserted(),
-        "a reload value of 3 expires on the third cycle, not the fourth"
-    );
-}
+// MR-18-1's test (`mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier`) was withdrawn by lot
+// MR-1b. It asserted Mesen's `if(--counter == 0)`, which fires when the counter leaves 1. The
+// only statement nesdev ("INES Mapper 018") makes about the firing point is "When it wraps, an
+// IRQ is generated" — a counter wraps on the clock that decrements a zero, which is our model
+// (`jaleco_ss88006.rs:174-179`). The sentence is in the page's notes rather than a
+// cycle-level description, so the finding is `unknown` leaning ours rather than "Mesen in
+// error". See `docs/review/MR-1-mappers.md`, MR-1b section.
