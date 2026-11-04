@@ -11,6 +11,10 @@
 //! file holds, the libretro value strings (which `RetroArch` persists), the profile field of the
 //! 3dSen import and the Lua surface. All of it is checked on the models and the tables, so it runs
 //! without a window.
+//!
+//! AMD-060 adds a **fourth** rung, 3, the depth-detecting SMAA of REQ-SCN-085 — a domain extension
+//! **(D)**. It is pinned here beside the other three rather than in a file of its own, because
+//! what this file is for is showing that the three did not move when something else did.
 #![allow(clippy::expect_used, clippy::unwrap_used)] // test code
 
 use zax_app::ui::handheld::advanced;
@@ -24,12 +28,17 @@ use zax_settings::persistence::SettingsFile;
 use zax_settings::store::MemoryStorage;
 use zax_settings::values::SettingValue;
 
-/// The three stored values, with the label the machine keeps and the text the user now reads in
-/// each language.
-const LEVELS: [(i32, &str, &str, &str); 3] = [
+/// The stored values, with the label the machine keeps and the text the user now reads in each
+/// language.
+///
+/// The fourth rung is AMD-060 REQ-SCN-085's: the depth-detecting SMAA, added as a **domain
+/// extension (D)** "sous un libellé propre […] sans toucher aux trois libellés existants", which
+/// the three rows above it being unchanged is the check of.
+const LEVELS: [(i32, &str, &str, &str); 4] = [
     (0, "None", "None", "Aucun"),
     (1, "FFAA", "MSAA 4×", "MSAA 4×"),
     (2, "SMAA", "MSAA 8×", "MSAA 8×"),
+    (3, "SMAA_DEPTH", "SMAA (depth)", "SMAA (profondeur)"),
 ];
 
 fn now() -> time::OffsetDateTime {
@@ -48,7 +57,7 @@ fn now() -> time::OffsetDateTime {
 #[test]
 fn ro_5_the_three_levels_read_as_the_multisampling_they_are() {
     let descriptor = catalogue::descriptor(SettingId::VideoAntiAlias);
-    let options = descriptor.domain().options().expect("three levels");
+    let options = descriptor.domain().options().expect("four levels");
 
     for (language, pick) in [
         (UiLanguage::English, 1_usize),
@@ -99,14 +108,17 @@ fn ro_5_the_row_did_not_move() {
     assert!(!options::EXCLUDED.contains(&SettingId::VideoAntiAlias));
 }
 
-/// What a machine reads is untouched: the three stored values, the **domain** labels — which are
-/// what the settings file holds, `video.anti_alias` being a `SettingKind::Enum` — and the profile
-/// field of the 3dSen import (field 32).
+/// What a machine reads is untouched: the stored values, the **domain** labels — which are what
+/// the settings file holds, `video.anti_alias` being a `SettingKind::Enum` — and the profile field
+/// of the 3dSen import (field 32).
+///
+/// The three rungs of AMD-032 keep their value, their label and their **index**, and the default
+/// stays 1 (AMD-052 REQ-PERS-089): AMD-060 appends, it does not reorder.
 #[test]
 fn ro_5_the_stored_values_the_domain_labels_and_field_32_are_untouched() {
     let descriptor = catalogue::descriptor(SettingId::VideoAntiAlias);
-    let options = descriptor.domain().options().expect("three levels");
-    assert_eq!(3, options.len());
+    let options = descriptor.domain().options().expect("four levels");
+    assert_eq!(4, options.len());
     for (index, (value, label, _, _)) in LEVELS.into_iter().enumerate() {
         assert_eq!(f64::from(value), options[index].value, "{label}");
         assert_eq!(label, options[index].label, "rung {index}");

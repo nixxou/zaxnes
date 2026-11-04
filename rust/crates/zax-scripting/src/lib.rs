@@ -32,7 +32,7 @@ pub use error::LuaScriptError;
 pub use lua_runtime::LuaRuntime;
 pub use runtime::{lend_context, HookTime, ProfileScriptRuntime};
 pub use script::{LoadedScript, ScriptHook};
-pub use settings::{ScriptLight, ScriptSettings};
+pub use settings::{read_msaa, ScriptLight, ScriptSettings};
 pub use surface::{ScriptApiMember, ScriptApiSurface, ScriptApiType};
 pub use values::{number_format, LuaColor, LuaIntVector3, LuaXrState};
 

@@ -118,6 +118,39 @@ fn req_prof_011_shared_tiles_are_resolved_to_the_same_object() {
     );
 }
 
+/// AMD-060 §2: "un champ 32 de profil qui la porte est relu tel quel par Zaxnes".
+///
+/// Field 32 is `video.anti_alias`, written as a raw `i32` (`wire::encoder`, `wire::decoder`), so
+/// the fourth value of the domain extension **(D)** needs nothing of the wire format — which is
+/// exactly what this asserts, and the reason the amendment can extend the domain without touching
+/// the profile layout. The three values of AMD-032 §2 ride along, so a change that broke one of
+/// them would fail here too.
+#[test]
+fn req_scn_085_profile_field_32_round_trips_the_fourth_anti_alias_value() {
+    for level in [0, 1, 2, 3] {
+        let mut profile = GameProfile::create_empty();
+        profile
+            .settings
+            .as_mut()
+            .expect("create_empty writes settings")
+            .anti_alias = level;
+
+        let bytes = format::save(&profile, FieldPresence::All);
+        let reloaded = format::load(&bytes, None, None).unwrap();
+
+        assert_eq!(
+            level,
+            reloaded
+                .profile
+                .settings
+                .as_ref()
+                .expect("the settings came back")
+                .anti_alias,
+            "field 32 holding {level}"
+        );
+    }
+}
+
 #[test]
 fn req_prof_004_a_profile_built_in_memory_writes_every_scalar() {
     // Without recorded fields the writer follows REQ-PROF-051 literally: every scalar written,

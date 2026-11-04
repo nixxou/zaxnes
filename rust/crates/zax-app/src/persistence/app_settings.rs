@@ -285,7 +285,7 @@ pub trait AppSettingsMut {
     fn set_frame_rate(&mut self, value: i32);
     /// Sets `video.vsync`, brought into 0 to 2.
     fn set_vsync(&mut self, value: i32);
-    /// Sets `video.anti_alias`, brought into 0 to 2.
+    /// Sets `video.anti_alias`, brought into 0 to 3 (AMD-060 §2 took the domain from 0..2).
     fn set_anti_alias(&mut self, value: i32);
     /// Sets `video.max_queued_frames`, brought into 1 to 2 (AMD-052 REQ-LOOP-077).
     fn set_max_queued_frames(&mut self, value: i32);
@@ -362,7 +362,7 @@ impl AppSettingsMut for SettingsModel {
     fn set_anti_alias(&mut self, value: i32) {
         self.set(
             SettingId::VideoAntiAlias,
-            SettingValue::Enum(value.clamp(0, 2)),
+            SettingValue::Enum(value.clamp(0, zax_render::geometry::SMAA_DEPTH_LEVEL)),
         );
     }
 

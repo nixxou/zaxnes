@@ -230,14 +230,28 @@ pub fn shadow_bias(texel_size: f32) -> f32 {
     SHADOW_DEPTH_BIAS.max(SHADOW_BIAS_TEXELS * texel_size)
 }
 
+/// The `video.anti_alias` level that asks for the depth-detecting SMAA of AMD-060 REQ-SCN-085
+/// instead of multisampling.
+pub const SMAA_DEPTH_LEVEL: i32 = 3;
+
 /// Samples per pixel the `video.anti_alias` option of SPEC-09 REQ-PERS-017 stands for: 0 off,
-/// 1 four samples, 2 eight samples (AMD-032 §2); anything else means off.
+/// 1 four samples, 2 eight samples (AMD-032 §2), **3 one sample** (AMD-060 REQ-SCN-085);
+/// anything else means off.
 ///
 /// REQ-PERS-017 lets the reimplementation apply a full-screen anti-aliasing and names FXAA and
 /// SMAA for the two levels. AMD-032 takes multisampling instead: the scene is a mass of
 /// hard-edged flat faces with nearest-neighbour texturing (REQ-SCN-034), so a post-processing
 /// filter would blur the pixel art it is supposed to keep crisp, while multisampling only
 /// touches the geometric edges.
+///
+/// AMD-060 adds a fourth level, and the `3` arm below is REQ-SCN-085's first clause: the scene
+/// "DOIT être rendue sans multi-échantillonnage", then filtered by the three SMAA passes, whose
+/// edge detection reads the **depth** and so never sees a contour inside a textured face — which
+/// is why AMD-032 §2's objection does not reach it. That arm is also AMD-060 §2's "en lecture, la
+/// valeur 3 se lit comme « aucun multi-échantillonnage »": this function is the one place the
+/// renderer turns the setting into a sample count. The arm it falls into is the same `_` a value
+/// outside the domain falls into, which is why there is no third arm — one that returned the same
+/// 1 would be the same arm written twice.
 #[must_use]
 pub const fn anti_alias_samples(option: i32) -> i32 {
     match option {
@@ -245,6 +259,16 @@ pub const fn anti_alias_samples(option: i32) -> i32 {
         2 => MAX_ANTI_ALIAS_SAMPLES,
         _ => 1,
     }
+}
+
+/// Whether `video.anti_alias` asks for the depth-detecting SMAA of AMD-060 REQ-SCN-085.
+///
+/// **Its falseness is the point**: at every other level REQ-SCN-086 requires that no SMAA pass,
+/// target or texture exist, so this is the one test the frame makes and the whole of what the
+/// mode costs a frame that does not want it.
+#[must_use]
+pub const fn smaa_depth(option: i32) -> bool {
+    option == SMAA_DEPTH_LEVEL
 }
 
 /// Rounds a requested sample count down to a power of two no greater than `supported`, which is

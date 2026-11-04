@@ -12,7 +12,7 @@ use crate::binding::cx::{host_payload, try_color, Call, Cx};
 use crate::binding::payload::{HostType, Payload, StyleParameterLog};
 use crate::binding::table::TypeDef;
 use crate::settings::{
-    ScriptSettings, CLIPPING_COUNT, DEFAULT_SMOOTH_TIME, LAYER_COUNT, NON_VR_SCALE, VR_SCALE,
+    self, ScriptSettings, CLIPPING_COUNT, DEFAULT_SMOOTH_TIME, LAYER_COUNT, NON_VR_SCALE, VR_SCALE,
 };
 use crate::values::LuaColor;
 
@@ -314,12 +314,17 @@ fn setting_values(definition: &mut TypeDef) {
     // `ScriptSettings::msaa_drives_anti_alias` holds. A bespoke property rather than `mapped`
     // because of that side effect; the member it publishes is identical, so `goldens/lua-api.txt`
     // does not move.
+    // AMD-060 §2 adds the other half of the member's contract: a write "ne produit jamais la
+    // valeur 3" — `normalise_msaa` already gives 0, 2 or 4 and `write_msaa` maps those onto None
+    // or FFAA, so neither `video.msaa_2_0` nor `video.anti_alias` can become 3 through here — and
+    // "en lecture, la valeur 3 se lit comme « aucun multi-échantillonnage »", which `read_msaa`
+    // is.
     definition.property(
         "Msaa",
         |cx, _| {
-            Ok(num(cx.data(|data| {
+            Ok(num(settings::read_msaa(cx.data(|data| {
                 data.env.settings.int(SettingId::VideoMsaa20)
-            })?))
+            })?)))
         },
         |cx, _, value| {
             let wanted = cx.integer(value, "Msaa")?;

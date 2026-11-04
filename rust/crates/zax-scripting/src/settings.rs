@@ -66,6 +66,24 @@ pub const fn normalise_msaa(written: i32) -> i32 {
     }
 }
 
+/// `Setting.Msaa` as a **read** gives it back, which is the stored value with one guard: AMD-060
+/// §2's "en lecture, la valeur 3 se lit comme « aucun multi-échantillonnage »".
+///
+/// 3 is the one value of the member's own domain that `normalise_msaa` never produces and the one
+/// value of `video.anti_alias` that means *no* multisampling (AMD-060 REQ-SCN-085), so a 3 reaching
+/// the member — from a settings file edited by hand, or from a future lot that lets the two
+/// settings meet — would be the one number the member could read as the opposite of the truth.
+/// It therefore reads as 0, and the clause costs one comparison on a path that runs when a script
+/// asks.
+#[must_use]
+pub const fn read_msaa(stored: i32) -> i32 {
+    if stored == 3 {
+        0
+    } else {
+        stored
+    }
+}
+
 /// Where the directional light keeps its state (SPEC-09 §4.1.3, REQ-PERS-005 point 2).
 #[derive(Debug, Clone, Default)]
 pub enum ScriptLight {

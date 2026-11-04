@@ -452,10 +452,24 @@ fn video_scaling(out: &mut Vec<SettingDescriptor>) {
         .with_lua("ResScaleIndex")
         .with_field("29"),
     );
-    let anti_alias_labels = vec![opt(0, "None"), opt(1, "FFAA"), opt(2, "SMAA")];
+    // The three levels of SPEC-09 §4.1.1, which AMD-032 §2 renders as multisampling, and the
+    // fourth AMD-060 adds. The libretro list keeps the three: a core option's value strings are
+    // persisted by the host, AMD-032 §7 lists the libretro table among what does not change, and
+    // AMD-060 §2 extends the **domain** and names only the options window. So the fourth level is
+    // reachable from the settings file, the options window, the console pages and Lua, and a
+    // libretro front end keeps the enumeration it already stored.
+    let anti_alias_libretro = vec![opt(0, "None"), opt(1, "FFAA"), opt(2, "SMAA")];
+    let mut anti_alias_labels = anti_alias_libretro.clone();
+    // AMD-060 REQ-SCN-085: SMAA 1x with edge detection on the scene's **depth**, the one
+    // full-screen filter AMD-032 §2's objection does not reach — it finds geometric contours only
+    // and never a contour inside a nearest-neighbour texture. A domain extension **(D)**: the
+    // value does not exist in the original, a settings file or a profile field 32 that carries it
+    // is read as it stands, and a value outside 0..3 is brought back the way one outside 0..2 was.
+    anti_alias_labels.push(opt(3, "SMAA_DEPTH"));
     // AMD-052 REQ-PERS-089: shipped **on**, which is MSAA 4x by AMD-032 §2 — a divergence
     // **(D)** from the original, whose own default is 0 and which has no effect at all
-    // (REQ-PERS-017). The handheld keeps 0 (`ui/handheld/defaults.rs`).
+    // (REQ-PERS-017). The handheld keeps 0 (`ui/handheld/defaults.rs`). AMD-060 §2 leaves the
+    // default where it is.
     out.push(
         SettingDescriptor::new(
             SettingId::VideoAntiAlias,
@@ -465,11 +479,11 @@ fn video_scaling(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::Immediate,
             SettingTheme::Video,
         )
-        .with_domain(Domain::choice(anti_alias_labels.clone()))
+        .with_domain(Domain::choice(anti_alias_labels))
         .with_lua("AntiAlias")
         .with_field("32")
         .with_label("Anti Alias")
-        .with_libretro(anti_alias_labels),
+        .with_libretro(anti_alias_libretro),
     );
     let mesh_labels = vec![
         opt(0, "GREEDY"),

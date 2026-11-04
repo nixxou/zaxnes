@@ -520,6 +520,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // file and the libretro option values hold. Q-107 §7.
     ("option.FFAA", "MSAA 4×"),
     ("option.SMAA", "MSAA 8×"),
+    // AMD-060 §2: the fourth level, "sous un libellé propre […] sans toucher aux trois libellés
+    // existants". It is the only one of the four that really is SMAA, so the label says which SMAA
+    // it is rather than how many samples it takes — there is one.
+    ("option.SMAA_DEPTH", "SMAA (depth)"),
     ("option.Native", "Native"),
     ("option.enabled", "enabled"),
     ("option.disabled", "disabled"),
@@ -583,12 +587,15 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.video.anti_alias",
-        "Smooths the staircase on the slanted edges of the 3D shapes. Zaxnes uses multisampling \
-         rather than a full-screen filter, so the pixel art of the textures stays sharp: the two \
-         levels are 4 and 8 samples per pixel. 3dSen calls them FFAA and SMAA, which is also what \
-         the settings file and the libretro option hold; Zaxnes draws them as what they are, MSAA \
-         4× and MSAA 8×. The cost is mostly memory bandwidth and grows with the resolution. \
-         Default: MSAA 4× on the desktop, None on a handheld.",
+        "Smooths the staircase on the slanted edges of the 3D shapes. The first two levels are \
+         multisampling — 4 and 8 samples per pixel — so the pixel art of the textures stays \
+         sharp. 3dSen calls them FFAA and SMAA, which is also what the settings file and the \
+         libretro option hold; Zaxnes draws them as what they are, MSAA 4× and MSAA 8×. SMAA \
+         (depth) is a filter instead of extra samples: it draws the scene once and finds the edges \
+         in the depth of the picture, so it smooths the shapes without ever touching a texture, and \
+         it costs about a third of MSAA 4×'s memory. It leaves the status bar's own outline alone. \
+         The cost of all three grows with the resolution. Default: MSAA 4× on the desktop, None on \
+         a handheld.",
     ),
     (
         "detail.video.skip_frame",

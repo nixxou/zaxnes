@@ -9,8 +9,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | The reference and the specs read; the design (pass order, colour space, targets, tables, bind layouts); the test plan | done — this commit |
-| 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | todo |
+| 1 | The reference and the specs read; the design (pass order, colour space, targets, tables, bind layouts); the test plan | done — `4465826` |
+| 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — this commit |
 | 3 | OpenGL: the two tables and the depth edge detection | todo |
 | 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | todo |
 | 5 | `wgpu`: the three passes, the lifecycle, the fallback | todo |
@@ -250,12 +250,99 @@ From RU-7's experience, settled before any code:
 | 8 | the HUD is not treated: not one of its pixels moves between 0 and 3 | `zax-harness/tests/amd060_smaa_tests.rs` |
 | 9 | parity, as RU-7 measured it: both backends on the same scenes, share of pixels within 2 levels and max channel difference, Vulkan and DX12 | `zax-harness/tests/parity_wgpu_tests.rs` |
 
-### The "before" figures (step 1)
+### Step 2 — the setting's domain, and nothing of the renderer
 
-To be taken at the head of step 2, so that step 7 can show the OpenGL path did not move: the four
-post-LTO instruction counts RU-7 tracked (`Ppu2C02::run_dots` 2231, `DrawListBuilder::build` 1095,
-`SceneRenderer::render_scene` 3401, `Construction::segment` 159) and the per-crate test counts.
+AMD-060 §2 clause by clause, with no shader and no target: the mode is selectable and persisted
+before anything renders it, so that step 3 has a switch to render against.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `zax-settings/src/table.rs` | the fourth rung, `opt(3, "SMAA_DEPTH")`, appended to the choice domain; the **libretro** list split off and kept at the three of AMD-032 §2 |
+| `zax-render/src/geometry.rs` | `SMAA_DEPTH_LEVEL`, `smaa_depth(option)`, and `anti_alias_samples`'s doc saying why level 3 falls into the one-sample arm |
+| `zax-app/src/persistence/app_settings.rs` | `set_anti_alias` clamps to `0..=SMAA_DEPTH_LEVEL` |
+| `zax-app/src/ui/strings/{english,french}.rs` | `option.SMAA_DEPTH` — "SMAA (depth)" / "SMAA (profondeur)" — and the row's tooltip rewritten in both languages: what the fourth level does, that it costs about a third of MSAA 4×'s memory, and that it leaves the status bar's own outline alone |
+| `zax-scripting/src/settings.rs`, `api/settings.rs`, `lib.rs` | `read_msaa`, the "en lecture, la valeur 3 se lit comme « aucun multi-échantillonnage »" half of AMD-060 §2's Lua clause, on the member's own read path |
+| `zax-settings/tests/amd060_anti_alias_domain.rs` (new) | five tests: the fourth rung, the untouched default / field 32 / Lua path, a settings file carrying it, a value outside the domain, the libretro list |
+| `zax-app/tests/anti_alias_labels_tests.rs` | RO-5's `LEVELS` grows a fourth row; the three above it unchanged is what the file now checks |
+| `zax-app/tests/video_option_tests.rs` | the domain test takes 3 and −4; `req_scn_085_the_fourth_level_asks_for_no_multisampling` |
+| `zax-profiles/tests/.../profile_round_trip_tests.rs` | field 32 round-trips 0, 1, 2 **and 3** |
+| `zax-scripting/tests/.../two_zero_api_tests.rs` | two tests: `Setting.Msaa` never writes 3 to either setting and reads 3 as 0; `Setting.AntiAlias` carries the fourth level both ways |
+| `.gitignore` | `rust/target-sm/`, beside RU-7's `rust/target-ro/` |
+
+#### The libretro list is **not** extended, and that is a decision
+
+AMD-060 §2 says the domain goes 0..2 → 0..3 and that "la fenêtre d'options propose la quatrième
+valeur". It says nothing of libretro. A core option's value strings are what `RetroArch` persists
+(`core_options::CoreOption` has one string per value, which is at once what it stores and what it
+displays), AMD-032 §7 lists the libretro table among what does not change, and RO-5's own test
+pins those three strings. So the domain has four rungs and the libretro enumeration has three: the
+fourth level is reachable from the settings file, the options window, the console pages and Lua,
+and a libretro front end keeps the enumeration it already stored.
+`req_scn_086_the_libretro_enumeration_is_not_extended` asserts it, so it is a checked choice rather
+than an omission — and a one-line change if R0 wants the other.
+
+#### AMD-060 §2's Lua clause, read
+
+"`Setting.Msaa` ne produit jamais la valeur 3 en écriture ; en lecture, la valeur 3 se lit comme
+« aucun multi-échantillonnage »." The first half was **already** true and is now asserted: AMD-059
+REQ-LUA-116's own mapping (`normalise_msaa`: `v ≤ 1 → 0`, `2 ≤ v ≤ 3 → 2`, `v ≥ 4 → 4`) cannot
+produce 3, and RO-2 part 4's side effect maps those onto None or FFAA, so neither `video.msaa_2_0`
+nor `video.anti_alias` can become 3 through the member. The second half had no existing reader, so
+it is `read_msaa`, one comparison on the member's read path: 3 is the one value of that member's
+domain `normalise_msaa` never produces *and* the one value of `video.anti_alias` that means no
+multisampling, so a 3 reaching the member is the one number it could otherwise read as the opposite
+of the truth. `Setting.AntiAlias` — the member that *is* the setting — carries 3 in both
+directions, which is what "aucune fonction ajoutée ni retirée" leaves it doing.
+
+The Lua API golden is untouched: no member was added or removed, and `goldens/lua-api.txt` is in
+the workspace suite.
+
+#### The "before" figures, measured here
+
+Post-LTO assembly of the harness binary, **default** features, so the column is the OpenGL path —
+the method RU-3a-fix through RU-7 used, with the script written fresh for this lot and kept out of
+the tree with the scratch probes.
+
+| Symbol | RU-7 recorded | SM-1 step 2 |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3401 | **3401** |
+| `Construction::segment` | 159 | **159** |
+
+All four to the instruction, which is the check that this lot starts where RU-7 ended.
+
+**One rule of the script is worth writing down, because getting it wrong looked exactly like a
+regression.** A function's body has to stop at `.seh_endproc`. Without that cut
+`DrawListBuilder::build` reads **1187** — a cold/unwind tail follows its epilogue and the naive
+block scan swallows it — while the other three read their RU-7 values unchanged. Three symbols
+agreeing and one off by 92 is a convincing-looking fault, and it is the script's.
+
+#### Tests
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean. In release, one crate at a time:
+
+| Crate | Result |
+|---|---|
+| `zax-settings` | 268 passed, 0 failed (5 of them this step's new file) |
+| `zax-profiles` | 349 passed, 0 failed, 68 ignored (1 new) |
+| `zax-scripting` | all suites passed (2 new) |
+| `zax-app --features bundled` | all suites passed (1 new, 2 amended) |
+| `zax-render` | all suites passed |
+
+#### A build note for whoever resumes this
+
+A fresh worktree has no `rust/crates/zax-app/demo/FlappyZaxNes.nes` or `flappyzaxnes.3dn`: both are
+`.gitignore`d build products of `demo/source`, and `demo_game.rs` `include_bytes!`s them, so
+`zax-app` does not compile without them. They were copied from `impl/`. They are ignored, so they
+cannot be staged by accident. `zax-app` and its tests also need `--features bundled` here, or
+`link.exe` cannot find `SDL2.lib`.
 
 ### What is left for R0
 
-Nothing yet. The closing section of AMD-060 is R0's; what R0 needs will be gathered here in step 7.
+Nothing yet beyond the libretro decision above and the three questions of **Q-109** (the depth
+threshold, the HUD clause of REQ-SCN-085, and the 2D mode). The closing section of AMD-060 is R0's;
+what R0 needs will be gathered here in step 7.

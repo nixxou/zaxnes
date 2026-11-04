@@ -46,6 +46,10 @@ fn req_pers_017_a_change_of_anti_alias_reaches_the_scene_at_once() {
     assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
 }
 
+/// The domain is 0..3 since AMD-060 §2 ("0..2 → 0..3"), and a value outside it is brought back
+/// "comme aujourd'hui une valeur hors 0..2" — which for this setter is the clamp, and for a value
+/// arriving through the settings model is the default (`Domain::coerce` on a choice domain whose
+/// labels do not cover it).
 #[test]
 fn req_pers_017_the_anti_alias_option_stays_in_its_domain() {
     let mut settings = SettingsModel::new();
@@ -55,8 +59,27 @@ fn req_pers_017_the_anti_alias_option_stays_in_its_domain() {
     assert_eq!(0, settings.anti_alias());
     settings.set_anti_alias(2);
     assert_eq!(2, settings.anti_alias());
+    settings.set_anti_alias(3);
+    assert_eq!(3, settings.anti_alias());
     settings.set_anti_alias(7);
-    assert_eq!(2, settings.anti_alias());
+    assert_eq!(3, settings.anti_alias());
+    settings.set_anti_alias(-4);
+    assert_eq!(0, settings.anti_alias());
+}
+
+/// AMD-060 REQ-SCN-085's first clause where the renderer reads it: level 3 is **one** sample.
+///
+/// This is also AMD-060 §2's "en lecture, la valeur 3 se lit comme « aucun multi-échantillonnage »"
+/// at the one place the setting becomes a sample count, and the reason the scene can carry the
+/// level without the multisampled attachments of AMD-032 §2 ever being allocated.
+#[test]
+fn req_scn_085_the_fourth_level_asks_for_no_multisampling() {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set_anti_alias(3));
+    assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
+    assert_eq!(3, harness.host.settings().anti_alias());
 }
 
 #[rstest]

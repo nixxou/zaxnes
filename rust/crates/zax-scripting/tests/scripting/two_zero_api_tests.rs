@@ -561,6 +561,54 @@ fn ro_2_the_lua_member_reads_back_the_normalised_value_either_way() {
     );
 }
 
+/// AMD-060 §2, both halves of the one clause that mentions Lua: "`Setting.Msaa` ne produit jamais
+/// la valeur 3 en écriture ; en lecture, la valeur 3 se lit comme « aucun multi-échantillonnage »."
+///
+/// The first half is read on **both** settings a write can reach — the member's own
+/// `video.msaa_2_0` and, through RO-2 part 4, `video.anti_alias` — over every number that could
+/// plausibly produce a 3, including 3 itself. The second is read on `read_msaa`, the one place a
+/// stored 3 could reach a script.
+#[test]
+fn req_scn_085_setting_msaa_never_writes_the_fourth_level_and_reads_it_as_none() {
+    for written in [-1, 0, 1, 2, 3, 4, 8, 300] {
+        let mut settings = settings_without_anti_alias();
+        settings.write_msaa(written);
+        assert_ne!(
+            3,
+            settings.int(SettingId::VideoMsaa20),
+            "Setting.Msaa = {written} stored 3"
+        );
+        assert_ne!(
+            3,
+            settings.int(SettingId::VideoAntiAlias),
+            "Setting.Msaa = {written} asked for the depth SMAA"
+        );
+    }
+
+    assert_eq!(0, zax_scripting::read_msaa(3));
+    for stored in [0, 2, 4] {
+        assert_eq!(stored, zax_scripting::read_msaa(stored));
+    }
+}
+
+/// And `Setting.AntiAlias` — the member that *is* the setting — carries the fourth value in both
+/// directions, which is the other side of the same clause: AMD-060 §2 adds no function and removes
+/// none, so the level is reachable from Lua through the member it has always had.
+#[test]
+fn req_scn_085_setting_anti_alias_carries_the_fourth_level() {
+    let mut session = blank();
+    session.evaluate("Setting.AntiAlias = 3");
+    assert_eq!(3.0, session.number("return Setting.AntiAlias"));
+    // And a value outside the domain is still brought back, as REQ-SCN-085 requires.
+    session.evaluate("Setting.AntiAlias = 9");
+    assert_eq!(1.0, session.number("return Setting.AntiAlias"));
+    assert!(
+        session.log.errors().is_empty(),
+        "{:?}",
+        session.log.errors()
+    );
+}
+
 /// REQ-LUA-116: no numeric write of the four members raises, whatever the number.
 #[test]
 fn req_lua_116_no_numeric_write_of_the_new_members_raises() {

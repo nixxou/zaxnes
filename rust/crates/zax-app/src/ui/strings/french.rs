@@ -490,6 +490,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     // deux langues, un niveau de multi-échantillonnage n'étant pas un mot. Q-107 §7.
     ("option.FFAA", "MSAA 4×"),
     ("option.SMAA", "MSAA 8×"),
+    // AMD-060 §2 : le quatrième niveau, « sous un libellé propre […] sans toucher aux trois
+    // libellés existants ». C'est le seul des quatre qui soit vraiment du SMAA, donc le libellé dit
+    // de quel SMAA il s'agit plutôt que combien d'échantillons il prend — il en prend un.
+    ("option.SMAA_DEPTH", "SMAA (profondeur)"),
     ("option.Native", "Native"),
     ("option.enabled", "activées"),
     ("option.disabled", "désactivées"),
@@ -556,13 +560,16 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.video.anti_alias",
-        "Adoucit l'escalier sur les arêtes obliques des formes 3D. Zaxnes emploie le \
-         multi-échantillonnage plutôt qu'un filtre plein écran, afin que les textures en pixel art \
-         restent nettes : les deux niveaux valent 4 et 8 échantillons par pixel. 3dSen les nomme \
-         FFAA et SMAA, et c'est aussi ce que contiennent le fichier de réglages et l'option \
-         libretro ; Zaxnes les affiche pour ce qu'ils sont, MSAA 4× et MSAA 8×. Le coût est \
-         surtout de la bande passante mémoire et croît avec la résolution. Par défaut : MSAA 4× \
-         sur le bureau, Aucun sur une console portable.",
+        "Adoucit l'escalier sur les arêtes obliques des formes 3D. Les deux premiers niveaux sont \
+         du multi-échantillonnage — 4 et 8 échantillons par pixel — afin que les textures en pixel \
+         art restent nettes. 3dSen les nomme FFAA et SMAA, et c'est aussi ce que contiennent le \
+         fichier de réglages et l'option libretro ; Zaxnes les affiche pour ce qu'ils sont, MSAA 4× \
+         et MSAA 8×. SMAA (profondeur) est un filtre et non des échantillons supplémentaires : la \
+         scène est rendue une seule fois et les contours sont cherchés dans la profondeur de \
+         l'image, de sorte que les formes sont adoucies sans qu'une texture soit jamais touchée, \
+         pour environ le tiers de la mémoire du MSAA 4×. Il laisse le contour de la barre d'état \
+         tel quel. Le coût des trois croît avec la résolution. Par défaut : MSAA 4× sur le bureau, \
+         Aucun sur une console portable.",
     ),
     (
         "detail.video.skip_frame",
