@@ -555,12 +555,18 @@ impl Mapper for Action53 {
         false
     }
 
+    // AMD-061 §3 and §5 (finding MR-28-3, ticket Q-112): "The mapper state is unchanged on
+    // reset" (nesdev, "INES Mapper 028"), and §5 amends REQ-CORE-004's "mapper revenu dans son
+    // état initial" to exempt a board whose public documentation says its state survives the
+    // RESET signal. Mapper 28 is the whole of that list at 2026-11-04 — the MMC1 is explicitly
+    // *not* on it — so the four registers §3 names (select, outer, inner, mode) and the CHR
+    // bank are all kept, and only the windows are refreshed, because `Cartridge::reset` has
+    // just put the mirroring back to the header's.
+    //
+    // The power-on state is unaffected: AMD-021 R2-001's values (outer 63, inner 15, mode 0,
+    // which put the last 16 KiB bank at $C000-$FFFF as §3 requires) are written by
+    // `Action53::new`, once per load, and this method no longer has to repeat them.
     fn reset(&mut self, memory: &mut CartridgeMemory) {
-        self.select = 0;
-        self.chr_bank = 0;
-        self.inner_prg = 15;
-        self.mode = 0;
-        self.outer_prg = 63;
         self.update_banks(memory);
     }
 

@@ -846,6 +846,71 @@ fn req_core_004_a_reset_puts_the_mapper_back_to_its_power_on_banks() {
     }
 }
 
+#[test]
+fn amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state() {
+    // AMD-061 §5 amends REQ-CORE-004's "mapper revenu dans son état initial" to exempt a board
+    // whose public documentation says its state survives the RESET signal, and the list it
+    // opens holds exactly one board: mapper 28. The MMC1 is named as *not* being on it. So
+    // every other supported board must still come back, which is what this sweeps.
+    for &mapper in NesCore::SUPPORTED_MAPPERS {
+        if mapper == 28 {
+            continue;
+        }
+
+        let mapper_number = usize::try_from(mapper).unwrap();
+        let mut core = MapperRom::new(mapper_number).prg(16).chr(32).load();
+        let power_on = (core.prg_windows(), core.chr_windows(), core.mirroring());
+        for (address, value) in [
+            (0x5000u16, 0x01u8),
+            (0x6000, 0x02),
+            (0x8000, 0x03),
+            (0x9000, 0x04),
+            (0xA000, 0x05),
+            (0xC000, 0x06),
+            (0xE000, 0x07),
+        ] {
+            core.write_memory(address, value);
+        }
+
+        core.reset();
+        assert_eq!(
+            power_on,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "mapper {mapper} did not come back to its power-on state"
+        );
+        assert!(!core.cartridge().unwrap().irq_asserted(), "mapper {mapper}");
+    }
+}
+
+#[test]
+fn amd_061_mapper_28_keeps_its_registers_across_a_reset() {
+    // AMD-061 §3: "Réinitialisation : l'état de la carte (registres externe, interne, de mode
+    // et de sélection) est conservé", from nesdev's "The mapper state is unchanged on reset"
+    // (finding MR-28-3, ticket Q-112).
+    let mut core = MapperRom::new(28).prg(128).chr(0).load();
+    // Power-on is AMD-021 R2-001's outer 63 / inner 15 / mode 0, which §3 keeps: the last
+    // 16 KiB bank of the image sits at $C000-$FFFF.
+    assert_eq!([124, 125, 126, 127], core.prg_windows());
+
+    // The same vector as `amd_021_r2_001_action53_acceptance_vectors`' third one.
+    action53_select(&mut core, 0x81, 0x02);
+    action53_select(&mut core, 0x80, 0x18);
+    action53_select(&mut core, 0x01, 0x03);
+    let running = (core.prg_windows(), core.mirroring());
+    assert_eq!([8, 9, 14, 15], running.0);
+
+    core.reset();
+    assert_eq!(
+        running,
+        (core.prg_windows(), core.mirroring()),
+        "the four registers of mapper 28 must survive a reset"
+    );
+
+    // And a reset still restores everything REQ-CORE-004 keeps requiring of it: §5 changes
+    // only the mapper point.
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}
+
 // ---------------------------------------------------------------- savestates
 
 #[test]

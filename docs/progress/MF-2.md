@@ -28,7 +28,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 
 - [x] 1/10 — step 0: give back what MF-1 cost on the MMC1 CHR path
 - [x] 2/10 — step 1: AMD-061 §2 and §4 — mapper 15 mode 1, mapper 101, the AMD-021 criteria
-- [ ] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
+- [x] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
 - [ ] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
 - [ ] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
 - [ ] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
@@ -48,6 +48,7 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | step 0 (no finding: MF-1's cost) | `mmc5.rs:177-186` (`refresh_background_chr_set`), `:41-48` (the field), `:196-199` (`chr_address`) | the MF-1 MR-5-1 tests, unchanged | `Board::ppu_peek` / `ppu_read`: **restored instruction-for-instruction** on the MMC1 arm; `Mmc5::ppu_peek` is 3 instructions *shorter* than at `74ce9bc` | none — behaviour is identical to MF-1 |
 | AMD-061 §2 (mapper 15 mode 1) | `multicart.rs:139-146` (`bank \| 0x07`) | `amd_061_mapper_15_acceptance_vectors` | none: one OR inside `Mapper015::update_banks`, which runs on a register write to a mapper-15 cartridge | the mapper-15 multicarts, and only an image **larger than 128 KiB** running in mode 1 |
 | AMD-061 §4 (mapper 101) | `multicart.rs:619-630` (8-bit field), `:659-672` (the range) | `amd_061_mapper_101_takes_eight_bits_from_6000_7fff` | none: both changes are in `JalecoJ87`, which only mapper 87 and 101 reach, and the range test got *simpler* (one `contains`, no branch on the board) | mapper-101 images with more than 32 KiB of CHR; mapper 87 does not move at all |
+| AMD-061 §3 and §5, MR-28-3 (Q-112) | `multicart.rs:558-570` (`Action53::reset` keeps the five registers) | `amd_061_mapper_28_keeps_its_registers_across_a_reset`, `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | none: `Mapper::reset` runs on a power cycle or a RESET, never per cycle. Five assignments **removed**, nothing added | the Action 53 multicarts, and only across a reset; no other board moves |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -241,3 +242,42 @@ loads and plays identically, except that a mapper-15 state in mode 1 on an image
 
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: 559 passed, 0 failed, 11 ignored.
+
+## Step 2 — AMD-061 §3 and §5, the reset
+
+`Action53::reset` wrote AMD-021 R2-001's power-on values over the five registers. AMD-061 §3
+says the opposite — "l'état de la carte (registres externe, interne, de mode et de sélection)
+est **conservé**" — and §5 makes room for it by amending REQ-CORE-004's "mapper revenu dans son
+état initial" to "…sauf pour une carte dont la documentation publique prescrit que son état
+survit au signal RESET". The source is nesdev's *INES Mapper 028*, "The mapper state is
+unchanged on reset", which is the finding MR-28-3 raised and the ticket Q-112 carried.
+
+The method now only refreshes the windows, which it must: `Cartridge::reset`
+(`cartridges/mod.rs:533`) has just put `memory.mirroring` back to the header's value, and
+`Action53::update_banks` is what re-asserts the mode's own mirroring over it.
+
+**The power-on state does not move.** `Mapper::reset` serves three callers — `Cartridge::create`
+at load, `NesCore::reset` (a power cycle, DEC-02-Q3) and `NesCore::soft_reset` (AMD-044
+REQ-CORE-122) — and R2-001's values are written by `Action53::new`, which runs once per load,
+immediately before the first `reset`. So a freshly loaded mapper-28 cartridge still powers on
+at outer 63 / inner 15 / mode 0, i.e. with the last 16 KiB bank of the image at `$C000-$FFFF`,
+which is the only thing §3 still *requires* of the power-on state. What changes is the second
+and later reset of a running cartridge, which is the fix.
+
+**Every other board is untouched**, which §5 requires in as many words (and it names the MMC1
+as explicitly *not* exempt). `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`
+sweeps `NesCore::SUPPORTED_MAPPERS`, writes seven registers across `$5000-$E000` on each board,
+resets, and asserts the PRG windows, the CHR windows and the mirroring are all back where they
+powered on. Mapper 28 is the single `continue`. The older, narrower
+`req_core_004_a_reset_puts_the_mapper_back_to_its_power_on_banks` (mappers 1, 4, 16, 64, with
+the MMC1 and MMC3 helpers and the IRQ check) is kept as it was.
+
+### Save states
+
+No field added, removed or re-interpreted: `Action53` still saves and loads the same five
+registers in the same order. A state written before this lot loads unchanged.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **561 passed** (the two new ones), 0 failed, 11 ignored.
