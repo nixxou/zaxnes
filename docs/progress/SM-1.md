@@ -12,8 +12,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 1 | The reference and the specs read; the design (pass order, colour space, targets, tables, bind layouts); the test plan | done — `4465826` |
 | 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — `607b1d1b` |
 | 3 | OpenGL: the two tables and the depth edge detection | done — `beb3ac0d` |
-| 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | done — this commit |
-| 5 | `wgpu`: the three passes, the lifecycle, the fallback | todo |
+| 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | done — `0badc10e` |
+| 5 | `wgpu`: the three passes, the lifecycle, the fallback | done — this commit |
 | 6 | The parity measurements and the costs | todo |
 | 7 | Closing: notes, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, release build | todo |
 
@@ -600,8 +600,146 @@ and 2, and `run_smaa` is `#[inline(never)]` so none of its body is in the counte
 - **The byte-identity of levels 0, 1 and 2 against `1a1086c`** is step 6's worktree comparison, as
   RU-7's own was. The instruction counts and the three zeroed counters are what this step has.
 
+### Step 5 — the `wgpu` path, and the bug it found in the OpenGL one
+
+The three passes on the second backend of REQ-SCN-056, their lifecycle and their fallback. **And
+the one finding of this lot so far: putting the same algorithm beside itself with the other `y`
+sign showed that the OpenGL path's two vertical searches did nothing at all.** That is written out
+first, because it is the reason this step matters more than a port usually does.
+
+#### The two vertical searches of the second pass were dead on OpenGL
+
+`zaxSmaaSearchYUp` and `zaxSmaaSearchYDown` walk `± (0, 2) · uRtMetrics.xy` and stop at a bound
+(`offset2.zw`) built the same way, so **both the step and the bound flip with the sign of
+`uRtMetrics.y`** — and the operator between them does not. With the reference's own
+`texcoord.y > end` and `uRtMetrics.y = −1/h`, the bound sits *above* the start and the condition is
+false on the first test: zero iterations, `e` left at its initial value, and the distance `d` the
+minimum. A vertical contour was therefore blended over **one** pixel instead of over the length of
+its run.
+
+The design note of step 1 (point 1) is what missed it: "every place the reference crosses the
+screen in `y` does it as `± offset · SMAA_RT_METRICS.y`, so the whole of its arithmetic runs
+unchanged". True of the arithmetic, false of the **comparisons** — an inequality is not covariant
+under a sign change of its two sides. The fix multiplies the comparison through by the metric:
+
+| | |
+|---|---|
+| reference (`y` downward) | `texcoord.y > end` |
+| both backends now | `(texcoord.y − end) · uRtMetrics.y > 0` |
+
+which is the reference's own inequality where `y` grows downward and the mirrored one where it
+grows up, written identically in the GLSL and in the WGSL so that neither can drift back.
+`zaxSmaaSearchXLeft` / `XRight` need nothing of the kind: `uRtMetrics.x` is positive on both.
+
+**Why nothing caught it before, and what catches it now.** The filter still anti-aliased, still
+passed both acceptance criteria of AMD-060 (more colours at 3 than at 0; the interior of a textured
+face byte-identical), still allocated and released correctly, and still *looked* right — the
+horizontal searches and the whole diagonal half were working. What exposed it was the one
+measurement a second backend makes possible: the two pictures of one scene.
+
+| close-up R, 320 × 240 | gl colours at 3 | wgpu colours at 3 | px gl moves | px wgpu moves | differ | within 2 |
+|---|---|---|---|---|---|---|
+| a cube on a floor, **before** | 68 | 98 | 611 | 682 | 0.3737 % | 99.6458 % |
+| a cube on a floor, **after** | **104** | 98 | **680** | 682 | **0.1003 %** | **99.8997 %** |
+| a face head-on, **before** | 81 | 118 | 568 | 783 | 0.4271 % | 99.6497 % |
+| a face head-on, **after** | **119** | 118 | **783** | 783 | **0.0143 %** | **99.9883 %** |
+
+On the head-on face — whose level-0 captures are **byte-identical** between the backends, so there
+is no rasterisation fringe to hide behind — the two backends now blend **782 of the same 783
+pixels** and the whole frame differs on 11 pixels of 76 800, worst 33 levels. Before the fix they
+differed on 328 pixels by up to 86 levels. The two ports agree because they are now the same
+algorithm.
+
+**The bar this suggests for step 6**, and the one that would have caught this: the level-3
+disagreement has to be of the same *order* as the level-0 control's, not an order worse. "At most
+three times the share the unfiltered pictures differ on, and at most 0.03 % where they are
+identical" passes after the fix (0.1003 % against 3 × 0.0482 %; 0.0143 % against 0.03 %) and fails
+before it on both scenes. The usual share-within-2-levels bar does **not** catch it: 99.6458 % is
+above RU-7's own 99.5 %.
+
+**Three things to draw from it**, since this is the second lot in a row where the finding is a
+coordinate convention:
+
+1. a mirrored axis is safe through multiply-adds and **unsafe through comparisons**. The lot's
+   design said so of texel offsets (`textureLodOffset`) and not of loop bounds;
+2. the GL figures of step 4's table (68 and 81 colours, 611 and 568 pixels moved) were measured
+   with the dead searches and are **superseded** by the row above. Nothing else in step 4 changes:
+   the byte-identity of the levels 0, 1 and 2, the instruction counts, the two acceptance criteria
+   and the fallback all held before the fix and hold after it;
+3. a second implementation is a test the first cannot write. RU-7 said "a device finds what reading
+   cannot"; this is its sequel — *another backend finds what one device cannot*.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `wgpu_backend/shaders/smaa.wgsl` (new) | what the three passes share: the block (two `vec4`), the six bindings, the full-screen triangle and the reads — the depth and the frame colour by `textureLoad`, the edges, the weights and the two tables by `textureSampleLevel` through one filtering sampler |
+| `wgpu_backend/shaders/smaa_edges.wgsl` (new) | `SMAADepthEdgeDetectionPS` with Q-109 §1's threshold, both differences and the `discard` |
+| `wgpu_backend/shaders/smaa_weights.wgsl` (new, 330 lines) | the whole of `SMAABlendingWeightCalculationPS` at the High preset |
+| `wgpu_backend/shaders/smaa_blend.wgsl` (new) | `SMAANeighborhoodBlendingPS` and its early-out |
+| `wgpu_backend/smaa.rs` (new) | the `Smaa` module: one layout, one sampler, **one** block, the two tables, the three pipelines, the three targets, the three bind groups, the resolve group of the filtered colour, `bytes`, `blended`, `filter`, `allocate` and three unit tests |
+| `wgpu_backend/renderer.rs` | `smaa`, `smaa_targets`, `smaa_given_up`, `fail_smaa`; `select_smaa` / `prepare_smaa`; the readable-depth wish; `Buckets` grown by three variants and read through three predicates; `run_smaa` (the three passes **and** the HUD pass that follows them); the resolve group redirection; the two counters |
+| `wgpu_backend/mod.rs` | `smaa_sources()`, for the test that reads what the passes compute |
+| `shaders/smaa_weights.frag` | the fix above, with the measurement in its comment |
+| `tests/amd060_smaa_tests.rs` | five tests: the WGSL carries the reference's arithmetic, the sign-covariant comparison on **both** sources, the `wgpu` lifecycle on each API, both acceptance criteria on each API, the fallback on each API |
+
+#### Three decisions this backend forced, and what each cost
+
+1. **The HUD needs a pass of its own here.** On OpenGL the filter leaves its framebuffer bound with
+   the frame's depth attached and `draw_hud` needs no change at all. `wgpu` has no bound
+   framebuffer, so `run_smaa` opens a pass over the same two attachments (the filtered colour, the
+   frame's own depth, both `Load`) and draws the HUD bucket into it. One render pass more at
+   level 3, not one draw more — and the frame order of Q-109 §2 is the same order on both.
+2. **`Buckets` had to split once more.** It was `All` / `Opaque` / `Blended`, where `Blended` is the
+   transparent objects **and** the HUD. REQ-SCN-085 puts the filter between those two, so the enum
+   grows `Scene` (opaque + transparent, a filtered frame with no screen pass), `Transparent` (the
+   same frame with one) and `Hud`, and `draw_buckets` reads three `const fn` predicates instead of
+   two `!=`. The three old variants select exactly the three old sets, so levels 0, 1 and 2 draw
+   what they drew — which is what the harness goldens and `ru_7_the_classic_frame_agrees_between_
+   the_backends` assert.
+3. **One uniform block, not one per pass.** `screen_effects` needs a slot per pass group because
+   `wgpu` applies every `write_buffer` of a submission before the command buffers run. The three
+   passes of this filter read the *same* two `vec4`, so one block written once a frame is all they
+   need — and the reason to write it down is that the opposite mistake is invisible.
+
+#### What the port could not be the WGSL of the GLSL, line for line
+
+All three are this language's and none changes the arithmetic: no `out` parameters (the two
+diagonal searches return a struct), no swizzle assignment (`c.yxwz = decode(c)` and `weights.rg`
+become explicit components, which is why the two weight pairs are two `vec2` rather than one
+`vec4`), and no `inout` (the corner patterns take the weights and return them multiplied). The one
+thing checked rather than assumed: **a data texture's row 0 sits at `v = 0` under both APIs**, so
+the two tables are read with the reference's own coordinates on both and only *framebuffers* mirror
+between the backends.
+
+#### The fallback on this backend is asked, not caught
+
+`wgpu` reports a refused allocation through the device's error scope rather than by handing back an
+error, so REQ-SCN-086's fallback is put to the adapter once in `new` — does it render into
+`Rg8Unorm` and `Rgba8Unorm`? — exactly as RU-7 put the `R16Float` pyramid of the MSVO fallback
+**(D)**. `fail_smaa` is the test seam that reaches it on a machine that refuses nothing, and the
+diagnostic line is the OpenGL path's own wording, written once.
+
+#### Tests
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean. In release, one crate at a time:
+
+| Crate | Result |
+|---|---|
+| `zax-render --features wgpu` | all suites passed; `amd060_smaa_tests` is 13 tests (5 new) |
+| `zax-harness --features wgpu` | all suites passed, the 26 of `parity_wgpu_tests` and the two golden suites among them |
+
+No Rust outside `wgpu_backend/` changed this step, so `SceneRenderer::render_scene` is step 4's
+3409 instructions unchanged; the only OpenGL change is two loop conditions in a fragment shader.
+
 ### What is left for R0
 
 Nothing yet beyond the libretro decision above and the three questions of **Q-109** (the depth
 threshold, the HUD clause of REQ-SCN-085, and the 2D mode). The closing section of AMD-060 is R0's;
 what R0 needs will be gathered here in step 7.
+
+One thing R0 should know now rather than in step 7: **the figures of step 4's own table are
+superseded by step 5's** (the dead vertical searches), and the cost figures of step 6 are therefore
+measured on the fixed filter. Step 4's instruction counts, byte counts and pass counts are
+unaffected.

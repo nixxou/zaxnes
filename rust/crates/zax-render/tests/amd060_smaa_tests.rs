@@ -179,6 +179,47 @@ fn req_scn_085_the_edge_detection_reads_the_depth_and_mirrors_y() {
     );
 }
 
+/// The one comparison of the second pass that the sign of `uRtMetrics.y` does **not** carry by
+/// itself, in both ports.
+///
+/// The vertical searches walk `± (0, 2) · metrics.xy` and stop at a bound built the same way, so
+/// both flip with the sign — and the operator between them does not. With the reference's own
+/// `texcoord.y > end` and a negative `y`, the condition is false on the first iteration and the
+/// two searches do nothing at all: a vertical contour is then blended over one pixel instead of
+/// over the length of its run. That is what the OpenGL path did until the `wgpu` port of step 5
+/// put the same algorithm beside it with the other sign; the fix multiplies the comparison through
+/// by `uRtMetrics.y`, which is the reference's inequality where `y` grows downward and the
+/// mirrored one where it grows up.
+///
+/// Pinned on both sources, because the symptom is invisible without a second backend to compare
+/// against: the filter still anti-aliases, still passes both acceptance criteria, and still looks
+/// right.
+#[test]
+fn req_scn_085_the_vertical_searches_compare_in_the_sign_of_the_y_metric() {
+    let source = shaders::assemble(&shaders::SMAA_WEIGHTS.fragment, true, false);
+    assert!(
+        source.contains("((texcoord.y - end) * uRtMetrics.y) > 0.0"),
+        "the upward search must compare in the sign of the y metric"
+    );
+    assert!(
+        source.contains("((texcoord.y - end) * uRtMetrics.y) < 0.0"),
+        "and the downward one"
+    );
+    // And never the reference's own two conditions, which are the ones that do nothing here. The
+    // loop, not the word: the file names them in the comment that explains why it does not use
+    // them, which is exactly the thing worth saying twice.
+    assert!(
+        !source.contains("while (texcoord.y > end") && !source.contains("while (texcoord.y < end"),
+        "a bare comparison does not carry the sign of the y metric"
+    );
+    // The horizontal searches keep the reference's own, `uRtMetrics.x` being positive on both
+    // backends — asserted so that the fix is read as the narrow thing it is.
+    assert!(
+        source.contains("while (texcoord.x > end") && source.contains("while (texcoord.x < end"),
+        "the horizontal searches need no sign"
+    );
+}
+
 /// The `y` of `SMAA_RT_METRICS` is **negative** on the OpenGL side. The algorithm is not symmetric
 /// under a mirror of it — `SMAAArea` splits a trapezoid's coverage between the two pixels on either
 /// side of the edge — so this is the assertion that stands between the port and a result displaced
@@ -401,4 +442,308 @@ fn req_scn_086_a_refused_resource_draws_the_frame_without_anti_aliasing() {
     let plain = fixture.render_built(&mut renderer, &built);
     assert_eq!(plain.pixels, refused.pixels, "the refused frame");
     assert_eq!(plain.pixels, again.pixels, "and the frame after it");
+}
+
+// ------------------------------------------------------------------ the `wgpu` backend
+
+/// The APIs to run the `wgpu` half on: Vulkan, and DirectX 12 on Windows.
+#[cfg(feature = "wgpu")]
+fn apis() -> Vec<(&'static str, zax_render::wgpu_backend::headless::GpuApi)> {
+    use zax_render::wgpu_backend::headless::GpuApi;
+
+    if cfg!(windows) {
+        vec![("vulkan", GpuApi::Vulkan), ("dx12", GpuApi::Dx12)]
+    } else {
+        vec![("vulkan", GpuApi::Vulkan)]
+    }
+}
+
+/// AMD-060 §4 on the `wgpu` side: the three passes are **there**, they carry the reference's own
+/// arithmetic, and the two things a text substitution would have got wrong are right.
+///
+/// Read on the source, as the GLSL half is, because none of it is observable from a capture: a
+/// port that sampled the edges with a point sampler, or that used an integer texel offset, would
+/// render a plausible and wrong picture.
+#[cfg(feature = "wgpu")]
+#[test]
+fn req_scn_085_the_wgsl_passes_carry_the_reference_s_arithmetic() {
+    let [shared, edges, weights, blend] = zax_render::wgpu_backend::smaa_sources();
+
+    // The shared chunk: the metrics, the drawn scale, and the two reads of the GLSL twin.
+    for name in [
+        "zax_smaa_depth",
+        "zax_smaa_depth_offset",
+        "zax_smaa_edges",
+        "zax_smaa_edges_offset",
+        "zax_smaa_table_area",
+        "zax_smaa_table_search",
+        "vs_smaa",
+    ] {
+        assert!(shared.contains(name), "the shared chunk misses {name}");
+    }
+    // The searches and `SMAAArea` read the edges and the tables through the **filtered** sampler
+    // (`@PSEUDO_GATHER4`), which is the reference's own `LinearSampler` and the one sampling
+    // choice of this port that a capture would not tell apart from a correct one.
+    assert_eq!(
+        4,
+        shared.matches("textureSampleLevel").count(),
+        "the edges, the two tables and the weights are sampled, not loaded"
+    );
+    // And the depth and the frame's colour are read texel by texel, which is the `PointSampler`
+    // half of the same split and the `NEAREST` of the OpenGL backend.
+    assert_eq!(
+        2,
+        shared.matches("textureLoad(").count(),
+        "the depth and the colour are loaded, not sampled"
+    );
+
+    // The first pass: the depth, the threshold of Q-109 §1, both differences and the reference's
+    // own early-out — and **not** the luma or the colour detector REQ-SCN-085 forbids.
+    for name in [
+        "ZAX_SMAA_DEPTH_RELATIVE",
+        "ZAX_SMAA_DEPTH_FLOOR",
+        "step(threshold, min(delta, curvature))",
+        "discard",
+        "vec2<f32>(-2.0, 0.0)",
+        "vec2<f32>(0.0, -2.0)",
+    ] {
+        assert!(edges.contains(name), "the edge pass misses {name}");
+    }
+    assert!(
+        !common::mentions(edges, "zax_smaa_color"),
+        "the depth detector must not read the frame's colour"
+    );
+
+    // The second: the reference's High preset, its two tables' own metrics, the diagonal search
+    // and the two corner patterns.
+    for name in [
+        "ZAX_SMAA_MAX_SEARCH_STEPS: i32 = 16",
+        "ZAX_SMAA_MAX_SEARCH_STEPS_DIAG: i32 = 8",
+        "ZAX_SMAA_CORNER_ROUNDING_NORM: f32 = 0.25",
+        "ZAX_AREATEX_MAX_DISTANCE: vec2<f32> = vec2<f32>(16.0, 16.0)",
+        "ZAX_AREATEX_MAX_DISTANCE_DIAG: vec2<f32> = vec2<f32>(20.0, 20.0)",
+        "ZAX_AREATEX_SUBTEX_SIZE: f32 = 1.0 / 7.0",
+        "ZAX_SEARCHTEX_SIZE: vec2<f32> = vec2<f32>(66.0, 33.0)",
+        "ZAX_SEARCHTEX_PACKED_SIZE: vec2<f32> = vec2<f32>(64.0, 16.0)",
+        "zax_smaa_search_diag1",
+        "zax_smaa_search_diag2",
+        "zax_smaa_decode_diag2",
+        "zax_smaa_decode_diag4",
+        "zax_smaa_search_x_left",
+        "zax_smaa_search_x_right",
+        "zax_smaa_search_y_up",
+        "zax_smaa_search_y_down",
+        "zax_smaa_search_length",
+        "zax_smaa_horizontal_corner",
+        "zax_smaa_vertical_corner",
+        "255.0 / 127.0",
+        "0.8281",
+        // The one comparison the sign of the metric does not carry by itself, written the same way
+        // in both sources so that neither can drift back to the reference's own — see
+        // `req_scn_085_the_vertical_searches_compare_in_the_sign_of_the_y_metric`.
+        "((texcoord.y - end) * smaa.metrics.y) > 0.0",
+        "((texcoord.y - end) * smaa.metrics.y) < 0.0",
+    ] {
+        assert!(weights.contains(name), "the weight pass misses {name}");
+    }
+
+    // The third: the reference's early-out — which is the second acceptance criterion — and the
+    // two colour taps written out.
+    for name in [
+        "dot(a, vec4<f32>(1.0, 1.0, 1.0, 1.0)) < 1e-5",
+        "zax_smaa_blend_toward",
+        "max(a.x, a.z) > max(a.y, a.w)",
+    ] {
+        assert!(blend.contains(name), "the blend pass misses {name}");
+    }
+
+    // **No integer texel offset anywhere**, which is the trap this port shares with the GLSL one:
+    // WGSL's `textureSampleLevel` takes a constant texel offset as a fifth argument, and that
+    // offset is in the texture's **own** space — it would not pick up the sign of `metrics.y`,
+    // the one number the two backends disagree about. So every sample of this filter is a
+    // four-argument call, all four of them live in the shared chunk, and the three passes reach a
+    // neighbour only through the `*_offset` helpers, which are the multiply-add the reference's
+    // own `SMAA_HLSL_3` path uses.
+    for (label, source) in [("edge", edges), ("weight", weights), ("blend", blend)] {
+        assert!(
+            !source.contains("textureSampleLevel") && !source.contains("textureLoad"),
+            "the {label} pass must read through the shared chunk's helpers"
+        );
+    }
+    assert_eq!(
+        4,
+        shared.matches(", 0.0)").count(),
+        "every sample is a four-argument call, so no texel offset can be passed"
+    );
+    assert!(
+        shared.contains("texels * smaa.metrics.xy"),
+        "the offsets are the multiply-add of the reference's own SMAA_HLSL_3 path"
+    );
+}
+
+/// REQ-SCN-086 on the `wgpu` backend, both clauses and both directions: nothing of the filter
+/// exists at levels 0, 1 and 2; the first frame at 3 builds the three pipelines and the three
+/// targets; leaving 3 releases them, without a restart.
+///
+/// The same measurement the OpenGL half makes, on the same counters, so that a reader can compare
+/// the two columns — and the three targets cost the same 14 bytes a pixel on both.
+#[cfg(feature = "wgpu")]
+#[test]
+fn req_scn_086_the_wgpu_filter_appears_at_3_and_is_released() {
+    for (name, api) in apis() {
+        let Some(mut fixture) = common::WgpuFixture::create(api, 96, 64) else {
+            return;
+        };
+        let mut built = stepped();
+
+        for level in [0, 1, 2] {
+            built.scene.settings.set_anti_alias(level);
+            fixture.render_built(&built);
+            let statistics = fixture.statistics();
+            assert_eq!(0, statistics.smaa_passes, "{name}: level {level} submitted");
+            assert_eq!(0, statistics.smaa_bytes, "{name}: level {level} allocated");
+            assert_eq!(0, statistics.smaa_programs, "{name}: level {level} built");
+        }
+
+        // Twice over, so that a round trip that leaked would show as an allocation that never
+        // goes back to zero.
+        for _ in 0..2 {
+            built.scene.settings.set_anti_alias(3);
+            fixture.render_built(&built);
+            let statistics = fixture.statistics();
+            assert_eq!(3, statistics.smaa_passes, "{name}");
+            assert_eq!(96 * 64 * (2 + 4 + 8), statistics.smaa_bytes, "{name}");
+            assert_eq!(3, statistics.smaa_programs, "{name}");
+            // REQ-SCN-085's first clause: "la scène DOIT être rendue sans multi-échantillonnage".
+            assert_eq!(1, statistics.anti_alias_samples, "{name}: no multisampling");
+
+            built.scene.settings.set_anti_alias(1);
+            fixture.render_built(&built);
+            let statistics = fixture.statistics();
+            assert_eq!(0, statistics.smaa_bytes, "{name}: released");
+            assert_eq!(0, statistics.smaa_programs, "{name}: released");
+            assert_eq!(4, statistics.anti_alias_samples, "{name}: MSAA 4x again");
+        }
+    }
+}
+
+/// AMD-060 REQ-SCN-085's two acceptance criteria on the `wgpu` backend, read the way the OpenGL
+/// half reads them: strictly more distinct colours at 3 than at 0 on a frame with hard geometric
+/// edges, and the interior of a single textured face identical **to the byte**.
+///
+/// One test and two scenes, because a device of this backend costs seconds to open and the two
+/// criteria are two captures of two fixtures through the same one.
+#[cfg(feature = "wgpu")]
+#[test]
+fn req_scn_085_the_wgpu_filter_meets_both_acceptance_criteria() {
+    for (name, api) in apis() {
+        let Some(mut fixture) = common::WgpuFixture::create(api, 320, 240) else {
+            return;
+        };
+
+        // 1. More colours on a geometric edge, with MSAA 4x beside it for scale.
+        let mut built = stepped();
+        built.scene.settings.set_anti_alias(0);
+        let plain = fixture.render_built(&built).distinct_colors();
+        built.scene.settings.set_anti_alias(1);
+        let msaa = fixture.render_built(&built).distinct_colors();
+        built.scene.settings.set_anti_alias(3);
+        let smaa = fixture.render_built(&built).distinct_colors();
+        println!(
+            "{name}: a cube on a floor has {} colours at 0, {} at 1, {} at 3",
+            plain.len(),
+            msaa.len(),
+            smaa.len()
+        );
+        assert!(smaa.len() > plain.len(), "{name}: 3 adds no gradation");
+        assert!(
+            smaa.len() >= msaa.len(),
+            "{name}: 3 is coarser than MSAA 4x"
+        );
+        assert!(
+            plain.iter().all(|color| smaa.contains(color)),
+            "{name}: a colour of the unfiltered frame is gone"
+        );
+
+        // 2. And the interior of a face textured one texel at a time does not move.
+        let mut face = striped_face();
+        face.scene.settings.set_anti_alias(0);
+        let unfiltered = fixture.render_built(&face);
+        face.scene.settings.set_anti_alias(3);
+        let filtered = fixture.render_built(&face);
+
+        let background = unfiltered.packed(0, 0);
+        let (first_row, last_row) = unfiltered.row_span(background);
+        let (first_column, last_column) = unfiltered.column_span(background);
+        assert!(
+            last_row - first_row > 16 && last_column - first_column > 16,
+            "{name}: the face is {first_column}..{last_column} x {first_row}..{last_row}"
+        );
+        assert!(
+            unfiltered.distinct_colors().len() >= 3,
+            "{name}: the face carries no contrast"
+        );
+        let mut compared = 0;
+        for y in (first_row + 3)..=(last_row - 3) {
+            for x in (first_column + 3)..=(last_column - 3) {
+                compared += 1;
+                assert_eq!(
+                    unfiltered.at(x, y),
+                    filtered.at(x, y),
+                    "{name}: the filter touched the interior at ({x}, {y})"
+                );
+            }
+        }
+        assert!(
+            compared > 1000,
+            "{name}: only {compared} interior pixels compared"
+        );
+    }
+}
+
+/// REQ-SCN-086's fallback on the `wgpu` backend: a refused resource draws the frame **without
+/// anti-aliasing**, with one diagnostic line, and is never retried.
+///
+/// Reached through `WgpuSceneRenderer::fail_smaa`, the twin of the OpenGL seam and of
+/// `refuse_msvo`: no desktop adapter refuses `Rg8Unorm` as a colour attachment, and an unreachable
+/// fallback is an untested one.
+#[cfg(feature = "wgpu")]
+#[test]
+fn req_scn_086_a_refused_resource_draws_the_wgpu_frame_without_anti_aliasing() {
+    for (name, api) in apis() {
+        let Some(mut fixture) = common::WgpuFixture::create(api, 64, 48) else {
+            return;
+        };
+        let mut built = stepped();
+        built.scene.settings.set_anti_alias(3);
+
+        fixture.renderer().fail_smaa(true);
+        let refused = fixture.render_built(&built);
+
+        assert!(fixture.renderer().smaa_given_up(), "{name}");
+        assert_eq!(0, fixture.statistics().smaa_passes, "{name}: no pass");
+        assert_eq!(0, fixture.statistics().smaa_bytes, "{name}: no target");
+        assert_eq!(
+            1,
+            fixture.statistics().anti_alias_samples,
+            "{name}: no MSAA"
+        );
+
+        let lines = fixture.renderer().take_diagnostics();
+        assert_eq!(1, lines.len(), "{name}: {lines:?}");
+        assert!(lines[0].contains("SMAA"), "{name}: {:?}", lines[0]);
+        assert!(lines[0].contains("REQ-SCN-086"), "{name}: {:?}", lines[0]);
+
+        let again = fixture.render_built(&built);
+        assert!(
+            fixture.renderer().take_diagnostics().is_empty(),
+            "{name}: said twice"
+        );
+
+        // And the picture is the one level 0 draws.
+        built.scene.settings.set_anti_alias(0);
+        let plain = fixture.render_built(&built);
+        assert_eq!(plain.pixels, refused.pixels, "{name}: the refused frame");
+        assert_eq!(plain.pixels, again.pixels, "{name}: and the one after it");
+    }
 }

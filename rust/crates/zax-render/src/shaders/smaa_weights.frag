@@ -212,10 +212,26 @@ float zaxSmaaSearchXRight(vec2 texcoord, float end)
 // "Up" and "down" are **screen** directions, and they come out right because `uRtMetrics.y` is
 // negative: the reference's `texcoord − (0, 2) · metrics.xy` is `+2/h` here, which in an OpenGL
 // texture is up on screen. The `end` bounds the caller passes carry the same sign.
+//
+// **And so must the comparison against them, which is the one place a sign does not carry
+// itself.** The walk and the bound both flip with `uRtMetrics.y`; the operator `>` does not, so
+// the reference's own `texcoord.y > end` is the condition of a *downward* y and tests false on the
+// first iteration here — the two searches then did nothing at all, and a vertical contour was
+// blended over one pixel instead of over the length of its run. It is what the `wgpu` port of
+// step 5 found, by being the same algorithm with the other sign: there the reference's condition
+// is right, and the pictures of the two backends differed on 0,43 % of the pixels by up to 86
+// levels. So the comparison is written multiplied through by `uRtMetrics.y`:
+//
+//     reference (y downward):  texcoord.y > end
+//     here, either sign:       (texcoord.y − end) · uRtMetrics.y > 0
+//
+// which is the same inequality where `y` grows downward and the mirrored one where it grows up.
+// `zaxSmaaSearchXLeft` and `XRight` need nothing of the kind: `uRtMetrics.x` is positive on both
+// backends.
 float zaxSmaaSearchYUp(vec2 texcoord, float end)
 {
     vec2 e = vec2(1.0, 0.0);
-    while (texcoord.y > end && e.r > 0.8281 && e.g == 0.0)
+    while (((texcoord.y - end) * uRtMetrics.y) > 0.0 && e.r > 0.8281 && e.g == 0.0)
     {
         e = zaxSmaaFetch(uEdges, texcoord).rg;
         texcoord = (-vec2(0.0, 2.0) * uRtMetrics.xy) + texcoord;
@@ -227,7 +243,7 @@ float zaxSmaaSearchYUp(vec2 texcoord, float end)
 float zaxSmaaSearchYDown(vec2 texcoord, float end)
 {
     vec2 e = vec2(1.0, 0.0);
-    while (texcoord.y < end && e.r > 0.8281 && e.g == 0.0)
+    while (((texcoord.y - end) * uRtMetrics.y) < 0.0 && e.r > 0.8281 && e.g == 0.0)
     {
         e = zaxSmaaFetch(uEdges, texcoord).rg;
         texcoord = (vec2(0.0, 2.0) * uRtMetrics.xy) + texcoord;

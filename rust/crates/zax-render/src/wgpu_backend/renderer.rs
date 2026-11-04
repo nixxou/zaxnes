@@ -28,6 +28,7 @@ use zax_engine3d::vectors::{Mat4, Vec3};
 use super::preprocess;
 use super::resources::{self, MeshHandle, MeshStore, TextureHandle, TextureStore, VERTEX_STRIDE};
 use super::screen_effects::{ScreenEffects, ScreenFrame};
+use super::smaa::{Smaa, SmaaFrame};
 use crate::camera::CameraView;
 use crate::color;
 use crate::frame_plan::{
@@ -420,6 +421,10 @@ impl Batching {
 /// The wgpu renderer of SPEC-06. The skies are the procedural ones of AMD-024 REQ-PUB-003: the
 /// cubemaps of a user asset folder are a GL-only option.
 #[derive(Debug)]
+// Independent facts about this renderer, one flag each: what the adapter answered about two
+// formats, whether each of the two declared fallbacks has been taken, and the two switches a test
+// or the host sets. The OpenGL twin carries the same set for the same reason.
+#[allow(clippy::struct_excessive_bools)]
 pub struct WgpuSceneRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -497,6 +502,19 @@ pub struct WgpuSceneRenderer {
     multi_scale: bool,
     /// Whether that line has been written. One per renderer, as `RenderDiagnostics` bounds its own.
     msvo_reported: bool,
+    /// AMD-060 REQ-SCN-085: the three passes of the depth-detecting SMAA, held only while
+    /// `video.anti_alias` is 3 — the twin of `SceneRenderer::smaa`, and `None` at every other
+    /// level, where the whole cost of the mode is the `is_none` test that decides not to run it.
+    smaa: Option<Smaa>,
+    /// Whether this adapter renders into the edge target of REQ-SCN-085, asked once in
+    /// [`Self::new`]. False gives the mode up for the session, with the one diagnostic line of
+    /// REQ-SCN-086's fallback.
+    smaa_targets: bool,
+    /// Whether the filter has been given up on, so that level 3 draws without anti-aliasing from
+    /// now on and the line is written once (REQ-SCN-086).
+    smaa_given_up: bool,
+    /// The test seam of [`Self::fail_smaa`]: no production path sets it.
+    fail_smaa: bool,
     /// AMD-049 REQ-SCN-075: the variant the backdrop run draws with this frame, chosen once by
     /// [`Self::select_bend_variant`]. **The frame's own variant** when `render.backdrop_lighting`
     /// is off or the profile has no backdrop, which is what makes the setting cost one comparison
@@ -581,6 +599,21 @@ impl WgpuSceneRenderer {
             .get_texture_format_features(super::msvo::PYRAMID_FORMAT)
             .allowed_usages
             .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
+        // AMD-060 REQ-SCN-086's fallback, asked the same way and for the same reason: the two
+        // small targets of the filter are the only formats it needs that nothing else here
+        // renders into (`Rgba16Float` is the linear buffer's own), so the adapter is asked once
+        // whether it renders into them rather than catching a refusal where they are made.
+        let smaa_targets = [
+            wgpu::TextureFormat::Rg8Unorm,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ]
+        .into_iter()
+        .all(|format| {
+            adapter
+                .get_texture_format_features(format)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        });
         let layouts = Layouts::new(&device);
 
         let module =
@@ -710,6 +743,10 @@ impl WgpuSceneRenderer {
             backdrop_variant: ShaderVariant::PLAIN,
             multi_scale,
             msvo_reported: false,
+            smaa: None,
+            smaa_targets,
+            smaa_given_up: false,
+            fail_smaa: false,
             style_modules: 0,
             frame_group,
             draw_group: scene_draw_group,
@@ -893,6 +930,79 @@ impl WgpuSceneRenderer {
         }
     }
 
+    /// Builds or releases the three passes of AMD-060 REQ-SCN-085 for this frame, once a frame:
+    /// the twin of `SceneRenderer::select_smaa`.
+    ///
+    /// REQ-SCN-086's two clauses in two lines — nothing of the filter exists at the other three
+    /// levels, and the first frame at 3 builds everything. **In 2D mode too**, unlike the screen
+    /// passes of AMD-055: the flat rectangle carries no interior depth discontinuity, so the
+    /// detector finds nothing in it and the picture is unchanged to the byte, while a bent one has
+    /// a curved silhouette that is a geometric edge like any other (Q-109 §3, and the OpenGL path
+    /// makes the same reading in the same place).
+    ///
+    /// At levels 0, 1 and 2 this is one integer comparison and one assignment of `None` to an
+    /// `Option` that is already `None`.
+    fn select_smaa(&mut self, scene: &SceneState) {
+        if !geometry::smaa_depth(scene.settings.anti_alias()) {
+            self.smaa = None;
+            return;
+        }
+        self.prepare_smaa();
+    }
+
+    /// Builds what the filter needs, or gives the mode up. Out of line because none of it belongs
+    /// in the instruction cache of a frame at any other level.
+    #[inline(never)]
+    fn prepare_smaa(&mut self) {
+        if self.smaa_given_up {
+            return;
+        }
+        // REQ-SCN-086's fallback: a refused resource draws the frame **without anti-aliasing**,
+        // with one diagnostic line, and is never retried. On this backend the refusal is what the
+        // adapter said about the two target formats in [`Self::new`] — or what a test asked for,
+        // the same seam the OpenGL path carries and for the reason RU-5 and RU-7 both gave: no
+        // desktop adapter refuses `Rg8Unorm`, and an unreachable fallback is an untested one.
+        let refusal = if self.fail_smaa {
+            Some("refused on request of a test".to_owned())
+        } else if self.smaa_targets {
+            None
+        } else {
+            Some(format!(
+                "this adapter does not render into {:?}",
+                wgpu::TextureFormat::Rg8Unorm
+            ))
+        };
+        if let Some(reason) = refusal {
+            self.smaa = None;
+            self.smaa_given_up = true;
+            // The wording of `RenderDiagnostics::smaa_unavailable`, which is the OpenGL path's
+            // line: one channel, one sentence, one requirement named.
+            self.diagnostics.push(format!(
+                "the SMAA filter could not be prepared ({reason}); the scene is drawn without \
+                 anti-aliasing (AMD-060 REQ-SCN-086)"
+            ));
+            return;
+        }
+        if self.smaa.is_none() {
+            self.smaa = Some(Smaa::new(&self.device, &self.queue));
+        }
+    }
+
+    /// Makes this renderer refuse the filter of AMD-060 REQ-SCN-085, so that REQ-SCN-086's
+    /// fallback can be observed on a machine whose adapter refuses nothing.
+    ///
+    /// Only a test calls this, as on the OpenGL side; the production path sets the same flag from
+    /// what the adapter said about the two target formats in [`Self::new`].
+    pub const fn fail_smaa(&mut self, fail: bool) {
+        self.fail_smaa = fail;
+    }
+
+    /// Whether the filter has been given up on, so that level 3 renders without anti-aliasing.
+    #[must_use]
+    pub const fn smaa_given_up(&self) -> bool {
+        self.smaa_given_up
+    }
+
     /// Makes this renderer refuse the multi-scale estimator of REQ-SCN-083's *Mode MSVO*, so that
     /// the fallback **(D)** onto the Depth occlusion can be observed on a machine whose adapter
     /// refuses nothing. `false` when the frame has no screen effects to refuse it on.
@@ -1021,6 +1131,8 @@ impl WgpuSceneRenderer {
         // AMD-055 REQ-SCN-080: and the same once a frame for the screen-space passes, in the
         // place `SceneRenderer::render` makes the same call.
         self.select_screen_effects(scene);
+        // AMD-060 REQ-SCN-085: and for the three passes of the depth-detecting SMAA, likewise.
+        self.select_smaa(scene);
 
         self.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -1328,7 +1440,15 @@ impl WgpuSceneRenderer {
             .screen_effects
             .as_ref()
             .is_some_and(ScreenEffects::active);
-        self.ensure_linear(target.width, target.height, wanted, effects);
+        // AMD-060 REQ-SCN-085 asks the frame's depth of the filter's first pass, which is the
+        // same readable allocation — so a frame at level 3 wants it for the same reason and at no
+        // extra cost. At the other three levels this is one `is_none` on a field that is `None`.
+        self.ensure_linear(
+            target.width,
+            target.height,
+            wanted,
+            effects || self.smaa.is_some(),
+        );
         #[allow(clippy::cast_possible_wrap)] // 1 to 8.
         {
             self.statistics.anti_alias_samples = wanted as i32;
@@ -1360,6 +1480,10 @@ impl WgpuSceneRenderer {
         self.statistics.skybox_pass = sky;
 
         let drawing = !self.plan.lists.nothing_to_draw();
+        // AMD-060 REQ-SCN-085: whether the three passes run on this frame. The filter needs a
+        // drawn frame to filter, as the screen passes do, and the HUD it must precede is drawn
+        // from the same lists.
+        let filtering = drawing && self.smaa.is_some();
         let batched = drawing && self.prepare_texture_arrays();
         // AMD-055 REQ-SCN-084: which instances are floors, and the runs the mask pass redraws.
         // Only on a frame whose Enhanced style asks for the reflections — in Classic this is one
@@ -1459,10 +1583,15 @@ impl WgpuSceneRenderer {
                 // the tiles, the backdrop and the 2D-mode rectangle occlude, are darkened and are
                 // reflected, and the transparent objects and the HUD are not. Without one, this is
                 // the whole frame and the second pass below is never opened.
-                let which = if effects {
-                    Buckets::Opaque
-                } else {
-                    Buckets::All
+                //
+                // REQ-SCN-085 splits it once more: the filter runs after the transparent objects
+                // and **before the HUD** (`run_smaa` carries the four reasons), so a filtered
+                // frame without a screen pass stops after the transparent bucket here and the HUD
+                // is drawn into the filter's own target.
+                let which = match (effects, filtering) {
+                    (true, _) => Buckets::Opaque,
+                    (false, true) => Buckets::Scene,
+                    (false, false) => Buckets::All,
                 };
                 draw_buckets(&mut pass, &buckets, &mut self.statistics, which);
             }
@@ -1518,8 +1647,36 @@ impl WgpuSceneRenderer {
                     ..buckets
                 },
                 &mut self.statistics,
-                Buckets::Blended,
+                // REQ-SCN-085: with the filter on, the HUD is not drawn here but after the three
+                // passes, into their own target.
+                if filtering {
+                    Buckets::Transparent
+                } else {
+                    Buckets::Blended
+                },
             );
+        }
+
+        // 3a. The three passes of AMD-060 REQ-SCN-085, and the HUD of REQ-SCN-044 after them.
+        let mut filtered = false;
+        if filtering {
+            let single = linear.depth_single.as_ref();
+            if let (Some(depth), Some(smaa)) = (single, &mut self.smaa) {
+                filtered = run_smaa(
+                    smaa,
+                    (&self.device, &self.queue),
+                    encoder,
+                    SmaaFrame {
+                        depth,
+                        color: &linear.resolved,
+                        size: (linear.width, linear.height),
+                        generation: self.linear_generation,
+                    },
+                    &self.layouts.resolve,
+                    &buckets,
+                    &mut self.statistics,
+                );
+            }
         }
 
         let effects_pipelines = self
@@ -1535,8 +1692,20 @@ impl WgpuSceneRenderer {
                 .map_or(0, ScreenEffects::multi_scale_levels),
         );
         self.statistics.centroid_interpolation = variant.centroid;
+        // AMD-060 REQ-SCN-086: 0 at every level but 3, where they are the filter's three
+        // pipelines and the 14 bytes a pixel of its three targets. The twin of what
+        // `SceneRenderer::render` writes, so a capture compares across the two backends.
+        let smaa = self.smaa.as_ref();
+        self.statistics.smaa_bytes = smaa.map_or(0, Smaa::bytes);
+        self.statistics.smaa_programs = smaa.map_or(0, |_| Smaa::PROGRAMS);
 
-        // AMD-021 R2-009: the whole image is encoded to sRGB once, into the target.
+        // AMD-021 R2-009: the whole image is encoded to sRGB once, into the target — reading the
+        // filter's own target when the three passes ran, which is this backend's spelling of the
+        // OpenGL path's `redirect_color`. One `Option` test at every other level.
+        let resolve_group = match smaa.and_then(Smaa::blended) {
+            Some((_, group)) if filtered => group,
+            _ => &linear.resolve_group,
+        };
         let mut resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("zax resolve"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1554,7 +1723,7 @@ impl WgpuSceneRenderer {
             multiview_mask: None,
         });
         resolve.set_pipeline(&self.resolve_pipeline);
-        resolve.set_bind_group(0, &linear.resolve_group, &[]);
+        resolve.set_bind_group(0, resolve_group, &[]);
         resolve.draw(0..3, 0..1);
     }
 
@@ -1944,13 +2113,44 @@ fn texture_slot(item: &WgpuDrawItem) -> i32 {
 /// AMD-055 REQ-SCN-080 cuts it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Buckets {
-    /// All three, in their order: the one pass of a frame with no screen-space effect, which is
-    /// every Classic frame and every handheld frame.
+    /// All three, in their order: the one pass of a frame with no screen-space effect and no
+    /// filter, which is every Classic frame and every handheld frame.
     All,
     /// The opaque objects alone — everything REQ-SCN-080 has the screen passes work on.
     Opaque,
     /// The transparent objects and the HUD, which REQ-SCN-080 puts after the screen passes.
     Blended,
+    /// The opaque objects **and** the transparent ones, the pass of a frame filtered by the SMAA
+    /// of AMD-060 REQ-SCN-085 with no screen pass before it: both are scene geometry with
+    /// silhouettes the filter smooths, and only the HUD follows it.
+    Scene,
+    /// The transparent objects alone: the same frame *with* a screen pass, which has already drawn
+    /// the opaque bucket.
+    Transparent,
+    /// The HUD alone (REQ-SCN-044), drawn into the filter's own target after the three passes —
+    /// the half of REQ-SCN-085's "les éléments 2D […] NE DOIVENT PAS être traités" that the order
+    /// of the frame carries (Q-109 §2).
+    Hud,
+}
+
+impl Buckets {
+    /// Whether the opaque objects of REQ-SCN-058 are drawn.
+    const fn opaque(self) -> bool {
+        matches!(self, Self::All | Self::Opaque | Self::Scene)
+    }
+
+    /// Whether the transparent objects of REQ-SCN-040 are.
+    const fn transparent(self) -> bool {
+        matches!(
+            self,
+            Self::All | Self::Blended | Self::Scene | Self::Transparent
+        )
+    }
+
+    /// Whether the HUD of REQ-SCN-044 is.
+    const fn hud(self) -> bool {
+        matches!(self, Self::All | Self::Blended | Self::Hud)
+    }
 }
 
 /// What [`draw_buckets`] needs of the renderer: field borrows rather than `&self`, because the
@@ -2040,13 +2240,13 @@ fn draw_buckets(
     // The indirect arguments follow the run lists: opaque, transparent, then HUD.
     let transparent_base = lists.opaque_runs.len();
     let hud_base = transparent_base + lists.transparent_runs.len();
-    if which != Buckets::Blended {
+    if which.opaque() {
         // 1. Opaque objects.
         for (entry, run) in lists.opaque_runs.iter().enumerate() {
             draw.run(&lists.opaque, run, entry, SceneMode::Opaque);
         }
     }
-    if which != Buckets::Opaque {
+    if which.transparent() {
         // 2. Transparent objects, farthest first, depth first then colour (REQ-SCN-040).
         for group in &lists.transparent_objects {
             draw.blended(
@@ -2056,6 +2256,8 @@ fn draw_buckets(
                 transparent_base,
             );
         }
+    }
+    if which.hud() {
         // 3. HUD (REQ-SCN-044), which never bends (REQ-SCN-068).
         draw.variant = hud_variant(scene.variant);
         draw.backdrop = draw.variant;
@@ -2066,16 +2268,18 @@ fn draw_buckets(
     draw.flush();
 
     let statistics = &mut *draw.statistics;
-    if which != Buckets::Blended {
+    if which.opaque() {
         statistics.opaque_tiles = count(lists.opaque.len());
     }
-    if which != Buckets::Opaque {
+    if which.transparent() {
         statistics.transparent_tiles = count(lists.transparent.len());
         statistics.transparent_objects = if lists.transparent.is_empty() {
             0
         } else {
             count(lists.transparent_objects.len())
         };
+    }
+    if which.hud() {
         statistics.hud_tiles = count(lists.hud.len());
     }
 }
@@ -2257,6 +2461,88 @@ fn run_screen_effects(
         submitted += effects.composite_occlusion(device, encoder, frame, &linear.resolved);
     }
     statistics.screen_effect_passes = submitted;
+}
+
+/// Runs the three passes of the depth-detecting SMAA of AMD-060 REQ-SCN-085 over the frame drawn
+/// so far, then draws the HUD of REQ-SCN-044 into the filter's own target; `true` when the frame
+/// carries on in that target, so that the sRGB encode reads it instead of the frame's own colour.
+///
+/// **Where it sits in the frame, and why** — REQ-SCN-085 leaves the order to the implementation
+/// and asks that it be documented. It is the OpenGL path's order, for the OpenGL path's four
+/// reasons (`crate::renderer::run_smaa` carries them in full):
+///
+/// 1. **after the opaque objects and after the screen passes of AMD-055 REQ-SCN-080** — the
+///    occlusion multiplies the colour in place and the reflections blend into it, and either laid
+///    on top of an already-blended edge would undo the blend;
+/// 2. **after the transparent objects of REQ-SCN-040** — they are scene geometry with silhouettes
+///    of their own, which levels 1 and 2 multisample and which nothing in AMD-060 excludes;
+/// 3. **before the HUD** — REQ-SCN-085 excludes the 2D elements, and this renderer's HUD is a
+///    plane of *extruded* tile boxes, so a depth detector run after it would find contours inside
+///    the status bar and blend its pixel art (Q-109 §2);
+/// 4. **before the sRGB encode, on linear colour** — the weights are coverage fractions, and a
+///    coverage-weighted average of two surfaces is an average of radiance.
+///
+/// The HUD pass is this backend's spelling of what the OpenGL path gets for nothing: there, the
+/// filter leaves its own framebuffer bound with the frame's depth attached and `draw_hud` needs no
+/// change at all. Here a pass is opened over the same two attachments, which is one render pass
+/// more and not one draw more.
+///
+/// **`#[inline(never)]` for the reason [`run_screen_effects`] carries it**: none of this runs at
+/// the other three levels, and a hot once-a-frame function should not carry the body through its
+/// instruction cache to prove it.
+#[inline(never)]
+fn run_smaa(
+    smaa: &mut Smaa,
+    (device, queue): (&wgpu::Device, &wgpu::Queue),
+    encoder: &mut wgpu::CommandEncoder,
+    frame: SmaaFrame<'_>,
+    resolve_layout: &wgpu::BindGroupLayout,
+    buckets: &BucketScene<'_>,
+    statistics: &mut RenderStatistics,
+) -> bool {
+    statistics.smaa_passes = smaa.filter(device, queue, encoder, frame, resolve_layout);
+    let Some((blended, _)) = smaa.blended() else {
+        return false;
+    };
+
+    // 4. The HUD, into the filtered colour, with the frame's **own** depth attached: the same
+    // program, the same depth test and the same blend as any other frame's HUD pass.
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("zax scene hud"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: blended,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: frame.depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    draw_buckets(
+        &mut pass,
+        &BucketScene {
+            // REQ-SCN-085 renders the scene without multisampling, so this is already the frame's
+            // own sample count; stated rather than assumed, as the blended pass of REQ-SCN-080
+            // states it.
+            samples: 1,
+            ..*buckets
+        },
+        statistics,
+        Buckets::Hud,
+    );
+    true
 }
 
 /// Issues the draws of the scene buckets: one draw call per run, or, with indirect arguments,
