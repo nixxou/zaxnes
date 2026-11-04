@@ -600,6 +600,7 @@ impl Apu2A03 {
         self.pulse2.length.set_enabled(false);
         self.triangle.length.set_enabled(false);
         self.noise.length.set_enabled(false);
+        // A disable queues no load, so the returned delay is always 0.
         self.dmc.set_enabled(false, self.apu_cycle);
 
         self.triangle.reset_phase();
@@ -921,7 +922,12 @@ impl Apu2A03 {
     }
 
     /// Writes an APU register, `address` in $4000-$4017.
-    pub fn write(&mut self, address: u16, value: u8) {
+    ///
+    /// Returns the DMC **load** fetch's start delay in CPU cycles, 0 for every write but a
+    /// `$4015` that starts a sample: the delay belongs to the bus, which owns the DMA cycles and
+    /// can hold it as one absolute cycle instead of a counter the per-cycle APU code would have
+    /// to look at (see [`DmcChannel::set_enabled`]).
+    pub fn write(&mut self, address: u16, value: u8) -> u32 {
         self.level_dirty = true;
         match address {
             0x4000..=0x4003 => self.pulse1.write(address - 0x4000, value, self.cycles),
@@ -934,11 +940,12 @@ impl Apu2A03 {
                 self.pulse2.length.set_enabled((value & 0x02) != 0);
                 self.triangle.length.set_enabled((value & 0x04) != 0);
                 self.noise.length.set_enabled((value & 0x08) != 0);
-                self.dmc.set_enabled((value & 0x10) != 0, self.apu_cycle);
+                return self.dmc.set_enabled((value & 0x10) != 0, self.apu_cycle);
             }
             0x4017 => self.write_frame_counter(value),
             _ => {}
         }
+        0
     }
 
     fn write_frame_counter(&mut self, value: u8) {

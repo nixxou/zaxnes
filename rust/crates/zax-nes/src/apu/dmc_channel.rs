@@ -37,9 +37,6 @@ pub(crate) struct DmcChannel {
     output: i32,
     /// Whether the channel is pulling /IRQ low (bit 7 of $4015).
     irq_flag: bool,
-    /// CPU cycles left before a sample started by a `$4015` write may ask for its first byte,
-    /// two or three depending on the parity of the write's cycle (see [`Self::set_enabled`]).
-    start_delay: i32,
 }
 
 impl Default for DmcChannel {
@@ -62,7 +59,6 @@ impl Default for DmcChannel {
             silence: true,
             output: 0,
             irq_flag: false,
-            start_delay: 0,
         }
     }
 }
@@ -83,11 +79,15 @@ impl DmcChannel {
         self.bytes_remaining > 0
     }
 
-    /// Whether the memory reader wants a byte: the sample buffer is empty, bytes remain, and a
-    /// sample just started by a `$4015` write has served its start delay (see
-    /// [`Self::set_enabled`]).
+    /// Whether the memory reader wants a byte: the sample buffer is empty and bytes remain.
+    ///
+    /// The **load** fetch's start delay is deliberately *not* asked about here. It is an absolute
+    /// cycle held by the bus ([`Self::set_enabled`] returns it, `NesBus::after_apu_write` stores
+    /// it), because this question is asked once per CPU cycle on every game and a third test on
+    /// it cost 10 instructions a cycle through [`Self::quiet_clocks`] and [`Self::clock_timer`]
+    /// (lot MF-4a-bis step 1).
     pub const fn needs_sample_fetch(&self) -> bool {
-        self.buffer_empty && self.bytes_remaining > 0 && self.start_delay == 0
+        self.buffer_empty && self.bytes_remaining > 0
     }
 
     /// Address the next DMA fetch reads.
@@ -127,61 +127,59 @@ impl DmcChannel {
     /// playing, stops it when it is clear. A $4015 write always clears the DMC IRQ flag
     /// (nesdev).
     ///
-    /// The **load** fetch a start asks for is not asked for on the write's own cycle: it waits
-    /// two cycles when the write lands on an even CPU cycle and three when it lands on an odd
-    /// one, which is what makes a load DMA "typically take 3 cycles" against a reload's four
-    /// (nesdev, "DMA"). `apu_cycle` is this core's name for that parity — it is the same bit the
-    /// `$4017` write delay reads (`apu_reset/4017_timing`). Mesen 2 does the same, from
-    /// `AccuracyCoin`'s "Delta Modulation Channel" page; without it blargg's `sync_dmc` locks onto
-    /// a phase three cycles away from the hardware's and `sprdma_and_dmc_dma` measures the DMC
-    /// fetch in the wrong place.
+    /// Returns the **load** fetch's start delay in CPU cycles, 0 when the write queued no load.
+    /// The fetch a start asks for is not asked for on the write's own cycle: it waits two cycles
+    /// when the write lands on an even CPU cycle and three when it lands on an odd one, which is
+    /// what makes a load DMA "typically take 3 cycles" against a reload's four (nesdev, "DMA").
+    /// `apu_cycle` is this core's name for that parity — it is the same bit the `$4017` write
+    /// delay reads (`apu_reset/4017_timing`). Mesen 2 does the same, from `AccuracyCoin`'s
+    /// "Delta Modulation Channel" page; without it blargg's `sync_dmc` locks onto a phase three
+    /// cycles away from the hardware's and `sprdma_and_dmc_dma` measures the DMC fetch in the
+    /// wrong place.
+    ///
+    /// The delay is **returned** instead of being counted down here. The channel is clocked once
+    /// per CPU cycle of every game, and a counter in it had to be tested in
+    /// [`Self::clock_timer`], [`Self::quiet_clocks`] and [`Self::skip_quiet_clocks`] — about 10
+    /// instructions a cycle whether a sample plays or not (lot MF-4a-bis step 1). The bus turns
+    /// the delay into one absolute cycle at this write and gates its own DMA path on it, which
+    /// costs the cycles that run no DMA nothing at all.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    pub fn set_enabled(&mut self, enabled: bool, apu_cycle: bool) {
+    pub fn set_enabled(&mut self, enabled: bool, apu_cycle: bool) -> u32 {
         self.irq_flag = false;
 
         if !enabled {
             self.bytes_remaining = 0;
-            self.start_delay = 0;
-            return;
+            return 0;
         }
 
         if self.bytes_remaining == 0 {
             self.restart();
-            self.start_delay = if apu_cycle { 2 } else { 3 };
+            return if apu_cycle { 2 } else { 3 };
         }
+
+        0
     }
 
     /// Timer clocks from now on which the timer only counts down: [`Self::clock_timer`]
     /// returns `false` on each of them.
     #[allow(clippy::cast_sign_loss)] // Checked non-negative.
     pub const fn quiet_clocks(&self) -> u32 {
-        let quiet = if self.timer > 0 { self.timer as u32 } else { 0 };
-        if self.start_delay > 0 {
-            // The cycle the delay runs out on is not quiet: it is where the fetch is asked for.
-            let left = (self.start_delay - 1) as u32;
-            if left < quiet {
-                return left;
-            }
+        if self.timer > 0 {
+            self.timer as u32
+        } else {
+            0
         }
-        quiet
     }
 
     /// Counts the timer down by `clocks`, at most [`Self::quiet_clocks`].
     #[allow(clippy::cast_possible_wrap)] // At most a timer period.
     pub fn skip_quiet_clocks(&mut self, clocks: u32) {
         self.timer -= clocks as i32;
-        if self.start_delay > 0 {
-            self.start_delay -= clocks as i32;
-        }
     }
 
     /// Clocks the output unit's timer; called once per CPU cycle.
     /// Clocks the timer; `true` when a bit was played (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {
-        if self.start_delay > 0 {
-            self.start_delay -= 1;
-        }
-
         if self.timer > 0 {
             self.timer -= 1;
             return false;
@@ -320,9 +318,6 @@ impl DmcChannel {
         self.silence = reader.read_bool()?;
         self.output = reader.read_i32()?;
         self.irq_flag = reader.read_bool()?;
-        // Not in the format: it lives for at most three cycles and a state is written between
-        // instructions, so there is never one in flight to save (REQ-CORE-091).
-        self.start_delay = 0;
         Ok(())
     }
 }
