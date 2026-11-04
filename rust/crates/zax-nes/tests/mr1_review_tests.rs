@@ -1061,7 +1061,6 @@ fn mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a() {
 /// The byte is observable through the nametable path, since modes 0 and 1 are the ones that
 /// show ExRAM to the PPU, and the assertion below holds under either fix.
 #[test]
-#[ignore = "MR-1b: MR-5-2"]
 fn mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value() {
     let mut core = MapperRom::new(5).prg(8).chr(16).load();
 

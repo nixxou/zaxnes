@@ -32,7 +32,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
 - [x] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
 - [x] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
-- [ ] 7/10 — step 6: MR-5-2, MR-5-4 — MMC5 ExRAM writes, and in-frame detection by bus sniffing
+- [x] 7/10 — step 6: MR-5-2 done; **MR-5-4 not done**, see Q-116
 - [ ] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
 - [ ] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
 - [ ] 10/10 — step 9: the three unknowns MR-64-1, MR-64-5, MR-18-1, and the close of the lot
@@ -58,6 +58,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | MR-BUS-1, MR-66-1, MR-34-2 (bus-conflict half) | `registry.rs:113-140` (`has_bus_conflicts`), `mod.rs:417-430` (`cpu_write`), `mod.rs:178-184` (the field) | `mr_bus_1_*` x4, `mr_66_1_*`, `mr_34_2_*` | `Cartridge::cpu_write`, which only a CPU write to $4020-$FFFF reaches: **two instructions** (`cmpb` + `je`) for a board without conflicts, and the `>= $8000` half folded into the range test already there, for free | mappers 2/3/7 **submapper-2 dumps only**, 11, 30 (submapper 0 without battery, or 2), 34 BNROM, 66. No golden-core entry is on any of them |
 | MR-64-3 | `a12_watcher.rs:17-78` (the filter is a field), `rambo1.rs:30` (48 dots), `rambo1.rs:146-162` (the horizon) | `mr_64_3_*` x2 | `A12Watcher::rose` reads a field instead of a constant, on the two boards that watch A12; the MMC3 passes its own 10 and **did not change size**. A **win** for mapper 64: the board can now declare a `ppu_irq_horizon` where it returned `None`, so `NesBus::catch_up_ppu` is 25 instructions smaller | the five Tengen mapper-64 titles: their splits move, the filter being 5x longer |
 | MR-64-4 | `rambo1.rs:76-96` (arm), `rambo1.rs:216-224` (`on_cpu_cycle`) | `mr_64_4_*` x2 | `Board::on_cpu_cycle`: prologue and every non-stepping arm **instruction-identical**; one compare and one branch inside the RAMBO-1 arm, which already stepped every cycle | the five Tengen titles, by at most two CPU cycles of raster position |
+| MR-5-2 | `mmc5.rs:479-498` | `mr_5_2_*` (un-ignored) | none outside the MMC5: `Mmc5::intercept_cpu_write` +6 instructions, `Board::intercept_cpu_write` unchanged, nothing else in the crate changed size | MMC5 titles writing ExRAM outside rendering in modes 0 or 1 |
+| MR-5-4 | **not implemented** — `// Q-116` on `mmc5.rs:on_ppu_scanline` | — | — | **none**: the only faithful implementation needs a new per-PPU-fetch notification every game pays for, which this lot's rule forbids. Q-116 asks the owner to choose |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -625,3 +627,77 @@ whatever `irq_pending` it had — which is where the countdown was heading. No f
 `mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value`, which is step 6's; the
 1 200-frame golden test (`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`)
 passes, which is the check that the new PPU horizon did not make the batching inexact.
+
+## Step 6 — MR-5-2 done, MR-5-4 **not done**, and why (Q-116)
+
+### MR-5-2 — an ExRAM write outside rendering
+
+nesdev's *MMC5* ExRAM table, modes %00 and %01: "In these modes writes are only allowed when the
+PPU is rendering. If writes are attempted during V-blank, they may be ignored or cause a
+corruption at that memory address." We stored the value in every mode but 3, which is the one
+behaviour the hardware does *not* have.
+
+`Mmc5::intercept_cpu_write` now resolves the four modes explicitly: modes 0 and 1 write only
+while `in_frame`, mode 2 (plain RAM) always, mode 3 (read-only) never. Of the two behaviours the
+source allows outside rendering, **ignoring** the write is taken — the cheaper and less
+surprising of them, and indistinguishable from Mesen's "write 0" to a game that reads back what
+it wrote, since the byte is 0 either way on a freshly powered ExRAM.
+
+`mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value` is **un-ignored** and passes
+as MR-1b re-aimed it.
+
+**Cost: `Mmc5::intercept_cpu_write` grew by six instructions and nothing else in the crate
+changed size at all.** `Board::intercept_cpu_write` is unchanged — the MMC5 arm is out of line —
+and no symbol appeared or disappeared. The write path concerned is a 1 KiB window only MMC5 games
+touch.
+
+### MR-5-4 — not implemented, and the reason is structural
+
+**This is the one item of the lot that is not delivered, and Q-116 is the ticket.** The finding is
+real; the only faithful implementation breaks the lot's own performance rule.
+
+The chip sets its in-frame flag from its PPU bus, on "three consecutive PPU reads from the same
+nametable address", and clears it when "3 CPU cycles pass without a PPU read" or on the
+$FFFA/$FFFB vector fetch. The three halves are not of the same kind:
+
+| half | confinable to the MMC5? |
+| --- | --- |
+| clear on 3 CPU cycles with no PPU read | **yes** — the board sees every CHR read (`chr_view` is `None`) and already steps every CPU cycle |
+| clear on the $FFFA/$FFFB fetch | **yes** — `Mmc5::rom_windows` answers `NO_ROM_WINDOW` on all four windows, so every $8000-$FFFF read already reaches `Mmc5::cpu_read_override` |
+| **set** on three identical nametable reads | **no** |
+
+The third is structural. During rendering the PPU notifies the cartridge of **pattern** addresses
+only (`ppu/render.rs`, `notify_pattern_address` and the sprite block); the nametable and attribute
+fetches go through `read_nametable_inner`, which notifies nothing. And `read_nametable_as`
+(`ppu/mod.rs:1239`) reaches a board only when the page is `SERVED_BY_CARTRIDGE` — an MMC5 in
+ExRAM-nametable or fill mode — so an MMC5 game in ordinary mirroring, which is most of them, has
+the PPU read console VRAM and the board sees nothing.
+
+Giving the board those addresses means a **new notification on the per-PPU-fetch path**: about 68
+nametable and attribute fetches a line, ~16 300 a frame. Even reduced to one load-time bool test
+in the PPU that is ~33 000 instructions a frame **for every game** — the same order as the
++0.356 % that step 0 of this very lot was spent giving back. The lot's rule is explicit, and so is
+its consequence: "any change for a board this lot does not touch sends the lot back".
+
+MR-1b's cost note said the detection "has to move into the board's `ppu_read`"; that is where it
+is wrong, because `ppu_read` is the **CHR** path ($0000-$1FFF), not the nametable one. The rest of
+its analysis — the idle counter, the vector hook — is right.
+
+**And the two confinable halves were not applied on their own**, deliberately. They are both
+*clears*; without the matching set they would replace a coherent approximation with a hybrid whose
+risk is concrete: the gap between a line's last pattern fetch (dot 336) and the next line's first
+is about nine dots, which is exactly the "3 CPU cycles without a PPU read" threshold. An idle
+counter without the bus-driven set could therefore drop the flag on **every line** and break the
+splits of every MMC5 game — the splits MF-1's MR-5-3 has just moved by one line and that R0 is
+re-blessing now.
+
+Q-116 puts three ways out to the owner: accept the line-boundary approximation as a declared (D)
+divergence (the provisional choice, and what the code does); amend the performance rule for this
+one point after R0 measures the real cost; or restructure the PPU fetch path so the notification
+is free, which is a lot of its own. The code carries `// Q-116` on `Mmc5::on_ppu_scanline`.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **577 passed**, 0 failed, **7 ignored** — one fewer than at
+step 5, MR-5-2's test having come off `#[ignore]`.

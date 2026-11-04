@@ -503,7 +503,20 @@ impl Mapper for Mmc5 {
         value: u8,
     ) -> bool {
         if (0x5C00..=0x5FFF).contains(&address) {
-            if self.ex_ram_mode != 3 {
+            // MR-5-2, nesdev ("MMC5"), the ExRAM table. In the two nametable modes "writes are
+            // only allowed when the PPU is rendering. If writes are attempted during V-blank,
+            // they may be ignored or cause a corruption at that memory address" — so storing
+            // the value, which is what we did in every mode but 3, is the one behaviour the
+            // hardware does not have. Of the two the source allows we take **ignored**, the
+            // cheaper and less surprising of them; Mesen writes 0, the "corruption" reading,
+            // and the two are indistinguishable to a game that reads back what it wrote.
+            // Mode 2 is the plain read/write RAM mode and mode 3 is read-only.
+            let writable = match self.ex_ram_mode {
+                0 | 1 => self.in_frame,
+                2 => true,
+                _ => false,
+            };
+            if writable {
                 self.ex_ram[usize::from(address - 0x5C00)] = value;
             }
 
@@ -580,6 +593,18 @@ impl Mapper for Mmc5 {
         }
     }
 
+    /// The in-frame flag and the scanline counter, told to us by the PPU once per line.
+    ///
+    /// **Q-116, finding MR-5-4.** The chip does not work this way: it sniffs its own PPU bus,
+    /// setting the flag on "three consecutive PPU reads from the same nametable address" and
+    /// clearing it when "3 CPU cycles pass without a PPU read" or on the $FFFA/$FFFB vector
+    /// fetch (nesdev, "MMC5"). Both clears are confinable to this board — it sees every CHR
+    /// read and every $8000-$FFFF read already — but the *set* is not: during rendering the PPU
+    /// notifies the cartridge of pattern addresses only, and `read_nametable_as` reaches a board
+    /// solely for a nametable the board itself serves. Giving the MMC5 the nametable addresses
+    /// means a new notification on the per-PPU-fetch path that **every game** would pay for,
+    /// which this lot's performance rule forbids. The ticket carries the three ways out; the
+    /// provisional choice is to keep the line-boundary approximation and declare it.
     fn on_ppu_scanline(&mut self, _memory: &mut CartridgeMemory, scanline: i32, rendering: bool) {
         if !rendering || scanline >= RegionTiming::VISIBLE_SCANLINES {
             self.in_frame = false;
