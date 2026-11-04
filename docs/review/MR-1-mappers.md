@@ -580,4 +580,158 @@ constrain our side anyway: the latches must move on real rendering only, never o
 which is what `advance_chr_latch` and `chr_latch_state` exist for and which the current
 design gets right.
 
-<!-- sections for steps 6..8 are appended as the review progresses -->
+## Mapper 4 — MMC3 (TxROM) and MMC6
+
+`mmc3.rs` against `Mappers/Nintendo/MMC3.h`.
+
+The core of the board is **equivalent**, and two of the things most often got wrong are
+right here:
+
+- **the IRQ revision.** Ours asserts on `counter == 0 && enabled` (`mmc3.rs:86-88`), which
+  is rev B — what REQ-CORE-100 requires ("comportement « rev B »") and what Mesen's default
+  path does (`MMC3.h:313-315`). Mesen's rev A path exists but is gated on its game database
+  reporting an `MMC3A` chip (`MMC3.h:198-200`), which we have no equivalent of and which
+  Mesen itself does not take for an unlisted ROM. REQ-CORE-114 explicitly permits
+  `mmc3_test_2` test 6 ("MMC3 alt", the rev A test) to fail. Not a finding.
+- **register 0/1 bit 0.** Mesen masks the written value (`MMC3.h:218-221`,
+  "Writes to registers 0 and 1 always ignore bit 0") while we store it whole and drop the
+  bit in the mapping (`mmc3.rs:71-73`). The resulting 1 KiB banks are identical —
+  `map_chr_2k(slot, b >> 1)` gives `b & 0xFE` and `(b & 0xFE) + 1`, and Mesen's
+  `_registers[0] & 0xFE` / `| 0x01` on an already-masked value gives the same pair. Only the
+  stored register byte differs, which nothing observes. **Equivalent.**
+
+Both CHR modes, both PRG modes, the four-screen guard on $A000, the non-MMC6 PRG-RAM enable
+and write-protect bits ($A001 bits 7 and 6) and the MMC6 window mirroring every $400 were
+checked and agree. The save state covers the same fields as Mesen's, plus a deliberate
+`update_banks()` on load whose reason is documented in the code.
+
+Findings:
+
+- **MR-4-1 — our bug, severity visible.** The MMC6 $A001 read-enable and write-enable bits
+  are swapped. Mesen (`MMC3.h:142-144`) takes the *lower* bit of each pair as the write
+  enable and the upper as the read enable — bit 4 writes / bit 5 reads the low 512 bytes,
+  bit 6 writes / bit 7 reads the high 512 — which is also how the nesdev MMC6 $A001 table
+  reads. We have it the other way round (`mmc3.rs:51-57`). The MMC6 games are *StarTropics*
+  and *Zoda's Revenge*, and both use the RAM for saves, so this is a save-corruption bug
+  rather than a cosmetic one. Test
+  `mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped`.
+- **MR-4-2 — our bug, severity subtle.** A12 must be observed *low* before any rise can
+  count. Mesen's MMC3 guards its detector with `_a12LowClock > 0` (`MMC3.h:288`); our shared
+  `A12Watcher` starts at `low_since = 0` and compares against it (`a12_watcher.rs:36-39`,
+  `:45`), so the first high address at a clock of 10 dots or more is reported as a rise.
+  That is one spurious clock of the scanline counter at every power-on and at every
+  `reset()` — which also re-zeroes `low_since` while the PPU clock keeps running, so a soft
+  reset mid-frame can produce a second one. IRQs are disabled at power-on so no interrupt
+  fires, but the counter is left one step off the hardware's, which shifts the first
+  programmed scanline IRQ. Test `mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise`.
+- **MR-4-3 — our bug, severity cosmetic.** Mapper 4 submapper 3 is not an MMC3 at all:
+  Mesen builds `McAcc` (the Acclaim MC-ACC, whose A12 filter sits at a different point in
+  the chain) at `MapperFactory.cpp:285-290`. We always build `Mmc3` (`registry.rs:48`). The
+  affected dumps are a handful of Acclaim carts.
+- **MR-4-4 — unknown, severity cosmetic.** The power-on bank registers differ. Mesen seeds
+  them to `0,2,4,5,6,7,0,1` (`MMC3.h:63-70`, via `GetPowerOnByte(default)`), giving a linear
+  CHR layout; we zero all eight but register 7 (`mmc3.rs:180-181`), giving
+  `0,1,0,0,0,0,0,0`. The PRG pair agrees, which is what matters for booting, and every MMC3
+  game programs all eight registers during init with rendering off. Neither value is
+  hardware-documented.
+- **MR-4-5 — unknown, severity cosmetic.** Our power-on `$A001 = 0x80` (PRG-RAM enabled and
+  writable) against Mesen's `GetPowerOnByte()` = 0 (disabled). Our code already argues the
+  case in a comment (`mmc3.rs:176-178`): it is the only value that lets a game use the RAM
+  from a cold start without writing $A001. Recorded as a difference with our rationale
+  attached, not as a bug — it is a deliberate choice about an undocumented power-on value,
+  and REQ-CORE-114's test ROMs constrain it.
+- **MR-4-6 — our bug, severity cosmetic.** The MMC6 carries 1 KiB of RAM
+  (`MMC3.h:184-185`: `GetSaveRamSize()` = `0x400`, page size `0x200`); we expose the 8 KiB
+  default. The window mapping is unaffected because `mmc6_offset` masks with `0x03FF` and
+  the `% prg_ram.len()` is then the identity (`mmc3.rs:45-47`), so only the exposed and
+  saved RAM size is wrong. Same family as MR-13-1 and MR-30-2; one shared override fixes all
+  three.
+
+## Shared: the A12 watcher
+
+`a12_watcher.rs` against `Mappers/A12Watcher.h` — and against Mesen's MMC3, which pointedly
+does **not** use that class.
+
+Our filter is one constant: A12 must have been low for `FILTER_DOTS = 10` PPU dots
+(`a12_watcher.rs:27`, `:45`). Mesen has three different answers:
+
+| user | threshold | unit |
+| --- | --- | --- |
+| `A12Watcher.h` default (`minDelay = 10`, `_cyclesDown > minDelay`) | >= 11 | PPU dots (frame cycles) |
+| `MMC3::IsA12RisingEdge` (`MMC3.h:286-296`) | >= 3 | **CPU cycles** (`GetMasterClock()`) |
+| `Rambo1::NotifyVramAddressChange` (`Rambo1.h:166`, `UpdateVramAddress<30>`) | >= 31 | PPU dots |
+
+So Mesen's own MMC3 and its shared watcher disagree with each other, and RAMBO-1 wants a
+filter three times longer than either. Our single 10-dot constant sits between the first two
+and is far short of the third (see MR-64-3).
+
+**Classification: unknown** for the MMC3/shared-watcher spread — the real filter is an RC
+delay on the cartridge and all three figures are approximations of it; REQ-CORE-114's
+acceptance is `mmc3_test_2` tests 1-5, which the current constant satisfies. The RAMBO-1
+figure is a different matter and is recorded as MR-64-3, because 10 against 31 is not an
+approximation of the same number.
+
+Two structural notes for whoever changes this:
+
+- `A12Watcher::MIN_RISE_INTERVAL` (`a12_watcher.rs:31`) is derived from `FILTER_DOTS` and
+  feeds `Mmc3::ppu_irq_horizon` (`mmc3.rs:167`), which is how far the PPU may run behind the
+  CPU. The two must move together or the horizon becomes a wrong bound and an IRQ lands
+  late. This is the one place in the lot where an accuracy change has a knock-on effect on
+  a scheduling decision.
+- Mesen's class takes the threshold as a template parameter precisely because its users
+  disagree. Ours needs the same: a `FILTER_DOTS` passed in at construction, not a constant.
+- Mesen's frame-relative clock forces it to carry an explicit frame-wrap correction
+  (`A12Watcher.h:31-38`, the `89342 - _lastCycle` term). Our monotone `ppu_clock` has no
+  such case, which is **simpler and equivalent** — worth keeping.
+
+## Mapper 64 — Tengen RAMBO-1
+
+`rambo1.rs` against `Mappers/Tengen/Rambo1.h`. The PRG layout (three switchable 8 KiB
+windows with the fixed one at $E000, and the $40 bit rotating which window takes register
+15) and the CHR 1 KiB mode with its A12 inversion are **equivalent** — our
+`high`/`low` pair reproduces Mesen's `slot ^ a12Inversion` for all eight slots, which is
+worth stating because the two expressions look unrelated.
+
+The IRQ, though, is a different counter from the MMC3's, and we implemented it as if it
+were the same one.
+
+- **MR-64-1 — our bug, severity visible.** RAMBO-1 *always* decrements, and the reload
+  loads the latch plus two — plus *one* when the latch is 0 or 1 (`Rambo1.h:76-91`, the
+  asymmetry carrying the comment "Fixes Hard Drivin'"). The period is therefore one clock
+  longer than an MMC3's. We reuse the MMC3 shape, assigning the latch with no decrement
+  (`rambo1.rs:72-83`), so every RAMBO-1 IRQ arrives one scanline early: split-screen status
+  bars sit one line off in *Klax*, *Skull & Crossbones*, *Rolling Thunder* and
+  *Hard Drivin'*. Test `mr_64_1_rambo1_counter_always_decrements`.
+- **MR-64-2 — our bug, severity visible.** The 2 KiB CHR windows do not ignore bit 0 of the
+  register: the pair is `reg` and `reg + 1` (`Rambo1.h:112-113`). Mesen is deliberately
+  different from its own MMC3 on this point — `MMC3.h:89-90` masks with `0xFE` and
+  `Rambo1.h` does not — which is strong evidence the asymmetry is real and not an oversight.
+  Our `map_chr_2k(slot, b(0) >> 1)` (`rambo1.rs:63-64`) drops the bit, so an odd register
+  shows the wrong kilobyte pair. Test `mr_64_2_rambo1_2kib_chr_window_keeps_bit_0`.
+- **MR-64-3 — our bug, severity subtle.** The A12 filter is `minDelay = 30`
+  (`Rambo1.h:166`), not the 10 we share with the MMC3, so we count rises this board ignores
+  and the scanline counter runs fast whenever A12 dips for less than 31 dots. Test
+  `mr_64_3_rambo1_a12_filter_is_30_dots`. Fix: make the threshold a construction parameter
+  of `A12Watcher` (see the shared section).
+- **MR-64-4 — our bug, severity subtle.** The IRQ assertion is delayed: 2 CPU cycles when
+  the counter was clocked by A12, 1 when clocked by the CPU divider (`Rambo1.h:13-14`,
+  `:55-60`, the `_needIrqDelay` countdown in `ProcessCpuClock`). We set `irq_pending`
+  immediately (`rambo1.rs:81`). No test: observing a one-to-two-cycle offset needs a
+  cycle-level IRQ probe the fixture does not have, and the fix is mechanical once MR-64-1 is
+  in.
+- **MR-64-5 — our bug, severity visible.** Leaving cycle mode must grant one more divider
+  clock. Mesen sets `_forceClock` when $C001 is written with bit 0 clear *while already in
+  cycle mode* (`Rambo1.h:137-142`), quoting FHorse: "after the write in the reg $C001, are
+  needed more than four CPU clock cycles before the switch takes place, allowing another
+  clock of irq running the reload" — and says it fixes *Skull & Crossbones*. We have no such
+  latch and reset the divider on every $C001 write (`rambo1.rs:170-174`) where Mesen zeroes
+  it only when *entering* cycle mode. One fix covers both halves.
+
+One difference where **Mesen looks like the one in error**: its `$8000` case sets
+`_currentRegister` and does *not* call `UpdateState` (`Rambo1.h:122-124`), so changing the
+CHR-inversion or PRG-rotation bits only takes effect on the next `$8001` write. Its own MMC3
+does call `UpdateState` from `$8000` (`MMC3.h:214-216`), and the bank selection is
+combinational on hardware, so a mode change should be visible at once — which is what we do
+(`rambo1.rs:156-159`). Recorded as **Mesen in error**; no change on our side.
+
+<!-- sections for steps 7..8 are appended as the review progresses -->

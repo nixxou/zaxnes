@@ -355,3 +355,166 @@ fn mr_1_4_mmc1_submapper_5_has_fixed_prg() {
         "submapper 5 fixes the whole 32 KiB: the PRG register must do nothing"
     );
 }
+
+// ================================================================ mapper 4, MMC3 / MMC6
+
+/// MR-4-1. The MMC6 $A001 read-enable and write-enable bits are the other way round.
+///
+/// Mesen (`Mappers/Nintendo/MMC3.h:142-144`):
+///
+///     firstBankAccess = (RegA001 & 0x10 ? Write : 0) | (RegA001 & 0x20 ? Read : 0);
+///     lastBankAccess  = (RegA001 & 0x40 ? Write : 0) | (RegA001 & 0x80 ? Read : 0);
+///
+/// so for each 512-byte half the *lower* bit of the pair enables writing and the upper one
+/// enables reading. Ours reads the pair the other way (`mmc3.rs:51-57`): bit 4 enables
+/// reading the low half and bit 5 enables writing it, and likewise 6/7 for the high half.
+///
+/// Observed by storing a byte with both bits set, then clearing the one that is really the
+/// write enable: the byte must still read back.
+#[test]
+#[ignore = "MR-1: MR-4-1"]
+fn mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped() {
+    let mut core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
+
+    core.mapper_write(0x8000, 0x20); // MMC6 work RAM enabled (bit 5 of $8000).
+    core.mapper_write(0xA001, 0x30); // Low half: read and write enabled either way round.
+    core.write_memory(0x7000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x7000));
+
+    // Bit 5 alone: Mesen reads this as "read enabled, write disabled".
+    core.mapper_write(0xA001, 0x20);
+
+    assert_eq!(
+        0x5A,
+        core.read_memory(0x7000),
+        "$A001 bit 5 enables *reading* the low half, not writing it"
+    );
+}
+
+/// MR-4-2. A12 must be seen low before any rise can count: at power-on, with no falling
+/// edge yet, the first high address on the PPU bus must not clock the scanline counter.
+///
+/// Mesen's MMC3 keeps its own edge detector (`MMC3.h:286-296`) and guards it with
+/// `_a12LowClock > 0`, so a rise before the first fall is never reported. Our shared
+/// `A12Watcher` starts with `low_since = 0` (`a12_watcher.rs:36-39`) and compares against
+/// it, so any high address at a clock of 10 dots or more counts as a rise — one spurious
+/// clock of the counter per power-on and per `reset()`.
+#[test]
+#[ignore = "MR-1: MR-4-2"]
+fn mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise() {
+    let mut core = MapperRom::new(4).prg(8).chr(16).load();
+    core.mapper_write(0xC000, 0x01); // Latch 1.
+    core.mapper_write(0xC001, 0x00); // Reload.
+    core.mapper_write(0xE001, 0x00); // IRQs on.
+
+    let cart = core.cartridge_mut().unwrap();
+    cart.on_ppu_address_bus(0x1000, 100); // High, with no preceding fall.
+    cart.on_ppu_address_bus(0x0000, 110); // The first real fall.
+    cart.on_ppu_address_bus(0x1000, 130); // The first rise that counts: reloads to 1.
+
+    assert!(
+        !cart.irq_asserted(),
+        "only one rise has counted, so the counter has just reloaded to 1"
+    );
+}
+
+// ================================================================ mapper 64, RAMBO-1
+
+/// Feeds one A12 rise wide enough for both filters (40 dots low, well over Mesen's
+/// `minDelay = 30` for this board).
+fn rambo_rise(core: &mut zax_nes::NesCore, at: i64) {
+    let cart = core.cartridge_mut().unwrap();
+    cart.on_ppu_address_bus(0x0000, at);
+    cart.on_ppu_address_bus(0x1000, at + 40);
+}
+
+/// MR-64-1. RAMBO-1 does not use the MMC3 counter algorithm: it *always* decrements, and
+/// the reload loads the latch plus two (plus one when the latch is 0 or 1), so the period
+/// is one clock longer than the MMC3's.
+///
+/// Mesen (`Mappers/Tengen/Rambo1.h:76-91`):
+///
+///     if(_needReload) {
+///         if(_irqReloadValue <= 1) { _irqCounter = _irqReloadValue + 1; }
+///         else { _irqCounter = _irqReloadValue + 2; }   // Fixes Hard Drivin'
+///         _needReload = false;
+///     } else if(_irqCounter == 0) { _irqCounter = _irqReloadValue + 1; }
+///     _irqCounter--;
+///
+/// We reuse the MMC3 shape, assigning the latch without the decrement
+/// (`rambo1.rs:72-83`), so the IRQ arrives one scanline early. With a latch of 3 the fifth
+/// rise is the one that fires; ours fires on the fourth.
+#[test]
+#[ignore = "MR-1: MR-64-1"]
+fn mr_64_1_rambo1_counter_always_decrements() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+    core.mapper_write(0xC000, 0x03); // Latch 3.
+    core.mapper_write(0xC001, 0x00); // Scanline mode, reload pending.
+    core.mapper_write(0xE001, 0x00); // IRQs on.
+
+    for i in 0..4 {
+        rambo_rise(&mut core, 1000 + i * 100);
+    }
+
+    assert!(
+        !core.cartridge().unwrap().irq_asserted(),
+        "with a latch of 3 the counter still holds 1 after four rises"
+    );
+
+    rambo_rise(&mut core, 2000);
+    assert!(core.cartridge().unwrap().irq_asserted(), "the fifth fires");
+}
+
+/// MR-64-2. RAMBO-1's 2 KiB CHR windows do not ignore bit 0 of the register: the pair is
+/// `reg` and `reg + 1`, not `reg & 0xFE` and `(reg & 0xFE) + 1`.
+///
+/// Mesen is deliberately different from its own MMC3 here — `MMC3.h:89-90` masks with
+/// `0xFE` while `Rambo1.h:112-113` does not:
+///
+///     SelectChrPage(1 ^ a12Inversion, _registers[0] + 1);
+///
+/// We route the register through `map_chr_2k(slot, b(0) >> 1)` (`rambo1.rs:63`), which
+/// drops the low bit. An odd register therefore shows the wrong kilobyte pair.
+#[test]
+#[ignore = "MR-1: MR-64-2"]
+fn mr_64_2_rambo1_2kib_chr_window_keeps_bit_0() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+
+    core.mapper_write(0x8000, 0x00); // Register 0, 2 KiB CHR mode, no inversion.
+    core.mapper_write(0x8001, 0x05); // An odd 1 KiB bank number.
+
+    let windows = core.chr_windows();
+    assert_eq!(
+        [5, 6],
+        [windows[0], windows[1]],
+        "the 2 KiB window is banks 5 and 6, not 4 and 5"
+    );
+}
+
+/// MR-64-3. RAMBO-1's A12 filter is much longer than the MMC3's: Mesen instantiates the
+/// shared watcher with `minDelay = 30` for this board (`Rambo1.h:166`,
+/// `_a12Watcher.UpdateVramAddress<30>(...)`) against the default 10 used elsewhere. We
+/// share one `A12Watcher` with a fixed 10-dot filter (`a12_watcher.rs:27`), so we count
+/// rises RAMBO-1 ignores and the counter runs fast.
+///
+/// Twenty dots of low is over our threshold and under Mesen's, so under Mesen no number of
+/// such pulses ever clocks the counter.
+#[test]
+#[ignore = "MR-1: MR-64-3"]
+fn mr_64_3_rambo1_a12_filter_is_30_dots() {
+    let mut core = MapperRom::new(64).prg(8).chr(16).load();
+    core.mapper_write(0xC000, 0x01);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+
+    let cart = core.cartridge_mut().unwrap();
+    for i in 0..10 {
+        cart.on_ppu_address_bus(0x0000, 1000 + i * 100);
+        cart.on_ppu_address_bus(0x1000, 1020 + i * 100);
+    }
+
+    assert!(
+        !cart.irq_asserted(),
+        "a 20-dot low is too short for RAMBO-1's filter: the counter never moves"
+    );
+}

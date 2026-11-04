@@ -15,10 +15,10 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
       `a12_watcher.rs`, `cartridges/mod.rs`, header/submapper handling, `BaseMapper`)
 - [x] 2/10 done `42c158ec` — Discrete boards, part 1: 0, 2, 3, 7, 11, 13, 66, 71
 - [x] 3/10 done `5c9eaca4` — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
-- [x] 4/10 done — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
-- [x] 5/10 done — MMC2 / MMC4 (mappers 9, 10)
-- [ ] 6/10 in progress — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
-- [ ] 7/10 todo — MMC5 (mapper 5) and its expansion audio + mix
+- [x] 4/10 done `b8eebc27` — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
+- [x] 5/10 done `b8eebc27` — MMC2 / MMC4 (mappers 9, 10)
+- [x] 6/10 done — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
+- [ ] 7/10 in progress — MMC5 (mapper 5) and its expansion audio + mix
 - [ ] 8/10 todo — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
 - [ ] 9/10 todo — Shared infrastructure the next lots need; summary table; report pass
@@ -80,3 +80,20 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   latch ranges match, and Mesen's deferred `_needChrUpdate` is the same observable
   behaviour as our immediate update, not a timing difference. One unknown left: Mesen
   flips the latch on a bare $2006 write, we need a real fetch.
+- **Step 6** — MMC3 + MMC6, the A12 watcher, RAMBO-1. MMC3 core is equivalent (rev B is
+  right and spec-pinned; the register 0/1 bit-0 masking is equivalent, not a bug).
+  6 MMC3 findings: MR-4-1 (**MMC6 $A001 read/write bits swapped** — StarTropics save
+  corruption, the worst of the step), MR-4-2 (A12 must fall before the first rise counts;
+  one spurious counter clock per power-on/reset), MR-4-3 (submapper 3 is MC-ACC, not
+  MMC3), MR-4-4/MR-4-5 (power-on register and $A001 values, unknown), MR-4-6 (MMC6 RAM is
+  1 KiB).
+  A12 watcher: Mesen has **three** different thresholds (shared class >= 11 dots, MMC3
+  >= 3 CPU cycles, RAMBO-1 >= 31 dots) and ours is one constant of 10. The MMC3 spread is
+  unknown/approximation; the RAMBO-1 gap is a real bug (MR-64-3). Note recorded that
+  `MIN_RISE_INTERVAL` feeds `Mmc3::ppu_irq_horizon`, so the two must change together.
+  RAMBO-1: 5 findings. MR-64-1 (**not the MMC3 counter** — always decrements, reload is
+  latch+2/+1; every IRQ one scanline early), MR-64-2 (2 KiB CHR keeps bit 0 — Mesen is
+  deliberately unlike its own MMC3 here), MR-64-3 (filter), MR-64-4 (IRQ delay 2/1 cycles),
+  MR-64-5 (`_forceClock` on leaving cycle mode, Skull & Crossbones). One point where Mesen
+  looks wrong and we are right: its $8000 does not re-map.
+  5 new ignored tests (18 total), each confirmed failing for the stated reason.
