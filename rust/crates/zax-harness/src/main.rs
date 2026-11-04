@@ -6,10 +6,12 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use zax_harness::{
-    bench_core, compare, golden_core, lua_api, meshes, packs, profile_tool, render, HarnessError,
+    bench_core, compare, golden_core, lua_api, meshes, packs, profile_tool, render, test_roms,
+    HarnessError,
 };
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
+       zax-harness test-roms <roms dir> <out.json> [--filter <substring>] [options]
        zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)
        zax-harness lua-api [--out <file>]
        zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
@@ -34,6 +36,20 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!(
                 "golden-core: {} ROMs run, {} files, {frames} frames each -> {out_path}",
                 summary.run, summary.files
+            );
+            Ok(())
+        }
+        [command, rest @ ..] if command == "test-roms" => {
+            let options = test_roms::Options::parse(rest)?;
+            let summary = test_roms::run(&options)?;
+            println!(
+                "test-roms: {} ROMs, {} pass, {} fail, {} timeout, {} unsupported, {} manual",
+                summary.total,
+                summary.pass,
+                summary.fail,
+                summary.timeout,
+                summary.unsupported,
+                summary.manual
             );
             Ok(())
         }
@@ -81,7 +97,8 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         }
         [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
             println!(
-                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+                test_roms::USAGE,
                 meshes::USAGE,
                 lua_api::USAGE,
                 render::USAGE,

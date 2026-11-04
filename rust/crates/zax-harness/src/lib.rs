@@ -12,5 +12,6 @@ pub mod meshes;
 pub mod packs;
 pub mod profile_tool;
 pub mod render;
+pub mod test_roms;
 
 pub use error::HarnessError;
