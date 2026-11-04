@@ -215,3 +215,56 @@ before this lot loads byte for byte.
 lists two acceptable outputs — now prints `11 22 / 11 22 / 44 55 / 11 22 / 11 22` with CRC
 `5E3DF9C4`, one of the two its source names. It printed `11 22` five times before, which is the
 "no extra `$2007` reads" answer and is not among them.
+
+## Step 2 — the halt cycle's repeated read, and the 2A03's own decode
+
+### What the step found
+
+Nothing left to fix. `dmc_dma_during_read4/dma_4016_read` **already passes** after step 1, and
+it passes for the reason the suite is about rather than by accident: the halt cycle of step 1's
+`run_dma` repeats the CPU's read, `$4016` is clocked once more, and the ROM prints
+`08 08 07 08 08` — its own source's documented output, with the seven in the one iteration of
+five where the DMA lands on the `lda $4016`.
+
+The rest of the folder does not regress, and one row moved without changing its label:
+
+| ROM | before MF-4a | after step 1 |
+| --- | --- | --- |
+| `dma_2007_read.nes` | manual — `11 22 / 11 22 / 11 22 / 11 22 / 11 22 / 498C5C5F` | manual — `11 22 / 11 22 / 44 55 / 11 22 / 11 22 / 5E3DF9C4` |
+| `dma_2007_write.nes` | pass | pass |
+| `dma_4016_read.nes` | **fail** — `08 08 08 08 08` | **pass** — `08 08 07 08 08` |
+| `double_2007_read.nes` | manual — `22 33 44 55 66 / 33 44 55 66 77 / D84F6815` | manual, unchanged |
+| `read_write_2007.nes` | pass | pass |
+
+`dma_2007_read` is `manual` because its own source says the output "depends on CPU-PPU
+synchronization at reset" and lists two acceptable results; before the lot it printed neither
+(five identical lines is the "no extra `$2007` read" answer), and it now prints the second of
+them, CRC included. `double_2007_read` is unchanged and is **not** a DMA row: its second line
+comes from `lda $20F7,x` with X=$10 reading `$2007` twice inside one instruction, which is the
+PPU's own read buffer on back-to-back reads — lot MF-4b's `PPU Register Mirroring` and open-bus
+territory, not this one's.
+
+### What the step adds
+
+`crates/zax-nes/tests/dmc_dma_timing_tests.rs`, two tests, because the behaviour the ROM
+measures deserves to be pinned where a bisect can see it:
+
+* `req_core_113_the_halt_cycle_reads_4016_again_and_the_program_loses_a_bit` — the same
+  experiment the ROM runs, in eight lines: with the DMC quiet, the controller answers on the
+  eighth read of `$4016`; with a fetch pending, on the seventh.
+* `req_core_113_only_the_halt_cycle_of_a_dma_reaches_the_controller` — the other half of the
+  rule, and the one that would silently rot: the DMC's dummy cycle and its alignment cycle must
+  **not** reach the port (/OE stays active), so the program loses one bit and not three. It also
+  checks that the fetch cost three or four cycles, so the test cannot pass by the DMA not having
+  happened.
+
+Both arm the fetch with a `$4015` write and then burn its start delay on **write** cycles, which
+is itself a check that a write cannot be halted.
+
+### Hot path
+
+No file under `src/` changed in this step, so the generated code is the step 1 commit's, byte
+for byte: nothing to compare. `cargo fmt --check` clean, clippy clean,
+`cargo test --release -p zax-nes -p zax-harness`: **683 passed, 0 failed, 7 ignored**.
+
+No game's output moves: no behaviour changed.
