@@ -13,11 +13,13 @@
 //! They are grouped here rather than appended to `mapper_tests.rs` so that the lot that
 //! fixes a board can find, un-ignore and move its test in one place.
 
-// Test values are small: the narrowing casts cannot lose anything.
+// Test values are small: the narrowing casts cannot lose anything. Board and register names
+// (ExRAM, VRC2a, ORing) read as prose here, as in `cartridges/mappers/mod.rs`.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
+    clippy::doc_markdown,
     clippy::unwrap_used
 )]
 
@@ -229,7 +231,11 @@ fn mr_34_1_bnrom_has_no_register_at_7ffd() {
         core.prg_windows(),
         "$7FFD is PRG-RAM on a BNROM board, not the PRG bank register"
     );
-    assert_eq!(0x01, core.read_memory(0x7FFD), "the write still reaches RAM");
+    assert_eq!(
+        0x01,
+        core.read_memory(0x7FFD),
+        "the write still reaches RAM"
+    );
 }
 
 // ================================================================ mapper 30, UNROM 512

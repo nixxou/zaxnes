@@ -21,9 +21,9 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
 - [x] 7/10 done `3706fa29` — MMC5 (mapper 5) and its expansion audio + mix
 - [x] 8/10 done `4d24ac21` — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
-- [x] 9/10 done — Shared infrastructure the next lots need; summary table; report pass
-- [ ] 10/10 in progress — `cargo fmt --check`, `clippy -D warnings`,
-      `cargo test --release -p zax-nes`; journal; close
+- [x] 9/10 done `7498c80c` — Shared infrastructure the next lots need; summary table; report pass
+- [x] 10/10 done — `cargo fmt --check`, `clippy -D warnings`,
+      `cargo test --release -p zax-nes`; journal; close. **Lot complete.**
 
 ## Notes
 
@@ -143,3 +143,29 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   split (its `NotifyVramAddressChange` work belongs in our `ppu_read`, never `ppu_peek`).
   Totals: 31 our-bug findings (25 with a failing ignored test), 7 unknown, 2 Mesen-in-error,
   9 spec questions across Q-110/Q-111, 7 boards equivalent outright.
+- **Step 10** — checks and closing. `cargo fmt` needed one reformat in the test file and
+  clippy needed `clippy::doc_markdown` in its allow list (board names read as prose, as in
+  `cartridges/mappers/mod.rs:3`). Final state:
+  - `cargo fmt --check` clean.
+  - `cargo clippy -p zax-nes --all-targets -- -D warnings` clean. **Not** the workspace:
+    see the known limitation above — `zax-app` cannot build in any worktree of this branch
+    because its demo ROM is gitignored. Pre-existing, unrelated to MR-1.
+  - `cargo test --release -p zax-nes`: **0 failures**, 25 ignored (this lot's findings),
+    `mr1_review_tests` reporting `1 passed; 0 failed; 25 ignored`.
+  - Journal entry appended to `cleanroom/journal/JOURNAL.md` (R3, 2026-11-04).
+  - Q tickets written outside the worktree: `spec/changes/Q-110.md`, `spec/changes/Q-111.md`.
+
+## Closing state
+
+Deliverables: `docs/review/MR-1-mappers.md` (one section per board, shared-infrastructure
+list, 50-entry summary table), `rust/crates/zax-nes/tests/mr1_review_tests.rs` (26 tests,
+25 ignored), `spec/changes/Q-110.md`, `spec/changes/Q-111.md`, this file.
+
+No board was changed. No `rust/crates/zax-render/tests/*_tmp.rs`, no root `tests/`, no
+`.claude/` and no `CLAUDE.md` was ever staged; `rust/target-mr/` is build output and was
+never staged.
+
+For whoever fixes these: the report's "three to fix first" are MR-41-1/2/3 (Caltron cannot
+start games 5-6), MR-4-1 (MMC6 corrupts StarTropics' save) and MR-64-1 (every RAMBO-1 IRQ a
+scanline early). MR-71-1 is the cheapest open question to close: our mirroring polarity and
+Mesen's are exact opposites, so one is wrong and Fire Hawk shows it.
