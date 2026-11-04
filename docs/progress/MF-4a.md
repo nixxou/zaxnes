@@ -386,3 +386,82 @@ Multi game moves by one cycle.
 
 `cargo fmt --check` clean, clippy clean, `cargo test --release -p zax-nes -p zax-harness`:
 **684 passed, 0 failed, 7 ignored**.
+
+## Step 5 — the suites, the campaign document and the regression guard
+
+### The suites, re-run end to end
+
+| suite | before the lot | after |
+| --- | --- | --- |
+| `nes-test-roms/sprdma_and_dmc_dma` | 0 / 2 | **2 / 2** |
+| `nes-test-roms/dmc_dma_during_read4` | 2 pass, 1 fail, 2 manual | **3 pass, 0 fail, 2 manual** |
+| `nes-test-roms/pal_apu_tests` | 3 / 10 | **10 / 10** |
+| `AccuracyCoin` | 89 / 147 | **93 / 147** |
+| `nes-test-roms/apu_test` | 9 / 9 | 9 / 9 |
+| `nes-test-roms/blargg_apu_2005.07.30` | 11 / 11 | 11 / 11 |
+| `nes-test-roms/apu_reset` | 6 / 6 | 6 / 6 |
+| `nes-test-roms/apu_mixer` | 4 / 4 | 4 / 4 |
+| `nes-test-roms/cpu_interrupts_v2` | 6 / 6 | 6 / 6 |
+| `nes-test-roms/cpu_timing_test6`, `instr_timing`, `branch_timing_tests` | all pass | all pass |
+| `nes-test-roms/cpu_dummy_reads`, `cpu_dummy_writes`, `cpu_exec_space`, `cpu_reset` | all pass | all pass |
+| `nes-test-roms/instr_misc`, `nes_instr_test`, `instr_test-v3`, `instr_test-v5` | all pass | all pass |
+| `nes-test-roms/oam_read`, `oam_stress` | 2 / 2 | 2 / 2 |
+| `nes-test-roms/ppu_vbl_nmi`, `vbl_nmi_timing`, `sprite_hit_tests`, `sprite_overflow_tests` | all pass | all pass |
+| `nes-test-roms/ppu_open_bus`, `ppu_read_buffer` | 2 / 2 | 2 / 2 |
+| `holy-mapperel` | 40 / 40 | 40 / 40 |
+| the three MMC3 suites | 5 / 6 each | 5 / 6 each, the same required failures |
+| **whole campaign** | **204 pass, 15 fail** | **214 pass, 5 fail** |
+
+`cpu_interrupts_v2/4-irq_and_dma` is the one worth naming, because it is the test that could
+have caught step 1 out: it times an OAM DMA against an IRQ, and it still passes although the
+513 or 514 stolen cycles are now charged to the instruction **after** the `STA $4014` instead
+of to the `STA` itself. That is where the hardware puts them — the unit cannot halt a write —
+and the total is the same, which is what the ROM measures.
+
+The five failures left are `AccuracyCoin`; `power_up_palette`, whose own readme says its
+reference values "are probably unique to my NES"; and the three MMC3 revision A ROMs that are
+**required to fail** under REQ-CORE-100.
+
+### The campaign document
+
+`docs/review/MF-T-test-roms.md`: the totals, the three per-suite counts, the eleven per-ROM
+rows and the failure table — where the ten fixed rows are struck through with what they said
+before, because that diagnosis is what the lot was given to work from — and a new
+"What lot MF-4a changed" section with the before/after of each, the two `manual` rows whose
+output improved, and the list of suites that did not move and were checked.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` grows from 3 to **9** groups, each a `#[test]`
+of its own, asserting the outcome of every ROM of the group — failures and `manual` rows
+included — when `ZAXNES_TEST_ROMS` points at a copy of `assets-free/test-roms/`:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_113_an_oam_transfer_and_a_dmc_fetch_share_the_bus` | both `sprdma_and_dmc_dma` ROMs |
+| `req_core_113_the_halt_cycle_repeats_the_read_it_interrupted` | all five of `dmc_dma_during_read4`, the two `manual` rows included so a change to either shows up |
+| `req_core_015_the_frame_sequencer_passes_on_a_pal_console` | all ten `pal_apu_tests` |
+| `req_core_111_the_ntsc_frame_sequencer_does_not_move_with_the_pal_one` | all eleven `blargg_apu_2005.07.30` |
+| `req_core_113_the_apu_and_dmc_suite_passes` | all nine `apu_test`, 7 and 8 being the DMC's own |
+| `req_core_004_the_apu_comes_back_from_reset_where_it_should` | all six `apu_reset`, `4017_timing` among them — the convention every DMA alignment in this core is built on |
+
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: **9 passed**.
+
+### The lot, end to end
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean. `cargo test --release -p zax-nes -p zax-harness`: **690 passed, 0 failed, 7 ignored**,
+against 680 at the lot's start — ten added, none removed or `#[ignore]`d.
+
+**No `unsafe`.** **No savestate byte moved**: every field the lot adds (`NesBus::dma`,
+`dma_oam_page`, `DmcChannel::start_delay`) is transient, outside the format, and cleared on
+load; a state written before the lot loads byte for byte.
+
+| brief item | state |
+| --- | --- |
+| 1. `sprdma_and_dmc_dma` ×2 | **done**, step 1 |
+| 2. `dma_4016_read`, the rest of its folder not regressing | **done** — step 1 passed it, step 2 pinned the rule and checked the folder |
+| 3. AccuracyCoin's DMA page, with the rest listed and explained | **done**, step 3: 89 → 93, seven DMA rows green, three listed with a diagnosis each |
+| 4. the seven `pal_apu_tests`, NTSC unmoved | **done**, step 4: 10 / 10, and `run_cpu_cycles` byte-identical |
+| 5. suites, campaign document, regression guard | **done**, this step |
+| no performance regression | **not fully** — about +1 % of wall clock, instruction count roughly nil; the three shapes measured and the reason no cheaper one exists are in **Q-119**, which asks R0 to rule |

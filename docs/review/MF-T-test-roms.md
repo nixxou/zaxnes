@@ -23,16 +23,18 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 
 | Result | ROMs |
 |---|---:|
-| pass | 204 |
-| fail | 15 (of which 3 are required to fail, see below) |
+| pass | 214 |
+| fail | 5 (of which 3 are required to fail, see below) |
 | timeout | 0 |
 | unsupported | 1 |
 | manual | 111 |
 | **total** | **331** |
 
-**Lot MF-3 moved eight rows, all of them in `holy-mapperel`**, which now passes in full; see
-"What lot MF-3 changed" at the end of this document for the before/after. Everything else in this
-document is the campaign as MF-T first measured it.
+**Lot MF-3 moved eight rows, all of them in `holy-mapperel`**, which now passes in full, and
+**lot MF-4a moved ten more** — the two `sprdma_and_dmc_dma`, `dmc_dma_during_read4/dma_4016_read`
+and the seven `pal_apu_tests`. See "What lot MF-3 changed" and "What lot MF-4a changed" at the
+end of this document for the before/after of each. Everything else in this document is the
+campaign as MF-T first measured it.
 
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
@@ -59,7 +61,7 @@ document is the campaign as MF-T first measured it.
 | `nes-test-roms/cpu_interrupts_v2` | 6 / 6 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/cpu_reset` | 2 / 2 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/cpu_timing_test6` | 1 / 1 | 0 | 0 | 0 | 0 |
-| `nes-test-roms/dmc_dma_during_read4` | 2 / 5 | 1 | 0 | 0 | 2 |
+| `nes-test-roms/dmc_dma_during_read4` | **3 / 5** | 0 | 0 | 0 | 2 |
 | `nes-test-roms/dmc_tests` | 0 / 4 | 0 | 0 | 0 | 4 |
 | `nes-test-roms/dpcmletterbox` | 0 / 1 | 0 | 0 | 0 | 1 |
 | `nes-test-roms/exram` | 0 / 1 | 0 | 0 | 0 | 1 |
@@ -82,7 +84,7 @@ document is the campaign as MF-T first measured it.
 | `nes-test-roms/oam_read` | 1 / 1 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/oam_stress` | 1 / 1 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/other` | 0 / 63 | 0 | 0 | 1 | 62 |
-| `nes-test-roms/pal_apu_tests` | 3 / 10 | 7 | 0 | 0 | 0 |
+| `nes-test-roms/pal_apu_tests` | **10 / 10** | 0 | 0 | 0 | 0 |
 | `nes-test-roms/ppu_open_bus` | 1 / 1 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/ppu_read_buffer` | 1 / 1 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/ppu_vbl_nmi` | 11 / 11 | 0 | 0 | 0 | 0 |
@@ -91,7 +93,7 @@ document is the campaign as MF-T first measured it.
 | `nes-test-roms/scanline-a1` | 0 / 1 | 0 | 0 | 0 | 1 |
 | `nes-test-roms/scrolltest` | 0 / 1 | 0 | 0 | 0 | 1 |
 | `nes-test-roms/soundtest` | 0 / 1 | 0 | 0 | 0 | 1 |
-| `nes-test-roms/sprdma_and_dmc_dma` | 0 / 2 | 2 | 0 | 0 | 0 |
+| `nes-test-roms/sprdma_and_dmc_dma` | **2 / 2** | 0 | 0 | 0 | 0 |
 | `nes-test-roms/sprite_hit_tests_2005.10.05` | 11 / 11 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/sprite_overflow_tests` | 5 / 5 | 0 | 0 | 0 | 0 |
 | `nes-test-roms/spritecans-2011` | 0 / 1 | 0 | 0 | 0 | 1 |
@@ -107,27 +109,27 @@ document is the campaign as MF-T first measured it.
 
 ## Every failure and timeout, with its subsystem
 
-One line per row that is not a pass. The subsystem is what the ROM exercises, which is where a fix would go; MF-T diagnoses and does not fix. **The two `holy-mapperel` SNROM rows that stood here are gone: MF-3 step 1 fixed them.**
+One line per row that is not a pass. The subsystem is what the ROM exercises, which is where a fix would go; MF-T diagnoses and does not fix. **The two `holy-mapperel` SNROM rows that stood here are gone: MF-3 step 1 fixed them.** **The ten DMA and PAL-APU rows that stood here are gone too: lot MF-4a fixed them** — they are kept below, struck through, with what they said before, because the diagnosis is what the lot was given to work from.
 
 **3 of these 15 are required to fail** and are marked as such below: they are the revision A half of a pair of MMC3 tests that contradict each other, and REQ-CORE-100 pins mapper 4 to revision B. In each pair the revision B ROM passes. Counting them as defects would be wrong.
 
 | ROM | Result | Subsystem and reading | What it says |
 |---|---|---|---|
-| `AccuracyCoin/AccuracyCoin.nes` | fail | CPU, PPU and APU together — 89 of 147 pass. Read the per-test table in the JSON: the 22 failures are the five `SH*` stores, `Open Bus`, and most of the DMA and APU-timing pages, and a further 36 are blocked rather than failed. | 89/147 tests passed; stopped the run: Interrupt flag latency (page "CPU Interrupts") — never returned; skipped on a later attempt, PPU Register Mirroring (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Register Open Bus (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Read Buffer (page "PPU Behavior") — to… |
+| `AccuracyCoin/AccuracyCoin.nes` | fail | CPU, PPU and APU together — 89 of 147 pass at MF-T, **93 after MF-4a** (its seven DMA rows and its DMC row went green; see `docs/progress/MF-4a.md` step 3 for the three that did not). Read the per-test table in the JSON: the 22 failures are the five `SH*` stores, `Open Bus`, and most of the DMA and APU-timing pages, and a further 36 are blocked rather than failed. | 89/147 tests passed; stopped the run: Interrupt flag latency (page "CPU Interrupts") — never returned; skipped on a later attempt, PPU Register Mirroring (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Register Open Bus (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Read Buffer (page "PPU Behavior") — to… |
 | `nes-test-roms/blargg_ppu_tests_2005.09.15b/power_up_palette.nes` | fail | PPU palette at power-on. Code `$02`, "palette differs from table" — and the suite's readme says of those reference values that they "are probably unique to my NES", so this is not a defect on its own. Nestopia 1.40 fails it too. | screen: $02 |
-| `nes-test-roms/dmc_dma_during_read4/dma_4016_read.nes` | fail | DMC DMA stealing a read | screen: 08 08 08 08 08 / FBF7C7B1 / dma_4016_read / Failed |
+| ~~`nes-test-roms/dmc_dma_during_read4/dma_4016_read.nes`~~ | **fixed, MF-4a** | DMC DMA stealing a read | screen: 08 08 08 08 08 / FBF7C7B1 / dma_4016_read / Failed |
 | `nes-test-roms/mmc3_irq_tests/5.MMC3_rev_A.nes` | fail | MMC3 IRQ, revision A — **required to fail**. The suite's readme: "The last two ROMs test different revisions of the MMC3, so at most only one will pass on a particular emulator", and `6.MMC3_rev_B` passes. REQ-CORE-100 pins mapper 4 to revision B. | screen: MMC3 IRQ COUNTER REVISION A / FAILED #3 |
 | `nes-test-roms/mmc3_test/6-MMC6.nes` | fail | MMC3/MMC6 IRQ reload once the counter has already reached zero — the revision A behaviour, the other half of the pair whose `5-MMC3` passes. **Required to fail** under REQ-CORE-100's revision B. | IRQ shouldn't occur when reloading after counter normally reaches 0 / 6-MMC6 / Failed #3 (code 3) |
 | `nes-test-roms/mmc3_test_2/rom_singles/6-MMC3_alt.nes` | fail | MMC3 IRQ, revision A — **required to fail**. AMD-061 (answer to Q-114) keeps revision B for every iNES 1.0 mapper-4 image and says REQ-CORE-114, which is this very ROM, stays required. `5-MMC3` passes. | IRQ shouldn't be set when reloading to 0 due to counter naturally reaching 0 previously / 6-MMC3_alt / Failed #2 (code 2) |
-| `nes-test-roms/pal_apu_tests/04.clock_jitter.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU CLOCK JITTER / FAILED: #2 |
-| `nes-test-roms/pal_apu_tests/05.len_timing_mode0.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU MODE 0 LENGTH TIMING / FAILED: #4 |
-| `nes-test-roms/pal_apu_tests/06.len_timing_mode1.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU MODE 1 LENGTH TIMING / FAILED: #5 |
-| `nes-test-roms/pal_apu_tests/07.irq_flag_timing.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU FRAME IRQ FLAG TIMING / FAILED: #2 |
-| `nes-test-roms/pal_apu_tests/08.irq_timing.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU FRAME IRQ TIMING / FAILED: #2 |
-| `nes-test-roms/pal_apu_tests/10.len_halt_timing.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU LENGTH HALT TIMING / FAILED: #5 |
-| `nes-test-roms/pal_apu_tests/11.len_reload_timing.nes` | fail | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU LENGTH RELOAD TIMING / FAILED: #3 |
-| `nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes` | fail | OAM DMA against DMC DMA | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) |
-| `nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes` | fail | OAM DMA against DMC DMA | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) |
+| ~~`nes-test-roms/pal_apu_tests/04.clock_jitter.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU CLOCK JITTER / FAILED: #2 |
+| ~~`nes-test-roms/pal_apu_tests/05.len_timing_mode0.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU MODE 0 LENGTH TIMING / FAILED: #4 |
+| ~~`nes-test-roms/pal_apu_tests/06.len_timing_mode1.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU MODE 1 LENGTH TIMING / FAILED: #5 |
+| ~~`nes-test-roms/pal_apu_tests/07.irq_flag_timing.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU FRAME IRQ FLAG TIMING / FAILED: #2 |
+| ~~`nes-test-roms/pal_apu_tests/08.irq_timing.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU FRAME IRQ TIMING / FAILED: #2 |
+| ~~`nes-test-roms/pal_apu_tests/10.len_halt_timing.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU LENGTH HALT TIMING / FAILED: #5 |
+| ~~`nes-test-roms/pal_apu_tests/11.len_reload_timing.nes`~~ | **fixed, MF-4a** | APU frame sequencer under **PAL** timing. The suite's readme calls it "PAL NES APU Tests [...] tested on a PAL NES", though its files carry NTSC headers, so the harness runs it on a PAL console; 3 of its 10 pass. | screen: APU LENGTH RELOAD TIMING / FAILED: #3 |
+| ~~`nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes`~~ | **fixed, MF-4a** | OAM DMA against DMC DMA | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) |
+| ~~`nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes`~~ | **fixed, MF-4a** | OAM DMA against DMC DMA | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) |
 
 ## Every ROM, by suite
 
@@ -370,13 +372,13 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 
 ### `nes-test-roms/dmc_dma_during_read4`
 
-**2 passed of 5** (1 fail, 2 manual)
+**3 passed of 5** (2 manual)
 
 | ROM | Result | What the ROM says | NESICIDE | Nestopia 1.40 | Nintendulator 0.975 |
 |---|---|---|---|---|---|
-| `dma_2007_read.nes` | manual | screen (no documented verdict): 11 22 / 11 22 / 11 22 / 11 22 / 11 22 / 498C5C5F | PASS | PASS |  |
+| `dma_2007_read.nes` | manual | screen (no documented verdict): 11 22 / 11 22 / 44 55 / 11 22 / 11 22 / 5E3DF9C4 — one of the two outputs its own source names | PASS | PASS |  |
 | `dma_2007_write.nes` | pass | screen: 11 11 AA 33 44 55 66 77 / 11 11 AA 33 44 55 66 77 / 11 11 AA 33 44 55 66 77 / 11 11 AA 33 44 55 66 77 / 11 11 AA 33 44 55 66 77 / dma_2007_write / Passed | PASS | PASS |  |
-| `dma_4016_read.nes` | fail | screen: 08 08 08 08 08 / FBF7C7B1 / dma_4016_read / Failed | FAIL | PASS |  |
+| `dma_4016_read.nes` | pass | screen: 08 08 07 08 08 / dma_4016_read / Passed | FAIL | PASS |  |
 | `double_2007_read.nes` | manual | screen (no documented verdict): 22 33 44 55 66 / 33 44 55 66 77 / D84F6815 | FAIL | FAIL |  |
 | `read_write_2007.nes` | pass | screen: 33 11 22 33 09 55 66 77 / 33 11 22 33 09 55 66 77 / read_write_2007 / Passed | PASS | PASS |  |
 
@@ -692,20 +694,20 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 
 ### `nes-test-roms/pal_apu_tests`
 
-**3 passed of 10** (7 fail)
+**10 passed of 10**
 
 | ROM | Result | What the ROM says | NESICIDE | Nestopia 1.40 | Nintendulator 0.975 |
 |---|---|---|---|---|---|
 | `01.len_ctr.nes` | pass | screen: APU LENGTH COUNTER / PASSED | PASS | PASS |  |
 | `02.len_table.nes` | pass | screen: APU LENGTH TABLE / PASSED | PASS | PASS |  |
 | `03.irq_flag.nes` | pass | screen: APU FRAME IRQ FLAG / PASSED | PASS | PASS |  |
-| `04.clock_jitter.nes` | fail | screen: APU CLOCK JITTER / FAILED: #2 | PASS | PASS |  |
-| `05.len_timing_mode0.nes` | fail | screen: APU MODE 0 LENGTH TIMING / FAILED: #4 | PASS | PASS |  |
-| `06.len_timing_mode1.nes` | fail | screen: APU MODE 1 LENGTH TIMING / FAILED: #5 | PASS | PASS |  |
-| `07.irq_flag_timing.nes` | fail | screen: APU FRAME IRQ FLAG TIMING / FAILED: #2 | PASS | PASS |  |
-| `08.irq_timing.nes` | fail | screen: APU FRAME IRQ TIMING / FAILED: #2 | PASS | PASS |  |
-| `10.len_halt_timing.nes` | fail | screen: APU LENGTH HALT TIMING / FAILED: #5 | PASS | PASS |  |
-| `11.len_reload_timing.nes` | fail | screen: APU LENGTH RELOAD TIMING / FAILED: #3 | PASS | PASS |  |
+| `04.clock_jitter.nes` | pass | screen: APU CLOCK JITTER / PASSED | PASS | PASS |  |
+| `05.len_timing_mode0.nes` | pass | screen: APU MODE 0 LENGTH TIMING / PASSED | PASS | PASS |  |
+| `06.len_timing_mode1.nes` | pass | screen: APU MODE 1 LENGTH TIMING / PASSED | PASS | PASS |  |
+| `07.irq_flag_timing.nes` | pass | screen: APU FRAME IRQ FLAG TIMING / PASSED | PASS | PASS |  |
+| `08.irq_timing.nes` | pass | screen: APU FRAME IRQ TIMING / PASSED | PASS | PASS |  |
+| `10.len_halt_timing.nes` | pass | screen: APU LENGTH HALT TIMING / PASSED | PASS | PASS |  |
+| `11.len_reload_timing.nes` | pass | screen: APU LENGTH RELOAD TIMING / PASSED | PASS | PASS |  |
 
 ### `nes-test-roms/ppu_open_bus`
 
@@ -786,12 +788,12 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 
 ### `nes-test-roms/sprdma_and_dmc_dma`
 
-**0 passed of 2** (2 fail)
+**2 passed of 2**
 
 | ROM | Result | What the ROM says | NESICIDE | Nestopia 1.40 | Nintendulator 0.975 |
 |---|---|---|---|---|---|
-| `sprdma_and_dmc_dma.nes` | fail | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) | PASS | FAIL |  |
-| `sprdma_and_dmc_dma_512.nes` | fail | B8EA17D9 / SPRDMA and DMC DMA / Failed (code 1) | PASS | FAIL |  |
+| `sprdma_and_dmc_dma.nes` | pass | 0F 526 / SPRDMA and DMC DMA / Passed | PASS | FAIL |  |
+| `sprdma_and_dmc_dma_512.nes` | pass | 0F 528 / SPRDMA and DMC DMA / Passed | PASS | FAIL |  |
 
 ### `nes-test-roms/sprite_hit_tests_2005.10.05`
 
@@ -999,3 +1001,59 @@ is not a mapper: "Corrupt header: missing iNES signature".
 groups, failures included, when `ZAXNES_TEST_ROMS` points at a copy of `assets-free/test-roms/`.
 MF-3 flipped its eight `holy-mapperel` expectations and left the three required MMC3 failures
 alone, so all forty `holy-mapperel` rows now read `Outcome::Pass` there.
+
+## What lot MF-4a changed
+
+MF-4a is the first lot on the NES core itself: the DMA units and the APU's frame counter. It
+moved **ten** rows from `fail` to `pass`, and nothing in either direction anywhere else.
+
+| ROM | before | after |
+|---|---|---|
+| `nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes` | fail — `B8EA17D9 / Failed (code 1)` | **pass** — `0F 526 / Passed` |
+| `nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes` | fail — `B8EA17D9 / Failed (code 1)` | **pass** — `0F 528 / Passed` |
+| `nes-test-roms/dmc_dma_during_read4/dma_4016_read.nes` | fail — `08 08 08 08 08 / FBF7C7B1` | **pass** — `08 08 07 08 08` |
+| `nes-test-roms/pal_apu_tests/04.clock_jitter.nes` | fail — `FAILED: #2` | **pass** |
+| `nes-test-roms/pal_apu_tests/05.len_timing_mode0.nes` | fail — `FAILED: #4` | **pass** |
+| `nes-test-roms/pal_apu_tests/06.len_timing_mode1.nes` | fail — `FAILED: #5` | **pass** |
+| `nes-test-roms/pal_apu_tests/07.irq_flag_timing.nes` | fail — `FAILED: #2` | **pass** |
+| `nes-test-roms/pal_apu_tests/08.irq_timing.nes` | fail — `FAILED: #2` | **pass** |
+| `nes-test-roms/pal_apu_tests/10.len_halt_timing.nes` | fail — `FAILED: #5` | **pass** |
+| `nes-test-roms/pal_apu_tests/11.len_reload_timing.nes` | fail — `FAILED: #3` | **pass** |
+
+Totals: **204 pass / 15 fail → 214 pass / 5 fail**, and the five left are `AccuracyCoin`,
+`power_up_palette` — whose own readme says its reference values "are probably unique to my NES"
+— and the three MMC3 revision A ROMs that are **required to fail** under REQ-CORE-100.
+
+Two rows that stay `manual` changed what they print, both for the better:
+
+| ROM | before | after |
+|---|---|---|
+| `dmc_dma_during_read4/dma_2007_read.nes` | `11 22 / 11 22 / 11 22 / 11 22 / 11 22 / 498C5C5F` | `11 22 / 11 22 / 44 55 / 11 22 / 11 22 / 5E3DF9C4` |
+
+Its own source says the output "depends on CPU-PPU synchronization at reset" and names two
+acceptable results with their CRCs; it printed neither before — five identical lines is the
+"the DMC DMA made no extra `$2007` read" answer — and it now prints the second of them exactly.
+It stays `manual` because the harness has no single verdict to read, not because it is wrong.
+`double_2007_read.nes` is unchanged; its second line comes from the PPU's read buffer on two
+`$2007` reads inside one instruction, which is lot MF-4b's ground, not the DMA's.
+
+`AccuracyCoin` stays a `fail` row, but eight of its 147 tests moved — seven of them its whole
+DMA page — and it goes from **89 to 93** passing with the same set of tests blocking the run
+before and after. `docs/progress/MF-4a.md` step 3 has the per-test table and a diagnosis for
+each of the three DMA tests that still fail.
+
+### The suites that did not move, and were checked
+
+`cpu_interrupts_v2` 6/6 (including `4-irq_and_dma`), `cpu_timing_test6`, `instr_timing` 3/3,
+`branch_timing_tests` 3/3, `cpu_dummy_reads`, `cpu_dummy_writes` 2/2, `cpu_exec_space` 2/2,
+`cpu_reset` 2/2, `instr_misc` 5/5, `nes_instr_test` 11/11, `instr_test-v3` 17/17,
+`instr_test-v5` 18/18, `oam_read`, `oam_stress`, `apu_test` 9/9,
+`blargg_apu_2005.07.30` 11/11, `apu_reset` 6/6, `apu_mixer` 4/4, `holy-mapperel` 40/40,
+`ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `sprite_hit_tests_2005.10.05` 11/11,
+`sprite_overflow_tests` 5/5, `ppu_open_bus`, `ppu_read_buffer`, `read_joy3`, and the three MMC3
+suites at 5/6 each with their required failure.
+
+`cpu_interrupts_v2/4-irq_and_dma` is the one worth naming: it times an OAM DMA against an IRQ,
+and it still passes although the 513 or 514 stolen cycles are now charged to the instruction
+*after* the `STA $4014` rather than to the `STA` itself — which is where the hardware puts them,
+the DMA unit being unable to halt the CPU on a write.

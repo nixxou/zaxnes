@@ -256,3 +256,221 @@ fn holy_mapperel_detects_every_supported_board() {
 
     check("holy-mapperel", &EXPECTED);
 }
+
+/// The two OAM-against-DMC ROMs lot MF-4a turned green (REQ-CORE-113).
+#[test]
+fn req_core_113_an_oam_transfer_and_a_dmc_fetch_share_the_bus() {
+    const EXPECTED: [(&str, Outcome); 2] = [
+        (
+            "nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("sprdma_and_dmc_dma", &EXPECTED);
+}
+
+/// A DMC fetch that halts the CPU mid-read (REQ-CORE-113).
+///
+/// `dma_2007_read` and `double_2007_read` are `manual` because neither prints a verdict the
+/// harness can read; they are listed so that a change to either shows up here. The first names
+/// two acceptable outputs in its own source, of which this core prints the second; the second
+/// is a PPU read-buffer row, not a DMA one.
+#[test]
+fn req_core_113_the_halt_cycle_repeats_the_read_it_interrupted() {
+    const EXPECTED: [(&str, Outcome); 5] = [
+        (
+            "nes-test-roms/dmc_dma_during_read4/dma_2007_read.nes",
+            Outcome::Manual,
+        ),
+        (
+            "nes-test-roms/dmc_dma_during_read4/dma_2007_write.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/dmc_dma_during_read4/dma_4016_read.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/dmc_dma_during_read4/double_2007_read.nes",
+            Outcome::Manual,
+        ),
+        (
+            "nes-test-roms/dmc_dma_during_read4/read_write_2007.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("dmc_dma_during_read4", &EXPECTED);
+}
+
+/// The frame sequencer on a PAL console (REQ-CORE-015, REQ-CORE-111). The harness runs this
+/// suite on a PAL console because its own readme says it was "tested on a PAL NES", though its
+/// files carry NTSC headers. Seven of these ten were failing before lot MF-4a.
+#[test]
+fn req_core_015_the_frame_sequencer_passes_on_a_pal_console() {
+    const EXPECTED: [(&str, Outcome); 10] = [
+        ("nes-test-roms/pal_apu_tests/01.len_ctr.nes", Outcome::Pass),
+        (
+            "nes-test-roms/pal_apu_tests/02.len_table.nes",
+            Outcome::Pass,
+        ),
+        ("nes-test-roms/pal_apu_tests/03.irq_flag.nes", Outcome::Pass),
+        (
+            "nes-test-roms/pal_apu_tests/04.clock_jitter.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/05.len_timing_mode0.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/06.len_timing_mode1.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/07.irq_flag_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/08.irq_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/10.len_halt_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/pal_apu_tests/11.len_reload_timing.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("pal_apu_tests", &EXPECTED);
+}
+
+/// The NTSC half of the same question: the PAL table and the NTSC one are separate, and a lot
+/// that touches either must leave the other alone (REQ-CORE-111).
+#[test]
+fn req_core_111_the_ntsc_frame_sequencer_does_not_move_with_the_pal_one() {
+    const EXPECTED: [(&str, Outcome); 11] = [
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/01.len_ctr.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/02.len_table.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/03.irq_flag.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/04.clock_jitter.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/05.len_timing_mode0.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/06.len_timing_mode1.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/07.irq_flag_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/08.irq_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/09.reset_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/10.len_halt_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/blargg_apu_2005.07.30/11.len_reload_timing.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("blargg_apu_2005.07.30", &EXPECTED);
+}
+
+/// blargg's later APU suite, whose 7 and 8 are the DMC's own tests (REQ-CORE-113).
+#[test]
+fn req_core_113_the_apu_and_dmc_suite_passes() {
+    const EXPECTED: [(&str, Outcome); 9] = [
+        ("nes-test-roms/apu_test/apu_test.nes", Outcome::Pass),
+        (
+            "nes-test-roms/apu_test/rom_singles/1-len_ctr.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/2-len_table.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/3-irq_flag.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/4-jitter.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/5-len_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/6-irq_flag_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/7-dmc_basics.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_test/rom_singles/8-dmc_rates.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("apu_test/", &EXPECTED);
+}
+
+/// `4017_timing` pins the convention every DMA alignment in this core is built on: the
+/// sequencer reset lands three CPU cycles after a `$4017` write made during an APU cycle and
+/// four otherwise (REQ-CORE-004, REQ-CORE-111).
+#[test]
+fn req_core_004_the_apu_comes_back_from_reset_where_it_should() {
+    const EXPECTED: [(&str, Outcome); 6] = [
+        ("nes-test-roms/apu_reset/4015_cleared.nes", Outcome::Pass),
+        ("nes-test-roms/apu_reset/4017_timing.nes", Outcome::Pass),
+        ("nes-test-roms/apu_reset/4017_written.nes", Outcome::Pass),
+        (
+            "nes-test-roms/apu_reset/irq_flag_cleared.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_reset/len_ctrs_enabled.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/apu_reset/works_immediately.nes",
+            Outcome::Pass,
+        ),
+    ];
+
+    check("apu_reset", &EXPECTED);
+}
