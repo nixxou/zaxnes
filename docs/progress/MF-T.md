@@ -23,7 +23,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 - [x] 5/10 — `--markdown` report generator, with the reference column taken from
   `nes-test-roms/status.txt`.
 - [x] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
-- [ ] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
+- [x] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
 - [ ] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
 - [ ] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
 - [ ] 10/10 — journal entry and close.
@@ -182,5 +182,41 @@ Run on subsets, not on the whole directory, so neither of the two campaign runs 
 
 ### Campaign runs
 
-- Run 1/2 (step 7): debug pass over the whole directory.
+- **Run 1/2 (step 7), done.** 331 ROMs in 4 min 21 s: 185 pass, 17 fail, 0 timeout,
+  7 unsupported, 122 manual. It found two harness faults, both fixed before run 2.
 - Run 2/2 (step 8): the run the committed report comes from.
+
+### What run 1 found, and the two fixes
+
+1. **The PAL suite was being run on an NTSC console.** `nes-test-roms/pal_apu_tests/` is, in
+   its own readme, "PAL NES APU Tests [...] tested on a PAL NES and all give a passing
+   result" — and all ten files carry a plain NTSC header, so nothing in the ROM says so. Worse,
+   the harness was not applying the region at all: `NesCore` detects it but deliberately does
+   not apply it (REQ-CORE-013 leaves that to the host, so a player's choice beats a header),
+   and the harness *is* the host here. It now calls `set_region` with the detected region, and
+   overrides it to PAL for that one suite, on the authority of the suite's own readme and
+   directory name. The region used is recorded in every row.
+   The seven failures **survive** the fix but their codes change (`#2 #2 #2 #2 #3 #2 #2` under
+   NTSC, `#2 #4 #5 #2 #2 #5 #3` under PAL), which is the proof the timing really changed: they
+   are genuine PAL APU frame-sequencer failings, not an artefact. 3 of 10 pass.
+2. **The screen fallback was eating the budget.** A ROM that never arms `$6000` fell through
+   to the screen reader with the whole two-minute budget, and the animated demos of
+   `nes-test-roms/other/` never settle, so each burned all 7 200 frames for a `manual` row.
+   The fallback is now capped at 1 800 frames; every suite that reports on screen settles
+   inside four to nine seconds, so nothing is lost.
+
+### Findings for later lots (this lot does not fix emulation)
+
+* **MMC3 IRQ reload when the counter has already reached zero** — three ROMs, one behaviour:
+  `mmc3_test/6-MMC6` (#3), `mmc3_test_2/rom_singles/6-MMC3_alt` (#2),
+  `mmc3_irq_tests/5.MMC3_rev_A` (#3). All say an IRQ fires on a reload that should not fire.
+* **OAM DMA against DMC DMA** — `sprdma_and_dmc_dma` and `sprdma_and_dmc_dma_512`, both
+  code 1 with the same checksum; `dmc_dma_during_read4/dma_4016_read` fails too.
+* **PAL APU frame sequencer** — seven of the ten `pal_apu_tests`.
+* **MMC1 SNROM WRAM disable** — the two Holy Mapperel SNROM boards, `4000`.
+* **`AccuracyCoin`** — see its section above.
+* `blargg_ppu_tests_2005.09.15b/power_up_palette` reports `$02`, "palette differs from table";
+  its readme says those reference values "are probably unique to my NES", so it is not a
+  defect on its own.
+* `nes-test-roms/other/LINUSMUS.NES` has no iNES signature (its sibling is `LINUS.NSF`), so it
+  is `unsupported` on format, correctly.

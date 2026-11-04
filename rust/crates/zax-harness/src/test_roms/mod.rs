@@ -34,7 +34,7 @@ use std::time::Instant;
 
 use serde_json::{json, Map, Value};
 use zax_nes::rom::InesHeader;
-use zax_nes::NesCore;
+use zax_nes::{NesCore, NesRegion};
 
 use crate::HarnessError;
 
@@ -378,17 +378,32 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
         };
     }
 
+    // The core detects the region but does not apply it: REQ-CORE-013 leaves that to the host,
+    // because a player's choice must win over a header. Here the harness *is* the host, and a
+    // ROM made for one console has to be run on that console or its result means nothing.
+    let region = region_of(name, load.region);
+    core.set_region(region);
+    result
+        .detail
+        .insert("region".into(), json!(format!("{region:?}")));
+
     core.reset();
     let plan = Plan::of(name, frame_cap);
     let verdict = match plan.protocol {
         Protocol::BlarggThenScreen => match blargg::run(&mut core, plan.frames) {
             blargg::Read::Verdict(verdict) => verdict,
             // The ROM never armed the protocol, so it is one of the suites that only draws its
-            // result. The frames already spent probing count towards the budget.
-            blargg::Read::NoProtocol { frames } => {
-                screen::run(&mut core, plan.frames.saturating_sub(frames), plan.screen)
-                    .after(frames)
-            }
+            // result. The frames already spent probing count towards the budget, and the rest
+            // is capped: a result screen appears in seconds, while the demos of
+            // `nes-test-roms/other/` never settle at all and would each eat the full budget.
+            blargg::Read::NoProtocol { frames } => screen::run(
+                &mut core,
+                plan.frames
+                    .saturating_sub(frames)
+                    .min(screen::FALLBACK_BUDGET),
+                plan.screen,
+            )
+            .after(frames),
         },
         Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
         Protocol::Mapperel => mapperel::run(&mut core, result.mapper, plan.frames),
@@ -400,7 +415,7 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
     result.code = verdict.code;
     result.message = verdict.message;
     result.frames = verdict.frames;
-    result.detail = verdict.detail;
+    result.detail.extend(verdict.detail);
     result.milliseconds = elapsed_ms(started);
 
     let mut frame = Vec::new();
@@ -518,6 +533,22 @@ fn write_shot(dir: &Path, name: &str, frame: &[u8]) -> Result<Option<String>, Ha
     Ok(file
         .file_name()
         .map(|file| file.to_string_lossy().into_owned()))
+}
+
+/// Which console the ROM at relative path `name` is to be run on.
+///
+/// `detected` is what the header says, which is right for almost everything. One suite is
+/// not: `nes-test-roms/pal_apu_tests/` is, in the words of its own readme, "PAL NES APU
+/// Tests [...] tested on a PAL NES and all give a passing result", yet every one of its ten
+/// files carries a plain NTSC header. Run under NTSC they measure the wrong frame sequencer
+/// and seven of the ten report a failure that says nothing about Zaxnes. The directory name
+/// and the readme agree, so the suite is run on the console it was written for.
+fn region_of(name: &str, detected: NesRegion) -> NesRegion {
+    if name.to_ascii_lowercase().contains("pal_apu_tests") {
+        NesRegion::Pal
+    } else {
+        detected
+    }
 }
 
 /// The suite a ROM is grouped under: the first two path components of the community

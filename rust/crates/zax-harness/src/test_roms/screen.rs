@@ -184,6 +184,15 @@ pub fn is_screen_rom(lower: &str) -> bool {
     lower.contains("holy-mapperel") || lower.contains("accuracycoin")
 }
 
+/// Frames given to a ROM that fell through to the screen reader because it never armed the
+/// `$6000` protocol.
+///
+/// Thirty seconds of emulated time. Every suite that reports on screen has drawn its result
+/// well inside that — the 2005 suites in about four seconds, Holy Mapperel in nine — while the
+/// demos of `nes-test-roms/other/` are animations that never settle and would otherwise each
+/// run the full two-minute budget for a `manual` row either way.
+pub const FALLBACK_BUDGET: u32 = 1_800;
+
 /// The frame budget of the screen ROM at relative path `lower` (lower-cased).
 #[must_use]
 pub fn frame_budget(lower: &str) -> u32 {
