@@ -43,10 +43,30 @@ pub(crate) struct BoardMemorySizes {
     pub min_prg_ram: usize,
 }
 
+/// Which of the two mapper-34 boards a dump is (nesdev, "INES Mapper 034"): "Submapper 1
+/// denotes the NINA-001/NINA-002 circuit board", "Submapper 2 denotes the I-IM/BNROM circuit
+/// board", and "In the absence of valid submapper information, mapper 34 .NES files should be
+/// considered BNROM when the CHR-ROM size is 0-8 KiB, and NINA-001/NINA-002 when the CHR-ROM
+/// size is above 8 KiB". The submapper takes precedence over the size (MR-34-1).
+#[must_use]
+pub(crate) fn mapper_34_is_nina(header: &InesHeader) -> bool {
+    if header.is_nes20 && (header.submapper == 1 || header.submapper == 2) {
+        return header.submapper == 1;
+    }
+
+    header.chr_rom_size > 8 * 1024
+}
+
 /// The volatile-memory sizes of `mapper`'s board for `header`.
 #[must_use]
 pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemorySizes {
     match mapper {
+        // MR-34-2, nesdev ("INES Mapper 034"): the NINA boards have "8 KiB of unbanked
+        // PRG-RAM" at $6000-$7FFF and the BNROM has none, so that window is open bus there.
+        34 if !mapper_34_is_nina(header) => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // MR-4-6, nesdev ("MMC6"): the chip "contains 1 KB of internal PRG RAM", at "CPU
         // $7000-$7FFF: 1 KB PRG RAM, mirrored". The header of a StarTropics dump describes
         // the 8 KiB every other mapper-4 board has.

@@ -195,7 +195,6 @@ fn mr_41_3_caltron_inner_chr_is_gated_on_the_prg_bank() {
 /// (`multicart.rs:80-89`), so on a CHR-RAM mapper-34 image a PRG-RAM write in the last
 /// three bytes of $7FFF silently switches the 32 KiB PRG bank.
 #[test]
-#[ignore = "MR-1: MR-34-1"]
 fn mr_34_1_bnrom_has_no_register_at_7ffd() {
     // No CHR-ROM: this is a BNROM, not a NINA-001.
     let mut core = MapperRom::new(34).prg(8).chr(0).load();
@@ -206,13 +205,43 @@ fn mr_34_1_bnrom_has_no_register_at_7ffd() {
     assert_eq!(
         [0, 1, 2, 3],
         core.prg_windows(),
-        "$7FFD is PRG-RAM on a BNROM board, not the PRG bank register"
+        "a BNROM board has no register at $7FFD"
     );
+    // MR-1's test asserted the write reached PRG-RAM here. MR-34-2, found in lot MR-1b, says
+    // the board has no work RAM at all — "8 KiB of unbanked PRG-RAM" is the NINA boards' — so
+    // the window is open bus and the write lands nowhere.
     assert_eq!(
-        0x01,
-        core.read_memory(0x7FFD),
-        "the write still reaches RAM"
+        None,
+        core.cartridge().unwrap().try_cpu_peek(0x7FFD),
+        "a BNROM has no work RAM: $6000-$7FFF is open bus"
     );
+}
+
+/// MR-34-1's other half: the NINA-001 keeps its three registers, and the board is resolved
+/// from the submapper when the dump declares one, from the CHR-ROM size otherwise — "BNROM
+/// when the CHR-ROM size is 0-8 KiB, and NINA-001/NINA-002 when the CHR-ROM size is above
+/// 8 KiB".
+#[test]
+fn mr_34_1_the_board_comes_from_the_submapper_then_from_the_chr_size() {
+    // 8 KiB of CHR-ROM with no submapper is a BNROM, where MR-1's `is_empty()` test said NINA.
+    let mut core = MapperRom::new(34).prg(8).chr(8).load();
+    core.mapper_write(0x7FFD, 0x01);
+    assert_eq!(
+        [0, 1, 2, 3],
+        core.prg_windows(),
+        "8 KiB of CHR-ROM is BNROM"
+    );
+
+    // The same image with submapper 1 is a NINA-001, registers and work RAM included.
+    let mut core = MapperRom::new(34).prg(8).chr(8).submapper(1).load();
+    core.mapper_write(0x7FFD, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "submapper 1 is NINA-001");
+    assert_eq!(Some(0x01), core.cartridge().unwrap().try_cpu_peek(0x7FFD));
+
+    // And submapper 2 is a BNROM however large its CHR-ROM.
+    let mut core = MapperRom::new(34).prg(8).chr(32).submapper(2).load();
+    core.mapper_write(0x7FFD, 0x01);
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "submapper 2 is BNROM");
 }
 
 // ================================================================ mapper 30, UNROM 512

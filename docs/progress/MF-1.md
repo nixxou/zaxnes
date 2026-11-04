@@ -23,7 +23,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
 - [x] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
 - [x] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
-- [ ] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
+- [x] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
 - [ ] 8/10 — MR-32-1, MR-156-1, MR-16-1
 - [ ] 9/10 — MR-13-1, MR-13-2, MR-15-1, MR-225-1, MR-4-9, MR-30-1, MR-30-2, MR-30-3, MR-30-5
 - [ ] 10/10 — full suite, the `--ignored` list, the R0 table and the review annotations
@@ -61,6 +61,8 @@ because a step cannot write its own commit hash.
 | MR-1-5 | `registry.rs:75-81` + `mod.rs:330-345` | `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed`, `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` | **Genghis Khan, Nobunaga's Ambition**: the battery file shrinks from 16 KiB to 8 |
 | MR-21-1 | `vrc2_vrc4.rs:138-147` (the variant's lines) | `mr_21_1_vrc2a_uses_the_exact_register_wiring`, `mr_21_3_every_vrc_variant_decodes_its_own_address_lines` | **Twinbee, Gradius** (mapper 22) |
 | MR-21-2 | `vrc2_vrc4.rs:229-241` (`is_vrc2`) | `mr_21_2_vrc2a_has_no_prg_swap_mode`, `req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two` | **Twinbee, Gradius**; any VRC2a title writing $9002-$9003 |
+| MR-34-1 | `registry.rs:30-41` + `multicart.rs:30-55`, `:92-101` | `mr_34_1_bnrom_has_no_register_at_7ffd`, `mr_34_1_the_board_comes_from_the_submapper_then_from_the_chr_size` | BNROM titles that write near $7FFF (Deadly Towers, Mashou-like CHR-RAM dumps); an 8 KiB-CHR-ROM mapper-34 dump now resolves to BNROM |
+| MR-34-2 (work-RAM half only) | `registry.rs:55-60` (`prg_ram: Some(0)`) | `mr_34_1_bnrom_has_no_register_at_7ffd` | BNROM titles reading $6000-$7FFF |
 | MR-21-3 | `vrc2_vrc4.rs:6-64` (the variant table) | `mr_21_3_every_vrc_variant_decodes_its_own_address_lines`, `mr_21_3_submapper_zero_keeps_the_ord_heuristic`, `mr_21_3_a_declared_vrc2b_has_no_irq_counter` | only submapper-tagged 21/23/25 dumps, and mapper 27 (now the exact VRC4\_27 wiring instead of the mapper-23 heuristic) |
 
 ### Step 1 notes
@@ -182,3 +184,24 @@ because a step cannot write its own commit hash.
 - `chr_high_mask` still keys on mapper 27 and the VRC2 mirroring stays a one-bit field: both
   are **AMD-021 R2-004** accepted divergences, not findings.
 - No state added, so save states are unaffected: the new fields are derived from the ROM.
+
+### Step 7 notes
+
+- The two mapper-34 boards are now distinguished by a load-time field, from
+  `registry::mapper_34_is_nina`: **the submapper first** ("Submapper 1 denotes the
+  NINA-001/NINA-002 circuit board", "Submapper 2 denotes the I-IM/BNROM circuit board"), then
+  the CHR-ROM size, "BNROM when the CHR-ROM size is 0-8 KiB". Both refinements MR-1b added to
+  MR-1's proposal are in: the threshold is 8 KiB rather than "empty", and the submapper wins.
+  An 8 KiB-CHR-ROM mapper-34 dump therefore changes board, which is the point of the fix.
+- `update_banks` keys its CHR layout on the board rather than on `chr_rom().is_empty()`, so a
+  BNROM with 8 KiB of CHR-ROM is unbanked as the board is ("fixed 8 KiB CHR-ROM/RAM").
+- **The work-RAM half of MR-34-2 is done; its bus-conflict half is not** — that one extends
+  MR-BUS-1 and belongs to lot MF-2, as the lot brief says. A BNROM now allocates no PRG-RAM, so
+  `Cartridge::default_cpu_read` falls through to `BankWindows::read_prg`, which answers `None`
+  below $8000: the window is open bus.
+- **MR-1's `mr_34_1_bnrom_has_no_register_at_7ffd` had an assertion MR-34-2 contradicts.** It
+  ended with "the write still reaches RAM" at $7FFD; the board has no RAM there at all, so that
+  line now asserts open bus instead. MR-1b did not reconcile the two findings, and this lot
+  fixes both.
+- No state added. A BNROM save state written before this lot carries an 8 KiB PRG-RAM blob,
+  which `read_blob_prefix_into` (step 2) drops into a zero-length buffer without complaining.

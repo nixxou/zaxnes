@@ -13,10 +13,15 @@ const fn horizontal_if(bit: bool) -> NametableMirroring {
     }
 }
 
-/// iNES mapper 34 (BNROM and NINA-001): registers at $7FFD-$7FFF and a PRG latch at $8000.
+/// iNES mapper 34, two different boards (nesdev, "INES Mapper 034"): the **NINA-001/NINA-002**
+/// has a PRG register at $7FFD and two 4 KiB CHR registers at $7FFE-$7FFF, plus "8 KiB of
+/// unbanked PRG-RAM" at $6000-$7FFF; the **I-IM/BNROM** has one register over $8000-$FFFF, a
+/// fixed 8 KiB of CHR and no work RAM at all. Which board a dump is comes from
+/// [`crate::cartridges::registry::mapper_34_is_nina`] (MR-34-1, MR-34-2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapper034 {
     banks: BankWindows,
+    is_nina: bool,
     prg_bank: u8,
     chr_low: u8,
     chr_high: u8,
@@ -26,19 +31,22 @@ impl Mapper034 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
+            is_nina: crate::cartridges::registry::mapper_34_is_nina(memory.rom().header()),
             prg_bank: 0,
             chr_low: 0,
             chr_high: 1,
         }
     }
 
-    fn update_banks(&mut self, memory: &CartridgeMemory) {
+    fn update_banks(&mut self, _memory: &CartridgeMemory) {
         self.banks.map_prg_32k(i32::from(self.prg_bank));
-        if memory.rom().chr_rom().is_empty() {
-            self.banks.map_chr_8k(0);
-        } else {
+        if self.is_nina {
             self.banks.map_chr_4k(0, i32::from(self.chr_low));
             self.banks.map_chr_4k(4, i32::from(self.chr_high));
+        } else {
+            // BNROM carries "fixed 8 KiB CHR-ROM/RAM": an 8 KiB CHR-ROM dump of the board is
+            // still unbanked, which the old `chr_rom().is_empty()` test got wrong.
+            self.banks.map_chr_8k(0);
         }
     }
 }
@@ -70,13 +78,19 @@ impl Mapper for Mapper034 {
         self.update_banks(memory);
     }
 
-    // The NINA-001 registers also write through to the PRG-RAM underneath.
+    // The NINA-001 registers also write through to the PRG-RAM underneath. MR-34-1: a BNROM
+    // "has no registers at those addresses", so there is nothing to intercept on that board —
+    // and nothing underneath either, since it has no work RAM (MR-34-2).
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
         address: u16,
         value: u8,
     ) -> bool {
+        if !self.is_nina {
+            return false;
+        }
+
         match address {
             0x7FFD => self.prg_bank = value,
             0x7FFE => self.chr_low = value,
