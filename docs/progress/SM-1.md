@@ -14,8 +14,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 3 | OpenGL: the two tables and the depth edge detection | done — `beb3ac0d` |
 | 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | done — `0badc10e` |
 | 5 | `wgpu`: the three passes, the lifecycle, the fallback | done — `f40c7471` |
-| 6 | The parity measurements and the costs | done — this commit |
-| 7 | Closing: notes, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, release build | todo |
+| 6 | The parity measurements and the costs | done — `13d70162` |
+| 7 | Closing: notes, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, release build | done — this commit |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -849,13 +849,85 @@ memory and samples rather than milliseconds:
 
 No campaign was run: 24 benches of 68 frames each, at two scenes, in one session.
 
-### What is left for R0
+### Step 7 — closing
 
-Nothing yet beyond the libretro decision above and the three questions of **Q-109** (the depth
-threshold, the HUD clause of REQ-SCN-085, and the 2D mode). The closing section of AMD-060 is R0's;
-what R0 needs will be gathered here in step 7.
+`rust/docs/PERFORMANCE-HISTORY.md` gains an SM-1 entry in §5.4 (the cost tables of step 6, the
+instruction count, the byte-identity against `1a1086c`, and the comparison-sign finding written as
+a lesson), and its §10 porting checklist gains two clauses: the `wgpu` row says that where a
+mirrored `y` metric carries a convention **every comparison against a coordinate has to be
+multiplied through by it**, and the OpenGL shader row names the three SMAA passes and
+`amd060_smaa_tests.rs`.
 
-One thing R0 should know now rather than in step 7: **the figures of step 4's own table are
-superseded by step 5's** (the dead vertical searches), and the cost figures of step 6 are therefore
-measured on the fixed filter. Step 4's instruction counts, byte counts and pass counts are
-unaffected.
+The MIT notice of `iryoku/smaa` was written in step 3 and already names both shader paths, the two
+committed tables and their hashes — nothing to add.
+
+#### Full test run of the lot
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean. In release, one crate at a time, in the foreground:
+
+| Crate | Suites | Tests | Failures |
+|---|---|---|---|
+| `zax-nes` | 39 | 518 | 0 |
+| `zax-engine3d` | 3 | 235 | 0 |
+| `zax-settings` | 11 | 260 | 0 |
+| `zax-profiles` | 3 | 177 (56 ignored, asset-dependent) | 0 |
+| `zax-scripting` | 3 | 172 | 0 |
+| `zax-goldens` | 2 | 3 | 0 |
+| `zax-render --features wgpu` | 36 | 345 | 0 |
+| `zax-harness --features wgpu` | 13 | 80 | 0 |
+| `zax-app --features bundled,wgpu` | 56 | 749 | 0 |
+
+The release executable is in `rust/target-sm/release/zaxnes.exe`, built from this commit with
+`--features zax-app/bundled,zax-app/wgpu` (18.9 MB).
+
+### What AMD-060's closing section needs, for R0
+
+The closing section of AMD-060 is R0's to write; this is what it needs, gathered.
+
+**1. What was built.** `video.anti_alias` has four rungs; the fourth renders the scene
+single-sample and runs the three passes of SMAA 1x with the reference's **depth** edge detection,
+on both backends of REQ-SCN-056, in linear space, after the screen passes of AMD-055 and the
+transparent objects and before the HUD. The two precomputed tables are the reference's bytes,
+committed as binary and pinned by SHA-256. The targets and the tables are allocated on the first
+frame at 3 and released on the first frame that is not, with no restart; a refused resource gives
+the mode up for the session with one diagnostic line.
+
+**2. The two acceptance criteria, measured.** On the close-up R of AMD-055 §2.5 at 320 × 240:
+
+| | distinct colours at 0 | at 1 (MSAA 4×) | **at 3** |
+|---|---|---|---|
+| a cube on a floor | 3 | 12 | **104** (gl), **98** (`wgpu`) |
+| a face head-on | 3 | 13 | **119** (gl), **118** (`wgpu`) |
+
+and the interior of a face textured one texel at a time is **identical to the byte** at 3, over
+10 000-odd interior pixels, on all three backends. Both criteria are assertions, not reports.
+
+**3. What the mode costs**: §6's two tables. The short version for a closing section — at 1080p the
+filter costs between MSAA 4× and MSAA 8× in time on OpenGL and Vulkan, above 8× on DX12, with
+**29.0 MB of targets against MSAA 4×'s 99.5 MB** and one rasterisation of the scene instead of
+four. The memory and the sample count are AMD-060 §1's argument; the milliseconds do not support it
+on a desktop GPU and are reported as measured.
+
+**4. The three questions of Q-109** are open and provisional in the code: §1 the depth threshold
+(`ZAX_SMAA_DEPTH_RELATIVE` = 0,002 and `ZAX_SMAA_DEPTH_FLOOR` = 2·10⁻⁷, with the reference's own
+constant shown unusable here), §2 the HUD clause read as (a) — the filter runs **before** the HUD,
+so the HUD's own silhouette is aliased at 3 where it is smoothed at 1 and 2 — and §3 the 2D mode,
+where the three passes run as everywhere else.
+
+**5. One decision R0 may want the other way**: the libretro core option keeps the **three** value
+strings of AMD-032 §2 and is not extended to four (step 2's section says why, and
+`req_scn_086_the_libretro_enumeration_is_not_extended` asserts it). A one-line change if R0 wants
+the fourth there too.
+
+**6. The lot's one real finding, and it is not about SMAA.** The OpenGL port's two vertical
+searches were dead for two steps — a mirrored `y` metric carries every *offset* and no
+*comparison* — and what found it was the second backend, not a test, not a review and not a
+device. Step 5's section carries the measurement; `PERFORMANCE-HISTORY.md` §5.4 and §10 carry the
+lesson. The figures of step 4's own table are superseded by step 5's; step 4's instruction counts,
+byte counts and pass counts are unaffected.
+
+**7. What did not change**: levels 0, 1 and 2 are byte-identical to `1a1086c` on all three
+backends over seven configurations (§6), `render_scene` is 3409 instructions against 3401 (+0.24 %,
+within the lot's 1 %), the Lua API golden is untouched, and no new pass, pipeline, target or table
+exists at any level but 3.

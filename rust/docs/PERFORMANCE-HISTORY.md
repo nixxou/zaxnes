@@ -815,6 +815,65 @@ baseline**, which is the only way the columns mean anything)
   four `SmartBlur` passes and three bilateral upsamples turn a boundary case into a fraction of a
   level.
 
+**The depth-detecting SMAA costs a third of MSAA 4×'s memory and one sample of geometry, and it is
+not the cheap option in milliseconds** (SM-1, AMD-060 REQ-SCN-085 / REQ-SCN-086)
+- `video.anti_alias` grows a fourth rung: the scene is rendered **single-sample** and the three
+  passes of SMAA 1x — depth edge detection, blending weights through the reference's two
+  precomputed tables, neighbourhood blending — run over it in linear space, after the screen
+  passes of REQ-SCN-080 and the transparent objects and **before the HUD**. Both backends.
+- **Nothing of it exists at the other three levels** (REQ-SCN-086), and the whole cost of the mode
+  to such a frame is the `is_none` test that decides not to run it: `SceneRenderer::render_scene`
+  goes from 3401 instructions at `1a1086c` to **3409** (+0.24 %, the cause identified and
+  documented — one store in `begin_pass` and one `unwrap_or` in `resolve_to`), and the synthetic
+  set is **byte-identical to `1a1086c` at levels 0, 1 and 2 on OpenGL, Vulkan and DX12** —
+  eleven PNGs *and* `render.json`, over seven configurations including three Enhanced ones and a
+  bent one.
+- **What it costs when it is on** (`--bench 60`, median of 60 frames, 1920 × 1080, one session,
+  RTX 3050, each backend against its own level-0 baseline):
+
+  | `framing` | OpenGL | Vulkan | DX12 | extra bytes |
+  |---|---|---|---|---|
+  | **level 0, baseline** | **0.539 ms** | **0.605 ms** | **0.798 ms** | 0 |
+  | level 1, MSAA 4× | +0.221 | +0.202 | +0.174 | 99.5 MB |
+  | level 2, MSAA 8× | +0.423 | +0.395 | +0.433 | 199.1 MB |
+  | **level 3, SMAA** | **+0.382** | **+0.404** | **+0.620** | **29.0 MB** |
+
+  and on `heavy`, against 1.140 / 1.255 / 1.616 ms: MSAA 4× **+0.215 / +0.218 / +0.223**, MSAA 8×
+  **+0.421 / +0.403 / +0.397**, SMAA **+0.241 / +0.351 / +0.474**.
+- Read plainly: **in time the mode sits between MSAA 4× and MSAA 8× on OpenGL and Vulkan and above
+  8× on DX12**, and three full-screen passes at 1080p are what they are. **In memory it is a third
+  of MSAA 4× and a seventh of MSAA 8×** — 29 030 400 bytes of targets (`RG8` + `RGBA8` + `RGBA16F`
+  at the frame's size, 14 bytes a pixel) against 99.5 and 199.1 MB of extra attachments — **and it
+  rasterises the scene once** where 4× and 8× shade every covered sample of every silhouette
+  pixel. On the handhelds of §4, whose limit is bandwidth and fill rate, those are the two terms
+  that decide; this desktop table cannot show them.
+- The filter's own cost follows the frame's **contour count**, not its complexity: it is *cheaper*
+  on `heavy` (+0.241) than on `framing` (+0.382) although `heavy` is the slower frame, because
+  `framing`'s regular grid of boxes at a shallow angle marks more pixels. One scene's figure is not
+  the mode's price.
+- **The two backends submit the same three passes, allocate the same 4 300 800 bytes and build the
+  same three pipelines** at 640 × 480 — an equality, not an allowance, because REQ-SCN-085 renders
+  single-sample and there is nothing for the depth resolve of REQ-SCN-080 to do. The agreement is
+  the control's own: on `heavy` the filtered pictures differ on 0.3776 % of the pixels where the
+  unfiltered ones already differ on 0.3577 %, and the `hud` scene is **byte-identical** at level 3
+  on all three backends.
+- **A mirrored axis is safe through multiply-adds and unsafe through comparisons**, and that is the
+  lesson of the lot. `SMAA_RT_METRICS.y` is negative on OpenGL so that the reference's own
+  `± offset · metrics.y` arithmetic means "north is up on screen" in a texture whose rows run
+  upward. It works for every offset and it does **not** work for the two vertical searches of the
+  second pass, whose bound flips with the sign while the operator `>` between them does not: with
+  the reference's condition those loops exited on the first test and a vertical contour was blended
+  over one pixel instead of over the length of its run. Both are now written
+  `(texcoord.y − end) · metrics.y > 0`, identically in the GLSL and the WGSL.
+  - It was found by **putting the same algorithm beside itself with the other sign** — the `wgpu`
+    port, where the reference's condition is right — and by nothing else: the filter passed every
+    static assertion, both acceptance criteria of AMD-060, the whole lifecycle, and the usual
+    "99.5 % of pixels within 2 levels" parity bar at **99.6458 %**. What exposed it was comparing
+    the level-3 disagreement with the **level-0 control's**: 0.4271 % of a frame whose unfiltered
+    captures were identical. That comparison is now the bar the parity test asserts.
+  - RU-7's conclusion was "a device finds what reading cannot". This is its sequel: **a second
+    backend finds what one device cannot.**
+
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
   of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,
@@ -1128,8 +1187,8 @@ Measurement pitfall:
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |
 | `Zax.Scripting` hook order or new hooks | 5.5 emulation ahead, pipelining, `pause_3d_in_2d`, `catch_up_last_3d` assumptions on when hooks run | `separate_core_tests`, `pause_3d_tests` |
-| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), **`ZAX_CENTROID`** (same rule for `video.anti_alias` = 0), **the backdrop program** (the model of REQ-SCN-075 may not reach a tile fragment, and the backdrop fragment may not gain an atlas lookup), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `bend_tests.rs`, `amd058_centroid_tests.rs`, `amd049_backdrop_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
-| `Zax.Render` **wgpu** shaders or a new effect | 5.4 **the second backend is not optional**: a new variant is a `//#ifdef` of `preprocess.rs` and never a branch on a frame field; a new screen pass takes a `Slot` of its own because `write_buffer` applies before the command buffers; anything that reads a **row index** or `gl_FragCoord.y` has to be mirrored into OpenGL's order, not transcribed; and `DepthBiasState`'s two fields are the **reverse** of `glPolygonOffset`'s arguments | `parity_wgpu_tests.rs` and `amd055_parity_tests.rs` (both figures *and* the effect's own "it moves something" row), `amd055_style_tests.rs`, and the §2.4 invariants on both backends |
+| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), **`ZAX_CENTROID`** (same rule for `video.anti_alias` = 0), **the backdrop program** (the model of REQ-SCN-075 may not reach a tile fragment, and the backdrop fragment may not gain an atlas lookup), linear palette (indexed albedo path), uniform cache, instance block layout, **the three SMAA passes of AMD-060** (they exist only at `video.anti_alias` = 3, and their `uRtMetrics.y` is negative) | captures, `bend_tests.rs`, `amd058_centroid_tests.rs`, `amd049_backdrop_tests.rs`, `amd060_smaa_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Render` **wgpu** shaders or a new effect | 5.4 **the second backend is not optional**: a new variant is a `//#ifdef` of `preprocess.rs` and never a branch on a frame field; a new screen pass takes a `Slot` of its own because `write_buffer` applies before the command buffers; anything that reads a **row index** or `gl_FragCoord.y` has to be mirrored into OpenGL's order, not transcribed; `DepthBiasState`'s two fields are the **reverse** of `glPolygonOffset`'s arguments; and where a mirrored `y` metric carries the convention (SM-1), **every comparison against a coordinate has to be multiplied through by it** — an offset flips with the sign, an inequality does not | `parity_wgpu_tests.rs` and `amd055_parity_tests.rs` (both figures *and* the effect's own "it moves something" row), `amd055_style_tests.rs`, and the §2.4 invariants on both backends |
 | `Zax.Render` scene programs (a new variant axis) | 5.4 `ScenePrograms`: the new axis goes in the **slot table**, so `current()` stays two indexings and no branch; the axis is chosen **once a frame**, an unbuilt key falls back to the flat scene pair, and the handheld defaults must leave it unbuilt | `amd058_centroid_tests.rs`, `amd049_backdrop_setting_tests.rs`, a start-up with every default |
 | `Zax.Engine3D` tile meshes / walls | 5.4 the wall depth bias of AMD-057 (every tile mesh is drawn **whole**; REQ-SCN-065 is held by depth, and `uWallClipBias` is 0 for a mesh whose normals are not axis aligned) | `amd057_wall_tests.rs` (both crates), `seam_tests.rs`, the `--dump-meshes` counts |
 | `Zax.Nes/Ppu` pixel composition | 5.4 **the opacity mask of REQ-CORE-049 rides in bit 6 of the picture byte**: `palette_marked` is maintained only where `palette` is written, and `run_dots` must stay at 2231 instructions in the post-LTO assembly | PPU goldens, the `run_dots` instruction count |
