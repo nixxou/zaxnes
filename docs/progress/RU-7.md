@@ -21,8 +21,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 4c | The reflections of REQ-SCN-084 and the floor mask | done — `0a763dd` |
 | 4d | The MSVO estimator and its runtime fallback | done — `2664c78` |
 | 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | done — `b3dc146` |
-| 5 | The parity measurements and the costs | done — this commit |
-| 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
+| 5 | The parity measurements and the costs | done — `3c454e1` |
+| 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | done — this commit |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -1586,6 +1586,102 @@ ignored. `-p zax-harness --features wgpu`: 13 suites, **77 passed, 0 failed**.
 `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
 -D warnings` clean.
 
+### Step 6 — the close
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `spec/changes/Q-104.md` | a **§6 closing section**, appended without editing a word of what came before: the §2 premise shown false and the defect its skip was hiding, the answers to questions 1, 3 and 4 with the figures, questions 2 and 5 declared without object, what goes with the gap, and what is *not* parity and stays |
+| `rust/docs/PERFORMANCE-HISTORY.md` | the RU-7 entries beside RU-5's and RU-6's — the three device-found defects, the two gaps the absence of execution kept alive, what `wgpu` needs that OpenGL does not, the Classic cost, the byte-identity, the cost table on three backends and the agreement table — the two older Q-104 lines amended to point at them, and a **new row of the §10 porting checklist** for the second backend |
+| `zax-harness/src/render/engine.rs` | the last `// Q-104` marker, which was the texture budget's and not a parity gap, reworded to say what it is |
+| `docs/progress/RU-7.md` | this file |
+
+#### The release executable
+
+`rust/target-ro/release/zaxnes.exe`, built from this lot's tree with
+`--features zax-app/bundled,zax-app/wgpu` — the features both packages that offer the second
+backend ship (`rust/build/package-windows.ps1`). 18 650 112 bytes.
+
+#### The whole suite
+
+`cargo test --workspace --release --features zax-app/bundled,zax-app/wgpu`: **2 521 passed, 0
+failed**, 84 ignored. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+--features zax-app/wgpu -- -D warnings` clean.
+
+The per-crate figures the lot's rule asks for, in release and one at a time:
+
+| Crate | Suites | Result |
+|---|---|---|
+| `zax-render --features wgpu` | 34 | **326 passed**, 0 failed, 1 ignored (RU-6's close) |
+| `zax-harness --features wgpu` | 13 | **77 passed**, 0 failed |
+| `zax-goldens` | 2 | 3 passed, 0 failed |
+
+Against the start of the lot: `zax-render` went 300 → 326 and `zax-harness` 58 → 77, and the 45
+tests the lot added are, in one list: 11 for the variant expander, 26 in `parity_wgpu_tests.rs`, 8
+in `amd055_parity_tests.rs`, the two §2.4 invariant tests on the `wgpu` side, the Classic-cost
+test, the AMD-049 variant test, 2 unit tests of the screen block, and the four known-gap tests
+rewritten into their opposites.
+
+#### What the lot delivered, in one list
+
+Against the map step 1 drew up against `gl/`, which is now empty:
+
+| Requirement | Step |
+|---|---|
+| AMD-043 `REQ-SCN-067`, `REQ-SCN-068` — the curvature, scene and shadow pass | 2 |
+| AMD-043 `REQ-SCN-066` — the arc and its pivot | 2 |
+| AMD-046 `REQ-SCN-074` — the 2D-mode rectangle | 2 |
+| `REQ-SCN-068`'s subdivided backdrop box | 2 |
+| AMD-055 `REQ-SCN-081` — the voxel grid | 3 |
+| AMD-055 `REQ-SCN-082` — the pixel shadows | 3 |
+| AMD-058 `REQ-SCN-065` — the centroid interpolation | 4a |
+| AMD-032 §2 — the three anti-aliasing levels, verified and measured | 4a |
+| AMD-055 `REQ-SCN-080` — the frame order, the lifecycle, the resolved depth | 4b |
+| AMD-055 `REQ-SCN-083` — the Depth estimator | 4b |
+| AMD-055 `REQ-SCN-084` — the reflections and the floor mask | 4c |
+| AMD-055 `REQ-SCN-083` *Mode MSVO* — the pyramid, and the fallback **(D)** | 4d |
+| AMD-049 `REQ-SCN-075` — the backdrop lighting | 4e |
+
+And what the lot did **not** change, which the brief named one by one:
+
+- **no setting added or removed**; the Lua API golden is untouched (the workspace suite includes
+  the API dump test);
+- **the options window is not changed** — Q-104's question 2 became moot rather than answered;
+- **the OpenGL backend did not move**: its renders byte-identical to `faced2a` at three
+  anti-aliasing levels and in six Enhanced, lit and bent configurations, `render.json` included;
+  the four instruction counts at 2231 / 1095 / 3401 / 159 throughout; and one word plus three
+  comments as the whole of its source diff.
+
+#### The scratch probes
+
+The four `crates/zax-render/tests/*_tmp.rs` that RU-5, RO-2, RU-6 and step 1 of this lot left
+uncommitted are still uncommitted, and the fifth this session wrote (`probe_ru7c_tmp.rs`, the
+overlap probe of step 4c) with them. The `tests/` directory at the repository root is still the
+.NET build output of an earlier checkout and is still untracked. Nothing of either is staged.
+
+#### What is left for R0, and for whoever comes next
+
+- **The instruction counts are R0's to confirm with callgrind**, as every lot's are. The post-LTO
+  assembly column here is the same method RU-3a-fix through RU-6 used, and it reads unchanged.
+- **The cost table is one machine's.** The three columns are comparable with each other because
+  they are one session; RU-5's and RU-6's are their own machines' and comparable in shape. A
+  handheld figure for the second backend does not exist and cannot: the two portable targets
+  (PortMaster, Android) are the OpenGL/GLES path, which is why the lot's rule is that it must not
+  move.
+- **A fixture with a large cast shadow** would strengthen REQ-SCN-082's evidence, which step 3
+  recorded as weak: the pixel shadows move 0.0091 % of `shadow` — about 28 pixels of 307 200 — and
+  nothing of `framing`. The agreement figure and the OpenGL unit tests carry that requirement; the
+  "it moves something" figure barely does.
+- **The reflections' residual is understood but not reducible here**: 5 259 pixels reflected by
+  both backends against a symmetric fringe of 204 and 241, which is the march's hit/miss boundary
+  on a depth buffer the two APIs quantise through different expressions. A tighter figure would
+  need the two to agree bit for bit on the reconstruction, which the `y` mirror forbids.
+- **The lone plane of §2.4 reads 0.9827 here against OpenGL's exact 1**, inside the 1,00 ± 0,02 the
+  requirement allows with 0.0027 to spare. Thirty-three pixels of 144 094, all on the plane's own
+  silhouette. If a future lot wants that margin back, the lever is the bias of `ao.wgsl` and not
+  the mirror.
+
 ### The design 4b was built from, and what is left after it
 
 Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
@@ -1682,7 +1778,7 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 | ~~4e~~ | ~~`backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075~~ — **landed**: not a file of its own in the end, but a variant of `scene.wgsl`, see its own section above |
 | — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
 | ~~5~~ | ~~the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures~~ — **landed**, see its own section above |
-| 6 | the close: `PERFORMANCE-HISTORY.md`, the Q-104 closing section answering its questions 1, 3 and 4, the full suite, the release build with `zax-app/bundled,zax-app/wgpu` |
+| ~~6~~ | ~~the close~~ — **landed**, see its own section above. **The lot is complete.** |
 
 Two notes 4b leaves for the steps after it:
 

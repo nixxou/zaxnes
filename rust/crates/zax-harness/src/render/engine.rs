@@ -170,7 +170,8 @@ impl Engine {
     pub fn set_texture_budget(&mut self, texels: Option<u64>) {
         match self {
             Self::Gl { renderer, .. } => renderer.set_texture_budget(texels),
-            // Q-104: the wgpu backend has no budget of its own yet.
+            // The wgpu backend has no texture budget of its own: AMD-051 REQ-E3D-644 is
+            // the OpenGL path's, and it is not a parity gap of the Enhanced style (Q-104 §6.5).
             #[cfg(feature = "wgpu")]
             Self::Wgpu(_) => {}
         }

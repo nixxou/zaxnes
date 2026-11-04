@@ -442,9 +442,9 @@ C# counterpart: `src/Zax.Render/Gl` (scene passes, shaders, texture/mesh caches)
   of the rule, read by the renderer and by `scene_export`): the backdrop box stays its six quads
   and the 2D rectangle its single quad at curvature 0. In 2D mode the rectangle goes 2 triangles
   → 2048 → 2 again when "Bend 2D Mode" is turned off, in one draw call throughout.
-- Q-104: the curvature landed in the **OpenGL backend only**. The `wgpu` backend keeps drawing
-  flat, as it did before the amendment, and a test asserts that known gap so a half-done parity
-  fails loudly.
+- Q-104: the curvature landed in the **OpenGL backend only** in this lot, and RU-7 ported it to
+  the `wgpu` one — see the RU-7 section below. The known-gap test that pinned the gap is now its
+  own opposite.
 
 **The opacity mask of AMD-050 REQ-CORE-049 costs the PPU nothing** (RU-4a) — a core change, listed
 here because it is the one measurement of the lot that had to come out at zero.
@@ -574,8 +574,9 @@ REQ-SCN-080 to REQ-SCN-084)
   every frame (`SceneRenderer::prepare_screen_effects`). There is no probe at context creation,
   deliberately: a probe would have to allocate, and point 1 of the RU-5 brief forbids Classic
   allocating anything the amendment needs. The first Enhanced frame is the probe.
-- `wgpu` (Vulkan, DirectX 12): the style is read back as set and the scene is drawn in **Classic**,
-  with one log line — the same gap the curvature has there, recorded in `Q-104`.
+- `wgpu` (Vulkan, DirectX 12): in this lot the style was read back as set and the scene drawn in
+  **Classic**, with one log line — the same gap the curvature had there, recorded in `Q-104`.
+  **RU-7 closed it**, log line and all; see its section below.
 
 **What each Enhanced effect costs when it is on** (RU-5, AMD-055; `--bench 60 --anti-alias 0`,
 median of 60 frames, each ended by a `finish()`)
@@ -686,6 +687,133 @@ median of 120 frames, each ended by a `finish()`, `framing`)
   0.22 levels and no banding. The hemisphere estimator tests the rise above a reconstructed tangent
   plane, which a one-unit joint step between coplanar faces does not pass; the sphere test of the
   multi-scale one registers it at its finest level.
+
+**The `wgpu` backend draws the whole picture now, and a backend that is never executed accumulates
+faults no review finds** (RU-7, AMD-043 / AMD-046 / AMD-049 / AMD-055 / AMD-058, `Q-104` §6)
+- Q-104 recorded that the curvature of AMD-043/AMD-046 and the Enhanced style of AMD-055 were
+  rendered by the OpenGL backend alone, and gave one reason: WGSL is validated by naga at module
+  creation, so it could not be verified on the machines of RU-4a and RU-5, where
+  `render_wgpu_tests.rs` skipped for want of a driver. The owner's answer was **port it**.
+- **The premise was false on a machine that has a driver**, and the skip it rested on was hiding a
+  defect in its own test. Both adapters answer here (Vulkan and DirectX 12, RTX 3050), and
+  `render_wgpu_tests.rs` did not skip — it **failed**, at 93.125 % of the pixels on `heavy`,
+  identically to the thousandth on both APIs. It was the test: its OpenGL twin passes
+  `--anti-alias 0` and `--no-backdrop-lighting` and says in eight lines why, and the `wgpu` one
+  passed neither. Rendered with those options the **OpenGL** backend fails the same scene by the
+  same margin. So the `wgpu` golden check had **never once been executed**. A registry probe is not
+  evidence either: `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` does not exist on this installation,
+  and the loader finds the ICD through the display adapter's PnP registry instead.
+- **Three defects, none visible in either shader, all found by measuring on a device**:
+  1. **`fwidth` is not `fwidth`.** Its precision is implementation-chosen in all three languages:
+     naga emits `OpFwidth` for Vulkan and HLSL `fwidth` for DirectX 12, and on this NVIDIA driver
+     the second is quad-**coarse**. The voxel grid uses the derivative only for its 3.5 % band's
+     smoothing width, so **DX12 alone** read 99.0124 % against Vulkan's 99.9795 %. Asking for
+     `fwidthFine` by name takes both to 99.983 %. Vulkan alone would have shipped it.
+  2. **`glPolygonOffset`'s two arguments cross over into `DepthBiasState`.** GL offsets by
+     `m × factor + r × units`, so GL's *first* argument is wgpu's `slope_scale` and its *second* is
+     wgpu's `constant`. Written the obvious way round the slope term is sixteen times too large and
+     a steeply-seen face wins `LessEqual` against what is in front of it: the floor mask of
+     REQ-SCN-084 marked the top of the cube and 1 709 pixels came out reflected. The bug is in a
+     pipeline field, not in any WGSL.
+  3. **Two row indices had to be mirrored, not transcribed.** The MSVO chain reads a row index
+     twice — which texel of each 2 × 2 block the decimation keeps, and which pixel coordinate the
+     per-pixel rotation hashes — and OpenGL counts rows from the bottom where this API counts from
+     the top. Either choice is admissible (the requirement fixes neither), but transcribing builds
+     the whole pyramid on a half-texel shift.
+- **And two gaps that only the absence of execution had kept alive**: the backdrop model of AMD-049
+  REQ-SCN-075 had no WGSL counterpart at all — **on by default on the desktop** — and the two
+  backends agreed on only **58.930 %** of the `backdrop` capture; and the golden-test defect above.
+  Hence Q-104 §6.3's answer to its own question 3: **the second backend's parity is a requirement
+  of every lot**, as long as a development machine has a driver.
+- What `wgpu` needed that OpenGL did not, in full: `preprocess.rs`, a `#ifdef` for WGSL sources so
+  that a variant is a marker and not a branch on a frame field; **one render pass per screen-effect
+  step**, where the OpenGL path rebinds a framebuffer inside one; and **a depth-resolve pass of its
+  own**, because `RenderPassDepthStencilAttachment` has no `resolve_target` and there is no
+  texture-to-texture blit for a depth format, so sample 0 goes through a full-screen triangle into
+  `@builtin(frag_depth)` (which is what the OpenGL blit gives, and what the floor mask's bias is
+  there for). That pass is counted, so `screen_effect_passes` reads one higher under anti-aliasing.
+- No format is new: `R8Unorm`, `Rgba16Float` and `R16Float` are the three the OpenGL module already
+  depends on. The one refusal REQ-SCN-083 names — the `R16Float` pyramid, the fallback **(D)** — is
+  asked of the **adapter** in `WgpuSceneRenderer::new` rather than caught, because `wgpu` reports a
+  refused allocation through the device's error scope and hands back a usable handle. Every adapter
+  WebGPU admits grants it, so the fallback is reached through the same test seam its OpenGL twin
+  has.
+- **A Classic `wgpu` frame does no new work**, measured: `style_programs`, `screen_effect_bytes`,
+  `screen_effect_passes` and `occlusion_levels` all 0 in Classic *and* in Enhanced with the four
+  switches at the defaults of REQ-SCN-079, the same picture to the pixel, and **ten pipeline
+  bindings** either way on both APIs. What it does carry from the lot: **80 bytes** added to a
+  `write_buffer` it was already making once a frame (64 for the curvature, 16 for the backdrop's
+  eye), four `is_some` tests on `Option`s that are `None`, one `color_mode == 2` comparison per
+  opaque run whose two arms are the same value, and one loop over an empty `floor_runs`.
+- **The OpenGL backend did not move**: its renders are **byte-identical to `faced2a`** — eleven
+  captures at each of the three anti-aliasing levels, and eleven captures plus `render.json` for
+  each of six Enhanced, lit and bent configurations — and the four instruction counts are
+  **2231 / 1095 / 3401 / 159** throughout. The lot's whole diff in an OpenGL file is one word
+  (`projection_terms` is `pub(crate)`, so the four projection terms the screen passes read are not
+  written twice) and three comments that said the style was not rendered on the other backend.
+
+**What the parity costs and what it reads** (RU-7; `--bench 60 --anti-alias 0`, median of 60
+frames, `framing` at 1920 × 1080, one session, RTX 3050 — **each backend against its own Classic
+baseline**, which is the only way the columns mean anything)
+
+| | OpenGL | Vulkan | DX12 | passes | target bytes |
+|---|---|---|---|---|---|
+| **Classic baseline** | **0.549 ms** | **0.519 ms** | **0.780 ms** | — | 0 |
+| voxel grid `N` = 4 | +0.06 | +0.07 | +0.07 | 0 | 0 |
+| pixel shadows | +0.02 | +0.14 | +0.14 | 0 | 0 |
+| occlusion Depth, Medium | +0.42 | +0.58 | +0.51 | 3 | 1 036 800 |
+| occlusion Depth, High | +1.13 | +1.59 | +1.45 | 3 | 4 147 200 |
+| occlusion **MSVO**, Medium | +0.61 | +0.82 | +0.98 | 20 | 3 434 160 |
+| occlusion **MSVO**, High | +2.16 | +2.63 | +2.67 | 20 | 13 737 600 |
+| all four effects on | +0.41 | +0.77 | +0.63 | 6 | 7 257 600 |
+
+- The reflections do not appear there and RU-5 recorded why: on `framing` at the default camera no
+  pixel is marked, so the trace returns at its mask test. On **`heavy` at 45° of elevation**,
+  against baselines of 1.119 / 1.270 / 1.635 ms: `ssr.quality` High **+0.85 / +0.85 / +1.01 ms**,
+  Ultra **+1.04 / +0.86 / +1.36 ms**. And the backdrop model of AMD-049, on `backdrop` against
+  0.251 / 0.289 / 0.475 ms: **+0.050 / +0.006 / +0.032 ms** — the cheapest effect of the lot
+  anywhere.
+- **The pass and byte columns are the same numbers on all three backends**, which is the stronger
+  statement than the milliseconds: the three renderers submit the same passes and allocate the same
+  targets, so the time differences are the drivers' and not the ports'. The screen passes run 15 to
+  40 % slower on `wgpu`, and the cause is the architecture rather than the shaders — one render
+  pass per step, plus the depth resolve.
+- DX12's Classic baseline is 50 % above Vulkan's **on this machine** (0.780 against 0.519) and its
+  deltas are then comparable; that is this driver's command-submission cost and has nothing to do
+  with any amendment. RU-5's and RU-6's tables were measured on their own machines and are
+  comparable in *shape* — the ordering of the rungs, the MSVO-to-Depth ratio, the memory, the pass
+  counts, all reproduced — and not in milliseconds.
+- **Agreement, per effect** (640 × 480, worst scene, share of pixels within 2 sRGB levels of the
+  OpenGL capture). The Classic control reads **99.6423 %** on `heavy` — 1 926 overlapping tile
+  boxes, so silhouette edge everywhere — and that figure, not 100 %, is what every row is read
+  against:
+
+  | | within 2 levels |
+  |---|---|
+  | Classic control | 99.6423 % |
+  | curvature (three configurations) | 99.59 to 99.87 % |
+  | voxel grid, pixel shadows, occlusion Depth and MSVO | **the control's own figure** |
+  | reflections, `ssr.quality` High / Ultra | 99.5999 % / 99.8493 % |
+  | **backdrop lighting** | **99.9990 %**, from 58.930 % |
+  | `video.anti_alias` 1 / 2 | 99.1084 % / 98.9489 % |
+
+- The two multisampled rows are **MSAA sample positions**, which are implementation-defined in all
+  three APIs: under MSAA 4× on `heavy`, Vulkan and DX12 agree with each other on **100.0000 %** of
+  the pixels with max channel **0**, and both differ from OpenGL by exactly the same amount. There
+  is nothing in the renderer to choose between the two patterns, and more samples let them diverge
+  further.
+- The two `wgpu` APIs are byte-identical to each other everywhere **except** the reflections
+  (99.9993 %, two or three pixels of the march) and the MSVO contact ratio (0.1430 against 0.1348,
+  the minimum sitting one pixel over). Both are the same cause: an estimator that is discontinuous
+  in the depth buffer, read at its minimum.
+- **The three invariants of AMD-055 §2.4 hold on this backend**, in both estimator modes: a plane
+  alone at **0.9827** (Depth) and **0.99565** (MSVO) against the 1,00 ± 0,02 the requirement allows
+  — 33 of 144 094 pixels darkened by at most 1.73 %, all on the plane's own silhouette, because the
+  two backends compute the same NDC through two expressions that differ in the last bits of `f32`
+  — the contact at 0.4337 / 0.1430, and the five `ao.strength` rungs strictly decreasing from 1 to
+  4 and flat from 4 to 5. MSVO is the better-behaved of the two on the first invariant, because
+  four `SmartBlur` passes and three bilateral upsamples turn a boundary case into a fraction of a
+  level.
 
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
@@ -1001,6 +1129,7 @@ Measurement pitfall:
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |
 | `Zax.Scripting` hook order or new hooks | 5.5 emulation ahead, pipelining, `pause_3d_in_2d`, `catch_up_last_3d` assumptions on when hooks run | `separate_core_tests`, `pause_3d_tests` |
 | `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), **`ZAX_CENTROID`** (same rule for `video.anti_alias` = 0), **the backdrop program** (the model of REQ-SCN-075 may not reach a tile fragment, and the backdrop fragment may not gain an atlas lookup), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `bend_tests.rs`, `amd058_centroid_tests.rs`, `amd049_backdrop_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Render` **wgpu** shaders or a new effect | 5.4 **the second backend is not optional**: a new variant is a `//#ifdef` of `preprocess.rs` and never a branch on a frame field; a new screen pass takes a `Slot` of its own because `write_buffer` applies before the command buffers; anything that reads a **row index** or `gl_FragCoord.y` has to be mirrored into OpenGL's order, not transcribed; and `DepthBiasState`'s two fields are the **reverse** of `glPolygonOffset`'s arguments | `parity_wgpu_tests.rs` and `amd055_parity_tests.rs` (both figures *and* the effect's own "it moves something" row), `amd055_style_tests.rs`, and the §2.4 invariants on both backends |
 | `Zax.Render` scene programs (a new variant axis) | 5.4 `ScenePrograms`: the new axis goes in the **slot table**, so `current()` stays two indexings and no branch; the axis is chosen **once a frame**, an unbuilt key falls back to the flat scene pair, and the handheld defaults must leave it unbuilt | `amd058_centroid_tests.rs`, `amd049_backdrop_setting_tests.rs`, a start-up with every default |
 | `Zax.Engine3D` tile meshes / walls | 5.4 the wall depth bias of AMD-057 (every tile mesh is drawn **whole**; REQ-SCN-065 is held by depth, and `uWallClipBias` is 0 for a mesh whose normals are not axis aligned) | `amd057_wall_tests.rs` (both crates), `seam_tests.rs`, the `--dump-meshes` counts |
 | `Zax.Nes/Ppu` pixel composition | 5.4 **the opacity mask of REQ-CORE-049 rides in bit 6 of the picture byte**: `palette_marked` is maintained only where `palette` is written, and `run_dots` must stay at 2231 instructions in the post-LTO assembly | PPU goldens, the `run_dots` instruction count |
