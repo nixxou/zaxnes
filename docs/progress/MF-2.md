@@ -33,7 +33,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
 - [x] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
 - [x] 7/10 — step 6: MR-5-2 done; **MR-5-4 not done**, see Q-116
-- [ ] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
+- [x] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
 - [ ] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
 - [ ] 10/10 — step 9: the three unknowns MR-64-1, MR-64-5, MR-18-1, and the close of the lot
 
@@ -60,6 +60,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | MR-64-4 | `rambo1.rs:76-96` (arm), `rambo1.rs:216-224` (`on_cpu_cycle`) | `mr_64_4_*` x2 | `Board::on_cpu_cycle`: prologue and every non-stepping arm **instruction-identical**; one compare and one branch inside the RAMBO-1 arm, which already stepped every cycle | the five Tengen titles, by at most two CPU cycles of raster position |
 | MR-5-2 | `mmc5.rs:479-498` | `mr_5_2_*` (un-ignored) | none outside the MMC5: `Mmc5::intercept_cpu_write` +6 instructions, `Board::intercept_cpu_write` unchanged, nothing else in the crate changed size | MMC5 titles writing ExRAM outside rendering in modes 0 or 1 |
 | MR-5-4 | **not implemented** — `// Q-116` on `mmc5.rs:on_ppu_scanline` | — | — | **none**: the only faithful implementation needs a new per-PPU-fetch notification every game pays for, which this lot's rule forbids. Q-116 asks the owner to choose |
+| MR-30-4 | `discrete.rs:455-470` (the state machine), `:508-560` (`step_flash`, erase, program) | `mr_30_4_*` x3 | none on any read path: the erase and the program complete at once, so `rom_windows` stays a plain window. `UnRom512::write_register` 8 → 116, reached by mapper 30 alone | self-flashing UNROM 512 homebrew. See Q-117 |
+| MR-30-6 | `discrete.rs:410-418` (the mode), `:588-606` (the three overrides), `mod.rs:178-192` + `:392-412` (the cached pages) | `mr_30_6_*` x2 | **every hot PPU function is instruction-identical to step 6** after two fixes: `Cartridge` caches the nametable pages (so the `Board` dispatch leaves the per-fetch path and `run_dots` is 32 instructions *better*) and `read_nametable_inner` keeps the `#[inline(never)]` it effectively had. `cpu_write` pays one bool test | four-screen UNROM 512 homebrew (byte 6 `%....1..1`) |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -701,3 +703,119 @@ is free, which is a lot of its own. The code carries `// Q-116` on `Mmc5::on_ppu
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: **577 passed**, 0 failed, **7 ignored** — one fewer than at
 step 5, MR-5-2's test having come off `#[ignore]`.
+
+## Step 7 — MR-30-4 and MR-30-6, the UNROM 512
+
+### MR-30-6 — four screens out of the last 8 KiB of CHR-RAM
+
+"The cartridge VRAM for the '4-screen with cartridge VRAM' comes from the last 8 KiB of
+CHR-RAM", with the four nametables at PPU $2000-$2FFF and scratch RAM at $3000-$3EFF (nesdev,
+"UNROM 512"). MF-1's MR-30-1 made byte 6 `%....1..1` mean that mode; it then took its nametables
+from console VRAM.
+
+`UnRom512Mirroring` gains `FourScreenCartridgeVram`. In it the board answers
+`SERVED_BY_CARTRIDGE` for all four tables and serves them out of CHR-RAM at
+`len - 8 KiB + (address & 0x1FFF)` — thirteen bits, so the four nametables fill the first 4 KiB
+and the $3000-$3EFF scratch window follows them, which is the piece MR-1 did not mention. A dump
+with less than 8 KiB of CHR-RAM keeps the old behaviour rather than indexing out of range.
+
+**The trait had to change**: `Mapper::read_nametable` and `write_nametable` now receive the
+`CartridgeMemory`, which is MR-1b's infrastructure item 10. That is the first signature change
+of the lot and it had consequences — see below.
+
+### MR-30-4 — the self-flashing
+
+The board carries flash, not mask ROM. `UnRom512` gains a three-field state machine
+(`can_flash`, `flash_step`, `flash_erasing`) advanced on every write to $8000-$FFFF, which runs
+the two documented SST39SF040 sequences: $AA/$9555, $55/$AAAA, $80/$9555, $AA/$9555, $55/$AAAA,
+$30/<sector> erases a 4 KiB sector to $FF, and $AA/$9555, $55/$AAAA, $A0/$9555, data/<address>
+programs a byte. A program ANDs rather than stores, because flash can only clear bits.
+
+**Both complete before the CPU can look**, so the verification reads the page prescribes ("read
+the written location twice until you get $FF twice") succeed at once and the board never answers
+a read with status. That is what removes the cost MR-30-4 feared: `rom_windows` stays a plain
+window, and nothing is added to any read path.
+
+The gate is `!registry::has_bus_conflicts(30, header)`, which interlocks MR-30-4 with step 4's
+MR-BUS-1 exactly as MR-1b asked: "bus conflicts interfere with the self-flashing procedure", so
+submapper 2 — and a submapper-0 dump without the battery bit — cannot flash at all.
+
+`CartridgeMemory::prg_rom_mut` is new and `pub(crate)`; this is the only board that calls it.
+
+**Q-117** records the one thing the page leaves open: every byte of a command sequence is also a
+write to the mapper's latch, so the window the chip sees when the last byte lands is the one the
+*previous* byte chose — which taken literally puts every byte-write in bank 0. The chip is given
+the window in force, which is what the register diagram and the write cycle's order imply. The
+ticket also records that a reprogrammed ROM is **not persisted**: the flash changes in memory
+and a reload loses it, MR-30-4's "ROM-diff save path" being out of scope.
+
+### The third instance of step 0's trap, and the one that bit hardest
+
+The new `CartridgeMemory` argument made `Cartridge::read_nametable` bigger, which made
+`Ppu2C02::read_nametable_inner` small enough for the inliner to fold into `peek_vram` — and from
+there into **`read_pattern_planes`**, where it hoisted `layout_of` above the loop. That is the
+very function R0's callgrind of MF-1 singled out, and it went from **106 instructions to 122**,
+on a branch a pattern fetch never takes. `background_fetch`, `run_sprite_fetches` and `step_dot`
+followed.
+
+Two changes undo it, and both leave the code better than it was:
+
+1. **`Cartridge` caches the nametable pages**, as it already caches `rom_windows`. The PPU asks
+   for a page once per nametable fetch, and answering through the `Board` enum put a 26-arm
+   dispatch on that path; a second non-default arm (the MMC5 had the only one) was what tipped
+   the inliner. `Cartridge::nametable_page` is now one array load and vanished as a symbol.
+   The refresh is gated on `nametable_pages_vary`, true for the MMC5 alone — the UNROM 512's
+   pages come from its wiring and are settled at load — so a cartridge write costs the same two
+   instructions (`cmpb`, `jne`) as step 4's bus-conflict gate instead of about 112.
+2. **`read_nametable_inner` is marked `#[inline(never)]`**, which is where it was before the
+   signature change. One attribute, with the measurement written above it.
+
+After both, every hot PPU function is **instruction-identical to step 6**:
+
+| symbol | step 6 | step 7 |
+| --- | --- | --- |
+| `Ppu2C02::read_pattern_planes` | 106 | **106** |
+| `Ppu2C02::step_dot` | 1409 | **1409** |
+| `Ppu2C02::background_fetch` | 187 | **187** |
+| `Ppu2C02::run_sprite_fetches` | 297 | **297** |
+| `Board::ppu_peek` / `ppu_read` | 240 / 241 | **240 / 241** |
+| `Ppu2C02::run_dots` | 591 | **559** |
+| `NesCore::run_frame` | 1850 | **1837** |
+| `Cartridge::load_state`, `NesCore::power_on`, `soft_reset` | — | all smaller |
+
+What grew is confined: `Cartridge::cpu_write` (+2 executed, one bool test),
+`Board::nametable_page` 16 → 28 and `Board::read_nametable` 27 → 45 — both now off every other
+game's path, the first because it is cached and the second because only a board answering
+`SERVED_BY_CARTRIDGE` reaches it — plus `UnRom512::write_register` 8 → 116 and the load-time
+`Cartridge::create` and `reset`.
+
+### Save states
+
+`flash_step` and `flash_erasing` are written **last** in `UnRom512::save_registers` and read only
+when `StateReader::remaining` says the block still has bytes, the pattern `Multicart225` and
+`Rambo1` use. A mapper-30 state from before this lot loads with no command open, which is the
+state of a board at any moment a game is not mid-sequence. `nametable_answer` and
+`cartridge_vram_base` are derived from the ROM and not saved. **No format version bump.**
+
+One thing a state does *not* carry, and this is worth R0 knowing: the **flashed PRG-ROM**. The
+save state stores PRG-RAM and CHR-RAM, not PRG-ROM, so a state taken after a game reprogrammed
+itself restores the registers but not the ROM contents. Q-117 carries it with the persistence
+question.
+
+### Tests
+
+Six new, all in `mr1_review_tests.rs`:
+
+| test | what it pins |
+| --- | --- |
+| `mr_30_4_unrom512_programs_a_byte_of_its_own_flash` | the erase reads back $FF, only its 4 KiB sector, and the byte write programs one byte |
+| `mr_30_4_unrom512_with_bus_conflicts_cannot_flash` | a submapper-2 board must not erase its own ROM |
+| `mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing` | an aborted sequence does not carry over |
+| `mr_30_6_unrom512_four_screen_comes_from_the_last_8_kib_of_chr_ram` | all four tables served, each its own kilobyte, and $3000 is scratch and not an alias of $2000 |
+| `mr_30_6_unrom512_outside_four_screen_leaves_the_nametables_to_the_console` | byte 6 $00, $01 and $08 still follow the mirroring |
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **582 passed**, 0 failed, 7 ignored.
+`cargo test --release -p zax-nes --no-fail-fast -- --ignored`: no failures, the 1 200-frame
+golden test included. `cargo check --workspace --exclude zax-app --all-targets` clean, so the
+`Mapper` signature change breaks no other crate.

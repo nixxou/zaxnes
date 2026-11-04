@@ -263,12 +263,18 @@ pub trait Mapper {
     }
 
     /// Reads a nametable byte the board serves itself.
-    fn read_nametable(&self, _address: u16) -> u8 {
+    ///
+    /// `memory` is passed because a board may serve its nametables out of the memories the
+    /// cartridge owns rather than out of its own registers: the UNROM 512's four-screen mode
+    /// takes them from the last 8 KiB of CHR-RAM (MR-30-6), where the MMC5's come from its
+    /// `ExRAM` and its fill registers. Only a board whose [`Mapper::nametable_page`] answers
+    /// `SERVED_BY_CARTRIDGE` is ever asked, so this is not on any other game's fetch path.
+    fn read_nametable(&self, _memory: &CartridgeMemory, _address: u16) -> u8 {
         0
     }
 
     /// Writes a nametable byte the board serves itself.
-    fn write_nametable(&mut self, _address: u16, _value: u8) {}
+    fn write_nametable(&mut self, _memory: &mut CartridgeMemory, _address: u16, _value: u8) {}
 
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}

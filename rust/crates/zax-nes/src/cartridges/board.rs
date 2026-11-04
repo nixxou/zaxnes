@@ -228,12 +228,12 @@ impl Mapper for Board {
         dispatch!(self, b => b.nametable_page(table))
     }
 
-    fn read_nametable(&self, address: u16) -> u8 {
-        dispatch!(self, b => b.read_nametable(address))
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        dispatch!(self, b => b.read_nametable(memory, address))
     }
 
-    fn write_nametable(&mut self, address: u16, value: u8) {
-        dispatch!(self, b => b.write_nametable(address, value));
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        dispatch!(self, b => b.write_nametable(memory, address, value));
     }
 
     fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {

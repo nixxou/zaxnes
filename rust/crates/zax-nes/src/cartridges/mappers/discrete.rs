@@ -407,13 +407,16 @@ impl Mapper for Codemasters {
 /// bus conflicts, mapper-controlled horizontal/vertical nametable arrangement" (MR-30-3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnRom512Mirroring {
-    /// The header's arrangement is wired: vertical, horizontal or genuine four-screen. Bit 7
-    /// does nothing.
+    /// The header's arrangement is wired: vertical or horizontal. Bit 7 does nothing.
     Fixed,
     /// Byte 6 `%....1..0`: bit 7 picks screen A or screen B.
     OneScreen,
     /// Submapper 3: bit 7 picks horizontal or vertical.
     HorizontalVertical,
+    /// Byte 6 `%....1..1`, "4-Screen with cartridge VRAM": the board serves all four
+    /// nametables, and the scratch RAM at PPU $3000-$3EFF with them, out of the last 8 KiB of
+    /// its CHR-RAM (MR-30-6). Bit 7 does nothing.
+    FourScreenCartridgeVram,
 }
 
 /// iNES mapper 30, UNROM 512: 16 KiB PRG, 8 KiB CHR-RAM bank and a nametable select from one
@@ -428,27 +431,145 @@ pub struct UnRom512 {
     mirroring_control: UnRom512Mirroring,
     /// Submapper 4: $8000-$BFFF is the LED register, not the bank register.
     has_led_register: bool,
+    /// Whether the board can erase and program its own PRG-ROM (MR-30-4). Decided at load:
+    /// submapper 2's bus conflicts "interfere with the self-flashing procedure", and a
+    /// submapper-0 dump without the battery bit has those conflicts too (see
+    /// [`super::super::registry::has_bus_conflicts`]).
+    can_flash: bool,
+    /// Where the board is in an SST39SF040 command sequence: 0 when none is open, then one
+    /// step per byte of the prologue (MR-30-4).
+    flash_step: u8,
+    /// Whether the open sequence is the six-byte erase rather than the four-byte byte-write.
+    flash_erasing: bool,
+    /// What [`Mapper::nametable_page`] answers, precomputed at load:
+    /// `SERVED_BY_CARTRIDGE` in the four-screen mode and `FOLLOW_MIRRORING` otherwise.
+    ///
+    /// A field and not a `match`, because `Board::nametable_page` is consulted **once per
+    /// nametable fetch for every game**: an arm that branches grows that dispatch enough to
+    /// push `Ppu2C02::read_nametable_as` out of line, and then every game pays a call per
+    /// fetch. Measured: it took `read_pattern_planes` from 106 instructions to 122. See
+    /// `docs/progress/MF-2.md`, step 7.
+    nametable_answer: i32,
+    /// First byte of CHR-RAM the four-screen mode serves nametables from, precomputed for the
+    /// same reason as `nametable_answer`.
+    cartridge_vram_base: usize,
     register: u8,
 }
 
 impl UnRom512 {
+    /// Bytes of CHR-RAM the four-screen mode takes for its nametables and scratch RAM.
+    const CARTRIDGE_VRAM_SIZE: usize = 8 * 1024;
+
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         let header = memory.rom().header();
         let submapper = if header.is_nes20 { header.submapper } else { 0 };
+        let four_screen_vram =
+            header.byte6 & 0x09 == 0x09 && memory.chr_ram().len() >= Self::CARTRIDGE_VRAM_SIZE;
         let mirroring_control = if submapper == 3 {
             UnRom512Mirroring::HorizontalVertical
         } else if header.byte6 & 0x09 == 0x08 {
             UnRom512Mirroring::OneScreen
+        } else if four_screen_vram {
+            UnRom512Mirroring::FourScreenCartridgeVram
         } else {
-            // Includes `%....1..1`, which is four-screen with cartridge VRAM and not
-            // mapper-controlled at all (MR-30-1). The VRAM itself is MR-30-6, out of lot MF-1.
             UnRom512Mirroring::Fixed
         };
         Self {
             banks: windows_for(memory),
             mirroring_control,
+            nametable_answer: if four_screen_vram {
+                super::super::Cartridge::SERVED_BY_CARTRIDGE
+            } else {
+                super::super::Cartridge::FOLLOW_MIRRORING
+            },
+            cartridge_vram_base: memory
+                .chr_ram()
+                .len()
+                .saturating_sub(Self::CARTRIDGE_VRAM_SIZE),
             has_led_register: submapper == 4,
+            // MR-30-4 and MR-BUS-1 are interlocked: a board whose ROM goes on driving the data
+            // bus during a write cannot run the command sequences at all.
+            can_flash: !super::super::registry::has_bus_conflicts(30, header),
+            flash_step: 0,
+            flash_erasing: false,
             register: 0,
+        }
+    }
+
+    /// Offset in CHR-RAM of PPU `address`, which is $2000-$3EFF here: the four nametables fill
+    /// the first 4 KiB of the window and the scratch RAM of $3000-$3EFF follows them, so the
+    /// thirteen low bits of the address are the offset (nesdev, "UNROM 512").
+    const fn cartridge_vram_offset(&self, address: u16) -> usize {
+        self.cartridge_vram_base + (address & 0x1FFF) as usize
+    }
+
+    /// Advances the SST39SF040 command state machine on a CPU write to $8000-$FFFF, and runs
+    /// the command when its last byte lands (MR-30-4).
+    ///
+    /// nesdev ("UNROM 512") gives the two sequences: erase a 4 KiB sector with $AA to $9555,
+    /// $55 to $AAAA, $80 to $9555, $AA to $9555, $55 to $AAAA and $30 to an address in the
+    /// sector; program a byte with $AA to $9555, $55 to $AAAA, $A0 to $9555 and the byte to its
+    /// address. Either completes before the CPU can look, so the verification reads the page
+    /// describes ("read the written location twice until you get $FF twice", and the same for
+    /// the data) succeed at once and the board never has to answer a read with status — which
+    /// is what keeps `rom_windows` a plain window and this fix off every other board's read
+    /// path.
+    ///
+    /// **Q-117.** Every byte of a sequence is also a write to the mapper's own latch, so the
+    /// 16 KiB window the chip sees when the last byte lands is the one the *previous* byte
+    /// chose. The page says nothing about that interaction, and taken literally it puts every
+    /// byte-write in bank 0 and every erase in bank 21. The chip is given the window in force,
+    /// which is what the register diagram and the write cycle's own order imply, and the ticket
+    /// records the two other readings. Persistence of a reprogrammed ROM is also out of scope
+    /// there: the flash is changed in memory and a reload loses it.
+    fn step_flash(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        match (self.flash_step, address, value) {
+            (0 | 3, 0x9555, 0xAA) | (1 | 4, 0xAAAA, 0x55) => self.flash_step += 1,
+            (2, 0x9555, 0x80) => {
+                self.flash_erasing = true;
+                self.flash_step = 3;
+            }
+            (2, 0x9555, 0xA0) => {
+                self.flash_erasing = false;
+                self.flash_step = 6;
+            }
+            (5, _, 0x30) if self.flash_erasing => {
+                self.erase_sector(memory, address);
+                self.flash_step = 0;
+            }
+            (6, _, _) => {
+                self.program_byte(memory, address, value);
+                self.flash_step = 0;
+            }
+            // Anything else aborts the sequence. A plain bank write is the common case.
+            _ => self.flash_step = 0,
+        }
+    }
+
+    /// Erases the 4 KiB flash sector `address` falls in, to $FF.
+    fn erase_sector(&self, memory: &mut CartridgeMemory, address: u16) {
+        let Some(offset) = self.banks.prg_rom_offset(address) else {
+            return;
+        };
+
+        let sector = offset & !0x0FFF;
+        let rom = memory.prg_rom_mut();
+        let end = (sector + 0x1000).min(rom.len());
+        if sector < end {
+            rom[sector..end].fill(0xFF);
+        }
+    }
+
+    /// Programs one byte. Flash can only clear bits, so the byte written is ANDed with what is
+    /// already there — a game that has not erased the sector first sees exactly that.
+    fn program_byte(&self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let Some(offset) = self.banks.prg_rom_offset(address) else {
+            return;
+        };
+
+        let rom = memory.prg_rom_mut();
+        if let Some(byte) = rom.get_mut(offset) {
+            *byte &= value;
         }
     }
 
@@ -459,7 +580,7 @@ impl UnRom512 {
             .map_chr_8k(i32::from((self.register >> 5) & 0x03));
         let high = self.register & 0x80 != 0;
         match self.mirroring_control {
-            UnRom512Mirroring::Fixed => {}
+            UnRom512Mirroring::Fixed | UnRom512Mirroring::FourScreenCartridgeVram => {}
             UnRom512Mirroring::OneScreen => memory.set_mirroring(if high {
                 NametableMirroring::SingleScreenB
             } else {
@@ -479,10 +600,23 @@ impl Mapper for UnRom512 {
 
     fn save_registers(&self, writer: &mut StateWriter) {
         writer.write_u8(self.register);
+        // Written last, so a mapper-30 state from before this lot loads with no flash command
+        // open — which is the state of a board the moment a game is not in the middle of a
+        // sequence, i.e. almost always (REQ-CORE-091).
+        writer.write_u8(self.flash_step);
+        writer.write_bool(self.flash_erasing);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.register = reader.read_u8()?;
+        if reader.remaining() > 0 {
+            self.flash_step = reader.read_u8()?;
+            self.flash_erasing = reader.read_bool()?;
+        } else {
+            self.flash_step = 0;
+            self.flash_erasing = false;
+        }
+
         Ok(())
     }
 
@@ -492,10 +626,42 @@ impl Mapper for UnRom512 {
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.register = 0;
+        self.flash_step = 0;
+        self.flash_erasing = false;
         self.update_banks(memory);
     }
 
+    /// MR-30-6. All four nametables come from the board in the four-screen mode, and only
+    /// there: every other arrangement leaves the layout to `memory.mirroring()` as before.
+    fn nametable_page(&self, _table: i32) -> i32 {
+        self.nametable_answer
+    }
+
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        let offset = self.cartridge_vram_offset(address);
+        memory.chr_ram().get(offset).copied().unwrap_or(0)
+    }
+
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let offset = self.cartridge_vram_offset(address);
+        if let Some(byte) = memory.chr_ram_mut().get_mut(offset) {
+            *byte = value;
+        }
+    }
+
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if address < 0x8000 {
+            return;
+        }
+
+        // MR-30-4. The flash chip sees every write to $8000-$FFFF, whatever the mapper latch
+        // does with the same write: the command sequences deliberately run through addresses
+        // that also move the bank, which is why a flashing routine lives in the fixed window.
+        // One `bool` test for a board that cannot flash, and no other board reaches this line.
+        if self.can_flash {
+            self.step_flash(memory, address, value);
+        }
+
         // MR-30-5: on a submapper-4 board $8000-$BFFF is the LED register, which drives four
         // colour pairs inside the cartridge shell and no bank. Nothing in the engine lights,
         // so the write is simply not a bank write; the bank register is at $C000-$FFFF.

@@ -171,6 +171,25 @@ impl BankWindows {
         })
     }
 
+    /// Offset into PRG-ROM that `address` ($8000-$FFFF) shows through the window table, or
+    /// `None` below $8000 and when the window shows PRG-RAM.
+    ///
+    /// For a board that writes its *own* ROM: the UNROM 512 carries flash rather than mask ROM
+    /// and a game can erase and program it (MR-30-4).
+    #[must_use]
+    pub fn prg_rom_offset(&self, address: u16) -> Option<usize> {
+        if address < 0x8000 {
+            return None;
+        }
+
+        let slot = usize::from(address - 0x8000) / Self::PRG_WINDOW_SIZE;
+        if self.prg_is_ram[slot] {
+            return None;
+        }
+
+        Some(self.prg_offset[slot] + (usize::from(address) & (Self::PRG_WINDOW_SIZE - 1)))
+    }
+
     /// Writes a PRG window that currently shows PRG-RAM (MMC5); `false` when the window
     /// shows ROM, which ignores writes.
     pub fn try_write_prg_window(

@@ -569,7 +569,7 @@ impl Mapper for Mmc5 {
         }
     }
 
-    fn read_nametable(&self, address: u16) -> u8 {
+    fn read_nametable(&self, _memory: &CartridgeMemory, address: u16) -> u8 {
         if self.nametable_mode(address) == 2 {
             // ExRAM as a nametable: only the two nametable modes show it to the PPU.
             return if self.ex_ram_mode < 2 {
@@ -587,7 +587,7 @@ impl Mapper for Mmc5 {
         }
     }
 
-    fn write_nametable(&mut self, address: u16, value: u8) {
+    fn write_nametable(&mut self, _memory: &mut CartridgeMemory, address: u16, value: u8) {
         if self.nametable_mode(address) == 2 && self.ex_ram_mode < 2 {
             self.ex_ram[usize::from(address & 0x03FF)] = value;
         }

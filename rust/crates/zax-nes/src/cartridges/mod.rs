@@ -95,6 +95,12 @@ impl CartridgeMemory {
         &self.rom
     }
 
+    /// PRG-ROM, mutably: the one board that writes its own is the UNROM 512, whose PRG is
+    /// flash and not mask ROM (MR-30-4). No other board calls this.
+    pub(crate) fn prg_rom_mut(&mut self) -> &mut [u8] {
+        self.rom.prg_rom_mut()
+    }
+
     /// PRG-RAM at $6000-$7FFF, 8 KiB unless the board or the header asks for more.
     #[must_use]
     pub fn prg_ram(&self) -> &[u8] {
@@ -174,6 +180,20 @@ pub struct Cartridge {
     board: Board,
     /// [`Mapper::rom_windows`], kept for [`Cartridge::read_rom_window`].
     rom_windows: [usize; 4],
+    /// [`Mapper::nametable_page`] for the four logical tables, kept for
+    /// [`Cartridge::nametable_page`].
+    ///
+    /// Cached for the same reason as `rom_windows`, and it matters more: the PPU asks for a
+    /// page **once per nametable fetch**, and answering it through the `Board` enum put a
+    /// 26-arm dispatch on that path. Two boards give a page of their own — the MMC5 from
+    /// `$5105` and the UNROM 512 from its four-screen wiring — and a second non-default arm was
+    /// enough to push `Ppu2C02::read_nametable_as` out of line, which cost every game a call
+    /// per fetch (`read_pattern_planes` went from 106 instructions to 122). Refreshed wherever
+    /// `rom_windows` is, by [`Cartridge::refresh_board_views`].
+    nametable_pages: [i32; 4],
+    /// Whether a register write can move [`Cartridge::nametable_pages`], which only the MMC5
+    /// can ($5105). Derived from the ROM at load; see [`Cartridge::refresh_rom_windows`].
+    nametable_pages_vary: bool,
     /// Whether the board lets the ROM drive the data bus during a register write, so that the
     /// value latched is the AND of the written value and the ROM byte at that address
     /// (MR-BUS-1; see [`registry::has_bus_conflicts`]). Derived from the ROM at load, so it is
@@ -232,6 +252,8 @@ impl Cartridge {
             memory,
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
+            nametable_pages: [Self::FOLLOW_MIRRORING; 4],
+            nametable_pages_vary: mapper == 5,
             bus_conflicts,
         };
         cartridge.reset();
@@ -371,8 +393,25 @@ impl Cartridge {
         Some(value)
     }
 
+    /// Re-reads the PRG-ROM windows, and the nametable pages too on the one board whose
+    /// mapping a register can move.
+    ///
+    /// The gate matters: this runs after **every** CPU write to the cartridge, and asking the
+    /// `Board` enum for four pages costs about 112 instructions. Only the MMC5 can move them
+    /// at run time ($5105); the UNROM 512's come from its wiring and are settled at load, so
+    /// the pages it answers are computed once by `refresh_nametable_pages` in `reset` and in
+    /// `load_state` and then left alone.
     fn refresh_rom_windows(&mut self) {
         self.rom_windows = self.board.rom_windows(&self.memory);
+        if self.nametable_pages_vary {
+            self.refresh_nametable_pages();
+        }
+    }
+
+    fn refresh_nametable_pages(&mut self) {
+        self.nametable_pages = std::array::from_fn(|table| {
+            self.board.nametable_page(i32::try_from(table).unwrap_or(0))
+        });
     }
 
     pub fn try_cpu_read(&mut self, address: u16) -> Option<u8> {
@@ -530,18 +569,19 @@ impl Cartridge {
     /// cartridge supplies the bytes itself.
     #[must_use]
     pub fn nametable_page(&self, table: i32) -> i32 {
-        self.board.nametable_page(table)
+        self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
     }
 
-    /// Reads a nametable byte the cartridge serves itself (MMC5 `ExRAM`, fill mode).
+    /// Reads a nametable byte the cartridge serves itself (MMC5 `ExRAM` and fill mode, UNROM
+    /// 512's four-screen CHR-RAM).
     #[must_use]
     pub fn read_nametable(&self, address: u16) -> u8 {
-        self.board.read_nametable(address)
+        self.board.read_nametable(&self.memory, address)
     }
 
-    /// Writes a nametable byte the cartridge serves itself (MMC5 `ExRAM`).
+    /// Writes a nametable byte the cartridge serves itself.
     pub fn write_nametable(&mut self, address: u16, value: u8) {
-        self.board.write_nametable(address, value);
+        self.board.write_nametable(&mut self.memory, address, value);
     }
 
     /// Advances the cartridge by one CPU cycle.
@@ -557,6 +597,7 @@ impl Cartridge {
         self.memory.mirroring = self.memory.rom.header().mirroring;
         self.memory.cpu_cycle = 0;
         self.board.reset(&mut self.memory);
+        self.refresh_nametable_pages();
         self.refresh_rom_windows();
     }
 
@@ -602,6 +643,7 @@ impl Cartridge {
         })?;
         self.memory.cpu_cycle = reader.read_i64()?;
         let loaded = self.board.load_state(reader);
+        self.refresh_nametable_pages();
         self.refresh_rom_windows();
         loaded
     }

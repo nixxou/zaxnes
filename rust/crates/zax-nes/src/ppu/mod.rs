@@ -1230,6 +1230,14 @@ impl Ppu2C02 {
         }
     }
 
+    /// Kept **out of line**. The cartridge's nametable read gained a `CartridgeMemory`
+    /// argument in lot MF-2 (the UNROM 512 serves its four-screen nametables out of CHR-RAM,
+    /// MR-30-6), which made this small enough for the inliner to fold into `peek_vram` — and
+    /// from there into `read_pattern_planes`, where it hoisted `layout_of` above the loop and
+    /// cost that function sixteen instructions a call for a branch pattern fetches never take.
+    /// `read_pattern_planes` is the function R0's callgrind of MF-1 singled out; see
+    /// `docs/progress/MF-2.md`, step 7.
+    #[inline(never)]
     fn read_nametable_inner(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
         self.read_nametable_as(address, cartridge, self.layout_of(cartridge))
     }

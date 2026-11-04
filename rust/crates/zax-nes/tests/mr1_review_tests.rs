@@ -473,6 +473,187 @@ fn mr_30_1_unrom512_byte6_08_is_switchable_one_screen() {
     assert_eq!(zax_nes::NametableMirroring::SingleScreenB, core.mirroring());
 }
 
+/// MR-30-4 — the board carries flash, not mask ROM, and a game can program it: "Write a
+/// sequence of bytes here for writing to flash ROM". nesdev ("UNROM 512") gives the SST39SF040
+/// "Write a byte" sequence as $AA to $9555, $55 to $AAAA, $A0 to $9555 and then the byte to its
+/// address, and the verification as "read the written location twice until you get DATA twice".
+/// **New in MF-2.**
+/// Every byte of the sequence is also a write to the mapper's own latch, as on hardware — the
+/// register is `D~[NCCP PPPP] A~[1... .... .... ....]` — so the 16 KiB window in force when the
+/// last byte lands is the one the flash chip sees, and it is the *previous* byte of the sequence
+/// that chose it. The two sequences therefore reach two different banks, which is what the
+/// explicit re-selections below read back through. See Q-117.
+#[test]
+fn mr_30_4_unrom512_programs_a_byte_of_its_own_flash() {
+    // Submapper 1 is "No bus conflicts", which is what the self-flashing procedure needs. The
+    // image is 64 KiB, four 16 KiB banks, and 8 KiB bank 0 is filled with $FF so that a
+    // programmed byte — flash can only clear bits — is observable without erasing first.
+    let mut core = MapperRom::new(30)
+        .prg(8)
+        .chr(0)
+        .submapper(1)
+        .prg_bank_all_ones(0)
+        .load();
+
+    // Erase: $AA/$9555, $55/$AAAA, $80/$9555, $AA/$9555, $55/$AAAA, $30/<sector>. The byte
+    // before the last is $55, which latches 16 KiB bank 21 mod 4 = 1, so the sector erased is
+    // the one $9000 shows through bank 1 — filled with $02 by the fixture.
+    for (address, value) in [
+        (0x9555u16, 0xAAu8),
+        (0xAAAA, 0x55),
+        (0x9555, 0x80),
+        (0x9555, 0xAA),
+        (0xAAAA, 0x55),
+    ] {
+        core.mapper_write(address, value);
+    }
+    core.mapper_write(0x9000, 0x30);
+
+    core.mapper_write(0x8000, 0x01); // Back to bank 1 to read it.
+    assert_eq!(
+        0xFF,
+        core.read_memory(0x9000),
+        "an erased sector reads back $FF, which is the page's verification read"
+    );
+    // And only that 4 KiB sector. $8000 is the same 8 KiB bank 2 below the sector, $B000 is
+    // 8 KiB bank 3 above it; the fixture fills each with its own number.
+    assert_eq!(0x02, core.read_memory(0x8000));
+    assert_eq!(0x03, core.read_memory(0xB000));
+
+    // Program one byte: $AA/$9555, $55/$AAAA, $A0/$9555, then the data. $A0 latches bank 0,
+    // which is the $FF-filled one, so the byte written shows through.
+    core.mapper_write(0x9555, 0xAA);
+    core.mapper_write(0xAAAA, 0x55);
+    core.mapper_write(0x9555, 0xA0);
+    core.mapper_write(0x9000, 0x5A);
+
+    core.mapper_write(0x8000, 0x00); // Back to bank 0 to read it.
+    assert_eq!(0x5A, core.read_memory(0x9000), "the byte is programmed");
+    assert_eq!(
+        0xFF,
+        core.read_memory(0x9001),
+        "and only that byte: its neighbour is still erased"
+    );
+}
+
+/// MR-30-4 — a sequence the chip does not recognise leaves the ROM alone, and an aborted one
+/// does not carry over: the state machine must not be left half-open by a plain bank write.
+/// **New in MF-2.**
+#[test]
+fn mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing() {
+    let mut core = MapperRom::new(30)
+        .prg(8)
+        .chr(0)
+        .submapper(1)
+        .prg_bank_all_ones(0)
+        .load();
+
+    // The prologue of a byte write, then a plain bank write instead of the data: the sequence
+    // aborts, and the bank write must not be taken as the data byte.
+    core.mapper_write(0x9555, 0xAA);
+    core.mapper_write(0xAAAA, 0x55);
+    core.mapper_write(0x8000, 0x00); // Not $A0 at $9555: abort.
+    core.mapper_write(0x9000, 0x5A);
+
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(
+        0xFF,
+        core.read_memory(0x9000),
+        "an aborted sequence must not program anything"
+    );
+}
+
+/// MR-30-4 — and a board **with** bus conflicts cannot flash at all, because they "interfere
+/// with the self-flashing procedure" (nesdev, "UNROM 512", submapper 2). **New in MF-2.**
+#[test]
+fn mr_30_4_unrom512_with_bus_conflicts_cannot_flash() {
+    let mut core = MapperRom::new(30).prg(8).chr(0).submapper(2).load();
+
+    // The same erase sequence, which a conflicting board must not act on. The written values
+    // are ANDed with the ROM anyway, so the sequence could never be recognised on hardware.
+    for (address, value) in [
+        (0x9555u16, 0xAAu8),
+        (0xAAAA, 0x55),
+        (0x9555, 0x80),
+        (0x9555, 0xAA),
+        (0xAAAA, 0x55),
+    ] {
+        core.mapper_write(address, value);
+    }
+    core.mapper_write(0x9000, 0x30);
+
+    assert_eq!(
+        0x00,
+        core.read_memory(0x9000),
+        "a submapper-2 board must not erase its own ROM"
+    );
+}
+
+/// MR-30-6 — "The cartridge VRAM for the '4-screen with cartridge VRAM' comes from the last
+/// 8 KiB of CHR-RAM", with the four nametables at PPU $2000-$2FFF and scratch RAM at
+/// $3000-$3EFF (nesdev, "UNROM 512"). Byte 6 `%....1..1` is that mode (MR-30-1, fixed in MF-1).
+/// **New in MF-2.**
+#[test]
+fn mr_30_6_unrom512_four_screen_comes_from_the_last_8_kib_of_chr_ram() {
+    // Byte 6 bit 3 and bit 0 both set, and 32 KiB of CHR-RAM so the last 8 KiB is bank 3.
+    let mut core = MapperRom::new(30)
+        .prg(8)
+        .chr(0)
+        .mirroring(0x09)
+        .battery()
+        .load();
+
+    // All four nametables come from the board, not from console VRAM.
+    for table in 0..4 {
+        assert_eq!(
+            zax_nes::cartridges::Cartridge::SERVED_BY_CARTRIDGE,
+            core.cartridge().unwrap().nametable_page(table),
+            "table {table}"
+        );
+    }
+
+    // Each of the four is its own kilobyte: writing the table number into the first byte of
+    // each and reading all four back must give four different values.
+    for table in 0..4u16 {
+        core.cartridge_mut()
+            .unwrap()
+            .write_nametable(0x2000 + table * 0x0400, 0x10 + table as u8);
+    }
+
+    for table in 0..4u16 {
+        assert_eq!(
+            0x10 + table as u8,
+            core.cartridge()
+                .unwrap()
+                .read_nametable(0x2000 + table * 0x0400),
+            "nametable {table} must not be mirrored onto another"
+        );
+    }
+
+    // And $3000-$3EFF is the scratch RAM that follows them, not a mirror of $2000.
+    core.cartridge_mut().unwrap().write_nametable(0x3000, 0x77);
+    assert_eq!(0x77, core.cartridge().unwrap().read_nametable(0x3000));
+    assert_eq!(
+        0x10,
+        core.cartridge().unwrap().read_nametable(0x2000),
+        "the scratch window must not alias nametable 0"
+    );
+}
+
+/// MR-30-6 — and a board in any other arrangement leaves the nametables to the console, which
+/// is every mapper-30 dump that is not `%....1..1`. **New in MF-2.**
+#[test]
+fn mr_30_6_unrom512_outside_four_screen_leaves_the_nametables_to_the_console() {
+    for byte6 in [0x00, 0x01, 0x08] {
+        let core = MapperRom::new(30).prg(8).chr(0).mirroring(byte6).load();
+        assert_eq!(
+            zax_nes::cartridges::Cartridge::FOLLOW_MIRRORING,
+            core.cartridge().unwrap().nametable_page(0),
+            "byte 6 {byte6:#04X}"
+        );
+    }
+}
+
 /// MR-30-5. NES 2.0 submapper 4 is "No bus conflicts, an additional register controls LEDs
 /// inside the cartridge shell", at `D~[BYGR bygr] A~[10.. .... .... ....]` — $8000-$BFFF. A
 /// write there must not move the PRG bank; the bank register is at $C000-$FFFF.
