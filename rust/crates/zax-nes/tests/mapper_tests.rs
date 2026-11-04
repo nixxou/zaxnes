@@ -113,7 +113,10 @@ fn req_core_100_mmc1_ignores_a_write_on_the_cycle_after_another() {
     // bit must not change the result.
     for bit in 0..5 {
         core.mapper_write(0xE000, (0x03 >> bit) & 0x01);
-        core.write_memory(0xE000, 0xFF); // Same cycle as the write above: dropped.
+        // Same cycle as the write above, so its bit 0 is dropped. Bit 7 is clear: the reset
+        // bit would be taken whatever the cycle (MR-1-1), which
+        // `mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter` pins.
+        core.write_memory(0xE000, 0x7F);
     }
 
     assert_eq!([6, 7, 14, 15], core.prg_windows());

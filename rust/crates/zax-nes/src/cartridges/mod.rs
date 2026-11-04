@@ -43,6 +43,10 @@ pub struct CartridgeMemory {
     chr_ram: Vec<u8>,
     mirroring: NametableMirroring,
     cpu_cycle: i64,
+    /// First byte of `prg_ram` the cartridge's battery retains; the rest of the RAM comes up
+    /// uninitialised (see [`registry::battery_offset`]). Derived from the ROM at load, so it is
+    /// not part of the savestate.
+    battery_offset: usize,
 }
 
 impl CartridgeMemory {
@@ -58,12 +62,14 @@ impl CartridgeMemory {
         });
         let chr_ram_size = sizes.chr_ram.unwrap_or(rom.header().chr_ram_size);
         let mirroring = rom.header().mirroring;
+        let battery_offset = registry::battery_offset(rom.mapper(), prg_ram_size);
         let mut memory = Self {
             rom,
             prg_ram: vec![0; prg_ram_size],
             chr_ram: vec![0; chr_ram_size],
             mirroring,
             cpu_cycle: 0,
+            battery_offset,
         };
         memory.load_trainer();
         memory
@@ -320,10 +326,13 @@ impl Cartridge {
 
     /// Battery-backed PRG-RAM, exposed so that a host can persist it (REQ-CORE-095,
     /// libretro "`SAVE_RAM`"). Empty when bit 1 of header byte 6 is clear.
+    ///
+    /// On a board whose battery is wired to only one of its RAM chips this is a sub-slice,
+    /// not the whole PRG-RAM (MR-1-5; see [`registry::battery_offset`]).
     #[must_use]
     pub fn battery_ram(&self) -> &[u8] {
         if self.memory.rom.header().has_battery {
-            &self.memory.prg_ram
+            &self.memory.prg_ram[self.memory.battery_offset..]
         } else {
             &[]
         }
@@ -332,7 +341,7 @@ impl Cartridge {
     /// Battery-backed PRG-RAM, mutably; empty without a battery.
     pub fn battery_ram_mut(&mut self) -> &mut [u8] {
         if self.memory.rom.header().has_battery {
-            &mut self.memory.prg_ram
+            &mut self.memory.prg_ram[self.memory.battery_offset..]
         } else {
             &mut []
         }

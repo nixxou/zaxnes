@@ -8,8 +8,8 @@ use crate::NametableMirroring;
 /// Each write to $8000-$FFFF shifts one bit into a five-bit serial register and the fifth
 /// write commits it to the register the address selects. Two writes on consecutive CPU
 /// cycles only count once (read-modify-write instructions). On 512 KiB boards bit 4 of CHR
-/// bank 0 supplies the top PRG address line, and bits 2-3 of it bank the PRG-RAM of SOROM
-/// and SXROM when the header announces more than 8 KiB.
+/// bank 0 supplies the top PRG address line, and its `S` bits bank the PRG-RAM of SOROM and
+/// SXROM when the header announces more than 8 KiB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mmc1 {
     banks: BankWindows,
@@ -20,10 +20,28 @@ pub struct Mmc1 {
     chr1: u8,
     prg: u8,
     last_write_cycle: i64,
+    /// NES 2.0 submapper 5 (MR-1-4), decided at load.
+    fixed_prg: bool,
+    /// How to read the `S` bits of CHR bank 0 for this board's PRG-RAM (MR-1-3), decided at
+    /// load so that `prg_ram_offset` keeps exactly one shift and one mask.
+    ram_bank_shift: u32,
+    ram_bank_mask: u8,
 }
 
 impl Mmc1 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+        let header = memory.rom().header();
+        // MR-1-3, nesdev ("MMC1"): "For SXROM, the upper `S` (bit 3) selects the SRAM's A14,
+        // and the lower `S` (bit 2) selects A13", and "The SOROM board only implements the
+        // upper `S` bit". SOROM is the 16 KiB board, SXROM the 32 KiB one; our old
+        // `(chr0 >> 2) & 0x03` reduced to bit 2 over a 16 KiB RAM, one bit off, which put the
+        // SOROM titles' saves in the half that is not battery-backed.
+        let (ram_bank_shift, ram_bank_mask) =
+            match memory.prg_ram().len() / BankWindows::PRG_WINDOW_SIZE {
+                0 | 1 => (0, 0x00),
+                2 => (3, 0x01),
+                _ => (2, 0x03),
+            };
         Self {
             banks: windows_for(memory),
             shift: 0,
@@ -33,6 +51,9 @@ impl Mmc1 {
             chr1: 0,
             prg: 0,
             last_write_cycle: -4,
+            fixed_prg: header.is_nes20 && header.submapper == 5,
+            ram_bank_shift,
+            ram_bank_mask,
         }
     }
 
@@ -45,18 +66,25 @@ impl Mmc1 {
         };
         let bank = i32::from(self.prg & 0x0F) | outer;
 
-        match (self.control >> 2) & 0x03 {
-            // 32 KiB at $8000, the low bit of the bank number ignored.
-            0 | 1 => self.banks.map_prg_32k(bank >> 1),
-            // First bank of the block fixed at $8000, switchable at $C000.
-            2 => {
-                self.banks.map_prg_16k(0, outer);
-                self.banks.map_prg_16k(2, bank);
-            }
-            // Switchable at $8000, last bank of the block fixed at $C000.
-            _ => {
-                self.banks.map_prg_16k(0, bank);
-                self.banks.map_prg_16k(2, outer | 0x0F);
+        // MR-1-4. NES 2.0 submapper 5 is SEROM, SHROM and SH1ROM, which "use a fixed 32k PRG
+        // ROM with no banking support" (nesdev, "NES 2.0 submappers"); Dr. Mario is the dump
+        // that names the board. The PRG register does nothing there.
+        if self.fixed_prg {
+            self.banks.map_prg_32k(0);
+        } else {
+            match (self.control >> 2) & 0x03 {
+                // 32 KiB at $8000, the low bit of the bank number ignored.
+                0 | 1 => self.banks.map_prg_32k(bank >> 1),
+                // First bank of the block fixed at $8000, switchable at $C000.
+                2 => {
+                    self.banks.map_prg_16k(0, outer);
+                    self.banks.map_prg_16k(2, bank);
+                }
+                // Switchable at $8000, last bank of the block fixed at $C000.
+                _ => {
+                    self.banks.map_prg_16k(0, bank);
+                    self.banks.map_prg_16k(2, outer | 0x0F);
+                }
             }
         }
 
@@ -124,14 +152,12 @@ impl Mapper for Mmc1 {
         self.update_banks(memory);
     }
 
+    /// The `S` bits of CHR bank 0 pick the 8 KiB PRG-RAM chip; which bits, and whether there
+    /// are any, is `Mmc1::new`'s decision (MR-1-3).
     fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
-        let len = memory.prg_ram().len();
-        let bank = if len > BankWindows::PRG_WINDOW_SIZE {
-            usize::from((self.chr0 >> 2) & 0x03)
-        } else {
-            0
-        };
-        (bank * BankWindows::PRG_WINDOW_SIZE + usize::from(address - 0x6000)) % len
+        let bank = usize::from((self.chr0 >> self.ram_bank_shift) & self.ram_bank_mask);
+        (bank * BankWindows::PRG_WINDOW_SIZE + usize::from(address - 0x6000))
+            % memory.prg_ram().len()
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
@@ -141,15 +167,20 @@ impl Mapper for Mmc1 {
 
         let ignored = memory.cpu_cycle() - self.last_write_cycle < 2;
         self.last_write_cycle = memory.cpu_cycle();
-        if ignored {
-            return;
-        }
 
+        // MR-1-1, nesdev ("MMC1"): the consecutive-write restriction "only applies to the data
+        // being written on bit 0; the bit 7 reset is never ignored" — the sentence that names
+        // Shinsenden, whose reset arrives as the second half of a read-modify-write. The test
+        // used to sit above this write, so the reset was swallowed with the data.
         if value & 0x80 != 0 {
             self.shift = 0;
             self.shift_count = 0;
             self.control |= 0x0C;
             self.update_banks(memory);
+            return;
+        }
+
+        if ignored {
             return;
         }
 

@@ -21,7 +21,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 2/10 — MMC6: MR-4-1, MR-4-7, MR-4-6, MR-4-8
 - [x] 3/10 — RAMBO-1 PRG mode: MR-64-7
 - [x] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
-- [ ] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
+- [x] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
 - [ ] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
 - [ ] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
 - [ ] 8/10 — MR-32-1, MR-156-1, MR-16-1
@@ -55,6 +55,10 @@ because a step cannot write its own commit hash.
 | MR-5-1 | `mmc5.rs:170-172` (three clauses) | `mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a`, `req_core_100_mmc5_serves_background_fetches_from_the_second_set_with_tall_sprites` | any 8x8-sprite MMC5 title that writes $5128-$512B |
 | MR-5-3 | `mmc5.rs:511-527` (arm, then increment) | `mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line`, `req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names` | **Castlevania III, Just Breed** and every other MMC5 split: each one moves down by exactly one scanline |
 | MR-5-5 | `mmc5.rs:410-416` (`None`) | `mr_5_5_mmc5_exram_reads_are_open_bus_in_the_nametable_modes` | none known |
+| MR-1-1 | `mmc1.rs:178-190` (bit 7 above the filter) | `mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter` | **Shinsenden**; any MMC1 game whose reset arrives as a read-modify-write |
+| MR-1-3 | `mmc1.rs:36-43` + `:170-175` (shift/mask at load) | `mr_1_3_mmc1_sorom_selects_its_ram_chip_with_bit_3_alone`, `mr_1_3_an_sxrom_still_uses_both_s_bits` | **Genghis Khan, Nobunaga's Ambition** (SOROM saves) |
+| MR-1-4 | `mmc1.rs:67-72` (`fixed_prg`) | `mr_1_4_mmc1_submapper_5_has_fixed_prg` | **Dr. Mario** and the other SEROM/SHROM dumps, only if headered NES 2.0 submapper 5 |
+| MR-1-5 | `registry.rs:75-81` + `mod.rs:330-345` | `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed`, `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` | **Genghis Khan, Nobunaga's Ambition**: the battery file shrinks from 16 KiB to 8 |
 
 ### Step 1 notes
 
@@ -122,3 +126,31 @@ because a step cannot write its own commit hash.
   but the register is what it is.
 - MR-5-2 (writes outside rendering) and MR-5-4 (the in-frame detection) are **not** touched:
   both are out of this lot and their tests stay ignored.
+
+### Step 5 notes
+
+- **MR-1-1** keeps `last_write_cycle` updated on a reset write, which is also what Mesen does
+  (`MMC1.h:210`, the assignment sits outside the `if`): the reset is processed whatever the
+  cycle, and the *next* write is still measured from it.
+  `req_core_100_mmc1_ignores_a_write_on_the_cycle_after_another` (`mapper_tests.rs:106`) used
+  0xFF for the write it expects to be dropped, which now carries the reset bit; it uses 0x7F
+  instead and asserts the same windows.
+- **MR-1-3 adds no runtime branch.** `ram_bank_shift`/`ram_bank_mask` are chosen in
+  `Mmc1::new` from `memory.prg_ram().len()`, exactly as MR-1b asked, so `prg_ram_offset` still
+  does one shift, one mask and one modulo on the $6000-$7FFF access path. The 8 KiB case takes
+  mask 0, which is the old `bank = 0` without the `if`.
+- **The fixture gained the PRG-RAM knob** MR-1b named as the blocker for MR-1-3 and MR-1-5:
+  `MapperRom::prg_ram(volatile, non_volatile)` writes NES 2.0 byte 10. A byte 10 of zero reads
+  back as the 8 KiB default, so the images that only asked for a submapper are unchanged.
+- **MR-1-5 opened Q-113** (`spec/changes/Q-113.md`). The nesdev sentence names SOROM and SZROM
+  only, both 16 KiB boards; MR-1b's prose extends it to the 32 KiB SXROM, which the source
+  does not say and Mesen contradicts. Applying that extension would cut *Final Fantasy I·II*
+  and *Best Play Pro Yakyuu Special* saves to a quarter, so the fix applies the quoted sentence
+  and nothing more: 16 KiB board -> the second 8 KiB chip only, 32 KiB board -> the whole RAM.
+  The ticket also asks whether SOROM's "second chip" is the bit-3-set bank (our reading, from
+  the wiki) or bank 0 (Mesen's), and what to do with battery files already written.
+- **For R0, a host-side consequence, not a save-state one:** on a SOROM the battery file goes
+  from 16 KiB to 8 KiB, and `NesCore::import_battery_ram` copies a prefix, so an existing
+  16 KiB file would load its volatile half into the retained one. Two titles are concerned;
+  question 3 of Q-113 carries it.
+- MR-1-2 is **not** applied: MR-1b withdrew it, and its test stays removed.

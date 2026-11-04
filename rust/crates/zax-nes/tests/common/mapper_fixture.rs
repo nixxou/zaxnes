@@ -21,6 +21,7 @@ pub struct MapperRom {
     mirroring: u8,
     battery: bool,
     submapper: Option<u8>,
+    prg_ram_byte10: Option<u8>,
 }
 
 impl MapperRom {
@@ -33,6 +34,7 @@ impl MapperRom {
             mirroring: 0,
             battery: false,
             submapper: None,
+            prg_ram_byte10: None,
         }
     }
 
@@ -61,6 +63,28 @@ impl MapperRom {
         self
     }
 
+    /// NES 2.0 byte 10: `volatile` bytes of work RAM and `non_volatile` bytes of
+    /// battery-backed RAM. The header stores each as `64 << shift`, so both must be 64 times a
+    /// power of two, or zero. Setting this makes the image an NES 2.0 one.
+    ///
+    /// The MMC1 boards need it: SOROM is 8 KiB of each and SXROM 32 KiB of one, and the `S`
+    /// bits of CHR bank 0 are read differently on the two (MR-1-3, MR-1-5).
+    pub fn prg_ram(mut self, volatile: usize, non_volatile: usize) -> Self {
+        let shift = |bytes: usize| -> u8 {
+            if bytes == 0 {
+                0
+            } else {
+                assert!(
+                    bytes >= 64 && (bytes / 64).is_power_of_two(),
+                    "byte 10 stores 64 << shift"
+                );
+                (bytes / 64).trailing_zeros() as u8
+            }
+        };
+        self.prg_ram_byte10 = Some((shift(non_volatile) << 4) | shift(volatile));
+        self
+    }
+
     /// The iNES image.
     pub fn image(&self) -> Vec<u8> {
         let mapper = self.mapper;
@@ -73,12 +97,12 @@ impl MapperRom {
         image[6] =
             (((mapper & 0x0F) << 4) as u8) | self.mirroring | if self.battery { 0x02 } else { 0 };
         image[7] = (mapper & 0xF0) as u8;
-        if let Some(submapper) = self.submapper {
+        if self.submapper.is_some() || self.prg_ram_byte10.is_some() || mapper >> 8 != 0 {
             image[7] |= 0x08; // NES 2.0.
-            image[8] = (submapper << 4) | ((mapper >> 8) & 0x0F) as u8;
-        } else if mapper >> 8 != 0 {
-            image[7] |= 0x08;
-            image[8] = ((mapper >> 8) & 0x0F) as u8;
+            image[8] = (self.submapper.unwrap_or(0) << 4) | ((mapper >> 8) & 0x0F) as u8;
+            // Byte 10 of zero reads back as the 8 KiB default, which is what an iNES image
+            // gets too, so an image that only wants a submapper is unaffected.
+            image[10] = self.prg_ram_byte10.unwrap_or(0);
         }
 
         for bank in 0..self.prg_banks_8k {

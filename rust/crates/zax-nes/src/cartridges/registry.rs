@@ -12,7 +12,7 @@ use super::mappers::{
     Daou306, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mmc1, Mmc2, Mmc3,
     Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
-use super::{Board, CartridgeMemory};
+use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
 
 /// Mapper numbers this build can run, in ascending order (REQ-CORE-102). 116 is optional in
@@ -59,6 +59,24 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             ..BoardMemorySizes::default()
         },
         _ => BoardMemorySizes::default(),
+    }
+}
+
+/// Where in PRG-RAM the battery-backed region begins on `mapper`'s board, once the board has
+/// `prg_ram_size` bytes of it. Everything from there to the end is what a host persists.
+///
+/// MR-1-5, nesdev ("MMC1"): "Even if the SOROM and SZROM boards utilizes a battery, it is
+/// connected to only one PRG-RAM chip. The first RAM chip will not retain its data, but the
+/// second one will." SOROM and SZROM are the 16 KiB boards, so the chip that retains is the
+/// second 8 KiB. The 32 KiB SXROM is **not** covered by that sentence and keeps its whole RAM
+/// battery-backed, as Mesen has it (`MMC1.h:134`, the whole window mapped `SaveRam`); see
+/// Q-113.
+#[must_use]
+pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
+    if mapper == 1 && prg_ram_size == 2 * BankWindows::PRG_WINDOW_SIZE {
+        BankWindows::PRG_WINDOW_SIZE
+    } else {
+        0
     }
 }
 

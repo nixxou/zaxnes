@@ -270,7 +270,6 @@ fn mr_30_2_unrom512_does_not_drive_6000_7fff() {
 /// We test the two-cycle filter *before* looking at bit 7 (`mmc1.rs:146-151`), so the reset
 /// is swallowed: `control` keeps its PRG mode instead of having bits 2-3 forced.
 #[test]
-#[ignore = "MR-1: MR-1-1"]
 fn mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter() {
     let mut core = MapperRom::new(1).prg(16).chr(16).load();
 
@@ -305,7 +304,6 @@ fn mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter() {
 /// banking at all. Mesen short-circuits it (`MMC1.h:152-156`, `SelectPrgPage2x(0, 0)`);
 /// we have no submapper handling on this board, so the PRG register still banks.
 #[test]
-#[ignore = "MR-1: MR-1-4"]
 fn mr_1_4_mmc1_submapper_5_has_fixed_prg() {
     let mut core = MapperRom::new(1).prg(4).chr(16).submapper(5).load();
 
@@ -317,6 +315,100 @@ fn mr_1_4_mmc1_submapper_5_has_fixed_prg() {
         core.prg_windows(),
         "submapper 5 fixes the whole 32 KiB: the PRG register must do nothing"
     );
+}
+
+/// MR-1-3. nesdev ("MMC1"): "For SXROM, the upper `S` (bit 3) selects the SRAM's A14, and the
+/// lower `S` (bit 2) selects A13", and "The SOROM board only implements the upper `S` bit".
+/// SOROM is the 16 KiB board. Our `(chr0 >> 2) & 0x03` reduced, modulo a 16 KiB RAM, to bit 2
+/// — one bit off — so Genghis Khan and Nobunaga's Ambition saved into the half that is not
+/// battery-backed and read back from the one that is.
+///
+/// MR-1b recorded this test as a fixture gap: `MapperRom` had no PRG-RAM knob and a 16 KiB
+/// declaration needs NES 2.0 byte 10. `MapperRom::prg_ram` is that knob.
+#[test]
+fn mr_1_3_mmc1_sorom_selects_its_ram_chip_with_bit_3_alone() {
+    // 8 KiB of work RAM plus 8 KiB battery-backed: a SOROM.
+    let mut core = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .battery()
+        .prg_ram(0x2000, 0x2000)
+        .load();
+    assert_eq!(0x4000, core.cartridge().unwrap().memory().prg_ram().len());
+
+    core.write_memory(0x6000, 0x11); // Chip 0.
+    core.mmc1_write(0xA000, 0x08); // CHR bank 0 with the upper S bit set: chip 1.
+    core.write_memory(0x6000, 0x22);
+    assert_eq!(0x22, core.read_memory(0x6000));
+
+    core.mmc1_write(0xA000, 0x00);
+    assert_eq!(
+        0x11,
+        core.read_memory(0x6000),
+        "bit 3 clear is chip 0 again"
+    );
+
+    core.mmc1_write(0xA000, 0x04);
+    assert_eq!(
+        0x11,
+        core.read_memory(0x6000),
+        "the lower S bit is not wired on a SOROM: it must not move the selector"
+    );
+}
+
+/// The 32 KiB SXROM does implement both `S` bits: the fix of MR-1-3 must not reach it.
+#[test]
+fn mr_1_3_an_sxrom_still_uses_both_s_bits() {
+    let mut core = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .battery()
+        .prg_ram(0, 0x8000)
+        .load();
+    assert_eq!(0x8000, core.cartridge().unwrap().memory().prg_ram().len());
+
+    for (bits, value) in [(0x00, 0x10), (0x04, 0x11), (0x08, 0x12), (0x0C, 0x13)] {
+        core.mmc1_write(0xA000, bits);
+        core.write_memory(0x6000, value);
+    }
+
+    for (bits, value) in [(0x00, 0x10), (0x04, 0x11), (0x08, 0x12), (0x0C, 0x13)] {
+        core.mmc1_write(0xA000, bits);
+        assert_eq!(value, core.read_memory(0x6000), "S bits {bits:#04X}");
+    }
+}
+
+/// MR-1-5. nesdev ("MMC1"): "Even if the SOROM and SZROM boards utilizes a battery, it is
+/// connected to only one PRG-RAM chip. The first RAM chip will not retain its data, but the
+/// second one will." We persisted the whole PRG-RAM whenever the header declared a battery.
+#[test]
+fn mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed() {
+    let core = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .battery()
+        .prg_ram(0x2000, 0x2000)
+        .load();
+
+    assert_eq!(
+        0x2000,
+        core.cartridge().unwrap().battery_ram().len(),
+        "the battery reaches one of the two chips, the second"
+    );
+}
+
+/// The SXROM board is not covered by that sentence and keeps its whole 32 KiB battery-backed
+/// (Q-113).
+#[test]
+fn mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed() {
+    let core = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .battery()
+        .prg_ram(0, 0x8000)
+        .load();
+
+    assert_eq!(0x8000, core.cartridge().unwrap().battery_ram().len());
 }
 
 // ================================================================ mapper 4, MMC3 / MMC6
