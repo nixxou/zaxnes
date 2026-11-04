@@ -220,9 +220,16 @@ pub enum Kind {
     Word,
     /// The ROM draws a hexadecimal result code, `$01` meaning every test passed.
     ///
-    /// `blargg_ppu_tests_2005.09.15b`: "Each ROM runs several tests and reports a result code
-    /// on screen and by beeping a number of times. A result code of 1 always indicates that
-    /// all tests were passed."
+    /// Two suites say this in the same words. `blargg_ppu_tests_2005.09.15b`: "Each ROM runs
+    /// several tests and reports a result code on screen and by beeping a number of times. A
+    /// result code of 1 always indicates that all tests were passed." And
+    /// `blargg_apu_2005.07.30`, in its `tests.txt`: "Each ROM runs several tests and reports a
+    /// result code on screen and by beeping a number of times. A result code of 1 always
+    /// indicates that all tests were passed. Other result codes indicate a problem or
+    /// behavior that isn't implemented as stated".
+    ///
+    /// `pal_apu_tests` is *not* one of them, despite the name: it draws `PASSED` and
+    /// `FAILED: #n` in words.
     HexCode,
 }
 
@@ -230,7 +237,7 @@ impl Kind {
     /// How the ROM at relative path `lower` (lower-cased) reports.
     #[must_use]
     pub fn of(lower: &str) -> Self {
-        if lower.contains("blargg_ppu_tests") {
+        if lower.contains("blargg_ppu_tests") || lower.contains("blargg_apu_2005") {
             Self::HexCode
         } else {
             Self::Word

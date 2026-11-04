@@ -43,10 +43,16 @@ pub fn markdown(
     writeln!(out, "# MF-T — Zaxnes against the public test ROMs\n")?;
     writeln!(
         out,
-        "Produced by `zax-harness test-roms <roms dir> <out.json> --markdown <this file>`. The \
-         ROMs are **not** in the repository: they come from `assets-free/test-roms/`, whose \
+        "The ROMs are **not** in the repository: they come from `assets-free/test-roms/`, whose \
          `README.md` records where each suite was downloaded from and at which commit. The JSON \
-         and the per-ROM PNGs of the final frame stay under `rust/target-mf/`.\n"
+         and the per-ROM PNGs of the final frame stay under `rust/target-mf/`, out of git.\n\n\
+         To reproduce the whole thing:\n\n\
+         ```\n\
+         zax-harness test-roms <roms dir> run.json --shots <dir> --markdown <this file>\n\
+         ```\n\n\
+         `--filter <substring>` runs one suite, `--merge <other.json>` keeps another \
+         campaign's rows and replaces only the ROMs this run touched, and `--reuse` rewrites \
+         this file from a JSON already on disk without emulating anything.\n"
     )?;
     writeln!(
         out,
@@ -70,7 +76,7 @@ pub fn markdown(
          evidence.\n"
     )?;
 
-    write_totals(&mut out, summary)?;
+    write_totals(&mut out, results, summary)?;
     write_suite_summary(&mut out, results)?;
     write_diagnoses(&mut out, results)?;
     write_tables(&mut out, results, &reference)?;
@@ -86,16 +92,37 @@ pub fn markdown(
     Ok(out)
 }
 
-fn write_totals(out: &mut String, summary: Summary) -> Result<(), HarnessError> {
+fn write_totals(
+    out: &mut String,
+    results: &[RomResult],
+    summary: Summary,
+) -> Result<(), HarnessError> {
+    let expected = results
+        .iter()
+        .filter(|row| {
+            matches!(row.outcome, Outcome::Fail | Outcome::Timeout) && diagnose(&row.rom).expected
+        })
+        .count();
+
     writeln!(out, "## Totals\n")?;
     writeln!(out, "| Result | ROMs |")?;
     writeln!(out, "|---|---:|")?;
     writeln!(out, "| pass | {} |", summary.pass)?;
-    writeln!(out, "| fail | {} |", summary.fail)?;
+    writeln!(
+        out,
+        "| fail | {} (of which {expected} are required to fail, see below) |",
+        summary.fail
+    )?;
     writeln!(out, "| timeout | {} |", summary.timeout)?;
     writeln!(out, "| unsupported | {} |", summary.unsupported)?;
     writeln!(out, "| manual | {} |", summary.manual)?;
     writeln!(out, "| **total** | **{}** |\n", summary.total)?;
+    writeln!(
+        out,
+        "`manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew \
+         rather than tests, and the handful of ROMs that ask a person to press buttons or \
+         listen. Each still has a PNG of its final frame.\n"
+    )?;
     Ok(())
 }
 
@@ -137,12 +164,26 @@ fn write_diagnoses(out: &mut String, results: &[RomResult]) -> Result<(), Harnes
         writeln!(out, "None.\n")?;
         return Ok(());
     }
+    let expected = bad.iter().filter(|row| diagnose(&row.rom).expected).count();
     writeln!(
         out,
         "One line per row that is not a pass. The subsystem is what the ROM exercises, which is \
          where a fix would go; this lot diagnoses and does not fix.\n"
     )?;
-    writeln!(out, "| ROM | Result | Subsystem | What it says |")?;
+    if expected > 0 {
+        writeln!(
+            out,
+            "**{expected} of these {} are required to fail** and are marked as such below: they \
+             are the revision A half of a pair of MMC3 tests that contradict each other, and \
+             REQ-CORE-100 pins mapper 4 to revision B. In each pair the revision B ROM passes. \
+             Counting them as defects would be wrong.\n",
+            bad.len()
+        )?;
+    }
+    writeln!(
+        out,
+        "| ROM | Result | Subsystem and reading | What it says |"
+    )?;
     writeln!(out, "|---|---|---|---|")?;
     for row in bad {
         writeln!(
@@ -150,7 +191,7 @@ fn write_diagnoses(out: &mut String, results: &[RomResult]) -> Result<(), Harnes
             "| `{}` | {} | {} | {} |",
             row.rom,
             row.outcome.label(),
-            diagnose(&row.rom),
+            diagnose(&row.rom).text,
             cell(&row.message)
         )?;
     }
@@ -252,12 +293,100 @@ fn cell(message: &str) -> String {
     text
 }
 
-/// The subsystem the ROM at `rom` exercises.
+/// What a failing row means: where to look, and whether it is a defect at all.
+#[derive(Debug, Clone, Copy)]
+pub struct Diagnosis {
+    /// The subsystem, and the requirement or document that bears on it.
+    pub text: &'static str,
+    /// True when the row is *supposed* to be a failure: the spec or the ROM's own
+    /// documentation says this emulator cannot pass it and be right.
+    pub expected: bool,
+}
+
+/// The ROMs whose failure has a known, documented reading.
 ///
-/// This is read off the suite the ROM belongs to — which is exactly what each suite's readme
-/// says it tests — and not from the failure, so it says where to look and claims nothing about
-/// the cause.
-fn diagnose(rom: &str) -> &'static str {
+/// Three of them are not defects at all. `mmc3_irq_tests`' readme says of its last two ROMs
+/// "The last two ROMs test different revisions of the MMC3, so at most only one will pass on a
+/// particular emulator", and `mmc3_test` and `mmc3_test_2` are built the same way: a revision
+/// B test and a revision A test that contradict each other. REQ-CORE-100 pins mapper 4 to
+/// revision B, and AMD-061's answer to Q-114 restates it — "toutes les autres images du mapper
+/// 4, dont toutes les images iNES 1.0, gardent la révision B de REQ-CORE-100, et REQ-CORE-114
+/// (`mmc3_test_2` n° 6) reste exigé pour elles". In all three pairs the revision B half passes
+/// here, which is the result the spec asks for.
+const SPECIFIC: [(&str, Diagnosis); 7] = [
+    (
+        "mmc3_irq_tests/5.mmc3_rev_a",
+        Diagnosis {
+            text: "MMC3 IRQ, revision A — **required to fail**. The suite's readme: \"The last \
+                   two ROMs test different revisions of the MMC3, so at most only one will pass \
+                   on a particular emulator\", and `6.MMC3_rev_B` passes. REQ-CORE-100 pins \
+                   mapper 4 to revision B.",
+            expected: true,
+        },
+    ),
+    (
+        "mmc3_test_2/rom_singles/6-mmc3_alt",
+        Diagnosis {
+            text: "MMC3 IRQ, revision A — **required to fail**. AMD-061 (answer to Q-114) keeps \
+                   revision B for every iNES 1.0 mapper-4 image and says REQ-CORE-114, which is \
+                   this very ROM, stays required. `5-MMC3` passes.",
+            expected: true,
+        },
+    ),
+    (
+        "mmc3_test/6-mmc6",
+        Diagnosis {
+            text: "MMC3/MMC6 IRQ reload once the counter has already reached zero — the \
+                   revision A behaviour, the other half of the pair whose `5-MMC3` passes. \
+                   **Required to fail** under REQ-CORE-100's revision B.",
+            expected: true,
+        },
+    ),
+    (
+        "blargg_ppu_tests_2005.09.15b/power_up_palette",
+        Diagnosis {
+            text: "PPU palette at power-on. Code `$02`, \"palette differs from table\" — and \
+                   the suite's readme says of those reference values that they \"are probably \
+                   unique to my NES\", so this is not a defect on its own. Nestopia 1.40 fails \
+                   it too.",
+            expected: false,
+        },
+    ),
+    (
+        "holy-mapperel/testroms/m1_p128k",
+        Diagnosis {
+            text: "MMC1 on an SNROM board: `$A000` bit 4 does not disable the work RAM \
+                   (detailed digits `4000`). The eleven other MMC1 boards — SJROM, SKROM, \
+                   SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone.",
+            expected: false,
+        },
+    ),
+    (
+        "pal_apu_tests",
+        Diagnosis {
+            text: "APU frame sequencer under **PAL** timing. The suite's readme calls it \"PAL \
+                   NES APU Tests [...] tested on a PAL NES\", though its files carry NTSC \
+                   headers, so the harness runs it on a PAL console; 3 of its 10 pass.",
+            expected: false,
+        },
+    ),
+    (
+        "accuracycoin",
+        Diagnosis {
+            text: "CPU, PPU and APU together — 89 of 147 pass. Read the per-test table in the \
+                   JSON: the 22 failures are the five `SH*` stores, `Open Bus`, and most of the \
+                   DMA and APU-timing pages, and a further 36 are blocked rather than failed.",
+            expected: false,
+        },
+    ),
+];
+
+/// The subsystem the ROM at `rom` exercises, and whether its failure is expected.
+///
+/// Beyond the ROMs [`SPECIFIC`] names, this is read off the suite the ROM belongs to — which
+/// is what each suite's readme says it tests — and not from the failure, so it says where to
+/// look and claims nothing about the cause.
+fn diagnose(rom: &str) -> Diagnosis {
     const RULES: [(&str, &str); 42] = [
         (
             "accuracycoin",
@@ -307,12 +436,19 @@ fn diagnose(rom: &str) -> &'static str {
     ];
 
     let lower = rom.to_ascii_lowercase();
-    RULES
-        .iter()
-        .find(|(needle, _)| lower.contains(needle))
-        .map_or("not classified — see the suite's readme", |(_, what)| {
-            *what
-        })
+    if let Some((_, diagnosis)) = SPECIFIC.iter().find(|(needle, _)| lower.contains(needle)) {
+        return *diagnosis;
+    }
+
+    Diagnosis {
+        text: RULES
+            .iter()
+            .find(|(needle, _)| lower.contains(needle))
+            .map_or("not classified — see the suite's readme", |(_, what)| {
+                *what
+            }),
+        expected: false,
+    }
 }
 
 /// What `status.txt` says, ROM by ROM.

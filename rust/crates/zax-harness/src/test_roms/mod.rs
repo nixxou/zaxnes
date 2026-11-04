@@ -44,6 +44,9 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
   --shots <dir>         where the final-frame PNGs go (default: beside <out.json>)
   --no-shots            write no PNG at all
   --markdown <file>     also write the report: a table per suite and a line per failure
+  --reuse               do not run anything: read <out.json> back and rewrite the report
+  --merge <file.json>   start from that campaign's rows; the ROMs run now replace theirs
+                        (with --filter, re-measures one suite without re-running the rest)
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
   --quiet               do not print one line per ROM";
 
@@ -59,6 +62,8 @@ pub struct Options {
     shots: Option<PathBuf>,
     no_shots: bool,
     markdown: Option<PathBuf>,
+    reuse: bool,
+    merge: Option<PathBuf>,
     frame_cap: Option<u32>,
     quiet: bool,
 }
@@ -83,13 +88,16 @@ impl Options {
             shots: None,
             no_shots: false,
             markdown: None,
+            reuse: false,
+            merge: None,
             frame_cap: None,
             quiet: false,
         };
         while let Some((name, tail)) = rest.split_first() {
-            if name == "--no-shots" || name == "--quiet" {
+            if matches!(name.as_str(), "--no-shots" | "--quiet" | "--reuse") {
                 options.no_shots |= name == "--no-shots";
                 options.quiet |= name == "--quiet";
+                options.reuse |= name == "--reuse";
                 rest = tail;
                 continue;
             }
@@ -98,6 +106,7 @@ impl Options {
                 "--filter" => options.filter = Some(value.clone()),
                 "--shots" => options.shots = Some(PathBuf::from(value)),
                 "--markdown" => options.markdown = Some(PathBuf::from(value)),
+                "--merge" => options.merge = Some(PathBuf::from(value)),
                 "--frames" => {
                     options.frame_cap = Some(
                         value
@@ -247,35 +256,53 @@ impl Summary {
 /// [`HarnessError`] when the ROM directory cannot be walked, or a file cannot be read, encoded
 /// or written.
 pub fn run(options: &Options) -> Result<Summary, HarnessError> {
-    let results = collect(options)?;
+    // `--reuse` rewrites the report from a campaign already on disk. Running 331 ROMs is
+    // minutes of emulation, and a change to the wording of the report is no reason to spend
+    // them again — nor to let the committed report come from a different run than its JSON.
+    let results = if options.reuse {
+        reread(&options.out)?
+    } else if let Some(base) = &options.merge {
+        // Re-measuring one suite after a reader change, without re-running the other 320
+        // ROMs: the rows of `base` are kept, and every ROM this run touched replaces its own.
+        let mut merged = reread(base)?;
+        let fresh = collect(options)?;
+        merged.retain(|row| !fresh.iter().any(|new| new.rom == row.rom));
+        merged.extend(fresh);
+        merged.sort_by(|left, right| left.rom.cmp(&right.rom));
+        merged
+    } else {
+        collect(options)?
+    };
     let mut summary = Summary::default();
     for result in &results {
         summary.count(result.outcome);
     }
 
-    let rows: Vec<Value> = results.iter().map(RomResult::to_json).collect();
-    let document = json!({
-        "roms_dir": options.roms.display().to_string(),
-        "filter": options.filter,
-        "summary": {
-            "total": summary.total,
-            "pass": summary.pass,
-            "fail": summary.fail,
-            "timeout": summary.timeout,
-            "unsupported": summary.unsupported,
-            "manual": summary.manual,
-        },
-        "results": rows,
-    });
-    if let Some(parent) = options.out.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
+    if !options.reuse {
+        let rows: Vec<Value> = results.iter().map(RomResult::to_json).collect();
+        let document = json!({
+            "roms_dir": options.roms.display().to_string(),
+            "filter": options.filter,
+            "summary": {
+                "total": summary.total,
+                "pass": summary.pass,
+                "fail": summary.fail,
+                "timeout": summary.timeout,
+                "unsupported": summary.unsupported,
+                "manual": summary.manual,
+            },
+            "results": rows,
+        });
+        if let Some(parent) = options.out.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
         }
+        fs::write(
+            &options.out,
+            serde_json::to_vec_pretty(&document).map_err(std::io::Error::from)?,
+        )?;
     }
-    fs::write(
-        &options.out,
-        serde_json::to_vec_pretty(&document).map_err(std::io::Error::from)?,
-    )?;
 
     if let Some(file) = &options.markdown {
         if let Some(parent) = file.parent() {
@@ -287,6 +314,94 @@ pub fn run(options: &Options) -> Result<Summary, HarnessError> {
     }
 
     Ok(summary)
+}
+
+/// Reads the rows of a campaign back out of the JSON it wrote.
+///
+/// Only the fields the report uses are restored; `detail` comes back whole, so nothing that
+/// was recorded is lost.
+///
+/// # Errors
+///
+/// [`HarnessError::Io`] when the file cannot be read and [`HarnessError::Format`] when it is
+/// not a campaign document.
+fn reread(path: &Path) -> Result<Vec<RomResult>, HarnessError> {
+    let text = fs::read_to_string(path)?;
+    let document: Value = serde_json::from_str(&text).map_err(std::io::Error::from)?;
+    let rows = document
+        .get("results")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            HarnessError::Format(format!(
+                "{}: no \"results\" array; is this a test-roms JSON?",
+                path.display()
+            ))
+        })?;
+
+    rows.iter()
+        .map(|row| {
+            let text_of = |key: &str| {
+                row.get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let rom = text_of("rom");
+            let label = text_of("result");
+            let outcome = match label.as_str() {
+                "pass" => Outcome::Pass,
+                "fail" => Outcome::Fail,
+                "timeout" => Outcome::Timeout,
+                "unsupported" => Outcome::Unsupported,
+                "manual" => Outcome::Manual,
+                _ => {
+                    return Err(HarnessError::Format(format!(
+                        "{}: {rom:?} has an unknown result {label:?}",
+                        path.display()
+                    )))
+                }
+            };
+
+            Ok(RomResult {
+                suite: if text_of("suite").is_empty() {
+                    suite_of(&rom)
+                } else {
+                    text_of("suite")
+                },
+                rom,
+                mapper: row
+                    .get("mapper")
+                    .and_then(Value::as_i64)
+                    .and_then(|mapper| i32::try_from(mapper).ok()),
+                submapper: row
+                    .get("submapper")
+                    .and_then(Value::as_i64)
+                    .and_then(|value| i32::try_from(value).ok()),
+                outcome,
+                code: row
+                    .get("code")
+                    .and_then(Value::as_u64)
+                    .and_then(|code| u32::try_from(code).ok()),
+                message: text_of("message"),
+                protocol: "reused",
+                frames: row
+                    .get("frames")
+                    .and_then(Value::as_u64)
+                    .and_then(|frames| u32::try_from(frames).ok())
+                    .unwrap_or(0),
+                milliseconds: row.get("ms").and_then(Value::as_u64).unwrap_or(0),
+                detail: row
+                    .get("detail")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default(),
+                shot: row
+                    .get("shot")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .collect()
 }
 
 /// Runs every ROM the options select and returns the rows, in path order.

@@ -24,7 +24,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
   `nes-test-roms/status.txt`.
 - [x] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
 - [x] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
-- [ ] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
+- [x] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
 - [ ] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
 - [ ] 10/10 — journal entry and close.
 
@@ -184,7 +184,48 @@ Run on subsets, not on the whole directory, so neither of the two campaign runs 
 
 - **Run 1/2 (step 7), done.** 331 ROMs in 4 min 21 s: 185 pass, 17 fail, 0 timeout,
   7 unsupported, 122 manual. It found two harness faults, both fixed before run 2.
-- Run 2/2 (step 8): the run the committed report comes from.
+- **Run 2/2 (step 8), done.** 331 ROMs in 2 min 55 s. Compared row by row against run 1:
+  **not one result differs**, so the campaign is deterministic.
+- **No third run.** Two reader changes came after run 2, and neither was worth a third
+  campaign, so two options were added to the command instead:
+  * `--reuse` rereads `<out.json>` and only rewrites the report. Used when the diagnosis
+    column and the "required to fail" count were added, which change the Markdown and nothing
+    else. The JSON was verified byte-identical afterwards.
+  * `--merge <file.json>` keeps another campaign's rows and lets the ROMs run now replace
+    their own. Used for the one reading fix below: 11 ROMs re-measured in 7 s instead of
+    re-running the other 320.
+
+  The committed report is therefore 320 rows from run 2/2 and 11 from the merge, every one of
+  them produced by the code as committed. Exact commands in the report's own header.
+
+### The last reading fix: `blargg_apu_2005.07.30`
+
+Its eleven ROMs were coming out `manual` on a screen reading `$01`. Their `tests.txt` says,
+in the same words as `blargg_ppu_tests_2005.09.15b`: "Each ROM runs several tests and reports
+a result code on screen and by beeping a number of times. A result code of 1 always indicates
+that all tests were passed." They are now read that way and **all eleven pass**, which is
+also what `status.txt` records for NESICIDE and Nestopia. `pal_apu_tests` is *not* the same
+suite despite the name — it draws `PASSED` and `FAILED: #n` in words.
+
+### Final campaign result
+
+**331 ROMs: 196 pass, 17 fail, 0 timeout, 7 unsupported, 111 manual.**
+
+Three of the seventeen failures are **required** to fail, and the report says so and counts
+them: `mmc3_irq_tests/5.MMC3_rev_A`, `mmc3_test/6-MMC6` and
+`mmc3_test_2/rom_singles/6-MMC3_alt` are each the revision A half of a pair of MMC3 tests
+that contradict each other. The suite's own readme says "The last two ROMs test different
+revisions of the MMC3, so at most only one will pass on a particular emulator"; REQ-CORE-100
+pins mapper 4 to revision B and AMD-061's answer to Q-114 restates that REQ-CORE-114 — which
+*is* `mmc3_test_2` no. 6 — stays required. In all three pairs the revision B ROM passes here.
+Counting them as defects would misread the spec.
+
+So **14 real failures**, in four groups: the PAL APU frame sequencer (7), OAM DMA against
+DMC DMA (3), the MMC1 SNROM work-RAM disable (2), `AccuracyCoin` (1, itself 22 failures and a
+wall), plus `power_up_palette`, whose readme disclaims its own reference values.
+
+`manual` is 111 rows, nearly all of `nes-test-roms/other/` — demos and homebrew rather than
+tests — plus the ROMs that ask a person to press buttons or listen. Each has a PNG.
 
 ### What run 1 found, and the two fixes
 
