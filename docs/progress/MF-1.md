@@ -20,7 +20,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 1/10 — Caltron 6-in-1: MR-41-1, MR-41-2, MR-41-3
 - [x] 2/10 — MMC6: MR-4-1, MR-4-7, MR-4-6, MR-4-8
 - [x] 3/10 — RAMBO-1 PRG mode: MR-64-7
-- [ ] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
+- [x] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
 - [ ] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
 - [ ] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
 - [ ] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
@@ -52,6 +52,9 @@ because a step cannot write its own commit hash.
 | MR-4-6 | `registry.rs:53` + `mmc3.rs:55` (1 KiB) | `mr_4_6_mmc6_carries_one_kib_of_prg_ram`, `mr_4_6_a_plain_mmc3_keeps_its_eight_kib` | StarTropics, Zoda's Revenge (battery-RAM and save-state size only) |
 | MR-4-8 | `mmc3.rs:236-243` (`Some(None)`) | `mr_4_8_mmc6_window_is_open_bus_when_no_half_is_readable` | none known |
 | MR-64-7 | `rambo1.rs:46-48` (R15, R7, R6) | `mr_64_7_rambo1_prg_mode_swaps_r6_and_r15` | the five mapper-64 titles, whichever of them sets $8000 bit 6 (Klax, Rolling Thunder, Shinobi, Skull & Crossbones, Xybots) |
+| MR-5-1 | `mmc5.rs:170-172` (three clauses) | `mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a`, `req_core_100_mmc5_serves_background_fetches_from_the_second_set_with_tall_sprites` | any 8x8-sprite MMC5 title that writes $5128-$512B |
+| MR-5-3 | `mmc5.rs:511-527` (arm, then increment) | `mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line`, `req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names` | **Castlevania III, Just Breed** and every other MMC5 split: each one moves down by exactly one scanline |
+| MR-5-5 | `mmc5.rs:410-416` (`None`) | `mr_5_5_mmc5_exram_reads_are_open_bus_in_the_nametable_modes` | none known |
 
 ### Step 1 notes
 
@@ -99,3 +102,23 @@ because a step cannot write its own commit hash.
   MR-64-2 (the 2 KiB CHR window) and MR-64-1 (the counter) are **not** applied, and the two
   tests that asserted them stay removed.
 - No state, no new branch: `select & 0x40` was already the condition.
+
+### Step 4 notes
+
+- **MR-5-1** is Mesen's `chrA` expression (`MMC5.h:192`) read back as "use set B": set B only
+  with 8x16 sprites, only on a background fetch, and only when either the scan is in a frame
+  or set B was written last. The three nesdev rules fall out of it, and the clause that was
+  missing — the last-written set deciding *only* outside rendering — is the third. It is
+  branchless now where it used to be an `if`, so nothing is added to the per-fetch path.
+  MR-1b's caveat stands and is not fixed here: the wiki narrows the last-written rule to $2007
+  access, which our one `read_chr` path does not distinguish from a fetch. That is the same
+  in-frame-detection question as MR-5-4, which is out of this lot.
+- **MR-5-3 moves every MMC5 split down one scanline**, so R0 should expect the golden-core
+  entries of the MMC5 titles to move — **Castlevania III and Just Breed above all** — and no
+  other board's to. `req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names` now
+  asserts line 60 for a target of 60, where it asserted 59.
+- The counter is masked to 8 bits on the increment, which the old `scanline + 1` never needed:
+  nesdev calls it "the internal 8-bit scanline counter", and 240 lines cannot reach the wrap,
+  but the register is what it is.
+- MR-5-2 (writes outside rendering) and MR-5-4 (the in-frame detection) are **not** touched:
+  both are out of this lot and their tests stay ignored.

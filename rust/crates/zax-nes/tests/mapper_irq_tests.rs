@@ -216,7 +216,9 @@ fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
     core.write_memory(0x5203, 60);
     core.write_memory(0x5204, 0x80); // Enable.
     assert!(tick_until_irq(&mut core, 200_000) > 0);
-    assert_eq!(59, core.ppu().scanline());
+    // MR-5-3: the first line of a frame only sets the in-frame flag and zeroes the counter, so
+    // the counter reaches 60 on visible line 60, not on line 59.
+    assert_eq!(60, core.ppu().scanline());
     // Bit 7 of $5204 reports the pending IRQ and reading it acknowledges; bit 6 says the
     // scan is inside a frame.
     assert_eq!(0xC0, core.read_memory(0x5204) & 0xC0); // A peek leaves it pending.

@@ -163,11 +163,15 @@ impl Mmc5 {
 
     fn chr_address(&self, address: u16, fetch: ChrFetch) -> usize {
         let index = i32::from(address & 0x1FFF);
-        let use_b = if self.sprite_size16 {
-            fetch == ChrFetch::Background
-        } else {
-            self.last_set_was_b
-        };
+        // MR-5-1. Three separate rules, not one (nesdev, "MMC5"): with 8x8 sprites
+        // "$5128-$512B are completely ignored", so set A serves everything; with 8x16 sprites
+        // the chip "keeps track of whether the PPU is fetching background tiles or sprite
+        // tiles", and the sprite fetches take set A; and only outside rendering does "the last
+        // set of registers written to" decide. We had been using the last-written set as *the*
+        // 8x8 rule, so an 8x8 game that last wrote $5128-$512B rendered from set B throughout.
+        let use_b = self.sprite_size16
+            && fetch == ChrFetch::Background
+            && (self.in_frame || self.last_set_was_b);
         let offset = match self.chr_mode {
             0 => {
                 let bank = if use_b { self.chr_b[3] } else { self.chr_a[7] };
@@ -401,13 +405,14 @@ impl Mapper for Mmc5 {
             0x5010 | 0x5015 => Some(self.audio.peek(address)),
             0x5205 => Some(Some(self.product().to_le_bytes()[0])),
             0x5206 => Some(Some(self.product().to_le_bytes()[1])),
-            // ExRAM reads back only in the two RAM modes; the nametable modes leave the CPU
-            // side open (nesdev).
-            0x5C00..=0x5FFF => Some(Some(if self.ex_ram_mode >= 2 {
-                self.ex_ram[usize::from(address - 0x5C00)]
+            // ExRAM reads back only in the two RAM modes. MR-5-5, nesdev ("MMC5"), the ExRAM
+            // table for modes %00 and %01: a CPU read "returns open bus"; we used to answer a
+            // driven 0 there.
+            0x5C00..=0x5FFF => Some(if self.ex_ram_mode >= 2 {
+                Some(self.ex_ram[usize::from(address - 0x5C00)])
             } else {
-                0
-            })),
+                None
+            }),
             _ => None,
         }
     }
@@ -502,8 +507,21 @@ impl Mapper for Mmc5 {
             return;
         }
 
-        self.in_frame = true;
-        self.scanline_counter = scanline + 1;
+        // MR-5-3, nesdev ("MMC5"), scanline detection: "if the 'in-frame' flag (register
+        // $5204) was clear, it becomes set, and the internal 8-bit scanline counter is reset
+        // to zero; but if it was already set, the scanline counter is incremented, then
+        // compared against the value written to $5203." So the first line of a frame only arms
+        // the flag, with no compare, and a target of 1 fires on the second line. We used to
+        // take the PPU's own line number plus one and compare at once, which put every split
+        // one scanline high.
+        if !self.in_frame {
+            self.in_frame = true;
+            self.scanline_counter = 0;
+            return;
+        }
+
+        self.scanline_counter = (self.scanline_counter + 1) & 0xFF;
+        // "Value $00 is a special case that will not produce IRQ pending conditions" ($5203).
         if self.irq_target != 0 && self.scanline_counter == self.irq_target {
             self.irq_pending = true;
         }

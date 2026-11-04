@@ -569,7 +569,6 @@ fn mr_64_7_rambo1_prg_mode_swaps_r6_and_r15() {
 ///
 /// so a game in 8x8 mode that last wrote $5128-$512B renders from set B throughout.
 #[test]
-#[ignore = "MR-1: MR-5-1"]
 fn mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a() {
     let mut core = MapperRom::new(5).prg(8).chr(64).load();
     // Sprite size is 8x8 at power-on (`sprite_size16` false), the case under test.
@@ -621,7 +620,6 @@ fn mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value() {
 /// to $5203." We set `scanline_counter = scanline + 1` from the PPU's own line number and
 /// compare at once (`mmc5.rs:506-509`), so every split is one scanline high.
 #[test]
-#[ignore = "MR-1b: MR-5-3"]
 fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
     let mut core = MapperRom::new(5).prg(8).chr(16).load();
 
@@ -640,6 +638,26 @@ fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
         cart.irq_asserted(),
         "the second line increments the counter to 1 and matches the target"
     );
+}
+
+/// MR-5-5. nesdev ("MMC5"), the ExRAM table for modes %00 and %01: a CPU read of $5C00-$5FFF
+/// "returns open bus". We answered a driven 0. Same family as MR-4-8 and MR-30-2.
+#[test]
+fn mr_5_5_mmc5_exram_reads_are_open_bus_in_the_nametable_modes() {
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+
+    core.mapper_write(0x5104, 0x02); // ExRAM in RAM mode, so the CPU can fill it.
+    core.write_memory(0x5C00, 0x5A);
+    assert_eq!(Some(0x5A), core.cartridge().unwrap().try_cpu_peek(0x5C00));
+
+    for mode in [0x00, 0x01] {
+        core.mapper_write(0x5104, mode);
+        assert_eq!(
+            None,
+            core.cartridge().unwrap().try_cpu_peek(0x5C00),
+            "ExRAM mode {mode} leaves the CPU side of $5C00-$5FFF open"
+        );
+    }
 }
 
 // ================================================================ mapper 156, Daou Infosys
