@@ -1254,8 +1254,9 @@ The *Bus conflict* page's "Programmers must not rely on this undefined behavior"
 ROM authors about relying on a clean AND, not licence for an emulator to skip it.
 
 **Test change:** none. `mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte` and
-`mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte` stay as MR-1 wrote them,
-re-labelled `MR-1b`. The non-ignored guard
+`mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte` stay exactly as MR-1 wrote
+them: a confirmed finding keeps the test and the `MR-1` label of the lot that wrote it, and
+only the tests this lot withdraws, re-aims or adds are touched. The non-ignored guard
 `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` keeps pinning plain mapper 2.
 
 **Cost: negligible.** The AND runs on a CPU write to $8000-$FFFF on a board that declares
@@ -1328,3 +1329,149 @@ is exactly the invariant the wiki leans on. There is nothing left to discover, s
 being `unknown`.
 
 **Test change:** none. No fix, so no cost.
+
+## Mapper 1 — MMC1 (SxROM)
+
+The register layouts quoted below come from *MMC1* (<https://www.nesdev.org/wiki/MMC1>) and
+the board table from *SxROM* (<https://www.nesdev.org/wiki/SxROM>). The CHR bank 0 register of
+a SOROM/SUROM/SXROM board is printed there as
+
+```
+4bit0
+-----
+PSSxC
+||| |
+||| +- Select 4 KiB CHR-RAM bank at PPU $0000 (ignored in 8 KiB mode)
+|++--- Select 8 KiB PRG-RAM bank
++----- Select 256 KiB PRG-ROM bank
+```
+
+which settles three of MR-1's four findings at once, in two different directions.
+
+### MR-1-1 — MMC1 reset bit and the consecutive-write filter
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed by name.**
+
+Source: *MMC1* — the consecutive-write restriction "only applies to the data being written on
+bit 0; the bit 7 reset is **never ignored**", and the page's own discussion of the restriction
+is the one that names *Shinsenden*. The reset write itself is "A write with bit set will reset
+shift register and write Control with (Control OR $0C)".
+
+The wiki and Mesen agree, and the wiki is the normative source under REQ-CORE-100. Our
+`write_register` (`mmc1.rs:142-146`) returns before it ever looks at the value, so a reset
+written as the second half of a read-modify-write is lost and the board keeps a PRG mode the
+game believes it has cleared.
+
+**Test:** unchanged, MR-1's test stands —
+`mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter`.
+
+**Cost: none.** The fix moves the `value & 0x80` test above the two-cycle filter inside
+`write_register`, which already runs on exactly these writes; no field is added, no path is
+widened, and the serial register is not read anywhere else.
+
+### MR-1-2 — the 512 KiB outer bank and the "last written" CHR register
+
+**MR-1 verdict: our bug (subtle). New verdict: neither side is right — and both are
+equivalent on every commercial dump. Leaves `our bug`.**
+
+Source: *MMC1* — "In 4 KiB CHR bank mode, SNROM's `E` bit and SO/U/XROM's `P` and `S` bits in
+both CHR bank registers must be set to the same values, or the PRG-ROM and/or RAM will be
+bankswitched/enabled **as the PPU renders**", followed by the advice that a program should
+"just set 8 KiB bankswitching mode".
+
+That is the hardware answer, and it is neither ours nor Mesen's: in 4 KiB CHR mode the outer
+PRG bank and the PRG-RAM bank follow *whichever CHR register PPU A12 is selecting at that
+instant*, so they move during rendering. Mesen's "the register written last" and our "always
+`chr0`" are both conventions for a case the documentation tells programs not to create. It is
+also unreachable in practice: *SxROM* gives SUROM and SXROM 8 KiB of CHR **RAM**, and the
+titles concerned (*Dragon Warrior III* and *IV* on SUROM, *Final Fantasy I·II* and *Best Play
+Pro Yakyuu Special* on SXROM) run in 8 KiB CHR mode, where Mesen's expression reduces to
+`chr0` and the two sides coincide.
+
+**Test change: withdrawn.** `mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register`
+asserted Mesen's convention as if it were the hardware's, which the source does not support.
+Removed rather than re-labelled: there is no behaviour here for a test to pin short of
+emulating the A12-driven switching, which no game needs.
+
+**Cost if someone implements the real thing anyway: risk, and not worth paying.** The PRG
+window and the PRG-RAM offset would have to be recomputed on every PPU A12 transition — a
+value consulted by `read_rom_window` on every CPU fetch, driven from a PPU-bus hook. That
+would also cost the MMC1 its `chr_view`, moving every MMC1 game (the largest board family in
+the library) from `run_visible_span` to `run_visible_span_through_bus`. No game needs it.
+
+### MR-1-3 — the SOROM PRG-RAM selector
+
+**MR-1 verdict: our bug (subtle, no test). New verdict: our bug — confirmed, and the bit is
+the one Mesen uses.**
+
+Sources: *MMC1* — "For SXROM, the upper `S` (bit 3) selects the SRAM's A14, and the lower `S`
+(bit 2) selects A13", and "The SOROM board only implements the upper `S` bit". *SxROM* gives
+SOROM 128/256 KiB PRG with 16 KiB PRG-RAM, SXROM 32 KiB.
+
+So a 32 KiB board uses bits 3-2, which is exactly our `(chr0 >> 2) & 0x03`
+(`mmc1.rs:129-133`) — our SXROM path is right — while a 16 KiB SOROM board uses **bit 3
+alone**. Our modulo over a 16 KiB RAM turns `(chr0 >> 2) & 0x03` into bit 2, so the selector
+is one bit off and *Genghis Khan* and *Nobunaga's Ambition* (the SOROM titles) put their saves
+in the half that is not battery-backed and read them from the half that is.
+
+**Test change: still none, and now for a recorded reason.** `MapperRom` has no PRG-RAM-size
+knob and a 16 KiB declaration needs NES 2.0 byte 10; adding that knob is the first step of any
+fix. Noted in the progress file so the fixing lot does not re-discover it.
+
+**Cost: none, if the selector is precomputed.** `prg_ram_offset` runs on every CPU read and
+write in $6000-$7FFF, so a second runtime branch there would be `measurable` on
+PRG-RAM-heavy games. It is avoidable: the shift and mask depend only on
+`memory.prg_ram().len()`, which is fixed at load, so `Mmc1::new` can store a
+`ram_bank_shift: u32` and `ram_bank_mask: u8` and the hot path keeps exactly the one shift and
+one mask it has today.
+
+### MR-1-4 — submapper 5, fixed PRG
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed, with a named game.**
+
+Sources: *NES 2.0 submappers*, mapper 1 submapper 5 — "use a fixed 32k PRG ROM with no
+banking support"; *MMC1* describes submapper 5 as the SEROM/SHROM/SH1ROM boards with 32 KiB of
+unbanked PRG-ROM; *SxROM* gives SEROM 32 KiB PRG and names **Dr. Mario**.
+
+Both sources agree with Mesen, and the board is a real one with a well-known title, so this is
+slightly less cosmetic than MR-1 made it: a correctly headered *Dr. Mario* dump that writes
+the PRG register at all would bank a 32 KiB image into halves on our side.
+
+**Test:** unchanged, MR-1's test stands — `mr_1_4_mmc1_submapper_5_has_fixed_prg`.
+
+**Cost: none.** The submapper is read at construction into a `fixed_prg: bool`; `update_banks`
+gains one branch, and `update_banks` runs only on a committed serial write.
+
+### MR-1-5 — only one of SOROM's two RAM chips is battery-backed (new)
+
+**New finding. Verdict: our bug, severity cosmetic.**
+
+Source: *MMC1* — "Even if the SOROM and SZROM boards utilizes a battery, it is connected to
+only one PRG-RAM chip. The first RAM chip will not retain its data, but the second one will."
+
+`Cartridge::battery_ram` (`mod.rs:330-337`) returns the *whole* `prg_ram` whenever the header
+declares a battery, so on a SOROM or SXROM board we persist 16 or 32 KiB where the hardware
+persists 8. The save file is larger than the cartridge's, and a cold boot shows retained data
+in a half that should come up uninitialised — which is exactly the half a game may use as
+scratch, so a game could in principle read stale data it expects to be garbage.
+
+**Test:** none; it needs the same PRG-RAM-size knob as MR-1-3.
+
+**Cost: none.** The battery half is a sub-slice chosen at load — Mesen's `GetSaveRamSize()` /
+`GetWorkRamSize()` split, which the shared-infrastructure item 2 of MR-1 already calls for.
+
+### The three MMC1 notes MR-1 left open
+
+- **the 512 KiB test** (`> 256 KiB` vs Mesen's `== 512 KiB`). *MMC1* prints the CHR register
+  bit as "PRG-ROM A18 if PRG-ROM size is 512 KiB", and *SxROM* lists 512 KiB as the only
+  size above 256 for SUROM/SXROM. **Equivalent** — no 384 KiB MMC1 dump exists.
+- **the MMC1A / MMC1B revision**. The source makes the difference bigger than MR-1 implied:
+  on an MMC1A, bit 4 of the PRG register is not a PRG-RAM disable at all but a PRG-ROM A17
+  control ("bit 3 directly controls A17 across the entire $8000-$FFFF address range"). We
+  implement MMC1B (`mmc1.rs:107-110`), which is both the common revision and what Mesen does
+  for any ROM its database does not list. **Equivalent for unlisted ROMs**; distinguishing
+  the two needs a game database, which REQ-CORE-100 does not ask for.
+- **the soft reset**. Still **unknown**: no public source describes what the MMC1 does on
+  the CPU reset line, and REQ-CORE-004 asks the cartridge to power on cleanly, which is what
+  `Mmc1::reset` does. What would settle it: a hardware test holding the reset line and
+  reading back the PRG window.

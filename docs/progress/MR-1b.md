@@ -99,3 +99,19 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   figure; and the power-on bank values are documented as *unspecified*, so MR-PWR-1 and
   MR-4-4 have nothing to discover.
   Bank-window wrapping stays equivalent.
+
+- **Step 3** — MMC1. The CHR bank 0 register layout `PSSxC` on the nesdev MMC1 page settles
+  three findings at once. **MR-1-1 confirmed** ("the bit 7 reset is never ignored", and the
+  page is where *Shinsenden* is named). **MR-1-3 confirmed** and the bit is Mesen's: "The
+  SOROM board only implements the upper `S` bit", so 16 KiB uses bit 3 while 32 KiB uses
+  bits 3-2 (our SXROM path is right); the SOROM titles are *Genghis Khan* and *Nobunaga's
+  Ambition*. **MR-1-4 confirmed**, with *Dr. Mario* as the SEROM title.
+  **MR-1-2 withdrawn**: in 4 KiB CHR mode the outer PRG bank and the PRG-RAM bank follow
+  whichever CHR register PPU A12 selects, "as the PPU renders" — neither our `chr0` nor
+  Mesen's last-written register, and unreachable because SUROM/SXROM are 8 KiB CHR-RAM
+  boards running in 8 KiB mode. Its test is removed, with the reason left in the file.
+  One **new finding, MR-1-5**: only one of SOROM's two RAM chips is battery-backed ("The
+  first RAM chip will not retain its data, but the second one will"), where we persist the
+  whole PRG-RAM.
+  Costs: MR-1-1 and MR-1-4 none; MR-1-3 none *provided* the selector shift/mask is computed
+  at load, because `prg_ram_offset` is a per-access path; MR-1-5 none.

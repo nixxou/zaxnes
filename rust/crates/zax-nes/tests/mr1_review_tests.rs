@@ -315,34 +315,14 @@ fn mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter() {
     );
 }
 
-/// MR-1-2. On a 512 KiB board the PRG A18 line comes from bit 4 of the CHR register that
-/// was written *last*, not always from the $A000 one.
-///
-/// Mesen (`MMC1.h:124`): `extraReg = (_lastChrReg == 0xC000 && _chrMode) ? _chrReg1 : _chrReg0`,
-/// then `prgBankSelect = extraReg & 0x10`. In 8 KiB CHR mode this reduces to `_chrReg0`,
-/// which is what we always use (`mmc1.rs:37-41`) — so SUROM titles that stay in 8 KiB CHR
-/// mode (*Dragon Warrior III* and *IV*) agree. In 4 KiB CHR mode with $C000 written last
-/// we select the wrong 256 KiB half.
-///
-/// The same `extraReg` feeds the SXROM PRG-RAM bank (`MMC1.h:136`), where we also read
-/// `chr0` unconditionally (`mmc1.rs:129-131`); one fix covers both.
-#[test]
-#[ignore = "MR-1: MR-1-2"]
-fn mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register() {
-    let mut core = MapperRom::new(1).prg(64).chr(16).load(); // 512 KiB.
-
-    core.mmc1_write(0x8000, 0x1F); // 4 KiB CHR, 16 KiB PRG, $8000 switchable.
-    core.mmc1_write(0xA000, 0x00); // CHR 0: A18 clear.
-    core.mmc1_write(0xC000, 0x10); // CHR 1: A18 set, and written last.
-    core.mmc1_write(0xE000, 0x02);
-
-    // Mesen: page0 = 2 | 0x10 = 18, page1 = 0x0F | 0x10 = 31 (16 KiB pages).
-    assert_eq!(
-        [36, 37, 62, 63],
-        core.prg_windows(),
-        "bit 4 of the last-written CHR register drives PRG A18"
-    );
-}
+// MR-1-2's test (`mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register`) was
+// withdrawn by lot MR-1b. It asserted Mesen's "the CHR register written last" convention as
+// if it were the hardware's; nesdev ("MMC1") says that in 4 KiB CHR mode the `P` and `S` bits
+// of *both* CHR registers must hold the same value, "or the PRG-ROM and/or RAM will be
+// bankswitched/enabled as the PPU renders" — the bank follows whichever register PPU A12
+// selects at that instant, which is neither side's model, and which no SUROM/SXROM title
+// creates (they are 8 KiB CHR-RAM boards and run in 8 KiB CHR mode, where our `chr0` and
+// Mesen's expression coincide). See `docs/review/MR-1-mappers.md`, MR-1b section.
 
 /// MR-1-4. NES 2.0 submapper 5 is the fixed-PRG MMC1 (SEROM, SHROM, SH1ROM): no PRG
 /// banking at all. Mesen short-circuits it (`MMC1.h:152-156`, `SelectPrgPage2x(0, 0)`);
