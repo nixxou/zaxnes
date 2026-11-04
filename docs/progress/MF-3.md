@@ -893,7 +893,14 @@ What is known about it:
   that instruction counts do not show. **Forcing the pre-lot shape back made it worse**:
   `#[inline(never)]` on `Cpu6502::execute` measured 1.078 ms/frame against the lot's 1.042 and the
   baseline's 0.997, so the inliner's new choices are not themselves the regression, and no
-  attribute was left in the CPU (which is out of this lot's scope anyway).
+  attribute was left in the CPU (which is out of this lot's scope anyway);
+* it is **not the reused-build-folder artefact R0 found in MF-2** ("Le +0,3/+0,9 % du premier
+  passage `mf2/l1` venait du dossier de build `/root/zaxmf`, réutilisé entre branches"). Both
+  binaries were rebuilt back to back after `cargo clean --release` of the five workspace crates —
+  a gigabyte of artefacts removed — and the figures came back 0.997-1.002 against 1.042-1.049,
+  the same +4.6 %. **The one thing that was not done is R0's own prescription**, a `git archive`
+  of each commit into a brand-new folder: the C: and G: drives are at 100 % and 99 %, and filling
+  G: to do it was not worth the risk. R0 should re-measure that way.
 
 **For R0.** The instrument for this is callgrind, which counts executed instructions
 deterministically, and R0 runs it on Mega Man 2 (mapper 1) and Zelda II (mapper 1) plus the
