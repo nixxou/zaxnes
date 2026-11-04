@@ -5,6 +5,7 @@
 // THIRD-PARTY-NOTICES.md.
 
 use super::{windows_for, Mapper};
+use crate::apu::Sunsoft5bAudio;
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
@@ -26,14 +27,19 @@ use crate::NametableMirroring;
 /// | $D | IRQ control, `C... ...T` |
 /// | $E, $F | the low and high bytes of the IRQ counter |
 ///
-/// $E000-$FFFF is not switchable: the last 8 KiB bank is wired there. The 5B's three sound
-/// channels are at $C000-$DFFF and $E000-$FFFF (step 4 of MF-3); until then a write there is
-/// ignored, which is what a 5A — the same chip without the sound — does.
+/// $E000-$FFFF is not switchable: the last 8 KiB bank is wired there. $C000-$DFFF and
+/// $E000-$FFFF are the 5B's sound registers, all of it in [`Sunsoft5bAudio`]; the output is the
+/// `M` the APU subtracts (REQ-CORE-073, AMD-061 §6.2), which the bus reads through
+/// [`Mapper::expansion_audio_output`].
 ///
 /// Registers in `$4020-$5FFF`: **none**. The board decodes $6000-$FFFF only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fme7 {
     banks: BankWindows,
+    /// The 5B's YM2149F. Carried by every mapper-69 image: whether a dump is a 5A (no sound) or
+    /// a 5B is not in the header, and a 5A game simply never writes $C000-$FFFF, which leaves
+    /// every volume register at 0 and the output at 0.
+    audio: Sunsoft5bAudio,
     command: u8,
     /// Command $9-$B, the three switchable 8 KiB PRG banks.
     prg: [u8; 3],
@@ -59,6 +65,7 @@ impl Fme7 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         let mut board = Self {
             banks: windows_for(memory),
+            audio: Sunsoft5bAudio::new(),
             command: 0,
             prg: [0; 3],
             window_6000: 0,
@@ -130,6 +137,10 @@ impl Mapper for Fme7 {
         writer.write_bool(self.irq_counter_enabled);
         writer.write_u16(self.irq_counter);
         writer.write_bool(self.irq_pending);
+        // Written last, so a mapper-69 state from before the sound was added loads with a silent
+        // chip — which is the state of a 5A, and of a 5B before its first register write
+        // (REQ-CORE-091).
+        self.audio.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -140,6 +151,12 @@ impl Mapper for Fme7 {
         self.irq_counter_enabled = reader.read_bool()?;
         self.irq_counter = reader.read_u16()?;
         self.irq_pending = reader.read_bool()?;
+        if reader.remaining() > 0 {
+            self.audio.load_state(reader)?;
+        } else {
+            self.audio.reset();
+        }
+
         self.refresh_window_6000();
         Ok(())
     }
@@ -158,6 +175,7 @@ impl Mapper for Fme7 {
         self.irq_counter_enabled = false;
         self.irq_counter = 0;
         self.irq_pending = false;
+        self.audio.reset();
         self.refresh_window_6000();
         self.update_banks();
         self.banks.map_chr_8k(0);
@@ -165,6 +183,12 @@ impl Mapper for Fme7 {
 
     fn irq_asserted(&self) -> bool {
         self.irq_pending
+    }
+
+    /// `M` of REQ-CORE-073, which the APU subtracts (AMD-061 §6.2, Q-118). One load: the level
+    /// is recomputed where the chip's generators move, not here.
+    fn expansion_audio_output(&self) -> Option<i32> {
+        Some(self.audio.output())
     }
 
     // No `ppu_irq_horizon`: the counter is clocked by the CPU and nothing the PPU does can move
@@ -230,8 +254,8 @@ impl Mapper for Fme7 {
                 0x0E => self.irq_counter = (self.irq_counter & 0xFF00) | u16::from(value),
                 _ => self.irq_counter = (self.irq_counter & 0x00FF) | (u16::from(value) << 8),
             },
-            // $C000-$FFFF: the 5B's sound registers, which a 5A does not have. MF-3 step 4.
-            _ => {}
+            // $C000-$DFFF selects one of the chip's sixteen registers, $E000-$FFFF writes it.
+            _ => self.audio.write(address, value),
         }
     }
 
@@ -242,6 +266,8 @@ impl Mapper for Fme7 {
     /// flag the enable bit can reveal later, which is how Mesen reads the page too
     /// (`SunsoftFme7.h:59-66`).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        self.audio.step_cpu_cycle();
+
         if !self.irq_counter_enabled {
             return;
         }

@@ -28,7 +28,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 1/9 — MMC1 SNROM: bit 4 of the CHR bank register disables the work RAM
 - [x] 2/9 — Q-117: the UNROM 512 bank latch is decoded by configuration
 - [x] 3/9 — mapper 69, Sunsoft FME-7 (banks, CPU-cycle IRQ, $6000 RAM/ROM switching)
-- [ ] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
+- [x] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
 - [ ] 5/9 — mapper 118, TxSROM
 - [ ] 6/9 — mapper 180, UNROM with the switchable bank at $C000
 - [ ] 7/9 — mapper 78, submappers 1 and 3
@@ -74,6 +74,7 @@ Before the lot (`7cbd9c52`):
 | MF-T, `M1_P128K` / `M1_P128K_CR8K` detailed `4000` (SNROM work-RAM disable) | `mmc1.rs:29-38` (two fields), `:72-104` (`is_snrom`), `:105-116` (`refresh_prg_ram_disable`), `:118-119` (`update_banks`), `:200-201` (`load_registers`), `:211-215` (`prg_ram_enabled`) | `req_core_100_mmc1_snrom_disables_prg_ram_with_bit_4_of_the_chr_register`, `req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enable`; the two Holy Mapperel rows in `test_roms_tests.rs` | **none.** The whole-crate asm diff is three symbols, all off every hot path: `Mmc1::update_banks` 137 → 148, `Mmc1::load_registers` 89 → 118, `Cartridge::create` 3435 → 3471 (the load-time decision). `Board::prg_ram_enabled` is **byte-identical** — the answer is a precomputed `bool`, so the $6000-$7FFF decode is the same load and test as before | mapper-1 images on an SNROM-shaped board (CHR-ROM ≤ 8 KiB, PRG-RAM 8 KiB, PRG-ROM ≤ 256 KiB) **that set bit 4 of `$A000`**: on real SNROM hardware that disables the RAM, so no shipped game does it while using the RAM. The golden-core set has mapper 1; *Mega Man 2* and *Zelda II* are both on this shape and neither writes that bit with the RAM live |
 | Q-117 (R0's answer): the UNROM 512 latch is at `$C000-$FFFF` on a self-flashable configuration, `$8000-$BFFF` being the flash write window, and the chip recognises its sequences on **chip** addresses | `discrete.rs:422-446` (the type doc and the `latch_base` field), `:496-503` (the load-time decision), `:514-526` (`chip_address`, the two unlock constants), `:528-585` (`step_flash`), `:688-698` (`write_register`) | `q_117_unrom512_programs_a_byte_of_its_own_flash` (was `mr_30_4_…`, rewritten with the page's sequences verbatim), `q_117_unrom512_flashes_the_bank_the_driver_selects`, `q_117_unrom512_unlocks_only_on_the_chips_own_command_addresses`, `q_117_unrom512_without_self_flashing_keeps_the_latch_over_8000_ffff`, `mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing`, `mr_30_4_unrom512_with_bus_conflicts_cannot_flash`, `mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register` (unchanged, and now implied by the new rule) | **none, and it is a win.** `UnRom512::write_register` 116 → **106** (one compare replaces a `bool` test plus a second compare) and `Cartridge::create` 3471 → **3462** (one `u16` replaces two `bool`s). Nothing else in the crate moved. The read path is untouched: `rom_windows` is still a plain window, so no board pays anything on a read | self-flashing UNROM 512 homebrew, and **every** mapper-30 image on a no-bus-conflict configuration: its bank latch has moved from `$8000-$FFFF` to `$C000-$FFFF`. No golden-core entry is on mapper 30 |
 | mapper 69, Sunsoft FME-7 / 5A / 5B — a **new board** (REQ-CORE-102) | `fme7.rs` (new, 240 lines), `board.rs:12-30` (the append rule) + `:70-72` + `:105` (the variant), `registry.rs:20-23` (`SUPPORTED_MAPPERS`) + `:181` (`create_board`), `mappers/mod.rs:26` + `:40` | `req_core_100_fme7_*` x4 and `req_core_090_the_fme7_state_survives_a_save_and_restore` in `mapper_tests.rs`, `req_core_100_the_fme7_*` x3 and `req_core_100_a_write_to_fme7_command_d_acknowledges_the_irq` in `mapper_irq_tests.rs`; `M69_P128K_C64K_S8K` and `_W8K` now **pass** with `detailed 0000` | `Board::ppu_peek` 240 → **251**, `ppu_read` 241 → **252**; `read_pattern_planes` and `read_nametable_as` **byte-identical**. The +11 is LLVM switching the function's shared bounds-check tail from tail-*merging* to tail-*duplication*: the arms' own code is unchanged and the executed path of the arms concerned is **one instruction and two taken branches shorter**. Every other hot dispatch (`on_cpu_cycle`, `irq_asserted`) has its existing arms **byte-identical** with the FME-7's appended. See "Step 3" for the wall-clock measurement and what it is worth | **none.** No commercial game moves: this is a board that did not load before. The golden-core set (mappers 0-4, 156) has no mapper-69 entry |
+| Sunsoft 5B audio (brief item 3, REQ-CORE-075 optional, **Q-118** for the level and the polarity) | `apu/sunsoft5b_audio.rs` (new, 320 lines), `apu/mixer.rs:145-215` (`SUNSOFT_5B_TABLE`, `sunsoft_5b_level`), `apu/mod.rs:10-15` + `:23` + `:38`, `fme7.rs:40-44` (the field) + `:190-192` (`expansion_audio_output`) + `:258` (the register writes) + `:269` (the clock) + `:143-160` (the state) | `sunsoft5b_audio_tests.rs`, 15 tests | **none.** The four named functions are **byte-identical**. The whole-crate diff is thirteen symbols, all inside `Fme7` / `Sunsoft5bAudio` or on the expansion-audio path that only an MMC5 or a mapper-69 cartridge reaches — `NesBus::push_expansion_audio` is still `#[inline(never)]` behind the load-time `expansion_audio` bool (RU-3a). `Board::on_cpu_cycle` is 7 instructions **smaller**: the FME-7's arm left the shared dispatch for a call | **none.** No commercial game on any other board moves; mapper-69 games gain their sound, which they did not have one commit ago. No golden-core entry is on mapper 69 |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -383,3 +384,120 @@ UNROM wiring — so mapper 69 and mapper 78 are the only two variants the lot ad
   Mapperel's README says it measures.
 * `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed, with
   the two mapper-69 rows flipped from `unsupported` to `pass`.
+
+## Step 4 — the Sunsoft 5B's audio
+
+### What the sources give, and what they do not
+
+NESdev, *Sunsoft 5B audio*: the chip carries a YM2149F (an AY-3-8910) reached through two
+addresses — `$C000-$DFFF` selects one of sixteen registers, `$E000-$FFFF` writes it — with three
+square channels, a noise generator and an envelope generator. The register map, the `$07` mixer,
+the 17-bit LFSR "with taps at bits 16 and 13", the eight envelope shapes of `$0D` and the
+"1.5db logarithmic steps" of the envelope's 32 levels are all there, and all implemented.
+
+**Mesen 2 was not adaptable.** Its `Sunsoft5bAudio` keeps the sixteen registers and the three
+tone generators, but `UpdateOutputLevel` (`Sunsoft5bAudio.h:63-74`) only ever looks at the tone:
+it has **neither the envelope nor the noise**, which the brief asks for and the page describes. The
+one place the two sources meet is the volume law — Mesen builds its table from the same 1.5 dB
+figure, twice per volume step — and that agreement is recorded on
+`mixer::SUNSOFT_5B_RATIO`. Nothing else was taken from it, so `sunsoft5b_audio.rs` carries no
+adaptation header.
+
+### The clock, and why one prescaler drives all three generators
+
+The page gives the tone and the noise as `Clock / (32 × Period)` and the envelope **step** as
+`Clock / (16 × Period)`, with the clock at 1.789773 MHz — the CPU's. Those three are exactly the
+AY's own datasheet relations (`fT = fCHIP / (16 × TP)`, `fN = fCHIP / (16 × NP)`,
+`fE = fCHIP / (256 × EP)` for the complete 32-step cycle) **for a chip clocked at half the CPU
+clock**, which is what reconciles the page's /32 with the datasheet's /16 and makes its envelope
+formula the step rate rather than the cycle rate. So:
+
+* a tone toggles every 16 × period CPU cycles,
+* the noise shifts every 32 × period,
+* the envelope steps every 16 × period,
+
+and a single divide-by-16 of the CPU clock drives everything: on each of its ticks a tone counter
+takes one step, the noise counter two, the envelope counter one. Writing it that way is both the
+hardware's shape and the cheap one — the real work happens once per sixteen CPU cycles.
+
+### The envelope's shape machine
+
+`$0D` is "envelope reset and shape: continue (C), attack (A), alternate (a), hold (H)". A write
+restarts the ramp at the end `A` names and releases a held envelope. When a ramp reaches an end of
+the 0-31 range:
+
+* `C = 0`: the level goes to 0 and stays, whichever way the ramp went (the four `\___` and `/___`
+  shapes);
+* `C = 1`, `H = 1`: stop, **after** `a` has had its chance to flip the direction — which is what
+  makes `\‾‾` and `/___` differ from `\___` and `/‾‾`;
+* `C = 1`, `H = 0`: go again, reversed if `a` and from the same end if not.
+
+All eight shapes fall out of those three lines, which is why the code is three branches and not a
+table.
+
+### Level and polarity: Q-118
+
+REQ-CORE-075 leaves this board's sound **optional** and gives it no level, and the page says only
+that "It is very loud compared to other audio expansion carts" — no ratio, no resistor values,
+nothing about polarity. So the lot opens **Q-118** with a provisional choice, taken the way
+AMD-061 §6.4 took the MMC5's: the one quantitative sentence available is "maximum level 31
+corresponds to the 4-bit volume register level 15", so **level 31 of one channel is one APU pulse
+at volume 15** — `PULSE_TABLE[15]` = 4 890 — and the other levels follow at 1.5 dB apart.
+`mixer::SUNSOFT_5B_TABLE` is built downwards from that anchor so the top entry is exact.
+
+The three channels are added **after** the table, not through a shared index as the MMC5's two
+squares are: the page requires it ("The three output channels are mixed together linearly") and the
+reason is physical — the MMC5 sits in the APU's own non-linear network, the 5B is a separate chip
+whose single output enters by the cartridge's audio pin. `M` therefore caps at 3 × 4 890 =
+**14 670**, 45 % of full scale, which is consistent with "very loud".
+
+`M` is **positive**, so the APU subtracts it as it subtracts the MMC5's. That is Q-118's
+provisional answer on polarity too, and the ticket says why it is not free to reverse:
+`mixer::clip` only implements the lower bound *because* `M` cannot be negative, and that is what
+leaves a game without expansion audio the three instructions AMD-061 §6.2 left it. One constant
+changes the level if R0 wants another; reversing the polarity would reopen §6.2.
+
+### Cost
+
+`Sunsoft5bAudio` is the board's own type, held by `Fme7`, and the level is cached in a field
+recomputed only where a generator or a register moves — so `expansion_audio_output`, which the bus
+reads every CPU cycle of a mapper-69 game, is one load. The bus's own gate is unchanged:
+`NesBus::push_expansion_audio` is `#[inline(never)]` and only called when the load-time
+`expansion_audio` bool is set, which is RU-3a's arrangement and is why the second board costs the
+other thirty mapper numbers nothing.
+
+| function | step 3 | step 4 |
+| --- | ---: | ---: |
+| `Board::ppu_peek` | 251 | 251 (byte-identical) |
+| `Board::ppu_read` | 252 | 252 (byte-identical) |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 (byte-identical) |
+| `Ppu2C02::read_nametable_as` | 107 | 107 (byte-identical) |
+
+The whole-crate diff is thirteen symbols, every one of them either inside `Fme7` /
+`Sunsoft5bAudio` or on the expansion-audio path that only an MMC5 or a mapper-69 cartridge
+reaches: `Board::expansion_audio_output` 10 → 26, `Cartridge::expansion_audio_output` 11 → 27,
+`NesBus::push_expansion_audio` 18 → 34, `NesBus::attach` 54 → 68,
+`Cartridge::has_expansion_audio` 12 → 21, `Cartridge::create` 3565 → 3574, `Board::reset`
+482 → 489. **`Board::on_cpu_cycle` got 7 instructions smaller** (107 → 100): the FME-7's arm grew
+past the inlining threshold and became a call to `Fme7::on_cpu_cycle`, which takes its body out of
+the dispatch every other board shares.
+
+### Save states
+
+The audio block is written **last** in `Fme7::save_registers` and read only if
+`reader.remaining() > 0`, so a mapper-69 state written between step 3 and this step loads with a
+silent chip — which is the state of a 5A, and of a 5B before its first register write
+(REQ-CORE-091). `load_state` also refuses an impossible prescaler or an envelope level above 31,
+neither of which this build can write, so a corrupt block cannot index past the table.
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed, including the 15 new tests of
+  `sunsoft5b_audio_tests.rs` (the volume law recomputed from 1.5 dB with `powf`, the linear sum of
+  three channels, the 32-cycles-per-period square, the `$07` gate including the "constant signal
+  at the specified volume" case, the noise gating a channel, four envelope shapes, the `$0D`
+  restart, the subtraction in the mixer, and a select above `$0F` writing nothing).
+* `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed. The
+  Holy Mapperel mapper-69 ROMs do not exercise the sound — the suite has no audio test — so they
+  are unchanged at `pass`.

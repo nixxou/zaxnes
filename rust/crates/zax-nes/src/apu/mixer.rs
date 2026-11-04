@@ -141,6 +141,75 @@ pub const TND_TABLE: [i32; TND_INDEX_MAX + 1] =
 pub const MMC5_PCM_TABLE: [i32; MMC5_PCM_INDEX_MAX + 1] =
     scaled(TND_NUMERATOR, TND_DENOMINATOR, NORMALISATION);
 
+/// Number of levels one Sunsoft 5B channel's amplitude can take: the envelope generator's
+/// "5-bit series of output levels".
+pub const SUNSOFT_5B_LEVELS: usize = 32;
+
+/// Amplitude ratio between two consecutive levels of [`SUNSOFT_5B_TABLE`]: `10^(1.5 / 20)`,
+/// written out because `powf` is not a `const fn`.
+///
+/// nesdev, "Sunsoft 5B audio": the envelope's levels are "1.5db logarithmic steps", and since
+/// "maximum level 31 corresponds to the 4-bit volume register level 15" a step of the *volume*
+/// register is two of these, i.e. 3 dB. Mesen 2 builds its own table from the same figure
+/// (`Sunsoft5bAudio.h:108-116`: `output *= 1.1885022274370184…` twice per volume step), so the
+/// law — unlike the level, see [`SUNSOFT_5B_TABLE`] — is not in doubt.
+/// `mixer_tests` recomputes the table from 1.5 dB with `powf` and compares.
+const SUNSOFT_5B_RATIO: f64 = 1.188_502_227_437_018_4;
+
+/// Amplitude of each of the 32 levels of one Sunsoft 5B channel, in the mixer's integer units
+/// (`M` of REQ-CORE-073). The three channels are summed **linearly** into `M`, which is what the
+/// chip does: "The three output channels are mixed together linearly" (nesdev, "Sunsoft 5B
+/// audio").
+///
+/// **Q-118.** REQ-CORE-075 leaves this board's sound optional and gives it no level, and the page
+/// says only that "It is very loud compared to other audio expansion carts" — no ratio, no
+/// resistor values, nothing on polarity. The provisional choice is the anchor AMD-061 §6.4 used
+/// for the MMC5, applied to the one quantitative sentence available: **level 31 of one channel is
+/// one APU pulse at volume 15**, `PULSE_TABLE[15]`, because 31 is that channel's full converter
+/// swing as volume 15 is a pulse's. Three channels therefore cap `M` at 3 × 4 890 = 14 670, 45 %
+/// of full scale. Unlike the MMC5's two squares, which share one index of [`PULSE_TABLE`] because
+/// they sit in the APU's own non-linear network, these three are added after the table: the 5B is
+/// a separate chip whose output enters through the cartridge's audio pin. The ticket records the
+/// two other readings; **one constant changes the level** if R0 wants another.
+///
+/// `M` is positive, so the APU **subtracts** it as it subtracts the MMC5's (AMD-061 §6.2). That
+/// is also Q-118's provisional answer on polarity, and it is not free to reverse: [`clip`] only
+/// implements the lower bound *because* `M` cannot be negative.
+pub const SUNSOFT_5B_TABLE: [i32; SUNSOFT_5B_LEVELS] = sunsoft_5b_table();
+
+/// Builds [`SUNSOFT_5B_TABLE`] downwards from its anchor, so that the top entry is exactly
+/// `PULSE_TABLE[15]` whatever the rounding does below it.
+const fn sunsoft_5b_table() -> [i32; SUNSOFT_5B_LEVELS] {
+    let mut table = [0; SUNSOFT_5B_LEVELS];
+    let anchor = NORMALISATION * pulse(15);
+    let mut amplitude = anchor;
+    let mut level = SUNSOFT_5B_LEVELS - 1;
+    while level > 0 {
+        table[level] = round_to_even(amplitude);
+        amplitude /= SUNSOFT_5B_RATIO;
+        level -= 1;
+    }
+
+    // Level 0 is silence. The converter's lowest step is not truly zero on the chip, but the
+    // page's own mapping makes volume 0 the bottom of the scale and Mesen 2 does the same
+    // (`_volumeLut[0] = 0`).
+    table
+}
+
+/// Amplitude level of a Sunsoft 5B channel whose volume register holds `volume`, for
+/// [`SUNSOFT_5B_TABLE`].
+///
+/// nesdev: "maximum level 31 corresponds to the 4-bit volume register level 15", so the four-bit
+/// volume lands on the odd levels, `2V + 1`. Volume 0 is silence rather than level 1 (Q-118).
+#[must_use]
+pub const fn sunsoft_5b_level(volume: u8) -> usize {
+    if volume == 0 {
+        0
+    } else {
+        2 * (volume & 0x0F) as usize + 1
+    }
+}
+
 /// `A` of REQ-CORE-073: the APU's own contribution, from the five channel outputs.
 ///
 /// `pulse1` and `pulse2` are 0 to 15, `triangle` and `noise` 0 to 15, `dmc` 0 to 127.

@@ -8,9 +8,11 @@
 //! blargg's `10.len_halt_timing` and `11.len_reload_timing` measure.
 //!
 //! **Expansion audio.** REQ-CORE-075 as amended by AMD-054 requires the MMC5's own sound and
-//! leaves the other boards (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) optional, so only the MMC5
-//! supplies one. Its output is the `M` of REQ-CORE-073, pushed in by the bus
-//! ([`Apu2A03::set_expansion_level`]) and added to the APU's own `A` before the sum is clipped.
+//! leaves the other boards (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) optional. Two boards supply
+//! one: the MMC5, and from MF-3 the **Sunsoft 5B** (the YM2149F of mapper 69, whose level Q-118
+//! settles provisionally). The output of either is the `M` of REQ-CORE-073, pushed in by the bus
+//! ([`Apu2A03::set_expansion_level`]) and subtracted from the APU's own `A` before the sum is
+//! clipped (AMD-061 §6.2).
 
 mod band_limited_resampler;
 mod dmc_channel;
@@ -21,6 +23,7 @@ mod mmc5_audio;
 mod mmc5_pulse_channel;
 mod noise_channel;
 mod pulse_channel;
+mod sunsoft5b_audio;
 mod triangle_channel;
 
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -35,6 +38,7 @@ use triangle_channel::TriangleChannel;
 
 pub use band_limited_resampler::HIGH_PASS_HZ;
 pub(crate) use mmc5_audio::Mmc5Audio;
+pub(crate) use sunsoft5b_audio::Sunsoft5bAudio;
 
 /// A rejected audio setting or read (the C# throws `ArgumentException` for these).
 #[derive(Debug, Clone, Copy, PartialEq)]
