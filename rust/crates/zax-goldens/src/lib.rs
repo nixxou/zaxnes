@@ -128,6 +128,17 @@ pub struct RenderScene {
     pub screen_effect_bytes: Option<u64>,
     #[serde(default)]
     pub screen_effect_passes: Option<u32>,
+    /// And the three AMD-060 adds, which `describe` writes **only** at `video.anti_alias` = 3 —
+    /// `None` on every capture at any other level, the goldens' own included, which is what keeps
+    /// them byte-identical to before that amendment. Read so that a test can compare what the
+    /// filter asked of each backend (SM-1: the pass count, the target bytes and the pipelines of
+    /// REQ-SCN-085 on OpenGL and on `wgpu`).
+    #[serde(default)]
+    pub smaa_passes: Option<u32>,
+    #[serde(default)]
+    pub smaa_bytes: Option<u64>,
+    #[serde(default)]
+    pub smaa_programs_resident: Option<u32>,
 }
 
 /// Parses `render.json`.

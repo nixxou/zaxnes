@@ -13,8 +13,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — `607b1d1b` |
 | 3 | OpenGL: the two tables and the depth edge detection | done — `beb3ac0d` |
 | 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | done — `0badc10e` |
-| 5 | `wgpu`: the three passes, the lifecycle, the fallback | done — this commit |
-| 6 | The parity measurements and the costs | todo |
+| 5 | `wgpu`: the three passes, the lifecycle, the fallback | done — `f40c7471` |
+| 6 | The parity measurements and the costs | done — this commit |
 | 7 | Closing: notes, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, release build | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -732,6 +732,122 @@ diagnostic line is the OpenGL path's own wording, written once.
 
 No Rust outside `wgpu_backend/` changed this step, so `SceneRenderer::render_scene` is step 4's
 3409 instructions unchanged; the only OpenGL change is two loop conditions in a fragment shader.
+
+### Step 6 — the parity, the identity against `1a1086c`, and what the mode costs
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `zax-harness/src/render/mod.rs` | `--anti-alias` takes the setting's own domain (`0..=geometry::SMAA_DEPTH_LEVEL`) and its usage line names the fourth rung. The harness could not capture the mode at all before this |
+| `zax-goldens/src/lib.rs` | `RenderScene` reads the three keys AMD-060 adds, as `Option` — `None` on every capture at any other level, the goldens' own included |
+| `zax-harness/tests/parity_wgpu_tests.rs` | an AMD-060 section: the filter agrees between the backends (against the level-0 **control**), it costs the same passes, bytes and pipelines on each, and it moves the same share of the frame on each — plus the HUD assertion. `ru_7_vulkan_and_dx12_agree_with_each_other_at_every_level` takes the fourth level |
+
+#### The parity, as RU-7 measured it — and the bar that actually bites
+
+640 × 480, the four scenes of the parity file, each backend against the OpenGL capture of the same
+configuration, **and each level-3 figure against the level-0 control of the same pair**.
+
+| scene | control: differ / within 2 / max | level 3: differ / within 2 / max |
+|---|---|---|
+| `framing` | 0.0166 % / 99.9834 % / 171 | 0.0309 % / 99.9827 % / 171 |
+| `shadow` | 0.0010 % / 99.9990 % / 107 | 0.0010 % / 99.9990 % / 107 |
+| `heavy` | 0.3577 % / 99.6423 % / 223 | 0.3776 % / 99.6328 % / 223 |
+| `hud` | 0.0000 % / 100.0000 % / 0 | **0.0000 % / 100.0000 % / 0** |
+
+Vulkan and DX12 produce **the same figures to the last digit** on every row, which is RU-7's own
+finding repeated: one WGSL through one naga, so the two APIs are each other's control.
+
+Two things worth reading off that table. **The filtered pictures are barely further apart than the
+unfiltered ones** — on `heavy`, 0.3776 % against 0.3577 %, and the extra fifth of a percent is the
+filter spreading a silhouette pixel the two rasterisers already placed differently. And **the
+`hud` scene is byte-identical at 3**: it is UI tiles and nothing else, the filter runs before the
+HUD, so not one of its pixels moves — Q-109 §2's reading of "les éléments 2D […] NE DOIVENT PAS
+être traités", read off a picture on all three backends. It also says the copy through the filter's
+own `Rgba16Float` target is lossless.
+
+**The bar is written against the control and not as a share, because the share does not bite.**
+Step 5's bug left the share within 2 levels at 99.6458 % — above RU-7's own 99.5 % — while the
+filtered pictures differed on 0.4271 % of a frame whose unfiltered captures were *identical*. So
+`req_scn_085_the_filter_agrees_between_the_backends` asserts both: the usual share, and "no further
+apart than three times what the unfiltered pictures already are, and no further than 0.03 % where
+they are identical". Both hold now and both failed before the fix.
+
+What the filter asked of each backend, read off `render.json` (`framing`, 640 × 480): **3 passes,
+3 pipelines, 4 300 800 bytes and 1 sample** — the same four numbers on OpenGL, Vulkan and DX12,
+with none of the allowance REQ-SCN-080's depth resolve needs. There is nothing to resolve at level
+3 by REQ-SCN-085's first clause, which is why this row is an equality and the occlusion's is not.
+And the filter moves **0.3070 %** of `heavy` on OpenGL against **0.3076 %** on both `wgpu` APIs.
+
+#### Levels 0, 1 and 2 are byte-identical to `1a1086c`, on all three backends
+
+The lot's hardest check, deferred here by steps 4 and 5. A throwaway worktree at `1a1086c`, its own
+release harness built in its own target directory, both binaries rendering the synthetic set at
+640 × 480, and SHA-256 over the eleven PNGs **and** `render.json`:
+
+| Configuration | OpenGL | Vulkan | DX12 |
+|---|---|---|---|
+| `--anti-alias 0` | **12 / 12** | **12 / 12** | **12 / 12** |
+| `--anti-alias 1` (MSAA 4×) | **12 / 12** | **12 / 12** | **12 / 12** |
+| `--anti-alias 2` (MSAA 8×) | **12 / 12** | **12 / 12** | **12 / 12** |
+| Enhanced, `spl.ao` = 2, MSAA 4× | **12 / 12** | **12 / 12** | **12 / 12** |
+| Enhanced, `spl.ao` = 1 (MSVO), MSAA 4× | **12 / 12** | **12 / 12** | **12 / 12** |
+| Enhanced, `spl.reflections` = 1, MSAA 4× | **12 / 12** | **12 / 12** | **12 / 12** |
+| `--bend 60,20,30`, MSAA 8× | **12 / 12** | **12 / 12** | **12 / 12** |
+
+`render.json` being in each count says more than the pixels: the draw calls, the triangles, the
+resident meshes, the sample count and the four screen-effect counters of every frame of every one
+of those configurations are the numbers `1a1086c` produced — and the three SMAA keys are absent
+from all of them, which is REQ-SCN-086's "aucune passe, aucune cible et aucune texture" down to
+the JSON. The three `wgpu` columns are what the `Buckets` split of step 5 had to be checked
+against; they are the reason it was written as three predicates over the old variants rather than
+as a new frame path. The worktree is removed.
+
+#### What the mode costs, measured
+
+`--bench 60`, median of 60 frames after 8 warm-up frames, **1920 × 1080**, one session, this
+machine (RTX 3050), each backend against its own level-0 baseline — RU-7's method and RU-7's
+scene, with `heavy` beside it because the filter's second pass costs what the frame's contours
+cost.
+
+| `framing` | OpenGL | Vulkan | DX12 | extra bytes |
+|---|---|---|---|---|
+| **level 0, baseline** | **0.539 ms** | **0.605 ms** | **0.798 ms** | 0 |
+| level 1, MSAA 4× | +0.221 | +0.202 | +0.174 | 99.5 MB |
+| level 2, MSAA 8× | +0.423 | +0.395 | +0.433 | 199.1 MB |
+| **level 3, SMAA** | **+0.382** | **+0.404** | **+0.620** | **29.0 MB** |
+
+| `heavy` | OpenGL | Vulkan | DX12 |
+|---|---|---|---|
+| **level 0, baseline** | **1.140 ms** | **1.255 ms** | **1.616 ms** |
+| level 1, MSAA 4× | +0.215 | +0.218 | +0.223 |
+| level 2, MSAA 8× | +0.421 | +0.403 | +0.397 |
+| **level 3, SMAA** | **+0.241** | **+0.351** | **+0.474** |
+
+Read plainly, because the result is not uniformly flattering and AMD-060 §1's argument is about
+memory and samples rather than milliseconds:
+
+- **in time, level 3 sits between MSAA 4× and MSAA 8× on OpenGL and Vulkan, and above 8× on
+  DX12.** It is not the cheap option on a desktop GPU: three full-screen passes at 1080p cost what
+  they cost, and the second one walks up to 16 texels in four directions per marked pixel;
+- **in memory it is a third of MSAA 4× and a seventh of MSAA 8×** — 29.0 MB of targets against
+  99.5 and 199.1 MB of extra attachments (`smaa_bytes` reads 29 030 400 on both backends, which is
+  1920 × 1080 × 14 exactly). That is the figure AMD-060 §1 argues from, and the one that decides
+  whether a mode fits on a handheld at all;
+- **and it rasterises the scene once.** Levels 1 and 2 shade every covered sample of every
+  silhouette pixel; level 3 shades one. On a machine whose limit is fill rate and bandwidth rather
+  than ALU — which is every handheld in `PERFORMANCE-HISTORY.md` §8 — that is the term that
+  dominates, and this desktop measurement cannot show it;
+- the cost is **lower on `heavy` than on `framing`** (+0.241 against +0.382 on OpenGL) although
+  `heavy` is the slower frame. The filter's own cost is not the scene's complexity but its *contour
+  count*: `framing`'s regular grid of boxes seen at a shallow angle marks more pixels than
+  `heavy`'s overlapping clutter does. Worth knowing before reading a single scene's figure as the
+  mode's price;
+- DX12 pays most for it (+0.620 on `framing`), which is where RU-7 left that driver: its Classic
+  baseline is already 48 % above Vulkan's on this machine and its per-submission cost is the
+  explanation, three more render passes being three more submissions.
+
+No campaign was run: 24 benches of 68 frames each, at two scenes, in one session.
 
 ### What is left for R0
 

@@ -92,7 +92,8 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --no-shadows             render with the shadows off
   --group-draws            reorder the opaque tiles by draw state (the handheld setting)
   --shadow-map <texels>    side of the shadow map (default 4096, AMD-034)
-  --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x (AMD-032)
+  --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x (AMD-032),
+                           3 SMAA on the scene's depth (AMD-060)
   --atlas-budget <texels>  ceiling of the texels the object textures may occupy; beyond it a
                            pattern's tiles are not drawn and one line is logged per pattern
                            (AMD-051 REQ-E3D-644). No ceiling by default
@@ -213,7 +214,7 @@ pub struct Options {
     pub group_draws: bool,
     /// Shadow map side asked for.
     pub shadow_map_size: i32,
-    /// `video.anti_alias`, 0 to 2.
+    /// `video.anti_alias`, 0 to 3 — the fourth level being the depth-detecting SMAA of AMD-060.
     pub anti_alias: i32,
     /// Skybox setting.
     pub skybox: SkyboxKind,
@@ -503,10 +504,12 @@ impl Options {
         };
         match key {
             "--shadow-map" => self.shadow_map_size = integer(value)?,
+            // AMD-060 REQ-SCN-085: the domain is the setting's own, which that amendment grew to
+            // four rungs. The harness has to reach the fourth to capture it at all.
             "--anti-alias" => {
                 self.anti_alias = integer(value)?;
-                if !(0..=2).contains(&self.anti_alias) {
-                    return Err("--anti-alias expects 0, 1 or 2.".to_owned());
+                if !(0..=zax_render::geometry::SMAA_DEPTH_LEVEL).contains(&self.anti_alias) {
+                    return Err("--anti-alias expects 0, 1, 2 or 3.".to_owned());
                 }
             }
             // AMD-055 REQ-SCN-078 and REQ-SCN-079: the style, and its parameters by the Lua

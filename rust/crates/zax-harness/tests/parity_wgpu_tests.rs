@@ -1036,10 +1036,14 @@ fn amd032_the_anti_alias_levels_agree_between_the_backends() {
 /// passes get: at level 1 and 2 it exercises the depth resolve of REQ-SCN-080 — the pass with no
 /// OpenGL counterpart — and a difference between the two APIs there would be a driver's or the
 /// port's, not a sample pattern's.
+///
+/// SM-1 adds the fourth level to the list, where it is the strongest check the *filter* gets: the
+/// same WGSL, the same tables and the same three passes on both APIs, over a frame the Enhanced
+/// style has already darkened.
 #[cfg(windows)]
 #[test]
 fn ru_7_vulkan_and_dx12_agree_with_each_other_at_every_level() {
-    for level in ["0", "1", "2"] {
+    for level in ["0", "1", "2", "3"] {
         let arguments = [
             "--anti-alias",
             level,
@@ -1122,4 +1126,190 @@ fn req_scn_067_the_curvature_moves_as_much_of_the_frame_on_each_backend() {
     }
     fs::remove_dir_all(&flat_gl).unwrap();
     fs::remove_dir_all(&bent_gl).unwrap();
+}
+
+// ------------------------------------------------- AMD-060, the depth-detecting SMAA of SM-1
+
+/// The fourth level of `video.anti_alias`, which is the whole of the mode (REQ-SCN-085).
+const SMAA: [&str; 2] = ["--anti-alias", "3"];
+
+/// How much further apart the two backends' **filtered** pictures may stand than their unfiltered
+/// ones, and why the bar is written this way rather than as a share.
+///
+/// Every other effect of this file is held to [`WITHIN_TWO`] against OpenGL, and that bar does
+/// **not** bite on this one: SM-1 step 5 found the OpenGL path's two vertical searches dead — the
+/// filter blended a vertical contour over one pixel instead of over the length of its run — and
+/// the share within 2 levels was still 99.6458 %, comfortably above 99.5 %. What exposed it was
+/// the comparison against the *control*: on a scene whose level-0 captures are byte-identical
+/// between the backends, the filtered ones differed on 0.4271 % of the pixels by up to 86 levels.
+///
+/// So the filter is held to both: the usual share, and "no further apart than three times what
+/// the unfiltered pictures already are, and no further than 0.03 % where they are identical".
+/// After the fix that reads 0.1003 % against 3 × 0.0482 % on a cube over a floor, and 0.0143 %
+/// against 0.03 % on a face head-on; before it, both scenes fail. The factor is 3 and not 1
+/// because the filter *spreads* a disagreement: a silhouette pixel the two rasterisers place
+/// differently is mixed into its neighbours by design.
+const SMAA_FRINGE_FACTOR: f64 = 3.0;
+
+/// And the floor of the same bar, for a scene whose control is identical or nearly so.
+const SMAA_FRINGE: f64 = 0.0003;
+
+/// AMD-060 REQ-SCN-085: the three passes of the filter, drawn through both backends over the whole
+/// synthetic set, each against the level-0 control of the same two backends.
+#[test]
+fn req_scn_085_the_filter_agrees_between_the_backends() {
+    let plain_gl = capture("smaa-control", None, &["--anti-alias", "0"])
+        .expect("the OpenGL backend always renders");
+    let filtered_gl = capture("smaa", None, &SMAA).expect("the OpenGL backend always renders");
+    for backend in backends() {
+        let Some(plain) = capture("smaa-control", Some(backend), &["--anti-alias", "0"]) else {
+            return;
+        };
+        let Some(filtered) = capture("smaa", Some(backend), &SMAA) else {
+            return;
+        };
+        for scene in SCENES {
+            let control = figures(&load(&plain, scene), &load(&plain_gl, scene));
+            let level3 = figures(&load(&filtered, scene), &load(&filtered_gl, scene));
+            println!(
+                "smaa {backend:7} {scene:<10} control {:>7.4} % differ / {:>8.4} % within 2, \
+                 max {:>3} | filtered {:>7.4} % / {:>8.4} %, max {:>3}",
+                control.differing * 100.0,
+                control.within_two * 100.0,
+                control.max_channel,
+                level3.differing * 100.0,
+                level3.within_two * 100.0,
+                level3.max_channel
+            );
+            assert!(
+                level3.within_two >= WITHIN_TWO,
+                "{scene} at level 3 agrees with OpenGL on only {:.4} % of pixels",
+                level3.within_two * 100.0
+            );
+            let bound = (control.differing * SMAA_FRINGE_FACTOR).max(SMAA_FRINGE);
+            assert!(
+                level3.differing <= bound,
+                "{scene}: the filtered pictures differ on {:.4} % of pixels, the unfiltered ones \
+                 on {:.4} % — the filter is not the same filter on the two backends",
+                level3.differing * 100.0,
+                control.differing * 100.0
+            );
+        }
+        fs::remove_dir_all(&plain).unwrap();
+        fs::remove_dir_all(&filtered).unwrap();
+    }
+    fs::remove_dir_all(&plain_gl).unwrap();
+    fs::remove_dir_all(&filtered_gl).unwrap();
+}
+
+/// What the filter asked of each backend, read off `render.json`: three passes, three pipelines
+/// and the same bytes, with **no** allowance of the kind REQ-SCN-080's depth resolve needs.
+///
+/// That is the point of the test: the scene is single-sample at level 3 by REQ-SCN-085's first
+/// clause, so there is nothing to resolve and the two backends submit exactly the same three
+/// passes. The HUD pass this backend opens after the filter is a scene pass and not a filter pass,
+/// so it is not counted here — on OpenGL the filter leaves its framebuffer bound and the HUD needs
+/// no pass of its own at all.
+#[test]
+fn req_scn_085_the_filter_costs_the_same_passes_and_bytes_on_each_backend() {
+    let reference = capture("smaa-counts", None, &SMAA).expect("OpenGL always renders");
+    let counters = |folder: &PathBuf| {
+        let records = read_render(&folder.join("render.json")).unwrap();
+        let scene = records
+            .iter()
+            .find(|record| record.scene == "framing")
+            .expect("the synthetic set has a `framing` scene");
+        (
+            scene.smaa_passes.expect("level 3 writes the key"),
+            scene.smaa_bytes.expect("level 3 writes the key"),
+            scene
+                .smaa_programs_resident
+                .expect("level 3 writes the key"),
+            scene.anti_alias_samples,
+        )
+    };
+    let (gl_passes, gl_bytes, gl_programs, gl_samples) = counters(&reference);
+    assert_eq!(3, gl_passes, "the three passes of REQ-SCN-085");
+    assert_eq!(3, gl_programs, "one program per pass");
+    assert_eq!(1, gl_samples, "the scene is rendered without multisampling");
+    for backend in backends() {
+        let Some(capture) = capture("smaa-counts", Some(backend), &SMAA) else {
+            return;
+        };
+        let (passes, bytes, programs, samples) = counters(&capture);
+        println!(
+            "smaa on {backend}: {passes} passes, {bytes} bytes and {programs} pipelines, \
+             OpenGL {gl_passes}, {gl_bytes} and {gl_programs}"
+        );
+        assert_eq!(gl_passes, passes, "{backend} submitted {passes} passes");
+        assert_eq!(gl_bytes, bytes, "{backend} allocated {bytes} bytes");
+        assert_eq!(
+            gl_programs, programs,
+            "{backend} built {programs} pipelines"
+        );
+        assert_eq!(gl_samples, samples, "{backend} granted {samples} samples");
+        fs::remove_dir_all(&capture).unwrap();
+    }
+    fs::remove_dir_all(&reference).unwrap();
+}
+
+/// The filter has to **do** something on each backend, and the same something — this file's own
+/// rule, which is what keeps a pass that silently compiled to nothing from passing.
+///
+/// And the other half of REQ-SCN-085 with it: the `hud` scene of the synthetic set is UI tiles and
+/// nothing else, so a filter that runs before the HUD must leave it **byte-identical** to the
+/// capture at level 0. That is the clause "les éléments 2D superposés à la scène […] NE DOIVENT
+/// PAS être traités" read off a picture, on both backends (Q-109 §2) — and it says as well that
+/// the copy through the filter's own `Rgba16Float` target is lossless.
+#[test]
+fn req_scn_085_the_filter_moves_the_same_share_of_the_frame_on_each_backend() {
+    let plain_gl = capture("smaa-move-0", None, &["--anti-alias", "0"])
+        .expect("the OpenGL backend always renders");
+    let filtered_gl =
+        capture("smaa-move-3", None, &SMAA).expect("the OpenGL backend always renders");
+    let moved = |plain: &PathBuf, filtered: &PathBuf, scene: &str| {
+        figures(&load(plain, scene), &load(filtered, scene)).differing
+    };
+    let reference = moved(&plain_gl, &filtered_gl, "heavy");
+    println!("smaa gl      moves {:.4} % of `heavy`", reference * 100.0);
+    assert!(
+        reference > 0.001,
+        "the filter moved only {:.4} % of the densest frame of the set",
+        reference * 100.0
+    );
+    assert_eq!(
+        0,
+        figures(&load(&plain_gl, "hud"), &load(&filtered_gl, "hud")).max_channel,
+        "the filter moved the HUD on OpenGL"
+    );
+
+    for backend in backends() {
+        let Some(plain) = capture("smaa-move-0", Some(backend), &["--anti-alias", "0"]) else {
+            return;
+        };
+        let Some(filtered) = capture("smaa-move-3", Some(backend), &SMAA) else {
+            return;
+        };
+        let share = moved(&plain, &filtered, "heavy");
+        println!(
+            "smaa {backend:7} moves {:.4} % of `heavy`, OpenGL {:.4} %",
+            share * 100.0,
+            reference * 100.0
+        );
+        assert!(
+            (share - reference).abs() < 0.005,
+            "{backend} filtered {:.4} % of the frame against OpenGL's {:.4} %",
+            share * 100.0,
+            reference * 100.0
+        );
+        assert_eq!(
+            0,
+            figures(&load(&plain, "hud"), &load(&filtered, "hud")).max_channel,
+            "{backend} moved the HUD"
+        );
+        fs::remove_dir_all(&plain).unwrap();
+        fs::remove_dir_all(&filtered).unwrap();
+    }
+    fs::remove_dir_all(&plain_gl).unwrap();
+    fs::remove_dir_all(&filtered_gl).unwrap();
 }
