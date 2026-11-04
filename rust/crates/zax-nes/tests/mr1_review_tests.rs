@@ -88,34 +88,12 @@ fn mr_bus_1_uxrom_without_a_submapper_has_no_conflict() {
 
 // ================================================================ mapper 11, Color Dreams
 
-/// MR-11-1. The PRG field of the Color Dreams latch is four bits, not two.
-///
-/// Mesen: `SelectPrgPage(0, value & 0x0F)` with 32 KiB pages,
-/// `Mappers/Unlicensed/ColorDreams.h:22`. Ours masks with `0x03`:
-/// `src/cartridges/mappers/discrete.rs:283`, so a Color Dreams image larger than 128 KiB
-/// can never reach its upper half.
-///
-/// The two writes are chosen so the result is the same whether or not MR-BUS-1 is fixed:
-/// each written value is a subset of the bits the target address already holds.
-#[test]
-#[ignore = "MR-1: MR-11-1"]
-fn mr_11_1_color_dreams_prg_field_is_four_bits() {
-    // 512 KiB: sixteen 32 KiB banks, so bank 12 exists.
-    let mut core = MapperRom::new(11).prg(64).chr(16).load();
-
-    // $E100 holds 0x03 (8 KiB bank 3), so 0x03 survives the AND. 32 KiB bank 3.
-    core.mapper_write(0xE100, 0x03);
-    assert_eq!([12, 13, 14, 15], core.prg_windows());
-
-    // $E100 now holds 0x0F (8 KiB bank 15), so 0x0C survives the AND. 32 KiB bank 12.
-    core.mapper_write(0xE100, 0x0C);
-
-    assert_eq!(
-        [48, 49, 50, 51],
-        core.prg_windows(),
-        "bits 2-3 of the latch must reach PRG A17-A18"
-    );
-}
+// MR-11-1's test (`mr_11_1_color_dreams_prg_field_is_four_bits`) was withdrawn by lot MR-1b.
+// nesdev ("INES Mapper 011", "Color Dreams") prints the latch as `CCCC LLPP`: the PRG field
+// is **two** bits, bits 2-3 are "Used for lockout defeat", and the board holds 128 KiB of PRG
+// in four 32 KiB banks. Our `0x03` mask is the documented field; Mesen's `value & 0x0F` is
+// the oversized-ROM relaxation its own comment describes. See `docs/review/MR-1-mappers.md`,
+// MR-1b section.
 
 // ================================================================ mapper 13, CPROM
 

@@ -2093,3 +2093,246 @@ derived from a number and become fields of the resolved variant.
   mirroring mask, which it lists as accepted divergences. The sources describe the Konami
   parts and mapper 27 is a pirate board, so they do not contradict the amendment and there is
   nothing to add to Q-110.
+
+## Mapper 11 — Color Dreams
+
+### MR-11-1 — the width of the PRG field
+
+**MR-1 verdict: our bug (subtle). New verdict: leaves `our bug` — the field is two bits, as
+we have it, and Mesen's four are a deliberate oversized-ROM allowance.**
+
+Sources:
+
+- *INES Mapper 011* prints the latch as
+
+  ```
+  7  bit  0
+  ---- ----
+  CCCC LLPP
+  |||| ||||
+  |||| ||++- Select 32 KiB PRG ROM bank for CPU $8000-$FFFF
+  |||| ++--- Used for lockout defeat
+  ++++------ Select 8 KiB CHR bank for PPU $0000-$1FFF
+  ```
+
+  <https://www.nesdev.org/wiki/INES_Mapper_011>
+- *Color Dreams* (board page) gives the board "128K" of PRG ROM in 32 KiB banks — four banks,
+  which is all a two-bit field can reach — and describes bits 2-3 as "Used for lockout
+  defeat", adding that the function "is unnecessary for emulator implementations".
+  <https://www.nesdev.org/wiki/Color_Dreams>
+
+So bits 2-3 are not PRG address lines at all: they drive the CIC lockout-defeat circuit. Our
+`0x03` mask (`discrete.rs:283`) is the documented field, and REQ-CORE-100 makes that normative.
+Mesen's `value & 0x0F` is what its own comment at `ColorDreams.h:20` says it is — a relaxation
+for oversized ROMs, pending "an option to prevent oversized roms" — and MR-1 mistook the
+comment for evidence that the field was four bits.
+
+**Test change: withdrawn.** `mr_11_1_color_dreams_prg_field_is_four_bits` asserted a 512 KiB
+Color Dreams image reaching bank 48, which no such board can do. Removed.
+
+**Cost: none** — no fix. Note for anyone tempted to add the four-bit field anyway: it would
+be free (one mask constant), but it would also make a corrupt or hacked image bank somewhere a
+real cartridge cannot, which is a worse default than wrapping.
+
+## Mapper 13 — CPROM
+
+### MR-13-1 — 16 KiB of CHR-RAM
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
+
+Source: *CPROM* — the board carries "16 KiB RAM (in two 8KiB RAMs)" as four 4 KiB banks, with
+a fixed "32 KiB" PRG-ROM. <https://www.nesdev.org/wiki/CPROM>
+
+REQ-CORE-100 already pinned the figure and the source agrees, so this needs no further
+argument. We allocate the header's 32 KiB default (`ines_header.rs:154`).
+
+**Test:** unchanged — `mr_13_1_cprom_has_16_kib_of_chr_ram`.
+
+**Cost: none.** A `chr_ram_size_override` consulted in `CartridgeMemory::new` at load (MR-1's
+infrastructure item 2). It makes the save state 16 KiB smaller per frame of rollback, so if
+anything it is a small win for run-ahead.
+
+### MR-13-2 — is the mirroring hard-wired vertical?
+
+**MR-1 verdict: unknown (severity "visible if it bites"). New verdict: our bug, severity
+cosmetic — the board wiring fixes it.**
+
+Source: *CPROM* — the board's nametable arrangement is given as "Vertical", with no solder pad
+or jumper among its characteristics, and "Only *Videomation*, a paint program for NES, is known
+to use it."
+
+A board page that states one arrangement and offers no pad is describing wiring, not a
+default, so Mesen's `SetMirroringType(MirroringType::Vertical)` in `InitMapper` is right and
+our honouring the header (`discrete.rs:254-257`) is wrong. It is cosmetic only because the one
+cartridge in existence has the correct byte-6 bit: the finding is really about robustness
+against a bad dump.
+
+**Test:** none added. The fixture would have to load a mapper-13 image with
+`mirroring(0x01)`, which is a one-line test — but it asserts a board override that does not
+exist yet and would read as two findings at once next to MR-13-1. Left to the fix.
+
+**Cost: none.** One `set_mirroring` call at construction, next to the CHR-RAM size override
+MR-13-1 needs.
+
+## Mapper 71 — Camerica / Codemasters
+
+### MR-71-1 — the one-screen polarity
+
+**MR-1 verdict: unknown, and "the one open question worth closing cheaply". New verdict:
+Mesen in error — our polarity is the documented one.**
+
+Source: *INES Mapper 071* prints the $9000-$9FFF register as
+
+```
+7  bit  0
+---- ----
+xxxM xxxx
+   |
+   +----- Select 1 KiB CIRAM bank for PPU $2000-$2FFF
+```
+
+and notes that the register exists only on the *Fire Hawk* cartridge, which "only writes this
+register at the address $9000". <https://www.nesdev.org/wiki/INES_Mapper_071>
+
+The bit selects a **CIRAM bank**, so M = 0 shows the first physical nametable and M = 1 the
+second. Our `NametableMirroring::SingleScreenA` is "all four logical nametables show the first
+physical one" and `SingleScreenB` the second (`nametable_mirroring.rs:11-14`), so bit 4 set ->
+`SingleScreenB` (`discrete.rs:381`) is exactly the documented mapping. Mesen's
+`(value & 0x10) ? ScreenAOnly : ScreenBOnly` (`BF909x.h:37`) is the inversion.
+
+MR-1 was right to refuse to call this "our bug" without a source; the source now settles it in
+our favour. **No change to our code**, and the next lot should not "fix" it to match Mesen.
+
+**Test:** none needed. Worth saying why: a test here would pin behaviour that is already
+correct, and `mapper_tests.rs` already covers mapper 71's mirroring; adding an MR-1b test
+would only duplicate it.
+
+**Cost: none** — no fix.
+
+### MR-71-2 — the decode ranges
+
+**MR-1 verdict: equivalent in practice. New verdict: equivalent — confirmed, with the
+submapper now named.**
+
+Source: *INES Mapper 071* — "$8000-$BFFF: Switchable" with the bank selected through the
+"$C000-$FFFF" register and "$C000-$FFFF: Fixed to last bank"; the page adds that a submapper
+has been allocated for *Fire Hawk*'s mirroring control.
+
+So the bank register is at $C000-$FFFF, which is what we decode; Mesen's extra arm accepting
+$8000-$BFFF writes before the BF9097 mode is engaged is its own leniency, not a documented
+behaviour, and no mapper-71 game writes there to bank. The submapper we lack would force the
+mirroring register on at power-on; harmless, because *Fire Hawk*'s first $9000 write does the
+same thing, and worth folding into any fix.
+
+**Cost: none** — nothing to fix.
+
+## Mapper 30 — UNROM 512
+
+Source for all six: *UNROM 512* (<https://www.nesdev.org/wiki/UNROM_512>). Its register is
+"D~[NCCP PPPP]" — five PRG bits, two CHR-RAM bits, bit 7 the nametable arrangement — which is
+what we implement (`discrete.rs:415-422`), so the banking core is **equivalent** and all six
+findings are about the board's periphery.
+
+### MR-30-1 — the four mirroring modes of byte 6
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed, and the table is
+explicit.**
+
+Source: *UNROM 512* — the nametable configuration uses byte 6 bits 0 and 3 **together**:
+`%....0..0` vertical, `%....0..1` horizontal, `%....1..0` one-screen (switchable),
+`%....1..1` "4-Screen with cartridge VRAM".
+
+Our parser collapses the last two on bit 3 alone (`ines_header.rs:170-176`) and the board then
+treats any `FourScreen` header as mapper-controlled one-screen (`discrete.rs:405-406`), so a
+genuinely four-screen image loses its four nametables.
+
+**Test:** unchanged — `mr_30_1_unrom512_byte6_09_is_four_screen`.
+
+**Cost: none.** Keeping `byte6` on `InesHeader` is one `u8` on a struct built once per load,
+and the decode moves from two tests to a four-way match in the same place.
+
+### MR-30-2 — no work RAM
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
+
+Source: *UNROM 512* — "PRG RAM capacity: None".
+
+**Test:** unchanged — `mr_30_2_unrom512_does_not_drive_6000_7fff`.
+
+**Cost: none.** The same load-time size override as MR-13-1 and MR-4-6, and it *removes* the
+`$6000-$7FFF` branch's work for this board.
+
+### MR-30-3 — submapper 3 toggles vertical/horizontal
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed verbatim.**
+
+Source: *UNROM 512*, submapper 3 — "No bus conflicts, mapper-controlled horizontal/vertical
+nametable arrangement".
+
+**Test:** none (MR-1 wrote none); same code site as MR-30-1.
+
+**Cost: none** — a load-time submapper flag chooses which of two `set_mirroring` calls the
+register write makes.
+
+### MR-30-4 — the flash
+
+**MR-1 verdict: our bug (visible, missing feature). New verdict: our bug — confirmed, and the
+protocol is documented.**
+
+Source: *UNROM 512* — the register's own description says "Write a sequence of bytes here for
+writing to flash ROM", and the page documents the SST39SF040 "Erase 4KB Flash Sector" and
+"Write a byte" sequences with their verification reads; submapper 1 sets the battery bit "only
+if the game makes use of the self-flashing capability", and submapper 2 cannot set it because
+"bus conflicts interfere with the self-flashing procedure".
+
+So the feature is real, specified, and interlocked with MR-BUS-1's submapper conditions — the
+two have to be fixed together or a submapper-2 dump will try to flash through a bus conflict.
+
+**Test:** none. It needs a ROM-diff save path we have no equivalent of (MR-1's infrastructure
+item 11).
+
+**Cost: measurable, confined to this board.** Writes to $8000-$BFFF stop being bank writes and
+become a flash state machine, and reads of $8000-$FFFF have to be able to return status instead
+of ROM — which means this board can no longer advertise a plain `rom_windows` entry for those
+addresses and must use `NO_ROM_WINDOW` while a command is in progress (`PERFORMANCE-HISTORY.md`
+§10 names exactly this: "`rom_windows` (`NO_ROM_WINDOW` when reads have side effects)"). That
+turns every CPU fetch in the window into a board call *for this board only*, which is why the
+state machine must set `NO_ROM_WINDOW` only while a flash command is open and restore the plain
+window the moment it completes.
+
+### MR-30-5 — submapper 4 and the LED register
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
+
+Source: *UNROM 512*, submapper 4 — "No bus conflicts, an additional register controls LEDs
+inside the cartridge shell".
+
+We bank on any write at $8000 or above (`discrete.rs:447-452`), so on such a cartridge an LED
+write moves the PRG bank.
+
+**Test:** none; one more arm of the same load-time submapper switch.
+
+**Cost: none.**
+
+### MR-30-6 — four-screen from CHR-RAM
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed, with the detail MR-1
+lacked.**
+
+Source: *UNROM 512* — "The cartridge VRAM for the '4-screen with cartridge VRAM' comes from
+the last 8 KiB of CHR-RAM", mapped as nametables at PPU $2000-$2FFF with scratch RAM at
+$3000-$3EFF.
+
+Mesen's InfiniteNesLives variation is therefore the documented one, and the extra piece is the
+$3000-$3EFF scratch window, which MR-1 did not mention and which our `nametable_page` /
+`read_nametable` pair has no way to express at all.
+
+**Test:** none; it depends on MR-30-1 being fixed first to be reachable.
+
+**Cost: negligible for other boards, measurable for this one.** Our `nametable_page` already
+has a `SERVED_BY_CARTRIDGE` answer, so the dispatch exists; what is missing is that
+`read_nametable` does not receive the CHR memory (MR-1's infrastructure item 10). Passing it
+changes a trait signature every board implements, which is the kind of change
+`PERFORMANCE-HISTORY.md` §10 flags for the `Board` enum — but the call is once per nametable
+fetch on a board that already answers `SERVED_BY_CARTRIDGE` only when asked, and the MMC5 is
+the only other user.

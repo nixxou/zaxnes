@@ -33,7 +33,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
 - [x] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
 - [x] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
-- [ ] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
+- [x] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
 - [ ] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
 - [ ] 10/12 — 16, 18, 32, MMC2/MMC4, and the boards MR-1 called equivalent outright
 - [ ] 11/12 — Report section "MR-1b — sourced re-check", the new authoritative summary
@@ -186,3 +186,22 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   **Note on this step: the C: volume filled up (356 KiB free), so drafts are no longer written
   to the session scratchpad; the remaining sections are edited straight into the report.** The
   cargo checks of step 12 must point `TMP`/`TEMP` at the G: volume.
+- **Step 8** — the discrete boards, and the step that closes MR-1's own open question.
+  **MR-71-1 settled in our favour**: the mapper-71 register is `xxxM xxxx`, "Select 1 KiB
+  CIRAM bank for PPU $2000-$2FFF", so M = 1 shows the second physical nametable — our
+  `SingleScreenB`. Mesen is inverted. MR-1 was right not to call it our bug; the next lot
+  must not "fix" it towards Mesen.
+  **MR-11-1 withdrawn**: the latch is `CCCC LLPP`, the PRG field is **two** bits and bits 2-3
+  are "Used for lockout defeat"; the board holds 128 KiB. Ours is right, Mesen's four bits are
+  its oversized-ROM relaxation. Test removed.
+  **MR-13-2 promoted from `unknown` to `our bug`** (cosmetic): the CPROM board page gives the
+  arrangement as "Vertical" with no solder pad, and only *Videomation* uses the board.
+  MR-13-1 confirmed ("16 KiB RAM (in two 8KiB RAMs)"). MR-71-2 still equivalent, with the
+  submapper now named.
+  **All six MR-30 findings confirmed** from the UNROM 512 page, which is unusually complete:
+  the byte-6 pair table including `%....1..1` = "4-Screen with cartridge VRAM", "PRG RAM
+  capacity: None", submapper 3 ("mapper-controlled horizontal/vertical"), submapper 4 (the LED
+  register), the SST39SF040 sequences, and "The cartridge VRAM ... comes from the last 8 KiB
+  of CHR-RAM" with scratch RAM at $3000-$3EFF that MR-1 had missed. MR-30-4 is `measurable`
+  and interlocks with MR-BUS-1 ("bus conflicts interfere with the self-flashing procedure"),
+  so the two must be fixed together; MR-30-6 needs the `read_nametable` signature change.
