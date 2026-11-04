@@ -621,6 +621,24 @@ pub const SMAA_EDGES: ProgramSource = ProgramSource {
     fragment: Stage::of([SMAA, include_str!("../shaders/smaa_edges.frag")]),
 };
 
+/// The blending weights of AMD-060 REQ-SCN-085, into an `RGBA8` target: the whole of
+/// `SMAABlendingWeightCalculationPS` at the reference's High preset, reading the two precomputed
+/// tables.
+pub const SMAA_WEIGHTS: ProgramSource = ProgramSource {
+    name: "smaa_weights",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SMAA, include_str!("../shaders/smaa_weights.frag")]),
+};
+
+/// The neighbourhood blending of AMD-060 REQ-SCN-085, into an `RGBA16F` target of the filter's
+/// own: the one pass of the three that cannot work in place, because it writes a mix of two texels
+/// of the texture it reads.
+pub const SMAA_BLEND: ProgramSource = ProgramSource {
+    name: "smaa_blend",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SMAA, include_str!("../shaders/smaa_blend.frag")]),
+};
+
 const SKY_VERTEX: Stage = Stage::of([
     include_str!("../shaders/sky.vert"),
     "",

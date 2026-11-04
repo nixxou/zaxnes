@@ -1545,13 +1545,17 @@ fn run_smaa(
             drawn_scale: linear.drawn_scale(),
             projection: projection_terms(view),
         };
-        passes.statistics.smaa_passes = smaa.detect_edges(frame)?;
+        passes.statistics.smaa_passes = smaa.filter(frame)?;
+        // From here the frame draws into the filter's own target, which `filter` left bound with
+        // the frame's depth attached — so the HUD needs no change at all — and the sRGB encode has
+        // to read that target instead of the frame's own colour.
+        linear.redirect_color(smaa.blended_texture());
     }
 
-    // The passes bound a target and a vertex array of their own and left the depth test off; the
-    // HUD that follows rebinds what it needs and expects the frame's state. Same restoration
-    // `run_screen_effects` makes, for the same reason.
-    linear.bind_for_draw();
+    // The passes left the depth test off and their own textures bound; the HUD that follows
+    // rebinds what it needs and expects the frame's state. Same restoration
+    // `run_screen_effects` makes, for the same reason — except the framebuffer, which stays the
+    // filter's own target on purpose.
     passes.forget_bindings();
     let gl = &passes.gl.clone();
     gl.bind_vertex_array(None);

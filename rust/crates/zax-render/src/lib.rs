@@ -45,8 +45,8 @@ pub use renderer::{RenderError, SceneRenderer};
 pub mod shaders {
     pub use crate::gl::shaders::{
         assemble, backdrop, fantasy, floor_mask, gradient, scene, shadow, ProgramSource,
-        SceneVariant, Stage, AO, AO_BLUR, AO_COMPOSITE, SMAA_AREA_TABLE, SMAA_EDGES,
-        SMAA_SEARCH_TABLE, SSR, SSR_COMPOSITE,
+        SceneVariant, Stage, AO, AO_BLUR, AO_COMPOSITE, SMAA_AREA_TABLE, SMAA_BLEND, SMAA_EDGES,
+        SMAA_SEARCH_TABLE, SMAA_WEIGHTS, SSR, SSR_COMPOSITE,
     };
 }
 

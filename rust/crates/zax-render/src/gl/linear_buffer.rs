@@ -97,6 +97,15 @@ pub struct LinearColorBuffer {
     /// attachments this frame, which is what the screen-space passes of REQ-SCN-080 need before
     /// they read the colour and the depth. [`Self::resolve_to`] then has nothing to blit.
     resolved: bool,
+    /// The texture [`Self::resolve_to`] encodes instead of the frame's own colour, when something
+    /// has filtered the frame into a target of its own: the depth-detecting SMAA of AMD-060
+    /// REQ-SCN-085, whose neighbourhood blending cannot work in place.
+    ///
+    /// **`None` on every frame at any other level of `video.anti_alias`**: every
+    /// [`Self::begin_pass`] clears it, so the invariant is "a frame starts with no redirection"
+    /// and there is one place to read it off. The cost to a frame that does not filter is that
+    /// store and the one `Option` test [`Self::resolve_to`] makes, both once a frame.
+    redirect: Option<Texture>,
 }
 
 impl LinearColorBuffer {
@@ -122,6 +131,7 @@ impl LinearColorBuffer {
             samples: 1,
             sample_depth: false,
             resolved: false,
+            redirect: None,
         })
     }
 
@@ -170,6 +180,7 @@ impl LinearColorBuffer {
         self.width = w;
         self.height = h;
         self.resolved = false;
+        self.redirect = None;
 
         self.bind_for_draw();
         Ok(())
@@ -247,6 +258,17 @@ impl LinearColorBuffer {
         self.bind_for_draw();
     }
 
+    /// Has the sRGB encode read `texture` instead of the frame's own colour, for the rest of this
+    /// frame (AMD-060 REQ-SCN-085).
+    ///
+    /// The depth-detecting SMAA writes its filtered colour into a target of its own — it cannot
+    /// work in place, unlike REQ-SCN-083's composite — and leaves that target bound, so the draws
+    /// that follow need no change at all and this is the only thing the rest of the renderer has to
+    /// be told. `None` puts the frame's own colour back.
+    pub const fn redirect_color(&mut self, texture: Option<Texture>) {
+        self.redirect = texture;
+    }
+
     /// Encodes the buffer to sRGB into `target`, which becomes the bound framebuffer.
     pub fn resolve_to(&mut self, target: &RenderTarget) {
         let Some(attachments) = &self.attachments else {
@@ -289,7 +311,10 @@ impl LinearColorBuffer {
             ),
         );
         gl.active_texture(0);
-        gl.bind_texture(glow::TEXTURE_2D, Some(attachments.color));
+        gl.bind_texture(
+            glow::TEXTURE_2D,
+            Some(self.redirect.unwrap_or(attachments.color)),
+        );
         gl.bind_vertex_array(Some(self.vertex_array));
         gl.draw_triangles(3);
         gl.bind_vertex_array(None);
@@ -334,6 +359,7 @@ impl LinearColorBuffer {
         self.capacity = (0, 0);
         self.sample_depth = false;
         self.resolved = false;
+        self.redirect = None;
     }
 }
 

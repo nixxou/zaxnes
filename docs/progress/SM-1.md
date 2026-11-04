@@ -11,8 +11,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 |---|---|---|
 | 1 | The reference and the specs read; the design (pass order, colour space, targets, tables, bind layouts); the test plan | done — `4465826` |
 | 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — `607b1d1b` |
-| 3 | OpenGL: the two tables and the depth edge detection | done — this commit |
-| 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | todo |
+| 3 | OpenGL: the two tables and the depth edge detection | done — `beb3ac0d` |
+| 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | done — this commit |
 | 5 | `wgpu`: the three passes, the lifecycle, the fallback | todo |
 | 6 | The parity measurements and the costs | todo |
 | 7 | Closing: notes, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, release build | todo |
@@ -474,6 +474,131 @@ integration tests, 2 new unit tests), `zax-harness` all suites passed, and `zax-
   `rustc-LLVM ERROR: IO failure on output stream: no space on device`. `release/deps/*.pdb` and the
   `.s` are safe to delete between runs — rustc regenerates them — and `impl/`'s own 30 GB of build
   directories are not this lot's to touch.
+
+### Step 4 — the blending weights, the neighbourhood blending, and the frame carrying on
+
+The other two passes of REQ-SCN-085, and with them the mode's first picture. Both acceptance
+criteria of AMD-060 are read off a capture in this step.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `src/shaders/smaa_weights.frag` (new, 300 lines) | the whole of `SMAABlendingWeightCalculationPS` at the reference's **High** preset: the diagonal search and its bilinear decode, the four horizontal and vertical searches through the search table, `SMAAArea` and `SMAAAreaDiag` through the area table, and the two corner patterns |
+| `src/shaders/smaa_blend.frag` (new) | `SMAANeighborhoodBlendingPS`, with its early-out — which is where the second acceptance criterion lives — and the two colour taps written out as `mix`es |
+| `src/gl/smaa.rs` | `weights` and `blend` programs; the `RGBA8` weight target and the `RGBA16F` blend target with the frame's **own depth** attached; `filter` (the three passes in one submission) replacing `detect_edges`; `allocate` out of line; `blended_texture`; `PROGRAMS` 1 → 3 |
+| `src/gl/linear_buffer.rs` | `redirect_color`, the one thing the rest of the renderer has to be told |
+| `src/renderer.rs` | `run_smaa` calls `filter` and sets the redirection; the framebuffer is **not** rebound afterwards, on purpose |
+| `src/gl/shaders.rs`, `src/lib.rs` | `SMAA_WEIGHTS` and `SMAA_BLEND` |
+| `zax-render/tests/amd060_smaa_tests.rs` | two tests: AMD-060's two acceptance criteria, with a `striped_face` fixture built for the second |
+
+#### The third pass cannot work in place, and that decides the shape of the whole frame
+
+REQ-SCN-083's composite is a **blend state** — `glBlendFunc(GL_ZERO, GL_SRC_COLOR)` multiplies the
+linear buffer where it stands, no second target and no copy. The neighbourhood blending cannot be:
+it writes a *mix of two texels of the texture it reads*, so source and destination have to be
+different objects. That is the one unavoidable cost of this mode, and it is what the extra
+`RGBA16F` target is.
+
+What follows from it is the nicest part of the step: the filter **leaves its own target bound**,
+with the frame's depth still attached. So the HUD of REQ-SCN-044 draws into it with **no change to
+any draw path** — same program, same depth test, same blend — and the only thing the rest of the
+renderer has to be told is that the sRGB encode must sample that texture instead of the frame's
+own. One `Option<Texture>` on `LinearColorBuffer`, set by `run_smaa` and cleared by every
+`begin_pass`.
+
+#### Three places the port could not be the reference, and one it deliberately is not
+
+1. **`SMAAMovc` is `mix(a, b, bvec)`.** The reference's conditional move is two `if`s over a
+   `float2`; GLSL's `mix` with a boolean selector is the same thing in one instruction, and it is
+   used in both arms of the diagonal weights and for the crossing-edge removal.
+2. **The neighbourhood blending does its own bilinear.** The reference "exploits bilinear filtering
+   to mix current pixel with the chosen neighbor" — it samples at `texcoord + fraction · metrics`
+   and lets the sampler return `(1 − f)·here + f·there`. The frame's colour texture is **`NEAREST`**
+   here and has been since AMD-021 R2-009; the resolve pass reads it at exact texel centres, where
+   the two filters agree. Changing a sampler state the whole renderer shares, to save a `mix`, was
+   the wrong trade — so the two taps are written out. Same two texels, same weight.
+3. **The two tables are read `LINEAR`, the edge and weight targets too.** Nothing in either shader
+   says which filter it wants; the reference says it through its `LinearSampler` / `PointSampler`
+   split, and getting it wrong is silent. The horizontal and vertical searches read **four edges at
+   a time** through the filter (`@PSEUDO_GATHER4`) and `SMAAArea` interpolates between two
+   distances, so `NEAREST` anywhere but the depth would have given a plausible, wrong picture.
+4. **High, not Ultra.** `SMAA_PRESET_HIGH` — 16 steps, 8 diagonal, corners at 25 %. The preset is a
+   cost, the mode's whole argument (AMD-060 §1) is that it costs one sample where MSAA 4× costs
+   four, and 16 steps handle a line 64 pixels long perfectly. Ultra's 32 is for a resolution far
+   above what a 1080p frame of 256 × 240 voxels shows.
+
+#### The two acceptance criteria, measured
+
+`close_up_r` of AMD-055 §2.5 at 320 × 240, release, this machine. Level 1 is in the table because a
+figure means more with something to read it against.
+
+| | distinct colours at 0 | at 1 (MSAA 4×) | **at 3** | level 3 moves | level 1 moves |
+|---|---|---|---|---|---|
+| a cube on a floor | 3 | 12 | **68** | 611 px (0.80 %) | 409 px (0.53 %) |
+| a face head-on | 3 | 13 | **81** | 568 px (0.74 %) | 449 px (0.59 %) |
+
+**The first criterion** — "la capture à 3 a strictement plus de couleurs distinctes qu'à 0" — holds
+by a wide margin, and the mode puts *more* gradations on a silhouette than MSAA 4× does (68 against
+12), which is what a coverage-area filter should do against four fixed samples. Every colour of the
+unfiltered capture survives: the filter adds gradations between the frame's own colours, it does not
+replace them. All three are assertions.
+
+**The second criterion** — "sur une scène dont une seule face plane porte une texture contrastée,
+les pixels intérieurs à la face sont identiques à l'octet à ceux de la capture à 0" — holds to the
+bit, over **10 000-odd interior pixels** of a 10 × 10-tile surface textured with alternating columns
+one texel wide, which is the worst case any filter can be given and exactly the pixel art AMD-032 §2
+refused a post-processing filter over. The pixels compared are those at least three columns and
+three rows inside the face's own silhouette: three because the first pass reaches two texels
+(`offset[2]`) and the third mixes over one more.
+
+It holds for a reason rather than by tuning, and the reason is worth repeating: the window depth is
+linear in screen space across a plane, the second difference is therefore zero there, and the
+`RGBA16F` source and target plus the reference's own early-out mean an unmarked pixel is **copied**,
+not recomputed.
+
+#### What a frame at any other level pays for this step
+
+`render_scene` goes from **3401 instructions at `1a1086c` to 3409** — plus 8, **0.24 %**, against
+the lot's 1 % bar. The cause is identified and it is `LinearColorBuffer`: `begin_pass` clears the
+redirection (one store) and `resolve_to` tests it (`self.redirect.unwrap_or(attachments.color)`),
+and both of those are inlined into `render_scene`.
+
+The reset was tried in `resolve_to` and in `select_smaa` instead — where it would land in `render`,
+which R0 does not count — and that bought **one** instruction (3408). It was put back in
+`begin_pass`, because one store is not worth three places to clear a field from and the invariant
+"a frame starts with no redirection" is worth being able to read off one line.
+
+| Symbol | `1a1086c` | step 3 | step 4 |
+|---|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3401 | 3400 | **3409** (+0.24 %) |
+| `Construction::segment` | 159 | 159 | **159** |
+
+Everything else is as step 3 left it: no program, no table, no target and no pass at levels 0, 1
+and 2, and `run_smaa` is `#[inline(never)]` so none of its body is in the counted function.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-085's first acceptance criterion, with MSAA 4× beside it and every unfiltered colour surviving | `amd060_smaa_tests.rs` `req_scn_085_the_filter_puts_more_colours_on_a_geometric_edge` |
+| REQ-SCN-085's second acceptance criterion, on a face textured one texel at a time | `req_scn_085_the_interior_of_a_textured_face_is_untouched` |
+| the three passes, the three programs and the 14 bytes a pixel | the lifecycle tests of step 3, with their counts raised from 1 and 2 |
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean. `zax-render` and `zax-harness` all suites passed in release, one at a time.
+
+#### What this step did **not** do, and where it goes
+
+- **The HUD-untouched check needs a HUD**, and `zax-render`'s fixture builder has no interface
+  container — the synthetic set of the harness has a `hud` scene, so that assertion goes in step 6
+  with the rest of the harness-wide measurements. The *order* that makes it true is built and
+  documented (`run_smaa`'s four numbered reasons, Q-109 §2); what is missing is the picture that
+  proves it.
+- **The byte-identity of levels 0, 1 and 2 against `1a1086c`** is step 6's worktree comparison, as
+  RU-7's own was. The instruction counts and the three zeroed counters are what this step has.
 
 ### What is left for R0
 

@@ -22,8 +22,9 @@
 
 mod common;
 
-use common::{close_up_r, Built, GlFixture};
+use common::{close_up_r, Built, GlFixture, SceneFixture};
 use sha2::{Digest, Sha256};
+use zax_profiles::enums::ProfileLayer;
 use zax_render::geometry;
 use zax_render::shaders;
 
@@ -33,6 +34,39 @@ use zax_render::shaders;
 /// does to the picture is measured in the harness, over the whole synthetic set.
 fn stepped() -> Built {
     close_up_r(true, 4, 1.0, 0.0)
+}
+
+/// **One flat face carrying a contrasted texture**, which is the frame AMD-060's second acceptance
+/// criterion is written about: a row of whole tiles at one depth, so their front faces are
+/// coplanar and the surface has no contour inside it at all, textured with alternating columns of
+/// two palette entries a palette apart.
+///
+/// The alternation is one **texel** wide — the worst case for any filter, and exactly the pixel art
+/// AMD-032 §2 refused a post-processing filter over.
+fn striped_face() -> Built {
+    // Alternating columns of palette entries 1 and 3 — a texel of one, a texel of the other, which
+    // is the worst case for any filter.
+    let mut low = 0_u64;
+    let mut high = 0_u64;
+    for y in 0..8_u32 {
+        for x in 0..8_u32 {
+            let bit = (y * 8) + 7 - x;
+            let index = if x % 2 == 0 { 1_u64 } else { 3_u64 };
+            low |= (index & 1) << bit;
+            high |= ((index >> 1) & 1) << bit;
+        }
+    }
+    let striped = (low, high);
+    SceneFixture::new()
+        .background(0x0F)
+        .palette(1, 0x30)
+        .palette(3, 0x16)
+        .pattern(striped, 6, ProfileLayer::L1)
+        // A block of 10 x 10 whole tiles in the middle of the picture (AMD-057): one surface, one
+        // plane, and a wide margin of background on every side so that the interior and the
+        // silhouette can be told apart.
+        .rect(striped, 11, 11, 10, 10)
+        .build()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -162,12 +196,108 @@ fn req_scn_085_the_render_target_metrics_name_the_drawn_size() {
     // The one observable consequence from out here: the filter ran, over a target of the frame's
     // own size, and said so.
     let statistics = renderer.statistics();
-    assert_eq!(1, statistics.smaa_passes);
-    assert_eq!(
-        96 * 64 * 2,
-        statistics.smaa_bytes,
-        "RG8 at the frame's size"
+    assert_eq!(3, statistics.smaa_passes);
+    // `RG8` + `RGBA8` + `RGBA16F`, all three at the frame's own size: 14 bytes a pixel, against the
+    // 48 the extra attachments of MSAA 4x cost (4 x (8 + 4)).
+    assert_eq!(96 * 64 * (2 + 4 + 8), statistics.smaa_bytes);
+}
+
+// ------------------------------------------------------------------ the two acceptance criteria
+
+/// AMD-060 REQ-SCN-085, first acceptance criterion: "sur une scène à arêtes géométriques franches,
+/// la capture à 3 a strictement plus de couleurs distinctes qu'à 0".
+///
+/// Read beside level 1 as well, because the figure means more with something to compare it to: the
+/// filter has to be doing *more* than nothing, and a reader should be able to see that what it does
+/// is of the same kind as what multisampling does.
+#[test]
+fn req_scn_085_the_filter_puts_more_colours_on_a_geometric_edge() {
+    let fixture = GlFixture::create(320, 240);
+    let mut renderer = fixture.renderer();
+    let mut built = stepped();
+
+    built.scene.settings.set_anti_alias(0);
+    let plain = fixture
+        .render_built(&mut renderer, &built)
+        .distinct_colors();
+    built.scene.settings.set_anti_alias(1);
+    let msaa = fixture
+        .render_built(&mut renderer, &built)
+        .distinct_colors();
+    built.scene.settings.set_anti_alias(3);
+    let smaa = fixture
+        .render_built(&mut renderer, &built)
+        .distinct_colors();
+
+    assert!(
+        smaa.len() > plain.len(),
+        "3 has {} colours, 0 has {}",
+        smaa.len(),
+        plain.len()
     );
+    // And the gradations are real rather than a handful: the filter is held to at least as many as
+    // MSAA 4x produces on the same frame, which is the weakest statement that still has teeth.
+    assert!(
+        smaa.len() >= msaa.len(),
+        "3 has {} colours, 1 has {}",
+        smaa.len(),
+        msaa.len()
+    );
+    // Every colour of the unfiltered capture survives: the filter adds gradations between the
+    // frame's own colours, it does not replace them.
+    assert!(
+        plain.iter().all(|color| smaa.contains(color)),
+        "a colour of the unfiltered frame is gone"
+    );
+}
+
+/// AMD-060 REQ-SCN-085, second acceptance criterion: "sur une scène dont une seule face plane porte
+/// une texture contrastée, les pixels intérieurs à la face sont identiques à l'octet à ceux de la
+/// capture à 0".
+///
+/// **This is the requirement the whole mode rests on**, and the reason AMD-032 §2's objection to
+/// post-processing filters does not reach it: the detector reads the depth, a flat face carries no
+/// depth contour, so no texel of a nearest-neighbour texture can be filtered. The pixels compared
+/// here are those at least three columns and three rows inside the face's own silhouette — three
+/// because that is the furthest the first pass reaches (`offset[2]` is two texels) plus the one the
+/// third pass mixes over.
+#[test]
+fn req_scn_085_the_interior_of_a_textured_face_is_untouched() {
+    let fixture = GlFixture::create(320, 240);
+    let mut renderer = fixture.renderer();
+    let mut built = striped_face();
+
+    built.scene.settings.set_anti_alias(0);
+    let plain = fixture.render_built(&mut renderer, &built);
+    built.scene.settings.set_anti_alias(3);
+    let smaa = fixture.render_built(&mut renderer, &built);
+
+    // The face has to be there, and it has to be textured: a uniform face would make this test
+    // pass for the wrong reason.
+    let background = plain.packed(0, 0);
+    let (first_row, last_row) = plain.row_span(background);
+    let (first_column, last_column) = plain.column_span(background);
+    assert!(
+        last_row - first_row > 16 && last_column - first_column > 16,
+        "the face is {first_column}..{last_column} x {first_row}..{last_row}"
+    );
+    assert!(
+        plain.distinct_colors().len() >= 3,
+        "the face carries no contrast"
+    );
+
+    let mut compared = 0;
+    for y in (first_row + 3)..=(last_row - 3) {
+        for x in (first_column + 3)..=(last_column - 3) {
+            compared += 1;
+            assert_eq!(
+                plain.at(x, y),
+                smaa.at(x, y),
+                "the filter touched the interior at ({x}, {y})"
+            );
+        }
+    }
+    assert!(compared > 1000, "only {compared} interior pixels compared");
 }
 
 // ------------------------------------------------------------------ the lifecycle
@@ -203,9 +333,9 @@ fn req_scn_086_nothing_of_the_filter_exists_at_the_other_levels() {
     built.scene.settings.set_anti_alias(3);
     fixture.render_built(&mut renderer, &built);
     let statistics = renderer.statistics();
-    assert_eq!(1, statistics.smaa_passes);
+    assert_eq!(3, statistics.smaa_passes);
     assert!(statistics.smaa_bytes > 0);
-    assert_eq!(1, statistics.smaa_programs);
+    assert_eq!(3, statistics.smaa_programs);
     assert_eq!(1, statistics.anti_alias_samples, "no multisampling at 3");
 }
 
@@ -223,8 +353,8 @@ fn req_scn_086_the_targets_are_allocated_and_released_without_a_restart() {
     for _ in 0..2 {
         built.scene.settings.set_anti_alias(3);
         fixture.render_built(&mut renderer, &built);
-        assert_eq!(64 * 48 * 2, renderer.statistics().smaa_bytes);
-        assert_eq!(1, renderer.statistics().smaa_programs);
+        assert_eq!(64 * 48 * (2 + 4 + 8), renderer.statistics().smaa_bytes);
+        assert_eq!(3, renderer.statistics().smaa_programs);
 
         built.scene.settings.set_anti_alias(1);
         fixture.render_built(&mut renderer, &built);

@@ -29,6 +29,13 @@ use crate::numerics::Vector4;
 /// Bytes one texel of the edge target occupies: two channels of eight bits.
 const EDGE_BYTES_PER_TEXEL: u64 = 2;
 
+/// Bytes one texel of the weight target occupies: four channels of eight bits.
+const WEIGHT_BYTES_PER_TEXEL: u64 = 4;
+
+/// Bytes one texel of the blended colour occupies: four half-float channels, the format the linear
+/// buffer of AMD-021 R2-009 has always used.
+const BLEND_BYTES_PER_TEXEL: u64 = 8;
+
 /// The area table of the reference, 160 × 560 `R8G8` (`AREATEX_PITCH` = 320).
 const AREA_SIZE: (i32, i32) = (160, 560);
 
@@ -47,18 +54,35 @@ pub struct Smaa {
     vertex_array: VertexArray,
     /// The depth edge detection of the reference's `SMAADepthEdgeDetectionPS`.
     edges: ShaderProgram,
+    /// The reference's `SMAABlendingWeightCalculationPS`.
+    weights: ShaderProgram,
+    /// The reference's `SMAANeighborhoodBlendingPS`.
+    blend: ShaderProgram,
     /// The two tables, uploaded once with the module.
     area: Texture,
     search: Texture,
     /// `RG8`, the west and north edge of every pixel; cleared each frame, because the first pass
     /// `discard`s where there is no contour.
     edge_target: Option<Target>,
+    /// `RGBA8`, the blending weight of every pixel. **Not** cleared: the second pass writes every
+    /// pixel, zero included.
+    weight_target: Option<Target>,
+    /// `RGBA16F`, the filtered colour — the one target of the three the filter cannot do without,
+    /// because the neighbourhood blending writes a mix of two texels of the texture it reads and so
+    /// cannot work in place the way REQ-SCN-083's composite does.
+    ///
+    /// The frame's **own depth** is attached to it, so that the HUD drawn after the filter
+    /// depth-tests against the scene exactly as it did before (REQ-SCN-044).
+    blend_target: Option<Target>,
+    /// The depth the blend framebuffer has attached, so that a reallocation of the frame's
+    /// attachments reallocates it with them — the same guard the floor mask of REQ-SCN-084 carries.
+    blend_depth: Option<Texture>,
 }
 
 impl Smaa {
     /// How many programs this module holds, for `RenderStatistics::style_programs`' sibling
     /// `smaa_programs`.
-    pub const PROGRAMS: u32 = 1;
+    pub const PROGRAMS: u32 = 3;
 
     /// Builds the module: the full-screen triangle's vertex array, the programs of the passes, and
     /// the two tables of the reference uploaded to the device.
@@ -70,7 +94,24 @@ impl Smaa {
     /// the one diagnostic line of REQ-SCN-086's fallback.
     pub fn new(gl: &Gl) -> Result<Self, GlError> {
         let vertex_array = gl.create_vertex_array()?;
-        let edges = ShaderProgram::create(gl, &shaders::SMAA_EDGES)?;
+        let programs = (
+            ShaderProgram::create(gl, &shaders::SMAA_EDGES),
+            ShaderProgram::create(gl, &shaders::SMAA_WEIGHTS),
+            ShaderProgram::create(gl, &shaders::SMAA_BLEND),
+        );
+        let (edges, weights, blend) = match programs {
+            (Ok(edges), Ok(weights), Ok(blend)) => (edges, weights, blend),
+            (edges, weights, blend) => {
+                gl.delete_vertex_array(vertex_array);
+                // Whichever of the three failed is the error the fallback of REQ-SCN-086 reports;
+                // the ones that linked are dropped with the tuple.
+                return Err(edges.err().or(weights.err()).or(blend.err()).unwrap_or(
+                    GlError::Unsupported {
+                        what: "the SMAA programs",
+                    },
+                ));
+            }
+        };
         // Both tables are read with bilinear filtering, as the reference's own `LinearSampler`
         // does: `SMAAArea` and `SMAAAreaDiag` interpolate between the areas of two distances, and
         // `SMAASearchLength`'s coordinates are built to land on texel centres ("Scale and bias to
@@ -95,9 +136,14 @@ impl Smaa {
             gl: gl.clone(),
             vertex_array,
             edges,
+            weights,
+            blend,
             area,
             search,
             edge_target: None,
+            weight_target: None,
+            blend_target: None,
+            blend_depth: None,
         })
     }
 
@@ -109,49 +155,137 @@ impl Smaa {
     /// `src/assets/smaa/README.md` and in the lot's notes instead.
     pub fn bytes(&self) -> u64 {
         bytes(self.edge_target.as_ref(), EDGE_BYTES_PER_TEXEL)
+            + bytes(self.weight_target.as_ref(), WEIGHT_BYTES_PER_TEXEL)
+            + bytes(self.blend_target.as_ref(), BLEND_BYTES_PER_TEXEL)
     }
 
-    /// Finds the edges of `frame` in its depth (REQ-SCN-085, first pass) and says how many passes
-    /// that took.
+    /// The filtered colour the sRGB encode must read instead of the frame's own, once this frame's
+    /// three passes have run; `None` before the first one.
+    pub fn blended_texture(&self) -> Option<Texture> {
+        self.blend_target.as_ref().map(|target| target.texture)
+    }
+
+    /// Runs the three passes of REQ-SCN-085 over `frame` and says how many that took.
+    ///
+    /// The filtered colour is left in this module's own target, which the caller leaves **bound**:
+    /// the HUD of REQ-SCN-044 then draws into it with no change to any draw path, and the sRGB
+    /// encode reads [`Self::blended_texture`] instead of the frame's own colour.
     ///
     /// # Errors
     ///
-    /// [`GlError`] when the edge target cannot be allocated. Nothing is drawn then, and the caller
-    /// gives the mode up.
-    pub fn detect_edges(&mut self, frame: ScreenFrame) -> Result<u32, GlError> {
-        if !matches!(&self.edge_target, Some(target) if target.size == frame.capacity) {
-            release(&self.gl, self.edge_target.take());
-            self.edge_target = Some(allocate_edges(&self.gl, frame.capacity)?);
-        }
-        let Some(target) = &self.edge_target else {
+    /// [`GlError`] when a target cannot be allocated. Nothing is drawn then, and the caller gives
+    /// the mode up for the session (REQ-SCN-086's fallback).
+    pub fn filter(&mut self, frame: ScreenFrame) -> Result<u32, GlError> {
+        self.allocate(frame)?;
+        let (Some(edges), Some(weights), Some(blended)) = (
+            self.edge_target.as_ref(),
+            self.weight_target.as_ref(),
+            self.blend_target.as_ref(),
+        ) else {
             return Ok(0);
         };
+        let (edge_texture, weight_texture) = (edges.texture, weights.texture);
+        let (edge_buffer, weight_buffer, blend_buffer) =
+            (edges.framebuffer, weights.framebuffer, blended.framebuffer);
 
         let gl = &self.gl;
         super::screen_effects::screen_pass_state(gl);
         gl.bind_vertex_array(Some(self.vertex_array));
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
-        gl.viewport(frame.drawn.0.max(1), frame.drawn.1.max(1));
-        // The first pass `discard`s where there is no contour, so what it leaves behind is what
-        // was here before it — hence the clear, every frame.
+        let viewport = (frame.drawn.0.max(1), frame.drawn.1.max(1));
+        let metrics = rt_metrics(frame.drawn);
+
+        // 1. The depth edge detection. The pass `discard`s where there is no contour, so what it
+        //    leaves behind is what was there before it — hence the clear, every frame.
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(edge_buffer));
+        gl.viewport(viewport.0, viewport.1);
         gl.clear_color(0.0, 0.0, 0.0, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
-
         let program = &mut self.edges;
         program.use_program();
         program.set_i32("uDepth", 0);
         program.set_vec2("uDrawnScale", frame.drawn_scale);
-        program.set_vec4("uRtMetrics", rt_metrics(frame.drawn));
+        program.set_vec4("uRtMetrics", metrics);
         gl.active_texture(0);
         gl.bind_texture(glow::TEXTURE_2D, Some(frame.depth));
         gl.draw_triangles(3);
 
-        Ok(1)
+        // 2. The blending weights, through the two tables. No clear: this pass writes every pixel,
+        //    zero included.
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(weight_buffer));
+        let program = &mut self.weights;
+        program.use_program();
+        program.set_i32("uEdges", 0);
+        program.set_i32("uArea", 1);
+        program.set_i32("uSearch", 2);
+        program.set_vec2("uDrawnScale", frame.drawn_scale);
+        program.set_vec4("uRtMetrics", metrics);
+        gl.active_texture(0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(edge_texture));
+        gl.active_texture(1);
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.area));
+        gl.active_texture(2);
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.search));
+        gl.draw_triangles(3);
+
+        // 3. The neighbourhood blending, into the target the frame carries on with. Depth writes
+        //    stay off and the depth test off: this pass covers every pixel and must not disturb the
+        //    depth the HUD is about to test against.
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blend_buffer));
+        let program = &mut self.blend;
+        program.use_program();
+        program.set_i32("uColor", 0);
+        program.set_i32("uWeights", 1);
+        program.set_vec2("uDrawnScale", frame.drawn_scale);
+        program.set_vec4("uRtMetrics", metrics);
+        gl.active_texture(0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(frame.color));
+        gl.active_texture(1);
+        gl.bind_texture(glow::TEXTURE_2D, Some(weight_texture));
+        gl.draw_triangles(3);
+
+        for unit in [2, 1] {
+            gl.active_texture(unit);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+        }
+        gl.active_texture(0);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        gl.bind_vertex_array(None);
+        // The blend target stays bound, with the frame's own depth attached: the HUD draws into it.
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blend_buffer));
+        gl.viewport(viewport.0, viewport.1);
+
+        Ok(3)
+    }
+
+    /// Allocates the three targets at the attachments' capacity, or reallocates them when the
+    /// capacity or the frame's depth texture changes.
+    ///
+    /// Out of line on purpose, the way `LinearColorBuffer::allocate` is: it runs on the first frame
+    /// at level 3 and then never again until the view is resized.
+    #[inline(never)]
+    fn allocate(&mut self, frame: ScreenFrame) -> Result<(), GlError> {
+        let sized = |target: &Option<Target>| matches!(target, Some(target) if target.size == frame.capacity);
+        if !sized(&self.edge_target) {
+            release(&self.gl, self.edge_target.take());
+            self.edge_target = Some(allocate_edges(&self.gl, frame.capacity)?);
+        }
+        if !sized(&self.weight_target) {
+            release(&self.gl, self.weight_target.take());
+            self.weight_target = Some(allocate_weights(&self.gl, frame.capacity)?);
+        }
+        if !sized(&self.blend_target) || self.blend_depth != Some(frame.depth) {
+            release(&self.gl, self.blend_target.take());
+            self.blend_target = Some(allocate_blend(&self.gl, frame.capacity, frame.depth)?);
+            self.blend_depth = Some(frame.depth);
+        }
+        Ok(())
     }
 }
 
 impl Drop for Smaa {
     fn drop(&mut self) {
+        release(&self.gl, self.blend_target.take());
+        release(&self.gl, self.weight_target.take());
         release(&self.gl, self.edge_target.take());
         self.gl.delete_texture(self.search);
         self.gl.delete_texture(self.area);
@@ -192,6 +326,35 @@ fn allocate_edges(gl: &Gl, size: (i32, i32)) -> Result<Target, GlError> {
         glow::UNSIGNED_BYTE,
         true,
         None,
+    )
+}
+
+/// The `RGBA8` weight target. **Filtered** too: the third pass reads three of its texels through
+/// the filter, which is how `SMAASample(blendTex, …)` gets the neighbours' weights.
+fn allocate_weights(gl: &Gl, size: (i32, i32)) -> Result<Target, GlError> {
+    super::screen_effects::allocate(
+        gl,
+        size,
+        glow::RGBA8,
+        glow::RGBA,
+        glow::UNSIGNED_BYTE,
+        true,
+        None,
+    )
+}
+
+/// The `RGBA16F` target the filtered frame carries on in, with the frame's **own depth** attached
+/// so that the HUD drawn after the filter depth-tests against the scene (REQ-SCN-044). `NEAREST`:
+/// the sRGB encode reads it texel by texel, exactly as it reads the frame's own colour.
+fn allocate_blend(gl: &Gl, size: (i32, i32), depth: Texture) -> Result<Target, GlError> {
+    super::screen_effects::allocate(
+        gl,
+        size,
+        glow::RGBA16F,
+        glow::RGBA,
+        glow::FLOAT,
+        false,
+        Some(depth),
     )
 }
 
