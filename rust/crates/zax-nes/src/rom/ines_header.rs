@@ -32,6 +32,11 @@ pub struct InesHeader {
     pub prg_ram_size: usize,
     /// Initial nametable layout (REQ-CORE-012).
     pub mirroring: NametableMirroring,
+    /// Byte 6 itself. [`Self::mirroring`] collapses its bits 0 and 3 the way iNES does, where
+    /// one board reads them as a pair: UNROM 512 uses "`%....0..0` Vertical, `%....0..1`
+    /// Horizontal, `%....1..0` 1-Screen switchable, `%....1..1` 4-Screen with cartridge VRAM"
+    /// (MR-30-1).
+    pub byte6: u8,
     /// Bit 1 of byte 6: the PRG-RAM is battery backed (REQ-CORE-095).
     pub has_battery: bool,
     /// Bit 2 of byte 6: a 512-byte trainer follows the header.
@@ -196,6 +201,7 @@ impl InesHeader {
             chr_ram_size: chr_ram,
             prg_ram_size: prg_ram,
             mirroring,
+            byte6,
             has_battery: (byte6 & 0x02) != 0,
             has_trainer: (byte6 & 0x04) != 0,
             region,

@@ -109,7 +109,6 @@ fn mr_bus_1_uxrom_without_a_submapper_has_no_conflict() {
 /// The upper 16 KiB is unreachable through the windows, so no pattern byte changes; what
 /// changes is the RAM the cartridge exposes and the size of the save-state blob.
 #[test]
-#[ignore = "MR-1: MR-13-1"]
 fn mr_13_1_cprom_has_16_kib_of_chr_ram() {
     let core = MapperRom::new(13).prg(4).chr(0).load();
 
@@ -118,6 +117,55 @@ fn mr_13_1_cprom_has_16_kib_of_chr_ram() {
         core.cartridge().unwrap().memory().chr_ram().len(),
         "REQ-CORE-100: CPROM has 16 KiB of CHR-RAM"
     );
+}
+
+/// MR-13-2. nesdev ("CPROM") gives the board's nametable arrangement as "Vertical", with no
+/// solder pad among its characteristics — wiring, not a header default — so a mis-headered
+/// *Videomation* dump must still come up vertical. Mesen does the same
+/// (`SetMirroringType(MirroringType::Vertical)` in `InitMapper`); we honoured the header.
+#[test]
+fn mr_13_2_cprom_mirroring_is_wired_vertical() {
+    // Byte 6 bit 0 set: a header asking for vertical the other way round, and bit 3 clear.
+    let core = MapperRom::new(13).prg(4).chr(0).mirroring(0x00).load();
+    assert_eq!(zax_nes::NametableMirroring::Vertical, core.mirroring());
+
+    let core = MapperRom::new(13).prg(4).chr(0).mirroring(0x01).load();
+    assert_eq!(
+        zax_nes::NametableMirroring::Vertical,
+        core.mirroring(),
+        "the arrangement is wired: the header cannot ask for horizontal"
+    );
+}
+
+// ================================================================ mapper 15, Contra Function 16
+
+/// MR-15-1. nesdev ("INES Mapper 015"): "CHR-RAM is write-protected in PRG banking modes 0 and
+/// 3, and write-enabled in modes 1 and 2." AMD-021 R2-002 is silent on the point rather than
+/// contradicting it, so REQ-CORE-100's documented behaviour applies and the absence is ours.
+/// How the mode itself is decoded is Q-110's question and is untouched.
+#[test]
+fn mr_15_1_mapper_15_write_protects_chr_ram_in_modes_0_and_3() {
+    let mut core = MapperRom::new(15).prg(16).chr(0).load();
+
+    // Mode 1 ($8001) is write-enabled.
+    core.mapper_write(0x8001, 0x00);
+    core.cartridge_mut().unwrap().ppu_write(0x0000, 0x5A);
+    assert_eq!(0x5A, core.chr_bank(0x0000), "mode 1 is write-enabled");
+
+    for mode in [0u16, 3] {
+        core.mapper_write(0x8000 | mode, 0x00);
+        core.cartridge_mut().unwrap().ppu_write(0x0000, 0xA5);
+        assert_eq!(
+            0x5A,
+            core.chr_bank(0x0000),
+            "mode {mode} write-protects CHR-RAM"
+        );
+    }
+
+    // And mode 2 is write-enabled again.
+    core.mapper_write(0x8002, 0x00);
+    core.cartridge_mut().unwrap().ppu_write(0x0000, 0xA5);
+    assert_eq!(0xA5, core.chr_bank(0x0000), "mode 2 is write-enabled");
 }
 
 // ================================================================ mapper 41, Caltron 6-in-1
@@ -258,7 +306,6 @@ fn mr_34_1_the_board_comes_from_the_submapper_then_from_the_chr_size() {
 /// (`discrete.rs:405-406`, `:416-422`), so a genuinely four-screen image (byte 6 = $09)
 /// loses its four nametables at power-on.
 #[test]
-#[ignore = "MR-1: MR-30-1"]
 fn mr_30_1_unrom512_byte6_09_is_four_screen() {
     let core = MapperRom::new(30).prg(8).chr(0).mirroring(0x09).load();
 
@@ -274,7 +321,6 @@ fn mr_30_1_unrom512_byte6_09_is_four_screen() {
 /// undriven. We give every board the header's 8 KiB default (`mod.rs:52-57`) and answer
 /// reads there (`mod.rs:378-387`).
 #[test]
-#[ignore = "MR-1: MR-30-2"]
 fn mr_30_2_unrom512_does_not_drive_6000_7fff() {
     let core = MapperRom::new(30).prg(8).chr(0).load();
 
@@ -283,6 +329,78 @@ fn mr_30_2_unrom512_does_not_drive_6000_7fff() {
         core.cartridge().unwrap().try_cpu_peek(0x6000),
         "UNROM 512 has no RAM at $6000-$7FFF: the bus stays open"
     );
+}
+
+/// MR-30-3. NES 2.0 submapper 3 is "No bus conflicts, mapper-controlled horizontal/vertical
+/// nametable arrangement": bit 7 of the register picks H or V, not screen A or B.
+#[test]
+fn mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical() {
+    let mut core = MapperRom::new(30).prg(8).chr(0).submapper(3).load();
+    assert_eq!(zax_nes::NametableMirroring::Vertical, core.mirroring());
+
+    core.mapper_write(0x8000, 0x80);
+    assert_eq!(zax_nes::NametableMirroring::Horizontal, core.mirroring());
+
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(zax_nes::NametableMirroring::Vertical, core.mirroring());
+}
+
+/// And byte 6 `%....1..0` still selects the switchable one-screen arrangement, which is what
+/// our `FourScreen` header used to mean on every mapper-30 image (MR-30-1's other half).
+#[test]
+fn mr_30_1_unrom512_byte6_08_is_switchable_one_screen() {
+    let mut core = MapperRom::new(30).prg(8).chr(0).mirroring(0x08).load();
+    assert_eq!(zax_nes::NametableMirroring::SingleScreenA, core.mirroring());
+
+    core.mapper_write(0x8000, 0x80);
+    assert_eq!(zax_nes::NametableMirroring::SingleScreenB, core.mirroring());
+}
+
+/// MR-30-5. NES 2.0 submapper 4 is "No bus conflicts, an additional register controls LEDs
+/// inside the cartridge shell", at `D~[BYGR bygr] A~[10.. .... .... ....]` — $8000-$BFFF. A
+/// write there must not move the PRG bank; the bank register is at $C000-$FFFF.
+#[test]
+fn mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register() {
+    let mut core = MapperRom::new(30).prg(8).chr(0).submapper(4).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    core.mapper_write(0x8000, 0x02); // The LED register.
+    assert_eq!(
+        [0, 1, 6, 7],
+        core.prg_windows(),
+        "an LED write must not move the PRG bank"
+    );
+
+    core.mapper_write(0xC000, 0x02); // The bank register.
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+}
+
+// ================================================================ mapper 225, 64-in-1
+
+/// MR-225-1. nesdev ("INES Mapper 225"): "$5800-5803: `[.... RRRR]` RAM (readable/writable)",
+/// "16 bits of RAM -- 4 bits in each of the 4 regs", mirrored through $5FFF. We implemented
+/// nothing there, so those addresses read as open bus.
+#[test]
+fn mr_225_1_multicart_225_has_four_nibbles_of_ram() {
+    let mut core = MapperRom::new(225).prg(16).chr(32).load();
+
+    for register in 0..4u16 {
+        core.mapper_write(0x5800 + register, 0xF0 | (register as u8 + 1));
+    }
+
+    for register in 0..4u16 {
+        assert_eq!(
+            Some(register as u8 + 1),
+            core.cartridge().unwrap().try_cpu_peek(0x5800 + register),
+            "register {register} keeps four bits"
+        );
+        // Mirrored through $5FFF.
+        assert_eq!(
+            Some(register as u8 + 1),
+            core.cartridge().unwrap().try_cpu_peek(0x5FFC + register),
+            "register {register} is mirrored"
+        );
+    }
 }
 
 // ================================================================ mapper 1, MMC1
@@ -585,6 +703,28 @@ fn mr_4_8_mmc6_window_is_open_bus_when_no_half_is_readable() {
     core.write_memory(0x7200, 0x5A);
     assert_eq!(Some(0x5A), core.cartridge().unwrap().try_cpu_peek(0x7200));
     assert_eq!(Some(0x00), core.cartridge().unwrap().try_cpu_peek(0x7000));
+}
+
+/// MR-4-9. nesdev ("NES 2.0 submappers"), mapper 4: "Submapper 2: MMC3C with hard-wired
+/// mirroring". The $A000 writes must be ignored, as they already are on a four-screen header.
+///
+/// Submapper 4, "NEC MMC3 (Loading latch with 0 disables IRQ)", is the rev A IRQ that
+/// REQ-CORE-100 pins to rev B for this board; it is a spec question, filed as Q-114, and not
+/// implemented here.
+#[test]
+fn mr_4_9_mmc3_submapper_2_has_hard_wired_mirroring() {
+    let mut core = MapperRom::new(4).prg(8).chr(16).submapper(2).load();
+    let wired = core.mirroring();
+
+    core.mapper_write(0xA000, 0x01);
+    assert_eq!(wired, core.mirroring(), "$A000 is ignored on submapper 2");
+    core.mapper_write(0xA000, 0x00);
+    assert_eq!(wired, core.mirroring());
+
+    // A plain MMC3 still follows $A000.
+    let mut core = MapperRom::new(4).prg(8).chr(16).load();
+    core.mapper_write(0xA000, 0x01);
+    assert_eq!(zax_nes::NametableMirroring::Horizontal, core.mirroring());
 }
 
 // ================================================================ mapper 64, RAMBO-1

@@ -14,6 +14,8 @@ pub struct Mmc3 {
     a12: A12Watcher,
     bank: [u8; 8],
     is_mmc6: bool,
+    /// The nametable arrangement is wired and $A000 is ignored: a four-screen header, or
+    /// NES 2.0 submapper 2, "MMC3C with hard-wired mirroring" (MR-4-9).
     four_screen: bool,
     select: u8,
     protect: u8,
@@ -33,7 +35,11 @@ impl Mmc3 {
             a12: A12Watcher::new(),
             bank: [0; 8],
             is_mmc6,
-            four_screen: header.mirroring == NametableMirroring::FourScreen,
+            // MR-4-9, nesdev ("NES 2.0 submappers"), mapper 4: "Submapper 2: MMC3C with
+            // hard-wired mirroring" — the same condition as a four-screen header, so the
+            // $A000 writes are ignored on both.
+            four_screen: header.mirroring == NametableMirroring::FourScreen
+                || (header.is_nes20 && header.submapper == 2),
             select: 0,
             protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,

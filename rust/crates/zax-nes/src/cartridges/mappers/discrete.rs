@@ -214,6 +214,10 @@ impl Mapper for GxRom {
 }
 
 /// iNES mapper 13, CPROM: 16 KiB of CHR-RAM, the upper 4 KiB banked.
+///
+/// The board page gives the RAM as "16 KiB RAM (in two 8KiB RAMs)" (MR-13-1) and the nametable
+/// arrangement as "Vertical", with no solder pad among its characteristics, so the arrangement
+/// is wiring and not a header default (MR-13-2). *Videomation* is the only cartridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpRom {
     banks: BankWindows,
@@ -221,6 +225,10 @@ pub struct CpRom {
 }
 
 impl CpRom {
+    /// MR-13-1: the CHR-RAM the board carries, four 4 KiB banks, whatever the header says.
+    /// Settled at load by `registry::board_memory_sizes`.
+    pub(crate) const CHR_RAM_SIZE: usize = 0x4000;
+
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
@@ -251,8 +259,10 @@ impl Mapper for CpRom {
         13
     }
 
-    fn reset(&mut self, _memory: &mut CartridgeMemory) {
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.bank = 0;
+        // MR-13-2: the arrangement is wired, so a mis-headered dump does not get to choose.
+        memory.set_mirroring(NametableMirroring::Vertical);
         self.update_banks();
     }
 
@@ -389,21 +399,55 @@ impl Mapper for Codemasters {
     }
 }
 
-/// iNES mapper 30, UNROM 512: 16 KiB PRG, 8 KiB CHR-RAM bank and (four-screen header)
-/// single-screen select from one register.
+/// What bit 7 of the UNROM 512 register does to the nametable arrangement.
+///
+/// nesdev ("UNROM 512") decodes header byte 6 bits 0 and 3 **together** — "`%....0..0`
+/// Vertical, `%....0..1` Horizontal, `%....1..0` 1-Screen, switchable, `%....1..1` 4-Screen,
+/// cartridge VRAM" — where iNES reads bit 3 alone (MR-30-1); and NES 2.0 submapper 3 is "No
+/// bus conflicts, mapper-controlled horizontal/vertical nametable arrangement" (MR-30-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnRom512Mirroring {
+    /// The header's arrangement is wired: vertical, horizontal or genuine four-screen. Bit 7
+    /// does nothing.
+    Fixed,
+    /// Byte 6 `%....1..0`: bit 7 picks screen A or screen B.
+    OneScreen,
+    /// Submapper 3: bit 7 picks horizontal or vertical.
+    HorizontalVertical,
+}
+
+/// iNES mapper 30, UNROM 512: 16 KiB PRG, 8 KiB CHR-RAM bank and a nametable select from one
+/// register.
+///
+/// NES 2.0 submapper 4 is "No bus conflicts, an additional register controls LEDs inside the
+/// cartridge shell", at `D~[BYGR bygr] A~[10.. .... .... ....]`, i.e. $8000-$BFFF — so on that
+/// board the bank register is only at $C000-$FFFF (MR-30-5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnRom512 {
     banks: BankWindows,
-    mapper_controlled_mirroring: bool,
+    mirroring_control: UnRom512Mirroring,
+    /// Submapper 4: $8000-$BFFF is the LED register, not the bank register.
+    has_led_register: bool,
     register: u8,
 }
 
 impl UnRom512 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+        let header = memory.rom().header();
+        let submapper = if header.is_nes20 { header.submapper } else { 0 };
+        let mirroring_control = if submapper == 3 {
+            UnRom512Mirroring::HorizontalVertical
+        } else if header.byte6 & 0x09 == 0x08 {
+            UnRom512Mirroring::OneScreen
+        } else {
+            // Includes `%....1..1`, which is four-screen with cartridge VRAM and not
+            // mapper-controlled at all (MR-30-1). The VRAM itself is MR-30-6, out of lot MF-1.
+            UnRom512Mirroring::Fixed
+        };
         Self {
             banks: windows_for(memory),
-            mapper_controlled_mirroring: memory.rom().header().mirroring
-                == NametableMirroring::FourScreen,
+            mirroring_control,
+            has_led_register: submapper == 4,
             register: 0,
         }
     }
@@ -413,12 +457,19 @@ impl UnRom512 {
         self.banks.map_prg_16k(2, -1);
         self.banks
             .map_chr_8k(i32::from((self.register >> 5) & 0x03));
-        if self.mapper_controlled_mirroring {
-            memory.set_mirroring(if self.register & 0x80 != 0 {
+        let high = self.register & 0x80 != 0;
+        match self.mirroring_control {
+            UnRom512Mirroring::Fixed => {}
+            UnRom512Mirroring::OneScreen => memory.set_mirroring(if high {
                 NametableMirroring::SingleScreenB
             } else {
                 NametableMirroring::SingleScreenA
-            });
+            }),
+            UnRom512Mirroring::HorizontalVertical => memory.set_mirroring(if high {
+                NametableMirroring::Horizontal
+            } else {
+                NametableMirroring::Vertical
+            }),
         }
     }
 }
@@ -445,7 +496,15 @@ impl Mapper for UnRom512 {
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if address >= 0x8000 {
+        // MR-30-5: on a submapper-4 board $8000-$BFFF is the LED register, which drives four
+        // colour pairs inside the cartridge shell and no bank. Nothing in the engine lights,
+        // so the write is simply not a bank write; the bank register is at $C000-$FFFF.
+        let first = if self.has_led_register {
+            0xC000
+        } else {
+            0x8000
+        };
+        if address >= first {
             self.register = value;
             self.update_banks(memory);
         }

@@ -78,6 +78,17 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             min_prg_ram: Mmc5::MAX_PRG_RAM_SIZE,
             ..BoardMemorySizes::default()
         },
+        // MR-13-1, nesdev ("CPROM") and REQ-CORE-100's mapper table: the board carries "16 KiB
+        // RAM (in two 8KiB RAMs)", not the header's 32 KiB default.
+        13 => BoardMemorySizes {
+            chr_ram: Some(CpRom::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None".
+        30 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         _ => BoardMemorySizes::default(),
     }
 }

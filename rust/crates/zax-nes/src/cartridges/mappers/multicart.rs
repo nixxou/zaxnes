@@ -188,13 +188,31 @@ impl Mapper for Mapper015 {
             self.update_banks(memory);
         }
     }
+
+    // MR-15-1, nesdev ("INES Mapper 015"): "CHR-RAM is write-protected in PRG banking modes 0
+    // and 3, and write-enabled in modes 1 and 2." AMD-021 R2-002 is silent on it, so
+    // REQ-CORE-100's documented nesdev behaviour applies directly. How `mode` itself is
+    // decoded, and the rest of the board's banking, are Q-110's business and untouched here.
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if self.mode == 0 || self.mode == 3 {
+            return;
+        }
+
+        if memory.rom().chr_rom().is_empty() {
+            self.banks.write_chr(address, value, memory.chr_ram_mut());
+        }
+    }
 }
 
 /// iNES mapper 225, the 64-in-1 style multicart: everything is in the address of the write.
+///
+/// The board also carries "$5800-5803: `[.... RRRR]` RAM (readable/writable)", "16 bits of RAM
+/// -- 4 bits in each of the 4 regs", mirrored through $5FFF (MR-225-1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Multicart225 {
     banks: BankWindows,
     latch: i32,
+    nibble_ram: [u8; 4],
 }
 
 impl Multicart225 {
@@ -202,6 +220,7 @@ impl Multicart225 {
         Self {
             banks: windows_for(memory),
             latch: 0x8000,
+            nibble_ram: [0; 4],
         }
     }
 
@@ -226,10 +245,20 @@ impl Mapper for Multicart225 {
 
     fn save_registers(&self, writer: &mut StateWriter) {
         writer.write_i32(self.latch);
+        // Last, so that a state written before lot MF-1 added the four nibbles reads back
+        // without them (REQ-CORE-091); `load_registers` then leaves them at their power-on
+        // zeros, which is also what a reset gives.
+        writer.write_raw(&self.nibble_ram);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.latch = reader.read_i32()?;
+        if reader.remaining() >= self.nibble_ram.len() {
+            reader.read_into(&mut self.nibble_ram)?;
+        } else {
+            self.nibble_ram = [0; 4];
+        }
+
         Ok(())
     }
 
@@ -243,7 +272,29 @@ impl Mapper for Multicart225 {
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.latch = 0x8000;
+        self.nibble_ram = [0; 4];
         self.update_banks(memory);
+    }
+
+    // MR-225-1: the four 4-bit registers at $5800-$5803, mirrored to $5FFF.
+    fn cpu_peek_override(&self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        (0x5800..=0x5FFF)
+            .contains(&address)
+            .then(|| Some(self.nibble_ram[usize::from(address & 0x03)]))
+    }
+
+    fn intercept_cpu_write(
+        &mut self,
+        _memory: &mut CartridgeMemory,
+        address: u16,
+        value: u8,
+    ) -> bool {
+        if (0x5800..=0x5FFF).contains(&address) {
+            self.nibble_ram[usize::from(address & 0x03)] = value & 0x0F;
+            return true;
+        }
+
+        false
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, _value: u8) {

@@ -25,7 +25,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
 - [x] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
 - [x] 8/10 — MR-32-1, MR-156-1, MR-16-1
-- [ ] 9/10 — MR-13-1, MR-13-2, MR-15-1, MR-225-1, MR-4-9, MR-30-1, MR-30-2, MR-30-3, MR-30-5
+- [x] 9/10 — MR-13-1, MR-13-2, MR-15-1, MR-225-1, MR-4-9, MR-30-1, MR-30-2, MR-30-3, MR-30-5
 - [ ] 10/10 — full suite, the `--ignored` list, the R0 table and the review annotations
 
 ## Out of scope (lot MF-2 or later), left untouched
@@ -61,6 +61,15 @@ because a step cannot write its own commit hash.
 | MR-1-5 | `registry.rs:75-81` + `mod.rs:330-345` | `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed`, `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` | **Genghis Khan, Nobunaga's Ambition**: the battery file shrinks from 16 KiB to 8 |
 | MR-21-1 | `vrc2_vrc4.rs:138-147` (the variant's lines) | `mr_21_1_vrc2a_uses_the_exact_register_wiring`, `mr_21_3_every_vrc_variant_decodes_its_own_address_lines` | **Twinbee, Gradius** (mapper 22) |
 | MR-21-2 | `vrc2_vrc4.rs:229-241` (`is_vrc2`) | `mr_21_2_vrc2a_has_no_prg_swap_mode`, `req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two` | **Twinbee, Gradius**; any VRC2a title writing $9002-$9003 |
+| MR-13-1 | `registry.rs:62-66` + `discrete.rs:227` | `mr_13_1_cprom_has_16_kib_of_chr_ram` | **Videomation**: the CHR-RAM and the save-state blob shrink by 16 KiB |
+| MR-13-2 | `discrete.rs:268-271` | `mr_13_2_cprom_mirroring_is_wired_vertical` | **Videomation**, only on a mis-headered dump |
+| MR-15-1 | `multicart.rs:192-204` | `mr_15_1_mapper_15_write_protects_chr_ram_in_modes_0_and_3` | the mapper-15 multicarts, when a game writes CHR-RAM in mode 0 or 3 |
+| MR-225-1 | `multicart.rs:212-215`, `:262-293` | `mr_225_1_multicart_225_has_four_nibbles_of_ram` | none known |
+| MR-4-9 (submapper 2 only) | `mmc3.rs:40-45` | `mr_4_9_mmc3_submapper_2_has_hard_wired_mirroring` | submapper-2 mapper-4 dumps only |
+| MR-30-1 | `ines_header.rs:35-40` + `discrete.rs:421-470` | `mr_30_1_unrom512_byte6_09_is_four_screen`, `mr_30_1_unrom512_byte6_08_is_switchable_one_screen` | four-screen UNROM 512 homebrew (byte 6 = $09) |
+| MR-30-2 | `registry.rs:67-71` (`prg_ram: Some(0)`) | `mr_30_2_unrom512_does_not_drive_6000_7fff` | UNROM 512 homebrew reading $6000-$7FFF |
+| MR-30-3 | `discrete.rs:437-439`, `:466-469` | `mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical` | submapper-3 UNROM 512 homebrew |
+| MR-30-5 | `discrete.rs:445` + `:521-527` | `mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register` | submapper-4 UNROM 512 homebrew |
 | MR-32-1 | `iremg101.rs:24` + `:85-93` | `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen` | **Major League** (NES 2.0 submapper 1 dumps only) |
 | MR-156-1 | `daou306.rs:74-81` | `mr_156_1_daou306_mirroring_is_a_two_bit_field` | the Daou Infosys titles (Metal Force, Buzz & Waldog) |
 | MR-16-1 | `bandai_fcg.rs:28` + `:44-57`, `:133-144` | `mr_16_1_bandai_submapper_4_writes_the_counter_directly` | **Famicom Jump II** and the other FCG-1/2 dumps, submapper 4 only |
@@ -223,3 +232,35 @@ because a step cannot write its own commit hash.
   did before, so no existing dump moves.
 - All three flags are load-time; the three existing tests of these boards use submapper 0 and
   are untouched.
+
+### Step 9 notes
+
+- **`InesHeader` gained `byte6`** (one `u8` on a struct built once per load, which is exactly
+  what MR-1b sanctioned). The generic iNES decode of `mirroring` is **unchanged** — changing it
+  would move every board — and only UNROM 512 reads the two bits as the pair its own page
+  documents. `UnRom512Mirroring` has the three cases: `Fixed` (vertical, horizontal, or the
+  genuine four-screen of `%....1..1`), `OneScreen` (`%....1..0`, which is what any FourScreen
+  header used to mean on this board) and `HorizontalVertical` (submapper 3).
+- **MR-30-6 is still out of scope**, so a four-screen UNROM 512 now keeps four nametables but
+  takes them from console VRAM rather than "the last 8 KiB of CHR-RAM". MR-30-1 is the
+  prerequisite MR-1b said MR-30-6 needed, and it is now in place.
+- **MR-30-5**: the LED register is `D~[BYGR bygr] A~[10.. .... .... ....]`, i.e. $8000-$BFFF,
+  so on submapper 4 the bank register only answers $C000-$FFFF. Nothing in the engine lights,
+  so the LED value is not stored and no state is added.
+- **MR-15-1** is one `self.mode` test in `Mapper::ppu_write`. Q-110's neighbours — how `mode`
+  itself is decoded, mode 1's fixed bank, the 6-bit `B` field, the missing XOR — are untouched,
+  as the lot brief requires.
+- **MR-225-1 adds state**, the only finding in the lot that does: four nibbles. They are
+  written **last** in `save_registers`, and `load_registers` reads them only when the block
+  still has bytes (`StateReader::remaining`), so a mapper-225 state written before this lot
+  loads with the nibbles at their power-on zeros — the same pattern the MMC5's sound registers
+  use for format versions 4 to 7. No version bump.
+- **MR-4-9 is half-done, and Q-114 says why.** Submapper 2, "MMC3C with hard-wired mirroring",
+  is in: it widens the existing `four_screen` flag. Submapper 4, "NEC MMC3 (Loading latch with
+  0 disables IRQ)", is the rev A counter, which **REQ-CORE-100 pins to rev B** for this board
+  and which REQ-CORE-114's `mmc3_test_2` test 6 then fails. That is a spec-versus-submapper
+  question, filed as `spec/changes/Q-114.md`, which also carries MR-4-3's MC-ACC (submapper 3)
+  since it raises the same priority question. Submapper 5 is a scrambling chip, outside
+  REQ-CORE-100.
+- **MR-13-1 and MR-30-2 reuse step 2's `board_memory_sizes` hook**; both shrink a memory, so
+  both rely on step 2's `read_blob_prefix_into` to keep older save states loadable.
