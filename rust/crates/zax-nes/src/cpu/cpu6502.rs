@@ -305,7 +305,19 @@ impl Cpu6502 {
     /// its end, so adding the IRQ's extra cycle of lag on top would place the handler one
     /// CPU cycle too late — which is exactly what `ppu_vbl_nmi` test 5 and `vbl_nmi_timing`
     /// test 7 measure (REQ-CORE-116).
-    #[inline]
+    ///
+    /// **`inline(always)`, and it must stay that way.** This closes *every* CPU cycle, from 75
+    /// call sites, and `bus.irq_asserted()` reaches `Board::irq_asserted` — the whole 29-arm
+    /// dispatch over the `Board` enum, which LLVM inlines into this function, jump table and
+    /// all. A plain `#[inline]` therefore makes the decision to paste it a function of how many
+    /// arms the enum happens to have: MF-3 added two boards and one more distinct arm body, the
+    /// callee crossed the inliner's threshold, and a `callq` per CPU cycle appeared on every
+    /// game — `Cpu6502::end_cycle` 0 → **159.9 M** exclusive instructions in R0's callgrind of
+    /// Mega Man 2, which is the whole of that lot's +0.26 % core regression. The dispatch itself
+    /// never got slower; only the callee's *size* changed. Nothing here depends on the board
+    /// count, so the inlining must not either. See `docs/progress/MF-3b.md`, steps 0 and 1.
+    #[allow(clippy::inline_always)] // Measured: a `callq` here costs 159.9 M instructions.
+    #[inline(always)]
     fn end_cycle<B: CpuBus + ?Sized>(&mut self, bus: &B) {
         self.poll_irq = self.irq_sample;
 
