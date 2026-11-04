@@ -25,8 +25,29 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 - [x] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
 - [x] 7/10 — campaign run 1/2 over the whole directory; reader fixes.
 - [x] 8/10 — campaign run 2/2 and the committed report `docs/review/MF-T-test-roms.md`.
-- [ ] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
+- [x] 9/10 — the gated `cargo test` subset (skipped without `ZAXNES_TEST_ROMS`).
 - [ ] 10/10 — journal entry and close.
+
+## The gated test (step 9)
+
+`rust/crates/zax-harness/tests/test_roms_tests.rs`, three tests over 62 ROMs:
+
+| Test | ROMs | Expected |
+|---|---|---|
+| `the_blargg_instruction_singles_all_pass` | `instr_test-v5/rom_singles` | 16 pass |
+| `req_core_100_keeps_the_mmc3_at_revision_b` | `mmc3_test/` 1-6 | 5 pass, 6-MMC6 fail |
+| `holy_mapperel_detects_every_supported_board` | all 40 boards | 32 pass, 2 fail, 6 unsupported |
+
+* Without `ZAXNES_TEST_ROMS` all three return at once and the suite stays green (0.00 s,
+  verified). With it they take 6.5 s together (verified).
+* Each test asserts the **exact** outcome of every ROM, failures included, and also that no
+  ROM ran that is not on the list. A ROM added to or removed from the collection is caught
+  rather than silently skipped.
+* Asserting the failures is deliberate. `mmc3_test/6-MMC6` passing again would mean `5-MMC3`
+  had stopped passing, which is a regression against REQ-CORE-100's revision B, not a fix —
+  the test name says so. The two SNROM rows record where that real defect stands, and the six
+  `unsupported` rows will flip the day mappers 69, 78.3, 118 or 180 are added, which is
+  exactly when someone should look.
 
 ## Notes
 
