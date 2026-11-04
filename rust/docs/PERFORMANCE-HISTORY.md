@@ -90,6 +90,24 @@ they are settings that are off on the desktop (the C# behaviour) and on by defau
 | In-app profiler (`ui.profiler` or `ZAXNES_PROFILE=1`) | per-stage mean/max per displayed frame, busy time per thread, Lua time per script hook, in `logs/zaxnes.log` | device runs |
 | `valgrind --tool=callgrind` on a short `bench-core` | instruction counts, closer to an in-order A53 than x86 time | core and engine work |
 
+**callgrind on the Windows host.** Lots MF-1 to MF-4a all recorded "no callgrind on this machine"
+and fell back to reading generated assembly. There is one: the WSL2 Ubuntu it carries, whose
+`rustc` is the *same* version with the same LLVM, so the Linux binary's hot code is the Windows
+binary's. Lot MF-4a-bis used it to localise a regression to the instruction:
+
+    # from a `git archive` of each compared commit, into its own fresh directory
+    CARGO_PROFILE_RELEASE_STRIP=false CARGO_TARGET_DIR=<fresh> \
+        cargo build --release -p zax-harness --bin zax-harness
+    valgrind --tool=callgrind --dump-instr=no --cache-sim=no --branch-sim=no \
+        ./zax-harness bench-core <rom> --frames 300 --warmup 0
+    callgrind_annotate --threshold=100 callgrind.out.<pid>
+
+`STRIP=false` is the whole trick — the shipped profile strips symbols, and without them callgrind
+has nothing to name. Nothing else of the profile changes, so the codegen is the shipped one. The
+counts are deterministic to the instruction: the same binary twice gives the same number, which is
+what makes a one-instruction-per-cycle change measurable where wall clock has three times that as
+noise. Build each commit in its **own** target directory (section 2).
+
 An app save state (`.ssN`) holds the core state block in its second section; extracting it gives a
 `--load-state` file for the harness, which reproduces a device scene exactly (used for the Zelda II
 world map, section 9).
@@ -1106,6 +1124,18 @@ Core:
 - Removing the PRG/CHR `% len` in the board reads: no x86 gain.
 - Restricting the cartridge cycle-hook dispatch: no gain.
 - Drawing visible spans one tile (8 dots) at a time: identical output but 5-9 % slower.
+- **Giving `NesBus::read_cycle` its own copy of the bus read** (`read_internal` split into an
+  `#[inline(always)]` body plus two out-of-line callers), so that the DMA gate ends *in* the read
+  instead of a `jmp` into it. Measured with callgrind, 300 frames: **−0.86 %** on `M1_P128K` and
+  **−0.79 %** on `M0_P32K_C8K_V` — real, reproducible, and **not shipped** (lot MF-4a-bis step 2).
+  Only one of the saved instructions is the `jmp`; the rest is LLVM outlining `Ppu2C02::read` and a
+  `Board` read out of the CPU read path to avoid duplicating them, which is MF-3b rule 1's
+  stop-the-lot signature (a hot callee gaining its first call site) pointing the other way. Every
+  `$2002` or `$2007` read then pays a `callq` and a prologue, and the two holy-mapperel ROMs that
+  show the win barely read PPU registers — a game that polls `$2002` in a vblank loop could pay for
+  it. It is an `#[inline(always)]` and a wrapper, so it cannot change behaviour; what it needs is a
+  lot that measures several commercial games and re-runs golden-core, not one whose job was to give
+  back a regression.
 
 Lua:
 - Lazy `shape2D` (made only when a script reads it, `763a0ff`): reverted. It needed a protected
@@ -1182,7 +1212,7 @@ Measurement pitfall:
 | `Zax.Nes/Ppu` (rendering, registers, timing) | 5.1 batched PPU sync points, fast span (`run_visible_span*`), per-line sprite buffer, sprite limit; the `save_machine_state` / `save_frame_records` split of the savestate (5.5 run-ahead) — a new field goes in one of the two, never in both | PPU goldens, golden-core |
 | `Zax.Nes/Apu` | 5.1 lazy level mixing (the non-linear tables of AMD-054 live there; the cache test stays **one** comparison of `level_key` and `current_level` keeps **one** call site), quiet-cycle skipping (`quiet_cycles` must account for any new timed state; a board with expansion audio keeps it off) | golden-core with audio digests |
 | `Zax.Nes/Cartridges` (new or changed mapper) | 5.1 IRQ horizon or per-cycle stepping; `chr_view` (only for pure fetches); `rom_windows` (`NO_ROM_WINDOW` when reads have side effects); debug assert in debug build | golden-core, a debug run of the mapper's games |
-| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F, and **`NesBus::tick`'s prologue in the post-LTO assembly** (119 instructions, 3 `pushq`, 32-byte frame: nothing board-specific and nothing of run-ahead may be inlined into it) | goldens |
+| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F, and **`NesBus::tick`'s prologue in the post-LTO assembly** (since MF-4a-bis: 75 instructions, 2 `pushq`, 40-byte frame — it was 119 and 3 `pushq` while it inlined the DMC fetch; nothing board-specific and nothing of run-ahead may be inlined into it). A **read** cycle must stay two calls with the address materialised **once** — `callq tick` then `callq read_cycle` — and a per-cycle test added to `DmcChannel` or to `Apu2A03::quiet_cycles` costs about 10 instructions on every CPU cycle of every game (MF-4a-bis step 1) | goldens, callgrind (section 3) |
 | `Zax.Engine3D` segmentation / frames | 5.2 filled-cell lists and germ order; `FastMap` iteration order never reaching output | render captures (identical) |
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |

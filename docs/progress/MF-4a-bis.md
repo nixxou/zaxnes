@@ -450,3 +450,179 @@ The ROMs, re-run: `sprdma_and_dmc_dma` **2 / 2** with the same `526` and `528`;
 **93 / 147** with the same fourteen failures and the same eight that take the run out of the loop;
 `test_roms_tests` **9 passed**. The two `manual` CRCs are what makes this a real check of the
 ordering: a halt cycle one cycle out would move them.
+
+### The shape that goes *below* parity, measured and not shipped
+
+One more instruction can be had. `read_cycle`'s hot side ends in `jmp read_internal`; if the gate
+owned a **copy** of the bus read — `read_internal` split into an `#[inline(always)]` body with two
+out-of-line callers, one of them `read_cycle` — the gate would end *in* the read and the `jmp`
+would go. Written, built and measured:
+
+| ROM | step 2 | with the split |
+| --- | ---: | ---: |
+| `M1_P128K` | +5.80 M (+0.114 %) | **5 026 233 722, −43.5 M (−0.86 %)** |
+| `M0_P32K_C8K_V` | +6.35 M (+0.111 %) | **5 652 703 675, −44.8 M (−0.79 %)** |
+
+Well below `b39eaba4`, on both ROMs. It is **not shipped**, and the reason is in the attribution:
+only 8.8 M of the 43.5 M is the `jmp`. The rest is LLVM reacting to the duplication by **outlining
+`Ppu2C02::read` (+6.9 M as a new symbol) and a `Board` read (+2.1 M) out of the CPU read path**, so
+`read_internal`'s 253.8 M becomes `read_cycle`'s 221.1 M plus those — a 14.9 M win from the PPU
+register read leaving the hot function, which has nothing to do with the DMA gate.
+
+That is MF-3b rule 1's stop-the-lot signature pointing the other way: a hot callee gaining its
+first call site. It means **every `$2002` and `$2007` read now pays a `callq` and a prologue**, and
+the two ROMs that show the win barely touch PPU registers — a game that polls `$2002` in a vblank
+loop is exactly the case they cannot judge, and no commercial ROM is available here to judge it
+with. The change is an attribute and a wrapper, so it cannot alter behaviour; what it needs is a
+lot that can measure several games and re-run golden-core. It is recorded in
+`rust/docs/PERFORMANCE-HISTORY.md` section 7 with its numbers so that lot does not have to find it
+again.
+
+Shipping it here would also have made this lot's claim unreadable: R0 is re-measuring to see
+MF-4a's regression given back, not a −0.8 % from somewhere else.
+
+## Step 3 — the lot measured end to end
+
+### The numbers, and the one thing in them that is not code
+
+| ROM | `b39eaba4` | MF-4a `c4577878` | step 1 | **the lot** |
+| --- | ---: | ---: | ---: | ---: |
+| `M1_P128K` (mapper 1) | 5 069 762 455 | +103 809 287 (**+2.05 %**) | +14 460 308 (+0.285 %) | **+5 796 837 (+0.114 %)** |
+| `M0_P32K_C8K_V` (NROM) | 5 697 464 924 | +104 481 995 (**+1.83 %**) | +15 052 707 (+0.264 %) | **+6 345 347 (+0.111 %)** |
+| `8-dmc_rates` (plays DPCM) | 5 789 392 437 | +117 567 209 (**+2.03 %**) | — | **+21 127 045 (+0.365 %)** |
+
+Of what is left, one part is not an instruction this lot can give back: **MF-4a's DMC output-unit
+phase**. MF-4a starts the DMC timer a whole period from its first bit instead of at 0, because
+blargg's `sync_dmc` does not converge otherwise and every ROM of `dmc_dma_during_read4` hangs on a
+blank screen without it. That moves *when* the channel's bit clock fires for the rest of the run,
+so identical code takes a different path through itself.
+
+It is measured, not assumed. The same tree with those two lines back at `timer: 0` — the only
+difference — gives:
+
+| ROM | the lot | the lot with the DMC phase of `b39eaba4` | the phase's share |
+| --- | ---: | ---: | ---: |
+| `M1_P128K` | +5 796 837 | **+3 733 468 (+0.074 %)** | +2 063 369 |
+| `M0_P32K_C8K_V` | +6 345 347 | **+4 177 994 (+0.073 %)** | +2 167 353 |
+| `8-dmc_rates` | +21 127 045 | **−4 388 299 (−0.076 %)** | +25 515 344 |
+
+and on `8-dmc_rates` `Apu2A03::run_cpu_cycles` reads **1 236 181 455** against `b39eaba4`'s
+**1 236 181 633** — 178 instructions apart in 1.24 billion, which is process start-up. So the
++14.1 M that row carries in the shipped tree is the phase and only the phase. On the ROM that
+exercises the DMC hardest, the lot's own code lands **below** `b39eaba4`.
+
+### What is actually left: the gate, and nothing else
+
+Excluding the phase, the whole residue is two rows that have to be read together:
+
+| function | `b39eaba4` | the lot | delta |
+| --- | ---: | ---: | ---: |
+| `NesBus::read_cycle` | — | 26 344 580 | **+26 344 580** |
+| `NesBus::tick` | 322 089 330 | 300 029 379 | **−22 059 951** |
+| | | | **+4 284 629** |
+
+`read_cycle` is three instructions — `cmpb` / `jne` / `jmp` — on each of the 8 781 527 read cycles
+of 300 frames (26 344 580 / 3 exactly). `tick` gives back 2.47 per cycle: a saved register in its
+prologue and epilogue, and the per-cycle DMC poll that no longer runs on a cycle the APU may lag.
+**Three against two and a half** — that is the residue, +0.08 %, and it is irreducible for a gate
+behind a call: a test, a conditional branch and a tail jump is the floor, and the cheaper
+arrangements are all worse (the inlined gate cost +8 % of wall clock in instruction cache at ~100
+sites, which Q-119 measured; folding `tick` into the gate needs a stack frame on every read cycle,
+about 15 instructions against the 6 the baseline spends; and a conditional tail call to `tick` is
+not something LLVM emits).
+
+Everything else closes to the instruction. The complete delta on `M1_P128K`, every row the run
+produced:
+
+| row | delta | what it is |
+| --- | ---: | --- |
+| `NesBus::read_cycle` | +26 344 580 | the gate |
+| `NesBus::tick` | −22 059 951 | what it gives back |
+| `Apu2A03::run_cpu_cycles` | +1 812 531 | the DMC phase (see above) |
+| `NesBus::read_internal` | −655 172 | fewer call sites; its callee takes part of it |
+| `Cartridge::default_cpu_read` | +393 261 | the other half of that placement |
+| `NesBus::run_dma` | +20 526 | **the DMA cycles themselves** |
+| `NesBus::dma_read` | +6 656 | **the DMA cycles themselves** |
+| `NesBus::write_internal` | −6 224 | the old `$4014` loop, gone |
+| Lua and libc rows | about −60 000 | start-up and hash-order noise |
+| **total** | **+5 795 618** | against the +5 796 837 of the whole process |
+
+`Apu2A03::quiet_cycles` is **0**, and every `Cpu6502` function is **0**.
+
+### How much of `run_dma` and `dma_read` is new — the brief's question
+
+Both of R0's games write `$4014` every frame and Mega Man 2 plays DPCM, so the brief asks what the
+exempted rows are worth. The honest answer has a caveat: **no public ROM available here does an OAM
+transfer every frame**, so the per-frame figure for those two games cannot be measured. What can:
+
+| ROM | the new rows (`run_dma` + `dma_read` + `halted_read_cycle`) | the old model's counterpart |
+| --- | ---: | --- |
+| `M1_P128K` | 27 182 (0.0005 % of the run) | the `$4014` loop inside `write_internal`, −6 224 |
+| `8-dmc_rates` (about 327 DMC fetches / 300 frames) | 69 580 (0.0012 %) | the fetch inlined in `tick`: its recursive ticks 43 928, plus 45 of `tick`'s 119 instructions per fetch |
+| `sprdma_and_dmc_dma` (OAM **and** DMC continuously) | **549 302 (0.011 %)** | the recursive ticks 27 058 and the OAM loop inside `write_internal` |
+
+The last row is the bound that matters, and it is the point: on a ROM that runs an OAM transfer and
+a DMC fetch as fast as it can, the *whole* DMA machinery is **a hundredth of a percent** of the
+run. The exemption the brief grants is not carrying anything. (That ROM's own total cannot be
+compared across the two commits — it fails at `b39eaba4` and passes now, so it does not run the
+same program.) The 327 fetches of `8-dmc_rates` are read off the baseline's recursive-tick row: the
+old inlined fetch called `tick` four times, 43 928 instructions at 33.6 per tick.
+
+Structurally the same answer: the *stolen cycles* are unchanged — 513 or 514 for an OAM transfer,
+three or four for a DMC fetch, pinned by `req_core_111_the_oam_transfer_waits_for_a_read_cycle` and
+by `sprdma_and_dmc_dma`'s `526` and `528` — and what grew is the bookkeeping per stolen cycle, from
+a tight loop inside the `$4014` write to `run_dma`'s get/put state machine. About nine instructions
+per stolen cycle, which is the 549 302 above.
+
+### What R0 should see
+
+| R0's measurement | expected |
+| --- | --- |
+| Mega Man 2 / Zelda II **core** | about **+4 M** of the +106.6 M and +85.4 M left, plus whatever MF-4a's DMC phase is worth on a game that plays DPCM continuously — on `8-dmc_rates` that phase is +25.5 M and the lot's own code is −4.4 M |
+| `Apu2A03::quiet_cycles` | +52.8 M to **0**, byte-identical body |
+| `Apu2A03::run_cpu_cycles` | +35.1 M to **the DMC phase alone**; the body is byte-identical, and at `timer: 0` the row is the baseline's to 178 instructions in 1.24 billion |
+| `Cpu6502::step` + `branch` + `resolve` | +11.8 M to **0**, each to the instruction |
+| `NesBus::read_cycle` and `NesBus::tick` | +36.3 M and −36.6 M, unchanged in shape: three instructions a read cycle against the two and a half `tick` gives back, net **+4.3 M** on a mapper 1 |
+| `NesBus::run_dma`, `dma_read` | the DMA cycles; at most 0.011 % of a run even on a ROM driving both units continuously |
+| **PPU** | **0**. Nothing in this lot touches the PPU, and no PPU symbol moved in either dump |
+| golden-core | the DMA timing is cycle-identical to MF-4a (`526` and `528`, `08 08 07 08 08`, CRC `5E3DF9C4`), so any game MF-4a moved stays where MF-4a put it, and no other game moves |
+
+### The suites, end to end
+
+| suite | MF-4a | the lot |
+| --- | --- | --- |
+| `nes-test-roms/sprdma_and_dmc_dma` | 2 / 2 | **2 / 2** (`526`, `528`) |
+| `nes-test-roms/dmc_dma_during_read4` | 3 pass, 0 fail, 2 manual | **3 pass, 0 fail, 2 manual**, both CRCs unchanged |
+| `nes-test-roms/pal_apu_tests` | 10 / 10 | **10 / 10** |
+| `nes-test-roms/apu_test` | 9 / 9 | **9 / 9** |
+| `nes-test-roms/blargg_apu_2005.07.30` | 11 / 11 | **11 / 11** |
+| `AccuracyCoin` | 93 / 147 | **93 / 147**, the same fourteen failures |
+| **whole campaign** | 214 pass, 5 fail | **214 pass, 5 fail**, 1 unsupported, 111 manual (331 ROMs) |
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean — **no new `allow`**, and in particular none for `inline_always`: the one the rejected shape
+needed is not in the tree. `cargo test --release -p zax-nes -p zax-harness`: **690 passed, 0
+failed, 7 ignored**, MF-4a's count exactly, with no test added, removed or `#[ignore]`d.
+`ZAXNES_TEST_ROMS=... cargo test --release -p zax-harness --test test_roms_tests`: **9 passed**.
+**No `unsafe`.**
+
+**Savestates.** The DMC's `save_state` and `load_state` are now `b39eaba4`'s code character for
+character — MF-4a's one added line (`start_delay = 0`) is gone with the field. `NesBus`'s block is
+untouched; `dmc_ready_cycle` is transient like `dma` and `dma_oam_page`, is not written, and is
+cleared by `load_state` and by `reset`. A state written before MF-4a, or before MF-3b, loads byte
+for byte.
+
+### What the brief asked for and what is here
+
+| brief item | state |
+| --- | --- |
+| 1. the APU path back to `b39eaba4`, the load delay kept and every MF-4a test kept | **done**: `quiet_cycles` and `run_cpu_cycles` are byte-identical to `b39eaba4`, field offsets included, and callgrind reads `quiet_cycles` **0** and `run_cpu_cycles` the DMC phase alone. 89.3 M of MF-4a's 103.8 M given back by this step |
+| 2. the CPU side | **done, fully**: every `Cpu6502` function is back to its baseline instruction count to the instruction. The gate is asked after the cycle, so the read site materialises the address once, as it did before MF-4a |
+| 3. generated-code evidence and an instruction count measured here, per step | **done**: post-LTO dumps diffed instruction for instruction, and callgrind — which this host does have, in WSL2 with the same `rustc` and LLVM; the procedure is now in `PERFORMANCE-HISTORY.md` section 3 |
+| target: no more core instructions than `b39eaba4` apart from the DMA cycles | **+0.074 % and +0.073 %** on a mapper 1 and an NROM, **−0.076 %** on the DPCM ROM, once MF-4a's DMC phase is set aside; the DMA rows themselves are at most 0.011 % even on a ROM driving both units continuously. The residue is one row: three instructions of gate per read cycle against the two and a half `tick` gives back, **+4.3 M**, which is what Q-119 asks R0 to rule on — now with a number instead of an estimate |
+| the ROMs MF-4a made pass keep passing | **done**, all six groups, the two `manual` CRCs included |
+| save states written before MF-4a keep loading | **done**; the DMC's block is `b39eaba4`'s code character for character |
+| safe Rust, no `unsafe` | **done** |
+
+No new Q ticket was needed: nothing in the spec was ambiguous here. **Q-119** gains the measurement
+it asked for, as an amendment section rather than a rewrite.
