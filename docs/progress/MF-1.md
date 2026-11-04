@@ -22,7 +22,7 @@ Build environment used for every cargo command (the C: drive is nearly full):
 - [x] 3/10 — RAMBO-1 PRG mode: MR-64-7
 - [x] 4/10 — MMC5: MR-5-1, MR-5-3, MR-5-5
 - [x] 5/10 — MMC1: MR-1-1, MR-1-3, MR-1-4, MR-1-5
-- [ ] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
+- [x] 6/10 — VRC2/VRC4: MR-21-1, MR-21-2, MR-21-3
 - [ ] 7/10 — mapper 34: MR-34-1 and the work-RAM half of MR-34-2
 - [ ] 8/10 — MR-32-1, MR-156-1, MR-16-1
 - [ ] 9/10 — MR-13-1, MR-13-2, MR-15-1, MR-225-1, MR-4-9, MR-30-1, MR-30-2, MR-30-3, MR-30-5
@@ -59,6 +59,9 @@ because a step cannot write its own commit hash.
 | MR-1-3 | `mmc1.rs:36-43` + `:170-175` (shift/mask at load) | `mr_1_3_mmc1_sorom_selects_its_ram_chip_with_bit_3_alone`, `mr_1_3_an_sxrom_still_uses_both_s_bits` | **Genghis Khan, Nobunaga's Ambition** (SOROM saves) |
 | MR-1-4 | `mmc1.rs:67-72` (`fixed_prg`) | `mr_1_4_mmc1_submapper_5_has_fixed_prg` | **Dr. Mario** and the other SEROM/SHROM dumps, only if headered NES 2.0 submapper 5 |
 | MR-1-5 | `registry.rs:75-81` + `mod.rs:330-345` | `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed`, `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` | **Genghis Khan, Nobunaga's Ambition**: the battery file shrinks from 16 KiB to 8 |
+| MR-21-1 | `vrc2_vrc4.rs:138-147` (the variant's lines) | `mr_21_1_vrc2a_uses_the_exact_register_wiring`, `mr_21_3_every_vrc_variant_decodes_its_own_address_lines` | **Twinbee, Gradius** (mapper 22) |
+| MR-21-2 | `vrc2_vrc4.rs:229-241` (`is_vrc2`) | `mr_21_2_vrc2a_has_no_prg_swap_mode`, `req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two` | **Twinbee, Gradius**; any VRC2a title writing $9002-$9003 |
+| MR-21-3 | `vrc2_vrc4.rs:6-64` (the variant table) | `mr_21_3_every_vrc_variant_decodes_its_own_address_lines`, `mr_21_3_submapper_zero_keeps_the_ord_heuristic`, `mr_21_3_a_declared_vrc2b_has_no_irq_counter` | only submapper-tagged 21/23/25 dumps, and mapper 27 (now the exact VRC4\_27 wiring instead of the mapper-23 heuristic) |
 
 ### Step 1 notes
 
@@ -154,3 +157,28 @@ because a step cannot write its own commit hash.
   16 KiB file would load its volatile half into the retained one. Two titles are concerned;
   question 3 of Q-113 carries it.
 - MR-1-2 is **not** applied: MR-1b withdrew it, and its test stays removed.
+
+### Step 6 notes
+
+- **The variant table is in the code now** (`VrcVariant`, with `resolve` from the mapper number
+  and the NES 2.0 submapper, `index_lines` straight from the nesdev table, and `is_vrc2`).
+  That is MR-1's infrastructure item 3 for this board, and it closes MR-21-1, MR-21-2 and
+  MR-21-3 together.
+- **`register_index` lost its `match` and gained nothing.** The two line pairs are load-time
+  fields; a known variant has them equal, so the OR is a no-op and the expression is the same
+  four shifts the heuristic used to cost, with no branch on the mapper number.
+- **The heuristic survives exactly where the variant is unknown**: submapper 0 of mappers 21,
+  23 and 25. Mapper 22 is always VRC2a and mapper 27 always the pirate board, so neither ever
+  reaches it; mapper 27 used to take the mapper-23 heuristic and now takes VRC4\_27's own
+  A0/A1, which happen to be the same pair — so no mapper-27 dump moves.
+- **An unknown variant keeps the VRC4 features** (IRQ counter and PRG swap mode), as our code
+  did before and as Mesen does for the IRQ. Mesen is inconsistent here: its submapper-0
+  mapper-23 default is VRC2b, which takes the VRC2 arm for $9000-$9003 yet still gets the IRQ.
+  Keeping VRC4 is the safe reading — most mapper-23 dumps are VRC4e or VRC4f — and a real
+  VRC2b or VRC2c declares itself with submapper 3, which the new table honours.
+- **VRC4f** (mapper 23 submapper 1) is a row Mesen does not have at all: it folds submapper 1
+  into its VRC2b default and so denies a VRC4f its IRQ. The nesdev table gives it VRC2b's
+  address lines with VRC4 capabilities, which is what `resolve` returns.
+- `chr_high_mask` still keys on mapper 27 and the VRC2 mirroring stays a one-bit field: both
+  are **AMD-021 R2-004** accepted divergences, not findings.
+- No state added, so save states are unaffected: the new fields are derived from the ROM.

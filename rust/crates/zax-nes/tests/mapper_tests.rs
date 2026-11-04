@@ -564,6 +564,8 @@ fn vrc_register(mapper: usize, index: u16) -> u16 {
 
 #[test]
 fn req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two() {
+    // Mapper 22 is left out of the swap half: it is a VRC2, which has no swap mode at all
+    // (MR-21-2, `mr_21_2_vrc2a_has_no_prg_swap_mode`).
     for mapper in [21usize, 22, 23, 25, 27] {
         let mut core = MapperRom::new(mapper).prg(16).chr(32).load();
         core.write_memory(0x8000, 0x03);
@@ -571,7 +573,12 @@ fn req_core_100_vrc_switches_two_prg_banks_and_fixes_the_last_two() {
         assert_eq!([3, 5, 14, 15], core.prg_windows(), "mapper {mapper}");
         // $9002 bit 1 moves the first switchable bank to $C000.
         core.write_memory(0x9000 | vrc_register(mapper, 2), 0x02);
-        assert_eq!([14, 5, 3, 15], core.prg_windows(), "mapper {mapper}");
+        let expected = if mapper == 22 {
+            [3, 5, 14, 15]
+        } else {
+            [14, 5, 3, 15]
+        };
+        assert_eq!(expected, core.prg_windows(), "mapper {mapper}");
     }
 }
 

@@ -793,7 +793,6 @@ fn mr_156_1_daou306_mirroring_is_a_two_bit_field() {
 /// `A1 = (a | (a >> 2)) & 1` picks up address bit 2 and yields register 2, which lands on
 /// CHR slot 1.
 #[test]
-#[ignore = "MR-1: MR-21-1"]
 fn mr_21_1_vrc2a_uses_the_exact_register_wiring() {
     let mut core = MapperRom::new(22).prg(8).chr(16).load();
 
@@ -814,7 +813,6 @@ fn mr_21_1_vrc2a_uses_the_exact_register_wiring() {
 /// We split it on every variant (`vrc2_vrc4.rs:191-200`, `if index < 2`), so on mapper 22 a
 /// write to $9003 swaps the PRG layout instead of setting mirroring.
 #[test]
-#[ignore = "MR-1: MR-21-2"]
 fn mr_21_2_vrc2a_has_no_prg_swap_mode() {
     let mut core = MapperRom::new(22).prg(8).chr(16).load();
     assert_eq!([0, 1, 6, 7], core.prg_windows());
@@ -825,6 +823,87 @@ fn mr_21_2_vrc2a_has_no_prg_swap_mode() {
         [0, 1, 6, 7],
         core.prg_windows(),
         "$9003 is the mirroring register on a VRC2: the PRG layout must not move"
+    );
+}
+
+/// MR-21-3. The whole variant table, one row per chip. `register_index` must decode the
+/// address through that chip's two address lines, so a write to the CHR-0 register of group
+/// $B000 — the address whose index is 0 under the variant's own wiring — must land on CHR slot
+/// 0 and nowhere else.
+///
+/// nesdev ("VRC2 and VRC4"), the variant table: VRC2a (22) A1 A0; VRC2b (23) A0 A1; VRC2c (25)
+/// A1 A0; VRC4a (21) A1 A2; VRC4b (25) A1 A0; VRC4c (21) A6 A7; VRC4d (25) A3 A2; VRC4e (23)
+/// A2 A3; VRC4f (23) A0 A1. The submapper of each row comes from "NES 2.0 submappers".
+/// VRC4c's A6/A7 is the pair MR-1b singled out: no OR of A0-A3 can reach it.
+#[test]
+fn mr_21_3_every_vrc_variant_decodes_its_own_address_lines() {
+    // (mapper, submapper, the line that supplies index bit 1, the chip's name).
+    let variants = [
+        (22u16, None, 0u32, "VRC2a"),
+        (23, Some(3), 1, "VRC2b"),
+        (25, Some(3), 0, "VRC2c"),
+        (21, Some(1), 2, "VRC4a"),
+        (25, Some(1), 0, "VRC4b"),
+        (21, Some(2), 7, "VRC4c"),
+        (25, Some(2), 2, "VRC4d"),
+        (23, Some(2), 3, "VRC4e"),
+        (23, Some(1), 1, "VRC4f"),
+    ];
+
+    for (mapper, submapper, bit1_line, name) in variants {
+        let mut rom = MapperRom::new(usize::from(mapper)).prg(8).chr(16);
+        if let Some(submapper) = submapper {
+            rom = rom.submapper(submapper);
+        }
+        let mut core = rom.load();
+
+        // Index 2 selects CHR slot 1 of the group, so the address that carries only the
+        // bit-1 line must move slot 1 and leave slot 0 alone.
+        core.mapper_write(0xB000 | (1 << bit1_line), 0x07);
+
+        let mut expected = [0u8; 8];
+        // VRC2a ignores the low bit of its CHR registers.
+        expected[1] = if mapper == 22 { 3 } else { 7 };
+        assert_eq!(expected, core.chr_windows(), "{name}");
+    }
+}
+
+/// And mappers 23 and 25 without a submapper keep the OR'd heuristic, which is the only place
+/// MR-1b leaves it: a VRC2b or VRC4e dump that does not declare itself still works.
+#[test]
+fn mr_21_3_submapper_zero_keeps_the_ord_heuristic() {
+    for mapper in [21usize, 23, 25] {
+        let mut core = MapperRom::new(mapper).prg(8).chr(16).load();
+        assert_eq!([0, 1, 6, 7], core.prg_windows(), "mapper {mapper}");
+
+        // Both candidate wirings of the number reach register 2, so both move CHR slot 1.
+        let lines: [u32; 2] = match mapper {
+            21 => [2, 7],
+            23 => [1, 3],
+            _ => [0, 2],
+        };
+        for line in lines {
+            core.mapper_write(0xB000 | (1 << line), 0x07);
+            assert_eq!(7, core.chr_windows()[1], "mapper {mapper}, A{line}");
+            core.mapper_write(0xB000 | (1 << line), 0x00);
+        }
+    }
+}
+
+/// A VRC2b (mapper 23 submapper 3) has no IRQ counter, where a submapper-0 mapper-23 dump
+/// keeps one because the variant is unknown (MR-21-3).
+#[test]
+fn mr_21_3_a_declared_vrc2b_has_no_irq_counter() {
+    let mut core = MapperRom::new(23).prg(8).chr(16).submapper(3).load();
+
+    core.mapper_write(0xF000, 0x0F);
+    core.mapper_write(0xF001, 0x0F); // Latch $FF: one clock would be enough.
+    core.mapper_write(0xF002, 0x06); // Enable, cycle mode.
+    tick(&mut core, 2000);
+
+    assert!(
+        !core.cartridge().unwrap().irq_asserted(),
+        "the VRC2 has no IRQ counter"
     );
 }
 
