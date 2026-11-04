@@ -31,7 +31,7 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 3/12 — MMC1 (MR-1-1, MR-1-2, MR-1-3, MR-1-4) and the three non-findings
 - [x] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
 - [x] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
-- [ ] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
+- [x] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
 - [ ] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
 - [ ] 8/12 — Discrete boards: 11, 13, 71, 30 (MR-11-1, MR-13-1/2, MR-71-1/2, MR-30-1 .. 6)
 - [ ] 9/12 — Multicarts: 34, 41, and the Q-110 boards 15 / 28 / 101; 87, 156, 225, 228
@@ -155,3 +155,21 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   exactly why MR-1 called our rotation equivalent.
   Blast radius of the whole board: the five NesCartDB titles (Klax, Skull & Crossbones,
   Shinobi, Rolling Thunder, the Hard Drivin' prototype) plus Alien Syndrome.
+- **Step 6** — MMC5. **MR-5-1 confirmed** in one sentence ("$5128-$512B are completely
+  ignored" with 8x8 sprites; the last-written rule is the $2007 rule). **MR-5-5 confirmed**
+  (modes 0/1 "returns open bus"). **MR-5-2 confirmed but re-scoped**: the source says the
+  write is "only allowed when the PPU is rendering" and otherwise "may be ignored or cause a
+  corruption", so Mesen's "write 0" is one of two allowed readings and *ignoring* the write is
+  the cheaper fix; the test is kept, re-aimed and renamed, since its assertion holds either
+  way.
+  **Two `unknown`s become `our bug`**: MR-5-3 (the counter is "reset to zero" on the first
+  detected line and only "incremented, then compared" afterwards, so a target of 1 fires on
+  the **second** line and every split of ours is a line high — test added) and MR-5-4 (the
+  whole bus-sniffing mechanism is documented, down to "3 CPU cycles pass without a PPU read"
+  and the $FFFA/$FFFB hook, so our PPU-told flag is a sourced divergence, not an open
+  question). MR-5-4 is the one `measurable` cost of the lot, and its sharp edge is the vector
+  hook: $FFFA-$FFFB is read by every game, so the gate must stay in the board dispatch.
+  **Q-111 verified at first hand**: both nesdev sentences ("Frequency values less than 8 do
+  not silence the MMC5 pulse channels", "the polarity of all MMC5 channels is reversed
+  compared to the APU") read on the page itself rather than through Mesen's quotes of them,
+  and AMD-054's marked (D) on the 240 Hz length counter is accurate too. No new ticket.

@@ -1858,3 +1858,147 @@ code there, which is why it is `visible` and not `subtle`.
 **Test:** added — `mr_64_7_rambo1_prg_mode_swaps_r6_and_r15`.
 
 **Cost: none.** Two indices exchange in `update_banks`, which runs on a $8000 or $8001 write.
+
+## Mapper 5 — MMC5
+
+Sources: *MMC5* (<https://www.nesdev.org/wiki/MMC5>) and *MMC5 audio*
+(<https://www.nesdev.org/wiki/MMC5_audio>). REQ-CORE-100 still makes the ExRAM extended
+attributes and the vertical split **P2**, so their absence remains a recorded gap and not a
+finding; nothing below changes that.
+
+### MR-5-1 — 8x8 sprites and the CHR register sets
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed in one sentence.**
+
+Source: *MMC5* — with 8x8 sprites, "$5128-$512B are completely ignored"; with 8x16 sprites
+the chip "keeps track of whether the PPU is fetching background tiles or sprite tiles"; and
+only when not rendering does "The last set of registers written to (either $5120-$5127 or
+$5128-$512B) ... be used for I/O via PPUDATA ($2007)".
+
+Three separate rules, exactly Mesen's three clauses. We use the last-written set as *the* 8x8
+rule (`mmc5.rs:163-167`), so an 8x8-sprite game that last wrote $5128-$512B renders its whole
+screen from set B. The wiki also narrows the last-written rule to $2007 access, which our
+`chr_peek_view` / `read_chr` path does not distinguish — worth noting for whoever fixes this,
+though it changes nothing a game observes while rendering.
+
+**Test:** unchanged — `mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a`.
+
+**Cost: none.** The predicate is computed in `read_chr`'s address calculation, which the MMC5
+already pays per fetch through the bus path (`chr_view` is `None` for this board). Restoring
+the third clause replaces one bool read with one bool read and an `in_frame` test already in
+the struct; it adds no state and no new call site, and the MMC5 is already excluded from the
+fast span.
+
+### MR-5-2 — an ExRAM write outside rendering, in modes 0 and 1
+
+**MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed that the write must not
+take effect, but "stores zero" is Mesen's choice among two the source allows.**
+
+Source: *MMC5*, the ExRAM table for modes %00 and %01 — "In these modes writes are only
+allowed when the PPU is rendering. If writes are attempted during V-blank, they may be ignored
+or cause a corruption at that memory address."
+
+So storing the written value, which is what we do in every mode but 3 (`mmc5.rs:421-427`), is
+the one behaviour the hardware does *not* have. Between the two the source allows, **ignoring
+the write** is the cheaper and less surprising fix; Mesen's "write 0" is the "corruption"
+reading. Both are conforming and both are indistinguishable to a game that reads back what it
+wrote, since the byte it reads is 0 either way on a freshly powered ExRAM.
+
+**Test:** kept, re-aimed and renamed —
+`mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value`. Its assertion (the
+nametable path reads 0) holds under either fix.
+
+**Cost: negligible.** One test of `in_frame` and `ex_ram_mode` on a CPU write to
+$5C00-$5FFF, a 1 KiB window that only MMC5 games touch; `intercept_cpu_write` already
+branches on the range and the mode.
+
+### MR-5-3 — the scanline counter's origin
+
+**MR-1 verdict: unknown (no test, "a test would assert one of two conventions"). New verdict:
+our bug, severity visible — the source states the convention.**
+
+Source: *MMC5*, scanline detection — "if the 'in-frame' flag (register $5204) was clear, it
+becomes set, and the internal 8-bit scanline counter is **reset to zero**; but if it was
+already set, the scanline counter is incremented, then compared against the value written to
+$5203." $5203's own description adds that "Value $00 is a special case that will not produce
+IRQ pending conditions".
+
+The counter therefore starts at 0 on the first detected line, with **no compare on that
+line**, and a target of 1 fires on the second. We set `scanline_counter = scanline + 1` from
+the PPU's own line number and compare immediately (`mmc5.rs:506-509`), so a target of 1 fires
+on the first visible line: every MMC5 split is one scanline high. This is Mesen's convention
+and the wiki's, so MR-1's "one of two conventions" is settled.
+
+**Test:** added — `mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line`.
+
+**Cost: none.** The counter becomes an increment guarded by the `in_frame` flag we already
+keep, in `on_ppu_scanline` — one call per scanline, 240 per frame, on a board with six
+cartridges' worth of games. Nothing moves to a per-cycle or per-fetch path.
+
+### MR-5-4 — how the in-frame flag is detected
+
+**MR-1 verdict: unknown ("a deliberate simplification"). New verdict: our bug, severity
+subtle — the mechanism is documented, not Mesen's invention.**
+
+Source: *MMC5* — the flag is set from the PPU bus, by detecting "three consecutive PPU reads
+from the same nametable address", after which "the next PPU read ... is the point at which the
+scanline is detected"; it clears when "the PPU is no longer rendering", detected because "3 CPU
+cycles pass without a PPU read", and also on the V-blank NMI or on a read of $FFFA/$FFFB.
+
+Every part of Mesen's `DetectScanlineStart` is therefore in the public documentation, down to
+the idle-cycle counter and the vector-read hook. Our `on_ppu_scanline(scanline, rendering)`
+(`mmc5.rs:498-510`) is told by the PPU instead, which agrees for a game that renders normally
+and diverges exactly where the chip's bus-sniffing design was meant to earn its keep: rendering
+switched on part-way down the frame, or a hand-driven $2006 sequence. So it is a real
+divergence rather than an open question — but it is also the fix with the largest blast radius
+in this lot, and MR-5-3 is the part of it worth doing first.
+
+**Test:** none. Reproducing it needs the PPU to drive the cartridge's read path over a whole
+line, which belongs in a PPU-level test rather than the mapper fixture.
+
+**Cost: measurable, confined to MMC5 games.** The detection has to move into the board's
+`ppu_read` (counting repeated nametable addresses) plus a per-CPU-cycle idle counter and a hook
+on the NMI vector fetch. The MMC5 already returns `None` from `chr_view` and already steps
+every CPU cycle for its audio (`PERFORMANCE-HISTORY.md` §5.1), so no other board pays anything
+and the MMC5's own per-fetch path grows by a compare and a counter. The *new* cost is the
+vector-read hook: `$FFFA-$FFFB` is read by every game on every NMI, so that one must be gated
+on the board at load — a `Mapper` method consulted per read would be a **risk** class change
+to a path every game runs. Our `cpu_read_override` is already per-board dispatch through the
+`Board` enum, so the gate exists; the point is not to add a new one in the bus.
+
+### MR-5-5 — ExRAM reads in modes 0 and 1
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
+
+Source: *MMC5*, the ExRAM table for modes %00 and %01 — a CPU read "returns open bus".
+
+We answer a driven 0 (`mmc5.rs:406-410`, `Some(Some(0))` where `Some(None)` is our open-bus
+answer). Same family as MR-4-8 and MR-30-2.
+
+**Test:** none — see MR-4-8; the three open-bus findings want one test each from the lot that
+adds the open-bus answers, and the fixture has no view of the bus's last value.
+
+**Cost: none.** One returned value changes in `cpu_peek_override`.
+
+### Q-111 — the two audio points, verified at first hand
+
+MR-1 filed `Q-111` on AMD-054's period-below-8 cutoff and its positive polarity, quoting
+Mesen's *quotations* of nesdev. Both sentences are now verified on the page itself:
+
+- *MMC5 audio* — "Frequency values less than 8 do not silence the MMC5 pulse channels; they
+  can output ultrasonic frequencies."
+- *MMC5 audio* — "The sound output of the square channels are equivalent in volume to the
+  corresponding APU channels, but the polarity of all MMC5 channels is reversed compared to
+  the APU."
+
+The third point AMD-054 *does* mark `(D)` is also confirmed: "MMC5 does not have an equivalent
+frame sequencer (APU $4017); envelope and length counter are fixed to a 240Hz update rate",
+and the length counter "operates twice as fast as the APU length counter". So the amendment's
+own marking is accurate where it marks, which is what made the two unmarked points worth a
+ticket.
+
+**No new ticket.** Q-111 stands as filed, now with the primary sources rather than Mesen's
+quotes of them; the spec prevails and no code changes. Were the answer to drop the cutoff, the
+cost would be **negligible and already mapped**: a per-channel flag in `PulseChannel::muted`,
+which `PERFORMANCE-HISTORY.md` §5.1 (RU-3a-fix) says must not become a second comparison in
+the level cache — the flag belongs in the channel, not in the cache key.

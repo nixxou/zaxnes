@@ -524,23 +524,21 @@ fn mr_5_1_mmc5_8x8_sprites_always_use_chr_set_a() {
     );
 }
 
-/// MR-5-2. In ExRAM modes 0 and 1 the CPU can only store a byte while the PPU is
-/// rendering; a write outside rendering stores **zero**.
+/// MR-5-2. In ExRAM modes 0 and 1 the CPU can only store a byte while the PPU is rendering;
+/// a write outside rendering must not take effect.
 ///
-/// Mesen overrides `WriteRam` for exactly this (`MMC5.h:420-426`):
+/// nesdev ("MMC5"), the ExRAM table for modes %00 and %01: "In these modes writes are only
+/// allowed when the PPU is rendering. If writes are attempted during V-blank, they may be
+/// ignored or cause a corruption at that memory address." Mesen takes the second reading and
+/// writes 0 (`MMC5.h:420-426`); ignoring the write is the cheaper of the two and equally
+/// conforming. What the source rules out is ours: storing the value, which we do in every
+/// mode but 3 (`mmc5.rs:421-427`) with no rendering test.
 ///
-///     if(addr >= 0x5C00 && addr <= 0x5FFF && _extendedRamMode <= 1 && !_ppuInFrame) {
-///         //Mode 0/1 - ... can only be written while the PPU is rendering
-///         //(otherwise, 0 is written)
-///         value = 0;
-///     }
-///
-/// We store the value in every mode but 3 (`mmc5.rs:412-418`) with no rendering test. The
-/// byte is observable through the nametable path, since modes 0 and 1 are the ones that show
-/// ExRAM to the PPU.
+/// The byte is observable through the nametable path, since modes 0 and 1 are the ones that
+/// show ExRAM to the PPU, and the assertion below holds under either fix.
 #[test]
-#[ignore = "MR-1: MR-5-2"]
-fn mr_5_2_mmc5_exram_write_outside_rendering_stores_zero() {
+#[ignore = "MR-1b: MR-5-2"]
+fn mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value() {
     let mut core = MapperRom::new(5).prg(8).chr(16).load();
 
     core.mapper_write(0x5104, 0x00); // ExRAM mode 0.
@@ -550,7 +548,37 @@ fn mr_5_2_mmc5_exram_write_outside_rendering_stores_zero() {
     assert_eq!(
         0,
         core.cartridge().unwrap().read_nametable(0x2000),
-        "a mode-0 ExRAM write outside rendering stores zero, not the value"
+        "a mode-0 ExRAM write outside rendering must not store the value"
+    );
+}
+
+/// MR-5-3. The MMC5's scanline counter starts at zero on the first line it detects, with no
+/// compare on that line, so a target of 1 fires on the **second** visible line.
+///
+/// nesdev ("MMC5"), scanline detection: "if the 'in-frame' flag (register $5204) was clear,
+/// it becomes set, and the internal 8-bit scanline counter is reset to zero; but if it was
+/// already set, the scanline counter is incremented, then compared against the value written
+/// to $5203." We set `scanline_counter = scanline + 1` from the PPU's own line number and
+/// compare at once (`mmc5.rs:506-509`), so every split is one scanline high.
+#[test]
+#[ignore = "MR-1b: MR-5-3"]
+fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+
+    core.mapper_write(0x5203, 0x01); // Target scanline 1.
+    core.mapper_write(0x5204, 0x80); // Scanline IRQ enabled.
+
+    let cart = core.cartridge_mut().unwrap();
+    cart.on_ppu_scanline(0, true);
+    assert!(
+        !cart.irq_asserted(),
+        "the first detected line only sets in-frame and zeroes the counter"
+    );
+
+    cart.on_ppu_scanline(1, true);
+    assert!(
+        cart.irq_asserted(),
+        "the second line increments the counter to 1 and matches the target"
     );
 }
 
