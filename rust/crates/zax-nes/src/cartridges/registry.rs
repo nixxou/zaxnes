@@ -19,7 +19,7 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 25, 27, 28, 30, 32, 34, 41, 64, 66,
-    69, 71, 87, 101, 156, 225, 228,
+    69, 71, 87, 101, 118, 156, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -70,6 +70,8 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // MR-4-6, nesdev ("MMC6"): the chip "contains 1 KB of internal PRG RAM", at "CPU
         // $7000-$7FFF: 1 KB PRG RAM, mirrored". The header of a StarTropics dump describes
         // the 8 KiB every other mapper-4 board has.
+        // Mapper 118 shares the MMC3's board but never its submapper 1: a TxSROM is not an
+        // MMC6, so this arm is on mapper 4 alone.
         4 if header.is_nes20 && header.submapper == 1 => BoardMemorySizes {
             prg_ram: Some(Mmc3::MMC6_PRG_RAM_SIZE),
             ..BoardMemorySizes::default()
@@ -157,7 +159,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         1 => Board::Mmc1(Mmc1::new(memory)),
         2 => Board::UxRom(UxRom::new(memory)),
         3 => Board::CnRom(CnRom::new(memory)),
-        4 => Board::Mmc3(Mmc3::new(memory)),
+        4 | 118 => Board::Mmc3(Mmc3::new(memory, mapper)),
         5 => Board::Mmc5(Mmc5::new(memory)),
         7 => Board::AxRom(AxRom::new(memory)),
         9 | 10 => Board::Mmc2(Mmc2::new(memory, mapper)),

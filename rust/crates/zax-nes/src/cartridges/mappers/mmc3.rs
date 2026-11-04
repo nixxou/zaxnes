@@ -8,20 +8,37 @@ use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
-/// iNES mapper 4, MMC3 and MMC6 (REQ-CORE-100, REQ-CORE-114).
+/// iNES mappers 4 (MMC3 and MMC6) and 118 (TxSROM) (REQ-CORE-100, REQ-CORE-114,
+/// REQ-CORE-102).
 ///
 /// Eight bank registers behind $8000/$8001, an A12-clocked scanline counter behind
 /// $C000-$E001 (nesdev, "MMC3"), PRG-RAM protection at $A001. MMC6 (NES 2.0 submapper 1)
-/// has 1 KiB of RAM in two halves with their own enable bits.
+/// has 1 KiB of RAM in two halves with their own enable bits. **TxSROM** (TKSROM and TLSROM,
+/// mapper 118) is the same chip with CHR A17 wired to CIRAM A10, so bit 7 of the CHR bank
+/// registers picks the nametable; see [`Mmc3::refresh_nametable_pages`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mmc3 {
     banks: BankWindows,
     a12: A12Watcher,
     bank: [u8; 8],
+    /// 4 or 118, for [`Mapper::mapper_number`].
+    mapper_number: i32,
     is_mmc6: bool,
-    /// The nametable arrangement is wired and $A000 is ignored: a four-screen header, or
-    /// NES 2.0 submapper 2, "MMC3C with hard-wired mirroring" (MR-4-9).
-    four_screen: bool,
+    /// TxSROM: the board drives CIRAM A10 itself, so bit 7 of the CHR registers is read for
+    /// the nametables (mapper 118).
+    is_txsrom: bool,
+    /// What [`Mapper::nametable_page`] answers for the four logical tables.
+    ///
+    /// A plain MMC3 holds `FOLLOW_MIRRORING` here from one end of a run to the other, which is
+    /// exactly what the trait's default answers; a TxSROM holds the pages bit 7 of its CHR
+    /// registers names. A field and not a `match`, for the reason `UnRom512::nametable_answer`
+    /// gives: `Board::nametable_page` has to stay one load per arm. Derived state —
+    /// `load_registers` recomputes it and no savestate byte moved (REQ-CORE-091).
+    nametable_pages: [i32; 4],
+    /// $A000 is ignored: a four-screen header, NES 2.0 submapper 2 ("MMC3C with hard-wired
+    /// mirroring", MR-4-9), or a TxSROM, whose mirroring register "is bypassed by the
+    /// configuration described above, so writing here has no effect" (nesdev, "INES Mapper 118").
+    ignore_a000: bool,
     /// NES 2.0 submapper 4, the NEC / Sharp MMC3A, whose IRQ counter is **revision A**
     /// (MR-4-9, AMD-061 §8 closing Q-114). Chosen at load; every other mapper-4 image, iNES
     /// 1.0 included, keeps revision B and with it REQ-CORE-114's `mmc3_test_2` test 6.
@@ -36,23 +53,28 @@ pub struct Mmc3 {
 }
 
 impl Mmc3 {
-    pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+    pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let header = memory.rom().header();
-        let is_mmc6 = header.is_nes20 && header.submapper == 1;
+        let is_txsrom = mapper_number == 118;
+        let is_mmc6 = !is_txsrom && header.is_nes20 && header.submapper == 1;
         Self {
             banks: windows_for(memory),
             a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
             bank: [0; 8],
+            mapper_number,
             is_mmc6,
+            is_txsrom,
+            nametable_pages: [super::super::Cartridge::FOLLOW_MIRRORING; 4],
             // MR-4-9, nesdev ("NES 2.0 submappers"), mapper 4: "Submapper 2: MMC3C with
             // hard-wired mirroring" — the same condition as a four-screen header, so the
-            // $A000 writes are ignored on both.
-            four_screen: header.mirroring == NametableMirroring::FourScreen
+            // $A000 writes are ignored on both. A TxSROM ignores it too, for its own reason.
+            ignore_a000: is_txsrom
+                || header.mirroring == NametableMirroring::FourScreen
                 || (header.is_nes20 && header.submapper == 2),
             // AMD-061 §8: "le sous-mappeur NES 2.0 d'une image l'emporte sur la révision par
             // défaut". Submapper 4 is "NEC MMC3 (Loading latch with 0 disables IRQ)" (nesdev,
             // "NES 2.0 submappers"), which is the revision A counter.
-            irq_revision_a: header.is_nes20 && header.submapper == 4,
+            irq_revision_a: !is_txsrom && header.is_nes20 && header.submapper == 4,
             select: 0,
             protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,
@@ -103,7 +125,35 @@ impl Mmc3 {
         self.protect & 0xA0 != 0
     }
 
+    /// The TxSROM's nametables (mapper 118).
+    ///
+    /// nesdev ("INES Mapper 118"): the board wires CHR A17 — bit 7 of the bank number — to CIRAM
+    /// A10, so "the CHR bankswitching directly affects the mirroring mapping the nametable RAM".
+    /// It is the registers mapped to **the first pattern table** that drive it, which bit 7 of
+    /// $8000 chooses between: with it clear the two 2 KiB registers R0 and R1 are at PPU
+    /// $0000-$0FFF and take two nametables each, and with it set the four 1 KiB registers R2-R5
+    /// are there and take one each. Mesen 2 reads the register the same way
+    /// (`TxSRom.h:16-39`), and a TxSROM write to $A000 does nothing at all.
+    ///
+    /// A plain MMC3 never comes here: its four pages stay `FOLLOW_MIRRORING`, so
+    /// `Mapper::nametable_page` answers what the trait's default answers and `$A000` keeps
+    /// driving `memory.mirroring()` as before.
+    fn refresh_nametable_pages(&mut self) {
+        if !self.is_txsrom {
+            return;
+        }
+
+        let page = |register: usize| i32::from(self.bank[register] >> 7);
+        self.nametable_pages = if self.select & 0x80 == 0 {
+            [page(0), page(0), page(1), page(1)]
+        } else {
+            [page(2), page(3), page(4), page(5)]
+        };
+    }
+
     fn update_banks(&mut self) {
+        self.refresh_nametable_pages();
+
         if self.select & 0x40 != 0 {
             self.banks.map_prg_8k(0, -2);
             self.banks.map_prg_8k(2, i32::from(self.bank[6]));
@@ -178,7 +228,8 @@ impl Mapper for Mmc3 {
         self.a12.load_state(reader)?;
         // The windows again from the registers, over the PRG-ROM loaded: a state of the same
         // game made with a PRG-ROM of another size (a widescreen hack that added banks, its
-        // fixed ones moved to the end) maps the fixed banks of this one.
+        // fixed ones moved to the end) maps the fixed banks of this one. It brings the TxSROM's
+        // nametable pages back with them, which are derived from the same registers.
         self.update_banks();
         Ok(())
     }
@@ -208,7 +259,15 @@ impl Mapper for Mmc3 {
     }
 
     fn mapper_number(&self) -> i32 {
-        4
+        self.mapper_number
+    }
+
+    /// `FOLLOW_MIRRORING` on a plain MMC3, and the TxSROM's own pages on mapper 118
+    /// ([`Mmc3::refresh_nametable_pages`]). `Cartridge` caches the four answers, and a
+    /// mapper-118 image is the second one — after the MMC5 — whose pages a register write can
+    /// move, so `Cartridge::nametable_pages_vary` names it too.
+    fn nametable_page(&self, table: i32) -> i32 {
+        self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
     }
 
     fn irq_asserted(&self) -> bool {
@@ -313,7 +372,7 @@ impl Mapper for Mmc3 {
                 self.update_banks();
             }
             0xA000 => {
-                if !self.four_screen {
+                if !self.ignore_a000 {
                     memory.set_mirroring(if value & 0x01 != 0 {
                         NametableMirroring::Horizontal
                     } else {

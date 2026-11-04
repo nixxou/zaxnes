@@ -16,6 +16,12 @@ use zax_nes::cartridges::{Cartridge, ChrFetch};
 use zax_nes::NametableMirroring as Nm;
 use zax_nes::NesCore;
 
+/// The four pages `Cartridge::nametable_page` answers, which is what the PPU reads.
+fn nametable_pages(core: &zax_nes::NesCore) -> [i32; 4] {
+    let cartridge = core.cartridge().unwrap();
+    std::array::from_fn(|table| cartridge.nametable_page(i32::try_from(table).unwrap()))
+}
+
 fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     core.cartridge()
         .unwrap()
@@ -41,13 +47,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     // accidental removal.
     //
     // * 156, Daou 306, which runs Metal Force (Korea), a widescreen target;
-    // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3).
+    // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3);
+    // * 118, TxSROM, which shares the MMC3's board (MF-3 step 5).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![69, 156], extra);
+    assert_eq!(vec![69, 118, 156], extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -632,6 +639,131 @@ fn req_core_090_the_fme7_state_survives_a_save_and_restore() {
     assert_eq!(0x07, core.read_memory(0x6000));
     assert_eq!(Nm::SingleScreenA, core.mirroring());
     // Re-saving gives the same bytes, so the counter and the two enables came back too.
+    assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ---------------------------------------------------------------- TxSROM (118)
+
+/// nesdev ("INES Mapper 118"): the board wires CHR A17 to CIRAM A10, so "the CHR bankswitching
+/// directly affects the mirroring mapping the nametable RAM". With bit 7 of $8000 **clear** the
+/// two 2 KiB registers R0 and R1 are at PPU $0000-$0FFF, and bit 7 of each takes two nametables.
+#[test]
+fn req_core_100_txsrom_takes_two_nametables_from_each_2_kib_register() {
+    let mut core = MapperRom::new(118).prg(16).chr(64).load();
+    assert_eq!(118, core.cartridge().unwrap().mapper_number());
+
+    for (r0, r1, expected) in [
+        (0x00u8, 0x00u8, [0, 0, 0, 0]),
+        (0x80, 0x00, [1, 1, 0, 0]),
+        (0x00, 0x80, [0, 0, 1, 1]),
+        (0x80, 0x80, [1, 1, 1, 1]),
+    ] {
+        core.mmc3_bank(0, r0);
+        core.mmc3_bank(1, r1);
+        assert_eq!(
+            expected,
+            nametable_pages(&core),
+            "R0 {r0:#04X} R1 {r1:#04X}"
+        );
+    }
+}
+
+/// Loads bank register `register` while keeping bit 7 of `$8000` set, which is the MMC3's CHR
+/// mode: the register index and the mode share that byte, so [`MapperMachine::mmc3_bank`] —
+/// which writes the index alone — would put the board back in CHR mode 0 on every call.
+fn txsrom_bank_in_chr_mode_1(core: &mut NesCore, register: u8, value: u8) {
+    core.mapper_write(0x8000, 0x80 | register);
+    core.mapper_write(0x8001, value);
+}
+
+/// And with bit 7 of $8000 **set** the four 1 KiB registers R2-R5 are at $0000-$0FFF and take one
+/// nametable each — "mapping the 1KB CHR banks to the first pattern table by setting bit 7 of
+/// $8000".
+#[test]
+fn req_core_100_txsrom_takes_one_nametable_from_each_1_kib_register() {
+    let mut core = MapperRom::new(118).prg(16).chr(64).load();
+    for register in 2..6u8 {
+        txsrom_bank_in_chr_mode_1(&mut core, register, 0x00);
+    }
+
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+
+    for (register, table) in [(2u8, 0usize), (3, 1), (4, 2), (5, 3)] {
+        txsrom_bank_in_chr_mode_1(&mut core, register, 0x80);
+        let mut expected = [0; 4];
+        expected[..=table].fill(1);
+
+        assert_eq!(expected, nametable_pages(&core), "register {register}");
+    }
+}
+
+/// The two sets are read according to bit 7 of $8000 and nothing else: flipping the CHR mode with
+/// both sets already loaded swaps which four bits are in charge.
+#[test]
+fn req_core_100_txsrom_switches_between_the_two_register_sets() {
+    let mut core = MapperRom::new(118).prg(16).chr(64).load();
+    core.mmc3_bank(0, 0x80); // R0: nametables 0 and 1 in CHR mode 0.
+    core.mmc3_bank(1, 0x00);
+    core.mmc3_bank(2, 0x00);
+    core.mmc3_bank(3, 0x00);
+    core.mmc3_bank(4, 0x80); // R4: nametable 2 in CHR mode 1.
+    core.mmc3_bank(5, 0x80); // R5: nametable 3.
+
+    assert_eq!([1, 1, 0, 0], nametable_pages(&core));
+    core.mapper_write(0x8000, 0x80);
+    assert_eq!([0, 0, 1, 1], nametable_pages(&core));
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!([1, 1, 0, 0], nametable_pages(&core));
+}
+
+/// "This bit is bypassed by the configuration described above, so writing here has no effect":
+/// `$A000` does nothing on a `TxSROM`, where it still drives the arrangement on a plain MMC3.
+#[test]
+fn req_core_100_txsrom_ignores_the_mirroring_register() {
+    let mut txsrom = MapperRom::new(118).prg(16).chr(64).load();
+    txsrom.mmc3_bank(0, 0x80);
+    txsrom.mmc3_bank(1, 0x00);
+    let before = txsrom.mirroring();
+    for value in [0x00u8, 0x01] {
+        txsrom.mapper_write(0xA000, value);
+        assert_eq!(before, txsrom.mirroring(), "$A000 = {value:#04X}");
+        assert_eq!([1, 1, 0, 0], nametable_pages(&txsrom));
+    }
+
+    // The plain MMC3 is untouched: $A000 still picks the arrangement, and the pages stay the
+    // console's.
+    let mut mmc3 = MapperRom::new(4).prg(16).chr(64).load();
+    mmc3.mapper_write(0xA000, 0x01);
+    assert_eq!(Nm::Horizontal, mmc3.mirroring());
+    mmc3.mapper_write(0xA000, 0x00);
+    assert_eq!(Nm::Vertical, mmc3.mirroring());
+    assert_eq!(
+        [Cartridge::FOLLOW_MIRRORING; 4],
+        nametable_pages(&mmc3),
+        "a plain MMC3 leaves its nametables to the console"
+    );
+}
+
+/// The pages are derived from the bank registers, so a savestate written before this lot still
+/// loads and a `TxSROM` state brings its nametables back with its banks (REQ-CORE-090,
+/// REQ-CORE-091).
+#[test]
+fn req_core_090_the_txsrom_nametables_come_back_with_its_banks() {
+    let mut core = MapperRom::new(118).prg(16).chr(64).load();
+    for (register, value) in [(2u8, 0x80u8), (3, 0x00), (4, 0x80), (5, 0x00)] {
+        txsrom_bank_in_chr_mode_1(&mut core, register, value);
+    }
+
+    assert_eq!([1, 0, 1, 0], nametable_pages(&core));
+
+    let state = core.save_state(true).unwrap();
+    core.mapper_write(0x8000, 0x00);
+    core.mmc3_bank(0, 0x00);
+    core.mmc3_bank(1, 0x00);
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!([1, 0, 1, 0], nametable_pages(&core));
     assert_eq!(state, core.save_state(true).unwrap());
 }
 

@@ -253,7 +253,7 @@ impl Cartridge {
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
-            nametable_pages_vary: mapper == 5,
+            nametable_pages_vary: matches!(mapper, 5 | 118),
             bus_conflicts,
         };
         cartridge.reset();
@@ -397,10 +397,11 @@ impl Cartridge {
     /// mapping a register can move.
     ///
     /// The gate matters: this runs after **every** CPU write to the cartridge, and asking the
-    /// `Board` enum for four pages costs about 112 instructions. Only the MMC5 can move them
-    /// at run time ($5105); the UNROM 512's come from its wiring and are settled at load, so
-    /// the pages it answers are computed once by `refresh_nametable_pages` in `reset` and in
-    /// `load_state` and then left alone.
+    /// `Board` enum for four pages costs about 112 instructions. Two boards can move them at
+    /// run time — the MMC5 through `$5105` and the `TxSROM` of mapper 118 through bit 7 of its CHR
+    /// registers; the UNROM 512's come from its wiring and are settled at load, so the pages it
+    /// answers are computed once by `refresh_nametable_pages` in `reset` and in `load_state` and
+    /// then left alone.
     fn refresh_rom_windows(&mut self) {
         self.rom_windows = self.board.rom_windows(&self.memory);
         if self.nametable_pages_vary {

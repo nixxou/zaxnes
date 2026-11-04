@@ -29,7 +29,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 2/9 — Q-117: the UNROM 512 bank latch is decoded by configuration
 - [x] 3/9 — mapper 69, Sunsoft FME-7 (banks, CPU-cycle IRQ, $6000 RAM/ROM switching)
 - [x] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
-- [ ] 5/9 — mapper 118, TxSROM
+- [x] 5/9 — mapper 118, TxSROM
 - [ ] 6/9 — mapper 180, UNROM with the switchable bank at $C000
 - [ ] 7/9 — mapper 78, submappers 1 and 3
 - [ ] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
@@ -75,6 +75,7 @@ Before the lot (`7cbd9c52`):
 | Q-117 (R0's answer): the UNROM 512 latch is at `$C000-$FFFF` on a self-flashable configuration, `$8000-$BFFF` being the flash write window, and the chip recognises its sequences on **chip** addresses | `discrete.rs:422-446` (the type doc and the `latch_base` field), `:496-503` (the load-time decision), `:514-526` (`chip_address`, the two unlock constants), `:528-585` (`step_flash`), `:688-698` (`write_register`) | `q_117_unrom512_programs_a_byte_of_its_own_flash` (was `mr_30_4_…`, rewritten with the page's sequences verbatim), `q_117_unrom512_flashes_the_bank_the_driver_selects`, `q_117_unrom512_unlocks_only_on_the_chips_own_command_addresses`, `q_117_unrom512_without_self_flashing_keeps_the_latch_over_8000_ffff`, `mr_30_4_unrom512_an_incomplete_flash_sequence_changes_nothing`, `mr_30_4_unrom512_with_bus_conflicts_cannot_flash`, `mr_30_5_unrom512_submapper_4_does_not_bank_through_the_led_register` (unchanged, and now implied by the new rule) | **none, and it is a win.** `UnRom512::write_register` 116 → **106** (one compare replaces a `bool` test plus a second compare) and `Cartridge::create` 3471 → **3462** (one `u16` replaces two `bool`s). Nothing else in the crate moved. The read path is untouched: `rom_windows` is still a plain window, so no board pays anything on a read | self-flashing UNROM 512 homebrew, and **every** mapper-30 image on a no-bus-conflict configuration: its bank latch has moved from `$8000-$FFFF` to `$C000-$FFFF`. No golden-core entry is on mapper 30 |
 | mapper 69, Sunsoft FME-7 / 5A / 5B — a **new board** (REQ-CORE-102) | `fme7.rs` (new, 240 lines), `board.rs:12-30` (the append rule) + `:70-72` + `:105` (the variant), `registry.rs:20-23` (`SUPPORTED_MAPPERS`) + `:181` (`create_board`), `mappers/mod.rs:26` + `:40` | `req_core_100_fme7_*` x4 and `req_core_090_the_fme7_state_survives_a_save_and_restore` in `mapper_tests.rs`, `req_core_100_the_fme7_*` x3 and `req_core_100_a_write_to_fme7_command_d_acknowledges_the_irq` in `mapper_irq_tests.rs`; `M69_P128K_C64K_S8K` and `_W8K` now **pass** with `detailed 0000` | `Board::ppu_peek` 240 → **251**, `ppu_read` 241 → **252**; `read_pattern_planes` and `read_nametable_as` **byte-identical**. The +11 is LLVM switching the function's shared bounds-check tail from tail-*merging* to tail-*duplication*: the arms' own code is unchanged and the executed path of the arms concerned is **one instruction and two taken branches shorter**. Every other hot dispatch (`on_cpu_cycle`, `irq_asserted`) has its existing arms **byte-identical** with the FME-7's appended. See "Step 3" for the wall-clock measurement and what it is worth | **none.** No commercial game moves: this is a board that did not load before. The golden-core set (mappers 0-4, 156) has no mapper-69 entry |
 | Sunsoft 5B audio (brief item 3, REQ-CORE-075 optional, **Q-118** for the level and the polarity) | `apu/sunsoft5b_audio.rs` (new, 320 lines), `apu/mixer.rs:145-215` (`SUNSOFT_5B_TABLE`, `sunsoft_5b_level`), `apu/mod.rs:10-15` + `:23` + `:38`, `fme7.rs:40-44` (the field) + `:190-192` (`expansion_audio_output`) + `:258` (the register writes) + `:269` (the clock) + `:143-160` (the state) | `sunsoft5b_audio_tests.rs`, 15 tests | **none.** The four named functions are **byte-identical**. The whole-crate diff is thirteen symbols, all inside `Fme7` / `Sunsoft5bAudio` or on the expansion-audio path that only an MMC5 or a mapper-69 cartridge reaches — `NesBus::push_expansion_audio` is still `#[inline(never)]` behind the load-time `expansion_audio` bool (RU-3a). `Board::on_cpu_cycle` is 7 instructions **smaller**: the FME-7's arm left the shared dispatch for a call | **none.** No commercial game on any other board moves; mapper-69 games gain their sound, which they did not have one commit ago. No golden-core entry is on mapper 69 |
+| mapper 118, TxSROM — **a variant of the MMC3 board chosen at load**, no new `Board` variant | `mmc3.rs:12-41` (the doc and three fields), `:56-78` (the load-time facts), `:136-156` (`refresh_nametable_pages`), `:158-159` (`update_banks`), `:260-270` (`mapper_number`, `nametable_page`), `:374` (`ignore_a000`), `registry.rs:20-23` + `:160`, `cartridges/mod.rs:194-196` + `:256` (`nametable_pages_vary`) | `req_core_100_txsrom_*` x4 and `req_core_090_the_txsrom_nametables_come_back_with_its_banks`; `M118_P128K_C64K` now **passes** with `detailed 0000` | **none, and the two fetch dispatches came out smaller than before the lot**: `Board::ppu_peek` 251 → **235**, `ppu_read` 252 → **236** (240/241 at `7bcd...`), prologue and niche unchanged, `read_pattern_planes` / `read_nametable_as` byte-identical, `Ppu2C02::step_dot` back to its pre-lot 1409. `Board::nametable_page` 28 → 33 for the new arm, which is a clamped load from a field — and `Cartridge` caches the four answers, re-reading them after a CPU write only for mappers 5 and 118 | **none.** Mapper 4 is byte-identical in behaviour: `is_txsrom` is false, the four pages stay `FOLLOW_MIRRORING`, `$A000` still drives the arrangement, and no savestate byte moved. The golden-core set has mapper 4 and it does not move |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -501,3 +502,89 @@ neither of which this build can write, so a corrupt block cannot index past the 
 * `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed. The
   Holy Mapperel mapper-69 ROMs do not exercise the sound — the suite has no audio test — so they
   are unchanged at `pass`.
+
+## Step 5 — mapper 118, the TxSROM
+
+### The board
+
+nesdev, *INES Mapper 118*: TKSROM and TLSROM, running *Armadillo*, *Goal! Two*, *NES Play Action
+Football* and *Pro Sport Hockey*. It is an MMC3 with **CHR A17 — bit 7 of the bank number — wired
+to CIRAM A10**, so "the CHR bankswitching directly affects the mirroring mapping the nametable
+RAM", and the registers that drive it are the ones mapped to **the first pattern table**, which
+bit 7 of `$8000` chooses between:
+
+* bit 7 clear: the two 2 KiB registers R0 and R1 sit at PPU `$0000-$0FFF`, and bit 7 of each takes
+  **two** nametables (R0 → 0 and 1, R1 → 2 and 3);
+* bit 7 set — "mapping the 1KB CHR banks to the first pattern table by setting bit 7 of `$8000`" —
+  the four 1 KiB registers R2-R5 sit there, one nametable each.
+
+And the mirroring register "is bypassed by the configuration described above, so writing here has
+no effect": `$A000` does nothing. Mesen 2 reads the register the same way (`TxSRom.h:16-39`, and
+its `UpdateMirroring` is empty with the comment "8001 writes are used to setup mirroring
+instead"), so the two sources agree.
+
+### Where it lives
+
+**Inside the MMC3 board, chosen at load**, which is what the brief asks for and what the board is:
+`Mmc3::new` now takes the mapper number, `registry::create_board` maps `4 | 118` to the same
+variant, and `SUPPORTED_MAPPERS` gains 118 (REQ-CORE-102). **No new `Board` variant**, so none of
+step 3's enum arithmetic applies here. Three load-time facts fall out of the number:
+
+* `is_txsrom`, which `refresh_nametable_pages` reads;
+* `ignore_a000`, which the four-screen flag and NES 2.0 submapper 2 already set (MR-4-9) and which
+  a TxSROM now sets too — one condition instead of a second test in `write_register`;
+* a TxSROM is neither an MMC6 (submapper 1) nor a revision-A MMC3 (submapper 4), since those
+  submappers belong to mapper 4; both are now `!is_txsrom && …`.
+
+The four answers live in a `[i32; 4]` field, `FOLLOW_MIRRORING` from one end of a plain MMC3's run
+to the other — exactly what the trait's default answers — and the pages bit 7 names on a TxSROM.
+A field and not a `match`, for the reason `UnRom512::nametable_answer` gives: `Board::nametable_page`
+has to stay one load per arm. It is recomputed in `update_banks`, which every register write
+already ends with, and in `load_registers` through it.
+
+`Cartridge::nametable_pages_vary` now names mapper 118 beside mapper 5: the TxSROM is the second
+board whose pages a register write can move, so the four answers are re-cached after every CPU
+write to those two cartridges and left alone for the other thirty-one mapper numbers.
+
+### Cost
+
+| function | step 4 | step 5 |
+| --- | ---: | ---: |
+| `Board::ppu_peek` | 251 | **235** |
+| `Board::ppu_read` | 252 | **236** |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 (byte-identical) |
+| `Ppu2C02::read_nametable_as` | 107 | 107 (byte-identical) |
+
+The two fetch dispatches came out **16 instructions smaller than at step 4 and 5 smaller than
+before the lot** (240/241), with the prologue and the niche unchanged — `movzbl 1355(%rcx)`,
+`movl $5` — so the tail-duplication step 3 measured has been undone by the same heuristic going
+the other way. `Ppu2C02::step_dot` is back to its pre-lot 1409. Nothing in this step touched any of
+those four functions; this is the register-allocation and block-placement lottery step 3
+documented, and it is the clearest possible evidence that the numbers in that step were not added
+work.
+
+Where real code moved: `Mmc3::update_banks` 144 → 167 (the page refresh),
+`Board::nametable_page` 28 → 33 (the new arm: a bounds-clamped load from the field),
+`Cartridge::create` 3574 → 3667 (the load-time decision). Several symbols shrank for the same
+lottery reason — `Cartridge::cpu_write` 181 → 120, `Cartridge::reset` 153 → 30,
+`Board::rom_windows` 239 → 213 — which is worth reporting but not worth claiming.
+
+Registers in `$4020-$5FFF`: **none**. The TxSROM decodes what the MMC3 decodes, `$6000-$FFFF`.
+
+### Save states
+
+`nametable_pages` is derived from the bank registers and nothing was added to
+`Mmc3::save_registers`, so **every mapper-4 savestate written before this lot loads byte for
+byte**, and a mapper-118 state brings its nametables back with its banks
+(`req_core_090_the_txsrom_nametables_come_back_with_its_banks`).
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed, with five new tests — the two
+  register sets, the switch between them, `$A000` doing nothing on a TxSROM while it still drives
+  the arrangement on a plain MMC3, and the savestate.
+* `zax-harness test-roms --filter M118`: **1 pass**, `T*SROM (MMC3): 128K PRG ROM, 8K PRG RAM OK,
+  64K CHR ROM OK, detailed 0000`.
+* `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed, with
+  the mapper-118 row flipped from `unsupported` to `pass`.
