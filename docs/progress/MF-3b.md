@@ -197,3 +197,114 @@ clean (the `inline_always` lint is denied workspace-wide, hence the narrow `allo
 measured reason — the first and only one in the crate);
 `cargo test --release -p zax-nes -p zax-harness`: **679 passed, 0 failed, 7 ignored**. No
 behaviour changed: an attribute cannot change what the function computes.
+
+## Step 2 — `Board::on_ppu_address_bus`: the no-op board's fast path restored
+
+### The cause, in the generated code
+
+R0's callgrind: `Board::on_ppu_address_bus` **+4.84 M**, "about one instruction more per call",
+with `background_fetch` −5.7 M and `run_dots` −3.4 M moving with it. The function is 106
+instructions at `7cbd9c52` and 155 at `42b541ef`, and its **prologue** is where the cost is.
+
+`7cbd9c52` — the board-does-nothing answer is a bitset the compiler folded into the dispatch:
+
+    movzbl  1355(%rcx), %eax     ; the niche tag
+    subb    $2, %al
+    movzbl  %al, %eax
+    movl    $5, %edx
+    cmovael %eax, %edx
+    movzbl  %dl, %eax
+    movl    $66584559, %edx      ; the boards with nothing to do
+    btl     %eax, %edx
+    jae     .LBB498_1            ; not in the set -> go and do the work
+    retq                         ; in the set -> leave
+
+`42b541ef` — a jump table:
+
+    movzbl  1355(%rcx), %eax
+    subb    $2, %al
+    movzbl  %al, %eax
+    movl    $5, %edx
+    cmovael %eax, %edx
+    movzbl  %dl, %eax
+    leaq    .LJTI502_0(%rip), %rdx
+    movslq  (%rdx,%rax,4), %rax
+    addq    %rdx, %rax
+    jmpq    *%rax                ; -> .LBB502_45: retq
+
+MF-3's MC-ACC gave the dispatch a third distinct arm body (the ÷8 prescaler), and LLVM stopped
+folding the question into a bitset. A board with nothing to do went from ten instructions and a
+*predictable* not-taken branch to eleven and an **indirect jump**, on every PPU fetch.
+
+**MF-3 step 8 measured the MMC3's own path and reported this as a win** — "the dispatch that
+reaches it got one instruction shorter (a jump table replaced a bitset-plus-compare chain)" —
+which is true for the MMC3, and exactly backwards for the twenty-six boards that only ever
+return. That is the lesson of this step: on a dispatch, the arm that matters is the one most
+games take, and for `on_ppu_address_bus` that arm is *the empty one*.
+
+### The fix
+
+Three of the twenty-nine `Board` variants override `Mapper::on_ppu_address_bus` — `Mmc3`
+(mappers 4 and 118), `McAcc` (mapper 4 submapper 3) and `Rambo1` (mapper 64). The question is
+therefore answerable at load time, which is what the sibling fields of `Cartridge` already do
+(`nametable_pages_vary`, `bus_conflicts`). `cartridges/mod.rs`:
+
+* a `watches_ppu_address_bus: bool` field (`:203-221`), with the story above on it, latched in
+  `Cartridge::create` as `matches!(mapper, 4 | 64 | 118)` (`:274-277`);
+* `Cartridge::on_ppu_address_bus` (`:566-578`) tests it and returns **before** dispatching.
+
+Derived at load, so no savestate byte moves.
+
+### What it gives back
+
+The latch is inlined into all twelve call sites, and the no-op board's whole cost per fetch is
+now one compare and one not-taken branch:
+
+    cmpb    $1, 1650(%r8)
+    jne     .LBB145_4          ; not a watcher -> the fetch carries on
+    ...
+    callq   Board::on_ppu_address_bus
+
+| per PPU fetch, board with nothing to do | `7cbd9c52` | MF-3 | this step |
+| --- | ---: | ---: | ---: |
+| instructions before returning | 10 + `callq`/`retq` | 11 + `callq`/`retq` + indirect jump | **2, no call** |
+
+So this is not parity but well under it: the twenty-six boards that do nothing no longer pay the
+call, the niche prologue or the jump table at all. R0's +4.84 M should come back as a **negative**
+number.
+
+**What it costs, stated plainly:** an MMC3, an MC-ACC or a RAMBO-1 now runs the latch test before
+the call it already made — about **+2 instructions per PPU fetch against `7cbd9c52`** for mappers
+4, 64 and 118, the jump-table prologue MF-3 introduced being the other half of it. Removing that
+too would mean matching the three variants directly in `Cartridge` and bypassing the `Board`
+dispatch, which duplicates in a second place the knowledge of which boards care; it was not worth
+it for two instructions. Neither of R0's callgrind games is on those mappers, and golden-core's
+mapper 4 is a correctness check.
+
+### The latch cannot go stale
+
+A board added later with an A12 counter, whose mapper number nobody adds to the `matches!`, would
+have its counter **silently never clocked** — a real bug, not a slow path. So the invariant is
+tested rather than trusted:
+`cartridges::tests::mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`
+(`cartridges/mod.rs:684-760`, an in-crate `#[cfg(test)]` module, which is where it has to live to
+reach `Cartridge`'s private fields and the `Board` dispatch).
+
+For every entry of `SUPPORTED_MAPPERS`, and for submapper 0 and submapper 3 of each, it builds the
+cartridge, drives twenty A12 rises straight at `Board::on_ppu_address_bus`, and requires
+`watches_ppu_address_bus` to be `true` wherever that moved the board (`Board` derives
+`PartialEq`, so "moved" is the whole board state, not a guess about which field). It checks the
+invariant itself, so it covers a board that does not exist yet.
+
+It also asserts that the boards which moved are exactly `[4, 4, 64, 64, 118, 118]` — both
+submappers of each of the three — which is what stops the test passing vacuously if the sweep ever
+stops reaching the hook. That assertion caught its own first draft: the expected count was 4, and
+submapper 3 of 64 and of 118 is not a board of its own, so six cartridges move, not four.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, `cargo test --release -p zax-nes -p zax-harness`: **680 passed, 0 failed, 7 ignored** — the
+679 of step 1 plus the new latch test. The MMC3, MC-ACC, TxSROM and RAMBO-1 IRQ tests
+(`mapper_irq_tests.rs`, `mr_4_3_*`) pass unchanged, which is the behavioural check that the latch
+lets the boards that need the hook still receive it.

@@ -200,6 +200,26 @@ pub struct Cartridge {
     /// not part of the savestate, and `false` for 27 of the 32 mapper numbers and for every
     /// submapper-0 dump of three of the other five.
     bus_conflicts: bool,
+    /// Whether the board has anything to do when the PPU puts an address on its bus, which only
+    /// an A12 counter needs: the MMC3 and its clones (mappers 4 and 118, and the MC-ACC) and the
+    /// RAMBO-1 (mapper 64). Three of the twenty-nine [`Board`] variants, and the other
+    /// twenty-six inherit the empty [`Mapper::on_ppu_address_bus`].
+    ///
+    /// Derived from the mapper number at load, so it is not part of the savestate, and read by
+    /// [`Cartridge::on_ppu_address_bus`] **before** the `Board` dispatch. That order is the whole
+    /// point. The PPU calls that hook on every fetch, and for a board with nothing to do the
+    /// answer used to be a bitset test the compiler folded into the dispatch prologue —
+    /// `movl $66584559, %edx; btl %eax, %edx; jae`, no indirect branch. MF-3's MC-ACC needed an
+    /// arm of its own there, which gave the dispatch a third distinct body; LLVM replaced the
+    /// bitset with a **jump table**, and every board that does nothing began paying one more
+    /// instruction and an indirect jump per fetch (R0's callgrind:
+    /// `Board::on_ppu_address_bus` +4.84 M on Mega Man 2). MF-3 step 8 measured the MMC3's own
+    /// path, which the jump table did shorten, and so reported the change as a win.
+    ///
+    /// **A board that overrides [`Mapper::on_ppu_address_bus`] must have its mapper numbers
+    /// added here**, or its counter will never be clocked. `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`
+    /// in `mapper_tests.rs` fails if one is missing.
+    watches_ppu_address_bus: bool,
 }
 
 impl Cartridge {
@@ -255,6 +275,9 @@ impl Cartridge {
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
             nametable_pages_vary: matches!(mapper, 5 | 118),
             bus_conflicts,
+            // The MMC3 board (4, 118, and the MC-ACC submapper of 4) and the RAMBO-1 (64); see
+            // the field. A new board with an A12 counter belongs in this list.
+            watches_ppu_address_bus: matches!(mapper, 4 | 64 | 118),
         };
         cartridge.reset();
         Ok(cartridge)
@@ -545,7 +568,15 @@ impl Cartridge {
     ///
     /// `ppu_clock` is the PPU dot count since power-on, which the A12 filter of MMC3-style
     /// boards needs to tell a real rise from the short dips of the fetch pipeline.
+    ///
+    /// The [`Cartridge::watches_ppu_address_bus`] test comes first so that the twenty-six boards
+    /// with nothing to do here never reach the `Board` dispatch — one load and one
+    /// not-taken branch per fetch, instead of the dispatch's niche prologue and indirect jump.
     pub fn on_ppu_address_bus(&mut self, address: u16, ppu_clock: i64) {
+        if !self.watches_ppu_address_bus {
+            return;
+        }
+
         self.board
             .on_ppu_address_bus(&mut self.memory, address, ppu_clock);
     }
@@ -647,5 +678,86 @@ impl Cartridge {
         self.refresh_nametable_pages();
         self.refresh_rom_windows();
         loaded
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mappers::Mapper;
+    use super::{registry, Cartridge};
+    use crate::rom::RomImage;
+
+    /// A minimal NES 2.0 image for `mapper` / `submapper`: 64 KiB of PRG and 16 KiB of CHR,
+    /// which every supported board can be created on.
+    fn image(mapper: i32, submapper: u8) -> Vec<u8> {
+        const PRG_16K_BANKS: u8 = 4;
+        const CHR_8K_BANKS: u8 = 2;
+        let prg = usize::from(PRG_16K_BANKS) * 16 * 1024;
+        let chr = usize::from(CHR_8K_BANKS) * 8 * 1024;
+        let mut image = vec![0u8; 16 + prg + chr];
+        image[..4].copy_from_slice(&[0x4E, 0x45, 0x53, 0x1A]);
+        image[4] = PRG_16K_BANKS;
+        image[5] = CHR_8K_BANKS;
+        image[6] = u8::try_from(mapper & 0x0F).unwrap_or(0) << 4;
+        image[7] = u8::try_from(mapper & 0xF0).unwrap_or(0) | 0x08; // NES 2.0, for the submapper.
+        image[8] = submapper << 4;
+        image
+    }
+
+    /// Every board whose [`Mapper::on_ppu_address_bus`] does something must be latched in
+    /// [`Cartridge::watches_ppu_address_bus`], or [`Cartridge::on_ppu_address_bus`] — which tests
+    /// that flag before it dispatches — will never clock it (MF-3b step 2).
+    ///
+    /// The check is the invariant itself and not a list: the board is driven directly, through
+    /// the `Board` dispatch, and the flag is required to be `true` wherever that moves the
+    /// board's state. A future lot adding an A12 counter and forgetting the flag fails here.
+    #[test]
+    fn mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched() {
+        let mut moved = Vec::new();
+        for &mapper in registry::SUPPORTED_MAPPERS {
+            // Submapper 3 of mapper 4 is the Acclaim MC-ACC, a board of its own (MR-4-3).
+            for submapper in [0u8, 3] {
+                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let mut cartridge = Cartridge::create(rom)
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let latched = cartridge.watches_ppu_address_bus;
+                let before = cartridge.board.clone();
+
+                // Twenty A12 rises, spaced well past the MMC3's filter, which is what an A12
+                // counter reacts to.
+                let mut clock = 0i64;
+                for _ in 0..20 {
+                    for address in [0x0000u16, 0x1000] {
+                        clock += 16;
+                        cartridge
+                            .board
+                            .on_ppu_address_bus(&mut cartridge.memory, address, clock);
+                    }
+                }
+
+                if cartridge.board != before {
+                    moved.push(mapper);
+                    assert!(
+                        latched,
+                        "mapper {mapper} submapper {submapper}: the board changes state when the \
+                         PPU drives its address bus, but Cartridge::watches_ppu_address_bus is \
+                         false, so Cartridge::on_ppu_address_bus returns before dispatching and \
+                         the counter is never clocked. Add the mapper number to the matches! in \
+                         Cartridge::create."
+                    );
+                }
+            }
+        }
+
+        // Guards against a vacuous pass: the sweep above must actually be reaching the hook.
+        // Both submappers of each of the three move — the MMC3 and the MC-ACC for mapper 4, and
+        // the RAMBO-1 and the TxSROM, whose submapper 3 is not a board of its own.
+        assert_eq!(
+            moved,
+            [4, 4, 64, 64, 118, 118],
+            "expected exactly the MMC3, the MC-ACC, the RAMBO-1 and the TxSROM to move on the \
+             PPU address bus, and the sweep to reach all of them"
+        );
     }
 }
