@@ -504,3 +504,87 @@ above is the proof**, and callgrind is R0's instrument.
 | Mega Man 2 / Zelda II **PPU** | **below** `7cbd9c52`, by roughly what that last row is worth |
 | `Board::ppu_read` | the +1.99 M may partly remain: placement, not work (see above) |
 | golden-core | unchanged; no board's behaviour was touched |
+
+## Step 5 — the suites, and the rule for the next lot that adds a board
+
+### The suites
+
+| suite | MF-3 | MF-3b |
+| --- | --- | --- |
+| `holy-mapperel` | 40 / 40 | **40 / 40**, `detailed 0000` throughout |
+| `nes-test-roms/mmc3_test` | 5 / 6 | **5 / 6** |
+| `nes-test-roms/mmc3_test_2` | 5 / 6 | **5 / 6** |
+| `nes-test-roms/mmc3_irq_tests` | 5 / 6 | **5 / 6** |
+
+The three failures are the three the campaign marks **required to fail** — each the revision A half
+of a contradictory pair whose revision B half passes, REQ-CORE-100 pinning mapper 4 to revision B.
+Unchanged, which is the point: nothing in this lot touched a board's behaviour.
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean. `cargo test --release -p zax-nes -p zax-harness`: **680 passed, 0 failed, 7 ignored** (679
+at the lot's start plus step 2's latch test; no test was added, removed or `#[ignore]`d otherwise).
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: **3 passed**,
+including `req_core_100_keeps_the_mmc3_at_revision_b` and
+`holy_mapperel_detects_every_supported_board`.
+
+**Savestates**: nothing moved. Steps 1 and 3 are inlining attributes. Step 2's field is derived
+from the mapper number at load, like its neighbours `nametable_pages_vary` and `bus_conflicts`, and
+is not written by `save_state`. A state written before this lot, or before MF-3, loads byte for
+byte.
+
+**No `unsafe`**, no `Board` variant added, moved or reordered, no change to any board's registers,
+and no Q ticket needed: nothing in the spec was ambiguous here.
+
+### The rule, for the next lot that adds a board
+
+MF-3 did everything its brief asked and still shipped a +4 % regression, because the measure it
+was given cannot see the failure mode. So the rule is about the *measure* first.
+
+**1. Count call sites, not just instructions.** A callee that goes from 0 call sites to N is a
+regression of N × (call + prologue + epilogue), and its instruction count does not move. From the
+same dump:
+
+    grep -oE "call[q]?\s+\S*<symbol>\S*" <dump>.s | wc -l
+
+Do this for `Cpu6502::end_cycle`, `Ppu2C02::read_nametable_as`, `Ppu2C02::read_nametable_inner`,
+`Board::ppu_read`, `Board::ppu_peek`, `Board::on_ppu_address_bus`, `Board::irq_asserted`,
+`Board::on_cpu_cycle`. **Any of them gaining its first call site is a stop-the-lot event.**
+
+**2. The lib dump is pre-LTO; the profile is `lto = "fat"`.** `cargo rustc -p zax-nes --lib
+--emit=asm` is the right instrument for the `Board` dispatches and the CPU, and it is **blind** to
+decisions LTO takes later — step 3 is a function MF-3 reported "byte-identical" nine times while
+it was out of line in the shipped binary. For anything on the PPU fetch path, confirm on the
+post-LTO dump of a real binary:
+
+    cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm
+
+**3. On a dispatch, the arm that matters is the empty one.** `Board::on_ppu_address_bus` has 29
+arms and 26 of them only `retq`; `Board::irq_asserted` is the same. A change that shortens the
+MMC3's arm and lengthens the empty one is a loss on nearly every game, and MF-3 step 8 recorded
+exactly that change as a win because it measured the arm it had just written. **Count the path of
+a board the lot did not touch** — an MMC1 and an NROM — before claiming a dispatch got cheaper.
+
+**4. A new arm with a body of its own can flip a whole dispatch's shape.** Both regressions this
+lot fixed came from one new distinct arm body tipping LLVM over a threshold: a bitset-plus-test
+became a jump table (step 2), and a callee grew past the inliner's budget (step 1). Neither shows
+up as "my board got slower". After adding a board, diff the **whole crate's** symbols and look at
+what moved *outside* your board.
+
+**5. Prefer a load-time latch to a per-cycle dispatch.** `Cartridge` now carries three
+(`nametable_pages_vary`, `bus_conflicts`, `watches_ppu_address_bus`). A board's constant facts
+belong there, tested before the dispatch, not asked of the enum on every cycle or fetch. **If the
+latch gates a side effect, test the invariant** rather than trusting the list — a forgotten mapper
+number is a silently unclocked counter, which is a correctness bug and not a slow path. Step 2's
+test checks the property itself, so it covers boards that do not exist yet.
+
+**6. Wall clock is a smoke alarm, not a measurement.** MF-3's `bench-core` was right that
+something was wrong and wrong about where. Instruction counts localise; always build each compared
+commit with `git archive` into a fresh directory with its own `CARGO_TARGET_DIR`.
+
+### What the brief asked for and what is here
+
+| brief item | state |
+| --- | --- |
+| 1. find the cause, by generated code or by bisecting with a cheap instruction count | **done** (step 0): the call-site diff names it in one line, `end_cycle` 0 → 75 call sites, and the arithmetic closes on R0's +20.5 M to the instruction |
+| 2. an MMC1 game executes the instructions of `7cbd9c52`, core and PPU, with every MF-3 behaviour and test kept | **done**: core parity exactly (step 1); PPU **below** parity (steps 2 and 3). 680 tests, 40/40 Holy Mapperel, the three MMC3 suites unchanged, no savestate byte moved, no `unsafe`, no `Board` variant moved |
+| 3. the cause and the fix in the progress file with the generated-code evidence, and a short rule for future lots | **done**: steps 0-4 carry the assembly, and the six-point rule above |
