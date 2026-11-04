@@ -1272,6 +1272,8 @@ hot-in-cache bool that is `false` for 27 of our 32 mapper numbers and for every 
 dump of the other five. No `Mapper` method is consulted per write and the `Board` enum
 dispatch is untouched; nothing reaches the PPU or CPU stepping.
 
+**Fixed in MF-2 (1f1c747b)** — `registry::has_bus_conflicts`, decided at load, plus one bool test in `Cartridge::cpu_write`. Mapper 66 (MR-66-1) and the BNROM (MR-34-2) came in with it; mappers 2, 3 and 7 keep the submapper gate `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` pins.
+
 ## Shared: bank-window wrapping
 
 **MR-1 verdict: equivalent. New verdict: equivalent — unchanged.**
@@ -1687,6 +1689,8 @@ selects which of two comparisons `clock_irq_counter` makes.
 
 **Fixed in MF-1 (969c1b2e) — submapper 2 only; submapper 4 is the rev A IRQ REQ-CORE-100 forbids, filed as Q-114.**
 
+**Fixed in MF-2 (64f08eeb) — submapper 4**, the revision A IRQ counter, per AMD-061 §8 closing Q-114; submapper 2 was MF-1 (969c1b2e).
+
 ### The two MMC3 non-findings, re-checked
 
 - **the IRQ revision.** *MMC3* — "Sharp MMC3B and MMC3C generate an IRQ on each scanline
@@ -1752,6 +1756,8 @@ investigation thread read against both models. Until then, no change.
 `clock_irq_counter`, which runs per A12 rise on a board already off the fast span:
 **negligible**.
 
+**Left as it is in MF-2 (step 9): unknown, leaning ours, re-checked.** The page states that "the counter reloads with the IRQ reload value if $C001 was written to after the previous clock, or if the IRQ counter is at 0; otherwise the counter decrements by 1", which is our reload-or-decrement `else` exactly, and the "ORed with 1" clause MR-1 wanted is still nowhere on it. No ROM in `assets-free/test-roms` drives mapper 64 at all, so nothing in the campaign can settle it.
+
 ### MR-64-2 — bit 0 of a 2 KiB CHR register
 
 **MR-1 verdict: our bug (visible). New verdict: leaves `our bug` — nesdev says the bit *is*
@@ -1802,6 +1808,8 @@ which returns `None` for the horizon today (`rambo1.rs:132-134`) and therefore s
 every cycle — could then *gain* a horizon worth 48 dots per clock, which would make this fix a
 performance **win** for the five Tengen games rather than a cost.
 
+**Fixed in MF-2 (4c6905a2)** — `A12Watcher`'s threshold is a per-board field, 48 dots for the RAMBO-1 with the MMC3's 10 untouched, and the board now declares a `ppu_irq_horizon` where it returned `None`: the net *win* this entry predicted. R0 measures it.
+
 ### MR-64-4 — the IRQ assertion delay
 
 **MR-1 verdict: our bug (subtle). New verdict: our bug — confirmed, with both figures.**
@@ -1821,6 +1829,8 @@ assert the CPU's view of the IRQ line two cycles apart; that belongs with the fi
 step. RAMBO-1 is already stepped every CPU cycle (`PERFORMANCE-HISTORY.md` §5.1: "Rambo1 and
 MMC5 still step every cycle"), so the counter adds one compare-and-branch to a path these five
 games already pay for, and nothing to any other board.
+
+**Fixed in MF-2 (4c6905a2)** — a countdown armed where the line used to be pulled, two M2 cycles in scanline mode and one in cycle mode, with the cycle-level IRQ probe this entry said the fixture lacked.
 
 ### MR-64-5 — the extra divider clock when leaving cycle mode
 
@@ -1847,6 +1857,8 @@ bit 0 while in cycle mode — the measurement the investigation thread was set u
 
 **Cost if adopted: negligible** — one bool consulted in the same per-CPU-cycle step as
 MR-64-4, and one more field in the save state.
+
+**Left as it is in MF-2 (step 9): unknown, re-checked.** The page still documents only the prescaler reset — "the prescaler is reset in cycle mode, so the next clock will occur 4 cycles later" — and says nothing about an extra clock being granted when the mode bit goes from 1 to 0. Resetting the divider on every $C001 write stays consistent with that sentence. No mapper-64 test ROM exists to settle it either.
 
 ### MR-64-6 — Mesen's $8000 does not re-map
 
@@ -1939,6 +1951,8 @@ nametable path reads 0) holds under either fix.
 $5C00-$5FFF, a 1 KiB window that only MMC5 games touch; `intercept_cpu_write` already
 branches on the range and the mode.
 
+**Fixed in MF-2 (650dcb82)** — modes 0 and 1 write only while `in_frame`; of the two behaviours the source allows, the write is **ignored**, as this entry recommended.
+
 ### MR-5-3 — the scanline counter's origin
 
 **MR-1 verdict: unknown (no test, "a test would assert one of two conventions"). New verdict:
@@ -1994,6 +2008,8 @@ vector-read hook: `$FFFA-$FFFB` is read by every game on every NMI, so that one 
 on the board at load — a `Mapper` method consulted per read would be a **risk** class change
 to a path every game runs. Our `cpu_read_override` is already per-board dispatch through the
 `Board` enum, so the gate exists; the point is not to add a new one in the bus.
+
+**Not fixed in MF-2 — see `spec/changes/Q-116.md`.** The two *clears* are confinable to the board, but the *set* is not: during rendering the PPU notifies the cartridge of pattern addresses only, and `read_nametable_as` reaches a board solely for a nametable that board serves itself, so an MMC5 in ordinary mirroring sees no nametable read at all. The cost note above is wrong on one point — it says the detection "has to move into the board's `ppu_read`", but that is the **CHR** path ($0000-$1FFF), not the nametable one. Giving the board those addresses needs a new per-PPU-fetch notification every game pays for (~16 300 fetches a frame), which the lot's performance rule forbids. The ticket puts three ways out to the owner.
 
 ### MR-5-5 — ExRAM reads in modes 0 and 1
 
@@ -2347,6 +2363,8 @@ turns every CPU fetch in the window into a board call *for this board only*, whi
 state machine must set `NO_ROM_WINDOW` only while a flash command is open and restore the plain
 window the moment it completes.
 
+**Fixed in MF-2 (cb4ac6fa)** — both documented SST39SF040 sequences, gated on the board having no bus conflicts, which is the interlock with MR-BUS-1 this entry asked for. The cost this entry feared does not arise: the operations complete before the CPU can look, so the verification reads succeed at once and `rom_windows` stays a plain window with nothing added to any read path. Q-117 asks which bank the chip sees, since the command bytes move the latch themselves, and records that a reprogrammed ROM is not persisted.
+
 ### MR-30-5 — submapper 4 and the LED register
 
 **MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
@@ -2385,6 +2403,8 @@ changes a trait signature every board implements, which is the kind of change
 `PERFORMANCE-HISTORY.md` §10 flags for the `Board` enum — but the call is once per nametable
 fetch on a board that already answers `SERVED_BY_CARTRIDGE` only when asked, and the MMC5 is
 the only other user.
+
+**Fixed in MF-2 (cb4ac6fa)** — all four nametables, and the $3000-$3EFF scratch window with them, out of the last 8 KiB of CHR-RAM. `Mapper::read_nametable` gained the `CartridgeMemory` this entry asked for (infrastructure item 10); `Cartridge` now caches the nametable pages as well, so the signature change left every hot PPU function instruction-identical and `run_dots` 32 instructions smaller.
 
 ## Mapper 34 — BNROM and NINA-001
 
@@ -2442,6 +2462,8 @@ more `true` from a load-time predicate; the work RAM is the same load-time size 
 MR-13-1, MR-4-6 and MR-30-2.
 
 **Fixed in MF-1 (b64de407) — the work-RAM half only; the bus-conflict half extends MR-BUS-1 and waits for lot MF-2.**
+
+**Fixed in MF-2 (1f1c747b) — the bus-conflict half**; the work-RAM half was MF-1 (b64de407).
 
 ## Mapper 41 — Caltron 6-in-1
 
@@ -2746,6 +2768,8 @@ comparison, moved.
 The board's **expansion audio at $F003** stays optional under REQ-CORE-075; neither side
 emulates it and the sources do not make it required.
 
+**Closed in MF-2 (step 9): equivalent, confirmed.** The page's own worked example — "if the counter is in 4-bit mode and contains $1232, it counts down to $1230, then wraps to $123F where an IRQ is triggered" — is `JalecoSs88006::on_cpu_cycle` exactly: the clock that finds the counted field at zero raises the IRQ and sets that field to its mask, leaving the bits above it alone. No code change, and this entry's `unknown` can be retired.
+
 ## Mapper 32 — Irem G-101
 
 ### MR-32-1 — submapper 1, *Major League*
@@ -2831,6 +2855,10 @@ board is unconditional, like Color Dreams'.
 
 So after this lot **MR-BUS-1 covers mappers 2, 3, 7, 11, 30, 34 (BNROM) and 66**, where MR-1
 listed only 2, 3, 7, 11 and 30.
+
+**Fixed in MF-2 (1f1c747b)** — mapper 66 is one of the two boards `registry::has_bus_conflicts`
+answers `true` for unconditionally, with mapper 11. `mr_66_1_gxrom_write_is_anded_with_the_rom_byte`
+pins it, against Mesen, which does not implement conflicts for this board.
 
 ## Mapper 0 — NROM
 

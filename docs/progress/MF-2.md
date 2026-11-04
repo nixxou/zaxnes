@@ -35,7 +35,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 7/10 — step 6: MR-5-2 done; **MR-5-4 not done**, see Q-116
 - [x] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
 - [x] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
-- [ ] 10/10 — step 9: the three unknowns MR-64-1, MR-64-5, MR-18-1, and the close of the lot
+- [x] 10/10 — step 9: the three unknowns MR-64-1, MR-64-5, MR-18-1, and the close of the lot
 
 ## Out of scope
 
@@ -64,6 +64,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | MR-30-6 | `discrete.rs:410-418` (the mode), `:588-606` (the three overrides), `mod.rs:178-192` + `:392-412` (the cached pages) | `mr_30_6_*` x2 | **every hot PPU function is instruction-identical to step 6** after two fixes: `Cartridge` caches the nametable pages (so the `Board` dispatch leaves the per-fetch path and `run_dots` is 32 instructions *better*) and `read_nametable_inner` keeps the `#[inline(never)]` it effectively had. `cpu_write` pays one bool test | four-screen UNROM 512 homebrew (byte 6 `%....1..1`) |
 | AMD-061 §8, Q-113 | `registry.rs:96-120` — **comment only**, the code was already §8's answer | `mr_1_5_*` x2, unchanged | none | none: the amendment confirmed MF-1's reading |
 | AMD-061 §8, Q-114 (MR-4-9's other half) | `mmc3.rs:20-24` (the flag), `:40-44` (the submapper), `:120-146` (`clock_irq_counter`) | `amd_061_mmc3_submapper_4_has_the_revision_a_irq_counter` | `Board::on_ppu_address_bus` is per pattern fetch: the dispatch and the MMC3 arm's own common path are **instruction-identical**; the +20 is inside the once-per-scanline A12-rise branch | NES 2.0 **submapper-4** mapper-4 dumps only. No other mapper-4 image moves, and `mmc3_test_2` test 6 still holds for them |
+| MR-18-1 | **closed, no code** — `jaleco_ss88006.rs:164-182` already matches the page's worked example | the board's existing IRQ tests | none | none |
+| MR-64-1, MR-64-5 | **left as they are**, re-checked against the page | — | none | none |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -897,3 +899,140 @@ gives one.
 
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
 `cargo test --release -p zax-nes`: **583 passed**, 0 failed, 7 ignored.
+
+## Step 9 — the three unknowns, and the close of the lot
+
+### The three unknowns
+
+**No ROM in `assets-free/test-roms` drives mapper 64 or mapper 18 at all** — `holy-mapperel` has
+no `M64_*` or `M18_*` image, and there is no RAMBO-1 or SS88006 suite — so the campaign cannot
+settle any of the three. What settles one of them is the NESdev page itself, re-read at first
+hand:
+
+| finding | verdict after step 9 | why |
+| --- | --- | --- |
+| **MR-18-1** | **closed: equivalent, confirmed** | the page carries a worked example MR-1b did not quote |
+| **MR-64-1** | unknown, leaning ours — re-checked, unchanged | the page describes our algorithm; the clause MR-1 wanted is still absent |
+| **MR-64-5** | unknown — re-checked, unchanged | the page documents the prescaler reset and nothing more |
+
+**MR-18-1 is closed.** *INES Mapper 018* gives not only "When it wraps, an IRQ is generated" but
+a worked example: "if the counter is in 4-bit mode and contains $1232, it counts down to $1230,
+then wraps to $123F where an IRQ is triggered". `JalecoSs88006::on_cpu_cycle` is that, exactly:
+the clock that finds the counted field at zero raises the IRQ and sets that field to its mask,
+leaving the bits above it alone — $1232 → $1231 → $1230 → $123F with the IRQ on the last step.
+MR-1b's "unknown, leaning ours" can be retired, and no code changed.
+
+**MR-64-1 stays as it is.** The page states that "the counter reloads with the IRQ reload value
+if $C001 was written to after the previous clock, or if the IRQ counter is at 0; otherwise the
+counter decrements by 1" — our reload-or-decrement `else` exactly — and the "ORed with 1" clause
+MR-1 wanted applied is still nowhere on it. MR-1b's warning not to apply MR-1's fix here stands.
+
+**MR-64-5 stays as it is.** The page still documents only the prescaler reset, "the prescaler is
+reset in cycle mode, so the next clock will occur 4 cycles later", and says nothing about an extra
+clock being granted when the mode bit goes from 1 to 0. Resetting the divider on every $C001 write
+remains consistent with that sentence, and the talk page's note that two different implementations
+both work on all three Tengen titles is exactly the situation where a game-driven fix cannot be
+promoted to a specification.
+
+**One thing for R0 to look at.** While re-reading the RAMBO-1 page for these, a summary of its
+IRQ section rendered the cycle-mode delay as "an IRQ is triggered after 4 CPU cycles", where
+MR-1b quotes the page at first hand as "triggers one M2 cycle later than one would naively
+expect" — which is the figure step 5 implemented, and the one that matches Mesen's `CpuIrqDelay`.
+Step 5 was **not** changed on the strength of a paraphrase, but if R0 wants one figure
+double-checked against the live page before blessing the five Tengen titles, that is the one.
+
+### What the lot delivered
+
+| AMD-061 | done |
+| --- | --- |
+| §2, mapper 15 mode 1 and its criterion | yes (step 1) |
+| §3 and §5, mapper 28's reset, every other board unchanged | yes (step 2) |
+| §4, mapper 101 | yes (step 1) |
+| §6, the MMC5 audio, all five points | yes (step 3); §6.4's contradiction with §6.5 is Q-115 |
+| §8, Q-113 | confirmed, no code needed (step 8) |
+| §8, Q-114 | yes (step 8) |
+
+| finding | done |
+| --- | --- |
+| MR-BUS-1, MR-66-1, MR-34-2 (bus conflicts) | yes (step 4) |
+| MR-64-3, MR-64-4 | yes (step 5) |
+| MR-5-2 | yes (step 6) |
+| **MR-5-4** | **no — Q-116**, the only item of the brief not delivered |
+| MR-30-4, MR-30-6 | yes (step 7) |
+| MR-64-1, MR-64-5, MR-18-1 | re-checked; MR-18-1 closed, the other two left as they were |
+
+Out of scope and untouched, as the brief says: MR-4-3 (the Acclaim MC-ACC is a new board) and any
+missing mapper.
+
+### No MR test is red any more
+
+`cargo test --release -p zax-nes`: **583 passed, 0 failed, 7 ignored**.
+`cargo test --release -p zax-nes --no-fail-fast -- --ignored`: **7 passed, 0 failed**.
+
+The seven are all long-running golden and timing tests, and every one of them passes. MF-1 closed
+with **four red MR tests**; MF-2 cleared all four — `mr_bus_1_color_dreams_...`,
+`mr_bus_1_uxrom_submapper_2_...`, `mr_64_3_rambo1_a12_filter_...` and `mr_5_2_mmc5_exram_...` —
+so **no `#[ignore]`d finding remains in `mr1_review_tests.rs`**. MR-5-4 never had a test (MR-1b:
+"Test: none"), and neither does MR-4-3.
+
+Fourteen tests were added over the lot, and `mr_bus_1_uxrom_without_a_submapper_has_no_conflict`,
+the guard MR-1b left against MR-BUS-1 over-reach, still passes as written.
+
+### The four Q tickets
+
+| ticket | what it asks |
+| --- | --- |
+| **Q-115** | AMD-061 §6.4's "appliquée voie par voie" contradicts §6.5's second criterion (9 780 against 8 462 for two MMC5 squares at volume 15); the criteria were followed. Also: what should a $5011 write do in read mode? |
+| **Q-116** | MR-5-4 cannot be implemented under the lot's performance rule; three ways out, the provisional one being to declare the line-boundary approximation |
+| **Q-117** | which bank the UNROM 512's flash chip sees, since the command bytes move the mapper latch themselves; and that a reprogrammed ROM is not persisted |
+| Q-113, Q-114 | **closed by AMD-061 §8**, not by this lot |
+
+### Test ROMs
+
+`docs/review/MF-T-test-roms.md` gains a "Re-run after lot MF-2" section. Eleven suites were
+re-run with `--filter` — `holy-mapperel`, the three MMC3 suites, `mmc5test`, `mmc5test_v2`,
+`exram`, `apu_mixer`, `apu_test`, `pal_apu_tests` and `m22chrbankingtest` — and **every one
+matches the campaign exactly**. In particular `holy-mapperel` stays at 32 / 40 with its `M11_*`,
+`M34_*` and `M66_*` boards now taking bus conflicts, and the three MMC3 revision-A rows that are
+*required* to fail still fail, which AMD-061 §8 confirms is right for an iNES 1.0 image.
+
+### Performance, for R0
+
+Every step measured itself against the previous one with the generated code, and the record is in
+each step's section. The summary:
+
+- **The MMC1 CHR fetch is instruction-for-instruction what it was at `74ce9bc`** (step 0), 16 on
+  a CHR-ROM board and 17 on a CHR-RAM one.
+- **Three times** a fix cascaded into a hot path through an inlining cliff, and each time the
+  measure caught it and the fix was reshaped rather than accepted: step 0 (`Board::ppu_peek`),
+  step 3 (`Board::irq_asserted` and `Cpu6502::step`), step 7 (`read_pattern_planes` via the
+  nametable signature). All three ended with the hot path identical or better.
+- **Net improvements**: `Ppu2C02::run_dots` 591 → 559, `NesCore::run_frame` 1850 → 1837,
+  `NesBus::catch_up_ppu` 193 → 168, `Board::irq_asserted` 25 → 24, `Board::cpu_read_override`
+  125 → 75, `Mmc5::ppu_peek` 86 → 83 (below its pre-MF-1 value), `Mmc5::on_cpu_cycle` 114 → 108,
+  `Mapper015::update_banks` 125 → 112, and RAMBO-1 games gain PPU batching they never had.
+- **New per-event costs, all gated at load**: two instructions in `Cartridge::cpu_write` (the
+  bus-conflict bool), two more there (the nametable-page refresh bool), one bool test in
+  `UnRom512::write_register`, and one compare-and-branch in the RAMBO-1 arm of
+  `Board::on_cpu_cycle`. Nothing on a per-cycle, per-PPU-fetch or CPU-read path that another
+  board runs.
+- `mixer::clip` is the one shared per-cycle change, and it is the same three instructions it was.
+
+### Save states
+
+**No format version bump anywhere in the lot.** Four boards and one channel gained state, and
+every one of them is either derived (recomputed on load) or written last and read behind
+`StateReader::remaining`:
+
+| board / channel | what it gained | how an older state loads |
+| --- | --- | --- |
+| `Mmc5` | `background_uses_set_b`, `irq_line` | derived; `load_registers` recomputes both |
+| `Mmc5Audio` | lost `length_turn` | its byte is kept, written as a reserved `false` |
+| `Rambo1` | `irq_delay` | written last, read behind `remaining()` |
+| `UnRom512` | `flash_step`, `flash_erasing` | written last, read behind `remaining()`; the board also gains two derived fields that are not saved |
+| `Cartridge` | `bus_conflicts`, `nametable_pages`, `nametable_pages_vary` | all derived from the ROM at load |
+| `A12Watcher` | `filter_dots` | wiring, not state: not saved, and `reset` leaves it |
+
+One thing a state does **not** carry: a **flashed PRG-ROM** (step 7). Save states store PRG-RAM
+and CHR-RAM, not PRG-ROM, so a state taken after a mapper-30 game reprogrammed itself restores the
+registers but not the ROM. Q-117 carries it.

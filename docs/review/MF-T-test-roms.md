@@ -912,3 +912,37 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 ---
 
 The reference columns are quoted from `nes-test-roms/status.txt`, the collection's own result table, as it ships with the ROMs ([source](https://github.com/christopherpow/nes-test-roms/blob/master/status.txt)). A blank cell means that file does not list the ROM. There is no Mesen 2 column: no published table covers these ROMs row by row, and a guessed column would be worse than none.
+
+---
+
+## Re-run after lot MF-2 (2026-11-04)
+
+Lot MF-2 (`docs/progress/MF-2.md`) changed seven boards and the APU's mixer, so the suites that
+could see it were re-run with `zax-harness test-roms --filter`. **Every one of them matches the
+campaign above exactly**; no row moved.
+
+| suite | before (this report) | after MF-2 | why it was re-run |
+| --- | --- | --- | --- |
+| `holy-mapperel` | 32 / 40, 2 fail, 6 unsupported | **32 / 40, 2 fail, 6 unsupported** | its `M11_*`, `M34_*` and `M66_*` boards gained unconditional bus conflicts (MR-BUS-1, MR-66-1, MR-34-2), and its `M1_*`, `M2_*`, `M3_*` boards are the submapper-gated ones |
+| `nes-test-roms/mmc3_irq_tests` | 5 / 6, 1 fail | **5 / 6, 1 fail** | the revision A / B gate of AMD-061 §8 (Q-114) |
+| `nes-test-roms/mmc3_test` | 5 / 6, 1 fail | **5 / 6, 1 fail** | same |
+| `nes-test-roms/mmc3_test_2` | 5 / 6, 1 fail | **5 / 6, 1 fail** | same; test 6 is REQ-CORE-114 and stays required for revision B |
+| `nes-test-roms/mmc5test` | 0 / 1, 1 manual | **0 / 1, 1 manual** | the MMC5 audio of AMD-061 §6 and the ExRAM write gate (MR-5-2) |
+| `nes-test-roms/mmc5test_v2` | 0 / 1, 1 manual | **0 / 1, 1 manual** | same |
+| `nes-test-roms/exram` | 0 / 1, 1 manual | **0 / 1, 1 manual** | MR-5-2 |
+| `nes-test-roms/apu_mixer` | 4 / 4 | **4 / 4** | the mixer's polarity and signed clip (AMD-061 §6.2) |
+| `nes-test-roms/apu_test` | 9 / 9 | **9 / 9** | same |
+| `nes-test-roms/pal_apu_tests` | 3 / 10, 7 fail | **3 / 10, 7 fail** | same |
+| `nes-test-roms/m22chrbankingtest` | 0 / 1, 1 manual | **0 / 1, 1 manual** | mapper 22 is a VRC2a, re-checked after step 5 touched the shared A12 watcher |
+
+The three MMC3 revision-A rows that **are required to fail** (`5.MMC3_rev_A.nes`,
+`mmc3_test/6-MMC6.nes`, `mmc3_test_2/rom_singles/6-MMC3_alt.nes`) still fail, and that is still
+right: AMD-061 §8 gives revision A to a **declared NES 2.0 submapper 4** only, and all three of
+those ROMs are iNES 1.0 images, which keep revision B. Their `5-MMC3` / `6.MMC3_rev_B`
+counterparts still pass.
+
+**Three suites a reader might expect here are absent because the ROMs do not exist**: nothing in
+`assets-free/test-roms` drives **mapper 64** (RAMBO-1) or **mapper 18** (Jaleco SS88006) at all —
+`holy-mapperel` has no `M64_*` or `M18_*` image — so steps 5 and 9 have no ROM-level evidence and
+rest on the NESdev pages alone. The campaign's mapper coverage is `holy-mapperel`'s board list
+plus the MMC1/MMC3/MMC5 suites.
