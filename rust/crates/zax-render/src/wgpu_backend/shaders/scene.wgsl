@@ -13,6 +13,11 @@ struct Frame {
     params: vec4<f32>,
     // The light direction of the scene buckets, then the HUD's.
     light: array<vec4<f32>, 2>,
+    // AMD-049 REQ-SCN-075: the eye in the scene frame, which the backdrop's reflection model needs
+    // for its view vector `V`. Written whatever the variant, read only by ZAX_BACKDROP — the
+    // OpenGL path gives it to the backdrop program alone, which has no equivalent here: a frame
+    // block has one layout. Sixteen bytes of a `write_buffer` a frame already makes, no branch.
+    eye: vec4<f32>,
     // AMD-043 REQ-SCN-067: the per-axis curvature constants, xyz each, the arc pivot in bend_k.w
     // and "this axis bends" as 1 or 0 in bend_on. Written by `frame_bytes` whatever the variant,
     // because the frame block has one layout; read only by the ZAX_BEND variant below.
@@ -190,6 +195,108 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(step(ZAX_FLOOR_NORMAL_THRESHOLD, up), 0.0, 0.0, 1.0);
 }
 //#else
+//#ifdef ZAX_BACKDROP
+// AMD-049 REQ-SCN-075: the backdrop of REQ-SCN-048 lit with the almost-matt reflection model of
+// the amendment instead of the plain diffuse term of REQ-SCN-028. The WGSL twin of
+// shaders/backdrop.frag, whose CPU twin is `color::backdrop_linear` — and a test compares those
+// two, which is what makes this arithmetic checkable rather than merely transcribed.
+//
+// This is the fragment stage of a **variant of its own**, chosen for the backdrop run alone, so no
+// tile fragment ever evaluates any of it and there is no branch on a frame field. It shares the
+// scene's vertex stage, which writes more varyings than this stage reads: the backdrop carries one
+// flat colour, so the texel coordinate of REQ-E3D-506 is not read here at all — and the
+// interpolation variant of AMD-058 therefore does not apply to it, which is why
+// `ShaderVariant::backdrop` clears that axis.
+
+// REQ-SCN-075: perceptual roughness 0.99, and the 0.04 a non-metallic surface reflects at normal
+// incidence — the same 4 % the diffuse part gives up.
+const ZAX_BACKDROP_ROUGHNESS: f32 = 0.99;
+const ZAX_BACKDROP_REFLECTANCE: f32 = 0.04;
+const ZAX_PI: f32 = 3.14159265358979323846;
+
+fn zax_pow5(value: f32) -> f32 {
+    let square = value * value;
+    return square * square * value;
+}
+
+fn zax_backdrop_fresnel(f90: f32, cosine: f32) -> f32 {
+    return 1.0 + (f90 - 1.0) * zax_pow5(1.0 - cosine);
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    let draw = draws[in.run];
+    // REQ-SCN-048: the backdrop is never clipped by the visible rectangle, and it is opaque, so
+    // this stage never rejects a fragment — which is what lets a tiled GPU drop what hides behind
+    // it early.
+    let n = normalize(in.normal);
+    let v = normalize(frame.eye.xyz - in.scene);
+    let l = normalize(-frame.light[0].xyz);
+    // REQ-SCN-075: H = (L + V) normalised, and H = N when L + V = 0 (R2's point 49-8).
+    let sum = l + v;
+    let h = select(n, normalize(sum), dot(sum, sum) > 0.0);
+
+    let nl = max(dot(n, l), 0.0);
+    let nv = abs(dot(n, v));
+    let nh = max(dot(n, h), 0.0);
+    let lh = max(dot(l, h), 0.0);
+
+    // REQ-SCN-031, as in the ordinary stage: `s` is 1 out of shadow and the strength in it, and it
+    // scales the specular term too — the specular term is direct light, and REQ-SCN-075 states
+    // there is no environment reflection.
+    var shadow = 1.0;
+    if (draw.modes.w != 0) {
+//#ifdef ZAX_BEND
+        let biased = in.bent + n * frame.params.w;
+//#else
+        let biased = in.scene + n * frame.params.w;
+//#endif
+        let light = frame.light_view_projection * vec4<f32>(biased.x, biased.y, -biased.z, 1.0);
+        let projected = light.xyz / light.w * 0.5 + 0.5;
+        if (projected.x >= 0.0 && projected.x <= 1.0
+            && projected.y >= 0.0 && projected.y <= 1.0
+            && projected.z <= 1.0) {
+            // The map's rows run top down here, bottom up in GL: the same texel is 1 - y.
+            let side = vec2<f32>(textureDimensions(shadow_map));
+            let at = vec2<i32>(min(floor(vec2<f32>(projected.x, 1.0 - projected.y) * side), side - 1.0));
+            let stored = textureLoad(shadow_map, at, 0);
+            if (projected.z - frame.params.z > stored) {
+                shadow = frame.params.y;
+            }
+        }
+    }
+
+    let alpha = ZAX_BACKDROP_ROUGHNESS * ZAX_BACKDROP_ROUGHNESS;
+
+    // The diffuse term.
+    let f90 = 0.5 + 2.0 * lh * lh * ZAX_BACKDROP_ROUGHNESS;
+    let fd = zax_backdrop_fresnel(f90, nl) * zax_backdrop_fresnel(f90, nv);
+
+    // The specular term.
+    let vis = 0.5 / (nl * (nv * (1.0 - alpha) + alpha)
+                   + nv * (nl * (1.0 - alpha) + alpha) + 1.0e-5);
+    let denominator = nh * nh * (alpha * alpha - 1.0) + 1.0;
+    let d = alpha * alpha / (ZAX_PI * denominator * denominator);
+    let spec = vis * d * ZAX_PI * nl;
+    let f = ZAX_BACKDROP_REFLECTANCE + (1.0 - ZAX_BACKDROP_REFLECTANCE) * zax_pow5(1.0 - lh);
+
+    // AMD-021 R2-009: written linear, like every other colour these shaders produce; the sRGB
+    // encode of REQ-SCN-028 is the resolve pass's job. The backdrop is opaque.
+    var albedo_linear = zax_to_linear3(draw.flat_alpha.xyz);
+//#ifdef ZAX_VOXEL_GRID
+    // AMD-055 §3 point 5: the grid modulates the albedo `c` **before** the model below, so that a
+    // groove does not darken the specular term — which is why this multiplies `albedo_linear` and
+    // not `lit`. The edges are at the scene coordinates that are multiples of `N × scene scale`,
+    // so the position is `in.scene`, before the curvature; the normal of a box face is also its
+    // scene normal, the placement being a scale and a translation with no rotation.
+    albedo_linear *= zax_voxel_grid(in.scene, normalize(in.local_normal), frame.style.x);
+//#endif
+    let lit = albedo_linear * (1.0 - ZAX_BACKDROP_REFLECTANCE)
+            * (vec3<f32>(frame.light_ambient.w) + frame.light_ambient.xyz * (shadow * fd * nl))
+        + frame.light_ambient.xyz * (shadow * spec * f);
+    return vec4<f32>(min(lit, vec3<f32>(1.0)), 1.0);
+}
+//#else
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
@@ -300,4 +407,5 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lit = albedo_linear * (vec3<f32>(frame.light_ambient.w) + ndl * frame.light_ambient.xyz * shadow);
     return vec4<f32>(min(lit, vec3<f32>(1.0)), draw.flat_alpha.w * texel_alpha);
 }
+//#endif
 //#endif

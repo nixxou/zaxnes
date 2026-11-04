@@ -19,8 +19,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — `d678e46` |
 | 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — `46f3174` (its clippy fix and its design: `9ef1447`) |
 | 4c | The reflections of REQ-SCN-084 and the floor mask | done — `0a763dd` |
-| 4d | The MSVO estimator and its runtime fallback | done — this commit |
-| 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | todo |
+| 4d | The MSVO estimator and its runtime fallback | done — `2664c78` |
+| 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | done — this commit |
 | 5 | The parity measurements and the costs | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
 
@@ -1206,6 +1206,127 @@ Of the list step 1 drew up against `gl/`, one line is left: the **backdrop light
 recorded as out of scope and which the owner then put into this lot. That is step 4e. Everything
 AMD-043, AMD-046, AMD-055 and AMD-058 ask for is now rendered by both backends.
 
+### Step 4e — the backdrop lighting of AMD-049 (REQ-SCN-075)
+
+The step the owner added to this lot between its two sessions, and the last line of step 1's map.
+Step 1 found the gap and measured it; this closes it.
+
+**58.930 % → 99.9990 %** on the `backdrop` capture, which is the whole step in one figure.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `shaders/scene.wgsl` | a third `fs_main` behind `//#ifdef ZAX_BACKDROP` — the twin of `shaders/backdrop.frag`: the half vector with its `H = N` fallback, the Fresnel-weighted diffuse term, the GGX specular with its visibility term, the `1 - F0` the diffuse part gives up, and the grid on the albedo **before** the model; and `Frame.eye`, the one field the model needs that no tile does |
+| `wgpu_backend/renderer.rs` | `ShaderVariant.backdrop` and `ShaderVariant::backdrop()`; `backdrop_variant`, chosen once a frame; `run_variant`, which picks it for the one run whose colour mode is 2; `FRAME_BYTES` 288 → 304 |
+| `wgpu_backend/mod.rs` | `expand_wgsl`, so that a test can assert what a variant does **not** carry |
+| `zax-render/tests/amd049_backdrop_tests.rs` | the static half: the model is in the WGSL, and it is a variant — no tile fragment carries any of it, and the backdrop variant carries none of the atlas machinery |
+| `zax-harness/tests/parity_wgpu_tests.rs` | the measured half: three tests, and the `capture`/`parity` helpers grow a `lit` arm because `--no-backdrop-lighting` is a one-way flag |
+
+#### It is a variant of the scene module, not a pass or a program of its own
+
+The OpenGL backend makes the backdrop a **separate program** sharing `scene.vert`, for three
+reasons `gl/shaders.rs` lists — chief among them that no tile fragment may evaluate the model and
+there must be no branch on a uniform. On this side the same thing is a sixth axis of
+`ShaderVariant`: the module is built from the same sources with `ZAX_BACKDROP` defined, which drops
+the ordinary `fs_main` and the atlas lookup with it, and keeps the model.
+
+That makes the backdrop **cheaper to add here than it was there**: the pipeline is the scene's
+`SceneMode::Opaque` pipeline unchanged — same blend, same depth state, same cull, same format, same
+sample count — so `SceneKey.variant` carries the whole of it and this step adds no pipeline
+function, no layout and no bind group. The floor mask of 4c needed all three, because its target is
+an `R8` channel and its depth state is its own.
+
+Two axes survive into `ShaderVariant::backdrop()`, and they are exactly the two
+`shaders::backdrop(bend, voxel_grid)` has: the curvature, because the backdrop bends with the scene
+(REQ-SCN-068), and the voxel grid, because REQ-SCN-081 applies to the faces of the box (AMD-055 §3
+point 5). The pixel shadows do not (REQ-SCN-082 is "sans objet sur le backdrop") and neither does
+AMD-058's centroid — the backdrop carries one flat colour and reads no texel coordinate at all,
+which `backdrop.frag`'s own header says.
+
+#### The frame block grows by sixteen bytes, and that is the step's only cost to a Classic frame
+
+The model needs the eye, which no tile shader has: the OpenGL path sets `uEye` on the backdrop
+program alone, and a frame block has no equivalent of "on that program alone". So `Frame` gains an
+`eye: vec4<f32>` and `FRAME_BYTES` goes from the 288 of step 2 to 304.
+
+That is the same trade step 2 made for the curvature's 64 bytes and rejected for REQ-SCN-084's
+floor vertical (which rode in the three slots the voxel cell left spare). Here there were no three
+spare slots left in any `vec4` the block already had, and putting a position into the curvature's
+`w` slots would have been a saving of sixteen bytes bought with a reader's confusion. Sixteen bytes
+added to a `write_buffer` the frame already makes, once a frame, no branch.
+
+Everything else a Classic frame pays:
+
+- `select_bend_variant` gains one `&&` (`backdrop_lighting && backdrop.enabled`), and when it is
+  false `backdrop_variant` **is** the frame's variant, so no module is built;
+- `prepare_pipelines` and `Drawer::run` gain one `color_mode == 2` comparison per run, on a field
+  both lines already read — and with the model off its two arms are the same value, so no pipeline
+  is added and none is switched to.
+
+The four instruction counts are still **2231 / 1095 / 3401 / 159**, and `git diff --stat` over the
+OpenGL path is **empty for this step**.
+
+#### Parity, measured
+
+Release, 640 × 480, anti-aliasing off, the backdrop model **on** — which is the desktop default
+since AMD-049 and the configuration step 1 found broken. The scene list is the backdrop's own:
+`backdrop` is the one capture of the set built for it, and the other three are the control.
+
+| scene | step 1 (no port) | this step | max channel |
+|---|---|---|---|
+| **`backdrop`** | **58.930 %** | **99.9990 %** | 107 |
+| `shadow` | — | 99.9990 % | 107 |
+| `heavy` | — | 99.6423 % | 223 |
+| `hud` | — | 100.0000 % | 0 |
+
+`heavy` is the Classic control's own figure and `hud` is exact; the `backdrop` row is now the same
+99.999 % the rest of the set reads. Under the curvature **and** the voxel grid — the configuration
+that exercises `backdrop_bend_grid`, the fourth and last variant — `backdrop` reads **99.9993 %**
+and `heavy` 99.7972 %, both better than the flat rows for the reason step 2 gave.
+
+And the model does something, and the same something:
+
+| | `backdrop` | `shadow` | `heavy` | `hud` |
+|---|---|---|---|---|
+| OpenGL moves | **41.0690 %** | 0.0000 % | 0.0000 % | 0.0000 % |
+| Vulkan moves | **41.0690 %** | 0.0000 % | 0.0000 % | 0.0000 % |
+| DX12 moves | **41.0690 %** | 0.0000 % | 0.0000 % | 0.0000 % |
+
+Identical to four decimals on all three, and **exactly zero** on every capture of the set that
+draws no backdrop — which is the half of the check that would have caught the gap step 1 found: a
+backend that ignored `render.backdrop_lighting` reads 100 % agreement on every scene and is wrong
+on one of them by 41 % of its pixels.
+
+`shadow`, `no-shadow` and `layer-shadow-off` turning out **not** to move is a property of the
+synthetic set measured here rather than assumed — the same discipline step 4b applied to the
+occlusion's scene list, and the test asserts it so that a fixture change which gives them a
+backdrop is a failure rather than a silent weakening.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| the model's two constants, its Fresnel, its half-vector fallback, its specular term's light colour, the `1 - F0` and the eye are in the WGSL | `amd049_backdrop_tests.rs` `req_scn_075_the_wgpu_backend_carries_the_model_as_a_variant_of_its_own` (new) |
+| **and it is a variant**: the tile variant carries none of the six names, and the backdrop variant carries none of the atlas machinery | the same test, through `wgpu_backend::expand_wgsl` — the twin of what the OpenGL half of that file does over `shaders::assemble` |
+| REQ-SCN-075 agrees between the backends with the model on | `parity_wgpu_tests.rs` `req_scn_075_the_backdrop_lighting_agrees_between_the_backends` |
+| and under the curvature and the grid, which is its fourth variant | `req_scn_075_the_lit_backdrop_agrees_under_curvature_and_the_grid` |
+| it moves as much of `backdrop` on each backend, and **nothing at all** of the captures that have none | `req_scn_075_the_backdrop_lighting_moves_as_much_of_the_frame_on_each_backend` |
+
+`cargo test --release -p zax-render --features wgpu`: 34 suites, **323 passed, 0 failed**, 1
+ignored. `-p zax-harness --features wgpu`: 13 suites, **77 passed, 0 failed** (26 of them
+`parity_wgpu_tests`). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+--features zax-app/wgpu -- -D warnings` clean.
+
+#### Step 1's map is now empty
+
+Every line of the table step 1 drew up against `gl/` is ported: the curvature and its shadow pass,
+the subdivided box, the centroid, the voxel grid, the pixel shadows, the floor mask, the Depth
+occlusion, the MSVO estimator with its `R16F` pyramid and its fallback, the reflections, the shared
+depth helpers, REQ-SCN-080's frame order, the lazy lifecycle, the anti-aliasing levels — and the
+backdrop model this step records as out of scope and the owner put back in. What is left of the lot
+is measurement and closing.
+
 ### The design 4b was built from, and what is left after it
 
 Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
@@ -1299,7 +1420,7 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 | ~~4b~~ | ~~`wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics~~ — **landed**, see its own section above |
 | ~~4c~~ | ~~`ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment~~ — **landed**, see its own section above |
 | ~~4d~~ | ~~`msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line~~ — **landed**, see its own section above |
-| 4e | `backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075, the step the owner added between the two sessions (see the checklist) |
+| ~~4e~~ | ~~`backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075~~ — **landed**: not a file of its own in the end, but a variant of `scene.wgsl`, see its own section above |
 | — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
 | 5 | the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures |
 | 6 | the close: `PERFORMANCE-HISTORY.md`, the Q-104 closing section answering its questions 1, 3 and 4, the full suite, the release build with `zax-app/bundled,zax-app/wgpu` |

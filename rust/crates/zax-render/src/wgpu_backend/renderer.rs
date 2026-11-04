@@ -71,9 +71,9 @@ const AFFINE_PLACEMENT: AffinePlacement = AffinePlacement;
 
 /// Bytes of a deformation (`Deform` in common.wgsl), which only deformed runs have.
 const DEFORM_BYTES: u64 = 128;
-/// Bytes of the frame block (`Frame` in scene.wgsl): two matrices and five `vec4`, then the four
-/// curvature `vec4` of AMD-043 REQ-SCN-067, rounded up to the alignment.
-const FRAME_BYTES: u64 = 288;
+/// Bytes of the frame block (`Frame` in scene.wgsl): two matrices and five `vec4`, the eye of
+/// AMD-049 REQ-SCN-075, the four curvature `vec4` of AMD-043 REQ-SCN-067 and AMD-055's own.
+const FRAME_BYTES: u64 = 304;
 /// Bytes of the shadow frame block (`ShadowFrame` in shadow.wgsl): the matrix, the time, and the
 /// same four curvature `vec4` (REQ-SCN-068 bends this pass too).
 const SHADOW_FRAME_BYTES: u64 = 144;
@@ -162,6 +162,10 @@ struct ShaderVariant {
     /// stage is the `+Y >= 0,9` test of the floor definition. Never a *frame's* variant — only
     /// [`Self::mask`] sets it, for the one pass that lays the mask down.
     floor_mask: bool,
+    /// AMD-049 REQ-SCN-075: the almost-matt reflection model of the backdrop. Never a *frame's*
+    /// variant either — only [`Self::backdrop`] sets it, for the one **run** of the opaque bucket
+    /// whose colour mode is 2.
+    backdrop: bool,
 }
 
 impl ShaderVariant {
@@ -172,6 +176,7 @@ impl ShaderVariant {
         pixel_shadow: false,
         centroid: false,
         floor_mask: false,
+        backdrop: false,
     };
 
     /// The defines [`preprocess::compose`] expands this variant's sources with.
@@ -191,6 +196,9 @@ impl ShaderVariant {
         }
         if self.floor_mask {
             defines.push("ZAX_FLOOR_MASK");
+        }
+        if self.backdrop {
+            defines.push("ZAX_BACKDROP");
         }
         defines
     }
@@ -219,6 +227,7 @@ impl ShaderVariant {
             (self.pixel_shadow, " pixel-shadow"),
             (self.centroid, " centroid"),
             (self.floor_mask, " floor-mask"),
+            (self.backdrop, " backdrop"),
         ] {
             if on {
                 suffix.push_str(name);
@@ -238,6 +247,24 @@ impl ShaderVariant {
             pixel_shadow: false,
             centroid: false,
             floor_mask: false,
+            backdrop: false,
+        }
+    }
+
+    /// The variant the **backdrop** of AMD-049 REQ-SCN-075 asks for: the curvature, because the
+    /// backdrop bends with the scene (REQ-SCN-068), and the voxel grid, because REQ-SCN-081 applies
+    /// to the faces of the box (AMD-055 §3 point 5). The pixel shadows do not — REQ-SCN-082 is
+    /// "sans objet sur le backdrop" — and neither does AMD-058's centroid: the backdrop carries one
+    /// flat colour and reads no texel coordinate at all. Those are exactly the two axes
+    /// `shaders::backdrop(bend, voxel_grid)` has on the OpenGL side.
+    const fn backdrop(self) -> Self {
+        Self {
+            bend: self.bend,
+            voxel_grid: self.voxel_grid,
+            pixel_shadow: false,
+            centroid: false,
+            floor_mask: false,
+            backdrop: true,
         }
     }
 
@@ -253,6 +280,7 @@ impl ShaderVariant {
             pixel_shadow: false,
             centroid: false,
             floor_mask: true,
+            backdrop: false,
         }
     }
 }
@@ -469,6 +497,11 @@ pub struct WgpuSceneRenderer {
     multi_scale: bool,
     /// Whether that line has been written. One per renderer, as `RenderDiagnostics` bounds its own.
     msvo_reported: bool,
+    /// AMD-049 REQ-SCN-075: the variant the backdrop run draws with this frame, chosen once by
+    /// [`Self::select_bend_variant`]. **The frame's own variant** when `render.backdrop_lighting`
+    /// is off or the profile has no backdrop, which is what makes the setting cost one comparison
+    /// per opaque run and nothing else.
+    backdrop_variant: ShaderVariant,
     /// How many scene modules AMD-055 added: a variant with the voxel grid of REQ-SCN-081 or the
     /// pixel shadows of REQ-SCN-082. **0 in Classic**, and 0 in Enhanced until one of the two is
     /// turned on, which is what `ScenePrograms::style_programs` counts on the other side.
@@ -674,6 +707,7 @@ impl WgpuSceneRenderer {
             linear: None,
             linear_generation: 0,
             screen_effects: None,
+            backdrop_variant: ShaderVariant::PLAIN,
             multi_scale,
             msvo_reported: false,
             style_modules: 0,
@@ -767,9 +801,11 @@ impl WgpuSceneRenderer {
             // the fallback draws the same pixels. With `video.anti_alias` = 0 nothing is built,
             // which is what keeps the handheld default on the module of before this amendment.
             centroid: scene.settings.anti_alias_samples() > 1,
-            // Never a frame's variant: `ShaderVariant::mask` is what sets it, for the one pass of
-            // REQ-SCN-084 that lays the mask down.
+            // Never a frame's variant: `ShaderVariant::mask` and `::backdrop` are what set these,
+            // for the one pass of REQ-SCN-084 that lays the mask down and the one run of
+            // REQ-SCN-075 that is the backdrop.
             floor_mask: false,
+            backdrop: false,
         };
         self.ensure_modules(variant);
         // REQ-SCN-081: the HUD never takes the grid, and it draws with the flat variant of
@@ -777,6 +813,18 @@ impl WgpuSceneRenderer {
         if variant != ShaderVariant::PLAIN {
             self.ensure_modules(hud_variant(variant));
         }
+        // AMD-049 REQ-SCN-075: the backdrop's own variant, when this frame wants the model at all
+        // (`render.backdrop_lighting` and a backdrop to draw). The twin of
+        // `SceneRenderer::select_backdrop_variant`, and like it one `&&` on a frame that does not:
+        // the variant is then the frame's, so the opaque loop never switches and no module is
+        // built.
+        self.backdrop_variant = if scene.settings.backdrop_lighting && scene.backdrop.enabled {
+            let backdrop = variant.backdrop();
+            self.ensure_modules(backdrop);
+            backdrop
+        } else {
+            variant
+        };
         if bend {
             let cells = interop::subdivision_for(true);
             if self.unit_box_bent.is_none() {
@@ -1364,6 +1412,7 @@ impl WgpuSceneRenderer {
             cull: scene.settings.cull_back_faces,
             samples: wanted,
             variant,
+            backdrop: self.backdrop_variant,
         };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1723,12 +1772,18 @@ impl WgpuSceneRenderer {
     ) {
         let lists = &self.plan.lists;
         let mut wanted = Vec::new();
+        let backdrop = self.backdrop_variant;
         let mut want = |items: &[WgpuDrawItem],
                         runs: &[InstanceRun],
                         modes: &[SceneMode],
                         variant: ShaderVariant| {
             for run in runs {
-                let mirrored = interop::normal_matrix(&items[run.first].model).1 < 0.0;
+                let item = &items[run.first];
+                let mirrored = interop::normal_matrix(&item.model).1 < 0.0;
+                // AMD-049 REQ-SCN-075: the backdrop is colour mode 2, and the only run that is.
+                // The test rides on a field this line already reads, and when the model is off
+                // `backdrop_variant` *is* `variant`, so it chooses nothing.
+                let variant = run_variant(variant, backdrop, item.color_mode);
                 for &mode in modes {
                     wanted.push(SceneKey {
                         mode,
@@ -1915,6 +1970,28 @@ struct BucketScene<'a> {
     /// follows a screen effect (REQ-SCN-080).
     samples: u32,
     variant: ShaderVariant,
+    /// AMD-049 REQ-SCN-075: the variant of the one opaque run whose colour mode is 2, or
+    /// `variant` when this frame does not want the model.
+    backdrop: ShaderVariant,
+}
+
+/// The variant one run of the opaque bucket draws with: the frame's, or the backdrop's for the one
+/// run AMD-049 REQ-SCN-075 lights differently.
+///
+/// Colour mode 2 is the backdrop and the only run that is (REQ-SCN-048), so the test is on a field
+/// the draw path already reads — the same place and the same reading as
+/// `ScenePrograms::set_backdrop` on the OpenGL side. With the model off, `backdrop` is `variant`
+/// and this is one comparison whose two arms are equal.
+const fn run_variant(
+    variant: ShaderVariant,
+    backdrop: ShaderVariant,
+    color_mode: i32,
+) -> ShaderVariant {
+    if color_mode == 2 {
+        backdrop
+    } else {
+        variant
+    }
 }
 
 /// Draws `which` of the scene's buckets into `pass`, in REQ-SCN-058's order.
@@ -1953,6 +2030,7 @@ fn draw_buckets(
         cull: scene.cull,
         samples: scene.samples,
         variant: scene.variant,
+        backdrop: scene.backdrop,
         current: None,
         bound_textures: None,
         indirect,
@@ -1980,6 +2058,7 @@ fn draw_buckets(
         }
         // 3. HUD (REQ-SCN-044), which never bends (REQ-SCN-068).
         draw.variant = hud_variant(scene.variant);
+        draw.backdrop = draw.variant;
         for group in &lists.hud_objects {
             draw.blended(&lists.hud, &lists.hud_runs, group.runs, hud_base);
         }
@@ -2192,6 +2271,9 @@ struct Drawer<'p, 'a> {
     samples: u32,
     /// The variant the runs drawn now ask for; the HUD puts the plain one back (REQ-SCN-068).
     variant: ShaderVariant,
+    /// The variant the backdrop run asks for (AMD-049 REQ-SCN-075), or `variant` when this frame
+    /// does not want the model.
+    backdrop: ShaderVariant,
     current: Option<SceneKey>,
     bound_textures: Option<(Option<TextureHandle>, Option<TextureHandle>)>,
     /// The indirect arguments of the runs when the draws are batched.
@@ -2210,7 +2292,7 @@ impl Drawer<'_, '_> {
             mirrored: interop::normal_matrix(&item.model).1 < 0.0,
             samples: self.samples,
             batched: self.indirect.is_some(),
-            variant: self.variant,
+            variant: run_variant(self.variant, self.backdrop, item.color_mode),
         };
         let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
         self.statistics.batches += 1;
@@ -3031,6 +3113,7 @@ const fn hud_variant(variant: ShaderVariant) -> ShaderVariant {
         pixel_shadow: false,
         centroid: variant.centroid,
         floor_mask: false,
+        backdrop: false,
     }
 }
 
@@ -3066,6 +3149,10 @@ fn frame_bytes(constants: &SceneConstants, local_camera: bool) -> Vec<u8> {
     );
     push_vec4(&mut data, vec3(constants.light_direction, 0.0));
     push_vec4(&mut data, vec3(constants.hud_light_direction, 0.0));
+    // AMD-049 REQ-SCN-075: the eye the backdrop's view vector is taken from. Written whatever the
+    // variant, for the reason `push_bend` gives — the block has one layout, and the OpenGL path's
+    // "uploaded to that program only" has no equivalent here.
+    push_vec4(&mut data, vec3(constants.eye, 0.0));
     push_bend(&mut data, constants.bend);
     // AMD-055 REQ-SCN-081: the voxel cell side, and REQ-SCN-084's floor vertical in the three
     // slots that `vec4` had spare. Written whatever the variant, for the reason `push_bend` gives,

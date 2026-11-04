@@ -563,3 +563,67 @@ fn the_head_on_fixture_really_looks_down_the_axis() {
         view.eye
     );
 }
+
+/// RU-7 step 4e: the model of REQ-SCN-075 is in the `wgpu` backend too, and it is still a
+/// **variant** there — no tile fragment carries any of it, which is the requirement of the lot
+/// that introduced it and the reason it is a program of its own on the OpenGL side.
+///
+/// Step 1 of RU-7 measured what its absence cost: with `render.backdrop_lighting` on — the desktop
+/// default since this amendment — the two backends agreed on **58.930 %** of the `backdrop`
+/// capture. The owner put the port into that lot; this is the static half of the check, and
+/// `zax-harness/tests/parity_wgpu_tests.rs` is the measured half.
+///
+/// Whether the WGSL compiles is not a question this side can answer — naga validates at module
+/// creation — which is why the figures live in the harness file.
+#[cfg(feature = "wgpu")]
+#[test]
+fn req_scn_075_the_wgpu_backend_carries_the_model_as_a_variant_of_its_own() {
+    const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
+
+    // The model itself: its two constants, its Fresnel, its half-vector fallback, the specular
+    // term that carries the light colour and not the albedo, and the `1 - F0` the diffuse part
+    // gives up.
+    assert!(SCENE.contains("ZAX_BACKDROP_ROUGHNESS: f32 = 0.99"));
+    assert!(SCENE.contains("ZAX_BACKDROP_REFLECTANCE: f32 = 0.04"));
+    assert!(SCENE.contains("fn zax_backdrop_fresnel("));
+    assert!(SCENE.contains("fn zax_pow5("));
+    assert!(SCENE.contains("select(n, normalize(sum), dot(sum, sum) > 0.0)"));
+    assert!(SCENE.contains("frame.light_ambient.xyz * (shadow * spec * f)"));
+    assert!(SCENE.contains("(1.0 - ZAX_BACKDROP_REFLECTANCE)"));
+    // And the eye the view vector comes from, which the OpenGL path gives to this program alone.
+    assert!(SCENE.contains("frame.eye.xyz - in.scene"));
+
+    // It is behind its own marker, so the module a tile draws with carries none of it: expanded
+    // without `ZAX_BACKDROP`, not one of the names above survives.
+    assert!(SCENE.contains("//#ifdef ZAX_BACKDROP"));
+    let plain = zax_render::wgpu_backend::expand_wgsl(SCENE, &[]);
+    for forbidden in [
+        "ZAX_BACKDROP_ROUGHNESS",
+        "ZAX_BACKDROP_REFLECTANCE",
+        "zax_backdrop_fresnel",
+        "zax_pow5",
+        "frame.eye",
+        "ZAX_PI",
+    ] {
+        assert!(
+            !common::mentions(&plain, forbidden),
+            "the tile variant of the wgpu scene module is given {forbidden}"
+        );
+    }
+    // And the other way round: the backdrop variant reads one flat colour, so it holds none of the
+    // atlas machinery of REQ-SCN-034. The names are written with their parenthesis, which is what
+    // makes them **calls**: the file's own header mentions the two texel functions in prose, to
+    // say where they come from, and that sentence is what a reader wants.
+    let backdrop = zax_render::wgpu_backend::expand_wgsl(SCENE, &["ZAX_BACKDROP"]);
+    for forbidden in [
+        "zax_index_texel(",
+        "zax_color_texel(",
+        "textureLoad(palette",
+        "zax_mod(",
+    ] {
+        assert!(
+            !backdrop.contains(forbidden),
+            "the backdrop variant of the wgpu scene module is given {forbidden}"
+        );
+    }
+}

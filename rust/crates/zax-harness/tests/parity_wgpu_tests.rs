@@ -76,6 +76,17 @@ fn figures(a: &[u8], b: &[u8]) -> Figures {
 /// run in parallel and two of them may ask for the same label and backend, in which case one
 /// would delete the folder the other is still reading.
 fn capture(label: &str, backend: Option<&str>, extra: &[&str]) -> Option<PathBuf> {
+    capture_with(label, backend, extra, false)
+}
+
+/// The same with the backdrop model of AMD-049 REQ-SCN-075 **on**, which is the desktop default
+/// (`lit`). Every other test of this file turns it off so that one variable moves at a time; the
+/// backdrop is a subject of its own, below.
+fn capture_lit(label: &str, backend: Option<&str>, extra: &[&str]) -> Option<PathBuf> {
+    capture_with(label, backend, extra, true)
+}
+
+fn capture_with(label: &str, backend: Option<&str>, extra: &[&str], lit: bool) -> Option<PathBuf> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let output = std::env::temp_dir().join(format!(
         "zax-parity-{label}-{}-{}-{}",
@@ -86,12 +97,12 @@ fn capture(label: &str, backend: Option<&str>, extra: &[&str]) -> Option<PathBuf
     let mut arguments = vec![
         "--out".to_owned(),
         output.display().to_string(),
-        // The anti-aliasing and the backdrop model are fixed here so that one variable moves at a
-        // time; the anti-aliasing levels are a subject of their own, below.
         "--anti-alias".to_owned(),
         "0".to_owned(),
-        "--no-backdrop-lighting".to_owned(),
     ];
+    if !lit {
+        arguments.push("--no-backdrop-lighting".to_owned());
+    }
     if let Some(backend) = backend {
         arguments.push("--backend".to_owned());
         arguments.push(backend.to_owned());
@@ -133,16 +144,28 @@ fn backends() -> Vec<&'static str> {
 ///
 /// `label` names the effect in the printed table and in the temporary folders.
 fn parity(label: &str, extra: &[&str]) -> Option<(f64, u8)> {
-    let reference = capture(label, None, extra).expect("the OpenGL backend always renders");
+    parity_with(label, extra, false, &SCENES)
+}
+
+/// The same with the backdrop model of AMD-049 REQ-SCN-075 on, over the scenes that have a
+/// backdrop — which [`SCENES`] alone does not reach, since the one scene built for it is not in
+/// that list.
+fn parity_lit(label: &str, extra: &[&str]) -> Option<(f64, u8)> {
+    parity_with(label, extra, true, &BACKDROP_SCENES)
+}
+
+fn parity_with(label: &str, extra: &[&str], lit: bool, scenes: &[&str]) -> Option<(f64, u8)> {
+    let reference =
+        capture_with(label, None, extra, lit).expect("the OpenGL backend always renders");
     let mut worst_share = 1.0_f64;
     let mut worst_channel = 0_u8;
     let mut any = false;
     for backend in backends() {
-        let Some(capture) = capture(label, Some(backend), extra) else {
+        let Some(capture) = capture_with(label, Some(backend), extra, lit) else {
             continue;
         };
         any = true;
-        for scene in SCENES {
+        for &scene in scenes {
             let figures = figures(&load(&capture, scene), &load(&reference, scene));
             println!(
                 "{label:22} {backend:7} {scene:<10} max {:>3} levels, {:>7.4} % of pixels differ, \
@@ -793,6 +816,124 @@ fn req_scn_084_the_reflections_cost_the_same_passes_and_bytes_on_each_backend() 
         }
         fs::remove_dir_all(&reference).unwrap();
     }
+}
+
+// ------------------------------------------- AMD-049, the backdrop lighting of REQ-SCN-075
+
+/// The scenes the backdrop model is read on: the one built for it, and three it must leave
+/// **untouched**.
+///
+/// Measured rather than assumed, as the occlusion's own scene list was: on the OpenGL backend
+/// `render.backdrop_lighting` moves **41.07 %** of `backdrop` and **0.0000 %** of every other
+/// capture of the set — including `shadow`, `no-shadow` and `layer-shadow-off`, which draw no
+/// backdrop of their own, and `hud`, which has none either. So the test below reads the first for
+/// the effect and the rest as a control, which is what pins "no run but the backdrop's".
+const BACKDROP_SCENES: [&str; 4] = ["backdrop", "shadow", "heavy", "hud"];
+
+/// AMD-049 REQ-SCN-075: the almost-matt reflection model of the backdrop, which is **on by
+/// default** on the desktop and which this backend did not render at all before this step.
+///
+/// Step 1 of this lot measured it and recorded it as out of scope: rendered with the model on, the
+/// two backends agreed on **58.930 %** of the `backdrop` scene. The owner put it into the lot
+/// between the two sessions, and this is the test that holds the result.
+#[test]
+fn req_scn_075_the_backdrop_lighting_agrees_between_the_backends() {
+    let Some((share, channel)) = parity_lit("backdrop-lit", &[]) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the lit backdrop agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "backdrop lighting: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// The same with the curvature and the voxel grid, which are the backdrop variant's two axes
+/// (REQ-SCN-068 bends the box, and AMD-055 §3 point 5 puts the grid on its faces) — so this is
+/// the configuration that exercises `backdrop_bend_grid`, the fourth and last of them.
+#[test]
+fn req_scn_075_the_lit_backdrop_agrees_under_curvature_and_the_grid() {
+    let Some((share, _)) = parity_lit(
+        "backdrop-bend-grid",
+        &[
+            "--bend",
+            "45,0,0",
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.voxel_grid=3",
+        ],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the lit backdrop under curvature and the grid agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+}
+
+/// And the model has to **do** something on the `wgpu` side, and the same something: the scenes
+/// that have a backdrop move with it, by as much as they do on OpenGL, and the ones that have none
+/// do not move at all.
+///
+/// This is the half of the check the share cannot make, and the half that would have caught the
+/// gap step 1 found: a backend that ignored `render.backdrop_lighting` would read 100 % here on
+/// every scene and would have been wrong on five of them.
+#[test]
+fn req_scn_075_the_backdrop_lighting_moves_as_much_of_the_frame_on_each_backend() {
+    let plain = capture("backdrop-plain", None, &[]).expect("OpenGL always renders");
+    let lit = capture_lit("backdrop-lit-moves", None, &[]).expect("OpenGL always renders");
+    let reference: Vec<f64> = BACKDROP_SCENES
+        .iter()
+        .map(|scene| figures(&load(&plain, scene), &load(&lit, scene)).differing)
+        .collect();
+    for (scene, moved) in BACKDROP_SCENES.iter().zip(&reference) {
+        println!(
+            "the OpenGL backdrop model moves {:.4} % of `{scene}`",
+            moved * 100.0
+        );
+    }
+    assert!(
+        reference[0] > 0.10,
+        "the OpenGL model moved only {:.4} % of `backdrop`",
+        reference[0] * 100.0
+    );
+    for (scene, moved) in BACKDROP_SCENES.iter().zip(&reference).skip(1) {
+        assert_eq!(
+            0.0, *moved,
+            "`{scene}` draws no backdrop, so REQ-SCN-075 must leave it alone on OpenGL too"
+        );
+    }
+
+    for backend in backends() {
+        let Some(flat) = capture("backdrop-plain", Some(backend), &[]) else {
+            continue;
+        };
+        let on = capture_lit("backdrop-lit-moves", Some(backend), &[]).unwrap();
+        for (scene, theirs) in BACKDROP_SCENES.iter().zip(&reference) {
+            let moved = figures(&load(&flat, scene), &load(&on, scene)).differing;
+            println!(
+                "the model on {backend} moves {:.4} % of `{scene}`, OpenGL {:.4} %",
+                moved * 100.0,
+                theirs * 100.0
+            );
+            assert!(
+                (moved - theirs).abs() < 0.01,
+                "the model on {backend} moved {:.4} % of `{scene}` against OpenGL's {:.4} %",
+                moved * 100.0,
+                theirs * 100.0
+            );
+        }
+        fs::remove_dir_all(&flat).unwrap();
+        fs::remove_dir_all(&on).unwrap();
+    }
+    fs::remove_dir_all(&plain).unwrap();
+    fs::remove_dir_all(&lit).unwrap();
 }
 
 // ------------------------------------------------------------- AMD-032, the anti-aliasing levels
