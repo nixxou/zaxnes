@@ -17,7 +17,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
   budget loop, blargg `$6000` reader, JSON rows, final-frame PNGs.
 - [x] 2/10 — screen readers: nametable → text through the ROM's own CHR font, and the
   documented pass/fail screens of the non-blargg suites.
-- [ ] 3/10 — Holy Mapperel reader: detected board and the four detailed nibbles.
+- [x] 3/10 — Holy Mapperel reader: detected board and the four detailed nibbles.
 - [ ] 4/10 — AccuracyCoin reader: Start at the menu top, then the `$0400-$0498` result
   table and the pass tally.
 - [ ] 5/10 — `--markdown` report generator, with the reference column taken from
@@ -102,6 +102,24 @@ failures) and stages nothing.
 * `blargg_ppu_tests_2005.09.15b/power_up_palette` reports `$02`, "Palette differs from table".
   Its readme says the reference values "are probably unique to my NES", so the report must note
   that and not read it as a plain emulation defect.
+
+### Holy Mapperel, step 3
+
+All 40 boards in 6.5 s: **32 pass, 2 fail, 6 unsupported**. Every board the ROM detects
+matches the header, and the sizes it measures match the file.
+
+* The six `unsupported` rows are mappers the registry does not list at all — 69 (JLROM/JSROM,
+  FME-7), 78.3 (IF-12), 118 (TxSROM) and 180 (UNROM 7408). This is a gap in coverage, not a
+  defect, and the report says so.
+* The two failures are `M1_P128K.nes` and `M1_P128K_CR8K.nes`, both SNROM, both
+  `DETAILED TEST RESULT: 4000`. The README reads digit 4 of the WRAM nibble as "$A000 bit 4
+  does not disable WRAM (SNROM)". The other eleven MMC1 boards — SJROM, SKROM, SUROM, SXROM —
+  are `0000`, so this is the SNROM-only CHR-register WRAM-disable line and nothing wider.
+  A finding for lot MF-2 or a follow-up MR ticket; this lot does not fix emulation.
+* `PRG RAM MISSING` is **not** read as a failure: BNROM and the A53 have no work RAM and are
+  right to say so. Only the four detailed digits and an explicit `BAD` decide the verdict,
+  which is what the README commits to ("Zero is normal; anything else reflects something
+  unexpected").
 
 ### Campaign runs
 

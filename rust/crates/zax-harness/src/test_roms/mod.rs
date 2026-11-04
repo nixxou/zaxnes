@@ -23,6 +23,7 @@
 //! `run_frame`, `soft_reset` — so nothing was added to a per-cycle or per-access path.
 
 pub mod blargg;
+pub mod mapperel;
 pub mod screen;
 
 use std::fs;
@@ -375,6 +376,7 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
             }
         },
         Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
+        Protocol::Mapperel => mapperel::run(&mut core, result.mapper, plan.frames),
     };
 
     result.protocol = verdict.protocol;
@@ -439,6 +441,8 @@ enum Protocol {
     BlarggThenScreen,
     /// A ROM known to report on screen only.
     Screen,
+    /// Holy Mapperel: a screen with a documented layout, read field by field.
+    Mapperel,
 }
 
 /// The reader and the frame budget of one ROM.
@@ -456,7 +460,9 @@ impl Plan {
     /// budget only decides how long a hang is given before it is called a timeout.
     fn of(name: &str, frame_cap: Option<u32>) -> Self {
         let lower = name.to_ascii_lowercase();
-        let (protocol, frames) = if screen::is_screen_rom(&lower) {
+        let (protocol, frames) = if lower.contains("holy-mapperel") {
+            (Protocol::Mapperel, screen::frame_budget(&lower))
+        } else if screen::is_screen_rom(&lower) {
             (Protocol::Screen, screen::frame_budget(&lower))
         } else {
             (Protocol::BlarggThenScreen, blargg::frame_budget(&lower))
