@@ -19,7 +19,7 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 25, 27, 28, 30, 32, 34, 41, 64, 66,
-    69, 71, 87, 101, 118, 156, 225, 228,
+    69, 71, 87, 101, 118, 156, 180, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -144,7 +144,10 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
     let submapper = if header.is_nes20 { header.submapper } else { 0 };
     match mapper {
         2 | 3 | 7 => submapper == 2,
-        11 | 66 => true,
+        // *INES Mapper 180* gives the board "Bus conflicts: Yes" with no submapper clause: the
+        // AND logic that makes its fixed bank the first one is what puts the ROM on the bus
+        // during a write.
+        11 | 66 | 180 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
         _ => false,
@@ -157,7 +160,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
     Some(match mapper {
         0 => Board::Nrom(Nrom),
         1 => Board::Mmc1(Mmc1::new(memory)),
-        2 => Board::UxRom(UxRom::new(memory)),
+        2 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
         3 => Board::CnRom(CnRom::new(memory)),
         4 | 118 => Board::Mmc3(Mmc3::new(memory, mapper)),
         5 => Board::Mmc5(Mmc5::new(memory)),

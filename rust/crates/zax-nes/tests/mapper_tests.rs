@@ -48,13 +48,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     //
     // * 156, Daou 306, which runs Metal Force (Korea), a widescreen target;
     // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3);
-    // * 118, TxSROM, which shares the MMC3's board (MF-3 step 5).
+    // * 118, TxSROM, which shares the MMC3's board (MF-3 step 5);
+    // * 180, the other 74-series wiring of the UxROM board (MF-3 step 6).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![69, 118, 156], extra);
+    assert_eq!(vec![69, 118, 156, 180], extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -242,6 +243,41 @@ fn req_core_100_axrom_switches_32_kib_and_selects_the_single_nametable() {
         core.map_nametable(0x2000) + 1024,
         core.map_nametable(0x2400) + 1024
     );
+}
+
+/// nesdev ("INES Mapper 180"): the board is a UNROM that "uses AND logic (74HC08) instead of OR
+/// logic (74HC32), producing a fixed first bank at $8000 rather than a fixed last bank at
+/// $C000". *Crazy Climber* is the only game (REQ-CORE-102).
+#[test]
+fn req_core_100_mapper_180_fixes_the_first_bank_and_switches_at_c000() {
+    // The board has bus conflicts, so the register is written through a bank of $FF: 8 KiB bank
+    // 0 is the low half of the fixed 16 KiB window at $8000.
+    let mut core = MapperRom::new(180)
+        .prg(16)
+        .chr(0)
+        .prg_bank_all_ones(0)
+        .load();
+    assert_eq!(180, core.cartridge().unwrap().mapper_number());
+
+    // Power-on: the first bank at $8000 and bank 0 at $C000, not the last one — so both
+    // windows show the same two 8 KiB banks, the low one being the $FF-filled bank 0.
+    assert_eq!([0xFF, 1, 0xFF, 1], core.prg_windows());
+
+    core.write_memory(0x8000, 0x03);
+    assert_eq!([0xFF, 1, 6, 7], core.prg_windows());
+    core.write_memory(0x8000, 0x07);
+    assert_eq!([0xFF, 1, 14, 15], core.prg_windows());
+}
+
+/// And mapper 2 keeps the other wiring, with no submapper and therefore no bus conflicts
+/// (MR-BUS-1): the register switches $8000 and the **last** bank is fixed at $C000.
+#[test]
+fn req_core_100_mapper_2_keeps_the_fixed_last_bank() {
+    let mut core = MapperRom::new(2).prg(16).chr(0).load();
+    assert_eq!(2, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.write_memory(0x8000, 0x03);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
 }
 
 // ---------------------------------------------------------------- MMC3 (4)

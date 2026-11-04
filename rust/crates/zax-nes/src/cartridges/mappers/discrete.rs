@@ -5,25 +5,45 @@ use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
-/// iNES mapper 2, UxROM: a write in $8000-$FFFF selects the 16 KiB bank at $8000, the last
-/// bank is fixed at $C000, CHR is not switched (nesdev, "UxROM").
+/// iNES mappers 2 and 180, UxROM: a write in $8000-$FFFF selects a 16 KiB bank, the other
+/// window is fixed, CHR is not switched (nesdev, "UxROM" and "INES Mapper 180").
+///
+/// **Mapper 180 is the same board with the other half of the 74 series.** Its page gives the
+/// board name as "UNROM" too and explains the difference in one sentence: it "uses AND logic
+/// (74HC08) instead of OR logic (74HC32), producing a fixed first bank at $8000 rather than a
+/// fixed last bank at $C000". So it is a wiring of this board, decided at load, and not a
+/// `Board` variant of its own — the enum's note says why that matters. *Crazy Climber* is the
+/// only game.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UxRom {
     banks: BankWindows,
+    /// 2 or 180, for [`Mapper::mapper_number`].
+    mapper_number: i32,
+    /// Mapper 180's wiring: the **first** bank fixed at $8000 and the register switching
+    /// $C000-$FFFF, where mapper 2 does the opposite. Decided at load.
+    fixed_first: bool,
     bank: u8,
 }
 
 impl UxRom {
-    pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+    pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         Self {
             banks: windows_for(memory),
+            mapper_number,
+            fixed_first: mapper_number == 180,
             bank: 0,
         }
     }
 
     fn update_banks(&mut self) {
-        self.banks.map_prg_16k(0, i32::from(self.bank));
-        self.banks.map_prg_16k(2, -1);
+        if self.fixed_first {
+            self.banks.map_prg_16k(0, 0);
+            self.banks.map_prg_16k(2, i32::from(self.bank));
+        } else {
+            self.banks.map_prg_16k(0, i32::from(self.bank));
+            self.banks.map_prg_16k(2, -1);
+        }
+
         self.banks.map_chr_8k(0);
     }
 }
@@ -41,7 +61,7 @@ impl Mapper for UxRom {
     }
 
     fn mapper_number(&self) -> i32 {
-        2
+        self.mapper_number
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {

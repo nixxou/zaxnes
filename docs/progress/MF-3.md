@@ -30,7 +30,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 3/9 — mapper 69, Sunsoft FME-7 (banks, CPU-cycle IRQ, $6000 RAM/ROM switching)
 - [x] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
 - [x] 5/9 — mapper 118, TxSROM
-- [ ] 6/9 — mapper 180, UNROM with the switchable bank at $C000
+- [x] 6/9 — mapper 180, UNROM with the switchable bank at $C000
 - [ ] 7/9 — mapper 78, submappers 1 and 3
 - [ ] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
 - [ ] 9/9 — re-run the suites, the campaign document, and the close of the lot
@@ -76,6 +76,7 @@ Before the lot (`7cbd9c52`):
 | mapper 69, Sunsoft FME-7 / 5A / 5B — a **new board** (REQ-CORE-102) | `fme7.rs` (new, 240 lines), `board.rs:12-30` (the append rule) + `:70-72` + `:105` (the variant), `registry.rs:20-23` (`SUPPORTED_MAPPERS`) + `:181` (`create_board`), `mappers/mod.rs:26` + `:40` | `req_core_100_fme7_*` x4 and `req_core_090_the_fme7_state_survives_a_save_and_restore` in `mapper_tests.rs`, `req_core_100_the_fme7_*` x3 and `req_core_100_a_write_to_fme7_command_d_acknowledges_the_irq` in `mapper_irq_tests.rs`; `M69_P128K_C64K_S8K` and `_W8K` now **pass** with `detailed 0000` | `Board::ppu_peek` 240 → **251**, `ppu_read` 241 → **252**; `read_pattern_planes` and `read_nametable_as` **byte-identical**. The +11 is LLVM switching the function's shared bounds-check tail from tail-*merging* to tail-*duplication*: the arms' own code is unchanged and the executed path of the arms concerned is **one instruction and two taken branches shorter**. Every other hot dispatch (`on_cpu_cycle`, `irq_asserted`) has its existing arms **byte-identical** with the FME-7's appended. See "Step 3" for the wall-clock measurement and what it is worth | **none.** No commercial game moves: this is a board that did not load before. The golden-core set (mappers 0-4, 156) has no mapper-69 entry |
 | Sunsoft 5B audio (brief item 3, REQ-CORE-075 optional, **Q-118** for the level and the polarity) | `apu/sunsoft5b_audio.rs` (new, 320 lines), `apu/mixer.rs:145-215` (`SUNSOFT_5B_TABLE`, `sunsoft_5b_level`), `apu/mod.rs:10-15` + `:23` + `:38`, `fme7.rs:40-44` (the field) + `:190-192` (`expansion_audio_output`) + `:258` (the register writes) + `:269` (the clock) + `:143-160` (the state) | `sunsoft5b_audio_tests.rs`, 15 tests | **none.** The four named functions are **byte-identical**. The whole-crate diff is thirteen symbols, all inside `Fme7` / `Sunsoft5bAudio` or on the expansion-audio path that only an MMC5 or a mapper-69 cartridge reaches — `NesBus::push_expansion_audio` is still `#[inline(never)]` behind the load-time `expansion_audio` bool (RU-3a). `Board::on_cpu_cycle` is 7 instructions **smaller**: the FME-7's arm left the shared dispatch for a call | **none.** No commercial game on any other board moves; mapper-69 games gain their sound, which they did not have one commit ago. No golden-core entry is on mapper 69 |
 | mapper 118, TxSROM — **a variant of the MMC3 board chosen at load**, no new `Board` variant | `mmc3.rs:12-41` (the doc and three fields), `:56-78` (the load-time facts), `:136-156` (`refresh_nametable_pages`), `:158-159` (`update_banks`), `:260-270` (`mapper_number`, `nametable_page`), `:374` (`ignore_a000`), `registry.rs:20-23` + `:160`, `cartridges/mod.rs:194-196` + `:256` (`nametable_pages_vary`) | `req_core_100_txsrom_*` x4 and `req_core_090_the_txsrom_nametables_come_back_with_its_banks`; `M118_P128K_C64K` now **passes** with `detailed 0000` | **none, and the two fetch dispatches came out smaller than before the lot**: `Board::ppu_peek` 251 → **235**, `ppu_read` 252 → **236** (240/241 at `7bcd...`), prologue and niche unchanged, `read_pattern_planes` / `read_nametable_as` byte-identical, `Ppu2C02::step_dot` back to its pre-lot 1409. `Board::nametable_page` 28 → 33 for the new arm, which is a clamped load from a field — and `Cartridge` caches the four answers, re-reading them after a CPU write only for mappers 5 and 118 | **none.** Mapper 4 is byte-identical in behaviour: `is_txsrom` is false, the four pages stay `FOLLOW_MIRRORING`, `$A000` still drives the arrangement, and no savestate byte moved. The golden-core set has mapper 4 and it does not move |
+| mapper 180, UNROM with the fixed **first** bank — **a wiring of the UxROM board chosen at load**, no new `Board` variant | `discrete.rs:8-49` (the doc, two fields, `update_banks`), `:63-65` (`mapper_number`), `registry.rs:20-23` + `:144-148` (`has_bus_conflicts`) + `:158` | `req_core_100_mapper_180_fixes_the_first_bank_and_switches_at_c000`, `req_core_100_mapper_2_keeps_the_fixed_last_bank`; `M180_P128K_CR8K_H` and `M180_P128K_H` now **pass** with `detailed 0000` | **none, and a small win.** All four named functions **byte-identical**. Seven symbols moved and five shrank: the branch made `UxRom::update_banks` worth outlining, which took 36 instructions out of `Board::write_register` and 30 out of `Board::reset` | **none.** Mapper 2 does not move: `fixed_first` is false, its conflicts stay gated on submapper 2 (MR-BUS-1), and no savestate byte moved. No golden-core entry is on mapper 180 |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -588,3 +589,55 @@ byte**, and a mapper-118 state brings its nametables back with its banks
   64K CHR ROM OK, detailed 0000`.
 * `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed, with
   the mapper-118 row flipped from `unsupported` to `pass`.
+
+## Step 6 — mapper 180, the other wiring of the UxROM board
+
+nesdev, *INES Mapper 180*, is three sentences and they decide everything. The board name is
+**UNROM**, the game is *Crazy Climber* and it is the only one, the register at `$8000-$FFFF`
+selects "16 KB PRG ROM bank for CPU `$C000-$FFFF`" with `$8000-$BFFF` "fixed to the first bank",
+and the reason is spelled out: the board "uses AND logic (74HC08) instead of OR logic (74HC32),
+producing a fixed first bank at `$8000` rather than a fixed last bank at `$C000`".
+
+So it is the UxROM board with the other half of the 74 series, and it goes **inside `UxRom`** as a
+load-time `fixed_first` flag rather than into a `Board` variant of its own — which is both what the
+page says it is and what `board.rs`'s note asks for. `registry::create_board` maps `2 | 180` to the
+same variant and `SUPPORTED_MAPPERS` gains 180 (REQ-CORE-102).
+
+**Bus conflicts.** The page's characteristics table gives the board "Bus conflicts: Yes" with no
+submapper clause — the AND logic that fixes the first bank is exactly what leaves the ROM driving
+the data bus during a write — so `registry::has_bus_conflicts` puts 180 with 11 and 66 rather than
+with the submapper-gated 2, 3 and 7 (MR-BUS-1). Mapper 2 is untouched: a submapper-0 dump still has
+none, which `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` pins.
+
+Registers in `$4020-$5FFF`: **none**; `$8000-$FFFF` only.
+
+### Cost
+
+| function | step 5 | step 6 |
+| --- | ---: | ---: |
+| `Board::ppu_peek` | 235 | 235 (byte-identical) |
+| `Board::ppu_read` | 236 | 236 (byte-identical) |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 (byte-identical) |
+| `Ppu2C02::read_nametable_as` | 107 | 107 (byte-identical) |
+
+Seven symbols in the whole-crate diff, and five of them **shrank**: the branch made
+`UxRom::update_banks` worth outlining (new, 76 instructions), which took its body out of
+`Board::write_register` (633 → 597) and `Board::reset` (489 → 459). `Cartridge::create` 3667 →
+3701 for the load-time decision. Nothing else.
+
+### Save states
+
+No new field is written: `fixed_first` and `mapper_number` are derived from the ROM at load, and
+`UxRom::save_registers` still writes the one bank byte. **Every mapper-2 savestate loads
+unchanged.**
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed, with two new tests — mapper 180's
+  fixed first bank and switchable `$C000`, written through a `$FF`-filled bank because the board
+  has conflicts, and mapper 2 keeping the opposite wiring.
+* `zax-harness test-roms --filter M180`: **2 pass**, `U*ROM (7408): 128K PRG ROM, 8K PRG RAM OK,
+  8K CHR RAM OK, detailed 0000`.
+* `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed, with
+  both mapper-180 rows flipped from `unsupported` to `pass`.
