@@ -475,4 +475,109 @@ on $C000-$C00F reproduces Mesen's `bank = (addr & 0x03) + (addr >= 0xC008 ? 4 : 
 $C010 PRG bank, the $C014 mirroring bit, the fixed last 16 KiB at $C000 and the one-screen
 power-on state all agree, and both ignore writes outside $C000-$C014.
 
-<!-- sections for steps 4..8 are appended as the review progresses -->
+## Mapper 1 — MMC1 (SxROM)
+
+`mmc1.rs` against `Mappers/Nintendo/MMC1.h`.
+
+Much of this board is right, and in ways that are not obvious from the code shape, so it is
+worth recording what was checked and found **equivalent**:
+
+- the serial register's bit order. Mesen shifts right and inserts at bit 4
+  (`MMC1.h:45-46`), we shift left by a counter (`mmc1.rs:160`); both put the first bit
+  written at bit 0.
+- the reset bit's effect: Mesen sets `_prgMode` and `_slotSelect` and leaves everything else
+  (`MMC1.h:38-42`), we `control |= 0x0C` (`mmc1.rs:155`) — the same two bits.
+- all four PRG modes. Our `(control >> 2) & 0x03` four-way match decomposes into Mesen's
+  `_prgMode`/`_slotSelect` pair in the same order, and in 32 KiB mode our
+  `map_prg_32k(bank >> 1)` yields the same four 8 KiB banks as Mesen's
+  `SelectPrgPage2x(0, (_prgReg & 0xFE) | prgBankSelect)`.
+- both CHR modes: in 8 KiB mode our `map_chr_8k(chr0 >> 1)` equals Mesen's
+  `SelectChrPage(0, _chrReg0 & 0x1E)` pair, because `8 * (chr0 >> 1) == 4 * (chr0 & 0x1E)`
+  for a five-bit register.
+- the two-cycle filter's unit. Mesen uses `_console->GetMasterClock()`, which for the NES is
+  `_cpu->GetCycleCount()` (`NesConsole.cpp:385-387`) — CPU cycles, like our
+  `memory.cpu_cycle()`. Not the master clock its name suggests.
+- the power-on state (`control = 0x0C`, all other registers 0, screen A) and the PRG-RAM
+  disable bit (bit 4 of $E000).
+
+Four differences:
+
+- **MR-1-1 — our bug, severity visible.** A write carrying the reset bit must be processed
+  even within two cycles of the previous write. Mesen checks bit 7 *first*
+  (`MMC1.h:208-213`) with the comment "If the reset bit is set, process the write even if
+  another write just occurred (fixes bug in Shinsenden)". We apply the filter before looking
+  at the value (`mmc1.rs:146-151`), so the reset is swallowed and the board keeps a PRG mode
+  the game believes it has cleared. Affects *Shinsenden* by name. Test
+  `mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter`.
+- **MR-1-2 — our bug, severity subtle.** On a 512 KiB board the PRG A18 line comes from bit
+  4 of the CHR register written *last*: `extraReg = (_lastChrReg == 0xC000 && _chrMode) ?
+  _chrReg1 : _chrReg0` (`MMC1.h:124`). We always read `chr0` (`mmc1.rs:37-41`). In 8 KiB
+  CHR mode Mesen's expression reduces to `_chrReg0`, so the SUROM titles Mesen names
+  (*Dragon Warrior III*, *IV*) agree with us; only 4 KiB CHR mode with $C000 written last
+  diverges, and then we select the wrong 256 KiB half of the ROM. The same `extraReg` feeds
+  the SXROM PRG-RAM bank (`MMC1.h:136`), where we also read `chr0` unconditionally
+  (`mmc1.rs:129-131`), so one fix — tracking the last CHR register written — covers both.
+  Test `mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register`.
+- **MR-1-3 — our bug, severity subtle. No test (fixture gap).** The PRG-RAM bank field
+  depends on the RAM size, and SOROM is the case we get wrong. Mesen
+  (`MMC1.h:134-150`): above 16 KiB (SXROM, 32 KiB) the bank is `(extraReg >> 2) & 0x03`;
+  at exactly 16 KiB with an 8 KiB battery half (SOROM) *bit 3* chooses which of the two
+  chips answers; at 8 KiB there is no banking; at 0 the window is unmapped. We use
+  `(chr0 >> 2) & 0x03` for anything above 8 KiB (`mmc1.rs:127-133`), which is right for
+  SXROM but puts SOROM's selector on bit 2, so battery-backed saves land in the volatile
+  half and back. No test because `MapperRom` has no PRG-RAM-size knob and a 16 KiB
+  declaration needs an NES 2.0 byte 10 — adding that knob is the first step of any fix.
+- **MR-1-4 — our bug, severity cosmetic.** NES 2.0 submapper 5 is the fixed-PRG MMC1
+  (SEROM, SHROM, SH1ROM): no banking at all (`MMC1.h:152-156`). We have no submapper
+  handling on this board, so the PRG register still banks a 32 KiB image into halves. Those
+  boards' games never write the register meaningfully, hence cosmetic. Test
+  `mr_1_4_mmc1_submapper_5_has_fixed_prg`.
+
+Two further notes, neither a bug:
+
+- the 512 KiB test. Mesen requires `_prgSize == 0x80000` exactly (`MMC1.h:126`); we use
+  `> 256 * 1024` (`mmc1.rs:38`), so a 384 KiB image would get the outer bit from us and not
+  from Mesen. No such MMC1 dump exists. **Equivalent** in practice.
+- the MMC1A/MMC1B revision defaults. Mesen reads the board name from its game database to
+  decide whether PRG-RAM starts disabled (MMC1B) or can never be disabled (MMC1A)
+  (`MMC1.h:189-194`). We have no game database, which matches Mesen's own behaviour for any
+  ROM the database does not list. **Equivalent** for synthetic and unlisted ROMs; a
+  deliberate gap rather than an error.
+- a soft reset. Mesen's MMC1 does not override `Reset`, so its registers survive a soft
+  reset; our `Mapper::reset` restores the power-on values (`mmc1.rs:112-124`), as
+  REQ-CORE-004 asks of the cartridge. **Unknown** which matches the chip; harmless in
+  practice because a game's reset path must reprogram the serial register anyway, its state
+  being unknowable.
+
+## Mappers 9 and 10 — MMC2 (PxROM) and MMC4 (FxROM)
+
+`mmc2.rs` against `Mappers/Nintendo/MMC2.h` and `MMC4.h`. **Equivalent**, including the
+details most likely to be wrong:
+
+- the latch trigger addresses, which are *asymmetric* on MMC2 and symmetric on MMC4. Mesen's
+  MMC2 matches `$0FD8`/`$0FE8` exactly for the left latch but the ranges `$1FD8-$1FDF` /
+  `$1FE8-$1FEF` for the right (`MMC2.h:124-132`); MMC4 widens both halves to ranges
+  (`MMC4.h:28-38`). Our `move_latches` reproduces exactly that split on `is_mmc4`
+  (`mmc2.rs:49-73`).
+- the PRG layouts: MMC2's four 8 KiB windows with three fixed at -3/-2/-1, MMC4's 16 KiB
+  switchable plus fixed last (`mmc2.rs:33-41`).
+- register widths (`value & 0x0F` for PRG, `& 0x1F` for the four CHR registers), the $F000
+  mirroring bit polarity, and both latches powering on selecting the $FE register.
+- **the deferred CHR update is equivalent, not a difference.** Mesen does not apply the new
+  bank when the latch flips: it sets `_needChrUpdate` and applies it on the next VRAM
+  address change (`MMC2.h:118-123`). We apply it at once in `set_latch` (`mmc2.rs:85-86`).
+  The observable state is the same, because the triggering fetch has already read its byte
+  in both designs — ours reads through `ppu_peek` before moving the latches
+  (`mmc2.rs:160-164`), and Mesen's hook runs before the next read uses the bank. This looks
+  like a timing difference and is not one.
+
+One difference, classified **unknown**, severity cosmetic: Mesen drives its latch hook from
+every PPU address-bus change, so a bare `$2006` write of `$0FD8` flips the latch with no
+pattern fetch at all; we hook `ppu_read`, so only a real CHR read moves it. Whether the
+MMC2's PA0-PA13 comparator sees an address the PPU loaded but never used for a fetch is a
+PPU-bus question the sources allowed here do not settle. REQ-CORE-033 and REQ-CORE-039
+constrain our side anyway: the latches must move on real rendering only, never on a peek,
+which is what `advance_chr_latch` and `chr_latch_state` exist for and which the current
+design gets right.
+
+<!-- sections for steps 6..8 are appended as the review progresses -->

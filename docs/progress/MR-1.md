@@ -14,10 +14,10 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
       infrastructure read (`registry.rs`, `board.rs`, `banked.rs`, `mappers/mod.rs`,
       `a12_watcher.rs`, `cartridges/mod.rs`, header/submapper handling, `BaseMapper`)
 - [x] 2/10 done `42c158ec` — Discrete boards, part 1: 0, 2, 3, 7, 11, 13, 66, 71
-- [x] 3/10 done —  — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
-- [ ] 4/10 in progress — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
-- [ ] 5/10 todo — MMC2 / MMC4 (mappers 9, 10)
-- [ ] 6/10 todo — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
+- [x] 3/10 done `5c9eaca4` — Discrete boards, part 2: 15, 28, 30, 34, 41, 87/101, 156, 225, 228
+- [x] 4/10 done — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
+- [x] 5/10 done — MMC2 / MMC4 (mappers 9, 10)
+- [ ] 6/10 in progress — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
 - [ ] 7/10 todo — MMC5 (mapper 5) and its expansion audio + mix
 - [ ] 8/10 todo — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
@@ -70,3 +70,13 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   four-screen collapsed, work RAM that should not exist, submapper 3/4, flash, four-screen
   CHR-RAM window). Mappers 87, 225, 228, 156 equivalent — one line each.
   6 new ignored tests (10 total), all confirmed failing for the stated reason.
+- **Steps 4 and 5** (one commit) — MMC1, MMC2/MMC4. MMC1: 4 findings. MR-1-1 (the reset
+  bit must bypass the two-cycle write filter; Mesen cites Shinsenden), MR-1-2 (the 512 KiB
+  outer PRG bit comes from the *last-written* CHR register, and the same value feeds the
+  SXROM PRG-RAM bank), MR-1-3 (SOROM's 16 KiB PRG-RAM selector is CHR bit 3, we use bits
+  2-3 — **no test**: `MapperRom` has no PRG-RAM-size knob, which a fix must add first),
+  MR-1-4 (submapper 5 fixed-PRG SEROM/SHROM not handled). 3 new ignored tests.
+  MMC2/MMC4: **equivalent**, and worth the words it took to show it — the asymmetric MMC2
+  latch ranges match, and Mesen's deferred `_needChrUpdate` is the same observable
+  behaviour as our immediate update, not a timing difference. One unknown left: Mesen
+  flips the latch on a bare $2006 write, we need a real fetch.

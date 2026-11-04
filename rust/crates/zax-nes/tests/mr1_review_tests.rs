@@ -272,3 +272,86 @@ fn mr_30_2_unrom512_does_not_drive_6000_7fff() {
         "UNROM 512 has no RAM at $6000-$7FFF: the bus stays open"
     );
 }
+
+// ================================================================ mapper 1, MMC1
+
+/// MR-1-1. A write with the reset bit set must be processed even when it lands within two
+/// CPU cycles of the previous write.
+///
+/// Mesen (`Mappers/Nintendo/MMC1.h:208-213`):
+///
+///     //If the reset bit is set, process the write even if another write just occurred
+///     //(fixes bug in Shinsenden)
+///     if((value & 0x80) || currentCycle - _lastWriteCycle >= 2) { ProcessBitWrite(addr, value); }
+///
+/// We test the two-cycle filter *before* looking at bit 7 (`mmc1.rs:146-151`), so the reset
+/// is swallowed: `control` keeps its PRG mode instead of having bits 2-3 forced.
+#[test]
+#[ignore = "MR-1: MR-1-1"]
+fn mr_1_1_mmc1_reset_bit_bypasses_the_consecutive_write_filter() {
+    let mut core = MapperRom::new(1).prg(16).chr(16).load();
+
+    core.mmc1_write(0x8000, 0x00); // 32 KiB PRG mode, screen A.
+    core.mmc1_write(0xE000, 0x02); // PRG register 2 -> 32 KiB bank 1.
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    // Two raw writes on the same CPU cycle: the second carries the reset bit.
+    core.bus_mut().tick();
+    core.bus_mut().tick();
+    core.write_memory(0x8000, 0x00);
+    core.write_memory(0x8000, 0x80);
+
+    // Reset forces bits 2-3 of $8000: 16 KiB mode, $8000 switchable, last bank at $C000.
+    assert_eq!(
+        [4, 5, 14, 15],
+        core.prg_windows(),
+        "the reset bit must take effect despite the two-cycle filter"
+    );
+}
+
+/// MR-1-2. On a 512 KiB board the PRG A18 line comes from bit 4 of the CHR register that
+/// was written *last*, not always from the $A000 one.
+///
+/// Mesen (`MMC1.h:124`): `extraReg = (_lastChrReg == 0xC000 && _chrMode) ? _chrReg1 : _chrReg0`,
+/// then `prgBankSelect = extraReg & 0x10`. In 8 KiB CHR mode this reduces to `_chrReg0`,
+/// which is what we always use (`mmc1.rs:37-41`) — so SUROM titles that stay in 8 KiB CHR
+/// mode (*Dragon Warrior III* and *IV*) agree. In 4 KiB CHR mode with $C000 written last
+/// we select the wrong 256 KiB half.
+///
+/// The same `extraReg` feeds the SXROM PRG-RAM bank (`MMC1.h:136`), where we also read
+/// `chr0` unconditionally (`mmc1.rs:129-131`); one fix covers both.
+#[test]
+#[ignore = "MR-1: MR-1-2"]
+fn mr_1_2_mmc1_suprom_outer_bank_follows_the_last_chr_register() {
+    let mut core = MapperRom::new(1).prg(64).chr(16).load(); // 512 KiB.
+
+    core.mmc1_write(0x8000, 0x1F); // 4 KiB CHR, 16 KiB PRG, $8000 switchable.
+    core.mmc1_write(0xA000, 0x00); // CHR 0: A18 clear.
+    core.mmc1_write(0xC000, 0x10); // CHR 1: A18 set, and written last.
+    core.mmc1_write(0xE000, 0x02);
+
+    // Mesen: page0 = 2 | 0x10 = 18, page1 = 0x0F | 0x10 = 31 (16 KiB pages).
+    assert_eq!(
+        [36, 37, 62, 63],
+        core.prg_windows(),
+        "bit 4 of the last-written CHR register drives PRG A18"
+    );
+}
+
+/// MR-1-4. NES 2.0 submapper 5 is the fixed-PRG MMC1 (SEROM, SHROM, SH1ROM): no PRG
+/// banking at all. Mesen short-circuits it (`MMC1.h:152-156`, `SelectPrgPage2x(0, 0)`);
+/// we have no submapper handling on this board, so the PRG register still banks.
+#[test]
+#[ignore = "MR-1: MR-1-4"]
+fn mr_1_4_mmc1_submapper_5_has_fixed_prg() {
+    let mut core = MapperRom::new(1).prg(4).chr(16).submapper(5).load();
+
+    core.mmc1_write(0x8000, 0x0C);
+    core.mmc1_write(0xE000, 0x01);
+
+    assert_eq!(
+        [0, 1, 2, 3],
+        core.prg_windows(),
+        "submapper 5 fixes the whole 32 KiB: the PRG register must do nothing"
+    );
+}
