@@ -582,3 +582,154 @@ fn mr_5_2_mmc5_exram_write_outside_rendering_stores_zero() {
         "a mode-0 ExRAM write outside rendering stores zero, not the value"
     );
 }
+
+// ================================================================ mappers 21-27, VRC2/VRC4
+
+// Our `register_index` (`vrc2_vrc4.rs:52-59`) always uses the **OR'd heuristic** wiring
+// Mesen applies only when the NES 2.0 submapper is absent (`VRC2_4.h:208-247`,
+// `_useHeuristics`). When the submapper is known — and always for mappers 22 and 27 —
+// Mesen uses one exact wiring instead (`VRC2_4.h:249-305`). For mapper 22 that is
+// `A0 = (addr >> 1) & 1`, `A1 = addr & 1`, with no OR term at all.
+//
+// Mapper 27's widened CHR field and the VRC2 mirroring mask are *not* findings:
+// AMD-021 R2-004 records both as accepted divergences ("Divergences acceptées (D)").
+
+/// MR-21-1. Mapper 22 is VRC2a, whose register lines are known exactly: ORing in the
+/// mapper-25 candidate bits makes us decode a different register for the same address.
+///
+/// At $B004 the exact VRC2a wiring gives A1 = 0, A0 = 0, i.e. CHR register 0; our OR'd
+/// `A1 = (a | (a >> 2)) & 1` picks up address bit 2 and yields register 2, which lands on
+/// CHR slot 1.
+#[test]
+#[ignore = "MR-1: MR-21-1"]
+fn mr_21_1_vrc2a_uses_the_exact_register_wiring() {
+    let mut core = MapperRom::new(22).prg(8).chr(16).load();
+
+    core.mapper_write(0xB004, 0x05);
+
+    // VRC2a ignores the low bit of its CHR registers, so 5 selects 1 KiB bank 2.
+    assert_eq!(
+        [2, 0, 0, 0, 0, 0, 0, 0],
+        core.chr_windows(),
+        "$B004 is CHR register 0 on VRC2a, not register 2"
+    );
+}
+
+/// MR-21-2. The VRC2 has no PRG swap mode: all of $9000-$9003 is the mirroring register
+/// (`VRC2_4.h:165-166`, the `_variant <= VRCVariant::VRC2c` arm covering `0x9000-0x9003`).
+/// Only VRC4 splits $9002-$9003 off as the PRG mode (`VRC2_4.h:177-178`).
+///
+/// We split it on every variant (`vrc2_vrc4.rs:191-200`, `if index < 2`), so on mapper 22 a
+/// write to $9003 swaps the PRG layout instead of setting mirroring.
+#[test]
+#[ignore = "MR-1: MR-21-2"]
+fn mr_21_2_vrc2a_has_no_prg_swap_mode() {
+    let mut core = MapperRom::new(22).prg(8).chr(16).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    core.mapper_write(0x9003, 0x02);
+
+    assert_eq!(
+        [0, 1, 6, 7],
+        core.prg_windows(),
+        "$9003 is the mirroring register on a VRC2: the PRG layout must not move"
+    );
+}
+
+// ================================================================ mapper 32, Irem G-101
+
+/// MR-32-1. NES 2.0 submapper 1 is *Major League*, whose board ties CIRAM A10 high: the
+/// mirroring is fixed one-screen and the PRG mode is fixed at 0.
+///
+/// Mesen handles both halves (`Mappers/Irem/IremG101.h:23-27` and `:60-62`):
+///
+///     if(_romInfo.SubMapperID == 1) { SetMirroringType(MirroringType::ScreenAOnly); }
+///     ...
+///     _prgMode = (value & 0x02) >> 1;
+///     if(_romInfo.SubMapperID == 1) { _prgMode = 0; }
+///
+/// We have no submapper handling on this board (`iremg101.rs`), so *Major League* takes its
+/// mirroring from the header and then from every $9000 write.
+#[test]
+#[ignore = "MR-1: MR-32-1"]
+fn mr_32_1_irem_g101_submapper_1_is_fixed_one_screen() {
+    let core = MapperRom::new(32).prg(8).chr(16).submapper(1).load();
+
+    assert_eq!(
+        zax_nes::NametableMirroring::SingleScreenA,
+        core.mirroring(),
+        "submapper 1 ties CIRAM A10 high: one-screen whatever the header says"
+    );
+}
+
+// ================================================================ mapper 16, Bandai FCG
+
+/// Advances the CPU by `cycles` cycles without touching the cartridge bus.
+fn tick(core: &mut zax_nes::NesCore, cycles: usize) {
+    for _ in 0..cycles {
+        core.bus_mut().tick();
+    }
+}
+
+/// MR-16-1. On the FCG-1/2 — NES 2.0 submapper 4 — $x00B and $x00C write the IRQ
+/// **counter** directly; there is no latch. Only the LZ93D50 (submapper 5) has the latch
+/// that $x00A copies across.
+///
+/// Mesen branches on it in three places (`Mappers/Bandai/BandaiFcg.h`, the
+/// `_romInfo.SubMapperID != 4` guards on cases `0x0A`, `0x0B` and `0x0C`), quoting the wiki:
+/// "On the FCG-1/2 (Submapper 4), writing to these two registers directly modifies the
+/// counter itself; all such games therefore disable counting before changing the counter
+/// value."
+///
+/// We always write the latch (`bandai_fcg.rs:119-121`). The two models agree as long as the
+/// game sets the value *before* enabling — which is why this has not shown up — but diverge
+/// the moment a value is written while the counter is running.
+#[test]
+#[ignore = "MR-1: MR-16-1"]
+fn mr_16_1_bandai_submapper_4_writes_the_counter_directly() {
+    let mut core = MapperRom::new(16).prg(8).chr(16).submapper(4).load();
+
+    core.mapper_write(0x800B, 0xFF); // Counter low byte.
+    core.mapper_write(0x800C, 0xFF); // Counter high byte: 0xFFFF either way.
+    core.mapper_write(0x800A, 0x01); // Enable counting.
+
+    // Clear the high byte while the counter runs: on an FCG-1/2 the counter itself drops to
+    // its low byte (at most 0xFF), so it must expire well inside 400 cycles.
+    core.mapper_write(0x800C, 0x00);
+    tick(&mut core, 400);
+
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "$x00C must write the counter, not a latch the counter never reads"
+    );
+}
+
+// ================================================================ mapper 18, Jaleco SS88006
+
+/// MR-18-1. The SS88006 IRQ fires on the cycle whose decrement *produces* zero, not on the
+/// cycle that observes a zero already there — our counter is one CPU cycle late.
+///
+/// Mesen (`Mappers/Jaleco/JalecoSs88006.h:91-100`):
+///
+///     uint16_t counter = _irqCounter & _irqMask[_irqCounterSize];
+///     if(--counter == 0) { SetIrqSource(...); }
+///
+/// We test the counter before decrementing and fire when it is already zero
+/// (`jaleco_ss88006.rs:171-179`), which adds a cycle to every period. With a reload value of
+/// 3 the third cycle fires; ours needs a fourth.
+#[test]
+#[ignore = "MR-1: MR-18-1"]
+fn mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier() {
+    let mut core = MapperRom::new(18).prg(8).chr(16).load();
+
+    core.mapper_write(0xE000, 0x03); // IRQ latch nibble 0 = 3.
+    core.mapper_write(0xF000, 0x00); // Reload the counter from the latch.
+    core.mapper_write(0xF001, 0x01); // Enable, 16-bit counter.
+
+    tick(&mut core, 3);
+
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "a reload value of 3 expires on the third cycle, not the fourth"
+    );
+}

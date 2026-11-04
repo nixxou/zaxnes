@@ -18,10 +18,10 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
 - [x] 4/10 done `b8eebc27` — MMC1 (mapper 1), incl. SNROM/SUROM/SXROM and submappers
 - [x] 5/10 done `b8eebc27` — MMC2 / MMC4 (mappers 9, 10)
 - [x] 6/10 done `161f1650` — MMC3 + A12 watcher + RAMBO-1 (mappers 4, 64), MMC6
-- [x] 7/10 done — MMC5 (mapper 5) and its expansion audio + mix
-- [ ] 8/10 in progress — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
+- [x] 7/10 done `3706fa29` — MMC5 (mapper 5) and its expansion audio + mix
+- [x] 8/10 done — VRC2/VRC4 (21/22/23/25/27), Bandai FCG (16),
       Jaleco SS88006 (18), Irem G-101 (32)
-- [ ] 9/10 todo — Shared infrastructure the next lots need; summary table; report pass
+- [ ] 9/10 in progress — Shared infrastructure the next lots need; summary table; report pass
 - [ ] 10/10 todo — `cargo fmt --check`, `clippy -D warnings`,
       `cargo test --release -p zax-nes`; journal; close
 
@@ -113,3 +113,23 @@ Spec prevails over Mesen: a difference where we follow a REQ becomes a Q ticket
   **Q-111** filed: AMD-054 contradicts nesdev and Mesen on the period-below-8 cutoff and on
   the output polarity, and these are the only two audio points it does *not* mark (D) while
   marking three others. Polarity is the audible one. No code change — the spec prevails.
+- **Step 8** — VRC2/VRC4, Bandai FCG, Jaleco SS88006, Irem G-101.
+  VRC: our `register_index` turns out to be *exactly* Mesen's three heuristic wirings, so
+  mappers 21/23/25 without a submapper agree completely. The two numbers Mesen never
+  heuristicises are the ones we get wrong: MR-21-1 (mapper 22 is VRC2a with an exact
+  wiring, no OR term), MR-21-2 (the VRC2 has no PRG swap mode — $9003 is mirroring),
+  MR-21-3 (mapper 27 and all submappers). The VRC IRQ is equivalent to Mesen's shared
+  `VrcIrq`. Mapper 27's CHR width and the VRC2 mirroring mask are **not** findings:
+  AMD-021 R2-004 lists them as accepted divergences.
+  Bandai: the IRQ counter is equivalent despite looking opposite (test-before-decrement vs
+  decrement-and-underflow fire on the same cycle). MR-16-1 (submapper 4 writes the counter,
+  not a latch), MR-16-2 (>=512 KiB PRG outer bank), MR-16-3 (CHR-RAM board must not bank).
+  The EEPROM is P3 per REQ-CORE-100, so not a finding.
+  Jaleco: register file fully equivalent; MR-18-1 (IRQ one CPU cycle late — `if(--counter
+  == 0)` vs testing before the decrement). The PRG-RAM-protect finding I had drafted was
+  withdrawn: Mesen has no such register on this board.
+  Irem: MR-32-1 (submapper 1 Major League, CIRAM A10 tied high).
+  Also recorded once as a shared note: four boards power on with a linear bank layout where
+  Mesen uses zeros — unknown, cosmetic, flagged so a later screenshot comparison does not
+  read it as a bug.
+  5 new ignored tests (25 total), each confirmed failing for the stated reason.

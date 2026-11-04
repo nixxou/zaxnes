@@ -857,4 +857,152 @@ audio, with the audio appended **last** specifically so that a pre-AMD-054 block
 Equivalent coverage to Mesen's `Serialize`, which additionally keeps the split-screen fields
 we have no equivalent of.
 
-<!-- section for step 8 is appended as the review progresses -->
+## Mappers 21, 22, 23, 25, 27 — Konami VRC2 and VRC4
+
+`vrc2_vrc4.rs` against `Mappers/Konami/VRC2_4.h` and `Mappers/Konami/VrcIrq.h`.
+
+Mesen models nine variants of the same silicon (`VRCVariant`) and resolves them from the
+mapper number *and* the NES 2.0 submapper (`DetectVariant`, `VRC2_4.h:37-77`). When the
+submapper is 0 it falls back on a heuristic that **ORs together** the two candidate wirings
+for that mapper number, with the comment "ORing both values should make most games work"
+(`VRC2_4.h:208-247`). When the submapper is known — and unconditionally for mappers 22 and
+27 — it uses one exact wiring (`VRC2_4.h:249-305`).
+
+Our `register_index` (`vrc2_vrc4.rs:52-59`) is **exactly Mesen's three heuristics**, applied
+always. Line for line: our mapper-21 arm is its mapper-21 heuristic, our `22 | 25` arm its
+mapper-25 heuristic, our fallback arm its mapper-23 heuristic. For mappers 21, 23 and 25
+without a submapper we therefore agree with Mesen completely — which is the common case.
+
+Two of the five numbers are wrong, and both are the ones Mesen never heuristicises:
+
+- **MR-21-1 — our bug, severity visible.** Mapper 22 is VRC2a, whose wiring is known
+  exactly (`A0 = (addr >> 1) & 1`, `A1 = addr & 1`, no OR term). We route it through the
+  mapper-25 heuristic, so address bits 2 and 3 leak into the register index and we decode a
+  different register for the same address. Test
+  `mr_21_1_vrc2a_uses_the_exact_register_wiring`.
+- **MR-21-2 — our bug, severity visible.** The VRC2 has no PRG swap mode: all of
+  $9000-$9003 is the mirroring register (`VRC2_4.h:165-166`), and only VRC4 splits
+  $9002-$9003 off as the mode (`:177-178`). We split on every variant
+  (`vrc2_vrc4.rs:191-200`), so on mapper 22 a write to $9003 swaps the PRG layout instead of
+  setting mirroring. Test `mr_21_2_vrc2a_has_no_prg_swap_mode`.
+- **MR-21-3 — our bug, severity subtle.** Mapper 27 gets the mapper-23 heuristic from us
+  where Mesen uses the exact VRC4_27 wiring; and no submapper is honoured on any of the five
+  numbers, so a correctly headered mapper-21 submapper-2 (VRC4c) or mapper-25 submapper-2
+  (VRC4d) image decodes through the OR'd pair rather than its own lines. Same root cause as
+  MR-21-1; one `DetectVariant` equivalent fixes all of it. No separate test.
+
+Not findings, on the spec's authority: mapper 27's eight-bit CHR high field
+(`vrc2_vrc4.rs:36-38`, against Mesen's uniform `value & 0x1F`) and the VRC2 mirroring mask
+are both recorded by **AMD-021 R2-004** in its table of *accepted* divergences — "Comportement
+nesdev pour le mapper 27 ; différences de largeur CHR (>= 256 Kio) et de mirroring VRC2 sans
+effet sur les cartouches commerciales".
+
+The IRQ is **equivalent** to Mesen's shared `VrcIrq`: the same `-= 3` / `+= 341` prescaler
+with the same `<= 0` threshold, the same `0xFF`-triggered reload, the same control-register
+bit assignment, and the same acknowledge semantics (`$F003` restoring `irq_enabled` from the
+after-ack bit). Two small differences, neither pursued:
+
+- in cycle mode Mesen still decrements and re-adds the prescaler (`VrcIrq.h:46-56`) while we
+  leave it untouched (`vrc2_vrc4.rs:231-234`). Mesen's bookkeeping grows the counter by 338
+  per cycle, bounded only by `SetControlValue` resetting it to 341; ours stays put. No
+  observable difference, and ours is the more defensible of the two.
+- the VRC2 microwire latch at $6000-$6FFF — one writable bit readable back in bit 0
+  (`VRC2_4.h:107-110`, `:147-151`) — exists on Mesen when the board declares no work RAM. We
+  give every board 8 KiB of PRG-RAM there instead. Cosmetic; same family as MR-30-2.
+
+## Mapper 16 — Bandai FCG
+
+`bandai_fcg.rs` against `Mappers/Bandai/BandaiFcg.h`.
+
+The register file agrees: eight CHR registers on $x000-$x007, PRG on $x008, the four-way
+mirroring on $x009 in the same order, and the IRQ control/low/high trio on $x00A-$x00C. The
+register window is $6000-$FFFF on both sides.
+
+**The IRQ counter is equivalent**, which is worth showing because the two codes look
+opposite. Mesen tests before decrementing (`BandaiFcg.h:131-139`, with a comment that this
+is the only way to satisfy both *Famicom Jump II* and *Magical Taruruuto-kun 2*); we
+decrement and test for underflow (`bandai_fcg.rs:129-135`). Tracing a counter of 2: Mesen
+fires on the third cycle (2 -> 1 -> 0, then 0 == 0), and so do we (1, 0, then -1 < 0). Both
+wrap to 0xFFFF afterwards. Same cycle, same period.
+
+- **MR-16-1 — our bug, severity subtle.** On the FCG-1/2 (NES 2.0 submapper 4) $x00B and
+  $x00C write the **counter** directly and there is no latch; only the LZ93D50 (submapper 5)
+  has the latch that $x00A copies across. Mesen branches on it in all three register cases
+  (the `_romInfo.SubMapperID != 4` guards), quoting the wiki: "all such games therefore
+  disable counting before changing the counter value". We always write the latch
+  (`bandai_fcg.rs:119-121`) and always reload on $x00A (`:114-118`). The two models agree
+  while a game writes the value *before* enabling — which is why this has not shown up — and
+  diverge as soon as one is written mid-count. Test
+  `mr_16_1_bandai_submapper_4_writes_the_counter_directly`.
+- **MR-16-2 — our bug, severity cosmetic.** On an image of 512 KiB or more Mesen builds a
+  PRG outer bank out of bit 0 of all eight CHR registers (`BandaiFcg.h:165-173`,
+  `GetPrgPageCount() >= 0x20`); we have no such path, so the upper half is unreachable. No
+  commercial mapper-16 image is that large — the feature belongs to mapper 153, out of scope.
+- **MR-16-3 — our bug, severity subtle.** On a CHR-RAM board the CHR registers must not
+  bank: Mesen gates the `SelectChrPage` on `!HasChrRam()` (`BandaiFcg.h:174-176`) and we
+  always bank (`bandai_fcg.rs:106-109`).
+
+The **EEPROM at $x00D is not a finding**: REQ-CORE-100's mapper-16 row reads "IRQ ; EEPROM :
+P3", so its absence is a prioritised gap the spec records, and the code already says so
+(`bandai_fcg.rs:124`). Mesen implements the full 24C01/24C02 pair plus the Datach barcode
+reader (`BaseEeprom24C0X.h`, `Eeprom24C01.h`, `Eeprom24C02.h`) — see the shared-infrastructure
+list.
+
+## Mapper 18 — Jaleco SS88006
+
+`jaleco_ss88006.rs` against `Mappers/Jaleco/JalecoSs88006.h`.
+
+The nibble-pair register file is **equivalent** throughout: three PRG banks on
+$8000-$9001 with $9002-$9003 dead, eight CHR banks on $A000-$D003, the four IRQ latch
+nibbles on $E000-$E003, and $F000-$F002 for reload, control and mirroring. Our
+`set_nibble` plus `group`/`index` decomposition reproduces Mesen's `addr & 0xF003` switch
+and its `updateUpperBits` flag exactly, the counter-width selection has the same priority
+order (bit 3 before bit 2 before bit 1), and the mirroring order is the same unusual
+horizontal-first one.
+
+- **MR-18-1 — our bug, severity subtle.** The IRQ fires on the cycle whose decrement
+  *produces* zero; ours fires on the cycle that observes a zero already there, so every
+  period is one CPU cycle long. Mesen is `if(--counter == 0)` (`JalecoSs88006.h:91-100`); we
+  test `counted == 0` before subtracting (`jaleco_ss88006.rs:171-179`). We also reload the
+  masked field to all-ones on firing where Mesen lets it wrap naturally — the same value,
+  reached a cycle apart. Test `mr_18_1_jaleco_ss88006_irq_fires_one_cycle_earlier`.
+
+$F003 is the board's expansion audio, which neither side emulates — and REQ-CORE-075 leaves
+it optional, so that is not a finding on either.
+
+## Shared: the power-on bank layout
+
+Three boards reviewed in this step, plus the Irem G-101, power on with a **linear** bank
+layout on our side and an **all-zero** one on Mesen's:
+
+| board | ours | Mesen |
+| --- | --- | --- |
+| VRC2/VRC4 | `prg0 = 0`, `prg1 = 1` (`vrc2_vrc4.rs:40-41`) | both `GetPowerOnByte() & 0x1F` = 0 |
+| Irem G-101 | `prg0 = 0`, `prg1 = 1` (`iremg101.rs:21-22`) | `_prgRegs[0] = _prgRegs[1] = 0` |
+| Jaleco SS88006 | `prg = [0, 1, 2]` (`jaleco_ss88006.rs:31`) | `memset(_prgBanks, 0, 3)` |
+| MMC3 | `bank[7] = 1`, rest 0 (`mmc3.rs:180-181`) | `0,2,4,5,6,7,0,1` |
+
+**Unknown, severity cosmetic** in every case. None of these values is hardware-documented;
+all four boards have the last PRG bank fixed at $E000, so the reset vector is fetched
+correctly either way, and every game programs its bank registers before enabling rendering.
+Recorded once here rather than four times, and flagged because a future lot comparing
+power-on screenshots against Mesen will see differences that are not bugs.
+
+## Mapper 32 — Irem G-101
+
+`iremg101.rs` against `Mappers/Irem/IremG101.h`. The two PRG registers, the $9000 mode and
+mirroring pair, the eight 1 KiB CHR registers on $B000-$B007 and the fixed banks at $C000
+and $E000 all agree.
+
+- **MR-32-1 — our bug, severity visible.** NES 2.0 submapper 1 is *Major League*, whose
+  board ties CIRAM A10 high: the mirroring is fixed one-screen and the PRG mode is forced to
+  0. Mesen handles both halves (`IremG101.h:23-27` and `:60-62`); we have no submapper
+  handling on this board, so *Major League* takes its mirroring from the header and then
+  from every $9000 write, and can swap its PRG layout. Test
+  `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen`.
+
+One difference left as **equivalent in practice**: Mesen masks both PRG registers to five
+bits (`& 0x1F`) and we keep all eight (`iremg101.rs:79`, `:83`). The G-101 tops out at
+256 KiB, where our modulo gives the same bank; only an oversized image would diverge.
+
+<!-- shared-infrastructure list and summary table follow -->
