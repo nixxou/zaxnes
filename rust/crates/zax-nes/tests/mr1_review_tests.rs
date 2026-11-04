@@ -46,16 +46,22 @@ use common::mapper_fixture::{MapperMachine, MapperRom};
 // We have no such path at all: `Cartridge::cpu_write`
 // (`src/cartridges/mod.rs:390-410`) hands the value to `write_register` unchanged.
 
-/// MR-BUS-1 on mapper 11, where Mesen applies the conflict unconditionally. At power-on
+/// MR-BUS-1 on mapper 11, where the conflict is unconditional — "All commercially-released
+/// games are subject to bus conflicts (submapper 2)" (nesdev, "INES Mapper 011"). At power-on
 /// $8000-$FFFF shows 32 KiB bank 0, whose first 8 KiB bank the fixture fills with 0x00, so
 /// every bit of the written value is pulled low and the latch keeps its reset value.
+///
+/// **Fixed in MF-2.** The CHR assertion MR-1 wrote was `[0; 8]`, which no CHR bank can produce:
+/// `chr_windows` reports the eight 1 KiB banks a window shows, so 8 KiB bank 0 is `0..=7` and
+/// not eight zeros. The finding's behaviour — the latch stays at CHR bank 0 instead of moving to
+/// the bank 1 that `0x13` asks for — is what the literal now says. Everything else is as MR-1
+/// wrote it.
 #[test]
-#[ignore = "MR-1: MR-BUS-1"]
 fn mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte() {
     let mut core = MapperRom::new(11).prg(8).chr(16).load();
     assert_eq!([0, 1, 2, 3], core.prg_windows());
 
-    // $8100 holds 0x00 (PRG bank 0). Mesen: value &= 0x00, so the latch stays 0.
+    // $8100 holds 0x00 (PRG bank 0), so value &= 0x00 and the latch stays 0.
     core.mapper_write(0x8100, 0x13);
 
     assert_eq!(
@@ -63,12 +69,17 @@ fn mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte() {
         core.prg_windows(),
         "the written 0x13 must be pulled to 0x00 by the ROM byte at $8100"
     );
-    assert_eq!([0; 8], core.chr_windows());
+    assert_eq!(
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        core.chr_windows(),
+        "CHR stays on 8 KiB bank 0; a latched 0x13 would have selected bank 1"
+    );
 }
 
-/// MR-BUS-1 on mapper 2, where Mesen gates the conflict on NES 2.0 submapper 2.
+/// MR-BUS-1 on mapper 2, where the conflict is gated on NES 2.0 submapper 2 — "Bus conflicts
+/// occur, producing the bitwise AND of the written value and the value in ROM" (nesdev, "NES 2.0
+/// submappers"). **Fixed in MF-2**, unchanged from MR-1 but for the `#[ignore]`.
 #[test]
-#[ignore = "MR-1: MR-BUS-1"]
 fn mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte() {
     let mut core = MapperRom::new(2).prg(8).chr(16).submapper(2).load();
     assert_eq!([0, 1, 6, 7], core.prg_windows());
@@ -86,6 +97,95 @@ fn mr_bus_1_uxrom_without_a_submapper_has_no_conflict() {
     let mut core = MapperRom::new(2).prg(8).chr(16).load();
     core.mapper_write(0x8100, 0x03);
     assert_eq!([6, 7, 6, 7], core.prg_windows());
+}
+
+/// MR-66-1 — the `GxROM` board table gives mapper 66 bus conflicts, which Mesen does not
+/// implement and which MR-1 therefore recorded as "no bus conflicts on either". Unconditional,
+/// like Color Dreams'. **New in MF-2.**
+#[test]
+fn mr_66_1_gxrom_write_is_anded_with_the_rom_byte() {
+    let mut core = MapperRom::new(66).prg(16).chr(32).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // The register is `xxPP xxCC`: $11 asks for 32 KiB PRG bank 1 and 8 KiB CHR bank 1. $8100
+    // sits in PRG bank 0, whose bytes are all 0x00, so the latch stays where it was.
+    core.mapper_write(0x8100, 0x11);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+
+    // From a window that is *not* zero-filled the AND lets bits through: $C100 is in 8 KiB bank
+    // 2, filled with 0x02, so a written $11 latches $11 & $02 = $00 — still zero. $03 & $02 = 2,
+    // which selects CHR bank 2 and leaves PRG where it is.
+    core.mapper_write(0xC100, 0x03);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!([16, 17, 18, 19, 20, 21, 22, 23], core.chr_windows());
+}
+
+/// MR-34-2, the bus-conflict half — "the effective value is the value being written
+/// bitwise-AND'd with the PRG-ROM content" (nesdev, "INES Mapper 034"), for **BNROM** only. The
+/// work-RAM half was fixed in MF-1. **New in MF-2.**
+#[test]
+fn mr_34_2_bnrom_write_is_anded_with_the_rom_byte_and_nina_is_not() {
+    // 8 KiB of CHR-ROM resolves to BNROM (MR-34-1), which has the conflicts.
+    let mut bnrom = MapperRom::new(34).prg(16).chr(8).load();
+    assert_eq!([0, 1, 2, 3], bnrom.prg_windows());
+    bnrom.mapper_write(0x8100, 0x01);
+    assert_eq!(
+        [0, 1, 2, 3],
+        bnrom.prg_windows(),
+        "PRG bank 0 is zero-filled, so the BNROM latch cannot leave bank 0"
+    );
+
+    // A NINA-001 (submapper 1) has no conflicts, so the same write takes.
+    let mut nina = MapperRom::new(34).prg(16).chr(8).submapper(1).load();
+    nina.mapper_write(0x7FFD, 0x01);
+    assert_eq!([4, 5, 6, 7], nina.prg_windows());
+}
+
+/// MR-BUS-1 on mapper 30 — the one board where the gate is not the submapper alone: "The Battery
+/// bit must be specified if the game relies on bus conflicts not being present" for submapper 0,
+/// and submapper 2 has them outright (nesdev, "UNROM 512"). **New in MF-2.**
+#[test]
+fn mr_bus_1_unrom512_conflicts_follow_the_submapper_and_the_battery_bit() {
+    // Submapper 0 without a battery: conflicts, so the zero-filled bank 0 pulls the write down.
+    let mut plain = MapperRom::new(30).prg(16).chr(0).load();
+    assert_eq!([0, 1, 14, 15], plain.prg_windows());
+    plain.mapper_write(0x8100, 0x01);
+    assert_eq!([0, 1, 14, 15], plain.prg_windows());
+
+    // Submapper 0 *with* a battery is how such a dump says "no conflicts".
+    let mut battery = MapperRom::new(30).prg(16).chr(0).battery().load();
+    battery.mapper_write(0x8100, 0x01);
+    assert_eq!([2, 3, 14, 15], battery.prg_windows());
+
+    // Submapper 2 has them whatever the battery bit says.
+    let mut declared = MapperRom::new(30)
+        .prg(16)
+        .chr(0)
+        .battery()
+        .submapper(2)
+        .load();
+    declared.mapper_write(0x8100, 0x01);
+    assert_eq!([0, 1, 14, 15], declared.prg_windows());
+}
+
+/// MR-BUS-1 — and the boards that have **no** conflicts keep latching what the CPU wrote, which
+/// is the other half of a gate decided at load. **New in MF-2.**
+#[test]
+fn mr_bus_1_a_board_without_conflicts_latches_the_written_value() {
+    // Mapper 3's and 7's conflicts are gated on submapper 2, like mapper 2's.
+    let mut cnrom = MapperRom::new(3).prg(8).chr(32).load();
+    cnrom.mapper_write(0x8100, 0x03);
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], cnrom.chr_windows());
+
+    let mut declared = MapperRom::new(3).prg(8).chr(32).submapper(2).load();
+    declared.mapper_write(0x8100, 0x03);
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], declared.chr_windows());
+
+    // And a board MR-BUS-1 does not list is untouched: the MMC1 takes its five writes.
+    let mut mmc1 = MapperRom::new(1).prg(16).chr(32).load();
+    mmc1.mmc1_write(0xE000, 0x05);
+    assert_eq!([10, 11, 14, 15], mmc1.prg_windows());
 }
 
 // ================================================================ mapper 11, Color Dreams
@@ -347,9 +447,21 @@ fn mr_30_3_unrom512_submapper_3_switches_horizontal_and_vertical() {
 
 /// And byte 6 `%....1..0` still selects the switchable one-screen arrangement, which is what
 /// our `FourScreen` header used to mean on every mapper-30 image (MR-30-1's other half).
+///
+/// The battery bit is set because MF-2's MR-BUS-1 gave this board conflicts: on a submapper-0
+/// UNROM 512 "the Battery bit must be specified if the game relies on bus conflicts not being
+/// present" (nesdev, "UNROM 512"), and without it the zero-filled PRG bank 0 at $8000 would pull
+/// the written $80 down to $00. Byte 6 stays `%....1.1.0` on bits 3 and 0, so the arrangement
+/// this test is about is unchanged; what the bit buys is a register write that reaches the
+/// register.
 #[test]
 fn mr_30_1_unrom512_byte6_08_is_switchable_one_screen() {
-    let mut core = MapperRom::new(30).prg(8).chr(0).mirroring(0x08).load();
+    let mut core = MapperRom::new(30)
+        .prg(8)
+        .chr(0)
+        .mirroring(0x08)
+        .battery()
+        .load();
     assert_eq!(zax_nes::NametableMirroring::SingleScreenA, core.mirroring());
 
     core.mapper_write(0x8000, 0x80);

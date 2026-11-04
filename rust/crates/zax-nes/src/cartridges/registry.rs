@@ -111,6 +111,36 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
     }
 }
 
+/// Whether `mapper`'s board lets the ROM drive the data bus during a write to $8000-$FFFF, so
+/// that the value the register latches is "the bitwise AND of the written value and the value
+/// in ROM" (MR-BUS-1, MR-66-1, the bus-conflict half of MR-34-2). Decided once at load.
+///
+/// Sources, all nesdev: *NES 2.0 submappers* gives mappers 2, 3 and 7 the AND on **submapper
+/// 2** and says "Bus conflicts do not occur" on submapper 1; *INES Mapper 011* says "All
+/// commercially-released games are subject to bus conflicts (submapper 2)", which with the
+/// *Color Dreams* board page (only the *Free Fall* prototype has conflict-prevention logic)
+/// makes it unconditional there; *UNROM 512* makes submapper 2 "Bus conflicts present" and for
+/// submapper 0 says "The Battery bit must be specified if the game relies on bus conflicts not
+/// being present", so a submapper-0 dump without battery has them; *INES Mapper 034* gives
+/// BNROM's register "the value being written bitwise-AND'd with the PRG-ROM content", and only
+/// BNROM — the NINA boards have conflict-free latches; and the `GxROM` board table gives mapper
+/// 66 conflicts (MR-66-1), which Mesen does not implement.
+///
+/// **A submapper-0 dump of mappers 2, 3 and 7 has none**, which is what
+/// `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` pins and what MR-1b asked be kept: the
+/// submapper is the gate, and most dumps of those boards carry no submapper at all.
+#[must_use]
+pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
+    let submapper = if header.is_nes20 { header.submapper } else { 0 };
+    match mapper {
+        2 | 3 | 7 => submapper == 2,
+        11 | 66 => true,
+        30 => submapper == 2 || (submapper == 0 && !header.has_battery),
+        34 => !mapper_34_is_nina(header),
+        _ => false,
+    }
+}
+
 /// Builds the board of `mapper` for `memory`, or `None` when it is not implemented.
 #[must_use]
 pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Board> {

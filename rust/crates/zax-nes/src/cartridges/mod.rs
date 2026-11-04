@@ -174,6 +174,12 @@ pub struct Cartridge {
     board: Board,
     /// [`Mapper::rom_windows`], kept for [`Cartridge::read_rom_window`].
     rom_windows: [usize; 4],
+    /// Whether the board lets the ROM drive the data bus during a register write, so that the
+    /// value latched is the AND of the written value and the ROM byte at that address
+    /// (MR-BUS-1; see [`registry::has_bus_conflicts`]). Derived from the ROM at load, so it is
+    /// not part of the savestate, and `false` for 27 of the 32 mapper numbers and for every
+    /// submapper-0 dump of three of the other five.
+    bus_conflicts: bool,
 }
 
 impl Cartridge {
@@ -213,6 +219,7 @@ impl Cartridge {
         }
 
         let sizes = registry::board_memory_sizes(mapper, rom.header());
+        let bus_conflicts = registry::has_bus_conflicts(mapper, rom.header());
         let memory = CartridgeMemory::new(rom, sizes);
         let Some(board) = registry::create_board(mapper, &memory) else {
             return Err(RomLoadError::new(
@@ -225,6 +232,7 @@ impl Cartridge {
             memory,
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
+            bus_conflicts,
         };
         cartridge.reset();
         Ok(cartridge)
@@ -415,6 +423,22 @@ impl Cartridge {
 
             return;
         }
+
+        // MR-BUS-1, MR-66-1, MR-34-2: on a board with no logic to disable the ROM's output
+        // enable during a write, the ROM goes on driving the bus and the register latches "the
+        // bitwise AND of the written value and the value in ROM" (nesdev, "NES 2.0
+        // submappers"). Only $8000-$FFFF is concerned, because that is where the PRG-ROM
+        // drives; none of the seven boards has a register below it.
+        //
+        // Every other game pays **one test of a bool** that is false at load and stays in
+        // cache beside `rom_windows`. No `Mapper` method is consulted, the `Board` dispatch is
+        // untouched, and nothing here is on a per-cycle, per-PPU-fetch or CPU-read path: a CPU
+        // write to the cartridge is the rarest bus event there is.
+        let value = if self.bus_conflicts && address >= 0x8000 {
+            value & self.read_rom_window(address).unwrap_or(0xFF)
+        } else {
+            value
+        };
 
         self.board.write_register(&mut self.memory, address, value);
         self.refresh_rom_windows();

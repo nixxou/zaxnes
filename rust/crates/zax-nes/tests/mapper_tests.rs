@@ -451,7 +451,14 @@ fn req_core_100_mmc4_only_needs_the_row_of_the_tile_to_move_its_latch() {
 
 #[test]
 fn req_core_100_color_dreams_splits_its_register_between_prg_and_chr() {
-    let mut core = MapperRom::new(11).prg(16).chr(64).load();
+    // Mapper 11 has unconditional bus conflicts (MR-BUS-1, MR-11's board page), so the write
+    // goes through a bank of $FF: the CHR field lives in bits 4-7 and a numbered bank could
+    // never pass it. What is tested is the register decode, not the conflict.
+    let mut core = MapperRom::new(11)
+        .prg(16)
+        .chr(64)
+        .prg_bank_all_ones(0)
+        .load();
     core.write_memory(0x8000, 0x32);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
     assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());
@@ -680,7 +687,15 @@ fn amd_021_r2_001_action53_takes_the_single_screen_bit_from_a_chr_write() {
 
 #[test]
 fn req_core_100_unrom512_switches_prg_chr_ram_and_mirroring() {
-    let mut core = MapperRom::new(30).prg(32).chr(0).mirroring(0x08).load();
+    // The battery bit is how a submapper-0 UNROM 512 declares that it does *not* have bus
+    // conflicts (MR-BUS-1, nesdev "UNROM 512"); byte 6 keeps bits 3 and 0, so the arrangement
+    // is the same `%....1..0` as before.
+    let mut core = MapperRom::new(30)
+        .prg(32)
+        .chr(0)
+        .mirroring(0x08)
+        .battery()
+        .load();
     core.write_memory(0x8000, 0x45); // PRG bank 5, CHR-RAM bank 2, screen A.
     assert_eq!([10, 11, 30, 31], core.prg_windows());
     assert_eq!(Nm::SingleScreenA, core.mirroring());
@@ -706,7 +721,13 @@ fn req_core_100_irem_g101_switches_two_prg_banks_eight_chr_banks_and_mirroring()
 
 #[test]
 fn req_core_100_bnrom_switches_32_kib_from_8000() {
-    let mut core = MapperRom::new(34).prg(16).chr(0).load();
+    // A BNROM register write is ANDed with the PRG-ROM content (MR-34-2), so the write goes
+    // through a bank of $FF; the decode is what this test is about.
+    let mut core = MapperRom::new(34)
+        .prg(16)
+        .chr(0)
+        .prg_bank_all_ones(0)
+        .load();
     core.write_memory(0x8000, 0x02);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
 }
@@ -760,7 +781,13 @@ fn req_core_100_rambo1_maps_three_prg_banks_and_a_1_kib_chr_mode() {
 
 #[test]
 fn req_core_100_gxrom_splits_its_register_between_prg_and_chr() {
-    let mut core = MapperRom::new(66).prg(16).chr(32).load();
+    // The GxROM board table gives mapper 66 bus conflicts (MR-66-1), and the PRG field is bits
+    // 4-5, so the write goes through a bank of $FF.
+    let mut core = MapperRom::new(66)
+        .prg(16)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
     core.write_memory(0x8000, 0x23);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
     assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());

@@ -22,6 +22,7 @@ pub struct MapperRom {
     battery: bool,
     submapper: Option<u8>,
     prg_ram_byte10: Option<u8>,
+    prg_bank_all_ones: Option<usize>,
 }
 
 impl MapperRom {
@@ -35,6 +36,7 @@ impl MapperRom {
             battery: false,
             submapper: None,
             prg_ram_byte10: None,
+            prg_bank_all_ones: None,
         }
     }
 
@@ -55,6 +57,20 @@ impl MapperRom {
 
     pub fn battery(mut self) -> Self {
         self.battery = true;
+        self
+    }
+
+    /// Fills 8 KiB PRG bank `bank` with $FF instead of its own number, so that a write landing
+    /// in that window on a board with **bus conflicts** (MR-BUS-1: mappers 2, 3, 7, 11, 30, 34
+    /// BNROM and 66) latches the value the CPU wrote rather than the AND of it with a
+    /// zero-filled bank.
+    ///
+    /// Needed because the numbered banks only ever carry bits 0-3, so no register field above
+    /// bit 3 could survive a conflicting write through one. A test that uses this cannot
+    /// identify that bank by number any more, which is why it takes the bank rather than
+    /// filling the image.
+    pub fn prg_bank_all_ones(mut self, bank: usize) -> Self {
+        self.prg_bank_all_ones = Some(bank);
         self
     }
 
@@ -107,7 +123,12 @@ impl MapperRom {
 
         for bank in 0..self.prg_banks_8k {
             let start = 16 + bank * 8 * 1024;
-            image[start..start + 8 * 1024].fill(bank as u8);
+            let fill = if self.prg_bank_all_ones == Some(bank) {
+                0xFF
+            } else {
+                bank as u8
+            };
+            image[start..start + 8 * 1024].fill(fill);
         }
 
         for bank in 0..self.chr_banks_1k {

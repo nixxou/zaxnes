@@ -30,7 +30,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 2/10 — step 1: AMD-061 §2 and §4 — mapper 15 mode 1, mapper 101, the AMD-021 criteria
 - [x] 3/10 — step 2: AMD-061 §3 and §5 — mapper 28 keeps its state across a reset
 - [x] 4/10 — step 3: AMD-061 §6 — the MMC5 audio
-- [ ] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
+- [x] 5/10 — step 4: MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
 - [ ] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
 - [ ] 7/10 — step 6: MR-5-2, MR-5-4 — MMC5 ExRAM writes, and in-frame detection by bus sniffing
 - [ ] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
@@ -55,6 +55,7 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | AMD-061 §6.3 ($5010 read mode) | `mmc5.rs:433-450` (`cpu_read_override`), `mmc5_audio.rs:77-92` | `amd_061_read_mode_takes_the_pcm_level_from_a_read_of_8000_bfff`, `amd_061_read_mode_raises_the_pcm_irq_on_a_byte_of_zero` | none for any other board: `Mmc5::rom_windows` already returns `NO_ROM_WINDOW` for all four windows, so MMC5 reads of $8000-$FFFF came through `cpu_read_override` already. `Board::cpu_read_override` is 50 instructions **smaller** | MMC5 titles that drive PCM from reads |
 | AMD-061 §6.3 (PCM IRQ on the CPU line) | `mmc5.rs:55-65` (`irq_line`), `:188-192` (`refresh_irq_line`) | `amd_061_the_pcm_irq_flag_pulls_the_cpu_irq_line`, `amd_061_the_pcm_irq_needs_bit_7_of_5010_to_reach_the_cpu` | `Board::irq_asserted` is on the CPU's per-cycle interrupt check for every board: the line is **latched in a field**, so the MMC5 arm stays one `movzbl` like the other 25 and the function is 24 instructions where it was 25 | MMC5 titles enabling the PCM IRQ |
 | AMD-061 §6.4 (levels) | `mixer.rs:137-142` (`MMC5_PCM_TABLE`), `mmc5_audio.rs:69-75` | `amd_061_the_squares_contribute_the_opposite_of_the_apu_pulses`, `amd_061_the_pcm_channel_follows_the_dmc_curve_over_a_full_byte` | none: the change is inside `Mmc5Audio::output`, which only an MMC5 cartridge reaches, and it is 8 instructions **shorter** (`Mmc5::expansion_audio_output` 56 → 48) | **every MMC5 title**: both the square and the PCM levels move. See Q-115 |
+| MR-BUS-1, MR-66-1, MR-34-2 (bus-conflict half) | `registry.rs:113-140` (`has_bus_conflicts`), `mod.rs:417-430` (`cpu_write`), `mod.rs:178-184` (the field) | `mr_bus_1_*` x4, `mr_66_1_*`, `mr_34_2_*` | `Cartridge::cpu_write`, which only a CPU write to $4020-$FFFF reaches: **two instructions** (`cmpb` + `je`) for a board without conflicts, and the `>= $8000` half folded into the range test already there, for free | mappers 2/3/7 **submapper-2 dumps only**, 11, 30 (submapper 0 without battery, or 2), 34 BNROM, 66. No golden-core entry is on any of them |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -418,3 +419,112 @@ neither moves the block:
 `cargo test --release -p zax-nes`: **566 passed**, 0 failed, 11 ignored.
 `cargo check --workspace --exclude zax-app --all-targets` clean, so removing the four MMC5 mixer
 constants breaks no other crate.
+
+## Step 4 — MR-BUS-1, MR-66-1 and the bus-conflict half of MR-34-2
+
+A board with no logic to disable the ROM's output enable during a write leaves the ROM driving
+the data bus, so the register latches "the bitwise AND of the written value and the value in ROM"
+(nesdev, *NES 2.0 submappers*). We handed `write_register` the value unchanged on every board.
+
+### Which boards, and on what evidence
+
+`registry::has_bus_conflicts(mapper, header)`, decided once in `Cartridge::create`:
+
+| mapper | conflicts when | source |
+| --- | --- | --- |
+| 2, 3, 7 | NES 2.0 **submapper 2** only | *NES 2.0 submappers*: submapper 2 "Bus conflicts occur, producing the bitwise AND of the written value and the value in ROM"; submapper 1 "Bus conflicts do not occur" |
+| 11 | always | *INES Mapper 011*: "All commercially-released games are subject to bus conflicts (submapper 2)", with the *Color Dreams* board page giving the conflict-prevention logic to the *Free Fall* prototype alone |
+| 30 | submapper 2, **or** submapper 0 without the battery bit | *UNROM 512*: submapper 2 "Bus conflicts present"; submapper 0 "The Battery bit must be specified if the game relies on bus conflicts not being present" |
+| 34 | **BNROM** only, always | *INES Mapper 034*: BNROM's register takes "the value being written bitwise-AND'd with the PRG-ROM content"; the NINA boards do not |
+| 66 | always | the `GxROM` board table (MR-66-1), which Mesen does not implement |
+
+MR-1b asked that `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` keep passing as written, and
+it does: the submapper is the gate on mappers 2, 3 and 7, and most dumps of those boards carry no
+submapper at all. Mapper 30's gate is the one that is not the submapper alone, and it is the one
+MR-1b singled out as "unusual".
+
+### Where it costs, and how much
+
+One block in `Cartridge::cpu_write`, after `intercept_cpu_write` and the PRG-RAM window, before
+`write_register`. For a board without conflicts the whole of it is **two instructions**:
+
+    .LBB361_5:
+            cmpb    $0, 1632(%rsi)     ; Cartridge::bus_conflicts
+            je      .LBB361_9          ; -> write_register, value untouched
+
+and the `address >= 0x8000` half of the condition costs **nothing at all**: LLVM folded it into
+the `$6000-$7FFF` range test that was already there, so a write below `$6000` never even reaches
+the bool. The bool itself sits at offset 1632, in the same cache line as `rom_windows` at 1600,
+which the very next statement reads. On a board that *does* have conflicts the cost is a window
+lookup, a bounds check and one `andb`.
+
+- `Cartridge::cpu_write` 90 → 112 instructions static; `Cartridge::create` 3 284 → 3 326, at
+  load. **Nothing else in the crate changed size, and no symbol appeared or disappeared** — no
+  inlining cascade of the kind steps 0 and 3 had to undo.
+- `size_of::<Cartridge>()` is unchanged: the new `bool` went into the padding after
+  `rom_windows`, and `board` is still at offset 240, so `memory` is still at offset 0 and every
+  other field offset held.
+- No `Mapper` method is consulted per write, the `Board` dispatch is untouched, and nothing
+  reaches a per-cycle, per-PPU-fetch or CPU-read path. A CPU write to the cartridge is the rarest
+  bus event there is.
+
+### Tests
+
+The two `#[ignore]`d MR-BUS-1 tests are **un-ignored** and pass, and four more are added for the
+boards MR-1b's re-check brought in:
+
+| test | what it pins |
+| --- | --- |
+| `mr_bus_1_color_dreams_write_is_anded_with_the_rom_byte` | mapper 11, unconditional |
+| `mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte` | mapper 2, submapper 2 |
+| `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` | the guard against over-reach, unchanged |
+| `mr_66_1_gxrom_write_is_anded_with_the_rom_byte` **new** | mapper 66, and that the AND lets bits through from a non-zero bank |
+| `mr_34_2_bnrom_write_is_anded_with_the_rom_byte_and_nina_is_not` **new** | BNROM has them, NINA-001 does not |
+| `mr_bus_1_unrom512_conflicts_follow_the_submapper_and_the_battery_bit` **new** | all three mapper-30 cases |
+| `mr_bus_1_a_board_without_conflicts_latches_the_written_value` **new** | mappers 3 and 7's submapper gate, and that an MMC1 is untouched |
+
+**MR-1's CHR assertion in the Color Dreams test was wrong and is corrected.** It ended with
+`assert_eq!([0; 8], core.chr_windows())`, which no CHR bank can produce: `chr_windows` reports the
+eight 1 KiB banks a window shows, so 8 KiB bank 0 is `0..=7` and not eight zeros. The finding's
+behaviour — the latch stays on CHR bank 0 instead of moving to the bank 1 that `$13` asks for — is
+what the literal says now. Everything else in both tests is as MR-1 wrote it. This is the same
+kind of correction MF-1 had to make to `mr_34_1_bnrom_has_no_register_at_7ffd`.
+
+### Five existing tests wrote through a window the conflict now pulls to zero
+
+The fixture fills 8 KiB PRG bank *n* with the byte *n*, so bank 0 is zero-filled and a register
+write through `$8000` on a conflicting board latches nothing. Five tests of the *register decode*
+— not of the conflict — were doing exactly that:
+
+| test | how it was fixed |
+| --- | --- |
+| `req_core_100_color_dreams_splits_its_register_between_prg_and_chr` | `prg_bank_all_ones(0)` |
+| `req_core_100_gxrom_splits_its_register_between_prg_and_chr` | `prg_bank_all_ones(0)` |
+| `req_core_100_bnrom_switches_32_kib_from_8000` | `prg_bank_all_ones(0)` |
+| `req_core_100_unrom512_switches_prg_chr_ram_and_mirroring` | `.battery()`, which is how a submapper-0 UNROM 512 declares it has no conflicts |
+| `mr_30_1_unrom512_byte6_08_is_switchable_one_screen` | `.battery()`, same reason |
+
+`MapperRom::prg_bank_all_ones(bank)` is the new fixture knob: it fills that one 8 KiB bank with
+`$FF` so a conflicting write through it latches what the CPU wrote. It is needed because the
+numbered banks only ever carry bits 0-3, so a register field above bit 3 — mapper 11's CHR field,
+mapper 66's PRG field — could never survive a conflicting write through one. The three mapper-30
+tests that use submappers 1, 3 and 4 need nothing: the sources give all three "No bus conflicts".
+
+### Save states
+
+Nothing added to any board and nothing to the block: `bus_conflicts` is derived from the ROM
+header at load, like `CartridgeMemory::battery_offset`, so it is not saved and a state written
+before this lot loads unchanged.
+
+### What R0 should expect to move
+
+The golden-core campaign has no entry on mapper 11, 30, 34 or 66, and the mapper-2, -3 and -7
+entries are iNES dumps with no submapper, which `has_bus_conflicts` answers `false` for. So **no
+golden-core entry should move**. A commercial Color Dreams or GxROM title would now AND its
+register writes, which is the fix.
+
+### Tests run
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **572 passed**, 0 failed, **9 ignored** — two fewer than at
+step 3, the two MR-BUS-1 tests having come off `#[ignore]`.
