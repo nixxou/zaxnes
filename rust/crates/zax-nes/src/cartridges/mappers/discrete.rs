@@ -182,6 +182,110 @@ impl Mapper for AxRom {
     }
 }
 
+/// iNES mapper 78, the Irem IF-12 of *Holy Diver* and the Jaleco board of *Uchuusen - Cosmo
+/// Carrier*: "a CNROM and a UNROM" in discrete logic, with one register doing all three jobs
+/// (nesdev, "INES Mapper 078"; the number is outside REQ-CORE-100's table, which REQ-CORE-102
+/// allows).
+///
+/// The register is `CCCC MPPP` over the whole of $8000-$FFFF: bits 0-2 the 16 KiB PRG bank at
+/// $8000-$BFFF, bit 3 the mirroring, bits 4-7 the 8 KiB CHR bank. $C000-$FFFF is fixed to the
+/// last 16 KiB. The board is "Subject to bus conflicts: Yes", unconditionally, which
+/// [`super::super::registry::has_bus_conflicts`] records.
+///
+/// Registers in `$4020-$5FFF`: **none**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mapper078 {
+    banks: BankWindows,
+    /// Which pair of arrangements bit 3 picks: the *Uchuusen* wiring, decided at load
+    /// ([`Mapper078::is_one_screen`]).
+    one_screen: bool,
+    register: u8,
+}
+
+impl Mapper078 {
+    pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+        Self {
+            banks: windows_for(memory),
+            one_screen: Self::is_one_screen(memory),
+            register: 0,
+        }
+    }
+
+    /// Which of the two boards this image is on.
+    ///
+    /// nesdev gives bit 3 of the register two meanings, one per cartridge: *Holy Diver*
+    /// "0 = H, 1 = V", through "a 74HC00, which serves as a 2:1 mux of PPU A10 and PPU A11 into
+    /// CIRAM A10", and *Cosmo Carrier* "0 = 1scA, 1 = 1scB". "Emulators SHOULD support NES 2.0
+    /// submappers: 1 for Uchuusen and 3 for Holy Diver", and for an image that carries none the
+    /// page gives the heuristic: "iNES1 ROM image headers often set the 'alternative nametables'
+    /// flag for Holy Diver and cleared it for Cosmo Carrier" — byte 6 bit 3, which our loader
+    /// reads as a four-screen header. Nothing comes of that reading here: `update_banks` sets the
+    /// arrangement from the register on the first reset, so `memory.mirroring()` is never left at
+    /// `FourScreen`.
+    ///
+    /// Mesen 2 reads bit 3 the same way for each board (`JalecoJf16.h:25-31`) but has **no**
+    /// heuristic: it takes the submapper alone, so an iNES 1.0 *Holy Diver* gets Cosmo Carrier's
+    /// one-screen wiring there. AMD-061 §1 makes the documentation prevail, so the heuristic is
+    /// implemented.
+    fn is_one_screen(memory: &CartridgeMemory) -> bool {
+        let header = memory.rom().header();
+        if header.is_nes20 && (header.submapper == 1 || header.submapper == 3) {
+            return header.submapper == 1;
+        }
+
+        header.byte6 & 0x08 == 0
+    }
+
+    fn update_banks(&mut self, memory: &mut CartridgeMemory) {
+        self.banks.map_prg_16k(0, i32::from(self.register & 0x07));
+        self.banks.map_prg_16k(2, -1);
+        self.banks
+            .map_chr_8k(i32::from((self.register >> 4) & 0x0F));
+
+        let high = self.register & 0x08 != 0;
+        memory.set_mirroring(if self.one_screen {
+            if high {
+                NametableMirroring::SingleScreenB
+            } else {
+                NametableMirroring::SingleScreenA
+            }
+        } else if high {
+            NametableMirroring::Vertical
+        } else {
+            NametableMirroring::Horizontal
+        });
+    }
+}
+
+impl Mapper for Mapper078 {
+    banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
+
+    fn mapper_number(&self) -> i32 {
+        78
+    }
+
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
+        self.register = 0;
+        self.update_banks(memory);
+    }
+
+    fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if address >= 0x8000 {
+            self.register = value;
+            self.update_banks(memory);
+        }
+    }
+}
+
 /// iNES mapper 66, GxROM: 32 KiB PRG bank in bits 4-5, 8 KiB CHR bank in bits 0-1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GxRom {

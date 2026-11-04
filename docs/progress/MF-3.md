@@ -31,7 +31,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 4/9 — Sunsoft 5B audio: the three AY-3-8910 squares, envelope and noise
 - [x] 5/9 — mapper 118, TxSROM
 - [x] 6/9 — mapper 180, UNROM with the switchable bank at $C000
-- [ ] 7/9 — mapper 78, submappers 1 and 3
+- [x] 7/9 — mapper 78, submappers 1 and 3
 - [ ] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
 - [ ] 9/9 — re-run the suites, the campaign document, and the close of the lot
 
@@ -77,6 +77,7 @@ Before the lot (`7cbd9c52`):
 | Sunsoft 5B audio (brief item 3, REQ-CORE-075 optional, **Q-118** for the level and the polarity) | `apu/sunsoft5b_audio.rs` (new, 320 lines), `apu/mixer.rs:145-215` (`SUNSOFT_5B_TABLE`, `sunsoft_5b_level`), `apu/mod.rs:10-15` + `:23` + `:38`, `fme7.rs:40-44` (the field) + `:190-192` (`expansion_audio_output`) + `:258` (the register writes) + `:269` (the clock) + `:143-160` (the state) | `sunsoft5b_audio_tests.rs`, 15 tests | **none.** The four named functions are **byte-identical**. The whole-crate diff is thirteen symbols, all inside `Fme7` / `Sunsoft5bAudio` or on the expansion-audio path that only an MMC5 or a mapper-69 cartridge reaches — `NesBus::push_expansion_audio` is still `#[inline(never)]` behind the load-time `expansion_audio` bool (RU-3a). `Board::on_cpu_cycle` is 7 instructions **smaller**: the FME-7's arm left the shared dispatch for a call | **none.** No commercial game on any other board moves; mapper-69 games gain their sound, which they did not have one commit ago. No golden-core entry is on mapper 69 |
 | mapper 118, TxSROM — **a variant of the MMC3 board chosen at load**, no new `Board` variant | `mmc3.rs:12-41` (the doc and three fields), `:56-78` (the load-time facts), `:136-156` (`refresh_nametable_pages`), `:158-159` (`update_banks`), `:260-270` (`mapper_number`, `nametable_page`), `:374` (`ignore_a000`), `registry.rs:20-23` + `:160`, `cartridges/mod.rs:194-196` + `:256` (`nametable_pages_vary`) | `req_core_100_txsrom_*` x4 and `req_core_090_the_txsrom_nametables_come_back_with_its_banks`; `M118_P128K_C64K` now **passes** with `detailed 0000` | **none, and the two fetch dispatches came out smaller than before the lot**: `Board::ppu_peek` 251 → **235**, `ppu_read` 252 → **236** (240/241 at `7bcd...`), prologue and niche unchanged, `read_pattern_planes` / `read_nametable_as` byte-identical, `Ppu2C02::step_dot` back to its pre-lot 1409. `Board::nametable_page` 28 → 33 for the new arm, which is a clamped load from a field — and `Cartridge` caches the four answers, re-reading them after a CPU write only for mappers 5 and 118 | **none.** Mapper 4 is byte-identical in behaviour: `is_txsrom` is false, the four pages stay `FOLLOW_MIRRORING`, `$A000` still drives the arrangement, and no savestate byte moved. The golden-core set has mapper 4 and it does not move |
 | mapper 180, UNROM with the fixed **first** bank — **a wiring of the UxROM board chosen at load**, no new `Board` variant | `discrete.rs:8-49` (the doc, two fields, `update_banks`), `:63-65` (`mapper_number`), `registry.rs:20-23` + `:144-148` (`has_bus_conflicts`) + `:158` | `req_core_100_mapper_180_fixes_the_first_bank_and_switches_at_c000`, `req_core_100_mapper_2_keeps_the_fixed_last_bank`; `M180_P128K_CR8K_H` and `M180_P128K_H` now **pass** with `detailed 0000` | **none, and a small win.** All four named functions **byte-identical**. Seven symbols moved and five shrank: the branch made `UxRom::update_banks` worth outlining, which took 36 instructions out of `Board::write_register` and 30 out of `Board::reset` | **none.** Mapper 2 does not move: `fixed_first` is false, its conflicts stay gated on submapper 2 (MR-BUS-1), and no savestate byte moved. No golden-core entry is on mapper 180 |
+| mapper 78, both wirings (submapper 1 *Uchuusen*, submapper 3 *Holy Diver*) with the iNES-1.0 heuristic — a **new board** and the lot's second and last new `Board` variant | `discrete.rs:185-283` (`Mapper078`, new), `board.rs:72-73` + `:107` (the appended variant), `registry.rs:20-23` + `:144-150` (`has_bus_conflicts`) + `:183`, `mappers/mod.rs:39-41` | `req_core_100_mapper_78_*` x4; `M78.3_P128K_C64K` now **passes** with `detailed 0000` | **none.** All four named functions **byte-identical**, same prologue and niche — the second appended variant cost the fetch dispatches nothing where the first cost +11 and then gave it back, which is what settles step 3's measurement as placement. +2 to +7 on the five `Board` dispatches that gained an arm; the crowd of renamed `discrete.rs` symbols is the mangled disambiguator shifting, not a change | **none.** A board that did not load before. No golden-core entry is on mapper 78 |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -641,3 +642,78 @@ unchanged.**
   8K CHR RAM OK, detailed 0000`.
 * `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed, with
   both mapper-180 rows flipped from `unsupported` to `pass`.
+
+## Step 7 — mapper 78, the Irem IF-12 and the Jaleco board of *Uchuusen*
+
+### The board
+
+nesdev, *INES Mapper 078*: the two cartridges are *Holy Diver* and *Uchuusen - Cosmo Carrier*,
+both "a CNROM and a UNROM" in discrete logic, with one register at `$8000-$FFFF` doing all three
+jobs — `CCCC MPPP`: bits 0-2 the 16 KiB PRG bank at `$8000-$BFFF`, bit 3 the mirroring, bits 4-7
+the 8 KiB CHR bank, and `$C000-$FFFF` fixed to the last 16 KiB. "Subject to bus conflicts: Yes",
+unconditionally, which puts it with mappers 11, 66 and 180 in
+`registry::has_bus_conflicts` rather than with the submapper-gated 2, 3 and 7.
+
+**Bit 3 means one thing on each board**, and that is the whole of the two wirings:
+
+* *Holy Diver*, NES 2.0 submapper 3: "0 = H, 1 = V", through "a 74HC00, which serves as a 2:1 mux
+  of PPU A10 and PPU A11 into CIRAM A10";
+* *Cosmo Carrier*, submapper 1: "0 = 1scA, 1 = 1scB".
+
+Mesen 2 reads bit 3 the same way for each (`JalecoJf16.h:25-31`), so the two sources agree on the
+direction — and the Holy Mapperel ROM, which identifies the board by its mirroring, is the
+witness: it prints `HOLY DIVER`.
+
+### The iNES 1.0 heuristic
+
+"Emulators SHOULD support NES 2.0 submappers: 1 for Uchuusen and 3 for Holy Diver", and for an
+image that carries neither the page gives the rule: "iNES1 ROM image headers often set the
+'alternative nametables' flag for Holy Diver and cleared it for Cosmo Carrier". So byte 6 bit 3
+decides, with the submapper winning where there is one. **Mesen 2 has no equivalent** — it reads
+`SubMapperID` alone, so an iNES 1.0 *Holy Diver* gets Cosmo Carrier's one-screen wiring there —
+and AMD-061 §1 makes the documentation prevail.
+
+Our loader reads byte 6 bit 3 as a four-screen header, and nothing comes of that: `update_banks`
+sets the arrangement from the register on the first reset, so `memory.mirroring()` is never left
+at `FourScreen`. `req_core_100_mapper_78_never_keeps_the_four_screen_header` pins it.
+
+Registers in `$4020-$5FFF`: **none**.
+
+### Where it lives
+
+A genuinely new board — not a wiring of an existing one — so it is the lot's **second and last**
+new `Board` variant, appended after `Fme7` per `board.rs`'s note. It sits in `discrete.rs`, which
+is where "a CNROM and a UNROM" belongs.
+
+### Cost
+
+| function | step 6 | step 7 |
+| --- | ---: | ---: |
+| `Board::ppu_peek` | 235 | 235 (byte-identical, same prologue and niche) |
+| `Board::ppu_read` | 236 | 236 (byte-identical) |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 (byte-identical) |
+| `Ppu2C02::read_nametable_as` | 107 | 107 (byte-identical) |
+
+So the second appended variant cost the two fetch dispatches **nothing at all**, where the first
+cost +11 and then got it back at step 5 — which is the behaviour of a placement heuristic and not
+of a cost that scales with the number of arms. The rest of the diff is the new board's own symbols,
++2 to +7 on the `Board` dispatches that gained an arm (`write_register`, `reset`, `save_registers`,
+`try_read_prg`, `expansion_audio_output`), `Cartridge::create` 3701 → 3734, and a crowd of
+`discrete.rs` symbols whose mangled disambiguator shifted because the new type was inserted before
+them in the file — those are renames, not changes. `Ppu2C02::step_dot` went 1409 → 1419, the same
+±10 lottery step 3 documented.
+
+### Save states
+
+One new board with one register byte, and nothing added to any existing board's block.
+
+### Result
+
+* `cargo fmt --check`, `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`: clean.
+* `cargo test --release -p zax-nes -p zax-harness`: 0 failed, with four new tests — the register's
+  three fields, bit 3 on each of the two boards, the byte-6 heuristic with the submapper winning
+  over it, and the four-screen header never surviving.
+* `zax-harness test-roms --filter M78`: **1 pass**, `HOLY DIVER: 128K PRG ROM, 8K PRG RAM OK,
+  64K CHR ROM OK, detailed 0000`.
+* `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed. **All
+  forty Holy Mapperel rows are now `pass`**, which is what this lot set out to do for that suite.

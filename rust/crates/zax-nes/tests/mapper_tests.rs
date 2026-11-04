@@ -49,13 +49,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 156, Daou 306, which runs Metal Force (Korea), a widescreen target;
     // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3);
     // * 118, TxSROM, which shares the MMC3's board (MF-3 step 5);
-    // * 180, the other 74-series wiring of the UxROM board (MF-3 step 6).
+    // * 180, the other 74-series wiring of the UxROM board (MF-3 step 6);
+    // * 78, the Irem IF-12 and the Jaleco board of Uchuusen (MF-3 step 7).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![69, 118, 156, 180], extra);
+    assert_eq!(vec![69, 78, 118, 156, 180], extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -801,6 +802,100 @@ fn req_core_090_the_txsrom_nametables_come_back_with_its_banks() {
     core.try_load_state(&state, 0).unwrap();
     assert_eq!([1, 0, 1, 0], nametable_pages(&core));
     assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ---------------------------------------------------------------- mapper 78 (IF-12, Uchuusen)
+
+/// A mapper-78 image on the submapper `submapper` says: the board has bus conflicts
+/// unconditionally, so PRG bank 0 — the low half of the switchable 16 KiB window at power-on — is
+/// filled with $FF for the register to be writable through it.
+fn mapper_78(submapper: Option<u8>, byte6: u8) -> NesCore {
+    let mut rom = MapperRom::new(78)
+        .prg(16)
+        .chr(32)
+        .mirroring(byte6)
+        .prg_bank_all_ones(0);
+    if let Some(submapper) = submapper {
+        rom = rom.submapper(submapper);
+    }
+
+    rom.load()
+}
+
+/// The register is `CCCC MPPP` over the whole of $8000-$FFFF: bits 0-2 the 16 KiB PRG bank at
+/// $8000-$BFFF, bits 4-7 the 8 KiB CHR bank, and $C000-$FFFF fixed to the last 16 KiB (nesdev,
+/// "INES Mapper 078").
+#[test]
+fn req_core_100_mapper_78_switches_prg_chr_and_mirroring_from_one_register() {
+    let mut core = mapper_78(Some(3), 0x00);
+    assert_eq!(78, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0xFF, 1, 14, 15], core.prg_windows());
+
+    core.write_memory(0x8000, 0x35); // PRG bank 5, CHR bank 3, bit 3 clear.
+    assert_eq!([10, 11, 14, 15], core.prg_windows());
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());
+
+    // Bits 0-2 only: bit 3 is the mirroring and does not reach the PRG bank. On a fresh board,
+    // because the write above moved the $FF-filled bank out of the window the register is
+    // written through (the board has conflicts).
+    let mut fresh = mapper_78(Some(3), 0x00);
+    fresh.write_memory(0x8000, 0x0F);
+    assert_eq!([14, 15, 14, 15], fresh.prg_windows());
+    assert_eq!(Nm::Vertical, fresh.mirroring());
+}
+
+/// Bit 3 means one thing on each board. nesdev: *Holy Diver* — NES 2.0 submapper 3 — is
+/// "0 = H, 1 = V" through "a 74HC00, which serves as a 2:1 mux of PPU A10 and PPU A11 into CIRAM
+/// A10", and *Cosmo Carrier* — submapper 1 — is "0 = 1scA, 1 = 1scB".
+#[test]
+fn req_core_100_mapper_78_reads_bit_3_according_to_its_board() {
+    let mut holy_diver = mapper_78(Some(3), 0x00);
+    holy_diver.write_memory(0x8000, 0x00);
+    assert_eq!(Nm::Horizontal, holy_diver.mirroring());
+    holy_diver.write_memory(0x8000, 0x08);
+    assert_eq!(Nm::Vertical, holy_diver.mirroring());
+
+    let mut uchuusen = mapper_78(Some(1), 0x00);
+    uchuusen.write_memory(0x8000, 0x00);
+    assert_eq!(Nm::SingleScreenA, uchuusen.mirroring());
+    uchuusen.write_memory(0x8000, 0x08);
+    assert_eq!(Nm::SingleScreenB, uchuusen.mirroring());
+}
+
+/// And for an image with no submapper, the page's own heuristic: "iNES1 ROM image headers often
+/// set the 'alternative nametables' flag for Holy Diver and cleared it for Cosmo Carrier" — byte
+/// 6 bit 3. Mesen 2 has no equivalent and gives such an image Cosmo Carrier's wiring whatever
+/// byte 6 says; AMD-061 §1 makes the documentation prevail.
+#[test]
+fn req_core_100_mapper_78_without_a_submapper_follows_byte_6_bit_3() {
+    let mut flagged = mapper_78(None, 0x08);
+    flagged.write_memory(0x8000, 0x08);
+    assert_eq!(
+        Nm::Vertical,
+        flagged.mirroring(),
+        "byte 6 bit 3 set: Holy Diver"
+    );
+
+    let mut plain = mapper_78(None, 0x00);
+    plain.write_memory(0x8000, 0x08);
+    assert_eq!(
+        Nm::SingleScreenB,
+        plain.mirroring(),
+        "byte 6 bit 3 clear: Cosmo Carrier"
+    );
+
+    // The submapper wins over the heuristic where there is one.
+    let mut both = mapper_78(Some(1), 0x08);
+    both.write_memory(0x8000, 0x08);
+    assert_eq!(Nm::SingleScreenB, both.mirroring());
+}
+
+/// A four-screen header is never left in place: `update_banks` sets the arrangement from the
+/// register on the first reset, so the byte-6 flag the heuristic reads has no other effect.
+#[test]
+fn req_core_100_mapper_78_never_keeps_the_four_screen_header() {
+    let core = mapper_78(None, 0x08);
+    assert_eq!(Nm::Horizontal, core.mirroring());
 }
 
 // ---------------------------------------------------------------- the small boards
