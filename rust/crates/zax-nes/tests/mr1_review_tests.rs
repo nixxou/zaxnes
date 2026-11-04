@@ -858,6 +858,52 @@ fn mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed() {
 
 // ================================================================ mapper 4, MMC3 / MMC6
 
+/// MR-4-9, second half — **AMD-061 §8, closing Q-114.** "Le sous-mappeur NES 2.0 d'une image
+/// l'emporte sur la révision par défaut : une image marquée sous-mappeur 4 (MMC3 NEC / Sharp
+/// MMC3A) a le compteur d'IRQ de révision A (un `$C000` chargé à `$00` ne produit qu'une seule
+/// IRQ) ; toutes les autres images du mapper 4, dont toutes les images iNES 1.0, gardent la
+/// révision B de REQ-CORE-100."
+///
+/// Revision B asserts whenever the counter is zero after a clock, so a latch of $00 gives an IRQ
+/// on every A12 rise. Revision A also requires the counter to have been moving, so the pending
+/// `$C001` reload lets the first clock through and nothing lets the next one. **New in MF-2.**
+#[test]
+fn amd_061_mmc3_submapper_4_has_the_revision_a_irq_counter() {
+    for (submapper, expected) in [(None, 3), (Some(2), 3), (Some(4), 1)] {
+        let mut rom = MapperRom::new(4).prg(8).chr(16);
+        if let Some(submapper) = submapper {
+            rom = rom.submapper(submapper);
+        }
+
+        let mut core = rom.load();
+        core.write_memory(0x2001, 0x00); // No rendering: only the rises below clock it.
+        core.mapper_write(0xC000, 0x00); // Latch $00.
+        core.mapper_write(0xC001, 0x00); // Reload on the next clock.
+        core.mapper_write(0xE001, 0x00); // Enable.
+
+        // Three A12 rises, each acknowledged so the next one can be counted on its own.
+        let mut irqs = 0;
+        for i in 0..3 {
+            {
+                let cart = core.cartridge_mut().unwrap();
+                cart.on_ppu_address_bus(0x0000, 10_000 + i * 100);
+                cart.on_ppu_address_bus(0x1000, 10_000 + i * 100 + 50);
+            }
+
+            if irq(&core) {
+                irqs += 1;
+                core.mapper_write(0xE000, 0x00); // Acknowledge.
+                core.mapper_write(0xE001, 0x00); // And re-enable.
+            }
+        }
+
+        assert_eq!(
+            expected, irqs,
+            "submapper {submapper:?}: a latch of $00 must give {expected} IRQ(s) over three rises"
+        );
+    }
+}
+
 /// MR-4-1. The MMC6 $A001 read-enable and write-enable bits are the other way round.
 ///
 /// Mesen (`Mappers/Nintendo/MMC3.h:142-144`):

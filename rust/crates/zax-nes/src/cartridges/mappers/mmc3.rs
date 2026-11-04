@@ -1,3 +1,8 @@
+// Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+//
+// `clock_irq_counter`'s revision A condition is Mesen's `(count > 0 || _irqReload)`
+// (`Core/NES/Mappers/Nintendo/MMC3.h`, `NotifyVramAddressChange`); see THIRD-PARTY-NOTICES.md.
+
 use super::{windows_for, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -17,6 +22,10 @@ pub struct Mmc3 {
     /// The nametable arrangement is wired and $A000 is ignored: a four-screen header, or
     /// NES 2.0 submapper 2, "MMC3C with hard-wired mirroring" (MR-4-9).
     four_screen: bool,
+    /// NES 2.0 submapper 4, the NEC / Sharp MMC3A, whose IRQ counter is **revision A**
+    /// (MR-4-9, AMD-061 §8 closing Q-114). Chosen at load; every other mapper-4 image, iNES
+    /// 1.0 included, keeps revision B and with it REQ-CORE-114's `mmc3_test_2` test 6.
+    irq_revision_a: bool,
     select: u8,
     protect: u8,
     irq_latch: u8,
@@ -40,6 +49,10 @@ impl Mmc3 {
             // $A000 writes are ignored on both.
             four_screen: header.mirroring == NametableMirroring::FourScreen
                 || (header.is_nes20 && header.submapper == 2),
+            // AMD-061 §8: "le sous-mappeur NES 2.0 d'une image l'emporte sur la révision par
+            // défaut". Submapper 4 is "NEC MMC3 (Loading latch with 0 disables IRQ)" (nesdev,
+            // "NES 2.0 submappers"), which is the revision A counter.
+            irq_revision_a: header.is_nes20 && header.submapper == 4,
             select: 0,
             protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,
@@ -112,15 +125,27 @@ impl Mmc3 {
         }
     }
 
+    /// Clocks the scanline counter on an A12 rise, and asserts the line when it lands on zero.
+    ///
+    /// **The two revisions (AMD-061 §8, Q-114).** Revision B — every mapper-4 image but a
+    /// declared submapper 4 — asserts whenever the counter is zero after the clock, so a latch
+    /// of $00 gives an IRQ on *every* rise; that is what REQ-CORE-114 and `mmc3_test_2` test 6
+    /// require and it is unchanged. Revision A also demands that the counter was **moving**:
+    /// non-zero before the clock, or a `$C001` reload pending. A latch of $00 then gives exactly
+    /// one IRQ — the pending reload lets the first clock through and nothing lets the next one —
+    /// which is §8's criterion.
     fn clock_irq_counter(&mut self) {
-        if self.irq_counter == 0 || self.irq_reload {
+        let before = self.irq_counter;
+        let reloading = self.irq_reload;
+        if before == 0 || reloading {
             self.irq_counter = i32::from(self.irq_latch);
             self.irq_reload = false;
         } else {
             self.irq_counter -= 1;
         }
 
-        if self.irq_counter == 0 && self.irq_enabled {
+        let moving = !self.irq_revision_a || before > 0 || reloading;
+        if moving && self.irq_counter == 0 && self.irq_enabled {
             self.irq_pending = true;
         }
     }

@@ -19,22 +19,26 @@ lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
 ### Mesen 2 — (c) Sour — GNU GPL v3
 
-Deux expressions de deux cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`) sont
-**adaptées de Mesen 2** (<https://github.com/SourMesen/Mesen2>, dépôt local
+Trois expressions de trois cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`)
+sont **adaptées de Mesen 2** (<https://github.com/SourMesen/Mesen2>, dépôt local
 `third_party/mesen2`, commit `b9fa69d`), publié sous GNU GPL v3 :
 
 - le choix du jeu de registres CHR du MMC5 (`mmc5.rs`, `chr_address`), repris de l'expression
   `chrA` de `Core/NES/Mappers/Nintendo/MMC5.h` ;
 - l'heuristique de décodage des lignes d'adresse des VRC2/VRC4 quand le sous-mappeur NES 2.0 est
   absent (`vrc2_vrc4.rs`, `Vrc2Vrc4::new`), reprise de `TranslateAddress` de
-  `Core/NES/Mappers/Konami/VRC2_4.h` (« ORing both values should make most games work »).
+  `Core/NES/Mappers/Konami/VRC2_4.h` (« ORing both values should make most games work ») ;
+- la condition du compteur d'IRQ de **révision A** du MMC3 (`mmc3.rs`, `clock_irq_counter`),
+  reprise de `(count > 0 || _irqReload)` dans `NotifyVramAddressChange` de
+  `Core/NES/Mappers/Nintendo/MMC3.h`, qui est le comportement qu'AMD-061 §8 exige du
+  sous-mappeur 4 (« un `$C000` chargé à `$00` ne produit qu'une seule IRQ »).
 
 Les fichiers concernés portent l'en-tête :
 
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
 
 Mesen 2 est distribué sous GNU GPL v3, la même licence que Zaxnes. Le texte complet est dans
-`LICENSE`. Le reste de ces deux cartes, et toutes les autres, suit la documentation publique
+`LICENSE`. Le reste de ces trois cartes, et toutes les autres, suit la documentation publique
 (wiki NESdev) que REQ-CORE-100 désigne comme référence ; Mesen 2 a servi de contre-épreuve lors
 de la relecture du lot MR-1/MR-1b (`docs/review/MR-1-mappers.md`), qui relève aussi les points
 où c'est Mesen qui est en erreur.

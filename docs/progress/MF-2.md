@@ -34,7 +34,7 @@ The brief numbers its work 0-9; the commits number 1-10, so commit *k* is brief 
 - [x] 6/10 — step 5: MR-64-3, MR-64-4 — the RAMBO-1 IRQ prescaler and its delayed assertion
 - [x] 7/10 — step 6: MR-5-2 done; **MR-5-4 not done**, see Q-116
 - [x] 8/10 — step 7: MR-30-4, MR-30-6 — UNROM 512 self-flashing and four-screen CHR-RAM
-- [ ] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
+- [x] 9/10 — step 8: AMD-061 §8 — Q-113 (SXROM battery) and Q-114 (mapper 4 submapper 4)
 - [ ] 10/10 — step 9: the three unknowns MR-64-1, MR-64-5, MR-18-1, and the close of the lot
 
 ## Out of scope
@@ -62,6 +62,8 @@ New boards: MR-4-3 (the Acclaim MC-ACC, mapper 4 submapper 3) and any missing ma
 | MR-5-4 | **not implemented** — `// Q-116` on `mmc5.rs:on_ppu_scanline` | — | — | **none**: the only faithful implementation needs a new per-PPU-fetch notification every game pays for, which this lot's rule forbids. Q-116 asks the owner to choose |
 | MR-30-4 | `discrete.rs:455-470` (the state machine), `:508-560` (`step_flash`, erase, program) | `mr_30_4_*` x3 | none on any read path: the erase and the program complete at once, so `rom_windows` stays a plain window. `UnRom512::write_register` 8 → 116, reached by mapper 30 alone | self-flashing UNROM 512 homebrew. See Q-117 |
 | MR-30-6 | `discrete.rs:410-418` (the mode), `:588-606` (the three overrides), `mod.rs:178-192` + `:392-412` (the cached pages) | `mr_30_6_*` x2 | **every hot PPU function is instruction-identical to step 6** after two fixes: `Cartridge` caches the nametable pages (so the `Board` dispatch leaves the per-fetch path and `run_dots` is 32 instructions *better*) and `read_nametable_inner` keeps the `#[inline(never)]` it effectively had. `cpu_write` pays one bool test | four-screen UNROM 512 homebrew (byte 6 `%....1..1`) |
+| AMD-061 §8, Q-113 | `registry.rs:96-120` — **comment only**, the code was already §8's answer | `mr_1_5_*` x2, unchanged | none | none: the amendment confirmed MF-1's reading |
+| AMD-061 §8, Q-114 (MR-4-9's other half) | `mmc3.rs:20-24` (the flag), `:40-44` (the submapper), `:120-146` (`clock_irq_counter`) | `amd_061_mmc3_submapper_4_has_the_revision_a_irq_counter` | `Board::on_ppu_address_bus` is per pattern fetch: the dispatch and the MMC3 arm's own common path are **instruction-identical**; the +20 is inside the once-per-scanline A12-rise branch | NES 2.0 **submapper-4** mapper-4 dumps only. No other mapper-4 image moves, and `mmc3_test_2` test 6 still holds for them |
 
 ## Step 0 — giving back what MF-1 cost
 
@@ -819,3 +821,79 @@ Six new, all in `mr1_review_tests.rs`:
 `cargo test --release -p zax-nes --no-fail-fast -- --ignored`: no failures, the 1 200-frame
 golden test included. `cargo check --workspace --exclude zax-app --all-targets` clean, so the
 `Mapper` signature change breaks no other crate.
+
+## Step 8 — AMD-061 §8, the two questions MF-1 opened
+
+### Q-113 — the MMC1 battery: **closed, and nothing to change**
+
+§8 settles it on exactly the reading MF-1 chose, in these words: SOROM and SZROM put "seule la
+seconde puce, $2000-$3FFF de la PRG-RAM" on the battery; **SXROM** carries "une seule puce de
+32 Kio, entièrement sur pile", so `battery_ram` exposes all 32 KiB and *Final Fantasy I·II* keeps
+its saves; and "une image dont la taille de RAM ne permet pas de distinguer la carte garde toute
+sa PRG-RAM sur pile".
+
+`registry::battery_offset` is already that function — a 16 KiB mapper-1 RAM retains its second
+half, every other size retains all of itself — so **no code changed**. What changed is its
+doc comment, which cited the open ticket and now cites the amendment that closes it. Both halves
+were already pinned by `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed` and
+`mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed`, which still pass.
+
+MF-1's step-5 note recorded a host-side consequence that still stands and is not a bug: on a
+SOROM the battery file goes from 16 KiB to 8, and `NesCore::import_battery_ram` copies a prefix,
+so an existing 16 KiB file loads its volatile half into the retained one. Two titles are
+concerned (*Genghis Khan*, *Nobunaga's Ambition*). §8 does not address migration; it is a
+host-side matter rather than a core one.
+
+### Q-114 — mapper 4 submapper 4 gets the revision A IRQ counter
+
+§8: "le sous-mappeur NES 2.0 d'une image l'emporte sur la révision par défaut : une image marquée
+sous-mappeur 4 (MMC3 NEC / Sharp MMC3A) a le compteur d'IRQ de révision A (un `$C000` chargé à
+`$00` ne produit qu'une seule IRQ) ; toutes les autres images du mapper 4, dont toutes les images
+iNES 1.0, gardent la révision B de REQ-CORE-100, et REQ-CORE-114 (`mmc3_test_2` n° 6) reste exigé
+pour elles. Le choix se fait au chargement."
+
+`Mmc3` gains `irq_revision_a`, set from the NES 2.0 submapper in `Mmc3::new`, and
+`clock_irq_counter` gains the one condition that separates the revisions:
+
+- **revision B** asserts whenever the counter is zero after the clock, so a latch of $00 gives an
+  IRQ on *every* A12 rise — unchanged, and that is what `mmc3_test_2` test 6 requires;
+- **revision A** also requires the counter to have been *moving*: non-zero before the clock, or a
+  `$C001` reload pending. A latch of $00 then gives exactly **one** IRQ — the pending reload lets
+  the first clock through, and nothing lets the next one — which is §8's criterion.
+
+The expression is Mesen's `(count > 0 || _irqReload)` (`MMC3.h`, `NotifyVramAddressChange`), and
+it agrees with the amendment's criterion, so `mmc3.rs` gains the
+`// Portions adapted from Mesen 2 (c) Sour, GPL-3.0` header and the notices file gains the site.
+Mesen gates the revision on its own ROM database's chip name; the amendment gates it on the
+NES 2.0 submapper, which is what this does.
+
+### Cost
+
+Two symbols changed in the whole crate: `Cartridge::create` (+6, at load) and
+`Board::on_ppu_address_bus` (86 → 106).
+
+That second one is on the **per-pattern-fetch path of every game**, so it is the one to check,
+and both of its relevant paths are instruction-identical:
+
+- a board that does not watch A12 runs the same ten-instruction prologue and the same `retq`
+  (the dispatch is a bit-test against a mask of the two A12 boards, unchanged);
+- the MMC3 arm's own common path — A12 low or staying low, which is what a pattern fetch does —
+  is byte-for-byte the same nine instructions.
+
+The +20 is inside the A12-**rise** branch, which runs once per scanline, and part of the MMC3 arm
+moved out of line with it. Nothing else in the crate moved: every PPU and CPU hot function is
+unchanged from step 7.
+
+### Save states
+
+Nothing added. `irq_revision_a` is derived from the ROM header at load, like `is_mmc6` and
+`four_screen` beside it, so it is not saved and no format version moves.
+
+### Tests
+
+`amd_061_mmc3_submapper_4_has_the_revision_a_irq_counter` **new**: over three A12 rises with a
+latch of $00, an undeclared image and a submapper-2 image give three IRQs and a submapper-4 image
+gives one.
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean,
+`cargo test --release -p zax-nes`: **583 passed**, 0 failed, 7 ignored.

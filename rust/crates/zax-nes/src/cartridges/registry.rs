@@ -99,9 +99,17 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
 /// MR-1-5, nesdev ("MMC1"): "Even if the SOROM and SZROM boards utilizes a battery, it is
 /// connected to only one PRG-RAM chip. The first RAM chip will not retain its data, but the
 /// second one will." SOROM and SZROM are the 16 KiB boards, so the chip that retains is the
-/// second 8 KiB. The 32 KiB SXROM is **not** covered by that sentence and keeps its whole RAM
-/// battery-backed, as Mesen has it (`MMC1.h:134`, the whole window mapped `SaveRam`); see
-/// Q-113.
+/// second 8 KiB.
+///
+/// **AMD-061 §8 closes Q-113 on the reading MF-1 chose**, and in these words: SOROM and SZROM
+/// put "seule la seconde puce, $2000-$3FFF de la PRG-RAM" on the battery; **SXROM** carries
+/// "une seule puce de 32 Kio, entièrement sur pile", so `battery_ram` exposes all 32 KiB and
+/// *Final Fantasy I·II* keeps its saves; and "une image dont la taille de RAM ne permet pas de
+/// distinguer la carte garde toute sa PRG-RAM sur pile". The function below is exactly that:
+/// a 16 KiB mapper-1 RAM retains its second half, every other size retains all of itself. No
+/// code changed in MF-2 — the amendment confirmed what was already here — and
+/// `mr_1_5_only_the_second_sorom_ram_chip_is_battery_backed` and
+/// `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` pin both halves.
 #[must_use]
 pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
     if mapper == 1 && prg_ram_size == 2 * BankWindows::PRG_WINDOW_SIZE {
