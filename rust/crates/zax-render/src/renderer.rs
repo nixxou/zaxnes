@@ -35,6 +35,7 @@ use crate::gl::screen_effects::{ScreenEffects, ScreenFrame};
 use crate::gl::shaders::{self, SceneVariant};
 use crate::gl::shadow_map::ShadowMap;
 use crate::gl::skybox::SkyboxPass;
+use crate::gl::smaa::Smaa;
 use crate::gl::texture_cache::TextureCache;
 use crate::interop;
 use crate::numerics::{Vector3, Vector4};
@@ -377,6 +378,19 @@ pub struct SceneRenderer {
     screen_effects_given_up: bool,
     /// The test seam of [`Self::fail_screen_effects`]: no code path sets it.
     fail_screen_effects: bool,
+    /// The three passes of the depth-detecting SMAA of AMD-060 REQ-SCN-085 and everything they
+    /// own, created the first frame `video.anti_alias` is 3 and dropped the first frame it is not.
+    ///
+    /// **`None` is the state of every frame at any other level**, which is REQ-SCN-086: no pass,
+    /// no target and no texture of the filter exists then, and the whole cost of the mode to such
+    /// a frame is the `is_none` test that decides not to run it.
+    smaa: Option<Smaa>,
+    /// Whether this session has given the filter up because the implementation refused it
+    /// (REQ-SCN-086's fallback). Tested only on a frame that wants it, and out of line, so a frame
+    /// at any other level never reads it.
+    smaa_given_up: bool,
+    /// The test seam of [`Self::fail_smaa`]: no code path sets it.
+    fail_smaa: bool,
     linear_palette: LinearPalette,
     /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
     convert_palette: bool,
@@ -508,6 +522,9 @@ impl SceneRenderer {
             screen_effects: None,
             screen_effects_given_up: false,
             fail_screen_effects: false,
+            smaa: None,
+            smaa_given_up: false,
+            fail_smaa: false,
             linear_palette: LinearPalette::new(&gl)?,
             convert_palette,
             unit_box: Arc::new(interop::unit_box()?),
@@ -604,6 +621,11 @@ impl SceneRenderer {
         // is what decides whether the module and its targets exist at all. In Classic, and in
         // Enhanced at the defaults of REQ-SCN-079, one boolean test and one `is_none`.
         self.select_screen_effects(scene);
+        // AMD-060 REQ-SCN-085: whether this frame is filtered by the depth-detecting SMAA, which
+        // is what decides whether its programs, its tables and its targets exist at all. At every
+        // other level of `video.anti_alias` — REQ-SCN-086 — one integer comparison and one
+        // `is_none`.
+        self.select_smaa(scene);
 
         self.passes.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -672,6 +694,7 @@ impl SceneRenderer {
         }
 
         let effects = self.screen_effects.as_ref();
+        let smaa = self.smaa.as_ref();
         let statistics = &mut self.passes.statistics;
         // AMD-055, point 1 of the lot's brief: the variants of REQ-SCN-081 and REQ-SCN-082 and the
         // programs of the two screen passes, counted together. 0 in Classic, and 0 in Enhanced
@@ -684,6 +707,12 @@ impl SceneRenderer {
         statistics.occlusion_levels = effects.map_or(0, |effects| {
             u32::try_from(effects.multi_scale_levels()).unwrap_or(u32::MAX)
         });
+        // AMD-060 REQ-SCN-086: the filter's resources, which are **0 at every level but 3** —
+        // including on the frame the level leaves 3, where the module has just been dropped. Set
+        // here rather than cleared in `begin_frame` for the same reason `screen_effect_bytes` is:
+        // what they report is what exists now, not what was submitted.
+        statistics.smaa_bytes = smaa.map_or(0, Smaa::bytes);
+        statistics.smaa_programs = smaa.map_or(0, |_| Smaa::PROGRAMS);
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
         statistics.resident_textures = count(self.textures.count());
@@ -1006,6 +1035,77 @@ impl SceneRenderer {
             .is_some_and(|effects| effects.msvo_refused().is_some())
     }
 
+    /// Creates or releases the three passes of AMD-060 REQ-SCN-085, once a frame.
+    ///
+    /// **What it does at any level but 3 is nothing**: one integer comparison and an `Option` that
+    /// is already `None`, which is REQ-SCN-086 ("aucune passe, aucune cible et aucune texture du
+    /// SMAA NE DOIT exister ni être soumise"). The first frame at 3 compiles the programs and
+    /// uploads the two tables of the reference; the first frame that leaves 3 drops the module,
+    /// which releases its targets and its tables with it — the "effet « imm. »" of SPEC-09 §4.1.1,
+    /// with no restart.
+    ///
+    /// **A failure is not fatal** (REQ-SCN-086): an implementation that cannot give the passes
+    /// their programs, their tables or their targets draws the frame **without anti-aliasing** and
+    /// says so once ([`RenderDiagnostics::smaa_unavailable`]) — the declared fallback, worded on
+    /// the fallback **(D)** of the MSVO estimator. The filter is then given up for the session: the
+    /// three formats it needs are ones the renderer already depends on, so a refusal is a property
+    /// of the implementation and not of the frame.
+    fn select_smaa(&mut self, scene: &SceneState) {
+        if !geometry::smaa_depth(scene.settings.anti_alias()) {
+            self.smaa = None;
+            return;
+        }
+        self.prepare_smaa();
+    }
+
+    /// Builds what the three passes need, and gives them up for the session if the implementation
+    /// refuses. Out of line for the reason [`Self::prepare_screen_effects`] is: none of it belongs
+    /// in the instruction cache of a frame at one of the other three levels.
+    #[inline(never)]
+    fn prepare_smaa(&mut self) {
+        if self.smaa_given_up {
+            return;
+        }
+        if let Err(error) = self.build_smaa() {
+            self.smaa = None;
+            self.smaa_given_up = true;
+            let frame = self.plan.frame_count();
+            self.plan
+                .diagnostics
+                .smaa_unavailable(&error.to_string(), frame);
+        }
+    }
+
+    /// The fallible half of [`Self::prepare_smaa`].
+    fn build_smaa(&mut self) -> Result<(), RenderError> {
+        // The seam the fallback is observed through: no code path sets it, only a test
+        // ([`Self::fail_smaa`]), because no driver this side refuses `RG8`.
+        if self.fail_smaa {
+            return Err(RenderError::Gl(GlError::Unsupported {
+                what: "the SMAA filter, refused on request of a test",
+            }));
+        }
+        if self.smaa.is_none() {
+            self.smaa = Some(Smaa::new(&self.gl)?);
+        }
+        Ok(())
+    }
+
+    /// Whether this session has given the filter of REQ-SCN-085 up because the implementation
+    /// refused it (REQ-SCN-086). False on every machine whose driver answers normally.
+    #[must_use]
+    pub const fn smaa_given_up(&self) -> bool {
+        self.smaa_given_up
+    }
+
+    /// Makes the next frame at `video.anti_alias` = 3 fail to prepare the filter, so that
+    /// REQ-SCN-086's fallback can be observed on a machine whose driver refuses nothing.
+    ///
+    /// Only a test calls this, for the reason [`Self::fail_screen_effects`] exists.
+    pub const fn fail_smaa(&mut self, fail: bool) {
+        self.fail_smaa = fail;
+    }
+
     /// Drops every cached GPU mesh and texture. The host calls it when the 3D engine rebuilds
     /// its geometry wholesale, for instance after a change of mesh algorithm (REQ-E3D-340).
     pub fn invalidate_caches(&mut self) {
@@ -1161,7 +1261,7 @@ impl SceneRenderer {
             target.width,
             target.height,
             scene.settings.anti_alias_samples(),
-            self.screen_effects.is_some(),
+            self.screen_effects.is_some() || self.smaa.is_some(),
         )?;
         self.passes.statistics.anti_alias_samples = self.linear.samples();
         self.passes.statistics.centroid_interpolation = self.passes.scene.centroid;
@@ -1280,6 +1380,14 @@ impl SceneRenderer {
             draw_transparent(passes, &mut common, lists);
         }
 
+        // 3a. The three passes of AMD-060 REQ-SCN-085, **after** the transparent objects and
+        // **before** the HUD. The order is the implementation's to fix and REQ-SCN-085 asks that
+        // it be documented; `run_smaa` carries the reasoning, and the short of it is that the
+        // 2D elements the requirement excludes are the ones drawn from here on.
+        if let Some(smaa) = &mut self.smaa {
+            run_smaa(smaa, &mut self.linear, passes, scene, view)?;
+        }
+
         // 4. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
         // REQ-SCN-044).
         if !lists.hud.is_empty() {
@@ -1373,6 +1481,81 @@ fn run_screen_effects(
     // draws that follow rebind what they need and expect the frame's state.
     passes.forget_bindings();
     let gl = &passes.gl.clone();
+    gl.enable(glow::DEPTH_TEST);
+    gl.depth_func(glow::LESS);
+    gl.depth_mask(true);
+    if scene.settings.cull_back_faces {
+        gl.enable(glow::CULL_FACE);
+        gl.cull_face(glow::BACK);
+    }
+    Ok(())
+}
+
+/// Runs the three passes of the depth-detecting SMAA of AMD-060 REQ-SCN-085 over the frame drawn
+/// so far, and leaves the state the draws that follow expect.
+///
+/// **Where it sits in the frame, and why** — REQ-SCN-085 leaves the order to the implementation
+/// and asks that it be documented, so here it is, against the four other things that touch the
+/// frame:
+///
+/// 1. **After the opaque objects and after the screen passes of AMD-055 REQ-SCN-080.** The
+///    occlusion of REQ-SCN-083 multiplies the colour in place and the reflections of REQ-SCN-084
+///    blend into it; a darkening or a reflection laid on top of an already-blended edge would undo
+///    the blend. The filter smooths the frame as it will be seen.
+/// 2. **After the transparent objects of REQ-SCN-040.** They are scene geometry with silhouettes
+///    of their own, which the multisampling of levels 1 and 2 smooths and which nothing in AMD-060
+///    excludes.
+/// 3. **Before the HUD.** REQ-SCN-085 says the 2D elements superimposed on the scene "NE DOIVENT
+///    PAS être traités", and in this renderer the HUD is not a flat overlay: it is a plane of
+///    **extruded** tile boxes placed by `interop::hud_matrix`, so adjacent HUD tiles sit at
+///    different depths and a depth detector run after it would find contours *inside* the status
+///    bar and blend its pixel art — the very objection AMD-032 §2 raised against post-processing
+///    filters. It is also the order REQ-SCN-080 already chose, for the same reason. The menus, the
+///    notifications and every other overlay are drawn by the interface after the sRGB encode, so
+///    they are outside the renderer's reach altogether. **Q-109 §2** records the reading.
+/// 4. **Before the sRGB encode, on linear colour.** SMAA's weights are coverage fractions, and a
+///    coverage-weighted average of two surfaces is an average of radiance: linear is the correct
+///    space for it. The frame already blends in linear (AMD-021 R2-009) and REQ-SCN-083's
+///    composite says so in the same words ("en espace linéaire, avant l'encodage sRGB"); and
+///    levels 1 and 2 resolve multisamples of that same linear buffer, so a linear blend makes
+///    level 3's edges the same *kind* of edge as the two levels it sits beside.
+///
+/// **`#[inline(never)]` for the reason `run_screen_effects` carries it**: none of this runs at the
+/// other three levels, and a hot once-a-frame function should not carry the body through its
+/// instruction cache to prove it. `render_scene` pays the one `is_some` that decides not to call
+/// it.
+///
+/// # Errors
+///
+/// [`GlError`] when a target cannot be allocated. The frame is then drawn without the filter.
+#[inline(never)]
+fn run_smaa(
+    smaa: &mut Smaa,
+    linear: &mut LinearColorBuffer,
+    passes: &mut Passes,
+    scene: &SceneState,
+    view: &CameraView,
+) -> Result<(), GlError> {
+    if let (Some(depth), Some(color)) = (linear.depth_texture(), linear.color_texture()) {
+        let frame = ScreenFrame {
+            depth,
+            color,
+            capacity: linear.capacity(),
+            drawn: linear.drawn(),
+            drawn_scale: linear.drawn_scale(),
+            projection: projection_terms(view),
+        };
+        passes.statistics.smaa_passes = smaa.detect_edges(frame)?;
+    }
+
+    // The passes bound a target and a vertex array of their own and left the depth test off; the
+    // HUD that follows rebinds what it needs and expects the frame's state. Same restoration
+    // `run_screen_effects` makes, for the same reason.
+    linear.bind_for_draw();
+    passes.forget_bindings();
+    let gl = &passes.gl.clone();
+    gl.bind_vertex_array(None);
+    gl.bind_texture(glow::TEXTURE_2D, None);
     gl.enable(glow::DEPTH_TEST);
     gl.depth_func(glow::LESS);
     gl.depth_mask(true);

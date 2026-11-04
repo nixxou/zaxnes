@@ -10,8 +10,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | # | Step | Status |
 |---|---|---|
 | 1 | The reference and the specs read; the design (pass order, colour space, targets, tables, bind layouts); the test plan | done — `4465826` |
-| 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — this commit |
-| 3 | OpenGL: the two tables and the depth edge detection | todo |
+| 2 | The setting's domain 0..3, the options window, the Lua mapping, the persistence — no rendering yet | done — `607b1d1b` |
+| 3 | OpenGL: the two tables and the depth edge detection | done — this commit |
 | 4 | OpenGL: the blending weights, the neighbourhood blending, the lifecycle, the fallback | todo |
 | 5 | `wgpu`: the three passes, the lifecycle, the fallback | todo |
 | 6 | The parity measurements and the costs | todo |
@@ -88,7 +88,7 @@ arithmetic form the reference's own `SMAA_HLSL_3` path uses —
 the same sources are correct with one number changed. The two backends therefore differ in exactly
 one uniform.
 
-#### 2. The depth threshold: the reference's constant is unusable here, and the slope is the answer
+#### 2. The depth threshold: the reference's constant is unusable here, and the second difference is the answer
 
 `SMAA_DEPTH_THRESHOLD` is `0.001` on the raw window depth, and the reference says plainly that it
 "depends on the depth range of the scene". Measured against this projection
@@ -103,26 +103,35 @@ it finds everything near the eye and nothing at the camera distances Zaxnes actu
 What replaces it, and why it is the faithful rather than the convenient answer:
 
 - **The window depth is exactly linear in screen space across a planar surface.** That is a
-  property of the perspective projection, not an approximation. So the first difference of the
-  window depth is **constant** over a plane, at any angle and any resolution, and the test "is this
-  step larger than the local slope?" is exact: it never fires inside a flat face. This is precisely
-  AMD-060's own acceptance criterion ("les pixels intérieurs à la face sont identiques à l'octet").
-  The slope is read from the pixel two away — `offset[2]` of `SMAAEdgeDetectionVS`, which the
-  reference already computes and which only its luma detector uses.
+  property of the perspective projection, not an approximation — it is why a depth buffer may be
+  interpolated linearly at all. So the **second** difference of the window depth is *rigorously
+  zero* over a plane, at any angle, any resolution and any distance, which makes AMD-060's own
+  acceptance criterion ("les pixels intérieurs à la face sont identiques à l'octet") an identity
+  rather than a tolerance. The third sample it needs is the pixel two away — `offset[2]` of
+  `SMAAEdgeDetectionVS`, which the reference already computes and which only its luma detector
+  uses.
+- **Both differences have to clear the threshold** (`min` of the two), and each rejects what the
+  other admits: the second difference alone marks the pixel *behind* the contour as well, and the
+  first alone fires on a slope. Step 3 measured both failure modes.
 - **The absolute floor is expressed as a relative distance jump**, so it is scale- and
   distance-free. From `w ≈ 1 − 0.15/d` comes `0.15/d ≈ 1 − w`, hence a jump of `ε · d` in distance
   is a jump of `ε · (1 − w)` in window depth. The floor is therefore
   `ZAX_SMAA_DEPTH_RELATIVE · (1 − w)`, with `1 − w` read straight off the sample.
 
-So: `threshold = ZAX_SMAA_DEPTH_RELATIVE · (1 − w) + ZAX_SMAA_DEPTH_SLOPE · slope`, with the
-reference's `step(threshold, delta)` and its `discard` unchanged. Both constants are constants of
-the shader file, as `ao_blur.frag`'s `ZAX_AO_BLUR_SHARPNESS` is, and for the reason that file gives:
-REQ-SCN-085 fixes the *detector* (the depth, never the luma or the colour) and leaves its
-sensitivity free. Starting values 0.002 and 1.5, to be settled by the measurements of step 3.
-**Q-109** records the departure from the reference's constant and the reasoning.
+So: `threshold = ZAX_SMAA_DEPTH_FLOOR + ZAX_SMAA_DEPTH_RELATIVE · (1 − w)`, and the quantity
+compared against it is `min(first difference, second difference)` — the reference's
+`step(threshold, ·)` and its `discard` unchanged. The constants are constants of the shader file,
+as `ao_blur.frag`'s `ZAX_AO_BLUR_SHARPNESS` is, and for the reason that file gives: REQ-SCN-085
+fixes the *detector* (the depth, never the luma or the colour) and leaves its sensitivity free.
+**Q-109 §1** records the departure from the reference's constant and the reasoning.
 
 The cost against the reference's own detector: two extra point samples of the depth per pixel, at
 offsets the reference's vertex shader already provides.
+
+**Step 3 corrected the shape of this term after measuring it** — the design as first written
+compared the step to the local *slope* (`delta > 1.5 · slope`), and that version found **no
+horizontal contour at all** on the close-up R. Its own section records the measurement and the fix;
+the paragraph above is the design as built.
 
 #### 3. Where the three passes go in the frame, and in which colour space
 
@@ -340,6 +349,131 @@ A fresh worktree has no `rust/crates/zax-app/demo/FlappyZaxNes.nes` or `flappyza
 `zax-app` does not compile without them. They were copied from `impl/`. They are ignored, so they
 cannot be staged by accident. `zax-app` and its tests also need `--features bundled` here, or
 `link.exe` cannot find `SDL2.lib`.
+
+### Step 3 — the two tables, the depth edge detection, and the lifecycle around it
+
+The filter's first pass, its data, and the whole of REQ-SCN-086's lifecycle — so that step 4 has a
+module to put two more passes into and nothing of the plumbing left to argue about.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `src/assets/smaa/area.bin`, `search.bin`, `README.md` (new) | the reference's two byte arrays, with their shapes, their SHA-256 and the extraction command |
+| `src/shaders/smaa.glsl` (new) | what the three passes share: `uRtMetrics` with the **mirrored** `y`, `uDrawnScale`, and the two reads (`zaxSmaaFetch`, `zaxSmaaFetchOffset`), written as multiply-adds so the `y` sign carries |
+| `src/shaders/smaa_edges.frag` (new) | `SMAADepthEdgeDetectionPS` with the threshold of Q-109 §1, the reference's `discard` and its `r` = west / `g` = north encoding |
+| `src/gl/smaa.rs` (new) | the `Smaa` module: the vertex array, the edge program, the two tables uploaded `LINEAR`, the `RG8` target allocated at the attachments' capacity and cleared each frame, `rt_metrics`, `bytes`, and two unit tests |
+| `src/gl/shaders.rs` | `SMAA_AREA_TABLE`, `SMAA_SEARCH_TABLE`, the `SMAA` chunk and `SMAA_EDGES` — which deliberately does **not** take `SCREEN_DEPTH`: this detector reconstructs no position, so the projection uniforms of AMD-055's passes would be four numbers it never reads |
+| `src/renderer.rs` | `smaa`, `smaa_given_up`, `fail_smaa`; `select_smaa` / `prepare_smaa` / `build_smaa`; the depth-texture wish; `run_smaa` with the frame order written out; the two resource counters |
+| `src/scene.rs` | `RenderSettings::anti_alias` and `set_anti_alias(level)`, which derives the sample count — see below |
+| `src/statistics.rs` | `smaa_passes`, `smaa_bytes`, `smaa_programs` |
+| `src/diagnostics.rs` | `smaa_unavailable`, the one line of REQ-SCN-086's fallback |
+| `zax-harness/src/render/mod.rs` | the three keys in `render.json`, written **only** at level 3 |
+| `zax-app` | `set_anti_alias(level)` at the three call sites that used to convert the level to a sample count themselves |
+| `zax-render/tests/amd060_smaa_tests.rs` (new) | six tests: the tables' bytes, the sources, the metrics, the three counters at the four levels, the allocate/release round trip, the fallback |
+
+#### The scene had no way to tell level 3 from level 0, and that is what `set_anti_alias` fixes
+
+The first thing this step ran into. `RenderSettings` carried **only** `anti_alias_samples`, and the
+app and the harness each converted the setting into a sample count on the way in
+(`set_anti_alias_samples(geometry::anti_alias_samples(level))`). Levels 0 and 3 both mean one
+sample, so the renderer could not tell them apart — and the renderer is where the filter lives.
+
+So `RenderSettings` gains the level and one setter for both: `set_anti_alias(level)` stores it and
+derives the sample count through the same `geometry::anti_alias_samples`, so the two can never
+disagree. The three production call sites now pass the level and the conversion rule lives in one
+place. `set_anti_alias_samples` stays for the tests that want a sample count and nothing else, with
+its doc saying so.
+
+#### The detector as designed found **no horizontal contour at all**, and the measurement is the step
+
+The one real finding of this step, and it cost a throwaway probe to get.
+
+The design section above first wrote the threshold as "is this step larger than the local slope?"
+— `delta > ZAX_SMAA_DEPTH_SLOPE · slope`, with the slope read from the pixel two away. The argument
+for it was sound (the window depth is linear in screen space over a plane, so `delta == slope`
+there) and the result was wrong. Measured on the close-up R of AMD-055 §2.5 at 320 × 240, with the
+edge pass redirected into the linear buffer so that the capture *is* the edge map:
+
+| detector | west edges | north edges |
+|---|---|---|
+| `delta > 1.5 · slope` (as designed) | 2 845 (3.70 %) | **0 (0.00 %)** |
+| `min(delta, second difference) > threshold` (as built) | 810 (1.06 %) | **1 094 (1.42 %)** |
+
+Zero north edges, on a frame whose most obvious contour is the cube's horizontal top silhouette.
+The cause, measured on the same frame with the raw differences written out as colour: the floor is
+a plane seen at a shallow angle, so its own per-pixel step reaches **3.4 · 10⁻⁴** — while the
+cube's horizontal silhouette jumps **3.2 · 10⁻⁴**. The same size. No threshold on the first
+difference separates a slope that steep from a step that small.
+
+The **second** difference does, exactly: it is rigorously zero over a plane (the window depth being
+linear in screen space is why), and at a silhouette it is the jump. But it is not enough on its own
+either — along a row `… bg bg | obj obj …` it is the same size at the first object pixel (right) and
+at the second (wrong), so the contour would come out two pixels wide where the second pass's weights
+are built for one. The first difference is zero at that second pixel. So **both** have to clear the
+threshold, which is one `min` and keeps the shape of the reference's own
+`edges = step(threshold, ·)`.
+
+Three things worth drawing from it, and they are why this is written out at length:
+
+1. **The first version would have passed every static test in the file.** It had the right
+   constants, the right offsets, the right `discard` and the mirrored `y`; what it did not have was
+   a frame. This is RU-7's own finding in a new place — "a device finds what reading cannot" — and
+   here the device was not even needed, only a *picture*.
+2. **The fix is strictly better than the design, not a retreat from it.** The `min` also finds a
+   detail one pixel wide (the second difference is twice the jump there), which the slope comparison
+   missed by construction. Q-109 §1 records that as a gain.
+3. **Half the probe's time went on the probe.** The redirection `detect_edges` was given drew into
+   framebuffer **0** rather than into the frame, because `screen_effects::allocate` binds its new
+   framebuffer and then unbinds to `None` — so on the first frame the redirection was undone between
+   the bind and the draw, and the capture was the ordinary scene. The tell was that a shader writing
+   solid green changed nothing: those 2 845 "west" pixels are the red cube's, read through an
+   `r > 127` test. Rendering twice fixed it. Written down because the same shape of mistake will
+   meet whoever next redirects a screen pass for a look.
+
+#### What a frame at any other level pays for this step
+
+`render_scene` went from **3401 instructions to 3400** — one fewer, which is 0.03 % and the wrong
+sign to worry about. The whole of what it carries: `select_smaa` is one integer comparison and one
+assignment of `None` to an `Option` that is already `None`; `begin_pass`'s depth-texture argument
+gains an `|| self.smaa.is_some()`; the frame gains one `is_some` that decides not to call
+`run_smaa` (which is `#[inline(never)]` for exactly that reason); and `smaa_bytes` /
+`smaa_programs` are assigned 0 once a frame. No program is built, no table is uploaded, no target
+is allocated and no pass is submitted.
+
+| Symbol | RU-7 | step 2 | step 3 |
+|---|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3401 | 3401 | **3400** |
+| `Construction::segment` | 159 | 159 | **159** |
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| AMD-060 §4, the tables to the byte | `amd060_smaa_tests.rs` `req_scn_085_the_two_tables_are_the_reference_s_own_bytes` (length + SHA-256) |
+| their shape against the reference's own constants | 1 unit test in `gl/smaa.rs` |
+| the detector reads the **depth**, carries Q-109 §1's threshold and both differences, and reads neither the colour nor the luma | `req_scn_085_the_edge_detection_reads_the_depth_and_mirrors_y` |
+| `SMAA_RT_METRICS.y` is negative | 1 unit test in `gl/smaa.rs`, plus the pass running over a target of the frame's size |
+| REQ-SCN-086: nothing at levels 0, 1 and 2; everything on the first frame at 3; one sample at 3 | `req_scn_086_nothing_of_the_filter_exists_at_the_other_levels` |
+| REQ-SCN-086: allocated and released without a restart, twice over | `req_scn_086_the_targets_are_allocated_and_released_without_a_restart` |
+| REQ-SCN-086's fallback: refused, no pass, no target, no MSAA, said once, and the picture of level 0 | `req_scn_086_a_refused_resource_draws_the_frame_without_anti_aliasing` |
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean. In release, one crate at a time: `zax-render` all suites passed (6 new
+integration tests, 2 new unit tests), `zax-harness` all suites passed, and `zax-settings`,
+`zax-profiles`, `zax-scripting` and `zax-app --features bundled` are unchanged from step 2.
+
+#### Two more environment notes for whoever resumes
+
+- **`rust/test-roms/` is `.gitignore`d too**, and `zax-harness`'s `bench_core_tests` needs
+  `nestest.nes` from it. Copied from `impl/`, like the demo artefacts of step 2.
+- **The G: drive filled up.** `target-sm` accumulated **1.14 GB of linker PDBs** (187 of them) on
+  top of a 36 MB `--emit=asm` dump, and the harness build then failed with
+  `rustc-LLVM ERROR: IO failure on output stream: no space on device`. `release/deps/*.pdb` and the
+  `.s` are safe to delete between runs — rustc regenerates them — and `impl/`'s own 30 GB of build
+  directories are not this lot's to touch.
 
 ### What is left for R0
 

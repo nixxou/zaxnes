@@ -2159,6 +2159,7 @@ dependencies = [
  "libloading",
  "png",
  "pollster",
+ "sha2",
  "thiserror",
  "wgpu",
  "windows-sys 0.61.2",

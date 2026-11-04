@@ -1556,9 +1556,7 @@ fn publish_settings_to_scene(model: &SettingsModel, scene: &mut SceneState) {
     scene.settings.skip_render = model.skip_frame();
     scene.settings.set_target_frame_rate(model.frame_rate());
     scene.settings.set_vsync(model.vsync());
-    scene
-        .settings
-        .set_anti_alias_samples(zax_render::geometry::anti_alias_samples(model.anti_alias()));
+    scene.settings.set_anti_alias(model.anti_alias());
     scene.camera.snap_to_setpoints();
 }
 

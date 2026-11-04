@@ -36,6 +36,7 @@ pub struct RenderSettings {
     light_intensity: f32,
     shadow_map_size: i32,
     anti_alias_samples: i32,
+    anti_alias: i32,
     vsync: i32,
     target_frame_rate: i32,
     /// Vertical field of view in degrees, 45 to 95 by steps of 5 (REQ-SCN-005).
@@ -79,6 +80,7 @@ impl Default for RenderSettings {
             light_intensity: 1.0,
             shadow_map_size: geometry::SHADOW_MAP_SIZE,
             anti_alias_samples: 1,
+            anti_alias: 0,
             vsync: 0,
             target_frame_rate: 90,
             fov: geometry::DEFAULT_FOV,
@@ -127,8 +129,28 @@ impl RenderSettings {
     }
 
     /// Sets the samples per pixel, clamped to 1..8.
+    ///
+    /// This is the sample count **alone**, which is all the three levels of AMD-032 §2 need. The
+    /// fourth level of AMD-060 is not a sample count, so a caller that has the setting should use
+    /// [`Self::set_anti_alias`] instead and let it derive this.
     pub fn set_anti_alias_samples(&mut self, value: i32) {
         self.anti_alias_samples = value.clamp(1, geometry::MAX_ANTI_ALIAS_SAMPLES);
+    }
+
+    /// The `video.anti_alias` level itself, 0 to 3 (SPEC-09 §4.1.1 as AMD-060 §2 extends it).
+    ///
+    /// The renderer needs the **level** and not only [`Self::anti_alias_samples`], because level 3
+    /// and level 0 both draw with one sample and only one of them runs the filter of REQ-SCN-085.
+    #[must_use]
+    pub const fn anti_alias(&self) -> i32 {
+        self.anti_alias
+    }
+
+    /// Sets the `video.anti_alias` level and, with it, the samples per pixel the level asks for
+    /// (`geometry::anti_alias_samples`) — so that the two can never disagree.
+    pub fn set_anti_alias(&mut self, level: i32) {
+        self.anti_alias = level;
+        self.set_anti_alias_samples(geometry::anti_alias_samples(level));
     }
 
     /// `VSync` (REQ-SCN-061, SPEC-09): 0 off, 1 every refresh, 2 every other refresh. Applying it

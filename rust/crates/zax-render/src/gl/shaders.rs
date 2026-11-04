@@ -593,6 +593,34 @@ pub const SSR_COMPOSITE: ProgramSource = ProgramSource {
     fragment: Stage::of([include_str!("../shaders/ssr_composite.frag")]),
 };
 
+/// `Textures/AreaTex.h`'s `areaTexBytes` of the reference, 160 x 560 `R8G8`, in its own row order
+/// (AMD-060 §4; `src/assets/smaa/README.md` holds the shape, the SHA-256 and the extraction).
+///
+/// Public so that a test can hash it: "les tables sont reprises à l'octet" is checkable from
+/// outside and nothing but a hash checks it.
+pub const SMAA_AREA_TABLE: &[u8] = include_bytes!("../assets/smaa/area.bin");
+
+/// `Textures/SearchTex.h`'s `searchTexBytes` of the reference, 64 x 16 `R8` — the cropped shape its
+/// own `SMAA_SEARCHTEX_PACKED_SIZE` names.
+pub const SMAA_SEARCH_TABLE: &[u8] = include_bytes!("../assets/smaa/search.bin");
+
+/// What the three passes of AMD-060 REQ-SCN-085 share: `SMAA_RT_METRICS` with the mirrored `y`,
+/// and the two reads every pass makes (`shaders/smaa.glsl`).
+const SMAA: &str = include_str!("../shaders/smaa.glsl");
+
+/// The depth edge detection of AMD-060 REQ-SCN-085, into an `RG8` target (`gl/smaa.rs`).
+///
+/// **Built the first time a frame runs at `video.anti_alias` = 3**, and released the first frame
+/// that does not: at every other level REQ-SCN-086 requires that this program not exist. It does
+/// **not** take [`SCREEN_DEPTH`]: the detector reads the window depth point by point and
+/// reconstructs no position, so the projection uniforms of the passes of AMD-055 would be four
+/// numbers it never looks at.
+pub const SMAA_EDGES: ProgramSource = ProgramSource {
+    name: "smaa_edges",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SMAA, include_str!("../shaders/smaa_edges.frag")]),
+};
+
 const SKY_VERTEX: Stage = Stage::of([
     include_str!("../shaders/sky.vert"),
     "",

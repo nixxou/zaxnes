@@ -46,6 +46,10 @@ windows-sys = { version = "0.61", optional = true, features = [
 
 [dev-dependencies]
 flate2 = "1"
+# AMD-060 §4: the two precomputed tables are "reprises à l'octet", which
+# `tests/amd060_smaa_tests.rs` pins by SHA-256. Already in the tree (zax-nes, zax-profiles,
+# zax-harness), so this adds no dependency to the lock file.
+sha2 = "0.10"
 zax-nes = { path = "../zax-nes" }
 zax-render = { path = ".", features = ["offscreen"] }
 

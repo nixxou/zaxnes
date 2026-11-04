@@ -84,6 +84,21 @@ pub struct RenderStatistics {
     /// write the same `O` through the same composite, so the picture does not say which ran, and
     /// the fallback to Depth has to be observable (REQ-SCN-083).
     pub occlusion_levels: u32,
+    /// Passes the depth-detecting SMAA of AMD-060 REQ-SCN-085 submitted for this frame: 3 at
+    /// `video.anti_alias` = 3, and **0 at every other level**, which is REQ-SCN-086's "aucune
+    /// passe […] NE DOIT exister ni être soumise" made observable from outside the renderer.
+    ///
+    /// It is also how the fallback of REQ-SCN-086 is told from the mode running: a frame that gave
+    /// the filter up reads 0 here while the setting still reads 3.
+    pub smaa_passes: u32,
+    /// Bytes the targets of those passes occupy — the edges, the blending weights and the blended
+    /// colour. **0 at every level but 3**, and back to 0 when the level leaves 3 and they are
+    /// released. The two precomputed tables are not counted: they do not grow with the resolution
+    /// (`gl/smaa.rs::bytes` says why).
+    pub smaa_bytes: u64,
+    /// Shader programs the filter of REQ-SCN-085 holds: the three of its passes. **0 at every
+    /// level but 3**, the same way `style_programs` is 0 in Classic.
+    pub smaa_programs: u32,
     /// CPU time of the collection of the tiles into the buckets (Rust-only, for the frame
     /// profiler).
     pub collect_time: Duration,
@@ -119,6 +134,9 @@ impl Default for RenderStatistics {
             screen_effect_bytes: 0,
             style_programs: 0,
             occlusion_levels: 0,
+            smaa_passes: 0,
+            smaa_bytes: 0,
+            smaa_programs: 0,
             collect_time: Duration::ZERO,
             gpu_time: None,
         }
@@ -142,6 +160,7 @@ impl RenderStatistics {
         self.centroid_interpolation = false;
         self.occluders = 0;
         self.screen_effect_passes = 0;
+        self.smaa_passes = 0;
         self.gpu_time = None;
         self.collect_time = Duration::ZERO;
     }

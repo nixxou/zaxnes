@@ -81,6 +81,47 @@ Le MiniEngine est publié sous la licence MIT suivante, compatible avec la GPL v
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+### SMAA (iryoku/smaa) — (c) 2013 Jorge Jimenez et al. — licence MIT
+
+Le quatrième niveau de l'option *Anti Alias* — « SMAA (profondeur) », AMD-060 REQ-SCN-085 — est
+**traduit de l'implémentation de référence SMAA** (<https://github.com/iryoku/smaa>, fichier
+`SMAA.hlsl`), du HLSL vers le GLSL (`rust/crates/zax-render/src/shaders/smaa*.glsl` et
+`smaa*.frag`) et vers le WGSL (`rust/crates/zax-render/src/wgpu_backend/shaders/smaa*.wgsl`). Les
+fichiers concernés nomment la référence et la fonction dont ils viennent.
+
+Les **deux tables précalculées** de la référence (`Textures/AreaTex.h` et `Textures/SearchTex.h`)
+sont reprises à l'octet, dans `rust/crates/zax-render/src/assets/smaa/area.bin` (160 × 560, `R8G8`)
+et `search.bin` (64 × 16, `R8`) ; leurs empreintes SHA-256 et la commande d'extraction sont dans
+`rust/crates/zax-render/src/assets/smaa/README.md`.
+
+SMAA est publié sous la licence MIT suivante, compatible avec la GPL v3 de Zaxnes :
+
+    Copyright (C) 2013 Jorge Jimenez (jorge@iryoku.com)
+    Copyright (C) 2013 Jose I. Echevarria (joseignacioechevarria@gmail.com)
+    Copyright (C) 2013 Belen Masia (bmasia@unizar.es)
+    Copyright (C) 2013 Fernando Navarro (fernandn@microsoft.com)
+    Copyright (C) 2013 Diego Gutierrez (diegog@unizar.es)
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to
+    use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+    of the Software, and to permit persons to whom the Software is furnished to
+    do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software. As clarification, there
+    is no requirement that the copyright notice and permission be included in
+    binary distributions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 ### rcheevos — (c) 2018 RetroAchievements.org — licence MIT
 
 La prise en charge de RetroAchievements (`rust/crates/zax-achievements`) compile la bibliothèque

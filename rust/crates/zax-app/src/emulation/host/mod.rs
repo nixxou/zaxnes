@@ -21,7 +21,6 @@ use std::collections::VecDeque;
 use time::OffsetDateTime;
 use zax_nes::NesRegion;
 use zax_nes::RegionTiming;
-use zax_render::geometry as render_geometry;
 use zax_scripting::{HookTime, NullScriptLog, ScriptLog};
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -1260,12 +1259,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             SettingId::VideoVSync => self.scene.settings.set_vsync(self.settings.vsync()),
             SettingId::VideoAntiAlias => {
                 // AMD-032 §2: the setting takes effect on the next rendered frame, the renderer
-                // reallocating its multisampled target by itself. No restart.
+                // reallocating its multisampled target by itself. No restart. AMD-060 §2 adds the
+                // fourth level, whose targets the renderer allocates and releases the same way —
+                // which is why the **level** goes to the scene and not only the sample count.
                 self.scene
                     .settings
-                    .set_anti_alias_samples(render_geometry::anti_alias_samples(
-                        self.settings.anti_alias(),
-                    ));
+                    .set_anti_alias(self.settings.anti_alias());
             }
             _ => {}
         }

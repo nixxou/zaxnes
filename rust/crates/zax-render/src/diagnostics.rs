@@ -53,6 +53,9 @@ pub struct RenderDiagnostics {
     /// Whether the one line of AMD-055 REQ-SCN-080 has been written (see
     /// [`Self::screen_effects_unavailable`]). One subject, so one boolean rather than a set.
     screen_effects_reported: bool,
+    /// Whether the one line of AMD-060 REQ-SCN-086's fallback has been written (see
+    /// [`Self::smaa_unavailable`]). One subject, so one boolean rather than a set.
+    smaa_reported: bool,
     /// Whether the one line of REQ-SCN-083's fallback **(D)** has been written (see
     /// [`Self::msvo_unavailable`]). One subject, so one boolean rather than a set.
     msvo_reported: bool,
@@ -115,6 +118,27 @@ impl RenderDiagnostics {
             format!(
                 "the screen-space effects of the Enhanced style could not be prepared \
                  ({reason}); the scene is drawn without them (AMD-055 REQ-SCN-080)"
+            ),
+        );
+    }
+
+    /// Reports that the depth-detecting SMAA of AMD-060 REQ-SCN-085 cannot run on this
+    /// implementation, so the frame is drawn **without anti-aliasing** — REQ-SCN-086's declared
+    /// fallback, worded on the fallback **(D)** of the MSVO estimator below.
+    ///
+    /// **Once per game**, and for the reason [`Self::screen_effects_unavailable`] gives: the three
+    /// formats the filter needs are ones the renderer already depends on, so an implementation
+    /// that refuses one will refuse it for ever, and retrying would cost a failed allocation a
+    /// frame.
+    pub fn smaa_unavailable(&mut self, reason: &str, frame: u64) {
+        if self.smaa_reported {
+            return;
+        }
+        self.smaa_reported = true;
+        self.push(
+            frame,
+            format!(
+                "the SMAA filter could not be prepared ({reason}); the scene is drawn                  without anti-aliasing (AMD-060 REQ-SCN-086)"
             ),
         );
     }

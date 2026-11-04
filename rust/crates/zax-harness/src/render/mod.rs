@@ -986,9 +986,7 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
     state.settings.style = options.style_settings();
 
     // AMD-032 §2: video.anti_alias as the application applies it.
-    state
-        .settings
-        .set_anti_alias_samples(geometry::anti_alias_samples(options.anti_alias));
+    state.settings.set_anti_alias(options.anti_alias);
     state.settings.set_shadow_map_size(options.shadow_map_size);
 }
 
@@ -1058,12 +1056,24 @@ fn describe(
     } else {
         String::new()
     };
+    // AMD-060 REQ-SCN-086, the same shape for the same reason: the filter's two counters are
+    // written **only** at `video.anti_alias` = 3, so a capture at any other level -- the three
+    // the goldens are taken at included -- produces the entry of before the amendment, byte for
+    // byte.
+    let smaa = if zax_render::geometry::smaa_depth(options.anti_alias) {
+        format!(
+            ", \"smaaPasses\": {}, \"smaaBytes\": {}, \"smaaProgramsResident\": {}",
+            render.smaa_passes, render.smaa_bytes, render.smaa_programs
+        )
+    } else {
+        String::new()
+    };
     format!(
         "{{ \"scene\": \"{}\", \"description\": \"{}\", \"width\": {}, \"height\": {}, \
          \"opaqueTiles\": {}, \"transparentTiles\": {}, \"hudTiles\": {}, \"shadowCasters\": {}, \
          \"drawCalls\": {}, \"triangles\": {}, \"residentMeshes\": {}, \"antiAliasSamples\": {}, \
          \"shadowMapSize\": {}, \"requestedShadowMapSize\": {}, \"distinctColors\": {}, \
-         \"backgroundPixels\": {}, \"meanLuma\": {:.4}, \"runAhead\": {}{bench}{style} }}",
+         \"backgroundPixels\": {}, \"meanLuma\": {:.4}, \"runAhead\": {}{bench}{style}{smaa} }}",
         json_text::escape(&scene.name),
         json_text::escape(&scene.description),
         options.width,

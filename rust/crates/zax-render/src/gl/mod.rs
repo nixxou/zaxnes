@@ -15,4 +15,5 @@ pub mod screen_effects;
 pub mod shaders;
 pub mod shadow_map;
 pub mod skybox;
+pub mod smaa;
 pub mod texture_cache;
