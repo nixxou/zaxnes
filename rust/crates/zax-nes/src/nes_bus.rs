@@ -27,19 +27,21 @@ const DMA_DMC: u8 = 0x04;
 /// [`NesBus::dma`]: an OAM transfer is pending or running.
 const DMA_OAM: u8 = 0x08;
 
-/// [`NesBus::dma`]: a `$4015` write has started a sample, and its **load** fetch may not be asked
-/// for before [`NesBus::dmc_load_cycle`] — two or three cycles after the write, by its parity
-/// (nesdev, "DMA"; see [`DmcChannel::set_enabled`]).
+/// [`NesBus::dma`]: the DMC's memory reader has asked for a byte, but no halt may land before
+/// [`NesBus::dmc_ready_cycle`]. Every DMC request passes through this state:
 ///
-/// The delay lives here, as one absolute cycle compared on the cycles that reach
+/// * a **reload** — the sample buffer running dry — is asked for inside the cycle's
+///   [`NesBus::tick`], so the earliest cycle it can halt is the next one;
+/// * a **load** — a `$4015` write that starts a sample — waits two or three cycles more,
+///   by the parity of the write's cycle (nesdev, "DMA"; see `DmcChannel::set_enabled`).
+///
+/// The load's delay lives here, as one absolute cycle compared only on the cycles that reach
 /// [`NesBus::halted_read_cycle`], rather than as a counter inside the DMC. In the DMC it had to be
 /// tested by `clock_timer`, `quiet_clocks` and `skip_quiet_clocks` — the per-CPU-cycle and
 /// per-quiet-run paths of **every** game, with or without a sample playing — which R0 measured at
 /// about +88 M instructions per 300 frames on Mega Man 2 (lot MF-4a-bis step 1). Here it costs a
 /// game that runs no DMA nothing: `dma` is zero on every one of its cycles, which is the single
 /// `cmpb` [`NesBus::read_cycle`] already made.
-///
-/// [`DmcChannel::set_enabled`]: crate::apu::Apu2A03
 const DMA_DMC_WAIT: u8 = 0x10;
 
 /// The CPU bus: memory map, open bus, OAM DMA and the master cycle clock (REQ-CORE-080 to
@@ -72,9 +74,9 @@ pub struct NesBus {
     dma: u8,
     /// Page the pending OAM transfer copies from: the byte written to `$4014`.
     dma_oam_page: u8,
-    /// Cycle from which the load fetch held by [`DMA_DMC_WAIT`] may be asked for; only read
+    /// Earliest cycle the halt of the DMC request held by [`DMA_DMC_WAIT`] may land on; only read
     /// while that bit is set.
-    dmc_load_cycle: i64,
+    dmc_ready_cycle: i64,
     oam_dma_count: i64,
     dmc_dma_count: i64,
     /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
@@ -138,7 +140,7 @@ impl NesBus {
             cycles: 0,
             dma: 0,
             dma_oam_page: 0,
-            dmc_load_cycle: 0,
+            dmc_ready_cycle: 0,
             oam_dma_count: 0,
             dmc_dma_count: 0,
             ppu_lag: 0,
@@ -257,7 +259,7 @@ impl NesBus {
         self.cycles = 0;
         self.dma = 0;
         self.dma_oam_page = 0;
-        self.dmc_load_cycle = 0;
+        self.dmc_ready_cycle = 0;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
@@ -394,20 +396,32 @@ impl NesBus {
     /// is exactly what the test it replaces in `tick` cost (MF-4a step 1).
     fn poll_dmc_dma(&mut self) {
         if self.apu.needs_dmc_dma() && (self.dma & (DMA_DMC | DMA_DMC_WAIT)) == 0 {
-            // A halt and a dummy cycle come before the fetch itself (nesdev, "DMA").
-            self.dma |= DMA_DMC | DMA_DUMMY | DMA_HALT;
+            // The request is raised inside this cycle's `tick`, so the earliest cycle its halt
+            // can land on is the next one — which is the whole reason the request is *held*
+            // rather than armed (see [`DMA_DMC_WAIT`] and [`NesBus::read_cycle`]).
+            self.hold_dmc_dma(0);
         }
     }
 
-    /// Turns the load fetch a `$4015` write queued ([`DMA_DMC_WAIT`]) into a real request, once
-    /// the two or three cycles it waits for have passed. Reached only from the DMA path, which
-    /// `dma != 0` already gates, so the cycles of a game that runs no DMA never see it.
+    /// Holds a DMC request whose halt may not land before `delay` cycles after the next one: 0 for
+    /// a reload, the `$4015` load delay for a load.
+    fn hold_dmc_dma(&mut self, delay: u32) {
+        self.dmc_ready_cycle = self.cycles + 1 + i64::from(delay);
+        self.dma |= DMA_DMC_WAIT;
+    }
+
+    /// Turns the held DMC request ([`DMA_DMC_WAIT`]) into a real one once `halt_cycle` — the cycle
+    /// the halt would land on — has reached [`NesBus::dmc_ready_cycle`]. A halt and a dummy cycle
+    /// come before the fetch itself (nesdev, "DMA").
+    ///
+    /// Reached only from the DMA path, which `dma != 0` already gates, so the cycles of a game
+    /// that runs no DMA never see it.
     ///
     /// The request is raised only if the memory reader still wants a byte: a `$4015` disable, a
-    /// soft reset or a sample that ended inside the window takes the load back, which is the
+    /// soft reset or a sample that ended inside the window takes it back, which is the
     /// "cancel DMA completely" half of the nesdev page read from the other side.
-    fn promote_dmc_wait(&mut self) {
-        if (self.dma & DMA_DMC_WAIT) == 0 || self.cycles < self.dmc_load_cycle {
+    fn promote_dmc_wait(&mut self, halt_cycle: i64) {
+        if (self.dma & DMA_DMC_WAIT) == 0 || halt_cycle < self.dmc_ready_cycle {
             return;
         }
 
@@ -532,8 +546,10 @@ impl NesBus {
         // The register the 2A03's decoder last answered, for the "two reads in a row" rule.
         let mut decoded_before = read_address;
 
+        // The halt cycle has already run: it is the cycle the caller ticked, the one the CPU was
+        // about to read on (see [`NesBus::read_cycle`]). What is left of it is its read, which
+        // happens with the CPU's address still on the bus.
         self.dma &= !DMA_HALT;
-        self.tick();
         if !halt_is_invisible {
             let value = self.read_internal(read_address);
             self.open_bus = value;
@@ -546,10 +562,12 @@ impl NesBus {
         let mut oam_byte: u8 = 0;
 
         while (self.dma & (DMA_DMC | DMA_OAM)) != 0 {
-            // A load fetch queued by a `$4015` write can come due in the middle of an OAM
-            // transfer; the transfer's own cycles then stand in for its halt and dummy cycles,
-            // exactly as they do for a reload the memory reader asks for here.
-            self.promote_dmc_wait();
+            // A held DMC request can come due in the middle of an OAM transfer — a load whose
+            // `$4015` delay runs out, or a reload the memory reader asked for inside one of the
+            // ticks below; the transfer's own cycles then stand in for its halt and dummy cycles.
+            // The cycle this iteration is about to run is `cycles + 1`, which is where its halt
+            // would land.
+            self.promote_dmc_wait(self.cycles + 1);
 
             let get_cycle = (self.cycles & 1) != 0;
 
@@ -793,8 +811,7 @@ impl NesBus {
     fn after_apu_write(&mut self, dmc_load_delay: u32) {
         if dmc_load_delay > 0 {
             // `self.cycles` is the write's own cycle: the bus ticks, then performs the access.
-            self.dmc_load_cycle = self.cycles + i64::from(dmc_load_delay);
-            self.dma |= DMA_DMC_WAIT;
+            self.hold_dmc_dma(dmc_load_delay);
             return;
         }
 
@@ -842,9 +859,23 @@ impl NesBus {
 }
 
 impl NesBus {
-    /// One **read** cycle of the CPU: the DMA units' only chance to halt it, then the cycle
-    /// itself (see [`NesBus::run_dma`]). Outside `run_dma` a non-zero `dma` always carries
-    /// `DMA_HALT`, so the gate needs no mask — one `cmpb` and one not-taken branch.
+    /// The **read** of a CPU read cycle whose cycle has just run, and the DMA units' only chance
+    /// to halt it (see [`NesBus::run_dma`]).
+    ///
+    /// **Where the gate sits, and why there.** The DMA question has to be asked on the read cycle
+    /// itself — the halt repeats the read the CPU was making — but it does not have to be asked
+    /// *before* it: the cycle the CPU was about to read on **is** the halt cycle, so running it
+    /// first and asking afterwards is the same machine. Asking afterwards is what makes it free:
+    /// the gate then stands where the read site already materialised the address for
+    /// `read_internal`, so a read cycle passes the address to **one** call, as it did before
+    /// MF-4a, instead of two. The `movl` of the second materialisation is the +9.0 M of
+    /// `Cpu6502::step`/`branch`/`resolve` this lot's step 2 gives back, measured on a mapper 1
+    /// that never runs a DMA.
+    ///
+    /// What the ordering costs is that `tick` can raise a DMC request *inside* the cycle the gate
+    /// is then asked about. It may not halt that cycle: the hardware samples the request before
+    /// the cycle. So every DMC request is **held** — [`DMA_DMC_WAIT`] with an earliest halt cycle
+    /// in [`NesBus::dmc_ready_cycle`] — and only the cold half below turns it into a halt.
     ///
     /// **Out of line, and that is the point.** [`CpuBus::read`] is inlined into about a hundred
     /// places inside `Cpu6502::step`, `resolve`, `branch`, `push` and `pull`. The gate is two
@@ -852,43 +883,61 @@ impl NesBus {
     /// argument moves and the `callq` of the cold side), and pasting those hundred times cost a
     /// measured **+8 % of wall clock** on an NROM and an MMC1 — all of it instruction cache, as
     /// the executed-instruction count went *down*. Behind this call the gate is encoded once;
-    /// the call sites keep the single `callq` they already had for [`NesBus::tick`].
+    /// the call sites keep the single `callq` they already had for [`NesBus::read_internal`].
     /// The two sides are written as an `if`/`else` of two tail calls on purpose: that way the
     /// function needs **no stack frame of its own** — no pushed register, no reserved shadow
     /// space — and the no-DMA side is a compare, a not-taken branch and a jump straight into
-    /// [`NesBus::tick`], which is the call the read site already made.
+    /// [`NesBus::read_internal`], which is the call the read site already made.
+    // Q-119
     #[inline(never)]
-    fn read_cycle(&mut self, address: u16) {
+    fn read_cycle(&mut self, address: u16) -> u8 {
         if self.dma == 0 {
-            self.tick();
+            self.read_internal(address)
         } else {
-            self.halted_read_cycle(address);
+            self.halted_read_cycle(address)
         }
     }
 
-    /// The cold half of [`NesBus::read_cycle`]: the DMA units take the bus, then the CPU gets
-    /// its cycle. Separate so that its argument shuffling and its call never reach the other
-    /// half's prologue.
+    /// The cold half of [`NesBus::read_cycle`]: the cycle that has just run becomes the DMA's
+    /// halt cycle, the units take the bus, and the CPU then gets the cycle it was denied and
+    /// reads again. Separate so that its argument shuffling and its frame never reach the other
+    /// half.
     ///
-    /// A [`DMA_DMC_WAIT`] whose cycle has not come yet is the one case where `dma` is non-zero
-    /// and no unit wants the bus: the read cycle then runs as any other.
+    /// A held DMC request whose cycle has not come is the one case where `dma` is non-zero and no
+    /// unit may halt: the read then happens as on any other cycle.
     // Q-119
     #[inline(never)]
-    fn halted_read_cycle(&mut self, address: u16) {
-        self.promote_dmc_wait();
+    fn halted_read_cycle(&mut self, address: u16) -> u8 {
+        // The cycle that has just run is the one a halt would land on.
+        self.promote_dmc_wait(self.cycles);
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
-            self.tick();
-            return;
+            return self.read_internal(address);
         }
         self.run_dma(address);
         self.tick();
+        self.read_internal(address)
+    }
+
+    /// The DMA units' chance to halt a read cycle whose byte does **not** come from the bus: an
+    /// instruction fetch inside the widescreen extension's execution zone, which reads a hack
+    /// pack's code. It runs the cycle itself, so the fetch site keeps the single call it had.
+    #[inline(never)]
+    fn zone_read_cycle(&mut self, address: u16) {
+        self.tick();
+        if self.dma != 0 {
+            // The halt's repeated read still reaches the bus, as it does for any other address.
+            self.halted_read_cycle(address);
+        }
     }
 }
 
 impl CpuBus for NesBus {
+    /// One **read** cycle: the cycle, then the read it carries — which the DMA units may turn
+    /// into a halt (see [`NesBus::read_cycle`]). Two calls and one materialisation of the
+    /// address, which is what this was before MF-4a.
     fn read(&mut self, address: u16) -> u8 {
-        self.read_cycle(address);
-        let value = self.read_internal(address);
+        self.tick();
+        let value = self.read_cycle(address);
         self.open_bus = value;
         value
     }
@@ -896,18 +945,20 @@ impl CpuBus for NesBus {
     /// An instruction fetch in the widescreen extension's execution zone (`$2000`-`$3FFF`, while
     /// a pack's code runs there) reads that code; any other is a plain read.
     ///
-    /// Measured: the four instructions MF-4a's DMA gate adds to [`CpuBus::read`], multiplied by
+    /// Measured: the four instructions MF-4a's DMA gate added to [`CpuBus::read`], multiplied by
     /// the call sites `read` is inlined into, grew this function past the inliner's budget and
     /// it became a `callq` on **every instruction fetch** — and, one level up, pushed
     /// `Cpu6502::execute` back out of `step`. Both are MF-3b's "a callee gaining its first call
-    /// site is a stop-the-lot event"; the attribute puts them back.
+    /// site is a stop-the-lot event"; the attribute puts them back. MF-4a-bis took those four
+    /// instructions back out again, and the attribute stays: it is the shape the whole MF-3b/MF-4a
+    /// history says to pin rather than rediscover.
     #[allow(clippy::inline_always)]
     #[inline(always)]
     fn read_code(&mut self, address: u16) -> u8 {
         let zone = self.ppu.wide().zone_offset(address);
         self.zone_instruction = zone.is_some();
         if let Some(offset) = zone {
-            self.read_cycle(address);
+            self.zone_read_cycle(address);
             let value = self.ppu.wide().code().get(offset).copied().unwrap_or(0xFF);
             self.open_bus = value;
             return value;
@@ -996,7 +1047,7 @@ impl NesBus {
         // state written before MF-4a loads byte for byte (REQ-CORE-091).
         self.dma = 0;
         self.dma_oam_page = 0;
-        self.dmc_load_cycle = 0;
+        self.dmc_ready_cycle = 0;
         self.ppu_lag = 0;
         self.ppu_deadline = 0;
         Ok(())

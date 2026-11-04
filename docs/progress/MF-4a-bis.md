@@ -125,6 +125,9 @@ or `+ 3` by the parity of the write's cycle and raises `DMA_DMC_WAIT`; `read_cyc
 load's cycle has not come) or turns the held request into a real `DMA_DMC | DMA_DUMMY | DMA_HALT`
 and runs the DMA.
 
+(Step 2 generalises the same holding to *every* DMC request and renames the field
+`dmc_ready_cycle`, so the line numbers above are this step's. The shipped tree is step 2's.)
+
 ### Why the timing is the same cycle, not one near it
 
 `read_cycle` is entered *before* the cycle's `tick`, so `self.cycles` there is the previous
@@ -260,3 +263,190 @@ have — the load fetch being noticed on time even when the APU is lagging, wher
 `quiet_clocks` clamp to get the same answer — makes the two models agree rather than differ. A
 `$4015` disable, a soft reset or a sample that ends inside the two-or-three-cycle window now takes
 the held load back, which MF-4a's `needs_sample_fetch` did too (the request simply never rose).
+
+### Measured: callgrind, 300 frames
+
+`cargo build --release -p zax-harness --bin zax-harness` from a `git archive` of each commit into
+its own fresh directory with its own `CARGO_TARGET_DIR` (`CARGO_PROFILE_RELEASE_STRIP=false`, so
+that callgrind can name the symbols; nothing else of the profile changed, `lto = "fat"` and
+`codegen-units = 1` as shipped), then
+`valgrind --tool=callgrind --dump-instr=no --cache-sim=no --branch-sim=no ./zax-harness bench-core
+<rom> --frames 300 --warmup 0`. Whole-process instruction counts, which are deterministic to the
+instruction: two runs of the same binary give the same number.
+
+| ROM | `b39eaba4` | `c4577878` (MF-4a) | **step 1** |
+| --- | ---: | ---: | ---: |
+| `M1_P128K` (mapper 1) | 5 069 762 455 | 5 173 571 742 (**+103.8 M, +2.05 %**) | **5 084 222 763 (+14.5 M, +0.285 %)** |
+| `M0_P32K_C8K_V` (NROM) | 5 697 464 924 | 5 801 946 919 (**+104.5 M, +1.83 %**) | **5 712 517 631 (+15.1 M, +0.264 %)** |
+
+**Step 1 gives back 89.3 M of MF-4a's 103.8 M on the mapper 1 and 89.4 M of 104.5 M on the NROM** —
+the APU side, in full. Per function, `M1_P128K`:
+
+| function | `b39eaba4` | MF-4a | step 1 | step 1 − base |
+| --- | ---: | ---: | ---: | ---: |
+| `Apu2A03::run_cpu_cycles` | 1 195 054 926 | 1 232 616 647 | 1 196 867 457 | +1 812 531 |
+| `Apu2A03::quiet_cycles` | 589 641 360 | 643 245 120 | 589 641 360 | **0** |
+| `NesBus::tick` | 322 089 330 | 300 029 379 | 300 029 379 | −22 059 951 |
+| `NesBus::read_cycle` | — | 26 344 580 | 26 344 580 | +26 344 580 |
+| `Cpu6502::step` | 300 134 169 | 304 275 996 | 304 275 996 | +4 141 827 |
+| `Cpu6502::branch` | 164 692 677 | 167 263 754 | 167 263 754 | +2 571 077 |
+| `Cpu6502::resolve` | 94 765 694 | 96 485 560 | 96 485 560 | +1 719 866 |
+| `Cpu6502::execute_without_operand` | 92 725 930 | 93 273 849 | 93 273 849 | +547 919 |
+| `Cpu6502::indexed` | 7 649 571 | 7 717 255 | 7 717 255 | +67 684 |
+| `NesBus::read_internal` | 253 764 381 | 253 108 979 | 253 108 979 | −655 402 |
+| `NesBus::write_internal` | 13 286 171 | 13 279 859 | 13 279 947 | −6 224 |
+
+`quiet_cycles` is back to **the instruction**, which is what the byte-identical body predicted;
+`run_cpu_cycles` is byte-identical too and still reads +1.81 M, which step 3 accounts for (it is
+not code — it is MF-4a's DMC phase). What is left is the CPU side, step 2's business: the
+`Cpu6502` rows, +9.05 M together, and `read_cycle` +26.34 M against `tick`'s −22.06 M.
+
+This ROM runs no DMA at all at `b39eaba4` and 27 182 instructions of one at step 1
+(`run_dma` 20 526, `dma_read` 6 656 — holy-mapperel's own `$4014` writes), so it measures the
+brief's "apart from the DMA cycles themselves" directly rather than by subtraction.
+
+## Step 2 — the CPU side
+
+### What the +9.05 M is, in one instruction
+
+The read site, `Cpu6502::branch`, `b39eaba4` on the left and MF-4a on the right:
+
+    movq  %rdi, %rcx                movq  %rdi, %rcx
+    callq tick                      movl  %r14d, %edx      ; <- the whole of it
+                                    callq read_cycle
+    movq  %rdi, %rcx                movq  %rdi, %rcx
+    movl  %r14d, %edx               movl  %r14d, %edx
+    callq read_internal             callq read_internal
+
+A read cycle makes **two** calls, and MF-4a made both of them want the address. Any call clobbers
+the volatile registers, so each one materialises its own copy: where the baseline wrote the address
+into `%edx` once, MF-4a writes it twice. (At the fetch sites the second copy takes the other shape
+— the address is loaded into `%edx` for `read_cycle` and then `movq %rdx, %rbx` keeps it across the
+call — but it is the same one instruction.) 26 344 580 / 3 = 8 781 527 read cycles in 300 frames,
+and the `Cpu6502` rows are +9 048 373: **+1.03 instructions per read cycle**, which is the `movl`
+and nothing else.
+
+### The shape that costs nothing, and why it is the same machine
+
+The DMA question has to be asked **on** the read cycle — the halt repeats the read the CPU was
+making, which is the whole of `dma_4016_read` — but it does not have to be asked **before** it. The
+cycle the CPU was about to read on *is* the halt cycle. So:
+
+    MF-4a                                   step 2
+    read_cycle(address)   gate              tick()                     the halt cycle, run first
+      -> run_dma: tick()  the halt cycle    read_cycle(address) gate
+                  read    the halt's read     -> run_dma: read         the halt's read
+                  DMA cycles                             DMA cycles
+         tick()            the CPU's cycle      tick()                 the CPU's cycle
+    read_internal(address) the CPU's read     read_internal(address)   the CPU's read
+
+the same four things in the same order. What moves is only *where the question is asked*, and
+asking it afterwards puts the gate exactly where the site had already materialised the address for
+`read_internal` — so `read_cycle` **replaces** that call instead of adding one:
+
+    fn read(&mut self, address: u16) -> u8 {
+        self.tick();                             // b39eaba4's call, byte for byte
+        let value = self.read_cycle(address);    // in place of read_internal
+        self.open_bus = value;
+        value
+    }
+
+`read_cycle` keeps its frameless two-tail-call shape and its three instructions, with the hot side
+now jumping into the read rather than into the tick:
+
+    cmpb  $0, 14113(%rcx)
+    jne   halted_read_cycle
+    jmp   read_internal
+
+### What it costs to ask afterwards, and how it is paid
+
+One thing: `tick` can raise a DMC request **inside** the very cycle the gate is then asked about,
+because `poll_dmc_dma` lives in `catch_up_apu`. The hardware samples the request before the cycle,
+so that request may not halt it — and MF-4a got this for free by asking first.
+
+So every DMC request is now **held**: `DMA_DMC_WAIT` plus `dmc_ready_cycle`, the earliest cycle its
+halt may land on (`nes_bus.rs:30-45`, `:400-433`). A reload asks inside a cycle's `tick`, so its
+ready cycle is the next one; a load adds the `$4015` delay on top. That is step 1's mechanism
+generalised from the load to every request, and it costs nothing on the common path — `poll_dmc_dma`
+sets a field it already set a bit next to, and the comparison happens only in the cold half, which
+`dma != 0` gates.
+
+It also makes one corner **more** faithful rather than less. `run_dma` computes `halt_is_invisible`
+from `self.dma & DMA_DMC`; with the halt cycle's `tick` now behind it, a reload polled *during* that
+tick would have been visible there. Because such a request is held and not armed, `run_dma` sees
+exactly the `dma` MF-4a's ordering gave it.
+
+The two comparison points differ by one cycle and the code says which is which:
+`halted_read_cycle` promotes with `self.cycles` (the cycle that has just run is the one a halt
+lands on), `run_dma`'s loop with `self.cycles + 1` (the cycle the iteration is about to run) —
+which is where MF-4a's loop evaluated its own conditions.
+
+`read_code`'s execution-zone fetch reads a hack pack's code and never calls `read_internal`, so it
+cannot share the gate. It gets `zone_read_cycle` (`nes_bus.rs:921-931`), which runs the cycle and
+asks the question itself, so the fetch site keeps the single call it had — the only place in the
+lot that still pays a `movl`, and it pays it only while a pack's code runs in the zone.
+
+### What it gives back, in the generated code
+
+The read sites are `b39eaba4`'s, **instruction for instruction**, with `read_cycle` standing where
+`read_internal` stood — the whole diff of `Cpu6502::branch`'s first read site against the baseline:
+
+    - callq NesBus::read_internal
+    + callq NesBus::read_cycle
+
+and nothing else but field displacements. Post-LTO, whole binary:
+
+| symbol | `b39eaba4` | MF-4a | step 1 | **step 2** |
+| --- | ---: | ---: | ---: | ---: |
+| `NesBus::read_cycle` | — | 3, 101 sites | 3, 101 sites | **3, 65 sites** |
+| `NesBus::zone_read_cycle` | — | — | — | 18, 36 sites |
+| `NesBus::read_internal` | 725, 60 sites | 728, 65 sites | 729, 65 sites | 729, **7 sites** |
+| `NesBus::tick` | 119, 117 sites | 74, 14 sites | 72, 14 sites | 75, **79 sites** |
+| `NesBus::halted_read_cycle` | — | 8 | 32 | 39 |
+| `NesBus::run_dma` | — | 289 | 309 | 307 |
+| `Apu2A03::quiet_cycles` | 90 | 96 | **90** | **90** |
+| `Apu2A03::run_cpu_cycles` | 949 | 956 | **949** | **949** |
+| `Cpu6502::step` | 885 | 890 | 890 | 893 |
+| `Cpu6502::branch` | 364 | 371 | 371 | 368 |
+| `Cpu6502::resolve` | 1 715 | 1 734 | 1 734 | 1 725 |
+
+The site counts tell the story: `read_internal` goes from 65 call sites to 7 — all cold (the DMA
+path, `poke`, the extension window) — because the ~65 CPU read sites now call `read_cycle`, which
+tail-jumps into it; and `tick` goes back to 79 sites, the baseline's arrangement. `quiet_cycles` and
+`run_cpu_cycles` are still byte-identical to `b39eaba4`, re-checked after this step. The `Cpu6502`
+static counts stay a few instructions above the baseline and that is the 36 zone fetch sites'
+`movl`, which no game without a hack pack executes.
+
+### Measured: callgrind, the same procedure
+
+| ROM | `b39eaba4` | MF-4a | step 1 | **step 2** |
+| --- | ---: | ---: | ---: | ---: |
+| `M1_P128K` (mapper 1) | 5 069 762 455 | +103.8 M (+2.05 %) | +14.5 M (+0.285 %) | **+5.80 M (+0.114 %)** |
+| `M0_P32K_C8K_V` (NROM) | 5 697 464 924 | +104.5 M (+1.83 %) | +15.1 M (+0.264 %) | **+6.35 M (+0.111 %)** |
+
+and **every `Cpu6502` function is back to its baseline count to the instruction** — not close to it,
+equal to it:
+
+| function | `b39eaba4` | MF-4a | step 2 |
+| --- | ---: | ---: | ---: |
+| `Cpu6502::step` | 300 134 169 | 304 275 996 | **300 134 169** |
+| `Cpu6502::branch` | 164 692 677 | 167 263 754 | **164 692 677** |
+| `Cpu6502::resolve` | 94 765 694 | 96 485 560 | **94 765 694** |
+| `Cpu6502::execute_without_operand` | 92 725 930 | 93 273 849 | **92 725 930** |
+| `Cpu6502::indexed` | 7 649 571 | 7 717 255 | **7 649 571** |
+| `Cpu6502::apply_read` | 20 491 679 | 20 491 679 | **20 491 679** |
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, `cargo test --release -p zax-nes -p zax-harness`: **690 passed, 0 failed, 7 ignored**. No
+`unsafe`, no savestate byte moved (`dmc_ready_cycle` is transient like `dma`, cleared on load and
+on reset).
+
+The ROMs, re-run: `sprdma_and_dmc_dma` **2 / 2** with the same `526` and `528`;
+`dmc_dma_during_read4` **3 pass, 0 fail, 2 manual**, `dma_4016_read` printing `08 08 07 08 08` and
+`dma_2007_read` `11 22 / 11 22 / 44 55 / 11 22 / 11 22` with CRC `5E3DF9C4`; `pal_apu_tests`
+**10 / 10**; `apu_test` **19 / 19**; `blargg_apu_2005.07.30` **11 / 11**; `AccuracyCoin`
+**93 / 147** with the same fourteen failures and the same eight that take the run out of the loop;
+`test_roms_tests` **9 passed**. The two `manual` CRCs are what makes this a real check of the
+ordering: a halt cycle one cycle out would move them.
