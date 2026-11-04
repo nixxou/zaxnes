@@ -20,7 +20,7 @@ ROM directory (not in git): `assets-free/test-roms/`. Outputs stay under `rust/t
 - [x] 3/10 — Holy Mapperel reader: detected board and the four detailed nibbles.
 - [x] 4/10 — AccuracyCoin reader: Start at the menu top, then the `$0400-$0498` result
   table and the pass tally.
-- [ ] 5/10 — `--markdown` report generator, with the reference column taken from
+- [x] 5/10 — `--markdown` report generator, with the reference column taken from
   `nes-test-roms/status.txt`.
 - [ ] 6/10 — reader debugging on filtered subsets (does not count as a campaign run).
 - [ ] 7/10 — campaign run 1/2 over the whole directory; reader fixes.

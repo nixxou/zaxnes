@@ -25,6 +25,7 @@
 pub mod blargg;
 pub mod coin;
 pub mod mapperel;
+pub mod report;
 pub mod screen;
 
 use std::fs;
@@ -42,6 +43,7 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
   --filter <substring>  only the ROMs whose relative path contains it
   --shots <dir>         where the final-frame PNGs go (default: beside <out.json>)
   --no-shots            write no PNG at all
+  --markdown <file>     also write the report: a table per suite and a line per failure
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
   --quiet               do not print one line per ROM";
 
@@ -56,6 +58,7 @@ pub struct Options {
     filter: Option<String>,
     shots: Option<PathBuf>,
     no_shots: bool,
+    markdown: Option<PathBuf>,
     frame_cap: Option<u32>,
     quiet: bool,
 }
@@ -79,6 +82,7 @@ impl Options {
             filter: None,
             shots: None,
             no_shots: false,
+            markdown: None,
             frame_cap: None,
             quiet: false,
         };
@@ -93,6 +97,7 @@ impl Options {
             match name.as_str() {
                 "--filter" => options.filter = Some(value.clone()),
                 "--shots" => options.shots = Some(PathBuf::from(value)),
+                "--markdown" => options.markdown = Some(PathBuf::from(value)),
                 "--frames" => {
                     options.frame_cap = Some(
                         value
@@ -271,6 +276,15 @@ pub fn run(options: &Options) -> Result<Summary, HarnessError> {
         &options.out,
         serde_json::to_vec_pretty(&document).map_err(std::io::Error::from)?,
     )?;
+
+    if let Some(file) = &options.markdown {
+        if let Some(parent) = file.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        fs::write(file, report::markdown(&options.roms, &results, summary)?)?;
+    }
 
     Ok(summary)
 }
