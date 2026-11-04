@@ -134,6 +134,54 @@ fn req_core_100_mmc1_disables_prg_ram_with_bit_4_of_the_prg_register() {
     assert_eq!(0x5A, core.read_memory(0x6000));
 }
 
+/// Holy Mapperel `M1_P128K` and `M1_P128K_CR8K`, detailed digits `4000` (REQ-CORE-100).
+///
+/// nesdev ("MMC1"), SNROM: the board "uses the upper CHR bank select line coming out of the
+/// mapper (CHR A16; bit 4 of bank number) as an additional chip enable for the PRG-RAM".
+#[test]
+fn req_core_100_mmc1_snrom_disables_prg_ram_with_bit_4_of_the_chr_register() {
+    // 128 KiB PRG, CHR-RAM, 8 KiB PRG-RAM: the SNROM row of the board table.
+    let mut core = MapperRom::new(1).prg(16).chr(0).battery().load();
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    core.mmc1_write(0xA000, 0x10);
+    core.write_memory(0x6000, 0xA5);
+    assert_eq!(0, core.read_memory(0x6000));
+
+    core.mmc1_write(0xA000, 0x00);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    // The $E000 half of the same chip enable is unchanged (digit `1xxx` of the same test).
+    core.mmc1_write(0xE000, 0x10);
+    assert_eq!(0, core.read_memory(0x6000));
+}
+
+/// The other half of the test ROM's `4xxx` digit: "$A000 bit 4 **disables** WRAM (all but
+/// SNROM)" is just as much a failure. On a CHR-ROM board bit 4 is CHR A16 and on a 512 KiB
+/// board it is the outer PRG bank, so neither may touch the RAM (REQ-CORE-100).
+#[test]
+fn req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enable() {
+    // SJROM / SKROM: 16 KiB of CHR-ROM, so bit 4 is a bank line.
+    let mut chr_rom = MapperRom::new(1).prg(16).chr(16).load();
+    // SUROM: 512 KiB of PRG, so bit 4 is A18 — pinned for the banking side by
+    // `req_core_100_mmc1_takes_the_512_kib_bank_bit_from_the_chr_register`.
+    let mut surom = MapperRom::new(1).prg(64).chr(0).load();
+    // SXROM: 32 KiB of PRG-RAM, so bits 2-3 bank it and bit 4 is A18.
+    let mut big_ram = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .prg_ram(32 * 1024, 0)
+        .load();
+
+    for core in [&mut chr_rom, &mut surom, &mut big_ram] {
+        core.write_memory(0x6000, 0x3C);
+        core.mmc1_write(0xA000, 0x10);
+        core.write_memory(0x6000, 0x3C);
+        assert_eq!(0x3C, core.read_memory(0x6000));
+    }
+}
+
 // ---------------------------------------------------------------- UxROM, CNROM, AxROM
 
 #[test]

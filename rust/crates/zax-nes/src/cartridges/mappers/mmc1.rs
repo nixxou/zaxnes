@@ -26,6 +26,16 @@ pub struct Mmc1 {
     /// load so that `prg_ram_offset` keeps exactly one shift and one mask.
     ram_bank_shift: u32,
     ram_bank_mask: u8,
+    /// SNROM wiring, decided at load (see [`Mmc1::is_snrom`]): bit 4 of the CHR bank register
+    /// is a second chip enable for the PRG-RAM.
+    snrom: bool,
+    /// What [`Mapper::prg_ram_enabled`] answers, recomputed whenever `prg` or `chr0` commits.
+    ///
+    /// A field rather than an expression because on an SNROM the answer needs *both* registers:
+    /// kept as `(self.prg | (self.chr0 & mask)) & 0x10 == 0` it would put a second load and a
+    /// mask on the CPU's $6000-$7FFF decode for every MMC1 game. Derived state, so it is not
+    /// written to the savestate — `load_registers` recomputes it (REQ-CORE-091).
+    prg_ram_disabled: bool,
 }
 
 impl Mmc1 {
@@ -54,10 +64,67 @@ impl Mmc1 {
             fixed_prg: header.is_nes20 && header.submapper == 5,
             ram_bank_shift,
             ram_bank_mask,
+            snrom: Self::is_snrom(memory),
+            prg_ram_disabled: false,
         }
     }
 
+    /// Whether this image is on an SNROM board, where bit 4 of the CHR bank registers disables
+    /// the PRG-RAM.
+    ///
+    /// nesdev ("MMC1"), SNROM: the board, "which only supports 8 KiB of CHR-ROM/-RAM, uses the
+    /// upper CHR bank select line coming out of the mapper (CHR A16; bit 4 of bank number) as an
+    /// additional chip enable for the PRG-RAM", the `E` bit of both CHR bank registers being
+    /// "PRG-RAM disable (0: enable, 1: open bus)". The same line is something else on every
+    /// other MMC1 board that has it at all: on SUROM and SXROM bit 4 is `P`, the 256 KiB outer
+    /// PRG bank, and on the CHR-ROM boards (SJROM, SKROM, SLROM) it is CHR A16, a real bank
+    /// line. So the three sizes of the board page's table settle it, and they are exactly the
+    /// three the Holy Mapperel driver probes before it decides which way its `4xxx` digit goes
+    /// (`holy-mapperel/README.md`: "$A000 bit 4 does not disable WRAM (SNROM), or $A000 bit 4
+    /// disables WRAM (all but SNROM)"):
+    ///
+    /// | board | PRG-ROM | PRG-RAM | CHR |
+    /// | --- | --- | --- | --- |
+    /// | SNROM | 128/256 KiB | 8 KiB | 8 KiB RAM/ROM |
+    /// | SOROM | 128/256 KiB | **16 KiB** | 8 KiB RAM/ROM |
+    /// | SUROM | **512 KiB** | 8 KiB | 8 KiB RAM/ROM |
+    /// | SXROM | 128/256/512 KiB | **32 KiB** | 8 KiB RAM/ROM |
+    ///
+    /// A 512 KiB PRG-ROM is excluded by the same comparison `update_banks` uses for `outer`, so
+    /// the two readings of bit 4 can never both be live.
+    ///
+    /// **The CHR test is on the header's CHR-*ROM*, not on the CHR-RAM buffer.** An NES 2.0
+    /// image gives its CHR-RAM size exactly (`M1_P128K.nes` declares 8 KiB in byte 11), but
+    /// REQ-CORE-012 hands an iNES 1.0 image with no CHR-ROM **32 KiB** of CHR-RAM, which no
+    /// MMC1 board carries: every CHR-RAM MMC1 board — SNROM, SOROM, SUROM, SXROM, SGROM — has
+    /// 8 KiB and no more, so a declared CHR-ROM of 0 is itself the 8 KiB board. Reading the
+    /// padded buffer instead would leave every iNES 1.0 SNROM dump — The Legend of Zelda,
+    /// Zelda II, Final Fantasy — on the wrong wiring. The PRG-RAM size is the effective one,
+    /// which for iNES 1.0 is the 8 KiB default: a dump that cannot be told from an SNROM is an
+    /// SNROM here, as it is for the test ROM's own driver.
+    fn is_snrom(memory: &CartridgeMemory) -> bool {
+        let header = memory.rom().header();
+        header.prg_rom_size <= 256 * 1024
+            && header.chr_rom_size <= BankWindows::PRG_WINDOW_SIZE
+            && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
+    }
+
+    /// Recomputes [`Mmc1::prg_ram_disabled`] from the two registers that drive it.
+    ///
+    /// Bit 4 of the PRG register disables the RAM on every board that has the chip; on an SNROM
+    /// bit 4 of CHR bank 0 does too. The page gives CHR bank 1 the same `E` bit, "ignored in
+    /// 8 KiB mode", and then requires that "SNROM's `E` bit and SO/U/XROM's `P` and `S` bits in
+    /// both CHR bank registers must be set to the same values" — so for any program the page
+    /// admits, CHR bank 0 is the whole answer, and that is also the register Holy Mapperel
+    /// names. (Mesen 2 implements only the `$E000` half, `MMC1.h:87`; AMD-061 makes the public
+    /// documentation prevail where the two disagree.)
+    fn refresh_prg_ram_disable(&mut self) {
+        self.prg_ram_disabled = self.prg & 0x10 != 0 || (self.snrom && self.chr0 & 0x10 != 0);
+    }
+
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
+        self.refresh_prg_ram_disable();
+
         // A18 of a 512 KiB board, in 16 KiB units.
         let outer = if memory.rom().prg_rom().len() > 256 * 1024 {
             i32::from((self.chr0 >> 4) & 0x01) << 4
@@ -125,6 +192,7 @@ impl Mapper for Mmc1 {
         self.chr1 = reader.read_u8()?;
         self.prg = reader.read_u8()?;
         self.last_write_cycle = reader.read_i64()?;
+        self.refresh_prg_ram_disable();
         Ok(())
     }
 
@@ -132,9 +200,11 @@ impl Mapper for Mmc1 {
         1
     }
 
-    /// Bit 4 of the PRG register disables the PRG-RAM chip (nesdev, "MMC1").
+    /// Bit 4 of the PRG register disables the PRG-RAM chip, and on an SNROM bit 4 of CHR bank 0
+    /// as well (nesdev, "MMC1"). Both are folded into one bool by
+    /// [`Mmc1::refresh_prg_ram_disable`].
     fn prg_ram_enabled(&self) -> bool {
-        self.prg & 0x10 == 0
+        !self.prg_ram_disabled
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {

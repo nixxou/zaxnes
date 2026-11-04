@@ -12,10 +12,11 @@
 //!   answer to Q-114 restates it for REQ-CORE-114). `5-MMC3`, the revision B half, passes. If
 //!   6 ever started passing, 5 would have stopped, and that would be a regression against the
 //!   spec rather than a fix.
-//! * the two Holy Mapperel SNROM boards fail on `$A000` bit 4 not disabling the work RAM. That
-//!   one *is* a defect, left for a later lot; the assertion records where it stands.
 //! * six Holy Mapperel boards are `unsupported` because mappers 69, 78.3, 118 and 180 are not
 //!   in the registry. Adding one of them should flip its row, and the test says so out loud.
+//!
+//! The two Holy Mapperel SNROM boards used to fail here on `$A000` bit 4 not disabling the work
+//! RAM; MF-3 step 1 made them pass.
 
 // A test: a missing ROM or an unreadable directory should fail it outright.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -205,8 +206,7 @@ fn holy_mapperel_detects_every_supported_board() {
             "holy-mapperel/testroms/M180_P128K_H.nes",
             Outcome::Unsupported,
         ),
-        // SNROM: $A000 bit 4 does not disable the work RAM, detailed digits 4000.
-        ("holy-mapperel/testroms/M1_P128K.nes", Outcome::Fail),
+        ("holy-mapperel/testroms/M1_P128K.nes", Outcome::Pass),
         ("holy-mapperel/testroms/M1_P128K_C128K.nes", Outcome::Pass),
         (
             "holy-mapperel/testroms/M1_P128K_C128K_S8K.nes",
@@ -225,7 +225,7 @@ fn holy_mapperel_detects_every_supported_board() {
             "holy-mapperel/testroms/M1_P128K_C32K_W8K.nes",
             Outcome::Pass,
         ),
-        ("holy-mapperel/testroms/M1_P128K_CR8K.nes", Outcome::Fail),
+        ("holy-mapperel/testroms/M1_P128K_CR8K.nes", Outcome::Pass),
         (
             "holy-mapperel/testroms/M1_P512K_CR8K_S32K.nes",
             Outcome::Pass,
