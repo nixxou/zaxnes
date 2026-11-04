@@ -1244,6 +1244,25 @@ impl Ppu2C02 {
 
     /// A nametable byte as the PPU reads it under `layout`, the mirroring it had when a row was
     /// drawn (a game may switch it during the frame, a status bar's split for instance).
+    ///
+    /// **`inline(always)`, as the counterpart of `read_nametable_inner`'s `inline(never)`.** This
+    /// is the body of every nametable fetch, and it must end up *inside* its out-of-line caller,
+    /// not behind a second call. It is the same accident as `Cpu6502::end_cycle` (step 1) and it
+    /// bit the same function twice: the field doc of `Cartridge::nametable_pages` records lot
+    /// MF-2 finding this exact function out of line after the UNROM 512 became a second board
+    /// with a nametable page of its own, and MF-3 put it back out of line — R0's callgrind of
+    /// `42b541ef` has `Ppu2C02::read_nametable_as` at 0 → **3.18 M** exclusive instructions with
+    /// `read_nametable_inner` +0.84 M, which is the `callq`/`retq` appearing between the two.
+    ///
+    /// The decision is pinned rather than left to the inliner because it is pure cost either
+    /// way: `read_nametable_inner` stays `#[inline(never)]`, so folding this into it cannot
+    /// reach `read_pattern_planes` — the function MF-2 built that shield for.
+    ///
+    /// Note that this one is **invisible in the crate's own assembly**: `cargo rustc --emit=asm`
+    /// on `zax-nes` shows the same tail call at `7cbd9c52` and at `42b541ef`. The profile is
+    /// `lto = "fat"`, and this is a decision LTO takes afterwards; see step 3.
+    #[allow(clippy::inline_always)] // Measured: a `callq` here costs 4.0 M instructions.
+    #[inline(always)]
     fn read_nametable_as(
         &self,
         address: u16,

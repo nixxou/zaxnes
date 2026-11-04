@@ -308,3 +308,91 @@ clean, `cargo test --release -p zax-nes -p zax-harness`: **680 passed, 0 failed,
 679 of step 1 plus the new latch test. The MMC3, MC-ACC, TxSROM and RAMBO-1 IRQ tests
 (`mapper_irq_tests.rs`, `mr_4_3_*`) pass unchanged, which is the behavioural check that the latch
 lets the boards that need the hook still receive it.
+
+## Step 3 — `Ppu2C02::read_nametable_as` folded back into `read_nametable_inner`
+
+### The instrument had to change first
+
+R0's callgrind: `Ppu2C02::read_nametable_as` 0 → **3.18 M** exclusive, `read_nametable_inner`
++0.84 M. The same signature as step 1 — a function that stopped being inlined — but this one
+**does not show up in the crate's own assembly at all**: `read_nametable_inner` tail-calls
+`read_nametable_as` four times at `7cbd9c52` and four times at `42b541ef`, byte for byte.
+
+The reason is in `rust/Cargo.toml`:
+
+    [profile.release]
+    lto = "fat"
+    codegen-units = 1
+
+`cargo rustc --release -p zax-nes --lib -- --emit=asm` emits **pre-LTO** codegen for the crate
+alone. MF-2 step 0 recorded the belief that "the crate's `.s` carries the real codegen for these
+functions even under `lto = "fat"`", and for the `Board` dispatches and the CPU it does. For
+`read_nametable_as` it does not: the inlining happens during the final crate's LTO, after that
+dump is written. **Any claim about this function made from the lib dump is unfalsifiable**, which
+is how MF-3 reported it "byte-identical" at every one of its nine steps while R0's callgrind saw
+it go out of line.
+
+So this lot added a second instrument — the **post-LTO** assembly of a real binary:
+
+    cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm
+    # 39 MB, the whole program after LTO; then count defs and call sites per symbol
+
+At `42b541ef` that dump says, for the functions this lot touches:
+
+| symbol | defs | call sites |
+| --- | ---: | ---: |
+| `Cpu6502::end_cycle` | 0 | 0 — step 1's fix confirmed at the level that counts |
+| `Ppu2C02::read_nametable_as` | **1** | **4** — out of line, R0's 3.18 M |
+| `Ppu2C02::read_nametable_inner` | 1 | 15 |
+| `Board::on_ppu_address_bus` | 1 | 15 |
+
+The baseline's post-LTO dump was **not** built: it needs the whole dependency tree in a fresh
+target directory (~3.4 GB) and G: has 6.4 GB free, which is the risk MF-3 step 9 already declined
+to take. It is not needed — callgrind's "0 exclusive instructions" *is* the statement that the
+function was never entered at `7cbd9c52`, and that is better evidence than a dump.
+
+### The fix
+
+`#[inline(always)]` on `Ppu2C02::read_nametable_as` (`ppu/mod.rs:1245-1270`), with the reasoning
+on the function.
+
+This is the counterpart of the `#[inline(never)]` MF-2 put on `read_nametable_inner`, not a
+contradiction of it. The pair expresses one intent: **one** out-of-line call per nametable fetch,
+with the whole body inside it. MF-2 pinned the outer boundary so `layout_of` could not be hoisted
+into `read_pattern_planes`; nothing pinned the inner one, so the inliner was free to insert a
+second call, and twice now it has — the field doc of `Cartridge::nametable_pages` records MF-2
+finding this very function out of line when the UNROM 512 became a second board with a nametable
+page of its own, and MF-3 did it again by adding boards.
+
+### What it gives back
+
+Post-LTO, after the fix:
+
+| symbol | defs | call sites |
+| --- | ---: | ---: |
+| `Ppu2C02::read_nametable_as` | **0** | **0** — inlined, as at `7cbd9c52` |
+| `Ppu2C02::read_nametable_inner` | 1 | 15 — still the one out-of-line call per fetch |
+| `Ppu2C02::read_pattern_planes` | 1 | 3 — unchanged |
+
+and in the lib dump the function it absorbed into is the only thing that moved:
+
+| function | `7cbd9c52` | MF-3 | this step |
+| --- | ---: | ---: | ---: |
+| `Ppu2C02::read_nametable_inner` | 11 | 11 | **132** |
+| `Ppu2C02::read_nametable_as` | 107 | 107 | *inlined* |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 | **106** |
+| `Ppu2C02::paint_side_tile` | 1 277 | 1 277 | **1 277** |
+| `Ppu2C02::wide_picture_into` | 901 | 901 | **901** |
+
+`read_pattern_planes` is **106, exactly its baseline** — the shield MF-2 built is doing its job,
+which is the thing to check when inlining anything on this path. The tile emitter's two big
+functions do not move either, so the other call sites of `read_nametable_as` cost nothing.
+
+**Expected effect on R0's figures: −3.18 M on `read_nametable_as` and −0.84 M on
+`read_nametable_inner`**, i.e. the 4.0 M those two gained.
+
+### Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, `cargo test --release -p zax-nes -p zax-harness`: **680 passed, 0 failed, 7 ignored**,
+unchanged from step 2. An inlining attribute cannot change what the function reads.
