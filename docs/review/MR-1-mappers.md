@@ -1475,3 +1475,202 @@ scratch, so a game could in principle read stale data it expects to be garbage.
   the CPU reset line, and REQ-CORE-004 asks the cartridge to power on cleanly, which is what
   `Mmc1::reset` does. What would settle it: a hardware test holding the reset line and
   reading back the PRG window.
+
+## Mapper 4 — MMC3 and MMC6
+
+Sources for this board: *MMC3* (<https://www.nesdev.org/wiki/MMC3>), *MMC6*
+(<https://www.nesdev.org/wiki/MMC6>) and *NES 2.0 submappers*
+(<https://www.nesdev.org/wiki/NES_2.0_submappers>).
+
+### MR-4-1 — the MMC6 $A001 read and write bits
+
+**MR-1 verdict: our bug (visible). New verdict: our bug — confirmed, bit for bit.**
+
+Source: *MMC6* prints $A001 as
+
+```
+7  bit  0
+---- ----
+HhLl xxxx
+||||
+|||+------ Enable writing to RAM at $7000-$71FF
+||+------- Enable reading RAM at $7000-$71FF
+|+-------- Enable writing to RAM at $7200-$73FF
++--------- Enable reading RAM at $7200-$73FF
+```
+
+so bit 4 writes and bit 5 reads the low half, bit 6 writes and bit 7 reads the high half —
+Mesen's assignment exactly, and the opposite of ours (`mmc3.rs:50-56`, where
+`mmc6_half_readable` takes bits 4 and 6 and `mmc6_half_writable` bits 5 and 7). The same page
+names the two titles, *StarTropics* and *Zoda's Revenge*, and both save through this RAM, so
+MR-1's "save corruption rather than a glitch" reading stands.
+
+**Test:** unchanged — `mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped`.
+
+**Cost: none.** Two constants swap inside `mmc6_half_readable` / `mmc6_half_writable`. Those
+run on CPU accesses to $6000-$7FFF of an MMC6 — two cartridges in the library — and the
+instruction count does not change at all.
+
+### MR-4-2 — "A12 must fall before the first rise counts"
+
+**MR-1 verdict: our bug (subtle). New verdict: leaves `our bug` — ours matches the hardware
+filter and Mesen's extra guard does not.**
+
+Source: *MMC3* — the counter is clocked by "PPU A12, triggered on a rising edge after the line
+has remained low for three falling edges of M2".
+
+The condition is on how long A12 has *been* low, not on having observed it go low. At
+power-on the PPU address bus holds `v = 0`, so A12 has been low since the machine started and
+the filter is satisfied: the first rise the MMC3 sees does clock the counter. That is what our
+`A12Watcher` does with `low_since = 0` (`a12_watcher.rs:36-39`, `:45`), and Mesen's
+`_a12LowClock > 0` guard (`MMC3.h:288`) makes it *miss* that first clock. MR-1 read Mesen's
+bookkeeping as the specification and called our behaviour a spurious clock; the source says it
+is the hardware's.
+
+One residue in our favour and against us, both unobservable: we reject a rise occurring in the
+first ten dots after power-on or after `reset()`, where the hardware would accept it. IRQs are
+disabled at both moments, so nothing can see it.
+
+**Test change: withdrawn.** `mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise` asserted
+Mesen's guard. Removed, with the reason recorded in the file.
+
+**Cost: none** — no fix.
+
+### MR-4-3 — mapper 4 submapper 3 is the Acclaim MC-ACC
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed, and the difference is
+bigger than "a different A12 filter position".**
+
+Sources: *NES 2.0 submappers*, mapper 4 — "Submapper 3: MC-ACC chip variant"; *MMC3* —
+"Acclaim's MC-ACC chip is their own variant of the MMC3 ... The only known difference is that
+the scanline counter uses a ÷8 prescaler instead of filtering A12, clocked by falling edges."
+
+So the MC-ACC does not filter A12 at all: it divides the A12 **falling** edges by eight. Over
+a normal rendered line that still gives one clock per scanline, which is why these games
+mostly work on an MMC3 emulation, but the phase differs (the clock lands on a fall, a few
+pixels from where the MMC3's rise lands) and any game or test that drives A12 by hand diverges
+outright. The second-source boards are Acclaim's; *The Incredible Crash Dummies* and *Mickey's
+Safari in Letterland* are the titles named in public discussion of the chip, and a dump can
+only be recognised by its NES 2.0 submapper or its hash.
+
+**Test:** none added. Reproducing the ÷8 prescaler needs a second counter in the fixture's
+reach but a *board* we do not have; the fix is a new board, not a branch, so the test belongs
+to the lot that adds it.
+
+**Cost: none for every other game, measurable only for MC-ACC dumps.** The right shape is a
+separate board (Mesen does the same: `MapperFactory.cpp:287` returns `McAcc`) chosen at load
+from the submapper, so no MMC3 game pays a branch. Inside that board the prescaler replaces
+the `A12Watcher` call in `on_ppu_address_bus` one for one — a counter increment instead of a
+clock comparison, on a path these cartridges already take through the bus. Note that the new
+board needs its own `ppu_irq_horizon`: eight falls per clock is not
+`A12Watcher::MIN_RISE_INTERVAL`, and a horizon copied from `Mmc3` would make the PPU late.
+
+### MR-4-4 — the power-on bank registers
+
+**MR-1 verdict: unknown. New verdict: equivalent** — see the shared power-on entry above.
+*MMC3* says the values "are unspecified at power on"; both our seeding and Mesen's conform.
+No test, no fix, no cost.
+
+### MR-4-5 — the power-on $A001
+
+**MR-1 verdict: unknown. New verdict: equivalent for the MMC3; for the MMC6 the question
+dissolves.**
+
+Source: *MMC6* — "When PRG RAM is disabled via $8000, the mapper continuously sets $A001 to
+$00, and so all writes to $A001 are ignored."
+
+For the MMC3 proper nothing in the sources gives a power-on value for $A001, so our 0x80 and
+Mesen's 0 are both conforming and the rationale already in our code (`mmc3.rs:189-192`) — it
+is the only value that lets blargg's MMC3 ROMs, which never write $A001, use the RAM from a
+cold start — is a good reason to keep it. For the MMC6 the value is documented: the chip
+powers on with $8000 = 0, RAM therefore disabled, and $A001 therefore held at 0. Our
+`protect = 0x80` is dormant there because `prg_ram_enabled` consults $8000 bit 5 on an MMC6
+(`mmc3.rs:173-179`) — but see MR-4-7, which is where it becomes visible.
+
+### MR-4-6 — the MMC6 RAM is 1 KiB
+
+**MR-1 verdict: our bug (cosmetic). New verdict: our bug — confirmed.**
+
+Source: *MMC6* — the chip "contains 1 KB of internal PRG RAM", at "CPU $7000-$7FFF: 1 KB PRG
+RAM, mirrored".
+
+Mesen's `GetSaveRamSize() = 0x400` is the same number. Our 8 KiB default changes no byte a
+game can read, because `mmc6_offset` masks with `0x03FF` (`mmc3.rs:46-48`), but the exposed
+and saved size is eight times the cartridge's.
+
+**Test:** none; it needs the same `chr_ram_size_override`-style hook as MR-13-1 (MR-1's
+shared-infrastructure item 2).
+
+**Cost: none.** A per-board save-RAM size is resolved in `CartridgeMemory::new` at load. It
+also *removes* work from the hot path: `mmc6_offset`'s `% memory.prg_ram().len()` becomes the
+identity on a 1 KiB allocation and can go away.
+
+### MR-4-7 — the MMC6 holds $A001 at zero while RAM is disabled (new)
+
+**New finding. Verdict: our bug, severity subtle.**
+
+Source: *MMC6* — "When PRG RAM is disabled via $8000, the mapper continuously sets $A001 to
+$00, and so all writes to $A001 are ignored."
+
+We store $A001 unconditionally (`mmc3.rs:259`), so on an MMC6 a value written while $8000
+bit 5 is clear survives and takes effect the moment the game sets bit 5. On the hardware that
+write is lost and the four enable bits are 0 until the game writes $A001 *after* enabling the
+RAM. *StarTropics* and *Zoda's Revenge* are the cartridges that could see it, and the
+difference is in which 512-byte half answers a read immediately after the RAM is switched on.
+
+**Test:** added — `mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled`.
+
+**Cost: none.** One condition on the $A001 arm of `write_register`, which runs only on a write
+to $A001, and only the MMC6 branch of it.
+
+### MR-4-8 — the MMC6 window is open bus when no half is readable (new)
+
+**New finding. Verdict: our bug, severity cosmetic.**
+
+Source: *MMC6* — "If neither bank is enabled for reading, the $7000-$7FFF area is open bus."
+
+Our `cpu_peek_override` answers a driven `0` in exactly that case (`mmc3.rs:208`, `:211-215`,
+`Some(Some(0))`), where `Some(None)` is our open-bus answer. The $6000-$6FFF half of the
+window already returns open bus correctly, which shows the shape is there and only these two
+sites are wrong. Same family as MR-5-5 and MR-30-2, and no known game reads a disabled MMC6
+window.
+
+**Test:** none — observing open bus from the fixture needs the bus's last-value behaviour,
+which `MapperMachine::prg_windows` does not expose; the three open-bus findings are better
+tested together by the lot that fixes them.
+
+**Cost: none.** Two returns change value in a function that only MMC6 dumps enter.
+
+### MR-4-9 — submappers 2 and 4 of mapper 4 are not handled (new)
+
+**New finding. Verdict: our bug, severity cosmetic.**
+
+Source: *NES 2.0 submappers*, mapper 4 — "Submapper 2: MMC3C with hard-wired mirroring";
+"Submapper 4: NEC MMC3 (Loading latch with 0 disables IRQ)"; "Submapper 5: Indicates the
+presence of a T9552 scrambling chip".
+
+We read only submapper 1 (`mmc3.rs:34`, the MMC6) and Mesen only submapper 3, so neither of us
+handles 2 or 4 — this is a gap the Mesen comparison could not reveal. Submapper 2 wants the
+$A000 mirroring writes ignored, which is the same code path as our existing `four_screen`
+guard (`mmc3.rs:250-258`). Submapper 4 asks for the rev A IRQ, which **REQ-CORE-100 pins to
+rev B** for this board and REQ-CORE-114 then lets `mmc3_test_2` test 6 fail; that is a
+spec-versus-submapper question rather than a plain bug, and it is small enough that it belongs
+in the same ticket as any other rev A decision rather than in a new one. Submapper 5 is a
+scrambling chip and out of REQ-CORE-100's scope.
+
+**Test:** none. Submapper 2's fix is one extra condition on a flag we already have; it is not
+worth a test ahead of the submapper dispatch MR-1's infrastructure item 3 calls for.
+
+**Cost: none.** Both are load-time flags; submapper 2 widens an existing branch, submapper 4
+selects which of two comparisons `clock_irq_counter` makes.
+
+### The two MMC3 non-findings, re-checked
+
+- **the IRQ revision.** *MMC3* — "Sharp MMC3B and MMC3C generate an IRQ on each scanline
+  while $C000 is $00", while "Sharp MMC3A and all NEC MMC3 variants generate only a single
+  IRQ when $C000 is $00". Our rev B (`mmc3.rs:86-90`) is both what REQ-CORE-100 requires and
+  the majority chip. **Still not a finding.**
+- **register 0/1 bit 0.** Nothing in the sources observes the stored register byte, only the
+  resulting 2 KiB bank, which our `map_chr_2k(slot, b >> 1)` gets right. **Still
+  equivalent.** The RAMBO-1 entry below shows why this detail is worth stating twice: the
+  same masking question has the *opposite* answer on that board, and nesdev says so for both.

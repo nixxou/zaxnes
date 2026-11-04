@@ -28,8 +28,8 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
 - [x] 1/12 — Setup: progress file, re-read MR-1's report, Q-110/Q-111, the test file and the
       fixture; source-gathering plan per board
 - [x] 2/12 — Shared: MR-BUS-1, bank-window wrapping, MR-PWR-1, MR-A12-1
-- [ ] 3/12 — MMC1 (MR-1-1, MR-1-2, MR-1-3, MR-1-4) and the three non-findings
-- [ ] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
+- [x] 3/12 — MMC1 (MR-1-1, MR-1-2, MR-1-3, MR-1-4) and the three non-findings
+- [x] 4/12 — MMC3 / MMC6 (MR-4-1 .. MR-4-6)
 - [ ] 5/12 — RAMBO-1 (MR-64-1 .. MR-64-6)
 - [ ] 6/12 — MMC5 (MR-5-1 .. MR-5-5) and the audio points of Q-111
 - [ ] 7/12 — VRC2 / VRC4 (MR-21-1, MR-21-2, MR-21-3)
@@ -115,3 +115,19 @@ Finding ids continue MR-1's numbering (`MR-<board>-<n>`).
   whole PRG-RAM.
   Costs: MR-1-1 and MR-1-4 none; MR-1-3 none *provided* the selector shift/mask is computed
   at load, because `prg_ram_offset` is a per-access path; MR-1-5 none.
+
+- **Step 4** — MMC3 and MMC6. **MR-4-1 confirmed bit for bit** by the MMC6 $A001 layout
+  (`HhLl xxxx`: bit 4 writes / bit 5 reads the low half, 6/7 the high half), with
+  *StarTropics* and *Zoda's Revenge* named on the same page. **MR-4-6 confirmed** ("1 KB of
+  internal PRG RAM"). **MR-4-3 confirmed and enlarged**: the MC-ACC "uses a ÷8 prescaler
+  instead of filtering A12, clocked by falling edges", so it is a board, not a branch, and it
+  needs its own IRQ horizon.
+  **MR-4-2 withdrawn**: the filter condition is "a rising edge after the line has remained
+  low for three falling edges of M2" — a condition on how long A12 *has been* low, satisfied
+  at power-on, so the first rise does clock the counter. Ours is right and Mesen's
+  `_a12LowClock > 0` guard misses a clock. Test removed.
+  MR-4-4 and MR-4-5 become **equivalent** (unspecified power-on values).
+  Three **new findings**: MR-4-7 (the MMC6 holds $A001 at zero while the RAM is disabled —
+  test added), MR-4-8 (the MMC6 window is open bus when no half is readable, we drive 0),
+  MR-4-9 (submappers 2 and 4 unhandled; submapper 4 wants rev A where REQ-CORE-100 pins
+  rev B). All three cost nothing.

@@ -377,30 +377,35 @@ fn mr_4_1_mmc6_a001_read_and_write_bits_are_not_swapped() {
     );
 }
 
-/// MR-4-2. A12 must be seen low before any rise can count: at power-on, with no falling
-/// edge yet, the first high address on the PPU bus must not clock the scanline counter.
+// MR-4-2's test (`mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise`) was withdrawn by lot
+// MR-1b. It asserted Mesen's `_a12LowClock > 0` guard as if it were the hardware's: nesdev
+// ("MMC3") says the counter is "triggered on a rising edge after the line has remained low
+// for three falling edges of M2", a condition on how long A12 *has been* low, which at
+// power-on (PPU `v = 0`) is already satisfied. The first rise therefore does clock the
+// counter, as our `A12Watcher` has it, and it is Mesen that misses that clock. See
+// `docs/review/MR-1-mappers.md`, MR-1b section.
+
+/// MR-4-7. On an MMC6 the chip holds $A001 at zero for as long as PRG-RAM is disabled
+/// through $8000 bit 5, so a write to $A001 made while the RAM is off must be lost.
 ///
-/// Mesen's MMC3 keeps its own edge detector (`MMC3.h:286-296`) and guards it with
-/// `_a12LowClock > 0`, so a rise before the first fall is never reported. Our shared
-/// `A12Watcher` starts with `low_since = 0` (`a12_watcher.rs:36-39`) and compares against
-/// it, so any high address at a clock of 10 dots or more counts as a rise — one spurious
-/// clock of the counter per power-on and per `reset()`.
+/// nesdev ("MMC6"): "When PRG RAM is disabled via $8000, the mapper continuously sets $A001
+/// to $00, and so all writes to $A001 are ignored." We store the value unconditionally
+/// (`mmc3.rs:259`), so it takes effect as soon as the game sets bit 5 of $8000.
 #[test]
-#[ignore = "MR-1: MR-4-2"]
-fn mr_4_2_mmc3_a12_needs_a_fall_before_the_first_rise() {
-    let mut core = MapperRom::new(4).prg(8).chr(16).load();
-    core.mapper_write(0xC000, 0x01); // Latch 1.
-    core.mapper_write(0xC001, 0x00); // Reload.
-    core.mapper_write(0xE001, 0x00); // IRQs on.
+#[ignore = "MR-1b: MR-4-7"]
+fn mr_4_7_mmc6_a001_is_held_at_zero_while_ram_is_disabled() {
+    let mut core = MapperRom::new(4).prg(8).chr(16).submapper(1).load();
 
-    let cart = core.cartridge_mut().unwrap();
-    cart.on_ppu_address_bus(0x1000, 100); // High, with no preceding fall.
-    cart.on_ppu_address_bus(0x0000, 110); // The first real fall.
-    cart.on_ppu_address_bus(0x1000, 130); // The first rise that counts: reloads to 1.
+    // RAM still disabled ($8000 bit 5 clear): this write must be ignored by the chip.
+    core.mapper_write(0xA001, 0xF0);
+    core.mapper_write(0x8000, 0x20); // Now enable the RAM.
 
-    assert!(
-        !cart.irq_asserted(),
-        "only one rise has counted, so the counter has just reloaded to 1"
+    // $A001 is still 0, so neither half is writable or readable yet.
+    core.write_memory(0x7000, 0x5A);
+    assert_eq!(
+        0x00,
+        core.read_memory(0x7000),
+        "an $A001 written while the RAM was disabled must not grant access"
     );
 }
 
