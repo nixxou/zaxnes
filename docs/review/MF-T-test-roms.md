@@ -23,12 +23,16 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 
 | Result | ROMs |
 |---|---:|
-| pass | 196 |
-| fail | 17 (of which 3 are required to fail, see below) |
+| pass | 204 |
+| fail | 15 (of which 3 are required to fail, see below) |
 | timeout | 0 |
-| unsupported | 7 |
+| unsupported | 1 |
 | manual | 111 |
 | **total** | **331** |
+
+**Lot MF-3 moved eight rows, all of them in `holy-mapperel`**, which now passes in full; see
+"What lot MF-3 changed" at the end of this document for the before/after. Everything else in this
+document is the campaign as MF-T first measured it.
 
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
@@ -37,7 +41,7 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 | Suite | passed / total | fail | timeout | unsupported | manual |
 |---|---:|---:|---:|---:|---:|
 | `AccuracyCoin` | 0 / 1 | 1 | 0 | 0 | 0 |
-| `holy-mapperel` | 32 / 40 | 2 | 0 | 6 | 0 |
+| `holy-mapperel` | **40 / 40** | 0 | 0 | 0 | 0 |
 | `nes-test-roms/240pee` | 0 / 2 | 0 | 0 | 0 | 2 |
 | `nes-test-roms/MMC1_A12` | 0 / 1 | 0 | 0 | 0 | 1 |
 | `nes-test-roms/PaddleTest3` | 0 / 1 | 0 | 0 | 0 | 1 |
@@ -103,15 +107,13 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 
 ## Every failure and timeout, with its subsystem
 
-One line per row that is not a pass. The subsystem is what the ROM exercises, which is where a fix would go; this lot diagnoses and does not fix.
+One line per row that is not a pass. The subsystem is what the ROM exercises, which is where a fix would go; MF-T diagnoses and does not fix. **The two `holy-mapperel` SNROM rows that stood here are gone: MF-3 step 1 fixed them.**
 
-**3 of these 17 are required to fail** and are marked as such below: they are the revision A half of a pair of MMC3 tests that contradict each other, and REQ-CORE-100 pins mapper 4 to revision B. In each pair the revision B ROM passes. Counting them as defects would be wrong.
+**3 of these 15 are required to fail** and are marked as such below: they are the revision A half of a pair of MMC3 tests that contradict each other, and REQ-CORE-100 pins mapper 4 to revision B. In each pair the revision B ROM passes. Counting them as defects would be wrong.
 
 | ROM | Result | Subsystem and reading | What it says |
 |---|---|---|---|
 | `AccuracyCoin/AccuracyCoin.nes` | fail | CPU, PPU and APU together — 89 of 147 pass. Read the per-test table in the JSON: the 22 failures are the five `SH*` stores, `Open Bus`, and most of the DMA and APU-timing pages, and a further 36 are blocked rather than failed. | 89/147 tests passed; stopped the run: Interrupt flag latency (page "CPU Interrupts") — never returned; skipped on a later attempt, PPU Register Mirroring (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Register Open Bus (page "PPU Behavior") — took the run out of the all-test loop; skipped on a later attempt, PPU Read Buffer (page "PPU Behavior") — to… |
-| `holy-mapperel/testroms/M1_P128K.nes` | fail | MMC1 on an SNROM board: `$A000` bit 4 does not disable the work RAM (detailed digits `4000`). The eleven other MMC1 boards — SJROM, SKROM, SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone. | SNROM (MMC1): detailed 4000 (WRAM 4: $A000 bit 4 does not disable WRAM (SNROM), or disables it (all but SNROM)); 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK |
-| `holy-mapperel/testroms/M1_P128K_CR8K.nes` | fail | MMC1 on an SNROM board: `$A000` bit 4 does not disable the work RAM (detailed digits `4000`). The eleven other MMC1 boards — SJROM, SKROM, SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone. | SNROM (MMC1): detailed 4000 (WRAM 4: $A000 bit 4 does not disable WRAM (SNROM), or disables it (all but SNROM)); 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK |
 | `nes-test-roms/blargg_ppu_tests_2005.09.15b/power_up_palette.nes` | fail | PPU palette at power-on. Code `$02`, "palette differs from table" — and the suite's readme says of those reference values that they "are probably unique to my NES", so this is not a defect on its own. Nestopia 1.40 fails it too. | screen: $02 |
 | `nes-test-roms/dmc_dma_during_read4/dma_4016_read.nes` | fail | DMC DMA stealing a read | screen: 08 08 08 08 08 / FBF7C7B1 / dma_4016_read / Failed |
 | `nes-test-roms/mmc3_irq_tests/5.MMC3_rev_A.nes` | fail | MMC3 IRQ, revision A — **required to fail**. The suite's readme: "The last two ROMs test different revisions of the MMC3, so at most only one will pass on a particular emulator", and `6.MMC3_rev_B` passes. REQ-CORE-100 pins mapper 4 to revision B. | screen: MMC3 IRQ COUNTER REVISION A / FAILED #3 |
@@ -139,7 +141,7 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 
 ### `holy-mapperel`
 
-**32 passed of 40** (2 fail, 6 unsupported)
+**40 passed of 40**
 
 | ROM | Result | What the ROM says | NESICIDE | Nestopia 1.40 | Nintendulator 0.975 |
 |---|---|---|---|---|---|
@@ -148,19 +150,19 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 | `M0_P32K_CR8K_V.nes` | pass | NROM: 32K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M10_P128K_C64K_S8K.nes` | pass | F*ROM (MMC4): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
 | `M10_P128K_C64K_W8K.nes` | pass | F*ROM (MMC4): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
-| `M118_P128K_C64K.nes` | unsupported | Unsupported mapper 118. |  |  |  |
+| `M118_P128K_C64K.nes` | pass | T*SROM (MMC3): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
 | `M11_P64K_C64K_V.nes` | pass | COLOR DREAMS: 64K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
 | `M11_P64K_CR32K_V.nes` | pass | COLOR DREAMS: 64K PRG ROM, 8K PRG RAM OK, 32K CHR RAM OK, detailed 0000 |  |  |  |
-| `M180_P128K_CR8K_H.nes` | unsupported | Unsupported mapper 180. |  |  |  |
-| `M180_P128K_H.nes` | unsupported | Unsupported mapper 180. |  |  |  |
-| `M1_P128K.nes` | fail | SNROM (MMC1): detailed 4000 (WRAM 4: $A000 bit 4 does not disable WRAM (SNROM), or disables it (all but SNROM)); 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK |  |  |  |
+| `M180_P128K_CR8K_H.nes` | pass | U*ROM (7408): 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
+| `M180_P128K_H.nes` | pass | U*ROM (7408): 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
+| `M1_P128K.nes` | pass | SNROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C128K.nes` | pass | SKROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 128K CHR ROM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C128K_S8K.nes` | pass | SKROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 128K CHR ROM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C128K_W8K.nes` | pass | SKROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 128K CHR ROM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C32K.nes` | pass | SJROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 32K CHR ROM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C32K_S8K.nes` | pass | SJROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 32K CHR ROM OK, detailed 0000 |  |  |  |
 | `M1_P128K_C32K_W8K.nes` | pass | SJROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 32K CHR ROM OK, detailed 0000 |  |  |  |
-| `M1_P128K_CR8K.nes` | fail | SNROM (MMC1): detailed 4000 (WRAM 4: $A000 bit 4 does not disable WRAM (SNROM), or disables it (all but SNROM)); 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK |  |  |  |
+| `M1_P128K_CR8K.nes` | pass | SNROM (MMC1): 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M1_P512K_CR8K_S32K.nes` | pass | SXROM (MMC1): 512K PRG ROM, 32K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M1_P512K_CR8K_S8K.nes` | pass | SUROM (MMC1): 512K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M1_P512K_S32K.nes` | pass | SXROM (MMC1): 512K PRG ROM, 32K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
@@ -177,9 +179,9 @@ One line per row that is not a pass. The subsystem is what the ROM exercises, wh
 | `M4_P128K_CR8K.nes` | pass | TNROM (MMC3): 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M4_P256K_C256K.nes` | pass | TSROM (MMC3): 256K PRG ROM, 8K PRG RAM OK, 256K CHR ROM OK, detailed 0000 |  |  |  |
 | `M66_P64K_C16K_V.nes` | pass | G*ROM: 64K PRG ROM, 8K PRG RAM OK, 16K CHR ROM OK, detailed 0000 |  |  |  |
-| `M69_P128K_C64K_S8K.nes` | unsupported | Unsupported mapper 69. |  |  |  |
-| `M69_P128K_C64K_W8K.nes` | unsupported | Unsupported mapper 69. |  |  |  |
-| `M78.3_P128K_C64K.nes` | unsupported | Unsupported mapper 78. |  |  |  |
+| `M69_P128K_C64K_S8K.nes` | pass | J*ROM (FME-7): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
+| `M69_P128K_C64K_W8K.nes` | pass | J*ROM (FME-7): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
+| `M78.3_P128K_C64K.nes` | pass | HOLY DIVER: 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
 | `M7_P128K.nes` | pass | A*ROM: 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M7_P128K_CR8K.nes` | pass | A*ROM: 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK, detailed 0000 |  |  |  |
 | `M9_P128K_C64K.nes` | pass | PNROM (MMC2): 128K PRG ROM, 8K PRG RAM OK, 64K CHR ROM OK, detailed 0000 |  |  |  |
@@ -946,3 +948,54 @@ counterparts still pass.
 `holy-mapperel` has no `M64_*` or `M18_*` image — so steps 5 and 9 have no ROM-level evidence and
 rest on the NESdev pages alone. The campaign's mapper coverage is `holy-mapperel`'s board list
 plus the MMC1/MMC3/MMC5 suites.
+
+## What lot MF-3 changed
+
+MF-T diagnosed; **MF-3 fixed the mapper half of its findings** (`docs/progress/MF-3.md`). Eight
+rows moved, all of them in `holy-mapperel`, which now passes in full. Re-measured with
+
+```
+zax-harness test-roms <roms dir> out.json --filter holy-mapperel --no-shots
+zax-harness test-roms <roms dir> out.json --filter mmc3_test --no-shots
+zax-harness test-roms <roms dir> out.json --filter mmc3_irq_tests --no-shots
+```
+
+| ROM | before MF-3 | after | what changed |
+|---|---|---|---|
+| `holy-mapperel/testroms/M1_P128K.nes` | **fail**, detailed `4000` | **pass**, detailed `0000` | step 1: on an SNROM, bit 4 of the CHR bank register is a second chip enable for the PRG-RAM (nesdev, "MMC1"). The board is identified at load from the three sizes of the board page's table |
+| `holy-mapperel/testroms/M1_P128K_CR8K.nes` | **fail**, detailed `4000` | **pass**, detailed `0000` | the same ROM under another name — the two files have identical headers |
+| `holy-mapperel/testroms/M69_P128K_C64K_S8K.nes` | unsupported | **pass**, `J*ROM (FME-7)`, detailed `0000` | step 3: mapper 69, the Sunsoft FME-7, with its CPU-cycle IRQ counter and its `$6000` RAM/ROM switching |
+| `holy-mapperel/testroms/M69_P128K_C64K_W8K.nes` | unsupported | **pass**, `J*ROM (FME-7)`, detailed `0000` | the same board without the battery |
+| `holy-mapperel/testroms/M118_P128K_C64K.nes` | unsupported | **pass**, `T*SROM (MMC3)`, detailed `0000` | step 5: mapper 118, the TxSROM, a variant of the MMC3 board chosen at load |
+| `holy-mapperel/testroms/M180_P128K_H.nes` | unsupported | **pass**, `U*ROM (7408)`, detailed `0000` | step 6: mapper 180, the UxROM board with its fixed bank at the other end |
+| `holy-mapperel/testroms/M180_P128K_CR8K_H.nes` | unsupported | **pass**, `U*ROM (7408)`, detailed `0000` | the same board with its CHR-RAM declared |
+| `holy-mapperel/testroms/M78.3_P128K_C64K.nes` | unsupported | **pass**, `HOLY DIVER`, detailed `0000` | step 7: mapper 78, both wirings, with the iNES-1.0 heuristic for an image that names no submapper |
+
+Note that **all eight pass with `detailed 0000`**, the third digit included: that digit is the IRQ
+test, which the suite's README says "measures only gross behavior of the interval timer of the
+MMC3 or FME-7", so the FME-7's counter is exercised and not merely present.
+
+### The suites that did not move, and were checked
+
+| suite | before | after |
+|---|---|---|
+| `nes-test-roms/mmc3_test` | 5 / 6, `6-MMC6` **required to fail** | unchanged |
+| `nes-test-roms/mmc3_test_2` | 5 / 6, `6-MMC3_alt` **required to fail** | unchanged |
+| `nes-test-roms/mmc3_irq_tests` | 5 / 6, `5.MMC3_rev_A` **required to fail** | unchanged |
+| `nes-test-roms/MMC1_A12` | manual | unchanged |
+
+The three required failures are still failing, which is the point: REQ-CORE-100 pins mapper 4 to
+revision B and AMD-061's answer to Q-114 restates it, so each of those three is the revision A half
+of a contradictory pair whose revision B half passes. MF-3 added the MC-ACC (mapper 4 submapper 3)
+and the TxSROM (mapper 118) to that board without moving any of them: an iNES 1.0 mapper-4 image,
+which is what all three suites are, is still a plain revision B MMC3.
+
+`nes-test-roms/other/LINUSMUS.NES` is the one `unsupported` row left in the whole campaign, and it
+is not a mapper: "Corrupt header: missing iNES signature".
+
+### The regression guard
+
+`rust/crates/zax-harness/tests/test_roms_tests.rs` asserts the outcome of every ROM of three
+groups, failures included, when `ZAXNES_TEST_ROMS` points at a copy of `assets-free/test-roms/`.
+MF-3 flipped its eight `holy-mapperel` expectations and left the three required MMC3 failures
+alone, so all forty `holy-mapperel` rows now read `Outcome::Pass` there.

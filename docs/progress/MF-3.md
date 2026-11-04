@@ -33,7 +33,7 @@ Build environment for every cargo command (the C: drive is nearly full):
 - [x] 6/9 — mapper 180, UNROM with the switchable bank at $C000
 - [x] 7/9 — mapper 78, submappers 1 and 3
 - [x] 8/9 — MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3)
-- [ ] 9/9 — re-run the suites, the campaign document, and the close of the lot
+- [x] 9/9 — re-run the suites, the campaign document, and the close of the lot
 
 ## Out of scope (from the brief)
 
@@ -79,6 +79,7 @@ Before the lot (`7cbd9c52`):
 | mapper 180, UNROM with the fixed **first** bank — **a wiring of the UxROM board chosen at load**, no new `Board` variant | `discrete.rs:8-49` (the doc, two fields, `update_banks`), `:63-65` (`mapper_number`), `registry.rs:20-23` + `:144-148` (`has_bus_conflicts`) + `:158` | `req_core_100_mapper_180_fixes_the_first_bank_and_switches_at_c000`, `req_core_100_mapper_2_keeps_the_fixed_last_bank`; `M180_P128K_CR8K_H` and `M180_P128K_H` now **pass** with `detailed 0000` | **none, and a small win.** All four named functions **byte-identical**. Seven symbols moved and five shrank: the branch made `UxRom::update_banks` worth outlining, which took 36 instructions out of `Board::write_register` and 30 out of `Board::reset` | **none.** Mapper 2 does not move: `fixed_first` is false, its conflicts stay gated on submapper 2 (MR-BUS-1), and no savestate byte moved. No golden-core entry is on mapper 180 |
 | mapper 78, both wirings (submapper 1 *Uchuusen*, submapper 3 *Holy Diver*) with the iNES-1.0 heuristic — a **new board** and the lot's second and last new `Board` variant | `discrete.rs:185-283` (`Mapper078`, new), `board.rs:72-73` + `:107` (the appended variant), `registry.rs:20-23` + `:144-150` (`has_bus_conflicts`) + `:183`, `mappers/mod.rs:39-41` | `req_core_100_mapper_78_*` x4; `M78.3_P128K_C64K` now **passes** with `detailed 0000` | **none.** All four named functions **byte-identical**, same prologue and niche — the second appended variant cost the fetch dispatches nothing where the first cost +11 and then gave it back, which is what settles step 3's measurement as placement. +2 to +7 on the five `Board` dispatches that gained an arm; the crowd of renamed `discrete.rs` symbols is the mangled disambiguator shifting, not a change | **none.** A board that did not load before. No golden-core entry is on mapper 78 |
 | MR-4-3, the Acclaim MC-ACC (mapper 4 submapper 3) — **the MMC3's own code, monomorphised**: `Mmc3Board<const MC_ACC: bool>`, `Mmc3 = Mmc3Board<false>`, `McAcc = Mmc3Board<true>` | `mmc3.rs:11-33` (the doc), `:46-49` (the prescaler field), `:58-62` (the two aliases), `:69-76` (the watcher), `:233-236` + `:248-251` (the savestate byte), `:316-327` (`ppu_irq_horizon`), `:430-437` (`$C001`), `:443-471` (`on_ppu_address_bus`), `a12_watcher.rs:19-30` + `:72-80` (`fell`), `board.rs:74-77` + `:109`, `registry.rs:155-162` | `mr_4_3_the_mc_acc_clocks_once_per_eight_a12_falls`, `mr_4_3_a_plain_mapper_4_image_is_not_an_mc_acc`, `mr_4_3_writing_c001_resets_the_mc_acc_prescaler`, `req_core_090_the_mc_acc_prescaler_survives_a_save_and_restore` | **none, and the one claim in the lot that had to be exact.** `Board::on_ppu_address_bus` runs on every PPU fetch: the MMC3's arm is **character for character** what it was, all three of its paths, and the dispatch that reaches it got **one instruction shorter** (a jump table replaced a bitset-plus-compare chain). The four named functions are byte-identical. A field-based mode was written first, measured at **+2 instructions per fetch** for mappers 4 and 64, and thrown away — which is why `MC_ACC` is a `const` parameter | **none.** A plain mapper-4 or mapper-118 image takes the same instructions and writes the same savestate bytes; only an NES 2.0 submapper-3 dump changes, and it did not run as an MC-ACC before. *The Incredible Crash Dummies* and *Mickey's Safari in Letterland* are the titles; neither is in the golden-core set |
+| step 9: the suites, the campaign document, the close | `docs/review/MF-T-test-roms.md` (totals, the eight changed rows, a "What lot MF-3 changed" section), `test_roms_tests.rs` (all forty `holy-mapperel` rows now `Pass`) | the whole `holy-mapperel` suite, `mmc3_test`, `mmc3_test_2`, `mmc3_irq_tests`, `MMC1_A12` | **the lot end to end:** `Board::ppu_peek` 240 → **235**, `ppu_read` 241 → **236**, `read_pattern_planes` and `read_nametable_as` **byte-identical**, `Ppu2C02::step_dot` 1409 → **1403**, and the MMC3's arm of `on_ppu_address_bus` character for character what it was. **But `bench-core` says +4 % on ROMs that touch no new board**, outside this host's noise — the lot's one open item, localised and documented in "Step 9" for R0's callgrind | **no commercial game on an existing board changes behaviour.** Golden-core has mappers 0-4 and 156: mapper 1 changes only for an SNROM-shaped image that sets bit 4 of `$A000` with the RAM live (no shipped game does), mapper 4 not at all unless the dump declares submapper 3, and 0, 2, 3 and 156 not at all |
 
 ## Step 1 — the MMC1 SNROM work-RAM disable
 
@@ -816,3 +817,123 @@ Registers in `$4020-$5FFF`: **none**, as for every MMC3.
   `mmc3_test` is an iNES 1.0 suite, so the behaviour is pinned by the unit tests alone, which is
   what MR-4-3 expected ("the fix is a new board, not a branch, so the test belongs to the lot that
   adds it").
+
+## Step 9 — the suites, the campaign document, and the close of the lot
+
+### The suites, re-run
+
+`zax-harness test-roms <dir> out.json --filter … --no-shots`, against
+`assets-free/test-roms`:
+
+| suite | before MF-3 | after MF-3 |
+| --- | --- | --- |
+| `holy-mapperel` | 32 / 40, 2 fail, 6 unsupported | **40 / 40** |
+| `nes-test-roms/mmc3_test` | 5 / 6 | 5 / 6, unchanged |
+| `nes-test-roms/mmc3_test_2` | 5 / 6 | 5 / 6, unchanged |
+| `nes-test-roms/mmc3_irq_tests` | 5 / 6 | 5 / 6, unchanged |
+| `nes-test-roms/MMC1_A12` | manual | manual, unchanged |
+
+The three MMC3 rows that still fail are the three the campaign marked **required to fail**: each
+is the revision A half of a contradictory pair whose revision B half passes, and REQ-CORE-100 pins
+mapper 4 to revision B (AMD-061's answer to Q-114 restates it). Adding the TxSROM and the MC-ACC to
+that board moved none of them, which is the point — an iNES 1.0 mapper-4 image, which is what all
+three suites are, is still a plain revision B MMC3.
+
+Campaign totals: pass **196 → 204**, fail **17 → 15**, unsupported **7 → 1**, manual 111 of 331.
+The one `unsupported` left in the whole campaign is `nes-test-roms/other/LINUSMUS.NES`, and it is
+not a mapper: "Corrupt header: missing iNES signature".
+
+`docs/review/MF-T-test-roms.md` carries the new totals, the eight changed `holy-mapperel` rows,
+and a "What lot MF-3 changed" section with the before/after table and the commands.
+`rust/crates/zax-harness/tests/test_roms_tests.rs` — the env-gated guard — now expects
+`Outcome::Pass` for all forty `holy-mapperel` rows and still expects the three MMC3 failures.
+
+### The lot's performance, measured end to end — and the one thing left open
+
+**Static, which is what the lot's rules ask for.** Pre-lot (`7cbd9c52`) against the finished lot,
+whole-crate assembly:
+
+| function | before the lot | after | |
+| --- | ---: | ---: | --- |
+| `Board::ppu_peek` | 240 | **235** | −5 |
+| `Board::ppu_read` | 241 | **236** | −5 |
+| `Ppu2C02::read_pattern_planes` | 106 | 106 | byte-identical |
+| `Ppu2C02::read_nametable_as` | 107 | 107 | byte-identical |
+| `Ppu2C02::step_dot` | 1409 | **1403** | −6 |
+
+And the function that mattered most, `Board::on_ppu_address_bus`: the MMC3's arm is **character
+for character** what it was, all three of its paths, and the dispatch that reaches it is one
+instruction shorter. The per-CPU-cycle dispatches — `Board::irq_asserted`,
+`Board::on_cpu_cycle` — differ from their pre-lot selves **only** in field displacements (the
+boards' structs grew) and in the order LLVM emitted the arms; no arm gained an instruction.
+
+**Wall clock, which is not.** `zax-harness bench-core`, 3600 frames after 300 of warm-up, two
+binaries differing only by this lot's code, interleaved runs, `core run_frame`:
+
+| build | 5-MMC3 (mapper 4) | NROM | `M1_P128K` (mapper 1) |
+| --- | ---: | ---: | ---: |
+| before the boards (step 2) | 0.997 ms/frame | 0.819 | 0.826 |
+| step 7 (five boards in) | 1.033 | — | — |
+| the finished lot | 1.042 | 0.860 | 0.861 |
+
+**That is about +4 %, on ROMs that cannot execute a line of any new board, and it is outside this
+host's noise** — twelve interleaved pairs, every one of them the same way round. It is the lot's
+one open item and it is reported here rather than explained away.
+
+What is known about it:
+
+* it **accumulates with the amount of new code**, not with any one step: ~+3 % by step 7 and
+  ~+4 % after step 8, roughly in proportion to the ~1 500 instructions of new board code;
+* it is **not the `Board` enum**: a control build with a 27th variant whose board does nothing at
+  all measured **0.0 %** on NROM (step 3);
+* it is **not an executed path**: see the static table above and the per-step sections;
+* the compiler reshuffled the CPU interpreter's inlining twice during the lot without being asked
+  to (`Cpu6502::step` 240 → 1331, `execute` and four helpers folded in, `resolve` 1293 → 584),
+  which is the most plausible home for it — a hot loop five times the size is an I-cache change
+  that instruction counts do not show. **Forcing the pre-lot shape back made it worse**:
+  `#[inline(never)]` on `Cpu6502::execute` measured 1.078 ms/frame against the lot's 1.042 and the
+  baseline's 0.997, so the inliner's new choices are not themselves the regression, and no
+  attribute was left in the CPU (which is out of this lot's scope anyway).
+
+**For R0.** The instrument for this is callgrind, which counts executed instructions
+deterministically, and R0 runs it on Mega Man 2 (mapper 1) and Zelda II (mapper 1) plus the
+golden-core campaign. The prediction this lot makes is that **callgrind will show no board paying
+instructions it did not pay before** — every claim above is checkable in the generated code — and
+that if callgrind nonetheless shows a regression, the lever is the layout and inlining of the CPU
+and PPU, not any of the seven boards this lot touched. Neither is in MF-3's scope; MF-4 has the
+CPU, the PPU and the APU.
+
+### The lot's state at the close
+
+* `cargo fmt --check`: clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -D warnings`:
+  clean. `cargo test --release -p zax-nes -p zax-harness`: **0 failed**, no test left `#[ignore]`d
+  by this lot.
+* `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: 3 passed.
+* **Savestates**: no existing board's block changed size or order. Mapper 1, 2, 4, 30 and 118
+  states written before this lot load byte for byte — mapper 4's block is identical because the
+  MC-ACC's prescaler byte is written only by the clone, and mapper 1's, 2's and 30's new facts are
+  all derived at load. The two new boards (69, 78) and the MC-ACC write their own.
+* **Tickets**: one opened, **Q-118** (the Sunsoft 5B's mixing level and polarity, with a
+  provisional choice from the one quantitative sentence the page gives). **Q-117** is implemented
+  as R0 answered it. No other ambiguity needed one.
+* **The `$4020-$5FFF` rule** (brief item 5): **no board of this lot has a register there**. Each
+  step says so for its own board, and the type-level documentation of each board repeats it. The
+  rule was never triggered, so nothing was opened for it.
+
+### What the brief asked for and what is here
+
+| brief item | state |
+| --- | --- |
+| 1. MMC1 SNROM work-RAM disable, both ROMs passing, every other MMC1 board still passing | **done** (step 1) |
+| 2. Q-117, UNROM 512 latch decoding, MR-30-4 tests rewritten with the page's sequences | **done** (step 2) |
+| 3. mapper 69 + Sunsoft 5B audio | **done** (steps 3 and 4), with Q-118 for the level |
+| 3. mapper 118 TxSROM, as a variant of the MMC3 board chosen at load | **done** (step 5) |
+| 3. mapper 180 | **done** (step 6), as a wiring of the UxROM board chosen at load |
+| 3. mapper 78, both wirings, with the iNES-1.0 heuristic | **done** (step 7) |
+| 3. for every new board: registry entry, `SUPPORTED_MAPPERS`, load-compatible save state, the Holy Mapperel ROM passing, tests on a synthetic ROM | **done** for all four numbers |
+| 4. MR-4-3, the MC-ACC, chosen at load, confined to the MMC3 board | **done** (step 8) |
+| 5. the `$4020-$5FFF` rule | **not triggered**; checked per board |
+| 6. suites re-run, before/after in `MF-T-test-roms.md`, the newly passing ROMs in the env-gated test | **done** (step 9) |
+
+Nothing the brief asked for is missing. The one item handed on is the +4 % wall clock above, which
+is a measurement and not an undelivered piece of work.
