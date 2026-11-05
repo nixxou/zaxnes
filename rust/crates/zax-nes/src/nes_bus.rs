@@ -913,7 +913,36 @@ impl NesBus {
             .read(port, open_bus, |aim| ppu.sees_light_at(aim.x, aim.y))
     }
 
-    fn read_internal(&mut self, address: u16) -> u8 {
+    /// The bus read itself, as a body each of the **two** out-of-line callers below gets its own
+    /// copy of: [`NesBus::read_cycle`] and [`NesBus::read_internal`] (lot PR-1, Q-119 point 3).
+    ///
+    /// The point of the second copy is that the DMA gate then ends **in** the read instead of a
+    /// `jmp` into it, so a read cycle no longer pays that `jmp` nor a second function's prologue
+    /// and epilogue: **−5.9 instructions per CPU read cycle**, measured by callgrind over
+    /// thirteen ROMs (lot PR-1 steps 2 and 3).
+    ///
+    /// What it costs is that LLVM, rather than duplicate them, moves the callees it can out of
+    /// the read: `Ppu2C02::read` and `Cartridge::try_cpu_read` each become a tail call. That is
+    /// **+4.1 instructions per PPU register read**, and it cannot lose, because a register read
+    /// *is* a read cycle and so saves 5.9 first — which is the answer to the open question of
+    /// Q-119 point 3, measured on a ROM that spends a fifth of its read cycles on `$2002`.
+    ///
+    /// The two things that make the arrangement hold, both measured and both easy to undo by
+    /// accident:
+    ///
+    /// * the rare arms are out of line and `#[cold]` ([`NesBus::read_io_register`],
+    ///   [`NesBus::read_wide_window`]), which keeps the body small enough that the two copies do
+    ///   not cost more than they save;
+    /// * `Board::cpu_read_override` carries `#[inline(always)]`, without which the MMC5 — the one
+    ///   board that reaches it on *every* read — pays +0.59 % instead of gaining 0.73 %.
+    ///
+    /// **Do not** add `#[inline(always)]` to `Ppu2C02::read` to "keep the register arm inline":
+    /// measured at +0.02 % overall and +0.89 % on the MMC5, because its prologue then lands on
+    /// every read cycle instead of on the register reads alone (lot PR-1 step 3, variants C and
+    /// D).
+    #[allow(clippy::inline_always)] // Measured: lot PR-1 step 3, -0.84 % over thirteen ROMs.
+    #[inline(always)]
+    fn read_internal_body(&mut self, address: u16) -> u8 {
         if address >= 0x8000 {
             if let Some(value) = self
                 .cartridge
@@ -943,37 +972,11 @@ impl NesBus {
         }
 
         if address < 0x4020 {
-            return match address {
-                0x4015 => {
-                    self.sync_apu();
-                    // Bit 5 is the **internal** bus, and the read leaves the pins alone: the two
-                    // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
-                    // (see [`NesBus::external_bus`]).
-                    self.hold_external_bus();
-                    self.apu.read_status(self.data_bus)
-                }
-                // A controller port answers on the internal bus too, and its three open-bus bits
-                // come from there — which is how `Implied Dummy Reads` can take the operands of a
-                // `JSR` out of `$4016`/`$4017` and have them "leech off the value read from the
-                // opcode" when that opcode came from `$4015`.
-                0x4016 => self.read_input_port(0, self.data_bus),
-                0x4017 => self.read_input_port(1, self.data_bus),
-
-                // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
-                _ => self.external_bus(),
-            };
+            return self.read_io_register(address);
         }
 
-        if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
-            if let Some(value) = self.wide_window_read(address) {
-                return value;
-            }
-            if let Some(value) = self.ppu.wide().read(address) {
-                return value;
-            }
-        }
-        if (0x6000..0x8000).contains(&address) {
-            if let Some(value) = self.wide_window_read(address) {
+        if address < 0x8000 {
+            if let Some(value) = self.read_wide_window(address) {
                 return value;
             }
         }
@@ -989,6 +992,80 @@ impl NesBus {
             Some(value) => value,
             None => self.external_bus(),
         }
+    }
+
+    /// The out-of-line copy of [`NesBus::read_internal_body`]: every reader of the bus that is
+    /// not a CPU read cycle — the DMA units, the halted read, the OAM loop.
+    ///
+    /// `#[inline(never)]` because there are about a dozen such sites and the body is 170
+    /// instructions: without it the copies multiply, which is the instruction-cache loss Q-119
+    /// measured at +8 % of wall clock when the DMA gate itself was pasted at every call site.
+    #[inline(never)]
+    fn read_internal(&mut self, address: u16) -> u8 {
+        self.read_internal_body(address)
+    }
+
+    /// `$4000`-`$401F`, the 2A03's own registers: `$4015` and the two controller ports, a few
+    /// dozen reads a frame at most, so the arm is out of line and `#[cold]`.
+    ///
+    /// It is out of line to keep [`NesBus::read_internal_body`] small, that body now having two
+    /// copies. Measured cost of the call: under 90 000 instructions per 300 frames on any ROM of
+    /// lot PR-1's set.
+    #[cold]
+    #[inline(never)]
+    fn read_io_register(&mut self, address: u16) -> u8 {
+        match address {
+            0x4015 => {
+                self.sync_apu();
+                // Bit 5 is the **internal** bus, and the read leaves the pins alone: the two
+                // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
+                // (see [`NesBus::external_bus`]).
+                self.hold_external_bus();
+                self.apu.read_status(self.data_bus)
+            }
+            // A controller port answers on the internal bus too, and its three open-bus bits
+            // come from there — which is how `Implied Dummy Reads` can take the operands of a
+            // `JSR` out of `$4016`/`$4017` and have them "leech off the value read from the
+            // opcode" when that opcode came from `$4015`.
+            0x4016 => self.read_input_port(0, self.data_bus),
+            0x4017 => self.read_input_port(1, self.data_bus),
+
+            // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
+            _ => self.external_bus(),
+        }
+    }
+
+    /// The widescreen extension's window at `$5000`-`$5FFF` and its optional one over
+    /// `$6000`-`$7FFF`, both of which only a ROM made for this emulator ever drives.
+    ///
+    /// The caller's single `address < 0x8000` test stands for the two ranges: `claims` is
+    /// `$5000`-`$5FFF` and the second range `$6000`-`$7FFF`, and at this point the address is
+    /// already past `$401F`. So one compare replaces two range tests in each of the body's two
+    /// copies, and the window's own decode moves here.
+    ///
+    /// `#[cold]` even though `$6000`-`$7FFF` is the PRG-RAM of every game with a battery: that
+    /// range reaches [`NesBus::wide_window_read`], which answers `None` for every cartridge whose
+    /// ROM has not written the unlock sequence, and the read then carries on to the cartridge as
+    /// before. Measured: 1.6 M instructions per 300 frames on the Holy Mapperel ROMs, 10.6 M on
+    /// an MMC5 reading its `ExRAM` through `$5C00`, under 0.15 M on any commercial game of lot
+    /// PR-1's set.
+    #[cold]
+    #[inline(never)]
+    fn read_wide_window(&mut self, address: u16) -> Option<u8> {
+        if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
+            if let Some(value) = self.wide_window_read(address) {
+                return Some(value);
+            }
+            if let Some(value) = self.ppu.wide().read(address) {
+                return Some(value);
+            }
+        }
+        if (0x6000..0x8000).contains(&address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return Some(value);
+            }
+        }
+        None
     }
 
     fn write_internal(&mut self, address: u16, value: u8) {
@@ -1141,7 +1218,10 @@ impl NesBus {
     #[inline(never)]
     fn read_cycle(&mut self, address: u16) -> u8 {
         if self.dma == 0 {
-            self.read_internal(address)
+            // Its **own copy** of the read (lot PR-1): the gate then ends in the read instead of
+            // a `jmp` into it, which is −5.9 instructions a read cycle. See
+            // [`NesBus::read_internal_body`] for what that copy costs and why it still wins.
+            self.read_internal_body(address)
         } else {
             self.halted_read_cycle(address)
         }

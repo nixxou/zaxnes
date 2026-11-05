@@ -187,6 +187,16 @@ impl Mapper for Board {
         dispatch!(self, b => b.try_read_prg(memory, address))
     }
 
+    /// `#[inline(always)]`, and it has to stay: the MMC5 maps PRG-**RAM** into `$8000`-`$DFFF`,
+    /// so `Cartridge::read_rom_window` cannot answer and **every** CPU read of an MMC5 game
+    /// reaches this dispatch — about one call per read cycle, where an MMC1 reaches it a few
+    /// thousand times in 8.8 million reads. Letting it go out of line turns lot PR-1's −0.73 %
+    /// on an MMC5 into **+0.59 %** and is the only thing that made the lot's arrangement lose on
+    /// any ROM of its set (`docs/progress/PR-1.md`, step 3). No other board is affected either
+    /// way; MF-3b rule 3's "the arm that matters is the empty one" does not apply here, because
+    /// what is being priced is the call, not an arm.
+    #[allow(clippy::inline_always)] // Measured: lot PR-1 step 3.
+    #[inline(always)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         dispatch!(self, b => b.cpu_read_override(memory, address))
     }

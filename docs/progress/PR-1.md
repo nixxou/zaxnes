@@ -296,3 +296,153 @@ appeared: this is a boundary, not a change of behaviour.
 
 So the split as Q-119 wrote it **cannot be committed**: the bar is "no slower, to the instruction,
 on every ROM of the set", and `mmc5` is +0.586 %. Step 3 tries to keep the −0.655 % without it.
+
+## Step 3 — nine variants, and the one that is faster on every ROM of the set
+
+### What was tried, and what each measured
+
+Every row is a full `build-clean.sh` + `callgrind-set.sh` over all thirteen ROMs. "Slower on"
+lists every ROM whose instruction count went **up** against `2754a7e8`, which is the only thing
+that can disqualify a variant.
+
+| | variant | total | slower on |
+| --- | --- | ---: | --- |
+| **A** | the split alone, Q-119 point 3 as written (step 2) | −0.655 % | `mmc5` **+0.586 %** |
+| **B** | A + `#[inline(always)]` on `Board::cpu_read_override` | −0.767 % | **none** |
+| **C** | B + `#[inline(always)]` on `Ppu2C02::read` **and** `WideExtension::read` | −0.084 % | `mmc5` +0.159 % |
+| **D** | A + `#[inline(always)]` on `Ppu2C02::read` alone | **+0.024 %** | `mmc5` +0.890 % |
+| **E** | `#[cold]` on the rare arms, **no split at all** | −0.068 % | eleven of thirteen (+0.000 % to +0.025 %) |
+| **F** | A + the `#[cold]` rare arms | −0.730 % | `mmc5` +0.018 % |
+| **G** | F + `#[inline(always)]` on `Board::cpu_read_override` | **−0.841 %** | **none** ← **kept** |
+| **H** | G with plain `#[inline(never)]` instead of `#[cold]` | −0.842 % | none |
+| **I** | G + `#[inline(always)]` on `Cartridge::try_cpu_read` | −0.802 % | none |
+
+The brief's two suggestions are **D** and **E**, and the measurement says both are wrong, which is
+worth recording because each sounds right:
+
+* **D, "keep the PPU-register arm inline and let only the rare arms go out of line."** It is the
+  worst variant of the nine: +0.024 % overall and **+0.890 %** on the MMC5. The reason is the one
+  MF-3b rule 3 states in another form — inlining `Ppu2C02::read` puts its prologue (four pushes
+  and a 40-byte frame) inside the body, so it is paid on **every read cycle** instead of on the
+  register reads alone. Per read cycle on `m1`: 25.2 instructions in **B**, 30.6 in **C**. The
+  +5.4 exactly cancels the −5.9 the split saves, and the register arm's +4.09 is the smaller
+  number by a factor of six even on `Duelito`.
+* **E, "`#[cold]` on the rare arms rather than on the split."** On its own it is a wash: −0.518 %
+  on the MMC5, where shrinking `read_internal` lets LLVM keep the board's override inline, and
+  **+0.000 % to +0.025 % on the other twelve** — slower, so disqualified, though by amounts
+  (5 688 instructions on `vblnmi`) that are near the instrument's floor.
+
+What the table does say is that the two ideas are **complementary rather than alternative**: the
+cold arms are what make the split's two copies cheap (A → F, mmc5 +0.586 % → +0.018 %), and the
+override's attribute is what closes the last of it (F → G, +0.018 % → −0.732 %).
+
+### The variant kept, **G**
+
+Three changes, all of them attributes or wrappers; nothing computes anything different.
+
+1. `nes_bus.rs` — `read_internal` split into `read_internal_body` (`#[inline(always)]`) plus two
+   out-of-line callers, `read_internal` (`#[inline(never)]`) and `read_cycle`, which is Q-119's
+   form.
+2. `nes_bus.rs` — the two rare arms of the body moved into `#[cold] #[inline(never)]` helpers:
+   `read_io_register` (`$4000`-`$401F`) and `read_wide_window` (the widescreen window at
+   `$5000`-`$5FFF` and its option over `$6000`-`$7FFF`). The caller's **single** `address < 0x8000`
+   test stands for the two ranges the second one had, the address being already past `$401F`
+   there — so each copy of the body loses a range test as well as the arm.
+3. `cartridges/board.rs` — `#[inline(always)]` on `Mapper::cpu_read_override` for `Board`.
+
+| ROM | board | `2754a7e8` | **G** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `oamstr` | NROM | 3 487 355 725 | 3 437 678 323 | −49 677 402 | −1.425 % |
+| `vblnmi` | MMC1 | 3 476 935 328 | 3 426 078 147 | −50 857 181 | −1.463 % |
+| `m1` | MMC1 | 5 063 537 884 | 5 013 867 622 | −49 670 262 | −0.981 % |
+| `metroid` | MMC1 | 5 304 394 605 | 5 252 749 510 | −51 645 095 | −0.974 % |
+| `m4` | MMC3 | 5 649 667 156 | 5 600 394 107 | −49 273 049 | −0.872 % |
+| `m0` | NROM | 5 694 534 646 | 5 643 170 346 | −51 364 300 | −0.902 % |
+| `smb1` | NROM | 6 181 802 642 | 6 130 416 678 | −51 385 964 | −0.831 % |
+| `mm2` | MMC1 | 6 188 849 351 | 6 136 343 372 | −52 505 979 | −0.848 % |
+| `z2` | MMC1 | 6 457 641 956 | 6 407 739 231 | −49 902 725 | −0.773 % |
+| `readbuf` | CNROM | 6 994 854 555 | 6 947 841 972 | −47 012 583 | −0.672 % |
+| `duelito` | NROM | 7 540 980 081 | 7 493 537 856 | −47 442 225 | −0.629 % |
+| `smb3` | MMC3 | 8 117 976 283 | 8 066 048 574 | −51 927 709 | −0.640 % |
+| `mmc5` | MMC5 | 11 486 356 993 | 11 402 193 161 | −84 163 832 | **−0.733 %** |
+| **total** | | 81 644 887 205 | 80 958 058 899 | **−686 828 306** | **−0.841 %** |
+
+**Thirteen ROMs, thirteen negative.** The MMC5 goes from the one loser of the split (+0.586 %) to
+the **largest** gain of the set (−0.733 %).
+
+### Post-LTO, as MF-3b's rule requires
+
+`cmp4c.py`, `bin-pr1-base.s` against `bin-pr1-v7.s`. **Every pinned symbol outside the read is
+IDENTICAL, raw** — the same seventeen listed in step 2, `Cpu6502::step` 897, `tick` 75,
+`write_internal` 2 564, `Board::ppu_read` 312, `on_cpu_cycle` 363 and the rest. What moved:
+
+| symbol | baseline | **G** | |
+| --- | ---: | ---: | --- |
+| `NesBus::read_cycle` | 3 | **182** | the gate plus its copy of the read; 288 in the split, the cold arms taking 106 out |
+| `NesBus::read_internal` | 786 | **176** | the other callers' copy |
+| `NesBus::read_io_register` | *inlined* | **71, out of line** | deliberately |
+| `NesBus::read_wide_window` | *inlined* | **165, out of line** | deliberately |
+| `Board::cpu_read_override` | *inlined* | *inlined* | **the attribute's whole job** |
+| `WideExtension::read` | *inlined* | *inlined* | it is reached only from the cold arm now |
+| `Ppu2C02::read` | *inlined* | **257, 2 call sites** | priced: +4.09 a register read |
+| `Cartridge::try_cpu_read` | *inlined* | **244, 2 call sites** | priced below |
+| `NesBus::dma_read` | 109 | 76 | its inlined read became the call `read_internal` already was |
+
+So **two** callees still gain their first call site, and MF-3b rule 1 says to name them rather
+than let them pass:
+
+* `Ppu2C02::read`, measured at **+4.09 instructions a register read** against **−5.90 a read
+  cycle** — it cannot lose (step 2).
+* `Cartridge::try_cpu_read`, which replaced `Board::cpu_read_override` as the boundary. It is the
+  *outer* function, so the MMC5 now pays **one** boundary where the split made it pay the
+  override's as well, and variant **I** measured that forcing this one inline too is **worse**
+  (−0.802 % against −0.841 %, and −0.463 % against −0.733 % on the MMC5): with both inline the
+  two copies of the body grow past what they save. The boundary where G leaves it is the measured
+  optimum of the nine.
+
+Per symbol, the MMC5, which is where the whole argument of this lot lives:
+
+| symbol | baseline | split (A) | **G** |
+| --- | ---: | ---: | ---: |
+| `NesBus::read_internal` | 607 291 787 | 1 090 984 | 1 076 430 |
+| `NesBus::read_cycle` | 25 602 335 | 383 374 809 | **231 692 814** |
+| `Board::cpu_read_override` | *inlined* | **308 101 626** | ***inlined*** |
+| `Cartridge::try_cpu_read` | *inlined* | *inlined* | **300 054 385** |
+| `Cartridge::default_cpu_read` | 283 356 728 | 283 356 728 | 283 356 728 |
+| `NesBus::read_wide_window` | — | — | 10 607 490 |
+| `Ppu2C02::read` | *inlined* | 5 364 857 | 5 364 857 |
+| `WideExtension::read` | *inlined* | 2 357 220 | *inlined* |
+| **whole process** | 11 486 356 993 | 11 553 670 347 | **11 402 193 161** |
+
+`default_cpu_read` at exactly the same count in all three columns is the check that none of this
+is work appearing or disappearing: it is where the boundary sits, nothing else.
+
+The two cold arms cost, per 300 frames: `read_wide_window` 1.57 M on the Holy Mapperel ROMs,
+10.6 M on the MMC5 reading ExRAM through `$5C00`, under 0.15 M on any commercial game;
+`read_io_register` under 90 000 anywhere. `read_wide_window` is `#[cold]` even though
+`$6000`-`$7FFF` is the PRG-RAM of every battery game, because that range reaches
+`wide_window_read`, which answers `None` for any cartridge whose ROM never wrote the unlock
+sequence — the numbers above are what that detour costs.
+
+### `#[cold]` or plain `#[inline(never)]`: the instrument cannot tell, so the code says why
+
+Variant **H** is **G** with the `#[cold]` dropped: −0.842 % against −0.841 %, a difference of
+157 000 instructions in 81 **billion**. `#[cold]` is kept anyway, and the reason is stated rather
+than implied: it moves those two bodies into a section away from the hot path, which is an
+instruction-cache property callgrind's `Ir` count is blind to and which matters on the A53's small
+caches (§4, §8 of `PERFORMANCE-HISTORY.md`). Where the instrument is silent, the attribute that
+documents the intent wins.
+
+### What this instrument's floor actually is
+
+Worth recording, because it was measured by accident. The variant was built twice from trees that
+differ **only in comments** (the final doc comments were written after G was measured), and the
+whole-process figures differ by **100 469 instructions in 81 billion, 0.0001 %**. Every single
+`zax_nes` symbol is identical between the two, to the instruction; the entire difference is
+`getgeneric` in glibc's time handling (+29 k on `m1`) and Lua's string table
+(`luaH_getshortstr` −13 k, `luaS_newlstr` +5 k), i.e. the harness's start-up, not the emulator.
+
+So the whole-process figure carries about 10⁵ instructions of host noise, and differences at that
+scale between variants — **E**'s +5 688 on `vblnmi`, **G** against **H** — are not signal. The
+numbers this lot rests on are 47 to 85 **million**, three orders of magnitude above the floor, and
+the per-symbol `zax_nes` counts have no floor at all: they are exact.
