@@ -6,6 +6,7 @@
 
 use super::vrc_irq::VrcIrq;
 use super::{windows_for, Mapper};
+use crate::apu::Vrc6Audio;
 use crate::cartridges::{BankWindows, Cartridge, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
@@ -19,8 +20,8 @@ use crate::NametableMirroring;
 /// | address | bits | effect |
 /// | --- | --- | --- |
 /// | $8000-$8003 | `.... PPPP` | 16 KiB PRG bank at $8000-$BFFF |
-/// | $9000-$9002 | — | pulse 1 (the sound, step 2) |
-/// | $9003 | `.... .A98` | frequency scale and halt (step 2) |
+/// | $9000-$9002 | — | pulse 1 ([`Vrc6Audio`]) |
+/// | $9003 | `.... .ADH` | frequency scale and halt, all three channels |
 /// | $A000-$A002 | — | pulse 2 |
 /// | $B000-$B002 | — | sawtooth |
 /// | $B003 | `W.PN MMDD` | PPU banking style, mirroring, and the PRG-RAM enable |
@@ -45,6 +46,10 @@ pub struct Vrc6 {
     /// Whether this is the VRC6b of mapper 26, whose A0 and A1 reach the chip the other way
     /// round. Load-time, so the rewrite below is one test and not a `match` on the number.
     swap_address_lines: bool,
+    /// The chip's three extra channels. Carried by every mapper-24 and -26 image: the VRC6
+    /// always has them, and a game that writes no sound register leaves every `E` bit clear,
+    /// which is silence (REQ-CORE-075, optional).
+    audio: Vrc6Audio,
     irq: VrcIrq,
     /// `$8000-$8003`, the 16 KiB bank at $8000-$BFFF: four bits.
     ///
@@ -83,6 +88,7 @@ impl Vrc6 {
             // nesdev, "VRC6": "VRC6b (mapper 026) has A0 and A1 swapped". Mesen reads it the
             // same way (`VRC6.h:231-233`).
             swap_address_lines: mapper_number == 26,
+            audio: Vrc6Audio::new(),
             irq: VrcIrq::new(),
             prg_16k: 0,
             // Nothing on the page gives a power-on value for either PRG register. 0 and 2 are
@@ -260,6 +266,11 @@ impl Mapper for Vrc6 {
         writer.write_u8(self.banking_mode);
         writer.write_raw(&self.chr);
         self.irq.save_state(writer);
+        // Written last, so that a mapper-24 state from before the sound existed would load with
+        // a silent chip -- which is a VRC6 before its first sound register write (REQ-CORE-091).
+        // No such state was ever shipped: the board and its sound arrive in the same lot. The
+        // ordering costs nothing and is the shape `fme7.rs` established.
+        self.audio.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -268,6 +279,11 @@ impl Mapper for Vrc6 {
         self.banking_mode = reader.read_u8()?;
         reader.read_into(&mut self.chr)?;
         self.irq.load_state(reader)?;
+        if reader.remaining() > 0 {
+            self.audio.load_state(reader)?;
+        } else {
+            self.audio.reset();
+        }
 
         // Every derived half comes back from the registers (REQ-CORE-091). The **mirroring** is
         // not touched: `Cartridge::load_state` has just restored it from the state, and
@@ -290,6 +306,7 @@ impl Mapper for Vrc6 {
     /// from CIRAM in the header's arrangement, and the PRG-RAM disabled. Mesen powers up the
     /// same way (`VRC6.h:29-38`), and the board's games set the register before they draw.
     fn reset(&mut self, memory: &mut CartridgeMemory) {
+        self.audio.reset();
         self.irq.reset();
         self.prg_16k = 0;
         self.prg_8k = 2;
@@ -303,6 +320,12 @@ impl Mapper for Vrc6 {
 
     fn irq_asserted(&self) -> bool {
         self.irq.asserted()
+    }
+
+    /// `M` of REQ-CORE-073, which the APU subtracts (AMD-061 §6.2; the page's own "except
+    /// inverted"). One load: the level is recomputed where the chip's generators move.
+    fn expansion_audio_output(&self) -> Option<i32> {
+        Some(self.audio.output())
     }
 
     fn prg_ram_enabled(&self) -> bool {
@@ -355,13 +378,31 @@ impl Mapper for Vrc6 {
             0xF000 => self.irq.write_latch(value),
             0xF001 => self.irq.write_control(value),
             0xF002 => self.irq.acknowledge(),
-            // $9000-$9003, $A000-$A002 and $B000-$B002 are the sound (step 2), and $F003 is not
-            // a register at all.
+            // The three sound channels, and their shared frequency scaling at $9003.
+            0x9000..=0x9003 | 0xA000..=0xA002 | 0xB000..=0xB002 => {
+                self.audio.write(address, value);
+            }
+            // $F003 is not a register at all, and neither is $A003.
             _ => {}
         }
     }
 
+    /// **Out of line, measured, and the attribute belongs on *this* function and not only on
+    /// the audio's own body.** This is one arm of `Board::on_cpu_cycle`, whose thirty arms share
+    /// one prologue. An arm that holds a value across a call needs a callee-saved register, and
+    /// the prologue that saves it is executed by every board on every CPU cycle.
+    ///
+    /// `#[inline(never)]` on [`Vrc6Audio::step_cpu_cycle`] alone fixed the Windows build — the
+    /// prologue went back to `pushq %rsi / subq $32, %rsp` — and left the Linux one costing
+    /// `Board::on_cpu_cycle` **+17.9 M instructions over 300 frames, +2 per CPU cycle, on all
+    /// thirteen ROMs of the measured set and every one of them on a board with no expansion
+    /// audio at all**. The two ABIs allocate registers differently, so an attribute chosen
+    /// against one dump is not evidence about the other: `cargo rustc --emit=asm` runs on the
+    /// Windows host and callgrind on the Linux one, and this is the first place in the lots where
+    /// they disagreed. With the attribute here the arm is a tail call and holds nothing.
+    #[inline(never)]
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        self.audio.step_cpu_cycle();
         self.irq.step_cpu_cycle();
     }
 }

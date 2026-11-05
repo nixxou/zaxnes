@@ -248,6 +248,32 @@ pub struct Cartridge {
     /// The iNES mapper number, latched at load. See [`Cartridge::mapper_number`] for why this is
     /// a field and not the `Board` dispatch.
     mapper_number: i32,
+    /// Whether the board has anything to do on a CPU cycle, which only a counter or a sound chip
+    /// needs: the MMC5's PPU-idle counter, the FCG and SS88006 IRQ counters, Konami's VRC IRQ,
+    /// the RAMBO-1's cycle mode, and the FME-7 and VRC6 with their expansion audio. Twelve of
+    /// the thirty-eight supported mapper numbers; the other twenty-six inherit the empty
+    /// [`Mapper::on_cpu_cycle`].
+    ///
+    /// **This is the `on_ppu_address_bus` story of MF-3b step 2, on the other clock.**
+    /// [`Cartridge::step_cpu_cycle`] runs once per CPU cycle and used to dispatch
+    /// unconditionally, so a board with nothing to do paid a `callq`, a twelve-instruction niche
+    /// prologue, a thirty-entry jump table and a three-instruction `retq` arm — measured by
+    /// callgrind at **eleven instructions per CPU cycle**, 98.3 M over 300 frames of any game on
+    /// the set, whatever its board. Testing a `bool` first costs two.
+    ///
+    /// Lot MF-5a is what forced it: the VRC6's expansion audio gave the dispatch an arm with
+    /// real work in it, and on Linux that cost `Board::on_cpu_cycle` +17.9 M instructions — **+2
+    /// per CPU cycle, on all thirteen ROMs of the set, every one of them on a board that has no
+    /// expansion audio at all.** `#[inline(never)]` on the audio's own body fixes the Windows
+    /// build's prologue and does nothing for the Linux one, because the two ABIs allocate
+    /// registers differently; the latch is ABI-independent, which is the point.
+    ///
+    /// Derived from the mapper number at load, so it is not part of the savestate.
+    ///
+    /// **A board that overrides [`Mapper::on_cpu_cycle`] must have its mapper numbers added
+    /// here**, or its counter will never be clocked and its sound will never play.
+    /// `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` fails if one is missing.
+    clocks_on_cpu_cycle: bool,
 }
 
 impl Cartridge {
@@ -313,6 +339,13 @@ impl Cartridge {
             watches_ppu_reads: matches!(mapper, 4 | 5 | 64 | 118),
             watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
             mapper_number: mapper,
+            // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), Konami's VRC2/VRC4
+            // (21, 22, 23, 25, 27) and VRC6 (24, 26), the RAMBO-1 (64) and the Sunsoft FME-7
+            // (69). See the field.
+            clocks_on_cpu_cycle: matches!(
+                mapper,
+                5 | 16 | 18 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69
+            ),
         };
         cartridge.reset();
         Ok(cartridge)
@@ -690,9 +723,16 @@ impl Cartridge {
     }
 
     /// Advances the cartridge by one CPU cycle.
+    ///
+    /// The clock itself always moves — the MMC1's shift register and three IRQ counters read it
+    /// (see [`Cartridge::cpu_cycle`]) — and only the dispatch is behind the latch. See
+    /// `clocks_on_cpu_cycle` for the eleven instructions a board with nothing to do used to pay
+    /// here.
     pub fn step_cpu_cycle(&mut self) {
         self.memory.cpu_cycle += 1;
-        self.board.on_cpu_cycle(&mut self.memory);
+        if self.clocks_on_cpu_cycle {
+            self.board.on_cpu_cycle(&mut self.memory);
+        }
     }
 
     /// Returns the cartridge to its power-on state (REQ-CORE-004). PRG-RAM is cleared by the
@@ -888,6 +928,57 @@ mod tests {
             [4, 4, 5, 5, 64, 64, 118, 118],
             "expected exactly the MMC3, the MC-ACC, the MMC5, the RAMBO-1 and the TxSROM to \
              move on the PPU address bus, and the sweep to reach all of them"
+        );
+    }
+
+    /// MF-5a, and MF-3b rule 5's warning in its second instance: `Cartridge::step_cpu_cycle`
+    /// tests `clocks_on_cpu_cycle` **before** the `Board` dispatch, so a board whose mapper
+    /// number nobody added to that list would have its counter silently never clocked and its
+    /// expansion audio silently never played — a correctness bug, not a slow path.
+    ///
+    /// It checks the invariant itself rather than the list, so it covers a board that does not
+    /// exist yet. `Board` derives `PartialEq`, so "moved" is the whole board state.
+    #[test]
+    fn mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched() {
+        let mut moved = Vec::new();
+        for &mapper in registry::SUPPORTED_MAPPERS {
+            for submapper in [0u8, 3] {
+                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let mut cartridge = Cartridge::create(rom)
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let latched = cartridge.clocks_on_cpu_cycle;
+                let before = cartridge.board.clone();
+
+                // Enough cycles for the slowest thing on this clock to show: the Sunsoft 5B's
+                // divide-by-16 needs sixteen, the VRC IRQ's prescaler 114, and the MMC5's PPU
+                // idle counter three.
+                for _ in 0..400 {
+                    cartridge.board.on_cpu_cycle(&mut cartridge.memory);
+                }
+
+                if cartridge.board != before {
+                    moved.push(mapper);
+                    assert!(
+                        latched,
+                        "mapper {mapper} submapper {submapper}: the board changes state on a CPU                          cycle, but Cartridge::clocks_on_cpu_cycle is false, so                          Cartridge::step_cpu_cycle returns before dispatching and the board is                          never clocked. Add the mapper number to the matches! in                          Cartridge::create."
+                    );
+                }
+            }
+        }
+
+        // Guards against a vacuous pass, and the list is **short on purpose**: only the two
+        // boards whose state moves with no register written at all appear. The MMC5's PPU idle
+        // counter runs from power-on, and the FME-7 carries the Sunsoft 5B, whose divide-by-16
+        // prescaler ticks whether or not a volume was ever set. The FCG, the SS88006, the VRC
+        // IRQ, the RAMBO-1's cycle mode and the VRC6's three oscillators all need an enable
+        // bit first, so they are latched here without this sweep seeing them move — what
+        // covers those is `mapper_irq_tests` and the two audio suites, which drive whole
+        // machines through `step_cpu_cycle` and would fail outright if the latch dropped them.
+        assert_eq!(
+            moved,
+            [5, 5, 69, 69],
+            "expected the MMC5's idle counter and the FME-7's 5B prescaler to move on a bare              CPU cycle, and the sweep to reach them"
         );
     }
 

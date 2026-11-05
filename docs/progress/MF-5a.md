@@ -319,10 +319,225 @@ accidental removal.
 compatibility question the extraction raised, and `VrcIrq::save_state` writes the seven fields in
 the order that board already used.
 
+## Step 2 — the VRC6 audio
+
+## The code
+
+`apu/vrc6_audio.rs`, **new**: `Vrc6Pulse` twice, `Vrc6Saw`, and `Vrc6Audio` holding them with
+`$9003`'s halt and frequency scaling. `apu/mixer.rs` gains `VRC6_LEVELS` and `VRC6_TABLE`.
+`vrc6.rs` carries the chip, routes `$9000`-`$9003`, `$A000`-`$A002` and `$B000`-`$B002` to it,
+clocks it from `on_cpu_cycle` and answers `expansion_audio_output`.
+
+### The level, and why Q-118 does not reopen here
+
+Q-118 had to pick an anchor for the Sunsoft 5B because its page gives none. **The VRC6's page
+gives both the anchor and the law**, in two sentences:
+
+* "At maximum volume, the pulse channels of the VRC6 are roughly equivalent to the pulse channels
+  of the 2A03 (except inverted)" — so one pulse at `V = 15` is `PULSE_TABLE[15]`, which is
+  exactly the anchor R0's answer to Q-118 approved for the 5B;
+* "The DAC of the VRC6, unlike the 2A03, appears to be linear", and "The final mix is a 6-bit DAC
+  summing the two 4-bit pulse outputs and the high 5 bits of the saw accumulator" — so the table
+  is a straight line of 62 steps and `M` caps at 61 × 4 890 / 15 = **19 886**, 61 % of full
+  scale.
+
+The polarity is the page's too — "(except inverted)" — and it is the polarity `mixer::clip`
+already implements (AMD-061 §6.2), so nothing in the mixer moved. **No new Q ticket**: the
+question Q-118 asked is answered by the document here, which is what that ticket said would
+settle it.
+
+`VRC6_TABLE` is built from the unrounded anchor rather than by multiplying the rounded
+`PULSE_TABLE[15]`, so the step is not quantised twice, and
+`req_core_075_the_vrc6_dac_is_linear_through_an_apu_pulse` recomputes all 62 entries at runtime
+and compares.
+
+### The three generators
+
+The pulses are the page's twelve-bit divider, its sixteen-step duty generator and its
+`step <= D` rule, with `M` bypassing the generator. The sawtooth is the one place **Mesen is the
+deciding source**: the page says "the accumulator only reacts on every 2 clocks" and gives six
+additions and a reset per phase, without saying *which* of the fourteen steps add;
+`Vrc6Saw.h:53-68` adds on the even ones and resets at step 0, which is the only reading that
+produces the page's six-and-one, and `req_core_075_the_vrc6_saw_accumulates_six_times_then_resets`
+pins the resulting output sequence (1, 2, 3, 4, 5, 6, then 0, for a rate of 8).
+
+`refresh_level` runs only when a generator actually stepped — each `step_cpu_cycle` returns
+whether it did — because all three run off the CPU clock itself, with no prescaler to hide behind
+like the 5B's divide-by-16.
+
+## The two attributes, and the lesson about the two dumps
+
+### `Board::on_cpu_cycle`'s prologue is shared by thirty arms
+
+The audio inlined into the VRC6's arm took the dispatch's prologue from
+`pushq %rsi / subq $32, %rsp` to `pushq %rsi / pushq %rdi / subq $40, %rsp` — **one more push and
+pop per CPU cycle for every board**, an NROM with no expansion audio included. That is MF-3b
+rule 3 in its exact form: the arm that matters is the empty one.
+
+`#[inline(never)]` on `Vrc6Audio::step_cpu_cycle` put the Windows prologue back. **Callgrind then
+showed it had done nothing at all for the Linux build**: `Board::on_cpu_cycle` +17 868 320
+instructions, +2 per CPU cycle, on **all thirteen ROMs**, twelve of which have no expansion audio.
+
+**This is the first place in these lots where the two instruments disagree, and the rule it
+yields is worth writing down.** `cargo rustc --emit=asm` runs on the Windows host, callgrind on
+the WSL2 Linux one. Same rustc, same LLVM — but not the same ABI: Windows x64 passes the first
+argument in `%rcx` and has a different callee-saved set from the SysV ABI, so an attribute chosen
+to fix a register-allocation symptom in one dump is *not evidence* about the other.
+**PERFORMANCE-HISTORY.md §2's "the Linux binary's hot code is the Windows binary's" holds for
+what a function computes and not for which registers it saves.** Register pressure and prologue
+size have to be read on the dump of the platform being measured, or settled by a change that is
+ABI-independent.
+
+The fix that works on both is `#[inline(never)]` on `Vrc6::on_cpu_cycle` **itself**, not only on
+the audio's body: the arm then becomes a tail call and holds nothing across it. With it,
+`Board::on_cpu_cycle` is 363 → **366** against the lot's baseline (+3, all of it inside the
+VRC6's own arm) and the per-cycle cost of the dispatch for every other board is the baseline's.
+
+### The latch: `Board::on_cpu_cycle` disappears for 26 of the 38 mapper numbers
+
+Chasing the above exposed something larger. `Cartridge::step_cpu_cycle` dispatched
+**unconditionally**, so a board with nothing to do paid, every CPU cycle: a `callq`, a
+twelve-instruction niche prologue, a thirty-entry jump table, a three-instruction `retq` arm and
+the return. Callgrind priced it exactly — `Board::on_cpu_cycle` is **98 275 760 instructions**
+over 300 frames on `duelito`, on `z2`, on `smb1`, on every ROM of the set whatever its board,
+which is **eleven instructions per CPU cycle**.
+
+Twelve of the thirty-eight supported mapper numbers override `Mapper::on_cpu_cycle`: 5 (the
+MMC5's PPU-idle counter), 16 and 18 (the FCG and SS88006 IRQ counters), 21, 22, 23, 25 and 27
+(Konami's VRC IRQ), 24 and 26 (the VRC6's IRQ and sound), 64 (the RAMBO-1's cycle mode) and 69
+(the FME-7 and its 5B). The other twenty-six inherit the empty default. So `Cartridge` gains
+`clocks_on_cpu_cycle`, latched from the mapper number at load and tested **before** the dispatch
+— the sixth such latch beside `rom_windows`, `nametable_pages_vary`, `bus_conflicts`,
+`watches_ppu_reads` and `watches_ppu_bus_without_read`, and the same shape MF-3b step 2 gave
+`on_ppu_address_bus`.
+
+**MF-3b rule 5's warning applies and is tested, not trusted.** A board whose number nobody adds
+to the list would have its counter silently never clocked and its sound silently never played —
+a correctness bug, not a slow path. `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`
+sweeps `SUPPORTED_MAPPERS` × submappers 0 and 3, drives 400 bare CPU cycles straight at each
+board and requires the latch wherever the board moved (`Board` derives `PartialEq`, so "moved" is
+the whole state). Its own expected list is short on purpose and the comment says why: only the
+MMC5's idle counter and the FME-7's 5B prescaler move with **no register written at all**, the
+other ten needing an enable bit first — which is what `mapper_irq_tests` and the two audio suites
+cover, since they drive whole machines through `step_cpu_cycle`.
+
+## Callgrind: thirteen ROMs, 300 frames, against `ad1ad765`
+
+| ROM | board | `ad1ad765` | MF-5a step 2 | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 426 817 394 | 3 328 505 294 | −98 312 100 | **−2.869 %** |
+| `oamstr` | NROM | 3 437 722 453 | 3 339 414 348 | −98 308 105 | **−2.860 %** |
+| `m1` | MMC1 | 5 014 160 791 | 4 915 912 247 | −98 248 544 | **−1.959 %** |
+| `metroid` | MMC1 | 5 252 853 203 | 5 154 567 576 | −98 285 627 | **−1.871 %** |
+| `m4` | MMC3 | 5 600 693 086 | 5 502 441 098 | −98 251 988 | **−1.754 %** |
+| `m0` | NROM | 5 643 153 338 | 5 544 850 455 | −98 302 883 | **−1.742 %** |
+| `smb1` | NROM | 6 130 637 413 | 6 032 345 169 | −98 292 244 | **−1.603 %** |
+| `mm2` | MMC1 | 6 136 429 450 | 6 038 176 841 | −98 252 609 | **−1.601 %** |
+| `z2` | MMC1 | 6 409 332 652 | 6 310 995 722 | −98 336 930 | **−1.534 %** |
+| `readbuf` | CNROM | 6 950 211 191 | 6 851 870 163 | −98 341 028 | **−1.415 %** |
+| `duelito` | NROM | 7 198 774 119 | 7 100 492 549 | −98 281 570 | **−1.365 %** |
+| `smb3` | MMC3 | 8 103 531 708 | 8 005 101 664 | −98 430 044 | **−1.215 %** |
+| `mmc5` | MMC5 | 11 402 398 394 | 11 420 241 676 | **+17 843 282** | **+0.156 %** |
+| **total** | | **80 706 715 192** | **79 544 914 802** | **−1 161 800 390** | **−1.440 %** |
+
+The symbol diff is one line per ROM and leaves nothing unaccounted for. On the twelve:
+
+    -98,275,760   98,275,760 -> 0   <Board as Mapper>::on_cpu_cycle
+
+and on `mmc5`:
+
+    +17,868,320  384,168,880 -> 402,037,200   <NesBus>::tick
+
+That is the whole of it: the dispatch **goes to zero** on every board that does not need it, and
+the latch's two instructions per cycle land in `tick`. Every other per-symbol count is identical
+to the instruction on all thirteen — `Cpu6502::step`, `resolve`, `branch`,
+`execute_without_operand`, `read_cycle`, `read_internal`, `write_internal`, `run_dma`, `dma_read`,
+`Ppu2C02::read`, `run_dots`, `read_nametable_inner`, `read_pattern_planes`, `background_fetch`,
+`run_sprite_evaluation`, `emit_sprite`, `paint_sprite`, `Apu2A03::run_cpu_cycles`,
+`quiet_cycles`, `Board::ppu_read`, `ppu_peek`, `on_ppu_address_bus`, `Cartridge::try_cpu_read`,
+`default_cpu_read` — with `catch_up_ppu` keeping step 1's −157 741 on `smb3`.
+
+### `mmc5` is +0.156 %, and that is a trade the lot is making knowingly
+
+**Stated plainly: this step does not meet "identical to the instruction or lower on every ROM".**
+One ROM of thirteen is slower, by two instructions per CPU cycle, and the reason is not the new
+board — `mmc5exram` runs no line of the VRC6 — but the latch that pays for it. A board that *is*
+latched now tests the `bool` and then dispatches as before.
+
+The trade, priced: **twenty-six of the thirty-eight mapper numbers gain eleven instructions per
+CPU cycle, and twelve pay two.** On the measured set that is twelve ROMs at −1.2 % to −2.9 %,
+including all five of R0's commercial games, against one at +0.156 %.
+
+It is also **the shape MF-3b step 2 shipped**, on the other clock, and that step's own words
+apply unchanged: it made twenty-six boards skip `on_ppu_address_bus` entirely and cost mappers 4,
+64 and 118 "about +2 instructions per PPU fetch", recording that "Neither of R0's callgrind games
+is on those mappers". Neither is on an MMC5 here either; the MMC5's commercial title is
+*Castlevania III*, which PR-1 step 1 deliberately left out of this set.
+
+**The revert is one line** — drop the `if self.clocks_on_cpu_cycle` in
+`Cartridge::step_cpu_cycle` — and it would leave the step at parity on twelve ROMs and the MMC5
+exactly on the baseline, at the cost of the −1.44 %. The call belongs to R0 and the numbers above
+are what it needs; PortMaster and handhelds coming first is the argument for keeping it.
+
+## Hot path: the generated code after LTO
+
+`cmp4c.py`, `bin-4d-s6b.s` against `bin-5a-s2c.s`. Against **step 1** every pinned symbol is
+`IDENTICAL, raw` except three, and that is the cleanest statement of what this step costs:
+
+| symbol | step 1 | step 2 | what moved |
+| --- | ---: | ---: | --- |
+| `NesBus::tick` | 75 | **79** | +4, the latch's `cmpb`/`jne` and its re-laid-out neighbours |
+| `NesBus::write_internal` | 2 784 | 2 805 | +21, inside the `$9000`-`$B002` arm |
+| `Board::on_cpu_cycle` | 388 | 393 | +5, inside the VRC6's arm: the tail call plus the VRC IRQ's register renaming |
+| everything else | | | `step` 916, `branch` 377, `resolve` 1 772, `read_cycle` 182, `read_internal` 176, `catch_up_ppu` 219, `run_dma` 511, `dma_read` 76, `run_cpu_cycles` 875, `quiet_cycles` 90, `run_dots` 1 932, `background_fetch` 199, `read_nametable_inner` 132, `read_pattern_planes` 106, `Board::ppu_read` 328, `ppu_peek` 253, `on_ppu_address_bus` 156 — **all IDENTICAL raw** |
+
+`Ppu2C02::run_dots` reports `DIFFERS` on the raw column for one reason only, and it is worth
+naming so the next lot does not chase it: the two `switch.table.…run_dots.1004` / `.1005` symbol
+**suffixes** become `.1005` / `.1006` because one more switch table exists in the module. Same
+instructions, same operands, a different symbol name in a `leaq`.
+
+**Prologues** (`prologues.py`): `Board::on_cpu_cycle` is back to `pushq %rsi / subq $32, %rsp`,
+and every other pinned symbol's prologue and frame is instruction-identical to step 1's.
+
+**MF-3b rule 1, call sites**: `callsites.py` reports **no watched callee moved at all** between
+step 1 and step 2 — not one entry in the table differs, `panic_bounds_check` included.
+
+## Tests
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, **no new `allow`**. `cargo test --release -p zax-nes -p zax-harness`: **741 passed,
+0 failed, 7 ignored** — step 1's 726 plus fourteen in `vrc6_audio_tests.rs` and the latch
+invariant.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_075_the_vrc6_dac_is_linear_through_an_apu_pulse` | all 62 entries against the page's anchor and its linear law, and `M`'s ceiling of 19 886 |
+| `req_core_075_a_vrc6_is_silent_until_a_channel_is_enabled` | power-on silence, and that a volume without `E` is still silence |
+| `req_core_075_a_vrc6_pulse_in_mode_m_outputs_its_volume_flat` | `M` bypassing the duty generator, at two volumes |
+| `req_core_075_a_vrc6_pulse_duty_is_d_plus_one_sixteenths` | `D` = 0, 3 and 7 giving 1/16, 4/16 and 8/16 of the cycle high |
+| `req_core_075_the_two_vrc6_pulses_add_into_the_same_dac` | 15 + 15 = step 30 = twice step 15, and `$A000` being a second channel and not a mirror |
+| `req_core_075_clearing_e_forces_a_vrc6_pulse_to_zero_and_resets_its_duty` | the forced 0, the halted generator, and the resume from step 0 |
+| `req_core_075_the_vrc6_saw_accumulates_six_times_then_resets` | the output sequence 1-6 then 0 for rate 8, and that there is no seventh addition |
+| `req_core_075_a_vrc6_saw_rate_above_42_wraps_the_accumulator` | rate 43 giving 5, 10, 16, 21, 26 and a wrap, never 31 |
+| `req_core_075_clearing_e_zeroes_the_vrc6_saw_accumulator` | the accumulator forced to 0 |
+| `req_core_075_the_vrc6_saw_divides_the_clock_by_14_and_the_pulses_by_16` | the two different divisors from the same period register |
+| `req_core_075_9003_bit_0_halts_every_vrc6_oscillator_in_place` | the halt freezing the level mid-duty, and releasing it |
+| `req_core_075_9003_scales_every_frequency_by_16_or_256` | the two shifts by edge count, 256x overriding 16x, and halt overriding both |
+| `req_core_075_the_vrc6_sums_its_three_channels_into_one_m` | the DAC's ceiling reached by all three together, and `M` positive |
+| `req_core_075_a_vrc6_subtracts_its_m_from_the_apu_mix` | `S = A − M` through the mixer's own test point |
+| `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` | the latch's invariant, over every supported mapper and two submappers |
+
+**Save states**: `Vrc6Audio::save_state` is appended after the IRQ, the shape `fme7.rs`
+established, and `load_registers` tolerates a block without it. `clocks_on_cpu_cycle` is derived
+from the mapper number at load, like its five neighbours, and is not written.
+
+`THIRD-PARTY-NOTICES.md` now lists the VRC6 and `VrcIrq` adaptations — and the FME-7's `$C`
+command, which lot MF-3 added the file header for without adding the entry.
+
 ## Status
 
 - [x] step 1 — the VRC6 board, mappers 24 and 26 (Q-123 opened: `$B003` bit 4)
-- [ ] step 2 — the VRC6 audio
+- [x] step 2 — the VRC6 audio (and `Board::on_cpu_cycle` latched: the set is **-1.44 %**, `mmc5` +0.156 %)
 - [ ] step 3 — the Namco 163 board, mappers 19 and 210
 - [ ] step 4 — the Namco 163 audio
 - [ ] step 5 — save states

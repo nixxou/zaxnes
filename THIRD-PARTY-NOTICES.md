@@ -19,9 +19,10 @@ lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
 ### Mesen 2 — (c) Sour — GNU GPL v3
 
-Trois expressions de trois cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`)
-sont **adaptées de Mesen 2** (<https://github.com/SourMesen/Mesen2>, dépôt local
-`third_party/mesen2`, commit `b9fa69d`), publié sous GNU GPL v3 :
+Plusieurs expressions de cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`) et de
+leur audio d'extension (`rust/crates/zax-nes/src/apu`) sont **adaptées de Mesen 2**
+(<https://github.com/SourMesen/Mesen2>, dépôt local `third_party/mesen2`, commit `b9fa69d`),
+publié sous GNU GPL v3 :
 
 - le choix du jeu de registres CHR du MMC5 (`mmc5.rs`, `chr_address`), repris de l'expression
   `chrA` de `Core/NES/Mappers/Nintendo/MMC5.h` ;
@@ -31,14 +32,30 @@ sont **adaptées de Mesen 2** (<https://github.com/SourMesen/Mesen2>, dépôt lo
 - la condition du compteur d'IRQ de **révision A** du MMC3 (`mmc3.rs`, `clock_irq_counter`),
   reprise de `(count > 0 || _irqReload)` dans `NotifyVramAddressChange` de
   `Core/NES/Mappers/Nintendo/MMC3.h`, qui est le comportement qu'AMD-061 §8 exige du
-  sous-mappeur 4 (« un `$C000` chargé à `$00` ne produit qu'une seule IRQ »).
+  sous-mappeur 4 (« un `$C000` chargé à `$00` ne produit qu'une seule IRQ ») ;
+- la lecture des quatre dispositions de la commande `$C` du FME-7 (`fme7.rs`, `arrangement`),
+  reprise de `SunsoftFme7.h:103-110`, qui lève l'ambiguïté du vocabulaire « Horizontal (A10) »
+  de la page NESdev (lot MF-3) ;
+- la disposition des bancs CHR et des nametables du VRC6 d'après `$B003` (`vrc6.rs`,
+  `derive_nametables` et `update_chr_banks`), reprise d'`UpdatePpuBanking` de
+  `Core/NES/Mappers/Konami/VRC6.h` : c'est la seule traduction des tables de la page NESdev
+  dans le vocabulaire de mirroring de ce dépôt qui ait pu être vérifiée ligne par ligne, et
+  les quatre lignes concernées sont re-dérivées des colonnes paire/impaire de la page dans le
+  commentaire de la fonction (lot MF-5a) ;
+- la forme du compteur d'IRQ commun au VRC4 et au VRC6 (`vrc_irq.rs`), qui est celle de
+  `Core/NES/Mappers/Konami/VrcIrq.h` — Mesen le factorise au même endroit et pour la même
+  raison (lot MF-5a) ;
+- la phase du canal en dents de scie du VRC6 (`apu/vrc6_audio.rs`, `Vrc6Saw::step_cpu_cycle`),
+  reprise de `Core/NES/Mappers/Audio/Vrc6Saw.h` : la page NESdev dit « the accumulator only
+  reacts on every 2 clocks » sans dire lesquels des quatorze pas de la phase additionnent, et
+  Mesen est la source qui tranche (lot MF-5a).
 
 Les fichiers concernés portent l'en-tête :
 
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
 
 Mesen 2 est distribué sous GNU GPL v3, la même licence que Zaxnes. Le texte complet est dans
-`LICENSE`. Le reste de ces trois cartes, et toutes les autres, suit la documentation publique
+`LICENSE`. Le reste de ces cartes, et toutes les autres, suit la documentation publique
 (wiki NESdev) que REQ-CORE-100 désigne comme référence ; Mesen 2 a servi de contre-épreuve lors
 de la relecture du lot MR-1/MR-1b (`docs/review/MR-1-mappers.md`), qui relève aussi les points
 où c'est Mesen qui est en erreur.

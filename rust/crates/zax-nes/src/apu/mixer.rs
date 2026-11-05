@@ -196,6 +196,49 @@ const fn sunsoft_5b_table() -> [i32; SUNSOFT_5B_LEVELS] {
     table
 }
 
+/// Steps of the VRC6's DAC: "The final mix is a 6-bit DAC summing the two 4-bit pulse outputs
+/// and the high 5 bits of the saw accumulator" (nesdev, "VRC6 audio") — 15 + 15 + 31, plus the
+/// zero.
+pub const VRC6_LEVELS: usize = 62;
+
+/// `M` of REQ-CORE-073 for each step of the VRC6's DAC (REQ-CORE-075, optional).
+///
+/// **The page fixes both halves of this, which is what Q-118 said would settle such a level.**
+/// Q-118 had to choose an anchor for the Sunsoft 5B because its page gives none — only "It is
+/// very loud compared to other audio expansion carts" — and R0's answer kept the reading that a
+/// channel at full converter swing equals an APU pulse at volume 15. The VRC6's page says the
+/// same thing outright, and says the law too:
+///
+/// * the anchor — "At maximum volume, the pulse channels of the VRC6 are roughly equivalent to
+///   the pulse channels of the 2A03 (except inverted)", so one pulse at `V = 15` is
+///   [`PULSE_TABLE`]`[15]`;
+/// * the law — "The DAC of the VRC6, unlike the 2A03, appears to be linear", and the mix is a
+///   plain sum of the three channels, so step `i` is `i / 15` of that anchor.
+///
+/// `M` therefore caps at 61 × `PULSE_TABLE[15]` / 15 ≈ 19 886, about 61 % of full scale, which
+/// is the right order for a chip the VRC6 pages call loud. Built from the unrounded anchor
+/// rather than by multiplying the rounded `PULSE_TABLE[15]`, so the step is not quantised twice.
+///
+/// **Polarity: subtracted, and the page asks for it in so many words** — "(except inverted)".
+/// For the 5B that was Q-118's provisional choice for want of a document; here the document
+/// says it, and it is also the only polarity `clip` implements (AMD-061 §6.2), so the two agree
+/// and nothing in the mixer had to move.
+pub const VRC6_TABLE: [i32; VRC6_LEVELS] = vrc6_table();
+
+/// Builds [`VRC6_TABLE`]: a straight line through `PULSE_TABLE[15]` at step 15.
+const fn vrc6_table() -> [i32; VRC6_LEVELS] {
+    let step = NORMALISATION * pulse(15) / 15.0;
+    let mut table = [0; VRC6_LEVELS];
+    let mut level = 0;
+    #[allow(clippy::cast_precision_loss)] // level is at most 61.
+    while level < VRC6_LEVELS {
+        table[level] = round_to_even(step * level as f64);
+        level += 1;
+    }
+
+    table
+}
+
 /// Amplitude level of a Sunsoft 5B channel whose volume register holds `volume`, for
 /// [`SUNSOFT_5B_TABLE`].
 ///
