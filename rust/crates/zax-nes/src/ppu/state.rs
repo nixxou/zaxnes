@@ -105,6 +105,12 @@ impl Ppu2C02 {
         self.fine_x = reader.read_u8()?;
         self.write_toggle = reader.read_bool()?;
         self.read_buffer = reader.read_u8()?;
+        // Not in the format, and nothing is lost: the window in which a `$2007` read still sees
+        // the byte before the last refill is shorter than two CPU cycles, and the only pair of
+        // `$2007` reads that close together is the dummy read and the read of one indexed
+        // instruction — which no save point can fall inside, a state being written between
+        // instructions. `read_buffer_prev` is only looked at inside that window.
+        self.read_buffer_clock = 0;
         self.decay = reader.read_u8()?;
         self.skip_latch = reader.read_bool()?;
         for stamp in &mut self.decay_stamp {

@@ -78,6 +78,26 @@ const DECAY_DOTS: i64 = 3_200_000;
 /// [`Ppu2C02::nmi_line_sample`]).
 const NMI_SAMPLE_LEAD: i32 = 2;
 
+/// PPU dots after a `$2007` read's own `ppu_clock` from which the byte that read fetched is
+/// the one a later read returns.
+///
+/// Two terms, both from `AccuracyCoin`'s `$2007 Stress Test` error code 2: "Reading from
+/// $2007 should set up the PPU Read Buffer **two ppu cycles after the CPU Read ends**", and a
+/// read presents the buffer at the *start* of its own CPU cycle, which is **three** dots before
+/// the `ppu_clock` the bus hands [`Ppu2C02::read`] (the PPU is caught up to the end of the
+/// cycle). So a read whose clock is less than five dots after another's still sees the older
+/// buffer — which is every pair of `$2007` reads one CPU cycle apart, and no pair two cycles
+/// apart.
+///
+/// That one-cycle pair is `dmc_dma_during_read4/double_2007_read`: `lda $20F7,x` with X=$10
+/// dummy-reads `$2007` and then reads `$2107`, and its source lists the four outputs hardware
+/// gives — all four have the second read returning the buffer as it stood *before* the first.
+///
+/// Two reads on the **same** dot are not a pair of CPU reads at all: only the time-free host
+/// accessor `NesCore::ppu_read` can make them, and it means "read the register again", so the
+/// window is open strictly after the previous read's dot.
+const READ_BUFFER_READY_DOTS: i64 = 5;
+
 /// Dot of the pre-render line at which PPUMASK decides whether the idle dot (0, 0) of the
 /// next frame is skipped (REQ-CORE-015).
 ///
@@ -182,6 +202,14 @@ pub struct Ppu2C02 {
     fine_x: u8,
     write_toggle: bool,
     read_buffer: u8,
+    /// The byte the `$2007` read buffer held before the last read refilled it, for a read that
+    /// comes too soon to see the refill (see [`READ_BUFFER_READY_DOTS`]).
+    read_buffer_prev: u8,
+    /// `ppu_clock` of the last `$2007` read, which is when `read_buffer` was refilled.
+    /// Transient: the window in which the refill is not yet visible is shorter than two CPU
+    /// cycles and no two `$2007` reads one cycle apart can straddle an instruction boundary, so
+    /// it is not in the savestate.
+    read_buffer_clock: i64,
     decay: u8,
     skip_latch: bool,
     vblank_just_started: bool,
@@ -306,6 +334,8 @@ impl Ppu2C02 {
             fine_x: 0,
             write_toggle: false,
             read_buffer: 0,
+            read_buffer_prev: 0,
+            read_buffer_clock: 0,
             decay: 0,
             skip_latch: false,
             vblank_just_started: false,
@@ -598,6 +628,8 @@ impl Ppu2C02 {
         self.fine_x = 0;
         self.write_toggle = false;
         self.read_buffer = 0;
+        self.read_buffer_prev = 0;
+        self.read_buffer_clock = 0;
         self.decay = 0;
         self.skip_latch = false;
         self.vblank_just_started = false;
@@ -632,6 +664,8 @@ impl Ppu2C02 {
         self.t = 0;
         self.fine_x = 0;
         self.read_buffer = 0;
+        self.read_buffer_prev = 0;
+        self.read_buffer_clock = 0;
         self.odd_frame = false;
     }
 
@@ -900,6 +934,22 @@ impl Ppu2C02 {
 
             7 => {
                 let address = self.v & 0x3FFF;
+                // The buffer this read sees. A read refills it only `READ_BUFFER_READY_DOTS`
+                // dots later, so a second read one CPU cycle behind still gets the old byte.
+                //
+                // Both bookkeeping fields are written **here**, before the fetch below, so that
+                // nothing of this has to stay live across that call: a value kept across it
+                // costs `read_internal` a callee-saved register — a `pushq`/`popq` pair on
+                // every CPU read cycle of every game, measured and then removed.
+                let since = self.ppu_clock - self.read_buffer_clock;
+                let visible = if since > 0 && since < READ_BUFFER_READY_DOTS {
+                    self.read_buffer_prev
+                } else {
+                    self.read_buffer
+                };
+                self.read_buffer_prev = visible;
+                self.read_buffer_clock = self.ppu_clock;
+
                 let value;
                 if is_palette_address(address) {
                     // Palette reads are immediate and only drive six bits; the buffer still
@@ -913,7 +963,7 @@ impl Ppu2C02 {
                         &mut cartridge,
                     );
                 } else {
-                    value = self.read_buffer;
+                    value = visible;
                     self.refresh_decay(value, 0xFF);
                     self.read_buffer = self.read_vram_inner(
                         address,
@@ -949,6 +999,10 @@ impl Ppu2C02 {
                 let address = self.v & 0x3FFF;
                 if is_palette_address(address) {
                     self.palette[palette_index(address)]
+                } else if (1..READ_BUFFER_READY_DOTS)
+                    .contains(&(self.ppu_clock - self.read_buffer_clock))
+                {
+                    self.read_buffer_prev
                 } else {
                     self.read_buffer
                 }

@@ -138,10 +138,124 @@ The eight retirements and the 32 tests behind them are unchanged, as expected: t
 
 **Save states**: no field added, nothing moved.
 
+## Step 2 — the `$2007` read buffer is refilled two dots late
+
+### What was wrong, and it is not mirroring
+
+`$2000-$3FFF` mirroring every eight bytes, the PPU's I/O latch with its 600 ms decay and the
+`$2007` buffer were all already right: the probe above has `PPU Register Mirroring`,
+`PPU Register Open Bus`, `PPU Read Buffer` and `Palette RAM Quirks` passing when run alone, and
+`ppu_open_bus` and `ppu_read_buffer` pass in the campaign. What was wrong is the one thing in the
+brief that no AccuracyCoin row covers: **`dmc_dma_during_read4/double_2007_read`**, which is
+`manual` and was printing an output its own source does not list.
+
+That ROM runs `lda $20F7,x` with X=`$10`: a page cross, so the dummy read hits `$2007` and the
+real read `$2107` — two `$2007` reads one CPU cycle apart. Its header lists what hardware gives:
+
+```
+;22 33 44 55 66
+;22 44 55 66 77 or
+;22 33 44 55 66 or
+;02 44 55 66 77 or
+;32 44 55 66 77 or
+;85CFD627 or F018C287 or 440EF923 or E52F41A5
+```
+
+Every one of the four has the **second** read returning the buffer as it stood *before* the
+first. This core printed `33 44 55 66 77`, i.e. the first read's refill already visible to the
+second — none of the four, and CRC `D84F6815`, none of the four either.
+
+`AccuracyCoin`'s `$2007 Stress Test` error code 2 states the rule: "Reading from $2007 should
+set up the PPU Read Buffer **two ppu cycles after the CPU Read ends**."
+
+### The change
+
+`ppu/mod.rs`: two fields, `read_buffer_prev` and `read_buffer_clock`, and a `$2007` read returns
+`read_buffer_prev` when `0 < ppu_clock - read_buffer_clock < READ_BUFFER_READY_DOTS` (5). The
+five is two terms: the refill lands two dots after the read cycle ends, and a read presents the
+buffer at the *start* of its own cycle, three dots before the `ppu_clock` the bus hands
+`Ppu2C02::read`. So a pair one CPU cycle apart (three dots) is stale and a pair two cycles apart
+(six) is not — exactly the line the ROM draws.
+
+The window is open **strictly after** the previous read's dot, because two reads on the same dot
+are not two CPU reads: only `NesCore::ppu_read`, the time-free host accessor, can make them, and
+there it means "read the register again". Its doc comment now says so.
+
+`double_2007_read` prints **`22 33 44 55 66 / 22 44 55 66 77 / 85CFD627`** — the first output and
+the first CRC of the four.
+
+### Hot path, and the cost
+
+Post-LTO, `bin-4b-s1.s` against `bin-4b-s2.s`. `Ppu2C02` grows 8 bytes, which moves every field
+after it in `NesBus`, so every pinned body "DIFFERS" on **displacements alone**. Normalising
+integers of 2048 or more — on these functions every such literal is a struct offset — gives:
+
+| symbol | instructions | verdict |
+| --- | ---: | --- |
+| `Cpu6502::step` | 893 → 893 | **IDENTICAL**, offsets normalised |
+| `Cpu6502::branch` | 366 → 366 | **IDENTICAL** |
+| `Cpu6502::resolve` (2 defs) | 1 725 → 1 725 | **IDENTICAL** |
+| `NesBus::read_cycle` | 3 → 3 | **IDENTICAL** |
+| `NesBus::tick` | 75 → 75 | **IDENTICAL** |
+| `NesBus::write_internal` | 2 565 → 2 565 | **IDENTICAL** |
+| `Apu2A03::run_cpu_cycles` (4 defs) | 873 → 873 | **IDENTICAL** (raw, offsets and all) |
+| `Apu2A03::quiet_cycles` | 90 → 90 | **IDENTICAL** (raw) |
+| `NesBus::read_internal` | 729 → **739** | **DIFFERS**, +10 |
+
+The +10 are **inside the register-7 arm**, after `cmpw $7, %ax ; jne`: nine instructions that
+read `read_buffer_clock`, pick `read_buffer` or `read_buffer_prev` with a `cmovae` on the address
+of the field, and store the two bookkeeping fields. **Nothing on any other read.** Every call-site
+count in `report.py` is unchanged, and MF-3b rule 1 holds (`end_cycle` 0 → 0,
+`read_nametable_as` 0 → 0, `read_nametable_inner` 15 → 15, `read_pattern_planes` 3 → 3,
+`Board::ppu_read` 4 → 4, `ppu_peek` 4 → 4, `on_ppu_address_bus` 12 → 12, `on_cpu_cycle` 1 → 1).
+
+**The first shape of this cost `read_internal` a callee-saved register** — `pushq %r15` /
+`popq %r15` and eight more bytes of frame, *on every CPU read cycle of every game*, because
+`visible` had to stay live across the `read_vram_inner` call. Writing the two bookkeeping fields
+**before** that call removes it, and the comment on them says so, since it is not obvious from the
+source.
+
+### Games whose output may move
+
+A game needs two `$2007` reads one CPU cycle apart: either an indexed read of a `$2007` mirror
+that crosses a page (`lda $20F7,x` with X ≥ `$09`), a read-modify-write on a `$2007` mirror, or a
+DMC DMA halting a `$2007` read. The last is the only one commercial code can stumble into, and
+`dma_2007_read` — the ROM built for it — prints **exactly what it printed before**,
+`11 22 / 11 22 / 44 55 / 11 22 / 11 22`, CRC `5E3DF9C4`, which is one of its two documented
+outputs: the extra reads of a DMA halt read the same byte through the buffer either way. So no
+game is expected to move, and `ppu_read_buffer`, `read_write_2007` and `dma_2007_write` confirm
+the single-read path is untouched.
+
+### Tests and ROMs
+
+`ppu_rendering_tests::req_core_112_a_2007_read_one_cycle_after_another_still_sees_the_older_buffer`
+drives the bus itself — `bus.read` is a real cycle — and pins both halves: the pair one cycle
+apart both returning `$22` with the buffer left holding the *second* read's byte (`$44`, not
+`$33`), and the reads two cycles apart lagging one byte as always.
+
+| suite | `3ac52b27` | step 2 |
+| --- | --- | --- |
+| `dmc_dma_during_read4` | 3 pass, 2 manual; `double_2007_read` `22 33 44 55 66 / 33 44 55 66 77 / D84F6815` | 3 pass, 2 manual; **`double_2007_read` `22 33 44 55 66 / 22 44 55 66 77 / 85CFD627`** |
+| `ppu_read_buffer`, `ppu_open_bus` | 2 / 2 | **2 / 2** |
+| `blargg_ppu_tests_2005.09.15b` | 4 / 5 (`power_up_palette` required) | **4 / 5**, same row |
+| `ppu_vbl_nmi`, `vbl_nmi_timing` | 11 / 11, 7 / 7 | **11 / 11, 7 / 7** |
+| `sprite_hit_tests`, `sprite_overflow_tests` | 11 / 11, 5 / 5 | **11 / 11, 5 / 5** |
+| `oam_read`, `oam_stress` | 2 / 2 | **2 / 2** |
+| `AccuracyCoin` | 94 / 147 | **94 / 147** |
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **697 passed, 0 failed**.
+
+**Save states**: the format is unchanged. `read_buffer_clock` is cleared on load and
+`read_buffer_prev` is only looked at inside the window, and nothing is lost — the window is
+shorter than two CPU cycles and the only pair of `$2007` reads that close is the dummy read and
+the read of one indexed instruction, which no save point can fall inside (a state is written
+between instructions, and cycle 1 of an instruction is always its opcode fetch).
+
 ## Status
 
 - [x] step 1 — the sticky poll of a taken branch
-- [ ] step 2 — the `$2007` read buffer's delay
+- [x] step 2 — the `$2007` read buffer's delay
 - [ ] step 3 — the internal and external data buses
 - [ ] step 4 — the `SH*` stores and a DMA on the dummy read
 - [ ] step 5 — the suites, the campaign document and the guard

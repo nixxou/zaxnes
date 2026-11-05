@@ -1030,6 +1030,11 @@ impl NesCore {
 
     /// Reads a PPU register with its side effects, as the CPU would, without advancing
     /// time.
+    ///
+    /// Advancing nothing means two calls in a row land on the same PPU dot, which no pair of CPU
+    /// reads can; `Ppu2C02::read` takes that for what it is and gives the second call the
+    /// refilled `$2007` buffer rather than the one-cycle-apart stale byte of
+    /// `READ_BUFFER_READY_DOTS`.
     pub fn ppu_read(&mut self, register: u16) -> u8 {
         let (ppu, cartridge) = self.bus.ppu_and_cartridge_mut();
         ppu.read(register, cartridge)

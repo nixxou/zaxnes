@@ -4,7 +4,8 @@
 
 mod common;
 
-use common::TileFixture;
+use common::{loaded_core, TileFixture};
+use zax_nes::cpu::CpuBus;
 use zax_nes::ppu::{SpriteLimit, PIXEL_COLOR, SCREEN_WIDTH};
 use zax_nes::NesCore;
 
@@ -222,6 +223,49 @@ fn req_core_112_reads_of_2007_outside_the_palette_go_through_a_one_byte_buffer()
     assert_eq!(0x11, fixture.core.ppu_read(7));
     assert_eq!(0x22, fixture.core.ppu_read(7));
     assert_eq!(0x33, fixture.core.ppu_read(7));
+}
+
+/// The buffer a `$2007` read fetches is only there for a read **two** CPU cycles later: a read
+/// one cycle behind still returns the byte the buffer held before. That is the pair
+/// `dmc_dma_during_read4/double_2007_read` makes with `lda $20F7,x`, X=$10 — the dummy read of
+/// `$2007` and the read of `$2107` — and `AccuracyCoin`'s `$2007 Stress Test` states the rule:
+/// "Reading from $2007 should set up the PPU Read Buffer two ppu cycles after the CPU Read
+/// ends" (REQ-CORE-112).
+#[test]
+fn req_core_112_a_2007_read_one_cycle_after_another_still_sees_the_older_buffer() {
+    /// One cycle on PRG, so that the next `$2007` read is far enough to see the last refill.
+    fn slack(bus: &mut zax_nes::NesBus) {
+        bus.read(0x8000);
+    }
+
+    let (_, mut bus) = loaded_core(None);
+
+    // VRAM $2000.. = 11 22 33 44 55 66 77, written with the host accessor so that no cycle runs
+    // and the read buffer is untouched, then the address back to $2001 as the ROM leaves it.
+    bus.poke(0x2006, 0x20);
+    bus.poke(0x2006, 0x00);
+    for value in [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77] {
+        bus.poke(0x2007, value);
+    }
+    bus.poke(0x2006, 0x20);
+    bus.poke(0x2006, 0x01);
+    bus.read(0x2007); // Fills the buffer with $22 and leaves v at $2002.
+    slack(&mut bus);
+
+    // The pair one cycle apart: both reads return $22, and the buffer is left holding the byte
+    // the *second* one fetched ($44 from $2003), not the first one's ($33 from $2002).
+    assert_eq!(0x22, bus.read(0x2007));
+    assert_eq!(0x22, bus.read(0x2107));
+    slack(&mut bus);
+    assert_eq!(0x44, bus.read(0x2007));
+
+    // Reads two cycles apart are the ordinary one-byte lag, with nothing lost.
+    slack(&mut bus);
+    assert_eq!(0x55, bus.read(0x2007));
+    slack(&mut bus);
+    assert_eq!(0x66, bus.read(0x2007));
+    slack(&mut bus);
+    assert_eq!(0x77, bus.read(0x2007));
 }
 
 #[test]
