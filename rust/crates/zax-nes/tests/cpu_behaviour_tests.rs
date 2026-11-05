@@ -360,6 +360,61 @@ fn req_core_111_cli_delays_irq_recognition_by_one_instruction() {
     assert_eq!(0x9000, cpu.pc);
 }
 
+/// A taken branch that crosses a page polls twice — before its second cycle and before its
+/// fourth — and the two polls are a **set**, not an overwrite: an IRQ the first one saw is
+/// still serviced when the line has gone back up before the second.
+///
+/// `AccuracyCoin`'s `Interrupt flag latency` test E is this experiment on hardware, with the
+/// acknowledgement made by a dummy read of `$4015` inside the branch: "An interrupt polled
+/// successfully on the first poll of a branch, cleared, and then polled again, should still
+/// occur" (REQ-CORE-111).
+#[test]
+fn req_core_111_a_page_crossing_branch_keeps_what_its_first_poll_found() {
+    /// `BEQ -$10` at $10FE: PC is $1100 after the operand, the target is $10F0, so the branch
+    /// is taken and crosses a page — four cycles, the fourth being the PCH fixup. `window` is
+    /// the half-open range of branch cycles on which the IRQ line is low; the handler entry is
+    /// then run, and the PC it reaches says whether the IRQ was recognised.
+    fn after(window: (i64, i64), opcodes: &[u8]) -> u16 {
+        let mut bus = TestBus::new();
+        bus.load(0x10F0, &[0xEA; 8]); // A NOP sled at either target, so that a boundary with
+        bus.load(0x1110, &[0xEA; 8]); // no interrupt is told apart from the handler entry.
+        bus.load(0x10FE, opcodes);
+        bus[0xFFFE] = 0x00;
+        bus[0xFFFF] = 0x90;
+
+        let mut cpu = bus.create_cpu(0x10FE, 0xFD);
+        cpu.set_flag(Z, true);
+        cpu.set_flag(I, false);
+        bus.irq_asserted = true;
+        bus.irq_window = Some(window);
+
+        cpu.step(&mut bus);
+        bus.irq_asserted = false;
+        cpu.step(&mut bus);
+        cpu.pc
+    }
+
+    const CROSSES: &[u8] = &[0xF0, 0xF0]; // BEQ -$10 at $10FE → $10F0, four cycles.
+    const STAYS: &[u8] = &[0xF0, 0x10]; // BEQ +$10 at $10FE → $1110, three cycles.
+
+    // The line is low for cycle 1 only: the first poll sees it, the second does not, and the
+    // handler still runs. This is the case the lot adds, and `Interrupt flag latency` test E.
+    assert_eq!(0x9000, after((1, 2), CROSSES));
+
+    // Low for cycles 1 to 3: both polls see it. Unchanged.
+    assert_eq!(0x9000, after((1, 4), CROSSES));
+
+    // Low only for cycle 3, after the first poll: the second poll catches it, which is what
+    // `cpu_interrupts_v2` part 5 measures of a page-crossing branch, and the handler runs
+    // instead of the instruction after the branch ($10F1 would be the NOP sled).
+    assert_eq!(0x9000, after((3, 4), CROSSES));
+
+    // A taken branch that stays in its page has only the first poll, so a line that goes low
+    // during its second cycle is not seen at all: the next instruction runs first. That is the
+    // delay `5-branch_delays_irq` pins, and the sticky poll must not undo it.
+    assert_eq!(0x1111, after((2, 4), STAYS));
+}
+
 #[test]
 fn req_core_004_reset_takes_seven_cycles_and_leaves_sp_at_fd() {
     let mut bus = TestBus::new();

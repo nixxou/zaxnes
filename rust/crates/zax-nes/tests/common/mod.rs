@@ -29,6 +29,10 @@ pub struct TestBus {
     pub cycle_count: i64,
     pub nmi_asserted: bool,
     pub irq_asserted: bool,
+    /// When set, the IRQ line is low only while the cycle counter is inside this half-open
+    /// range, so that a test can place an assertion or an acknowledgement on a chosen cycle
+    /// of one instruction (`Cpu6502::branch` polls twice).
+    pub irq_window: Option<(i64, i64)>,
     /// Every address read or written, in order, for dummy-cycle assertions.
     pub access_log: Vec<u16>,
     /// The addresses read as the instruction stream ([`CpuBus::read_code`]), in order.
@@ -42,6 +46,7 @@ impl TestBus {
             cycle_count: 0,
             nmi_asserted: false,
             irq_asserted: false,
+            irq_window: None,
             access_log: Vec::new(),
             code_log: Vec::new(),
         }
@@ -111,6 +116,9 @@ impl CpuBus for TestBus {
 
     fn irq_asserted(&self) -> bool {
         self.irq_asserted
+            && self
+                .irq_window
+                .is_none_or(|(low, high)| (low..high).contains(&self.cycle_count))
     }
 
     fn cycle_count(&self) -> i64 {

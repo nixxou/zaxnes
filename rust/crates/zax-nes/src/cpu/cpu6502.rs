@@ -699,8 +699,21 @@ impl Cpu6502 {
     /// `end_cycle` models by promoting the previous cycle's sample. A taken branch that
     /// stays in the page polls one cycle earlier still — where a two-cycle instruction
     /// would — so the decision taken before its third cycle is the one that stands. A taken
-    /// branch that crosses a page is ordinary: its fourth cycle restores nothing, and the
-    /// `test_branch_taken_pagecross` column of the ROM shows the normal pattern.
+    /// branch that crosses a page polls **twice**: before its second cycle and again before
+    /// its fourth (nesdev, "CPU interrupts": "Interrupts are always polled before the second
+    /// CPU cycle (the operand fetch), but not before the third CPU cycle on a taken branch",
+    /// and "For taken branches that cross a page boundary, interrupts are polled before the
+    /// PCH fixup cycle").
+    ///
+    /// **The two polls are a set, not an overwrite.** Polling raises an internal signal that
+    /// stays raised for the rest of the instruction; a second poll that finds the line back up
+    /// does not take the decision away. The only way to tell is to have an IRQ the first poll
+    /// sees and the second does not, which inside a branch means a dummy read of `$4015`
+    /// acknowledging the frame counter — and `AccuracyCoin`'s `Interrupt flag latency` test E
+    /// does exactly that, from `BCC` fetched out of open bus at `$4013`: "An interrupt polled
+    /// successfully on the first poll of a branch, cleared, and then polled again, should still
+    /// occur" (`AccuracyCoin/README.md`, page "CPU Interrupts"). No other sequence of four
+    /// reads can deassert an IRQ, so this changes nothing a program can otherwise observe.
     fn branch<B: CpuBus + ?Sized>(&mut self, bus: &mut B, taken: bool) {
         #[allow(clippy::cast_possible_wrap)] // The operand is a signed displacement.
         let offset = self.read_pc(bus) as i8;
@@ -722,9 +735,13 @@ impl Cpu6502 {
             self.poll_irq = poll_irq_before_taken;
             self.poll_nmi = poll_nmi_before_taken;
         } else {
-            // Second extra cycle: the high byte of PC is fixed up. The poll is then the
-            // ordinary one, so nothing is restored.
+            // Second extra cycle: the high byte of PC is fixed up, and the ordinary poll
+            // before the last cycle happens. It is a second poll and not a second decision,
+            // so what the first one found is OR-ed back in rather than replaced.
             self.read_code(bus, (self.pc & 0xFF00) | (target & 0x00FF));
+            self.poll_irq |= poll_irq_before_taken;
+            // `poll_nmi` needs nothing: it is `nmi_pending`, which only `step` and
+            // `service_interrupt` clear, so an edge the first poll saw is still there.
         }
 
         self.pc = target;
