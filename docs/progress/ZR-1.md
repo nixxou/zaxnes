@@ -179,3 +179,39 @@ the baseline's own count, no test added or removed yet.
 
 No `unsafe`. No state field added, removed or reordered, and nothing new is serialised: the save
 format does not move.
+
+## Step 3 — the unit tests
+
+Three, in `exec_zone_tests.rs` (REQ-CORE-113), and **all three fail on the baseline**, each by
+exactly one `$2007` read. They are built on one idea: of the eight registers, `$2007` is the only
+one whose read has an effect that **accumulates** — `v` steps once per read — so `v` counts the
+reads for the test, and no assertion ever has to name how many repeats the DMA itself makes.
+
+| test | the state | what it asserts |
+| --- | --- | --- |
+| `…_a_zone_fetch_under_a_held_dmc_request_touches_no_ppu_register` | `$4015` has started a sample, so the request is **held**: `dma` non-zero, no unit may halt | `v`, the read buffer **and** `w` are the control's, the fetched byte is the pack's, and the held fetch still runs once it is due |
+| `…_a_halted_zone_fetch_reads_one_time_fewer_than_the_data_read_it_stands_for` | the DMC fetch is **due**: the read cycle is halted | `v` moved **one less** than for the data read the fetch stands for, and both completed the fetch |
+| `…_a_zone_fetch_halted_by_an_oam_transfer_lets_it_finish_and_reads_nothing_itself` | a `$4014` transfer is pending — the other unit, the other path through `run_dma`, 512 cycles | the same one-less relation, plus the 256 bytes land in OAM byte for byte |
+
+Two notes on how they are written:
+
+* **The held case uses a control, the halted cases use a counterpart.** With a held request no
+  unit may take the bus, so the fetch must be indistinguishable from a cycle spent writing CPU
+  RAM — a clone doing exactly that is the control, and `v`, the buffer and `w` must all match it.
+  Once a unit *does* halt, the DMA's own repeated read legitimately moves the PPU, so there the
+  counterpart is the **data read the fetch stands for**: same state, same cycle, `bus.read`
+  instead of `bus.read_code`. The difference between them is the CPU's own read, and it must be
+  exactly one.
+* **`w` is only decidable in the held case.** A halt's repeated read of `$2002` clears the toggle
+  whether the access was a fetch or a data read, so the halted tests cannot tell the two apart on
+  `w` and do not pretend to; the held test can, and does, with the `$2006` double-write probe the
+  REQ-CORE-112 test already uses.
+
+The OAM assertion masks bits 2-4 of each sprite's attribute byte, which are not implemented and
+read back as 0 (nesdev, "PPU OAM") — found by the test, not assumed.
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean (`cast_sign_loss` joins the file's existing `cast_possible_truncation` allow: the PPU's
+scroll accessors are masked bit-fields and never negative).
+`cargo test --release -p zax-nes -p zax-harness`: **744 passed, 0 failed, 7 ignored** — 741 plus
+these three.
