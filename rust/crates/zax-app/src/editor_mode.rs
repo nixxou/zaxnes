@@ -8,8 +8,9 @@
 //! editor/
 //!   AGENT.md              start here
 //!   docs/                 the editor, the method, profile.json, the Lua API, the specifications
-//!   templates/main.lua    the script of a new profile
-//!   projects/<game>/      one project per game: profile.json, main.lua, PROMPT.txt
+//!   templates/            the script and the notes of a new project
+//!   examples/             a complete project (FlappyZaxNes) and its classification script
+//!   projects/<game>/      one project per game: profile.json, main.lua, NOTES.md, PROMPT.txt
 //! ```
 //!
 //! The documents are carried by the executable and written when the folder lacks them or when
@@ -67,11 +68,37 @@ const DOCUMENTS: &[(&str, &str)] = &[
         "docs/spec/SPEC-05-lua.md",
         include_str!("../../../../docs/spec/SPEC-05-lua.md"),
     ),
+    (
+        "docs/DUMP-FORMAT.md",
+        include_str!("../editor/DUMP-FORMAT.md"),
+    ),
+    ("docs/CLASSIFY.md", include_str!("../editor/CLASSIFY.md")),
+    ("docs/RECIPES.md", include_str!("../editor/RECIPES.md")),
+    ("docs/CHECKLIST.md", include_str!("../editor/CHECKLIST.md")),
+    (
+        "examples/flappyzaxnes/README.md",
+        include_str!("../editor/examples/flappyzaxnes/README.md"),
+    ),
+    (
+        "examples/flappyzaxnes/profile.json",
+        include_str!("../demo/source/profile/flappyzaxnes.json"),
+    ),
+    (
+        "examples/flappyzaxnes/profile3d.py",
+        include_str!("../demo/source/tools/profile3d.py"),
+    ),
+    (
+        "examples/classify-rules.json",
+        include_str!("../editor/examples/classify-rules.json"),
+    ),
     ("templates/main.lua", TEMPLATE_SCRIPT),
+    ("templates/NOTES.md", TEMPLATE_NOTES),
 ];
 
 /// The script of a new project.
 const TEMPLATE_SCRIPT: &str = include_str!("../editor/main.lua");
+/// The notes of a new project, which the agent keeps up to date.
+const TEMPLATE_NOTES: &str = include_str!("../editor/NOTES.md");
 
 /// The file that records which documents were written, to write them again when they change.
 const STAMP: &str = ".documents";
@@ -263,6 +290,11 @@ pub fn create_project(folder: &Path, game: &str) -> Result<NewProject, String> {
     let text = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
     std::fs::write(description_file(&project), text + "\n").map_err(fail)?;
     std::fs::write(project.join("main.lua"), TEMPLATE_SCRIPT).map_err(fail)?;
+    std::fs::write(
+        project.join("NOTES.md"),
+        TEMPLATE_NOTES.replace("<game>", &name),
+    )
+    .map_err(fail)?;
     let built = build_project(&project)?;
     let build_folder = project.join("build");
     std::fs::create_dir_all(&build_folder).map_err(fail)?;
@@ -285,6 +317,10 @@ pub struct PromptContext {
     pub folder: PathBuf,
     /// The game on screen: its title and its ROM.
     pub game: Option<(String, String)>,
+    /// What identifies the ROM: data CRC, mapper, region.
+    pub rom_identity: Option<String>,
+    /// The movie being played and its length in frames.
+    pub movie: Option<(PathBuf, u32)>,
     /// The project of the game's profile, when it has one.
     pub project: Option<PathBuf>,
     /// The URL of the MCP server, when it runs.
@@ -297,6 +333,7 @@ pub struct PromptContext {
 
 /// The prompt to give an AI agent, in the user's language.
 #[must_use]
+#[allow(clippy::too_many_lines)] // the prompt's lines, in their order and both languages
 pub fn agent_prompt(context: &PromptContext) -> String {
     let french = context.french;
     let t = |english: &'static str, francais: &'static str| if french { francais } else { english };
@@ -307,6 +344,30 @@ pub fn agent_prompt(context: &PromptContext) -> String {
     ));
     if let Some((title, rom)) = &context.game {
         let _ = writeln!(out, "{} {title} (ROM : {rom})", t("Game:", "Jeu :"));
+    }
+    if let Some(identity) = &context.rom_identity {
+        let _ = writeln!(
+            out,
+            "{} {identity}",
+            t("ROM identity:", "Identité de la ROM :")
+        );
+    }
+    match &context.movie {
+        Some((movie, length)) => {
+            let _ = writeln!(
+                out,
+                "{} {} ({length} frames)",
+                t(
+                    "The movie being played (seek reaches any of its frames):",
+                    "Le film en lecture (seek va à n'importe laquelle de ses frames) :",
+                ),
+                movie.display()
+            );
+        }
+        None => out.push_str(t(
+            "No movie is playing: ask the user for one that goes through the whole game (an FCEUX .fm2, from TASVideos for instance), then open it with open_movie.\n",
+            "Aucun film n'est en lecture : demande à l'utilisateur un film qui traverse tout le jeu (un .fm2 FCEUX, de TASVideos par exemple), puis ouvre-le avec open_movie.\n",
+        )),
     }
     let agent = context.folder.join("AGENT.md");
     let _ = writeln!(
@@ -338,6 +399,10 @@ pub fn agent_prompt(context: &PromptContext) -> String {
             out.push_str(t(
                 "After each change, call reload_script (or the user presses F5): Zaxnes rebuilds the .3dn from the project and restarts the scripts. Then step one frame and read get_log.\n",
                 "Après chaque modification, appelle reload_script (ou l'utilisateur appuie sur F5) : Zaxnes reconstruit le .3dn depuis le projet et relance les scripts. Avance ensuite d'une frame (step) et lis get_log.\n",
+            ));
+            out.push_str(t(
+                "Keep NOTES.md of the project up to date (state, depth plan, my choices, what is left): it is what lets the work resume after a crash or with another agent. Read it first if it is not empty.\n",
+                "Tiens à jour NOTES.md du projet (état, plan des profondeurs, mes choix, ce qui reste) : c'est ce qui permet de reprendre après un plantage ou avec un autre agent. Lis-le d'abord s'il n'est pas vide.\n",
             ));
         }
         None => out.push_str(t(
@@ -374,8 +439,8 @@ pub fn agent_prompt(context: &PromptContext) -> String {
             out,
             "{} {}",
             t(
-                "The harness (render from any angle, profile-dump):",
-                "Le harnais (rendu sous n'importe quel angle, profile-dump) :",
+                "The harness (classify the tiles of dumps, render from any angle, profile-dump):",
+                "Le harnais (classer les tuiles des dumps, rendu sous n'importe quel angle, profile-dump) :",
             ),
             harness.display()
         );
@@ -383,6 +448,10 @@ pub fn agent_prompt(context: &PromptContext) -> String {
     out.push_str(t(
         "I will show you what to do on screen with the editor's pens (read them with annotations) and tell you what to change. Keep the profile readable by 3dSen: no engine change for one game.\n",
         "Je te montrerai quoi faire à l'écran avec les stylos de l'éditeur (lis-les avec annotations) et te dirai quoi changer. Garde le profil lisible par 3dSen : aucun changement du moteur pour un jeu.\n",
+    ));
+    out.push_str(t(
+        "Before saying a part is done, go through docs/CHECKLIST.md.\n",
+        "Avant de dire qu'une partie est finie, passe docs/CHECKLIST.md.\n",
     ));
     let _ = writeln!(
         out,
@@ -464,6 +533,8 @@ mod tests {
             project: Some(PathBuf::from("data/editor/projects/Metal Force")),
             mcp_url: Some("http://127.0.0.1:8765/mcp".to_owned()),
             harness: None,
+            rom_identity: Some("data CRC 1234abcd, mapper 4, NTSC".to_owned()),
+            movie: None,
             french: true,
         };
         let prompt = agent_prompt(&context);

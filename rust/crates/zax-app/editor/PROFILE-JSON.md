@@ -10,6 +10,7 @@ relative to the folder of `profile.json`.
   "title": "My Game (Lua)",
   "author": "", "publisher": "", "description": "",
   "template": "base.3dn",
+  "includes": ["classified.json"],
   "layers": [{ "index": 4, "offset": 0, "aligned": 1 }],
   "tiles": {
     "brick": ["0f0f0f0f0f0f0f0f", "00ff00ff00ff00ff"],
@@ -37,6 +38,7 @@ relative to the folder of `profile.json`.
 | `id` | the profile's identifier in the library: keep the one the editor gave |
 | `title`, `author`, `publisher`, `description` | what the library shows |
 | `template` | optional: a `.3dn` whose settings (layers, camera, lights...) are kept; its patterns and scripts are not |
+| `includes` | optional: descriptions whose `tiles` and `patterns` join this one's (the output of `zax-harness classify`); a tile named twice must have the same planes |
 | `layers` | optional, needs a `template`: overrides of its six layer sets, `index` 0 to 5, `offset`, `aligned` (0 front, 1 centre, 2 back) |
 | `tiles` | the tile pictures, by a name of your choice |
 | `patterns` | the patterns, none at all for a profile of scripts only |

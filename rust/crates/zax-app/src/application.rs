@@ -846,6 +846,24 @@ impl Running {
             (title, rom)
         });
         let project = game_id.and_then(|id| editor_mode::project_of(&folder, id));
+        let rom_identity = game.as_ref().and_then(|(_, rom)| {
+            let image = std::fs::read(rom).ok()?;
+            let mapper = image
+                .get(6..8)
+                .filter(|_| image.starts_with(b"NES\x1a"))
+                .map(|flags| (flags[0] >> 4) | (flags[1] & 0xF0));
+            let region = host.session().map(|session| session.core().region());
+            Some(format!(
+                "data CRC {:08x} (No-Intro), mapper {}, {}",
+                zax_nes::builtin_patches::data_crc(&image),
+                mapper.map_or_else(|| "?".to_owned(), |m| m.to_string()),
+                region.map_or_else(|| "?".to_owned(), |r| format!("{r:?}")),
+            ))
+        });
+        let movie = host
+            .movie_file()
+            .zip(host.movie_position())
+            .map(|(file, (_, length))| (file.to_path_buf(), length));
         let harness = ["zax-harness.exe", "zax-harness"]
             .iter()
             .map(|name| host.paths().executable_directory.join(name))
@@ -854,6 +872,8 @@ impl Running {
             folder,
             game,
             project,
+            rom_identity,
+            movie,
             mcp_url: self
                 .mcp
                 .as_ref()

@@ -126,11 +126,18 @@ it on) gathers the above for writing a profile with an AI agent (`editor_mode.rs
   server closes its port when the mode is turned off; `--mcp` keeps it on for the session);
 * the **editor folder** of the user data (`<data>/editor`), laid out from documents the
   executable carries: `AGENT.md` (what an agent reads first), `docs/` (this page, the workflow,
-  `PROFILE-JSON.md`, `LUA-API.txt`, SPEC-00, 03, 04, 04B and 05), `templates/main.lua`. A
+  `PROFILE-JSON.md`, `DUMP-FORMAT.md` with the NES colours, `CLASSIFY.md`, `RECIPES.md`,
+  `CHECKLIST.md`, `LUA-API.txt`, SPEC-00, 03, 04, 04B and 05), `examples/` (the FlappyZaxNes
+  description and classification rules), `templates/` (`main.lua`, `NOTES.md`). A
   document is written when it is missing or when the set changed (a digest in
   `editor/.documents`); the projects are never written again;
+* `zax-harness classify <rules.json> --out <classified.json> --sheet <sheet.png>`: the tiles of
+  frame dumps sorted into pattern classes by rules (palette, place, NES colour, sprite, dump),
+  each picture to its first class; a report of the pictures used in two roles and of those no
+  class took, and a sheet of the classes in the game's colours. `profile.json` takes its output
+  through `"includes"`;
 * **projects**: `editor/projects/<game>/profile.json` (the description of `zax-harness
-  profile-build`, now `zax_profiles::description`), `main.lua`, `PROMPT.txt`, `build/`. Turning
+  profile-build`, now `zax_profiles::description`), `main.lua`, `NOTES.md` (the state of the work, kept by the agent), `PROMPT.txt`, `build/`. Turning
   the mode on while a game runs on a generic entry ("2D Mode", "3D by default"), or Tools > "New
   Lua profile for this game" (`tools.new_lua_profile`), makes one: its profile (a placeholder
   pattern keeps it in 3D, a profile without patterns playing in 2D) is built, imported into the
