@@ -446,3 +446,66 @@ So the whole-process figure carries about 10⁵ instructions of host noise, and 
 scale between variants — **E**'s +5 688 on `vblnmi`, **G** against **H** — are not signal. The
 numbers this lot rests on are 47 to 85 **million**, three orders of magnitude above the floor, and
 the per-symbol `zax_nes` counts have no floor at all: they are exact.
+
+## Step 4 — the decision
+
+### What is committed, and against which bar
+
+Variant **G** is committed to `crates/zax-nes/src` (`nes_bus.rs`, `cartridges/board.rs`), because
+it clears the bar the brief set: **no ROM of the set is slower, to the instruction**, and the
+total is lower.
+
+| the brief's condition | measured |
+| --- | --- |
+| no slower on any ROM of the set | **thirteen of thirteen faster**, −0.629 % to −1.463 % |
+| including the `$2002` spinner | `Duelito` (4 024 register reads a frame, ~a fifth of its read cycles) **−0.629 %** |
+| faster in total | **−0.841 %**, 686 828 306 instructions over 300 frames of thirteen ROMs |
+| R0's five games, R0's own bar | Mega Man 2 −0.848 %, Zelda II −0.773 %, SMB3 −0.640 %, SMB1 −0.831 %, Metroid −0.974 % |
+| MF-3b's rule applied to every hot symbol of the read path, before the commit | step 3: every pinned symbol outside the read **IDENTICAL raw**; the two that gain a call site named and priced |
+| no behaviour change | attributes and wrappers only; see below |
+
+### Why this changes no behaviour, stated rather than assumed
+
+Three things changed, and none of them is an expression:
+
+1. **The split.** `read_internal_body` holds the body character for character; `read_internal` is
+   `self.read_internal_body(address)`; `read_cycle`'s `self.read_internal(address)` became
+   `self.read_internal_body(address)`. Same function, same arguments, same order.
+2. **`#[inline(always)]` on `Board::cpu_read_override`.** An attribute cannot change what a
+   dispatch returns.
+3. **The two cold arms.** The `$4000`-`$401F` `match` moved verbatim into `read_io_register`. The
+   widescreen arms moved into `read_wide_window`, which is the one place where the *shape* changed:
+   two range tests became one `address < 0x8000` in the caller plus the same two inside the
+   helper. That is an identity, not a judgement — `WideExtension::claims` is `$5000`-`$5FFF` and
+   the second range `$6000`-`$7FFF`, both below `$8000`, and the address at that point is already
+   past `$401F` because the arm above returned. Every address that entered those two tests before
+   enters them now, in the same order, and no other address reaches them.
+
+**Savestates**: nothing moved. No field was added, removed or retyped; `save_state` and
+`load_state` are untouched. A state written before this lot loads byte for byte.
+
+**No `unsafe`**, no `Board` variant added, moved or reordered, no board's registers touched, no
+`Mapper` method's signature changed.
+
+### `PERFORMANCE-HISTORY.md`
+
+Three places, because a shipped change does not belong only in the list of dropped ones:
+
+* **§7** — the dropped-attempt entry keeps its history (why MF-4a-bis did not ship it) and gains
+  the resolution: the three findings, what shipped, and the two traps a later lot should not
+  re-try.
+* **§5.1** — a new entry under the NES core, where a shipped change belongs: the −5.90 per read
+  cycle, the thirteen-ROM table, the two companions that are not optional, the +4.09 per register
+  read and why it cannot lose, and the "do not `#[inline(always)]` `Ppu2C02::read`" warning.
+* **§3** — `rust/tools/perf/` as the script form of the callgrind procedure, with the parallelism
+  that makes a whole set affordable and the two noise floors this lot measured.
+
+### Q-119
+
+Point 3 of the question is **answered**, and R0's decision 3 ("put aside for a dedicated
+performance lot, measured on the commercial games of callgrind and of golden-core, a game that
+loops on `$2002` included, to be placed after MF-4c") is **discharged**: the five commercial games
+are in the set, the `$2002` loop is in it twice over (`Duelito` at 4 024 a frame and Zelda II at
+1 858), and the form that ships is faster on every one of them. No new Q ticket is needed —
+nothing in the spec was ambiguous here; the question was about measurement, and the measurement
+was the lot.

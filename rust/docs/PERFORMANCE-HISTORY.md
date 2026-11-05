@@ -108,6 +108,19 @@ counts are deterministic to the instruction: the same binary twice gives the sam
 what makes a one-instruction-per-cycle change measurable where wall clock has three times that as
 noise. Build each commit in its **own** target directory (section 2).
 
+**The procedure as a script: `rust/tools/perf/`** (lot PR-1). `make-tree.sh <ref|--worktree>` packs
+a clean tree — on the host, because a git worktree's `.git` is a host path that WSL cannot follow;
+`build-clean.sh <label> <tar>` builds it in a brand-new directory and deletes the 4 GB target as
+soon as the binary is out; `callgrind-set.sh <label>` runs the whole ROM set of `roms.txt`;
+`callgrind-diff.py` prints the per-ROM table, the symbols that moved and the verdict;
+`callgrind-symbols.py` tabulates one run. The runs go in **parallel** — callgrind is a simulator,
+so a count does not depend on machine load — which is 43 s of wall clock for thirteen ROMs instead
+of nine minutes, and that is what makes measuring every variant of a change on a whole set
+affordable. Two floors worth knowing: the whole-process figure carries about **10⁵ instructions**
+(0.0001 %) of host noise from glibc's time handling and Lua's string table, measured by building
+two trees that differ only in comments; the per-symbol counts of `zax_nes` have **no** floor, and
+were identical to the instruction across that pair.
+
 An app save state (`.ssN`) holds the core state block in its second section; extracting it gives a
 `--load-state` file for the harness, which reproduces a device scene exactly (used for the Zelda II
 world map, section 9).
@@ -321,6 +334,35 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
   `Mapper::chr_view`, or `Ppu2C02::run_visible_span` takes dots 2 to 255 of every visible line
   without a single notification. Asserted in
   `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`.
+
+**The CPU read cycle reads the bus in its own copy of it** (lot PR-1, Q-119 point 3), `nes_bus.rs`
+and `cartridges/board.rs`. `read_internal` is an `#[inline(always)]` body
+(`read_internal_body`) with two out-of-line callers — `read_cycle`, which therefore ends its DMA
+gate *in* the read instead of a `jmp` into it, and `read_internal` for the dozen other readers of
+the bus. Output identical (attributes and wrappers only, no `match` arm reordered); no switch.
+- **−5.90 instructions per CPU read cycle**, the `jmp` plus a second function's prologue and
+  epilogue. Callgrind, 300 frames, thirteen ROMs against `2754a7e8`: **all thirteen negative**,
+  −0.629 % (`Duelito`) to −1.463 % (`ppu_vbl_nmi`), total **−0.841 %**; Mega Man 2 −0.848 %,
+  Zelda II −0.773 %, SMB3 −0.640 %, SMB1 −0.831 %, Metroid −0.974 %, an MMC5 −0.733 %.
+- **It needs two companions, and neither is optional.** The rare arms of the body are out of line
+  and `#[cold]` (`read_io_register` for `$4000`-`$401F`, `read_wide_window` for the widescreen
+  window over `$5000`-`$7FFF`), so the two copies stay small — without them an MMC5 is +0.018 %.
+  And `Board::cpu_read_override` carries `#[inline(always)]`, without which the same MMC5 is
+  **+0.586 %**: it is the one board that reaches that dispatch on *every* read cycle, mapping
+  PRG-RAM into `$8000`-`$DFFF` so `Cartridge::read_rom_window` cannot answer.
+- **What it costs, and why it cannot lose.** LLVM moves `Ppu2C02::read` and
+  `Cartridge::try_cpu_read` out of the read path rather than duplicate them — MF-3b rule 1's
+  stop-the-lot signature, so it was priced: **+4.09 instructions per PPU register read**. A
+  register read *is* a read cycle, so it saves 5.90 before paying 4.09. Measured on a ROM that
+  spends a fifth of its read cycles on `$2002` (`Duelito`, 4 024 register reads a frame against
+  Mega Man 2's 30): still −0.629 %.
+- **Do not** add `#[inline(always)]` to `Ppu2C02::read`: its prologue then lands on every read
+  cycle instead of on register reads alone, which measures +0.02 % overall and +0.89 % on an MMC5
+  — the worst of the nine variants PR-1 tried.
+- **The measurement set belongs to the change.** `rust/tools/perf/` holds the whole procedure
+  (`make-tree.sh`, `build-clean.sh`, `callgrind-set.sh`, `callgrind-diff.py`,
+  `callgrind-symbols.py`, `roms.txt`): thirteen ROMs chosen by *measured* register-read rate, run
+  in parallel, 43 s of wall clock for a whole set. Section 3's procedure, as a script.
 
 Combined effect of the core work: SMB1 -16 %, Metroid -15 %, MM2 -12 % on top of the
 milestones, device core about 17.4 -> 10-12 ms per NES frame.
@@ -1188,15 +1230,38 @@ Core:
 - **Giving `NesBus::read_cycle` its own copy of the bus read** (`read_internal` split into an
   `#[inline(always)]` body plus two out-of-line callers), so that the DMA gate ends *in* the read
   instead of a `jmp` into it. Measured with callgrind, 300 frames: **−0.86 %** on `M1_P128K` and
-  **−0.79 %** on `M0_P32K_C8K_V` — real, reproducible, and **not shipped** (lot MF-4a-bis step 2).
-  Only one of the saved instructions is the `jmp`; the rest is LLVM outlining `Ppu2C02::read` and a
-  `Board` read out of the CPU read path to avoid duplicating them, which is MF-3b rule 1's
-  stop-the-lot signature (a hot callee gaining its first call site) pointing the other way. Every
-  `$2002` or `$2007` read then pays a `callq` and a prologue, and the two holy-mapperel ROMs that
-  show the win barely read PPU registers — a game that polls `$2002` in a vblank loop could pay for
-  it. It is an `#[inline(always)]` and a wrapper, so it cannot change behaviour; what it needs is a
-  lot that measures several commercial games and re-runs golden-core, not one whose job was to give
-  back a regression.
+  **−0.79 %** on `M0_P32K_C8K_V` — real, reproducible, and not shipped by lot MF-4a-bis (step 2),
+  because only one of the saved instructions is the `jmp`: the rest was LLVM outlining
+  `Ppu2C02::read` and a `Board` read out of the CPU read path to avoid duplicating them, which is
+  MF-3b rule 1's stop-the-lot signature (a hot callee gaining its first call site) pointing the
+  other way. Every `$2002` or `$2007` read then pays a prologue, and the two holy-mapperel ROMs
+  that show the win barely read PPU registers, so neither could price it.
+
+  **Resolved and shipped by lot PR-1** (`docs/progress/PR-1.md`), which measured it on thirteen
+  ROMs spanning the register-read rate — from Mega Man 2's 30 PPU-register reads a frame to
+  `Duelito`'s 4 024, about a fifth of its read cycles, with the rate measured per ROM rather than
+  guessed. Three findings:
+
+  1. **The `$2002` spinner cannot pay for it.** The split saves **5.90 instructions per CPU read
+     cycle** and the outlined `Ppu2C02::read` costs **4.09 per PPU register read** (least squares
+     over twelve ROMs, residuals under 0.05 % of a run). A register read *is* a read cycle, so it
+     saves 5.90 before paying 4.09: net −1.81, and no mix of addresses can reverse that. `Duelito`
+     gains 0.63 %, Zelda II 0.77 %, `oam_stress` 1.43 %.
+  2. **The real cost was a board, not the PPU.** The split alone is +0.586 % on an MMC5, which maps
+     PRG-RAM into `$8000`-`$DFFF` so that `Cartridge::read_rom_window` cannot answer and *every*
+     read reaches `Board::cpu_read_override` — about one call per read cycle, against a few
+     thousand in 8.8 million on an MMC1.
+  3. **What shipped** is the split plus two things that make it hold: the rare arms of the body
+     (`$4000`-`$401F`, and the widescreen window over `$5000`-`$7FFF`) moved into
+     `#[cold] #[inline(never)]` helpers so the two copies stay small, and `#[inline(always)]` on
+     `Board::cpu_read_override`. **Thirteen ROMs, thirteen negative: −0.63 % to −1.46 %, total
+     −0.84 %**, the MMC5 going from the only loser to the largest gain (−0.73 %).
+
+  Two traps PR-1 measured and that a later lot should not re-try: `#[inline(always)]` on
+  `Ppu2C02::read` to "keep the register arm inline" is the **worst** of the nine variants
+  (+0.02 % overall, +0.89 % on the MMC5 — its prologue then lands on every read cycle instead of
+  on register reads alone), and the cold arms **without** the split are slower on eleven ROMs of
+  thirteen. The two ideas are complementary, not alternative.
 
 Lua:
 - Lazy `shape2D` (made only when a script reads it, `763a0ff`): reverted. It needed a protected
