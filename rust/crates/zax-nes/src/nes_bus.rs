@@ -1268,9 +1268,52 @@ impl NesBus {
     fn zone_read_cycle(&mut self, address: u16) {
         self.tick();
         if self.dma != 0 {
-            // The halt's repeated read still reaches the bus, as it does for any other address.
-            self.halted_read_cycle(address);
+            self.halted_zone_read_cycle(address);
         }
+    }
+
+    /// The cold half of [`NesBus::zone_read_cycle`]: [`NesBus::halted_read_cycle`] for a fetch
+    /// whose byte does not come from the bus.
+    ///
+    /// **The one thing it must not do is read the address** (lot ZR-1). The zone is `$2000`-`$3FFF`
+    /// — the PPU's registers — and the byte the CPU fetches there comes from the pack's code
+    /// buffer, so the fetch itself never drives a read of `$2002` or `$2007`. Sharing
+    /// `halted_read_cycle`, which since MF-4a-bis ends in `read_internal` on both its paths, gave
+    /// every halted zone fetch one: it cleared `w`, or moved `v` and the read buffer — and since
+    /// MF-4d step 6 a `$2007` read during rendering moves `v` by a coarse X and a Y at once.
+    /// Measured on Super Mario Bros. 3 with `--advanced --widescreen 128`: 3 301 halted zone
+    /// fetches in 1 500 frames, **every one of them** a register read the hardware does not make,
+    /// 420 of `$2002` and 411 of `$2007`. It broke the row of ground above the status bar from
+    /// frame 1 500, and Ninja Gaiden III from frame 370.
+    ///
+    /// What the DMA does **is** unchanged, and that is deliberate: the halt still repeats the
+    /// CPU's read with its address on the bus, inside [`NesBus::run_dma`] and
+    /// [`NesBus::dmc_only_dma`] exactly as they do for any other halted address. That read is the
+    /// hardware's — the CPU is stopped with `$2xxx` on the address bus whatever the fetched byte
+    /// came from — and it is the one the bus saw at `c4577878`. Only the CPU's own second read,
+    /// the one that stands for the cycle it was denied, has no counterpart here: the fetch takes
+    /// its byte from the code buffer when `zone_read_cycle` returns.
+    ///
+    /// [`NesBus::dma_gave_back`] is not stamped either, for the same reason: it is read by the
+    /// five `SH*` stores about **their own dummy read**, which is a data read and never a fetch.
+    ///
+    /// A zone address is in `$2000`-`$3FFF` by construction (`Wide::zone_offset`), so
+    /// `halted_read_cycle`'s `$4000`-`$401F` test is answered here once and for all: the halted
+    /// address is never one of the 2A03's own registers.
+    #[inline(never)]
+    fn halted_zone_read_cycle(&mut self, address: u16) {
+        // The cycle that has just run is the one a halt would land on.
+        self.promote_dmc_wait(self.cycles);
+        if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
+            return;
+        }
+        if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) {
+            self.dmc_only_dma(address);
+        } else {
+            self.run_dma(address);
+        }
+        // The cycle the CPU finally fetches on; its byte comes from the code buffer.
+        self.tick();
     }
 }
 

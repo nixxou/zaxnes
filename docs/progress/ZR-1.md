@@ -105,3 +105,77 @@ Two things follow, and the second is the one that has to be said plainly.
 The same command without `--advanced --widescreen 128`, 1 500 frames, `c4577878` against the
 fixed baseline: **the same SHA-256**. Outside the hack there is no difference to find, which is
 what makes the two pictures above attributable to the zone path alone.
+
+## Step 2 — the fix
+
+### What it is
+
+`NesBus::zone_read_cycle` stops sharing `halted_read_cycle` and calls a zone-only cold half,
+`NesBus::halted_zone_read_cycle`, which is `halted_read_cycle` **minus the CPU's own read**:
+
+* `promote_dmc_wait(self.cycles)` — the cycle that has just run is where a halt would land;
+* nothing to do when no unit may halt, where `halted_read_cycle` would `read_internal`;
+* `dmc_only_dma` or `run_dma` otherwise, unchanged, **including the halt's own repeated read of
+  the zone address**. That read is the hardware's: the CPU is stopped with `$2xxx` on the address
+  bus whatever the fetched byte came from, and it is the read the bus saw at `c4577878`;
+* the cycle the CPU finally fetches on, and return. The byte comes from the pack's code buffer in
+  `read_code`, as it always did.
+
+Two details, both deliberate:
+
+* **`dma_gave_back` is not stamped.** It is read by the five `SH*` stores about *their own dummy
+  read*, which is a data read and never an instruction fetch, so a zone fetch has no business
+  recording one. It did not exist at `c4577878` at all.
+* **The `$4000`-`$401F` test is dropped, not kept.** A zone address is in `$2000`-`$3FFF` by
+  construction (`Wide::zone_offset`), so `halted_read_cycle`'s `(address & 0xFFE0) != 0x4000` is
+  answered here once and for all — the halted address is never one of the 2A03's own registers.
+
+`NesBus::read`, `read_cycle`, `halted_read_cycle`, `read_code` and `run_dma` are **not touched**:
+`acfa6e20`'s gain for every non-zone read is kept whole.
+
+### The MF-3b check on the five functions
+
+Clean `git archive` builds of the baseline `ee5fd0ce` and of this tree, each with its own
+`CARGO_TARGET_DIR`. Instructions per symbol and **call sites per callee**, MF-3b rule 1, on the
+pre-LTO lib dump (`cargo rustc --release -p zax-nes --lib -- --emit=asm`) and — MF-3b rule 2,
+because all of this is on the CPU read path — on the **post-LTO** dump of the shipped binary
+(`cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm`). The two dumps agree
+symbol for symbol; the post-LTO figures:
+
+| symbol | ins, baseline | ins, fixed | call sites, baseline | call sites, fixed |
+| --- | ---: | ---: | ---: | ---: |
+| `NesBus::read_cycle` | 182 | **182** | 65 | **65** |
+| `NesBus::halted_read_cycle` | 53 | **53** | 0 | **0** |
+| `NesBus::zone_read_cycle` | 18 | **18** | 36 | **36** |
+| `NesBus::run_dma` | 511 | **511** | 1 | 2 |
+| `NesBus::dmc_only_dma` | 102 | **102** | 1 | 2 |
+| `NesBus::read_internal` | 176 | **176** | 14 | **14** |
+| `NesBus::tick` | 79 | **79** | 84 | **84** |
+| `NesBus::halted_zone_read_cycle` | — | 43 | — | 0 |
+| `Cpu6502::step` | 916 | **916** | 2 | **2** |
+| `Cpu6502::resolve` | 1 402 | **1 402** | 3 | **3** |
+| `Cpu6502::branch` | 377 | **377** | 0 | **0** |
+| `Cpu6502::execute_without_operand` | 2 333 | **2 333** | 0 | **0** |
+
+`CpuBus::read_code` has no symbol in either dump: it is `#[inline(always)]` and inlined
+everywhere, and `zone_read_cycle`'s **36 call sites — unchanged** are its fetch sites, which is
+the same statement seen from the callee's side.
+
+Over the whole binary dump: **903 690 → 903 733 instructions, +43**, which is
+`halted_zone_read_cycle` and nothing else, and **exactly two** callees moved a call site —
+`run_dma` and `dmc_only_dma`, each 1 → 2, both the new cold path's own. Neither gains its *first*
+call site, so neither is MF-3b's stop-the-lot event, and neither is reachable from a read that is
+not a zone fetch. Every other symbol in the binary is identical.
+
+The cost is therefore **zero instructions on every path that is not a halted zone fetch**, which
+is every instruction of every game without hack code, and on a halted zone fetch it is one
+`callq` to a 43-instruction function instead of one `callq` to a 53-instruction one.
+
+### The suites at this step
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean. `cargo test --release -p zax-nes -p zax-harness`: **741 passed, 0 failed, 7 ignored** —
+the baseline's own count, no test added or removed yet.
+
+No `unsafe`. No state field added, removed or reordered, and nothing new is serialised: the save
+format does not move.
