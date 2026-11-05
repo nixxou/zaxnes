@@ -247,3 +247,133 @@ pixels and not the shape.
 
 `cargo test --release -p zax-nes -p zax-harness`: **744 passed, 0 failed, 8 ignored** — the new
 test is the eighth ignored, and runs under `-- --ignored` with `ZAXNES_ROMS` set.
+
+## Step 5 — nothing else moved
+
+Five builds take part, all clean `git archive` extractions into their own directory with their
+own `CARGO_TARGET_DIR`: `c4577878` (the reference), `d96d73b7`+fix (MF-4d step 5), `a758f923`+fix
+(step 6), `ad1ad765`+fix (MF-4d's end), the baseline `ee5fd0ce`, and this tree.
+
+### The test-ROM campaign, ROM by ROM
+
+`zax-harness test-roms <assets-free/test-roms> <out.json> --no-shots`, three runs on the same
+collection on the same host, compared with `campdiff.py`:
+
+| comparison | rows | differing |
+| --- | ---: | ---: |
+| MF-4d's end (`ad1ad765`) → this tree | 331 / 331, same set | **0** |
+| baseline (`ee5fd0ce`) → this tree | 331 / 331, same set | **0** |
+
+214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual on all three — MF-4c's and MF-4d's four
+totals. Identical as it had to be: no test ROM runs hack-zone code, so no test ROM reaches the
+function this lot added.
+
+### Super Mario Bros. 3, `--advanced --widescreen 128`
+
+| check | result |
+| --- | --- |
+| frame **1 800** PNG | `7eb550a0d6568949…` on this tree, on `c4577878` **and** on `ad1ad765`+fix — identical to the reference, exactly as the brief asks |
+| frame **1 500** PNG | `a1516fbf96fa8de7…` on this tree and on `ad1ad765`+fix; `c4577878` is `a923573ab7b9b3f8…`, which `d96d73b7`+fix reproduces |
+| every 5th frame to **1 600** (321 dumps) vs `ad1ad765`+fix | **0 of 321 differ** |
+| every 5th frame to 1 600 vs `c4577878` | 76 of 321 differ |
+| the same 321 dumps, `c4577878` vs **`d96d73b7`+fix** | **0 of 321 differ** |
+
+The last row is what settles the fourth. With the fix in place, **every** one of the 321 dumps is
+`c4577878`'s up to MF-4d step 5; the 76 appear at step 6 and nowhere else. Frame 1 800 does not
+move at all, so the instruction's two named frames come out one matched and one attributed.
+
+### Ninja Gaiden III, `--advanced --widescreen 128 --run 700 --dump-every 5`
+
+141 dumps, R0's press script.
+
+| comparison | differing | first |
+| --- | ---: | --- |
+| baseline `ee5fd0ce` vs `c4577878` — **the regression** | 36 of 141 | frame **370** |
+| `c4577878` vs `d96d73b7`+fix (MF-4d step 5) | **0 of 141** | — |
+| `d96d73b7`+fix vs `a758f923`+fix (step 6) | 24 of 141 | frame 370 |
+| `a758f923`+fix vs this tree | **0 of 141** | — |
+| this tree vs `ad1ad765`+fix | **0 of 141** | — |
+| this tree vs `c4577878` | 24 of 141 | frame 370 |
+
+R0's **frame 370** is reproduced to the frame. The same shape as SMB3: with the fix, Ninja Gaiden
+III is `c4577878` on all 141 dumps through MF-4d step 5, and what remains appears at step 6 — the
+deliberate `$2007` rule — and nowhere after it. Both games' residuals start at frame 370 and
+frame 15 respectively for the same reason the bug did: the status-bar split is where the pack's
+code, the DMC samples and the `$2007` reads all meet.
+
+### The instruction count, and a finding about the instrument
+
+PR-1's scripts, two clean builds in the WSL2 Ubuntu, thirteen ROMs, 300 frames, no warm-up,
+whole process.
+
+| ROM | baseline `ee5fd0ce` | this tree | delta |
+| --- | ---: | ---: | ---: |
+| `duelito` | 7 100 519 901 | 7 100 494 416 | −25 485 |
+| `m0` | 5 544 847 634 | 5 544 867 832 | +20 198 |
+| `m1` | 4 915 888 869 | 4 915 930 628 | +41 759 |
+| `m4` | 5 502 417 322 | 5 502 457 559 | +40 237 |
+| `metroid` | 5 154 555 237 | 5 154 558 329 | +3 092 |
+| `mm2` | 6 038 161 478 | 6 038 160 116 | −1 362 |
+| `mmc5` | 11 420 255 552 | 11 420 272 617 | +17 065 |
+| `oamstr` | 3 339 407 192 | 3 339 425 387 | +18 195 |
+| `readbuf` | 6 851 901 549 | 6 851 867 013 | −34 536 |
+| `smb1` | 6 032 328 877 | 6 032 340 399 | +11 522 |
+| `smb3` | 8 005 056 054 | 8 005 071 601 | +15 547 |
+| `vblnmi` | 3 328 544 719 | 3 328 552 077 | +7 358 |
+| `z2` | 6 311 029 381 | 6 310 969 915 | −59 466 |
+| **total** | 79 544 913 765 | 79 544 967 889 | **+54 124 (+0.00007 %)** |
+
+`callgrind-diff.py`'s verdict line says *SLOWER on 9 ROMs*, and that verdict is **wrong**. Three
+measurements say so, in increasing order of force.
+
+**1. Four ROMs got faster.** A change that adds instructions cannot take 59 466 off Zelda II.
+The deltas are two-directional, which is the signature of noise and not of cost.
+
+**2. No symbol of the emulator moved — on any ROM, at threshold 1.** Comparing the two runs
+symbol by symbol and keeping everything whose name contains `zax`, `Cpu6502` or `Ppu2C02`, the
+**entire** list on all thirteen ROMs is two entries: the settings catalogue's
+`HashMap<String, SettingId>` and the `CATALOGUE` initialiser that fills it, ±a few hundred
+instructions in both directions, built once at startup. Not one `zax_nes` symbol appears — no
+CPU, PPU, APU, bus or board. `halted_zone_read_cycle` has no exclusive count at all: no ROM of
+the set runs hack-zone code, so nothing calls it. Above the per-symbol threshold the only movers
+in the whole process are Lua (`luaH_getshortstr`, `getgeneric`, `luaS_newlstr`, `luaH_set`),
+libc (`__memcpy_avx_unaligned_erms`, `__memcmp_avx2_movbe`) and `flt2dec`.
+
+**3. The same binary, against itself, moves more than the change does.** `zax-harness-fix` was
+copied to a second label and the whole set re-run:
+
+```
+m1       4,915,930,628  ->  4,915,880,918   -49,710  -0.001
+m4       5,502,457,559  ->  5,502,408,445   -49,114  -0.001
+metroid  5,154,558,329  ->  5,154,578,205   +19,876  +0.000  SLOWER
+TOTAL   79,544,967,889  -> 79,544,896,128   -71,761
+VERDICT: SLOWER on 8 ROM(s)
+```
+
+One binary compared with itself swings by up to **49 710** instructions on a ROM and by 71 761 in
+total — **more than the 54 124 of the change** — and the tool declares it slower on eight ROMs.
+The per-symbol diff of that self-comparison names the same movers: `getgeneric` ±43 940,
+`luaH_getshortstr` ±29 204, the catalogue's `HashMap`.
+
+**The mechanism**, and why it is not the change's: both of those tables are hashed with a seed
+taken from an address (`hashbrown`'s `RandomState`, Lua's `makeseed`). A different seed puts the
+same keys in different buckets and costs a different number of probes, and the probing is what
+`getgeneric` and `luaH_getshortstr` count. It varies between two runs of one binary and it varies
+between two binaries; it has nothing to do with emulation, which never hashes a string.
+
+**So PR-1's premise needs a footnote.** `PERFORMANCE-HISTORY.md` §3 and PR-1 step 1 both state
+that the Ir count is "deterministic to the instruction: the same binary twice gives the same
+number". For the symbols that matter it still is — `NesBus::read_internal` and its neighbours do
+not move by one instruction between runs. For the **whole-process total** of `zax-harness` it is
+no longer true: the floor is about **±50 000 per ROM**, which is 1 × 10⁻⁵ and far below anything
+a per-cycle regression produces (MF-3b's was +20 400 000 on one ROM, four hundred times this),
+but far above a verdict line that compares exact integers. Out of this lot's scope to edit that
+document — flagged here for R0 to fold into §3, together with the suggestion that the verdict
+compare the per-symbol emulator counts rather than the process total.
+
+**The bar, answered on the measure that resolves it.** "Identical to the instruction, or lower,
+on every ROM without hack code": the generated code of every non-zone path is byte-identical
+(step 2's post-LTO dump, symbol for symbol and call site for call site), and no emulator symbol
+executes a different number of instructions on any of the thirteen ROMs. The named, measured cost
+on a zone fetch alone is one `callq` into a 43-instruction function in place of one `callq` into
+a 53-instruction one — which is lower, and which only a game running hack code ever pays.
