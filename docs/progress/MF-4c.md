@@ -557,11 +557,93 @@ split would land one line late for that frame, which under run-ahead (a state lo
 AMD-041) would be permanent. `ppu_idle_counter` is restored to 0 so that a load cannot drop a flag
 the block says is set; the first PPU read after the load arms it again.
 
+## Step 5 — the MMC5 games, frame by frame
+
+### The instrument
+
+`zax-harness golden-core <dir> <out.jsonl> <frames>` digests the **picture**, the **tile records**
+of SPEC-02 §3.5, the **CPU cycle count** and the **audio** at seven checkpoints — frames 1, 60,
+300, 600, 1 200, 1 800 and 3 600 — so a divergence is dated rather than just detected. Both sides
+are the `git archive` / `git ls-files` builds of step 4, each in its own directory.
+
+### Castlevania III (`G:/3DSen/mmc5-test`), 3 600 frames
+
+| digest | frame 1 | 60 | 300 | 600 | 1 200 | 1 800 | 3 600 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| picture | same | same | same | same | same | same | **differs** |
+| tile records | same | same | same | same | same | same | **same** |
+| CPU cycles | same | same | same | same | same | same | **same** |
+| audio | same | same | same | same | **differs** | **differs** | **differs** |
+
+So: **the cycle count is identical at every checkpoint, and so are the tile records the 3D engine
+draws** — including at frame 3 600. The 2D reference picture is identical for the first 1 800
+frames (the title and the opening screens) and differs at frame 3 600, which is inside the demo;
+the audio differs from frame 1 200 on.
+
+Both are the one scanline Q-121 explains. The IRQ fires on line 59 instead of 60 for a `$5203` of
+60, so the handler runs about 341 dots earlier and the register writes it makes — a bank switch
+for the split, a sound register — land a line earlier too. The cycle count not moving says the
+instruction stream is the same length; the audio digest moving says one of those writes crossed a
+sample boundary.
+
+The harness gives no pixel dump at an arbitrary frame (`test-roms` stops at the first stable
+screen, well before 3 600), so the *shape* of Castlevania III's frame-3 600 difference is not
+measured here. It is measured exactly on the ROM built for it, below.
+
+### `mmc5test.nes`, where the shift is visible and measurable
+
+`nes-test-roms/mmc5test/mmc5test.nes` is the one MMC5 ROM here that draws from the scanline IRQ,
+and it shows the change for what it is. Picture and tile records differ from frame 60 on; the
+final-frame PNGs of the two builds, decoded and compared row by row:
+
+```
+lines that differ: 159 .. 239, count 76
+  base line y equals new line y-1 on 75 of 76 differing lines
+  base line y equals new line y+1 on  1 of 76 differing lines
+```
+
+**The picture below line 159 is the old picture moved up by exactly one scanline.** Not a
+different picture, not corruption: the split boundary one line earlier, which is MR-5-4 applied
+and AMD-061 §9's divergence removed. The campaign's text transcription of that screen is
+unchanged, which is why step 6's ROM-by-ROM comparison does not flag it — the shift is a pixel
+boundary, not a character.
+
+### Every MMC5 ROM in the campaign
+
+| ROM | picture | tiles | cycles | audio | |
+| --- | --- | --- | --- | --- | --- |
+| `nes-test-roms/mmc5test/mmc5test.nes` | **differs** | **differs** | same | same | the one-scanline shift above |
+| `nes-test-roms/other/firefly.nes` | same | same | **differs** at 60, 600, 1 200 | same | the IRQ lands a line earlier, so a polling loop spins a different number of times; nothing observable |
+| `nes-test-roms/exram/mmc5exram.nes` | same | same | same | same | drives its bars from V-blank code, not the scanline IRQ |
+| `nes-test-roms/mmc5test_v2/mmc5test.nes` | same | same | same | same | a text/bank screen with no split |
+
+### The golden-core set, 1 800 frames
+
+`G:/3DSen/demo/roms`, the 18 commercial ROMs the harness runs there — NROM, MMC1, MMC3 (*Super
+Mario Bros. 3*, *Ninja Gaiden III*), UxROM and CNROM among them:
+
+```
+18 ROMs, 18 identical on all four digests, 0 moved
+```
+
+**Not one of them moves, on the picture, the tile records, the cycle count or the audio.** That is
+the statement the lot needs: no board but the MMC5 changed behaviour, and the four non-MMC5
+callgrind ROMs of step 4 say no board but the MMC5 changed cost either.
+
+### Golden core: what may move
+
+Only the **six commercial MMC5 titles**, by one scanline on every split, and only in steady state
+— the first frame after power-on keeps the old line because the chip's repeat counter starts at 0
+(step 4's table). *Castlevania III*, *Just Breed*, *Uchuu Keibitai SDF*, *Gemfire*, *Bandit Kings
+of Ancient China* and *L'Empereur* are the six. Measured here: Castlevania III's tile records and
+cycle counts do not move at all over 3 600 frames, and its picture moves at one of the seven
+checkpoints.
+
 ## Status
 
 - [x] step 1 — `Palette RAM Quirks`
 - [x] step 2 — the design of the variant
 - [x] step 3 — the notification split by /RD, no board using it
 - [x] step 4 — MR-5-4 on the MMC5
-- [ ] step 5 — the MMC5 games
+- [x] step 5 — the MMC5 games
 - [ ] step 6 — the suites, the campaign, the documents, the guard
