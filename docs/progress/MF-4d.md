@@ -461,13 +461,92 @@ rather than half-changed: **this is a scope decision, not a hot-path verdict** �
 is free, and it is the next thing a follow-up lot should take, with the probe recipe above as its
 instrument.
 
+## Step 4 — what a DMA reads when the ports and the APU drive the bus: **not committed**
+
+**No code shipped.** A merge was written and measured: it fixes all sixteen of the bytes the row
+is *about*, moves no row, and perturbs the bus chain the ROM's later bytes ride on — so it came
+back out, for the same reason MF-4a took its own attempt out. What this step leaves is the table,
+the one-line diagnosis and the residual.
+
+### The failing messages
+
+> `APU Register Activation` 6: The OAM DMA should be able to read from the APU registers (and
+> mirrors of them) if `$40` is written to `$4016`, and the CPU Address Bus is in the range of
+> `$4000` to `$401F`.
+
+> `DMC DMA Bus Conflicts` 2: The DMC DMA did not correctly emulate the bus conflict with the APU
+> registers. (and its 4: "Reading from the controller port should have some bits that are open
+> bus. These bits are different depending on the model of the console.")
+
+### The instrument, and what it showed
+
+`APU Register Activation` 6 copies OAM to `$500`-`$5FF` and checks it row by row, and
+`AccuracyCoin.asm` prints the expected 256 bytes in its own comment. Reading those back with
+`NesCore::read_memory` turns the row from one error code into a 256-byte diff. **Every byte agreed
+with hardware except one per odd row** — offset `$x6`:
+
+```
+  00  50 50 40 50 50 50 40 50 50 50 40 50 50 50 40 50     (agrees)
+* 10  50 50 40 50 50 44 40 40 ...        key  ... 44 41 40 ...
+* 30  40 40 40 40 40 04 00 00 ...        key  ... 04 01 00 ...
+* 50  00 00 00 00 00 04 00 00 ...        key  ... 04 01 00 ...   (and so on, every odd row)
+```
+
+The `$x5` bytes — `44` then `04` — agree, which is step 1's `$4015` clear timing measured a second
+way: the frame IRQ flag the DMA's own read of `$4015` clears, seen 32 bytes later.
+
+### The one-line diagnosis, which MF-4b had half-right
+
+MF-4b proposed "the 2A03's own decode of a DMA read is gated on `internal`, which means the
+**halted** address… and not the **source** address", and that is not it: the ROM says in so many
+words that the gate *is* the 6502 bus — "Reading from the APU registers requires the 6502 address
+bus to be in the range of `$4000` through `$401F`" — which is exactly what `internal` means, and
+the core's tests 4 and 5 pass on it.
+
+What the table actually turns on is that **the transferred page is `$50`, not `$40`**. The test
+executes its `STA $4014` from `$3FFE` so that the high byte of its own operand comes out of open
+bus, and `A` is `$50`:
+
+```
+[$3FFE = $8D  STA abs] [$3FFF = $14] [$4000 -> open bus $40] => STA $4014, A = $50
+```
+
+So the DMA reads `$5000`-`$50FF`, and **every** `$4016`/`$4017` byte of it is a *mirror* read —
+`$5016`, `$5036`, `$5056`, … — never the register itself. All of them land in `dma_read`'s
+`!same` arm, which is MF-4a's diagnosis exactly: it returns `self.read_internal(address) & value`,
+and the AND loses the controller bit that the open-bus byte has clear.
+
+### What was tried, and the residual
+
+`(value & 0x01) | (self.read_internal(address) & 0xFE)` — the port register drives bit 0 and
+leaves the rest to whatever else is on the bus. That is the rule the four distinct key bytes ask
+for (`$41` at `$5016` over an open bus of `$40`; `$01` at `$5036` once the bus has gone to `$00`;
+`$40` and `$00` for the port-2 mirrors), and **it produces all sixteen of them correctly.**
+
+It still fails, one byte later. The bytes *after* each port read come back `44`/`04` where the key
+says `40`/`00`: bit 2 — the triangle's bit, out of the `$4015` read five bytes earlier — survives
+on the internal bus across the conflicted read, where on hardware the merged byte replaces it. So
+the residual is **not** the merge mask but *which byte a conflicted mirror read leaves on the
+internal data bus*, a second rule in the same arm. A first attempt with the mask at `0x1F`
+instead of `0x01` was worse still: it zeroed bits 1 to 4 of the open-bus byte, which broke the
+chain feeding the `$4000` fetch above, the `STA` stored somewhere other than `$4014`, and no
+transfer happened at all.
+
+`AccuracyCoin` with the merge in: **127 / 147, unchanged**, `APU Register Activation` still code 6
+and `DMC DMA Bus Conflicts` still code 2. A change that moves no row while altering what a DMA
+leaves on the bus — which `Internal Data Bus`, `Open Bus` and `Implied Dummy Reads` all read — is
+not worth shipping unpinned, so it is out. The next lot wants the two rules together, with the
+256-byte diff above as its instrument.
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
 - [x] step 2 — `$4010` written as the DMC timer reloads
 - [~] step 3 — the `$4015` DMC stop, delayed like the start: **measured and designed, not
   committed** (12 of 16 key bytes already agree; the four that do not are named above)
-- [ ] step 4 — what a DMA reads when the ports and the APU drive the bus
+- [~] step 4 — what a DMA reads when the ports and the APU drive the bus: **the mirror merge is
+  found and all sixteen key bytes come out, but a second rule on the same arm remains; not
+  committed**
 - [ ] step 5 — the dot on which `$2002`'s sprite flags clear
 - [ ] step 6 — `$2004` on a visible line, and `$2007` read with rendering on
 - [ ] step 7 — the suites, the campaign and the guard
