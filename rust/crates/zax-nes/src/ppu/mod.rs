@@ -1074,8 +1074,10 @@ impl Ppu2C02 {
                     self.v_row_next = self.v;
 
                     // The new address reaches the cartridge: this is how a game clocks an
-                    // MMC3 counter by hand, and what mmc3_test measures (REQ-CORE-114).
-                    self.notify_address_bus(self.v & 0x3FFF, &mut cartridge);
+                    // MMC3 counter by hand, and what mmc3_test measures (REQ-CORE-114). It is
+                    // the address lines alone — /RD stays high — so it goes through the
+                    // without-read notification, which a board waiting on /RD does not take.
+                    self.notify_address_bus_without_read(self.v & 0x3FFF, &mut cartridge);
                 } else {
                     self.t = (self.t & 0x00FF) | (u16::from(value & 0x3F) << 8);
                 }
@@ -1246,7 +1248,7 @@ impl Ppu2C02 {
         let address = address & 0x3FFF;
 
         if access != PpuBusAccess::Inert {
-            self.notify_address_bus(address, cart);
+            self.notify_address_bus_without_read(address, cart);
         }
 
         if address < 0x2000 {
@@ -1270,11 +1272,26 @@ impl Ppu2C02 {
         self.palette_marked[index] = mark(index, value & 0x3F);
     }
 
-    /// Tells the cartridge which address the PPU is driving, so that an MMC3-style board can
-    /// count its A12 rises (REQ-CORE-114).
+    /// Tells the cartridge which address the PPU is **reading**, so that an MMC3-style board can
+    /// count its A12 rises (REQ-CORE-114) and the MMC5 can detect the start of a scanline on its
+    /// own bus (nesdev, "MMC5"; finding MR-5-4).
+    ///
+    /// This is the notification of every fetch of a rendered line, nametable and attribute
+    /// bytes included — see [`Cartridge::on_ppu_address_bus`]. It carries no cost for a board
+    /// that does not ask for it: the test is a load of one `bool` settled at load time.
     fn notify_address_bus(&self, address: u16, cart: Cart<'_, '_>) {
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus(address, self.ppu_clock);
+        }
+    }
+
+    /// The counterpart for the address lines moving with **/RD high**: a `$2007` write, or a
+    /// `$2006` write loading `v`. A12 is an address line, so an A12 counter must see both, and a
+    /// board whose rule is about /RD — the MMC5's in-frame detection — must not
+    /// (`Cartridge::watches_ppu_bus_without_read`).
+    fn notify_address_bus_without_read(&self, address: u16, cart: Cart<'_, '_>) {
+        if let Some(cartridge) = cart.as_deref_mut() {
+            cartridge.on_ppu_address_bus_without_read(address, self.ppu_clock);
         }
     }
 

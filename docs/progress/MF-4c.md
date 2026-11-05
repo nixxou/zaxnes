@@ -6,7 +6,7 @@ Baseline `a5994fd1` (MF-4b's end). Q-116 issue 3, finding MR-5-4, AMD-061 §9.
 
 1. `Palette RAM Quirks`: a `$2007` read of palette RAM is ANDed with `$30` under greyscale.
 2. The design of the variant, and the alternatives rejected — **before coding**.
-3. The notification split read/write, with no board using it yet; instruction-identical.
+3. The notification split by /RD, with no board using it yet; instruction-identical.
 4. MR-5-4 on the MMC5 through it: the in-frame flag from the PPU bus.
 5. The MMC5 games.
 6. The suites, the campaign ROM by ROM, the documents and the guard.
@@ -244,11 +244,119 @@ pre-render line's first read to detect, exactly as it does without a load. With 
 would slip to visible line 0 and the split would land one line late for that frame, which under
 run-ahead (a state load per frame, AMD-041) would be a permanent one-line error.
 
+## Step 3 — the notification split by /RD, with no board using it
+
+### What the PPU drives, in three kinds
+
+Writing the split out made a third case visible that the design section had folded into the
+second. The PPU puts an address on the cartridge's bus in three ways, and the MMC5 cares about
+exactly one of them:
+
+| what happens | /RD | where | MMC3 / RAMBO-1 (A12) | MMC5 (in-frame) |
+| --- | --- | --- | ---: | ---: |
+| a render fetch, or a CPU `$2007` **read** | **low** | `read_vram_inner` | yes | **yes** |
+| a CPU `$2007` **write** | high | `write_vram_inner` | yes | no |
+| a `$2006` write loading `v` | high | `Ppu2C02::write` arm 6 | yes | no |
+
+A12 is an *address* line: it is driven by all three, and the third alone is enough to clock an
+MMC3 counter by hand — which is how `mmc3_test` drives it (REQ-CORE-114) and what
+`req_core_114_writing_2006_clocks_the_mmc3_counter_by_hand` pins. The MMC5's rule is about /RD
+in both directions, the set ("three consecutive PPU **reads** from the same nametable address")
+and the clear ("PPU **/RD** has not been low during the last 3 M2 rises"), so it must take the
+first row only. Mesen draws the same line with two hooks, `MapperReadVram` and
+`NotifyVramAddressChange`, and the MMC5 overriding only the first.
+
+So the name is not "read versus write" but **"with /RD low" versus "the address lines alone"**.
+
+### The change
+
+* `Cartridge::watches_ppu_address_bus` becomes **`watches_ppu_reads`**, and a second latch
+  **`watches_ppu_bus_without_read`** joins it; both are `matches!(mapper, 4 | 64 | 118)` in this
+  step, so the lot's behaviour is **unchanged** until step 4 adds mapper 5 to the first.
+* `Cartridge::on_ppu_address_bus_without_read` is the second entry point. It dispatches to the
+  **same** `Mapper::on_ppu_address_bus`, so there is no new `Board` method, no duplicated MMC3
+  body and no new arm shape (MF-3b rule 4).
+* `Ppu2C02::notify_address_bus_without_read` is its PPU-side caller, used at the two cold sites:
+  `write_vram_inner` and the `$2006` arm of `Ppu2C02::write`.
+* `Cartridge` gains a fourth `bool`, which trips `clippy::struct_excessive_bools`. The lint is
+  allowed on the struct **with the reason on it**: the four facts are independent and each is
+  read on a path of its own, and packing them into one byte would turn each test from the single
+  `cmpb` the MF-3b and MF-4c measurements are written against into a `testb` of a bit — a
+  needless re-measurement for no gain. `render.rs` already carries the same `allow` for
+  PPUMASK's four layer switches.
+
+### Hot path
+
+Post-LTO `cmp4c.py`, `bin-4c-s1.s` against `bin-4c-s3.s`. **Every pinned symbol IDENTICAL**, raw,
+except one — and that one is identical once struct displacements are normalised:
+
+| symbol | instructions | verdict |
+| --- | ---: | --- |
+| `Cpu6502::step` | 897 → 897 | **IDENTICAL**, raw |
+| `NesBus::read_cycle`, `tick`, `read_internal` | 3, 75, 760 | **IDENTICAL**, raw |
+| `NesBus::catch_up_ppu`, `run_dma`, `dma_read` | 219, 511, 109 | **IDENTICAL**, raw |
+| `Cpu6502::branch`, `resolve` | 366, 1 725 | **IDENTICAL**, raw |
+| `Apu2A03::run_cpu_cycles`, `quiet_cycles` | 873, 90 | **IDENTICAL**, raw |
+| `Ppu2C02::run_dots` | 1 996 → 1 996 | **IDENTICAL**, raw |
+| `Ppu2C02::background_fetch`, `read_nametable_inner`, `read_pattern_planes` | 199, 132, 106 | **IDENTICAL**, raw |
+| `Board::ppu_read`, `ppu_peek`, `on_ppu_address_bus`, `on_cpu_cycle` | 312, 235, 155, 351 | **IDENTICAL**, raw |
+| `NesBus::write_internal` | 2 565 → 2 565 | **DIFFERS** raw, **IDENTICAL** normalised |
+
+`write_internal`'s whole diff is two lines, the same field one byte further along because
+`Cartridge` grew a `bool`:
+
+```
+-cmpb  $1, 11002(%rsi)      +cmpb  $1, 11003(%rsi)
+-cmpb  $0, 11002(%rsi)      +cmpb  $0, 11003(%rsi)
+```
+
+Same instruction, same encoding length (a 32-bit displacement either way), so callgrind cannot
+see it.
+
+**Call sites** (MF-3b rule 1): `Cpu6502::step` 2, `NesBus::tick` 84, `NesBus::read` 116,
+`read_internal` 13, `catch_up_ppu` 9, `run_dma` 1, `Apu2A03::run_cpu_cycles` 17,
+`quiet_cycles` 2, `Ppu2C02::run_dots` 2, `Board::ppu_read` 4,
+**`Board::on_ppu_address_bus` 12 → 12**. Not one site gained or lost: the two cold notifications
+moved from one inlined helper to another, and the twelve sites are the same twelve.
+
+### Games whose output may move
+
+**None, and not by argument**: both latches hold the same three mapper numbers as the single
+latch did, so every board takes the same path on the same events as at `a5994fd1`. The step is a
+refactor whose only observable is the generated code above.
+
+### Tests
+
+* `cartridges::tests::mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` — MF-3b's
+  invariant, with the sweep extended from twenty A12 rises to **twenty A12 rises plus three whole
+  rendered lines** (`one_rendered_line`: per tile the nametable byte, the attribute byte and the
+  two planes driven twice each, then the three identical nametable fetches of dots 337, 338 and
+  340 and the attribute fetch that follows them). A board that reacts to nametable fetches rather
+  than to A12 is now caught too, which is what step 4 needs. Still exactly `[4, 4, 64, 64, 118,
+  118]`, the vacuity guard.
+* The same test gains a second assertion, the invariant that makes the notification reliable:
+  **a board that watches the PPU's reads must return `None` from `Mapper::chr_view`**. Otherwise
+  `Ppu2C02::run_visible_span` takes dots 2 to 255 of every visible line through console VRAM and
+  the `ChrView` directly and the board hears nothing — a silent hole, not a slow path. It holds
+  for the three A12 boards today and it is what lets step 4 add the MMC5 without touching the dot
+  loop.
+* `cartridges::tests::mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` —
+  `watches_ppu_bus_without_read` implies `watches_ppu_reads`, over every supported mapper and
+  both submappers.
+
+`cargo fmt --check` clean, clippy clean (one `allow` added, on the struct, with its reason),
+`cargo test --release -p zax-nes -p zax-harness`: **706 passed, 0 failed, 7 ignored**. The MMC3
+suite's hand-driven `$2006` clocking passes, which is the end-to-end check that the
+without-read notification still arrives.
+
+**Save states**: both latches are derived from the mapper number at load, like their two
+neighbours, and neither is written by `save_state`. The format does not move.
+
 ## Status
 
 - [x] step 1 — `Palette RAM Quirks`
 - [x] step 2 — the design of the variant
-- [ ] step 3 — the notification split read/write, no board using it
+- [x] step 3 — the notification split by /RD, no board using it
 - [ ] step 4 — MR-5-4 on the MMC5
 - [ ] step 5 — the MMC5 games
 - [ ] step 6 — the suites, the campaign, the documents, the guard

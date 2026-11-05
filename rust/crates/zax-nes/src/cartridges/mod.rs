@@ -175,6 +175,11 @@ impl CartridgeMemory {
 /// never in [`Cartridge::ppu_peek`], which is what the tile emitter and the host memory
 /// accessors call.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Four independent facts the board settles at load time, each read on a path of its own — the
+// nametable mapping, the register-write bus conflict, the PPU's reads and the PPU's writes. They
+// are `bool` and not bits of one byte on purpose: each test must stay the single `cmpb` the
+// measurements of MF-3b and of this lot are written against.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cartridge {
     memory: CartridgeMemory,
     board: Board,
@@ -219,7 +224,27 @@ pub struct Cartridge {
     /// **A board that overrides [`Mapper::on_ppu_address_bus`] must have its mapper numbers
     /// added here**, or its counter will never be clocked. `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`
     /// in `mapper_tests.rs` fails if one is missing.
-    watches_ppu_address_bus: bool,
+    watches_ppu_reads: bool,
+    /// The same, for the two cold sites where the PPU's address lines move with **/RD high**
+    /// ([`Cartridge::on_ppu_address_bus_without_read`]): a `$2007` write, and a `$2006` write
+    /// that loads `v`. The three A12 counters, and **not** the MMC5.
+    ///
+    /// A12 is an address line: it is driven on a write, and a `$2006` write alone is enough to
+    /// clock an MMC3 counter by hand, which is how `mmc3_test` drives it (REQ-CORE-114). So an
+    /// A12 counter must be in both lists. The MMC5's in-frame detection must see **reads
+    /// only**: nesdev ("MMC5") clears the flag when "3 CPU cycles pass without a PPU read
+    /// having occurred (PPU **/RD** has not been low during the last 3 M2 rises)", and /RD is
+    /// not low on either of those two. A game that uploads to `$2007` through vblank with the
+    /// NMI disabled would otherwise hold the flag set for the whole upload. Mesen draws the
+    /// same line, with `MapperReadVram` on one side and `NotifyVramAddressChange` on the other,
+    /// and this board overriding only the first.
+    ///
+    /// The two latches share one `Board` dispatch, which is the point: a fourth argument on
+    /// [`Mapper::on_ppu_address_bus`] would cost the three A12 boards one `mov` on every fetch,
+    /// and a second `Board` method would give the enum a new distinct arm — the shape MF-3b
+    /// rule 4 records turning a bitset into a jump table. A second `bool` read on the cold path
+    /// costs nothing on the fetch path.
+    watches_ppu_bus_without_read: bool,
 }
 
 impl Cartridge {
@@ -276,8 +301,9 @@ impl Cartridge {
             nametable_pages_vary: matches!(mapper, 5 | 118),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4) and the RAMBO-1 (64); see
-            // the field. A new board with an A12 counter belongs in this list.
-            watches_ppu_address_bus: matches!(mapper, 4 | 64 | 118),
+            // the field. A new board with an A12 counter belongs in both lists.
+            watches_ppu_reads: matches!(mapper, 4 | 64 | 118),
+            watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
         };
         cartridge.reset();
         Ok(cartridge)
@@ -562,18 +588,41 @@ impl Cartridge {
         self.board.advance_chr_latch(pattern_table, tile);
     }
 
-    /// Signals that the PPU put `address` (14 bits) on its address bus during real rendering
-    /// or a $2006/$2007 access. Boards that count A12 rises (MMC3 and compatibles) hook
-    /// their scanline counter here. Never called for a peek (REQ-CORE-033).
+    /// Signals that the PPU **read** `address` (14 bits) off its bus, during real rendering or a
+    /// $2006/$2007 access. Boards that count A12 rises (MMC3 and compatibles) hook their
+    /// scanline counter here, and the MMC5 its in-frame detection. Never called for a peek
+    /// (REQ-CORE-033).
+    ///
+    /// Every fetch of a rendered line comes through here, through
+    /// [`Ppu2C02::read_vram_inner`](crate::ppu::Ppu2C02): the nametable byte, the attribute
+    /// byte, the two background planes, the two discarded nametable fetches of dots 338 and
+    /// 340, and every sprite pattern plane — 57 600-odd calls a frame, measured.
     ///
     /// `ppu_clock` is the PPU dot count since power-on, which the A12 filter of MMC3-style
-    /// boards needs to tell a real rise from the short dips of the fetch pipeline.
+    /// boards needs to tell a real rise from the short dips of the fetch pipeline, and which
+    /// the MMC5 does not look at.
     ///
-    /// The [`Cartridge::watches_ppu_address_bus`] test comes first so that the twenty-six boards
+    /// The [`Cartridge::watches_ppu_reads`] test comes first so that the twenty-five boards
     /// with nothing to do here never reach the `Board` dispatch — one load and one
     /// not-taken branch per fetch, instead of the dispatch's niche prologue and indirect jump.
     pub fn on_ppu_address_bus(&mut self, address: u16, ppu_clock: i64) {
-        if !self.watches_ppu_address_bus {
+        if !self.watches_ppu_reads {
+            return;
+        }
+
+        self.board
+            .on_ppu_address_bus(&mut self.memory, address, ppu_clock);
+    }
+
+    /// Signals that the PPU put `address` (14 bits) on its bus with **/RD high**: a `$2007`
+    /// write, or a `$2006` write loading `v`.
+    ///
+    /// The same `Board` hook as [`Cartridge::on_ppu_address_bus`], behind its own latch: A12 is
+    /// an address line and is driven by both, so the three A12 counters need this, and a board
+    /// whose rule is about /RD must not see it. See
+    /// [`Cartridge::watches_ppu_bus_without_read`].
+    pub fn on_ppu_address_bus_without_read(&mut self, address: u16, ppu_clock: i64) {
+        if !self.watches_ppu_bus_without_read {
             return;
         }
 
@@ -704,15 +753,49 @@ mod tests {
         image
     }
 
+    /// The addresses of one rendered line as the PPU puts them on the cartridge's bus, in order:
+    /// per tile the nametable byte, the attribute byte and the two pattern planes (each driven
+    /// one dot before it is latched), then the two discarded nametable fetches of dots 338 and
+    /// 340 — which, with the fetch of dot 337, are the **three consecutive reads of the same
+    /// nametable address** the MMC5 looks for.
+    ///
+    /// `clock` steps by one dot per entry, which is enough for the A12 filter of MMC3-style
+    /// boards to ignore the pattern fetches and for every board to see a plausible line.
+    fn one_rendered_line() -> Vec<(u16, i64)> {
+        let mut line = Vec::new();
+        let mut clock = 0i64;
+        let mut push = |address: u16, clock: &mut i64| {
+            *clock += 1;
+            line.push((address, *clock));
+        };
+        for tile in 0u16..32 {
+            push(0x2000 | tile, &mut clock);
+            push(0x23C0 | (tile >> 2), &mut clock);
+            for plane in [0x0000u16, 0x0000, 0x0008, 0x0008] {
+                push(0x1000 | (tile << 4) | plane, &mut clock);
+            }
+        }
+
+        // Dots 337, 338 and 340: the same address three times, then the attribute fetch of the
+        // next line, which is the point at which the scanline is detected.
+        for _ in 0..3 {
+            push(0x2020, &mut clock);
+        }
+        push(0x23C8, &mut clock);
+        line
+    }
+
     /// Every board whose [`Mapper::on_ppu_address_bus`] does something must be latched in
-    /// [`Cartridge::watches_ppu_address_bus`], or [`Cartridge::on_ppu_address_bus`] — which tests
+    /// [`Cartridge::watches_ppu_reads`], or [`Cartridge::on_ppu_address_bus`] — which tests
     /// that flag before it dispatches — will never clock it (MF-3b step 2).
     ///
     /// The check is the invariant itself and not a list: the board is driven directly, through
     /// the `Board` dispatch, and the flag is required to be `true` wherever that moves the
-    /// board's state. A future lot adding an A12 counter and forgetting the flag fails here.
+    /// board's state. A future lot adding an A12 counter, or a second board that listens for
+    /// nametable fetches, and forgetting the flag fails here.
     #[test]
     fn mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched() {
+        let line = one_rendered_line();
         let mut moved = Vec::new();
         for &mapper in registry::SUPPORTED_MAPPERS {
             // Submapper 3 of mapper 4 is the Acclaim MC-ACC, a board of its own (MR-4-3).
@@ -721,15 +804,25 @@ mod tests {
                     .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
                 let mut cartridge = Cartridge::create(rom)
                     .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
-                let latched = cartridge.watches_ppu_address_bus;
+                let latched = cartridge.watches_ppu_reads;
                 let before = cartridge.board.clone();
 
                 // Twenty A12 rises, spaced well past the MMC3's filter, which is what an A12
-                // counter reacts to.
+                // counter reacts to, then three whole rendered lines, which is what a board
+                // detecting the start of a scanline on its own bus reacts to.
                 let mut clock = 0i64;
                 for _ in 0..20 {
                     for address in [0x0000u16, 0x1000] {
                         clock += 16;
+                        cartridge
+                            .board
+                            .on_ppu_address_bus(&mut cartridge.memory, address, clock);
+                    }
+                }
+                for _ in 0..3 {
+                    let base = clock;
+                    for &(address, dot) in &line {
+                        clock = base + dot;
                         cartridge
                             .board
                             .on_ppu_address_bus(&mut cartridge.memory, address, clock);
@@ -741,12 +834,24 @@ mod tests {
                     assert!(
                         latched,
                         "mapper {mapper} submapper {submapper}: the board changes state when the \
-                         PPU drives its address bus, but Cartridge::watches_ppu_address_bus is \
+                         PPU drives its address bus, but Cartridge::watches_ppu_reads is \
                          false, so Cartridge::on_ppu_address_bus returns before dispatching and \
                          the counter is never clocked. Add the mapper number to the matches! in \
                          Cartridge::create."
                     );
                 }
+
+                // A board that listens to the fetches of a line must also keep the PPU on the
+                // path that makes them: `Ppu2C02::run_visible_span` takes a whole line of dots
+                // without telling the cartridge anything, and it is entered exactly when
+                // `chr_view` answers `Some`.
+                assert!(
+                    !(latched && cartridge.chr_view().is_some()),
+                    "mapper {mapper} submapper {submapper}: the board watches the PPU's reads \
+                     but offers a chr_view, so Ppu2C02::run_visible_span will run dots 2 to 255 \
+                     of every visible line without a single notification. Return None from \
+                     Mapper::chr_view."
+                );
             }
         }
 
@@ -759,5 +864,27 @@ mod tests {
             "expected exactly the MMC3, the MC-ACC, the RAMBO-1 and the TxSROM to move on the \
              PPU address bus, and the sweep to reach all of them"
         );
+    }
+
+    /// The write latch is the read latch minus the boards that wait on /RD.
+    ///
+    /// A12 is driven on a PPU write as much as on a read, so every A12 counter must be in both
+    /// lists; a board whose rule is about /RD belongs in the read list only. The reverse cannot
+    /// happen: a board that ignores the PPU's reads has no business hearing its writes.
+    #[test]
+    fn mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd() {
+        for &mapper in registry::SUPPORTED_MAPPERS {
+            for submapper in [0u8, 3] {
+                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let cartridge = Cartridge::create(rom)
+                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                assert!(
+                    !cartridge.watches_ppu_bus_without_read || cartridge.watches_ppu_reads,
+                    "mapper {mapper} submapper {submapper}: watches the PPU's writes without \
+                     watching its reads"
+                );
+            }
+        }
     }
 }
