@@ -95,6 +95,45 @@ impl DmcChannel {
         self.current_address
     }
 
+    /// CPU cycles from the channel's own position until [`Self::needs_sample_fetch`] could next
+    /// turn true, or `None` while no sample is playing.
+    ///
+    /// The memory reader asks for a byte on the cycle the output unit takes the last bit out of
+    /// the shift register and finds the sample buffer is the only thing left to refill it with
+    /// ([`Self::clock_timer`]): the next bit plays `timer + 1` cycles from here, since the timer
+    /// counts down once per CPU cycle and the bit plays on the cycle it is already 0 on, and each
+    /// of the `bits_remaining - 1` bits after it a whole period later.
+    ///
+    /// `None` is the answer for a channel with no bytes left, and it is an answer about the
+    /// **future** and not only about now: `bytes_remaining` can only grow again through a write
+    /// to `$4015` or through [`Self::supply_byte`], so while the CPU is halted and no fetch runs
+    /// — which is exactly the window [`crate::nes_bus::NesBus`] asks this for — nothing can make
+    /// the reader ask. For the same reason the count returned is a count the caller may rely on
+    /// to the cycle rather than a lower bound that drifts.
+    ///
+    /// Used by the bus to decide how much of an OAM transfer may run in its fast loop; it is
+    /// never on a per-cycle path.
+    pub const fn cycles_until_fetch(&self) -> Option<u32> {
+        if self.bytes_remaining <= 0 {
+            return None;
+        }
+        // `timer` is non-negative and `bits_remaining` is 1 to 8 everywhere outside
+        // `clock_timer`'s own body; anything else is answered with "now", which only ever makes
+        // the caller more careful than it has to be.
+        if self.buffer_empty || self.timer < 0 || self.bits_remaining <= 0 {
+            return Some(0);
+        }
+
+        let period = self.rates[self.rate_index].unsigned_abs();
+        let bits_after_the_next = self.bits_remaining.unsigned_abs().saturating_sub(1);
+        Some(
+            self.timer
+                .unsigned_abs()
+                .saturating_add(1)
+                .saturating_add(bits_after_the_next.saturating_mul(period)),
+        )
+    }
+
     /// Selects the NTSC or the PAL rate table (REQ-CORE-015).
     pub fn set_timing(&mut self, timing: &RegionTiming) {
         self.rates = if timing.uses_pal_noise_and_dmc_periods {

@@ -433,6 +433,17 @@ impl Apu2A03 {
         self.dmc.fetch_address()
     }
 
+    /// CPU cycles from the APU's own position until the DMC's memory reader could next ask for a
+    /// byte, or `None` while no sample is playing (`DmcChannel::cycles_until_fetch`).
+    ///
+    /// The position is the APU's, not the bus's: a caller whose APU is lagging has to take its
+    /// lag off the answer, because on a quiet cycle the DMC's timer has not been counted down
+    /// yet (see `NesBus::oam_fast_pairs`).
+    #[must_use]
+    pub const fn cycles_until_dmc_fetch(&self) -> Option<u32> {
+        self.dmc.cycles_until_fetch()
+    }
+
     /// Hands the byte a DMC DMA fetched to the memory reader.
     pub fn supply_dmc_byte(&mut self, value: u8) {
         self.dmc.supply_byte(value);

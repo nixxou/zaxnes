@@ -28,6 +28,81 @@ fn arm_a_pending_dmc_fetch(bus: &mut NesBus) {
     }
 }
 
+/// Starts a long DPCM sample at the slowest rate and takes its **load** fetch, so that the
+/// sample buffer is full and the memory reader's next question is a whole shift register away.
+fn start_a_dmc_sample(bus: &mut NesBus) {
+    bus.write(0x4010, 0x00); // Rate 0: 428 CPU cycles a bit, no IRQ, no loop.
+    bus.write(0x4012, 0x00); // Sample at $C000.
+    bus.write(0x4013, 0x0F); // 241 bytes, so no fetch below is the last one.
+    bus.write(0x4015, 0x10);
+
+    // The load fetch is asked for two or three cycles after the write; a write cycle cannot be
+    // halted, so these only let the delay run out.
+    for _ in 0..3 {
+        bus.write(0x0000, 0x00);
+    }
+    bus.read(0x8000);
+    assert_eq!(1, bus.dmc_dma_count());
+}
+
+/// `Apu2A03::cycles_until_dmc_fetch` names the cycle the memory reader asks on, to the cycle and
+/// in both directions.
+///
+/// This is the bound lot MF-4a-ter's fast OAM loop rests on: it skips the DMA state machine for
+/// the cycles the horizon covers, so a horizon one cycle too long would let a DMC fetch land late
+/// and one cycle too short would only cost speed. The two halves of the assertion below are
+/// exactly those two failures. Asked at sixteen phases of the timer, since it is the timer's
+/// remainder that the first of the eight bits depends on.
+#[test]
+fn req_core_113_the_dmc_fetch_horizon_names_the_cycle_the_reader_asks_on() {
+    for phase in 0..16u32 {
+        let (_, mut bus) = loaded_core(None);
+        start_a_dmc_sample(&mut bus);
+        for _ in 0..phase {
+            bus.write(0x0000, 0x00);
+        }
+
+        // The bus is not batching here, so the APU is caught up and the horizon is a count of
+        // bus cycles from now with no lag to take off it.
+        let horizon = bus
+            .apu()
+            .cycles_until_dmc_fetch()
+            .expect("the sample is still playing");
+        assert!(horizon > 1, "phase {phase}: {horizon}");
+
+        // One cycle short of it the reader has not asked yet: the read cycle there runs plainly.
+        let mut probe = bus.clone();
+        for _ in 0..horizon - 1 {
+            probe.write(0x0000, 0x00);
+        }
+        probe.read(0x8000);
+        assert_eq!(1, probe.dmc_dma_count(), "phase {phase}, horizon {horizon}");
+
+        // At it, it has: the next read cycle is halted and the fetch runs.
+        for _ in 0..horizon {
+            bus.write(0x0000, 0x00);
+        }
+        bus.read(0x8000);
+        assert_eq!(2, bus.dmc_dma_count(), "phase {phase}, horizon {horizon}");
+    }
+}
+
+/// A channel with no bytes left answers "never", and nothing a halted CPU can do changes that:
+/// only a `$4015` write or a fetch's own `supply_byte` can put bytes back, and a halted CPU makes
+/// neither. That is what lets the fast loop run a whole transfer without asking again.
+#[test]
+fn req_core_113_the_dmc_fetch_horizon_is_none_while_no_sample_plays() {
+    let (_, mut bus) = loaded_core(None);
+    assert_eq!(None, bus.apu().cycles_until_dmc_fetch());
+
+    start_a_dmc_sample(&mut bus);
+    assert!(bus.apu().cycles_until_dmc_fetch().is_some());
+
+    // $4015 bit 4 clear stops the sample.
+    bus.write(0x4015, 0x00);
+    assert_eq!(None, bus.apu().cycles_until_dmc_fetch());
+}
+
 /// Reads `$4016` until the controller answers 1, as `dma_4016_read` does, and returns how many
 /// reads that took. With one button pressed and the strobe released, an untouched controller
 /// takes eight.
