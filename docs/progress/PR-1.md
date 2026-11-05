@@ -129,7 +129,7 @@ a change hiding below `callgrind_annotate`'s fold cannot pass as "no symbol move
 | `duelito` | NROM | 7 540 980 081 |
 | `smb3` | MMC3 | 8 117 976 283 |
 | `mmc5` | MMC5 | 11 486 356 993 |
-| **total** | | **84 944 886 205** |
+| **total** | | **81 644 887 205** |
 
 The procedure reproduces the earlier lots to the instruction where they overlap, which is the
 check that the instrument is the same one:
@@ -161,3 +161,138 @@ And the baseline read path per symbol, exclusive (`callgrind-symbols.py`), on fo
 `read_cycle` is the three-instruction gate — `cmpb`/`jne`/`jmp` — on about 8.8 M read cycles, and
 it is the same ~26 M on every ROM of the set, which is what Q-119's "only 8.8 M of the 43.5 M is
 the `jmp`" refers to: a third of that 26 M.
+
+## Step 2 — the split form, its generated code, and what it measures
+
+### The change
+
+`nes_bus.rs`, exactly the shape Q-119 point 3 describes — an `#[inline(always)]` body and two
+out-of-line callers:
+
+```rust
+#[allow(clippy::inline_always)]
+#[inline(always)]
+fn read_internal_body(&mut self, address: u16) -> u8 { /* the whole bus read */ }
+
+#[inline(never)]                                // caller 1: every reader that is not a CPU cycle
+fn read_internal(&mut self, address: u16) -> u8 { self.read_internal_body(address) }
+
+#[inline(never)]                                // caller 2: the CPU read cycle, with the gate
+fn read_cycle(&mut self, address: u16) -> u8 {
+    if self.dma == 0 { self.read_internal_body(address) } else { self.halted_read_cycle(address) }
+}
+```
+
+### Post-LTO, against the baseline
+
+`cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm` at `2754a7e8`
+(`bin-pr1-base.s`) and with the split (`bin-pr1-split.s`), compared with MF-4c's `cmp4c.py`.
+**Every pinned symbol of the CPU path outside the read itself is IDENTICAL, raw** —
+`Cpu6502::step` 897, `branch` 366, `resolve` 1 725, `NesBus::tick` 75, `write_internal` 2 564,
+`catch_up_ppu` 219, `run_dma` 511, `Apu2A03::run_cpu_cycles` 873, `quiet_cycles` 90,
+`Ppu2C02::run_dots` 1 936, `background_fetch` 199, `read_nametable_inner` 132,
+`read_pattern_planes` 106, `Board::ppu_read` 312, `ppu_peek` 235, `on_ppu_address_bus` 156,
+`on_cpu_cycle` 363. What moved:
+
+| symbol | baseline | split | |
+| --- | ---: | ---: | --- |
+| `NesBus::read_cycle` | **3** | **288** | the gate (`cmpb`/`jne`/`jmp`) becomes the gate plus its own copy of the read |
+| `NesBus::read_internal` | **786** | **312** | the other callers' copy, now a tail of what is left |
+| `NesBus::dma_read` | 109 | 76 | its inlined read became the call `read_internal` already was |
+| `Ppu2C02::read` | *inlined* | **257, 2 call sites** | **left the read path** |
+| `Board::cpu_read_override` | *inlined* | **231, 2 call sites** | **left the read path** |
+| `WideExtension::read` | *inlined* | **50, 2 call sites** | **left the read path** |
+
+So the answer to the question Q-119 asked is **yes, confirmed in the generated code**: three hot
+callees each gain their first call site, which is MF-3b rule 1's stop-the-lot signature. And they
+leave by a **tail call**, not a `callq` — which is what makes the price much lower than Q-119
+feared:
+
+```
+    movq    %rsi, %rcx            ; the two arguments
+    movl    %edi, %edx
+    addq    $32, %rsp             ; the caller's epilogue, brought forward
+    popq    %rbx
+    popq    %rdi
+    popq    %rsi
+    jmp     <Ppu2C02>::read       ; and the callee's own prologue:
+                                  ;   pushq %r14 / %rsi / %rdi / %rbx ; subq $40, %rsp
+```
+
+Seven instructions at the site and five in the prologue, against the one shared epilogue
+(`addq` + five `popq` + `retq`) the baseline paid once for the whole of `read_internal`:
+**about +11 encoded** at the boundary, and no `retq` of its own because the callee's `retq`
+returns straight to the CPU.
+
+### What it measures on the whole set
+
+300 frames, no warm-up, whole process:
+
+| ROM | board | reg. reads | `2754a7e8` | split | delta | |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `oamstr` | NROM | 447 080 | 3 487 355 725 | 3 437 653 319 | −49 702 406 | −1.425 % |
+| `vblnmi` | MMC1 | 304 710 | 3 476 935 328 | 3 426 125 404 | −50 809 924 | −1.461 % |
+| `m1` | MMC1 | 71 908 | 5 063 537 884 | 5 014 060 377 | −49 477 507 | −0.977 % |
+| `metroid` | MMC1 | 8 936 | 5 304 394 605 | 5 252 724 997 | −51 669 608 | −0.974 % |
+| `m4` | MMC3 | 72 132 | 5 649 667 156 | 5 600 585 290 | −49 081 866 | −0.869 % |
+| `m0` | NROM | 6 718 | 5 694 534 646 | 5 643 411 966 | −51 122 680 | −0.898 % |
+| `smb1` | NROM | 69 843 | 6 181 802 642 | 6 130 401 472 | −51 401 170 | −0.831 % |
+| `mm2` | MMC1 | 9 079 | 6 188 849 351 | 6 136 338 583 | −52 510 768 | −0.848 % |
+| `z2` | MMC1 | 557 332 | 6 457 641 956 | 6 407 695 136 | −49 946 820 | −0.773 % |
+| `readbuf` | CNROM | 1 044 160 | 6 994 854 555 | 6 947 866 869 | −46 987 686 | −0.672 % |
+| `duelito` | NROM | 1 207 258 | 7 540 980 081 | 7 493 512 635 | −47 467 446 | −0.629 % |
+| `smb3` | MMC3 | 17 615 | 8 117 976 283 | 8 066 046 557 | −51 929 726 | −0.640 % |
+| `mmc5` | **MMC5** | 87 947 | 11 486 356 993 | 11 553 670 347 | **+67 313 354** | **+0.586 %** |
+| **total** | | | 81 644 887 205 | 81 110 092 952 | −534 794 253 | −0.655 % |
+
+§7's two figures are reproduced: `m1` −0.977 % against its −0.86 %, `m0` −0.898 % against its
+−0.79 % (the lots differ by MF-4b and MF-4c, which both changed `read_internal`).
+
+### The `$2002` spinner does not pay for it, and here is why
+
+**The case Q-119 could not judge is now judged, and it comes out the other way.** `Duelito`
+spends about a fifth of its read cycles on `$2002` — 4 024 register reads a frame against Mega
+Man 2's 30, a factor of 130 — and it still **gains 0.63 %**. So does `readbuf` (3 482 a frame,
+−0.672 %), so does Zelda II (1 858 a frame, −0.773 %), so does `oam_stress` on `$2004`
+(−1.425 %).
+
+The reason is arithmetic, and it is worth writing down because it settles the question for the
+hardware rather than for this set. Fitting the twelve non-MMC5 deltas to *(read cycles, register
+reads)* by least squares — read cycles being `read_cycle`'s baseline count divided by its three
+instructions:
+
+| | instructions |
+| --- | ---: |
+| saved, per CPU **read cycle** | **−5.90** |
+| paid, per **PPU register read** | **+4.09** |
+
+with every residual under 2.5 M, i.e. under 0.05 % of a run. **A register read is itself a read
+cycle.** It therefore saves 5.90 and pays 4.09, for a net **−1.81**, and no mix of addresses can
+make the split lose on this axis: the break-even would need 1.44 register reads per read cycle,
+which is more than one. Q-119's worry was that the gain and the cost sit on different
+denominators; they sit on the same one.
+
+### Where the MMC5 loses, and it is not the register read
+
+The one ROM that is slower loses it all on a different callee. Per symbol on `mmc5`:
+
+| symbol | baseline | split | delta |
+| --- | ---: | ---: | ---: |
+| `NesBus::read_internal` | 607 291 787 | 1 090 984 | −606 200 803 |
+| `NesBus::read_cycle` | 25 602 335 | 383 374 809 | +357 772 474 |
+| `Board::cpu_read_override` | *inlined* | **308 101 626** | **+308 101 626** |
+| `Ppu2C02::read` | *inlined* | 5 364 857 | +5 364 857 |
+| `WideExtension::read` | *inlined* | 2 357 220 | +2 357 220 |
+| `Cartridge::default_cpu_read` | 283 356 728 | 283 356 728 | **0** |
+| everything else (`tick`, `step`, `write_internal`, `catch_up_ppu`, `run_dots`, …) | | | **0** |
+
+The MMC5's register reads are only 88 000, worth about 0.4 M at +4.09 each. The cost is
+`Board::cpu_read_override`: the MMC5 maps PRG-**RAM** into `$8000`-`$DFFF`, so
+`Cartridge::read_rom_window` cannot answer and **every** CPU read reaches the override — about one
+call per read cycle, where an MMC1 reaches it on a few thousand reads out of 8.8 M — and the
+boundary there costs about 13 instructions, which swamps the −5.90 the split saves.
+`default_cpu_read` sitting at exactly its baseline count on both sides is the check that no work
+appeared: this is a boundary, not a change of behaviour.
+
+So the split as Q-119 wrote it **cannot be committed**: the bar is "no slower, to the instruction,
+on every ROM of the set", and `mmc5` is +0.586 %. Step 3 tries to keep the −0.655 % without it.
