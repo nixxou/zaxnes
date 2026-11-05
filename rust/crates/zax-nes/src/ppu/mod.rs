@@ -860,18 +860,20 @@ impl Ppu2C02 {
                 self.begin_rendered_frame();
             }
 
-            // Boards that count rendered lines rather than A12 rises (MMC5) are told where
-            // the scan is.
-            let rendering = self.rendering_enabled();
-            if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.on_ppu_scanline(self.scanline, rendering);
+            // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line
+            // that is always reached: the idle dot 0 of line 0 is dropped on a skipped odd
+            // frame.
+            //
+            // **Nested inside the `dot == 1` test, not a second one of its own.** Both tests
+            // read the same field and LLVM is free to merge them, and when lot MF-4c took the
+            // MMC5's `on_ppu_scanline` out of this block it did: the two short-circuiting
+            // branches became one branchless `setae`/`orb`/`jne` that evaluates the scanline
+            // compare on **every** dot reaching this function, about 21 000 a frame.
+            // Callgrind put that at +30 to +40 M instructions over 300 frames on every game,
+            // NROM included — 0.5 % for a hook with nothing behind it.
+            if self.scanline < VISIBLE_SCANLINES {
+                self.begin_capture_line(self.scanline, cart);
             }
-        }
-
-        // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line that
-        // is always reached: the idle dot 0 of line 0 is dropped on a skipped odd frame.
-        if self.dot == 1 && self.scanline < VISIBLE_SCANLINES {
-            self.begin_capture_line(self.scanline, cart);
         }
 
         self.run_render_dot(cart);
@@ -1289,7 +1291,7 @@ impl Ppu2C02 {
     /// `$2006` write loading `v`. A12 is an address line, so an A12 counter must see both, and a
     /// board whose rule is about /RD — the MMC5's in-frame detection — must not
     /// (`Cartridge::watches_ppu_bus_without_read`).
-    fn notify_address_bus_without_read(&self, address: u16, cart: Cart<'_, '_>) {
+    pub(super) fn notify_address_bus_without_read(&self, address: u16, cart: Cart<'_, '_>) {
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_without_read(address, self.ppu_clock);
         }

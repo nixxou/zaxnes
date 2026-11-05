@@ -27,7 +27,8 @@
 
 mod common;
 
-use common::mapper_fixture::{MapperMachine, MapperRom};
+use common::mapper_fixture::{arm_mmc5_in_frame, detect_mmc5_scanline, MapperMachine, MapperRom};
+use zax_nes::NesCore;
 
 /// Whether the cartridge is pulling the /IRQ line.
 fn irq(core: &zax_nes::NesCore) -> bool {
@@ -1373,13 +1374,19 @@ fn mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value() {
 }
 
 /// MR-5-3. The MMC5's scanline counter starts at zero on the first line it detects, with no
-/// compare on that line, so a target of 1 fires on the **second** visible line.
+/// compare on that line, so a target of 1 fires on the **second** detected line.
 ///
 /// nesdev ("MMC5"), scanline detection: "if the 'in-frame' flag (register $5204) was clear,
 /// it becomes set, and the internal 8-bit scanline counter is reset to zero; but if it was
 /// already set, the scanline counter is incremented, then compared against the value written
 /// to $5203." We set `scanline_counter = scanline + 1` from the PPU's own line number and
-/// compare at once (`mmc5.rs:506-509`), so every split is one scanline high.
+/// compare at once, so every split was one scanline high.
+///
+/// Lot MF-4c re-drives this through the board's own bus (finding MR-5-4): the detections are
+/// the three identical nametable reads and the read that follows them, not a per-line signal
+/// from the PPU. Both assertions are MR-5-3's, unchanged — what moved is who reports a line,
+/// and with it *which* PPU line is the first detected one (the pre-render line, which fetches
+/// like a visible one), not the counter's arithmetic.
 #[test]
 fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
     let mut core = MapperRom::new(5).prg(8).chr(16).load();
@@ -1387,18 +1394,100 @@ fn mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line() {
     core.mapper_write(0x5203, 0x01); // Target scanline 1.
     core.mapper_write(0x5204, 0x80); // Scanline IRQ enabled.
 
-    let cart = core.cartridge_mut().unwrap();
-    cart.on_ppu_scanline(0, true);
+    arm_mmc5_in_frame(&mut core);
     assert!(
-        !cart.irq_asserted(),
+        !core.cartridge().unwrap().irq_asserted(),
         "the first detected line only sets in-frame and zeroes the counter"
     );
 
-    cart.on_ppu_scanline(1, true);
+    detect_mmc5_scanline(&mut core, 1);
     assert!(
-        cart.irq_asserted(),
-        "the second line increments the counter to 1 and matches the target"
+        core.cartridge().unwrap().irq_asserted(),
+        "the second detected line increments the counter to 1 and matches the target"
     );
+}
+
+/// MR-5-4, the set: the in-frame flag is raised by "three consecutive PPU reads from the same
+/// nametable address in the range $2xxx", after which "the next PPU read, regardless of
+/// address, is the point at which the scanline is detected" (nesdev, "MMC5").
+///
+/// Driven read by read, so that each clause of the sentence is a separate assertion: two
+/// identical reads are not enough, the third arms nothing by itself either — the *next* read
+/// is the detection — and a read of a different address in between puts the count back to
+/// zero. `$5204` bit 6 is the flag.
+#[test]
+fn mr_5_4_mmc5_in_frame_is_set_by_three_identical_nametable_reads_and_the_read_after_them() {
+    let in_frame = |core: &NesCore| (core.read_memory(0x5204) & 0x40) != 0;
+    let read = |core: &mut NesCore, address: u16| {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 0);
+    };
+
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+    assert!(!in_frame(&core), "nothing has been read yet");
+
+    // Two identical reads, then a pattern fetch: the count goes back to zero and the next two
+    // identical reads are only the first and second of a new run.
+    read(&mut core, 0x2000);
+    read(&mut core, 0x2000);
+    read(&mut core, 0x0000);
+    read(&mut core, 0x2000);
+    read(&mut core, 0x2000);
+    read(&mut core, 0x23C0);
+    read(&mut core, 0x2001);
+    assert!(
+        !in_frame(&core),
+        "a broken run of nametable reads detects nothing"
+    );
+
+    // Three identical reads. They are not themselves the detection point.
+    for _ in 0..3 {
+        read(&mut core, 0x2000);
+    }
+    assert!(!in_frame(&core), "the three reads only arm the detection");
+
+    // "the next PPU read, regardless of address": the attribute fetch detects the scanline,
+    // and the nametable fetch that opens the line raises the flag.
+    read(&mut core, 0x23C0);
+    read(&mut core, 0x2001);
+    assert!(
+        in_frame(&core),
+        "the read after the three sets the in-frame flag"
+    );
+}
+
+/// MR-5-4, the two clears: "3 CPU cycles pass without a PPU read having occurred", and the CPU
+/// reading the NMI vector from `$FFFA`/`$FFFB` (nesdev, "MMC5").
+#[test]
+fn mr_5_4_mmc5_in_frame_is_cleared_by_three_idle_cpu_cycles_and_by_the_nmi_vector() {
+    let in_frame = |core: &NesCore| (core.read_memory(0x5204) & 0x40) != 0;
+
+    // Three CPU cycles with no PPU read. The board is clocked by hand so that the PPU, which
+    // would otherwise be fetching, cannot reload the counter.
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+    arm_mmc5_in_frame(&mut core);
+    assert!(in_frame(&core));
+    for cycle in 1..=2 {
+        core.cartridge_mut().unwrap().step_cpu_cycle();
+        assert!(
+            in_frame(&core),
+            "still inside the frame after {cycle} idle cycles"
+        );
+    }
+
+    core.cartridge_mut().unwrap().step_cpu_cycle();
+    assert!(!in_frame(&core), "three idle CPU cycles drop the flag");
+
+    // The NMI vector read, which is the V-blank NMI as the board sees it.
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+    arm_mmc5_in_frame(&mut core);
+    assert!(in_frame(&core));
+    core.cartridge_mut().unwrap().try_cpu_read(0xFFFA);
+    assert!(!in_frame(&core), "the NMI vector read drops the flag");
+
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+    arm_mmc5_in_frame(&mut core);
+    core.cartridge_mut().unwrap().try_cpu_read(0xFFFB);
+    assert!(!in_frame(&core), "the high half of the vector drops it too");
 }
 
 /// MR-5-5. nesdev ("MMC5"), the ExRAM table for modes %00 and %01: a CPU read of $5C00-$5FFF

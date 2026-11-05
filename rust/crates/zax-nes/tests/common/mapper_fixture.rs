@@ -210,3 +210,32 @@ impl MapperMachine for NesCore {
         self.mapper_write(0x8001, value);
     }
 }
+
+/// Drives the MMC5's in-frame detection the way the PPU's fetch path does, so that a test can
+/// arm the flag without running a frame (finding MR-5-4; nesdev, "MMC5").
+///
+/// Five reads: the same nametable address three times — dots 337, 338 and 340 of a line, the
+/// fetch of the next line's first tile and the two the hardware performs and discards — then the
+/// attribute fetch that is "the point at which the scanline is detected", then the nametable
+/// fetch that turns the flag on.
+///
+/// Leaves the scanline counter at 0, i.e. the board has detected its **first** line.
+pub fn arm_mmc5_in_frame(core: &mut NesCore) {
+    detect_mmc5_scanline(core, 1);
+    let cartridge = core.cartridge_mut().expect("a cartridge");
+    cartridge.on_ppu_address_bus(0x2001, 0);
+}
+
+/// Drives `lines` scanline detections on the MMC5's bus: per line, the three identical
+/// nametable reads and the attribute read that follows them.
+///
+/// The nametable fetch that raises the flag is **not** included, so a caller can tell the
+/// detection apart from the flag; [`arm_mmc5_in_frame`] adds it.
+pub fn detect_mmc5_scanline(core: &mut NesCore, lines: usize) {
+    let cartridge = core.cartridge_mut().expect("a cartridge");
+    for _ in 0..lines {
+        for address in [0x2000u16, 0x2000, 0x2000, 0x23C0] {
+            cartridge.on_ppu_address_bus(address, 0);
+        }
+    }
+}

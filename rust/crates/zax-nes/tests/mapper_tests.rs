@@ -455,7 +455,7 @@ fn req_core_100_mmc5_serves_background_fetches_from_the_second_set_with_tall_spr
     // And inside a frame the background takes set B whichever set was written last, which is
     // the clause MR-5-1 restored: write set A last, then arm the in-frame flag.
     core.write_memory(0x5120, 0x00);
-    core.cartridge_mut().unwrap().on_ppu_scanline(0, true);
+    common::mapper_fixture::arm_mmc5_in_frame(&mut core);
     assert_eq!(16, peek(&core, 0x0000, ChrFetch::Background));
     assert_eq!(0, peek(&core, 0x0000, ChrFetch::Sprite));
 }

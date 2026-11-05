@@ -209,6 +209,13 @@ fn req_core_100_the_ss88006_counter_can_be_narrowed_to_four_bits() {
 
 // ---------------------------------------------------------------- MMC5
 
+/// MF-4c, finding MR-5-4 and Q-121: the board finds its lines on its own bus, so the **first**
+/// detected line of a frame is the pre-render line, which fetches exactly like a visible one.
+/// Visible line 0 is therefore the first line the counter counts, and `$5203` = 60 fires on
+/// visible line **59** — except on the very first frame after power-on, where the chip's repeat
+/// counter starts at 0 and the pre-render line's first read detects nothing, so that frame fires
+/// one line later. Both are asserted, because the transient is what a test that runs one frame
+/// would otherwise pin by accident.
 #[test]
 fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
     let mut core = MapperRom::new(5).chr(32).load();
@@ -216,8 +223,8 @@ fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
     core.write_memory(0x5203, 60);
     core.write_memory(0x5204, 0x80); // Enable.
     assert!(tick_until_irq(&mut core, 200_000) > 0);
-    // MR-5-3: the first line of a frame only sets the in-frame flag and zeroes the counter, so
-    // the counter reaches 60 on visible line 60, not on line 59.
+    // MR-5-3: the first detected line only sets the in-frame flag and zeroes the counter, so the
+    // counter reaches 60 sixty detections later, not fifty-nine.
     assert_eq!(60, core.ppu().scanline());
     // Bit 7 of $5204 reports the pending IRQ and reading it acknowledges; bit 6 says the
     // scan is inside a frame.
@@ -226,6 +233,14 @@ fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
     let status = core.cartridge_mut().unwrap().try_cpu_read(0x5204).unwrap();
     assert_eq!(0xC0, status & 0xC0);
     assert!(!irq(&core));
+
+    // In steady state the pre-render line is detected first, so the same target lands one line
+    // earlier, frame after frame.
+    for _ in 0..4 {
+        assert!(tick_until_irq(&mut core, 200_000) > 0);
+        assert_eq!(59, core.ppu().scanline());
+        core.cartridge_mut().unwrap().try_cpu_read(0x5204);
+    }
 }
 
 #[test]

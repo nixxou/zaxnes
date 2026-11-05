@@ -352,11 +352,216 @@ without-read notification still arrives.
 **Save states**: both latches are derived from the mapper number at load, like their two
 neighbours, and neither is written by `save_state`. The format does not move.
 
+## Step 4 — MR-5-4: the MMC5's in-frame flag comes off its own bus
+
+### The change
+
+`mmc5.rs`, the whole of the documented mechanism and nothing more:
+
+* **`Mapper::on_ppu_address_bus`** is implemented, and mapper 5 joins `watches_ppu_reads`. The
+  arm is three instructions — it calls `Mmc5::see_ppu_read`, which is `#[inline(never)]` for a
+  measured reason (below).
+* **`Mmc5::see_ppu_read`** is Mesen's `DetectScanlineStart` plus the idle reload, each clause a
+  sentence of the nesdev page: a nametable fetch (a `$2xxx` address with `address & $3FF < $3C0`)
+  consumes an armed detection and raises the flag; the read **after** `NT_READS_TO_DETECT` (2)
+  repeats of one `$2xxx` address is the detection point; a different address puts the repeat
+  counter back to 0; and every read, of every kind, reloads `ppu_idle_counter` to 3.
+* **`Mmc5::detect_scanline`** is MR-5-3 unchanged: the first detected line arms and zeroes with
+  no compare, a later one increments and compares against `$5203`, with `$00` the documented
+  special case.
+* **The two clears**: `ppu_idle_counter` counted down in `Mapper::on_cpu_cycle`, next to the
+  sound the board already clocks there; and an `$FFFA | $FFFB` arm in `Mmc5::cpu_read_override`
+  that calls `leave_frame` and answers `None`, so the vector byte comes from the ordinary PRG
+  path. Only the flag is cleared — Mesen also zeroes the scanline counter and the pending IRQ,
+  which the source does not say and which the next detection makes redundant anyway.
+* **`Mmc5::on_ppu_scanline` is gone.** The bus replaces all three of its jobs. No board
+  implements the hook now; the trait method, `Cartridge::on_ppu_scanline` and the PPU's call stay
+  (two tests drive it and it is a documented extension point), and every arm is the empty default.
+* **Four fields**, placed after `in_frame`: `need_in_frame`, `ppu_idle_counter`,
+  `nt_read_counter`, `last_ppu_read_addr`. The board grows 5 bytes.
+* **`// Q-116`** now marks `Mmc5::on_ppu_address_bus`, the code that answers the ticket.
+
+The address-only notifications moved too, and the reason is both correctness and cost:
+`notify_pattern_address` and the sprite-fetch steps 3 and 5 put an address on the bus **one dot
+before** the byte is latched, with /RD still high — the real read follows on the next dot through
+`read_vram_inner`. They now go through `notify_address_bus_without_read`. An A12 counter is in
+both latch lists and sees no difference; the MMC5 is spared **two of the six bus events a tile
+produces**, which callgrind prices at 229 M instructions over 300 frames of *Castlevania III*
+(+5.16 % became +3.01 %).
+
+### Q-121: which PPU line is the first detected one
+
+The counter's arithmetic is MR-5-3's and does not move. What moves is **which PPU line is the
+first detected one**, and the source does not say: the pre-render line fetches exactly like a
+visible one, three identical nametable reads at dots 337, 338 and 340 included, and nothing
+documented resets the repeat counter across V-blank. So it is detected, visible line 0 is the
+first *counted* line, and **`$5203` = N fires on visible line N-1**.
+
+`$5203` = 60 on a synthetic mapper-5 ROM, dot of the IRQ read off the PPU:
+
+| frame | line | why |
+| --- | ---: | --- |
+| 1 | **60** | power-on: the repeat counter is 0, so the pre-render line's first read detects nothing and visible line 0 arms |
+| 2 and after | **59** | steady state: line 239's triple leaves the counter at 2, so the pre-render line's first read is the detection point |
+
+`a5994fd1` fired on line 60 every frame. So **every MMC5 split moves one scanline earlier**,
+which is the ≤ 1-line divergence AMD-061 §9 declared and this lot removes — and it puts the
+observable split back where it was *before* MF-1, for a different reason and with the counter
+arithmetic now right. **Q-121** records the ambiguity, takes this reading provisionally (AMD-061
+§1: the documented hardware prevails; Mesen agrees; and the page's "the MMC5's scanline IRQ occurs
+at PPU cycle 4" matches our detection at dot 3-4), and gives the owner the one-line alternative.
+Marked `// Q-121` on `Mmc5::detect_scanline`.
+
+### Hot path: two regressions found by callgrind and fixed, not argued
+
+The generated-code check passed the first shape of this step and **callgrind did not**. Both
+regressions were structural, both are the shapes MF-3b's rules name, and both are now 0.
+
+**(a) `Ppu2C02::run_dots`, +30 to +40 M on every game, NROM included.** Removing the MMC5's
+`on_ppu_scanline` left `process_dot` with two separate `if self.dot == 1` tests — the vblank/
+pre-render block and the sprite capture of SPEC-02 §3.5 — reading the same field. LLVM merged
+them and made the second branchless:
+
+```
+-cmpl  $238, %r8d          +cmpl  $239, %r8d
+-ja    .LBB                +setae %al
+                           +...
+                           +setne %cl
+                           +orb   %al, %cl
+                            jne   .LBB
+```
+
+so the scanline compare ran on **every** dot reaching `process_dot`, about 21 000 a frame. The
+fix is to nest the capture inside the one `dot == 1` block it belongs to, which is what it means;
+the comment on it says why it must stay nested. `run_dots` went from +40 M to **−6 to −34 M**.
+
+**(b) `Board::on_ppu_address_bus`, +16.6 M on *Super Mario Bros. 3*.** With the MMC5's detection
+inlined into its arm, the 155-instruction dispatch became 214 and its **prologue gained one
+instruction** — `movl %eax, %r9d`, the board tag kept alive across the jump-table index — paid by
+the three A12 boards on all 17.3 M fetches of 300 frames. This is MF-3b rule 4 exactly: a new arm
+with a body of its own flipping a whole dispatch. The fix is `#[inline(never)]` on
+`Mmc5::see_ppu_read`: the arm is three instructions, the prologue is byte for byte `a5994fd1`'s
+(the tag's own offset aside, `1355` → `1360`), the function is **156** instructions, and SMB3's
+`Board::on_ppu_address_bus` is **316 413 291 → 316 413 291, 0 to the instruction**.
+
+Post-LTO `cmp4c.py`, `bin-4c-s3.s` against `bin-4c-s4d.s`, after both fixes:
+
+| symbol | instructions | verdict |
+| --- | ---: | --- |
+| `Cpu6502::step`, `branch`, `resolve` | 897, 366, 1 725 | **IDENTICAL**, offsets normalised |
+| `NesBus::read_cycle`, `tick`, `catch_up_ppu` | 3, 75, 219 | **IDENTICAL** |
+| `NesBus::run_dma`, `dma_read` | 511, 109 | **IDENTICAL** |
+| `Apu2A03::run_cpu_cycles`, `quiet_cycles` | 873, 90 | **IDENTICAL**, raw |
+| `Ppu2C02::read_pattern_planes` | 106 | **IDENTICAL**, raw |
+| `Ppu2C02::run_dots` | 1 996 → **1 936** | −60, the dot-1 hook |
+| `Ppu2C02::background_fetch`, `read_nametable_inner` | 199, 132 | same length, re-allocated |
+| `Board::on_ppu_address_bus` | 155 → **156** | +1, the MMC5's three-instruction arm |
+| `Board::on_cpu_cycle` | 351 → **363** | +12, the MMC5's idle counter; **prologue and the empty arm byte for byte identical** (MF-3b rule 3) |
+| `NesBus::read_internal` | 760 → **786** | +26, inside the MMC5's inlined register decode: the `$FFFA` arm and the register churn around it. Prologue identical — same five pushes, same `subq $32` — and the RAM, PRG and PPU-register paths byte for byte the same |
+| `NesBus::write_internal` | 2 565 → **2 564** | −1 |
+
+**Call sites** unchanged, `Board::on_ppu_address_bus` **12 → 12**.
+
+### No performance regression: measured
+
+`PERFORMANCE-HISTORY.md` §3's procedure, under WSL2: `a5994fd1` from `git archive` and this step
+from `git ls-files | tar` with line endings normalised, each in its own fresh directory with its
+own `CARGO_TARGET_DIR` and `CARGO_PROFILE_RELEASE_STRIP=false`, then
+`valgrind --tool=callgrind --dump-instr=no --cache-sim=no --branch-sim=no ./zax-harness bench-core
+<rom> --frames 300 --warmup 0`. The two trees differ in exactly the seven files this lot touches.
+
+**Super Mario Bros. 3 is in the set on purpose**: `Board::on_ppu_address_bus` is reached only by
+mappers 4, 5, 64 and 118, so a board-dispatch regression is invisible on the MMC1 and NROM ROMs
+R0's baseline uses.
+
+**Whole process:**
+
+| ROM | board | `a5994fd1` | MF-4c step 4 | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `M0_P32K_C8K_V` | NROM | 5 701 077 827 | 5 694 536 051 | **−6 541 776** | −0.115 % |
+| Mega Man 2 | MMC1 | 6 197 444 397 | 6 188 861 046 | **−8 583 351** | −0.138 % |
+| Super Mario Bros. 3 | **MMC3** | 8 129 267 163 | 8 118 039 834 | **−11 227 329** | −0.138 % |
+| Zelda II | MMC1 | 6 492 072 420 | 6 457 595 787 | **−34 476 633** | −0.531 % |
+| Castlevania III | **MMC5** | 10 689 703 722 | 11 011 814 947 | +322 111 225 | **+3.013 %** |
+
+**Per symbol, exclusive.** On all four non-MMC5 ROMs, **0 to the instruction** on
+`Cpu6502::step`, `resolve`, `NesBus::tick`, `read_cycle`, `catch_up_ppu`, `run_dma`,
+`Apu2A03::run_cpu_cycles`, `quiet_cycles`, `Ppu2C02::background_fetch`, `run_sprite_fetches`,
+`run_sprite_evaluation`, `read_nametable_inner`, `read_pattern_planes`, `rebuild_sprite_line`,
+`Board::ppu_read`, `ppu_peek`, `on_cpu_cycle` — and `Board::on_ppu_address_bus` on SMB3. The only
+symbols that move at all, on any of the four, are:
+
+| symbol | NROM | Mega Man 2 | SMB3 | Zelda II |
+| --- | ---: | ---: | ---: | ---: |
+| `Ppu2C02::run_dots` | −6 413 910 | −8 510 138 | −11 302 020 | −34 467 371 |
+| `NesBus::read_internal` | −131 084 | 0 | −9 056 | −828 |
+| `NesBus::write_internal` | −16 | −587 | −637 | −1 219 |
+
+All three negative, all four totals negative. Zelda II's −34.5 M is the largest because its world
+map is the heaviest `process_dot` load of the set.
+
+**Castlevania III, where the +322 M goes:**
+
+| symbol | delta | per PPU read |
+| --- | ---: | --- |
+| `Mmc5::see_ppu_read` | +209 953 688 | ~15 instructions, the detection itself |
+| `Board::on_ppu_address_bus` | +119 629 323 | ~8, the dispatch it now reaches |
+| `Ppu2C02::background_fetch` | +71 533 620 | the call at the fetch sites |
+| `Board::on_cpu_cycle` | +50 796 381 | ~3 per CPU cycle, the idle counter |
+| `Ppu2C02::run_sprite_fetches` | +17 953 536 | the same call, sprite side |
+| `NesBus::read_internal` | +18 741 735 | the `$FFFA` arm and its decode |
+| `Ppu2C02::run_dots` | **−166 502 948** | the `on_ppu_scanline` hook, gone |
+| everything else (`tick`, `catch_up_ppu`, `ppu_read`, `ppu_peek`, `run_cpu_cycles`, `push_expansion_audio`, …) | **0** | |
+
+about 28 000 reads a frame after the address-only events moved off the read path, at roughly 25
+instructions each. **The six MMC5 games pay 3 %, and no other game pays anything.** That is the
+cost the brief asked to be measured; if the owner wants it lower, the lever is the same one that
+took 5.16 % to 3.01 % — fewer events on the read channel — and the remaining ones are all genuine
+/RD-low reads.
+
+### Games whose output may move
+
+**The six commercial MMC5 titles**, by one scanline on every split, as Q-121 sets out, and nothing
+else. Every other board takes the same path on the same events as at `a5994fd1`: the two latches
+hold the same numbers for them, and the four non-MMC5 ROMs above are 0 to the instruction on every
+pinned symbol. Step 5 runs the MMC5 games frame by frame.
+
+### Tests
+
+| test | what it pins |
+| --- | --- |
+| `mr1_review_tests::mr_5_4_mmc5_in_frame_is_set_by_three_identical_nametable_reads_and_the_read_after_them` | each clause of the set, read by read: two repeats are not enough, a foreign read in between resets the run, the third repeat arms nothing by itself, and the read *after* it detects |
+| `mr1_review_tests::mr_5_4_mmc5_in_frame_is_cleared_by_three_idle_cpu_cycles_and_by_the_nmi_vector` | both clears, and that the flag survives **two** idle cycles and not three; `$FFFA` and `$FFFB` each |
+| `mr1_review_tests::mr_5_3_mmc5_scanline_target_one_fires_on_the_second_line` | MR-5-3's two assertions, re-driven through the bus instead of `on_ppu_scanline` |
+| `mr1_review_tests::mr_5_2_mmc5_exram_write_outside_rendering_does_not_store_the_value` | unchanged, still passing: MR-5-2 reads the same `in_frame` |
+| `mapper_irq_tests::req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names` | both lines of Q-121 — the power-on frame on 60 and the four frames after it on 59 — so the transient cannot be pinned by accident |
+| `mapper_irq_tests::req_core_100_the_mmc5_scanline_irq_stays_quiet_without_rendering` | unchanged |
+| `mapper_tests::req_core_100_mmc5_serves_background_fetches_from_the_second_set_with_tall_sprites` | MR-5-1's in-frame clause, with the flag armed through the bus (`arm_mmc5_in_frame`) |
+| `cartridges::tests::mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` | the MMC5 now in the moved set: `[4, 4, 5, 5, 64, 64, 118, 118]` |
+
+`common::mapper_fixture` gains `arm_mmc5_in_frame` and `detect_mmc5_scanline`, which drive the
+board's bus the way the PPU's fetch path does.
+
+`cargo fmt --check` clean, `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, `cargo test --release -p zax-nes -p zax-harness`: **708 passed, 0 failed, 7 ignored**.
+
+### Save states
+
+**The format does not move and no older state is touched.** `in_frame` and `scanline_counter`
+were already in the block; the four new fields are transient and out of it, with one deliberate
+value on load: `nt_read_counter` is restored to **2**, not 0 (`Mmc5::NT_READS_AFTER_LOAD`). A
+state is written at a frame boundary, i.e. in vblank, and line 239's dots 337/338/340 always leave
+that counter at 2 — so 2 is what makes the pre-render line's first read the detection point,
+exactly as it is without a load. With 0 the first detection would slip to visible line 0 and the
+split would land one line late for that frame, which under run-ahead (a state load per frame,
+AMD-041) would be permanent. `ppu_idle_counter` is restored to 0 so that a load cannot drop a flag
+the block says is set; the first PPU read after the load arms it again.
+
 ## Status
 
 - [x] step 1 — `Palette RAM Quirks`
 - [x] step 2 — the design of the variant
 - [x] step 3 — the notification split by /RD, no board using it
-- [ ] step 4 — MR-5-4 on the MMC5
+- [x] step 4 — MR-5-4 on the MMC5
 - [ ] step 5 — the MMC5 games
 - [ ] step 6 — the suites, the campaign, the documents, the guard

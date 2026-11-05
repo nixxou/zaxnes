@@ -375,8 +375,14 @@ impl Ppu2C02 {
     /// watching A12 sees it one dot before the data arrives. That dot is measurable: it is
     /// what `mmc3_test_2` test 4 pins down, to PPU-clock accuracy, for both $2000 = $08 and
     /// $2000 = $10 (REQ-CORE-114).
+    ///
+    /// It goes through the **without-read** notification: this dot is the address lines alone,
+    /// /RD going low on the next one, where `fetch_pattern`'s own `read_vram_inner` reports it.
+    /// A board watching A12 is in both latch lists and sees no difference; a board waiting on
+    /// /RD — the MMC5's in-frame detection — must not count this dot, and is spared a third of
+    /// the bus events of a line for it (two of the six a tile produces).
     fn notify_pattern_address(&self, plane: u16, cart: Cart<'_, '_>) {
-        self.notify_address_bus(self.pattern_address(plane), cart);
+        self.notify_address_bus_without_read(self.pattern_address(plane), cart);
     }
 
     fn shift_background(&mut self) {
@@ -569,10 +575,10 @@ impl Ppu2C02 {
         let step = (dot - 257) & 0x07;
 
         if step == 3 || step == 5 {
-            // The address of the coming fetch is already on the bus (see
+            // The address of the coming fetch is already on the bus, /RD still high (see
             // notify_pattern_address).
             let address = self.sprite_pattern_address(slot) + if step == 3 { 0 } else { 8 };
-            self.notify_address_bus(address, cart);
+            self.notify_address_bus_without_read(address, cart);
             return;
         }
 

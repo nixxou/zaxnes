@@ -300,9 +300,11 @@ impl Cartridge {
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
             nametable_pages_vary: matches!(mapper, 5 | 118),
             bus_conflicts,
-            // The MMC3 board (4, 118, and the MC-ACC submapper of 4) and the RAMBO-1 (64); see
-            // the field. A new board with an A12 counter belongs in both lists.
-            watches_ppu_reads: matches!(mapper, 4 | 64 | 118),
+            // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
+            // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
+            // three identical nametable reads. See the two fields. A new board with an A12
+            // counter belongs in both lists; one that waits on /RD, in the first only.
+            watches_ppu_reads: matches!(mapper, 4 | 5 | 64 | 118),
             watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
         };
         cartridge.reset();
@@ -856,13 +858,14 @@ mod tests {
         }
 
         // Guards against a vacuous pass: the sweep above must actually be reaching the hook.
-        // Both submappers of each of the three move — the MMC3 and the MC-ACC for mapper 4, and
-        // the RAMBO-1 and the TxSROM, whose submapper 3 is not a board of its own.
+        // Both submappers of each of the four move — the MMC3 and the MC-ACC for mapper 4, the
+        // MMC5's scanline detection (MF-4c, finding MR-5-4), and the RAMBO-1 and the TxSROM,
+        // whose submapper 3 is not a board of its own.
         assert_eq!(
             moved,
-            [4, 4, 64, 64, 118, 118],
-            "expected exactly the MMC3, the MC-ACC, the RAMBO-1 and the TxSROM to move on the \
-             PPU address bus, and the sweep to reach all of them"
+            [4, 4, 5, 5, 64, 64, 118, 118],
+            "expected exactly the MMC3, the MC-ACC, the MMC5, the RAMBO-1 and the TxSROM to \
+             move on the PPU address bus, and the sweep to reach all of them"
         );
     }
 
