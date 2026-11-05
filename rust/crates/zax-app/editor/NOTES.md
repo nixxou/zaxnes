@@ -5,7 +5,7 @@ after a crash or be handed over. Read it first.
 
 ## State
 
-| Part (level, screen) | Movie frames | State | Notes |
+| Part (level, screen) | Where (movie frames, or how to get there) | State | Notes |
 |---|---|---|---|
 | | | to do | |
 

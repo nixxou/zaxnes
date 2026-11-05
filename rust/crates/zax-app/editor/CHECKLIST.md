@@ -2,9 +2,9 @@
 
 For a level, then for the whole profile:
 
-1. **The whole movie**: go through every screen of the part (seek by steps of a few hundred
-   frames, then around each transition: a door, a boss, a scroll), not only the ones you worked
-   on. Look in 3D, and from the side (`zax-harness render ... --angles 0,89`) where depth matters.
+1. **Every screen of the part**, not only the ones you worked on: with a movie, seek by steps
+   of a few hundred frames, then around each transition (a door, a boss, a scroll); without
+   one, ask the user to play through the part again while you look. Look in 3D, and from the side (`zax-harness render ... --angles 0,89`) where depth matters.
 2. **The four views** of the tool box: `3D`, `2D` (the game's picture: does the 3D keep its
    meaning?), `3S` (as 3dSen reads the script: `#zax` code left out) and `HH` (as a handheld
    reads it).

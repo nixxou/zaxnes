@@ -62,8 +62,12 @@ The tools (detail: `docs/EDITOR.md` §4):
 * `editor_info`: this session in one text (game, ROM identity, movie, folders, your project,
   the harness): the prompt you were given, again;
 * `status`: the game, the movie frame, pause, 2D or 3D view;
-* `open_movie`, `seek`, `step`, `play`, `pause`: go where you need to look. A TAS movie
-  (FCEUX `.fm2`) reaches every screen of a game; ask the user for one;
+* `open_movie`, `seek`, `step`, `play`, `pause`: go where you need to look. By default there
+  is no movie: **the user plays**, and you work on the screen they are on (ask them to stop
+  where you need, `pause`, look, then let them go on). A movie lets you reach any screen
+  yourself; offer it once, never require it: an FCEUX `.fm2` (TASVideos has one for many
+  games; the old binary `.fcm` is not read), or the user's own play recorded with Tools >
+  Record a movie (a Zaxnes `.zmv`, which `seek` then reaches like any movie);
 * `screenshot` (`view: 3d` or `2d`): what the window shows, with the user's drawings;
 * `annotations`: the user's drawings (they circle things with the pens and write notes);
 * `dump_frame {path}`: every tile of the frame on screen (its two bit planes `low` / `high`,
