@@ -395,9 +395,90 @@ about `n × 71` on top of an OAM figure that is itself slightly negative.
 | **PPU** | **0**. No PPU symbol moved in either dump and no PPU row moved in any run |
 | golden-core | the DMA timing is cycle-identical to `d4151eae` (128-row table, `526`/`528`, `08 08 07 08 08`, CRC `5E3DF9C4`), so no game moves |
 
+## Step 4 — the suites end to end
+
+### Every ROM, character for character
+
+| suite | `d4151eae` | this lot |
+| --- | --- | --- |
+| `nes-test-roms/sprdma_and_dmc_dma` | 2 / 2 (`0F 526`, `0F 528`) | **2 / 2 (`0F 526`, `0F 528`)** |
+| `nes-test-roms/dmc_dma_during_read4` | 3 pass, 0 fail, 2 manual | **3 pass, 0 fail, 2 manual** |
+| `nes-test-roms/dmc_tests` | 4 manual | **4 manual** |
+| `nes-test-roms/pal_apu_tests` | 10 / 10 | **10 / 10** |
+| `nes-test-roms/apu_test` | 19 / 19 | **19 / 19** |
+| `nes-test-roms/blargg_apu_2005.07.30` | 11 / 11 | **11 / 11** |
+| `nes-test-roms/apu_reset` | 6 / 6 | **6 / 6** |
+| `AccuracyCoin` | 93 / 147 | **93 / 147** |
+| **whole campaign** | 214 pass, 5 fail, 1 unsupported, 111 manual (331 ROMs) | **214 pass, 5 fail, 1 unsupported, 111 manual** |
+
+The campaign comparison is not a comparison of the four totals. Both runs' JSON was loaded and
+compared ROM by ROM: **331 ROMs, the same set, and 0 whose verdict or message differs by a single
+character** — the 111 manual screens and their CRCs included, which is where a DMA one cycle out
+would show. `AccuracyCoin`'s message likewise matches character for character: the same fourteen
+failures with the same codes, the same eight that take the run out of the all-test loop, the same
+"32 never ran, from Palette RAM Quirks on".
+
+`dma_4016_read` prints `08 08 07 08 08`; `dma_2007_read` prints `11 22 / 11 22 / 44 55 / 11 22 /
+11 22` with CRC `5E3DF9C4`; `double_2007_read` prints `22 33 44 55 66 / 33 44 55 66 77` with CRC
+`D84F6815`.
+
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: **9 passed**,
+including `req_core_113_an_oam_transfer_and_a_dmc_fetch_share_the_bus`,
+`req_core_113_the_halt_cycle_repeats_the_read_it_interrupted` and
+`req_core_113_the_apu_and_dmc_suite_passes`.
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, **no new `allow`** on any item of `zax-nes` (the one added is `clippy::unwrap_used` on the
+`oam_dma_timing_tests` *test* file, which every other savestate test file already carries).
+`cargo test --release -p zax-nes -p zax-harness`: **695 passed, 0 failed, 7 ignored** — MF-4a-bis's
+690 plus this lot's five tests, with none added elsewhere, removed or `#[ignore]`d. **No `unsafe`.**
+
+### Savestates, and what checking them turned up
+
+This lot touches **no savestate code at all**: `git diff d4151eae HEAD` over `nes_bus.rs` and
+`apu/` matches nothing in `save_state` or `load_state`. It adds no state either — `oam_steps`,
+`oam_index` and `oam_byte` are locals of `run_dma`, which no save point can interrupt, and neither
+fast path has a field. So a state written before MF-4a, or before MF-3b, loads byte for byte, and
+the format is MF-3b's.
+
+Checking the brief's other half — "a DMA in flight at save time must restore exactly" — found that
+it does not, and that `load_state`'s own comment was wrong about why. A DMA that is *running*
+indeed cannot be caught: all 513 or 514 cycles happen inside one `CpuBus::read`. A **pending** one
+can, and it is the normal state between two instructions: a `$4014` write is a write cycle, so the
+transfer waits for the next read cycle — the opcode fetch after it. `load_state` clears `dma`, so
+that transfer is dropped. Measured: after a `$4014` write, a save, a load and a read, the transfer
+steals **0** cycles instead of 513 or 514 and OAM is untouched.
+
+It is not a regression of this lot — `dma` has never been in the format, MF-4a created the pending
+state and MF-4a-bis left it out — so the fix is not this lot's to make: it needs three fields and a
+block version (the mechanism exists, `StateReader::format_version`, with the MMC5's sound block as
+precedent) and it engages REQ-CORE-090/091 and the application's existing saves. What this lot did
+instead:
+
+* **`Q-120`** records it: the window (one cycle per `STA $4014`, crossed every frame by run-ahead),
+  the measurement, the provisional choice to leave the format alone, and the three questions for R0;
+* `load_state`'s comment now says what is true, what is lost and why, and carries `// Q-120`;
+* `req_core_091_a_pending_oam_transfer_is_dropped_by_a_state_load` pins the behaviour **as it
+  stands** and points at the ticket, so a lot that fixes it fails a test that explains itself
+  rather than discovering this by accident.
+
+## What the brief asked for and what is here
+
+| brief item | state |
+| --- | --- |
+| 1. a fast path for an OAM DMA no DMC fetch interrupts, cycle-exact, every MF-4a ROM still passing | **done**: `copy_oam_pairs` behind a provable bound (`oam_fast_pairs`, step 1's horizon), with the exact state machine from the cycle a request can appear. A plain transfer is one batch of 256 pairs. All 331 campaign ROMs byte-identical |
+| …and the "cannot become due" bound | **provable**, so the brief's fallback (asking once per get/put pair) was not needed: the DMC's own timer and bit counter name the cycle its reader can next ask on, pinned both ways by `req_core_113_the_dmc_fetch_horizon_names_the_cycle_the_reader_asks_on` at sixteen phases |
+| 2. measured with an instruction count run here, clean builds from `git archive`, fresh target each | **done**: callgrind in WSL2, three commits (`b39eaba4`, `d4151eae`, this lot), five ROMs, each build in its own fresh directory |
+| target: `run_dma` + `dma_read` + `write_internal` within **+1 M** of `b39eaba4` | **met on the OAM bookkeeping the lot names**: **−27 208** on 295 transfers with no DPCM, −254 and +1 537 on the two holy-mapperel boards — 23.6 instructions per stolen cycle against `b39eaba4`'s 23.8 and `d4151eae`'s 61.4. **Not met as a whole-row figure on a game that also plays DPCM**: `dpcmletterbox` is +1 446 877, and the arithmetic says all of it is its 19 051 DMC fetches at 71 instructions each (down from 181), against a `b39eaba4` whose ~45 per fetch sat in `tick` and so was never in these three rows. Recorded with the per-fetch number, as the brief asks |
+| no performance regression elsewhere (`Cpu6502::step`, `read_cycle`, `tick`, `catch_up_apu`, `run_cpu_cycles`) | **done, twice over**: byte-identical post-LTO bodies (`catch_up_apu` inlined into `tick`, which is identical), and the same callgrind count **to the instruction** on all five ROMs. Only four `zax_nes` symbols moved at all, and they are the four the lot touches. MF-3b rule 1: no callee gains a first call site |
+| safe Rust, no `unsafe` | **done** |
+| save states written before MF-4a keep loading | **done**: no savestate code or field touched, format unchanged |
+| a DMA in flight at save time restores exactly | **a running one cannot be caught; a pending one is dropped, and was before this lot.** Measured, ticketed as **Q-120**, the misleading comment corrected, and pinned by a test that names the ticket |
+| ambiguity → Q-NNN with a provisional choice and `// Q-NNN` in the code | **Q-120**, `// Q-120` at `nes_bus.rs` `load_state` and on the test |
+
 ## Status
 
 - [x] step 1 — the DMC's fetch horizon
 - [x] step 2 — the fast path
 - [x] step 3 — measured
-- [ ] step 4 — the suites
+- [x] step 4 — the suites

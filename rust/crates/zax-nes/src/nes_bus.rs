@@ -1201,9 +1201,22 @@ impl NesBus {
         self.cycles = reader.read_i64()?;
         self.oam_dma_count = reader.read_i64()?;
         self.dmc_dma_count = reader.read_i64()?;
-        // No DMA can be in flight at a save point: a state is written between instructions,
-        // and the units own every cycle of theirs. Nothing of `dma` is in the format, so a
-        // state written before MF-4a loads byte for byte (REQ-CORE-091).
+        // Nothing of `dma` is in the format, so a state written before MF-4a loads byte for byte
+        // (REQ-CORE-091).
+        //
+        // A DMA that is *running* cannot be at a save point, because all 513 or 514 cycles of a
+        // transfer happen inside one `CpuBus::read` and so inside one instruction. A **pending**
+        // one can: a `$4014` write is a write cycle, which no unit may halt, so the transfer waits
+        // for the next read cycle — the opcode fetch of the instruction after it — and a held DMC
+        // request waits for an absolute cycle by construction. Clearing the three fields below
+        // therefore drops a transfer a `STA $4014` had just asked for, and the state reloads as if
+        // that write had not happened.
+        //
+        // That is a divergence and not a save-format question this lot settled: see Q-120 for the
+        // measurement, its scope (one cycle per `STA $4014`, crossed every frame by run-ahead) and
+        // the three fields a fix would add behind a block version. It is pinned as it stands by
+        // `req_core_091_a_pending_oam_transfer_is_dropped_by_a_state_load`.
+        // Q-120
         self.dma = 0;
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;

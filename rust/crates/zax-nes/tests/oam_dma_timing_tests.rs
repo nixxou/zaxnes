@@ -6,12 +6,16 @@
 //! follows the `STA $4014`. These tests therefore drive that read themselves rather than
 //! expecting the whole transfer to happen inside the write.
 
+// Test helpers: a failed setup panics.
+#![allow(clippy::unwrap_used)]
+
 mod common;
 
 use std::fmt::Write as _;
 
 use common::loaded_core;
 use zax_nes::cpu::CpuBus;
+use zax_nes::state::{StateReader, StateWriter};
 use zax_nes::NesBus;
 
 /// The write to `$4014`, then the read the DMA unit halts on, as a CPU would make them.
@@ -106,6 +110,42 @@ fn req_core_111_oam_dma_starts_at_the_current_oam_address() {
     assert_eq!(0xEF, oam[0xFF]);
     assert_eq!(0xF0, oam[0x00]);
     assert_eq!(0xFF, oam[0x0F]);
+}
+
+/// A transfer a `$4014` write has only **asked** for does not survive a state load, because
+/// nothing of `NesBus::dma` is in the savestate format (REQ-CORE-090, REQ-CORE-091).
+///
+/// This pins a **divergence**, not a requirement: the write is a write cycle, so the transfer
+/// waits for the next read cycle, and the instruction boundary in between is a valid save point.
+/// `load_state` clears `dma`, so the state reloads as if the `STA $4014` had not run. The window,
+/// its scope and the three fields a fix would add behind a block version are in `Q-120`; a lot
+/// that fixes it should fail here, read the ticket, and replace this test with its opposite.
+///
+/// A transfer that is *running* genuinely cannot be caught: all 513 or 514 of its cycles happen
+/// inside one `CpuBus::read`.
+// Q-120
+#[test]
+fn req_core_091_a_pending_oam_transfer_is_dropped_by_a_state_load() {
+    let (_, mut bus) = loaded_core(None);
+    for i in 0..=255u8 {
+        bus.poke(0x0200 + u16::from(i), 255 - i);
+    }
+
+    bus.write(0x4014, 0x02);
+    let mut writer = StateWriter::with_capacity(0x1000);
+    bus.save_state(&mut writer);
+    let bytes = writer.into_vec();
+
+    // Without the save and load in between, this read would steal 513 or 514 cycles and fill OAM
+    // — which `req_core_111_oam_dma_steals_513_cycles_on_an_even_cycle_and_514_on_an_odd_one` and
+    // `req_core_111_oam_dma_copies_the_whole_page_into_oam` are exactly about.
+    let mut reader = StateReader::new(&bytes, 0).unwrap();
+    bus.load_state(&mut reader).unwrap();
+
+    let before = bus.cycle_count();
+    bus.read(0x8000);
+    assert_eq!(0, bus.cycle_count() - before - 1, "the request is gone");
+    assert_eq!([0; 8], bus.ppu().oam()[..8], "and OAM was never written");
 }
 
 /// Starts a DPCM sample at `rate` and takes its load fetch, so that the channel is playing and

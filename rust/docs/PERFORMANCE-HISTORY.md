@@ -261,6 +261,33 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
 - `RollbackHistory::capture_with`, `NesCore::save_state_to`: no allocation per snapshot, same
   bytes.
 
+**The DMA's stolen cycles cost what they cost before MF-4a** (lot MF-4a-ter)
+- MF-4a replaced the OAM transfer inside the `$4014` write, and the DMC fetch inlined into
+  `NesBus::tick`, with one cycle-exact state machine (`run_dma`). It is right and it was dear:
+  **61.4 instructions per stolen OAM cycle against the old loop's 23.8**, and 181 per DMC fetch
+  against about 45.
+- `NesBus::copy_oam_pairs` runs the byte pairs of a transfer no DMC fetch can interrupt as a tight
+  get/put loop, `oam_fast_pairs` saying how many pairs are provably safe from
+  `DmcChannel::cycles_until_fetch`; `dmc_fetch_cycles` (reached through `dmc_only_dma`, straight
+  from `halted_read_cycle`) runs a lone fetch's three or four cycles straight. Anything else — a
+  fetch inside a transfer, a halted `$4016` read, a source page of `$40` — is the state machine
+  untouched.
+- **23.6 instructions per stolen OAM cycle, 71 per DMC fetch.** `run_dma` + `dma_read` +
+  `write_internal` against `b39eaba4`: `spritecans` (295 transfers, no DPCM) **−27 208**,
+  `M0_P32K_C8K_V` −254, `M1_P128K` +1 537, `dpcmletterbox` (297 transfers and 19 051 fetches)
+  +1 446 877. `tick`, `read_cycle`, `read_internal`, `write_internal`, `Cpu6502::step`/`branch`/
+  `resolve`, `Apu2A03::run_cpu_cycles`/`quiet_cycles` are byte-identical post-LTO and read the same
+  callgrind count to the instruction on all five ROMs.
+- Invariant: the fast loop may run a cycle only if `promote_dmc_wait` would have done nothing on
+  it. `oam_fast_pairs` returns `free / 2` and not `free`, so a batch's last cycle is always a put
+  cycle; one cycle more would let that put consume the DMC's halt cycle and move the fetch.
+  `req_core_113_the_fast_oam_loop_is_the_state_machine_cycle_for_cycle` asserts 128 rows of
+  (stolen cycles, fetches inside, OAM hash) produced by the state machine alone at `dadb94c5`.
+- **`spritecans-2011/spritecans.nes`** is the ROM to measure OAM DMA on: one full transfer a frame
+  and no DPCM, which MF-4a-bis had to record as missing. `dpcmletterbox` is the same with DPCM
+  played continuously. Counts obtained from `NesBus::oam_dma_count`/`dmc_dma_count` via a temporary
+  print in `bench-core`, not by inference.
+
 Combined effect of the core work: SMB1 -16 %, Metroid -15 %, MM2 -12 % on top of the
 milestones, device core about 17.4 -> 10-12 ms per NES frame.
 
