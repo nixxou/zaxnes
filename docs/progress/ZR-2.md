@@ -313,3 +313,90 @@ test (`zr_2_…`) says which lot pinned it.
 
 `cargo fmt --check` clean, clippy clean, and the test passes under `-- --ignored` with
 `ZAXNES_ROMS` set.
+
+## Step 5 — the pictures
+
+Five builds, all clean: `c4577878` (the reference, and ZR-1's 321 + 141 dumps of it, re-verified
+against ZR-1's recorded hashes before use), this tree, **this tree minus MF-4d step 6's `$2007`
+half** (one line, `if false && self.fetching()` in `increment_vram_address`), **`c4577878` plus
+ZR-2's rule and nothing else** (a `zr2_zone` flag on the reference's own `run_dma`, raised around
+`read_code`'s zone cycle), and the reference again without the hack. The last two are throwaway
+diagnostics, in no commit.
+
+### The named frames, and ZR-1's controls
+
+| check | result |
+| --- | --- |
+| frame **1 500**, `--advanced --widescreen 128` | **`a923573ab7b9b3f8…`** — byte for byte `c4577878`'s, which is what the brief asks and what ZR-1 could not reach |
+| frame 1 500, the colour-index picture | **1 834 880 705 716 891 653** — `c4577878`'s own, step 4 |
+| frame **1 800**, the hack on | `7eb550a0d6568949…` — the reference's, as at ZR-1 |
+| frame 1 500, the hack **off** | `a63981ebd2178d47…` — the reference's, as at ZR-1 |
+
+### Every 5th frame: 462 dumps, and what is left
+
+`--dump-frame <dir>/f.json --dump-every 5`, SMB3 to 1 600 (321 dumps) and Ninja Gaiden III to
+700 (141), R0's press scripts, SHA-256 per dump.
+
+| comparison against `c4577878` | SMB3, of 321 | Ninja Gaiden III, of 141 |
+| --- | ---: | ---: |
+| the hack **on** | **64** | **10** |
+| the hack **off** — the control | **58** | **0** |
+| the hack on, minus MF-4d step 6's `$2007` half | 6 | 10 |
+| **`c4577878` + ZR-2's rule alone**, the hack on | **6** | **10** |
+
+The differing frames themselves, which is what makes the four rows one statement:
+
+* SMB3, the hack on: 15, 20, … 300 (every 5th, 58 of them), then **430, 1 115, 1 195, 1 305,
+  1 345, 1 540**;
+* SMB3, the hack off: **exactly** 15, 20, … 300, and nothing else;
+* SMB3 minus step 6's `$2007` half: **exactly** 430, 1 115, 1 195, 1 305, 1 345, 1 540;
+* `c4577878` + the rule alone: **exactly the same six**, and for Ninja Gaiden III **exactly the
+  same ten** (425, 475, 495, 515, 530, 550, 555, 565, 610, 670).
+
+So the 64 and the 10 split cleanly in two, with nothing unaccounted for:
+
+1. **58 frames of SMB3 are MF-4d step 6, and they appear without the hack.** The brief's test is
+   met for them twice over: they are there with the hack off, between the same two builds and on
+   the same frames, and they vanish when that one half is backed out.
+2. **6 frames of SMB3 and 10 of Ninja Gaiden III are ZR-2's rule itself.** Not an interaction, not
+   an implementation detail of this lot: `c4577878`'s **own** code, with nothing changed but the
+   two re-read sites of its own `run_dma`, moves those sixteen frames and no others.
+
+And the decomposition closes: **`c4577878` + the rule, against this tree minus step 6's `$2007`
+half — 0 of 321 and 0 of 141.** Everything else between `c4577878` and here (MF-4a-bis, MF-4a-ter,
+MF-4b, MF-4c, MF-4d's other six steps, PR-1, MF-5a, ZR-1 and the rest of this lot) leaves all 462
+dumps of both games untouched.
+
+### Why those sixteen frames cannot appear without the hack, and why that is right
+
+The brief asks that any remaining difference also appear with the hack off. For the 58 it does.
+For the sixteen it **cannot**, and the reason is the rule's own definition: without the hack there
+is no zone, so there is no fetch whose re-read could be suppressed, so the builds are identical
+there — Ninja Gaiden III's control is 0 of 141 and SMB3's frame 1 500 is byte-identical.
+
+What those sixteen frames are is measured, not guessed. At `c4577878` a halted zone fetch made
+3 166 register reads per 1 500 SMB3 frames (step 1). Each moved `v` by 1 or 32, cleared `w`, or
+refilled the read buffer. The hack's **own** data reads of `$2002` and `$2007` — which are not
+fetches and which this lot leaves alone, as R0 asked — then saw a disturbed register set, and on
+sixteen frames of the two runs they asked for a different split. The rule takes the disturbance
+away, so the hack now sees the PPU the hardware would have shown it.
+
+Two measurements say the games are not harmed by it:
+
+* **The work RAM never diverges in live state.** `--trace-ram` over SMB3's 1 600 frames,
+  `c4577878` against `c4577878` + the rule: the first frame whose 2 KiB differ is **388**, by
+  **one byte**, and over the whole run only **15 addresses ever differ — `$01EC` to `$01FC`,
+  every one of them in the stack page above the stack pointer**. Dead stack slots hold the byte a
+  push left behind; no variable of the game moves. The first picture difference is frame 430,
+  after it.
+* **The pictures are the same picture, a row apart.** At SMB3 frame 430, **935 of 968 records
+  match the reference's ignoring `y`** (968 against 940 records), and the reference has a row at
+  y = 24 that this tree does not: the status-bar split lands one row differently. Ninja Gaiden III
+  frame 425: 1 326 of 1 374. Not a corrupted frame — a frame whose split the hack placed one row
+  away.
+
+**For R0, plainly: this is a judgement that belongs to R0 and not to this lot.** The rule as
+stated restores frame 1 500 byte for byte and both named frames, and it is the rule R0 wrote; the
+price is that sixteen of 462 dumps leave `c4577878` behind, because `c4577878` drew them with
+reads the hardware does not make. They are listed above, frame by frame, and the no-hack column
+for them is "identical" by construction. Nothing else in the two games moves.
