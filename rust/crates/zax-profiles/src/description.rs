@@ -292,8 +292,9 @@ pub fn build(description: &Path, out: &Path, png: PngReader<'_>) -> Result<Strin
 pub fn build_profile(description: &Path, png: PngReader<'_>) -> Result<BuiltProfile, String> {
     let text = std::fs::read_to_string(description)
         .map_err(|e| error(format!("{}: {e}", description.display())))?;
-    let spec: Value = serde_json::from_str(&text)
+    let mut spec: Value = serde_json::from_str(&text)
         .map_err(|e| error(format!("{}: {e}", description.display())))?;
+    merge_includes(&mut spec, description.parent().unwrap_or(Path::new(".")))?;
     let mut profile = match spec.get("template").and_then(Value::as_str) {
         Some(template) => {
             let path = description
@@ -354,6 +355,61 @@ pub fn build_profile(description: &Path, png: PngReader<'_>) -> Result<BuiltProf
         patterns: patterns.len(),
         tiles: tiles.len(),
     })
+}
+
+/// `"includes": ["classified.json"]`: descriptions beside this one whose `tiles` and `patterns`
+/// join this one's (a file a tool writes, such as the classifier's, next to the hand-written
+/// one). A tile named in two files must have the same planes.
+fn merge_includes(spec: &mut Value, base: &Path) -> Result<(), String> {
+    let includes: Vec<String> = spec
+        .get("includes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    for include in includes {
+        let path = base.join(&include);
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| error(format!("{}: {e}", path.display())))?;
+        let other: Value =
+            serde_json::from_str(&text).map_err(|e| error(format!("{}: {e}", path.display())))?;
+        if let Some(tiles) = other.get("tiles").and_then(Value::as_object) {
+            let own = spec
+                .as_object_mut()
+                .ok_or_else(|| error("the description is not an object"))?
+                .entry("tiles")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+            let own = own
+                .as_object_mut()
+                .ok_or_else(|| error("\"tiles\" is not an object"))?;
+            for (name, planes) in tiles {
+                match own.get(name) {
+                    Some(existing) if existing != planes => {
+                        return Err(error(format!(
+                            "{include}: tile {name:?} differs from the one of the description"
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        own.insert(name.clone(), planes.clone());
+                    }
+                }
+            }
+        }
+        if let Some(patterns) = other.get("patterns").and_then(Value::as_array) {
+            let own = spec
+                .as_object_mut()
+                .ok_or_else(|| error("the description is not an object"))?
+                .entry("patterns")
+                .or_insert_with(|| Value::Array(Vec::new()));
+            own.as_array_mut()
+                .ok_or_else(|| error("\"patterns\" is not a list"))?
+                .extend(patterns.iter().cloned());
+        }
+    }
+    Ok(())
 }
 
 /// `"layers": [{"index": 4, "offset": 0, "aligned": 1}]` overrides the stored layer sets
