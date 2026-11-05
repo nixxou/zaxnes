@@ -279,3 +279,37 @@ not about cycles: the baseline spent the same cycles and merely read.
 
 `cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
 clean. `cargo test --release -p zax-nes -p zax-harness`: **746 passed, 0 failed, 8 ignored**.
+
+## Step 4 — the harness regression test, re-pinned on the reference's own number
+
+`crates/zax-harness/tests/widescreen_zone_tests.rs` keeps its shape — `#[ignore]`d, gated on
+`ZAXNES_ROMS`, R0's command run through `render::rom::capture` so that no GPU is needed, the
+assertion on `SyntheticScene::nes_picture`'s 512 × 240 colour indices hashed with the file's
+four-line FNV-1a. Only the golden moves, and this time it needs no apology:
+
+| build | `fnv1a(nes_picture)` at frame 1 500 |
+| --- | ---: |
+| `c4577878` — **the reference** | **1 834 880 705 716 891 653** |
+| baseline `2d714d82` (ZR-1's end) | 7 496 683 613 019 477 804 — **fails** |
+| this tree | **1 834 880 705 716 891 653** — passes |
+
+**The reference's row is measured, not inferred.** `c4577878` is older than this test, so its
+number could have been argued for but not read — except that its `RomRequest` and
+`SyntheticScene` are field for field the ones the test uses. So this very file was dropped into a
+clean tree of `c4577878` and run there, in that tree's own target directory, and it printed
+1 834 880 705 716 891 653. The reference binary ZR-1 left behind is unchanged by that
+(`e044d95fd845e2aa…` before and after), and the test file was removed again.
+
+That is what ZR-1 could not have. Its note had to explain why the golden was `c4577878` **plus**
+MF-4d step 6; with the halt's repeats gone, step 6 has nothing in this picture to apply to, and
+the golden is the reference's. The test's doc comment now carries that reasoning and the renamed
+test (`zr_2_…`) says which lot pinned it.
+
+**Two independent composers agree.** The golden hashes the PPU's own colour-index picture
+(`Ppu2C02::wide_picture_into`); `--png-nes` composes the frame's **tile records** through
+`compose_records` and a PNG encoder. They share only the frame they describe, and both are
+`c4577878`'s: the hash above, and `a923573ab7b9b3f8…` for the PNG. Step 5 adds a third, the
+`--dump-frame` JSON of records and palette, on 321 frames.
+
+`cargo fmt --check` clean, clippy clean, and the test passes under `-- --ignored` with
+`ZAXNES_ROMS` set.

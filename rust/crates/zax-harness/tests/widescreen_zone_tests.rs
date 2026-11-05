@@ -1,10 +1,13 @@
-//! The widescreen extension's execution zone, run for real (lot ZR-1).
+//! The widescreen extension's execution zone, run for real (lots ZR-1 and ZR-2).
 //!
 //! `acfa6e20` made a code fetch from the zone perform a read of the PPU register its address
 //! decodes to, which the hardware does not: the byte comes from the hack pack's code buffer. The
 //! games it reached are the MMC3 ones that play DPCM samples while their pack's code runs at a
 //! status-bar split, and the picture it broke is the row of ground above Super Mario Bros. 3's
 //! status bar, from frame 1 500 on.
+//!
+//! ZR-1 removed the fetch's own read and ZR-2 the DMA halt's repeats of it, which were 3 166 of
+//! 1 500 frames on their own and kept the row broken.
 //!
 //! Needs the user's own dump: set `ZAXNES_ROMS` to the folder that holds it.
 
@@ -80,24 +83,28 @@ fn smb3_picture(folder: &str, frames: u32) -> Option<(Vec<u8>, usize)> {
     Some((scene.nes_picture, scene.nes_picture_height))
 }
 
-/// The picture at frame 1 500, pinned.
+/// The picture at frame 1 500, pinned — and it is **`c4577878`'s own number** (lot ZR-2).
 ///
-/// **What the number is, and why it is not `c4577878`'s.** `c4577878` — the last build before
-/// `acfa6e20` — is the reference this lot restores, and the fix transplanted onto `acfa6e20`,
-/// onto PR-1's end and onto MF-4d step 5 reproduces that build's picture byte for byte. One
-/// **deliberate** change sits between MF-4d step 5 and here: step 6, "a fetching PPU moves `v` by
-/// a coarse X and a Y at once" (`a758f923`), which MF-4d measured as moving Super Mario Bros. 3's
-/// picture — 960 tile records to 992 — and flagged for R0's widescreen-pack A/B. So the golden
-/// below is `c4577878` **plus MF-4d step 6**, and it is the same number `ad1ad765`+fix and
-/// `a758f923`+fix produce. Lot ZR-1 step 1 has the full table.
+/// `c4577878`, the last build before `acfa6e20`, is the reference these two lots restore. ZR-1
+/// pinned a different number here and had to explain why: it had taken away the CPU's own read of
+/// the zone address but kept the DMA halt's and the dummy cycles' repeats of it, and MF-4d step 6
+/// (`a758f923`, "a fetching PPU moves `v` by a coarse X and a Y at once") then made those repeats
+/// move the picture. ZR-2 took the repeats away too — no fetch from the zone reaches the PPU by
+/// any road — and with them gone MF-4d step 6 has nothing here to apply to: this picture is the
+/// reference's again, byte for byte.
+///
+/// Measured, not assumed. The number below was read back from a clean build of `c4577878` itself,
+/// with this very test file dropped into its tree (its `RomRequest` and `SyntheticScene` are
+/// field for field the same), and the frame-1500 `--png-nes` of the two builds is byte-identical
+/// as well — two independent composers of the same frame agreeing. Lot ZR-2 step 4 has the table.
 ///
 /// To re-derive it: the `render` command of the lot's brief, then this test's `fnv1a` of the
 /// composed colour indices — or simply read the number this test prints when it fails.
-const SMB3_FRAME_1500: u64 = 7_496_683_613_019_477_804;
+const SMB3_FRAME_1500: u64 = 1_834_880_705_716_891_653;
 
 #[test]
 #[ignore = "needs a user ROM: set ZAXNES_ROMS to the folder holding Super Mario Bros. 3 (USA).nes"]
-fn zr_1_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack() {
+fn zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack() {
     let Ok(folder) = std::env::var("ZAXNES_ROMS") else {
         eprintln!("skipped: ZAXNES_ROMS is not set");
         return;
