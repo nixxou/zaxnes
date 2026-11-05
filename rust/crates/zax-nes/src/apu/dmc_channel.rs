@@ -149,7 +149,39 @@ impl DmcChannel {
             0 => {
                 self.irq_enabled = (value & 0x80) != 0;
                 self.looping = (value & 0x40) != 0;
-                self.rate_index = usize::from(value & 0x0F);
+
+                // **A write on the very cycle the timer reloads uses the new period.**
+                // `AccuracyCoin`'s `DMC Reload Timing` walks a `$4010` write across the reload
+                // one cycle at a time and keys the six outcomes: a write 3, 2, 1 or **0** cycles
+                // before the reload takes the new rate, and one 1 or 2 cycles after it does not
+                // ("if the write to $4010 happens on the same cycle as the timer reloading, then
+                // the sample rate changes, and the DMC timer takes the new value").
+                //
+                // A write earlier than the reload needs nothing: [`Self::clock_timer`] reads
+                // `rates[rate_index]` at the instant it reloads, not a cached period. Only the
+                // same-cycle case is missing, and it is missing because the bus performs a write
+                // *after* stepping the APU — so that reload has already happened and has taken
+                // the old period.
+                //
+                // `timer` standing at exactly `period - 1` is what says the reload was this
+                // cycle: the reload is the only thing that sets that value, and the timer leaves
+                // it on the next clock, so nothing but a write on the reload's own cycle can see
+                // it. Reloading again with the new period is then the whole of the rule, and it
+                // costs a register write and nothing per cycle.
+                // The index is masked to the table's sixteen entries so that this read needs no
+                // bounds check. `rate_index` is always 0 to 15, but LLVM cannot see that here —
+                // the field's last writer is another call — and without the mask it emits a
+                // bounds check and a `core::panicking::panic_bounds_check` **call site inside
+                // `NesBus::write_internal`**, which is MF-3b rule 1's stop-the-lot event:
+                // measured at +5 instructions and a cold panic block. The mask folds away.
+                let reloaded_this_cycle = self.timer == self.rates[self.rate_index & 0x0F] - 1;
+
+                let index = usize::from(value & 0x0F);
+                self.rate_index = index;
+                if reloaded_this_cycle {
+                    // `index` is 0 to 15 by construction, so this one is already checkless.
+                    self.timer = self.rates[index] - 1;
+                }
 
                 // "Disabling IRQ flag should clear it" (apu_test 7-dmc_basics).
                 if !self.irq_enabled {

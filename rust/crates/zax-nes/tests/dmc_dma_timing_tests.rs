@@ -87,6 +87,65 @@ fn req_core_113_the_dmc_fetch_horizon_names_the_cycle_the_reader_asks_on() {
     }
 }
 
+/// `AccuracyCoin`'s `DMC Reload Timing` (REQ-CORE-113): a `$4010` write lands on the very cycle
+/// the DMC timer reloads, and the timer takes the **new** period — "if the write to $4010 happens
+/// on the same cycle as the timer reloading, then the sample rate changes, and the DMC timer takes
+/// the new value". One cycle later it is too late: that bit keeps the period it reloaded with.
+///
+/// Read through `cycles_until_dmc_fetch`, which is an exact count: with `bits_remaining` bits
+/// left and a period `p`, it is `timer + 1 + (bits_remaining - 1) * p`. So `timer == 0` — the
+/// cycle *before* the reload, with all eight bits still to go — is exactly
+/// `(horizon - 1) % p == 0`, and that is how the reload is found here without reaching into the
+/// channel. The cycle after it is the reload's own, and `bus.write` ticks before it writes, so a
+/// write issued there lands on it.
+#[test]
+fn req_core_113_a_4010_write_on_the_reload_cycle_takes_the_new_period() {
+    // NTSC periods in CPU cycles per bit (nesdev): rate 0 is the slowest, rate 15 the fastest.
+    const SLOW: u32 = 428;
+    const FAST: u32 = 54;
+
+    // `start_a_dmc_sample` takes the load fetch, leaving eight bits to play; the first reload
+    // spends one, so seven remain from there on.
+    const BITS_LEFT_AFTER_THE_RELOAD: u32 = 7;
+
+    /// Steps to the cycle before a reload at the slow rate, then writes the fast rate on the
+    /// reload's own cycle plus `delay`, and answers with the horizon the write leaves.
+    fn horizon_after_writing_the_fast_rate(delay: u32) -> u32 {
+        let (_, mut bus) = loaded_core(None);
+        start_a_dmc_sample(&mut bus);
+
+        // Write cycles only: a DMA unit may not halt one, so nothing but the timer moves.
+        let mut guard = 0;
+        while (bus.apu().cycles_until_dmc_fetch().unwrap_or(0) + SLOW - 1) % SLOW != 0 {
+            bus.write(0x0000, 0x00);
+            guard += 1;
+            assert!(guard < 2 * SLOW, "no reload cycle found");
+        }
+        for _ in 0..delay {
+            bus.write(0x0000, 0x00);
+        }
+
+        bus.write(0x4010, 0x0F); // Fastest rate, no IRQ, no loop.
+        bus.apu()
+            .cycles_until_dmc_fetch()
+            .expect("the sample is still playing")
+    }
+
+    // On the reload's own cycle: the timer is re-reloaded with the fast period, so every one of
+    // the seven bits left runs at the fast rate.
+    assert_eq!(
+        FAST * BITS_LEFT_AFTER_THE_RELOAD,
+        horizon_after_writing_the_fast_rate(0)
+    );
+
+    // One cycle later: this bit keeps the slow period it reloaded with — one cycle of it already
+    // spent — and only the six bits after it are fast.
+    assert_eq!(
+        SLOW - 1 + FAST * (BITS_LEFT_AFTER_THE_RELOAD - 1),
+        horizon_after_writing_the_fast_rate(1)
+    );
+}
+
 /// A channel with no bytes left answers "never", and nothing a halted CPU can do changes that:
 /// only a `$4015` write or a fetch's own `supply_byte` can put bytes back, and a halted CPU makes
 /// neither. That is what lets the fast loop run a whole transfer without asking again.

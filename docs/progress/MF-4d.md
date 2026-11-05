@@ -261,10 +261,118 @@ OAM DMA before the writes changes nothing, so the next instrument has to be the 
 instruction stream rather than a parity-aligned probe. Left as named follow-up work; it is outside
 this step's scope and no other row waits on it.
 
+## Step 2 — `$4010` written as the DMC timer reloads
+
+### The failing message
+
+> `CPU Behavior 2 / DMC Reload Timing` 1: Writing to $4010 as the DMC timer resets should cause
+> the timer to reload using the new value.
+
+### The hardware rule, and its source
+
+The ROM walks a `$4010` write across the reload one cycle at a time, six iterations, and keys the
+six outcomes against hardware ("determined by running this on real hardware"). Its own table:
+
+| iteration | the write lands | the timer reloads with |
+| --- | --- | --- |
+| 0, 1, 2 | 3, 2, 1 cycles **before** the reload | 428 cycles — the **new**, slow rate |
+| 3 | **on the same cycle** as the reload | 428 cycles — still the **new** rate |
+| 4, 5 | 1, 2 cycles **after** the reload | 54 cycles — the old, fast rate it already took |
+
+> Amusingly, this test also confirms that if the write to `$4010` happens on the same cycle as the
+> timer reloading, then the sample rate changes, and the DMC timer takes the new value.
+
+Its answer key is `40 00 / 40 00 / 40 00 / 40 00 / 00 40 / 00 40` — four "early" then two "late",
+so the boundary sits **after** iteration 3 and the same-cycle write counts as early.
+
+### What was actually wrong — not MF-4b's diagnosis
+
+MF-4b's table proposed "`DmcChannel::clock_timer` reloads from the period as it stood before the
+write. Cheapest: read the period field at the moment of the reload rather than caching it — one
+field read on the DMC's per-cycle path, so it needs measuring." **`clock_timer` already reads
+`self.rates[self.rate_index]` at the instant it reloads**, so iterations 0 to 2 were right all
+along and there is nothing to pay on the per-cycle path.
+
+The one broken case is iteration 3, and the cause is the order inside a cycle: the bus ticks and
+*then* performs the access, so a `$4010` write on cycle N is applied after cycle N's
+`clock_timer` has already reloaded with the old period.
+
+### The change
+
+One register-write-time test in `DmcChannel::write`'s `$4010` arm. `timer` standing at exactly
+`period - 1` is what says the reload was this cycle — the reload is the only thing that sets that
+value and the timer leaves it on the next clock — so the arm re-reloads with the new period:
+
+```rust
+let reloaded_this_cycle = self.timer == self.rates[self.rate_index & 0x0F] - 1;
+let index = usize::from(value & 0x0F);
+self.rate_index = index;
+if reloaded_this_cycle {
+    self.timer = self.rates[index] - 1;
+}
+```
+
+**Nothing per cycle, no new field, no save-state change.**
+
+### Hot path: the generated code after LTO
+
+`cmp4c.py`, `bin-4d-s1.s` (step 1) against `bin-4d-s2b.s`. **Every pinned symbol is IDENTICAL,
+raw — displacements and all — except `NesBus::write_internal`, 2 577 → 2 587, +10.**
+
+`Apu2A03::run_cpu_cycles` (875 → 875) and `Apu2A03::quiet_cycles` (90 → 90) are byte-identical,
+which is the statement that matters: the DMC's whole per-cycle path is inlined into them and it
+did not move. `write_internal`'s prologue, its 72-byte frame, its RAM fast path
+(`movb %dil, 12040(%rsi,%r12)`) and all **23** of its jump tables are byte-identical too, so the
+dispatch did not reshape (MF-3b rule 4).
+
+The +10, by opcode shape, is exactly the rule and nothing else: `andl` (the mask), two
+`movl (R,R,4)` (the two period loads), two `decl`, one `cmpl` against `timer`, one `jne`, one
+`movl R, N(R)` (the timer store) and one `movq N(R), R` (the rates pointer). A game writes
+`$4010` once per sample at most.
+
+**The first shape of this cost a panic path.** Without the `& 0x0F`, LLVM cannot prove
+`rate_index` is in range — the field's last writer is another call — and emitted a bounds check
+plus a **`core::panicking::panic_bounds_check` call site inside `NesBus::write_internal`**, which
+is MF-3b rule 1's stop-the-lot event: +15 instead of +10, with a cold panic block. `rates` is a
+`&'static [i32; 16]`, so masking the index to four bits makes it checkless and the mask folds
+away. The comment on the line says so, since it is not obvious from the source.
+`panic_bounds_check` call sites across the binary: **1 260 → 1 260**. Every other watched call
+site unchanged (`end_cycle` 0 → 0, `read_nametable_inner` 14 → 14, `ppu_peek` 4 → 4,
+`on_ppu_address_bus` 11 → 11, `on_cpu_cycle` 1 → 1).
+
+### Games whose output may move
+
+A game needs a `$4010` write landing on the exact cycle its DMC timer reloads — a one-in-54 to
+one-in-428 coincidence, and only for code that changes the sample rate *while* a sample plays.
+Games that set `$4010` once before `$4015` and leave it alone cannot reach it at all. Where it is
+reached, the effect is one bit of DPCM played at the new rate instead of the old, which moves the
+next fetch by at most `428 - 54` cycles. `sprdma_and_dmc_dma` (`0F 526`) and
+`sprdma_and_dmc_dma_512` (`0F 528`) are unchanged, as are all four `dmc_tests` screens and
+`dma_4016_read`, `read_write_2007` and `double_2007_read`.
+
+### Tests and ROMs
+
+`dmc_dma_timing_tests::req_core_113_a_4010_write_on_the_reload_cycle_takes_the_new_period` reads
+the rule through `cycles_until_dmc_fetch`, which is `timer + 1 + (bits_remaining - 1) * period`,
+so `timer == 0` — the cycle before the reload — is `(horizon - 1) % period == 0` and the reload's
+own cycle is the one after it. Writing the fast rate there gives `54 * 7`; writing it one cycle
+later gives `427 + 54 * 6`, the slow period kept with one cycle of it already spent.
+
+| suite | step 1 | step 2 |
+| --- | --- | --- |
+| `apu_test`, `pal_apu_tests`, `blargg_apu_2005.07.30`, `apu_reset`, `apu_mixer` (42 ROMs) | 42 / 42 | **42 / 42** |
+| `dmc_dma_during_read4`, `dmc_tests`, `sprdma_and_dmc_dma` (14 ROMs) | 8 pass, 6 manual | **8 pass, 6 manual**, every screen identical |
+| `AccuracyCoin` | 126 / 147 | **127 / 147** — `DMC Reload Timing` **pass** |
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **713 passed, 0 failed**.
+
+**Save states**: no field added, nothing moved.
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
-- [ ] step 2 — `$4010` written as the DMC timer reloads
+- [x] step 2 — `$4010` written as the DMC timer reloads
 - [ ] step 3 — the `$4015` DMC stop, delayed like the start
 - [ ] step 4 — what a DMA reads when the ports and the APU drive the bus
 - [ ] step 5 — the dot on which `$2002`'s sprite flags clear
