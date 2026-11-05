@@ -245,6 +245,9 @@ pub struct Cartridge {
     /// rule 4 records turning a bitset into a jump table. A second `bool` read on the cold path
     /// costs nothing on the fetch path.
     watches_ppu_bus_without_read: bool,
+    /// The iNES mapper number, latched at load. See [`Cartridge::mapper_number`] for why this is
+    /// a field and not the `Board` dispatch.
+    mapper_number: i32,
 }
 
 impl Cartridge {
@@ -298,7 +301,10 @@ impl Cartridge {
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
-            nametable_pages_vary: matches!(mapper, 5 | 118),
+            // The MMC5 ($5105), the TxSROM of mapper 118 (bit 7 of its CHR registers) and — since
+            // MF-5a — the VRC6, whose `$B003` and CHR registers between them pick a CIRAM page
+            // per table (nesdev, "VRC6", the `$B003` tables).
+            nametable_pages_vary: matches!(mapper, 5 | 24 | 26 | 118),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
@@ -306,6 +312,7 @@ impl Cartridge {
             // counter belongs in both lists; one that waits on /RD, in the first only.
             watches_ppu_reads: matches!(mapper, 4 | 5 | 64 | 118),
             watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
+            mapper_number: mapper,
         };
         cartridge.reset();
         Ok(cartridge)
@@ -341,9 +348,24 @@ impl Cartridge {
     }
 
     /// iNES mapper number of this cartridge.
+    ///
+    /// A latched field, not the `Board` dispatch, and that is a measured decision (MF-3b rule 5).
+    /// `Ppu2C02::capture_sprites` asks this **once per sprite batch** — mappers 9 and 10 sort
+    /// their sprites by x (REQ-CORE-044) and nothing else does — and `Board::mapper_number` is
+    /// the one dispatch whose arms return a *per-variant constant*, so LLVM compiles it as a
+    /// bitset over the boards that answer with a literal plus a field read at the offset of
+    /// `mapper_number` for the boards that carry one (`UxRom`, `Mmc2`, `Mmc3`, `Vrc2Vrc4`,
+    /// `JalecoJ87`…). Two distinct field offsets fit that shape; MF-5a's `Vrc6` was a **third**,
+    /// which turned the bitset into a jump table and cost `Ppu2C02::run_dots` one instruction
+    /// per sprite emitted — measured, +37 990 instructions over 300 frames of Zelda II and
+    /// exactly **0** on `oam_stress` and `ppu_vbl_nmi`, the two ROMs of the set that emit no
+    /// sprite at all.
+    ///
+    /// Latching it is below the baseline rather than level with it: the question is answered by
+    /// one load for every board, where the baseline paid four instructions and a branch.
     #[must_use]
-    pub fn mapper_number(&self) -> i32 {
-        self.board.mapper_number()
+    pub const fn mapper_number(&self) -> i32 {
+        self.mapper_number
     }
 
     /// Current nametable layout (SPEC-02 §2, "current mirroring").

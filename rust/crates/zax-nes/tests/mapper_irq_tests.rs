@@ -466,3 +466,73 @@ fn req_core_090_the_mc_acc_prescaler_survives_a_save_and_restore() {
         "the restored prescaler still had three falls to go"
     );
 }
+
+// ---------------------------------------------------------------- VRC6
+
+/// The VRC6 reaches the same three IRQ registers as the VRC4 at fixed addresses — $F000 the
+/// latch, $F001 the control, $F002 the acknowledge — with mapper 26 swapping A0 and A1, so its
+/// control and acknowledge are the other way round.
+fn write_vrc6_irq(core: &mut NesCore, mapper: usize, index: u16, value: u8) {
+    let offset = if mapper == 26 {
+        ((index & 0x01) << 1) | ((index & 0x02) >> 1)
+    } else {
+        index
+    };
+    core.write_memory(0xF000 | offset, value);
+}
+
+#[test]
+fn req_core_100_the_vrc6_counter_counts_up_on_the_cpu_clock() {
+    for mapper in [24usize, 26] {
+        let mut core = MapperRom::new(mapper).chr(32).load();
+        // The VRC6 writes the whole latch at once, where a VRC4 needs two nibbles.
+        write_vrc6_irq(&mut core, mapper, 0, 0xF0);
+        // Enable, cycle mode. $F0 then counts up to $FF and fires on the sixteenth clock,
+        // exactly as the VRC4 does.
+        write_vrc6_irq(&mut core, mapper, 1, 0x06);
+        assert_eq!(16, tick_until_irq(&mut core, 1000), "mapper {mapper}");
+
+        // "writing any value to this register will acknowledge the pending IRQ, and copy the A
+        // bit to the E bit" — A was clear, so the counter stops.
+        write_vrc6_irq(&mut core, mapper, 2, 0x00);
+        assert!(!irq(&core), "mapper {mapper}");
+        assert_eq!(-1, tick_until_irq(&mut core, 300), "mapper {mapper}");
+    }
+}
+
+#[test]
+fn req_core_100_the_vrc6_counter_runs_on_the_scanline_prescaler_and_keeps_a_set() {
+    let mut core = MapperRom::new(24).chr(32).load();
+    // Latch $FF, so one clock is enough; then enable, scanline mode, with A set. The prescaler
+    // divides the CPU clock by 341/3, which is one scanline.
+    core.write_memory(0xF000, 0xFF);
+    core.write_memory(0xF001, 0x03);
+    let cycles = tick_until_irq(&mut core, 1000);
+    assert!((113..=115).contains(&cycles), "cycles {cycles}");
+
+    // A was set, so the acknowledge leaves the counter enabled and it fires again.
+    core.write_memory(0xF002, 0x00);
+    assert!(!irq(&core));
+    let again = tick_until_irq(&mut core, 1000);
+    assert!((113..=115).contains(&again), "cycles {again}");
+}
+
+#[test]
+fn mf_5a_the_vrc6_and_the_vrc4_share_one_irq_counter() {
+    // Lot MF-5a step 1 extracted `VrcIrq` out of `vrc2_vrc4.rs` instead of copying it. This is
+    // the check that the two boards really are driving the same counter: given the same latch,
+    // the same mode and the same number of ticks, a mapper-23 VRC4 and a mapper-24 VRC6 must
+    // fire on the same cycle, through their two different register decodes.
+    let mut vrc4 = MapperRom::new(23).chr(32).load();
+    vrc4.write_memory(0xF000, 0x0A); // Latch low nibble.
+    vrc4.write_memory(0xF001, 0x0C); // Latch high nibble: $CA.
+    vrc4.write_memory(0xF002, 0x06); // Enable, cycle mode.
+
+    let mut vrc6 = MapperRom::new(24).chr(32).load();
+    vrc6.write_memory(0xF000, 0xCA); // The same latch, written whole.
+    vrc6.write_memory(0xF001, 0x06);
+
+    let expected = 0x100 - 0xCA;
+    assert_eq!(expected, tick_until_irq(&mut vrc4, 1000));
+    assert_eq!(expected, tick_until_irq(&mut vrc6, 1000));
+}

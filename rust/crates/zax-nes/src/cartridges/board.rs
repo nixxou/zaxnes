@@ -5,7 +5,7 @@ use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
     Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom,
-    Vrc2Vrc4,
+    Vrc2Vrc4, Vrc6,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -91,6 +91,8 @@ pub enum Board {
     /// Mapper 4 submapper 3, the Acclaim MC-ACC: the MMC3's code, with its ÷8 prescaler on A12's
     /// falling edges folded in at compile time (MR-4-3).
     McAcc(McAcc),
+    /// Mappers 24 and 26, Konami VRC6.
+    Vrc6(Vrc6),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -126,6 +128,7 @@ macro_rules! dispatch {
             Board::Fme7($b) => $body,
             Board::Mapper078($b) => $body,
             Board::McAcc($b) => $body,
+            Board::Vrc6($b) => $body,
         }
     };
 }
@@ -266,6 +269,27 @@ impl Mapper for Board {
         dispatch!(self, b => b.nametable_page(table))
     }
 
+    /// **Exactly two boards may override [`Mapper::read_nametable`], and a third costs every
+    /// game.** Lot MF-5a measured it: this dispatch is folded into
+    /// `Ppu2C02::read_nametable_inner` behind its `page == SERVED_BY_CARTRIDGE` test, and with
+    /// two distinct arm bodies — the MMC5's `ExRAM`/fill and the UNROM 512's four-screen
+    /// CHR-RAM — LLVM answers "not me" with a bitset: `movl $imm, %r9d`, `btl %ecx, %r9d`,
+    /// `jae`.
+    ///
+    /// Giving the VRC6 an arm of its own for the `N`-set CHR-ROM nametables made that a **jump
+    /// table**, and the extra register pressure grew `read_nametable_inner`'s prologue from
+    /// `pushq %rsi / subq $32` to `pushq %rsi / pushq %rbx / subq $40` — two instructions and
+    /// 8 bytes of stack **on every nametable fetch of every board**. `#[inline(always)]` here
+    /// and on `Cartridge::read_nametable` does not help; it only moves the boundary (132
+    /// instructions → 83, then 80, then 116, never back to 132). Shrinking the new arm to one
+    /// indexed load, the shape the UNROM 512's already has, does not help either: the trigger is
+    /// the third distinct body, not its size.
+    ///
+    /// So the VRC6 does not override it, and `$B003`'s `N` is left as **Q-123**. A board that
+    /// needs its own nametables from here on has to reuse one of the two existing arms, or the
+    /// `SERVED_BY_CARTRIDGE` path needs redesigning so that the data source is a cached slice on
+    /// `Cartridge` rather than an arm of this enum — which the MMC5's fill mode, being computed
+    /// and not a slice, is what makes awkward.
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         dispatch!(self, b => b.read_nametable(memory, address))
     }

@@ -50,13 +50,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 69, Sunsoft FME-7 / 5A / 5B (MF-3 step 3);
     // * 118, TxSROM, which shares the MMC3's board (MF-3 step 5);
     // * 180, the other 74-series wiring of the UxROM board (MF-3 step 6);
-    // * 78, the Irem IF-12 and the Jaleco board of Uchuusen (MF-3 step 7).
+    // * 78, the Irem IF-12 and the Jaleco board of Uchuusen (MF-3 step 7);
+    // * 24 and 26, Konami VRC6 and VRC6b (MF-5a step 1).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![69, 78, 118, 156, 180], extra);
+    assert_eq!(vec![24, 26, 69, 78, 118, 156, 180], extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -1491,4 +1492,208 @@ fn req_core_095_a_cartridge_without_a_battery_exposes_nothing() {
 
     assert_eq!(core.export_battery_ram(), []);
     assert!(!core.import_battery_ram(&[1, 2, 3]));
+}
+
+// ---------------------------------------------------------------- VRC6 (mappers 24 and 26)
+
+/// The VRC6's register address for `index` (0-3) in the group at `group`, under the wiring of
+/// `mapper`: "`VRC6b` (mapper 026) has A0 and A1 swapped".
+fn vrc6_register(mapper: usize, group: u16, index: u16) -> u16 {
+    let offset = if mapper == 26 {
+        ((index & 0x01) << 1) | ((index & 0x02) >> 1)
+    } else {
+        index
+    };
+    group | offset
+}
+
+fn write_vrc6(core: &mut NesCore, mapper: usize, group: u16, index: u16, value: u8) {
+    let address = vrc6_register(mapper, group, index);
+    core.write_memory(address, value);
+}
+
+#[test]
+fn req_core_100_vrc6_switches_a_16_kib_and_an_8_kib_prg_bank() {
+    for mapper in [24usize, 26] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(32).load();
+        // "$8000-$8003: Select 16 KB PRG ROM bank at $8000-$BFFF", four bits, so bank 3 is the
+        // pair of 8 KiB banks 6 and 7.
+        write_vrc6(&mut core, mapper, 0x8000, 0, 0x03);
+        // "$C000-$C003: Select 8 KB PRG ROM bank at $C000-$DFFF", five bits.
+        write_vrc6(&mut core, mapper, 0xC000, 0, 0x09);
+        // $E000-$FFFF is absent from the page's PRG table: the last bank is wired there.
+        assert_eq!([6, 7, 9, 15], core.prg_windows(), "mapper {mapper}");
+
+        // All four mirrors of each register are the same register.
+        for index in 1..4 {
+            write_vrc6(&mut core, mapper, 0x8000, index, 0x02);
+            assert_eq!(
+                [4, 5, 9, 15],
+                core.prg_windows(),
+                "mapper {mapper} m{index}"
+            );
+            write_vrc6(&mut core, mapper, 0x8000, index, 0x03);
+        }
+
+        // The 16 KiB field is four bits and the 8 KiB field five: nothing above them latches.
+        write_vrc6(&mut core, mapper, 0x8000, 0, 0xF3);
+        write_vrc6(&mut core, mapper, 0xC000, 0, 0xE9);
+        assert_eq!([6, 7, 9, 15], core.prg_windows(), "mapper {mapper}");
+    }
+}
+
+#[test]
+fn req_core_100_vrc6b_has_a0_and_a1_swapped() {
+    // $D001 and $D002 are two different CHR registers, R1 and R2, so the swap is visible on
+    // them; it is invisible on $C000-$C003, whose four mirrors are one register.
+    let mut a = MapperRom::new(24).chr(32).load();
+    let mut b = MapperRom::new(26).chr(32).load();
+    a.write_memory(0xD001, 0x07);
+    b.write_memory(0xD001, 0x07);
+
+    // Mapper 24 latches R1, which is PPU $0400-$07FF.
+    assert_eq!([0, 7, 0, 0, 0, 0, 0, 0], a.chr_windows());
+    // Mapper 26 decodes the same address as $D002, so it latches R2 instead.
+    assert_eq!([0, 0, 7, 0, 0, 0, 0, 0], b.chr_windows());
+}
+
+#[test]
+fn req_core_100_vrc6_arranges_chr_in_the_four_banking_modes() {
+    let mut core = MapperRom::new(24).chr(64).load();
+    for register in 0..8u16 {
+        let group = if register < 4 { 0xD000 } else { 0xE000 };
+        core.write_memory(group | (register & 3), 0x10 | (register as u8));
+    }
+
+    // Mode 0 with P clear: eight 1 KiB banks, R0-R7 straight through.
+    core.write_memory(0xB003, 0x00);
+    assert_eq!(
+        [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17],
+        core.chr_windows()
+    );
+
+    // Mode 1 with P set: four 2 KiB banks from R0-R3, each half `R & $FE` then `R | 1` — PPU
+    // A10 passes through.
+    core.write_memory(0xB003, 0x21);
+    assert_eq!(
+        [0x10, 0x11, 0x10, 0x11, 0x12, 0x13, 0x12, 0x13],
+        core.chr_windows()
+    );
+
+    // Mode 1 with P clear: "CHR A10 … according to the latched value", so both 1 KiB halves of
+    // each 2 KiB window show the whole register.
+    core.write_memory(0xB003, 0x01);
+    assert_eq!(
+        [0x10, 0x10, 0x11, 0x11, 0x12, 0x12, 0x13, 0x13],
+        core.chr_windows()
+    );
+
+    // Mode 2 with P set: four 1 KiB banks from R0-R3, then two 2 KiB banks from R4 and R5.
+    core.write_memory(0xB003, 0x22);
+    assert_eq!(
+        [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x14, 0x15],
+        core.chr_windows()
+    );
+
+    // Mode 3 has the same CHR arrangement as mode 2; only its nametables differ.
+    core.write_memory(0xB003, 0x23);
+    assert_eq!(
+        [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x14, 0x15],
+        core.chr_windows()
+    );
+}
+
+#[test]
+fn req_core_100_vrc6_b003_fixes_four_arrangements_when_p_is_set() {
+    let mut core = MapperRom::new(24).chr(32).load();
+    // The four rows of the page's own tables, re-derived from its even/odd columns in
+    // `Vrc6::derive_nametables`: $20/$27 vertical, $23/$24 horizontal, $28/$2F one screen A,
+    // $2B/$2C one screen B. Each arrangement goes through the cartridge mirroring, so every
+    // page follows it.
+    for (mode, expected) in [
+        (0x20, Nm::Vertical),
+        (0x27, Nm::Vertical),
+        (0x23, Nm::Horizontal),
+        (0x24, Nm::Horizontal),
+        (0x28, Nm::SingleScreenA),
+        (0x2F, Nm::SingleScreenA),
+        (0x2B, Nm::SingleScreenB),
+        (0x2C, Nm::SingleScreenB),
+    ] {
+        core.write_memory(0xB003, mode);
+        assert_eq!(expected, core.mirroring(), "mode {mode:#04X}");
+        assert_eq!([-1, -1, -1, -1], nametable_pages(&core), "mode {mode:#04X}");
+    }
+}
+
+#[test]
+fn req_core_100_vrc6_picks_a_ciram_page_per_table_from_the_latched_bit() {
+    let mut core = MapperRom::new(24).chr(32).load();
+    core.write_memory(0xE000, 0x00); // R4 = 0.
+    core.write_memory(0xE001, 0x01); // R5 = 1.
+    core.write_memory(0xE002, 0x01); // R6 = 1.
+    core.write_memory(0xE003, 0x00); // R7 = 0.
+
+    // Mode 0 with P clear: each half of the screen takes one register, R6 then R7.
+    core.write_memory(0xB003, 0x00);
+    assert_eq!([1, 1, 0, 0], nametable_pages(&core));
+
+    // Mode 1 is the page's "4-screen" row: one register per table, R4-R7.
+    core.write_memory(0xB003, 0x01);
+    assert_eq!([0, 1, 1, 0], nametable_pages(&core));
+
+    // Mode 2 pairs the tables the other way: R6, R7, R6, R7.
+    core.write_memory(0xB003, 0x02);
+    assert_eq!([1, 0, 1, 0], nametable_pages(&core));
+
+    // Only the low bit of the register is the page.
+    core.write_memory(0xE002, 0xFE);
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+}
+
+#[test]
+fn q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom() {
+    // Q-123: `$B003` bit 4 means "Nametables come from CHRROM", and this build does not serve
+    // them — a third board overriding `Mapper::read_nametable` reshapes the dispatch that
+    // `Ppu2C02::read_nametable_inner` folds in and costs every board two instructions and 8
+    // bytes of stack per nametable fetch (measured; see `<Board as Mapper>::read_nametable`).
+    // The provisional choice is that `N` changes nothing: the four tables stay on CIRAM, laid
+    // out by the same registers, which is what this pins so that a lot implementing the mode
+    // has to come here and say so.
+    let mut core = MapperRom::new(24).chr(64).load();
+    core.write_memory(0xE002, 0x01); // R6.
+    core.write_memory(0xE003, 0x00); // R7.
+
+    // Mode 0 with P clear and N clear: a page per half from the latched bit.
+    core.write_memory(0xB003, 0x00);
+    let without_n = nametable_pages(&core);
+    assert_eq!([1, 1, 0, 0], without_n);
+
+    // The same with N set: unchanged, and in particular never `SERVED_BY_CARTRIDGE`.
+    core.write_memory(0xB003, 0x10);
+    assert_eq!(without_n, nametable_pages(&core));
+    assert!(!nametable_pages(&core).contains(&Cartridge::SERVED_BY_CARTRIDGE));
+
+    // And the fixed arrangements still reach the cartridge mirroring with N set.
+    core.write_memory(0xB003, 0x34);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+}
+
+#[test]
+fn req_core_100_vrc6_enables_prg_ram_with_bit_7_of_b003() {
+    let mut core = MapperRom::new(24).chr(32).load();
+    // Power-on is $B003 = 0, so "PRG RAM enable" is clear and the window is open bus.
+    core.write_memory(0x6000, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x6000));
+
+    core.write_memory(0xB003, 0x80);
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    // Disabling it again hides what was written without losing it.
+    core.write_memory(0xB003, 0x00);
+    assert_ne!(0x5A, core.read_memory(0x6000));
+    core.write_memory(0xB003, 0x80);
+    assert_eq!(0x5A, core.read_memory(0x6000));
 }

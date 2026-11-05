@@ -3,6 +3,7 @@
 // The OR'd heuristic `Vrc2Vrc4::new` falls back on when the NES 2.0 submapper is absent is
 // Mesen's `TranslateAddress` (`Core/NES/Mappers/Konami/VRC2_4.h`); see THIRD-PARTY-NOTICES.md.
 
+use super::vrc_irq::VrcIrq;
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -87,13 +88,10 @@ pub struct Vrc2Vrc4 {
     prg0: u8,
     prg1: u8,
     swap_prg: bool,
-    irq_latch: u8,
-    irq_counter: i32,
-    prescaler: i32,
-    irq_enabled: bool,
-    irq_enable_after_ack: bool,
-    irq_cycle_mode: bool,
-    irq_pending: bool,
+    /// Konami's IRQ counter, now [`VrcIrq`] and shared with the VRC6 (lot MF-5a step 1). The
+    /// seven fields it replaces were written to the save state in exactly the order
+    /// [`VrcIrq::save_state`] writes them, so the block is unchanged.
+    irq: VrcIrq,
 }
 
 impl Vrc2Vrc4 {
@@ -139,13 +137,7 @@ impl Vrc2Vrc4 {
             prg0: 0,
             prg1: 1,
             swap_prg: false,
-            irq_latch: 0,
-            irq_counter: 0,
-            prescaler: 341,
-            irq_enabled: false,
-            irq_enable_after_ack: false,
-            irq_cycle_mode: false,
-            irq_pending: false,
+            irq: VrcIrq::new(),
         }
     }
 
@@ -160,25 +152,14 @@ impl Vrc2Vrc4 {
         bit(self.index_lines, 0) | (bit(self.index_lines, 1) << 1)
     }
 
+    /// The four registers of $F000-$FFFF, reached through the variant's two index lines: the
+    /// latch's low nibble, its high nibble, the control register and the acknowledge.
     fn write_irq_register(&mut self, index: i32, value: u8) {
         match index {
-            0 => self.irq_latch = (self.irq_latch & 0xF0) | (value & 0x0F),
-            1 => self.irq_latch = (self.irq_latch & 0x0F) | ((value & 0x0F) << 4),
-            2 => {
-                self.irq_enable_after_ack = value & 0x01 != 0;
-                self.irq_enabled = value & 0x02 != 0;
-                self.irq_cycle_mode = value & 0x04 != 0;
-                if self.irq_enabled {
-                    self.irq_counter = i32::from(self.irq_latch);
-                    self.prescaler = 341;
-                }
-
-                self.irq_pending = false;
-            }
-            _ => {
-                self.irq_pending = false;
-                self.irq_enabled = self.irq_enable_after_ack;
-            }
+            0 => self.irq.write_latch_nibble(value, false),
+            1 => self.irq.write_latch_nibble(value, true),
+            2 => self.irq.write_control(value),
+            _ => self.irq.acknowledge(),
         }
     }
 
@@ -202,16 +183,6 @@ impl Vrc2Vrc4 {
             self.banks.map_chr_1k(slot, bank);
         }
     }
-
-    fn clock_irq_counter(&mut self) {
-        if self.irq_counter == 0xFF {
-            self.irq_counter = i32::from(self.irq_latch);
-            self.irq_pending = true;
-            return;
-        }
-
-        self.irq_counter += 1;
-    }
 }
 
 impl Mapper for Vrc2Vrc4 {
@@ -224,13 +195,7 @@ impl Mapper for Vrc2Vrc4 {
         writer.write_u8(self.prg0);
         writer.write_u8(self.prg1);
         writer.write_bool(self.swap_prg);
-        writer.write_u8(self.irq_latch);
-        writer.write_i32(self.irq_counter);
-        writer.write_i32(self.prescaler);
-        writer.write_bool(self.irq_enabled);
-        writer.write_bool(self.irq_enable_after_ack);
-        writer.write_bool(self.irq_cycle_mode);
-        writer.write_bool(self.irq_pending);
+        self.irq.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -240,13 +205,7 @@ impl Mapper for Vrc2Vrc4 {
         self.prg0 = reader.read_u8()?;
         self.prg1 = reader.read_u8()?;
         self.swap_prg = reader.read_bool()?;
-        self.irq_latch = reader.read_u8()?;
-        self.irq_counter = reader.read_i32()?;
-        self.prescaler = reader.read_i32()?;
-        self.irq_enabled = reader.read_bool()?;
-        self.irq_enable_after_ack = reader.read_bool()?;
-        self.irq_cycle_mode = reader.read_bool()?;
-        self.irq_pending = reader.read_bool()?;
+        self.irq.load_state(reader)?;
         Ok(())
     }
 
@@ -255,7 +214,7 @@ impl Mapper for Vrc2Vrc4 {
     }
 
     fn irq_asserted(&self) -> bool {
-        self.irq_pending
+        self.irq.asserted()
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
@@ -263,13 +222,7 @@ impl Mapper for Vrc2Vrc4 {
         self.prg0 = 0;
         self.prg1 = 1;
         self.swap_prg = false;
-        self.irq_latch = 0;
-        self.irq_counter = 0;
-        self.prescaler = 341;
-        self.irq_enabled = false;
-        self.irq_enable_after_ack = false;
-        self.irq_cycle_mode = false;
-        self.irq_pending = false;
+        self.irq.reset();
         self.update_banks();
     }
 
@@ -331,22 +284,12 @@ impl Mapper for Vrc2Vrc4 {
         }
     }
 
+    /// "A VRC2 has no IRQ counter" (MR-21-2), so the whole arm is behind that load-time flag.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
-        if self.is_vrc2 || !self.irq_enabled {
+        if self.is_vrc2 {
             return;
         }
 
-        if self.irq_cycle_mode {
-            self.clock_irq_counter();
-            return;
-        }
-
-        self.prescaler -= 3;
-        if self.prescaler > 0 {
-            return;
-        }
-
-        self.prescaler += 341;
-        self.clock_irq_counter();
+        self.irq.step_cpu_cycle();
     }
 }

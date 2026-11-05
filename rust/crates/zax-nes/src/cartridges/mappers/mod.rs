@@ -34,6 +34,8 @@ mod multicart;
 mod nrom;
 mod rambo1;
 mod vrc2_vrc4;
+mod vrc6;
+mod vrc_irq;
 
 pub use bandai_fcg::BandaiFcg;
 pub use daou306::Daou306;
@@ -53,6 +55,7 @@ pub use multicart::{
 pub use nrom::Nrom;
 pub use rambo1::Rambo1;
 pub use vrc2_vrc4::Vrc2Vrc4;
+pub use vrc6::Vrc6;
 
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
