@@ -639,6 +639,115 @@ of Ancient China* and *L'Empereur* are the six. Measured here: Castlevania III's
 cycle counts do not move at all over 3 600 frames, and its picture moves at one of the seven
 checkpoints.
 
+## Step 6 — the suites, the campaign, the documents and the guard
+
+### The campaign, ROM by ROM
+
+MF-4b's own campaign JSON is not on disk (`rust/target-mf` holds its step-4 run, with the old
+drive), so the baseline was **re-measured** rather than read: `a5994fd1` rebuilt from a
+`git archive` in its own directory, and both builds run against the same ROM collection on the
+same host.
+
+```
+base 331 rows, new 331 rows, same set: true
+rows whose verdict, code or message differs: 1
+--- AccuracyCoin/AccuracyCoin.nes
+  base: fail 23  124/147 tests passed; …
+  new : fail 22  125/147 tests passed; …
+```
+
+**331 ROMs, one row.** 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual — MF-4b's four
+totals exactly. Every per-suite tally identical, and the 111 `manual` screens character for
+character what they were, `double_2007_read`'s included.
+
+The four MMC5 ROMs keep their `manual` verdicts and their transcriptions, which is why they are
+not in that list; step 5's `golden-core` and PNG measurements are where their change shows.
+
+### The suites
+
+| suite | `a5994fd1` | MF-4c |
+| --- | --- | --- |
+| `AccuracyCoin` | 124 / 147 | **125 / 147** |
+| `cpu_interrupts_v2` | 6 / 6 | **6 / 6** |
+| `instr_timing`, `branch_timing_tests` | 3 / 3, 3 / 3 | **unchanged** |
+| `cpu_dummy_reads`, `cpu_dummy_writes`, `cpu_exec_space`, `cpu_reset`, `cpu_timing_test6` | all pass | **unchanged** |
+| `instr_misc`, `instr_test-v3`, `instr_test-v5`, `nes_instr_test` | 5, 17, 18, 11 | **unchanged** |
+| `ppu_open_bus`, `ppu_read_buffer` | 1 / 1 each | **unchanged** |
+| `ppu_vbl_nmi`, `vbl_nmi_timing` | 11 / 11, 7 / 7 | **unchanged** |
+| `sprite_hit_tests_2005.10.05`, `sprite_overflow_tests` | 11 / 11, 5 / 5 | **unchanged** |
+| `blargg_ppu_tests_2005.09.15b` | 4 / 5 | **4 / 5**, the same required row |
+| `oam_read`, `oam_stress` | 1 / 1 each | **unchanged** |
+| `apu_test`, `blargg_apu_2005.07.30`, `apu_reset`, `apu_mixer`, `pal_apu_tests` | 9, 11, 6, 4, 10 | **unchanged** |
+| `sprdma_and_dmc_dma`, `dmc_dma_during_read4`, `dmc_tests` | 2 / 2, 3 pass 2 manual, 4 manual | **unchanged** |
+| `holy-mapperel` | 40 / 40 | **40 / 40** |
+| `mmc3_test`, `mmc3_test_2`, `mmc3_irq_tests` | 5 / 6 each | **5 / 6 each**, the same required failures |
+| the four MMC5 ROMs | 4 manual | **4 manual** |
+| **whole campaign** | 214 / 5 / 0 / 1 / 111 | **identical; 1 of 331 rows changed** |
+
+The three MMC3 suites matter more than their unchanged tally suggests: the MMC3 is the board whose
+`Board::on_ppu_address_bus` arm this lot had to leave untouched, and step 4's callgrind on *Super
+Mario Bros. 3* is the measurement that caught it when it did not.
+
+### The documents
+
+* **`docs/review/MF-T-test-roms.md`** gains "What lot MF-4c changed": the one row of the campaign,
+  the `Palette RAM Quirks` rule, the `golden-core` table for the four MMC5 ROMs with the
+  one-scanline measurement on `mmc5test`, the suites that did not move, and the guard.
+* **`docs/review/MR-1-mappers.md`**: MR-5-4 becomes **our bug, fixed in MF-4c (`08da8e0a`)**, with
+  the correction that the entry's own cost note — and Q-116's — misread the call chain, and with
+  the callgrind numbers. Its row in the summary table moves from `unknown` to fixed and names the
+  two tests.
+* **`rust/docs/PERFORMANCE-HISTORY.md`** §5.1 gains the lot's entry: why no notification was
+  needed, the two regressions callgrind caught and the two invariants that must survive a port —
+  the capture nested inside the one `dot == 1` block, and `Mmc5::see_ppu_read` staying
+  `#[inline(never)]` — plus the note that **an MMC3 game belongs in the measurement set**, since
+  `Board::on_ppu_address_bus` is invisible on the MMC1 and NROM ROMs the baseline uses.
+* **`spec/changes/Q-121.md`** is the lot's one ticket. No spec document was edited; retiring
+  AMD-061 §9 is R0's.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` grows from 13 to **14** groups:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green` | the tally as a floor of **125**, no test left unrun or retired, and **thirteen** rows by name — MF-4b's twelve plus `PPU Behavior / Palette RAM Quirks` |
+| `req_core_100_the_mmc5_rom_suites_keep_their_outcomes` | the three MMC5 suites' rows. All are `manual`, so what it guards is that they still **run**: a board that now reacts to every PPU read can hang or lose its IRQ, and either would show up as a `timeout` |
+
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: **14 passed**.
+
+### Hot path, this step
+
+Nothing under `crates/zax-nes/src/` changed, and `cmp4c.py` on `bin-4c-s4d.s` against
+`bin-4c-s6.s` says so: **all 20 pinned symbols IDENTICAL**. The step touches the guard and four
+documents.
+
+## The lot, end to end
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, with **one** `allow` added — `clippy::struct_excessive_bools` on `Cartridge`, with its
+reason on it, matching the one `render.rs` already carries for PPUMASK's four switches.
+`cargo test --release -p zax-nes -p zax-harness`: **709 passed, 0 failed, 7 ignored**, against
+MF-4b's 704 — five added (the greyscale read, the write-latch invariant, the two MR-5-4 tests and
+the MMC5 ROM group), none removed or `#[ignore]`d. **No `unsafe`.**
+
+| brief item | state |
+| --- | --- |
+| 1. `Palette RAM Quirks`, checked free in the generated code | **done**, step 1: `AccuracyCoin` 124 → 125; +3 instructions inside the palette branch of the `$2007` arm and **0** everywhere else, the diff quoted |
+| 2. design the variant, alternatives rejected, written before coding | **done**, step 2 — and the design is that **there is no variant to build**: the notification exists, carries nametable and attribute addresses, and is already gated by a load-time latch. Proved with a probe of 115 198 bus events before a line was written. Six alternatives rejected with reasons, the brief's const-generic dot loop among them |
+| 3. implement it with no board using it, callgrind identical to the instruction | **done**, step 3: the split by /RD, both latches holding the same three mapper numbers, **every pinned symbol IDENTICAL** and `Board::on_ppu_address_bus` 12 → 12 call sites |
+| 4. MR-5-4 through it, the `// Q-116` mark kept, Q-116's nine-dot warning minded | **done**, step 4. The warning is answered with a measurement: the longest silence on the PPU's bus during rendering is **five dots**, and the idle counter counts reads of every kind |
+| MR-5-2 and MR-5-3 keep their tests passing | **done**: MR-5-2 untouched, MR-5-3 re-driven through the bus with both its assertions intact. Q-121 records that the *line* moves while the counter's arithmetic does not |
+| the MR-5-4 tests active | **done**: they did not exist (MR-1 recorded "Test: none"), so step 4 wrote them — one per half of the mechanism |
+| 5. the MMC5 games, and which frame moves and why | **done**, step 5: Castlevania III over 3 600 frames (tiles and cycles identical at every checkpoint, picture at frame 3 600, audio from 1 200), the four campaign MMC5 ROMs, and `mmc5test`'s picture measured as **the old picture moved up exactly one scanline** |
+| 6. the suites, `AccuracyCoin`, the campaign ROM by ROM, the documents, the guard | **done**, step 6: 1 of 331 rows, 14 guard groups, four documents |
+| no performance regression, none at all | **done, and twice re-done**: four non-MMC5 ROMs at −0.115 % to −0.531 % with every pinned symbol 0 to the instruction, after callgrind caught +0.5 % on every game and +16.6 M on the MMC3 that the generated-code check had passed |
+| safe Rust, no `unsafe` | **done** |
+| save states written before this lot keep loading | **done**, the format is unchanged; the one value a load has to get right is `nt_read_counter`, and `Mmc5::NT_READS_AFTER_LOAD` carries the argument |
+| the variant chosen correctly after a state load | **done** in the sense the lot ends with: there is no variant, and the board's detection state is restored so that the frame after a load splits where the frame before it did |
+
+**One Q ticket, Q-121**, on the one point the sources leave open. Q-122 is the next free number.
+
 ## Status
 
 - [x] step 1 — `Palette RAM Quirks`
@@ -646,4 +755,4 @@ checkpoints.
 - [x] step 3 — the notification split by /RD, no board using it
 - [x] step 4 — MR-5-4 on the MMC5
 - [x] step 5 — the MMC5 games
-- [ ] step 6 — the suites, the campaign, the documents, the guard
+- [x] step 6 — the suites, the campaign, the documents, the guard

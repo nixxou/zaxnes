@@ -34,9 +34,10 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 **lot MF-4a moved ten more** — the two `sprdma_and_dmc_dma`, `dmc_dma_during_read4/dma_4016_read`
 and the seven `pal_apu_tests`. **Lot MF-4b moved no row of the table at all**, and moved
 `AccuracyCoin` from 93 to 124 of its 147 tests and `double_2007_read` onto one of the four
-outputs its own source names. See "What lot MF-3 changed", "What lot MF-4a changed" and "What lot
-MF-4b changed" at the end of this document for the before/after of each. Everything else in this
-document is the campaign as MF-T first measured it.
+outputs its own source names. **Lot MF-4c moved no row either**, and moved `AccuracyCoin` from
+124 to 125. See "What lot MF-3 changed", "What lot MF-4a changed", "What lot MF-4b changed" and
+"What lot MF-4c changed" at the end of this document for the before/after of each. Everything
+else in this document is the campaign as MF-T first measured it.
 
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
@@ -1144,3 +1145,88 @@ test left unrun or retired, and twelve rows by name),
 `branch_timing_tests`, `instr_timing`), `req_core_112_the_ppu_bus_latch_and_the_read_buffer_pass`
 and `req_core_110_the_dummy_cycle_suites_pass`. `ZAXNES_TEST_ROMS=… cargo test --release -p
 zax-harness --test test_roms_tests`: **13 passed**.
+
+## What lot MF-4c changed
+
+Lot MF-4c is the answer to Q-116 issue 3: the MMC5's "in-frame" flag and its scanline counter
+come off the board's own PPU bus (finding **MR-5-4**), which retires the `(D)` of AMD-061 §9. It
+also takes `AccuracyCoin`'s `Palette RAM Quirks`.
+
+### The campaign, ROM by ROM
+
+The baseline was re-measured rather than read from a file: `a5994fd1` was rebuilt from a
+`git archive` in its own directory and run against the same ROM collection, so both sides of the
+comparison come from the same host on the same day.
+
+```
+331 ROMs, the same set, 1 row whose verdict, code or message differs
+```
+
+| | `a5994fd1` | MF-4c |
+|---|---|---|
+| `AccuracyCoin` | 124 / 147, 23 failed | **125 / 147, 22 failed** |
+| everything else, all 330 rows | — | **character for character identical** |
+
+214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual — MF-4b's four totals exactly. Every suite
+tally is unchanged, the 111 `manual` screens included.
+
+### `AccuracyCoin`: `Palette RAM Quirks`
+
+| test | before | after | what it is |
+|---|---|---|---|
+| `PPU Behavior / Palette RAM Quirks` | fail 6 | **pass** | with PPUMASK's greyscale bit set, a `$2007` read of palette RAM returns the entry masked with `$30`; the stored byte is unaffected |
+
+Its code 6 is "With Greyscale Mode enabled, the lower four bits of the value read should all be
+zero" and its code 7 "with Greyscale Mode enabled, the lower four bits of the value **written**
+should be unaffected" — so the bit masks the palette's output, on the way to the CPU as much as to
+the pixel. The 22 rows that still fail are MF-4b's 23 minus this one, with the same codes.
+
+### The MMC5, which the campaign's text cannot show
+
+The four mapper-5 ROMs of the collection keep their `manual` verdicts and their screen
+transcriptions **character for character**, which is why the ROM-by-ROM comparison above shows
+only one row. The change is there all the same, and `golden-core` sees it:
+
+| ROM | picture | tile records | CPU cycles | audio |
+|---|---|---|---|---|
+| `nes-test-roms/mmc5test/mmc5test.nes` | **differs** from frame 60 | **differs** | same | same |
+| `nes-test-roms/other/firefly.nes` | same | same | **differs** at 60, 600, 1 200 | same |
+| `nes-test-roms/exram/mmc5exram.nes` | same | same | same | same |
+| `nes-test-roms/mmc5test_v2/mmc5test.nes` | same | same | same | same |
+
+`mmc5test` is the one that draws from the scanline IRQ, and decoding the two final-frame PNGs row
+by row says exactly what moved: **75 of the 76 differing scanlines of the new picture are the old
+picture's next line down**, from line 159 to the bottom. The split boundary is one scanline
+earlier, which is MR-5-4 applied — see `docs/progress/MF-4c.md` step 5, and `spec/changes/Q-121.md`
+for why the pre-render line is the first one the counter counts.
+
+*Castlevania III* over 3 600 frames: tile records and cycle counts identical at all seven
+`golden-core` checkpoints, picture identical through frame 1 800 and different at frame 3 600,
+audio different from frame 1 200. The 18 commercial ROMs of the `golden-core` set — NROM, MMC1,
+MMC3 and UxROM among them — are **identical on all four digests**, 0 moved.
+
+### The suites that did not move, and were checked
+
+Every suite of the "Per suite" table above, tally for tally, at `a5994fd1` and at this lot:
+`cpu_interrupts_v2` 6/6, `instr_timing` 3/3, `branch_timing_tests` 3/3, `cpu_dummy_reads`,
+`cpu_dummy_writes` 2/2, `cpu_exec_space` 2/2, `cpu_reset` 2/2, `cpu_timing_test6`,
+`instr_misc` 5/5, `nes_instr_test` 11/11, `instr_test-v3` 17/17, `instr_test-v5` 18/18,
+`oam_read`, `oam_stress`, `apu_test` 9/9, `blargg_apu_2005.07.30` 11/11, `apu_reset` 6/6,
+`apu_mixer` 4/4, `pal_apu_tests` 10/10, `sprdma_and_dmc_dma` 2/2, `dmc_dma_during_read4` 3 pass
+and 2 manual, `dmc_tests` 4 manual, `holy-mapperel` 40/40, `ppu_vbl_nmi` 11/11,
+`vbl_nmi_timing` 7/7, `sprite_hit_tests_2005.10.05` 11/11, `sprite_overflow_tests` 5/5,
+`blargg_ppu_tests_2005.09.15b` 4/5 with its required `power_up_palette`, `ppu_open_bus`,
+`ppu_read_buffer`, `read_joy3`, and the three MMC3 suites at 5/6 each with their required
+failure — the MMC3 being the board whose `Board::on_ppu_address_bus` arm this lot had to leave
+untouched.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` grows from 13 to **14** groups.
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green` becomes
+`…_mf_4b_and_mf_4c_turned_green`: the tally floor rises from 124 to **125** and
+`PPU Behavior / Palette RAM Quirks` joins the twelve rows pinned by name. The new group is
+`req_core_100_the_mmc5_rom_suites_keep_their_outcomes`, which pins the three MMC5 suites' rows —
+what it guards is that a board now reacting to every PPU read still **runs** them, since a hang
+or a lost IRQ would turn one into a `timeout`. `ZAXNES_TEST_ROMS=… cargo test --release -p
+zax-harness --test test_roms_tests`: **14 passed**.

@@ -501,7 +501,7 @@ fn accuracy_coin() -> Option<(usize, serde_json::Map<String, serde_json::Value>)
 /// The score is asserted as a floor and the eight rows by name, so that a lot which fixes more
 /// does not have to edit this test while one that breaks any of these does.
 #[test]
-fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green() {
+fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green() {
     let Some((passed, tests)) = accuracy_coin() else {
         println!(
             "skipped: set {} to a copy of assets-free/test-roms/ to run this",
@@ -510,11 +510,12 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green() {
         return;
     };
 
-    // Lot MF-4b's end. 116 of these were already there once the drive stopped mistaking
-    // `Implied Dummy Reads`' backup of the zero page for the end of the run (see `coin.rs`).
+    // Lot MF-4c's end, MF-4b's 124 plus `Palette RAM Quirks`. 116 of the 124 were already
+    // there once the drive stopped mistaking `Implied Dummy Reads`' backup of the zero page for
+    // the end of the run (see `coin.rs`).
     assert!(
-        passed >= 124,
-        "AccuracyCoin scored {passed}/147, which is under lot MF-4b's 124"
+        passed >= 125,
+        "AccuracyCoin scored {passed}/147, which is under lot MF-4c's 125"
     );
 
     // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
@@ -545,6 +546,8 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green() {
         "PPU Behavior / PPU Register Mirroring",
         "PPU Behavior / PPU Register Open Bus",
         "PPU Behavior / PPU Read Buffer",
+        // MF-4c step 1: a palette read under greyscale is masked with `$30`.
+        "PPU Behavior / Palette RAM Quirks",
     ] {
         let row = tests[name].as_str().unwrap();
         assert!(row.starts_with("pass"), "{name}: {row}");
@@ -650,4 +653,26 @@ fn req_core_110_the_dummy_cycle_suites_pass() {
     ];
     check("cpu_dummy_reads", &READS);
     check("cpu_dummy_writes", &WRITES);
+}
+
+/// The MMC5 ROMs of the collection, which lot MF-4c's step 4 put on the board's own PPU bus
+/// (finding MR-5-4, REQ-CORE-100).
+///
+/// All three are `manual` — they print a screen with no documented verdict — so what this group
+/// guards is that they still **run**: a board that now reacts to every PPU read is a board that
+/// can hang, loop or lose its IRQ, and any of those would turn one of these into a `timeout`.
+/// The behaviour itself is pinned where it can be asserted rather than transcribed:
+/// `mr1_review_tests::mr_5_4_*` for the set and the two clears,
+/// `mapper_irq_tests::req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names` for the
+/// line the IRQ lands on, and `mmc5test`'s picture — which lot MF-4c measured as the old picture
+/// moved up exactly one scanline — in `docs/progress/MF-4c.md`, step 5.
+#[test]
+fn req_core_100_the_mmc5_rom_suites_keep_their_outcomes() {
+    const EXRAM: [(&str, Outcome); 1] = [("nes-test-roms/exram/mmc5exram.nes", Outcome::Manual)];
+    const MMC5: [(&str, Outcome); 2] = [
+        ("nes-test-roms/mmc5test/mmc5test.nes", Outcome::Manual),
+        ("nes-test-roms/mmc5test_v2/mmc5test.nes", Outcome::Manual),
+    ];
+    check("exram", &EXRAM);
+    check("mmc5test", &MMC5);
 }

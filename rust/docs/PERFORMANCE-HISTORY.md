@@ -288,6 +288,40 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
   played continuously. Counts obtained from `NesBus::oam_dma_count`/`dmc_dma_count` via a temporary
   print in `bench-core`, not by inference.
 
+**The MMC5 listens to the PPU's reads, and only the MMC5 pays** (lot MF-4c)
+
+- MR-5-4: the board's "in-frame" flag and its scanline counter now come off the PPU bus (three
+  identical nametable reads, then the next read), with the idle clear on `on_cpu_cycle` and the
+  `$FFFA`/`$FFFB` hook in `cpu_read_override`. `Mmc5::on_ppu_scanline` is gone.
+- **No new notification was needed.** `Ppu2C02::read_vram_inner` has told the cartridge every
+  address it reads since the first PPU commit, nametable and attribute bytes included; Q-116's
+  cost estimate of ~33 000 new instructions a frame for every game was a misreading of the call
+  chain. What the lot added is a second load-time latch so the two cold sites where the address
+  lines move with **/RD high** — a `$2007` write and a `$2006` write — and the two per-tile
+  notifications that drive a pattern address one dot *ahead* of its fetch can be kept off a board
+  that waits on /RD. That alone is 229 M instructions of 300 frames of *Castlevania III*.
+- **Two regressions that only callgrind could see, both of them MF-3b's rules:**
+  - removing the MMC5's hook from `process_dot` left two `if self.dot == 1` tests side by side;
+    LLVM merged them and made the second branchless, so the scanline compare ran on every one of
+    the ~21 000 dots a frame that reach that function. **+30 to +40 M on every game, NROM
+    included.** The capture must stay **nested** inside the one `dot == 1` block.
+  - inlining the detection into the MMC5's arm of `Board::on_ppu_address_bus` added **one
+    instruction to that dispatch's prologue** (the board tag kept alive across the jump-table
+    index), paid by mappers 4, 64 and 118 on every fetch: **+16.6 M on *Super Mario Bros. 3***.
+    `Mmc5::see_ppu_read` is `#[inline(never)]` for that reason and must stay so.
+- After both: callgrind, 300 frames, against `a5994fd1` — `M0_P32K_C8K_V` **−0.115 %**,
+  Mega Man 2 **−0.138 %**, Super Mario Bros. 3 **−0.138 %**, Zelda II **−0.531 %**, Castlevania
+  III **+3.013 %**. On the four non-MMC5 ROMs every pinned symbol is **0 to the instruction** —
+  `Board::on_ppu_address_bus` on SMB3 included — and the only movers are `run_dots` (−6.4 to
+  −34.5 M, the hook), `read_internal` and `write_internal` (−131 k to −16).
+- **An MMC3 game belongs in the measurement set.** `Board::on_ppu_address_bus` is reached only by
+  mappers 4, 5, 64 and 118, so a regression in it is invisible on the MMC1 and NROM ROMs the
+  baseline uses. *Super Mario Bros. 3* is the one that caught it.
+- Invariant: a board in `Cartridge::watches_ppu_reads` must return `None` from
+  `Mapper::chr_view`, or `Ppu2C02::run_visible_span` takes dots 2 to 255 of every visible line
+  without a single notification. Asserted in
+  `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`.
+
 Combined effect of the core work: SMB1 -16 %, Metroid -15 %, MM2 -12 % on top of the
 milestones, device core about 17.4 -> 10-12 ms per NES frame.
 
