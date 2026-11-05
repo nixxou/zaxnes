@@ -915,13 +915,39 @@ impl Ppu2C02 {
                     status |= 0x20;
                 }
 
-                self.refresh_decay(status, 0xE0);
-
-                // Reading the flag one dot before it would be raised suppresses it for the
-                // whole frame (nesdev; vbl_nmi_timing test 2, case 8).
-                if self.scanline == self.timing.vblank_scanline && self.dot == 0 {
-                    self.suppress_vblank = true;
+                // Dot 0 is where both of PPUSTATUS's timing quirks live, so the two share one
+                // test on the dot and differ only in the scanline.
+                if self.dot == 0 {
+                    if self.scanline == self.timing.vblank_scanline {
+                        // Reading the flag one dot before it would be raised suppresses it for
+                        // the whole frame (nesdev; vbl_nmi_timing test 2, case 8).
+                        self.suppress_vblank = true;
+                    } else if self.scanline == self.pre_render_scanline() {
+                        // **The sprite flags are sampled at the end of the read, the vblank flag
+                        // at its start.** All three are cleared on dot 1 of the pre-render line,
+                        // and `AccuracyCoin`'s `$2002 flag timing` says why a read still sees
+                        // them differently: "Reads from $2002 will latch the state of the vblank
+                        // flag at the beginning of the read (when M2 goes high), but the sprite
+                        // flags are not latched, so the value you get back is the state of the
+                        // sprite flags at the end of the read (when M2 goes low). […] the sprite
+                        // flags are read approximately 1.875 PPU cycles after the vblank flag."
+                        //
+                        // So a read landing on dot 0 of this line samples the sprite flags at
+                        // about dot 1.9 — past the clear — while its vblank bit is the one dot 0
+                        // still had. That is the single byte of the ROM's key that moves: its
+                        // four reads walk dots 339 and 340 of the line before, then dots 0 and 1
+                        // of this one, and want `E0 E0 80 00` where every flag latched at the
+                        // read's own dot would give `E0 E0 E0 00`. Dot 340 of the previous line
+                        // is 1.9 dots short of the clear, so it keeps both bits, and by dot 1
+                        // the clear has been seen by the vblank bit too.
+                        //
+                        // The ROM also accepts `E0 80 80 00`, a console whose sampling lands a
+                        // dot earlier; this takes the first key.
+                        status &= !0x60;
+                    }
                 }
+
+                self.refresh_decay(status, 0xE0);
 
                 self.vblank_flag = false;
                 self.write_toggle = false;

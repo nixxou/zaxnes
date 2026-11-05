@@ -127,6 +127,69 @@ fn req_core_112_sprite_zero_hit_needs_a_solid_pixel_in_both_layers() {
     assert!(!hit(0x1E, 0x00)); // transparent background
 }
 
+/// `AccuracyCoin`'s `$2002 flag timing` (REQ-CORE-112, REQ-CORE-116): the sprite flags and the
+/// vblank flag are all cleared on dot 1 of the pre-render line, but a `$2002` read latches the
+/// vblank flag at its **start** and samples the sprite flags at its **end**, about 1.9 dots
+/// later. So a read landing on dot 0 of that line comes back with bit 7 still set and bits 5 and
+/// 6 already gone, and a read one dot earlier still has all three.
+#[test]
+fn req_core_112_a_2002_read_on_the_pre_render_dot_0_already_sees_the_sprite_flags_cleared() {
+    /// Sets both sprite flags, then reads `$2002` on the cycle whose PPU position is
+    /// `(line, dot)`. The read's own cycle advances the PPU three dots, so the alignment is
+    /// found three dots ahead of the target; the achieved position is asserted, so a phase that
+    /// cannot land on it fails loudly rather than measuring the wrong dot.
+    fn status_read_at(line: i32, dot: i32) -> u8 {
+        let mut fixture = TileFixture::new();
+        // Sprite 0 over a solid background sets the hit; nine sprites on the line set overflow.
+        fixture.fill_vram(0x2000, 960, SOLID_TILE);
+        for n in 0..9u8 {
+            fixture.set_sprite(n, 99, SOLID_TILE, 0x00, 8 * n);
+        }
+        fixture.set_sprite(0, 99, SOLID_TILE, 0x00, 100);
+        fixture.set_scroll(0, 0);
+        fixture.set_control(0x00);
+        fixture.set_mask(0x1E);
+        fixture.core.run_frame(0);
+
+        // Three dots before the target, which one read cycle then covers.
+        let (want_line, want_dot) = if dot >= 3 {
+            (line, dot - 3)
+        } else {
+            (line - 1, dot + 341 - 3)
+        };
+
+        let bus = fixture.core.bus_mut();
+        let mut guard = 0;
+        loop {
+            bus.sync_ppu();
+            if bus.ppu().scanline() == want_line && bus.ppu().dot() == want_dot {
+                break;
+            }
+            bus.tick();
+            guard += 1;
+            assert!(guard < 2_000_000, "never aligned on {want_line}/{want_dot}");
+        }
+
+        let status = bus.read(0x2002);
+        assert_eq!(
+            (line, dot),
+            (bus.ppu().scanline(), bus.ppu().dot()),
+            "the read did not land where the test meant it to"
+        );
+        status & 0xE0
+    }
+
+    let pre_render = TileFixture::new().core.ppu().pre_render_scanline();
+
+    // Dot 0: the vblank bit is the one this dot still had, the sprite flags are sampled past the
+    // dot-1 clear. The ROM's third reading, `$80`.
+    assert_eq!(0x80, status_read_at(pre_render, 0));
+
+    // The last dot of the line before: 1.9 dots short of the clear, so all three stand. The
+    // ROM's second reading, `$E0`.
+    assert_eq!(0xE0, status_read_at(pre_render - 1, 340));
+}
+
 #[test]
 fn req_core_116_the_overflow_flag_rises_once_nine_sprites_share_a_line() {
     fn overflow(sprites: u8) -> bool {

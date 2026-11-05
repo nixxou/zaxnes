@@ -538,6 +538,111 @@ leaves on the bus — which `Internal Data Bus`, `Open Bus` and `Implied Dummy R
 not worth shipping unpinned, so it is out. The next lot wants the two rules together, with the
 256-byte diff above as its instrument.
 
+## Step 5 — the dot on which `$2002`'s sprite flags clear
+
+### The failing message
+
+> `Sprite Evaluation / $2002 flag timing` 1: Verify the timing in which the sprite zero and
+> sprite overflow flags are cleared.
+
+### The hardware rule, and its source
+
+MF-4b guessed this one was about *which dot* clears the flags and that the dot "needs its `.asm`
+read". The `.asm` says the opposite, in as many words, and it is not a dot at all:
+
+> Just so you are aware, all the flags are cleared on dot 1 of the pre-render line. This is a
+> fact. […] If you are failing this test, you might be inclined to scoot the sprite flags over,
+> so they get cleared on dot 0, but that's not the proper solution. Here's what's going on:
+> Reads from $2002 will latch the state of the vblank flag at the beginning of the read (when M2
+> goes high), but the sprite flags are **not** latched, so the value you get back is the state of
+> the sprite flags at the **end** of the read (when M2 goes low). On a revision G CPU, M2 has a
+> duty cycle of 15/24 […] the sprite flags are read approximately **1.875 PPU cycles** after the
+> vblank flag is read.
+
+So the clear stays where it was — dot 1 of the pre-render line, for all three flags — and what
+moves is the **sampling instant of a read**: bit 7 as of the read's own dot, bits 5 and 6 as of
+about 1.9 dots later.
+
+`ReadFrom2002WithExactTiming` walks four reads one dot apart, starting at scanline 260 dot 339,
+and the key is `E0 E0 80 00` (`E0 80 80 00` also accepted, a console sampling a dot earlier):
+
+| read lands on | sprite flags sampled at | key | why |
+| --- | --- | --- | --- |
+| 260 / 339 | 260 / ~340.9 | `E0` | before the clear |
+| 260 / 340 | pre-render / ~0.9 | `E0` | **still** before dot 1 |
+| pre-render / 0 | pre-render / ~1.9 | `80` | past the clear; bit 7 is the one dot 0 had |
+| pre-render / 1 | pre-render / ~2.9 | `00` | the clear is behind both |
+
+Flags latched at the read's own dot — what this core did — give `E0 E0 E0 00`: **one byte**, the
+third.
+
+### The change
+
+One arm, no new state. `Ppu2C02::read`'s register-2 arm masks bits 5 and 6 off the byte it
+returns when the read lands on **dot 0 of the pre-render line**, which is the only position
+within 1.9 dots before the clear. The test on the dot is **shared** with the vblank-suppression
+quirk that was already there — both live on dot 0 and differ only in the scanline — so the two
+are now one `dot == 0` gate with two scanline arms instead of a separate compare each.
+
+### Hot path: the generated code after LTO
+
+`cmp4c.py`, `bin-4d-s2b.s` against `bin-4d-s5.s`. **Every pinned symbol IDENTICAL, raw** —
+including `Ppu2C02::run_dots` (1 936 → 1 936), `NesBus::read_internal` (176 → 176, so the call
+into the PPU is unchanged) and `NesBus::catch_up_ppu` (219 → 219). The one symbol that moves is
+`Ppu2C02::read`, 257 → **263**, +6.
+
+The six are in a basic block of their own, reached by the `dot == 0` branch and branchless inside
+it:
+
+```
+movl   #(%rcx), %r8d     ; scanlines_per_frame
+decl   %r8d              ;   - 1  = pre_render_scanline()
+movzbl %sil, %r10d       ; the byte as composed
+andb   $-97, %sil        ; status &= !0x60
+cmpl   %r8d, %edx        ; scanline == pre-render?
+cmovnel %r10d, %esi      ; and pick
+```
+
+**A `$2002` read on any other dot does not reach them**, and its own path did not grow: the
+merged gate tests the dot once where the old code tested the scanline and the dot, so the common
+read — a vblank spinner's, which is what PR-1's `duelito` and `vblnmi` are in the set for — pays
+one compare as before. The rest of the function's diff is `apply_decay`'s unrolled loop being
+re-laid-out around the new block (`-4` register moves, one branch flipped from `jge` to `jl`);
+no instruction was added to it.
+
+Call sites unchanged, every one of MF-3b rule 1's list.
+
+### Games whose output may move
+
+A game must read `$2002` on **dot 0 of the pre-render line** — one dot in 89 342 — and care about
+bits 5 or 6 of that read. A vblank poller reads bit 7 and is unaffected even when it lands there;
+sprite-0 timing code polls bit 6 during the visible lines, hundreds of scanlines away. **No
+commercial game is expected to move**, and the suites agree: `sprite_hit_tests` 11 / 11,
+`sprite_overflow_tests` 5 / 5, `ppu_vbl_nmi` 11 / 11, `vbl_nmi_timing` 7 / 7, every screen
+identical.
+
+### Tests and ROMs
+
+`ppu_rendering_tests::req_core_112_a_2002_read_on_the_pre_render_dot_0_already_sees_the_sprite_flags_cleared`
+sets both flags (sprite 0 over a solid background, nine sprites on the line), then aligns the bus
+three dots ahead of the dot it wants — a read cycle covers exactly three — and **asserts the
+position it achieved**, so a phase that cannot land on the dot fails loudly instead of measuring
+a neighbour. Both of the ROM's middle readings are pinned: `$80` at pre-render dot 0, `$E0` at
+dot 340 of the line before.
+
+| suite | step 2 | step 5 |
+| --- | --- | --- |
+| `ppu_vbl_nmi`, `vbl_nmi_timing` (19 ROMs) | 19 / 19 | **19 / 19** |
+| `sprite_hit_tests`, `sprite_overflow_tests` (18 ROMs) | 17 pass, 1 manual | **17 pass, 1 manual** |
+| `oam_read`, `oam_stress` (4 ROMs) | 3 pass, 1 manual | **3 pass, 1 manual** |
+| `ppu_*` (20 ROMs) | 19 / 20, `power_up_palette` required | **19 / 20**, same row |
+| `AccuracyCoin` | 127 / 147 | **128 / 147** — `$2002 flag timing` **pass** |
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **714 passed, 0 failed**.
+
+**Save states**: no field added, nothing moved.
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
@@ -547,6 +652,6 @@ not worth shipping unpinned, so it is out. The next lot wants the two rules toge
 - [~] step 4 — what a DMA reads when the ports and the APU drive the bus: **the mirror merge is
   found and all sixteen key bytes come out, but a second rule on the same arm remains; not
   committed**
-- [ ] step 5 — the dot on which `$2002`'s sprite flags clear
+- [x] step 5 — the dot on which `$2002`'s sprite flags clear
 - [ ] step 6 — `$2004` on a visible line, and `$2007` read with rendering on
 - [ ] step 7 — the suites, the campaign and the guard
