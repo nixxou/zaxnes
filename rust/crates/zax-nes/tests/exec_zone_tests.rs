@@ -160,17 +160,25 @@ fn with_its_data_the_zone_reaches_the_extension_at_3000_and_the_game_still_the_p
 }
 
 // ---------------------------------------------------------------------------------------------
-// A code fetch from the zone and the DMA units (lot ZR-1).
+// A code fetch from the zone and the DMA units (lots ZR-1 and ZR-2).
 //
 // The zone is `$2000`-`$3FFF` — the PPU's registers — and the byte a fetch takes there comes from
-// the pack's code buffer, never from the bus. So the fetch itself must read no register, whatever
-// the DMA units are doing on the cycle it lands on. The halt's **own** repeated read is a
-// different thing and still happens: the CPU is stopped with `$2xxx` on the address bus.
+// the pack's code buffer, never from the bus. So **nothing** about the fetch may read a register:
+// not the fetch itself (lot ZR-1), and not the halt cycle's or the dummy cycles' repeats of the
+// fetch address inside `run_dma` and `dmc_only_dma` (lot ZR-2). On real hardware those repeats
+// always happen, because the CPU is stopped with its address on the bus; but no NES runs code from
+// the PPU's register window, so for a zone fetch there is no hardware behaviour to preserve.
 //
-// `acfa6e20` broke exactly this by routing the halted zone fetch through
-// `NesBus::halted_read_cycle`, which since that commit ends in a real read on both its paths. It
-// cost Super Mario Bros. 3 the row of ground above its status bar: 3 301 register reads in 1 500
-// frames, 420 of `$2002` and 411 of `$2007`.
+// `acfa6e20` broke the first half by routing the halted zone fetch through
+// `NesBus::halted_read_cycle`, which since that commit ends in a real read on both its paths; it
+// cost Super Mario Bros. 3 the row of ground above its status bar. ZR-1 took that read away and
+// the row stayed broken, because 3 166 of the DMA's own repeats were left — 441 of `$2002` and
+// 442 of `$2007` in 1 500 frames, and a `$2007` read during rendering moves `v` by a coarse X and
+// a Y at once (MF-4d step 6).
+//
+// The DMA units' reads of their **own** addresses are not this read, and every test below asserts
+// they are untouched: the sample fetch happens, the transfer lands in OAM byte for byte, and the
+// access spends exactly the cycles it would have spent.
 // ---------------------------------------------------------------------------------------------
 
 /// The PPU's internal `v`, from the four halves the public accessors expose.
@@ -270,22 +278,26 @@ fn req_core_113_a_zone_fetch_under_a_held_dmc_request_touches_no_ppu_register() 
     assert_eq!(1, bus.dmc_dma_count(), "the held fetch ran once it was due");
 }
 
-/// REQ-CORE-113. The halted case, where the DMA unit **does** repeat the CPU's read: a zone fetch
-/// must make exactly **one read fewer** than the data read it stands for, that one being the
-/// CPU's own, which for a fetch comes from the code buffer instead.
-///
-/// `$2007` is the instrument because its read is the only one whose effect accumulates: `v` steps
-/// once per read, so the two machines' `v` count the reads for us and the test never has to name
-/// how many repeats the DMA itself makes.
-#[test]
-fn req_core_113_a_halted_zone_fetch_reads_one_time_fewer_than_the_data_read_it_stands_for() {
-    let mut bus = zone_fetch_machine();
-    hold_a_dmc_request(&mut bus);
-    // A write cannot be halted, so these only let the load's delay run out: the next read cycle
-    // is the halt.
+/// Lets a held DMC request come due: a write cannot be halted, so these three spend the load's
+/// delay without giving the unit the bus. The next **read** cycle is the halt.
+fn let_the_dmc_request_come_due(bus: &mut zax_nes::NesBus) {
     for _ in 0..3 {
         bus.write(0x0000, 0x00);
     }
+}
+
+/// REQ-CORE-113. The halted case: the zone fetch must make **none** of the reads the data read it
+/// stands for makes — neither the CPU's own (lot ZR-1) nor the halt's and the dummy cycles'
+/// repeats (lot ZR-2).
+///
+/// `$2007` is the instrument because its read is the only one whose effect accumulates: `v` steps
+/// once per read. So `v` counts the reads for us, and the claim is the sharpest one there is —
+/// after the fetch `v` is **exactly** where it was, while the data read moved it.
+#[test]
+fn req_core_113_a_halted_zone_fetch_makes_none_of_the_reads_the_data_read_it_stands_for_makes() {
+    let mut bus = zone_fetch_machine();
+    hold_a_dmc_request(&mut bus);
+    let_the_dmc_request_come_due(&mut bus);
 
     let before = vram_address(&bus);
     let mut data = bus.clone();
@@ -294,15 +306,19 @@ fn req_core_113_a_halted_zone_fetch_reads_one_time_fewer_than_the_data_read_it_s
     assert_eq!(0xEA, fetch.read_code(0x2007));
 
     assert_eq!(1, data.dmc_dma_count(), "the data read was halted");
-    assert_eq!(1, fetch.dmc_dma_count(), "and so was the fetch");
+    assert_eq!(
+        1,
+        fetch.dmc_dma_count(),
+        "and so was the fetch, and it fetched"
+    );
     assert!(
         vram_address(&data) > before,
         "the halt repeats the CPU's read, so the data read moved v more than once"
     );
     assert_eq!(
-        vram_address(&data) - 1,
+        before,
         vram_address(&fetch),
-        "the fetch made the halt's own reads and not the CPU's"
+        "the fetch moved v not at all: it made neither its own read nor the halt's"
     );
 }
 
@@ -337,8 +353,149 @@ fn req_core_113_a_zone_fetch_halted_by_an_oam_transfer_lets_it_finish_and_reads_
     );
     assert!(vram_address(&data) > before);
     assert_eq!(
-        vram_address(&data) - 1,
+        before,
         vram_address(&fetch),
-        "the fetch made the halt's own reads and not the CPU's"
+        "the fetch moved v not at all, and the transfer ran all the same"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The same two halts **during rendering** (lot ZR-2), which is the state the picture broke in.
+//
+// Rendering off, a `$2007` read steps `v` by the control register's stride. During rendering it
+// moves a coarse X and a Y at once instead (MF-4d step 6), which is the rule that turned the
+// reads ZR-1 left behind into a visible break at Super Mario Bros. 3's status-bar split. So these
+// two run the halt where it did its damage, and they ask for more than `v`: the write toggle, the
+// read buffer, and the cycles the access spent.
+//
+// The counterpart is a **control** rather than the data read: a halted read of `$8000`, which is
+// the same halt, the same unit and the same cycles, on an address that is not a register. A
+// halted zone fetch must be indistinguishable from it in the PPU — that is the whole rule, and
+// it is also what pins the cycles, because during rendering the PPU moves `v` by itself and two
+// machines only agree on it if they stopped on the same dot.
+// ---------------------------------------------------------------------------------------------
+
+/// Everything the fetch must leave alone, read out of `bus` and consuming it, because the last two
+/// probes are destructive.
+#[derive(Debug, PartialEq, Eq)]
+struct Observed {
+    /// Where the PPU stopped, which counts the cycles the access spent.
+    position: (i32, i32),
+    /// `v`.
+    vram: u16,
+    /// What `$2007` hands over, which is the read buffer as the access left it.
+    buffered: u8,
+    /// What a second `$2006` write makes of `v`: it loads the low byte only while the write
+    /// toggle is still set, so this is the toggle (a read of `$2002`, or of any mirror of it,
+    /// would have cleared it).
+    write_toggle_probe: u16,
+}
+
+fn observe(mut bus: zax_nes::NesBus) -> Observed {
+    bus.sync_ppu();
+    let position = (bus.ppu().scanline(), bus.ppu().dot());
+    let vram = vram_address(&bus);
+    let buffered = bus.read(0x2007);
+    bus.write(0x2006, 0x99);
+    Observed {
+        position,
+        vram,
+        buffered,
+        write_toggle_probe: vram_address(&bus),
+    }
+}
+
+/// Whether the PPU stands well inside a visible line, fetching: where a `$2007` read moves `v`
+/// by a coarse X and a Y at once rather than by the control register's stride.
+fn rendering_a_visible_line(bus: &mut zax_nes::NesBus) -> bool {
+    bus.sync_ppu();
+    (16..200).contains(&bus.ppu().scanline()) && (16..240).contains(&bus.ppu().dot())
+}
+
+/// Turns rendering on and spends CPU cycles — writes of work RAM, which no unit may halt and
+/// which touch no register — until it gets there. One frame is under 30 000 CPU cycles, so the
+/// bound is three frames' worth and the assertion after the loop never fires.
+fn render_into_a_visible_line(bus: &mut zax_nes::NesBus) {
+    bus.write(0x2001, 0x18); // Background and sprites shown: the PPU fetches.
+    for _ in 0..90_000 {
+        if rendering_a_visible_line(bus) {
+            break;
+        }
+        bus.write(0x0000, 0x00);
+    }
+    assert!(
+        rendering_a_visible_line(bus),
+        "the PPU never reached a visible line"
+    );
+}
+
+/// The machine of the halted tests above, rendering, with the zone on and the PPU primed.
+fn rendering_zone_fetch_machine() -> zax_nes::NesBus {
+    let mut bus = zone_fetch_machine();
+    render_into_a_visible_line(&mut bus);
+    bus
+}
+
+/// Asserts that a zone fetch of `address` left the PPU exactly as the control's halted read of
+/// `$8000` left it, both halted from `armed`.
+fn a_zone_fetch_is_the_controls_halted_read(armed: &zax_nes::NesBus, address: u16, what: &str) {
+    let mut control = armed.clone();
+    let mut fetch = armed.clone();
+    control.read(0x8000);
+    assert_eq!(
+        0xEA,
+        fetch.read_code(address),
+        "{what}: the byte came from the pack's code"
+    );
+    assert_eq!(
+        control.dmc_dma_count(),
+        fetch.dmc_dma_count(),
+        "{what}: the DMC fetched as it did for the control"
+    );
+    assert_eq!(
+        control.oam_dma_count(),
+        fetch.oam_dma_count(),
+        "{what}: the transfer ran as it did for the control"
+    );
+    assert_eq!(
+        control.ppu().oam(),
+        fetch.ppu().oam(),
+        "{what}: OAM is the control's, byte for byte"
+    );
+    assert_eq!(
+        observe(control),
+        observe(fetch),
+        "{what}: the PPU is not the control's — the fetch read a register, \
+         or spent the wrong cycles"
+    );
+}
+
+/// REQ-CORE-113. A zone fetch halted by a DMC sample fetch, during rendering: `v`, the write
+/// toggle and the read buffer are the control's, and so are the cycles.
+///
+/// Fetched at a `$2007` mirror and at a `$2002` mirror, which are the two reads with something to
+/// lose: `$2007` moves `v` and refills the buffer, `$2002` clears the toggle. At the tip of ZR-1
+/// those are 442 and 441 reads of Super Mario Bros. 3's 1 500 frames.
+#[test]
+fn req_core_113_a_zone_fetch_halted_by_a_dmc_fetch_during_rendering_moves_no_ppu_register() {
+    for address in [0x2007, 0x2002] {
+        let mut armed = rendering_zone_fetch_machine();
+        hold_a_dmc_request(&mut armed);
+        let_the_dmc_request_come_due(&mut armed);
+        a_zone_fetch_is_the_controls_halted_read(&armed, address, &format!("${address:04X}"));
+    }
+}
+
+/// REQ-CORE-113. The same during rendering with an OAM transfer — the other unit, the other path
+/// through `NesBus::run_dma`, and 512 cycles of repeats instead of two or three.
+#[test]
+fn req_core_113_a_zone_fetch_halted_by_an_oam_transfer_during_rendering_moves_no_ppu_register() {
+    for address in [0x2007, 0x2002] {
+        let mut armed = rendering_zone_fetch_machine();
+        for (index, slot) in armed.ram_mut()[0x0200..0x0300].iter_mut().enumerate() {
+            *slot = (index as u8) ^ 0x5A;
+        }
+        armed.write(0x4014, 0x02); // The transfer halts the next read cycle.
+        a_zone_fetch_is_the_controls_halted_read(&armed, address, &format!("${address:04X}"));
+    }
 }

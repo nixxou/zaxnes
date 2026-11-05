@@ -561,6 +561,7 @@ impl NesBus {
     /// * **the halt cycle repeats the CPU's own read.** The CPU is stopped with its address on
     ///   the bus, so the access happens twice — the extra `$4016` read of
     ///   `dmc_dma_during_read4/dma_4016_read` and the extra `$2007` reads of `dma_2007_read`.
+    ///   `ZONE` is the one case where it does not: see [`NesBus::dma_repeat_read`].
     /// * **get and put cycles.** "The CPU alternates between cycles on which DMA can get (read)
     ///   and cycles on which DMA can put (write). These are the first and second halves of APU
     ///   cycles." A unit that wants the wrong half wastes an alignment cycle. In this core's
@@ -583,10 +584,16 @@ impl NesBus {
     ///
     /// What the three shapes tried here cost, and the residual the measured one leaves, are in
     /// the ticket.
+    ///
+    /// **`ZONE`** says the halted read is an instruction fetch from the widescreen extension's
+    /// execution zone, and suppresses the re-reads of `read_address` alone — see
+    /// [`NesBus::dma_repeat_read`] for the rule and [`NesBus::halted_zone_read_cycle`] for why it
+    /// is a const parameter and not an argument. Everything else is the same machine: the same
+    /// cycles, the same transfers, the same reads of the units' **own** addresses.
     // Q-119
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     #[inline(never)]
-    fn run_dma(&mut self, read_address: u16) {
+    fn run_dma<const ZONE: bool>(&mut self, read_address: u16) {
         // Only the **first** idle read of $4016/$4017 is a read as far as the controller is
         // concerned: /OE stays active for the cycles that follow, so the shift register is
         // clocked once however many idle cycles the DMA spends (nesdev, "DMA"; the original
@@ -610,8 +617,7 @@ impl NesBus {
         // happens with the CPU's address still on the bus.
         self.dma &= !DMA_HALT;
         if !halt_is_invisible {
-            let value = self.read_internal(read_address);
-            self.data_bus = value;
+            self.dma_repeat_read::<ZONE>(read_address);
         }
 
         // Bytes read and written so far, counted the way the hardware's pair counter is: even
@@ -682,8 +688,7 @@ impl NesBus {
                 // The CPU's address is still on the bus, so its read happens again.
                 self.dma_cycle();
                 if !input_port {
-                    let value = self.read_internal(read_address);
-                    self.data_bus = value;
+                    self.dma_repeat_read::<ZONE>(read_address);
                 }
             }
         }
@@ -698,15 +703,54 @@ impl NesBus {
     /// A game that plays DPCM makes tens of these per frame against its one OAM transfer
     /// (`dpcmletterbox`: 19 051 fetches against 297 transfers in 300 frames), so this is the
     /// other half of the DMA bookkeeping lot MF-4a-ter set out to trim.
+    /// `ZONE` carries [`NesBus::run_dma`]'s meaning, and suppresses the same re-reads.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     #[inline(never)]
-    fn dmc_only_dma(&mut self, read_address: u16) {
+    fn dmc_only_dma<const ZONE: bool>(&mut self, read_address: u16) {
         // The halt cycle has already run; what is left of it is its read, with the CPU's address
         // still on the bus. `halt_is_invisible` needs `internal`, which the caller excluded.
         self.dma &= !DMA_HALT;
-        let value = self.read_internal(read_address);
-        self.data_bus = value;
-        self.dmc_fetch_cycles(read_address);
+        self.dma_repeat_read::<ZONE>(read_address);
+        self.dmc_fetch_cycles::<ZONE>(read_address);
+    }
+
+    /// The read a DMA unit makes of the **CPU's** address while it holds the bus: the halt cycle's
+    /// own read, and the dummy and alignment cycles' repeats of it. One per idle DMA cycle.
+    ///
+    /// On real hardware it always happens — the CPU is stopped with its address on the bus and the
+    /// access is simply made again, which is what `dmc_dma_during_read4` and `dma_2007_read`
+    /// measure. **`ZONE` is the one case where it must not** (lot ZR-2): the address is then an
+    /// instruction fetch from the widescreen extension's execution zone, `$2000`-`$3FFF`, and that
+    /// zone does not exist on real hardware at all — no NES ever runs code from the PPU's register
+    /// window, so there is no hardware behaviour to preserve by reading `$2002` or `$2007` here.
+    /// What there is instead is the extension's own rule: **code running from the zone never
+    /// reaches the PPU registers through the CPU's fetch path**, neither by the fetch (lot ZR-1)
+    /// nor by a halt or dummy re-read of the fetch address (this lot). The hack's own explicit
+    /// loads and stores to the PPU registers are data accesses, not fetches, and are out of the
+    /// rule — they go on reaching the PPU as they always did.
+    ///
+    /// Measured at the tip of ZR-1, Super Mario Bros. 3 with `--advanced --widescreen 128`:
+    /// 1 077 halted zone fetches in 1 500 frames made **3 166** of these reads, every one of them
+    /// reaching `Ppu2C02::read` and none absorbed by the extension's own `$3000`-`$3FFF` window —
+    /// 441 of `$2002`, each clearing the `w` latch, and 442 of `$2007`, each moving `v` and the
+    /// read buffer. Since MF-4d step 6 a `$2007` read during rendering moves `v` by a coarse X and
+    /// a Y at once, which is right for a real read and is what broke the row of ground above the
+    /// status bar. Ninja Gaiden III: 3 810 of them in 700 frames.
+    ///
+    /// Not reading leaves [`NesBus::data_bus`] alone as well, which is the same statement: a read
+    /// that does not happen drives nothing onto the bus. The byte the fetch takes comes from the
+    /// pack's code buffer in [`CpuBus::read_code`], and loads it there.
+    ///
+    /// The DMA units' reads of their **own** addresses — an OAM transfer's source bytes, the DMC's
+    /// sample fetch — are not this read and are untouched: the transfer runs byte for byte, on the
+    /// same cycles, whatever halted it.
+    #[allow(clippy::inline_always)] // The whole point: `ZONE` false must leave no trace.
+    #[inline(always)]
+    fn dma_repeat_read<const ZONE: bool>(&mut self, read_address: u16) {
+        if !ZONE {
+            let value = self.read_internal(read_address);
+            self.data_bus = value;
+        }
     }
 
     /// The cycles of a DMC sample fetch with no OAM transfer beside it: the dummy cycle, an
@@ -729,18 +773,16 @@ impl NesBus {
     /// The DMC's read keeps going through [`NesBus::dma_read`]: it is one call per fetch, it is
     /// where the 2A03's "two reads in a row" rule lives, and a sample address outside
     /// `$8000`-`$FFFF` (which only a loaded state can produce) must still decode as it did.
-    fn dmc_fetch_cycles(&mut self, read_address: u16) {
+    fn dmc_fetch_cycles<const ZONE: bool>(&mut self, read_address: u16) {
         // The dummy cycle. The CPU's address is still on the bus, so its read happens again.
         self.dma &= !DMA_DUMMY;
         self.tick();
-        let value = self.read_internal(read_address);
-        self.data_bus = value;
+        self.dma_repeat_read::<ZONE>(read_address);
 
         // An alignment cycle when the cycle after this one would not be a get cycle.
         if (self.cycles & 1) == 0 {
             self.tick();
-            let value = self.read_internal(read_address);
-            self.data_bus = value;
+            self.dma_repeat_read::<ZONE>(read_address);
         }
 
         // The get cycle: the memory reader has had its halt and its dummy cycle, so it reads.
@@ -1249,9 +1291,9 @@ impl NesBus {
         if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) && (address & 0xFFE0) != 0x4000 {
             // A lone DMC fetch, which is most of what a game playing DPCM comes here for, and a
             // fixed three or four cycles rather than a state machine (lot MF-4a-ter step 3).
-            self.dmc_only_dma(address);
+            self.dmc_only_dma::<false>(address);
         } else {
-            self.run_dma(address);
+            self.run_dma::<false>(address);
         }
         self.tick();
         // The cycle the CPU finally reads on, for the five `SH*` stores: they drop the AND with
@@ -1286,16 +1328,27 @@ impl NesBus {
     /// 420 of `$2002` and 411 of `$2007`. It broke the row of ground above the status bar from
     /// frame 1 500, and Ninja Gaiden III from frame 370.
     ///
-    /// What the DMA does **is** unchanged, and that is deliberate: the halt still repeats the
-    /// CPU's read with its address on the bus, inside [`NesBus::run_dma`] and
-    /// [`NesBus::dmc_only_dma`] exactly as they do for any other halted address. That read is the
-    /// hardware's — the CPU is stopped with `$2xxx` on the address bus whatever the fetched byte
-    /// came from — and it is the one the bus saw at `c4577878`. Only the CPU's own second read,
-    /// the one that stands for the cycle it was denied, has no counterpart here: the fetch takes
-    /// its byte from the code buffer when `zone_read_cycle` returns.
+    /// **Nor may the DMA read it on the fetch's behalf** (lot ZR-2). ZR-1 took away the CPU's own
+    /// read and left the halt's and the dummy cycles' re-reads of the same address inside
+    /// [`NesBus::run_dma`] and [`NesBus::dmc_only_dma`], on the grounds that the CPU is stopped
+    /// with `$2xxx` on the address bus whatever the fetched byte came from. That reasoning does not
+    /// hold, because the premise does not: **the zone does not exist on real hardware**, so there
+    /// is no halt of a fetch from `$2000`-`$3FFF` whose behaviour could be preserved. What is left
+    /// is the extension's rule, and it covers the whole fetch path — see
+    /// [`NesBus::dma_repeat_read`], which is where the suppression lives and what it measured.
+    /// 3 166 of those reads survived ZR-1 on Super Mario Bros. 3's 1 500 frames and the row of
+    /// ground stayed broken.
     ///
-    /// [`NesBus::dma_gave_back`] is not stamped either, for the same reason: it is read by the
-    /// five `SH*` stores about **their own dummy read**, which is a data read and never a fetch.
+    /// **Why `ZONE` is a const parameter and not an argument.** `run_dma` and `dmc_only_dma` are
+    /// on the DMA path of **every** game, and the bar for this lot is zero cost outside the zone.
+    /// A `bool` argument would put a `movl` at each of their ordinary call sites and a test in
+    /// each body; a const parameter is monomorphised, so `run_dma::<false>` is the old `run_dma`
+    /// instruction for instruction and its call site is the old call site. What it costs instead
+    /// is a second, cold copy of each — step 2's table measures it — reached only from here.
+    ///
+    /// [`NesBus::dma_gave_back`] is not stamped either, for the same reason the read is not made:
+    /// it is read by the five `SH*` stores about **their own dummy read**, which is a data read
+    /// and never a fetch.
     ///
     /// A zone address is in `$2000`-`$3FFF` by construction (`Wide::zone_offset`), so
     /// `halted_read_cycle`'s `$4000`-`$401F` test is answered here once and for all: the halted
@@ -1308,9 +1361,9 @@ impl NesBus {
             return;
         }
         if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) {
-            self.dmc_only_dma(address);
+            self.dmc_only_dma::<true>(address);
         } else {
-            self.run_dma(address);
+            self.run_dma::<true>(address);
         }
         // The cycle the CPU finally fetches on; its byte comes from the code buffer.
         self.tick();
