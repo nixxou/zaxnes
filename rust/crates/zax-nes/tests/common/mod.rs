@@ -33,6 +33,9 @@ pub struct TestBus {
     /// range, so that a test can place an assertion or an acknowledgement on a chosen cycle
     /// of one instruction (`Cpu6502::branch` polls twice).
     pub irq_window: Option<(i64, i64)>,
+    /// What [`CpuBus::dma_gave_back_at`] answers, so that a test can place a DMA halt on a
+    /// chosen cycle of one instruction (the `SH*` stores read it).
+    pub dma_gave_back: i64,
     /// Every address read or written, in order, for dummy-cycle assertions.
     pub access_log: Vec<u16>,
     /// The addresses read as the instruction stream ([`CpuBus::read_code`]), in order.
@@ -47,6 +50,7 @@ impl TestBus {
             nmi_asserted: false,
             irq_asserted: false,
             irq_window: None,
+            dma_gave_back: i64::MIN,
             access_log: Vec::new(),
             code_log: Vec::new(),
         }
@@ -123,6 +127,10 @@ impl CpuBus for TestBus {
 
     fn cycle_count(&self) -> i64 {
         self.cycle_count
+    }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.dma_gave_back
     }
 }
 

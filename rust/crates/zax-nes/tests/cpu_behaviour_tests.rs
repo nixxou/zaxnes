@@ -679,3 +679,83 @@ fn req_core_110_nop_variants_still_consume_their_operand() {
     assert_eq!(0x33, cpu.y);
     assert_eq!(flags, cpu.p());
 }
+
+/// The five `SH*` stores AND the register with the high byte of the un-indexed address plus one —
+/// **unless** a DMA held the CPU on the dummy read cycle right before the write, in which case the
+/// register is stored whole. The address still takes the AND-ed high byte on a page cross.
+///
+/// nesdev's "Programming with unofficial opcodes" records the instability; `AccuracyCoin`'s `SH*`
+/// error codes 7 to C measure this case ("If the RDY line goes low 2 cycles before the write
+/// cycle, the target address of the instruction was not correct") and the five rows pass with it.
+/// The scan below pins *which* cycle it is rather than asserting a constant: only a halt on the
+/// cycle the write follows drops the AND (REQ-CORE-110).
+#[test]
+fn req_core_110_a_dma_on_the_dummy_read_drops_the_and_of_the_sh_stores() {
+    /// Runs one `SH* $0568,X/Y` at $1000, with the register the opcode uses as its source set to
+    /// `$8F` and the index register to 0, and the bus claiming a DMA gave the CPU its read back on
+    /// cycle `halt_on`. Returns the address written and the byte written.
+    fn store(opcode: u8, halt_on: i64) -> (u16, u8) {
+        let mut bus = TestBus::new();
+        bus.load(0x1000, &[opcode, 0x68, 0x05]);
+        let mut cpu = bus.cpu();
+        match opcode {
+            // SHY abs,X: the source is Y and the index is X.
+            0x9C => {
+                cpu.y = 0x8F;
+                cpu.x = 0x00;
+            }
+            // SHX abs,Y: the source is X and the index is Y.
+            0x9E => {
+                cpu.x = 0x8F;
+                cpu.y = 0x00;
+            }
+            // SHA and SHS abs,Y: the source is A & X and the index is Y.
+            _ => {
+                cpu.a = 0x8F;
+                cpu.x = 0xFF;
+                cpu.y = 0x00;
+            }
+        }
+        bus.dma_gave_back = halt_on;
+        cpu.step(&mut bus);
+        assert_eq!(5, bus.cycle_count, "absolute-indexed write: five cycles");
+        let address = *bus.access_log.last().unwrap();
+        (address, bus[usize::from(address)])
+    }
+
+    /// The same with a page cross: the high byte of the target is replaced by the AND-ed value
+    /// whether or not the DMA happened, and only the byte written changes.
+    fn crossed(halt_on: i64) -> (u16, u8) {
+        let mut bus = TestBus::new();
+        bus.load(0x1000, &[0x9E, 0xF0, 0x1F]); // SHX $1FF0,Y with Y = $20 → $2010, page crossed.
+        let mut cpu = bus.cpu();
+        cpu.x = 0x0A;
+        cpu.y = 0x20;
+        bus.dma_gave_back = halt_on;
+        cpu.step(&mut bus);
+        let address = *bus.access_log.last().unwrap();
+        (address, bus[usize::from(address)])
+    }
+
+    // SHA abs,Y ($9F) stores A & X = $8F, AND-ed with $05 + 1 = $06.
+    assert_eq!((0x0568, 0x06), store(0x9F, i64::MIN), "no DMA at all");
+    for halt_on in [1, 2, 3, 5] {
+        assert_eq!(
+            (0x0568, 0x06),
+            store(0x9F, halt_on),
+            "a halt on cycle {halt_on} is not the dummy read"
+        );
+    }
+    // Cycle 4 is the dummy read, the one the write follows.
+    assert_eq!((0x0568, 0x8F), store(0x9F, 4));
+
+    // The other three absolute forms, each with its own source register.
+    for opcode in [0x9E, 0x9C, 0x9B] {
+        assert_eq!((0x0568, 0x06), store(opcode, i64::MIN), "{opcode:02X}");
+        assert_eq!((0x0568, 0x8F), store(opcode, 4), "{opcode:02X}");
+    }
+
+    // X & ($1F + 1) = $0A & $20 = $00, so the high byte becomes $00.
+    assert_eq!((0x0010, 0x00), crossed(i64::MIN));
+    assert_eq!((0x0010, 0x0A), crossed(4));
+}

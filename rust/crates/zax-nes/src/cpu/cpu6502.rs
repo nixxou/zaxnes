@@ -884,11 +884,29 @@ impl Cpu6502 {
         // un-indexed address plus one, and on a page cross that same value replaces the
         // high byte of the target address.
         let high = operand.base_address.to_be_bytes()[0].wrapping_add(1);
-        let value = source & high;
+        let masked = source & high;
         let address = if operand.page_crossed {
-            (u16::from(value) << 8) | (operand.address & 0x00FF)
+            (u16::from(masked) << 8) | (operand.address & 0x00FF)
         } else {
             operand.address
+        };
+
+        // **Unless a DMA halted the dummy read cycle just before this write.** The high byte
+        // reaches the data lines through the same path the DMA unit takes over, so when RDY was
+        // low there the AND does not happen and the register is stored whole; the address still
+        // gets its corrupted high byte on a page cross. nesdev's "Programming with unofficial
+        // opcodes" notes the instability, and `AccuracyCoin`'s `SH*` error codes 7 to C measure
+        // exactly this case ("If the RDY line goes low 2 cycles before the write cycle, …"),
+        // which is also what Mesen 2 does in `SyaSxaAxa` ("Dummy read took more than 1 cycle, so
+        // it was interrupted by a DMA").
+        //
+        // `cycle_count()` here is the dummy read's own cycle, since the write below has not run
+        // yet: if that is the cycle a DMA handed the read back on, the halt was on it.
+        // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+        let value = if bus.dma_gave_back_at() == bus.cycle_count() {
+            source
+        } else {
+            masked
         };
 
         self.write(bus, address, value);

@@ -74,6 +74,9 @@ pub struct NesBus {
     /// `ext_cycle`. See [`NesBus::external_bus`].
     ext_bus: u8,
     ext_cycle: i64,
+    /// The cycle a DMA unit last gave a halted read back to the CPU on; `i64::MIN` while none
+    /// ever has. Read by the `SH*` stores alone (see [`CpuBus::dma_gave_back_at`]).
+    dma_gave_back: i64,
     cycles: i64,
     /// What the two DMA units still owe: [`DMA_HALT`], [`DMA_DUMMY`], [`DMA_DMC`], [`DMA_OAM`].
     /// Zero while neither unit wants the bus, which is the state of every cycle of a game that
@@ -146,6 +149,7 @@ impl NesBus {
             data_bus: 0,
             ext_bus: 0,
             ext_cycle: 0,
+            dma_gave_back: i64::MIN,
             cycles: 0,
             dma: 0,
             dma_oam_page: 0,
@@ -310,6 +314,7 @@ impl NesBus {
         self.data_bus = 0;
         self.ext_bus = 0;
         self.ext_cycle = 0;
+        self.dma_gave_back = i64::MIN;
         self.cycles = 0;
         self.dma = 0;
         self.dma_oam_page = 0;
@@ -1165,6 +1170,10 @@ impl NesBus {
             self.run_dma(address);
         }
         self.tick();
+        // The cycle the CPU finally reads on, for the five `SH*` stores: they drop the AND with
+        // the address high byte when the RDY line went low on their dummy read (see
+        // [`CpuBus::dma_gave_back_at`]). One store per halted read cycle, zero on every other.
+        self.dma_gave_back = self.cycles;
         self.read_internal(address)
     }
 
@@ -1269,6 +1278,10 @@ impl CpuBus for NesBus {
     fn cycle_count(&self) -> i64 {
         self.cycles
     }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.dma_gave_back
+    }
 }
 
 impl NesBus {
@@ -1296,6 +1309,9 @@ impl NesBus {
         // buses before anything reads the external one.
         self.ext_bus = 0;
         self.ext_cycle = 0;
+        // Transient like `dma`: no save point can fall between a halted read and the write of the
+        // instruction it belongs to, both being inside one `Cpu6502::step`.
+        self.dma_gave_back = i64::MIN;
         self.cycles = reader.read_i64()?;
         self.oam_dma_count = reader.read_i64()?;
         self.dmc_dma_count = reader.read_i64()?;

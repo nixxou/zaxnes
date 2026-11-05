@@ -406,10 +406,83 @@ zax-harness`: **699 passed, 0 failed**.
 instructions, and the first cycle of an instruction is its opcode fetch, which drives both buses
 before anything reads the external one.
 
+## Step 4 — a DMA on the dummy read drops the `SH*` stores' AND
+
+### What the rule is
+
+All five `SH*` rows failed with code **7**, which is the one sub-test of each that brings a DMA
+in: "If the RDY line goes low 2 cycles before the write cycle, the target address of the
+instruction was not correct." The basic behaviour — the value AND-ed with the un-indexed address's
+high byte plus one, and that same value replacing the high byte on a page cross — was already
+right, codes 1 to 6 passing.
+
+The high byte reaches the data lines through the path a DMA unit takes over, so when the CPU was
+halted on the dummy read cycle the AND does not happen and the register is stored whole; the
+address still gets its corrupted high byte. Mesen 2 implements the same rule in `SyaSxaAxa`
+("Dummy read took more than 1 cycle, so it was interrupted by a DMA"), and the file carries the
+adaptation header.
+
+### The change, and where the cost is
+
+The CPU cannot see a DMA: `CpuBus::read` is the DMA's own gate, and asking it on the way *in*
+would pay at every one of the hundred sites `read` is pasted into — MF-4a's +8 % lesson. So it is
+asked **afterwards**, once, from the `SH*` tail:
+
+* `CpuBus::dma_gave_back_at` (`cpu/cpu_bus.rs`), a trait method with a default of `i64::MIN`;
+* `NesBus::dma_gave_back`, one store in `halted_read_cycle` at the point the CPU gets its read
+  back — on a halted read cycle only, and **zero on every other cycle**;
+* `Cpu6502::apply_write`: `bus.dma_gave_back_at() == bus.cycle_count()`. At that point the write
+  has not run, so `cycle_count()` *is* the dummy read's cycle.
+
+Post-LTO, `bin-4b-s3.s` against `bin-4b-s4.s` with `offsets.py`: `read_cycle`, `tick`,
+`read_internal`, `write_internal`, `branch`, `resolve`, `run_dma`, `dma_read`,
+`run_cpu_cycles`, `quiet_cycles` — all **IDENTICAL**. `Cpu6502::step` is 893 → **897**, and the
+diff is one hunk of four instructions (`movq dma_gave_back` / `cmpq cycles` / `movzbl` / `cmovnel`)
+inside the `SH*` write arm, which no official opcode reaches.
+
+### Games whose output may move
+
+Only a game that executes `SHA`, `SHX`, `SHY` or `TAS` **and** has a DMA land on that
+instruction's dummy read. No commercial NES title uses these opcodes; blargg's `instr_test-v5`
+`03-immediate` and `07-abs_xy` exercise them and both still pass, as do `cpu_dummy_writes` and
+`instr_misc`.
+
+### Tests and ROMs
+
+`cpu_behaviour_tests::req_core_110_a_dma_on_the_dummy_read_drops_the_and_of_the_sh_stores` pins
+*which* cycle it is instead of asserting a constant: a halt claimed on cycles 1, 2, 3 or 5 of a
+five-cycle absolute-indexed write leaves the AND in place, and only cycle 4 — the one the write
+follows — drops it. All four absolute forms, each with its own source register, plus the
+page-crossing case where the address still takes the AND-ed high byte and only the byte written
+changes. `TestBus` grows one field, `dma_gave_back`.
+
+| | before step 4 | step 4 |
+| --- | --- | --- |
+| `Unofficial SH* / $93 SHA Indirect,Y` | fail 7 | **pass 1** |
+| `Unofficial SH* / $9F SHA Absolute,Y` | fail 7 | **pass 1** |
+| `Unofficial SH* / $9B SHS Absolute,Y` | fail 7 | **pass 1** |
+| `Unofficial SH* / $9C SHY Absolute,X` | fail 7 | **pass** |
+| `Unofficial SH* / $9E SHX Absolute,Y` | fail 7 | **pass** |
+| `APU Registers and DMA tests / DMA + $2002 Read` | fail 2 | **pass 1** |
+| `AccuracyCoin` | 118 / 147 | **124 / 147** |
+
+Success code 1 on the three that have one is "The Address-Bus-High-Byte-Corruption performed a
+bitwise AND upon ABH with both X and A", which is the documented behaviour and not the
+magic-number variant. `DMA + $2002 Read` came back with them: its own error 1 is "did not pass the
+SLO Absolute, X test" and its timing moved with the instruction stream of the page before it.
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **700 passed, 0 failed**. `cpu_dummy_reads`, `cpu_dummy_writes`, `instr_test-v3`,
+`instr_test-v5`, `nes_instr_test`, `instr_misc`, `cpu_exec_space`: all pass, unchanged.
+
+**Save states**: `dma_gave_back` is transient and cleared on load; no save point can fall between
+a halted read and the write of the instruction it belongs to, both being inside one `Cpu6502::step`.
+The format is unchanged.
+
 ## Status
 
 - [x] step 1 — the sticky poll of a taken branch
 - [x] step 2 — the `$2007` read buffer's delay
 - [x] step 3 — the internal and external data buses
-- [ ] step 4 — the `SH*` stores and a DMA on the dummy read
+- [x] step 4 — the `SH*` stores and a DMA on the dummy read
 - [ ] step 5 — the suites, the campaign document and the guard
