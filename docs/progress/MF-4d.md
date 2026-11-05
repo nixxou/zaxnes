@@ -643,6 +643,136 @@ zax-harness`: **714 passed, 0 failed**.
 
 **Save states**: no field added, nothing moved.
 
+## Step 6 — `$2004` written and `$2007` accessed while the PPU is fetching
+
+Two rows, one predicate. The brief allows this step **only if** the fix is a read-time
+computation that does not touch the per-dot path: it is, and `Ppu2C02::run_dots` is byte-identical
+after it.
+
+### The failing messages
+
+> `PPU Misc. / $2007 Read w/ Rendering` 2: Reading from `$2007` while rendering is enabled should
+> result in a vertical increment of v.
+
+> `PPU Misc. / Address $2004 behavior` 6: Writing to `$2004` on a visible scanline should
+> increment the OAM address by 4.
+
+and the two the same write owes: 7, "shouldn't write to OAM", and A, "increment the OAM address by
+4, and then bitwise AND the OAM address with `$FC`".
+
+### The hardware rule, and the predicate both share
+
+nesdev, "PPU registers", on PPUDATA: during rendering "it will update v in an odd way, triggering
+a coarse X increment and a Y increment simultaneously". So a `$2007` access does **not** add the
+1 or 32 of PPUCTRL; it rides the fetch pipeline's own address logic. `increment_coarse_x` and
+`increment_y` are the dot loop's own two helpers, so the address a game corrupts this way is
+corrupted exactly as a fetch would have moved it; they became `pub(super)` and nothing else moved.
+
+A `$2004` write made at the same time does not reach OAM at all and bumps OAMADDR by four,
+realigned: `oam_address = (oam_address + 4) & 0xFC`.
+
+**The condition is "the PPU is fetching", and it includes the pre-render line.** The ROM's own
+test says so against its title: `Address $2004 behavior` 6 is called "writing to `$2004` on a
+visible scanline" and its code notes that "the CPU write occurs on **dot 321 of the pre-render
+line**". So the new `Ppu2C02::fetching()` is `rendering_enabled() && (visible || pre-render)`,
+and both rules test it.
+
+Only the **register** write is suppressed. An OAM transfer's bytes go through `write_oam_dma` and
+keep writing, which every game that starts a transfer with rendering on depends on; the check sits
+in the `$2004` arm of `Ppu2C02::write` and not inside `write_oam`, which the two share.
+
+### What moved, and what did not
+
+| row | step 5 | step 6 |
+| --- | --- | --- |
+| `PPU Misc. / $2007 read w/ rendering` | fail, code 2 | **pass** |
+| `PPU Misc. / Address $2004 behavior` | fail, code 6 | fail, **code 8** |
+
+`$2007 read w/ rendering` passes. `Address $2004 behavior` takes its codes 6, 7 and A and stops on
+
+> 8: Reads from `$2004` during PPU cycles 65 to 256 of a visible scanline (with rendering enabled)
+> should read from the current OAM address, **which is changing every other ppu cycle**.
+
+and its 9, the `$FF` window of dots 256 to 320. Both are the sprite-evaluation pipeline's moving
+OAM address — the `run_sprite_evaluation` rewrite the brief gives to **lot MF-4e**, and the same
+machinery `$2004 Stress Test`, `Arbitrary Sprite zero` and `Misaligned OAM behavior` wait on. The
+row cannot close in this lot, and the two codes it now stops on say exactly which lot owns it.
+
+### Hot path: the generated code after LTO
+
+`cmp4c.py`, `bin-4d-s5.s` against `bin-4d-s6b.s`. **Every pinned symbol IDENTICAL, raw**, and the
+two that matter most for a change inside the PPU:
+
+* `Ppu2C02::run_dots` 1 936 → **1 936, byte-identical** — the per-dot path is untouched, which is
+  the whole condition the brief put on this step. `background_fetch`, `read_nametable_inner` and
+  `read_pattern_planes` likewise.
+* `NesBus::read_internal` 176 → 176 and `NesBus::read_cycle` 182 → 182 — the CPU read path does
+  not pay for it.
+
+`NesBus::write_internal` 2 587 → 2 643 and `Ppu2C02::read` 263 → 319, both +56, and both of those
+56 are **inside the register-7 arm** — the inlined body of `increment_vram_address` with its new
+branch. Nothing on any other register.
+
+**`#[inline]` is load-bearing here, and it was measured.** Without it the new branch pushes
+`increment_vram_address` past the inliner's budget: it becomes a real function of 61 instructions
+with **one call site**, taken on every `$2007` access, and `Ppu2C02::read` drops 19 to pay for it.
+That is MF-3b rule 1's shape change on a path PR-1 keeps `readbuf` in its ROM set for, so the
+attribute puts the body back and the comment on it says why — the same trap `CpuBus::read_code`
+carries its own note about. With the attribute, `increment_vram_address` is back to **0 call
+sites**, exactly the baseline's shape.
+
+Call sites, MF-3b rule 1's list: `end_cycle` 0 → 0, `read_nametable_as` 0 → 0, `Board::ppu_read`
+0 → 0, `ppu_peek` 4 → 4, `on_ppu_address_bus` 11 → 11, `irq_asserted` 0 → 0, `on_cpu_cycle`
+1 → 1, `panic_bounds_check` 1 260 → 1 260. `read_nametable_inner` goes 14 → **15**: one more
+*static* site, from LLVM specialising the `$2007` arm's two branches, and **not** a first call
+site — the dot loop's own calls are unchanged, which `run_dots` being byte-identical proves. No
+executed call was added.
+
+### Games whose output may move
+
+This is the step of the lot with real reach, and it is worth being plain about it:
+
+* **`$2007` accessed with rendering on.** A game that writes or reads `$2007` mid-frame without
+  turning rendering off now has `v` moved by a coarse X plus a Y increment instead of by 1 or 32.
+  That is what the hardware does, and the usual reason a game does it at all is a deliberate
+  mid-frame scroll or CHR trick; the ones that do it by accident were already corrupting their
+  own scroll. **`mmc3_irq_tests`' A12 clocking tests 5 and 6 measure a `$2007` access stepping
+  across `$1000` and still pass**, which is the sharpest ROM here for this path, and the whole
+  MMC3 suite is unchanged.
+* **`$2004` written with rendering on.** Previously the write landed in OAM; now it is dropped
+  and OAMADDR jumps by four. A game that writes OAM this way was writing to a sprite slot the
+  hardware would not have written, so its sprites move *toward* the reference. No commercial game
+  is known to feed OAM through `$2004` during rendering — the cost is 256 writes against a
+  513-cycle transfer — and `oam_read`, `oam_stress`, `sprite_hit_tests` and `sprite_overflow_tests`
+  are all unchanged.
+
+### Tests and ROMs
+
+Both new tests call the PPU's register methods **directly** with the PPU parked on a chosen
+scanline, so no dot passes between the two readings and the difference is the increment itself
+rather than the dot loop's:
+
+* `req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once` parks `v` at `$2105`
+  (coarse X 5, coarse Y 8, fine Y 2) and requires `(6, 8, 3)` on a visible line against
+  `(6, 8, 2)` in vblank — the Y increment is the bit the ROM asks for by name.
+* `req_core_112_a_2004_write_while_fetching_bumps_the_address_by_four_and_writes_nothing` pins all
+  three codes: `+4` from an aligned address, `(1 + 4) & $FC == 4` from an unaligned one, OAM
+  untouched, and the ordinary `+1`-with-a-write in vblank.
+
+| suite | step 5 | step 6 |
+| --- | --- | --- |
+| `ppu_*` (20 ROMs) | 19 / 20, `power_up_palette` required | **19 / 20**, same row |
+| `ppu_vbl_nmi`, `vbl_nmi_timing` (19 ROMs) | 19 / 19 | **19 / 19** |
+| `sprite_hit_tests`, `sprite_overflow_tests` (18) | 17 pass, 1 manual | **17 pass, 1 manual** |
+| `oam_read`, `oam_stress` (4) | 3 pass, 1 manual | **3 pass, 1 manual** |
+| `mmc3_test`, `mmc3_test_2`, `mmc3_irq_tests` (18) | 15 pass, 3 required fails | **15 pass, 3 required fails**, same screens |
+| `AccuracyCoin` | 128 / 147 | **129 / 147** |
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **716 passed, 0 failed**.
+
+**Save states**: no field added, nothing moved.
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
@@ -653,5 +783,7 @@ zax-harness`: **714 passed, 0 failed**.
   found and all sixteen key bytes come out, but a second rule on the same arm remains; not
   committed**
 - [x] step 5 — the dot on which `$2002`'s sprite flags clear
-- [ ] step 6 — `$2004` on a visible line, and `$2007` read with rendering on
+- [x] step 6 — `$2004` on a visible line, and `$2007` read with rendering on (`$2007 read w/
+  rendering` passes; `Address $2004 behavior` takes its codes 6, 7 and A and stops on 8, which is
+  lot MF-4e's evaluation pipeline)
 - [ ] step 7 — the suites, the campaign and the guard

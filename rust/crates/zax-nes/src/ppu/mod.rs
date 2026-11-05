@@ -501,6 +501,19 @@ impl Ppu2C02 {
         (self.mask & 0x18) != 0
     }
 
+    /// Whether the PPU is actually fetching: rendering enabled **and** on a line that fetches —
+    /// a visible one or the pre-render line.
+    ///
+    /// This is the condition the two register quirks of `AccuracyCoin`'s `Address $2004 behavior`
+    /// and `$2007 Read w/ Rendering` turn on. The pre-render line counts, and the ROM says so
+    /// against its own test's title: `Address $2004 behavior` 6 is called "writing to `$2004` on a
+    /// visible scanline" and its code notes that "the CPU write occurs on **dot 321 of the
+    /// pre-render line**".
+    const fn fetching(&self) -> bool {
+        self.rendering_enabled()
+            && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
     /// Whether the leftmost column is masked for background or sprites (bits 1 and 2 of
     /// PPUMASK), which forces maskX to at least 8 (REQ-CORE-046).
     #[must_use]
@@ -1078,7 +1091,23 @@ impl Ppu2C02 {
 
             3 => self.oam_address = value,
 
-            4 => self.write_oam(value),
+            4 => {
+                if self.fetching() {
+                    // **A `$2004` write made while the PPU is fetching does not reach OAM, and
+                    // bumps the address by four.** `AccuracyCoin`'s `Address $2004 behavior` 6
+                    // ("should increment the OAM address by 4"), 7 ("shouldn't write to OAM") and
+                    // A ("increment the OAM address by 4, and then bitwise AND the OAM address
+                    // with `$FC`"). Its test 7 writes `$8C` over the whole of OAM this way and
+                    // then requires OAM `$00` to still hold the `$5A` a transfer put there.
+                    //
+                    // Only the register write is suppressed: an OAM transfer's bytes go through
+                    // [`Self::write_oam_dma`] and keep writing, which is what every game that
+                    // starts a transfer with rendering on depends on.
+                    self.oam_address = self.oam_address.wrapping_add(4) & 0xFC;
+                } else {
+                    self.write_oam(value);
+                }
+            }
 
             5 => {
                 if self.write_toggle {
@@ -1157,9 +1186,27 @@ impl Ppu2C02 {
         self.oam_address = self.oam_address.wrapping_add(1);
     }
 
+    /// **Kept inline, measured.** The `fetching` branch grew this body past the inliner's budget
+    /// and it became a `callq` with one call site on the `$2007` path, which is MF-3b rule 1's
+    /// shape change; the attribute puts it back and `Ppu2C02::read` keeps the specialised copy it
+    /// had. The same trap `CpuBus::read_code` carries its own note about.
+    #[inline]
     fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
-        let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
-        self.v = self.v.wrapping_add(step) & 0x7FFF;
+        if self.fetching() {
+            // **While the PPU is fetching, a `$2007` access does not add 1 or 32.** The access
+            // rides the rendering pipeline's own address logic, so it triggers a coarse X
+            // increment and a Y increment at once (nesdev, "PPU registers": "it will update v in
+            // an odd way, triggering a coarse X increment and a Y increment simultaneously").
+            // `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 asks for the vertical half by name.
+            //
+            // The two helpers are the dot loop's own, so the address a game corrupts this way is
+            // corrupted exactly as the fetch would have moved it.
+            self.increment_coarse_x();
+            self.increment_y();
+        } else {
+            let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
+            self.v = self.v.wrapping_add(step) & 0x7FFF;
+        }
 
         // A CPU write reaches the row of the line it is made in (R2-005).
         self.v_row_start = self.v;

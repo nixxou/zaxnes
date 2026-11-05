@@ -190,6 +190,89 @@ fn req_core_112_a_2002_read_on_the_pre_render_dot_0_already_sees_the_sprite_flag
     assert_eq!(0xE0, status_read_at(pre_render - 1, 340));
 }
 
+/// Runs the machine until the PPU stands on `scanline`, so that a register access made straight
+/// on the PPU afterwards happens at that position with no dot in between.
+fn park_on_scanline(fixture: &mut TileFixture, scanline: i32) {
+    let bus = fixture.core.bus_mut();
+    let mut guard = 0;
+    loop {
+        bus.sync_ppu();
+        if bus.ppu().scanline() == scanline {
+            return;
+        }
+        bus.tick();
+        guard += 1;
+        assert!(guard < 2_000_000, "never reached scanline {scanline}");
+    }
+}
+
+/// `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 (REQ-CORE-112): while the PPU is fetching, a
+/// `$2007` access does not add 1 or 32 — it triggers a coarse X increment and a Y increment at
+/// once, the dot loop's own two (nesdev, "PPU registers").
+///
+/// The access is made on the PPU directly so that no dot passes between the two readings of `v`
+/// and the difference is the increment itself and nothing else.
+#[test]
+fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
+    // v = $2105: coarse X 5, coarse Y 8, fine Y 2.
+    fn v_after_a_2007_read(scanline: i32) -> (i32, i32, i32) {
+        let mut fixture = TileFixture::new();
+        fixture.set_control(0x00); // Step of 1 when the PPU is not fetching.
+        fixture.set_mask(0x1E); // Rendering enabled.
+        park_on_scanline(&mut fixture, scanline);
+
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.write(6, 0x21, None);
+        ppu.write(6, 0x05, None);
+        assert_eq!((5, 8, 2), (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y()));
+
+        ppu.read(7, None);
+        (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y())
+    }
+
+    // On a visible line, with rendering on: coarse X **and** fine Y both move.
+    assert_eq!((6, 8, 3), v_after_a_2007_read(100));
+
+    // In vblank nothing is fetched, so the PPUCTRL step of 1 applies and only the low bits move.
+    assert_eq!((6, 8, 2), v_after_a_2007_read(250));
+}
+
+/// `AccuracyCoin`'s `Address $2004 behavior` 6, 7 and A (REQ-CORE-112): a `$2004` write made
+/// while the PPU is fetching does not reach OAM and bumps the OAM address by four, realigned
+/// with `& $FC`.
+#[test]
+fn req_core_112_a_2004_write_while_fetching_bumps_the_address_by_four_and_writes_nothing() {
+    fn write_2004(scanline: i32, from: u8) -> (u8, u8) {
+        let mut fixture = TileFixture::new();
+        fixture.set_mask(0x1E); // Rendering enabled.
+        park_on_scanline(&mut fixture, scanline);
+
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.write(3, from, None); // OAMADDR
+        let before = ppu.oam()[usize::from(from)];
+        ppu.write(4, before.wrapping_add(1), None); // A byte that cannot already be there.
+        (ppu.oam_address(), ppu.oam()[usize::from(from)])
+    }
+
+    // Fetching, from an aligned address: +4, and OAM untouched.
+    let (address, byte) = write_2004(100, 0);
+    assert_eq!(4, address);
+    assert_eq!(0xFF, byte, "OAM was written while the PPU was fetching");
+
+    // Fetching, from an unaligned one: (1 + 4) & $FC is 4, not 5 — the ROM's code A.
+    assert_eq!(4, write_2004(100, 1).0);
+
+    // In vblank the write is an ordinary one: OAM takes the byte and the address steps by 1.
+    let mut fixture = TileFixture::new();
+    fixture.set_mask(0x1E);
+    park_on_scanline(&mut fixture, 250);
+    let ppu = fixture.core.bus_mut().ppu_mut();
+    ppu.write(3, 0x00, None);
+    ppu.write(4, 0x5A, None);
+    assert_eq!(1, ppu.oam_address());
+    assert_eq!(0x5A, ppu.oam()[0]);
+}
+
 #[test]
 fn req_core_116_the_overflow_flag_rises_once_nine_sprites_share_a_line() {
     fn overflow(sprites: u8) -> bool {
