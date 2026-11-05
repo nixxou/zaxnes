@@ -116,6 +116,33 @@ fn req_core_081_unmapped_reads_return_the_open_bus() {
     assert_eq!(0x5A, bus.read(0x4018));
 }
 
+/// `$4015` is decoded inside the 2A03: the read answers on the **internal** data bus and leaves
+/// the pins alone, so the next open-bus read still sees whatever drove them last.
+///
+/// `AccuracyCoin`'s `Open Bus` test 7 ("Reading from $4015 should not update the data bus"), its
+/// test 9 ("Bit 5 of address $4015 is open bus") and `Internal Data Bus` test 3 ("Reads from
+/// $4015 only update the internal data bus and cannot affect the external data bus")
+/// (REQ-CORE-081).
+#[test]
+fn req_core_081_a_4015_read_answers_on_the_internal_bus_and_not_on_the_pins() {
+    let (_, mut bus) = loaded_core(None);
+
+    // A write drives both buses, so both hold $A5, whose bit 5 is set.
+    bus.write(0x0000, 0xA5);
+
+    // Bit 5 of the status is the bus, and the APU answers 0 in every other bit: nothing is
+    // playing and no IRQ is pending.
+    let status = bus.read(0x4015);
+    assert_eq!(0x20, status, "bit 5 is the internal bus, $A5 bit 5");
+
+    // The pins were not driven, so they still hold $A5 — not the $20 the APU just answered with.
+    assert_eq!(0xA5, bus.read(0x4018));
+
+    // And the read that just happened did drive them, so the one after sees $A5 again rather
+    // than anything older.
+    assert_eq!(0xA5, bus.read(0x4019));
+}
+
 // ---------------------------------------------------------------- PPU side (T02)
 
 /// The minimal ROM loaded in a machine (C# `LoadedCore`).

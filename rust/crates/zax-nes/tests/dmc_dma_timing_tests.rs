@@ -217,3 +217,55 @@ fn req_core_113_only_the_halt_cycle_of_a_dma_reaches_the_controller() {
     }
     assert_eq!(7, reads);
 }
+
+/// A DMC sample fetch drives the **external** data bus and not the internal one.
+///
+/// Both halves come from `AccuracyCoin`. `Internal Data Bus` test 2: a fetch lands between the
+/// operands and the read of `LDA $4015`, and "This DMC DMA does not update the internal data bus.
+/// Only the external one. Hence the read from $4015 not reflecting the DMA's read in bit 5."
+/// `DMA + Open Bus` test 2 is the other way round: the byte the fetch brought in **is** what an
+/// open-bus read on the next cycle returns. The rule is what lets `Implied Dummy Reads` fetch an
+/// opcode out of `$4015` and still read bit 5 of the byte that was on the internal bus before the
+/// fetch (REQ-CORE-113).
+#[test]
+fn req_core_113_a_dmc_fetch_drives_the_external_bus_and_not_the_internal_one() {
+    /// Arms a fetch with the two buses both holding $20, and burns the start delay on writes.
+    /// The sample is at $C000, which is zero in this ROM, so the byte the fetch brings in is
+    /// $00 — the opposite of the $20 the buses hold, which is what makes both halves visible.
+    fn armed_with_20_on_the_bus() -> NesBus {
+        let (_, mut bus) = loaded_core(None);
+        bus.write(0x4010, 0x00); // Fastest rate, no IRQ, no loop.
+        bus.write(0x4012, 0x00); // Sample at $C000.
+        bus.write(0x4013, 0x01); // 17 bytes, so the fetch is not the last one.
+        bus.write(0x4015, 0x10);
+        for _ in 0..3 {
+            bus.write(0x0000, 0x20); // A write drives both buses and cannot be halted.
+        }
+        bus
+    }
+
+    // The internal half. The halted read is `$4015`: its halt cycle reads the register again —
+    // bit 5 coming from the $20 on the internal bus — then the fetch runs, then the CPU gets its
+    // read. Bit 5 is still the internal bus's, which the fetch did not touch.
+    let mut bus = armed_with_20_on_the_bus();
+    let status = bus.read(0x4015);
+    assert_eq!(1, bus.dmc_dma_count(), "the fetch did happen");
+    assert_eq!(
+        0x20,
+        status & 0x20,
+        "bit 5 is the internal bus, not the sample byte"
+    );
+
+    // The external half. The halted read is an unmapped address, so what it returns *is* the
+    // pins: the fetch drove them with the sample byte, so $00 and not the $20 of the internal
+    // bus.
+    let mut bus = armed_with_20_on_the_bus();
+    let open = bus.read(0x5000);
+    assert_eq!(1, bus.dmc_dma_count(), "the fetch did happen");
+    assert_eq!(0x00, open, "the pins carry the byte the fetch read");
+
+    // With no fetch in the way the same read gives the $20 both buses hold.
+    let (_, mut bus) = loaded_core(None);
+    bus.write(0x0000, 0x20);
+    assert_eq!(0x20, bus.read(0x5000));
+}

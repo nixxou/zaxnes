@@ -66,7 +66,14 @@ pub struct NesBus {
     apu: Apu2A03,
     input: InputPorts,
     cartridge: Option<Cartridge>,
-    open_bus: u8,
+    /// The 2A03's **internal** data bus: the byte of the last access the CPU or a DMA unit made,
+    /// whatever answered it. Every read and every write loads it.
+    data_bus: u8,
+    /// The **external** data bus — the pins, and the capacitance that holds them — when it
+    /// differs from [`NesBus::data_bus`], with the cycle it was last driven on its own in
+    /// `ext_cycle`. See [`NesBus::external_bus`].
+    ext_bus: u8,
+    ext_cycle: i64,
     cycles: i64,
     /// What the two DMA units still owe: [`DMA_HALT`], [`DMA_DUMMY`], [`DMA_DMC`], [`DMA_OAM`].
     /// Zero while neither unit wants the bus, which is the state of every cycle of a game that
@@ -136,7 +143,9 @@ impl NesBus {
             apu,
             input,
             cartridge: None,
-            open_bus: 0,
+            data_bus: 0,
+            ext_bus: 0,
+            ext_cycle: 0,
             cycles: 0,
             dma: 0,
             dma_oam_page: 0,
@@ -154,10 +163,53 @@ impl NesBus {
         }
     }
 
-    /// Last value seen on the data bus, returned by unmapped reads.
+    /// Last value seen on the **external** data bus, which is what an unmapped read returns.
     #[must_use]
     pub const fn open_bus(&self) -> u8 {
-        self.open_bus
+        self.external_bus()
+    }
+
+    /// The byte the external data bus is holding.
+    ///
+    /// **Why there are two buses.** The 2A03's internal data bus and the cartridge-edge data bus
+    /// are joined by a buffer the chip does not always enable, so they are not always the same
+    /// byte. `AccuracyCoin`'s `Internal Data Bus` test states the rule it measures: "The internal
+    /// data bus is updated during every read/write, while the external data bus is updated on
+    /// every read/write **except for reads from address `$4015`**" — `$4015` is decoded inside
+    /// the 2A03 and answers on the internal bus alone — and, the other way round, a DMC sample
+    /// fetch "does not update the internal data bus. Only the external one".
+    ///
+    /// So the two differ for at most the cycle a `$4015` read or a DMC fetch happened on and the
+    /// one after it: every other access drives both, and a CPU cycle is one access. That is what
+    /// this reads — `data_bus` carries the internal bus for free on the per-cycle path, and the
+    /// external one costs two stores on those two cold sites and nothing anywhere else.
+    ///
+    /// The bound is exact for every sequence a program can make. It is approximate in two cases
+    /// that need a DMA *and* an address in `$4000`-`$401F`, and falls back to `data_bus` there:
+    /// a halt cycle the controller cannot see (`halt_is_invisible`) directly after a `$4015`
+    /// read, and an OAM transfer whose source page is `$40` interleaved with a DMC fetch. No ROM
+    /// here reaches either.
+    #[must_use]
+    const fn external_bus(&self) -> u8 {
+        if self.cycles - self.ext_cycle <= 1 {
+            self.ext_bus
+        } else {
+            self.data_bus
+        }
+    }
+
+    /// Notes that only the external data bus was driven, with `value`: a DMC sample fetch.
+    fn drive_external_bus(&mut self, value: u8) {
+        self.ext_bus = value;
+        self.ext_cycle = self.cycles;
+    }
+
+    /// Notes that the external bus was **not** driven although the internal one was: a read of
+    /// `$4015`. Called before `data_bus` takes the byte the APU answered with, so the value kept
+    /// here is the one the pins are still holding.
+    fn hold_external_bus(&mut self) {
+        self.ext_bus = self.external_bus();
+        self.ext_cycle = self.cycles;
     }
 
     /// CPU work RAM, for writing.
@@ -255,7 +307,9 @@ impl NesBus {
     /// Clears work RAM and the clock (part of power-on, REQ-CORE-004).
     pub fn reset(&mut self) {
         self.ram.fill(0);
-        self.open_bus = 0;
+        self.data_bus = 0;
+        self.ext_bus = 0;
+        self.ext_cycle = 0;
         self.cycles = 0;
         self.dma = 0;
         self.dma_oam_page = 0;
@@ -552,7 +606,7 @@ impl NesBus {
         self.dma &= !DMA_HALT;
         if !halt_is_invisible {
             let value = self.read_internal(read_address);
-            self.open_bus = value;
+            self.data_bus = value;
         }
 
         // Bytes read and written so far, counted the way the hardware's pair counter is: even
@@ -597,7 +651,7 @@ impl NesBus {
                 self.dma_cycle();
                 self.dmc_dma_count += 1;
                 let address = self.apu.dmc_dma_address();
-                let value = self.dma_read(address, internal, &mut decoded_before);
+                let value = self.dmc_fetch_read(address, internal, &mut decoded_before);
                 self.sync_apu();
                 self.apu.supply_dmc_byte(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
@@ -624,7 +678,7 @@ impl NesBus {
                 self.dma_cycle();
                 if !input_port {
                     let value = self.read_internal(read_address);
-                    self.open_bus = value;
+                    self.data_bus = value;
                 }
             }
         }
@@ -646,7 +700,7 @@ impl NesBus {
         // still on the bus. `halt_is_invisible` needs `internal`, which the caller excluded.
         self.dma &= !DMA_HALT;
         let value = self.read_internal(read_address);
-        self.open_bus = value;
+        self.data_bus = value;
         self.dmc_fetch_cycles(read_address);
     }
 
@@ -675,13 +729,13 @@ impl NesBus {
         self.dma &= !DMA_DUMMY;
         self.tick();
         let value = self.read_internal(read_address);
-        self.open_bus = value;
+        self.data_bus = value;
 
         // An alignment cycle when the cycle after this one would not be a get cycle.
         if (self.cycles & 1) == 0 {
             self.tick();
             let value = self.read_internal(read_address);
-            self.open_bus = value;
+            self.data_bus = value;
         }
 
         // The get cycle: the memory reader has had its halt and its dummy cycle, so it reads.
@@ -689,7 +743,7 @@ impl NesBus {
         self.dmc_dma_count += 1;
         let address = self.apu.dmc_dma_address();
         let mut decoded_before = read_address;
-        let value = self.dma_read(address, false, &mut decoded_before);
+        let value = self.dmc_fetch_read(address, false, &mut decoded_before);
         self.sync_apu();
         self.apu.supply_dmc_byte(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
@@ -751,7 +805,7 @@ impl NesBus {
             // The get cycle: the DMA unit reads the source byte.
             self.tick();
             let byte = self.read_internal(page | u16::from(oam_index));
-            self.open_bus = byte;
+            self.data_bus = byte;
             oam_index = oam_index.wrapping_add(1);
 
             // The put cycle: it writes it into OAM.
@@ -784,13 +838,18 @@ impl NesBus {
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     fn dma_read(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
         if !internal {
-            // Nothing answers $4000-$401F on the external bus.
-            let value = if (0x4000..0x4020).contains(&address) {
-                self.open_bus
-            } else {
-                self.read_internal(address)
-            };
-            self.open_bus = value;
+            // Nothing answers $4000-$401F on the external bus. Written as two returns rather
+            // than one `if` expression so that the external bus — a compare and a select — stays
+            // behind the test instead of being hoisted in front of it: an ordinary source
+            // address, which is every byte of every OAM transfer, must pay nothing for it.
+            if (0x4000..0x4020).contains(&address) {
+                let value = self.external_bus();
+                self.data_bus = value;
+                *decoded_before = address;
+                return value;
+            }
+            let value = self.read_internal(address);
+            self.data_bus = value;
             *decoded_before = address;
             return value;
         }
@@ -807,7 +866,7 @@ impl NesBus {
             }
             0x4016 | 0x4017 => {
                 let value = if *decoded_before == decoded {
-                    self.open_bus
+                    self.data_bus
                 } else {
                     self.read_internal(decoded)
                 };
@@ -820,8 +879,22 @@ impl NesBus {
             }
             _ => self.read_internal(address),
         };
-        self.open_bus = value;
+        self.data_bus = value;
         *decoded_before = decoded;
+        value
+    }
+
+    /// The **DMC's** fetch, which is [`NesBus::dma_read`] on the external bus alone.
+    ///
+    /// The sample byte reaches the DMC straight off the pins and never travels the internal bus,
+    /// so the cycle after a fetch cannot see it in bit 5 of a `$4015` read — which is
+    /// `AccuracyCoin`'s `Internal Data Bus` test 2 — while an open-bus read on that cycle does
+    /// see it, which is `DMA + Open Bus`. Four instructions, once per fetch.
+    fn dmc_fetch_read(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
+        let internal_bus = self.data_bus;
+        let value = self.dma_read(address, internal, decoded_before);
+        self.drive_external_bus(value);
+        self.data_bus = internal_bus;
         value
     }
 
@@ -853,7 +926,10 @@ impl NesBus {
         if address < 0x4000 {
             // The extension's registers, as a read of `$5xxx` reaches them (no PPU catch-up).
             if let Some(register) = self.zone_data_address(address) {
-                return self.ppu.wide().read(register).unwrap_or(self.open_bus);
+                return match self.ppu.wide().read(register) {
+                    Some(value) => value,
+                    None => self.external_bus(),
+                };
             }
             self.sync_ppu();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
@@ -865,13 +941,21 @@ impl NesBus {
             return match address {
                 0x4015 => {
                     self.sync_apu();
-                    self.apu.read_status(self.open_bus)
+                    // Bit 5 is the **internal** bus, and the read leaves the pins alone: the two
+                    // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
+                    // (see [`NesBus::external_bus`]).
+                    self.hold_external_bus();
+                    self.apu.read_status(self.data_bus)
                 }
-                0x4016 => self.read_input_port(0, self.open_bus),
-                0x4017 => self.read_input_port(1, self.open_bus),
+                // A controller port answers on the internal bus too, and its three open-bus bits
+                // come from there — which is how `Implied Dummy Reads` can take the operands of a
+                // `JSR` out of `$4016`/`$4017` and have them "leech off the value read from the
+                // opcode" when that opcode came from `$4015`.
+                0x4016 => self.read_input_port(0, self.data_bus),
+                0x4017 => self.read_input_port(1, self.data_bus),
 
                 // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
-                _ => self.open_bus,
+                _ => self.external_bus(),
             };
         }
 
@@ -889,10 +973,17 @@ impl NesBus {
             }
         }
 
-        self.cartridge
+        // `match` and not `unwrap_or`: the external bus is a compare and a select, and asking for
+        // it eagerly puts those on every read the cartridge *does* answer — the PRG-RAM of every
+        // game with a battery.
+        match self
+            .cartridge
             .as_mut()
             .and_then(|cartridge| cartridge.try_cpu_read(address))
-            .unwrap_or(self.open_bus)
+        {
+            Some(value) => value,
+            None => self.external_bus(),
+        }
     }
 
     fn write_internal(&mut self, address: u16, value: u8) {
@@ -1006,7 +1097,7 @@ impl NesBus {
     /// Writes a byte exactly as a CPU write would, without advancing emulated time
     /// (REQ-CORE-082).
     pub fn poke(&mut self, address: u16, value: u8) {
-        self.open_bus = value;
+        self.data_bus = value;
         self.write_internal(address, value);
     }
 }
@@ -1097,7 +1188,7 @@ impl CpuBus for NesBus {
     fn read(&mut self, address: u16) -> u8 {
         self.tick();
         let value = self.read_cycle(address);
-        self.open_bus = value;
+        self.data_bus = value;
         value
     }
 
@@ -1119,7 +1210,7 @@ impl CpuBus for NesBus {
         if let Some(offset) = zone {
             self.zone_read_cycle(address);
             let value = self.ppu.wide().code().get(offset).copied().unwrap_or(0xFF);
-            self.open_bus = value;
+            self.data_bus = value;
             return value;
         }
         self.read(address)
@@ -1127,7 +1218,7 @@ impl CpuBus for NesBus {
 
     fn write(&mut self, address: u16, value: u8) {
         self.tick();
-        self.open_bus = value;
+        self.data_bus = value;
         self.write_internal(address, value);
     }
 
@@ -1185,7 +1276,7 @@ impl NesBus {
     /// (REQ-CORE-090). The chips and the cartridge the bus owns save themselves.
     pub fn save_state(&self, writer: &mut StateWriter) {
         writer.write_blob(&self.ram);
-        writer.write_u8(self.open_bus);
+        writer.write_u8(self.data_bus);
         writer.write_i64(self.cycles);
         writer.write_i64(self.oam_dma_count);
         writer.write_i64(self.dmc_dma_count);
@@ -1197,7 +1288,14 @@ impl NesBus {
     /// [`InvalidState`] when the block is truncated or its RAM block has the wrong size.
     pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         reader.read_blob_into(&mut self.ram)?;
-        self.open_bus = reader.read_u8()?;
+        self.data_bus = reader.read_u8()?;
+        // The external bus is in the format only through `data_bus`: the two differ for at most
+        // the cycle a `$4015` read or a DMC fetch happened on and the one after it, and neither
+        // can be the cycle a state is written on. A `$4015` read **can** be an instruction's last
+        // cycle, but the next instruction's first cycle is its opcode fetch, which drives both
+        // buses before anything reads the external one.
+        self.ext_bus = 0;
+        self.ext_cycle = 0;
         self.cycles = reader.read_i64()?;
         self.oam_dma_count = reader.read_i64()?;
         self.dmc_dma_count = reader.read_i64()?;

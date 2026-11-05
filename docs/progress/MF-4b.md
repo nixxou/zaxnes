@@ -252,10 +252,164 @@ shorter than two CPU cycles and the only pair of `$2007` reads that close is the
 the read of one indexed instruction, which no save point can fall inside (a state is written
 between instructions, and cycle 1 of an instruction is always its opcode fetch).
 
+## Step 3 — two data buses, and the drive that was reading the ROM wrong
+
+### What the ROM says
+
+`AccuracyCoin`'s `Internal Data Bus` test states the rule in one line: "The internal data bus is
+updated during every read/write, while the **external** data bus is updated on every read/write
+**except for reads from address `$4015`**", and its test 2 states the other half, that a DMC
+sample fetch "does not update the internal data bus. Only the external one." `$4015` is decoded
+inside the 2A03 and answers on its internal bus; the sample byte reaches the DMC off the pins.
+
+Three rows came straight out of that, and the first two were the lot's measurable target:
+
+| test | code | what it says |
+| --- | --- | --- |
+| `CPU Behavior / Open Bus` | 7 | "Reading from $4015 should not update the data bus." |
+| `CPU Behavior 2 / Internal Data Bus` | 3 | "Reads from $4015 only update the internal data bus and cannot affect the external data bus." |
+| `CPU Behavior / Open Bus` | 9 | "Bit 5 of address $4015 is open bus" — and `Internal Data Bus` 2 says *which* bus: the internal one, which a DMC fetch does not touch. |
+
+### The change
+
+`nes_bus.rs`. The field that was `open_bus` is now `data_bus` and holds the **internal** bus:
+every read, every write, every repeated read of a DMA halt cycle loads it, which is what the old
+single bus already did, so the per-cycle path does not change at all. The external bus is a pair,
+`ext_bus` and `ext_cycle`, written at the **two cold sites where the two diverge**:
+
+* `hold_external_bus`, in `read_internal`'s `$4015` arm: the pins keep what they had;
+* `drive_external_bus`, in `dmc_fetch_read`: the pins take the sample byte and the internal bus
+  keeps what it had.
+
+`external_bus()` returns `ext_bus` while `cycles - ext_cycle <= 1` and `data_bus` otherwise, and
+the bound is exact: a CPU cycle *is* one bus access, so any cycle other than those two drives both
+buses, and the cycle after a divergence is the last one that can tell them apart. Two cases need a
+DMA **and** an address in `$4000`-`$401F` to fall outside it and read `data_bus` instead — a halt
+cycle the controller cannot see directly after a `$4015` read, and an OAM transfer from page `$40`
+interleaved with a DMC fetch — and the function's doc names them. No ROM here reaches either.
+
+The three consumers that mean "nothing is driving the pins" now ask `external_bus()`:
+`$4000`-`$4014` and `$4018`-`$401F`, an address no cartridge answers, and the extension's window.
+`$4015`'s bit 5 and the three open-bus bits of `$4016`/`$4017` keep reading `data_bus` — which is
+what `Implied Dummy Reads` needs when it takes the operands of a `JSR` out of the controller ports
+after fetching the opcode from `$4015`: they "leech off the value read from the opcode".
+
+### And then the real blocker, which was the harness
+
+`Implied Dummy Reads` still took the run out of the all-test loop at 96/147 — although it passes
+on its own, and although page 14 run as a page passes it, and although **every earlier page marked
+as skipped** did not help. That last measurement is what gave it away: the cause was not state
+left by another test, it was the drive.
+
+`TEST_ImpliedDummyRead_BackupRAM` copies `$00`-`$FF` to `$700`-`$7FF`, **zeroes the zero page**,
+and puts it back when the test is done — it needs every byte of it for the function it assembles
+to run out of open bus. `RunningAllTests` is `$0035` and `PostAllTestTally` is `$0037`. So for the
+whole of that test both read 0, and the drive's "the run is over when `RunningAllTests` drops to
+zero" fired in the middle of it: it stopped, called the test "took the run out of the all-test
+loop", retired it, and hit the same wall on every retry until `MAX_SKIPS` was spent. Eight tests
+reported as hung, 32 behind them never reached, and the emulator had nothing to do with any of it.
+
+`coin.rs` now measures progress with `run_count` — how many of the 147 result bytes are written —
+which lives in page 4, which no test touches but its own. The run is over when all 147 are there
+and `RunningAllTests` is zero; the stall watch is on that same count; and the two labels are still
+told apart, by whether `RunningAllTests` stayed zero for the whole wait.
+
+### What it moves
+
+| | `3ac52b27` | step 3 |
+| --- | --- | --- |
+| `AccuracyCoin` | 93 / 147, 14 failed, **8 retired, 32 never run**, 9 attempts, 29 s | **118 / 147, 29 failed, 0 retired, 0 never run, 1 attempt, 2.6 s** |
+
+The 25 rows that moved: `Open Bus`, `Interrupt flag latency` (step 1), `Implied Dummy Reads`,
+`Internal Data Bus`, `DMA Landing on Write`, `DMC Playback Rate`, `CHR ROM is not writable`,
+`PPU Register Mirroring`, `PPU Register Open Bus`, `PPU Read Buffer`, the seven
+`PPU VBlank Timing` rows, `Sprite overflow behavior`, `Sprite 0 Hit behavior`,
+`Suddenly Resize Sprite`, `Misaligned OAM DMA`, `t Register Quirks`, `INC $4014`,
+`Rendering Flag Behavior`, `Attributes As Tiles` and `Sprites On Scanline 0` — all of which were
+behind the wall.
+
+One row reads worse and it is **not** a regression: `DMA + $2002 Read` was `pass 1` in the old
+nine-attempt run, where the last attempt had eight tests marked skipped and so ran everything
+with different timing, and is `fail 2` in the honest single run. It passes when run on its own.
+Step 5 measures `3ac52b27` under the corrected drive so that the before/after is read the same way
+on both sides.
+
+### Hot path
+
+`offsets.py` (`bodies.py` with struct displacements normalised, since `NesBus` grows 16 bytes and
+every field after `ext_bus` moves), `bin-4b-s2.s` against `bin-4b-s3.s`:
+
+| symbol | instructions | verdict |
+| --- | ---: | --- |
+| `Cpu6502::step` | 893 → 893 | **IDENTICAL** |
+| `Cpu6502::branch`, `resolve` | 366, 1 725 | **IDENTICAL** |
+| `NesBus::read_cycle`, `tick`, `write_internal` | 3, 75, 2 565 | **IDENTICAL** |
+| `Apu2A03::run_cpu_cycles`, `quiet_cycles` | 873, 90 | **IDENTICAL**, raw |
+| `NesBus::read_internal` | 739 → **757** | +18 |
+| `NesBus::dma_read` | 98 → **109** | +11 |
+| `NesBus::run_dma` | 506 → **511** | +5 |
+
+Where the three go, read off the diffs:
+
+* `read_internal`: **+9 in the `$4015` arm** (the select and the two stores), **+5 on the
+  unmapped-cartridge tail** and +4 of tail duplication. The prologue is byte for byte the same —
+  same five pushes, same `subq $32` — so no callee-saved register was added, and the RAM, PRG,
+  PRG-RAM-answered and PPU-register paths are untouched. Two sites had to be made **lazy** to get
+  there: `unwrap_or(self.external_bus())` evaluates the select before the `Option` is tested, which
+  put it on every read a cartridge *does* answer, and the `$4000`-`$401F` test in `dma_read` had it
+  hoisted in front of the compare, which put it on every byte of every OAM transfer. Both are now
+  written as a `match` and as two returns, with the reason on them.
+* `dma_read`: +6 in the `$4000`-`$401F` arm, +9 in the `internal` `$4015` sub-read, −2 elsewhere.
+  The ordinary OAM source read — `read_internal` then two stores — is unchanged.
+* `run_dma`: the five instructions of `dmc_fetch_read` inlined at the DMC-fetch arm, once per
+  fetch.
+
+So: **nothing per cycle**, nine instructions per `$4015` read, five per DMC fetch, five per read
+of an address no cartridge answers.
+
+### Games whose output may move
+
+A game must read `$4015` and then read an unmapped address (or `$4000`-`$4014`/`$4018`-`$401F`) on
+the very next cycle, or read `$4015` within a cycle of a DMC fetch. The first needs an indexed read
+whose dummy cycle lands on `$4015`, i.e. `lda $40FF,x` with X ≥ `$16`; the second needs a DPCM
+sample playing while `$4015` is polled, which **is** ordinary code — a music driver reading `$4015`
+to see whether a channel has finished. What changes there is bit 5 only, the one bit of `$4015`
+that is not a flag, and a driver that reads bit 5 reads a value no hardware guarantees. No
+commercial title is expected to move; `apu_test`, `blargg_apu_2005.07.30`, `apu_reset`,
+`apu_mixer`, `pal_apu_tests`, `dmc_dma_during_read4` and `sprdma_and_dmc_dma` are all unchanged,
+ROM by ROM.
+
+### Tests and ROMs
+
+* `memory_access_tests::req_core_081_a_4015_read_answers_on_the_internal_bus_and_not_on_the_pins`
+  — write `$A5`, read `$4015` (bit 5 set, every other bit 0), then read `$4018`: `$A5`, not the
+  `$20` the APU just answered with.
+* `dmc_dma_timing_tests::req_core_113_a_dmc_fetch_drives_the_external_bus_and_not_the_internal_one`
+  — both halves, with `$20` on both buses and a sample byte of `$00`: a halted `$4015` read still
+  reads bit 5 from the internal bus, and a halted read of an unmapped address returns the sample
+  byte off the pins.
+
+| suite | `3ac52b27` | step 3 |
+| --- | --- | --- |
+| `apu_test` 19/19, `blargg_apu` 11/11, `apu_reset` 6/6, `apu_mixer` 4/4, `pal_apu_tests` 10/10 | all pass | **all pass** |
+| `sprdma_and_dmc_dma` 2/2, `dmc_dma_during_read4` 3 pass 2 manual, `dmc_tests` 4 manual | unchanged | **unchanged** |
+| `cpu_interrupts_v2`, `instr_misc`, `instr_test-v3`, `instr_test-v5`, `nes_instr_test`, `cpu_dummy_reads`, `cpu_dummy_writes`, `cpu_exec_space`, `cpu_reset`, `instr_timing`, `branch_timing_tests`, `cpu_timing_test6` | all pass | **all pass** |
+| `ppu_open_bus`, `ppu_read_buffer`, `read_joy3` | unchanged | **unchanged** |
+| `AccuracyCoin` | 93 / 147 | **118 / 147** |
+
+`cargo fmt --check` clean, clippy clean (**no new `allow`**), `cargo test --release -p zax-nes -p
+zax-harness`: **699 passed, 0 failed**.
+
+**Save states**: the format is unchanged — `data_bus` is the byte `open_bus` was. `ext_bus` and
+`ext_cycle` are cleared on load and nothing is lost: the two buses differ for at most the cycle a
+`$4015` read or a DMC fetch happened on and the one after it, a state is written between
+instructions, and the first cycle of an instruction is its opcode fetch, which drives both buses
+before anything reads the external one.
+
 ## Status
 
 - [x] step 1 — the sticky poll of a taken branch
 - [x] step 2 — the `$2007` read buffer's delay
-- [ ] step 3 — the internal and external data buses
+- [x] step 3 — the internal and external data buses
 - [ ] step 4 — the `SH*` stores and a DMA on the dummy read
 - [ ] step 5 — the suites, the campaign document and the guard

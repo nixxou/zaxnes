@@ -1354,18 +1354,41 @@ struct Run {
     stalled: bool,
 }
 
+/// How many of the 147 tests have a result byte: the drive's own measure of progress.
+///
+/// **Not** `RunningAllTests` or `PostAllTestTally`, and that is the whole point. Both live in the
+/// zero page, and `Implied Dummy Reads` — which needs every byte of it for the function it builds
+/// to run out of open bus — copies `$00`-`$FF` to `$700`-`$7FF`, **zeroes it**, and puts it back
+/// when it is done (`TEST_ImpliedDummyRead_BackupRAM` / `_RestoreRAM`). So for the whole of that
+/// test `RunningAllTests` reads 0 and `PostAllTestTally` reads 0, which the earlier drive took for
+/// the end of the run: it stopped there, called the test "took the run out of the all-test loop",
+/// retired it, and then met the same wall on the next retry until `MAX_SKIPS` was spent — eight
+/// tests reported as hung and the 32 behind them never reached, none of which the emulator had
+/// anything to do with. Lot MF-4b found it by running those eight tests one at a time, the way the
+/// README says to ("Pressing A will run the highlighted test"), and watching seven of them pass.
+///
+/// The result bytes are at `$0403`-`$0498`, in page 4, which no test touches but its own.
+fn run_count(core: &NesCore) -> usize {
+    TESTS
+        .iter()
+        .filter(|test| TestResult::of(core.read_memory(test.result)) != TestResult::NotRun)
+        .count()
+}
+
 /// Marks `retired` to be skipped, presses Start at the menu's top and waits for the run.
 ///
-/// The run is over when `RunningAllTests` drops back to zero; the ROM draws its table in the
-/// same call, so a few more frames are run before the tallies are read. A test that never
-/// returns would otherwise cost the whole budget — the ROM is looping, not working — so the
-/// drive also watches `PostAllTestTally`, which the all-test loop increments once per test it
-/// starts. A counter that has not moved for `STALL` frames means the run will not finish.
+/// The run is over once every test has a result byte ([`run_count`]) and the ROM has cleared
+/// `RunningAllTests`; it draws its table in the same call, so a few more frames are run before the
+/// tallies are read. A test that never returns would otherwise cost the whole budget — the ROM is
+/// looping, not working — so the drive watches that same count: if it has not moved for `STALL`
+/// frames the run will not finish. Which of the two ways it ended is told apart by
+/// `RunningAllTests`: a test that took the CPU out of the loop leaves it at zero for the whole
+/// wait, where a test that is merely looping inside the loop does not.
 fn drive(core: &mut NesCore, budget: u32, retired: &[Test]) -> Run {
     /// Frames run after the ROM clears `RunningAllTests`, so that it finishes drawing its
     /// result table and recomputing the two tallies.
     const AFTER: u32 = 30;
-    /// Frames the test counter may stand still before the run is called stuck. A minute of
+    /// Frames the test count may stand still before the run is called stuck. A minute of
     /// emulated time, where the ROM's longest tests are seconds.
     const STALL: u32 = 3_600;
     /// Frames spent on the title screen before the first button, so that the menu is drawn.
@@ -1375,10 +1398,10 @@ fn drive(core: &mut NesCore, budget: u32, retired: &[Test]) -> Run {
     script.mark_to_skip(retired);
     script.press(START);
 
-    let mut started = false;
     let mut done_at = None;
-    let mut counter = core.read_memory(TOTAL_TALLY);
+    let mut counted = run_count(core);
     let mut moved_at = script.frames();
+    let mut running_zero_since = None;
     for frame in 1..=budget {
         core.run_frame(script.input(frame));
         if frame <= script.frames() {
@@ -1386,23 +1409,29 @@ fn drive(core: &mut NesCore, budget: u32, retired: &[Test]) -> Run {
         }
 
         if core.read_memory(RUNNING_ALL) == 0 {
-            if started && done_at.is_none() {
-                done_at = Some(frame + AFTER);
+            if running_zero_since.is_none() {
+                running_zero_since = Some(frame);
             }
         } else {
-            started = true;
-            let now = core.read_memory(TOTAL_TALLY);
-            if now == counter {
-                if frame - moved_at >= STALL {
-                    return Run {
-                        frames: frame,
-                        stalled: true,
-                    };
-                }
-            } else {
-                counter = now;
-                moved_at = frame;
+            running_zero_since = None;
+        }
+
+        let now = run_count(core);
+        if now != counted {
+            counted = now;
+            moved_at = frame;
+        }
+
+        if counted == TESTS.len() {
+            if done_at.is_none() && running_zero_since.is_some() {
+                done_at = Some(frame + AFTER);
             }
+        } else if frame - moved_at >= STALL {
+            let left_the_loop = running_zero_since.is_some_and(|since| frame - since >= STALL);
+            return Run {
+                frames: frame,
+                stalled: !left_the_loop,
+            };
         }
 
         if done_at.is_some_and(|due| frame >= due) {
@@ -1415,7 +1444,7 @@ fn drive(core: &mut NesCore, budget: u32, retired: &[Test]) -> Run {
 
     Run {
         frames: budget,
-        stalled: started,
+        stalled: counted > 0,
     }
 }
 
