@@ -369,11 +369,104 @@ zax-harness`: **713 passed, 0 failed**.
 
 **Save states**: no field added, nothing moved.
 
+## Step 3 — the `$4015` DMC stop, delayed like the start: **not committed**
+
+**No code changed in this step.** What it produced is a measurement that localises the defect to
+four bytes, the mechanism behind them, and a design that costs the hot path nothing — which is
+what MF-4a asked a later lot to find and did not have.
+
+### The failing message
+
+> `Explicit DMA Abort` 2 / `Implicit DMA Abort` 2: The aborted DMAs did not spend the correct
+> number of CPU cycles.
+
+Both rows pass their test 1 (`CheckDMATiming`, `CPY #4`), so the core's DMA *duration* is already
+right; what fails is the 16-entry answer key each compares against.
+
+### The instrument this step added
+
+The keys live in RAM — `$50`-`$5F` for the explicit row, `$500`-`$51F` for the implicit one — and
+`NesCore::read_memory` can read them, which makes the rows measurable instead of a single error
+code. A throwaway test loaded the ROM, ran the drive's own script (180 settle frames, then Start
+for two) and snapshotted both ranges on the frame each result byte first went non-zero. To
+reproduce it: `result_ExplicitDMAAbort` is `$479` and `result_ImplicitDMAAbort` is `$478`.
+
+### What the measurement says
+
+| X | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| hardware key | 04 | 04 | 04 | 04 | 04 | 04 | **03** | **04** | **01** | **01** | 00 | 00 | 00 | 00 | 00 | 00 |
+| this core | 04 | 04 | 04 | 04 | 04 | 04 | **00** | **00** | **00** | **00** | 00 | 00 | 00 | 00 | 00 | 00 |
+
+**Twelve of the sixteen already agree.** The DMA that runs in full costs four cycles (X = 0 to 5)
+and the write that lands early enough cancels it outright (X = 10 to 15); only the four-cycle
+window between them is wrong, and in one direction — this core cancels where the hardware does
+not.
+
+`Clockslide64_Minus_A` leaves `A = X` cycles before the DMA, so **a larger X is a write that
+lands earlier**. Read that way the key is one rule:
+
+* X = 0 to 5 — the write lands *after* the DMA has run: nothing to stop, four cycles.
+* X = 6, 7 — the write lands on or just after the halt: too late, so the DMA still runs. Three
+  cycles or four, by whether its alignment cycle was needed.
+* X = 8, 9 — the write lands just *before* the halt. The stop has not reached the DMA unit yet, so
+  the halt still happens and the DMA is then dropped: **one cycle spent**.
+* X = 10 to 15 — the write lands two or more cycles before: the stop arrives first and no DMA
+  happens at all.
+
+So the stop reaches the DMA unit two or three cycles after the write, exactly the way the **start**
+already does (`DmcChannel::set_enabled` returns `if apu_cycle { 2 } else { 3 }`), and a request
+caught inside that window is dropped *after* its halt cycle rather than before it.
+
+The implicit row's `$500`-`$51F` came back all zeroes, so its loop stored nothing: it is blocked
+earlier than the key comparison and its own error code 3 names a mechanism this core does not have
+at all — "The 1-cycle DMA should not get delayed by a write cycle, rather it just shouldn't occur
+in that case", the 1-cycle DMA a reload makes when it lands just after a load on a one-byte sample
+with looping off. That is a second mechanism, not a calibration of the first.
+
+### The design, and why it costs nothing
+
+MF-4a wrote the obvious shape — delay the **channel's stop** — measured it, and took it back out
+because "it changes what `$4015` bit 4 reads back for two to three cycles after a disable, and
+nothing in the suites pins the new behaviour". That objection is right and it is avoidable:
+**delay the cancellation of the request, not the stop of the channel.**
+
+* `DmcChannel::set_enabled(false)` keeps clearing `bytes_remaining` at once, so `$4015` bit 4
+  reads back exactly as it does today and no unpinned behaviour is introduced. MF-4a's reason for
+  reverting disappears.
+* The bus gains one cycle stamp, `dmc_stop_cycle`, set by the `$4015` disable to
+  `cycles + (2 or 3)`. `NesBus::after_apu_write` stops clearing `DMA_DMC | DMA_DMC_WAIT |
+  DMA_DUMMY` immediately and stamps instead.
+* `promote_dmc_wait` promotes a held request when `needs_dmc_dma() || halt_cycle <
+  dmc_stop_cycle` — the second term is what lets X = 8 and 9 start at all.
+* The DMA loop drops an in-flight `DMA_DMC` once `cycles >= dmc_stop_cycle`, which spends one
+  cycle when the halt has just run.
+
+Every consult site is inside `run_dma`, `dmc_only_dma` and `promote_dmc_wait` — all of them
+`#[inline(never)]` or reached only from the DMA path, which `dma != 0` gates — so a game that
+runs no DMA pays nothing, and a game that runs OAM transfers pays at most one test per
+state-machine iteration (the fast loop `copy_oam_pairs` covers the bulk of a transfer and would
+not be touched). `Apu2A03::write`'s return would become a three-way `None` / `Load(u32)` /
+`Stop(u32)` rather than a bare `u32`, so the two delays cannot be confused.
+
+### Why it is not in this commit
+
+The remaining four bytes have to come out **exactly** — including the non-monotone `03` then `04`,
+which is an alignment-cycle parity — and each calibration turn is a rebuild plus a ROM run. The
+change lands in the one subsystem that `sprdma_and_dmc_dma`, `sprdma_and_dmc_dma_512`,
+`dma_4016_read`, `read_write_2007`, `double_2007_read` and the whole golden core rest on, and the
+implicit row needs a second mechanism on top. Weighed against the five rows of steps 4 to 6 and
+the campaign of step 7, the honest call was to leave the two abort rows measured and designed
+rather than half-changed: **this is a scope decision, not a hot-path verdict** — the design above
+is free, and it is the next thing a follow-up lot should take, with the probe recipe above as its
+instrument.
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
 - [x] step 2 — `$4010` written as the DMC timer reloads
-- [ ] step 3 — the `$4015` DMC stop, delayed like the start
+- [~] step 3 — the `$4015` DMC stop, delayed like the start: **measured and designed, not
+  committed** (12 of 16 key bytes already agree; the four that do not are named above)
 - [ ] step 4 — what a DMA reads when the ports and the APU drive the bus
 - [ ] step 5 — the dot on which `$2002`'s sprite flags clear
 - [ ] step 6 — `$2004` on a visible line, and `$2007` read with rendering on
