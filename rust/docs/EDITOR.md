@@ -109,9 +109,37 @@ handheld: the blocks read with the `handheld` condition). A change of reading re
 
 ## 6. Cost when it is not used
 
-Nothing of it runs in the frame loop unless used: the movie hook already existed (one `Option`
+Nothing of it runs in the frame loop unless used (the editor mode, section 7, adds one setting
+read per displayed frame while it is off): the movie hook already existed (one `Option`
 test); the timeline adds one `bool` read beside `rollback_enabled` per emulated frame, and work
 only on the frames that are multiples of 60 while a movie plays; the seek is one `Option` test
 per tick; the MCP server one `Option` test per displayed frame; the log keeps lines in memory
 only once the server started. The core, the conversion, the Lua hooks, the draw list and the
 renderer are untouched.
+
+## 7. The editor mode
+
+Tools > "Editor mode" (`tools.editor_mode`, the setting `ui.editor_mode`, kept; `--editor` turns
+it on) gathers the above for writing a profile with an AI agent (`editor_mode.rs`):
+
+* the MCP server (section 4) and the pens (section 5), started and stopped with the mode (the
+  server closes its port when the mode is turned off; `--mcp` keeps it on for the session);
+* the **editor folder** of the user data (`<data>/editor`), laid out from documents the
+  executable carries: `AGENT.md` (what an agent reads first), `docs/` (this page, the workflow,
+  `PROFILE-JSON.md`, `LUA-API.txt`, SPEC-00, 03, 04, 04B and 05), `templates/main.lua`. A
+  document is written when it is missing or when the set changed (a digest in
+  `editor/.documents`); the projects are never written again;
+* **projects**: `editor/projects/<game>/profile.json` (the description of `zax-harness
+  profile-build`, now `zax_profiles::description`), `main.lua`, `PROMPT.txt`, `build/`. Turning
+  the mode on while a game runs on a generic entry ("2D Mode", "3D by default"), or Tools > "New
+  Lua profile for this game" (`tools.new_lua_profile`), makes one: its profile (a placeholder
+  pattern keeps it in 3D, a profile without patterns playing in 2D) is built, imported into the
+  library and the game started again on it, its movie too. In editor mode a script reload first
+  builds the profile file of a project-made entry again from its project
+  (`GameCatalog::rebuild_from_project`), so the agent edits the project, never the `.3dn`;
+* Tools > "Copy the prompt for the AI agent" (`tools.copy_agent_prompt`): the text to give the
+  agent, with this session's paths (the editor folder, the project, the MCP address,
+  `zax-harness` when it is next to the executable) and the source repository, into the
+  clipboard; also written into the project's `PROMPT.txt` and copied when a project is made.
+
+The Windows and Linux packages ship `zax-harness` next to `zaxnes` for it.
