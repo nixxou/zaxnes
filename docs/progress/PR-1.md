@@ -509,3 +509,23 @@ are in the set, the `$2002` loop is in it twice over (`Duelito` at 4 024 a frame
 1 858), and the form that ships is faster on every one of them. No new Q ticket is needed —
 nothing in the spec was ambiguous here; the question was about measurement, and the measurement
 was the lot.
+
+## Step 5 — the suites
+
+| suite | MF-4c's end (`2754a7e8`) | PR-1 |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | **clean** |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean | **clean** |
+| `cargo test --release -p zax-nes -p zax-harness` | 709 passed, 0 failed, 7 ignored | **709 passed, 0 failed, 7 ignored** |
+| `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests` | 14 passed | **14 passed** |
+
+The same counts, which is the expected result: no test was added, removed or `#[ignore]`d, and an
+attribute or a wrapper cannot change what a function computes. `req_core_100_the_mmc5_rom_suites_keep_their_outcomes`
+passing matters more than the rest here — the MMC5 is the board whose read path this lot moved
+furthest (`Board::cpu_read_override` back inline, `Cartridge::try_cpu_read` out of line), and that
+guard is MF-4c's own pin on its four ROM suites.
+
+Clippy needed one thing: `` `ExRAM` `` in a doc comment, `clippy::doc_markdown` being denied
+workspace-wide. The two `#[allow(clippy::inline_always)]` carry their measured reason on the
+function, as MF-3b's do — they are the fourth and fifth in the crate, after
+`Cpu6502::end_cycle`, `CpuBus::read_code` and `Ppu2C02::read_nametable_as`.
