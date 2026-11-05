@@ -630,6 +630,73 @@ impl NesBus {
         }
     }
 
+    /// A DMC sample fetch with no OAM transfer beside it, halting a read of an address outside
+    /// `$4000`-`$401F`: the whole of [`NesBus::run_dma`] for that case, entered straight from
+    /// [`NesBus::halted_read_cycle`] so that it pays neither `run_dma`'s prologue — eight general
+    /// registers and two XMM registers, the price of the OAM state machine's working set — nor
+    /// the three classifications of the halted address that only the `internal` case reads.
+    ///
+    /// A game that plays DPCM makes tens of these per frame against its one OAM transfer
+    /// (`dpcmletterbox`: 19 051 fetches against 297 transfers in 300 frames), so this is the
+    /// other half of the DMA bookkeeping lot MF-4a-ter set out to trim.
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[inline(never)]
+    fn dmc_only_dma(&mut self, read_address: u16) {
+        // The halt cycle has already run; what is left of it is its read, with the CPU's address
+        // still on the bus. `halt_is_invisible` needs `internal`, which the caller excluded.
+        self.dma &= !DMA_HALT;
+        let value = self.read_internal(read_address);
+        self.open_bus = value;
+        self.dmc_fetch_cycles(read_address);
+    }
+
+    /// The cycles of a DMC sample fetch with no OAM transfer beside it: the dummy cycle, an
+    /// alignment cycle when the one after it is not a get cycle, and the fetch. Three cycles after
+    /// the halt, or four — [`NesBus::DMC_DMA_CYCLES_ALIGNED`] and [`NesBus::DMC_DMA_CYCLES`].
+    ///
+    /// **Why the sequence is fixed before it starts**, so that the state machine's per-cycle
+    /// questions can all be answered here in advance:
+    ///
+    /// * no second DMC request can appear inside it. `poll_dmc_dma` raises one only while
+    ///   `(dma & (DMA_DMC | DMA_DMC_WAIT)) == 0`, and `DMA_DMC` stays set until the byte has been
+    ///   supplied below — so `promote_dmc_wait` would have nothing to do on any of these cycles;
+    /// * no OAM transfer can appear inside it: `$4014` is a write and the CPU is halted;
+    /// * `DMA_HALT` is already consumed by the caller and `DMA_DUMMY` is consumed by the first
+    ///   cycle, so `dma_cycle`'s two tests have one answer each;
+    /// * the caller's `!internal` makes `input_port` false too (`$4016` and `$4017` are inside
+    ///   `$4000`-`$401F`), so every idle cycle repeats the CPU's read unconditionally, and
+    ///   `halt_is_invisible` — which needs `internal` — was false.
+    ///
+    /// The DMC's read keeps going through [`NesBus::dma_read`]: it is one call per fetch, it is
+    /// where the 2A03's "two reads in a row" rule lives, and a sample address outside
+    /// `$8000`-`$FFFF` (which only a loaded state can produce) must still decode as it did.
+    fn dmc_fetch_cycles(&mut self, read_address: u16) {
+        // The dummy cycle. The CPU's address is still on the bus, so its read happens again.
+        self.dma &= !DMA_DUMMY;
+        self.tick();
+        let value = self.read_internal(read_address);
+        self.open_bus = value;
+
+        // An alignment cycle when the cycle after this one would not be a get cycle.
+        if (self.cycles & 1) == 0 {
+            self.tick();
+            let value = self.read_internal(read_address);
+            self.open_bus = value;
+        }
+
+        // The get cycle: the memory reader has had its halt and its dummy cycle, so it reads.
+        self.tick();
+        self.dmc_dma_count += 1;
+        let address = self.apu.dmc_dma_address();
+        let mut decoded_before = read_address;
+        let value = self.dma_read(address, false, &mut decoded_before);
+        self.sync_apu();
+        self.apu.supply_dmc_byte(value);
+        // Cleared last: the `sync_apu` above polls the request, which is still raised until the
+        // byte lands.
+        self.dma &= !DMA_DMC;
+    }
+
     /// How many of the `wanted` byte pairs an OAM transfer still owes may run in
     /// [`NesBus::copy_oam_pairs`] instead of in the state machine above: the pairs that end on or
     /// before the cycle the DMC's memory reader could ask for a byte on.
@@ -999,7 +1066,13 @@ impl NesBus {
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
             return self.read_internal(address);
         }
-        self.run_dma(address);
+        if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) && (address & 0xFFE0) != 0x4000 {
+            // A lone DMC fetch, which is most of what a game playing DPCM comes here for, and a
+            // fixed three or four cycles rather than a state machine (lot MF-4a-ter step 3).
+            self.dmc_only_dma(address);
+        } else {
+            self.run_dma(address);
+        }
         self.tick();
         self.read_internal(address)
     }

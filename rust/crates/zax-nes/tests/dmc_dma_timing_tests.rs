@@ -103,6 +103,46 @@ fn req_core_113_the_dmc_fetch_horizon_is_none_while_no_sample_plays() {
     assert_eq!(None, bus.apu().cycles_until_dmc_fetch());
 }
 
+/// A lone DMC fetch halting a read of an address **outside** `$4000`-`$401F` takes its three or
+/// four cycles by the parity of the halt, and repeats the CPU's read on each idle cycle.
+///
+/// That is the sequence `NesBus::dmc_fetch_cycles` runs straight instead of through the DMA state
+/// machine (lot MF-4a-ter step 3). `only_the_halt_cycle_of_a_dma_reaches_the_controller` above
+/// pins the same counts for a halted `$4016` read, which is the `internal` case and still goes
+/// through the state machine, so between them both halves are covered.
+#[test]
+fn req_core_113_a_lone_dmc_fetch_takes_three_cycles_or_four_by_its_alignment() {
+    let mut stalls = Vec::new();
+    let mut reads = Vec::new();
+
+    for padding in [0, 1] {
+        let (_, mut bus) = loaded_core(None);
+        for _ in 0..padding {
+            bus.tick(); // Flips the parity the reset sequence left behind.
+        }
+        arm_a_pending_dmc_fetch(&mut bus);
+
+        // $2002 is read by the halt and again by every idle cycle of the DMA; each read clears
+        // the address latch and returns the open bus in its low five bits, but the PPU counts
+        // them, which is what `dma_2007_read` and `double_2007_read` are built on. Here the
+        // cheaper witness is the cycle count plus the extra read the halt itself makes.
+        let before = bus.cycle_count();
+        bus.read(0x8000);
+        stalls.push(bus.cycle_count() - before - 1);
+        reads.push(bus.dmc_dma_count());
+    }
+
+    stalls.sort_unstable();
+    assert_eq!(
+        vec![
+            i64::from(NesBus::DMC_DMA_CYCLES_ALIGNED),
+            i64::from(NesBus::DMC_DMA_CYCLES),
+        ],
+        stalls
+    );
+    assert_eq!(vec![1, 1], reads);
+}
+
 /// Reads `$4016` until the controller answers 1, as `dma_4016_read` does, and returns how many
 /// reads that took. With one button pressed and the strobe released, an untouched controller
 /// takes eight.
