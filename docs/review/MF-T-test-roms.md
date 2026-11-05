@@ -32,9 +32,11 @@ Anything none of those can read is `manual`, and the PNG of the final frame is t
 
 **Lot MF-3 moved eight rows, all of them in `holy-mapperel`**, which now passes in full, and
 **lot MF-4a moved ten more** — the two `sprdma_and_dmc_dma`, `dmc_dma_during_read4/dma_4016_read`
-and the seven `pal_apu_tests`. See "What lot MF-3 changed" and "What lot MF-4a changed" at the
-end of this document for the before/after of each. Everything else in this document is the
-campaign as MF-T first measured it.
+and the seven `pal_apu_tests`. **Lot MF-4b moved no row of the table at all**, and moved
+`AccuracyCoin` from 93 to 124 of its 147 tests and `double_2007_read` onto one of the four
+outputs its own source names. See "What lot MF-3 changed", "What lot MF-4a changed" and "What lot
+MF-4b changed" at the end of this document for the before/after of each. Everything else in this
+document is the campaign as MF-T first measured it.
 
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
@@ -1057,3 +1059,88 @@ suites at 5/6 each with their required failure.
 and it still passes although the 513 or 514 stolen cycles are now charged to the instruction
 *after* the `STA $4014` rather than to the `STA` itself — which is where the hardware puts them,
 the DMA unit being unable to halt the CPU on a write.
+
+## What lot MF-4b changed
+
+MF-4b is the CPU and PPU register edges `AccuracyCoin` reports. The campaign's four totals do
+not move — **214 pass, 5 fail, 1 unsupported, 111 manual**, and both JSONs compared ROM by ROM
+give **331 ROMs, the same set, and exactly two whose verdict or message differs by a character**:
+
+| ROM | before | after |
+|---|---|---|
+| `AccuracyCoin/AccuracyCoin.nes` | fail — 93/147, 8 tests retired, 32 never run | fail — **124/147**, 0 retired, 0 never run |
+| `nes-test-roms/dmc_dma_during_read4/double_2007_read.nes` | manual — `22 33 44 55 66 / 33 44 55 66 77 / D84F6815` | manual — `22 33 44 55 66 / 22 44 55 66 77 / 85CFD627` |
+
+### `double_2007_read`, which had been printing something no console does
+
+The ROM runs `lda $20F7,x` with X=`$10`: a page cross, so the dummy read hits `$2007` and the
+real read `$2107` — two `$2007` reads one CPU cycle apart. Its own source names what hardware
+gives, and all four acceptable outputs have the **second** read returning the buffer as it stood
+*before* the first:
+
+```
+;22 33 44 55 66
+;22 44 55 66 77 or   22 33 44 55 66 or   02 44 55 66 77 or   32 44 55 66 77
+;85CFD627 or F018C287 or 440EF923 or E52F41A5
+```
+
+It printed `33 44 55 66 77` with CRC `D84F6815`, neither of which is on the list: the first
+read's refill was already visible to the second. It now prints `22 44 55 66 77` with CRC
+`85CFD627` — the first output and the first CRC of the four. `AccuracyCoin`'s `$2007 Stress
+Test` states the rule the fix is built on: "Reading from $2007 should set up the PPU Read Buffer
+two ppu cycles after the CPU Read ends." `dma_2007_read` still prints `44 55` with CRC
+`5E3DF9C4`, which is one of its own two documented outputs, so the DMA half is unmoved.
+
+### `AccuracyCoin`: 93 → 124, of which 8 are the core and 23 were the drive
+
+The row is read differently now, and the two halves are worth keeping apart.
+
+**23 of the 31 rows that moved were never the emulator's.** `Implied Dummy Reads` copies
+`$00`-`$FF` to `$700`-`$7FF` and **zeroes the zero page** for the duration of the test — it needs
+every byte of it for the function it assembles to run out of open bus. `RunningAllTests` is
+`$0035`. The harness's "the run is over when `RunningAllTests` drops to zero" therefore fired in
+the middle of that test, called it "took the run out of the all-test loop", retired it, and met
+the same wall on each retry until its eight-skip budget was spent: eight tests reported as hung
+and the 32 behind them never reached. The drive now counts the 147 result bytes, which live in
+page 4 and which no test touches but its own. Measured at `3ac52b27` with the corrected drive:
+**116/147**, one attempt, nothing retired, nothing unrun.
+
+**8 rows are the lot's own**, and each has a documented rule behind it:
+
+| test | before | after | what it is |
+|---|---|---|---|
+| `CPU Interrupts / Interrupt flag latency` | fail E | **pass** | the second poll of a taken page-crossing branch does not clear what the first poll found |
+| `CPU Behavior / Open Bus` | fail 7 | **pass** | a read of `$4015` answers on the internal data bus and leaves the pins alone |
+| `CPU Behavior 2 / Internal Data Bus` | fail 3 | **pass** | …and a DMC fetch is the other way round: the pins, not the internal bus |
+| `Unofficial SH* / $93 SHA Indirect,Y` | fail 7 | **pass 1** | a DMA on the dummy read cycle drops the AND with the address high byte |
+| `Unofficial SH* / $9F SHA Absolute,Y` | fail 7 | **pass 1** | " |
+| `Unofficial SH* / $9B SHS Absolute,Y` | fail 7 | **pass 1** | " |
+| `Unofficial SH* / $9C SHY Absolute,X` | fail 7 | **pass** | " |
+| `Unofficial SH* / $9E SHX Absolute,Y` | fail 7 | **pass** | " |
+
+`docs/progress/MF-4b.md` has the per-test table, the 23 rows that still fail with a diagnosis
+and the cheapest design for each, and the measurements.
+
+### The suites that did not move, and were checked
+
+`cpu_interrupts_v2` 6/6, `cpu_timing_test6`, `instr_timing` 3/3, `branch_timing_tests` 3/3,
+`cpu_dummy_reads`, `cpu_dummy_writes` 2/2, `cpu_exec_space` 2/2, `cpu_reset` 2/2,
+`instr_misc` 5/5, `nes_instr_test` 11/11, `instr_test-v3` 17/17, `instr_test-v5` 18/18,
+`oam_read`, `oam_stress`, `apu_test` 9/9, `blargg_apu_2005.07.30` 11/11, `apu_reset` 6/6,
+`apu_mixer` 4/4, `pal_apu_tests` 10/10, `sprdma_and_dmc_dma` 2/2, `dmc_dma_during_read4` 3 pass
+and 2 manual, `dmc_tests` 4 manual, `holy-mapperel` 40/40, `ppu_vbl_nmi` 11/11,
+`vbl_nmi_timing` 7/7, `sprite_hit_tests_2005.10.05` 11/11, `sprite_overflow_tests` 5/5,
+`blargg_ppu_tests_2005.09.15b` 4/5 with its required `power_up_palette`, `ppu_open_bus`,
+`ppu_read_buffer`, `read_joy3`, and the three MMC3 suites at 5/6 each with their required
+failure. The 111 `manual` rows are character for character what they were, CRCs included,
+except `double_2007_read` above.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` grows from 9 to **13** groups:
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green` (the tally as a floor of 124, no
+test left unrun or retired, and twelve rows by name),
+`req_core_111_the_cpu_interrupt_and_timing_suites_pass` (`cpu_interrupts_v2`,
+`branch_timing_tests`, `instr_timing`), `req_core_112_the_ppu_bus_latch_and_the_read_buffer_pass`
+and `req_core_110_the_dummy_cycle_suites_pass`. `ZAXNES_TEST_ROMS=… cargo test --release -p
+zax-harness --test test_roms_tests`: **13 passed**.

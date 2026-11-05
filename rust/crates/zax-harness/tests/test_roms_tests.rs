@@ -474,3 +474,180 @@ fn req_core_004_the_apu_comes_back_from_reset_where_it_should() {
 
     check("apu_reset", &EXPECTED);
 }
+
+/// Reads the per-test table of the one `AccuracyCoin` row, or `None` when the ROMs are not there.
+fn accuracy_coin() -> Option<(usize, serde_json::Map<String, serde_json::Value>)> {
+    let dir = roms_dir()?;
+    let options = test_roms::Options::parse(&[
+        dir.display().to_string(),
+        dir.join("unused.json").display().to_string(),
+        "--filter".to_owned(),
+        "AccuracyCoin".to_owned(),
+        "--no-shots".to_owned(),
+        "--quiet".to_owned(),
+    ])
+    .unwrap();
+    let results = test_roms::collect(&options).unwrap();
+    let row = results.first().expect("the AccuracyCoin row");
+    let detail = &row.detail;
+    let passed = usize::try_from(detail["passed"].as_u64().unwrap()).unwrap();
+    let tests = detail["tests"].as_object().unwrap().clone();
+    Some((passed, tests))
+}
+
+/// `AccuracyCoin`'s own tally and the rows lot MF-4b turned green, which the campaign's single
+/// `fail` row cannot show (REQ-CORE-110, REQ-CORE-111, REQ-CORE-112, REQ-CORE-113).
+///
+/// The score is asserted as a floor and the eight rows by name, so that a lot which fixes more
+/// does not have to edit this test while one that breaks any of these does.
+#[test]
+fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green() {
+    let Some((passed, tests)) = accuracy_coin() else {
+        println!(
+            "skipped: set {} to a copy of assets-free/test-roms/ to run this",
+            test_roms::ROMS_DIR_VARIABLE
+        );
+        return;
+    };
+
+    // Lot MF-4b's end. 116 of these were already there once the drive stopped mistaking
+    // `Implied Dummy Reads`' backup of the zero page for the end of the run (see `coin.rs`).
+    assert!(
+        passed >= 124,
+        "AccuracyCoin scored {passed}/147, which is under lot MF-4b's 124"
+    );
+
+    // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
+    // and a test that hangs would show up here rather than as a silent skip.
+    assert_eq!(0, tests.values().filter(|v| *v == "not run").count());
+    assert_eq!(
+        0,
+        tests
+            .values()
+            .filter(|v| v.as_str() == Some("skipped"))
+            .count()
+    );
+
+    for name in [
+        // Step 1: the second poll of a page-crossing branch does not clear the first's decision.
+        "CPU Interrupts / Interrupt flag latency",
+        // Step 3: `$4015` answers on the internal data bus and leaves the pins alone.
+        "CPU Behavior / Open Bus",
+        "CPU Behavior 2 / Internal Data Bus",
+        // Step 4: a DMA on the dummy read drops the `SH*` stores' AND.
+        "Unofficial SH* / $93 SHA Indirect,Y",
+        "Unofficial SH* / $9F SHA Absolute,Y",
+        "Unofficial SH* / $9B SHS Absolute,Y",
+        "Unofficial SH* / $9C SHY Absolute,X",
+        "Unofficial SH* / $9E SHX Absolute,Y",
+        // Behind the drive's wall until step 3, and passing once they were reached.
+        "CPU Behavior 2 / Implied Dummy Reads",
+        "PPU Behavior / PPU Register Mirroring",
+        "PPU Behavior / PPU Register Open Bus",
+        "PPU Behavior / PPU Read Buffer",
+    ] {
+        let row = tests[name].as_str().unwrap();
+        assert!(row.starts_with("pass"), "{name}: {row}");
+    }
+}
+
+/// The CPU interrupt, timing and unofficial-instruction suites steps 1 to 4 must not move
+/// (REQ-CORE-110, REQ-CORE-111).
+#[test]
+fn req_core_111_the_cpu_interrupt_and_timing_suites_pass() {
+    const INTERRUPTS: [(&str, Outcome); 6] = [
+        (
+            "nes-test-roms/cpu_interrupts_v2/cpu_interrupts.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_interrupts_v2/rom_singles/1-cli_latency.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_interrupts_v2/rom_singles/2-nmi_and_brk.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_interrupts_v2/rom_singles/4-irq_and_dma.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes",
+            Outcome::Pass,
+        ),
+    ];
+    const BRANCHES: [(&str, Outcome); 3] = [
+        (
+            "nes-test-roms/branch_timing_tests/1.Branch_Basics.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/branch_timing_tests/2.Backward_Branch.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/branch_timing_tests/3.Forward_Branch.nes",
+            Outcome::Pass,
+        ),
+    ];
+    const TIMING: [(&str, Outcome); 3] = [
+        ("nes-test-roms/instr_timing/instr_timing.nes", Outcome::Pass),
+        (
+            "nes-test-roms/instr_timing/rom_singles/1-instr_timing.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/instr_timing/rom_singles/2-branch_timing.nes",
+            Outcome::Pass,
+        ),
+    ];
+    check("cpu_interrupts_v2", &INTERRUPTS);
+    check("branch_timing_tests", &BRANCHES);
+    check("instr_timing", &TIMING);
+}
+
+/// The PPU's data-bus latch and its `$2007` read buffer, which lot MF-4b's step 2 moved
+/// (REQ-CORE-112).
+///
+/// `ppu_open_bus` covers the latch and its decay; `ppu_read_buffer` covers the buffer, the
+/// palette's immediate read and the nametable byte a palette read puts underneath it. Neither
+/// reads `$2007` twice inside one instruction, which is why `double_2007_read` — pinned in
+/// `req_core_113_the_halt_cycle_repeats_the_read_it_interrupted` above — is the row that moved.
+#[test]
+fn req_core_112_the_ppu_bus_latch_and_the_read_buffer_pass() {
+    const EXPECTED: [(&str, Outcome); 1] =
+        [("nes-test-roms/ppu_open_bus/ppu_open_bus.nes", Outcome::Pass)];
+    const BUFFER: [(&str, Outcome); 1] = [(
+        "nes-test-roms/ppu_read_buffer/test_ppu_read_buffer.nes",
+        Outcome::Pass,
+    )];
+    check("ppu_open_bus", &EXPECTED);
+    check("ppu_read_buffer", &BUFFER);
+}
+
+/// The dummy reads and dummy writes of the official and unofficial instructions, which step 4's
+/// `SH*` change must not move (REQ-CORE-110).
+#[test]
+fn req_core_110_the_dummy_cycle_suites_pass() {
+    const READS: [(&str, Outcome); 1] = [(
+        "nes-test-roms/cpu_dummy_reads/cpu_dummy_reads.nes",
+        Outcome::Pass,
+    )];
+    const WRITES: [(&str, Outcome); 2] = [
+        (
+            "nes-test-roms/cpu_dummy_writes/cpu_dummy_writes_oam.nes",
+            Outcome::Pass,
+        ),
+        (
+            "nes-test-roms/cpu_dummy_writes/cpu_dummy_writes_ppumem.nes",
+            Outcome::Pass,
+        ),
+    ];
+    check("cpu_dummy_reads", &READS);
+    check("cpu_dummy_writes", &WRITES);
+}

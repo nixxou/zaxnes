@@ -479,10 +479,371 @@ zax-harness`: **700 passed, 0 failed**. `cpu_dummy_reads`, `cpu_dummy_writes`, `
 a halted read and the write of the instruction it belongs to, both being inside one `Cpu6502::step`.
 The format is unchanged.
 
+## Step 5 — the suites end to end, the campaign document and the guard
+
+### The campaign, ROM by ROM
+
+`zax-harness test-roms <roms> all.json --no-shots`, 331 ROMs, 2 min 51 s:
+**214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual** — MF-4a-ter's four totals exactly.
+Both runs' JSON compared row by row: **331 ROMs, the same set, and exactly two whose verdict or
+message differs by a single character**, `AccuracyCoin` (93 → 124 of its 147 tests) and
+`double_2007_read` (onto the first of the four outputs its own source names). The other 111
+`manual` screens and their CRCs are character for character what they were.
+
+The five failures left are the same five: `AccuracyCoin`; `power_up_palette`, whose own readme
+says its reference values "are probably unique to my NES"; and the three MMC3 revision A ROMs
+that are **required to fail** under REQ-CORE-100.
+
+### The baseline, read the same way
+
+The drive's fix means the before/after would otherwise be measured with two different
+instruments. So `3ac52b27` was built from a `git archive` in WSL with **this lot's `coin.rs`**
+copied over it, and run:
+
+| | attempts | retired | never run | passed |
+| --- | ---: | ---: | ---: | ---: |
+| `3ac52b27`, the old drive | 9 | 8 | 32 | **93 / 147** |
+| `3ac52b27`, the corrected drive | 1 | 0 | 0 | **116 / 147** |
+| MF-4b | 1 | 0 | 0 | **124 / 147** |
+
+So of the 31 rows between 93 and 124, **23 were the drive** and **8 are the core**: step 1's
+`Interrupt flag latency`, step 3's `Open Bus` and `Internal Data Bus`, and step 4's five `SH*`
+stores. Both numbers are worth stating: the 23 were always passing on this emulator and the
+harness was hiding them, and the 8 are behaviour that was wrong.
+
+### The per-test table
+
+**124 / 147**, 23 failed, 0 retired, 0 never run, 1 attempt. The ROM's own tally reads `124/147`.
+
+| page | test | `3ac52b27`, corrected drive | MF-4b |
+| --- | --- | --- | --- |
+| CPU Behavior | `ROM is not writable` | pass | pass |
+|  | `RAM Mirroring` | pass | pass |
+|  | `PC Wraparound` | pass | pass |
+|  | `The Decimal Flag` | pass | pass |
+|  | `The B Flag` | pass | pass |
+|  | `Dummy read cycles` | pass | pass |
+|  | `Dummy write cycles` | pass | pass |
+|  | `Open Bus` | fail 7 | pass **(moved)** |
+|  | `All NOP instructions` | pass | pass |
+| Addressing mode wraparound | `Absolute Indexed` | pass | pass |
+|  | `Zero Page Indexed` | pass | pass |
+|  | `Indirect` | pass | pass |
+|  | `Indirect, X` | pass | pass |
+|  | `Indirect, Y` | pass | pass |
+|  | `Relative` | pass | pass |
+| Unofficial SLO | `$03 SLO Indirect,X` | pass | pass |
+|  | `$07 SLO Zero Page` | pass | pass |
+|  | `$0F SLO Absolute` | pass | pass |
+|  | `$13 SLO Indirect,Y` | pass | pass |
+|  | `$17 SLO Zero Page,X` | pass | pass |
+|  | `$1B SLO Absolute,Y` | pass | pass |
+|  | `$1F SLO Absolute,X` | pass | pass |
+| Unofficial RLA | `$23 RLA Indirect,X` | pass | pass |
+|  | `$27 RLA Zero Page` | pass | pass |
+|  | `$2F RLA Absolute` | pass | pass |
+|  | `$33 RLA Indirect,Y` | pass | pass |
+|  | `$37 RLA Zero Page,X` | pass | pass |
+|  | `$3B RLA Absolute,Y` | pass | pass |
+|  | `$3F RLA Absolute,X` | pass | pass |
+| Unofficial SRE | `$43 SRE Indirect,X` | pass | pass |
+|  | `$47 SRE Zero Page` | pass | pass |
+|  | `$4F SRE Absolute` | pass | pass |
+|  | `$53 SRE Indirect,Y` | pass | pass |
+|  | `$57 SRE Zero Page,X` | pass | pass |
+|  | `$5B SRE Absolute,Y` | pass | pass |
+|  | `$5F SRE Absolute,X` | pass | pass |
+| Unofficial RRA | `$63 RRA Indirect,X` | pass | pass |
+|  | `$67 RRA Zero Page` | pass | pass |
+|  | `$6F RRA Absolute` | pass | pass |
+|  | `$73 RRA Indirect,Y` | pass | pass |
+|  | `$77 RRA Zero Page,X` | pass | pass |
+|  | `$7B RRA Absolute,Y` | pass | pass |
+|  | `$7F RRA Absolute,X` | pass | pass |
+| Unofficial *AX | `$83 SAX Indirect,X` | pass | pass |
+|  | `$87 SAX Zero Page` | pass | pass |
+|  | `$8F SAX Absolute` | pass | pass |
+|  | `$97 SAX Zero Page,Y` | pass | pass |
+|  | `$A3 LAX Indirect,X` | pass | pass |
+|  | `$A7 LAX Zero Page` | pass | pass |
+|  | `$AF LAX Absolute` | pass | pass |
+|  | `$B3 LAX Indirect,Y` | pass | pass |
+|  | `$B7 LAX Zero Page,Y` | pass | pass |
+|  | `$BF LAX Absolute,Y` | pass | pass |
+| Unofficial DCP | `$C3 DCP Indirect,X` | pass | pass |
+|  | `$C7 DCP Zero Page` | pass | pass |
+|  | `$CF DCP Absolute` | pass | pass |
+|  | `$D3 DCP Indirect,Y` | pass | pass |
+|  | `$D7 DCP Zero Page,X` | pass | pass |
+|  | `$DB DCP Absolute,Y` | pass | pass |
+|  | `$DF DCP Absolute,X` | pass | pass |
+| Unofficial ISC | `$E3 ISC Indirect,X` | pass | pass |
+|  | `$E7 ISC Zero Page` | pass | pass |
+|  | `$EF ISC Absolute` | pass | pass |
+|  | `$F3 ISC Indirect,Y` | pass | pass |
+|  | `$F7 ISC Zero Page,X` | pass | pass |
+|  | `$FB ISC Absolute,Y` | pass | pass |
+|  | `$FF ISC Absolute,X` | pass | pass |
+| Unofficial SH* | `$93 SHA Indirect,Y` | fail 7 | pass 1 **(moved)** |
+|  | `$9F SHA Absolute,Y` | fail 7 | pass 1 **(moved)** |
+|  | `$9B SHS Absolute,Y` | fail 7 | pass 1 **(moved)** |
+|  | `$9C SHY Absolute,X` | fail 7 | pass **(moved)** |
+|  | `$9E SHX Absolute,Y` | fail 7 | pass **(moved)** |
+|  | `$BB LAE Absolute,Y` | pass | pass |
+| Unofficial Immediates | `$0B ANC Immediate` | pass | pass |
+|  | `$2B ANC Immediate` | pass | pass |
+|  | `$4B ASR Immediate` | pass | pass |
+|  | `$6B ARR Immediate` | pass | pass |
+|  | `$8B ANE Immediate` | pass | pass |
+|  | `$AB LXA Immediate` | pass | pass |
+|  | `$CB AXS Immediate` | pass | pass |
+|  | `$EB SBC Immediate` | pass | pass |
+| CPU Interrupts | `Interrupt flag latency` | fail E | pass **(moved)** |
+|  | `NMI Overlap BRK` | pass | pass |
+|  | `NMI Overlap IRQ` | pass | pass |
+| APU Registers and DMA tests | `DMA + Open Bus` | pass | pass |
+|  | `DMA + $2002 Read` | pass 1 | pass 1 |
+|  | `DMA + $2007 Read` | pass | pass |
+|  | `DMA + $2007 Write` | pass | pass |
+|  | `DMA + $4015 Read` | pass | pass |
+|  | `DMA + $4016 Read` | pass 1 | pass 1 |
+|  | `DMC DMA Bus Conflicts` | fail 2 | fail 2 |
+|  | `DMC DMA + OAM DMA` | pass | pass |
+|  | `Explicit DMA Abort` | fail 2 | fail 2 |
+|  | `Implicit DMA Abort` | fail 2 | fail 2 |
+| APU Tests | `Length Counter` | pass | pass |
+|  | `Length Table` | pass | pass |
+|  | `Frame Counter IRQ` | fail 7 | fail 7 |
+|  | `Frame Counter 4-step` | pass | pass |
+|  | `Frame Counter 5-step` | pass | pass |
+|  | `Delta Modulation Channel` | pass | pass |
+|  | `APU Register Activation` | fail 6 | fail 6 |
+|  | `Controller Strobing` | fail 4 | fail 4 |
+|  | `Controller Clocking` | pass 2 | pass 2 |
+| CPU Behavior 2 | `Instruction Timing` | pass | pass |
+|  | `Implied Dummy Reads` | pass | pass |
+|  | `Branch Dummy Reads` | pass | pass |
+|  | `JSR Edge Cases` | pass | pass |
+|  | `Internal Data Bus` | fail 3 | pass **(moved)** |
+|  | `DMA Landing on Write` | pass 1 | pass 1 |
+|  | `DMC Reload Timing` | fail 1 | fail 1 |
+|  | `DMC Playback Rate` | pass | pass |
+| PPU Behavior | `CHR ROM is not writable` | pass | pass |
+|  | `PPU Register Mirroring` | pass | pass |
+|  | `PPU Register Open Bus` | pass | pass |
+|  | `PPU Read Buffer` | pass 10 | pass 10 |
+|  | `Palette RAM Quirks` | fail 6 | fail 6 |
+| PPU VBlank Timing | `VBlank beginning` | pass | pass |
+|  | `VBlank end` | pass | pass |
+|  | `NMI Control` | pass | pass |
+|  | `NMI Timing` | pass | pass |
+|  | `NMI Suppression` | pass | pass |
+|  | `NMI at VBlank end` | pass | pass |
+|  | `NMI disabled at VBlank` | pass | pass |
+| Sprite Evaluation | `Sprite overflow behavior` | pass | pass |
+|  | `Sprite 0 Hit behavior` | pass | pass |
+|  | `$2002 flag timing` | fail 1 | fail 1 |
+|  | `Suddenly Resize Sprite` | pass | pass |
+|  | `Misaligned OAM DMA` | pass | pass |
+|  | `Arbitrary Sprite zero` | fail 2 | fail 2 |
+|  | `Misaligned OAM behavior` | fail 1 | fail 1 |
+|  | `OAM Corruption` | fail 2 | fail 2 |
+| PPU Misc. | `t Register Quirks` | pass | pass |
+|  | `Address $2004 behavior` | fail 6 | fail 6 |
+|  | `INC $4014` | pass | pass |
+|  | `Rendering Flag Behavior` | pass | pass |
+|  | `$2007 read w/ rendering` | fail 2 | fail 2 |
+|  | `$2004 Stress Test` | fail 2 | fail 2 |
+|  | `$2007 Stress Test` | fail 2 | fail 2 |
+| Advanced Background Evaluation | `Attributes As Tiles` | pass | pass |
+|  | `Stale BG Shift Registers` | fail 3 | fail 3 |
+|  | `BG Serial In` | fail 2 | fail 2 |
+|  | `ALE + Read` | fail 2 | fail 2 |
+|  | `Hybrid Addresses` | fail 2 | fail 2 |
+| Advanced Sprite Evaluation | `Sprites On Scanline 0` | pass 2 | pass 2 |
+|  | `Stale Sprite Shift Regs` | fail 3 | fail 3 |
+|  | `Frozen OAM2 Increment` | fail 2 | fail 2 |
+|  | `Misaligned OAM2 Address` | fail 3 | fail 3 |
+
+### What still fails, and the cheapest correct design for each
+
+23 rows. Four of them are the APU register edges the brief holds back for a later lot, and they
+are listed first because three of the others wait on them.
+
+| test | code | what it is, and the cheapest design |
+| --- | --- | --- |
+| `APU Tests / Frame Counter IRQ` | 7 | "The IRQ flag should not be cleared yet when the APU transitions from a **get** cycle to a **put** cycle" (and code 6: it *is* cleared on put→get). A `$4015` read clears the frame IRQ flag here at once; the hardware clears it on the next put→get boundary, half a CPU cycle later. Cheapest: `Apu2A03::read_status` sets a pending-clear flag instead of clearing, and the frame counter's per-cycle step consumes it on the put→get cycle it already distinguishes. That is a test on a path the APU walks every cycle, so it has to be measured; the brief defers it. |
+| `APU Tests / Controller Strobing` | 4 | "Controllers should not be strobed when the CPU transitions from a put cycle to a get cycle" — the same get/put asymmetry on `$4016` bit 0. Cheapest: `InputPorts::write` records the cycle and the strobe takes effect on the next get→put, which the bus already knows from `cycles & 1`. |
+| `APU Tests / APU Register Activation` | 6 | "The OAM DMA should be able to read from the APU registers (and mirrors of them) if `$40` is written to `$4016`, and the CPU Address Bus is in the range of `$4000` to `$401F`." The source page `$40` *is* handled (`run_dma`'s `fast` excludes it), but the 2A03's own decode of a DMA read is gated on `internal`, which means "the **halted** address is in `$4000`-`$401F`" and not "the **source** address is". Cheapest: give `dma_read` the source address's own decode as well. Small, but it changes bus-conflict rules this lot did not measure. |
+| `APU Registers and DMA tests / DMC DMA Bus Conflicts` | 2 | MF-4a step 3's diagnosis stands: `dma_read` ANDs the whole byte of two drivers, where the hardware keeps the external value on the bits the `$4016`/`$4017` port leaves open. Needs an open-bus mask per controller port, which `InputPorts` does not have — a controller-port change, not a DMA one. |
+| `APU Registers and DMA tests / Explicit DMA Abort` | 2 | MF-4a step 3's diagnosis stands: a `$4015` write that takes a fetch back **after** its halt cycle. Needs the `$4015` **stop** delayed two or three cycles the way the start already is, plus an abort check inside the DMA loop. MF-4a wrote it, measured it and took it back out because it moved no row and changed what `$4015` bit 4 reads back for two cycles with nothing pinning the new value. The piece it is missing is `Frame Counter IRQ`'s get/put machinery above. |
+| `APU Registers and DMA tests / Implicit DMA Abort` | 2 | The same mechanism with the sample ending rather than a write. |
+| `CPU Behavior 2 / DMC Reload Timing` | 1 | "Writing to `$4010` as the DMC timer resets should cause the timer to reload using the new value." `DmcChannel::clock_timer` reloads from the period as it stood before the write. Cheapest: read the period field at the moment of the reload rather than caching it — one field read on the DMC's per-cycle path, so it needs measuring. |
+| `PPU Behavior / Palette RAM Quirks` | 6 | "With Greyscale Mode enabled, the lower four bits of the value read should all be zero" (and code 7: the value *written* is unaffected). A `$2007` read of palette RAM returns six bits and ignores PPUMASK's greyscale bit. Cheapest and free: one `value &= 0x30` behind `self.mask & 0x01` in the palette arm of `Ppu2C02::read`, the arm step 2 already touched. **This one is a one-line fix** and is the first thing a follow-up lot should take. |
+| `Sprite Evaluation / $2002 flag timing` | 1 | "The flags were not cleared on the correct ppu cycle." The sprite-0 and overflow flags are cleared at dot 1 of the pre-render line here and the test measures the exact dot; which dot it wants needs its `.asm` read. |
+| `Sprite Evaluation / Arbitrary Sprite zero` | 2 | "The first processed sprite of a scanline should be treated as sprite zero" — with a non-zero OAMADDR the flag follows the first sprite *evaluated*, not OAM index 0. Cheapest: `sprite_zero_found` becomes "the first sprite copied to secondary OAM came from the address evaluation started at". |
+| `Sprite Evaluation / Misaligned OAM behavior` | 1 | The rest of that family: evaluation starting at an OAMADDR that is not a multiple of 4, with the `+4 & $FC` and `+5` rules of its codes 2 to 7. A rewrite of `run_sprite_evaluation`'s address stepping. |
+| `Sprite Evaluation / OAM Corruption` | 2 | "OAM Corruption should corrupt a row in OAM by copying the 8 values from row 0 to another row" when rendering is switched off during evaluation. Not modelled at all; a documented 2C02 behaviour, and an addition to the evaluation state machine. |
+| `PPU Misc. / Address $2004 behavior` | 6 | "Writing to `$2004` on a visible scanline should increment the OAM address by 4" (code A: by 4 then AND `$FC`; code 7: and not write to OAM). `write_oam` always writes and always increments by 1. Cheapest and nearly free: the visible-and-rendering case inside `Ppu2C02::write`'s arm 4, a register write and not a per-dot path. |
+| `PPU Misc. / $2007 read w/ rendering` | 2 | "Reading from `$2007` while rendering is enabled should result in a vertical increment of v." `increment_vram_address` adds 1 or 32; with rendering on the hardware does the coarse-X and fine-Y increments instead. Cheapest: call the two increment helpers `run_dots` already has. Free for a game that does not read `$2007` mid-frame. |
+| `PPU Misc. / $2004 Stress Test` | 2 | Reads of `$2004` during evaluation must come from the OAM **buffer** the evaluation holds, not from OAM. Part of the `run_sprite_evaluation` rewrite above. |
+| `PPU Misc. / $2007 Stress Test` | 2 | The other half of step 2's rule: with rendering on, the buffer takes "the same value as the resulting read from the background or sprite fetch that occurred on the same ppu cycle". Needs the `$2007` access placed on the PPU's own fetch cadence — the same dot-exact PPU bus `ALE + Read` and `Hybrid Addresses` want. |
+| `Advanced Background Evaluation / Stale BG Shift Registers` | 3 | "The background shift registers should not be clocked during H-Blank or F-Blank." They are reloaded at the start of every line here. A change inside `run_dots`' background pipeline — the hottest function in the emulator, and the one family where a fix is **not** obviously free. It should be designed against callgrind from the first line. |
+| `Advanced Background Evaluation / BG Serial In` | 2 | "Background shift registers should bring in a 1 into bit 0 when shifted." Same pipeline, same caveat. |
+| `Advanced Background Evaluation / ALE + Read` | 2 | "A well timed read from `$2007` should be able to affect the PPU Address Bus during the background read cadence." Needs the CPU's `$2007` access to land on the PPU's current fetch slot. |
+| `Advanced Background Evaluation / Hybrid Addresses` | 2 | The same with a `$2006` write. |
+| `Advanced Sprite Evaluation / Stale Sprite Shift Regs` | 3 | "The sprite shift registers should not be clocked during F-Blank or H-Blank", the sprite twin of the background family. |
+| `Advanced Sprite Evaluation / Frozen OAM2 Increment` | 2 | The secondary-OAM overflow flag gating the OAM2 address increment; part of the evaluation state machine. |
+| `Advanced Sprite Evaluation / Misaligned OAM2 Address` | 3 | Reads of `$2004` between dots 321 and 340 must see the OAM2 address the fetch left; same family. |
+
+Read as a whole, the 23 are **four lots and not one**: the APU's get/put edges (4 rows, the
+brief's next lot), one free PPU fix (`Palette RAM Quirks`), a group of register-write edges that
+are cheap because they are not per-dot (`Address $2004 behavior`, `$2007 read w/ rendering`), and
+the sprite-evaluation and shift-register pipelines (13 rows), which live inside `run_dots` and
+want a lot of their own with callgrind in the loop.
+
+### No performance regression: measured, not argued
+
+`PERFORMANCE-HISTORY.md` §3's procedure: `git archive` of `3ac52b27` and of this lot's end into
+their own fresh directories in WSL2, each with its own `CARGO_TARGET_DIR` and
+`CARGO_PROFILE_RELEASE_STRIP=false`, then `valgrind --tool=callgrind --dump-instr=no
+--cache-sim=no --branch-sim=no ./zax-harness bench-core <rom> --frames 300 --warmup 0`. The five
+ROMs are MF-4a-ter's.
+
+**Whole process:**
+
+| ROM | `3ac52b27` | MF-4b | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `spritecans` (295 OAM transfers, no DPCM) | 6 345 020 441 | 6 343 865 227 | **−1 155 214** | −0.018 % |
+| `dpcmletterbox` (297 transfers, 19 051 DMC fetches) | 6 310 835 408 | 6 308 290 193 | **−2 545 215** | −0.040 % |
+| `apu_test/8-dmc_rates` | 5 810 464 106 | 5 810 635 186 | +171 080 | +0.003 % |
+| `M1_P128K` (MMC1) | 5 075 609 367 | 5 074 620 058 | **−989 309** | −0.020 % |
+| `M0_P32K_C8K_V` (NROM) | 5 703 590 876 | 5 701 113 096 | **−2 477 780** | −0.043 % |
+
+Four of the five are **faster**, and the fifth is +0.003 %.
+
+**Per symbol, exclusive**, which is the statement that matters. On **all five** ROMs:
+
+| symbol | delta |
+| --- | --- |
+| `Cpu6502::step` | **0, to the instruction** |
+| `Cpu6502::resolve`, `apply_read`, `execute_without_operand` | **0** |
+| `NesBus::tick`, `read_cycle`, `write_internal` | **0** |
+| `Apu2A03::run_cpu_cycles`, `quiet_cycles` | **0** |
+| `Ppu2C02::read_nametable_inner`, `read_pattern_planes` | **0** |
+| `Board::ppu_read`, `Board::on_cpu_cycle` | **0** |
+
+and the only `zax_nes` symbols that moved at all are:
+
+| symbol | spritecans | dpcm | 8-dmc_rates | M1 | M0 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Cpu6502::branch` | +1 379 306 | −82 714 | +2 539 305 | −625 710 | −1 038 587 |
+| `NesBus::read_internal` | −1 516 | −42 589 | −35 741 | +912 247 | +390 718 |
+| `NesBus::halted_read_cycle` | +590 | +38 696 | +578 | +2 | — |
+| `NesBus::dmc_only_dma` | — | +76 204 | +1 144 | — | — |
+| `NesBus::run_dma` | 0 | 0 | +15 | 0 | — |
+| `Ppu2C02::run_dots` | −2 265 895 | −2 281 257 | −2 142 999 | −1 144 469 | −1 697 501 |
+| `Ppu2C02::background_fetch` | −222 430 | −223 938 | −210 366 | −112 346 | −166 634 |
+
+Read row by row:
+
+* **`branch`** is step 1's two instructions on a taken page-crossing branch plus the register
+  allocation that moved with them, and **its sign changes with the ROM** — negative on three of
+  the five — so most of the ±1 to 2.5 M is placement rather than work. The worst case is +1.0 %
+  of `branch` on `8-dmc_rates`, a ROM whose main loop *is* a branch, and that ROM's whole-process
+  figure is +0.003 %.
+* **`read_internal`** is step 3's five instructions on a read no cartridge answers. It is
+  *negative* on the three nes-test-roms and positive on the two **Holy Mapperel** boards, which
+  are memory-test ROMs that deliberately read across unmapped space; +912 k on `M1_P128K` is
+  +0.36 % of that function, and that ROM's whole-process figure is still **−989 309**.
+* **`halted_read_cycle`**, **`dmc_only_dma`** and **`run_dma`** are step 3's and step 4's stores:
+  four to five instructions per DMC fetch and one per halted read cycle. +76 204 across
+  `dpcmletterbox`'s 19 051 fetches is exactly the four predicted.
+* **`run_dots` and `background_fetch` went down on every ROM**, by 1.1 to 2.3 M. Neither was
+  touched. `Ppu2C02` grew 16 bytes across steps 2 and 3, which moved every field offset after
+  them and let LLVM re-lay-out the dot loop; the gain is layout, and it is reported because it is
+  what makes four of five totals negative, not because the lot earned it.
+
+**Golden core.** The DMA timing, the APU and the whole dot loop are cycle-identical to
+`3ac52b27`: the campaign's 111 `manual` screens and their CRCs say so, `double_2007_read`
+excepted. The games whose output may move are listed per step above and the list is short — a
+page-crossing branch whose third cycle reads `$4015` (no commercial game), two `$2007` reads one
+CPU cycle apart (no commercial game, and `dma_2007_read`, the ROM built for the one case ordinary
+code can reach, prints exactly what it printed before), a `$4015` read within a cycle of a DMC
+fetch (bit 5 only, the one bit of `$4015` no hardware guarantees), and the `SH*` stores (no
+commercial game).
+
+### The suites
+
+| suite | `3ac52b27` | MF-4b |
+| --- | --- | --- |
+| `AccuracyCoin` | 93 / 147 (116 read correctly) | **124 / 147** |
+| `cpu_interrupts_v2` | 6 / 6 | **6 / 6** |
+| `instr_timing`, `branch_timing_tests` | 3 / 3, 3 / 3 | **3 / 3, 3 / 3** |
+| `cpu_timing_test6`, `cpu_dummy_reads`, `cpu_dummy_writes`, `cpu_exec_space`, `cpu_reset` | all pass | **all pass** |
+| `instr_misc`, `instr_test-v3`, `instr_test-v5`, `nes_instr_test` | 5 / 5, 17 / 17, 18 / 18, 11 / 11 | **unchanged** |
+| `ppu_open_bus`, `ppu_read_buffer` | 2 / 2 | **2 / 2** |
+| `ppu_vbl_nmi`, `vbl_nmi_timing`, `sprite_hit_tests`, `sprite_overflow_tests` | 11 / 11, 7 / 7, 11 / 11, 5 / 5 | **unchanged** |
+| `blargg_ppu_tests_2005.09.15b` | 4 / 5 | **4 / 5**, the same required row |
+| `oam_read`, `oam_stress` | 2 / 2 | **2 / 2** |
+| `apu_test`, `blargg_apu_2005.07.30`, `apu_reset`, `apu_mixer`, `pal_apu_tests` | 19 / 19, 11 / 11, 6 / 6, 4 / 4, 10 / 10 | **unchanged** |
+| `sprdma_and_dmc_dma`, `dmc_dma_during_read4`, `dmc_tests` | 2 / 2, 3 pass 2 manual, 4 manual | **unchanged but `double_2007_read`'s text** |
+| `holy-mapperel` | 40 / 40 | **40 / 40** |
+| the three MMC3 suites | 5 / 6 each | **5 / 6 each**, the same required failures |
+| **whole campaign** | 214 pass, 5 fail, 1 unsupported, 111 manual | **identical; 2 of 331 messages changed** |
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` grows from 9 to **13** groups:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_turned_green` | the tally as a floor of 124, **no test left unrun or retired** — so the drive cannot silently start hiding tests again — and twelve rows by name |
+| `req_core_111_the_cpu_interrupt_and_timing_suites_pass` | `cpu_interrupts_v2` 6, `branch_timing_tests` 3, `instr_timing` 3 |
+| `req_core_112_the_ppu_bus_latch_and_the_read_buffer_pass` | `ppu_open_bus`, `ppu_read_buffer` |
+| `req_core_110_the_dummy_cycle_suites_pass` | `cpu_dummy_reads`, `cpu_dummy_writes` 2 |
+
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests`: **13 passed**.
+
+### Hot path, this step
+
+Nothing under `crates/zax-nes/src/` changed in step 5, so the generated code is step 4's byte for
+byte and there is nothing to compare: the step touches `zax-harness`'s drive (`coin.rs`), the
+regression guard and the two documents. `run_count` runs 147 `read_memory` calls once per emulated
+frame of an `AccuracyCoin` run and nowhere else; the whole row now takes 2.6 s against 29 s,
+because it is one attempt instead of nine.
+
+### The lot, end to end
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, **no new `allow` anywhere**. `cargo test --release -p zax-nes -p zax-harness`:
+**704 passed, 0 failed, 7 ignored**, against MF-4a-ter's 695 — nine added, none removed or
+`#[ignore]`d.
+
+**No `unsafe`.** **No savestate byte moved**: `data_bus` is the byte `open_bus` was, and every
+field the lot adds (`Ppu2C02::read_buffer_prev` and `read_buffer_clock`, `NesBus::ext_bus`,
+`ext_cycle` and `dma_gave_back`) is transient, outside the format, and cleared on load — each
+with the argument for why nothing observable is lost written next to it. A state written before
+this lot, or before MF-4a, loads byte for byte.
+
+**No Q ticket.** Nothing here was ambiguous: every rule has a sentence of `AccuracyCoin`'s own
+documentation or of the NESdev wiki behind it, quoted at the code. Q-121 is still free.
+
+| brief item | state |
+| --- | --- |
+| 1. `Interrupt flag latency` returns and passes; `cpu_interrupts_v2` 6/6, `instr_timing`, `branch_timing_tests` keep passing | **done**, step 1 |
+| 2. `$2000`-`$3FFF` mirroring, the PPU I/O latch with its decay, the `$2007` read buffer including `double_2007_read`; `ppu_open_bus`, `ppu_read_buffer` keep passing | **done**, step 2 — the first three were already right and the ROM says so once it is allowed to run; `double_2007_read` was the defect and it now prints a documented output |
+| 3. the CPU data bus: `Open Bus`, `Internal Data Bus`, `Implied Dummy Reads`, the five `SH*`; `cpu_dummy_reads`, `cpu_dummy_writes`, `instr_test-v5`, `instr_misc` keep passing | **done**, steps 3 and 4 — `Implied Dummy Reads` was the drive, not the core |
+| 4. re-run everything, before/after in the campaign document, the per-test table here, the guard, and what still fails with the cheapest design for each | **done**, this step |
+| no performance regression, none at all | **done**: `Cpu6502::step`, `tick`, `read_cycle`, `write_internal`, `resolve`, `run_cpu_cycles`, `quiet_cycles` are **0 to the instruction** on five ROMs, and four of the five whole-process totals are negative |
+| safe Rust, no `unsafe` | **done** |
+| save states written before this lot keep loading | **done**, format unchanged |
+| the APU register edges held back | **held back**: `Frame Counter IRQ`, `APU Register Activation`, `Controller Strobing` and the `$4015` stop delay are listed above with their designs and were not touched |
+
 ## Status
 
 - [x] step 1 — the sticky poll of a taken branch
 - [x] step 2 — the `$2007` read buffer's delay
 - [x] step 3 — the internal and external data buses
 - [x] step 4 — the `SH*` stores and a DMA on the dummy read
-- [ ] step 5 — the suites, the campaign document and the guard
+- [x] step 5 — the suites, the campaign document and the guard
