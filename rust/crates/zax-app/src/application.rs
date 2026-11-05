@@ -811,7 +811,10 @@ impl Running {
     fn serve_the_editor(&mut self) {
         // Its MCP server, after the frame is drawn so a screenshot is of it.
         if let Some(mcp) = &mut self.mcp {
-            mcp.serve(&mut self.host);
+            let port = mcp.port();
+            let info =
+                move |host: &AppHost| editor_mode::agent_prompt(&prompt_context(host, Some(port)));
+            mcp.serve(&mut self.host, &info);
         }
         if !self.editor.on {
             return;
@@ -837,7 +840,17 @@ impl Running {
 
     /// What the agent's prompt says of this session.
     fn prompt_context(&self) -> editor_mode::PromptContext {
-        let host = &self.host;
+        prompt_context(
+            &self.host,
+            self.mcp.as_ref().map(crate::mcp::McpBridge::port),
+        )
+    }
+}
+
+/// What the agent's prompt says of this session: the game on `host`, the MCP server on
+/// `mcp_port` when it runs (also the `editor_info` tool's answer).
+fn prompt_context(host: &AppHost, mcp_port: Option<u16>) -> editor_mode::PromptContext {
+    {
         let folder = editor_mode::folder(&host.paths().root);
         let game_id = host.current_game_id();
         let rom = game_id.and_then(|id| host.games().rom_path(id));
@@ -874,15 +887,14 @@ impl Running {
             project,
             rom_identity,
             movie,
-            mcp_url: self
-                .mcp
-                .as_ref()
-                .map(|mcp| format!("http://127.0.0.1:{}/mcp", mcp.port())),
+            mcp_url: mcp_port.map(|port| format!("http://127.0.0.1:{port}/mcp")),
             harness,
             french: strings::language() == UiLanguage::French,
         }
     }
+}
 
+impl Running {
     /// Puts `prompt` into the clipboard, and says so.
     fn copy_prompt(&mut self, prompt: &str) {
         let french = strings::language() == UiLanguage::French;
@@ -919,9 +931,20 @@ impl Running {
             |stem| stem.to_string_lossy().into_owned(),
         );
         let folder = editor_mode::folder(&self.host.paths().root);
+        // A game already on a project's profile has nothing to make: its prompt is copied.
+        if editor_mode::project_of(&folder, &game_id).is_some() {
+            let prompt = editor_mode::agent_prompt(&self.prompt_context());
+            self.copy_prompt(&prompt);
+            return;
+        }
+        // A game with a profile of its own gets a project built on it, else a blank one.
+        let source = self.host.games().profile_file(&game_id);
         let made = editor_mode::deploy(&folder)
             .map_err(|error| format!("{}: {error}", folder.display()))
-            .and_then(|_| editor_mode::create_project(&folder, &name));
+            .and_then(|_| match &source {
+                Some(source) => editor_mode::export_project(&folder, &name, source),
+                None => editor_mode::create_project(&folder, &name),
+            });
         let project = match made {
             Ok(project) => project,
             Err(message) => {

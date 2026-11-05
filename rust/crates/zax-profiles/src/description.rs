@@ -295,26 +295,47 @@ pub fn build_profile(description: &Path, png: PngReader<'_>) -> Result<BuiltProf
     let mut spec: Value = serde_json::from_str(&text)
         .map_err(|e| error(format!("{}: {e}", description.display())))?;
     merge_includes(&mut spec, description.parent().unwrap_or(Path::new(".")))?;
-    let mut profile = match spec.get("template").and_then(Value::as_str) {
-        Some(template) => {
-            let path = description
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join(template);
-            let mut template = read_profile(&path)?;
-            template.permanent_patterns.clear();
-            template.temporary_patterns.clear();
-            template.scripts.clear();
-            template
+    // "base": a profile kept whole (its patterns, permanent and temporary, and its settings);
+    // only its scripts give way to the description's. The editor mode's projects made from an
+    // existing profile build on it, so that nothing the description cannot say is lost.
+    // "template" keeps only the settings.
+    let mut profile = if let Some(base) = spec.get("base").and_then(Value::as_str) {
+        let path = description.parent().unwrap_or(Path::new(".")).join(base);
+        let mut base = read_profile(&path)?;
+        base.scripts.clear();
+        base
+    } else {
+        match spec.get("template").and_then(Value::as_str) {
+            Some(template) => {
+                let path = description
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join(template);
+                let mut template = read_profile(&path)?;
+                template.permanent_patterns.clear();
+                template.temporary_patterns.clear();
+                template.scripts.clear();
+                template
+            }
+            None => GameProfile::create_empty(),
         }
-        None => GameProfile::create_empty(),
     };
     let text_field = |name: &str| spec.get(name).and_then(Value::as_str).map(str::to_owned);
-    profile.title = text_field("title");
-    profile.author = text_field("author");
-    profile.publisher = text_field("publisher");
-    profile.description = text_field("description");
-    profile.id = text_field("id");
+    // (with a base, an absent field keeps the base's)
+    let keep = spec.get("base").is_some();
+    for (name, field) in [
+        ("title", &mut profile.title),
+        ("author", &mut profile.author),
+        ("publisher", &mut profile.publisher),
+        ("description", &mut profile.description),
+        ("id", &mut profile.id),
+    ] {
+        match text_field(name) {
+            Some(value) => *field = Some(value),
+            None if keep => {}
+            None => *field = None,
+        }
+    }
     if let Some(overrides) = spec.get("layers").and_then(Value::as_array) {
         apply_layers(&mut profile, overrides)?;
     }
@@ -342,11 +363,14 @@ pub fn build_profile(description: &Path, png: PngReader<'_>) -> Result<BuiltProf
         let source = std::fs::read_to_string(&path)
             .map_err(|e| error(format!("{}: {e}", path.display())))?;
         let name = entry.get("name").and_then(Value::as_str).unwrap_or(file);
+        // "enabled" (default true) and "tags" (the patterns it is bound to, default "*": all)
+        let enabled = flag(entry.get("enabled"), true);
+        let tags = entry.get("tags").and_then(Value::as_str).unwrap_or("*");
         profile.scripts.push(crate::script::ProfileScript::new(
             Some(name),
-            true,
+            enabled,
             Some(&source),
-            Some("*"),
+            Some(tags),
         ));
     }
     crate::export::normalize(&mut profile, None).map_err(|e| error(e.to_string()))?;

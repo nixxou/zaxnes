@@ -1005,7 +1005,9 @@ Détails utiles :
 Activer le mode pendant qu'un jeu tourne sur « 2D Mode » ou « 3D par défaut » (un jeu sans
 profil) crée un **profil Lua vierge** : un projet `editor/projects/<jeu>/` (`profile.json`,
 `main.lua`, `PROMPT.txt`), son profil importé dans la bibliothèque, le jeu relancé dessus.
-**Outils ▸ Nouveau profil Lua pour ce jeu** fait de même à tout moment. En mode éditeur, F5
+**Outils ▸ Nouveau profil Lua pour ce jeu** fait de même à tout moment ; sur un jeu qui a déjà
+un profil (un `.3dn` importé), le projet part de ce profil, gardé entier (`base.3dn`), avec ses
+scripts en fichiers `.lua` : le profil d'origine n'est pas modifié. En mode éditeur, F5
 reconstruit le profil depuis son projet avant de recharger les scripts : on modifie le projet,
 jamais le `.3dn`.
 

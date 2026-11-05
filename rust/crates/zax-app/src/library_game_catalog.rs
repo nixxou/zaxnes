@@ -385,6 +385,12 @@ impl GameCatalog for LibraryGameCatalog {
         self.profiles.remove(game_id);
     }
 
+    fn profile_file(&self, game_id: &str) -> Option<std::path::PathBuf> {
+        let entry = self.library.find(game_id)?;
+        let path = entry.profile_path();
+        (!entry.is_generic() && path.is_file()).then(|| path.to_path_buf())
+    }
+
     fn rebuild_from_project(&mut self, game_id: &str) -> Option<Result<(), String>> {
         let entry = self.library.find(game_id)?;
         if entry.source() != GameProfileSource::User {

@@ -88,6 +88,7 @@ Tools (each action goes through the window's own commands, so it shows there):
 | `annotations {width, height}` | the user's drawings (section 5): each stroke's pen and points, from 0 to 1 and in pixels of the view |
 | `clear_annotations` | wipes the drawings |
 | `get_log {lines}` | the last lines of the log, Lua `print`, warnings and errors included |
+| `editor_info` | in editor mode: the session as the agent's prompt gives it (game, ROM identity, movie, folders, project, harness) |
 | `run_command {name, number, text}` | any command of the menus by name (`docs` of `emulation/commands.rs`) |
 
 ## 5. The pens
@@ -144,6 +145,11 @@ it on) gathers the above for writing a profile with an AI agent (`editor_mode.rs
   library and the game started again on it, its movie too. In editor mode a script reload first
   builds the profile file of a project-made entry again from its project
   (`GameCatalog::rebuild_from_project`), so the agent edits the project, never the `.3dn`;
+* on a game whose entry has a profile file, "New Lua profile for this game" makes the project
+  from it (`export_project`): the file kept whole as `base.3dn` (`"base"` of the description:
+  every pattern, permanent and temporary, and every setting), its scripts written as `.lua`
+  files with their `enabled` and `tags`, a new identifier and " (Lua)" after the title, so the
+  original entry stays. On a game already on a project's profile it only copies the prompt;
 * Tools > "Copy the prompt for the AI agent" (`tools.copy_agent_prompt`): the text to give the
   agent, with this session's paths (the editor folder, the project, the MCP address,
   `zax-harness` when it is next to the executable) and the source repository, into the

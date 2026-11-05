@@ -78,6 +78,11 @@ pub trait GameCatalog {
     /// Builds again the profile file of `game_id` from its project of the editor mode
     /// (`editor_mode.rs`), before a script reload reads it: `None` when it has no project, else
     /// whether the build went through. A catalogue without files has no project.
+    /// The profile file of `game_id`, when it has one (the generic entries have none).
+    fn profile_file(&self, _game_id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+
     fn rebuild_from_project(&mut self, _game_id: &str) -> Option<Result<(), String>> {
         None
     }

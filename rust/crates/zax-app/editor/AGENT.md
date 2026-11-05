@@ -42,8 +42,11 @@ window, or the `reload_script` tool): **edit the project, never the `.3dn`**. Te
 more Lua files go in the project folder too, named in `profile.json`. Work only in the project
 folder; do not touch the rest of the user's files.
 
-A profile that already existed before the editor mode (a `.3dn` without project) cannot be
-rebuilt this way: ask the user before replacing it with a project.
+A project can also start from an existing profile (Tools > New Lua profile for this game, on a
+game that has one): the profile is kept whole as `base.3dn` (all its patterns and settings), its
+scripts are the project's `.lua` files, and the patterns of `profile.json` are added to the
+base's. The project's profile has its own identifier and title: the original stays as it is.
+`NOTES.md` says where it came from.
 
 ## 3. Driving Zaxnes
 
@@ -56,6 +59,8 @@ claude mcp add --transport http zaxnes http://127.0.0.1:8765/mcp
 
 The tools (detail: `docs/EDITOR.md` §4):
 
+* `editor_info`: this session in one text (game, ROM identity, movie, folders, your project,
+  the harness): the prompt you were given, again;
 * `status`: the game, the movie frame, pause, 2D or 3D view;
 * `open_movie`, `seek`, `step`, `play`, `pause`: go where you need to look. A TAS movie
   (FCEUX `.fm2`) reaches every screen of a game; ask the user for one;

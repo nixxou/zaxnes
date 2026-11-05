@@ -27,6 +27,11 @@ movie's start.";
 pub fn definitions() -> Vec<Value> {
     let empty = json!({ "type": "object", "properties": {} });
     vec![
+        json!({ "name": "editor_info", "description": "What this editor session is about: the \
+            game and its ROM identity, the movie, the editor folder and its documents (AGENT.md \
+            first), the project of the game's profile, the harness. The same text as the prompt \
+            the user copies; ask it when you lost it or start afresh.",
+            "inputSchema": empty }),
         json!({ "name": "status", "description": "The game, the movie (frame on screen, length, \
             seek under way, share explored), pause state and whether the scripts drive the core.",
             "inputSchema": empty }),
@@ -127,8 +132,10 @@ impl McpBridge {
         self.server.port()
     }
 
-    /// Once a displayed frame, after it is drawn: answers what can be answered.
-    pub fn serve(&mut self, host: &mut AppHost) {
+    /// Once a displayed frame, after it is drawn: answers what can be answered. `editor_info`
+    /// gives the text of `editor_info` (the agent's prompt of the editor mode), made only when
+    /// asked.
+    pub fn serve(&mut self, host: &mut AppHost, editor_info: &dyn Fn(&AppHost) -> String) {
         let seeking = host.movie_seek_target().is_some();
         let mut waiting = Vec::new();
         for mut deferred in std::mem::take(&mut self.deferred) {
@@ -142,6 +149,10 @@ impl McpBridge {
         }
         self.deferred = waiting;
         for call in self.server.take_calls() {
+            if call.name == "editor_info" {
+                let _ = call.reply.send(ToolResult::text(editor_info(host)));
+                continue;
+            }
             match start(&call, host, seeking) {
                 Started::Answer(result) => {
                     let _ = call.reply.send(result);

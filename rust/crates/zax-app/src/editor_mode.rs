@@ -254,6 +254,117 @@ fn new_id(name: &str) -> String {
     format!("lua-{slug}-{:08x}", stamp & 0xffff_ffff)
 }
 
+/// The project folder for the game `name`: `projects/<name>`, or `<name> 2`, `<name> 3`... when
+/// it is taken.
+fn free_project_folder(folder: &Path, name: &str) -> PathBuf {
+    let projects = folder.join("projects");
+    (1..=999)
+        .map(|n| {
+            if n == 1 {
+                projects.join(name)
+            } else {
+                projects.join(format!("{name} {n}"))
+            }
+        })
+        .find(|path| !path.exists())
+        .unwrap_or_else(|| projects.join(name))
+}
+
+/// A script's name made fit for a file name.
+fn script_file_name(name: &str, taken: &mut Vec<String>) -> String {
+    let stem: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let stem = if stem.is_empty() {
+        "script".to_owned()
+    } else {
+        stem
+    };
+    let mut file = format!("{stem}.lua");
+    let mut n = 2;
+    while taken.iter().any(|t| t.eq_ignore_ascii_case(&file)) {
+        file = format!("{stem}_{n}.lua");
+        n += 1;
+    }
+    taken.push(file.clone());
+    file
+}
+
+/// Makes a project from the existing profile file `source` of the game `game`: the profile kept
+/// whole as `base.3dn` (its patterns and settings, which `profile.json` adds to), its scripts
+/// as Lua files, and a profile of its own (a new identifier, " (Lua)" after the title), so that
+/// the original stays as it is.
+///
+/// # Errors
+/// The text to show: the profile cannot be read, a file could not be written, or the project
+/// does not build.
+pub fn export_project(folder: &Path, game: &str, source: &Path) -> Result<NewProject, String> {
+    let bytes = std::fs::read(source).map_err(|e| format!("{}: {e}", source.display()))?;
+    let profile = zax_profiles::format::load(&bytes, None, None)
+        .map_err(|e| format!("{}: {}", source.display(), e.message))?
+        .profile;
+    let name = folder_name(game);
+    let project = free_project_folder(folder, &name);
+    let fail = |e: io::Error| format!("{}: {e}", project.display());
+    std::fs::create_dir_all(&project).map_err(fail)?;
+    std::fs::write(project.join("base.3dn"), &bytes).map_err(fail)?;
+    let mut taken = Vec::new();
+    let mut scripts = Vec::new();
+    for script in &profile.scripts {
+        let script_name = script.name.clone().unwrap_or_else(|| "script".to_owned());
+        let file = script_file_name(&script_name, &mut taken);
+        std::fs::write(project.join(&file), script.source.as_deref().unwrap_or(""))
+            .map_err(fail)?;
+        scripts.push(json!({
+            "name": script_name,
+            "file": file,
+            "enabled": script.enabled,
+            "tags": script.tag_string.as_deref().unwrap_or("*"),
+        }));
+    }
+    let original = profile.title.clone().unwrap_or_else(|| name.clone());
+    let title = format!("{original} (Lua)");
+    let spec = json!({
+        "id": new_id(&name),
+        "title": title,
+        "base": "base.3dn",
+        "tiles": {},
+        "patterns": [],
+        "scripts": scripts,
+    });
+    let text = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
+    std::fs::write(description_file(&project), text + "\n").map_err(fail)?;
+    let notes = TEMPLATE_NOTES.replace("<game>", &name)
+        + &format!(
+            "\n## Origin\n\nMade from the profile \"{original}\" ({} permanent and {} temporary \
+             patterns, {} scripts), kept whole as `base.3dn`: its patterns and settings stay, the \
+             patterns of `profile.json` are added to them, its scripts are the `.lua` files here. \
+             A pattern of the base is changed from Lua (its tags), or by a pattern of \
+             `profile.json` of the same tiles.\n",
+            profile.permanent_patterns.len(),
+            profile.temporary_patterns.len(),
+            profile.scripts.len()
+        );
+    std::fs::write(project.join("NOTES.md"), notes).map_err(fail)?;
+    let built = build_project(&project)?;
+    let build_folder = project.join("build");
+    std::fs::create_dir_all(&build_folder).map_err(fail)?;
+    let profile_file = build_folder.join(format!("{name}.3dn"));
+    std::fs::write(&profile_file, &built.bytes).map_err(fail)?;
+    Ok(NewProject {
+        folder: project,
+        profile_file,
+        title,
+    })
+}
+
 /// Makes a blank project for the game `game` (the ROM's name) in the editor folder `folder`:
 /// `profile.json` naming `main.lua`, the template script, and the profile built from them.
 ///
@@ -261,17 +372,7 @@ fn new_id(name: &str) -> String {
 /// The text to show: a file could not be written, or the profile not built.
 pub fn create_project(folder: &Path, game: &str) -> Result<NewProject, String> {
     let name = folder_name(game);
-    let projects = folder.join("projects");
-    let project = (1..=999)
-        .map(|n| {
-            if n == 1 {
-                projects.join(&name)
-            } else {
-                projects.join(format!("{name} {n}"))
-            }
-        })
-        .find(|path| !path.exists())
-        .unwrap_or_else(|| projects.join(&name));
+    let project = free_project_folder(folder, &name);
     let fail = |e: io::Error| format!("{}: {e}", project.display());
     std::fs::create_dir_all(&project).map_err(fail)?;
     let title = format!("{name} (Lua)");
@@ -522,6 +623,47 @@ mod tests {
         let second = create_project(&dir, "Metal Force [Korea][Unl][!]").ok();
         assert!(second.is_some_and(|second| second.folder.ends_with("Metal Force Korea Unl 2")));
         assert!(build_project(&project.folder).is_ok_and(|built| built.patterns == 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_made_from_a_profile_builds_the_same_patterns_and_scripts() {
+        let dir = scratch("export");
+        let _ = deploy(&dir);
+        let source = dir.join("flappy.3dn");
+        let _ = std::fs::write(&source, include_bytes!("../demo/flappyzaxnes.3dn"));
+        let Ok(project) = export_project(&dir, "FlappyZaxNes", &source) else {
+            panic!("the project was not made");
+        };
+        let original = description::dump(&source, true).unwrap_or_default();
+        let rebuilt = description::dump(&project.profile_file, true).unwrap_or_default();
+        // the first line names the profile, which has its own title
+        let body = |text: &str| {
+            text.lines().skip(1).collect::<Vec<_>>().join(
+                "
+",
+            )
+        };
+        assert_ne!(body(&original).len(), 0);
+        assert_eq!(body(&original), body(&rebuilt));
+        let load = |path: &Path| {
+            std::fs::read(path)
+                .ok()
+                .and_then(|bytes| zax_profiles::format::load(&bytes, None, None).ok())
+                .map(|document| document.profile)
+        };
+        let (Some(before), Some(after)) = (load(&source), load(&project.profile_file)) else {
+            panic!("a profile does not load");
+        };
+        assert_eq!(before.scripts.len(), after.scripts.len());
+        for (a, b) in before.scripts.iter().zip(&after.scripts) {
+            assert_eq!(
+                (&a.name, a.enabled, &a.source, &a.tag_string),
+                (&b.name, b.enabled, &b.source, &b.tag_string)
+            );
+        }
+        assert_ne!(before.id, after.id);
+        assert!(after.title.is_some_and(|title| title.ends_with(" (Lua)")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
