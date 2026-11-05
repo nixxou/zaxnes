@@ -215,3 +215,35 @@ clean (`cast_sign_loss` joins the file's existing `cast_possible_truncation` all
 scroll accessors are masked bit-fields and never negative).
 `cargo test --release -p zax-nes -p zax-harness`: **744 passed, 0 failed, 7 ignored** — 741 plus
 these three.
+
+## Step 4 — the harness-level regression test
+
+`crates/zax-harness/tests/widescreen_zone_tests.rs`, one test, `#[ignore]`d and gated on
+`ZAXNES_ROMS` exactly as `background_row_split_tests.rs` gates its own Super Mario Bros. 3 run:
+the folder is read from the environment, an absent ROM prints `skipped:` and returns.
+
+It is R0's command, less the part that needs a GPU. `render::rom::capture` is what
+`render::build_scenes` calls behind `--rom`, so the same `RomRequest` — 1 500 frames, R0's press
+script, the `$7CFF` poke at frame 1 000, `advanced`, `widescreen: 128`, the no-`--profile`
+profile `profile::load(None, None)` — runs the identical emulation; only `render::run`'s GL pass
+is skipped. The assertion is on `SyntheticScene::nes_picture`, the composed colour indices, 512 ×
+240 of them with the margins: **the picture itself, with no PNG encoder and no JSON format
+between it and the golden**, hashed with a four-line FNV-1a so the golden needs no crate.
+
+| build | `fnv1a(nes_picture)` at frame 1 500 |
+| --- | ---: |
+| baseline `ee5fd0ce` | 10 895 653 189 805 518 951 — **fails** |
+| this tree | **7 496 683 613 019 477 804** — passes |
+
+**Why the golden is not `c4577878`'s number**, which is the lot's first choice and is not
+available: MF-4d step 6 moves this picture deliberately. The test's own doc comment carries that
+reasoning and the table of step 1, so the next person to see it move has the argument in front of
+them rather than a bare number. The value pinned is `c4577878` **+ MF-4d step 6**, which step 1
+shows is what `a758f923`+fix and `ad1ad765`+fix both produce.
+
+The two cheap structural assertions in front of the hash — 240 rows, 512 × 240 indices — fail
+first and more legibly if the margins or the geometry ever move, so a hash mismatch means the
+pixels and not the shape.
+
+`cargo test --release -p zax-nes -p zax-harness`: **744 passed, 0 failed, 8 ignored** — the new
+test is the eighth ignored, and runs under `-- --ignored` with `ZAXNES_ROMS` set.
