@@ -254,8 +254,10 @@ pub fn create_project(folder: &Path, game: &str) -> Result<NewProject, String> {
         "author": "",
         "publisher": "",
         "description": format!("A Lua profile of {name}, made with the editor mode of Zaxnes."),
-        "tiles": {},
-        "patterns": [],
+        // A profile without patterns is played in 2D: this one keeps the new profile in 3D (the
+        // default extrusion of every tile) until the agent writes patterns of its own.
+        "tiles": { "placeholder": [PLACEHOLDER_PLANES[0], PLACEHOLDER_PLANES[1]] },
+        "patterns": [{ "grid": [["placeholder"]], "depth": 8, "tags": "placeholder" }],
         "scripts": [{ "name": "main", "file": "main.lua" }],
     });
     let text = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
@@ -272,6 +274,9 @@ pub fn create_project(folder: &Path, game: &str) -> Result<NewProject, String> {
         title,
     })
 }
+
+/// The picture of the placeholder pattern of a new profile: a tile no game is likely to draw.
+const PLACEHOLDER_PLANES: [&str; 2] = ["8142241818244281", "0f0f0f0ff0f0f0f0"];
 
 /// What the prompt for the agent says of this session.
 #[derive(Debug, Clone, Default)]
@@ -447,7 +452,7 @@ mod tests {
         // a second one of the same game gets a folder of its own
         let second = create_project(&dir, "Metal Force [Korea][Unl][!]").ok();
         assert!(second.is_some_and(|second| second.folder.ends_with("Metal Force Korea Unl 2")));
-        assert!(build_project(&project.folder).is_ok_and(|built| built.patterns == 0));
+        assert!(build_project(&project.folder).is_ok_and(|built| built.patterns == 1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

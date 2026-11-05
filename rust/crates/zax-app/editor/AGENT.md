@@ -27,6 +27,10 @@ The editor made a project folder for the game, `projects/<game>/` next to this f
 | `main.lua` | the profile's script (`docs/spec/SPEC-05-lua.md` and `docs/LUA-API.txt`) |
 | `PROMPT.txt` | what you were asked, with the paths of this session |
 
+A new project holds one pattern, `placeholder` (a tile picture no game is likely to draw): a
+profile without any pattern is played in 2D, this one keeps the game in 3D with the default
+extrusion of every tile. Remove it once you have patterns of your own.
+
 Zaxnes builds the `.3dn` from `profile.json` each time the scripts are reloaded (F5 in the
 window, or the `reload_script` tool): **edit the project, never the `.3dn`**. Textures (PNG) and
 more Lua files go in the project folder too, named in `profile.json`. Work only in the project
