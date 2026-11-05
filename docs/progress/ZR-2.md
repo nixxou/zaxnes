@@ -212,3 +212,70 @@ a compile-time parameter and lives in no value. The save format does not move.
 The decisive check, out of order because it is one command: frame 1 500 of Super Mario Bros. 3
 with `--advanced --widescreen 128` is now **`a923573ab7b9b3f8…`** — byte for byte `c4577878`'s
 reference picture. Step 5 does the dense A/B and the control.
+
+## Step 3 — the unit tests
+
+In `exec_zone_tests.rs` (REQ-CORE-113), and in step 2's commit rather than their own: the fix makes
+two of ZR-1's three assertions **false**, so the code and the tests could not be committed apart.
+
+### What changed, and what was added
+
+ZR-1's three tests were built on the premise that the halt's own repeated read legitimately moves
+the PPU. Two of them therefore asserted a **one-read-fewer** relation against the data read the
+fetch stands for. That relation is now wrong — the fetch makes **none** of those reads — so both
+are re-pinned on the sharper claim, and two tests are added for the state the picture broke in.
+
+| test | the state | what it asserts |
+| --- | --- | --- |
+| `…_under_a_held_dmc_request_touches_no_ppu_register` | `dma` non-zero, no unit may halt | unchanged from ZR-1, and still passing: `v`, the read buffer and `w` are a control's |
+| `…_a_halted_zone_fetch_makes_none_of_the_reads_the_data_read_it_stands_for_makes` | a DMC fetch due | **re-pinned**: `v` is **exactly** where it was, while the data read moved it |
+| `…_halted_by_an_oam_transfer_lets_it_finish_and_reads_nothing_itself` | a `$4014` transfer pending | **re-pinned** the same way, and the 256 bytes still land in OAM byte for byte |
+| `…_halted_by_a_dmc_fetch_during_rendering_moves_no_ppu_register` | **new** | during rendering, the fetch is a control's halted read of `$8000` in `v`, `w`, the read buffer **and** the cycles |
+| `…_halted_by_an_oam_transfer_during_rendering_moves_no_ppu_register` | **new** | the same, the other unit, 512 cycles of repeats |
+
+The two new ones run **during rendering**, which is where the damage was: rendering off, a `$2007`
+read steps `v` by the control register's stride, but during rendering it moves a coarse X and a Y
+at once (MF-4d step 6), and that is what broke the status-bar split.
+
+Three notes on how they are written:
+
+* **the counterpart is a control, not the data read.** A halted read of `$8000` is the same halt,
+  the same unit and the same cycles on an address that is not a register, so a halted zone fetch
+  must be indistinguishable from it in the PPU — which is the rule itself, stated as a test.
+* **it pins the cycles too, for free.** During rendering the PPU moves `v` by itself, so two
+  machines only agree on `v` if they stopped on the same dot; the test also compares
+  `(scanline, dot)` outright.
+* **each address probes its own observable.** Each test fetches at a `$2007` mirror and at a
+  `$2002` mirror: `$2007` moves `v` and refills the read buffer, `$2002` clears the write toggle
+  (probed with the `$2006` double write REQ-CORE-112's test already uses). Those are the two reads
+  with something to lose, and 442 and 441 of step 1's SMB3 count.
+
+Each also asserts what must **not** have changed: the DMC fetched, the transfer ran, and OAM is
+the control's byte for byte.
+
+### All four halted tests fail on the baseline
+
+`2d714d82`'s `nes_bus.rs` put back under the new tests, nothing else touched:
+
+| test | baseline | this tree |
+| --- | --- | --- |
+| `…_under_a_held_dmc_request_…` | passes | passes |
+| `…_makes_none_of_the_reads_…` | **fails**, `v` 9 032 against 9 030 | passes |
+| `…_halted_by_an_oam_transfer_lets_it_finish_…` | **fails**, the same two | passes |
+| `…_by_a_dmc_fetch_during_rendering_…` | **fails** | passes |
+| `…_by_an_oam_transfer_during_rendering_…` | **fails** | passes |
+
+and the two rendering failures print the damage itself. At the `$2007` mirror, control against
+baseline fetch:
+
+    position: (16, 53)   vram: 4493   buffered: 17   write_toggle_probe: 4505
+    position: (16, 53)   vram: 16784  buffered: 0    write_toggle_probe: 4505
+
+`v` has gone from `$118D` to `$4190` — a coarse X **and** a Y, MF-4d step 6's rule applied to a
+read the hardware never makes — and the read buffer has been refilled. At the `$2002` mirror the
+`vram` and `buffered` columns agree and `write_toggle_probe` is 4 505 against 8 591: the toggle
+cleared. **`position` is identical in every case**, which is what makes the claim about reads and
+not about cycles: the baseline spent the same cycles and merely read.
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean. `cargo test --release -p zax-nes -p zax-harness`: **746 passed, 0 failed, 8 ignored**.
