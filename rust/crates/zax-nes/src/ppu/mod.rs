@@ -954,7 +954,8 @@ impl Ppu2C02 {
                 if is_palette_address(address) {
                     // Palette reads are immediate and only drive six bits; the buffer still
                     // takes the mirrored nametable byte "underneath" the palette (nesdev).
-                    value = (self.palette[palette_index(address)] & 0x3F) | (self.decay & 0xC0);
+                    value = (self.palette[palette_index(address)] & self.palette_read_mask())
+                        | (self.decay & 0xC0);
                     self.refresh_decay(value, 0x3F);
                     self.read_buffer = self.read_vram_inner(
                         address & 0x2FFF,
@@ -980,6 +981,23 @@ impl Ppu2C02 {
             // $2000, $2001, $2003, $2005 and $2006 are write-only: the read returns the
             // PPU's bus latch and does not refresh it (ppu_open_bus tests 2 and 5).
             _ => self.decay,
+        }
+    }
+
+    /// What the palette RAM drives onto the PPU's data bus: six bits, and only the two colour
+    /// bits of a grey when PPUMASK's greyscale bit is set (REQ-CORE-047).
+    ///
+    /// The bit masks the palette's **output**, so it reaches the CPU through `$2007` exactly as
+    /// it reaches the pixel — `AccuracyCoin`'s `Palette RAM Quirks` code 6, "with Greyscale Mode
+    /// enabled, the lower four bits of the value read should all be zero", against its code 7,
+    /// "the lower four bits of the value *written* should be unaffected". The stored byte is
+    /// therefore left alone, which is why [`Ppu2C02::peek`] — the side-effect-free host accessor
+    /// of REQ-CORE-081, which answers what was written — does not apply this.
+    const fn palette_read_mask(&self) -> u8 {
+        if (self.mask & 0x01) != 0 {
+            0x30
+        } else {
+            0x3F
         }
     }
 

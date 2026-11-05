@@ -421,3 +421,57 @@ fn smart_keeps_the_limit_on_the_lines_a_game_masks_with_eight_stacked_sprites() 
     let fixture = sprite_frame(SpriteLimit::Smart, spread);
     assert_eq!(0x02, pixel_at(&fixture.core, 103, 106));
 }
+
+/// With PPUMASK's greyscale bit set, the palette RAM drives only the two colour bits of a grey
+/// onto the PPU's data bus, so a `$2007` read of `$3F00-$3FFF` returns the entry masked with
+/// `$30` (REQ-CORE-047, REQ-CORE-112). The byte **stored** in palette RAM is untouched.
+///
+/// `AccuracyCoin`'s `Palette RAM Quirks`, code 6: "With Greyscale Mode enabled, the lower four
+/// bits of the value read should all be zero"; code 7: "with Greyscale Mode enabled, the lower
+/// four bits of the value written should be unaffected".
+#[test]
+fn req_core_047_a_palette_read_under_greyscale_returns_the_value_anded_with_30() {
+    let mut fixture = TileFixture::new();
+    fixture.write_vram(0x3F00, &[0x21, 0x0F, 0x3F]);
+
+    // Greyscale off: the six stored bits, with the two upper bits of the PPU's I/O latch.
+    fixture.set_mask(0x00);
+    for (address, stored) in [(0x3F00u16, 0x21u8), (0x3F01, 0x0F), (0x3F02, 0x3F)] {
+        let [high, low] = address.to_be_bytes();
+        fixture.core.write_memory(0x2006, high);
+        fixture.core.write_memory(0x2006, low);
+        assert_eq!(
+            stored,
+            fixture.core.ppu_read(7) & 0x3F,
+            "greyscale off, ${address:04X}"
+        );
+    }
+
+    // Greyscale on: the same entries, ANDed with $30 — and the write of $2001 is the last byte
+    // on the latch, so the upper two bits are its own.
+    fixture.set_mask(0x01);
+    for (address, masked) in [(0x3F00u16, 0x20u8), (0x3F01, 0x00), (0x3F02, 0x30)] {
+        let [high, low] = address.to_be_bytes();
+        fixture.core.write_memory(0x2006, high);
+        fixture.core.write_memory(0x2006, low);
+        assert_eq!(
+            masked,
+            fixture.core.ppu_read(7) & 0x3F,
+            "greyscale on, ${address:04X}"
+        );
+    }
+
+    // Code 7: nothing was stored masked. Turning greyscale back off gives all three entries
+    // back, so the mask only ever touched what the palette drove onto the bus.
+    fixture.set_mask(0x00);
+    for (address, stored) in [(0x3F00u16, 0x21u8), (0x3F01, 0x0F), (0x3F02, 0x3F)] {
+        let [high, low] = address.to_be_bytes();
+        fixture.core.write_memory(0x2006, high);
+        fixture.core.write_memory(0x2006, low);
+        assert_eq!(
+            stored,
+            fixture.core.ppu_read(7) & 0x3F,
+            "the stored byte of ${address:04X} is unaffected"
+        );
+    }
+}
