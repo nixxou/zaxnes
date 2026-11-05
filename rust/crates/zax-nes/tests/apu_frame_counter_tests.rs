@@ -5,7 +5,8 @@
 
 mod common;
 
-use common::{machine_with, minimal};
+use common::{loaded_core as loaded_bus, machine_with, minimal};
+use zax_nes::cpu::CpuBus;
 use zax_nes::{NesCore, NesRegion, RegionTiming};
 
 const NTSC_FOUR_STEP_PERIOD: usize = 29830;
@@ -81,6 +82,72 @@ fn req_core_081_peeking_4015_does_not_clear_the_frame_irq() {
     // Only a real CPU read clears it.
     core.bus_mut().apu_mut().read_status(0);
     assert!(!core.apu().irq_asserted());
+}
+
+/// `AccuracyCoin`'s `Frame Counter IRQ` 6 and 7 (REQ-CORE-111, REQ-CORE-081): a `$4015` read
+/// arms the clear of bit 6 for the first **get** cycle strictly after it — an even cycle in this
+/// core's numbering — so a second read one cycle later sees bit 6 gone only when the first read
+/// was on a put cycle.
+///
+/// The ROM makes its pair of reads one cycle apart with `$1F`, `SLO Absolute,X`, over `$4015`;
+/// here the two reads are driven on the bus directly, which is the same two cycles.
+#[test]
+fn req_core_111_a_4015_read_clears_bit_6_on_the_next_get_cycle() {
+    // Returns the two reads' bit 6, the first read landing on a put cycle or a get one.
+    fn two_reads_one_cycle_apart(first_on_put: bool) -> (u8, u8) {
+        let (_cpu, mut bus) = loaded_bus(None);
+        // Four-step mode, IRQ enabled, then long enough for the flag to be set.
+        bus.write(0x4017, 0x00);
+        for _ in 0..NTSC_FOUR_STEP_PERIOD + 8 {
+            bus.tick();
+        }
+
+        // Align so that the next cycle — the first read's — has the wanted parity. A get cycle
+        // is an even one, so a put cycle is odd.
+        while ((bus.cycle_count() + 1) & 1 == 1) != first_on_put {
+            bus.tick();
+        }
+
+        let first = bus.read(0x4015);
+        assert_eq!(
+            first_on_put,
+            bus.cycle_count() & 1 == 1,
+            "the first read did not land where the test meant it to"
+        );
+        let second = bus.read(0x4015);
+        (first & 0x40, second & 0x40)
+    }
+
+    // Test 6: read on a put cycle, read again on the get cycle after it. The clear lands on
+    // that get cycle, so the second read sees bit 6 clear.
+    assert_eq!((0x40, 0x00), two_reads_one_cycle_apart(true));
+
+    // Test 7: read on a get cycle, read again on the put cycle after it. The clear waits for
+    // the get cycle after *that*, so the second read still sees bit 6 set.
+    assert_eq!((0x40, 0x40), two_reads_one_cycle_apart(false));
+}
+
+/// The other half of the rule above: the IRQ **line** goes low on the read itself, whatever the
+/// parity, which is what blargg's `07.irq_flag_timing` and `08.irq_timing` pin (Q-122).
+#[test]
+fn req_core_111_the_frame_irq_line_falls_on_the_read_and_not_on_the_get_cycle() {
+    for first_on_put in [true, false] {
+        let (_cpu, mut bus) = loaded_bus(None);
+        bus.write(0x4017, 0x00);
+        for _ in 0..NTSC_FOUR_STEP_PERIOD + 8 {
+            bus.tick();
+        }
+        while ((bus.cycle_count() + 1) & 1 == 1) != first_on_put {
+            bus.tick();
+        }
+
+        assert!(bus.apu_mut().irq_asserted());
+        bus.read(0x4015);
+        assert!(
+            !bus.apu_mut().irq_asserted(),
+            "the line should be low at once, first read on a put cycle: {first_on_put}"
+        );
+    }
 }
 
 #[test]

@@ -133,8 +133,10 @@ fn req_core_061_a_zapper_read_does_not_advance_a_shift_register() {
         .set_port_type(1, ControllerPortType::Controller)
         .unwrap();
     run_frame(&mut fixture, 0x0800);
-    fixture.core.bus_mut().input_mut().write(0x01);
-    fixture.core.bus_mut().input_mut().write(0x00);
+    // Cycles 10 and 14: a get cycle for the strobe, and the reload it arms for cycle 11 has
+    // landed well before `read_port` below, which reads on the bus's own cycle.
+    fixture.core.bus_mut().input_mut().write(0x01, 10);
+    fixture.core.bus_mut().input_mut().write(0x00, 14);
     assert_eq!(0x00, read_port(&mut fixture) & 0x01);
     assert_eq!(0x00, read_port(&mut fixture) & 0x01);
     assert_eq!(0x00, read_port(&mut fixture) & 0x01);

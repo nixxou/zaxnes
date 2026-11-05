@@ -908,9 +908,10 @@ impl NesBus {
     /// `InputPorts.Read` with its light probe wired to the PPU.
     pub fn read_input_port(&mut self, port: usize, open_bus: u8) -> u8 {
         self.sync_ppu();
+        let cycle = self.cycles;
         let ppu = &self.ppu;
         self.input
-            .read(port, open_bus, |aim| ppu.sees_light_at(aim.x, aim.y))
+            .read(port, open_bus, cycle, |aim| ppu.sees_light_at(aim.x, aim.y))
     }
 
     /// The bus read itself, as a body each of the **two** out-of-line callers below gets its own
@@ -1088,7 +1089,10 @@ impl NesBus {
         if address < 0x4020 {
             match address {
                 0x4014 => self.queue_oam_dma(value),
-                0x4016 => self.input.write(value),
+                // `self.cycles` is the write's own cycle: the bus ticks, then performs the
+                // access. The strobe's reload waits for the next put cycle (see
+                // [`InputPorts::write`]).
+                0x4016 => self.input.write(value, self.cycles),
                 _ => {
                     self.sync_apu();
                     let dmc_load_delay = self.apu.write(address, value);

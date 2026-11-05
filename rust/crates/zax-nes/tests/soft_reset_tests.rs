@@ -198,9 +198,11 @@ fn req_core_122_the_port_latch_and_shift_registers_are_cleared() {
     // it cannot show what the shift registers hold.
     fn strobe_and_read(core: &mut NesCore) -> u8 {
         let input = core.bus_mut().input_mut();
-        input.write(0x01);
-        input.write(0x00);
-        input.read(0, 0, |_| false) & 0x01
+        // A get cycle for the strobe and a later one for the read, so the reload the first
+        // write arms for the next put cycle has landed (see `InputPorts::write`).
+        input.write(0x01, 10);
+        input.write(0x00, 14);
+        input.read(0, 0, 20, |_| false) & 0x01
     }
 
     let mut core = machine_with(&minimal(), "Minimal.nes");
@@ -214,7 +216,10 @@ fn req_core_122_the_port_latch_and_shift_registers_are_cleared() {
 
     // The latch is down and the shift registers are empty, so a read with no strobe returns 0
     // even though the button is still held.
-    assert_eq!(0, core.bus_mut().input_mut().read(0, 0, |_| false) & 0x01);
+    assert_eq!(
+        0,
+        core.bus_mut().input_mut().read(0, 0, 20, |_| false) & 0x01
+    );
 
     // The port types survive, exactly as they do across a hard reset (REQ-CORE-004).
     assert_eq!(Ok(ControllerPortType::Zapper), core.port_type(1));

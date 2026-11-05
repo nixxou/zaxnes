@@ -49,9 +49,17 @@ one() {
     echo "  $key $(cat "$out/$key.ir")" >&2
 }
 
+# The ROM list is read from a here-document and **not** from a pipe. A `while read` fed by a
+# pipeline runs in a subshell, and that subshell exits without waiting for the background jobs
+# it started: with 13 ROMs and 8 jobs the last batch of five was orphaned and its runs lost,
+# silently, leaving a set of eight that still looked complete (found in lot MF-4d). A
+# here-document is a redirect, so the loop stays in this shell and the final `wait` sees every
+# job.
+list=$(grep -v '^[[:space:]]*#' "$here/roms.txt" | grep -v '^[[:space:]]*$')
+
 running=0
 # shellcheck disable=SC2162  # no backslash processing wanted in the ROM paths
-grep -v '^[[:space:]]*#' "$here/roms.txt" | grep -v '^[[:space:]]*$' | while read key root path; do
+while read key root path; do
     case $root in
         free) rom=$free_root/$path ;;
         comm) rom=$comm_root/$path ;;
@@ -67,6 +75,8 @@ grep -v '^[[:space:]]*#' "$here/roms.txt" | grep -v '^[[:space:]]*$' | while rea
         wait
         running=0
     fi
-done
+done <<LIST
+$list
+LIST
 wait
 echo "callgrind-set: $out" >&2

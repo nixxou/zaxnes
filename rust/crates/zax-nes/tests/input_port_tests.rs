@@ -9,7 +9,8 @@ mod common;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use common::{machine_with, minimal, minimal_rom};
+use common::{loaded_core, machine_with, minimal, minimal_rom};
+use zax_nes::cpu::CpuBus;
 use zax_nes::input::{ControllerPortType, InputPorts};
 use zax_nes::{nes_colors, NesCore, ZapperPosition};
 
@@ -31,9 +32,14 @@ fn controller_reader_program() -> Vec<u8> {
     program
 }
 
+/// A read on a cycle well past any strobe these tests write, so that a reload the `$4016`
+/// write armed for the next put cycle has always landed (see `InputPorts::write`).
 fn read(ports: &mut InputPorts, port: usize, open_bus: u8, light: bool) -> u8 {
-    ports.read(port, open_bus, |_| light)
+    ports.read(port, open_bus, READ_CYCLE, |_| light)
 }
+
+/// The cycle [`read`] pretends to be on.
+const READ_CYCLE: i64 = 1_000;
 
 #[test]
 fn req_core_022_input_word_0x0081_reads_a_then_right_on_port_one() {
@@ -68,8 +74,8 @@ fn req_core_022_input_word_0x0800_presses_start_on_port_two() {
 fn req_core_022_the_ninth_read_and_the_ones_after_it_return_one() {
     let mut ports = InputPorts::new();
     ports.begin_frame(0x0000);
-    ports.write(0x01);
-    ports.write(0x00);
+    ports.write(0x01, 10); // A get cycle: the reload lands on cycle 11.
+    ports.write(0x00, 14);
     for _ in 0..8 {
         assert_eq!(0, read(&mut ports, 0, 0, false) & 0x01);
     }
@@ -77,6 +83,65 @@ fn req_core_022_the_ninth_read_and_the_ones_after_it_return_one() {
     for _ in 0..4 {
         assert_eq!(1, read(&mut ports, 0, 0, false) & 0x01);
     }
+}
+
+/// `AccuracyCoin`'s `Controller Strobing` 3 and 4 (REQ-CORE-022): `DEC $4016` holds the strobe
+/// high for exactly one cycle — `$41` on its fifth cycle, `$40` on its sixth — and the
+/// controllers are reloaded only when the **sixth** cycle, the one the raised line is actually
+/// high for, is a put cycle. A put cycle is an odd one in this core's numbering, so the reload
+/// happens when the *raising* write lands on an even cycle; `AccuracyCoin` is what pins that
+/// mapping, and `InputPorts::write` carries the ROM's cycle annotations.
+///
+/// Driven on the bus rather than on [`InputPorts`] alone, so that it pins the cycle `NesBus`
+/// hands the port as well as the rule itself. The two writes land on consecutive cycles, which
+/// is what the ROM's read-modify-write does.
+#[test]
+fn req_core_022_a_one_cycle_strobe_reloads_only_on_a_put_cycle() {
+    // No buttons held, so a reloaded register reads eight zeroes and a register left depleted
+    // by the reads before it reads eight ones (the ninth-read rule above).
+    fn eight_bits_after_a_one_cycle_strobe(raise_on_even: bool) -> u8 {
+        let (_cpu, mut bus) = loaded_core(None);
+        bus.input_mut().begin_frame(0x0000);
+
+        // Strobe the ordinary way — two writes four cycles apart, as every game does — and read
+        // the eight bits out, which leaves the shift register depleted.
+        bus.write(0x4016, 0x01);
+        bus.write(0x4016, 0x00);
+        for _ in 0..8 {
+            bus.read(0x4016);
+        }
+
+        // Align so that the *next* cycle, the one the raising write lands on, has the wanted
+        // parity.
+        while ((bus.cycle_count() + 1) & 1 == 0) != raise_on_even {
+            bus.tick();
+        }
+
+        // `DEC $4016`'s last two cycles, one after the other.
+        bus.write(0x4016, 0x41);
+        assert_eq!(
+            raise_on_even,
+            bus.cycle_count() & 1 == 0,
+            "the raising write did not land where the test meant it to"
+        );
+        bus.write(0x4016, 0x40);
+
+        let mut bits = 0u8;
+        for i in 0..8 {
+            bits |= (bus.read(0x4016) & 0x01) << i;
+        }
+        bits
+    }
+
+    // Test 3: the raising write is on a get cycle, so the line is high for the put cycle after
+    // it and the controllers are strobed. The ROM's `ReadControllerInto50_and_A` must come back
+    // with $00.
+    assert_eq!(0x00, eight_bits_after_a_one_cycle_strobe(true));
+
+    // Test 4: the raising write is on a put cycle, so the line is high only for a get cycle and
+    // the reload it armed for the put cycle after that is taken back by the lowering write.
+    // Nothing is strobed and the depleted register keeps answering 1 — the ROM requires $FF.
+    assert_eq!(0xFF, eight_bits_after_a_one_cycle_strobe(false));
 }
 
 #[test]
@@ -152,8 +217,8 @@ fn req_core_024_switching_back_to_a_controller_restores_serial_reads() {
     ports
         .set_port_type(1, ControllerPortType::Controller)
         .unwrap();
-    ports.write(0x01);
-    ports.write(0x00);
+    ports.write(0x01, 10); // A get cycle: the reload lands on cycle 11.
+    ports.write(0x00, 14);
     assert_eq!(1, read(&mut ports, 1, 0x00, false) & 0x01); // A.
     assert_eq!(0, read(&mut ports, 1, 0x00, false) & 0x01); // B.
 }

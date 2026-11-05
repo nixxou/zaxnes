@@ -249,6 +249,17 @@ pub struct Apu2A03 {
     five_step_mode: bool,
     irq_inhibited: bool,
     frame_irq_flag: bool,
+    /// Bit 6 of `$4015`, which is the frame IRQ flag as a **read** of the register sees it.
+    ///
+    /// Kept apart from [`Self::frame_irq_flag`], the IRQ line, because a `$4015` read does not
+    /// clear the two at the same instant: the line goes low on the read itself, and the flag a
+    /// *later* read sees only clears at the start of the next **get** cycle
+    /// ([`Self::frame_irq_clear_at`]). See [`Self::read_status`].
+    frame_irq_status: bool,
+    /// The cycle from which a `$4015` read's clear of [`Self::frame_irq_status`] counts, 0 while
+    /// no read is waiting for its get cycle. Consumed by [`Self::read_status`] and looked at by
+    /// [`Self::peek_status`]; nothing per cycle reads it, which is what makes the rule free.
+    frame_irq_clear_at: i64,
     frame_irq_pending: bool,
     pending_sequencer_reset: i32,
     readable_status: u8,
@@ -298,6 +309,8 @@ impl Clone for Apu2A03 {
             five_step_mode: self.five_step_mode,
             irq_inhibited: self.irq_inhibited,
             frame_irq_flag: self.frame_irq_flag,
+            frame_irq_status: self.frame_irq_status,
+            frame_irq_clear_at: self.frame_irq_clear_at,
             frame_irq_pending: self.frame_irq_pending,
             pending_sequencer_reset: self.pending_sequencer_reset,
             readable_status: self.readable_status,
@@ -354,6 +367,8 @@ impl Apu2A03 {
             five_step_mode: false,
             irq_inhibited: false,
             frame_irq_flag: false,
+            frame_irq_status: false,
+            frame_irq_clear_at: 0,
             frame_irq_pending: false,
             pending_sequencer_reset: 0,
             readable_status: 0,
@@ -578,6 +593,8 @@ impl Apu2A03 {
         self.five_step_mode = false;
         self.irq_inhibited = false;
         self.frame_irq_flag = false;
+        self.frame_irq_status = false;
+        self.frame_irq_clear_at = 0;
         self.frame_irq_pending = false;
         self.pending_sequencer_reset = 0;
         self.readable_status = 0;
@@ -618,6 +635,8 @@ impl Apu2A03 {
         self.dmc.soft_reset();
 
         self.frame_irq_flag = false;
+        self.frame_irq_status = false;
+        self.frame_irq_clear_at = 0;
         self.frame_irq_pending = false;
         self.frame_counter = 0;
         self.frame_step = 0;
@@ -672,6 +691,11 @@ impl Apu2A03 {
         if self.frame_irq_pending {
             self.frame_irq_pending = false;
             self.frame_irq_flag = true;
+            // The flag being raised again overrides a clear a `$4015` read had armed and whose
+            // get cycle has not come: two stores in a branch three cycles of a frame take, and
+            // nothing outside it.
+            self.frame_irq_status = true;
+            self.frame_irq_clear_at = 0;
         }
 
         // A CPU read of $4015 sees the register as it stood before this cycle's internal
@@ -892,8 +916,48 @@ impl Apu2A03 {
     /// The value returned is the one latched at the start of the current CPU cycle (blargg's
     /// `04.clock_jitter`, `05.len_timing_mode0`, `07.irq_flag_timing`). The read clears the
     /// frame IRQ flag but leaves the DMC's alone (`apu_test` `7-dmc_basics`).
+    ///
+    /// **The clear of bit 6 waits for a get cycle.** `AccuracyCoin`'s `Frame Counter IRQ` 7 says
+    /// it in one line — "The IRQ flag should not be cleared when the APU transitions from a
+    /// 'get' cycle to a 'put' cycle" — and its 6 says the other half, that it *is* cleared on the
+    /// put→get transition. The ROM's own commentary spells the two cases out: a `$1F` (`SLO
+    /// Absolute,X`) over `$4015` reads the register twice, one CPU cycle apart, and
+    ///
+    /// * read on a **put** cycle, read again on the **get** after it → the second read sees bit 6
+    ///   **clear** (its test 6);
+    /// * read on a **get** cycle, read again on the **put** after it → the second read still sees
+    ///   bit 6 **set**, and the clear lands on the get cycle after *that* (its test 7).
+    ///
+    /// So the clear takes effect at the start of the first get cycle strictly after the read,
+    /// which in this core's numbering — where a get cycle is an **even** one, the convention
+    /// [`NesBus::run_dma`](crate::NesBus) already uses — is `(cycle + 2) & !1`.
+    ///
+    /// It is applied **lazily**, when a read or a peek next asks, and not from
+    /// [`Self::step_cpu_cycle`]: only a read of `$4015` can see bit 6 at all, so a per-cycle test
+    /// would buy nothing and would land on the one path the APU walks every cycle. The IRQ
+    /// **line** ([`Self::frame_irq_flag`]) is a different matter and goes low here, at once: see
+    /// `Q-122` for what pins that half and what does not.
+    // Q-122
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     pub fn read_status(&mut self, open_bus: u8) -> u8 {
-        let status = self.readable_status | (open_bus & 0x20);
+        let mut status = self.readable_status | (open_bus & 0x20);
+
+        if self.frame_irq_status {
+            if self.frame_irq_clear_at != 0 && self.cycles >= self.frame_irq_clear_at {
+                // The get cycle an earlier read armed has come. `readable_status` was latched at
+                // the start of this cycle, before the clear, and this read is the first thing
+                // able to tell the difference.
+                self.frame_irq_status = false;
+                self.frame_irq_clear_at = 0;
+                status &= !0x40;
+            } else {
+                // This read arms the clear for the first get cycle strictly after it. A read
+                // that re-arms what an earlier one armed computes the same cycle, so the two
+                // reads of `Frame Counter IRQ` 7 agree.
+                self.frame_irq_clear_at = (self.cycles + 2) & !1;
+            }
+        }
+
         self.frame_irq_flag = false;
         status
     }
@@ -901,7 +965,13 @@ impl Apu2A03 {
     /// Reads $4015 with no side effect at all (REQ-CORE-081).
     #[must_use]
     pub const fn peek_status(&self) -> u8 {
-        self.compose_status(0)
+        let status = self.compose_status(0);
+        if self.frame_irq_clear_at != 0 && self.cycles >= self.frame_irq_clear_at {
+            // A clear an earlier read armed is due; a read would see bit 6 gone. Looked at and
+            // not applied: a peek may not move the machine (REQ-CORE-081).
+            return status & !0x40;
+        }
+        status
     }
 
     const fn compose_status(&self, open_bus: u8) -> u8 {
@@ -922,7 +992,10 @@ impl Apu2A03 {
         if self.dmc.active() {
             status |= 0x10;
         }
-        if self.frame_irq_flag {
+        // Bit 6 is `frame_irq_status` and not the IRQ line: the two differ for the cycle or two
+        // between a `$4015` read and the get cycle its clear waits for (see
+        // [`Self::read_status`]).
+        if self.frame_irq_status {
             status |= 0x40;
         }
         if self.dmc.irq_flag() {
@@ -965,8 +1038,12 @@ impl Apu2A03 {
 
         if self.irq_inhibited {
             // The flag is cleared only by a $4015 read or by a $4017 write with bit 6 set
-            // (blargg, "Misc").
+            // (blargg, "Misc"). This clear has no get-cycle delay: `AccuracyCoin`'s
+            // `Frame Counter IRQ` 9 reads `$4015` on the very next instruction and requires bit 6
+            // to be gone already.
             self.frame_irq_flag = false;
+            self.frame_irq_status = false;
+            self.frame_irq_clear_at = 0;
             self.frame_irq_pending = false;
         }
 
@@ -1134,6 +1211,15 @@ impl Apu2A03 {
         self.five_step_mode = reader.read_bool()?;
         self.irq_inhibited = reader.read_bool()?;
         self.frame_irq_flag = reader.read_bool()?;
+        // Not in the block, and nothing observable is lost by deriving them (REQ-CORE-091, the
+        // format is unchanged). The flag a read sees and the IRQ line differ only between a
+        // `$4015` read and the get cycle its clear waits for — one or two cycles — and the
+        // nearest a *second* `$4015` read can be to the first across a save point is three
+        // cycles, a state being written between instructions and the first cycle of an
+        // instruction being its opcode fetch. So the window can never still be open when
+        // anything looks at it.
+        self.frame_irq_status = self.frame_irq_flag;
+        self.frame_irq_clear_at = 0;
         self.frame_irq_pending = reader.read_bool()?;
         self.pending_sequencer_reset = reader.read_i32()?;
         self.readable_status = reader.read_u8()?;

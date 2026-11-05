@@ -62,6 +62,9 @@ pub struct InputPorts {
     zapper: [ZapperPosition; Self::PORT_COUNT],
     input_word: u16,
     strobe: bool,
+    /// The cycle from which a raised strobe's reload of the shift registers counts, 0 while none
+    /// is waiting. See [`InputPorts::write`]; transient, derived, and outside the savestate.
+    reload_at: i64,
 }
 
 impl Default for InputPorts {
@@ -84,6 +87,7 @@ impl InputPorts {
             zapper: [ZapperPosition::OFF_SCREEN; Self::PORT_COUNT],
             input_word: 0,
             strobe: false,
+            reload_at: 0,
         }
     }
 
@@ -134,6 +138,7 @@ impl InputPorts {
         self.input_word = input_word;
         if self.strobe {
             self.reload();
+            self.reload_at = 0;
         }
     }
 
@@ -184,18 +189,21 @@ impl InputPorts {
         }
     }
 
-    /// Reads $4016 (port 0) or $4017 (port 1). Bits 5 to 7 are the stale bus contents.
-    /// `sees_light` answers the Zapper's light detection for an aim (REQ-CORE-062); it is
-    /// only called for a Zapper port.
+    /// Reads $4016 (port 0) or $4017 (port 1) on CPU cycle `cycle`. Bits 5 to 7 are the stale bus
+    /// contents. `sees_light` answers the Zapper's light detection for an aim (REQ-CORE-062); it
+    /// is only called for a Zapper port.
     pub fn read(
         &mut self,
         port: usize,
         open_bus: u8,
+        cycle: i64,
         sees_light: impl FnOnce(ZapperPosition) -> bool,
     ) -> u8 {
         if port >= Self::PORT_COUNT {
             return open_bus & 0xE0;
         }
+
+        self.settle_strobe(cycle);
 
         if self.types[port] == ControllerPortType::Zapper {
             // Bit 4 is the trigger, copied straight from the input word; bit 3 is 0 when
@@ -226,14 +234,64 @@ impl InputPorts {
         bit | (open_bus & 0xE0)
     }
 
-    /// Writes $4016: bit 0 is the strobe (REQ-CORE-022).
-    pub fn write(&mut self, value: u8) {
+    /// Writes $4016 on CPU cycle `cycle`: bit 0 is the strobe (REQ-CORE-022).
+    ///
+    /// **The shift registers reload on a put cycle the strobe line is high for, and the line a
+    /// write raises is high from the cycle *after* it.** `AccuracyCoin`'s `Controller Strobing`
+    /// 3 and 4 ask it as a question — "Do controller strobes only happen when the CPU
+    /// transitions from a get cycle to a put cycle?" — and answer it with `DEC $4016`, which
+    /// writes `$41` on its fifth cycle and `$40` on its sixth, holding the line high for exactly
+    /// one cycle. The ROM annotates both runs cycle by cycle, and the `LDA <$00` before the
+    /// second one carries three tokens for its three cycles, which fixes the alignment: each
+    /// `DEC` carries seven tokens for six cycles, so the last one is the cycle *after* the
+    /// instruction.
+    ///
+    /// * test 3 — `(get) (put) (get) (put) (get) [PUT]`: the raising write is on cycle 5, a
+    ///   **get** cycle, and cycle 6 is a **put**. The controllers **are** strobed, and the test
+    ///   reads the pad and requires `$00`, the unpressed buttons.
+    /// * test 4 — `(put) (get) (put) (get) (put) [GET]`: the raising write is on a **put** cycle
+    ///   and cycle 6 is a **get**. They are **not strobed at all**, and the test requires `$FF`,
+    ///   a shift register left depleted by the reads before it.
+    ///
+    /// Both rows are the same rule: the value a write puts on the bus latches at the **end** of
+    /// its cycle, so the line raised on cycle 5 is high *during cycle 6* and the reload fires on
+    /// cycle 6 exactly when cycle 6 is a put cycle. The cycle-6 write of `$40` only takes the
+    /// line low from cycle 7, which is why it does not undo test 3's reload — and why in test 4,
+    /// where the reload was waiting for cycle 7, it does.
+    ///
+    /// So a write that raises the line arms the reload for the first put cycle **after** its own
+    /// cycle — a put cycle is an **odd** one in this core's numbering, where a get cycle is even
+    /// ([`NesBus::run_dma`](crate::NesBus)) — and a write that lowers it applies a reload armed
+    /// for a cycle at or before its own and cancels any armed for a later one.
+    ///
+    /// A line held high for more than one cycle necessarily covers a put cycle, which is why the
+    /// `LDA #1 / STA $4016 / LDA #0 / STA $4016` of every game reads the pad exactly as it did
+    /// before: the two writes are at least two cycles apart, and the armed cycle is at most
+    /// `cycle + 2`.
+    ///
+    /// The reload is applied **lazily**, by [`Self::settle_strobe`] from the next read or write:
+    /// nothing per cycle has to ask.
+    pub fn write(&mut self, value: u8, cycle: i64) {
         let strobe = value & 0x01 != 0;
-        if strobe {
+
+        // A reload armed for this cycle or an earlier one has happened: this write's own level
+        // only reaches the line from the next cycle, so it cannot take it back.
+        self.settle_strobe(cycle);
+
+        // The first put cycle this level covers, counted from the cycle after this one, or none
+        // while the line is low.
+        self.reload_at = if strobe { (cycle + 1) | 1 } else { 0 };
+        self.strobe = strobe;
+    }
+
+    /// Reloads the shift registers when a strobe armed by [`Self::write`] has reached a put cycle
+    /// at or before `through`. Called from every observer of the registers, so the deferral costs
+    /// nothing per cycle; the reload itself is idempotent while `input_word` stands still.
+    fn settle_strobe(&mut self, through: i64) {
+        if self.reload_at != 0 && through >= self.reload_at {
+            self.reload_at = 0;
             self.reload();
         }
-
-        self.strobe = strobe;
     }
 
     /// Returns the ports to their power-on state; the plugged devices stay (as in the
@@ -241,6 +299,7 @@ impl InputPorts {
     pub fn reset(&mut self) {
         self.input_word = 0;
         self.strobe = false;
+        self.reload_at = 0;
         self.shift = [0; Self::PORT_COUNT];
         self.shift_count = [0; Self::PORT_COUNT];
         self.zapper = [ZapperPosition::OFF_SCREEN; Self::PORT_COUNT];
@@ -275,6 +334,16 @@ impl InputPorts {
     pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.input_word = reader.read_u16()?;
         self.strobe = reader.read_bool()?;
+        // Not in the block, and nothing is lost (REQ-CORE-091, the format is unchanged). A strobe
+        // that is **high** reloads on every put cycle it is high for, so a reload is always due:
+        // 1 is before any cycle a loaded state can be at, and the first observer settles it. A
+        // strobe that is low can have no reload armed, [`Self::write`] having taken it back.
+        //
+        // The reload is armed rather than performed here so that the bytes just read stay exactly
+        // as the block gave them and saving again writes the same ones (REQ-CORE-092). In the
+        // ordinary case — a `$4016` write of 1 some cycles ago — it settles to a no-op anyway,
+        // the registers already holding `port_byte` with a count of 0.
+        self.reload_at = i64::from(self.strobe);
         for port in 0..Self::PORT_COUNT {
             self.types[port] = match reader.read_u8()? {
                 0 => ControllerPortType::Controller,
