@@ -385,6 +385,22 @@ impl GameCatalog for LibraryGameCatalog {
         self.profiles.remove(game_id);
     }
 
+    fn rebuild_from_project(&mut self, game_id: &str) -> Option<Result<(), String>> {
+        let entry = self.library.find(game_id)?;
+        if entry.source() != GameProfileSource::User {
+            return None;
+        }
+        let folder = crate::editor_mode::folder(&self.paths.root);
+        let project = crate::editor_mode::project_of(&folder, game_id)?;
+        let file = entry.profile_path().to_path_buf();
+        Some(
+            crate::editor_mode::build_project(&project).and_then(|built| {
+                std::fs::write(&file, &built.bytes)
+                    .map_err(|error| format!("{}: {error}", file.display()))
+            }),
+        )
+    }
+
     fn rom_path(&self, game_id: &str) -> Option<String> {
         self.library
             .find(game_id)

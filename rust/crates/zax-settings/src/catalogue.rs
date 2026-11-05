@@ -197,6 +197,7 @@ setting_ids! {
     AudioMute => "audio.mute",
     UiShowFps => "ui.show_fps",
     UiProfiler => "ui.profiler",
+    UiEditorMode => "ui.editor_mode",
     UiLanguage => "ui.language",
     UiRomsFolder => "ui.roms_folder",
     // The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079, keys of its §4). They

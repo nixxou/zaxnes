@@ -18,6 +18,7 @@ use zax_platform::input::sdl::SdlInput;
 use zax_platform::pacing::DisplayPacingState;
 use zax_platform::WindowGraphics;
 use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
+use zax_profiles::catalogue::ProfileImportOutcome;
 use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
 use zax_render::controls;
@@ -34,11 +35,14 @@ use crate::audio::audio_assets::AudioAssets;
 use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
 use crate::demo_game;
+use crate::editor_mode;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::frame_pacer::CatchUp;
 use crate::emulation::game_catalog::GameCatalog;
-use crate::emulation::host::{DeferredParts, EmulationHost, EmulationHostOptions, HostEvent};
+use crate::emulation::host::{
+    DeferredParts, EditorRequest, EmulationHost, EmulationHostOptions, HostEvent,
+};
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock, Thread};
 use crate::frame_rate_counter::FrameRateCounter;
@@ -48,7 +52,7 @@ use crate::input::cursor_auto_hide::CursorAutoHide;
 use crate::input::input_action::to_camera_actions;
 use crate::input::{routing, DesktopInputSource, DeviceRefs, InputSnapshot};
 use crate::library_game_catalog::LibraryGameCatalog;
-use crate::persistence::app_settings::AppSettings;
+use crate::persistence::app_settings::{AppSettings, AppSettingsMut as _};
 use crate::persistence::command_line_settings;
 use crate::persistence::input_binding_store::FileInputBindingStore;
 use crate::persistence::save_slots;
@@ -60,7 +64,7 @@ use crate::scene_script_bridge::{self, ConsoleScriptLog};
 use crate::ui::debug_overlay::DebugInfo;
 use crate::ui::frontend::{ImguiFrontend, Sizes, UiGraphics};
 use crate::ui::handheld;
-use crate::ui::strings::UiLanguage;
+use crate::ui::strings::{self, UiLanguage};
 use crate::ui::zax_ui::{UiEffect, UiFrame};
 use crate::user_data_paths::UserDataPaths;
 use crate::{neutral_assets, persistence::input_binding_store::InputBindingStore as _};
@@ -155,6 +159,17 @@ fn log(message: &str) {
     app_log::line(&format!("Zaxnes: {message}"));
 }
 
+/// Where the editor mode stands (`editor_mode.rs`).
+#[derive(Debug, Clone, Copy)]
+struct EditorState {
+    /// Whether it is on.
+    on: bool,
+    /// Whether the setting was read once (the start does not make a profile by itself).
+    checked: bool,
+    /// Whether a game on a generic entry is to get a blank Lua profile once it runs.
+    wants_project: bool,
+}
+
 /// The windowed application.
 pub struct ZaxApplication {
     options: AppOptions,
@@ -218,8 +233,11 @@ struct Running {
     /// The save state slot `-slot=<n>` (AMD-053 REQ-UI-213) or `--load-state` asks for, until the
     /// game accepts the load: `"1"` to `"36"` or `"quick"`.
     pending_state_load: Option<String>,
-    /// The MCP server of the editor (`--mcp`), off by default.
+    /// The MCP server of the editor (`--mcp`, the editor mode), off by default.
     mcp: Option<crate::mcp::McpBridge>,
+    /// The editor mode (`editor_mode.rs`): whether it is on, and whether it is to make a blank
+    /// Lua profile for the game once one runs.
+    editor: EditorState,
 }
 
 /// The state of the automatic resolution between two displayed frames.
@@ -361,6 +379,9 @@ impl Running {
         };
         // The editor's pens come with its MCP server (EDITOR-1).
         host.annotations_mut().enabled = options.mcp_port.is_some();
+        if options.editor {
+            host.update_settings(|model| model.set_editor_mode(true));
+        }
         let mut ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
         ui.set_clipboard(window.clipboard());
         // REQ-LOOP-077 is presentation, so it only exists for the renderer that presents here.
@@ -404,12 +425,18 @@ impl Running {
                         None
                     }
                 }),
+            editor: EditorState {
+                on: false,
+                checked: false,
+                wants_project: false,
+            },
         })
     }
 
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
+        self.follow_the_editor_setting();
         self.load_the_asked_state();
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
@@ -474,10 +501,7 @@ impl Running {
             Duration::ZERO
         };
         self.close_the_gpu_queue(bounded);
-        // The editor's MCP server, after the frame is drawn so a screenshot is of it.
-        if let Some(mcp) = &mut self.mcp {
-            mcp.serve(&mut self.host);
-        }
+        self.serve_the_editor();
         self.carry_out_ui_effects();
         let mark = self.clock.start();
         pump_audio(&mut self.host, self.audio.as_mut(), real);
@@ -739,6 +763,195 @@ impl Running {
         } else {
             "frame profiler off"
         });
+    }
+
+    /// Turns the editor mode on or off with `ui.editor_mode` (`--mcp` keeps its server on): on,
+    /// the editor folder is laid out, the MCP server listens and the pens show; turned on while
+    /// running (or by `--editor`), a game on a generic entry gets a blank Lua profile.
+    fn follow_the_editor_setting(&mut self) {
+        let wanted = self.host.settings().editor_mode() || self.options.mcp_port.is_some();
+        let first = !self.editor.checked;
+        self.editor.checked = true;
+        if wanted == self.editor.on {
+            return;
+        }
+        self.editor.on = wanted;
+        self.host.annotations_mut().enabled = wanted;
+        if !wanted {
+            self.editor.wants_project = false;
+            if self.options.mcp_port.is_none() && self.mcp.take().is_some() {
+                log("editor mode off: MCP server closed");
+            }
+            return;
+        }
+        let folder = editor_mode::folder(&self.host.paths().root);
+        match editor_mode::deploy(&folder) {
+            Ok(true) => log(&format!("editor folder laid out: {}", folder.display())),
+            Ok(false) => {}
+            Err(error) => log(&format!("editor folder {}: {error}", folder.display())),
+        }
+        if self.mcp.is_none() {
+            let port = self.options.mcp_port.unwrap_or(crate::mcp::DEFAULT_PORT);
+            match crate::mcp::McpBridge::start(port) {
+                Ok(bridge) => {
+                    log(&format!(
+                        "MCP server: http://127.0.0.1:{}/mcp",
+                        bridge.port()
+                    ));
+                    self.mcp = Some(bridge);
+                }
+                Err(error) => log(&format!("MCP server not started on port {port}: {error}")),
+            }
+        }
+        self.editor.wants_project = !first || self.options.editor;
+    }
+
+    /// The editor mode's work of a frame, after it is drawn: the MCP calls, a blank profile for a game on a generic entry once it
+    /// runs, and the requests of the menu.
+    fn serve_the_editor(&mut self) {
+        // Its MCP server, after the frame is drawn so a screenshot is of it.
+        if let Some(mcp) = &mut self.mcp {
+            mcp.serve(&mut self.host);
+        }
+        if !self.editor.on {
+            return;
+        }
+        if self.editor.wants_project
+            && !self.host.is_loading()
+            && self.host.current_game_id().is_some()
+        {
+            self.editor.wants_project = false;
+            if self.host.current_game_is_generic() {
+                self.new_lua_profile();
+            }
+        }
+        match self.host.take_editor_request() {
+            Some(EditorRequest::NewLuaProfile) => self.new_lua_profile(),
+            Some(EditorRequest::CopyAgentPrompt) => {
+                let prompt = editor_mode::agent_prompt(&self.prompt_context());
+                self.copy_prompt(&prompt);
+            }
+            None => {}
+        }
+    }
+
+    /// What the agent's prompt says of this session.
+    fn prompt_context(&self) -> editor_mode::PromptContext {
+        let host = &self.host;
+        let folder = editor_mode::folder(&host.paths().root);
+        let game_id = host.current_game_id();
+        let rom = game_id.and_then(|id| host.games().rom_path(id));
+        let game = game_id.zip(rom).map(|(id, rom)| {
+            let title = host.games().title(id).unwrap_or_else(|| id.to_owned());
+            (title, rom)
+        });
+        let project = game_id.and_then(|id| editor_mode::project_of(&folder, id));
+        let harness = ["zax-harness.exe", "zax-harness"]
+            .iter()
+            .map(|name| host.paths().executable_directory.join(name))
+            .find(|path| path.is_file());
+        editor_mode::PromptContext {
+            folder,
+            game,
+            project,
+            mcp_url: self
+                .mcp
+                .as_ref()
+                .map(|mcp| format!("http://127.0.0.1:{}/mcp", mcp.port())),
+            harness,
+            french: strings::language() == UiLanguage::French,
+        }
+    }
+
+    /// Puts `prompt` into the clipboard, and says so.
+    fn copy_prompt(&mut self, prompt: &str) {
+        let french = strings::language() == UiLanguage::French;
+        match self.window.clipboard().set_clipboard_text(prompt) {
+            Ok(()) => self.host.show_notification(
+                if french {
+                    "Prompt pour l'agent IA copié dans le presse-papiers"
+                } else {
+                    "Prompt for the AI agent copied to the clipboard"
+                },
+                false,
+            ),
+            Err(error) => {
+                log(&format!("clipboard: {error}"));
+                self.host.show_notification(&error, true);
+            }
+        }
+    }
+
+    /// A blank Lua profile for the game on screen: a project in the editor folder, its profile
+    /// built and imported, the game started again on it, and the agent's prompt written into the
+    /// project and copied.
+    fn new_lua_profile(&mut self) {
+        let french = strings::language() == UiLanguage::French;
+        let Some(game_id) = self.host.current_game_id().map(str::to_owned) else {
+            return;
+        };
+        let Some(rom) = self.host.games().rom_path(&game_id) else {
+            return;
+        };
+        let movie = self.host.movie_file().map(Path::to_path_buf);
+        let name = Path::new(&rom).file_stem().map_or_else(
+            || "game".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let folder = editor_mode::folder(&self.host.paths().root);
+        let made = editor_mode::deploy(&folder)
+            .map_err(|error| format!("{}: {error}", folder.display()))
+            .and_then(|_| editor_mode::create_project(&folder, &name));
+        let project = match made {
+            Ok(project) => project,
+            Err(message) => {
+                log(&format!("new Lua profile: {message}"));
+                self.host.show_notification(&message, true);
+                return;
+            }
+        };
+        let result = self.host.games_mut().import_profile(&project.profile_file);
+        let Some(profile) = result.profile.filter(|_| {
+            matches!(
+                result.outcome,
+                ProfileImportOutcome::Added | ProfileImportOutcome::Replaced
+            )
+        }) else {
+            log(&format!("new Lua profile: {}", result.message));
+            self.host.show_notification(&result.message, true);
+            return;
+        };
+        log(&format!(
+            "new Lua profile '{}' for {rom}: project {}",
+            project.title,
+            project.folder.display()
+        ));
+        if let Some(movie) = movie {
+            self.host.play_movie_after_launch(&movie.to_string_lossy());
+        }
+        self.host.launch_rom_with_profile(&rom, &profile.id);
+        let mut context = self.prompt_context();
+        context.game = Some((project.title.clone(), rom));
+        context.project = Some(project.folder.clone());
+        let prompt = editor_mode::agent_prompt(&context);
+        if let Err(error) = editor_mode::write_prompt(&project.folder, &prompt) {
+            log(&format!("PROMPT.txt: {error}"));
+        }
+        self.copy_prompt(&prompt);
+        self.host.show_notification(
+            &if french {
+                format!(
+                    "Profil Lua créé : {}. Le prompt de l'agent est copié.",
+                    project.folder.display()
+                )
+            } else {
+                format!(
+                    "Lua profile made: {}. The agent's prompt is copied.",
+                    project.folder.display()
+                )
+            },
+            false,
+        );
     }
 
     /// AMD-052 REQ-LOOP-077: waits until the GPU holds fewer rendered frames than the depth in

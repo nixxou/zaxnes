@@ -75,6 +75,13 @@ pub trait GameCatalog {
     /// has nothing to forget.
     fn forget_profile(&mut self, _game_id: &str) {}
 
+    /// Builds again the profile file of `game_id` from its project of the editor mode
+    /// (`editor_mode.rs`), before a script reload reads it: `None` when it has no project, else
+    /// whether the build went through. A catalogue without files has no project.
+    fn rebuild_from_project(&mut self, _game_id: &str) -> Option<Result<(), String>> {
+        None
+    }
+
     /// Whether the game is marked as a favourite (AMD-053 REQ-UI-210). False for a catalogue that
     /// has no library behind it.
     fn is_favorite(&self, _game_id: &str) -> bool {

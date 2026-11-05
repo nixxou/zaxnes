@@ -47,7 +47,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
     // emu.builtin_patches, emu.catch_up, emu.catch_up_last_3d, emu.forced_patch, emu.hack_options, emu.lua_experimental,
-    // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.profiler, ui.roms_folder,
+    // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.editor_mode, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.half_rate_3d, video.widescreen, video.widescreen_advanced,
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
@@ -74,6 +74,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "input.touch_pad",
+            "ui.editor_mode",
             "ui.language",
             "ui.profiler",
             "ui.roms_folder",

@@ -313,6 +313,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         &mut self.annotations
     }
 
+    /// What a command asked of the editor mode since the last call.
+    pub const fn take_editor_request(&mut self) -> Option<super::EditorRequest> {
+        self.editor_request.take()
+    }
+
     /// The movie frame on screen and the movie's length, while a movie plays with a timeline.
     #[must_use]
     pub fn movie_position(&self) -> Option<(u32, u32)> {
@@ -627,6 +632,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     pub(super) fn notify(&mut self, message: &str) {
         self.notifications.show_normal(message);
+    }
+
+    /// Shows `message` in the notification area, as an error when `error`.
+    pub fn show_notification(&mut self, message: &str, error: bool) {
+        if error {
+            self.notifications.show_error(message);
+        } else {
+            self.notifications.show_normal(message);
+        }
     }
 }
 

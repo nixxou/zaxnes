@@ -105,6 +105,16 @@ pub type LogFn = Box<dyn Fn(&str)>;
 
 /// What the host is made of.
 #[allow(clippy::struct_excessive_bools)] // independent switches, as the C# options record
+/// What a command asks of the editor mode, which the application carries out (it owns the
+/// clipboard and the concrete library).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRequest {
+    /// A blank Lua profile for the game on screen (`tools.new_lua_profile`).
+    NewLuaProfile,
+    /// The prompt for an AI agent into the clipboard (`tools.copy_agent_prompt`).
+    CopyAgentPrompt,
+}
+
 pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// The user data folder.
     pub paths: UserDataPaths,
@@ -199,6 +209,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_explorer: Option<super::movie_explorer::MovieExplorer>,
     /// The drawings over the view and the editor's pens (EDITOR-1).
     annotations: super::annotations::Annotations,
+    /// What the editor mode is asked to do, for the application (`editor_mode.rs`).
+    editor_request: Option<EditorRequest>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -367,6 +379,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_after_launch: None,
             movie_explorer: None,
             annotations: super::annotations::Annotations::default(),
+            editor_request: None,
             job: None,
             loading: false,
             confirmation: None,
@@ -536,6 +549,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     #[must_use]
     pub fn current_game_id(&self) -> Option<&str> {
         self.current_game.as_ref().map(|game| game.id.as_str())
+    }
+
+    /// Whether the game being played is on one of the two generic entries ("2D Mode", "3D by
+    /// default"), which have no profile of their own.
+    #[must_use]
+    pub fn current_game_is_generic(&self) -> bool {
+        self.current_game
+            .as_ref()
+            .is_some_and(ResolvedGame::is_generic)
+    }
+
+    /// The movie file being played, if any.
+    #[must_use]
+    pub fn movie_file(&self) -> Option<&std::path::Path> {
+        self.movie_file.as_deref()
     }
 
     /// The title of the game being played.

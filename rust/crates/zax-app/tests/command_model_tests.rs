@@ -91,6 +91,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         // Rust-only (EDITOR-1): the profile's scripts read again, the game kept where it is.
         ReloadScript,
         AnnotateMovie,
+        // Rust-only (owner request): the editor mode, a blank Lua profile, the agent's prompt.
+        ToggleEditorMode,
+        NewLuaProfile,
+        CopyAgentPrompt,
         // Rust-only (owner request): stepping frame by frame.
         FrameBack,
         FrameAdvance,

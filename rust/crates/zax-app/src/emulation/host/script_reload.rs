@@ -19,6 +19,7 @@ use super::{EmulationHost, GameView};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::game_session::GameSession;
+use crate::persistence::app_settings::AppSettings as _;
 use crate::ui::strings::{self, UiLanguage};
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -28,6 +29,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(game_id) = self.current_game_id().map(str::to_owned) else {
             return;
         };
+        // The editor mode: a profile made from a project is built again from it first.
+        if self.settings.editor_mode() {
+            if let Some(Err(message)) = self.games.rebuild_from_project(&game_id) {
+                self.log(&format!(
+                    "script reload: the project does not build: {message}"
+                ));
+                self.notifications.show_error(&message);
+                return;
+            }
+        }
         self.games.forget_profile(&game_id);
         let Some(game) = self.games.resolve(&game_id) else {
             return;

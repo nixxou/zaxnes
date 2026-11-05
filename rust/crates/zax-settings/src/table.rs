@@ -1507,6 +1507,21 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Performance measures"),
     );
+    // Rust-only (owner request): the editor mode, for writing a Lua profile with an AI agent:
+    // its MCP server, the pens, and the editor folder of the user data (docs/EDITOR.md). Not
+    // exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiEditorMode,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Editor mode"),
+    );
     // AMD-035 §1 (amended): the interface language, "en" in the catalogue. While nothing is saved
     // the application suggests the operating-system language through the model's environment
     // default. The two texts are the whole domain; anything else reads as "en".
