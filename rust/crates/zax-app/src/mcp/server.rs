@@ -8,7 +8,9 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -71,10 +73,12 @@ pub struct ToolCall {
     pub reply: Sender<ToolResult>,
 }
 
-/// The server: the calls waiting for the main thread.
+/// The server: the calls waiting for the main thread. Dropping it closes the port (leaving the
+/// editor mode).
 pub struct McpServer {
     calls: Receiver<ToolCall>,
     port: u16,
+    stop: Arc<AtomicBool>,
 }
 
 impl McpServer {
@@ -86,17 +90,23 @@ impl McpServer {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let port = listener.local_addr()?.port();
         let (sender, calls) = channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
         std::thread::Builder::new()
             .name("zaxnes-mcp".to_owned())
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
+                    // The connection `Drop` makes to wake this loop: the listener closes here.
+                    if stopped.load(Ordering::Acquire) {
+                        return;
+                    }
                     let sender = sender.clone();
                     let _ = std::thread::Builder::new()
                         .name("zaxnes-mcp-connection".to_owned())
                         .spawn(move || serve_connection(stream, &sender));
                 }
             })?;
-        Ok(Self { calls, port })
+        Ok(Self { calls, port, stop })
     }
 
     /// The port listened on.
@@ -109,6 +119,18 @@ impl McpServer {
     #[must_use]
     pub fn take_calls(&self) -> Vec<ToolCall> {
         self.calls.try_iter().collect()
+    }
+}
+
+impl Drop for McpServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        // Wakes the accepting thread, which then sees `stop` and lets the listener go; the
+        // connections already open end when their client leaves (their calls fail at once).
+        let _ = TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], self.port)),
+            Duration::from_secs(1),
+        );
     }
 }
 
@@ -357,6 +379,21 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn a_dropped_server_lets_its_port_go() {
+        let Ok(server) = McpServer::start(0) else {
+            return; // no loopback interface to bind here
+        };
+        let port = server.port();
+        drop(server);
+        // The accepting thread closes the listener just after the wake-up connection.
+        let free = (0..50).any(|_| {
+            std::thread::sleep(Duration::from_millis(20));
+            TcpListener::bind(("127.0.0.1", port)).is_ok()
+        });
+        assert!(free, "port {port} still bound after the drop");
     }
 
     #[test]
