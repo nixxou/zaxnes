@@ -377,3 +377,64 @@ on every ROM without hack code": the generated code of every non-zone path is by
 executes a different number of instructions on any of the thirteen ROMs. The named, measured cost
 on a zone fetch alone is one `callq` into a 43-instruction function in place of one `callq` into
 a 53-instruction one — which is lower, and which only a game running hack code ever pays.
+
+## Step 6 — the suites
+
+| suite | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **744 passed, 0 failed, 8 ignored** (741 + 3 unit + 1 ignored harness test) |
+| the same with `--include-ignored --test-threads=1`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set | **750 passed, 2 failed**, both failing identically on the baseline (below) |
+| the test-ROM campaign | 331 rows, **0 differences** against MF-4d's and against the baseline (step 5) |
+| `golden-core`, 330 free ROMs, 1 200 frames | baseline against this tree: **byte-identical** |
+| `golden-core`, 18 commercial ROMs, 120 frames | baseline against this tree: **byte-identical** |
+
+Golden-core runs without hack code, so "nothing may move" is met in the strongest form available:
+the two JSONL files compare equal with `diff`, line for line, on 348 ROMs.
+
+**Save states**: no field added, removed or reordered, nothing new serialised, no change to
+`save_state` or `load_state`. The format does not move.
+
+No `unsafe`. No Q ticket: nothing in the spec was ambiguous here — the zone's rule is the
+extension's own, and the hardware's behaviour on a halt is the one `run_dma` already implements.
+
+### The two ignored tests that fail, and one of them matters
+
+Both fail **identically on the baseline** `ee5fd0ce`, so neither is this lot's; both are only
+reachable with `--include-ignored` and a commercial ROM, which is why no earlier lot's suite line
+mentions them. Out of scope to fix here, and reported for R0.
+
+**1. `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`** — the second
+assertion, `apply(&hack).is_none()`: an already-patched image is patched again. A patch-detection
+matter, nothing to do with the core.
+
+**2. `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** — and this one is a real
+regression in a shipped lot. The criterion is that Super Mario Bros. 3 never emits a background
+row on its split line; it now emits one on **4 986 of 5 000 frames**. Bisected here, each build
+clean, the test being a no-hack `NesCore` run that this lot's change cannot reach:
+
+| build | the test |
+| --- | --- |
+| `64550944` PR-1 6/6 | **passes** |
+| `d96d73b7` MF-4d 5/7 | **passes** |
+| `a758f923` MF-4d 6/7 | **fails**, 4 986 / 5 000 |
+| `ee5fd0ce` baseline, and this tree | **fails**, 4 986 / 5 000 — the same number |
+
+It is MF-4d step 6 again, the same `$2007`-while-fetching rule as the picture moves of step 5 —
+and this time it breaks a **documented requirement**, AMD-021 R2-005, on the very game and the
+very scanline (193) MF-4d's own probe named. MF-4d's step 7 weighed the rule against its picture
+moves and kept it; it did not have this row, because the test needs a commercial ROM and is
+`#[ignore]`d. MF-4d itself wrote that the half "is isolated to four lines of
+`increment_vram_address`, so backing it out alone is a one-line revert if the A/B says to" — that
+decision is R0's, and it now has one more input.
+
+### For R0
+
+1. The lot's instruction "SMB3 frames 1 500 and 1 800 match `c4577878`" holds for 1 800 exactly;
+   1 500 is `c4577878` + MF-4d step 6, demonstrated by six builds in step 1 and by the dense
+   dumps in step 5. The same for Ninja Gaiden III: identical to `c4577878` through MF-4d step 5.
+2. `PERFORMANCE-HISTORY.md` §3's "deterministic to the instruction" needs the footnote step 5
+   measured: the whole-process count has a ±50 000 per-ROM floor from address-seeded hashing.
+3. `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` has been failing since
+   `a758f923`.
