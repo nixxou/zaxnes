@@ -529,3 +529,82 @@ Clippy needed one thing: `` `ExRAM` `` in a doc comment, `clippy::doc_markdown` 
 workspace-wide. The two `#[allow(clippy::inline_always)]` carry their measured reason on the
 function, as MF-3b's do — they are the fourth and fifth in the crate, after
 `Cpu6502::end_cycle`, `CpuBus::read_code` and `Ppu2C02::read_nametable_as`.
+
+## Step 6 — the campaign, ROM by ROM
+
+### Identical, on every field but the clock
+
+`zax-harness test-roms G:/…/assets-free/test-roms <out.json> --no-shots`, against MF-4c's own
+campaign JSON (`rust/target-mf/4c-all.json`, the run its step 6 recorded):
+
+| | MF-4c (`2754a7e8`) | PR-1 |
+| --- | --- | --- |
+| ROMs | 331 | **331**, the same set |
+| pass / fail / timeout / unsupported / manual | 214 / 5 / 0 / 1 / 111 | **214 / 5 / 0 / 1 / 111** |
+| rows whose verdict, code or message differs | — | **0** |
+| per-suite tallies, 64 suites | — | **identical** |
+
+Compared **field by field** over all 331 rows, not just the verdict: `result`, `code`, `message`,
+`detail`, `protocol`, `frames`, `mapper`, `submapper` and `shot` differ on **zero** rows. The
+`message` of a `manual` row is the campaign's text transcription of the final screen, so the 111
+manual screens are character for character what they were, and `frames` identical means every ROM
+reached its verdict on the same frame — which is the check that no timing moved. `AccuracyCoin`
+stays at **125 / 147**, code 22, with the same list of failing rows; the three MMC3 suites keep
+5 / 6 each and the same required failures; `holy-mapperel` 40 / 40; the four MMC5 ROMs their four
+`manual` verdicts.
+
+The only field that moves is `ms`, the wall clock, on 285 of 330 rows.
+
+### The wall clock, and which measurement is evidence
+
+MF-4c's `ms` column was taken in another session, and comparing it with this one's gives
+**+1.23 %** in total — i.e. it says the opposite of the instruction count. That number is not
+evidence, and the reason is the one MF-3b rule 6 and §3 of `PERFORMANCE-HISTORY.md` both state:
+two wall clocks taken at different times on this host are not comparable (MF-3b records ±3 % from
+changing one field's type without changing a single executed instruction), and MF-4c's run also
+wrote a PNG per ROM where this one did not.
+
+So an **interleaved** one was taken instead — same host, same session, the two binaries
+alternating, `bench-core --frames 1200 --warmup 300`, `core run_frame` in ms per frame:
+
+| ROM | `2754a7e8` | PR-1 | |
+| --- | --- | --- | ---: |
+| `M1_P128K` | 0.7937 / 0.7938 / 0.8051 | **0.7695 / 0.7680 / 0.7728** | −3.2 % |
+| Mega Man 2 | 0.7374 / 0.7304 / 0.7344 | **0.7303 / 0.7265 / 0.7163** | −1.9 % |
+| `Duelito` | 1.0108 / 0.9994 / 0.9971 | **0.9843 / 0.9858 / 0.9771** | −2.0 % |
+| `mmc5exram` | 2.0795 / 2.0825 / 2.0705 | **2.0693 / 2.0532 / 2.0663** | −0.2 % |
+
+**No overlap on any of the four**: the slowest `PR-1` run of a ROM is faster than its fastest
+`2754a7e8` run, including on the MMC5 and on the `$2002` spinner. The clock moves further than the
+−0.63 % to −0.98 % the instruction count predicts, which is the ordinary difference between the
+two instruments — a `jmp` into a second function's prologue costs a branch and an instruction-cache
+line as well as the instructions callgrind counts. The instruction counts stay the lot's evidence;
+this is corroboration, taken properly.
+
+## The lot, end to end
+
+| the brief asked | what is here |
+| --- | --- |
+| 1. a ROM set spanning §7's two, a `$2002` spinner, a heavy `$2007` reader, an MMC1/MMC3/MMC5 board; the choice explained; a committed reproducible script; the baseline on `2754a7e8` | **done** (step 1): thirteen ROMs chosen on a **measured** per-ROM register-read rate, not a guess — `Duelito` at 4 024 `$2002` reads a frame, `M1_P128K`/`M4_P128K` the corpus's heaviest `$2007` readers at 219, `mmc5exram`, plus R0's five games. Five committed scripts in `rust/tools/perf/`, 43 s for a whole set. Baseline reproduces MF-4a-bis's `read_cycle` 26 344 580 on `m1` to the instruction |
+| 2. build the split form; compare the post-LTO code of every function on the read path; say whether `Ppu2C02::read` and the `Board` read left it and what a `$2002`/`$2007` read now costs | **done** (step 2): every pinned symbol outside the read **IDENTICAL raw**; `Ppu2C02::read`, `Board::cpu_read_override` and `WideExtension::read` each gain their first call site, by **tail call**, about +11 instructions encoded at the boundary and **+4.09 executed per register read** against **−5.90 per read cycle** — so the `$2002` spinner Q-119 could not find **gains** 0.63 % |
+| 3. try to keep the gain without the cost; measure each variant on the whole set; write every variant with its numbers | **done** (step 3): **nine** variants, all thirteen ROMs each. Both of the brief's suggestions measured **wrong** (the PPU arm inline is the worst of the nine, +0.89 % on an MMC5; the cold arms alone are slower on eleven of thirteen) and the two shown to be **complementary**: together they are −0.841 % with nothing slower |
+| 4. commit only if no slower to the instruction on every ROM including the `$2002` spinner; update §7 either way | **done** (step 4): **thirteen of thirteen faster**, −0.629 % to −1.463 %. `PERFORMANCE-HISTORY.md` updated in **three** places — §7 keeps the dropped-attempt history and gains the resolution, §5.1 gains the shipped entry, §3 gains the scripts and the two noise floors |
+| 5. `fmt`, clippy, `cargo test`; the campaign ROM by ROM, identical | **done** (steps 5 and 6): fmt and clippy clean, **709 passed / 0 failed / 7 ignored** and **14** group tests, both MF-4c's numbers; the campaign **331 rows, zero differences on every field but the clock**, and an interleaved clock with no overlap on four ROMs |
+| no performance regression, none at all | **done**, and the bar is cleared on a set six times larger than the one R0 measures: R0's five games are in it at −0.640 % to −0.974 % |
+| no behaviour change | attributes and wrappers; the one shape change (two range tests becoming one in the caller plus the same two in the cold helper) is an identity, argued in step 4. No savestate byte moved, no `unsafe`, no `Board` variant touched |
+| out of scope: behaviour, the 22 AccuracyCoin rows | respected: `AccuracyCoin` is 125 / 147 on both sides, the same 22 rows failing |
+
+**Not done, and deliberately:** `golden-core` was not re-run. It is R0's instrument and needs the
+98-ROM commercial collection; what stands in its place here is the campaign's 331 rows identical
+on every field — `frames` and the 111 screen transcriptions included — plus the post-LTO evidence
+that the only generated code that moved is the read path's own boundaries. R0's own golden-core
+and widescreen A/B remain the gate, as the lot's rules say.
+
+## Checklist
+
+- [x] step 1 — the ROM set, the script, the baseline (`4032cc3d`)
+- [x] step 2 — the split form, its generated code, the whole set (`b3355043`)
+- [x] step 3 — nine variants, and the one kept (`d1cc5a6d`)
+- [x] step 4 — the decision and `PERFORMANCE-HISTORY.md` (`76bb04fd`)
+- [x] step 5 — fmt, clippy, the tests (`6c7dbcca`)
+- [x] step 6 — the campaign ROM by ROM, and the interleaved clock
