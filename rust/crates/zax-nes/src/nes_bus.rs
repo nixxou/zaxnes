@@ -739,7 +739,10 @@ impl NesBus {
     ///
     /// Not reading leaves [`NesBus::data_bus`] alone as well, which is the same statement: a read
     /// that does not happen drives nothing onto the bus. The byte the fetch takes comes from the
-    /// pack's code buffer in [`CpuBus::read_code`], and loads it there.
+    /// pack's code buffer in [`CpuBus::read_code`], and loads it there. The alternative would be
+    /// to load the bus with what the register *would* have answered, which needs the read the rule
+    /// forbids — so the choice is barely open, but it is observable and it is written down.
+    // Q-124
     ///
     /// The DMA units' reads of their **own** addresses — an OAM transfer's source bytes, the DMC's
     /// sample fetch — are not this read and are untouched: the transfer runs byte for byte, on the

@@ -400,3 +400,113 @@ stated restores frame 1 500 byte for byte and both named frames, and it is the r
 price is that sixteen of 462 dumps leave `c4577878` behind, because `c4577878` drew them with
 reads the hardware does not make. They are listed above, frame by frame, and the no-hack column
 for them is "identical" by construction. Nothing else in the two games moves.
+
+**Q-124** is opened for both halves of that judgement — what the data bus becomes, and what the
+reference for the hack's picture should be — with the provisional choices this lot made and the
+numbers above. `NesBus::dma_repeat_read` carries the `// Q-124` mark.
+
+## Step 6 — the suites, the campaign, golden-core and the instruction count
+
+| suite | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **746 passed, 0 failed, 8 ignored** (ZR-1's 744 + the two new) |
+| the same with `--include-ignored --test-threads=1 --no-fail-fast`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set | **752 passed, 2 failed** — the same two ZR-1 reported, below |
+| the test-ROM campaign | 331 rows, **0 differences** against ZR-1's **and** against MF-4d's |
+| `golden-core`, 330 free ROMs, 1 200 frames | **byte-identical** to ZR-1's (`diff` clean) |
+| `golden-core`, 18 commercial ROMs, 120 frames | **byte-identical** to ZR-1's |
+
+214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual — MF-4c's, MF-4d's and ZR-1's four totals.
+Identical as it had to be: no test ROM runs hack-zone code, so no test ROM reaches either of the
+two cold copies this lot adds.
+
+**Golden-core runs without hack code**, so "nothing may move" is met in the strongest form
+available: the four JSONL files compare equal with `diff`, line for line, on 348 ROMs.
+
+**Save states**: no field added, removed or reordered, nothing new serialised, no change to
+`save_state` or `load_state`. `ZONE` is a compile-time parameter and lives in no value. The format
+does not move. No `unsafe`.
+
+### The instruction count
+
+PR-1's scripts, two clean `git archive` builds in the WSL2 Ubuntu — `build-clean.sh`, each
+extracted into its own directory with its own `CARGO_TARGET_DIR`, never reused — then
+`callgrind-set.sh` over `roms.txt`' thirteen ROMs, 300 frames, no warm-up, whole process.
+
+| ROM | baseline `2d714d82` | this tree | delta |
+| --- | ---: | ---: | ---: |
+| `duelito` | 7 100 546 679 | 7 100 488 674 | −58 005 |
+| `m0` | 5 544 875 052 | 5 544 889 651 | +14 599 |
+| `m1` | 4 915 946 934 | 4 915 902 987 | −43 947 |
+| `m4` | 5 502 476 484 | 5 502 428 288 | −48 196 |
+| `metroid` | 5 154 580 711 | 5 154 596 453 | +15 742 |
+| `mm2` | 6 038 170 825 | 6 038 179 832 | +9 007 |
+| `mmc5` | 11 420 257 082 | 11 420 232 610 | −24 472 |
+| `oamstr` | 3 339 414 915 | 3 339 449 031 | +34 116 |
+| `readbuf` | 6 851 869 882 | 6 851 902 454 | +32 572 |
+| `smb1` | 6 032 353 537 | 6 032 308 605 | −44 932 |
+| `smb3` | 8 005 046 976 | 8 005 078 225 | +31 249 |
+| `vblnmi` | 3 328 522 822 | 3 328 527 469 | +4 647 |
+| `z2` | 6 310 980 434 | 6 311 008 134 | +27 700 |
+| **total** | 79 545 042 333 | 79 544 992 413 | **−49 920 (−0.00006 %)** |
+
+The total is **lower**, five ROMs are faster, and every delta is inside the ±50 000-per-ROM noise
+floor ZR-1 measured for this instrument (`PERFORMANCE-HISTORY.md` §3's footnote, still
+outstanding). `callgrind-diff.py` says *SLOWER on 8 ROMs* and that verdict is as wrong here as it
+was there.
+
+**What settles it is the per-symbol count, and it settles it completely.** Comparing the two runs
+symbol by symbol at **threshold 1** over all thirteen ROMs, the emulator symbols whose exclusive
+count differs are:
+
+| symbol | what moved |
+| --- | --- |
+| `NesBus::run_dma` → `NesBus::run_dma::<false>` | the **same number to the digit**, on every ROM that enters it: `z2` 2 295 903 → 2 295 903, `mmc5` 2 295 831 → 2 295 831, `smb1` 2 287 098 → 2 287 098, `mm2` 2 271 396 → 2 271 396, `metroid` 2 241 324 → 2 241 324, `smb3` 2 240 172 → 2 240 172, `readbuf` 288 021 → 288 021, `m4` 7 761 → 7 761 |
+| `HashMap::insert`, `OnceLock::call_once` | the settings catalogue's `HashMap<String, SettingId>` and the `CATALOGUE` initialiser, ±a few hundred in both directions, built once at startup — ZR-1's two named noise symbols |
+
+That is the whole list. **No CPU, PPU, APU, bus or board symbol moves by one instruction on any
+ROM.** `run_dma` did not get bigger or smaller; it got a new name and ran the same code, which is
+step 2's post-LTO line-by-line comparison seen at run time.
+
+And `run_dma::<true>` and `dmc_only_dma::<true>` **appear in none of the twenty-six annotations**:
+no ROM of the set runs hack-zone code, so the two cold copies are never entered. `PR-1`'s own
+`callgrind-symbols.py` table of the CPU read path's symbols is **identical** between the two runs,
+`diff` clean.
+
+**The bar, answered on the measure that resolves it.** "Identical to the instruction, or lower, on
+every ROM without hack code": the generated code of every non-zone path is the same code (step 2,
+line by line, post-LTO), and no emulator symbol executes a different number of instructions on any
+of the thirteen ROMs. The named, measured cost on a halted zone fetch alone is one `callq` into a
+483- or 89-instruction function in place of one into a 511- or 102-instruction one.
+
+### The two ignored tests that fail
+
+Both fail **identically on the baseline**, so neither is this lot's, and both were reported by
+ZR-1. Out of scope here, and already scheduled by R0.
+
+1. **`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** — 4 986 of 5 000 frames,
+   **ZR-1's exact number**, unchanged. It is a no-hack `NesCore` run, which this lot's change
+   cannot reach; it has been failing since `a758f923` (MF-4d step 6), and R0's decision to back
+   that half out is lot MF-4d-fix, next.
+2. **`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`** — an already-patched
+   image is patched again. Nothing to do with the core.
+
+### For R0
+
+1. **The brief's main criterion is met.** SMB3 frame 1 500 with `--advanced --widescreen 128` is
+   byte-identical to `c4577878`'s, in two independent representations (the PNG
+   `a923573ab7b9b3f8…` and the colour-index hash 1 834 880 705 716 891 653). Frame 1 800 and the
+   no-hack control are the reference's too.
+2. **Sixteen of 462 dumps do not come back, and cannot.** Six frames of SMB3 and ten of Ninja
+   Gaiden III, listed in step 5. They are the rule itself — `c4577878`'s own code plus the rule
+   alone moves exactly those and no others — and they cannot appear without the hack because
+   without the hack there is no zone. `c4577878` is not a sound reference on this path: it makes
+   the forbidden reads too, only with a smaller effect per read. **Q-124** asks the question
+   properly.
+3. **Nothing else moved.** `c4577878` + the rule against this tree minus MF-4d step 6's `$2007`
+   half: 0 of 321 and 0 of 141. The whole difference between `c4577878` and this tree, on both
+   games, is those two named changes.
+4. `PERFORMANCE-HISTORY.md` §3's footnote that ZR-1 asked for is still outstanding, and this lot
+   reproduces its measurement: the same two address-seeded tables, a total that moves by −49 920
+   while not one emulator symbol moves at all.
