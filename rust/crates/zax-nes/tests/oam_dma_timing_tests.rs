@@ -8,6 +8,8 @@
 
 mod common;
 
+use std::fmt::Write as _;
+
 use common::loaded_core;
 use zax_nes::cpu::CpuBus;
 use zax_nes::NesBus;
@@ -105,6 +107,211 @@ fn req_core_111_oam_dma_starts_at_the_current_oam_address() {
     assert_eq!(0xF0, oam[0x00]);
     assert_eq!(0xFF, oam[0x0F]);
 }
+
+/// Starts a DPCM sample at `rate` and takes its load fetch, so that the channel is playing and
+/// its memory reader will interrupt an OAM transfer somewhere inside it.
+fn start_a_dmc_sample(bus: &mut NesBus, rate: u8) {
+    bus.write(0x4010, rate & 0x0F); // No IRQ, no loop.
+    bus.write(0x4012, 0x00); // Sample at $C000.
+    bus.write(0x4013, 0xFF); // 4081 bytes: the whole run below is one sample.
+    bus.write(0x4015, 0x10);
+    for _ in 0..3 {
+        bus.write(0x0000, 0x00); // The load delay, on cycles a DMA may not halt.
+    }
+    bus.read(0x8000);
+    assert_eq!(1, bus.dmc_dma_count());
+}
+
+/// The fast OAM loop (lot MF-4a-ter step 2) is the DMA state machine, cycle for cycle.
+///
+/// For four DPCM rates, an OAM transfer is driven with the sample playing and the DMC's request
+/// aimed at a chosen point of it: `lead` is how many cycles short of the reader's own question the
+/// `$4014` write lands, so leads 0 to 15 put the fetch in the transfer's first cycles, 254 to 257
+/// in the middle and 504 to 515 across its end and just after it. Sixteen consecutive leads cover
+/// both parities eight times over, which is the boundary the fast loop's `free / 2` exists for: a
+/// batch that ran one cycle past the cycle the request rose on would let the put cycle after it
+/// consume the DMC's halt cycle and the fetch would land one cycle early.
+///
+/// Three things are recorded per row: the cycles the transfer stole from the CPU, how many DMC
+/// fetches landed inside it, and a hash of the OAM it left — which moves if a byte was read out
+/// of step, written twice or missed.
+///
+/// The expected table was produced by this same test at `dadb94c5` (this lot's step 1, whose only
+/// change is the horizon function this test's own setup calls), where the state machine ran every
+/// one of these cycles on its own. It is asserted character for character.
+#[test]
+fn req_core_113_the_fast_oam_loop_is_the_state_machine_cycle_for_cycle() {
+    let mut log = String::new();
+
+    for rate in [0u8, 8, 14, 15] {
+        for lead in (0..16u32).chain(254..258).chain(504..516) {
+            let (_, mut bus) = loaded_core(None);
+            for i in 0..=255u8 {
+                bus.poke(0x0300 + u16::from(i), i.wrapping_mul(7) ^ 0x5A);
+            }
+            start_a_dmc_sample(&mut bus, rate);
+
+            // Up to `lead` cycles short of the reader's question, on write cycles, which a DMA
+            // may not halt.
+            let horizon = bus
+                .apu()
+                .cycles_until_dmc_fetch()
+                .expect("the sample is still playing");
+            for _ in 0..horizon.saturating_sub(lead) {
+                bus.write(0x0000, 0x00);
+            }
+
+            let fetches = bus.dmc_dma_count();
+            let stall = oam_dma_stall(&mut bus, 0x03);
+            let hash = bus.ppu().oam().iter().fold(0u32, |acc, b| {
+                acc.wrapping_mul(31).wrapping_add(u32::from(*b))
+            });
+
+            writeln!(
+                log,
+                "{rate:2} {lead:3} {stall} {} {hash:08X}",
+                bus.dmc_dma_count() - fetches
+            )
+            .unwrap();
+        }
+    }
+
+    assert_eq!(OAM_DMA_WITH_DPCM, log);
+}
+
+/// `rate`, `lead`, cycles stolen, DMC fetches inside the transfer, OAM hash — as the DMA
+/// state machine alone produced them at `dadb94c5`. See the test above.
+#[rustfmt::skip]
+const OAM_DMA_WITH_DPCM: &str = concat!(
+    " 0   0 516 1 DCF93400\n",
+    " 0   1 515 1 DCF93400\n",
+    " 0   2 516 1 DCF93400\n",
+    " 0   3 515 1 DCF93400\n",
+    " 0   4 516 1 DCF93400\n",
+    " 0   5 515 1 DCF93400\n",
+    " 0   6 516 1 DCF93400\n",
+    " 0   7 515 1 DCF93400\n",
+    " 0   8 516 1 DCF93400\n",
+    " 0   9 515 1 DCF93400\n",
+    " 0  10 516 1 DCF93400\n",
+    " 0  11 515 1 DCF93400\n",
+    " 0  12 516 1 DCF93400\n",
+    " 0  13 515 1 DCF93400\n",
+    " 0  14 516 1 DCF93400\n",
+    " 0  15 515 1 DCF93400\n",
+    " 0 254 516 1 DCF93400\n",
+    " 0 255 515 1 DCF93400\n",
+    " 0 256 516 1 DCF93400\n",
+    " 0 257 515 1 DCF93400\n",
+    " 0 504 516 1 DCF93400\n",
+    " 0 505 515 1 DCF93400\n",
+    " 0 506 516 1 DCF93400\n",
+    " 0 507 515 1 DCF93400\n",
+    " 0 508 516 1 DCF93400\n",
+    " 0 509 515 1 DCF93400\n",
+    " 0 510 516 1 DCF93400\n",
+    " 0 511 514 1 DCF93400\n",
+    " 0 512 515 1 DCF93400\n",
+    " 0 513 516 1 DCF93400\n",
+    " 0 514 517 1 DCF93400\n",
+    " 0 515 513 0 DCF93400\n",
+    " 8   0 516 1 DCF93400\n",
+    " 8   1 515 1 DCF93400\n",
+    " 8   2 516 1 DCF93400\n",
+    " 8   3 515 1 DCF93400\n",
+    " 8   4 516 1 DCF93400\n",
+    " 8   5 515 1 DCF93400\n",
+    " 8   6 516 1 DCF93400\n",
+    " 8   7 515 1 DCF93400\n",
+    " 8   8 516 1 DCF93400\n",
+    " 8   9 515 1 DCF93400\n",
+    " 8  10 516 1 DCF93400\n",
+    " 8  11 515 1 DCF93400\n",
+    " 8  12 516 1 DCF93400\n",
+    " 8  13 515 1 DCF93400\n",
+    " 8  14 516 1 DCF93400\n",
+    " 8  15 515 1 DCF93400\n",
+    " 8 254 516 1 DCF93400\n",
+    " 8 255 515 1 DCF93400\n",
+    " 8 256 516 1 DCF93400\n",
+    " 8 257 515 1 DCF93400\n",
+    " 8 504 516 1 DCF93400\n",
+    " 8 505 515 1 DCF93400\n",
+    " 8 506 516 1 DCF93400\n",
+    " 8 507 515 1 DCF93400\n",
+    " 8 508 516 1 DCF93400\n",
+    " 8 509 515 1 DCF93400\n",
+    " 8 510 516 1 DCF93400\n",
+    " 8 511 514 1 DCF93400\n",
+    " 8 512 515 1 DCF93400\n",
+    " 8 513 516 1 DCF93400\n",
+    " 8 514 517 1 DCF93400\n",
+    " 8 515 513 0 DCF93400\n",
+    "14   0 516 1 DCF93400\n",
+    "14   1 515 1 DCF93400\n",
+    "14   2 516 1 DCF93400\n",
+    "14   3 515 1 DCF93400\n",
+    "14   4 516 1 DCF93400\n",
+    "14   5 515 1 DCF93400\n",
+    "14   6 516 1 DCF93400\n",
+    "14   7 515 1 DCF93400\n",
+    "14   8 516 1 DCF93400\n",
+    "14   9 515 1 DCF93400\n",
+    "14  10 516 1 DCF93400\n",
+    "14  11 515 1 DCF93400\n",
+    "14  12 516 1 DCF93400\n",
+    "14  13 515 1 DCF93400\n",
+    "14  14 516 1 DCF93400\n",
+    "14  15 515 1 DCF93400\n",
+    "14 254 516 1 DCF93400\n",
+    "14 255 515 1 DCF93400\n",
+    "14 256 516 1 DCF93400\n",
+    "14 257 515 1 DCF93400\n",
+    "14 504 516 1 DCF93400\n",
+    "14 505 515 1 DCF93400\n",
+    "14 506 516 1 DCF93400\n",
+    "14 507 515 1 DCF93400\n",
+    "14 508 516 1 DCF93400\n",
+    "14 509 515 1 DCF93400\n",
+    "14 510 516 1 DCF93400\n",
+    "14 511 514 1 DCF93400\n",
+    "14 512 515 1 DCF93400\n",
+    "14 513 516 1 DCF93400\n",
+    "14 514 517 1 DCF93400\n",
+    "14 515 513 0 DCF93400\n",
+    "15   0 518 2 DCF93400\n",
+    "15   1 517 2 DCF93400\n",
+    "15   2 518 2 DCF93400\n",
+    "15   3 517 2 DCF93400\n",
+    "15   4 518 2 DCF93400\n",
+    "15   5 517 2 DCF93400\n",
+    "15   6 518 2 DCF93400\n",
+    "15   7 517 2 DCF93400\n",
+    "15   8 518 2 DCF93400\n",
+    "15   9 517 2 DCF93400\n",
+    "15  10 518 2 DCF93400\n",
+    "15  11 517 2 DCF93400\n",
+    "15  12 518 2 DCF93400\n",
+    "15  13 517 2 DCF93400\n",
+    "15  14 518 2 DCF93400\n",
+    "15  15 517 2 DCF93400\n",
+    "15 254 516 1 DCF93400\n",
+    "15 255 515 1 DCF93400\n",
+    "15 256 516 1 DCF93400\n",
+    "15 257 515 1 DCF93400\n",
+    "15 504 516 1 DCF93400\n",
+    "15 505 515 1 DCF93400\n",
+    "15 506 516 1 DCF93400\n",
+    "15 507 515 1 DCF93400\n",
+    "15 508 516 1 DCF93400\n",
+    "15 509 515 1 DCF93400\n",
+    "15 510 516 1 DCF93400\n",
+    "15 511 514 1 DCF93400\n",
+    "15 512 515 1 DCF93400\n",
+    "15 513 516 1 DCF93400\n",
+    "15 514 517 1 DCF93400\n",
+    "15 515 513 0 DCF93400\n",
+);
 
 #[test]
 fn req_core_111_a_sta_4014_instruction_costs_its_own_cycles_plus_the_stall() {

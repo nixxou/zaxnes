@@ -561,7 +561,28 @@ impl NesBus {
         let mut oam_index: u8 = 0;
         let mut oam_byte: u8 = 0;
 
+        // Whether the fast loop below may be used at all for this transfer, which depends only on
+        // the halted address and the page and so is asked once (see [`NesBus::copy_oam_pairs`]).
+        let fast = !internal && self.dma_oam_page != 0x40;
+
         while (self.dma & (DMA_DMC | DMA_OAM)) != 0 {
+            // **The fast path.** An OAM transfer with nothing else owed, standing on a byte
+            // boundary one cycle before a get cycle, and with no DMC fetch able to fall inside
+            // the next `pairs` byte pairs: those pairs are a tight get/put loop, and everything
+            // the state machine below asks per cycle is answered once for all of them.
+            if fast && self.dma == DMA_OAM && (self.cycles & 1) != 0 && (oam_steps & 1) == 0 {
+                let pairs = self.oam_fast_pairs(0x100 - (oam_steps >> 1));
+                if pairs > 0 {
+                    oam_index = self.copy_oam_pairs(pairs, oam_index);
+                    oam_steps += pairs * 2;
+                    if oam_steps == 0x200 {
+                        self.dma &= !DMA_OAM;
+                        self.ppu.wide_mut().latch_sprites();
+                    }
+                    continue;
+                }
+            }
+
             // A held DMC request can come due in the middle of an OAM transfer — a load whose
             // `$4015` delay runs out, or a reload the memory reader asked for inside one of the
             // ticks below; the transfer's own cycles then stand in for its halt and dummy cycles.
@@ -607,6 +628,71 @@ impl NesBus {
                 }
             }
         }
+    }
+
+    /// How many of the `wanted` byte pairs an OAM transfer still owes may run in
+    /// [`NesBus::copy_oam_pairs`] instead of in the state machine above: the pairs that end on or
+    /// before the cycle the DMC's memory reader could ask for a byte on.
+    ///
+    /// **Why the bound closes.** The state machine's loop does one thing per cycle that the fast
+    /// loop does not: `promote_dmc_wait`, which turns a held DMC request into a halt. A request
+    /// can only appear from `poll_dmc_dma` — that is, from inside one of the `tick`s the loop
+    /// itself runs, on the cycle the reader runs dry — and `cycles_until_dmc_fetch` names that
+    /// cycle (lot MF-4a-ter step 1). Let it be `dry = cycles + free`. The request raised there is
+    /// *held* until `dry + 1`, so the cycles `cycles + 1` to `dry` are cycles on which
+    /// `promote_dmc_wait` would have done nothing at all, and skipping it on them is not an
+    /// approximation.
+    ///
+    /// `free / 2` is exactly the pairs that fit in those cycles, and it also keeps `dry` from
+    /// being a *get* cycle with a put still to come inside the batch: a pair is an even get cycle
+    /// and the odd put after it, so the batch's last cycle is always a put, and when `free` is
+    /// even that put *is* `dry`. Were the batch to run past a get cycle on which the request
+    /// rose, the put after it would have consumed the DMC's halt cycle in the state machine
+    /// (`dma_cycle`) and the fetch would land a cycle earlier than the fast loop puts it.
+    ///
+    /// `None` from the APU is "no sample is playing, and a halted CPU cannot start one", so the
+    /// whole of the rest of the transfer is one batch — which is every OAM DMA of a game that
+    /// plays no DPCM.
+    fn oam_fast_pairs(&self, wanted: u16) -> u16 {
+        let Some(free) = self.apu.cycles_until_dmc_fetch() else {
+            return wanted;
+        };
+        // The APU's horizon is measured from where the APU stands: on a quiet cycle the DMC's
+        // timer has not been counted down yet, so its own lag comes off the answer.
+        let free = free.saturating_sub(self.apu_lag);
+        u16::try_from(free / 2).unwrap_or(u16::MAX).min(wanted)
+    }
+
+    /// Copies `pairs` bytes of the pending OAM transfer, a get cycle and a put cycle each, and
+    /// returns the index the next byte comes from.
+    ///
+    /// This is the state machine above with everything it asks per cycle hoisted out: `dma` is
+    /// `DMA_OAM` alone, so no halt or dummy cycle is owed and `dma_cycle` is a plain `tick`; the
+    /// caller has checked that the next cycle is a get one and that the transfer stands on a byte
+    /// boundary, so the get/put alternation is the loop body rather than a dispatch; no DMC
+    /// request can appear inside the batch, so `promote_dmc_wait` is not asked; and `dma_read`'s
+    /// work is all constant here — the caller's `fast` excludes a halted address in `$4000`-`$401F`
+    /// (so `internal` is false and `decoded_before` is dead) and a source page of `$40` (so no
+    /// source address can be one of the open-bus ones), which leaves the plain
+    /// [`NesBus::read_internal`] the old `$4014` loop made.
+    ///
+    /// What the state machine charged per stolen cycle for all of that is lot MF-4a-ter's subject;
+    /// the cycles themselves, their count and their parity are untouched.
+    fn copy_oam_pairs(&mut self, pairs: u16, mut oam_index: u8) -> u8 {
+        let page = u16::from(self.dma_oam_page) << 8;
+        for _ in 0..pairs {
+            // The get cycle: the DMA unit reads the source byte.
+            self.tick();
+            let byte = self.read_internal(page | u16::from(oam_index));
+            self.open_bus = byte;
+            oam_index = oam_index.wrapping_add(1);
+
+            // The put cycle: it writes it into OAM.
+            self.tick();
+            self.sync_ppu();
+            self.ppu.write_oam_dma(byte);
+        }
+        oam_index
     }
 
     /// Runs one DMA cycle, consuming the halt or the dummy cycle the DMC may still be owed: an
