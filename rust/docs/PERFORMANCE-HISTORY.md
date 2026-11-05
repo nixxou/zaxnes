@@ -364,6 +364,35 @@ the bus. Output identical (attributes and wrappers only, no `match` arm reordere
   `callgrind-symbols.py`, `roms.txt`): thirteen ROMs chosen by *measured* register-read rate, run
   in parallel, 43 s of wall clock for a whole set. Section 3's procedure, as a script.
 
+**Register-edge accuracy at a named cost, and a bug in the instrument** (lot MF-4d)
+- `AccuracyCoin` 125 -> 129/147: the `$4016` strobe's put cycle, the `$4015` bit-6 clear's get
+  cycle, a `$4010` write on the DMC timer's reload cycle, the `$2002` sprite flags' sampling
+  instant, and a `$2007`/`$2004` access made while the PPU is fetching.
+- **`callgrind-set.sh` was dropping five of its thirteen ROMs** — R0's five commercial games.
+  Its `while read` was fed by a **pipe**, so the loop ran in a subshell that exited without
+  waiting for the last batch of background jobs; the outer `wait` cannot see them. The only trace
+  is a `cg-` directory with eight `.ir` files and five empty `.log`s. Fixed by feeding the loop
+  from a here-document, which is a redirect and keeps the loop in the current shell. **Any
+  measurement taken with the piped version covered eight ROMs, not thirteen.**
+- Every per-cycle symbol is **below the 100 000 threshold on all thirteen ROMs**: `Cpu6502::step`,
+  `branch`, `resolve`, `NesBus::tick`, `read_cycle`, `read_internal`, `run_dma`,
+  `Apu2A03::run_cpu_cycles`, `quiet_cycles`, `Board::ppu_read`, `on_cpu_cycle`,
+  `background_fetch`. What is paid is in the register arms: `Ppu2C02::read` +141 k to +2.12 M by
+  `$2002`/`$2007` read rate, `NesBus::write_internal` +183 k to +228 k.
+- **Two attributes are load-bearing and were measured, not guessed.** `#[inline]` on
+  `Ppu2C02::increment_vram_address`: without it the new `fetching` branch pushes the body past the
+  inliner's budget and it becomes a real function with **one call site on every `$2007` access**.
+  And the `& 0x0F` on `DmcChannel::write`'s rate index: without it LLVM cannot prove the index in
+  range and emits a `core::panicking::panic_bounds_check` **call site inside
+  `NesBus::write_internal`**.
+- **Three ROMs' totals move because their pictures move, not because the core got slower**:
+  `duelito` −3.93 %, `smb3` +0.46 %, `z2` +0.02 %. `Ppu2C02::run_dots` is byte-identical after
+  LTO at every step of the lot and still executes more dots on those three, while `duelito`'s
+  −295 M is almost all `zax_engine3d`. The cause is the `$2007`-while-fetching rule (nesdev;
+  `third_party/mesen2` agrees), and `golden-core` confirms CPU cycles and audio bit-identical on
+  all six games measured. **Super Mario Bros. 3 and Zelda II need a widescreen-pack A/B.**
+- Whole set: **−0.310 %** over the thirteen ROMs.
+
 Combined effect of the core work: SMB1 -16 %, Metroid -15 %, MM2 -12 % on top of the
 milestones, device core about 17.4 -> 10-12 ms per NES frame.
 

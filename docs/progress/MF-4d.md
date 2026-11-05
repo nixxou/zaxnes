@@ -728,23 +728,28 @@ Call sites, MF-3b rule 1's list: `end_cycle` 0 → 0, `read_nametable_as` 0 → 
 site — the dot loop's own calls are unchanged, which `run_dots` being byte-identical proves. No
 executed call was added.
 
-### Games whose output may move
+### Games whose output may move — **and two commercial ones do**
 
-This is the step of the lot with real reach, and it is worth being plain about it:
+This is the step of the lot with real reach.
 
 * **`$2007` accessed with rendering on.** A game that writes or reads `$2007` mid-frame without
   turning rendering off now has `v` moved by a coarse X plus a Y increment instead of by 1 or 32.
-  That is what the hardware does, and the usual reason a game does it at all is a deliberate
-  mid-frame scroll or CHR trick; the ones that do it by accident were already corrupting their
-  own scroll. **`mmc3_irq_tests`' A12 clocking tests 5 and 6 measure a `$2007` access stepping
-  across `$1000` and still pass**, which is the sharpest ROM here for this path, and the whole
-  MMC3 suite is unchanged.
+  **Measured, step 7: `Super Mario Bros. 3` and `Zelda II` both move**, and so does `Duelito`.
+  Step 7 names the cause to the scanline — SMB3 makes 18 such accesses over 30 frames, every one
+  on scanline 193, its status-bar split — and checks the rule against nesdev and against
+  `third_party/mesen2`, which takes the same branch on the same lines. `mmc3_irq_tests`' A12
+  clocking tests 5 and 6 measure a `$2007` access stepping across `$1000` and **still pass**,
+  which is the sharpest ROM here for this path, and the whole MMC3 suite is unchanged.
 * **`$2004` written with rendering on.** Previously the write landed in OAM; now it is dropped
   and OAMADDR jumps by four. A game that writes OAM this way was writing to a sprite slot the
-  hardware would not have written, so its sprites move *toward* the reference. No commercial game
-  is known to feed OAM through `$2004` during rendering — the cost is 256 writes against a
-  513-cycle transfer — and `oam_read`, `oam_stress`, `sprite_hit_tests` and `sprite_overflow_tests`
-  are all unchanged.
+  hardware would not have written, so its sprites move *toward* the reference. **Measured, step
+  7: a variant carrying only this half leaves all six golden-core ROMs identical**, so nothing in
+  that set reaches it — the cost of feeding OAM through `$2004` is 256 writes against a 513-cycle
+  transfer — and `oam_read`, `oam_stress`, `sprite_hit_tests` and `sprite_overflow_tests` are
+  unchanged.
+
+The claim first written here, that no commercial game was expected to move, was **wrong**, and
+step 7's golden-core run is what caught it. The correction is above and the evidence is in step 7.
 
 ### Tests and ROMs
 
@@ -773,6 +778,150 @@ zax-harness`: **716 passed, 0 failed**.
 
 **Save states**: no field added, nothing moved.
 
+## Step 7 — the suites, the campaign, the measurement and the guard
+
+### The suites
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings`
+clean, **no new `allow` anywhere in the lot**. `cargo test --release -p zax-nes -p zax-harness`:
+**716 passed, 0 failed** — the baseline's 709 plus this lot's seven.
+
+`ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness --test test_roms_tests --
+--test-threads=1`: **14 passed**. The thread cap is needed with the ROMs present and is **not new
+to this lot** — the fourteen groups each drive whole suites and concurrently exhaust the process,
+at the baseline as much as here (the group set is unchanged; two assertions in one group moved).
+The all-crate runs above pass because `ZAXNES_TEST_ROMS` is unset there and every group returns at
+once. Recorded in the campaign document so the next lot does not have to find it.
+
+### The campaign, ROM by ROM
+
+Both sides rebuilt from a `git archive` into their own directory with their own
+`CARGO_TARGET_DIR`, run against the same collection on the same host:
+
+```
+base 331 rows, new 331 rows, same set: True
+rows whose verdict, code or message differs: 2
+```
+
+214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual — **MF-4c's four totals exactly**. The two
+rows are `AccuracyCoin` (125 → 129) and `nes-test-roms/other/Duelito.nes`, a `manual` row with no
+documented verdict whose screen follows the golden-core change below. The other 110 `manual`
+screens are character for character identical, as are all 214 passes and the 5 required failures.
+
+### `AccuracyCoin`: 125 → **129 / 147**
+
+| row | baseline | MF-4d |
+| --- | --- | --- |
+| `APU Tests / Controller Strobing` | fail 4 | **pass** (step 1) |
+| `CPU Behavior 2 / DMC Reload Timing` | fail 1 | **pass** (step 2) |
+| `Sprite Evaluation / $2002 flag timing` | fail 1 | **pass** (step 5) |
+| `PPU Misc. / $2007 read w/ rendering` | fail 2 | **pass** (step 6) |
+| `APU Tests / Frame Counter IRQ` | fail 7 | fail **D** — tests 6 to 12 pass; D is the `$4017` reset delay |
+| `PPU Misc. / Address $2004 behavior` | fail 6 | fail **8** — codes 6, 7 and A pass; 8 and 9 are MF-4e's |
+
+### The instruction count, measured
+
+`PERFORMANCE-HISTORY.md` §3's procedure, PR-1's thirteen ROMs, 300 frames, no warm-up, whole
+process. **The here-document fix of this lot's first step is what makes this table complete**: all
+thirteen ran, R0's five commercial games included, where the piped loop would have dropped the
+last five.
+
+| ROM | board | `64550944` | MF-4d | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 426 070 017 | 3 426 799 834 | +729 817 | +0.021 % |
+| `oamstr` | NROM | 3 437 657 810 | 3 437 689 671 | +31 861 | +0.001 % |
+| `m1` | MMC1 | 5 013 837 433 | 5 014 233 106 | +395 673 | +0.008 % |
+| `metroid` | MMC1 | 5 252 747 761 | 5 252 882 702 | +134 941 | +0.003 % |
+| `m4` | MMC3 | 5 600 363 684 | 5 600 762 806 | +399 122 | +0.007 % |
+| `m0` | NROM | 5 643 156 877 | 5 643 113 680 | **−43 197** | −0.001 % |
+| `smb1` | NROM | 6 130 394 919 | 6 130 593 271 | +198 352 | +0.003 % |
+| `mm2` | MMC1 | 6 136 314 659 | 6 136 422 408 | +107 749 | +0.002 % |
+| `z2` | MMC1 | 6 407 761 474 | 6 409 325 939 | +1 564 465 | +0.024 % |
+| `readbuf` | CNROM | 6 947 863 134 | 6 950 165 350 | +2 302 216 | +0.033 % |
+| `duelito` | NROM | 7 493 450 648 | 7 198 718 334 | **−294 732 314** | −3.933 % |
+| `smb3` | MMC3 | 8 066 092 510 | 8 103 504 411 | +37 411 901 | +0.464 % |
+| `mmc5` | MMC5 | 11 402 264 113 | 11 402 403 015 | +138 902 | +0.001 % |
+| **total** | | **80 957 975 039** | **80 706 614 527** | **−251 360 512** | **−0.310 %** |
+
+The baseline column reproduces this document's own baseline table to within 10⁵, the
+whole-process host-noise floor PR-1 step 3 measured.
+
+**ROMs are slower, and the bar says to name the instructions and the rule.** The per-symbol
+counts, which have no noise floor, split them cleanly into two kinds. First, **the per-cycle paths
+did not move at all**: `Cpu6502::step`, `branch`, `resolve`, `execute_without_operand`,
+`NesBus::tick`, `read_cycle`, `read_internal`, `halted_read_cycle`, `run_dma`, `dma_read`,
+`Apu2A03::run_cpu_cycles`, `quiet_cycles`, `Board::ppu_read`, `on_cpu_cycle` and
+`background_fetch` are **below 100 000 on every one of the thirteen**, which is why none of them
+appears in the diff at all.
+
+What moved is only this:
+
+| symbol | ROMs | delta | what it is |
+| --- | --- | ---: | --- |
+| `Ppu2C02::read` | all that read `$2002`/`$2007` | +141 k (`smb1`) … +2.12 M (`readbuf`) | step 5's six instructions in the `dot == 0` block and step 6's inlined increment in the register-7 arm, times the read count. `readbuf` is the `$2007` ROM of the set and `vblnmi`/`z2`/`duelito` the `$2002` ones — the two PR-1 added for exactly this |
+| `NesBus::write_internal` | `m1` +228 k, `m4` +228 k, `readbuf` +183 k | | the `$2007` and `$4010` write arms, named per step |
+| `Ppu2C02::run_dots`, `read_pattern_planes`, `read_nametable_inner`, `Board::ppu_peek`, `paint_sprite` | **only** `duelito`, `smb3`, `z2` | up to +6.36 M | **not added instructions.** `run_dots` is byte-identical after LTO at every step; it executes *more dots* because those three ROMs' pictures changed. `smb3`'s `ppu_peek` +3.98 M and `read_pattern_planes` +3.13 M are the extra background row the engine now fetches |
+
+So `smb3`'s +0.46 % and `duelito`'s −3.93 % are the **same** phenomenon with opposite signs: the
+3D conversion engine doing more or less work on a changed picture, which `callgrind-diff` shows
+directly — `duelito`'s −295 M is almost entirely `zax_engine3d::ConversionEngine::convert`,
+`DrawListBuilder::build` and `Segmenter::grow_background`, with `run_dots` *up* 6.36 M at the same
+time. Nothing in the core got slower; three ROMs now paint something else.
+
+### The golden core, and the lot's one real risk
+
+`golden-core` over R0's five commercial games plus `duelito`, 120 frames:
+
+| ROM | frame 1 | picture at 60 | tile records | CPU cycles | audio |
+| --- | --- | --- | --- | --- | --- |
+| `Mega Man 2`, `Metroid`, `Super Mario Bros.` | same | same | same | same | same |
+| `Super Mario Bros. 3` | same | **differs** | **960 → 992** | same | same |
+| `Zelda II` | same | **differs** | 1 086 | same | same |
+| `Duelito` | same | **differs** | 1 024 | same | same |
+
+**CPU cycles and audio are bit-identical on all six**, and so is frame 1: the emulated clock does
+not move, only what is painted once the divergence accumulates.
+
+Bisected to the step and the half: steps 1, 2 and 5 leave all six **identical**, and so does a
+variant carrying only step 6's `$2004` half. It is step 6's **`$2007`** half. A probe over 30
+frames of SMB3 finds 18 `$2007` accesses while fetching, all on **scanline 193** — its status-bar
+split, written with rendering on. The rule is nesdev's, and `third_party/mesen2`'s
+`NesPpu::UpdateVideoRamAddr` branches on `_scanline >= 240 || !IsRenderingEnabled()`, which is the
+same predicate including the pre-render line (Mesen numbers it −1). `AccuracyCoin`'s own row only
+passes with it, and `mmc3_irq_tests`' A12 clocking still passes.
+
+The lot keeps it: the brief asks each step to **list** the games whose output may move rather than
+to avoid them, and this is a documented rule the core lacked, corroborated by two independent
+sources. **But R0 should A/B the widescreen packs for Super Mario Bros. 3 and Zelda II**, which
+are authored against the old picture. It is the one change in the lot that can move them, and it
+is isolated to four lines of `increment_vram_address`, so backing it out alone is a one-line
+revert if the A/B says to.
+
+### The regression guard
+
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green` becomes
+`…_mf_4b_to_mf_4d_turned_green`: the floor rises 125 → **129** and the four rows this lot turned
+green join the thirteen pinned by name, so a lot that fixes more need not edit it while one that
+breaks any of these fails. Groups stay at 14.
+
+**Save states**: the format is unchanged across the whole lot. Step 1 derives its two pairs of
+fields on load behind the existing block versioning and the reasoning is on each `load_state`;
+steps 2, 5 and 6 add no field at all.
+
+### The lot, end to end
+
+| brief item | state |
+| --- | --- |
+| 1. `Frame Counter IRQ` and `Controller Strobing` | **done**: `Controller Strobing` passes, `Frame Counter IRQ` moves 7 → D with its tests 6 and 7 — the two in scope — passing. Q-122 opened |
+| 2. `DMC Reload Timing` | **done**: passes; MF-4b's diagnosis corrected, nothing owed on the per-cycle path |
+| 3. `Explicit`/`Implicit DMA Abort` | **measured and designed, not committed**: 12 of 16 key bytes already agree, the four that do not are named, and the recorded design costs the hot path nothing. A scope decision, stated as one |
+| 4. `DMC DMA Bus Conflicts`, `APU Register Activation` | **measured, not committed**: the 256-byte diff localises it to one byte per odd row, the page is `$50` so every one is a mirror read, and the merge produces all sixteen — a second rule on the same arm remains |
+| 5. `$2002 flag timing` | **done**: passes; the rule is the read's sampling instant, not the clear's dot |
+| 6. `Address $2004 behavior`, `$2007 read w/ rendering` | **done**: `$2007` passes, `$2004` takes codes 6, 7 and A and stops on MF-4e's evaluation pipeline. `run_dots` byte-identical, which was the brief's condition |
+| 7. suites, `AccuracyCoin`, the campaign ROM by ROM, the document, the guard | **done**: 716 tests, 331 rows with 2 changed, 125 → 129, the document and the guard updated |
+| no performance regression | **measured on all thirteen**: every per-cycle symbol below the 100 000 threshold on every ROM; the named register-arm instructions per step; three ROMs' totals move because their **pictures** move, with `run_dots` byte-identical to prove it |
+| golden core | **three ROMs move, two of them commercial**, bisected to step 6's `$2007` half, corroborated against nesdev and Mesen 2, flagged for R0's pack A/B |
+
 ## Status
 
 - [x] step 1 — the get/put asymmetry of `$4015` and of the `$4016` strobe
@@ -786,4 +935,4 @@ zax-harness`: **716 passed, 0 failed**.
 - [x] step 6 — `$2004` on a visible line, and `$2007` read with rendering on (`$2007 read w/
   rendering` passes; `Address $2004 behavior` takes its codes 6, 7 and A and stops on 8, which is
   lot MF-4e's evaluation pipeline)
-- [ ] step 7 — the suites, the campaign and the guard
+- [x] step 7 — the suites, the campaign, the measurement and the guard

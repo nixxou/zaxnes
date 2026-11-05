@@ -501,7 +501,7 @@ fn accuracy_coin() -> Option<(usize, serde_json::Map<String, serde_json::Value>)
 /// The score is asserted as a floor and the eight rows by name, so that a lot which fixes more
 /// does not have to edit this test while one that breaks any of these does.
 #[test]
-fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green() {
+fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
     let Some((passed, tests)) = accuracy_coin() else {
         println!(
             "skipped: set {} to a copy of assets-free/test-roms/ to run this",
@@ -510,12 +510,13 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green() {
         return;
     };
 
-    // Lot MF-4c's end, MF-4b's 124 plus `Palette RAM Quirks`. 116 of the 124 were already
-    // there once the drive stopped mistaking `Implied Dummy Reads`' backup of the zero page for
-    // the end of the run (see `coin.rs`).
+    // Lot MF-4d's end: MF-4c's 125 plus `Controller Strobing`, `DMC Reload Timing`,
+    // `$2002 flag timing` and `$2007 read w/ rendering`. 116 of MF-4b's 124 were already there
+    // once the drive stopped mistaking `Implied Dummy Reads`' backup of the zero page for the
+    // end of the run (see `coin.rs`).
     assert!(
-        passed >= 125,
-        "AccuracyCoin scored {passed}/147, which is under lot MF-4c's 125"
+        passed >= 129,
+        "AccuracyCoin scored {passed}/147, which is under lot MF-4d's 129"
     );
 
     // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
@@ -548,6 +549,16 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green() {
         "PPU Behavior / PPU Read Buffer",
         // MF-4c step 1: a palette read under greyscale is masked with `$30`.
         "PPU Behavior / Palette RAM Quirks",
+        // MF-4d step 1: the shift registers reload on the put cycle the raised strobe line
+        // covers, not on the `$4016` write.
+        "APU Tests / Controller Strobing",
+        // MF-4d step 2: the DMC timer reloads from the period a write on that very cycle left.
+        "CPU Behavior 2 / DMC Reload Timing",
+        // MF-4d step 5: a `$2002` read samples the sprite flags about 1.9 dots after bit 7.
+        "Sprite Evaluation / $2002 flag timing",
+        // MF-4d step 6: a `$2007` access while the PPU is fetching moves `v` by a coarse X and
+        // a Y increment at once.
+        "PPU Misc. / $2007 read w/ rendering",
     ] {
         let row = tests[name].as_str().unwrap();
         assert!(row.starts_with("pass"), "{name}: {row}");

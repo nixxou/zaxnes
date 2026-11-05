@@ -1230,3 +1230,99 @@ untouched.
 what it guards is that a board now reacting to every PPU read still **runs** them, since a hang
 or a lost IRQ would turn one into a `timeout`. `ZAXNES_TEST_ROMS=… cargo test --release -p
 zax-harness --test test_roms_tests`: **14 passed**.
+
+## What lot MF-4d changed
+
+Lot MF-4d takes the `AccuracyCoin` rows that live on the APU and DMA register edges and on
+`$2002`/`$2004`/`$2007` **outside** the per-dot loop. Four rows turn green; two more are measured
+and designed but deliberately not shipped (see `docs/progress/MF-4d.md` steps 3 and 4).
+
+### The campaign, ROM by ROM
+
+Both sides were measured on the same host on the same day: `64550944` and this lot's end were
+each rebuilt from a `git archive` into its own directory with its own `CARGO_TARGET_DIR`
+(`rust/tools/perf/build-clean.sh`) and run against the same ROM collection.
+
+```
+base 331 rows, new 331 rows, same set: True
+rows whose verdict, code or message differs: 2
+```
+
+| | `64550944` | MF-4d |
+|---|---|---|
+| `AccuracyCoin` | 125 / 147, 22 failed | **129 / 147, 18 failed** |
+| `nes-test-roms/other/Duelito.nes` | `manual`, no documented verdict | **`manual`, a different screen** |
+| everything else, all 329 rows | — | **character for character identical** |
+
+214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual — MF-4c's four totals exactly, and every
+per-suite tally unchanged. `Duelito` is one of the 111 `manual` rows: it has **no documented
+verdict**, its screen is an untranscribable scramble either way, and it is in the collection as a
+`$2002`-heavy timing ROM rather than as a test with an answer. Its screen moving is the campaign's
+view of the golden-core change below, not a verdict that regressed.
+
+### `AccuracyCoin`: four rows
+
+| test | before | after | what it is |
+|---|---|---|---|
+| `APU Tests / Controller Strobing` | fail 4 | **pass** | the shift registers reload on a **put** cycle the strobe line is high for, and a write's level only reaches the line from the cycle after it — so `DEC $4016`'s one-cycle strobe reloads exactly when its sixth cycle is a put cycle |
+| `CPU Behavior 2 / DMC Reload Timing` | fail 1 | **pass** | a `$4010` write on the very cycle the DMC timer reloads is used by that reload; the bus performs a write after stepping the APU, so that reload had already taken the old period |
+| `Sprite Evaluation / $2002 flag timing` | fail 1 | **pass** | all three flags still clear on dot 1 of the pre-render line, but a read latches bit 7 at its start and samples bits 5 and 6 about 1.9 dots later |
+| `PPU Misc. / $2007 read w/ rendering` | fail 2 | **pass** | while the PPU is fetching, a `$2007` access moves `v` by a coarse X **and** a Y increment at once instead of by 1 or 32 |
+
+Two more rows moved without closing, and both now stop on a named mechanism rather than on the one
+this lot took:
+
+| test | before | after | what is left |
+|---|---|---|---|
+| `APU Tests / Frame Counter IRQ` | fail 7 | fail **D** | tests 6 to 12 pass. Code D is the `$4017` write's sequencer-reset delay on a get cycle, not the get/put asymmetry of the read |
+| `PPU Misc. / Address $2004 behavior` | fail 6 | fail **8** | codes 6, 7 and A pass. Codes 8 and 9 are the sprite-evaluation pipeline's moving OAM address, which is lot MF-4e's |
+
+The 18 rows that still fail are MF-4c's 22 minus these four, with the same codes but for the two
+above.
+
+### The golden core: three ROMs' pictures move, and `$2007` is why
+
+This is the lot's one behavioural reach outside the test ROMs, and it is worth being plain about.
+`golden-core` over R0's five commercial games plus `Duelito`, 120 frames:
+
+| ROM | frame 1 | picture at 60 | tile records | CPU cycles | audio |
+|---|---|---|---|---|---|
+| `Mega Man 2` | same | same | same | same | same |
+| `Metroid` | same | same | same | same | same |
+| `Super Mario Bros.` | same | same | same | same | same |
+| `Super Mario Bros. 3` | same | **differs** | **960 → 992** | same | same |
+| `Zelda II` | same | **differs** | 1 086 → 1 086 | same | same |
+| `Duelito` | same | **differs** | 1 024 → 1 024 | same | same |
+
+**CPU cycles and audio are bit-identical on all six**, and frame 1 is identical on all six: the
+core's timing does not move at all, only what the PPU paints after the divergence accumulates.
+
+Bisecting the lot's commits says which step: steps 1, 2 and 5 leave all six **identical**, and a
+variant carrying only step 6's `$2004` half leaves them identical too. It is step 6's **`$2007`
+half** alone. A probe over 30 frames of SMB3 finds 18 `$2007` accesses made while the PPU is
+fetching, every one of them on **scanline 193** — its status-bar split, written with rendering
+on. The hardware rule is nesdev's ("during rendering … it will update v in an odd way, triggering
+a coarse X increment and a Y increment simultaneously") and `third_party/mesen2`'s
+`NesPpu::UpdateVideoRamAddr` takes the same branch for the same scanlines, the pre-render line
+included. `mmc3_irq_tests`' A12-clocking rows — the sharpest ROMs here for a `$2007` access
+stepping across `$1000` — still pass, and the whole MMC3 suite is unchanged.
+
+So the new output is the documented behaviour the core previously lacked, and SMB3's extra 32 tile
+records are one background row the split now exposes. **R0 should A/B the widescreen packs for
+Super Mario Bros. 3 and Zelda II before this reaches users**: the packs are authored against the
+old picture, and this is the one change in the lot that can move them.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` keeps its **14** groups.
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_and_mf_4c_turned_green` becomes
+`…_mf_4b_to_mf_4d_turned_green`: the tally floor rises from 125 to **129**, and the four rows this
+lot turned green join the thirteen pinned by name. `ZAXNES_TEST_ROMS=… cargo test --release -p
+zax-harness --test test_roms_tests -- --test-threads=1`: **14 passed**.
+
+`--test-threads=1` is needed when the ROMs are present, and that is **not** new to this lot: the
+file's fourteen groups each drive whole suites, and running them concurrently exhausts the
+process. The default-threaded run dies with `STATUS_ACCESS_VIOLATION` at both the baseline and
+this lot's end — the group set is unchanged here, only two assertions in one group — and the
+earlier all-crate runs pass because `ZAXNES_TEST_ROMS` is unset there and every group returns at
+once. A lot that wants the guard green by default has to cap the threads inside the file.
