@@ -45,12 +45,29 @@ pub(crate) struct Mmc5Audio {
     read_mode: bool,
     irq_enabled: bool,
     irq_flag: bool,
+
+    /// The two squares' half of `M`, `PULSE_TABLE[q1 + q2]`, kept apart from the PCM's half
+    /// because the two have **no input in common**: a PCM read or a `$5011` write moves only the
+    /// term below, and must not have to recompute this one. See [`Self::refresh_pcm_level`] for
+    /// why that matters down to the instruction.
+    pulse_level: i32,
+
+    /// `M` itself, `pulse_level + MMC5_PCM_TABLE[pcm]`, handed out by [`Self::output`] as a
+    /// plain load.
+    ///
+    /// Both are derived, so **neither is serialised**: [`Self::load_state`] recomputes them and
+    /// the savestate block does not move (REQ-CORE-091).
+    level: i32,
 }
 
 impl Mmc5Audio {
     /// A board's sound at power-on, silent (REQ-CORE-004).
     pub fn new() -> Self {
-        Self::default()
+        // `refresh_level` rather than a `0`, so that the cached `M` is right by construction and
+        // not by an assumption about the first entry of the two tables.
+        let mut audio = Self::default();
+        audio.refresh_level();
+        audio
     }
 
     /// `M` of REQ-CORE-073: the board's output in the mixer's integer units, a **positive**
@@ -66,12 +83,43 @@ impl Mmc5Audio {
     /// The criteria win — they are what the amendment declares normative, and one index shared
     /// by both squares is what "equivalent in volume to the corresponding APU channels" means
     /// for a pair of APU pulses. The ticket carries the contradiction.
-    pub fn output(&self) -> i32 {
+    ///
+    /// **A cached field, not the sum.** The bus asks for `M` on **every CPU cycle** of a board
+    /// with expansion audio ([`NesBus::push_expansion_audio`](crate::nes_bus)), and computing the
+    /// two channel outputs and the two table lookups there cost callgrind **178.7 M instructions
+    /// over 300 frames of `mmc5exram`** — about twenty per CPU cycle, for a value that moves only
+    /// when a duty sequencer advances, an envelope or length counter is clocked, or a register is
+    /// written. [`Self::refresh_level`] runs at those four places and this is a load, which is
+    /// the shape [`Vrc6Audio`](super::vrc6_audio::Vrc6Audio) already ships.
+    pub const fn output(&self) -> i32 {
+        self.level
+    }
+
+    /// Recomputes `M` from the two squares and the PCM level.
+    fn refresh_level(&mut self) {
         let index = self.pulse1.output() + self.pulse2.output();
-        mixer::PULSE_TABLE[usize::try_from(index)
+        self.pulse_level = mixer::PULSE_TABLE[usize::try_from(index)
             .unwrap_or(0)
-            .min(mixer::PULSE_INDEX_MAX)]
-            + mixer::MMC5_PCM_TABLE[usize::from(self.pcm)]
+            .min(mixer::PULSE_INDEX_MAX)];
+        self.refresh_pcm_level();
+    }
+
+    /// Recomputes `M` from the PCM level alone, leaving the squares' cached term as it is.
+    ///
+    /// **Three instructions and no call, which is the point.** `feed_pcm_read` below is reached
+    /// from one arm of `Board::cpu_read_override`, and LLVM inlines that dispatch into
+    /// [`Cartridge::try_cpu_read`](crate::cartridges::Cartridge) — a function entered on every
+    /// cartridge-space read of **every** game. Putting the full [`Self::refresh_level`] on that
+    /// path leaves a `callq` in the arm, the byte read has to stay live across it, and the
+    /// dispatch's entry grows two instructions of argument shuffling for every board: callgrind
+    /// priced it at exactly **+2 per `try_cpu_read` call**, +524 336 over 300 frames on each of
+    /// `M0_P32K_C8K_V`, `M1_P128K` and `M4_P128K`, none of which is an MMC5. Out-of-lining the
+    /// arm instead moved the same two instructions rather than removing them. What removes them
+    /// is having nothing to call: the index is a `u8` into a 256-entry table, so this is a load,
+    /// an add and a store, with no bounds check and no register to save. MF-3b rule 3, on the
+    /// read path instead of the dispatch's.
+    fn refresh_pcm_level(&mut self) {
+        self.level = self.pulse_level + mixer::MMC5_PCM_TABLE[usize::from(self.pcm)];
     }
 
     /// Whether $5010 put the PCM channel in read mode, where the board takes its level from the
@@ -83,11 +131,16 @@ impl Mmc5Audio {
     /// Feeds the PCM channel the byte a CPU read of $8000-$BFFF put on the bus, which read mode
     /// turns into the level; a byte of 0 raises the PCM IRQ flag instead, exactly as a write of
     /// 0 does in write mode (AMD-061 §6.3).
+    ///
+    /// It refreshes the PCM half of `M` alone, and [`Self::refresh_pcm_level`] carries the
+    /// measurement that says why that is not a micro-optimisation: this sits on every game's
+    /// cartridge-read path through `Cartridge::try_cpu_read`.
     pub fn feed_pcm_read(&mut self, value: u8) {
         if value == 0 {
             self.irq_flag = true;
         } else {
             self.pcm = value;
+            self.refresh_pcm_level();
         }
     }
 
@@ -112,8 +165,14 @@ impl Mmc5Audio {
         self.half_rate = !self.half_rate;
         if self.half_rate {
             // The square timers run at half the CPU clock, as the APU's pulses do.
-            self.pulse1.clock_timer();
-            self.pulse2.clock_timer();
+            //
+            // Not `||`: both must be clocked, so the short circuit would be a bug. `M` is
+            // recomputed only when a sequencer actually advanced — see [`Self::output`].
+            let mut stepped = self.pulse1.clock_timer();
+            stepped |= self.pulse2.clock_timer();
+            if stepped {
+                self.refresh_level();
+            }
         }
 
         self.divider += 1;
@@ -128,6 +187,7 @@ impl Mmc5Audio {
         self.pulse2.envelope.clock();
         self.pulse1.length.clock(self.cycles);
         self.pulse2.length.clock(self.cycles);
+        self.refresh_level();
     }
 
     /// Writes one of the board's sound registers, $5000 to $5015.
@@ -158,8 +218,10 @@ impl Mmc5Audio {
                 self.pulse1.length.set_enabled((value & 0x01) != 0);
                 self.pulse2.length.set_enabled((value & 0x02) != 0);
             }
-            _ => {}
+            _ => return,
         }
+
+        self.refresh_level();
     }
 
     /// Reads one of the board's two readable sound registers, $5010 or $5015, as a CPU read
@@ -222,6 +284,7 @@ impl Mmc5Audio {
         self.read_mode = reader.read_bool()?;
         self.irq_enabled = reader.read_bool()?;
         self.irq_flag = reader.read_bool()?;
+        self.refresh_level();
         Ok(())
     }
 }

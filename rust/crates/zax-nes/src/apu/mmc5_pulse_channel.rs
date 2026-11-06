@@ -73,12 +73,19 @@ impl Mmc5PulseChannel {
     }
 
     /// Clocks the duty sequencer's timer, once every two CPU cycles as the APU does.
-    pub fn clock_timer(&mut self) {
+    ///
+    /// Returns whether the sequencer advanced, which is the only thing a clock can change about
+    /// [`Self::output`] — the caller uses it to recompute the board's cached `M` only on the
+    /// cycles it can have moved, the shape [`Vrc6Audio`](super::vrc6_audio::Vrc6Audio)'s
+    /// generators already use.
+    pub fn clock_timer(&mut self) -> bool {
         if self.timer == 0 {
             self.timer = self.timer_period;
             self.sequence_position = (self.sequence_position + 1) & 7;
+            true
         } else {
             self.timer -= 1;
+            false
         }
     }
 

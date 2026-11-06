@@ -13,11 +13,15 @@ follows.
 
 1. The VRC6 board (mappers 24 and 26), with the VRC IRQ counter **shared** with `vrc2_vrc4.rs`.
 2. The VRC6 audio: two pulses, the sawtooth, and `$9003`.
-3. The Namco 163 board (mapper 19; mapper 210 submappers 1 and 2, no audio).
-4. The Namco 163 audio: up to eight channels, time-multiplexed, one every 15 CPU cycles.
-5. Save states for both boards and both audio blocks, behind the existing block versioning.
-6. The ROM check.
-7. The suites, the campaign ROM by ROM against MF-4d's, and the campaign document.
+3. R0's second addendum: the MMC5's `+0.156 %` and `Ppu2C02::read`'s `+11` per register read.
+4. The Namco 163 board (mapper 19; mapper 210 submappers 1 and 2, no audio).
+5. The Namco 163 audio: up to eight channels, time-multiplexed, one every 15 CPU cycles.
+6. Save states for both boards and both audio blocks, behind the existing block versioning.
+7. The ROM check.
+8. The suites, the campaign ROM by ROM against MF-4d's, and the campaign document.
+
+Steps 3 to 8 were 2 to 7 before R0's second addendum (2026-11-06) put its two performance items
+ahead of the Namco 163; nothing else in the plan moved.
 
 ## The ROM situation, settled first because it shapes every step
 
@@ -534,12 +538,273 @@ from the mapper number at load, like its five neighbours, and is not written.
 `THIRD-PARTY-NOTICES.md` now lists the VRC6 and `VrcIrq` adaptations — and the FME-7's `$C`
 command, which lot MF-3 added the file header for without adding the entry.
 
+## Step 3 — R0's two performance items, both met, one of them not all the way
+
+The lot stopped after step 2 and three lots ran in between (ZR-1, ZR-2, MF-4d-fix), so this step
+starts from `ab99dc1a` and is measured against **three** references, each answering a different
+question:
+
+| reference | what it is | the question it answers |
+| --- | --- | --- |
+| `ad1ad765` | MF-4d's end, the lot's baseline | the lot's bar, and item 1's target |
+| `fff53974` | ZR-2's end, MF-4d-fix's baseline | item 2's target |
+| `ab99dc1a` | the branch tip | what this step alone changes |
+
+Builds: `tools/perf/make-tree.sh` then `build-clean.sh` — a `git archive` (or `git ls-files`) tar
+extracted into a brand-new directory with its own `CARGO_TARGET_DIR`, never reused — then
+`callgrind-set.sh`, thirteen ROMs, 300 frames, no warm-up, 7 jobs. `ad1ad765`'s and `fff53974`'s
+runs are the ones steps 1-2 and MF-4d-fix made; the tip was **rebuilt and re-run here** and
+reproduces MF-4d-fix's table inside the ±5×10⁴ per-ROM floor (`mmc5` 11 421 211 640 against its
+11 421 265 390, `duelito` 7 411 056 802 against 7 411 012 660), which is the check that the
+instrument has not drifted between the two sessions.
+
+Two new tools: `target-mf/asm/blocks.py`, which prints a symbol's post-LTO body **with its basic
+block labels kept** — `fn.py` and `cmp4c.py` both drop them, and "which block is on the
+fall-through" is exactly the question this step had to answer — and `target-mf/explore.sh`, a
+**reuse-the-target-directory** loop for trying a shape in 40 seconds. `explore.sh` is not a
+measurement and says so in its header: every number below comes from `build-clean.sh`.
+
+### Item 2 first, because it is the one that named itself in one line
+
+MF-4d-fix step 5 and Q-125 measured `Ppu2C02::read` at **+11 instructions per register read**
+with the call count identical, and could not say where they went. `blocks.py` says it in one
+look. In `fff53974`:
+
+    [.LBB1687_22]              <- the $2007 arm, and nothing else reaches it
+        pushq   %rbp
+        pushq   %r15
+        pushq   %r14
+        pushq   %rbx
+        pushq   %rax
+
+and the `$2002`, `$2004` and write-only arms `retq` **with no pops at all** — the prologue is
+*shrink-wrapped* into the one arm that needs callee-saved registers, because it is the one arm
+that calls anything (`read_vram_inner`). At the tip the same five pushes sit at the head of
+`.LBB1687_9`, the block the register dispatch itself begins in:
+
+    [.LBB1687_9]               <- every register read arrives here
+        pushq   %r15
+        pushq   %r14
+        pushq   %r12
+        pushq   %rbx
+        pushq   %rax
+        cmpw    $7, %si
+        je      .LBB1687_27
+
+**Five pushes and five pops on every read of every register, plus the `jmp` that replaced the
+fall-through: eleven.** Not a bigger function — `read` is 319 → 262 instructions — and not a new
+call site. LLVM stopped shrink-wrapping because an arm on the common path started wanting `%rbx`
+(the `$2004` arm's `movb $-1, %bl`), and backing out the `$2007` half of MF-4d step 6 is what
+tipped it.
+
+**The fix is to make the calling arm a function.** `Ppu2C02::read_data`, `#[inline(never)]`,
+holds the `$2007` body unchanged — the read buffer, the palette's immediate path, the refill
+fetch and the increment, moved line for line. Then:
+
+| | `fff53974` | `ab99dc1a` | this step |
+| --- | ---: | ---: | ---: |
+| `Ppu2C02::read`, static instructions | 319 | 262 | **143** |
+| `pushq`/`popq` reached by a `$2002` read | **0** | 10 | **0** |
+| `Ppu2C02::read_data` | — | — | 117, **tail-called** (`jmp`, not `callq`) |
+
+The arm is `movq %rdx, %rsi / jmp read_data`: the five pushes are the ones `read` used to make
+anyway, they have simply gone back to being paid only by a `$2007` read.
+
+### What item 2 still costs, to the instruction
+
+| ROM | `fff53974` | this step | delta | | |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `vblnmi` | 3 328 510 177 | 3 328 737 112 | +226 935 | +0.0068 % | **the residual** |
+| `oamstr` | 3 339 441 540 | 3 339 434 090 | −7 450 | −0.0002 % | was +5 323 029 |
+| `m1` | 4 915 938 139 | 4 915 597 954 | −340 185 | −0.0069 % | |
+| `metroid` | 5 154 551 600 | 5 154 529 476 | −22 124 | −0.0004 % | was +58 352 |
+| `m4` | 5 502 464 705 | 5 501 662 553 | −802 152 | −0.0146 % | |
+| `m0` | 5 544 879 030 | 5 544 859 429 | −19 601 | −0.0004 % | was +33 066 |
+| `smb1` | 6 032 339 510 | 6 032 404 944 | +65 434 | +0.0011 % | was +738 517 |
+| `mm2` | 6 038 173 401 | 6 038 123 561 | −49 840 | −0.0008 % | was +45 536 |
+| `readbuf` | 6 851 884 536 | 6 852 870 280 | +985 744 | +0.0144 % | **the residual**, was +11 038 597 |
+| `mmc5` | 11 420 253 509 | 11 357 823 749 | −62 429 760 | −0.5467 % | item 1 |
+| **the ten whose behaviour is unchanged** | **58 128 436 147** | **58 066 043 148** | **−62 392 999** | **−0.107 %** | was **+0.035 %** |
+| `z2`, `duelito`, `smb3` | | | | | behaviour, MF-4d-fix |
+
+**The target was "`fff53974`'s count or lower on every ROM whose behaviour is unchanged", and
+eight of the ten are there.** Two are not, and the symbol diff names the whole of it:
+
+* `vblnmi`: `Ppu2C02::read` +304 710 instructions for **exactly 304 710 calls** — one
+  instruction per register read. It is the `movq %rdx, %rsi` of the tail call, `cart` moving down
+  an argument position, paid at `read`'s entry by the register allocator.
+* `readbuf`: `read_data` +1 693 573 and `read` −608 240, the same `movq` plus the `retq` of the
+  `$2007` reads, which that ROM makes by the hundred thousand.
+
+**The variant that would remove it was built and refuted.** Giving `read_data` `read`'s own
+`(&mut self, register, cart)` signature puts the three arguments in the same registers on the
+System V and the Windows ABI alike, so the `movq` should vanish — and it does not: the parameter
+is unused, LLVM drops it from this internal function's own convention, re-derives `cart` into
+`%rsi`, and emits the same instruction. `read_data`'s entry in that build is `movq %rsi, %rbx`,
+which is the proof. The next lever is `#[cold]` or a section move, which costs the `$2007`-heavy
+ROMs a far branch for no gain, or fighting the allocator — the trade MF-3b and PR-1 both declined
+and this step declines too. **+0.0144 % at worst, against the +0.161 % it started from: 91 % of
+it back, and the 9 % left is one named instruction.**
+
+### Item 1: the MMC5, and the two instructions that were never the point
+
+The latch's cost to a board that *is* latched is `cmpb $1, 11016(%rbx) / jne` in `NesBus::tick` —
+**two instructions, and they are irreducible in that shape.** Every ordering was walked through
+on paper before anything was built, and each one keeps two tests rather than one:
+
+| shape | the MMC5's per-cycle path | verdict |
+| --- | --- | --- |
+| today | `Option` test (2) + `incq` (1) + latch (2) + call | +2 against `ad1ad765` |
+| the latch in `NesBus` instead of `Cartridge` | same three tests, one of them a nearer load | +2, no change |
+| `if !latch { return }` early | the same `cmpb`/`jne` inverted | +2 |
+| the latch tested **before** the `Option` | `memory.cpu_cycle` must still be incremented | +2, and the 26 others lose |
+| one combined `wants_cpu_cycle` latch | the MMC1 reads `cpu_cycle`, so it joins the list and pays the full dispatch | a regression on four of the thirteen ROMs |
+| `cpu_cycle` moved into `NesBus` | would make it **parity exactly** | breaks `Cartridge::save_state`'s block (REQ-CORE-091) |
+
+So the two instructions stay, and parity had to come from **moving the MMC5's per-cycle work**,
+which is R0's own first suggestion. Callgrind says where that work actually is, and it is not the
+latch — on `mmc5exram`, 300 frames:
+
+| symbol | instructions | per CPU cycle |
+| --- | ---: | ---: |
+| `Board::on_cpu_cycle` | 337 017 452 | ~38 |
+| `NesBus::push_expansion_audio` | 241 222 320 | ~27 |
+| **`Mmc5 as Mapper::expansion_audio_output`** | **178 683 220** | **~20** |
+| the latch, for comparison | 17 843 282 | 2 |
+
+**The board recomputes `M` from scratch on every CPU cycle**, because `Mmc5Audio::output` is
+`PULSE_TABLE[q1 + q2] + MMC5_PCM_TABLE[pcm]` and the bus asks for it once per cycle — 178.7 M
+instructions, ten times the latch's cost, for a value that moves only when a duty sequencer
+advances, an envelope or a length counter is clocked, or a register is written. `Vrc6Audio`
+already had the answer: step 2 gave it a cached `level` and a `refresh_level` that runs only when
+a generator stepped. **The MMC5 now has the same**, which also makes the two boards' audio the
+same shape for the Namco 163 to follow.
+
+`Mmc5PulseChannel::clock_timer` returns whether the sequencer advanced; `Mmc5Audio::output` is a
+load; `refresh_level` runs at four places and nowhere else. `level` is **derived, so neither it
+nor `pulse_level` is serialised** — `load_state` recomputes them and the savestate block does not
+move. `Mmc5Audio::new` calls `refresh_level` rather than writing a `0`, so the cache is right by
+construction instead of by an assumption about the first entry of two tables.
+
+### The trap on the way, and the shape that got out of it
+
+The first version put one `refresh_level()` in `feed_pcm_read`, which is reached from an arm of
+`Board::cpu_read_override` that LLVM inlines into **`Cartridge::try_cpu_read`** — a function
+entered on every cartridge-space read of every game. The byte read has to stay live across the
+call, so:
+
+    try_cpu_read's prologue:   pushq %rax      ->   pushq %rbp / pushq %rbx / pushq %rax
+
+Callgrind priced it at **exactly +524 336 instructions on each of `m0`, `m1` and `m4`** — +2 per
+`try_cpu_read` call, on three ROMs none of which is an MMC5. MF-3b rule 3 in its exact form,
+again, and the three figures being equal to the instruction is what identified it as a per-call
+entry cost rather than anything to do with the PCM.
+
+**Out-of-lining the arm did not fix it**, which is the part worth recording: `Mmc5::read_prg_into_pcm`
+with `#[inline(never)]` put the prologue back to `pushq %rax` and then added `movl %esi, %edx /
+movq %rdi, %rcx` at the entry and their two inverses before the tail call — the same +524 336, to
+the instruction, in a different disguise. A call in that arm costs two instructions however it is
+dressed.
+
+What removes them is **having nothing to call**. `pulse_level` and `level` are now two fields
+rather than one, because the squares' half of `M` and the PCM's half have no input in common: a
+PCM read moves only the second, so `refresh_pcm_level` is a load, an add and a store — a `u8`
+index into a 256-entry table, so no bounds check either — and it inlines into the arm with no
+register to save. `try_cpu_read`'s entry is then **instruction-identical** to the tip's but for
+the one field displacement the new field adds:
+
+    < movzbl 1600(%rdi), %eax          > movzbl 1608(%rdi), %eax
+
+### Callgrind: thirteen ROMs, 300 frames, against the lot's baseline `ad1ad765`
+
+| ROM | board | `ad1ad765` | this step | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 426 817 394 | 3 328 737 112 | −98 080 282 | **−2.862 %** |
+| `oamstr` | NROM | 3 437 722 453 | 3 339 434 090 | −98 288 363 | **−2.859 %** |
+| `m1` | MMC1 | 5 014 160 791 | 4 915 597 954 | −98 562 837 | **−1.966 %** |
+| `metroid` | MMC1 | 5 252 853 203 | 5 154 529 476 | −98 323 727 | **−1.872 %** |
+| `m4` | MMC3 | 5 600 693 086 | 5 501 662 553 | −99 030 533 | **−1.768 %** |
+| `m0` | NROM | 5 643 153 338 | 5 544 859 429 | −98 293 909 | **−1.742 %** |
+| `smb1` | NROM | 6 130 637 413 | 6 032 404 944 | −98 232 469 | **−1.602 %** |
+| `mm2` | MMC1 | 6 136 429 450 | 6 038 123 561 | −98 305 889 | **−1.602 %** |
+| `z2` | MMC1 | 6 409 332 652 | 6 311 243 238 | −98 089 414 | **−1.530 %** |
+| `readbuf` | CNROM | 6 950 211 191 | 6 852 870 280 | −97 340 911 | **−1.401 %** |
+| `duelito` | NROM | 7 198 774 119 | 7 398 944 557 | +200 170 438 | +2.781 % |
+| `smb3` | MMC3 | 8 103 531 708 | 7 967 772 532 | −135 759 176 | **−1.675 %** |
+| **`mmc5`** | **MMC5** | **11 402 398 394** | **11 357 823 749** | **−44 574 645** | **−0.391 %** |
+| **total** | | **80 706 715 192** | **79 744 003 475** | **−962 711 717** | **−1.193 %** |
+
+**Item 1 is met with room to spare: `mmc5` is 44.6 M instructions *below* `ad1ad765`, −0.391 %,
+where step 2 left it at +0.156 %.** Twelve of the thirteen ROMs are below the baseline, by
+−1.4 % to −2.9 %, including all five of R0's commercial games.
+
+`duelito`'s +2.781 % is **not this step's and not this lot's**: it is MF-4d-fix's back-out, which
+golden-core says changes that ROM's output (its screen is `d96d73b7`'s again), so its binary
+emulates different work. MF-4d-fix step 5 measured the same +310 M on it and the same −37 M on
+`smb3` from the same cause, and the moves going in both directions is what says it is behaviour.
+Against the tip, which carries the back-out too, `duelito` is **−12 112 245** and every one of the
+thirteen is lower:
+
+| against `ab99dc1a` | | |
+| --- | ---: | ---: |
+| every ROM lower except `m1` (+178 789, 3.5× the floor, no symbol moved) | | |
+| `mmc5` −63 387 891 | `readbuf` −10 048 464 | `oamstr` −5 340 609 |
+| `z2` −5 532 181 | `vblnmi` −3 034 347 | `duelito` −12 112 245 |
+| **total −100 655 244, −0.126 %** | | |
+
+**The per-symbol diff against the tip has nothing in it but the four named symbols**, on one ROM:
+`Mmc5::expansion_audio_output` 178 683 220 → **0**, `Mmc5Audio::refresh_level` 0 → 98 302 204,
+`Board::on_cpu_cycle` +62 543 912 (the refresh now inside it), `push_expansion_audio`
+241 222 320 → 196 551 520. On the other twelve ROMs **no symbol moves by 60 000 or more at all**
+except `Ppu2C02::read`/`read_data` and `NesBus::write_internal`, which are item 2's.
+
+### Hot path: the generated code after LTO
+
+`cmp4c.py` and `prologues.py`, the tip's Linux dump against this step's, both from
+`cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm` on clean trees.
+
+| symbol | `ab99dc1a` | this step | what moved |
+| --- | ---: | ---: | --- |
+| `Ppu2C02::read` | 262 | **143** | item 2: the `$2007` arm is a function |
+| `Ppu2C02::read_data` | — | 117 | new, tail-called from one site |
+| `Cartridge::try_cpu_read` | 244 | 248 | +4, `refresh_pcm_level` inlined into the MMC5's arm; **entry instruction-identical** |
+| `NesBus::write_internal` | 2 854 | 2 862 | +8, inside the MMC5's own `$5000`-`$5015` arm |
+| `NesBus::tick` | 79 | **79** | IDENTICAL — the latch is untouched, as instructed |
+| everything else pinned | | | `Cpu6502::step`, `resolve`, `branch`, `read_cycle`, `read_internal`, `catch_up_ppu`, `run_dma`, `dma_read`, `run_cpu_cycles`, `quiet_cycles`, `run_dots`, `background_fetch`, `read_nametable_inner`, `read_pattern_planes`, `Board::ppu_read`, `ppu_peek`, `on_cpu_cycle`, `on_ppu_address_bus` — unchanged |
+
+**Prologues**: `Ppu2C02::read` has **no stack frame at all** where the tip pushed five registers;
+`try_cpu_read` is back to `pushq %rax`; `tick`'s, `write_internal`'s and every other pinned
+symbol's prologue and frame are instruction-identical to the tip's. **Call sites**: the one new
+callee is `Ppu2C02::read_data`, with exactly one site, and it is a `jmp`. No watched callee gains
+a first call site, and no bounds check appears anywhere.
+
+### Tests
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, **no new `allow`** |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **746 passed, 0 failed, 8 ignored** |
+
+**746 / 0 / 8 is `ab99dc1a`'s count exactly** — no test added, removed or renamed, which is the
+right outcome for a step that changes no behaviour. `mmc5_audio_tests`' nineteen all pass,
+including `req_core_090_the_board_sound_survives_a_savestate_round_trip` and
+`req_core_091_a_block_written_before_the_board_sound_still_loads`, which are the two that would
+catch a cached `M` going stale or a serialised field appearing.
+
+**Save states**: no field serialised, removed or reordered. `pulse_level` and `level` are derived
+and recomputed by `load_state`; `Ppu2C02::read_data` is a code move. The format does not move. No
+`unsafe`. The committed tree is **code-identical** to the `vE` build the tables above were
+measured on — the only difference is the doc comment on `read_data` that records the refuted
+variant.
+
 ## Status
 
 - [x] step 1 — the VRC6 board, mappers 24 and 26 (Q-123 opened: `$B003` bit 4)
 - [x] step 2 — the VRC6 audio (and `Board::on_cpu_cycle` latched: the set is **-1.44 %**, `mmc5` +0.156 %)
-- [ ] step 3 — the Namco 163 board, mappers 19 and 210
-- [ ] step 4 — the Namco 163 audio
-- [ ] step 5 — save states
-- [ ] step 6 — the ROM check
-- [ ] step 7 — the suites and the campaign
+- [x] step 3 — R0's two items: `mmc5` **−0.391 %** against `ad1ad765` (item 1 met); `Ppu2C02::read` back to a shrink-wrapped prologue, **+0.0144 %** left on `readbuf` against `fff53974` where it was +0.161 % (item 2, 91 % back)
+- [ ] step 4 — the Namco 163 board, mappers 19 and 210
+- [ ] step 5 — the Namco 163 audio
+- [ ] step 6 — save states
+- [ ] step 7 — the ROM check
+- [ ] step 8 — the suites and the campaign

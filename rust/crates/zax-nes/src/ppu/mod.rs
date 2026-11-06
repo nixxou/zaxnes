@@ -975,56 +975,84 @@ impl Ppu2C02 {
                 value
             }
 
-            7 => {
-                let address = self.v & 0x3FFF;
-                // The buffer this read sees. A read refills it only `READ_BUFFER_READY_DOTS`
-                // dots later, so a second read one CPU cycle behind still gets the old byte.
-                //
-                // Both bookkeeping fields are written **here**, before the fetch below, so that
-                // nothing of this has to stay live across that call: a value kept across it
-                // costs `read_internal` a callee-saved register — a `pushq`/`popq` pair on
-                // every CPU read cycle of every game, measured and then removed.
-                let since = self.ppu_clock - self.read_buffer_clock;
-                let visible = if since > 0 && since < READ_BUFFER_READY_DOTS {
-                    self.read_buffer_prev
-                } else {
-                    self.read_buffer
-                };
-                self.read_buffer_prev = visible;
-                self.read_buffer_clock = self.ppu_clock;
-
-                let value;
-                if is_palette_address(address) {
-                    // Palette reads are immediate and only drive six bits; the buffer still
-                    // takes the mirrored nametable byte "underneath" the palette (nesdev).
-                    value = (self.palette[palette_index(address)] & self.palette_read_mask())
-                        | (self.decay & 0xC0);
-                    self.refresh_decay(value, 0x3F);
-                    self.read_buffer = self.read_vram_inner(
-                        address & 0x2FFF,
-                        PpuBusAccess::Cpu,
-                        ChrFetch::Background,
-                        &mut cartridge,
-                    );
-                } else {
-                    value = visible;
-                    self.refresh_decay(value, 0xFF);
-                    self.read_buffer = self.read_vram_inner(
-                        address,
-                        PpuBusAccess::Cpu,
-                        ChrFetch::Background,
-                        &mut cartridge,
-                    );
-                }
-
-                self.increment_vram_address(&mut cartridge);
-                value
-            }
+            7 => self.read_data(&mut cartridge),
 
             // $2000, $2001, $2003, $2005 and $2006 are write-only: the read returns the
             // PPU's bus latch and does not refresh it (ppu_open_bus tests 2 and 5).
             _ => self.decay,
         }
+    }
+
+    /// The `$2007` arm of [`Ppu2C02::read`]: the read buffer, the palette's immediate path, the
+    /// refill fetch and the address increment.
+    ///
+    /// **Out of line, and that is the whole point of it being a function.** It is the only arm of
+    /// the register dispatch that calls anything, so it is the only one that needs callee-saved
+    /// registers; inlined, LLVM gives up on shrink-wrapping and hoists its
+    /// `pushq %r15 / %r14 / %r12 / %rbx / %rax` **above** the dispatch, where every read of every
+    /// register pays five pushes and five pops. Callgrind priced that at **+11 instructions per
+    /// register read** on `ppu_vbl_nmi` (304 710 calls, 19.2 M against 22.6 M instructions) and
+    /// **+0.035 %** over the ten ROMs of PR-1's set whose behaviour had not moved — see Q-125 and
+    /// `docs/progress/MF-4d-fix.md` step 5, which measured the cost and left the fix to a lot of
+    /// its own. Behind a call, the prologue is back inside this body and `$2002`, `$2004` and the
+    /// write-only arms `retq` without touching the stack, which is `d96d73b7`'s shape.
+    ///
+    /// `#[cold]` is **not** used: it would move the body to a different section and cost the
+    /// `$2007`-heavy ROMs (`ppu_read_buffer`) a far branch for no gain — `#[inline(never)]` alone
+    /// restores the shrink-wrap.
+    ///
+    /// **What it still costs, named exactly.** The arm compiles to `movq %rdx, %rsi` and a
+    /// `jmp`: a tail call, so the five pushes are the ones [`Self::read`] used to make anyway,
+    /// but the one `movq` that moves `cart` down an argument position is paid at `read`'s entry,
+    /// and callgrind prices it at **exactly +304 710 instructions on `ppu_vbl_nmi` for exactly
+    /// 304 710 calls** — one instruction per *register* read. Giving this function `read`'s own
+    /// `(&mut self, register, cart)` signature to keep the arguments in place was built and
+    /// **refuted**: the parameter is unused, LLVM drops it from this internal function's own
+    /// convention, re-derives `cart` into `%rsi` and emits the same `movq`. The residual is
+    /// +0.0068 % on `ppu_vbl_nmi` and +0.0144 % on `ppu_read_buffer` against `fff53974`, against
+    /// the +0.161 % the hoisted prologue cost; the rest of the way is a fight with the register
+    /// allocator, which `docs/progress/MF-5a.md` records rather than takes.
+    #[inline(never)]
+    fn read_data(&mut self, cart: Cart<'_, '_>) -> u8 {
+        let address = self.v & 0x3FFF;
+        // The buffer this read sees. A read refills it only `READ_BUFFER_READY_DOTS`
+        // dots later, so a second read one CPU cycle behind still gets the old byte.
+        //
+        // Both bookkeeping fields are written **here**, before the fetch below, so that
+        // nothing of this has to stay live across that call: a value kept across it
+        // costs `read_internal` a callee-saved register — a `pushq`/`popq` pair on
+        // every CPU read cycle of every game, measured and then removed.
+        let since = self.ppu_clock - self.read_buffer_clock;
+        let visible = if since > 0 && since < READ_BUFFER_READY_DOTS {
+            self.read_buffer_prev
+        } else {
+            self.read_buffer
+        };
+        self.read_buffer_prev = visible;
+        self.read_buffer_clock = self.ppu_clock;
+
+        let value;
+        if is_palette_address(address) {
+            // Palette reads are immediate and only drive six bits; the buffer still
+            // takes the mirrored nametable byte "underneath" the palette (nesdev).
+            value = (self.palette[palette_index(address)] & self.palette_read_mask())
+                | (self.decay & 0xC0);
+            self.refresh_decay(value, 0x3F);
+            self.read_buffer = self.read_vram_inner(
+                address & 0x2FFF,
+                PpuBusAccess::Cpu,
+                ChrFetch::Background,
+                cart,
+            );
+        } else {
+            value = visible;
+            self.refresh_decay(value, 0xFF);
+            self.read_buffer =
+                self.read_vram_inner(address, PpuBusAccess::Cpu, ChrFetch::Background, cart);
+        }
+
+        self.increment_vram_address(cart);
+        value
     }
 
     /// What the palette RAM drives onto the PPU's data bus: six bits, and only the two colour
