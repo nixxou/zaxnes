@@ -1306,6 +1306,62 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.11 Lot MF-6a: a `Board` variant is free, a `Board` arm *body* is not
+
+Seventeen mapper numbers added in two `Board` variants, set total **−50 984 instructions** below
+`240a2718` with every ROM of lot PR-1's thirteen inside the instrument's own noise. Four
+findings, and the first one corrects the unit §4.9 of `docs/review/MF-6-inventory.md` costed in.
+
+**A new `Board` variant costs the existing boards nothing; a new *distinct arm body* costs
+whatever inlines that dispatch.** The experiment is step 1's X: the 33rd variant, with its
+struct, its `banked!()`, its `nametable_page`, its `reset` and its save-state block but **no
+`write_register` of its own**, left `NesBus::write_internal` identical **to the instruction on
+all thirteen ROMs**. Give the same variant a register decode and the two MMC3 ROMs pay +66 921
+and +16 561 there, whatever attribute the arm carries — inlined, `#[inline(never)]` and
+`#[cold] #[inline(never)]` give the *same delta to the instruction*. And §4.2's per-arm yardstick
+(+11 in `Cpu6502::branch`, +47 in `resolve`) is **not** paid by a board that inherits
+`irq_asserted`'s empty default: `branch` stayed at 418 and `resolve` at 1 854 through all five
+measured trees, because twenty-one boards answering `false` share one arm and a twenty-second
+joins it. The lesson for a board-adding lot: count bodies, not variants, and keep the new board's
+methods either absent or identical to a body that already exists.
+
+**`Ppu2C02::run_dots` is the function a board-adding lot has to defend, and `chr_view` is the
+line that defends it.** Five boards as five variants cost **+3.3 M to +6.9 M over 300 frames on
+eight of the thirteen** — 0.067 % to 0.131 % — with `run_dots` **not gaining one instruction**:
+it was all spill and reload churn inside the loop, because `Board::chr_view`'s arms are inlined
+into `Ppu2C02::run_visible_span` and that into `run_dots`. Three refutations came with it, and
+all three are worth not repeating: **merging the five variants into one changes nothing** (one
+variant forwarding `chr_view` to five boards costs the same as five variants, because the trait
+default is monomorphised per board and five `banks` fields sit at five offsets);
+**`#[inline(never)]` on `Board::chr_view` is far worse** (+0.297 % on the set, +0.849 % on
+`Duelito`, because that dispatch is reached once per *span* and some ROMs have very many);
+and what works is **answering `None`** — the body MMC2, MMC3, MMC5 and the RAMBO-1 already
+answer — which costs the dozen games of those boards the span fast path and the rest of the
+library nothing. Q-123's rule ("the trigger is the third distinct body, not its size") holds one
+hook along, on `chr_view` as on `read_nametable`.
+
+**`expansion_audio_output` was the next dispatch in the queue behind `irq_asserted`.** Five more
+variants pushed it past the inliner's budget and LLVM gave it a symbol: **0 → 116 144 093
+instructions over 300 frames of `mmc5exram`**, with `NesBus::push_expansion_audio` shedding
+44 670 800 as its body left — net **+75 937 647, +0.672 %** on a board the lot does not touch.
+`#[inline(always)]` on it, and the ROM ends at −0.000 %. That is MF-5b step 1's story one
+dispatch along, so the list of pinned links is now five: `NesBus::irq_asserted`,
+`Cartridge::irq_asserted`, `<Board as Mapper>::irq_asserted`, `Board::try_read_prg`,
+`Board::cpu_read_override` and `Board::expansion_audio_output`.
+
+**The whole-process callgrind count is not deterministic on this machine; the emulated symbols
+are.** Three runs of the *same binary at the same path* spread by up to **57 097 instructions**
+per ROM (0.0017 %), and `callgrind-diff.py` names all of it in one symbol: **`luaH_getshortstr`**,
+Lua's short-string hash lookup, 85 722 → 187 789 between two runs, whose collision pattern
+follows the heap addresses. `getgeneric`, `__memcpy_avx_unaligned_erms`, `__memcmp_avx2_movbe`
+and `dragon::format_exact` move the same way. Every emulated-core symbol and every level-2 `core`
+stage is **exactly** reproducible, so a bar of the form "every ROM at the baseline's count or
+lower" has to be read on the **symbol table** — a 2 000-instruction move there is real where a
+50 000-instruction move in the total may be none. The build path's *length* matters too: the same
+commit built at two paths differs by up to 1.56 M on a level-2 `total`, all of it in
+`load_profile` and `lua_hooks`, which is why MF-6a gave every build of the lot a label of exactly
+fifteen characters.
+
 ### 5.10 Lot MF-5b-fix: the set is not the games, and `step` holds one inlining budget
 
 MF-5b ended **−0.240 %** on all thirteen ROMs of lot PR-1's set and **+0.138 % on Zelda II** and

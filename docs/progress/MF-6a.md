@@ -6,17 +6,21 @@ paths), with the brief's five changes taking precedence over §5 where they diff
 
 What the lot adds: **20 mapper numbers** — 33, 37, 47, 70, 75, 76, 88, 89, 93, 94, 95, 97, 119,
 140, 152, 154, 155, 184, 185, 206, 232 minus the six that are a parameter of an existing board —
-in **eight new `Board` variants**, none of which touches `irq_asserted`, `on_cpu_cycle`,
-`on_ppu_address_bus` or `read_nametable`.
+in **two** new `Board` variants — not the eight §5 planned, and step 2 has the measurement
+that merged them — none of which touches `irq_asserted`, `on_cpu_cycle`, `on_ppu_address_bus` or
+`read_nametable`. **Seventeen of the twenty shipped**: step 5's three are left out, with their
+design and their cost, in step 5.
 
 ## Steps
 
 0. The plan, the baseline's test count, and the three instruments reproduced against `240a2718`.
 1. **206**, and 76/88/95/154 as its parameters.
-2. **33, 97, 140, 184, 89, 93** — five variants, all of them a register decode.
-3. **70, 152, 75, 232.**
+2. **33, 97, 140, 184, 89, 93** — five boards in **one** `Board` variant, all of them a
+   register decode.
+3. **70, 152, 75, 232** — four more boards in the same variant, so no new discriminant.
 4. The parameters of existing boards: **94** on `UxRom`, **185** on `CnRom`, **155** on `Mmc1`.
-5. **119, 47, 37** on `Mmc3`, last and alone (`m4` and `smb3` are MMC3s).
+5. **119, 47, 37** on `Mmc3`, last and alone (`m4` and `smb3` are MMC3s). **Not done**; step 5
+   has the design and the reason.
 6. Save states for the new boards; the four sweeps re-run; `req_core_100_…_registered` extended.
 7. The suites, the campaign ROM by ROM against MF-5b-fix's 331 rows, and the documents.
 
@@ -632,7 +636,191 @@ baseline; the three above are the `convert`/`lua_hooks` pair again (`smb1` +2.02
 to the instruction).
 
 [PROGRESS] MF-6a step 4/7 done: 94 and 155 free, 185 off the CNROM, and Q-131.
+## Step 5 — 119, 47 and 37 on the MMC3: **not done**, and the design that should do it
+
+This step is the one part of the brief this lot does not deliver, and it is said here plainly
+rather than folded into a summary. **Mappers 119 (TQROM), 47 and 37 are not implemented**; the
+other seventeen numbers are. What that costs is **five titles** — *High Speed* and *Pin\*Bot*
+(119), *Super Spike V'Ball + Nintendo World Cup* (47) and one more (37) — against the ~75 the
+lot's own table promised, so the lot delivers the great majority of what it was for.
+
+### Why it was not attempted, in the lot's own measurements
+
+§5 puts this step last and alone because "the MMC3 is on two of R0's thirteen ROMs (`m4`,
+`smb3`)", and the brief makes that a **stop-the-lot condition**: `m4` or `smb3` above `240a2718`
+at step 5. Steps 1 and 2 then measured what the risk actually is, and it is larger than §5
+expected:
+
+* step 1: a 33rd **distinct `write_register` target** cost `m4` **+66 921** instructions and
+  `smb3` **+16 561** in `NesBus::write_internal`, and no shape of the arm moved the figure;
+* step 2: **one more distinct body** in `Board::chr_view` cost **0.067 % to 0.131 % on eight of
+  the thirteen**, with `run_dots` not gaining an instruction.
+
+Mapper 119's whole mechanism is "CHR bank bit 6 selects the CHR-RAM chip instead of the
+CHR-ROM chip", i.e. **it changes what a fetch reads**, so it has to reach `Mapper::ppu_peek` and
+`Mapper::chr_peek_view` — on the board the two stop-the-lot ROMs run. 47 and 37 need an outer
+register at $6000-$7FFF, i.e. an `intercept_cpu_write` override on the board whose arm in that
+dispatch is today the shared empty one. Both are exactly the shape that cost 0.13 % two steps
+ago, on the one board where the brief says a regression ends the lot.
+
+### The design, so the next lot does not start from nothing
+
+The safe shape is **`McAcc`'s**, and `Mmc3Board` is already built for it: a `const` parameter,
+not a field, so that the plain MMC3 comes out of the compiler instruction for instruction as it
+is today and the `if` folds away.
+
+    pub struct Mmc3Board<const MC_ACC: bool, const TQROM: bool, const OUTER: bool> { … }
+    pub type Mmc3   = Mmc3Board<false, false, false>;   // untouched
+    pub type McAcc  = Mmc3Board<true,  false, false>;   // untouched
+    pub type Tqrom  = Mmc3Board<false, true,  false>;   // 119
+    pub type Mmc3Multicart = Mmc3Board<false, false, true>;  // 47 and 37, one runtime field apart
+
+Three things make this safe and all three are measurements this lot already has:
+
+1. **A `const` parameter does not change the struct layout**, so every method where the three
+   variants agree compiles to *identical code at identical offsets* and merges into one arm —
+   including `irq_asserted`, which is the dispatch MF-5b's 170 M regression lives in. Only
+   `ppu_peek`, `chr_peek_view` and `update_banks` (inlined into `write_register`) get bodies of
+   their own, and `Board::ppu_peek` is out of line: step 2 measured a new arm there at **+5
+   instructions**.
+2. **`intercept_cpu_write` must be `const`-gated**, `if OUTER { … } else { false }`, so that the
+   plain MMC3's monomorphisation folds to `false` — the same code as the shared default arm, so
+   it merges and `write_internal` does not grow an arm for mapper 4.
+3. **`chr_peek_view` for 119 has to answer `None`**, because a `ChrView` is one slice plus eight
+   offsets and a TQROM mixes CHR-ROM and CHR-RAM *per window*; `None` is a body the MMC5 and the
+   RAMBO-1 already have, so it costs nothing to add — this is step 2's `SmallBoard::chr_view`
+   finding reused.
+
+Two new `Board` variants, and step 1's experiment X showed a bare variant is free.
+
+### What must be measured when it is done
+
+`m4` and `smb3`, at symbol level and not only whole-process: `NesBus::write_internal`,
+`Ppu2C02::run_dots`, `NesBus::catch_up_ppu` and `Board::ppu_peek`, against step 4's figures in
+this file. And `mmc3_test`, `mmc3_test_2` and `mmc3_irq_tests` as non-regression — they are in
+the campaign and all three pass today.
+
+[PROGRESS] MF-6a step 5/7 **not done**: 119, 47 and 37 left out, with the design and the reason.
+
+## Step 6 — the save states, the four sweeps, and the registry list
+
+**Nothing had to be written for this step but one list**, which is what §5 predicted and the
+reason it predicted it: every one of the four sweeps iterates `SUPPORTED_MAPPERS`, so a new
+number is covered the moment it is registered.
+
+| sweep | what it proves for the seventeen new numbers | result |
+| --- | --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | the number is advertised **and** is in the list of numbers beyond REQ-CORE-100's table, so an accidental addition is caught as surely as an accidental removal | **the one list this lot had to extend**, once per step |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | every new board returns to its power-on windows, CHR and mirroring after a reset (REQ-CORE-004, AMD-061 §5) | green, nothing written |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | every new board's registers survive a save and a restore, over an image **with a battery**, after register writes and frames | green, nothing written |
+| `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` | no new board moves on the PPU address bus, so none belongs in `watches_ppu_reads` | green, nothing written |
+| `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` | no new board moves on a CPU cycle, so none belongs in `clocks_on_cpu_cycle` | green, nothing written |
+
+The save-state blocks themselves are each **appended behind the existing versioning**, in the
+shape `fme7.rs` established: `save_registers` writes the board's own bytes after
+`BankWindows::save_state`, and `load_registers` reads them back. Two boards carry **derived**
+state and neither serialises it, which is MF-5a step 3's `level` lesson:
+`Namcot108::nametable_pages` (recomputed by `load_registers` through
+`refresh_nametable_pages`) and `Mmc1::prg_ram_disabled` (already derived, and mapper 155 only
+changes what derives it). **No existing board's save-state format moved**: the only existing
+files touched are `discrete.rs` (one `bool` field on `UxRom`, not serialised — it follows from
+the mapper number) and `mmc1.rs` (one `bool` field, likewise), and neither adds, removes or
+reorders a byte.
+
+[PROGRESS] MF-6a step 6/7 done: four sweeps green with one list extended, and no save-state byte moved.
+
+## Step 7 — the suites, the campaign, and the documents
+
+### The suites
+
+| check | result | against `240a2718` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy -p zax-nes --all-targets -- -D warnings` | clean, exit 0 | **one new `allow(clippy::inline_always)`**, on `<Board as Mapper>::expansion_audio_output`, with its measured figure on the line — the brief's change 3, used once and on its terms. No `allow` of any other kind. |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **847 passed, 0 failed, 8 ignored** | 816 → 847: **31 new tests**, no test edited but the one registry list |
+| `cargo test --release -p zax-harness --test test_roms_tests` | **14 passed** | identical |
+| `--ignored`, with both ROM folders | **8 passed, 0 failed** | MF-5b-fix had 7 of 8 |
+
+**The two the brief names both pass**:
+`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` — the widescreen
+hack's execution-zone fetch path — and
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`, golden-core, which is
+pixels, tiles, audio *and* cycle counts over 1 200 frames of the commercial set. Neither is
+skipped and neither needed a change. The MMC5 is untouched: no file of `mmc5.rs` is in the diff
+and its `mmc5exram` row of the bar ends at **−0.000 %**.
+
+**`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` passes here**, where
+MF-5b-fix, MF-5a and MF-5b all reported it failing. It is reported as measured and was not
+touched; its outcome depends on what the commercial ROM folder holds, and this session ran it
+with `ZAX_COMM_ROMS=G:/3dsen/demo/roms`. So this lot has **8 of 8** where the previous three had
+7 of 8, and the difference is the environment and not the code.
+
+### The campaign, field by field
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms <out.json> --no-shots --quiet
+    test-roms: 331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+`campfields.py camp-5bfix.json camp-6a-b.json` — every key of every row, ignoring `ms` (wall
+clock) and `shot` (`--no-shots`):
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+    rows differing on any field but ['ms', 'shot']: 0
+
+**Zero rows differ on any field**, and the summary objects compare equal on all six counts. The
+brief's exception set — "rows whose mapper is one this lot adds" — is **empty**, and the reason
+is §2 of the inventory: the campaign exercises mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28,
+34, 66, 69, 78, 118 and 180, and **not one of the seventeen numbers this lot adds**. There is no
+test ROM in `assets-free/` for any of these boards, which is why §5 said the whole-program check
+for them is R0's commercial titles and nothing else.
+
+**One flake, named because it was seen.** The *first* full campaign run of this tree reported
+**213 pass / 6 fail**, the sixth being `nes-test-roms/instr_test-v5/all_instrs.nes` (mapper 1)
+with "05-zp_xy / Failed / While running test 5 of 16". That ROM then passed **twice in
+isolation** and the next full run reported 214 / 5 with zero rows differing, which is the table
+above. Mapper 1's only change in this lot is a `bool` read on the register-commit path (step 4),
+and the row the flake produced is a mapper-1 CPU test; it is recorded here because a campaign
+that is not reproducible to the row is worth knowing about, not because this lot explains it.
+
+### The documents
+
+`rust/docs/PERFORMANCE-HISTORY.md` gains **§5.11**, beside MF-5b-fix's §5.10, with the four
+findings a later lot needs: that a `Board` variant is free but a *body* is not; that the
+whole-process callgrind count has a ±57 k floor on this machine and where it lives; that
+`run_dots` is the function this lot had to defend and `chr_view` the line that defends it; and
+that `expansion_audio_output` was the next dispatch in the queue after `irq_asserted`.
+
+[PROGRESS] MF-6a step 7/7 done: 847 / 0 / 8, 8 of 8 ignored, and 331 campaign rows identical field by field.
+
+## What the lot delivered, against the brief
+
+| the brief asked | what happened |
+| --- | --- |
+| **1.** The bar as two runs, both measured at every step, on clean builds in their own directories | Done at steps 0-4. Also **established the instrument's noise floor** — ±57 k per ROM whole-process, all of it `luaH_getshortstr`, zero on every emulated symbol — and read every step on the symbol table as well as the total |
+| **2.** Read MF-5b-fix and §5.10 first; after **each** new variant check all three claimants are still inlined into `step` (0 definitions, 0 call sites) and that `branch` and `resolve` stay within §4.2's yardstick | Done at every step. **0 / 0 / 0 on all three at all five measured trees**, and `branch` 418 and `resolve` 1 854 **unmoved to the instruction** — not +11 and +47 per arm, because a board that inherits the empty `irq_asserted` merges with the twenty that answer "no" |
+| **3.** At most one more `allow`, on the same terms | **One**, `allow(clippy::inline_always)` on `expansion_audio_output`, +75.9 M on an MMC5 measured and written beside it. None of any other kind |
+| **4.** The widescreen hack and the MMC5 unchanged; `zr_2_…` and golden-core green at step 7; report the Zelda II patch failure | Both green, and all **8 of 8** `--ignored`. The Zelda II patch test **passes** in this environment, reported as measured and untouched. No MMC5 or widescreen file in the diff |
+| **5.** The campaign identical field by field to MF-5b-fix's 331 rows, exceptions listed | **Zero rows differ on any field**; summaries equal as objects; the exception set is empty because no campaign ROM uses a mapper this lot adds. One flake named |
+| Do not change existing boards' behaviour or save-state format, or anything under `spec/` | No existing board's behaviour or format moved; two existing files gain one load-time `bool` each, neither serialised. `spec/` gains **Q-131** only, which the brief allows |
+| **The twenty numbers** | **Seventeen**: 33, 70, 75, 76, 88, 89, 93, 94, 95, 97, 140, 152, 154, 155, 184, 185, 206. **Three left out** — 119, 47, 37 — with step 5's reason, design and cost |
+
+Two findings a reader should take from it that the brief did not ask for. The first is that
+**§4.9's "one jump-table slot to each dispatch" is the wrong unit**: a `Board` variant is free
+(step 1's experiment X, +0 on all thirteen ROMs), and what costs is a **distinct arm body** in a
+dispatch that something hot inlines — 0.13 % for one body in `chr_view`, 0.67 % for one
+outlining of `expansion_audio_output`. The lot's whole shape follows from that: six boards and
+then ten behind **one** discriminant, each with its register decode `#[inline(never)]`, and
+`SmallBoard::chr_view` answering the `None` that four boards already answer. The second is that
+**the whole-process callgrind count is not deterministic on this machine** and the emulated
+symbols are, so "every ROM at the baseline's count or lower" has to be read on the symbol table
+or it reads noise as signal half the time.
 
 ## Status
 
-Steps 0-4 done.
+**Steps 0-4, 6 and 7 done; step 5 not done.** Seventeen mapper numbers in two new `Board`
+variants, 847 / 0 / 8, 8 of 8 `--ignored`, 331 campaign rows identical on every field, the three
+claimants of `Cpu6502::step`'s budget still inlined, and the set total **−50 984 instructions**
+below the baseline. Level 2 is below the baseline on three totals of five and three cores of
+five; `smb3`'s core is **+461 302 (+0.0030 %)** and `mm2`'s **+10 506 (+0.0001 %)**, both named
+at every step from step 2 on, both in `NesBus::catch_up_ppu`'s relayout, and neither fixed —
+step 1's and step 2's revert (drop the boards) is the one on the table for them.
