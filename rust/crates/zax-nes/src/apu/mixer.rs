@@ -286,6 +286,64 @@ const fn namco163_table() -> [i32; NAMCO163_LEVELS] {
     table
 }
 
+/// Channels the VRC7 sums into its one converter: "The VRC7 has one DAC and output pin for
+/// audio, multiplexed for all 6 channels" (nesdev, "VRC7 audio").
+pub const VRC7_CHANNELS: i32 = 6;
+
+/// Amplitude 1.0 of one VRC7 carrier, in the fixed-point units `apu::vrc7_audio` works in.
+pub const VRC7_UNIT: i32 = 1 << 14;
+
+/// `M` of REQ-CORE-073 that one **sounding** VRC7 channel carries about its own mean: half the
+/// swing of an APU pulse at volume 15, which is the Q-128 anchor. A channel that is not sounding
+/// carries none of it, so a silent chip has an `M` of exactly 0 — see [`vrc7_level`].
+pub const VRC7_CHANNEL_DC: i32 = PULSE_TABLE[15] / 2;
+
+/// Largest `M` a VRC7 can produce: six sounding channels, each at the top of its swing.
+pub const VRC7_MAX: i32 = 2 * VRC7_CHANNELS * VRC7_CHANNEL_DC;
+
+/// `M` of REQ-CORE-073 for a VRC7 whose sounding channels sum to `total` (REQ-CORE-075,
+/// optional), `total` being in [`VRC7_UNIT`]s and already carrying one unit of offset per
+/// sounding channel.
+///
+/// **Q-128, and it is the level this chip's own page does not give at all.** The VRC6's page
+/// hands over its anchor in a sentence and the Namco 163's gives a band per submapper; "VRC7
+/// audio" says nothing about loudness — not a ratio to the APU, not a resistor value, not even
+/// the qualitative "very loud" the Sunsoft 5B's page offers. So the anchor is Q-118's rule, which
+/// R0 approved for the 5B and the VRC6's page then confirmed in its own words, applied the one
+/// way an **FM** channel allows:
+///
+/// * one channel at full output has the **peak-to-peak swing** of one APU pulse at volume 15. An
+///   APU pulse at volume 15 alternates between 0 and [`PULSE_TABLE`]`[15]`, so its swing is
+///   4 890; a sine of amplitude [`VRC7_CHANNEL_DC`] has the same swing. Six channels therefore
+///   reach [`VRC7_MAX`] = 29 340, and by coincidence their amplitude about the mean, 14 670, is
+///   exactly the Sunsoft 5B's own ceiling;
+/// * the alternative reading — amplitude for amplitude rather than swing for swing — is twice as
+///   loud, and the ticket records it.
+///
+/// **The offset, and why it is per sounding channel and not one constant.** `M` must be positive:
+/// AMD-061 §6.2 made the mix `S = A − M` and [`clip`] implements only the lower bound *because*
+/// `M` cannot go negative (Q-118). A summed FM carrier is inherently bipolar, so each **sounding**
+/// channel contributes `VRC7_CHANNEL_DC ± its amplitude`, which is never negative.
+///
+/// A channel that is not sounding contributes **nothing**, so a chip with no note playing has an
+/// `M` of exactly 0 rather than a standing offset. That is not cosmetic: REQ-CORE-074 clears the
+/// audio pipeline on a savestate restore, so a standing offset makes a save-restore-save round
+/// trip differ in the high-pass filter's own state — which is how
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` caught the first version of this
+/// function, with three bytes of an `f64` at −0.4476 (that is −14 670 / 32 768) against 0.
+///
+/// REQ-CORE-073 ends the chain with "un filtre passe-haut coupant la composante continue", so
+/// what offset remains while a note sounds is removed before anything hears it. `A − M` stays
+/// inside [`MIN_SCALE`] with 3 428 units to spare at the worst `M` this chip can produce.
+///
+/// **One constant changes the level** — the `/ 2` in [`VRC7_CHANNEL_DC`] — if R0 wants the other
+/// reading.
+// Q-128
+#[must_use]
+pub const fn vrc7_level(total: i32) -> i32 {
+    (total * PULSE_TABLE[15]) / (2 * VRC7_UNIT)
+}
+
 /// Builds [`VRC6_TABLE`]: a straight line through `PULSE_TABLE[15]` at step 15.
 const fn vrc6_table() -> [i32; VRC6_LEVELS] {
     let step = NORMALISATION * pulse(15) / 15.0;

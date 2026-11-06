@@ -27,6 +27,7 @@ mod pulse_channel;
 mod sunsoft5b_audio;
 mod triangle_channel;
 mod vrc6_audio;
+mod vrc7_audio;
 
 use crate::state::{InvalidState, StateReader, StateWriter};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -43,6 +44,7 @@ pub(crate) use mmc5_audio::Mmc5Audio;
 pub(crate) use namco163_audio::Namco163Audio;
 pub(crate) use sunsoft5b_audio::Sunsoft5bAudio;
 pub(crate) use vrc6_audio::Vrc6Audio;
+pub(crate) use vrc7_audio::Vrc7Audio;
 
 /// A rejected audio setting or read (the C# throws `ArgumentException` for these).
 #[derive(Debug, Clone, Copy, PartialEq)]

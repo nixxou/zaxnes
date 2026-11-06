@@ -7,6 +7,7 @@
 
 use super::vrc_irq::VrcIrq;
 use super::{windows_for, Mapper};
+use crate::apu::Vrc7Audio;
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
@@ -59,6 +60,10 @@ pub struct Vrc7 {
     /// Whether A4 selects the register (the VRC7a of submapper 2, and submapper 0).
     select_a4: bool,
     irq: VrcIrq,
+    /// The chip's six FM channels. Carried by every mapper-85 image: the VRC7 always has them,
+    /// and a game that writes no sound register leaves every channel released, which is silence
+    /// (REQ-CORE-075, optional).
+    audio: Vrc7Audio,
     /// `$8000`, `$8010` and `$9000`, the three switchable 8 KiB banks: six bits each.
     ///
     /// Kept as registers and not only as mapped windows, so that [`Mapper::reset`] puts them
@@ -91,6 +96,7 @@ impl Vrc7 {
             select_a3: submapper != 2,
             select_a4: submapper != 1,
             irq: VrcIrq::new(),
+            audio: Vrc7Audio::new(),
             // Nothing on the page gives a power-on value for any PRG register. 0, 1 and 2 are
             // the banks the windows would show with no board logic at all — $8000-$DFFF laid out
             // linearly — which is what Mesen comes up with too (`VRC7.h:34-43` maps only the
@@ -165,6 +171,11 @@ impl Mapper for Vrc7 {
         writer.write_raw(&self.chr);
         writer.write_u8(self.control);
         self.irq.save_state(writer);
+        // Written last, so that a mapper-85 state from before the sound existed would load with
+        // a silent chip -- which is a VRC7 before its first key-on (REQ-CORE-091). No such state
+        // was ever shipped: the board and its sound arrive in the same lot, one step apart. The
+        // ordering costs nothing and is the shape `fme7.rs` and `vrc6.rs` established.
+        self.audio.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -172,6 +183,11 @@ impl Mapper for Vrc7 {
         reader.read_into(&mut self.chr)?;
         self.control = reader.read_u8()?;
         self.irq.load_state(reader)?;
+        if reader.remaining() > 0 {
+            self.audio.load_state(reader)?;
+        } else {
+            self.audio.reset();
+        }
 
         // The two derived bits come back from `$E000` (REQ-CORE-091). The **mirroring** is not
         // touched: `Cartridge::load_state` has just restored it from the state, and recomputing
@@ -193,6 +209,7 @@ impl Mapper for Vrc7 {
     /// because a VRC7 drives CIRAM A10 from `$E000` alone and has no pass-through mode (the
     /// VRC6's mode 0 is not an analogue: that one lets the header's arrangement stand).
     fn reset(&mut self, memory: &mut CartridgeMemory) {
+        self.audio.reset();
         self.irq.reset();
         self.prg = [0, 1, 2];
         self.chr = [0; 8];
@@ -209,6 +226,21 @@ impl Mapper for Vrc7 {
         self.prg_ram_on
     }
 
+    /// `M` of REQ-CORE-073, which the APU subtracts (AMD-061 §6.2). One load: the level is
+    /// recomputed once per sample, at the board clock divided by 36.
+    ///
+    /// `$E000`'s `S` bit — "Silence expansion sound if set" — answers 0 rather than muting the
+    /// chip, so that the generators keep their place and un-silencing resumes where the music
+    /// was. The writes it blocks are blocked in [`Vrc7Audio::write`], which is where the page
+    /// puts them.
+    fn expansion_audio_output(&self) -> Option<i32> {
+        Some(if self.silenced {
+            0
+        } else {
+            self.audio.output()
+        })
+    }
+
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
             return;
@@ -218,7 +250,7 @@ impl Mapper for Vrc7 {
         // own note for why they are at $9010 and $9030 on every submapper. A5 is what separates
         // them, so the mask has to be $F030 and not $F010.
         if address & 0xF030 == 0x9010 || address & 0xF030 == 0x9030 {
-            // The sound is step 2 of `docs/progress/MF-5b.md`.
+            self.audio.write(address, value, self.silenced);
             return;
         }
 
@@ -263,6 +295,7 @@ impl Mapper for Vrc7 {
     /// and `vrc6.rs`'s own note is the measurement.
     #[inline(never)]
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        self.audio.step_cpu_cycle();
         self.irq.step_cpu_cycle();
     }
 }

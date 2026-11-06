@@ -257,11 +257,197 @@ adds beyond REQ-CORE-100's table.
 
 **Save states**: the board's block is new, and no existing block moved. No `unsafe`.
 
+## Step 2 — the VRC7 audio: the OPLL subset, from the documentation alone
+
+### The code
+
+`apu/vrc7_audio.rs`, **new**: the two tables, the twelve operators, the six channels and the chip.
+`apu/mixer.rs` gains `VRC7_CHANNELS`, `VRC7_UNIT`, `VRC7_CHANNEL_DC`, `VRC7_MAX` and
+`vrc7_level`. `vrc7.rs` carries the chip, routes `$9010` and `$9030` to it, clocks it from
+`on_cpu_cycle` and answers `expansion_audio_output`.
+
+**No Mesen 2 header on the new file, and that is the whole story of this step.**
+`Audio/Vrc7Audio.h` is 91 lines around `OPLL_calc`; `emu2413` lives in `Core/Shared/Utilities`,
+which `third_party/README.md` says was not copied. So this is the first expansion chip in the
+build with **one** source instead of two, and the five quantities no allowed source gives
+numerically are **Q-129**.
+
+### The unit, which is the one design decision everything else follows from
+
+**1/256 of an octave of amplitude**, about 0.0235 dB. Not arbitrary: it is the coarsest unit in
+which every documented quantity is a whole number —
+
+| documented quantity | units |
+| --- | ---: |
+| one envelope step, 0.375 dB (the reverse-engineering notes' measurement) | 16 |
+| one total-level step, 0.75 dB | 32 |
+| one sustain-level step, 3 dB | 128 |
+| one carrier volume step, 3 dB | 128 |
+| KSL at 1.5 / 3 / 6 dB per octave | 64 / 128 / 256 per octave |
+
+— and in which the exponential becomes a 256-entry table plus a shift, so **there is no division
+anywhere on the per-sample path**. The 0.375 dB step comes out at 0.37629 dB, 0.3 % high: over
+the whole 128 levels that is 48.2 dB where the notes measured 48.0.
+
+The two tables are built by `const fn` from `e^x`, `sin x` and `ln y` written as their own series,
+because `f64::exp`, `f64::sin` and `f64::ln` are not `const fn` — the same reason
+`mixer::SUNSOFT_5B_RATIO` is a written-out literal. `f64::from` is not `const` either, so the
+casts are `as f64` on `u32` and `i32`, both of which are lossless and so draw no lint.
+
+### Three things the documents pin that look like they would need a guess
+
+1. **The envelope's advance patterns.** The reverse-engineering notes give the law
+   (`eg_shift = 13 - rate/4`, four densities of 4/8, 5/8, 6/8 and 7/8) and, separately, a
+   duration formula `cycles = (1 << (14 - rate/4)) × s[rate & 3]` with `s = {127, 102, 85, 73}`
+   that "reconstructs the datasheet table precisely". A 127-level decay at density `d` takes
+   `127 × 2^eg_shift / d` samples, so `s[n] = 127 × 0.5 / d[n]` — and 127 × 0.8, 127 × 2/3 and
+   127 × 4/7 are **102, 85 and 73 to the unit**. That fixes the count of ones in each row; the
+   notes' other measurement, "Rate 14: pattern of 2048, 1024, 1024 samples", fixes the positions,
+   because `0,1,1,1,0,1,1,1` is the only 6-in-8 arrangement whose gaps repeat 1, 1, 2. The
+   derivation is on `EG_PATTERNS` so the next reader does not take the table on trust.
+2. **The two LFO rates.** The page's test register says the LFOs are normally stepped "once every
+   several samples" and that bit 3 makes them "64x faster" for the tremolo and "1024x faster" for
+   the vibrato. With the manual's 3.7 Hz, `49716 / (64 × 210) = 3.699 Hz` **fixes the tremolo's
+   triangle at 210 steps**; the vibrato comes out at 6.07 Hz against the manual's 6.36 at the
+   VRC7's own 3.58 MHz.
+3. **The phase accumulator's width.** The page's "49716 Hz * freq / 2^(19 - octave)" says it
+   outright: 19 bits, and the increment `(fnum × 2 × multiplier) << block >> 1` is an integer with
+   no rounding at all.
+
+### The envelope's floor is silence, and a test is what established it
+
+The envelope has 128 levels of 0.375 dB, which runs out at 48 dB and not at nothing. Taken
+literally, a released note — and a note whose attack rate is `$0`, which the page calls a "halt" —
+would sound faintly for ever: `req_core_075_a_vrc7_attack_of_zero_never_sounds` measured it at 18
+units of swing where it expected none. The bottom level is the converter running out of bits, so
+`Operator::attenuation` answers full attenuation there, and both tests now see exact silence.
+
+### Q-128: the level, and the save state that corrected the first version of it
+
+The VRC7's page gives **no** level at all — not a ratio, not a resistor value, not even the
+qualitative "very loud" the Sunsoft 5B's page offers. So the anchor is Q-118's rule, which R0
+approved for the 5B and which the VRC6's page then confirmed in its own words, applied the one way
+an FM channel allows: **one channel at full output has the peak-to-peak swing of one APU pulse at
+volume 15**. A pulse at volume 15 alternates between 0 and 4 890, so its amplitude about its own
+mean is 2 445; a sine of amplitude 2 445 has the same swing. Six channels reach 29 340.
+
+**An FM carrier is bipolar, and `M` has to be positive** (AMD-061 §6.2 and Q-118: `clip`
+implements only the lower bound *because* `M` cannot go negative). The first version put a
+**constant** offset of 14 670 on `M` — and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` failed on mapper 85, with three bytes
+of an `f64` at −0.4476 against 0. That `f64` is the high-pass filter's own state, −14 670 / 32 768:
+**REQ-CORE-074 clears the audio pipeline on a restore**, so a standing offset makes
+save-restore-save differ. The offset is therefore carried **per sounding channel** — an idle
+channel contributes nothing — so a chip with no note playing has an `M` of exactly 0, like every
+other expansion chip in the build, and what offset remains while a note sounds is removed by the
+high-pass filter REQ-CORE-073 puts at the end of the chain. At the worst `M`, `A − M` has 3 428
+units of margin under `MIN_SCALE`.
+
+That test is worth naming as a finding: **it catches a class of bug no audio test would**, because
+it is about the savestate and not about the sound.
+
+### The two attributes, each with its measurement
+
+| attribute | what it buys |
+| --- | --- |
+| `#[inline(never)]` on `Vrc7Audio::write` | `NesBus::write_internal`'s frame went from `subq $56, %rsp` to `subq $104, %rsp` — the same **one** instruction, so no count moved, but 48 more bytes of stack touched on every CPU write of every board. MF-3b rule 3's shape. With the attribute the arm is a tail call and the frame is step 1's |
+| `#[inline(never)]` on `Vrc7Audio::run_sample`, with `step_cpu_cycle` left `#[inline]` | the shape MF-5a's note on `Vrc6Audio` asks for. The VRC6 had no cheap early-out — its three oscillators run on the CPU clock itself — so its whole body had to leave; this chip runs at the board clock **divided by 36**, so the divider inlines as three instructions and the sample does not |
+
+### Callgrind: thirteen ROMs, 300 frames
+
+| ROM | board | `a577f336` | MF-5b step 2 | delta | | vs step 1 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `oamstr` | NROM | 3 339 425 956 | 3 318 333 247 | −21 092 709 | **−0.632 %** | +0 |
+| `smb1` | NROM | 6 032 357 668 | 6 000 553 684 | −31 803 984 | **−0.527 %** | +19 213 |
+| `mm2` | MMC1 | 6 038 205 780 | 6 017 246 350 | −20 959 430 | **−0.347 %** | −11 961 |
+| `m4` | MMC3 | 5 500 894 936 | 5 482 284 501 | −18 610 435 | **−0.338 %** | −12 246 |
+| `m1` | MMC1 | 4 914 873 709 | 4 900 174 720 | −14 698 989 | **−0.299 %** | −4 808 |
+| `readbuf` | CNROM | 6 852 861 485 | 6 835 939 505 | −16 921 980 | **−0.247 %** | +11 433 |
+| `duelito` | NROM | 7 398 916 294 | 7 380 753 621 | −18 162 673 | **−0.245 %** | +8 544 |
+| `m0` | NROM | 5 544 075 747 | 5 533 139 316 | −10 936 431 | **−0.197 %** | +5 484 |
+| `vblnmi` | MMC1 | 3 328 805 321 | 3 322 245 015 | −6 560 306 | **−0.197 %** | −11 719 |
+| `mmc5` | MMC5 | 11 331 592 771 | 11 311 616 787 | −19 975 984 | **−0.176 %** | −8 917 325 |
+| `smb3` | MMC3 | 7 967 683 371 | 7 960 904 211 | −6 779 160 | **−0.085 %** | −3 171 |
+| `metroid` | MMC1 | 5 154 491 016 | 5 151 068 445 | −3 422 571 | **−0.066 %** | +15 822 |
+| `z2` | MMC1 | 6 312 926 031 | 6 312 078 696 | −847 335 | **−0.013 %** | −424 |
+| **total** | | **79 717 110 085** | **79 526 338 098** | **−190 771 987** | **−0.239 %** | **−8 901 398** |
+
+**All thirteen are below the lot's baseline**, and against step 1 the six that move up do so by
+424 to 19 213 instructions — one to two orders of magnitude inside the ~10⁵ whole-process floor
+PR-1 step 3 measured. The one symbol that moves by 1.5 M or more anywhere in the set is
+`NesBus::push_expansion_audio` on `mmc5`, **−8 934 160**, which is a gain.
+
+### Hot path: the generated code after LTO
+
+`cmp4c.py` and `prologues.py`, `lin-5b-s1f.s` against `lin-5b-s2b.s`. **Exactly two symbols
+differ, and every one of the twenty pinned prologues and stack frames is instruction-identical
+(`prologues.py` reports twenty `SAME PROLOGUE` and no `MOVED`):**
+
+| symbol | step 1 | step 2 | what moved |
+| --- | ---: | ---: | --- |
+| `NesBus::write_internal` | 3 012 | 3 020 | +8, the tail call into `Vrc7Audio::write` inside the mapper-85 arm |
+| `Board::irq_asserted` | 32 | 32 | same size, arms re-ordered |
+| everything else pinned | | | `Cpu6502::step` 2 529, `branch` 406, `resolve` 1 847, `read_cycle` 181, `read_internal` 175, `tick` 82, `catch_up_ppu` 216, `run_dma` 992, `dma_read` 75, `run_cpu_cycles` 950, `quiet_cycles` 87, `run_dots` 1 906, `background_fetch` 196, `read_nametable_inner` 114, `read_pattern_planes` 107, `Board::ppu_read` 336, `ppu_peek` 252, `on_cpu_cycle` 396, `on_ppu_address_bus` 156 — **all IDENTICAL** |
+
+**Bounds checks: 911 against the baseline's 911, identical.** No watched callee moved.
+
+### Tests
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, **no new `allow`** beyond one `struct_excessive_bools` on `OperatorPatch`, whose six bits the page names one by one |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **809 passed, 0 failed, 8 ignored** |
+
+809 is step 1's 794 plus this step's fifteen, in `tests/vrc7_audio_tests.rs`:
+
+| test | what it pins |
+| --- | --- |
+| `q_128_a_vrc7_channel_at_full_output_swings_like_an_apu_pulse_at_volume_15` | the Q-128 level, all four constants recomputed from `PULSE_TABLE`, and that nothing sounding is an `M` of **exactly 0** |
+| `req_core_075_a_vrc7_is_silent_until_a_channel_is_keyed_on` | power-on silence, and that a volume without a trigger bit is still silence |
+| `req_core_075_a_keyed_vrc7_channel_makes_a_tone_that_swings_both_ways` | the key-on, and the carrier's sine going both sides of its own offset |
+| `req_core_075_a_vrc7_volume_of_f_is_the_quietest_and_0_the_loudest` | the inverted four-bit volume at 3 dB a step |
+| `req_core_075_a_vrc7_note_releases_to_silence_when_the_trigger_clears` | the key-off, and that the release reaches exact silence rather than a floor of 47.6 dB |
+| `req_core_075_a_vrc7_attack_of_zero_never_sounds` | "attack $0 = halt", through `RATE = 0`: the envelope never leaves the floor |
+| `req_core_075_a_faster_vrc7_attack_reaches_its_peak_sooner` | attack `$F` against `$5`, measured in cycles to a quarter of the peak |
+| `req_core_075_the_vrc7_sustain_bit_of_2x_forces_the_release_rate_to_5` | `$2X`'s `S` overriding instrument 1's own release of `$7` with the slower rate 5 |
+| `req_core_075_the_fifteen_vrc7_instruments_are_the_pages_own_bytes` | all fifteen sound, and no two produce the same 256 samples — which is what a duplicated row of the patch table would do |
+| `req_core_075_instrument_0_is_the_custom_patch_and_follows_00_to_07_live` | instrument 0 reading `$00`-`$07`, and a change to `$03`'s `Q` bit heard **while the note sounds** |
+| `req_core_075_the_vrc7_tremolo_runs_at_3_7_hz_and_the_vibrato_at_6_07` | the two cadences by their arithmetic, so a change to any of the three constants has to come and change this test |
+| `req_core_075_the_vrc7_tremolo_modulates_the_amplitude_and_the_vibrato_the_pitch` | the tremolo lowering the energy of a whole LFO period, and the vibrato changing the waveform |
+| `req_core_075_the_vrc7_sums_its_six_channels_into_one_dac` | six channels far louder than one, and `$16`/`$26`/`$36` not being a seventh |
+| `req_core_075_e000_bit_6_silences_the_vrc7_and_disregards_its_writes` | `M` going to 0, the writes being dropped while it is set, and the chip resuming where it was |
+| `req_core_075_a_vrc7_subtracts_its_m_from_the_apu_mix` | `S = A − M` at the loudest `M`, through the mixer's own test point |
+
+Three of those fifteen were **wrong when first written**, and each failure was a lesson worth
+keeping: the extremes of a long window are the same with and without tremolo (so the test measures
+energy over an LFO period instead); two instruments at the same note and volume reach the **same**
+peak, the carrier's level being the channel volume and not a patch byte (so the test compares 256
+samples instead); and the vibrato's first LFO step bends a nine-bit F-number of 384 by `384 >> 9`,
+which is nothing at all, so a window shorter than a few LFO steps compares two identical stretches
+(the window is now 4 096 samples).
+
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` **did** need editing, and what it caught
+is the same thing MF-5a's step 4 caught: the chip's sample divider counts down from power-on with
+no register written, like the FME-7's 5B prescaler and the Namco 163's multiplexer, so 85 joins
+its expected list — which is now `[5, 5, 19, 19, 69, 69, 85, 85]`.
+
+**Save states**: `Vrc7Audio::save_state` is appended after the IRQ, the shape `fme7.rs`,
+`vrc6.rs` and `namco163.rs` established, and `load_registers` tolerates a block without it. The
+two `OperatorPatch`es per channel are **not** serialised — they are decoded from `$3X` and the
+custom patch, both of which are, so `load_state` rebuilds them exactly as a write would, and
+there is one fewer thing that can come back out of step with itself. `level` **is** serialised,
+for the reason `Namco163Audio::level` records: recomputing it would need the waveform evaluated
+without advancing it, and one `i32` is cheaper than that.
+
 ## Status
 
 - [x] step 1 — the VRC7 board, mapper 85. **Every one of the thirteen ROMs is below `a577f336`**,
       total **−0.228 %**, after the `NesBus::irq_asserted` outlining this step found and the four
       attributes that undo it
+- [x] step 2 — the VRC7 audio (**Q-128** opened: the level, which this chip's page does not give
+      at all; **Q-129** opened: the five OPLL quantities no allowed source gives, there being no
+      reference implementation in reach). **All thirteen below the baseline**, total **−0.239 %**
 - [ ] step 2 — the VRC7 audio
 - [ ] step 3 — save states
 - [ ] step 4 — the ROM check: **no mapper-85 image exists** (the sweep is above)
