@@ -179,6 +179,79 @@ The right-hand column is the second bar: **every one of the thirteen at that num
 
 [PROGRESS] MF-5b-fix step 1/5 done: the instrument and both numbers reproduced.
 
+## Step 2 — the diagnosis: one budget, three candidates, and why PR-1 could not see it
+
+### What the post-LTO code says
+
+`cargo rustc --release -p zax-harness --bin zax-harness -- --emit=asm` on the same two clean
+trees, read with `target-mf/asm/shape.py` (new, untracked as the lot's rules require of anything
+under `rust/target-mf/`): for each symbol, *definitions / call sites / instructions*.
+
+| symbol | `a577f336` | `04a5d8c1` |
+| --- | ---: | ---: |
+| `<Board as Mapper>::irq_asserted` | **0 / 0 / 0** | 1 / 25 / 32 |
+| `WideExtension::zone_offset` | **0 / 0 / 0** | 1 / 1 / 33 |
+| `Cpu6502::execute_without_operand` | 1 / 1 / 2 402 | **0 / 0 / 0** |
+| `Cpu6502::step` | 1 / 2 / **932** | 1 / 2 / **2 529** |
+| `Cpu6502::resolve` | 2 / 6 / 1 800 | 2 / 6 / 1 847 |
+| `Cpu6502::branch` | 1 / 1 / 395 | 1 / 1 / 406 |
+| `NesBus::read_cycle`, `tick`, `read_internal` | 181, 82, 175 | **same** |
+| `NesBus::write_internal` | 2 874 | 3 020 (the VRC7's register decode) |
+| `Ppu2C02::run_dots` | 1 907 | 1 906 |
+
+`step` 932 → 2 529 and `execute_without_operand` 2 402 → *no symbol* are the same event: MF-5b
+step 5's table, reproduced to the instruction. **It is one budget with three claimants**, and at
+either commit `step` holds two of the three:
+
+* at `a577f336`: the dispatch and the zone test are pasted into `step`, and
+  `execute_without_operand` is a `callq`;
+* at `04a5d8c1`: `execute_without_operand` is folded in, and the other two are `callq`s.
+
+### Why the fold is a gain on thirteen ROMs and a loss on two games
+
+The fold is worth, per ROM, the difference between `execute_without_operand`'s exclusive count and
+what `step` grows by. The calls it pays for cost what the table of step 1 says. On `m1`,
+300 frames: `execute_without_operand` −92.7 M against `step` +58.4 M and `irq_asserted` +18.8 M, a
+net −15.5 M. On Zelda II with its pack, 600 frames: −145.5 M against `step` +94.0 M,
+`irq_asserted` +56.8 M and `zone_offset` +16.6 M, a net **+21.9 M**. Same trade, opposite sign.
+
+Three measurements of step 1's symbol table are the reason the sign flips, and each of them is a
+thing PR-1's set cannot see:
+
+| what | on PR-1's set | at level 2 |
+| --- | --- | --- |
+| `zone_offset` is on the fetch path | it answers `None` from `code.is_empty()` — `duelito` 68 537, `oamstr` 319 802 | **Zelda II 16.6 M**, SMB1 2.6 M: the pack's code runs in the execution zone |
+| the cartridge is actually asked for /IRQ | `NesBus::irq_asserted` is `apu.irq_asserted() \|\| cartridge…`, and the APU's frame IRQ short-circuits it on most ROMs — `mm2` **51 324**, `duelito` 51 156, `oamstr` 44 472, `readbuf` 44 160 | Metroid 90.0 M, SMB1 97.1 M, Zelda II 56.8 M, SMB3 47.9 M |
+| how long a run is | 300 frames | 600 after 120 of warm-up, so every per-cycle cost is 2.4 × larger |
+
+The second row is the one that matters most and is the least obvious: **`mm2` and `metroid` are
+both MMC1 games and the same binary asks the cartridge 700 times more often on one than on the
+other**, because Mega Man 2 leaves the APU's frame IRQ asserted and Metroid inhibits it. A ROM
+whose APU short-circuits the sample pays for the dispatch's *code* and never runs it, so for
+`duelito`, `oamstr`, `readbuf` and `mm2` there is nothing to win here and only size to lose. They
+are four of PR-1's thirteen, and they are exactly the four that resist in step 3.
+
+### The three candidates, and the one the brief rules out in advance
+
+The brief lists four. One is refuted before anything is built: **a different place for the VRC7's
+audio-silence test cannot help**, because `Vrc7::irq_asserted` is `self.irq.asserted()` — one load
+of a `VrcIrq`'s `pending` — and `silenced` is read by `expansion_audio_output`, which is not on
+this path at all. What the VRC7 added to the dispatch is an *arm*: the jump table's thirty-second
+slot and an eleventh distinct arm body (`movzbl 676(%rdi)`, its `VrcIrq` sitting at an offset no
+other board's does). The dispatch at `04a5d8c1` is
+
+    movzbl 1368(%rdi), %eax ; subb $2 ; movzbl ; movl $5 ; cmovael ; movzbl
+    leaq .LJTI1784_0(%rip) ; movslq (%rcx,%rax,4) ; addq ; jmpq *%rax
+    ... 11 blocks of `movzbl <offset>(%rdi), %eax ; retq`, one of them `xorl %eax, %eax`
+
+— 32 instructions, of which 21 of the 32 table slots land on the `xorl`. Nothing in it is dear;
+what is dear is its *inline cost*, which LLVM charges per table slot and per block, and which one
+more variant tipped over the threshold. So the three live candidates are the dispatch's **shape**,
+the **attribute**, and **splitting the VRC7 arm out** — step 3 measures all three, and the shape
+turns out to have a second, opposite cost that only the boards with an IRQ pay.
+
+[PROGRESS] MF-5b-fix step 2/5 done: the diagnosis.
+
 ## Status
 
-Step 1 done. Step 2 next.
+Steps 1-2 done. Step 3 next.
