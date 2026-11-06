@@ -10,21 +10,34 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
-**Two boards are parked, and MF-6c is the lot that parked both.** `parked-boards` was empty
-through MF-6b and MF-6a3, wired so that a later lot which did park a board would find the switch
-ready; step 2 put **`board-taito-x1`** in it and step 9 **`board-111`**. Everything else is in
-`default`.
+**No board is parked, and `parked-boards` is empty and still wired.** It was empty through MF-6b
+and MF-6a3, wired so that a later lot which did park a board would find the switch ready; **MF-6c
+step 2 put `board-taito-x1` in it and step 9 `board-111`, and MF-CART step 5 took both back
+out.** Every board this build has is in `default`.
 
-**Both are parked on the same instruction, and it is not theirs.** `Cartridge::default_cpu_read`
-has two measured layouts on `mmc5exram` — 283 356 728 and 290 813 484 instructions over 300
-frames, a difference of **7 456 756, +0.066 %** — and a variant past a shared enum's own limit
-selects the dearer one. MF-6c measured all three limits: `SmallBoard` ten, `IrqBoard` ten,
-`DecodeBoard` four. The figure appears whether or not the enum forwards `Board::prg_ram_enabled`,
-the dispatch it lives inside — `SmallBoard` does, for the Taito boards, and `DecodeBoard` does not
-— so what crosses the line is LLVM's layout of the whole module, and no shape of either board's own
-code can move it: step 2 measured seven and step 9 one more. R0 has scheduled a sub-lot for the
-structural fix (a load-time cache of the $6000-$7FFF decode on `Cartridge`), which would un-park
-both.
+**Both were parked on one instruction, and it was not theirs — MF-CART removed the instruction.**
+`Cartridge::default_cpu_read` held the inlined `Board::try_read_prg` jump table, and past a
+certain pressure LLVM materialised `&self.board` above it for that table's *cold* arms (mapper
+116's boxed `IrqBoard::Somari(Box<Somari>)`, and the arms that are `#[inline(never)]`), where it
+then ran on every call. The MMC5 is the one board that maps PRG-RAM into $8000-$DFFF, so
+`Cartridge::read_rom_window` cannot answer and **every** CPU read of an MMC5 game reached that
+function — **exactly 7 456 756 of them over 300 frames of `mmc5exram`**, which is why the figure
+was always a whole number of units of 7 456 756 (+0.066 % each): it was one instruction per read.
+MF-6c measured it nine times in both directions, found each shared enum's own limit (`SmallBoard`
+ten, `IrqBoard` ten, `DecodeBoard` four) and could not move it with seven shapes of a board's own
+code; MF-CART step 1 measured it a tenth time at **three** units for `board-taito-x1` and step 3 an
+eleventh at **four**, the wall moving further away as the tree grew.
+
+**What MF-CART did**, in two halves that only work together (`docs/progress/MF-CART.md` steps 2
+and 4): the $6000-$7FFF read answer is settled on `Cartridge` beside `rom_windows` through the new
+`Mapper::prg_ram_window`, so no `Board` dispatch answers it per read; and
+`Cartridge::default_cpu_read` then carries `#[inline(always)]`, which MF-6c step 2 had measured as
+its shape c and rejected because `Board::prg_ram_enabled` went out of line as the body moved — the
+one drawback the first half removes. The function stops existing, the MMC5's own `try_read_prg` arm
+goes out of line, and **`Mmc5::try_read_prg` and `Cartridge::try_cpu_read` then measure 141 678 364
+and 429 758 682 whether `Board` has 36, 38 or 39 variants, identical to the instruction.** The
+MMC5's read path no longer depends on how many boards exist. `rust/docs/PERFORMANCE-HISTORY.md`
+§5.15 has the new limit for a lot that needs to plan against one.
 
 ## The table
 
@@ -52,12 +65,22 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-77` | 77 | the Irem LROG017: one `[CCCC PPPP]` register, bus conflicts, four-screen mirroring and a **split CHR** — 2 KiB of swappable CHR-ROM at $0000-$07FF with the 6 KiB CHR-RAM chip at $0800-$1FFF, which no `ChrView` can describe. First member of `DecodeBoard`; implies it | 1 (*Napoleon Senki*) | worst `metroid` **+12 780 (+0.000 %)**, set total **−136 318**, `mmc5` **−40 814** (MF-6c step 6, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; worst `total` `smb3` +0.024 %, which the per-function diff puts **entirely** in Lua's `ltable.c` (`luaH_getshortstr` +4 039 948, `getgeneric` +2 248 672) with no symbol of this project moving by 120 000 on that game. `Ppu2C02::read_pattern_planes` **107, unchanged** | **on** | as above |
 | `board-jaleco-72-92-86` | 72, 92, 86 | Jaleco's JF-17, JF-19 and JF-13, the three boards with a µPD7756C ADPCM speech chip. 72 and 92 are one board whose `is_jf19` bool picks which PRG window its rising-edge latch drives; 86 is a GNROM-like board whose ports *are* $6000-$7FFF. Two `DecodeBoard` variants, no `Board` variant; implies `board-decode-boards`. **The audio is not implemented** — REQ-CORE-075 does not list the chip and its samples are a mask ROM inside the ASIC (§4.8), so `expansion_audio_output` stays `None` and a test pins the silence | **6** | worst `duelito` **+15 716 (+0.000 %)**, **twelve of thirteen below the baseline**, set total **−312 171**, `mmc5` −34 885 (MF-6c step 7, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; the two `total` figures above the baseline are +0.000 % and +0.011 %, **both inside the tolerance on their own**, and the per-function diff puts them in Lua's `ltable.c` | **on** | as above |
 | `board-96` | 96 | the Bandai Oeka Kids board: a 32 KiB PRG bank and a 16 KiB outer CHR bank from one CPU register, and the 4 KiB inner CHR-RAM page **latched off the PPU address bus** on the entry into $2000-$2FFF -- including a bare $2006 write. In **both** PPU-bus latches and the first number in either with no IRQ; one `DecodeBoard` variant and one new forward. The Oeka Kids tablet is a recorded gap, and "Bus conflicts: partly" is Q-135. Implies `board-decode-boards` | 2 | worst `duelito` **+70 187 (+0.001 %)**, set total +223 036, `m4` +31 167 on the dispatch it joins (MF-6c step 8, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; three `total` figures above the baseline at +0.000 %, +0.002 % and +0.004 %, **all inside the tolerance**, and all of them Lua's `ltable.c`. `Board::on_ppu_address_bus` **157 → 161** | **on** | as above |
-| `board-111` | 111 | the Membler Industries GTROM / Cheapocabra: a 32 KiB PRG bank, an 8 KiB CHR-RAM bank, **two 8 KiB banks of four distinct nametables** served through `read_nametable` (the fourth body of that dispatch), an SST39SF040 the game saves into, and two LEDs. One `DecodeBoard` variant and three forwards; implies `board-decode-boards`. The LEDs, the register's read side and the flash's persistence are recorded gaps | **7** homebrew | `mmc5` **+7 423 140 (+0.066 %)**, every other ROM within ±85 100 (MF-6c step 9, vs `8496c503`). The board measured **without** its nametable banks gives the same +7 416 670, so the fifth `DecodeBoard` variant is the cause and the mechanism is free — `read_nametable_inner` stays at **75 with four bodies** | not measured with the feature on; the park was taken on PR-1's set. With it **off**: four `core` **+0**, `smb3/core` −20 823, worst `total` `smb3` +0.019 % | **off — parked** | `cargo build -p zax-nes --features board-111` |
-| `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | `mmc5` **+7 456 756 (+0.066 %)**, every other ROM within **±31 000** (MF-6c step 2, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` **+0.003 %** | **off — parked** | `cargo build -p zax-nes --features board-taito-x1` |
-| `parked-boards` | 80, 207, 82, 552, 111 | the umbrella: every board left out of `default`. Today that is `board-taito-x1` and `board-111` | 13 + 7 | as those rows | as those rows | **off** | `cargo build -p zax-nes --features parked-boards` |
+| `board-111` | 111 | the Membler Industries GTROM / Cheapocabra: a 32 KiB PRG bank, an 8 KiB CHR-RAM bank, **two 8 KiB banks of four distinct nametables** served through `read_nametable` (the fourth body of that dispatch), an SST39SF040 the game saves into, and two LEDs. One `DecodeBoard` variant and three forwards; implies `board-decode-boards`. The LEDs, the register's read side and the flash's persistence are recorded gaps | **7** homebrew | **un-parked by MF-CART step 5**: `mmc5` **−12 564 290 (−0.111 %)**, worst ROM `mm2`/`oamstr` **+0.002 %**, set total **−24 997 757** (vs `mfct-0-44f77f72`). MF-6c step 9 had measured `mmc5` +7 423 140 (+0.066 %) — one unit of `Cartridge::default_cpu_read`'s quantum, which MF-CART step 4 removed. The board measured **without** its nametable banks gave the same +7 416 670 then, so the fifth `DecodeBoard` variant was the cause and the mechanism was free; `read_nametable_inner` stays at **75 with four bodies** | four `core` **below or equal**, `mm2/core` +0.002 %, worst `total` −0.017 % to +0.000 % (MF-CART step 5) | **on** | `cargo build -p zax-nes --no-default-features --features <the others>` |
+| `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | **un-parked by MF-CART step 5**: `mmc5` **−12 576 627 (−0.112 %)**, worst ROM `mm2` **+0.001 %**, set total **−25 190 380** (vs `mfct-0-44f77f72`). MF-6c step 2 had measured `mmc5` +7 456 756 (+0.066 %) and MF-CART step 1 measured the same two variants at **three** units, +22 370 268 (+0.198 %) — all of it the one instruction step 4 removed | **all five `core` below or equal**, `mm2/core` +0.002 %, worst `total` +0.000 % (MF-CART step 5) | **on** | as above |
+| `parked-boards` | — | the umbrella: every board left out of `default`. **Empty since MF-CART step 5**, and still wired, so that a later lot which does park a board adds it here and nowhere else | — | — | — | **off, and a no-op** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
-+0.02 %.
++0.02 %. That figure is `board-116`'s, measured by MF-6a3 step 4; the two features MF-CART step 5
+brought in are +0.001 % and +0.002 % on their worst ROM, and the tree they came into is
+**−25 551 352 (−0.032 %)** on PR-1's thirteen against `44f77f72`, the lot's own baseline.
+
+## MF-CART lifted the limit, and these two sections are what it lifted
+
+Everything from here to "How to turn a board off" is **MF-6c's state of knowledge, kept because
+its eleven measurements are the record** — all of them of the same quantum — and superseded on one
+point: the limit each shared enum had is **gone**, and `rust/docs/PERFORMANCE-HISTORY.md` §5.15
+has the figures that replace it. Read the two sections below as the diagnosis the fix was built
+from, not as advice for a new board.
 
 ## Two findings of MF-6c step 4 that change the advice in note 1 below
 
@@ -83,6 +106,13 @@ own costs the +0.080 % MF-6a3 step 1 measured, and the next lot that needs one h
 $6000-$7FFF read path — for instance by caching the decode on `Cartridge` the way `rom_windows`
 already is, which is the one shape MF-6c's eleven measurements did not try.
 
+> **MF-CART is the lot that did that, and the paragraph above is why it exists.** Caching the
+> decode was half of it and was not enough on its own — its step 3 measured the same quantum,
+> four units — and what finished it was `#[inline(always)]` on `Cartridge::default_cpu_read`,
+> the shape MF-6c step 2 had measured and rejected and which the cache made safe. **All three
+> enums' limits are void**: §5.15 of `PERFORMANCE-HISTORY.md` has the four configurations
+> MF-CART step 6 measured.
+
 **2. Q-123's ceiling does not reproduce.** MF-5a measured a third `Mapper::read_nametable` arm
 body at `Ppu2C02::read_nametable_inner` **132 → 109 for every game in the library**. On this tree
 that function is **114 → 75** — the body leaving by a tail call, MF-5a's own second shape and not
@@ -92,7 +122,7 @@ serve its own nametables never calls it. Mapper 68's CHR-ROM nametable mode ther
 `default`, and a **fourth** body should be re-measured the same way rather than assumed to cost
 132 → 109.
 
-## The one parked board, and why
+## The boards that were parked, and why (MF-6c's account, superseded by MF-CART)
 
 `board-taito-x1` is **+0.066 % on one ROM of one instrument and zero everywhere else**, and the
 whole of it is a single instruction. `Cartridge::default_cpu_read` has exactly **two** measured
@@ -122,19 +152,27 @@ five level-2 `core` figures are **+0** and the worst `total` is `smb3` at +0.003
 instrument that loads a 3D pack. A later lot that adds any body to that chain may hand the figure
 straight back.
 
+> **It did better than that.** MF-CART step 5 re-measured both features on a tree where the
+> function the figure lived in no longer exists, and they are `mmc5` **−0.112 %** and
+> **−0.111 %** with worst ROMs of **+0.001 %** and **+0.002 %**. Both are in `default` and
+> `parked-boards` is empty.
+
 ## How to turn a board off
 
-There is no `--no-feature` flag in Cargo, so turning one board off means naming the other eight:
+There is no `--no-feature` flag in Cargo, so turning one board off means naming the others:
 
     cargo build -p zax-nes --no-default-features --features \
-        board-94,board-105,board-116,board-155,board-158,board-mmc3-multicart,board-namcot108
+        board-94,board-105,board-111,board-116,board-153,board-155,board-158,board-68,\
+        board-68-chr-nametables,board-77,board-96,board-eeprom,board-jaleco-72-92-86,\
+        board-mmc3-multicart,board-namcot108,board-small-boards,board-taito-x1
     # ... which is every board but `board-119`.
 
 and `cargo test -p zax-nes --no-default-features` is the configuration with **every** board off —
-**782 passed, 0 failed, 7 ignored**, against 836 by default. The registry then advertises **45**
-mapper numbers instead of 69. All eleven configurations (each feature alone, none, all, and all
-plus `parked-boards`) build, pass clippy `-D warnings` and pass their tests; MF-6a3 step 3's table
-has the per-feature test counts.
+**783 passed, 0 failed, 7 ignored**, against **862** by default since MF-CART step 5 put the last
+two features in it. `--features parked-boards` is now the same build as `default`, that list being
+empty, and the suites run it anyway so that the switch cannot rot. Every configuration (each
+feature alone, none, all, and all plus `parked-boards`) builds, passes clippy `-D warnings` and
+passes its tests; MF-6a3 step 3's table has the per-feature test counts.
 
 A downstream crate reaches the features through its dependency: `--features zax-nes/board-119`.
 
@@ -153,7 +191,8 @@ games at or below `9f9d9d41` on total *and* core — `l2-diff.py`'s own verdict 
 is "at or below the baseline on every game, total and core". No figure rose, so no feature. MF-6a2
 added no board at all.
 
-**3. A board's cost is not its own, and the lot that proved it is MF-6a3.** Three of its
+**3. A board's cost is not its own, and the lot that proved it is MF-6a3** — and MF-CART is the
+lot that stopped it being true of the one path where it mattered most. Three of MF-6a3's
 measurements are the same phenomenon:
 
 * two new `Board` discriminants cost `mmc5` **+8 994 278 (+0.080 %)** — one taken `jmp` per

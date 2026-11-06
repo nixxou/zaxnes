@@ -36,6 +36,8 @@ default = [
     "board-mmc3-multicart",
     "board-namcot108",
     "board-small-boards",
+    "board-taito-x1",
+    "board-111",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -144,15 +146,17 @@ board-96 = ["board-decode-boards"]
 # persistence are recorded gaps; see `Cheapocabra`'s own note. Implies
 # `board-decode-boards`.
 #
-# **The second board of this project to be parked, and the fifth `DecodeBoard` variant is what
-# parks it.** `Cartridge::default_cpu_read` flips to the dearer of its two measured layouts on
-# `mmc5exram`, +7 456 756 instructions over 300 frames -- **+0.066 %** against the owner's
-# +0.02 % -- on a board this feature does not touch. It is the same quantised figure MF-6c steps
-# 2, 4 and 5 measured for the eleventh `SmallBoard` variant and the eleventh and twelfth
-# `IrqBoard` ones, so **each shared enum has its own limit** and `DecodeBoard`'s is four. Step 9
-# also measured the board with its nametable banks switched off and got the same figure, which
-# refutes the fourth `Mapper::read_nametable` body as the cause and is why there is one feature
-# here and not two. See `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-6c.md` step 9.
+# **Parked by MF-6c step 9 and un-parked by MF-CART step 5**, which is the whole point of that
+# lot: the fifth `DecodeBoard` variant used to flip `Cartridge::default_cpu_read` into the dearer
+# of its two layouts on `mmc5exram`, +7 456 756 instructions over 300 frames (**+0.066 %**) on a
+# board this feature does not touch. That function no longer exists — MF-CART step 4 inlined it
+# into `Cartridge::try_cpu_read` and the MMC5's own `try_read_prg` arm went out of line — so the
+# variant costs nothing: re-measured on the fixed tree this feature is **`mmc5` −0.111 %** and
+# worst ROM **+0.002 %**, against a tolerance of +0.02 %. Step 9's other finding stands and is
+# why there is one feature here and not two: the board measured *without* its nametable banks
+# gave the identical figure, which refutes the fourth `Mapper::read_nametable` body as the cause.
+# See `docs/review/BOARD-FEATURES.md`, `docs/progress/MF-6c.md` step 9 and
+# `docs/progress/MF-CART.md` step 5.
 board-111 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
@@ -168,22 +172,33 @@ board-eeprom = []
 # `prg_ram_enabled`, because these boards decode $6000-$7FFF themselves, and `nametable_page` for
 # mapper 207's CIRAM A10. Implies `board-small-boards`, the enum they live in.
 #
-# **The first board of this project to be parked**, and it is one instruction that parks it:
-# `Cartridge::default_cpu_read` flips to the dearer of its two measured layouts, in which LLVM
-# hoists `leaq 240(%rdi), %rax` above the inlined `Board::prg_ram_enabled` dispatch so that it
-# runs on every call. That is +7 456 756 over 300 frames of `mmc5exram` -- **+0.066 %**, against
-# the owner's +0.02 % -- on a board this feature does not touch. MF-6c step 2 measured **seven**
-# shapes against it, step 3 re-measured it on a changed tree, and the figure never moved by an
-# instruction; it is the same one MF-6b steps 2-5 were charged and MF-6a3 step 4 was given back.
-# See `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-6c.md` steps 2 and 3.
+# **Parked by MF-6c step 2 and un-parked by MF-CART step 5.** What parked it was one hoisted
+# instruction in `Cartridge::default_cpu_read` — `&self.board`, materialised above the inlined
+# `Board::try_read_prg` jump table for that table's cold arms, so that it ran on every CPU read
+# of the one board which maps PRG-RAM into $8000-$DFFF: +7 456 756 over 300 frames of
+# `mmc5exram` per unit (**+0.066 %**), and by MF-CART step 1 these two variants were buying
+# **three** units. MF-6c measured seven shapes of the boards' own code against it and the figure
+# never moved by an instruction, because it was never theirs. MF-CART step 4 took that function
+# out of existence, and re-measured on the fixed tree this feature is **`mmc5` −0.112 %** with a
+# worst ROM of **+0.001 %**. See `docs/review/BOARD-FEATURES.md`, `docs/progress/MF-6c.md` steps
+# 2 and 3, and `docs/progress/MF-CART.md` steps 1, 4 and 5.
 board-taito-x1 = ["board-small-boards"]
 
 # The umbrella: every board left out of `default` because it is above the tolerance. MF-6b and
 # MF-6a3 both ended with it empty, and the feature existed so that a later lot which did park a
-# board would have the switch already wired. **MF-6c step 2 is that lot**: `board-taito-x1` was
-# the first entry it ever had, and **MF-6c step 9 adds `board-111`** on the same quantised
-# +7 456 756, bought this time by the fifth `DecodeBoard` variant.
-parked-boards = ["board-111", "board-taito-x1"]
+# board would have the switch already wired; MF-6c step 2 was that lot and put `board-taito-x1`
+# in it, step 9 added `board-111`.
+#
+# **MF-CART step 5 emptied it again, and the switch stays wired for the same reason it was wired
+# before.** Both entries were above the tolerance on one instruction of
+# `Cartridge::default_cpu_read` and nothing of their own, that lot's step 4 removed the
+# instruction, and re-measured on the fixed tree the two features are `mmc5` −0.112 % and
+# −0.111 % with worst ROMs of +0.001 % and +0.002 %. A later lot that does park a board adds it
+# here and nowhere else; `--features parked-boards` is then still the one flag that reaches
+# every left-out board at once, and with the list empty it is a no-op that still builds, which
+# the suites check (`--features parked-boards` is one of the three configurations every step
+# runs).
+parked-boards = []
 
 [dev-dependencies]
 sha2 = "0.10"

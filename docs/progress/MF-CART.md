@@ -658,3 +658,143 @@ instruction.** `Mapper::cpu_read_windows` makes the write path one dispatch inst
 `mmc5` **−0.112 %**, set **−25 551 352 (−0.032 %)**, ten of thirteen below, four level-2 cores
 below or equal and `mm2/core` +0.002 % the only figure above. `#[repr(C)]` on `Cartridge` refuted
 at +0.586 %, and `#[inline(never)]` on the refresh refuted.
+
+## Step 5 — **both boards un-parked**, and `parked-boards` is empty again
+
+### The two measurements, each feature alone on the fixed tree
+
+| | label | `mmc5` | worst ROM of thirteen | set total |
+| --- | --- | ---: | --- | ---: |
+| `board-taito-x1` (80, 207, 82, 552) | `mfct-5-x1onedis` | **11 266 781 495, −0.112 %** | `mm2` **+76 961, +0.001 %** | **−25 190 380, −0.032 %** |
+| `board-111` (the GTROM) | `mfct-5-gt1onedi` | **11 266 793 832, −0.111 %** | `mm2` +94 724 / `oamstr` +76 127, **+0.002 %** | **−24 997 757, −0.031 %** |
+
+**Both are inside the owner's +0.02 % by a factor of ten or twenty on every ROM, and both leave
+`mmc5` a tenth of a per cent *below* the baseline.** What MF-6c measured for the same two features
+— +7 456 756 and +7 423 140, and by MF-CART step 1 **+22 370 268** for the first — is gone, because
+the function those figures lived in is gone. So both go into `default`, `parked-boards` is emptied,
+and this project has **no parked board**.
+
+    parked-boards = []
+
+The switch stays wired, for the reason it was wired through MF-6b and MF-6a3 when it was also
+empty: a later lot that does park a board adds it there and nowhere else, and
+`--features parked-boards` is then still the one flag that reaches every left-out board at once.
+With the list empty it is a build identical to `default`, and the suites run it anyway so that it
+cannot rot.
+
+### The shipped build: `default` with every board this project has
+
+`mfct-5-unparked`, against `mfct-0-44f77f72`:
+
+| ROM | board | `44f77f72` | **step 5** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 287 870 | 3 308 319 744 | +31 874 | +0.001 % |
+| `oamstr` | NROM | 3 318 485 575 | **3 318 444 925** | −40 650 | −0.001 % |
+| `m1` | MMC1 | 4 885 953 734 | **4 881 249 893** | **−4 703 841** | **−0.096 %** |
+| `m4` | MMC3 | 5 472 522 428 | **5 468 239 595** | **−4 282 833** | **−0.078 %** |
+| `m0` | NROM | 5 520 499 653 | **5 517 368 200** | **−3 131 453** | **−0.057 %** |
+| `metroid` | MMC1 | 5 115 985 915 | **5 115 573 500** | −412 415 | −0.008 % |
+| `smb1` | NROM | 5 996 362 814 | **5 996 328 257** | −34 557 | −0.001 % |
+| `mm2` | MMC1 | 6 017 861 569 | 6 017 927 746 | **+66 177** | **+0.001 %** |
+| `z2` | MMC1 | 6 291 442 776 | 6 291 510 615 | +67 839 | +0.001 % |
+| `readbuf` | CNROM | 6 834 534 036 | **6 834 510 710** | −23 326 | −0.000 % |
+| `duelito` | NROM | 7 380 421 165 | **7 380 410 905** | −10 260 | −0.000 % |
+| `smb3` | MMC3 | 7 949 489 726 | **7 949 330 220** | −159 506 | −0.002 % |
+| `mmc5` | MMC5 | 11 279 358 122 | **11 266 798 540** | **−12 559 582** | **−0.111 %** |
+| **total** | | **79 371 205 383** | **79 346 012 850** | **−25 192 533** | **−0.032 %** |
+
+**Ten of thirteen below the baseline with five mapper numbers added to the default build**, the
+three above all at +0.001 %, and the set total is **−25 192 533** — a lot that *adds* boards and
+ends 0.032 % faster than the tree it started from.
+
+Level 2, `l2-diff.py --bar`:
+
+| game/stage | `44f77f72` | **step 5** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 146 861 951** | −433 191 | −0.004 % |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 774 928 308** | −722 740 | −0.006 % |
+| `mm2/core` | 12 036 822 861 | 12 037 123 709 | **+300 848** | **+0.002 %** |
+| `smb3/core` | 15 315 537 499 | **15 314 945 307** | −592 192 | −0.004 % |
+| `metroid/total` | 13 735 578 935 | **13 735 129 401** | −449 534 | −0.003 % |
+| `smb1/total` | 13 586 757 575 | 13 588 084 193 | +1 326 618 | +0.010 % |
+| `zelda2/total` | 15 360 318 280 | **15 358 364 558** | −1 953 722 | −0.013 % |
+| `mm2/total` | 18 976 430 445 | 18 976 605 166 | +174 721 | +0.001 % |
+| `smb3/total` | 24 188 986 419 | 24 190 119 762 | +1 133 343 | +0.005 % |
+
+**Three `core` figures below by 0.004 % to 0.006 %, the fourth exactly equal, and the fifth
+`mm2/core` at +0.002 %** — a tenth of the tolerance, and step 4 has the four shapes measured
+against it. The two `total` rises are rule 2's layout-noise case **checked and not assumed**;
+`symct.sh` at a 400 000 threshold names every symbol that moved on any of the five games:
+
+* **`smb1`**: one symbol, `luaH_getshortstr` **+1 164 830**. Lua's `ltable.c`, nothing else at
+  all, against a total delta of +1 326 618 and a `core` delta of **+0**.
+* **`smb3`**: `luaH_getshortstr` +1 179 523 and `__memcpy_avx_unaligned_erms` +400 678, and this
+  project's own five symbols sum to **−1 228 506** — `default_cpu_read` −1 705 442,
+  `Board::rom_windows` −1 100 920, `Board::prg_ram_offset` −1 098 295 against
+  `Board::cpu_read_windows` +1 623 857 and `try_cpu_read` +1 052 294. The rise is Lua and
+  `memcpy`; the emulator is below, and `smb3/core` is −592 192.
+* **`metroid`** and **`zelda2`** show the fix and nothing else: `Board::prg_ram_offset` −783 216
+  and −849 968 and `default_cpu_read` −557 270 and −920 892 against `try_cpu_read` +425 285 and
+  +702 786.
+* **`mm2`** shows the one cost this lot has: `Board::cpu_read_windows` **+772 270** against
+  `Board::rom_windows` **−532 600**, a net +239 670 which is `mm2/core`'s +300 848. That is the
+  write path settling what the read path stopped asking for, named to the symbol.
+
+### Instrument 3: the post-LTO dump
+
+`pins63.py lin-mfct-0-44f77f72.s lin-mfct-5-unparked.s`:
+
+| symbol | `44f77f72` | **step 5** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 626 | **1 / 2 / 3 626** |
+| `Board::ppu_peek` | 1 / 4 / 291 | **1 / 4 / 291** |
+| `NesBus::write_internal` | 1 / 10 / 3 861 | 1 / 10 / 3 879 |
+| `Ppu::run_dots` | 1 / 5 / 1 919 | **1 / 5 / 1 919** |
+| `NesBus::catch_up_ppu` | 1 / 12 / 188 | **1 / 12 / 188** |
+
+and `shape.py`'s five others — `resolve` 2 / 6 / **1 948**, `branch` 1 / 1 / **457**,
+`read_cycle` 1 / 65 / **181**, `tick` 1 / 95 / **82**, `read_internal` 1 / 17 / **175** —
+identical to the instruction, def and call sites included. With `fn.py`:
+
+| symbol | `44f77f72` | **step 5** |
+| --- | ---: | ---: |
+| `Ppu2C02::read_pattern_planes` | **107** | **107** |
+| `Ppu2C02::read_nametable_inner` | **75** | **75** |
+| `Cartridge::default_cpu_read` | 429 | **no definition** |
+
+**`read_pattern_planes` is 107 for the ninth lot running**, `zone_offset` does not exist as a
+symbol — the inlining holding, which is the widescreen hack's own figure — and the three
+claimants of `Cpu6502::step` are 0 / 0 / 0 with `step` at 3 626. The only pinned symbol that moved
+is `write_internal` **+18**, the write path's new arithmetic, and the dynamic column prices it at
+`m4` −0.078 % and `smb3` −0.002 %.
+
+### The suites, and what un-parking did to them
+
+| configuration | `zax-nes`, debug | release, with `zax-harness` |
+| --- | ---: | ---: |
+| `default` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--features parked-boards` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--no-default-features` | **783 / 0 / 7** | — |
+
+**`default` is now what `--features parked-boards` used to be** — MF-6c's 854 plus the eight tests
+that were behind the two parked features, five of `board-taito-x1`'s and three of `board-111`'s —
+and the two columns are equal because the umbrella is empty. `cargo fmt --check` clean; clippy
+`-D warnings` clean on `zax-nes` in five configurations (`default`, `--features parked-boards`,
+`--no-default-features`, and each un-parked feature alone on top of `--no-default-features`) and
+on `zax-harness`, **no new `allow`**.
+
+`docs/review/BOARD-FEATURES.md` is rewritten where it has to be: its header now says no board is
+parked and why, the two rows carry their new figures beside the old ones, the umbrella row says
+the switch is wired and empty, MF-6c's two diagnosis sections are kept and marked **superseded**
+with a pointer to §5.15, and the how-to figures are the un-parked tree's (783 against **862**).
+
+[PROGRESS] MF-CART step 5/8 done: **both boards un-parked and `parked-boards` is empty.**
+`board-taito-x1` re-measured at `mmc5` **−0.112 %** with a worst ROM of +0.001 % and `board-111`
+at **−0.111 %** with +0.002 %, against the +7 456 756 and +7 423 140 MF-6c parked them on. The
+shipped `default` is **−25 192 533 (−0.032 %)** on PR-1's thirteen with ten of them below, three
+level-2 cores below and one equal, `read_pattern_planes` **107** and every other pinned symbol
+identical to the instruction — and five mapper numbers more than the tree it started from.
