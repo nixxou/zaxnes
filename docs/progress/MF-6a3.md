@@ -675,3 +675,215 @@ step 2 already measured at ±4.3 M. The shipped tree is measured on both instrum
 step 4, with mapper 116 in it.
 
 [PROGRESS] MF-6a3 step 3/6 done: eight board features, nine configurations green with no `dead_code` warning in any, 782 / 0 / 7 with every board off against 830 / 0 / 7 by default, and the default build's dump instruction-for-instruction step 1's.
+
+## Step 4 — mapper 116, the Gouder SOMARI-P, and Q-130 question 1 answered
+
+### The board, from MF-6b step 6's design
+
+`docs/progress/MF-6b.md` step 6 left mapper 116 "open on purpose", with its register map, its
+three constructors, its one `BankWindows` method, its four submappers' readings and its one
+ticket all written down; this step is that design built. [`Somari`] **holds** an [`Mmc3`], an
+[`Mmc1`] and a [`Vrc2Vrc4`] and delegates to the active one, which is [`super::NesEvent`]'s shape
+read three times over — the page requires exactly that: "three chips each keeping its own
+registers, so that when switching between modes using the supervisor register, the entire mapper
+state changes, including PRG/CHR-ROM switchable and fixed banks as well as IRQ state".
+
+| what the design said | where it is |
+| --- | --- |
+| supervisor register `$4100`, `(addr & $E100) == $4100`, `[.... .CMM]`, `C` at **bit 2**, power-on `$01` | `Somari::SUPERVISOR_MASK`, `POWER_ON`, `outer_chr` |
+| the `address < 0x8000` guard **not** first | `Somari::write_register`, with the reason in its own doc |
+| three chips, each keeping its own registers | the three fields, and `Somari::refresh` |
+| the VRC2 mode is a **VRC2b**, asked for directly because a mapper-116 image declares no VRC submapper | `Vrc2Vrc4::new_vrc2b` |
+| the VRC2's CHR registers powering up to `$FF` | `Vrc2Vrc4::force_chr_registers` |
+| an MMC3 that cannot be read as an MMC6 or a TxSROM | `Mmc3::new(memory, 116)` — **no new constructor needed**, because step 1's submapper tightening made `Mmc3Board::new` read a submapper only on mapper 4 |
+| only the MMC3 mode has an IRQ | `Somari::irq_asserted` and `on_ppu_address_bus`, both mode-gated |
+| the outer CHR bank as a new `BankWindows` method | `BankWindows::offset_chr_banks`, additive and behind `board-116` |
+| the MMC1 mode ignoring the outer bank | `Somari::refresh`'s third arm |
+| submappers 0 and 1, the two PALs | `Somari::write_supervisor` |
+| submapper 2, the Huang-2's 8 KiB PRG | `Somari::refresh_mmc1` |
+| submapper 3, the one real gap | **Q-132**, written |
+
+**One thing the design did not anticipate, and it is the step's one real finding.** `Somari` is
+**536 bytes** — three sub-boards — so as an inline variant of [`IrqBoard`] it would be the variant
+that sets that enum's size, 200 → 544. MF-6b step 1 measured what moving an IRQ board's fields
+costs: **one byte** of displacement on `VrcIrq::pending`, which `Board::irq_asserted` reads for
+the VRC3 arm of this very enum, re-laid out `Cpu6502::branch` and cost eleven of PR-1's thirteen
+ROMs +0.009 % to +0.027 % **with no code added at all**. So the variant is **boxed**:
+
+    size_of::<Board>()     1376   (the MMC5's, unchanged since MF-2)
+    size_of::<IrqBoard>()   200   (MF-6a3 step 1's figure, unchanged)
+    size_of::<Somari>()     536
+
+`clippy::large_enum_variant` fires on the unboxed form and the lot's terms allow **no new
+`allow`**, so the two constraints point the same way. The price is one pointer dereference per
+forwarded call **for mapper 116 and no other board**, on a `Board` value built once at load —
+§4.10's rule again.
+
+### The save state, and the one ordering trap this board has
+
+[`Mapper::save_state`] and [`Mapper::load_state`] are overridden rather than
+`save_registers`/`load_registers`, and the order is the whole reason. The defaults write
+`banks()` and then the registers, and `banks()` on this board is **whichever chip the current
+mode names** — so a state restored into a board sitting in a different mode would have loaded one
+chip's windows into another's. The supervisor register is written **first** and each chip's own
+`save_state` after it, so every block has exactly one owner and the mode is known before any of
+them is read. `load_state` then puts both chips the outer CHR bank reaches back to their
+*register-derived* windows before re-applying it, so a state cannot come back with the bank
+counted twice or not at all.
+
+`req_core_090_the_mapper_state_survives_a_save_and_restore` and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` sweep
+`SUPPORTED_MAPPERS` and cover the board without a line written.
+
+### Q-130 question 1 answered, and Q-132 opened
+
+Q-130's provisional choice for mapper 116 was "**not implemented at all**, so REQ-CORE-011
+refuses it", pinned by `req_core_102_any_other_mapper_is_refused`'s own comment. R0's decision and
+the brief reverse it, so **both tests that carried the choice were edited to say so**:
+
+* `req_core_102_any_other_mapper_is_refused` drops 116 from its sweep when `board-116` is on,
+  with the comment pointing at Q-130;
+* `req_core_102_only_implemented_mappers_are_accepted` (`rom_loading_tests.rs`) asserted
+  `!SUPPORTED_MAPPERS.contains(&116)` and now asserts `cfg!(feature = "board-116") ==
+  contains(&116)`.
+
+**REQ-CORE-102's own acceptance criterion is untouched**: it names mapper 200, which §6 item 1 of
+the inventory keeps out, and both tests still refuse 6, 177 and 200.
+
+**`spec/changes/Q-132.md`** is written, with two readings and one note:
+
+1. **submapper 3**, the reset-based multicart: the page says nothing about how a reset selects
+   the game, and Mesen 2 does not implement it. Provisional and implemented: it loads as a
+   Huang-1 with no reset-based outer bank, so the first game runs and the rest are unreachable;
+2. **submapper 2**, the Huang-2: "the PRG bank register value is shifted by one bit to the left
+   compared to what one would write to a normal MMC1" admits the **formula** (`register >> 1`,
+   then the MMC1's own layout) and the **prose** ("addresses 8 KiB rather than 16 KiB banks", so
+   an odd register gives an unaligned 16 KiB view). The formula is implemented, because it is
+   the sentence and nothing more, and both are in the ticket;
+3. **submappers 0 and 1** are *not* a question, and the ticket records why: the implementation
+   puts the shift-register reset on submapper 1, and the page closes it itself — "every
+   single-game cartridge is submapper 0 except the GK2 *Somari*, and that game does not seem to
+   rely on it", so **no software in the sources can observe the difference either way**.
+
+### Six tests, 893 → **899**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_somari_supervisor_register_is_at_4100_under_an_e100_mask` | the power-on MMC3 mode, **seven** mirrors the `$E100` mask admits, and `$4000` not being one — which is also the test that fails if the `address < 0x8000` guard is put first |
+| `req_core_100_the_somari_switches_the_whole_mapper_state_between_its_three_chips` | a layout only each chip could produce, surviving a round trip through both others, and mode 3 being mode 2 |
+| `req_core_100_the_somari_outer_chr_bank_is_bit_2_and_the_mmc1_mode_ignores_it` | `C` at bit 2 and **not** bit 3, 256 KiB of CHR, the bank **not counted twice** on a further register write, and the MMC1 mode ignoring it |
+| `req_core_100_the_somari_vrc2_mode_is_a_vrc2b_with_its_chr_registers_at_ff` | the `$FF` power-on, A0 picking the nibble and A1 the half-register, and `$F000-$FFFF` moving nothing because a VRC2 has no IRQ |
+| `req_core_100_the_somari_w_pal_resets_the_mmc1_shift_register_on_the_switch` | submapper 1 against submapper 0, through a `$E000` write deliberately left three bits short |
+| `req_core_100_the_somari_does_not_disturb_the_three_chips_it_holds` | mappers 4, 23 and 1 unchanged: no supervisor register on any of them, and the VRC2's own power-on CHR still zero |
+
+The third test reads the windows through `chr_peek_view().offsets()` rather than through
+`MapperMachine::chr_windows`, and the reason is worth the line: the fixture fills CHR bank N with
+`N as u8` and this board's outer bank moves a window by **256** banks, so the two would read the
+same byte. The offsets distinguish them.
+
+**Eleven configurations build, pass clippy `-D warnings` and pass their tests:**
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| `--no-default-features` | 782 / 0 / 7 |
+| each of the nine features alone | 783 to 802 |
+| `--no-default-features --features board-116` | **788 / 0 / 7** |
+| default (all nine) | **836 / 0 / 7** |
+| default `--features parked-boards` | 836 / 0 / 7 |
+
+With `zax-harness`, **899 passed, 0 failed, 8 ignored** — MF-6b's 887 plus this lot's twelve.
+`cargo fmt --check` clean; clippy `-D warnings` clean in all eleven, **no new `allow` of any
+kind**. The registry advertises **69 numbers by default** and 45 with every board feature off.
+
+### The shipped tree, on both instruments
+
+**PR-1's thirteen**, against `mf63-0-07325f6e`:
+
+| ROM | board | `07325f6e` | **step 4** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 378 921 | **3 308 288 529** | −90 392 | −0.0027 % |
+| `oamstr` | NROM | 3 318 459 130 | 3 318 478 745 | +19 615 | +0.0006 % |
+| `m1` | MMC1 | 4 885 841 284 | 4 885 937 821 | **+96 537** | **+0.0020 %** |
+| `m0` | NROM | 5 520 389 483 | 5 520 470 984 | **+81 501** | **+0.0015 %** |
+| `m4` | **MMC3** | 5 472 545 224 | **5 472 506 826** | −38 398 | −0.0007 % |
+| `metroid` | MMC1 | 5 115 944 243 | **5 115 928 064** | −16 179 | −0.0003 % |
+| `smb1` | NROM | 5 996 346 457 | 5 996 354 620 | +8 163 | +0.0001 % |
+| `mm2` | MMC1 | 6 017 889 238 | **6 017 855 604** | −33 634 | −0.0006 % |
+| `z2` | MMC1 | 6 291 431 663 | 6 291 489 092 | +57 429 | +0.0009 % |
+| `readbuf` | CNROM | 6 834 547 836 | 6 834 572 417 | +24 581 | +0.0004 % |
+| `duelito` | NROM | 7 380 393 405 | 7 380 421 007 | +27 602 | +0.0004 % |
+| `smb3` | **MMC3** | 7 949 452 274 | 7 949 490 475 | +38 201 | +0.0005 % |
+| `mmc5` | MMC5 | 11 286 830 608 | **11 279 363 868** | **−7 466 740** | **−0.066 %** |
+| **total** | | **79 378 449 766** | **79 371 158 052** | **−7 291 714** | **−0.009 %** |
+
+**The worst ROM of the thirteen is `m1` at +0.0020 %**, one tenth of the tolerance, and the set
+total is **0.009 % below** the base commit. `m4` and `smb3` — the two the MF lots make the ones to
+watch — are **−38 398 and +38 201**.
+
+**`mmc5`'s −7 466 740 is one symbol and it is a debt repaid**: `Cartridge::default_cpu_read`
+**−7 456 756**, which is *to the instruction* the **+7 456 756** MF-6b steps 2, 3, 4 and 5 all
+recorded on that ROM as the price of `IrqBoard::prg_ram_enabled` becoming a forwarded body. Two
+more bodies in that inner match — the Somari's `prg_ram_enabled` and `prg_ram_writable` — and
+LLVM laid the function out the way it had before MF-6b step 3. That is the third time this lot
+has found the same phenomenon (step 1's `push_expansion_audio` and step 3's nine ROMs are the
+others): **a dispatch that a hot function inlines whole has no monotone cost in its arm count.**
+The sixth board of `IrqBoard` cost that function 7.46 M and the eighth gave it back.
+
+**Level 2**, `l2-diff.py --bar`:
+
+| game/stage | `07325f6e` | **step 4** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `smb3/core` | 15 315 558 069 | 15 315 558 322 | **+253** | **+0.0000017 %** |
+| `mm2/core` | 12 036 819 361 | 12 036 822 861 | **+3 500** | **+0.00003 %** |
+| `smb1/core` | 11 515 125 238 | 11 515 128 803 | **+3 565** | **+0.00003 %** |
+| `zelda2/core` | 12 775 641 366 | 12 775 651 048 | **+9 682** | **+0.00008 %** |
+| `metroid/core` | 11 147 278 310 | 11 147 295 142 | **+16 832** | **+0.00015 %** |
+| `mm2/total` | 18 976 300 081 | **18 976 279 805** | −20 276 | −0.0001 % |
+| `metroid/total` | 13 735 514 951 | 13 735 583 997 | +69 046 | +0.0005 % |
+| `zelda2/total` | 15 358 834 193 | 15 359 752 301 | +918 108 | +0.0060 % |
+| `smb1/total` | 13 587 898 562 | 13 588 987 540 | +1 088 978 | +0.0080 % |
+| `smb3/total` | 24 187 868 326 | 24 190 548 627 | +2 680 301 | **+0.0111 %** |
+
+**Every figure of both columns is inside the tolerance outright**, with no noise argument needed
+at all: the five `core` figures are **+253 to +16 832 instructions** — `smb3/core` is 253
+instructions in 15.3 **billion** — and the worst `total` is **+0.011 %**, just over half the
++0.02 % allowed. Step 2's `smb3/total` +0.027 % did need the floor measurement; step 4's does
+not, and the floor measurement is still the reason that column can be read at all.
+
+For comparison, MF-6a2 step 3's stop-the-lot figures for 119, 47 and 37 alone were `mm2/core`
+**+2 136 243** and `smb3/core` **+848 592**. This tree has those three boards, mapper 116 and
+nine Cargo features, and its five `core` figures sum to **+33 832**.
+
+### The post-LTO check
+
+`pins63.py`, the three trees of this lot against the baseline:
+
+| symbol | `07325f6e` | step 3 | **step 4** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 626 | 1 / 2 / 3 626 | 1 / 2 / **3 626** |
+| `Board::ppu_peek` | 1 / 4 / 272 | 1 / 4 / 272 | 1 / 4 / **272** |
+| `NesBus::write_internal` | 1 / 10 / 3 580 | 1 / 10 / 3 743 | 1 / 10 / 3 815 |
+| `Ppu::run_dots` | 1 / 5 / 1 907 | 1 / 5 / 1 907 | 1 / 5 / **1 907** |
+| `NesBus::catch_up_ppu` | 1 / 12 / 188 | 1 / 12 / 188 | 1 / 12 / **188** |
+
+and `shape.py`: `Cpu::resolve` 2 / 6 / **1 948**, `Cpu::branch` 1 / 1 / **457**,
+`NesBus::read_cycle` 1 / 65 / **181**, `tick` 1 / 95 / **82**, `read_internal` 1 / 17 / **175**.
+
+**Seven of the eight pinned symbols, and all five of `shape.py`'s others, are identical to the
+instruction from one end of the lot to the other** — four boards added and nine Cargo features
+retrofitted, and `Cpu6502::step`, `resolve`, `branch`, `Board::ppu_peek`, `Ppu2C02::run_dots` and
+`NesBus::catch_up_ppu` have not moved by one instruction. The three claimants of `step`'s
+inlining budget are 0 / 0 / 0 and `zone_offset` has no symbol at all, which is the only reading of
+"no dearer" that means anything.
+
+The one that moved is `NesBus::write_internal`, **3 580 → 3 815** (+235) over the whole lot: the
+register decodes of the TQROM, the two multicarts and the Somari, plus two `IrqBoard` forwards.
+Its dynamic cost did not follow — `m4` −38 398 and `smb3` +38 201 are the two ROMs whose writes
+go down that path most.
+
+[`Somari`]: ../../rust/crates/zax-nes/src/cartridges/mappers/somari.rs
+
+[PROGRESS] MF-6a3 step 4/6 done: mapper 116 on three held chips behind `board-116`, Q-130 question 1 answered and Q-132 written, 899 / 0 / 8, and the shipped tree inside the tolerance outright on both runs with `mmc5` −0.066 %.

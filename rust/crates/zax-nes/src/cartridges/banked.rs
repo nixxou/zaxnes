@@ -134,6 +134,24 @@ impl BankWindows {
         }
     }
 
+    /// Adds `banks` to every 1 KiB CHR window's bank number, each re-wrapped as
+    /// [`Self::map_chr_1k`] wraps it.
+    ///
+    /// For a board whose outer CHR bank cannot be expressed through the sub-board that computed
+    /// the windows: mapper 116 holds an MMC3, an MMC1 and a VRC2 whose `update_banks` write
+    /// **absolute** bank numbers, and its supervisor register adds CHR A18 above all three. The
+    /// bank is recovered from the offset rather than remembered, so the call is idempotent and
+    /// the caller may re-apply it after every register write.
+    ///
+    /// Additive: no board but mapper 116 calls it, and it is behind `board-116`.
+    #[cfg(feature = "board-116")]
+    pub fn offset_chr_banks(&mut self, banks: i32) {
+        for slot in 0..Self::CHR_WINDOWS {
+            let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);
+            self.map_chr_1k(slot, bank.wrapping_add(banks));
+        }
+    }
+
     // ---------------------------------------------------------------- bus
 
     /// Reads PRG-ROM, or PRG-RAM when the window shows it, at `address`; `None` below

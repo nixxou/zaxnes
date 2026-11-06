@@ -77,7 +77,14 @@ fn req_core_011_unsupported_mapper_is_rejected_with_its_number() {
 fn req_core_102_only_implemented_mappers_are_accepted() {
     // The table of REQ-CORE-100, and nothing else: the list itself is checked in
     // mapper_tests, here only that it is the gate the loader uses.
-    assert!(!NesCore::SUPPORTED_MAPPERS.contains(&116));
+    //
+    // **116 is in the table exactly when `board-116` is on** (MF-6a3 step 4, answering Q-130
+    // question 1). Mapper 200 is the number REQ-CORE-102's own acceptance criterion names and
+    // §6 item 1 of `docs/review/MF-6-inventory.md` keeps out, so it is unconditional.
+    assert_eq!(
+        cfg!(feature = "board-116"),
+        NesCore::SUPPORTED_MAPPERS.contains(&116)
+    );
     assert!(!NesCore::SUPPORTED_MAPPERS.contains(&200));
     assert!(NesCore::SUPPORTED_MAPPERS.contains(&0));
     assert!(NesCore::SUPPORTED_MAPPERS.contains(&228));

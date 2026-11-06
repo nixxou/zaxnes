@@ -417,6 +417,13 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
         self.chr_ram_windows = mask;
     }
 
+    /// Recomputes the windows from the registers, for a board that holds this chip and writes
+    /// its own outer bank over them (mapper 116). Behind `board-116`, its only caller.
+    #[cfg(feature = "board-116")]
+    pub(crate) fn refresh_banks(&mut self) {
+        self.update_banks();
+    }
+
     fn update_banks(&mut self) {
         self.refresh_nametable_pages();
 

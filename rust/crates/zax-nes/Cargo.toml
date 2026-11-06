@@ -22,6 +22,7 @@ workspace = true
 default = [
     "board-94",
     "board-105",
+    "board-116",
     "board-119",
     "board-155",
     "board-158",
@@ -56,6 +57,12 @@ board-105 = []
 # Mapper 158, Tengen's 800037: the RAMBO-1 with CHR A17 wired to CIRAM A10 (MF-6b step 5). One
 # title, *Alien Syndrome*.
 board-158 = []
+
+# Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three mapper implementations (a VRC2, an
+# MMC3 and an MMC1) in one board with a supervisor register at $4100 (MF-6a3 step 4). Six
+# unlicensed titles, *Somari the Adventurer* among them; REQ-CORE-101 makes the number optional
+# and Q-130 question 1 is the decision to implement it.
+board-116 = []
 
 # Mapper 119, the Nintendo TQROM: *High Speed* and *Pin\*Bot*. A `const` parameter of the
 # MMC3's board, with its CHR-RAM chip's select, its two `#[inline(never)]` fetch bodies and the

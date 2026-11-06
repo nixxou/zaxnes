@@ -52,6 +52,8 @@ mod nrom;
 mod rambo1;
 #[cfg(feature = "board-small-boards")]
 mod small_boards;
+#[cfg(feature = "board-116")]
+mod somari;
 #[cfg(feature = "board-small-boards")]
 mod sunsoft1;
 #[cfg(feature = "board-small-boards")]
@@ -110,6 +112,8 @@ pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};
 #[cfg(feature = "board-small-boards")]
 pub use small_boards::SmallBoard;
+#[cfg(feature = "board-116")]
+pub use somari::Somari;
 #[cfg(feature = "board-small-boards")]
 pub use sunsoft1::Sunsoft1;
 #[cfg(feature = "board-small-boards")]

@@ -140,8 +140,15 @@ impl Mmc1 {
     // `const`-versus-field question — mapper 1 carries neither the 30-bit counter nor a test for
     // it, and `cmp4c.py` reads `Mmc1::update_banks` byte-identical across the step.
 
+    /// Recomputes the windows from the registers, for a board that holds this chip and writes
+    /// its own PRG layout over them (mappers 105 and 116). Behind the two features that need it.
+    #[cfg(feature = "board-116")]
+    pub(crate) fn refresh_banks(&mut self, memory: &mut CartridgeMemory) {
+        self.update_banks(memory);
+    }
+
     /// The committed `$8000` register, `[.... PSMM]`.
-    #[cfg(feature = "board-105")]
+    #[cfg(any(feature = "board-105", feature = "board-116"))]
     pub(crate) const fn control_register(&self) -> u8 {
         self.control
     }
@@ -153,14 +160,14 @@ impl Mmc1 {
     }
 
     /// The committed `$E000` register, `[...W BBBB]` on both boards.
-    #[cfg(feature = "board-105")]
+    #[cfg(any(feature = "board-105", feature = "board-116"))]
     pub(crate) const fn prg_register(&self) -> u8 {
         self.prg
     }
 
     /// The bank windows, for a board that computes its own PRG layout from the registers above
     /// and writes it over the MMC1's — which is what the NES-EVENT's discrete ICs do.
-    #[cfg(feature = "board-105")]
+    #[cfg(any(feature = "board-105", feature = "board-116"))]
     pub(crate) const fn windows_mut(&mut self) -> &mut BankWindows {
         &mut self.banks
     }

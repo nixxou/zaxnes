@@ -359,8 +359,11 @@ impl Cartridge {
             // created and the arm is unreachable either way. One `matches!` is also one
             // `matches!` whatever the features, which is what keeps this load-time decision
             // out of the diff when a feature is flipped.
-            watches_ppu_reads: matches!(mapper, 4 | 5 | 37 | 47 | 48 | 64 | 118 | 119 | 158),
-            watches_ppu_bus_without_read: matches!(mapper, 4 | 37 | 47 | 48 | 64 | 118 | 119 | 158),
+            watches_ppu_reads: matches!(mapper, 4 | 5 | 37 | 47 | 48 | 64 | 116 | 118 | 119 | 158),
+            watches_ppu_bus_without_read: matches!(
+                mapper,
+                4 | 37 | 47 | 48 | 64 | 116 | 118 | 119 | 158
+            ),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
@@ -1009,7 +1012,10 @@ mod tests {
         let mut expected = vec![4, 4, 5, 5];
         #[cfg(feature = "board-mmc3-multicart")]
         expected.extend_from_slice(&[37, 37, 47, 47]);
-        expected.extend_from_slice(&[48, 48, 64, 64, 118, 118]);
+        expected.extend_from_slice(&[48, 48, 64, 64]);
+        #[cfg(feature = "board-116")]
+        expected.extend_from_slice(&[116, 116]);
+        expected.extend_from_slice(&[118, 118]);
         #[cfg(feature = "board-119")]
         expected.extend_from_slice(&[119, 119]);
         #[cfg(feature = "board-158")]

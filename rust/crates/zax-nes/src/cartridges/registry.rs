@@ -13,6 +13,8 @@ use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
 use super::mappers::NesEvent;
 use super::mappers::Nrom;
+#[cfg(feature = "board-116")]
+use super::mappers::Somari;
 #[cfg(feature = "board-158")]
 use super::mappers::Tengen800037;
 #[cfg(feature = "board-119")]
@@ -104,6 +106,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     101,
     #[cfg(feature = "board-105")]
     105,
+    #[cfg(feature = "board-116")]
+    116,
     118,
     #[cfg(feature = "board-119")]
     119,
@@ -452,6 +456,10 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // `Mmc3Board`'s own note on the six shapes MF-6a2 step 3 measured for it. It goes in
         // `IrqBoard` rather than in a `Board` variant of its own, and `IrqBoard`'s note has the
         // +0.080 % on `mmc5` that two more discriminants cost.
+        // MF-6a3 step 4: the Gouder SOMARI-P, three chips in one board. `Somari`'s own note
+        // has the supervisor register, the four submappers and the two Q-132 readings.
+        #[cfg(feature = "board-116")]
+        116 => Board::IrqBoard(IrqBoard::Somari(Box::new(Somari::new(memory)))),
         #[cfg(feature = "board-119")]
         119 => Board::IrqBoard(IrqBoard::Tqrom(Tqrom::new(memory, mapper))),
         // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two

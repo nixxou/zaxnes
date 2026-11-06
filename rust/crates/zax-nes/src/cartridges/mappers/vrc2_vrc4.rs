@@ -141,6 +141,47 @@ impl Vrc2Vrc4 {
         }
     }
 
+    /// Mapper 116's VRC2 mode: nesdev ("INES Mapper 116") gives it as "A0/A1, i.e. VRC2b",
+    /// which is exactly [`VrcVariant::Vrc2b`] — Mesen's scrambled-looking
+    /// `((((addr & 0x02) | (addr >> 10)) >> 1) + 2) & 0x07` resolves to A1 picking the
+    /// half-register and A0 the nibble, which is what this build's mapper-23 arm computes with
+    /// `index = addr & 3`. A mapper-116 image declares no VRC submapper, so the variant is asked
+    /// for directly instead of being resolved from the header.
+    #[cfg(feature = "board-116")]
+    pub(crate) fn new_vrc2b(memory: &CartridgeMemory, mapper_number: i32) -> Self {
+        let lines = VrcVariant::Vrc2b.index_lines();
+        Self {
+            index_lines: lines,
+            index_or_lines: lines,
+            is_vrc2: true,
+            chr_shift: false,
+            chr_high_mask: 0x1F,
+            mapper_number,
+            ..Self::new(memory, 23)
+        }
+    }
+
+    /// Recomputes the windows from the registers (mapper 116); see
+    /// [`super::Mmc3Board::refresh_banks`].
+    #[cfg(feature = "board-116")]
+    pub(crate) fn refresh_banks(&mut self) {
+        self.update_banks();
+    }
+
+    /// Sets all eight CHR registers without a register write.
+    ///
+    /// nesdev ("INES Mapper 116") has the VRC2's CHR registers powering up to **`$FF`** on that
+    /// board, and "one version of *Somari the Adventurer* relies on this". A **method and not a
+    /// field**, for the reason MF-6b step 1 measured: one byte of displacement on
+    /// `VrcIrq::pending` — which `Board::irq_asserted` reads for this very board — re-laid out
+    /// `Cpu6502::branch` and cost eleven of lot PR-1's thirteen ROMs +0.009 % to +0.027 % with
+    /// no code added at all. The same shape as [`super::Mmc1::force_chr0_register`].
+    #[cfg(feature = "board-116")]
+    pub(crate) fn force_chr_registers(&mut self, value: i32) {
+        self.chr = [value; 8];
+        self.update_banks();
+    }
+
     /// MR-21-1 and MR-21-3: the register index comes from the two address lines the variant
     /// table gives this chip, not from the OR'd heuristic of its mapper number. The OR is
     /// still here and still free, because a known variant has both pairs equal.

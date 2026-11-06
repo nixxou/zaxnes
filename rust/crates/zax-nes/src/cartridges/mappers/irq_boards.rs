@@ -2,6 +2,8 @@
 use super::Mmc3Multicart;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
+#[cfg(feature = "board-116")]
+use super::Somari;
 #[cfg(feature = "board-158")]
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
@@ -104,6 +106,23 @@ pub enum IrqBoard {
     /// Mappers 47 and 37, Nintendo's two MMC3 multicarts (MF-6a3 step 1).
     #[cfg(feature = "board-mmc3-multicart")]
     Mmc3Multicart(Mmc3Multicart),
+    /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
+    /// only the MMC3 has an IRQ (MF-6a3 step 4).
+    ///
+    /// **Boxed, and for two reasons that are the same reason.** A [`Somari`] holds an MMC3, an
+    /// MMC1 and a VRC2 — about 550 bytes against this enum's 200 — so inline it would be the
+    /// variant that sets the enum's size, and MF-6b step 1 measured what moving an IRQ board's
+    /// fields costs: **one byte** of displacement on `VrcIrq::pending`, which
+    /// `Board::irq_asserted` reads for the VRC3 arm of this very enum, re-laid out
+    /// `Cpu6502::branch` and cost eleven of lot PR-1's thirteen ROMs +0.009 % to +0.027 % with
+    /// no code added at all. Boxed, this enum is the size MF-6a3 step 1 measured and the six
+    /// boards MF-6b put here do not move an instruction. It is also what keeps
+    /// `clippy::large_enum_variant` satisfied without a new `allow`.
+    ///
+    /// The price is one pointer dereference per forwarded call **for mapper 116 and no other
+    /// board**, on a board whose `Board` value is built once at load — §4.10's rule again.
+    #[cfg(feature = "board-116")]
+    Somari(Box<Somari>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -122,6 +141,8 @@ macro_rules! inner {
             IrqBoard::Tqrom($b) => $body,
             #[cfg(feature = "board-mmc3-multicart")]
             IrqBoard::Mmc3Multicart($b) => $body,
+            #[cfg(feature = "board-116")]
+            IrqBoard::Somari($b) => $body,
         }
     };
 }
@@ -180,7 +201,7 @@ impl Mapper for IrqBoard {
     /// read path: `Cartridge::default_cpu_read` went **+67 110 804 instructions over 300 frames
     /// of `mmc5exram`**, +0.504 % on that ROM, where the 430 k it was meant to save is 0.002 %
     /// of a game this board is not. The 55 instructions stay.
-    #[cfg(any(feature = "board-105", feature = "board-119"))]
+    #[cfg(any(feature = "board-105", feature = "board-116", feature = "board-119"))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
     }
@@ -195,7 +216,7 @@ impl Mapper for IrqBoard {
     /// — the same answer the un-forwarded dispatch gave them. The two multicarts need nothing
     /// from it either: they carry no PRG-RAM at all, and the condition their outer register puts
     /// on itself reads `Mmc3Board::prg_ram_writable` directly.
-    #[cfg(feature = "board-119")]
+    #[cfg(any(feature = "board-116", feature = "board-119"))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
     }

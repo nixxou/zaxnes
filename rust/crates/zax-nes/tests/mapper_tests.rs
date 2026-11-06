@@ -70,7 +70,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   (MF-6b step 4);
     // * 158 (Tengen's 800037, the RAMBO-1 with CHR A17 on CIRAM A10) (MF-6b step 5);
     // * 119 (the Nintendo TQROM) and 47 and 37 (Nintendo's two MMC3 multicarts), each behind
-    //   its own Cargo feature (MF-6a3 step 1) -- see `docs/review/BOARD-FEATURES.md`.
+    //   its own Cargo feature (MF-6a3 step 1) -- see `docs/review/BOARD-FEATURES.md`;
+    // * 116 (the Gouder SOMARI-P and its Huang ASIC), the one number REQ-CORE-101 leaves
+    //   optional, behind `board-116` (MF-6a3 step 4, answering Q-130 question 1).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -85,7 +87,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let small = cfg!(feature = "board-small-boards");
     let namcot = cfg!(feature = "board-namcot108");
     let multicart = cfg!(feature = "board-mmc3-multicart");
-    let additions: [(i32, bool); 37] = [
+    let additions: [(i32, bool); 38] = [
         (19, true),
         (24, true),
         (26, true),
@@ -109,6 +111,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (95, namcot),
         (97, small),
         (105, cfg!(feature = "board-105")),
+        (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
         (140, small),
@@ -137,9 +140,16 @@ fn req_core_100_every_required_mapper_is_registered() {
 
 #[test]
 fn req_core_102_any_other_mapper_is_refused() {
-    // 116 is the one REQ-CORE-101 leaves optional: not implemented, so refused with the
-    // message of REQ-CORE-011 like any other number outside the table.
-    for mapper in [6usize, 116, 177, 200] {
+    // **116 is no longer here**, and that is Q-130 question 1 answered. REQ-CORE-101 leaves the
+    // number optional and that ticket's provisional choice was "not implemented at all, so
+    // REQ-CORE-011 refuses it"; MF-6a3 step 4 implements it instead, behind `board-116`, so the
+    // sweep drops it exactly when that feature is on. REQ-CORE-102's own acceptance criterion
+    // (mapper 200) is untouched either way, which is the other half of Q-130.
+    let mut refused = vec![6usize, 177, 200];
+    if !cfg!(feature = "board-116") {
+        refused.insert(1, 116);
+    }
+    for mapper in refused {
         assert!(!Cartridge::is_supported(mapper as i32));
         let mut core = zax_nes::NesCore::new();
         let load = core.load_rom(&MapperRom::new(mapper).image(), "Other.nes");
@@ -3405,5 +3415,284 @@ fn req_core_100_an_ordinary_mapper_4_image_is_unaffected_by_119_47_and_37() {
     assert!(
         core.cartridge().unwrap().chr_peek_view().is_some(),
         "mapper 4 still offers a chr_peek_view"
+    );
+}
+
+// ------------------------------------------- the Gouder SOMARI-P (116), MF-6a3 step 4
+
+/// Writes the supervisor register at `$4100`.
+#[cfg(feature = "board-116")]
+fn somari_mode(core: &mut NesCore, value: u8) {
+    core.mapper_write(0x4100, value);
+}
+
+/// The eight 1 KiB CHR window offsets the active chip shows.
+///
+/// Read through the view and not through [`MapperMachine::chr_windows`], because the fixture
+/// fills CHR bank N with `N as u8` and the outer bank of mapper 116 moves a window by **256**
+/// banks: the two would read the same byte. The offsets distinguish them.
+#[cfg(feature = "board-116")]
+fn chr_offsets(core: &NesCore) -> [usize; 8] {
+    core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
+}
+
+/// nesdev ("INES Mapper 116"): the supervisor register is at `$4100` with "Mask: $E100", holding
+/// `[.... .CMM]`, and the board powers on at **`$01`, MMC3 mode**.
+///
+/// The register is below `$8000`, which `Cartridge::cpu_write` reaches for all of `$4020-$FFFF`,
+/// so `Mapper::write_register`'s usual `address < 0x8000` guard must not be this board's first
+/// line — a board that returned early there could never be switched out of MMC3 mode at all,
+/// which is what every mirror below would show.
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_supervisor_register_is_at_4100_under_an_e100_mask() {
+    // Power-on: MMC3 mode. R6 = 0, R7 = 1 with the last two banks fixed is the MMC3's own
+    // power-on layout, and nothing else on this board gives it.
+    let mut core = MapperRom::new(116).prg(32).chr(128).load();
+    assert_eq!([0, 1, 30, 31], core.prg_windows(), "power-on is MMC3 mode");
+
+    // Every mirror the $E100 mask admits reaches the register: A8 set and A13-A15 = %010, with
+    // A0-A7 and A9-A12 undecoded.
+    for address in [0x4100u16, 0x4101, 0x41FF, 0x4300, 0x5100, 0x5300, 0x5FFF] {
+        let mut probe = MapperRom::new(116).prg(32).chr(128).load();
+        probe.mapper_write(address, 0x00); // VRC2 mode.
+                                           // $8000 is the VRC2's first 8 KiB PRG register; on the MMC3 it is the bank select and
+                                           // moves nothing at all.
+        probe.mapper_write(0x8000, 0x05);
+        assert_eq!(
+            [5, 1, 30, 31],
+            probe.prg_windows(),
+            "{address:#06X} is the supervisor register"
+        );
+    }
+
+    // And an address the mask excludes is not it: A8 clear.
+    core.mapper_write(0x4000, 0x00);
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!(
+        [0, 1, 30, 31],
+        core.prg_windows(),
+        "$4000 is not the supervisor register, so this is still an MMC3"
+    );
+}
+
+/// "Three chips each keeping its own registers, so that when switching between modes using the
+/// supervisor register, the entire mapper state changes, including PRG/CHR-ROM switchable and
+/// fixed banks as well as IRQ state."
+///
+/// So each chip's registers must survive a round trip through the other two: set a layout only
+/// that chip could produce, walk away through both others, come back and find it unchanged.
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_switches_the_whole_mapper_state_between_its_three_chips() {
+    let mut core = MapperRom::new(116).prg(32).chr(128).load();
+
+    // The MMC3: $8000/$8001 as a select-and-value pair.
+    core.mmc3_bank(6, 3);
+    core.mmc3_bank(7, 5);
+    assert_eq!([3, 5, 30, 31], core.prg_windows(), "the MMC3's own layout");
+
+    // The VRC2: two 8 KiB registers at $8000 and $A000, nothing like the MMC3's pair.
+    somari_mode(&mut core, 0x00);
+    core.mapper_write(0x8000, 0x07);
+    core.mapper_write(0xA000, 0x09);
+    assert_eq!([7, 9, 30, 31], core.prg_windows(), "the VRC2's own layout");
+
+    // The MMC1: 16 KiB banking through the five-bit serial shift register.
+    somari_mode(&mut core, 0x02);
+    core.mmc1_write(0x8000, 0x0C); // PRG mode 3, 8 KiB CHR.
+    core.mmc1_write(0xE000, 0x05);
+    assert_eq!(
+        [10, 11, 30, 31],
+        core.prg_windows(),
+        "the MMC1's own layout"
+    );
+
+    // And all three are still there, mode 3 being mode 2.
+    somari_mode(&mut core, 0x01);
+    assert_eq!(
+        [3, 5, 30, 31],
+        core.prg_windows(),
+        "the MMC3 kept its registers"
+    );
+    somari_mode(&mut core, 0x00);
+    assert_eq!(
+        [7, 9, 30, 31],
+        core.prg_windows(),
+        "the VRC2 kept its registers"
+    );
+    somari_mode(&mut core, 0x03);
+    assert_eq!(
+        [10, 11, 30, 31],
+        core.prg_windows(),
+        "the MMC1 kept its registers, and mode 3 is mode 2"
+    );
+}
+
+/// `C` is **bit 2** of the supervisor register and selects the outer 256 KiB CHR-ROM bank, CHR
+/// A18: "outer 256 KiB CHR-ROM bank". The page's own diagram puts it at bit 2 and Mesen agrees
+/// (`(_mode & 0x04) << 6`); a summary of that page which says bit 3 is wrong, which is what the
+/// bit-3 probe pins.
+///
+/// **The MMC1 mode ignores it** (Mesen's `UpdateChr` case 2/3 does not apply it), and the bank
+/// must not be counted twice when a further register write arrives.
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_outer_chr_bank_is_bit_2_and_the_mmc1_mode_ignores_it() {
+    const KIB: usize = 1024;
+    let mut core = MapperRom::new(116).prg(32).chr(512).load();
+
+    // MMC3 mode: R2 and R3 drive PPU $1000-$17FF with the CHR mode bit clear.
+    core.mmc3_bank(2, 0x10);
+    core.mmc3_bank(3, 0x11);
+    let plain = chr_offsets(&core);
+    assert_eq!((16 * KIB, 17 * KIB), (plain[4], plain[5]), "`C` clear");
+
+    somari_mode(&mut core, 0x05); // MMC3 mode with `C` set.
+    let outer = chr_offsets(&core);
+    assert_eq!(
+        (272 * KIB, 273 * KIB),
+        (outer[4], outer[5]),
+        "`C` is bit 2, and it is 256 KiB of CHR"
+    );
+
+    // A further register write must not add the bank a second time.
+    core.mmc3_bank(2, 0x10);
+    assert_eq!(
+        272 * KIB,
+        chr_offsets(&core)[4],
+        "the outer bank is not counted twice"
+    );
+
+    // Bit 3 is not the chip select.
+    somari_mode(&mut core, 0x09);
+    assert_eq!(16 * KIB, chr_offsets(&core)[4], "bit 3 is not `C`");
+
+    // The MMC1 mode ignores the bank: the same registers give the same windows either way.
+    somari_mode(&mut core, 0x06); // MMC1 mode, `C` set.
+    core.mmc1_write(0x8000, 0x1C); // 4 KiB CHR mode, PRG mode 3.
+    core.mmc1_write(0xA000, 0x04);
+    let with_c = chr_offsets(&core);
+    somari_mode(&mut core, 0x02); // MMC1 mode, `C` clear.
+    assert_eq!(with_c, chr_offsets(&core), "the MMC1 mode ignores `C`");
+    // The MMC1's own 4 KiB CHR mode: register $04 is 4 KiB bank 4, which is 1 KiB bank 16.
+    assert_eq!(
+        16 * KIB,
+        with_c[0],
+        "and shows the bank its own register names"
+    );
+}
+
+/// nesdev ("INES Mapper 116"): the VRC2 mode is "A0/A1, i.e. a `VRC2b`", and its **CHR registers
+/// power up to `$FF`** — "one version of *Somari the Adventurer* relies on this", which is why
+/// the power-on value is forced rather than left at the chip's own zero.
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_vrc2_mode_is_a_vrc2b_with_its_chr_registers_at_ff() {
+    let mut core = MapperRom::new(116).prg(32).chr(512).load();
+    somari_mode(&mut core, 0x00);
+
+    // $FF in every one of the eight 1 KiB registers: bank 255 of a 512-bank CHR-ROM.
+    assert_eq!([255u8; 8], core.chr_windows(), "the power-on $FF");
+
+    // A VRC2b takes the register index from A1 (which half of the register) and A0 (which
+    // nibble), which is what this build's mapper-23 arm computes with `index = addr & 3`. So
+    // $B000 is CHR register 0's low nibble and $B001 its high nibble: $3 then $1 gives bank $13.
+    core.mapper_write(0xB000, 0x03);
+    core.mapper_write(0xB001, 0x01);
+    assert_eq!(
+        0x13,
+        core.chr_bank(0x0000),
+        "A0 picks the nibble and A1 the half-register: a VRC2b"
+    );
+
+    // And the VRC2 has no IRQ at all — that is the VRC4's — so $F000-$FFFF moves nothing.
+    let before = core.prg_windows();
+    for address in [0xF000u16, 0xF001, 0xF002, 0xF003] {
+        core.mapper_write(address, 0xFF);
+    }
+    assert_eq!(
+        before,
+        core.prg_windows(),
+        "no VRC4 IRQ registers on a VRC2"
+    );
+}
+
+/// Submapper 1, the **SOMARI-W** PAL: it "resets the MMC1's serial shift register when switching
+/// *to* MMC1 mode, equivalent to writing to $8000-$FFFF with bit 7 set", and submapper 0, the
+/// **SOMARI-P**, does not.
+///
+/// The test leaves the shift register three bits full on purpose, walks away to the VRC2 and
+/// comes back: on submapper 1 the five bits that follow are the whole of what commits, and on
+/// submapper 0 the three stale bits are still in front of them, so the same writes commit
+/// something else. The reading that puts the reset on submapper 1 is the one recorded in
+/// [`Somari`]'s own note; no game in the sources can show the difference, because the only
+/// cartridge of the other PAL "does not seem to rely on it".
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_w_pal_resets_the_mmc1_shift_register_on_the_switch() {
+    let mut windows = Vec::new();
+    for submapper in [0u8, 1] {
+        let mut core = MapperRom::new(116)
+            .prg(32)
+            .chr(128)
+            .submapper(submapper)
+            .load();
+        somari_mode(&mut core, 0x02); // MMC1 mode.
+        core.mmc1_write(0x8000, 0x0C); // PRG mode 3, a clean start.
+
+        // Three bits of a $E000 write and no more.
+        for _ in 0..3 {
+            core.mapper_write(0xE000, 0x01);
+        }
+
+        somari_mode(&mut core, 0x00); // away to the VRC2...
+        somari_mode(&mut core, 0x02); // ...and back *to* MMC1 mode.
+        core.mmc1_write(0xE000, 0x05);
+        windows.push(core.prg_windows());
+    }
+
+    assert_eq!(
+        [10, 11, 30, 31],
+        windows[1],
+        "submapper 1 reset the shift register, so $05 is the whole of what committed"
+    );
+    assert_ne!(
+        windows[1], windows[0],
+        "submapper 0 does not reset it, so the three stale bits are still in front"
+    );
+}
+
+/// The non-regression: the three chips mapper 116 holds are untouched on their own numbers.
+#[cfg(feature = "board-116")]
+#[test]
+fn req_core_100_the_somari_does_not_disturb_the_three_chips_it_holds() {
+    // A mapper-4 image has no supervisor register, so $4100 moves nothing.
+    let mut mmc3 = MapperRom::new(4).prg(32).chr(128).load();
+    mmc3.mmc3_bank(6, 3);
+    let before = mmc3.prg_windows();
+    mmc3.mapper_write(0x4100, 0x00);
+    assert_eq!(
+        before,
+        mmc3.prg_windows(),
+        "no supervisor register on mapper 4"
+    );
+
+    // A mapper-23 image is still a VRC2/VRC4 resolved from its own header, not a forced VRC2b,
+    // and its CHR registers still power on at zero rather than at $FF.
+    let vrc = MapperRom::new(23).prg(16).chr(32).load();
+    assert_eq!(23, vrc.cartridge().unwrap().mapper_number());
+    assert_eq!([0u8; 8], vrc.chr_windows(), "the VRC2's own power-on CHR");
+
+    // And a mapper-1 image is still an MMC1, whose $4100 is nothing either.
+    let mut mmc1 = MapperRom::new(1).prg(16).chr(32).load();
+    mmc1.mmc1_write(0x8000, 0x0C);
+    mmc1.mmc1_write(0xE000, 0x03);
+    let before = mmc1.prg_windows();
+    mmc1.mapper_write(0x4100, 0x00);
+    assert_eq!(
+        before,
+        mmc1.prg_windows(),
+        "no supervisor register on mapper 1"
     );
 }
