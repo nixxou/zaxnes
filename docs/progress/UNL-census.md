@@ -17,7 +17,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | ---: | --- | --- |
 | 0 | the plan, this file, and the exact number set the census has to cover | **done** |
 | 1 | census part A — §3.3's single-publisher boards (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | **done** |
-| 2 | census part B — §3.4's explicitly listed numbers | to do |
+| 2 | census part B — §3.4's explicitly listed numbers | **done** |
 | 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | to do |
 | 4 | census part D — the homebrew numbers, and the census's category totals | to do |
 | 5 | the category-A detail: documentation quality, hooks, effort per number | to do |
@@ -89,3 +89,28 @@ The findings that change a decision:
   61 is NTDEC/GS, 172 Super Mega, 173 Idea-Tek, 286 Benshieng.
 * **NesCartDB answers HTTP 403 to this environment**, so no per-number cartridge count could be
   refreshed. Recorded in §0 as the census's one open gap.
+
+## Step 2 — §3.4's 83 numbers: 15 A, 7 B, 47 C, 6 D, 8 E
+
+`docs/review/UNL-census.md` §2. The findings that change a decision:
+
+* **Fifty-three of the 83 are multicarts, bootlegs or FDS conversions.** §3.4's own description was
+  right; the owner's content rule reaches the same verdict without any performance argument.
+* **Fifteen are A**, and they are fewer boards than numbers: **79 + 113 + 146 + 148 are one
+  circuit** (NESdev gives them one page, "NINA-003-006"; Mesen returns `Nina03_06` for three of
+  them), and **83 + 264 are one page and one Cony/Yoko ASIC**.
+* **79 is AVE's whole catalogue** — Wikipedia's `/wiki/American_Video_Entertainment` lists 19
+  NES-exclusive AVE titles — behind a board whose documentation is a full table and whose hook list
+  is empty. One register at $4100.
+* **163 (Nánjīng) survives the content rule**: seven titles with catalogue numbers, including the
+  Chinese *Harvest Moon*, *Diablo* and *Final Fantasy IV*. It needs a PPU-read hook, battery
+  PRG-RAM and, on submapper 1, ADPCM expansion audio.
+* **83 (Cony/Yoko) is the find of this step**: four ports of Capcom/SNK/Neo Geo games, a full
+  register table, and an IRQ counter with *two* selectable clock sources (CPU M2 or PPU A12).
+* **Six of the fifteen A numbers have a stub for documentation** — 144, 170, 216, 240, 244, 521 —
+  so the "no reliable public documentation" reason bites inside category A, not only outside it.
+  170 is one sentence with no register and no mask.
+* **301 has no documentation of its own**: NESdev redirects `NES 2.0 Mapper 301` to INES Mapper
+  242, a different board, while Mesen builds `Bmc8157`. Recorded as E on that contradiction.
+* **177 and 200 stay unsupported**, so `req_core_102_any_other_mapper_is_refused` keeps three of
+  its four numbers (6, 177, 200) and holds unchanged.

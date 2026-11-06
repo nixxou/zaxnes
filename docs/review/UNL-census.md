@@ -36,10 +36,12 @@ homebrew numbers the census covers **199**. Mapper 14 is already inside the clon
    board. They are what the owner's rule calls original content. A port of a game that *does* run
    on a supported board — Waixing's Chinese *Dragon Ball Z: Kyōshū! Saiya-jin*, whose Bandai
    original is mapper 16 — is B.
-2. **A number is categorised by the highest category any one of its titles reaches**, because the
-   question is what shipping the board would preserve. A board carrying one original game and nine
-   multicarts is A. Where that promotion is the only reason for the category, the row says so and
-   names the single title that does it.
+2. **A is a promotion; B, C and D are not ranked against each other.** Any single category-A title
+   promotes the number to A, because that title is what shipping the board would preserve — a board
+   carrying one original game and nine multicarts is A, and where that promotion is the only reason
+   for the category the row names the single title that does it. Below A the number takes the
+   category of the **bulk** of its catalogue, since B, C and D are all excluded under the same
+   owner's rule and nothing turns on the order. §2.0 restates this where it first bites.
 
 ### Sources, and one that is unreachable
 
@@ -369,3 +371,174 @@ standing.
 **29** of them carry at least one game that exists on no other board this build supports, and four
 numbers — **36/132/172/173** — are a single protection ASIC that also covers two of the Sachen
 numbers.
+
+---
+
+## 2. Part B — §3.4's 83 explicitly listed numbers
+
+### 2.0 One refinement to the category rule
+
+**A is a promotion and B/C/D are not ranked against each other.** Any single category-A title
+promotes the number to A, because that title is what shipping the board would preserve. Below A,
+the number takes the category of the **bulk** of its catalogue rather than of its most unusual
+cartridge — a 22-in-1 with a pirate *Contra* in a reset-selected slot is **C**, not B. Nothing
+turns on the distinction: B, C and D are all out under the same owner's rule, and the rows name
+the titles either way.
+
+### 2.1 The fifteen category-A numbers of §3.4
+
+| iNES | board (NESdev) | Mesen class | publisher | the title(s) that make it A | doc | hooks beyond banking |
+| ---: | --- | --- | --- | --- | --- | --- |
+| **38** | UNL-PCI556 | `UnlPci556` | **Bit Corp.** | *Crime Busters* — the page quotes **1 game in NesCartDB** | partial | none. The page warns writes to $F000-$FFFF "are very likely to also trigger a bankswitch", and the 74138's enable depends on /ROMSEL, R/W and M2 |
+| **79** | **NINA-03, NINA-06** (72-pin) | `Nina03_06(false)` | **American Video Entertainment** | the page names none, but Wikipedia's `/wiki/American_Video_Entertainment` lists **19** AVE NES titles, every one of them NES-exclusive unlicensed software: *Dudes with Attitude*, *Trolls on Treasure Island*, *Deathbots*, *Krazy Kreatures*, *Tiles of Fate*, *Double Strike*, *Impossible Mission II*, *Solitaire*, *Blackjack*, *F-15 City War*, *Puzzle*, *Pyramid*, *Rad Racket*, *Mermaids of Atlantis*, *Ultimate League Soccer*, *Venice Beach Volleyball*, *Wally Bear and the NO! Gang*, *Cue Stick* (cancelled), *Maxivision 15-in-1* | **full** | none at all. A one-byte control register at $4100: 8 KiB CHR bank, 32 KiB PRG bank |
+| **83** | a chip-on-board ASIC by **Cony (Yoko)**; PCBs NC-24/82-07-17J, NC-14/82-05-26J, N-C88-1603/83-08-19J, N-C44/82-08-24J | `Mapper83` | Cony / Yoko | *Street Fighter II Pro*, *Fatal Fury 2*, *World Heroes 2'*, *Super Blaster VII Turbo 28* — ports of Capcom, SNK and Neo Geo games that never shipped on a Famicom cartridge. Four multicarts beside them | **full** | an **IRQ counter with two selectable clock sources — CPU M2 *or* PPU A12 rising edge**; mirroring control; a solder-pad read at $5000; 4 bytes of scratch RAM at $5100-$5103 |
+| **107** | not named; an 8-bit unified register | `Mapper107` | **Magicseries** | *Magic Dragon* | **full** | none. The page notes FCEUX implements three bits of the register and MesenCE all eight; bus-conflict behaviour undetermined |
+| **144** | a Color Dreams revision, PCB **50282** | `ColorDreams` | Color Dreams | *Death Race* | **stub** | **bus conflicts, and an unusual kind**: a 300 Ω resistor between CPU D0 and the mapper means only the ROM's least significant bit wins. The page gives three alternative formulas and no register table |
+| **146** | the **same NINA-03/06 circuit** as 79, as the Sachen 3015 / SA-016 60-pin chip-on-board | `Nina03_06(false)` | Sachen | **none attributed to this number by either source.** Graded A by family, and the grading is moot: it is the same board as 79 and implementing 79 implements it | **full** (the family's) | as 79 |
+| **163** | **Nánjīng FC-001** | `Nanjing` | 南晶 (Nánjīng) | **7**: *牧场物语 — Harvest Moon* (NJ011), *水浒神兽* (NJ019), *暗黑破坏神 — Diablo* (NJ037), *轩辕剑外传 之 天之痕* (NJ045), *Final Fantasy IV — 最终幻想 4* (NJ098), *雷电皇 比卡丘传说* (NJ046), *真 Samurai Spirits — 武士道列传: 侍魂* (NJ-033, submapper 1) | **full** — five registers at $5000-$5300 with a feedback read | **a PPU-read hook** (the 4 KiB CHR-RAM page is selected automatically from the PPU address lines), battery-backed 8 KiB PRG-RAM, and **expansion audio on submapper 1** (an ADPCM chip) |
+| **170** | not named | `Mapper170` | not named | *Shiko Game Syu*, an original unlicensed Famicom title | **stub — one sentence**, no register, no mask | unknown, because nothing is documented |
+| **190** | not named | `MagicKidGooGoo` | **Zemina** | *Magic Kid Googoo* | partial | none. CHR at $A000-$BFFF, PRG at $8000-$9FFF and $C000-$DFFF; no initialisation values, no timing |
+| **216** | not named | `Mapper216` | **RCM Group** | *Bonza*, *Videopoker Bonza*, *Magic Jewelry II* | **stub** | **Dendy timing** — the page says some revisions need it to display correctly, which is a console-timing concern and not a cartridge one |
+| **240** | two PCB variants, neither named | `Mapper240` | not named | *荊軻新傳 — Jing Ke Xin Zhuan*, *聖火列傳 — Sheng Huo Lie Zhuan*. Wikipedia's `/wiki/Hummer_Team` independently attributes *Jīng Kē Xīn Zhuàn* (1992) to Hummer Team and calls it "a Chinese language RPG" | **stub** — "Selects 32k PRG @ $8000", "Selects 8k CHR @ $0000", two different decodings | PRG-RAM, and a heuristic to tell the two PCBs apart |
+| **244** | not named | `Mapper244` | **C&E** | *Decathlon* | **stub** | none documented |
+| **246** | **G0151-1** | `Mapper246` | not named | *封神榜 — Fēngshénbǎng: Fúmó Sān Tàizǐ* | partial | battery-backed PRG-RAM at **$6800-$6FFF** (not the usual window), and a **PRG A17 forced on reads from certain CPU addresses**. The page warns the game "only work[s] in Famiclones" |
+| **264** | the **same Cony/Yoko page as 83**, the 2 KiB-CHR variant (83.1/264) | `Yoko` | Cony / Yoko | as 83 | **full** | as 83 |
+| **521** | **DREAMTECH01** | — | not named | *장두진 바둑교실: 입문편*, a Korean Igo tutorial | **stub** | none. A bank register at $5020 (mask $F030), a fixed last bank, 8 KiB CHR-RAM |
+
+**Six of the fifteen have a stub for documentation** — 144, 170, 216, 240, 244, 521 — and that is
+where one of the three remaining exclusion reasons still bites *inside* category A. 170 is the
+extreme case: one sentence, no register, no mask, nothing to implement from. §6 sorts them.
+
+**Three clusters are worth seeing as clusters**, because they change the effort arithmetic:
+
+* **79 + 113 + 146 + 148 are one circuit.** NESdev gives them **one page**, "NINA-003-006", and
+  Mesen returns `Nina03_06` for 79, 113 and 146 (`MapperFactory:79,113,146`). The differences are
+  stated on that page in one line each: 113 "extend[s] the NINA-03/06 with an extra 4 bits of
+  control register" plus run-time mirroring, 146 is the 60-pin Sachen chip-on-board of the same
+  circuit, 148 "relocates the latch register, introducing bus conflicts". **Four numbers, one
+  board, and AVE's whole 19-title catalogue behind it.**
+* **83 + 264 are one page and one ASIC** — and 487 (AVE **NINA-08**) belongs to the same discussion
+  for a different reason: its register set implements *both* the NINA-03 and the Color Dreams
+  bankswitching schemes, selected by a bit at $4180, "so that AVE and Color Dreams games ran
+  completely unmodified". A board that is two supported boards in one.
+* **163 is the Nánjīng board §6 named as revisitable, and it survives the content rule**: seven
+  titles with their own catalogue numbers, including the Chinese *Harvest Moon*, *Diablo* and
+  *Final Fantasy IV* — RPGs written for the Famicom and existing on no other platform's cartridge.
+  Its page is a full register table. It is a genuine A.
+
+### 2.2 The seven B numbers — bootlegs, hacks and ports of games already here
+
+| iNES | board | the title, and what it derives from | doc |
+| ---: | --- | --- | --- |
+| **106** | discrete, a 74LS670 register file and ROM chips 5601/5602 | *Super Mario Bros. 3* bootleg, "modified from [the] MMC3 original, with copyright removed" — mapper **4**, which this build has | full; a 16-bit CPU-cycle IRQ. The page documents FCEUX's implementation as inaccurate on real hardware, especially on PAL |
+| **117** | not named | *Crayon Shin-Chan (Ch)* and *San Guo Zhi 4 — Chi Bi Feng Yun*, both hacks/ports | partial, and the IRQ is guessed: "selects PPU scanline MINUS $14 (?)", with $A008-$A00F marked unknown |
+| **183** | a VRC4e clone with extra logic | *Shui Guan Pipe*, a pirate variant of Sunsoft's *Gimmick!* — mapper **69**, which this build has | partial, plus an errata correcting an early wrong implementation |
+| **222** | **CTC-31**, corporation unknown | pirate ports of Data East's *Dragon Ninja* and Taito's *Don Doko Don 2* (the latter renamed *Super Mario Bros. 8*) | **stub**, and the page says so outright: *"No better information than FCEUX's source is currently available"* |
+| **266** | **UNL-CITYFIGHT** | *City Fighter IV*, which the page calls a hack of *Master Fighter II* — itself a mapper-189 hack of *Street Fighter II* | full. Its hook is remarkable and recorded for a later audio lot: a **4-bit PCM DAC at $980C** through an R-2R ladder, driven during speech while the VRC4's pseudo-scanline IRQ mode runs |
+| **529** | UNL-T-230 (also YY0807, J-2148) | bootlegs of *Datach Dragon Ball Z* and *Dragon Ball Z Gaiden* | partial. A VRC4 clone plus a **93C56 EEPROM** over Microwire, whose register overlaps the VRC4's, so the game writes $FFFx to reach it |
+| **530** | **UNL-AX5705** | *Super Mario Bros. Pocker Mali* (a hack) and a bootleg of Bandai's *Crayon Shin-chan: Ora to Poi Poi* | **stub**. A VRC4f clone with PRG A14↔A16 and CHR A15↔A16 swapped |
+
+**529 is the one row where the category rule and the owner's intent pull apart, and it is worth a
+sentence.** Its two titles are bootlegs of **licensed Bandai cartridges** — so they are not
+original content and the number is out — but the licensed originals are the **Datach** (mapper
+**157**) and the LZ93D50+X24C01 (**159**), *neither* of which this build has. The right way to
+preserve those two games is §3.1's licensed Bandai row, not a bootleg board: 157 and 159 are
+already in the inventory's MF-6c plan. The census's recommendation is to leave 529 out and let that
+plan stand.
+
+### 2.3 The six D numbers — FDS conversions
+
+| iNES | board | titles | doc |
+| ---: | --- | --- | --- |
+| **42** | not named | *Ai Senshi Nicol*; *Mario Baby* (actually *Bio Miracle Bokutte Upa*) | full; a 15-bit counter with 24 576-cycle timing. The page: "while they likely used different hardware, they can both be encompassed by a single mapper" |
+| **43** | **TONY-I**, **YS-612** | *Super Mario Bros. 2* (J); *Mr. Mary 2* (from a multicart only) | full; a 12-bit M2-cycle IRQ, register at $4022 |
+| **50** | **N-32** conversion, PCB 761214 | *Super Mario Bros. 2* (J); an alt-levels *Super Mario Bros.* hack | partial. The page calls the PRG setup "bizarre" and questions whether the counter is 16-bit or "13-bit with inverted MSB" |
+| **103** | discrete: three 7400, two 7410, a 7432, a 7474, a 74138, a 74157, a 74161 | *Doki Doki Panic* — "a specific pirate port of the FDS version" | full, from Krzysiobal's reverse engineering |
+| **108** | **DH-08** (sub 1), **UNL-BB** (subs 2 and 4) | Whirlwind Manu conversions: *Bubble Bobble* (LH31), *Falsion* (LH54), *Meikyuu Jiin Dababa* (LH28), *Pro Wrestling* (LE05) | full per submapper, plus the FCEUX/Mesen heuristic that disambiguates the PCBs without configuration |
+| **120** | **LH15**, Whirlwind Manu | *とびだせ大作戦 — Tobidase Daisakusen* | partial; one register at $41FF |
+
+Six more FDS conversions on top of §3.3's twelve. **Eighteen of the 143 numbers in §3.3 and §3.4's
+own lists exist to put an FDS disk on a cartridge**, and the owner's rule excludes every one.
+
+### 2.4 The eight E numbers
+
+| iNES | why | detail |
+| ---: | --- | --- |
+| **59** | **no title** | BMC-T3H53, BMC-D1038. A full register table *and* a jumper read, and no game named. The page records that "NESten's Mapper DLL v1.0 contained an incorrect implementation", corrected in v1.2 but not universally, so **59 and 60 are inconsistently applied across ROM files and emulators** |
+| **166** | **no title** | Subor's educational-computer board, in the bank order that was later found wrong: 167's errata says 166 had "a fixed bank $07 rather than $20 in mode 0, and a non-inverted PRG A14 in modes 2 and 3" |
+| **167** | **no title** | the same Subor board, correct. Full register table, four registers with XOR-combined bank selection and three layout modes. The page says only "various mini-games" and names none |
+| **177** | **no game** | 恒格电子 (Hénggé Diànzǐ). Two titles, both **educational cartridges** rather than games: *Nikita PC Vivaz* and *英语发声词霸 — ABC 声霸*. Documentation is a full table, and the hooks are heavy: a **TMS5220-compatible LPC speech chip at $5000-$5FFF**, 8-32 KiB of battery WRAM, and a 16 KiB CHR-RAM mode that auto-switches on the PPU address |
+| **179** | **no documentation, no title** | "a Nestopia assignment which duplicates iNES Mapper 176"; the page is a redirect notice saying 176 should be used |
+| **301** | **no documentation** | **NESdev's `NES 2.0 Mapper 301` redirects to INES Mapper 242**, a different board, while Mesen builds `Bmc8157` for it (`MapperFactory:301`). The two sources name different hardware and neither documents 301 itself |
+| **328** | **no game** | UNL-RT-01, whose only title is *Test Ver. 1.01 Dlya Proverki TV Pristavok* — a television test cartridge. Stub documentation, mask "unknown, possibly $BFFF", and a weak-bit random-number generator at $CE80-$CEFF |
+| **329** | **no game** | the "Keyboard Transformer", a Russian cartridge that attaches an IBM PC/AT keyboard. Its titles are a modified *Family BASIC* — a licensed Nintendo product — and *Мооспирв обучающий компьютер 2000*. Stub documentation, no pinout, no protocol |
+
+**177 is one of the four numbers `req_core_102_any_other_mapper_is_refused` sweeps**
+(`mapper_tests.rs:69`), along with 6, 116 and 200. This census leaves **6**, **177** and **200**
+unsupported, so the test keeps three numbers and holds unchanged; Q-130 question 2's observation
+that it holds no number guaranteed never to become supported is still true and still unresolved.
+
+### 2.5 The forty-seven C numbers
+
+Every one is a multicart, and the owner's content rule excludes the whole column. Listed with its
+board so the document is complete and so a later lot never has to re-derive the identification.
+
+| iNES | board | the multicart(s) | doc |
+| ---: | --- | --- | --- |
+| **39** | oversize BNROM, Subor | *Study & Game 32-in-1*. The page says 241 provides the same thing | stub |
+| **46** | **Rumble Station**, a NES-on-a-chip | *Rumblestation 15-in-1*, of licensed Color Dreams titles | partial; bus conflicts "No idea" |
+| **51** | not named | *11-in-1 Ball Games*, and the JY-010/850828C variant as submapper 1 | stub |
+| **53** | not named | *Supervision 16-in-1* | stub — one sentence |
+| **54** | BMC-NovelDiamond9999999in1 | *Novel Diamond 9999999-in-1* | stub, **and the number is disputed**: the page says Nestopia claims 54 for this board while GoodNES 3.1.4 and FCEUX have no allocation and treat it as a UNIF dump |
+| **57** | not named | *GK 47-in-1*; *6-in-1 / SuperGK* | partial |
+| **58** | not named | eight: *21-in-1* (AS-5321), *50-in-1* (WQ1806 B), *55-in-1* (WQ2006 B), *68-in-1* (HKX5268), *75-in-1* (WQ1905 E), *86-in-1* (AP-5486), *92-in-1* (WQ1605 E), *97-in-1* (WQ1708 B) | partial. 213 duplicates it |
+| **60** | reset-based NROM-128 4-in-1 | *Reset Based 4-in-1*, titles unnamed | stub: *"I would assume the register is 2 bits wide? Don't know for sure"* |
+| **62** | not named | *Super 700-in-1* | partial, Disch's notes |
+| **113** | **HES NTD-8** | *HES 6-in-1*, *Mind Blower Pak*, *Total Funpak* | full. The NINA-03/06 with four more control bits |
+| **200** | **MG109** | *1993 Super 50 in 1* | partial, two submappers |
+| **201** | not named | *8-in-1*; *21-in-1* (2006-CA). "All known games use only the two least significant bits" | partial |
+| **202** | not named | the *150-in-1* shipped with the dual-slot SP60 famiclone | partial |
+| **203** | not named | a *35-in-1* of *Duck Hunt*, *Hogan's Alley*, *Wild Gunman* and *Battle City "Tank 1990"* — four licensed Nintendo titles | partial |
+| **204** | not named | *4-in-1*, *64-in-1*, *80-in-1*, *150-in-1* | stub |
+| **212** | "BMC Super HiK 300-in-1" per Nestopia | the 300-in-1, titles unnamed | partial |
+| **213** | **a duplicate of 58** | *9999999-in-1*; *168-in-1*. The page: "both ROM files run well as mapper 58" | stub |
+| **214** | not named | *Super Gun 20-in-1* | stub — one sentence |
+| **226** | discrete: 74LS74A, 74LS273, 74LS139, 74LS02, 74LS153 | *42-in-1*, *63-in-1*, *76-in-1*, *Super 42-in-1* | partial; depends on uninitialised memory for the game count |
+| **227** | 810449-C-A1; **FW-01** (Wàixīng); N120-72 | *1992 Contra 120 in 1* | partial, three submappers; battery WRAM on the Wàixīng variant |
+| **229** | BMC 31-IN-1 | the 31-in-1, titles unnamed | stub; Nestopia and Nintendulator disagree on the CHR width |
+| **230** | not named | *22-in-1*, with a pirate *Contra* reachable by soft reset | partial |
+| **231** | not named | *20-in-1* | stub |
+| **233** | not named | a 42-in-1 whose table lists **32 licensed titles** (*Galaxian*, *Balloon Fight*, *Donkey Kong*, *Excitebike*, *Ice Climber*, …) | partial, **and the dump is doubted**: "clarify actual mapper behavior", "determine if ROM is valid or corrupted" |
+| **234** | **Maxi 15** (AVE's *Maxivision 15-in-1*) | the 15-in-1 | **full**. Read-triggered bankswitching at $FF80-$FF9F/$FFE8-$FFF7, a lockout-defeat register, dual CNROM/NINA-03 modes, bus conflicts resolved from ROM contents |
+| **235** | "Golden Game" 150-in-1 | ~60 titles, which the page says are all **hacked** | partial |
+| **236** | **Realtec** 8031, 8155, 8099, 8106 | *35-in-1* (HM5511), *56-in-1* (NT-009), *68-in-1*, *70-in-1*, *智慧大全 12-in-1*, *800-in-1* | full, both CHR-ROM and CHR-RAM variants |
+| **241** | BxROM with WRAM | *小霸王 2合1: 仓库世家 & 动脑筋*. The page attributes the number mostly to **Hengge** educational cartridges and to mapper hacks of other publishers' games | stub; optional TMS5220C at $5000-$5FFF |
+| **255** | 110-in-1: four 512 KiB PRG ROMs, two 512 KiB CHR ROMs, a 74'273, a 74139 and a PAL16L8 | the 110-in-1 | partial; **duplicates 225**, and "the banking register boots with random contents" |
+| **261** | BMC-810544-C-A1 | *14-in-1* (NTDEC); a *200-in-1* containing *Elfland* | partial |
+| **265** | BMC-T-262 | T-262 multicarts, titles unnamed | partial |
+| **274** | BMC-80013-B, **RCM Group** | *Cartridge Story* (72-in-1), *II* (80-in-1), *III* (90-in-1, a.k.a. *90-in-1 Hwang Shinwei*) | full |
+| **283** | BMC-GS-2004 (with an 8 KiB PRG chip) and BMC-GS-2013 (without) | *Block Family 6-in-1 / 7-in-1* | stub |
+| **285** | BMC-A65AS; BMC-GF-401CD (sub 1) | *A65AS*; *JY-066*; and a Russian *Highway Star* / Русские Гонки bootleg | full, both submappers |
+| **288** | **GKCX1 21-in-1** | two GKCX1 21-in-1s | stub. GoodNES 3.23b files them as mapper 133, "even though it is entirely incompatible" |
+| **289** | BMC-60311C | *Super HiK 17-in-1*; *1995 Champion Cassette 1200-in-1*; *Super 76-in-1 with Contra* | full |
+| **300** | BMC-190in1 | *Golden 190-in-1* | partial |
+| **314** | PB011003-3x1, UNIF **BMC-64in1NoRepeat** | *32-in-1*, *64-in-1*, *76-in-1* Y2K | partial; masks "Unknown, probably" |
+| **319** | **HP-898F**, KD-7/9-E | six, incl. *Prima Soft 9999999-in-1* and *Olympic 2000 1000000-in-1* | partial |
+| **320** | BMC-830425C-4391T | *Super HiK 6-in-1* (A-030) | full; "basically UxROM" with an outer-bank latch |
+| **331** | BMC-12-IN-1 | *7-in-1* (NS03) | partial. Notable hook: **separate inner-bank registers for the $0000-$0FFF and $1000-$1FFF PPU windows**, switched to avoid mid-render conflicts |
+| **332** | BMC-WS | *Super 40-in-1*; *Super 500-in-1* | partial; a solder-pad probe that checks whether $8000-$FFFF returns open bus |
+| **336** | BMC-K-3046 | *11-in-1* (K-3046), *2-in-1* (YH-217), *4-in-1* (YH-4109), *Top Gun III 2-in-1*, *2-in-1* (YH-218) | full, three submappers. Submapper 1 needs **144's resistor trick** |
+| **349** | BMC-G-146 | *1994 Super HIK 14-in-1* (G-136) | partial |
+| **487** | **AVE NINA-08** | *Maxivision 30-in-1*, **unreleased** | **full**. 1536 KiB of PRG and of CHR, and **both** the NINA-03 and Color Dreams bankswitching schemes, selected by a bit at $4180 — "so that AVE and Color Dreams games ran completely unmodified" |
+| **518** | **UNL-DANCE2000**, Subor | *小霸王 Subor 999*, *小霸王 Subor V*, *跳舞天使: 動感 2000 — Dance 2000 12-in-1* | full. And the heaviest hook list in the census: a **µPD765-compatible floppy disk controller**, an LPC speech chip in two formats, a CHR-RAM auto-bankswitch during rendering, mid-scanline nametable switching, a second PRG-RAM, and **Dendy timing only** |
+| **519** | UNL-EH8813A | a Chinese-language multicart, titles unnamed | full |
+
+### 2.6 Part B's totals
+
+| | A | B | C | D | E | total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| §3.4's explicit list | **15** | 7 | **47** | 6 | 8 | **83** |
+
+**Fifty-three of the 83 are multicarts, bootlegs or FDS conversions** — which is what §3.4 said
+they were, and the owner's content rule confirms it independently of any performance argument.
+**Fifteen are A**, and four of those fifteen (79, 146, 83, 264) are two boards, not four.
