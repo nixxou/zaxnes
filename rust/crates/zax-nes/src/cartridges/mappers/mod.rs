@@ -73,6 +73,10 @@ pub use jaleco_jf11::JalecoJf11;
 pub use jaleco_ss88006::JalecoSs88006;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
+#[cfg(feature = "board-mmc3-multicart")]
+pub use mmc3::Mmc3Multicart;
+#[cfg(feature = "board-119")]
+pub use mmc3::Tqrom;
 pub use mmc3::{McAcc, Mmc3};
 pub use mmc5::Mmc5;
 pub use multicart::{

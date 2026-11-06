@@ -68,19 +68,32 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 105 (the Nintendo NES-EVENT board of Nintendo World Championships 1990) (MF-6b step 3);
     // * 48 (the Taito TC0690, the TC0190 of mapper 33 with the MMC3's scanline counter)
     //   (MF-6b step 4);
-    // * 158 (Tengen's 800037, the RAMBO-1 with CHR A17 on CIRAM A10) (MF-6b step 5).
+    // * 158 (Tengen's 800037, the RAMBO-1 with CHR A17 on CIRAM A10) (MF-6b step 5);
+    // * 119 (the Nintendo TQROM) and 47 and 37 (Nintendo's two MMC3 multicarts), each behind
+    //   its own Cargo feature (MF-6a3 step 1) -- see `docs/review/BOARD-FEATURES.md`.
+    //
+    // **The expected list is built and not written**, because the board features decide which
+    // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
+    // feature, so the loop above holds in every configuration; these are the additions, and a
+    // featured one is expected exactly when its feature is on. An accidental addition is still
+    // caught as surely as an accidental removal.
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(
-        vec![
-            19, 24, 26, 33, 48, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105,
-            118, 140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 232
-        ],
-        extra
-    );
+    let mut expected = vec![19, 24, 26, 33];
+    if cfg!(feature = "board-mmc3-multicart") {
+        expected.extend_from_slice(&[37, 47]);
+    }
+    expected.extend_from_slice(&[
+        48, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105, 118,
+    ]);
+    if cfg!(feature = "board-119") {
+        expected.push(119);
+    }
+    expected.extend_from_slice(&[140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 232]);
+    assert_eq!(expected, extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -2998,4 +3011,319 @@ fn req_core_100_the_nes_event_takes_its_mirroring_from_the_mmc1() {
         core.mmc1_write(0x8000, 0x0C | bits);
         assert_eq!(expected, core.mirroring(), "$8000 = {bits:02X}");
     }
+}
+
+// ------------------------------------------- the TQROM (119) and the two MMC3 multicarts
+// ------------------------------------------- (47, 37), MF-6a3 step 1
+
+/// Writes CHR through the board's own fetch path, which is the only way to reach the TQROM's
+/// second chip: `Cartridge::ppu_write` dispatches to the board, and on this board that is the
+/// chip-select decode.
+#[cfg(feature = "board-119")]
+fn chr_write(core: &mut NesCore, address: u16, value: u8) {
+    core.cartridge_mut().unwrap().ppu_write(address, value);
+}
+
+/// nesdev ("INES Mapper 119"): "Bit 6 of the CHR bank number is used to switch between the CHR
+/// ROM chip and the CHR RAM chip."
+///
+/// The select is a line of the **bank number**, so it is read the same way on a 1 KiB register
+/// and on a 2 KiB one -- and a 2 KiB register, which "ignores bit 0", puts **both** of its 1 KiB
+/// windows on the same chip. Bit 7 of $8000 swaps which registers drive which windows, so the
+/// claim is made in both CHR modes.
+#[cfg(feature = "board-119")]
+#[test]
+fn req_core_100_tqrom_bit_6_of_a_chr_bank_selects_the_chr_ram_chip() {
+    let mut core = MapperRom::new(119).prg(16).chr(64).load();
+
+    // A 1 KiB register, CHR mode 0: R2 drives PPU $1000-$13FF, the 1 KiB half being the high one.
+    core.mmc3_bank(2, 0x05);
+    assert_eq!(
+        5,
+        peek(&core, 0x1000),
+        "bit 6 clear: the CHR-ROM chip, bank 5"
+    );
+    core.mmc3_bank(2, 0x45); // Bit 6 set, low three bits still 5.
+    chr_write(&mut core, 0x1000, 0xA5);
+    assert_eq!(0xA5, peek(&core, 0x1000), "bit 6 set: the CHR-RAM chip");
+    core.mmc3_bank(2, 0x05);
+    assert_eq!(5, peek(&core, 0x1000), "and back to the ROM, unchanged");
+    core.mmc3_bank(2, 0x45);
+    assert_eq!(0xA5, peek(&core, 0x1000), "the RAM kept it");
+
+    // The same register in CHR mode 1, where bit 7 of $8000 has moved the 1 KiB half to
+    // $0000-$03FF: the select is read off the same bit of the same register.
+    //
+    // The writes go through `txsrom_bank_in_chr_mode_1`, which exists for the trap its own note
+    // describes: the register index and the CHR mode share $8000, so `mmc3_bank` -- which
+    // writes the index alone -- would put the board back in CHR mode 0 on every call.
+    txsrom_bank_in_chr_mode_1(&mut core, 2, 0x45);
+    assert_eq!(0xA5, peek(&core, 0x0000), "CHR mode 1: still the RAM chip");
+    txsrom_bank_in_chr_mode_1(&mut core, 2, 0x05);
+    assert_eq!(5, peek(&core, 0x0000), "CHR mode 1: still the ROM chip");
+
+    // A 2 KiB register: R0 is at $1000-$17FF in CHR mode 1, and **both** of its 1 KiB windows
+    // follow bit 6 of the one register.
+    txsrom_bank_in_chr_mode_1(&mut core, 0, 0x40); // 1 KiB banks $40 and $41, RAM banks 0 and 1.
+    chr_write(&mut core, 0x1000, 0xB0);
+    chr_write(&mut core, 0x1400, 0xB1);
+    assert_eq!(
+        (0xB0, 0xB1),
+        (peek(&core, 0x1000), peek(&core, 0x1400)),
+        "both halves of the 2 KiB register are on the RAM chip"
+    );
+    txsrom_bank_in_chr_mode_1(&mut core, 0, 0x0A); // 1 KiB banks 10 and 11 of the ROM.
+    assert_eq!(
+        (10, 11),
+        (peek(&core, 0x1000), peek(&core, 0x1400)),
+        "and both halves move back to the ROM together"
+    );
+
+    // A `ChrView` is one slice plus eight offsets and cannot say "this window is the other
+    // chip", so this board answers `None` -- the body the MMC5 and the RAMBO-1 already give.
+    assert!(
+        core.cartridge().unwrap().chr_peek_view().is_none(),
+        "a TQROM cannot be expressed as one ChrView"
+    );
+}
+
+/// Section 5 of `docs/review/MF-6-inventory.md`'s own wording: "a write to a CHR-RAM-selected
+/// window landing in RAM and not being swallowed".
+///
+/// `Mapper::ppu_write`'s default drops every write on a board that has CHR-ROM, and a TQROM has
+/// both chips -- so without the board's own override the 8 KiB would be unreachable. The write
+/// must also be dropped on a ROM window, be visible through a *second* window that shows the
+/// same RAM bank and not through one that shows another, and leave the CHR-ROM alone.
+#[cfg(feature = "board-119")]
+#[test]
+fn req_core_100_tqrom_a_write_to_a_ram_selected_window_is_not_swallowed() {
+    let mut core = MapperRom::new(119).prg(16).chr(64).load();
+
+    // R2 on RAM bank 3, R3 on RAM bank 4, R4 on ROM bank 7, R5 on RAM bank 3 again.
+    core.mmc3_bank(2, 0x43);
+    core.mmc3_bank(3, 0x44);
+    core.mmc3_bank(4, 0x07);
+    core.mmc3_bank(5, 0x43);
+
+    chr_write(&mut core, 0x1000, 0x11); // RAM bank 3.
+    chr_write(&mut core, 0x1800, 0x22); // ROM bank 7: dropped.
+
+    assert_eq!(0x11, peek(&core, 0x1000), "the write landed in the RAM");
+    assert_eq!(7, peek(&core, 0x1800), "the ROM window swallowed the write");
+    assert_eq!(
+        0x11,
+        peek(&core, 0x1C00),
+        "a second window on the same RAM bank shows it"
+    );
+    // RAM bank 4 is still the zero it powered on with.
+    assert_eq!(0, peek(&core, 0x1400), "another RAM bank does not");
+
+    // And the CHR-ROM itself is untouched: the same bank, selected again, reads its own number.
+    core.mmc3_bank(2, 0x03);
+    assert_eq!(3, peek(&core, 0x1000), "the CHR-ROM bank 3 is still bank 3");
+
+    // The board's 8 KiB, and not REQ-CORE-012's 32 KiB default: that default only applies to an
+    // image with no CHR-ROM, and byte 5 of this one declares 64 KiB of it.
+    assert_eq!(
+        0x2000,
+        core.cartridge().unwrap().memory().chr_ram().len(),
+        "the TQROM's own CHR-RAM chip"
+    );
+}
+
+/// nesdev ("INES Mapper 047"): $6000-$7FFF is `[.... ...B]`, "each block has 128k PRG and 128k
+/// CHR", and $8000-$FFFF is the "Same as MMC3 for selected block".
+///
+/// So `B` is PRG A17 above the MMC3's four bits of 8 KiB bank and CHR A17 above its seven bits
+/// of 1 KiB bank, the fixed `-1` and `-2` windows become the **block's** last two rather than
+/// the image's, and a bank number wraps inside the block.
+#[cfg(feature = "board-mmc3-multicart")]
+#[test]
+fn req_core_100_mapper_47_switches_128_kib_blocks_of_prg_and_chr() {
+    let mut core = MapperRom::new(47).prg(32).chr(256).load();
+
+    // Block 0. Power-on is R6 = 0 and R7 = 1, and the two fixed windows are the block's last.
+    assert_eq!([0, 1, 14, 15], core.prg_windows(), "block 0 at power-on");
+    core.write_memory(0x6000, 0x01);
+    assert_eq!(
+        [16, 17, 30, 31],
+        core.prg_windows(),
+        "block 1: every window, the two fixed ones included, moves by 128 KiB"
+    );
+
+    // A bank number wraps **inside** the block: $13 is bank 3 of whichever block is selected,
+    // never bank 19 of the image.
+    core.mmc3_bank(6, 0x13);
+    assert_eq!(
+        [19, 17, 30, 31],
+        core.prg_windows(),
+        "block 1, inner bank 3"
+    );
+    core.write_memory(0x6000, 0x00);
+    assert_eq!([3, 1, 14, 15], core.prg_windows(), "block 0, inner bank 3");
+
+    // CHR: the same bit is A17 above the MMC3's seven, on a 2 KiB register and a 1 KiB one.
+    core.mmc3_bank(0, 0x02);
+    core.mmc3_bank(1, 0x08);
+    core.mmc3_bank(2, 0x14);
+    core.mmc3_bank(3, 0x15);
+    core.mmc3_bank(4, 0x16);
+    core.mmc3_bank(5, 0xA0); // Bit 7 is the MMC3's own, so it wraps inside the block too.
+    assert_eq!([2, 3, 8, 9, 20, 21, 22, 32], core.chr_windows(), "block 0");
+    core.write_memory(0x6000, 0x01);
+    assert_eq!(
+        [130, 131, 136, 137, 148, 149, 150, 160],
+        core.chr_windows(),
+        "block 1: CHR A17 comes from the outer register"
+    );
+}
+
+/// nesdev ("INES Mapper 037") gives the wiring rather than a mask: "PRG ROM A16 =
+/// NAND(NAND(Q0,Q1),NAND(Q2,M16))" with "PRG ROM A17 ... driven by Q2", `M16` being the MMC3's
+/// own A16. That NAND of two NANDs is `A16 = (Q0 AND Q1) OR (Q2 AND M16)`, and **one expression
+/// reproduces the page's whole four-row table** -- the two 64 KiB windows and the two 128 KiB
+/// ones. This test is that table, all eight values against the MMC3's A16 clear and set.
+///
+/// The two places the page and Mesen 2 disagree are both here, and AMD-061 section 1 settles
+/// them for the page: block 7 is $30000-$3FFFF where `MMC3_37.h` puts it at $20000-$27FFF, and
+/// the MMC3's own CHR bit 7 never reaches the CHR-ROM where Mesen masks nothing.
+#[cfg(feature = "board-mmc3-multicart")]
+#[test]
+fn req_core_100_mapper_37_reproduces_its_outer_bank_table() {
+    // The page's table, as the first PRG window's 8 KiB bank number: `M16` is bit 3 of R6.
+    for (m16, banks) in [
+        (0x00u8, [0u8, 0, 0, 8, 16, 16, 16, 24]),
+        (0x08, [0, 0, 0, 8, 24, 24, 24, 24]),
+    ] {
+        let mut core = MapperRom::new(37).prg(32).chr(256).load();
+        core.mmc3_bank(6, m16);
+        for (written, expected) in banks.iter().copied().enumerate() {
+            core.write_memory(0x6000, u8::try_from(written).unwrap());
+            assert_eq!(
+                expected,
+                core.prg_windows()[0],
+                "R6 = {m16:#04X}, $6000 = {written}"
+            );
+        }
+    }
+
+    // Bits 3-7 are not latched: $FB is block 3 and nothing else.
+    let mut core = MapperRom::new(37).prg(32).chr(256).load();
+    core.write_memory(0x6000, 0xFB);
+    assert_eq!(8, core.prg_windows()[0], "bits 3-7 are not latched");
+
+    // CHR A17 is **driven** by Q2, so the MMC3's own bit 7 never reaches the CHR-ROM.
+    core.write_memory(0x6000, 0x00);
+    core.mmc3_bank(2, 0x20);
+    assert_eq!(32, core.chr_windows()[4], "Q2 clear: CHR A17 clear");
+    core.mmc3_bank(2, 0xA0);
+    assert_eq!(
+        32,
+        core.chr_windows()[4],
+        "the MMC3's bit 7 is dropped, not ORed in"
+    );
+    core.write_memory(0x6000, 0x04);
+    assert_eq!(160, core.chr_windows()[4], "Q2 set: CHR A17 set");
+}
+
+/// The condition both multicart pages put on the outer register, and section 5 of the
+/// inventory's own "easy thing to miss": it is "only writable when MMC3 PRG-RAM is enabled and
+/// writable (see $A001)" (047) and "you will need to enable writes to PRG-RAM" (037).
+///
+/// 037's page adds that the register "is not readable and attempting to read it will return open
+/// bus", which is what `prg_ram: Some(0)` gives: with no RAM behind the window,
+/// `Cartridge::default_cpu_read` falls through to `Mapper::try_read_prg`, which answers `None`
+/// below $8000.
+#[cfg(feature = "board-mmc3-multicart")]
+#[test]
+fn req_core_100_the_mmc3_multicart_outer_register_needs_prg_ram_enabled_and_writable() {
+    for mapper in [47usize, 37] {
+        let mut core = MapperRom::new(mapper).prg(32).chr(256).load();
+        // The value that selects the second 128 KiB of PRG on each number: `B` on 47, `Q` on 37.
+        let outer = if mapper == 47 { 0x01 } else { 0x04 };
+
+        // $A001 powers on at $80 -- enabled and writable (MR-4-5) -- so the register takes.
+        core.write_memory(0x6000, outer);
+        assert_eq!(
+            16,
+            core.prg_windows()[0],
+            "mapper {mapper}: $A001 = $80 at power-on, the register takes"
+        );
+
+        // $C0: enabled but write-protected.
+        core.mapper_write(0xA001, 0xC0);
+        core.write_memory(0x6000, 0x00);
+        assert_eq!(
+            16,
+            core.prg_windows()[0],
+            "mapper {mapper}: $A001 = $C0 is write-protected"
+        );
+
+        // $00: the chip is disabled altogether.
+        core.mapper_write(0xA001, 0x00);
+        core.write_memory(0x6000, 0x00);
+        assert_eq!(
+            16,
+            core.prg_windows()[0],
+            "mapper {mapper}: $A001 = $00 is disabled"
+        );
+
+        // And $80 again lets it through.
+        core.mapper_write(0xA001, 0x80);
+        core.write_memory(0x6000, 0x00);
+        assert_eq!(
+            0,
+            core.prg_windows()[0],
+            "mapper {mapper}: $A001 = $80 again, and the register takes"
+        );
+
+        // The window is not RAM and not readable: the register *is* the board's decode of it.
+        core.write_memory(0x6000, 0x5A);
+        assert_ne!(
+            0x5A,
+            core.read_memory(0x6000),
+            "mapper {mapper}: $6000-$7FFF reads open bus, not the register"
+        );
+    }
+}
+
+/// The non-regression the three boards exist to not break: an ordinary mapper-4 image behaves
+/// exactly as it did before they were added.
+///
+/// A write to $6000 is PRG-RAM and not an outer register; CHR bank $A0 is bank $A0 and not bank
+/// $20 of a block; the four PRG windows span the whole image rather than one 128 KiB block of
+/// it; and mapper 4 still offers a `chr_peek_view`, which the TQROM cannot.
+#[test]
+fn req_core_100_an_ordinary_mapper_4_image_is_unaffected_by_119_47_and_37() {
+    let mut core = MapperRom::new(4).prg(32).chr(256).battery().load();
+
+    // $6000-$7FFF is the MMC3's own PRG-RAM, and writing there moves no bank.
+    let before = core.prg_windows();
+    core.write_memory(0x6000, 0x01);
+    assert_eq!(before, core.prg_windows(), "no outer register on mapper 4");
+    assert_eq!(0x01, core.read_memory(0x6000), "the PRG-RAM is still there");
+
+    // The whole image, not a block of it: the two fixed windows are the image's last two.
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+    core.mmc3_bank(6, 0x13);
+    assert_eq!(
+        [19, 1, 30, 31],
+        core.prg_windows(),
+        "bank $13 is bank 19 of the image, not bank 3 of a block"
+    );
+
+    // Seven bits of CHR bank, all of them the MMC3's own.
+    core.mmc3_bank(2, 0xA0);
+    assert_eq!(
+        160,
+        core.chr_windows()[4],
+        "CHR bank $A0 is bank $A0, not bank $20 of a block"
+    );
+
+    // And the MMC3's peek is still a view: only its fetches clock the IRQ counter, so the
+    // pattern tables can be read as one slice plus eight offsets.
+    assert!(
+        core.cartridge().unwrap().chr_peek_view().is_some(),
+        "mapper 4 still offers a chr_peek_view"
+    );
 }

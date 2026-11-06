@@ -350,8 +350,17 @@ impl Cartridge {
             // clocked through the same A12 filter (nesdev, "INES Mapper 048"), so it is in both.
             // MF-6b step 5 adds Tengen's 800037 (158), which is a RAMBO-1 and so watches A12
             // exactly as mapper 64 does.
-            watches_ppu_reads: matches!(mapper, 4 | 5 | 48 | 64 | 118 | 158),
-            watches_ppu_bus_without_read: matches!(mapper, 4 | 48 | 64 | 118 | 158),
+            // MF-6a3 step 1 adds the TQROM (119) and the two MMC3 multicarts (47, 37): all
+            // three *are* the MMC3's board, so all three are in both lists. §4.3's warning,
+            // and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` is the test
+            // that catches it -- it failed with its own expected list until both were extended.
+            // The three numbers are **not** behind their Cargo features here: a number whose
+            // board is off is not in `SUPPORTED_MAPPERS`, so no cartridge of it is ever
+            // created and the arm is unreachable either way. One `matches!` is also one
+            // `matches!` whatever the features, which is what keeps this load-time decision
+            // out of the diff when a feature is flipped.
+            watches_ppu_reads: matches!(mapper, 4 | 5 | 37 | 47 | 48 | 64 | 118 | 119 | 158),
+            watches_ppu_bus_without_read: matches!(mapper, 4 | 37 | 47 | 48 | 64 | 118 | 119 | 158),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
@@ -987,17 +996,28 @@ mod tests {
         }
 
         // Guards against a vacuous pass: the sweep above must actually be reaching the hook.
-        // Both submappers of each of the six move — the MMC3 and the MC-ACC for mapper 4, the
+        // Both submappers of each board move — the MMC3 and the MC-ACC for mapper 4, the
         // MMC5's scanline detection (MF-4c, finding MR-5-4), the Taito TC0690 of mapper 48
         // (MF-6b step 4), whose counter is the MMC3's, the RAMBO-1 and Tengen's 800037 of
         // mapper 158 (MF-6b step 5), which is the same chip, and the TxSROM, whose submapper 3
         // is not a board of its own.
+        //
+        // MF-6a3 step 1 adds the TQROM (119) and the two MMC3 multicarts (47, 37): all three
+        // *are* the MMC3's board, counter included. They are behind their Cargo features, so
+        // the expected list is built rather than written — a number whose board is off is not
+        // in `SUPPORTED_MAPPERS`, so the sweep never reaches it.
+        let mut expected = vec![4, 4, 5, 5];
+        #[cfg(feature = "board-mmc3-multicart")]
+        expected.extend_from_slice(&[37, 37, 47, 47]);
+        expected.extend_from_slice(&[48, 48, 64, 64, 118, 118]);
+        #[cfg(feature = "board-119")]
+        expected.extend_from_slice(&[119, 119]);
+        expected.extend_from_slice(&[158, 158]);
         assert_eq!(
-            moved,
-            [4, 4, 5, 5, 48, 48, 64, 64, 118, 118, 158, 158],
-            "expected exactly the MMC3, the MC-ACC, the MMC5, the TC0690, the RAMBO-1, the \
-             TxSROM and the Tengen 800037 to move on the PPU address bus, and the sweep to \
-             reach all of them"
+            moved, expected,
+            "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \
+             TC0690, the RAMBO-1, the TxSROM, the TQROM and the Tengen 800037 to move on the \
+             PPU address bus, and the sweep to reach all of them"
         );
     }
 

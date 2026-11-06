@@ -112,6 +112,13 @@ pub enum Board {
     /// [`SmallBoard`]'s read the other way round — every board in that enum answers *no* to
     /// [`Mapper::irq_asserted`] and therefore shares the empty arm; every board in this one
     /// answers *yes* and can only share the others'.
+    /// MF-6a3 step 1 adds the TQROM (119) and the two MMC3 multicarts (47 and 37) to it, and
+    /// **this enum has not grown a variant since**, which is the measurement that put them
+    /// there: two more `Board` discriminants cost `mmc5` **+8 994 278 instructions over 300
+    /// frames (+0.080 %)**, all of it one taken `jmp` per expansion-audio sample, because the
+    /// jump table of `Board::expansion_audio_output` — which `NesBus::push_expansion_audio`
+    /// inlines whole — grew by two entries and LLVM moved the fall-through off the MMC5's arm.
+    /// See [`IrqBoard`]'s own note.
     IrqBoard(IrqBoard),
 }
 

@@ -1,3 +1,7 @@
+#[cfg(feature = "board-mmc3-multicart")]
+use super::Mmc3Multicart;
+#[cfg(feature = "board-119")]
+use super::Tqrom;
 use super::{IremH3001, Mapper, NesEvent, Sunsoft3, TaitoTc0690, Tengen800037, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -41,6 +45,39 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 /// a time. Everything a board of this enum actually implements is forwarded below, and nothing
 /// else: a method no board here overrides must keep `Mapper`'s default, or it becomes a body in
 /// a dispatch for nothing.
+///
+/// # Why the TQROM and the two MMC3 multicarts are in here, and not variants of their own
+///
+/// They belong by their own description — all three *are* the MMC3's board, counter included, so
+/// all three answer **yes** to [`Mapper::irq_asserted`], which is this enum's entry condition.
+/// What put them here rather than beside [`super::Mmc3`] is a measurement, and it is the first of
+/// this project to price a `Board` **variant** rather than a body.
+///
+/// MF-6a3 step 1 built them as two new `Board` discriminants, 35 → 37. Every pinned symbol held
+/// — `NesBus::catch_up_ppu` **188 → 188**, the three claimants of `Cpu6502::step` 0 / 0 / 0,
+/// `Mmc3Board::update_banks` byte-identical — and `mmc5` came out **+8 994 278 instructions over
+/// 300 frames, +0.080 %**, four times the owner's tolerance, with the whole of it in one symbol:
+/// `NesBus::push_expansion_audio`, **+8 934 160**. That function is **31 instructions in both
+/// dumps** and `Board::expansion_audio_output` is inlined into it whole, as a 35-entry jump
+/// table over the discriminants. Two more entries, and LLVM moved the fall-through into the
+/// shared tail off the MMC5's arm: `movl 10776(%rdi), %eax` used to fall through and now ends
+/// `jmp`. **One taken `jmp` per expansion-audio sample, 8.9 million of them.**
+///
+/// It is MF-6a2 step 1's residual — "the MMC3 and the RAMBO-1 swapped the fall-through … one
+/// taken `jmp` per evaluation" — one dispatch along, and MF-6b step 1 measured the same figure
+/// in the other direction: its thirty-fifth variant *bought* `push_expansion_audio`
+/// **−8 934 160**, the same number to the instruction. So the two findings close on each other,
+/// and the rule they give is narrower than §4.9's "a `Board` variant is free": a variant is free
+/// in every dispatch **except** one whose jump table a hot function inlines whole, and
+/// `push_expansion_audio` is that function. Adding the three numbers here leaves `Board` at
+/// thirty-five discriminants and that jump table byte-identical.
+///
+/// The price the three boards pay for it is [`IrqBoard::ppu_irq_horizon`]'s `None`: an MMC3
+/// could bound the PPU's lag and these three give it up, so their games run the PPU in step with
+/// the CPU. That is exactly the trade MF-6b step 4 charged the TC0690, for the same reason — any
+/// forward there is one more body in a dispatch `NesBus::catch_up_ppu` inlines, worth +9 214 379
+/// on `mmc5` for two instructions — and it is §4.10's rule: the cost lands on the board that
+/// needs the variant, not on the library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrqBoard {
     /// Mapper 73, Konami VRC3.
@@ -55,6 +92,12 @@ pub enum IrqBoard {
     TaitoTc0690(TaitoTc0690),
     /// Mapper 158, Tengen's 800037: the RAMBO-1 with CHR A17 wired to CIRAM A10.
     Tengen800037(Tengen800037),
+    /// Mapper 119, the Nintendo TQROM (MF-6a3 step 1).
+    #[cfg(feature = "board-119")]
+    Tqrom(Tqrom),
+    /// Mappers 47 and 37, Nintendo's two MMC3 multicarts (MF-6a3 step 1).
+    #[cfg(feature = "board-mmc3-multicart")]
+    Mmc3Multicart(Mmc3Multicart),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -67,6 +110,10 @@ macro_rules! inner {
             IrqBoard::NesEvent($b) => $body,
             IrqBoard::TaitoTc0690($b) => $body,
             IrqBoard::Tengen800037($b) => $body,
+            #[cfg(feature = "board-119")]
+            IrqBoard::Tqrom($b) => $body,
+            #[cfg(feature = "board-mmc3-multicart")]
+            IrqBoard::Mmc3Multicart($b) => $body,
         }
     };
 }
@@ -127,6 +174,36 @@ impl Mapper for IrqBoard {
     /// of a game this board is not. The 55 instructions stay.
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
+    }
+
+    /// Forwarded for the TQROM alone (mapper 119, MF-6a3 step 1), which is an MMC3 board and so
+    /// has the MMC3's $A001: bit 7 enables the RAM and **bit 6 write-protects it**. Without the
+    /// forward, `Mapper::prg_ram_writable`'s default would answer
+    /// [`IrqBoard::prg_ram_enabled`] and bit 6 would do nothing on that board.
+    ///
+    /// It is **behaviour-neutral for the other boards of this enum**: none of the six MF-6b put
+    /// here overrides `prg_ram_writable`, so each one's own default is `self.prg_ram_enabled()`
+    /// — the same answer the un-forwarded dispatch gave them. The two multicarts need nothing
+    /// from it either: they carry no PRG-RAM at all, and the condition their outer register puts
+    /// on itself reads `Mmc3Board::prg_ram_writable` directly.
+    #[cfg(feature = "board-119")]
+    fn prg_ram_writable(&self) -> bool {
+        inner!(self, b => b.prg_ram_writable())
+    }
+
+    /// Forwarded for the two MMC3 multicarts alone (47 and 37, MF-6a3 step 1), whose outer
+    /// register *is* the board's decode of $6000-$7FFF — see
+    /// `Mmc3Board::multicart_outer_write`. No other board of this enum overrides it, so the arm
+    /// this adds to `Board::intercept_cpu_write` answers `false` for all seven of them exactly
+    /// as the un-forwarded dispatch did.
+    #[cfg(feature = "board-mmc3-multicart")]
+    fn intercept_cpu_write(
+        &mut self,
+        memory: &mut CartridgeMemory,
+        address: u16,
+        value: u8,
+    ) -> bool {
+        inner!(self, b => b.intercept_cpu_write(memory, address, value))
     }
 
     /// Forwarded for mapper 158 alone (MF-6b step 5). `Cartridge` caches the four answers and

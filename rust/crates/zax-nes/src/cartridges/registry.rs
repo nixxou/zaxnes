@@ -6,7 +6,11 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-mmc3-multicart")]
+use super::mappers::Mmc3Multicart;
 use super::mappers::Nrom;
+#[cfg(feature = "board-119")]
+use super::mappers::Tqrom;
 use super::mappers::{
     Action52, Action53, AxRom, Bandai74161, BandaiFcg, Bf9096, Caltron6In1, CnRom, CnRomProtect,
     Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremH3001, IremTamS1,
@@ -18,12 +22,85 @@ use super::mappers::{
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
 
-/// Mapper numbers this build can run, in ascending order (REQ-CORE-102). 116 is optional in
-/// REQ-CORE-101 and not implemented.
+/// Mapper numbers this build can run, in ascending order (REQ-CORE-102).
+///
+/// **The table depends on the board features** (`docs/review/BOARD-FEATURES.md`): a number whose
+/// board is behind a feature that is off is not advertised, so a ROM of it is refused with
+/// REQ-CORE-011's message rather than accepted and found unplayable — which is the whole point
+/// of the registry's own note above. `req_core_100_every_required_mapper_is_registered` holds in
+/// every configuration, because REQ-CORE-100's own table is in no feature.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
-    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
-    34, 41, 48, 64, 65, 66, 67, 69, 70, 71, 73, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101,
-    105, 118, 140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 225, 228, 232,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    10,
+    11,
+    13,
+    15,
+    16,
+    18,
+    19,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    30,
+    32,
+    33,
+    34,
+    #[cfg(feature = "board-mmc3-multicart")]
+    37,
+    41,
+    #[cfg(feature = "board-mmc3-multicart")]
+    47,
+    48,
+    64,
+    65,
+    66,
+    67,
+    69,
+    70,
+    71,
+    73,
+    75,
+    76,
+    78,
+    85,
+    87,
+    88,
+    89,
+    93,
+    94,
+    95,
+    97,
+    101,
+    105,
+    118,
+    #[cfg(feature = "board-119")]
+    119,
+    140,
+    152,
+    154,
+    155,
+    156,
+    158,
+    180,
+    184,
+    185,
+    206,
+    210,
+    225,
+    228,
+    232,
 ];
 
 /// Whether `mapper` is implemented.
@@ -82,6 +159,27 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         },
         5 => BoardMemorySizes {
             min_prg_ram: Mmc5::MAX_PRG_RAM_SIZE,
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 119"): "Both TQROM games used 8 KiB CHR RAM", beside the CHR-ROM
+        // the same board carries. **No header field can state it**: byte 5 of an iNES 1.0
+        // header is the CHR-*ROM* size, and REQ-CORE-012's CHR-RAM default only applies to an
+        // image with no CHR-ROM at all -- so a TQROM dump would come up with none. Mesen 2
+        // agrees (`MapperFactory.cpp:404`, `MMC3_ChrRam(0x40, 0x7F, 8)` -- chip-select bit $40,
+        // 8 KiB).
+        #[cfg(feature = "board-119")]
+        119 => BoardMemorySizes {
+            chr_ram: Some(Tqrom::TQROM_CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // Mappers 47 and 37: the outer register *is* the board's decode of $6000-$7FFF, so
+        // there is no RAM behind that window. 037's page says so of the register itself -- it
+        // "is not readable and attempting to read it will return open bus" -- and with no RAM
+        // there `Cartridge::default_cpu_read` falls through to `Mapper::try_read_prg`, which
+        // answers `None` below $8000. The same arm 140 and 184 are on, for the same reason.
+        #[cfg(feature = "board-mmc3-multicart")]
+        37 | 47 => BoardMemorySizes {
+            prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
         // MR-13-1, nesdev ("CPROM") and REQ-CORE-100's mapper table: the board carries "16 KiB
@@ -303,6 +401,17 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // MF-6b step 5: Tengen's 800037 is the RAMBO-1 with CHR A17 on CIRAM A10, which is a
         // `const` parameter of the same board -- see `Rambo1Board`'s own note.
         158 => Board::IrqBoard(IrqBoard::Tengen800037(Tengen800037::new(memory))),
+        // MF-6a3 step 1: the TQROM, a `const` parameter of the MMC3's board -- see
+        // `Mmc3Board`'s own note on the six shapes MF-6a2 step 3 measured for it. It goes in
+        // `IrqBoard` rather than in a `Board` variant of its own, and `IrqBoard`'s note has the
+        // +0.080 % on `mmc5` that two more discriminants cost.
+        #[cfg(feature = "board-119")]
+        119 => Board::IrqBoard(IrqBoard::Tqrom(Tqrom::new(memory, mapper))),
+        // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two
+        // numbers differ only in what the outer register's bits drive, which is a field test
+        // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.
+        #[cfg(feature = "board-mmc3-multicart")]
+        37 | 47 => Board::IrqBoard(IrqBoard::Mmc3Multicart(Mmc3Multicart::new(memory, mapper))),
         _ => return None,
     })
 }
