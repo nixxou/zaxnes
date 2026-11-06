@@ -18,6 +18,13 @@ pub struct RomLoadResult {
     pub failure: RomLoadFailure,
     /// Technical message naming the cause, or `None` on success.
     pub error: Option<String>,
+    /// A message about the image that is **not** a failure, for the host to log: what was
+    /// detected and what of it this build does not emulate. `None` for an ordinary NES image.
+    ///
+    /// Lot MF-VS added it for the VS. System, whose load note names the PPU model, where the
+    /// model came from and every piece the build leaves out (`crate::vs::VsSystem::load_note`);
+    /// an unidentified VS image says so here, which is what the owner's brief asks for.
+    pub note: Option<String>,
 }
 
 impl RomLoadResult {
@@ -29,6 +36,19 @@ impl RomLoadResult {
             region,
             failure: RomLoadFailure::None,
             error: None,
+            note: None,
+        }
+    }
+
+    /// The same, with a message about the image for the host to log ([`Self::note`]).
+    #[must_use]
+    pub const fn ok_with_note(region: NesRegion, note: String) -> Self {
+        Self {
+            success: true,
+            region,
+            failure: RomLoadFailure::None,
+            error: None,
+            note: Some(note),
         }
     }
 
@@ -40,6 +60,7 @@ impl RomLoadResult {
             region: NesRegion::Ntsc,
             failure,
             error: Some(error),
+            note: None,
         }
     }
 }

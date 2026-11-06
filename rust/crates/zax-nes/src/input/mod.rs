@@ -65,6 +65,16 @@ pub struct InputPorts {
     /// The cycle from which a raised strobe's reload of the shift registers counts, 0 while none
     /// is waiting. See [`InputPorts::write`]; transient, derived, and outside the savestate.
     reload_at: i64,
+    /// The VS. System of the image loaded, or `None` for a NES image — which is **every** image
+    /// as far as the paths above are concerned, this field being read only by the `$4016` and
+    /// `$4017` arms of `NesBus::read_io_register`, which are `#[cold]` and out of line.
+    ///
+    /// It lives here, and not beside the cartridge, because what it carries is the cabinet: two
+    /// coin slots, a service button and eight DIP switches that answer on the two controller
+    /// ports (lot MF-VS). Like [`Self::types`], it is **configuration** and survives
+    /// [`Self::reset`]: a power cycle does not unplug the arcade board.
+    #[cfg(feature = "board-vs-system")]
+    vs: Option<Box<crate::vs::VsSystem>>,
 }
 
 impl Default for InputPorts {
@@ -88,7 +98,29 @@ impl InputPorts {
             input_word: 0,
             strobe: false,
             reload_at: 0,
+            #[cfg(feature = "board-vs-system")]
+            vs: None,
         }
+    }
+
+    /// Plugs in (or unplugs) the VS. System of the image loaded; see [`Self::vs`].
+    #[cfg(feature = "board-vs-system")]
+    pub fn set_vs_system(&mut self, vs: Option<crate::vs::VsSystem>) {
+        self.vs = vs.map(Box::new);
+    }
+
+    /// The VS. System of the image loaded, or `None` for a NES image.
+    #[cfg(feature = "board-vs-system")]
+    #[must_use]
+    pub fn vs(&self) -> Option<&crate::vs::VsSystem> {
+        self.vs.as_deref()
+    }
+
+    /// The same, to drive the cabinet: insert a coin, hold the service button, set the DIP
+    /// switches.
+    #[cfg(feature = "board-vs-system")]
+    pub fn vs_mut(&mut self) -> Option<&mut crate::vs::VsSystem> {
+        self.vs.as_deref_mut()
     }
 
     /// The input word of the current frame: port 0 in the low byte, port 1 in the high byte.

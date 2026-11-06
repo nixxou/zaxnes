@@ -38,6 +38,7 @@ default = [
     "board-small-boards",
     "board-taito-x1",
     "board-111",
+    "board-vs-system",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -158,6 +159,20 @@ board-96 = ["board-decode-boards"]
 # See `docs/review/BOARD-FEATURES.md`, `docs/progress/MF-6c.md` step 9 and
 # `docs/progress/MF-CART.md` step 5.
 board-111 = ["board-decode-boards"]
+
+# The Nintendo VS. System, single-screen, and the two mapper numbers that exist only on it: 99
+# (the VS board itself, one `DecodeBoard` variant) and 151 (a VRC1 on a VS board, a parameter of
+# the existing VRC1 and no variant at all). Lot MF-VS.
+#
+# One feature for the whole machine and not one per piece, because the pieces are not separable:
+# the PPU's palette and its two RC2C05 register quirks, the coin slots, the service button and
+# the eight DIP switches at $4016/$4017, the swapped sticks, the per-ROM table and the board all
+# answer the same question — "is this image a VS. System?" — settled once at load
+# (`crate::vs::VsSystem`). Turning any one of them off would leave a VS image running wrong
+# rather than running as a NES.
+#
+# What it costs is in `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-VS.md` step 7.
+board-vs-system = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

@@ -274,6 +274,19 @@ impl NesBus {
         &mut self.input
     }
 
+    /// Plugs the VS. System of the image loaded into the machine, or takes it out with `None`
+    /// (lot MF-VS).
+    ///
+    /// **One call settles every consumer**, which is the whole design of the lot: the cabinet's
+    /// state goes to the controller ports, and the PPU is handed the two *answers* it needs —
+    /// its palette remap and its RC2C05 register quirks — so that nothing downstream ever asks
+    /// which machine this is. Called by `NesCore::load_rom` before the power-on, and the pieces
+    /// it sets are configuration that no reset clears.
+    #[cfg(feature = "board-vs-system")]
+    pub fn set_vs_system(&mut self, vs: Option<crate::vs::VsSystem>) {
+        self.input.set_vs_system(vs);
+    }
+
     /// The attached cartridge, if any.
     #[must_use]
     pub const fn cartridge(&self) -> Option<&Cartridge> {

@@ -87,7 +87,7 @@ implements it.
 ## Steps
 
 * [x] **0/10** — the plan: the baseline read, the design above settled, this file. No code.
-* [ ] **1/10** — detection: byte 7 bit 0 and NES 2.0 console type 1 (and extended type 1), byte 13's
+* [x] **1/10** — detection: byte 7 bit 0 and NES 2.0 console type 1 (and extended type 1), byte 13's
   two nibbles, the per-ROM CRC table, the load message, the `VsPpuModel` and `VsHardware` types.
 * [ ] **2/10** — the palettes: the four RP2C04 LUTs and the 2C03/2C05 identity, chosen at load and
   applied in `snapshot_palette` and the margin palette.
@@ -137,3 +137,64 @@ Three facts that shaped the design, each checked in the tree rather than assumed
 Free space on the drive at the start of the lot: 13 GB. `rust/target-mf` holds 26 GB of earlier
 lots' build trees and logs; the clean-build directories of step 7 are deleted as soon as their
 figures are recorded, and the check before each build is the rule of the brief (stop under 5 GB).
+
+### Step 1 — detection, the per-ROM table and the load note
+
+**Three rules make an image a VS. System** (`vs::VsSystem::is_vs_image`), and the first is the one
+the brief names: an **iNES 1.0** header with **byte 7 bit 0** set, a **NES 2.0** header with
+**console type 1** — or console type 3 with byte 13's *extended* console type equal to 1, which the
+page lists and which says "Vs. System" and nothing more — and, whatever the console type says,
+**mapper 99 or 151**, two numbers that exist only on this board. A **dirty** iNES header is
+excluded, because REQ-CORE-012's existing rule is that bytes 7 to 15 of one are not read at all: an
+old tool's `DiskDude!` comment must not be able to turn a game into an arcade cabinet, and a test
+pins that.
+
+`InesHeader` gains three fields and no behaviour: `console_type` (byte 7's two low bits, zero on a
+dirty header), `byte13` and `byte15`, in the shape `byte6` and `byte10` already had. Byte 13's low
+nibble is the Vs. PPU type and its high nibble the Vs. hardware type; byte 15 is the default
+expansion device, whose `$04`, `$05` and `$07` are "1P via `$4016`", "1P via `$4017`" and the
+Vs. Zapper — so the **stick swap is a header field**, not a guess.
+
+**The table is generated, not hand-written, and the source is the one the brief names.** The public
+NES 2.0 ROM header database (`nes20db.xml`, `NewRisingSun`, the build dated 2026-09-26) has 21 339
+games, of which exactly **74** carry `<console type="1">`, each with a `<vs hardware= ppu= />` and
+an `<expansion type= />` and, in the same entry, the `<rom crc32= />` of the data **without the
+header** — which is byte for byte the key `builtin_patches::data_crc` already computes. The 74 rows
+are sorted by CRC and bisected; a test walks every one of them through the detection path and
+another pins the sort.
+
+Two things the data settled that the plan had only assumed:
+
+* **Mapper 151 is in no row.** *Vs. Gradius* and *Vs. The Goonies* are recorded as **mapper 75**
+  with console type 1, which is exactly what `MF-6-inventory.md` row 151 says the number is — "the
+  **75** board of MF-6a … nothing but the VS System wrapper". So step 4's job for 151 is to make the
+  number reach the VRC1 and turn the VS layer on, and not to build anything.
+* **The eight mapper numbers a VS image can have are 0, 1, 2, 4, 67, 75, 99 and 206**, and every one
+  but 99 is already supported. 55 of the 74 rows are mapper 99, and the two 40 KiB PRG images the
+  page mentions are *Vs. Gumshoe* and *Raid on Bungeling Bay*.
+
+**No DIP column**: the header database records no DIP settings and the nesdev wiki has no per-game
+DIP list, so the brief's fallback applies and every image starts with the eight switches off.
+
+**One bug worth recording, because it was in the generator and not in the code.** The database's
+comment separates several file names with `"; "`, and `"Stroke &amp; Match Golf"` carries a
+semicolon of its own inside its XML escape: splitting on `";"` before unescaping truncated five
+titles to `"Stroke &amp"`. Caught by clippy's `doc_markdown` pass over the generated file rather
+than by a test, which is why `scratchpad/check_table.py` now re-derives the 74 rows from the
+database and compares them to the committed file field by field — it reports **identical**.
+
+`RomLoadResult` gains a `note: Option<String>`, a message about the image that is not a failure,
+and `NesCore::load_rom` fills it from `VsSystem::load_note`. The note names the hardware type, the
+PPU model, where the model came from, and **every piece this build leaves out** — the `DualSystem`
+running as a single screen, the protection board, the Zapper — so that nothing is silently dropped.
+An image nothing identifies says so in the brief's own words: "unknown VS image … so the plain NES
+palette".
+
+The state lives on `InputPorts`, as `Option<Box<VsSystem>>`, because what it carries is the
+cabinet; like the plugged device types it is configuration and survives `reset`. `NesBus` has one
+setter, `set_vs_system`, which steps 2 to 4 extend to push the PPU's and the board's answers out
+from the same call.
+
+Green: **880 passed, 0 failed, 7 ignored** by default (862 at the baseline plus this step's 18),
+**783 / 0 / 7** with `--no-default-features`, fmt clean and clippy `-D warnings` clean on `zax-nes`
+in all three configurations and on `zax-harness`.

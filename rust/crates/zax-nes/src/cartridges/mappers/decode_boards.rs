@@ -8,7 +8,8 @@
     feature = "board-77",
     feature = "board-96",
     feature = "board-111",
-    feature = "board-jaleco-72-92-86"
+    feature = "board-jaleco-72-92-86",
+    feature = "board-vs-system"
 )))]
 compile_error!(
     "feature `board-decode-boards` is implied by each of its boards (`board-77`, …) and is not \

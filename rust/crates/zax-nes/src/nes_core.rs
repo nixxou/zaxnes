@@ -342,10 +342,27 @@ impl NesCore {
             .map_or(0, crate::builtin_patches::BuiltinPatch::default_options);
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
+
+        // The VS. System of the image, settled once, before the power-on: an arcade board, its
+        // PPU model and its stick wiring are detected from the header and from the CRC of the
+        // data, never from anything the machine does later (lot MF-VS step 1).
+        #[cfg(feature = "board-vs-system")]
+        let note = {
+            let vs = crate::vs::VsSystem::detect(cartridge.rom().header(), crc);
+            let note = vs.as_ref().map(crate::vs::VsSystem::load_note);
+            self.bus.set_vs_system(vs);
+            note
+        };
+        #[cfg(not(feature = "board-vs-system"))]
+        let note: Option<String> = None;
+
         self.bus.attach(Some(cartridge));
         self.install_pack(Some(image));
         self.power_on();
-        RomLoadResult::ok(region)
+        match note {
+            Some(note) => RomLoadResult::ok_with_note(region, note),
+            None => RomLoadResult::ok(region),
+        }
     }
 
     /// Stops the emulation (REQ-CORE-005).
@@ -354,6 +371,8 @@ impl NesCore {
         self.original_image = None;
         self.builtin_patch = None;
         self.rom_crc = None;
+        #[cfg(feature = "board-vs-system")]
+        self.bus.set_vs_system(None);
         self.bus.attach(None);
         self.bus.apu_mut().discard_samples();
         // A stopped machine makes no sound, whatever a run-ahead sequence had asked for.
@@ -365,6 +384,23 @@ impl NesCore {
     #[must_use]
     pub const fn is_running(&self) -> bool {
         self.bus.cartridge().is_some()
+    }
+
+    /// The VS. System of the image loaded, or `None` for a NES image (lot MF-VS).
+    ///
+    /// What it carries was chosen at load and does not change; what a host may *drive* through
+    /// [`Self::vs_system_mut`] is the cabinet — the coin slots, the service button and the eight
+    /// DIP switches.
+    #[cfg(feature = "board-vs-system")]
+    #[must_use]
+    pub fn vs_system(&self) -> Option<&crate::vs::VsSystem> {
+        self.bus.input().vs()
+    }
+
+    /// The VS. System of the image loaded, to drive its cabinet.
+    #[cfg(feature = "board-vs-system")]
+    pub fn vs_system_mut(&mut self) -> Option<&mut crate::vs::VsSystem> {
+        self.bus.input_mut().vs_mut()
     }
 
     /// Name the ROM was loaded under (REQ-CORE-014).

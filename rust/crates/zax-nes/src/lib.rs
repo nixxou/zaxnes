@@ -21,6 +21,8 @@ pub mod rom;
 pub mod state;
 mod tile_record;
 mod video_info;
+#[cfg(feature = "board-vs-system")]
+pub mod vs;
 pub mod wide;
 pub mod wide_decode;
 

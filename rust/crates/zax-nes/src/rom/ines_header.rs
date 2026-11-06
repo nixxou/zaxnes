@@ -44,6 +44,23 @@ pub struct InesHeader {
     /// because it is "not part of the game cartridge". Exposed for the reason [`Self::byte6`] is
     /// (MF-6c step 3).
     pub byte10: u8,
+    /// Byte 7's two low bits, the **console type** (nesdev, "NES 2.0"): 0 the NES and Famicom,
+    /// 1 the Nintendo Vs. System, 2 the PlayChoice-10, 3 "extended", which puts the real type in
+    /// byte 13's low nibble. On an **iNES 1.0** header the same two bits are the two older flags,
+    /// bit 0 "Vs. Unisystem" and bit 1 "PlayChoice-10", which is why a VS image of that vintage is
+    /// recognised by bit 0 alone (`crate::vs::VsSystem::detect`).
+    ///
+    /// Zero on a dirty header, whose bytes 7 to 15 are not read at all (REQ-CORE-012).
+    pub console_type: u8,
+    /// Byte 13 itself, zero on an iNES 1.0 or dirty header. Its meaning depends on the console
+    /// type: for the Vs. System it is the Vs. PPU type in the low nibble and the Vs. hardware
+    /// type in the high one, and for console type 3 the low nibble is the extended console type
+    /// (nesdev, "NES 2.0"). Exposed for the reason [`Self::byte6`] is.
+    pub byte13: u8,
+    /// Byte 15 itself, zero on an iNES 1.0 or dirty header: the **default expansion device**
+    /// (nesdev, "NES 2.0"), whose `$04`, `$05` and `$07` are the three VS. System wirings
+    /// (`crate::vs::VsWiring`). Exposed for the reason [`Self::byte6`] is.
+    pub byte15: u8,
     /// Bit 1 of byte 6: the PRG-RAM is battery backed (REQ-CORE-095).
     pub has_battery: bool,
     /// Bit 2 of byte 6: a 512-byte trainer follows the header.
@@ -208,6 +225,12 @@ impl InesHeader {
             chr_ram_size: chr_ram,
             prg_ram_size: prg_ram,
             byte10: if is_nes20 { image[10] } else { 0 },
+            // A dirty header's bytes 7 to 15 are unread (REQ-CORE-012), so the console type and
+            // the two bytes below are zero for one: an old tool's free-text comment must not be
+            // able to turn an image into a Vs. System.
+            console_type: if is_dirty { 0 } else { byte7 & 0x03 },
+            byte13: if is_nes20 { image[13] } else { 0 },
+            byte15: if is_nes20 { image[15] } else { 0 },
             mirroring,
             byte6,
             has_battery: (byte6 & 0x02) != 0,
