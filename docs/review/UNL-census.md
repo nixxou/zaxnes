@@ -663,3 +663,118 @@ boards unlicensed publishers used for games that needed real banking, so they ca
 pure compilation hardware sits in §3.4. They are also the cheapest group to build: the MMC3, the
 A12 watcher and the `Mmc3Board` `const`-parameter pattern are all already here, and **six of the
 nineteen are one Mesen class that this build already implements one member of** (mapper 119).
+
+---
+
+## 4. Part D — the eight homebrew numbers
+
+§3.1's note lists 29, 31, 218, 284, 323, 324 and 682 as "the remaining `Mappers/Homebrew/`
+numbers", and §3.1's table has **111** (Cheapocabra). Homebrew is where the owner's content rule is
+least ambiguous: a homebrew cartridge is **nothing but** original content — there is no licensed
+original anywhere behind it, so no number here can be B, C or D. The only questions are whether a
+number has a **title** and whether it has **documentation**, and they split the eight four and four.
+
+| iNES | board | author | titles | doc | cat. |
+| ---: | --- | --- | --- | --- | :-: |
+| **29** | **RET-CUFROM revD** | **Sealie Computing** | *Glider* | **full** — register layout, PRG/CHR setup diagrams **and the schematic** | **A** |
+| **111** | **Cheapocabra (GTROM)** | **Membler Industries**, who also make the cartridges | **seven**: *Anguna: Scourge of the Goblin King*, *Candelabra: Estoscerro*, *The Incident*, *NEScape*, *Project Blue*, *Spook-o-tron*, *Storied Sword* | **full** — registers, bank configurations, a hardware teardown with the logic functions, and schematic references | **A** |
+| **218** | **Magic Floor** | homebrew, author not named on the page | *Magic Floor*; *Starfight* | **full** — four configurations, each with its PPU-address-line wiring and its effect | **A** |
+| **284** | **UNL-DRIPGAME**, an FPGA mapper | **Quietust** | *Drip* | the mapper-284 page is a **stub** that says "See: UNIF/UNL-DripGame" — and **that** page is comprehensive: memory map, every readable and writable register with bit layouts, the extended attribute tables, the IRQ, the audio | **A** |
+| **31** | an NSF-to-cartridge board, no PCB name | various | *2A03 Puritans*, *Famicompo Pico*, *RNDM*, *EZNSF*, *ZENSF*, "plus test ROMs" — **chiptune compilations and NSF players, not games** | **full** — PRG bank register at $5FF8-$5FFF, eight 4 KiB banks, the high bank initialised to the last at power-on | **E** |
+| **323** | **FARID_SLROM_8-IN-1** | Farid | **none named** | partial — an outer bank at $6000-$7FFF (mask $E000, write-only, gated on the MMC1's WRAM enable) over a stock MMC1 | **E** |
+| **324** | **FARID_UNROM_8-IN-1** | Farid | **none named** | partial — a UNROM latch plus an outer bank for 128 KiB, with a lock, a D7-transition clock generator, and a power-up rule that zeroes the middle four bits and preserves the outer four | **E** |
+| **682** | **Rainbow**, an FPGA mapper | **Broke Studio** | **none named on the wiki** | **stub** — a brief reference to an external GitHub document and nothing else. Its feature list is scanline IRQs, cycle IRQs, read triggers, single-screen mirroring, a large PRG-RAM, the whole of $4020-$5FFF, **and Wi-Fi**. The page: "Everything but Rainbow's Wi-Fi functionality is supported by mainline Mesen" | **E** |
+
+### The four A numbers, and what each actually costs
+
+* **218 (Magic Floor) is the cheapest board in the entire census, and it is cheap because it has no
+  CHR memory at all.** Its 2 KiB of internal nametable RAM *is* its CHR-RAM, and the four
+  configurations differ only in which PPU address line CIRAM A10 is wired to — A10, A11, A12 or
+  A13. That is a nametable-mapping variant, which this build expresses through
+  `Mapper::nametable_page`, plus a pattern-table read that comes out of CIRAM. The inventory's §3.1
+  note already picked it out as "the only [homebrew number] with a hook worth naming"; the hook is
+  §4.5's, and §4.10 prices `Mapper::nametable_page` at **0** behind its `nametable_pages_vary`
+  latch. Two titles.
+* **29 (RET-CUFROM) is the second cheapest**: a single register at $8000 holding two bits of
+  CHR-RAM bank and three of PRG bank, hard-wired vertical mirroring, 8 KiB of WRAM in the standard
+  window. Four 8 KiB CHR-RAM banks and eight 16 KiB PRG banks. The flash-reprogramming path (EXP0
+  and R/W both low) is a **CopyNES** feature, not something a game uses, so it need not be
+  emulated. One title.
+* **111 (Cheapocabra) is the one homebrew board with a real catalogue — seven commercial homebrew
+  releases — and it has the most unusual save path in the census.** It has no PRG-RAM: the
+  **SST39SF040 flash chip is self-flashed by the running game**, so a save means recognising the
+  flash command sequences and persisting a sector of what the loader thinks is ROM. Beside that,
+  bit 5 of the control register selects between **two 8 KiB CHR-RAM pages used as nametable RAM**
+  (with four-screen mirroring forced and no alternative), and bits 6-7 drive two LEDs which the
+  page itself says are "currently universally unsupported" and which this build can ignore
+  without consequence. The flash path is the cost; everything else is a latch.
+* **284 (Drip) is an A that the third exclusion reason reaches**, and it is the clearest case of
+  disproportionate cost in the census: one game, and the board wants a cycle-countdown IRQ with a
+  reload buffer, **two FIFO-buffered expansion-audio channels** with independent period and volume,
+  an SRAM write-enable flag — and **extended attribute tables giving per-tile palette selection**.
+  That last one is not a cartridge feature at all: it changes what the PPU fetches for attributes,
+  which is SPEC-06 territory and `zax-ppu`'s hot loop. One homebrew title does not justify
+  reaching into the renderer.
+
+### The four E numbers, and why three of them are nearly free anyway
+
+**323 and 324 are Farid's homebrew 8-in-1 multicarts** — an MMC1 and a UNROM with an outer bank
+register — and they would each cost about what `board-mmc3-multicart` cost for 47 and 37 (an outer
+register gated on a WRAM-enable bit, which `Mmc3`'s version of that gate already demonstrates).
+They are out because **neither page names a single title**, so there is nothing to say they
+preserve; and because an 8-in-1 of unnamed homebrew is a compilation by construction.
+
+**31 is the interesting E.** Its documentation is a *full* table and the board is three lines — a
+4 KiB PRG bank register at $5FF8-$5FFF with the top bank fixed at power-on. It is out because its
+titles are **not games**: *2A03 Puritans* and *Famicompo Pico* are chiptune compilations and
+*EZNSF*/*ZENSF* are NSF players. Preserving them is preserving music, which `profiles.json` has
+nothing to do. **This is a judgement the owner may want to overturn cheaply**, and the census
+records the price so the decision has a number on it: mapper 31 is an S, it needs no hook at all,
+and §6 lists it as the one E that a later lot could pick up for almost nothing. It is *not*
+proposed here.
+
+**682 (Rainbow) is out on documentation and on cost together.** The wiki page is a stub; the real
+specification is an external vendor document on GitHub, which is public but is a moving target for
+an FPGA development board whose feature list includes Wi-Fi. Mesen's own position — "everything but
+Rainbow's Wi-Fi functionality is supported by mainline Mesen" — is a statement about an upstream
+project with an FPGA author in the loop, not a specification this role can build against. No title
+is named on the page either.
+
+---
+
+## 5. The whole census in one table
+
+| group | numbers | **A** | B | C | D | E |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| §3.3, the single-publisher boards | 60 | **29** | 4 | 10 | 12 | 5 |
+| §3.4, the explicit pirate/BMC list | 83 | **15** | 7 | 47 | 6 | 8 |
+| §3.2's MMC3-clone row | 48 | **19** | 9 | 15 | 0 | 5 |
+| the homebrew numbers | 8 | **4** | 0 | 0 | 0 | 4 |
+| **total** | **199** | **67** | **20** | **72** | **18** | **22** |
+
+**Sixty-seven of the 199 numbers are category A** — a third of them — against §6 item 1's blanket
+exclusion of all of them. The other 132 are out under the owner's content rule (110: 20 B, 72 C,
+18 D) or for want of a title or documentation (22 E), and **none** of those exclusions rests on a
+performance argument.
+
+### The one thing every MF-UNL lot has to live with: there is no ROM to run
+
+A header scan of all **334** files in `assets-free/test-roms` finds these mapper numbers and no
+others:
+
+    0 (225 files), 1 (32), 2 (4), 3 (10), 4 (28), 5 (4), 7 (3), 9 (1), 10 (2), 11 (6),
+    22 (1), 28 (4), 34 (3), 66 (1), 69 (2), 78 (1), 118 (1), 180 (2)
+
+**Every one of those eighteen numbers is already supported, and not one of the 199 census numbers
+appears.** The inventory's §2 said this in prose ("there is nothing to run, for any of these
+boards"); it is still true, it is now counted, and it is the binding constraint on the plan rather
+than a footnote. Consequences §6 takes as given:
+
+1. **No MF-UNL lot can have a ROM-level acceptance gate.** Its gate is the unit tests written from
+   the board's own page, plus the four sweeps over `SUPPORTED_MAPPERS` that every MF lot runs, plus
+   the save-state round-trip. That is what MF-6a3 did for mapper 116, which also had no ROM.
+2. **The per-board tests must come from the page's register table, not from a game's behaviour.**
+   Which is why the documentation grade in §§1-4 is not bookkeeping: a board graded "stub" has
+   **nothing to write a test from**, and that — not its runtime cost — is what keeps it out.
+3. **R0's commercial-title list for each lot is a list of titles R0 would have to source
+   separately.** §6 gives it per lot anyway, because it is the only way to say what the lot is for.

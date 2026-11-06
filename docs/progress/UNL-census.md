@@ -19,7 +19,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | 1 | census part A — §3.3's single-publisher boards (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | **done** |
 | 2 | census part B — §3.4's explicitly listed numbers | **done** |
 | 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | **done** |
-| 4 | census part D — the homebrew numbers, and the census's category totals | to do |
+| 4 | census part D — the homebrew numbers, and the census's category totals | **done** |
 | 5 | the category-A detail: documentation quality, hooks, effort per number | to do |
 | 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | to do |
 | 7 | the check — `cargo fmt --check`, `cargo test --release -p zax-nes -p zax-harness` | to do |
@@ -145,3 +145,32 @@ The findings that change a decision:
 * **245 and 199 are the strongest "nearly A" rows** — the two most capable clones here (1 MiB of
   PRG; 32 KiB of battery save with 12 KiB mapped) whose only titles are Chinese translations of
   licensed Famicom RPGs. Noted in §3.2 as where to look first if that rule ever changes.
+
+## Step 4 — the 8 homebrew numbers (4 A, 4 E), and the census totals: 67 A of 199
+
+`docs/review/UNL-census.md` §4 and §5.
+
+* **Homebrew cannot be B, C or D** — there is no licensed original behind a homebrew cartridge — so
+  the eight split only on title and documentation: **29, 111, 218, 284 are A; 31, 323, 324, 682 are
+  E.**
+* **111 (Cheapocabra / GTROM, Membler Industries) is the homebrew find: seven commercial homebrew
+  releases** — *Anguna*, *Candelabra: Estoscerro*, *The Incident*, *NEScape*, *Project Blue*,
+  *Spook-o-tron*, *Storied Sword* — behind a fully documented board. Its cost is the save path: the
+  **SST39SF040 flash is self-flashed by the running game**, so a save means recognising flash
+  command sequences and persisting a sector of what the loader thinks is ROM.
+* **218 (Magic Floor) is the cheapest board in the census**: no CHR memory at all, its 2 KiB of
+  nametable RAM *is* its CHR-RAM, and its four configurations differ only in which PPU address line
+  CIRAM A10 is wired to. §4.10 prices `Mapper::nametable_page` at 0 behind its existing latch.
+* **284 (Drip) is an A excluded on disproportionate cost**: one game, and it wants two FIFO
+  expansion-audio channels and **extended attribute tables for per-tile palettes** — a change to
+  what the PPU fetches, i.e. `zax-ppu`'s hot loop, not the cartridge layer.
+* **31 is the E the owner may want to overturn**: full documentation, three lines of code, no hook —
+  but its titles are chiptune compilations and NSF players, not games. Priced in §4 and §6 so the
+  decision has a number on it; not proposed.
+* **Census totals: 67 A, 20 B, 72 C, 18 D, 22 E of 199.** A third of the numbers §6 item 1
+  excluded in one sentence are category A, and no exclusion in this census rests on performance.
+* **THE binding constraint, now counted rather than asserted**: a header scan of all **334** files
+  in `assets-free/test-roms` finds mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78,
+  118 and 180 — **all already supported, and not one of the 199 census numbers**. So no MF-UNL lot
+  can have a ROM-level gate; its gate is unit tests written from the board's own register table,
+  which is why a "stub" documentation grade is what excludes a board, not its runtime cost.
