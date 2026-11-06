@@ -593,3 +593,140 @@ whole-process count the bar.
    of it. The 47/37 half needs no copy at all beyond the outer register.
 
 [PROGRESS] MF-6a2 step 3/4 **not done**: 119, 47 and 37 built, tested and measured six ways, then reverted on the stop-the-lot condition.
+
+## Step 4 — the checks, the campaign, and the documents
+
+### The suites
+
+| check | result | against `db804934` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | clean, exit 0 | **no new `allow` of any kind**. `zax-nes` is the only crate this lot touches |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **847 passed, 0 failed, 8 ignored** | identical: step 2 added no test and changed no answer, and step 3's six went out with its boards |
+| `cargo test --release -p zax-harness --test test_roms_tests` | **14 passed** | identical |
+| `--ignored`, both ROM folders, `--no-fail-fast` | **7 passed, 1 failed** | MF-5a, MF-5b and MF-5b-fix reported 7 of 8; MF-6a reported 8 of 8 |
+
+The environment for the `--ignored` run is `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`. `--no-fail-fast` matters: without
+it `cargo test` stops after the first failing test *binary* and six of the eight never run, which
+is how a run can look like "1 passed" and mean nothing.
+
+**The two the brief names both pass.**
+`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` — the widescreen
+hack's execution-zone fetch path, *Super Mario Bros. 3* at frame 1500 — and
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`. Neither needed a change.
+**But the second one needs reading, and §3 of `PERFORMANCE-HISTORY.md` now says so:**
+
+| `rust/test-roms/` holds | golden-core reports | verdict |
+| --- | --- | --- |
+| `nestest.nes` only, as a fresh checkout does | `1 of 291 rows matched, 290 ROMs missing` | **passes** |
+| the real corpus (`assets-free/test-roms/nes-test-roms`, 290 of the 291) | `239 of 291 rows matched, 1 ROM missing` | **fails, 51 mismatches** |
+
+A ROM the test cannot find is counted *missing* and not *failing*, so the green of MF-5b-fix and
+MF-6a was green over one ROM. The 51 are **not** this lot's: with the same junction in place and
+only `mmc1.rs`, `mmc3.rs` and `rambo1.rs` checked out at `db804934`, the run gives **239 of 291
+again and the mismatching set is identical line for line**. They are ±1-cycle and audio-digest
+differences on `apu_reset/works_immediately`, `apu_test`, `apu_test/rom_singles/7-dmc_basics`,
+`apu_test/rom_singles/8-dmc_rates`, `dmc_dma_during_read4/dma_2007_read` and their neighbours —
+the DMC-DMA area REQ-CORE-113 marks P3 and which `req_core_113_dmc_dma_during_read4_is_p3` and
+`the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` already pin as accepted divergences.
+The junction was removed again, so `rust/test-roms/` ends this lot as it began.
+
+**The one failure is `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`**, at
+`assert!(apply(&hack).is_none())`: a hack of the ROM — its last byte flipped — still takes the
+patch, where the test requires that only a forced apply should. **No file of the patch machinery
+is in this lot's diff**, nor in MF-6a's: `git diff --name-only 240a2718 HEAD` lists twenty-one
+source files and `builtin_patches.rs` is not among them. The dump in the folder is exact
+(262 160 bytes for a 128 KiB + 128 KiB image, no overdump) and ends in `FF`s, and the outcome
+depends on what `data_crc` covers over such a tail. It is reported as measured and untouched,
+which is the state MF-5a, MF-5b and MF-5b-fix reported too.
+
+### The campaign, field by field
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms camp-6a2.json --no-shots --quiet
+    test-roms: 331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+`campfields.py camp-6a-b.json camp-6a2.json` — every key of every row, ignoring `ms` (wall
+clock) and `shot` (`--no-shots`):
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+      base: {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+      new : {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+
+    rows differing on any field but ['ms', 'shot']: 0
+
+    mapper numbers the campaign exercises: [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180]
+    of which this lot adds: []
+
+**Zero rows differ on any field**, the summary objects compare equal on all six counts, and the
+brief's exception set is empty twice over: this lot adds no mapper number at all, and the
+campaign exercises none of MF-6a's seventeen either. **The eighteen MMC3 rows the brief names are
+identical field by field** — all six of `mmc3_irq_tests`, all six of `mmc3_test`, all six of
+`mmc3_test_2/rom_singles` — which is the non-regression step 2's `Mmc3Board` change and step 3's
+revert both had to show. Three of the campaign's five failures are in that set and were failing
+at MF-6a and MF-5b-fix for reasons of their own
+(`mmc3_irq_tests/5.MMC3_rev_A` "FAILED #3", `mmc3_test/6-MMC6` and
+`mmc3_test_2/rom_singles/6-MMC3_alt`, the revision-A and MMC6 reload cases of AMD-061 §8); the
+other two are `AccuracyCoin` (128 of 147) and `blargg_ppu_tests/power_up_palette`. The run was
+reproducible first time, unlike MF-6a's, whose first full run flaked one mapper-1 CPU row.
+
+### The documents
+
+`rust/docs/PERFORMANCE-HISTORY.md` gains **§5.12**, beside MF-6a's §5.11, with the five findings
+a later lot needs: that a dispatch body *removed* pays every board and by how much; that MF-6a's
+`smb3` residual was one taken `jmp` and how `blocks.py` finds such a thing when the instruction
+count cannot; that **`Board::ppu_peek` is the fourth hook with a measured body cap** and what the
+TQROM's arm cost there; that a level-2 `total` has a ±2.7 M run-to-run floor where its `core` has
+none; and that valgrind 3.22 stops reading this build's symbols without a word, with the way
+round it and the warning that the way round is coarse.
+
+**§3, "Verification tools", gains a paragraph** on the first row of its own table: golden-core
+counts a ROM it cannot find as missing rather than failing, so a lot must say how many rows
+matched or its green means nothing.
+
+`docs/review/MF-6-inventory.md` is **not** amended, although §4.4's "+16 measured" for an arm in
+`Board::ppu_read`/`ppu_peek` is now known to be the figure for a *plain banked read* and not for
+an arm that chooses between two chips. The inventory is R0's plan document and this role does not
+edit it; §5.12 carries the measurement and names §4.4 so the next reader of either finds the
+other.
+
+No Q ticket was opened. The two places the public documentation and Mesen 2 disagree — mapper
+37's block 7 and its CHR A17 — are AMD-061 §1 cases, which that amendment settles in favour of
+the page without a ticket, exactly as MF-6a step 1 settled the Namco 108's `$E001` mask; and both
+are recorded in step 3 above rather than in the code, because the code is reverted. Q-132 is
+still free.
+
+[PROGRESS] MF-6a2 step 4/4 done: 847 / 0 / 8, 331 campaign rows identical field by field, and PERFORMANCE-HISTORY sections 5.12 and 3.
+
+## What the lot delivered, against the brief
+
+| the brief asked | what happened |
+| --- | --- |
+| **1.** Reproduce both runs at `240a2718` and `db804934` on clean builds, each in its own directory and target directory | Done. Every level-2 `core` figure came out **character for character** MF-6a step 0's, and both residuals at **exactly** its step 4's numbers — `smb3` +461 302, `mm2` +10 506 |
+| **2.** Remove those two residuals: every level-2 game at `240a2718`'s total **and** core or lower, without dropping a board; write every variant tried | **Core: done, all five below, −0.005 % to −0.011 %**, `smb3` **−1 759 555** and `mm2` **−563 286**. Four variants written up with their numbers. Total: four of five below; `smb3/total` +429 357, which the step then showed to be **one sixth of the same binary's own run-to-run spread on that column** rather than asserting it. No board dropped; PR-1's thirteen **all** below, set total **−19 586 552** |
+| **3.** 119, 47 and 37 on `Mmc3` with MF-6a step 5's design, the tests of §5, the save states, the registry list; measure at symbol level; stop the lot if `m4`/`smb3` or a level-2 game goes above | **Built in full and reverted.** 853 / 0 / 8 with six new tests, fmt and clippy clean, both A12 latches and the registry list extended, one save-state byte appended behind the versioning. Six shapes measured: the best leaves `m4` **+258 640** and `smb3` **+390 724** on PR-1's set and `mm2/core` **+2 136 243** at level 2. Stop-the-lot condition met on both instruments after the attempts, so the boards are out and the design, the page readings, the two Mesen divergences and the six shapes' numbers are in step 3 |
+| The post-LTO checks after each variant | **`irq_asserted`, `zone_offset` and `execute_without_operand` are 0 / 0 / 0 on every tree measured**, `step` 3 443, `resolve` 1 854, `read_cycle` 1/65/181, `tick` 1/95/82, `read_internal` 1/17/175 **unmoved to the instruction** throughout; `branch` 418 → 418 or 420 against §4.2's +11 per arm |
+| **4.** The checks, the `--ignored` pair, the campaign identical to MF-6a's 331 rows, PERFORMANCE-HISTORY only where a later lot needs it | 847 / 0 / 8, 14 / 14, **zero campaign rows differing on any field**, the two named `--ignored` tests green, the Zelda II patch failure reported with the proof that no file of it is in the diff, and §5.12 plus a §3 paragraph |
+| Change no existing board's behaviour or save-state format, nothing under `spec/` | **No behaviour and no byte moved.** `Mmc3Board::dots_per_clock` and `Mmc1`'s two masks are wiring recomputed at load and carry the same values the code they replace computed; `Rambo1`'s change is one attribute. `spec/` untouched, Q-132 still free |
+| Q-131 not reopened | Not reopened |
+
+Two findings a reader should take from it that the brief did not ask for. The first is that
+**§4.9's unit is still wrong in the favourable direction too**: MF-6a established that a `Board`
+variant is free and a *body* is not, and this lot measured the mirror — removing two bodies from
+one dispatch bought **−0.082 % on an MMC5 and −0.033 % on an NROM**, boards with no body in it,
+which is a larger effect than most of what the MF lots have spent a step chasing. `Board`'s
+dispatches are worth auditing for bodies that could merge, independently of adding any board.
+The second is that **two of this project's instruments were reporting more confidence than they
+had**: golden-core passes over one ROM when the corpus is absent, and a level-2 `total` cannot be
+read at a resolution finer than about 3 M. Both are now written down where the next lot will look.
+
+## Status
+
+**Steps 1, 2 and 4 done; step 3 not done.** No mapper number added; **MF-6a's two level-2 core
+residuals removed and turned into gains** — every level-2 game below `240a2718` on `core` by
+0.005 % to 0.011 %, every one of PR-1's thirteen ROMs below it, set total **−19 586 552
+(−0.025 %)** — with 847 / 0 / 8, 331 campaign rows identical on every field, no new `allow`, no
+save-state byte moved and the three claimants of `Cpu6502::step`'s budget still inlined.
+**Mappers 119, 47 and 37 are still out**, now with their design, their page readings, their six
+measured shapes and the reason in step 3, and with the shape to try next named there.

@@ -90,6 +90,20 @@ they are settings that are off on the desktop (the C# behaviour) and on by defau
 | In-app profiler (`ui.profiler` or `ZAXNES_PROFILE=1`) | per-stage mean/max per displayed frame, busy time per thread, Lua time per script hook, in `logs/zaxnes.log` | device runs |
 | `valgrind --tool=callgrind` on a short `bench-core` | instruction counts, closer to an in-order A53 than x86 time | core and engine work |
 
+**The golden-core corpus has to be *there*, and the table's first row does not say so.**
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` reads its 291 ROMs from
+`rust/test-roms/`, a gitignored folder, and **a ROM it cannot find is counted as missing and not
+as a failure** — so with the folder holding only `nestest.nes`, as it does in a fresh checkout,
+the test reports `1 of 291 rows matched, 290 ROMs missing` and **passes**. Lots MF-5b-fix and
+MF-6a both reported it green on that basis. Pointed at the real corpus
+(`assets-free/test-roms/nes-test-roms`, which carries 290 of the 291) it is **239 of 291 with 51
+mismatches**, and MF-6a2 checked that the mismatching set is **identical line for line at
+`db804934`**, so they are not a regression of any mapper lot: they are cycle and audio
+differences on `apu_reset`, `apu_test`, `dmc_dma_during_read4` and their neighbours, ±1 CPU cycle
+at a time, in the DMC-DMA area REQ-CORE-113 marks P3 and which this build's own `#[ignore]`d
+tests already document. **A lot that claims golden-core green must say how many rows matched**,
+or the claim says nothing.
+
 **callgrind on the Windows host.** Lots MF-1 to MF-4a all recorded "no callgrind on this machine"
 and fell back to reading generated assembly. There is one: the WSL2 Ubuntu it carries, whose
 `rustc` is the *same* version with the same LLVM, so the Linux binary's hot code is the Windows
@@ -1305,6 +1319,69 @@ clock divided by 36, so `Vrc7Audio::step_cpu_cycle` is a decrement, a test and a
 oscillators being on the CPU clock itself. The whole chip costs the set nothing measurable: six
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
+
+### 5.12 Lot MF-6a2: a dispatch body *removed* pays every board, and `ppu_peek` is the fourth capped hook
+
+MF-6a2 took MF-6a's two level-2 residuals off — `smb3`'s emulated core from +461 302 to
+**−1 759 555** and Mega Man 2's from +10 506 to **−563 286** against `240a2718` — and left its
+three remaining mapper numbers out, measured rather than declined. Five findings.
+
+**One arm body *fewer* in a dispatch that something hot inlines is worth −0.005 % to −0.082 % to
+every board in the library, including boards that have no body there at all.** §5.11 measured
+what adding one costs (0.13 % in `chr_view`, 0.67 % in `expansion_audio_output`); this is the
+same lever pulled the other way, on `Board::ppu_irq_horizon`. `NesBus::catch_up_ppu` inlines
+`NesBus::ppu_horizon`, which inlines `Cartridge::ppu_irq_horizon` and the whole dispatch. It had
+four bodies; two were removed — the RAMBO-1's to an out-of-line call, the MC-ACC's into the
+MMC3's by making `dots_per_clock` a load-time field instead of an `if MC_ACC` — and
+`catch_up_ppu` went from **216 instructions to 188** with `catch_up_ppu` falling on **all
+thirteen ROMs of lot PR-1's set**: `mmc5` −9 214 379, `duelito` (an **NROM**, no IRQ, no A12
+watcher, no horizon) −2 433 068, `m4` −454 483, `m0` −160 815. Set total **−19 586 552
+(−0.025 %)**, every ROM below the reference. The price is named: mapper 64 and 158 pay a
+`leaq`/`callq` per PPU batch.
+
+**MF-6a's `smb3` residual was one taken `jmp`, and the mechanism is worth recognising.**
+`Mmc3Board::ppu_irq_horizon` and `Rambo1::ppu_irq_horizon` were the *same source expression*
+character for character, so LLVM tail-merged their last two instructions into a block only one of
+the two arms can fall through to. At `240a2718` the MMC3 held the fall-through; MF-6a's ten new
+`Board` variants joined the dispatch's default arm, its placement moved, and the RAMBO-1 took it
+— one extra `jmp` per MMC3 horizon, 430 417 of them over 600 level-2 frames of *Super Mario Bros.
+3*. `fn.py` said 216 instructions in both dumps and `blocks.py` said which block had moved; a
+function that is identical in size and different in layout is a case the instruction count alone
+cannot see.
+
+**`Board::ppu_peek` is the fourth hook with a measured cap on arm bodies**, after
+`read_nametable` (Q-123, 132 → 109 at the third body), `chr_view` (§5.11, 0.13 % at the sixth)
+and `ppu_irq_horizon` above. §4.4 of `docs/review/MF-6-inventory.md` prices an arm there at
+**+16** from the VRC6, which is right for a plain banked read and wrong for anything else: the
+TQROM's per-window chip select took `Board::ppu_peek` from **271 instructions to 583** and cost
+**3.4 M on `m4`, 3.5 M on `metroid` and 5.4 M on `mm2` over 300 frames** — three games on boards
+the change does not touch — because its arms are inlined into `Ppu2C02::background_fetch`, 7 % to
+11 % of every ROM of the set. `#[inline(never)]` on the board's own body took it back to 272 and
+recovered **8.0 M of set total**. A lot adding a board whose fetch is not a plain banked read
+should write that attribute first and measure second.
+
+**The level-2 `total` column has a ±2.7 M run-to-run floor; the `core` column has none.** §5.11
+measured the PR-1 whole-process floor at ±57 k per ROM and named `luaH_getshortstr`. The same
+measurement on level 2 — the *same binary* at the *same path*, through `callgrind-l2.sh` twice —
+gives **0 on every `core` stage of all five games, 0 on `apu`, `draw_list` and `ppu`, and up to
++2 739 840 on `smb3/total` and +2 659 382 on `smb1/total`**, all of it in `convert` and
+`lua_hooks` and named in one symbol (`getgeneric`, Lua's table lookup, +2 247 112 on one pair of
+runs). A level-2 `total` therefore cannot be read at a resolution finer than about 3 M, and a
+verdict on that column alone is worthless; `core` is exact and is the one to judge on.
+
+**Valgrind 3.22 silently stops reading this build's Rust symbols past a certain binary**, and a
+lot that hits it should not conclude the counts are wrong. Every tree of PR-1 through MF-6a2
+step 2 annotated with names; every tree of its step 3 annotated `???:0x...`, with `nm` listing
+4 522 text symbols, `file` reporting "with debug_info, not stripped", no warning from valgrind,
+and `--read-inline-info=no` / `--read-var-info=no` changing nothing. The *counts* are unaffected
+— three builds of the same tree agreed on the set total to within 0.0002 % — so the
+whole-process column stays usable and `rust/target-mf/resolvesyms.py` puts the names back from
+`nm`, deriving the constant bias valgrind's addresses carry (`0x108000` there) by tallying which
+candidate lands the most addresses exactly on a symbol start. **That table is coarse and must not
+decide a verdict**: valgrind merges a tail-called function into its caller, so `Cpu6502::branch`
+read 0 and `Cpu6502::step` +197 M where the post-LTO dump showed `branch` with its own definition
+and its own call site in both trees. When this happens, the post-LTO dump is the symbol-level
+instrument and the whole-process count is the bar.
 
 ### 5.11 Lot MF-6a: a `Board` variant is free, a `Board` arm *body* is not
 
