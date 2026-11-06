@@ -76,5 +76,50 @@ says so. Where a page gives neither, the cell says that instead of guessing.
   profile. `profiles.json` records no mapper number, so which board each of the 101 dumps sits on
   is R0's to check — but this one named a missing board by itself, and it is why 47 is in MF-6a.
 
+## Step 2 — the hooks, the hot paths, and the variants
+
+`MF-6-inventory.md` §4, one section per hook, each with the measurement that priced it rather than
+a judgement. The summary table §4.10 is the one a sub-lot brief should carry verbatim.
+
+**Eight of the ten hooks cost a board that does not use them exactly zero**, and each is zero
+because a lot made it so: `clocks_on_cpu_cycle` (MF-5a step 2, which took 11 instructions per CPU
+cycle to 0 for 26 of the 38 numbers), `watches_ppu_reads` and `watches_ppu_bus_without_read`
+(MF-3b step 2, over 57 600 fetches a frame), `nametable_pages_vary`, `rom_windows`,
+`bus_conflicts`, and the `mapper_number` field MF-5a step 1 turned from a per-sprite dispatch into
+an `i32`.
+
+**Two are not latched, and they are the whole performance story of MF-6:**
+
+* **`NesBus::irq_asserted`.** MF-5b's thirty-second arm pushed the chain past the inliner's budget
+  and LLVM outlined it: **+169 739 749 instructions, ~19 per CPU cycle, on twelve ROMs of thirteen
+  whose board cannot assert an IRQ at all**, +0.542 % on every one. Four `#[inline(always)]` fixed
+  it; the load-time `irq_capable` latch was **built and refuted** (+1.3 to +1.8 % on three of R0's
+  ROMs, two of them MMC3s), so MF-6b must not re-litigate it. MF-6b adds up to five more arms and
+  the yardstick per arm is MF-5a's and MF-5b's identical +11 in `branch` / +47 in `resolve`.
+* **`Mapper::read_nametable`, capped at two distinct arm bodies by measurement.** Q-123: a third
+  body takes `read_nametable_inner` from 132 to 109-83 *for every game*, and MF-5a's five shapes
+  prove "the trigger is the third distinct body, not its size". **Mapper 68 (Sunsoft-4) is that
+  third body** — its `$E000` bit 4 is the same CHR-ROM-nametable feature the VRC6 has and we
+  decode and ignore. §4.5 says what MF-6c must do instead.
+
+§3.2 is the variants: **27 numbers plus the 48 MMC3 clones are a parameter of a board we already
+have, not a new board** — and `board.rs`'s own note is why that matters (32 variants, `Mmc5`
+pinned at index 5 by the niche-filling layout, appended never inserted). The `McAcc` line
+(MR-4-3, shipped) is the precedent for a `const` parameter that costs the parent board nothing;
+mapper 26 is the precedent for a runtime `bool` when the test is off the per-cycle path.
+
+Three decisions were taken here rather than deferred, each with the text that settles it:
+
+* **mappers 72, 86, 92 get their boards and not their µPD7756C audio.** REQ-CORE-075 lists six
+  optional chips and this is not one of them, and the ADPCM samples live in a mask ROM inside the
+  ASIC — "sample files for the speech synthesis chip emulation", which no source this role may use
+  contains. A test pins the silence. **No Q ticket.**
+* **mappers 80, 82, 207 and 552's mapper-internal WRAM is the Namco 163's shape**, not a new
+  mechanism: `registry.rs:90-97` already puts a chip's internal bytes "at the end of PRG-RAM so
+  that REQ-CORE-095's single battery slice carries it".
+* **the 24C01/24C02 EEPROM of 157 and 159 is genuinely new**, and REQ-CORE-100's mapper-16 row
+  already prices it: "EEPROM : P3".
+
 [PROGRESS] MF-6 step 0/4 done: the plan, the sources, and the ROM situation settled first
 [PROGRESS] MF-6 step 1/4 done: the inventory, 245 numbers in four tables
+[PROGRESS] MF-6 step 2/4 done: the hooks, the two unlatched hot paths, and the variants

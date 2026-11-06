@@ -232,3 +232,295 @@ this build cannot reach: it loads iNES and NES 2.0 only.
 **The FDS** (`MapperFactory::FdsMapperID`) is out of scope: it is a disk system, not a mapper, and
 REQ-CORE-075 names its audio among the optional chips without the spec ever asking for the drive.
 
+---
+
+## 4. The hooks, and which hot path each one touches
+
+A board costs this core in two separate currencies, and the sub-lots have to be budgeted in both:
+
+* **its own arm** in `NesBus::write_internal`, `Board::on_cpu_cycle`, `Board::ppu_read` and so
+  on — reached only by a cartridge of that board, and therefore free to every other game. MF-5a
+  measured the VRC6's whole register decode at **+141 instructions in `write_internal`** and MF-5b
+  the VRC7's at **+138**, both inside their own arm, both costing an NROM nothing.
+* **the shared shape** of the dispatch that holds that arm — its prologue, its jump table, the
+  inliner's budget for its caller. This is the currency that has bitten every lot, and it is paid
+  by **every** game. The sections below are one per hook, each with the measurement that priced it.
+
+### 4.1 `Board::on_cpu_cycle` — a CPU-cycle IRQ or expansion audio
+
+Boards in this inventory that need it: **65, 67, 73, 105**, 82 if its IRQ is implemented, and the
+ADPCM of **72, 86, 92** if that were ever done.
+
+**MF-5a step 2 made this hook free to the boards that do not need it**, and the figure is exact:
+`Cartridge::step_cpu_cycle` used to dispatch unconditionally, which callgrind priced at
+**98 275 760 instructions over 300 frames on every ROM of the thirteen whatever its board —
+eleven instructions per CPU cycle**. The `Cartridge::clocks_on_cpu_cycle` latch, tested *before*
+the dispatch, took that to **zero** for the twenty-six mapper numbers that inherit the empty
+default, at a cost of **two instructions per cycle in `NesBus::tick`** to the twelve that are in
+the list.
+
+So a new CPU-cycle board costs every other board nothing — **provided three things**, each a step
+in the sub-lot rather than an assumption:
+
+1. **The mapper number goes into the `matches!` in `Cartridge::create`.** Forgetting it is a
+   silent correctness bug, not a slow path: the counter is never clocked. This is MF-3b rule 5's
+   warning, and it is tested rather than trusted —
+   `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` sweeps `SUPPORTED_MAPPERS` ×
+   submappers 0 and 3, drives 400 bare CPU cycles at each board and requires the latch wherever
+   `Board`'s `PartialEq` says the state moved. **A sub-lot that adds a CPU-cycle board and does
+   not extend that list fails an existing test.** Nothing to write.
+2. **The arm must be a tail call.** MF-5a's VRC6 inlined its audio into the arm and took the
+   dispatch's shared prologue from `pushq %rsi / subq $32, %rsp` to
+   `pushq %rsi / pushq %rdi / subq $40, %rsp` — **one more push and pop per CPU cycle for every
+   board, an NROM included.** That is MF-3b rule 3 in its exact form: the arm that matters is the
+   empty one. What worked was `#[inline(never)]` on the *board's own* `on_cpu_cycle`, not on the
+   audio body.
+3. **The prologue must be read on the dump of the platform being measured.** MF-5a's own words:
+   `#[inline(never)]` on the audio body "put the Windows prologue back", and callgrind then showed
+   it "had done nothing at all for the Linux build" — +2 per CPU cycle on all thirteen ROMs.
+   Windows x64 and System V differ in argument registers and callee-saved sets, so **an attribute
+   chosen to fix a register-allocation symptom in one dump is not evidence about the other.**
+
+### 4.2 `NesBus::irq_asserted` — *any* board that can assert an IRQ
+
+**This is the most expensive hook in the inventory and the one a sub-lot is most likely to trip
+over, because it costs nothing in the board's own code.** Boards needing it: 48, 65, 67, 73, 105,
+153, 157, 158, 159, and 82 if its IRQ is done.
+
+MF-5b step 1 is the whole story. The VRC7 board is "twenty-two lines of banking and a shared IRQ
+counter", and adding it cost **+0.542 % on all thirteen ROMs**, with the symbol diff naming it in
+one line on every one of them:
+
+    +169,739,749    0 -> 169,739,749   <NesBus as CpuBus>::irq_asserted
+
+`Cpu6502::end_cycle` samples /IRQ once per CPU cycle through `NesBus::irq_asserted`, which inlines
+`Cartridge::irq_asserted` and with it the whole `Board::irq_asserted` dispatch — **the
+thirty-second arm grew the callee past the inliner's budget and LLVM outlined the whole chain**,
+about **19 instructions per CPU cycle on twelve ROMs of thirteen whose board cannot assert an IRQ
+at all.**
+
+Three things follow, all three load-bearing for MF-6b:
+
+* **What fixed it was four `#[inline(always)]`** — on `NesBus::irq_asserted`,
+  `Cartridge::irq_asserted`, `Cpu6502::execute` and `Board::try_read_prg`. They are in the tree
+  now, so the chain is pinned — but **pinning does not make the dispatch free to grow**, it makes
+  LLVM keep inlining a dispatch that is getting bigger. The 33rd, 34th and 35th arms are
+  unmeasured, and MF-6b adds up to five.
+* **The load-time `irq_capable` latch was built and refuted.** MF-3b costed it on paper and
+  declined; MF-5b built it and measured **−1.1 to −1.5 % on four ROMs and +1.3 to +1.8 % on
+  three, two of them MMC3s**, because a board that *can* assert an IRQ then pays a `callq` per CPU
+  cycle instead of an inlined bitset. **A sub-lot must not re-litigate this**: the numbers are in
+  `MF-5b.md` step 1 and the answer is no.
+* **`callsites.py` now watches `NesBus::irq_asserted` and `Cartridge::irq_asserted`.** MF-3b rule
+  1 reported `Board::irq_asserted` 0 → 0 while the 170 M regression was happening, because the
+  regression had moved one link up the chain and the watched list only had the last link. That was
+  the second time the instrument was blind to a real outlining, and both times the fix was to
+  widen it rather than to trust it.
+
+`Cpu6502::branch` **+11** and `Cpu6502::resolve` **+47** are the per-arm cost of one more
+`irq_asserted` variant, measured identically in MF-5a step 1 and MF-5b step 1: extra copies of the
+inlined three-instruction block by tail duplication, plus one more jump-table slot. Those two
+figures are the yardstick — a sub-lot whose numbers are far from +11/+47 per arm has done
+something else as well, and should find out what.
+
+### 4.3 `Board::on_ppu_address_bus` — a scanline IRQ through the A12 watcher
+
+Boards needing it: **48**, and **158** inherits the RAMBO-1's, which is already paid for.
+
+Gated by **two** latches, not one (`cartridges/mod.rs:673-700`): `watches_ppu_reads` (mappers 4,
+5, 64, 118) for the /RD-low path, and `watches_ppu_bus_without_read` (4, 64, 118) for the
+`$2006`/`$2007` path, because "A12 is an address line and is driven by both, so the three A12
+counters need this, and a board whose rule is about /RD must not see it". The function's own
+comment prices the traffic: **"57 600-odd calls a frame, measured"** — the densest hook in the
+core after the CPU clock.
+
+MF-3b step 2 made it free to the boards that do not need it and recorded what it costs the ones
+that do: the twenty-six skip it entirely, and mappers 4, 64 and 118 pay "about +2 instructions per
+PPU fetch". A sub-lot adding mapper 48 **adds the number to both latches** and is swept by
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` with nothing to write.
+
+One structural item is already waiting for whoever does 48, from MR-1's shared A12 section:
+`A12Watcher::FILTER_DOTS` is a **constant**, and its three users disagree — the shared watcher
+wants ≥11 dots, Mesen's MMC3 ≥3 CPU cycles, `Rambo1` ≥31 dots (MR-64-3). MR-1's own conclusion:
+"Ours needs the same: a `FILTER_DOTS` passed in at construction, not a constant." The TC0690's
+"about a 4 CPU cycle delay" on the *assertion* is a second parameter beside the filter, and
+MR-64-4 is the same shape on the RAMBO-1 (a 1-2 cycle delay, left unimplemented for want of a
+cycle-level IRQ probe the fixture does not have). **Mapper 48 should not be the lot that invents
+that probe**: it should reuse whatever MR-64-4's fix builds, or record the same gap in the same
+words.
+
+Also from MR-1: `A12Watcher::MIN_RISE_INTERVAL` is derived from `FILTER_DOTS` and feeds
+`Mmc3::ppu_irq_horizon`, which bounds how far the PPU may run behind the CPU. **The two must move
+together** or the horizon becomes a wrong bound and an IRQ lands late. This is the one place in
+the mapper code where an accuracy change reaches a scheduling decision, and a sub-lot touching
+`A12Watcher` has to say so out loud.
+
+### 4.4 `Board::ppu_read` and the CHR latch — PPU-read hooks
+
+`Cartridge::ppu_read` dispatches **unconditionally** (`cartridges/mod.rs:606`): every CHR fetch
+goes through `Board::ppu_read`, which is 328-336 instructions and gains one arm per board. It is
+not latched and cannot be — a pattern byte has to come from the cartridge. MF-5a measured **+16**
+for the VRC6's arm and MF-5b reported the function `IDENTICAL raw` at 336 after the VRC7's, so an
+arm that is a plain banked read is cheap; the risk is an arm that *calls* something.
+
+No board in §3.1 needs an MMC2-style CHR latch, and the MMC2's own latch does not even ride this
+hook: `Cartridge::advance_chr_latch` is called from the tile decode (`ppu/tiles.rs:292`, `:832`),
+not from the per-fetch path.
+
+**Mapper 96 (Oeka Kids) is the one PPU-read-shaped hook in the inventory, and it is not this
+hook.** It reacts to nametable *addresses*, not to pattern fetches, and its page is explicit that
+the board "monitors every change to the PPU Address lines" — including a bare `$2006` write with
+no fetch behind it. That is `on_ppu_address_bus_without_read`, i.e. §4.3's second latch, which
+puts mapper 96 in an A12 board's cost class even though it has no IRQ.
+
+MR-1's MMC2 section records the one open question here, classified **unknown**: Mesen drives its
+latch from every PPU address-bus change where we hook `ppu_read`, so "a bare `$2006` write of
+`$0FD8` flips the latch with no pattern fetch at all" on Mesen and not here; REQ-CORE-033 and
+REQ-CORE-039 constrain our side anyway. **Mapper 96 would be the first board for which that
+distinction is not academic**, because its whole mechanism is the address bus. A sub-lot doing 96
+inherits MR-1's open question and must say which way it read it.
+
+### 4.5 `Mapper::read_nametable` — nametable control, and the Q-123 ceiling
+
+**This is the hook the inventory should make a sub-lot most afraid of**, and the reason is a
+measurement, not a judgement.
+
+There are two levels of "nametable control" and they cost wildly differently:
+
+* **choosing a CIRAM page per logical table** — `Mapper::nametable_page`, behind the
+  `Cartridge::nametable_pages_vary` latch (mappers 5, 19, 24, 26, 118). Cheap. **Boards 95, 154,
+  158, 68-in-CIRAM-mode and possibly 111 all land here**: add the number to the latch, return a
+  page.
+* **serving the nametable byte from the cartridge** — `Mapper::read_nametable`, reached when
+  `nametable_page` returns `SERVED_BY_CARTRIDGE`. **This is capped at two distinct arm bodies, and
+  the cap is measured.**
+
+Q-123 is the measurement. `Ppu2C02::read_nametable_inner` is 132 instructions with two arm bodies
+(the MMC5's ExRAM/fill and the UNROM 512's four-screen CHR-RAM), which LLVM compiles as a bitset.
+MF-5a built **five** shapes for a third body — the VRC6's `$B003` bit 4, "nametables from
+CHR-ROM" — and every one of them cost every other board:
+
+| shape | `read_nametable_inner` |
+| --- | ---: |
+| baseline | **132**, bitset |
+| the third arm as first written | 83 — the dispatch leaves by a tail call |
+| `#[inline(always)]` on `Mapper::read_nametable` | 80 — the boundary moves up to `Cartridge::read_nametable` |
+| `#[inline(always)]` on both | 109, and it becomes a **jump table**; the MMC5's arm goes out of line |
+| the arm shrunk to one indexed load | 116, and the prologue grows to `pushq %rsi / pushq %rbx / subq $40` |
+| **no third arm** | **132, `IDENTICAL` to the baseline** |
+
+**"The trigger is the third distinct body, not its size"** — the fifth row is what proves it, and
+it is why no amount of shrinking the arm would have worked. MF-5a took the attributes back out,
+left `$B003` bit 4 decoded and ignored, and wrote the measurement on
+`<Board as Mapper>::read_nametable` so the next lot would read it "before adding a fourth board".
+Q-123 holds the provisional choice and
+`q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom` pins it.
+
+**Mapper 68 (Sunsoft-4) is that third body.** Its `$E000` bit 4 maps CHR-ROM banks over
+$2000-$2FFF, which is a cartridge-served nametable in the exact sense Q-123 is about — and it is
+the *same feature* the VRC6 has and we deliberately do not implement. **Mapper 111 (Cheapocabra)
+would be a fourth** if its 32 KiB of CHR-RAM nametable pages do not reduce to `nametable_page`
+alone. **Mapper 77 (Napoleon Senki) is not one**: its cartridge RAM sits at $0800-$1FFF, inside
+CHR space, with nametables staying on CIRAM, so it is a `chr_view` question and not this one.
+
+The honest conclusion for the plan: **a board whose only reason to exist is a cartridge-served
+nametable is not worth 132 → 109 on every game in the library.** If MF-6c does mapper 68, the
+CIRAM half (the four mirroring modes, the PRG-RAM enable, the banking) is free, and the CHR-ROM
+nametable mode has to either reopen Q-123 with a shape nobody has tried, or be decoded and ignored
+with a test pinning that — which is what the VRC6 already does, so both the precedent and the
+test's shape exist. MF-6c's step for 68 is written that way in §5.
+
+### 4.6 PRG-RAM, mapper-internal WRAM and EEPROM — the save path
+
+Three different things, and the inventory separates them because only one of the three is new:
+
+* **ordinary PRG-RAM at $6000-$7FFF**, sized by the board. `registry::board_memory_sizes` already
+  does this per mapper (0 for BNROM and UNROM 512, 1 KiB for the MMC6, 16 KiB of CHR-RAM for
+  CPROM, the Namco 163's four windows, the MMC5's floor), and `registry::battery_offset` says
+  which part a host persists. **Boards 153, 47, 37, 140, 184 and 97 need nothing new here** — one
+  arm of an existing `match`, with the page quoted in the comment as the existing arms do.
+* **mapper-internal WRAM**: **80 and 207** carry 128 bytes inside the ASIC, **82 and 552** carry
+  5 KiB, both battery-backable. These are not the header's PRG-RAM, and REQ-CORE-095 only promises
+  a host "la PRG-RAM (8 Kio)". The pattern to follow already exists and is already written down:
+  `registry.rs:90-97` puts the Namco 163's internal 128 bytes "at the end of PRG-RAM so that
+  REQ-CORE-095's single battery slice carries it, which is also Mesen's `.sav` layout".
+  **So 80, 82, 207 and 552 are the Namco 163's shape, not a new mechanism** — the single most
+  useful thing this section can hand MF-6c.
+* **a serial EEPROM**: **157** (24C02) and **159** (X24C01). This *is* new. There is no
+  counterpart in this build — MR-1's shared table records "no counterpart" against Mesen's
+  `BaseEeprom24C0X.h`, `Eeprom24C01.h` and `Eeprom24C02.h` — and REQ-CORE-100's mapper-16 row
+  makes it **P3** in as many words ("IRQ ; EEPROM : P3"). An EEPROM is a state machine clocked by
+  register writes, so it costs nothing on any hot path: its whole cost is in `write_register` and
+  in a save-state block. **159's one trap is documented and should be quoted into the sub-lot**:
+  "Bandai's developers consistently thought the X24C01 was a little-endian device" and it is
+  big-endian, so the address increments differently across a multi-byte operation.
+
+### 4.7 Bus conflicts
+
+**Already built, and the cheapest hook in the document.** MR-BUS-1 was a finding; MF-1/MF-2
+shipped `registry::has_bus_conflicts` plus one test in `Cartridge::cpu_write`, latched into
+`Cartridge::bus_conflicts` so the decision is taken once at load. Boards **89, 93 and 152**
+declare conflicts on their NESdev pages; each is **one arm of the `match` at
+`registry.rs:166-177`**. No hot path moves: the test is already there for every board, taken or
+not.
+
+### 4.8 Expansion audio and the mixer
+
+Boards: **72, 86, 92** — the Jaleco µPD7756C — and nothing else in the inventory.
+
+REQ-CORE-075 is the governing text and it **does not list this chip**: "L'audio d'extension des
+cartouches (VRC6, VRC7, MMC5, Namco 163, Sunsoft 5B, FDS) PEUT être émulé." Six chips, and the
+µPD7756C is not one of them. More decisively, the chip plays **ADPCM samples held in a mask ROM
+inside the ASIC**: the NESdev page for 086 says an implementation needs "sample files for the
+speech synthesis chip emulation". Those bytes are not in `assets-free/`, not in
+`assets-neutral/`, not in the spec, and not obtainable from any source this role may use.
+
+**So the decision is taken here rather than deferred: mappers 72, 86 and 92 get their boards and
+not their audio.** The three games are playable without the speech; what is lost is recorded
+voice. A test pins the silence so that it is a choice and not a bug, exactly as the VRC6's
+Q-123 test pins its ignored bit. **No Q ticket**: REQ-CORE-075's list settles it, and AMD-061 §1
+does not reopen it, because no documentation this role may read contains the samples.
+
+The mixer cost, recorded in case a later lot finds them: `NesBus::push_expansion_audio` has **15
+call sites**, and MF-5a priced the MMC5's naive version at **178 683 220 instructions over 300
+frames, ~20 per CPU cycle**, because the board recomputed `M` from scratch every cycle. The fix is
+the cached `level` + `refresh_level` shape the VRC6 established and the MMC5 and Namco 163 now
+share, with `level` **derived and therefore not serialised**. Any new chip follows it.
+
+### 4.9 The `Board` enum itself
+
+Not a hook, but a shared cost the plan must respect, and `board.rs`'s own note is the authority:
+32 variants today, **appended never inserted**, for two measured reasons — `Mmc5` must stay at
+index 5 because it is the largest variant and the enum's niche tag lives inside it, so every
+dispatch prologue is a literal `movl $5`; and the existing discriminants are the jump-table slots
+of every dispatch, so appending leaves the earlier arms instruction-identical where inserting in
+the middle shuffles four of them.
+
+Two consequences for the sub-lots:
+
+1. **Every new board goes at the end of `Board`, whatever its number.** Non-negotiable, and
+   already written in the file.
+2. **A board larger than the MMC5's ExRAM would move the niche tag and rewrite every prologue.**
+   Nothing in this inventory comes close — but a sub-lot that gave a board a kilobyte-scale buffer
+   would pay MF-2 step 0's reshape cost. The 5 KiB of mapper-internal WRAM on 82/552 is a reason
+   to put it in `CartridgeMemory`, which is exactly what the Namco 163 pattern in §4.6 does.
+
+### 4.10 Summary: what each hook costs the games that do not use it
+
+| hook | gate today | cost to a board that does not need it | the lot that made it free |
+| --- | --- | --- | --- |
+| `Board::on_cpu_cycle` | `clocks_on_cpu_cycle` latch | **0** (was 11 instructions per CPU cycle) | MF-5a step 2 |
+| `Board::on_ppu_address_bus` | `watches_ppu_reads`, `watches_ppu_bus_without_read` | **0** (was the dispatch on 57 600 fetches a frame) | MF-3b step 2 |
+| `Mapper::nametable_page` | `nametable_pages_vary` latch | **0** | MF-3b / MF-5a |
+| `Cartridge::read_rom_window` | `rom_windows` latch | **0** | earlier MF lots |
+| bus conflicts | `bus_conflicts` latch | **0**, the test is already in `cpu_write` | MF-1 / MF-2 |
+| `Cartridge::mapper_number` | a plain `i32` field | **0** (was a per-sprite dispatch; −4 in `run_dots`) | MF-5a step 1 |
+| `NesBus::irq_asserted` | **none — four `#[inline(always)]`** | **one arm's worth**, ≈+11 in `branch` and +47 in `resolve`; the latch was built and refuted | MF-5b step 1 |
+| `Board::ppu_read` | **none**, dispatches unconditionally | **one arm's worth**, +16 measured | — |
+| `Mapper::read_nametable` | **2 distinct bodies, a measured cap** | **132 → 109 for every game** at the third body | Q-123, MF-5a step 1 |
+| `NesBus::push_expansion_audio` | `expansion_audio_output` returning `None` | one arm's worth; the per-cycle recompute is the real cost | MF-5a steps 2-3 |
+
+**The two unlatched rows are the whole performance story of MF-6**: `NesBus::irq_asserted`, which
+every IRQ board grows and which MF-6b grows five times, and `Mapper::read_nametable`, which is
+capped at two bodies. Everything else in this inventory is free to the rest of the library by
+construction, and the tests that prove it already exist and sweep `SUPPORTED_MAPPERS`.
