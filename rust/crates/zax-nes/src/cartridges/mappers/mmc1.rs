@@ -126,6 +126,41 @@ impl Mmc1 {
             && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
     }
 
+    // ------------------------------------------------------------ the NES-EVENT's five lines
+    //
+    // Mapper 105 ([`super::NesEvent`]) is this chip with its PRG outputs taken through discrete
+    // logic, so it drives the same shift register, the same four registers and the same
+    // mirroring and then maps PRG itself. These five accessors are the whole of what it needs;
+    // **they add no field and no branch to this struct**, which is MF-6b step 3's answer to §5's
+    // `const`-versus-field question — mapper 1 carries neither the 30-bit counter nor a test for
+    // it, and `cmp4c.py` reads `Mmc1::update_banks` byte-identical across the step.
+
+    /// The committed `$8000` register, `[.... PSMM]`.
+    pub(crate) const fn control_register(&self) -> u8 {
+        self.control
+    }
+
+    /// The committed `$A000` register, which on the NES-EVENT is `[...I OAA.]`.
+    pub(crate) const fn chr0_register(&self) -> u8 {
+        self.chr0
+    }
+
+    /// The committed `$E000` register, `[...W BBBB]` on both boards.
+    pub(crate) const fn prg_register(&self) -> u8 {
+        self.prg
+    }
+
+    /// The bank windows, for a board that computes its own PRG layout from the registers above
+    /// and writes it over the MMC1's — which is what the NES-EVENT's discrete ICs do.
+    pub(crate) const fn windows_mut(&mut self) -> &mut BankWindows {
+        &mut self.banks
+    }
+
+    /// Forces `$A000` to `value` without a commit, for the NES-EVENT's power-on `I` bit alone.
+    pub(crate) const fn force_chr0_register(&mut self, value: u8) {
+        self.chr0 = value;
+    }
+
     /// Recomputes [`Mmc1::prg_ram_disabled`] from the two registers that drive it.
     ///
     /// Bit 4 of the PRG register disables the RAM on every board that has the chip; on an SNROM

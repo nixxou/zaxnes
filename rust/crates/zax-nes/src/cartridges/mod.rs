@@ -358,9 +358,27 @@ impl Cartridge {
             // has no scanline mode at all (nesdev, "VRC3").
             // MF-6b step 2 adds the Irem H3001 (65) and the Sunsoft-3 (67), the two plain
             // 16-bit CPU-cycle down counters (nesdev, "INES Mapper 065" and "INES Mapper 067").
+            // MF-6b step 3 adds the NES-EVENT (105), whose "30-bit up counter clocked by M2"
+            // is the widest of them (nesdev, "NES-EVENT").
             clocks_on_cpu_cycle: matches!(
                 mapper,
-                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 65 | 67 | 69 | 73 | 85
+                5 | 16
+                    | 18
+                    | 19
+                    | 21
+                    | 22
+                    | 23
+                    | 24
+                    | 25
+                    | 26
+                    | 27
+                    | 64
+                    | 65
+                    | 67
+                    | 69
+                    | 73
+                    | 85
+                    | 105
             ),
         };
         cartridge.reset();

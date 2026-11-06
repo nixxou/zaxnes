@@ -1,4 +1,4 @@
-use super::{IremH3001, Mapper, Sunsoft3, Vrc3};
+use super::{IremH3001, Mapper, NesEvent, Sunsoft3, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -49,6 +49,8 @@ pub enum IrqBoard {
     IremH3001(IremH3001),
     /// Mapper 67, Sunsoft-3.
     Sunsoft3(Sunsoft3),
+    /// Mapper 105, the Nintendo NES-EVENT board.
+    NesEvent(NesEvent),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -58,6 +60,7 @@ macro_rules! inner {
             IrqBoard::Vrc3($b) => $body,
             IrqBoard::IremH3001($b) => $body,
             IrqBoard::Sunsoft3($b) => $body,
+            IrqBoard::NesEvent($b) => $body,
         }
     };
 }
@@ -101,6 +104,15 @@ impl Mapper for IrqBoard {
     #[inline(never)]
     fn irq_asserted(&self) -> bool {
         inner!(self, b => b.irq_asserted())
+    }
+
+    /// Forwarded for mapper 105 alone, and it is the **only** one of the three PRG-RAM methods
+    /// that is: [`Mapper::prg_ram_writable`]'s default calls this one, and the NES-EVENT's 8 KiB
+    /// of unbanked PRG-RAM is exactly what [`Mapper::prg_ram_offset`]'s default answers. One body
+    /// in `Board::prg_ram_enabled` instead of three across the $6000-$7FFF decode, which is the
+    /// path MF-6b step 2 found `Cartridge::default_cpu_read` on.
+    fn prg_ram_enabled(&self) -> bool {
+        inner!(self, b => b.prg_ram_enabled())
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

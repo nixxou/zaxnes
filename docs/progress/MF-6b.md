@@ -679,3 +679,241 @@ and *Fantasy Zone II* (J) and *Mito Koumon II - Sekai Manyuu Ki* (67), for R0 to
 Platoon* is the Sunsoft-3 on a VS System board, which §6 of the inventory sets aside.
 
 [PROGRESS] MF-6b step 2/8 done: mappers 65 and 67 in the same variant, all thirteen ROMs and all five level-2 cores below `9f9d9d41` (set −30 338 767, `smb3/core` −0.092 %), and `Cartridge::default_cpu_read` named as the figure step 4 reads first.
+
+## Step 3 — mapper 105, and the answer to `const`-versus-field is neither
+
+### The question §5 asks, and why the step does not answer it
+
+§5 calls this "the step where `const`-vs-field matters most in the whole lot, because mapper 1 is
+on five of R0's thirteen ROMs (`vblnmi`, `m1`, `metroid`, `mm2`, `z2`)", with the stop condition
+"any of those five above `9f9d9d41`". Both of the shapes it offers cost mapper 1 something,
+and both costs are already measured in this project:
+
+* a **`const` parameter** — `Mmc1Board<const EVENT: bool>`, the shape MR-4-3 gave the MC-ACC —
+  monomorphises the *code* but not the *struct*: the 30-bit counter and its three flags are
+  fields of both instantiations, and **MF-6b step 1 priced exactly that move**. One byte of
+  displacement on `VrcIrq::pending` re-laid out `Cpu6502::branch` and cost eleven of the thirteen
+  ROMs +0.009 % to +0.027 %, ending +9 886 794 on the set, with no code added at all. `Mmc1`'s
+  fields are read on more paths than `VrcIrq`'s.
+* a **runtime `bool`** is the one MF-6a2 step 2 already charged: mapper 155 as
+  `!self.no_ram_disable && …` cost `Mmc1::update_banks` **+8 001 instructions over 600 level-2
+  frames of Mega Man 2**, +2 217 on Metroid and +4 311 on Zelda II, because the test is on the
+  commit path.
+
+So [`NesEvent`] **holds an `Mmc1` instead of being one**. The chip runs exactly as it does on a
+mapper-1 cartridge — the five-bit shift register, the consecutive-write rule, the four registers,
+the mirroring — and the board then writes its own PRG layout over the windows the MMC1 just
+computed, which is what the "several 4000-series and 7400-series discrete ICs" of the page's parts
+list physically do to the MMC1's outputs. The measurement that says this was the right shape is
+one line of `cmp4c.py`:
+
+    Mmc1::update_banks       1    215    215  IDENTICAL  IDENTICAL  IDENTICAL
+
+**Byte-identical, baseline to step 3.** Mapper 1 carries no counter, no flag and no test. The
+five accessors `Mmc1` gained (`control_register`, `chr0_register`, `prg_register`, `windows_mut`,
+`force_chr0_register`) add no field and no branch, and nothing but `NesEvent` calls them.
+
+What the NES-EVENT pays instead is one redundant MMC1 bank computation per write to
+`$8000-$FFFF`, which §4.10's rule puts exactly where it belongs: there is one cartridge of this
+board in the world.
+
+`NesEvent` is the fourth inner variant of `IrqBoard`, so it adds **no** `Board` discriminant. A
+probe of `size_of` before the step settled the one thing that could have made that expensive:
+`Board` is **1 376 bytes and that is `Mmc5`'s size**, niche-filled, where `Mmc1` is 144 and
+`IrqBoard` 136 — so an inner variant of ~152 bytes cannot grow the enum, and `Cartridge` is the
+same size it was.
+
+[`NesEvent`]: ../../rust/crates/zax-nes/src/cartridges/mappers/nes_event.rs
+
+### The board
+
+nesdev ("NES-EVENT", "INES Mapper 105") and Disch's notes, which agree register for register:
+`$8000` is `[.... PSMM]`, "same as MMC1 (but CHR mode bit isn't used)"; `$A000` is
+`[...I OAA.]`, the MMC1's CHR register repurposed as a timer control, a chip select and a PRG
+register; `$C000` is unused; `$E000` is `[...W BBBB]`, the MMC1's `W` and the second chip's bank.
+PRG is "2 PRG chips, each 128k", `O` choosing both the chip *and* which PRG register selects
+inside it, and "if the mapper has not been 'unlocked', the first 32k of the first chip is always
+selected regardless (as if $A000 contained $00)".
+
+**Three readings the sources leave open, and what the board does with each:**
+
+1. **The power-on `I` bit.** "The first 32 KiB is hardwired until the timer is started (write 0
+   then 1 to bit 4) for the first time" only means something if `I` starts **set** — an MMC1
+   powers its CHR register on at zero, and the documented "write 0" would then be a no-op that
+   unlocks on the first `I=1` instead of the second edge. No page states the power-on value;
+   Mesen 2 resolves it with `_chrReg0 |= 0x10; //Set I bit to 1` (`MMC1_105.h:24`) and this board
+   does the same, so the documented two-step sequence is the sequence that unlocks.
+   `req_core_100_the_nes_event_hardwires_the_first_32_kib_until_the_timer_is_unlocked` writes the
+   half-done sequence on purpose: a board counting one edge swaps PRG a write too early.
+2. **The DIP switches**, which have no host surface in this build. The page's own default is the
+   one taken: "in the official tournament, `C` was closed, and the others were open, so the
+   counter had to reach $2800000" — $28000000, a digit short, which its own `[1D CBAx …]` formula
+   confirms (bit 29 set, `C` at bit 27). **The arithmetic corroborates it**: 0x2800_0000 M2 cycles
+   at 1.789773 MHz is 6 min 15 s, and *Nintendo World Championships*' limit was 6 min 21 s. It
+   also settles a conflict between the two sources — the wiki says the switches set "the counter's
+   **initial** value", Disch that they set the value it must reach, and only Disch's reading gives
+   the page's own "roughly 5 to 10 minutes" **and** the tournament's length. Mesen 2 implements
+   Disch's (`0x20000000 | (GetDipSwitches() << 25)`).
+3. **The locked state, exactly.** Disch's table makes it a flat first 32 KiB and Mesen 2
+   implements that (`SelectPrgPage2x(0, 0)`); the wiki adds a parenthetical that "MMC1 PRG A14 is
+   connected to both PRG ROMs (so writes to $8000 could select either 16+16 banking mode, and then
+   writes to $E000 could cause either the first or second 16K of the first ROM to be mapped at
+   both $8000 and $C000 before the timer was unlocked)". The two disagree, the note is the only
+   statement of it anywhere, and nothing the one game does can show the difference — it unlocks
+   before it banks. **The flat 32 KiB is implemented and the refinement is recorded here**, in the
+   type's own note, as the thing a later lot would need a cartridge to settle. No Q ticket: this
+   is a conflict between two public documents about an optional board, not a gap in the spec.
+
+### The bar, and the stop condition that did not fire
+
+**PR-1's thirteen**, against `mf6b-0-9f9d9d41` — every ROM below, **and the five MMC1 ROMs are
+five of them**:
+
+| ROM | board | `9f9d9d41` | **step 3** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | **MMC1** | 3 310 470 388 | **3 308 309 361** | −2 161 027 | −0.065 % |
+| `oamstr` | NROM | 3 319 466 313 | **3 318 480 760** | −985 553 | −0.030 % |
+| `m1` | **MMC1** | 4 886 651 514 | **4 885 520 719** | −1 130 795 | −0.023 % |
+| `m0` | NROM | 5 521 219 795 | **5 519 962 642** | −1 257 153 | −0.023 % |
+| `m4` | MMC3 | 5 473 783 790 | **5 471 994 836** | −1 788 954 | −0.033 % |
+| `metroid` | **MMC1** | 5 116 149 734 | **5 115 868 405** | −281 329 | −0.005 % |
+| `smb1` | NROM | 5 996 882 321 | **5 996 355 879** | −526 442 | −0.009 % |
+| `mm2` | **MMC1** | 6 020 725 910 | **6 017 875 886** | −2 850 024 | −0.047 % |
+| `z2` | **MMC1** | 6 292 582 908 | **6 291 433 990** | −1 148 918 | −0.018 % |
+| `readbuf` | CNROM | 6 836 830 137 | **6 834 577 090** | −2 253 047 | −0.033 % |
+| `duelito` | NROM | 7 383 094 194 | **7 380 483 839** | −2 610 355 | −0.035 % |
+| `smb3` | MMC3 | 7 950 795 166 | **7 949 429 710** | −1 365 456 | −0.017 % |
+| `mmc5` | MMC5 | 11 289 605 855 | **11 286 840 994** | −2 764 861 | −0.024 % |
+| **total** | | **79 398 258 025** | **79 377 134 111** | **−21 123 914** | **−0.027 %** |
+
+`callgrind-diff.py`: **"no ROM slower, total lower -- keepable"**.
+
+**Level 2.** All five `core` figures below the baseline; **two `total` figures above it**, and
+both are the layout noise the lot's own rule names:
+
+| game/stage | `9f9d9d41` | **step 3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 898 492 | **11 147 223 960** | −674 532 | −0.006 % |
+| `smb1/core` | 11 515 980 923 | **11 515 146 178** | −834 745 | −0.007 % |
+| `zelda2/core` | 12 777 709 570 | **12 775 647 562** | −2 062 008 | −0.016 % |
+| `mm2/core` | 12 043 306 623 | **12 036 872 563** | −6 434 060 | −0.053 % |
+| `smb3/core` | 15 318 626 455 | **15 315 412 686** | −3 213 769 | −0.021 % |
+| `metroid/total` | 13 736 176 888 | **13 735 588 274** | −588 614 | −0.004 % |
+| `zelda2/total` | 15 362 221 166 | **15 361 403 682** | −817 484 | −0.005 % |
+| `mm2/total` | 18 982 867 263 | **18 976 355 375** | −6 511 888 | −0.034 % |
+| `smb1/total` | 13 589 021 252 | 13 592 170 876 | **+3 149 624** | +0.023 % |
+| `smb3/total` | 24 192 639 363 | 24 195 011 633 | **+2 372 270** | +0.010 % |
+
+**The diff, as the rule requires it.** `l2-diff.py`'s per-stage table puts the whole of both rises
+in one stage: `smb1/convert` **+3 979 870** against `smb1/lua_hooks` **+3 979 870** — the same
+figure to the instruction, `convert` being `lua_hooks`'s caller — and `smb3/convert` +5 129 101
+against `smb3/lua_hooks` +5 579 822. Every other stage of both games is flat or down, `ppu`
+−332 640 and −318 560 included. Per function, with `l2sym.py` over the two annotations:
+
+| game | symbol | delta |
+| --- | --- | ---: |
+| `smb1` | `ltable.c:getgeneric` | **+2 200 700** |
+| `smb1` | `ltable.c:luaH_getshortstr` | **+1 913 851** |
+| `smb1` | `Cpu6502::branch` | −502 105 |
+| `smb1` | `Ppu2C02::run_dots` | −332 640 |
+| `smb3` | `ltable.c:getgeneric` | **+3 782 744** |
+| `smb3` | `ltable.c:luaH_set` | **+1 223 386** |
+| `smb3` | `ltable.c:luaH_getshortstr` | **+225 754** |
+| `smb3` | `malloc.c:malloc_consolidate` | −793 516 |
+| `smb3` | `malloc.c:unlink_chunk.isra.0` | −409 149 |
+| `smb3` | `memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms` | +395 970 |
+| `smb3` | `Cpu6502::branch` | **−2 931 497** |
+| `smb3` | `Ppu2C02::run_dots` | −339 383 |
+
+**Not one of the risen symbols is this project's code.** `getgeneric`, `luaH_set` and
+`luaH_getshortstr` are Lua's hash table, `malloc_consolidate` and `unlink_chunk` are glibc's
+allocator, `__memcpy_avx_unaligned_erms` is its `memcpy` — and the two symbols the step *does*
+touch are **down** on both games. §5.11 measured that column's floor at ±57 k per ROM on
+`luaH_getshortstr` alone and MF-6a2 step 2 measured ±2.7 M on a level-2 `total` against 0 on
+`core`; this is that, on a 3D pack whose Lua tables rehash at a different point because the
+binary's layout moved. `core` is the column the lot is read on and all five are below.
+
+### The post-LTO invariants, and the hook that came back to the baseline
+
+`shape.py`, the three dumps:
+
+| symbol | `9f9d9d41` | step 2 | **step 3** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 443 | 1 / 2 / 3 645 | 1 / 2 / 3 626 |
+| `Cpu::resolve` | 2 / 6 / 1 854 | 2 / 6 / 1 958 | 2 / 6 / 1 948 |
+| `Cpu::branch` | 1 / 1 / 418 | 1 / 1 / 468 | 1 / 1 / 457 |
+| `NesBus::read_cycle` | 1 / 65 / 181 | 1 / 65 / 181 | 1 / 65 / 181 |
+| `NesBus::tick` | 1 / 95 / 82 | 1 / 95 / 82 | 1 / 95 / 82 |
+| `NesBus::read_internal` | 1 / 17 / 175 | 1 / 17 / 175 | 1 / 17 / 175 |
+| `NesBus::write_internal` | 1 / 10 / 3 103 | 1 / 10 / 3 145 | 1 / 10 / 3 465 |
+| `Ppu::run_dots` | 1 / 2 / 1 907 | 1 / 2 / 1 907 | 1 / 2 / 1 907 |
+
+`grep -oE '^_RN[^:]*irq_asserted[A-Za-z0-9_]*:'` over the dump still returns
+`IrqBoard::irq_asserted` and nothing else; `callsites.py` has `Board::irq_asserted`,
+`NesBus::irq_asserted` and `Cartridge::irq_asserted` all at **0 defs / 0 sites**;
+`prologues.py` has **all twenty** pinned prologues identical.
+
+**`Board::ppu_peek` is back to 272** — the baseline is 271 — because the fourth variant pushed
+`IrqBoard::ppu_peek` out of line into a definition of its own, 66 instructions. That is why step
+2's windfall on the two MMC3 ROMs (`ppu_peek` −2 288 640 on `m4`, −4 473 536 on `smb3`) is not in
+this step's table: those ROMs are now carried by `branch` alone and are −1 788 954 and −1 365 456
+instead. The capped hook came out of the step one instruction above where it started, which is
+the better of the two outcomes to keep.
+
+The rest: `Board::ppu_read` 354 → 356, `Board::on_cpu_cycle` 396 → 422 with
+`NesEvent::on_cpu_cycle` 9 instructions out of line, `Board::on_ppu_address_bus` **156 → 156**,
+`NesBus::catch_up_ppu` **188 → 188**, `Ppu2C02::read_nametable_inner` **114 → 114**,
+`Mmc1::update_banks` **215 → 215, byte-identical**.
+
+**`Cartridge::default_cpu_read` is 305 → 375**, +70, where step 2 left it at 322. `IrqBoard` now
+forwards `prg_ram_enabled` — the NES-EVENT is the only board of the variant that needs it — and
+that body inlines through `Board::prg_ram_enabled` into this function. **The dynamic figure did
+not move**: `mmc5` is +7 456 756 on it in step 2 and +7 456 756 in step 3, to the instruction, and
+`mmc5` overall is −2 764 861 against the reference. So step 2's warning stands but is no worse:
+the margin step 4 has on that ROM is still about 2.8 M.
+
+**Only one of the three PRG-RAM methods is forwarded**, deliberately:
+`Mapper::prg_ram_writable`'s default calls `prg_ram_enabled`, and the NES-EVENT's 8 KiB of
+unbanked PRG-RAM is exactly what `Mapper::prg_ram_offset`'s default already answers. One body on
+the $6000-$7FFF decode instead of three.
+
+### Tests
+
+**877 passed, 0 failed, 8 ignored**, step 2's 868 plus nine:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_nes_event_counter_fires_at_its_dip_switch_target` | the 30-bit comparator at $28000000 **exactly** — two cycles short, the IRQ is two cycles away |
+| `req_core_100_the_nes_event_timer_bit_resets_the_counter_and_acknowledges` | `I` set: "reset to 0 and stays there (does not count), and the pending IRQ is acknowledged", and `I` clear again restarting from zero rather than resuming |
+| `req_core_100_only_the_nes_event_timer_bit_touches_its_counter` | the other three registers not resetting it: a hundred cycles short, two serial writes (ten ticks each) leave eighty |
+| `req_core_100_the_nes_event_hardwires_the_first_32_kib_until_the_timer_is_unlocked` | the two-edge unlock, with the half-done sequence written first |
+| `req_core_100_the_nes_event_chip_select_picks_both_the_rom_half_and_the_prg_register` | `O` choosing the chip **and** the register, all three MMC1 modes on the second chip, bit 0 unused, and `B` being three bits |
+| `req_core_100_no_nes_event_register_moves_its_unbanked_chr` | the MMC1's CHR mode bit and both CHR registers moving nothing |
+| `req_core_100_the_nes_event_carries_eight_kib_of_chr_ram` | the board's 8 KiB against REQ-CORE-012's 32 |
+| `req_core_100_the_nes_event_wram_disable_is_e000_and_never_the_timer_bit` | **the trap**: a NWC dump is `Mmc1::is_snrom`'s exact signature, so a delegated `prg_ram_enabled` would read the timer bit as a RAM disable — and it powers on set, so the save RAM would never be readable at all |
+| `req_core_100_the_nes_event_takes_its_mirroring_from_the_mmc1` | all four of the chip's own layouts |
+
+**How the counter is tested at all.** Nothing on this board writes the counter — the switches set
+the value it must *reach* and `I` only ever zeroes it — so reaching the comparator costs
+671 088 640 bus ticks, which is minutes of wall clock. `nes_event_at_counter` runs the counter for
+a distinctive number of cycles, **finds that number** in the savestate block, patches it and
+reloads: the offset is not hard-coded, the helper asserts the marker appears exactly once, and it
+therefore also pins that the counter is part of the state (REQ-CORE-090, REQ-CORE-091) — if it
+were not serialised the search would fail rather than the test passing vacuously.
+
+`req_core_100_every_required_mapper_is_registered`'s list is extended with 105, and the four
+sweeps needed nothing: 105 went into `clocks_on_cpu_cycle`, it touches no PPU bus, and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` both pass over it.
+
+`cargo fmt --check` clean; `cargo clippy --release -p zax-nes --all-targets -- -D warnings`
+clean, **no new `allow` of any kind**.
+
+The one title is *Nintendo World Championships 1990*, for R0 to run — and it is the one cartridge
+in the lot whose whole point is a six-and-a-quarter-minute timer, so the thing to watch is that
+the IRQ arrives at all rather than when.
+
+[PROGRESS] MF-6b step 3/8 done: mapper 105 holding an `Mmc1` rather than parameterising one, `Mmc1::update_banks` byte-identical, all five MMC1 ROMs below `9f9d9d41` (set −21 123 914) and the two level-2 `total` rises entirely inside Lua's `ltable.c`.

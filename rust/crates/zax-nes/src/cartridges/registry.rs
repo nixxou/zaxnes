@@ -11,8 +11,9 @@ use super::mappers::{
     Action52, Action53, AxRom, Bandai74161, BandaiFcg, Bf9096, Caltron6In1, CnRom, CnRomProtect,
     Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremH3001, IremTamS1,
     IrqBoard, JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1,
-    Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1, SmallBoard,
-    Sunsoft1, Sunsoft2, Sunsoft3, TaitoTc0190, UnRom512, UxRom, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
+    Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, NesEvent, Rambo1,
+    SmallBoard, Sunsoft1, Sunsoft2, Sunsoft3, TaitoTc0190, UnRom512, UxRom, Vrc1, Vrc2Vrc4, Vrc3,
+    Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -21,8 +22,8 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
-    34, 41, 64, 65, 66, 67, 69, 70, 71, 73, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 118,
-    140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 225, 228, 232,
+    34, 41, 64, 65, 66, 67, 69, 70, 71, 73, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 105,
+    118, 140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 225, 228, 232,
 ];
 
 /// Whether `mapper` is implemented.
@@ -95,6 +96,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // (`VRC3.h:17`, `GetChrPageSize` 0x2000 with one page selected).
         73 => BoardMemorySizes {
             chr_ram: Some(Vrc3::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("NES-EVENT"): "8K of CHR RAM", and Disch "this mapper has 8k CHR-RAM, and it
+        // is not swappable". The same reading as mapper 73 above, for the same REQ-CORE-012
+        // reason, and Mesen 2 agrees (`MMC1.h`'s 8 KiB CHR with one page selected).
+        105 => BoardMemorySizes {
+            chr_ram: Some(NesEvent::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // The Namco 163 carries the four 2 KiB windows of $6000-$7FFF whatever the header
@@ -285,6 +293,9 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // differences.
         65 => Board::IrqBoard(IrqBoard::IremH3001(IremH3001::new(memory))),
         67 => Board::IrqBoard(IrqBoard::Sunsoft3(Sunsoft3::new(memory))),
+        // MF-6b step 3: the NES-EVENT, which holds an `Mmc1` rather than parameterising one --
+        // `NesEvent`'s own note has the measurement that decided that.
+        105 => Board::IrqBoard(IrqBoard::NesEvent(NesEvent::new(memory))),
         _ => return None,
     })
 }

@@ -809,3 +809,97 @@ fn mf_6b_mapper_65_fires_at_zero_and_mapper_67_one_cycle_past_it() {
     sunsoft3.write_memory(0xD800, 0x10);
     assert_eq!(0x1_0000, tick_until_irq(&mut sunsoft3, 70_000));
 }
+
+// ---------------------------------------------------------------- NES-EVENT (105)
+
+/// The value the NES-EVENT's 30-bit counter must reach, with the DIP switches the board ships
+/// with here: nesdev ("NES-EVENT"), "in the official tournament, `C` was closed, and the others
+/// were open, so the counter had to reach $2800000" — $28000000, the page having dropped a digit,
+/// which both its own formula (`[1D CBAx …]`, bit 29 set and `C` at bit 27) and the arithmetic
+/// confirm: `0x2800_0000` M2 cycles at 1.789773 MHz is **6 min 15 s**, and the tournament's limit
+/// was 6 min 21 s.
+const NES_EVENT_TARGET: u32 = 0x2800_0000;
+
+/// A mapper-105 core whose counter is already at `counter`, with the timer running.
+///
+/// **Why the state block and not 671 million bus ticks.** Nothing on this board writes the
+/// counter — the DIP switches set the value it must *reach*, and `$A000`'s `I` bit only ever
+/// resets it to zero — so the only way to observe the comparator at unit-test speed is to put
+/// the counter there through a savestate. The offset is not hard-coded: the counter is run for a
+/// distinctive number of cycles first and that number is then **found** in the block, which
+/// fails loudly if it is not there exactly once. So this helper also pins that the counter is
+/// part of the state at all (REQ-CORE-090, REQ-CORE-091).
+fn nes_event_at_counter(counter: u32) -> NesCore {
+    const MARKER: u32 = 0x0001_2345;
+
+    let mut core = MapperRom::new(105).prg(32).chr(0).load();
+    // `I` clear starts the timer. `mmc1_write` ticks the bus twice per serial bit, so the
+    // counter only starts moving once the fifth write commits.
+    core.mmc1_write(0xA000, 0x00);
+    for _ in 0..MARKER {
+        core.bus_mut().tick();
+    }
+
+    let mut state = core.save_state(true).unwrap();
+    let needle = MARKER.to_le_bytes();
+    let found: Vec<usize> = state
+        .windows(4)
+        .enumerate()
+        .filter(|(_, window)| *window == needle)
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(
+        1,
+        found.len(),
+        "the counter should appear exactly once in the state block, found {found:?}"
+    );
+
+    state[found[0]..found[0] + 4].copy_from_slice(&counter.to_le_bytes());
+    let mut restored = NesCore::new();
+    restored.try_load_state(&state, 0).unwrap();
+    restored
+}
+
+#[test]
+fn req_core_100_the_nes_event_counter_fires_at_its_dip_switch_target() {
+    // nesdev ("NES-EVENT"): "a 30-bit up counter clocked by M2 that fires an IRQ when it reaches
+    // a high enough value", and Disch's "the IRQ counter is 30 bits wide.. when it reaches the
+    // following value, an IRQ is fired". Two cycles short of the target, the IRQ is two cycles
+    // away — which pins the value exactly, not approximately.
+    let mut core = nes_event_at_counter(NES_EVENT_TARGET - 2);
+    assert!(!irq(&core));
+    assert_eq!(2, tick_until_irq(&mut core, 10));
+}
+
+#[test]
+fn req_core_100_the_nes_event_timer_bit_resets_the_counter_and_acknowledges() {
+    // Disch: "when cleared, the IRQ counter counts up every cycle. When set, the IRQ counter is
+    // reset to 0 and stays there (does not count), and the pending IRQ is acknowledged."
+    let mut core = nes_event_at_counter(NES_EVENT_TARGET - 2);
+    assert_eq!(2, tick_until_irq(&mut core, 10));
+
+    core.mmc1_write(0xA000, 0x10); // `I` set.
+    assert!(!irq(&core), "the timer bit did not acknowledge");
+    assert_eq!(-1, tick_until_irq(&mut core, 2000), "it counted while held");
+
+    // `I` clear again starts it from **zero**, not from where it was: a whole 0x28000000 cycles
+    // away, so nothing comes within two thousand.
+    core.mmc1_write(0xA000, 0x00);
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut core, 2000),
+        "the counter resumed near the target instead of restarting"
+    );
+}
+
+#[test]
+fn req_core_100_only_the_nes_event_timer_bit_touches_its_counter() {
+    // The case `req_core_100_the_vrc6_counter_*` pins for the VRC6 — an enable that is not a
+    // reload — read onto a board where the enable and the reset are the same wire: what is left
+    // to check is that the **other three** registers do not reset the counter. A hundred cycles
+    // short of the target, two serial writes (ten bus ticks each) leave eighty to go.
+    let mut core = nes_event_at_counter(NES_EVENT_TARGET - 100);
+    core.mmc1_write(0xE000, 0x00);
+    core.mmc1_write(0x8000, 0x0C);
+    assert_eq!(80, tick_until_irq(&mut core, 1000));
+}

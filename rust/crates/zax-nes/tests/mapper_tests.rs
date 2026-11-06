@@ -64,7 +64,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   155 (the MMC1 with no PRG-RAM disable) (MF-6a step 4);
     // * 73 (Konami VRC3) (MF-6b step 1);
     // * 65 (Irem H3001) and 67 (Sunsoft-3), the two plain CPU-cycle down counters
-    //   (MF-6b step 2).
+    //   (MF-6b step 2);
+    // * 105 (the Nintendo NES-EVENT board of Nintendo World Championships 1990) (MF-6b step 3).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -72,8 +73,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         .collect();
     assert_eq!(
         vec![
-            19, 24, 26, 33, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140,
-            152, 154, 155, 156, 180, 184, 185, 206, 210, 232
+            19, 24, 26, 33, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105, 118,
+            140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 232
         ],
         extra
     );
@@ -2640,5 +2641,157 @@ fn req_core_100_the_sunsoft3_mirroring_register_has_four_states() {
         let mut core = MapperRom::new(67).prg(8).chr(32).load();
         core.write_memory(0xE800, value);
         assert_eq!(expected, core.mirroring(), "$E800 = {value:02X}");
+    }
+}
+
+// ------------------------------------------- NES-EVENT (105)
+
+/// A mapper-105 image whose timer has been unlocked by the documented sequence, leaving `$A000`
+/// at `$10`: `I` set, `O` clear, `AA` zero.
+fn unlocked_nes_event() -> zax_nes::NesCore {
+    let mut core = MapperRom::new(105).prg(32).chr(0).load();
+    core.mmc1_write(0xA000, 0x00);
+    core.mmc1_write(0xA000, 0x10);
+    core
+}
+
+/// nesdev ("NES-EVENT"): "the first 32 KiB is hardwired until the timer is started (write 0 then
+/// 1 to bit 4) for the first time", and Disch "PRG cannot be swapped until the mapper has been
+/// 'initialized' by setting the `I` bit to 0, then to `1`. [...] In addition, if the mapper has
+/// not been 'unlocked', the first 32k of the first chip is always selected regardless (as if
+/// $A000 contained $00)."
+///
+/// The half-done sequence is the point of the middle of this test: one write of `I=0` is not the
+/// unlock, so a board that counted a single edge would swap PRG a write too early.
+#[test]
+fn req_core_100_the_nes_event_hardwires_the_first_32_kib_until_the_timer_is_unlocked() {
+    let mut core = MapperRom::new(105).prg(32).chr(0).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // `O` set and a bank in `$E000`, with only the first half of the unlock written: nothing
+    // moves, "as if $A000 contained $00".
+    core.mmc1_write(0xA000, 0x08);
+    core.mmc1_write(0xE000, 0x03);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // `I` back to 1 completes it, and the registers that were ignored take effect at once: `O`
+    // is still set, so this is the second chip with the MMC1's power-on mode — `B` switchable at
+    // $8000 and the chip's last bank fixed at $C000.
+    core.mmc1_write(0xA000, 0x18);
+    assert_eq!([22, 23, 30, 31], core.prg_windows());
+}
+
+/// The `$A000` register's own diagram: bit 0 "not used (ordinarily selects bottom or top half of
+/// CHR RAM)", bits 3-1 "0-3: select 32 KiB bank in $8000-$FFFF from lower 128KB ROM" and "4-7:
+/// normal MMC1 behavior from upper 128KB ROM" — Disch's `O` bit above his two-bit `A`, which
+/// "selects between the chips, and also determines which PRG Reg is used to select the page".
+#[test]
+fn req_core_100_the_nes_event_chip_select_picks_both_the_rom_half_and_the_prg_register() {
+    let mut core = unlocked_nes_event();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // `O=0`: "use first PRG chip (first 128k), use `A` PRG Reg, 32k swap".
+    core.mmc1_write(0xA000, 0x14); // AA = %10.
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    core.mmc1_write(0xA000, 0x16); // AA = %11.
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    // Bit 0 is not used: $17 is the same bank as $16.
+    core.mmc1_write(0xA000, 0x17);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+
+    // `O=1`: "use second PRG chip (second 128k), use `B` PRG Reg, MMC1 style swap" — all three
+    // of the MMC1's modes, over the second 128 KiB and nothing else.
+    core.mmc1_write(0xA000, 0x18);
+    core.mmc1_write(0xE000, 0x03);
+    assert_eq!([22, 23, 30, 31], core.prg_windows(), "P=1, S=1");
+    core.mmc1_write(0x8000, 0x08);
+    assert_eq!([16, 17, 22, 23], core.prg_windows(), "P=1, S=0");
+    core.mmc1_write(0x8000, 0x00);
+    assert_eq!([20, 21, 22, 23], core.prg_windows(), "P=0, 32 KiB");
+
+    // `B` is three bits: the chip is 128 KiB and bit 3 of $E000 cannot reach past it.
+    core.mmc1_write(0x8000, 0x0C);
+    core.mmc1_write(0xE000, 0x0B);
+    assert_eq!(
+        [22, 23, 30, 31],
+        core.prg_windows(),
+        "$0B is bank 3 of the chip"
+    );
+}
+
+/// Disch: "this mapper has 8k CHR-RAM, and it is not swappable", and the page's parts list "8K of
+/// CHR RAM". The MMC1 inside still has its CHR mode bit and both CHR registers — "PPU A12 is
+/// still connected to the MMC1" — and **none of them may move a pattern fetch**.
+///
+/// The image carries CHR-ROM so that the banks have numbers to read; a real *Nintendo World
+/// Championships* dump has none, which the next test covers.
+#[test]
+fn req_core_100_no_nes_event_register_moves_its_unbanked_chr() {
+    let mut core = MapperRom::new(105).prg(32).chr(16).load();
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+
+    // The MMC1's 4 KiB CHR mode, and a bank in each of its two CHR registers.
+    core.mmc1_write(0x8000, 0x1C);
+    core.mmc1_write(0xA000, 0x02);
+    core.mmc1_write(0xC000, 0x03);
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+}
+
+/// "8K of CHR RAM" against REQ-CORE-012's 32 KiB default for an image with no CHR-ROM, the same
+/// reading `req_core_100_the_vrc3_carries_eight_kib_of_chr_ram_*` pins for mapper 73.
+#[test]
+fn req_core_100_the_nes_event_carries_eight_kib_of_chr_ram() {
+    let core = MapperRom::new(105).prg(32).chr(0).load();
+    assert_eq!(
+        0x2000,
+        core.cartridge().unwrap().memory().chr_ram().len(),
+        "the board's 8 KiB, not REQ-CORE-012's default"
+    );
+}
+
+/// **The trap of this board**, and the reason it does not delegate `Mapper::prg_ram_enabled` to
+/// the MMC1 it holds. Disch gives `$E000` as `[...W BBBB]` with "`W` = WRAM disable (same as
+/// MMC1)" — so `W` is the only wire to the 8 KiB of PRG-RAM. But a *Nintendo World
+/// Championships* dump is 256 KiB of PRG with no CHR-ROM and 8 KiB of PRG-RAM, which is exactly
+/// the signature `Mmc1::is_snrom` reads as an SNROM, and on an SNROM bit 4 of `$A000` is a second
+/// chip enable for that RAM. Bit 4 of `$A000` here is the **timer**: starting the tournament
+/// clock would switch the save RAM off, and it powers on set, so the RAM would never be readable
+/// at all.
+#[test]
+fn req_core_100_the_nes_event_wram_disable_is_e000_and_never_the_timer_bit() {
+    let mut core = MapperRom::new(105).prg(32).chr(0).load();
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000), "at power-on, with `I` set");
+
+    // Both edges of the timer bit, neither of which is a RAM disable.
+    core.mmc1_write(0xA000, 0x00);
+    assert_eq!(0x5A, core.read_memory(0x6000), "the timer started");
+    core.mmc1_write(0xA000, 0x10);
+    assert_eq!(0x5A, core.read_memory(0x6000), "the timer reset");
+
+    // `W` of $E000 is, as on every other MMC1 board.
+    core.mmc1_write(0xE000, 0x10);
+    assert_ne!(
+        0x5A,
+        core.read_memory(0x6000),
+        "`W` did not disable the RAM"
+    );
+    core.mmc1_write(0xE000, 0x00);
+    assert_eq!(0x5A, core.read_memory(0x6000), "and it came back");
+}
+
+/// `$8000` is "`[.... PSMM]`, same as MMC1 (but CHR mode bit isn't used)", so the mirroring is
+/// the chip's own and this board adds nothing to it.
+#[test]
+fn req_core_100_the_nes_event_takes_its_mirroring_from_the_mmc1() {
+    for (bits, expected) in [
+        (0x00u8, zax_nes::NametableMirroring::SingleScreenA),
+        (0x01, zax_nes::NametableMirroring::SingleScreenB),
+        (0x02, zax_nes::NametableMirroring::Vertical),
+        (0x03, zax_nes::NametableMirroring::Horizontal),
+    ] {
+        let mut core = MapperRom::new(105).prg(32).chr(0).load();
+        core.mmc1_write(0x8000, 0x0C | bits);
+        assert_eq!(expected, core.mirroring(), "$8000 = {bits:02X}");
     }
 }

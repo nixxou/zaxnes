@@ -40,6 +40,7 @@ mod mmc5;
 mod multicart;
 mod namco163;
 mod namcot108;
+mod nes_event;
 mod nrom;
 mod rambo1;
 mod small_boards;
@@ -78,6 +79,7 @@ pub use multicart::{
 };
 pub use namco163::{Namco163, NamcoVariant};
 pub use namcot108::Namcot108;
+pub use nes_event::NesEvent;
 pub use nrom::Nrom;
 pub use rambo1::Rambo1;
 pub use small_boards::SmallBoard;
