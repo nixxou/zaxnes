@@ -605,6 +605,8 @@ impl Cartridge {
     /// write path cannot share that cache, because the enable folded into it is
     /// `Mapper::prg_ram_enabled` and what gates a write is `Mapper::prg_ram_writable` — the same
     /// answer on every board but four, and this is not a path worth proving an implication on.
+    #[allow(clippy::inline_always)] // Measured: MF-CART step 3, variant B2.
+    #[inline(always)]
     fn prg_ram_offset(&self, address: u16) -> usize {
         let (base, wrap) = self.board.prg_ram_window(&self.memory);
         (base + usize::from(address - 0x6000)) % wrap
@@ -670,8 +672,7 @@ impl Cartridge {
     ///
     /// Not gated the way `nametable_pages_vary` gates `refresh_nametable_pages`: eighteen of the
     /// supported mapper numbers can move this answer with a register write, which is too many
-    /// for the gate to pay for itself, and the whole of it is one `Board` dispatch plus an `and`
-    /// on a path a CPU write to the cartridge already pays `rom_windows` for.
+    /// for the gate to pay for itself.
     fn refresh_prg_ram_read(&mut self) {
         let (base, wrap) = self.board.prg_ram_window(&self.memory);
         let readable = self.prg_ram_enabled() && !self.memory.prg_ram.is_empty();

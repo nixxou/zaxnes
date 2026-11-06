@@ -373,3 +373,105 @@ cached `usize` on `Cartridge` beside `rom_windows` — so `Cartridge::default_cp
 `Board` dispatch for $6000-$7FFF at all**. 854 / 862 / 783 debug and 917 / 925 release, every
 figure MF-6c's to the test, with the cache checking itself against the dispatch it replaces on
 every read of every debug build.
+
+## Step 3 — the fix measured: **−11.3 M on the set, and the target not reached**
+
+### Instrument 2, the default build (`mfct-3-ramwindo`, then `mfct-3-pinoffst`)
+
+Two shapes were measured for the one thing step 2 moved onto the write path, and both are in the
+table below. The figures named in the text are the second, which is the shipped one.
+
+| ROM | `44f77f72` | **step 3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 287 870 | **3 308 287 621** | −249 | −0.000 % |
+| `oamstr` | 3 318 485 575 | **3 318 473 334** | −12 241 | −0.000 % |
+| `m1` | 4 885 953 734 | **4 881 020 468** | **−4 933 266** | **−0.101 %** |
+| `m4` | 5 472 522 428 | **5 467 781 912** | **−4 740 516** | **−0.087 %** |
+| `m0` | 5 520 499 653 | **5 517 124 138** | **−3 375 515** | **−0.061 %** |
+| `metroid` | 5 115 985 915 | **5 115 565 862** | −420 053 | −0.008 % |
+| `smb1` | 5 996 362 814 | 5 996 365 756 | +2 942 | +0.000 % |
+| `mm2` | 6 017 861 569 | 6 018 045 058 | **+183 489** | **+0.003 %** |
+| `z2` | 6 291 442 776 | 6 291 535 363 | +92 587 | +0.001 % |
+| `readbuf` | 6 834 534 036 | **6 834 511 350** | −22 686 | −0.000 % |
+| `duelito` | 7 380 421 165 | 7 380 424 201 | +3 036 | +0.000 % |
+| `smb3` | 7 949 489 726 | 7 949 548 566 | +58 840 | +0.001 % |
+| `mmc5` | 11 279 358 122 | **11 279 349 260** | −8 862 | −0.000 % |
+| **total** | **79 371 205 383** | **79 358 032 889** | **−13 172 494** | **−0.017 %** |
+
+**The cache is worth −13.2 M on the set before it lifts any limit at all**, and the three
+holy-mapperel ROMs say why: the dispatch it removed was **not free**.
+`Board::prg_ram_offset` had a symbol of its own with **3 736 274 instructions on `m0`,
+5 506 200 on `m1`, 3 736 350 on `m4` and 644 280 on `metroid`** — an out-of-line call per
+$6000-$7FFF read, on four ROMs whose boards bank nothing. All four go to **0**.
+
+**The two shapes, and the first is refuted.** What step 2 moved onto the write path is one
+`Board::prg_ram_window` dispatch and one `prg_ram_enabled` per CPU write, and the boundary LLVM
+had drawn moved with it: `Cartridge::refresh_rom_windows` **0 → 337 060** on `mm2` as it acquired
+a symbol, with `Board::rom_windows` **177 400 → 0** as it was inlined into it.
+
+| | shape | set total | worst ROM |
+| --- | --- | ---: | --- |
+| B1 | `#[inline(always)]` on `refresh_rom_windows`, to put the old boundary back | −10 963 934 | `mm2` **+223 498** — and six ROMs above, `readbuf`, `smb1` and `vblnmi` newly so |
+| **B2** | `#[inline(always)]` on `Cartridge::prg_ram_offset`, the **write** path's own helper | **−13 172 494** | `mm2` +183 489, and `vblnmi` and `readbuf` back below |
+
+B2 is the shipped one and the reason is in the symbol table: `cpu_write` reached PRG-RAM through
+**two** calls (`Cartridge::prg_ram_offset`, 1 311 240 on `m0`, then `Board::prg_ram_window`) where
+it used to make one, and pinning the outer one leaves the dispatch and drops the wrapper. That is
+this project's own idiom for the fifth time — a chain the cost model keeps re-deciding is pinned
+rather than shortened (PERFORMANCE-HISTORY §5.10).
+
+### **The experiment re-run, and the target is not reached**
+
+`board-taito-x1` put back into `default` on **this** tree (`mfct-3-x1fixed1`):
+
+| | `mmc5` | `Cartridge::default_cpu_read` | |
+| --- | ---: | ---: | --- |
+| `44f77f72`, the board parked | 11 279 358 122 | 283 356 728 | |
+| `44f77f72` + `board-taito-x1` (step 1) | 11 301 718 016 | 305 726 996 | +22 370 268 = **3 units** |
+| **step 3** + `board-taito-x1` | 11 309 204 842 | **313 183 752** | **+29 827 024 = 4 units**, +0.265 % |
+
+**Four units of exactly 7 456 756, and worse than step 1's three.** So the $6000-$7FFF cache does
+not lift the limit, and step 1's dump said why it would not: the hoisted `leaq 240(%rdi), %rax`
+that costs is the one in the **`Board::try_read_prg`** table's prologue, and that table is still
+in this function.
+
+### What the dump says, and it is the step's real finding
+
+`fn.py` on the three trees, and one number that settles the diagnosis:
+
+| | `default_cpu_read`, static | `default_cpu_read` on `mmc5`, dynamic |
+| --- | ---: | ---: |
+| `44f77f72` | 429 | **283 356 728** |
+| step 3 (the cache) | 396 | **283 356 728**, identical to the instruction |
+| step 3 + `board-taito-x1` | 340 | 313 183 752 |
+
+**283 356 728 ÷ 7 456 756 is exactly 38.0**, so that function is entered **7 456 756 times** —
+once per CPU read of `mmc5exram` — and the quantum MF-6c measured nine times **is one instruction
+per read**, neither more nor less. Step 3 took 33 instructions out of the function statically and
+changed its dynamic cost on the MMC5 by **zero**: the MMC5's reads are of $8000-$FFFF and never
+enter the $6000-$7FFF half at all. The cache's −13.2 M is all on the other boards.
+
+And the dear layout differs from the cheap one in **three instructions of the entry**, which
+`grep leaq` finds in one look — `movl %esi, %ecx`, `movq %rdi, %r8`, and
+**`leaq 240(%r8), %rdi`**. The fixed default build contains **no `leaq 240(…)` at all**. So LLVM
+is setting up a call ABI: `%rdi = &self.board` for the cold arms of the `try_read_prg` table that
+are out-of-line calls, with `self` and the address shuffled out of the way first.
+
+> **The target of step 2 is not reached, and the reason is now exact: what has to leave
+> `Cartridge::default_cpu_read` is not the $6000-$7FFF dispatch but the `Board::try_read_prg`
+> jump table's *copy* in that function.** Step 4 is where that happens.
+
+### The suites
+
+The tree of this step is step 2's plus one `#[inline(always)]`, which cannot change behaviour;
+the suites are therefore step 2's, and step 4 re-runs all five configurations on the tree that
+carries both attributes: **854 / 862 / 783** debug and **917 / 925** release, `cargo fmt --check`
+clean and clippy `-D warnings` clean on `zax-nes` in three configurations and on `zax-harness`.
+
+[PROGRESS] MF-CART step 3/8 done: the cache is **−13 172 494 (−0.017 %)** on PR-1's thirteen with
+`m1` −0.101 %, because the `Board::prg_ram_offset` dispatch it removed had a symbol worth 3.7 M to
+5.5 M on four ROMs — **and the target is not reached**: `board-taito-x1` on this tree is **four**
+units of the same 7 456 756, +0.265 %. The dump settles the diagnosis — `default_cpu_read` is
+entered exactly 7 456 756 times on `mmc5`, the quantum is **one instruction per read**, and the
+three that appear are `movq %rdi, %r8` and `leaq 240(%r8), %rdi` setting up `&self.board` for the
+**`try_read_prg`** table's out-of-line arms.
