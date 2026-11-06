@@ -1128,3 +1128,206 @@ The six titles for R0 are *Bakushou!! Jinsei Gekijou 3*, *Bubble Bobble 2*, *Don
 above — *The Flintstones: The Rescue of Dino & Hoppy*.
 
 [PROGRESS] MF-6b step 4/8 done: mapper 48, with `ppu_irq_horizon` answering `None` for the whole variant after a forward cost `catch_up_ppu` two instructions and `mmc5` 9.2 M; all thirteen ROMs and all five level-2 games below `9f9d9d41` on total and core.
+
+## Step 5 — mapper 158, a `const` parameter, and a chain that had to be pinned
+
+### The board, in one sentence of the page's own
+
+nesdev ("INES Mapper 158"): the Tengen 800037 "modifies RAMBO-1 (mapper 64) in the exact same way
+that TLSROM (118) differs from MMC3 (4), by which we mean the RAMBO-1's CHR A17 output is
+connected to CIRAM A10". So bit 7 of the CHR bank registers picks the nametable, `$A000` is
+bypassed, and **nothing else moves** — `mf_6b_tengen_800037_banks_exactly_as_a_rambo1_does` gives
+a mapper-64 and a mapper-158 image the same seven registers and asserts the same windows.
+
+Which registers drive it is the TxSROM's rule read onto this chip's CHR layout: it is the ones
+mapped to the **first pattern table**, and bit 7 of `$8000` chooses them — clear, the two 2 KiB
+registers R0 and R1 are at `$0000-$0FFF` and take two nametables each; set, the four 1 KiB
+registers R2-R5 are there and take one each. That is the same bit, read the same way round, that
+`update_banks` already uses for its `high`/`low` swap, and Mesen 2 reads it identically
+(`Rambo1_158.h:10-32`). Registers 8 and 9, which fill the odd kilobytes of 1 KiB mode, reach no
+nametable: there are four pages and the four 1 KiB registers already name them.
+
+**`TLSROM` is a `const` parameter and not a field** — MR-4-3's rule, the one `Mmc3Board`'s
+`MC_ACC` follows. A field would have been *two* fields on the RAMBO-1 (a flag and the four
+pages), and step 1 priced that move exactly: one byte of displacement on `VrcIrq::pending`
+re-laid out `Cpu6502::branch` and cost eleven of thirteen ROMs +0.009 % to +0.027 % with no code
+added at all. The receipt is one line of `cmp4c.py`: **`Rambo1::update_banks` 139 → 139,
+byte-identical**, which is `Rambo1Board<false>`'s monomorphisation.
+
+And the pages are **computed, not cached**: `Mmc3Board` keeps a `nametable_pages: [i32; 4]` field
+because it predates the cache `Cartridge` now holds, and with `Cartridge::nametable_pages_vary`
+naming 158 the board is asked four times per register write and never on a fetch. A field would
+have bought nothing and cost the RAMBO-1 its layout.
+
+`Rambo1Board<true>` goes in [`IrqBoard`] as its sixth inner variant, so there is **no new
+`Board` discriminant** — `McAcc`, the other monomorphisation of this kind, has one of its own
+because it predates that variant.
+
+### Four shapes, and the one that is below the bar
+
+| shape | what changed | set total | `m1` | `mmc5` |
+| --- | --- | ---: | ---: | ---: |
+| **V1** | the board as designed | **−18 091 239** | −8 415 | −2 917 065 |
+| **V2** | V1 + `#[inline(never)]` on `IrqBoard::nametable_page` | **−18 251 797** | −3 727 | −2 919 202 |
+| **V3** (**shipped**) | V2 + `#[inline(always)]` on `Cartridge::cpu_write` | **−19 980 904** | **−784 152** | −2 814 125 |
+| **V4** | V3 + `#[inline(never)]` on `IrqBoard::prg_ram_enabled` | **+43 399 080** | **+382 906** | **+56 855 937** |
+
+**V1 was already below the reference on all thirteen**, but `m1` by 8 415 instructions — inside
+the ±57 k-per-ROM floor §5.11 measured, so effectively *at* it. One function explains the whole
+of that: `Cartridge::cpu_write` had gone **out of line**, 0 → 2 448 instructions, while
+`NesBus::write_internal` fell from 3 577 to 1 102 as its body moved out. The call that appeared
+between the two cost `m4` **+5 089 659** against −3 537 021 in its caller, `m1` +3 776 318 against
+−2 658 017, and `m0` +3 543 400 — about 1.2 M net on three ROMs whose boards this step does not
+touch. What tipped it is the second `Rambo1` monomorphisation: `Board::write_register` now holds
+the RAMBO-1's register decode twice, and the two together are past what the cost model will
+inline into one caller.
+
+**V2 is the attempt that did not work, and it is recorded because it looked like the obvious
+one.** `IrqBoard::nametable_page` out of line shrinks `Board::nametable_page`, which shrinks
+`Cartridge::refresh_nametable_pages`, which is called from `cpu_write` — and it moved the set by
+**+160 597**, thirteen ROMs' worth of floor. `cpu_write` outlined with exactly the same figures
+after it. The attribute is kept because it keeps that cold dispatch out of a hot caller on
+principle, but it is **not** what fixed this and the table says so.
+
+**V3 pins the chain instead of shortening it**, which is PERFORMANCE-HISTORY §5.10's own
+conclusion and the fourth time this project has reached for it: `#[inline(always)]` on
+`Cartridge::cpu_write`, beside the four MF-5b and MF-6a left on `Board::irq_asserted`,
+`Board::expansion_audio_output`, `Board::try_read_prg` and `Board::cpu_read_override`. This
+function and `write_internal` are one body as far as every measurement of this project is
+concerned, and which of the two holds it is LLVM's choice; the step takes the choice away.
+`write_internal` is **3 580** instructions and `Cartridge::cpu_write` has no symbol at all.
+That is the one new `allow(clippy::inline_always)` of the lot, on MF-5b-fix's terms, and it
+carries its measurement in the comment.
+
+**V4 is refuted, and its refutation is the useful part.** `Board::prg_ram_writable` had gone out
+of line in V3 — 0 → 55 instructions, the sixth inner variant having tipped *that* dispatch — at a
+cost of **+430 380** over 600 level-2 frames of *Super Mario Bros. 3*. Taking `IrqBoard`'s
+`prg_ram_enabled` body out of line to shrink it put `Board::prg_ram_enabled` behind a `callq` on
+the MMC5's read path instead: `Cartridge::default_cpu_read` **+67 110 804 instructions over 300
+frames of `mmc5exram`**, +0.504 % on that ROM, to save 0.002 % on a game this board is not. **The
+55 instructions stay**, and the comment on that method now says so with both numbers, so the
+next lot does not try it again.
+
+The shipped tree is V3's code with V4's refutation written into a doc comment, which cannot
+change codegen.
+
+### The bar
+
+**PR-1's thirteen** — every ROM below, set total **−19 980 904 (−0.025 %)**:
+
+| ROM | board | `9f9d9d41` | **V3** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 310 470 388 | **3 308 318 543** | −2 151 845 | −0.065 % |
+| `oamstr` | NROM | 3 319 466 313 | **3 318 452 542** | −1 013 771 | −0.031 % |
+| `m1` | MMC1 | 4 886 651 514 | **4 885 867 362** | −784 152 | −0.016 % |
+| `m0` | NROM | 5 521 219 795 | **5 520 387 914** | −831 881 | −0.015 % |
+| `m4` | MMC3 | 5 473 783 790 | **5 472 568 488** | −1 215 302 | −0.022 % |
+| `metroid` | MMC1 | 5 116 149 734 | **5 115 903 585** | −246 149 | −0.005 % |
+| `smb1` | NROM | 5 996 882 321 | **5 996 358 632** | −523 689 | −0.009 % |
+| `mm2` | MMC1 | 6 020 725 910 | **6 017 842 189** | −2 883 721 | −0.048 % |
+| `z2` | MMC1 | 6 292 582 908 | **6 291 432 170** | −1 150 738 | −0.018 % |
+| `readbuf` | CNROM | 6 836 830 137 | **6 834 524 765** | −2 305 372 | −0.034 % |
+| `duelito` | NROM | 7 383 094 194 | **7 380 398 198** | −2 695 996 | −0.037 % |
+| `smb3` | MMC3 | 7 950 795 166 | **7 949 431 003** | −1 364 163 | −0.017 % |
+| `mmc5` | MMC5 | 11 289 605 855 | **11 286 791 730** | −2 814 125 | −0.025 % |
+| **total** | | **79 398 258 025** | **79 378 277 121** | **−19 980 904** | **−0.025 %** |
+
+**Level 2** — all five `core` figures below, one `total` above:
+
+| game/stage | `9f9d9d41` | **V3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 898 492 | **11 147 278 310** | −620 182 | −0.006 % |
+| `smb1/core` | 11 515 980 923 | **11 515 125 238** | −855 685 | −0.007 % |
+| `zelda2/core` | 12 777 709 570 | **12 775 641 366** | −2 068 204 | −0.016 % |
+| `mm2/core` | 12 043 306 623 | **12 036 819 361** | −6 487 262 | −0.054 % |
+| `smb3/core` | 15 318 626 455 | **15 315 558 069** | −3 068 386 | −0.020 % |
+| `metroid/total` | 13 736 176 888 | **13 735 567 846** | −609 042 | −0.004 % |
+| `smb1/total` | 13 589 021 252 | **13 588 385 656** | −635 596 | −0.005 % |
+| `zelda2/total` | 15 362 221 166 | **15 359 169 158** | −3 052 008 | −0.020 % |
+| `mm2/total` | 18 982 867 263 | **18 976 209 352** | −6 657 911 | −0.035 % |
+| `smb3/total` | 24 192 639 363 | 24 193 872 632 | **+1 233 269** | +0.005 % |
+
+**The diff for `smb3/total`, per function**, as the rule requires — and this one is *not* entirely
+Lua, so the arithmetic is given rather than the label:
+
+| symbol | delta |
+| --- | ---: |
+| `ltable.c:luaH_getshortstr` | **+3 442 500** |
+| `Cpu6502::branch` | **−2 931 497** |
+| `ltable.c:luaH_set` | +566 326 |
+| `Board::prg_ram_writable` | +430 380 |
+| `Ppu2C02::run_dots` | −339 383 |
+| `NesBus::write_internal` | −264 172 |
+
+Lua's hash table accounts for **+4 008 826** and this project's own symbols for **−3 104 672**,
+which nets the +1 233 269. Without the `ltable.c` column the game is 3.1 M below the baseline;
+`core`, the column the lot is read on, is −0.020 %. The one figure of ours that rose is
+`Board::prg_ram_writable`'s 430 380, which V4 went after and which V4's own measurement says to
+leave alone.
+
+### The post-LTO invariants
+
+| symbol | `9f9d9d41` | step 4 | **step 5 (V3)** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 443 | 1 / 2 / 3 626 | 1 / 2 / **3 626** |
+| `Cpu::resolve` | 2 / 6 / 1 854 | 2 / 6 / 1 948 | 2 / 6 / **1 948** |
+| `Cpu::branch` | 1 / 1 / 418 | 1 / 1 / 457 | 1 / 1 / **457** |
+| `NesBus::read_cycle` | 1 / 65 / 181 | 1 / 65 / 181 | 1 / 65 / 181 |
+| `NesBus::tick` | 1 / 95 / 82 | 1 / 95 / 82 | 1 / 95 / 82 |
+| `NesBus::read_internal` | 1 / 17 / 175 | 1 / 17 / 175 | 1 / 17 / 175 |
+| `NesBus::write_internal` | 1 / 10 / 3 103 | 1 / 10 / 3 577 | 1 / 10 / 3 580 |
+| `Ppu::run_dots` | 1 / 2 / 1 907 | 1 / 2 / 1 907 | 1 / 2 / 1 907 |
+
+The three claimants of `Cpu6502::step`'s budget are **unmoved to the instruction** across steps 4
+and 5, and two new boards have now been added without touching them. `IrqBoard::irq_asserted` is
+still the only `irq_asserted` definition in the dump; `callsites.py` has the three links at 0
+defs / 0 sites.
+
+`NesBus::catch_up_ppu` **188 → 188**, `Mmc1::update_banks` **215 → 215 byte-identical**,
+`Rambo1::update_banks` **139 → 139 byte-identical**, `Mmc3::update_banks` 161 → 161,
+`Board::ppu_peek` **272** against the baseline's 271 with `IrqBoard::ppu_peek` out of line at 133.
+`Board::on_ppu_address_bus` 156 → 242 with `IrqBoard::on_ppu_address_bus` out of line at 85,
+`Board::on_cpu_cycle` 396 → 425, `Cartridge::default_cpu_read` 305 → 379,
+`Board::nametable_page` out of line at 44 with `IrqBoard::nametable_page` at 13, and
+`Board::prg_ram_writable` out of line at 55.
+
+**Nineteen of the twenty pinned prologues are identical, and the twentieth did not grow.**
+`prologues.py` flags `Board::on_cpu_cycle`, and the diff is register allocation: the three
+`pushq`es and the stack frame are the same instructions in the same order, and from the sixth
+instruction on the same `movzbl`/`movl`/`cmov` trio uses `%ecx` and `%eax` the other way round
+(`cmovael %eax, %ecx` against `cmovbl %eax, %ecx` with the operands swapped). MF-6a's criterion
+for this instrument is "a `pushq` or a bigger `subq $N, %rsp` is a cost to every game", and
+neither happened.
+
+### Tests
+
+**887 passed, 0 failed, 8 ignored**, step 4's 883 plus four:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_tengen_800037_takes_two_nametables_from_each_2_kib_register` | the four combinations of bit 7 of R0 and R1, which is `req_core_100_txsrom_takes_two_nametables_from_each_2_kib_register`'s own table on this chip |
+| `req_core_100_tengen_800037_takes_one_nametable_from_each_1_kib_register` | the other arrangement, R2-R5 one page each, and registers 8 and 9 reaching none |
+| `req_core_100_tengen_800037_ignores_the_mirroring_register` | `$A000` having no effect — **and a mapper-64 RAMBO-1 in the same test still honouring it**, with its pages still `FOLLOW_MIRRORING` whatever bit 7 of its CHR registers holds, which is what says the `const` parameter did not reach mapper 64 |
+| `mf_6b_tengen_800037_banks_exactly_as_a_rambo1_does` | the seven registers of the 1 KiB mode, 8 and 9 included, giving the same windows on both numbers |
+
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` **caught the missing latch**:
+158 is a RAMBO-1 and watches A12, and the sweep failed with its own message
+("Add the mapper number to the matches! in Cartridge::create") until `watches_ppu_reads` and
+`watches_ppu_bus_without_read` had it. Its expected list is now
+`[4, 4, 5, 5, 48, 48, 64, 64, 118, 118, 158, 158]`. That is the second step running in which
+that sweep has found a real omission before any measurement did.
+
+`req_core_100_every_required_mapper_is_registered` is extended with 158, and
+`nametable_pages_vary` names it — §4.5's cheap level, a page override and not a
+`read_nametable`.
+
+`cargo fmt --check` clean; `cargo clippy --release -p zax-nes --all-targets -- -D warnings`
+clean, with **one** new `allow`, `clippy::inline_always` on `Cartridge::cpu_write`, which the
+lot's own terms permit and which carries its measurement.
+
+The one title is *Alien Syndrome* (Tengen, 1989), for R0 to run.
+
+[PROGRESS] MF-6b step 5/8 done: mapper 158 as a `const` parameter of `Rambo1`, `Rambo1::update_banks` byte-identical, `Cartridge::cpu_write` pinned after a second monomorphisation outlined it at 1.2 M on three ROMs, and all thirteen ROMs below `9f9d9d41` (set −19 980 904).

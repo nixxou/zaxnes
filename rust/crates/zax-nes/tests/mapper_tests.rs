@@ -67,7 +67,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   (MF-6b step 2);
     // * 105 (the Nintendo NES-EVENT board of Nintendo World Championships 1990) (MF-6b step 3);
     // * 48 (the Taito TC0690, the TC0190 of mapper 33 with the MMC3's scanline counter)
-    //   (MF-6b step 4).
+    //   (MF-6b step 4);
+    // * 158 (Tengen's 800037, the RAMBO-1 with CHR A17 on CIRAM A10) (MF-6b step 5).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -76,7 +77,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     assert_eq!(
         vec![
             19, 24, 26, 33, 48, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105,
-            118, 140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 232
+            118, 140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 232
         ],
         extra
     );
@@ -2644,6 +2645,130 @@ fn req_core_100_the_sunsoft3_mirroring_register_has_four_states() {
         core.write_memory(0xE800, value);
         assert_eq!(expected, core.mirroring(), "$E800 = {value:02X}");
     }
+}
+
+// ------------------------------------------- Tengen 800037 (158)
+
+/// Loads RAMBO-1 bank register `register` while keeping bit 7 of `$8000` at `swap`, that bit
+/// being both the CHR half-swap and — on mapper 158 — what chooses which registers drive the
+/// nametables. [`MapperMachine::mmc3_bank`] writes the index alone and would clear it.
+fn rambo1_bank(core: &mut zax_nes::NesCore, swap: bool, register: u8, value: u8) {
+    core.mapper_write(0x8000, if swap { 0x80 | register } else { register });
+    core.mapper_write(0x8001, value);
+}
+
+/// nesdev ("INES Mapper 158"): the board "modifies RAMBO-1 (mapper 64) in the exact same way that
+/// TLSROM (118) differs from MMC3 (4), by which we mean the RAMBO-1's CHR A17 output is connected
+/// to CIRAM A10". With bit 7 of `$8000` clear the two 2 KiB registers R0 and R1 are at PPU
+/// `$0000-$0FFF` and take **two** nametables each, which is
+/// `req_core_100_txsrom_takes_two_nametables_from_each_2_kib_register`'s table on this chip.
+#[test]
+fn req_core_100_tengen_800037_takes_two_nametables_from_each_2_kib_register() {
+    let mut core = MapperRom::new(158).prg(16).chr(64).load();
+    assert_eq!(158, core.cartridge().unwrap().mapper_number());
+
+    for (r0, r1, expected) in [
+        (0x00u8, 0x00u8, [0, 0, 0, 0]),
+        (0x80, 0x00, [1, 1, 0, 0]),
+        (0x00, 0x80, [0, 0, 1, 1]),
+        (0x80, 0x80, [1, 1, 1, 1]),
+    ] {
+        rambo1_bank(&mut core, false, 0, r0);
+        rambo1_bank(&mut core, false, 1, r1);
+        assert_eq!(
+            expected,
+            nametable_pages(&core),
+            "R0 {r0:#04X} R1 {r1:#04X}"
+        );
+    }
+}
+
+/// And with bit 7 of `$8000` **set** the four 1 KiB registers R2-R5 are at the first pattern
+/// table and take one nametable each — the same bit `update_banks` swaps the CHR halves with, so
+/// the registers that drive CIRAM A10 are always the ones the PPU fetches `$0000-$0FFF` from.
+#[test]
+fn req_core_100_tengen_800037_takes_one_nametable_from_each_1_kib_register() {
+    let mut core = MapperRom::new(158).prg(16).chr(64).load();
+    for register in 2..6u8 {
+        rambo1_bank(&mut core, true, register, 0x00);
+    }
+
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+
+    for (register, expected) in [
+        (2u8, [1, 0, 0, 0]),
+        (3, [1, 1, 0, 0]),
+        (4, [1, 1, 1, 0]),
+        (5, [1, 1, 1, 1]),
+    ] {
+        rambo1_bank(&mut core, true, register, 0x80);
+        assert_eq!(expected, nametable_pages(&core), "R{register}");
+    }
+
+    // Registers 8 and 9 fill the odd kilobytes of 1 KiB mode and reach no nametable: there are
+    // four pages and the four 1 KiB registers already name them.
+    rambo1_bank(&mut core, true, 8, 0x00);
+    rambo1_bank(&mut core, true, 9, 0x00);
+    assert_eq!([1, 1, 1, 1], nametable_pages(&core));
+}
+
+/// `$A000` "is bypassed by the configuration described above, so writing here has no effect" —
+/// nesdev's words for the `TxSROM`, which this board copies. **And a RAMBO-1 in the same test
+/// still honours it**, which is what says the `const` parameter did not reach mapper 64.
+#[test]
+fn req_core_100_tengen_800037_ignores_the_mirroring_register() {
+    let mut board = MapperRom::new(158).prg(16).chr(64).load();
+    rambo1_bank(&mut board, false, 0, 0x80);
+    rambo1_bank(&mut board, false, 1, 0x00);
+    let before = board.mirroring();
+    for value in [0x00u8, 0x01] {
+        board.mapper_write(0xA000, value);
+        assert_eq!(before, board.mirroring(), "$A000 = {value:#04X}");
+        assert_eq!([1, 1, 0, 0], nametable_pages(&board));
+    }
+
+    let mut rambo1 = MapperRom::new(64).prg(16).chr(64).load();
+    assert_eq!(64, rambo1.cartridge().unwrap().mapper_number());
+    rambo1.mapper_write(0xA000, 0x01);
+    assert_eq!(Nm::Horizontal, rambo1.mirroring());
+    rambo1.mapper_write(0xA000, 0x00);
+    assert_eq!(Nm::Vertical, rambo1.mirroring());
+    // And its pages stay the console's, bit 7 of its CHR registers or not.
+    rambo1_bank(&mut rambo1, false, 0, 0x80);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&rambo1));
+}
+
+/// The banking is the RAMBO-1's, unchanged: the one thing mapper 158 rewires is CIRAM A10, so a
+/// mapper-64 and a mapper-158 image given the same registers must show the same windows.
+#[test]
+fn mf_6b_tengen_800037_banks_exactly_as_a_rambo1_does() {
+    let mut rambo1 = MapperRom::new(64).prg(16).chr(64).load();
+    let mut board = MapperRom::new(158).prg(16).chr(64).load();
+    for core in [&mut rambo1, &mut board] {
+        // The third PRG register, the 1 KiB CHR mode and registers 8 and 9 with it.
+        core.mapper_write(0x8000, 0x20);
+        for (register, value) in [
+            (6u8, 3u8),
+            (7, 5),
+            (15, 9),
+            (0, 10),
+            (1, 12),
+            (8, 11),
+            (9, 13),
+        ] {
+            core.mapper_write(0x8000, 0x20 | register);
+            core.mapper_write(0x8001, value);
+        }
+
+        for register in 2..6u8 {
+            core.mapper_write(0x8000, 0x20 | register);
+            core.mapper_write(0x8001, 20 + register);
+        }
+    }
+
+    assert_eq!(rambo1.prg_windows(), board.prg_windows());
+    assert_eq!(rambo1.chr_windows(), board.chr_windows());
+    assert_eq!([10, 11, 12, 13, 22, 23, 24, 25], board.chr_windows());
 }
 
 // ------------------------------------------- Taito TC0690 (48)

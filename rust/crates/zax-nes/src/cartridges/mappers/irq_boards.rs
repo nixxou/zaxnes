@@ -1,4 +1,4 @@
-use super::{IremH3001, Mapper, NesEvent, Sunsoft3, TaitoTc0690, Vrc3};
+use super::{IremH3001, Mapper, NesEvent, Sunsoft3, TaitoTc0690, Tengen800037, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -53,6 +53,8 @@ pub enum IrqBoard {
     NesEvent(NesEvent),
     /// Mapper 48, the Taito TC0690.
     TaitoTc0690(TaitoTc0690),
+    /// Mapper 158, Tengen's 800037: the RAMBO-1 with CHR A17 wired to CIRAM A10.
+    Tengen800037(Tengen800037),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -64,6 +66,7 @@ macro_rules! inner {
             IrqBoard::Sunsoft3($b) => $body,
             IrqBoard::NesEvent($b) => $body,
             IrqBoard::TaitoTc0690($b) => $body,
+            IrqBoard::Tengen800037($b) => $body,
         }
     };
 }
@@ -114,8 +117,33 @@ impl Mapper for IrqBoard {
     /// of unbanked PRG-RAM is exactly what [`Mapper::prg_ram_offset`]'s default answers. One body
     /// in `Board::prg_ram_enabled` instead of three across the $6000-$7FFF decode, which is the
     /// path MF-6b step 2 found `Cartridge::default_cpu_read` on.
+    ///
+    /// **Inlined, and `#[inline(never)]` here is refuted** (MF-6b step 5, V4). The sixth inner
+    /// variant pushed `Board::prg_ram_writable` out of line — 0 to 55 instructions — at
+    /// **+430 380** over 600 level-2 frames of Super Mario Bros. 3, and taking *this* body out
+    /// of line to shrink it instead put `Board::prg_ram_enabled` behind a call on the MMC5's
+    /// read path: `Cartridge::default_cpu_read` went **+67 110 804 instructions over 300 frames
+    /// of `mmc5exram`**, +0.504 % on that ROM, where the 430 k it was meant to save is 0.002 %
+    /// of a game this board is not. The 55 instructions stay.
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
+    }
+
+    /// Forwarded for mapper 158 alone (MF-6b step 5). `Cartridge` caches the four answers and
+    /// re-asks them only after a register write, so this dispatch is cold: the field
+    /// `Mmc3Board` keeps for the TxSROM predates that cache and is not copied here.
+    ///
+    /// **`#[inline(never)]`, and the first shape of step 5 measured why.** Inlined, this body
+    /// grows `Board::nametable_page`, which grows `Cartridge::refresh_nametable_pages`, which
+    /// pushed `Cartridge::cpu_write` past the inliner's budget: that function went from **0 to
+    /// 3 776 318 instructions on `m1`** and 5 089 659 on `m4` over 300 frames, against
+    /// −2 658 017 and −3 537 021 in `NesBus::write_internal` as its body left — a net cost of
+    /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
+    /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
+    /// anybody else.
+    #[inline(never)]
+    fn nametable_page(&self, table: i32) -> i32 {
+        inner!(self, b => b.nametable_page(table))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

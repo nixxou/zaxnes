@@ -12,8 +12,8 @@ use super::mappers::{
     Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremH3001, IremTamS1,
     IrqBoard, JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1,
     Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, NesEvent, Rambo1,
-    SmallBoard, Sunsoft1, Sunsoft2, Sunsoft3, TaitoTc0190, TaitoTc0690, UnRom512, UxRom, Vrc1,
-    Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
+    SmallBoard, Sunsoft1, Sunsoft2, Sunsoft3, TaitoTc0190, TaitoTc0690, Tengen800037, UnRom512,
+    UxRom, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -23,7 +23,7 @@ use crate::rom::InesHeader;
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
     34, 41, 48, 64, 65, 66, 67, 69, 70, 71, 73, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101,
-    105, 118, 140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 225, 228, 232,
+    105, 118, 140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 225, 228, 232,
 ];
 
 /// Whether `mapper` is implemented.
@@ -300,6 +300,9 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // and a four-cycle delay on its assertion. `TaitoTc0690`'s own note has the three
         // readings where it leaves Mesen 2 for the page.
         48 => Board::IrqBoard(IrqBoard::TaitoTc0690(TaitoTc0690::new(memory))),
+        // MF-6b step 5: Tengen's 800037 is the RAMBO-1 with CHR A17 on CIRAM A10, which is a
+        // `const` parameter of the same board -- see `Rambo1Board`'s own note.
+        158 => Board::IrqBoard(IrqBoard::Tengen800037(Tengen800037::new(memory))),
         _ => return None,
     })
 }

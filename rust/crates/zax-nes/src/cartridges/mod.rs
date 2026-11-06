@@ -337,7 +337,10 @@ impl Cartridge {
             // 88, 154 and 206 have hardwired mirroring, and 154's one-screen bit goes through
             // `memory.set_mirroring` like every other mirroring register rather than through a
             // page override.
-            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 95 | 118),
+            // MF-6b step 5 adds Tengen's 800037 (158), the RAMBO-1 with CHR A17 wired to
+            // CIRAM A10, which is the TxSROM's arrangement on that chip (nesdev, "INES Mapper
+            // 158") -- §4.5's cheap level, a page override and not a `read_nametable`.
+            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 95 | 118 | 158),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
@@ -345,8 +348,10 @@ impl Cartridge {
             // counter belongs in both lists; one that waits on /RD, in the first only.
             // MF-6b step 4 adds the Taito TC0690 (48), whose counter is the MMC3's and is
             // clocked through the same A12 filter (nesdev, "INES Mapper 048"), so it is in both.
-            watches_ppu_reads: matches!(mapper, 4 | 5 | 48 | 64 | 118),
-            watches_ppu_bus_without_read: matches!(mapper, 4 | 48 | 64 | 118),
+            // MF-6b step 5 adds Tengen's 800037 (158), which is a RAMBO-1 and so watches A12
+            // exactly as mapper 64 does.
+            watches_ppu_reads: matches!(mapper, 4 | 5 | 48 | 64 | 118 | 158),
+            watches_ppu_bus_without_read: matches!(mapper, 4 | 48 | 64 | 118 | 158),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
@@ -597,6 +602,23 @@ impl Cartridge {
     }
 
     /// Writes a byte from the CPU bus, in $4020-$FFFF.
+    ///
+    /// **`#[inline(always)]` since MF-6b step 5, and it has to stay.** This function and
+    /// `NesBus::write_internal` are one body as far as every measurement of this project is
+    /// concerned, and which of the two holds it is LLVM's choice. Step 5's second `Rambo1`
+    /// monomorphisation tipped that choice: `write_internal` went from **3 577 instructions to
+    /// 1 102** and this function from **0 to 2 448** as the body moved out, and the call that
+    /// appeared between them cost `m4` **+5 089 659** instructions over 300 frames against
+    /// −3 537 021 in its caller, `m1` +3 776 318 against −2 658 017, and `m0` +3 543 400 — about
+    /// 1.2 M net on three ROMs whose boards the step does not touch.
+    ///
+    /// Pinning it is the same fix, and for the same reason, as the four `#[inline(always)]`
+    /// attributes MF-5b and MF-6a left on `Board::irq_asserted`, `Board::expansion_audio_output`,
+    /// `Board::try_read_prg` and `Board::cpu_read_override`: a chain the cost model keeps
+    /// re-deciding as boards are added is pinned rather than shortened
+    /// (PERFORMANCE-HISTORY §5.10).
+    #[allow(clippy::inline_always)] // Measured: MF-6b step 5, about 1.2 M on three ROMs.
+    #[inline(always)]
     pub fn cpu_write(&mut self, address: u16, value: u8) {
         if self
             .board
@@ -965,15 +987,17 @@ mod tests {
         }
 
         // Guards against a vacuous pass: the sweep above must actually be reaching the hook.
-        // Both submappers of each of the five move — the MMC3 and the MC-ACC for mapper 4, the
+        // Both submappers of each of the six move — the MMC3 and the MC-ACC for mapper 4, the
         // MMC5's scanline detection (MF-4c, finding MR-5-4), the Taito TC0690 of mapper 48
-        // (MF-6b step 4), whose counter is the MMC3's, and the RAMBO-1 and the TxSROM, whose
-        // submapper 3 is not a board of its own.
+        // (MF-6b step 4), whose counter is the MMC3's, the RAMBO-1 and Tengen's 800037 of
+        // mapper 158 (MF-6b step 5), which is the same chip, and the TxSROM, whose submapper 3
+        // is not a board of its own.
         assert_eq!(
             moved,
-            [4, 4, 5, 5, 48, 48, 64, 64, 118, 118],
-            "expected exactly the MMC3, the MC-ACC, the MMC5, the TC0690, the RAMBO-1 and the \
-             TxSROM to move on the PPU address bus, and the sweep to reach all of them"
+            [4, 4, 5, 5, 48, 48, 64, 64, 118, 118, 158, 158],
+            "expected exactly the MMC3, the MC-ACC, the MMC5, the TC0690, the RAMBO-1, the \
+             TxSROM and the Tengen 800037 to move on the PPU address bus, and the sweep to \
+             reach all of them"
         );
     }
 

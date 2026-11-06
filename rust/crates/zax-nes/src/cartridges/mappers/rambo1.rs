@@ -3,10 +3,33 @@ use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
-/// iNES mapper 64, Tengen RAMBO-1: MMC3-like with a third PRG register, 1 KiB CHR mode and a
-/// scanline counter that can also count CPU cycles (REQ-CORE-100).
+/// iNES mappers 64 (Tengen RAMBO-1) and 158 (Tengen 800037): MMC3-like with a third PRG
+/// register, 1 KiB CHR mode and a scanline counter that can also count CPU cycles
+/// (REQ-CORE-100, REQ-CORE-102).
+///
+/// **`TLSROM` is mapper 158, and it is a type parameter and not a field** — MR-4-3's rule, the
+/// one [`super::Mmc3Board`]'s `MC_ACC` follows. nesdev ("INES Mapper 158") gives the whole board
+/// in one sentence: it "modifies RAMBO-1 (mapper 64) in the exact same way that TLSROM (118)
+/// differs from MMC3 (4), by which we mean the RAMBO-1's CHR A17 output is connected to CIRAM
+/// A10". So bit 7 of the CHR bank registers picks the nametable, `$A000` is bypassed, and
+/// nothing else moves.
+///
+/// A `const` parameter rather than a `bool` because the difference would otherwise be **two new
+/// fields on the RAMBO-1** — a flag and the four pages — and MF-6b step 1 measured what moving
+/// an IRQ board's fields costs: one byte of displacement on `VrcIrq::pending` re-laid out
+/// `Cpu6502::branch` and cost eleven of lot PR-1's thirteen ROMs +0.009 % to +0.027 %, with no
+/// code added at all. Monomorphised, `Rambo1` is `Rambo1Board<false>` and comes out of the
+/// compiler byte-identical, which `cmp4c.py` reads on `Rambo1::update_banks`.
+///
+/// The pages are **computed and not cached**, which is the one place this board differs from the
+/// TxSROM's shape. `Mmc3Board` holds a `nametable_pages: [i32; 4]` field because it predates the
+/// cache `Cartridge` now keeps; with `Cartridge::nametable_pages_vary` naming mapper 158,
+/// `Mapper::nametable_page` is asked four times per register write and never on a fetch, so a
+/// field here would buy nothing and cost the RAMBO-1 its layout.
+///
+/// The one game is *Alien Syndrome* (Tengen, 1989), on Tengen's board 800037.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Rambo1 {
+pub struct Rambo1Board<const TLSROM: bool> {
     banks: BankWindows,
     a12: A12Watcher,
     bank: [u8; 16],
@@ -26,7 +49,13 @@ pub struct Rambo1 {
     irq_delay: i32,
 }
 
-impl Rambo1 {
+/// Mapper 64, the RAMBO-1 proper.
+pub type Rambo1 = Rambo1Board<false>;
+
+/// Mapper 158, Tengen's 800037: the same chip with CHR A17 wired to CIRAM A10.
+pub type Tengen800037 = Rambo1Board<true>;
+
+impl<const TLSROM: bool> Rambo1Board<TLSROM> {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
@@ -97,7 +126,7 @@ impl Rambo1 {
     }
 }
 
-impl Mapper for Rambo1 {
+impl<const TLSROM: bool> Mapper for Rambo1Board<TLSROM> {
     banked!();
 
     fn save_registers(&self, writer: &mut StateWriter) {
@@ -145,7 +174,40 @@ impl Mapper for Rambo1 {
     }
 
     fn mapper_number(&self) -> i32 {
-        64
+        if TLSROM {
+            158
+        } else {
+            64
+        }
+    }
+
+    /// Mapper 158's nametables, the TxSROM's rule on this chip's CHR layout
+    /// ([`super::Mmc3Board::refresh_nametable_pages`] is the same six lines for the MMC3).
+    ///
+    /// It is the registers mapped to **the first pattern table** that drive CIRAM A10, and bit 7
+    /// of `$8000` is what chooses them: with it clear the two 2 KiB registers R0 and R1 are at
+    /// PPU `$0000-$0FFF` and take two nametables each, and with it set the four 1 KiB registers
+    /// R2-R5 are there and take one each. That is the same bit, read the same way round, that
+    /// `update_banks` uses for its `high`/`low` swap, and Mesen 2 reads it identically
+    /// (`Rambo1_158.h:10-32`).
+    ///
+    /// Registers 8 and 9, which fill the odd kilobytes of 1 KiB mode, do **not** reach a
+    /// nametable: only four pages exist and the four 1 KiB registers already name them. The
+    /// page's own note that "Nestopia-1.4.0's implementation looks incomplete; it seems to
+    /// ignore bank registers 8 and 9, as well as the K bit" is about its *banking*, which
+    /// `update_banks` has had since MF-3.
+    fn nametable_page(&self, table: i32) -> i32 {
+        if !TLSROM {
+            return -1;
+        }
+
+        let page = |register: usize| i32::from(self.bank[register] >> 7);
+        let table = usize::try_from(table).unwrap_or(0) & 3;
+        if self.select & 0x80 == 0 {
+            page(table >> 1)
+        } else {
+            page(2 + table)
+        }
     }
 
     fn irq_asserted(&self) -> bool {
@@ -201,7 +263,11 @@ impl Mapper for Rambo1 {
                 self.bank[usize::from(self.select & 0x0F)] = value;
                 self.update_banks();
             }
-            0xA000 => memory.set_mirroring(if value & 0x01 != 0 {
+            // Mapper 158 drives CIRAM A10 off its CHR registers, so this register "is bypassed
+            // by the configuration described above, so writing here has no effect" — nesdev's
+            // own words for the TxSROM (`INES Mapper 118`), which this board copies. Mesen 2
+            // filters the same address out (`Rambo1_158.h:35`).
+            0xA000 if !TLSROM => memory.set_mirroring(if value & 0x01 != 0 {
                 NametableMirroring::Horizontal
             } else {
                 NametableMirroring::Vertical
