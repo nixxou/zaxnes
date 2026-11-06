@@ -990,3 +990,173 @@ fn req_core_075_the_namco163_phase_is_stored_back_into_the_chips_ram() {
     core.write_memory(0xF800, 0x40 | 0x7D);
     assert_eq!(2, core.read_memory(0x4800));
 }
+
+// ---------------------------------------------------------------- save states
+
+/// REQ-CORE-090 and REQ-CORE-091: everything the board and the chip hold comes back from a state,
+/// and the machine goes on from exactly where it was.
+///
+/// The check is not field-by-field but **behavioural**: two machines are driven apart, one is
+/// saved and restored, and the two then have to produce the same `M` on every one of 600 CPU
+/// cycles. That covers the phase accumulators (which live in the chip's RAM), the per-channel
+/// outputs, the multiplexer's counter and which channel it is on, the cached `M`, and the
+/// wavetable itself.
+#[test]
+fn req_core_090_a_namco163_state_round_trips_through_the_sound() {
+    let mut core = core_163();
+    load_ram(&mut core, 0x00, &[0x21, 0x43, 0x65, 0x87]);
+    load_ram(&mut core, 0x70, &channel_registers(0x00123, 0xF8, 0x02, 9));
+    load_ram(&mut core, 0x78, &channel_registers(0x01234, 0xFC, 0x00, 15));
+    load_ram(&mut core, 0x7F, &[0x10 | 15]); // two channels, channel 7 at full volume.
+    for _ in 0..400 {
+        core.bus_mut().tick();
+    }
+
+    let state = core.save_state(true).unwrap();
+    let expected: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            expansion(&core)
+        })
+        .collect();
+
+    // Drive the machine somewhere else entirely, then come back.
+    core.write_memory(0xE000, 0x40); // the sound disabled, for good measure.
+    for _ in 0..1000 {
+        core.bus_mut().tick();
+    }
+
+    core.try_load_state(&state, 0).unwrap();
+    let after: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            expansion(&core)
+        })
+        .collect();
+
+    assert_eq!(
+        expected, after,
+        "the sound must resume where the state left it"
+    );
+    assert!(
+        expected.iter().any(|level| *level != expected[0]),
+        "the test is vacuous unless M actually moves"
+    );
+}
+
+/// The chip's 128 bytes are PRG-RAM, so `Cartridge::save_state` carries them — the wavetable and
+/// the channel registers come back byte for byte, and so does the address port that reads them.
+#[test]
+fn req_core_091_a_namco163_state_brings_back_the_wavetable_and_the_port() {
+    let mut core = core_163();
+    load_ram(&mut core, 0x10, &[0xDE, 0xAD, 0xBE, 0xEF]);
+    set_port(&mut core, 0x11, true);
+
+    let state = core.save_state(true).unwrap();
+
+    // Overwrite all of it, port included.
+    load_ram(&mut core, 0x10, &[0, 0, 0, 0]);
+    set_port(&mut core, 0x7A, false);
+
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!(0xDE, peek_ram(&mut core, 0x10));
+    assert_eq!(
+        [0xAD, 0xBE, 0xEF],
+        [
+            peek_ram(&mut core, 0x11),
+            peek_ram(&mut core, 0x12),
+            peek_ram(&mut core, 0x13)
+        ]
+    );
+
+    // And the port is back at $11 with its auto-increment, which a CPU read then steps on.
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!(0xAD, cpu_read(&mut core, 0x4800));
+    assert_eq!(0xBE, cpu_read(&mut core, 0x4800));
+}
+
+/// The IRQ counter and its pending flag are part of the state: a restore puts the line back where
+/// it was rather than where the new run had got to.
+#[test]
+fn req_core_091_a_namco163_state_brings_back_the_irq_counter() {
+    let mut core = core_163();
+    let start = 0x7FFF - 30;
+    core.write_memory(0x5000, (start & 0xFF) as u8);
+    core.write_memory(0x5800, 0x80 | ((start >> 8) & 0x7F) as u8);
+    for _ in 0..10 {
+        core.bus_mut().tick();
+    }
+
+    let state = core.save_state(true).unwrap();
+    let low = core.read_memory(0x5000);
+    let high = core.read_memory(0x5800);
+
+    // Let it fire, then come back to before the edge.
+    for _ in 0..200 {
+        core.bus_mut().tick();
+    }
+    assert!(cartridge(&core).irq_asserted());
+
+    core.try_load_state(&state, 0).unwrap();
+    assert!(
+        !cartridge(&core).irq_asserted(),
+        "the restored counter is short of its top"
+    );
+    assert_eq!(low, core.read_memory(0x5000));
+    assert_eq!(high, core.read_memory(0x5800));
+
+    // And it fires again from there, which is the check that the enable bit came back too.
+    let mut fired = false;
+    for _ in 0..60 {
+        core.bus_mut().tick();
+        fired |= cartridge(&core).irq_asserted();
+    }
+    assert!(fired, "the restored counter must go on counting");
+}
+
+/// REQ-CORE-091: a block written **before** this board existed still loads. The format version
+/// sits right after the four magic bytes, so an older one is what a state from a build without
+/// the Namco 163 carries — and the core has to read it without the board's own block.
+#[test]
+fn req_core_091_a_block_written_before_the_namco163_still_loads() {
+    let mut core = core_163();
+    load_ram(&mut core, 0x78, &channel_registers(0x01234, 0xFC, 0x00, 15));
+    for _ in 0..200 {
+        core.bus_mut().tick();
+    }
+
+    let mut state = core.save_state(true).unwrap();
+    state[4..8].copy_from_slice(&NesCore::STATE_VERSION_4.to_le_bytes());
+
+    core.try_load_state(&state, 0).unwrap();
+    core.bus_mut().tick();
+    assert_eq!(
+        0,
+        expansion(&core),
+        "an older block leaves the chip silent rather than failing"
+    );
+}
+
+/// A mapper-210 state round-trips too, and the 340's mirroring — which is a register on that
+/// variant and the header's on the other two — comes back from the state and not from `$E000`.
+#[test]
+fn req_core_090_a_mapper_210_state_round_trips_its_mirroring_and_banks() {
+    let mut core = core_210(2);
+    core.write_memory(0xE000, 0x40 | 0x05); // vertical, bank 5.
+    core.write_memory(0xE800, 0x06);
+    core.write_memory(0x8000, 0x21);
+
+    let state = core.save_state(true).unwrap();
+
+    core.write_memory(0xE000, 0xC0 | 0x11); // one-screen B, bank 17.
+    core.write_memory(0x8000, 0x33);
+
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!(
+        NametableMirroring::Vertical,
+        core.cartridge().unwrap().mirroring()
+    );
+    assert_eq!(0x05, prg_bank(&core, 0x8000));
+    assert_eq!(0x06, prg_bank(&core, 0xA000));
+    assert_eq!(0x21, chr_bank(&core, 0x0000));
+}

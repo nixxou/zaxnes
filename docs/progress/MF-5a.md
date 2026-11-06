@@ -1052,6 +1052,62 @@ trait for it. No existing block moved.
 `THIRD-PARTY-NOTICES.md` now lists the two Namco 163 adaptations: the register decode's split
 between the three variants, and the phase wrap.
 
+## Step 6 — the save states, and what the seven new tests prove rather than assert
+
+Steps 1, 2 and 4 each wrote their own block; this step is where the **behaviour** of those blocks
+is pinned, because the format being right and the machine resuming are two different claims.
+
+**The shape of the check.** Five of the seven tests are not field-by-field comparisons: two
+machines are driven apart, one is saved and restored, and the two then have to produce the **same
+`M` on every one of 600 CPU cycles**. For the Namco 163 that covers the three phase accumulators
+(which live in the chip's RAM and not in the audio struct), the eight per-channel outputs, the
+multiplexer's counter and which channel it is on, the cached `M`, the channel count, and the
+wavetable itself — in one assertion, with a second assertion that `M` actually moves so the test
+cannot pass vacuously. For the VRC6 it covers the two pulses, the sawtooth accumulator and
+`$9003`'s scale and halt the same way.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_090_a_namco163_state_round_trips_through_the_sound` | 600 cycles of `M` identical after a restore, with the machine deliberately driven elsewhere in between |
+| `req_core_091_a_namco163_state_brings_back_the_wavetable_and_the_port` | the 128 bytes byte for byte, and the address port **with** its auto-increment, checked by two CPU reads |
+| `req_core_091_a_namco163_state_brings_back_the_irq_counter` | the counter short of its top, both readable halves, the enable bit, and that it fires again from there |
+| `req_core_091_a_block_written_before_the_namco163_still_loads` | an older format version loads and leaves the chip silent |
+| `req_core_090_a_mapper_210_state_round_trips_its_mirroring_and_banks` | the 340's mirroring coming back **from the state** and not from `$E000`, with its PRG and CHR banks |
+| `req_core_090_a_vrc6_state_round_trips_through_the_three_oscillators` | 600 cycles of `M` identical, the oscillators and `$9003` |
+| `req_core_091_a_block_written_before_the_vrc6_sound_still_loads` | step 2's own tolerance claim, which had no test until now |
+
+**Nothing in the format moved.** The two new blocks are new; no existing block gained, lost or
+reordered a field. Three things are deliberately *not* serialised, and each has its reason in the
+code:
+
+* the Namco 163's **128 bytes** — they are PRG-RAM, which `Cartridge::save_state` already writes,
+  and writing them twice would be the only way to get them out of step with themselves;
+* `Cartridge::clocks_on_cpu_cycle` and `nametable_pages_vary` — derived from the mapper number at
+  load, like their five neighbours;
+* the MMC5's `pulse_level` and `level` (step 3) — derived, and `load_state` recomputes them.
+
+One thing *is* serialised although it is derived, and the field doc says why:
+`Namco163Audio::level`. `Mapper::load_registers` is not given the cartridge's memories, and `$7F`
+— which decides how the channel outputs are divided — is a byte of those memories. One `i32` in
+the block is cheaper than threading `&mut CartridgeMemory` through the trait for it, and it makes
+the restored `M` exactly the saved one rather than one update late.
+
+**The reset sweep covers the new boards without being edited.**
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` walks
+`NesCore::SUPPORTED_MAPPERS`, so 19 and 210 are in it now. It is the test that caught step 1's
+missing VRC6 PRG registers — a board that maps its windows straight from `write_register` and
+keeps no register has nothing for `Mapper::reset` to put back — and it passed for both Namco
+variants first time, because every register of this board is a field.
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, no new `allow` |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **782 passed, 0 failed, 8 ignored** |
+
+782 is step 4's 775 plus these seven. No production code changed in this step, so the measured
+binary of step 4 stands and no new instruction count was taken.
+
 ## Status
 
 - [x] step 1 — the VRC6 board, mappers 24 and 26 (Q-123 opened: `$B003` bit 4)
@@ -1059,6 +1115,6 @@ between the three variants, and the phase wrap.
 - [x] step 3 — R0's two items: `mmc5` **−0.391 %** against `ad1ad765` (item 1 met); `Ppu2C02::read` back to a shrink-wrapped prologue, **+0.0144 %** left on `readbuf` against `fff53974` where it was +0.161 % (item 2, 91 % back)
 - [x] step 4 — the Namco 163 board, mappers 19 and 210 (Q-126 opened: the two PPU modes, and submapper 0 of mapper 210)
 - [x] step 5 — the Namco 163 audio (Q-127 opened: the level). Shipped in step 4's commit; the section above says why the two cannot compile apart
-- [ ] step 6 — save states
+- [x] step 6 — save states (seven tests; 600 cycles of `M` identical after a restore, on both boards)
 - [ ] step 7 — the ROM check
 - [ ] step 8 — the suites and the campaign

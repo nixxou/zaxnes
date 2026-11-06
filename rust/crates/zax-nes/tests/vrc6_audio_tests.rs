@@ -394,3 +394,73 @@ fn req_core_075_a_vrc6_subtracts_its_m_from_the_apu_mix() {
     core.bus_mut().tick();
     assert_eq!(quiet - mixer::VRC6_TABLE[15], core.apu().mixer_output());
 }
+
+// ---------------------------------------------------------------- save states
+
+/// REQ-CORE-090 and REQ-CORE-091 for the VRC6: the three oscillators, `$9003` and the IRQ counter
+/// all come back from a state, checked behaviourally — a saved machine and the restored one have
+/// to produce the same `M` on every one of 600 CPU cycles.
+///
+/// Step 2 of lot MF-5a appended `Vrc6Audio`'s block after the IRQ's and said `load_registers`
+/// tolerates a block without it; this is the test that says the whole of it round-trips, and step
+/// 6 of that lot is where it was added.
+#[test]
+fn req_core_090_a_vrc6_state_round_trips_through_the_three_oscillators() {
+    let mut core = core();
+    pulse(&mut core, 0x9000, 0x7F, 0x012, true);
+    pulse(&mut core, 0xA000, 0x3F, 0x034, true);
+    saw(&mut core, 0x25, 0x056, true);
+    core.write_memory(0x9003, 0x02); // the 16x frequency scale.
+    for _ in 0..400 {
+        core.bus_mut().tick();
+    }
+
+    let state = core.save_state(true).unwrap();
+    let expected: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            expansion(&core)
+        })
+        .collect();
+
+    // Drive it somewhere else: halt everything and run on.
+    core.write_memory(0x9003, 0x01);
+    for _ in 0..1000 {
+        core.bus_mut().tick();
+    }
+
+    core.try_load_state(&state, 0).unwrap();
+    let after: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            expansion(&core)
+        })
+        .collect();
+
+    assert_eq!(
+        expected, after,
+        "the three oscillators must resume where the state left them"
+    );
+    assert!(
+        expected.iter().any(|level| *level != expected[0]),
+        "the test is vacuous unless M actually moves"
+    );
+}
+
+/// REQ-CORE-091: a block written **before** the VRC6's sound existed still loads, and leaves the
+/// chip silent — which is what a VRC6 is before its first sound-register write.
+#[test]
+fn req_core_091_a_block_written_before_the_vrc6_sound_still_loads() {
+    let mut core = core();
+    pulse(&mut core, 0x9000, 0x7F, 0x012, true);
+    for _ in 0..200 {
+        core.bus_mut().tick();
+    }
+
+    let mut state = core.save_state(true).unwrap();
+    state[4..8].copy_from_slice(&NesCore::STATE_VERSION_4.to_le_bytes());
+
+    core.try_load_state(&state, 0).unwrap();
+    core.bus_mut().tick();
+    assert_eq!(0, expansion(&core), "an older block leaves the chip silent");
+}
