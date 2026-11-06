@@ -4,6 +4,8 @@ use super::Mmc3Multicart;
 use super::NesEvent;
 #[cfg(feature = "board-116")]
 use super::Somari;
+#[cfg(feature = "board-68")]
+use super::Sunsoft4;
 #[cfg(feature = "board-158")]
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
@@ -123,6 +125,24 @@ pub enum IrqBoard {
     /// board**, on a board whose `Board` value is built once at load — §4.10's rule again.
     #[cfg(feature = "board-116")]
     Somari(Box<Somari>),
+    /// Mapper 68, the Sunsoft-4 (MF-6c step 4) — **the one board here whose page says "IRQ:
+    /// None"**, and the reason is a measurement, not a reclassification.
+    ///
+    /// By [`super::SmallBoard`]'s entry condition this board belongs there, and step 4 built it
+    /// there first. The eleventh variant of that enum cost `mmc5` **+7 456 756 instructions over
+    /// 300 frames, +0.066 %** — `Cartridge::default_cpu_read` flipping to the dearer of its two
+    /// layouts, the same figure and the same function `board-taito-x1` was parked on, from **one**
+    /// new variant and one forwarded method. `IrqBoard` was already nine variants deep and the
+    /// same function was in its cheap layout, so the board was moved here and the figure went
+    /// away; MF-6c step 4's write-up has both measurements side by side.
+    ///
+    /// The price is this variant's [`IrqBoard::ppu_irq_horizon`] `None` — the Sunsoft-4 could have
+    /// let the PPU run behind the CPU and gives that up — which is §4.10's rule and exactly the
+    /// trade the TQROM and the two MMC3 multicarts already make. Its `irq_asserted` arm answers
+    /// `false` through its own `Mapper` default, which costs this enum's inner match one more arm
+    /// of the body it already has.
+    #[cfg(feature = "board-68")]
+    Sunsoft4(Sunsoft4),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -143,6 +163,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Multicart($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
+            #[cfg(feature = "board-68")]
+            IrqBoard::Sunsoft4($b) => $body,
         }
     };
 }
@@ -201,7 +223,12 @@ impl Mapper for IrqBoard {
     /// read path: `Cartridge::default_cpu_read` went **+67 110 804 instructions over 300 frames
     /// of `mmc5exram`**, +0.504 % on that ROM, where the 430 k it was meant to save is 0.002 %
     /// of a game this board is not. The 55 instructions stay.
-    #[cfg(any(feature = "board-105", feature = "board-116", feature = "board-119"))]
+    #[cfg(any(
+        feature = "board-105",
+        feature = "board-116",
+        feature = "board-119",
+        feature = "board-68"
+    ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
     }
@@ -248,10 +275,30 @@ impl Mapper for IrqBoard {
     /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
     /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
     /// anybody else.
-    #[cfg(feature = "board-158")]
+    #[cfg(any(feature = "board-158", feature = "board-68"))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))
+    }
+
+    /// Forwarded for mapper 68 alone, and **only behind `board-68-chr-nametables`**: this is the
+    /// third distinct body of the dispatch Q-123 measured a cap of two on, and the owner's rule of
+    /// 2026-11-06 is what puts it here ("A costly *mechanism* of a board … is implemented too,
+    /// behind its own feature if it costs more than the board itself").
+    ///
+    /// **MF-6c step 4 re-measured Q-123's ceiling and did not find it.** MF-5a built five shapes
+    /// for a third arm on a tree seven lots older and the best of them took
+    /// `Ppu2C02::read_nametable_inner` from 132 instructions to 109; on this tree that function is
+    /// **114 → 75**, the body leaving by a tail call, and the thirteen ROMs of lot PR-1 move by
+    /// **+17 007 in total** with `readbuf` — the CNROM whose whole run is fetches — **−78 628**.
+    /// The cap is re-stated rather than quoted, which is what the step was asked to do.
+    ///
+    /// **Behaviour-neutral for the other boards of this variant**: none of them overrides it, and
+    /// none answers `SERVED_BY_CARTRIDGE` from `nametable_page`, so this body is never reached for
+    /// them.
+    #[cfg(feature = "board-68-chr-nametables")]
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        inner!(self, b => b.read_nametable(memory, address))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

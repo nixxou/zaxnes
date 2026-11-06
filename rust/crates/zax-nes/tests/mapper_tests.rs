@@ -78,7 +78,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 80 and 207 (the Taito X1-005 and its single-screen wiring) and 82 and 552 (the Taito
     //   X1-017 with the two bank orders), behind `board-taito-x1` (MF-6c step 2);
     // * 157 (the Datach Joint ROM System) and 159, the two Bandai LZ93D50 boards with a serial
-    //   EEPROM, behind `board-eeprom` (MF-6c step 3).
+    //   EEPROM, behind `board-eeprom` (MF-6c step 3);
+    // * 68 (the Sunsoft-4), behind `board-68`, with its CHR-ROM nametable mode behind the second
+    //   feature `board-68-chr-nametables` (MF-6c step 4).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -95,7 +97,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let multicart = cfg!(feature = "board-mmc3-multicart");
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
-    let additions: [(i32, bool); 45] = [
+    let additions: [(i32, bool); 46] = [
         (19, true),
         (24, true),
         (26, true),
@@ -105,6 +107,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (48, true),
         (65, true),
         (67, true),
+        (68, cfg!(feature = "board-68")),
         (69, true),
         (70, small),
         (73, true),
@@ -1693,6 +1696,128 @@ fn q_134_the_eeprom_direction_bit_is_decoded_and_does_not_gate_sda() {
         0x5A,
         set.cartridge().unwrap().battery_ram()[0x05],
         "Q-134: the direction bit does not gate SDA"
+    );
+}
+
+/// The Sunsoft-4's CIRAM half: four 2 KiB CHR banks, the 16 KiB window with the last bank wired,
+/// the four mirroring modes of $E000 bits 1-0 and the PRG-RAM enable of $F000 bit 4
+/// (MF-6c step 4).
+#[cfg(feature = "board-68")]
+#[test]
+fn req_core_100_sunsoft_4_banks_four_2_kib_chr_windows_and_one_prg_window() {
+    let mut core = MapperRom::new(68).prg(32).chr(32).battery().load();
+    assert_eq!(68, core.cartridge().unwrap().mapper_number());
+    // Power-on: bank 0 at $8000, the image's last 16 KiB wired at $C000.
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+    // "...E BBBB": four bits of bank.
+    core.write_memory(0xF000, 0x05);
+    assert_eq!([10, 11, 30, 31], core.prg_windows());
+    core.write_memory(0xF000, 0x0F);
+    assert_eq!([30, 31, 30, 31], core.prg_windows());
+    // The four 2 KiB CHR registers, on the high nibble of their own quarter of $8000-$BFFF.
+    core.write_memory(0x8000, 0x01);
+    core.write_memory(0x9123, 0x03);
+    core.write_memory(0xA456, 0x05);
+    core.write_memory(0xB789, 0x07);
+    assert_eq!([2, 3, 6, 7, 10, 11, 14, 15], core.chr_windows());
+    // $E000 bits 1-0: the four modes.
+    for (bits, expected) in [
+        (0x00u8, Nm::Vertical),
+        (0x01, Nm::Horizontal),
+        (0x02, Nm::SingleScreenA),
+        (0x03, Nm::SingleScreenB),
+    ] {
+        core.write_memory(0xE000, bits);
+        assert_eq!(expected, core.mirroring(), "$E000 = {bits:#04X}");
+    }
+    // With bit 4 clear the nametables stay on CIRAM, which is `FOLLOW_MIRRORING`.
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+    // $F000 bit 4 is the PRG-RAM enable, and it is **off** at power-on.
+    let fresh = MapperRom::new(68).prg(32).chr(32).battery().load();
+    assert_ne!(0x5A, fresh.read_memory(0x6100));
+    core.write_memory(0xF000, 0x10);
+    core.write_memory(0x6100, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6100));
+    core.write_memory(0xF000, 0x00);
+    assert_ne!(0x5A, core.read_memory(0x6100));
+    core.write_memory(0xF000, 0x10);
+    assert_eq!(0x5A, core.read_memory(0x6100));
+    assert_eq!(8 * 1024, core.cartridge().unwrap().battery_ram().len());
+}
+
+/// **Q-123's third `Mapper::read_nametable` body**, which the owner's rule of 2026-11-06 has this
+/// lot build rather than decode and ignore: $E000 bit 4 maps the 1 KiB CHR-ROM banks of $C000 and
+/// $D000 over $2000-$2FFF, which register serving which logical table being decided by the
+/// mirroring mode. Behind `board-68-chr-nametables`, whose own measurement decides whether it is
+/// in `default` (MF-6c step 4).
+#[cfg(feature = "board-68-chr-nametables")]
+#[test]
+fn req_core_100_sunsoft_4_serves_its_nametables_from_chr_rom_on_e000_bit_4() {
+    // 256 KiB of CHR so that the 1 KiB banks $80 and up exist: "7 bits used; D7 ignored", and the
+    // board wires CHR A17 high for a nametable fetch, so bank $80 is the first one it can reach.
+    let mut core = MapperRom::new(68).prg(32).chr(256).load();
+    let cartridge =
+        |core: &NesCore, address: u16| core.cartridge().unwrap().read_nametable(address);
+
+    // Bit 4 clear: CIRAM, and `nametable_page` says so.
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+    // $C000 and $D000 take a 1 KiB bank with bit 7 forced set: $00 is bank $80 and $05 is $85.
+    core.write_memory(0xC000, 0x00);
+    core.write_memory(0xD000, 0x05);
+    // Bit 4 set, with vertical mirroring: the two registers alternate across the four tables.
+    core.write_memory(0xE000, 0x10);
+    assert_eq!(
+        [-2, -2, -2, -2],
+        nametable_pages(&core),
+        "SERVED_BY_CARTRIDGE"
+    );
+    assert_eq!(0x80, cartridge(&core, 0x2000));
+    assert_eq!(0x85, cartridge(&core, 0x2400));
+    assert_eq!(0x80, cartridge(&core, 0x2800));
+    assert_eq!(0x85, cartridge(&core, 0x2C00));
+    // Horizontal: they pair up.
+    core.write_memory(0xE000, 0x11);
+    assert_eq!(0x80, cartridge(&core, 0x2000));
+    assert_eq!(0x80, cartridge(&core, 0x2400));
+    assert_eq!(0x85, cartridge(&core, 0x2800));
+    assert_eq!(0x85, cartridge(&core, 0x2C00));
+    // The two single-screen modes put one register everywhere.
+    core.write_memory(0xE000, 0x12);
+    assert_eq!(
+        [0x80, 0x80, 0x80, 0x80],
+        [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|a| cartridge(&core, a))
+    );
+    core.write_memory(0xE000, 0x13);
+    assert_eq!(
+        [0x85, 0x85, 0x85, 0x85],
+        [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|a| cartridge(&core, a))
+    );
+    // The offset inside the 1 KiB bank is the low ten bits of the address.
+    assert_eq!(0x85, cartridge(&core, 0x23FF));
+    // And bit 4 clear puts the nametables back on CIRAM without the registers moving.
+    core.write_memory(0xE000, 0x03);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+}
+
+/// The bit is **decoded and kept in the savestate whatever `board-68-chr-nametables` says**, so
+/// that the feature switches the serving and not the register decode — which is what lets a state
+/// written by one configuration load into the other (REQ-CORE-090, REQ-CORE-091). MF-6c step 4.
+#[cfg(feature = "board-68")]
+#[test]
+fn mf_6c_sunsoft_4_decodes_e000_bit_4_in_both_configurations() {
+    let mut core = MapperRom::new(68).prg(32).chr(256).load();
+    core.write_memory(0xC000, 0x02);
+    core.write_memory(0xE000, 0x10);
+    let state = core.save_state(true).unwrap();
+    let mut other = MapperRom::new(68).prg(32).chr(256).load();
+    other.try_load_state(&state, 0).unwrap();
+    // The pages come back derived, and they are whatever this build serves.
+    assert_eq!(nametable_pages(&core), nametable_pages(&other));
+    let served = cfg!(feature = "board-68-chr-nametables");
+    assert_eq!(
+        if served { -2 } else { -1 },
+        nametable_pages(&other)[0],
+        "the feature decides the serving, not the decode"
     );
 }
 

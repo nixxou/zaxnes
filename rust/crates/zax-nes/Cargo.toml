@@ -26,6 +26,8 @@ default = [
     "board-119",
     "board-153",
     "board-155",
+    "board-68",
+    "board-68-chr-nametables",
     "board-eeprom",
     "board-158",
     "board-mmc3-multicart",
@@ -80,6 +82,18 @@ board-mmc3-multicart = []
 # (MF-6c step 1). One title, *Famicom Jump II: Saikyou no 7-nin*. Two bytes and three branches
 # on `BandaiFcg`, which is mapper 16's board: no `Board` variant, no dispatch arm anywhere.
 board-153 = []
+
+# Mapper 68, the Sunsoft-4 (MF-6c step 4): four 2 KiB CHR banks, four mirroring modes, a PRG-RAM
+# enable and a 16 KiB window. One more `SmallBoard` variant; "IRQ: None" on its page, which is
+# that enum's entry condition. *After Burner*, *Maharaja*, *Nantettatte!! Baseball* and the rest.
+board-68 = []
+
+# **Mapper 68's CHR-ROM nametable mode alone**, $E000 bit 4, which is the *third* distinct body of
+# the `Mapper::read_nametable` dispatch Q-123 measured a cap of two on (MF-6c step 4). Its own
+# feature because the owner's rule of 2026-11-06 says a costly mechanism of a board is built
+# "behind its own feature if it costs more than the board itself"; the bit is decoded and kept in
+# the savestate either way, so this switches the *serving* and not the decode.
+board-68-chr-nametables = ["board-68"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

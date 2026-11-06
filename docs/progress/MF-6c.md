@@ -708,3 +708,196 @@ all three configurations and on `zax-harness`, clean, **no new `allow` of any ki
 level-2 cores +0 and `duelito` +0.001 % the worst of thirteen with `mmc5` −40 903 — and step 2's
 park re-measured at the same +7 456 756 on a tree 48 instructions larger, which refutes that
 step's size-threshold reading and leaves the park standing.
+
+## Step 4 — the Sunsoft-4, **Q-123's ceiling lifted**, and what parks a board named at last
+
+### What was built
+
+nesdev ("INES Mapper 068"), six registers on the high nibble of $8000-$FFFF, and the code quotes
+the page on each:
+
+| what | where |
+| --- | --- |
+| four **2 KiB** CHR banks at $0000, $0800, $1000 and $1800 | `Sunsoft4::update_banks` |
+| the 16 KiB window of `$F000`'s `...E BBBB`, with the image's last bank wired at $C000 | the same method |
+| `$F000` bit 4, the PRG-RAM enable, **off at power-on** | `Sunsoft4::prg_ram_enabled` |
+| `$E000` bits 1-0, the four mirroring modes, through `set_mirroring` and not through a page override | `Sunsoft4::write_x1_register`'s `0xE000` arm |
+| `$C000` and `$D000`, the two nametable banks, "7 bits used; D7 ignored" with CHR A17 wired high | the same arm, `value \| 0x80` |
+| **`$E000` bit 4**, "CIRAM / CHR-ROM Select for Nametables" | `Sunsoft4::read_nametable` |
+| which register serves which logical table, by the mirroring mode | `Sunsoft4::nametable_register` |
+
+**Two Cargo features, because the owner's rule 1 asks for exactly that.** §5 MF-6c step 4 of the
+inventory offered this lot a choice between finding a shape MF-5a had not tried and decoding
+`$E000` bit 4 and ignoring it, with "the second [as] the expected outcome". The owner's rule
+replaces that — "A costly *mechanism* of a board (Sunsoft-4's CHR-ROM nametables through
+`read_nametable` …) is implemented too, behind its own feature if it costs more than the board
+itself" — so the mode is **built**, as `board-68-chr-nametables`, and the measurement decides only
+where its feature lives. The bit is **decoded and kept in the savestate either way**, so the
+feature switches the serving and not the decode, which
+`mf_6c_sunsoft_4_decodes_e000_bit_4_in_both_configurations` pins by loading one configuration's
+state into the other's cartridge.
+
+**One gap recorded: *Nantettatte!! Baseball*.** Its second PRG-ROM sits on a subboard, selected by
+a bit of `$F000` and gated by a licensing timer the board starts on a write to $6000-$7FFF. "A
+second ROM image has no path through `Cartridge::create` and no spec text asks for one" — §5 MF-6c
+step 4's own words — so `$F000` is a 4-bit bank here, which is what the page's `...E BBBB` diagram
+gives it, and the external ROM joins MR-30-4's UNROM 512 flash and step 3's Datach barcode scanner
+as a recorded gap. Mesen 2 reads bit 3 as a chip select and holds a 105 000-cycle timer
+(`Sunsoft4.h:120-139`); on a single-chip dump the two readings agree, because bank 8 and above wrap
+into the same eight banks.
+
+### **Finding 1: what parks a board is the eleventh `SmallBoard` variant**
+
+The board went into [`SmallBoard`] first, which is where its own page sends it — "IRQ: None", that
+enum's entry condition — with **one** new variant and **one** forwarded method
+(`prg_ram_enabled`, for `$F000` bit 4). Measured (`mf6c-4-sunsoft4`):
+
+| | `8496c503` | **68 in `SmallBoard`** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `mmc5` | 11 279 383 781 | 11 286 797 392 | **+7 413 611** | **+0.066 %** |
+| every other ROM | | | within **±89 000** | ≤ +0.001 % |
+| set total | 79 371 161 907 | 79 378 790 369 | +7 628 462 | +0.010 % |
+
+and the symbol diff names one function: `Cartridge::default_cpu_read`, **283 356 728 →
+290 813 484, +7 456 756** — step 2's figure, to the instruction, for the **fourth** time in this
+lot and the **sixth** in this project.
+
+**That settles what step 2 could not.** Step 2 had two new variants and three forwards and blamed
+the forwards, then the function's size; step 3 refuted the size. This step has **one** variant and
+a *different* single forward, and gets the identical number. So the trigger is the variant:
+
+> **The eleventh `SmallBoard` variant flips `Cartridge::default_cpu_read` into the dearer of its
+> two layouts, at +0.066 % on `mmc5` and nothing anywhere else.** `SmallBoard` has been the
+> recommended home for a register-decode board since MF-6a step 2, and that advice has run out.
+
+### **Finding 2: `IrqBoard` is the cheap home, and it costs one PPU horizon**
+
+[`IrqBoard`] was already nine variants deep with the same function in its *cheap* layout, so the
+board was moved there — `irq_asserted` answering `false` through its own `Mapper` default, which
+costs that enum's inner match one more arm of the body it already has — and three forwards widened
+(`prg_ram_enabled`, `nametable_page`, and `read_nametable` behind the second feature). Measured
+(`mf6c-4-s4irqbrd`), **with both features on**:
+
+| ROM | `8496c503` | **68 in `IrqBoard`** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 311 891 | 3 308 335 323 | +23 432 | +0.001 % |
+| `oamstr` | 3 318 460 965 | **3 318 459 686** | −1 279 | −0.000 % |
+| `m1` | 4 885 949 431 | 4 885 952 434 | +3 003 | +0.000 % |
+| `m4` | 5 472 514 995 | 5 472 518 088 | +3 093 | +0.000 % |
+| `m0` | 5 520 458 691 | **5 520 455 246** | −3 445 | −0.000 % |
+| `metroid` | 5 115 944 288 | **5 115 937 171** | −7 117 | −0.000 % |
+| `smb1` | 5 996 381 185 | **5 996 355 737** | −25 448 | −0.000 % |
+| `mm2` | 6 017 851 607 | 6 017 920 165 | **+68 558** | **+0.001 %** |
+| `z2` | 6 291 458 642 | **6 291 437 125** | −21 517 | −0.000 % |
+| `readbuf` | 6 834 538 187 | 6 834 561 249 | +23 062 | +0.000 % |
+| `duelito` | 7 380 437 910 | 7 380 457 425 | +19 515 | +0.000 % |
+| `smb3` | 7 949 470 334 | **7 949 447 453** | −22 881 | −0.000 % |
+| `mmc5` | 11 279 383 781 | **11 279 348 656** | **−35 125** | −0.000 % |
+| **total** | **79 371 161 907** | **79 371 185 758** | **+23 851** | **+0.000 %** |
+
+**`mmc5` is −35 125 instead of +7 413 611**, the worst ROM of the thirteen is `mm2` at +0.001 %,
+and level 2's verdict line is the one this lot has not seen before: **"at or below the baseline on
+every game, total and core"** — all five `core` figures +0 and all five `total` figures below,
+`smb3` −1 353 944 and `smb1` −820 240.
+
+The price is this variant's `ppu_irq_horizon` `None`: a Sunsoft-4 could have let the PPU run
+behind the CPU and gives that up, which is §4.10's rule and exactly the trade the TQROM and the
+two MMC3 multicarts already make for the same reason.
+
+### **Finding 3: Q-123's ceiling does not reproduce, and the third body is free**
+
+The mechanism the inventory called "the hook a sub-lot should be most afraid of" turns out to cost
+nothing on this tree, and the step measured it twice.
+
+`Ppu2C02::read_nametable_inner`, with `fn.py`:
+
+| | instructions | shape |
+| --- | ---: | --- |
+| MF-5a's baseline, seven lots ago | 132 | bitset, two arm bodies |
+| MF-5a's best third-arm shape | 109 | jump table, the MMC5's arm out of line |
+| **`8496c503`, this lot's baseline** | **114** | bitset, two arm bodies |
+| **with the third body** | **75** | the body leaves by a tail call |
+
+and the dynamic cost of that, measured as `board-68-chr-nametables` **against the same tree with
+only `board-68`** (`mf6c-4-s4ntable` against `mf6c-4-sunsoft4`): the set total moves
+**+17 007 instructions, +0.000 %**, the worst ROM is `metroid` at +0.001 %, and **`readbuf` — the
+CNROM whose whole run is fetches — is −78 628**.
+
+So the third arm is the 75-instruction shape, which is MF-5a's own second row ("the dispatch leaves
+by a tail call") and not its third; the dispatch is reached only behind
+`page == SERVED_BY_CARTRIDGE`, so a board that does not serve its own nametables never calls it.
+**Q-123's "132 → 109 for every game in the library" is not the price on this tree**, and the step
+re-measured it rather than quoting it, which is what §4.5 asked the next lot to do before adding a
+fourth board. `Ppu2C02::read_pattern_planes` is **107**, unchanged, which is MF-2's shield holding.
+
+### Instrument 3
+
+| symbol | `8496c503` | **step 4** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | 290 |
+| `NesBus::write_internal` | 3 815 | **3 798** |
+| `Ppu::run_dots` | 1 907 | 1 919 |
+| `NesBus::catch_up_ppu` | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | 75 |
+
+`shape.py`'s five others are identical to the instruction. `write_internal` is **below** the
+baseline; `ppu_peek` +18 and `run_dots` +12 are step 3's figures carried forward, unchanged by this
+step, and the dynamic column above is what prices them at nothing.
+
+### One existing test had to move a number, and Q-130 question 2 predicted it
+
+`req_core_102_an_unimplemented_mapper_is_refused_by_name` swept **6, 68, 177 and 200**, and 68 is
+now implemented. **That is the second time a lot has had to edit that list** — MF-5a step 4 moved
+19 out when it built the Namco 163 — and it is exactly what Q-130 question 2 says: "all four are
+real boards Mesen builds, so the test holds no number guaranteed never to become supported … the
+criterion wants a number that is nobody's board."
+
+68's replacement is the first number in this project with that guarantee written down: **186**, the
+Study Box, from §3.5's list of the numbers Mesen 2 has a `case` for and `break`s out of — "They are
+**not** candidates for any sub-lot" — and which §6 item 2 names because "Mesen loads [it] as a BIOS
+and not as a ROM". A number that is not a cartridge board cannot be claimed by a later mapper lot.
+The test's comment says so, and references Q-130 question 2.
+
+### The tests, 906 → **909**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_sunsoft_4_banks_four_2_kib_chr_windows_and_one_prg_window` | the power-on windows, the 4-bit bank, the four 2 KiB CHR registers on their own quarters of $8000-$BFFF, all four mirroring modes, `FOLLOW_MIRRORING` with bit 4 clear, and the PRG-RAM **off at power-on** then gated by $F000 bit 4 in both directions |
+| `req_core_100_sunsoft_4_serves_its_nametables_from_chr_rom_on_e000_bit_4` | `SERVED_BY_CARTRIDGE` with bit 4 set; the two 1 KiB banks with bit 7 forced; **which register serves which table in all four mirroring modes**; the offset inside the bank; and the nametables going back to CIRAM without the registers moving |
+| `mf_6c_sunsoft_4_decodes_e000_bit_4_in_both_configurations` | a savestate written with the mode on loading into a fresh cartridge, the derived pages coming back, and the **feature** and not the decode deciding what is served |
+
+**Four configurations green**, `cargo fmt --check` clean and clippy `-D warnings` clean on
+`zax-nes` in all four and on `zax-harness`, **no new `allow` of any kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default (both mapper-68 features on) | **846** |
+| `--features parked-boards` | **851** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-68` | **785** |
+
+With `zax-harness` the default figure is **909 passed / 0 failed / 8 ignored**. Both `board-68` and
+`board-68-chr-nametables` are inside the tolerance by a factor of twenty and go in `default`.
+
+### What step 9 must do first, and it is worth 13 titles
+
+**Finding 2 very probably un-parks `board-taito-x1`.** The two Taito boards are parked on exactly
+the figure this step cured by moving one board out of `SmallBoard`, and both of their pages say
+"IRQ: None" the same way the Sunsoft-4's does, so [`IrqBoard`] will take them on the same terms —
+`try_read_prg`, `prg_ram_enabled` and `nametable_page` are all forwards that enum already has or
+can widen, and the price is the same `ppu_irq_horizon`. **Step 9 should move them and re-measure
+before writing the feature table**; if it holds, thirteen licensed titles come back into `default`
+and `parked-boards` is empty again.
+
+[`SmallBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/small_boards.rs
+[`IrqBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/irq_boards.rs
+
+[PROGRESS] MF-6c step 4/10 done: the Sunsoft-4 and its CHR-ROM nametables both in `default`,
+909 / 0 / 8, level 2 **at or below the baseline on every game, total and core** — and two findings:
+the eleventh `SmallBoard` variant is what parks a board, and Q-123's 132 → 109 ceiling does not
+reproduce (114 → 75, set +17 007, `readbuf` −78 628).

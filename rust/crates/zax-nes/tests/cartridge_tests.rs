@@ -33,7 +33,19 @@ fn req_core_102_an_unimplemented_mapper_is_refused_by_name() {
     // 19 stood here until lot MF-5a step 4 implemented the Namco 163, and 177 took its place:
     // a number in the same decade that no lot has claimed, so the test still proves that an
     // unimplemented two-digit mapper is refused and not merely that a wild one is.
-    for mapper in [6, 68, 177, 200] {
+    //
+    // **68 had to move for the same reason in MF-6c step 4**, which implemented the Sunsoft-4,
+    // and that is the second time this list has been edited by a lot that implemented one of its
+    // numbers — which is precisely the fragility **Q-130 question 2** describes: "the test that
+    // embodies the criterion sweeps 6, 116, 177 and 200, and all four are real boards Mesen
+    // builds, so the test holds no number guaranteed never to become supported".
+    //
+    // Its replacement is the first number in this project with that guarantee written down.
+    // §3.5 of `docs/review/MF-6-inventory.md` lists the numbers Mesen 2 has a `case` for and
+    // `break`s out of, with "They are **not** candidates for any sub-lot", and §6 item 2 names
+    // **186** among them: the Study Box, "which Mesen loads as a BIOS and not as a ROM". A number
+    // that is not a cartridge board at all cannot be implemented by a later mapper lot.
+    for mapper in [6, 177, 186, 200] {
         assert!(!Cartridge::is_supported(mapper));
         let mut image = minimal();
         image[6] = (image[6] & 0x0F) | (((mapper & 0x0F) as u8) << 4);

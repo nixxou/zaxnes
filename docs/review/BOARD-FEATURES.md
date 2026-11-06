@@ -33,12 +33,37 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-mmc3-multicart` | 47, 37 | Nintendo's two MMC3 multicarts, one `const` monomorphisation with an outer register at $6000-$7FFF | 2 | as `board-119`, measured together | as `board-119` | **on** | as above |
 | `board-116` | 116 | Gouder SOMARI-P / Huang ASIC, **holding** an `Mmc3`, an `Mmc1` and a `Vrc2Vrc4` | **6** | worst `m1` **+96 537 (+0.0020 %)**, set total **−7 291 714 (−0.009 %)**, `mmc5` **−0.066 %** (MF-6a3 step 4, vs `07325f6e`) | all five `core` **+253 to +16 832** (`smb3/core` is 253 instructions in 15.3 G); worst `total` `smb3` **+0.011 %** | **on** | as above |
 | `board-153` | 153 | the Bandai FCG board with an LZ93D50 and 8 KiB of battery-backed WRAM, **two appended `bool`s on `BandaiFcg`** | 1 (*Famicom Jump II*) | worst `duelito` **+57 669 (+0.001 %)**, set total +37 631 (MF-6c step 1, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` +0.005 %, entirely Lua's `ltable.c` | **on** | as above |
+| `board-68` | 68 | the Sunsoft-4, **in `IrqBoard` and not `SmallBoard`** — its page says "IRQ: None", but the eleventh `SmallBoard` variant costs `mmc5` +0.066 % and the tenth `IrqBoard` one costs nothing | **~6** | worst `mm2` **+68 558 (+0.001 %)**, set total +23 851, `mmc5` **−35 125** (MF-6c step 4, vs `8496c503`, measured with `board-68-chr-nametables` on) | **at or below the baseline on every game, total and core** | **on** | as above |
+| `board-68-chr-nametables` | 68 | **mapper 68's CHR-ROM nametable mode alone**, $E000 bit 4 — the third distinct body of the dispatch Q-123 capped at two. Implies `board-68` | — | against `board-68` alone: set total **+17 007 (+0.000 %)**, worst `metroid` +0.001 %, `readbuf` **−78 628** (MF-6c step 4) | included in `board-68`'s row above | **on** | as above |
 | `board-eeprom` | 157, 159 | the Bandai LZ93D50 with a serial EEPROM: `Eeprom24C0X` as **one** state machine for the X24C01 and the X24C02, and `EepromPort` as one `Option` field on `BandaiFcg` | **11** | worst `duelito` **+60 800 (+0.001 %)**, set total **−10 565**, `mmc5` **−40 903** (MF-6c step 3, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` +0.014 %, entirely Lua's `ltable.c` and `memcpy` | **on** | as above |
 | `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | `mmc5` **+7 456 756 (+0.066 %)**, every other ROM within **±31 000** (MF-6c step 2, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` **+0.003 %** | **off — parked** | `cargo build -p zax-nes --features board-taito-x1` |
 | `parked-boards` | 80, 207, 82, 552 | the umbrella: every board left out of `default`. Today that is `board-taito-x1` | 13 | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
 +0.02 %.
+
+## Two findings of MF-6c step 4 that change the advice in note 1 below
+
+**1. `SmallBoard` is full.** That enum has been the recommended home for a register-decode board
+since MF-6a step 2, and MF-6c measured what joining it now costs: **one** more variant flips
+`Cartridge::default_cpu_read` into the dearer of its two layouts on `mmc5exram`, **+7 456 756
+instructions over 300 frames, +0.066 %**, with nothing else moving. Step 2 saw it with two
+variants and three forwards, step 4 saw the identical figure with one variant and one *different*
+forward, and step 3 saw it on a tree where that function had grown 48 instructions for unrelated
+reasons — so the trigger is the variant and not the boards' code. **`IrqBoard` is the cheap home**:
+the Sunsoft-4 moved there and `mmc5` went from +7 413 611 to **−35 125**. A board whose page says
+"IRQ: None" belongs in `SmallBoard` by that enum's entry condition and in `IrqBoard` by the
+measurement; the price of the second is that variant's `ppu_irq_horizon` `None`, which is §4.10's
+rule.
+
+**2. Q-123's ceiling does not reproduce.** MF-5a measured a third `Mapper::read_nametable` arm
+body at `Ppu2C02::read_nametable_inner` **132 → 109 for every game in the library**. On this tree
+that function is **114 → 75** — the body leaving by a tail call, MF-5a's own second shape and not
+its third — and the thirteen ROMs of lot PR-1 move by **+17 007 in total** with `readbuf` **−78
+628**. The dispatch is reached only behind `page == SERVED_BY_CARTRIDGE`, so a board that does not
+serve its own nametables never calls it. Mapper 68's CHR-ROM nametable mode therefore ships in
+`default`, and a **fourth** body should be re-measured the same way rather than assumed to cost
+132 → 109.
 
 ## The one parked board, and why
 

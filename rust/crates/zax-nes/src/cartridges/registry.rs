@@ -17,6 +17,8 @@ use super::mappers::NesEvent;
 use super::mappers::Nrom;
 #[cfg(feature = "board-116")]
 use super::mappers::Somari;
+#[cfg(feature = "board-68")]
+use super::mappers::Sunsoft4;
 #[cfg(feature = "board-158")]
 use super::mappers::Tengen800037;
 #[cfg(feature = "board-119")]
@@ -83,6 +85,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     65,
     66,
     67,
+    #[cfg(feature = "board-68")]
+    68,
     69,
     #[cfg(feature = "board-small-boards")]
     70,
@@ -507,6 +511,10 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // is here and not a parameter of `CnRom`.
         #[cfg(feature = "board-small-boards")]
         185 => Board::SmallBoard(SmallBoard::CnRomProtect(CnRomProtect::new(memory))),
+        // MF-6c step 4: the Sunsoft-4. Its CIRAM half is a register decode; its CHR-ROM
+        // nametable mode is Q-123's third `read_nametable` body and has a feature of its own.
+        #[cfg(feature = "board-68")]
+        68 => Board::IrqBoard(IrqBoard::Sunsoft4(Sunsoft4::new(memory))),
         // MF-6c step 2: the two Taito boards whose WRAM is inside the ASIC. Mapper 207 is the
         // X1-005 with CHR A17 on CIRAM A10 and 552 the X1-017's corrected bank order, so each
         // chip is one board with one parameter. They are `SmallBoard` variants because both
