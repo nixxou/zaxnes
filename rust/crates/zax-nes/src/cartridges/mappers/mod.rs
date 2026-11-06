@@ -62,6 +62,10 @@ mod sunsoft3;
 #[cfg(feature = "board-small-boards")]
 mod taito_tc0190;
 mod taito_tc0690;
+#[cfg(feature = "board-taito-x1")]
+mod taito_x1005;
+#[cfg(feature = "board-taito-x1")]
+mod taito_x1017;
 #[cfg(feature = "board-small-boards")]
 mod vrc1;
 mod vrc2_vrc4;
@@ -122,6 +126,10 @@ pub use sunsoft3::Sunsoft3;
 #[cfg(feature = "board-small-boards")]
 pub use taito_tc0190::TaitoTc0190;
 pub use taito_tc0690::TaitoTc0690;
+#[cfg(feature = "board-taito-x1")]
+pub use taito_x1005::TaitoX1005;
+#[cfg(feature = "board-taito-x1")]
+pub use taito_x1017::TaitoX1017;
 #[cfg(feature = "board-small-boards")]
 pub use vrc1::Vrc1;
 pub use vrc2_vrc4::Vrc2Vrc4;

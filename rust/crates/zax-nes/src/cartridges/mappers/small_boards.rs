@@ -2,6 +2,8 @@ use super::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, Mapper, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
+#[cfg(feature = "board-taito-x1")]
+use super::{TaitoX1005, TaitoX1017};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -62,6 +64,17 @@ pub enum SmallBoard {
     /// Mapper 185, CNROM with the security diodes. Here and not on [`super::CnRom`] because a
     /// CHR chip select has to reach `chr_view`, and this variant has already paid for that.
     CnRomProtect(CnRomProtect),
+    // Appended by MF-6c step 2, which adds four numbers and no `Board` variant. Both boards
+    // belong here by this enum's entry condition — "IRQ: None" on both pages, so both share the
+    // empty `Board::irq_asserted` arm — and the two methods they need
+    // ([`Mapper::cpu_peek_override`] and [`Mapper::nametable_page`]) are forwarded **once for
+    // the variant**, which is the whole reason this enum exists.
+    /// Mappers 80 and 207, the Taito X1-005 and its single-screen wiring.
+    #[cfg(feature = "board-taito-x1")]
+    TaitoX1005(TaitoX1005),
+    /// Mapper 82 and NES 2.0 mapper 552, the Taito X1-017 with its two bank orders.
+    #[cfg(feature = "board-taito-x1")]
+    TaitoX1017(TaitoX1017),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -77,6 +90,10 @@ macro_rules! inner {
             SmallBoard::Vrc1($b) => $body,
             SmallBoard::Bf9096($b) => $body,
             SmallBoard::CnRomProtect($b) => $body,
+            #[cfg(feature = "board-taito-x1")]
+            SmallBoard::TaitoX1005($b) => $body,
+            #[cfg(feature = "board-taito-x1")]
+            SmallBoard::TaitoX1017($b) => $body,
         }
     };
 }
@@ -92,6 +109,58 @@ impl Mapper for SmallBoard {
 
     fn banks_mut(&mut self) -> Option<&mut BankWindows> {
         inner!(self, b => b.banks_mut())
+    }
+
+    /// Forwarded for the two Taito X1 boards alone (MF-6c step 2), **and this is the hook their
+    /// mapper-internal WRAM reads through rather than [`Mapper::cpu_peek_override`].** Step 2
+    /// measured the difference and it is the whole performance story of that step:
+    ///
+    /// * with the decode in `cpu_peek_override`, `Board::cpu_read_override` — whose default
+    ///   forwards to it — gained a distinct body, and `Cartridge::default_cpu_read` went
+    ///   **283 356 728 → 290 813 484 on `mmc5`, +7 456 756 over 300 frames, +0.066 %**, with no
+    ///   other ROM of PR-1's thirteen moving by more than ±23 000. The post-LTO dump names the
+    ///   mechanism exactly: that function grew 377 → 391 instructions and LLVM hoisted one
+    ///   `leaq 240(%rdi), %rax` **above** the jump table of the inlined `Board::prg_ram_enabled`,
+    ///   so it is executed on every call — one instruction per CPU read of the one board that
+    ///   maps PRG-RAM into $8000-$DFFF and therefore reaches `default_cpu_read` on all of them.
+    ///   It is MF-6b steps 2-5's figure to the instruction, and MF-6a3 step 4's in reverse: a
+    ///   two-state oscillation of one function on one ROM.
+    /// * with the decode **here**, the same two boards and the same four numbers cost that
+    ///   function nothing — `#[inline(never)]` on this forward bounds the arm
+    ///   `Board::try_read_prg`'s `#[inline(always)]` folds into `default_cpu_read` to one
+    ///   `callq`, whatever this enum grows to later.
+    ///
+    /// Two other shapes were tried and rejected, both in `docs/progress/MF-6c.md` step 2:
+    /// `#[inline(never)]` on the `cpu_peek_override` forward (**+0.111 %** on the set, `mmc5`
+    /// +78 M as `Cartridge::try_cpu_read` lost the inlined chain), and `#[inline(always)]` on
+    /// `Cartridge::default_cpu_read` (which cured `mmc5` at −0.065 % and pushed
+    /// `Board::prg_ram_enabled`, then `Cartridge::prg_ram_enabled`, out of line instead —
+    /// +0.021 % to +0.024 % on `m0` and `m1`, two ROMs whose board the step does not touch).
+    ///
+    /// **Behaviour-neutral for the nine boards MF-6a put here**: none of them overrides it, so
+    /// each one's own default — `self.banks().and_then(BankWindows::read_prg)` — is the answer the
+    /// un-forwarded dispatch gave it.
+    #[cfg(feature = "board-taito-x1")]
+    #[inline(never)]
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        inner!(self, b => b.try_read_prg(memory, address))
+    }
+
+    /// Forwarded for the two Taito X1 boards alone (MF-6c step 2), which answer **`false`**: the
+    /// generic $6000-$7FFF path of `Cartridge::default_cpu_read` must not take that window,
+    /// because only part of it is decoded and only while a permission latch holds the chip's
+    /// magic value. With it false, the read falls through to [`SmallBoard::try_read_prg`] above,
+    /// which is where those boards answer, and `Mapper::prg_ram_writable`'s default makes the
+    /// generic *write* path stand aside for the same reason (the board's own
+    /// `intercept_cpu_write` has already consumed it).
+    ///
+    /// **Behaviour-neutral for the nine boards MF-6a put here**: every one of them takes
+    /// `Mapper`'s default `true`, which is what the un-forwarded dispatch answered for the whole
+    /// variant. Adding a body to `Board::prg_ram_enabled` was measured free in MF-6c step 1,
+    /// which gave that dispatch mapper 153's `is_153 && prg_ram_on` and left `mmc5` at −46 670.
+    #[cfg(feature = "board-taito-x1")]
+    fn prg_ram_enabled(&self) -> bool {
+        inner!(self, b => b.prg_ram_enabled())
     }
 
     fn save_registers(&self, writer: &mut StateWriter) {
@@ -113,6 +182,22 @@ impl Mapper for SmallBoard {
         value: u8,
     ) -> bool {
         inner!(self, b => b.intercept_cpu_write(memory, address, value))
+    }
+
+    /// Forwarded for mapper 207 alone (MF-6c step 2), the X1-005 wiring whose CHR A17 drives
+    /// CIRAM A10 — "the exact same way that TLSROM (118) differs from MMC3 (4)". Behind
+    /// `Cartridge::nametable_pages_vary`, so no other board asks it.
+    ///
+    /// **`#[inline(never)]`, for the reason `IrqBoard::nametable_page` carries the same attribute**
+    /// (MF-6b step 5): inlined, this body grows `Board::nametable_page`, which grows
+    /// `Cartridge::refresh_nametable_pages`, which pushed `Cartridge::cpu_write` past the
+    /// inliner's budget and cost two MMC1 ROMs about 1.2 M instructions over 300 frames on a
+    /// dispatch no MMC1 reaches. Out of line it is one `callq` per register write of a mapper-207
+    /// cartridge, four times, and nothing for anybody else.
+    #[cfg(feature = "board-taito-x1")]
+    #[inline(never)]
+    fn nametable_page(&self, table: i32) -> i32 {
+        inner!(self, b => b.nametable_page(table))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

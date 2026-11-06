@@ -340,7 +340,13 @@ impl Cartridge {
             // MF-6b step 5 adds Tengen's 800037 (158), the RAMBO-1 with CHR A17 wired to
             // CIRAM A10, which is the TxSROM's arrangement on that chip (nesdev, "INES Mapper
             // 158") -- §4.5's cheap level, a page override and not a `read_nametable`.
-            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 95 | 118 | 158),
+            // MF-6c step 2 adds mapper 207, the Taito X1-005 wiring whose page says it "modifies
+            // Taito's X1-005 (80) boards in the exact same way that TLSROM (118) differs from
+            // MMC3 (4)" -- CHR A17 to CIRAM A10, so bit 7 of each 2 KiB CHR register is a
+            // nametable select (nesdev, "INES Mapper 207"). §4.5's cheap level again: a page
+            // override and not a `read_nametable`. **Mapper 80 is deliberately absent**, and so
+            // are 82 and 552: those three put their mirroring through `memory.set_mirroring`.
+            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 95 | 118 | 158 | 207),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
@@ -511,6 +517,7 @@ impl Cartridge {
     }
 
     /// True when $6000-$7FFF is readable and writable. Mappers may disable it.
+    ///
     fn prg_ram_enabled(&self) -> bool {
         self.board.prg_ram_enabled()
     }
@@ -885,6 +892,12 @@ mod tests {
 
     /// A minimal NES 2.0 image for `mapper` / `submapper`: 64 KiB of PRG and 16 KiB of CHR,
     /// which every supported board can be created on.
+    ///
+    /// Byte 8 carries the submapper in its high nibble **and mapper bits 8-11 in its low one**,
+    /// which an iNES 1.0 header has nowhere to put. MF-6c step 2 added the second half: NES 2.0
+    /// mapper **552** is the first number in `SUPPORTED_MAPPERS` above 255, and without it the
+    /// four sweeps below built a mapper-40 image for that number and failed on an unsupported
+    /// mapper rather than on what they test.
     fn image(mapper: i32, submapper: u8) -> Vec<u8> {
         const PRG_16K_BANKS: u8 = 4;
         const CHR_8K_BANKS: u8 = 2;
@@ -896,7 +909,7 @@ mod tests {
         image[5] = CHR_8K_BANKS;
         image[6] = u8::try_from(mapper & 0x0F).unwrap_or(0) << 4;
         image[7] = u8::try_from(mapper & 0xF0).unwrap_or(0) | 0x08; // NES 2.0, for the submapper.
-        image[8] = submapper << 4;
+        image[8] = (submapper << 4) | u8::try_from((mapper >> 8) & 0x0F).unwrap_or(0);
         image
     }
 

@@ -30,6 +30,8 @@ use super::mappers::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
+#[cfg(feature = "board-taito-x1")]
+use super::mappers::{TaitoX1005, TaitoX1017};
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
 
@@ -89,6 +91,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-namcot108")]
     76,
     78,
+    #[cfg(feature = "board-taito-x1")]
+    80,
+    #[cfg(feature = "board-taito-x1")]
+    82,
     85,
     87,
     #[cfg(feature = "board-namcot108")]
@@ -131,11 +137,15 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     185,
     #[cfg(feature = "board-namcot108")]
     206,
+    #[cfg(feature = "board-taito-x1")]
+    207,
     210,
     225,
     228,
     #[cfg(feature = "board-small-boards")]
     232,
+    #[cfg(feature = "board-taito-x1")]
+    552,
 ];
 
 /// Whether `mapper` is implemented.
@@ -257,6 +267,26 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
                     _ => 4 * 0x800,
                 },
             ),
+            ..BoardMemorySizes::default()
+        },
+        // The two Taito boards whose RAM is inside the ASIC, exactly as the Namco 163's 128
+        // bytes are (§4.6 of `docs/review/MF-6-inventory.md`): the size is the chip's and the
+        // header cannot say otherwise, and because there is no header RAM in front of it
+        // REQ-CORE-095's single battery slice *is* the chip's RAM.
+        //
+        // * 80 and 207, nesdev ("Taito X1-005"): "CPU $7F00-$7F7F: 128 B internal RAM",
+        //   mirrored at $7F80-$7FFF, and no other RAM in $6000-$7FFF;
+        // * 82 and 552, nesdev ("Taito X1-017"): three windows of 2 KiB, 2 KiB and 1 KiB, each
+        //   behind its own permission register -- 5 KiB in the window order $6000 / $6800 /
+        //   $7000, which is Mesen's `.sav` layout (`TaitoX1017.h:29`, `0x1400`).
+        #[cfg(feature = "board-taito-x1")]
+        80 | 207 => BoardMemorySizes {
+            prg_ram: Some(TaitoX1005::RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-taito-x1")]
+        82 | 552 => BoardMemorySizes {
+            prg_ram: Some(TaitoX1017::RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // The three boards that carry no PRG-RAM at all, each on its page's own words:
@@ -439,6 +469,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // is here and not a parameter of `CnRom`.
         #[cfg(feature = "board-small-boards")]
         185 => Board::SmallBoard(SmallBoard::CnRomProtect(CnRomProtect::new(memory))),
+        // MF-6c step 2: the two Taito boards whose WRAM is inside the ASIC. Mapper 207 is the
+        // X1-005 with CHR A17 on CIRAM A10 and 552 the X1-017's corrected bank order, so each
+        // chip is one board with one parameter. They are `SmallBoard` variants because both
+        // pages say "IRQ: None", which is that enum's entry condition.
+        #[cfg(feature = "board-taito-x1")]
+        80 | 207 => Board::SmallBoard(SmallBoard::TaitoX1005(TaitoX1005::new(memory, mapper))),
+        #[cfg(feature = "board-taito-x1")]
+        82 | 552 => Board::SmallBoard(SmallBoard::TaitoX1017(TaitoX1017::new(memory, mapper))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),

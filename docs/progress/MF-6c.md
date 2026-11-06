@@ -343,3 +343,176 @@ comparison for every feature this lot adds at once, as MF-6a3 step 3 did for its
 [PROGRESS] MF-6c step 1/10 done: mapper 153 as two appended `bool`s on `BandaiFcg`, 902 / 0 / 8,
 all five level-2 cores **+0**, worst of PR-1's thirteen `duelito` +0.001 %, and the only pinned
 symbol that moved is `write_internal` +4.
+
+## Step 2 — the Taito X1-005 and X1-017, and **the first board this project has parked**
+
+### What was built: four numbers, two boards, two `SmallBoard` variants
+
+| what | where | the page's words |
+| --- | --- | --- |
+| the $7EFx register file, **and its $7E7x image** | `TaitoX1005::register_of` | "All registers exist at $7EFx and mirrored at $7E7x because the CPU A7 line is ignored" |
+| the two 2 KiB CHR registers taking a **2 KiB** bank number | `TaitoX1005::update_banks`, `TaitoX1017::update_banks` | "Bit 0 of written bank number is ignored when switching 2K banks ($7EF0, $7EF1)" |
+| $7EF6's arrangement bit, and its **absence** at $7EF7 on the X1-005 | `TaitoX1005::write_x1_register` | "0: vertical (A11); 1: horizontal (A10)"; "$7EF6 … is not mirrored at $7EF7" |
+| the 128 bytes, their mirror and their magic value | `TaitoX1005::try_read_prg`, `is_internal_ram`, `RAM_MAGIC` | "CPU $7F00-$7F7F: 128 B internal RAM"; "write $A3 to enable" |
+| mapper 207's CIRAM A10 | `TaitoX1005::refresh_nametable_pages` | "modifies Taito's X1-005 (80) boards in the exact same way that TLSROM (118) differs from MMC3 (4)"; "$7EF6: was old mirroring control register, now ignored" |
+| the X1-017's CHR A12 inversion | `TaitoX1017::update_banks` | "CHR A12 inversion (determines whether 2KB banks occupy $0000-$0FFF or $1000-$1FFF)" |
+| its three RAM windows and three magic values | `TaitoX1017::ram_window`, `RAM_MAGIC` | $CA / $69 / $84 over 2 KiB + 2 KiB + 1 KiB |
+| **both bank orders** | `TaitoX1017::prg_bank`, `reversed_bank` | "NES 2.0 Mapper 552 represents the actual way the mask ROM is connected and is thus the correct bank order, while iNES Mapper 082 represents the bank order as it was understood before January 2020, when the mapper was reverse-engineered" |
+| the internal WRAM as §4.6's Namco 163 layout | `registry::board_memory_sizes`, arms `80 \| 207` and `82 \| 552` | the chip's size, with no header RAM in front, so REQ-CORE-095's single slice *is* the chip's RAM |
+
+Both boards are **`SmallBoard` variants**, by that enum's own entry condition: both pages say
+"IRQ: None", so both share the empty `Board::irq_asserted` arm and `Board` keeps its
+thirty-five discriminants.
+
+**Four divergences from Mesen 2, all four settled for the page by AMD-061 §1.** Three are the
+X1-005's, listed in that struct's note: the 2 KiB LSB (Mesen maps `value` and `value + 1`,
+`TaitoX1005.h:54-55`), $7EF7 (Mesen answers it) and the $7E7x image (Mesen decodes $7EF0-$7EFF
+only). The fourth is the X1-017's register range: the X1-005's page gives the $7E7x mirror and
+**the X1-017's page does not**, so this build gives it to one chip and not the other rather than
+inferring from the family — `TaitoX1017::register_of` says so in as many words.
+
+**One reading carried past the page, in the direction its own infobox points.** nesdev gives mapper
+552's PRG register four documented lines (bit 5 → A13 down to bit 2 → A16) and the board a 512 KiB
+PRG capacity, which four lines cannot reach. `TaitoX1017::reversed_bank` continues the reversal to
+A17 and A18, which is what Mesen does and by the same pattern (`TaitoX1017.h:98-105`); the four
+documented lines are identical in the two implementations.
+
+**One power-on value neither page gives**: the three PRG bank registers. They power on at zero,
+which names bank 0, and the test says so in a comment rather than asserting a linear layout.
+
+**One sweep helper had to grow**, and it is the only non-board change the step makes to shared
+code: `cartridges::tests::image` put only the low byte of the mapper number in the header, so
+**552** — the first number in `SUPPORTED_MAPPERS` above 255 — came out as mapper 40 and the four
+sweeps failed on an unsupported number instead of on what they test. Byte 8's low nibble is mapper
+bits 8-11; it now carries them.
+
+### The measurement: **seven shapes, and the figure never moved**
+
+The accurate decode costs `mmc5` **+7 456 756 instructions over 300 frames, +0.066 %** — three
+and a bit times the owner's +0.02 % — and **nothing else moves at all**: no other ROM of PR-1's
+thirteen is outside ±31 000 in any shape, and **every one of the five level-2 `core` figures is
++0 in every shape**. The whole of it is one symbol, `Cartridge::default_cpu_read`,
+**283 356 728 → 290 813 484**.
+
+| # | shape | `mmc5` | the rest |
+| ---: | --- | ---: | --- |
+| a | the decode in `SmallBoard::cpu_peek_override` | **+0.066 %** | all within ±23 000 |
+| b | a, with `#[inline(never)]` on that forward | +0.690 % | set **+0.111 %**, `try_cpu_read` +78.7 M |
+| c | a, with `#[inline(always)]` on `Cartridge::default_cpu_read` | **−0.065 %** | `m0` +0.022 %, `m1` +0.024 % — `Board::prg_ram_enabled` out of line |
+| d | c, with `#[inline(always)]` on `Board::prg_ram_enabled` too | **−0.065 %** | `m0` +0.021 %, `m1` +0.024 % — `Cartridge::prg_ram_enabled` out of line instead |
+| e | a, with `#[inline(never)]` on `SmallBoard::try_read_prg` | +0.066 % | all within ±45 000 |
+| f | the decode moved to `try_read_prg` + `prg_ram_enabled` | +0.066 % | all within ±31 000 — **the shipped shape** |
+| g | f, with all three links of the chain pinned | +0.144 % | `m0`/`m1`/`m4` +0.014 % to +0.016 % |
+| h | f, with `#[inline(never)]` on `Board::prg_ram_offset` | +0.066 % | all within ±41 000 |
+
+**The post-LTO dump names the mechanism, and it is one instruction.** `fn.py` on
+`Cartridge::default_cpu_read`: **377** instructions at `8496c503`, **382** after step 1, **391**
+after step 2. Past about 390 LLVM hoists
+
+    leaq 240(%rdi), %rax
+
+— `&self.board`, needed only by the *cold* arms of the inlined `Board::prg_ram_enabled` jump
+table, among them mapper 116's boxed `IrqBoard::Somari(Box<Somari>)` — **above** the dispatch,
+where it runs on every call, and turns the cold `movq 240(%rdi), %rax` into `movq (%rax), %rax`.
+The MMC5 is the one board that maps PRG-**RAM** into $8000-$DFFF, so `read_rom_window` cannot
+answer and every CPU read of an MMC5 game reaches this function: one `leaq` × 7.46 M reads.
+
+**It is the same number, to the instruction, that this project has now measured three times in
+both directions.** MF-6b steps 2 to 5 were charged `default_cpu_read` **+7 456 756** on `mmc5` for
+`IrqBoard`'s sixth body; MF-6a3 step 4 recorded **−7 456 756** on the same ROM for that enum's
+eighth and ninth ("which is *to the instruction* the figure MF-6b steps 2 to 5 charged it for the
+sixth"); and this step is charged it again. So **the figure is a two-state oscillation of one
+function on one ROM, and `8496c503` happens to sit on the favourable side of it** — not work the
+Taito boards do. Seven shapes were measured against it and none of the four that changed anything
+changed it in the right direction without taking the cost somewhere else.
+
+### What the lot did with that: **`board-taito-x1` is parked**
+
+The owner's rule 2 is unconditional — "Above it, it stays out of `default` and joins
+`parked-boards`" — so that is what happened, and `parked-boards` has its first entry since MF-6b
+wired the switch. The boards, their four numbers, their mechanisms and their tests are all
+**built**, which is rule 1: nothing is dropped, and one command reaches them.
+
+    cargo build -p zax-nes --features parked-boards      # or --features board-taito-x1
+
+**Two things are worth putting in front of whoever revisits this**, because the decision is the
+owner's and not this lot's:
+
+1. **At level 2 the boards cost nothing.** With the feature **on**, all five `core` figures are
+   **+0** and the only `total` above the baseline is `smb3` at **+0.003 %** — on the instrument
+   that loads a 3D pack, which is the one R0's own campaign runs. The +0.066 % exists on one ROM
+   of the no-pack instrument alone.
+2. **The figure is a coin-flip this project has already seen land both ways.** A future lot that
+   adds any body to the `Board::prg_ram_enabled` chain may hand it straight back, exactly as
+   MF-6a3 step 4 did.
+
+### The default build is `8496c503` plus step 1, on all three instruments
+
+With the feature parked, `mf6c-2-x1parked` — the **shipped** configuration — is:
+
+| ROM | `8496c503` | **step 2 default** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 311 891 | **3 308 300 715** | −11 176 | −0.000 % |
+| `oamstr` | 3 318 460 965 | **3 318 451 868** | −9 097 | −0.000 % |
+| `m1` | 4 885 949 431 | **4 885 938 375** | −11 056 | −0.000 % |
+| `m4` | 5 472 514 995 | **5 472 500 157** | −14 838 | −0.000 % |
+| `m0` | 5 520 458 691 | **5 520 451 673** | −7 018 | −0.000 % |
+| `metroid` | 5 115 944 288 | 5 115 957 346 | +13 058 | +0.000 % |
+| `smb1` | 5 996 381 185 | **5 996 352 423** | −28 762 | −0.000 % |
+| `mm2` | 6 017 851 607 | **6 017 848 108** | −3 499 | −0.000 % |
+| `z2` | 6 291 458 642 | 6 291 472 168 | +13 526 | +0.000 % |
+| `readbuf` | 6 834 538 187 | 6 834 607 122 | **+68 935** | **+0.001 %** |
+| `duelito` | 7 380 437 910 | 7 380 463 342 | +25 432 | +0.000 % |
+| `smb3` | 7 949 470 334 | **7 949 437 675** | −32 659 | −0.000 % |
+| `mmc5` | 11 279 383 781 | **11 279 365 244** | −18 537 | −0.000 % |
+| **total** | **79 371 161 907** | **79 371 146 216** | **−15 691** | **−0.000 %** |
+
+Worst ROM **+0.001 %**, nine of thirteen below the baseline. Level 2: **all five `core` figures
++0**, and the three `total` rises (`smb3` +0.024 %, `zelda2` +0.008 %, `smb1` +0.005 %) are rule
+2's layout-noise case checked and not assumed — `sym6c.sh` at a 400 000 threshold names **three**
+symbols over all five games and they are `getgeneric` (+5 993 152 on `smb3`, +2 217 912 on `smb1`,
++1 152 136 on `zelda2`) and `luaH_getshortstr` (−1 994 874), which is Lua's `ltable.c` and nothing
+else.
+
+The post-LTO dump is **step 1's dump**, which is the owner's "with a feature off, the build is the
+same as without it" shown rather than asserted: `pins63.py` gives `Cpu::step` **3 626**,
+`ppu_peek` **272**, `write_internal` **3 819** (step 1's figure, mapper 153's +4), `run_dots`
+**1 907**, `catch_up_ppu` **188** and the three claimants **0 / 0 / 0**; `shape.py`'s five others
+are identical to the baseline; `read_pattern_planes` **107** and `read_nametable_inner` **114**
+unchanged; and `default_cpu_read` is **382**, step 1's count, not step 2's 391.
+
+### The tests, 902 → **907**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_taito_x1_005_banks_prg_and_chr_with_the_2_kib_lsb_ignored` | the three PRG windows and the wired last bank, the odd PRG mirrors, **$05 and $04 selecting the same 2 KiB pair**, the four 1 KiB registers, a write through the **$7E7x** image, $7EF6's two values, and $7EF7 doing nothing |
+| `req_core_100_taito_x1_005_internal_ram_answers_only_after_a3_at_7ef8` | the RAM off the bus at power-on, $A3 turning it on, the $7F80 mirror in both directions, **$6000, $7000 and $7EFA reading open bus**, $7EF9 as the register's mirror, any other value disabling, and REQ-CORE-095's slice being **128 bytes** with the written byte in it |
+| `req_core_100_mapper_207_puts_chr_a17_on_ciram_a10` | each 2 KiB register's bit 7 driving its own pair of tables, all four combinations, $7EF6 ignored, **and mapper 80 answering `FOLLOW_MIRRORING` for the same write** |
+| `req_core_100_mapper_82_and_552_are_the_same_board_with_the_bank_order_reversed` | **both orders in one test**: $14 → bank 5 on 082 and bank 10 on 552, $04 → bank 1 and bank 8, the three windows being the same three, and each number reporting itself |
+| `req_core_100_taito_x1_017_inverts_chr_a12_and_gates_three_ram_windows` | the eight CHR windows in both inversion modes with the arrangement bit independent, the three magic values each opening **only its own** window, a wrong value being as good as none, $7400 undecoded, and the 5 KiB laid out $6000 / $6800 / $7000 |
+
+**Three configurations green**, all with `cargo fmt --check` clean and clippy `-D warnings` clean
+on `zax-nes` (default, `--features parked-boards`, `--no-default-features`,
+`--no-default-features --features board-taito-x1`) and on `zax-harness`, **no new `allow` of any
+kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default (the feature parked) | **839** |
+| `--features parked-boards` | **844** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-taito-x1` | 808 |
+
+839 + 5 = 844, the five tests being the step's own. With `zax-harness`, the default figure is
+**907 passed / 0 failed / 8 ignored** in the `parked-boards` configuration and 902 in the default
+one. The four sweeps held once `image` carried mapper bits 8-11 — and
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`,
+`mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` and
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` are the three that found the omission,
+which is the fourth lot running in which that family of sweeps has caught a real mistake before
+any measurement did.
+
+[PROGRESS] MF-6c step 2/10 done: the Taito X1-005 and X1-017 on four numbers, 907 / 0 / 8, all
+five level-2 cores +0 with the feature on **and** off — and `board-taito-x1` **parked**, on one
+hoisted `leaq` worth +0.066 % on `mmc5` that seven shapes could not move and that this project has
+measured in both directions.

@@ -74,7 +74,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 116 (the Gouder SOMARI-P and its Huang ASIC), the one number REQ-CORE-101 leaves
     //   optional, behind `board-116` (MF-6a3 step 4, answering Q-130 question 1);
     // * 153 (the Bandai FCG board with an LZ93D50 and 8 KiB of battery-backed WRAM), behind
-    //   `board-153` (MF-6c step 1).
+    //   `board-153` (MF-6c step 1);
+    // * 80 and 207 (the Taito X1-005 and its single-screen wiring) and 82 and 552 (the Taito
+    //   X1-017 with the two bank orders), behind `board-taito-x1` (MF-6c step 2).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -89,7 +91,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let small = cfg!(feature = "board-small-boards");
     let namcot = cfg!(feature = "board-namcot108");
     let multicart = cfg!(feature = "board-mmc3-multicart");
-    let additions: [(i32, bool); 39] = [
+    let taito_x1 = cfg!(feature = "board-taito-x1");
+    let additions: [(i32, bool); 43] = [
         (19, true),
         (24, true),
         (26, true),
@@ -105,6 +108,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         (75, small),
         (76, namcot),
         (78, true),
+        (80, taito_x1),
+        (82, taito_x1),
         (85, true),
         (88, namcot),
         (89, small),
@@ -127,8 +132,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (184, small),
         (185, small),
         (206, namcot),
+        (207, taito_x1),
         (210, true),
         (232, small),
+        (552, taito_x1),
     ];
     let expected: Vec<i32> = additions
         .iter()
@@ -1181,6 +1188,195 @@ fn mf_6c_an_ordinary_mapper_16_image_is_unaffected_by_153() {
     // And $800D is the EEPROM port, so it enables nothing.
     core.write_memory(0x800D, 0x20);
     assert_ne!(0x5A, core.read_memory(0x6123));
+}
+
+/// The Taito X1-005's register file: the $7E7x image, the 2 KiB registers whose LSB the page
+/// says is ignored, $7EF6's mirroring and its **absence** at $7EF7, and the wired last bank
+/// (MF-6c step 2).
+#[cfg(feature = "board-taito-x1")]
+#[test]
+fn req_core_100_taito_x1_005_banks_prg_and_chr_with_the_2_kib_lsb_ignored() {
+    let mut core = MapperRom::new(80).prg(32).chr(32).load();
+    // "8 KiB PRG-ROM bank, fixed to the last bank" at $E000, and three switchable windows.
+    core.write_memory(0x7EFA, 0x03);
+    core.write_memory(0x7EFC, 0x05);
+    core.write_memory(0x7EFE, 0x06);
+    assert_eq!([3, 5, 6, 31], core.prg_windows());
+    // The odd mirrors of the PRG registers answer too.
+    core.write_memory(0x7EFB, 0x04);
+    assert_eq!([4, 5, 6, 31], core.prg_windows());
+    // "Bit 0 of written bank number is ignored when switching 2K banks": $05 and $04 both select
+    // 2 KiB bank 2, i.e. 1 KiB banks 4 and 5. (Mesen would read $05 as 1 KiB banks 5 and 6.)
+    core.write_memory(0x7EF0, 0x05);
+    core.write_memory(0x7EF1, 0x06);
+    for register in 2..6u16 {
+        core.write_memory(0x7EF2 + register - 2, 0x08 + register as u8 - 2);
+    }
+    assert_eq!([4, 5, 6, 7, 8, 9, 10, 11], core.chr_windows());
+    core.write_memory(0x7EF0, 0x04);
+    assert_eq!([4, 5], [core.chr_bank(0x0000), core.chr_bank(0x0400)]);
+    // "All registers exist at $7EFx and mirrored at $7E7x because the CPU A7 line is ignored."
+    core.write_memory(0x7E72, 0x0A);
+    assert_eq!(10, core.chr_bank(0x1000));
+    // $7EF6 bit 0: "0: vertical (A11); 1: horizontal (A10)" — the arrangement, so clear is this
+    // build's `Horizontal` and set is its `Vertical`.
+    core.write_memory(0x7EF6, 0x01);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    core.write_memory(0x7EF6, 0x00);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    // "$7EF6 … is not mirrored at $7EF7." (Mesen answers both.)
+    core.write_memory(0x7EF7, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// The X1-005's 128 bytes: "$7F00-$7F7F: 128 B internal RAM" mirrored at $7F80-$7FFF, answering
+/// only while $7EF8 holds $A3, with the rest of $6000-$7FFF open bus and the whole of it on
+/// REQ-CORE-095's battery slice (MF-6c step 2).
+#[cfg(feature = "board-taito-x1")]
+#[test]
+fn req_core_100_taito_x1_005_internal_ram_answers_only_after_a3_at_7ef8() {
+    let mut core = MapperRom::new(80).prg(32).chr(32).battery().load();
+    // Power-on: the permission latch is zero, so the RAM is off the bus and refuses writes.
+    core.write_memory(0x7F10, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x7F10));
+    // "Write $A3 to enable 128 B internal RAM; other values disable it."
+    core.write_memory(0x7EF8, 0xA3);
+    core.write_memory(0x7F10, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x7F10));
+    // Mirrored once: A7 is ignored inside the RAM too.
+    assert_eq!(0x5A, core.read_memory(0x7F90));
+    core.write_memory(0x7F90, 0x3C);
+    assert_eq!(0x3C, core.read_memory(0x7F10));
+    // Nothing else in the window is decoded: $6000-$7EFF is open bus, the registers included.
+    assert_ne!(0x3C, core.read_memory(0x6000));
+    assert_ne!(0x3C, core.read_memory(0x7000));
+    assert_ne!(0x3C, core.read_memory(0x7EFA));
+    // $7EF9 is the permission register's own mirror, and any other value disables.
+    core.write_memory(0x7EF9, 0x00);
+    assert_ne!(0x3C, core.read_memory(0x7F10));
+    core.write_memory(0x7EF9, 0xA3);
+    assert_eq!(0x3C, core.read_memory(0x7F10));
+    // REQ-CORE-095: the chip's RAM *is* the battery slice, and it is 128 bytes and not the
+    // header's 8 KiB.
+    let battery = core.cartridge().unwrap().battery_ram();
+    assert_eq!(128, battery.len());
+    assert_eq!(0x3C, battery[0x10]);
+}
+
+/// Mapper 207 "modifies Taito's X1-005 (80) boards in the exact same way that TLSROM (118)
+/// differs from MMC3 (4)": CHR A17 — bit 7 of each 2 KiB CHR register — drives CIRAM A10 for the
+/// pair of tables that register covers, and $7EF6 "was old mirroring control register, now
+/// ignored" (MF-6c step 2).
+#[cfg(feature = "board-taito-x1")]
+#[test]
+fn req_core_100_mapper_207_puts_chr_a17_on_ciram_a10() {
+    let mut core = MapperRom::new(207).prg(32).chr(32).load();
+    // Power-on: both registers are zero, so both pairs show physical page 0.
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+    core.write_memory(0x7EF0, 0x80);
+    assert_eq!([1, 1, 0, 0], nametable_pages(&core));
+    core.write_memory(0x7EF1, 0x80);
+    assert_eq!([1, 1, 1, 1], nametable_pages(&core));
+    core.write_memory(0x7EF0, 0x00);
+    assert_eq!([0, 0, 1, 1], nametable_pages(&core));
+    // $7EF6 is ignored on this wiring: the pages stay where the CHR registers put them.
+    core.write_memory(0x7EF6, 0x01);
+    assert_eq!([0, 0, 1, 1], nametable_pages(&core));
+    // And mapper 80 keeps $7EF6 and answers `FOLLOW_MIRRORING`, which is the other half of the
+    // same claim.
+    let mut eighty = MapperRom::new(80).prg(32).chr(32).load();
+    eighty.write_memory(0x7EF0, 0x80);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&eighty));
+}
+
+/// iNES 082 and NES 2.0 552 are the same silicon with the PRG register read in opposite bit
+/// order — "NES 2.0 Mapper 552 represents the actual way the mask ROM is connected and is thus
+/// the correct bank order, while iNES Mapper 082 represents the bank order as it was understood
+/// before January 2020, when the mapper was reverse-engineered." **Both orders in one test**, so
+/// the pair cannot be got backwards (MF-6c step 2).
+#[cfg(feature = "board-taito-x1")]
+#[test]
+fn req_core_100_mapper_82_and_552_are_the_same_board_with_the_bank_order_reversed() {
+    // $14 is `0001 0100`: bit 4 and bit 2 set.
+    //   082 reads bit 2 as PRG A13 and bit 5 as A16, so the bank is `$14 >> 2` = 5;
+    //   552 reads bit 5 as PRG A13 and bit 2 as A16, so bit 4 is A14 (2) and bit 2 is A16 (8),
+    //   which is bank 10.
+    let mut eighty_two = MapperRom::new(82).prg(32).chr(32).load();
+    eighty_two.write_memory(0x7EFA, 0x14);
+    // The other two registers are still at their power-on zero, which is bank 0: neither page
+    // gives a power-on bank, and a register that reads zero names bank zero.
+    assert_eq!([5, 0, 0, 31], eighty_two.prg_windows());
+    let mut five_five_two = MapperRom::new(552).prg(32).chr(32).load();
+    five_five_two.write_memory(0x7EFA, 0x14);
+    assert_eq!([10, 0, 0, 31], five_five_two.prg_windows());
+    // The lowest line each number reads: $04 is A13 on 082 (bank 1) and A16 on 552 (bank 8).
+    eighty_two.write_memory(0x7EFA, 0x04);
+    five_five_two.write_memory(0x7EFA, 0x04);
+    assert_eq!(1, eighty_two.prg_windows()[0]);
+    assert_eq!(8, five_five_two.prg_windows()[0]);
+    // And the three windows are the same three on both: $7EFB is $A000, $7EFC is $C000, and
+    // $E000 is wired to the last bank.
+    for core in [&mut eighty_two, &mut five_five_two] {
+        core.write_memory(0x7EFB, 0x0C);
+        core.write_memory(0x7EFC, 0x10);
+    }
+    assert_eq!([1, 3, 4, 31], eighty_two.prg_windows());
+    assert_eq!([8, 12, 2, 31], five_five_two.prg_windows());
+    // Both report their own number, so a dump of either is never silently taken for the other.
+    assert_eq!(82, eighty_two.cartridge().unwrap().mapper_number());
+    assert_eq!(552, five_five_two.cartridge().unwrap().mapper_number());
+}
+
+/// The X1-017's CHR A12 inversion and its three independently gated RAM windows (MF-6c step 2).
+#[cfg(feature = "board-taito-x1")]
+#[test]
+fn req_core_100_taito_x1_017_inverts_chr_a12_and_gates_three_ram_windows() {
+    let mut core = MapperRom::new(82).prg(32).chr(32).battery().load();
+    core.write_memory(0x7EF0, 0x04); // 2 KiB bank 2: 1 KiB banks 4 and 5.
+    core.write_memory(0x7EF1, 0x06); // 2 KiB bank 3: 1 KiB banks 6 and 7.
+    for register in 0..4u16 {
+        core.write_memory(0x7EF2 + register, 0x08 + register as u8);
+    }
+    assert_eq!([4, 5, 6, 7, 8, 9, 10, 11], core.chr_windows());
+    // $7EF6 bit 1 is "CHR A12 inversion (determines whether 2KB banks occupy $0000-$0FFF or
+    // $1000-$1FFF)": the two groups swap halves, and bit 0 still sets the arrangement.
+    core.write_memory(0x7EF6, 0x02);
+    assert_eq!([8, 9, 10, 11, 4, 5, 6, 7], core.chr_windows());
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.write_memory(0x7EF6, 0x03);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    assert_eq!([8, 9, 10, 11, 4, 5, 6, 7], core.chr_windows());
+    core.write_memory(0x7EF6, 0x00);
+    assert_eq!([4, 5, 6, 7, 8, 9, 10, 11], core.chr_windows());
+
+    // The three windows, each behind its own magic value, and each one only its own window.
+    for address in [0x6100u16, 0x6900, 0x7100] {
+        core.write_memory(address, 0x5A);
+        assert_ne!(0x5A, core.read_memory(address), "{address:04X} before");
+    }
+    core.write_memory(0x7EF7, 0xCA); // $6000-$67FF.
+    core.write_memory(0x6100, 0x11);
+    assert_eq!(0x11, core.read_memory(0x6100));
+    assert_ne!(0x11, core.read_memory(0x6900));
+    core.write_memory(0x7EF8, 0x69); // $6800-$6FFF.
+    core.write_memory(0x6900, 0x22);
+    assert_eq!(0x22, core.read_memory(0x6900));
+    core.write_memory(0x7EF9, 0x84); // $7000-$73FF.
+    core.write_memory(0x7100, 0x33);
+    assert_eq!(0x33, core.read_memory(0x7100));
+    // The wrong magic value is as good as none, and each latch gates only its own window.
+    core.write_memory(0x7EF7, 0x69);
+    assert_ne!(0x11, core.read_memory(0x6100));
+    assert_eq!(0x22, core.read_memory(0x6900));
+    // $7400-$7FFF is not decoded at all on this chip — no window covers it.
+    core.write_memory(0x7500, 0x44);
+    assert_ne!(0x44, core.read_memory(0x7500));
+    // REQ-CORE-095: 5 KiB, in the window order $6000 / $6800 / $7000.
+    let battery = core.cartridge().unwrap().battery_ram();
+    assert_eq!(5 * 1024, battery.len());
+    assert_eq!(0x11, battery[0x100]);
+    assert_eq!(0x22, battery[0x900]);
+    assert_eq!(0x33, battery[0x1100]);
 }
 
 #[test]

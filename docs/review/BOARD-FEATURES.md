@@ -10,9 +10,9 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
-**Nothing is parked.** `parked-boards` is empty, off by default, and exists so that the switch is
-already wired for a later lot that does park a board — and so that `--features parked-boards` is a
-configuration every lot checks either way.
+**One board is parked, and MF-6c step 2 is the lot that parked it.** `parked-boards` was empty
+through MF-6b and MF-6a3, wired so that a later lot which did park a board would find the switch
+ready; it now holds **`board-taito-x1`**. Everything else is in `default`.
 
 ## The table
 
@@ -32,9 +32,35 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-119` | 119 | Nintendo TQROM, a `const` parameter of `Mmc3Board` with a CHR-RAM chip beside its CHR-ROM | 2 | **with the multicart below**: worst `m0` **+58 307 (+0.0011 %)**, set total **−57 265** (MF-6a3 step 2, vs `07325f6e`) | all five `core` within **±6 699**, `smb1/core` **+0**; two `total` rises inside the same binary's own ±4.3 M spread on that column | **on** | as above |
 | `board-mmc3-multicart` | 47, 37 | Nintendo's two MMC3 multicarts, one `const` monomorphisation with an outer register at $6000-$7FFF | 2 | as `board-119`, measured together | as `board-119` | **on** | as above |
 | `board-116` | 116 | Gouder SOMARI-P / Huang ASIC, **holding** an `Mmc3`, an `Mmc1` and a `Vrc2Vrc4` | **6** | worst `m1` **+96 537 (+0.0020 %)**, set total **−7 291 714 (−0.009 %)**, `mmc5` **−0.066 %** (MF-6a3 step 4, vs `07325f6e`) | all five `core` **+253 to +16 832** (`smb3/core` is 253 instructions in 15.3 G); worst `total` `smb3` **+0.011 %** | **on** | as above |
-| `parked-boards` | — | the umbrella: every board left out of `default`. **Empty** | — | — | — | **off** | `cargo build -p zax-nes --features parked-boards` |
+| `board-153` | 153 | the Bandai FCG board with an LZ93D50 and 8 KiB of battery-backed WRAM, **two appended `bool`s on `BandaiFcg`** | 1 (*Famicom Jump II*) | worst `duelito` **+57 669 (+0.001 %)**, set total +37 631 (MF-6c step 1, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` +0.005 %, entirely Lua's `ltable.c` | **on** | as above |
+| `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | `mmc5` **+7 456 756 (+0.066 %)**, every other ROM within **±31 000** (MF-6c step 2, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` **+0.003 %** | **off — parked** | `cargo build -p zax-nes --features board-taito-x1` |
+| `parked-boards` | 80, 207, 82, 552 | the umbrella: every board left out of `default`. Today that is `board-taito-x1` | 13 | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
 
-**Worst figure anywhere in the table: +0.0020 % on one ROM**, against a tolerance of +0.02 %.
+**Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
++0.02 %.
+
+## The one parked board, and why
+
+`board-taito-x1` is **+0.066 % on one ROM of one instrument and zero everywhere else**, and the
+mechanism is a single instruction that has nothing to do with the Taito boards:
+`Cartridge::default_cpu_read` grows past about 390 instructions, and LLVM then hoists
+`leaq 240(%rdi), %rax` — `&self.board`, wanted only by the cold arms of the inlined
+`Board::prg_ram_enabled` jump table, mapper 116's boxed payload among them — **above** that
+dispatch, where it runs on every call. The MMC5 is the one board that maps PRG-RAM into
+$8000-$DFFF, so every CPU read of an MMC5 game reaches that function.
+
+**The figure is a two-state oscillation this project has measured three times in both
+directions**: MF-6b steps 2-5 were charged `default_cpu_read` **+7 456 756** on `mmc5` for
+`IrqBoard`'s sixth body, MF-6a3 step 4 was given **−7 456 756** back for its eighth and ninth, and
+MF-6c step 2 was charged it again. `8496c503` sits on the favourable side of it by luck. MF-6c
+step 2 measured **seven** shapes against it — including taking the decode from
+`cpu_peek_override` to `try_read_prg`, and pinning one, two and three links of the chain — and
+none held every ROM; its own write-up has the table.
+
+So the park is the owner's rule applied, not a verdict on the boards: with the feature **on**, all
+five level-2 `core` figures are **+0** and the worst `total` is `smb3` at +0.003 %, on the
+instrument that loads a 3D pack. A later lot that adds any body to that chain may hand the figure
+straight back.
 
 ## How to turn a board off
 

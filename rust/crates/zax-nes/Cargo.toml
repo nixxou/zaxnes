@@ -80,11 +80,27 @@ board-mmc3-multicart = []
 # on `BandaiFcg`, which is mapper 16's board: no `Board` variant, no dispatch arm anywhere.
 board-153 = []
 
-# The umbrella: every board left out of `default` because it is above the tolerance. Empty
-# while no board is parked, which is the state MF-6b ended in and MF-6a3 keeps -- the feature
-# exists so that a later lot which does park one has the switch already wired, and so that
-# `cargo test --features parked-boards` is a configuration this lot checks either way.
-parked-boards = []
+# Mappers 80, 207, 82 and NES 2.0 552 — the Taito X1-005 and X1-017, the two boards whose WRAM
+# is inside the ASIC (MF-6c step 2). Thirteen titles. Two more `SmallBoard` variants and no
+# `Board` variant, plus three forwards that family did not have: `try_read_prg` and
+# `prg_ram_enabled`, because these boards decode $6000-$7FFF themselves, and `nametable_page` for
+# mapper 207's CIRAM A10. Implies `board-small-boards`, the enum they live in.
+#
+# **The first board of this project to be parked**, and it is one instruction that parks it:
+# `Cartridge::default_cpu_read` crosses the size at which LLVM hoists `leaq 240(%rdi), %rax`
+# above its inlined `Board::prg_ram_enabled` dispatch, which is +7 456 756 over 300 frames of
+# `mmc5exram` -- **+0.066 %**, against the owner's +0.02 % -- on a board this feature does not
+# touch. MF-6c step 2 measured **seven** shapes against it and none held; the figure is the same
+# one MF-6b steps 2-5 were charged and MF-6a3 step 4 was given back, to the instruction, so it is
+# a two-state oscillation of one function on one ROM rather than work the boards do. See
+# `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-6c.md` step 2.
+board-taito-x1 = ["board-small-boards"]
+
+# The umbrella: every board left out of `default` because it is above the tolerance. MF-6b and
+# MF-6a3 both ended with it empty, and the feature existed so that a later lot which did park a
+# board would have the switch already wired. **MF-6c step 2 is that lot**: `board-taito-x1` is
+# the first entry it has ever had.
+parked-boards = ["board-taito-x1"]
 
 [dev-dependencies]
 sha2 = "0.10"
