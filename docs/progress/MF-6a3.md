@@ -887,3 +887,108 @@ go down that path most.
 [`Somari`]: ../../rust/crates/zax-nes/src/cartridges/mappers/somari.rs
 
 [PROGRESS] MF-6a3 step 4/6 done: mapper 116 on three held chips behind `board-116`, Q-130 question 1 answered and Q-132 written, 899 / 0 / 8, and the shipped tree inside the tolerance outright on both runs with `mmc5` −0.066 %.
+
+## Step 5 — the suites, the `--ignored` pair, and the campaign row by row
+
+### The suites, at the shipped tree
+
+| check | result | against `07325f6e` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| clippy `--release -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, exit 0 | **no new `allow` of any kind** |
+| the same, `--features zax-nes/parked-boards` | clean | — |
+| the same, `-p zax-nes --no-default-features` | clean | — |
+| the same, each of the nine board features alone | clean, nine times | — |
+| `cargo test --release -p zax-nes -p zax-harness` | **899 passed, 0 failed, 8 ignored** | 887 + 12 |
+| the same, `--features parked-boards` | **899 / 0 / 8** | identical |
+| `cargo test --release -p zax-nes --no-default-features` | **782 / 0 / 7** | — |
+| `cargo test --release -p zax-harness --test test_roms_tests` | **14 passed** | identical |
+| `--ignored`, both ROM folders, `--no-fail-fast` | **7 passed, 1 failed** | identical to MF-6b's and MF-6a2's |
+
+**Eleven configurations, all green and all clippy-clean.** The twelve new tests are six for 119,
+47 and 37 (step 1) and six for 116 (step 4); 782 + 48 + 6 = 836 on `zax-nes` alone, plus
+`zax-harness`'s 63.
+
+The `--ignored` environment is `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, with `--no-fail-fast`, without which
+`cargo test` stops after the first failing binary and most of the eight never run.
+
+### The two the brief names, both green, and the caveat §3 requires
+
+    test zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack ... ok
+    goldens up to frame 1200: 1 of 291 rows matched, 0 pending: [], 290 ROMs missing
+    test golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200 ... ok
+
+Neither needed a change, and the second is reported with the caveat §3 of
+`rust/docs/PERFORMANCE-HISTORY.md` now requires: **`rust/test-roms/` is empty in this worktree,
+so golden-core counts 290 of its 291 rows as *missing* rather than failing and its green is green
+over one ROM.** MF-6a2 step 4 measured what the real corpus gives (239 of 291, with 51 mismatches
+that are the DMC-DMA area REQ-CORE-113 marks P3 and that two existing tests already pin as
+accepted divergences) and showed the same set at its own baseline; this lot touches none of those
+files and did not re-run that measurement, exactly as MF-6b step 8 did not.
+
+**The one `--ignored` failure is `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`**,
+the same one MF-6b, MF-6a2, MF-5b-fix and MF-5a all reported, and the proof is the same:
+`git diff --name-only 07325f6e HEAD` lists **seventeen** files and `builtin_patches.rs` is not
+among them.
+
+### The campaign, field by field
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms camp-6a3.json --no-shots --quiet
+    test-roms: 331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+`campfields.py camp-6b.json camp-6a3.json` — every key of every row, ignoring `ms` (wall clock)
+and `shot` (`--no-shots`):
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+      base: {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+      new : {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+
+    rows differing on any field but ['ms', 'shot']: 0
+
+    mapper numbers the campaign exercises: [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180]
+    of which this lot adds: []
+
+**Zero rows differ on any field** and the summary objects compare equal on all six counts.
+
+**The eighteen MMC3 rows are identical field by field**, named one by one because this lot changed
+`Mmc3Board` — two new `const` parameters, three new window setters, four monomorphisations where
+there were two: all six of `mmc3_irq_tests`, all six of `mmc3_test`, all six of
+`mmc3_test_2/rom_singles`. That is the non-regression steps 1 and 4 both had to show.
+
+**The three required-to-fail rows are still failing with their messages unchanged**:
+
+| row | message |
+| --- | --- |
+| `mmc3_irq_tests/5.MMC3_rev_A` | "MMC3 IRQ COUNTER REVISION A / FAILED #3" |
+| `mmc3_test/6-MMC6` | "IRQ shouldn't occur when reloading after counter normally reaches 0" |
+| `mmc3_test_2/rom_singles/6-MMC3_alt` | "IRQ shouldn't be set when reloading to 0 due to counter naturally reaching 0" |
+
+— the revision-A and MMC6 reload cases REQ-CORE-114 and AMD-061 §8 make accepted divergences. The
+other two failures are `AccuracyCoin` (128/147, failing `$2004 Stress Test`) and
+`blargg_ppu_tests_2005.09.15b/power_up_palette`, both as they were, and the one unsupported row is
+`nes-test-roms/other/LINUSMUS.NES` ("Corrupt header: missing iNES signature"), also as it was.
+
+### Why a second campaign with the features off would be the same run
+
+The brief asks for the campaign "feature-off", and the configuration it names is the one measured
+above: `parked-boards` is off by default and nothing is parked, so the default build **is** the
+feature-off build.
+
+For the nine board features the answer is a proof rather than a second run, and `campfields.py`'s
+own last two lines are it:
+
+    campaign numbers: [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180]
+    gated numbers   : [33, 37, 47, 70, 75, 76, 88, 89, 93, 94, 95, 97, 105, 116, 119,
+                       140, 152, 154, 155, 158, 184, 185, 206, 232]
+    intersection    : []
+
+**The campaign exercises eighteen mapper numbers and not one of them is behind a feature**, so no
+flip of any of the nine can move a row of it — which is also §2 of the inventory's own finding
+read forwards: there is no image of any of these boards under `assets-free/test-roms`. What the
+features *do* change in the registry is covered by
+`req_core_100_every_required_mapper_is_registered`, which builds its expected list from the
+`cfg!`s and runs in all eleven configurations.
+
+[PROGRESS] MF-6a3 step 5/6 done: eleven configurations green and clippy-clean, 899 / 0 / 8, 14 / 14, the `--ignored` pair green with the golden-core caveat, and 331 campaign rows identical field by field with the eighteen MMC3 rows among them.
