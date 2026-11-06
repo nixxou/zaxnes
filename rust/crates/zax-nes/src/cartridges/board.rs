@@ -164,6 +164,30 @@ impl Mapper for Board {
         dispatch!(self, b => b.reset(memory));
     }
 
+    /// **`#[inline(always)]`, and it has to stay: this is the last link of the per-CPU-cycle
+    /// /IRQ sample, and the only one MF-5b left to the cost model.** `<NesBus as CpuBus>::`
+    /// and `Cartridge::irq_asserted` above it carry the attribute; this dispatch did not, so
+    /// when the thirty-second variant pushed it past the inliner's budget LLVM gave it a symbol
+    /// and twenty-five call sites inside `Cpu6502::step`. MF-5b measured that as a gain — it is
+    /// what let `Cpu6502::execute_without_operand` fold into `step` — and on lot PR-1's set, 300
+    /// frames with no 3D pack, it is: all thirteen ROMs went down.
+    ///
+    /// With a pack loaded it is a loss. R0's level-2 run (five commercial games, their packs,
+    /// 600 frames, inputs pressed) priced the `callq` at **+56 834 892 instructions on Zelda II
+    /// and +97 104 372 on Super Mario Bros.** against the 45.1 M of this dispatch that left
+    /// `step`, and both games ended above the baseline. Pinned, with
+    /// [`WideExtension::zone_offset`](crate::wide::WideExtension::zone_offset) and
+    /// `execute_without_operand`, the five games are 0.123 % to 0.663 % *below* it
+    /// (`docs/progress/MF-5b-fix.md`, step 3).
+    ///
+    /// **Pinning it is not the same as shortening it.** An eleven-arm form with the twenty-one
+    /// boards that cannot assert /IRQ folded into one arm is inlined by the cost model on its own,
+    /// and LLVM then compiles it to a bit mask plus a table of field offsets rather than a jump
+    /// table: cheaper for a board that cannot assert, **+0.698 % on `m4`, +0.464 % on `smb3` and
+    /// +0.278 % on `mmc5`** for the ones that can. Measured as variant 7 of the same step; the
+    /// thirty-two-arm `dispatch!` is what the boards with an IRQ want.
+    #[allow(clippy::inline_always)] // Measured: MF-5b-fix step 3, +56.8 M on Zelda II's pack.
+    #[inline(always)]
     fn irq_asserted(&self) -> bool {
         dispatch!(self, b => b.irq_asserted())
     }

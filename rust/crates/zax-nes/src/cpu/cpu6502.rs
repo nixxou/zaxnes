@@ -506,6 +506,10 @@ impl Cpu6502 {
     /// against `step` −93.5 M and `execute_without_operand` −92.7 M). The arm that reaches
     /// `execute_without_operand` is the cheaper boundary because only the implied-addressing
     /// opcodes take it, where every instruction passes through here.
+    ///
+    /// Since MF-5b-fix **both** carry the attribute, so the interpreter has no out-of-line
+    /// boundary per instruction at all: `execute_without_operand` is pinned for its own measured
+    /// reason, recorded on it.
     #[allow(clippy::inline_always)] // Measured: MF-5b step 1, about +6 M per ROM when outlined.
     #[inline(always)]
     fn execute<B: CpuBus + ?Sized>(&mut self, bus: &mut B, info: OpcodeInfo) {
@@ -537,7 +541,24 @@ impl Cpu6502 {
         }
     }
 
+    /// `#[inline(always)]`, with **one** call site — the arm of [`Cpu6502::execute`] above — so
+    /// the attribute duplicates nothing. What it does is *keep* the fold lot MF-5b got for free.
+    ///
+    /// MF-5b's thirty-second `Board` variant outlined `Board::irq_asserted`, which freed enough
+    /// of `step`'s budget for this function to fold into it, and the fold is worth 99.3 M
+    /// instructions on Metroid's pack and 34 M on `m1`. Lot MF-5b-fix pins `Board::irq_asserted`
+    /// again, which takes that budget back: unpinned, this function returns out of line and the
+    /// fold is lost, at **+11.6 M to +13.1 M on every ROM of lot PR-1's set** (variant 4 of
+    /// `docs/progress/MF-5b-fix.md` step 3). Pinning both is what gets all three of
+    /// `Board::irq_asserted`, `WideExtension::zone_offset` and this function into `step` at once,
+    /// which is the arrangement the lot shipped.
+    ///
+    /// `step` is then 3 443 instructions in the post-LTO assembly, against 932 before MF-5b, and
+    /// `read_cycle` (181), `tick` (82), `read_internal` (175) and `Ppu2C02::run_dots` (1 906) are
+    /// unmoved — the check that the growth evicted nothing else off the per-cycle path.
     #[allow(clippy::too_many_lines)] // One arm per operation, as in the C# switch.
+    #[allow(clippy::inline_always)] // Measured: MF-5b-fix step 3, +11.6 M to +13.1 M when outlined.
+    #[inline(always)]
     fn execute_without_operand<B: CpuBus + ?Sized>(&mut self, bus: &mut B, info: OpcodeInfo) {
         match info.operation {
             CpuOperation::Jmp if info.mode == AddressingMode::Absolute => {

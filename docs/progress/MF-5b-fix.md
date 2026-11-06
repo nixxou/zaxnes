@@ -252,6 +252,171 @@ turns out to have a second, opposite cost that only the boards with an IRQ pay.
 
 [PROGRESS] MF-5b-fix step 2/5 done: the diagnosis.
 
+## Step 3 — eleven variants, and the three attributes that ship
+
+Every variant was built from a `git ls-files` tar of the working tree into its own fresh
+directory with its own `CARGO_TARGET_DIR`, dumped with `--emit=asm`, and run over **all thirteen
+ROMs of PR-1's set** — which is the discriminating bar, being the one `fcfa5cb3` already won. The
+labels are the build labels, so that the `target-mf/asm/lin-<label>.s` dumps and the
+`cg-<label>/` directories can be read back; **there is no variant 8** (a tree superseded before it
+was measured).
+
+### What each variant is
+
+| | `Board::irq_asserted` | `zone_offset` | `execute_without_operand` | other |
+| --- | --- | --- | --- | --- |
+| **v1** | `inline(always)` | — | — | |
+| **v2** | `inline(always)` | `inline(always)` | — | |
+| **v3** | `inline(always)` | `inline(always)` | `inline(always)` | **shipped** |
+| **v4** | — | — | `inline(always)` | |
+| **v5** | `inline(always)` | — | `inline(always)` | |
+| **v6** | — | `inline(always)` | `inline(always)` | |
+| **v7** | eleven-arm match, `_ => false`, not pinned | `inline(always)` | `inline(always)` | |
+| **v9** | `inline(always)` | `inline(always)` | `inline(always)` | `zone_on()` guard inlined in `read_code` |
+| **v10** | `inline(always)` | `inline(always)` | `inline(always)` | the zone-hit body outlined (`zone_code_fetch`, `inline(never)`) |
+| **v11** | `inline(always)` | **not** pinned | `inline(always)` | `zone_on()` guard inlined in `read_code` |
+| **v12** | `inline(always)` | `inline(always)` | `inline(always)` | `zone_offset`'s guard chain split into three early returns |
+
+### PR-1's thirteen, every variant
+
+| variant | set total | vs `a577f336` | vs `fcfa5cb3` | ROMs above `fcfa5cb3` | worst excess |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `a577f336` | 79 717 215 557 | — | +0.240 % | | |
+| `fcfa5cb3` | 79 526 223 046 | −0.240 % | — | | |
+| v2 | 79 841 286 836 | +0.156 % | +0.396 % | **13** | +39 880 188 `smb1` |
+| v4 | 79 714 479 571 | −0.003 % | +0.237 % | **13** | +45 526 550 `smb1` |
+| v5 | 79 537 433 123 | −0.226 % | +0.014 % | 6 | +39 979 902 `smb1` |
+| v6 | 79 579 347 630 | −0.173 % | +0.067 % | 11 | +9 214 163 `m0` |
+| v7 | 79 478 337 364 | −0.300 % | −0.060 % | 7 | +38 271 871 `m4` |
+| v9 | 79 462 652 389 | −0.319 % | −0.080 % | 5 | +7 470 184 `duelito` |
+| v10 | 79 429 436 783 | −0.361 % | −0.122 % | 4 | +6 052 523 `duelito` |
+| v11 | 79 503 666 045 | −0.268 % | −0.028 % | 5 | +11 299 368 `duelito` |
+| v12 | 79 423 100 603 | −0.369 % | −0.130 % | 4 | +4 792 336 `duelito` |
+| **v3** | **79 417 939 646** | **−0.375 %** | **−0.136 %** | **4** | **+4 802 854 `duelito`** |
+| **shipped** | **79 417 861 775** | **−0.376 %** | **−0.136 %** | **4** | **+4 794 923 `duelito`** |
+
+(The shipped tree is v3 with the doc comments written; the 78 k between them is the build
+directory's name inside the binary, not code — the post-LTO shapes are identical, see below.)
+
+### What each variant taught, in the order it was measured
+
+**v1 — the attribute alone is not enough, and it is a step backwards.** Pinning the dispatch puts
+`Board::irq_asserted` back to *0 definitions, 0 call sites* at once, and `step` drops straight back
+to **933** instructions with `execute_without_operand` out of line at 2 472: `a577f336`'s
+arrangement, recovered by one attribute. But `zone_offset` stays out of line (1 / 1 / 33) where
+`a577f336` had it inlined, so this is `a577f336` *minus* something. Not measured on the set — the
+shape alone says it cannot beat `fcfa5cb3`, which beats `a577f336` by 0.240 %.
+
+**v2 — two attributes without the third lose on all thirteen, and to both baselines.** +0.156 %
+over `a577f336`, +0.396 % over `fcfa5cb3`, every ROM worse. The two helpers are inlined and
+`execute_without_operand` is out of line again, and the fold is worth more than they are. This is
+the variant that says **the fold has to be kept**, not merely tolerated.
+
+**v4 — the fold alone, pinned, is worth nothing without the other two.** +0.237 % over
+`fcfa5cb3`, all thirteen worse, `smb1` +45.5 M. The reason is in the asm: with
+`execute_without_operand` folded in, `step` holds **fifteen** instruction-fetch sites, and
+`zone_offset` goes from one call site to **fifteen**. A `callq` per fetch, for every game, pack or
+no pack. Same story in **v5** (`smb1` +40.0 M, for the same fifteen).
+
+**v6 — the fold plus the zone, without the dispatch.** +0.067 %, eleven ROMs worse. The dispatch
+is the single biggest of the three on the ROMs that reach it.
+
+**v7 — the eleven-arm dispatch: the shape works, and it has an opposite cost.** With the
+twenty-one boards that cannot assert /IRQ folded into `_ => false`, the cost model inlines the
+dispatch **on its own**, no attribute, and the generated code gets *better everywhere else*:
+`Cpu6502::branch` **330** instructions (395 at `a577f336`, 406 at `fcfa5cb3`, 418 in v3),
+`resolve` **1 552** (1 800 / 1 847 / 1 854). On the ROMs whose board cannot assert /IRQ it is the
+best variant of the lot — `metroid` **−1.107 %**, `m1` −0.745 %, `z2` −0.654 %, `m0` −0.639 %
+against `fcfa5cb3`. And LLVM compiles it to
+
+    leal -6(%rax) ; cmpb $2 ; movzbl ; movl $1 ; cmovael ; xorl %eax, %eax
+    cmpb $27, %cl ; ja <false>            ; the range of the eleven
+    movzbl %cl, %ecx ; movl $255886211, %edx ; btl %ecx, %edx ; jae <false>   ; their bit mask
+    leaq .Lswitch.table…(%rip) ; movzwl (%rdx,%rcx,2), %ecx ; …               ; a table of field offsets
+
+— a bit mask and a table of **field offsets** instead of a jump table. Three instructions cheaper
+for a board that answers "no" and three dearer for one that answers at all: **`m4` +0.698 %,
+`smb3` +0.464 %, `mmc5` +0.278 %**, two of them MMC3s. That is MF-5b's refuted load-time latch
+again, in a different disguise and with the same verdict, and it is why the thirty-two-arm
+`dispatch!` stays. (The form is also safe to write — `_ => false` can be spelled as the twenty-one
+variants named explicitly, so the compiler refuses a board that is in neither group — and it is
+recorded here in case a future lot has a set where the MMC3s do not matter.)
+
+**v9, v11 — a `zone_on()` guard in `read_code`, and why it is not free.** v3's residual cost is
+`branch`: its *body* grows 406 → 418 and its *executed* path grows with it, by about two
+instructions a fetch, because the pinned `zone_offset` materialises and spills the
+`WideExtension` pointer (`leaq 3348(%r14) ; movq %rax, 24(%rsp)`) before the range test. The
+obvious answer is a three-load guard in front of it, and it is wrong both ways round: in front of
+the pinned form (**v9**, +7.5 M `duelito`, five ROMs above) and in front of an out-of-line
+`zone_offset` (**v11**, +11.3 M `duelito`, five above, and `smb1` back to +4.8 M). The guard's own
+three loads land on every fetch and buy less than they cost.
+
+**v10 — outlining the zone-hit body does not remove the spill.** `zone_read_cycle` is already
+`#[inline(never)]`; moving the `code().get(offset)` with it into a `zone_code_fetch` shrinks `step`
+to 3 350 and `resolve` to 1 816, and `branch` keeps the `leaq`/`movq` pair anyway — the pointer is
+spilled under register pressure, not for `code()`. Within 0.014 % of v3 on the set and on four of
+the five games; kept out because it adds a function and buys nothing.
+
+**v12 — splitting `zone_offset`'s guard chain into three early returns is a wash.** Set total
+−0.369 % against v3's −0.375 %; `oamstr` +1.67 M against +2.10 M, `z2` −17.4 M against −18.2 M; at
+level 2, better on Metroid (−0.663 % against −0.653 %) and worse on Zelda II (−0.256 % against
+−0.263 %), SMB1 and SMB3. v3 wins three of the five games and the set total, and does it **with no
+change to any function body**, so v12 is out and its numbers stay here.
+
+### What ships
+
+Three `#[inline(always)]`, each with its measurement on the function, and **nothing else** — no
+body moved, no arm reordered, no new function, no new state:
+
+| attribute | what it buys |
+| --- | --- |
+| `<Board as Mapper>::irq_asserted` | the 56.8 M of Zelda II's pack and the 97.1 M of SMB1's. The last link of the per-cycle /IRQ sample, and the one MF-5b left to the cost model |
+| `WideExtension::zone_offset` | 16.6 M on Zelda II's pack; and, once the fold is pinned, the fifteen `callq`s per instruction that v4 and v5 measured |
+| `Cpu6502::execute_without_operand` | the fold MF-5b got for free and pinning the dispatch takes back: +11.6 M to +13.1 M on every ROM of the set without it (v2) |
+
+### The post-LTO code: MF-3b's rule, both ways
+
+`shape.py`, the shipped tree against both baselines:
+
+| symbol | `a577f336` | `04a5d8c1` | **shipped** |
+| --- | ---: | ---: | ---: |
+| `<Board as Mapper>::irq_asserted` | 0 / 0 / 0 | 1 / 25 / 32 | **0 / 0 / 0** |
+| `WideExtension::zone_offset` | 0 / 0 / 0 | 1 / 1 / 33 | **0 / 0 / 0** |
+| `Cpu6502::execute_without_operand` | 1 / 1 / 2 402 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu6502::step` | 932 | 2 529 | **3 443** |
+| `Cpu6502::resolve` | 1 800 | 1 847 | 1 854 |
+| `Cpu6502::branch` | 395 | 406 | 418 |
+| `NesBus::read_cycle` | 181 | 181 | **181** |
+| `NesBus::tick` | 82 | 82 | **82** |
+| `NesBus::read_internal` | 175 | 175 | **175** |
+| `NesBus::write_internal` | 2 874 | 3 020 | 3 020 |
+| `Ppu2C02::run_dots` | 1 907 | 1 906 | 1 906 |
+
+**Both symbols are inlined into `step` again — no definition and no call site anywhere** — and
+`execute_without_operand` stays folded in, which is the arrangement neither baseline had. `step`
+holds all three at 3 443 instructions, and the four symbols a per-cycle path cannot afford to lose
+(`read_cycle`, `tick`, `read_internal`, `run_dots`) are **unmoved to the instruction**, with their
+call-site counts unchanged (65, 95, 17, 2). `write_internal` and `run_dots` are MF-5b's numbers,
+untouched by this lot.
+
+`target-mf/asm/callsites.py` (MF-3b rule 1's own instrument, with MF-5b's widened list) reports
+**no entry moved at all** between `a577f336` and the shipped tree: `Board::irq_asserted` 0 → 0
+call sites, `NesBus::irq_asserted` and `Cartridge::irq_asserted` 0 → 0, `end_cycle` 0 → 0,
+`Board::ppu_read` 4 → 4, `on_ppu_address_bus` 14 → 14, `read_nametable_inner` 14 → 14,
+`panic_bounds_check` 911 → 911. The `FIRST CALL SITE -- stop the lot` that MF-5b's own run printed
+and overruled is gone.
+
+### Behaviour, and what was not touched
+
+No body of any function changed: the diff is three attributes, their `allow(clippy::inline_always)`
+and their doc comments, plus an addendum on `Cpu6502::execute`'s existing note saying that both
+halves of the pair now carry the attribute. No `unsafe`. Nothing under
+`G:/3dsen/cleanroom/spec/`. The save-state format is untouched — no field, no order, no block.
+`cargo test --release -p zax-nes -p zax-harness -- --test-threads=1`: **816 passed, 0 failed,
+8 ignored**, which is MF-6's count on the nose.
+
+[PROGRESS] MF-5b-fix step 3/5 done: the three attributes, and eleven variants' numbers.
+
 ## Status
 
-Steps 1-2 done. Step 3 next.
+Steps 1-3 done. Step 4 next.

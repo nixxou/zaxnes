@@ -313,7 +313,25 @@ impl WideExtension {
     /// The offset in the hack pack's code an instruction fetch of `address` reads in the
     /// execution zone, or `None` when the zone is off, there is no code, or `address` is
     /// outside it. The offset may be past the end of the code: the caller reads `$FF` there.
+    ///
+    /// **`#[inline(always)]`, and it has to stay.** `NesBus::read_code` calls this on **every
+    /// instruction fetch**, before anything can tell whether the zone is on, so a `callq` here
+    /// is a `callq` per fetch for every game whether or not it runs a pack's code. Lot MF-5b
+    /// folded `Cpu6502::execute_without_operand` into `Cpu6502::step` and the cost model then
+    /// stopped pasting this function at **fifteen** of its sites: out of line it costs Zelda II
+    /// with its 3D pack **+16 642 696 instructions over 600 frames** against the 5 M of it that
+    /// left `step`, `ppu_vbl_nmi` 9 922 675 over 300 with no pack at all, and Super Mario Bros.
+    /// 40 M once `execute_without_operand` is pinned as well.
+    ///
+    /// Two cheaper-looking shapes were measured and are worse, so that nobody builds them again
+    /// (`docs/progress/MF-5b-fix.md`, step 3): a `zone_on()` guard inlined in front of an
+    /// out-of-line `zone_offset` (variant 11, +0.14 % to +0.32 % on five ROMs of PR-1's set, the
+    /// guard's three loads landing on every fetch), and the same guard in front of the pinned
+    /// form (variant 9, worse still). Splitting the guard chain into three early returns
+    /// (variant 12) is a wash: within 0.01 % of this on every ROM of both sets.
     #[must_use]
+    #[allow(clippy::inline_always)] // Measured: MF-5b-fix step 3, +16.6 M on Zelda II's pack.
+    #[inline(always)]
     pub fn zone_offset(&self, address: u16) -> Option<usize> {
         if !(ZONE_FIRST..=ZONE_LAST).contains(&address)
             || !self.unlocked
