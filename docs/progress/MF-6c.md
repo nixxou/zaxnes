@@ -1892,3 +1892,110 @@ quantised +7 456 756 on `mmc5` that steps 2, 4 and 5 measured for the other two 
 measured without its nametable banks gives the identical figure and
 `Ppu2C02::read_nametable_inner` stays at **75 with four bodies in it**, so Q-123's cap is now
 measured at four and the mechanism is free; the shipped build is step 8's, symbol for symbol.
+
+## Step 10 — the placement, the feature-off proof, the sweeps and the save states
+
+No code of any board changed in this step. What it does is finish the five features the lot added
+and show the two things the owner's rules ask for that no single step could.
+
+### The placement, from the measurements
+
+| feature | numbers | worst figure of either run | where it goes |
+| --- | --- | --- | --- |
+| `board-decode-boards` | — (the shared variant) | measured with `board-77`: free | **`default`** |
+| `board-77` | 77 | `metroid` +12 780, **+0.000 %** | **`default`** |
+| `board-jaleco-72-92-86` | 72, 92, 86 | `duelito` +15 716, **+0.000 %** | **`default`** |
+| `board-96` | 96 | `duelito` +70 187, **+0.001 %** | **`default`** |
+| `board-111` | 111 | `mmc5` +7 423 140, **+0.066 %** | **`parked-boards`** |
+
+Four in, one out, and the one that is out is out on an instruction that belongs to no board of
+this lot — see step 9. `docs/review/BOARD-FEATURES.md` has the five rows, and its header now
+explains both parks together: `SmallBoard`'s limit is ten, `IrqBoard`'s ten and `DecodeBoard`'s
+four, and the figure appears whether or not the enum forwards `Board::prg_ram_enabled` (that one
+does, for the Taito boards; this one does not), which is what says the trigger is LLVM's layout of
+the whole module and not an arm.
+
+`default` gains three entries and `parked-boards` its second:
+
+    parked-boards = ["board-111", "board-taito-x1"]
+
+### **"With a feature off, the build is the same as without it"**, shown on the dump
+
+The owner's rule 2 asks for this and step 1 deferred it to one check for the whole lot, as MF-6a3
+step 3 did for its nine features. The check is: build **this** tree with the three features the lot
+put in `default` taken back out (`board-77`, `board-jaleco-72-92-86`, `board-96`; `board-111` is
+already out), and compare its post-LTO dump against **step 4's shipped tree** — the last tree
+before step 6, which is what "without them" means.
+
+Label `mf6c-10-featoff`, against `lin-mf6c-4-s4irqbrd.s`:
+
+| symbol | step 4 | **features off** | step 9 default |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** | 0 / 0 / 0 |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** | 0 / 0 / 0 |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** | 0 / 0 / 0 |
+| `Cpu::step` | 3 626 | **3 626** | 3 626 |
+| `Board::ppu_peek` | 290 | **290** | 291 |
+| `NesBus::write_internal` | 3 798 | **3 798** | 3 861 |
+| `Ppu::run_dots` | 1 919 | **1 919** | 1 919 |
+| `NesBus::catch_up_ppu` | 188 | **188** | 188 |
+| `Ppu2C02::read_pattern_planes` | 107 | **107** | 107 |
+| `Ppu2C02::read_nametable_inner` | 75 | **75** | 75 |
+| `Cartridge::default_cpu_read` | 429 | **429** | 429 |
+
+**Every pinned symbol is identical to step 4's**, and the whole-file comparison is better than
+that: with the crate disambiguator folded, the two 36 MB dumps differ in **eighteen lines**, and
+every one of them is in one of three places —
+
+* **`Cartridge::create`**, thirteen lines: the `movabsq` bitsets of its three load-time
+  `matches!` lists. Those are **deliberately outside the features** — `nametable_pages_vary`,
+  `watches_ppu_reads` and `watches_ppu_bus_without_read` carry 96 and 111 whatever the Cargo flags
+  say, for the reason that function's own note gives ("one `matches!` is also one `matches!`
+  whatever the features, which is what keeps this load-time decision out of the diff when a
+  feature is flipped"). A number whose board is off is not in `SUPPORTED_MAPPERS`, so no cartridge
+  of it is ever created and the arm is unreachable either way;
+* **five `panic::Location` records**, which are source line numbers in `cartridges/mod.rs` that
+  moved because the `matches!` lists grew (`0x234` → `0x245` and so on). Metadata, not code.
+
+So the gating is complete: the four boards' code, their `Board` variant, their dispatch arms, their
+`SUPPORTED_MAPPERS` entries, their `registry` arms, their `board_memory_sizes` arms, their
+save-state blocks and their tests are all behind their features, and nothing of them survives in a
+build that does not ask for them.
+
+### The four sweeps, in all three configurations
+
+| sweep | what it had to be told this lot | default | all off | `parked-boards` |
+| --- | --- | :-: | :-: | :-: |
+| `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` | `96, 96` in its expected list (step 8), and it is the sweep that **requires** `Mapper::chr_view` to be `None` for a board in the read latch | ok | ok | ok |
+| `mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` | nothing: mapper 96 is in both lists | ok | ok | ok |
+| `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` | nothing: none of the five boards moves on a CPU cycle | ok | ok | ok |
+| `req_core_100_every_required_mapper_is_registered` | six numbers in its `additions` list behind their four `cfg!`s, 46 → 52 entries | ok | ok | ok |
+
+and the three that are sweeps in all but name:
+
+| test | what it covers for this lot |
+| --- | --- |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | **the save states**, which is this step's own item: it walks `SUPPORTED_MAPPERS`, writes registers, runs two frames, saves, scrambles and restores. The five new blocks — mapper 77's one byte, the JF-17's two bools, the JF-13's one byte, the Oeka Kids board's two bytes and a `u16`, and the GTROM's two bytes and a bool — are covered by it in the configuration that advertises their numbers, and by the three tests that save a state of their own (96's previous address, 111's nametable bank, 68's $E000 bit 4) |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | every new board's `reset`, which matters most for the three that force a mirroring (77 four-screen, 96 vertical, 111 four-screen) and for the JF-17's two latch bits |
+| `req_core_102_an_unimplemented_mapper_is_refused_by_name` | unchanged: none of this lot's numbers is in its list, which step 4 re-pointed at **186** for Q-130 question 2's reason |
+
+### Every configuration green
+
+| configuration | `zax-nes` | with `zax-harness` |
+| --- | ---: | ---: |
+| `default` | **857 / 0 / 7** … **854** | **917 / 0 / 8** |
+| `--no-default-features` | **783 / 0 / 7** | — |
+| `--features parked-boards` | **862 / 0 / 7** | **925 / 0 / 8** |
+
+854 + 8 = 862: the eight tests behind a parked feature are `board-taito-x1`'s five and `board-111`'s
+three. `cargo fmt --check` clean; clippy `-D warnings` clean on `zax-nes` in all three
+configurations **and** in each new feature's own (`--no-default-features --features board-77`,
+`board-jaleco-72-92-86`, `board-96`, `board-111`), and on `zax-harness`; **no new `allow` of any
+kind anywhere in the lot**. The other crates that build in this worktree (`zax-goldens`,
+`zax-profiles`, `zax-settings`, `zax-scripting`) are **615 / 0 / 68**, unchanged.
+
+[PROGRESS] MF-6c step 10/11 done: four features in `default` and `board-111` parked, the five rows
+in `BOARD-FEATURES.md`, every configuration green, and the owner's "with a feature off the build is
+the same as without it" **shown** — the features-off dump is step 4's on every pinned symbol, and
+the two 36 MB files differ in eighteen lines, all of them `Cartridge::create`'s three deliberate
+`matches!` bitsets and five `panic::Location` line numbers.

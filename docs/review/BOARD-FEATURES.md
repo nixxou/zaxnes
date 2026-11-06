@@ -19,11 +19,12 @@ ready; step 2 put **`board-taito-x1`** in it and step 9 **`board-111`**. Everyth
 has two measured layouts on `mmc5exram` — 283 356 728 and 290 813 484 instructions over 300
 frames, a difference of **7 456 756, +0.066 %** — and a variant past a shared enum's own limit
 selects the dearer one. MF-6c measured all three limits: `SmallBoard` ten, `IrqBoard` ten,
-`DecodeBoard` four. Neither enum forwards `Board::prg_ram_enabled`, the dispatch the figure lives
-inside, so what crosses the line is LLVM's layout of the whole module and no shape of either
-board's own code can move it — step 2 measured seven and step 9 one more. R0 has scheduled a
-sub-lot for the structural fix (a load-time cache of the $6000-$7FFF decode on `Cartridge`),
-which would un-park both.
+`DecodeBoard` four. The figure appears whether or not the enum forwards `Board::prg_ram_enabled`,
+the dispatch it lives inside — `SmallBoard` does, for the Taito boards, and `DecodeBoard` does not
+— so what crosses the line is LLVM's layout of the whole module, and no shape of either board's own
+code can move it: step 2 measured seven and step 9 one more. R0 has scheduled a sub-lot for the
+structural fix (a load-time cache of the $6000-$7FFF decode on `Cartridge`), which would un-park
+both.
 
 ## The table
 
