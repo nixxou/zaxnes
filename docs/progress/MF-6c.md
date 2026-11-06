@@ -987,3 +987,59 @@ because the shipped tree is the one step 4 already measured.
 `IrqBoard` at twelve variants puts `mmc5` at +0.132 %, two units of the same 7 456 756, so
 `board-taito-x1` stays parked; both enums' limits are now measured and written into their own doc
 comments.
+
+---
+
+## Steps 6 to 11 — the plan as the step-5 finding leaves it
+
+**This is a plan revision and not a step**, written because step 5's measurement invalidates the
+shape §5 MF-6c assumed for the four boards that are left, and a successor resuming this lot should
+start from a correct plan rather than rediscover the wall. No code is involved.
+
+### The wall
+
+Every one of the four remaining boards is, structurally, "a register decode and nothing else":
+
+| step | board | what it needs from a shared variant |
+| ---: | --- | --- |
+| 6 | **77**, Irem LROG017 | `ppu_peek` and `ppu_write` for the CHR-RAM at $0800-$1FFF (both already forwarded by either enum); its CHR-ROM half is ordinary banking |
+| 7 | **72, 92, 86**, Jaleco JF-17 / JF-19 / JF-13 | `write_register` and `intercept_cpu_write` for 86's $6000-$6FFF; nothing else |
+| 8 | **96**, Oeka Kids | `on_ppu_address_bus` — which `IrqBoard` forwards and `SmallBoard` deliberately does not |
+| 9 | **111**, Cheapocabra | `nametable_page`, `ppu_peek`, `ppu_write` |
+
+and step 5 measured that **neither shared enum has room**: one more variant in either is
++7 456 756 on `mmc5exram`, +0.066 %, against a tolerance of +0.02 %. So the plan §5 wrote — "add
+it to `SmallBoard`, it is free" — is no longer available to any of them, and the four steps would
+produce four parked features if run as written.
+
+### The three shapes a successor should measure, in this order
+
+1. **One new `Board` variant holding all four boards** — a third shared enum beside `SmallBoard`
+   and `IrqBoard`, say `DecodeBoard`, with 77, 72/92/86, 96 and 111 inside it. This is **one**
+   discriminant for all eight numbers, and the figure to beat is MF-6a3 step 1's: **two** new
+   `Board` discriminants cost `mmc5` +8 994 278 (+0.080 %), one taken `jmp` per expansion-audio
+   sample, because `Board::expansion_audio_output`'s 35-entry jump table grew by two and LLVM
+   moved the fall-through off the MMC5's arm. **One** entry has never been measured on its own and
+   may well be free — LLVM either moves that fall-through or it does not. This is the cheapest
+   experiment available and it decides all four steps at once; it is also the only one that keeps
+   `SmallBoard`'s and `IrqBoard`'s inner matches where they are.
+2. **The `$6000-$7FFF` read path cached on `Cartridge`**, the way `rom_windows` and
+   `nametable_pages` already are. Every one of this lot's eleven measurements landed in the
+   inlined `Board::prg_ram_enabled` dispatch inside `Cartridge::default_cpu_read`; a load-time
+   cache of "does this board decode $6000-$7FFF, and how" would take that dispatch out of the
+   function entirely and is the one shape nothing has tried. It is the structural fix and it would
+   lift the limit for every later lot — and it touches a function on the MMC5's every CPU read, so
+   it is also the riskiest and wants its own sub-lot rather than a step inside this one.
+3. **Four parked features**, one per step, if neither of the above holds. This is the owner's
+   rule 2 applied and it is not a failure — the boards are all *built*, every test passes, and one
+   `--features` flag reaches them — but it leaves eight numbers out of the default build and
+   should be the answer only after 1 and 2 have been measured and written down.
+
+### What has not changed about steps 6 to 11
+
+The board designs §5 MF-6c gives are unaffected: 77's split `chr_view` (and its
+**`read_pattern_planes` 107**, which this lot has held at every step), the three-way Jaleco
+parameter with `expansion_audio_output` pinned at `None` on §4.8's grounds, 96's
+`watches_ppu_bus_without_read` and MR-1's open MMC2 question, and 111's `nametable_page` — which
+step 4's finding 3 now makes easier, since a **fourth** `read_nametable` body is measured and not
+assumed. Steps 10 and 11 are unchanged.
