@@ -28,11 +28,15 @@ mod bf9096;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 mod daou306;
+#[cfg(feature = "board-decode-boards")]
+mod decode_boards;
 mod discrete;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 mod fme7;
 mod irem_h3001;
+#[cfg(feature = "board-77")]
+mod irem_lrog017;
 #[cfg(feature = "board-small-boards")]
 mod irem_tam_s1;
 mod iremg101;
@@ -86,6 +90,8 @@ pub use bf9096::Bf9096;
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 pub use daou306::Daou306;
+#[cfg(feature = "board-decode-boards")]
+pub use decode_boards::DecodeBoard;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
 };
@@ -93,6 +99,8 @@ pub use discrete::{
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 pub use fme7::Fme7;
 pub use irem_h3001::IremH3001;
+#[cfg(feature = "board-77")]
+pub use irem_lrog017::IremLrog017;
 #[cfg(feature = "board-small-boards")]
 pub use irem_tam_s1::IremTamS1;
 pub use iremg101::IremG101;

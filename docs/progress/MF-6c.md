@@ -1043,3 +1043,259 @@ parameter with `expansion_audio_output` pinned at `None` on §4.8's grounds, 96'
 `watches_ppu_bus_without_read` and MR-1's open MMC2 question, and 111's `nametable_page` — which
 step 4's finding 3 now makes easier, since a **fourth** `read_nametable` body is measured and not
 assumed. Steps 10 and 11 are unchanged.
+
+## Step 6 — mapper 77, and **shape 1 holds: one new `Board` discriminant is free**
+
+### What the step had to settle first
+
+R0's decision after the plan revision is an experiment before a board: "**Measure shape 1 first**:
+one new shared `Board` variant (`DecodeBoard`) holding 77, 72/92/86, 96 and 111. If it is within
+the tolerance for all of them, ship them in `default`." So this step builds the enum with its
+first member and prices **the discriminant**, which is the figure the three steps after it inherit.
+
+The figure to beat was MF-6a3 step 1's, for **two** new `Board` discriminants: `mmc5`
+**+8 994 278, +0.080 %**, one taken `jmp` per expansion-audio sample because the jump table of
+`Board::expansion_audio_output` grew by two entries and LLVM moved the fall-through off the MMC5's
+arm. **One** entry had never been measured on its own.
+
+**It is free.** The whole of instrument 2 is below, and the headline is that `mmc5` — the ROM every
+one of this lot's eleven earlier measurements landed on — is **−40 814**, the set total is
+**−136 318**, and the worst of the thirteen is `metroid` at **+12 780, +0.000 %**: one
+seventeen-hundredth of the owner's +0.02 %.
+
+So `DecodeBoard` is the home of the four remaining boards, [`SmallBoard`] and [`IrqBoard`] stay at
+the variant counts step 5 left them with, and their doc comments now say so.
+
+### What was built: mapper 77, the Irem LROG017
+
+nesdev ("INES Mapper 077"), one register and a memory map, and the code quotes the page on each:
+
+| what | where | the page's words |
+| --- | --- | --- |
+| the one register, PRG in the low nibble and CHR in the high one | `IremLrog017::update_banks` | "`$8000-FFFF: [CCCC PPPP]`", `C` a "2k CHR reg @ $0000", `P` a "32k PRG reg @ $8000" |
+| the write ANDed with the ROM's own byte | `registry::has_bus_conflicts`, arm `77` | "Bus conflicts: yes" |
+| the CHR-ROM chip at $0000-$07FF and the CHR-RAM chip above it | `IremLrog017::ppu_peek`, `ppu_write` | "$0000-$07FF swappable CHR-ROM", "$0800-$1FFF fixed CHR-RAM" |
+| the RAM chip's 6 KiB, which no header field can state | `registry::board_memory_sizes`, arm `77` | the implementation note, below |
+| the four nametables | `IremLrog017::reset`, `NametableMirroring::FourScreen` | the map's "$2000-$27FF" and "$2800-$2FFF" as two distinct regions |
+| the linear order inside the RAM chip | `IremLrog017::ram_offset` | "you do not need to care about the specific order of the CHR-RAM banks" |
+
+**The split CHR is the whole board**, and it is the TQROM's problem again: a `ChrView` is one
+slice plus eight window offsets and has no way to say "this window is the other chip". So the
+answer is the TQROM's, in the same words — `chr_view` and `chr_peek_view` both `None`, and
+`ppu_peek` and `ppu_write` serve the two chips with `#[inline(never)]` on each, so that the arms
+they put in `Board::ppu_peek` and in `NesBus::write_internal` are a `callq` and not a body.
+
+**`Ppu2C02::read_pattern_planes` is 107, unchanged**, which was §5 MF-6c step 5's
+*stop-the-lot condition* for this board and the one figure the inventory feared it would move. It
+could not have: a board whose `chr_view` is `None` is off the PPU's span fast path by construction.
+What it gives up instead is that fast path — one fetch at a time through `ppu_peek`, for one game
+— which is the price the nine `SmallBoard` boards have paid since MF-6a step 2 and §4.10's own
+rule.
+
+### The 10 KiB, in two pieces, and why Q-123's dispatch is untouched
+
+The page's implementation note is what settles the layout: "When making an emulator, you do not
+need to care about the specific order of the CHR-RAM banks: **just provide 10KiB from
+$0800-$2FFF**." This build provides exactly that:
+
+* **6 KiB of CHR-RAM** at $0800-$1FFF, from `CartridgeMemory::chr_ram`, sized by
+  `board_memory_sizes` for the reason the TQROM's arm already gives — byte 5 of an iNES 1.0 header
+  is the CHR-*ROM* size and REQ-CORE-012's CHR-RAM default only applies to an image with no
+  CHR-ROM, so a *Napoleon Senki* dump would otherwise come up with none. Mesen 2 agrees,
+  `GetChrRamSize` `0x1800`.
+* **4 KiB of nametable** at $2000-$2FFF, which is `NametableMirroring::FourScreen`: this core's
+  console VRAM is 4 KiB (`ppu::VRAM_SIZE`), so the four tables are four distinct kilobytes and
+  **nothing is served by the cartridge at all**.
+
+On the board those ten are 8 KiB of cartridge RAM (the chip the 74'21 enables) plus the console's
+2 KiB of CIRAM, and which 2 KiB of $2000-$2FFF is which is invisible to a program — both are RAM
+and all five 2 KiB regions are distinct either way. That is what the page's note licenses, and it
+is why **this board needs no `Mapper::read_nametable` body**: §4.5's dispatch and Q-123's ceiling
+are untouched, where the UNROM 512's four-screen mode does serve its nametables out of CHR-RAM
+because that board has no CIRAM to spare. `read_nametable_inner` is **75**, step 4's figure to the
+instruction.
+
+The mirroring is **forced** at power-on and on reset rather than read from byte 6, which is Mesen
+2's reading too (`SetMirroringType(MirroringType::FourScreens)` in `InitMapper`): the page's memory
+map is the board's wiring, and an iNES 1.0 dump of a singleton mapper cannot be relied on to carry
+the four-screen bit. `Cartridge::reset` puts `memory.mirroring` back to the header's before calling
+the board's `reset`, so the force is in `reset` and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` covers it.
+
+### What the page does not give, and is therefore left alone
+
+**PRG-RAM.** The page has no PRG-RAM line and its hardware note lists one RAM chip, on the PPU
+bus; the register is at $8000-$FFFF, so nothing of the board decodes $6000-$7FFF. The header's size
+therefore stands — no `board_memory_sizes` entry for it — which is Mesen 2's reading (that file
+overrides no work-RAM size) and the choice step 1 argued for $800D bit 5: of the two possible
+errors, taking RAM away from a game that never asks for it is the worse one. **No Q ticket**:
+nothing normative is ambiguous, the page simply does not mention a memory the board does not have.
+
+### The shape, and one Cargo feature that is not a board
+
+`board-decode-boards` is the umbrella `board-77` implies, and it gates `DecodeBoard` itself — the
+module, the `Board` variant, its `dispatch!` arm and the registry's `use`. Cargo cannot express the
+other direction, so `--features board-decode-boards` alone would leave the enum with no variant and
+`Board::DecodeBoard` uninhabited; a `compile_error!` behind `not(any(feature = "board-77"))` says
+so in one line instead of nine. **A later member of this enum adds its feature to that `any` and to
+nothing else.**
+
+What `DecodeBoard` forwards is [`SmallBoard`]'s list minus what no member needs, and `chr_view`
+answers `None` **directly** rather than forwarding — the one line MF-6a step 2's bar turned on,
+because that dispatch's arms are inlined into `Ppu2C02::run_dots` and a forward is a distinct body
+there (+3.3 M to +6.9 M on eight of the thirteen, measured). `irq_asserted`, `on_cpu_cycle`,
+`on_ppu_address_bus`, `nametable_page` and `expansion_audio_output` are left to `Mapper`'s
+defaults, which is that enum's entry condition read across: every board in here answers *no* to
+`irq_asserted` and shares the empty arm.
+
+### Instrument 2: PR-1's thirteen — worst ROM **+0.000 %**, ten of thirteen below
+
+`callgrind-diff.py`, label `mf6c-6-decode77`, against `mf6c-0-8496c503`:
+
+| ROM | board | `8496c503` | **step 6** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 311 891 | 3 308 321 829 | +9 938 | +0.000 % |
+| `oamstr` | NROM | 3 318 460 965 | **3 318 457 076** | −3 889 | −0.000 % |
+| `m1` | MMC1 | 4 885 949 431 | 4 885 950 837 | +1 406 | +0.000 % |
+| `m4` | MMC3 | 5 472 514 995 | **5 472 508 620** | −6 375 | −0.000 % |
+| `m0` | NROM | 5 520 458 691 | **5 520 452 801** | −5 890 | −0.000 % |
+| `metroid` | MMC1 | 5 115 944 288 | 5 115 957 068 | **+12 780** | **+0.000 %** |
+| `smb1` | NROM | 5 996 381 185 | **5 996 376 024** | −5 161 | −0.000 % |
+| `mm2` | MMC1 | 6 017 851 607 | **6 017 825 235** | −26 372 | −0.000 % |
+| `z2` | MMC1 | 6 291 458 642 | **6 291 456 227** | −2 415 | −0.000 % |
+| `readbuf` | CNROM | 6 834 538 187 | **6 834 525 376** | −12 811 | −0.000 % |
+| `duelito` | NROM | 7 380 437 910 | **7 380 414 301** | −23 609 | −0.000 % |
+| `smb3` | MMC3 | 7 949 470 334 | **7 949 437 228** | −33 106 | −0.000 % |
+| `mmc5` | MMC5 | 11 279 383 781 | **11 279 342 967** | **−40 814** | −0.000 % |
+| **total** | | **79 371 161 907** | **79 371 025 589** | **−136 318** | **−0.000 %** |
+
+The worst ROM of the thirteen is `metroid` at **+12 780**, and the three above the baseline are
++1 406, +9 938 and +12 780 — inside the ±57 k-per-ROM `luaH_getshortstr` floor §5.11 measured, on a
+set whose total is **below** the baseline. **`readbuf`, the CNROM whose whole run is pattern
+fetches, is −12 811**, which is the receipt that a `chr_view` of `None` on a new variant costs the
+PPU nothing; and `mmc5` is −40 814 on the function four earlier steps were charged +7 456 756 for.
+
+### Instrument 1: level 2 — four cores **+0** and the fifth **below**
+
+`l2-diff.py --bar`, against `mf6c-0-8496c503`:
+
+| game/stage | `8496c503` | **step 6** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 147 295 142** | **+0** | **equal** |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 775 651 048** | **+0** | **equal** |
+| `mm2/core` | 12 036 822 861 | **12 036 822 861** | **+0** | **equal** |
+| `smb3/core` | 15 315 558 322 | **15 315 537 499** | **−20 823** | −0.000 % |
+| `metroid/total` | 13 735 627 354 | **13 735 574 314** | −53 040 | −0.000 % |
+| `smb1/total` | 13 589 030 161 | **13 587 881 040** | −1 149 121 | −0.008 % |
+| `zelda2/total` | 15 360 284 960 | **15 359 750 311** | −534 649 | −0.003 % |
+| `mm2/total` | 18 976 349 017 | **18 976 296 014** | −53 003 | −0.000 % |
+| `smb3/total` | 24 187 154 526 | 24 192 914 856 | +5 760 330 | **+0.024 %** |
+
+**Nine of the ten figures are at or below the baseline**, and the one that is not is rule 2's
+layout-noise case **checked and not assumed**. `sym6c.sh` at a 400 000 threshold names every symbol
+that moved on any of the five games, and there are three: `luaH_getshortstr` (+4 039 948 on `smb3`,
+−1 863 700 on `smb1`, −1 424 840 on `zelda2`), `getgeneric` (+2 248 672 on `smb3`) and `luaH_set`
+(+719 517 and +1 018 389). Lua's `ltable.c` and `memcpy`, nothing else — and on `smb3` the
+threshold was dropped to **120 000** to be sure: the same three lines, and **no symbol of this
+project moved at all** on the game whose total rose. +4 039 948 + 2 248 672 − 427 268 is +5 861 352
+against a total delta of +5 760 330, which is the whole of it. The `core` column decides, and it is
+four zeroes and a −20 823.
+
+### Instrument 3: the post-LTO dump
+
+`pins63.py lin-mf6c-0-8496c503.s lin-mf6c-6-decode77.s`:
+
+| symbol | `8496c503` | step 4 | **step 6** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | 290 | 291 |
+| `NesBus::write_internal` | 3 815 | 3 798 | 4 035 |
+| `Ppu::run_dots` | 1 907 | 1 919 | **1 919** |
+| `NesBus::catch_up_ppu` | 188 | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | 107 | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | 75 | **75** |
+
+`shape.py`'s five others — `resolve` 1 948, `branch` 457, `read_cycle` 181, `tick` 82,
+`read_internal` 175 — are identical to the instruction, and so are the three claimants,
+`Cpu::step` and `catch_up_ppu`. **The owner's two named symbols hold**: `zone_offset` does not
+exist as a symbol, which is the inlining holding, and `read_pattern_planes` is 107 for the
+seventh lot running.
+
+**The committed tree is the measured tree**, shown and not asserted: the write-up above added doc
+comments to `SmallBoard`, `IrqBoard` and `BOARD-FEATURES.md` *after* the three instruments ran, so
+the tree was built a second time (`mf6c-6-doc77chk`, the same fifteen characters) and the two
+post-LTO dumps are **byte-identical** once the crate disambiguator is folded — 36 010 954 bytes
+each, the same binary size, and `pins63.py` identical on all eight symbols.
+
+**The two that moved are reported and not waved away.** `Board::ppu_peek` is **+1** over step 4
+(the new variant's arm, which is the `callq` the `#[inline(never)]` bought) and `run_dots` is
+step 3's figure unchanged. `NesBus::write_internal` 3 798 → **4 035** is the step's largest
+structural move — the register decode and the `ppu_write` arm of the new variant, both reached
+through that one body — and what prices it at nothing is the dynamic column: `smb3` −33 106, `m4`
+−6 375 and all five level-2 cores at or below the baseline.
+
+**And a third data point against step 2's size-threshold reading**: `Cartridge::default_cpu_read`
+is **429** instructions here — 377 at the baseline, 391 at step 2, 425 at step 3 — with `mmc5`
+**−40 814, below the baseline**. That function's dearer layout is selected by a variant in
+`SmallBoard` or `IrqBoard` and by nothing else measured so far, its own size included.
+
+### The tests, 909 → **911**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_mapper_77_banks_32_kib_of_prg_and_2_kib_of_chr_rom` | the power-on windows and `FourScreen` mirroring; one write of `[CCCC PPPP]` moving both fields; **the bus conflict**, the same write a second time latching `$35 & 20 = $14` through a numbered bank; four bits of PRG wrapping into the image's eight 32 KiB banks; four bits of CHR with the PRG field independent; and a write at **$FFFF** decoding the same register |
+| `req_core_100_mapper_77_reads_chr_rom_at_0000_and_chr_ram_at_0800` | §5's own wording — "a pattern read from CHR-ROM at $0000 and from CHR-RAM at $0800 in the same test": the ROM window following the bank register and **swallowing** a write, the three 2 KiB RAM regions distinct and *not* moved by the bank register, both CHR views `None`, the 6 KiB and not REQ-CORE-012's 32 KiB, `nametable_page` answering `FOLLOW_MIRRORING` for all four tables, and **the four nametables of $2000-$2FFF holding four different bytes at once**, which is the other 4 KiB of the page's ten |
+
+The sweeps that write themselves held with nothing added:
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`,
+`mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` and
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` all pass, because this board moves on no
+cycle and watches no bus; `amd_061_...` passes because `reset` puts the register and the mirroring
+back; and `req_core_100_every_required_mapper_is_registered` took the number in its `additions`
+list behind `cfg!(feature = "board-77")` (46 → 47 entries). One test helper was widened:
+`chr_write`, which was behind `board-119`, is now behind
+`any(feature = "board-77", feature = "board-119")` and sits with `peek` at the top of the file,
+because two boards now have a second CHR chip only `Cartridge::ppu_write` can reach.
+
+**Four configurations green**, `cargo fmt --check` clean and clippy `-D warnings` clean on
+`zax-nes` in all four and on `zax-harness`, **no new `allow` of any kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default (`board-77` on) | **848** |
+| `--features parked-boards` | **853** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-77` | 785 |
+
+848 + 5 = 853, the five being `board-taito-x1`'s. With `zax-harness` the default figure is
+**911 passed / 0 failed / 8 ignored**, step 4's 909 plus this step's two.
+
+`board-77` and `board-decode-boards` are **inside the tolerance on every figure** — the worst of
+the eighteen numbers above is +0.024 % on one level-2 total that is entirely Lua's hash table, and
+the worst `core` or per-ROM figure is +0.000 % — so both go in `default`, and
+`docs/review/BOARD-FEATURES.md` has their two rows. Step 10 still owns the all-features-off dump
+comparison for every feature this lot adds at once, as step 1 planned.
+
+### What this means for steps 7, 8 and 9
+
+**Shape 1 holds, so the three remaining steps are the ones §5 MF-6c wrote**, with one change of
+address: 72/92/86, 96 and 111 go into `DecodeBoard` rather than into [`SmallBoard`], and each
+still gets its own Cargo feature and its own measurement. The discriminant they share is **already
+paid for and measured at zero**, so what each step has left to price is its own code — the Jaleco
+three-way parameter, 96's `on_ppu_address_bus` (which this enum does not forward yet and which
+`SmallBoard` deliberately never did), and 111's `nametable_page`.
+
+Shape 2, the `$6000-$7FFF` read path cached on `Cartridge`, is **still worth its sub-lot** and R0
+has already scheduled it: it is what would un-park `board-taito-x1` and lift the limit for the
+twelve MF-UNL lots, and nothing in this step touches it. Shape 3, four parked features, is not
+needed.
+
+[PROGRESS] MF-6c step 6/11 done: mapper 77 and the new `DecodeBoard` variant, 911 / 0 / 8, and
+**shape 1 holds** — one new `Board` discriminant costs `mmc5` **−40 814**, the set total
+**−136 318** and the worst of thirteen `metroid` +0.000 %, with four level-2 cores +0, the fifth
+−20 823 and `read_pattern_planes` **107 unchanged**, which was this board's own stop-the-lot
+condition.

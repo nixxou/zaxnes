@@ -53,9 +53,18 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 ///   and it does not: `IrqBoard` at twelve variants put `default_cpu_read` at **298 270 240**,
 ///   +14 913 512 — **two** units of the same 7 456 756 — and `mmc5` at +0.132 %. The park stands.
 ///
-/// So a board that would have come here has **nowhere free left**, and the next lot that wants one
-/// has to redesign the $6000-$7FFF read path rather than pick an enum. `docs/progress/MF-6c.md`
-/// steps 2 to 5 have the eleven measurements.
+/// So a board that would have come here has **nowhere free left in either existing enum**.
+/// `docs/progress/MF-6c.md` steps 2 to 5 have the eleven measurements.
+///
+/// **What step 6 then found, and it is the way out**: *one* new `Board` discriminant is free.
+/// [`super::DecodeBoard`] is a second enum of exactly this kind beside this one, and the twelve
+/// ROMs plus five games that priced it came out at **worst `metroid` +12 780 (+0.000 %), set total
+/// −136 318 and `mmc5` −40 814** — where MF-6a3 step 1 had measured **two** new discriminants at
+/// `mmc5` +8 994 278 (+0.080 %). So a register-decode board goes to [`super::DecodeBoard`] now,
+/// and this enum and [`super::IrqBoard`] stay at the variant counts MF-6c left them with.
+/// Redesigning the $6000-$7FFF read path — a load-time cache of its decode on `Cartridge`, the one
+/// shape none of this lot's measurements tried — is still the structural fix, and R0 has made it
+/// its own sub-lot after MF-6c; it would lift the limit here rather than route around it.
 ///
 /// # What is forwarded, and what is deliberately not
 ///

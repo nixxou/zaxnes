@@ -1,6 +1,8 @@
 //! The [`Board`] enum: one variant per mapper family, dispatching [`Mapper`] to it
 //! (REQ-CORE-100). Created once at load time by the registry.
 
+#[cfg(feature = "board-decode-boards")]
+use super::mappers::DecodeBoard;
 #[cfg(feature = "board-namcot108")]
 use super::mappers::Namcot108;
 #[cfg(feature = "board-small-boards")]
@@ -126,6 +128,20 @@ pub enum Board {
     /// inlines whole — grew by two entries and LLVM moved the fall-through off the MMC5's arm.
     /// See [`IrqBoard`]'s own note.
     IrqBoard(IrqBoard),
+    /// The **second** enum of boards that are a register decode and nothing else, behind one
+    /// discriminant: mapper 77, the Irem LROG017 (MF-6c step 6).
+    ///
+    /// It exists because [`SmallBoard`] and [`IrqBoard`] are both **full**, which MF-6c steps 2 to
+    /// 5 measured four times: one more variant in either puts `Cartridge::default_cpu_read` into
+    /// the dearer of its two layouts on `mmc5exram`, **+7 456 756 instructions over 300 frames,
+    /// +0.066 %**, against the owner's tolerance of +0.02 % per ROM. R0's decision of 2026-11-06
+    /// is to measure **one** new `Board` discriminant for all four of the lot's remaining boards
+    /// instead, against MF-6a3 step 1's figure for **two** (`mmc5` +8 994 278, +0.080 %, one taken
+    /// `jmp` per expansion-audio sample as the jump table of `Board::expansion_audio_output`
+    /// grew); one entry alone had never been measured. This variant is that experiment, and
+    /// `docs/progress/MF-6c.md` step 6 has what it cost.
+    #[cfg(feature = "board-decode-boards")]
+    DecodeBoard(DecodeBoard),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -169,6 +185,8 @@ macro_rules! dispatch {
             #[cfg(feature = "board-small-boards")]
             Board::SmallBoard($b) => $body,
             Board::IrqBoard($b) => $body,
+            #[cfg(feature = "board-decode-boards")]
+            Board::DecodeBoard($b) => $body,
         }
     };
 }

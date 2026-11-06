@@ -28,6 +28,14 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
         .ppu_peek(address, ChrFetch::Background)
 }
 
+/// Writes CHR through the board's own path, which is the only way to reach a second chip:
+/// `Cartridge::ppu_write` dispatches to the board, and on the TQROM (119) that is the chip-select
+/// decode while on the Irem LROG017 (77) it is the $0800-$1FFF half of the split.
+#[cfg(any(feature = "board-77", feature = "board-119"))]
+fn chr_write(core: &mut NesCore, address: u16, value: u8) {
+    core.cartridge_mut().unwrap().ppu_write(address, value);
+}
+
 #[test]
 fn req_core_100_every_required_mapper_is_registered() {
     // REQ-CORE-100's own table.
@@ -80,7 +88,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 157 (the Datach Joint ROM System) and 159, the two Bandai LZ93D50 boards with a serial
     //   EEPROM, behind `board-eeprom` (MF-6c step 3);
     // * 68 (the Sunsoft-4), behind `board-68`, with its CHR-ROM nametable mode behind the second
-    //   feature `board-68-chr-nametables` (MF-6c step 4).
+    //   feature `board-68-chr-nametables` (MF-6c step 4);
+    // * 77 (the Irem LROG017 of Napoleon Senki), behind `board-77` -- the first member of
+    //   `DecodeBoard`, this project's second shared `Board` variant (MF-6c step 6).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -97,7 +107,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let multicart = cfg!(feature = "board-mmc3-multicart");
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
-    let additions: [(i32, bool); 46] = [
+    let additions: [(i32, bool); 47] = [
         (19, true),
         (24, true),
         (26, true),
@@ -113,6 +123,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (73, true),
         (75, small),
         (76, namcot),
+        (77, cfg!(feature = "board-77")),
         (78, true),
         (80, taito_x1),
         (82, taito_x1),
@@ -1818,6 +1829,162 @@ fn mf_6c_sunsoft_4_decodes_e000_bit_4_in_both_configurations() {
         if served { -2 } else { -1 },
         nametable_pages(&other)[0],
         "the feature decides the serving, not the decode"
+    );
+}
+
+// ------------------------------------------- Irem LROG017 (77)
+
+/// nesdev ("INES Mapper 077"): `$8000-$FFFF: [CCCC PPPP]`, `C` a "2k CHR reg @ $0000" and `P` a
+/// "32k PRG reg @ $8000", with "Bus conflicts". The four-screen nametable is the page's own memory
+/// map, which gives $2000-$27FF and $2800-$2FFF as two distinct 2 KiB regions of RAM
+/// (MF-6c step 6).
+#[cfg(feature = "board-77")]
+#[test]
+fn req_core_100_mapper_77_banks_32_kib_of_prg_and_2_kib_of_chr_rom() {
+    // 8 KiB bank 0 is filled with $FF, so a write through the power-on window survives the bus
+    // conflict whole; every other bank reads its own number and masks the value.
+    let mut core = MapperRom::new(77)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
+    assert_eq!(77, core.cartridge().unwrap().mapper_number());
+    // Power-on: 32 KiB PRG bank 0 and 2 KiB CHR bank 0. $0800-$1FFF is the RAM chip, which has
+    // powered on at zero and is not the bank register's business at all.
+    assert_eq!([255, 1, 2, 3], core.prg_windows());
+    assert_eq!([0, 1, 0, 0, 0, 0, 0, 0], core.chr_windows());
+    // The board's own wiring, whatever byte 6 of the dump says.
+    assert_eq!(Nm::FourScreen, core.mirroring());
+
+    // One write of `[CCCC PPPP]`: C = 3 is 1 KiB banks 6 and 7, P = 5 is 8 KiB banks 20 to 23.
+    core.mapper_write(0x8000, 0x35);
+    assert_eq!([20, 21, 22, 23], core.prg_windows());
+    assert_eq!([6, 7, 0, 0, 0, 0, 0, 0], core.chr_windows());
+
+    // **Bus conflicts**: the same write again, with 8 KiB bank 20 now under $8000, latches
+    // $35 & 20 = $14 — C = 1 (1 KiB banks 2 and 3) and P = 4 (8 KiB banks 16 to 19).
+    core.mapper_write(0x8000, 0x35);
+    assert_eq!(
+        [16, 17, 18, 19],
+        core.prg_windows(),
+        "the ROM went on driving the bus"
+    );
+    assert_eq!([2, 3, 0, 0, 0, 0, 0, 0], core.chr_windows());
+
+    // Four bits of PRG, wrapping into the image's eight 32 KiB banks: $0F is bank 15, i.e. 7.
+    let mut prg = MapperRom::new(77)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
+    prg.mapper_write(0x8000, 0x0F);
+    assert_eq!([28, 29, 30, 31], prg.prg_windows());
+
+    // Four bits of CHR: bank 15 is the last 2 KiB of a 32 KiB CHR-ROM, and the PRG field is
+    // independent of it.
+    let mut chr = MapperRom::new(77)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
+    chr.mapper_write(0x8000, 0xF0);
+    assert_eq!([30, 31, 0, 0, 0, 0, 0, 0], chr.chr_windows());
+    assert_eq!([255, 1, 2, 3], chr.prg_windows());
+
+    // The register is the whole of $8000-$FFFF: a write at $FFFF decodes the same, through the
+    // byte of 8 KiB bank 3 that is there — $03 & 3 is $03, so P = 3 is banks 12 to 15.
+    let mut top = MapperRom::new(77)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
+    top.mapper_write(0xFFFF, 0x03);
+    assert_eq!([12, 13, 14, 15], top.prg_windows());
+}
+
+/// The split CHR, which is this board's reason to exist: "PPU $0000-$07FF: swappable CHR-ROM" and
+/// "$0800-$1FFF: fixed CHR-RAM", the page's implementation note sizing the rest — "you do not need
+/// to care about the specific order of the CHR-RAM banks: just provide 10KiB from $0800-$2FFF".
+///
+/// §5 MF-6c step 5 of `docs/review/MF-6-inventory.md` asks for "a pattern read from CHR-ROM at
+/// $0000 and from CHR-RAM at $0800 in the same test", and this is it; the 10 KiB are checked as
+/// the two pieces they are, 6 KiB of CHR-RAM and the four distinct nametables of the four-screen
+/// mode (MF-6c step 6).
+#[cfg(feature = "board-77")]
+#[test]
+fn req_core_100_mapper_77_reads_chr_rom_at_0000_and_chr_ram_at_0800() {
+    let mut core = MapperRom::new(77)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(0)
+        .load();
+
+    // $0000-$07FF is the ROM chip through the bank register.
+    assert_eq!((0, 1), (peek(&core, 0x0000), peek(&core, 0x0400)));
+    core.mapper_write(0x8000, 0x30); // C = 3: 1 KiB banks 6 and 7. P = 0 keeps bank 0 at $8000.
+    assert_eq!((6, 7), (peek(&core, 0x0000), peek(&core, 0x0400)));
+    chr_write(&mut core, 0x0000, 0xA5);
+    assert_eq!(6, peek(&core, 0x0000), "the ROM window swallowed the write");
+
+    // $0800-$1FFF is the RAM chip, all 6 KiB of it, and the three 2 KiB regions are distinct.
+    let ram = [
+        (0x0800u16, 0x11u8),
+        (0x1000, 0x22),
+        (0x1800, 0x33),
+        (0x1FFF, 0x44),
+    ];
+    for (address, value) in ram {
+        chr_write(&mut core, address, value);
+    }
+    assert_eq!(
+        [0x11, 0x22, 0x33, 0x44],
+        ram.map(|(address, _)| peek(&core, address))
+    );
+
+    // The bank register does not move it: C = 5 is ROM banks 10 and 11 and the RAM is where it
+    // was, which is the page's "fixed CHR-RAM".
+    core.mapper_write(0x8000, 0x50);
+    assert_eq!((10, 11), (peek(&core, 0x0000), peek(&core, 0x0400)));
+    assert_eq!(
+        [0x11, 0x22, 0x33, 0x44],
+        ram.map(|(address, _)| peek(&core, address))
+    );
+
+    // Neither CHR dispatch can describe two chips in one view, so both answer `None` and the PPU
+    // takes `Mapper::ppu_peek` one fetch at a time — the TQROM's answer, in `DecodeBoard`'s note.
+    assert!(core.cartridge().unwrap().chr_view().is_none());
+    assert!(core.cartridge().unwrap().chr_peek_view().is_none());
+
+    // 6 KiB, and not REQ-CORE-012's 32 KiB default: that default only applies to an image with no
+    // CHR-ROM, and byte 5 of this one declares 32 KiB of it.
+    assert_eq!(
+        0x1800,
+        core.cartridge().unwrap().memory().chr_ram().len(),
+        "the board's own RAM chip"
+    );
+
+    // The other 4 KiB of the page's ten: $2000-$2FFF is four distinct nametables, out of this
+    // core's own 4 KiB of console VRAM, so the cartridge serves no nametable at all.
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+    for (table, value) in [
+        (0x2000u16, 0x50u8),
+        (0x2400, 0x51),
+        (0x2800, 0x52),
+        (0x2C00, 0x53),
+    ] {
+        core.write_memory(0x2006, (table >> 8) as u8);
+        core.write_memory(0x2006, (table & 0xFF) as u8);
+        core.write_memory(0x2007, value);
+    }
+    let nametable = |core: &mut NesCore, address: u16| {
+        core.write_memory(0x2006, (address >> 8) as u8);
+        core.write_memory(0x2006, (address & 0xFF) as u8);
+        core.ppu_read(7); // The read buffer is one fetch behind.
+        core.ppu_read(7)
+    };
+    assert_eq!(
+        [0x50, 0x51, 0x52, 0x53],
+        [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|address| nametable(&mut core, address))
     );
 }
 
@@ -3843,14 +4010,6 @@ fn req_core_100_the_nes_event_takes_its_mirroring_from_the_mmc1() {
 
 // ------------------------------------------- the TQROM (119) and the two MMC3 multicarts
 // ------------------------------------------- (47, 37), MF-6a3 step 1
-
-/// Writes CHR through the board's own fetch path, which is the only way to reach the TQROM's
-/// second chip: `Cartridge::ppu_write` dispatches to the board, and on this board that is the
-/// chip-select decode.
-#[cfg(feature = "board-119")]
-fn chr_write(core: &mut NesCore, address: u16, value: u8) {
-    core.cartridge_mut().unwrap().ppu_write(address, value);
-}
 
 /// nesdev ("INES Mapper 119"): "Bit 6 of the CHR bank number is used to switch between the CHR
 /// ROM chip and the CHR RAM chip."

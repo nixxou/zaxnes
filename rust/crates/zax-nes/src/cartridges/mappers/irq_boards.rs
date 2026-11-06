@@ -141,7 +141,9 @@ pub enum IrqBoard {
     /// at **twelve** variants this enum puts `Cartridge::default_cpu_read` at 298 270 240 on
     /// `mmc5`, +14 913 512 — **two** units of the same 7 456 756 — and that ROM at +0.132 %. So
     /// the figure is quantised in units of one layout step, both enums have a limit, and the Taito
-    /// boards stay parked. See [`super::SmallBoard`]'s own note for all eleven measurements.
+    /// boards stay parked. See [`super::SmallBoard`]'s own note for all eleven measurements — and,
+    /// at the end of it, what MF-6c step 6 found instead: **one new `Board` discriminant is free**,
+    /// so the next register-decode board goes to [`super::DecodeBoard`] and this enum stays at ten.
     ///
     /// The price is this variant's [`IrqBoard::ppu_irq_horizon`] `None` — the Sunsoft-4 could have
     /// let the PPU run behind the CPU and gives that up — which is §4.10's rule and exactly the

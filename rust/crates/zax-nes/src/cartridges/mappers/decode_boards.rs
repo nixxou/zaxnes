@@ -1,0 +1,140 @@
+// `board-decode-boards` is the umbrella each board in this enum implies (`board-77 =
+// ["board-decode-boards"]`), and Cargo cannot express the other direction: nothing stops
+// `--features board-decode-boards` on its own, which would leave this enum with no variant and
+// `Board::DecodeBoard` uninhabited. One clear error beats nine confusing ones. **A later member
+// of this enum adds its feature to the `any` below**, and to nothing else -- the module, the
+// `Board` variant, its `dispatch!` arm and the registry's `use` are all behind the umbrella.
+#[cfg(not(any(feature = "board-77")))]
+compile_error!(
+    "feature `board-decode-boards` is implied by each of its boards (`board-77`, …) and is not \
+     meant to be selected on its own"
+);
+
+#[cfg(feature = "board-77")]
+use super::IremLrog017;
+use super::Mapper;
+use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
+use crate::state::{InvalidState, StateReader, StateWriter};
+
+/// The **second** enum of boards that are a register decode and nothing else, sharing one
+/// [`Board`] variant between them (MF-6c step 6).
+///
+/// [`Board`]: crate::cartridges::Board
+/// [`SmallBoard`]: super::SmallBoard
+/// [`IrqBoard`]: super::IrqBoard
+///
+/// # Why a second one exists at all
+///
+/// [`SmallBoard`] is where a board of this shape belonged from MF-6a step 2 until MF-6c step 5,
+/// and that enum's own note has the four measurements that closed it: **one more variant in
+/// either [`SmallBoard`] or [`IrqBoard`] costs `mmc5` +7 456 756 instructions over 300 frames,
+/// +0.066 %**, against the owner's tolerance of +0.02 % per ROM. The figure is quantised —
+/// `Cartridge::default_cpu_read` has two layouts on that ROM and a variant past each enum's own
+/// limit buys one unit of the difference — and step 5 measured two units for two variants. So the
+/// four remaining licensed boards of lot MF-6c (77; 72, 92 and 86; 96; 111) have no free home,
+/// and R0's decision of 2026-11-06 names the first shape to measure instead:
+///
+/// > **One new `Board` variant holding all four boards** — a third shared enum beside
+/// > `SmallBoard` and `IrqBoard` … This is **one** discriminant for all eight numbers, and the
+/// > figure to beat is MF-6a3 step 1's: **two** new `Board` discriminants cost `mmc5`
+/// > +8 994 278 (+0.080 %) … **One** entry has never been measured on its own and may well be
+/// > free.
+///
+/// This enum is that experiment. It keeps [`SmallBoard`]'s and [`IrqBoard`]'s inner matches
+/// exactly where they are — neither grows a variant — and pays one jump-table slot in each
+/// `Board` dispatch instead. `docs/progress/MF-6c.md` step 6 has what that slot measured.
+///
+/// # Its entry condition, and what is forwarded
+///
+/// [`SmallBoard`]'s, unchanged: every board here answers *no* to [`Mapper::irq_asserted`] through
+/// `Mapper`'s own default, so all of them share that dispatch's empty arm, and the per-cycle and
+/// per-fetch methods are **deliberately not forwarded** for the reason that note gives — an inner
+/// `match` returning `false` is not the same code as `false`, and a body too many in one of those
+/// dispatches is what MF-5b step 1 priced at 170 M instructions.
+///
+/// Only the methods a board in here actually implements are forwarded, and [`Mapper::chr_view`]
+/// answers `None` directly rather than forwarding, which is the one line MF-6a step 2's bar turned
+/// on: see [`DecodeBoard::chr_view`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeBoard {
+    /// Mapper 77, the Irem LROG017 of *Napoleon Senki* (MF-6c step 6).
+    #[cfg(feature = "board-77")]
+    IremLrog017(IremLrog017),
+}
+
+/// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
+///
+/// [`SmallBoard`]: super::SmallBoard
+macro_rules! inner {
+    ($self:ident, $b:ident => $body:expr) => {
+        match $self {
+            #[cfg(feature = "board-77")]
+            DecodeBoard::IremLrog017($b) => $body,
+        }
+    };
+}
+
+impl Mapper for DecodeBoard {
+    fn mapper_number(&self) -> i32 {
+        inner!(self, b => b.mapper_number())
+    }
+
+    fn banks(&self) -> Option<&BankWindows> {
+        inner!(self, b => b.banks())
+    }
+
+    fn banks_mut(&mut self) -> Option<&mut BankWindows> {
+        inner!(self, b => b.banks_mut())
+    }
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        inner!(self, b => b.save_registers(writer));
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        inner!(self, b => b.load_registers(reader))
+    }
+
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
+        inner!(self, b => b.reset(memory));
+    }
+
+    fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        inner!(self, b => b.write_register(memory, address, value));
+    }
+
+    /// **`None`, and not a forward** — the line MF-6a step 2's measurement turned on, quoted in
+    /// [`SmallBoard::chr_view`]'s own note: this dispatch's arms are inlined into
+    /// `Ppu2C02::run_visible_span` and so into `Ppu2C02::run_dots`, and one more *distinct body*
+    /// there cost **+3.3 M to +6.9 M over 300 frames on eight of lot PR-1's thirteen ROMs** in
+    /// spill churn alone. A forward is such a body, because `Mapper::chr_view`'s default is
+    /// monomorphised per board; `None` is the body the MMC2, the MMC3, the MMC5, the RAMBO-1 and
+    /// [`SmallBoard`] already answer, so the dispatch gains nothing to lay out.
+    ///
+    /// The price is that the games of these numbers take [`Mapper::ppu_peek`] one fetch at a time
+    /// instead of the span fast path — a cost on the boards that caused it and on no other game,
+    /// which is §4.10's own rule. Mapper 77 could not have answered this dispatch anyway: its two
+    /// CHR chips cannot be one [`ChrView`].
+    ///
+    /// [`SmallBoard`]: super::SmallBoard
+    /// [`SmallBoard::chr_view`]: super::SmallBoard::chr_view
+    fn chr_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        None
+    }
+
+    /// `None` as well, which is mapper 77's own answer (its two chips are not one view) and so
+    /// costs this dispatch nothing beyond the arm it already has. A later member of this enum that
+    /// *can* show a view turns this into a forward; until one does, the direct `None` is the body
+    /// the TQROM and the MMC5 already give.
+    fn chr_peek_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        None
+    }
+
+    fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        inner!(self, b => b.ppu_peek(memory, address, fetch))
+    }
+
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        inner!(self, b => b.ppu_write(memory, address, value));
+    }
+}

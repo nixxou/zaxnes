@@ -6,8 +6,12 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-decode-boards")]
+use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
+#[cfg(feature = "board-77")]
+use super::mappers::IremLrog017;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
 #[cfg(feature = "board-namcot108")]
@@ -96,6 +100,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     75,
     #[cfg(feature = "board-namcot108")]
     76,
+    #[cfg(feature = "board-77")]
+    77,
     78,
     #[cfg(feature = "board-taito-x1")]
     80,
@@ -252,6 +258,21 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-mmc3-multicart")]
         37 | 47 => BoardMemorySizes {
             prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 077"): the Irem LROG017 carries a RAM chip on the PPU bus beside
+        // its CHR-ROM, and the page's implementation note sizes what an emulator must provide --
+        // "just provide 10KiB from $0800-$2FFF". 6 KiB of it is this CHR-RAM, at $0800-$1FFF; the
+        // 4 KiB of $2000-$2FFF is the four-screen nametable the board forces and this core's
+        // console VRAM already holds (see `IremLrog017`'s own note on the split).
+        //
+        // **No header field can state it**, which is the TQROM's arm's reason above in the same
+        // words: byte 5 of an iNES 1.0 header is the CHR-*ROM* size and REQ-CORE-012's CHR-RAM
+        // default only applies to an image with no CHR-ROM at all. Mesen 2 agrees
+        // (`IremLrog017.h:10`, `GetChrRamSize` 0x1800).
+        #[cfg(feature = "board-77")]
+        77 => BoardMemorySizes {
+            chr_ram: Some(IremLrog017::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // MR-13-1, nesdev ("CPROM") and REQ-CORE-100's mapper table: the board carries "16 KiB
@@ -415,6 +436,12 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // "Mappers with bus conflicts" too (MF-6a step 3).
         // Mesen 2 gives mapper 185 the CNROM board's conflicts (`CnromProtect.h:21`), which
         // the *CNROM* board page describes for the family (MF-6a step 4).
+        // *INES Mapper 077* gives the Irem LROG017 "Bus conflicts: yes" against its one register
+        // at $8000-$FFFF: two 74161s latch the write and nothing on the board disables the PRG
+        // ROM's output enable while they do (MF-6c step 6). Mesen 2 agrees
+        // (`IremLrog017.h:12`, `HasBusConflicts` true).
+        #[cfg(feature = "board-77")]
+        77 => true,
         11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
@@ -523,6 +550,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         80 | 207 => Board::SmallBoard(SmallBoard::TaitoX1005(TaitoX1005::new(memory, mapper))),
         #[cfg(feature = "board-taito-x1")]
         82 | 552 => Board::SmallBoard(SmallBoard::TaitoX1017(TaitoX1017::new(memory, mapper))),
+        // MF-6c step 6: the Irem LROG017, first member of the **second** enum of boards that are
+        // a register decode and nothing else. `DecodeBoard`'s own note has R0's decision of
+        // 2026-11-06 that put it in a new `Board` discriminant rather than in `SmallBoard`, which
+        // steps 2 to 5 measured as full.
+        #[cfg(feature = "board-77")]
+        77 => Board::DecodeBoard(DecodeBoard::IremLrog017(IremLrog017::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),

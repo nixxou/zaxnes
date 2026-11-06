@@ -28,6 +28,7 @@ default = [
     "board-155",
     "board-68",
     "board-68-chr-nametables",
+    "board-77",
     "board-eeprom",
     "board-158",
     "board-mmc3-multicart",
@@ -94,6 +95,23 @@ board-68 = []
 # "behind its own feature if it costs more than the board itself"; the bit is decoded and kept in
 # the savestate either way, so this switches the *serving* and not the decode.
 board-68-chr-nametables = ["board-68"]
+
+# The **second** shared `Board` variant for boards that are a register decode and nothing else,
+# `DecodeBoard`, with no board of its own: each board feature below implies it. It exists because
+# MF-6c steps 2 to 5 measured `SmallBoard` and `IrqBoard` as both **full** -- one more variant in
+# either costs `mmc5` +7 456 756 instructions over 300 frames, +0.066 %, against a tolerance of
+# +0.02 % -- and R0's decision of 2026-11-06 is to measure one new `Board` discriminant for all
+# four of this lot's remaining boards instead. See `DecodeBoard`'s own note.
+#
+# Not meant to be selected alone: with no board feature on, the enum has no variant.
+board-decode-boards = []
+
+# Mapper 77, the Irem LROG017 of *Napoleon Senki* (MF-6c step 6): one `[CCCC PPPP]` register, bus
+# conflicts, four-screen mirroring, and a **split CHR** -- 2 KiB of swappable CHR-ROM at
+# $0000-$07FF with the 6 KiB CHR-RAM chip at $0800-$1FFF, which no `ChrView` can describe. First
+# member of `DecodeBoard`, and the board whose own bar was `Ppu2C02::read_pattern_planes` (§5
+# MF-6c step 5 of `docs/review/MF-6-inventory.md`).
+board-77 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
