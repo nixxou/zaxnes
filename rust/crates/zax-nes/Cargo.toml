@@ -9,6 +9,24 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# One feature per board that raises any figure (owner's rule, 2026-11-06). Each gates its
+# board's code, its `Board` variant or `const` monomorphisation, every dispatch arm, its
+# `SUPPORTED_MAPPERS` entries, its `registry` arms, its `board_memory_sizes` arm, its
+# save-state block and its tests. A board whose measured cost is inside the owner's tolerance
+# (at most +0.02 % per ROM on both runs) is in `default`; one above it is left out, and
+# `parked-boards` then enables all the left-out ones at once.
+#
+# `docs/review/BOARD-FEATURES.md` is the table: a row per feature, with the measured cost per
+# ROM on both runs and the one command that flips it.
+[features]
+default = []
+
+# The umbrella: every board left out of `default` because it is above the tolerance. Empty
+# while no board is parked, which is the state MF-6b ended in and MF-6a3 keeps -- the feature
+# exists so that a later lot which does park one has the switch already wired, and so that
+# `cargo test --features parked-boards` is a configuration this lot checks either way.
+parked-boards = []
+
 [dev-dependencies]
 sha2 = "0.10"
 zax-goldens = { path = "../zax-goldens" }
