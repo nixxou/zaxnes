@@ -1108,6 +1108,108 @@ variants first time, because every register of this board is a field.
 782 is step 4's 775 plus these seven. No production code changed in this step, so the measured
 binary of step 4 stands and no new instruction count was taken.
 
+## Step 7 — the ROM check: there is none to run, re-established independently
+
+The first session of this lot reported that no VRC6 and no Namco 163 test ROM exists anywhere in
+`assets-free/test-roms`, and R0 noted it. This step **re-ran the sweep from scratch** rather than
+taking that on trust, because the claim is load-bearing: every behavioural assertion in this lot
+rests on it.
+
+Every `.nes` under the tree was opened and its iNES header decoded, the NES 2.0 submapper byte
+included. **330 images carry a valid header**, and between them:
+
+    mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180
+
+| mapper | images |
+| --- | ---: |
+| 19 (Namco 163) | **0** |
+| 210 (Namcot 175 / 340) | **0** |
+| 24 (VRC6) | **0** |
+| 26 (VRC6b) | **0** |
+
+`holy-mapperel` has no `M19`, `M24`, `M26` or `M210` target — its highest is `M180` — and
+`m22chrbankingtest` is a VRC2a, which mapper 22 already covered before this lot. The figure
+matches the first session's to the image.
+
+**So this lot cannot be accepted by a test ROM, and says so rather than discovering it late.** What
+stands in place of one: sixty unit tests written against the nesdev pages and cross-checked
+against `third_party/mesen2`, with the four provisional choices pinned by name; and **R0's
+commercial titles**, which are the only images in reach that run these boards — *Akumajou
+Densetsu*, *Madara* and *Esper Dream 2* for the VRC6, *Megami Tensei II*, *Erika to Satoru no Yume
+Bouken* and *King of Kings* for the Namco 163. Q-126 and Q-127 both name what those runs would
+settle.
+
+## Step 8 — the suites, the campaign ROM by ROM, and the document
+
+### The suites
+
+| check | result | against the tip `ab99dc1a` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, **no new `allow`** in either crate | same |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **782 passed, 0 failed, 8 ignored** | the tip's 746 plus this lot's 36 |
+| `cargo test --release -p zax-harness --test test_roms_tests -- --test-threads=1` | **14 passed** | same 14 groups, untouched |
+| `--ignored`, with both ROM folders | **7 of 8 pass** | **same 7** |
+
+The CPU, PPU, APU and mapper suites are all inside the first line; nothing in them was edited
+except the three tests named in step 4 (the CPU-cycle latch sweep's expected list, and the two that
+used mapper 19 as their example of an unimplemented number).
+
+**The one `--ignored` failure is not this lot's**:
+`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`, which MF-4d-fix named as out
+of scope and which fails identically on this lot's baseline and on ZR-1's and ZR-2's trees. The
+seven that pass include the two that matter most here —
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`, which compares pixels, tiles,
+audio **and** cycle counts over 1 200 frames of the commercial set, and
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`, the P1 criterion MF-4d-fix exists
+to have restored.
+
+### The campaign, ROM by ROM
+
+`zax-harness test-roms` over `assets-free/test-roms`, against MF-4d-fix's own run:
+
+    331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+**Identical totals, and identical rows.** `campdiff.py` reports *rows whose verdict, code or
+message differs: 0*. Comparing all 331 rows **field by field** — ignoring `.ms`, which is wall
+clock and moves on most rows in any two runs, and `.shot`, because this run used `--no-shots` —
+**zero rows differ on any field**: verdict, code, message, mapper and detail alike. Inside the
+`AccuracyCoin` row, all **147** sub-tests are unchanged and the tally stays at **128/147**, which
+is MF-4d-fix's figure after Q-125.
+
+That is a stronger result than the brief asked for. It asked for "every row identical, except the
+rows of the new boards", and **there are no rows of the new boards**: step 7's sweep says the
+campaign contains no image on mappers 19, 24, 26 or 210, so the expected exception set is empty and
+the campaign is identical outright.
+
+### The document
+
+`docs/review/MF-T-test-roms.md` gains a "What lot MF-5a changed" section, which records the
+identical campaign, the header sweep with the mapper list, the sixty unit tests and the two
+commercial sets that stand in for the ROMs this tree has not got, the eight ignored tests with
+their results, and that the regression guard is untouched at MF-4d-fix's floor of 128. The totals
+table's note now says MF-4d-fix and MF-5a moved no row either.
+
+## What the lot delivered, against the brief
+
+| brief item | state |
+| --- | --- |
+| the VRC6 board, mappers 24 and 26, IRQ **shared** with `vrc2_vrc4.rs` | step 1: `vrc_irq.rs` extracted, `mf_5a_the_vrc6_and_the_vrc4_share_one_irq_counter` proves the share |
+| the VRC6 audio, two pulses, the sawtooth, `$9003` | step 2, mixed through `expansion_audio_output` at the page's own anchor |
+| R0's addendum 1, the MMC5's +0.156 % | step 3: `mmc5` is **−0.391 %** against `ad1ad765`, and **−0.621 %** after step 4 |
+| R0's addendum 2, `Ppu2C02::read`'s +11 per register read | step 3: the prologue is shrink-wrapped again, +0.0144 % left on one ROM where it was +0.161 %; the residual is one named instruction and the variant that would remove it was refuted |
+| the Namco 163 board, mapper 19 and mapper 210 submappers 1 and 2 | step 4, with the CIRAM modes at **Q-126** |
+| the Namco 163 audio, up to eight channels, one update per 15 cycles, `$7F`, `$E000`'s disable bit | step 4, at **Q-127**'s level |
+| save states for both boards and both audio blocks | step 6, seven tests, 600 cycles of `M` identical after a restore |
+| the ROM check | step 7: **there is no ROM to run**, re-established by decoding all 330 headers |
+| the suites and the campaign ROM by ROM | step 8: **331 rows identical on every field** |
+| no performance regression | every one of the thirteen ROMs is **below the branch tip**, total −0.159 %; twelve of thirteen below `ad1ad765`, total −1.226 % |
+
+**Three things are left for R0**, each with a ticket and a one-constant or one-function fix:
+Q-123 (the VRC6's CHR-ROM nametables), Q-126 (the Namco 163's two CIRAM modes and submapper 0 of
+mapper 210) and Q-127 (the Namco 163's level). All three need the commercial titles to settle, and
+all three say so.
+
 ## Status
 
 - [x] step 1 — the VRC6 board, mappers 24 and 26 (Q-123 opened: `$B003` bit 4)
@@ -1116,5 +1218,5 @@ binary of step 4 stands and no new instruction count was taken.
 - [x] step 4 — the Namco 163 board, mappers 19 and 210 (Q-126 opened: the two PPU modes, and submapper 0 of mapper 210)
 - [x] step 5 — the Namco 163 audio (Q-127 opened: the level). Shipped in step 4's commit; the section above says why the two cannot compile apart
 - [x] step 6 — save states (seven tests; 600 cycles of `M` identical after a restore, on both boards)
-- [ ] step 7 — the ROM check
-- [ ] step 8 — the suites and the campaign
+- [x] step 7 — the ROM check: **no ROM exists** for mappers 19, 24, 26 or 210; the sweep of all 330 headers is in the step
+- [x] step 8 — the suites (**782 / 0 / 8**, 7 of 8 ignored) and the campaign (**331 rows identical on every field**), `MF-T-test-roms.md` updated

@@ -39,6 +39,10 @@ outputs its own source names. **Lot MF-4c moved no row either**, and moved `Accu
 "What lot MF-4c changed" at the end of this document for the before/after of each. Everything
 else in this document is the campaign as MF-T first measured it.
 
+**Lots MF-4d-fix and MF-5a moved no row either**, and MF-5a could not have: see "What lot MF-5a
+changed" at the end, which records that **no ROM in this tree exercises either of the two boards
+that lot added**.
+
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
 ## Per suite
@@ -1326,3 +1330,76 @@ process. The default-threaded run dies with `STATUS_ACCESS_VIOLATION` at both th
 this lot's end — the group set is unchanged here, only two assertions in one group — and the
 earlier all-crate runs pass because `ZAXNES_TEST_ROMS` is unset there and every group returns at
 once. A lot that wants the guard green by default has to cap the threads inside the file.
+
+## What lot MF-5a changed
+
+**Nothing, and that is the finding rather than the absence of one.**
+
+The lot added two boards — Konami's VRC6 (iNES mappers 24 and 26) and the Namco 163 with the two
+Namcot ASICs cut from it (mappers 19 and 210) — and then re-ran this campaign and compared it row
+by row against lot MF-4d-fix's:
+
+```
+331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+```
+
+**Identical totals, and identical rows**: comparing all 331 rows field by field, ignoring `.ms`
+(wall clock, which moves on most rows in any two runs) and `.shot` (this run was made with
+`--no-shots`), **zero rows differ** — verdict, code, message, mapper and detail alike. Inside the
+`AccuracyCoin` row, all **147** sub-tests are unchanged and the tally stays at **128/147**, which
+is MF-4d-fix's figure after Q-125 gave back the `$2007 read w/ rendering` row.
+
+### Why no row could move, and the sweep that establishes it
+
+**There is no test ROM for any of the four mapper numbers anywhere in `assets-free/test-roms`.**
+That is not a naming accident: every `.nes` under the tree was opened and its iNES header decoded,
+submapper byte included. The 330 images with a valid header carry
+
+    mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180
+
+and **mappers 19, 24, 26 and 210 have zero images each**. `holy-mapperel` has no `M19`, `M24`,
+`M26` or `M210` target — its highest is `M180` — and `m22chrbankingtest` is a VRC2a, which mapper
+22 already covered before this lot.
+
+So the campaign is the right regression check for this lot and the wrong acceptance check for it:
+it proves the two new boards cost the other eighteen mappers nothing, and it can say nothing at
+all about whether the new boards are *right*. What stands in its place:
+
+* **sixty unit tests** written against the nesdev pages and cross-checked against
+  `third_party/mesen2` — ten on the VRC6 board and fourteen on its sound (lot steps 1 and 2),
+  thirteen on the Namco 163 board and sixteen on its sound (step 4), and seven on the two
+  savestates (step 6) — with the four provisional choices pinned by name (`Q-123` twice, `Q-126`
+  three times, `Q-127` once);
+* **R0's commercial titles**, which are the only images in reach that run these boards:
+  *Akumajou Densetsu*, *Madara* and *Esper Dream 2* for the VRC6, and *Megami Tensei II*,
+  *Erika to Satoru no Yume Bouken* and *King of Kings* for the Namco 163.
+
+### The ignored tests, with both ROM folders present
+
+`cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --ignored --test-threads=1`,
+with `ZAXNES_TEST_ROMS` on this tree's ROMs and `ZAXNES_ROMS` on the owner's commercial folder:
+**7 of the 8 pass**, which is MF-4d-fix's result exactly.
+
+| ignored test | result |
+| --- | --- |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | pass |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | pass |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | pass |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | pass |
+| `req_core_113_dmc_dma_during_read4_is_p3` | pass |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | pass |
+| `the_cost_of_one_capture_and_one_restore` | pass |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **fail**, and not this lot's |
+
+The golden-pixels test is the one that matters most here: it compares pixels, tiles, audio **and**
+cycle counts over 1 200 frames of the commercial set, and it passing is what says the two new
+`Board` variants changed nothing for a game on another board. The one failure is the patch-detection
+test MF-4d-fix named as out of scope; it fails identically on this lot's baseline and on ZR-1's and
+ZR-2's trees.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` is **untouched** by this lot, and its
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green` floor stays at MF-4d-fix's
+**128** with the same fifteen rows named. `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness
+--test test_roms_tests -- --test-threads=1`: **14 passed**, the same 14 groups.
