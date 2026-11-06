@@ -161,3 +161,113 @@ instruments — four level-2 `core` figures identical to the instruction and `sm
 own −20 823, every ROM of PR-1's thirteen inside the ±57 k whole-process floor against MF-6c step
 9's shipped build, `mmc5` on the **favourable** layout at −6 196, and all eleven pinned symbols
 holding with `default_cpu_read` at **429**.
+
+## Step 1 — the limit reproduced, and it is **three times** what MF-6c measured
+
+### What was measured, and why these two experiments are the right ones
+
+The brief asks for "one more variant in each shared enum, priced on `mmc5`". The two **parked
+boards are exactly that experiment**, and they are also the two boards step 5 has to un-park, so
+no synthetic variant was needed for either:
+
+| experiment | label | what it adds | the enum |
+| --- | --- | --- | --- |
+| A | `mfct-1-x1small1` | `board-taito-x1` put into `default` | `SmallBoard`'s **eleventh and twelfth** variants |
+| B | `mfct-1-gt111dec` | `board-111` put into `default` | `DecodeBoard`'s **fifth** variant |
+
+`IrqBoard` is not covered here, for a reason: no parked board belongs to it, so pricing its
+eleventh variant needs a synthetic one. MF-6c step 5 measured it (two more variants, two units)
+and **step 6 of this lot re-prices all three enums on the fixed tree**, which is where the number
+a successor needs lives.
+
+Each experiment is one line of `rust/crates/zax-nes/Cargo.toml`'s `default` list, packed with
+`make-tree.sh --worktree`; the file is back to `44f77f72`'s in the committed tree.
+
+### Experiment A — `SmallBoard`'s eleventh and twelfth variants: `mmc5` **+0.198 %**
+
+`callgrind-diff.py`, against `mfct-0-44f77f72`:
+
+| ROM | `44f77f72` | **experiment A** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 287 870 | **3 308 284 219** | −3 651 | −0.000 % |
+| `oamstr` | 3 318 485 575 | **3 318 480 156** | −5 419 | −0.000 % |
+| `m1` | 4 885 953 734 | **4 885 941 716** | −12 018 | −0.000 % |
+| `m4` | 5 472 522 428 | 5 472 580 799 | +58 371 | +0.001 % |
+| `m0` | 5 520 499 653 | **5 520 471 147** | −28 506 | −0.001 % |
+| `metroid` | 5 115 985 915 | **5 115 936 722** | −49 193 | −0.001 % |
+| `smb1` | 5 996 362 814 | **5 996 355 331** | −7 483 | −0.000 % |
+| `mm2` | 6 017 861 569 | **6 017 850 941** | −10 628 | −0.000 % |
+| `z2` | 6 291 442 776 | 6 291 470 949 | +28 173 | +0.000 % |
+| `readbuf` | 6 834 534 036 | 6 834 539 959 | +5 923 | +0.000 % |
+| `duelito` | 7 380 421 165 | 7 380 476 374 | +55 209 | +0.001 % |
+| `smb3` | 7 949 489 726 | **7 949 470 464** | −19 262 | −0.000 % |
+| `mmc5` | 11 279 358 122 | 11 301 718 016 | **+22 359 894** | **+0.198 %** |
+| **total** | **79 371 205 383** | 79 393 576 793 | +22 371 410 | +0.028 % |
+
+One symbol, as in all nine of MF-6c's measurements: `Cartridge::default_cpu_read`,
+**283 356 728 → 305 726 996, +22 370 268**. And that is **exactly 3 × 7 456 756**, the quantum
+MF-6c measured — so the figure is the same quantum and the **same two variants now buy three
+units of it instead of one**. MF-6c step 2 and step 3 recorded one unit for this pair against
+`8496c503`; eight commits of boards later, the price has tripled. That is the whole case for this
+lot: the wall is not stationary, it is moving away.
+
+### Experiment B — `DecodeBoard`'s fifth variant: `mmc5` **+0.066 %**, one unit
+
+| ROM | `44f77f72` | **experiment B** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `mmc5` | 11 279 358 122 | 11 286 848 022 | **+7 489 900** | **+0.066 %** |
+| `m4` | 5 472 522 428 | 5 472 542 909 | +20 481 | +0.000 % |
+| every other ROM | | | within **±53 100** | ≤ +0.000 % |
+| **total** | **79 371 205 383** | 79 378 523 753 | +7 318 370 | +0.009 % |
+
+`Cartridge::default_cpu_read`, **283 356 728 → 290 813 484, +7 456 756** — MF-6c step 9's figure
+to the instruction, for the tenth time in this project.
+
+### **The instruction, and MF-6c's diagnosis sharpened**
+
+MF-6c named `leaq 240(%rdi), %rax` hoisted above "the inlined `Board::prg_ram_enabled` dispatch".
+On this tree the dump says something more precise, and it matters for the fix.
+`fn.py lin-mfct-0-44f77f72.s default_cpu_read` is **429** instructions and
+`lin-mfct-1-gt111dec.s` **445**, and the two bodies differ in **one instruction that is not new
+code**:
+
+| | `44f77f72` (cheap) | experiment B (dear) |
+| --- | --- | --- |
+| the head, for $6000-$7FFF | `cmpl $24575` / `jle` / **`leaq 240(%rdi), %rax`** / jump table | *identical* |
+| the tail, for everything else | `movzbl 1608(%rdi), %eax` / … / `jmpq *%rax` — **11 instructions** | `movzbl 1608(%rdi), %edx` / `leal -2(%rdx), %r8d` / **`leaq 240(%rdi), %rax`** / … — **12** |
+
+So the hoist is **already in the head at the baseline** and costs nothing there: `movswl %si, %ecx`
+followed by `cmpl $24575, %ecx; jle` is one *signed* comparison that sends both $0000-$5FFF and
+$8000-$FFFF away in two instructions, because a `u16` above $7FFF sign-extends negative. The head
+is therefore never entered by a read of $8000-$FFFF, which is nearly every read an MMC5 game makes.
+
+**What costs is the second copy of the same `leaq`, in the `Board::try_read_prg` jump table's
+prologue** — the tail every $8000-$FFFF read goes through. `&self.board` is wanted there by the
+*cold* arms of that table, among them mapper 116's boxed `IrqBoard::Somari(Box<Somari>)`, whose
+arm is `movq (%rax), %r10` followed by a nested jump table; LLVM materialises the pointer above
+the table rather than inside the arm, and it then runs on every call. One instruction × 7 456 756
+reads of `mmc5exram` over 300 frames is **7 456 756**, to the instruction.
+
+`default_cpu_read` holds the `try_read_prg` table **twice** — once as the fall-through of the
+$6000-$7FFF head (PRG-RAM disabled, or none) and once as the tail — and the dear layout is the one
+in which the *tail* copy gets the hoist. That is why no shape of a board's own code ever moved the
+figure (MF-6c step 2 measured seven, step 9 one more): the trigger is how much pressure the whole
+429-instruction function puts on that one block.
+
+### The figure to beat
+
+> **One more variant in a shared enum costs `mmc5` one or more units of exactly 7 456 756
+> instructions over 300 frames (+0.066 % each), paid as one hoisted `leaq` per CPU read in
+> `Cartridge::default_cpu_read`'s copy of the `Board::try_read_prg` jump table. At `44f77f72`
+> `SmallBoard`'s eleventh and twelfth variants cost three units (+0.198 %) and `DecodeBoard`'s
+> fifth costs one (+0.066 %), against a tolerance of +0.02 %.**
+
+The target of step 2 is that both of those come inside +0.02 % on every ROM.
+
+[PROGRESS] MF-CART step 1/8 done: the limit reproduced at the new baseline and **worse than
+MF-6c's** — `board-taito-x1` is `mmc5` **+22 370 268, three units of the same 7 456 756** and
++0.198 %, `board-111` is one unit and +0.066 %, both of them entirely
+`Cartridge::default_cpu_read`; and the dump sharpens the diagnosis — the hoisted
+`leaq 240(%rdi), %rax` that costs is the one in the **`Board::try_read_prg`** table's prologue on
+the $8000-$FFFF tail, not the one in the `prg_ram_enabled` head, which a single signed compare
+already skips.
