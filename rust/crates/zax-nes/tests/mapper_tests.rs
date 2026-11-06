@@ -61,7 +61,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 70 and 152 (Bandai 74161/7432 without and with mirroring control), 75 (Konami VRC1)
     //   and 232 (Camerica BF9096) (MF-6a step 3);
     // * 94 (HVC-UN1ROM, a wiring of the UxROM board), 185 (CNROM with the security diodes) and
-    //   155 (the MMC1 with no PRG-RAM disable) (MF-6a step 4).
+    //   155 (the MMC1 with no PRG-RAM disable) (MF-6a step 4);
+    // * 73 (Konami VRC3) (MF-6b step 1).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -69,7 +70,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         .collect();
     assert_eq!(
         vec![
-            19, 24, 26, 33, 69, 70, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140, 152, 154,
+            19, 24, 26, 33, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140, 152, 154,
             155, 156, 180, 184, 185, 206, 210, 232
         ],
         extra
@@ -2434,4 +2435,52 @@ fn req_core_100_mapper_155_ignores_the_mmc1_prg_ram_disable() {
             "mapper {mapper}: re-enabled"
         );
     }
+}
+
+// ------------------------------------------- Konami VRC3 (73)
+
+/// nesdev ("VRC3"): "CPU $8000-$BFFF: 16 KiB switchable PRG ROM bank" and "CPU $C000-$FFFF:
+/// 16 KiB PRG ROM bank, fixed to the last bank", the register being `$F000-$FFFF` with "three
+/// bits" of bank. The mirroring is hard-wired and `$E000-$EFFF` is not decoded at all, which is
+/// what makes `$A000` an IRQ latch on this board where every other Konami chip has an
+/// arrangement register there.
+#[test]
+fn req_core_100_the_vrc3_banks_16_kib_at_8000_and_fixes_the_last_at_c000() {
+    let mut core = MapperRom::new(73).prg(8).chr(32).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    core.write_memory(0xF000, 0x02);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    // Three bits, so bit 3 of the written value is not latched: $0B selects bank 3.
+    core.write_memory(0xF000, 0x0B);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+
+    // $E000-$EFFF is not a register on this board.
+    core.write_memory(0xE000, 0x00);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+
+    // And no register of the board moves CHR: the whole 8 KiB is fixed.
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    for address in [0x8000u16, 0x9000, 0xA000, 0xB000, 0xC000, 0xD000, 0xF000] {
+        core.write_memory(address, 0x0F);
+        assert_eq!(
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            core.chr_windows(),
+            "a write to {address:04X} moved CHR"
+        );
+    }
+}
+
+/// nesdev ("VRC3"): "PPU $0000-$1FFF: 8 KiB CHR RAM". REQ-CORE-012 gives an iNES 1.0 image with
+/// no CHR-ROM **32 KiB** of CHR-RAM, which this board has no bank line to reach, so the size is
+/// the board's and `registry::board_memory_sizes` settles it at load.
+#[test]
+fn req_core_100_the_vrc3_carries_eight_kib_of_chr_ram_and_not_the_default_thirty_two() {
+    let core = MapperRom::new(73).prg(8).chr(0).load();
+    assert_eq!(
+        0x2000,
+        core.cartridge().unwrap().memory().chr_ram().len(),
+        "the board's 8 KiB, not REQ-CORE-012's default"
+    );
 }

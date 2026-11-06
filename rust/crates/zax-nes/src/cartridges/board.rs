@@ -3,9 +3,9 @@
 
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
-    Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Namcot108, Nrom, Rambo1,
-    SmallBoard, UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
+    Daou306, Fme7, GxRom, IremG101, IrqBoard, JalecoJ87, JalecoSs88006, Mapper, Mapper015,
+    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Namcot108, Nrom,
+    Rambo1, SmallBoard, UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -106,6 +106,12 @@ pub enum Board {
     /// `Ppu2C02::run_dots` 0.067 % to 0.131 % on eight of lot PR-1's thirteen ROMs in register
     /// pressure alone, and one costs nothing.
     SmallBoard(SmallBoard),
+    /// The boards whose counter can pull /IRQ, **behind one discriminant** (MF-6b step 1):
+    /// mapper 73 (Konami VRC3). [`IrqBoard`]'s own note has the reasoning, which is
+    /// [`SmallBoard`]'s read the other way round — every board in that enum answers *no* to
+    /// [`Mapper::irq_asserted`] and therefore shares the empty arm; every board in this one
+    /// answers *yes* and can only share the others'.
+    IrqBoard(IrqBoard),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -146,6 +152,7 @@ macro_rules! dispatch {
             Board::Vrc7($b) => $body,
             Board::Namcot108($b) => $body,
             Board::SmallBoard($b) => $body,
+            Board::IrqBoard($b) => $body,
         }
     };
 }

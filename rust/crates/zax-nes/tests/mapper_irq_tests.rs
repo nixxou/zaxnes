@@ -536,3 +536,97 @@ fn mf_5a_the_vrc6_and_the_vrc4_share_one_irq_counter() {
     assert_eq!(expected, tick_until_irq(&mut vrc4, 1000));
     assert_eq!(expected, tick_until_irq(&mut vrc6, 1000));
 }
+
+// ---------------------------------------------------------------- VRC3 (73)
+
+/// The VRC3's reload value arrives as **four** nibbles, at $8000, $9000, $A000 and $B000
+/// (nesdev, "VRC3"), where a VRC4 has two and a VRC6 writes the byte whole.
+fn write_vrc3_latch(core: &mut NesCore, latch: u16) {
+    for nibble in 0..4u16 {
+        let value = ((latch >> (nibble * 4)) & 0x0F) as u8;
+        core.write_memory(0x8000 + nibble * 0x1000, value);
+    }
+}
+
+#[test]
+fn req_core_100_the_vrc3_counter_is_sixteen_bits_wide_and_counts_cpu_cycles_up() {
+    // nesdev ("VRC3"): "The counter is 16 bits instead of 8 bits, and there is no scanline mode,
+    // only CPU cycle mode"; it "is incremented each CPU cycle", and "when it overflows from
+    // $FFFF, an IRQ is generated, and the counter is reloaded with the 16-bit latch value".
+    let mut core = MapperRom::new(73).chr(32).load();
+    write_vrc3_latch(&mut core, 0x01F0);
+    // `.... .MEA`: E alone, so the counter is reloaded and counts all sixteen bits.
+    core.write_memory(0xC000, 0x02);
+    assert_eq!(0x1_0000 - 0x01F0, tick_until_irq(&mut core, 70_000));
+
+    // "writing any value to this register will acknowledge the pending IRQ, and copy the A bit
+    // to the E bit" — A was clear, so the counter stops.
+    core.write_memory(0xD000, 0x00);
+    assert!(!irq(&core));
+    assert_eq!(-1, tick_until_irq(&mut core, 300));
+}
+
+#[test]
+fn req_core_100_the_vrc3_eight_bit_mode_wraps_at_ff_and_leaves_bits_8_to_15_alone() {
+    // nesdev ("VRC3"), the `M` bit: in 8-bit mode "IRQs are generated when the lower 8 bits
+    // overflow from $FF". The same latch that takes 65 040 cycles above takes 16 here, which is
+    // what says the mode is a counter **width** and not the VRC4's prescaler bypass.
+    let mut core = MapperRom::new(73).chr(32).load();
+    write_vrc3_latch(&mut core, 0x01F0);
+    core.write_memory(0xC000, 0x07); // A, E and M.
+    assert_eq!(0x100 - 0xF0, tick_until_irq(&mut core, 1000));
+
+    // A is set, so the acknowledge leaves it running, and the low byte reloaded from the low
+    // byte of the latch.
+    core.write_memory(0xD000, 0x00);
+    assert!(!irq(&core));
+    assert_eq!(0x100 - 0xF0, tick_until_irq(&mut core, 1000));
+
+    // Back to sixteen bits with E **clear**, so nothing is reloaded, and re-enabled by the
+    // acknowledge: what is left to count is $10000 - $01F0 and not $10000 - $00F0, so bits 8-15
+    // are still the $01 the first reload put there and no wrap of the low byte has touched them.
+    core.write_memory(0xC000, 0x01);
+    core.write_memory(0xD000, 0x00);
+    assert_eq!(0x1_0000 - 0x01F0, tick_until_irq(&mut core, 70_000));
+}
+
+#[test]
+fn req_core_100_the_vrc3_enable_without_a_reload_leaves_the_counter_armed() {
+    // The case `req_core_100_the_vrc6_counter_*` pins for the VRC6, on this chip: a control
+    // write with E clear reloads nothing and clocks nothing, and the acknowledge that copies a
+    // set A into E starts the counter from wherever it was — here the $0000 it powered on with,
+    // which is $100 8-bit clocks from its wrap.
+    let mut core = MapperRom::new(73).chr(32).load();
+    write_vrc3_latch(&mut core, 0xFFF0);
+    core.write_memory(0xC000, 0x05); // A and M, E clear.
+    assert_eq!(-1, tick_until_irq(&mut core, 300));
+
+    core.write_memory(0xD000, 0x00);
+    assert_eq!(0x100, tick_until_irq(&mut core, 1000));
+}
+
+#[test]
+fn mf_6b_the_vrc3_and_the_vrc4_fire_on_the_same_cycle() {
+    // MF-6b step 1 built the VRC3's counter as a width parameter on `VrcIrq` first — the shape
+    // MR-4-3 gave the MC-ACC — and measured it: the extra latch byte moves `pending` inside
+    // `Vrc2Vrc4`, `Vrc6` and `Vrc7`, those offsets are operands in the per-board blocks
+    // `Board::irq_asserted` becomes inside `Cpu6502::branch`, and eleven of lot PR-1's thirteen
+    // ROMs paid for it. So `Vrc3Irq` stands beside `VrcIrq` instead, and what the two chips do
+    // share — the `.... .MEA` control register, the reload on `E`, the acknowledge that copies
+    // `A` into `E`, and an up-counter that fires on the step out of its top value — is what this
+    // test pins, in the shape `mf_5a_the_vrc6_and_the_vrc4_share_one_irq_counter` gave it: given
+    // the same latch and the same 8-bit counting, through two register decodes with nothing in
+    // common, a mapper-73 board and a mapper-23 VRC4 must fire on the same cycle.
+    let mut vrc4 = MapperRom::new(23).chr(32).load();
+    vrc4.write_memory(0xF000, 0x0A); // Latch low nibble.
+    vrc4.write_memory(0xF001, 0x0C); // Latch high nibble: $CA.
+    vrc4.write_memory(0xF002, 0x06); // Enable, cycle mode.
+
+    let mut vrc3 = MapperRom::new(73).chr(32).load();
+    write_vrc3_latch(&mut vrc3, 0x00CA);
+    vrc3.write_memory(0xC000, 0x06); // Enable, 8-bit mode.
+
+    let expected = 0x100 - 0xCA;
+    assert_eq!(expected, tick_until_irq(&mut vrc4, 1000));
+    assert_eq!(expected, tick_until_irq(&mut vrc3, 1000));
+}

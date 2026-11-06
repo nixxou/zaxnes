@@ -9,10 +9,10 @@
 use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, Bandai74161, BandaiFcg, Bf9096, Caltron6In1, CnRom, CnRomProtect,
-    Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremTamS1, JalecoJ87,
-    JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5,
-    Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1, SmallBoard, Sunsoft1, Sunsoft2,
-    TaitoTc0190, UnRom512, UxRom, Vrc1, Vrc2Vrc4, Vrc6, Vrc7,
+    Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremTamS1, IrqBoard,
+    JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3,
+    Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1, SmallBoard, Sunsoft1, Sunsoft2,
+    TaitoTc0190, UnRom512, UxRom, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -21,7 +21,7 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
-    34, 41, 64, 66, 69, 70, 71, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 118, 140, 152,
+    34, 41, 64, 66, 69, 70, 71, 73, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 118, 140, 152,
     154, 155, 156, 180, 184, 185, 206, 210, 225, 228, 232,
 ];
 
@@ -87,6 +87,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // RAM (in two 8KiB RAMs)", not the header's 32 KiB default.
         13 => BoardMemorySizes {
             chr_ram: Some(CpRom::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("VRC3"): "PPU $0000-$1FFF: 8 KiB CHR RAM", unbanked, and the board has no CHR
+        // bank line at all. REQ-CORE-012's default would give an iNES 1.0 Salamander dump 32 KiB
+        // of it, three quarters of which the chip cannot address. Mesen 2 agrees
+        // (`VRC3.h:17`, `GetChrPageSize` 0x2000 with one page selected).
+        73 => BoardMemorySizes {
+            chr_ram: Some(Vrc3::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // The Namco 163 carries the four 2 KiB windows of $6000-$7FFF whatever the header
@@ -269,6 +277,9 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // MF-6a step 4: CNROM with the security diodes. `CnRomProtect`'s note says why it
         // is here and not a parameter of `CnRom`.
         185 => Board::SmallBoard(SmallBoard::CnRomProtect(CnRomProtect::new(memory))),
+        // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
+        // `IrqBoard`'s note has the measurement that put them there.
+        73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),
         _ => return None,
     })
 }

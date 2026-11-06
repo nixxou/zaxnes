@@ -354,9 +354,11 @@ impl Cartridge {
             // 163 with the IRQ counter and the sound cut out, so their board moves on no CPU
             // cycle at all and `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`
             // proves it rather than taking its word.
+            // MF-6b step 1 adds the Konami VRC3 (73), whose 16-bit counter is clocked by M2 and
+            // has no scanline mode at all (nesdev, "VRC3").
             clocks_on_cpu_cycle: matches!(
                 mapper,
-                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69 | 85
+                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69 | 73 | 85
             ),
         };
         cartridge.reset();
