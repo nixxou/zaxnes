@@ -17,6 +17,7 @@ mod adventure_island;
 mod blastermaster;
 mod castlevania;
 mod excitebike;
+mod faxanadu;
 mod ff1;
 pub mod guest;
 mod kirby;
@@ -313,6 +314,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
         kirby::SOURCE_CRC => Some(&kirby::Kirby),
         crc if kirby::OTHER_CRCS.contains(&crc) => Some(&kirby::Kirby),
+        faxanadu::SOURCE_CRC => Some(&faxanadu::Faxanadu),
         _ => None,
     }
 }
