@@ -10,7 +10,8 @@ use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mapper078,
-    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4, Vrc6,
+    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Rambo1, UnRom512, UxRom,
+    Vrc2Vrc4, Vrc6,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -18,8 +19,8 @@ use crate::rom::InesHeader;
 /// Mapper numbers this build can run, in ascending order (REQ-CORE-102). 116 is optional in
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
-    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 34, 41,
-    64, 66, 69, 71, 78, 87, 101, 118, 156, 180, 225, 228,
+    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 34,
+    41, 64, 66, 69, 71, 78, 87, 101, 118, 156, 180, 210, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -84,6 +85,26 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // RAM (in two 8KiB RAMs)", not the header's 32 KiB default.
         13 => BoardMemorySizes {
             chr_ram: Some(CpRom::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // The Namco 163 carries the four 2 KiB windows of $6000-$7FFF whatever the header
+        // says, plus the chip's own 128 bytes behind them -- that RAM lives at the end of
+        // PRG-RAM so that REQ-CORE-095's single battery slice carries it, which is also
+        // Mesen's `.sav` layout. See `Namco163`'s own note.
+        19 => BoardMemorySizes {
+            prg_ram: Some(Namco163::PRG_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 210"): the Namcot 175 has "0-8 KiB" of PRG-RAM and the 340
+        // "contains no WRAM". Neither has the chip's internal RAM.
+        210 => BoardMemorySizes {
+            prg_ram: Some(
+                match Namco163::variant_of(210, if header.is_nes20 { header.submapper } else { 0 })
+                {
+                    NamcoVariant::Namco340 => 0,
+                    _ => 4 * 0x800,
+                },
+            ),
             ..BoardMemorySizes::default()
         },
         // MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None".
@@ -181,6 +202,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         18 => Board::JalecoSs88006(JalecoSs88006::new(memory)),
         21 | 22 | 23 | 25 | 27 => Board::Vrc2Vrc4(Vrc2Vrc4::new(memory, mapper)),
         // Mapper 26 is the VRC6b, the same chip with A0 and A1 swapped (nesdev, "VRC6").
+        19 | 210 => Board::Namco163(Namco163::new(memory, mapper)),
         24 | 26 => Board::Vrc6(Vrc6::new(memory, mapper)),
         28 => Board::Action53(Action53::new(memory)),
         30 => Board::UnRom512(UnRom512::new(memory)),

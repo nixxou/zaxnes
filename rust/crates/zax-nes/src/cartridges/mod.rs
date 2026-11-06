@@ -330,7 +330,7 @@ impl Cartridge {
             // The MMC5 ($5105), the TxSROM of mapper 118 (bit 7 of its CHR registers) and — since
             // MF-5a — the VRC6, whose `$B003` and CHR registers between them pick a CIRAM page
             // per table (nesdev, "VRC6", the `$B003` tables).
-            nametable_pages_vary: matches!(mapper, 5 | 24 | 26 | 118),
+            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 118),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
@@ -339,12 +339,17 @@ impl Cartridge {
             watches_ppu_reads: matches!(mapper, 4 | 5 | 64 | 118),
             watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
             mapper_number: mapper,
-            // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), Konami's VRC2/VRC4
-            // (21, 22, 23, 25, 27) and VRC6 (24, 26), the RAMBO-1 (64) and the Sunsoft FME-7
-            // (69). See the field.
+            // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
+            // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27) and VRC6 (24, 26), the RAMBO-1
+            // (64) and the Sunsoft FME-7 (69). See the field.
+            //
+            // **Mapper 210 is deliberately absent**: the Namcot 175 and 340 are the Namco
+            // 163 with the IRQ counter and the sound cut out, so their board moves on no CPU
+            // cycle at all and `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`
+            // proves it rather than taking its word.
             clocks_on_cpu_cycle: matches!(
                 mapper,
-                5 | 16 | 18 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69
+                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69
             ),
         };
         cartridge.reset();
@@ -967,18 +972,24 @@ mod tests {
             }
         }
 
-        // Guards against a vacuous pass, and the list is **short on purpose**: only the two
+        // Guards against a vacuous pass, and the list is **short on purpose**: only the three
         // boards whose state moves with no register written at all appear. The MMC5's PPU idle
-        // counter runs from power-on, and the FME-7 carries the Sunsoft 5B, whose divide-by-16
-        // prescaler ticks whether or not a volume was ever set. The FCG, the SS88006, the VRC
-        // IRQ, the RAMBO-1's cycle mode and the VRC6's three oscillators all need an enable
-        // bit first, so they are latched here without this sweep seeing them move — what
-        // covers those is `mapper_irq_tests` and the two audio suites, which drive whole
-        // machines through `step_cpu_cycle` and would fail outright if the latch dropped them.
+        // counter runs from power-on; the FME-7 carries the Sunsoft 5B, whose divide-by-16
+        // prescaler ticks whether or not a volume was ever set; and the Namco 163's sound
+        // multiplexer walks its channels every fifteen cycles from power-on, which is MF-5a
+        // step 4's addition. The FCG, the SS88006, the VRC IRQ, the RAMBO-1's cycle mode and the
+        // VRC6's three oscillators all need an enable bit first, so they are latched here
+        // without this sweep seeing them move — what covers those is `mapper_irq_tests` and the
+        // audio suites, which drive whole machines through `step_cpu_cycle` and would fail
+        // outright if the latch dropped them.
+        //
+        // **Mapper 210 is absent and that is the point of its own guard**: the Namcot 175 and
+        // 340 are the 163 with the IRQ counter and the sound cut out, so `Namco163::on_cpu_cycle`
+        // returns at once for them and they are rightly not latched.
         assert_eq!(
             moved,
-            [5, 5, 69, 69],
-            "expected the MMC5's idle counter and the FME-7's 5B prescaler to move on a bare              CPU cycle, and the sweep to reach them"
+            [5, 5, 19, 19, 69, 69],
+            "expected the MMC5's idle counter, the Namco 163's sound multiplexer and the FME-7's              5B prescaler to move on a bare CPU cycle, and the sweep to reach them"
         );
     }
 

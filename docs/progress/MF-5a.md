@@ -798,13 +798,267 @@ and recomputed by `load_state`; `Ppu2C02::read_data` is a code move. The format 
 measured on — the only difference is the doc comment on `read_data` that records the refuted
 variant.
 
+## Steps 4 and 5 — the Namco 163 board and its audio, in one commit
+
+**The two plan steps ship together**, and the reason is structural rather than a shortcut: the
+chip's channel registers *are* bytes $40-$7F of its internal RAM, so the audio has no registers of
+its own to build a board around, and a board without the audio type does not compile. The two
+deliverables are documented separately below and tested separately — thirteen tests for the board
+and sixteen for the sound — and the step numbering keeps the eight the lot has.
+
+### The code
+
+`cartridges/mappers/namco163.rs`, **new**: mapper 19 (Namco 163) and mapper 210 (Namcot 175 and
+340), one struct with a `NamcoVariant`. Nineteen registers on an `address & 0xF800` decode, which
+is the page's own "each register occupying an $800-byte range". PRG (three switchable 8 KiB
+windows and the wired last one), CHR (eight 1 KiB windows), the nametable selects, the 15-bit IRQ
+up-counter, the write protection, the internal RAM's port, and the sound.
+
+`apu/namco163_audio.rs`, **new**: the multiplexer, the eight channels and the RAM port.
+`apu/mixer.rs` gains `NAMCO163_LEVELS`, `NAMCO163_GAIN` and `NAMCO163_TABLE`.
+`registry.rs`: `19 | 210 => Board::Namco163(...)`, `SUPPORTED_MAPPERS` gains 19 and 210, and
+`board_memory_sizes` gives mapper 19 its PRG-RAM. `board.rs`: the variant is **appended**, as that
+file's own note requires. `cartridges/mod.rs`: `nametable_pages_vary` gains 19, and
+`clocks_on_cpu_cycle` gains **19 and not 210**.
+
+### Where the chip's 128 bytes live, and why it is a decision
+
+`Namco163Audio` does **not** hold them. They are the **last 128 bytes of PRG-RAM**, and the board
+is sized `4 x 0x800 + 0x80`. REQ-CORE-095 hands the host one contiguous slice to persist,
+`Cartridge::battery_ram`, and on this board the wavetable *is* the save file's second half — a
+game's instruments have to survive a power cycle. Mesen's `.sav` has the same two parts in the same
+order (`Namco163.h:103-139` writes `_saveRam` then `GetInternalRam()`), so **a save file crosses
+between the two programs**. The CPU's $6000-$7FFF window never reaches the tail:
+`Mapper::prg_ram_offset` takes its modulus over the four 2 KiB windows alone.
+
+Two tests pin it: `req_core_095_the_namco163_internal_ram_is_inside_the_battery_slice` checks the
+slice's length and both halves and that a write to $7FFF cannot reach the wavetable, and
+`req_core_095_a_namco163_without_a_battery_still_has_the_chips_ram` checks that the chip has its
+RAM whatever the header says while the persisted slice is empty.
+
+### `$F800` is one byte doing two jobs, and they overlap
+
+The board page gives `$F800` "KKKK DCBA", whose "upper nybble must equal b0100 to enable writes",
+and the sound page gives the **same byte**'s low seven bits to the RAM address and bit 7 to the
+auto-increment. `$40` is therefore *both* the write-enable key and bit 6 of the address: a game
+that enables PRG-RAM writes moves the RAM port to $40 by the same stroke. That is the chip and not
+a reading of it — Mesen passes the same byte to both halves (`Namco163.h:273-281`) — and it cost
+this step a wrong test before the overlap was noticed, so `set_port` in the test file carries the
+whole explanation and no test assumes the other half of the register.
+
+### The per-window write protection, and the one thing `Mapper` cannot say
+
+Bits A-D "protect four 2 KiB windows of external RAM ($6000-$67FF through $7800-$7FFF)" one by
+one, which is finer than `Mapper::prg_ram_writable` can express — that method is not given the
+address. So the **global** key is `prg_ram_writable` and the **per-window** half is applied by
+`Mapper::intercept_cpu_write`, which drops a write to a protected window and lets every other one
+fall through to the default path. Reads are never gated.
+`req_core_100_namco163_protects_its_prg_ram_by_2_kib_window` walks all four windows through all
+three states.
+
+### The IRQ counter stops rather than wraps
+
+"A 15-bit CPU cycle up-counter" that "increments on each CPU cycle while enabled", firing "upon
+reaching $7FFF". The page says nothing of a reload, so the counter **stops** at $7FFF and the line
+stays asserted until a write to either half acknowledges it — Mesen's `ProcessCpuClock` reads the
+same two sentences the same way. The enable lives in bit 15 of the same `u16` the two registers
+read and write, so a read gives back exactly what was written, enable bit included, and a read
+never acknowledges. Four tests: the count up to the edge, the stand-still while disabled, the stop
+at the top over a thousand cycles, and the read-back.
+
+### Q-126: two PPU modes decoded and not served, and Q-123 is why
+
+Two of the chip's modes need a fetch to come out of a memory this crate's fetch path cannot reach
+from the cartridge, and **the measurement that forbids the only available mechanism is this lot's
+own Q-123**, taken at step 1:
+
+* a **CHR register holding $E0-$FF** selects a CIRAM page as pattern data. `read_vram_inner` sends
+  every `address < 0x2000` to the cartridge, which has no access to `Ppu2C02::vram`. Four
+  mechanisms were costed and every one of them puts a load and a test **on every pattern fetch of
+  every game** (sixteen per tile in `read_pattern_planes`), or a test on every nametable write, or
+  an argument on the fetch path. Served as the CHR-ROM bank the register names — which is exactly
+  what the chip does on the 256 KiB-CHR games that set `$E800`'s disable bits.
+* a **nametable select below $E0** puts a CHR-ROM bank in a nametable. The mechanism exists
+  (`SERVED_BY_CARTRIDGE`) and Q-123 closed it: a **third** distinct arm body in
+  `Board::read_nametable` turns the bitset `read_nametable_inner` folds in into a jump table and
+  grows its prologue by two instructions and 8 bytes of stack per nametable fetch, and Q-123's
+  fifth row proves the trigger is the third body and not its size. Served from CIRAM through the
+  cartridge's mirroring, which is also the power-on state, so a game that has not written its
+  selects behaves like an ordinary board.
+
+Both are **decoded, kept in the registers and serialised**, so a lot that implements them has the
+state it needs. The ticket also carries the third provisional choice: **submapper 0 of mapper 210
+is read as a Namcot 175**, because the two variants differ in whether `$E000`'s top two bits move
+the mirroring, and a 175 misread as a 340 has its mirroring moved by what are bank bits to it — a
+visible fault on the first bank switch — where a 340 misread as a 175 merely keeps the header's
+arrangement. Three tests pin the three choices.
+
+### Q-127: the level, where the page gives a band and not a figure
+
+The page's law is explicit — "simply sum the channel outputs, and divide the output volume by the
+number of active channels", each channel being a four-bit sample times a four-bit volume — so
+`NAMCO163_TABLE` is a straight line of 226 steps and the whole chip has the swing of one channel.
+The **level** is not: the page gives 11.0-13.0 dB over the APU for NES 2.0 submapper 3, 16.0-17.0
+for submapper 4 and 18.0-19.5 for submapper 5, with a per-title table from 11.2 to 19.5 dB, and an
+iNES 1.0 dump carries no submapper at all.
+
+The provisional choice is **one table at 12.0 dB**, the midpoint of submapper 3's band, on Q-118's
+anchor (one channel at full swing against one APU pulse at volume 15). The top step is
+4 890 x 3.981 = about **19 467**, 60 % of full scale — within a few hundred of the VRC6's own
+19 886, so `clip` needs nothing it does not already have. Submapper 3's band is the widest and the
+lowest, so an unlabelled dump placed in it is never louder than the documentation allows. **One
+constant changes it**, and `req_core_075_the_namco163_table_is_linear_through_an_apu_pulse_at_12_db`
+recomputes all 226 entries at runtime against that constant.
+
+**The converter is unipolar here, `sample * volume`, where Mesen centres it on
+`(sample - 8) * volume`.** That is what lets `M` stay positive, which is what `clip` depends on
+(AMD-061 §6.2, and Q-118's note that the upper bound is unreachable *because* `M` cannot go
+negative). The DC content differs from Mesen's by construction and is inaudible; the chip's own
+converter is unipolar.
+
+### What the step costs, and the one thing that is not free
+
+`cmp4c.py`, step 3's Linux dump against this one. New arms in the dispatches, and the executed
+path of a board the lot did not touch is unchanged in each: `Board::ppu_read` 334 → 336,
+`ppu_peek` 250 → 252, `on_cpu_cycle` 388 → 392, `write_internal` 2 862 → 2 874 (the whole register
+decode, inside its own arm), `Cpu6502::branch` 384 → 395 and `resolve` 1 753 → 1 800 (extra copies
+of the inlined `irq_asserted` block plus a jump-table slot, the same shape step 1 measured).
+`read_cycle`, `read_internal`, `run_cpu_cycles`, `quiet_cycles`, `run_dma`, `dma_read`,
+`background_fetch`, `read_pattern_planes` and `read_nametable_inner` are **IDENTICAL**, and every
+pinned prologue and stack frame is instruction-identical.
+
+**`NesBus::tick` is 79 → 82, and that one is a real cost to eleven other boards.** This is the
+first `on_cpu_cycle` arm in the build that reads anything out of `CartridgeMemory` — the chip's
+128 bytes are PRG-RAM — and LLVM answers by promoting that function's `&mut CartridgeMemory`
+argument to the pointer and length it uses, propagating the new convention up through
+`Board::on_cpu_cycle` (both are internal, so it is free to) and hoisting two loads into `tick`:
+
+    leaq  9592(%rbx), %rdi          leaq  9592(%rbx), %rdi
+                                    movq  9528(%rbx), %rsi
+                                    movq  9536(%rbx), %rdx
+
+They sit **after** the `clocks_on_cpu_cycle` test, so the twenty-six unlatched mapper numbers pay
+**nothing**; the twelve latched ones pay two instructions per CPU cycle — callgrind prices it at
+exactly **+17 868 320 on `mmc5`**, which is +2 x the 8.93 M CPU cycles of 300 frames.
+
+**One variant was built and refuted**, and it is worth recording because it looks obvious: an
+extra `#[inline(never)]` boundary between `Namco163::on_cpu_cycle` and the audio. Argument
+promotion is **transitive through `noinline`** — it runs bottom-up, promoted the new inner
+function, then the outer one, then the dispatch — and `tick` came out at 82 again, byte for byte.
+What would stop it is a *store* through the pointer, which this board has no reason to make. The
+design that would remove it is to take the chip's RAM out of `CartridgeMemory` altogether, and
+that is what REQ-CORE-095's single battery slice forbids: it would have to be mirrored, and the
+mirror would have to be refreshed from `update_channel`'s phase write-back, which puts the same
+two loads back on the same path.
+
+### Callgrind: thirteen ROMs, 300 frames — every ROM below both references
+
+| ROM | board | `ad1ad765` | this step | delta | | vs the tip |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 426 817 394 | 3 328 806 010 | −98 011 384 | **−2.860 %** | −2 965 449 |
+| `oamstr` | NROM | 3 437 722 453 | 3 339 442 491 | −98 279 962 | **−2.859 %** | −5 332 208 |
+| `m1` | MMC1 | 5 014 160 791 | 4 914 865 131 | −99 295 660 | **−1.980 %** | −554 034 |
+| `metroid` | MMC1 | 5 252 853 203 | 5 154 490 003 | −98 363 200 | **−1.873 %** | −167 445 |
+| `m4` | MMC3 | 5 600 693 086 | 5 500 892 012 | −99 801 074 | **−1.782 %** | −990 271 |
+| `m0` | NROM | 5 643 153 338 | 5 544 093 464 | −99 059 874 | **−1.755 %** | −817 739 |
+| `smb1` | NROM | 6 130 637 413 | 6 032 375 860 | −98 261 553 | **−1.603 %** | −698 059 |
+| `mm2` | MMC1 | 6 136 429 450 | 6 038 195 083 | −98 234 367 | **−1.601 %** | −23 681 |
+| `z2` | MMC1 | 6 409 332 652 | 6 312 907 248 | −96 425 404 | **−1.505 %** | −3 868 171 |
+| `readbuf` | CNROM | 6 950 211 191 | 6 852 868 864 | −97 342 327 | **−1.401 %** | −10 049 880 |
+| `duelito` | NROM | 7 198 774 119 | 7 399 004 345 | +200 230 226 | +2.781 % | **−12 052 457** |
+| `smb3` | MMC3 | 8 103 531 708 | 7 967 706 566 | −135 825 142 | **−1.676 %** | −280 608 |
+| `mmc5` | MMC5 | 11 402 398 394 | 11 331 624 233 | −70 774 161 | **−0.621 %** | −89 587 407 |
+| **total** | | **80 706 715 192** | **79 717 271 310** | **−989 443 882** | **−1.226 %** | **−127 387 409** |
+
+**Every one of the thirteen is lower than the branch tip, `duelito` included**, and twelve of the
+thirteen are lower than `ad1ad765` — `duelito`'s +2.781 % against that baseline is MF-4d-fix's
+behaviour change, which golden-core attributes to its screen moving and which that lot measured at
+the same magnitude. `mmc5` ends at **−0.621 %** against `ad1ad765` despite paying the +2 per
+cycle, because step 3's cached `M` gives it far more than the promotion takes back and
+`push_expansion_audio` loses another 44.7 M here.
+
+Three ROMs show `Ppu2C02::run_dots` moving — `z2` +1 691 280 (+0.026 % of that ROM), `mm2`
++80 693, `vblnmi` +80 209 — and it is the tail-merging/vectorisation flip MF-1, MF-2, MF-3 and
+step 1 of this lot all met on that function: one more `Board` variant, the same work, a different
+register allocation in the tile-record store. Against the tip, which is the comparison that
+isolates this step's own code, all three ROMs are **faster** anyway. `Board::prg_ram_offset` is
+−786 584 on each of `m0`, `m1` and `m4`, a gain from the new arm reshaping that dispatch.
+
+### Tests
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, **no new `allow`** in the crate (the test file allows the three cast lints every mapper test file allows) |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **775 passed, 0 failed, 8 ignored** |
+
+775 is step 3's 746 plus this step's **29**: thirteen on the board and sixteen on the sound.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_namco163_switches_three_8_kib_prg_banks_and_wires_the_last` | the three windows, the wired last bank, the six-bit fields, and that every address of an $800 range is the register |
+| `req_core_100_namco163_switches_eight_1_kib_chr_banks` | the eight windows, one per $800 |
+| `q_126_namco163_shows_chr_rom_where_e0_asks_for_ciram` | the Q-126 choice, with and without `$E800`'s disable bits |
+| `req_core_100_namco163_picks_a_ciram_page_per_table_from_the_select` | a page per table from the select's low bit, four tables |
+| `q_126_namco163_keeps_its_nametables_on_ciram_where_a_select_asks_for_chr_rom` | `FOLLOW_MIRRORING` and never `SERVED_BY_CARTRIDGE`, at power-on and after a write |
+| `req_core_100_the_namco163_counter_counts_up_on_the_cpu_clock` | the up-count to $7FFF, the edge, and the acknowledge |
+| `req_core_100_the_namco163_counter_stands_still_while_disabled` | the enable bit, over a hundred cycles |
+| `req_core_100_the_namco163_counter_stops_at_its_top_rather_than_wrapping` | no wrap and no second edge over a thousand cycles |
+| `req_core_100_the_namco163_counter_reads_back_without_acknowledging` | both halves read back, enable included, and a read does not acknowledge |
+| `req_core_075_the_namco163_ram_port_reads_and_writes_the_chips_128_bytes` | the port, the auto-increment on a **CPU** read as well as a write, the host accessor's side-effect freedom, and the seven-bit wrap |
+| `req_core_095_the_namco163_internal_ram_is_inside_the_battery_slice` | the two halves of the battery slice, and that $6000-$7FFF cannot reach the wavetable |
+| `req_core_095_a_namco163_without_a_battery_still_has_the_chips_ram` | the RAM without a battery, and the empty persisted slice |
+| `req_core_100_namco163_protects_its_prg_ram_by_2_kib_window` | the key, the four per-window bits, and that reads are never gated |
+| `req_core_100_the_namcot_175_keeps_the_headers_mirroring` | all four `$E000` top-bit patterns leaving a 175's mirroring alone while the bank bits take |
+| `req_core_100_the_namcot_175_enables_its_prg_ram_with_one_bit` | `$C000` bit 0, and that disabling hides without losing |
+| `req_core_100_the_namcot_340_picks_its_mirroring_from_e000` | the page's four mirroring rows in its order |
+| `req_core_100_the_namcot_340_has_no_wram_and_neither_210_has_sound_or_an_irq` | no WRAM on the 340, and no IRQ and no `M` on either 210 variant |
+| `q_126_mapper_210_submapper_0_is_read_as_a_namcot_175` | the submapper-0 choice, on the mirroring and on `$C000` |
+| `req_core_075_the_namco163_table_is_linear_through_an_apu_pulse_at_12_db` | all 226 entries recomputed at runtime, the 12.0 dB anchor and the straight line |
+| `req_core_075_a_namco163_is_silent_until_a_waveform_is_loaded` | power-on silence, and that a volume without a waveform is still silence |
+| `req_core_075_the_namco163_updates_one_channel_every_fifteen_cpu_cycles` | the interval, five times running, and the 225 ceiling |
+| `req_core_075_a_namco163_waveform_is_nibbles_low_first` | the four nibbles in order, compared as a cycle |
+| `req_core_075_a_namco163_waveform_wraps_at_its_length` | the four samples repeating, and all four distinct |
+| `req_core_075_the_namco163_wave_address_is_counted_in_nibbles` | the window of four samples shifting by **one** per nibble of address and by two per byte |
+| `req_core_075_the_namco163_channel_count_comes_from_7f_and_enables_the_top_channels` | `$7F`'s count, the divide-by-count, and a channel below the count staying out however loud |
+| `req_core_075_the_namco163_multiplexer_shares_fifteen_cycles_between_the_channels` | 15 cycles with one channel and 120 with eight |
+| `req_core_075_e000_bit_6_freezes_every_namco163_channel_in_place` | the freeze over a thousand cycles, and the resume |
+| `req_core_075_a_namco163_subtracts_its_m_from_the_apu_mix` | `M` positive, through the mixer's own test point |
+| `req_core_075_the_namco163_phase_is_stored_back_into_the_chips_ram` | the 24-bit phase written back into $79/$7B/$7D, high byte and low two |
+
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`,
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` and
+`mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` sweep
+`SUPPORTED_MAPPERS`, so all three now cover 19 and 210 without being edited.
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` **did** need editing, and what it caught
+is worth recording: the Namco 163's sound multiplexer walks its channels from power-on with no
+register written, like the FME-7's 5B prescaler, so 19 joins the expected list — and **mapper 210
+is deliberately absent from it**, which is why `Namco163::on_cpu_cycle` opens with a variant guard
+whose only caller is that test.
+
+`req_core_100_every_required_mapper_is_registered` has 19 and 210 added to the list of numbers this
+build adds beyond REQ-CORE-100's table. Two tests that used **mapper 19 as their example of an
+unimplemented number** had to move to 177, and both now say so in a comment:
+`req_core_102_an_unimplemented_mapper_is_refused_by_name` and
+`req_core_102_any_other_mapper_is_refused`.
+
+**Save states**: the board's block is new. `Namco163Audio::save_state` is appended after the
+registers, the shape `fme7.rs` and `vrc6.rs` established, and `load_registers` tolerates a block
+without it. The chip's 128 bytes are **not** in that block — they are PRG-RAM, written by
+`Cartridge::save_state` with the rest of it — and `level` **is**, because `Mapper::load_registers`
+is not given the cartridge's memories and one `i32` is cheaper than threading them through the
+trait for it. No existing block moved.
+
+`THIRD-PARTY-NOTICES.md` now lists the two Namco 163 adaptations: the register decode's split
+between the three variants, and the phase wrap.
+
 ## Status
 
 - [x] step 1 — the VRC6 board, mappers 24 and 26 (Q-123 opened: `$B003` bit 4)
 - [x] step 2 — the VRC6 audio (and `Board::on_cpu_cycle` latched: the set is **-1.44 %**, `mmc5` +0.156 %)
 - [x] step 3 — R0's two items: `mmc5` **−0.391 %** against `ad1ad765` (item 1 met); `Ppu2C02::read` back to a shrink-wrapped prologue, **+0.0144 %** left on `readbuf` against `fff53974` where it was +0.161 % (item 2, 91 % back)
-- [ ] step 4 — the Namco 163 board, mappers 19 and 210
-- [ ] step 5 — the Namco 163 audio
+- [x] step 4 — the Namco 163 board, mappers 19 and 210 (Q-126 opened: the two PPU modes, and submapper 0 of mapper 210)
+- [x] step 5 — the Namco 163 audio (Q-127 opened: the level). Shipped in step 4's commit; the section above says why the two cannot compile apart
 - [ ] step 6 — save states
 - [ ] step 7 — the ROM check
 - [ ] step 8 — the suites and the campaign

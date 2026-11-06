@@ -225,6 +225,67 @@ pub const VRC6_LEVELS: usize = 62;
 /// and nothing in the mixer had to move.
 pub const VRC6_TABLE: [i32; VRC6_LEVELS] = vrc6_table();
 
+/// Steps the Namco 163's summed output can take: one channel is `sample x volume` with both
+/// four bits wide, so 0 to 225, and the sum of the enabled channels is divided by how many there
+/// are — "it is often preferred to simply sum the channel outputs, and divide the output volume
+/// by the number of active channels" (nesdev, "Namco 163 audio"). So the whole chip has the swing
+/// of one channel.
+pub const NAMCO163_LEVELS: usize = 15 * 15 + 1;
+
+/// How much louder than an APU square the Namco 163 is, as an amplitude ratio: 10^(12/20).
+///
+/// Written out because `powf` is not a `const fn`, exactly as [`SUNSOFT_5B_RATIO`] is. The 12 dB
+/// is the midpoint of the band the page gives NES 2.0 submapper 3, "N163 expansion sound:
+/// 11.0-13.0 dB louder than NES APU" -- see [`NAMCO163_TABLE`] and Q-127.
+pub const NAMCO163_GAIN: f64 = 3.981_071_705_534_972;
+
+/// `M` of REQ-CORE-073 for each step of the Namco 163's output (REQ-CORE-075, optional).
+///
+/// **The law comes from the page and only the level needed a choice.** The page is explicit about
+/// the shape of the mix -- sum the enabled channels, divide by how many are enabled, each channel
+/// being a four-bit sample times a four-bit volume -- so the table is a straight line of 226
+/// steps, as the VRC6's is of 62.
+///
+/// **Q-127, the level.** Unlike the VRC6's page, which hands over its anchor in a sentence, and
+/// unlike the 5B's, which gives nothing at all, this page gives a *range per submapper*: 11.0 to
+/// 13.0 dB louder than the NES APU for submapper 3, 16.0 to 17.0 for submapper 4 and 18.0 to 19.5
+/// for submapper 5, with a per-title table from 11.2 dB to 19.5 dB. There is therefore no single
+/// level, and an iNES 1.0 dump carries no submapper at all. The provisional choice is **one
+/// table at 12.0 dB**, the midpoint of submapper 3's band:
+///
+/// * Q-118's rule still fixes what the dB is measured against -- one channel at its full
+///   converter swing against one APU pulse at volume 15, `PULSE_TABLE[15]` -- so the top entry is
+///   4 890 x [`NAMCO163_GAIN`] = about **19 467**, 60 % of full scale, which is within a few
+///   hundred of the VRC6's own 19 886 and so needs nothing of [`clip`] that is not already there;
+/// * submapper 3's band is the widest and the lowest, so an unlabelled dump placed in it is never
+///   made louder than the documentation allows, where placing it in submapper 5's band would risk
+///   the opposite on every image.
+///
+/// The ticket carries the two alternatives -- one table per submapper, or the per-title figures --
+/// and **one constant changes the level** if R0 wants another.
+///
+/// **Polarity: subtracted, like every other board's `M`.** The chip's own converter is unipolar
+/// (`sample x volume`, not Mesen's centred `(sample - 8) x volume`), which is what lets `M` stay
+/// positive -- and [`clip`] only implements the lower bound *because* `M` cannot be negative
+/// (AMD-061 §6.2).
+pub const NAMCO163_TABLE: [i32; NAMCO163_LEVELS] = namco163_table();
+
+/// Builds [`NAMCO163_TABLE`]: a straight line through `NAMCO163_GAIN` x `PULSE_TABLE[15]` at its
+/// top step, from the unrounded anchor so that the step is not quantised twice.
+const fn namco163_table() -> [i32; NAMCO163_LEVELS] {
+    #[allow(clippy::cast_precision_loss)] // NAMCO163_LEVELS - 1 is 225.
+    let step = NORMALISATION * pulse(15) * NAMCO163_GAIN / (NAMCO163_LEVELS - 1) as f64;
+    let mut table = [0; NAMCO163_LEVELS];
+    let mut level = 0;
+    #[allow(clippy::cast_precision_loss)] // level is at most 225.
+    while level < NAMCO163_LEVELS {
+        table[level] = round_to_even(step * level as f64);
+        level += 1;
+    }
+
+    table
+}
+
 /// Builds [`VRC6_TABLE`]: a straight line through `PULSE_TABLE[15]` at step 15.
 const fn vrc6_table() -> [i32; VRC6_LEVELS] {
     let step = NORMALISATION * pulse(15) / 15.0;

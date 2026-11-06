@@ -4,8 +4,8 @@
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
-    Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom,
-    Vrc2Vrc4, Vrc6,
+    Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Nrom, Rambo1, UnRom512,
+    UxRom, Vrc2Vrc4, Vrc6,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -93,6 +93,8 @@ pub enum Board {
     McAcc(McAcc),
     /// Mappers 24 and 26, Konami VRC6.
     Vrc6(Vrc6),
+    /// Mapper 19, the Namco 163, and mapper 210, the Namcot 175 and 340 cut from it.
+    Namco163(Namco163),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -129,6 +131,7 @@ macro_rules! dispatch {
             Board::Mapper078($b) => $body,
             Board::McAcc($b) => $body,
             Board::Vrc6($b) => $body,
+            Board::Namco163($b) => $body,
         }
     };
 }

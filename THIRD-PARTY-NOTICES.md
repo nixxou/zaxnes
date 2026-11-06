@@ -48,7 +48,18 @@ publié sous GNU GPL v3 :
 - la phase du canal en dents de scie du VRC6 (`apu/vrc6_audio.rs`, `Vrc6Saw::step_cpu_cycle`),
   reprise de `Core/NES/Mappers/Audio/Vrc6Saw.h` : la page NESdev dit « the accumulator only
   reacts on every 2 clocks » sans dire lesquels des quatorze pas de la phase additionnent, et
-  Mesen est la source qui tranche (lot MF-5a).
+  Mesen est la source qui tranche (lot MF-5a) ;
+- le découpage du décodage de registres du Namco 163 entre ses trois variants (`namco163.rs`,
+  `write_register`), repris du `switch (addr & 0xF800)` de
+  `Core/NES/Mappers/Namco/Namco163.h` : c'est la seule lecture du tableau de registres des pages
+  NESdev « INES Mapper 019 » et « INES Mapper 210 » qui ait pu être vérifiée cas par cas contre
+  une seconde source, en particulier le partage de `$C000-$D800` et des deux bits hauts de
+  `$E000` entre le 163, le 175 et le 340 (lot MF-5a) ;
+- l'enroulement de la phase du Namco 163, `(phase + freq) % (length << 16)`
+  (`apu/namco163_audio.rs`, `Namco163Audio::update_channel`), repris de
+  `Core/NES/Mappers/Audio/Namco163Audio.h` : c'est le seul point que la page « Namco 163 audio »
+  énonce comme une formule plutôt qu'en prose, et Mesen est la seconde source qui la confirme
+  (lot MF-5a).
 
 Les fichiers concernés portent l'en-tête :
 

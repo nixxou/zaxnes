@@ -21,6 +21,7 @@ mod length_counter;
 pub mod mixer;
 mod mmc5_audio;
 mod mmc5_pulse_channel;
+mod namco163_audio;
 mod noise_channel;
 mod pulse_channel;
 mod sunsoft5b_audio;
@@ -39,6 +40,7 @@ use triangle_channel::TriangleChannel;
 
 pub use band_limited_resampler::HIGH_PASS_HZ;
 pub(crate) use mmc5_audio::Mmc5Audio;
+pub(crate) use namco163_audio::Namco163Audio;
 pub(crate) use sunsoft5b_audio::Sunsoft5bAudio;
 pub(crate) use vrc6_audio::Vrc6Audio;
 
