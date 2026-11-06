@@ -1494,3 +1494,199 @@ row.
 **twelve of thirteen ROMs below the baseline** with the set total −312 171 and `mmc5` −34 885, four
 level-2 cores +0 and the fifth −20 823 — and the µPD7756C audio left out on §4.8's grounds with a
 test pinning the silence.
+
+## Step 8 — the Oeka Kids board, §4.4's hook, at **+4 instructions on the dispatch it joins**
+
+### What was built
+
+nesdev ("INES Mapper 096"): one CPU register, and one thing that is not a register at all.
+
+| what | where | the page's words |
+| --- | --- | --- |
+| two bits of 32 KiB PRG bank | `OekaKids::write_register` | `CPU $8000-$FFFF: [xxxx xCPP]`, "Select 32KiB PRG bank" |
+| bit 2, the 16 KiB outer CHR bank | the same method | "Select 16KiB outer CHR bank" |
+| the 4 KiB inner CHR-RAM page, **off the PPU address bus** | `OekaKids::on_ppu_address_bus` | "Select 4 KiB inner CHR RAM bank for PPU $0000-$0FFF" on bits 9-8 |
+| the **edge**, not the decode | the same method | "Latch CC bits when 'DD' changes from anything else to '10'" |
+| the outer bank's last page wired at $1000-$1FFF | `OekaKids::update_chr` | Mesen 2's `SelectChrPage(1, _outerChrBank \| 0x03)` |
+| no PRG-RAM, 32 KiB of CHR-RAM | `registry::board_memory_sizes`, arm `96` | "PRG RAM capacity: No", "CHR capacity: 32 KiB RAM" |
+| vertical mirroring, forced | `OekaKids::reset` | "Hardwired Vertical mirroring" |
+| the write ANDed with the ROM's byte | `registry::has_bus_conflicts`, arm `96` | "Bus conflicts: partly" — see **Q-135** |
+
+### §4.4's question, answered **per board and from the page**
+
+§4.4 of `docs/review/MF-6-inventory.md` set this board aside as the one whose hook it could not
+classify in advance: "Mapper 96 (Oeka Kids) is the one PPU-read-shaped hook in the inventory, and
+it is not this hook" — not `Mapper::ppu_read`, because the board reacts to nametable *addresses*
+and not to pattern fetches — and then: "**Mapper 96 would be the first board for which that
+distinction is not academic**, because its whole mechanism is the address bus. A sub-lot doing 96
+inherits MR-1's open question and must say which way it read it."
+
+**The page answers it for this board in one sentence**, and the step quotes it rather than
+reasoning from the MMC2:
+
+> This latching occurs regardless of whether the PPU or game code initiated the address change,
+> enabling software to manually select CHR pages by writing specific values to $2006.
+
+So mapper 96 goes into **both** of §4.3's latches — `watches_ppu_reads` for the rendering's own
+fetches and `watches_ppu_bus_without_read` for a bare `$2006` write — and it is the **first number
+in either list with no IRQ at all**, which is the cost class §4.4 predicted.
+
+**It does not settle MR-1's question, and the write-up says so rather than implying otherwise.**
+What MR-1 leaves open is whether the MMC2's *latch*, whose rule is about /RD, should move on a bare
+address change; REQ-CORE-033 and REQ-CORE-039 constrain that one and this step does not touch it.
+The two are different questions about different boards, and each board's own documentation answers
+its own: mapper 96's page says "regardless", so it gets both latches; the MMC2's page is about a
+fetch, so its latch stays where MF-4c left it. `OekaKids`'s doc comment carries that distinction in
+as many words.
+
+**The latch is an edge and the test is what insists on it.** `DD` must change "from anything else
+to '10'", so walking inside $2000-$2FFF changes nothing and only the entry into it does; and
+because only the *second* write of a `$2006` pair loads `v` and reaches the cartridge, a game
+selects a page the way the hardware makes it — one pair that leaves the range, then one that enters
+it at the page it wants. `OekaKids::last_address` is the other side of that edge and is **in the
+save state**, because nothing derives a value that is in the past.
+
+### One reading taken, and it is **Q-135**
+
+The page's infobox says "Bus conflicts: **partly**", which is the one line in it that decides
+nothing: this build has a single `bus_conflicts` bool per cartridge (MR-BUS-1), so "partly" has to
+become yes or no. It is **yes**, which is Mesen 2's reading (`HasBusConflicts` true, with no
+qualification) and the reading that cannot turn a deliberate AND into a different bank. Q-135 holds
+both readings, the argument and what would change the answer; the arm carries a `// Q-135`
+reference, and **the two tests write the register through an all-$FF window so that they pass under
+either reading** — a test asserting the AND would freeze a reading the page does not support.
+
+### The tablet, recorded as a gap
+
+Both titles — *Oeka Kids: Anpanman no Hiragana Daisuki* and *Anpanman to Oekaki Shiyou!!* — are
+drawing programs for the **Oeka Kids tablet**, a peripheral on the expansion port, and this build
+has no host surface for an input device of that kind. The brief names it as a recorded gap and not
+a deliverable, and it joins MR-30-4's UNROM 512 flash, step 3's Datach barcode scanner and step 4's
+*Nantettatte!! Baseball* external ROM in the same words. The board is implemented and the games
+boot; what cannot be done with them is draw.
+
+### Instrument 2: PR-1's thirteen — worst ROM **+0.001 %**
+
+`callgrind-diff.py`, label `mf6c-8-oekakids`, against `mf6c-0-8496c503`:
+
+| ROM | board | `8496c503` | **step 8** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 311 891 | 3 308 345 619 | +33 728 | +0.001 % |
+| `oamstr` | NROM | 3 318 460 965 | **3 318 452 581** | −8 384 | −0.000 % |
+| `m1` | MMC1 | 4 885 949 431 | 4 885 983 379 | +33 948 | +0.001 % |
+| `m4` | MMC3 | 5 472 514 995 | 5 472 546 162 | +31 167 | +0.001 % |
+| `m0` | NROM | 5 520 458 691 | **5 520 444 940** | −13 751 | −0.000 % |
+| `metroid` | MMC1 | 5 115 944 288 | **5 115 929 129** | −15 159 | −0.000 % |
+| `smb1` | NROM | 5 996 381 185 | **5 996 380 365** | −820 | −0.000 % |
+| `mm2` | MMC1 | 6 017 851 607 | 6 017 864 002 | +12 395 | +0.000 % |
+| `z2` | MMC1 | 6 291 458 642 | 6 291 523 763 | +65 121 | +0.001 % |
+| `readbuf` | CNROM | 6 834 538 187 | 6 834 582 998 | +44 811 | +0.001 % |
+| `duelito` | NROM | 7 380 437 910 | 7 380 508 097 | **+70 187** | **+0.001 %** |
+| `smb3` | MMC3 | 7 949 470 334 | **7 949 434 607** | −35 727 | −0.000 % |
+| `mmc5` | MMC5 | 11 279 383 781 | 11 279 389 301 | +5 520 | +0.000 % |
+| **total** | | **79 371 161 907** | **79 371 384 943** | **+223 036** | **+0.000 %** |
+
+The worst ROM is `duelito` at **+70 187, +0.001 %** — a twentieth of the owner's +0.02 %, and
+inside the ±57 k-per-ROM `luaH_getshortstr` floor to within 13 k. **`m4` +31 167 is the figure
+worth naming**, because the MMC3 is the board that shares the dispatch this step joins: it is
++0.001 % on a ROM whose 300 frames make about 17 M calls to it, which is two thousandths of an
+instruction per call — layout, not work, and the dump below says why.
+
+### Instrument 1: level 2 — four cores **+0**, the fifth below, three totals inside
+
+`l2-diff.py --bar`, against `mf6c-0-8496c503`:
+
+| game/stage | `8496c503` | **step 8** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 147 295 142** | **+0** | **equal** |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 775 651 048** | **+0** | **equal** |
+| `mm2/core` | 12 036 822 861 | **12 036 822 861** | **+0** | **equal** |
+| `smb3/core` | 15 315 558 322 | **15 315 537 499** | **−20 823** | −0.000 % |
+| `metroid/total` | 13 735 627 354 | **13 735 615 358** | −11 996 | −0.000 % |
+| `smb1/total` | 13 589 030 161 | 13 589 042 754 | +12 593 | +0.000 % |
+| `zelda2/total` | 15 360 284 960 | 15 360 543 443 | +258 483 | +0.002 % |
+| `mm2/total` | 18 976 349 017 | **18 976 337 477** | −11 540 | −0.000 % |
+| `smb3/total` | 24 187 154 526 | 24 188 150 752 | +996 226 | +0.004 % |
+
+**Every `core` figure is at or below the baseline** — four at +0 and `smb3/core` at the same
+−20 823 steps 6 and 7 measured — and the three totals above it are +0.000 %, +0.002 % and
++0.004 %, all three *inside* the tolerance on their own. `sym6c.sh` at a 300 000 threshold names
+four symbols over all five games and they are `luaH_getshortstr`, `luaH_set`, `getgeneric` and
+`memcpy`: Lua's `ltable.c` and nothing else, with **nothing at all on `metroid`, `zelda2` or
+`mm2`**. The board that watches 57 600 PPU addresses a frame costs the five games that do not use
+it nothing measurable, which is §4.10's rule holding on the hook §4.4 was most careful about.
+
+### Instrument 3: the post-LTO dump, and **the +4 that is the whole step**
+
+| symbol | `8496c503` | step 7 | **step 8** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | 296 | 291 |
+| `NesBus::write_internal` | 3 815 | 3 843 | 3 861 |
+| `Ppu::run_dots` | 1 907 | 1 919 | **1 919** |
+| `NesBus::catch_up_ppu` | 188 | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | 107 | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | 75 | **75** |
+| **`Board::on_ppu_address_bus`** | **157** | **157** | **161** |
+
+`shape.py`'s five others — `resolve` 1 948, `branch` 457, `read_cycle` 181, `tick` 82,
+`read_internal` 175 — are identical to the instruction, and `Cartridge::default_cpu_read` is
+**429**, steps 6 and 7's count.
+
+**The last row is the step.** `Board::on_ppu_address_bus` is the dispatch the three A12 counters
+and the MMC5's in-frame detection live in, and a fifth arm cost it **four instructions** — because
+`OekaKids::on_ppu_address_bus` carries `#[inline(never)]`, so what the dispatch gained is a `callq`
+and not a body. That is the shape MF-6a2 step 3 established for the TQROM's fetch bodies and
+MF-6b step 5 for `IrqBoard::nametable_page`, applied to the one dispatch §4.4 called an A12 board's
+cost class; `Board::ppu_peek` going **down** five instructions from step 7 and `read_pattern_planes`
+holding at 107 are what say the PPU-side paths were not disturbed.
+
+### The tests, 915 → **917**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_mapper_96_banks_32_kib_of_prg_and_has_no_prg_ram` | the two-bit PRG field over four 32 KiB banks; bit 2 moving **no** PRG window ($05 and $01 selecting the same bank); the hardwired vertical mirroring; "PRG RAM capacity: No"; and the 32 KiB of CHR-RAM |
+| `req_core_100_mapper_96_latches_its_chr_page_from_the_ppu_address_bus` | all **eight** 4 KiB pages written and read back through the board's own two selects; the wired $1000-$1FFF window being the outer bank's last page; **the edge** — four addresses inside $2000-$2FFF latching nothing, and the next entry latching; **a bare `$2006` write selecting a page with no fetch at all**, in the leave-then-enter pair the hardware requires; two entries in a row being one edge; and the save state carrying the previous address, so that the restored board knows which side of the edge it is on |
+
+The three sweeps that write themselves are what made this step's wiring provable:
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` **saw the board move** and
+required `96, 96` in its expected list and `Mapper::chr_view` to be `None` for it (which
+`DecodeBoard` already answers for the whole variant, and which that sweep demands of any board in
+the read latch — `Ppu2C02::run_visible_span` would otherwise take a whole line of dots without
+telling the cartridge anything);
+`mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd` held because the number
+is in both lists; and `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` because this board
+moves on no CPU cycle. `req_core_100_every_required_mapper_is_registered` took the number behind
+`cfg!(feature = "board-96")` (50 → 51 entries).
+
+**Four configurations green**, `cargo fmt --check` clean and clippy `-D warnings` clean on
+`zax-nes` in all four and on `zax-harness`, **no new `allow` of any kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default | **854** |
+| `--features parked-boards` | **859** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-96` | 785 |
+
+With `zax-harness` the default figure is **917 passed / 0 failed / 8 ignored**, step 7's 915 plus
+this step's two. `board-96` is **inside the tolerance by a factor of twenty on the worst figure of
+either run**, so it goes in `default`, and `docs/review/BOARD-FEATURES.md` has its row.
+
+**One housekeeping note, because the next session will meet it**: the host disk filled during this
+step and the suites failed with `os error 112` rather than on anything in the tree. What was
+deleted to make room is scratch only — the `.tar` trees under `rust/target-mf/tmp`, the post-LTO
+dumps of lots older than MF-6c under `rust/target-mf/asm`, and `target-mf/debug/incremental` — all
+of it regenerable, and `rust/target-*` is never staged. The dumps this lot's write-ups cite
+(`mf6c-0`, `mf6c-1`, `mf6c-2-x1parked`, `mf6c-3`, `mf6c-4-sunsoft4`, `mf6c-4-s4irqbrd`, `mf6c-6`,
+`mf6c-7`, `mf6c-8`) are kept.
+
+[PROGRESS] MF-6c step 8/11 done: the Oeka Kids board and §4.4's hook, 917 / 0 / 8, worst of
+thirteen `duelito` +0.001 % with all five level-2 cores at or below the baseline — and the dispatch
+the three A12 counters share grew by **four instructions**, because the new arm is a `callq`.
+MR-1's open question is answered for this board from its own page and left open for the MMC2;
+"Bus conflicts: partly" is **Q-135**.

@@ -30,6 +30,7 @@ default = [
     "board-68-chr-nametables",
     "board-77",
     "board-jaleco-72-92-86",
+    "board-96",
     "board-eeprom",
     "board-158",
     "board-mmc3-multicart",
@@ -123,6 +124,15 @@ board-77 = ["board-decode-boards"]
 # (§4.8 of `docs/review/MF-6-inventory.md`). `expansion_audio_output` keeps its `None` default and
 # a test pins the silence. Implies `board-decode-boards`.
 board-jaleco-72-92-86 = ["board-decode-boards"]
+
+# Mapper 96, the Bandai Oeka Kids board (MF-6c step 8): a 32 KiB PRG bank and a 16 KiB outer
+# CHR bank from one CPU register, and a 4 KiB inner CHR-RAM bank **latched off the PPU address
+# bus** on the entry into $2000-$2FFF -- including a bare $2006 write, which is 4.4's "not
+# academic" distinction and MR-1's open MMC2 question answered for this board from its own
+# page. Two titles, both drawing programs for the Oeka Kids tablet, which is a recorded gap:
+# this build has no host surface for that peripheral. One `DecodeBoard` variant, in both
+# PPU-bus latches, and one new forward, `on_ppu_address_bus`. Implies `board-decode-boards`.
+board-96 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

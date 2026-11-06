@@ -30,8 +30,9 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 
 /// Writes CHR through the board's own path, which is the only way to reach a second chip:
 /// `Cartridge::ppu_write` dispatches to the board, and on the TQROM (119) that is the chip-select
-/// decode while on the Irem LROG017 (77) it is the $0800-$1FFF half of the split.
-#[cfg(any(feature = "board-77", feature = "board-119"))]
+/// decode, on the Irem LROG017 (77) it is the $0800-$1FFF half of the split, and on the Oeka
+/// Kids board (96) it is the 4 KiB CHR-RAM page the PPU address bus last latched.
+#[cfg(any(feature = "board-77", feature = "board-96", feature = "board-119"))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
 }
@@ -93,7 +94,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   `DecodeBoard`, this project's second shared `Board` variant (MF-6c step 6);
     // * 72 and 92 (Jaleco's JF-17 and JF-19) and 86 (the JF-13), the three boards with a
     //   uPD7756C speech chip this build does not sound, behind `board-jaleco-72-92-86`
-    //   (MF-6c step 7).
+    //   (MF-6c step 7);
+    // * 96 (the Bandai Oeka Kids board, whose CHR page is latched off the PPU address bus),
+    //   behind `board-96` (MF-6c step 8).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -111,7 +114,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
-    let additions: [(i32, bool); 50] = [
+    let additions: [(i32, bool); 51] = [
         (19, true),
         (24, true),
         (26, true),
@@ -140,6 +143,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (93, small),
         (94, cfg!(feature = "board-94")),
         (95, namcot),
+        (96, cfg!(feature = "board-96")),
         (97, small),
         (105, cfg!(feature = "board-105")),
         (116, cfg!(feature = "board-116")),
@@ -2183,6 +2187,182 @@ fn mf_6c_the_three_jaleco_upd7756c_boards_are_silent() {
             );
         }
     }
+}
+
+// ------------------------------------------- Oeka Kids (96)
+
+/// Drives the PPU's address bus across the edge that latches the Oeka Kids board's CHR bank: out
+/// of $2000-$2FFF and then into `address`. The board latches on the entry and on nothing else.
+#[cfg(feature = "board-96")]
+fn latch_chr_page(core: &mut NesCore, address: u16) {
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 1);
+    cartridge.on_ppu_address_bus(address, 2);
+}
+
+/// nesdev ("INES Mapper 096"): `CPU $8000-$FFFF: [xxxx xCPP]`, two bits of 32 KiB PRG bank with
+/// the 16 KiB outer CHR bank above them, "PRG ROM capacity: 128 KiB", "PRG RAM capacity: No" and
+/// "Hardwired Vertical mirroring" (MF-6c step 8).
+#[cfg(feature = "board-96")]
+#[test]
+fn req_core_100_mapper_96_banks_32_kib_of_prg_and_has_no_prg_ram() {
+    // The register is at $8000-$FFFF and the board has bus conflicts (Q-135), so the write goes
+    // through 8 KiB bank 0 while the power-on bank is still there.
+    let image = || MapperRom::new(96).prg(16).chr(0).prg_bank_all_ones(0);
+    let mut core = image().load();
+    assert_eq!(96, core.cartridge().unwrap().mapper_number());
+    assert_eq!([255, 1, 2, 3], core.prg_windows());
+    assert_eq!(Nm::Vertical, core.mirroring(), "hardwired");
+
+    // "..PP": two bits, four 32 KiB banks in 128 KiB.
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+
+    // Bit 2 is the outer CHR bank and moves no PRG window: $05 is PRG bank 1 either way.
+    let mut outer = image().load();
+    outer.mapper_write(0x8000, 0x05);
+    assert_eq!([4, 5, 6, 7], outer.prg_windows());
+    let mut plain = image().load();
+    plain.mapper_write(0x8000, 0x01);
+    assert_eq!([4, 5, 6, 7], plain.prg_windows());
+
+    // "PRG RAM capacity: No".
+    assert_eq!(0, core.cartridge().unwrap().memory().prg_ram().len());
+    // "CHR capacity: 32 KiB RAM", which is eight of the 4 KiB pages the board banks in.
+    assert_eq!(
+        32 * 1024,
+        core.cartridge().unwrap().memory().chr_ram().len()
+    );
+}
+
+/// **The board's whole mechanism**, and §4.4 of `docs/review/MF-6-inventory.md` is why it is the
+/// last board of the lot: the 4 KiB CHR-RAM page at PPU $0000-$0FFF is latched off the **PPU
+/// address bus**, on the entry into $2000-$2FFF and from bits 9-8 of the address —
+///
+/// ```text
+/// 13  PPU address  0
+///  DD xxCC xxxx xxxx
+///  ||   ||
+///  ||   ++---------- Select 4 KiB inner CHR RAM bank for PPU $0000-$0FFF
+///  ++--------------- Latch CC bits when 'DD' changes from anything else to '10'
+/// ```
+///
+/// — and the page is explicit that it happens with no fetch behind it: "This latching occurs
+/// regardless of whether the PPU or game code initiated the address change, enabling software to
+/// manually select CHR pages by writing specific values to $2006." **That is the claim §5 MF-6c
+/// asks this test for**, and the one MR-1's open MMC2 question bears on (MF-6c step 8).
+#[cfg(feature = "board-96")]
+#[test]
+fn req_core_100_mapper_96_latches_its_chr_page_from_the_ppu_address_bus() {
+    let mut core = MapperRom::new(96)
+        .prg(16)
+        .chr(0)
+        .prg_bank_all_ones(0)
+        .load();
+
+    // Put a different byte in each of the eight 4 KiB CHR-RAM pages, through the board's own two
+    // selects: bit 2 of the register for the outer 16 KiB bank, the PPU address for the inner one.
+    // The register writes are $00 and $04, which both leave PRG bank 0 (and its $FF bytes) at
+    // $8000 so that the next one survives the bus conflict.
+    for outer in [0x00u8, 0x04] {
+        core.mapper_write(0x8000, outer);
+        for inner in 0..4u16 {
+            latch_chr_page(&mut core, 0x2000 | (inner << 8));
+            chr_write(&mut core, 0x0000, 0xA0 | (outer << 2) | inner as u8);
+        }
+    }
+
+    // And read them back the same way. Bits 9-8 of the address are the page, so $2000, $2100,
+    // $2200 and $2300 are pages 0 to 3 of the selected outer bank.
+    for outer in [0x00u8, 0x04] {
+        core.mapper_write(0x8000, outer);
+        for inner in 0..4u16 {
+            latch_chr_page(&mut core, 0x2000 | (inner << 8));
+            assert_eq!(
+                0xA0 | (outer << 2) | inner as u8,
+                peek(&core, 0x0000),
+                "outer {outer:#04X}, inner {inner}"
+            );
+            // $1000-$1FFF is the outer bank's **last** page, wired, whatever the latch holds.
+            assert_eq!(
+                0xA0 | (outer << 2) | 0x03,
+                peek(&core, 0x1000),
+                "the wired window, outer {outer:#04X}"
+            );
+        }
+    }
+
+    // **The latch is an edge and not a decode**: once inside $2000-$2FFF, moving the address
+    // within it changes nothing. Page 1 is selected, and walking to $2200 and $2300 leaves it.
+    core.mapper_write(0x8000, 0x00);
+    latch_chr_page(&mut core, 0x2100);
+    assert_eq!(0xA1, peek(&core, 0x0000));
+    for address in [0x2200u16, 0x2300, 0x2000, 0x2FFF] {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 3);
+        assert_eq!(
+            0xA1,
+            peek(&core, 0x0000),
+            "no edge into $2000-$2FFF, no latch: {address:#06X}"
+        );
+    }
+    // An address outside the range does not latch either, and then the next entry does.
+    core.cartridge_mut().unwrap().on_ppu_address_bus(0x1300, 4);
+    assert_eq!(0xA1, peek(&core, 0x0000));
+    core.cartridge_mut().unwrap().on_ppu_address_bus(0x2200, 5);
+    assert_eq!(0xA2, peek(&core, 0x0000));
+
+    // **A bare `$2006` write, with no fetch behind it**, which is the page's own claim and the
+    // reason this board is in `Cartridge::watches_ppu_bus_without_read` as well as in
+    // `watches_ppu_reads`. Only the *second* write of a $2006 pair loads `v` and reaches the
+    // cartridge, so a game selects a page the way the hardware makes it: one pair that leaves
+    // $2000-$2FFF, then one that enters it at the page it wants.
+    let write_v = |core: &mut NesCore, address: u16| {
+        let _ = core.read_memory(0x2002); // Clear the two-write latch, whatever it held.
+        core.write_memory(0x2006, (address >> 8) as u8);
+        core.write_memory(0x2006, (address & 0xFF) as u8);
+    };
+    write_v(&mut core, 0x0000);
+    assert_eq!(
+        0xA2,
+        peek(&core, 0x0000),
+        "leaving the range latches nothing"
+    );
+    write_v(&mut core, 0x2300);
+    assert_eq!(
+        0xA3,
+        peek(&core, 0x0000),
+        "a $2006 write of $2300 selects page 3 with no fetch at all"
+    );
+    write_v(&mut core, 0x1000);
+    write_v(&mut core, 0x2000);
+    assert_eq!(0xA0, peek(&core, 0x0000), "and $2000 selects page 0");
+    // A second pair into the range is **no** edge, so it cannot change the page: the game has to
+    // leave it first, which is the hardware's own rule and not an approximation of it.
+    write_v(&mut core, 0x2300);
+    assert_eq!(
+        0xA0,
+        peek(&core, 0x0000),
+        "two entries in a row are one edge"
+    );
+
+    // The whole of it survives a save state, **the previous address included**: the edge needs
+    // both of its sides and nothing derives the one that is in the past (REQ-CORE-090).
+    write_v(&mut core, 0x1000);
+    write_v(&mut core, 0x2100);
+    let state = core.save_state(true).unwrap();
+    let mut other = MapperRom::new(96)
+        .prg(16)
+        .chr(0)
+        .prg_bank_all_ones(0)
+        .load();
+    other.try_load_state(&state, 0).unwrap();
+    assert_eq!(0xA1, peek(&other, 0x0000), "the latched page came back");
+    other.cartridge_mut().unwrap().on_ppu_address_bus(0x2300, 6);
+    assert_eq!(
+        0xA1,
+        peek(&other, 0x0000),
+        "and so did the previous address, so $2300 is no edge"
+    );
 }
 
 #[test]

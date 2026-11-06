@@ -59,6 +59,8 @@ mod namcot108;
 #[cfg(feature = "board-105")]
 mod nes_event;
 mod nrom;
+#[cfg(feature = "board-96")]
+mod oeka_kids;
 mod rambo1;
 #[cfg(feature = "board-small-boards")]
 mod small_boards;
@@ -133,6 +135,8 @@ pub use namcot108::Namcot108;
 #[cfg(feature = "board-105")]
 pub use nes_event::NesEvent;
 pub use nrom::Nrom;
+#[cfg(feature = "board-96")]
+pub use oeka_kids::OekaKids;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};

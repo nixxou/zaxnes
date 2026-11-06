@@ -371,10 +371,20 @@ impl Cartridge {
             // created and the arm is unreachable either way. One `matches!` is also one
             // `matches!` whatever the features, which is what keeps this load-time decision
             // out of the diff when a feature is flipped.
-            watches_ppu_reads: matches!(mapper, 4 | 5 | 37 | 47 | 48 | 64 | 116 | 118 | 119 | 158),
+            // MF-6c step 8 adds mapper 96, the Oeka Kids board, to **both** lists, and it is
+            // the first number in either with no IRQ at all: its 4 KiB CHR bank is latched
+            // off the PPU address bus on the entry into $2000-$2FFF, and its page says the
+            // latch "occurs regardless of whether the PPU or game code initiated the address
+            // change, enabling software to manually select CHR pages by writing specific
+            // values to $2006" -- so it needs the rendering's fetches *and* the bare writes.
+            // See `OekaKids`'s own note, which does not settle MR-1's question for the MMC2.
+            watches_ppu_reads: matches!(
+                mapper,
+                4 | 5 | 37 | 47 | 48 | 64 | 96 | 116 | 118 | 119 | 158
+            ),
             watches_ppu_bus_without_read: matches!(
                 mapper,
-                4 | 37 | 47 | 48 | 64 | 116 | 118 | 119 | 158
+                4 | 37 | 47 | 48 | 64 | 96 | 116 | 118 | 119 | 158
             ),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
@@ -1041,6 +1051,10 @@ mod tests {
         #[cfg(feature = "board-mmc3-multicart")]
         expected.extend_from_slice(&[37, 37, 47, 47]);
         expected.extend_from_slice(&[48, 48, 64, 64]);
+        // MF-6c step 8: the Oeka Kids board latches its CHR bank on the entry into
+        // $2000-$2FFF, which the rendered line below reaches.
+        #[cfg(feature = "board-96")]
+        expected.extend_from_slice(&[96, 96]);
         #[cfg(feature = "board-116")]
         expected.extend_from_slice(&[116, 116]);
         expected.extend_from_slice(&[118, 118]);

@@ -4,7 +4,11 @@
 // `Board::DecodeBoard` uninhabited. One clear error beats nine confusing ones. **A later member
 // of this enum adds its feature to the `any` below**, and to nothing else -- the module, the
 // `Board` variant, its `dispatch!` arm and the registry's `use` are all behind the umbrella.
-#[cfg(not(any(feature = "board-77", feature = "board-jaleco-72-92-86")))]
+#[cfg(not(any(
+    feature = "board-77",
+    feature = "board-96",
+    feature = "board-jaleco-72-92-86"
+)))]
 compile_error!(
     "feature `board-decode-boards` is implied by each of its boards (`board-77`, …) and is not \
      meant to be selected on its own"
@@ -13,6 +17,8 @@ compile_error!(
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 use super::Mapper;
+#[cfg(feature = "board-96")]
+use super::OekaKids;
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::{JalecoJf13, JalecoJf17};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -73,6 +79,10 @@ pub enum DecodeBoard {
     /// Mapper 86, Jaleco's JF-13: the same speech chip on a GNROM-like board.
     #[cfg(feature = "board-jaleco-72-92-86")]
     JalecoJf13(JalecoJf13),
+    // Appended by MF-6c step 8.
+    /// Mapper 96, the Bandai Oeka Kids board, whose CHR bank is latched off the PPU address bus.
+    #[cfg(feature = "board-96")]
+    OekaKids(OekaKids),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -87,6 +97,8 @@ macro_rules! inner {
             DecodeBoard::JalecoJf17($b) => $body,
             #[cfg(feature = "board-jaleco-72-92-86")]
             DecodeBoard::JalecoJf13($b) => $body,
+            #[cfg(feature = "board-96")]
+            DecodeBoard::OekaKids($b) => $body,
         }
     };
 }
@@ -161,5 +173,19 @@ impl Mapper for DecodeBoard {
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.ppu_write(memory, address, value));
+    }
+
+    /// Forwarded for mapper 96 alone (MF-6c step 8), the one board here whose whole mechanism
+    /// is the PPU address bus. Behind `Cartridge::watches_ppu_reads` and
+    /// `Cartridge::watches_ppu_bus_without_read`, so no board outside those two latches reaches
+    /// this dispatch at all; `OekaKids::on_ppu_address_bus` carries `#[inline(never)]` so that
+    /// the arm this adds beside the three A12 counters' is a `callq` and not a body.
+    ///
+    /// **Behaviour-neutral for the other three boards here**: none of them overrides it, so each
+    /// takes `Mapper`'s empty default, which is what the un-forwarded dispatch did for the whole
+    /// variant.
+    #[cfg(feature = "board-96")]
+    fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }
 }

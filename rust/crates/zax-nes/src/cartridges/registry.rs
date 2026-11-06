@@ -19,6 +19,8 @@ use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
 use super::mappers::NesEvent;
 use super::mappers::Nrom;
+#[cfg(feature = "board-96")]
+use super::mappers::OekaKids;
 #[cfg(feature = "board-116")]
 use super::mappers::Somari;
 #[cfg(feature = "board-68")]
@@ -127,6 +129,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     94,
     #[cfg(feature = "board-namcot108")]
     95,
+    #[cfg(feature = "board-96")]
+    96,
     #[cfg(feature = "board-small-boards")]
     97,
     101,
@@ -355,6 +359,16 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(TaitoX1017::RAM_SIZE),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 096"): "PRG RAM capacity: No", and "CHR capacity: 32 KiB RAM" --
+        // eight of the 4 KiB pages the board banks in. The CHR figure is the same one
+        // REQ-CORE-012's default gives an image with no CHR-ROM, and it is stated anyway
+        // because the page states it and no header field can (MF-6c step 8).
+        #[cfg(feature = "board-96")]
+        96 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: Some(OekaKids::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 086"): "No PRG RAM (mapper ports occupy $6000-$7FFF instead)".
         // With no RAM behind that window `Cartridge::cpu_write` walks past its PRG-RAM branch and
         // `Mapper::write_register` sees the address intact, which is how the JF-13 decodes its two
@@ -463,6 +477,12 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // not its output enable. Mesen 2 does not give it conflicts either.
         #[cfg(feature = "board-jaleco-72-92-86")]
         72 | 92 => true,
+        // *INES Mapper 096* says "Bus conflicts: **partly**", and this build has one bool per
+        // cartridge (MR-BUS-1), so "partly" has to become yes or no. **Yes**, which is Mesen
+        // 2's reading (`OekaKids.h:14`, `HasBusConflicts` true); Q-135 holds the two readings
+        // and the argument (MF-6c step 8).
+        #[cfg(feature = "board-96")]
+        96 => true, // Q-135
         // *INES Mapper 077* gives the Irem LROG017 "Bus conflicts: yes" against its one register
         // at $8000-$FFFF: two 74161s latch the write and nothing on the board disables the PRG
         // ROM's output enable while they do (MF-6c step 6). Mesen 2 agrees
@@ -591,6 +611,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         72 | 92 => Board::DecodeBoard(DecodeBoard::JalecoJf17(JalecoJf17::new(memory, mapper))),
         #[cfg(feature = "board-jaleco-72-92-86")]
         86 => Board::DecodeBoard(DecodeBoard::JalecoJf13(JalecoJf13::new(memory))),
+        // MF-6c step 8: the Oeka Kids board, whose 4 KiB CHR bank is latched off the PPU
+        // address bus -- the first board in this core whose whole mechanism is that bus,
+        // including a bare $2006 write with no fetch behind it. Its tablet is a recorded gap.
+        #[cfg(feature = "board-96")]
+        96 => Board::DecodeBoard(DecodeBoard::OekaKids(OekaKids::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),
