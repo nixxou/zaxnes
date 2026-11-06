@@ -548,9 +548,11 @@ impl Mapper for Mmc5 {
         (self.protect1 & 0x03) == 0x02 && (self.protect2 & 0x03) == 0x01
     }
 
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
-        (usize::from(self.ram_bank) * BankWindows::PRG_WINDOW_SIZE + usize::from(address - 0x6000))
-            % memory.prg_ram().len()
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        (
+            usize::from(self.ram_bank) * BankWindows::PRG_WINDOW_SIZE,
+            memory.prg_ram().len(),
+        )
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {

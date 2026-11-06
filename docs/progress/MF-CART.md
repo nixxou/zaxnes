@@ -271,3 +271,105 @@ MF-6c's** — `board-taito-x1` is `mmc5` **+22 370 268, three units of the same 
 `leaq 240(%rdi), %rax` that costs is the one in the **`Board::try_read_prg`** table's prologue on
 the $8000-$FFFF tail, not the one in the `prg_ram_enabled` head, which a single signed compare
 already skips.
+
+## Step 2 — the structural fix: the $6000-$7FFF read answer settled on `Cartridge`
+
+### What was built
+
+`Cartridge::default_cpu_read` asked the `Board` enum **two** questions about $6000-$7FFF —
+`Mapper::prg_ram_enabled` and `Mapper::prg_ram_offset` — on a function the MMC5 reaches on every
+CPU read. Both are now settled wherever `rom_windows` and `nametable_pages` already are, which is
+the shape the plan revision of MF-6c step 5 named as shape 2 and nothing had tried.
+
+**One trait method was replaced**, and that is the whole of the design:
+
+| | before | after |
+| --- | --- | --- |
+| the trait | `fn prg_ram_offset(&self, memory, address) -> usize` | `fn prg_ram_window(&self, memory) -> (usize, usize)` |
+| the default | `usize::from(address - 0x6000) % memory.prg_ram().len()` | `(0, memory.prg_ram().len())` |
+| the index | the method, per read | `(base + (address - 0x6000)) % wrap`, from two cached `usize` |
+
+The four boards that override it are the four that bank their PRG-RAM, and **every one of them
+already had exactly this shape**, which is why the method could become a window with no change of
+arithmetic anywhere:
+
+| board | before | after |
+| --- | --- | --- |
+| `Mmc1` (SOROM/SXROM) | `(bank * 8192 + (a − 0x6000)) % len` | `(bank * 8192, len)` |
+| `Mmc5` | `(ram_bank * 8192 + (a − 0x6000)) % len` | `(ram_bank * 8192, len)` |
+| `Fme7` | `(window_6000 & 0x3F) * 8192 + …) % len` | `((window_6000 & 0x3F) * 8192, len)` |
+| `Namco163` | `(a − 0x6000) % (len − 128).max(1)` | `(0, (len − 128).max(1))` |
+
+No shared enum forwarded `prg_ram_offset` and none forwards `prg_ram_window`, so `Board` keeps a
+four-body dispatch — now reached **once per CPU write** instead of once per CPU read.
+
+### The two fields, and why the enable is folded into the wrap
+
+    prg_ram_read_base: usize,   // the byte offset in PRG-RAM of $6000
+    prg_ram_read_wrap: usize,   // the length the offset wraps at; 0 means "not RAM for a read"
+
+`refresh_prg_ram_read` is called from `refresh_rom_windows`, so the answer is settled at load, on
+every CPU write to the cartridge, on a reset and on a loaded state — the same four moments
+`rom_windows` is settled at, and **the only four at which any board can move it**: the eighteen
+mapper numbers whose register can change it all move it from `write_register` or
+`intercept_cpu_write`, and the one board whose state advances on a CPU cycle inside this question's
+reach (the NES-EVENT's M2 counter) touches `counting`, `counter` and `irq_pending` and not
+`Mmc1::prg_register`.
+
+`prg_ram_enabled` and `!prg_ram.is_empty()` are folded into the wrap so that the read is **one
+test and not three**, and the test is ordered *after* the range test rather than before it,
+because the head of this function is where an MMC5 game's reads arrive: `movswl %si, %ecx` then
+`cmpl $24575, %ecx; jle` is one *signed* comparison that sends both $0000-$5FFF and $8000-$FFFF
+away in two instructions, a `u16` above $7FFF sign-extending negative.
+
+`refresh_prg_ram_read` is **not** gated the way `nametable_pages_vary` gates
+`refresh_nametable_pages`: eighteen numbers can move this answer against two that can move a
+nametable page, which is too many for the gate to pay for itself.
+
+### The write path is deliberately left alone
+
+`Cartridge::cpu_write` goes on asking the dispatch, through `Cartridge::prg_ram_offset`, which is
+now one `prg_ram_window` call and the arithmetic. It **cannot** share the read cache: the enable
+folded into that cache is `Mapper::prg_ram_enabled` and what gates a write is
+`Mapper::prg_ram_writable`, which is a different answer on four boards — and a Namcot 340 is a
+case where a write may land while a read may not. A CPU write to the cartridge is the rarest bus
+event there is (MF-6b step 5), so there is nothing to buy there and an implication to prove that
+is not worth proving.
+
+### **How the lot knows the cache is never stale, and it is not an argument**
+
+`Cartridge::read_rom_window` has carried
+`debug_assert_eq!(Some(value), self.board.try_read_prg(&self.memory, address))` since lot PR-1:
+the cache checks itself against the dispatch it replaces, on every read, in every debug build.
+`default_cpu_read` now carries the same idiom in three parts — the offset against
+`self.prg_ram_offset(address)`, the taken branch against `prg_ram_enabled() && !is_empty()`, and
+**the not-taken branch against its negation**, which is the half a one-sided assertion would miss.
+`refresh_prg_ram_read` carries the fourth, the one thing the trait cannot state: a readable window
+is a window of non-zero length, or the sentinel would read as "not RAM".
+
+So the whole test suite is the checker, in all three configurations:
+
+| configuration | `zax-nes`, debug (the asserts live) | release, with `zax-harness` |
+| --- | ---: | ---: |
+| `default` | **854 / 0 / 7** | **917 / 0 / 8** |
+| `--features parked-boards` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--no-default-features` | **783 / 0 / 7** | — |
+
+Every figure is MF-6c step 10's and step 11's to the test, and the debug columns are **854 + 862 +
+783 = 2 499 test bodies that drove the assertions and none that tripped**. No test was added,
+changed or removed by this step: it is a refactor whose correctness claim is "the same answers",
+and the way to show that is the existing suite with a checker wired into the path.
+
+`cargo fmt --check` clean; clippy `-D warnings` clean on `zax-nes` in `default`,
+`--features parked-boards` and `--no-default-features`, and on `zax-harness`, with **no new
+`allow` of any kind**. The savestate is untouched — no board gained, lost or moved a field, and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` is in all three columns above.
+
+The measurement is step 3; this step is the code.
+
+[PROGRESS] MF-CART step 2/8 done: `Mapper::prg_ram_offset` becomes `Mapper::prg_ram_window`, asked
+once per CPU write instead of once per CPU read, and its answer with the enable folded in is two
+cached `usize` on `Cartridge` beside `rom_windows` — so `Cartridge::default_cpu_read` holds **no
+`Board` dispatch for $6000-$7FFF at all**. 854 / 862 / 783 debug and 917 / 925 release, every
+figure MF-6c's to the test, with the cache checking itself against the dispatch it replaces on
+every read of every debug build.

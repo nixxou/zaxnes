@@ -248,6 +248,43 @@ pub struct Cartridge {
     /// The iNES mapper number, latched at load. See [`Cartridge::mapper_number`] for why this is
     /// a field and not the `Board` dispatch.
     mapper_number: i32,
+    /// What a CPU read of $6000-$7FFF answers, settled wherever [`Cartridge::rom_windows`] is
+    /// and read by [`Cartridge::default_cpu_read`]: the byte offset in PRG-RAM of $6000, and the
+    /// length the offset wraps at. **`prg_ram_read_wrap == 0` means the window is not RAM for a
+    /// read** — the board has it disabled, or the cartridge carries none — and the read falls
+    /// through to [`Mapper::try_read_prg`] as it did before.
+    ///
+    /// **This field is lot MF-CART, and it is the third load-time cache of a board answer on
+    /// this struct for the same reason as the first two.** `rom_windows` exists because asking
+    /// the `Board` enum for a window on every CPU read put a 35-arm dispatch on that path, and
+    /// `nametable_pages` because asking it for a page on every nametable fetch did; this one
+    /// exists because `default_cpu_read` asked it **two** questions per CPU read of a
+    /// $6000-$7FFF address — `Mapper::prg_ram_enabled` and the old `Mapper::prg_ram_offset` —
+    /// and the MMC5 is the one board that maps PRG-RAM into $8000-$DFFF, so
+    /// [`Cartridge::read_rom_window`] cannot answer and **every** CPU read of an MMC5 game
+    /// reaches that function.
+    ///
+    /// What those two dispatches cost was not their own arms. They made `default_cpu_read` 429
+    /// instructions holding the inlined `Board::try_read_prg` jump table **twice**, and past a
+    /// certain pressure LLVM hoists `leaq 240(%rdi), %rax` — `&self.board`, wanted only by that
+    /// table's cold arms, among them mapper 116's boxed `IrqBoard::Somari(Box<Somari>)` — above
+    /// the table, where it runs on every call: **+7 456 756 instructions over 300 frames of
+    /// `mmc5exram`, +0.066 %**, one per read, against the owner's tolerance of +0.02 % per ROM.
+    /// MF-6c measured that figure nine times in both directions and parked two boards on it;
+    /// MF-CART step 1 measured it a tenth time at **three units** for `board-taito-x1`
+    /// (+0.198 %). See `docs/progress/MF-CART.md`.
+    ///
+    /// **The enable is folded into the wrap on purpose**, so that the read is one test and not
+    /// two, and the test is ordered *after* the range test because an MMC5 game's reads are
+    /// nearly all of $8000-$FFFF and one signed comparison sends those away.
+    ///
+    /// Derived, so it is not in the savestate — [`Cartridge::load_state`] recomputes it, exactly
+    /// as it does `rom_windows` and `nametable_pages`. The **write** path does not use it: it
+    /// asks `Mapper::prg_ram_writable`, which is not `prg_ram_enabled` on four boards, and a CPU
+    /// write to the cartridge is the rarest bus event there is.
+    prg_ram_read_base: usize,
+    /// See [`Cartridge::prg_ram_read_base`]. Zero means "not RAM for a read".
+    prg_ram_read_wrap: usize,
     /// Whether the board has anything to do on a CPU cycle, which only a counter or a sound chip
     /// needs: the MMC5's PPU-idle counter, the FCG and SS88006 IRQ counters, Konami's VRC IRQ,
     /// the RAMBO-1's cycle mode, and the FME-7 and VRC6 with their expansion audio. Twelve of
@@ -327,6 +364,11 @@ impl Cartridge {
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
+            // Both settled by the `refresh_rom_windows` below `cartridge.reset()` runs, as
+            // `rom_windows` itself is; the zero wrap is the "not RAM" answer, so a cartridge is
+            // never readable at $6000-$7FFF before the board has been asked.
+            prg_ram_read_base: 0,
+            prg_ram_read_wrap: 0,
             // The MMC5 ($5105), the TxSROM of mapper 118 (bit 7 of its CHR registers), the VRC6
             // since MF-5a, whose `$B003` and CHR registers between them pick a CIRAM page per
             // table (nesdev, "VRC6", the `$B003` tables), and — since MF-6a step 1 — the
@@ -556,9 +598,16 @@ impl Cartridge {
     }
 
     /// Index in PRG-RAM of CPU address `address` in $6000-$7FFF. Boards that bank their
-    /// PRG-RAM override it (MMC1 SOROM, MMC5).
+    /// PRG-RAM move the window (MMC1 SOROM, MMC5, FME-7, Namco 163).
+    ///
+    /// The **write** path's own, and since lot MF-CART the only caller outside a
+    /// `debug_assert!`: a read takes the cached [`Cartridge::prg_ram_read_base`] instead. The
+    /// write path cannot share that cache, because the enable folded into it is
+    /// `Mapper::prg_ram_enabled` and what gates a write is `Mapper::prg_ram_writable` — the same
+    /// answer on every board but four, and this is not a path worth proving an implication on.
     fn prg_ram_offset(&self, address: u16) -> usize {
-        self.board.prg_ram_offset(&self.memory, address)
+        let (base, wrap) = self.board.prg_ram_window(&self.memory);
+        (base + usize::from(address - 0x6000)) % wrap
     }
 
     /// Battery-backed PRG-RAM, exposed so that a host can persist it (REQ-CORE-095,
@@ -611,9 +660,26 @@ impl Cartridge {
     /// then left alone.
     fn refresh_rom_windows(&mut self) {
         self.rom_windows = self.board.rom_windows(&self.memory);
+        self.refresh_prg_ram_read();
         if self.nametable_pages_vary {
             self.refresh_nametable_pages();
         }
+    }
+
+    /// Settles what a CPU read of $6000-$7FFF answers; see [`Cartridge::prg_ram_read_base`].
+    ///
+    /// Not gated the way `nametable_pages_vary` gates `refresh_nametable_pages`: eighteen of the
+    /// supported mapper numbers can move this answer with a register write, which is too many
+    /// for the gate to pay for itself, and the whole of it is one `Board` dispatch plus an `and`
+    /// on a path a CPU write to the cartridge already pays `rom_windows` for.
+    fn refresh_prg_ram_read(&mut self) {
+        let (base, wrap) = self.board.prg_ram_window(&self.memory);
+        let readable = self.prg_ram_enabled() && !self.memory.prg_ram.is_empty();
+        self.prg_ram_read_base = base;
+        self.prg_ram_read_wrap = if readable { wrap } else { 0 };
+        // The one thing the cache needs of a board and the trait cannot state: a window that is
+        // readable is a window of non-zero length, or the sentinel would read as "not RAM".
+        debug_assert!(!readable || wrap != 0);
     }
 
     fn refresh_nametable_pages(&mut self) {
@@ -641,14 +707,28 @@ impl Cartridge {
         self.default_cpu_read(address)
     }
 
+    /// The CPU read of $4020-$FFFF that no board wanted to override: PRG-RAM at $6000-$7FFF, and
+    /// the board's own decode for the rest.
+    ///
+    /// **No `Board` dispatch answers the $6000-$7FFF half** — [`Cartridge::prg_ram_read_base`]
+    /// and its wrap were settled by the last CPU write, a reset or a loaded state, the way
+    /// `rom_windows` is — and that is lot MF-CART's whole change. The `debug_assert_eq!` is the
+    /// idiom [`Cartridge::read_rom_window`] already uses for the same kind of cache: every test
+    /// of the suite checks the cached answer against the dispatch it replaces.
     fn default_cpu_read(&self, address: u16) -> Option<u8> {
-        if (0x6000..=0x7FFF).contains(&address)
-            && self.prg_ram_enabled()
-            && !self.memory.prg_ram.is_empty()
-        {
-            return Some(self.memory.prg_ram[self.prg_ram_offset(address)]);
+        if (0x6000..=0x7FFF).contains(&address) && self.prg_ram_read_wrap != 0 {
+            let offset =
+                (self.prg_ram_read_base + usize::from(address - 0x6000)) % self.prg_ram_read_wrap;
+            debug_assert_eq!(offset, self.prg_ram_offset(address));
+            debug_assert!(self.prg_ram_enabled() && !self.memory.prg_ram.is_empty());
+            return Some(self.memory.prg_ram[offset]);
         }
 
+        debug_assert!(
+            !(0x6000..=0x7FFF).contains(&address)
+                || !self.prg_ram_enabled()
+                || self.memory.prg_ram.is_empty()
+        );
         self.board.try_read_prg(&self.memory, address)
     }
 

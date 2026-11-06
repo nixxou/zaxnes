@@ -202,9 +202,9 @@ impl Mapper for Fme7 {
     /// The six bank bits of command $8 over the PRG-RAM the board carries, which on JSROM is one
     /// 8 KiB chip: the modulo then makes every bank the same chip, as the hardware's missing
     /// address lines do.
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         let bank = usize::from(self.window_6000 & 0x3F) * BankWindows::PRG_WINDOW_SIZE;
-        (bank + usize::from(address - 0x6000)) % memory.prg_ram().len()
+        (bank, memory.prg_ram().len())
     }
 
     /// $6000-$7FFF when it is not the RAM: a PRG-ROM bank, or open bus if command $8 selected the

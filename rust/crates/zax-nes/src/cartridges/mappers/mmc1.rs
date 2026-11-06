@@ -23,7 +23,7 @@ pub struct Mmc1 {
     /// NES 2.0 submapper 5 (MR-1-4), decided at load.
     fixed_prg: bool,
     /// How to read the `S` bits of CHR bank 0 for this board's PRG-RAM (MR-1-3), decided at
-    /// load so that `prg_ram_offset` keeps exactly one shift and one mask.
+    /// load so that `prg_ram_window` keeps exactly one shift and one mask.
     ram_bank_shift: u32,
     ram_bank_mask: u8,
     /// Bit 4 of the PRG register, masked: `$10` on a board that wires the PRG-RAM disable and
@@ -306,10 +306,9 @@ impl Mapper for Mmc1 {
 
     /// The `S` bits of CHR bank 0 pick the 8 KiB PRG-RAM chip; which bits, and whether there
     /// are any, is `Mmc1::new`'s decision (MR-1-3).
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         let bank = usize::from((self.chr0 >> self.ram_bank_shift) & self.ram_bank_mask);
-        (bank * BankWindows::PRG_WINDOW_SIZE + usize::from(address - 0x6000))
-            % memory.prg_ram().len()
+        (bank * BankWindows::PRG_WINDOW_SIZE, memory.prg_ram().len())
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

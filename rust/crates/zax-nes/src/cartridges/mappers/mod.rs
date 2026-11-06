@@ -250,9 +250,21 @@ pub trait Mapper {
         self.prg_ram_enabled()
     }
 
-    /// Index in PRG-RAM of CPU address `address` in $6000-$7FFF.
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
-        usize::from(address - 0x6000) % memory.prg_ram().len()
+    /// Where $6000-$7FFF lands in PRG-RAM: the byte offset of $6000, and the length the offset
+    /// wraps at — the chip, or the part of it the window reaches. The index of `address` is
+    /// `(base + (address - 0x6000)) % wrap`, which is what every board that banks its PRG-RAM
+    /// computes and the only shape any of the four overrides needs.
+    ///
+    /// **Asked once per CPU write and not once per CPU read**, which is the whole reason it is a
+    /// window and not an offset: [`Cartridge`](crate::cartridges::Cartridge) caches the answer
+    /// beside `rom_windows`, so `Cartridge::default_cpu_read` — on the MMC5's every CPU read —
+    /// holds no `Board` dispatch for $6000-$7FFF at all. Lot MF-CART is why; its step 1 priced
+    /// the dispatch this replaces at one hoisted `leaq` per read.
+    ///
+    /// A board whose window moves at some other time than a CPU write, a reset or a loaded state
+    /// has nowhere to say so, exactly as [`Mapper::rom_windows`] already requires; none does.
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        (0, memory.prg_ram().len())
     }
 
     /// Where each 8 KiB window of $8000-$FFFF starts in PRG-ROM when a CPU read of it is a plain

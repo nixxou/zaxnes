@@ -56,7 +56,7 @@ pub enum NamcoVariant {
 /// to be in it: on this board the wavetable *is* the save file's second half. Mesen's `.sav` has
 /// the same two parts in the same order (`Namco163.h:103-139` writes `_saveRam` then
 /// `GetInternalRam()`), so a save file crosses between the two programs. The CPU's $6000-$7FFF
-/// window never reaches the tail — see [`Mapper::prg_ram_offset`].
+/// window never reaches the tail — see [`Mapper::prg_ram_window`].
 ///
 /// **What this build does not serve, and why: Q-126.** Two of the chip's PPU modes need a
 /// pattern or nametable fetch to come out of a memory this crate's fetch path cannot reach from
@@ -375,13 +375,13 @@ impl Mapper for Namco163 {
     /// $6000-$7FFF covers the four 2 KiB windows and **not** the 128 bytes behind them: the
     /// modulo is over the windows alone, so the chip's RAM is unreachable from the CPU bus except
     /// through $4800. See the struct's note on where that RAM lives.
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         let windows = memory
             .prg_ram()
             .len()
             .saturating_sub(Self::INTERNAL_RAM_SIZE)
             .max(1);
-        usize::from(address - 0x6000) % windows
+        (0, windows)
     }
 
     fn nametable_page(&self, table: i32) -> i32 {

@@ -221,7 +221,7 @@ impl Mapper for IrqBoard {
 
     /// Forwarded for mapper 105 alone, and it is the **only** one of the three PRG-RAM methods
     /// that is: [`Mapper::prg_ram_writable`]'s default calls this one, and the NES-EVENT's 8 KiB
-    /// of unbanked PRG-RAM is exactly what [`Mapper::prg_ram_offset`]'s default answers. One body
+    /// of unbanked PRG-RAM is exactly what [`Mapper::prg_ram_window`]'s default answers. One body
     /// in `Board::prg_ram_enabled` instead of three across the $6000-$7FFF decode, which is the
     /// path MF-6b step 2 found `Cartridge::default_cpu_read` on.
     ///

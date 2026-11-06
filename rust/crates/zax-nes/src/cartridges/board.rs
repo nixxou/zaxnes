@@ -274,8 +274,11 @@ impl Mapper for Board {
         dispatch!(self, b => b.prg_ram_writable())
     }
 
-    fn prg_ram_offset(&self, memory: &CartridgeMemory, address: u16) -> usize {
-        dispatch!(self, b => b.prg_ram_offset(memory, address))
+    /// Not on any read path since lot MF-CART: `Cartridge` asks this once per CPU write and
+    /// caches the answer, where its predecessor `prg_ram_offset` was a dispatch inside
+    /// `Cartridge::default_cpu_read`.
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        dispatch!(self, b => b.prg_ram_window(memory))
     }
 
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
