@@ -381,6 +381,9 @@ impl Cartridge {
             // is the widest of them (nesdev, "NES-EVENT").
             // MF-6b step 4 adds the Taito TC0690 (48): its counter is the PPU's, but the
             // four-cycle delay on its assertion is counted down here (nesdev, "INES Mapper 048").
+            // MF-6c step 1 adds mapper 153, which is the Bandai FCG's own board and so the Bandai
+            // FCG's own counter: its IRQ registers "function the same way as on INES Mapper 016,
+            // submapper 5" (nesdev, "INES Mapper 153").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -401,6 +404,7 @@ impl Cartridge {
                     | 73
                     | 85
                     | 105
+                    | 153
             ),
         };
         cartridge.reset();

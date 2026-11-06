@@ -24,6 +24,7 @@ default = [
     "board-105",
     "board-116",
     "board-119",
+    "board-153",
     "board-155",
     "board-158",
     "board-mmc3-multicart",
@@ -73,6 +74,11 @@ board-119 = []
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the
 # same board with an outer register at $6000-$7FFF above its bank numbers (MF-6a3 step 1).
 board-mmc3-multicart = []
+
+# Mapper 153, the Bandai FCG board with an LZ93D50 and 8192 bytes of battery-backed WRAM
+# (MF-6c step 1). One title, *Famicom Jump II: Saikyou no 7-nin*. Two bytes and three branches
+# on `BandaiFcg`, which is mapper 16's board: no `Board` variant, no dispatch arm anywhere.
+board-153 = []
 
 # The umbrella: every board left out of `default` because it is above the tolerance. Empty
 # while no board is parked, which is the state MF-6b ended in and MF-6a3 keeps -- the feature

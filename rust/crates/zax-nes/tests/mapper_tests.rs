@@ -72,7 +72,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 119 (the Nintendo TQROM) and 47 and 37 (Nintendo's two MMC3 multicarts), each behind
     //   its own Cargo feature (MF-6a3 step 1) -- see `docs/review/BOARD-FEATURES.md`;
     // * 116 (the Gouder SOMARI-P and its Huang ASIC), the one number REQ-CORE-101 leaves
-    //   optional, behind `board-116` (MF-6a3 step 4, answering Q-130 question 1).
+    //   optional, behind `board-116` (MF-6a3 step 4, answering Q-130 question 1);
+    // * 153 (the Bandai FCG board with an LZ93D50 and 8 KiB of battery-backed WRAM), behind
+    //   `board-153` (MF-6c step 1).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -87,7 +89,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let small = cfg!(feature = "board-small-boards");
     let namcot = cfg!(feature = "board-namcot108");
     let multicart = cfg!(feature = "board-mmc3-multicart");
-    let additions: [(i32, bool); 38] = [
+    let additions: [(i32, bool); 39] = [
         (19, true),
         (24, true),
         (26, true),
@@ -116,6 +118,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (119, cfg!(feature = "board-119")),
         (140, small),
         (152, small),
+        (153, cfg!(feature = "board-153")),
         (154, namcot),
         (155, cfg!(feature = "board-155")),
         (156, true),
@@ -1081,6 +1084,103 @@ fn req_core_100_bandai_fcg_banks_prg_chr_and_mirroring() {
     // The FCG-1 and FCG-2 wiring puts the same registers at $6000-$7FFF.
     core.write_memory(0x6009, 0x01);
     assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// Mapper 153's three departures from mapper 16, each on the page's own words (MF-6c step 1):
+/// the outer 256 KiB PRG bank on $8000-$8003, the fixed window staying inside that block, and
+/// "No CHR banking is available".
+#[cfg(feature = "board-153")]
+#[test]
+fn req_core_100_mapper_153_banks_a_256_kib_outer_block_and_no_chr() {
+    // 512 KiB of PRG: 64 banks of 8 KiB, i.e. two 256 KiB outer blocks of sixteen 16 KiB banks.
+    let mut core = MapperRom::new(153).prg(64).chr(32).battery().load();
+    // Power-on: inner bank 0, outer block 0, and the fixed window is the block's last 16 KiB.
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+    // $8008 is the inner 16 KiB bank, four bits wide.
+    core.write_memory(0x8008, 0x05);
+    assert_eq!([10, 11, 30, 31], core.prg_windows());
+    // Bit 0 of $8000-$8003 is the outer block, "The same value must be written to all four".
+    for register in 0..4u16 {
+        core.write_memory(0x8000 + register, 0x01);
+    }
+    // Both windows moved into the second block: bank 5 of it, and its last bank.
+    assert_eq!([42, 43, 62, 63], core.prg_windows());
+    // The inner field is four bits: $0F wraps inside the block rather than leaving it.
+    core.write_memory(0x8008, 0x1F);
+    assert_eq!([62, 63, 62, 63], core.prg_windows());
+    // "No CHR banking is available": $8000-$8007 moved no CHR window, which is the linear 8 KiB
+    // the board is wired to.
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    for register in 0..8u16 {
+        core.write_memory(0x8000 + register, 0x01);
+    }
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    // Back to block 0 when all four carry a clear bit 0.
+    for register in 0..4u16 {
+        core.write_memory(0x8000 + register, 0x00);
+    }
+    assert_eq!([30, 31, 30, 31], core.prg_windows());
+    // $8009's mirroring and $800A-$800C's IRQ are submapper 5's, unchanged.
+    core.write_memory(0x8009, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// Mapper 153's WRAM: 8 KiB of battery-backed RAM at $6000-$7FFF, gated by $800D bit 5, with the
+/// register ports mirrored across $8000-$FFFF **only** so that the window is RAM and not a port
+/// (MF-6c step 1, REQ-CORE-095).
+#[cfg(feature = "board-153")]
+#[test]
+fn req_core_100_mapper_153_has_battery_wram_at_6000_gated_by_800d_bit_5() {
+    let mut core = MapperRom::new(153).prg(64).chr(32).battery().load();
+    // Power-on is enabled: see `BandaiFcg`'s note on `prg_ram_on`.
+    core.write_memory(0x6123, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6123));
+    // $800D bit 5 clear disables the chip: the window stops reading and stops accepting writes,
+    // and the byte already in it is kept.
+    core.write_memory(0x800D, 0x00);
+    assert_ne!(0x5A, core.read_memory(0x6123));
+    core.write_memory(0x6123, 0x11);
+    core.write_memory(0x800D, 0x20);
+    assert_eq!(0x5A, core.read_memory(0x6123));
+    // The ports are mirrored across $8000-$FFFF only: a write of $6009 is RAM, not the
+    // mirroring register. (Mapper 16 answers that address, which the FCG test above pins.)
+    core.write_memory(0x8009, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    core.write_memory(0x6009, 0x01);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    assert_eq!(0x01, core.read_memory(0x6009));
+    // And REQ-CORE-095's single slice is the whole 8 KiB.
+    let battery = core.cartridge().unwrap().battery_ram();
+    assert_eq!(8 * 1024, battery.len());
+    assert_eq!(0x5A, battery[0x123]);
+}
+
+/// Mapper 16's board is unaffected by mapper 153's parameter: the shape MF-6a3 step 1 used for
+/// `req_core_100_an_ordinary_mapper_4_image_is_unaffected_by_119_47_and_37`, and the test that
+/// says the three branches of `BandaiFcg` are a parameter and not a change (MF-6c step 1).
+#[test]
+fn mf_6c_an_ordinary_mapper_16_image_is_unaffected_by_153() {
+    let mut core = MapperRom::new(16).prg(64).chr(32).load();
+    // $8000-$8007 are the eight CHR registers, not an outer PRG bank: bit 0 of $8000 moves CHR
+    // window 0 and no PRG window. (Mesen 2 would make this image's $8000 an outer bank, because
+    // it has 512 KiB of PRG; the page documents that on mapper 153 alone. `BandaiFcg`'s note.)
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    core.write_memory(0x8000, 0x11);
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    assert_eq!(0x11, core.chr_bank(0x0000));
+    // $8008 is a full byte on mapper 16, not four bits, and the fixed window is the image's last
+    // 16 KiB and not a block's.
+    core.write_memory(0x8008, 0x1F);
+    assert_eq!([62, 63, 62, 63], core.prg_windows());
+    // $6000-$7FFF is the register window, not RAM: $6009 is still the mirroring register and the
+    // board has no readable PRG-RAM there.
+    core.write_memory(0x6009, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.write_memory(0x6123, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x6123));
+    // And $800D is the EEPROM port, so it enables nothing.
+    core.write_memory(0x800D, 0x20);
+    assert_ne!(0x5A, core.read_memory(0x6123));
 }
 
 #[test]

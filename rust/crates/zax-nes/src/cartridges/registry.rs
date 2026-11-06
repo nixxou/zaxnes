@@ -115,6 +115,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     140,
     #[cfg(feature = "board-small-boards")]
     152,
+    #[cfg(feature = "board-153")]
+    153,
     #[cfg(feature = "board-namcot108")]
     154,
     #[cfg(feature = "board-155")]
@@ -381,7 +383,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         11 => Board::ColorDreams(ColorDreams::new(memory)),
         13 => Board::CpRom(CpRom::new(memory)),
         15 => Board::Mapper015(Mapper015::new(memory)),
-        16 => Board::BandaiFcg(BandaiFcg::new(memory)),
+        // MF-6c step 1: mapper 153 is the same LZ93D50 on a board with 8 KiB of battery-backed
+        // WRAM, an outer PRG bank on $8000-$8003 and no CHR banking. A parameter of mapper 16's
+        // board and not a variant of its own; see `BandaiFcg`'s own note.
+        #[cfg(feature = "board-153")]
+        153 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
+        16 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
         18 => Board::JalecoSs88006(JalecoSs88006::new(memory)),
         21 | 22 | 23 | 25 | 27 => Board::Vrc2Vrc4(Vrc2Vrc4::new(memory, mapper)),
         // Mapper 26 is the VRC6b, the same chip with A0 and A1 swapped (nesdev, "VRC6").

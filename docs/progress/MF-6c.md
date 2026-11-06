@@ -140,7 +140,7 @@ else, and it is **the bar for the whole lot**.
 | `duelito` | NROM | 7 380 437 910 |
 | `smb3` | MMC3 | 7 949 470 334 |
 | `mmc5` | MMC5 | 11 279 383 781 |
-| **total** | | **79 377 161 907** |
+| **total** | | **79 371 161 907** |
 
 ### Instrument 3: the post-LTO dump
 
@@ -181,3 +181,165 @@ behind its own feature whatever it costs.
 [PROGRESS] MF-6c step 0/10 done: the plan, the driver, and `8496c503` reproduced on all three
 instruments — the five level-2 `core` deltas against MF-6a3 step 0 are mapper 116's own
 +253 to +16 832, and all eight pinned symbols hold.
+
+## Step 1 — mapper 153, a parameter of mapper 16's board, at **zero** on all five level-2 cores
+
+### What was built
+
+nesdev ("INES Mapper 153"): "a Bandai FCG board with an LZ93D50 ASIC and 8192 bytes of
+battery-backed WRAM", whose IRQ and mirroring registers "function the same way as on INES Mapper
+016, submapper 5". Three things are the number's own, and the code quotes the page on each:
+
+| what | where |
+| --- | --- |
+| $8000-$8003 as an outer **PRG** bank, "Select 256 KiB outer PRG-ROM bank" on bit 0, "The same value must be written to all four registers" | `BandaiFcg::outer_prg_153` |
+| both windows inside that block, so the fixed one is the block's last 16 KiB and not the image's | `BandaiFcg::update_banks` |
+| "No CHR banking is available" — the linear 8 KiB `BankWindows::new` lays down is what stays | the same method |
+| $800D bit 5 as the WRAM chip enable, where the LZ93D50 proper has the EEPROM port there | `BandaiFcg::write_register`, arm `0xD` |
+| the ports mirrored across **$8000-$FFFF only**, because $6000-$7FFF *is* the WRAM | `BandaiFcg::register_floor` |
+| the 8 KiB being the header's, so no `board_memory_sizes` arm: byte 10 = $70 is 64 << 7 = 8 192, and an iNES 1.0 dump gets `DEFAULT_PRG_RAM_SIZE` | `nes20_prg_ram_size`, unchanged |
+
+**One reading was tightened, exactly as MF-6a3 step 1 tightened the MMC3's three.** `is_fcg12` was
+`header.is_nes20 && header.submapper == 4`, which is mapper 16's condition written without naming
+mapper 16. nesdev's *NES 2.0 submappers* defines submappers 4 and 5 for mapper 16 and **none** for
+153, 157 or 159, so a NES 2.0 dump of one of those carrying a submapper byte of 4 would have been
+read as an FCG-1/2. It is now `mapper == 16 && …`, which is identical for every mapper-16 image.
+
+**Two divergences from Mesen 2, both settled for the page by AMD-061 §1.** Mesen ORs bit 0 of all
+**eight** registers into the outer bank, and applies the outer bank to mapper **16** as well
+whenever an image carries 512 KiB or more of PRG (`BandaiFcg.h:164-170`). The page documents the
+outer bank on 153 alone and names $8000-$8003 alone, so this build does neither;
+`mf_6c_an_ordinary_mapper_16_image_is_unaffected_by_153` pins both halves of that.
+
+**One power-on value the page does not give**: $800D bit 5. Mesen only calls
+`SetCpuMemoryMapping` when the register is written (`BandaiFcg.h:226`), so until then its
+cartridge keeps `BaseMapper`'s read/write mapping — enabled. This build powers on **enabled**, for
+the reason `board_memory_sizes` already gives for mapper 97: taking RAM away from a game that
+never writes the register is the worse of the two errors. No Q ticket — nothing normative is
+ambiguous, and the page's quirk note ("booting with WRAM filled with zeroes, *Famicom Jump II*
+will freeze with a black screen … soft-resetting … will then always run the game properly") is
+about the WRAM's **contents**, which REQ-CORE-095's import path owns, not about this bit.
+
+### The shape: **no `Board` variant, no dispatch arm, no new `irq_asserted` body**
+
+Mapper 153 is two `bool`s on `BandaiFcg` and three branches, because that board already answers
+*yes* to `Mapper::irq_asserted` and already clocks on a CPU cycle. So this step adds **nothing**
+to the two unlatched hooks of §4.10 — which is why the inventory calls 153 "the easy one of the
+group", and why the measurement below is what it is.
+
+**The two `bool`s are appended**, and that is deliberate. rustc groups a struct's fields by
+alignment and keeps declaration order inside a group, so declaring them after `irq_pending` leaves
+every existing field where it was. Measured with `offset_of!`: `irq_latch` **120**, `prg` **128**,
+`irq_enabled` **130**, `irq_pending` **131**, and the two new fields at **132** and **133** —
+`size_of::<BandaiFcg>()` 132 → **136**, not one existing byte moved. That matters because
+`Board::irq_asserted` reads `irq_pending` once per CPU cycle and MF-6b step 1 measured what moving
+such a field costs: one byte of displacement on `VrcIrq::pending` cost eleven of PR-1's thirteen
+ROMs +0.009 % to +0.027 % with no code added at all. `Board`'s own size is the MMC5's and is
+untouched.
+
+### Instrument 1: level 2 — **all five `core` figures identical to the instruction**
+
+`l2-diff.py --bar`, against `mf6c-0-8496c503`:
+
+| game/stage | `8496c503` | **step 1** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 147 295 142** | **+0** | **equal** |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 775 651 048** | **+0** | **equal** |
+| `mm2/core` | 12 036 822 861 | **12 036 822 861** | **+0** | **equal** |
+| `smb3/core` | 15 315 558 322 | **15 315 558 322** | **+0** | **equal** |
+| `metroid/total` | 13 735 627 354 | 13 735 783 448 | +156 094 | +0.001 % |
+| `smb1/total` | 13 589 030 161 | 13 589 137 572 | +107 411 | +0.001 % |
+| `zelda2/total` | 15 360 284 960 | **15 359 048 252** | −1 236 708 | −0.008 % |
+| `mm2/total` | 18 976 349 017 | **18 976 194 247** | −154 770 | −0.001 % |
+| `smb3/total` | 24 187 154 526 | 24 188 391 106 | +1 236 580 | +0.005 % |
+
+**Zero on every core**, which is what a board that adds no arm to any dispatch should cost and the
+first time this lot's instrument has had to say it. The three `total` rises are the owner's rule 2
+case exactly: `sym6c.sh` at a 300 000 threshold names **every** symbol that moved on any of the
+five, and there are five of them — `luaH_set` +686 816 (`smb1`) and +1 099 592 (`smb3`),
+`luaH_getshortstr` +636 924, +745 423 and **−1 458 096** (`zelda2`), `getgeneric` −1 330 864, and
+`__memcpy_avx_unaligned_erms` −403 262. Lua's `ltable.c` and `memcpy`, nothing else, and
+`zelda2`'s −1.24 M is `smb3`'s +1.24 M in the other direction. Layout noise; the core decides.
+
+### Instrument 2: PR-1's thirteen — worst ROM **+0.001 %**
+
+`callgrind-diff.py`, against `mf6c-0-8496c503`:
+
+| ROM | board | `8496c503` | **step 1** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 311 891 | **3 308 284 507** | −27 384 | −0.001 % |
+| `oamstr` | NROM | 3 318 460 965 | 3 318 492 573 | +31 608 | +0.001 % |
+| `m1` | MMC1 | 4 885 949 431 | **4 885 941 173** | −8 258 | −0.000 % |
+| `m4` | MMC3 | 5 472 514 995 | **5 472 508 676** | −6 319 | −0.000 % |
+| `m0` | NROM | 5 520 458 691 | 5 520 498 033 | +39 342 | +0.001 % |
+| `metroid` | MMC1 | 5 115 944 288 | 5 115 972 128 | +27 840 | +0.001 % |
+| `smb1` | NROM | 5 996 381 185 | **5 996 359 172** | −22 013 | −0.000 % |
+| `mm2` | MMC1 | 6 017 851 607 | **6 017 828 412** | −23 195 | −0.000 % |
+| `z2` | MMC1 | 6 291 458 642 | 6 291 511 207 | +52 565 | +0.001 % |
+| `readbuf` | CNROM | 6 834 538 187 | **6 834 529 501** | −8 686 | −0.000 % |
+| `duelito` | NROM | 7 380 437 910 | 7 380 495 579 | **+57 669** | **+0.001 %** |
+| `smb3` | MMC3 | 7 949 470 334 | **7 949 441 466** | −28 868 | −0.000 % |
+| `mmc5` | MMC5 | 11 279 383 781 | **11 279 337 111** | −46 670 | −0.000 % |
+| **total** | | **79 371 161 907** | **79 371 199 538** | **+37 631** | **+0.000 %** |
+
+**The worst ROM of the thirteen is `duelito` at +57 669, which is +0.001 %** — one twentieth of
+the owner's +0.02 %, and inside the ±57 k-per-ROM `luaH_getshortstr` floor §5.11 measured. Eight
+of the thirteen are below the baseline.
+
+### Instrument 3: the post-LTO dump
+
+`pins63.py`, step 1 against the baseline:
+
+| symbol | `8496c503` | **step 1** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | **272** |
+| `NesBus::write_internal` | 3 815 | 3 819 |
+| `Ppu::run_dots` | 1 907 | **1 907** |
+| `NesBus::catch_up_ppu` | 188 | **188** |
+
+and `shape.py` beside it: `Cpu::resolve` 2 / 6 / **1 948**, `Cpu::branch` 1 / 1 / **457**,
+`NesBus::read_cycle` 1 / 65 / **181**, `tick` 1 / 95 / **82**, `read_internal` 1 / 17 / **175** —
+every one identical. The **only** symbol that moved anywhere in either instrument's pinned list is
+`NesBus::write_internal`, **+4 instructions**, which is mapper 153's three branches inside the
+register decode `Cartridge::cpu_write` is one body with. `zone_offset` did not get dearer: it does
+not exist as a symbol, which is the inlining holding.
+
+And the two symbols the owner's rule 2 and §4.5 name, read with `fn.py`:
+
+| symbol | `8496c503` | **step 1** |
+| --- | ---: | ---: |
+| `Ppu2C02::read_pattern_planes` | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | **114** |
+
+### The tests, 899 → **902**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_mapper_153_banks_a_256_kib_outer_block_and_no_chr` | the inner 16 KiB bank, the outer block on bit 0 of all four registers, the fixed window being the **block's** last bank, the inner field wrapping inside the block rather than leaving it, and "No CHR banking is available" against writes to all eight registers |
+| `req_core_100_mapper_153_has_battery_wram_at_6000_gated_by_800d_bit_5` | the WRAM readable and writable at power-on, $800D bit 5 clear taking it off the bus *and* refusing writes while keeping its contents, bit 5 set bringing the same byte back, $6009 being RAM and not the mirroring register, and REQ-CORE-095's slice being the whole 8 KiB with the written byte in it |
+| `mf_6c_an_ordinary_mapper_16_image_is_unaffected_by_153` | a 512 KiB mapper-16 image: $8000 moving a **CHR** window and no PRG window (the first Mesen divergence), $8008 being a full byte and the fixed window the image's last, $6009 still being the mirroring register, no readable RAM at $6123, and $800D enabling nothing |
+
+The three sweeps that write themselves held with nothing added:
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` passes because 153 went into
+`Cartridge::create`'s `matches!`,
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` because `reset` puts
+`prg_ram_on` back, and `req_core_100_every_required_mapper_is_registered` because the number was
+added to its `additions` list (38 → 39 entries) behind `cfg!(feature = "board-153")`.
+
+**Three configurations green**: default **902 passed / 0 failed / 8 ignored** (MF-6a3's 899 plus
+three), `--no-default-features` **783** (MF-6a3's 782 plus the one test that is in no feature),
+`--features parked-boards` the same as default. `cargo fmt --check` clean; clippy `-D warnings` on
+`zax-nes` in all three configurations and on `zax-harness`, clean, **no new `allow` of any kind**.
+
+`board-153` is **inside the tolerance by a factor of twenty on every figure**, so it goes in
+`default`; step 9 writes its row in `BOARD-FEATURES.md` and does the all-features-off dump
+comparison for every feature this lot adds at once, as MF-6a3 step 3 did for its nine.
+
+[PROGRESS] MF-6c step 1/10 done: mapper 153 as two appended `bool`s on `BandaiFcg`, 902 / 0 / 8,
+all five level-2 cores **+0**, worst of PR-1's thirteen `duelito` +0.001 %, and the only pinned
+symbol that moved is `write_internal` +4.
