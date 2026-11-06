@@ -778,3 +778,132 @@ than a footnote. Consequences §6 takes as given:
    **nothing to write a test from**, and that — not its runtime cost — is what keeps it out.
 3. **R0's commercial-title list for each lot is a list of titles R0 would have to source
    separately.** §6 gives it per lot anyway, because it is the only way to say what the lot is for.
+
+---
+
+## 6. The category-A roster: documentation, hooks, effort
+
+Sixty-seven numbers, and the first thing to say about them is that **they are not 67 boards**.
+Collapsing the numbers that NESdev documents on one page and that Mesen builds from one class
+leaves **44 distinct boards**: ten families covering 33 numbers, and 34 singletons.
+
+### 6.1 The ten families
+
+| family | numbers | why they are one board | effort for the whole family |
+| --- | --- | --- | :-: |
+| **Sachen 8259** | 137, 138, 139, 141 | one NESdev page; Mesen's `Sachen8259(Sachen8259Variant::A/B/C/D)` — **one class, one enum parameter** | **M** |
+| **The JV001 / TXC 05-00002-010 protection ASIC** | 36, 132, 136, 147, 172, 173 | the same custom IC on six boards from four publishers. Mesen: `Txc22000`, `Txc22211A/B/C`, `Sachen_136`, `Sachen_147` — five classes for one chip with different wirings and a reversed data-bit order on 172 | **M** |
+| **NINA-03 / NINA-06** | 79, 146 | one NESdev page ("NINA-003-006"); `Nina03_06` for both. 113 (C) and 148 (E) are the same circuit | **S** |
+| **Cony / Yoko COB ASIC** | 83, 264 | one page; 264 is the 2 KiB-CHR variant (83.1) | **M** |
+| **J.Y. Company ASIC** | 35, 90, 209, 211 | one page; `JyCompany` for three of them and `Mapper35` for the fourth. The page says the chip serves eight numbers | **L** |
+| **Sachen's eight-register ASIC** | 150, 243 | Mesen builds **one class**, `Sachen74LS374N`, for both | **M** |
+| **MMC3 + a CHR-RAM window** | 74, 192, 194, 195 | Mesen: `MMC3_ChrRam(first, last, size)` — **and this build already ships one member of it**, mapper **119** (`board-119`, MF-6a3 step 2) | **S** |
+| **MMC3 + scrambled registers + an NROM-like PRG override** | 114, 115, 121, 123, 182, 187 | the same two additions on six Kǎshèng/SuperGame/Hosenkan/Gouder boards; NESdev redirects 182 to 114's page | **M** |
+| **Huang-1** | 12, 14 | the same ASIC as mapper **116**, which this build already has as `Somari` (`board-116`, MF-6a3 step 4) | **M** |
+| **Cheapocabra / RET-CUFROM / Magic Floor** — *not* a family | 29, 111, 218 | listed here only to say they are **three separate boards**, grouped nowhere | — |
+
+### 6.2 The roster
+
+Effort scale, anchored on lots this project has actually run:
+
+* **S** — a `const` or `bool` parameter on a board already here, or a new board with one register
+  and no hook. The shape MF-6a3 step 1 used for 119/47/37 and MR-4-3 for `McAcc`. **≈1-2 h.**
+* **M** — a new board with its own register set, at most one hook this build already has.
+  MF-6b's mappers 65, 67 and 73 were this. **≈3-5 h.**
+* **L** — a new board with a hook or a save shape this build does **not** have, or more than one
+  chip. MF-6a3 step 4's mapper 116 was this. **≈6 h or more.**
+
+Hook abbreviations follow the inventory's §4: **cyc** CPU-cycle IRQ (§4.1), **a12** A12 scanline
+IRQ (§4.3), **ppu** a PPU-read hook or CHR latch (§4.4), **nt** nametable control (§4.5),
+**aud** expansion audio (§4.8), **sav** a save path (§4.6), **bus** bus conflicts (§4.7).
+"(have)" marks a hook already built and already free to boards that do not use it.
+
+| # | board | doc | hooks | effort | what it preserves |
+| ---: | --- | --- | --- | :-: | --- |
+| **79, 146** | NINA-03/06 (AVE; Sachen 60-pin) | **full** | none | **S** | AVE's 19-title catalogue |
+| **74, 192, 194, 195** | MMC3 + a CHR-RAM window | 74/192/194 **stub**, 195 partial | a12 (have) | **S** | 6 Wàixīng/Chinese originals and ports |
+| **114, 182** | MMC3, scrambled + NROM override | **full** | a12 (have) | **S** | *Aladdin*, *The Lion King*, *Boogerman*, *Pocohontas*, *Super Donkey Kong* |
+| **123** | UNL-H2288 | **full** | a12 (have) | **S** | *Mortal Kombat 3*, *Earthworm Jim 2* |
+| **263** | UNL-KOF97 (Rex Soft) | **full** | a12 (have) | **S** | *KOF '97*, *Boogerman II* |
+| **298** | UNL-TF1201 (VRC4b, $F003 differs) | partial | cyc (have) | **S** | *Lethal Weapon* |
+| **112** | a mapper-206 with scrambled registers | **full** | none | **S** | *Huang Di*, *San Guo Zhi — Qun Xiong Zheng Ba* |
+| **193** | NTDEC TC-112 | **full** | nt (have) | **S** | *Fighting Hero*, *War in the Gulf* |
+| **189** | TXC 01-22017/22018 (MMC3 + $4100 PRG) | **full** | a12 (have) | **S** | *Thunder Warrior*; *Street Fighter II: The World Warrior* |
+| **38** | UNL-PCI556 (Bit Corp.) | partial | none | **S** | *Crime Busters* |
+| **107** | Magicseries | **full** | none | **S** | *Magic Dragon* |
+| **144** | Color Dreams 50282 | **stub** | bus (have) | **S** | *Death Race* |
+| **145** | Sachen SA-72007 | **stub** | none | **S** | *Sidewinder* |
+| **149** | Sachen SA-0036 | **stub** | bus (have) | **S** | *Taiwan Mahjong 16* |
+| **143** | Sachen NROM + 74138/74368 | **stub** | none | **S** | *Dancing Blocks*, *Magical Mathematics* |
+| **190** | Zemina | partial | none | **S** | *Magic Kid Googoo* |
+| **29** | RET-CUFROM revD (Sealie) | **full**, with schematic | none | **S** | *Glider* |
+| **218** | Magic Floor | **full** | nt (have) | **S** | *Magic Floor*, *Starfight* |
+| **12** | SL-5020B (Huang-1 COB) | partial | a12 (have) | **S** | *Dragon Ball Z 5* |
+| **170** | not named | **stub, one sentence** | unknown | — | *Shiko Game Syu* |
+| **216** | not named (RCM Group) | **stub** | Dendy timing | — | *Bonza*, *Videopoker Bonza*, *Magic Jewelry II* |
+| **240** | two unnamed PCBs | **stub** | sav | — | *Jing Ke Xin Zhuan*, *Sheng Huo Lie Zhuan* |
+| **244** | not named (C&E) | **stub** | none | — | *Decathlon* |
+| **521** | DREAMTECH01 | **stub** | none | — | *장두진 바둑교실* |
+| **137-139, 141** | Sachen 8259 A/B/C/D | partial (FCEU-mm derived) | nt | **M** | *The Great Wall*, *Q-Boy* |
+| **133** | Sachen 3009 / 72008 (108 clone) | partial | none | **M** | *Jovial Race*, *Master Chu and the Drunkard Hu* |
+| **150, 243** | Sachen's eight-register ASIC | 150 **full**, 243 partial | nt | **M** | **15** Sachen titles |
+| **36, 132, 136, 147, 172, 173** | the JV001 / 05-00002-010 ASIC | 132/172/173/136/147 **full**, 36 partial | nt (172), bus (173) | **M** | **~20** TXC, Idea-Tek, Super Mega and Sachen originals |
+| **83, 264** | Cony / Yoko COB ASIC | **full** | cyc **or** a12, selectable (both have) | **M** | *Street Fighter II Pro*, *Fatal Fury 2*, *World Heroes 2'*, *Super Blaster VII* |
+| **91** | JY830623C / YY840238C / EJ-006-1 | **full** | a12, cyc (have) | **M** | *Street Fighter 3*, *Mortal Kombat II*, *Dragon Ball Z 2*, *Mario & Sonic 2* |
+| **115** | Kǎshèng SFC-02B/-03/-004 | partial | a12 (have), a "sharp" IRQ rule | **M** | **6** Gouder originals |
+| **121** | Kǎshèng A9711 / A9713 | **full** | a12 (have), **ppu** (A9711 drives CHR A18 from PPU A12) | **M** | *Street Fighter Zero 2 '97*, *The Panda Prince* |
+| **187** | Kǎshèng A98402 | partial | a12 (have), **ppu** (same A18 trick) | **M** | *Street Fighter Zero 2*, *KOF '96* |
+| **208** | Gouder, with a 256-byte protection table | **full** | a12 (have) | **M** | *快打傳説 — Street Fighter IV* |
+| **215** | UNL-8237 / 8237A (Sugar Softec) | **full** | a12 (have) | **M** | *Earthworm Jim 2*, *Mortal Kombat 3*, *MK3 Extra 60*, *Pocahontas Part 2* |
+| **219** | Kǎshèng A9461 | partial | a12 (have) | **M** | *Toy Story* |
+| **262** | UNL-SHERO (Sachen) | partial | a12 (have), **nt** (4 KiB extra VRAM, four-screen) | **M** | *Street Heroes*, *侍魂 — Samurai Spirits* |
+| **292** | UNL-DRAGONFIGHTER (Flying Star) | **full** | a12 (have), registers on **reads** at $6000-$7FFF | **M** | *Dragon Fighter* |
+| **14** | UNL-SL1632 (Huang-1) | partial, **mirroring unverified** | a12 (have) | **M** | *Samurai Spirits*, the 8-character version |
+| **162** | Wàixīng FS304 | **full** | **ppu**, sav | **M** | *Mummy*, *Pharaoh*, *西游记后传*, the *Fire Emblem* port |
+| **246** | G0151-1 | partial | sav (an unusual window) | **M** | *封神榜* |
+| **163** | Nánjīng FC-001 | **full** | **ppu**, sav; **aud** on submapper 1 | **M** / **L** | **7** Nánjīng RPGs incl. the Chinese *Harvest Moon*, *Diablo*, *FF IV* |
+| **178** | Wàixīng FS305 / Nánjīng NJ0430 | **full** | sav, nt; **cyc** and **aud** on submappers 1-2 | **M** / **L** | *宠物: 小精灵 IV*, *Ping Pong* |
+| **35, 90, 209, 211** | the J.Y. Company ASIC | **full** | **cyc + a12 selectable, ppu (CHR latch), nt (from CHR-ROM)**, a multiplier, sav | **L** | **13** Hummer Team ports incl. *Super Mario World*, *Aladdin*, *Final Fight 3*, *Tekken 2*, *Donkey Kong Country 4* |
+| **111** | Cheapocabra (GTROM) | **full** | **sav — self-flashing PRG**, nt (CHR-RAM pages), forced four-screen | **L** | **7** commercial homebrew releases |
+| **164** | Dōngdá PEC-9588 | **full** | **sav — a 93C66 Microwire EEPROM**, nt, a 1 bpp video mode | **L** | 6 Dōngdá titles incl. the *FF V* port and *Dark Seed* |
+| **513** | UNL-SA-9602B (Sachen) | partial | a12 (have), **sav — 32 KiB battery CHR-RAM** | **L** | the *Princess Maker 3* port |
+| **268** | COOLBOY / MINDKIDS | partial | a12 (have), **32-64 MiB address space** | **L** | 9 Chinese RPGs + 3 Piko reissues |
+| **284** | UNL-DRIPGAME (Quietust) | **full** (on the UNIF page) | cyc, **aud (two FIFO channels)**, **nt + extended attribute tables** | **L** | *Drip* |
+
+### 6.3 What the roster says
+
+**Twenty-four of the 67 are S**, and together they need no hook this build does not already have.
+**Five carry no effort estimate at all** — 170, 216, 240, 244, 521 — because there is nothing to
+estimate: §7 excludes them on documentation. The remaining 38 are M or L.
+
+**"Stub" is doing two different jobs in the doc column, and the roster has to be read with that in
+mind.** Seven S numbers are graded stub — 74, 143, 144, 145, 149, 192, 194 — and every one of them
+is a **stub that is complete for its board**: 74/192/194's page documents exactly the one thing
+that differs from the MMC3 (which 1 KiB CHR pages become RAM, and how many), and 143/144/145/149's
+documents the one register the board has, which is all the board is. A page can be a stub and still
+be sufficient when the board is a single latch. The five numbers with **no** estimate are the other
+kind: 170's page is one sentence with no register and no mask, and 216/240/244/521's give a title
+and a sentence of banking with no mask, no power-on state and no protection behaviour. The test
+§7 applies is not "is the page long" but **"can a unit test be written from it"** — which, with no
+ROM in `assets-free/test-roms` for any of these boards (§5), is the only verification a lot gets.
+
+**The hook ledger is short, and that is the census's most useful single finding.** Across all 67 A
+numbers, exactly **five** hooks appear that this build does not already have:
+
+| the hook | numbers that need it | what it is |
+| --- | --- | --- |
+| a **self-flashing PRG** save | 111 | the game rewrites its own flash; a save is a persisted ROM sector |
+| a **serial EEPROM over Microwire** | 164 | a 93C66; a third EEPROM shape beside the X24C01 and 24C02 the inventory's §4.6 already plans for Bandai |
+| **battery-backed CHR-RAM** | 513 | 32 KiB on the CHR side, which `CartridgeMemory`'s save path does not model |
+| **two FIFO expansion-audio channels** | 284 | a new generator in the mixer |
+| **extended attribute tables** | 284 | per-tile palettes — a change to what the **PPU** fetches, not to the cartridge |
+
+Everything else the 67 need — the A12 scanline IRQ, the CPU-cycle IRQ, the CHR latch, nametable
+control, bus conflicts, PRG-RAM saves — is built, latched and priced at **0** to the boards that do
+not use it (§4.10). **Two of the five new hooks belong to a single board each**, and one of those
+two (284) is excluded on cost.
+
+**Expansion audio appears three times and is optional every time**: 163 submapper 1 (ADPCM), 178
+submapper 2 (a TMS5220 speech chip) and 284. On 163 and 178 the A titles are on submapper 0, so
+both boards can ship without their audio chip and still preserve everything that made them A — a
+point §7 builds two lots on.

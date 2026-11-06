@@ -20,7 +20,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | 2 | census part B — §3.4's explicitly listed numbers | **done** |
 | 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | **done** |
 | 4 | census part D — the homebrew numbers, and the census's category totals | **done** |
-| 5 | the category-A detail: documentation quality, hooks, effort per number | to do |
+| 5 | the category-A detail: documentation quality, hooks, effort per number | **done** |
 | 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | to do |
 | 7 | the check — `cargo fmt --check`, `cargo test --release -p zax-nes -p zax-harness` | to do |
 
@@ -174,3 +174,28 @@ The findings that change a decision:
   118 and 180 — **all already supported, and not one of the 199 census numbers**. So no MF-UNL lot
   can have a ROM-level gate; its gate is unit tests written from the board's own register table,
   which is why a "stub" documentation grade is what excludes a board, not its runtime cost.
+
+## Step 5 — the 67 category-A numbers are 44 boards, and need five hooks this build lacks
+
+`docs/review/UNL-census.md` §6.
+
+* **67 A numbers collapse to 44 distinct boards**: ten families covering 33 numbers (the Sachen
+  8259's four, the JV001 ASIC's six, NINA-03/06's two, Cony/Yoko's two, the J.Y. ASIC's four,
+  Sachen's eight-register ASIC's two, the MMC3+CHR-RAM-window's four, the MMC3-scramble's six,
+  Huang-1's two, and 150/243) plus 34 singletons.
+* **The hook ledger is five entries long.** Across all 67 A numbers the only hooks this build does
+  not have are: a **self-flashing PRG** save (111 alone), a **93C66 Microwire EEPROM** (164 alone),
+  **battery-backed CHR-RAM** (513 alone), **two FIFO expansion-audio channels** (284 alone) and
+  **extended attribute tables** (284 alone). Everything else — a12, cyc, the CHR latch, nametable
+  control, bus conflicts, PRG-RAM saves — is built and priced at 0 by §4.10.
+* **Effort: 24 S, 38 M or L, 5 with no estimate** (170, 216, 240, 244, 521 — excluded on
+  documentation).
+* **"Stub" means two different things and the roster says which.** Seven S numbers are graded stub
+  (74, 143, 144, 145, 149, 192, 194) but each is a *stub complete for its board* — the page
+  documents the single latch or the single CHR-RAM window that is the whole board. The five with no
+  estimate are the other kind: a title and a sentence, no mask, no power-on state. **The test is
+  "can a unit test be written from it", which with no ROM for any of these boards is the only
+  verification a lot gets.**
+* **Expansion audio appears three times and is optional every time**: 163 sub 1 (ADPCM), 178 sub 2
+  (TMS5220), 284. On 163 and 178 the A titles sit on submapper 0, so both ship without their audio
+  chip and still preserve what made them A.
