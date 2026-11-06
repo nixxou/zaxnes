@@ -1202,6 +1202,58 @@ last 3D, pause 3D in 2D, parallel scripts, optimised and experimental Lua.
   script); golden-core under qemu-aarch64 is identical to the x86 goldens.
 - PortMaster launcher sets the `performance` CPU governor for the run and restores it.
 
+### 5.8 Lot MF-5a: two boards added, and the whole set came out faster
+
+The lot that added the VRC6 (mappers 24, 26) and the Namco 163 (19, 210) is the first to add
+boards *and* end below its own baseline on every ROM of PR-1's set. Four findings are reusable and
+none of them is about the boards:
+
+**A per-cycle `expansion_audio_output` is a recomputation, not a read.** `Mmc5Audio::output`
+summed two channel outputs through two tables every time the bus asked for `M`, which is every CPU
+cycle of an MMC5 — **178.7 M instructions over 300 frames of `mmc5exram`, about twenty per cycle**,
+for a value that moves only when a duty sequencer advances, an envelope or length counter is
+clocked, or a register is written. Caching it in a `level` field refreshed at those four points is
+what gave the MMC5 back the `on_cpu_cycle` latch's two instructions and 44 M more. Every
+expansion-audio board in the build now has that shape (`Vrc6Audio` had it from the start,
+`Namco163Audio` was written with it). **A board whose `M` is computed on demand should be assumed
+to be paying twenty instructions a cycle until measured.**
+
+**Shrink-wrapping is a property worth checking by name.** `Ppu2C02::read`'s +11 instructions per
+register read (Q-125) was neither a new call site nor a bigger function — `read` was *smaller* —
+but LLVM had stopped shrink-wrapping: the five `pushq` the `$2007` arm needs had moved from inside
+that arm to the head of the block every register read arrives in. `cmp4c.py` and `prologues.py`
+both report the entry prologue and neither sees it, because the prologue had moved *into* a basic
+block. `target-mf/asm/blocks.py` (new) prints a body with its `.LBB` labels kept, which is what
+made it visible in one look. **Taking the one arm that calls anything out of line
+(`#[inline(never)]`, a tail call) is the fix, and it is worth trying whenever a dispatch's arms
+have unequal register needs.**
+
+**Argument promotion is transitive through `noinline`.** The Namco 163 is the first
+`Mapper::on_cpu_cycle` arm that reads `CartridgeMemory` (its chip RAM is PRG-RAM), and LLVM
+promoted the `&mut CartridgeMemory` argument to the (pointer, length) it uses, propagated the new
+convention up through `Board::on_cpu_cycle` — both are internal — and hoisted two loads into
+`NesBus::tick`. An extra `#[inline(never)]` boundary between the arm and the audio was built and
+**changed nothing**: promotion runs bottom-up and simply promoted the new function too. What stops
+it is a *store* through the pointer. The two loads sit after `Cartridge::clocks_on_cpu_cycle`, so
+the twenty-six unlatched mapper numbers pay nothing and the twelve latched ones pay two
+instructions per CPU cycle.
+
+**MF-3b rule 3 cost two attempts in one step, on a new path.** One `refresh_level()` call inside
+`Mmc5Audio::feed_pcm_read` is a call inside an arm of `Board::cpu_read_override`, which LLVM
+inlines into `Cartridge::try_cpu_read` — entered on every cartridge-space read of every game. The
+byte read must stay live across the call, so that dispatch's prologue grew from `pushq %rax` to
+three pushes: **exactly +524 336 instructions on each of `M0_P32K_C8K_V`, `M1_P128K` and
+`M4_P128K`**, none of them an MMC5, and the three figures being equal to the instruction is what
+identified it as a per-call entry cost. Out-of-lining the arm moved the same two instructions into
+argument shuffling instead of removing them. **The fix was to have nothing to call**: the squares'
+half of `M` and the PCM's half share no input, so they are two cached fields and the PCM refresh
+is a load, an add and a store.
+
+Numbers, callgrind, thirteen ROMs, 300 frames, against MF-4d's end `ad1ad765`: twelve of thirteen
+lower by −1.4 % to −2.9 %, `mmc5` −0.621 %, total **−1.226 %**; and against the branch tip the lot
+started from, **all thirteen lower**, total −0.159 %. `duelito`'s +2.78 % against `ad1ad765` is
+MF-4d-fix's behaviour change, not code.
+
 ### 5.7 Instrumentation
 
 - Frame profiler (`frame_profiler.rs`, setting `ui.profiler`, `ZAXNES_PROFILE=1`): stages input,
