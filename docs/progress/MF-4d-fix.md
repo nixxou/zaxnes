@@ -255,3 +255,158 @@ This is also the sharpest statement of the lot's shape available: golden-core ru
 code**, so these rows move only because the core's own `$2007` behaviour changed, and they return
 to `d96d73b7`'s exactly. The `$2004` half, which is kept, moves none of the 18 — the same result
 MF-4d step 7 measured with a variant carrying only that half.
+
+## Step 5 — the suites, the campaign, golden-core, and a performance cost that does **not** meet the bar
+
+### The suites
+
+| check | result | against ZR-2's |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, no new `allow` | same |
+| `cargo test --release -p zax-nes -p zax-harness` | **746 passed, 0 failed, 8 ignored** | **same** |
+| the same `--test-threads=1` with `ZAXNES_TEST_ROMS` | **746 passed, 0 failed, 8 ignored** | same |
+| `--ignored` with both ROM folders | **7 of 8 pass**, the Zelda II patch test the only failure | ZR-2 had **6 of 8** |
+
+ZR-2's run reported two failures; this one reports one. The one that went green is
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` — the point of the lot.
+
+### The campaign, ROM by ROM
+
+`zax-harness test-roms` over `assets-free/test-roms`, baseline and this tree, compared row by row.
+
+    331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+**identical totals to ZR-2's, MF-4d's and MF-4c's.** Comparing the 331 rows field by field
+(ignoring `.ms`, which is wall clock and moves on 299 rows in any two runs), **exactly two rows
+move, and both were named in advance**:
+
+| row | baseline | this tree | why |
+| --- | --- | --- | --- |
+| `AccuracyCoin/AccuracyCoin.nes` | 129/147 | **128/147** | `PPU Misc. / $2007 read w/ rendering` `pass` → `fail 2`. Step 3's row. |
+| `nes-test-roms/other/Duelito.nes` | screen A | **screen B** | a `manual` row, no documented verdict, so no total moves. The third ROM MF-4d step 7 named. |
+
+Within the `AccuracyCoin` row, `.detail.tests` moves on **one key only**, the one above; the other
+146 are unchanged, `Address $2004 behavior` still stopping on code 8.
+
+**Both are restorations, and the campaign proves it.** Against a clean build of `d96d73b7` this
+tree's 331 rows differ on **one** row and **one** field: `Address $2004 behavior`, `fail 6` →
+`fail 8` — which is precisely the `$2004` half the lot keeps. Duelito's screen is `d96d73b7`'s
+exactly. So the campaign is `d96d73b7`'s campaign **plus the `$2004` half**, which is the shape
+the lot set out to produce.
+
+### golden-core
+
+`golden-core <free> <out.jsonl> 1200`, 331 free ROMs, and `golden-core <comm> <out.jsonl> 120`,
+18 commercial ones:
+
+| set | this tree vs baseline | this tree vs `d96d73b7` |
+| --- | --- | --- |
+| 331 free ROMs, 1 200 frames | **1 row moves**: `Duelito.nes` | 1 row: `8bitpeoples_-_deadline_console_invitro.nes` |
+| 18 commercial, 120 frames | **3 rows move**: SMB3, Zelda II USA, Zelda II Europe | **0 — `diff` clean** |
+
+The `deadline` row is **not this lot's**: it is byte-identical between the baseline and this tree
+(`baseline == this tree: True`), so it is one of the lots between `d96d73b7` and ZR-2 — the
+`$2004` half being the likely one, that demo writing OAM through the register. Duelito is the
+mirror: `d96d73b7 == this tree: True`, and it differs from the baseline.
+
+**So against this lot's own baseline exactly four ROMs move in golden-core — Duelito, Super Mario
+Bros. 3, Zelda II (USA), Zelda II (Europe) — every one of them back to `d96d73b7`'s output, and
+every one of them a ROM MF-4d step 7 had named as moved by the rule.** Nothing else moves.
+
+### The instruction count — **the bar is not met, and here is exactly what it costs**
+
+PR-1's scripts in the WSL2 Ubuntu: `make-tree.sh`, then `build-clean.sh` for each side (a clean
+`git archive` tar extracted into its own directory with its own `CARGO_TARGET_DIR`, never reused),
+then `callgrind-set.sh` over `roms.txt`' thirteen ROMs, 300 frames, no warm-up, whole process.
+
+| ROM | baseline `fff53974` | this tree | delta | | behaviour |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `duelito` | 7 100 508 812 | 7 411 012 660 | +310 503 848 | +4.373 % | **moved** |
+| `m0` | 5 544 879 030 | 5 544 912 096 | +33 066 | +0.001 % | — |
+| `m1` | 4 915 938 139 | 4 915 451 289 | −486 850 | −0.010 % | — |
+| `m4` | 5 502 464 705 | 5 501 909 252 | −555 453 | −0.010 % | — |
+| `metroid` | 5 154 551 600 | 5 154 609 952 | +58 352 | +0.001 % | — |
+| `mm2` | 6 038 173 401 | 6 038 218 937 | +45 536 | +0.001 % | — |
+| `mmc5` | 11 420 253 509 | 11 421 265 390 | +1 011 881 | +0.009 % | — |
+| `oamstr` | 3 339 441 540 | 3 344 764 569 | **+5 323 029** | **+0.159 %** | — |
+| `readbuf` | 6 851 884 536 | 6 862 923 133 | **+11 038 597** | **+0.161 %** | — |
+| `smb1` | 6 032 339 510 | 6 033 078 027 | +738 517 | +0.012 % | — |
+| `smb3` | 8 005 053 260 | 7 967 968 531 | **−37 084 729** | −0.463 % | **moved** |
+| `vblnmi` | 3 328 510 177 | 3 331 792 209 | +3 282 032 | +0.099 % | — |
+| `z2` | 6 310 972 435 | 6 316 807 372 | +5 834 937 | +0.092 % | **moved** |
+| **total** | 79 544 970 654 | 79 844 713 417 | +299 742 763 | +0.377 % | |
+| **the ten whose behaviour is unchanged** | 58 128 436 147 | 58 148 924 854 | **+20 488 707** | **+0.035 %** | |
+
+**The three ROMs marked "moved" are not a code cost.** Duelito, Super Mario Bros. 3 and Zelda II
+are exactly the ROMs golden-core says changed output, so their binaries emulate different work;
+the proof that this is behaviour and not code is that the moves go in **both** directions —
+`smb3` is **37 M faster**, Duelito 310 M slower. They should be read out of the performance
+question entirely.
+
+**The ten remaining ROMs are the measurement, and they say +0.035 %.** Far above the ±50 000
+per-ROM noise floor ZR-1 and ZR-2 measured for this instrument: `readbuf` +11.0 M and `oamstr`
++5.3 M are two hundred times it, and they are the `$2007` and `$2004` ROMs PR-1 keeps in the set
+for exactly this path.
+
+**One symbol carries all of it, and it is not a new call site.** On `vblnmi`, whose output is
+byte-identical between the two builds:
+
+| | baseline | this tree |
+| --- | ---: | ---: |
+| `Ppu2C02::read`, exclusive | 19 247 831 | **22 599 641** (+3 351 810) |
+| **calls to `Ppu2C02::read`** | **304 710** | **304 710 — identical** |
+| calls to `read_nametable_inner` / `read_pattern_planes` | 32 111 / 7 872 | **32 111 / 7 872 — identical** |
+| every other symbol above 100 000 | — | **none moves** |
+
+Identical call counts and +3.35 M executed: **`Ppu2C02::read` costs about eleven more instructions
+per call**, and that is the whole of the ten ROMs' delta.
+
+**What it is not.** Not a new call site: `callsites.py` on the post-LTO dumps of **both** targets
+says every watched callee is unchanged and `increment_vram_address` is 0 definitions / 0 call
+sites on each. Not the `#[inline]`: putting the attribute back was built and measured and moves
+`vblnmi` by 6 882 instructions in 3.33 **billion**, which is nothing — so the attribute is gone,
+which is `d96d73b7`'s shape, and the comment on the function records the measurement. Not a bigger
+function: `Ppu2C02::read` is **smaller** on both targets, 319 → 262 on Linux and 319 → 263 on
+Windows, and every other pinned symbol is `IDENTICAL` raw.
+
+**What it is: MF-3b rule 4, a dispatch whose shape flipped because an arm lost its own body.**
+Diffing the two Linux bodies instruction by instruction, the register dispatch and the `$2002` arm
+sit in the baseline as the **fall-through** immediately after the inlined `apply_decay` unroll; in
+this tree the same block is reached by a `jmp` and the `$2004`-during-rendering block has been
+folded in beside it. The `$2007` arm losing its `fetching` branch is what let LLVM re-lay the
+function — "a new arm with a body of its own can flip a whole dispatch's shape", read backwards.
+MF-4d step 6 therefore bought about eleven instructions per register read **by accident**, and
+backing its behaviour out gives them back.
+
+`callgrind-diff.py` prints *SLOWER on 10 ROMs*. **Unlike in ZR-1 and ZR-2, that verdict is right
+here** — on seven of those ten it is a real per-call cost, and the three others are behaviour.
+
+### The bar, answered honestly
+
+The lot's bar is "identical to the instruction, or lower, on every ROM without hack code".
+**This lot does not meet it.** The honest statement is:
+
+* the cost is **+0.035 %** over the ten ROMs whose behaviour is unchanged, worst case **+0.161 %**
+  on `readbuf`;
+* it is **one symbol**, `Ppu2C02::read`, about **+11 instructions per register read**, with no new
+  call site and no larger function anywhere;
+* it is a **codegen-layout effect**, not a line of added work — the source this lot ships executes
+  strictly less than the baseline's, and `run_dots`, `read_cycle`, `read_internal`, `run_dma`,
+  `dmc_only_dma`, `zone_read_cycle`, `halted_zone_read_cycle`, `Cpu6502::step` and the `Board`
+  dispatches are all byte-identical;
+* it cannot be removed by keeping the behaviour, because the behaviour **is** the branch: the only
+  way to hold MF-4d step 6's layout is to hold its `$2007` rule, which is the P1 regression this
+  lot exists to undo.
+
+**R0's call, with the trade stated plainly**: AMD-021 R2-005 (P1) and the owner's two pictures,
+against +0.035 % of emulated instructions on ten ROMs. I shipped the back-out, as instructed, and
+I am not hiding the cost. If R0 wants the layout back, it is a codegen-only change to
+`Ppu2C02::read` — forcing the `$2002` arm to the fall-through position — that carries no behaviour
+and belongs in its own lot; it is **not** attempted here, because the brief scopes this lot to the
+back-out and the first attempt (the `#[inline]`) was measured and refuted. Lot **MF-4e**, which
+rewrites this path per dot, will re-lay the function anyway and should measure it then.
+
+**Save states**: no field added, removed or reordered; nothing new serialised; `save_state` and
+`load_state` untouched. The format does not move. No `unsafe`. `cargo fmt --check` and clippy
+clean, no new `allow`.

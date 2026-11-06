@@ -1202,6 +1202,16 @@ impl Ppu2C02 {
     //
     // Lot MF-4e owns the per-dot work and must satisfy **both** the rule and R2-005. Until then
     // the ordinary PPUCTRL step applies on every line, which is `d96d73b7`'s behaviour.
+    //
+    // **No `#[inline]`, which is `d96d73b7`'s shape and was checked both ways.** MF-4d step 6
+    // needed the attribute because its `fetching` branch pushed this body past the inliner's
+    // budget; without the branch the body is small again and LLVM inlines it unasked — 0
+    // definitions and 0 call sites in the post-LTO dump on both targets. Adding the attribute
+    // back was measured and changes nothing: `ppu_vbl_nmi`, 300 frames, callgrind, whole
+    // process, 3 331 792 209 without it against 3 331 799 091 with it.
+    //
+    // It is **not** the lever on the cost this back-out gives back, which is a block-layout flip
+    // inside [`Self::read`] — see `docs/progress/MF-4d-fix.md` step 5.
     fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
         let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
         self.v = self.v.wrapping_add(step) & 0x7FFF;
