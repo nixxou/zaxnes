@@ -52,13 +52,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 180, the other 74-series wiring of the UxROM board (MF-3 step 6);
     // * 78, the Irem IF-12 and the Jaleco board of Uchuusen (MF-3 step 7);
     // * 24 and 26, Konami VRC6 and VRC6b (MF-5a step 1);
-    // * 19 and 210, the Namco 163 and the Namcot 175 and 340 cut from it (MF-5a step 4).
+    // * 19 and 210, the Namco 163 and the Namcot 175 and 340 cut from it (MF-5a step 4);
+    // * 85, Konami VRC7 (MF-5b step 1).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![19, 24, 26, 69, 78, 118, 156, 180, 210], extra);
+    assert_eq!(vec![19, 24, 26, 69, 78, 85, 118, 156, 180, 210], extra);
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));

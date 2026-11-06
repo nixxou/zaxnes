@@ -59,7 +59,12 @@ publié sous GNU GPL v3 :
   (`apu/namco163_audio.rs`, `Namco163Audio::update_channel`), repris de
   `Core/NES/Mappers/Audio/Namco163Audio.h` : c'est le seul point que la page « Namco 163 audio »
   énonce comme une formule plutôt qu'en prose, et Mesen est la seconde source qui la confirme
-  (lot MF-5a).
+  (lot MF-5a) ;
+- le décodage de registres du VRC7 (`vrc7.rs`, `write_register`), repris du `switch (addr &
+  0xF038)` de `Core/NES/Mappers/Konami/VRC7.h` : en particulier le fait que les deux ports de son
+  restent en `$9010` et `$9030` quelle que soit la ligne d'adresse qui sélectionne les registres
+  — Mesen exempte exactement ces deux adresses de son repli A4 vers A3 — et l'ordre des quatre
+  registres de `$E000` à `$F010` (lot MF-5b).
 
 Les fichiers concernés portent l'en-tête :
 

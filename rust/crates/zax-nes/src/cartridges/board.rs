@@ -5,7 +5,7 @@ use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
     Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Nrom, Rambo1, UnRom512,
-    UxRom, Vrc2Vrc4, Vrc6,
+    UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -95,6 +95,8 @@ pub enum Board {
     Vrc6(Vrc6),
     /// Mapper 19, the Namco 163, and mapper 210, the Namcot 175 and 340 cut from it.
     Namco163(Namco163),
+    /// Mapper 85, Konami VRC7.
+    Vrc7(Vrc7),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -132,6 +134,7 @@ macro_rules! dispatch {
             Board::McAcc($b) => $body,
             Board::Vrc6($b) => $body,
             Board::Namco163($b) => $body,
+            Board::Vrc7($b) => $body,
         }
     };
 }
@@ -189,6 +192,19 @@ impl Mapper for Board {
         dispatch!(self, b => b.rom_windows(memory))
     }
 
+    /// `#[inline(always)]`, and it has to stay, for the reason [`Mapper::cpu_read_override`]
+    /// carries one method below: this dispatch is on **every CPU read of an MMC5 game**, that
+    /// board being the one that maps PRG-RAM into $8000-$DFFF so that
+    /// `Cartridge::read_rom_window` cannot answer.
+    ///
+    /// Lot MF-5b step 1 is what pinned it. Adding a thirty-second `Board` variant pushed this
+    /// dispatch past the inliner's budget: it left `Cartridge::default_cpu_read` (which went to
+    /// **0** exclusive instructions, its body having moved here) and became a call from
+    /// `Cartridge::try_cpu_read`, at **+216 245 924 instructions over 300 frames of
+    /// `mmc5exram`** against +133 M in its caller and −283 M in `default_cpu_read` — a net
+    /// +66 M, 0.58 % of that ROM, on a board the lot does not touch.
+    #[allow(clippy::inline_always)] // Measured: MF-5b step 1, +66 M on an MMC5.
+    #[inline(always)]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         dispatch!(self, b => b.try_read_prg(memory, address))
     }

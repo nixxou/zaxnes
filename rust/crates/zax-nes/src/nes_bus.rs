@@ -1454,6 +1454,25 @@ impl CpuBus for NesBus {
         self.ppu.nmi_line_sample()
     }
 
+    /// **`#[inline(always)]`, and it has to stay: a `callq` here costs about 170 M instructions
+    /// over 300 frames, on every board.** This is MF-3b step 1's regression one level up, and
+    /// lot MF-5b met it by adding a thirty-second `Board` variant.
+    ///
+    /// `Cpu6502::end_cycle` samples /IRQ once per CPU cycle and reaches this function, which
+    /// inlines `Cartridge::irq_asserted` and with it the whole `Board::irq_asserted` dispatch —
+    /// thirty-two arms, twenty of which only answer "no". MF-3b pinned `end_cycle` itself so the
+    /// *sampling* would stay inlined; nothing pinned this, so when the VRC7's arm grew the
+    /// dispatch past the inliner's budget LLVM outlined **this** function instead and called it
+    /// every cycle. Callgrind priced it at `+169 739 749` on `m1` and `m4`, `+169 641 994` on
+    /// `m0`, `+164 225 879` on `metroid` — about **19 instructions per CPU cycle, on thirteen
+    /// ROMs of which twelve are on a board that cannot assert an IRQ at all** (MF-5b step 1).
+    ///
+    /// The attribute, and not the load-time latch MF-3b step 1 also costed: the latch would take
+    /// an MMC1 below parity, but the dispatch has to *leave* this function for the `bool` to
+    /// shrink it, which puts the `callq` on the boards that do have an IRQ — mapper 4 among them,
+    /// and golden-core's. Restoring parity is what the lot's bar asks for.
+    #[allow(clippy::inline_always)] // Measured: 170 M instructions, MF-5b step 1.
+    #[inline(always)]
     fn irq_asserted(&self) -> bool {
         self.apu.irq_asserted() || self.cartridge.as_ref().is_some_and(Cartridge::irq_asserted)
     }

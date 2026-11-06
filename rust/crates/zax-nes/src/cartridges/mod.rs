@@ -340,8 +340,8 @@ impl Cartridge {
             watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
-            // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27) and VRC6 (24, 26), the RAMBO-1
-            // (64) and the Sunsoft FME-7 (69). See the field.
+            // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
+            // the RAMBO-1 (64) and the Sunsoft FME-7 (69). See the field.
             //
             // **Mapper 210 is deliberately absent**: the Namcot 175 and 340 are the Namco
             // 163 with the IRQ counter and the sound cut out, so their board moves on no CPU
@@ -349,7 +349,7 @@ impl Cartridge {
             // proves it rather than taking its word.
             clocks_on_cpu_cycle: matches!(
                 mapper,
-                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69
+                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69 | 85
             ),
         };
         cartridge.reset();
@@ -413,7 +413,13 @@ impl Cartridge {
     }
 
     /// Whether the cartridge is asserting the CPU IRQ line.
+    ///
+    /// `#[inline(always)]` for the reason `<NesBus as CpuBus>::irq_asserted` carries: this is the
+    /// middle link of the per-CPU-cycle /IRQ sample, and pinning only the outer one moved the
+    /// boundary here instead (6.6 M instructions on `m1`, 12.9 M on `mmc5`, MF-5b step 1).
     #[must_use]
+    #[allow(clippy::inline_always)] // Measured: MF-5b step 1.
+    #[inline(always)]
     pub fn irq_asserted(&self) -> bool {
         self.board.irq_asserted()
     }

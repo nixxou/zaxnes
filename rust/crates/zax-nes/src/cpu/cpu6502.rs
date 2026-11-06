@@ -495,6 +495,19 @@ impl Cpu6502 {
 
     // ---------------------------------------------------------------- execution
 
+    /// `#[inline(always)]`, with **one** call site, so the attribute adds no code: what it does
+    /// is keep the interpreter's single out-of-line boundary where MF-3b left it.
+    ///
+    /// MF-3b step 4 recorded the pair as interchangeable — `execute` folded into `step` with
+    /// `execute_without_operand` outlined, or the reverse, "one out-of-line boundary per
+    /// instruction before, one after". It is not quite interchangeable: lot MF-5b's thirty-second
+    /// `Board` variant flipped it the other way and callgrind priced the flip at **about +6 M
+    /// instructions over 300 frames on every ROM of the set** (`execute` 0 → 192.5 M on `m1`,
+    /// against `step` −93.5 M and `execute_without_operand` −92.7 M). The arm that reaches
+    /// `execute_without_operand` is the cheaper boundary because only the implied-addressing
+    /// opcodes take it, where every instruction passes through here.
+    #[allow(clippy::inline_always)] // Measured: MF-5b step 1, about +6 M per ROM when outlined.
+    #[inline(always)]
     fn execute<B: CpuBus + ?Sized>(&mut self, bus: &mut B, info: OpcodeInfo) {
         match info.access {
             OperandAccess::None => self.execute_without_operand(bus, info),
