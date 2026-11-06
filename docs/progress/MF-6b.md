@@ -917,3 +917,214 @@ in the lot whose whole point is a six-and-a-quarter-minute timer, so the thing t
 the IRQ arrives at all rather than when.
 
 [PROGRESS] MF-6b step 3/8 done: mapper 105 holding an `Mmc1` rather than parameterising one, `Mmc1::update_banks` byte-identical, all five MMC1 ROMs below `9f9d9d41` (set −21 123 914) and the two level-2 `total` rises entirely inside Lua's `ltable.c`.
+
+## Step 4 — mapper 48, and the two instructions that cost `mmc5` nine million
+
+### The board
+
+nesdev ("INES Mapper 048"): the TC0690 is "a superset of TC0190+PAL16R4 abilities", so the
+banking is mapper 33's with the register mask **widened from `$A003` to `$E003`** — and that one
+change is the whole board, because it is what frees `$C000`-`$C003` for the IRQ and `$E000` for a
+mirroring register of its own. On a TC0190 a write to `$C000` masks down to `$8000` and moves
+PRG; here it is the reload value.
+
+The IRQ is "exactly like MMC3's IRQs, with 2 exceptions":
+
+1. **"The written reload value is inverted."** Stored inverted on the way in, so nothing else in
+   the board has to remember. `req_core_100_the_tc0690_reload_value_is_inverted` writes `$14`
+   both ways round: inverted it is a 21-line period, raw it is 236 lines.
+2. **"The IRQ seems to trip a little later than it does on MMC3. It looks like about a 4 CPU
+   cycle delay."** MR-64-4's shape, reused rather than re-invented: the counter **arms**
+   `irq_delay` and `on_cpu_cycle` counts it down, which is `Rambo1::irq_delay` to the line.
+
+The four prerequisites §5 step 4 lists were all already in the tree, so the step did not have to
+build any of them: `A12Watcher::filter_dots` has been a construction parameter with
+`min_rise_interval()` derived from it since MF-4c/MF-5a (MR-64-3), and MR-64-4's delayed
+assertion since the same lot. The board is one `A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS)`
+and one `i32`.
+
+**`irq_delay` is armed with the page's figure plus one, and the ordering inside `NesBus::tick` is
+why.** That function runs `catch_up_ppu` — where the A12 rise, and so the arming, happens —
+*before* `Cartridge::step_cpu_cycle`, so the very cycle the rise lands in decrements the counter
+itself. An MMC3 asserting on that rise is observable at the end of that cycle; four cycles later
+is four cycles after that. `Rambo1::irq_delay` encodes a different quantity the same way: its
+page counts **M2 falls** from the rise and the arming cycle's own fall is the first of them, so
+its 2 is literally two falls where this 4 is four cycles of difference. The measurement is
+`mf_6b_the_tc0690_counts_the_same_lines_as_the_mmc3_and_trips_four_cycles_later`, which runs a
+real mapper-4 MMC3 and a mapper-48 TC0690 with the same latch on the same instrument and asserts
+the difference is exactly 4.
+
+### Three divergences from Mesen 2, and one of them a game can see
+
+1. **The delay is 4 and not 6 or 22.** `TaitoTc0690.h:32-34` picks between those two by submapper
+   with a comment that says what they are: "6 removes the shaking from The Jetsons, 21-22 seems
+   to work for the Flintstones+Captain Saver". Tuned against games; the page gives one number.
+2. **`$C000` and `$C001` do not acknowledge.** Mesen clears the IRQ source in both
+   (`TaitoTc0690.h:60`, `:67`): "Flintstones expects either $C000 or $C001 to clear the irq flag".
+   The page's two exceptions do not include it and an MMC3's own latch and clear do not either.
+   **This is the one divergence of this board that a game can see**, and it is named for R0: if
+   *The Flintstones: The Rescue of Dino & Hoppy* shows a shaking or mistimed status bar, that arm
+   is where to look. `req_core_100_the_tc0690_irq_registers_are_the_mmc3_s_at_c000_to_c003` pins
+   the page's reading, so changing it later is one assertion.
+3. **No submapper.** Mesen reads `_romInfo.SubMapperID == 1`; the page documents none.
+
+And one place the page disagrees with **itself**: its prose says bit 4 of `$E000` selects the
+mirroring and its own register diagram says `[.M.. ....]`, which is bit 6. The diagram and Mesen
+(`value & 0x40`) agree, so bit 6 it is, and
+`req_core_100_the_tc0690_mirroring_is_bit_6_of_e000` walks the whole byte — `$10` among the
+values that must change nothing — rather than asserting the one bit.
+
+The counter is **written out and not shared with `Mmc3`**: sharing would mean lifting the MMC3's
+five IRQ fields into a struct of their own, and that is precisely what this step's stop condition
+forbids. Step 1 measured what moving an IRQ board's fields by one byte costs (eleven of thirteen
+ROMs, +0.009 % to +0.027 %, no code added). `Mmc3::update_banks` is **161 → 161** and
+`Mmc1::update_banks` **215 → 215, byte-identical**, which is the receipt.
+
+### V1 missed the bar, and the two instructions that did it
+
+**V1 forwarded `ppu_irq_horizon` from `IrqBoard` with `#[inline(never)]`** — step 1's trick, and
+the shape MF-6a2 step 2 used on `Rambo1::ppu_irq_horizon`. It was **above the reference on two
+ROMs**:
+
+| ROM | `9f9d9d41` | **V1** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `mmc5` | 11 289 605 855 | 11 296 018 331 | **+6 412 476** | +0.057 % |
+| `z2` | 6 292 582 908 | 6 292 758 949 | **+176 041** | +0.003 % |
+
+and the per-symbol diff named one function on **four** ROMs: `NesBus::catch_up_ppu`, +9 214 379
+on `mmc5`, +2 433 068 on `duelito`, +2 245 658 on `readbuf`. Statically it had gone from **188
+instructions to 190**. `metroid`, which was −281 329 at step 3, came out at −33 803.
+
+`m4` and `smb3` — §5's own named stop condition — were **below** the reference the whole time
+(−1 398 273 and −1 018 201). The board that paid was the MMC5, through a function the board has
+nothing to do with.
+
+**Why two instructions are worth nine million.** `NesBus::ppu_horizon` is inlined into
+`catch_up_ppu`, and it folds in the whole `Board::ppu_irq_horizon` dispatch. *Any* forward from
+`IrqBoard` is one more distinct body there — even one whose four other boards answer `Mapper`'s
+default, even with the leaf out of line. This is MF-6a2 step 2's finding read backwards: that
+step took the RAMBO-1's body *out* of this dispatch, took `catch_up_ppu` from 216 to 203, and
+bought **every board in the library** 0.005 % to 0.082 %. Two instructions in that function are
+worth more than thirty in most.
+
+**V2 answers `None` for the whole variant, and `None` is already in the dispatch** — it is the
+MMC5's arm — so it adds no body at all. `Mapper::ppu_irq_horizon`'s own contract makes it the
+safe answer: "no bound is known (the PPU then runs in step with the CPU)". The price is that a
+cartridge of this variant gives up the PPU's lag; the TC0690 could not have kept it anyway, and
+the other four boards could but pay for the family, which is §4.10's rule and exactly the trade
+`IrqBoard::chr_view` already makes one dispatch further on.
+
+`NesBus::catch_up_ppu` is **188 → 188** in V2, and the function does not appear in the per-symbol
+diff at all.
+
+### The bar, V2 on both instruments
+
+**PR-1's thirteen** — every ROM below, set total **−21 419 036 (−0.027 %)**:
+
+| ROM | board | `9f9d9d41` | **V2** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 310 470 388 | **3 308 320 074** | −2 150 314 | −0.065 % |
+| `oamstr` | NROM | 3 319 466 313 | **3 318 448 961** | −1 017 352 | −0.031 % |
+| `m1` | MMC1 | 4 886 651 514 | **4 885 452 838** | −1 198 676 | −0.025 % |
+| `m0` | NROM | 5 521 219 795 | **5 519 917 503** | −1 302 292 | −0.024 % |
+| `m4` | **MMC3** | 5 473 783 790 | **5 471 936 909** | −1 846 881 | −0.034 % |
+| `metroid` | MMC1 | 5 116 149 734 | **5 115 846 055** | −303 679 | −0.006 % |
+| `smb1` | NROM | 5 996 882 321 | **5 996 373 588** | −508 733 | −0.008 % |
+| `mm2` | MMC1 | 6 020 725 910 | **6 017 890 404** | −2 835 506 | −0.047 % |
+| `z2` | MMC1 | 6 292 582 908 | **6 291 475 824** | −1 107 084 | −0.018 % |
+| `readbuf` | CNROM | 6 836 830 137 | **6 834 540 841** | −2 289 296 | −0.033 % |
+| `duelito` | NROM | 7 383 094 194 | **7 380 400 848** | −2 693 346 | −0.036 % |
+| `smb3` | **MMC3** | 7 950 795 166 | **7 949 411 924** | −1 383 242 | −0.017 % |
+| `mmc5` | MMC5 | 11 289 605 855 | **11 286 823 220** | −2 782 635 | −0.025 % |
+| **total** | | **79 398 258 025** | **79 376 838 989** | **−21 419 036** | **−0.027 %** |
+
+**Level 2** — `l2-diff.py --bar`: **"at or below the baseline on every game, total and core"**,
+and step 3's two `total` rises are gone, which is the other half of the evidence that they were
+Lua's layout and not this lot's code:
+
+| game/stage | `9f9d9d41` | **V2** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 898 492 | **11 147 223 960** | −674 532 | −0.006 % |
+| `smb1/core` | 11 515 980 923 | **11 515 146 178** | −834 745 | −0.007 % |
+| `zelda2/core` | 12 777 709 570 | **12 775 647 562** | −2 062 008 | −0.016 % |
+| `mm2/core` | 12 043 306 623 | **12 036 872 563** | −6 434 060 | −0.053 % |
+| `smb3/core` | 15 318 626 455 | **15 315 412 686** | −3 213 769 | −0.021 % |
+| `metroid/total` | 13 736 176 888 | **13 735 498 841** | −678 047 | −0.005 % |
+| `smb1/total` | 13 589 021 252 | **13 586 873 570** | −2 147 682 | −0.016 % |
+| `zelda2/total` | 15 362 221 166 | **15 360 551 856** | −1 669 310 | −0.011 % |
+| `mm2/total` | 18 982 867 263 | **18 976 424 548** | −6 442 715 | −0.034 % |
+| `smb3/total` | 24 192 639 363 | **24 189 903 784** | −2 735 579 | −0.011 % |
+
+Every `core` figure is **identical to step 3's to the instruction** — the change between V1 and
+V2 is in a function the five games' cores do not reach differently — which is also why the
+level-2 run was only needed once for V2.
+
+### The post-LTO invariants
+
+| symbol | `9f9d9d41` | step 3 | **step 4 (V2)** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 443 | 1 / 2 / 3 626 | 1 / 2 / **3 626** |
+| `Cpu::resolve` | 2 / 6 / 1 854 | 2 / 6 / 1 948 | 2 / 6 / **1 948** |
+| `Cpu::branch` | 1 / 1 / 418 | 1 / 1 / 457 | 1 / 1 / **457** |
+| `NesBus::read_cycle` | 1 / 65 / 181 | 1 / 65 / 181 | 1 / 65 / 181 |
+| `NesBus::tick` | 1 / 95 / 82 | 1 / 95 / 82 | 1 / 95 / 82 |
+| `NesBus::read_internal` | 1 / 17 / 175 | 1 / 17 / 175 | 1 / 17 / 175 |
+| `NesBus::write_internal` | 1 / 10 / 3 103 | 1 / 10 / 3 465 | 1 / 10 / 3 577 |
+| `Ppu::run_dots` | 1 / 2 / 1 907 | 1 / 2 / 1 907 | 1 / 2 / 1 907 |
+
+The three claimants of `Cpu6502::step`'s budget are **unmoved to the instruction** from step 3,
+the fifth variant having cost that chain nothing at all. `grep` still finds
+`IrqBoard::irq_asserted` and no other `irq_asserted` definition; `callsites.py` has all three
+links at 0 defs / 0 sites; **all twenty prologues identical**.
+
+`NesBus::catch_up_ppu` **188 → 188**, `Ppu2C02::read_nametable_inner` **114 → 114**,
+`Mmc1::update_banks` **215 → 215**, `Mmc3::update_banks` **161 → 161**, `Board::ppu_peek` **272**
+against the baseline's 271 — the fourth capped hook a single instruction above where the lot
+found it, with `IrqBoard::ppu_peek` out of line at 86. The two that grew are the ones this board
+is: `Board::on_ppu_address_bus` 156 → 195, with `IrqBoard::on_ppu_address_bus` out of line at 38,
+and `Board::on_cpu_cycle` 396 → 426 with `TaitoTc0690::on_cpu_cycle` 9.
+
+`Cartridge::default_cpu_read` is 305 → 377, two instructions more than step 3's 375, and its
+dynamic figure on `mmc5` is **+7 456 756 — the same number as step 2 and step 3, to the
+instruction**. Three steps have now added an `IrqBoard` variant without moving it, so step 2's
+warning can be narrowed: what cost that function its +53 was `prg_ram_enabled` becoming a
+forwarded body in step 3, not the variant count, and `mmc5`'s margin against the reference is
+still −2 782 635.
+
+### Tests
+
+**883 passed, 0 failed, 8 ignored**, step 3's 877 plus six:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_tc0690_reload_value_is_inverted` | the XOR, in both directions: `$14` inverted is 21 lines and raw is an order of magnitude more |
+| `mf_6b_the_tc0690_counts_the_same_lines_as_the_mmc3_and_trips_four_cycles_later` | the counter against a real MMC3 on the same instrument, and the delay as **exactly** four cycles. §5 calls this the step's `ppu_irq_horizon` test, "the one test in the lot whose failure is a scheduling bug rather than a mapper bug": the PPU runs behind the CPU by whatever the horizon allows, so a wrong horizon shows here as a difference that is not four |
+| `req_core_100_the_tc0690_irq_registers_are_the_mmc3_s_at_c000_to_c003` | `$C002` enabling, `$C003` disabling and acknowledging, and **neither `$C000` nor `$C001` acknowledging**, which is the divergence from Mesen a game can see |
+| `req_core_100_an_a12_dip_shorter_than_the_filter_does_not_clock_the_tc0690` | §5's own case: three dots of low rejected, twenty-four accepted, with A12 driven high *before* the counter is armed so the rise under test is the first the watcher sees |
+| `req_core_100_the_tc0690_banks_like_a_tc0190_through_the_wider_e003_mask` | the banking, six bits of PRG, the whole byte in the 2 KiB CHR registers, `$8004` collapsing to `$8000`, and the IRQ registers banking nothing |
+| `req_core_100_the_tc0690_mirroring_is_bit_6_of_e000` | the whole byte, `$10` included, and `$E001`-`$E003` not being registers |
+
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` **caught the new board by
+itself** and failed until its own expected list was extended: `[4, 4, 5, 5, 48, 48, 64, 64, 118,
+118]`. That is the sweep working as MF-3b intended — a board was added to
+`watches_ppu_reads`/`watches_ppu_bus_without_read` and the guard against a vacuous pass is what
+noticed. Its second assertion, that a board watching the PPU's reads must answer `None` to
+`chr_view`, passed untouched: `IrqBoard::chr_view` has answered `None` for the whole variant
+since step 1.
+
+`req_core_100_every_required_mapper_is_registered` is extended with 48;
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`,
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` needed nothing.
+
+`cargo fmt --check` clean; `cargo clippy --release -p zax-nes --all-targets -- -D warnings`
+clean, **no new `allow` of any kind**.
+
+The six titles for R0 are *Bakushou!! Jinsei Gekijou 3*, *Bubble Bobble 2*, *Don Doko Don 2*,
+*Captain Saver*, *The Jetsons: Cogswell's Caper!* and — the one to run first, for the reason
+above — *The Flintstones: The Rescue of Dino & Hoppy*.
+
+[PROGRESS] MF-6b step 4/8 done: mapper 48, with `ppu_irq_horizon` answering `None` for the whole variant after a forward cost `catch_up_ppu` two instructions and `mmc5` 9.2 M; all thirteen ROMs and all five level-2 games below `9f9d9d41` on total and core.

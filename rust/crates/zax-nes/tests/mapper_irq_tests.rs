@@ -903,3 +903,150 @@ fn req_core_100_only_the_nes_event_timer_bit_touches_its_counter() {
     core.mmc1_write(0x8000, 0x0C);
     assert_eq!(80, tick_until_irq(&mut core, 1000));
 }
+
+// ---------------------------------------------------------------- Taito TC0690 (48)
+
+/// The TC0690's four IRQ registers are the MMC3's in a different order: `$C000` the reload
+/// value, `$C001` the clear, `$C002` the enable, `$C003` the acknowledge — and the value written
+/// to `$C000` is **inverted**, "you can simply XOR the writes with $FF and it will work just like
+/// MMC3" (nesdev, "INES Mapper 048").
+fn arm_tc0690(core: &mut NesCore, latch: u8) {
+    core.mapper_write(0xC000, latch ^ 0xFF);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xC002, 0x00);
+}
+
+/// Loads `v` through `$2006`, which drives A12 off the PPU's address bus with /RD high.
+fn set_vram_address(core: &mut NesCore, address: u16) {
+    core.write_memory(0x2006, (address >> 8) as u8);
+    core.write_memory(0x2006, (address & 0xFF) as u8);
+}
+
+#[test]
+fn req_core_100_the_tc0690_reload_value_is_inverted() {
+    // The first of the page's two exceptions: "writing $06 to the reload reg on this mapper
+    // would be like writing $F9 on MMC3". So the same twenty-line period an MMC3 gets from $14
+    // needs $EB here — and $14 written straight through would give 236 lines instead of 21.
+    let mut core = MapperRom::new(48).chr(32).load();
+    enable_scanline_counting(&mut core);
+    arm_tc0690(&mut core, 20);
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+    core.mapper_write(0xC003, 0x00);
+    core.mapper_write(0xC002, 0x00);
+    assert!(!irq(&core));
+    let period = tick_until_irq(&mut core, 200_000);
+    assert!(
+        (20 * 341 / 3..=22 * 341 / 3).contains(&period),
+        "period {period}"
+    );
+
+    // $14 written **without** the inversion is a latch of 235, which is an order of magnitude
+    // more lines: the one figure that says which way round the XOR goes. The period is not
+    // pinned exactly here because 236 clocks cross a vblank, during which A12 does not rise at
+    // all, and where in the frame that falls depends on when the acknowledge landed.
+    let mut raw = MapperRom::new(48).chr(32).load();
+    enable_scanline_counting(&mut raw);
+    raw.mapper_write(0xC000, 20);
+    raw.mapper_write(0xC001, 0x00);
+    raw.mapper_write(0xC002, 0x00);
+    let long = tick_until_irq(&mut raw, 300_000);
+    assert!(long > 10 * period, "period {long} against {period}");
+}
+
+#[test]
+fn mf_6b_the_tc0690_counts_the_same_lines_as_the_mmc3_and_trips_four_cycles_later() {
+    // The second exception, and what it is measured against: "the IRQ seems to trip a little
+    // later than it does on MMC3. It looks like about a 4 CPU cycle delay from the normal MMC3
+    // IRQ time." Two cores, the same ROM, the same PPU state and the same latch through two
+    // different register sets — so the difference between the two cycle counts is the delay and
+    // nothing else.
+    //
+    // This is also the step's `ppu_irq_horizon` test, the one §5 calls "the one test in the lot
+    // whose failure is a scheduling bug rather than a mapper bug": the PPU runs behind the CPU
+    // by whatever that horizon allows, so a horizon too long on this board would show here as a
+    // difference that is not four.
+    let mut mmc3 = MapperRom::new(4).chr(32).load();
+    enable_scanline_counting(&mut mmc3);
+    mmc3.mapper_write(0xC000, 20);
+    mmc3.mapper_write(0xC001, 0x00);
+    mmc3.mapper_write(0xE001, 0x00);
+
+    let mut tc0690 = MapperRom::new(48).chr(32).load();
+    enable_scanline_counting(&mut tc0690);
+    arm_tc0690(&mut tc0690, 20);
+
+    let on_the_mmc3 = tick_until_irq(&mut mmc3, 200_000);
+    assert!(on_the_mmc3 > 0);
+    assert_eq!(on_the_mmc3 + 4, tick_until_irq(&mut tc0690, 200_000));
+}
+
+#[test]
+fn req_core_100_the_tc0690_irq_registers_are_the_mmc3_s_at_c000_to_c003() {
+    let mut core = MapperRom::new(48).chr(32).load();
+    enable_scanline_counting(&mut core);
+    arm_tc0690(&mut core, 2);
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+
+    // **Neither `$C000` nor `$C001` acknowledges.** The page's two exceptions do not include
+    // that and an MMC3's own latch and clear do not either; Mesen 2 clears the source in both
+    // (`TaitoTc0690.h:60`, `:67`) with the comment "Flintstones expects either $C000 or $C001 to
+    // clear the irq flag", which is the one divergence of this board a game can see.
+    core.mapper_write(0xC000, 0x00);
+    assert!(irq(&core), "$C000 acknowledged");
+    core.mapper_write(0xC001, 0x00);
+    assert!(irq(&core), "$C001 acknowledged");
+
+    // `$C003` does, and it disables the counter with it, as the MMC3's `$E000` does.
+    core.mapper_write(0xC003, 0x00);
+    assert!(!irq(&core));
+    assert_eq!(-1, tick_until_irq(&mut core, 60_000));
+
+    // And `$C002` starts it again.
+    core.mapper_write(0xC002, 0x00);
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+}
+
+#[test]
+fn req_core_100_an_a12_dip_shorter_than_the_filter_does_not_clock_the_tc0690() {
+    // §5's own case for this step. The counter is the MMC3's and so is its filter: A12 must have
+    // stayed low for `A12Watcher::MMC3_FILTER_DOTS` before a rise counts, which is what keeps
+    // the two-dot nametable and attribute dips of every tile out of the count.
+    let mut core = MapperRom::new(48).chr(32).load();
+    core.write_memory(0x2001, 0x00); // Rendering off: only $2006 drives A12.
+
+    // A12 high **before** the counter is armed, so the rise under test is the first one it sees.
+    set_vram_address(&mut core, 0x1000);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    // Latch 0: on MMC3 revision B every clock that lands reaches zero and fires, so one
+    // unfiltered rise is all it would take.
+    arm_tc0690(&mut core, 0);
+
+    // Three dots of low, under the ten-dot filter.
+    set_vram_address(&mut core, 0x0000);
+    core.bus_mut().tick();
+    set_vram_address(&mut core, 0x1000);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    assert!(!irq(&core), "a three-dot dip clocked the counter");
+
+    // Twenty-four dots of low, over it.
+    set_vram_address(&mut core, 0x0000);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    set_vram_address(&mut core, 0x1000);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    assert!(
+        irq(&core),
+        "a twenty-four-dot dip did not clock the counter"
+    );
+}

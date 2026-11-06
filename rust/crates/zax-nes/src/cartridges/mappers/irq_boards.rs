@@ -1,4 +1,4 @@
-use super::{IremH3001, Mapper, NesEvent, Sunsoft3, Vrc3};
+use super::{IremH3001, Mapper, NesEvent, Sunsoft3, TaitoTc0690, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -51,6 +51,8 @@ pub enum IrqBoard {
     Sunsoft3(Sunsoft3),
     /// Mapper 105, the Nintendo NES-EVENT board.
     NesEvent(NesEvent),
+    /// Mapper 48, the Taito TC0690.
+    TaitoTc0690(TaitoTc0690),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -61,6 +63,7 @@ macro_rules! inner {
             IrqBoard::IremH3001($b) => $body,
             IrqBoard::Sunsoft3($b) => $body,
             IrqBoard::NesEvent($b) => $body,
+            IrqBoard::TaitoTc0690($b) => $body,
         }
     };
 }
@@ -117,6 +120,39 @@ impl Mapper for IrqBoard {
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_register(memory, address, value));
+    }
+
+    /// **`#[inline(never)]`, and §4.3 of `docs/review/MF-6-inventory.md` is why**: this dispatch
+    /// runs 57 600-odd times a frame on a board that watches the PPU's address bus, and mappers
+    /// 4, 64 and 118 are in it already. Inlined, the `IrqBoard` body would be one more arm in
+    /// `Board::on_ppu_address_bus` for all four boards of this variant, three of which never
+    /// reach it; out of line it is a `callq` for the one board that does. MF-6b step 4 has the
+    /// figures.
+    #[inline(never)]
+    fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
+    }
+
+    /// **`None` for the whole variant, which is the body the MMC5 already gives**, and MF-6b
+    /// step 4 measured why it is not the forward it looks like it should be.
+    ///
+    /// `NesBus::ppu_horizon` is inlined into `NesBus::catch_up_ppu`, and *any* forward here is
+    /// one more distinct body in the `Board::ppu_irq_horizon` dispatch it folds in — even one
+    /// whose four other boards answer `Mapper`'s default, even behind `#[inline(never)]`. The
+    /// first shape of this step did exactly that, with the TC0690's own
+    /// [`Mapper::ppu_irq_horizon`] out of line: `catch_up_ppu` went from **188 instructions to
+    /// 190** and that pair of instructions cost `mmc5` **+9 214 379** and `readbuf` +2 245 658
+    /// over 300 frames, taking `mmc5` and `z2` above the lot's reference. It is MF-6a2 step 2's
+    /// finding read backwards — that step took the RAMBO-1's body *out* of this dispatch, took
+    /// `catch_up_ppu` from 216 to 203 and bought every board in the library 0.005 % to 0.082 %.
+    ///
+    /// `None` is "no bound is known, so the PPU runs in step with the CPU": always correct, and
+    /// already in the dispatch as the MMC5's arm, so it adds no body at all. The price is that a
+    /// cartridge of this variant gives up the PPU's lag — the TC0690 could not have kept it
+    /// anyway, and the other four could but pay for the family, which is §4.10's own rule and
+    /// the same trade [`IrqBoard::chr_view`] below makes one dispatch further on.
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        None
     }
 
     /// `None` for the whole variant; see the type's own note on why this is not forwarded.

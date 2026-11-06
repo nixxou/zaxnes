@@ -343,8 +343,10 @@ impl Cartridge {
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
             // three identical nametable reads. See the two fields. A new board with an A12
             // counter belongs in both lists; one that waits on /RD, in the first only.
-            watches_ppu_reads: matches!(mapper, 4 | 5 | 64 | 118),
-            watches_ppu_bus_without_read: matches!(mapper, 4 | 64 | 118),
+            // MF-6b step 4 adds the Taito TC0690 (48), whose counter is the MMC3's and is
+            // clocked through the same A12 filter (nesdev, "INES Mapper 048"), so it is in both.
+            watches_ppu_reads: matches!(mapper, 4 | 5 | 48 | 64 | 118),
+            watches_ppu_bus_without_read: matches!(mapper, 4 | 48 | 64 | 118),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
@@ -360,6 +362,8 @@ impl Cartridge {
             // 16-bit CPU-cycle down counters (nesdev, "INES Mapper 065" and "INES Mapper 067").
             // MF-6b step 3 adds the NES-EVENT (105), whose "30-bit up counter clocked by M2"
             // is the widest of them (nesdev, "NES-EVENT").
+            // MF-6b step 4 adds the Taito TC0690 (48): its counter is the PPU's, but the
+            // four-cycle delay on its assertion is counted down here (nesdev, "INES Mapper 048").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -372,6 +376,7 @@ impl Cartridge {
                     | 25
                     | 26
                     | 27
+                    | 48
                     | 64
                     | 65
                     | 67
@@ -960,14 +965,15 @@ mod tests {
         }
 
         // Guards against a vacuous pass: the sweep above must actually be reaching the hook.
-        // Both submappers of each of the four move — the MMC3 and the MC-ACC for mapper 4, the
-        // MMC5's scanline detection (MF-4c, finding MR-5-4), and the RAMBO-1 and the TxSROM,
-        // whose submapper 3 is not a board of its own.
+        // Both submappers of each of the five move — the MMC3 and the MC-ACC for mapper 4, the
+        // MMC5's scanline detection (MF-4c, finding MR-5-4), the Taito TC0690 of mapper 48
+        // (MF-6b step 4), whose counter is the MMC3's, and the RAMBO-1 and the TxSROM, whose
+        // submapper 3 is not a board of its own.
         assert_eq!(
             moved,
-            [4, 4, 5, 5, 64, 64, 118, 118],
-            "expected exactly the MMC3, the MC-ACC, the MMC5, the RAMBO-1 and the TxSROM to \
-             move on the PPU address bus, and the sweep to reach all of them"
+            [4, 4, 5, 5, 48, 48, 64, 64, 118, 118],
+            "expected exactly the MMC3, the MC-ACC, the MMC5, the TC0690, the RAMBO-1 and the \
+             TxSROM to move on the PPU address bus, and the sweep to reach all of them"
         );
     }
 

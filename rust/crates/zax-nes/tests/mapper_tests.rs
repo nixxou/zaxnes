@@ -65,7 +65,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 73 (Konami VRC3) (MF-6b step 1);
     // * 65 (Irem H3001) and 67 (Sunsoft-3), the two plain CPU-cycle down counters
     //   (MF-6b step 2);
-    // * 105 (the Nintendo NES-EVENT board of Nintendo World Championships 1990) (MF-6b step 3).
+    // * 105 (the Nintendo NES-EVENT board of Nintendo World Championships 1990) (MF-6b step 3);
+    // * 48 (the Taito TC0690, the TC0190 of mapper 33 with the MMC3's scanline counter)
+    //   (MF-6b step 4).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -73,8 +75,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         .collect();
     assert_eq!(
         vec![
-            19, 24, 26, 33, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105, 118,
-            140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 232
+            19, 24, 26, 33, 48, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105,
+            118, 140, 152, 154, 155, 156, 180, 184, 185, 206, 210, 232
         ],
         extra
     );
@@ -2641,6 +2643,83 @@ fn req_core_100_the_sunsoft3_mirroring_register_has_four_states() {
         let mut core = MapperRom::new(67).prg(8).chr(32).load();
         core.write_memory(0xE800, value);
         assert_eq!(expected, core.mirroring(), "$E800 = {value:02X}");
+    }
+}
+
+// ------------------------------------------- Taito TC0690 (48)
+
+/// nesdev ("INES Mapper 048"): the TC0690 is "a superset of TC0190+PAL16R4 abilities", so the
+/// banking is mapper 33's — two switchable 8 KiB PRG banks with the last two fixed, two 2 KiB
+/// CHR registers using the whole written value and four 1 KiB ones — with the register mask
+/// widened from `$A003` to **`$E003`**. That one difference is what frees `$C000`-`$C003` for the
+/// IRQ and `$E000` for a mirroring register: on a TC0190 a write to `$C000` masks down to
+/// `$8000` and moves PRG, and here it does not.
+#[test]
+fn req_core_100_the_tc0690_banks_like_a_tc0190_through_the_wider_e003_mask() {
+    let mut core = MapperRom::new(48).prg(16).chr(32).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+
+    core.write_memory(0x8000, 0x03);
+    core.write_memory(0x8001, 0x05);
+    assert_eq!([3, 5, 14, 15], core.prg_windows());
+
+    // Six bits of bank, as on the TC0190: $43 is bank 3.
+    core.write_memory(0x8000, 0x43);
+    assert_eq!([3, 5, 14, 15], core.prg_windows());
+
+    // Two 2 KiB registers that take the whole byte, then four 1 KiB ones.
+    core.write_memory(0x8002, 0x01);
+    core.write_memory(0x8003, 0x03);
+    for register in 0..4u16 {
+        core.write_memory(0xA000 + register, 20 + register as u8);
+    }
+
+    assert_eq!([2, 3, 6, 7, 20, 21, 22, 23], core.chr_windows());
+
+    // A3-A12 are not decoded, so $8004 is $8000...
+    core.write_memory(0x8004, 0x07);
+    assert_eq!([7, 5, 14, 15], core.prg_windows());
+
+    // ...and the IRQ registers bank nothing, which is the whole of the mask's difference.
+    core.write_memory(0xC000, 0x02);
+    core.write_memory(0xC002, 0x02);
+    assert_eq!([7, 5, 14, 15], core.prg_windows());
+}
+
+/// `$E000` is `[.M.. ....]`, which is **bit 6** — the page's own register diagram and Mesen 2
+/// (`value & 0x40`) agree, and the page's prose says bit 4, so the whole byte is walked here
+/// rather than the one bit, and bit 4 is among the values that must change nothing.
+///
+/// The board controls the layout, so the header's own mirroring bit never decides it: the
+/// power-on state is the register's zero, vertical, where the fixture's header says horizontal.
+#[test]
+fn req_core_100_the_tc0690_mirroring_is_bit_6_of_e000() {
+    for (value, expected) in [
+        (0x00u8, zax_nes::NametableMirroring::Vertical),
+        (0x40, zax_nes::NametableMirroring::Horizontal),
+        (0x10, zax_nes::NametableMirroring::Vertical),
+        (0xBF, zax_nes::NametableMirroring::Vertical),
+        (0xFF, zax_nes::NametableMirroring::Horizontal),
+    ] {
+        let mut core = MapperRom::new(48).prg(16).chr(32).load();
+        assert_eq!(
+            zax_nes::NametableMirroring::Vertical,
+            core.mirroring(),
+            "power-on"
+        );
+        core.write_memory(0xE000, value);
+        assert_eq!(expected, core.mirroring(), "$E000 = {value:02X}");
+    }
+
+    // $E001-$E003 are not registers on this board.
+    let mut core = MapperRom::new(48).prg(16).chr(32).load();
+    for address in [0xE001u16, 0xE002, 0xE003] {
+        core.write_memory(address, 0x40);
+        assert_eq!(
+            zax_nes::NametableMirroring::Vertical,
+            core.mirroring(),
+            "{address:04X} set the mirroring"
+        );
     }
 }
 
