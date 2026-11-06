@@ -57,7 +57,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 206, the Namco 108 / DxROM, with 76, 88, 95 and 154 as its four parameters
     //   (MF-6a step 1);
     // * 33 (Taito TC0190), 97 (Irem TAM-S1), 140 (Jaleco JF-11/14), 184 (Sunsoft-1) and
-    //   89 and 93 (Sunsoft-2 on its two boards) (MF-6a step 2).
+    //   89 and 93 (Sunsoft-2 on its two boards) (MF-6a step 2);
+    // * 70 and 152 (Bandai 74161/7432 without and with mirroring control), 75 (Konami VRC1)
+    //   and 232 (Camerica BF9096) (MF-6a step 3);
+    // * 94 (HVC-UN1ROM, a wiring of the UxROM board), 185 (CNROM with the security diodes) and
+    //   155 (the MMC1 with no PRG-RAM disable) (MF-6a step 4).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -65,8 +69,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         .collect();
     assert_eq!(
         vec![
-            19, 24, 26, 33, 69, 76, 78, 85, 88, 89, 93, 95, 97, 118, 140, 154, 156, 180, 184, 206,
-            210
+            19, 24, 26, 33, 69, 70, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140, 152, 154,
+            155, 156, 180, 184, 185, 206, 210, 232
         ],
         extra
     );
@@ -2131,6 +2135,303 @@ fn req_core_100_sunsoft_2_has_bus_conflicts_on_both_boards() {
             [0, 1, 14, 15],
             core.prg_windows(),
             "mapper {mapper}: the ROM did not drive the bus"
+        );
+    }
+}
+
+// ------------------------------------------- Bandai 74161/7432 (70, 152), VRC1 (75),
+// ------------------------------------------- Camerica BF9096 (232)
+
+/// nesdev ("INES Mapper 070") gives the board `[PPPP CCCC]` and no mirroring control; nesdev
+/// ("INES Mapper 152") gives the same board `[MPPP CCCC]`, `M` being one-screen select. One
+/// write pins the pair: `$F0` is PRG bank 15 and no layout change on 70, and PRG bank 7 with
+/// one-screen B on 152.
+///
+/// Both boards have bus conflicts, so the write goes to `$C000`, whose 8 KiB bank is filled
+/// with $FF: through a numbered bank the AND would mask the field away.
+#[test]
+fn req_core_100_bandai_74161_reads_bit_7_as_a_bank_bit_on_70_and_a_nametable_on_152() {
+    // 32 x 8 KiB is 16 x 16 KiB, so a four-bit PRG field is fully reachable.
+    let mut on_70 = MapperRom::new(70)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(30)
+        .load();
+    let before = on_70.mirroring();
+    on_70.mapper_write(0xC000, 0xF0);
+    // Four PRG bits: %1111 is 16 KiB bank 15, i.e. 8 KiB banks 30 and 31; 30 reads back as 255.
+    assert_eq!([255, 31, 255, 31], on_70.prg_windows());
+    assert_eq!(
+        before,
+        on_70.mirroring(),
+        "mapper 70 has no mirroring control"
+    );
+
+    let mut on_152 = MapperRom::new(152)
+        .prg(32)
+        .chr(32)
+        .prg_bank_all_ones(30)
+        .load();
+    on_152.mapper_write(0xC000, 0xF0);
+    // Three PRG bits: %111 is 16 KiB bank 7, i.e. 8 KiB banks 14 and 15.
+    assert_eq!([14, 15, 255, 31], on_152.prg_windows());
+    assert_eq!(Nm::SingleScreenB, on_152.mirroring());
+
+    on_152.mapper_write(0xC000, 0x70);
+    assert_eq!(Nm::SingleScreenA, on_152.mirroring());
+    assert_eq!([14, 15, 255, 31], on_152.prg_windows());
+}
+
+/// The half the two numbers share: a 16 KiB PRG window at $8000 with the last bank fixed at
+/// $C000, and an 8 KiB CHR bank from bits 3-0 — and the bus conflict, visible because the write
+/// below lands on 8 KiB bank 14, whose every byte is 14.
+#[test]
+fn req_core_100_bandai_74161_shares_its_prg_and_chr_split_between_70_and_152() {
+    for mapper in [70usize, 152] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(128).load();
+        assert_eq!([0, 1, 14, 15], core.prg_windows(), "mapper {mapper}");
+
+        // $FF & 14 = 14: PRG field 0, CHR field 14.
+        core.mapper_write(0xC000, 0xFF);
+        assert_eq!([0, 1, 14, 15], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(112, core.chr_windows()[0], "mapper {mapper}");
+    }
+}
+
+/// nesdev ("VRC1"): three switchable 8 KiB PRG windows at $8000, $A000 and $C000, with
+/// $E000-$FFFF wired to the last bank.
+#[test]
+fn req_core_100_vrc1_switches_three_prg_windows_and_wires_the_last() {
+    let mut core = MapperRom::new(75).prg(16).chr(32).load();
+    assert_eq!([0, 1, 2, 15], core.prg_windows());
+
+    core.mapper_write(0x8000, 0x05);
+    core.mapper_write(0xA000, 0x07);
+    core.mapper_write(0xC000, 0x09);
+    assert_eq!([5, 7, 9, 15], core.prg_windows());
+
+    // Four bits: the register ignores anything above them.
+    core.mapper_write(0x8000, 0xF3);
+    assert_eq!([3, 7, 9, 15], core.prg_windows());
+}
+
+/// The CHR half is two 4 KiB banks of **five** bits each: `$E000` and `$F000` carry the low four
+/// and `$9000` bits 1 and 2 the high one.
+#[test]
+fn req_core_100_vrc1_takes_its_chr_high_bit_from_9000() {
+    let mut core = MapperRom::new(75).prg(16).chr(128).load();
+    core.mapper_write(0xE000, 0x03);
+    core.mapper_write(0xF000, 0x05);
+    // 4 KiB banks 3 and 5, i.e. 1 KiB banks 12-15 and 20-23.
+    assert_eq!([12, 13, 14, 15, 20, 21, 22, 23], core.chr_windows());
+
+    // $9000 bit 1 is the high bit of the first window, bit 2 of the second: bank 3 + 16 = 19,
+    // i.e. 1 KiB banks 76-79, and bank 5 + 16 = 21, i.e. 84-87.
+    core.mapper_write(0x9000, 0x02);
+    assert_eq!([76, 77, 78, 79, 20, 21, 22, 23], core.chr_windows());
+    core.mapper_write(0x9000, 0x06);
+    assert_eq!([76, 77, 78, 79, 84, 85, 86, 87], core.chr_windows());
+    core.mapper_write(0x9000, 0x00);
+    assert_eq!([12, 13, 14, 15, 20, 21, 22, 23], core.chr_windows());
+}
+
+/// `$9000` bit 0 is the mirroring bit, "0 = Vertical, 1 = Horizontal"; and the page's condition:
+/// "the mirroring bit is ignored if the cartridge is wired for 4-screen VRAM".
+#[test]
+fn req_core_100_vrc1_has_a_mirroring_bit_that_a_four_screen_header_ignores() {
+    let mut core = MapperRom::new(75).prg(16).chr(32).load();
+    core.mapper_write(0x9000, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.mapper_write(0x9000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // Byte 6 bit 3 is the four-screen bit.
+    let mut four = MapperRom::new(75).prg(16).chr(128).mirroring(0x08).load();
+    assert_eq!(Nm::FourScreen, four.mirroring());
+    for value in [0x00u8, 0x01, 0x07] {
+        four.mapper_write(0x9000, value);
+        assert_eq!(Nm::FourScreen, four.mirroring(), "{value:#04X}");
+    }
+
+    // And the CHR high bits still work on a four-screen board.
+    four.mapper_write(0xE000, 0x01);
+    four.mapper_write(0x9000, 0x02);
+    assert_eq!(68, four.chr_windows()[0]);
+}
+
+/// There is no IRQ on the VRC1: nesdev gives the chip none, and the three addresses a VRC2 or
+/// VRC4 would use for one do nothing here.
+#[test]
+fn req_core_100_vrc1_has_no_irq() {
+    let mut core = MapperRom::new(75).prg(16).chr(32).load();
+    for address in [0x9000u16, 0xB000, 0xD000, 0xE000, 0xF000] {
+        core.mapper_write(address, 0xFF);
+    }
+    for _ in 0..4 {
+        core.run_frame(0);
+    }
+
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}
+
+/// nesdev ("INES Mapper 232"): `$8000-$BFFF: [...B B...]` selects a 64 KiB block and
+/// `$C000-$FFFF: [.... ..PP]` a 16 KiB page inside it — "pages are taken from the 64k block
+/// currently selected by $8000" — with the block's last page fixed at $C000.
+#[test]
+fn req_core_100_bf9096_takes_its_pages_from_the_selected_64_kib_block() {
+    let mut core = MapperRom::new(232).prg(32).chr(16).load();
+    // Power-on: block 0, page 0, so $8000 is page 0 and $C000 page 3 of block 0.
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    core.mapper_write(0xC000, 0x02);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    // Block 1 is the second 64 KiB: its four pages are 4 to 7 of 16 KiB.
+    core.mapper_write(0x8000, 0x08);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+
+    core.mapper_write(0xC000, 0x00);
+    assert_eq!([8, 9, 14, 15], core.prg_windows());
+
+    // Bits outside the two fields are not part of either register: $EF keeps block 1 and $FC
+    // keeps page 0.
+    core.mapper_write(0x8000, 0xEF);
+    assert_eq!([8, 9, 14, 15], core.prg_windows());
+    core.mapper_write(0xC000, 0xFC);
+    assert_eq!([8, 9, 14, 15], core.prg_windows());
+}
+
+/// NES 2.0 submapper 1 is the Aladdin Deck Enhancer, whose two block bits are the other way
+/// round; submapper 0 is the plain *Quattro* board. `$08` is bit 3 alone, so it is block %01
+/// plain and block %10 swapped.
+#[test]
+fn req_core_100_bf9096_swaps_its_block_bits_on_submapper_1() {
+    let mut plain = MapperRom::new(232).prg(32).chr(16).load();
+    plain.mapper_write(0x8000, 0x08);
+    assert_eq!([8, 9, 14, 15], plain.prg_windows());
+
+    let mut aladdin = MapperRom::new(232).prg(32).chr(16).submapper(1).load();
+    aladdin.mapper_write(0x8000, 0x08);
+    assert_eq!([16, 17, 22, 23], aladdin.prg_windows());
+}
+
+// ------------------------------------------- the parameters of existing boards:
+// ------------------------------------------- 94 on UxROM, 185 on CNROM, 155 on MMC1
+
+/// nesdev ("INES Mapper 094"): "very similar to `UxROM`, but the register is shifted by two bits",
+/// `xxxP PPxx`, with the same switchable window at $8000-$BFFF and the last bank fixed at $C000.
+///
+/// **Both numbers in one test**, so the parameter cannot be got backwards: `$14` is bank 5 on
+/// mapper 94 (bits 4-2) and bank 20 — which wraps to 4 — on mapper 2.
+#[test]
+fn req_core_100_un1rom_shifts_the_uxrom_field_by_two_bits() {
+    let mut on_94 = MapperRom::new(94).prg(16).load();
+    assert_eq!([0, 1, 14, 15], on_94.prg_windows());
+    on_94.mapper_write(0x8000, 0x14);
+    assert_eq!([10, 11, 14, 15], on_94.prg_windows());
+
+    let mut on_2 = MapperRom::new(2).prg(16).load();
+    on_2.mapper_write(0x8000, 0x14);
+    assert_eq!([8, 9, 14, 15], on_2.prg_windows());
+
+    // Three bits on mapper 94: bits 7-5 and 1-0 are not part of the bank.
+    on_94.mapper_write(0x8000, 0xE3);
+    assert_eq!([0, 1, 14, 15], on_94.prg_windows());
+    on_94.mapper_write(0x8000, 0x1F);
+    assert_eq!([14, 15, 14, 15], on_94.prg_windows());
+}
+
+/// nesdev ("INES Mapper 185"): submappers 4 to 7 say which value of the two chip-select bits
+/// enables the CHR-ROM; "when another value is active, CHR-ROM is disabled, meaning that reading
+/// from the pattern tables returns open bus behavior".
+#[test]
+fn req_core_100_cnrom_protect_enables_chr_rom_on_its_submappers_chip_select() {
+    for (submapper, enabling) in [(4u8, 0u8), (5, 1), (6, 2), (7, 3)] {
+        let mut core = MapperRom::new(185)
+            .prg(4)
+            .chr(8)
+            .submapper(submapper)
+            .prg_bank_all_ones(3)
+            .load();
+        for value in 0..4u8 {
+            // $E100 is inside 8 KiB bank 3, filled with $FF, so the bus conflict leaves the
+            // value written. $E000 itself would not: the fixture puts a `JMP` there for the
+            // reset vector to point at, so the AND would be with $4C.
+            core.mapper_write(0xE100, value);
+            let read = peek(&core, 0x0400);
+            if value == enabling {
+                // CHR 1 KiB bank 1 is filled with 1.
+                assert_eq!(1, read, "submapper {submapper} value {value}: enabled");
+            } else {
+                // Disabled: the chip is deselected and D0 floats high.
+                assert_eq!(1 | 0x01, read, "submapper {submapper} value {value}");
+                assert_eq!(0x03, peek(&core, 0x0800), "submapper {submapper}: D0 high");
+            }
+        }
+    }
+}
+
+/// Submapper 0, which is every iNES 1.0 image: the page's heuristic needs to count $2007 reads,
+/// which this core cannot tell from a background fetch, so **Q-131** records the question and
+/// the latch-value heuristic is what ships — "if C AND $0F is nonzero, and if C does not equal
+/// $13: CHR is enabled".
+#[test]
+fn q_131_cnrom_protect_reads_its_submapper_0_heuristic_off_the_latch() {
+    let mut core = MapperRom::new(185)
+        .prg(4)
+        .chr(8)
+        .prg_bank_all_ones(3)
+        .load();
+    // Power-on latch 0: the low nibble is zero, so the CHR is disabled.
+    assert_eq!(0x03, peek(&core, 0x0800));
+
+    core.mapper_write(0xE100, 0x01);
+    assert_eq!(2, peek(&core, 0x0800));
+
+    // $13 is the one nonzero value the heuristic excludes.
+    core.mapper_write(0xE100, 0x13);
+    assert_eq!(0x03, peek(&core, 0x0800));
+
+    core.mapper_write(0xE100, 0x0F);
+    assert_eq!(2, peek(&core, 0x0800));
+}
+
+/// Mapper 3 is **not** touched by any of this: its register is still an 8 KiB CHR bank select,
+/// and nothing about it is a chip select.
+#[test]
+fn req_core_100_plain_cnrom_is_unaffected_by_mapper_185() {
+    let mut core = MapperRom::new(3).prg(4).chr(32).load();
+    core.mapper_write(0x8000, 0x03);
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], core.chr_windows());
+    assert_eq!(3, core.cartridge().unwrap().mapper_number());
+}
+
+/// nesdev ("INES Mapper 155"): the MMC1 on a board that does not wire the PRG-RAM disable, so
+/// bit 4 of the PRG register has no effect on it — **and an MMC1 in the same test still honours
+/// it**, which is what says the parameter did not reach mapper 1.
+#[test]
+fn req_core_100_mapper_155_ignores_the_mmc1_prg_ram_disable() {
+    for (mapper, still_readable) in [(155usize, true), (1, false)] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(16).load();
+        assert_eq!(mapper, core.cartridge().unwrap().mapper_number() as usize);
+
+        core.write_memory(0x6000, 0x5A);
+        assert_eq!(0x5A, core.read_memory(0x6000), "mapper {mapper}: power-on");
+
+        // $E000 bit 4 is `R`, "PRG RAM chip enable (0: enabled; 1: disabled)".
+        core.mmc1_write(0xE000, 0x10);
+        assert_eq!(
+            still_readable,
+            core.read_memory(0x6000) == 0x5A,
+            "mapper {mapper}: after the disable bit"
+        );
+
+        // And clearing it again gives an MMC1 its RAM back, with what was written still there.
+        core.mmc1_write(0xE000, 0x00);
+        assert_eq!(
+            0x5A,
+            core.read_memory(0x6000),
+            "mapper {mapper}: re-enabled"
         );
     }
 }

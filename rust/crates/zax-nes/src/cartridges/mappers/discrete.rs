@@ -5,8 +5,9 @@ use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
-/// iNES mappers 2 and 180, UxROM: a write in $8000-$FFFF selects a 16 KiB bank, the other
-/// window is fixed, CHR is not switched (nesdev, "UxROM" and "INES Mapper 180").
+/// iNES mappers 2, 94 and 180, UxROM: a write in $8000-$FFFF selects a 16 KiB bank, the other
+/// window is fixed, CHR is not switched (nesdev, "UxROM", "INES Mapper 094" and
+/// "INES Mapper 180").
 ///
 /// **Mapper 180 is the same board with the other half of the 74 series.** Its page gives the
 /// board name as "UNROM" too and explains the difference in one sentence: it "uses AND logic
@@ -14,11 +15,23 @@ use crate::NametableMirroring;
 /// fixed last bank at $C000". So it is a wiring of this board, decided at load, and not a
 /// `Board` variant of its own — the enum's note says why that matters. *Crazy Climber* is the
 /// only game.
+///
+/// **Mapper 94 is the HVC-UN1ROM**, the third wiring of the same board and the one *Senjou no
+/// Ookami* — the Japanese *Commando* — runs on. nesdev ("INES Mapper 094") gives it
+/// `xxxP PPxx`, "very similar to UxROM, but the register is shifted by two bits", with the same
+/// switchable window at $8000-$BFFF and the same "16 KB PRG ROM bank, fixed to the last bank" at
+/// $C000. So it is the mapper-180 shape of difference — a load-time wiring, not a `Board`
+/// variant — and `shifted_field` is it. The test writes one value through both numbers so that
+/// the parameter cannot be got backwards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UxRom {
     banks: BankWindows,
-    /// 2 or 180, for [`Mapper::mapper_number`].
+    /// 2, 94 or 180, for [`Mapper::mapper_number`].
     mapper_number: i32,
+    /// Mapper 94's wiring: the bank field is bits 4-2 of the latch, not bits 3-0. Decided at
+    /// load, and read only by [`Mapper::write_register`] — a CPU write to $8000-$FFFF — so no
+    /// read, fetch or cycle path of mapper 2 or 180 sees it.
+    shifted_field: bool,
     /// Mapper 180's wiring: the **first** bank fixed at $8000 and the register switching
     /// $C000-$FFFF, where mapper 2 does the opposite. Decided at load.
     fixed_first: bool,
@@ -31,6 +44,7 @@ impl UxRom {
             banks: windows_for(memory),
             mapper_number,
             fixed_first: mapper_number == 180,
+            shifted_field: mapper_number == 94,
             bank: 0,
         }
     }
@@ -71,7 +85,11 @@ impl Mapper for UxRom {
 
     fn write_register(&mut self, _memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address >= 0x8000 {
-            self.bank = value;
+            self.bank = if self.shifted_field {
+                (value >> 2) & 0x07
+            } else {
+                value
+            };
             self.update_banks();
         }
     }

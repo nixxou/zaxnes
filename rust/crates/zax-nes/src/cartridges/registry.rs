@@ -8,11 +8,11 @@
 
 use super::mappers::Nrom;
 use super::mappers::{
-    Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    Daou306, Fme7, GxRom, IremG101, IremTamS1, JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015,
-    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant,
-    Namcot108, Rambo1, SmallBoard, Sunsoft1, Sunsoft2, TaitoTc0190, UnRom512, UxRom, Vrc2Vrc4,
-    Vrc6, Vrc7,
+    Action52, Action53, AxRom, Bandai74161, BandaiFcg, Bf9096, Caltron6In1, CnRom, CnRomProtect,
+    Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremTamS1, JalecoJ87,
+    JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5,
+    Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1, SmallBoard, Sunsoft1, Sunsoft2,
+    TaitoTc0190, UnRom512, UxRom, Vrc1, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -21,8 +21,8 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
-    34, 41, 64, 66, 69, 71, 76, 78, 85, 87, 88, 89, 93, 95, 97, 101, 118, 140, 154, 156, 180, 184,
-    206, 210, 225, 228,
+    34, 41, 64, 66, 69, 70, 71, 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 118, 140, 152,
+    154, 155, 156, 180, 184, 185, 206, 210, 225, 228, 232,
 ];
 
 /// Whether `mapper` is implemented.
@@ -193,7 +193,11 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // logic with nothing to stop the ROM driving the bus.
         // *INES Mapper 089* and *INES Mapper 093* both carry the page's own "BUS CONFLICTS"
         // line against the register at $8000-$FFFF (MF-6a step 2).
-        11 | 66 | 78 | 89 | 93 | 180 => true,
+        // *INES Mapper 070* and *INES Mapper 152* file the Bandai 74161/7432 board under
+        // "Mappers with bus conflicts" too (MF-6a step 3).
+        // Mesen 2 gives mapper 185 the CNROM board's conflicts (`CnromProtect.h:21`), which
+        // the *CNROM* board page describes for the family (MF-6a step 4).
+        11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
         _ => false,
@@ -205,8 +209,11 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
 pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Board> {
     Some(match mapper {
         0 => Board::Nrom(Nrom),
-        1 => Board::Mmc1(Mmc1::new(memory)),
-        2 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
+        // MF-6a step 4: mapper 155 is the MMC1 on a board with no PRG-RAM disable wire.
+        1 | 155 => Board::Mmc1(Mmc1::new(memory)),
+        // MF-6a step 4: mapper 94 is the third wiring of the UxROM board, its bank field
+        // shifted two bits (nesdev, "INES Mapper 094").
+        2 | 94 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
         3 => Board::CnRom(CnRom::new(memory)),
         // MR-4-3: mapper 4 submapper 3 is Acclaim's MC-ACC, the same board with a ÷8 prescaler
         // on A12's falling edges. It is the same code, monomorphised with the difference as a
@@ -254,6 +261,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         184 => Board::SmallBoard(SmallBoard::Sunsoft1(Sunsoft1::new(memory))),
         // Mapper 89 is the Sunsoft-3 board and 93 the Sunsoft-3R; the chip is the same.
         89 | 93 => Board::SmallBoard(SmallBoard::Sunsoft2(Sunsoft2::new(memory, mapper))),
+        // MF-6a step 3: four more numbers in the same variant, so no new discriminant.
+        // Mapper 152 is the same board as 70 with its mirroring wire connected.
+        70 | 152 => Board::SmallBoard(SmallBoard::Bandai74161(Bandai74161::new(memory, mapper))),
+        75 => Board::SmallBoard(SmallBoard::Vrc1(Vrc1::new(memory))),
+        232 => Board::SmallBoard(SmallBoard::Bf9096(Bf9096::new(memory))),
+        // MF-6a step 4: CNROM with the security diodes. `CnRomProtect`'s note says why it
+        // is here and not a parameter of `CnRom`.
+        185 => Board::SmallBoard(SmallBoard::CnRomProtect(CnRomProtect::new(memory))),
         _ => return None,
     })
 }

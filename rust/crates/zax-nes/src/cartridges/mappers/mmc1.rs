@@ -29,6 +29,11 @@ pub struct Mmc1 {
     /// SNROM wiring, decided at load (see [`Mmc1::is_snrom`]): bit 4 of the CHR bank register
     /// is a second chip enable for the PRG-RAM.
     snrom: bool,
+    /// Mapper 155: the board has no PRG-RAM disable at all, so bit 4 of the PRG register — and
+    /// an SNROM's bit 4 of CHR bank 0 — are ignored for that purpose. Decided at load and read
+    /// only by [`Mmc1::refresh_prg_ram_disable`], which runs when a register commits, so
+    /// `Mapper::prg_ram_enabled` is instruction-identical for mapper 1 (MF-6a step 4).
+    no_ram_disable: bool,
     /// What [`Mapper::prg_ram_enabled`] answers, recomputed whenever `prg` or `chr0` commits.
     ///
     /// A field rather than an expression because on an SNROM the answer needs *both* registers:
@@ -65,6 +70,7 @@ impl Mmc1 {
             ram_bank_shift,
             ram_bank_mask,
             snrom: Self::is_snrom(memory),
+            no_ram_disable: memory.rom().mapper() == 155,
             prg_ram_disabled: false,
         }
     }
@@ -118,8 +124,14 @@ impl Mmc1 {
     /// admits, CHR bank 0 is the whole answer, and that is also the register Holy Mapperel
     /// names. (Mesen 2 implements only the `$E000` half, `MMC1.h:87`; AMD-061 makes the public
     /// documentation prevail where the two disagree.)
+    ///
+    /// Mapper 155 is this chip on a board that does not wire the disable: nesdev
+    /// ("INES Mapper 155") gives it as MMC1 "with the WRAM disable bit removed", and Mesen 2
+    /// implements it by holding the flag at false (`MMC1_155.h:9`). One `&&` here, on the
+    /// register-commit path, and mapper 1 pays nothing on its $6000-$7FFF decode.
     fn refresh_prg_ram_disable(&mut self) {
-        self.prg_ram_disabled = self.prg & 0x10 != 0 || (self.snrom && self.chr0 & 0x10 != 0);
+        self.prg_ram_disabled =
+            !self.no_ram_disable && (self.prg & 0x10 != 0 || (self.snrom && self.chr0 & 0x10 != 0));
     }
 
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
@@ -197,7 +209,11 @@ impl Mapper for Mmc1 {
     }
 
     fn mapper_number(&self) -> i32 {
-        1
+        if self.no_ram_disable {
+            155
+        } else {
+            1
+        }
     }
 
     /// Bit 4 of the PRG register disables the PRG-RAM chip, and on an SNROM bit 4 of CHR bank 0

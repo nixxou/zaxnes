@@ -1,4 +1,7 @@
-use super::{IremTamS1, JalecoJf11, Mapper, Sunsoft1, Sunsoft2, TaitoTc0190};
+use super::{
+    Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, Mapper, Sunsoft1, Sunsoft2,
+    TaitoTc0190, Vrc1,
+};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -47,6 +50,18 @@ pub enum SmallBoard {
     Sunsoft1(Sunsoft1),
     /// Mappers 89 and 93, Sunsoft-2 on its two boards.
     Sunsoft2(Sunsoft2),
+    // Appended by MF-6a step 3, which added four more numbers and **no** `Board` variant: the
+    // whole point of this enum is that a board joining it is free to the rest of the library.
+    /// Mappers 70 and 152, the Bandai 74161/7432 board with and without mirroring control.
+    Bandai74161(Bandai74161),
+    /// Mapper 75, Konami VRC1.
+    Vrc1(Vrc1),
+    /// Mapper 232, the Camerica BF9096.
+    Bf9096(Bf9096),
+    // Appended by MF-6a step 4.
+    /// Mapper 185, CNROM with the security diodes. Here and not on [`super::CnRom`] because a
+    /// CHR chip select has to reach `chr_view`, and this variant has already paid for that.
+    CnRomProtect(CnRomProtect),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -58,6 +73,10 @@ macro_rules! inner {
             SmallBoard::JalecoJf11($b) => $body,
             SmallBoard::Sunsoft1($b) => $body,
             SmallBoard::Sunsoft2($b) => $body,
+            SmallBoard::Bandai74161($b) => $body,
+            SmallBoard::Vrc1($b) => $body,
+            SmallBoard::Bf9096($b) => $body,
+            SmallBoard::CnRomProtect($b) => $body,
         }
     };
 }

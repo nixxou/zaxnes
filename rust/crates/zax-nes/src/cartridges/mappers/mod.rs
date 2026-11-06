@@ -20,7 +20,10 @@ macro_rules! banked {
     };
 }
 
+mod bandai74161;
 mod bandai_fcg;
+mod bf9096;
+mod cnrom_protect;
 mod daou306;
 mod discrete;
 mod fme7;
@@ -41,12 +44,16 @@ mod small_boards;
 mod sunsoft1;
 mod sunsoft2;
 mod taito_tc0190;
+mod vrc1;
 mod vrc2_vrc4;
 mod vrc6;
 mod vrc7;
 mod vrc_irq;
 
+pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
+pub use bf9096::Bf9096;
+pub use cnrom_protect::CnRomProtect;
 pub use daou306::Daou306;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
@@ -71,6 +78,7 @@ pub use small_boards::SmallBoard;
 pub use sunsoft1::Sunsoft1;
 pub use sunsoft2::Sunsoft2;
 pub use taito_tc0190::TaitoTc0190;
+pub use vrc1::Vrc1;
 pub use vrc2_vrc4::Vrc2Vrc4;
 pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;

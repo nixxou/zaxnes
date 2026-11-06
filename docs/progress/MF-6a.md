@@ -490,7 +490,67 @@ hook to that path and leaves `ppu_irq_horizon`'s dispatch the bodies it had. The
 one step 1 names, extended: drop the boards.
 
 [PROGRESS] MF-6a step 2/7 done: six boards in one variant, and the line that cost 0.13 %.
+## Step 3 — 70, 152, 75 and 232: four boards and **no** new `Board` variant
+
+### What was built
+
+Three board structs — `bandai74161.rs` (70 and 152, the same board with and without the
+mirroring wire), `vrc1.rs` (75) and `bf9096.rs` (232) — all three appended to
+**`SmallBoard`**, so `Board` gains nothing at all. That is step 2's finding used rather than
+re-measured: a board that joins that variant is free to the rest of the library by construction.
+
+Each board's registers are its page's, quoted in the file. Three readings are decisions:
+
+* **70 against 152** is the pair the parameter exists for. `[PPPP CCCC]` on 70 and
+  `[MPPP CCCC]` on 152 means bit 7 is *both* a bank bit on one number and a nametable select on
+  the other, so `mirroring_control` decides two things at once; one test writes `$F0` through
+  both numbers and reads the windows and the layout off each.
+* **Mesen 2's two mapper-70 compatibility hacks are not copied** (AMD-061 §1): forcing vertical
+  mirroring at power-on "to make Kamen Rider Club … work correctly (bad header)", and treating
+  mapper 70 as having mirroring control the moment a game sets bit 7, "a hack to make as many
+  games as possible work without CRC checks". Neither is the hardware either page describes.
+* **232's submapper 1**, the Aladdin Deck Enhancer, swaps the two outer-bank bits. The swap is
+  implemented as a load-time `bool` and Mesen's own doubt about it recorded in the file —
+  "but this seems to match the Pegasus 4-in-1 behavior? Wiki wrong?" — because this role has no
+  image of either cartridge to settle it with.
+
+70 and 152 also get the `has_bus_conflicts` arm each page's "Mappers with bus conflicts" line
+asks for, which is why their tests write into a `$FF`-filled bank.
+
+Eight tests, 834 → **842 / 0 / 8**, all passing first time; `fmt` and clippy clean, no new
+`allow`.
+
+### The bar
+
+**PR-1's thirteen**: set total **−90 354 (−0.000 %)**, every ROM within **±117 k**. The
+emulated symbols that moved are the three step 2 already had — `write_internal` −64 to −68 k on
+`m0`/`m1`, `run_dots` −20 to −22 k on `duelito`/`metroid`, and `smb3`'s `catch_up_ppu`
++117 086 — and **nothing new**: four boards, no new discriminant, no new cost.
+
+**Level 2**, against `240a2718`:
+
+| game/stage | baseline | step 3 | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 148 433 485 | **11 148 407 139** | −26 346 | −0.0002 % |
+| `smb1/core` | 11 516 670 821 | **11 516 657 770** | −13 051 | −0.0001 % |
+| `zelda2/core` | 12 778 994 409 | **12 778 983 095** | −11 314 | −0.0001 % |
+| `mm2/core` | 12 043 869 909 | 12 043 872 423 | +2 514 | +0.0000 % |
+| `smb3/core` | 15 320 386 010 | 15 320 847 312 | **+461 302** | **+0.0030 %** |
+| `smb1/total` | 13 588 597 037 | **13 587 654 349** | −942 688 | −0.0069 % |
+| `smb3/total` | 24 194 492 263 | **24 193 145 609** | −1 346 654 | −0.0056 % |
+| `metroid/total` | 13 736 688 715 | **13 736 621 596** | −67 119 | −0.0005 % |
+| `zelda2/total` | 15 363 074 749 | **15 363 017 598** | −57 151 | −0.0004 % |
+| `mm2/total` | 18 983 316 177 | **18 983 293 631** | −22 546 | −0.0001 % |
+
+**All five totals are below the baseline** and three of five cores; `mm2`'s core is +2 514 and
+`smb3`'s +461 302, the same two figures step 2 had and from the same place (`catch_up_ppu`), not
+accumulating. The post-LTO state is step 2's: the three claimants **0 / 0 / 0**, `step` 3 443,
+`resolve` 1 854, `branch` 418, `read_cycle`/`tick`/`read_internal` unmoved to the instruction,
+`run_dots` 1 907, `write_internal` 3 079 — **+21 for four boards**, which is what
+`#[inline(never)]` on each decode buys.
+
+[PROGRESS] MF-6a step 3/7 done: four boards, no new `Board` variant, set total −90 354.
 
 ## Status
 
-Steps 0-2 done.
+Steps 0-3 done.
