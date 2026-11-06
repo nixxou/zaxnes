@@ -16,7 +16,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | k | step | state |
 | ---: | --- | --- |
 | 0 | the plan, this file, and the exact number set the census has to cover | **done** |
-| 1 | census part A — §3.3's single-publisher boards (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | to do |
+| 1 | census part A — §3.3's single-publisher boards (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | **done** |
 | 2 | census part B — §3.4's explicitly listed numbers | to do |
 | 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | to do |
 | 4 | census part D — the homebrew numbers, and the census's category totals | to do |
@@ -66,3 +66,26 @@ preserve. Where that promotion is the whole reason for the category, the row say
 0-5, 7, 9-11, 13, 15, 16, 18, 19, 21-28, 30, 32, 33, 34, 37, 41, 47, 48, 64-67, 69, 70, 71, 73,
 75, 76, 78, 85, 87, 88, 89, 93, 94, 95, 97, 101, 105, 116, 118, 119, 140, 152, 154, 155, 156, 158,
 180, 184, 185, 206, 210, 225, 228, 232 — **69 numbers**, 45 of them with every board feature off.
+
+## Step 1 — §3.3's 60 numbers: 29 A, 4 B, 10 C, 12 D, 5 E
+
+`docs/review/UNL-census.md` §0 (scope, categories, sources) and §1 (the eight publisher groups).
+The findings that change a decision:
+
+* **29 of the 60 numbers §6 excluded in one sentence are category A.** The densest clusters are
+  **Sachen** (13 of 14) and **J.Y. Company** (5 of 5).
+* **36, 132, 172, 173 are one ASIC** — the TXC/Idea-Tek `05-00002-010`, the same `JV001` that
+  Sachen's **136** and **147** carry. Six numbers, ~20 original titles, one board with wiring
+  parameters: the best effort-to-titles ratio in the document.
+* **298 (UNL-TF1201) is a `Vrc2Vrc4` `Vrc4b` with one documented difference** ($F003 acknowledges
+  only), for one game that exists on no other NES board. A `const` parameter in the `McAcc` manner.
+* **Kaiser (11) and Whirlwind Manu (5) hold no A at all** — seven and five FDS conversions
+  respectively, two bootlegs of licensed cartridges, one pirate multicart, one no-title number.
+  §3.3's own notes were right and the content rule retires both groups.
+* **176 (FK23C), which §6 named as revisitable, is C**: every title on its page is a multicart or a
+  plug-and-play. It is out on the content rule *and* on cost, which is two of the three reasons.
+* **Four of §3.3's eight publisher labels are wrong**, recorded in §1: 171 is BBK, not Kaiser (and
+  NESdev and Mesen disagree about what the number even is); 164 is Dōngdá/Yànchéng, not Wàixīng;
+  61 is NTDEC/GS, 172 Super Mega, 173 Idea-Tek, 286 Benshieng.
+* **NesCartDB answers HTTP 403 to this environment**, so no per-number cartridge count could be
+  refreshed. Recorded in §0 as the census's one open gap.
