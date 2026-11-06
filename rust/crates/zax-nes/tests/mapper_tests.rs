@@ -76,7 +76,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 153 (the Bandai FCG board with an LZ93D50 and 8 KiB of battery-backed WRAM), behind
     //   `board-153` (MF-6c step 1);
     // * 80 and 207 (the Taito X1-005 and its single-screen wiring) and 82 and 552 (the Taito
-    //   X1-017 with the two bank orders), behind `board-taito-x1` (MF-6c step 2).
+    //   X1-017 with the two bank orders), behind `board-taito-x1` (MF-6c step 2);
+    // * 157 (the Datach Joint ROM System) and 159, the two Bandai LZ93D50 boards with a serial
+    //   EEPROM, behind `board-eeprom` (MF-6c step 3).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -92,7 +94,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let namcot = cfg!(feature = "board-namcot108");
     let multicart = cfg!(feature = "board-mmc3-multicart");
     let taito_x1 = cfg!(feature = "board-taito-x1");
-    let additions: [(i32, bool); 43] = [
+    let eeprom = cfg!(feature = "board-eeprom");
+    let additions: [(i32, bool); 45] = [
         (19, true),
         (24, true),
         (26, true),
@@ -127,7 +130,9 @@ fn req_core_100_every_required_mapper_is_registered() {
         (154, namcot),
         (155, cfg!(feature = "board-155")),
         (156, true),
+        (157, eeprom),
         (158, cfg!(feature = "board-158")),
+        (159, eeprom),
         (180, true),
         (184, small),
         (185, small),
@@ -1377,6 +1382,318 @@ fn req_core_100_taito_x1_017_inverts_chr_a12_and_gates_three_ram_windows() {
     assert_eq!(0x11, battery[0x100]);
     assert_eq!(0x22, battery[0x900]);
     assert_eq!(0x33, battery[0x1100]);
+}
+
+/// Drives the two-wire bus of a Bandai LZ93D50's EEPROM from the CPU side, through $800D: bit 5
+/// is the internal chip's SCL and bit 6 the SDA both chips see (nesdev's own diagram for
+/// mapper 157, `RDC. ....`). MF-6c step 3.
+#[cfg(feature = "board-eeprom")]
+mod i2c {
+    use super::NesCore;
+
+    /// Puts `scl` and `sda` on the two lines. `direction` is $800D bit 7, which Q-134 records as
+    /// decoded and inert — the tests pass it so that the claim is exercised and not assumed.
+    pub fn lines(core: &mut NesCore, scl: u8, sda: u8, direction: u8) {
+        core.write_memory(0x800D, (direction << 7) | (sda << 6) | (scl << 5));
+    }
+
+    /// One clock of `bit`: SCL low with the data set up, then SCL high to clock it in.
+    pub fn clock(core: &mut NesCore, bit: u8, direction: u8) {
+        lines(core, 0, bit, direction);
+        lines(core, 1, bit, direction);
+    }
+
+    /// "START is identified by a high to low transition of the SDA line while the clock SCL is
+    /// *stable* in the high state."
+    pub fn start(core: &mut NesCore, direction: u8) {
+        lines(core, 0, 1, direction);
+        lines(core, 1, 1, direction);
+        lines(core, 1, 0, direction);
+    }
+
+    /// "STOP is identified by a low to high transition of the SDA line while the clock SCL is
+    /// *stable* in the high state."
+    pub fn stop(core: &mut NesCore, direction: u8) {
+        lines(core, 0, 0, direction);
+        lines(core, 1, 0, direction);
+        lines(core, 1, 1, direction);
+    }
+
+    /// The `width` bits of `value`, **most significant first** — the big-endian clocking the
+    /// mapper-159 page says the hardware does.
+    pub fn send(core: &mut NesCore, value: u8, width: u8, direction: u8) {
+        for index in 0..width {
+            clock(core, (value >> (width - 1 - index)) & 1, direction);
+        }
+    }
+
+    /// The EEPROMs' data out: bit 4 of a read of $6000-$7FFF (the page's `xxxE Bxxx`).
+    pub fn data_out(core: &NesCore) -> u8 {
+        (core.read_memory(0x6000) >> 4) & 1
+    }
+
+    /// Clocks eight bits out of the chip, most significant first, and acknowledges so that a
+    /// sequential read goes on.
+    pub fn receive(core: &mut NesCore, direction: u8) -> u8 {
+        let mut value = 0u8;
+        for _ in 0..8 {
+            lines(core, 0, 1, direction);
+            lines(core, 1, 1, direction);
+            value = (value << 1) | data_out(core);
+        }
+        // The master's acknowledge: SDA low for one clock.
+        clock(core, 0, direction);
+        value
+    }
+
+    /// A whole X24C01 transfer: seven address bits then the R/W bit in the same byte, the chip's
+    /// acknowledge, then the data.
+    pub fn x24c01_write(core: &mut NesCore, address: u8, bytes: &[u8]) {
+        start(core, 0);
+        send(core, address & 0x7F, 7, 0);
+        clock(core, 0, 0); // R/W = write.
+        clock(core, 1, 0); // the chip's acknowledge.
+        for byte in bytes {
+            send(core, *byte, 8, 0);
+            clock(core, 1, 0);
+        }
+        stop(core, 0);
+    }
+
+    pub fn x24c01_read(core: &mut NesCore, address: u8, count: usize) -> Vec<u8> {
+        start(core, 0);
+        send(core, address & 0x7F, 7, 0);
+        clock(core, 1, 0); // R/W = read.
+        clock(core, 1, 0); // the chip's acknowledge.
+        let out = (0..count).map(|_| receive(core, 1)).collect();
+        stop(core, 0);
+        out
+    }
+
+    /// An X24C02 transfer: the chip-address byte ($A0, R/W clear), the word address, then data.
+    pub fn x24c02_write(core: &mut NesCore, address: u8, bytes: &[u8]) {
+        start(core, 0);
+        send(core, 0xA0, 8, 0);
+        clock(core, 1, 0);
+        send(core, address, 8, 0);
+        clock(core, 1, 0);
+        for byte in bytes {
+            send(core, *byte, 8, 0);
+            clock(core, 1, 0);
+        }
+        stop(core, 0);
+    }
+
+    /// A "Current Address Read": the chip address with R/W set, after the word address has been
+    /// positioned by a write that was stopped before any data.
+    pub fn x24c02_read(core: &mut NesCore, address: u8, count: usize) -> Vec<u8> {
+        start(core, 0);
+        send(core, 0xA0, 8, 0);
+        clock(core, 1, 0);
+        send(core, address, 8, 0);
+        clock(core, 1, 0);
+        start(core, 0);
+        send(core, 0xA1, 8, 0);
+        clock(core, 1, 0);
+        let out = (0..count).map(|_| receive(core, 1)).collect();
+        stop(core, 0);
+        out
+    }
+}
+
+/// Mapper 159's X24C01, and **the one behavioural claim of MF-6c step 3**, quoted from nesdev
+/// ("INES Mapper 159"):
+///
+/// > Bandai's developers consistently thought the X24C01 was a little-endian device, and their
+/// > code clocks in address and data bytes assuming this. However, it's actually a big-endian
+/// > device, and a multi-byte read or write from EEPROM will increment the address accordingly.
+///
+/// So the chip is clocked most significant bit first, and a sequential transfer walks the
+/// hardware's address. Mesen 2 clocks this part LSB first (`Eeprom24C01.h:15`); AMD-061 §1 makes
+/// the page prevail.
+#[cfg(feature = "board-eeprom")]
+#[test]
+fn req_core_100_the_x24c01_is_big_endian_and_its_address_increments_accordingly() {
+    let mut core = MapperRom::new(159).prg(32).chr(32).battery().load();
+    assert_eq!(159, core.cartridge().unwrap().mapper_number());
+
+    // A single byte round-trips.
+    i2c::x24c01_write(&mut core, 0x05, &[0x5A]);
+    assert_eq!(vec![0x5A], i2c::x24c01_read(&mut core, 0x05, 1));
+
+    // **Big-endian**: the byte landed where the most-significant-first address said, not where a
+    // little-endian reading of the same seven bits would have put it. $05 is `000 0101`; read
+    // LSB-first those bits are `101 0000` = $50, which must hold nothing.
+    assert_eq!(vec![0x00], i2c::x24c01_read(&mut core, 0x50, 1));
+
+    // **A multi-byte write increments the address**: three bytes from $10 land at $10, $11, $12.
+    i2c::x24c01_write(&mut core, 0x10, &[0x11, 0x22, 0x33]);
+    assert_eq!(vec![0x11, 0x22, 0x33], i2c::x24c01_read(&mut core, 0x10, 3));
+    // And a multi-byte read walks the same way, so the two agree: reading from $11 gives the
+    // second and third bytes.
+    assert_eq!(vec![0x22, 0x33], i2c::x24c01_read(&mut core, 0x11, 2));
+
+    // The chip is 128 bytes and the address wraps inside it: $7F then $00.
+    i2c::x24c01_write(&mut core, 0x7F, &[0xAB, 0xCD]);
+    assert_eq!(vec![0xAB], i2c::x24c01_read(&mut core, 0x7F, 1));
+    assert_eq!(vec![0xCD], i2c::x24c01_read(&mut core, 0x00, 1));
+
+    // REQ-CORE-095: the 128 bytes are the battery slice, and they are the EEPROM's.
+    let battery = core.cartridge().unwrap().battery_ram();
+    assert_eq!(128, battery.len());
+    assert_eq!(0x5A, battery[0x05]);
+    assert_eq!([0x11, 0x22, 0x33], battery[0x10..0x13]);
+    assert_eq!(0xCD, battery[0x00]);
+
+    // The EEPROM is not CPU-addressable memory: $6000-$7FFF is the data-out register, so a write
+    // there cannot be read back as RAM.
+    core.write_memory(0x6123, 0x77);
+    assert_ne!(0x77, core.read_memory(0x6123));
+}
+
+/// Mapper 157, the Datach Joint ROM System: the internal X24C02, the external X24C01 whose clock
+/// is on $8000-$8003, their outputs wire-`ANDed`, and "No CHR banking is available"
+/// (MF-6c step 3).
+#[cfg(feature = "board-eeprom")]
+#[test]
+fn req_core_100_the_datach_has_an_internal_24c02_and_an_external_24c01() {
+    // Byte 10 = $10 is the 128 bytes the page uses to declare the second chip.
+    let mut core = MapperRom::new(157)
+        .prg(32)
+        .chr(32)
+        .battery()
+        .prg_ram(0, 128)
+        .load();
+    assert_eq!(157, core.cartridge().unwrap().mapper_number());
+    // 256 bytes of internal chip, then the 128 of the external one.
+    assert_eq!(256 + 128, core.cartridge().unwrap().battery_ram().len());
+
+    // The internal X24C02 answers the chip address $A0 and an 8-bit word address, big-endian, and
+    // writes sequentially.
+    i2c::x24c02_write(&mut core, 0x80, &[0xDE, 0xAD]);
+    assert_eq!(
+        vec![0xDE, 0xAD],
+        i2c::x24c02_read(&mut core, 0x80, 2),
+        "the internal 24C02"
+    );
+    assert_eq!(0xDE, core.cartridge().unwrap().battery_ram()[0x80]);
+
+    // A chip address that is not $A0 selects nobody: "This chip wasn't selected, go back to idle
+    // mode", so the byte at $80 is untouched.
+    i2c::start(&mut core, 0);
+    i2c::send(&mut core, 0x50, 8, 0);
+    i2c::clock(&mut core, 1, 0);
+    i2c::send(&mut core, 0x80, 8, 0);
+    i2c::clock(&mut core, 1, 0);
+    i2c::send(&mut core, 0x00, 8, 0);
+    i2c::clock(&mut core, 1, 0);
+    i2c::stop(&mut core, 0);
+    assert_eq!(0xDE, core.cartridge().unwrap().battery_ram()[0x80]);
+
+    // "No CHR banking is available": the eight registers move no CHR window, and the four lowest
+    // are the external chip's clock instead.
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    for register in 0..8u16 {
+        core.write_memory(0x8000 + register, 0x0F);
+    }
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+
+    // The PRG banking, the mirroring and the IRQ are submapper 5's, unchanged.
+    core.write_memory(0x8008, 0x03);
+    assert_eq!([6, 7, 30, 31], core.prg_windows());
+    core.write_memory(0x8009, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// The external chip's clock is bit 3 of $8000-$8003 — "External EEPROM Clock ($8000-$8003
+/// write)", the diagram `xxxx Cxxx` — and the two chips' outputs are wire-`ANDed`: "When both
+/// internal and external EEPROMs exist, their outputs are `ANDed` together via open-drain circuit"
+/// (MF-6c step 3).
+#[cfg(feature = "board-eeprom")]
+#[test]
+fn req_core_100_the_datach_external_eeprom_is_clocked_from_8000_and_wire_anded() {
+    let mut core = MapperRom::new(157)
+        .prg(32)
+        .chr(32)
+        .battery()
+        .prg_ram(0, 128)
+        .load();
+
+    // Driving the external chip: SDA comes from $800D bit 6 as always, SCL from bit 3 of a write
+    // to one of $8000-$8003.
+    //
+    // **The two lines are in two registers, so they cannot move together** — which is why the
+    // master has to lower SCL *before* it changes SDA. Changing SDA while SCL is high is a START
+    // or a STOP by definition, and the page's own warning about this register ("PPU rendering
+    // must be disabled during external EEPROM access") is about the same hazard from the other
+    // side. The internal chip sees SCL stuck at 0 throughout and so never leaves idle.
+    let scl = |core: &mut NesCore, value: u8| core.write_memory(0x8000, value << 3);
+    let sda = |core: &mut NesCore, value: u8| core.write_memory(0x800D, value << 6);
+    let bit = |core: &mut NesCore, value: u8| {
+        scl(core, 0);
+        sda(core, value);
+        scl(core, 1);
+    };
+
+    // START: SDA falls while SCL is stable high.
+    scl(&mut core, 0);
+    sda(&mut core, 1);
+    scl(&mut core, 1);
+    sda(&mut core, 0);
+    // Address $01, seven bits most significant first, then the write bit and the chip's ack.
+    for value in [0u8, 0, 0, 0, 0, 0, 1, 0, 1] {
+        bit(&mut core, value);
+    }
+    // $3C, eight bits, then the chip's ack.
+    for value in [0u8, 0, 1, 1, 1, 1, 0, 0, 1] {
+        bit(&mut core, value);
+    }
+
+    // The byte landed in the **external** chip's 128 bytes, which are behind the internal 256.
+    assert_eq!(0x3C, core.cartridge().unwrap().battery_ram()[256 + 0x01]);
+    // And not in the internal chip, whose own clock never moved.
+    assert_eq!(0x00, core.cartridge().unwrap().battery_ram()[0x01]);
+
+    // **The wire-AND.** The last clock left the external chip mid-acknowledge, holding SDA low,
+    // where the internal chip has never left idle and releases it — and the register reads **0**.
+    // "When both internal and external EEPROMs exist, their outputs are ANDed together via
+    // open-drain circuit": the only chip that can be pulling it down is the external one.
+    assert_eq!(0, i2c::data_out(&core), "the two outputs are ANDed");
+    // One clock fall later the acknowledge is over and both chips release the line again.
+    scl(&mut core, 0);
+    assert_eq!(1, i2c::data_out(&core));
+}
+
+/// Q-134: $800D bit 7 is "Both EEPROM's Direction bit (1=Enable Read)" on the page and has **no
+/// effect** here — the state machine knows which way a byte is going because the protocol told
+/// it, and Mesen 2 ignores the bit for the same reason. The provisional choice is pinned so that
+/// it is a choice and not a bug, the way `q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom`
+/// pins the VRC6's ignored bit.
+#[cfg(feature = "board-eeprom")]
+#[test]
+fn q_134_the_eeprom_direction_bit_is_decoded_and_does_not_gate_sda() {
+    // The same transfer twice, once with the direction bit clear throughout and once with it set
+    // throughout, into two identical cartridges.
+    let image = MapperRom::new(159).prg(32).chr(32).battery();
+    let mut clear = image.load();
+    let mut set = image.load();
+
+    for (core, direction) in [(&mut clear, 0u8), (&mut set, 1u8)] {
+        i2c::start(core, direction);
+        i2c::send(core, 0x05, 7, direction);
+        i2c::clock(core, 0, direction);
+        i2c::clock(core, 1, direction);
+        i2c::send(core, 0x5A, 8, direction);
+        i2c::clock(core, 1, direction);
+        i2c::stop(core, direction);
+    }
+
+    assert_eq!(0x5A, clear.cartridge().unwrap().battery_ram()[0x05]);
+    assert_eq!(
+        0x5A,
+        set.cartridge().unwrap().battery_ram()[0x05],
+        "Q-134: the direction bit does not gate SDA"
+    );
 }
 
 #[test]

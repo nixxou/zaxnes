@@ -29,6 +29,8 @@ mod bf9096;
 mod cnrom_protect;
 mod daou306;
 mod discrete;
+#[cfg(feature = "board-eeprom")]
+mod eeprom24c0x;
 mod fme7;
 mod irem_h3001;
 #[cfg(feature = "board-small-boards")]
@@ -85,6 +87,8 @@ pub use daou306::Daou306;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
 };
+#[cfg(feature = "board-eeprom")]
+pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 pub use fme7::Fme7;
 pub use irem_h3001::IremH3001;
 #[cfg(feature = "board-small-boards")]

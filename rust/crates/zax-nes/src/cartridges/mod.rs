@@ -390,6 +390,9 @@ impl Cartridge {
             // MF-6c step 1 adds mapper 153, which is the Bandai FCG's own board and so the Bandai
             // FCG's own counter: its IRQ registers "function the same way as on INES Mapper 016,
             // submapper 5" (nesdev, "INES Mapper 153").
+            // MF-6c step 3 adds 157 and 159 for the same reason, in the same words: "All
+            // registers function the same way as INES Mapper 016, submapper 5, except that the
+            // serial EEPROM is not a 24C02 but Xicor's X24C01" (nesdev, "INES Mapper 159").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -411,6 +414,8 @@ impl Cartridge {
                     | 85
                     | 105
                     | 153
+                    | 157
+                    | 159
             ),
         };
         cartridge.reset();

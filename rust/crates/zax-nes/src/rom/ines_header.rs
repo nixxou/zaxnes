@@ -37,6 +37,13 @@ pub struct InesHeader {
     /// Horizontal, `%....1..0` 1-Screen switchable, `%....1..1` 4-Screen with cartridge VRAM"
     /// (MR-30-1).
     pub byte6: u8,
+    /// Byte 10 itself, zero on an iNES 1.0 header. [`Self::prg_ram_size`] collapses its two
+    /// nibbles into one total with a floor, where one board needs the **non-volatile** nibble on
+    /// its own: nesdev ("INES Mapper 157") gives the Datach's subcartridge EEPROM "byte 10 value
+    /// 0x10" and its absence "byte 10 value 0x00", the internal 256-byte chip being excluded
+    /// because it is "not part of the game cartridge". Exposed for the reason [`Self::byte6`] is
+    /// (MF-6c step 3).
+    pub byte10: u8,
     /// Bit 1 of byte 6: the PRG-RAM is battery backed (REQ-CORE-095).
     pub has_battery: bool,
     /// Bit 2 of byte 6: a 512-byte trainer follows the header.
@@ -200,6 +207,7 @@ impl InesHeader {
             chr_rom_size: chr_size,
             chr_ram_size: chr_ram,
             prg_ram_size: prg_ram,
+            byte10: if is_nes20 { image[10] } else { 0 },
             mirroring,
             byte6,
             has_battery: (byte6 & 0x02) != 0,

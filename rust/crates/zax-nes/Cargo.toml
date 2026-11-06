@@ -26,6 +26,7 @@ default = [
     "board-119",
     "board-153",
     "board-155",
+    "board-eeprom",
     "board-158",
     "board-mmc3-multicart",
     "board-namcot108",
@@ -80,6 +81,13 @@ board-mmc3-multicart = []
 # on `BandaiFcg`, which is mapper 16's board: no `Board` variant, no dispatch arm anywhere.
 board-153 = []
 
+# Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
+# System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
+# (MF-6c step 3). REQ-CORE-100's mapper-16 row makes the EEPROM "P3"; MR-1's table records "no
+# counterpart" against Mesen's three files, and `Eeprom24C0X` is it. One `Option` field on
+# `BandaiFcg`, no `Board` variant and no dispatch arm but `try_read_prg`'s.
+board-eeprom = []
+
 # Mappers 80, 207, 82 and NES 2.0 552 — the Taito X1-005 and X1-017, the two boards whose WRAM
 # is inside the ASIC (MF-6c step 2). Thirteen titles. Two more `SmallBoard` variants and no
 # `Board` variant, plus three forwards that family did not have: `try_read_prg` and
@@ -87,13 +95,13 @@ board-153 = []
 # mapper 207's CIRAM A10. Implies `board-small-boards`, the enum they live in.
 #
 # **The first board of this project to be parked**, and it is one instruction that parks it:
-# `Cartridge::default_cpu_read` crosses the size at which LLVM hoists `leaq 240(%rdi), %rax`
-# above its inlined `Board::prg_ram_enabled` dispatch, which is +7 456 756 over 300 frames of
-# `mmc5exram` -- **+0.066 %**, against the owner's +0.02 % -- on a board this feature does not
-# touch. MF-6c step 2 measured **seven** shapes against it and none held; the figure is the same
-# one MF-6b steps 2-5 were charged and MF-6a3 step 4 was given back, to the instruction, so it is
-# a two-state oscillation of one function on one ROM rather than work the boards do. See
-# `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-6c.md` step 2.
+# `Cartridge::default_cpu_read` flips to the dearer of its two measured layouts, in which LLVM
+# hoists `leaq 240(%rdi), %rax` above the inlined `Board::prg_ram_enabled` dispatch so that it
+# runs on every call. That is +7 456 756 over 300 frames of `mmc5exram` -- **+0.066 %**, against
+# the owner's +0.02 % -- on a board this feature does not touch. MF-6c step 2 measured **seven**
+# shapes against it, step 3 re-measured it on a changed tree, and the figure never moved by an
+# instruction; it is the same one MF-6b steps 2-5 were charged and MF-6a3 step 4 was given back.
+# See `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-6c.md` steps 2 and 3.
 board-taito-x1 = ["board-small-boards"]
 
 # The umbrella: every board left out of `default` because it is above the tolerance. MF-6b and

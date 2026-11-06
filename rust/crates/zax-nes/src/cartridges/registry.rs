@@ -6,6 +6,8 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-eeprom")]
+use super::mappers::EepromPort;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
 #[cfg(feature = "board-namcot108")]
@@ -128,8 +130,12 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-155")]
     155,
     156,
+    #[cfg(feature = "board-eeprom")]
+    157,
     #[cfg(feature = "board-158")]
     158,
+    #[cfg(feature = "board-eeprom")]
+    159,
     180,
     #[cfg(feature = "board-small-boards")]
     184,
@@ -181,6 +187,23 @@ pub(crate) fn mapper_34_is_nina(header: &InesHeader) -> bool {
     }
 
     header.chr_rom_size > 8 * 1024
+}
+
+/// Whether a mapper-157 cartridge carries the Datach's **second**, external EEPROM.
+///
+/// nesdev ("INES Mapper 157"): "The NES 2.0 header's PRG-NVRAM field will only denote whether the
+/// game cartridge has an additional 128-byte serial EEPROM (byte 10 value 0x10) or not (byte 10
+/// value 0x00)." So the header is the only indicator, and an iNES 1.0 dump cannot declare it.
+///
+/// **One divergence from Mesen 2, in the direction AMD-061 §1 requires.** Mesen gives the second
+/// chip to *any* dump that is not NES 2.0 (`BandaiFcg.h:55`, `!IsNes20() || … == 128`), which
+/// hands a phantom chip to the six Datach games that have none — and that chip's output is
+/// wire-ANDed with the internal one (see [`super::mappers::EepromPort`]), so a game writing
+/// $8000-$8003 could clock it onto the bus. The page makes byte 10 the test; this build uses only
+/// byte 10.
+#[cfg(feature = "board-eeprom")]
+fn datach_has_external_eeprom(header: &InesHeader) -> bool {
+    header.is_nes20 && header.byte10 == 0x10
 }
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -267,6 +290,16 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
                     _ => 4 * 0x800,
                 },
             ),
+            ..BoardMemorySizes::default()
+        },
+        // MF-6c step 3: the EEPROM bytes of mappers 157 and 159, in PRG-RAM so that
+        // REQ-CORE-095's single battery slice carries them -- the internal chip first and the
+        // Datach's external one behind it. The board carries no other RAM at $6000-$7FFF, and
+        // `BandaiFcg::prg_ram_enabled` answers `false` on these two numbers, so nothing the CPU
+        // can address lives here: the bytes are reached only through the serial protocol.
+        #[cfg(feature = "board-eeprom")]
+        157 | 159 => BoardMemorySizes {
+            prg_ram: EepromPort::ram_size(mapper, datach_has_external_eeprom(header)),
             ..BoardMemorySizes::default()
         },
         // The two Taito boards whose RAM is inside the ASIC, exactly as the Namco 163's 128
@@ -418,6 +451,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // board and not a variant of its own; see `BandaiFcg`'s own note.
         #[cfg(feature = "board-153")]
         153 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
+        // MF-6c step 3: the two numbers with a serial EEPROM, which is one `Option` field on the
+        // same board -- see `EepromPort`'s own note on the Datach's two chips and on the three
+        // things this build records rather than implements.
+        #[cfg(feature = "board-eeprom")]
+        157 | 159 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
         16 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
         18 => Board::JalecoSs88006(JalecoSs88006::new(memory)),
         21 | 22 | 23 | 25 | 27 => Board::Vrc2Vrc4(Vrc2Vrc4::new(memory, mapper)),

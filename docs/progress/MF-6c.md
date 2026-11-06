@@ -405,17 +405,23 @@ thirteen is outside ±31 000 in any shape, and **every one of the five level-2 `
 | g | f, with all three links of the chain pinned | +0.144 % | `m0`/`m1`/`m4` +0.014 % to +0.016 % |
 | h | f, with `#[inline(never)]` on `Board::prg_ram_offset` | +0.066 % | all within ±41 000 |
 
-**The post-LTO dump names the mechanism, and it is one instruction.** `fn.py` on
-`Cartridge::default_cpu_read`: **377** instructions at `8496c503`, **382** after step 1, **391**
-after step 2. Past about 390 LLVM hoists
+**The post-LTO dump names the instruction.** `fn.py` on `Cartridge::default_cpu_read` gives
+**377** instructions at `8496c503`, **382** after step 1 and **391** after step 2, and the diff of
+the last pair is one hoist:
 
     leaq 240(%rdi), %rax
 
 — `&self.board`, needed only by the *cold* arms of the inlined `Board::prg_ram_enabled` jump
-table, among them mapper 116's boxed `IrqBoard::Somari(Box<Somari>)` — **above** the dispatch,
-where it runs on every call, and turns the cold `movq 240(%rdi), %rax` into `movq (%rax), %rax`.
-The MMC5 is the one board that maps PRG-**RAM** into $8000-$DFFF, so `read_rom_window` cannot
-answer and every CPU read of an MMC5 game reaches this function: one `leaq` × 7.46 M reads.
+table, among them mapper 116's boxed `IrqBoard::Somari(Box<Somari>)` — moved **above** the
+dispatch, where it runs on every call, with the cold `movq 240(%rdi), %rax` becoming
+`movq (%rax), %rax`. The MMC5 is the one board that maps PRG-**RAM** into $8000-$DFFF, so
+`read_rom_window` cannot answer and every CPU read of an MMC5 game reaches this function: one
+`leaq` × 7.46 M reads.
+
+**This step read that as a size threshold, and step 3 refuted it** — see step 3's own
+re-measurement. The honest statement is the one the two numbers support: `default_cpu_read` has
+two layouts on this ROM, 283 356 728 and 290 813 484, and the two Taito `SmallBoard` variants
+select the dearer one whatever else the tree looks like.
 
 **It is the same number, to the instruction, that this project has now measured three times in
 both directions.** MF-6b steps 2 to 5 were charged `default_cpu_read` **+7 456 756** on `mmc5` for
@@ -516,3 +522,189 @@ any measurement did.
 five level-2 cores +0 with the feature on **and** off — and `board-taito-x1` **parked**, on one
 hoisted `leaq` worth +0.066 % on `mmc5` that seven shapes could not move and that this project has
 measured in both directions.
+
+## Step 3 — the serial EEPROM, mappers 157 and 159, at **+0.001 %** on the worst ROM
+
+### What was built: one state machine, two chips, two numbers
+
+`cartridges/mappers/eeprom24c0x.rs` is new, and it is the counterpart MR-1's shared table records
+as missing ("no counterpart" against Mesen 2's `BaseEeprom24C0X.h`, `Eeprom24C01.h` and
+`Eeprom24C02.h`). **One** type with an [`EepromKind`] parameter and not three, for the reason
+`VrcIrq` is one type — and because mapper 157 needs both chips at once:
+
+| what | where | the page's words |
+| --- | --- | --- |
+| START and STOP | `Eeprom24C0X::write` | "START is identified by a high to low transition of the SDA line while the clock SCL is *stable* in the high state" |
+| the X24C02's chip address and its R/W bit | `chip_address_done` | "Upon a correct compare the X24C02 outputs an acknowledge on the SDA line"; "When set to one a read operation is selected, when set to zero a write operations is selected" |
+| a "Current Address Read" fetching the byte at the acknowledge | the same method | "Upon receipt of the slave address with the R/W bit set to one, the X24C02 issues an acknowledge and transmits the eight bit word during the next eight clock cycles" |
+| the X24C01's seven address bits and R/W in one byte | `address_bit` | "the master sends a start condition followed by a seven bit word address and a write bit" |
+| the sequential read and write, on **both** chips | `clock_fall`, `Mode::WaitAck` | "a multi-byte read or write from EEPROM will increment the address accordingly" |
+| mapper 157's two chips and their wire-AND | `EepromPort` | "an internal 256-byte serial EEPROM (X24C02)"; "an additional external 128-byte serial EEPROM (X24C01)"; "their outputs are ANDed together via open-drain circuit" |
+| the external chip's clock on $8000-$8003 | `write_external_clock` | "External EEPROM Clock ($8000-$8003 write)", the diagram `xxxx Cxxx` |
+| $800D's three bits | `write_control` | the diagram `RDC. ....` — bit 7 direction, bit 6 SDA for both, bit 5 the internal SCL |
+| the read register | `BandaiFcg::try_read_prg` | the diagram `xxxE Bxxx` — bit 4 the EEPROMs, bit 3 the barcode scanner |
+| the ports at $8000-$FFFF only | `BandaiFcg::register_floor` | "Mappers 157 and 159 do not need to support the FCG-1 and -2 and so should only mirror the ports across $8000-$FFFF" |
+| mapper 157's CHR | `BandaiFcg::no_chr_banking` | "No CHR banking is available"; "8 KiB of unbanked CHR-RAM" |
+| the bytes on the battery | `registry::board_memory_sizes`, arm `157 \| 159` | §4.6's Namco 163 layout: the internal chip first, the external one behind it |
+
+**The one behavioural claim of the step, quoted verbatim into the code and into the test**, from
+nesdev ("INES Mapper 159"):
+
+> Bandai's developers consistently thought the X24C01 was a little-endian device, and their code
+> clocks in address and data bytes assuming this. However, it's actually a big-endian device, and
+> a multi-byte read or write from EEPROM will increment the address accordingly.
+
+So **both chips are clocked most-significant bit first** here, the X24C01 included. Mesen 2 clocks
+its X24C01 LSB first (`Eeprom24C01.h:15`), which is the model the page says Bandai's developers
+*had*; AMD-061 §1 makes the page prevail. The consequence is the one the page draws and the test
+pins: a single byte still round-trips, because the game's bit order cancels on the way out as it
+did on the way in, and a multi-byte transfer walks the **hardware's** address.
+
+**Three more divergences from Mesen 2, all three settled for the page by AMD-061 §1.**
+
+1. **Sequential transfers work on the X24C01 too.** Mesen sends that part to `Idle` after one byte
+   in both directions (`Eeprom24C01.h:77-82` and `:116`), the first under a comment — "We expected
+   an ack, but received something else" — that its own condition contradicts. The page's sentence
+   above gives the X24C01 multi-byte reads *and* writes.
+2. **The Datach's second chip is declared by byte 10 and by nothing else.** Mesen gives it to any
+   dump that is not NES 2.0 (`BandaiFcg.h:55`), which hands a phantom chip to the six Datach games
+   that have none — and a phantom chip is not harmless here, because its output is wire-ANDed with
+   the real one and $8000-$8003 would clock it. `registry::datach_has_external_eeprom` tests byte
+   10 alone.
+3. **Mapper 16 is untouched.** Mesen connects a 24C02 to mapper 16 as well, on submapper 0 or on
+   submapper 5 with 256 bytes of save RAM. REQ-CORE-100 makes that number's EEPROM P3 and the
+   brief's scope is 157 and 159, so mapper 16's board comes out of this step byte for byte as step
+   1 left it — `mf_6c_an_ordinary_mapper_16_image_is_unaffected_by_153` still passes unchanged.
+
+**Two gaps recorded rather than hidden**, both on `EepromPort`'s own note:
+
+* **the Datach's barcode scanner.** An input device, and this build has no host surface for one —
+  the gap MR-30-4 records for the UNROM 512's flash, in the same words. Bit 3 of the read register
+  is 0, so a Datach game sees no scan and plays on.
+* **the six open-bus bits of that register read 0.** `Mapper::try_read_prg` answers a whole byte
+  or nothing and `Mapper::cpu_peek_override` can only say "all open bus"; **no hook in this
+  architecture drives two bits and releases six**. Routing the read through `cpu_peek_override`
+  for the sake of `Some(None)` was not available either: step 2 measured one more body in that
+  dispatch at +0.066 % on `mmc5`.
+
+**One question filed: Q-134.** $800D bit 7 is "Both EEPROM's Direction bit (1=Enable Read)" on the
+page, and on the hardware it releases the master's SDA driver so the chip can answer. This build
+**decodes it and does not let it gate SDA**: the state machine already knows which way a byte is
+going, because the protocol told it, and forcing SDA high would break a master that sets the bit
+late. Mesen ignores the bit for the same reason.
+`q_134_the_eeprom_direction_bit_is_decoded_and_does_not_gate_sda` drives the same transfer twice,
+once with the bit clear throughout and once with it set throughout, and requires the same byte in
+the EEPROM both times — the shape
+`q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom` gave the VRC6's ignored bit.
+
+**One header field was exposed**, and it is the pure addition `byte6` is the precedent for:
+`InesHeader::byte10`. `prg_ram_size` collapses byte 10's two nibbles into one total **with a
+floor** — `(volatile + non_volatile).max(DEFAULT_PRG_RAM_SIZE)`, so a Datach dump declaring 128
+bytes of PRG-NVRAM comes out as 8 192 — where the page needs the raw field: "byte 10 value 0x10"
+against "byte 10 value 0x00".
+
+### The shape: the read goes through `try_read_prg`, which step 2 paid to learn
+
+Mappers 157 and 159 have a **readable** register at $6000-$7FFF, which mapper 16's board did not.
+Step 2's whole performance story was that `Board::cpu_read_override` is `#[inline(always)]` and
+one more distinct body in it costs `mmc5` +0.066 %, where one more body in `Board::try_read_prg`
+— also `#[inline(always)]` — costs nothing. So the EEPROM's data out is answered from
+`BandaiFcg::try_read_prg`, and the measurement below is what that choice bought.
+
+The EEPROM itself is a `None` on mappers 16 and 153 and adds **no `Board` variant, no `IrqBoard`
+arm and no dispatch arm but that one**. Its bytes are in PRG-RAM with
+`BandaiFcg::prg_ram_enabled` answering `false` on both numbers, so nothing the CPU can address
+lives there: the bytes are reached only through the serial protocol.
+
+### The measurement: free on both instruments
+
+`callgrind-diff.py`, against `mf6c-0-8496c503`:
+
+| ROM | board | `8496c503` | **step 3** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 311 891 | 3 308 327 534 | +15 643 | +0.000 % |
+| `oamstr` | NROM | 3 318 460 965 | 3 318 461 730 | +765 | +0.000 % |
+| `m1` | MMC1 | 4 885 949 431 | **4 885 917 630** | −31 801 | −0.001 % |
+| `m4` | MMC3 | 5 472 514 995 | **5 472 488 535** | −26 460 | −0.000 % |
+| `m0` | NROM | 5 520 458 691 | **5 520 453 899** | −4 792 | −0.000 % |
+| `metroid` | MMC1 | 5 115 944 288 | 5 115 959 334 | +15 046 | +0.000 % |
+| `smb1` | NROM | 5 996 381 185 | 5 996 385 963 | +4 778 | +0.000 % |
+| `mm2` | MMC1 | 6 017 851 607 | **6 017 830 827** | −20 780 | −0.000 % |
+| `z2` | MMC1 | 6 291 458 642 | 6 291 464 491 | +5 849 | +0.000 % |
+| `readbuf` | CNROM | 6 834 538 187 | 6 834 568 809 | +30 622 | +0.000 % |
+| `duelito` | NROM | 7 380 437 910 | 7 380 498 710 | **+60 800** | **+0.001 %** |
+| `smb3` | MMC3 | 7 949 470 334 | **7 949 451 002** | −19 332 | −0.000 % |
+| `mmc5` | MMC5 | 11 279 383 781 | **11 279 342 878** | −40 903 | −0.000 % |
+| **total** | | **79 371 161 907** | **79 371 151 342** | **−10 565** | **−0.000 %** |
+
+Worst ROM `duelito` at **+0.001 %**, one twentieth of the owner's tolerance and inside the ±57 k
+`luaH_getshortstr` floor; the set total is **below** the baseline. **`mmc5` is −40 903**, which is
+the step's receipt that the `try_read_prg` route was the right one.
+
+Level 2, `l2-diff.py --bar`: **all five `core` figures +0** again. The three `total` rises
+(`smb3` +0.014 %, `smb1` +0.004 %, `mm2` +0.000 %) are rule 2's layout-noise case checked and not
+assumed — `sym6c.sh` at 400 000 names four symbols over all five games and they are `getgeneric`
+(+3 745 480 on `smb3`, +2 217 944 on `smb1`), `luaH_getshortstr` (−2 013 943 and −1 033 758) and
+`__memcpy_avx_unaligned_erms` (−403 395). Lua's `ltable.c` and `memcpy`, nothing else.
+
+### Instrument 3, and the two pinned symbols that moved
+
+| symbol | `8496c503` | **step 3** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | 290 |
+| `NesBus::write_internal` | 3 815 | 3 828 |
+| `Ppu::run_dots` | 1 907 | 1 919 |
+| `NesBus::catch_up_ppu` | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | **114** |
+
+`shape.py`'s five others — `resolve` 1 948, `branch` 457, `read_cycle` 181, `tick` 82,
+`read_internal` 175 — are identical to the instruction, and so are the three claimants and
+`catch_up_ppu`. **`Board::ppu_peek` +18 and `Ppu::run_dots` +12 are reported and not waved away**:
+they are the mapper-157 `no_chr_banking` test inside `BandaiFcg::update_banks`'s neighbourhood and
+the register decode's extra arms, and what says they cost nothing is the dynamic column above —
+all five level-2 `core` figures at **+0** and `readbuf`, the CNROM whose whole run is pattern
+fetches, at +0.000 %.
+
+### **Step 2's size-threshold explanation was wrong, and this step is what refuted it**
+
+Step 3's `Cartridge::default_cpu_read` is **425** instructions — 377 at the baseline, 382 after
+step 1, 391 after step 2, 425 now — and `mmc5` is **−40 903, below the baseline**. So "past about
+390 LLVM hoists the `leaq`" is not the rule; that function's dearer layout is not a function of
+its size.
+
+So the step re-measured `board-taito-x1` on this tree, with the feature put back into `default`
+(label `mf6c-3-x1again`), and the answer is **+7 456 756 on `mmc5`, +0.066 %** — the same number
+to the instruction, for the eighth time, on a tree where the function it lands in has grown by 48
+instructions and every other ROM of the thirteen is within ±60 000. **The park stands**, and the
+claim is now the narrow one the measurements support: `default_cpu_read` has two layouts on that
+ROM, 283 356 728 and 290 813 484, and the two Taito `SmallBoard` variants select the dearer one
+whatever else the tree looks like. Step 2's write-up and `BOARD-FEATURES.md` are corrected to say
+that instead.
+
+### The tests, 902 → **906** in the default build
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_x24c01_is_big_endian_and_its_address_increments_accordingly` | a byte round-tripping; **the bit order**, by requiring the little-endian reading of the same seven address bits ($05 → $50) to hold nothing; a three-byte sequential write landing at $10, $11, $12; a two-byte sequential read agreeing with it; the 128-byte wrap from $7F to $00; REQ-CORE-095's slice being the EEPROM's own 128 bytes; and $6000-$7FFF not being RAM |
+| `req_core_100_the_datach_has_an_internal_24c02_and_an_external_24c01` | the 256 + 128 battery slice, the internal chip's chip-address byte and 8-bit word address, a sequential write and read-back, a **wrong chip address selecting nobody**, "No CHR banking is available" against writes to all eight registers, and the PRG banking and mirroring still being submapper 5's |
+| `req_core_100_the_datach_external_eeprom_is_clocked_from_8000_and_wire_anded` | the external chip driven with SCL from $8000 bit 3 and SDA from $800D bit 6 — **lowering SCL before changing SDA**, because the two lines are in two registers and cannot move together — the byte landing behind the internal 256 and not in them, and the **wire-AND**: the register reads 0 while the external chip holds SDA low and 1 one clock fall later |
+| `q_134_the_eeprom_direction_bit_is_decoded_and_does_not_gate_sda` | the same transfer with $800D bit 7 clear throughout and set throughout, into two identical cartridges, giving the same byte |
+
+The test file gained an `i2c` module that drives the two-wire bus from the CPU side, so the three
+EEPROM tests speak the protocol rather than poking state.
+
+**Three configurations green**: default **906 passed / 0 failed / 8 ignored** with `zax-harness`
+(843 for `zax-nes` alone), `--features parked-boards` **848** for `zax-nes`,
+`--no-default-features` **783**. `cargo fmt --check` clean; clippy `-D warnings` on `zax-nes` in
+all three configurations and on `zax-harness`, clean, **no new `allow` of any kind**.
+`board-eeprom` is inside the tolerance by a factor of twenty and goes in `default`.
+
+[PROGRESS] MF-6c step 3/10 done: `Eeprom24C0X` and mappers 157 and 159, 906 / 0 / 8, all five
+level-2 cores +0 and `duelito` +0.001 % the worst of thirteen with `mmc5` −40 903 — and step 2's
+park re-measured at the same +7 456 756 on a tree 48 instructions larger, which refutes that
+step's size-threshold reading and leaves the park standing.

@@ -1,3 +1,5 @@
+#[cfg(feature = "board-eeprom")]
+use super::EepromPort;
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -41,6 +43,15 @@ use crate::NametableMirroring;
 /// Behind the Cargo feature `board-153`. With the feature off, [`BandaiFcg::is_153`] is
 /// `cfg!(…) && …`, so every branch below folds away at compile time and the board is mapper 16's
 /// alone.
+///
+/// # Mappers 157 and 159, and why they are a field too (MF-6c step 3)
+///
+/// The Datach Joint ROM System and the LZ93D50 with an X24C01 are the same ASIC again, with a
+/// serial EEPROM on $800D where mapper 153 has its WRAM enable. That EEPROM is [`EepromPort`],
+/// one `Option` field behind `board-eeprom`, and the three things the two numbers add to this
+/// board are the port's `write_control` on $800D, the Datach's external clock on $8000-$8003, and
+/// a readable register at $6000-$7FFF. Mapper 16 and mapper 153 are untouched: the field is
+/// `None` for both, and `board-eeprom` off removes it altogether.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BandaiFcg {
     banks: BankWindows,
@@ -78,6 +89,14 @@ pub struct BandaiFcg {
     /// WRAM away from a game that never writes the register is the worse of the two errors, which
     /// is the reading `registry::board_memory_sizes` already takes for mapper 97.
     prg_ram_on: bool,
+    /// Mappers **157** and **159**: the board's serial EEPROM, or EEPROMs. `None` on mappers 16
+    /// and 153, which pay one null test on a cold path and nothing else. See [`EepromPort`].
+    ///
+    /// Appended for the reason the comment above `is_153` gives, and `#[cfg]` and not `cfg!` this
+    /// time because the field is tens of bytes rather than one: with `board-eeprom` off the struct
+    /// is the one step 2 shipped, byte for byte.
+    #[cfg(feature = "board-eeprom")]
+    eeprom: Option<EepromPort>,
 }
 
 impl BandaiFcg {
@@ -94,6 +113,11 @@ impl BandaiFcg {
             irq_pending: false,
             is_153: mapper == 153,
             prg_ram_on: true,
+            // The second Datach chip is declared by byte 10 alone; see
+            // `registry::datach_has_external_eeprom`, which `board_memory_sizes` asks the same
+            // question so that the PRG-RAM is exactly the size the two chips need.
+            #[cfg(feature = "board-eeprom")]
+            eeprom: EepromPort::new(mapper, header.is_nes20 && header.byte10 == 0x10),
         }
     }
 
@@ -119,7 +143,17 @@ impl BandaiFcg {
     /// **$8000 on mapper 153**, whose $6000-$7FFF is the board's WRAM: nesdev ("INES Mapper
     /// 153"), quoted by Mesen 2 at `BandaiFcg.h:76`, "the writeable ports must only be mirrored
     /// across $8000-$FFFF".
+    ///
+    /// **$8000 on mappers 157 and 159 too** (MF-6c step 3): "Mappers 157 and 159 do not need to
+    /// support the FCG-1 and -2 and so should only mirror the ports across $8000-$FFFF" (the page,
+    /// quoted by Mesen 2 at `BandaiFcg.h:77`). Their $6000-$7FFF is a **readable** register — the
+    /// EEPROM's data out — which is `Mapper::try_read_prg`'s business and not this floor's.
     const fn register_floor(&self) -> u16 {
+        #[cfg(feature = "board-eeprom")]
+        if self.eeprom.is_some() {
+            return 0x8000;
+        }
+
         if self.is_153() {
             0x8000
         } else {
@@ -175,9 +209,27 @@ impl BandaiFcg {
 
         self.banks.map_prg_16k(0, i32::from(self.prg));
         self.banks.map_prg_16k(2, -1);
+
+        // nesdev ("INES Mapper 157"): the Datach board has "No CHR banking is available" and
+        // "8 KiB of unbanked CHR-RAM", so its eight registers are the EEPROM clock and nothing
+        // else. Mesen 2 excludes the number from its CHR path for the same reason
+        // (`BandaiFcg.h:171`).
+        #[cfg(feature = "board-eeprom")]
+        if self.no_chr_banking() {
+            return;
+        }
+
         for slot in 0..BankWindows::CHR_WINDOWS {
             self.banks.map_chr_1k(slot, i32::from(self.chr[slot]));
         }
+    }
+
+    /// Mapper 157 alone: "No CHR banking is available."
+    #[cfg(feature = "board-eeprom")]
+    fn no_chr_banking(&self) -> bool {
+        self.eeprom
+            .as_ref()
+            .is_some_and(|port| port.mapper_number() == 157)
     }
 }
 
@@ -198,6 +250,12 @@ impl Mapper for BandaiFcg {
         if self.is_153() {
             writer.write_bool(self.prg_ram_on);
         }
+        // Appended by MF-6c step 3, behind the board again: mapper 16's and mapper 153's blocks
+        // keep every byte they had (REQ-CORE-090).
+        #[cfg(feature = "board-eeprom")]
+        if let Some(port) = self.eeprom.as_ref() {
+            port.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -210,10 +268,19 @@ impl Mapper for BandaiFcg {
         if self.is_153() {
             self.prg_ram_on = reader.read_bool()?;
         }
+        #[cfg(feature = "board-eeprom")]
+        if let Some(port) = self.eeprom.as_mut() {
+            port.load_state(reader)?;
+        }
         Ok(())
     }
 
     fn mapper_number(&self) -> i32 {
+        #[cfg(feature = "board-eeprom")]
+        if let Some(port) = self.eeprom.as_ref() {
+            return port.mapper_number();
+        }
+
         if self.is_153() {
             153
         } else {
@@ -240,6 +307,12 @@ impl Mapper for BandaiFcg {
         self.irq_counter = 0;
         self.irq_enabled = false;
         self.irq_pending = false;
+        // The bus goes back to power-on; the bytes do not, because they are the battery's
+        // (REQ-CORE-004, REQ-CORE-095). See `Eeprom24C0X::reset`.
+        #[cfg(feature = "board-eeprom")]
+        if let Some(port) = self.eeprom.as_mut() {
+            port.reset();
+        }
         self.update_banks();
     }
 
@@ -265,6 +338,15 @@ impl Mapper for BandaiFcg {
         match address & 0x000F {
             0x0..=0x7 => {
                 self.chr[usize::from(address & 0x07)] = value;
+                // nesdev ("INES Mapper 157"), "External EEPROM Clock ($8000-$8003 write)": bit 3
+                // of the **first four** registers is the Datach subcartridge chip's SCL, because
+                // the line is CHR A13 on that header. Registers 4-7 are not it.
+                #[cfg(feature = "board-eeprom")]
+                if address & 0x0F <= 3 {
+                    if let Some(port) = self.eeprom.as_mut() {
+                        port.write_external_clock(memory.prg_ram_mut(), value);
+                    }
+                }
                 self.update_banks();
             }
             0x8 => {
@@ -294,8 +376,45 @@ impl Mapper for BandaiFcg {
             // (1=Enable)" at bit 5, which is the bit Mesen 2 reads (`BandaiFcg.h:226`,
             // `value & 0x20`).
             0xD if self.is_153() => self.prg_ram_on = value & 0x20 != 0,
+            // The EEPROM port proper, on mappers 157 and 159 (MF-6c step 3): bit 5 the internal
+            // chip's SCL, bit 6 the SDA both chips see, bit 7 the direction (Q-134). See
+            // [`EepromPort::write_control`].
+            #[cfg(feature = "board-eeprom")]
+            0xD => {
+                if let Some(port) = self.eeprom.as_mut() {
+                    port.write_control(memory.prg_ram_mut(), value);
+                }
+            }
             _ => {}
         }
+    }
+
+    /// PRG-ROM above $8000, and on mappers **157 and 159** the EEPROM's data out at
+    /// $6000-$7FFF: "bit 4 the EEPROMs' data out, bit 3 the barcode scanner's" (nesdev's own
+    /// diagram, `xxxE Bxxx`). The other six bits read **0** and not open bus, and the barcode
+    /// scanner's bit reads 0 because this build has no host surface for one — both recorded on
+    /// [`EepromPort`] with the measurement that forbids the alternative.
+    ///
+    /// Mapper 16 and mapper 153 answer exactly what `Mapper::try_read_prg`'s default answered
+    /// them: the banked read above $8000 and `None` below it. **This is the hook and not
+    /// [`Mapper::cpu_peek_override`]**, for the reason MF-6c step 2 measured —
+    /// `Board::cpu_read_override` is `#[inline(always)]` and one more body in it cost `mmc5`
+    /// +0.066 %, where a body here cost nothing.
+    #[cfg(feature = "board-eeprom")]
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        if address >= 0x8000 {
+            return self
+                .banks
+                .read_prg(address, memory.rom().prg_rom(), memory.prg_ram());
+        }
+
+        if address >= 0x6000 {
+            if let Some(port) = self.eeprom.as_ref() {
+                return Some(port.read_register());
+            }
+        }
+
+        None
     }
 
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
