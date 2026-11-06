@@ -1320,6 +1320,81 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.13 Lot MF-6b: one shared variant for a whole family, and the two instructions that cost nine million
+
+MF-6b added five boards with a CPU-cycle or scanline IRQ — the VRC3 (73), the Irem H3001 (65),
+the Sunsoft-3 (67), the NES-EVENT (105), the Taito TC0690 (48) and Tengen's 800037 (158) — and
+ended **−19 980 904 (−0.025 %)** on lot PR-1's thirteen ROMs against `9f9d9d41`, with every ROM
+below and every level-2 `core` below. Six findings a later lot needs.
+
+**A family of boards that all answer *yes* to a hook should share one `Board` variant, and the
+shared body should be out of line.** §5.11's `SmallBoard` put nine boards that answer *no* to
+`irq_asserted` behind one discriminant and deliberately did **not** forward the IRQ methods,
+because "an inner match returning `false` is not the same code as `false`". `IrqBoard` is that
+sentence read the other way: every board in it answers *yes*, so none could ever share the empty
+arm and what they can share is each other's. One inner match is one body in each of four
+dispatches **for six boards instead of one per board**. And the body belongs out of line:
+inlined, the first board's arm was the thirteenth block in the dispatch `Cpu6502::branch` folds
+`Board::irq_asserted` into and **nine of thirteen ROMs rose by +0.013 % to +0.026 %** on boards
+with no IRQ at all; `#[inline(never)]` on the shared leaf bought **−29 072 137** on the set and
+−0.006 % to −0.053 % on all five level-2 cores. `Cpu6502::branch` fell on twelve of the thirteen,
+an NROM by 2.5 M over 300 frames. **What moves is not how many instructions `branch` holds — it
+held 418 in both shapes — but which of its blocks sit on the fall-through.**
+
+**A field offset is a cost even when no code changes.** The VRC3's counter was first built as
+`VrcIrqCounter<const WIDE: bool>` with `VrcIrq` as `<false>`, the shape §5.11 and MR-4-3 both
+recommend. The 16-bit latch needs one byte more, which lands in existing padding and costs the
+struct nothing — but it moves `pending` one byte along inside `Vrc2Vrc4`, `Vrc6` and `Vrc7`, and
+those three displacements are *operands* in three of the twelve per-board blocks of
+`Board::irq_asserted`. Eleven of thirteen ROMs rose by +0.009 % to +0.027 %, **+9 886 794 on the
+set, with the static sizes of `Cpu6502::step`, `resolve` and `branch` unmoved to the
+instruction**. A second shape with the field churn isolated left the regression exactly where it
+was, ROM for ROM, which is what says the offsets and not the parameter were the cost. **So the
+`const`-parameter rule needs a qualifier: it is free when it adds no field, and a parameter that
+widens a struct the IRQ chain reads is not free.** Mapper 158 is the rule applied correctly —
+`Rambo1Board<const TLSROM: bool>` adds no field, and `Rambo1::update_banks` comes out
+byte-identical.
+
+**`NesBus::catch_up_ppu` is the fifth hook with a measured body cap, and its cap is two
+instructions.** §5.12 found that taking the RAMBO-1's body *out* of `Board::ppu_irq_horizon` took
+that function from 216 instructions to 203 and bought every board 0.005 % to 0.082 %. Read
+backwards: forwarding `ppu_irq_horizon` from one shared variant — with the leaf itself out of
+line, and with four of the five boards answering `Mapper`'s default — took it from **188 to 190**
+and cost `mmc5` **+9 214 379**, `duelito` +2 433 068 and `readbuf` +2 245 658 over 300 frames,
+taking two ROMs above the reference. The fix is to answer **`None`**, which the MMC5's arm already
+gives, so the dispatch gains no body at all: `catch_up_ppu` is 188 again. A board that gives up
+its horizon runs the PPU in step with the CPU, which is a cost to that board and to nobody else.
+
+**`Cartridge::cpu_write` is now pinned, and it is the fifth link of its kind.** It and
+`NesBus::write_internal` are one body as far as every measurement here is concerned, and which of
+the two holds it is LLVM's choice. A second monomorphisation of the RAMBO-1's register decode
+tipped that choice: `write_internal` went from **3 577 instructions to 1 102** and `cpu_write`
+from **0 to 2 448**, and the call that appeared between them cost `m4` **+5 089 659** against
+−3 537 021 in its caller, `m1` +3 776 318 against −2 658 017 and `m0` +3 543 400 — about 1.2 M net
+on three ROMs whose boards the lot does not touch. `#[inline(always)]` restores it. This is
+§5.10's conclusion for the fifth time: **a chain the cost model keeps re-deciding as boards are
+added is pinned rather than shortened.**
+
+**`Board::prg_ram_enabled` must stay inlined, and the refutation is worth more than the
+finding.** The sixth inner variant pushed `Board::prg_ram_writable` out of line, 0 → 55
+instructions, at +430 380 over 600 level-2 frames of *Super Mario Bros. 3*. Taking the shared
+`prg_ram_enabled` body out of line to shrink it instead put that dispatch behind a `callq` on the
+MMC5's read path: `Cartridge::default_cpu_read` **+67 110 804 instructions over 300 frames of
+`mmc5exram`, +0.504 %**, to save 0.002 % on a game the board is not. The 55 instructions stay.
+Together with the `catch_up_ppu` finding above, the rule is: **`#[inline(never)]` on a shared
+forward pays when the dispatch is cold for the boards that do not use it and dear for the one
+that does; it loses when some *other* board reaches the same dispatch in bulk.**
+
+**`cmp4c.py` and `callsites.py` are both loud at `Board::irq_asserted` and both are wrong.**
+Their watched owners are matched as plain substrings and `Board` is a substring of **`IrqBoard`**,
+so a shared variant's own leaf reads as the dispatch having sprouted a definition and 54 call
+sites. `callsites.py` printed `FIRST CALL SITE -- stop the lot`. The direct check is
+`grep -oE '^_RN[^:]*irq_asserted[A-Za-z0-9_]*:'` over the dump, and `shape.py`, whose regex
+anchors the owner on its v0 length prefix (`5Board`, not `Board`). **This is the fourth time an
+instrument of this project has been blind or loud at exactly the symbol a lot was watching**
+(MF-3b rule 1, MF-5b step 1, and both of these), and the first time one has cried wolf rather
+than stayed quiet. Anchor on the length prefix.
+
 ### 5.12 Lot MF-6a2: a dispatch body *removed* pays every board, and `ppu_peek` is the fourth capped hook
 
 MF-6a2 took MF-6a's two level-2 residuals off — `smb3`'s emulated core from +461 302 to

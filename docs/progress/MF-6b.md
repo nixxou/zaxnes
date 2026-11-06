@@ -1331,3 +1331,257 @@ lot's own terms permit and which carries its measurement.
 The one title is *Alien Syndrome* (Tengen, 1989), for R0 to run.
 
 [PROGRESS] MF-6b step 5/8 done: mapper 158 as a `const` parameter of `Rambo1`, `Rambo1::update_banks` byte-identical, `Cartridge::cpu_write` pinned after a second monomorphisation outlined it at 1.2 M on three ROMs, and all thirteen ROMs below `9f9d9d41` (set −19 980 904).
+
+## Step 6 — mappers 14 and 238 are out on their own pages' evidence; **116 is open**
+
+### The decision the brief asked for, and the sentence that makes it
+
+The brief: "If 14 or 238 differ from 116 in more than the PAL's decoding, say so and leave them
+out with their design." Mapper 116's own page gives the premise — "INES Mapper 014 and INES
+Mapper 238 use the same ASIC but with the PAL programmed differently to respond in other ways to
+other addresses" — and **mapper 14's page shows that "other ways" is more than a decode**:
+
+| | **116** | **14** (SL-1632, `UNL-SL1632`) |
+| --- | --- | --- |
+| supervisor register | `$4100`, `(addr & $E100) == $4100`, below the ROM | **`$A131`**, "Mask: $FFFF?", **overlapping the MMC3 and VRC2 registers there** |
+| modes | three: VRC2, MMC3, MMC1 (mode 3 = mode 2) | **two**: VRC2 and MMC3. No MMC1 mode at all |
+| outer CHR | one bit, `C` at bit 2, "outer 256 KiB CHR-ROM bank (CHR A18)" for the whole of CHR | **three** bits — `A.B. C.M.`, bit 1 the mode, **bit 3 CHR A18 for `$0000-$0FFF`, bit 5 for `$1000-$17FF`, bit 7 for `$1800-$1FFF`** |
+| provenance | registers and submappers documented, and the power-on values with them | mirroring and address-mirror behaviour "according to Nestopia's mapper source code", which the page says "contradict other emulators and have not been verified on original hardware" |
+
+A supervisor register that *shares* addresses with the board it supervises is a different decode;
+**three independent CHR A18 bits over three unequal PPU windows are a different CHR path**, and
+`BankWindows` has no way to express a 1 KiB window table whose A18 changes at `$1000` and again
+at `$1800` other than by computing it per window. With no MMC1 mode and an explicitly unverified
+mirroring rule on top, mapper 14 is a second board, not a parameter. **It is out, and its design
+is the table above**: the supervisor decode, two modes, and three outer-bank bits applied to
+window groups `0-3`, `4-5` and `6-7` of the 1 KiB CHR table.
+
+**Mapper 238 is out because there is nothing to implement it from.** Its page is one sentence —
+it "is used for *Contra Fighter*, a hack of *G.I. Joe* with Street Fighter II characters" — with
+no register, no mask, no mode and no submapper. 116's page's claim that it shares the ASIC is the
+only statement about its hardware anywhere in the sources this role may use, and a board cannot
+be written from it. A later lot that finds a register table has 116's code to parameterise.
+
+### 116 itself: the design, and what is left to do
+
+The page and `Mapper116.h` between them settle the whole board, and the reading is recorded here
+so that whoever takes the step does not have to re-derive it:
+
+* **Supervisor register `$4100`**, `(addr & $E100) == $4100`, `[.... .CMM]`: `MM` the mode,
+  `C` **bit 2** the outer 256 KiB CHR bank (CHR A18). The page's own diagram puts `C` at bit 2 and
+  Mesen agrees (`(_mode & 0x04) << 6`); a summary of the page that says bit 3 is wrong.
+  Power-on **`$01`, MMC3 mode**. The register is below `$8000`, which `Cartridge::cpu_write`
+  reaches for all of `$4020-$FFFF`, so `Mapper::write_register`'s usual `address < 0x8000` guard
+  must *not* be the first line of this board.
+* **Three chips with separate registers**, "so that when switching between modes using the
+  supervisor register, the entire mapper state changes, including PRG/CHR-ROM switchable and fixed
+  banks as well as IRQ state". So `Somari` holds an [`Mmc3`], an [`Mmc1`] and a [`Vrc2Vrc4`] and
+  delegates to the active one; `Mapper::banks` answers that one's windows. Three sub-boards is
+  about 550 bytes, and `Board` is **1 376** (the MMC5's, niche-filled), so the variant cannot grow
+  the enum.
+* **The VRC2 mode is a VRC2b**, "A0/A1, i.e. VRC2b", and that is *exactly* `Vrc2Vrc4`'s
+  `VrcVariant::Vrc2b` — Mesen's scrambled-looking
+  `((((addr & 0x02) | (addr >> 10)) >> 1) + 2) & 0x07` resolves to A1 picking the half-register
+  and A0 the nibble, which is what this build's mapper-23 arm computes with `index = addr & 3`.
+  The one addition needed is a `pub(crate)` constructor that asks for the variant directly, since
+  a mapper-116 image declares no VRC submapper. **The VRC2 CHR registers power up to `$FF`** —
+  "one version of *Somari the Adventurer* relies on this" — and `Vrc2Vrc4::reset` clears them, so
+  that is the second addition.
+* **The MMC3 mode is a plain MMC3** plus the outer CHR bank: Mesen's ten-register array is its
+  own spelling of R6/R7 with the two fixed windows, and the arithmetic reduces to this build's own
+  two PRG modes. It needs a constructor that cannot be read as an MMC6 or a TxSROM, because
+  `Mmc3::new` takes the submapper from the header and a mapper-116 submapper-1 image would
+  otherwise become an MMC6. **Only this mode has an IRQ** (the brief, and Mesen gates the whole
+  counter on `(_mode & 0x03) == 1`), so `on_ppu_address_bus` and `ppu_irq_horizon` are mode-gated.
+* **The outer CHR bank** cannot be expressed through the sub-boards, whose `update_banks` write
+  absolute bank numbers. The cheapest correct form is a new `BankWindows` method — `offset_chr_banks(banks: i32)`,
+  which recovers each window's bank from its offset, adds `banks` and re-wraps as `map_chr_1k`
+  does — applied to the active sub-board's own windows after every update. It is additive, has no
+  field, and costs no existing board anything. The MMC1 mode ignores the outer bank (Mesen's
+  `UpdateChr` case 2/3 does not apply it).
+* **Submapper 0 against 1** is one `bool`: the `-W` PAL "resets the MMC1's serial shift register
+  when switching *to* MMC1 mode, equivalent to writing to $8000-$FFFF with bit 7 set", the `-P`
+  PAL does not. Every single-game cartridge is submapper 0 except the GK2 *Somari*, "and that game
+  does not seem to rely on it". `Mmc1::write_register` already implements that reset as its bit-7
+  arm, so the switch can drive it.
+* **Submapper 2**, the Huang-2, "addresses 8 KiB rather than 16 KiB PRG-ROM banks, meaning that
+  the PRG bank register value is shifted by one bit to the left compared to what one would write
+  to a normal MMC1". That cannot go through `Mmc1::update_banks`, whose windows are 16 KiB —
+  but it can be done **on top of** it, because step 3 already added `Mmc1::prg_register`,
+  `control_register` and `windows_mut` for the NES-EVENT, and this is the same move: let the chip
+  hold the shift register and the registers, and let the board lay PRG out in 8 KiB units.
+* **Submapper 3 is the one real gap, and it wants Q-132.** The page gives it as "a reset-based
+  multicart with the first game having 256 KiB of PRG- and CHR-ROM each, the remaining ones 128
+  KiB" and **says nothing about how a reset selects the game** — not the counter's width, not
+  which address lines it drives, not whether it wraps. Mesen does not implement it at all. The
+  provisional choice to record in the ticket is that the submapper loads as a Huang-1 with no
+  reset-based outer bank, so the first game runs and the rest are unreachable; that is strictly
+  better than guessing an outer-bank rule and silently running the wrong game.
+
+[`Mmc3`]: ../../rust/crates/zax-nes/src/cartridges/mappers/mmc3.rs
+[`Mmc1`]: ../../rust/crates/zax-nes/src/cartridges/mappers/mmc1.rs
+[`Vrc2Vrc4`]: ../../rust/crates/zax-nes/src/cartridges/mappers/vrc2_vrc4.rs
+
+### Why the implementation is below the gate and not above it
+
+**Step 6 is the one step of this lot that is open, and it is open on purpose.** Steps 7 and 8 are
+the lot's acceptance gate — the four sweeps, the save states, both ROM folders through `--ignored`,
+and the campaign row by row — and they validate the **five boards and eleven commits already in**.
+Mapper 116 would add a sixth board, unlicensed, with no ROM in `assets-free/test-roms` to run it
+(§2 of the inventory) and one submapper that needs a ticket answered before it can be finished.
+Running the gate over what is committed is worth more than adding to what is not yet gated, so
+the gate was run first and this is where the lot stops.
+
+Everything above is the whole of what the next session needs: the register map, the three
+constructors to add, the one `BankWindows` method, the four submappers' readings and the one
+ticket to open. `req_core_102_any_other_mapper_is_refused` still lists 116 and still refuses it;
+the brief's edit to that test belongs with the implementation, not before it, and REQ-CORE-102's
+own criterion (mapper 200) is untouched either way. **Q-132 is still free.**
+
+[PROGRESS] MF-6b step 6/8 OPEN: mappers 14 and 238 decided out on their pages' own evidence, 116's full design and its one Q-132 gap recorded, implementation deliberately left below the acceptance gate.
+
+## Step 7 — save states, the four sweeps, and the registry test
+
+All of step 7 was done **inside** steps 1 to 5 rather than after them, because the sweeps are
+what caught two of the lot's real omissions and waiting for a final step would have hidden them
+behind a measurement. What follows is the confirmation, at `6cdcdcf9`.
+
+**Save states.** Every new board appends its registers behind the existing versioning, the shape
+`fme7.rs` established, and nothing of an existing board's block moved:
+
+| board | block | derived state recomputed on load, not serialised |
+| --- | --- | --- |
+| 73, VRC3 | `prg`, then `Vrc3Irq` (latch as two bytes, counter, four flags) | the bank windows, through `update_banks` |
+| 65, H3001 | the eight CHR regs, two PRG regs, the layout bit, reload, counter, two flags | the windows |
+| 67, Sunsoft-3 | four CHR regs, PRG, the live count, three flags | the windows |
+| 105, NES-EVENT | **`Mmc1`'s own block unchanged**, then counter, init state, two flags | nothing: `Mapper::save_state` serialises `banks()` |
+| 48, TC0690 | two PRG regs, six CHR regs, latch, counter, three flags, the delay, then `A12Watcher` | the windows |
+| 158, Tengen 800037 | **`Rambo1`'s own block, byte for byte** — the `const` parameter adds no field | the four nametable pages, computed on demand |
+
+`req_core_090_the_mapper_state_survives_a_save_and_restore` sweeps `SUPPORTED_MAPPERS` and
+covers all six without a line written. The NES-EVENT's counter is pinned harder than that:
+`nes_event_at_counter` **finds** the counter's value inside the state block by searching for it,
+so a counter that was not serialised would fail the search rather than let three tests pass
+vacuously.
+
+**The four sweeps, and the two omissions they found.** Each iterates `SUPPORTED_MAPPERS`, so the
+six new numbers were covered the moment they were registered — and twice that was not enough on
+its own:
+
+| sweep | outcome |
+| --- | --- |
+| `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` | green at every step; 65, 67, 73, 105 and 48 are all in `clocks_on_cpu_cycle` and it would have failed otherwise |
+| `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` | **failed twice and was right twice** — at step 4 until mapper 48 was in both `watches_ppu_reads` and `watches_ppu_bus_without_read`, and at step 5 until 158 was. Its expected list is now `[4, 4, 5, 5, 48, 48, 64, 64, 118, 118, 158, 158]`, and its second assertion — that a board watching the PPU's reads must answer `None` to `chr_view` — passed untouched, `IrqBoard::chr_view` having answered `None` for the whole variant since step 1 |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | green; every new board's `reset` returns every field it owns, the NES-EVENT's forced power-on `$A000` included |
+| `req_core_100_every_required_mapper_is_registered` | extended with 48, 65, 67, 73, 105 and 158, in the list of numbers beyond REQ-CORE-100's table, so an accidental addition is caught as surely as a removal; the ascending-order assertion holds |
+
+`SUPPORTED_MAPPERS` is **65 numbers over 35 `Board` variants**, six numbers and **one** variant
+more than `9f9d9d41`'s 59 and 34 — the one variant being `IrqBoard`, which carries all six
+boards.
+
+[PROGRESS] MF-6b step 7/8 done: six save-state blocks appended with no existing byte moved, the four sweeps green with the two omissions they caught recorded, and the registry test extended with all six numbers.
+
+## Step 8 — the suites, the campaign, and the documents
+
+### The suites, at `6cdcdcf9`
+
+| check | result | against `9f9d9d41` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | clean, exit 0 | **one** new `allow`: `clippy::inline_always` on `Cartridge::cpu_write`, which the lot's terms permit and which carries its measurement in the comment |
+| `cargo test --release -p zax-nes -p zax-harness` | **887 passed, 0 failed, 8 ignored** | 847 + 40 |
+| `cargo test --release -p zax-harness --test test_roms_tests` | **14 passed** | identical |
+| `--ignored`, both ROM folders, `--no-fail-fast` | **7 passed, 1 failed** | identical to MF-6a2's |
+
+The environment is `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, with `--no-fail-fast`, without which
+`cargo test` stops after the first failing binary and most of the eight never run.
+
+**The two tests the brief names both pass**:
+`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` and
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`. Neither needed a change —
+and the second one is reported with the caveat §3 of `PERFORMANCE-HISTORY.md` now requires:
+**`rust/test-roms/` is empty in this worktree, so golden-core counts all 291 rows as missing
+rather than failing and its green is green over nothing.** MF-6a2 measured what the real corpus
+gives (239 of 291, with 51 mismatches that are the DMC-DMA area REQ-CORE-113 marks P3 and that
+two existing tests already pin as accepted divergences) and showed the same set at its own
+baseline; this lot touches none of those files and did not re-run that measurement.
+
+**The one failure is `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`**, the
+same one MF-6a2, MF-5b-fix and MF-5a reported, and the proof is the same:
+`git diff --name-only 9f9d9d41 HEAD` lists **sixteen** files and `builtin_patches.rs` is not
+among them. Nothing of the patch machinery is in this lot's diff.
+
+### The campaign, field by field
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms camp-6b.json --no-shots --quiet
+    test-roms: 331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+`campfields.py camp-6a2.json camp-6b.json` — every key of every row, ignoring `ms` and `shot`:
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+      base: {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+      new : {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+
+    rows differing on any field but ['ms', 'shot']: 0
+
+    mapper numbers the campaign exercises: [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180]
+    of which this lot adds: []
+
+**Zero rows differ on any field**, the summaries compare equal on all six counts, and the
+exception set is empty twice over: the campaign exercises none of this lot's six numbers, which
+§2 of the inventory predicted — there is no image for any of them under `assets-free/test-roms`.
+
+**All eighteen MMC3 rows are identical field by field** — six of `mmc3_irq_tests`, six of
+`mmc3_test`, six of `mmc3_test_2/rom_singles` — which is what steps 4 and 5 had to show, the one
+adding a board whose counter *is* the MMC3's and the other a second monomorphisation of the
+RAMBO-1. **The three required-to-fail rows are still failing, with their messages unchanged**:
+`mmc3_irq_tests/5.MMC3_rev_A` ("MMC3 IRQ COUNTER REVISION A / FAILED #3"), `mmc3_test/6-MMC6`
+and `mmc3_test_2/rom_singles/6-MMC3_alt` — the revision-A and MMC6 reload cases REQ-CORE-114 and
+AMD-061 §8 make accepted divergences. The other two of the five failures are `AccuracyCoin`
+(128 of 147) and `blargg_ppu_tests/power_up_palette`, both as they were.
+
+### The documents
+
+`rust/docs/PERFORMANCE-HISTORY.md` gains **§5.13**, beside MF-6a2's §5.12, with the six findings
+a later lot needs:
+
+1. **A family of boards that all answer *yes* to a hook should share one `Board` variant, and the
+   shared body should be out of line** — one inner match for six boards instead of six arms, and
+   `#[inline(never)]` on the shared leaf worth −29 072 137 on the set.
+2. **A field offset is a cost even when no code changes** — the width parameter that cost
+   +9 886 794 with the static sizes of `step`, `resolve` and `branch` unmoved to the instruction,
+   and the qualifier it puts on §5.11's `const`-parameter rule.
+3. **`NesBus::catch_up_ppu` is the fifth hook with a measured body cap, and its cap is two
+   instructions** — +9 214 379 on `mmc5` for 188 → 190, and `None` as the answer that costs
+   nothing because the MMC5 already gives it.
+4. **`Cartridge::cpu_write` is pinned, the fifth link of its kind**, with the 1.2 M on three ROMs
+   that pinned it.
+5. **`Board::prg_ram_enabled` must stay inlined** — the refutation, +67 110 804 on `mmc5` to save
+   430 380 on `smb3`, and the rule it gives for when `#[inline(never)]` on a shared forward pays.
+6. **`cmp4c.py` and `callsites.py` are both loud at `Board::irq_asserted` and both are wrong**,
+   because `Board` is a substring of `IrqBoard` — the fourth instrument of this project blind or
+   loud at the symbol a lot was watching, and the first to cry wolf.
+
+`docs/review/MF-6-inventory.md` is **not** amended: it is R0's plan document and this role does
+not edit it. Three of its figures are now known to be different from what a reader would assume —
+§4.2's "+11 and +47 per `irq_asserted` arm" is the wrong *unit* for that dispatch (the shape with
+the same static sizes was the worst dynamically), §5 step 1's hope that a width parameter on
+`VrcIrq` would serve the VRC3 is refuted with a number, and §5 step 4's prerequisites were all
+already built — and all three are recorded in the steps above and in §5.13, which names the
+inventory sections so that a reader of either finds the other. **No board of this lot was parked**:
+the `parked-boards` feature R0 added for step 2 onwards was never needed, because every board
+that missed the bar missed it on a shape that was fixable (step 4's `ppu_irq_horizon` forward and
+step 5's `cpu_write` outlining), and the two shapes that were not fixable — the VRC3's width
+parameter and step 5's V4 — are refutations of an *implementation*, not of a board.
+
+No Q ticket was opened. Every place the public documentation and Mesen 2 disagree — nine of them
+across the six boards — is an AMD-061 §1 case, which that amendment settles for the page without
+a ticket: the H3001's `$C000` bank that "doesn't exist", its three-outcome mirroring and its
+counter's floor; the Sunsoft-3's missing acknowledge and its `$D800`; the VRC3's 8-bit mode; the
+TC0690's delay, its `$C000`/`$C001` and its submapper. The one genuine gap in the sources is
+submapper 3 of mapper 116, and the ticket for it belongs with the implementation that needs it.
+**Q-132 is still free.**
+
+[PROGRESS] MF-6b step 8/8 done: 887 / 0 / 8, 14 / 14, the `--ignored` pair green, 331 campaign rows identical field by field with the eighteen MMC3 rows and their three required failures among them, and PERFORMANCE-HISTORY §5.13.
