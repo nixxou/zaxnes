@@ -1254,6 +1254,58 @@ lower by −1.4 % to −2.9 %, `mmc5` −0.621 %, total **−1.226 %**; and agai
 started from, **all thirteen lower**, total −0.159 %. `duelito`'s +2.78 % against `ad1ad765` is
 MF-4d-fix's behaviour change, not code.
 
+### 5.9 Lot MF-5b: the thirty-second `Board` variant, and the chain nobody had pinned
+
+The lot that added the VRC7 (mapper 85) and its FM sound ended below its baseline on all thirteen
+ROMs of PR-1's set, total **−0.239 %** — but it got there by first measuring a **+0.542 %
+regression on every one of them**, caused by twenty-two lines of bank switching. Three findings
+are reusable and none of them is about the board.
+
+**Pin the whole chain of a per-cycle question, not its last link.** `Cpu6502::end_cycle` samples
+/IRQ once per CPU cycle through `NesBus::irq_asserted` → `Cartridge::irq_asserted` →
+`Board::irq_asserted`, a thirty-two-arm dispatch of which twenty arms only answer "no". MF-3b
+step 1 pinned `end_cycle` with `#[inline(always)]` so the *sampling* would stay inlined, and
+nothing pinned the two links below it. Adding the thirty-second arm grew the callee past the
+inliner's budget, so LLVM outlined **`NesBus::irq_asserted`** instead and called it every cycle:
+`0 → 169 739 749` instructions over 300 frames, about **19 per CPU cycle, on twelve ROMs of
+thirteen whose board cannot assert an IRQ at all**. Both links now carry the attribute with the
+figure on them. This is the third time in these lots that one more enum variant has tipped an
+inliner budget on a per-cycle path (MF-3b step 1, MF-5a step 1's `Board::mapper_number`, here).
+
+**And widen the instrument when it misses one.** `callsites.py` reported `Board::irq_asserted`
+**0 → 0** throughout, because MF-3b rule 1's watched list held only the last link. It now watches
+`NesBus::irq_asserted` and `Cartridge::irq_asserted` too. That is the second time the watched list
+has been blind to a real outlining; both times the fix was to widen it rather than to trust it.
+
+**The load-time latch for `irq_asserted` was built and refuted, and the numbers are the record.**
+MF-3b step 1 costed a `Cartridge::irq_capable` latch on paper and declined it; this lot built it —
+the latch plus `#[inline(never)]` on the dispatch — because the paper argument could not say how
+big either side was. A board that cannot assert an IRQ stops paying the dispatch entirely (`m1`
+**−1.526 %**, `metroid` −1.428 %, `m0` −1.300 %, `z2` −1.069 %) and a board that can pays a
+`callq` per CPU cycle instead of an inlined bitset (`m4` **+1.805 %**, `mmc5` +1.449 %, `smb3`
++1.340 %). Three of the thirteen, two of them MMC3s, so it is out — and nobody has to build it
+again.
+
+**A savestate round-trip test can catch an audio design error.** `Apu2A03::load_state` re-derives
+its cached mixer level with `M` forced to 0, deliberately and with its reason on the line. So an
+expansion chip whose `M` is non-zero **while silent** makes
+`req_core_090_the_mapper_state_survives_a_save_and_restore` fail on byte identity, which is how
+the VRC7's first mixer level was caught: six bipolar FM carriers need a DC offset for `M` to stay
+positive (AMD-061 §6.2), and a *standing* offset of 14 670 showed up as three bytes of an `f64` at
+−0.4476. Carrying the offset **per sounding channel** fixes it and is better sound: a chip with
+nothing playing has an `M` of exactly 0, like the other four expansion chips. The asymmetry it
+exposed is general — a state saved while any expansion chip is *sounding* is not byte-identical on
+an immediate re-save, on the MMC5, the VRC6, the Namco 163 and the 5B alike — and
+`mf_5b_a_sounding_expansion_chip_is_not_byte_identical_on_any_board` records it on two boards so
+nobody reads the silence requirement as a stronger invariant than it is.
+
+**Scale a new sound chip's work with its own clock, not the CPU's.** The VRC7 runs at the board
+clock divided by 36, so `Vrc7Audio::step_cpu_cycle` is a decrement, a test and a call to an
+`#[inline(never)]` sample — the shape MF-5a wanted for the VRC6 and could not have, its three
+oscillators being on the CPU clock itself. The whole chip costs the set nothing measurable: six
+ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
+magnitude inside the ~10⁵ whole-process floor.
+
 ### 5.7 Instrumentation
 
 - Frame profiler (`frame_profiler.rs`, setting `ui.profiler`, `ZAXNES_PROFILE=1`): stages input,

@@ -46,7 +46,8 @@ and the YM2413 application manual.** R0 runs the two commercial titles: *Lagrang
 | `third_party/mesen2` | `Konami/VRC7.h`, the board — adapted. **Its `Audio/Vrc7Audio.h` is a 91-line shell around `emu2413`, and `Shared/Utilities/` is not in the copied tree** (`third_party/README.md`: only `Core/NES` and `Core/Shared/Audio` were copied). So there is **no OPLL reference implementation in reach**, and the FM core below is built from the documentation alone. |
 
 That last row is why this lot opens two tickets rather than one: the board is documented to the
-bit, and the FM core has four quantities no allowed source gives numerically.
+bit, and the FM core has **five** quantities no allowed source gives numerically, plus a sixth
+question that is not a number (Q-129).
 
 ## Step 1 — the VRC7 board, mapper 85
 
@@ -518,6 +519,141 @@ VRC6 so that nobody reads the VRC7's silence requirement as a stronger invariant
 | `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, no new `allow` |
 | `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **816 passed, 0 failed, 8 ignored** |
 
+## Step 4 — the ROM check: there is none to run, re-established independently
+
+The sweep at the head of this file was **re-run from scratch** rather than taken from MF-5a on
+trust, because the claim is load-bearing: every behavioural assertion in this lot rests on it.
+Every `.nes` under `assets-free/test-roms` was opened and its iNES header decoded, the NES 2.0
+submapper byte included. **330 images carry a valid header**, and between them
+
+    mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180
+
+which is MF-5a step 7's list to the image.
+
+| mapper | images |
+| --- | ---: |
+| 85 (VRC7) | **0** |
+| 19, 24, 26, 210 (MF-5a's four) | 0 each, unchanged |
+
+`holy-mapperel` has no `M85` target — its 43 files stop at `M180` — and no file anywhere in the
+tree has `vrc` or `85` in its name.
+
+**So this lot cannot be accepted by a test ROM.** What stands in place of one: the thirty-four
+unit tests of steps 1 to 3, written against the nesdev pages, the YM2413 application manual and
+the YM2413 reverse-engineering notes, with the two provisional choices pinned by name; and
+**R0's two commercial titles**, which are the only images in reach that run this board —
+*Lagrange Point* (submapper 2, the VRC7a, the one game with FM music) and *Tiny Toon Adventures 2*
+(J) (submapper 1, the VRC7b). Q-128 and Q-129 both name what those runs would settle, and Q-129's
+sixth point is specifically about the second of them.
+
+## Step 5 — the suites, the campaign ROM by ROM, and the document
+
+### The suites
+
+| check | result | against `a577f336` |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean | **five new `allow`**: the four `inline_always` of step 1 and one `struct_excessive_bools` on `OperatorPatch` |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **816 passed, 0 failed, 8 ignored** | the baseline's 782 plus this lot's 34 |
+| `cargo test --release -p zax-harness --test test_roms_tests -- --test-threads=1` | **14 passed** | the same 14 groups, the file untouched |
+| `--ignored`, with both ROM folders | **7 of 8 pass** | the **same 7**, test for test |
+
+The CPU, PPU, APU and mapper suites are all inside the third line; nothing in them was edited
+except the two sweeps that had to learn about mapper 85 (step 1's and step 2's notes name both).
+
+**The one `--ignored` failure is not this lot's**:
+`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`, which MF-4d-fix named as out
+of scope and which MF-5a reported identically. The seven that pass include the two that matter
+most here — `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`, which compares
+pixels, tiles, audio **and** cycle counts over 1 200 frames of the commercial set, and
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`, the P1 criterion MF-4d-fix exists
+to have restored. **Golden-core is the brief's "no game on another board may move", and it passes
+unchanged** — which, for a lot that had to pin four `#[inline(always)]` attributes to reach
+parity, is not a formality.
+
+### The campaign, ROM by ROM
+
+`zax-harness test-roms` over `assets-free/test-roms`, against MF-5a's own run:
+
+    331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+**Identical totals, and identical rows.** `campdiff.py` reports *rows whose verdict, code or
+message differs: 0*. Comparing all 331 rows **field by field** — ignoring `.ms`, which is wall
+clock and moves on most rows in any two runs, and `.shot`, because this run used `--no-shots` —
+**zero rows differ on any field**: verdict, code, message, mapper and detail alike. Inside the
+`AccuracyCoin` row the tally stays at **128/147** with the same failing rows in the same order,
+which is MF-4d-fix's figure after Q-125.
+
+As in MF-5a, that is stronger than the brief asked for. It asked for "every row identical except
+the new board's", and **there are no rows of the new board**: step 4's sweep says the campaign
+contains no mapper-85 image, so the expected exception set is empty and the campaign is identical
+outright.
+
+### Callgrind on the committed tree
+
+The step-2 measurement was taken on a tree that is **code-identical** to the committed one
+(`git diff HEAD -- rust/crates/*/src` is empty from step 3 on, both later steps being tests and
+documents), but the lot's end was built and re-run anyway, because that is the number R0 compares
+against:
+
+| ROM | board | `a577f336` | MF-5b's end | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `oamstr` | NROM | 3 339 425 956 | 3 318 352 390 | −21 073 566 | **−0.631 %** |
+| `smb1` | NROM | 6 032 357 668 | 6 000 539 662 | −31 818 006 | **−0.527 %** |
+| `mm2` | MMC1 | 6 038 205 780 | 6 017 224 822 | −20 980 958 | **−0.347 %** |
+| `m4` | MMC3 | 5 500 894 936 | 5 482 275 947 | −18 618 989 | **−0.338 %** |
+| `m1` | MMC1 | 4 914 873 709 | 4 900 165 436 | −14 708 273 | **−0.299 %** |
+| `readbuf` | CNROM | 6 852 861 485 | 6 835 942 036 | −16 919 449 | **−0.247 %** |
+| `duelito` | NROM | 7 398 916 294 | 7 380 740 398 | −18 175 896 | **−0.246 %** |
+| `m0` | NROM | 5 544 075 747 | 5 533 123 239 | −10 952 508 | **−0.198 %** |
+| `vblnmi` | MMC1 | 3 328 805 321 | 3 322 236 008 | −6 569 313 | **−0.197 %** |
+| `mmc5` | MMC5 | 11 331 592 771 | 11 311 618 977 | −19 973 794 | **−0.176 %** |
+| `smb3` | MMC3 | 7 967 683 371 | 7 960 927 909 | −6 755 462 | **−0.085 %** |
+| `metroid` | MMC1 | 5 154 491 016 | 5 150 991 122 | −3 499 894 | **−0.068 %** |
+| `z2` | MMC1 | 6 312 926 031 | 6 312 078 643 | −847 388 | **−0.013 %** |
+| **total** | | **79 717 110 085** | **79 526 216 589** | **−190 893 496** | **−0.239 %** |
+
+Reproduces step 2's table inside the ±5×10⁴ per-ROM floor on every row, which is the check that
+the instrument has not drifted across the lot's four runs.
+
+### The document
+
+`docs/review/MF-T-test-roms.md` gains a "What lot MF-5b changed" section: the identical campaign,
+the header sweep with the mapper list, the thirty-four unit tests and the two commercial titles
+that stand in for the ROM this tree has not got, the eight ignored tests with their results, and
+the regression guard untouched at MF-4d-fix's floor of 128. It also records the thing that makes
+this board different from the other four expansion chips — **one source instead of two** — and
+that Q-129 is the list of what that costs. The totals table's own note now says MF-4d-fix, MF-5a
+and MF-5b moved no row.
+
+## What the lot delivered, against the brief
+
+| brief item | state |
+| --- | --- |
+| the VRC7 board, mapper 85, submappers 1 and 2 selecting the register address line and 0 decoding both | step 1: `vrc7.rs`, two latched `bool`s and no `match` on the number |
+| PRG and CHR banking, mirroring, the PRG-RAM enable, the VRC IRQ **shared**, the audio-silence bit | step 1, with `mf_5b_the_vrc7_and_the_vrc6_share_one_irq_counter` proving the share |
+| a unit test for each register | step 1: twelve, one per register group plus the two variants and the power-on override |
+| the VRC7 audio: six FM channels, two operators each, fifteen instruments plus the custom one, the envelope, both LFOs, key-on, sustain, no rhythm mode | step 2, built from the documentation alone — **there is no OPLL reference implementation in the copied tree** |
+| register writes through `$9010` and `$9030` | step 2, decoded before the register-select rewrite, on every submapper |
+| mix through `expansion_audio_output` at the level NESdev gives relative to the APU | **the page gives no level at all**, so **Q-128** opened, pinned by name in a test, exactly as MF-5a did with Q-127 |
+| a Q ticket if the sources disagree on the level or the patch set | **Q-128** for the level, **Q-129** for the five quantities no allowed source gives. The patch set is not in doubt: the page tabulates all fifteen in hex |
+| the chip at the board clock divided by 36, with as little work per CPU cycle as possible and none at all on other boards | step 2: three instructions and a call, `#[inline(never)]` on the sample; `clocks_on_cpu_cycle` gains 85 so no other board pays anything |
+| unit tests on the operator, the envelope and a channel's output | step 2: fifteen, including the attack's halt, the attack's rate ordering, the sustain-bit release rate, and the fifteen instruments proved distinct over 256 samples each |
+| save states behind the existing block versioning, with older states still loading | step 3: seven tests, 600 cycles of `M` identical after a restore, and the tolerance tested by **truncating** the block |
+| the ROM check | step 4: **no mapper-85 image exists**, re-established by decoding all 330 headers |
+| the suites and the campaign ROM by ROM | step 5: **331 rows identical on every field**, 816 / 0 / 8, 7 of 8 ignored, golden-core unchanged |
+| no performance regression, none at all | **every one of the thirteen ROMs is below `a577f336`**, total **−0.239 %**; the worst is `z2` at −0.013 % and all five of R0's commercial games are below the baseline |
+
+**Two things are left for R0**, each with a one-constant or one-`bool` fix: **Q-128** (the level,
+where one `/ 2` changes the reading) and **Q-129** (the five OPLL quantities, and the VRC7b's
+missing resonator). Both need *Lagrange Point* to settle, and both say so.
+
+**One finding is reusable and belongs to no step**: `NesBus::irq_asserted` outlining under a
+thirty-second `Board` variant, which cost **+0.542 % on all thirteen ROMs** before four
+attributes undid it — the third time in these lots that one more enum variant has tipped an
+inliner budget on a per-cycle path (MF-3b step 1, MF-5a step 1, here), and the second time that
+`callsites.py`'s watched list has been blind to it.
+
 ## Status
 
 - [x] step 1 — the VRC7 board, mapper 85. **Every one of the thirteen ROMs is below `a577f336`**,
@@ -526,8 +662,7 @@ VRC6 so that nobody reads the VRC7's silence requirement as a stronger invariant
 - [x] step 2 — the VRC7 audio (**Q-128** opened: the level, which this chip's page does not give
       at all; **Q-129** opened: the five OPLL quantities no allowed source gives, there being no
       reference implementation in reach). **All thirteen below the baseline**, total **−0.239 %**
-- [ ] step 2 — the VRC7 audio
 - [x] step 3 — save states (seven tests; 600 cycles of `M` identical after a restore, and the
       round-trip test that found the standing DC offset of Q-128)
-- [ ] step 4 — the ROM check: **no mapper-85 image exists** (the sweep is above)
-- [ ] step 5 — the suites and the campaign
+- [x] step 4 — the ROM check: **no mapper-85 image exists**, re-established by decoding all 330 headers
+- [x] step 5 — the suites (**816 / 0 / 8**, 7 of 8 ignored, golden-core unchanged) and the campaign (**331 rows identical on every field**), `MF-T-test-roms.md` updated

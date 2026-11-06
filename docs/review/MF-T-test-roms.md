@@ -39,9 +39,9 @@ outputs its own source names. **Lot MF-4c moved no row either**, and moved `Accu
 "What lot MF-4c changed" at the end of this document for the before/after of each. Everything
 else in this document is the campaign as MF-T first measured it.
 
-**Lots MF-4d-fix and MF-5a moved no row either**, and MF-5a could not have: see "What lot MF-5a
-changed" at the end, which records that **no ROM in this tree exercises either of the two boards
-that lot added**.
+**Lots MF-4d-fix, MF-5a and MF-5b moved no row either**, and neither of the last two could have:
+see "What lot MF-5a changed" and "What lot MF-5b changed" at the end, which record that **no ROM
+in this tree exercises any of the five boards those lots added**.
 
 `manual` is mostly `nes-test-roms/other/`, which is a folder of demos and homebrew rather than tests, and the handful of ROMs that ask a person to press buttons or listen. Each still has a PNG of its final frame.
 
@@ -1403,3 +1403,97 @@ ZR-2's trees.
 `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green` floor stays at MF-4d-fix's
 **128** with the same fifteen rows named. `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness
 --test test_roms_tests -- --test-threads=1`: **14 passed**, the same 14 groups.
+
+## What lot MF-5b changed
+
+**Nothing, and for the second lot running that is the finding rather than the absence of one.**
+
+The lot added one board — Konami's VRC7 (iNES mapper 85) with its FM sound — and then re-ran this
+campaign and compared it row by row against lot MF-5a's:
+
+```
+331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+```
+
+**Identical totals, and identical rows**: comparing all 331 rows field by field, ignoring `.ms`
+(wall clock) and `.shot` (this run was made with `--no-shots`), **zero rows differ** — verdict,
+code, message, mapper and detail alike. Inside the `AccuracyCoin` row the tally stays at
+**128/147** with the same failing rows named in the same order, which is MF-4d-fix's figure after
+Q-125.
+
+### Why no row could move, and the sweep that establishes it
+
+**There is no mapper-85 test ROM anywhere in `assets-free/test-roms`.** The header sweep was run
+again from scratch rather than taken from MF-5a on trust, because the claim is load-bearing: every
+behavioural assertion in the lot rests on it. The 330 images with a valid header carry
+
+    mappers 0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180
+
+which is MF-5a step 7's list to the image, and **mapper 85 has zero images**. `holy-mapperel` has
+no `M85` target — its 43 files stop at `M180` — and no file anywhere in the tree has `vrc` or `85`
+in its name.
+
+So the campaign is again the right regression check and the wrong acceptance check. What stands
+in its place:
+
+* **thirty-four unit tests**: twelve on the board (lot step 1), fifteen on the FM sound (step 2)
+  and seven on the two savestates (step 3), with the two provisional choices pinned by name
+  (`Q-128` once, `Q-129` through the five quantities it covers);
+* **R0's two commercial titles**, which are the only images in reach that run this board:
+  *Lagrange Point* (submapper 2, the VRC7a, the one game with FM music) and *Tiny Toon Adventures
+  2* (J) (submapper 1, the VRC7b, whose board has no ceramic resonator and therefore no sound —
+  which is one of the questions Q-129 asks).
+
+### What is different about this board, and why the campaign matters more than usual
+
+Every other expansion chip in this build had **two** sources: the nesdev page and
+`third_party/mesen2` as a line-by-line counter-check. The VRC7's sound has **one**:
+`Core/NES/Mappers/Audio/Vrc7Audio.h` is a 91-line shell around `emu2413`, which lives in
+`Core/Shared/Utilities` and is not in the copied tree. The FM core is therefore built from the
+nesdev page, the YM2413 application manual and the YM2413 reverse-engineering notes alone, and
+**Q-129 lists the five quantities none of the three gives numerically** — the attack curve, the
+two LFO depths, the key-level-scaling table and the modulator-to-carrier modulation index.
+
+None of the five changes the notes a game plays; what they can change is the timbre. That is why
+this campaign, and the golden-pixels test below, carry more of the acceptance than usual: they are
+what says the board costs the other eighteen mappers nothing.
+
+### The ignored tests, with both ROM folders present
+
+`cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --ignored --test-threads=1`,
+with `ZAXNES_TEST_ROMS` on this tree's ROMs and `ZAXNES_ROMS` on the owner's commercial folder:
+**7 of the 8 pass**, which is MF-5a's result exactly, test for test.
+
+| ignored test | result |
+| --- | --- |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | pass |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | pass |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | pass |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | pass |
+| `req_core_113_dmc_dma_during_read4_is_p3` | pass |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | pass |
+| `the_cost_of_one_capture_and_one_restore` | pass |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **fail**, and not this lot's |
+
+The golden-pixels test is again the one that matters most: pixels, tiles, audio **and** cycle
+counts over 1 200 frames of the commercial set, and it passing is what says the thirty-second
+`Board` variant changed nothing for a game on another board — which, given that this lot had to
+pin four `#[inline(always)]` attributes to get there, is not a formality. The one failure is the
+patch-detection test MF-4d-fix named as out of scope; it fails identically on this lot's baseline.
+
+### The regression guard
+
+`crates/zax-harness/tests/test_roms_tests.rs` is **untouched** by this lot, and its
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green` floor stays at MF-4d-fix's
+**128** with the same fifteen rows named. `ZAXNES_TEST_ROMS=… cargo test --release -p zax-harness
+--test test_roms_tests -- --test-threads=1`: **14 passed**, the same 14 groups.
+
+### The in-crate suites
+
+`cargo test --release -p zax-nes -p zax-harness -- --test-threads=1`: **816 passed, 0 failed, 8
+ignored**, which is MF-5a's 782 plus this lot's 34. The CPU, PPU, APU and mapper suites are all
+inside that line; nothing in them was edited except two sweeps that had to learn about mapper 85 —
+`req_core_100_every_required_mapper_is_registered`, whose list of numbers beyond REQ-CORE-100's
+table gains 85, and `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`, whose expected list
+becomes `[5, 5, 19, 19, 69, 69, 85, 85]` because the VRC7's sample divider counts down from
+power-on with no register written.
