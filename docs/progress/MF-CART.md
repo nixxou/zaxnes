@@ -878,3 +878,143 @@ variant has no limit left to plan against; a new `Board` discriminant is still t
 `push_expansion_audio` lottery, **+8 934 160 to the instruction** in both probes, at `mmc5`
 +0.181 % for four and +0.021 % for twelve. Written into `PERFORMANCE-HISTORY.md` §5.15 with
 pointers from the three older rules it changes, and into §4.9 of the inventory as item 4.
+
+## Step 7 — the check
+
+### golden-core, in a form this project has not used before
+
+The brief asks for golden-core unchanged, and MF-6c step 11 recorded that the test as it stands is
+**nearly vacuous**: it reads its 291 ROMs from the gitignored `rust/test-roms/`, which in this
+worktree holds **one**, and a ROM it cannot find counts as missing and not as a failure — so it
+passes having examined 1 of 291 rows. That lot linked the real collection in with 64 junctions,
+got **240 of 291 with 51 mismatches**, and showed the 51 were identical at its own baseline.
+
+This step did that **and** something stronger, which cost nothing because the binaries already
+existed. `zax-harness golden-core` is the same digests as a subcommand, and this lot has the
+baseline's Linux binary and the tip's side by side in its scratch root:
+
+    sh rust/target-mf/gcpair.sh mfct-0-44f77f72 mfct-5-unparked      # 1200 frames each
+
+| | ROMs run | rows | the two files |
+| --- | ---: | ---: | --- |
+| `mfct-0-44f77f72` (the baseline) | **289** | 290 | |
+| `mfct-5-unparked` (the tip) | **289** | 290 | **identical, byte for byte** |
+
+**Every pixel digest, tile record, audio digest and cycle count of the whole `nes-test-roms`
+collection, over 1 200 frames each, is unchanged between the baseline and the tip.** That is the
+claim the lot needs — it rebuilt the CPU read path — and it is a `diff -q` rather than a count.
+No build was needed: the two binaries are the ones instruments 1 and 2 were measured on.
+
+The ignored test itself was then run the strong way as well, for continuity with MF-6c's figure:
+**240 of 291 rows matched, 0 pending, 0 missing**, which is that lot's number. The junctions were
+removed afterwards and `rust/test-roms` holds `nestest.nes` alone again — with them in place the
+ignored test *fails*, and leaving a trap behind would be worse than leaving the weak check.
+
+### The campaign: **331 rows, zero differing on any field**
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms target-mf/camp-cart.json --no-shots
+    python rust/target-mf/campfields.py rust/target-mf/camp-6c.json rust/target-mf/camp-cart.json
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+      base: {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+      new : {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+
+    rows differing on any field but ['ms', 'shot']: 0
+
+    mapper numbers the campaign exercises: [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118, 180]
+    of which this lot adds: []
+
+**Zero rows differ**, `ms` and `shot` excluded, which is what the brief asks for rather than the
+verdict alone; the suites are `nes-test-roms` (291 rows) and `holy-mapperel` (40, all forty
+`pass`). The last line is the point: the eighteen numbers the campaign exercises include **none**
+of this lot's, so what it proves is that a redesigned CPU read path, a new trait method, two
+`#[inline(always)]` attributes and two un-parked boards changed **nothing** for the boards already
+there.
+
+### The `--ignored` suite, with both ROM folders
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`,
+`cargo test -p zax-nes -p zax-harness --release --no-fail-fast -- --ignored`: **7 passed, 1
+failed**, MF-6c step 11's figure.
+
+| test | |
+| --- | --- |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | **ok** — the brief names it |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | **ok** — see above |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | ok |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | ok |
+| `req_core_113_dmc_dma_during_read4_is_p3` | ok |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | ok |
+| `the_cost_of_one_capture_and_one_restore` | ok |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **FAILED — the known one, out of scope** |
+
+The failure is the one the brief names as a known failure and MF-6c step 11 reproduced at *its*
+baseline: the same assertion on the same line, `builtin_patches.rs:2525`. No commit of this lot
+touches that file — `git log 44f77f72..HEAD -- crates/zax-nes/src/builtin_patches.rs` is empty —
+and it belongs to the Zelda II patch lot.
+
+### fmt, clippy and the suites
+
+| configuration | `zax-nes`, debug | release, with `zax-harness` |
+| --- | ---: | ---: |
+| `default` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--features parked-boards` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--no-default-features` | **783 / 0 / 7** | — |
+
+and the other crates that build in this worktree — `zax-goldens`, `zax-profiles`, `zax-settings`,
+`zax-scripting` — are **615 / 0 / 68**, MF-6c step 10's figure unchanged. (`zax-app` cannot build
+here, which the brief states.)
+
+`cargo fmt --check` clean. clippy `-D warnings` clean on **`zax-nes` in five configurations** —
+`default`, `--features parked-boards`, `--no-default-features`, and each un-parked feature alone on
+top of `--no-default-features` — and on `zax-harness`. **No new `allow` of any kind** beyond the
+two `clippy::inline_always` the two measured attributes carry, each with its figure on the line,
+which is the convention the four such attributes already in `board.rs` and `cartridges/mod.rs`
+follow.
+
+### No behaviour changed, and four things say so independently
+
+| | |
+| --- | --- |
+| the **save-state format** | untouched: no board gained, lost or moved a field, and `req_core_090_the_mapper_state_survives_a_save_and_restore` is in all three test columns |
+| **golden-core** | 289 ROMs × 1 200 frames, the two digest files identical **byte for byte** |
+| the **campaign** | 331 rows, **0** differing on any field |
+| the **cache's own checker** | four `debug_assert!` in `default_cpu_read` — the offset against the dispatch replaced, the taken branch, **and its negation** — driven by **2 499 test bodies** across the three debug configurations, none tripping |
+
+### The documents and the journal
+
+* `rust/docs/PERFORMANCE-HISTORY.md` **§5.15**, with pointers from §5.14, §5.11 and §5.13 (step 6).
+* `docs/review/MF-6-inventory.md` **§4.9 item 4** (step 6).
+* `docs/review/BOARD-FEATURES.md`: the header, the two rows, the umbrella row, the how-to figures,
+  and MF-6c's two diagnosis sections kept and marked superseded (step 5).
+* `journal/JOURNAL.md`, the entry of 2026-11-07: the diagnosis, the two halves of the fix, the two
+  refuted levers, the new limit, the verification figures, the disk, and the `resolvesyms.py`
+  wrinkles.
+* **No Q ticket.** Nothing in the spec was ambiguous: the lot adds no board, reads no new page and
+  changes no behaviour, and nothing under `spec/` was touched.
+
+### What the lot delivered
+
+| | |
+| --- | ---: |
+| the limit on a board that shares a variant | **gone** — twelve more variants cost `mmc5` **+3 695**, worst ROM **+0.002 %** |
+| boards un-parked | **5 mapper numbers** in two features (80, 207, 82, 552 and 111); `parked-boards` is **empty** |
+| PR-1's thirteen ROMs | **−25 192 533 (−0.032 %)**, ten of thirteen below |
+| `mmc5` | **−12 559 582 (−0.111 %)** |
+| level-2 `core` | three below by 0.004 %–0.006 %, one **equal**, `mm2` **+0.002 %** |
+| `Ppu2C02::read_pattern_planes` | **107**, unchanged |
+| the three `Cpu6502::step` inlinings | **0 / 0 / 0**, and `zone_offset` still has no symbol |
+| trait change | `prg_ram_offset` → `prg_ram_window`, and `cpu_read_windows` added; **no board overrides either** |
+| shapes measured | **eight** (the cache, B1, B2, `repr(C)`, 4i, 4j, 4k, and the three-enum probes), **four refuted and written down** |
+| tests added | **0** — it is a refactor, and its correctness claim is the existing suite with a checker wired into the path |
+| Q tickets | **0** |
+
+[PROGRESS] MF-CART step 7/8 done: the check. **golden-core is 289 ROMs over 1 200 frames each with
+the baseline's and the tip's digest files identical byte for byte** — a stronger form than the
+240-of-291 count, and free, because the two measured binaries already existed; the campaign is
+**331 rows with zero differing on any field**; the `--ignored` suite is **7 of 8** with the one
+failure the brief names, reproduced on a file no commit of this lot touches; **862 / 925 / 783 /
+615** green with fmt and clippy `-D warnings` clean in five configurations and no new `allow`; and
+the journal entry of 2026-11-07 is written. Lot complete: **the limit lifted, five mapper numbers
+un-parked, `parked-boards` empty, and the tree 0.032 % faster than the one it started from.**
