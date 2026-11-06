@@ -13,6 +13,12 @@ script, reload, look at the same frame). Branch work EDITOR-1 (`docs/progress/ED
     differs is warned about, not refused. Refused with a message: movies starting from a
     savestate, binary movies, Zapper, Four Score, FDS, VS. System. Resets inside the movie are
     not replayed yet (warned);
+  * an **FCE Ultra `.fcm`** (0.98.x binary movies, version 2, read from the TASVideos "FCM"
+    page): read into the same frames as an `.fm2` and played the same way. Its controller data
+    toggles buttons, each update followed by the frames to the next one; the header's frame
+    count is the length. Refused: movies starting from their savestate (every `.fcm` holds one;
+    the start is from reset when the header's flag says so or the first command is a reset or
+    a power cycle), Four Score, FDS and VS. System commands;
   * a **Zaxnes movie** (`.mv<n>`, `docs/MOVIES.md`).
 * While a movie plays the run-ahead is held at 0 (its frames are shown as they are), the
   setting kept for after.

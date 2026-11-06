@@ -36,7 +36,7 @@ pub fn definitions() -> Vec<Value> {
             seek under way, share explored), pause state and whether the scripts drive the core.",
             "inputSchema": empty }),
         json!({ "name": "open_movie", "description": "Plays a movie from its start: an FCEUX .fm2 \
-            (from power on) or a Zaxnes movie (.mv<n>). A game must be running.",
+            or FCE Ultra .fcm (from power on) or a Zaxnes movie (.mv<n>). A game must be running.",
             "inputSchema": { "type": "object", "properties": {
                 "path": { "type": "string", "description": "The movie file" } },
                 "required": ["path"] } }),

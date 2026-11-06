@@ -466,8 +466,8 @@ pub fn agent_prompt(context: &PromptContext) -> String {
             );
         }
         None => out.push_str(t(
-            "No movie is playing: the user plays the game and you work on what is on screen as they go (ask them to stop on a screen, then pause, screenshot, dump_frame). A movie is a help, never a need: you may offer it, once, so that you can go back to any screen yourself (an FCEUX .fm2, from TASVideos for instance, opened with open_movie; or the user records their own play with Tools > Record a movie).\n",
-            "Aucun film n'est en lecture : l'utilisateur joue et tu travailles sur ce qui est à l'écran au fur et à mesure (demande-lui de s'arrêter sur un écran, puis pause, screenshot, dump_frame). Un film aide mais n'est jamais nécessaire : tu peux le proposer, une fois, pour revenir toi-même à n'importe quel écran (un .fm2 FCEUX, de TASVideos par exemple, ouvert avec open_movie ; ou l'utilisateur enregistre sa partie avec Outils ▸ Enregistrer un film).\n",
+            "No movie is playing: the user plays the game and you work on what is on screen as they go (ask them to stop on a screen, then pause, screenshot, dump_frame). A movie is a help, never a need: you may offer it, once, so that you can go back to any screen yourself (an FCEUX .fm2 or an older FCE Ultra .fcm, from TASVideos for instance, opened with open_movie; or the user records their own play with Tools > Record a movie).\n",
+            "Aucun film n'est en lecture : l'utilisateur joue et tu travailles sur ce qui est à l'écran au fur et à mesure (demande-lui de s'arrêter sur un écran, puis pause, screenshot, dump_frame). Un film aide mais n'est jamais nécessaire : tu peux le proposer, une fois, pour revenir toi-même à n'importe quel écran (un .fm2 FCEUX ou un ancien .fcm FCE Ultra, de TASVideos par exemple, ouvert avec open_movie ; ou l'utilisateur enregistre sa partie avec Outils ▸ Enregistrer un film).\n",
         )),
     }
     let agent = context.folder.join("AGENT.md");

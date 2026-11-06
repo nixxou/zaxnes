@@ -57,7 +57,8 @@ pub fn rom_filters() -> Vec<FileFilter> {
     ]
 }
 
-/// The filters of the movie dialog (EDITOR-1): `FCEUX` `.fm2` movies and Zaxnes's own, whose
+/// The filters of the movie dialog (EDITOR-1): `FCEUX` `.fm2` and FCE Ultra `.fcm` movies and
+/// Zaxnes's own, whose
 /// extension carries their number (`.mv1`, `.mv2`...), hence "all files" beside.
 #[must_use]
 pub fn movie_filters() -> Vec<FileFilter> {
@@ -65,7 +66,7 @@ pub fn movie_filters() -> Vec<FileFilter> {
         filter(
             keys::BROWSER_FILTER_MOVIES,
             &[
-                "fm2", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
+                "fm2", "fcm", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
             ],
         ),
         filter(keys::BROWSER_FILTER_ALL, &[]),

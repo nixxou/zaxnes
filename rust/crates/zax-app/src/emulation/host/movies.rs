@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-use zax_nes::movie::fm2::Fm2Movie;
 use zax_nes::movie::{Movie, MovieMode};
 use zax_nes::NesRegion;
 
@@ -61,7 +60,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub(super) fn play_movie(&mut self, path: &str) {
         self.complete_frame_in_flight();
         self.finish_movie();
-        if is_fm2(Path::new(path)) {
+        if zax_nes::movie::fceu_kind(Path::new(path)).is_some() {
             self.play_fm2(path);
             return;
         }
@@ -108,13 +107,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
-    /// Plays the `.fm2` movie `path` (FCEUX's text format): the game is reset as on a power
-    /// cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
+    /// Plays the `.fm2` movie `path` (FCEUX's text format) or `.fcm` movie (FCE Ultra's
+    /// binary one): the game is reset as on a power cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
     /// ROM that differs from the movie's is warned about, not refused: the movie may desync.
     fn play_fm2(&mut self, path: &str) {
         let parsed = std::fs::read(path)
             .map_err(|error| error.to_string())
-            .and_then(|bytes| Fm2Movie::parse(&bytes).map_err(|error| error.to_string()));
+            .and_then(|bytes| {
+                zax_nes::movie::read_fceu(Path::new(path), &bytes)
+                    .unwrap_or_else(|| Err("not an fm2 or fcm movie".to_owned()))
+            });
         let fm2 = match parsed {
             Ok(fm2) => fm2,
             Err(error) => {
@@ -506,8 +508,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.new_movie_file()
             }
             _ => match played_file {
-                // An `.fm2` is never written over: its notes go to a new Zaxnes movie.
-                Some(file) if annotated && is_fm2(&file) => self.new_movie_file(),
+                // An `.fm2` or `.fcm` is never written over: its notes go to a new Zaxnes movie.
+                Some(file) if annotated && zax_nes::movie::fceu_kind(&file).is_some() => {
+                    self.new_movie_file()
+                }
                 Some(file) if annotated => file,
                 _ => {
                     self.notify(&text("Movie stopped", "Film arrêté"));
@@ -704,8 +708,3 @@ pub(super) fn explorer_verdict(verdict: Option<bool>) -> bool {
 /// through thousands of frames.
 const SEEK_BUDGET: std::time::Duration = std::time::Duration::from_millis(12);
 
-/// Whether `path` names an `.fm2` movie (FCEUX's text format), by its extension.
-fn is_fm2(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("fm2"))
-}

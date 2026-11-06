@@ -30,8 +30,9 @@ Options taken from the original program (single dash; the double-dash forms are 
 
 Options:
   --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
-  --movie <path>          A movie to play once the ROM has started: an FCEUX .fm2
-                          or a Zaxnes movie (.mv<n>), with its bar at the bottom.
+  --movie <path>          A movie to play once the ROM has started: an FCEUX .fm2,
+                          an FCE Ultra .fcm or a Zaxnes movie (.mv<n>), with its bar
+                          at the bottom.
   --profile <name>        Built-in profile title, or the path of a profile file.
                           Defaults to the "2D Mode" entry (SPEC-06 REQ-SCN-055).
   --assets <dir>          Optional folder of your own asset files (profiles.json,

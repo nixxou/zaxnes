@@ -143,7 +143,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::BROWSER_COMPUTER, "Poste de travail"),
     (keys::BROWSER_FILTER_NES_ROMS, "ROMs NES (*.nes, *.zip)"),
     (keys::BROWSER_FILTER_NES_FILES, "Fichiers .nes"),
-    (keys::BROWSER_FILTER_MOVIES, "Films (.fm2, .mv)"),
+    (keys::BROWSER_FILTER_MOVIES, "Films (.fm2, .fcm, .mv)"),
     (keys::MOVIE_BAR_PLAY, "Lecture"),
     (keys::MOVIE_BAR_PAUSE, "Pause"),
     (keys::MOVIE_BAR_SEEKING, "vers"),

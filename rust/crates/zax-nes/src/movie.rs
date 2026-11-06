@@ -13,7 +13,30 @@
 //! Frames are counted from the start state: frame `n` is the picture after `n` input words, and
 //! an annotation on frame `n` was written while that picture was on screen.
 
+pub mod fcm;
 pub mod fm2;
+
+/// The kind of an FCEUX or FCE Ultra movie file, by its extension: `.fm2` (text) or `.fcm`
+/// (binary). `None` for any other file.
+#[must_use]
+pub fn fceu_kind(path: &std::path::Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    match extension.as_str() {
+        "fm2" => Some("fm2"),
+        "fcm" => Some("fcm"),
+        _ => None,
+    }
+}
+
+/// Reads an FCEUX `.fm2` or FCE Ultra `.fcm` movie (by the extension of `path`) from `bytes`.
+/// `None` when `path` names neither.
+#[must_use]
+pub fn read_fceu(path: &std::path::Path, bytes: &[u8]) -> Option<Result<fm2::Fm2Movie, String>> {
+    Some(match fceu_kind(path)? {
+        "fcm" => fcm::parse(bytes).map_err(|error| error.to_string()),
+        _ => fm2::Fm2Movie::parse(bytes).map_err(|error| error.to_string()),
+    })
+}
 
 /// The signature that opens a movie file.
 pub const SIGNATURE: &[u8; 8] = b"ZAXMOVIE";

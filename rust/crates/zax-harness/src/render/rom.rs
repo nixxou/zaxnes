@@ -220,9 +220,11 @@ fn dump_periodic_frame(
 }
 
 /// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
-/// Reads the `.fm2` movie `path`: it plays from power on, which is the state the host starts in.
+/// Reads the `.fm2` or `.fcm` movie `path`: it plays from power on, which is the state the host
+/// starts in.
 fn start_fm2(host: &Host, path: &Path, rom: &Path) -> Result<zax_nes::movie::Movie, HarnessError> {
-    let movie = zax_nes::movie::fm2::Fm2Movie::parse(&fs::read(path)?)
+    let movie = zax_nes::movie::read_fceu(path, &fs::read(path)?)
+        .unwrap_or_else(|| Err("not an fm2 or fcm movie".to_owned()))
         .map_err(|error| HarnessError::Rom(format!("{}: {error}", path.display())))?;
     let pal = matches!(
         host.core.region(),
@@ -243,7 +245,7 @@ fn start_fm2(host: &Host, path: &Path, rom: &Path) -> Result<zax_nes::movie::Mov
         );
     }
     println!(
-        "render: fm2 movie of {} frames, {} rerecords",
+        "render: FCEUX movie of {} frames, {} rerecords",
         movie.frames.len(),
         movie.header.rerecord_count.unwrap_or(0)
     );
@@ -259,10 +261,7 @@ fn start_movie(
     path: &Path,
     rom: &Path,
 ) -> Result<zax_nes::movie::Movie, HarnessError> {
-    if path
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("fm2"))
-    {
+    if zax_nes::movie::fceu_kind(path).is_some() {
         return start_fm2(host, path, rom);
     }
     let movie = zax_nes::movie::Movie::read(&fs::read(path)?)
