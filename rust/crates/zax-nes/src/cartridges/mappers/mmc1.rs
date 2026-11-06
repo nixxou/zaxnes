@@ -26,14 +26,22 @@ pub struct Mmc1 {
     /// load so that `prg_ram_offset` keeps exactly one shift and one mask.
     ram_bank_shift: u32,
     ram_bank_mask: u8,
-    /// SNROM wiring, decided at load (see [`Mmc1::is_snrom`]): bit 4 of the CHR bank register
-    /// is a second chip enable for the PRG-RAM.
-    snrom: bool,
-    /// Mapper 155: the board has no PRG-RAM disable at all, so bit 4 of the PRG register — and
-    /// an SNROM's bit 4 of CHR bank 0 — are ignored for that purpose. Decided at load and read
-    /// only by [`Mmc1::refresh_prg_ram_disable`], which runs when a register commits, so
-    /// `Mapper::prg_ram_enabled` is instruction-identical for mapper 1 (MF-6a step 4).
-    no_ram_disable: bool,
+    /// Bit 4 of the PRG register, masked: `$10` on a board that wires the PRG-RAM disable and
+    /// **`$00` on mapper 155**, which has no such wire.
+    ///
+    /// A mask and not a `bool` tested beside the register, for the reason `ram_bank_mask` above
+    /// gives and which MF-6a2 step 2 then measured: MF-6a step 4 added mapper 155 as
+    /// `!self.no_ram_disable && …`, which is free on `Mapper::prg_ram_enabled`'s path — that
+    /// reads the cached answer — but not on the **commit** path, where
+    /// [`Mmc1::refresh_prg_ram_disable`] runs. `Mmc1::update_banks` grew **+8 001 instructions
+    /// over 600 level-2 frames of Mega Man 2**, +2 217 on Metroid and +4 311 on Zelda II, all
+    /// three plain mapper-1 games paying for mapper 155's existence. Folded into the mask the
+    /// test disappears and mapper 1 is back to one load and one `and` per register.
+    prg_disable_mask: u8,
+    /// The same bit of CHR bank 0, which only an SNROM wires (see [`Mmc1::is_snrom`]) as a
+    /// second chip enable for the PRG-RAM: `$10` on an SNROM that is not a mapper 155, `$00`
+    /// everywhere else.
+    chr_disable_mask: u8,
     /// What [`Mapper::prg_ram_enabled`] answers, recomputed whenever `prg` or `chr0` commits.
     ///
     /// A field rather than an expression because on an SNROM the answer needs *both* registers:
@@ -57,6 +65,9 @@ impl Mmc1 {
                 2 => (3, 0x01),
                 _ => (2, 0x03),
             };
+        // nesdev ("INES Mapper 155") gives the board as the MMC1 "with the WRAM disable bit
+        // removed", so on mapper 155 neither wire exists and both masks are zero.
+        let wired = u8::from(memory.rom().mapper() != 155) << 4;
         Self {
             banks: windows_for(memory),
             shift: 0,
@@ -69,8 +80,8 @@ impl Mmc1 {
             fixed_prg: header.is_nes20 && header.submapper == 5,
             ram_bank_shift,
             ram_bank_mask,
-            snrom: Self::is_snrom(memory),
-            no_ram_disable: memory.rom().mapper() == 155,
+            prg_disable_mask: wired,
+            chr_disable_mask: if Self::is_snrom(memory) { wired } else { 0 },
             prg_ram_disabled: false,
         }
     }
@@ -127,11 +138,12 @@ impl Mmc1 {
     ///
     /// Mapper 155 is this chip on a board that does not wire the disable: nesdev
     /// ("INES Mapper 155") gives it as MMC1 "with the WRAM disable bit removed", and Mesen 2
-    /// implements it by holding the flag at false (`MMC1_155.h:9`). One `&&` here, on the
-    /// register-commit path, and mapper 1 pays nothing on its $6000-$7FFF decode.
+    /// implements it by holding the flag at false (`MMC1_155.h:9`). Here it is the two masks
+    /// being zero, so the whole expression is two loads, two `and`s and a test whatever the
+    /// board — see [`Mmc1::prg_disable_mask`] for the measurement that made it a mask.
     fn refresh_prg_ram_disable(&mut self) {
         self.prg_ram_disabled =
-            !self.no_ram_disable && (self.prg & 0x10 != 0 || (self.snrom && self.chr0 & 0x10 != 0));
+            ((self.prg & self.prg_disable_mask) | (self.chr0 & self.chr_disable_mask)) != 0;
     }
 
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
@@ -208,8 +220,10 @@ impl Mapper for Mmc1 {
         Ok(())
     }
 
+    /// A zero [`Mmc1::prg_disable_mask`] is mapper 155 and nothing else: every other MMC1 board
+    /// wires bit 4 of the PRG register to the PRG-RAM's chip enable.
     fn mapper_number(&self) -> i32 {
-        if self.no_ram_disable {
+        if self.prg_disable_mask == 0 {
             155
         } else {
             1

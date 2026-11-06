@@ -59,6 +59,18 @@ pub struct Mmc3Board<const MC_ACC: bool> {
     /// MR-4-3: A12 falls left before the next clock of the scanline counter, counting down from
     /// 7. Only `MC_ACC` reads it, and only `MC_ACC` writes it to the savestate.
     irq_prescaler: u8,
+    /// PPU dots one clock of the scanline counter needs, which is what
+    /// [`Mapper::ppu_irq_horizon`] multiplies the clocks-to-zero by: the A12 watcher's
+    /// `min_rise_interval` on an MMC3, and 8 on an MC-ACC, whose ÷8 prescaler needs two dots
+    /// per fall (MR-4-3's warning).
+    ///
+    /// A **field** settled in `new`, and not the `if MC_ACC` it was, for a reason MF-6a2 step 2
+    /// measured: with the `if`, the two monomorphisations' `ppu_irq_horizon` are two distinct
+    /// arm bodies in the `Board::ppu_irq_horizon` dispatch that `NesBus::catch_up_ppu` inlines,
+    /// and a body there is worth 0.005 % to 0.082 % to **every** board in the library. With the
+    /// field they are one body, and the MC-ACC's `shlq $3` is gone from `catch_up_ppu`. Wiring
+    /// and not state: `reset` leaves it and no savestate byte carries it.
+    dots_per_clock: i64,
     select: u8,
     protect: u8,
     irq_latch: u8,
@@ -86,6 +98,11 @@ impl<const MC_ACC: bool> Mmc3Board<MC_ACC> {
         } else {
             A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS)
         };
+        // MR-4-3's warning: eight falls per clock is not `A12Watcher::min_rise_interval`, and a
+        // horizon copied from the MMC3's would make the PPU late. A fall needs two dots — one
+        // high and one low — so eight dots per clock is a safe floor, which is what a horizon
+        // has to be.
+        let dots_per_clock = if MC_ACC { 8 } else { a12.min_rise_interval() };
         Self {
             banks: windows_for(memory),
             a12,
@@ -105,6 +122,7 @@ impl<const MC_ACC: bool> Mmc3Board<MC_ACC> {
             // "NES 2.0 submappers"), which is the revision A counter.
             irq_revision_a: !is_txsrom && header.is_nes20 && header.submapper == 4,
             irq_prescaler: 0,
+            dots_per_clock,
             select: 0,
             protect: Self::power_on_protect(is_mmc6),
             irq_latch: 0,
@@ -323,16 +341,9 @@ impl<const MC_ACC: bool> Mapper for Mmc3Board<MC_ACC> {
         } else {
             i64::from(self.irq_counter)
         };
-        // MR-4-3's warning: eight falls per clock is not `A12Watcher::min_rise_interval`, and a
-        // horizon copied from the MMC3's would make the PPU late. A fall needs two dots — one
-        // high and one low — so eight dots per clock is a safe floor, which is what a horizon
-        // has to be.
-        let dots_per_clock = if MC_ACC {
-            8
-        } else {
-            self.a12.min_rise_interval()
-        };
-        Some((clocks_to_zero - 1) * dots_per_clock)
+        // [`Mmc3Board::dots_per_clock`] settled this at load, which is what makes the two
+        // monomorphisations one arm body here instead of two.
+        Some((clocks_to_zero - 1) * self.dots_per_clock)
     }
 
     fn prg_ram_enabled(&self) -> bool {

@@ -189,3 +189,155 @@ symbol moving the same way; all three are MMC1 games.
   layout to come out where step 3's own changes put it.
 
 [PROGRESS] MF-6a2 step 1/4 done: both runs reproduced, +461 302 and +10 506 to the instruction, and the block that lost the fall-through.
+
+## Step 2 — both residuals removed, and a dispatch body is worth 0.08 % to a board that has none
+
+### What was built: three changes, none of them to a board's behaviour
+
+**1. `Rambo1::ppu_irq_horizon` is `#[inline(never)]`.** Step 1 found the `smb3` residual to be one
+taken `jmp` per MMC3 horizon, because the MMC3's and the RAMBO-1's arms are the same source
+expression and LLVM tail-merges them into a block only one of the two can fall through to. Taking
+the RAMBO-1's body out of the dispatch leaves the MMC3 the only claimant, and the merged block
+disappears into its arm.
+
+**2. `Mmc3Board::dots_per_clock` is a load-time field, not an `if MC_ACC`.** The second body in
+the same dispatch was the MC-ACC's `shlq $3`: `dots_per_clock` was
+`if MC_ACC { 8 } else { self.a12.min_rise_interval() }`, so the two monomorphisations had two
+arms. Settled in `new`, they have one. Wiring and not state — `reset` leaves it, no savestate byte
+carries it, and the value is the same 8 and the same `min_rise_interval()` as before, so **no
+board's behaviour moves**. It also takes the `incq` out of the arm, because the field holds
+`filter_dots + 1` already.
+
+**3. `Mmc1`'s mapper-155 `bool` becomes two masks** — `prg_disable_mask` and `chr_disable_mask`,
+`$10` or `$00` — which is the `ram_bank_mask` idiom already in that struct, and
+`Mapper::mapper_number` reads 155 off a zero `prg_disable_mask` rather than off a second field.
+`refresh_prg_ram_disable` is then branchless and the same length whatever the board.
+
+### The four variants, and their numbers
+
+The screen is the post-LTO dump, 45 s against a level-2 run's six minutes: `fn.py` on
+`NesBus::catch_up_ppu` plus `blocks.py` to see which block holds the fall-through.
+
+| variant | `catch_up_ppu` | the MMC3's arm | PR-1 set total | `smb3` | `m4` |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `240a2718` | 216 | 13 instr, **falls through** to the merged tail | — | — | — |
+| `db804934` | 216 | 14 instr, **`jmp` to the merged tail** | −138 207 | +162 606 | −26 164 |
+| **V1** `#[inline(never)]` on the RAMBO-1's horizon | **203** | 13 instr, own tail | **−19 408 499** | −394 211 | −458 476 |
+| **V2** V1 + `dots_per_clock` as a field | **188** | **12 instr**, one block, no `incq` | **−19 758 169** | **−704 591** | **−484 586** |
+| **V3** V2 + `Mmc1`'s two masks (**shipped**) | **188** | as V2 | −19 586 552 | −688 704 | −477 391 |
+
+V3 against V2 is −171 617 on the set total, which is **inside the ±57 k-per-ROM Lua floor summed
+over thirteen ROMs**: no emulated symbol differs between the two on any ROM. V3 ships because
+`Mmc1::update_banks` is **220 instructions at `240a2718`, 223 at `db804934` and 215 under the
+masks** — five *below* the reference — and because `mm2`'s level-2 core is what that change is for.
+
+### The finding: one body fewer in `Board::ppu_irq_horizon` is worth −0.005 % to −0.082 % to **every** board
+
+This is the step's result and it was not the one expected. `NesBus::catch_up_ppu` inlines
+`NesBus::ppu_horizon`, which inlines `Cartridge::ppu_irq_horizon` and with it the whole
+`Board::ppu_irq_horizon` dispatch. Removing two of its four bodies — the RAMBO-1's to an
+out-of-line call, the MC-ACC's into the MMC3's — took the function from **216 to 188
+instructions**, and `catch_up_ppu` fell on **every one of PR-1's thirteen ROMs**, including boards
+that have no horizon body at all and never had one:
+
+| ROM | board | `catch_up_ppu` at `240a2718` | V3 | delta |
+| --- | --- | ---: | ---: | ---: |
+| `mmc5` | MMC5 | 1 314 266 808 | 1 305 052 429 | **−9 214 379** |
+| `duelito` | **NROM** | 360 182 526 | 357 749 458 | **−2 433 068** |
+| `m4` | MMC3 | 67 193 744 | 66 739 261 | −454 483 |
+| `m1` | MMC1 | 64 953 655 | 64 515 198 | −438 457 |
+| `mm2` | MMC1 | 35 271 973 | 35 035 079 | −236 894 |
+| `metroid` | MMC1 | 35 172 269 | 34 935 881 | −236 388 |
+| `m0` | **NROM** | 23 858 961 | 23 698 146 | −160 815 |
+
+An NROM has no IRQ, no A12 watcher and no horizon — it takes the default arm — and it still gains
+2.4 M instructions over 300 frames, because the dispatch's *shape* is what `catch_up_ppu` is laid
+out around. That is §5.11's "count bodies, not variants" read in the other direction: MF-6a
+measured what **adding** a body costs (0.13 % in `chr_view`, 0.67 % in `expansion_audio_output`);
+this measures what **removing** one buys, on a dispatch no lot had looked at.
+
+The price is named rather than hidden: **the RAMBO-1 (mappers 64 and 158, six titles) pays a
+`leaq`/`callq` per horizon evaluation** where it had thirteen inline instructions. No ROM of either
+instrument is a RAMBO-1, so the cost is not measurable here; it is a real cost, and it is MF-6a
+step 2's rule in reverse — the gain lands on the whole library and the cost on one board.
+`#[cold]` was not added beside it: a mapper-64 game consults that horizon on every PPU batch,
+which is not unlikely.
+
+### The bar: every level-2 game below `240a2718` on `core`, and the `total` column cannot be read at this resolution
+
+`l2-diff.py --bar`, V3 against `mf62-0-240a2718`:
+
+| game/stage | `240a2718` | **V3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 148 433 485 | **11 147 898 492** | −534 993 | −0.005 % |
+| `smb1/core` | 11 516 670 821 | **11 515 980 923** | −689 898 | −0.006 % |
+| `zelda2/core` | 12 778 994 409 | **12 777 709 570** | −1 284 839 | −0.010 % |
+| `mm2/core` | 12 043 869 909 | **12 043 306 623** | **−563 286** | −0.005 % |
+| `smb3/core` | 15 320 386 010 | **15 318 626 455** | **−1 759 555** | −0.011 % |
+| `metroid/total` | 13 736 863 010 | **13 736 160 637** | −702 373 | −0.005 % |
+| `mm2/total` | 18 983 269 814 | **18 982 779 228** | −490 586 | −0.003 % |
+| `smb1/total` | 13 589 815 609 | **13 587 306 153** | −2 509 456 | −0.018 % |
+| `zelda2/total` | 15 364 480 222 | **15 362 494 367** | −1 985 855 | −0.013 % |
+| `smb3/total` | 24 190 479 966 | 24 190 909 323 | +429 357 | +0.002 % ABOVE |
+
+**Both residuals are gone and no board was dropped**: `mm2/core` +10 506 → **−563 286**,
+`smb3/core` +461 302 → **−1 759 555**. `smb3/apu` and `smb3/draw_list` are identical **to the
+instruction**, `smb3/ppu` is −24 155, and the only emulated symbol above 100 000 on `smb3` is
+`catch_up_ppu` at **−1 790 440**.
+
+The one figure above is `smb3/total` +429 357, and it is `convert` +2 136 668 with `lua_hooks`
++1 956 135 — the nested pair every MF lot since MF-5b-fix has had to set aside — named in one
+symbol: **`getgeneric` +2 247 112**, Lua's table lookup, with `luaH_set` −457 371 and
+`luaH_getshortstr` +164 992 beside it. So this step measured that floor instead of asserting it.
+**The same binary, at the same path, through `callgrind-l2.sh` twice:**
+
+| | spread over the two runs |
+| --- | --- |
+| every level-2 `core` stage | **0, to the instruction, on all five games** |
+| `apu`, `draw_list`, `ppu` | **0** |
+| `smb3/total` | **+2 739 840** |
+| `smb1/total` | **+2 659 382** |
+| `zelda2/total` | +867 108 |
+| `metroid/total` | +31 824 |
+| `mm2/total` | −1 084 |
+
+`smb3/total`'s +429 357 is **one sixth of the same binary's own run-to-run spread on that
+column**: the second run put `smb3/total` at +3 169 197 and `smb1/total` at +149 926 — a column
+that had been −2 509 456 — while every `core` stage stayed identical to the instruction. §5.11
+measured this floor at ±57 k on the PR-1 set's whole-process count; on a level-2 `total` it is
+**±2.7 M**, forty-eight times larger, because a level-2 run loads a 3D pack and runs Lua frame
+hooks and the PR-1 run does neither. The `core` column is the one that can be read at this
+resolution, and **all five games are below `240a2718` on it, by 0.005 % to 0.011 %**.
+
+### PR-1's thirteen: all thirteen below, set total −19 586 552
+
+| ROM | `240a2718` | **V3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 311 166 765 | **3 310 526 412** | −640 353 | −0.019 % |
+| `oamstr` | 3 320 463 094 | **3 319 502 016** | −961 078 | −0.029 % |
+| `m1` | 4 887 190 347 | **4 886 656 025** | −534 322 | −0.011 % |
+| `m4` | 5 474 269 733 | **5 473 792 342** | −477 391 | −0.009 % |
+| `m0` | 5 521 486 292 | **5 521 263 906** | −222 386 | −0.004 % |
+| `metroid` | 5 116 414 925 | **5 116 127 287** | −287 638 | −0.006 % |
+| `smb1` | 5 997 234 561 | **5 996 876 627** | −357 934 | −0.006 % |
+| `mm2` | 6 020 968 359 | **6 020 784 916** | −183 443 | −0.003 % |
+| `z2` | 6 293 956 281 | **6 292 636 422** | −1 319 859 | −0.021 % |
+| `readbuf` | 6 839 079 589 | **6 836 835 668** | −2 243 921 | −0.033 % |
+| `duelito` | 7 385 515 979 | **7 383 061 072** | −2 454 907 | −0.033 % |
+| `smb3` | 7 951 492 113 | **7 950 803 409** | −688 704 | −0.009 % |
+| `mmc5` | 11 298 830 974 | **11 289 616 358** | −9 214 616 | −0.082 % |
+| **total** | **79 418 069 012** | **79 398 482 460** | **−19 586 552** | **−0.025 %** |
+
+`m4` and `smb3`, the two ROMs the brief makes a stop-the-lot condition, are **−477 391** and
+**−688 704**. `NesBus::write_internal` is −65 503 on `m0` and −64 164 on `m1` and unmoved
+elsewhere; `Ppu2C02::run_dots` is −20 926 on `duelito` and −22 074 on `metroid`.
+
+### Suites
+
+`847 passed, 0 failed, 8 ignored`, which is MF-6a's figure: no test was added or edited at this
+step and none changed its answer. `cargo fmt --check` clean, `cargo clippy --release -p zax-nes
+--all-targets -- -D warnings` clean, **no new `allow` of any kind**. No save-state byte moved —
+`Mmc3Board::save_registers` and `Mmc1::save_registers` are untouched, and both new fields are
+wiring recomputed at load.
+
+[PROGRESS] MF-6a2 step 2/4 done: both residuals gone, all five cores and all thirteen ROMs below the reference, −19 586 552.

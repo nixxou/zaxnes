@@ -158,6 +158,7 @@ impl Mapper for Rambo1 {
     /// In **cycle mode** the counter is clocked by M2 and not by the PPU at all, so no amount of
     /// PPU lag can move this line and the horizon is unbounded. In scanline mode the counter
     /// only moves on an A12 rise, and those come at least `min_rise_interval` dots apart.
+    #[inline(never)]
     fn ppu_irq_horizon(&self) -> Option<i64> {
         if self.cycle_mode || self.irq_pending || !self.irq_enabled {
             return Some(i64::MAX);
