@@ -630,3 +630,182 @@ fn mf_6b_the_vrc3_and_the_vrc4_fire_on_the_same_cycle() {
     assert_eq!(expected, tick_until_irq(&mut vrc4, 1000));
     assert_eq!(expected, tick_until_irq(&mut vrc3, 1000));
 }
+
+// ---------------------------------------------------------------- Irem H3001 (65)
+
+/// nesdev ("INES Mapper 065"): "There's a 16-bit internal down counter which (when enabled),
+/// decrements by 1 every CPU cycle. When the counter reaches 0, an IRQ is fired."
+///
+/// The reload value is written high byte first — "note that $9005 is the HIGH bits, not the low
+/// bits" — so $9005 = $01 with $9006 = $F0 is 496 cycles and not the 61 441 the two registers
+/// taken the other way round would give.
+#[test]
+fn req_core_100_the_h3001_counter_counts_down_one_per_cpu_cycle_and_fires_at_zero() {
+    let mut core = MapperRom::new(65).chr(32).load();
+    core.write_memory(0x9005, 0x01); // High byte of the reload value.
+    core.write_memory(0x9006, 0xF0); // Low byte: $01F0.
+    core.write_memory(0x9003, 0x80); // E: enable.
+    core.write_memory(0x9004, 0x00); // Copy the reload value into the counter.
+    assert_eq!(0x01F0, tick_until_irq(&mut core, 70_000));
+
+    // "Any write to $9003 or $9004 will acknowledge the pending IRQ" — this one keeps E set.
+    core.write_memory(0x9003, 0x80);
+    assert!(!irq(&core));
+}
+
+/// The half of the page an implementation drops: "The counter stops at 0 -- it does not wrap and
+/// isn't automatically reloaded", and "$9006 and $9005 set the reload value, but do not have any
+/// effect on the actual counter".
+#[test]
+fn req_core_100_the_h3001_counter_stops_at_zero_and_only_9004_reloads_it() {
+    let mut core = MapperRom::new(65).chr(32).load();
+    core.write_memory(0x9005, 0x00);
+    core.write_memory(0x9006, 0x20); // $0020.
+    core.write_memory(0x9003, 0x80);
+    core.write_memory(0x9004, 0x00);
+    assert_eq!(0x20, tick_until_irq(&mut core, 1000));
+
+    // Acknowledged with E still set, the counter is at zero and stopped: it does not wrap round
+    // to $FFFF and come back 65 536 cycles later.
+    core.write_memory(0x9003, 0x80);
+    assert_eq!(-1, tick_until_irq(&mut core, 70_000));
+
+    // A new reload value on its own changes nothing...
+    core.write_memory(0x9005, 0x00);
+    core.write_memory(0x9006, 0x40);
+    assert_eq!(-1, tick_until_irq(&mut core, 1000));
+
+    // ...and $9004 is what arms the counter again, with the value those two registers hold.
+    core.write_memory(0x9004, 0x00);
+    assert_eq!(0x40, tick_until_irq(&mut core, 1000));
+}
+
+/// The case `req_core_100_the_vrc6_counter_*` pins for the VRC6, on this chip: `$9003` carries no
+/// reload of any kind, so a counter loaded while the enable bit was clear is still holding its
+/// count when the enable arrives — and the cycles that passed in between did not move it.
+#[test]
+fn req_core_100_the_h3001_enable_without_a_reload_leaves_the_counter_armed() {
+    let mut core = MapperRom::new(65).chr(32).load();
+    core.write_memory(0x9005, 0x00);
+    core.write_memory(0x9006, 0x64); // 100.
+    core.write_memory(0x9003, 0x00); // E clear.
+    core.write_memory(0x9004, 0x00); // Loaded, but not counting.
+    assert_eq!(-1, tick_until_irq(&mut core, 50));
+
+    core.write_memory(0x9003, 0x80);
+    assert_eq!(100, tick_until_irq(&mut core, 1000));
+}
+
+// ---------------------------------------------------------------- Sunsoft-3 (67)
+
+/// nesdev ("INES Mapper 067"), the `$C800` register: "Write the high then low byte of a 16-bit
+/// CPU cycle count, much like PPUADDR. This directly affects the current count, not a reload
+/// value." The count then "decreases by 1 every CPU cycle" and the IRQ comes on the wrap, so a
+/// count of $01F0 fires on cycle 497 and not 496.
+#[test]
+fn req_core_100_the_sunsoft3_count_is_written_high_byte_first_and_fires_on_the_wrap() {
+    let mut core = MapperRom::new(67).chr(32).load();
+    core.write_memory(0xD800, 0x10); // P: count, and the $C800 toggle reset to "high next".
+    core.write_memory(0xC800, 0x01); // High byte.
+    core.write_memory(0xC800, 0xF0); // Low byte: $01F0.
+    assert_eq!(0x01F0 + 1, tick_until_irq(&mut core, 70_000));
+}
+
+/// Two claims of the same paragraph: "the mapper asserts an IRQ and pauses itself", and — the
+/// page's own correction of Disch, which Mesen 2 still has — "despite previous notes, writes to
+/// this register do not acknowledge the IRQ".
+#[test]
+fn req_core_100_the_sunsoft3_pauses_itself_on_the_wrap_and_d800_does_not_acknowledge() {
+    let mut core = MapperRom::new(67).chr(32).load();
+    core.write_memory(0xD800, 0x10);
+    core.write_memory(0xC800, 0x00);
+    core.write_memory(0xC800, 0x10); // 16.
+    assert_eq!(17, tick_until_irq(&mut core, 1000));
+
+    // Paused: the count rolled on to $FFFF but nothing clocks it any more.
+    for _ in 0..1000 {
+        core.bus_mut().tick();
+    }
+
+    // And neither a pause nor a re-enable through $D800 clears the pending IRQ.
+    core.write_memory(0xD800, 0x00);
+    assert!(irq(&core), "$D800 with P clear acknowledged");
+    core.write_memory(0xD800, 0x10);
+    assert!(irq(&core), "$D800 with P set acknowledged");
+
+    // The acknowledge is $8000's, and the count resumed from $FFFF, so what is left to it is a
+    // whole sixteen bits: $10000 cycles to the next wrap.
+    core.write_memory(0x8000, 0x00);
+    assert!(!irq(&core));
+    assert_eq!(0x1_0000, tick_until_irq(&mut core, 70_000));
+}
+
+/// "Interrupt Acknowledge ($8000). Mask: $8800. Any write to this address or any of its mirrors
+/// acknowledges a pending IRQ." The mask decodes A15 and A11 and nothing else, so **every**
+/// A11-clear page above $8000 is that register — which is also what keeps it apart from the seven
+/// `$F800` registers, all of which have A11 set.
+#[test]
+fn req_core_100_the_sunsoft3_acknowledges_on_every_a11_clear_mirror_of_8000() {
+    for address in [
+        0x8000u16, 0x87FF, 0x9000, 0xA123, 0xC000, 0xD000, 0xE000, 0xF000,
+    ] {
+        let mut core = MapperRom::new(67).chr(32).load();
+        core.write_memory(0xD800, 0x10);
+        core.write_memory(0xC800, 0x00);
+        core.write_memory(0xC800, 0x04);
+        assert_eq!(5, tick_until_irq(&mut core, 1000), "{address:04X}");
+
+        core.write_memory(address, 0x00);
+        assert!(!irq(&core), "a write to {address:04X} did not acknowledge");
+    }
+}
+
+/// The `$C800` toggle, and what resets it: "in addition to enabling/disabling counting, any write
+/// to $D800 will reset the toggle so that the next write to $C800 will be the first write."
+#[test]
+fn req_core_100_a_d800_write_puts_the_sunsoft3_c800_toggle_back_to_the_high_byte() {
+    let mut core = MapperRom::new(67).chr(32).load();
+    // One write, so the toggle is left expecting the low byte...
+    core.write_memory(0xC800, 0x00);
+    // ...and $D800 takes it back to the high byte, which this $01 therefore becomes.
+    core.write_memory(0xD800, 0x10);
+    core.write_memory(0xC800, 0x01);
+    core.write_memory(0xC800, 0xF0);
+    assert_eq!(0x01F0 + 1, tick_until_irq(&mut core, 70_000));
+}
+
+/// The one test of this step that exists to keep the two boards apart, which §5 of
+/// `docs/review/MF-6-inventory.md` asks for in as many words: 65 and 67 are "the same mechanism
+/// with different wrap rules: 65 fires at zero, 67 on the wrap *past* zero, and a test that
+/// drives both to zero in the same assertion is what keeps the two from being conflated".
+///
+/// Both counters are given the same count and both are clocked once per CPU cycle, so the H3001
+/// fires on cycle N and the Sunsoft-3 one cycle later — and the H3001 then **stops** where the
+/// Sunsoft-3 **pauses**, which is the other half of the difference.
+#[test]
+fn mf_6b_mapper_65_fires_at_zero_and_mapper_67_one_cycle_past_it() {
+    const COUNT: i64 = 0x0123;
+
+    let mut h3001 = MapperRom::new(65).chr(32).load();
+    h3001.write_memory(0x9005, 0x01);
+    h3001.write_memory(0x9006, 0x23);
+    h3001.write_memory(0x9003, 0x80);
+    h3001.write_memory(0x9004, 0x00);
+
+    let mut sunsoft3 = MapperRom::new(67).chr(32).load();
+    sunsoft3.write_memory(0xD800, 0x10);
+    sunsoft3.write_memory(0xC800, 0x01);
+    sunsoft3.write_memory(0xC800, 0x23);
+
+    assert_eq!(COUNT, tick_until_irq(&mut h3001, 70_000));
+    assert_eq!(COUNT + 1, tick_until_irq(&mut sunsoft3, 70_000));
+
+    // Acknowledged and left enabled, the H3001's counter is stopped at zero for good; the
+    // Sunsoft-3's is paused at $FFFF and a `P` write starts it again.
+    h3001.write_memory(0x9003, 0x80);
+    assert_eq!(-1, tick_until_irq(&mut h3001, 70_000));
+
+    sunsoft3.write_memory(0x8000, 0x00);
+    sunsoft3.write_memory(0xD800, 0x10);
+    assert_eq!(0x1_0000, tick_until_irq(&mut sunsoft3, 70_000));
+}

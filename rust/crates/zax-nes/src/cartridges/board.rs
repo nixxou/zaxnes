@@ -106,8 +106,9 @@ pub enum Board {
     /// `Ppu2C02::run_dots` 0.067 % to 0.131 % on eight of lot PR-1's thirteen ROMs in register
     /// pressure alone, and one costs nothing.
     SmallBoard(SmallBoard),
-    /// The boards whose counter can pull /IRQ, **behind one discriminant** (MF-6b step 1):
-    /// mapper 73 (Konami VRC3). [`IrqBoard`]'s own note has the reasoning, which is
+    /// The boards whose counter can pull /IRQ, **behind one discriminant**: mapper 73 (Konami
+    /// VRC3, MF-6b step 1), mappers 65 and 67 (the Irem H3001 and the Sunsoft-3, MF-6b step 2).
+    /// [`IrqBoard`]'s own note has the reasoning, which is
     /// [`SmallBoard`]'s read the other way round — every board in that enum answers *no* to
     /// [`Mapper::irq_asserted`] and therefore shares the empty arm; every board in this one
     /// answers *yes* and can only share the others'.

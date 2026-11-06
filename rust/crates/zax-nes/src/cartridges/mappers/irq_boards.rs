@@ -1,4 +1,4 @@
-use super::{Mapper, Vrc3};
+use super::{IremH3001, Mapper, Sunsoft3, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -45,6 +45,10 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 pub enum IrqBoard {
     /// Mapper 73, Konami VRC3.
     Vrc3(Vrc3),
+    /// Mapper 65, Irem H3001.
+    IremH3001(IremH3001),
+    /// Mapper 67, Sunsoft-3.
+    Sunsoft3(Sunsoft3),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -52,6 +56,8 @@ macro_rules! inner {
     ($self:ident, $b:ident => $body:expr) => {
         match $self {
             IrqBoard::Vrc3($b) => $body,
+            IrqBoard::IremH3001($b) => $body,
+            IrqBoard::Sunsoft3($b) => $body,
         }
     };
 }

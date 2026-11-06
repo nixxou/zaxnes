@@ -39,8 +39,17 @@ against **0** on `core` — and the `core` figure decides. After **each** new bo
 check (`cmp4c.py`, `prologues.py`, `blocks.py`, `callsites.py`) that `irq_asserted`,
 `zone_offset` and `execute_without_operand` are still inlined into `Cpu6502::step` (0 / 0 / 0).
 
-**Stop-the-lot condition**: a figure above the reference that the step cannot fix — revert that
-board, record why and its design, and go on with the next one. MF-6a2 step 3 is the model.
+**Stop-the-lot condition**: a figure above the reference that the step cannot fix — and from
+step 2 on, the board is **parked, not reverted** (owner's rule, 2026-11-06, which stopped and
+restarted this session after step 1 for that one change; step 1 stands). Parking means a new
+Cargo feature **`parked-boards`** of `zax-nes`, **off by default**, carrying the board's module,
+its `Board` variant, its arms in every dispatch, its registry entry and its tests, all
+`#[cfg(feature = "parked-boards")]`, so that feature-off the build is the same as without the
+board — shown, not asserted: the post-LTO check and the bar measured feature-off, and
+`cargo test --release -p zax-nes --features parked-boards` green as well. The board then stays
+listed here and in `docs/review/MF-6-inventory.md` as "parked: built and tested, off by default,
+cost `<figures>`", which is the store the later lot of one specialised core per board picks it
+up from. MF-6a2 step 3 is still the model for *what to record*; only the disposal changed.
 
 ### The labels are MF-6a's shape, deliberately
 
@@ -426,3 +435,247 @@ warnings` clean, **no new `allow` of any kind**.
 The commercial title is *Salamander* (Konami, 1987), for R0 to run.
 
 [PROGRESS] MF-6b step 1/8 done: mapper 73, one `Board` variant for the whole lot, and the body out of line buys −29 072 137 on the set and −0.006 % to −0.053 % on all five level-2 cores.
+
+## Step 2 — mappers 65 and 67, and the variant that paid for itself a second time
+
+### The two boards, and the only thing an implementation can conflate
+
+Both are a 16-bit counter stepped once per CPU cycle, with no prescaler, no scanline mode and
+nothing on the PPU bus — which is why §5 puts them in one step — and they differ on exactly two
+things. The step's own test, `mf_6b_mapper_65_fires_at_zero_and_mapper_67_one_cycle_past_it`,
+drives both from the same count in the same assertion, which is what §5 asks for in as many
+words:
+
+| | **65**, Irem H3001 | **67**, Sunsoft-3 |
+| --- | --- | --- |
+| the firing | "when the counter reaches 0, an IRQ is fired" | "whenever the count wraps from $0000 to $FFFF" — one cycle later |
+| afterwards | "the counter **stops at 0** -- it does not wrap and isn't automatically reloaded" | "the mapper asserts an IRQ and **pauses itself**", the count running on from $FFFF |
+| the load | `$9004` copies a **reload register** (`$9005` high, `$9006` low) into the counter | `$C800`, written twice, high byte first, **straight into the live count** — "much like PPUADDR" |
+| the enable | `$9003` bit 7, and a write there or to `$9004` acknowledges | `$D800` bit 4, and a write there explicitly does **not** acknowledge |
+| the acknowledge | `$9003` and `$9004` | `$8000`, mask **`$8800`** |
+
+**Mapper 67's decode is one line because of that mask.** The acknowledge is decoded on A15 and
+A11 alone and the other seven registers on A12-A15 with A11 set, so "A11 clear above `$8000` is
+the acknowledge, A11 set is one of the seven" is the whole of it —
+`req_core_100_the_sunsoft3_acknowledges_on_every_a11_clear_mirror_of_8000` walks eight of those
+mirrors.
+
+Mapper 65's mask is `$F007`, so A3-A11 are undecoded and one register answers over its whole
+4 KiB page — except at `$B000-$B007`, where A0-A2 split the page into the eight 1 KiB CHR
+registers. `req_core_100_the_h3001_powers_on_with_prg_reg_0_at_zero_and_reg_1_at_one` writes
+`$8007`, `$AFFF` and `$8123` to pin the collapsing half and
+`req_core_100_the_h3001_banks_eight_1_kib_chr_regs_at_b000` writes `$B80C` to pin the splitting
+one.
+
+### Five divergences from Mesen 2, all the same way round, and AMD-061 §1 settles every one
+
+The pages are newer than the code, and in four of the five cases they say so themselves:
+
+1. **`$C000` is not a PRG register on the H3001.** The page's first line: "Disch's older
+   documentation is known to be wrong, incorrectly believing in a changeable bank at $C000. It
+   doesn't exist", with the forum post that settled it. `IremH3001.h:70` still has
+   `case 0xC000: SelectPrgPage(2, value)`. Here `$C000-$FFFF` decodes to nothing and that window
+   follows `$9000`'s layout bit alone.
+2. **The H3001's mirroring has three outcomes, not two.** `$9001` is `[MM.. ....]`: "%00 = Vert",
+   "%10 = Horz", "%01,%11 = 1scA". Mesen tests bit 7 alone (`IremH3001.h:57`) and never reaches
+   the one-screen state, so bit 6 decides first here.
+3. **The H3001's counter stops rather than its enable bit clearing.** Mesen clears `_irqEnabled`
+   when the IRQ fires (`IremH3001.h:41-48`), which leaves a counter sitting at $0000 to be
+   decremented to $FFFF by the next `$9003` enable and fire again 65 536 cycles later. The page's
+   "stops at 0" is one test on the counter instead, and
+   `req_core_100_the_h3001_counter_stops_at_zero_and_only_9004_reloads_it` is that sentence.
+4. **`Sunsoft3.h` has no acknowledge at all.** Its `WriteRegister` switches on `addr & 0xF800`
+   with no arm for the A11-clear pages, so the `$8000` register is unreachable there.
+5. **`$D800` acknowledges in Mesen** (`Sunsoft3.h:57-61`), where the page says "despite previous
+   notes, writes to this register do not acknowledge the IRQ".
+
+Two narrower fields than the byte written into them, which Mesen passes whole and leaves to its
+own bank wrap: the Sunsoft-3's `$F800` is `...X PPPP` with `X` "a 1 bit latch, present but
+unused", and its CHR registers reach six bits because "the hardware only has six pins for CHR
+banking, for a limit of 128KB of CHR".
+`req_core_100_the_sunsoft3_prg_latch_bit_and_the_two_spare_chr_bits_are_dropped` is measured on
+a 12-bank PRG and a 48 KiB CHR **on purpose**: at the fixture's default sizes the dropped bit is
+a whole multiple of the bank count, so masking and not masking give the same bank and the test
+would pass either way.
+
+`$3E` and `$3F`, the H3001's two fixed banks, are `-2` and `-1` through
+`BankWindows::map_prg_8k`: they are the last two 8 KiB banks of the 512 KiB its four bank lines
+reach, and a board masks the bank number by its own ROM size, so $3E & 31 = 30 is the
+second-to-last bank of a 256 KiB ROM and of every smaller one. Mesen reaches the same two banks
+by the same arithmetic (`0xFE` and `-1`, `IremH3001.h:25-26`).
+
+### The design: no new `Board` variant, and the measurement that says why that was right
+
+Both boards are inner variants of [`IrqBoard`], so the lot still spends **one** body in
+`Board::irq_asserted`, one in `Board::on_cpu_cycle`, one in `Board::on_ppu_address_bus` and one
+in `Board::ppu_irq_horizon` — step 1's design, now carrying three boards instead of one. Each
+board's own `on_cpu_cycle` is `#[inline(never)]` per §4.1 item 2, which §5 step 2 asks for by
+name.
+
+What LLVM did with the three-way inner match is worth the line. Step 1's leaf was three
+instructions; the three-board leaf is **four**, and branchless:
+
+    movl %edi, %eax ; cmpb $2, %sil ; cmovbl %esi, %eax ; retq
+
+[`IrqBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/irq_boards.rs
+
+### The bar, on both instruments
+
+**PR-1's thirteen**, against `mf6b-0-9f9d9d41` — **every ROM below, set total −30 338 767
+(−0.038 %)**, which is 1.27 M better than step 1 shipped:
+
+| ROM | board | `9f9d9d41` | **step 2** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 310 470 388 | **3 308 287 961** | −2 182 427 | −0.066 % |
+| `oamstr` | NROM | 3 319 466 313 | **3 318 033 026** | −1 433 287 | −0.043 % |
+| `m1` | MMC1 | 4 886 651 514 | **4 885 266 985** | −1 384 529 | −0.028 % |
+| `m0` | NROM | 5 521 219 795 | **5 519 813 048** | −1 406 747 | −0.025 % |
+| `m4` | MMC3 | 5 473 783 790 | **5 469 380 223** | −4 403 567 | −0.080 % |
+| `metroid` | MMC1 | 5 116 149 734 | **5 115 169 849** | −979 885 | −0.019 % |
+| `smb1` | NROM | 5 996 882 321 | **5 996 345 177** | −537 144 | −0.009 % |
+| `mm2` | MMC1 | 6 020 725 910 | **6 017 898 512** | −2 827 398 | −0.047 % |
+| `z2` | MMC1 | 6 292 582 908 | **6 291 190 363** | −1 392 545 | −0.022 % |
+| `readbuf` | CNROM | 6 836 830 137 | **6 834 513 940** | −2 316 197 | −0.034 % |
+| `duelito` | NROM | 7 383 094 194 | **7 380 402 412** | −2 691 782 | −0.036 % |
+| `smb3` | MMC3 | 7 950 795 166 | **7 944 884 594** | −5 910 572 | −0.074 % |
+| `mmc5` | MMC5 | 11 289 605 855 | **11 286 733 168** | −2 872 687 | −0.025 % |
+| **total** | | **79 398 258 025** | **79 367 919 258** | **−30 338 767** | **−0.038 %** |
+
+`callgrind-diff.py`'s own verdict: **"no ROM slower, total lower -- keepable"**.
+
+**Level 2**, `l2-diff.py --bar`: **"at or below the baseline on every game, total and core"**.
+
+| game/stage | `9f9d9d41` | **step 2** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 898 492 | **11 145 612 461** | −2 286 031 | −0.021 % |
+| `smb1/core` | 11 515 980 923 | **11 515 047 278** | −933 645 | −0.008 % |
+| `zelda2/core` | 12 777 709 570 | **12 774 468 288** | −3 241 282 | −0.025 % |
+| `mm2/core` | 12 043 306 623 | **12 036 875 886** | −6 430 737 | −0.053 % |
+| `smb3/core` | 15 318 626 455 | **15 304 530 884** | −14 095 571 | −0.092 % |
+| `metroid/total` | 13 736 176 888 | **13 733 892 748** | −2 284 140 | −0.017 % |
+| `smb1/total` | 13 589 021 252 | **13 587 062 143** | −1 959 109 | −0.014 % |
+| `zelda2/total` | 15 362 221 166 | **15 358 827 771** | −3 393 395 | −0.022 % |
+| `mm2/total` | 18 982 867 263 | **18 976 390 259** | −6 477 004 | −0.034 % |
+| `smb3/total` | 24 192 639 363 | **24 179 328 952** | −13 310 411 | −0.055 % |
+
+`smb3/core`'s −0.092 % is the largest single-game core move of the lot so far, and it is not the
+IRQ dispatch: it is `Board::ppu_peek`.
+
+### Where the instructions actually went: two symbols, in opposite directions
+
+Against **step 1's shipped V3** the set is −1 266 630 overall but **three ROMs are up** — `m0`
++15 122, `mm2` +53 484 and `mmc5` +7 388 068 — and the bar is `9f9d9d41`, where all three are
+down. Both ends of that are one symbol each, and the `1 000 000`-threshold diff of V3 against
+step 2 prints nothing else:
+
+* **`Board::ppu_peek` −2 288 640 on `m4` and −4 473 536 on `smb3`.** The two MMC3 ROMs, on a
+  board this step did not touch. Statically the function went **271 → 281**, +10 — so it is
+  *larger* and *faster*, for the reason step 1 found in `Cpu6502::branch`: what the arms cost is
+  not their instruction count but which of them sits on the fall-through. §4's fourth capped hook
+  is therefore comfortable rather than strained — MF-6a2 step 3's TQROM arm took this function to
+  583 and cost `m4` 3.4 M, and 281 costs it −2.3 M.
+* **`Cartridge::default_cpu_read` +7 456 756 on `mmc5`**, and statically **305 → 322**, +17. That
+  function inlines `Board::try_read_prg`, whose inner `IrqBoard` match gains a body per board, and
+  the MMC5 is the one ROM of the thirteen whose reads go down that path in bulk. 305 at the
+  baseline *and* at V3: the first `IrqBoard` variant was free there and the second and third were
+  not.
+
+**That is the figure step 4 has to read first.** `mmc5`'s remaining margin against the reference
+is −2 872 687, and two more inner variants at ≈ +3.7 M each would spend it. Steps 3 and 5 do not
+add any (105 is a parameter of `Mmc1`, 158 of `Rambo1`); steps 4 and 6 add one each. If `mmc5`
+goes above `9f9d9d41` at step 4, the fix to try before parking the TC0690 is `#[inline(never)]`
+on `IrqBoard::banks` — the same move that bought step 1 the whole set, one dispatch along.
+
+### The post-LTO invariants
+
+`shape.py`, the three dumps side by side:
+
+| symbol | `9f9d9d41` | V3 (step 1) | **step 2** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 443 | 1 / 2 / 3 616 | 1 / 2 / 3 645 |
+| `Cpu::resolve` | 2 / 6 / 1 854 | 2 / 6 / 1 944 | 2 / 6 / 1 958 |
+| `Cpu::branch` | 1 / 1 / 418 | 1 / 1 / 456 | 1 / 1 / 468 |
+| `NesBus::read_cycle` | 1 / 65 / 181 | 1 / 65 / 181 | 1 / 65 / 181 |
+| `NesBus::tick` | 1 / 95 / 82 | 1 / 95 / 82 | 1 / 95 / 82 |
+| `NesBus::read_internal` | 1 / 17 / 175 | 1 / 17 / 175 | 1 / 17 / 175 |
+| `NesBus::write_internal` | 1 / 10 / 3 103 | 1 / 10 / 3 274 | 1 / 10 / **3 145** |
+| `Ppu::run_dots` | 1 / 2 / 1 907 | 1 / 2 / 1 907 | 1 / 2 / 1 907 |
+
+The three claimants of `Cpu6502::step`'s budget are still inlined into it, and `Ppu::run_dots`
+has not moved by an instruction in either step — `IrqBoard::chr_view` answering `None` for the
+whole variant is doing its job.
+
+**`NesBus::write_internal` went *down*, 3 274 → 3 145**, with two boards' register decodes added.
+V3 had the VRC3's decode inlined there (3 103 + 171); at three boards LLVM outlined all three —
+`Vrc3::write_register` 151 instructions, `IremH3001::write_register` 51,
+`Sunsoft3::write_register` 57, none of them marked — and `write_internal` kept only the +42 of the
+dispatch. Nothing asked for that and nothing depends on it; it is recorded because the figure
+would otherwise read as a board having gone missing.
+
+`prologues.py`: **all twenty pinned prologues identical**, `Board::on_cpu_cycle`'s included —
+still `pushq %r14 ; pushq %rbx ; pushq %rax ; movzbl 1368(%rdi), %eax ; subb $2, %al ; movl $5,
+%ecx`, step 0's own reading. `callsites.py`: every watched callee unchanged, and
+`Board::irq_asserted`, `NesBus::irq_asserted` and `Cartridge::irq_asserted` all **0 defs / 0
+sites**.
+
+The other watched figures: `Board::ppu_read` 354 → 364, `Board::on_cpu_cycle` 396 → 417,
+`Board::on_ppu_address_bus` **156 → 156**, `NesBus::catch_up_ppu` **188 → 188**,
+`Ppu2C02::read_nametable_inner` **114 → 114**, `Mmc1::update_banks` **215 → 215** (byte-identical).
+The three out-of-line `on_cpu_cycle` leaves are 24 instructions (VRC3), 12 (H3001) and 7
+(Sunsoft-3).
+
+**`cmp4c.py` cried wolf at the same symbol `callsites.py` did in step 1, and for the same
+reason.** It prints `Board::irq_asserted  defs 0 -> 4  DEFS`, and `4` is the four instructions of
+`IrqBoard::irq_asserted`: its owner pattern is the plain substring `Board`, which `8IrqBoard`
+contains. The direct check is the one step 0 recorded —
+`grep -oE '^_RN[^:]*irq_asserted[A-Za-z0-9_]*:'` over the dump returns
+`...10irq_boards...8IrqBoard...6Mapper12irq_asserted` and **nothing else**, in step 1's dump and
+in this one, so `Board::irq_asserted` has no definition and no call site. `shape.py`, whose regex
+anchors the owner on its v0 length prefix (`5Board`), agrees. That is the **fourth** instrument of
+this project blind or loud at exactly the symbol a lot was watching (MF-3b rule 1, MF-5b step 1,
+MF-6b step 1), and `rust/target-mf/asm/` is scratch, so the fix belongs with `callsites.py`'s:
+anchor on `5Board`, not `Board`.
+
+### Tests
+
+**868 passed, 0 failed, 8 ignored**, which is step 1's 853 plus fifteen:
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_h3001_counter_counts_down_one_per_cpu_cycle_and_fires_at_zero` | the unit (CPU cycle), the direction (down), the firing *at* zero, and `$9005` being the **high** byte — a swapped pair would read 61 441 cycles instead of 496 |
+| `req_core_100_the_h3001_counter_stops_at_zero_and_only_9004_reloads_it` | "stops at 0 -- it does not wrap", and that `$9005`/`$9006` "do not have any effect on the actual counter" |
+| `req_core_100_the_h3001_enable_without_a_reload_leaves_the_counter_armed` | §5's own case: `$9003` reloads nothing, and the cycles that passed while `E` was clear moved nothing |
+| `req_core_100_the_h3001_powers_on_with_prg_reg_0_at_zero_and_reg_1_at_one` | the power-on the page says games crash without, the `$F007` mask collapsing a page, and `$C000-$FFFF` decoding to nothing |
+| `req_core_100_the_h3001_layout_bit_moves_prg_reg_0_to_c000` | `$9000` bit 7, both ways round, with `$A000` and `$E000` unmoved |
+| `req_core_100_the_h3001_banks_eight_1_kib_chr_regs_at_b000` | the eight CHR registers, and A0-A2 splitting the one page the mask does not collapse |
+| `req_core_100_the_h3001_mirroring_is_decided_by_bit_6_before_bit_7` | all three outcomes of `[MM.. ....]`, the one-screen case Mesen cannot reach |
+| `req_core_100_the_sunsoft3_count_is_written_high_byte_first_and_fires_on_the_wrap` | PPUADDR's shape, into the live count, and the wrap being one cycle past zero |
+| `req_core_100_the_sunsoft3_pauses_itself_on_the_wrap_and_d800_does_not_acknowledge` | "pauses itself", the page's correction of Disch on `$D800`, and the count resuming from $FFFF |
+| `req_core_100_the_sunsoft3_acknowledges_on_every_a11_clear_mirror_of_8000` | the `$8800` mask, over eight mirrors |
+| `req_core_100_a_d800_write_puts_the_sunsoft3_c800_toggle_back_to_the_high_byte` | the toggle reset, through a `$C800` write deliberately left half-done |
+| `req_core_100_the_sunsoft3_banks_16_kib_at_8000_and_four_2_kib_chr_windows` | the PRG pair and the four CHR registers |
+| `req_core_100_the_sunsoft3_prg_latch_bit_and_the_two_spare_chr_bits_are_dropped` | `...X PPPP` and the six CHR pins, on a ROM where masking and not masking differ |
+| `req_core_100_the_sunsoft3_mirroring_register_has_four_states` | `.... ..MM`, all four |
+| `mf_6b_mapper_65_fires_at_zero_and_mapper_67_one_cycle_past_it` | §5's conflation test: the same count in both chips, one cycle apart, then stop against pause |
+
+`req_core_100_every_required_mapper_is_registered`'s list of numbers beyond REQ-CORE-100's table
+is extended with 65 and 67. The four sweeps needed nothing written:
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` passes because both numbers went into
+`clocks_on_cpu_cycle` and would have failed otherwise,
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` because neither board touches
+that bus, and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` because both boards reset and
+serialise every field they have.
+
+`cargo fmt --check` clean; `cargo clippy --release -p zax-nes --all-targets -- -D warnings`
+clean, **no new `allow` of any kind**.
+
+The commercial titles are *Daiku no Gen San 2*, *Kaiketsu Yanchamaru 3* and *Spartan X 2* (65),
+and *Fantasy Zone II* (J) and *Mito Koumon II - Sekai Manyuu Ki* (67), for R0 to run. *Vs.
+Platoon* is the Sunsoft-3 on a VS System board, which §6 of the inventory sets aside.
+
+[PROGRESS] MF-6b step 2/8 done: mappers 65 and 67 in the same variant, all thirteen ROMs and all five level-2 cores below `9f9d9d41` (set −30 338 767, `smb3/core` −0.092 %), and `Cartridge::default_cpu_read` named as the figure step 4 reads first.

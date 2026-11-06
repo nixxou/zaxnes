@@ -62,7 +62,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   and 232 (Camerica BF9096) (MF-6a step 3);
     // * 94 (HVC-UN1ROM, a wiring of the UxROM board), 185 (CNROM with the security diodes) and
     //   155 (the MMC1 with no PRG-RAM disable) (MF-6a step 4);
-    // * 73 (Konami VRC3) (MF-6b step 1).
+    // * 73 (Konami VRC3) (MF-6b step 1);
+    // * 65 (Irem H3001) and 67 (Sunsoft-3), the two plain CPU-cycle down counters
+    //   (MF-6b step 2).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
@@ -70,8 +72,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         .collect();
     assert_eq!(
         vec![
-            19, 24, 26, 33, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140, 152, 154,
-            155, 156, 180, 184, 185, 206, 210, 232
+            19, 24, 26, 33, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 118, 140,
+            152, 154, 155, 156, 180, 184, 185, 206, 210, 232
         ],
         extra
     );
@@ -2483,4 +2485,160 @@ fn req_core_100_the_vrc3_carries_eight_kib_of_chr_ram_and_not_the_default_thirty
         core.cartridge().unwrap().memory().chr_ram().len(),
         "the board's 8 KiB, not REQ-CORE-012's default"
     );
+}
+
+// ------------------------------------------- Irem H3001 (65)
+
+/// nesdev ("INES Mapper 065"): "On powerup, it appears as though PRG regs are inited to specific
+/// values: $8000 = $00, $A000 = $01. Games do rely on this and will crash otherwise." With the
+/// layout bit clear that is PRG reg 0 at `$8000`, PRG reg 1 at `$A000`, `$3E` at `$C000` and
+/// `$3F` at `$E000` — the ROM's last two banks, which is what the board's own bank mask makes of
+/// those two numbers at any size.
+///
+/// The mask is `$F007`, so A3-A11 are not decoded and the one register answers over its whole
+/// page; and **`$C000` is not a register at all** — the page opens on Disch's older
+/// documentation "incorrectly believing in a changeable bank at $C000", which Mesen 2 still has.
+#[test]
+fn req_core_100_the_h3001_powers_on_with_prg_reg_0_at_zero_and_reg_1_at_one() {
+    let mut core = MapperRom::new(65).prg(8).chr(32).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    core.write_memory(0x8000, 0x03);
+    core.write_memory(0xA000, 0x04);
+    assert_eq!([3, 4, 6, 7], core.prg_windows());
+
+    // The $F007 mask: every address of the page is the same register.
+    core.write_memory(0x8007, 0x02);
+    core.write_memory(0xAFFF, 0x05);
+    assert_eq!([2, 5, 6, 7], core.prg_windows());
+    core.write_memory(0x8123, 0x01);
+    assert_eq!([1, 5, 6, 7], core.prg_windows());
+
+    // And the three pages above $9000 that decode to nothing move nothing.
+    for address in [0xC000u16, 0xD000, 0xE000, 0xF000] {
+        core.write_memory(address, 0x07);
+        assert_eq!([1, 5, 6, 7], core.prg_windows(), "{address:04X} banked PRG");
+    }
+}
+
+/// `$9000` is `[X... ....]`: "%0 = bank at $8000 set by writes to $8000, bank at $C000 always
+/// $3E", "%1 = bank at $C000 set by writes to $8000, bank at $8000 always $3E". The `$A000`
+/// window and the `$3F` at `$E000` do not move either way.
+#[test]
+fn req_core_100_the_h3001_layout_bit_moves_prg_reg_0_to_c000() {
+    let mut core = MapperRom::new(65).prg(8).chr(32).load();
+    core.write_memory(0x8000, 0x03);
+    assert_eq!([3, 1, 6, 7], core.prg_windows());
+
+    core.write_memory(0x9000, 0x80);
+    assert_eq!([6, 1, 3, 7], core.prg_windows());
+
+    // The same register, now feeding the other window.
+    core.write_memory(0x8000, 0x02);
+    assert_eq!([6, 1, 2, 7], core.prg_windows());
+
+    // Only bit 7 is the layout, and clearing it puts the bank back at $8000.
+    core.write_memory(0x9000, 0x7F);
+    assert_eq!([2, 1, 6, 7], core.prg_windows());
+}
+
+/// The CHR table of the page: `$B000` to `$B007`, eight 1 KiB banks "mapped sequentially from
+/// $0000-$1C00". The eight registers are told apart by A0-A2 alone, so this is also the one place
+/// the `$F007` mask splits a page rather than collapsing it.
+#[test]
+fn req_core_100_the_h3001_banks_eight_1_kib_chr_regs_at_b000() {
+    let mut core = MapperRom::new(65).prg(8).chr(32).load();
+    // Every window shows CHR bank 0 at power-on, the registers being zero.
+    assert_eq!([0; 8], core.chr_windows());
+
+    for slot in 0..8u16 {
+        core.write_memory(0xB000 + slot, (31 - slot) as u8);
+    }
+
+    assert_eq!([31, 30, 29, 28, 27, 26, 25, 24], core.chr_windows());
+
+    // A3-A11 undecoded here too: $B80C is $B004.
+    core.write_memory(0xB80C, 0x07);
+    assert_eq!([31, 30, 29, 28, 7, 26, 25, 24], core.chr_windows());
+}
+
+/// `$9001` is `[MM.. ....]` with **three** outcomes — "%00 = Vert", "%10 = Horz", "%01,%11 =
+/// 1scA" — so bit 6 decides the one-screen case first and bit 7 only chooses between the two
+/// mirrorings below it. Mesen 2 tests bit 7 alone (`IremH3001.h:57`) and never reaches the
+/// one-screen state; AMD-061 §1 puts the page first.
+#[test]
+fn req_core_100_the_h3001_mirroring_is_decided_by_bit_6_before_bit_7() {
+    for (value, expected) in [
+        (0x00u8, zax_nes::NametableMirroring::Vertical),
+        (0x80, zax_nes::NametableMirroring::Horizontal),
+        (0x40, zax_nes::NametableMirroring::SingleScreenA),
+        (0xC0, zax_nes::NametableMirroring::SingleScreenA),
+        // Bits 0-5 are not part of `MM`.
+        (0x3F, zax_nes::NametableMirroring::Vertical),
+    ] {
+        let mut core = MapperRom::new(65).prg(8).chr(32).load();
+        core.write_memory(0x9001, value);
+        assert_eq!(expected, core.mirroring(), "$9001 = {value:02X}");
+    }
+}
+
+// ------------------------------------------- Sunsoft-3 (67)
+
+/// nesdev ("INES Mapper 067"): "CPU $8000-$BFFF: 16 KiB switchable PRG ROM bank", "CPU
+/// $C000-$FFFF: 16 KiB PRG ROM bank, fixed to the last bank", and the four 2 KiB CHR banks at
+/// `$8800`, `$9800`, `$A800` and `$B800`.
+#[test]
+fn req_core_100_the_sunsoft3_banks_16_kib_at_8000_and_four_2_kib_chr_windows() {
+    let mut core = MapperRom::new(67).prg(8).chr(32).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
+
+    core.write_memory(0xF800, 0x02);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    for (address, bank) in [(0x8800u16, 0u8), (0x9800, 1), (0xA800, 2), (0xB800, 3)] {
+        core.write_memory(address, bank);
+    }
+
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+}
+
+/// The two fields of the page that are narrower than the byte written into them: `$F800` is
+/// `...X PPPP`, whose `X` is "a 1 bit latch, present but unused", and the CHR registers reach
+/// only six bits because "the hardware only has six pins for CHR banking, for a limit of 128KB
+/// of CHR". Both are checked on a ROM whose bank count does **not** divide the dropped bit, so
+/// that masking and not masking give different banks — Mesen 2 passes the whole byte through and
+/// relies on its own wrap.
+#[test]
+fn req_core_100_the_sunsoft3_prg_latch_bit_and_the_two_spare_chr_bits_are_dropped() {
+    let mut core = MapperRom::new(67).prg(12).chr(48).load();
+    assert_eq!([0, 1, 10, 11], core.prg_windows());
+
+    // $12: bank 2 with the unused latch set. Taken whole it would be bank 18, which on six
+    // 16 KiB banks is bank 0.
+    core.write_memory(0xF800, 0x12);
+    assert_eq!([4, 5, 10, 11], core.prg_windows());
+
+    // $45: 2 KiB CHR bank 5, which is 1 KiB banks 10 and 11. Taken whole it would be bank 69,
+    // which on twenty-four 2 KiB banks is bank 21, i.e. 1 KiB banks 42 and 43.
+    core.write_memory(0x8800, 0x45);
+    assert_eq!([10, 11], core.chr_windows()[..2]);
+}
+
+/// `$E800` is `.... ..MM`: "Nametable mirroring (0=vertical, 1=horizontal, 2=1scA, 3=1scB)", the
+/// four states "aka connect VRAM A10 to (0=PPU A10, 1=PPU A11, 2=Gnd, 3=Vcc)".
+#[test]
+fn req_core_100_the_sunsoft3_mirroring_register_has_four_states() {
+    for (value, expected) in [
+        (0x00u8, zax_nes::NametableMirroring::Vertical),
+        (0x01, zax_nes::NametableMirroring::Horizontal),
+        (0x02, zax_nes::NametableMirroring::SingleScreenA),
+        (0x03, zax_nes::NametableMirroring::SingleScreenB),
+        // Bits 2-7 are not part of `MM`.
+        (0xFE, zax_nes::NametableMirroring::SingleScreenA),
+    ] {
+        let mut core = MapperRom::new(67).prg(8).chr(32).load();
+        core.write_memory(0xE800, value);
+        assert_eq!(expected, core.mirroring(), "$E800 = {value:02X}");
+    }
 }

@@ -356,9 +356,11 @@ impl Cartridge {
             // proves it rather than taking its word.
             // MF-6b step 1 adds the Konami VRC3 (73), whose 16-bit counter is clocked by M2 and
             // has no scanline mode at all (nesdev, "VRC3").
+            // MF-6b step 2 adds the Irem H3001 (65) and the Sunsoft-3 (67), the two plain
+            // 16-bit CPU-cycle down counters (nesdev, "INES Mapper 065" and "INES Mapper 067").
             clocks_on_cpu_cycle: matches!(
                 mapper,
-                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 69 | 73 | 85
+                5 | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 64 | 65 | 67 | 69 | 73 | 85
             ),
         };
         cartridge.reset();
