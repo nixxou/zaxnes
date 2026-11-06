@@ -38,6 +38,8 @@ use super::mappers::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
+#[cfg(feature = "board-jaleco-72-92-86")]
+use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
 use super::{BankWindows, Board, CartridgeMemory};
@@ -95,6 +97,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-small-boards")]
     70,
     71,
+    #[cfg(feature = "board-jaleco-72-92-86")]
+    72,
     73,
     #[cfg(feature = "board-small-boards")]
     75,
@@ -108,11 +112,15 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-taito-x1")]
     82,
     85,
+    #[cfg(feature = "board-jaleco-72-92-86")]
+    86,
     87,
     #[cfg(feature = "board-namcot108")]
     88,
     #[cfg(feature = "board-small-boards")]
     89,
+    #[cfg(feature = "board-jaleco-72-92-86")]
+    92,
     #[cfg(feature = "board-small-boards")]
     93,
     #[cfg(feature = "board-94")]
@@ -347,6 +355,16 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(TaitoX1017::RAM_SIZE),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 086"): "No PRG RAM (mapper ports occupy $6000-$7FFF instead)".
+        // With no RAM behind that window `Cartridge::cpu_write` walks past its PRG-RAM branch and
+        // `Mapper::write_register` sees the address intact, which is how the JF-13 decodes its two
+        // ports without an `intercept_cpu_write` body -- the same arm, and the same reason, that
+        // mappers 47 and 37 are on above (MF-6c step 7).
+        #[cfg(feature = "board-jaleco-72-92-86")]
+        86 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // The three boards that carry no PRG-RAM at all, each on its page's own words:
         //
         // * 30, MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None";
@@ -436,6 +454,15 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // "Mappers with bus conflicts" too (MF-6a step 3).
         // Mesen 2 gives mapper 185 the CNROM board's conflicts (`CnromProtect.h:21`), which
         // the *CNROM* board page describes for the family (MF-6a step 4).
+        // *INES Mapper 072* gives Jaleco's JF-17 "Bus conflicts: Yes" against its port at
+        // $8000-$FFFF, and *INES Mapper 092* is "identical to mapper 072 except for the
+        // different PRG Setup", so the JF-19 has them too (MF-6c step 7). Mesen 2 agrees for
+        // both (`JalecoJf17_19.h:19`). **Mapper 86 is deliberately absent**: its page gives the
+        // JF-13 no bus-conflict line and its ports are below $8000, where the PRG-ROM does not
+        // drive -- the accidental copies at $E000-$FFFF are the board's missing address line and
+        // not its output enable. Mesen 2 does not give it conflicts either.
+        #[cfg(feature = "board-jaleco-72-92-86")]
+        72 | 92 => true,
         // *INES Mapper 077* gives the Irem LROG017 "Bus conflicts: yes" against its one register
         // at $8000-$FFFF: two 74161s latch the write and nothing on the board disables the PRG
         // ROM's output enable while they do (MF-6c step 6). Mesen 2 agrees
@@ -556,6 +583,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // steps 2 to 5 measured as full.
         #[cfg(feature = "board-77")]
         77 => Board::DecodeBoard(DecodeBoard::IremLrog017(IremLrog017::new(memory))),
+        // MF-6c step 7: Jaleco's three boards with a uPD7756C speech chip, which this build does
+        // not implement (§4.8). Mappers 72 and 92 are the JF-17 and the JF-19, one board whose
+        // `is_jf19` bool picks which PRG window the latch drives; mapper 86 is the JF-13, a
+        // different board with the same chip, so it is a second variant and not a parameter.
+        #[cfg(feature = "board-jaleco-72-92-86")]
+        72 | 92 => Board::DecodeBoard(DecodeBoard::JalecoJf17(JalecoJf17::new(memory, mapper))),
+        #[cfg(feature = "board-jaleco-72-92-86")]
+        86 => Board::DecodeBoard(DecodeBoard::JalecoJf13(JalecoJf13::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),

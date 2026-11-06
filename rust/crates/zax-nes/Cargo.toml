@@ -29,6 +29,7 @@ default = [
     "board-68",
     "board-68-chr-nametables",
     "board-77",
+    "board-jaleco-72-92-86",
     "board-eeprom",
     "board-158",
     "board-mmc3-multicart",
@@ -112,6 +113,16 @@ board-decode-boards = []
 # member of `DecodeBoard`, and the board whose own bar was `Ppu2C02::read_pattern_planes` (§5
 # MF-6c step 5 of `docs/review/MF-6-inventory.md`).
 board-77 = ["board-decode-boards"]
+
+# Mappers 72, 92 and 86 -- Jaleco's JF-17, JF-19 and JF-13, the three boards with a uPD7756C
+# ADPCM speech chip (MF-6c step 7). Six titles. Two `DecodeBoard` variants and no `Board`
+# variant: 72 and 92 are one board whose `is_jf19` bool picks which PRG window its latch drives,
+# and 86 is a different board with the same chip. **The audio is not implemented and that is a
+# decision, not an omission**: REQ-CORE-075's list of expansion-audio chips does not include it
+# and its samples live in a mask ROM inside the ASIC, which is in no source this project may read
+# (§4.8 of `docs/review/MF-6-inventory.md`). `expansion_audio_output` keeps its `None` default and
+# a test pins the silence. Implies `board-decode-boards`.
+board-jaleco-72-92-86 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

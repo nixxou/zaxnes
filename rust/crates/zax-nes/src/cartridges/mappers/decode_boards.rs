@@ -4,7 +4,7 @@
 // `Board::DecodeBoard` uninhabited. One clear error beats nine confusing ones. **A later member
 // of this enum adds its feature to the `any` below**, and to nothing else -- the module, the
 // `Board` variant, its `dispatch!` arm and the registry's `use` are all behind the umbrella.
-#[cfg(not(any(feature = "board-77")))]
+#[cfg(not(any(feature = "board-77", feature = "board-jaleco-72-92-86")))]
 compile_error!(
     "feature `board-decode-boards` is implied by each of its boards (`board-77`, …) and is not \
      meant to be selected on its own"
@@ -13,6 +13,8 @@ compile_error!(
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 use super::Mapper;
+#[cfg(feature = "board-jaleco-72-92-86")]
+use super::{JalecoJf13, JalecoJf17};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -60,6 +62,17 @@ pub enum DecodeBoard {
     /// Mapper 77, the Irem LROG017 of *Napoleon Senki* (MF-6c step 6).
     #[cfg(feature = "board-77")]
     IremLrog017(IremLrog017),
+    // Appended by MF-6c step 7, which adds three numbers and **no** `Board` variant: step 6
+    // paid for the discriminant and measured it at zero, so a board joining this enum is now
+    // free to the rest of the library exactly as one joining [`SmallBoard`] was until step 2.
+    //
+    // [`SmallBoard`]: super::SmallBoard
+    /// Mappers 72 and 92, Jaleco's JF-17 and JF-19, which differ by one `bool`.
+    #[cfg(feature = "board-jaleco-72-92-86")]
+    JalecoJf17(JalecoJf17),
+    /// Mapper 86, Jaleco's JF-13: the same speech chip on a GNROM-like board.
+    #[cfg(feature = "board-jaleco-72-92-86")]
+    JalecoJf13(JalecoJf13),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -70,6 +83,10 @@ macro_rules! inner {
         match $self {
             #[cfg(feature = "board-77")]
             DecodeBoard::IremLrog017($b) => $body,
+            #[cfg(feature = "board-jaleco-72-92-86")]
+            DecodeBoard::JalecoJf17($b) => $body,
+            #[cfg(feature = "board-jaleco-72-92-86")]
+            DecodeBoard::JalecoJf13($b) => $body,
         }
     };
 }
@@ -122,12 +139,20 @@ impl Mapper for DecodeBoard {
         None
     }
 
-    /// `None` as well, which is mapper 77's own answer (its two chips are not one view) and so
-    /// costs this dispatch nothing beyond the arm it already has. A later member of this enum that
-    /// *can* show a view turns this into a forward; until one does, the direct `None` is the body
-    /// the TQROM and the MMC5 already give.
-    fn chr_peek_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        None
+    /// **Forwarded, unlike [`DecodeBoard::chr_view`] above**, and MF-6c step 7 is the step that
+    /// turned it from a direct `None` into this: three of the four boards here are ordinary
+    /// CHR-ROM boards that *can* show a view, and what the view buys is not speed but accuracy.
+    /// `Ppu2C02::read_row_planes` captures `view.offsets()` when a background row is drawn and
+    /// replays the row through them later (REQ-CORE-037); with `None` it falls back on
+    /// `read_pattern_planes` **with the banks as they are now**, so a game that switches its
+    /// 8 KiB CHR bank mid-frame would have its 3D tiles captured from the wrong bank.
+    ///
+    /// This dispatch is **not** inside `Ppu2C02::run_dots` — which is the whole reason
+    /// [`DecodeBoard::chr_view`] may not be forwarded — and [`super::SmallBoard`] and
+    /// [`super::IrqBoard`] both forward it already. Mapper 77 answers `None` from its own impl,
+    /// because its two CHR chips are not one [`ChrView`].
+    fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        inner!(self, b => b.chr_peek_view(memory))
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {

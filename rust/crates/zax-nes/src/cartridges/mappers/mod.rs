@@ -43,6 +43,10 @@ mod iremg101;
 mod irq_boards;
 #[cfg(feature = "board-small-boards")]
 mod jaleco_jf11;
+#[cfg(feature = "board-jaleco-72-92-86")]
+mod jaleco_jf13;
+#[cfg(feature = "board-jaleco-72-92-86")]
+mod jaleco_jf17;
 mod jaleco_ss88006;
 mod mmc1;
 mod mmc2;
@@ -107,6 +111,10 @@ pub use iremg101::IremG101;
 pub use irq_boards::IrqBoard;
 #[cfg(feature = "board-small-boards")]
 pub use jaleco_jf11::JalecoJf11;
+#[cfg(feature = "board-jaleco-72-92-86")]
+pub use jaleco_jf13::JalecoJf13;
+#[cfg(feature = "board-jaleco-72-92-86")]
+pub use jaleco_jf17::JalecoJf17;
 pub use jaleco_ss88006::JalecoSs88006;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;

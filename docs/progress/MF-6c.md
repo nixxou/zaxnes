@@ -1299,3 +1299,198 @@ needed.
 **−136 318** and the worst of thirteen `metroid` +0.000 %, with four level-2 cores +0, the fifth
 −20 823 and `read_pattern_planes` **107 unchanged**, which was this board's own stop-the-lot
 condition.
+
+## Step 7 — the three Jaleco µPD7756C boards, **twelve of thirteen below the baseline**
+
+### What was built: three numbers, two boards, two `DecodeBoard` variants
+
+§5 MF-6c step 6 of the inventory asked for "the three-way parameter (PRG size, the command bit
+'required by mapper 92 games only', and 86's registers at $6000-$6FFF)". **Reading the three pages
+makes it a two-way parameter and a second board**, and that is the only change this step makes to
+the plan: mappers 72 and 92 are one board — nesdev ("INES Mapper 092") says so in as many words,
+"This mapper is identical to mapper 072 except for the different PRG Setup" — while mapper 86 is a
+GNROM-like board with its ports below $8000 and a different register layout, sharing only the
+speech chip. One `bool` for the first pair, a second variant for the third number. Mesen 2 splits
+them the same way (`JalecoJf17_19.h` with a `_jf19Mode` flag, `JalecoJf13.h` on its own).
+
+| what | where | the page's words |
+| --- | --- | --- |
+| the PRG latch, **on the rising edge of bit 7** | `JalecoJf17::write_register` | "When a 1 is written after a 0 was previously written, load the bank specified by D" |
+| the CHR latch, the same on bit 6 | the same method | the second diagram, `xCxx DDDD` |
+| three bits of PRG on 72 and four on 92 | the same method | "Required by mapper 92 games only" against bit 3 |
+| which window the register drives | the same method, `is_jf19` | the two PRG Setup diagrams: `PRG Reg \| { -1}` and `{ 0 } \| PRG Reg` |
+| the write ANDed with the ROM's byte, on both numbers | `registry::has_bus_conflicts`, arm `72 \| 92` | "Bus conflicts: Yes" |
+| mirroring from the header and no register | nothing at all | "Cuttable trace selects vertical or horizontal" |
+| 86's two fields, with the CHR field's third bit up at bit 6 | `JalecoJf13::update_banks` | `$6000-$6FFF: [.CPP ..CC]` |
+| 86's ports being the $6000-$7FFF window itself | `registry::board_memory_sizes`, arm `86` | "No PRG RAM (mapper ports occupy $6000-$7FFF instead)" |
+| 86's accidental copies | `JalecoJf13::write_register`, one mask | "accidental copies of the registers are present at $E000-$FFFF because /ROMSEL is high when M2 is low, not just when A15 is low" |
+
+**Two things fell out rather than being written**, and both are worth naming because they are the
+reason this step costs what it does:
+
+1. **`address & 0x7000` *is* mapper 86's decode and its design flaw at once.** That mask is $6000
+   for $6000-$6FFF and for $E000-$EFFF, $7000 for $7000-$7FFF and for $F000-$FFFF, and neither for
+   any of $8000-$DFFF. So the two documented ports, their two accidental copies and the whole dead
+   middle are one comparison — which is what a /ROMSEL driven by M2 instead of by A15 amounts to.
+2. **Mapper 86 needs no `intercept_cpu_write`.** With `prg_ram: Some(0)`,
+   `Cartridge::cpu_write` walks past its PRG-RAM branch and hands $6000-$7FFF to
+   [`Mapper::write_register`] with the address intact — the route mappers 47 and 37 already use. So
+   this step adds **no body to that dispatch**, where mapper 140's board (the same company, the
+   same window) has one.
+
+**One power-on value no page gives**, and it is mapper 92's PRG register. On mapper 72 the
+$C000-$FFFF window is the page's wired `{ -1}`; on mapper 92 the same window is the register's and
+the page says nothing about what it holds at power-on. `JalecoJf17::reset_banks` puts the image's
+**last** bank there on both numbers, which is Mesen 2's state (`SelectPrgPage(1, -1)` in its
+`InitMapper`, whatever the mode) and the only choice that puts a cartridge's vectors under
+$FFFA-$FFFF before the first write.
+
+### The audio: **not implemented, and that is §4.8's decision, not this step's omission**
+
+Bits 5 and 4 of mapper 72's port and the whole of mapper 86's $7000-$7FFF drive a µPD7756C ADPCM
+speech chip — a track number, a start bit, and a reset that must be "low for at least 34 cycles".
+§4.8 of the inventory settles it and this step quotes it rather than re-deciding: REQ-CORE-075
+lists the expansion-audio chips that MAY be emulated — "VRC6, VRC7, MMC5, Namco 163, Sunsoft 5B,
+FDS" — and this is not one of them, and more decisively the samples are an ADPCM mask ROM **inside
+the ASIC**, bytes that are in `assets-free/`, in `assets-neutral/`, in the spec and in no
+documentation this role may read. **No Q ticket**, for the reason §4.8 gives: nothing normative is
+ambiguous.
+
+So the ports are decoded and dropped, [`Mapper::expansion_audio_output`] keeps its `None` default,
+and `mf_6c_the_three_jaleco_upd7756c_boards_are_silent` pins the silence over eight writes on both
+of the family's decodes so that it is a choice and not a bug — the shape Q-123's VRC6 test gave an
+ignored bit. The two bits are **not** stored in the save state: there is no chip for them to be the
+state of.
+
+### One dispatch changed its answer, and the reason is accuracy and not speed
+
+[`DecodeBoard::chr_peek_view`] was a direct `None` in step 6 and is a **forward** from this step
+on. Three of this enum's four boards are ordinary CHR-ROM boards that can show a view, and what a
+view buys is not speed: `Ppu2C02::read_row_planes` captures `view.offsets()` when a background row
+is drawn and replays the row through them later (REQ-CORE-037), and with `None` it falls back on
+`read_pattern_planes` **with the banks as they are now** — so a game that switches its 8 KiB CHR
+bank mid-frame would have its 3D tiles captured from the wrong bank. That dispatch is not inside
+`Ppu2C02::run_dots`, which is the whole reason [`DecodeBoard::chr_view`] may *not* be forwarded,
+and [`SmallBoard`] and [`IrqBoard`] both forward it already. Mapper 77 goes on answering `None`
+from its own impl, because its two CHR chips cannot be one `ChrView`.
+
+### Instrument 2: PR-1's thirteen — **twelve below the baseline**, worst +0.000 %
+
+`callgrind-diff.py`, label `mf6c-7-jaleco72`, against `mf6c-0-8496c503`:
+
+| ROM | board | `8496c503` | **step 7** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 311 891 | **3 308 285 408** | −26 483 | −0.001 % |
+| `oamstr` | NROM | 3 318 460 965 | **3 318 452 514** | −8 451 | −0.000 % |
+| `m1` | MMC1 | 4 885 949 431 | **4 885 900 439** | −48 992 | −0.001 % |
+| `m4` | MMC3 | 5 472 514 995 | **5 472 463 007** | −51 988 | −0.001 % |
+| `m0` | NROM | 5 520 458 691 | **5 520 444 917** | −13 774 | −0.000 % |
+| `metroid` | MMC1 | 5 115 944 288 | **5 115 943 738** | −550 | −0.000 % |
+| `smb1` | NROM | 5 996 381 185 | **5 996 335 416** | −45 769 | −0.001 % |
+| `mm2` | MMC1 | 6 017 851 607 | **6 017 820 847** | −30 760 | −0.001 % |
+| `z2` | MMC1 | 6 291 458 642 | **6 291 437 400** | −21 242 | −0.000 % |
+| `readbuf` | CNROM | 6 834 538 187 | **6 834 536 251** | −1 936 | −0.000 % |
+| `duelito` | NROM | 7 380 437 910 | 7 380 453 626 | **+15 716** | **+0.000 %** |
+| `smb3` | MMC3 | 7 949 470 334 | **7 949 427 277** | −43 057 | −0.001 % |
+| `mmc5` | MMC5 | 11 279 383 781 | **11 279 348 896** | −34 885 | −0.000 % |
+| **total** | | **79 371 161 907** | **79 370 849 736** | **−312 171** | **−0.000 %** |
+
+One ROM of the thirteen is above the baseline and it is `duelito` at **+15 716**, a thirteenth of
+the ±57 k-per-ROM `luaH_getshortstr` floor §5.11 measured and one thirteen-hundredth of the owner's
++0.02 %. The set total is **−312 171**, the lowest this lot has recorded, and `mmc5` is −34 885 —
+so the two new `DecodeBoard` variants confirm step 6's finding from the other side: a board joining
+*this* enum is free, where the eleventh variant of `SmallBoard` or the twelfth of `IrqBoard` is
++0.066 % or +0.132 % on that ROM.
+
+### Instrument 1: level 2 — four cores **+0**, the fifth below, and **both totals inside**
+
+`l2-diff.py --bar`, against `mf6c-0-8496c503`:
+
+| game/stage | `8496c503` | **step 7** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 147 295 142** | **+0** | **equal** |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 775 651 048** | **+0** | **equal** |
+| `mm2/core` | 12 036 822 861 | **12 036 822 861** | **+0** | **equal** |
+| `smb3/core` | 15 315 558 322 | **15 315 537 499** | **−20 823** | −0.000 % |
+| `metroid/total` | 13 735 627 354 | 13 735 675 814 | +48 460 | +0.000 % |
+| `smb1/total` | 13 589 030 161 | **13 586 678 949** | −2 351 212 | −0.017 % |
+| `zelda2/total` | 15 360 284 960 | **15 359 136 808** | −1 148 152 | −0.007 % |
+| `mm2/total` | 18 976 349 017 | **18 976 303 003** | −46 014 | −0.000 % |
+| `smb3/total` | 24 187 154 526 | 24 189 760 284 | +2 605 758 | +0.011 % |
+
+**No figure of this instrument needs rule 2's layout-noise argument at all**: the two above the
+baseline are +0.000 % and +0.011 %, and both are *inside* the owner's +0.02 % on their own. The
+argument is made anyway, because the lot has made it at every step and a reader should be able to
+check it: `sym6c.sh` at 400 000 names four symbols over all five games and they are `getgeneric`
+(+2 247 212 on `smb3`, −1 330 936 on `smb1`), `luaH_set` (+879 700 on `smb3`) and
+`luaH_getshortstr` (−1 337 100 and −1 373 608). Lua's `ltable.c`, nothing else, and nothing at all
+on `metroid`. `smb3/core` is the same −20 823 step 6 measured, to the instruction.
+
+### Instrument 3: the post-LTO dump
+
+`pins63.py`, the baseline and step 6 beside it:
+
+| symbol | `8496c503` | step 6 | **step 7** |
+| --- | ---: | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | 3 626 | **3 626** |
+| `Board::ppu_peek` | 272 | 291 | 296 |
+| `NesBus::write_internal` | 3 815 | 4 035 | **3 843** |
+| `Ppu::run_dots` | 1 907 | 1 919 | **1 919** |
+| `NesBus::catch_up_ppu` | 188 | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | 107 | 107 | **107** |
+| `Ppu2C02::read_nametable_inner` | 114 | 75 | **75** |
+
+`shape.py`'s five others — `resolve` 1 948, `branch` 457, `read_cycle` 181, `tick` 82,
+`read_internal` 175 — are identical to the instruction, and `Cartridge::default_cpu_read` is
+**429**, step 6's count unchanged: two more variants in this enum do not touch the function four
+earlier steps were charged 7 456 756 instructions on.
+
+**`NesBus::write_internal` went *down*, 4 035 → 3 843**, which is worth a line because it is the
+only pinned symbol this lot has seen fall while code was added: both new register decodes carry
+`#[inline(never)]`, so what that body gained is two `callq`s and what it lost is whatever LLVM had
+spilled around step 6's arms. `Board::ppu_peek` 291 → 296 is the two new inner-match arms, and the
+dynamic column prices them at nothing — `readbuf`, the CNROM whose whole run is fetches, is
+−1 936, and all five level-2 cores are at or below the baseline.
+
+### The tests, 911 → **915**
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_jf17_latches_load_on_a_rising_edge_of_their_own_bit` | the power-on windows; bit 7 clear loading nothing; **0→1 loading, 1→1 and 1→0 not**; the three-bit field on mapper 72 with `$8F` reaching bank 7; the CHR latch on bit 6 being independent of both; the 8 KiB CHR bank covering $0000-$1FFF whole; and the mirroring a write cannot change |
+| `req_core_100_mapper_92_drives_the_other_window_with_a_fourth_bank_bit` | **both numbers on one write of `$8B`**: mapper 72's three bits making it 16 KiB bank 3 at $8000-$BFFF with the image's last bank wired above, and mapper 92's four making it bank 11 at $C000-$FFFF with bank 0 wired below |
+| `req_core_100_the_jf13_registers_have_accidental_copies_at_e000` | the `.CPP ..CC` split with **bit 6 as the CHR field's third bit** (`$61` being CHR bank 5 and not 1); $E123 being the $6000 port; $F000 being the **audio** port's copy and moving no bank; all six of $8000-$DFFF decoding nothing; and the board carrying no PRG-RAM |
+| `mf_6c_the_three_jaleco_upd7756c_boards_are_silent` | `has_expansion_audio` false and `expansion_audio_output` `None` on all three numbers, across eight writes of the track number, the start bit and the reset bit on both of the family's decodes |
+
+One test helper fixed a trap worth recording for the next board with bus conflicts:
+**`prg_bank_all_ones(15)` does not make `$E000` writable through the conflict**, because the
+fixture's stub program and the vectors live in the last bank — `$E000` reads `$4C` (a `JMP`) there,
+and `$03 & $4C` is 0. The JF-17 test writes through `$C000` and `prg_bank_all_ones(14)` instead,
+the other half of the same wired window, and says so in a comment.
+
+The sweeps held with nothing added: these three boards move on no CPU cycle and watch no PPU bus,
+and `req_core_100_every_required_mapper_is_registered` took the three numbers in its `additions`
+list behind `cfg!(feature = "board-jaleco-72-92-86")` (47 → 50 entries).
+
+**Four configurations green**, `cargo fmt --check` clean and clippy `-D warnings` clean on
+`zax-nes` in all four and on `zax-harness`, **no new `allow` of any kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default | **852** |
+| `--features parked-boards` | **857** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-jaleco-72-92-86` | 787 |
+
+With `zax-harness` the default figure is **915 passed / 0 failed / 8 ignored**, step 6's 911 plus
+this step's four. `board-jaleco-72-92-86` is **inside the tolerance by a factor of fifty on the
+worst figure of either run**, so it goes in `default`, and `docs/review/BOARD-FEATURES.md` has its
+row.
+
+[PROGRESS] MF-6c step 7/11 done: Jaleco's JF-17, JF-19 and JF-13 on three numbers, 915 / 0 / 8,
+**twelve of thirteen ROMs below the baseline** with the set total −312 171 and `mmc5` −34 885, four
+level-2 cores +0 and the fifth −20 823 — and the µPD7756C audio left out on §4.8's grounds with a
+test pinning the silence.

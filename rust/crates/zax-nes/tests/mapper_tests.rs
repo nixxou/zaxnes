@@ -90,7 +90,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 68 (the Sunsoft-4), behind `board-68`, with its CHR-ROM nametable mode behind the second
     //   feature `board-68-chr-nametables` (MF-6c step 4);
     // * 77 (the Irem LROG017 of Napoleon Senki), behind `board-77` -- the first member of
-    //   `DecodeBoard`, this project's second shared `Board` variant (MF-6c step 6).
+    //   `DecodeBoard`, this project's second shared `Board` variant (MF-6c step 6);
+    // * 72 and 92 (Jaleco's JF-17 and JF-19) and 86 (the JF-13), the three boards with a
+    //   uPD7756C speech chip this build does not sound, behind `board-jaleco-72-92-86`
+    //   (MF-6c step 7).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -107,7 +110,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let multicart = cfg!(feature = "board-mmc3-multicart");
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
-    let additions: [(i32, bool); 47] = [
+    let jaleco = cfg!(feature = "board-jaleco-72-92-86");
+    let additions: [(i32, bool); 50] = [
         (19, true),
         (24, true),
         (26, true),
@@ -120,6 +124,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (68, cfg!(feature = "board-68")),
         (69, true),
         (70, small),
+        (72, jaleco),
         (73, true),
         (75, small),
         (76, namcot),
@@ -128,8 +133,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (80, taito_x1),
         (82, taito_x1),
         (85, true),
+        (86, jaleco),
         (88, namcot),
         (89, small),
+        (92, jaleco),
         (93, small),
         (94, cfg!(feature = "board-94")),
         (95, namcot),
@@ -1986,6 +1993,196 @@ fn req_core_100_mapper_77_reads_chr_rom_at_0000_and_chr_ram_at_0800() {
         [0x50, 0x51, 0x52, 0x53],
         [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|address| nametable(&mut core, address))
     );
+}
+
+// ------------------------------------------- Jaleco JF-17 / JF-19 / JF-13 (72, 92, 86)
+
+/// nesdev ("INES Mapper 072"): the port at $8000-$FFFF is two latches, each loading on the
+/// **rising edge** of its own bit — "When a 1 is written after a 0 was previously written, load
+/// the bank specified by D" for bit 7 (PRG) and bit 6 (CHR). $C000-$FFFF is the page's `{ -1}`,
+/// wired (MF-6c step 7).
+#[cfg(feature = "board-jaleco-72-92-86")]
+#[test]
+fn req_core_100_the_jf17_latches_load_on_a_rising_edge_of_their_own_bit() {
+    // The writes go to $C000, inside the **wired** window, whose 8 KiB bank 14 is filled with
+    // $FF: this board has bus conflicts, so a write through a numbered bank would be masked, and
+    // that window is the only one that cannot move under the test's feet. $E000-$FFFF is the
+    // other half of the same window and is **not** usable, because that is where the fixture's
+    // stub program and the vectors live.
+    let mut core = MapperRom::new(72)
+        .prg(16)
+        .chr(128)
+        .prg_bank_all_ones(14)
+        .load();
+    assert_eq!(72, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0, 1, 255, 15], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // Bit 7 clear: no load, whatever the field says.
+    core.mapper_write(0xC000, 0x03);
+    assert_eq!([0, 1, 255, 15], core.prg_windows(), "no edge, no load");
+    // 0 -> 1: the 16 KiB bank of bits 2-0, at $8000-$BFFF.
+    core.mapper_write(0xC000, 0x83);
+    assert_eq!([6, 7, 255, 15], core.prg_windows());
+    // 1 -> 1 is not an edge: the field is ignored.
+    core.mapper_write(0xC000, 0x85);
+    assert_eq!([6, 7, 255, 15], core.prg_windows(), "still no edge");
+    // 1 -> 0 is not one either, and then 0 -> 1 loads the new field.
+    core.mapper_write(0xC000, 0x05);
+    assert_eq!([6, 7, 255, 15], core.prg_windows());
+    core.mapper_write(0xC000, 0x85);
+    assert_eq!([10, 11, 255, 15], core.prg_windows());
+    // Bit 3 is "Required by mapper 92 games only": on this board the field is three bits, so $8F
+    // is bank 7 -- the image's last, which is the one $C000 is wired to.
+    core.mapper_write(0xC000, 0x0F);
+    core.mapper_write(0xC000, 0x8F);
+    assert_eq!([255, 15, 255, 15], core.prg_windows());
+
+    // The CHR latch is bit 6, independent of bit 7 and of the PRG field.
+    core.mapper_write(0xC000, 0x47); // Bit 6 rising: 8 KiB CHR bank 7.
+    assert_eq!(56, core.chr_bank(0x0000));
+    assert_eq!(
+        63,
+        core.chr_bank(0x1C00),
+        "one 8 KiB bank over the whole range"
+    );
+    core.mapper_write(0xC000, 0x45); // 1 -> 1: ignored.
+    assert_eq!(56, core.chr_bank(0x0000), "no edge on bit 6 either");
+    core.mapper_write(0xC000, 0x05);
+    core.mapper_write(0xC000, 0x45);
+    assert_eq!(40, core.chr_bank(0x0000));
+    // And the PRG windows did not move while the CHR latch was being driven.
+    assert_eq!([255, 15, 255, 15], core.prg_windows());
+
+    // Mirroring is a "Cuttable trace", so it is the header's and no write changes it.
+    let before = core.mirroring();
+    core.mapper_write(0xC000, 0xFF);
+    assert_eq!(before, core.mirroring());
+}
+
+/// nesdev ("INES Mapper 092"): "This mapper is identical to mapper 072 except for the different
+/// PRG Setup" — the page's two diagrams put the register at $8000-$BFFF with `{ -1}` fixed above
+/// it on mapper 72, and `{ 0 }` fixed below it with the register at $C000-$FFFF on mapper 92. The
+/// fourth bank bit is the one marked "Required by mapper 92 games only" (MF-6c step 7).
+#[cfg(feature = "board-jaleco-72-92-86")]
+#[test]
+fn req_core_100_mapper_92_drives_the_other_window_with_a_fourth_bank_bit() {
+    // One write of $8B on each number, through 8 KiB bank 0 filled with $FF. On mapper 92 that
+    // window is the fixed `{ 0 }` and cannot move; on mapper 72 it is the register's own, and one
+    // write is all this test needs from it.
+    let image = |mapper: usize| MapperRom::new(mapper).prg(32).chr(128).prg_bank_all_ones(0);
+
+    let mut jf17 = image(72).load();
+    assert_eq!(
+        [255, 1, 30, 31],
+        jf17.prg_windows(),
+        "72: the fixed window is the image's last"
+    );
+    jf17.mapper_write(0x8000, 0x8B);
+    assert_eq!(
+        [6, 7, 30, 31],
+        jf17.prg_windows(),
+        "72: three bits, so $8B is 16 KiB bank 3"
+    );
+
+    let mut jf19 = image(92).load();
+    assert_eq!(92, jf19.cartridge().unwrap().mapper_number());
+    assert_eq!(
+        [255, 1, 30, 31],
+        jf19.prg_windows(),
+        "92: the fixed window is bank 0"
+    );
+    jf19.mapper_write(0x8000, 0x8B);
+    assert_eq!(
+        [255, 1, 22, 23],
+        jf19.prg_windows(),
+        "92: four bits, so $8B is 16 KiB bank 11, and at $C000"
+    );
+
+    // The CHR half is the same board on both numbers: bit 6's edge, four bits of 8 KiB bank.
+    jf19.mapper_write(0x8000, 0x4C);
+    assert_eq!(96, jf19.chr_bank(0x0000));
+}
+
+/// nesdev ("INES Mapper 086"): `$6000-$6FFF: [.CPP ..CC]`, the CHR field's third bit sitting up at
+/// bit 6 above a GNROM-like pair; `$7000-$7FFF: [..RP TTTT]`, the `µPD7756C`'s track, start and
+/// reset. And the page's design flaw: "accidental copies of the registers are present at
+/// $E000-$FFFF because /ROMSEL is high when M2 is low, not just when A15 is low" (MF-6c step 7).
+#[cfg(feature = "board-jaleco-72-92-86")]
+#[test]
+fn req_core_100_the_jf13_registers_have_accidental_copies_at_e000() {
+    // 128 KiB of PRG is four 32 KiB banks for the two-bit field and 64 KiB of CHR is eight 8 KiB
+    // banks for the three-bit one, which is the board the page describes.
+    let mut core = MapperRom::new(86).prg(16).chr(64).load();
+    assert_eq!(86, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // "..PP" at bits 5-4 and "..CC" at bits 1-0.
+    core.mapper_write(0x6000, 0x23);
+    assert_eq!([8, 9, 10, 11], core.prg_windows(), "32 KiB PRG bank 2");
+    assert_eq!(24, core.chr_bank(0x0000), "8 KiB CHR bank 3");
+    // **Bit 6 is the CHR field's third bit**: $61 is PRG bank 2 again and CHR bank 5, not 1.
+    core.mapper_write(0x6000, 0x61);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(40, core.chr_bank(0x0000), "bit 6 is CHR A15");
+
+    // The accidental copy: $E000-$EFFF *is* $6000-$6FFF, because `address & $7000` cannot tell
+    // them apart — which is what a /ROMSEL driven by M2 rather than by A15 amounts to.
+    core.mapper_write(0xE123, 0x10);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "$E000 is the $6000 port");
+    assert_eq!(0, core.chr_bank(0x0000));
+    // And $F000-$FFFF is the **audio** port's copy, so it moves no bank at all.
+    core.mapper_write(0xF000, 0xFF);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "$F000 is the $7000 port");
+    assert_eq!(0, core.chr_bank(0x0000));
+    // $8000-$DFFF decodes nothing: `address & $7000` is neither $6000 nor $7000 anywhere in it.
+    for address in [0x8000u16, 0x9000, 0xA000, 0xB000, 0xC000, 0xD000] {
+        core.mapper_write(address, 0x30);
+        assert_eq!([4, 5, 6, 7], core.prg_windows(), "{address:#06X}");
+    }
+
+    // "No PRG RAM (mapper ports occupy $6000-$7FFF instead)": the window is the register.
+    assert_eq!(0, core.cartridge().unwrap().memory().prg_ram().len());
+}
+
+/// §4.8 of `docs/review/MF-6-inventory.md`, and the decision it takes rather than defers: the
+/// three Jaleco boards get their boards and **not their `µPD7756C` audio**. REQ-CORE-075's list of
+/// expansion-audio chips — "VRC6, VRC7, MMC5, Namco 163, Sunsoft 5B, FDS" — does not include it,
+/// and its samples are an ADPCM mask ROM inside the ASIC, in no source this project may read.
+///
+/// The silence is pinned so that it is a choice and not a bug, the way
+/// `q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom` pins the VRC6's ignored bit
+/// (MF-6c step 7).
+#[cfg(feature = "board-jaleco-72-92-86")]
+#[test]
+fn mf_6c_the_three_jaleco_upd7756c_boards_are_silent() {
+    for mapper in [72usize, 92, 86] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+        assert!(
+            !core.cartridge().unwrap().has_expansion_audio(),
+            "mapper {mapper} declares no expansion audio"
+        );
+        // Every write the audio ports take, on both of this family's two decodes: the track
+        // number, the start bit low and the reset bit low.
+        for (address, value) in [
+            (0x7000u16, 0x0Au8),
+            (0x7000, 0x1A),
+            (0x7000, 0x2A),
+            (0xF000, 0x0A),
+            (0xE000, 0x00),
+            (0x8000, 0x30),
+            (0x8000, 0x10),
+            (0x8000, 0x20),
+        ] {
+            core.mapper_write(address, value);
+            assert_eq!(
+                None,
+                core.cartridge().unwrap().expansion_audio_output(),
+                "mapper {mapper}, {address:#06X} = {value:#04X}"
+            );
+        }
+    }
 }
 
 #[test]
