@@ -201,3 +201,57 @@ The row given up, stated once more for the record: **`PPU Misc. / $2007 read w/ 
 | `cargo test --release -p zax-nes -p zax-harness` | **746 passed, 0 failed, 8 ignored** |
 
 The whole suite is green again: the guard was the only non-ignored failure step 1 left.
+
+## Step 4 — the pictures: the owner's case is byte-identical, and the three ROMs come back
+
+### The owner-reported case
+
+The core state `verify/states/smb3-fortress-pause.state` (the state block names its ROM:
+`Super Mario Bros. 3 [USA][Rev 1][!!].nes`, a fortress, paused), two frames after the restore:
+
+    zax-harness render --rom "<Super Mario Bros. 3 [USA][Rev 1][!!].nes>" \
+      --load-state <state> --run 2 --out <dir> --png-nes <png>
+
+and the same with `--advanced --widescreen 128`. Three binaries, each a **clean `git archive`
+build in its own directory with its own `CARGO_TARGET_DIR`**: the reference `c4577878`, the
+baseline `fff53974`, and this tree.
+
+| picture | `c4577878` | baseline `fff53974` | this tree |
+| --- | --- | --- | --- |
+| plain | `b83105c2583e51cb…` | `c8e03f5e1e270dda…` **differs** | **`b83105c2583e51cb…` identical** |
+| `--advanced --widescreen 128` | `5c88a3f88fd01062…` | `00ea68b19a0e038c…` **differs** | **`5c88a3f88fd01062…` identical** |
+
+**Both pictures are byte-identical to a clean build of `c4577878`**, which is what the brief
+asked for, and both were different on the baseline — so the A/B says the back-out is what
+restores them and nothing else was needed.
+
+**The symptom by eye, confirmed.** On the baseline the top row of the floor above the status bar
+is cut and shifted by half a block: in the widescreen capture the left floor section is a broken
+strip of half-height blocks instead of a row of whole ones. On this tree it is a complete row
+again, in both modes. That is the owner's report, reproduced and closed.
+
+### golden-core, this tree against the `d96d73b7` side
+
+`zax-harness golden-core <roms> <out.jsonl> 120` over the 18 commercial ROMs, a clean build of
+`d96d73b7` against this tree: **`diff` clean, all 18 rows identical.** Super Mario Bros. 3 and
+Zelda II explicitly, by row hash: `2747c5bc…` = `2747c5bc…` and `82ded78e…` = `82ded78e…`.
+
+The same run on the baseline says which ROMs the back-out is restoring, and it is exactly the set
+MF-4d step 7 named:
+
+| ROM | baseline vs `d96d73b7` | **this tree** vs `d96d73b7` |
+| --- | --- | --- |
+| `Super Mario Bros. 3 (USA).nes` | **DIFFERS** | **same** |
+| `Zelda II - The Adventure of Link (USA).nes` | **DIFFERS** | **same** |
+| `Zelda II - The Adventure of Link (Europe).nes` | **DIFFERS** | **same** |
+| the other 15 | same | same |
+
+**Three ROMs moved at `a758f923` and three come back; nothing else moves in either direction.**
+The Europe Zelda II is the third: MF-4d step 7 named "Super Mario Bros. 3 and Zelda II", and both
+Zelda II dumps are affected. `Duelito`, the third ROM step 7 named, is a free one and is covered
+by the full golden-core run in step 5.
+
+This is also the sharpest statement of the lot's shape available: golden-core runs **without hack
+code**, so these rows move only because the core's own `$2007` behaviour changed, and they return
+to `d96d73b7`'s exactly. The `$2004` half, which is kept, moves none of the 18 — the same result
+MF-4d step 7 measured with a variant carrying only that half.
