@@ -46,4 +46,35 @@ be driven by a ROM. Each one has to rest on unit tests written against the NESde
 cross-checked against `third_party/mesen2`, with commercial titles named for R0 to run — which is
 exactly the position MF-5a and MF-5b were in, and both shipped from it.
 
+## Step 1 — the inventory
+
+`docs/review/MF-6-inventory.md` §1 to §3. **245 of the numbers Mesen 2 builds a board for are
+numbers this registry refuses**, derived mechanically from `MapperFactory.cpp:279-648` rather than
+transcribed, and split four ways because they are not 245 equal items:
+
+| § | what | count |
+| --- | --- | ---: |
+| 3.1 | boards with licensed titles and no counterpart here | 38 numbers |
+| 3.2 | numbers that are a **parameter** of a board we already have | 27 + the 48 MMC3 clones |
+| 3.3 | unlicensed boards of a single publisher (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | 60 |
+| 3.4 | pirate multicarts, BMC boards and MMC3 clones | 134 |
+| 3.5 | numbers Mesen knows and refuses, the gaps, the UNIF-only boards, the FDS | 23 + the gaps |
+
+Every title count is the figure its own NESdev board page gives — its "N in NesCartDB" line or the
+length of the game list it prints, the two distinguished in the table. NesCartDB's own host was
+unreachable from this session, so the counts are the wiki's transcriptions of it and the document
+says so. Where a page gives neither, the cell says that instead of guessing.
+
+**Two findings worth more than the tables:**
+
+* **REQ-CORE-100's required table is covered in full.** Nothing in this document is required by
+  the spec; the build already adds twelve numbers beyond the table, which REQ-CORE-102 permits in
+  as many words. So the sub-lots are ordered by what each buys, not by compliance.
+* **The profile list has "Super Spike V'ball", and mapper 47 is the Nintendo multicart of exactly
+  that title.** The US standalone is an ordinary mapper 4 and loads today; a user whose dump is
+  `Super Spike V'Ball + Nintendo World Cup` gets REQ-CORE-011's refusal and never reaches the
+  profile. `profiles.json` records no mapper number, so which board each of the 101 dumps sits on
+  is R0's to check — but this one named a missing board by itself, and it is why 47 is in MF-6a.
+
 [PROGRESS] MF-6 step 0/4 done: the plan, the sources, and the ROM situation settled first
+[PROGRESS] MF-6 step 1/4 done: the inventory, 245 numbers in four tables
