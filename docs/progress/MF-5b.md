@@ -440,6 +440,84 @@ there is one fewer thing that can come back out of step with itself. `level` **i
 for the reason `Namco163Audio::level` records: recomputing it would need the waveform evaluated
 without advancing it, and one `i32` is cheaper than that.
 
+## Step 3 — the save states, and the one existing test that found a real bug
+
+Steps 1 and 2 each wrote their own half of the block; this step is where the **behaviour** of it
+is pinned, because the format being right and the machine resuming are two different claims. **No
+production code changed**, so the measured binary of step 2 stands and no new instruction count
+was taken.
+
+### Nothing in the format moved
+
+The board's block is new. No existing block gained, lost or reordered a field. Three things are
+deliberately *not* serialised, each with its reason in the code:
+
+* the two `OperatorPatch`es of each channel — decoded from `$3X` and from the custom patch, both
+  of which *are* in the block, so `load_state` rebuilds them exactly as a write would;
+* `Cartridge::clocks_on_cpu_cycle` — derived from the mapper number at load, like its five
+  neighbours;
+* the four `bool`s the board derives from `$E000` (`prg_ram_on`, `silenced`) and the mirroring,
+  which `Cartridge::load_state` has already restored from the state — recomputing the arrangement
+  here would overwrite the saved one with whatever `$E000` implies.
+
+One thing *is* serialised although it is derived — `Vrc7Audio::level` — for the reason
+`Namco163Audio::level`'s field doc gives: recomputing it would need the whole waveform evaluated
+without advancing it, and one `i32` makes the restored `M` exactly the saved one.
+
+### What the seven tests prove rather than assert
+
+| test | what it pins |
+| --- | --- |
+| `req_core_090_a_vrc7_state_round_trips_through_the_fm_chip` | **600 cycles of `M` identical** after a restore, with four channels on four instruments (one of them the custom patch) and the machine deliberately driven elsewhere in between: twelve phase accumulators, twelve envelopes and their phases, two LFO counters and their dividers, the shared envelope counter, the sample divider and the cached `M`, in one assertion |
+| `req_core_091_a_vrc7_state_brings_back_the_custom_patch_and_the_port` | the eight custom bytes through 300 cycles of `M`, and `$9010`'s latched address checked by **writing through it** after the restore |
+| `req_core_091_a_block_written_before_the_vrc7_sound_still_loads` | the tolerance `load_registers` claims, tested by **truncating** the block |
+| `req_core_090_a_vrc7_state_round_trips_its_arrangement_and_banks` | the three PRG banks, the eight CHR banks, the arrangement coming back **from the state** and not from `$E000`, and the PRG-RAM enable |
+| `req_core_091_a_vrc7_state_brings_back_the_irq_counter` | the shared `VrcIrq` mid-count, and that it fires from where the state left it and not from the latch |
+| `req_core_092_a_silent_vrc7_saves_and_restores_byte_for_byte` | the Q-128 property: a silent chip has an `M` of exactly 0, so the round trip is byte-identical |
+| `mf_5b_a_sounding_expansion_chip_is_not_byte_identical_on_any_board` | that the *sounding* case is the APU's own load path and not this board's, demonstrated on a **VRC6 as well as** the VRC7 |
+
+### The tolerance test had to be rewritten, and the reason is worth recording
+
+`vrc6_audio_tests.rs` tests the same claim by relabelling the block `STATE_VERSION_4`. That does
+not work here, and thinking about why is what produced the right test: a VRC7 state written at
+step 1 is not a differently-*versioned* block, it is a **shorter** one — no format version sits
+between the two steps, and what distinguishes them is that step 1's `save_registers` stopped
+after the IRQ. `reader.remaining() > 0` is exactly the right test for that, and it works because
+the mapper's registers are the last thing in the whole state. So the test truncates the block by
+the 253 bytes `Vrc7Audio::save_state` writes and requires the load to **succeed** with a silent
+chip — a truncation there is not a corruption.
+
+### The bug an existing test found, which no audio test would have
+
+`req_core_090_the_mapper_state_survives_a_save_and_restore` sweeps every supported mapper and
+asserts that a save, five frames, a restore and a second save give the **same bytes**. It failed
+on mapper 85 with three bytes of an `f64` at **−0.4476** against 0 — and −0.4476 is
+−14 670 / 32 768.
+
+That `f64` is the APU's cached mixer level, and `Apu2A03::load_state` re-derives it with `M`
+forced to 0, deliberately and with its reason on the line
+(`self.mixer_output = mixer::clip(self.mixer_apu, 0)`, "`M` … not in the block … the bus pushes
+`M` again before the next cycle"). The first version of `vrc7_level` put a **standing** DC offset
+of 14 670 on `M`, so a VRC7 making no sound at all still reported one — and the round trip
+differed.
+
+**The fix made the sound better, not just the test green**: the offset is carried per *sounding*
+channel, so a chip with nothing playing has an `M` of exactly 0, like the other four expansion
+chips in the build, and the offset that remains while a note sounds is what REQ-CORE-073's
+high-pass filter is for. The whole argument is Q-128.
+
+Two things are worth taking from it. First, **a savestate test caught an audio design error**,
+which is not where anyone would have looked. Second, the asymmetry it exposed is *general*: a
+state saved while any expansion chip is sounding is not byte-identical on an immediate re-save,
+on the MMC5, the VRC6, the Namco 163 and the 5B alike. The second test above demonstrates it on a
+VRC6 so that nobody reads the VRC7's silence requirement as a stronger invariant than it is.
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, no new `allow` |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **816 passed, 0 failed, 8 ignored** |
+
 ## Status
 
 - [x] step 1 — the VRC7 board, mapper 85. **Every one of the thirteen ROMs is below `a577f336`**,
@@ -449,6 +527,7 @@ without advancing it, and one `i32` is cheaper than that.
       at all; **Q-129** opened: the five OPLL quantities no allowed source gives, there being no
       reference implementation in reach). **All thirteen below the baseline**, total **−0.239 %**
 - [ ] step 2 — the VRC7 audio
-- [ ] step 3 — save states
+- [x] step 3 — save states (seven tests; 600 cycles of `M` identical after a restore, and the
+      round-trip test that found the standing DC offset of Q-128)
 - [ ] step 4 — the ROM check: **no mapper-85 image exists** (the sweep is above)
 - [ ] step 5 — the suites and the campaign

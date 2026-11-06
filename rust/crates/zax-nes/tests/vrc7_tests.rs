@@ -335,3 +335,167 @@ fn req_core_100_the_vrc7_counter_runs_on_the_scanline_prescaler_too() {
     core.bus_mut().tick();
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+// ------------------------------------------------------------------- save states
+
+#[test]
+fn req_core_090_a_vrc7_state_round_trips_its_arrangement_and_banks() {
+    // REQ-CORE-090: the banks, the arrangement and `$E000`'s two gating bits come back from the
+    // state. The arrangement is the interesting one on this board, because it comes from
+    // `$E000` and from nowhere else: a load that re-derived it from the register rather than
+    // taking the state's would agree by luck here and not after a mid-frame change.
+    let mut core = vrc7a();
+    core.mapper_write(0x8000, 0x11);
+    core.mapper_write(0x8010, 0x12);
+    core.mapper_write(0x9000, 0x13);
+    for slot in 0..8u16 {
+        let address = 0xA000 + (slot / 2) * 0x1000 + if slot % 2 == 1 { 0x10 } else { 0 };
+        core.mapper_write(address, (slot + 1) as u8);
+    }
+
+    core.mapper_write(0xE000, 0x82); // WRAM enabled, one-screen A, not silenced.
+    core.write_memory(0x6000, 0x5A);
+
+    let state = core.save_state(true).unwrap();
+    let windows = core.prg_windows();
+    let chr = core.chr_windows();
+
+    // Drive it elsewhere: other banks, the other arrangement, the PRG-RAM protected.
+    core.mapper_write(0x8000, 0x01);
+    core.mapper_write(0xA000, 0x00);
+    core.mapper_write(0xE000, 0x01);
+    for _ in 0..3 {
+        core.run_frame(0);
+    }
+
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!(windows, core.prg_windows(), "the three PRG banks");
+    assert_eq!(chr, core.chr_windows(), "the eight CHR banks");
+    assert_eq!(
+        NametableMirroring::SingleScreenA,
+        core.cartridge().unwrap().mirroring(),
+        "the arrangement comes back from the state"
+    );
+    assert_eq!(0x5A, core.read_memory(0x6000), "and the PRG-RAM enable");
+}
+
+#[test]
+fn req_core_091_a_vrc7_state_brings_back_the_irq_counter() {
+    // REQ-CORE-091: the shared `VrcIrq` comes back mid-count, through this board's own decode,
+    // and fires again from where the state left it rather than from the latch.
+    let mut core = vrc7a();
+    core.mapper_write(0xE010, 0xF0); // Latch $F0: sixteen cycles to the top.
+    core.mapper_write(0xF000, 0x06); // E and M: enabled, cycle mode.
+    for _ in 0..10 {
+        core.bus_mut().tick();
+    }
+
+    assert!(!core.cartridge().unwrap().irq_asserted());
+    let state = core.save_state(true).unwrap();
+
+    // Drive it elsewhere: let it fire, acknowledge it, and disable the counter.
+    for _ in 0..20 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted(), "it fires first");
+    core.mapper_write(0xF010, 0x00);
+    core.mapper_write(0xF000, 0x00);
+    for _ in 0..200 {
+        core.bus_mut().tick();
+    }
+
+    core.try_load_state(&state, 0).unwrap();
+    assert!(
+        !core.cartridge().unwrap().irq_asserted(),
+        "the restored counter is still short of its top"
+    );
+
+    // Six more cycles than the state had run: $FA through $FF, then the wrap.
+    for _ in 0..5 {
+        core.bus_mut().tick();
+    }
+    assert!(
+        !core.cartridge().unwrap().irq_asserted(),
+        "and it counts from where the state left it, not from the latch"
+    );
+    core.bus_mut().tick();
+    assert!(core.cartridge().unwrap().irq_asserted());
+}
+
+#[test]
+fn req_core_092_a_silent_vrc7_saves_and_restores_byte_for_byte() {
+    // REQ-CORE-092: "Sauvegarder puis restaurer immédiatement ne modifie rien." This is the
+    // assertion that caught the VRC7's first mixer level: a **standing** DC offset on `M` made
+    // the chip's `M` non-zero even with no note playing, so the high-pass filter carried state
+    // that REQ-CORE-074 then cleared on the restore, and the bytes differed by three of an `f64`
+    // at -0.4476 (that is -14 670 / 32 768). Q-128 is the ticket; the offset is now carried per
+    // **sounding** channel, so a chip with nothing playing has an `M` of exactly 0.
+    //
+    // The chip is left silent on purpose, and the companion test
+    // `req_core_092_a_sounding_apu_is_not_byte_identical_on_any_board` records why a sounding
+    // one cannot be compared this way.
+    let mut core = vrc7a();
+    core.mapper_write(0x8000, 0x11);
+    core.mapper_write(0xE000, 0x81);
+    core.write_memory(0x6000, 0x42);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    core.try_load_state(&state, 0).unwrap();
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "a save, a restore and a save must give the same bytes"
+    );
+}
+
+/// The companion of the test above, and the reason it keeps the chip silent: a state saved while
+/// **any** expansion chip is sounding is not byte-identical after an immediate restore, and the
+/// cause is in the APU's own load path rather than in any board.
+///
+/// `Apu2A03::load_state` re-derives its cached level with `M` forced to 0 —
+/// `self.mixer_output = mixer::clip(self.mixer_apu, 0)` — because "`M` and the two integers of
+/// the test point are not in the block: the board restores its own sound state and the bus pushes
+/// `M` again before the next cycle", which is what lets a block written before AMD-054 still
+/// load. So the `f64` of that cached level is `to_float(A − M)` when it is saved and
+/// `to_float(A)` when it is read back, and the two differ by exactly `M / 32768`.
+///
+/// Demonstrated on **two** boards, a mapper-24 VRC6 and this lot's mapper-85 VRC7, so that the
+/// property is visibly the APU's and not the VRC7's. Without this test, the one above would read
+/// as a weaker version of a general invariant; the general invariant does not hold, and what the
+/// VRC7 had to stop doing (Q-128) was reporting an `M` while **silent**.
+#[test]
+fn mf_5b_a_sounding_expansion_chip_is_not_byte_identical_on_any_board() {
+    let round_trip_differs = |core: &mut NesCore| -> bool {
+        for _ in 0..2 {
+            core.run_frame(0);
+        }
+
+        let state = core.save_state(true).unwrap();
+        core.try_load_state(&state, 0).unwrap();
+        state != core.save_state(true).unwrap()
+    };
+
+    // A VRC6 with its first pulse running: $9000 volume 15 mode M, $9002 enable.
+    let mut vrc6 = MapperRom::new(24).chr(32).load();
+    vrc6.write_memory(0x9000, 0x8F);
+    vrc6.write_memory(0x9001, 0x40);
+    vrc6.write_memory(0x9002, 0x80);
+    assert!(
+        round_trip_differs(&mut vrc6),
+        "a sounding VRC6 is not byte-identical either -- the cause is the APU's load path"
+    );
+
+    // And the VRC7, with one channel keyed on.
+    let mut vrc7 = vrc7a();
+    vrc7.write_memory(0x9010, 0x30);
+    vrc7.write_memory(0x9030, 0x10);
+    vrc7.write_memory(0x9010, 0x20);
+    vrc7.write_memory(0x9030, 0x1B);
+    assert!(
+        round_trip_differs(&mut vrc7),
+        "and so is a sounding VRC7, for the same reason and no other"
+    );
+}

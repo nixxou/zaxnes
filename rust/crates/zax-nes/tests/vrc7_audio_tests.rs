@@ -554,3 +554,171 @@ fn req_core_075_a_vrc7_subtracts_its_m_from_the_apu_mix() {
     );
     assert!(mixer::clip(0, mixer::VRC7_MAX) < 0);
 }
+
+// ------------------------------------------------------------------- save states
+
+/// REQ-CORE-090: the whole FM chip comes back from a state.
+///
+/// Not a field-by-field comparison: two machines are driven apart, one is saved and restored,
+/// and the two then have to produce the **same `M` on every one of 600 CPU cycles**. That covers
+/// the twelve phase accumulators, the twelve envelopes and their phases, the two LFO counters and
+/// their dividers, the shared envelope counter, the sample divider, the six channels' registers,
+/// the custom patch, the latched port address and the cached `M` — in one assertion, with a
+/// second assertion that `M` actually moves so the test cannot pass vacuously. It is the shape
+/// MF-5a step 6 established for the VRC6 and the Namco 163.
+#[test]
+fn req_core_090_a_vrc7_state_round_trips_through_the_fm_chip() {
+    let mut core = core_85();
+    // Three channels on three instruments at three notes, so the state has something in it.
+    play(&mut core, 0, 1, 0x180, 5);
+    play(&mut core, 1, 7, 0x1C0, 4);
+    play(&mut core, 2, 0x0A, 0x140, 6);
+    // And a custom patch, which channel 3 plays, so instrument 0 is exercised too.
+    for (register, value) in [
+        (0x00u8, 0x21u8),
+        (0x01, 0x11),
+        (0x02, 0x18),
+        (0x03, 0x07),
+        (0x04, 0xF8),
+        (0x05, 0xF4),
+        (0x06, 0x12),
+        (0x07, 0x27),
+    ] {
+        sound(&mut core, register, value);
+    }
+
+    play(&mut core, 3, 0, 0x100, 5);
+    swing(&mut core, 30_000);
+
+    let state = core.save_state(true).unwrap();
+    let expected: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            level(&core)
+        })
+        .collect();
+
+    // Drive it somewhere else: silence it, key everything off, and run on.
+    core.write_memory(0xE000, 0x40);
+    for channel in 0..6u8 {
+        sound(&mut core, 0x20 + channel, 0x00);
+    }
+
+    swing(&mut core, 20_000);
+    core.write_memory(0xE000, 0x00);
+    swing(&mut core, 20_000);
+
+    core.try_load_state(&state, 0).unwrap();
+    let after: Vec<i32> = (0..600)
+        .map(|_| {
+            core.bus_mut().tick();
+            level(&core)
+        })
+        .collect();
+
+    assert_eq!(
+        expected, after,
+        "the twelve operators must resume where the state left them"
+    );
+    assert!(
+        expected.iter().any(|m| *m != expected[0]),
+        "the test is vacuous unless M actually moves"
+    );
+}
+
+/// REQ-CORE-091: the custom patch and the latched port address come back, checked through the
+/// ports rather than by reading fields.
+#[test]
+fn req_core_091_a_vrc7_state_brings_back_the_custom_patch_and_the_port() {
+    let mut core = core_85();
+    let patch = [0x21u8, 0x11, 0x18, 0x07, 0xF8, 0xF4, 0x12, 0x27];
+    for (index, value) in patch.iter().enumerate() {
+        sound(&mut core, index as u8, *value);
+    }
+
+    play(&mut core, 0, 0, 0x180, 5);
+    swing(&mut core, 30_000);
+    // Leave the address port pointing at $05, with no data write after it.
+    core.write_memory(0x9010, 0x05);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    let state = core.save_state(true).unwrap();
+    let expected: Vec<i32> = (0..300)
+        .map(|_| {
+            core.bus_mut().tick();
+            level(&core)
+        })
+        .collect();
+
+    // Overwrite the custom patch and the port, then restore.
+    for index in 0..8u8 {
+        sound(&mut core, index, 0x00);
+    }
+
+    core.write_memory(0x9010, 0x30);
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    core.try_load_state(&state, 0).unwrap();
+    let after: Vec<i32> = (0..300)
+        .map(|_| {
+            core.bus_mut().tick();
+            level(&core)
+        })
+        .collect();
+    assert_eq!(expected, after, "the custom patch is back, note and all");
+
+    // And the port is back at $05: one data write must land on the carrier's attack and decay,
+    // which it would not if the port had come back at $30 (the instrument and volume register).
+    let before = samples(&mut core, 64);
+    core.write_memory(0x9030, 0x00); // Attack $0, decay $0 on the carrier.
+    for _ in 0..8 {
+        core.bus_mut().tick();
+    }
+
+    let held = samples(&mut core, 64);
+    assert_ne!(
+        before, held,
+        "the restored port must still be $05, so the write reaches the carrier's envelope"
+    );
+}
+
+/// REQ-CORE-091: a block written **before** the VRC7's sound existed still loads, and leaves the
+/// chip silent — which is what a VRC7 is before its first key-on.
+///
+/// Such a block is a **shorter** one and not a differently-versioned one: the board arrived in
+/// step 1 of this lot and the sound in step 2, with no format version between them, so what
+/// distinguishes them is that step 1's `save_registers` stopped after the IRQ. That is exactly
+/// what `Vrc7::load_registers`' `reader.remaining() > 0` tests, and the cartridge's registers
+/// being the last thing in the whole block is what makes it work.
+///
+/// The 253 bytes cut here are the size of `Vrc7Audio::save_state`'s own block — 37 for the chip
+/// plus 36 for each of the six channels. The constant is deliberate: a change to the layout has
+/// to come and change it, which is the only place in the suite that records the size.
+#[test]
+fn req_core_091_a_block_written_before_the_vrc7_sound_still_loads() {
+    let mut core = core_85();
+    play(&mut core, 0, 1, 0x180, 5);
+    swing(&mut core, 30_000);
+
+    let state = core.save_state(true).unwrap();
+    let truncated = &state[..state.len() - 253];
+
+    let loaded = core.try_load_state(truncated, 0);
+    assert!(
+        loaded.is_ok(),
+        "a block that stops after the IRQ is not a corrupt one"
+    );
+    core.bus_mut().tick();
+    assert_eq!(0, level(&core), "and it leaves the chip silent");
+
+    // The board itself came back: the note's registers are gone with the sound block, but the
+    // banks and the arrangement are before it.
+    assert_eq!(
+        zax_nes::NametableMirroring::Vertical,
+        core.cartridge().unwrap().mirroring()
+    );
+}
