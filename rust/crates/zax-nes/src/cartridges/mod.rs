@@ -327,10 +327,17 @@ impl Cartridge {
             board,
             rom_windows: [mappers::NO_ROM_WINDOW; 4],
             nametable_pages: [Self::FOLLOW_MIRRORING; 4],
-            // The MMC5 ($5105), the TxSROM of mapper 118 (bit 7 of its CHR registers) and — since
-            // MF-5a — the VRC6, whose `$B003` and CHR registers between them pick a CIRAM page
-            // per table (nesdev, "VRC6", the `$B003` tables).
-            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 118),
+            // The MMC5 ($5105), the TxSROM of mapper 118 (bit 7 of its CHR registers), the VRC6
+            // since MF-5a, whose `$B003` and CHR registers between them pick a CIRAM page per
+            // table (nesdev, "VRC6", the `$B003` tables), and — since MF-6a step 1 — the
+            // NAMCOT-3425 of mapper 95, which wires CHR A15 to CIRAM A10 so that bit 5 of its
+            // two 2 KiB CHR registers is a nametable select (nesdev, "INES Mapper 095").
+            //
+            // **The other four numbers of the Namco 108 family are deliberately absent**: 76,
+            // 88, 154 and 206 have hardwired mirroring, and 154's one-screen bit goes through
+            // `memory.set_mirroring` like every other mirroring register rather than through a
+            // page override.
+            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 95 | 118),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for

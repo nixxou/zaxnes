@@ -32,6 +32,7 @@ mod mmc3;
 mod mmc5;
 mod multicart;
 mod namco163;
+mod namcot108;
 mod nrom;
 mod rambo1;
 mod vrc2_vrc4;
@@ -55,6 +56,7 @@ pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,
 };
 pub use namco163::{Namco163, NamcoVariant};
+pub use namcot108::Namcot108;
 pub use nrom::Nrom;
 pub use rambo1::Rambo1;
 pub use vrc2_vrc4::Vrc2Vrc4;

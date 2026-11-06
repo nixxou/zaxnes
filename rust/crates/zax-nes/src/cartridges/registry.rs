@@ -10,8 +10,8 @@ use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mapper078,
-    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Rambo1, UnRom512, UxRom,
-    Vrc2Vrc4, Vrc6, Vrc7,
+    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1,
+    UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -20,7 +20,7 @@ use crate::rom::InesHeader;
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 34,
-    41, 64, 66, 69, 71, 78, 85, 87, 101, 118, 156, 180, 210, 225, 228,
+    41, 64, 66, 69, 71, 76, 78, 85, 87, 88, 95, 101, 118, 154, 156, 180, 206, 210, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -109,6 +109,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         },
         // MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None".
         30 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 206"), the Namco 108 family: `PRG RAM: None`, the page adding
+        // "with the rare exception" of the *Magical Puzzle Popils* prototype, which carries
+        // "8 KiB battery-backed". So the window is open bus on these five numbers unless the
+        // image declares a battery, which is the one board the page excepts.
+        76 | 88 | 95 | 154 | 206 if !header.has_battery => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -220,6 +228,9 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         156 => Board::Daou306(Daou306::new(memory)),
         225 => Board::Multicart225(Multicart225::new(memory)),
         228 => Board::Action52(Action52::new(memory)),
+        // MF-6a step 1: the Namco 108 and its four parameters. One board, five numbers; see
+        // `Namcot108`'s own note on why the differences are fields and not `const` parameters.
+        76 | 88 | 95 | 154 | 206 => Board::Namcot108(Namcot108::new(memory, mapper)),
         _ => return None,
     })
 }

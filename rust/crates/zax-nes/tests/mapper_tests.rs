@@ -53,13 +53,18 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 78, the Irem IF-12 and the Jaleco board of Uchuusen (MF-3 step 7);
     // * 24 and 26, Konami VRC6 and VRC6b (MF-5a step 1);
     // * 19 and 210, the Namco 163 and the Namcot 175 and 340 cut from it (MF-5a step 4);
-    // * 85, Konami VRC7 (MF-5b step 1).
+    // * 85, Konami VRC7 (MF-5b step 1);
+    // * 206, the Namco 108 / DxROM, with 76, 88, 95 and 154 as its four parameters
+    //   (MF-6a step 1).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    assert_eq!(vec![19, 24, 26, 69, 78, 85, 118, 156, 180, 210], extra);
+    assert_eq!(
+        vec![19, 24, 26, 69, 76, 78, 85, 88, 95, 118, 154, 156, 180, 206, 210],
+        extra
+    );
 
     // Ascending, which is what the registry's own comment promises.
     assert!(Cartridge::SUPPORTED_MAPPERS.windows(2).all(|p| p[0] < p[1]));
@@ -1698,4 +1703,213 @@ fn req_core_100_vrc6_enables_prg_ram_with_bit_7_of_b003() {
     assert_ne!(0x5A, core.read_memory(0x6000));
     core.write_memory(0xB003, 0x80);
     assert_eq!(0x5A, core.read_memory(0x6000));
+}
+
+// ------------------------------------------- the Namco 108 family (206, and 76, 88, 95, 154)
+
+/// Loads bank register `register` with `value` through the two registers of the Namco 108: the
+/// bank select at $8000-$9FFE (even) and the bank data at $8001-$9FFF (odd). The same pair the
+/// MMC3 has, so [`MapperMachine::mmc3_bank`] drives it; named for what it is here.
+fn namcot108_bank(core: &mut NesCore, register: u8, value: u8) {
+    core.mmc3_bank(register, value);
+}
+
+/// nesdev ("INES Mapper 206"): `PRG Window: 8K + 8K + 16K fixed`, R6 at $8000-$9FFF and R7 at
+/// $A000-$BFFF, with "the last two 8KiB banks fixed to the end".
+#[test]
+fn req_core_100_namcot_108_switches_two_prg_windows_and_fixes_the_last_two() {
+    let mut core = MapperRom::new(206).prg(8).load();
+    // Power-on, which `reset` settles: R6 = 0 and R7 = 1.
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+
+    namcot108_bank(&mut core, 6, 3);
+    namcot108_bank(&mut core, 7, 5);
+    assert_eq!([3, 5, 6, 7], core.prg_windows());
+
+    // "bits 3-0" of the data register are the PRG bank, and a bank beyond the ROM wraps rather
+    // than reading out of it.
+    namcot108_bank(&mut core, 6, 0x0F);
+    assert_eq!([7, 5, 6, 7], core.prg_windows());
+}
+
+/// `CHR Window: 2Kx2 + 1Kx4` â€” R0 and R1 are 2 KiB banks at PPU $0000-$07FF and $0800-$0FFF,
+/// R2-R5 are 1 KiB banks at $1000-$13FF through $1C00-$1FFF. "Only bits 5-1 exist for 2KB CHR
+/// banks", so bit 0 of R0 and R1 is not part of the bank.
+#[test]
+fn req_core_100_namcot_108_banks_two_2_kib_and_four_1_kib_chr_windows() {
+    let mut core = MapperRom::new(206).prg(8).chr(16).load();
+    namcot108_bank(&mut core, 0, 4);
+    namcot108_bank(&mut core, 1, 8);
+    for register in 2..6u8 {
+        namcot108_bank(&mut core, register, 10 + register);
+    }
+
+    assert_eq!([4, 5, 8, 9, 12, 13, 14, 15], core.chr_windows());
+
+    // Bit 0 of a 2 KiB register does not exist: 5 selects the same pair as 4.
+    namcot108_bank(&mut core, 0, 5);
+    assert_eq!([4, 5], core.chr_windows()[..2]);
+}
+
+/// `Mirroring: Fixed H/V, or 4` â€” hardwired. **No register of this board touches it**, which is
+/// the claim that separates 206 from 154, and the one a port of the MMC3 gets wrong by leaving
+/// $A000 alive.
+#[test]
+fn req_core_100_namcot_108_has_no_mirroring_register() {
+    for (bits, expected) in [(0u8, Nm::Horizontal), (1, Nm::Vertical)] {
+        let mut core = MapperRom::new(206).prg(8).mirroring(bits).load();
+        assert_eq!(expected, core.mirroring());
+
+        for address in [
+            0x8000u16, 0x8001, 0x9FFE, 0x9FFF, 0xA000, 0xA001, 0xC000, 0xE000,
+        ] {
+            for value in [0x00u8, 0x01, 0x40, 0xFF] {
+                core.mapper_write(address, value);
+                assert_eq!(expected, core.mirroring(), "{address:#06X} = {value:#04X}");
+            }
+        }
+    }
+}
+
+/// `IRQ: None` and `PRG RAM: None`, and with them the register mask $E001: the three MMC3
+/// register pairs above $9FFF do not exist on this chip, so writing the MMC3's IRQ latch,
+/// reload, disable and enable addresses changes nothing and asserts nothing.
+#[test]
+fn req_core_100_namcot_108_has_no_irq_and_no_prg_ram() {
+    let mut core = MapperRom::new(206).prg(8).chr(16).load();
+    namcot108_bank(&mut core, 6, 3);
+    let prg = core.prg_windows();
+    let chr = core.chr_windows();
+
+    for address in [0xA000u16, 0xA001, 0xC000, 0xC001, 0xE000, 0xE001] {
+        core.mapper_write(address, 0x01);
+    }
+    for _ in 0..4 {
+        core.run_frame(0);
+    }
+
+    assert!(!core.cartridge().unwrap().irq_asserted());
+    assert_eq!(prg, core.prg_windows());
+    assert_eq!(chr, core.chr_windows());
+
+    // "PRG RAM: None": $6000-$7FFF is not RAM, so a write there is not read back.
+    core.write_memory(0x6000, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x6000));
+}
+
+/// nesdev ("INES Mapper 076"), the NAMCOT-3446 of *Megami Tensei*: R2-R5 are **four 2 KiB CHR
+/// windows** at $0000, $0800, $1000 and $1800, each a 2 KiB bank number six bits wide, so
+/// 128 KiB of CHR is reachable. R0 and R1 are not wired to anything.
+#[test]
+fn req_core_100_namcot_3446_banks_chr_in_four_2_kib_windows() {
+    let mut core = MapperRom::new(76).prg(8).chr(128).load();
+    namcot108_bank(&mut core, 2, 0);
+    namcot108_bank(&mut core, 3, 1);
+    namcot108_bank(&mut core, 4, 2);
+    // Bank 63 of 2 KiB is the last of 128 KiB: the page's "coarser CHR banking".
+    namcot108_bank(&mut core, 5, 63);
+    assert_eq!([0, 1, 2, 3, 4, 5, 126, 127], core.chr_windows());
+
+    // The 108's own two 2 KiB registers have no effect on this board.
+    namcot108_bank(&mut core, 0, 0x3F);
+    namcot108_bank(&mut core, 1, 0x3F);
+    assert_eq!([0, 1, 2, 3, 4, 5, 126, 127], core.chr_windows());
+}
+
+/// nesdev ("INES Mapper 088"), the NAMCOT-3433/3443 of *Dragon Spirit* and *Quinty*: "CHR
+/// support is increased to 128 KiB by connecting PPU's A12 line to the CHR ROM's A16 line", so
+/// the left pattern table can only reach the first 64 KiB and the right one only the second â€”
+/// the page's own implementation note, an AND with $3F on registers 0-1 and an OR with $40 on
+/// registers 2-5. This is the one claim a careless port of the 108 gets wrong.
+#[test]
+fn req_core_100_namcot_3433_splits_128_kib_of_chr_by_pattern_table() {
+    let mut core = MapperRom::new(88).prg(8).chr(128).load();
+    // R0 asks for 1 KiB bank 80, which is in the second half: the AND brings it back to 16.
+    namcot108_bank(&mut core, 0, 0x50);
+    namcot108_bank(&mut core, 1, 0x7F);
+    for register in 2..6u8 {
+        namcot108_bank(&mut core, register, register - 2);
+    }
+
+    assert_eq!([16, 17, 62, 63, 64, 65, 66, 67], core.chr_windows());
+
+    // The claim itself, over every bank value the registers can hold: $0000-$0FFF stays in the
+    // first 64 KiB and $1000-$1FFF in the second.
+    for value in 0..64u8 {
+        for register in 0..6u8 {
+            namcot108_bank(&mut core, register, value | 0x40);
+        }
+        let windows = core.chr_windows();
+        assert!(windows[..4].iter().all(|bank| *bank < 64), "{windows:?}");
+        assert!(windows[4..].iter().all(|bank| *bank >= 64), "{windows:?}");
+    }
+}
+
+/// nesdev ("INES Mapper 095"), the NAMCOT-3425 of *Dragon Buster*: the bank data register is
+/// `..ND DDDD`, N being "Nametable select, based on last value written to Bank select register".
+/// Register 0 drives the nametable at PPU $2000-$27FF and register 1 the one at $2800-$2FFF â€”
+/// CHR A15 wired to CIRAM A10.
+#[test]
+fn req_core_100_namcot_3425_takes_its_nametable_from_chr_a15() {
+    let mut core = MapperRom::new(95).prg(8).chr(32).load();
+    assert_eq!([0, 0, 0, 0], nametable_pages(&core));
+
+    for (r0, r1, expected) in [
+        (0x00u8, 0x00u8, [0, 0, 0, 0]),
+        (0x20, 0x00, [1, 1, 0, 0]),
+        (0x00, 0x20, [0, 0, 1, 1]),
+        (0x20, 0x20, [1, 1, 1, 1]),
+    ] {
+        namcot108_bank(&mut core, 0, r0);
+        namcot108_bank(&mut core, 1, r1);
+        assert_eq!(
+            expected,
+            nametable_pages(&core),
+            "R0 {r0:#04X} R1 {r1:#04X}"
+        );
+        // Never served by the cartridge: these are CIRAM pages (Q-123's ceiling is untouched).
+        assert!(!nametable_pages(&core).contains(&Cartridge::SERVED_BY_CARTRIDGE));
+    }
+
+    // And N is not part of the bank: with it set, R0 = $20 shows the same pair as R0 = $00.
+    namcot108_bank(&mut core, 0, 0x20);
+    assert_eq!([0, 1], core.chr_windows()[..2]);
+    namcot108_bank(&mut core, 0, 0x0A);
+    assert_eq!([10, 11], core.chr_windows()[..2]);
+    assert_eq!([0, 0, 1, 1], nametable_pages(&core));
+
+    // The other four numbers of the family answer the trait's default, which is the latch's
+    // other half: 95 alone is in `Cartridge::nametable_pages_vary`.
+    let plain = MapperRom::new(206).prg(8).chr(32).load();
+    assert_eq!([Cartridge::FOLLOW_MIRRORING; 4], nametable_pages(&plain));
+}
+
+/// nesdev ("INES Mapper 154"), the NAMCOT-3453 of *Devil Man*: `$8000-$FFFF: [.N.. ....]`, N
+/// being one-screen select, 0 = 1ScA and 1 = 1ScB. The page's own statement of the difference:
+/// "the nametable control bit is present over the entire 32kB range; unlike the associated
+/// Namco 108 which is only present at $8000-$9FFF".
+#[test]
+fn req_core_100_namcot_3453_decodes_its_one_screen_bit_over_all_of_8000_ffff() {
+    let mut core = MapperRom::new(154).prg(8).chr(128).load();
+
+    // Every 8 KiB block of $8000-$FFFF, and both polarities, including the two blocks a 206
+    // does not decode at all.
+    for address in [
+        0x8000u16, 0x8001, 0x9FFF, 0xA000, 0xBFFF, 0xC000, 0xDFFF, 0xE000, 0xFFFF,
+    ] {
+        core.mapper_write(address, 0x40);
+        assert_eq!(Nm::SingleScreenB, core.mirroring(), "{address:#06X} N set");
+        core.mapper_write(address, 0x00);
+        assert_eq!(
+            Nm::SingleScreenA,
+            core.mirroring(),
+            "{address:#06X} N clear"
+        );
+    }
+
+    // And the board is an 88 otherwise: the same CHR split by pattern table.
+    namcot108_bank(&mut core, 0, 0x50);
+    namcot108_bank(&mut core, 2, 0x00);
+    assert_eq!([16, 17], core.chr_windows()[..2]);
+    assert_eq!(64, core.chr_windows()[4]);
 }
