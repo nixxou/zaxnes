@@ -546,6 +546,93 @@ back where it belongs.
 
 [PROGRESS] MF-5b-fix step 4/5 done: the bar, met at level 2 and missed on four of PR-1's thirteen.
 
+## Step 5 — the checks, and the campaign row by row
+
+### The suites
+
+| check | result | against MF-5b |
+| --- | --- | --- |
+| `cargo fmt --check` | clean | same |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean, exit 0 | **three new `allow(clippy::inline_always)`**, one per attribute, each with its measured figure on the line |
+| `cargo test --release -p zax-nes -p zax-harness -- --test-threads=1` | **816 passed, 0 failed, 8 ignored** | **identical**, 816 / 0 / 8 |
+| `cargo test --release -p zax-harness --test test_roms_tests -- --test-threads=1` | **14 passed** | the same 14 groups, the file untouched |
+| `--ignored`, `--no-fail-fast`, with both ROM folders | **7 of 8 pass** | the **same 7**, test for test |
+
+No test file is in the diff: the lot adds none and edits none, three `#[inline(always)]` being
+attributes and not behaviour. 816 is MF-6's count, which is MF-5b's.
+
+**The one `--ignored` failure is not this lot's.**
+`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`, at
+`builtin_patches.rs:2525`, `assertion failed: apply(&hack).is_none()` — the same assertion, in the
+same place, that MF-4d-fix named as out of scope and that MF-5a and MF-5b reported identically.
+The seven that pass are, in the order they ran:
+
+| test | what it covers |
+| --- | --- |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | **golden-core**: pixels, tiles, audio *and* cycle counts over 1 200 frames of the commercial set |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | MF-4d-fix's P1 criterion |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | **the execution-zone fetch path**, which is the one `zone_offset` is on |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | |
+| `req_core_113_dmc_dma_during_read4_is_p3` | |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | |
+| `the_cost_of_one_capture_and_one_restore` | a measurement, reported not asserted |
+
+Golden-core is the brief's "no change of behaviour" at its strongest, and `zr_2_…` is the one that
+would notice if pinning `zone_offset` had altered what a zone fetch reads. Both pass unchanged.
+
+### The campaign, ROM by ROM
+
+    zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms <out.json> --no-shots --quiet
+    test-roms: 331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+**Identical to MF-5b's on every field of every row.** `campdiff.py camp-5b.json camp-5bfix.json`:
+
+    base 331 rows, new 331 rows, same set: True
+    rows whose verdict, code or message differs: 0
+
+and the summary objects compare equal as objects (`total`/`pass`/`fail`/`timeout`/`unsupported`/
+`manual`, all six). Comparing all 331 rows **field by field** — every key of every row, ignoring
+`.ms`, which is wall clock and moves in any two runs, and `.shot`, this run having used
+`--no-shots` — **zero rows differ on any field**: verdict, code, message, suite, mapper,
+submapper and detail alike. Inside the `AccuracyCoin` row the tally is **128/147** with the same
+failing sub-tests in the same order, which is MF-4d-fix's figure after Q-125 and MF-5b's.
+
+So the brief's "every row identical to MF-5b's" is met outright, with no exception set.
+
+### The document
+
+`rust/docs/PERFORMANCE-HISTORY.md` gains **§5.10**, beside MF-5b's §5.9, with the four findings a
+later lot needs and not the lot's narrative: that a 300-frame no-pack run is not the application
+and `rust/tools/perf/` now carries the level-2 instrument too; that `Cpu6502::step` holds one
+inlining budget with three claimants and fits all three only if all three are pinned; that pinning
+a dispatch and shortening it have opposite beneficiaries, with the eleven-arm form's numbers so
+nobody builds it a third time; and that a per-cycle question's cost depends on which half of
+`apu.irq_asserted() || cartridge…` answered — 37.9 M entries on Metroid against 51 324 on Mega Man
+2, both MMC1, same binary.
+
+[PROGRESS] MF-5b-fix step 5/5 done: the suites, 331 identical campaign rows, and §5.10.
+
+## What the lot delivered, against the brief
+
+| the brief asked | what happened |
+| --- | --- |
+| **1.** Reproduce both numbers with PR-1's script extended to the level-2 command line, on clean `git archive` builds of `a577f336` and the tip, each in its own directory and target directory; write the commands in the progress file | Done. The `core` column is R0's **to the instruction** on all five games; the `total` deltas are within 170 k of R0's. Three files added to `rust/tools/perf/`; the commands are in step 1 |
+| **2.** Fix so `irq_asserted` and `zone_offset` are inlined again on the CPU step path, no change of behaviour; every variant and its numbers in the progress file; show in the post-LTO code that both are inlined into `step` again | Done. Both at **0 definitions, 0 call sites**, and `execute_without_operand` folded in as well — an arrangement neither baseline had. Eleven variants, each with its set numbers, in step 3; the four candidates the brief listed are all measured, including the one it ruled out on inspection |
+| **3.** The bar: all five level-2 ROMs at `a577f336`'s total or lower, core too; all thirteen of PR-1's set at `fcfa5cb3`'s count or lower | **Level 2: met**, −0.143 % to −0.663 % on total and −0.253 % to −0.804 % on core. **PR-1's set: missed on four of thirteen**, by +0.046 % to +0.065 %, met on nine, set total −0.136 %. The best variant is kept and all the numbers are given, as the brief directs |
+| **4.** `fmt`, clippy on the crates touched, `cargo test --release -p zax-nes -p zax-harness`, then the whole test-ROM campaign, every row identical to MF-5b's | All clean. 816 / 0 / 8. The campaign is **331 rows identical on every field** |
+| Do not change behaviour, the save-state format, or anything under `spec/` | Three attributes, three `allow`s and doc comments. No body moved, no new function, no new state, no `unsafe`, no test edited, no save-state field, nothing under `spec/` |
+
+Two things a reader should take from it that the brief did not ask for. The first is that
+**the four ROMs that resist are a property of the APU, not of the board**: `duelito`, `oamstr`,
+`readbuf` and `mm2` leave the APU's frame IRQ asserted, so `NesBus::irq_asserted`'s `||`
+short-circuits and the cartridge dispatch is entered a few tens of thousands of times instead of
+tens of millions. They pay for the dispatch's code and never run it. The second is that
+**`a577f336`'s arrangement was recoverable with one attribute** (variant 1) and is not worth
+recovering: `fcfa5cb3` beats it by 0.240 % on the set, and the shipped arrangement beats both.
+
 ## Status
 
-Steps 1-4 done. Step 5 next.
+**Done.** Steps 1-5 complete. The level-2 bar is met on all five games, total and core; PR-1's
+thirteen are all below `a577f336` and nine of thirteen below `fcfa5cb3`, the four above it by
+0.046 % to 0.065 % being named and explained in step 4. No behaviour changed: 816 / 0 / 8, the
+same 7 of 8 `--ignored`, golden-core unchanged and 331 campaign rows identical on every field.

@@ -1306,6 +1306,52 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.10 Lot MF-5b-fix: the set is not the games, and `step` holds one inlining budget
+
+MF-5b ended **−0.240 %** on all thirteen ROMs of lot PR-1's set and **+0.138 % on Zelda II** and
+**+0.060 % on Super Mario Bros.** once each game was run with its 3D pack. Both numbers were right.
+Four findings, none of them about a board.
+
+**A 300-frame no-pack run is not the application.** PR-1's thirteen ROMs measure the emulated core
+alone: no pack, so the widescreen extension's execution zone is off and `WideExtension::zone_offset`
+answers `None` from a constant; no input, so the games sit on a title screen; 300 frames, so every
+per-cycle cost is 2.4 × smaller than in R0's 600-frames-after-120 level-2 run. `rust/tools/perf/`
+now carries the level-2 instrument as well (`roms-l2.txt`, `callgrind-l2.sh`, `l2-diff.py`), so
+**a lot measures the games with their packs before R0 does**, and `<key>.ann`/`<key>.ir` are named
+so `callgrind-diff.py` reads a level-2 directory unchanged.
+
+**`Cpu6502::step` holds one inlining budget with three claimants**, and a lot that frees one of
+them hands the room to another. The three are `<Board as Mapper>::irq_asserted` (the per-cycle
+/IRQ dispatch), `WideExtension::zone_offset` (every instruction fetch, through
+`NesBus::read_code`) and `Cpu6502::execute_without_operand` (the interpreter's out-of-line
+boundary). At `a577f336` the cost model kept the first two and outlined the third; MF-5b's
+thirty-second `Board` variant flipped it; **the budget fits all three only if all three are
+pinned**, and that is what ships — `step` 932 → 2 529 → **3 443** instructions, with `read_cycle`
+(181), `tick` (82), `read_internal` (175) and `run_dots` (1 906) unmoved to the instruction and
+their call-site counts unchanged. Set total −0.376 % against `a577f336`, and all five games
+0.143 % to 0.663 % below it, core and total.
+
+**Pinning a dispatch and shortening it are different changes with opposite beneficiaries.** An
+eleven-arm `irq_asserted` with the twenty-one boards that cannot assert /IRQ folded into one arm is
+inlined by the cost model with no attribute at all, and makes `Cpu6502::branch` 330 instructions
+(395 at `a577f336`) and `resolve` 1 552 (1 800). LLVM compiles it to a bit mask over the
+discriminant plus a **table of field offsets**, which is three instructions cheaper for a board
+that answers "no" and three dearer for one that answers: `metroid` **−1.107 %**, `m1` −0.745 %,
+and `m4` **+0.698 %**, `smb3` +0.464 %, `mmc5` +0.278 %. That is MF-5b's refuted load-time latch
+in a new disguise, with the same verdict — the thirty-two-arm `dispatch!` is what the boards with
+an IRQ want — and `docs/progress/MF-5b-fix.md` step 3 has the form written out so nobody builds it
+a third time. The same step refutes a `zone_on()` guard in front of `zone_offset`, in both
+positions, and outlining the zone-hit body.
+
+**A per-cycle question's cost depends on the APU, not only on the board.** `NesBus::irq_asserted`
+is `apu.irq_asserted() || cartridge…`, so a game that leaves the APU's frame IRQ asserted never
+reaches the cartridge at all. Over 300 frames the dispatch is entered **37.9 M times on Metroid
+and 51 324 times on Mega Man 2 — both MMC1 games, same binary**. Four of PR-1's thirteen
+(`duelito`, `oamstr`, `readbuf`, `mm2`) are in that regime: they pay for the dispatch's code,
+never run it, and end **+0.046 % to +0.065 %** above `fcfa5cb3` while the other nine are 0.055 %
+to 0.672 % below it. All thirteen are below `a577f336`. When reading a per-cycle figure, check
+which half of the `||` answered.
+
 ### 5.7 Instrumentation
 
 - Frame profiler (`frame_profiler.rs`, setting `ui.profiler`, `ZAXNES_PROFILE=1`): stages input,
