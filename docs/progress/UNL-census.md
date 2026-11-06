@@ -18,7 +18,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | 0 | the plan, this file, and the exact number set the census has to cover | **done** |
 | 1 | census part A — §3.3's single-publisher boards (Sachen, Kaiser, Waixing, TXC, NTDEC, JY, Whirlwind, FFE) | **done** |
 | 2 | census part B — §3.4's explicitly listed numbers | **done** |
-| 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | to do |
+| 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | **done** |
 | 4 | census part D — the homebrew numbers, and the census's category totals | to do |
 | 5 | the category-A detail: documentation quality, hooks, effort per number | to do |
 | 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | to do |
@@ -56,9 +56,11 @@ pairwise across all four lists.
 * **E — no title / no documentation**.
 
 A number can be truthfully describable by two of these (a board carrying one original game and
-nine multicarts is A, not C). The rule applied throughout: **the highest category any one of its
-titles reaches**, because the question the census answers is what shipping the board would
-preserve. Where that promotion is the whole reason for the category, the row says so.
+nine multicarts is A, not C). The rule applied throughout: **A is a promotion** — any single A
+title promotes the number, because that title is what shipping the board would preserve — while
+**B, C and D are not ranked against each other**, so below A a number takes the category of the
+bulk of its catalogue. Nothing turns on that order: B, C and D are all out under the same rule.
+The census's §0 and §2.0 state this where it first bites.
 
 ### What "supported" means for the A test
 
@@ -114,3 +116,32 @@ The findings that change a decision:
   242, a different board, while Mesen builds `Bmc8157`. Recorded as E on that contradiction.
 * **177 and 200 stay unsupported**, so `req_core_102_any_other_mapper_is_refused` keeps three of
   its four numbers (6, 177, 200) and holds unchanged.
+
+## Step 3 — the 48 MMC3 clones: 19 A, 9 B, 15 C, 0 D, 5 E
+
+`docs/review/UNL-census.md` §3. **The largest block of category A in the census, and the cheapest.**
+
+* **§3.2's claim that none of the 48 has a licensed title is correct, and it is exactly why 19 are
+  A.** An MMC3 clone is what an unlicensed publisher put an *original* game on when the game needed
+  MMC3-class banking, so the clones carry the ports and the Chinese RPGs while the pure multicart
+  hardware sits in §3.4. Between them: *Aladdin*, *The Lion King*, *Boogerman*, *Earthworm Jim 2*,
+  *Mortal Kombat 3*, *Pocahontas*, *Super Donkey Kong*, *Toy Story*, *Street Fighter Zero 2*,
+  *KOF '96*, *KOF '97*, *Samurai Spirits*, *Street Heroes*, *Dragon Fighter*, nine Chinese RPGs.
+* **Six of the nineteen are one Mesen class this build already implements one member of.** Mesen
+  builds 74, 119, 191, 192, 194 and 195 from `MMC3_ChrRam(first, last, size)`, and **119 is
+  `board-119`, shipped in MF-6a3 step 2**. The same `const` parameters cover five more numbers.
+* **Five more are the MMC3 with scrambled registers and an NROM-like PRG override** — 114, 115,
+  121, 123, 187, plus 182 free with 114 — carrying sixteen original titles.
+* **Not one of the 48 needs a hook this build lacks.** All nineteen A numbers use the MMC3's own
+  A12 scanline IRQ. The three new *shapes* are 262's extra 4 KiB of four-screen VRAM, 292's
+  read-triggered registers at $6000-$7FFF, and 268's 32-64 MiB address space.
+* **182 is 114.** NESdev redirects `INES Mapper 182` to mapper 114's page, which states FCEUX
+  "explicitly reassigns Hosenkan's Mapper 182 ROMs to Mapper 114".
+* **14 is A on one title** — Rex Soft's 8-character *Samurai Spirits* — and MF-6b step 6's design
+  table still stands; the page's mirroring rule is still "according to Nestopia's mapper source
+  code … not verified on original hardware", which is a documentation caveat, not a blocker.
+* **238 stays out for the reason MF-6b gave**: its page is one sentence, and a board cannot be
+  written from it.
+* **245 and 199 are the strongest "nearly A" rows** — the two most capable clones here (1 MiB of
+  PRG; 32 KiB of battery save with 12 KiB mapped) whose only titles are Chinese translations of
+  licensed Famicom RPGs. Noted in §3.2 as where to look first if that rule ever changes.

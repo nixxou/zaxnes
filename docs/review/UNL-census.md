@@ -542,3 +542,124 @@ board so the document is complete and so a later lot never has to re-derive the 
 **Fifty-three of the 83 are multicarts, bootlegs or FDS conversions** — which is what §3.4 said
 they were, and the owner's content rule confirms it independently of any performance argument.
 **Fifteen are A**, and four of those fifteen (79, 146, 83, 264) are two boards, not four.
+
+---
+
+## 3. Part C — the 48 MMC3 clones of §3.2 (mapper 14 among them)
+
+§3.2 filed these as "MMC3 clones and pirate extensions … **48 numbers, none with a licensed
+title**", and §3.4 excluded them by reference. The licensed-title claim is correct. **Nineteen of
+the 48 are nonetheless category A** — more than any other group in the census — and the reason is
+structural: an MMC3 clone is what a Taiwanese or Chinese publisher put an *original* game on when
+the game needed MMC3-class banking, so the clones carry the ports and the Chinese RPGs while the
+pure multicart boards cluster in §3.4.
+
+They are also the **cheapest** group to implement, because this build already has the MMC3, the
+A12 watcher and the `Mmc3Board` `const`-parameter mechanism that MF-6a3 used for 119, 47 and 37.
+
+### 3.1 The nineteen A numbers
+
+| iNES | board (NESdev) | Mesen class | publisher | the title(s) that make it A | doc | what it adds to the MMC3 |
+| ---: | --- | --- | --- | --- | --- | --- |
+| **12** | **SL-5020B** (a chip-on-board variant of the **Huang-1** ASIC, with a GAL16V8); submapper 1 is the FFE Magic Card 4M | `MMC3_12` | Gouder; FFE | *Dragon Ball Z 5* (Rex Soft) | partial | 512 KiB of CHR-ROM through an external register at **$4132** |
+| **14** | **UNL-SL1632** (SL-1632 PCB), the **Huang-1** again | `MMC3_14` | **Rex Soft** | *Samurai Spirits*, the 8-character version | partial, **and the page says its mirroring comes "according to Nestopia's mapper source code"** and "contradict[s] other emulators and ha[s] not been verified on original hardware" | a supervisor register at **$A131** overlapping the MMC3's own, two modes (VRC2 / MMC3, no MMC1), and **three independent CHR A18 bits** over the three PPU windows $0000-$0FFF, $1000-$17FF and $1800-$1FFF. MF-6b step 6's table |
+| **74** | 43-393 / 43-406 / 860908C | `MMC3_ChrRam(0x08,0x09,2)` | **Wàixīng** | *甲A — China Soccer League for Division A*; *第四次: 机器人大战* (the Super Robot Wars IV port); *風雲 — Traitor Legend* (1997). *機甲戰士* is a *Metal Max* translation and is B on its own | **stub** | a 74LS138 and a 74LS139 redirect 1 KiB CHR banks **#8 and #9** to 2 KiB of CHR-RAM |
+| **114** | an MMC3 clone with **scrambled register addresses and indices** | `MMC3_114` | **SuperGame**, **Hosenkan** | *Aladdin*, *The Lion King*, *Boogerman* (SuperGame); *Pocohontas*, *Super Donkey Kong* (Hosenkan) | **full**, both submappers | a 256 KiB outer CHR-ROM bank at $6001, an NROM-like PRG override at $6000, and two distinct scramble patterns |
+| **115** | **Kǎshèng SFC-02B / -03 / -004** | `MMC3_115` | Kǎshèng, re-releasing **Gouder** | *A.V. 究極麻將 II*, *包青天*, *餓狼伝説 Special*, *雷電 II — Thunderbolt Fighting Plane*, *三國春秋: 四川省*, *幽☆遊☆白書 Final* — **six**, plus a 16-in-1 | partial | a 256 KiB outer CHR bank and an NROM-like PRG override; the $600x registers work regardless of the WRAM enable; a "sharp" IRQ (latch 0 fires every scanline) |
+| **121** | **Kǎshèng A9711** (256 KiB) and **A9713** (512 KiB) | `MMC3_121` | 卡聖 (Kǎshèng) | *Street Fighter Zero 2 '97*; *The Panda Prince* / *Super Lion King 2*. Seven further titles are hacks and one is a 3-in-1 | **full**, with the behavioural quirks | a **protection array** at $5000-$5FFF; extended PRG banking at $A000/$C000/$E000 from bit-reversed $8001 values; **CHR A18 driven directly by PPU A12** on the A9711, so the two pattern tables sit in different 256 KiB halves |
+| **123** | **UNL-H2288** | `MMC3_123` | Kǎshèng, with **Hummer Team** and Shin-Shin | *Mortal Kombat 3*; *Earthworm Jim 2* | **full** | an NROM-like PRG override at $5800 with a selectable 16 KiB bank, and scrambled register indices |
+| **182** | **NESdev redirects `INES Mapper 182` to mapper 114's page**, which states "INES Mapper 182 is a duplicate of Mapper 114. In fact, FCEUX explicitly reassigns Hosenkan's Mapper 182 ROMs to Mapper 114" | `MMC3_182` | Hosenkan | *Pocohontos*; *Super Donkey Kong* | **full** (114's) | nothing of its own. The page's distinction is behavioural: "Hosenkan's games make no use of the $6000-$6001 registers, other than writing zero to both of them on startup" |
+| **187** | **Kǎshèng A98402** | `MMC3_187` | Kǎshèng / **Hummer Team** | *Street Fighter Zero 2*; *The King of Fighters '96* | partial | an NROM-like PRG override at $5000 with protection reads, and **CHR A18 selected directly by PPU A12** for 512 KiB |
+| **192** | **Wàixīng FS308** | `MMC3_ChrRam(0x08,0x0B,4)` | Wàixīng | *Ying Lie Qun Xia Zhuan* | **stub** | CHR pages **$08-$0B** become 4 KiB of CHR-RAM alongside the CHR-ROM, so the game can draw Chinese characters |
+| **194** | not named | `MMC3_ChrRam(0x00,0x01,2)` | not named | *Dai-2-Ji — Super Robot Taisen*, the port | **stub** | 2 KiB of CHR-RAM at pages **$00-$01** |
+| **195** | **Wàixīng FS303** | `MMC3_ChrRam(0x00,0x03,4)` | Wàixīng | *哥伦布传 — 黄金中文版* (Columbus); *天神之剑* (the *Crystalis* / God Slayer port). *天使之翼 2* is a hack and 赌神 a re-release | partial | **a GAL that changes at run time which CHR banks are RAM** rather than ROM; 32 KiB of CHR-RAM fitted with only 8 KiB of address lines wired |
+| **208** | not named; the copyright notice is **Gouder**'s | `MMC3_208` | Gouder | *快打傳説 — Street Fighter IV*. *Mortal Kombat (JJ-01) (Ch)* is a copyright-stripped hack on submapper 1 | **full**, including a **256-byte protection lookup table** | PRG bank and mirroring at $4800-$4FFF and $6800-$6FFF; a protection index at $5000-$57FF and protection data at $5800-$5FFF, XOR'd against the table |
+| **215** | **UNL-8237** (sub 0), **UNL-8237A** (sub 1) | `MMC3_215` | **Sugar Softec** | *Earthworm Jim 2*, *Mortal Kombat 3*, *Mortal Kombat 3 Extra 60*, *Pocahontas Part 2* — **four**, plus eight multicarts | **full** | **a selectable scrambling pattern**: $5007 picks one of eight address/data scrambles, plus outer banks and an NROM override |
+| **219** | **Kǎshèng A9461** | `MMC3_219` | Kǎshèng | *Toy Story*, the port. *Super 1997 4-in-1* beside it | partial | an extended mode ($8002 bit 5) giving four independent PRG windows and pseudo-2 KiB/1 KiB CHR switches, with outer bits at $5002/$5003 for 512 KiB |
+| **262** | **UNL-SHERO** | `MMC3_StreetHeroes` | **Sachen** | *Street Heroes*; *侍魂 — Samurai Spirits*. Wikipedia's `/wiki/Sachen` independently lists *Street Heroes* in Sachen's own catalogue | partial — several masks are "probably" or "unknown" | 8 KiB of CHR-RAM, **4 KiB of extra VRAM for four-screen mirroring**, and a CHR-ROM/CHR-RAM select plus high CHR bits at **$4100** |
+| **263** | **UNL-KOF97** | `MMC3_Kof97` | **Rex Soft** | *Boogerman II: The Final Adventure*; *The King of Fighters '97* | **full** | scrambled address *and* data bits: A12→A0, and the written value permuted by `(V&0xD8) \| ((V&0x20)>>4) \| ((V&4)<<3) \| ((V&2)>>1) \| ((V&1)<<2)` |
+| **268** | **COOLBOY**, **MINDKIDS**, and eleven more PCB codes (KT-008, YH2018A, JTH-813, GH2009_V01, SMD173C_60, KP-6022, LD622D, J-852C, …) | `MMC3_Coolboy` | many Chinese manufacturers, **and Retro-Bit / Piko Interactive** | nine Chinese RPGs — *大话水浒*, *楚留香新传*, *魔道劫*, *口袋妖怪: 叶绿* (three volumes), three *最终幻想* titles, *神奇宝贝* — and three **modern licensed reissues**: *Gravity Trooper Metal Storm*, *Holy Diver*, *Quest Forge*. Eleven multicarts beside them | partial | outer bank registers taking the MMC3 from 512 KiB to **32-64 MiB**, mixed CHR-ROM/RAM modes, GNROM-style and "weird" MMC3 variants, and a lockout |
+| **292** | **UNL-DRAGONFIGHTER**, PCB BMW8544 | `DragonFighter` | **Flying Star** | *Dragon Fighter* — and the page is explicit that Natsume's **licensed** game of the same name is a different mapper, so this is not a bootleg of it | **full**, with the effective-bank arithmetic worked out | an XOR-based protection, 512 KiB of CHR-ROM, and two registers reached by **reads *and* writes at $6000-$7FFF** that drive CHR A17-A18 and the XOR values per pattern table |
+
+**The three facts that matter for the plan:**
+
+1. **Six of the nineteen are the MMC3 with a CHR-RAM window and nothing else** — 74, 192, 194,
+   195, and (as a different shape) 262 and 12. Mesen says the same thing more compactly than any
+   prose could: it builds **74, 119, 191, 192, 194 and 195 from one class**,
+   `MMC3_ChrRam(first, last, size)` (`MapperFactory:74,119,191,192,194,195`), and this build
+   **already has 119** — the TQROM, `board-119`, shipped in MF-6a3 step 2 as "CHR bank bit 6
+   selects the CHR-RAM chip instead of the CHR-ROM chip". The same `const` parameters, with
+   `first`/`last`/`size` instead of a bit test, cover five more numbers.
+2. **Five more are the MMC3 with its registers scrambled and an NROM-like PRG override** — 114,
+   115, 121, 123, 187, and 182 for free with 114. One board with a scramble table and an override
+   register, and **sixteen original titles** between them.
+3. **Nothing in this group needs a hook this build does not have.** Every one of the nineteen uses
+   the MMC3's own A12 scanline IRQ, which `Mmc3` has and `irq_asserted` already dispatches. The
+   exceptions are not new hooks but new *shapes*: 262's four-screen VRAM (an extra 4 KiB of
+   nametable RAM — the inventory's §4.5 territory), 292's read-triggered registers at $6000-$7FFF
+   (`Cartridge::cpu_read` already reaches that window), and 268's 64 MiB address space.
+
+### 3.2 The nine B numbers
+
+| iNES | board | the title, and what it derives from | doc |
+| ---: | --- | --- | --- |
+| **165** | not named | *Fire Emblem (Unl)*, which the page calls a pirate hack | **stub**. Its shape is interesting — the MMC3 with **MMC2-style CHR swapping and a CHR latch**, toggled by reading PPU $xFD0/$xFE0 through $2007, selecting 4 KiB of CHR-RAM |
+| **197** | **UNL-FC-28-5027** (sub 1); Kǎshèng NT-series codes | *Super Fighter III* (two submappers), *Mortal Kombat III Special* (NT-328/YY-030) — all hacks — and a *1995 Super 2-in-1* | **full**, four submappers. Raises CHR granularity from 1/2 KiB to 2/4 KiB for 512 KiB |
+| **198** | not named | *吞食天地: 三国外传*, a Chinese translation of Capcom's *Destiny of an Emperor II* | **stub**. 8 KiB CHR-RAM, 8 KiB battery WRAM at $6000-$7FFF **and 4 KiB more at $5000-$5FFF**, across two PRG chips |
+| **199** | **FS309** | *成吉思汗* (a *Genghis Khan* translation), *風色幻想* (a *Square's Tom Sawyer* translation), a *吞食天地* re-release | partial. Over 512 KiB of PRG, and **32 KiB of battery PRG-RAM of which 12 KiB are mapped at $5000-$7FFF** |
+| **238** | not named | *Contra Fighter*, "a hack of *G.I. Joe* with Street Fighter II characters" | **stub — the page is that one sentence.** MF-6b step 6 left it out for exactly this reason: "a board cannot be written from it" |
+| **245** | **Wàixīng F003** | *勇者斗恶龙 VII*, a Chinese *Dragon Quest IV* | **full**. Repurposes the MMC3's CHR outputs as high PRG lines for **1 MiB**, with 8 KiB battery WRAM and 8 KiB unbanked CHR-RAM |
+| **250** | not named, by **Nitra** | *Time Diver Avenger*, *Queen Bee V* — pirate hacks | **stub**. Uses **A10 instead of A0** to pick the register and **A7..A0 instead of D7..D0** as the value |
+| **254** | not named | *Pikachu Y2K* (a hack); the number is itself a pirate-hack variant of *Felix the Cat* | **stub**, marked TODO. A PRG-RAM read XOR'd with $A001 until the game touches $8000 |
+| **325** | **UNL-MALISB** | *Super Mali Splash Bomb*, a bootleg hack of *Keioppi to Keroriinu no Splash Bomb* | **stub**. CPU A0 routed to A3 (and A2 when A14 is set), PRG bank bits 2↔3 and CHR bank bits 1↔5 swapped |
+
+**245 and 199 are worth one sentence each, because they are the strongest "nearly A" rows in the
+census.** Both are Wàixīng boards whose only titles are *translations* of licensed Famicom RPGs —
+*Dragon Quest IV* and *Genghis Khan* — so they are out on the content rule. But they are also the
+two most capable MMC3 clones here (1 MiB of PRG; 32 KiB of battery save with 12 KiB mapped), and if
+a later owner decision ever values Chinese-language translations, these two and 74's *Metal Max*
+are where to look first.
+
+### 3.3 The fifteen C numbers
+
+| iNES | board | the multicart(s) | doc |
+| ---: | --- | --- | --- |
+| **44** | not named | *Super Big 7-in-1* | **full**; a block register at $A001, six 128 KiB blocks and one 256 KiB |
+| **45** | **GA23C** ASIC multicart PCB | *Super New Year Cart 15-in-1* | partial; four outer-bank registers at $6000 with AND/OR masks, DIP or address-line menu select |
+| **49** | not named | *Super HIK 4-in-1* | partial. Its one notable rule: "when the 'O' mode bit is clear, ordinary MMC3 PRG regs are ignored" and a 32 KiB page is swapped in instead |
+| **52** | **Realtec 8213** and variants; **AB892** (sub 14) | *"Mario Party" 7 in 1*, *AB-128 Well 8-in-1*, *AB-134* | partial; an outer register at $6000-$7FFF driving PRG and CHR A17-A19 |
+| **126** | **TEC9719**, **ING003C**, **ING-022** ASICs — **one page shared with mappers 422 and 534** | *Power Joy Classic TV Game 84-in-1*; *Gamezone 118-in-1* | **full** across the three numbers; four outer registers at $6000-$7FFF for up to 4 MiB |
+| **134** | **T4A54A**, WX-KB4K, BS-5652 | *2-in-1 Family Kid & Aladdin 4*, two *Super Cool Boy 4-in-1*s (CB-4034 hacked, CB-4035), *Super 4-in-1 1998* (JH-274), *1998 HIGH 4-in-1* (YH-463) | partial; outer banks at $6001/$6002 and a mode register at $6000 with a CNROM mode |
+| **191** | not named | *赌神* — itself a hack of Technos' *Sugoro Quest* — plus three unnamed bonus games, as a 4-in-1 | partial; dual CHR-ROM plus 2 KiB CHR-RAM, outer bank at **$90AA** |
+| **205** | **BMC-JC-016-2** | *15-in-1*; *3-in-1* | partial; game select at $6000-$7FFF partitions the ROM into blocks the MMC3 then banks inside |
+| **217** | not named | a *500-in-1* and a *2000-in-1* | **stub — one sentence**, no technical content at all |
+| **260** | **BMC-HPxx**, BMC-HP2018-A | *KY6009 6-in-1* | partial; NROM-128/256, CNROM and MMC3 modes with base registers at $5001/$5002, a DIP and a lock. The page notes **no available ROM image uses the CNROM mode** |
+| **287** | **BMC-411120-C**, **BMC-K-3088** | 4-in-1s (411120-C, 811120-C) | **stub**; an outer register at $6000-$7FFF reachable only while MMC3 $A001 bit 7 enables WRAM — the same gate `board-mmc3-multicart` already implements for 47 and 37 |
+| **313** | **BMC-RESET-TXROM** | nine: *1995/1997 Super HiK 4-in-1* (JY-008, JY-024, JY-040, JY-044, JY-047), *4-in-1* (CK-015), *Mario Series 4-in-1* (JY-013), *Sheng Tian Gao K 4-in-1*, *4-in-1* (A01-1) | partial, five submappers. **Reset-based**: "when an interruption of the M2 signal is detected, the higher address lines are automatically incremented" |
+| **333** | **BMC-8-IN-1**, BMC-NEWSTAR-GRM070-8IN1 | *New Star Super 8-in-1* | **stub**; a 128 KiB outer bank and an NROM-256-or-MMC3 mode switch at $9000-$9FFF |
+| **348** | **BMC-830118C** | *1994 New Series Red Pig 7-in-1* | partial; outer bank at $6800 driving A17-A18, with a GNROM-like mode when both are set |
+| **366** | **GN-45** | *4-in-1* (K-3131GS); *4-in-1* (K-3131SS) | partial, the outer register's mask "unknown"; a lock so the games' WRAM accesses do not disturb it |
+
+### 3.4 The five E numbers
+
+| iNES | why | detail |
+| ---: | --- | --- |
+| **196** | **no title** | the **MRCM** board. Its whole documented content is a copy protection: the MMC3 clone's A0 input is rerouted to A1, A2 or A3 by submapper, and submappers 0 and 3 add mapper-189-style PRG banking after a $6000-$7FFF write. The page names no game |
+| **224** | **no title** | the **KT-008** PCB by 晶科泰 (Jncota). A stub whose only technical statement is that it "includes the same chipset as the 'MINDKIDS' multicarts" — i.e. it points at **268** and stops |
+| **249** | **no title** | the **T9552** Wàixīng chip. Partial documentation of a register at $5000 selecting one of four PRG and one of eight CHR address-bit **scrambles**, and no game named to test any of them against |
+| **258** | **no documentation, no title** | the page in full: mapper 258 "has been tentatively reserved by the FCEUX developers to mean the same hardware as UNIF MAPR 158B". No board, no publisher, no title, no register |
+| **259** | **no documentation, no title** | the same shape: "tentatively reserved … to mean the same hardware as UNIF MAPR F-15, an MMC3 multicart" |
+
+### 3.5 Part C's totals
+
+| | A | B | C | D | E | total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| §3.2's MMC3-clone row | **19** | 9 | 15 | 0 | 5 | **48** |
+
+**Nineteen A, and §3.2's own claim that none has a licensed title is exactly why.** These are the
+boards unlicensed publishers used for games that needed real banking, so they carry the ports
+(*Aladdin*, *The Lion King*, *Boogerman*, *Earthworm Jim 2*, *Mortal Kombat 3*, *Toy Story*,
+*Street Fighter Zero 2*, *KOF '96*, *KOF '97*, *Samurai Spirits*) and the Chinese RPGs, while the
+pure compilation hardware sits in §3.4. They are also the cheapest group to build: the MMC3, the
+A12 watcher and the `Mmc3Board` `const`-parameter pattern are all already here, and **six of the
+nineteen are one Mesen class that this build already implements one member of** (mapper 119).
