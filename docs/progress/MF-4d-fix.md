@@ -172,3 +172,32 @@ row that moves: 129 − 1 = 128, which is MF-4c's 125 plus `Controller Strobing`
 Timing` and `$2002 flag timing`. `Address $2004 behavior` is unaffected — it still stops on code
 8, the moving OAM address of lot MF-4e, because the `$2004` half is kept. Step 3 lowers the floor
 to 128 and takes that one row out of the guard's named list; the other fifteen names stay.
+
+## Step 3 — the guard's floor, 129 → 128, and the row named
+
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green` in
+`rust/crates/zax-harness/tests/test_roms_tests.rs`:
+
+* the floor goes **129 → 128**, and the message with it ("under lot MF-4d-fix's 128");
+* the comment above it names the arithmetic — MF-4c's 125 plus `Controller Strobing`, `DMC Reload
+  Timing` and `$2002 flag timing` — and **names the row given up**, with Q-125 and the condition
+  for taking it back;
+* **`"PPU Misc. / $2007 read w/ rendering"` comes out of the named list**, replaced by a comment
+  that says it stood there from MF-4d step 6 until this lot, that it is a `fail 2` again, and that
+  lot MF-4e puts it back together with R2-005.
+
+The floor is still a floor and the other **fifteen** names are untouched, so a lot that fixes more
+does not have to edit the test and one that breaks any of those fifteen still fails it. When MF-4e
+brings the rule back under R2-005, the floor returns to 129 and the row returns to the list.
+
+The row given up, stated once more for the record: **`PPU Misc. / $2007 read w/ rendering`**,
+`AccuracyCoin` code 2, 129 → 128 / 147. No other row moves.
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D warnings` | clean |
+| `cargo test --release -p zax-harness --test test_roms_tests --test-threads=1` | **14 passed, 0 failed** |
+| `cargo test --release -p zax-nes -p zax-harness` | **746 passed, 0 failed, 8 ignored** |
+
+The whole suite is green again: the guard was the only non-ignored failure step 1 left.
