@@ -1,0 +1,20 @@
+# The five commercial games R0's **level-2** callgrind run measures, one per line:
+#
+#     <key> <rom, relative to $ZAX_L2_ROMS> | <3D pack, relative to $ZAX_L2_PACKS>
+#
+# Level 2 differs from `roms.txt` (lot PR-1's set) in three ways, and each of them is why the
+# regression lot MF-5b-fix exists was invisible to PR-1's thirteen:
+#
+#   * a **3D pack** is loaded (`--profile`), so the conversion, the Lua frame hooks and the
+#     draw-list build run, and the widescreen extension's execution zone is live;
+#   * **600 frames** after the default 120 of warm-up, not 300 with none;
+#   * **inputs are pressed**, so the games leave their title screens and run actual play.
+#
+# A pipe separates the two paths because both contain spaces; a line whose ROM or pack is
+# missing is skipped with a warning.
+
+smb1    Super Mario Bros. [World][!!].nes               | Super Mario Bros.3dn
+smb3    Super Mario Bros. 3 [USA][Rev 1][!!].nes        | Super Mario Bros 3 (U) (PRG1).3dn
+mm2     Mega Man 2 [USA][!!].nes                        | Mega Man 2.3dn
+metroid Metroid [USA][!!].nes                           | Metroid.3dn
+zelda2  Zelda II - The Adventure of Link (USA).nes      | Zelda II - The Adventure of Link (U).3dn
