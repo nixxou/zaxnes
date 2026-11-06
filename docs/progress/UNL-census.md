@@ -22,7 +22,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | 4 | census part D — the homebrew numbers, and the census's category totals | **done** |
 | 5 | the category-A detail: documentation quality, hooks, effort per number | **done** |
 | 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | **done** |
-| 7 | the check — `cargo fmt --check`, `cargo test --release -p zax-nes -p zax-harness` | to do |
+| 7 | the check — `cargo fmt --check`, `cargo test --release -p zax-nes -p zax-harness` | **done** |
 
 ## Step 0 — the number set, and an arithmetic correction to the inventory
 
@@ -243,3 +243,19 @@ The findings that change a decision:
   code has been written on it; (2) Q-130 q2 restated, with candidate replacement numbers for
   REQ-CORE-102's criterion drawn from the numbers Mesen marks as having no implementation on either
   side and for which NESdev has no page.
+
+## Step 7 — the check: 899 / 0 / 8, and no `.rs` file moved
+
+`docs/review/UNL-census.md` §8.
+
+* `git diff --stat 8496c503 HEAD` — **two files, both documentation**: `docs/review/UNL-census.md`
+  and `docs/progress/UNL-census.md`. `git diff --name-only 8496c503 HEAD -- '*.rs'` → **0 files**.
+* `cargo fmt --check` — **clean**.
+* `cargo test --release -p zax-nes -p zax-harness` — **899 passed, 0 failed, 8 ignored**, which is
+  the figure MF-6a3 step 5 recorded for the same two crates at `8496c503`.
+* `TMP`, `TEMP` and `CARGO_TARGET_DIR` were set under `rust/target-mf` as the brief requires;
+  `rust/target-mf/` stays untracked.
+
+**The lot is complete.** `spec/changes/Q-133.md` lives in the spec tree, not in this worktree, and
+is therefore not in any commit here — the two questions and their provisional choices are
+summarised in step 6 above.

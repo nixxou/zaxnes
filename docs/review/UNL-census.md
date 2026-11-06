@@ -1550,3 +1550,38 @@ and a UNROM with an outer bank), which are out because **neither page names a si
   **Q-133 question 1**, filed with the provisional choice (the permissive reading) that this plan
   is written on. No code has been written on it, so a restrictive answer costs the plan and nothing
   else.
+
+---
+
+## 8. The check
+
+This lot changes no `.rs` file, so the check is that nothing moved.
+
+    git diff --stat 8496c503 HEAD
+     docs/progress/UNL-census.md |  245 +++++++
+     docs/review/UNL-census.md   | 1552 ++++++++++++++++++++++++++++++++++++++
+     2 files changed, 1797 insertions(+)
+
+    git diff --name-only 8496c503 HEAD -- '*.rs'   →  0 files
+
+With `TMP`, `TEMP` and `CARGO_TARGET_DIR` under `rust/target-mf`:
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| `cargo test --release -p zax-nes -p zax-harness` | **899 passed, 0 failed, 8 ignored** |
+
+**899 / 0 / 8 is the figure MF-6a3 step 5 recorded** for the same two crates at `8496c503`
+(`docs/progress/MF-6a3.md`), so the suite is byte-for-byte the suite the baseline left — which is
+the only thing a documentation lot can be asked to prove.
+
+### The one gap a reviewer should close
+
+**NesCartDB answers HTTP 403 to every request from this environment** (§0), so no per-number
+cartridge count in this census could be refreshed from it. Every title list above comes from the
+NESdev page that names it, cross-checked against Wikipedia where Wikipedia covers the publisher
+(`/wiki/Sachen`, `/wiki/Hummer_Team`, `/wiki/American_Video_Entertainment`, `/wiki/Rad_Racer`) and
+against Mesen 2's `MapperFactory.cpp` for board identity. A reviewer with a browser should
+re-check the counts for the three boards the plan leans on hardest — **79** (AVE's nineteen
+titles), **35/90/209/211** (the J.Y. ASIC's thirteen) and the **JV001** family's twenty — because
+MF-UNL-1 through MF-UNL-4's ordering rests on them.
