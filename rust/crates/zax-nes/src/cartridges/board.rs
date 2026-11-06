@@ -1,11 +1,15 @@
 //! The [`Board`] enum: one variant per mapper family, dispatching [`Mapper`] to it
 //! (REQ-CORE-100). Created once at load time by the registry.
 
+#[cfg(feature = "board-namcot108")]
+use super::mappers::Namcot108;
+#[cfg(feature = "board-small-boards")]
+use super::mappers::SmallBoard;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IrqBoard, JalecoJ87, JalecoSs88006, Mapper, Mapper015,
-    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Namcot108, Nrom,
-    Rambo1, SmallBoard, UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
+    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Nrom, Rambo1,
+    UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -99,12 +103,14 @@ pub enum Board {
     Vrc7(Vrc7),
     /// Mapper 206, the Namco 108 / Namcot 109, 118, 119 and the Tengen MIMIC-1, with mappers
     /// 76, 88, 95 and 154 as its four parameters (MF-6a step 1).
+    #[cfg(feature = "board-namcot108")]
     Namcot108(Namcot108),
     /// Mappers 33, 89, 93, 97, 140 and 184: the Taito TC0190, both Sunsoft-2 boards, the Irem
     /// TAM-S1, the Jaleco JF-11/14 and Sunsoft-1, **behind one discriminant** (MF-6a step 2).
     /// [`SmallBoard`]'s own note has the measurement that put them there: five variants cost
     /// `Ppu2C02::run_dots` 0.067 % to 0.131 % on eight of lot PR-1's thirteen ROMs in register
     /// pressure alone, and one costs nothing.
+    #[cfg(feature = "board-small-boards")]
     SmallBoard(SmallBoard),
     /// The boards whose counter can pull /IRQ, **behind one discriminant**: mapper 73 (Konami
     /// VRC3, MF-6b step 1), mappers 65 and 67 (the Irem H3001 and the Sunsoft-3, MF-6b step 2).
@@ -158,7 +164,9 @@ macro_rules! dispatch {
             Board::Vrc6($b) => $body,
             Board::Namco163($b) => $body,
             Board::Vrc7($b) => $body,
+            #[cfg(feature = "board-namcot108")]
             Board::Namcot108($b) => $body,
+            #[cfg(feature = "board-small-boards")]
             Board::SmallBoard($b) => $body,
             Board::IrqBoard($b) => $body,
         }

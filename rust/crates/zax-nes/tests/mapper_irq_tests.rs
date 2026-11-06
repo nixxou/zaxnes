@@ -818,8 +818,10 @@ fn mf_6b_mapper_65_fires_at_zero_and_mapper_67_one_cycle_past_it() {
 /// which both its own formula (`[1D CBAx …]`, bit 29 set and `C` at bit 27) and the arithmetic
 /// confirm: `0x2800_0000` M2 cycles at 1.789773 MHz is **6 min 15 s**, and the tournament's limit
 /// was 6 min 21 s.
+#[cfg(feature = "board-105")]
 const NES_EVENT_TARGET: u32 = 0x2800_0000;
 
+#[cfg(feature = "board-105")]
 /// A mapper-105 core whose counter is already at `counter`, with the timer running.
 ///
 /// **Why the state block and not 671 million bus ticks.** Nothing on this board writes the
@@ -860,6 +862,7 @@ fn nes_event_at_counter(counter: u32) -> NesCore {
     restored
 }
 
+#[cfg(feature = "board-105")]
 #[test]
 fn req_core_100_the_nes_event_counter_fires_at_its_dip_switch_target() {
     // nesdev ("NES-EVENT"): "a 30-bit up counter clocked by M2 that fires an IRQ when it reaches
@@ -871,6 +874,7 @@ fn req_core_100_the_nes_event_counter_fires_at_its_dip_switch_target() {
     assert_eq!(2, tick_until_irq(&mut core, 10));
 }
 
+#[cfg(feature = "board-105")]
 #[test]
 fn req_core_100_the_nes_event_timer_bit_resets_the_counter_and_acknowledges() {
     // Disch: "when cleared, the IRQ counter counts up every cycle. When set, the IRQ counter is
@@ -892,6 +896,7 @@ fn req_core_100_the_nes_event_timer_bit_resets_the_counter_and_acknowledges() {
     );
 }
 
+#[cfg(feature = "board-105")]
 #[test]
 fn req_core_100_only_the_nes_event_timer_bit_touches_its_counter() {
     // The case `req_core_100_the_vrc6_counter_*` pins for the VRC6 — an enable that is not a

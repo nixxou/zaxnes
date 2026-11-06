@@ -508,3 +508,170 @@ comes out of this step **at the figure it went in at**.
 `zax-nes`'s `default`.** Nothing is parked, so `parked-boards` stays empty.
 
 [PROGRESS] MF-6a3 step 2/6 done: worst PR-1 ROM +0.0011 %, all five level-2 cores within ±6 699 with `smb1`'s at 0, the two `total` rises inside the same binary's own ±4.3 M spread on that column, and the three boards default-on.
+
+## Step 3 — one feature per board that measured a rise, at the granularity the measurements exist at
+
+### Which boards, and why these
+
+The owner's rule is "every board that raises any figure gets its own Cargo feature ... convert
+every board of MF-6a, MF-6a2 and MF-6b whose step measured any rise". Read off the three progress
+files, those are:
+
+| lot and step | board | the rise that step measured |
+| --- | --- | --- |
+| MF-6a step 1 | Namco 108 / DxROM (**206**, and **76**, **88**, **95**, **154**) | `smb3/core` **+45 707**, `m4` **+66 921** |
+| MF-6a step 2 | `SmallBoard`'s first five (**33**, **97**, **140**, **184**, **89**, **93**) | `smb3/core` **+433 086** |
+| MF-6a step 3 | four more in the same variant (**70**, **152**, **75**, **232**) | `smb3/core` **+461 302** |
+| MF-6a step 4 | **94** on `UxRom`, **155** on `Mmc1`, **185** in `SmallBoard` | `mm2/core` **+10 506**, `smb3/core` **+461 302** |
+| MF-6b step 3 | NES-EVENT (**105**) | `smb1/total` **+0.023 %**, `smb3/total` **+0.010 %** |
+| MF-6b step 5 | Tengen 800037 (**158**) | `smb3/total` **+0.005 %** |
+| MF-6a3 step 1 | TQROM (**119**), the two multicarts (**47**, **37**) | step 2's table |
+
+**MF-6b has nothing parked**, and its step 8 says why in as many words: "No board of this lot was
+parked ... every board that missed the bar missed it on a shape that was fixable". So the
+`parked-boards` umbrella has nothing to enable, which is the state step 0 created it in.
+
+MF-6b steps 1, 2 and 4 are **not** in the list on purpose: each of those shipped with every one
+of PR-1's thirteen ROMs and all five level-2 games at or below `9f9d9d41` on total *and* core, and
+`l2-diff.py`'s own verdict line for steps 1, 2 and 4 is "at or below the baseline on every game,
+total and core". No figure rose, so no feature. MF-6a2 added no board at all.
+
+### The granularity, stated rather than assumed
+
+The rule's unit is "one feature per board ... or one for a family sharing one variant", and this
+step takes the second form wherever a family *does* share a variant, because **that is also the
+granularity at which the measured costs exist**:
+
+* `board-namcot108` is one board with four `const`/`bool` parameters — five numbers, one
+  `Board` variant, one measurement (MF-6a step 1's);
+* `board-small-boards` is nine boards behind **one** `Board` discriminant, which is the whole
+  reason [`SmallBoard`] exists: MF-6a step 2 measured five *variants* at 0.067 % to 0.131 % on
+  eight of thirteen ROMs and one at nothing. Splitting it into nine features would mean nine
+  independent `#[cfg]`s on one enum and **nine measurements that no lot has made** — MF-6a priced
+  its steps 2, 3 and 4, not its boards. One feature, three measured step figures in the table;
+* `board-mmc3-multicart` is 47 and 37, which the owner's rule names as the example.
+
+A later lot that wants a finer split on `SmallBoard` has to measure the nine boards one at a time
+first, and `docs/review/BOARD-FEATURES.md` says so in its own note.
+
+[`SmallBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/small_boards.rs
+
+### What each feature gates
+
+| | gated |
+| --- | --- |
+| modules and exports | `mappers/mod.rs`: `mod` and `pub use` for 12 board files |
+| `Board` variants | `Namcot108`, `SmallBoard`, and their `dispatch!` arms |
+| inner variants | `IrqBoard::NesEvent`, `IrqBoard::Tengen800037`, and their `inner!` arms |
+| inner forwards | `IrqBoard::prg_ram_enabled` (now `any(board-105, board-119)` — the TQROM needs it too), `IrqBoard::nametable_page` (`board-158`) |
+| `const` monomorphisation | `Rambo1Board<true>`'s alias (`board-158`) |
+| the two parameters | `UxRom`'s `shifted_field` and `Mmc1`'s `wired` mask, through **`cfg!`** rather than `#[cfg]`: with the feature off each folds to the constant the board always had, so the comparison is gone and the host board is byte-for-byte the code it was |
+| the five `Mmc1` accessors | `control_register`, `chr0_register`, `prg_register`, `windows_mut`, `force_chr0_register` — mapper 105 is their only caller, and rustc says so when the feature is off |
+| `registry` | `SUPPORTED_MAPPERS` (one `#[cfg]` per number), `create_board` arms, `board_memory_sizes` arms, the imports |
+| tests | 44 items across `mapper_tests.rs` and `mapper_irq_tests.rs`, plus three expected lists |
+
+**The two A12 latch lists and `has_bus_conflicts` are deliberately *not* gated.** A number whose
+board is off is not in `SUPPORTED_MAPPERS`, so `Cartridge::create` refuses it and no cartridge of
+it is ever built: the arm is unreachable either way. Leaving them as one `matches!` whatever the
+features means flipping a feature does not touch a load-time decision, which is one less thing
+for a later reader to hold.
+
+**Three expected lists are now built rather than written**, which is the one place a feature can
+make a sweep lie:
+
+* `req_core_100_every_required_mapper_is_registered` — REQ-CORE-100's own 31 numbers are in no
+  feature, so its first loop holds in every configuration; the 37 additions beyond that table are
+  a `[(i32, bool); 37]` whose flag is the number's own `cfg!`, so an accidental addition is still
+  caught as surely as an accidental removal;
+* `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` — its guard against a vacuous
+  pass is assembled from the features (119 and the two multicarts, then 158);
+* the other three sweeps (`mf_5a_…`, `amd_061_a_reset_…`, `req_core_090_…`) iterate
+  `SUPPORTED_MAPPERS` and needed nothing.
+
+### Nine configurations build, pass clippy and pass their tests
+
+| configuration | `zax-nes` tests | the additions its tests make |
+| --- | ---: | ---: |
+| `--no-default-features` | **782 / 0 / 7** | — |
+| `--features board-94` | 783 | +1 |
+| `--features board-155` | 783 | +1 |
+| `--features board-119` | 784 | +2 |
+| `--features board-mmc3-multicart` | 785 | +3 |
+| `--features board-158` | 786 | +4 |
+| `--features board-105` | 791 | +9 |
+| `--features board-namcot108` | 790 | +8 |
+| `--features board-small-boards` | 802 | +20 |
+| **default** (all eight) | **830 / 0 / 7** | +48 |
+
+782 + 48 = 830 exactly, which is what says each feature carries its own tests and no others.
+With `zax-harness` the default figure is **893 passed, 0 failed, 8 ignored**, unchanged from step
+1. `cargo fmt --check` clean; clippy `-D warnings` clean on `zax-nes` and `zax-harness` in the
+default configuration, with `--features parked-boards`, and with `--no-default-features` —
+**no new `allow` of any kind, and no `dead_code` or `unused` warning in any of the nine**. The
+registry advertises **68 numbers by default and 45 with every board feature off**.
+
+### The receipt: the retrofit is free in the default build
+
+This step adds `#[cfg]` attributes and nothing else, so with every feature on the code must be
+the code step 1 shipped. It is shown twice rather than asserted.
+
+**The post-LTO dump.** `pins63.py`, step 3 against step 1:
+
+| symbol | step 1 | **step 3** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 626 | 1 / 2 / **3 626** |
+| `Board::ppu_peek` | 1 / 4 / 272 | 1 / 4 / **272** |
+| `NesBus::write_internal` | 1 / 10 / 3 743 | 1 / 10 / **3 743** |
+| `Ppu::run_dots` | 1 / 5 / 1 907 | 1 / 5 / **1 907** |
+| `NesBus::catch_up_ppu` | 1 / 12 / 188 | 1 / 12 / **188** |
+
+and `cmp4c.py` over its whole pinned list gives **the same instruction count for every one of the
+thirty-odd symbols it watches** — `read_cycle` 181, `tick` 82, `read_internal` 175, `branch` 457,
+`resolve` 1 948, `run_dma` 992, `background_fetch` 196, `read_nametable_inner` 114,
+`Board::ppu_read` 356, `Board::on_cpu_cycle` 460, `Board::on_ppu_address_bus` 341 — with the
+normalised bodies IDENTICAL on all but four, and those four differ only in the `.Lanon` and
+section names the crate disambiguator changes between any two builds (MF-6a2 step 3 records that
+hazard: the two trees are built at different times and carry different `Cs<12>_` hashes).
+
+**PR-1's thirteen.** Step 3 against step 1:
+
+| | |
+| --- | --- |
+| largest move on any ROM | **+40 812** (`duelito`), **−33 942** (`z2`) |
+| set total | **+93 759**, +0.0001 % |
+| symbols moving by 200 000 or more, on any ROM | **none at all** |
+
+Every ROM is inside the ±57 k-per-ROM `luaH_getshortstr` floor §5.11 measured, and the
+per-symbol diff prints nothing: no emulated symbol moved on any of the thirteen.
+
+**And against the base commit**, which is the figure the tolerance is read on:
+
+| ROM | `07325f6e` | **step 3** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 378 921 | **3 308 312 658** | −66 263 | −0.0020 % |
+| `oamstr` | 3 318 459 130 | 3 318 466 874 | +7 744 | +0.0002 % |
+| `m1` | 4 885 841 284 | 4 885 864 197 | +22 913 | +0.0005 % |
+| `m0` | 5 520 389 483 | 5 520 457 293 | **+67 810** | **+0.0012 %** |
+| `m4` | 5 472 545 224 | 5 472 580 421 | +35 197 | +0.0006 % |
+| `metroid` | 5 115 944 243 | **5 115 918 037** | −26 206 | −0.0005 % |
+| `smb1` | 5 996 346 457 | **5 996 340 925** | −5 532 | −0.0001 % |
+| `mm2` | 6 017 889 238 | **6 017 832 742** | −56 496 | −0.0009 % |
+| `z2` | 6 291 431 663 | 6 291 452 064 | +20 401 | +0.0003 % |
+| `readbuf` | 6 834 547 836 | **6 834 521 169** | −26 667 | −0.0004 % |
+| `duelito` | 7 380 393 405 | 7 380 460 346 | **+66 941** | **+0.0009 %** |
+| `smb3` | 7 949 452 274 | 7 949 465 563 | +13 289 | +0.0002 % |
+| `mmc5` | 11 286 830 608 | **11 286 813 971** | −16 637 | −0.0001 % |
+| **total** | **79 378 449 766** | **79 378 486 260** | **+36 494** | **+0.00005 %** |
+
+Worst ROM **+0.0012 %**, one seventeenth of the tolerance; six of thirteen below the baseline.
+
+**The level-2 run is not repeated at this step, and that is a decision rather than an omission.**
+Step 3 changes no instruction of the default build — shown by the dump and by thirteen ROMs with
+no symbol moving — so a level-2 run could only re-measure its own `total`-column floor, which
+step 2 already measured at ±4.3 M. The shipped tree is measured on both instruments at the end of
+step 4, with mapper 116 in it.
+
+[PROGRESS] MF-6a3 step 3/6 done: eight board features, nine configurations green with no `dead_code` warning in any, 782 / 0 / 7 with every board off against 830 / 0 / 7 by default, and the default build's dump instruction-for-instruction step 1's.

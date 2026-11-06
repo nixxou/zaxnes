@@ -82,17 +82,53 @@ fn req_core_100_every_required_mapper_is_registered() {
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
-    let mut expected = vec![19, 24, 26, 33];
-    if cfg!(feature = "board-mmc3-multicart") {
-        expected.extend_from_slice(&[37, 47]);
-    }
-    expected.extend_from_slice(&[
-        48, 65, 67, 69, 70, 73, 75, 76, 78, 85, 88, 89, 93, 94, 95, 97, 105, 118,
-    ]);
-    if cfg!(feature = "board-119") {
-        expected.push(119);
-    }
-    expected.extend_from_slice(&[140, 152, 154, 155, 156, 158, 180, 184, 185, 206, 210, 232]);
+    let small = cfg!(feature = "board-small-boards");
+    let namcot = cfg!(feature = "board-namcot108");
+    let multicart = cfg!(feature = "board-mmc3-multicart");
+    let additions: [(i32, bool); 37] = [
+        (19, true),
+        (24, true),
+        (26, true),
+        (33, small),
+        (37, multicart),
+        (47, multicart),
+        (48, true),
+        (65, true),
+        (67, true),
+        (69, true),
+        (70, small),
+        (73, true),
+        (75, small),
+        (76, namcot),
+        (78, true),
+        (85, true),
+        (88, namcot),
+        (89, small),
+        (93, small),
+        (94, cfg!(feature = "board-94")),
+        (95, namcot),
+        (97, small),
+        (105, cfg!(feature = "board-105")),
+        (118, true),
+        (119, cfg!(feature = "board-119")),
+        (140, small),
+        (152, small),
+        (154, namcot),
+        (155, cfg!(feature = "board-155")),
+        (156, true),
+        (158, cfg!(feature = "board-158")),
+        (180, true),
+        (184, small),
+        (185, small),
+        (206, namcot),
+        (210, true),
+        (232, small),
+    ];
+    let expected: Vec<i32> = additions
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(mapper, _)| *mapper)
+        .collect();
     assert_eq!(expected, extra);
 
     // Ascending, which is what the registry's own comment promises.
@@ -1526,7 +1562,8 @@ fn req_core_095_battery_backed_prg_ram_is_exposed_and_survives_a_reload() {
 fn req_core_095_a_cartridge_without_a_battery_exposes_nothing() {
     let mut core = load(4);
 
-    assert_eq!(core.export_battery_ram(), []);
+    let empty: [u8; 0] = [];
+    assert_eq!(core.export_battery_ram(), empty);
     assert!(!core.import_battery_ram(&[1, 2, 3]));
 }
 
@@ -1739,10 +1776,12 @@ fn req_core_100_vrc6_enables_prg_ram_with_bit_7_of_b003() {
 /// Loads bank register `register` with `value` through the two registers of the Namco 108: the
 /// bank select at $8000-$9FFE (even) and the bank data at $8001-$9FFF (odd). The same pair the
 /// MMC3 has, so [`MapperMachine::mmc3_bank`] drives it; named for what it is here.
+#[cfg(feature = "board-namcot108")]
 fn namcot108_bank(core: &mut NesCore, register: u8, value: u8) {
     core.mmc3_bank(register, value);
 }
 
+#[cfg(feature = "board-namcot108")]
 /// nesdev ("INES Mapper 206"): `PRG Window: 8K + 8K + 16K fixed`, R6 at $8000-$9FFF and R7 at
 /// $A000-$BFFF, with "the last two 8KiB banks fixed to the end".
 #[test]
@@ -1761,6 +1800,7 @@ fn req_core_100_namcot_108_switches_two_prg_windows_and_fixes_the_last_two() {
     assert_eq!([7, 5, 6, 7], core.prg_windows());
 }
 
+#[cfg(feature = "board-namcot108")]
 /// `CHR Window: 2Kx2 + 1Kx4` — R0 and R1 are 2 KiB banks at PPU $0000-$07FF and $0800-$0FFF,
 /// R2-R5 are 1 KiB banks at $1000-$13FF through $1C00-$1FFF. "Only bits 5-1 exist for 2KB CHR
 /// banks", so bit 0 of R0 and R1 is not part of the bank.
@@ -1780,6 +1820,7 @@ fn req_core_100_namcot_108_banks_two_2_kib_and_four_1_kib_chr_windows() {
     assert_eq!([4, 5], core.chr_windows()[..2]);
 }
 
+#[cfg(feature = "board-namcot108")]
 /// `Mirroring: Fixed H/V, or 4` — hardwired. **No register of this board touches it**, which is
 /// the claim that separates 206 from 154, and the one a port of the MMC3 gets wrong by leaving
 /// $A000 alive.
@@ -1800,6 +1841,7 @@ fn req_core_100_namcot_108_has_no_mirroring_register() {
     }
 }
 
+#[cfg(feature = "board-namcot108")]
 /// `IRQ: None` and `PRG RAM: None`, and with them the register mask $E001: the three MMC3
 /// register pairs above $9FFF do not exist on this chip, so writing the MMC3's IRQ latch,
 /// reload, disable and enable addresses changes nothing and asserts nothing.
@@ -1826,6 +1868,7 @@ fn req_core_100_namcot_108_has_no_irq_and_no_prg_ram() {
     assert_ne!(0x5A, core.read_memory(0x6000));
 }
 
+#[cfg(feature = "board-namcot108")]
 /// nesdev ("INES Mapper 076"), the NAMCOT-3446 of *Megami Tensei*: R2-R5 are **four 2 KiB CHR
 /// windows** at $0000, $0800, $1000 and $1800, each a 2 KiB bank number six bits wide, so
 /// 128 KiB of CHR is reachable. R0 and R1 are not wired to anything.
@@ -1845,6 +1888,7 @@ fn req_core_100_namcot_3446_banks_chr_in_four_2_kib_windows() {
     assert_eq!([0, 1, 2, 3, 4, 5, 126, 127], core.chr_windows());
 }
 
+#[cfg(feature = "board-namcot108")]
 /// nesdev ("INES Mapper 088"), the NAMCOT-3433/3443 of *Dragon Spirit* and *Quinty*: "CHR
 /// support is increased to 128 KiB by connecting PPU's A12 line to the CHR ROM's A16 line", so
 /// the left pattern table can only reach the first 64 KiB and the right one only the second —
@@ -1874,6 +1918,7 @@ fn req_core_100_namcot_3433_splits_128_kib_of_chr_by_pattern_table() {
     }
 }
 
+#[cfg(feature = "board-namcot108")]
 /// nesdev ("INES Mapper 095"), the NAMCOT-3425 of *Dragon Buster*: the bank data register is
 /// `..ND DDDD`, N being "Nametable select, based on last value written to Bank select register".
 /// Register 0 drives the nametable at PPU $2000-$27FF and register 1 the one at $2800-$2FFF —
@@ -1913,6 +1958,7 @@ fn req_core_100_namcot_3425_takes_its_nametable_from_chr_a15() {
     assert_eq!([Cartridge::FOLLOW_MIRRORING; 4], nametable_pages(&plain));
 }
 
+#[cfg(feature = "board-namcot108")]
 /// nesdev ("INES Mapper 154"), the NAMCOT-3453 of *Devil Man*: `$8000-$FFFF: [.N.. ....]`, N
 /// being one-screen select, 0 = 1ScA and 1 = 1ScB. The page's own statement of the difference:
 /// "the nametable control bit is present over the entire 32kB range; unlike the associated
@@ -1947,6 +1993,7 @@ fn req_core_100_namcot_3453_decodes_its_one_screen_bit_over_all_of_8000_ffff() {
 // ------------------------------------------- Jaleco JF-11 (140), Sunsoft-1 (184),
 // ------------------------------------------- Sunsoft-2 (89, 93)
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 033"): PRG register 0 at `$8000` with the mirroring bit above it,
 /// register 1 at `$8001`, and the last two 8 KiB banks fixed to the end.
 #[test]
@@ -1965,6 +2012,7 @@ fn req_core_100_tc0190_switches_two_prg_windows_and_decodes_the_mirroring_bit() 
     assert_eq!([5, 7, 14, 15], core.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// The CHR half, and the claim that separates this board from an MMC3: the two 2 KiB registers
 /// at `$8002`-`$8003` "use the full written value (not dropping the LSB like MMC3), allowing
 /// 512 KiB addressability", where the four 1 KiB ones at `$A000`-`$A003` reach 256 KiB.
@@ -1982,6 +2030,7 @@ fn req_core_100_tc0190_banks_2_kib_chr_from_the_whole_byte_unlike_an_mmc3() {
     assert_eq!([6, 7, 10, 11, 20, 21, 22, 23], core.chr_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// Register mask `$A003`: the eight registers repeat over the whole of $8000-$FFFF, so a write
 /// to `$C000` is a write to `$8000` and one to `$E003` is a write to `$A003`.
 #[test]
@@ -1998,6 +2047,7 @@ fn req_core_100_tc0190_decodes_its_registers_through_the_a003_mask() {
     assert_eq!([6, 7], core.chr_windows()[..2]);
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 097"): `$8000-BFFF: [M..P PPPP]`, the `P` field switching the 16 KiB
 /// bank **at $C000** while $8000-$BFFF holds the last bank — the opposite way round from every
 /// other 16 KiB board here.
@@ -2021,6 +2071,7 @@ fn req_core_100_tam_s1_switches_c000_and_fixes_the_last_bank_at_8000() {
     assert_eq!(Nm::Vertical, core.mirroring());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// "This mapper does not have bus conflicts", so a five-bit bank survives a write landing on a
 /// zero-filled PRG bank — which on a board *with* conflicts the AND would take to 0.
 #[test]
@@ -2032,6 +2083,7 @@ fn req_core_100_tam_s1_has_no_bus_conflicts() {
     assert_eq!([14, 15, 14, 15], core.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 140"): `$6000-7FFF: [...PP CCCC]`, a GNROM whose register sits below
 /// $8000 — "Regs lie at $6000-7FFF, so there's no SRAM".
 #[test]
@@ -2053,6 +2105,7 @@ fn req_core_100_jf11_banks_32_kib_prg_and_8_kib_chr_from_6000() {
     assert_ne!(0x5A, core.read_memory(0x6000));
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 184"), Sunsoft-1: two 4 KiB CHR banks from one register at $6000-$7FFF,
 /// the upper one limited to "banks 4-7" because bit 6 is tied high in hardware.
 #[test]
@@ -2077,6 +2130,7 @@ fn req_core_100_sunsoft_1_banks_two_4_kib_chr_windows_with_the_upper_one_above_f
     assert_ne!(0x5A, core.read_memory(0x6000));
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 089"), the Sunsoft-2 on the Sunsoft-3 board: `$8000-FFFF: [CPPP MCCC]`
 /// — a 16 KiB PRG bank from bits 6-4, an 8 KiB CHR bank from bits 2-0 with bit 7 above them,
 /// one-screen mirroring from bit 3, and the last 16 KiB fixed.
@@ -2108,6 +2162,7 @@ fn req_core_100_sunsoft_2_banks_16_kib_prg_and_8_kib_chr_on_mapper_89() {
     assert_eq!(Nm::SingleScreenB, core.mirroring());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 093"), the Sunsoft-2 on the Sunsoft-3R board: `$8000-FFFF: [.PPP ...E]`
 /// — the same PRG field, **no** CHR bank and **no** mirroring bit, and `E` a CHR-RAM enable
 /// whose disabled state is "reads are open bus" and "writes are ignored".
@@ -2141,6 +2196,7 @@ fn req_core_100_sunsoft_2_enables_chr_ram_with_bit_0_on_mapper_93() {
     }
 }
 
+#[cfg(feature = "board-small-boards")]
 /// Both Sunsoft-2 boards carry the page's own "BUS CONFLICTS" line, which is one arm of
 /// `registry::has_bus_conflicts` and is visible from outside: a write landing on a numbered
 /// bank latches the AND of the value with the bank's bytes.
@@ -2162,6 +2218,7 @@ fn req_core_100_sunsoft_2_has_bus_conflicts_on_both_boards() {
 // ------------------------------------------- Bandai 74161/7432 (70, 152), VRC1 (75),
 // ------------------------------------------- Camerica BF9096 (232)
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 070") gives the board `[PPPP CCCC]` and no mirroring control; nesdev
 /// ("INES Mapper 152") gives the same board `[MPPP CCCC]`, `M` being one-screen select. One
 /// write pins the pair: `$F0` is PRG bank 15 and no layout change on 70, and PRG bank 7 with
@@ -2202,6 +2259,7 @@ fn req_core_100_bandai_74161_reads_bit_7_as_a_bank_bit_on_70_and_a_nametable_on_
     assert_eq!([14, 15, 255, 31], on_152.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// The half the two numbers share: a 16 KiB PRG window at $8000 with the last bank fixed at
 /// $C000, and an 8 KiB CHR bank from bits 3-0 — and the bus conflict, visible because the write
 /// below lands on 8 KiB bank 14, whose every byte is 14.
@@ -2218,6 +2276,7 @@ fn req_core_100_bandai_74161_shares_its_prg_and_chr_split_between_70_and_152() {
     }
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("VRC1"): three switchable 8 KiB PRG windows at $8000, $A000 and $C000, with
 /// $E000-$FFFF wired to the last bank.
 #[test]
@@ -2235,6 +2294,7 @@ fn req_core_100_vrc1_switches_three_prg_windows_and_wires_the_last() {
     assert_eq!([3, 7, 9, 15], core.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// The CHR half is two 4 KiB banks of **five** bits each: `$E000` and `$F000` carry the low four
 /// and `$9000` bits 1 and 2 the high one.
 #[test]
@@ -2255,6 +2315,7 @@ fn req_core_100_vrc1_takes_its_chr_high_bit_from_9000() {
     assert_eq!([12, 13, 14, 15, 20, 21, 22, 23], core.chr_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// `$9000` bit 0 is the mirroring bit, "0 = Vertical, 1 = Horizontal"; and the page's condition:
 /// "the mirroring bit is ignored if the cartridge is wired for 4-screen VRAM".
 #[test]
@@ -2279,6 +2340,7 @@ fn req_core_100_vrc1_has_a_mirroring_bit_that_a_four_screen_header_ignores() {
     assert_eq!(68, four.chr_windows()[0]);
 }
 
+#[cfg(feature = "board-small-boards")]
 /// There is no IRQ on the VRC1: nesdev gives the chip none, and the three addresses a VRC2 or
 /// VRC4 would use for one do nothing here.
 #[test]
@@ -2294,6 +2356,7 @@ fn req_core_100_vrc1_has_no_irq() {
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 232"): `$8000-$BFFF: [...B B...]` selects a 64 KiB block and
 /// `$C000-$FFFF: [.... ..PP]` a 16 KiB page inside it — "pages are taken from the 64k block
 /// currently selected by $8000" — with the block's last page fixed at $C000.
@@ -2321,6 +2384,7 @@ fn req_core_100_bf9096_takes_its_pages_from_the_selected_64_kib_block() {
     assert_eq!([8, 9, 14, 15], core.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// NES 2.0 submapper 1 is the Aladdin Deck Enhancer, whose two block bits are the other way
 /// round; submapper 0 is the plain *Quattro* board. `$08` is bit 3 alone, so it is block %01
 /// plain and block %10 swapped.
@@ -2338,6 +2402,7 @@ fn req_core_100_bf9096_swaps_its_block_bits_on_submapper_1() {
 // ------------------------------------------- the parameters of existing boards:
 // ------------------------------------------- 94 on UxROM, 185 on CNROM, 155 on MMC1
 
+#[cfg(feature = "board-94")]
 /// nesdev ("INES Mapper 094"): "very similar to `UxROM`, but the register is shifted by two bits",
 /// `xxxP PPxx`, with the same switchable window at $8000-$BFFF and the last bank fixed at $C000.
 ///
@@ -2361,6 +2426,7 @@ fn req_core_100_un1rom_shifts_the_uxrom_field_by_two_bits() {
     assert_eq!([14, 15, 14, 15], on_94.prg_windows());
 }
 
+#[cfg(feature = "board-small-boards")]
 /// nesdev ("INES Mapper 185"): submappers 4 to 7 say which value of the two chip-select bits
 /// enables the CHR-ROM; "when another value is active, CHR-ROM is disabled, meaning that reading
 /// from the pattern tables returns open bus behavior".
@@ -2391,6 +2457,7 @@ fn req_core_100_cnrom_protect_enables_chr_rom_on_its_submappers_chip_select() {
     }
 }
 
+#[cfg(feature = "board-small-boards")]
 /// Submapper 0, which is every iNES 1.0 image: the page's heuristic needs to count $2007 reads,
 /// which this core cannot tell from a background fetch, so **Q-131** records the question and
 /// the latch-value heuristic is what ships — "if C AND $0F is nonzero, and if C does not equal
@@ -2426,6 +2493,7 @@ fn req_core_100_plain_cnrom_is_unaffected_by_mapper_185() {
     assert_eq!(3, core.cartridge().unwrap().mapper_number());
 }
 
+#[cfg(feature = "board-155")]
 /// nesdev ("INES Mapper 155"): the MMC1 on a board that does not wire the PRG-RAM disable, so
 /// bit 4 of the PRG register has no effect on it — **and an MMC1 in the same test still honours
 /// it**, which is what says the parameter did not reach mapper 1.
@@ -2665,11 +2733,13 @@ fn req_core_100_the_sunsoft3_mirroring_register_has_four_states() {
 /// Loads RAMBO-1 bank register `register` while keeping bit 7 of `$8000` at `swap`, that bit
 /// being both the CHR half-swap and — on mapper 158 — what chooses which registers drive the
 /// nametables. [`MapperMachine::mmc3_bank`] writes the index alone and would clear it.
+#[cfg(feature = "board-158")]
 fn rambo1_bank(core: &mut zax_nes::NesCore, swap: bool, register: u8, value: u8) {
     core.mapper_write(0x8000, if swap { 0x80 | register } else { register });
     core.mapper_write(0x8001, value);
 }
 
+#[cfg(feature = "board-158")]
 /// nesdev ("INES Mapper 158"): the board "modifies RAMBO-1 (mapper 64) in the exact same way that
 /// TLSROM (118) differs from MMC3 (4), by which we mean the RAMBO-1's CHR A17 output is connected
 /// to CIRAM A10". With bit 7 of `$8000` clear the two 2 KiB registers R0 and R1 are at PPU
@@ -2696,6 +2766,7 @@ fn req_core_100_tengen_800037_takes_two_nametables_from_each_2_kib_register() {
     }
 }
 
+#[cfg(feature = "board-158")]
 /// And with bit 7 of `$8000` **set** the four 1 KiB registers R2-R5 are at the first pattern
 /// table and take one nametable each — the same bit `update_banks` swaps the CHR halves with, so
 /// the registers that drive CIRAM A10 are always the ones the PPU fetches `$0000-$0FFF` from.
@@ -2725,6 +2796,7 @@ fn req_core_100_tengen_800037_takes_one_nametable_from_each_1_kib_register() {
     assert_eq!([1, 1, 1, 1], nametable_pages(&core));
 }
 
+#[cfg(feature = "board-158")]
 /// `$A000` "is bypassed by the configuration described above, so writing here has no effect" —
 /// nesdev's words for the `TxSROM`, which this board copies. **And a RAMBO-1 in the same test
 /// still honours it**, which is what says the `const` parameter did not reach mapper 64.
@@ -2751,6 +2823,7 @@ fn req_core_100_tengen_800037_ignores_the_mirroring_register() {
     assert_eq!([-1, -1, -1, -1], nametable_pages(&rambo1));
 }
 
+#[cfg(feature = "board-158")]
 /// The banking is the RAMBO-1's, unchanged: the one thing mapper 158 rewires is CIRAM A10, so a
 /// mapper-64 and a mapper-158 image given the same registers must show the same windows.
 #[test]
@@ -2863,6 +2936,7 @@ fn req_core_100_the_tc0690_mirroring_is_bit_6_of_e000() {
 
 // ------------------------------------------- NES-EVENT (105)
 
+#[cfg(feature = "board-105")]
 /// A mapper-105 image whose timer has been unlocked by the documented sequence, leaving `$A000`
 /// at `$10`: `I` set, `O` clear, `AA` zero.
 fn unlocked_nes_event() -> zax_nes::NesCore {
@@ -2872,6 +2946,7 @@ fn unlocked_nes_event() -> zax_nes::NesCore {
     core
 }
 
+#[cfg(feature = "board-105")]
 /// nesdev ("NES-EVENT"): "the first 32 KiB is hardwired until the timer is started (write 0 then
 /// 1 to bit 4) for the first time", and Disch "PRG cannot be swapped until the mapper has been
 /// 'initialized' by setting the `I` bit to 0, then to `1`. [...] In addition, if the mapper has
@@ -2902,6 +2977,7 @@ fn req_core_100_the_nes_event_hardwires_the_first_32_kib_until_the_timer_is_unlo
 /// CHR RAM)", bits 3-1 "0-3: select 32 KiB bank in $8000-$FFFF from lower 128KB ROM" and "4-7:
 /// normal MMC1 behavior from upper 128KB ROM" — Disch's `O` bit above his two-bit `A`, which
 /// "selects between the chips, and also determines which PRG Reg is used to select the page".
+#[cfg(feature = "board-105")]
 #[test]
 fn req_core_100_the_nes_event_chip_select_picks_both_the_rom_half_and_the_prg_register() {
     let mut core = unlocked_nes_event();
@@ -2936,6 +3012,7 @@ fn req_core_100_the_nes_event_chip_select_picks_both_the_rom_half_and_the_prg_re
     );
 }
 
+#[cfg(feature = "board-105")]
 /// Disch: "this mapper has 8k CHR-RAM, and it is not swappable", and the page's parts list "8K of
 /// CHR RAM". The MMC1 inside still has its CHR mode bit and both CHR registers — "PPU A12 is
 /// still connected to the MMC1" — and **none of them may move a pattern fetch**.
@@ -2954,6 +3031,7 @@ fn req_core_100_no_nes_event_register_moves_its_unbanked_chr() {
     assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
 }
 
+#[cfg(feature = "board-105")]
 /// "8K of CHR RAM" against REQ-CORE-012's 32 KiB default for an image with no CHR-ROM, the same
 /// reading `req_core_100_the_vrc3_carries_eight_kib_of_chr_ram_*` pins for mapper 73.
 #[test]
@@ -2966,6 +3044,7 @@ fn req_core_100_the_nes_event_carries_eight_kib_of_chr_ram() {
     );
 }
 
+#[cfg(feature = "board-105")]
 /// **The trap of this board**, and the reason it does not delegate `Mapper::prg_ram_enabled` to
 /// the MMC1 it holds. Disch gives `$E000` as `[...W BBBB]` with "`W` = WRAM disable (same as
 /// MMC1)" — so `W` is the only wire to the 8 KiB of PRG-RAM. But a *Nintendo World
@@ -2997,6 +3076,7 @@ fn req_core_100_the_nes_event_wram_disable_is_e000_and_never_the_timer_bit() {
     assert_eq!(0x5A, core.read_memory(0x6000), "and it came back");
 }
 
+#[cfg(feature = "board-105")]
 /// `$8000` is "`[.... PSMM]`, same as MMC1 (but CHR mode bit isn't used)", so the mirroring is
 /// the chip's own and this board adds nothing to it.
 #[test]

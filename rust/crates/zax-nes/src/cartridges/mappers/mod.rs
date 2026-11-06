@@ -20,17 +20,22 @@ macro_rules! banked {
     };
 }
 
+#[cfg(feature = "board-small-boards")]
 mod bandai74161;
 mod bandai_fcg;
+#[cfg(feature = "board-small-boards")]
 mod bf9096;
+#[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 mod daou306;
 mod discrete;
 mod fme7;
 mod irem_h3001;
+#[cfg(feature = "board-small-boards")]
 mod irem_tam_s1;
 mod iremg101;
 mod irq_boards;
+#[cfg(feature = "board-small-boards")]
 mod jaleco_jf11;
 mod jaleco_ss88006;
 mod mmc1;
@@ -39,16 +44,23 @@ mod mmc3;
 mod mmc5;
 mod multicart;
 mod namco163;
+#[cfg(feature = "board-namcot108")]
 mod namcot108;
+#[cfg(feature = "board-105")]
 mod nes_event;
 mod nrom;
 mod rambo1;
+#[cfg(feature = "board-small-boards")]
 mod small_boards;
+#[cfg(feature = "board-small-boards")]
 mod sunsoft1;
+#[cfg(feature = "board-small-boards")]
 mod sunsoft2;
 mod sunsoft3;
+#[cfg(feature = "board-small-boards")]
 mod taito_tc0190;
 mod taito_tc0690;
+#[cfg(feature = "board-small-boards")]
 mod vrc1;
 mod vrc2_vrc4;
 mod vrc3;
@@ -56,9 +68,12 @@ mod vrc6;
 mod vrc7;
 mod vrc_irq;
 
+#[cfg(feature = "board-small-boards")]
 pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
+#[cfg(feature = "board-small-boards")]
 pub use bf9096::Bf9096;
+#[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 pub use daou306::Daou306;
 pub use discrete::{
@@ -66,9 +81,11 @@ pub use discrete::{
 };
 pub use fme7::Fme7;
 pub use irem_h3001::IremH3001;
+#[cfg(feature = "board-small-boards")]
 pub use irem_tam_s1::IremTamS1;
 pub use iremg101::IremG101;
 pub use irq_boards::IrqBoard;
+#[cfg(feature = "board-small-boards")]
 pub use jaleco_jf11::JalecoJf11;
 pub use jaleco_ss88006::JalecoSs88006;
 pub use mmc1::Mmc1;
@@ -83,16 +100,25 @@ pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,
 };
 pub use namco163::{Namco163, NamcoVariant};
+#[cfg(feature = "board-namcot108")]
 pub use namcot108::Namcot108;
+#[cfg(feature = "board-105")]
 pub use nes_event::NesEvent;
 pub use nrom::Nrom;
-pub use rambo1::{Rambo1, Rambo1Board, Tengen800037};
+#[cfg(feature = "board-158")]
+pub use rambo1::Tengen800037;
+pub use rambo1::{Rambo1, Rambo1Board};
+#[cfg(feature = "board-small-boards")]
 pub use small_boards::SmallBoard;
+#[cfg(feature = "board-small-boards")]
 pub use sunsoft1::Sunsoft1;
+#[cfg(feature = "board-small-boards")]
 pub use sunsoft2::Sunsoft2;
 pub use sunsoft3::Sunsoft3;
+#[cfg(feature = "board-small-boards")]
 pub use taito_tc0190::TaitoTc0190;
 pub use taito_tc0690::TaitoTc0690;
+#[cfg(feature = "board-small-boards")]
 pub use vrc1::Vrc1;
 pub use vrc2_vrc4::Vrc2Vrc4;
 pub use vrc3::Vrc3;

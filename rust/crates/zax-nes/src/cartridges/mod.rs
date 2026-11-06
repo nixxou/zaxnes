@@ -1012,6 +1012,7 @@ mod tests {
         expected.extend_from_slice(&[48, 48, 64, 64, 118, 118]);
         #[cfg(feature = "board-119")]
         expected.extend_from_slice(&[119, 119]);
+        #[cfg(feature = "board-158")]
         expected.extend_from_slice(&[158, 158]);
         assert_eq!(
             moved, expected,

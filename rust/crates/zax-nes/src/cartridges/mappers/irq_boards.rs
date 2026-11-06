@@ -1,8 +1,12 @@
 #[cfg(feature = "board-mmc3-multicart")]
 use super::Mmc3Multicart;
+#[cfg(feature = "board-105")]
+use super::NesEvent;
+#[cfg(feature = "board-158")]
+use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
-use super::{IremH3001, Mapper, NesEvent, Sunsoft3, TaitoTc0690, Tengen800037, Vrc3};
+use super::{IremH3001, Mapper, Sunsoft3, TaitoTc0690, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -87,10 +91,12 @@ pub enum IrqBoard {
     /// Mapper 67, Sunsoft-3.
     Sunsoft3(Sunsoft3),
     /// Mapper 105, the Nintendo NES-EVENT board.
+    #[cfg(feature = "board-105")]
     NesEvent(NesEvent),
     /// Mapper 48, the Taito TC0690.
     TaitoTc0690(TaitoTc0690),
     /// Mapper 158, Tengen's 800037: the RAMBO-1 with CHR A17 wired to CIRAM A10.
+    #[cfg(feature = "board-158")]
     Tengen800037(Tengen800037),
     /// Mapper 119, the Nintendo TQROM (MF-6a3 step 1).
     #[cfg(feature = "board-119")]
@@ -107,8 +113,10 @@ macro_rules! inner {
             IrqBoard::Vrc3($b) => $body,
             IrqBoard::IremH3001($b) => $body,
             IrqBoard::Sunsoft3($b) => $body,
+            #[cfg(feature = "board-105")]
             IrqBoard::NesEvent($b) => $body,
             IrqBoard::TaitoTc0690($b) => $body,
+            #[cfg(feature = "board-158")]
             IrqBoard::Tengen800037($b) => $body,
             #[cfg(feature = "board-119")]
             IrqBoard::Tqrom($b) => $body,
@@ -172,6 +180,7 @@ impl Mapper for IrqBoard {
     /// read path: `Cartridge::default_cpu_read` went **+67 110 804 instructions over 300 frames
     /// of `mmc5exram`**, +0.504 % on that ROM, where the 430 k it was meant to save is 0.002 %
     /// of a game this board is not. The 55 instructions stay.
+    #[cfg(any(feature = "board-105", feature = "board-119"))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
     }
@@ -218,6 +227,7 @@ impl Mapper for IrqBoard {
     /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
     /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
     /// anybody else.
+    #[cfg(feature = "board-158")]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))

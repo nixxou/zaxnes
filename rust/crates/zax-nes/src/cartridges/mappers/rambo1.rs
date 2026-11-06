@@ -53,6 +53,7 @@ pub struct Rambo1Board<const TLSROM: bool> {
 pub type Rambo1 = Rambo1Board<false>;
 
 /// Mapper 158, Tengen's 800037: the same chip with CHR A17 wired to CIRAM A10.
+#[cfg(feature = "board-158")]
 pub type Tengen800037 = Rambo1Board<true>;
 
 impl<const TLSROM: bool> Rambo1Board<TLSROM> {

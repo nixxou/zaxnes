@@ -19,7 +19,43 @@ workspace = true
 # `docs/review/BOARD-FEATURES.md` is the table: a row per feature, with the measured cost per
 # ROM on both runs and the one command that flips it.
 [features]
-default = ["board-119", "board-mmc3-multicart"]
+default = [
+    "board-94",
+    "board-105",
+    "board-119",
+    "board-155",
+    "board-158",
+    "board-mmc3-multicart",
+    "board-namcot108",
+    "board-small-boards",
+]
+
+# Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
+# parameters, 45 titles (MF-6a step 1, which measured `smb3/core` +45 707 and `m4` +66 921).
+board-namcot108 = []
+
+# Mappers 33, 70, 75, 89, 93, 97, 140, 152, 184, 185 and 232 — the Taito TC0190, the Bandai
+# 74161/7432, Konami VRC1, both Sunsoft-2 boards, the Irem TAM-S1, the Jaleco JF-11/14,
+# Sunsoft-1, CNROM with the security diodes and the Camerica BF9096 — nine boards **sharing one
+# `Board` variant**, which is what `SmallBoard`'s own note exists for. One feature for the
+# family, because one variant is what the measurements of MF-6a steps 2, 3 and 4 priced.
+board-small-boards = []
+
+# Mapper 94, the HVC-UN1ROM: a wiring of the UxROM board, its bank field shifted two bits
+# (MF-6a step 4). One title, *Senjou no Ookami*.
+board-94 = []
+
+# Mapper 155, the MMC1 on a board with no PRG-RAM disable wire (MF-6a step 4). MF-6a2 step 2
+# traced that step's `mm2/core` +10 506 to this parameter exactly and then removed it with the
+# two-mask idiom, which left `Mmc1::update_banks` five instructions *below* the reference.
+board-155 = []
+
+# Mapper 105, the Nintendo NES-EVENT board of *Nintendo World Championships 1990* (MF-6b step 3).
+board-105 = []
+
+# Mapper 158, Tengen's 800037: the RAMBO-1 with CHR A17 wired to CIRAM A10 (MF-6b step 5). One
+# title, *Alien Syndrome*.
+board-158 = []
 
 # Mapper 119, the Nintendo TQROM: *High Speed* and *Pin\*Bot*. A `const` parameter of the
 # MMC3's board, with its CHR-RAM chip's select, its two `#[inline(never)]` fetch bodies and the

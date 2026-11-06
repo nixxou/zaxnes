@@ -44,7 +44,9 @@ impl UxRom {
             banks: windows_for(memory),
             mapper_number,
             fixed_first: mapper_number == 180,
-            shifted_field: mapper_number == 94,
+            // `cfg!` and not `#[cfg]`: with `board-94` off this folds to `false` and
+            // the comparison is gone, so the UxROM proper is the code it always was.
+            shifted_field: cfg!(feature = "board-94") && mapper_number == 94,
             bank: 0,
         }
     }

@@ -8,16 +8,25 @@
 
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
+#[cfg(feature = "board-namcot108")]
+use super::mappers::Namcot108;
+#[cfg(feature = "board-105")]
+use super::mappers::NesEvent;
 use super::mappers::Nrom;
+#[cfg(feature = "board-158")]
+use super::mappers::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::mappers::Tqrom;
 use super::mappers::{
-    Action52, Action53, AxRom, Bandai74161, BandaiFcg, Bf9096, Caltron6In1, CnRom, CnRomProtect,
-    Codemasters, ColorDreams, CpRom, Daou306, Fme7, GxRom, IremG101, IremH3001, IremTamS1,
-    IrqBoard, JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015, Mapper034, Mapper078, McAcc, Mmc1,
-    Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, NesEvent, Rambo1,
-    SmallBoard, Sunsoft1, Sunsoft2, Sunsoft3, TaitoTc0190, TaitoTc0690, Tengen800037, UnRom512,
-    UxRom, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
+    Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
+    Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
+    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant,
+    Rambo1, Sunsoft3, TaitoTc0690, UnRom512, UxRom, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
+};
+#[cfg(feature = "board-small-boards")]
+use super::mappers::{
+    Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
+    TaitoTc0190, Vrc1,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -55,6 +64,7 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     28,
     30,
     32,
+    #[cfg(feature = "board-small-boards")]
     33,
     34,
     #[cfg(feature = "board-mmc3-multicart")]
@@ -68,38 +78,57 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     66,
     67,
     69,
+    #[cfg(feature = "board-small-boards")]
     70,
     71,
     73,
+    #[cfg(feature = "board-small-boards")]
     75,
+    #[cfg(feature = "board-namcot108")]
     76,
     78,
     85,
     87,
+    #[cfg(feature = "board-namcot108")]
     88,
+    #[cfg(feature = "board-small-boards")]
     89,
+    #[cfg(feature = "board-small-boards")]
     93,
+    #[cfg(feature = "board-94")]
     94,
+    #[cfg(feature = "board-namcot108")]
     95,
+    #[cfg(feature = "board-small-boards")]
     97,
     101,
+    #[cfg(feature = "board-105")]
     105,
     118,
     #[cfg(feature = "board-119")]
     119,
+    #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-small-boards")]
     152,
+    #[cfg(feature = "board-namcot108")]
     154,
+    #[cfg(feature = "board-155")]
     155,
     156,
+    #[cfg(feature = "board-158")]
     158,
     180,
+    #[cfg(feature = "board-small-boards")]
     184,
+    #[cfg(feature = "board-small-boards")]
     185,
+    #[cfg(feature = "board-namcot108")]
     206,
     210,
     225,
     228,
+    #[cfg(feature = "board-small-boards")]
     232,
 ];
 
@@ -199,6 +228,7 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // nesdev ("NES-EVENT"): "8K of CHR RAM", and Disch "this mapper has 8k CHR-RAM, and it
         // is not swappable". The same reading as mapper 73 above, for the same REQ-CORE-012
         // reason, and Mesen 2 agrees (`MMC1.h`'s 8 KiB CHR with one page selected).
+        #[cfg(feature = "board-105")]
         105 => BoardMemorySizes {
             chr_ram: Some(NesEvent::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
@@ -243,6 +273,7 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // "with the rare exception" of the *Magical Puzzle Popils* prototype, which carries
         // "8 KiB battery-backed". So the window is open bus on these five numbers unless the
         // image declares a battery, which is the one board the page excepts.
+        #[cfg(feature = "board-namcot108")]
         76 | 88 | 95 | 154 | 206 if !header.has_battery => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
@@ -324,10 +355,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
     Some(match mapper {
         0 => Board::Nrom(Nrom),
         // MF-6a step 4: mapper 155 is the MMC1 on a board with no PRG-RAM disable wire.
-        1 | 155 => Board::Mmc1(Mmc1::new(memory)),
+        #[cfg(feature = "board-155")]
+        155 => Board::Mmc1(Mmc1::new(memory)),
+        1 => Board::Mmc1(Mmc1::new(memory)),
         // MF-6a step 4: mapper 94 is the third wiring of the UxROM board, its bank field
         // shifted two bits (nesdev, "INES Mapper 094").
-        2 | 94 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
+        #[cfg(feature = "board-94")]
+        94 => Board::UxRom(UxRom::new(memory, mapper)),
+        2 | 180 => Board::UxRom(UxRom::new(memory, mapper)),
         3 => Board::CnRom(CnRom::new(memory)),
         // MR-4-3: mapper 4 submapper 3 is Acclaim's MC-ACC, the same board with a ÷8 prescaler
         // on A12's falling edges. It is the same code, monomorphised with the difference as a
@@ -366,22 +401,32 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         228 => Board::Action52(Action52::new(memory)),
         // MF-6a step 1: the Namco 108 and its four parameters. One board, five numbers; see
         // `Namcot108`'s own note on why the differences are fields and not `const` parameters.
+        #[cfg(feature = "board-namcot108")]
         76 | 88 | 95 | 154 | 206 => Board::Namcot108(Namcot108::new(memory, mapper)),
         // MF-6a step 2: five boards that are a register decode and nothing else, sharing one
         // `Board` discriminant. `SmallBoard`'s note has the measurement that put them there.
+        #[cfg(feature = "board-small-boards")]
         33 => Board::SmallBoard(SmallBoard::TaitoTc0190(TaitoTc0190::new(memory))),
+        #[cfg(feature = "board-small-boards")]
         97 => Board::SmallBoard(SmallBoard::IremTamS1(IremTamS1::new(memory))),
+        #[cfg(feature = "board-small-boards")]
         140 => Board::SmallBoard(SmallBoard::JalecoJf11(JalecoJf11::new(memory))),
+        #[cfg(feature = "board-small-boards")]
         184 => Board::SmallBoard(SmallBoard::Sunsoft1(Sunsoft1::new(memory))),
         // Mapper 89 is the Sunsoft-3 board and 93 the Sunsoft-3R; the chip is the same.
+        #[cfg(feature = "board-small-boards")]
         89 | 93 => Board::SmallBoard(SmallBoard::Sunsoft2(Sunsoft2::new(memory, mapper))),
         // MF-6a step 3: four more numbers in the same variant, so no new discriminant.
         // Mapper 152 is the same board as 70 with its mirroring wire connected.
+        #[cfg(feature = "board-small-boards")]
         70 | 152 => Board::SmallBoard(SmallBoard::Bandai74161(Bandai74161::new(memory, mapper))),
+        #[cfg(feature = "board-small-boards")]
         75 => Board::SmallBoard(SmallBoard::Vrc1(Vrc1::new(memory))),
+        #[cfg(feature = "board-small-boards")]
         232 => Board::SmallBoard(SmallBoard::Bf9096(Bf9096::new(memory))),
         // MF-6a step 4: CNROM with the security diodes. `CnRomProtect`'s note says why it
         // is here and not a parameter of `CnRom`.
+        #[cfg(feature = "board-small-boards")]
         185 => Board::SmallBoard(SmallBoard::CnRomProtect(CnRomProtect::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
@@ -393,6 +438,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         67 => Board::IrqBoard(IrqBoard::Sunsoft3(Sunsoft3::new(memory))),
         // MF-6b step 3: the NES-EVENT, which holds an `Mmc1` rather than parameterising one --
         // `NesEvent`'s own note has the measurement that decided that.
+        #[cfg(feature = "board-105")]
         105 => Board::IrqBoard(IrqBoard::NesEvent(NesEvent::new(memory))),
         // MF-6b step 4: the TC0690, the TC0190 of mapper 33 with the MMC3's scanline counter
         // and a four-cycle delay on its assertion. `TaitoTc0690`'s own note has the three
@@ -400,6 +446,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         48 => Board::IrqBoard(IrqBoard::TaitoTc0690(TaitoTc0690::new(memory))),
         // MF-6b step 5: Tengen's 800037 is the RAMBO-1 with CHR A17 on CIRAM A10, which is a
         // `const` parameter of the same board -- see `Rambo1Board`'s own note.
+        #[cfg(feature = "board-158")]
         158 => Board::IrqBoard(IrqBoard::Tengen800037(Tengen800037::new(memory))),
         // MF-6a3 step 1: the TQROM, a `const` parameter of the MMC3's board -- see
         // `Mmc3Board`'s own note on the six shapes MF-6a2 step 3 measured for it. It goes in
