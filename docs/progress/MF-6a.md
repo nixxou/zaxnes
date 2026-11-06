@@ -550,7 +550,89 @@ accumulating. The post-LTO state is step 2's: the three claimants **0 / 0 / 0**,
 `#[inline(never)]` on each decode buys.
 
 [PROGRESS] MF-6a step 3/7 done: four boards, no new `Board` variant, set total −90 354.
+## Step 4 — 94 on `UxRom`, 155 on `Mmc1`, and 185 **not** on `CnRom`
+
+**Bookkeeping first, because it is visible in the history**: step 3's commit `0c3f0f8e` carries
+step 4's code as well — the staging area held both when step 3 was committed, and amending is not
+allowed here. The *measurements* are per-step and were taken before the next step's code existed:
+`tar -tf rust/target-mf/tmp/mf6a-3-wt000001.tar` has `bandai74161.rs`, `vrc1.rs` and `bf9096.rs`
+and **no `cnrom_protect.rs`**, so step 3's figures are step-3-only. This step's commit is its
+progress-file section and the Q-131 ticket.
+
+### 94 and 155 are free, and the reason is where the parameter is read
+
+* **94** is one more wiring of the UxROM board, beside mapper 180. nesdev
+  ("INES Mapper 094"): "very similar to UxROM, but the register is shifted by two bits",
+  `xxxP PPxx`, same switchable window at $8000-$BFFF, same last bank fixed at $C000. The
+  `shifted_field` `bool` is read **only by `UxRom::write_register`**, so no read, fetch or cycle
+  path of mapper 2 or 180 sees it. The test writes `$14` through both numbers — bank 5 on 94,
+  bank 4 on 2 — so the parameter cannot be got backwards.
+* **155** is the MMC1 on a board that does not wire the PRG-RAM disable. The one place it is read
+  is `Mmc1::refresh_prg_ram_disable`, which runs **when a register commits**, not on the
+  $6000-$7FFF decode: `Mapper::prg_ram_enabled` is still `!self.prg_ram_disabled`, instruction
+  for instruction, so the four MMC1 ROMs of lot PR-1's set pay nothing. The test asserts both
+  halves in one loop — 155 ignoring `$E000` bit 4 and **mapper 1 still honouring it**.
+
+### 185 is its own board, and that is a deliberate departure from §5
+
+§5 has 185 as "a submapper parameter of `CnRom`". It is not. A disabled CHR changes **what a
+fetch reads**, so the parameter would have to reach `Mapper::chr_view` — and step 2 measured one
+more distinct body there at **0.067 % to 0.131 % on eight of lot PR-1's thirteen ROMs**, one of
+which (`test_ppu_read_buffer`) *is* a CNROM. So 185 went into `SmallBoard`, whose `chr_view`
+already answers `None` for the whole variant, and **mapper 3 is not touched at all** — which
+`req_core_100_plain_cnrom_is_unaffected_by_mapper_185` pins from the outside.
+
+Submappers 4 to 7 are implemented as the page describes: the chip-select value that enables the
+CHR-ROM is 0, 1, 2 and 3 respectively, and any other value disables it. The page's own
+instruction is quoted in the file so that a later lot does not add the diodes: "emulators need
+not emulate the functionality of security diodes to run games correctly".
+
+**Submapper 0 is Q-131.** The page's heuristic is "disable CHR-ROM for the first two reads from
+$2007 after a reset and then enable it", and this core cannot see that: a $2007 read and a
+background fetch both arrive at `Mapper::ppu_read` as `ChrFetch::Background`, and telling them
+apart needs either a third `ChrFetch` value — whose price §4.4 and Q-123 give — or a hook no
+board has. The provisional choice is the other documented heuristic, the one Mesen 2 uses, which
+reads only the latch: "if C AND $0F is nonzero, and if C does not equal $13: CHR is enabled".
+`q_131_cnrom_protect_reads_its_submapper_0_heuristic_off_the_latch` pins all four of its cases.
+The ticket also records the second local choice — a disabled read is the CHR byte **with D0
+pulled up**, not zero, which is Mesen's and which its comment says *Mighty Bomb Jack* needs to
+boot — and points out that `ChrFetch`'s inability to tell a CPU read from a rendering fetch is
+now the **third** board to ask for it (MR-1's MMC2 latch, §4.4's mapper 96, this).
+
+Five tests, 842 → **847 / 0 / 8**; `fmt` and clippy clean, no new `allow`.
+
+### The bar
+
+**PR-1's thirteen**: set total **−50 984 (−0.000 %)**, every ROM within **±112 k**, and the
+emulated symbols are step 2's three and nothing else — `write_internal` **−64 to −65 k** on
+`m0`/`m1`, `run_dots` **−20 to −22 k** on `duelito`/`metroid`, `smb3`'s `catch_up_ppu`
+**+157 741**. `m4` ends **+21 886** whole-process with **no symbol above 20 000**: step 1's
++66 921 in `write_internal` is gone and has not come back.
+
+**Level 2**, against `240a2718`:
+
+| game/stage | baseline | step 4 | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 148 433 485 | **11 148 409 347** | −24 138 | −0.0002 % |
+| `smb1/core` | 11 516 670 821 | **11 516 657 770** | −13 051 | −0.0001 % |
+| `zelda2/core` | 12 778 994 409 | **12 778 987 397** | −7 012 | −0.0001 % |
+| `mm2/core` | 12 043 869 909 | 12 043 880 415 | +10 506 | +0.0001 % |
+| `smb3/core` | 15 320 386 010 | 15 320 847 312 | **+461 302** | **+0.0030 %** |
+| `metroid/total` | 13 736 688 715 | **13 736 617 840** | −70 875 | −0.0005 % |
+| `mm2/total` | 18 983 316 177 | **18 983 305 724** | −10 453 | −0.0001 % |
+| `zelda2/total` | 15 363 074 749 | 15 363 848 606 | +773 857 | +0.0050 % |
+| `smb3/total` | 24 194 492 263 | 24 195 814 442 | +1 322 179 | +0.0055 % |
+| `smb1/total` | 13 588 597 037 | 13 590 620 588 | +2 023 551 | +0.0149 % |
+
+**This step does not meet the level-2 core bar on `smb3` (+461 302, +0.0030 %) or `mm2`
+(+10 506, +0.0001 %)**; `smb3`'s figure is step 3's to within 0, so it is the same
+`catch_up_ppu` relayout and not something this step added. Three of five totals are below the
+baseline; the three above are the `convert`/`lua_hooks` pair again (`smb1` +2.02 M on a total of
+13.6 G, against a `smb1/core` that is 13 051 **below** the baseline and a `smb1/ppu` identical
+to the instruction).
+
+[PROGRESS] MF-6a step 4/7 done: 94 and 155 free, 185 off the CNROM, and Q-131.
 
 ## Status
 
-Steps 0-3 done.
+Steps 0-4 done.
