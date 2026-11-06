@@ -1320,6 +1320,125 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.15 Lot MF-CART: the limit on new boards, lifted — and the new limit, measured
+
+For nine measurements of MF-6c and two of MF-CART, **every new board cost `mmc5` a whole number of
+units of exactly 7 456 756 instructions over 300 frames (+0.066 % each)**, against the owner's
+tolerance of +0.02 % per ROM. MF-6c parked two boards on it, found each shared enum's own limit
+(`SmallBoard` ten variants, `IrqBoard` ten, `DecodeBoard` four) and could not move the figure with
+seven shapes of a board's own code; MF-CART step 1 measured it a tenth time at **three** units for
+`board-taito-x1` and its step 3 an eleventh at **four**, the wall moving further away as the tree
+grew. MF-CART removes it. The lot ends **−25 192 533 (−0.032 %)** on lot PR-1's thirteen ROMs
+against `44f77f72` with ten of them below, three level-2 `core` figures below and one exactly
+equal, and **five mapper numbers more in the default build** — the two parked features un-parked.
+Five findings.
+
+**1. The quantum was one instruction per CPU read, and the arithmetic says so exactly.**
+`Cartridge::default_cpu_read`'s exclusive count on `mmc5exram` was **283 356 728**, and
+283 356 728 ÷ 7 456 756 is **38.0**: that function was entered **7 456 756 times**, once per CPU
+read, because the MMC5 is the one board that maps PRG-RAM into $8000-$DFFF so
+`Cartridge::read_rom_window` cannot answer. The function held the inlined
+`Board::try_read_prg` jump table — twice, once per path — and past a certain pressure LLVM
+materialised `&self.board` **above** the table, for that table's *cold* arms: mapper 116's boxed
+`IrqBoard::Somari(Box<Somari>)`, which dereferences it, and the arms that are `#[inline(never)]`,
+which pass it. The dear layout differs from the cheap one in three instructions of the entry, and
+`grep leaq` over the two post-LTO dumps finds them in one look —
+`movl %esi, %ecx`, `movq %rdi, %r8`, **`leaq 240(%r8), %rdi`** — where the cheap one has no
+`leaq 240(…)` at all. **A figure that is a whole multiple of the call count is one instruction on
+the call; look for the register shuffle before looking for work.**
+
+**2. The fix is two halves and neither works alone.**
+
+* **The $6000-$7FFF read answer is settled on `Cartridge`**, beside `rom_windows` and
+  `nametable_pages`: `Mapper::prg_ram_offset(memory, address)` becomes
+  `Mapper::prg_ram_window(memory) -> (base, wrap)`, cached with `Mapper::prg_ram_enabled` folded
+  into the wrap (zero meaning "not RAM for a read"), so `default_cpu_read` asks the `Board` enum
+  **nothing** about that window. Worth **−13 172 494 on the set on its own**, because the dispatch
+  it removed was not free: `Board::prg_ram_offset` had a symbol of its own with **3 736 274
+  instructions on `M0_P32K_C8K_V`, 5 506 200 on `M1_P128K`, 3 736 350 on `M4_P128K` and 644 280 on
+  Metroid** — an out-of-line call per $6000-$7FFF read on four ROMs whose boards bank nothing. But
+  it does **not** lift the limit: `board-taito-x1` on that tree is four units, +0.265 %.
+* **`#[inline(always)]` on `Cartridge::default_cpu_read`.** MF-6c step 2 measured this as its
+  shape c and *rejected* it — `mmc5` −0.065 % but `m0` +0.022 % and `m1` +0.024 %, because
+  `Board::prg_ram_enabled` went out of line as the body moved — and the first half is exactly what
+  makes that impossible. The function then stops existing as a symbol and the **MMC5's own
+  `try_read_prg` arm goes out of line** instead: `default_cpu_read` **283 356 728 → 0**,
+  `Mmc5::try_read_prg` **0 → 141 678 364**, `try_cpu_read` **300 643 690 → 429 758 682**, a net
+  **−12.6 M** and `m0`/`m1` at −0.057 % and −0.096 % rather than +0.022 %.
+
+**The proof that the limit is gone is an identity, not a margin**: `Mmc5::try_read_prg` and
+`try_cpu_read` measure **141 678 364 and 429 758 682 in all three configurations** — `Board` at
+thirty-six, thirty-eight and thirty-nine variants — **identical to the instruction**. The MMC5's
+read path no longer depends on how many boards the build has.
+
+**3. The new limit, measured with synthetic boards rather than assumed.** A probe board
+`ProbeBoard<const N: u8>` — a register-decode board with `BankWindows`, a register,
+`write_register` and `prg_ram_enabled`, so that N variants are N distinct monomorphised bodies in
+every dispatch they reach — was added N at a time and constructed from `registry::create_board`
+under mapper numbers 10 000.. (absent from `SUPPORTED_MAPPERS`, so no cartridge is ever one and
+nothing is dead code LLVM could prune). Against the shipped tree:
+
+| probe | `mmc5` | worst ROM of the thirteen | set total |
+| --- | ---: | --- | ---: |
+| **+12 variants in a shared enum** (`DecodeBoard` 5 → 17) | **+3 695** | `m4` **+136 589, +0.002 %** | +301 876 (+0.000 %) |
+| **+12 new `Board` discriminants** (36 → 48) | **+2 391 493, +0.021 %** | `mmc5`; **twelve of thirteen are 0.015 % to 0.279 % *below*** | **−66 508 473 (−0.084 %)** |
+| **+4 new `Board` discriminants** (36 → 40) | **+20 396 376, +0.181 %** | `mmc5`, then `m4` +0.089 % | −16 609 321 (−0.021 %) |
+
+> **A board that shares a variant is free: a shared enum takes at least twelve more at +0.002 %
+> on the worst ROM, a tenth of the tolerance. A board that wants a `Board` discriminant of its own
+> is still a lottery, and the only quantum left in this build is
+> `NesBus::push_expansion_audio` ±8 934 160.**
+
+The twelve MF-UNL lots and MF-VS can therefore plan on **one shared enum variant per board, with
+no limit they will reach**, and should not add a `Board` discriminant without measuring it.
+
+**4. The remaining quantum is `push_expansion_audio`, and MF-6a3's figure reproduces to the
+instruction.** Both `Board`-discriminant probes move that function by **+8 934 160** on `mmc5` —
+*to the instruction* the figure §5.14 measured for **two** new discriminants and §5.13's step 1
+measured as **−8 934 160** for the thirty-fifth. One taken `jmp` per expansion-audio sample, 8.9
+million of them, as the jump table that `NesBus::push_expansion_audio` inlines whole re-lays out
+and the MMC5's arm loses the fall-through. What differs between the probes is everything *else*:
+`Ppu2C02::run_dots` is **+11 460 164 on `mmc5` at four discriminants and −4.6 M to −17.7 M on
+every other ROM at twelve**, which is `Board::chr_view`'s table doing the same thing with the
+opposite sign. §5.14's rule stands unamended and is now measured at four points: **any change to
+such a dispatch's arm count re-rolls the block placement, and the sign is LLVM's choice. Measure
+it; do not predict it.**
+
+**5. Two layout levers were refuted, and the first is worth not trying again.**
+
+* **`#[repr(C)]` on `Cartridge`, to put `board` at offset 0** so that `&self.board` *is* `%rdi`
+  and finding 1's instruction has nothing to compute. `repr(Rust)` sorts fields by alignment and
+  had put `memory` first, so the attribute was the only way to ask — and it costs **every ROM of
+  the set 0.33 % to 1.12 %, set total +464 793 722 (+0.586 %)**, all of it
+  `NesBus::read_cycle` **+35.3 M to +38.7 M**, about **4.3 instructions per CPU read**, with
+  `default_cpu_read` unmoved. `NesBus` holds the cartridge as an `Option<Cartridge>` and what the
+  attribute moves is that enum's layout. **`#[repr(C)]` is not available as a layout lever on a
+  struct something holds in an `Option`.**
+* **`#[inline(never)]` on the new refresh**, to keep `refresh_rom_windows` small enough to inline
+  into `cpu_write` as it used to be: set total −24 693 981 against −25 432 993, nine ROMs above
+  the baseline against four.
+
+**And one thing the fix had to pay for, named rather than argued away.** The read path stopped
+asking the board a question, so the **write** path has to settle it, and
+`Cartridge::refresh_rom_windows` runs after every CPU write to the cartridge. Asked as three
+`Board` methods that was `mm2/core` **+0.005 %** — Mega Man 2 is an MMC1, whose five-write shift
+register makes the refresh run five times per register. `Mapper::cpu_read_windows` makes it
+**one** dispatch: it returns the four ROM windows and the $6000-$7FFF pair together, and **no
+board overrides it**, so the default body calls the three methods on the board's own monomorphised
+`Self` and there is no dispatch left inside the arm. That halves it, to **`mm2/core` +0.002 %** and
+`mm2` +0.001 % on the no-pack set — the one figure of the lot above the baseline, against four
+shapes measured for it. **A cache on a per-write path should be filled by one dispatch that
+returns everything, not by one dispatch per answer.**
+
+**A note for whoever measures next.** The binaries of this lot's later shapes are past the
+threshold §5.12 records: valgrind 3.22 stops reading their Rust symbols, `callgrind-l2.sh`'s awk
+then matches nothing and `stages.txt` comes out **empty** rather than wrong. The counts are
+unaffected. `resolvesyms.py` repairs it, with two wrinkles that lot did not meet: it looks at
+`*.ann` only, so the inclusive `*.inc` files have to be staged under `.ann` names first, and it
+writes the names back in their **mangled** v0 form, so the stage patterns have to accept
+`7NesCore9run_frame` as well as `<…NesCore>::run_frame`. The bias derives itself — `0x108000`,
+with 986 addresses landing exactly on a symbol start.
+
 ### 5.14 Lot MF-6a3: a `Board` **variant** has a measured price, and a dispatch's arm count is not monotone
 
 MF-6a3 restored the three boards MF-6a2 step 3 had built and reverted — the TQROM (119) and
@@ -1355,6 +1474,14 @@ gain read backwards: its step 1 recorded `push_expansion_audio` **−8 934 160**
 > inlines whole**, and `NesBus::push_expansion_audio` is that function. Its unit is the
 > **discriminant count**, not the body count — which is what makes it the first exception to
 > §5.11 in five lots.
+
+**§5.15 narrows this to one dispatch and measures it twice more.** Lot MF-CART's two
+`Board`-discriminant probes both move `push_expansion_audio` by **+8 934 160 on `mmc5`**, this
+figure to the instruction, at four discriminants and at twelve — so the rule above holds exactly
+as written. What that lot removed is the *other* dispatch a new variant used to be charged for,
+`Cartridge::default_cpu_read`'s copy of `Board::try_read_prg`'s table, and after it a board that
+**shares** a variant is free: a shared enum takes at least twelve more at +0.002 % on the worst
+ROM.
 
 The fix is to add no discriminant: all four of this lot's boards went into §5.13's `IrqBoard`,
 which they qualify for because all four assert /IRQ, and `Board` ends the lot at the
@@ -1481,7 +1608,9 @@ on three ROMs whose boards the lot does not touch. `#[inline(always)]` restores 
 added is pinned rather than shortened.**
 
 **`Board::prg_ram_enabled` must stay inlined, and the refutation is worth more than the
-finding.** The sixth inner variant pushed `Board::prg_ram_writable` out of line, 0 → 55
+finding.** (Both the dispatch and the function it was inlined into are gone since §5.15: that
+window's answer is settled on `Cartridge` per CPU write, and `Cartridge::default_cpu_read` is
+`try_cpu_read`'s body. The finding is kept because the shape of its argument is general.) The sixth inner variant pushed `Board::prg_ram_writable` out of line, 0 → 55
 instructions, at +430 380 over 600 level-2 frames of *Super Mario Bros. 3*. Taking the shared
 `prg_ram_enabled` body out of line to shrink it instead put that dispatch behind a `callq` on the
 MMC5's read path: `Cartridge::default_cpu_read` **+67 110 804 instructions over 300 frames of
@@ -1570,7 +1699,9 @@ Seventeen mapper numbers added in two `Board` variants, set total **−50 984 in
 findings, and the first one corrects the unit §4.9 of `docs/review/MF-6-inventory.md` costed in.
 
 **A new `Board` variant costs the existing boards nothing; a new *distinct arm body* costs
-whatever inlines that dispatch.** The experiment is step 1's X: the 33rd variant, with its
+whatever inlines that dispatch.** (§5.14 found the one exception — `push_expansion_audio`'s jump
+table, whose unit is the discriminant count — and §5.15 measured it twice more and removed the
+second one, `Cartridge::default_cpu_read`'s.) The experiment is step 1's X: the 33rd variant, with its
 struct, its `banked!()`, its `nametable_page`, its `reset` and its save-state block but **no
 `write_register` of its own**, left `NesBus::write_internal` identical **to the instruction on
 all thirteen ROMs**. Give the same variant a register decode and the two MMC3 ROMs pay +66 921

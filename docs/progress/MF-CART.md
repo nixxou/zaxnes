@@ -798,3 +798,83 @@ at **−0.111 %** with +0.002 %, against the +7 456 756 and +7 423 140 MF-6c par
 shipped `default` is **−25 192 533 (−0.032 %)** on PR-1's thirteen with ten of them below, three
 level-2 cores below and one equal, `read_pattern_planes` **107** and every other pinned symbol
 identical to the instruction — and five mapper numbers more than the tree it started from.
+
+## Step 6 — the new limit, **measured with synthetic boards** and written down
+
+### How it was measured
+
+A limit is only worth writing down if it is a number, so this step added boards rather than
+reasoning about them. `ProbeBoard<const N: u8>` is a synthetic register-decode board — a
+`BankWindows`, a register, `write_register`, `prg_ram_enabled`, `reset` and a savestate block —
+and each probe variant is a **distinct monomorphisation**, so N variants are N distinct bodies in
+every dispatch they reach, which is the expensive case and the shape an MF-UNL board will have.
+
+Two things make the probes honest:
+
+* they are **constructed**, from `registry::create_board` under mapper numbers 10 000.., so no arm
+  and no jump-table slot is dead code LLVM could prune. Those numbers are not in
+  `SUPPORTED_MAPPERS`, so `Cartridge::create` refuses them and no cartridge is ever one;
+* they are **scratch**. `rust/target-mf/probe.py` wrote them into the worktree, the tree was packed
+  with `make-tree.sh --worktree`, and `git checkout --` put it back; nothing of them is committed,
+  and the tree at the end of this step is step 5's byte for byte.
+
+### What the two axes cost, against the shipped tree (`mfct-5-unparked`)
+
+| probe | label | `mmc5` | worst ROM of the thirteen | set total |
+| --- | --- | ---: | --- | ---: |
+| **+12 variants in a shared enum** (`DecodeBoard` 5 → 17) | `mfct-6-dec12prb` | **+3 695** | `m4` **+136 589, +0.002 %** | +301 876 (+0.000 %) |
+| **+12 new `Board` discriminants** (36 → 48) | `mfct-6-brd12prb` | **+2 391 493, +0.021 %** | `mmc5`; **twelve of thirteen are 0.015 % to 0.279 % below** | **−66 508 473 (−0.084 %)** |
+| **+4 new `Board` discriminants** (36 → 40) | `mfct-6-brd4prbe` | **+20 396 376, +0.181 %** | `mmc5`, then `m4` +0.089 % | −16 609 321 (−0.021 %) |
+
+> **The limit for a board that shares a variant is gone.** A shared enum takes **at least twelve
+> more variants** — on top of `DecodeBoard`'s five and `SmallBoard`'s twelve — at `mmc5` **+3 695**
+> and a worst ROM of **+0.002 %**, a tenth of the owner's tolerance. Where MF-6c had to measure
+> `SmallBoard` at ten, `IrqBoard` at ten and `DecodeBoard` at four, there is now no number a lot
+> will reach: the twelve MF-UNL lots and MF-VS can plan on **one shared enum variant per board**.
+>
+> **A `Board` discriminant of its own is still a lottery, and it is the only quantum left.** Both
+> probes move `NesBus::push_expansion_audio` by **+8 934 160 on `mmc5`** — *to the instruction*
+> the figure MF-6a3 step 1 measured for **two** discriminants and MF-6b step 1 recorded as
+> **−8 934 160** for the thirty-fifth variant: one taken `jmp` per expansion-audio sample, 8.9
+> million of them, as the jump table `push_expansion_audio` inlines whole re-lays out and the
+> MMC5's arm loses the fall-through. What differs between four and twelve is everything *else*:
+> `Ppu2C02::run_dots` is **+11 460 164 on `mmc5` at four** and **−4.6 M to −17.7 M on every other
+> ROM at twelve**, which is `Board::chr_view`'s table doing the same thing with the opposite sign,
+> and at four discriminants `Board::ppu_read` +3 082 184 and `ppu_peek` +2 288 640 take `m4` to
+> +0.089 % as well.
+
+So MF-6a3 step 1's rule survives this lot **unamended and now measured at four points**, and it is
+the one a successor has to respect: a new discriminant is free in every dispatch except the one a
+hot function inlines whole, and whether LLVM hands the MMC5 the fall-through is its choice.
+**Measure it; do not predict it** (§5.14).
+
+### Where it is written down
+
+* **`rust/docs/PERFORMANCE-HISTORY.md` §5.15**, new, between §5.9 and §5.14 as the file orders
+  its lots: the quantum's arithmetic (283 356 728 ÷ 7 456 756 = 38.0, so one instruction per
+  read), the two halves of the fix and why neither works alone, the table above, the
+  `push_expansion_audio` finding, the two refuted layout levers (`#[repr(C)]` at +0.586 % and
+  `#[inline(never)]` on the refresh), the one cost the fix pays on the write path, and §5.12's
+  valgrind failure with the two wrinkles `resolvesyms.py` has on a level-2 directory.
+* **Three older rules now point at it**, so that a reader of the rule finds the measurement that
+  changed it: §5.14's `push_expansion_audio` rule (narrowed, not amended), §5.11's "a `Board`
+  variant is free", and §5.13's `Board::prg_ram_enabled` finding, whose dispatch *and* whose
+  function are both gone.
+* **`docs/review/MF-6-inventory.md` §4.9 item 4**, new: item 3 is the limit this lot removed, and
+  it said in as many words that "the structural fix … is R0's own sub-lot after MF-6c". That
+  sub-lot ran, so item 4 says what replaces the advice — add the board to a shared enum, and
+  measure a `Board` discriminant if you want one.
+* **`docs/review/BOARD-FEATURES.md`**, in step 5.
+
+### Nothing of this step is in the tree
+
+No code, no test and no feature changed: `git diff` against step 5 is `PERFORMANCE-HISTORY.md` and
+`MF-6-inventory.md` and nothing else, so the suites and every measurement of step 5 stand
+unaltered. The probe trees were deleted with their tars as soon as their figures were recorded.
+
+[PROGRESS] MF-CART step 6/8 done: the new limit **measured, not assumed** — twelve more variants
+in a shared enum cost `mmc5` **+3 695** and a worst ROM of **+0.002 %**, so a board that shares a
+variant has no limit left to plan against; a new `Board` discriminant is still the
+`push_expansion_audio` lottery, **+8 934 160 to the instruction** in both probes, at `mmc5`
++0.181 % for four and +0.021 % for twelve. Written into `PERFORMANCE-HISTORY.md` §5.15 with
+pointers from the three older rules it changes, and into §4.9 of the inventory as item 4.

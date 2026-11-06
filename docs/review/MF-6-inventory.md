@@ -540,6 +540,20 @@ Two consequences for the sub-lots:
    against it across MF-6c. **A sub-lot that needs a register-decode board therefore starts a fourth
    shared variant rather than extending one**, and the structural fix (a load-time cache of the
    $6000-$7FFF decode on `Cartridge`) is R0's own sub-lot after MF-6c.
+4. **And that sub-lot ran: item 3 is void, and the advice it gives is no longer the advice.**
+   Lot **MF-CART** removed the figure. Caching the $6000-$7FFF decode was half of it and was not
+   enough alone — its step 3 measured the same quantum, *four* units — and what finished it was
+   `#[inline(always)]` on `Cartridge::default_cpu_read`, which the cache made safe: the function
+   stops existing, the MMC5's own `try_read_prg` arm goes out of line, and
+   **`Mmc5::try_read_prg` and `Cartridge::try_cpu_read` then measure 141 678 364 and 429 758 682
+   whether `Board` has 36, 38 or 39 variants, identical to the instruction**. MF-CART step 6
+   measured the new limit with synthetic boards: **twelve more variants in a shared enum cost
+   `mmc5` +3 695 and a worst ROM of +0.002 %**, so a sub-lot adds its board to an existing shared
+   enum and has no limit to plan against. A new `Board` **discriminant** is still a lottery — four
+   of them cost `mmc5` +0.181 % and twelve cost +0.021 %, both on
+   `NesBus::push_expansion_audio` ±8 934 160 — so that is the one thing still to measure rather
+   than assume. `rust/docs/PERFORMANCE-HISTORY.md` §5.15 and `docs/progress/MF-CART.md` have it
+   all; `docs/review/BOARD-FEATURES.md` has the two boards MF-6c parked and MF-CART un-parked.
 
 ### 4.10 Summary: what each hook costs the games that do not use it
 
