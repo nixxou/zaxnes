@@ -31,7 +31,7 @@
 //! | Mega Man 6 (USA), and Rockman 6 (Japan) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; the Japanese build's own pack; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
 //! | Mega Man 3 (USA), Rockman 3 (Japan), (Europe) and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; a pack per build, the European ones PAL with NTSC twins; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
 //! | Mega Man (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman (Japan) and the conversions by its signatures; the European build's pack, PAL, and the same as NTSC; "Invincible" a component of its own, with or without the advanced mode (`mm1wide`, `tools/build.py --pack`) |
-//! | Faxanadu (USA) | testing aids only (the margin decoder alone widens the game) | a hack pack (`crate::hack_pack`) of two components: "Invincible" (the routine taking the HP returns at once) and the level select (a new game starts at the temple the buttons held at START pick; its code in the zone fantôme), the ROM keeping its size (`faxanaduwide`, `tools/build_pack.py`) |
+//! | Faxanadu (USA) | testing aids only (the margin decoder alone widens the game) | a hack pack (`crate::hack_pack`) of three components: "Invincible" (the routine taking the HP returns at once), the level select (a new game starts at the temple the buttons held at START pick, with a rank and an outfit made for that town) and "Infinite money" (the shops always find gold enough, the purse full); their code in the zone fantôme, the ROM keeping its size (`faxanaduwide`, `tools/build_pack.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -1599,9 +1599,11 @@ pub const PATCHES: [BuiltinPatch; 65] = [
         rom_name: "Faxanadu (USA)",
         source_crc: 0x57DD_23D1,
         // A hack pack of testing aids only (`faxanaduwide`, `tools/build_pack.py`): "Invincible"
-        // (the routine taking the player's HP returns at once) and the level select (a new game
-        // starts at the temple of the town the buttons held at START pick, as a password does;
-        // its 40 bytes of code in the execution zone). The widescreen is the margin decoder's.
+        // (the routine taking the player's HP returns at once), the level select (a new game
+        // starts at the temple of the town the buttons held at START pick, as a password does,
+        // with a rank and an outfit made for that town) and "Infinite money" (the shops always
+        // find gold enough, the purse full); their code in the execution zone. The widescreen
+        // is the margin decoder's.
         bps: include_bytes!("../patches/faxanadu-usa.zxpk"),
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
@@ -1760,6 +1762,14 @@ const FAXANADU_OPTIONS: &[HackOption] = &[
         label: "Invincible",
         label_fr: "Invincible",
         bit: 1,
+        default: false,
+    },
+    // The shops always find gold enough; paying or getting gold fills the purse to 9,999,999.
+    HackOption {
+        key: "infinite_money",
+        label: "Infinite money",
+        label_fr: "Argent infini",
+        bit: 2,
         default: false,
     },
 ];
