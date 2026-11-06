@@ -125,3 +125,50 @@ instruction count is measured in step 5.
 
 **Save states**: no field added, removed or reordered; nothing new serialised; `save_state` and
 `load_state` untouched. The format does not move. No `unsafe`.
+
+## Step 2 — R2-005 passes again, and the ignored tests listed one by one
+
+`cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --ignored --test-threads=1`,
+with `ZAXNES_ROMS` on the owner's commercial folder and `ZAXNES_TEST_ROMS` on
+`assets-free/test-roms`. All **eight** ignored tests, every one actually run (none skipped for a
+missing ROM):
+
+| ignored test | result |
+| --- | --- |
+| **`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** | **pass** |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | pass |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | pass |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | pass |
+| `req_core_113_dmc_dma_during_read4_is_p3` | pass |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | pass |
+| `the_cost_of_one_capture_and_one_restore` | pass |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **fail**, out of scope |
+
+**The lot's criterion is met.** `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`
+passes. It had been failing on **4 986 of 5 000 frames** since `a758f923`, the same number in
+ZR-1, in ZR-2 and on this lot's baseline; it now reports `at_split_line == 0`, the smallest gap
+between two rows ≥ 3, and no frame above the thirty of a split-free image. AMD-021 R2-005
+criterion 2 is satisfied, with no hack code involved — which is what made the regression a P1
+matter rather than a picture preference.
+
+`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack`, ZR-2's own harness
+regression test, **also passes** — the back-out does not disturb what ZR-2 pinned.
+
+**The one failure is the one the brief puts out of scope.**
+`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` fails on its second assertion,
+`apply(&hack).is_none()` (`builtin_patches.rs:2525`): an already-patched image is patched again. It
+is a patch-detection matter with nothing in the core, it fails identically on the baseline and on
+ZR-1's and ZR-2's trees, and it is named out of scope here as a separate lot.
+
+### The one row this lot gives up, by name
+
+The non-ignored guard `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green`
+fails, and this is the intended cost:
+
+    AccuracyCoin scored 128/147, which is under lot MF-4d's 129
+
+**`PPU Misc. / $2007 read w/ rendering`** goes back from `pass` to `fail 2`, and it is the only
+row that moves: 129 − 1 = 128, which is MF-4c's 125 plus `Controller Strobing`, `DMC Reload
+Timing` and `$2002 flag timing`. `Address $2004 behavior` is unaffected — it still stops on code
+8, the moving OAM address of lot MF-4e, because the `$2004` half is kept. Step 3 lowers the floor
+to 128 and takes that one row out of the guard's named list; the other fifteen names stay.
