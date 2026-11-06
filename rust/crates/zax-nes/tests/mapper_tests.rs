@@ -31,8 +31,14 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// Writes CHR through the board's own path, which is the only way to reach a second chip:
 /// `Cartridge::ppu_write` dispatches to the board, and on the TQROM (119) that is the chip-select
 /// decode, on the Irem LROG017 (77) it is the $0800-$1FFF half of the split, and on the Oeka
-/// Kids board (96) it is the 4 KiB CHR-RAM page the PPU address bus last latched.
-#[cfg(any(feature = "board-77", feature = "board-96", feature = "board-119"))]
+/// Kids board (96) it is the 4 KiB CHR-RAM page the PPU address bus last latched, and on the
+/// GTROM (111) it is the 8 KiB CHR half of a 32 KiB chip whose other half is the nametables.
+#[cfg(any(
+    feature = "board-77",
+    feature = "board-96",
+    feature = "board-111",
+    feature = "board-119"
+))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
 }
@@ -96,7 +102,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   uPD7756C speech chip this build does not sound, behind `board-jaleco-72-92-86`
     //   (MF-6c step 7);
     // * 96 (the Bandai Oeka Kids board, whose CHR page is latched off the PPU address bus),
-    //   behind `board-96` (MF-6c step 8).
+    //   behind `board-96` (MF-6c step 8);
+    // * 111 (the Membler Industries GTROM / Cheapocabra, seven homebrew titles), behind
+    //   `board-111` (MF-6c step 9).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -114,7 +122,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
-    let additions: [(i32, bool); 51] = [
+    let additions: [(i32, bool); 52] = [
         (19, true),
         (24, true),
         (26, true),
@@ -146,6 +154,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (96, cfg!(feature = "board-96")),
         (97, small),
         (105, cfg!(feature = "board-105")),
+        (111, cfg!(feature = "board-111")),
         (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
@@ -2362,6 +2371,213 @@ fn req_core_100_mapper_96_latches_its_chr_page_from_the_ppu_address_bus() {
         0xA1,
         peek(&other, 0x0000),
         "and so did the previous address, so $2300 is no edge"
+    );
+}
+
+// ------------------------------------------- GTROM / Cheapocabra (111)
+
+/// Reads a nametable byte the way the PPU does, through the board when it serves its own.
+#[cfg(feature = "board-111")]
+fn nametable(core: &NesCore, address: u16) -> u8 {
+    core.cartridge().unwrap().read_nametable(address)
+}
+
+/// Writes one, the same way.
+#[cfg(feature = "board-111")]
+fn nametable_write(core: &mut NesCore, address: u16, value: u8) {
+    core.cartridge_mut()
+        .unwrap()
+        .write_nametable(address, value);
+}
+
+/// nesdev ("GTROM"): one register at "$5000-$5FFF and $7000-$7FFF", `GRNC PPPP` — four bits of
+/// 32 KiB PRG bank with "no portion of the bank is fixed", bit 4 the 8 KiB CHR-RAM bank, bit 5 the
+/// 8 KiB nametable bank, and the two LED bits above them (MF-6c step 9).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_100_the_gtrom_banks_32_kib_of_prg_from_either_register_window() {
+    // 512 KiB of PRG is the board's capacity: sixteen 32 KiB banks for the four-bit field.
+    let mut core = MapperRom::new(111).prg(64).chr(0).load();
+    assert_eq!(111, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "no window is fixed");
+
+    // $5000-$5FFF, and the whole 32 KiB moves: a four-bit field over sixteen banks.
+    core.mapper_write(0x5000, 0x0F);
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+    core.mapper_write(0x5ABC, 0x05);
+    assert_eq!([20, 21, 22, 23], core.prg_windows());
+    // $7000-$7FFF is the same register, which is also why the board has no PRG-RAM there.
+    core.mapper_write(0x7FFF, 0x0A);
+    assert_eq!([40, 41, 42, 43], core.prg_windows());
+    assert_eq!(0, core.cartridge().unwrap().memory().prg_ram().len());
+    // And nothing between or below the two windows decodes: $4FFF and $6000-$6FFF are not it.
+    core.mapper_write(0x6000, 0x01);
+    core.mapper_write(0x6FFF, 0x02);
+    assert_eq!(
+        [40, 41, 42, 43],
+        core.prg_windows(),
+        "$6000-$6FFF is not the register"
+    );
+
+    // Bit 4, the 8 KiB CHR-RAM bank, over the 32 KiB chip's first half. The two banks are
+    // distinct memory, which is what one write to each proves.
+    chr_write(&mut core, 0x0000, 0x11);
+    core.mapper_write(0x5000, 0x1A); // Bit 4 set: the other CHR bank, same PRG bank.
+    assert_eq!([40, 41, 42, 43], core.prg_windows());
+    chr_write(&mut core, 0x0000, 0x22);
+    assert_eq!(0x22, peek(&core, 0x0000));
+    core.mapper_write(0x5000, 0x0A);
+    assert_eq!(
+        0x11,
+        peek(&core, 0x0000),
+        "the first CHR bank kept its byte"
+    );
+
+    // The two LED bits are decoded into the register and drive nothing; what they must not do is
+    // disturb the banks they share a byte with.
+    core.mapper_write(0x5000, 0xCA);
+    assert_eq!([40, 41, 42, 43], core.prg_windows());
+    assert_eq!(0x11, peek(&core, 0x0000));
+
+    // "The board contains 32KB of RAM": two 8 KiB CHR banks and two 8 KiB nametable banks.
+    assert_eq!(
+        32 * 1024,
+        core.cartridge().unwrap().memory().chr_ram().len()
+    );
+}
+
+/// The nametables, which are the reason this board is the lot's last: **two** 8 KiB banks, each
+/// holding four distinct tables and the bonus RAM above them.
+///
+/// > This provides unique memory in both banks for all 4 nametables. This means the mapper always
+/// > uses 4-screen mirroring and can neither use nor benefit from a switch to control the
+/// > nametable arrangement.
+///
+/// and, of $3000-$3EFF:
+///
+/// > On this board these addresses are not mirrored and instead are wired to real, independent
+/// > addresses on the RAM chip.
+///
+/// So `nametable_page` answers `SERVED_BY_CARTRIDGE` always, and this is the **fourth** distinct
+/// body of the `Mapper::read_nametable` dispatch Q-123 measured a cap of two on (MF-6c step 9).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_100_the_gtrom_serves_two_banks_of_four_distinct_nametables() {
+    let mut core = MapperRom::new(111).prg(64).chr(0).load();
+    assert_eq!(
+        [-2, -2, -2, -2],
+        nametable_pages(&core),
+        "SERVED_BY_CARTRIDGE, for all four tables and always"
+    );
+    assert_eq!(Nm::FourScreen, core.mirroring());
+
+    // Bank 0: four distinct tables, and the bonus RAM of $3000-$3EFF behind them.
+    let cells = [
+        0x2000u16, 0x2400, 0x2800, 0x2C00, 0x3000, 0x3400, 0x3800, 0x3C00,
+    ];
+    for (i, address) in cells.into_iter().enumerate() {
+        nametable_write(&mut core, address, 0x40 | i as u8);
+    }
+    for (i, address) in cells.into_iter().enumerate() {
+        assert_eq!(0x40 | i as u8, nametable(&core, address), "{address:#06X}");
+    }
+
+    // Bit 5: the other 8 KiB bank, eight more distinct kilobytes.
+    core.mapper_write(0x5000, 0x20);
+    for address in cells {
+        assert_eq!(0, nametable(&core, address), "a fresh bank, {address:#06X}");
+    }
+    for (i, address) in cells.into_iter().enumerate() {
+        nametable_write(&mut core, address, 0x80 | i as u8);
+    }
+    for (i, address) in cells.into_iter().enumerate() {
+        assert_eq!(0x80 | i as u8, nametable(&core, address), "{address:#06X}");
+    }
+    // And bank 0 is where it was left.
+    core.mapper_write(0x5000, 0x00);
+    for (i, address) in cells.into_iter().enumerate() {
+        assert_eq!(0x40 | i as u8, nametable(&core, address), "{address:#06X}");
+    }
+
+    // The nametable half is behind the CHR half in the same chip, so a CHR write cannot reach it:
+    // 16 KiB of CHR and 16 KiB of nametable in the 32 KiB the page gives the board.
+    chr_write(&mut core, 0x0000, 0xFF);
+    core.mapper_write(0x5000, 0x10);
+    chr_write(&mut core, 0x0000, 0xFF);
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!(
+        0x40,
+        nametable(&core, 0x2000),
+        "the CHR banks and the nametable banks are different halves of the chip"
+    );
+
+    // All of it survives a save state, the selected bank included (REQ-CORE-090).
+    core.mapper_write(0x5000, 0x20);
+    let state = core.save_state(true).unwrap();
+    let mut other = MapperRom::new(111).prg(64).chr(0).load();
+    other.try_load_state(&state, 0).unwrap();
+    assert_eq!(0x80, nametable(&other, 0x2000));
+    assert_eq!(0x87, nametable(&other, 0x3C00));
+    other.mapper_write(0x5000, 0x00);
+    assert_eq!(0x40, nametable(&other, 0x2000));
+}
+
+/// The SST39SF040 the game saves into, on this board's chip addressing: "Like UNROM 512, GTROM
+/// uses a Microchip SST39SF040 flash chip" and "Programs must execute from RAM while erasing and
+/// writing". The sequences are the chip's, on **chip** addresses $5555 and $2AAA, which is R0's
+/// answer to Q-117; persistence and the software-ID commands are the gaps MR-30-4 records for the
+/// UNROM 512 (MF-6c step 9).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_100_the_gtrom_programs_and_erases_its_own_prg_rom() {
+    let mut core = MapperRom::new(111).prg(64).chr(0).load();
+    // Bank 0 is at $8000-$FFFF, so chip $5555 is CPU $D555 and chip $2AAA is CPU $AAAA.
+    let unlock = |core: &mut NesCore| {
+        core.mapper_write(0xD555, 0xAA);
+        core.mapper_write(0xAAAA, 0x55);
+    };
+
+    // Program a byte: the sequence, then the address and the data. 8 KiB bank 1 reads 1, and
+    // flash can only clear bits, so $01 & $FE is $00.
+    assert_eq!(1, core.read_memory(0xA123));
+    unlock(&mut core);
+    core.mapper_write(0xD555, 0xA0);
+    core.mapper_write(0xA123, 0xFE);
+    assert_eq!(0, core.read_memory(0xA123), "the byte was programmed");
+    // A byte already at 0 cannot be raised: that is the chip, not an approximation of it.
+    unlock(&mut core);
+    core.mapper_write(0xD555, 0xA0);
+    core.mapper_write(0xA123, 0xFF);
+    assert_eq!(0, core.read_memory(0xA123), "flash only clears bits");
+
+    // Erase the 4 KiB sector it is in, which takes the whole sector to $FF and leaves the next
+    // one alone. $A123 is in the sector $A000-$AFFF; $B000 is in the one after it.
+    assert_eq!(1, core.read_memory(0xB000));
+    unlock(&mut core);
+    core.mapper_write(0xD555, 0x80);
+    unlock(&mut core);
+    core.mapper_write(0xA123, 0x30);
+    assert_eq!(0xFF, core.read_memory(0xA000));
+    assert_eq!(0xFF, core.read_memory(0xAFFF));
+    assert_eq!(1, core.read_memory(0xB000), "the next sector is untouched");
+
+    // The bank is part of the chip address: the same CPU address in another PRG bank is another
+    // sector of the chip, and the one just erased stays erased.
+    core.mapper_write(0x5000, 0x01);
+    assert_eq!(5, core.read_memory(0xA123), "8 KiB bank 5, another sector");
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!(0xFF, core.read_memory(0xA123));
+
+    // A sequence that goes wrong writes nothing: the wrong unlock value aborts it, and the data
+    // write that follows is just a write to ROM.
+    core.mapper_write(0xD555, 0xAA);
+    core.mapper_write(0xAAAA, 0x54); // Not $55.
+    core.mapper_write(0xD555, 0xA0);
+    core.mapper_write(0xB123, 0x00);
+    assert_eq!(
+        1,
+        core.read_memory(0xB123),
+        "an aborted sequence programs nothing"
     );
 }
 

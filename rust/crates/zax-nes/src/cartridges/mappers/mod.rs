@@ -25,6 +25,8 @@ mod bandai74161;
 mod bandai_fcg;
 #[cfg(feature = "board-small-boards")]
 mod bf9096;
+#[cfg(feature = "board-111")]
+mod cheapocabra;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 mod daou306;
@@ -93,6 +95,8 @@ pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
 #[cfg(feature = "board-small-boards")]
 pub use bf9096::Bf9096;
+#[cfg(feature = "board-111")]
+pub use cheapocabra::Cheapocabra;
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 pub use daou306::Daou306;

@@ -10,9 +10,20 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
-**One board is parked, and MF-6c step 2 is the lot that parked it.** `parked-boards` was empty
+**Two boards are parked, and MF-6c is the lot that parked both.** `parked-boards` was empty
 through MF-6b and MF-6a3, wired so that a later lot which did park a board would find the switch
-ready; it now holds **`board-taito-x1`**. Everything else is in `default`.
+ready; step 2 put **`board-taito-x1`** in it and step 9 **`board-111`**. Everything else is in
+`default`.
+
+**Both are parked on the same instruction, and it is not theirs.** `Cartridge::default_cpu_read`
+has two measured layouts on `mmc5exram` — 283 356 728 and 290 813 484 instructions over 300
+frames, a difference of **7 456 756, +0.066 %** — and a variant past a shared enum's own limit
+selects the dearer one. MF-6c measured all three limits: `SmallBoard` ten, `IrqBoard` ten,
+`DecodeBoard` four. Neither enum forwards `Board::prg_ram_enabled`, the dispatch the figure lives
+inside, so what crosses the line is LLVM's layout of the whole module and no shape of either
+board's own code can move it — step 2 measured seven and step 9 one more. R0 has scheduled a
+sub-lot for the structural fix (a load-time cache of the $6000-$7FFF decode on `Cartridge`),
+which would un-park both.
 
 ## The table
 
@@ -40,8 +51,9 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-77` | 77 | the Irem LROG017: one `[CCCC PPPP]` register, bus conflicts, four-screen mirroring and a **split CHR** — 2 KiB of swappable CHR-ROM at $0000-$07FF with the 6 KiB CHR-RAM chip at $0800-$1FFF, which no `ChrView` can describe. First member of `DecodeBoard`; implies it | 1 (*Napoleon Senki*) | worst `metroid` **+12 780 (+0.000 %)**, set total **−136 318**, `mmc5` **−40 814** (MF-6c step 6, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; worst `total` `smb3` +0.024 %, which the per-function diff puts **entirely** in Lua's `ltable.c` (`luaH_getshortstr` +4 039 948, `getgeneric` +2 248 672) with no symbol of this project moving by 120 000 on that game. `Ppu2C02::read_pattern_planes` **107, unchanged** | **on** | as above |
 | `board-jaleco-72-92-86` | 72, 92, 86 | Jaleco's JF-17, JF-19 and JF-13, the three boards with a µPD7756C ADPCM speech chip. 72 and 92 are one board whose `is_jf19` bool picks which PRG window its rising-edge latch drives; 86 is a GNROM-like board whose ports *are* $6000-$7FFF. Two `DecodeBoard` variants, no `Board` variant; implies `board-decode-boards`. **The audio is not implemented** — REQ-CORE-075 does not list the chip and its samples are a mask ROM inside the ASIC (§4.8), so `expansion_audio_output` stays `None` and a test pins the silence | **6** | worst `duelito` **+15 716 (+0.000 %)**, **twelve of thirteen below the baseline**, set total **−312 171**, `mmc5` −34 885 (MF-6c step 7, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; the two `total` figures above the baseline are +0.000 % and +0.011 %, **both inside the tolerance on their own**, and the per-function diff puts them in Lua's `ltable.c` | **on** | as above |
 | `board-96` | 96 | the Bandai Oeka Kids board: a 32 KiB PRG bank and a 16 KiB outer CHR bank from one CPU register, and the 4 KiB inner CHR-RAM page **latched off the PPU address bus** on the entry into $2000-$2FFF -- including a bare $2006 write. In **both** PPU-bus latches and the first number in either with no IRQ; one `DecodeBoard` variant and one new forward. The Oeka Kids tablet is a recorded gap, and "Bus conflicts: partly" is Q-135. Implies `board-decode-boards` | 2 | worst `duelito` **+70 187 (+0.001 %)**, set total +223 036, `m4` +31 167 on the dispatch it joins (MF-6c step 8, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; three `total` figures above the baseline at +0.000 %, +0.002 % and +0.004 %, **all inside the tolerance**, and all of them Lua's `ltable.c`. `Board::on_ppu_address_bus` **157 → 161** | **on** | as above |
+| `board-111` | 111 | the Membler Industries GTROM / Cheapocabra: a 32 KiB PRG bank, an 8 KiB CHR-RAM bank, **two 8 KiB banks of four distinct nametables** served through `read_nametable` (the fourth body of that dispatch), an SST39SF040 the game saves into, and two LEDs. One `DecodeBoard` variant and three forwards; implies `board-decode-boards`. The LEDs, the register's read side and the flash's persistence are recorded gaps | **7** homebrew | `mmc5` **+7 423 140 (+0.066 %)**, every other ROM within ±85 100 (MF-6c step 9, vs `8496c503`). The board measured **without** its nametable banks gives the same +7 416 670, so the fifth `DecodeBoard` variant is the cause and the mechanism is free — `read_nametable_inner` stays at **75 with four bodies** | not measured with the feature on; the park was taken on PR-1's set. With it **off**: four `core` **+0**, `smb3/core` −20 823, worst `total` `smb3` +0.019 % | **off — parked** | `cargo build -p zax-nes --features board-111` |
 | `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | `mmc5` **+7 456 756 (+0.066 %)**, every other ROM within **±31 000** (MF-6c step 2, vs `8496c503`) | **all five `core` +0**; worst `total` `smb3` **+0.003 %** | **off — parked** | `cargo build -p zax-nes --features board-taito-x1` |
-| `parked-boards` | 80, 207, 82, 552 | the umbrella: every board left out of `default`. Today that is `board-taito-x1` | 13 | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
+| `parked-boards` | 80, 207, 82, 552, 111 | the umbrella: every board left out of `default`. Today that is `board-taito-x1` and `board-111` | 13 + 7 | as those rows | as those rows | **off** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
 +0.02 %.

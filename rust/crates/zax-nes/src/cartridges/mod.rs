@@ -352,7 +352,14 @@ impl Cartridge {
             // `board-68-chr-nametables` says, for the reason the three A12 numbers are not behind
             // their features here: one `matches!` is one `matches!`, and a number whose board is
             // off is never created.
-            nametable_pages_vary: matches!(mapper, 5 | 19 | 24 | 26 | 68 | 95 | 118 | 158 | 207),
+            // MF-6c step 9 adds mapper 111, the GTROM, which answers `SERVED_BY_CARTRIDGE`
+            // for all four tables always: its two 8 KiB nametable banks hold two sets of four
+            // distinct tables where this core's VRAM holds one (nesdev, "GTROM": "the mapper
+            // always uses 4-screen mirroring").
+            nametable_pages_vary: matches!(
+                mapper,
+                5 | 19 | 24 | 26 | 68 | 95 | 111 | 118 | 158 | 207
+            ),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
             // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for

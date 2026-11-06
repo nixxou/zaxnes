@@ -7,6 +7,7 @@
 #[cfg(not(any(
     feature = "board-77",
     feature = "board-96",
+    feature = "board-111",
     feature = "board-jaleco-72-92-86"
 )))]
 compile_error!(
@@ -14,6 +15,8 @@ compile_error!(
      meant to be selected on its own"
 );
 
+#[cfg(feature = "board-111")]
+use super::Cheapocabra;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 use super::Mapper;
@@ -83,6 +86,10 @@ pub enum DecodeBoard {
     /// Mapper 96, the Bandai Oeka Kids board, whose CHR bank is latched off the PPU address bus.
     #[cfg(feature = "board-96")]
     OekaKids(OekaKids),
+    // Appended by MF-6c step 9, the last board of the lot.
+    /// Mapper 111, the Membler Industries GTROM / Cheapocabra board.
+    #[cfg(feature = "board-111")]
+    Cheapocabra(Cheapocabra),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -99,6 +106,8 @@ macro_rules! inner {
             DecodeBoard::JalecoJf13($b) => $body,
             #[cfg(feature = "board-96")]
             DecodeBoard::OekaKids($b) => $body,
+            #[cfg(feature = "board-111")]
+            DecodeBoard::Cheapocabra($b) => $body,
         }
     };
 }
@@ -187,5 +196,33 @@ impl Mapper for DecodeBoard {
     #[cfg(feature = "board-96")]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
+    }
+
+    /// Forwarded for mapper 111 alone (MF-6c step 9), behind `Cartridge::nametable_pages_vary`
+    /// so that no other board asks it. `#[inline(never)]`, for the reason
+    /// [`super::IrqBoard::nametable_page`] and [`super::SmallBoard::nametable_page`] both carry
+    /// it (MF-6b step 5): inlined, this body grows `Board::nametable_page`, which grows
+    /// `Cartridge::refresh_nametable_pages`, which pushed `Cartridge::cpu_write` past the
+    /// inliner's budget and cost two MMC1 ROMs about 1.2 M instructions on a dispatch no MMC1
+    /// reaches.
+    #[cfg(feature = "board-111")]
+    #[inline(never)]
+    fn nametable_page(&self, table: i32) -> i32 {
+        inner!(self, b => b.nametable_page(table))
+    }
+
+    /// Forwarded for mapper 111 alone (MF-6c step 9), the board whose two 8 KiB nametable banks
+    /// hold two sets of four distinct tables where this core's VRAM holds one. Reached only
+    /// behind a `SERVED_BY_CARTRIDGE` answer from [`DecodeBoard::nametable_page`] above, so a
+    /// board that does not serve its own nametables never calls either.
+    #[cfg(feature = "board-111")]
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        inner!(self, b => b.read_nametable(memory, address))
+    }
+
+    /// The counterpart, for the same board and the same reason.
+    #[cfg(feature = "board-111")]
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        inner!(self, b => b.write_nametable(memory, address, value));
     }
 }

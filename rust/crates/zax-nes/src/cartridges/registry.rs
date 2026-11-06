@@ -6,6 +6,8 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-111")]
+use super::mappers::Cheapocabra;
 #[cfg(feature = "board-decode-boards")]
 use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
@@ -136,6 +138,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     101,
     #[cfg(feature = "board-105")]
     105,
+    #[cfg(feature = "board-111")]
+    111,
     #[cfg(feature = "board-116")]
     116,
     118,
@@ -357,6 +361,17 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-taito-x1")]
         82 | 552 => BoardMemorySizes {
             prg_ram: Some(TaitoX1017::RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("GTROM"): "The board contains 32KB of RAM" on the PPU side -- two 8 KiB CHR
+        // banks and two 8 KiB nametable banks, in one allocation because the board has one
+        // chip and REQ-CORE-090 has one blob for it (see `Cheapocabra`'s own note). No
+        // PRG-RAM: the register is at $5000-$5FFF and $7000-$7FFF, so that window is the
+        // register and Mesen 2 gives the board neither work nor save RAM (MF-6c step 9).
+        #[cfg(feature = "board-111")]
+        111 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: Some(Cheapocabra::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 096"): "PRG RAM capacity: No", and "CHR capacity: 32 KiB RAM" --
@@ -616,6 +631,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // including a bare $2006 write with no fetch behind it. Its tablet is a recorded gap.
         #[cfg(feature = "board-96")]
         96 => Board::DecodeBoard(DecodeBoard::OekaKids(OekaKids::new(memory))),
+        // MF-6c step 9: the GTROM / Cheapocabra, whose two 8 KiB nametable banks are the
+        // fourth distinct body of the `Mapper::read_nametable` dispatch (4.5, Q-123) and
+        // whose PRG-ROM is an SST39SF040 the game writes into (Q-117, MR-30-4).
+        #[cfg(feature = "board-111")]
+        111 => Board::DecodeBoard(DecodeBoard::Cheapocabra(Cheapocabra::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),

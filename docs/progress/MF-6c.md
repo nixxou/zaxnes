@@ -1690,3 +1690,205 @@ thirteen `duelito` +0.001 % with all five level-2 cores at or below the baseline
 the three A12 counters share grew by **four instructions**, because the new arm is a `callq`.
 MR-1's open question is answered for this board from its own page and left open for the MMC2;
 "Bus conflicts: partly" is **Q-135**.
+
+## Step 9 — the GTROM, **the second board this project parks**, and `DecodeBoard`'s limit is four
+
+### What was built
+
+nesdev ("GTROM"): one register at **$5000-$5FFF and $7000-$7FFF**, and an SST39SF040 above it.
+
+| what | where | the page's words |
+| --- | --- | --- |
+| four bits of 32 KiB PRG bank, no fixed window | `Cheapocabra::update_banks` | `GRNC PPPP`, "Select 32 KiB PRG ROM bank"; "no portion of the bank is fixed" |
+| bit 4, the 8 KiB CHR-RAM bank | the same method | "Select 8 KiB CHR RAM bank" |
+| bit 5, the 8 KiB nametable bank | `Cheapocabra::nametable_offset` | "Select 8 KiB nametable" |
+| the two LED bits, decoded and kept | the `register` byte | "Red LED (0=On; 1=Off)", "Green LED (0=On; 1=Off)" |
+| the two register windows and nothing between them | `Cheapocabra::write_register` | "$5000-$5FFF and $7000-$7FFF" |
+| the 32 KiB chip, in one allocation | `registry::board_memory_sizes`, arm `111` | "The board contains 32KB of RAM" |
+| four distinct tables, twice over | `Mapper::nametable_page` → `SERVED_BY_CARTRIDGE` | "unique memory in both banks for all 4 nametables … always uses 4-screen mirroring" |
+| $3000-$3EFF as real RAM | the same offset function | "these addresses are not mirrored and instead are wired to real, independent addresses on the RAM chip" |
+| the flash the game saves into | `Cheapocabra::step_flash` | "Like UNROM 512, GTROM uses a Microchip SST39SF040 flash chip" |
+
+**The nametables are the mechanism §4.5 was afraid of, and this board is the fourth body.** Each of
+the two 8 KiB banks covers PPU $2000-$3FFF whole — four 1 KiB nametables and 4 KiB of bonus RAM
+behind them — so the board needs **two sets of four distinct tables** where this core's VRAM holds
+one (`ppu::VRAM_SIZE` is 4 KiB). `nametable_page` therefore answers `SERVED_BY_CARTRIDGE` always
+and the board reads and writes the bytes itself, which is MR-30-6's shape for the UNROM 512's
+four-screen mode.
+
+**The flash is the state machine R0's answer to Q-117 produced for the UNROM 512**, on this board's
+chip addressing (the register's bank above the 32 KiB window, so chip $5555 and $2AAA are CPU
+$D555 and $AAAA in bank 0), with the same two scopes left out and recorded: **persistence** (the
+flash changes in memory and a reload loses it) and the **software-ID commands** $90 and $F0, which
+a *read* would have to answer and which would need a body in `Board::cpu_read_override` — the
+dispatch step 2 measured at +0.066 % on `mmc5`. It is written in `cheapocabra.rs` rather than
+shared with `UnRom512`: factoring one state machine out of a shipped board would touch that board's
+layout for no behavioural gain, and the brief forbids changing an existing board. A later lot that
+wants the pair as one type has both bodies side by side to do it from.
+
+### Two gaps of the board's own, and the second is an argued one
+
+* **the two LEDs** drive nothing. They are in the register byte, so they are decoded and in the
+  save state for free; this build has no host surface for an indicator on a cartridge, which is
+  step 8's Oeka Kids tablet gap in the same words.
+* **"reading from the register effectively writes the value of open bus"** is not implemented, and
+  the argument is the owner's rule 4 (development cost out of proportion), not a judgement about
+  the page. A faithful implementation needs the **open-bus value** inside
+  `Mapper::cpu_read_override`, which no hook of this architecture carries, so it would take new
+  plumbing from `NesBus` into the cartridge read path — and the page's own sentence continues "so
+  bitwise manipulation will require keeping a copy of the mapper register's value in RAM", which
+  tells every program on this board never to depend on the result. The register is write-only here.
+
+**One power-on value the page does not give**: the register itself. Zero — PRG bank 0, CHR bank 0,
+nametable bank 0 — because a board with **no fixed PRG window** must have usable vectors in
+whichever bank it powers on in, and bank 0 is the one a dump is laid out from. Mesen 2 uses its
+configurable power-on byte here, which is the same choice when that is zero.
+
+### The measurement with the board on: **+0.066 % on `mmc5`, for the ninth time**
+
+`callgrind-diff.py`, label `mf6c-9-gtrom111`, against `mf6c-0-8496c503`:
+
+| ROM | `8496c503` | **step 9, board on** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `mmc5` | 11 279 383 781 | 11 286 806 921 | **+7 423 140** | **+0.066 %** |
+| `m4` | 5 472 514 995 | 5 472 600 095 | +85 100 | +0.002 % |
+| `mm2` | 6 017 851 607 | 6 017 919 715 | +68 108 | +0.001 % |
+| every other ROM | | | within **±61 000** | ≤ +0.000 % |
+| **total** | **79 371 161 907** | **79 378 603 838** | +7 441 931 | +0.009 % |
+
+and the symbol diff names the function this lot has named eight times before:
+`Cartridge::default_cpu_read`, **283 356 728 → 290 813 484, +7 456 756**.
+
+### **The finding: it is the fifth variant, and the fourth `read_nametable` body is free**
+
+Before parking anything the step asked the obvious question — is this the *nametable mechanism*, in
+which case the owner's rule 1 would split it into its own feature as step 4 split the Sunsoft-4's?
+So the three nametable methods were put behind a second feature, switched **off**, and the board
+re-measured (`mf6c-9-gt111noNT`). With the board's four tables coming from this core's own VRAM
+under the four-screen mirroring `reset` sets, and `Mapper::read_nametable` not forwarded at all:
+
+| | `mmc5` | `Cartridge::default_cpu_read` |
+| --- | ---: | ---: |
+| the board whole (`mf6c-9-gtrom111`) | +7 423 140, **+0.066 %** | 290 813 484 |
+| the board **without** its nametable banks (`mf6c-9-gt111noNT`) | +7 416 670, **+0.066 %** | 290 813 484 |
+
+**The same figure, to the layout.** So the mechanism is not what costs, the second feature would
+buy nothing, and it was taken back out: mapper 111 ships whole behind one feature.
+
+And the post-LTO dump says the same thing from the other side. `Ppu2C02::read_nametable_inner`,
+with `fn.py`, **with the fourth distinct body in it**:
+
+| | instructions |
+| --- | ---: |
+| `8496c503`, two bodies | 114 |
+| step 4, **three** bodies | 75 |
+| **step 9, four bodies** | **75** |
+
+**Q-123's cap of two is now measured at four and the function has not moved since the third.**
+§4.5 asked the lot doing this board to "re-measure rather than quote" the 132 → 109 that ticket
+recorded; step 4 did it for the third body and this step does it for the fourth, and the answer is
+zero both times. `Ppu2C02::read_pattern_planes` is **107**, unchanged, for the eighth lot running.
+
+So what buys the +7 456 756 is the **fifth `DecodeBoard` variant**, and that closes the finding
+step 5 opened in a third enum:
+
+> **`Cartridge::default_cpu_read`'s cost on `mmc5` is quantised in units of 7 456 756 instructions,
+> each shared enum has its own limit, and a variant past it buys one unit.** `SmallBoard`'s limit
+> is **ten** (steps 2 and 4), `IrqBoard`'s is **ten** (steps 4 and 5), and `DecodeBoard`'s is
+> **four** (steps 6 to 9). None of the three enums forwards `Board::prg_ram_enabled`, which is the
+> dispatch the figure lives inside, so what crosses the line is LLVM's layout of the whole module
+> and not any one arm — which is why no shape of the board's own code can move it, as step 2's
+> seven shapes already found.
+
+### What the lot did with that: **`board-111` is parked**
+
+The owner's rule 2 is unconditional, so `parked-boards` has its second entry. The board, its three
+mechanisms and its three tests are all **built**, which is rule 1, and one command reaches them:
+
+    cargo build -p zax-nes --features parked-boards      # or --features board-111
+
+Two things are worth putting in front of whoever revisits it, as step 2 put them for the Taito
+boards:
+
+1. **At level 2 the board costs nothing measurable even switched on** — but the lot did not run
+   that instrument on the board-on build, because the park decision was already taken on instrument
+   2 and the figure is a known two-state oscillation of one function on one ROM. A successor
+   re-measuring should use `mf6c-9-gtrom111` and `mf6c-9-gt111noNT`, which are both reproducible
+   from the labels.
+2. **This is the shape R0 has already scheduled a sub-lot for.** Shape 2 of the step-5 plan
+   revision — the `$6000-$7FFF` read path cached on `Cartridge`, which would take the inlined
+   `Board::prg_ram_enabled` dispatch out of `default_cpu_read` entirely — is what would un-park
+   both `board-taito-x1` and `board-111`, and it is the one shape none of this lot's thirteen
+   measurements has tried.
+
+### The shipped build is step 8's build, on every instrument
+
+With the feature parked, `mf6c-9-gt111prk` — the **shipped** configuration — is:
+
+| ROM | `8496c503` | **step 9 default** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 311 891 | **3 308 289 861** | −22 030 | −0.001 % |
+| `oamstr` | 3 318 460 965 | 3 318 519 291 | **+58 326** | **+0.002 %** |
+| `m1` | 4 885 949 431 | **4 885 902 927** | −46 504 | −0.001 % |
+| `m4` | 5 472 514 995 | **5 472 467 740** | −47 255 | −0.001 % |
+| `m0` | 5 520 458 691 | 5 520 507 879 | +49 188 | +0.001 % |
+| `metroid` | 5 115 944 288 | 5 115 949 302 | +5 014 | +0.000 % |
+| `smb1` | 5 996 381 185 | 5 996 385 173 | +3 988 | +0.000 % |
+| `mm2` | 6 017 851 607 | 6 017 860 743 | +9 136 | +0.000 % |
+| `z2` | 6 291 458 642 | 6 291 487 955 | +29 313 | +0.000 % |
+| `readbuf` | 6 834 538 187 | 6 834 596 398 | +58 211 | +0.001 % |
+| `duelito` | 7 380 437 910 | **7 380 435 767** | −2 143 | −0.000 % |
+| `smb3` | 7 949 470 334 | **7 949 454 867** | −15 467 | −0.000 % |
+| `mmc5` | 11 279 383 781 | **11 279 364 318** | **−19 463** | −0.000 % |
+| **total** | **79 371 161 907** | **79 371 222 221** | **+60 314** | **+0.000 %** |
+
+Worst ROM `oamstr` at **+0.002 %**, set total +0.000 %, and **`mmc5` back below the baseline** at
+−19 463, which is the park working. Level 2: four `core` figures **+0** and `smb3/core`
+**−20 823**, with `metroid/total` +0.000 % and `smb3/total` **+0.019 %** — inside the owner's
++0.02 %, and rule 2's layout-noise case checked and not assumed: `sym6c.sh` at 400 000 names three
+symbols over all five games and they are `luaH_getshortstr` (+4 550 192 on `smb3`, −2 055 173 on
+`smb1`, −951 740 on `zelda2`), `luaH_set` and `getgeneric`. Lua's `ltable.c` and nothing else.
+
+And the post-LTO dump is **step 8's dump, symbol for symbol**, which is the owner's "with a feature
+off, the build is the same as without it" shown rather than asserted: the three claimants
+**0 / 0 / 0**, `Cpu::step` **3 626**, `Board::ppu_peek` **291**, `NesBus::write_internal` **3 861**,
+`Ppu::run_dots` **1 919**, `catch_up_ppu` **188**, `read_pattern_planes` **107**,
+`read_nametable_inner` **75**, `default_cpu_read` **429**, and `shape.py`'s five others identical to
+the instruction. With the feature **on** it is 445 and `write_internal` 3 884 — the board's own
+code, and the dearer layout the park exists to avoid.
+
+### The tests, 917 → **920** with the feature on
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_gtrom_banks_32_kib_of_prg_from_either_register_window` | the four-bit PRG field over sixteen 32 KiB banks with **no fixed window**; **both** register windows and the fact that $6000-$6FFF is neither; the board's lack of PRG-RAM; bit 4's two CHR banks being distinct memory; the two LED bits disturbing nothing they share a byte with; and the 32 KiB chip |
+| `req_core_100_the_gtrom_serves_two_banks_of_four_distinct_nametables` | `SERVED_BY_CARTRIDGE` for all four tables and `FourScreen` mirroring; **eight** distinct kilobytes per bank — the four nametables *and* the bonus RAM of $3000-$3EFF — written and read back; bit 5 giving eight more; bank 0 surviving the excursion; the CHR half and the nametable half being different halves of one chip; and the selected bank coming back from a save state |
+| `req_core_100_the_gtrom_programs_and_erases_its_own_prg_rom` | the program sequence on **chip** addresses $5555 and $2AAA; flash only clearing bits ($01 & $FE, then $FF changing nothing); the 4 KiB sector erase leaving the next sector alone; **the register's bank being part of the chip address**, so the same CPU address in another PRG bank is another sector; and a sequence with one wrong byte programming nothing |
+
+**Four configurations green**, `cargo fmt --check` clean and clippy `-D warnings` clean on `zax-nes`
+in all four and on `zax-harness`, **no new `allow` of any kind**:
+
+| configuration | `zax-nes` tests |
+| --- | ---: |
+| default (the feature parked) | **854** |
+| `--features parked-boards` | **862** |
+| `--no-default-features` | **783** |
+| `--no-default-features --features board-111` | 786 |
+
+854 + 8 = 862, the eight being `board-taito-x1`'s five and this board's three. With `zax-harness`
+the default figure is **917 passed / 0 failed / 8 ignored** — step 8's, because the three new tests
+are behind a parked feature — and **920** in the `parked-boards` configuration.
+
+**One housekeeping note.** Commit `9cf098ee` (step 8) accidentally carried two cargo cache files at
+`rust/crates/zax-nes/src/target-mf/`, from a `cargo` call whose working directory was `src` while
+`CARGO_TARGET_DIR` was relative; `9db5a40f` removes them with `git rm --cached` and a delete. No
+amend, because the protocol forbids one, so both the mistake and its removal are in the history.
+The two files are not read by any build, so step 8's measured tree and its committed tree are the
+same code.
+
+[PROGRESS] MF-6c step 9/11 done: the GTROM / Cheapocabra whole — its two nametable banks, its
+SST39SF040 and its two gaps — **parked**, because the fifth `DecodeBoard` variant buys the same
+quantised +7 456 756 on `mmc5` that steps 2, 4 and 5 measured for the other two enums. The board
+measured without its nametable banks gives the identical figure and
+`Ppu2C02::read_nametable_inner` stays at **75 with four bodies in it**, so Q-123's cap is now
+measured at four and the mechanism is free; the shipped build is step 8's, symbol for symbol.
