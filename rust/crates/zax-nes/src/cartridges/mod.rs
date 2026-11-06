@@ -660,27 +660,20 @@ impl Cartridge {
     /// registers; the UNROM 512's come from its wiring and are settled at load, so the pages it
     /// answers are computed once by `refresh_nametable_pages` in `reset` and in `load_state` and
     /// then left alone.
+    /// **One `Board` dispatch, and it has to stay one** (lot MF-CART step 4). The three answers
+    /// the CPU read path needs — the four ROM windows, the $6000-$7FFF base and its wrap with
+    /// the enable folded in — come from [`Mapper::cpu_read_windows`], whose default body calls
+    /// the three `Mapper` methods on the board's own monomorphised `Self`. Asked as three
+    /// separate `Board` methods they were three jump tables on this path, which step 4 measured
+    /// at `mm2/core` **+0.005 %** — Mega Man 2 being an MMC1 that writes its registers often.
     fn refresh_rom_windows(&mut self) {
-        self.rom_windows = self.board.rom_windows(&self.memory);
-        self.refresh_prg_ram_read();
+        let windows = self.board.cpu_read_windows(&self.memory);
+        self.rom_windows = windows.rom;
+        self.prg_ram_read_base = windows.prg_ram_base;
+        self.prg_ram_read_wrap = windows.prg_ram_wrap;
         if self.nametable_pages_vary {
             self.refresh_nametable_pages();
         }
-    }
-
-    /// Settles what a CPU read of $6000-$7FFF answers; see [`Cartridge::prg_ram_read_base`].
-    ///
-    /// Not gated the way `nametable_pages_vary` gates `refresh_nametable_pages`: eighteen of the
-    /// supported mapper numbers can move this answer with a register write, which is too many
-    /// for the gate to pay for itself.
-    fn refresh_prg_ram_read(&mut self) {
-        let (base, wrap) = self.board.prg_ram_window(&self.memory);
-        let readable = self.prg_ram_enabled() && !self.memory.prg_ram.is_empty();
-        self.prg_ram_read_base = base;
-        self.prg_ram_read_wrap = if readable { wrap } else { 0 };
-        // The one thing the cache needs of a board and the trait cannot state: a window that is
-        // readable is a window of non-zero length, or the sentinel would read as "not RAM".
-        debug_assert!(!readable || wrap != 0);
     }
 
     fn refresh_nametable_pages(&mut self) {
@@ -716,6 +709,33 @@ impl Cartridge {
     /// `rom_windows` is — and that is lot MF-CART's whole change. The `debug_assert_eq!` is the
     /// idiom [`Cartridge::read_rom_window`] already uses for the same kind of cache: every test
     /// of the suite checks the cached answer against the dispatch it replaces.
+    /// **`#[inline(always)]` since lot MF-CART step 4, and it is the step's whole result.**
+    /// Inlined into [`Cartridge::try_cpu_read`], this function stops existing as a symbol and
+    /// the MMC5's own `try_read_prg` arm — the big one, the board that maps PRG-RAM into
+    /// $8000-$DFFF — goes **out of line** instead. On 300 frames of `mmc5exram` that is
+    /// `default_cpu_read` **283 356 728 → 0**, `Mmc5::try_read_prg` **0 → 141 678 364** and
+    /// `try_cpu_read` **300 643 690 → 429 758 682**: a net **−12.6 M, −0.111 %** on the one ROM
+    /// nine measurements of MF-6c and two of MF-CART had been charged +7 456 756 a time for.
+    ///
+    /// **And it is what lifts the limit on new boards.** The quantum those eleven measurements
+    /// moved in was one instruction per CPU read, paid in this function's copy of the inlined
+    /// `Board::try_read_prg` jump table: past a certain pressure LLVM shuffled two registers and
+    /// materialised `&self.board` above the table, for the table's cold arms — mapper 116's
+    /// boxed `IrqBoard::Somari(Box<Somari>)` and the arms that are `#[inline(never)]`. Inlined
+    /// here, there is no such copy: the MMC5 reaches its own arm through a `callq` whose callee
+    /// is one board's code, and **`Mmc5::try_read_prg` and `try_cpu_read` then measure
+    /// 141 678 364 and 429 758 682 whether `Board` has thirty-six variants, thirty-eight or
+    /// thirty-nine** — identical to the instruction in all three configurations MF-CART step 4
+    /// measured. A board added to any shared enum no longer touches the MMC5's read path at all.
+    ///
+    /// MF-6c step 2 measured this attribute as its shape c and had to reject it: `mmc5` came out
+    /// −0.065 % but `m0` +0.022 % and `m1` +0.024 %, because `Board::prg_ram_enabled` went out
+    /// of line as the body moved. **That dispatch is no longer in this function** — step 2 of
+    /// this lot settled it on `Cartridge` — so the shape's one drawback is gone, and `m0` and
+    /// `m1` come out −0.059 % and −0.098 % instead. The two halves of the fix only work
+    /// together, and neither reaches the owner's tolerance alone.
+    #[allow(clippy::inline_always)] // Measured: MF-CART step 4, -0.111 % on an MMC5.
+    #[inline(always)]
     fn default_cpu_read(&self, address: u16) -> Option<u8> {
         if (0x6000..=0x7FFF).contains(&address) && self.prg_ram_read_wrap != 0 {
             let offset =

@@ -475,3 +475,186 @@ units of the same 7 456 756, +0.265 %. The dump settles the diagnosis — `defau
 entered exactly 7 456 756 times on `mmc5`, the quantum is **one instruction per read**, and the
 three that appear are `movq %rdi, %r8` and `leaq 240(%r8), %rdi` setting up `&self.board` for the
 **`try_read_prg`** table's out-of-line arms.
+
+## Step 4 — the shape that lifts the limit: **`default_cpu_read` inlined, and one dispatch per write**
+
+Four shapes were measured, two of them refuted, and the one that works is one MF-6c had already
+measured and had to reject.
+
+### Shape 4a — `board` at offset 0 of `Cartridge`, `#[repr(C)]`: **refuted, and expensively**
+
+Step 3's dump said the cost is LLVM materialising `&self.board` into `%rdi`. With `board` at
+offset 0 that address *is* `%rdi` and there would be nothing to materialise, and `repr(Rust)`
+sorts fields by alignment and had put `memory` first, so `#[repr(C)]` was the only way to ask.
+
+**It costs every ROM of the set between +0.33 % and +1.12 %, and not in this function at all:**
+`NesBus::read_cycle` **+35.3 M to +38.7 M on all thirteen** — about **4.3 instructions per CPU
+read** — set total **+464 793 722 (+0.586 %)**, with `default_cpu_read` and `prg_ram_offset`
+moving exactly as they did without it. `NesBus` holds the cartridge as an `Option<Cartridge>`, and
+what the attribute moved is that enum's layout, not this struct's hot fields. Reverted, and worth
+recording so that nobody tries it twice: **`#[repr(C)]` on `Cartridge` is not available as a
+layout lever.**
+
+### Shape 4i — `#[inline(always)]` on `Cartridge::default_cpu_read`: **this is the fix**
+
+MF-6c step 2 measured this attribute as its shape c and rejected it: `mmc5` came out −0.065 %
+but `m0` +0.022 % and `m1` +0.024 %, "`Board::prg_ram_enabled` out of line" — that dispatch
+having left this function for one of its own as the body moved into `try_cpu_read`. **Step 2 of
+this lot took that dispatch out of the function altogether**, so the shape's one drawback cannot
+happen, and the two halves of the fix only work together.
+
+On `mmc5`, with `board-taito-x1` **on**, the three symbols that move are:
+
+| symbol | step 3 | **step 4** |
+| --- | ---: | ---: |
+| `Cartridge::default_cpu_read` | 283 356 728 | **0** |
+| `Mmc5::try_read_prg` | 0 | **141 678 364** |
+| `Cartridge::try_cpu_read` | 300 643 690 | **429 758 682** |
+
+a net **−12.6 M**. The function stops existing and the **MMC5's own `try_read_prg` arm goes out
+of line** — the big arm, on the one board that maps PRG-RAM into $8000-$DFFF — so the per-read
+path is `try_cpu_read`'s body and a `callq` into one board's code.
+
+> **And that is what lifts the limit.** The quantum was one instruction per read paid in this
+> function's *copy* of the inlined `Board::try_read_prg` jump table. There is no such copy any
+> more, and the proof is that **`Mmc5::try_read_prg` measures 141 678 364 and `try_cpu_read`
+> 429 758 682 in all three configurations** — `default`, `+ board-taito-x1`, and
+> `+ board-taito-x1 + board-111` — **identical to the instruction**, with `Board` at
+> thirty-six, thirty-eight and thirty-nine variants. A board added to a shared enum no longer
+> touches the MMC5's read path at all.
+
+| configuration | `Board` variants | `mmc5` | set total |
+| --- | ---: | ---: | ---: |
+| `default` | 36 | **11 266 796 862** (−0.111 %) | −25 432 993 (−0.032 %) |
+| `+ board-taito-x1` | 38 | **11 266 785 317** (−0.111 %) | −25 180 572 (−0.032 %) |
+| `+ board-taito-x1 + board-111` | 39 | **11 266 985 480** (−0.110 %) | −26 066 297 (−0.033 %) |
+
+The ±200 000 between the three is the ±57 k-per-ROM whole-process floor of §5.11 and the loader's
+own work for two more boards; the symbol table is identical.
+
+### Shape 4j — `#[inline(never)]` on `refresh_prg_ram_read`: **refuted**
+
+An attempt at the write-path cost step 3 left: shrink `refresh_rom_windows` so that LLVM inlines
+it into `cpu_write` again. Set total **−24 693 981** against 4i's −25 432 993, nine ROMs above the
+baseline against four, and `mm2` **+233 731** against +177 444. Reverted.
+
+### Shape 4k — **one dispatch per CPU write, and it halves what is left**
+
+What stayed above the baseline after 4i was `mm2`, and the level-2 instrument priced it at
+**`mm2/core` +612 352, +0.005 %**: Mega Man 2 is an MMC1, whose five-write shift register makes
+`refresh_rom_windows` run five times per register, and that function was asking the `Board` enum
+**three** questions — `rom_windows`, `prg_ram_window` and `prg_ram_enabled`, three jump tables.
+
+`Mapper::cpu_read_windows` makes them **one**. It returns a `CpuReadWindows` — the four ROM
+windows, the $6000-$7FFF base, and its wrap with the enable folded in — and **no board overrides
+it**: the default body calls the three methods on `Self`, which is monomorphised per board, so
+inside one arm of the one dispatch there is no dispatch left to pay.
+
+| | set total | worst ROM of thirteen | `mm2/core` |
+| --- | ---: | --- | ---: |
+| 4i, three dispatches | −25 340 126 | `mm2` +171 056 (+0.003 %) | +612 352 (+0.005 %) |
+| **4k, one dispatch** | **−25 551 352** | `mm2` **+62 226 (+0.001 %)** | **+287 536 (+0.002 %)** |
+
+### The shipped build of this step, on both instruments
+
+`mfct-4-onedisp1`, against `mfct-0-44f77f72`:
+
+| ROM | `44f77f72` | **step 4** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 287 870 | 3 308 307 092 | +19 222 | +0.001 % |
+| `oamstr` | 3 318 485 575 | **3 318 483 000** | −2 575 | −0.000 % |
+| `m1` | 4 885 953 734 | **4 881 230 998** | **−4 722 736** | **−0.097 %** |
+| `m4` | 5 472 522 428 | **5 467 984 307** | **−4 538 121** | **−0.083 %** |
+| `m0` | 5 520 499 653 | **5 517 393 347** | **−3 106 306** | **−0.056 %** |
+| `metroid` | 5 115 985 915 | **5 115 540 611** | −445 304 | −0.009 % |
+| `smb1` | 5 996 362 814 | **5 996 331 285** | −31 529 | −0.001 % |
+| `mm2` | 6 017 861 569 | 6 017 923 795 | **+62 226** | **+0.001 %** |
+| `z2` | 6 291 442 776 | 6 291 477 214 | +34 438 | +0.001 % |
+| `readbuf` | 6 834 534 036 | **6 834 492 375** | −41 661 | −0.001 % |
+| `duelito` | 7 380 421 165 | **7 380 413 452** | −7 713 | −0.000 % |
+| `smb3` | 7 949 489 726 | **7 949 308 385** | −181 341 | −0.002 % |
+| `mmc5` | 11 279 358 122 | **11 266 768 170** | **−12 589 952** | **−0.112 %** |
+| **total** | **79 371 205 383** | **79 345 654 031** | **−25 551 352** | **−0.032 %** |
+
+**Ten of thirteen below the baseline**, the three above all at +0.001 %, and `mmc5` — the ROM
+eleven measurements of MF-6c and MF-CART had been charged +7 456 756 a time for — **−0.112 %**.
+
+Level 2, `l2-diff.py --bar`:
+
+| game/stage | `44f77f72` | **step 4** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 295 142 | **11 146 858 287** | −436 855 | −0.004 % |
+| `smb1/core` | 11 515 128 803 | **11 515 128 803** | **+0** | **equal** |
+| `zelda2/core` | 12 775 651 048 | **12 774 921 154** | −729 894 | −0.006 % |
+| `mm2/core` | 12 036 822 861 | 12 037 110 397 | **+287 536** | **+0.002 %** |
+| `smb3/core` | 15 315 537 499 | **15 314 887 392** | −650 107 | −0.004 % |
+| `metroid/total` | 13 735 578 935 | **13 735 098 459** | −480 476 | −0.003 % |
+| `smb1/total` | 13 586 757 575 | **13 586 649 040** | −108 535 | −0.001 % |
+| `zelda2/total` | 15 360 318 280 | **15 357 711 018** | −2 607 262 | −0.017 % |
+| `mm2/total` | 18 976 430 445 | 18 976 510 095 | +79 650 | +0.000 % |
+| `smb3/total` | 24 188 986 419 | **24 186 496 714** | −2 489 705 | −0.010 % |
+
+**Eight of the ten figures are below the baseline, three of the five `core` figures by 0.004 % to
+0.006 % and the fourth exactly equal.** The one that is above is **`mm2/core` +0.002 %**, a tenth
+of the owner's +0.02 %, and it is reported rather than argued away: it is the per-CPU-write cost
+of settling the answer the read path stopped asking for, on the one game of the five whose board
+writes a register five times to set it. Four shapes were measured against it — B1, B2, 4j and 4k
+— and 4k is the best of them; a fifth, a load-time latch on whether the window can move at all,
+was considered and not built, because the MMC1's enable moves too (its $8000 bit 4) and the latch
+would exempt neither Mega Man 2 nor Zelda II.
+
+### Instrument 3: the post-LTO dump
+
+`pins63.py lin-mfct-4-inlrdchk.s`, which is shape 4i's tree; 4k changes no symbol of this list.
+
+| symbol | `44f77f72` | **step 4** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 3 626 | **3 626** |
+| `Board::ppu_peek` | 291 | **291** |
+| `NesBus::write_internal` | 3 861 | 3 879 |
+| `Ppu::run_dots` | 1 919 | **1 919** |
+| `NesBus::catch_up_ppu` | 188 | **188** |
+| `Ppu2C02::read_pattern_planes` | **107** | **107** |
+| `Ppu2C02::read_nametable_inner` | 75 | **75** |
+| `Cartridge::default_cpu_read` | 429 | **gone — it is `try_cpu_read`'s body** |
+
+`shape.py`'s five others — `resolve` 1 948, `branch` 457, `read_cycle` 181, `tick` 82,
+`read_internal` 175 — are identical to the instruction. **`read_pattern_planes` is 107 for the
+ninth lot running** and `zone_offset` does not exist as a symbol, which is the owner's two named
+figures holding. `write_internal` +18 is the write path's new arithmetic, and the dynamic column
+prices it: `m4` −0.083 %, `smb3` −0.002 %.
+
+**One note for a successor, because it cost this step twenty minutes.** The binary of shape 4k is
+past the threshold §5.12 records: **valgrind 3.22 stopped reading its Rust symbols**, so
+`callgrind-l2.sh`'s awk matched nothing and `stages.txt` came out empty. The counts are
+unaffected. `rust/target-mf/l2fix.sh` (scratch) repairs a level-2 directory with
+`resolvesyms.py` — which that lot wrote for a `callgrind-set.sh` directory, so the `.inc` files
+have to be staged under `.ann` names first, and the stage patterns have to accept the **mangled**
+v0 spelling the tool writes back. The bias derived itself, `0x108000`, with 986 addresses landing
+exactly on a symbol start.
+
+### The suites, every configuration
+
+| configuration | `zax-nes`, debug | release, with `zax-harness` |
+| --- | ---: | ---: |
+| `default` | **854 / 0 / 7** | **917 / 0 / 8** |
+| `--features parked-boards` | **862 / 0 / 7** | **925 / 0 / 8** |
+| `--no-default-features` | **783 / 0 / 7** | — |
+
+every figure MF-6c's to the test, with the debug columns running step 2's four assertions on
+every read. `cargo fmt --check` clean; clippy `-D warnings` clean on `zax-nes` in all three
+configurations and on `zax-harness`, **no new `allow` beyond the two `clippy::inline_always` the
+two measured attributes carry**, each with its figure on the line.
+
+[PROGRESS] MF-CART step 4/8 done: **the limit is lifted.** `#[inline(always)]` on
+`Cartridge::default_cpu_read` — the shape MF-6c step 2 measured and had to reject, whose one
+drawback step 2 of this lot removed — takes that function out of existence and the MMC5's own
+`try_read_prg` arm out of line, and **`Mmc5::try_read_prg` and `try_cpu_read` then measure
+141 678 364 and 429 758 682 whether `Board` has 36, 38 or 39 variants, identical to the
+instruction.** `Mapper::cpu_read_windows` makes the write path one dispatch instead of three.
+`mmc5` **−0.112 %**, set **−25 551 352 (−0.032 %)**, ten of thirteen below, four level-2 cores
+below or equal and `mm2/core` +0.002 % the only figure above. `#[repr(C)]` on `Cartridge` refuted
+at +0.586 %, and `#[inline(never)]` on the refresh refuted.

@@ -172,6 +172,25 @@ pub use vrc7::Vrc7;
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
+/// What [`Mapper::cpu_read_windows`] settles for the CPU read path, cached on
+/// [`Cartridge`](crate::cartridges::Cartridge) after every CPU write to the cartridge.
+///
+/// One struct from one dispatch, which is the point: lot MF-CART step 4 measured the three
+/// questions asked separately at `mm2/core` +0.005 %.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CpuReadWindows {
+    /// [`Mapper::rom_windows`]: where each 8 KiB window of $8000-$FFFF starts in PRG-ROM, or
+    /// [`NO_ROM_WINDOW`].
+    pub rom: [usize; 4],
+    /// The byte offset in PRG-RAM of $6000 ([`Mapper::prg_ram_window`]'s base).
+    pub prg_ram_base: usize,
+    /// The length that offset wraps at, and **zero when a CPU read of $6000-$7FFF is not RAM**
+    /// — the board has it disabled ([`Mapper::prg_ram_enabled`]), or the cartridge carries none.
+    /// The enable is folded in here so that the read is one test; see
+    /// `Cartridge::default_cpu_read`.
+    pub prg_ram_wrap: usize,
+}
+
 /// The behaviour a board adds to the shared cartridge state (REQ-CORE-100). Every method has
 /// the default of a board that does nothing special; banked boards expose their
 /// [`BankWindows`] through [`Mapper::banks`] and get PRG and CHR access for free.
@@ -276,6 +295,30 @@ pub trait Mapper {
         let rom = memory.rom().prg_rom().len();
         self.banks()
             .map_or([NO_ROM_WINDOW; 4], |banks| banks.rom_windows(rom))
+    }
+
+    /// Everything the CPU **read** path needs settled, in **one** call: the four windows of
+    /// [`Mapper::rom_windows`], and [`Mapper::prg_ram_window`] with
+    /// [`Mapper::prg_ram_enabled`] folded into its wrap (see [`CpuReadWindows`]).
+    ///
+    /// **It exists to be one `Board` dispatch and not three** (lot MF-CART step 4). This runs
+    /// after every CPU write to the cartridge, and the three questions it answers used to be
+    /// three dispatches on that path — the shape MF-CART step 3 measured at `mm2/core`
+    /// **+0.005 %**, Mega Man 2 being an MMC1 that writes its registers often. **No board
+    /// overrides this method**: the default body calls the three on `Self`, which is
+    /// monomorphised per board, so inside one arm there is no dispatch left to pay.
+    fn cpu_read_windows(&self, memory: &CartridgeMemory) -> CpuReadWindows {
+        let (prg_ram_base, wrap) = self.prg_ram_window(memory);
+        CpuReadWindows {
+            rom: self.rom_windows(memory),
+            prg_ram_base,
+            prg_ram_wrap: if self.prg_ram_enabled() && !memory.prg_ram().is_empty() {
+                debug_assert!(wrap != 0, "a readable PRG-RAM window of length zero");
+                wrap
+            } else {
+                0
+            },
+        }
     }
 
     /// Reads PRG-ROM, or a readable register, at `address`.

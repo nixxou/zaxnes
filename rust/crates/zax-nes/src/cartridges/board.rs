@@ -9,9 +9,9 @@ use super::mappers::Namcot108;
 use super::mappers::SmallBoard;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    Daou306, Fme7, GxRom, IremG101, IrqBoard, JalecoJ87, JalecoSs88006, Mapper, Mapper015,
-    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Nrom, Rambo1,
-    UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
+    CpuReadWindows, Daou306, Fme7, GxRom, IremG101, IrqBoard, JalecoJ87, JalecoSs88006, Mapper,
+    Mapper015, Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Nrom,
+    Rambo1, UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -283,6 +283,15 @@ impl Mapper for Board {
 
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         dispatch!(self, b => b.rom_windows(memory))
+    }
+
+    /// The **one** dispatch `Cartridge::refresh_rom_windows` makes, and the reason
+    /// [`Mapper::cpu_read_windows`] exists: inside an arm, `rom_windows`, `prg_ram_window` and
+    /// `prg_ram_enabled` are that board's own monomorphised bodies and not three more jump
+    /// tables (lot MF-CART step 4, which measured the three-dispatch shape at `mm2/core`
+    /// +0.005 %).
+    fn cpu_read_windows(&self, memory: &CartridgeMemory) -> CpuReadWindows {
+        dispatch!(self, b => b.cpu_read_windows(memory))
     }
 
     /// `#[inline(always)]`, and it has to stay, for the reason [`Mapper::cpu_read_override`]
