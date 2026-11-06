@@ -368,7 +368,129 @@ and step 7's figure, not step 1's, is the one the lot stands on**. If `smb3` is 
 baseline at step 7, step 7 says so and the revert above is the one on the table.
 
 [PROGRESS] MF-6a step 1/7 done: 206 and its four parameters, and the one symbol that moved.
+## Step 2 — 33, 97, 140, 184, 89 and 93: six boards, **one** `Board` variant
+
+### What was built
+
+Five board structs in five files — `taito_tc0190.rs` (33), `irem_tam_s1.rs` (97),
+`jaleco_jf11.rs` (140), `sunsoft1.rs` (184), `sunsoft2.rs` (89 and 93, the chip's two boards
+behind one `chr_ram_enable` parameter) — and **one** `Board` variant for all five,
+`Board::SmallBoard`, in `small_boards.rs`. Each board's registers come from its own NESdev page
+and are quoted in its doc comment. Four readings are decisions rather than transcription:
+
+* **33**'s register mask is `$A003`, so the eight registers repeat over all of $8000-$FFFF, and
+  its two 2 KiB CHR registers "use the full written value (not dropping the LSB like MMC3)" —
+  the claim that separates the board from an MMC3 and the one the test pins.
+* **97** is taken from the page and **not** from Mesen 2, under AMD-061 §1: the page gives
+  `[M..P PPPP]`, a five-bit bank and `M` alone with two layouts, where `IremTamS1.h` takes four
+  bits and decodes four layouts from bits 7-6. The two agree whenever bits 7 and 6 differ. The
+  divergence is in the code comment.
+* **184**'s upper CHR window is `4 | HH` because "only banks 4-7 selectable" — bit 6 is tied
+  high — and the page adds that software writes it set anyway, so no real image can tell this
+  reading from Mesen's three-bit one.
+* **140** and **184** get `prg_ram: Some(0)` in `board_memory_sizes` because each page says so in
+  its own words. **97 does not**: its page documents no PRG-RAM but does not say the board has
+  none, and taking RAM away from an image that uses it is the worse error. 89 and 93 get the
+  `has_bus_conflicts` arm their pages ask for.
+
+Thirteen tests, 824 → **834 / 0 / 8**; `fmt` and `clippy -p zax-nes --all-targets -D warnings`
+clean. The step also repairs nine em dashes in `mapper_tests.rs` that step 1's append mangled
+(PowerShell `Get-Content -Raw` plus `Add-Content` round-trips UTF-8 through cp1252); five of them
+were committed at step 1.
+
+### One `allow`, and it is the one the brief permits
+
+`#[inline(always)]` on **`<Board as Mapper>::expansion_audio_output`**, with
+`#[allow(clippy::inline_always)]` and its measured figure on the line, which is the brief's
+change 3 used once and exactly on its terms. Five more `Board` variants pushed that dispatch past
+the inliner's budget and LLVM gave it a symbol: **0 → 116 144 093 instructions over 300 frames
+of `mmc5exram`**, with `NesBus::push_expansion_audio` shedding 44 670 800 as its body left — net
+**+75 937 647, +0.672 % on that ROM**, on a board this lot does not touch. MF-5b step 1's story
+one dispatch along, and the same fix. Pinned, `mmc5` ends the step at **+41 598 (+0.000 %)**.
+
+### The regression that took four variants to remove, and the one line that did it
+
+The five boards as **five** `Board` variants cost `Ppu2C02::run_dots` — 18 to 21 % of every ROM
+in the set — **+3.3 M to +6.9 M instructions over 300 frames on eight of the thirteen**, 0.067 %
+to 0.131 %, with `run_dots` **keeping its instruction count**: the whole of it was spill and
+reload churn inside the loop, visible in `showdiff.py` as `%rbp` becoming `%r14` and `8(%rsp)`
+becoming `16(%rsp)`, with one reload gone from the hot block. Six shapes were measured:
+
+| shape | `run_dots` | the eight ROMs | set total |
+| --- | ---: | --- | ---: |
+| five `Board` variants, Sunsoft-2 giving a third `chr_view` body | 1 926 | +3.3 M to +7.0 M | +0.135 % |
+| … with Sunsoft-2's `chr_view` answering `None` | **1 906** | +3.3 M to +6.9 M, unchanged | +0.029 % |
+| **experiment Y**: five variants, **no** PPU-side override on any board | — | the same deltas **to the instruction** | — |
+| `#[inline(never)]` on `Board::chr_view`, to take the arms out of the loop | — | **far worse**: +0.849 % on `duelito`, +0.761 % on `mmc5`, +0.730 % on `readbuf` | **+0.297 %** |
+| the five boards behind **one** variant, `chr_view` still forwarded | — | +3.3 M to +6.6 M, unchanged | +0.053 % |
+| **one variant, `SmallBoard::chr_view` answering `None`** | 1 907 | **inside ±143 k** | **+0.000 %** |
+
+Experiment Y is the row that located it: the same five variants with no `chr_view`, `ppu_peek`
+or `ppu_write` override on any of the five reproduced the deltas exactly, so the cost was never
+the boards' code. And the fifth row rules out the variant *count* as well — one variant
+forwarding `chr_view` to five boards costs the same as five variants, because
+`Mapper::chr_view`'s default is monomorphised per board and five boards' `banks` fields sit at
+five different offsets, so the "shared" arm is only shared while the code is identical.
+
+**What ships is both**: one variant, and `SmallBoard::chr_view` answering `None` — which is not a
+body of its own but the one MMC2, MMC3, MMC5 and the RAMBO-1 already answer, so `Board::chr_view`
+gains nothing for `run_dots` to lay out. The price is that the dozen games of these six mapper
+numbers take `Mapper::ppu_peek` one fetch at a time instead of the span fast path
+(`Board::ppu_peek` 4 → 6 call sites), which is §4.10's own rule: the cost lands on the boards
+that caused it. `chr_peek_view` **is** forwarded, so the tile emitter and the host accessors keep
+a view; that dispatch is not inside `run_dots`, and the MMC3 and the UNROM 512 already give it
+bodies of their own.
+
+`#[inline(never)]` on each of the five boards' own register decode, as step 1 established, keeps
+those decodes out of `NesBus::write_internal`: it ends at **3 058**, 38 above the baseline for
+six mapper numbers, and `write_internal` is now **−64 to −65 k on `m0`, `m1` and `m4`** against
+the baseline — step 1's +66 921 on `m4` is gone, taken away by the same relayout.
+
+### The post-LTO code
+
+`shape.py`, baseline / step 1 / step 2 (def / sites / instructions): the three claimants of
+`Cpu6502::step`'s budget are **0 / 0 / 0 in all three**, and `step` 3 443, `resolve` 1 854,
+`branch` 418, `read_cycle` 1/65/181, `tick` 1/95/82 and `read_internal` 1/17/175 are **unmoved to
+the instruction** at every step. `write_internal` 3 020 → 3 004 → 3 058; `run_dots` 1 906 →
+1 907 → 1 907. `callsites.py`: every watched entry unchanged but `Board::ppu_peek` 4 → 6, which
+is the `chr_view` decision above, and `panic_bounds_check` **911 → 911**.
+
+### The bar
+
+**PR-1's thirteen**, whole process: every ROM within **±143 k (0.002 %)**, set total **+52 301
+(+0.000 %)**. The emulated symbols that moved by 20 000 or more, Lua and libc set aside:
+
+| ROM | symbol | delta |
+| --- | --- | ---: |
+| `m0`, `m1`, `m4` | `NesBus::write_internal` | **−65 503, −64 164, −64 207** |
+| `duelito`, `metroid` | `Ppu2C02::run_dots` | **−20 926, −22 074** |
+| `smb3` | `NesBus::catch_up_ppu` | **+157 741** |
+
+**Level 2**, against `240a2718`:
+
+| game/stage | baseline | step 2 | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 148 433 485 | **11 148 407 139** | −26 346 | −0.0002 % |
+| `smb1/core` | 11 516 670 821 | **11 516 657 770** | −13 051 | −0.0001 % |
+| `zelda2/core` | 12 778 994 409 | **12 778 983 095** | −11 314 | −0.0001 % |
+| `mm2/core` | 12 043 869 909 | 12 043 872 423 | +2 514 | +0.0000 % |
+| `smb3/core` | 15 320 386 010 | 15 320 819 096 | **+433 086** | **+0.0028 %** |
+| `metroid/total` | 13 736 688 715 | **13 736 626 670** | −62 045 | −0.0005 % |
+| `smb1/total` | 13 588 597 037 | 13 588 648 142 | +51 105 | +0.0004 % |
+| `mm2/total` | 18 983 316 177 | 18 983 413 180 | +97 003 | +0.0005 % |
+| `zelda2/total` | 15 363 074 749 | 15 365 686 930 | +2 612 181 | +0.0170 % |
+| `smb3/total` | 24 194 492 263 | 24 199 708 821 | +5 216 558 | +0.0216 % |
+
+`ppu` is identical to the instruction on all five games. **This step does not meet the level-2
+core bar on `smb3` (+433 086, +0.0028 %) or on `mm2` (+2 514, +0.00002 %)**; the two totals
+furthest above are again `convert` and `lua_hooks`, the pair MF-5b-fix step 4 showed moves
+between any two builds. `smb3`'s core is the `catch_up_ppu` figure above scaled by level 2's
+2.4× frames: an MMC3 PPU-catch-up path that LLVM lays out differently, in a step that adds no
+hook to that path and leaves `ppu_irq_horizon`'s dispatch the bodies it had. The revert is the
+one step 1 names, extended: drop the boards.
+
+[PROGRESS] MF-6a step 2/7 done: six boards in one variant, and the line that cost 0.13 %.
 
 ## Status
 
-Steps 0-1 done.
+Steps 0-2 done.

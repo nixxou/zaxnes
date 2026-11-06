@@ -5,7 +5,7 @@ use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034,
     Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, Namcot108, Nrom, Rambo1,
-    UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
+    SmallBoard, UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -100,6 +100,12 @@ pub enum Board {
     /// Mapper 206, the Namco 108 / Namcot 109, 118, 119 and the Tengen MIMIC-1, with mappers
     /// 76, 88, 95 and 154 as its four parameters (MF-6a step 1).
     Namcot108(Namcot108),
+    /// Mappers 33, 89, 93, 97, 140 and 184: the Taito TC0190, both Sunsoft-2 boards, the Irem
+    /// TAM-S1, the Jaleco JF-11/14 and Sunsoft-1, **behind one discriminant** (MF-6a step 2).
+    /// [`SmallBoard`]'s own note has the measurement that put them there: five variants cost
+    /// `Ppu2C02::run_dots` 0.067 % to 0.131 % on eight of lot PR-1's thirteen ROMs in register
+    /// pressure alone, and one costs nothing.
+    SmallBoard(SmallBoard),
 }
 
 /// Expands `$body` once per variant with the board bound to `$b`.
@@ -139,6 +145,7 @@ macro_rules! dispatch {
             Board::Namco163($b) => $body,
             Board::Vrc7($b) => $body,
             Board::Namcot108($b) => $body,
+            Board::SmallBoard($b) => $body,
         }
     };
 }
@@ -196,6 +203,20 @@ impl Mapper for Board {
         dispatch!(self, b => b.irq_asserted())
     }
 
+    /// **`#[inline(always)]` since MF-6a step 2, and it has to stay.** `NesBus::tick` asks this
+    /// of the cartridge once per CPU cycle on a board with expansion audio, through
+    /// `Cartridge::expansion_audio_output` and the `expansion_audio` latch; the MMC5 is the one
+    /// board of REQ-CORE-075 this build must sound, and `mmc5exram` is in lot PR-1's set.
+    ///
+    /// The thirty-seventh `Board` variant pushed this dispatch past the inliner's budget and
+    /// LLVM gave it a symbol: **0 → 116 144 093 instructions over 300 frames of `mmc5exram`**,
+    /// with `NesBus::push_expansion_audio` dropping 44 670 800 as its body left — a net
+    /// **+75 937 647, +0.672 % on that ROM**, on a board this lot does not touch. It is the same
+    /// story MF-5b step 1 tells about `irq_asserted` one dispatch along, and the same fix: the
+    /// chain is pinned rather than shortened, because shortening a dispatch and pinning it have
+    /// opposite beneficiaries (PERFORMANCE-HISTORY §5.10).
+    #[allow(clippy::inline_always)] // Measured: MF-6a step 2, +75.9 M on an MMC5.
+    #[inline(always)]
     fn expansion_audio_output(&self) -> Option<i32> {
         dispatch!(self, b => b.expansion_audio_output())
     }

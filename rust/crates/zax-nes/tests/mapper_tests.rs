@@ -55,14 +55,19 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 19 and 210, the Namco 163 and the Namcot 175 and 340 cut from it (MF-5a step 4);
     // * 85, Konami VRC7 (MF-5b step 1);
     // * 206, the Namco 108 / DxROM, with 76, 88, 95 and 154 as its four parameters
-    //   (MF-6a step 1).
+    //   (MF-6a step 1);
+    // * 33 (Taito TC0190), 97 (Irem TAM-S1), 140 (Jaleco JF-11/14), 184 (Sunsoft-1) and
+    //   89 and 93 (Sunsoft-2 on its two boards) (MF-6a step 2).
     let extra: Vec<i32> = Cartridge::SUPPORTED_MAPPERS
         .iter()
         .copied()
         .filter(|mapper| !required.contains(mapper))
         .collect();
     assert_eq!(
-        vec![19, 24, 26, 69, 76, 78, 85, 88, 95, 118, 154, 156, 180, 206, 210],
+        vec![
+            19, 24, 26, 33, 69, 76, 78, 85, 88, 89, 93, 95, 97, 118, 140, 154, 156, 180, 184, 206,
+            210
+        ],
         extra
     );
 
@@ -1732,7 +1737,7 @@ fn req_core_100_namcot_108_switches_two_prg_windows_and_fixes_the_last_two() {
     assert_eq!([7, 5, 6, 7], core.prg_windows());
 }
 
-/// `CHR Window: 2Kx2 + 1Kx4` â€” R0 and R1 are 2 KiB banks at PPU $0000-$07FF and $0800-$0FFF,
+/// `CHR Window: 2Kx2 + 1Kx4` — R0 and R1 are 2 KiB banks at PPU $0000-$07FF and $0800-$0FFF,
 /// R2-R5 are 1 KiB banks at $1000-$13FF through $1C00-$1FFF. "Only bits 5-1 exist for 2KB CHR
 /// banks", so bit 0 of R0 and R1 is not part of the bank.
 #[test]
@@ -1751,7 +1756,7 @@ fn req_core_100_namcot_108_banks_two_2_kib_and_four_1_kib_chr_windows() {
     assert_eq!([4, 5], core.chr_windows()[..2]);
 }
 
-/// `Mirroring: Fixed H/V, or 4` â€” hardwired. **No register of this board touches it**, which is
+/// `Mirroring: Fixed H/V, or 4` — hardwired. **No register of this board touches it**, which is
 /// the claim that separates 206 from 154, and the one a port of the MMC3 gets wrong by leaving
 /// $A000 alive.
 #[test]
@@ -1818,7 +1823,7 @@ fn req_core_100_namcot_3446_banks_chr_in_four_2_kib_windows() {
 
 /// nesdev ("INES Mapper 088"), the NAMCOT-3433/3443 of *Dragon Spirit* and *Quinty*: "CHR
 /// support is increased to 128 KiB by connecting PPU's A12 line to the CHR ROM's A16 line", so
-/// the left pattern table can only reach the first 64 KiB and the right one only the second â€”
+/// the left pattern table can only reach the first 64 KiB and the right one only the second —
 /// the page's own implementation note, an AND with $3F on registers 0-1 and an OR with $40 on
 /// registers 2-5. This is the one claim a careless port of the 108 gets wrong.
 #[test]
@@ -1847,7 +1852,7 @@ fn req_core_100_namcot_3433_splits_128_kib_of_chr_by_pattern_table() {
 
 /// nesdev ("INES Mapper 095"), the NAMCOT-3425 of *Dragon Buster*: the bank data register is
 /// `..ND DDDD`, N being "Nametable select, based on last value written to Bank select register".
-/// Register 0 drives the nametable at PPU $2000-$27FF and register 1 the one at $2800-$2FFF â€”
+/// Register 0 drives the nametable at PPU $2000-$27FF and register 1 the one at $2800-$2FFF —
 /// CHR A15 wired to CIRAM A10.
 #[test]
 fn req_core_100_namcot_3425_takes_its_nametable_from_chr_a15() {
@@ -1912,4 +1917,220 @@ fn req_core_100_namcot_3453_decodes_its_one_screen_bit_over_all_of_8000_ffff() {
     namcot108_bank(&mut core, 2, 0x00);
     assert_eq!([16, 17], core.chr_windows()[..2]);
     assert_eq!(64, core.chr_windows()[4]);
+}
+
+// ------------------------------------------- Taito TC0190 (33), Irem TAM-S1 (97),
+// ------------------------------------------- Jaleco JF-11 (140), Sunsoft-1 (184),
+// ------------------------------------------- Sunsoft-2 (89, 93)
+
+/// nesdev ("INES Mapper 033"): PRG register 0 at `$8000` with the mirroring bit above it,
+/// register 1 at `$8001`, and the last two 8 KiB banks fixed to the end.
+#[test]
+fn req_core_100_tc0190_switches_two_prg_windows_and_decodes_the_mirroring_bit() {
+    let mut core = MapperRom::new(33).prg(16).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+
+    core.mapper_write(0x8000, 0x05);
+    core.mapper_write(0x8001, 0x07);
+    assert_eq!([5, 7, 14, 15], core.prg_windows());
+    // `M` clear is vertical; the page's `[.MPP PPPP]` puts it at bit 6.
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    core.mapper_write(0x8000, 0x45);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    assert_eq!([5, 7, 14, 15], core.prg_windows());
+}
+
+/// The CHR half, and the claim that separates this board from an MMC3: the two 2 KiB registers
+/// at `$8002`-`$8003` "use the full written value (not dropping the LSB like MMC3), allowing
+/// 512 KiB addressability", where the four 1 KiB ones at `$A000`-`$A003` reach 256 KiB.
+#[test]
+fn req_core_100_tc0190_banks_2_kib_chr_from_the_whole_byte_unlike_an_mmc3() {
+    let mut core = MapperRom::new(33).prg(16).chr(128).load();
+    core.mapper_write(0x8002, 0x03);
+    core.mapper_write(0x8003, 0x05);
+    for register in 0..4u16 {
+        core.mapper_write(0xA000 + register, 20 + register as u8);
+    }
+
+    // An MMC3 would read $8002 = 3 as 2 KiB bank 1 (banks 2 and 3 of 1 KiB); this board reads
+    // it as 2 KiB bank 3, which is 1 KiB banks 6 and 7.
+    assert_eq!([6, 7, 10, 11, 20, 21, 22, 23], core.chr_windows());
+}
+
+/// Register mask `$A003`: the eight registers repeat over the whole of $8000-$FFFF, so a write
+/// to `$C000` is a write to `$8000` and one to `$E003` is a write to `$A003`.
+#[test]
+fn req_core_100_tc0190_decodes_its_registers_through_the_a003_mask() {
+    let mut core = MapperRom::new(33).prg(16).chr(128).load();
+    core.mapper_write(0xC000, 0x45); // -> $8000.
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    assert_eq!([5, 1, 14, 15], core.prg_windows());
+
+    core.mapper_write(0xE003, 0x1F); // -> $A003.
+    assert_eq!(0x1F, core.chr_windows()[7]);
+
+    core.mapper_write(0x9002, 0x03); // -> $8002.
+    assert_eq!([6, 7], core.chr_windows()[..2]);
+}
+
+/// nesdev ("INES Mapper 097"): `$8000-BFFF: [M..P PPPP]`, the `P` field switching the 16 KiB
+/// bank **at $C000** while $8000-$BFFF holds the last bank — the opposite way round from every
+/// other 16 KiB board here.
+#[test]
+fn req_core_100_tam_s1_switches_c000_and_fixes_the_last_bank_at_8000() {
+    let mut core = MapperRom::new(97).prg(16).load();
+    assert_eq!([14, 15, 0, 1], core.prg_windows());
+
+    core.mapper_write(0x8000, 0x03);
+    assert_eq!([14, 15, 6, 7], core.prg_windows());
+    // `M` is bit 7: "%0 = Horz (PPU A11)".
+    assert_eq!(Nm::Horizontal, core.mirroring());
+
+    core.mapper_write(0xBFFF, 0x85);
+    assert_eq!([14, 15, 10, 11], core.prg_windows());
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // The register is $8000-$BFFF and nothing above it.
+    core.mapper_write(0xC000, 0x01);
+    assert_eq!([14, 15, 10, 11], core.prg_windows());
+    assert_eq!(Nm::Vertical, core.mirroring());
+}
+
+/// "This mapper does not have bus conflicts", so a five-bit bank survives a write landing on a
+/// zero-filled PRG bank — which on a board *with* conflicts the AND would take to 0.
+#[test]
+fn req_core_100_tam_s1_has_no_bus_conflicts() {
+    let mut core = MapperRom::new(97).prg(16).load();
+    // $8000 shows bank 14, whose bytes are all 14: an AND would leave $1F & 14 = 14 -> bank 14
+    // of 16 KiB, which wraps to 8 KiB banks 12, 13. Without conflicts the register takes $1F.
+    core.mapper_write(0x8000, 0x1F);
+    assert_eq!([14, 15, 14, 15], core.prg_windows());
+}
+
+/// nesdev ("INES Mapper 140"): `$6000-7FFF: [...PP CCCC]`, a GNROM whose register sits below
+/// $8000 — "Regs lie at $6000-7FFF, so there's no SRAM".
+#[test]
+fn req_core_100_jf11_banks_32_kib_prg_and_8_kib_chr_from_6000() {
+    let mut core = MapperRom::new(140).prg(16).chr(128).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    core.mapper_write(0x6000, 0x2A);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!([80, 81, 82, 83, 84, 85, 86, 87], core.chr_windows());
+
+    // The whole window is the register.
+    core.mapper_write(0x7FFF, 0x13);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(24, core.chr_windows()[0]);
+
+    // And there is no RAM behind it: what was written is not read back.
+    core.write_memory(0x6000, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x6000));
+}
+
+/// nesdev ("INES Mapper 184"), Sunsoft-1: two 4 KiB CHR banks from one register at $6000-$7FFF,
+/// the upper one limited to "banks 4-7" because bit 6 is tied high in hardware.
+#[test]
+fn req_core_100_sunsoft_1_banks_two_4_kib_chr_windows_with_the_upper_one_above_four() {
+    let mut core = MapperRom::new(184).prg(4).chr(32).load();
+    core.mapper_write(0x6000, 0x52);
+    // L = 2 -> 4 KiB bank 2, i.e. 1 KiB banks 8-11; H = %01 with bit 6 high -> bank 5.
+    assert_eq!([8, 9, 10, 11, 20, 21, 22, 23], core.chr_windows());
+
+    // Bit 6 is high whatever is written, so clearing it in software changes nothing: the upper
+    // window can never show banks 0-3. The page: "existing software is well behaved and writes
+    // to this with the $40s bit set".
+    for value in 0..=0xFFu8 {
+        core.mapper_write(0x6000, value);
+        let windows = core.chr_windows();
+        assert!(windows[4] >= 16, "{value:#04X} -> {windows:?}");
+    }
+
+    // No PRG banking at all, and no RAM at $6000-$7FFF.
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.write_memory(0x6000, 0x5A);
+    assert_ne!(0x5A, core.read_memory(0x6000));
+}
+
+/// nesdev ("INES Mapper 089"), the Sunsoft-2 on the Sunsoft-3 board: `$8000-FFFF: [CPPP MCCC]`
+/// — a 16 KiB PRG bank from bits 6-4, an 8 KiB CHR bank from bits 2-0 with bit 7 above them,
+/// one-screen mirroring from bit 3, and the last 16 KiB fixed.
+///
+/// The board has **bus conflicts**, so the test writes into a PRG bank filled with $FF: on the
+/// numbered banks the AND would mask every bit above 3 away.
+#[test]
+fn req_core_100_sunsoft_2_banks_16_kib_prg_and_8_kib_chr_on_mapper_89() {
+    let mut core = MapperRom::new(89)
+        .prg(16)
+        .chr(128)
+        .prg_bank_all_ones(14)
+        .load();
+    // Bank 14 is $FF-filled for the bus conflict, so it reads back as 255 and not as 14.
+    assert_eq!([0, 1, 255, 15], core.prg_windows());
+
+    // $C000 is 8 KiB bank 14, the $FF-filled one, so the register latches what is written.
+    core.mapper_write(0xC000, 0x35); // C=0 PPP=3 M=0 CCC=5 -> PRG 3, CHR 5, 1ScA.
+    assert_eq!([6, 7, 255, 15], core.prg_windows());
+    assert_eq!(40, core.chr_windows()[0]);
+    assert_eq!(Nm::SingleScreenA, core.mirroring());
+
+    // Bit 7 is the CHR bank's high bit: 8 | 5 = 13.
+    core.mapper_write(0xC000, 0xB5);
+    assert_eq!(104, core.chr_windows()[0]);
+
+    // Bit 3 is the one-screen select, "%1 = 1ScB".
+    core.mapper_write(0xC000, 0x3D);
+    assert_eq!(Nm::SingleScreenB, core.mirroring());
+}
+
+/// nesdev ("INES Mapper 093"), the Sunsoft-2 on the Sunsoft-3R board: `$8000-FFFF: [.PPP ...E]`
+/// — the same PRG field, **no** CHR bank and **no** mirroring bit, and `E` a CHR-RAM enable
+/// whose disabled state is "reads are open bus" and "writes are ignored".
+#[test]
+fn req_core_100_sunsoft_2_enables_chr_ram_with_bit_0_on_mapper_93() {
+    let mut core = MapperRom::new(93)
+        .prg(16)
+        .chr(0)
+        .prg_bank_all_ones(14)
+        .load();
+    assert_eq!([0, 1, 255, 15], core.prg_windows());
+
+    // `E` set: the CHR-RAM answers, and a write to it lands.
+    core.mapper_write(0xC000, 0x31);
+    assert_eq!([6, 7, 255, 15], core.prg_windows());
+    core.cartridge_mut().unwrap().ppu_write(0x0040, 0x5A);
+    assert_eq!(0x5A, peek(&core, 0x0040));
+
+    // `E` clear: reads are open bus, which this core answers as zero, and writes are ignored.
+    core.mapper_write(0xC000, 0x30);
+    assert_eq!(0, peek(&core, 0x0040));
+    core.cartridge_mut().unwrap().ppu_write(0x0040, 0x3C);
+    core.mapper_write(0xC000, 0x31);
+    assert_eq!(0x5A, peek(&core, 0x0040));
+
+    // And the board has no mirroring register: the header's layout stands whatever is written.
+    let before = core.mirroring();
+    for value in [0x00u8, 0x08, 0x40, 0xFF] {
+        core.mapper_write(0xC000, value);
+        assert_eq!(before, core.mirroring(), "{value:#04X}");
+    }
+}
+
+/// Both Sunsoft-2 boards carry the page's own "BUS CONFLICTS" line, which is one arm of
+/// `registry::has_bus_conflicts` and is visible from outside: a write landing on a numbered
+/// bank latches the AND of the value with the bank's bytes.
+#[test]
+fn req_core_100_sunsoft_2_has_bus_conflicts_on_both_boards() {
+    for mapper in [89usize, 93] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(128).load();
+        // $C000 shows 8 KiB bank 14, whose every byte is 14 = %0000_1110. A PRG field of %111
+        // in bits 6-4 therefore cannot survive the write.
+        core.mapper_write(0xC000, 0x70);
+        assert_eq!(
+            [0, 1, 14, 15],
+            core.prg_windows(),
+            "mapper {mapper}: the ROM did not drive the bus"
+        );
+    }
 }

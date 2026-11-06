@@ -9,9 +9,10 @@
 use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    Daou306, Fme7, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mapper078,
-    McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant, Namcot108, Rambo1,
-    UnRom512, UxRom, Vrc2Vrc4, Vrc6, Vrc7,
+    Daou306, Fme7, GxRom, IremG101, IremTamS1, JalecoJ87, JalecoJf11, JalecoSs88006, Mapper015,
+    Mapper034, Mapper078, McAcc, Mmc1, Mmc2, Mmc3, Mmc5, Multicart225, Namco163, NamcoVariant,
+    Namcot108, Rambo1, SmallBoard, Sunsoft1, Sunsoft2, TaitoTc0190, UnRom512, UxRom, Vrc2Vrc4,
+    Vrc6, Vrc7,
 };
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
@@ -19,8 +20,9 @@ use crate::rom::InesHeader;
 /// Mapper numbers this build can run, in ascending order (REQ-CORE-102). 116 is optional in
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
-    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 34,
-    41, 64, 66, 69, 71, 76, 78, 85, 87, 88, 95, 101, 118, 154, 156, 180, 206, 210, 225, 228,
+    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 30, 32, 33,
+    34, 41, 64, 66, 69, 71, 76, 78, 85, 87, 88, 89, 93, 95, 97, 101, 118, 140, 154, 156, 180, 184,
+    206, 210, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -107,8 +109,19 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             ),
             ..BoardMemorySizes::default()
         },
-        // MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None".
-        30 => BoardMemorySizes {
+        // The three boards that carry no PRG-RAM at all, each on its page's own words:
+        //
+        // * 30, MR-30-2, nesdev ("UNROM 512"): "PRG RAM capacity: None";
+        // * 140 ("INES Mapper 140"): "Regs lie at $6000-7FFF, so there's no SRAM";
+        // * 184 ("INES Mapper 184"): "This mapper precludes iNES-default RAM because the
+        //   register is mapped into $6000-7FFF".
+        //
+        // The last two answer that window themselves through `Mapper::intercept_cpu_write`, so
+        // the RAM must not exist behind it. **Mapper 97 is deliberately absent**, although §4.6
+        // of the inventory grouped it with those two: its page documents no PRG-RAM but does not
+        // say the board has none, and taking RAM away from an image that uses it is the worse of
+        // the two errors.
+        30 | 140 | 184 => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -178,7 +191,9 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // during a write.
         // *INES Mapper 078* says the same of its board, "a CNROM and a UNROM" in discrete
         // logic with nothing to stop the ROM driving the bus.
-        11 | 66 | 78 | 180 => true,
+        // *INES Mapper 089* and *INES Mapper 093* both carry the page's own "BUS CONFLICTS"
+        // line against the register at $8000-$FFFF (MF-6a step 2).
+        11 | 66 | 78 | 89 | 93 | 180 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
         _ => false,
@@ -231,6 +246,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // MF-6a step 1: the Namco 108 and its four parameters. One board, five numbers; see
         // `Namcot108`'s own note on why the differences are fields and not `const` parameters.
         76 | 88 | 95 | 154 | 206 => Board::Namcot108(Namcot108::new(memory, mapper)),
+        // MF-6a step 2: five boards that are a register decode and nothing else, sharing one
+        // `Board` discriminant. `SmallBoard`'s note has the measurement that put them there.
+        33 => Board::SmallBoard(SmallBoard::TaitoTc0190(TaitoTc0190::new(memory))),
+        97 => Board::SmallBoard(SmallBoard::IremTamS1(IremTamS1::new(memory))),
+        140 => Board::SmallBoard(SmallBoard::JalecoJf11(JalecoJf11::new(memory))),
+        184 => Board::SmallBoard(SmallBoard::Sunsoft1(Sunsoft1::new(memory))),
+        // Mapper 89 is the Sunsoft-3 board and 93 the Sunsoft-3R; the chip is the same.
+        89 | 93 => Board::SmallBoard(SmallBoard::Sunsoft2(Sunsoft2::new(memory, mapper))),
         _ => return None,
     })
 }
