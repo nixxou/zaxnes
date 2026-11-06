@@ -31,6 +31,32 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 /// one of these five boards — the same trade as every other hook in §4.10, where a cost lands
 /// on the board that needs it instead of on the library.
 ///
+/// # **This enum is full, and MF-6c measured where its limit is**
+///
+/// Three measurements of lot MF-6c, and they agree: **one more variant here costs `mmc5`
+/// +7 456 756 instructions over 300 frames, +0.066 %**, and nothing else in lot PR-1's thirteen
+/// moves at all. `Cartridge::default_cpu_read` has two layouts on that ROM — 283 356 728 and
+/// 290 813 484 — and a variant past the tenth selects the dearer one, in which LLVM hoists
+/// `leaq 240(%rdi), %rax` above the jump table of the inlined `Board::prg_ram_enabled` so that it
+/// runs on every CPU read of the one board that maps PRG-RAM into $8000-$DFFF.
+///
+/// * **step 2** added the two Taito X1 boards (variants eleven and twelve) with three forwards:
+///   +7 456 756. Seven shapes of their own code could not move it, and the two numbers are
+///   **parked** (`board-taito-x1`, off by default).
+/// * **step 3** re-measured that on a tree where `default_cpu_read` had grown from 377
+///   instructions to 425 for unrelated reasons: the same figure, to the instruction. So it is not
+///   a size threshold.
+/// * **step 4** added the Sunsoft-4 alone (variant eleven) with **one** forward: the same figure
+///   again. Moved to [`super::IrqBoard`], which was nine variants deep and in the cheap layout, it
+///   cost `mmc5` **−35 125** and the board shipped in `default`.
+/// * **step 5** then tried the same move for the two Taito boards, which step 4 expected to work,
+///   and it does not: `IrqBoard` at twelve variants put `default_cpu_read` at **298 270 240**,
+///   +14 913 512 — **two** units of the same 7 456 756 — and `mmc5` at +0.132 %. The park stands.
+///
+/// So a board that would have come here has **nowhere free left**, and the next lot that wants one
+/// has to redesign the $6000-$7FFF read path rather than pick an enum. `docs/progress/MF-6c.md`
+/// steps 2 to 5 have the eleven measurements.
+///
 /// # What is forwarded, and what is deliberately not
 ///
 /// Only the twelve methods one of the five actually implements. **The per-cycle and per-fetch

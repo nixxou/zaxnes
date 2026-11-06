@@ -42,7 +42,11 @@ ignore it" of §5 MF-6c:**
 | Oeka Kids | **96** | CHR banking from every PPU address-bus change |
 | Cheapocabra (GTROM) | **111** | mapper-selected CHR-RAM nametable pages, self-flashing PRG |
 
-## Steps (n = 10)
+## Steps (n = 11)
+
+**Step 5 was inserted after step 4**, which found a shape that looked as though it would un-park
+`board-taito-x1` and said so; the insertion is that experiment, and it is a negative result. The
+steps after it keep the order and the content step 0 planned.
 
 0. The plan, the driver and the baseline at `8496c503` on all three instruments.
 1. **153** — the `BandaiFcg` parameter, built and measured.
@@ -51,13 +55,15 @@ ignore it" of §5 MF-6c:**
 3. **157, 159** — the `Eeprom24C0X` state machine beside `vrc_irq.rs`, built and measured.
 4. **68** — the CIRAM half through `nametable_pages_vary`, **and** the CHR-ROM nametable mode,
    which is the third `read_nametable` body, behind its own feature (owner's rule 1).
-5. **77** — the split `chr_view`, built and measured.
-6. **72, 92, 86** — the three-way parameter, audio pinned silent.
-7. **96** — the PPU address bus, `watches_ppu_bus_without_read`, MR-1's open question answered.
-8. **111** — `nametable_page` if it reduces to one, else the same answer 68's mechanism got.
-9. The features' `default` / `parked` placement from the measurements, `BOARD-FEATURES.md`, the
-   four sweeps, every configuration green, the save states.
-10. The check: `--ignored` with both ROM folders, the campaign field by field against MF-6a3's
+5. **The un-parking attempt step 4 recommended**: the two Taito X1 boards moved to `IrqBoard` and
+   re-measured. *Inserted, and a negative result.*
+6. **77** — the split `chr_view`, built and measured.
+7. **72, 92, 86** — the three-way parameter, audio pinned silent.
+8. **96** — the PPU address bus, `watches_ppu_bus_without_read`, MR-1's open question answered.
+9. **111** — `nametable_page` if it reduces to one, else the same answer 68's mechanism got.
+10. The features' `default` / `parked` placement from the measurements, `BOARD-FEATURES.md`, the
+    four sweeps, every configuration green, the save states.
+11. The check: `--ignored` with both ROM folders, the campaign field by field against MF-6a3's
     331, the inventory, the Q tickets and the journal.
 
 ## The bar, at every step
@@ -178,7 +184,7 @@ at **114** is Q-123's ceiling as this tree stands — MF-5a measured 132 with th
 132**, because step 4 is the step that adds the third body and the owner's rule says it ships
 behind its own feature whatever it costs.
 
-[PROGRESS] MF-6c step 0/10 done: the plan, the driver, and `8496c503` reproduced on all three
+[PROGRESS] MF-6c step 0/11 done: the plan, the driver, and `8496c503` reproduced on all three
 instruments — the five level-2 `core` deltas against MF-6a3 step 0 are mapper 116's own
 +253 to +16 832, and all eight pinned symbols hold.
 
@@ -340,7 +346,7 @@ three), `--no-default-features` **783** (MF-6a3's 782 plus the one test that is 
 `default`; step 9 writes its row in `BOARD-FEATURES.md` and does the all-features-off dump
 comparison for every feature this lot adds at once, as MF-6a3 step 3 did for its nine.
 
-[PROGRESS] MF-6c step 1/10 done: mapper 153 as two appended `bool`s on `BandaiFcg`, 902 / 0 / 8,
+[PROGRESS] MF-6c step 1/11 done: mapper 153 as two appended `bool`s on `BandaiFcg`, 902 / 0 / 8,
 all five level-2 cores **+0**, worst of PR-1's thirteen `duelito` +0.001 %, and the only pinned
 symbol that moved is `write_internal` +4.
 
@@ -518,7 +524,7 @@ one. The four sweeps held once `image` carried mapper bits 8-11 — and
 which is the fourth lot running in which that family of sweeps has caught a real mistake before
 any measurement did.
 
-[PROGRESS] MF-6c step 2/10 done: the Taito X1-005 and X1-017 on four numbers, 907 / 0 / 8, all
+[PROGRESS] MF-6c step 2/11 done: the Taito X1-005 and X1-017 on four numbers, 907 / 0 / 8, all
 five level-2 cores +0 with the feature on **and** off — and `board-taito-x1` **parked**, on one
 hoisted `leaq` worth +0.066 % on `mmc5` that seven shapes could not move and that this project has
 measured in both directions.
@@ -704,7 +710,7 @@ EEPROM tests speak the protocol rather than poking state.
 all three configurations and on `zax-harness`, clean, **no new `allow` of any kind**.
 `board-eeprom` is inside the tolerance by a factor of twenty and goes in `default`.
 
-[PROGRESS] MF-6c step 3/10 done: `Eeprom24C0X` and mappers 157 and 159, 906 / 0 / 8, all five
+[PROGRESS] MF-6c step 3/11 done: `Eeprom24C0X` and mappers 157 and 159, 906 / 0 / 8, all five
 level-2 cores +0 and `duelito` +0.001 % the worst of thirteen with `mmc5` −40 903 — and step 2's
 park re-measured at the same +7 456 756 on a tree 48 instructions larger, which refutes that
 step's size-threshold reading and leaves the park standing.
@@ -884,20 +890,100 @@ The test's comment says so, and references Q-130 question 2.
 With `zax-harness` the default figure is **909 passed / 0 failed / 8 ignored**. Both `board-68` and
 `board-68-chr-nametables` are inside the tolerance by a factor of twenty and go in `default`.
 
-### What step 9 must do first, and it is worth 13 titles
+### What step 5 was inserted to try, and it is worth 13 titles
 
-**Finding 2 very probably un-parks `board-taito-x1`.** The two Taito boards are parked on exactly
-the figure this step cured by moving one board out of `SmallBoard`, and both of their pages say
-"IRQ: None" the same way the Sunsoft-4's does, so [`IrqBoard`] will take them on the same terms —
-`try_read_prg`, `prg_ram_enabled` and `nametable_page` are all forwards that enum already has or
-can widen, and the price is the same `ppu_irq_horizon`. **Step 9 should move them and re-measure
-before writing the feature table**; if it holds, thirteen licensed titles come back into `default`
-and `parked-boards` is empty again.
+**Finding 2 looks as though it un-parks `board-taito-x1`.** The two Taito boards are parked on
+exactly the figure this step cured by moving one board out of `SmallBoard`, and both of their pages
+say "IRQ: None" the same way the Sunsoft-4's does, so [`IrqBoard`] should take them on the same
+terms — `try_read_prg`, `prg_ram_enabled` and `nametable_page` are all forwards that enum already
+has or can widen, and the price is the same `ppu_irq_horizon`. **Step 5 is inserted to move them
+and re-measure**; if it holds, thirteen licensed titles come back into `default` and
+`parked-boards` is empty again. (It does not. See step 5.)
 
 [`SmallBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/small_boards.rs
 [`IrqBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/irq_boards.rs
 
-[PROGRESS] MF-6c step 4/10 done: the Sunsoft-4 and its CHR-ROM nametables both in `default`,
+[PROGRESS] MF-6c step 4/11 done: the Sunsoft-4 and its CHR-ROM nametables both in `default`,
 909 / 0 / 8, level 2 **at or below the baseline on every game, total and core** — and two findings:
 the eleventh `SmallBoard` variant is what parks a board, and Q-123's 132 → 109 ceiling does not
 reproduce (114 → 75, set +17 007, `readbuf` −78 628).
+
+## Step 5 — the un-parking attempt, and it **fails**: both enums have a limit
+
+### What was tried
+
+Exactly what step 4 recommended. The two Taito X1 boards came out of [`SmallBoard`] and went into
+[`IrqBoard`] beside the Sunsoft-4, on the same terms:
+
+* `try_read_prg` and `prg_ram_enabled` forwarded from `IrqBoard` instead, the first
+  `#[inline(never)]` as it was in `SmallBoard`;
+* `nametable_page`'s existing `IrqBoard` forward widened to cover mapper 207;
+* `board-taito-x1` put back into `default` and `parked-boards` emptied;
+* the four `SmallBoard` forwards step 2 had added taken back out, leaving that enum at the ten
+  variants and the twelve methods MF-6a left it with.
+
+The suites agree it is correct: **914 passed / 0 failed / 8 ignored** with `zax-harness`, every
+test of the five Taito ones included, `cargo fmt --check` clean and clippy `-D warnings` clean in
+all three configurations.
+
+### What it measures: **two** units of the same figure
+
+`callgrind-diff.py`, label `mf6c-5-x1irqbrd`, against `mf6c-0-8496c503`:
+
+| ROM | `8496c503` | **step 5's attempt** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 311 891 | **3 308 295 191** | −16 700 | −0.001 % |
+| `oamstr` | 3 318 460 965 | **3 318 450 163** | −10 802 | −0.000 % |
+| `m1` | 4 885 949 431 | **4 885 930 601** | −18 830 | −0.000 % |
+| `m4` | 5 472 514 995 | **5 472 491 025** | −23 970 | −0.000 % |
+| `m0` | 5 520 458 691 | **5 520 447 707** | −10 984 | −0.000 % |
+| `metroid` | 5 115 944 288 | **5 115 941 237** | −3 051 | −0.000 % |
+| `smb1` | 5 996 381 185 | **5 996 353 716** | −27 469 | −0.000 % |
+| `mm2` | 6 017 851 607 | **6 017 827 617** | −23 990 | −0.000 % |
+| `z2` | 6 291 458 642 | **6 291 456 216** | −2 426 | −0.000 % |
+| `readbuf` | 6 834 538 187 | 6 834 566 283 | +28 096 | +0.000 % |
+| `duelito` | 7 380 437 910 | **7 380 410 865** | −27 045 | −0.000 % |
+| `smb3` | 7 949 470 334 | **7 949 442 480** | −27 854 | −0.000 % |
+| `mmc5` | 11 279 383 781 | 11 294 270 253 | **+14 886 472** | **+0.132 %** |
+| **total** | **79 371 161 907** | **79 385 883 354** | +14 721 447 | +0.019 % |
+
+**Eleven of thirteen below the baseline, and `mmc5` at +0.132 %** — twice the figure the park was
+taken on. One symbol, as always: `Cartridge::default_cpu_read`, **283 356 728 → 298 270 240,
++14 913 512**, which is **2 × 7 456 756 to the instruction**.
+
+### The finding this closes
+
+> **`Cartridge::default_cpu_read`'s cost on `mmc5` is quantised in units of 7 456 756
+> instructions, and a variant past each enum's own limit buys one unit.** `IrqBoard` had room for
+> the tenth (the Sunsoft-4, free, step 4) and none for the eleventh and twelfth (the two Taito
+> boards, two units). `SmallBoard` had none for the eleventh (one unit, steps 2 and 4).
+
+So the recommendation step 4 wrote in good faith is **refuted**, and the attempt was reverted: the
+tree at the end of this step is the tree step 4 committed, with the Taito boards back in
+`SmallBoard` and `board-taito-x1` back in `parked-boards`. The only change this step leaves behind
+is **the knowledge, written where the next lot will read it** — [`SmallBoard`]'s own doc comment
+now carries all four measurements under the heading "This enum is full, and MF-6c measured where
+its limit is", and [`IrqBoard::Sunsoft4`]'s says the same of its own enum.
+
+**What that means for a later lot, and it is not a small thing**: a board that is a register decode
+and nothing else has **no free home left**. Both shared variants are at their limit, a `Board`
+variant of its own costs the +0.080 % MF-6a3 step 1 measured on `Board::expansion_audio_output`'s
+jump table, and the figure this step quantified lives in the inlined `Board::prg_ram_enabled`
+dispatch inside `Cartridge::default_cpu_read`. **The next lot that needs one has to redesign that
+read path rather than pick an enum** — for instance by giving `Cartridge` a load-time cache of the
+$6000-$7FFF decode the way `rom_windows` and `nametable_pages` are already cached, which is the one
+shape none of this lot's eleven measurements tried.
+
+### What this step changes, and what it does not
+
+**No code behaviour changes and no measurement of step 4's tree is invalidated.** `git checkout`
+restored the four files, so the committed tree is byte-identical to step 4's on
+`small_boards.rs`, `irq_boards.rs` (but for the new note), `registry.rs` and `Cargo.toml`; the
+suites are back to step 4's **909 / 0 / 8**, `--features parked-boards` to **851** and
+`--no-default-features` to **783**. There is no new measurement to report for the shipped tree,
+because the shipped tree is the one step 4 already measured.
+
+[PROGRESS] MF-6c step 5/11 done: the un-parking step 4 recommended, tried and **refuted** —
+`IrqBoard` at twelve variants puts `mmc5` at +0.132 %, two units of the same 7 456 756, so
+`board-taito-x1` stays parked; both enums' limits are now measured and written into their own doc
+comments.

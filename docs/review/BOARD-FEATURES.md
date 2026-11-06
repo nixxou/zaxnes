@@ -44,17 +44,27 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 
 ## Two findings of MF-6c step 4 that change the advice in note 1 below
 
-**1. `SmallBoard` is full.** That enum has been the recommended home for a register-decode board
-since MF-6a step 2, and MF-6c measured what joining it now costs: **one** more variant flips
-`Cartridge::default_cpu_read` into the dearer of its two layouts on `mmc5exram`, **+7 456 756
-instructions over 300 frames, +0.066 %**, with nothing else moving. Step 2 saw it with two
-variants and three forwards, step 4 saw the identical figure with one variant and one *different*
-forward, and step 3 saw it on a tree where that function had grown 48 instructions for unrelated
-reasons — so the trigger is the variant and not the boards' code. **`IrqBoard` is the cheap home**:
-the Sunsoft-4 moved there and `mmc5` went from +7 413 611 to **−35 125**. A board whose page says
-"IRQ: None" belongs in `SmallBoard` by that enum's entry condition and in `IrqBoard` by the
-measurement; the price of the second is that variant's `ppu_irq_horizon` `None`, which is §4.10's
-rule.
+**1. Both shared variants are full, and the figure is quantised.**
+`Cartridge::default_cpu_read`'s cost on `mmc5exram` moves in units of exactly **7 456 756
+instructions over 300 frames (+0.066 %)**, and a variant past a shared enum's own limit buys one
+unit — in the inlined `Board::prg_ram_enabled` dispatch, where LLVM hoists
+`leaq 240(%rdi), %rax` above the jump table so that it runs on every CPU read of the one board
+that maps PRG-RAM into $8000-$DFFF. Four measurements:
+
+| | variants | `mmc5` |
+| --- | ---: | ---: |
+| `SmallBoard` + the two Taito boards (step 2, seven shapes) | 11, 12 | **+1 unit** |
+| the same, on a tree 48 instructions larger (step 3) | 11, 12 | **+1 unit**, identical |
+| `SmallBoard` + the Sunsoft-4 alone, one forward (step 4) | 11 | **+1 unit**, identical |
+| `IrqBoard` + the Sunsoft-4 (step 4) | 10 | **−35 125** |
+| `IrqBoard` + the two Taito boards as well (step 5) | 11, 12 | **+2 units** |
+
+So `SmallBoard` has been the recommended home for a register-decode board since MF-6a step 2 and
+that advice has run out; `IrqBoard` had room for exactly one more and the Sunsoft-4 took it. **A
+board that is a register decode and nothing else now has no free home**, a `Board` variant of its
+own costs the +0.080 % MF-6a3 step 1 measured, and the next lot that needs one has to redesign the
+$6000-$7FFF read path — for instance by caching the decode on `Cartridge` the way `rom_windows`
+already is, which is the one shape MF-6c's eleven measurements did not try.
 
 **2. Q-123's ceiling does not reproduce.** MF-5a measured a third `Mapper::read_nametable` arm
 body at `Ppu2C02::read_nametable_inner` **132 → 109 for every game in the library**. On this tree

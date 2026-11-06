@@ -136,6 +136,13 @@ pub enum IrqBoard {
     /// same function was in its cheap layout, so the board was moved here and the figure went
     /// away; MF-6c step 4's write-up has both measurements side by side.
     ///
+    /// **And the room that made it possible is now used up.** MF-6c step 5 tried the same move
+    /// for the two Taito X1 boards `board-taito-x1` is parked on, which step 4 expected to work:
+    /// at **twelve** variants this enum puts `Cartridge::default_cpu_read` at 298 270 240 on
+    /// `mmc5`, +14 913 512 — **two** units of the same 7 456 756 — and that ROM at +0.132 %. So
+    /// the figure is quantised in units of one layout step, both enums have a limit, and the Taito
+    /// boards stay parked. See [`super::SmallBoard`]'s own note for all eleven measurements.
+    ///
     /// The price is this variant's [`IrqBoard::ppu_irq_horizon`] `None` — the Sunsoft-4 could have
     /// let the PPU run behind the CPU and gives that up — which is §4.10's rule and exactly the
     /// trade the TQROM and the two MMC3 multicarts already make. Its `irq_asserted` arm answers
