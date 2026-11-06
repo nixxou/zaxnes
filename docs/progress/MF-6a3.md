@@ -992,3 +992,131 @@ features *do* change in the registry is covered by
 `cfg!`s and runs in all eleven configurations.
 
 [PROGRESS] MF-6a3 step 5/6 done: eleven configurations green and clippy-clean, 899 / 0 / 8, 14 / 14, the `--ignored` pair green with the golden-core caveat, and 331 campaign rows identical field by field with the eighteen MMC3 rows among them.
+
+## Step 6 — the documents
+
+### `docs/review/BOARD-FEATURES.md`, the table the owner asked for
+
+One table, a row per feature: feature name, mapper numbers, board, titles, measured cost per ROM
+on **both** runs with the worst ROM named, default on or off, and the one command that flips it.
+Ten rows — the nine board features and `parked-boards` — and three notes a reader revisiting the
+choices needs:
+
+1. **the granularity is the granularity the measurements exist at.** `board-small-boards` is
+   eleven numbers because they are **one `Board` variant**, which is the whole reason
+   `SmallBoard` exists; splitting it into nine features would need nine measurements no lot has
+   made, because MF-6a priced its *steps*, not its boards;
+2. **the three MF-6b steps that are not in the table are not an omission** — steps 1, 2 and 4 each
+   shipped with `l2-diff.py`'s own "at or below the baseline on every game, total and core", so no
+   figure rose and no feature was owed;
+3. **a board's cost is not its own**, with this lot's three measurements of that: step 1's
+   +0.080 %, step 4's −0.066 % on the same ROM for the same kind of change, and step 3's proof
+   that the gating itself is free. **A feature's cost is the figure its own step saw in its own
+   tree**, and turning two features off does not subtract two costs.
+
+The last note matters more than it looks, because it is the one thing a table of per-board costs
+could mislead a reader about.
+
+### `docs/review/MF-6-inventory.md`, amended on the brief's instruction
+
+MF-6a2 step 4 and MF-6b step 8 both record that this role does **not** edit the inventory, because
+it is R0's plan document. **This lot's brief instructs the edit** ("In
+`docs/review/MF-6-inventory.md`, mark 119, 47 and 37 as done ... with the measured cost"), so four
+places are amended and no others:
+
+* §3.2's rows for **37/47** and **119** carry "**Done, MF-6a3 step 1**", the feature name, the
+  default state and the measured cost;
+* §5's MF-6a plan table carries the same two "Done" marks on the TQROM and the MMC3-multicart
+  rows;
+* **§6's mapper-116 paragraph gains a block quote**: Q-130 question 1 is answered, the answer was
+  "as the hardware", the board is implemented behind `board-116`, and — the part that matters to
+  §6's own argument — **it costs `Board` neither a variant nor an `irq_asserted` arm**, which is
+  exactly the price §6 item 1 weighs the unlicensed boards at. That argument still stands for all
+  the others; what made this one different is that the spec names it.
+
+### `rust/docs/PERFORMANCE-HISTORY.md` gains **§5.14**
+
+Four findings and one figure, beside MF-6b's §5.13:
+
+1. **a `Board` variant is *not* free, and §5.11's rule needs one exception** — the +0.080 % on
+   `mmc5`, the jump table that lost the MMC5's fall-through, and the rule that its unit is the
+   discriminant count and not the body count. It is the first exception to §5.11 in five lots, and
+   it closes on §5.13 step 1's own −8 934 160 to the instruction;
+2. **an inlined dispatch's cost is not monotone in its arm count** — `IrqBoard`'s sixth body cost
+   `Cartridge::default_cpu_read` 7.46 M on `mmc5` and its eighth gave it back. *Measure it; do not
+   predict it*, and when a figure of this kind appears look for a fall-through before looking for
+   a cost;
+3. **`#[cfg]` gating is free, and here is the proof shape** — `cmp4c.py` identical on every
+   watched symbol and thirteen ROMs within ±40 812 with nothing above 200 000 moving, plus the two
+   idioms that make it true (`cfg!` and not `#[cfg]` for a parameter inside another board; leave a
+   load-time `matches!` alone) and the three exact-list tests that have to be rebuilt from `cfg!`s;
+4. **a field that fits in existing padding costs nothing, and the check is one line** —
+   `size_of::<Mmc3>()` 192 either way, which is why the TQROM's chip select is one `u8` where the
+   design said `[u8; 8]`, and the mirror of it is why mapper 116's 536-byte board is boxed.
+
+And the figure: **the level-2 `total` floor is ±2.7 M on `mm2` and `metroid` and ±3.1 M to ±4.3 M
+on `zelda2` and `smb3`**, against **0** on every `core` stage of all five — measured, the same
+binary twice, because step 2's own reading was above §5.12's number.
+
+### No other document touched
+
+`spec/` is untouched but for the new **`spec/changes/Q-132.md`**, which CLAUDE.md's own rule
+requires and whose number MF-6b step 8 recorded as free. Q-130 is **not** edited — it is R0's
+ticket and the answer to its question 1 is recorded in the inventory paragraph it points at, in
+the code, and in step 4 above.
+
+The session is logged in `G:/3dsen/cleanroom/journal/`.
+
+[PROGRESS] MF-6a3 step 6/6 done: `BOARD-FEATURES.md` with ten rows and three notes, the inventory's four marks including Q-130 question 1 answered, PERFORMANCE-HISTORY §5.14, and Q-132.
+
+## What the lot delivered, against the brief
+
+| the brief asked | what happened |
+| --- | --- |
+| **1.** Rebuild **119, 47 and 37** from MF-6a2 step 3's design with their six tests, **enabled by default**; park behind `parked-boards` only if above the tolerance | **Done, default on.** Shape C of that step's six, with two departures each measured: one `u8` of flags where the design said `[u8; 8]` (`size_of::<Mmc3>()` 192 either way), and **no new `Board` variant** after two of them cost `mmc5` +0.080 %. Six tests, `req_core_100_every_required_mapper_is_registered` holding in all eleven configurations |
+| **2.** Measure the default build on both runs, ROM by ROM, against the tolerance | **Done, and inside it with room.** The shipped tree: worst PR-1 ROM `m1` **+0.0020 %**, set total **−0.009 %**; all five level-2 `core` figures **+253 to +16 832 instructions**; worst level-2 `total` **+0.011 %**. The tolerance is +0.02 % |
+| … and for a parked board, the feature-off dump and both runs identical to the base commit | **No board is parked**, so nothing needed it — and the step-3 proof is the same shape, offered for the gating instead: `cmp4c.py` identical on every watched symbol, thirteen ROMs within ±40 812, no symbol above 200 000 moving |
+| **3.** The checks: fmt, clippy with and without the feature, the suites both ways, `--ignored` feature-off, the campaign row by row | **Done, in eleven configurations.** fmt clean; clippy `-D warnings` clean eleven times with **no new `allow` of any kind**; **899 / 0 / 8** by default and with `parked-boards`, **782 / 0 / 7** with every board off; 14 / 14; `--ignored` **7 of 8** with the two named tests green and the one failure proved out of the diff; **zero campaign rows differing on any field**, the eighteen MMC3 rows named one by one |
+| **Owner's rule:** one feature per board that raises any figure, for 119/47/37 **and** every board of MF-6a, MF-6a2 and MF-6b that measured a rise | **Nine features.** `board-namcot108`, `board-small-boards`, `board-94`, `board-155`, `board-105`, `board-158`, `board-119`, `board-mmc3-multicart`, `board-116`, all in `default`; `parked-boards` created, empty, off. Each gates code, variant, arms, registry entries, `board_memory_sizes`, save state and tests. MF-6b's steps 1, 2 and 4 are excluded with the reason — no figure rose |
+| **Also:** mapper **116** from MF-6b step 6's design, with its own feature, `req_core_102` edited to drop it with a comment pointing at Q-130 | **Done.** The board holds an `Mmc3`, an `Mmc1` and a `Vrc2Vrc4`, boxed inside `IrqBoard`; six tests; **two** tests edited (`req_core_102_any_other_mapper_is_refused` and `req_core_102_only_implemented_mappers_are_accepted`, which carried the same choice); **Q-132** written with submapper 3's gap, submapper 2's two readings, and the note on why submappers 0 and 1 are not a question |
+| Mappers 14 and 238 stay out | Untouched. MF-6b step 6's evidence stands: 14 is a second board (a supervisor register that *shares* addresses with the board it supervises, no MMC1 mode, three independent CHR A18 bits over three unequal windows) and 238 has no register documentation at all |
+| **End with `docs/review/BOARD-FEATURES.md`** | Written: ten rows, the measured cost per ROM on both runs with the worst ROM named, and the command that flips each feature |
+| The post-LTO invariants at every step | **Seven of the eight pinned symbols identical to the instruction from one end of the lot to the other** — `Cpu6502::step` 3 626, `resolve` 1 948, `branch` 457, `Board::ppu_peek` 272, `Ppu2C02::run_dots` 1 907, `NesBus::catch_up_ppu` 188, and the three claimants 0 / 0 / 0 with `zone_offset` having no symbol at all. The eighth is `NesBus::write_internal`, 3 580 → 3 815, which is four boards' register decodes |
+| Change no existing board's behaviour or save-state format, nothing under `spec/` | **No behaviour and no byte moved.** Mapper 4's `update_banks` is byte-identical (817 035 → 817 035 on `smb3`, and 2 836 959 → 2 836 959 at level 2); the multicart's one save-state byte is appended behind the existing versioning *and* behind its `const`; the two `IrqBoard` forwards are behaviour-neutral for the six boards MF-6b put there, because none of them overrides either method. `spec/` untouched but for Q-132 |
+
+Three things a reader should take from the lot that the brief did not ask for.
+
+**The first is that §5.11's "a `Board` variant is free" had an exception and four lots had been
+written against it.** It cost this lot a measurement to find and one shape change to fix, and the
+fix — put a board in an existing shared variant rather than beside the board it resembles — is now
+the default move for any board that asserts /IRQ.
+
+**The second is that an inlined dispatch has no cost model.** `IrqBoard`'s sixth body cost
+`Cartridge::default_cpu_read` 7.46 M on an MMC5 and its eighth gave the same 7.46 M back; two
+`Board` discriminants cost `push_expansion_audio` 8.9 M and MF-6b's thirty-fifth had bought the
+same 8.9 M. Four lots have now spent steps chasing figures of this shape. **The thing to look for
+first is a lost fall-through**, which `blocks.py` finds in two lines and which no instruction count
+shows.
+
+**The third is that the owner's tolerance turned out not to be needed.** It was granted for
++0.018 % on *Mega Man 2*'s emulated core, which is what MF-6a2 step 3 measured for these three
+boards. The shipped tree has those three, mapper 116 and nine Cargo features, and its five
+level-2 `core` figures sum to **+33 832 instructions** — `mm2/core` is **+3 500**, six hundred
+times smaller than the figure that reverted them. What the tolerance actually bought was the
+freedom to *keep measuring* instead of stopping at the first figure above zero, and both of this
+lot's real findings came out of measurements it would otherwise have had no reason to make.
+
+## Status
+
+**All six steps done.** Four mapper numbers added — **119** (TQROM), **47** and **37** (the MMC3
+multicarts) and **116** (the Gouder SOMARI-P) — for **ten titles**, with **nine Cargo features**
+retrofitted across them and the fifteen boards of MF-6a and MF-6b that measured a rise, and
+`parked-boards` created and empty. **899 / 0 / 8** in eleven configurations, **zero campaign rows
+differing on any field**, no new `allow`, no save-state byte moved, and seven of the eight pinned
+post-LTO symbols identical to the instruction. The shipped tree is **0.009 % below** the base
+commit on PR-1's thirteen with its worst ROM at **+0.0020 %**, and its five level-2 `core` figures
+are within **+253 to +16 832 instructions** — inside the owner's tolerance on both runs, outright,
+with no noise argument needed.
+
+**Q-132** is open, with submapper 3's reset rule and submapper 2's "shifted by one bit". **Q-130
+question 1 is answered.** Q-133 is free.

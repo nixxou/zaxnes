@@ -159,8 +159,8 @@ MF-5a did exactly this for mapper 26 ("one `address` rewrite, decided by a load-
 | ---: | --- | --- | --- |
 | 76, 88, 95, 154 | NAMCOT-3446 / -3433 / -3425 / -3453 | the **206** board of MF-6a | CHR window size (76), PPU A12 → CHR A16 (88), CHR A15 → CIRAM A10 (95), a one-screen bit over all of $8000-$FFFF rather than $8000-$9FFF (154) |
 | 206 | DxROM | — | the parent. MR-1's inventory already notes 118 (TxSROM) is served by `Mmc3`; 206 is the *simpler* predecessor and is its own board |
-| 37, 47 | Nintendo MMC3 multicarts | `Mmc3` | an outer block register at $6000-$7FFF, writable only while MMC3 PRG-RAM is enabled and writable |
-| 119 | TQROM | `Mmc3` | CHR bank bit 6 selects the CHR-RAM chip instead of the CHR-ROM chip |
+| 37, 47 | Nintendo MMC3 multicarts | `Mmc3` | an outer block register at $6000-$7FFF, writable only while MMC3 PRG-RAM is enabled and writable. **Done, MF-6a3 step 1**, behind `board-mmc3-multicart` (default on): worst ROM `m0` +0.0011 %, all five level-2 cores within ±6 699 |
+| 119 | TQROM | `Mmc3` | CHR bank bit 6 selects the CHR-RAM chip instead of the CHR-ROM chip. **Done, MF-6a3 step 1**, behind `board-119` (default on), measured with 47 and 37 above |
 | 12, 14, 44, 45, 49, 52, 74, 114, 115, 121, 123, 126, 134, 165, 182, 187, 191, 192, 194, 195, 196, 197, 198, 199, 205, 208, 215, 217, 219, 224, 238, 245, 249, 250, 254, 258, 259, 260, 262, 263, 268, 287, 292, 313, 325, 333, 348, 366 | MMC3 clones and pirate extensions | `Mmc3` | one outer register, or a CHR-RAM window, or a scrambled register order, per number. **48 numbers, none with a licensed title**; see §3.4 |
 | 105, 155 | NES-EVENT, MMC1 with PRG-RAM always on | `Mmc1` | 105 adds the M2 timer; 155 removes the PRG-RAM disable bit (MR-1-4's submapper-5 fix is the same code site) |
 | 153 | Bandai FCG with battery WRAM | `BandaiFcg` | 8 KiB of battery-backed WRAM at $6000-$7FFF; registers "function the same way as on INES Mapper 016, submapper 5" |
@@ -578,8 +578,8 @@ flag that is already built. No board in MF-6a touches `irq_asserted`, `on_cpu_cy
 | CNROM + diodes | **185** | several J titles | **none** — a submapper parameter of `CnRom` |
 | Camerica BF9096 | **232** | 3 | one, beside `Codemasters` |
 | MMC1 with PRG-RAM always on | **155** | 1-2 | **none** — a parameter of `Mmc1`, the same code site as MR-1-4 |
-| TQROM | **119** | 2 (*High Speed*, *Pin\*Bot*) | **none** — a parameter of `Mmc3` |
-| Nintendo MMC3 multicarts | **47**, **37** | 2 + 1 | **none** — a parameter of `Mmc3` plus an outer register |
+| TQROM | **119** | 2 (*High Speed*, *Pin\*Bot*) | **none** — a parameter of `Mmc3`. **Done, MF-6a3 step 1** |
+| Nintendo MMC3 multicarts | **47**, **37** | 2 + 1 | **none** — a parameter of `Mmc3` plus an outer register. **Done, MF-6a3 step 1** |
 
 Eight new `Board` variants, 20 new mapper numbers, and six of the twenty are a flag on a board
 that already exists.
@@ -885,6 +885,18 @@ two normative texts give different jobs. **Q-130 question 1.** It is in no sub-l
 answered; if the answer is "as the hardware", it is an MF-6b-class job on its own (three ASICs,
 each with its own register set and its own IRQ) for six unlicensed titles, which §6 item 1's
 argument would then weigh against anyway.
+
+> **Answered, and the answer was "as the hardware": mapper 116 is implemented.** MF-6b step 6
+> settled the whole design from the page and left it below that lot's acceptance gate; **MF-6a3
+> step 4** built it, behind the Cargo feature `board-116` and in `zax-nes`'s `default`. It does
+> *not* cost `Board` a variant or `irq_asserted` an arm, which is what §6 item 1's argument prices
+> it at: the board holds an `Mmc3`, an `Mmc1` and a `Vrc2Vrc4` and goes into the existing
+> `IrqBoard` discriminant, boxed so that enum keeps its size. Measured against `07325f6e`: worst
+> ROM `m1` **+0.0020 %**, set total **−0.009 %** with `mmc5` **−0.066 %**, and all five level-2
+> cores **+253 to +16 832 instructions**. The two readings the page leaves open — submapper 3's
+> reset rule and submapper 2's "shifted by one bit" — are **Q-132**.
+> §6 item 1's argument against the unlicensed boards still stands for all the others: what made
+> this one different is that the spec names it.
 
 ### Q-130
 

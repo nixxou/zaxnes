@@ -1320,6 +1320,111 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.14 Lot MF-6a3: a `Board` **variant** has a measured price, and a dispatch's arm count is not monotone
+
+MF-6a3 restored the three boards MF-6a2 step 3 had built and reverted — the TQROM (119) and
+Nintendo's two MMC3 multicarts (47 and 37) — added the Gouder SOMARI-P (116) that MF-6b step 6
+left designed but unbuilt, and put **one Cargo feature per board that raises any figure** behind
+all of them and behind nine of the boards MF-6a and MF-6b had already shipped. It ends
+**−7 291 714 (−0.009 %)** on lot PR-1's thirteen ROMs against `07325f6e`, worst ROM **+0.0020 %**,
+with all five level-2 `core` figures within **+253 to +16 832 instructions**. Four findings.
+
+**1. A `Board` variant is *not* free, and §5.11's rule needs one exception.** §5.11 concluded that
+"a `Board` variant is free, a `Board` arm *body* is not", and four lots have been written against
+it. MF-6a3 step 1 built 119, 47 and 37 as **two new discriminants**, 35 → 37, and `mmc5` came out
+**+8 994 278 (+0.080 %)** with every pinned symbol holding — `NesBus::catch_up_ppu` 188 → 188,
+`Board::ppu_peek` 272 → 273, the three claimants of `Cpu6502::step` 0 / 0 / 0,
+`Mmc3Board::update_banks` byte-identical. The whole of it is one symbol,
+**`NesBus::push_expansion_audio` +8 934 160**, and that function is **31 instructions in both
+dumps** with `Board::expansion_audio_output` inlined into it whole, as a jump table over the
+discriminants. Two more entries, and LLVM placed a different one of the five expansion-audio arms
+last:
+
+| | 35 variants | 37 variants |
+| --- | --- | --- |
+| the MMC5's table entry | `.LBB_8` | `.LBB_3` |
+| that block | `movl 10776(%rdi), %eax` *(falls through)* | `movl 10776(%rdi), %eax` ; **`jmp .LBB_10`** |
+
+**One taken `jmp` per expansion-audio sample, 8.9 million of them** — 142 946 560 exclusive
+instructions over about 8.9 M calls, and 8 934 160 / 8.9 M is exactly one. It is §5.12's `smb3`
+residual ("the MMC3 and the RAMBO-1 swapped the fall-through") one dispatch along, and §5.13's
+gain read backwards: its step 1 recorded `push_expansion_audio` **−8 934 160** for its
+*thirty-fifth* variant, **the same number to the instruction**. The rule to carry forward:
+
+> A `Board` variant is free in every dispatch **except one whose jump table a hot function
+> inlines whole**, and `NesBus::push_expansion_audio` is that function. Its unit is the
+> **discriminant count**, not the body count — which is what makes it the first exception to
+> §5.11 in five lots.
+
+The fix is to add no discriminant: all four of this lot's boards went into §5.13's `IrqBoard`,
+which they qualify for because all four assert /IRQ, and `Board` ends the lot at the
+**thirty-five** discriminants MF-6b left it with. The price is `IrqBoard::ppu_irq_horizon`'s
+`None` — an MMC3 could bound the PPU's lag and these four give it up — which is the trade §5.13
+already charged the TC0690.
+
+**2. An inlined dispatch's cost is not monotone in its arm count.** Step 4 added mapper 116 as
+`IrqBoard`'s eighth inner variant and `mmc5` came out **−7 466 740 (−0.066 %)**, one symbol:
+`Cartridge::default_cpu_read` **−7 456 756**. That is, to the instruction, the **+7 456 756**
+§5.13's steps 2, 3, 4 and 5 all recorded on that same ROM as the price of
+`IrqBoard::prg_ram_enabled` becoming a forwarded body. **The sixth body cost that function 7.46 M
+and the eighth gave it back.** Taken with finding 1 and with §5.12's "a body removed pays every
+board", the shape of the rule is now clear and it is not a cost model: for a dispatch a hot
+function inlines whole, *any* change to its arm count re-rolls the block placement, and the sign
+of the result is LLVM's choice. **Measure it; do not predict it** — and when a figure of this kind
+appears, look for a fall-through before looking for a cost.
+
+**3. `#[cfg]` gating is free, and here is the proof shape.** Step 3 put nine Cargo features on
+boards already shipped. With every feature on the code must be the code that was there, and it is
+shown twice rather than asserted: `cmp4c.py` gives **the same instruction count for every one of
+the thirty-odd symbols it watches**, and the thirteen ROMs move by at most **±40 812** with **no
+symbol above 200 000 changing on any of them**. Two idioms are what make that true:
+
+* **`cfg!` and not `#[cfg]` for a parameter inside another board.** Mapper 94 is
+  `shifted_field: cfg!(feature = "board-94") && mapper_number == 94` and mapper 155 is
+  `u8::from(!(cfg!(feature = "board-155") && mapper == 155)) << 4`. Feature-off, each folds to the
+  constant the host board always had and the comparison is gone; feature-on, nothing moved. A
+  `#[cfg]` on the *field* would have needed a `#[cfg]` on every use of it.
+* **Leave a load-time `matches!` alone.** The A12 latch lists and `has_bus_conflicts` name the
+  gated numbers unconditionally: a number whose board is off is not in `SUPPORTED_MAPPERS`, so
+  `Cartridge::create` refuses it and the arm is unreachable either way. One `matches!` whatever
+  the features is one less thing a feature flip can move.
+
+A feature *does* change a test that asserts an exact list, and three of them had to be rebuilt
+from `cfg!`s rather than written: `req_core_100_every_required_mapper_is_registered` (a
+`[(i32, bool); 38]` whose flag is each number's own `cfg!`),
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` and
+`req_core_102_only_implemented_mappers_are_accepted`. The other three sweeps iterate
+`SUPPORTED_MAPPERS` and needed nothing.
+
+**4. A field that fits in existing padding costs nothing, and the way to check is one line.**
+§5.13's finding 2 is that "a field offset is a cost even when no code changes" — +9 886 794 for
+one byte of displacement on `VrcIrq::pending`. MF-6a2 step 3's design for the TQROM recorded its
+chip select as a `[u8; 8]`; this lot made it **one `u8` of bit flags** carrying the same eight
+answers, and the receipt is two numbers:
+
+    size_of::<Mmc3>()   192 with both new fields (119's and the multicart's), 192 with neither
+    size_of::<Board>() 1376 either way
+
+**Both new `u8`s landed in the padding the struct already had**, so §5.13's cost does not apply to
+this lot at all — eight bytes could not have done that. The same reasoning, in the other
+direction, is why mapper 116's 536-byte board is **boxed** inside `IrqBoard`: inline it would set
+that enum's size (200 → 544) and move the six boards §5.13 put there. Boxed, `IrqBoard` is the
+size step 1 measured and the price is one pointer dereference per forwarded call for the one board
+that wanted it.
+
+**And one figure for §3's floor table.** MF-6a2 step 2 measured the level-2 `total` run-to-run
+floor at ±2.7 M against **0** on `core`. Step 2 of this lot measured it again, the same binary at
+the same path through `callgrind-l2.sh` twice, because its own `smb3/total` reading was above that
+figure: **`smb3/total` ±4 284 799 and `zelda2/total` ±3 097 124**, the two games whose packs run
+the most Lua, against ±53 986 on `metroid/total`, ±12 438 on `mm2/total` and **0, to the
+instruction, on every `core` stage of all five games**. So the floor is **±2.7 M on `mm2` and
+`metroid` and ±3.1 M to ±4.3 M on `zelda2` and `smb3`**, and `core` remains the only column that
+can be read at a finer resolution than that.
+
+`docs/review/BOARD-FEATURES.md` is the table of the nine features — mapper numbers, board,
+titles, measured cost per ROM on both runs with the worst ROM named, default on or off, and the
+command that flips each one.
+
 ### 5.13 Lot MF-6b: one shared variant for a whole family, and the two instructions that cost nine million
 
 MF-6b added five boards with a CPU-cycle or scanline IRQ — the VRC3 (73), the Irem H3001 (65),
