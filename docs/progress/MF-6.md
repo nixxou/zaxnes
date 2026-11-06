@@ -180,6 +180,50 @@ need no arbitration.
    holds no safe number. Provisional: 200 stays out, the criterion holds — but it wants a number
    that is nobody's board.
 
+## Step 4 — the check
+
+Nothing in the code moved, and the check says so rather than assuming it.
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean**, exit 0 |
+| `cargo test --release -p zax-nes -p zax-harness` | **816 passed, 0 failed, 8 ignored** |
+
+**816 / 0 / 8 is MF-5b's own closing figure, test for test** (`MF-5b.md` step 5: "816 passed,
+0 failed, 8 ignored"), which is the check this lot actually needed: a documentation lot that moved
+a test count would mean it had touched something it said it had not.
+
+No clippy run: no crate's sources changed, so there is nothing to lint that MF-5b did not already
+lint clean. `git status` at the close shows only the two documents of this lot and the untracked
+`rust/target-mf/`, which the lot's rules forbid staging.
+
+`spec/changes/Q-130.md` is written outside this repository (the spec tree is not a git working
+copy), so it is not in any commit here; the ticket's content is summarised in step 3 above and in
+`MF-6-inventory.md` §6.
+
+## What the lot delivered, against the brief
+
+- [x] **The inventory** — `docs/review/MF-6-inventory.md`, 910 lines. Every iNES number Mesen 2 or
+      NESdev documents and this registry refuses: **245**, derived mechanically from
+      `MapperFactory.cpp` rather than transcribed, with board name, chip family, licensed status,
+      a title estimate cited to its own NESdev page, and the test-ROM answer (§2: **no**, for every
+      row, established by decoding all 333 headers).
+- [x] **The hooks per board**, and every one that would touch a hot path flagged with the
+      measurement that priced it (§4). The two that are **not** latched —
+      `NesBus::irq_asserted` and `Mapper::read_nametable` — are named as the whole performance
+      story of MF-6, with MF-5a's and MF-5b's figures and the refuted `irq_capable` latch.
+- [x] **The variants** (§3.2): 27 numbers plus the 48 MMC3 clones are a parameter of a board we
+      already have, not a new board, with the `McAcc` `const`-parameter precedent and `board.rs`'s
+      append-never-insert rule.
+- [x] **The plan of the three sub-lots** (§5), each with its boards, steps, per-board tests, test
+      ROMs (none), R0's commercial titles, and the measurement to make — plus three explicit
+      stop-the-lot conditions on the steps that touch `Mmc3`, `Mmc1` and `read_pattern_planes`.
+- [x] **What is left out and why** (§6): 200 numbers, four reasons, with mapper 99 priced rather
+      than merely deferred.
+- [x] **Q-130**, two questions, provisional choices marked.
+- [x] **The check** (this step), and **no `.rs` file changed**: `git diff --stat fcfa5cb3 HEAD`
+      touches `docs/progress/MF-6.md` and `docs/review/MF-6-inventory.md` and nothing else.
+
 [PROGRESS] MF-6 step 0/4 done: the plan, the sources, and the ROM situation settled first
 [PROGRESS] MF-6 step 1/4 done: the inventory, 245 numbers in four tables
 [PROGRESS] MF-6 step 2/4 done: the hooks, the two unlatched hot paths, and the variants
