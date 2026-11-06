@@ -206,18 +206,27 @@ fn park_on_scanline(fixture: &mut TileFixture, scanline: i32) {
     }
 }
 
-/// `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 (REQ-CORE-112): while the PPU is fetching, a
-/// `$2007` access does not add 1 or 32 — it triggers a coarse X increment and a Y increment at
-/// once, the dot loop's own two (nesdev, "PPU registers").
+/// **Q-125: this test is inverted on purpose, and pins a deferred behaviour.** On hardware a
+/// `$2007` access made while the PPU is fetching does not add 1 or 32 — it triggers a coarse X
+/// increment and a Y increment at once (nesdev, "PPU registers"; `AccuracyCoin`'s `$2007 Read w/
+/// Rendering` 2, REQ-CORE-112). That rule shipped in lot MF-4d step 6 and lot MF-4d-fix **backed
+/// it out**: applied blind to the dot the access lands on it breaks AMD-021 R2-005 criterion 2,
+/// a P1 requirement, on Super Mario Bros. 3's split line. Lot MF-4e owns the per-dot work and
+/// must satisfy both; when it does, this test goes back to asserting `(6, 8, 3)` on the visible
+/// line and loses this note.
+///
+/// It is inverted rather than `#[ignore]`d so that it keeps running: an ignored test pins nothing
+/// and would let the rule come back by accident, whereas this one states the shipped behaviour on
+/// every suite and MF-4e has to come here to change it.
 ///
 /// The access is made on the PPU directly so that no dot passes between the two readings of `v`
 /// and the difference is the increment itself and nothing else.
 #[test]
-fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
+fn req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_125() {
     // v = $2105: coarse X 5, coarse Y 8, fine Y 2.
     fn v_after_a_2007_read(scanline: i32) -> (i32, i32, i32) {
         let mut fixture = TileFixture::new();
-        fixture.set_control(0x00); // Step of 1 when the PPU is not fetching.
+        fixture.set_control(0x00); // Step of 1.
         fixture.set_mask(0x1E); // Rendering enabled.
         park_on_scanline(&mut fixture, scanline);
 
@@ -230,10 +239,11 @@ fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
         (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y())
     }
 
-    // On a visible line, with rendering on: coarse X **and** fine Y both move.
-    assert_eq!((6, 8, 3), v_after_a_2007_read(100));
+    // On a visible line, with rendering on: the PPUCTRL step of 1 applies, so coarse X moves and
+    // fine Y does **not**. The hardware rule would give (6, 8, 3) — Q-125, lot MF-4e.
+    assert_eq!((6, 8, 2), v_after_a_2007_read(100));
 
-    // In vblank nothing is fetched, so the PPUCTRL step of 1 applies and only the low bits move.
+    // In vblank, the same, and here it is the hardware's own answer: nothing is fetched.
     assert_eq!((6, 8, 2), v_after_a_2007_read(250));
 }
 

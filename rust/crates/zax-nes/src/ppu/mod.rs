@@ -504,11 +504,13 @@ impl Ppu2C02 {
     /// Whether the PPU is actually fetching: rendering enabled **and** on a line that fetches —
     /// a visible one or the pre-render line.
     ///
-    /// This is the condition the two register quirks of `AccuracyCoin`'s `Address $2004 behavior`
-    /// and `$2007 Read w/ Rendering` turn on. The pre-render line counts, and the ROM says so
-    /// against its own test's title: `Address $2004 behavior` 6 is called "writing to `$2004` on a
-    /// visible scanline" and its code notes that "the CPU write occurs on **dot 321 of the
-    /// pre-render line**".
+    /// This is the condition the `$2004` register quirk of `AccuracyCoin`'s `Address $2004
+    /// behavior` turns on. The pre-render line counts, and the ROM says so against its own test's
+    /// title: `Address $2004 behavior` 6 is called "writing to `$2004` on a visible scanline" and
+    /// its code notes that "the CPU write occurs on **dot 321 of the pre-render line**".
+    ///
+    /// The `$2007` quirk that shared this predicate until lot MF-4d-fix is deferred to lot MF-4e;
+    /// see [`Self::increment_vram_address`] and `Q-125`.
     const fn fetching(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
@@ -1186,27 +1188,23 @@ impl Ppu2C02 {
         self.oam_address = self.oam_address.wrapping_add(1);
     }
 
-    /// **Kept inline, measured.** The `fetching` branch grew this body past the inliner's budget
-    /// and it became a `callq` with one call site on the `$2007` path, which is MF-3b rule 1's
-    /// shape change; the attribute puts it back and `Ppu2C02::read` keeps the specialised copy it
-    /// had. The same trap `CpuBus::read_code` carries its own note about.
-    #[inline]
+    // Q-125: **a `$2007` access made while the PPU is fetching moves `v` by a coarse X increment
+    // and a Y increment at once on hardware**, not by the 1 or 32 of PPUCTRL (nesdev, "PPU
+    // registers": "it will update v in an odd way, triggering a coarse X increment and a Y
+    // increment simultaneously"; `third_party/mesen2` takes the same branch, and
+    // `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 asks for the vertical half by name).
+    //
+    // That rule shipped in lot MF-4d step 6 and was **backed out here**, in lot MF-4d-fix: the
+    // increment it produces is right only for the dot the access actually lands on, and applied
+    // dot-blind it broke AMD-021 R2-005 criterion 2 (a background row on Super Mario Bros. 3's
+    // split line on 4 986 of 5 000 frames) and moved the pictures of Super Mario Bros. 3 and
+    // Zelda II in golden-core. R2-005 is a P1 requirement; one `AccuracyCoin` row is not.
+    //
+    // Lot MF-4e owns the per-dot work and must satisfy **both** the rule and R2-005. Until then
+    // the ordinary PPUCTRL step applies on every line, which is `d96d73b7`'s behaviour.
     fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
-        if self.fetching() {
-            // **While the PPU is fetching, a `$2007` access does not add 1 or 32.** The access
-            // rides the rendering pipeline's own address logic, so it triggers a coarse X
-            // increment and a Y increment at once (nesdev, "PPU registers": "it will update v in
-            // an odd way, triggering a coarse X increment and a Y increment simultaneously").
-            // `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 asks for the vertical half by name.
-            //
-            // The two helpers are the dot loop's own, so the address a game corrupts this way is
-            // corrupted exactly as the fetch would have moved it.
-            self.increment_coarse_x();
-            self.increment_y();
-        } else {
-            let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
-            self.v = self.v.wrapping_add(step) & 0x7FFF;
-        }
+        let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
+        self.v = self.v.wrapping_add(step) & 0x7FFF;
 
         // A CPU write reaches the row of the line it is made in (R2-005).
         self.v_row_start = self.v;

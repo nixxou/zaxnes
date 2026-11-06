@@ -411,7 +411,7 @@ impl Ppu2C02 {
             };
     }
 
-    pub(super) fn increment_coarse_x(&mut self) {
+    fn increment_coarse_x(&mut self) {
         if (self.v & 0x001F) == 0x001F {
             self.v = (self.v & !0x001F) ^ 0x0400;
         } else {
@@ -419,7 +419,7 @@ impl Ppu2C02 {
         }
     }
 
-    pub(super) fn increment_y(&mut self) {
+    fn increment_y(&mut self) {
         if (self.v & 0x7000) != 0x7000 {
             self.v += 0x1000;
             return;
