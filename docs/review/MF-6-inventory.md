@@ -524,3 +524,387 @@ Two consequences for the sub-lots:
 every IRQ board grows and which MF-6b grows five times, and `Mapper::read_nametable`, which is
 capped at two bodies. Everything else in this inventory is free to the rest of the library by
 construction, and the tests that prove it already exist and sweep `SUPPORTED_MAPPERS`.
+---
+
+## 5. The plan: MF-6a, MF-6b, MF-6c
+
+Three sub-lots, in priority order. Each one is briefed from this section plus §4; nothing here
+asks a sub-lot to go and re-derive a measurement that §4 already has.
+
+**Common to all three**, because every MF lot has needed it and the three that forgot it paid:
+
+* **The bar.** MF-5b's: `cargo test --release -p zax-nes -p zax-harness` green, `cargo fmt
+  --check` and `cargo clippy -p <crates touched> --all-targets -- -D warnings` clean with **no new
+  `allow`**, and the callgrind set at **`fcfa5cb3`'s count or lower on every one of the thirteen
+  ROMs**. Where a step cannot meet the last one, it says so in the words MF-5a used for its
+  `+0.156 %` on `mmc5` — "this step does not meet …" — with the trade priced and the revert named.
+* **The three instruments**, and all three are needed because each is blind to what the others
+  see (MF-5a step 1): the post-LTO dump (`cmp4c.py`, `prologues.py`, `blocks.py`), the call-site
+  table (`callsites.py`, which now watches `NesBus::irq_asserted` and `Cartridge::irq_asserted`),
+  and callgrind over `tools/perf/`'s thirteen ROMs at 300 frames, built by `make-tree.sh` +
+  `build-clean.sh` into a fresh directory. The prologue comparison must be read on the dump of the
+  platform being measured — §4.1 item 3.
+* **The sweeps write themselves.** `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`,
+  `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`,
+  `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` and
+  `req_core_100_every_required_mapper_is_registered` all iterate `SUPPORTED_MAPPERS`, so a new
+  number is covered by four existing tests without a line being written — and the last one has to
+  have the number **added to its list of numbers beyond REQ-CORE-100's table**, so that an
+  accidental addition is caught as surely as an accidental removal.
+* **Save states.** Each board's block is **appended** behind the existing versioning, the shape
+  `fme7.rs` established, and `load_registers` tolerates a block without it (REQ-CORE-091). A
+  derived field is recomputed on load and **not** serialised — the `level` lesson of MF-5a step 3.
+* **No ROM at any step.** §2. R0's titles are named per sub-lot below and are the only
+  whole-program check any of this gets.
+
+### MF-6a — the licensed boards with no hook at all
+
+**What it buys: ~75 licensed titles, at zero risk to any hot path.** Every board here needs
+nothing beyond PRG/CHR banking, a mirroring register and — for three of them — the bus-conflict
+flag that is already built. No board in MF-6a touches `irq_asserted`, `on_cpu_cycle`,
+`on_ppu_address_bus` or `read_nametable`.
+
+| board | numbers | titles | new `Board` variant? |
+| --- | --- | ---: | --- |
+| DxROM / Namcot 108 | **206**, and 76, 88, 95, 154 as its parameters | 39 + 1 + 3 + 1 + 1 | **one**, with four `const`/`bool` parameters |
+| Taito TC0190 | **33** | 4 | one |
+| Sunsoft-1 | **184** | 3 | one |
+| Sunsoft-2 | **89**, **93** | 1 + 2 | one, with a board-revision parameter |
+| Bandai 74161/7432 | **70**, **152** | 3-ish + 2 | one, with a mirroring-control parameter |
+| Jaleco JF-11/14 | **140** | 1+ | one (GNROM with the register at $6000-$7FFF) |
+| Irem TAM-S1 | **97** | 1 | one |
+| Konami VRC1 | **75** | 6 | one |
+| UN1ROM | **94** | 1 | **none** — a parameter of `UxRom`, beside mapper 180 |
+| CNROM + diodes | **185** | several J titles | **none** — a submapper parameter of `CnRom` |
+| Camerica BF9096 | **232** | 3 | one, beside `Codemasters` |
+| MMC1 with PRG-RAM always on | **155** | 1-2 | **none** — a parameter of `Mmc1`, the same code site as MR-1-4 |
+| TQROM | **119** | 2 (*High Speed*, *Pin\*Bot*) | **none** — a parameter of `Mmc3` |
+| Nintendo MMC3 multicarts | **47**, **37** | 2 + 1 | **none** — a parameter of `Mmc3` plus an outer register |
+
+Eight new `Board` variants, 20 new mapper numbers, and six of the twenty are a flag on a board
+that already exists.
+
+**Steps.**
+
+0. The plan, the baseline's test count, and the three instruments reproduced against `fcfa5cb3`
+   (MF-5a step 1's "the baseline callgrind run reproduces the previous lot's own table" check —
+   the one that says the instrument has not drifted).
+1. **206, and 76/88/95/154 as its parameters.** The biggest single win in the document and the
+   right first step for a second reason: it is the board with no hooks at all, so step 1 measures
+   what a *bare* new `Board` variant costs — one arm in `write_internal`, one in `ppu_read`, one
+   jump-table slot — and every later step is read against that number. 95 and 154 add the mapper
+   number to `nametable_pages_vary` and nothing else.
+2. **33, 97, 140, 184, 89, 93** — six boards, five variants, all of them a register decode. 89,
+   93 and 152's bus conflicts are one arm each of `registry::has_bus_conflicts`, with the page
+   quoted in the comment as the existing arms quote theirs.
+3. **70, 152, 75, 232.**
+4. **The parameters of existing boards: 94 on `UxRom`, 185 on `CnRom`, 155 on `Mmc1`.** Separated
+   from steps 1-3 on purpose, because this is the step where a mistake costs an existing board:
+   §3.2's rule is a `const` parameter where the difference is a constant and a runtime `bool` only
+   where the test is off the per-cycle path. `prologues.py` on `Board::ppu_read`,
+   `Board::irq_asserted` and `NesBus::write_internal` is the check.
+5. **119, 47, 37 on `Mmc3`.** Last, and alone, because the MMC3 is on two of R0's thirteen ROMs
+   (`m4`, `smb3`) and on `mmc3_test`, `mmc3_test_2` and `mmc3_irq_tests`. A `const` parameter
+   monomorphises, which is the `McAcc` precedent; a field on `Mmc3` does not and would be read by
+   *smb3*. **Stop-the-lot condition: `m4` or `smb3` above `fcfa5cb3`.**
+6. Save states for the new boards; the four sweeps re-run; `req_core_100_every_required_mapper_is_registered`
+   extended.
+7. The suites, the campaign ROM by ROM against MF-5b's 331 rows, and the campaign document.
+
+**Tests per board**, each against a register of its NESdev page, in the shape MF-5a's ten and
+MF-5b's tests take (one test per claim, named `req_core_100_<board>_<claim>`):
+
+* 206: the two 8 KiB PRG windows with the last two fixed; the two 2 KiB and four 1 KiB CHR
+  windows; that **no** register changes mirroring; that there is no IRQ and no PRG-RAM.
+* 88: PPU A12 → CHR A16, i.e. that $0000-$0FFF can only reach the first 64 KiB and $1000-$1FFF
+  only the second — the page's own statement, and the one claim a careless port gets wrong.
+* 95: CHR A15 → CIRAM A10, i.e. the nametable page following the CHR bank register.
+* 154: the one-screen bit decoded over all of $8000-$FFFF, **not** only $8000-$9FFF — the page's
+  stated difference from the 108.
+* 76: the coarser 2 KiB CHR windows, and 128 KiB reachable.
+* 33: the $8000/$8001 PRG pair, the $8002-$8003 2 KiB and $A000-$A003 1 KiB CHR, the $8000
+  mirroring bit, and the `$A003` address mask.
+* 48: *not here* — MF-6b.
+* 184: the register at $6000-$7FFF, its seven bits over two 4 KiB CHR banks, and **that the board
+  has no PRG-RAM** ("This mapper precludes iNES-default RAM because the register is mapped into
+  $6000-7FFF") — one arm of `board_memory_sizes`, and `holy-mapperel`'s `PRG RAM MISSING` line is
+  the shape of the claim.
+* 89/93: the 16 KiB PRG at $8000, the 8 KiB CHR, the one-screen polarity, and for 93 the CHR-RAM
+  enable bit whose disabled state is "writes are ignored and reads are open bus".
+* 70/152: the shared PRG/CHR split, and that **70 has no mirroring control and 152 does** — the
+  pair that pins the parameter.
+* 140: GNROM banking from $6000-$7FFF, and no PRG-RAM.
+* 97: the single $8000-$BFFF register banking $C000 and the mirroring bit, and no bus conflicts.
+* 75: the three switchable 8 KiB windows plus the fixed one, the 4 KiB CHR, the mirroring bit, and
+  that there is no IRQ.
+* 94: the field shifted two bits against mapper 2's, with a test that pins **both** numbers
+  through the one board so the parameter cannot be got backwards.
+* 185: each submapper 4-7's chip-select value enabling CHR-ROM, submapper 0's heuristic, and that
+  a disabled CHR reads as the page describes. Quote the page's "emulators need not emulate the
+  functionality of security diodes" in the comment, so a later lot does not add diodes.
+* 232: the $8000-$BFFF block and $C000-$FFFF page registers, and that the lockout circuit is not
+  emulated (the page: "mostly unimportant for emulation purposes").
+* 155: the PRG-RAM disable bit having no effect, and an MMC1 (mapper 1) in the same test still
+  honouring it.
+* 119: CHR bank bit 6 selecting CHR-RAM over CHR-ROM, in both MMC3 CHR modes, and a write to a
+  CHR-RAM-selected window landing in RAM and not being swallowed.
+* 47/37: the outer register at $6000-$7FFF **writable only while MMC3 PRG-RAM is enabled and
+  writable** (the page's own condition, and the easy thing to miss), the 128 KiB PRG and CHR
+  blocks, and that an ordinary mapper-4 image is unaffected.
+
+**Test ROMs to run**: none exist (§2). The `holy-mapperel` 40 and `mmc3_test`/`mmc3_test_2`/
+`mmc3_irq_tests` are run as **non-regression** for step 5, not as coverage.
+
+**Commercial titles for R0**, one per board, from the pages' own lists: *Dragon Spirit* and
+*Quinty* (88), *Dragon Buster* (95), *Devil Man* (154), *Megami Tensei* (76), a DxROM title such
+as *Mappy-Land* or *Family Circuit* (206), *Don Doko Don* and *Insector X* (33), *Kaiketsu
+Yanchamaru* (97), *Bio Senshi Dan* (140), *Atlantis no Nazo* and *The Wing of Madoola* (184),
+*Shanghai* and *Fantasy Zone* (93), *Mito Koumon* (89), *Arkanoid 2* (152), a *Family Trainer*
+title (70), a VRC1 title such as *Ganbare Goemon!* (75), *Senjou no Ookami* (94), *Bird Week* and
+*Mighty Bomb Jack* J (185), *Quattro Adventure* (232), *High Speed* and *Pin\*Bot* (119),
+*Super Spike V'Ball + Nintendo World Cup* (47) — which §2 shows is also a profile-list entry.
+
+**Performance risk: low, and bounded by one number.** Every board adds an arm to
+`Board::ppu_read` (+16 measured for the VRC6), to `NesBus::write_internal` (+138/+141 measured)
+and one jump-table slot to each dispatch — all inside its own arm. **The one thing to watch is
+`NesBus::irq_asserted`**: eight new variants means eight more `Board` discriminants, and although
+none of them can assert an IRQ, each adds an arm that answers "no" to a dispatch that is at
+**thirty-two arms, twenty of which only answer no** and which already outlined once. **The
+measurement to make, at every step and not only at the end**: `callsites.py` on
+`NesBus::irq_asserted` and `Cartridge::irq_asserted` (`FIRST CALL SITE -- stop the lot`), and
+`cmp4c.py` on `Cpu6502::branch` and `Cpu6502::resolve` against the +11/+47-per-arm yardstick. If
+the chain outlines again, the fix is **not** the refuted latch: it is one more `#[inline(always)]`
+or a smaller "no" arm, and the step records which.
+
+### MF-6b — the boards with a CPU-cycle or scanline IRQ
+
+**What it buys: ~15 licensed titles**, and it is second rather than first because §4.2 says every
+one of these boards grows the one dispatch in the core that has already outlined under exactly
+this pressure.
+
+| board | number | IRQ | titles |
+| --- | ---: | --- | ---: |
+| Irem H3001 | **65** | 16-bit **down** counter, −1 per CPU cycle | page gives no count |
+| Sunsoft-3 | **67** | 16-bit counter, −1 per CPU cycle, fires on the $0000 → $FFFF wrap | page gives no count |
+| Konami VRC3 | **73** | 16-bit **up** counter, no scanline mode, plus an 8-bit mode | 1 (*Salamander*) |
+| Taito TC0690 | **48** | **scanline, through the A12 watcher**, MMC3-shaped, +≈4 CPU cycles on the assertion | 6 |
+| NES-EVENT | **105** | a 30-bit M2 counter, DIP-selected bit 28-25 | 1 (*NWC 1990*) |
+| Tengen 800037 | **158** | the RAMBO-1's, **already built** | 1 (*Alien Syndrome*) |
+
+**Steps.**
+
+0. The plan, and the baseline's `NesBus::irq_asserted` figure recorded **before** anything is
+   added — the number every later step is read against. MF-5b's lesson is that this symbol's
+   absence from the dump is the signal, so the baseline has to record its absence explicitly.
+1. **73 (VRC3), extending `VrcIrq`.** First because it is the one board that may need **no new
+   arm at all**: `vrc_irq.rs` already holds "the counter Konami put in the VRC4 and the VRC6", and
+   the VRC3's is the same counter at 16 bits with no scanline mode. If a width parameter on
+   `VrcIrq` serves it, mapper 73 reuses mappers 21-27's and 24/26's existing `irq_asserted` arms
+   and §4.2's risk does not arise for it. **If it does not, say so and measure** — and
+   `mf_5a_the_vrc6_and_the_vrc4_share_one_irq_counter` is the shape of the test that proves a
+   share rather than a copy.
+2. **65 and 67**, the two plain CPU-cycle down-counters, together because they are the same
+   mechanism with different wrap rules: 65 fires at zero, 67 on the wrap *past* zero, and a test
+   that drives both to zero in the same assertion is what keeps the two from being conflated.
+   Both numbers into `clocks_on_cpu_cycle`; both arms `#[inline(never)]` per §4.1 item 2.
+3. **105 (NES-EVENT), as a parameter of `Mmc1`.** Its 30-bit M2 counter is a `Mmc1` field, so
+   mapper 1 would carry it — **this is the step where `const`-vs-field matters most in the whole
+   lot**, because mapper 1 is on five of R0's thirteen ROMs (`vblnmi`, `m1`, `metroid`, `mm2`,
+   `z2`). The DIP switches have no host surface today; the step picks the documented default and
+   records it. **Stop-the-lot condition: any of those five above `fcfa5cb3`.**
+4. **48 (TC0690) and its A12 watcher parameter.** §4.3: `FILTER_DOTS` becomes a construction
+   parameter (MR-1's own recommendation, and MR-64-3's fix), `MIN_RISE_INTERVAL` and
+   `Mmc3::ppu_irq_horizon` move with it or the horizon becomes a wrong bound, and the number goes
+   into **both** `watches_ppu_reads` and `watches_ppu_bus_without_read`. The "+≈4 CPU cycle delay"
+   is the same unmeasurable-today quantity as MR-64-4's 1-2 cycles: **reuse MR-64-4's fix if it
+   has landed, otherwise record the identical gap in the identical words and do not invent a
+   cycle-level IRQ probe here.**
+5. **158 as a parameter of `Rambo1`**, with its nametable control going through
+   `nametable_pages_vary` (§4.5's cheap level, not `read_nametable`).
+6. Save states; the four sweeps; `req_core_100_every_required_mapper_is_registered`.
+7. The suites, the campaign, the document.
+
+**Tests per board**: for each, the counter's **unit** (CPU cycle, not master clock — MR-1's MMC1
+note on `GetMasterClock()` is the trap), its direction, its reload rule, the acknowledge, and the
+"enable without a reload leaves it armed" case that `req_core_100_the_vrc6_counter_*` pins for the
+VRC6. For 48, additionally: that an A12 dip shorter than the filter is **not** counted, and that
+`ppu_irq_horizon` still bounds the PPU correctly — the one test in the lot whose failure is a
+scheduling bug rather than a mapper bug.
+
+**Test ROMs to run**: none for these boards. `mmc3_irq_tests` (6), `mmc3_test` (6) and
+`mmc3_test_2` (6) are run as **non-regression** for step 4, which touches `A12Watcher`, and their
+three required-to-fail rows stay required to fail (REQ-CORE-114, AMD-061 §8).
+
+**Commercial titles for R0**: *Salamander* (73), *Nintendo World Championships 1990* (105),
+*Alien Syndrome* (158), and from 48's own list *The Jetsons*, *The Flintstones*, *Bubble Bobble 2*
+and *Don Doko Don 2*. For 65 and 67 the pages name no title, so R0 picks from NesCartDB.
+
+**Performance risk: the highest in the document, and it is one symbol.** Five new `irq_asserted`
+arms that answer *yes*, on a dispatch of thirty-two arms that outlined at the thirty-second. The
+measurement is the same as MF-6a's and must be made **per step**: `callsites.py` on
+`NesBus::irq_asserted` / `Cartridge::irq_asserted`, and `branch`/`resolve` against +11/+47 per arm.
+Second risk, step 4 only: `on_ppu_address_bus` is 57 600 calls a frame and the latch keeps
+twenty-six boards out of it, but mappers 4, 64 and 118 pay +2 per PPU fetch and `A12Watcher`
+becoming parameterised could cost them more. **`m4` and `smb3` are the two ROMs that would show
+it**, and the horizon change is the one that would show as a wrong IRQ rather than as a slow one.
+
+### MF-6c — the rest worth doing
+
+**What it buys: ~25 licensed titles**, and it is third because every board in it has a hook that
+is either new (an EEPROM), awkward (mapper-internal WRAM), or capped by a measurement (a
+cartridge-served nametable).
+
+| board | numbers | titles | why it is here |
+| --- | ---: | ---: | --- |
+| Taito X1-005 | **80**, **207** | 8 | 128 B of mapper-internal battery WRAM |
+| Taito X1-017 | **82**, **552** | 5 | 5 KiB of the same; 552 is the corrected bank order |
+| Bandai FCG + WRAM | **153** | 1 (*Famicom Jump II*) | a `BandaiFcg` parameter; the easy one of the group |
+| Bandai LZ93D50 + EEPROM | **157**, **159** | the Datach series + 4 | **the EEPROM**, REQ-CORE-100's "EEPROM : P3" |
+| Sunsoft-4 | **68** | page gives no count | **the Q-123 ceiling** |
+| Irem LROG017 | **77** | 1 (*Napoleon Senki*) | an unusual `chr_view`: CHR-ROM at $0000-$07FF, four 2 KiB CHR-RAM banks fixed at $0800-$1FFF |
+| Jaleco JF-17 / JF-19 / JF-13 | **72**, **92**, **86** | 3 + ? + 2 | boards yes, µPD7756C audio **no** (§4.8) |
+| Oeka Kids | **96** | 2 | CHR banking from **every** PPU address-bus change; also wants the tablet |
+| Cheapocabra (GTROM) | **111** | homebrew | self-flashing PRG, mapper-selected CHR-RAM nametable pages |
+
+**Steps.**
+
+0. The plan and the instruments, as always.
+1. **153**, the `BandaiFcg` parameter — one arm of `board_memory_sizes` and the "same as mapper 16
+   submapper 5" register note. Smallest step, and it warms up the FCG code the EEPROM steps need.
+2. **80, 207, and 82, 552** — the mapper-internal WRAM, as the Namco 163's shape (§4.6): the bytes
+   at the end of PRG-RAM so REQ-CORE-095's single battery slice carries them, 128 B for 80/207 and
+   5 KiB for 82/552. 552 and 82 differ only in bank order and the step must pin **both** orders in
+   one test, quoting the page's January-2020 sentence, so the pair cannot be got backwards.
+3. **157 and 159, the EEPROM.** A `Eeprom24C0X` state machine beside `vrc_irq.rs` — shared by the
+   two parts the way `VrcIrq` is shared, since MR-1's table lists Mesen's three files as having
+   "no counterpart" here. 159's X24C01 endianness trap is the one behavioural claim to quote
+   verbatim into the test. The EEPROM bytes are a **battery region**, so `battery_offset` and
+   REQ-CORE-095 are in scope and the `.sav` layout should match Mesen's as the Namco 163's does.
+4. **68 (Sunsoft-4), in two halves, and the second half is a decision not an implementation.**
+   The CIRAM half — four mirroring modes, PRG-RAM enable, the PRG and four 2 KiB CHR windows — is
+   free, through `nametable_pages_vary`. The **CHR-ROM nametable mode** hits §4.5's measured cap:
+   it would be the third distinct `read_nametable` body, which Q-123 priced at **132 → 109 for
+   every game in the library**. So: either find a shape MF-5a's five did not try and *measure*
+   it, or **decode `$E000` bit 4 and ignore it**, with a test pinning exactly that, the way
+   `q_123_vrc6_keeps_its_nametables_on_ciram_when_n_asks_for_chr_rom` pins the VRC6's identical
+   bit. The second is the expected outcome and the step should say which it took and why.
+   *Nantettatte!! Baseball*'s licensing register and its external option ROM are **out of scope**:
+   a second ROM image has no path through `Cartridge::create` and no spec text asks for one.
+5. **77 (Napoleon Senki)** — the `chr_view` split. One game, and it is here rather than in MF-6a
+   because `Mapper::chr_view` / `chr_peek_view` feed the 3D tile path and the PPU's pattern reads,
+   so a board that answers them with two different memories is the one shape in MF-6c that could
+   reach `Ppu2C02::read_pattern_planes` (106-107 instructions, `IDENTICAL raw` through MF-5a and
+   MF-5b, and MF-2's shield). **Stop-the-lot condition: `read_pattern_planes` moves at all.**
+6. **72, 92, 86** — boards only, audio pinned silent per §4.8, with the three-way parameter (PRG
+   size, the command bit "required by mapper 92 games only", and 86's registers at $6000-$6FFF
+   with the page's "accidental copies [...] at $E000-$FFFF").
+7. **96 (Oeka Kids)** — last of the boards, because §4.4 says it is the first board in this core
+   whose whole mechanism is the PPU address bus including a bare `$2006` write, which is MR-1's
+   open MMC2 question made load-bearing. It goes into `watches_ppu_bus_without_read` and inherits
+   an A12 board's cost class. The tablet is an input device with no host surface; the step
+   implements the board and records the peripheral as a gap, as MR-30-4 records the UNROM 512's
+   flash.
+8. **111 (Cheapocabra)** — if and only if its nametable pages reduce to `nametable_page`; if they
+   need `read_nametable`, it is a fourth body and the answer is the same as 68's. Its
+   self-flashing PRG is the same gap MR-30-4 already records for the UNROM 512, and the honest
+   move is to reuse whatever Q-117's answer produced for that board, or to defer 111 with the
+   reason written down.
+9. Save states (four new blocks: the internal WRAM is in `CartridgeMemory` and already covered,
+   the EEPROM is new), the four sweeps, the suites, the campaign, the document.
+
+**Tests per board**: as MF-6a's, plus — 80/82/207/552: the WRAM's address window, that it is
+*not* the header's PRG-RAM, and that `battery_ram` exposes it; 157/159: a full EEPROM write and
+read-back through the serial protocol, and 159's multi-byte address increment proving the
+big-endian reading; 68: the four CIRAM modes, the PRG-RAM enable, and the Q-123 test pinning the
+ignored bit; 77: a pattern read from CHR-ROM at $0000 and from CHR-RAM at $0800 in the same test;
+72/92/86: the write-then-command latch, 92's extra bit, 86's register copies, and a test pinning
+`expansion_audio_output` at `None`; 96: a `$2006` write with no fetch behind it selecting the CHR
+page, which is the claim the page makes and the one MR-1's open question bears on.
+
+**Test ROMs to run**: none. `holy-mapperel`'s 40 as non-regression for steps 4, 5 and 7, which
+touch nametables, `chr_view` and the PPU bus.
+
+**Commercial titles for R0**: *Famicom Jump II* (153), an X1-005 title such as *The Legend of
+Kage* J or *Takeshi no Chousenjou* (80), an X1-017 title such as *Kyonshiizu 2* (82),
+*Dragon Ball Z: Kyoushuu! Saiya-jin* and *SD Gundam Gaiden* (159), a Datach title (157),
+*After Burner* (68), *Napoleon Senki* (77), *Pinball Quest* and *Moero!! Pro Tennis* (72),
+*Moero!! Pro Yakyuu* (86), *Oeka Kids: Anpanman no Hiragana Daisuki* (96).
+
+**Performance risk: concentrated in two steps, and both have a stop-the-lot condition.** Step 4
+(68) is §4.5's cap and the expected answer is to not pay it. Step 5 (77) is the only board in
+MF-6 that can reach `read_pattern_planes`. Step 7 (96) adds one number to the PPU-bus latch and
+costs that board +2 per fetch, which MF-3b already priced for mappers 4, 64 and 118. Steps 1-3 and
+6 touch no hot path: an EEPROM is clocked by register writes and lives entirely inside
+`write_register`, and mapper-internal WRAM lives in `CartridgeMemory` where `Board`'s size is not
+affected (§4.9 item 2).
+
+---
+
+## 6. What is deliberately left out, and why
+
+**200 of the 245 numbers**, and the reasons are four.
+
+**1. Pirate multicarts, BMC boards and the MMC3 clones — 182 numbers.** §3.3 and §3.4. The ones
+with no documentation are out for the obvious reason; the ones *with* a NESdev page are out for a
+reason specific to this application, and it is worth stating plainly because it is the strongest
+argument in this document:
+
+> **This is not an emulator, it is a 3D emulator.** Its value over the dozens of accurate NES
+> emulators is `assets-neutral/profiles.json` — 101 hand-built 3D profiles, every one of them a
+> licensed title. A game on an unlicensed board has no profile, so running it adds a flat 2D game
+> to a program whose point is the third dimension. REQ-CORE-100's own acceptance criterion is "les
+> 101 titres des profils embarqués démarrent et sont jouables", not "every dump loads".
+
+That argument puts the 48 MMC3 clones, the 14 Sachen, 11 Kaiser, 8 Waixing, 7 TXC, 7 NTDEC, 5 JY
+Company, 5 Whirlwind and 3 FFE copier boards out of scope — **not because they are hard, but
+because each one costs `Board` a variant and `irq_asserted` an arm (§4.2, §4.9) and returns
+nothing a profile can use.** Three are named rather than counted, because a later owner decision
+could reasonably reach for them: **176** (FK23C, the large Chinese multicarts), **163** (Nanjing)
+and **90/209/211** (JY Company, which has its own scanline IRQ and CHR latch and would therefore
+be an MF-6b-class job, not an MF-6a-class one).
+
+**2. Boards no title uses.** The 23 numbers Mesen itself `break`s on (§3.5), the numbers with no
+implementation on either side, the UNIF-only boards — which have no iNES number at all and which
+this build cannot reach, loading iNES and NES 2.0 only — and **186** (the Study Box, which Mesen
+loads as a BIOS and not as a ROM).
+
+**3. Mapper 99 and the VS System: set aside by the owner.** Not a technical judgement. Recorded
+here with what it would have taken, so the decision can be revisited with a price on it: a coin
+and DIP-switch input surface, a different palette, a two-bank CHR select, and a per-ROM
+configuration table — four pieces, none of them in the cartridge layer, three of them in SPEC-08
+and SPEC-06 territory. **Mapper 151** (VRC1 on a VS board) goes out with it, which is why §5 has
+75 in MF-6a and 151 nowhere.
+
+**4. The FDS: out of scope.** A disk drive, not a mapper. REQ-CORE-075 names its audio among the
+optional expansion chips without the spec ever asking for the drive, and `MapperFactory`'s
+`FdsMapperID` is a separate loader in Mesen too.
+
+**And one board left out for a reason that is a question, not a decision: mapper 116.** It is the
+only number in the inventory the spec names by itself (REQ-CORE-101, P3) and the only one where
+two normative texts give different jobs. **Q-130 question 1.** It is in no sub-lot until that is
+answered; if the answer is "as the hardware", it is an MF-6b-class job on its own (three ASICs,
+each with its own register set and its own IRQ) for six unlicensed titles, which §6 item 1's
+argument would then weigh against anyway.
+
+### Q-130
+
+Filed as `spec/changes/Q-130.md`, two questions, each with the provisional choice this document
+made and marked as provisional:
+
+1. **Mapper 116.** REQ-CORE-101 makes it optional and describes the reference's emulation as "une
+   carte VRC2 simple, de façon incomplète"; AMD-061 §1 makes public hardware documentation prevail
+   over the reference. Under the first reading it is half a day's work; under the second it is an
+   MF-6b-class sub-lot on its own — three ASICs in one board, two of them with an IRQ counter, one
+   more arm on `NesBus::irq_asserted` — for six unlicensed titles with no 3D profile.
+   Provisional: **not implemented at all**, so REQ-CORE-011 refuses it, which REQ-CORE-101's own
+   criterion allows ("sans objet si non supporté") and which an existing test already pins —
+   `req_core_102_any_other_mapper_is_refused` (`mapper_tests.rs:69`) carries the comment "116 is
+   the one REQ-CORE-101 leaves optional: not implemented, so refused".
+2. **REQ-CORE-102's acceptance criterion.** It is "en-tête annonçant le mapper 200 → échec", and
+   mapper 200 is a real pirate multicart board Mesen implements. The criterion therefore tests
+   "refuse an unsupported number" using a number that could stop being unsupported — by the
+   exercise of the permission the same requirement grants in its previous sentence. And it is
+   wider than the one number: the test that embodies the criterion sweeps **6, 116, 177 and 200**,
+   and **all four are real boards Mesen builds**, so the test holds no number guaranteed never to
+   become supported. Provisional: **mapper 200 is left out** (§6 item 1 covers it), so the
+   criterion holds unchanged — but the criterion wants a number that is nobody's board.

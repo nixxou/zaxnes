@@ -120,6 +120,67 @@ Three decisions were taken here rather than deferred, each with the text that se
 * **the 24C01/24C02 EEPROM of 157 and 159 is genuinely new**, and REQ-CORE-100's mapper-16 row
   already prices it: "EEPROM : P3".
 
+## Step 3 — the plan of the sub-lots, the exclusions, and Q-130
+
+`MF-6-inventory.md` §5 and §6. **45 of the 245 numbers go into three sub-lots; 200 are left out,
+and each of the four reasons is written down.**
+
+| sub-lot | boards | numbers | new `Board` variants | licensed titles | performance risk |
+| --- | --- | ---: | ---: | ---: | --- |
+| **MF-6a** | the licensed boards with **no hook at all** | 20 | 8 | ~75 | low: eight more "no" arms on `irq_asserted` |
+| **MF-6b** | the boards with a CPU-cycle or scanline IRQ | 6 | 4 | ~15 | **the highest in the document**, and it is one symbol |
+| **MF-6c** | the rest worth doing | 14 | 7 | ~25 | two steps, each with a stop-the-lot condition |
+
+Each sub-lot's section carries the boards, the steps, the tests per board (one per register claim,
+in MF-5a's and MF-5b's naming), the test ROMs (**none exist**; the existing suites are run as
+non-regression only), the commercial titles R0 should run, and the measurement to make. Four
+things are common to all three and are stated once: the bar (MF-5b's), the three instruments, the
+four `SUPPORTED_MAPPERS` sweeps that cover a new number without a line being written, and the
+append-behind-versioning rule for save states.
+
+**The ordering is not by title count alone.** MF-6a is first because its twenty numbers touch no
+hot path and six of them are a flag on a board that already exists (94 on `UxRom`, 185 on `CnRom`,
+155 on `Mmc1`, 119/47/37 on `Mmc3`). MF-6b is second — not last — because its boards are
+*licensed* and its risk is known and bounded: five new arms on the one dispatch MF-5b watched
+outline at the thirty-second, with `+11`/`+47` per arm as the yardstick and the refuted
+`irq_capable` latch explicitly out of bounds. MF-6c is third because each of its boards has a hook
+that is new (the EEPROM), awkward (mapper-internal WRAM) or capped by a measurement (mapper 68 and
+the Q-123 ceiling).
+
+Three steps carry an explicit **stop-the-lot condition**, because each touches a board on R0's
+thirteen ROMs: MF-6a step 5 (`Mmc3`: `m4`, `smb3`), MF-6b step 3 (`Mmc1`: five of the thirteen),
+MF-6c step 5 (mapper 77 is the only board in MF-6 that can reach `read_pattern_planes`, which has
+been `IDENTICAL raw` since MF-2 built its shield).
+
+**What is left out: 200 numbers, four reasons.** 182 pirate multicarts, BMC boards and MMC3 clones
+— and the argument for the documented ones among them is the strongest in the document and is
+quoted as such: *this is not an emulator, it is a 3D emulator*, its value is the 101 hand-built
+profiles, every one a licensed title, and a game on an unlicensed board has no profile, so running
+it adds a flat 2D game to a program whose point is the third dimension. Then the boards no title
+uses (Mesen's own 23 refusals, the UNIF-only boards this build cannot reach, the Study Box);
+**mapper 99 / VS System, set aside by the owner** — recorded with a price on it (four pieces,
+three of them in SPEC-08 and SPEC-06 territory) so the decision can be revisited, and mapper 151
+goes out with it; and **the FDS**, a disk drive and not a mapper.
+
+**Q-130 filed** (`spec/changes/Q-130.md`), two questions, the next free number, each with its
+provisional choice marked as provisional. The other 243 numbers are decided in the document and
+need no arbitration.
+
+1. **Mapper 116** — the only number the spec names for itself (REQ-CORE-101) and the only one where
+   two normative texts give different jobs: "comme la référence" is a VRC2 of half a day,
+   AMD-061 §1's "comme le matériel" is three ASICs with two IRQ counters and a supervisor register,
+   for six unlicensed titles with no profile. A third reading is named so the answer can take it:
+   AMD-061 §1 forbids copying the reference's *errors*, not leaving an optional board out.
+   Provisional: **not implemented**, which REQ-CORE-101 allows and which
+   `req_core_102_any_other_mapper_is_refused` already pins by name.
+2. **REQ-CORE-102's acceptance criterion names mapper 200**, which is a real board Mesen builds —
+   so the criterion tests "refuse an unsupported number" with a number that could stop being
+   unsupported by the exercise of the permission the same requirement grants one sentence earlier.
+   The test that embodies it sweeps 6, 116, 177 and 200 and **all four are real boards**, so it
+   holds no safe number. Provisional: 200 stays out, the criterion holds — but it wants a number
+   that is nobody's board.
+
 [PROGRESS] MF-6 step 0/4 done: the plan, the sources, and the ROM situation settled first
 [PROGRESS] MF-6 step 1/4 done: the inventory, 245 numbers in four tables
 [PROGRESS] MF-6 step 2/4 done: the hooks, the two unlatched hot paths, and the variants
+[PROGRESS] MF-6 step 3/4 done: the three sub-lots, the 200 numbers left out, and Q-130
