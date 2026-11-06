@@ -31,6 +31,7 @@
 //! | Mega Man 6 (USA), and Rockman 6 (Japan) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; the Japanese build's own pack; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
 //! | Mega Man 3 (USA), Rockman 3 (Japan), (Europe) and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; a pack per build, the European ones PAL with NTSC twins; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
 //! | Mega Man (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman (Japan) and the conversions by its signatures; the European build's pack, PAL, and the same as NTSC; "Invincible" a component of its own, with or without the advanced mode (`mm1wide`, `tools/build.py --pack`) |
+//! | Faxanadu (USA) | testing aids only (the margin decoder alone widens the game) | a hack pack (`crate::hack_pack`) of two components: "Invincible" (the routine taking the HP returns at once) and the level select (a new game starts at the temple the buttons held at START pick; its code in the zone fantôme), the ROM keeping its size (`faxanaduwide`, `tools/build_pack.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -142,6 +143,8 @@ pub const KIRBY_EUROPE: &str = "Kirby's Adventure (Europe) widescreen";
 pub const KIRBY_EUROPE_NTSC: &str = "Kirby's Adventure (Europe) (NTSC) widescreen";
 /// Name of the Kirby's Adventure (Germany) widescreen patch.
 pub const KIRBY_GERMANY: &str = "Kirby's Adventure (Germany) widescreen";
+/// Name of the Faxanadu (USA) pack (testing aids only: its widescreen is the margin decoder's).
+pub const FAXANADU_USA: &str = "Faxanadu (USA) aids";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -230,7 +233,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 64] = [
+pub const PATCHES: [BuiltinPatch; 65] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1591,6 +1594,27 @@ pub const PATCHES: [BuiltinPatch; 64] = [
         idle_loop: Some((0xC070, 0xC072)),
     },
     BuiltinPatch {
+        name: FAXANADU_USA,
+        game: "Faxanadu",
+        rom_name: "Faxanadu (USA)",
+        source_crc: 0x57DD_23D1,
+        // A hack pack of testing aids only (`faxanaduwide`, `tools/build_pack.py`): "Invincible"
+        // (the routine taking the player's HP returns at once) and the level select (a new game
+        // starts at the temple of the town the buttons held at START pick, as a password does;
+        // its 40 bytes of code in the execution zone). The widescreen is the margin decoder's.
+        bps: include_bytes!("../patches/faxanadu-usa.zxpk"),
+        options: FAXANADU_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        // The level select's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        zone_data: false,
+        // The frame's wait: LDA $10 / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xCA29, 0xCA2B)),
+    },
+    BuiltinPatch {
         name: NOVA_THE_SQUIRREL,
         game: "Nova the Squirrel",
         rom_name: "Nova the Squirrel",
@@ -1634,7 +1658,6 @@ pub const PATCHES: [BuiltinPatch; 64] = [
     },
 ];
 
-/// The options of the Nova the Squirrel pack: its two testing aids.
 /// The options of the Kirby's Adventure pack.
 const KIRBY_OPTIONS: &[HackOption] = &[
     // Kirby's checklists of state changes (one per state and ability, banks $14-$19) test the
@@ -1722,6 +1745,26 @@ const KIRBY_OPTIONS: &[HackOption] = &[
     },
 ];
 
+/// The options of the Faxanadu pack: testing aids, off by default.
+const FAXANADU_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "level_select",
+        label: "Level select (hold at START: up Apolune, up+B Forepaw, up+A Mascon, up+A+B Victim, down Conflate, down+B Daybreak, down+A Dartmoor)",
+        label_fr: "Sélection de niveau (maintenir sur START : haut Apolune, haut+B Forepaw, haut+A Mascon, haut+A+B Victim, bas Conflate, bas+B Daybreak, bas+A Dartmoor)",
+        bit: 0,
+        default: false,
+    },
+    // No HP lost (a hit still throws the hero back).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+];
+
+/// The options of the Nova the Squirrel pack: its two testing aids.
 const NOVA_OPTIONS: &[HackOption] = &[
     HackOption {
         key: "level_select",
@@ -2867,13 +2910,15 @@ mod tests {
     fn the_built_in_patches_are_well_formed() {
         for patch in PATCHES {
             // A hack pack: it reads, and its widescreen is one of its components, unless it is
-            // a pack of aids alone (Nova the Squirrel).
+            // a pack of aids alone (Nova the Squirrel; Faxanadu, whose level select's code runs
+            // in the execution zone).
             if crate::hack_pack::is_pack(patch.bps) {
                 let pack = crate::hack_pack::HackPack::read(patch.bps);
                 assert!(
                     pack.is_some_and(|pack| {
                         pack.component(crate::hack_pack::WIDESCREEN).is_some()
-                            || (!pack.components.is_empty() && pack.code.is_empty())
+                            || (!pack.components.is_empty()
+                                && (pack.code.is_empty() || patch.boot_zone))
                     }),
                     "{}",
                     patch.name
