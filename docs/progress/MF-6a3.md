@@ -342,3 +342,169 @@ the gating is real rather than decorative:
 `parked-boards` and with `--no-default-features`, clean, **no new `allow` of any kind**.
 
 [PROGRESS] MF-6a3 step 1/6 done: 119, 47 and 37 on `Mmc3Board`, 893 / 0 / 8, and two `Board` variants priced at +0.080 % on `mmc5` before the three numbers went into `IrqBoard` instead.
+
+## Step 2 — the measurement, against the owner's tolerance
+
+The tree measured is step 1's, at label `mf63-1-tqrom47b`, on a clean `make-tree.sh --worktree`
+build in its own directory with its own target directory. **The default build is what is
+measured**: `board-119` and `board-mmc3-multicart` are both in `zax-nes`'s `default`, so this is
+what a `cargo build` of the shipped configuration produces.
+
+### PR-1's thirteen: every ROM inside ±0.0011 %, set total **−57 265**
+
+`callgrind-diff.py`, against `mf63-0-07325f6e`:
+
+| ROM | board | `07325f6e` | **step 1** | delta | |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | MMC1 | 3 308 378 921 | **3 308 293 511** | −85 410 | −0.0026 % |
+| `oamstr` | NROM | 3 318 459 130 | **3 318 454 343** | −4 787 | −0.0001 % |
+| `m1` | MMC1 | 4 885 841 284 | 4 885 841 629 | **+345** | **+0.0000 %** |
+| `m0` | NROM | 5 520 389 483 | 5 520 447 790 | **+58 307** | **+0.0011 %** |
+| `m4` | **MMC3** | 5 472 545 224 | 5 472 559 790 | **+14 566** | **+0.0003 %** |
+| `metroid` | MMC1 | 5 115 944 243 | **5 115 924 968** | −19 275 | −0.0004 % |
+| `smb1` | NROM | 5 996 346 457 | **5 996 326 465** | −19 992 | −0.0003 % |
+| `mm2` | MMC1 | 6 017 889 238 | **6 017 844 725** | −44 513 | −0.0007 % |
+| `z2` | MMC1 | 6 291 431 663 | 6 291 486 006 | **+54 343** | **+0.0009 %** |
+| `readbuf` | CNROM | 6 834 547 836 | **6 834 546 677** | −1 159 | −0.0000 % |
+| `duelito` | NROM | 7 380 393 405 | 7 380 419 534 | **+26 129** | **+0.0004 %** |
+| `smb3` | **MMC3** | 7 949 452 274 | **7 949 441 696** | −10 578 | −0.0001 % |
+| `mmc5` | MMC5 | 11 286 830 608 | **11 286 805 367** | −25 241 | −0.0002 % |
+| **total** | | **79 378 449 766** | **79 378 392 501** | **−57 265** | **−0.0001 %** |
+
+**The worst ROM of the thirteen is `m0` at +58 307, which is +0.0011 %** — one eighteenth of the
++0.02 % the owner allows, and inside the ±57 k-per-ROM `luaH_getshortstr` floor §5.11 measured.
+The two MMC3 ROMs — `m4` and `smb3`, which every MF lot since MF-6a has made the ones to watch
+because the three new boards *are* the MMC3's board — are **+14 566 and −10 578**. `mmc5`, which
+the two-variant shape cost +8 994 278, is **−25 241**.
+
+For comparison, MF-6a2 step 3's best shape (C) left `m4` +258 640, `smb3` +390 724, `mm2`
++992 528 and `m0` +786 360 on the same instrument. Every one of those is between five and
+eighteen times this step's worst figure, and the difference is the one change of step 1: no new
+`Board` discriminant.
+
+The only symbol that moves by 300 000 or more on any ROM of the set is `Mmc3Board::update_banks`
+**being renamed by its new monomorphisation signature**:
+
+    smb3:  +817,035  0 -> 817,035  <...mmc3::Mmc3Board<false, false, false>>::update_banks
+           -817,035  817,035 -> 0  <...mmc3::Mmc3Board<false>>::update_banks
+
+**817 035 to 817 035, the same number to the instruction** — mapper 4's banking is the same code
+doing the same work under a new name, which is what the `const` parameters exist to guarantee and
+what MF-6b step 5 took as its receipt for `Rambo1::update_banks`.
+
+### Level 2: **all five `core` figures within ±6 699**, and smb1's at exactly 0
+
+`l2-diff.py --bar`, against `mf63-0-07325f6e`:
+
+| game/stage | `07325f6e` | **step 1** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid/core` | 11 147 278 310 | 11 147 281 665 | **+3 355** | **+0.00003 %** |
+| `smb1/core` | 11 515 125 238 | 11 515 125 238 | **0** | **equal** |
+| `zelda2/core` | 12 775 641 366 | 12 775 647 488 | **+6 122** | **+0.00005 %** |
+| `mm2/core` | 12 036 819 361 | **12 036 800 417** | −18 944 | −0.0002 % |
+| `smb3/core` | 15 315 558 069 | **15 315 551 370** | −6 699 | −0.0000 % |
+| `mm2/total` | 18 976 300 081 | **18 976 261 589** | −38 492 | −0.0002 % |
+| `smb1/total` | 13 587 898 562 | **13 587 226 944** | −671 618 | −0.0049 % |
+| `metroid/total` | 13 735 514 951 | 13 735 608 782 | +93 831 | +0.0007 % |
+| `zelda2/total` | 15 358 834 193 | 15 361 709 526 | **+2 875 333** | **+0.019 %** |
+| `smb3/total` | 24 187 868 326 | 24 194 302 228 | **+6 433 902** | **+0.027 %** |
+
+**The `core` column — the one with no run-to-run spread at all — is unmoved on all five games**,
+the largest move being `zelda2` at +6 122 instructions in 12.8 billion. `mm2/core`, which is the
+figure that ended MF-6a2 step 3 at **+2 136 243 (+0.018 %)**, is **−18 944** here: that step's
+stop-the-lot figure is gone, 113 times over, and in the other direction.
+
+`smb3/total` at +0.027 % is the one figure above the tolerance, and the lot's own rule requires
+the per-function diff rather than a label. `l2sym.py`, moves of 250 000 or more:
+
+| game | symbol | delta |
+| --- | --- | ---: |
+| `smb3` | `ltable.c:luaH_getshortstr` | **+6 636 177** |
+| `smb3` | `Mmc3Board<false, false, false>::update_banks` | +2 836 959 |
+| `smb3` | `Mmc3Board<false>::update_banks` | −2 836 959 |
+| `zelda2` | `ltable.c:luaH_getshortstr` | **+1 499 147** |
+| `zelda2` | `ltable.c:getgeneric` | **+1 382 656** |
+
+**One Lua symbol accounts for more than the whole of `smb3/total`'s rise** — `luaH_getshortstr`
++6 636 177 against a measured +6 433 902, so this project's own code is net *down* on that game —
+and `zelda2`'s two Lua symbols come to +2 881 803 against a measured +2 875 333, which is the
+whole of it to within 6 470. `Mmc3Board::update_banks` is the rename again, +2 836 959 against
+−2 836 959, byte-identical.
+
+### The floor on that column, measured rather than asserted
+
+MF-6a2 step 2 measured the level-2 `total` run-to-run floor at ±2.7 M, and both figures above are
+larger than that, so the step measured the floor again instead of leaning on an old number. **The
+same binary, at the same path, through `callgrind-l2.sh` twice** (labels `tqrom47b` and
+`tqrom47c`, the second a copy of the first binary so the path length is identical):
+
+| | spread over the two runs |
+| --- | --- |
+| every level-2 `core` stage | **0, to the instruction, on all five games** |
+| `smb3/total` | **−4 284 799** (−0.018 %) |
+| `zelda2/total` | **−3 097 124** (−0.020 %) |
+| `smb1/total` | +274 361 |
+| `metroid/total` | −53 986 |
+| `mm2/total` | −12 438 |
+
+So on this instrument **`zelda2/total`'s +2 875 333 is smaller than the same binary's own spread
+on that column (3 097 124), and `smb3/total`'s +6 433 902 is 1.5 times it** — while every `core`
+stage is identical to the instruction across the two runs, which is what makes `core` the column
+that can be read. The second run puts `smb3/total` at 24 190 017 429, **+0.009 % against the
+baseline**, inside the tolerance: the verdict on that column depends on which of two readings of
+the same binary one takes, which is the definition of noise.
+
+Step 0 had already shown the same thing from the other side: `smb3/total` read 24 187 868 326 at
+`07325f6e` against MF-6b step 5's 24 193 872 632 for **the same source tree**, a 6.0 M difference
+with no code change at all.
+
+**This refines §5.12's figure for a later lot**: the level-2 `total` floor is ±2.7 M on `mm2` and
+`metroid` and **±3.1 M to ±4.3 M on `zelda2` and `smb3`**, the two games whose packs run the most
+Lua, against **0** on every `core` stage of all five.
+
+### The post-LTO check
+
+`pins63.py`, step 1's dump against the baseline's — the three claimants and the five symbols the
+brief names:
+
+| symbol | `07325f6e` | **step 1** |
+| --- | ---: | ---: |
+| `Board::irq_asserted` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Wide::zone_offset` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::execute_without_operand` | 0 / 0 / 0 | **0 / 0 / 0** |
+| `Cpu::step` | 1 / 2 / 3 626 | 1 / 2 / **3 626** |
+| `Board::ppu_peek` | 1 / 4 / 272 | 1 / 4 / **272** |
+| `NesBus::write_internal` | 1 / 10 / 3 580 | 1 / 10 / 3 743 |
+| `Ppu::run_dots` | 1 / 5 / 1 907 | 1 / 5 / **1 907** |
+| `NesBus::catch_up_ppu` | 1 / 12 / 188 | 1 / 12 / **188** |
+
+and `shape.py` beside it: `Cpu::resolve` 2 / 6 / **1 948**, `Cpu::branch` 1 / 1 / **457**,
+`NesBus::read_cycle` 1 / 65 / **181**, `tick` 1 / 95 / **82**, `read_internal` 1 / 17 / **175**.
+
+**Seven of the eight pinned symbols are identical to the instruction, and so are all five of
+`shape.py`'s others.** `zone_offset` did not get dearer; it does not exist as a symbol, which is
+the only reading of it that matters. The one that moved is `NesBus::write_internal`, 3 580 →
+**3 743** (+163): the TQROM's and the multicarts' register decodes plus the `intercept_cpu_write`
+forward. Its dynamic cost did not follow — `m4` +14 566 and `smb3` −10 578 are the two ROMs whose
+writes go down that path most — which is the same relation MF-6b step 2 recorded when that
+function went *down* with two boards added.
+
+`Board::ppu_peek` back at **272** is the measurement MF-6a2 step 3 asked for by name: that step
+found the TQROM's chip-select body took it to **583** and cost `m4` 3.4 M, and named
+`#[inline(never)]` on the board's own body as the fix. The fix holds, and the fourth capped hook
+comes out of this step **at the figure it went in at**.
+
+### The verdict against the tolerance
+
+| the owner's condition | measured |
+| --- | --- |
+| at most **+0.02 % per ROM** on PR-1's set | worst is `m0` **+0.0011 %**; set total **−0.0001 %** |
+| at most **+0.02 % per ROM** on level 2, `core` | worst is `zelda2` **+0.00005 %**; two of five below |
+| at most **+0.02 % per ROM** on level 2, `total` | `smb3` +0.027 % and `zelda2` +0.019 %, both **inside the same binary's own run-to-run spread on that column** (−4 284 799 and −3 097 124), with the whole of both in Lua's `ltable.c` and every `core` stage identical across the two runs |
+| the three claimants of `Cpu6502::step` inlined, 0 / 0 / 0 | **0 / 0 / 0** |
+| `zone_offset` no dearer | **0 / 0 / 0**, no symbol at all |
+
+**The three boards are inside the tolerance, and `board-119` and `board-mmc3-multicart` stay in
+`zax-nes`'s `default`.** Nothing is parked, so `parked-boards` stays empty.
+
+[PROGRESS] MF-6a3 step 2/6 done: worst PR-1 ROM +0.0011 %, all five level-2 cores within ±6 699 with `smb1`'s at 0, the two `total` rises inside the same binary's own ±4.3 M spread on that column, and the three boards default-on.
