@@ -785,9 +785,9 @@ than a footnote. Consequences §6 takes as given:
 
 Sixty-seven numbers, and the first thing to say about them is that **they are not 67 boards**.
 Collapsing the numbers that NESdev documents on one page and that Mesen builds from one class
-leaves **44 distinct boards**: ten families covering 33 numbers, and 34 singletons.
+leaves **44 distinct boards**: **nine families covering 32 numbers, and 35 singletons.**
 
-### 6.1 The ten families
+### 6.1 The nine families
 
 | family | numbers | why they are one board | effort for the whole family |
 | --- | --- | --- | :-: |
@@ -800,7 +800,15 @@ leaves **44 distinct boards**: ten families covering 33 numbers, and 34 singleto
 | **MMC3 + a CHR-RAM window** | 74, 192, 194, 195 | Mesen: `MMC3_ChrRam(first, last, size)` — **and this build already ships one member of it**, mapper **119** (`board-119`, MF-6a3 step 2) | **S** |
 | **MMC3 + scrambled registers + an NROM-like PRG override** | 114, 115, 121, 123, 182, 187 | the same two additions on six Kǎshèng/SuperGame/Hosenkan/Gouder boards; NESdev redirects 182 to 114's page | **M** |
 | **Huang-1** | 12, 14 | the same ASIC as mapper **116**, which this build already has as `Somari` (`board-116`, MF-6a3 step 4) | **M** |
-| **Cheapocabra / RET-CUFROM / Magic Floor** — *not* a family | 29, 111, 218 | listed here only to say they are **three separate boards**, grouped nowhere | — |
+
+**A family is one feature and one code unit, with the differences as parameters** — which is what
+`BOARD-FEATURES.md` note 1 means by "the granularity is the granularity the measurements exist at",
+and what `board-small-boards` (nine boards, one `Board` variant) and `board-namcot108` (five
+numbers, four parameters) already do. §6.2's roster nonetheless gives **115, 121 and 187 their own
+rows** inside the MMC3-scramble family, because each adds something beyond the shared scramble and
+override — 115 a "sharp" IRQ rule, 121 a protection array, 121 and 187 a CHR A18 driven from PPU
+A12 — and those extras are what makes the family an M rather than an S. The other 35 A numbers are
+singletons: no other number shares their page or their Mesen class.
 
 ### 6.2 The roster
 
@@ -907,3 +915,638 @@ two (284) is excluded on cost.
 submapper 2 (a TMS5220 speech chip) and 284. On 163 and 178 the A titles are on submapper 0, so
 both boards can ship without their audio chip and still preserve everything that made them A — a
 point §7 builds two lots on.
+
+---
+
+## 7. The plan of the MF-UNL lots
+
+### 7.1 Conventions, and the three things every lot does
+
+**Effort scale**, re-anchored on what this project's lots have actually delivered — MF-6a shipped
+**nine** small boards in one lot and MF-6b **five** IRQ boards, so the units are smaller than a
+first reading of §6.2 suggests:
+
+* **S ≈ 1 h** — a `const`/`bool` parameter on a board already here, or a new board with one
+  register and no hook, plus its tests.
+* **M ≈ 2-3 h** — a new board with its own register set and at most one hook already built.
+* **L ≈ 6 h+** — a new hook or save shape, or more than one chip in the board.
+
+**A lot is at most ~10 boards and ~6-8 h.** Lots are ordered by **original titles per hour**, which
+is the ordering the owner's rule implies: the measure of a board is what it preserves.
+
+**Every board gets its own Cargo feature**, per the owner's rule and `BOARD-FEATURES.md`'s
+mechanism. The naming follows the existing rows: `board-<number>` for a single number,
+`board-<family>` for a family (`board-nina03`, `board-jv001`, `board-sachen8259`,
+`board-mmc3-chrram`, `board-mmc3-scramble`, `board-jy-asic`, `board-huang1`, `board-cony`,
+`board-sachen-8reg`). A family is **one** feature because — as `BOARD-FEATURES.md` note 1 says —
+"the granularity is the granularity the measurements exist at", and a family is one `Board` variant
+or one `const` monomorphisation.
+
+**Three things every lot does**, inherited from MF-6a/6b/6a3 and not restated per lot:
+
+1. **The four sweeps over `SUPPORTED_MAPPERS`** (`req_core_100_*`, `req_core_102_*`, the
+   registry round-trip, `board_memory_sizes`), in every feature configuration the lot adds, plus
+   `--no-default-features` and `--features parked-boards`.
+2. **A save-state round-trip per board** with mapper state dirtied first.
+3. **`cargo fmt --check`, clippy `-D warnings`, and a PR-1 thirteen-ROM + level-2 five-game
+   measurement against the lot's base commit**, with the +0.02 %-per-ROM tolerance of
+   `BOARD-FEATURES.md`. A board over tolerance is **parked** — moved out of `default` into
+   `parked-boards` — not dropped.
+
+**And one thing no lot can do: run a game.** §5 counted it — no file in `assets-free/test-roms`
+uses any of the 199 numbers. So the "tests per board" below are **written from the board's own
+register table**, which is why §6 graded documentation, and the "titles R0 should run" are titles
+**R0 would have to source**, listed so each lot's purpose is stated rather than assumed.
+
+### 7.2 The twelve lots
+
+| lot | boards | numbers | effort | original titles | titles/h |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **MF-UNL-1** — the JV001 protection ASIC and Sachen's register ASICs | 3 | 9 | ~7.5 h | **37** | **4.9** |
+| **MF-UNL-2** — the MMC3 clones that need nothing new | 4 | 12 | ~7 h | **26** | 3.7 |
+| **MF-UNL-3** — AVE, and the single-latch boards | 8 | 9 | ~8 h | **27** | 3.4 |
+| **MF-UNL-4** — the J.Y. Company ASIC | 1 | 4 | ~8 h | **13** | 1.6 |
+| **MF-UNL-5** — the Chinese-RPG boards with a PPU-driven CHR-RAM window | 3 | 3 | ~8 h | **13** | 1.6 |
+| **MF-UNL-6** — COOLBOY / MINDKIDS | 1 | 1 | ~8 h | **12** | 1.5 |
+| **MF-UNL-7** — the Sachen 8259, the 206 clones and two homebrew boards | 6 | 9 | ~7 h | **10** | 1.4 |
+| **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board | 3 | 5 | ~8.5 h | **10** | 1.2 |
+| **MF-UNL-9** — Cheapocabra (GTROM) | 1 | 1 | ~6 h | **7** | 1.2 |
+| **MF-UNL-10** — Dōngdá PEC-9588 | 1 | 1 | ~7 h | **6** | 0.9 |
+| **MF-UNL-11** — the Kǎshèng protection MMC3s | 3 | 3 | ~7 h | **6** | 0.9 |
+| **MF-UNL-12** — the last three singletons | 3 | 3 | ~7 h | **4** | 0.6 |
+| **total** | **37** | **60** | **~89 h** | **~171** | |
+
+The title counts double-count nothing within a lot but do count a title once per board that carries
+it; where two numbers share a title the roster in §6.2 says so.
+
+---
+
+#### MF-UNL-1 — the JV001 protection ASIC and Sachen's register ASICs
+
+**Boards and features**: `board-jv001` (36, 132, 136, 147, 172, 173 — the TXC/Idea-Tek
+05-00002-010 and the Sachen JV001, one chip with five wirings); `board-sachen-8reg` (150, 243);
+`board-133` (Sachen 3009 / 72008). **9 numbers, 3 features, ~7.5 h, ~37 original titles.**
+
+**Why first**: the best titles-per-hour in the plan by a wide margin, and the chip is one chip.
+
+**Steps**
+1. `Jv001`, a new board holding the six registers the page names — P, R and Output (three bits
+   each), S, inCrement and inVert (one bit each) — with the register window at $4100-$4103 and the
+   mirroring write at $8000-$FFFF. Parameters: a `const` for the **data-bit order** (172 reverses
+   D0-D5), a `const` for the **protection read width** (36 and 173 check the low three-to-four
+   bits, 172 the low six), and a `bool` for whether $8000 writes drive mirroring.
+2. `registry.rs` arms for 36, 132, 136, 147, 172, 173 behind `board-jv001`, each with its own
+   parameters; `SUPPORTED_MAPPERS` entries; `board_memory_sizes`.
+3. `Sachen8Reg`, the eight-register ASIC of 150 and 243: an index write, a data write, registers
+   R4-R7 driving CHR bank, PRG bank and mirroring, and the page's statement that registers 0, 1 and
+   3 "have no external effect" encoded as a no-op (**not** as an `unreachable!`).
+4. `board-133`: the Namco-108 clone with the analog feedback path. The 72-pin half of the page is
+   one line (`Mask $E100, $4100: [.... .PCC]`), so submapper or heuristic selection between the
+   60-pin and 72-pin decodes, with the choice recorded in the code comment.
+5. The three common things of §7.1, plus the feature matrix: each of the three features alone,
+   all three, none.
+
+**Tests from the pages**
+* **JV001 protection**: write a value to $4100, read $4100, assert the result is the written value
+  **incremented and inverted** over the board's width. One test per width (3, 4, 6 bits).
+* **172's reversed data bus**: the same write/read pair with D0-D5 reversed yields a *different*
+  register value than 136's — the test that proves the `const` is wired.
+* **Mirroring from the Invert state** (172): a $8000-$FFFF write sets horizontal with Invert clear
+  and vertical with it set.
+* **173's bus conflict** (*撲克精靈*): a write to $8000 with a ROM byte present ANDs, through the
+  existing `bus_conflicts` latch.
+* **150/243**: index 4 selects a CHR bank, 5 a PRG bank, 7 the mirroring; indices 0, 1 and 3 change
+  nothing observable. 243's `switchable H/V/vertically-flipped L/one-screen` as four cases.
+* **133**: a $4100 write with mask $E100 selects the PRG and CHR banks; an address outside the mask
+  does not.
+
+**Titles R0 should run**: *Strike Wolf*, *Policeman*, *F-15 City War*, *棋王 — Chinese Chess*,
+*Creatom*, *Rad Racket — Deluxe Tennis II*, *1991 賭馬 Racing*, *Venice Beach Volley*,
+*撲克精靈*, *戰國四川省*, *未来小子 — Joy Van Kid*, *蝶變 — Incantation*,
+*少林武者 — Chinese Kungfu* / *Challenge of the Dragon*, *Tasac*, *将棋学園 — Chess Academy*,
+*Strategist*, *Olympic I.Q.*, *美女拳 — Honey Peach*, *Jovial Race*,
+*盜帥 — Master Chu and the Drunkard Hu*.
+
+---
+
+#### MF-UNL-2 — the MMC3 clones that need nothing new
+
+**Boards and features**: `board-mmc3-chrram` (74, 192, 194, 195); `board-mmc3-scramble` (114, 115,
+121, 123, 182, 187); `board-263` (UNL-KOF97); `board-189` (TXC 01-22017/22018).
+**12 numbers, 4 features, ~7 h, ~26 original titles.**
+
+**Why second**: every board is the MMC3 this build already has, with the A12 watcher already built
+and `Mmc3Board`'s `const`-parameter mechanism already proven by MF-6a3 step 2 on 119, 47 and 37.
+Mapper **119 is literally a member of the first family** — Mesen builds 74, 119, 191, 192, 194 and
+195 from one class — so the first step is a generalisation of code that is already in `default`.
+
+**Steps**
+1. Generalise `board-119`'s CHR-RAM selection into `Mmc3ChrRam<const FIRST: u8, const LAST: u8,
+   const SIZE: u8>`: the 1 KiB CHR banks in `FIRST..=LAST` come from the CHR-RAM chip, the rest
+   from CHR-ROM. 119 becomes `(0x40, 0x7F, 8)` and must produce a **byte-identical** dump against
+   its current implementation — the lot's own regression gate, and the one place this lot can test
+   against something that already works.
+2. Add 74 `(0x08, 0x09, 2)`, 192 `(0x08, 0x0B, 4)`, 194 `(0x00, 0x01, 2)`,
+   195 `(0x00, 0x03, 4)`. 195 additionally wants the page's run-time GAL, so it carries a `bool`
+   for "the RAM window is selectable at run time" and the 32 KiB-fitted/8 KiB-wired note in a
+   comment.
+3. `Mmc3Scramble`: an MMC3 with (a) a `const` scramble table for the register address and index,
+   (b) an outer CHR-ROM bank register, (c) an NROM-like PRG override register. Per number: 114 and
+   182 at $6000/$6001 with two scramble patterns; 115 the same with the $600x registers live
+   regardless of the WRAM enable **and the "sharp" IRQ rule** (latch 0 fires every scanline); 123
+   the override at $5800; 187 the override at $5000 with protection reads and CHR A18 from PPU A12;
+   121 the $5000-$5FFF protection array, bit-reversed $8001 values feeding $A000/$C000/$E000, and
+   the A9711's CHR A18 from PPU A12.
+4. `board-263`: A12→A0 and the page's data permutation
+   `(V&0xD8) | ((V&0x20)>>4) | ((V&4)<<3) | ((V&2)>>1) | ((V&1)<<2)`.
+5. `board-189`: four 32 KiB PRG banks from bits 4-5 of a write to $4100-$5FFF with address bit 9
+   set, over a stock MMC3.
+6. §7.1's three common things, and the configurations.
+
+**Tests from the pages**
+* **119 byte-identical** before and after the generalisation (step 1's gate).
+* Per CHR-RAM number: a CHR read inside `FIRST..=LAST` hits RAM and is writable; a read one bank
+  below `FIRST` and one above `LAST` hits ROM and ignores writes.
+* **114/182 scramble**: writing the MMC3 register at the *scrambled* address and index produces the
+  same bank layout as an unscrambled MMC3; writing at the unscrambled address does not.
+* **The NROM override**: with the override register set, the MMC3's own PRG registers stop
+  affecting $8000-$FFFF; clearing it restores them.
+* **115's sharp IRQ**: latch = 0 asserts on every scanline, where the MMC3 proper does not.
+* **121's CHR A18 from PPU A12**: a fetch in $0000-$0FFF and one in $1000-$1FFF land in different
+  256 KiB halves with identical MMC3 CHR registers. Same test for 187.
+* **263's permutation**: a table-driven test over all 256 input bytes against the page's formula.
+* **182 writes zero to $6000/$6001 at startup and never again** — the page's own observation, as a
+  test that the board tolerates it.
+* **189**: a $4100 write with A9 set switches the 32 KiB bank; one with A9 clear does not.
+
+**Titles R0 should run**: *Aladdin*, *The Lion King*, *Boogerman* (SuperGame); *Pocohontas*,
+*Super Donkey Kong* (Hosenkan); *Mortal Kombat 3*, *Earthworm Jim 2* (H2288); *KOF '97*,
+*Boogerman II: The Final Adventure* (Rex Soft); *Street Fighter Zero 2 '97*, *The Panda Prince*
+(A9711); *Street Fighter Zero 2*, *KOF '96* (A98402); *A.V. 究極麻將 II*, *包青天*,
+*餓狼伝説 Special*, *雷電 II*, *三國春秋: 四川省*, *幽☆遊☆白書 Final* (SFC-02B);
+*第四次: 机器人大战*, *甲A*, *風雲 — Traitor Legend*, *Ying Lie Qun Xia Zhuan*,
+*Dai-2-Ji — Super Robot Taisen*, *哥伦布传*, *天神之剑*; *Thunder Warrior*,
+*Street Fighter II: The World Warrior*.
+
+---
+
+#### MF-UNL-3 — AVE, and the single-latch boards
+
+**Boards and features**: `board-nina03` (79, 146); `board-38`; `board-107`; `board-143`;
+`board-144`; `board-145`; `board-149`; `board-190`. **9 numbers, 8 features, ~8 h, ~27 titles.**
+
+**Why third**: it is where the largest single catalogue in the census — AVE's nineteen titles —
+sits behind the simplest board in the census, one register at $4100. The other seven are each one
+latch, and the lot exists to do them all at once in the manner of MF-6a's `SmallBoard`.
+
+**Steps**
+1. `Nina03`: the $4100 control register, 8 KiB CHR bank and 32 KiB PRG bank, for 79 and 146.
+   FCEUX's extra CNROM switch at $8000-$FFFF is **not** implemented — the page presents it as a
+   workaround for mislabelled mapper-3 images, not as hardware. Record that in a comment.
+2. One `SmallBoard`-style variant holding the seven remaining latches, each a `const`
+   parameterisation: 38's $7000-$7FFF bank select (with the page's warning that $F000-$FFFF very
+   likely switches too, implemented as the same decode); 107's single 8-bit register driving CHR
+   and PRG together, **with all eight bits** (the page notes FCEUX implements three and MesenCE
+   eight); 143's inverted-data protection read; 144's bus conflict where only the ROM's least
+   significant bit wins; 145's and 149's one-register CNROM clones; 190's CHR at $A000-$BFFF and
+   PRG at $8000-$9FFF/$C000-$DFFF.
+3. Eight features, eight `registry.rs` arms, `SUPPORTED_MAPPERS`, `board_memory_sizes`.
+4. §7.1's three common things. **Eight features is eight configurations plus all-and-none** — the
+   largest matrix any lot in the plan runs, and the reason this lot is eight hours and not six.
+
+**Tests from the pages**
+* **79/146**: a $4100 write selects the CHR and PRG banks; a write at $8000 changes nothing (the
+  anti-test for the FCEUX behaviour deliberately left out).
+* **38**: a $7000 write switches; so does a $F000 write; a $6FFF write does not.
+* **107**: all eight bits of the register are honoured — a bank number above 7 is reachable.
+* **143**: a read returns the **logical inversion** of the written bits, open bus elsewhere. The
+  page's note that *Dancing Blocks* "relies extensively on the values of uninitialized memory" goes
+  in a comment, not a test — it is a RAM-init property, not a mapper one.
+* **144**: a write of `$FF` to $8000 over a ROM byte of `$00` yields bank `$FE`, not `$FF` — the
+  300 Ω resistor rule. The page gives three candidate formulas; the test pins the one chosen and
+  the comment names the other two.
+* **145, 149**: a one-register CHR bank switch; 149 additionally ANDs with the ROM byte.
+* **190**: the three windows, each from its own register.
+
+**Titles R0 should run**: *Dudes with Attitude*, *Trolls on Treasure Island*, *Deathbots*,
+*Krazy Kreatures*, *Tiles of Fate*, *Double Strike*, *Impossible Mission II*, *Solitaire*,
+*Blackjack*, *Pyramid*, *Mermaids of Atlantis*, *Ultimate League Soccer*,
+*Wally Bear and the NO! Gang* (AVE); *Crime Busters* (Bit Corp.); *Magic Dragon* (Magicseries);
+*Dancing Blocks*, *Magical Mathematics*, *Sidewinder*, *Taiwan Mahjong 16* (Sachen);
+*Death Race* (Color Dreams); *Magic Kid Googoo* (Zemina).
+
+---
+
+#### MF-UNL-4 — the J.Y. Company ASIC
+
+**Board and feature**: `board-jy-asic` (35, 90, 209, 211). **4 numbers, 1 feature, ~8 h,
+13 original titles.**
+
+**Why fourth**: the single most-played body of unlicensed NES software there is, and the precedent
+is already paid — `board-116` exists because the owner accepted a board whose only titles are
+Hummer Team ports (*Somari*, *Kart Fighter*). This board carries thirteen more of them.
+
+**Why it is an L on its own**: it is the only board in the plan needing **four** hooks at once —
+a CPU-cycle IRQ *and* an A12 scanline IRQ with a selectable clock source, an MMC4-style CHR latch,
+and nametables served from CHR-ROM. The last is the one that is **not free**: §4.5's
+`Mapper::read_nametable` is capped at **two distinct bodies** by the Q-123 measurement, and this
+board would be a third. **That is the lot's main risk**, and the step list puts it first.
+
+**Steps**
+1. **Settle the nametable question before writing the board.** Measure a third
+   `Mapper::read_nametable` body against the Q-123 ceiling. If it costs what Q-123 measured, the
+   board serves nametables through the existing CHR-ROM path instead and the feature ships; if it
+   does not fit at all, the board is **parked** (`parked-boards`), which is exactly what the
+   mechanism is for. Record the figure in `PERFORMANCE-HISTORY.md`.
+2. `JyCompany`: the register map at $5000-$D003 — PRG and CHR banking modes, the nametable select,
+   the IRQ configuration, and the 8×8→16 **hardware multiplier**.
+3. The IRQ: one counter, a selectable source (CPU M2, PPU A12, or the other documented sources),
+   and one arm each on `on_cpu_cycle`, `on_ppu_address_bus` and `irq_asserted`. `ppu_irq_horizon`
+   answers `None` when the source is not A12.
+4. The CHR latch on `Board::ppu_read`, in the manner of the existing MMC4 path.
+5. 8 KiB of PRG-RAM through the existing save path; four `registry.rs` arms for 35, 90, 209, 211
+   behind the one feature.
+6. §7.1's three common things, and the PR-1 + level-2 measurement **per hook added**, not just at
+   the end — the lesson of MF-6a3 step 1, where two `Board` discriminants cost `mmc5` +0.080 %.
+
+**Tests from the page**
+* The **multiplier**: write two bytes, read the 16-bit product. A table-driven test.
+* **IRQ source selection**: with the source set to M2, the counter advances on CPU cycles and not
+  on A12 edges; with it set to A12, the reverse.
+* **The CHR latch**: a fetch of the latch tile switches the bank for subsequent fetches, and the
+  latch is per pattern table.
+* **Nametables from CHR-ROM**: with the nametable select pointing at CHR-ROM, a $2000-$2FFF read
+  returns CHR-ROM and not CIRAM; the four mirroring modes each map the four pages correctly.
+* The **banking modes**, one case per documented mode, PRG and CHR.
+* `ppu_irq_horizon` returns `None` for every non-A12 source — the property MF-6b's lots pinned for
+  every IRQ board.
+
+**Titles R0 should run**: *Super Mario World*, *Aladdin*, *Final Fight 3*, *Tekken 2*,
+*Donkey Kong Country 4*, *Contra Spirits*, *Mortal Kombat II Special*, *Mickey Mania 7*,
+*Tiny Toon Adventures 6*, *Warioland II*, *Shin Samurai Spirits 2*,
+*Mighty Morphin' Power Rangers III*, *Super Aladdin: The Return of Jaffar*.
+
+---
+
+#### MF-UNL-5 — the Chinese-RPG boards with a PPU-driven CHR-RAM window
+
+**Boards and features**: `board-163` (Nánjīng FC-001); `board-162` (Wàixīng FS304); `board-178`
+(Wàixīng FS305 / Nánjīng NJ0430). **3 numbers, 3 features, ~8 h, 13 original titles.**
+
+**Why these three together**: all three select a 4 KiB CHR-RAM page **from the PPU address lines
+rather than from a register** — one hook (`Board::on_ppu_address_bus` / `ppu_read`, §4.4, already
+built and latched), three boards, and three complete register tables. All three also want
+battery-backed PRG-RAM, which the save path has.
+
+**Scope decision this lot makes explicitly**: **submapper 0 only.** 163's submapper 1 ADPCM and
+178's submapper 2 TMS5220 speech are **deferred to a later expansion-audio lot**, and 178's
+submapper 1 infrared-sensor IRQ with it. Every category-A title on both boards is a submapper-0
+cartridge, so the lot preserves everything that made them A. 178's educational variants also want
+**Dendy timing**, which is a console-timing matter and out of this lot either way.
+
+**Steps**
+1. `Nanjing`: $5000 (PRG low / CHR-RAM switch), $5200 (PRG high), $5100-$5101 (feedback write),
+   $5500-$5501 (feedback read), $5300 (mode). Battery PRG-RAM. The automatic 4 KiB CHR-RAM page
+   from the PPU address.
+2. `Waixing162`: the four registers at $5000/$5100/$5200/$5300 and the same automatic CHR-RAM page.
+3. `Waixing178`: the four registers, mirroring control, PRG-RAM banking at $6000-$7FFF. The page's
+   warning that "two ROM images will not work when emulated using the above description" because
+   their register meanings are swapped is recorded as a **dumping-error note in a comment**, not
+   worked around — the page attributes it to bad dumps, not to a hardware variant.
+4. `expansion_audio_output` returns `None` for all three; `clocks_on_cpu_cycle` stays false. The
+   deferral is therefore invisible to every other board.
+5. §7.1's three common things.
+
+**Tests from the pages**
+* **The automatic CHR-RAM page**: a PPU fetch at an address in one quarter of the window selects
+  one 4 KiB page and a fetch in another selects another, with **no register write between them** —
+  the test that distinguishes this hook from register-driven banking.
+* **The feedback register** (163): write to $5100/$5101, read $5500/$5501, assert the documented
+  relation.
+* **PRG high/low composition** (163): $5000 and $5200 together select a bank above 256 KiB.
+* **Mirroring** (178): both arrangements from the register.
+* **Battery PRG-RAM**: a write at $6000-$7FFF survives a save-state round-trip and appears in the
+  save file, for all three.
+* `expansion_audio_output` is `None` and `ppu_irq_horizon` is `None` for all three.
+
+**Titles R0 should run**: *牧场物语 — Harvest Moon* (NJ011), *水浒神兽* (NJ019),
+*暗黑破坏神 — Diablo* (NJ037), *轩辕剑外传 之 天之痕* (NJ045),
+*Final Fantasy IV — 最终幻想 4* (NJ098), *雷电皇 比卡丘传说* (NJ046) (Nánjīng);
+*Mummy — 神鬼传奇*, *法老王 — Pharaoh*, *西游记后传*, *火焰纹章 — 圣战的系谱* (Wàixīng FS304);
+*宠物: 小精灵 IV*, *Ping Pong* (FS305).
+
+---
+
+#### MF-UNL-6 — COOLBOY / MINDKIDS
+
+**Board and feature**: `board-268`. **1 number, 1 feature, ~8 h, 12 original titles.**
+
+**Why it is its own lot, and the one thing to watch**: twelve original titles — nine Chinese RPGs
+and three modern licensed reissues (*Gravity Trooper Metal Storm*, *Holy Diver*, *Quest Forge*,
+through Retro-Bit / Piko Interactive) — behind an MMC3 whose outer registers take it from 512 KiB
+to **32-64 MiB**. The cost is not the registers, it is that **the page lists thirteen PCB codes**
+(COOLBOY, MINDKIDS, KT-008, YH2018A, JTH-813, GH2009_V01, SMD173C_60, SMD173C_L1, KP-6022, LD622D,
+J-852C, SMD72A_V5S_V01, SMD172C-L1) and its documentation is **partial**. A single implementation
+covering all thirteen is a guess; the lot should implement what the page documents, name in the
+code which PCB codes it is known to serve, and leave the rest refusing.
+
+Mapper **224** (census E) is the same chipset per its own page and would come along if that
+implementation ever covers the MINDKIDS variant — but 224 has no title, so this lot does not add
+it.
+
+**Steps**
+1. `Mmc3Outer`: an MMC3 with the page's outer bank registers, the mixed CHR-ROM/RAM modes and the
+   GNROM-style and "weird" MMC3 variants it documents.
+2. Lift the **PRG/CHR size ceiling** in the loader and in `board_memory_sizes` to what a 64 MiB
+   image needs — a check this build has never had to make, and the lot's real risk.
+3. The lockout: documented, and implemented as a no-op with the reason in a comment, as the
+   Camerica row of `BOARD-FEATURES.md` already does for 232 ("mostly unimportant for emulation").
+4. §7.1's three common things, plus a **header-size regression test**: an image declaring 64 MiB of
+   PRG loads, and one declaring more is refused with REQ-CORE-011's message rather than panicking.
+
+**Tests from the page**: each documented banking mode, one case each; an outer-bank write selects a
+bank above 512 KiB; the CHR-ROM/CHR-RAM mix; and the size-ceiling pair above.
+
+**Titles R0 should run**: *大话水浒*, *楚留香新传*, *魔道劫*, *口袋妖怪: 叶绿* (vols 1-3),
+three *最终幻想* titles, *神奇宝贝*; *Gravity Trooper Metal Storm*, *Holy Diver*, *Quest Forge*.
+
+---
+
+#### MF-UNL-7 — the Sachen 8259, the 206 clones and two homebrew boards
+
+**Boards and features**: `board-sachen8259` (137, 138, 139, 141); `board-112`; `board-193`;
+`board-298`; `board-218` (Magic Floor); `board-29` (RET-CUFROM). **9 numbers, 6 features, ~7 h,
+10 original titles.**
+
+**Why these together**: five of the six are a variant of something already here — 112 and 193 are
+near-206 boards and `board-namcot108` has the 206; 298 is a `Vrc2Vrc4` `Vrc4b`; 218 and 29 are one
+latch each. The 8259 is the only new board, and it is one chip with four wirings.
+
+**The documentation caveat this lot has to carry**: the 8259 page says its information "was
+gathered primarily from FCEU-mm and while it appears to be a good enough behavioral description to
+run many ROMs, it is likely incomplete", and **it governs all four numbers**. Neither NESdev nor
+Wikipedia attributes the 8259 titles to 137/138/139/141 individually. So the lot implements the
+four variants from the page's own A/B/C/D table and **records the attribution gap in the code
+comment** — it does not guess which variant *The Great Wall* and *Q-Boy* are on beyond what the
+page says (137 is the D and the page gives *The Great Wall* as "the only known game").
+
+**Steps**
+1. `Sachen8259<const VARIANT: u8>`: the $4100 index / $4101 data pair, internal registers 0-3
+   (CHR select), 4 (CHR outer bank), 5 (PRG bank) and 7 (mode and mirroring), with the per-variant
+   CHR shift the page's table gives. Four `registry.rs` arms behind one feature.
+2. `board-298`: a `const` parameter on `Vrc2Vrc4` selecting `Vrc4b` plus the one documented
+   difference — **"writing to $F003 only acknowledges a pending IRQ"** — in the manner of `McAcc`.
+3. `board-112`: the 206 with the page's scrambled registers at $8000/$A000/$E000.
+4. `board-193`: NTDEC's TC-112 — CHR in three registers over unequal windows, PRG at $8000-$FFFF,
+   mirroring at **$6004**.
+5. `board-218`: no CHR memory at all. The 2 KiB of CIRAM serves the pattern tables, and the four
+   configurations are which PPU address line drives CIRAM A10 — A10, A11, A12 or A13 — through
+   `Mapper::nametable_page`, which §4.10 prices at **0**.
+6. `board-29`: the $8000 register, two bits of CHR-RAM bank and three of PRG bank, hard-wired
+   vertical mirroring, 8 KiB WRAM. The CopyNES flash-write path (EXP0 and R/W low) is **not**
+   emulated — it is a programmer feature, not a game one; comment says so.
+7. §7.1's three common things.
+
+**Tests from the pages**
+* **8259**: index/data writes reach each of registers 0-5 and 7; the four mirroring modes including
+  `(0,1,1,1)` and one-screen A; the per-variant CHR shift distinguishes A from B from C from D;
+  the CHR-RAM variant (the 2M-RAM-COB board) ignores CHR writes when disabled.
+* **298**: a write to $F003 acknowledges an IRQ and does **not** reload the counter — the single
+  difference from mapper 21/25, as a direct A/B against the existing VRC4b.
+* **112**: the scrambled register order produces a 206's bank layout; the unscrambled order does
+  not.
+* **193**: the three CHR windows are unequal and each from its own register; a $6004 write changes
+  mirroring (and the page's note that "no games are known to rely on changing mirroring at
+  run-time" is a comment, not a reason to skip the test).
+* **218**: a pattern-table fetch returns CIRAM; each of the four configurations gives the documented
+  two-screen or one-screen arrangement; **there is no CHR bank register to test**, which is the
+  point.
+* **29**: four CHR-RAM banks, eight PRG banks, writes to CHR-RAM visible on read-back.
+
+**Titles R0 should run**: *The Great Wall*, *Q-Boy* (Sachen 8259); *Huang Di*,
+*San Guo Zhi — Qun Xiong Zheng Ba* (112); *Fighting Hero*, *War in the Gulf* (193);
+*Lethal Weapon* (298); *Magic Floor*, *Starfight* (218); *Glider* (29).
+
+---
+
+#### MF-UNL-8 — Huang-1's last two numbers, Cony/Yoko, and J.Y.'s simple board
+
+**Boards and features**: `board-huang1` (12, 14); `board-cony` (83, 264); `board-91`.
+**5 numbers, 3 features, ~8.5 h, 10 original titles.**
+
+**Why these together**: all three hold a board that is a near-relative of something this build has.
+12 and 14 are the **Huang-1**, the same ASIC as mapper **116**, which `board-116` already
+implements as `Somari` — so `Somari`'s three-chip delegation is the starting point and MF-6b step 6
+already wrote 14's design. 83/264 and 91 are both IRQ boards whose hooks are built.
+
+**Steps**
+1. `board-huang1`, from `Somari`: 12 is the SL-5020B chip-on-board — the same ASIC plus an external
+   register at **$4132** for 512 KiB of CHR — so it is `Somari` with one more register.
+   Submapper 1 (the FFE Magic Card 4M) is **not** implemented: it is copier hardware with a trainer,
+   the same reason §1.8 puts 6/8/17 out, and the code comment says so.
+2. 14, exactly to MF-6b step 6's table: the supervisor at **$A131** overlapping the MMC3's and the
+   VRC2's own registers (so the board's decode runs *before* the sub-board's), two modes (VRC2 and
+   MMC3, **no MMC1 mode**), and **three independent CHR A18 bits** applied to 1 KiB window groups
+   `0-3`, `4-5` and `6-7`. Its mirroring rule comes from Nestopia's source by the page's own
+   admission, so the implementation follows the page and the comment records the caveat.
+3. `board-cony`: the $8000 PRG base, the $8100 mode register (mirroring, banking modes, IRQ
+   control), the $8300-$8303 8 KiB PRG banks, the $8310-$8317 CHR banks (2 KiB on 264/83.1), the
+   $5000 solder-pad read and the $5100-$5103 scratch RAM. One IRQ counter, **source selectable
+   between CPU M2 and PPU A12** — both hooks built.
+4. `board-91`: CHR banks, mirroring, the IRQ counter and PRG banks. The page's warning that "the
+   commonly available ROM image of Super Fighter III is a mapper hack for INES Mapper 197" is a
+   comment — that title is **not** evidence for this board and is not in R0's list below.
+5. §7.1's three common things.
+
+**Tests from the pages**
+* **14's supervisor decode**: a write to $A131 switches mode *and* is seen by the sub-board's
+  register at the same address — the ordering test that the overlap makes necessary.
+* **14's three CHR A18 bits**: with the three bits set differently, windows 0-3, 4-5 and 6-7 land in
+  different 256 KiB halves. One case per group.
+* **12's $4132**: an outer CHR bank above 256 KiB is reachable; with $4132 clear it is not.
+* **Cony's IRQ source**: as MF-UNL-4's — M2 advances on CPU cycles only, A12 on edges only.
+* **Cony's scratch RAM**: four bytes at $5100-$5103 read back what was written and survive a
+  save-state round-trip; the **solder-pad read at $5000** returns the configured value.
+* **91's IRQ counter** and its four register groups, one case each.
+* `ppu_irq_horizon` is `None` whenever the source is not A12, on both IRQ boards.
+
+**Titles R0 should run**: *Dragon Ball Z 5* (12); *Samurai Spirits*, the 8-character version (14);
+*Street Fighter II Pro*, *Fatal Fury 2*, *World Heroes 2'*, *Super Blaster VII Turbo 28* (Cony);
+*Street Fighter 3*, *Mortal Kombat II*, *Dragon Ball Z 2*, *Mario & Sonic 2* (91).
+
+---
+
+#### MF-UNL-9 — Cheapocabra (GTROM)
+
+**Board and feature**: `board-111`. **1 number, 1 feature, ~6 h, 7 original titles.**
+
+**Why it is worth an L for one number**: seven *commercially released* homebrew games —
+*Anguna: Scourge of the Goblin King*, *Candelabra: Estoscerro*, *The Incident*, *NEScape*,
+*Project Blue*, *Spook-o-tron*, *Storied Sword* — on a fully documented board with a schematic,
+from a maker that still sells the cartridges. It is the best titles-per-number ratio of any single
+number in the census outside the J.Y. ASIC.
+
+**Why it is an L**: the save path. The board has **no PRG-RAM**; the game rewrites its own
+**SST39SF040 flash**, so a save means recognising the chip's command sequences and persisting a
+sector of what the loader believes is read-only ROM. That is a shape `CartridgeMemory` does not
+model, and it is the whole of this lot's difficulty.
+
+**Steps**
+1. A `FlashRom` memory kind in `CartridgeMemory`: the SST39SF040's command sequence (the
+   unlock writes, sector erase, byte program), a dirty-sector set, and a save file that is the
+   changed sectors rather than a separate RAM image. **This is the step to design before coding** —
+   it is the first time this build persists something that the ROM window reads.
+2. `Gtrom`: the control register's PRG bank, its **bit 5 selecting between two 8 KiB CHR-RAM pages
+   used as nametable RAM**, and four-screen mirroring forced with no alternative.
+3. Bits 6-7 (the two LEDs) are decoded and discarded, with the page's own "currently universally
+   unsupported" quoted in the comment.
+4. §7.1's three common things, with the save-state round-trip extended to cover a **flashed**
+   sector as well as mapper state.
+
+**Tests from the page**
+* The flash command sequence: an unlock-then-program sequence changes a ROM byte; an **incomplete**
+  sequence does not; a sector erase sets a whole sector to `$FF`.
+* A flashed byte survives a save-state round-trip **and** appears in the save file.
+* Bit 5 switches the nametable between the two 8 KiB CHR-RAM pages; a write to one page is not
+  visible in the other.
+* Mirroring is four-screen regardless of the header's flag.
+* The LED bits change nothing observable.
+
+**Titles R0 should run**: the seven above.
+
+---
+
+#### MF-UNL-10 — Dōngdá PEC-9588
+
+**Board and feature**: `board-164`. **1 number, 1 feature, ~7 h, 6 original titles.**
+
+**Six titles** — *Final Fantasy 太空戰士 V* (G-003), *大話西游* (G-004), *櫻桃小丸子* (G-005),
+*岳飛傳* (G-006), *Dark Seed — 黑暗之蛊* (G-009), *口袋精靈: 金* — with catalogue numbers, behind a
+**full** register table. **An L for two reasons**: a **93C66 512-byte serial EEPROM over a Microwire
+interface**, which is a third EEPROM shape beside the X24C01 and 24C02 the inventory's §4.6 already
+plans for Bandai's 157/159; and a **1 bpp video mode** that changes CHR addressing.
+
+**Note for sequencing**: if MF-6c's Bandai row (157, 159) is built first, its EEPROM work is most
+of this lot's step 1. **This lot should follow MF-6c, not precede it**, and that is the only
+ordering constraint the plan has beyond "MF-UNL-2 after nothing".
+
+**Steps**
+1. A Microwire serial-EEPROM device in `CartridgeMemory`, parameterised by word width — 93C66 is
+   512 bytes at 16-bit words. Shared with, or shared by, 157/159's X24C01 and 24C02.
+2. `Pec9588`: the five registers at $5000/$5100/$5200/$5300/$5500, mirroring from $5300, and the
+   1 bpp CHR addressing mode.
+3. §7.1's three common things, with the save path exercised through the EEPROM.
+
+**Tests from the page**: the EEPROM's read and write command sequences, bit by bit over the serial
+line, against the 93C66's documented protocol; a written word survives a save-state round-trip and
+reaches the save file; the 1 bpp mode changes which CHR bits a pattern fetch consumes; mirroring
+from $5300.
+
+**Titles R0 should run**: the six above.
+
+---
+
+#### MF-UNL-11 — the Kǎshèng protection MMC3s
+
+**Boards and features**: `board-215` (UNL-8237/8237A); `board-208`; `board-219`.
+**3 numbers, 3 features, ~7 h, 6 original titles.**
+
+All three are an MMC3 with a protection mechanism and an extended banking mode, and all three use
+only hooks this build has. They are late in the plan because the titles-per-hour is low, not because
+anything is hard.
+
+**Steps**
+1. `board-215`: the $5007 register selecting one of **eight** address/data scramble patterns, plus
+   the outer banks and the NROM override. Submapper 0 is UNL-8237 and 1 is UNL-8237A.
+2. `board-208`: the PRG bank and mirroring at $4800-$4FFF and $6800-$6FFF, the protection index at
+   $5000-$57FF and the protection data at $5800-$5FFF **XOR'd against the page's 256-byte table**,
+   which goes in the source as a `const` array with the page cited.
+3. `board-219`: the extended mode at $8002 bit 5 — four independent PRG windows and pseudo-2 KiB
+   and 1 KiB CHR switches — with outer bits at $5002/$5003 for 512 KiB, and standard MMC3 behaviour
+   when the mode bit is clear.
+4. §7.1's three common things.
+
+**Tests from the pages**
+* **215**: each of the eight $5007 patterns produces its documented bank layout — eight cases, one
+  per pattern, which is the only way to prove the table is transcribed right.
+* **208**: write an index, write data, read back and assert the XOR against the table; a wrong code
+  leaves the board in the state the page describes.
+* **219**: with $8002 bit 5 set, the four PRG windows are independent; with it clear, the board is
+  an MMC3. The pseudo-2 KiB CHR switch at the documented PPU range.
+
+**Titles R0 should run**: *Earthworm Jim 2*, *Mortal Kombat 3*, *Mortal Kombat 3 Extra 60*,
+*Pocahontas Part 2* (215); *快打傳説 — Street Fighter IV* (208); *Toy Story* (219).
+
+---
+
+#### MF-UNL-12 — the last three singletons
+
+**Boards and features**: `board-262` (UNL-SHERO); `board-292` (UNL-DRAGONFIGHTER); `board-246`
+(G0151-1). **3 numbers, 3 features, ~7 h, 4 original titles.**
+
+Last because the ratio is lowest. Each is nonetheless a clean board with a complete-enough page.
+
+**Steps**
+1. `board-262`: an MMC3 clone with 8 KiB of CHR-RAM, a CHR-ROM/CHR-RAM select and the high CHR bits
+   at **$4100**, and **4 KiB of extra VRAM for four-screen mirroring** — the one nametable shape in
+   this lot, and the one §4.5 already has a path for. Several masks on the page are "probably" or
+   "unknown"; the implementation follows the page and the comment lists which masks are guesses.
+2. `board-292`: the XOR protection and the two registers reached by **reads as well as writes** at
+   $6000-$7FFF driving CHR A17-A18 and the per-pattern-table XOR values. `Cartridge::cpu_read`
+   already reaches that window, so no new hook.
+3. `board-246`: four PRG banks at $6000-$6003 and four CHR banks at $6004-$6007, battery PRG-RAM at
+   the unusual **$6800-$6FFF**, and a **forced PRG A17 on reads from certain CPU addresses**. The
+   page's note that *封神榜* "only work[s] in Famiclones" is recorded in the comment — this build
+   targets NTSC/PAL/Dendy timing, and whether the game runs is a timing matter outside the board.
+4. §7.1's three common things.
+
+**Tests from the pages**
+* **262**: the CHR-ROM/CHR-RAM select at $4100 flips the source for a CHR read; the four-screen
+  arrangement maps all four pages to distinct RAM; the high CHR bits reach banks above 256 KiB.
+* **292**: a **read** at $6000-$7FFF changes the CHR bank, which is the test that proves the
+  read path is wired; the XOR values differ per pattern table; the effective-bank arithmetic
+  checked against the page's own worked table.
+* **246**: the eight bank registers; a PRG-RAM write at $6800-$6FFF survives a round-trip and a
+  write at $6000-$67FF does **not** reach PRG-RAM (it is a bank register); the A17 forcing on the
+  documented read addresses.
+
+**Titles R0 should run**: *Street Heroes*, *侍魂 — Samurai Spirits* (262); *Dragon Fighter* (292);
+*封神榜 — Fēngshénbǎng: Fúmó Sān Tàizǐ* (246).
+
+### 7.3 The category-A boards this plan excludes, and the only reasons left
+
+Seven of the 44 A boards are out. **No exclusion below is a performance argument** — the owner
+retired that — and each cites one of the three reasons that remain.
+
+| board | numbers | reason | the argument |
+| --- | ---: | --- | --- |
+| not named | **170** | **no reliable public documentation** | the page is **one sentence**: the mapper is used by one unlicensed Famicom title. No register, no mask, no mode, no publisher, no board name. *Shiko Game Syu* is a real original game and this is the census's clearest "worth preserving, impossible to build" row — the same position MF-6b step 6 put mapper 238 in. **If a register table appears, this becomes an S.** |
+| not named (RCM Group) | **216** | **no reliable public documentation** | three original titles (*Bonza*, *Videopoker Bonza*, *Magic Jewelry II*) and a stub. The only technical statement on the page is that some revisions need **Dendy timing** to display correctly — which is a console-timing note, not a mapper description. Nothing to write a test from. |
+| two unnamed PCBs | **240** | **no reliable public documentation** | two original titles, one of them Hummer Team's *Jīng Kē Xīn Zhuàn* (Wikipedia: "a Chinese language RPG"), and a page that says "Selects 32k PRG @ $8000" and "Selects 8k CHR @ $0000" with two different decodings and **no mask, no power-on state and no way to tell the two PCBs apart** except by a heuristic the page does not give. |
+| not named (C&E) | **244** | **no reliable public documentation** | one original title, *Decathlon*, and a page with no technical content at all. |
+| DREAMTECH01 | **521** | **no reliable public documentation** | one original title, a Korean Igo tutorial, and a stub: a bank register at $5020 with mask $F030 and a fixed last bank, with no power-on state and no account of what the other bits do. **Borderline** — closer to implementable than the four above — and the honest call is that one title does not justify guessing. |
+| UNL-SA-9602B | **513** | **development cost out of proportion** | one title (the *Princess Maker 3* port), and it would need **32 KiB of battery-backed CHR-RAM** — a save shape on the CHR side that `CartridgeMemory` does not model and that no other board in the census wants. A new save path for one game. If a later lot adds CHR-side saves for another reason, 513 becomes an **S** and should be revisited. |
+| UNL-DRIPGAME | **284** | **development cost out of proportion** | one homebrew title, *Drip*, and the page (comprehensively) asks for a cycle IRQ with a reload buffer, **two FIFO-buffered expansion-audio channels**, and **extended attribute tables giving per-tile palette selection**. That last is not a cartridge feature: it changes what the **PPU** fetches for attributes, so it is `zax-ppu`'s hot loop and SPEC-06's text, not the cartridge layer. One game does not justify reaching into the renderer. |
+
+**And one E worth naming, because the owner may want to overturn it cheaply: mapper 31.** Full
+documentation, no hook at all, three lines of code — a 4 KiB PRG bank register at $5FF8-$5FFF with
+the top bank fixed at power-on. It is **E** because its titles are not games: *2A03 Puritans* and
+*Famicompo Pico* are chiptune compilations and *EZNSF*/*ZENSF* are NSF players. The census does
+**not** propose it, and records the price so the decision has a number on it: **S, no hook, one
+feature**. The same holds, less cheaply, for **323** and **324** (Farid's homebrew 8-in-1s, an MMC1
+and a UNROM with an outer bank), which are out because **neither page names a single title**.
+
+### 7.4 What the plan does not change
+
+* **`req_core_102_any_other_mapper_is_refused` holds unchanged.** It sweeps 6, 116, 177 and 200;
+  116 is already supported, and this plan leaves **6** (category E, copier hardware), **177**
+  (category E, no game) and **200** (category C, a multicart) out. Q-130 question 2's observation —
+  that the test holds no number guaranteed never to become supported — is still true and is
+  restated with candidate replacements in **Q-133**.
+* **REQ-CORE-100's criterion is untouched.** The 101 embedded profiles are all licensed titles;
+  none of the 60 numbers has a profile, and every feature this plan adds is measured against the
+  +0.02 % tolerance that protects the default build.
+* **Nothing here is a spec change.** Whether REQ-CORE-102's permission reaches 60 numbers is
+  **Q-133 question 1**, filed with the provisional choice (the permissive reading) that this plan
+  is written on. No code has been written on it, so a restrictive answer costs the plan and nothing
+  else.

@@ -21,7 +21,7 @@ preserving; compilations, multicarts of licensed titles and FDS-to-cartridge con
 | 3 | census part C — the MMC3 clones of §3.2, mapper 14 among them | **done** |
 | 4 | census part D — the homebrew numbers, and the census's category totals | **done** |
 | 5 | the category-A detail: documentation quality, hooks, effort per number | **done** |
-| 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | to do |
+| 6 | the plan of the MF-UNL lots, and the A boards excluded under the three remaining reasons | **done** |
 | 7 | the check — `cargo fmt --check`, `cargo test --release -p zax-nes -p zax-harness` | to do |
 
 ## Step 0 — the number set, and an arithmetic correction to the inventory
@@ -199,3 +199,47 @@ The findings that change a decision:
 * **Expansion audio appears three times and is optional every time**: 163 sub 1 (ADPCM), 178 sub 2
   (TMS5220), 284. On 163 and 178 the A titles sit on submapper 0, so both ship without their audio
   chip and still preserve what made them A.
+
+## Step 6 — twelve MF-UNL lots over 37 boards and 60 numbers, and Q-133
+
+`docs/review/UNL-census.md` §7, and `spec/changes/Q-133.md`.
+
+* **Twelve lots, 37 boards, 60 numbers, ~89 h, ~171 original titles**, ordered by titles per hour.
+  Every board gets its own Cargo feature; a family is **one** feature because it is one `Board`
+  variant or one `const` monomorphisation, per `BOARD-FEATURES.md` note 1.
+* **The order is the owner's rule made arithmetic.** MF-UNL-1 is the **JV001 protection ASIC** plus
+  Sachen's two register ASICs — 9 numbers, 3 features, ~7.5 h, **~37 titles, 4.9 titles/h**, the
+  best ratio in the plan. Then the MMC3 clones that need nothing new (3.7), then AVE's nineteen
+  titles behind one $4100 register (3.4). The J.Y. Company ASIC is fourth at 1.6 and COOLBOY sixth
+  at 1.5. MF-UNL-12 is last at 0.6.
+* **MF-UNL-2 starts by generalising code already in `default`.** Mesen builds 74, 119, 191, 192,
+  194 and 195 from one class and **119 is `board-119`**, so step 1 is
+  `Mmc3ChrRam<FIRST, LAST, SIZE>` with 119 as `(0x40,0x7F,8)` producing a **byte-identical** dump
+  against its current implementation — the one place in the whole plan a lot can regress against
+  something that already works, since no ROM exists for any of these boards.
+* **MF-UNL-4's risk is named and sequenced first**: the J.Y. ASIC serves nametables from CHR-ROM,
+  and §4.5's `Mapper::read_nametable` is capped at **two distinct bodies** by Q-123. Step 1 is to
+  measure a third body; if it does not fit, the board is **parked**, which is what the mechanism is
+  for.
+* **MF-UNL-10 (164) must follow MF-6c**, whose Bandai 157/159 EEPROM work is most of its step 1.
+  The plan's only ordering constraint beyond the ratio.
+* **Two scope decisions stated rather than assumed**: MF-UNL-5 ships 163 and 178 on **submapper 0
+  only** (every A title is there), deferring the ADPCM, the TMS5220 and the infrared IRQ to a later
+  expansion-audio lot; MF-UNL-8 does **not** implement mapper 12's submapper 1, which is the FFE
+  Magic Card copier with a trainer.
+* **Seven A boards excluded, each under one of the three remaining reasons and none on
+  performance**: 170, 216, 240, 244, 521 on **no reliable public documentation** (170's page is one
+  sentence; 240's gives no mask, no power-on state and no way to tell its two PCBs apart); 513 and
+  284 on **development cost out of proportion** — 513 wants a battery-backed **CHR**-RAM save shape
+  for one game, and 284 wants **extended attribute tables**, which is `zax-ppu`'s hot loop, for one
+  homebrew title.
+* **Mapper 31 is priced and not proposed**: full documentation, no hook, S — but its titles are
+  chiptune compilations and NSF players, not games. Recorded so the owner can overturn it cheaply.
+* **`req_core_102_any_other_mapper_is_refused` holds unchanged**: it sweeps 6, 116, 177 and 200,
+  and the plan leaves 6 (E), 177 (E) and 200 (C) out.
+* **Q-133 filed** (next free number; Q-129 to Q-132 exist), two questions, both with the
+  provisional choice marked: (1) does REQ-CORE-102's unqualified permission reach **60** more
+  numbers when REQ-CORE-101 names only 116 — provisional **yes**, the permissive reading, and no
+  code has been written on it; (2) Q-130 q2 restated, with candidate replacement numbers for
+  REQ-CORE-102's criterion drawn from the numbers Mesen marks as having no implementation on either
+  side and for which NESdev has no page.
