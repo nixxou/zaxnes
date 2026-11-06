@@ -1999,3 +1999,116 @@ in `BOARD-FEATURES.md`, every configuration green, and the owner's "with a featu
 the same as without it" **shown** — the features-off dump is step 4's on every pinned symbol, and
 the two 36 MB files differ in eighteen lines, all of them `Cartridge::create`'s three deliberate
 `matches!` bitsets and five `panic::Location` line numbers.
+
+## Step 11 — the check
+
+### The campaign: **331 rows, identical field by field**
+
+`zax-harness test-roms G:/3dsen/cleanroom/assets-free/test-roms target-mf/camp-6c.json --no-shots`,
+then `campfields.py target-mf/camp-6a3.json target-mf/camp-6c.json`:
+
+    base 331 rows, new 331 rows, same set: True
+    summaries compare equal as objects: True
+      base: {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+      new : {'total': 331, 'pass': 214, 'fail': 5, 'timeout': 0, 'unsupported': 1, 'manual': 111}
+
+    rows differing on any field but ['ms', 'shot']: 0
+
+**Zero rows differ on any field**, `ms` and `shot` excluded, which is what the brief asks for rather
+than the verdict alone. The suites are `nes-test-roms` (291 rows) and **`holy-mapperel` (40 rows,
+all forty `pass`)**, which the brief names explicitly. The mapper numbers the campaign exercises are
+0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 22, 28, 34, 66, 69, 78, 118 and 180, **none of them a number this
+lot adds** — there is no test ROM in `assets-free` for any of the eighteen, which §2 of the
+inventory already said of every board of this lot. So what the campaign proves is the thing worth
+proving: eighteen numbers, five Cargo features, a new `Board` discriminant and a new shared enum
+changed **nothing** for the boards that were already there.
+
+### The `--ignored` suite, with both ROM folders
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`,
+`cargo test -p zax-nes -p zax-harness --release --no-fail-fast -- --ignored`: **7 passed, 1 failed**.
+
+| test | |
+| --- | --- |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | **ok** — the brief names it |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | **ok** — see below |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | ok |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | ok |
+| `req_core_113_dmc_dma_during_read4_is_p3` | ok |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | ok |
+| `the_cost_of_one_capture_and_one_restore` | ok |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **FAILED, and not this lot's** |
+
+**The one failure is pre-existing, and the check proves it rather than claiming it.** R0's journal
+entry of 2026-11-06 already records this test as real and deterministic, failing on
+`assert!(apply(&hack).is_none())`; this step reproduced it **at the lot's own baseline**, `45aa86ae`,
+built in a scratch directory of its own with the same `ZAXNES_ROMS`: the same assertion on the same
+line. No commit of this lot touches `builtin_patches.rs` (`git log 45aa86ae..HEAD --` on that file
+is empty), and the mechanism is in that file — `patch_for`'s `or_else(pack_matching(…))` fallback
+catches an image whose CRC no longer matches, so a one-byte hack still takes the patch. It belongs
+to the "Zelda II patch" lot R0 has scheduled.
+
+### golden-core, measured twice because the first answer was not worth much
+
+In this worktree `rust/test-roms/` — gitignored, the owner's own collection — holds **one** ROM, so
+the test passes having examined **1 of its 291 rows**, with 290 missing. That is a pass, and it is
+nearly vacuous. The 291 rows name ROMs of the `nes-test-roms` collection, which *is* in
+`assets-free`, so the step linked the whole of it in and ran the test for real:
+
+    # 66 junctions, into a directory .gitignore already covers
+    Get-ChildItem G:\3dsen\cleanroom\assets-free\test-roms\nes-test-roms -Directory |
+      ForEach-Object { cmd /c mklink /J (Join-Path $dst $_.Name) $_.FullName }
+
+| | rows matched | mismatching | missing |
+| --- | ---: | ---: | ---: |
+| **the tip** | 240 of 291 | 51 | 0 |
+| **the baseline `45aa86ae`** | 240 of 291 | 51 | 0 |
+
+and the two lists of 51 are **identical line for line, reason for reason** (`diff` of the captured
+output is empty). So the mismatches are a property of `assets-free`'s dumps — the goldens were
+recorded against the owner's collection, and the two differ — and **not one of them moved in this
+lot**. `read_pattern_planes` holding at 107 and the campaign's zero differing rows say the same
+thing from two other directions.
+
+**The junctions were then removed**, leaving `rust/test-roms` as it was found, with `nestest.nes`
+alone: with them in place that ignored test *fails*, without them it passes, and leaving a trap
+behind would be worse than leaving the weak check. The command above is recorded here so the next
+session can repeat the strong one in thirty seconds.
+
+### The documents
+
+* **`docs/review/MF-6-inventory.md`**, four places, each where a reader of the plan would look for
+  the answer: §4.4 gets MR-1's question answered **for mapper 96 and only for it**, with the page's
+  sentence and the `157 → 161` the dispatch cost; §4.5 gets the Q-123 ceiling **re-measured at the
+  third and fourth bodies** and found absent (114 → 75 → 75); §4.9 gets a third consequence it did
+  not know — **each shared variant has its own limit**, `SmallBoard` ten, `IrqBoard` ten,
+  `DecodeBoard` four, and one new `Board` discriminant is free; and §5's MF-6c paragraph gets the
+  outcome, including that **the two risks it named were not the ones that bit**.
+* **`docs/review/BOARD-FEATURES.md`**: five new rows, and a header that explains both parks together.
+* **Q tickets**: **Q-134** (step 3, the LZ93D50 EEPROM's direction bit) and **Q-135** (step 8,
+  mapper 96's "Bus conflicts: partly"). Nothing else in the lot needed one — the four gaps are
+  argued decisions, not ambiguities, and each is recorded on the board that has it.
+* **The journal**: `journal/JOURNAL.md`, the entry of 2026-11-06 for steps 6 to 11, with the two
+  findings a later lot needs, the verification figures, and what was deleted to keep the disk alive.
+
+### What the lot delivered
+
+| | |
+| --- | ---: |
+| mapper numbers | **14** — 153, 80, 207, 82, 552, 157, 159, 68, 77, 72, 92, 86, 96, 111, which is §5 MF-6c's list entire |
+| distinct boards | **11**, the nine rows §5's table groups them into |
+| in `default` | **9 numbers** (153, 157, 159, 68, 77, 72, 92, 86, 96) |
+| parked | **5 numbers** in two features (`board-taito-x1`: 80, 207, 82, 552; `board-111`), both on `Cartridge::default_cpu_read`'s two layouts and neither on anything the boards do |
+| Cargo features added | **5** (`board-decode-boards`, `board-77`, `board-jaleco-72-92-86`, `board-96`, `board-111`) |
+| tests added | **26** — 899 → **917** in `default` with `zax-harness`, and **925** with `--features parked-boards`, the eight-test gap being the two parked features' own |
+| Q tickets | **2** (Q-134, Q-135) |
+| gaps recorded with their argument | **4** (the µPD7756C audio, the Oeka Kids tablet, the GTROM's LEDs and register read, *Nantettatte!!*'s external ROM) |
+| `Ppu2C02::read_pattern_planes` | **107**, unchanged at every step |
+| the three `Cpu6502::step` inlinings | **0 / 0 / 0**, at every step |
+
+[PROGRESS] MF-6c step 11/11 done: the campaign is **331 rows identical field by field** to MF-6a3's
+with `holy-mapperel`'s forty all passing, the `--ignored` suite is 7 of 8 with the one failure
+**reproduced at the lot's baseline** and owned by another lot, and golden-core is **240 of 291 with
+the same 51 mismatches at the baseline and at the tip** when the whole golden collection is linked
+in. Lot complete: **fourteen numbers over eleven boards**, nine of them in `default` and five parked
+in two features, 26 tests, two Q tickets and four argued gaps.

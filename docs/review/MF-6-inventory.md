@@ -380,6 +380,18 @@ REQ-CORE-039 constrain our side anyway. **Mapper 96 would be the first board for
 distinction is not academic**, because its whole mechanism is the address bus. A sub-lot doing 96
 inherits MR-1's open question and must say which way it read it.
 
+> **Answered for mapper 96, and only for it: MF-6c step 8.** The board's own page settles it in one
+> sentence — "This latching occurs regardless of whether the PPU or game code initiated the address
+> change, enabling software to manually select CHR pages by writing specific values to $2006" — so
+> the number went into **both** latches, `watches_ppu_reads` and `watches_ppu_bus_without_read`, and
+> it is the first number in either with no IRQ at all. **MR-1's question about the MMC2 stays
+> open**: what it asks is whether a latch whose rule is about /RD should move on a bare address
+> change, which REQ-CORE-033 and REQ-CORE-039 constrain and this board's page says nothing about.
+> Each board's own documentation answers its own. The cost was §4.4's own prediction and no more:
+> `Board::on_ppu_address_bus` went **157 → 161 instructions**, the new arm being a `callq` because
+> `OekaKids::on_ppu_address_bus` carries `#[inline(never)]`, and `m4` — the ROM that shares the
+> dispatch — moved +31 167 over 300 frames, +0.001 %.
+
 ### 4.5 `Mapper::read_nametable` — nametable control, and the Q-123 ceiling
 
 **This is the hook the inventory should make a sub-lot most afraid of**, and the reason is a
@@ -422,6 +434,17 @@ the *same feature* the VRC6 has and we deliberately do not implement. **Mapper 1
 would be a fourth** if its 32 KiB of CHR-RAM nametable pages do not reduce to `nametable_page`
 alone. **Mapper 77 (Napoleon Senki) is not one**: its cartridge RAM sits at $0800-$1FFF, inside
 CHR space, with nametables staying on CIRAM, so it is a `chr_view` question and not this one.
+
+> **Re-measured twice, and the ceiling is not there: MF-6c steps 4 and 9.** §4.5 asked the next
+> lot to measure rather than quote, and the answer is zero both times.
+> `Ppu2C02::read_nametable_inner` is **114** instructions at MF-6c's baseline with two arm bodies;
+> **75** with the Sunsoft-4's third (step 4, the dispatch leaving by a tail call, set total
+> +17 007 and `readbuf` −78 628); and **75** again with the GTROM's fourth (step 9, unchanged to
+> the instruction). `Ppu2C02::read_pattern_planes` held at **107** through both. So Q-123's
+> "132 → 109 for every game in the library" was a property of the tree MF-5a measured on, not of
+> the dispatch, and a fifth board needing a cartridge-served nametable should measure rather than
+> fear it. **What did park a board in MF-6c is unrelated**: `Cartridge::default_cpu_read`'s two
+> layouts on `mmc5exram`, which §4.9's shared-variant note now carries.
 
 The honest conclusion for the plan: **a board whose only reason to exist is a cartridge-served
 nametable is not worth 132 → 109 on every game in the library.** If MF-6c does mapper 68, the
@@ -504,6 +527,19 @@ Two consequences for the sub-lots:
    Nothing in this inventory comes close — but a sub-lot that gave a board a kilobyte-scale buffer
    would pay MF-2 step 0's reshape cost. The 5 KiB of mapper-internal WRAM on 82/552 is a reason
    to put it in `CartridgeMemory`, which is exactly what the Namco 163 pattern in §4.6 does.
+3. **And the third consequence MF-6c measured, which §4.9 did not know when it was written: each
+   shared variant has a limit, and it is not the `Board` enum's.** `Cartridge::default_cpu_read` has
+   two layouts on `mmc5exram` — 283 356 728 and 290 813 484 instructions over 300 frames, a
+   difference of **7 456 756, +0.066 %** — and a variant past a shared enum's own limit selects the
+   dearer one. MF-6c measured all three: **`SmallBoard` ten** (steps 2 and 4), **`IrqBoard` ten**
+   (steps 4 and 5) and **`DecodeBoard` four** (steps 6 to 9). One *new* `Board` discriminant, on the
+   other hand, is **free** (step 6: `mmc5` −40 814, set total −136 318), where MF-6a3 step 1 priced
+   **two** at +0.080 %. The figure appears whether or not the enum forwards
+   `Board::prg_ram_enabled`, the dispatch it lives inside, so what crosses the line is LLVM's layout
+   of the whole module and no shape of a board's own code moves it — eight shapes were measured
+   against it across MF-6c. **A sub-lot that needs a register-decode board therefore starts a fourth
+   shared variant rather than extending one**, and the structural fix (a load-time cache of the
+   $6000-$7FFF decode on `Cartridge`) is R0's own sub-lot after MF-6c.
 
 ### 4.10 Summary: what each hook costs the games that do not use it
 
@@ -837,6 +873,27 @@ costs that board +2 per fetch, which MF-3b already priced for mappers 4, 64 and 
 6 touch no hot path: an EEPROM is clocked by register writes and lives entirely inside
 `write_register`, and mapper-internal WRAM lives in `CartridgeMemory` where `Board`'s size is not
 affected (§4.9 item 2).
+
+> **Done, and the two risks this paragraph named were not the ones that bit.** MF-6c implemented
+> **all fourteen numbers of the table above, over eleven boards** (`docs/progress/MF-6c.md`, eleven steps, and the
+> owner's rules of 2026-11-06 replaced this section's stop-the-lot conditions with one feature per
+> board). **Nine numbers are in `default`** (153, 157, 159, 68, 77, 72, 92, 86, 96) and **five are
+> parked** in two features — `board-taito-x1` (80, 207, 82, 552) and `board-111` — both on
+> `Cartridge::default_cpu_read`'s two layouts and neither on anything the boards themselves do; see
+> §4.9 item 3.
+>
+> * §4.5's cap **does not reproduce** (step 4 and step 9; see the note in that section);
+> * step 5's `read_pattern_planes` stop-the-lot condition **held at 107** through the whole lot, and
+>   mapper 77's split CHR could not have moved it: a board whose `chr_view` is `None` is off the
+>   PPU's span fast path by construction;
+> * step 7's PPU-bus risk cost `Board::on_ppu_address_bus` **four instructions** (§4.4's note);
+> * what did cost is the one thing this paragraph did not list — **the shared-variant limit**, found
+>   by step 2 and quantified by steps 4, 5, 6 and 9.
+>
+> Four gaps are recorded with their arguments rather than hidden: the µPD7756C audio of 72/92/86
+> (§4.8's own decision), the Oeka Kids tablet, the GTROM's two LEDs and its register's read side,
+> and *Nantettatte!! Baseball*'s external ROM. Two Q tickets were filed, **Q-134** (the LZ93D50
+> EEPROM's direction bit) and **Q-135** (mapper 96's "Bus conflicts: partly").
 
 ---
 
