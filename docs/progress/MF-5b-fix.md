@@ -417,6 +417,135 @@ halves of the pair now carry the attribute. No `unsafe`. Nothing under
 
 [PROGRESS] MF-5b-fix step 3/5 done: the three attributes, and eleven variants' numbers.
 
+## Step 4 — the bar: one half met, the other missed by 0.065 % on four ROMs of thirteen
+
+Both runs are of the **committed** tree (`git ls-files` tar of `b736dc41`'s content, built clean
+in its own directory with its own target directory), against the two baselines of step 1 built the
+same way.
+
+### The level-2 bar: met, on every game, total and core
+
+> every one of the five ROMs at `a577f336`'s total or lower, and the core stage too
+
+| game/stage | `a577f336` | **shipped** | delta | | `04a5d8c1` was |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `metroid/total` | 13 826 992 757 | **13 736 666 706** | −90 326 051 | **−0.653 %** | −0.058 % |
+| `metroid/core` | 11 238 744 231 | **11 148 433 485** | −90 310 746 | **−0.804 %** | −0.072 % |
+| `smb1/total` | 13 680 903 406 | **13 590 153 669** | −90 749 737 | **−0.663 %** | **+0.060 %** |
+| `smb1/core` | 11 608 529 144 | **11 516 670 821** | −91 858 323 | **−0.791 %** | **+0.058 %** |
+| `zelda2/total` | 15 402 925 330 | **15 362 793 261** | −40 132 069 | **−0.261 %** | **+0.137 %** |
+| `zelda2/core` | 12 818 624 858 | **12 778 994 409** | −39 630 449 | **−0.309 %** | **+0.172 %** |
+| `mm2/total` | 19 024 545 977 | **18 983 454 568** | −41 091 409 | **−0.216 %** | −0.256 % |
+| `mm2/core` | 12 085 128 624 | **12 043 869 909** | −41 258 715 | **−0.341 %** | −0.402 % |
+| `smb3/total` | 24 230 216 871 | **24 195 620 108** | −34 596 763 | **−0.143 %** | −0.060 % |
+| `smb3/core` | 15 359 181 750 | **15 320 386 010** | −38 795 740 | **−0.253 %** | −0.093 % |
+
+**`l2-diff.py --bar`: "at or below the baseline on every game, total and core."** The two games
+that were above it are now the two furthest below: Zelda II **+0.137 % → −0.261 %** and SMB1
+**+0.060 % → −0.663 %**, and the three that were already below go further down on every stage but
+Mega Man 2's, which gives back 0.040 % of its 0.256 % and is still 0.216 % under the baseline.
+
+The bar is `total` and `core`; the other six stages are reported here in full because
+`l2-diff.py` without `--bar` prints them and three of them are not at zero, which has to be said
+rather than left out:
+
+| game | apu | ppu | draw_list | load_profile | convert | lua_hooks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `metroid` | **+0** | +16 703 | **+0** | **+0** | −4 942 | −4 942 |
+| `mm2` | **+0** | +10 798 | **+0** | +4 039 | +79 250 | +76 312 |
+| `smb1` | **+0** | +13 051 | **+0** | +54 867 | +799 477 | +802 674 |
+| `smb3` | **+0** | +24 155 | **+0** | −1 310 | +4 169 862 | +3 790 226 |
+| `zelda2` | **+0** | +12 346 | +9 086 | −227 757 | −371 527 | −473 512 |
+
+* **`apu` is equal to the instruction on all five games**, and `draw_list` on four. That is the
+  check that a CPU-path lot changed only the CPU path.
+* **`ppu` is not byte-identical, and none of its +0.000 % is this lot's**: every figure in that
+  column is `fcfa5cb3`'s own — `metroid/ppu` 6 926 425 344 is character for character R0's
+  `fcfa5cb3` value, and so are the other four. It is MF-5b's, inherited, and it is +0.000 % in
+  R0's table too.
+* **`convert` and `lua_hooks` move together**, by nearly the same count on each game
+  (smb3 +4 169 862 against +3 790 226, zelda2 −371 527 against −473 512, and so on, sign included)
+  — they are the nested pair, the Lua frame hooks running inside the conversion. Neither is on any
+  path this lot touches: no `zax-engine3d` or `zax-scripting` file is in the diff, and the core
+  they consume is behaviour-identical (step 5's campaign).
+  **This pair is the one that moves between any two builds**: R0's own `a577f336` → `fcfa5cb3`
+  table has `smb1/convert` +0.114 % with `smb1/lua_hooks` +0.150 %, and `smb3` −0.006 % with
+  −0.022 %, for a lot that touched neither either. `callgrind-l2.sh` pins `ZAXNES_LUA_GC=smooth`
+  for that reason, and the two are read as a pair. The largest of them here, smb3 at +0.140 %,
+  sits inside a `smb3/total` of **−0.143 %**.
+
+### PR-1's thirteen: nine below `fcfa5cb3`, four above it by 0.046 % to 0.065 %
+
+> every ROM at `fcfa5cb3`'s count or lower
+
+| ROM | board | `fcfa5cb3` | **shipped** | delta | | |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `metroid` | MMC1 | 5 150 997 694 | **5 116 394 014** | −34 603 680 | −0.672 % | |
+| `vblnmi` | MMC1 | 3 322 241 995 | **3 311 130 882** | −11 111 113 | −0.334 % | |
+| `z2` | MMC1 | 6 312 096 132 | **6 293 906 638** | −18 189 494 | −0.288 % | |
+| `m1` | MMC1 | 4 900 185 476 | **4 887 150 614** | −13 034 862 | −0.266 % | |
+| `m0` | NROM | 5 533 124 867 | **5 521 486 644** | −11 638 223 | −0.210 % | |
+| `m4` | MMC3 | 5 482 298 196 | **5 474 237 729** | −8 060 467 | −0.147 % | |
+| `smb3` | MMC3 | 7 960 902 506 | **7 951 502 203** | −9 400 303 | −0.118 % | |
+| `mmc5` | MMC5 | 11 311 610 019 | **11 298 802 676** | −12 807 343 | −0.113 % | |
+| `smb1` | NROM | 6 000 514 816 | **5 997 201 028** | −3 313 788 | −0.055 % | |
+| `duelito` | NROM | 7 380 729 013 | 7 385 523 936 | **+4 794 923** | **+0.065 %** | **above** |
+| `oamstr` | NROM | 3 318 333 668 | 3 320 466 003 | **+2 132 335** | **+0.064 %** | **above** |
+| `mm2` | MMC1 | 6 017 251 716 | 6 020 978 149 | **+3 726 433** | **+0.062 %** | **above** |
+| `readbuf` | CNROM | 6 835 936 948 | 6 839 081 259 | **+3 144 311** | **+0.046 %** | **above** |
+| **total** | | **79 526 223 046** | **79 417 861 775** | **−108 361 271** | **−0.136 %** | |
+
+**This half of the bar is missed on four of the thirteen**, by 2.1 M to 4.8 M each — 0.046 % to
+0.065 % — against −0.113 % to −0.672 % on the nine others and −0.136 % on the set. Per the brief,
+the best variant is kept and all the numbers are given; the eleven that were tried are in step 3,
+and the four ROMs are the same four in every one of them. The smallest worst-excess any variant
+reached is this one's +4.79 M; the only variant that is better *on these four* is v10, by
+0.00 M to −1.3 M on three of them and worse on the fourth, and it is worse on the set and on four
+of the five games.
+
+**Why those four, and not the other nine.** Step 2's middle row: `<Board as Mapper>::irq_asserted`
+is reached 44 160 to 51 324 times on `duelito`, `oamstr`, `readbuf` and `mm2` over 300 frames,
+against 18.8 M to 37.9 M on the nine others, because `NesBus::irq_asserted` is
+`apu.irq_asserted() || cartridge…` and those four leave the APU's frame IRQ asserted. They pay for
+the dispatch's code and never run it. What they do pay is `Cpu6502::branch`'s executed path, two
+instructions a fetch longer because the pinned `zone_offset` materialises the `WideExtension`
+pointer before its range test: `branch` +4.5 M to +6.9 M, which is their whole excess —
+
+    duelito   branch  122,894,509 -> 129,167,584   +6,273,075   (the only symbol above 3 M)
+    oamstr    branch   68,256,865 ->  72,774,245   +4,517,380   (step -3,670,718)
+    readbuf   branch  106,971,958 -> 112,504,708   +5,532,750
+    mm2       branch  134,506,186 -> 141,362,311   +6,856,125
+
+— and v9, v10 and v11 are three attempts at removing it, all three measured and all three worse.
+
+### Against `a577f336`, which is what the regression was measured from: every ROM lower
+
+| ROM | `a577f336` | **shipped** | delta | |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid` | 5 154 485 933 | 5 116 394 014 | −38 091 919 | −0.739 % |
+| `smb1` | 6 032 398 559 | 5 997 201 028 | −35 197 531 | −0.583 % |
+| `oamstr` | 3 339 440 632 | 3 320 466 003 | −18 974 629 | −0.568 % |
+| `m1` | 4 914 885 719 | 4 887 150 614 | −27 735 105 | −0.564 % |
+| `vblnmi` | 3 328 802 922 | 3 311 130 882 | −17 672 040 | −0.531 % |
+| `m4` | 5 500 905 288 | 5 474 237 729 | −26 667 559 | −0.485 % |
+| `m0` | 5 544 079 149 | 5 521 486 644 | −22 592 505 | −0.408 % |
+| `z2` | 6 312 893 679 | 6 293 906 638 | −18 987 041 | −0.301 % |
+| `mmc5` | 11 331 604 501 | 11 298 802 676 | −32 801 825 | −0.289 % |
+| `mm2` | 6 038 204 350 | 6 020 978 149 | −17 226 201 | −0.285 % |
+| `smb3` | 7 967 708 299 | 7 951 502 203 | −16 206 096 | −0.203 % |
+| `readbuf` | 6 852 874 003 | 6 839 081 259 | −13 792 744 | −0.201 % |
+| `duelito` | 7 398 932 523 | 7 385 523 936 | −13 408 587 | −0.181 % |
+| **total** | **79 717 215 557** | **79 417 861 775** | **−299 353 782** | **−0.376 %** |
+
+`callgrind-diff.py`: **"no ROM slower, total lower — keepable."** So the lot is below `a577f336`
+on **all eighteen** measurements it has — thirteen ROMs of PR-1's set and five games at level 2,
+total and core — and below `fcfa5cb3` on fourteen of eighteen. The set total is 0.376 % under the
+commit the regression was measured from and 0.136 % under the commit that produced it; MF-5b's own
+figure was 0.240 %, so this lot takes the set a further 0.136 % down while putting the pack path
+back where it belongs.
+
+[PROGRESS] MF-5b-fix step 4/5 done: the bar, met at level 2 and missed on four of PR-1's thirteen.
+
 ## Status
 
-Steps 1-3 done. Step 4 next.
+Steps 1-4 done. Step 5 next.
