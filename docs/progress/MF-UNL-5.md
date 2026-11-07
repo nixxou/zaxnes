@@ -64,7 +64,7 @@ boards is a submapper-0 cartridge.
   the mirroring register and the banked PRG-RAM window.
 - [x] **4/7** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
-- [ ] **5/7** — the callgrind campaign per board against the base commit, and the feature decision
+- [x] **5/7** — the callgrind campaign per board against the base commit, and the feature decision
   for each.
 - [ ] **6/7** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
@@ -353,3 +353,104 @@ adds plus the two §7.1 requires:
 the two feedback-read constants are unreachable, and `-D warnings` is `-D dead_code`. They are now
 behind `board-163` beside the method that uses them. That is the fourth lot in a row in which the
 *alone* configurations caught something the default build cannot see.
+
+---
+
+## Step 5 — the callgrind campaign per board, and three features in `default`
+
+Five binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with its
+own `CARGO_TARGET_DIR`, which is then deleted. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…` (the 101 profiles, `.3dn`).
+
+| label | tree |
+| --- | --- |
+| `unl5base` | **`4a1cbffe`**, the lot's base commit |
+| `unl5b163` | `b6dec63d`, step 1 — **`board-163` alone**, the new `DecodeBoard` variant and the PPU-bus forward |
+| `unl5b162` | `adf5266b`, step 2 — **+ `board-162`**, which adds no variant and no forward |
+| `unl5` | `249d4863`, step 4 — **+ `board-178`**, the lot as it ships |
+| `unl5off` | the shipped source with the three features **out of `default`** — the control, whose emulation is the base commit's byte for byte |
+
+**One check before any figure was read**: `zax-harness-unl5base` is **byte-identical** to MF-UNL-4's
+own measured `zax-harness-unl4ship`. The lot's base commit adds only documentation over the commit
+that lot measured, so the two instruments are the same instrument and this lot's deltas are
+comparable with MF-UNL-4's.
+
+### PR-1's thirteen ROMs, 300 frames, no pack, each against `4a1cbffe`
+
+| stage | set total | % | worst ROM | ROMs below |
+| --- | ---: | ---: | --- | ---: |
+| `unl5b163` — `board-163` alone | **+225 155** | +0.000 | `m1` **+0.001 %** (+55 928) | 2 |
+| `unl5b162` — **+ `board-162`** | **+323 610** | +0.000 | `m1` **+0.002 %** (+83 939) | 4 |
+| **`unl5` — the lot, all three** | **+451 305** | **+0.001** | `duelito` / `m1` / `m4` / `metroid` / `mm2` / `oamstr` **+0.001 %** | 0 |
+| `unl5off` — the control | **+129 626** | +0.000 | `vblnmi` **+0.002 %** (+51 433) | 4 |
+
+**The worst ROM of the whole campaign is +0.002 %, a tenth of the tolerance — and it is the
+control's.** `unl5off` changes no behaviour at all and is `vblnmi` +0.002 %; `unl5b162` is `m1`
++0.002 %. So on this instrument the lot's cost is inside the noise of gating three features off,
+which is the cleanest reading the PR-1 set can give.
+
+The three boards are also **flat in each other's presence**: 163 alone is +225 155 on the set,
+163+162 is +323 610, and all three are +451 305 — about +100 000 a board on 79.3 G, i.e. nothing
+beyond what one `DecodeBoard` variant and a handful of `match` arms cost. MF-CART step 6's
+twelve-variant measurement is what predicted that, and this is the fifth lot to find it holds.
+
+### Level 2: five games, 600 frames with their 3D packs, inputs pressed
+
+| build | `core` | `total` |
+| --- | --- | --- |
+| `unl5b163` | three **+0, identical to the instruction** (`smb1`, `smb3`, `zelda2`); `metroid` +9 952 and `mm2` +18 944, both +0.000 % | −0.001 % to **+0.006 %** (`smb3`) |
+| `unl5b162` | **the same five figures, to the instruction** — 162 adds nothing to `core` at all | −0.008 % to **+0.016 %** (`smb3`) |
+| **`unl5`** | **the same five figures again** — 178 adds nothing either | −0.000 % to **+0.016 %** (`smb1`) |
+| `unl5off` | **all five +0** | −0.000 % to **+0.016 %** (`smb3`) |
+
+**Every figure of both columns is inside the owner's +0.02 %**, which is what the brief asks be
+checked per ROM on `total` as well as on `core`. This is the second MF-UNL lot with nothing outside
+the tolerance on either instrument, after MF-UNL-3.
+
+`metroid/core` **+9 952** and `mm2/core` **+18 944** are not new numbers: MF-UNL-1 step 6 and
+MF-UNL-3 step 7 both measured those two games at exactly **+9 952** and **+18 944** for their own
+lots, and MF-UNL-2 at +0.000 % on the same two. They are the quantum of adding any board to this
+tree at all, and this lot pays it once for three boards — `unl5b163`, `unl5b162` and `unl5` are
+identical to the instruction on all five `core` figures.
+
+### The `total` column, shown with a same-behaviour pair as the brief requires
+
+The lot's worst `total` is **`smb1` +0.016 %**, inside the tolerance. The stage table says where it
+is, and the per-function diff says what it is:
+
+| `smb1`, `unl5` vs `unl5base` | |
+| --- | --- |
+| `core`, `ppu`, `apu`, `draw_list` | **+0, identical to the instruction** |
+| `convert` | +2 495 703 (**+0.209 %**) |
+| `lua_hooks` | +2 490 770 (**+0.276 %**) |
+| the only symbols above 300 000 | `getgeneric` **+1 380 172**, `luaH_getshortstr` **+1 255 652**, `__memcpy_avx_unaligned_erms` −365 614 |
+
+So 2.64 M of a 2.19 M whole-run move is Lua's string-key hash table, and no symbol of this project
+moves by 300 000 on that game.
+
+**The pair the brief asks for is `unl5off`**, whose emulation is the base commit's byte for byte —
+no board code of this lot is reachable in it at all. On the same game it is `smb1/total`
+**+0.013 %** and `smb3/total` **+0.016 %**, with `luaH_getshortstr` **+1 891 303** and `luaH_set`
++337 056 as its only symbols above 300 000 and **all five `core` figures +0**. A build that changes
+nothing moves `total` by as much as the lot does, in the same function, which is the finding
+MF-UNL-2 step 8 and MF-UNL-3 step 7 recorded and this lot confirms a third time.
+
+### The decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-163` | **`default`** | PR-1 worst ROM **+0.001 %**, set total +225 155; level 2 three `core` **+0** and two at +0.000 %, worst `total` +0.006 % |
+| `board-162` | **`default`** | PR-1 worst ROM **+0.002 %**, set total +323 610, four ROMs below; level 2 **the same five `core` figures as 163 alone**, worst `total` +0.016 % |
+| `board-178` | **`default`** | PR-1, with all three on, worst ROM **+0.001 %**, set total +451 305; level 2 the same five `core` figures again, worst `total` +0.016 % |
+
+**No board is parked**, and `parked-boards` keeps the one feature it has had since MF-VS. Every
+figure of the lot is inside the tolerance on both instruments and on both columns, so the owner's
+rule gives no reason to move any of the three out of `default`; and the gating is free either way —
+`unl5off` is set total +129 626 with all five level-2 `core` figures +0.
+
+### Disk and machine
+
+G: stayed above **18 GiB** free on the WSL side throughout. Each of the five build directories was
+deleted by `build-clean.sh` as soon as its binary was copied out; no GPU campaign; every long run
+in the foreground with its output read, as the headless rule requires.
