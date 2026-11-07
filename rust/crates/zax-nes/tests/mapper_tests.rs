@@ -110,7 +110,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   (MF-UNL-1 step 1);
     // * 150 and 243, Sachen's eight-register ASIC -- one class in Mesen 2, one `DecodeBoard`
     //   variant here -- behind `board-sachen-8reg` (MF-UNL-1 step 2);
-    // * 133, the Sachen 72008's one latch, behind `board-133` (MF-UNL-1 step 3).
+    // * 133, the Sachen 72008's one latch, behind `board-133` (MF-UNL-1 step 3);
+    // * 74, 192, 194 and 195, the other four members of mapper 119's CHR-RAM family -- four
+    //   `const` monomorphisations of the MMC3's board behind one `IrqBoard` variant -- behind
+    //   `board-mmc3-chrram` (MF-UNL-2 step 2).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -130,7 +133,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
     let jv001 = cfg!(feature = "board-jv001");
     let sachen = cfg!(feature = "board-sachen-8reg");
-    let additions: [(i32, bool); 63] = [
+    let chrram = cfg!(feature = "board-mmc3-chrram");
+    let additions: [(i32, bool); 67] = [
         (19, true),
         (24, true),
         (26, true),
@@ -146,6 +150,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (70, small),
         (72, jaleco),
         (73, true),
+        (74, chrram),
         (75, small),
         (76, namcot),
         (77, cfg!(feature = "board-77")),
@@ -190,6 +195,9 @@ fn req_core_100_every_required_mapper_is_registered() {
         (180, true),
         (184, small),
         (185, small),
+        (192, chrram),
+        (194, chrram),
+        (195, chrram),
         (206, namcot),
         (207, taito_x1),
         (210, true),
@@ -4807,6 +4815,269 @@ fn req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers() {
             (expected(value & 0xFE), expected(value | 0x01)),
             (peek(&core, 0x0000), peek(&core, 0x0400)),
             "CHR mode 0, R0 = {value:#04X}"
+        );
+    }
+}
+
+// ------------------------------------------- the other four of mapper 119's CHR-RAM family
+// ------------------------------------------- (74, 192, 194, 195), MF-UNL-2 step 2
+
+/// The `First RAM bank` and `Size of RAM` rows of nesdev's *MMC3 with CHR ROM and CHR RAM*,
+/// which is the whole of what 74, 192 and 194 add to the MMC3: 74 "redirect[s] 1 KiB CHR-ROM
+/// banks #8 and #9 to 2 KiB of CHR-RAM", 192 is "effectively the same as INES Mapper 074 but
+/// with twice as much CHR RAM" so "CHR Pages $08-$0B are CHR-RAM", and 194's "CHR Pages
+/// $00-$01 are CHR-RAM, other pages are CHR-ROM".
+///
+/// The claim is made at **both edges** — the bank one below `FIRST` and the bank one above
+/// `LAST` read the CHR-ROM and swallow a write, every bank in between reads a writable RAM —
+/// and then on the `RAM mirrored? **No**` column, which is what separates these three from the
+/// TQROM: the bank `FIRST + SIZE` is past the window and so is **ROM**, where a single-line
+/// select would have caught it.
+#[cfg(feature = "board-mmc3-chrram")]
+#[test]
+fn req_core_100_the_chr_ram_family_puts_its_own_window_on_the_ram_chip() {
+    for (mapper, first, last, banks) in [
+        (74usize, 0x08u8, 0x09u8, 2u8),
+        (192, 0x08, 0x0B, 4),
+        (194, 0x00, 0x01, 2),
+    ] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+
+        // Every bank of the window is RAM and keeps what is written to it. R2 is at PPU
+        // $1000-$13FF in CHR mode 0, and `$C0 | bank` is outside the byte space of a 64-bank
+        // numbered CHR-ROM, so a read can name the chip.
+        for bank in first..=last {
+            core.mmc3_bank(2, bank);
+            chr_write(&mut core, 0x1000, 0xC0 | bank);
+            assert_eq!(
+                0xC0 | bank,
+                peek(&core, 0x1000),
+                "mapper {mapper}: bank {bank:#04X} is the RAM chip"
+            );
+        }
+
+        // One below the window and one above it are the CHR-ROM, whose numbered banks read
+        // their own number, and a write to either goes nowhere.
+        for bank in [first.wrapping_sub(1), last + 1] {
+            core.mmc3_bank(2, bank);
+            chr_write(&mut core, 0x1000, 0x5A);
+            assert_eq!(
+                bank % 64,
+                peek(&core, 0x1000),
+                "mapper {mapper}: bank {bank:#04X} is the CHR-ROM and swallows the write"
+            );
+        }
+
+        // `RAM mirrored? No`: `FIRST + SIZE` has the same low bits as `FIRST` -- the chip's own
+        // lines -- and is still the ROM, because the select is a range and not a line.
+        let outside = first + banks;
+        core.mmc3_bank(2, outside);
+        assert_eq!(
+            outside % 64,
+            peek(&core, 0x1000),
+            "mapper {mapper}: bank {outside:#04X} is past the window, so the ROM"
+        );
+
+        // The board's own chip, and not REQ-CORE-012's 32 KiB default: byte 5 declares 64 KiB
+        // of CHR-ROM, so that default does not apply, and no header field can state this.
+        assert_eq!(
+            usize::from(banks) * 1024,
+            core.cartridge().unwrap().memory().chr_ram().len(),
+            "mapper {mapper}: the chip of its own row"
+        );
+    }
+}
+
+/// Writes `value` to mapper 195's `CHRB` register, which is a PPU write to a window the
+/// CHR-**ROM** drives: "The games write, via the PPU, to specific CHR banks in order to select
+/// both which and how many CHR banks are mapped to RAM instead of ROM. **Writes to CHR ROM** in
+/// multiples of 1 KiB" (nesdev, "INES Mapper 195").
+///
+/// Bank `$3F` is in no row of the page's table, so it is a ROM window whatever the register
+/// holds.
+#[cfg(feature = "board-mmc3-chrram")]
+fn fs303_chrb(core: &mut NesCore, value: u8) {
+    core.mmc3_bank(2, 0x3F);
+    chr_write(core, 0x1000, value);
+}
+
+/// Reads the byte 1 KiB CHR bank `bank` shows with `CHRB` set to `register`.
+#[cfg(feature = "board-mmc3-chrram")]
+fn fs303_read(core: &mut NesCore, register: u8, bank: u8) -> u8 {
+    fs303_chrb(core, register);
+    core.mmc3_bank(2, bank);
+    peek(core, 0x1000)
+}
+
+/// nesdev ("INES Mapper 195"), the Waixing FS303's GAL — the register that moves the CHR-RAM
+/// window at run time, over **all 256 values** of it and all 256 bank numbers.
+///
+/// The decode is one three-bit field, `(Z, L, L)` = bits 6, 3 and 1, which is what the page's
+/// own diagram draws and what makes its list `$80, $82, $88, $8A, $C0, $C2, $C8, $CA`
+/// consecutive. So bits 5, 2 and 0 are don't-cares and every row is reached by eight byte
+/// values; bit 4 (`D`) is "ignore above and always enable CHR ROM"; and bit 7 "Must be 1", so a
+/// byte without it is not a register value at all.
+///
+/// The eight banks of the chip are filled with `$E0 | k` first, through the two rows that cover
+/// them — which is also the page's worked example — so one read names the chip *and* the offset:
+/// a 64-bank CHR-ROM reads `bank % 64`, below `$40`, and nothing else can read `$E0 | k`.
+#[cfg(feature = "board-mmc3-chrram")]
+#[test]
+fn req_core_100_mapper_195_gal_moves_the_chr_ram_window_at_run_time() {
+    let mut core = MapperRom::new(195).prg(16).chr(64).load();
+
+    // The chip is 8 KiB -- "The PCB mounts 32 KiB of CHR-RAM, although address lines for only
+    // 8 KiB are connected" -- and not the 4 KiB of the census's `(0x00, 0x03, 4)`.
+    assert_eq!(
+        0x2000,
+        core.cartridge().unwrap().memory().chr_ram().len(),
+        "the 8 KiB the FS303's address lines reach"
+    );
+
+    // Power-on is `$80`, so banks $28-$2B are already the RAM chip before any register write
+    // (Q-142: the census's `(0x00, 0x03, 4)` is the `$82` row, not this one).
+    core.mmc3_bank(2, 0x28);
+    chr_write(&mut core, 0x1000, 0xE0);
+    assert_eq!(
+        0xE0,
+        peek(&core, 0x1000),
+        "power-on $80: bank $28 is the RAM chip"
+    );
+
+    // Fill the chip: `$80` reaches its banks 0-3 through $28-$2B and `$88` its banks 4-7
+    // through $4C-$4F, the offset being the low three bits of the bank number.
+    for (register, first) in [(0x80u8, 0x28u8), (0x88, 0x4C)] {
+        fs303_chrb(&mut core, register);
+        for i in 0..4u8 {
+            core.mmc3_bank(2, first + i);
+            chr_write(&mut core, 0x1000, 0xE0 | ((first + i) & 0x07));
+        }
+    }
+
+    // The page's table, by `(Z, L, L)`.
+    let row_window = |row: u8| -> Option<(u8, u8)> {
+        match row {
+            0 => Some((0x28, 0x2B)),
+            1 => Some((0x00, 0x03)),
+            2 => Some((0x4C, 0x4F)),
+            3 => Some((0x64, 0x67)),
+            4 => Some((0x46, 0x47)),
+            5 => Some((0x7C, 0x7D)),
+            6 => Some((0x0A, 0x0B)),
+            _ => None,
+        }
+    };
+
+    for value in 0x80..=0xFFu8 {
+        let window = if value & 0x10 == 0 {
+            row_window(((value >> 4) & 0x04) | ((value >> 2) & 0x02) | ((value >> 1) & 0x01))
+        } else {
+            None
+        };
+
+        fs303_chrb(&mut core, value);
+        for bank in 0..=0xFFu8 {
+            core.mmc3_bank(2, bank);
+            let read = peek(&core, 0x1000);
+            if window.is_some_and(|(first, last)| bank >= first && bank <= last) {
+                assert_eq!(
+                    0xE0 | (bank & 0x07),
+                    read,
+                    "195 CHRB={value:#04X} bank {bank:#04X}: the RAM chip"
+                );
+            } else {
+                assert_eq!(
+                    bank % 64,
+                    read,
+                    "195 CHRB={value:#04X} bank {bank:#04X}: the CHR-ROM"
+                );
+            }
+        }
+    }
+
+    // "Must be 1": a byte without bit 7 is not a `CHRB` value, so the window stays where the
+    // last real write left it.
+    fs303_chrb(&mut core, 0x82);
+    fs303_chrb(&mut core, 0x00);
+    core.mmc3_bank(2, 0x00);
+    assert_eq!(
+        0xE0,
+        peek(&core, 0x1000),
+        "a write with bit 7 clear leaves the $82 window in place"
+    );
+
+    // The page's own worked example, which is why `SIZE` is 8 and not 4: "setting $80 ($28-$2B)
+    // will select different 4 KiB of CHR-RAM from setting $88 ($4C-$4F), but the same 4 KiB as
+    // setting $82 ($00-$03), because CHR A13 is not connected to CHR-RAM."
+    assert_eq!(
+        fs303_read(&mut core, 0x80, 0x28),
+        fs303_read(&mut core, 0x82, 0x00),
+        "$82 ($00-$03) is the same 4 KiB of the chip as $80 ($28-$2B)"
+    );
+    assert_ne!(
+        fs303_read(&mut core, 0x80, 0x28),
+        fs303_read(&mut core, 0x88, 0x4C),
+        "$88 ($4C-$4F) is a different 4 KiB"
+    );
+    assert_eq!(
+        fs303_read(&mut core, 0x88, 0x4C),
+        fs303_read(&mut core, 0x8A, 0x64),
+        "$8A ($64-$67) aliases onto $88's 4 KiB, three address lines being all there are"
+    );
+}
+
+/// The four numbers are an MMC3 in everything but the CHR source, so each one's A12 scanline
+/// counter and `$A001` PRG-RAM protection are the MMC3's — and `IrqBoard`'s entry condition is
+/// that they answer *yes* to [`Mapper::irq_asserted`].
+///
+/// 195's own page names one more thing this build takes from the header rather than the board:
+/// "A compatible circuit board (with unknown PCB code) adds 4 KiB of non-battery-backed PRG-RAM
+/// (recognizable as such in the NES 2.0 header) mapped to CPU $5000-$5FFF" — *天神之剑*. That
+/// window is **not** implemented and the reason is the page's own parenthesis: the header is the
+/// only indicator and this core has no $5000-$5FFF RAM window on any board. The test pins what
+/// the board does carry instead.
+#[cfg(feature = "board-mmc3-chrram")]
+#[test]
+fn req_core_114_the_chr_ram_family_keeps_the_mmc3s_scanline_counter() {
+    for mapper in [74usize, 192, 194, 195] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+
+        // Latch 4, reload, enable: the counter is the MMC3's, so it asserts on the fifth A12
+        // rise and not before. The rises are driven by hand with rendering off and from a clock
+        // well past the register writes', which is the idiom `mr1_review_tests` already uses --
+        // the A12 watcher filters a rise that is too close to the last one.
+        core.write_memory(0x2001, 0x00);
+        core.mapper_write(0xC000, 4);
+        core.mapper_write(0xC001, 0);
+        core.mapper_write(0xE001, 0);
+
+        let cartridge = core.cartridge_mut().unwrap();
+        for rise in 1..=5i64 {
+            cartridge.on_ppu_address_bus(0x0000, 10_000 + rise * 100);
+            cartridge.on_ppu_address_bus(0x1000, 10_000 + rise * 100 + 50);
+            assert_eq!(
+                rise == 5,
+                cartridge.irq_asserted(),
+                "mapper {mapper}: rise {rise}"
+            );
+        }
+
+        // $A001: bit 7 enables the RAM, bit 6 write-protects it, exactly as on mapper 4 --
+        // read off the RAM itself, which is the header's 8 KiB at $6000-$7FFF because no page
+        // of the four states a size of its own.
+        core.mapper_write(0xA001, 0x80);
+        core.mapper_write(0x6000, 0x5A);
+        assert_eq!(
+            0x5A,
+            core.read_memory(0x6000),
+            "mapper {mapper}: $A001 = $80"
+        );
+        core.mapper_write(0xA001, 0xC0);
+        core.mapper_write(0x6000, 0x33);
+        assert_eq!(
+            0x5A,
+            core.read_memory(0x6000),
+            "mapper {mapper}: $A001 = $C0 write-protects"
         );
     }
 }

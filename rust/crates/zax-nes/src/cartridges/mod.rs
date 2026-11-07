@@ -433,13 +433,16 @@ impl Cartridge {
             // change, enabling software to manually select CHR pages by writing specific
             // values to $2006" -- so it needs the rendering's fetches *and* the bare writes.
             // See `OekaKids`'s own note, which does not settle MR-1's question for the MMC2.
+            // MF-UNL-2 step 2 adds 74, 192, 194 and 195, the other four members of mapper
+            // 119's CHR-RAM family: all four *are* the MMC3's board, counter included, so all
+            // four go in both lists on the reason the step-1 comment above gives for 119.
             watches_ppu_reads: matches!(
                 mapper,
-                4 | 5 | 37 | 47 | 48 | 64 | 96 | 116 | 118 | 119 | 158
+                4 | 5 | 37 | 47 | 48 | 64 | 74 | 96 | 116 | 118 | 119 | 158 | 192 | 194 | 195
             ),
             watches_ppu_bus_without_read: matches!(
                 mapper,
-                4 | 37 | 47 | 48 | 64 | 96 | 116 | 118 | 119 | 158
+                4 | 37 | 47 | 48 | 64 | 74 | 96 | 116 | 118 | 119 | 158 | 192 | 194 | 195
             ),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
@@ -1165,6 +1168,9 @@ mod tests {
         #[cfg(feature = "board-mmc3-multicart")]
         expected.extend_from_slice(&[37, 37, 47, 47]);
         expected.extend_from_slice(&[48, 48, 64, 64]);
+        // MF-UNL-2 step 2: the other four of the TQROM's CHR-RAM family, for 119's own reason.
+        #[cfg(feature = "board-mmc3-chrram")]
+        expected.extend_from_slice(&[74, 74]);
         // MF-6c step 8: the Oeka Kids board latches its CHR bank on the entry into
         // $2000-$2FFF, which the rendered line below reaches.
         #[cfg(feature = "board-96")]
@@ -1176,6 +1182,8 @@ mod tests {
         expected.extend_from_slice(&[119, 119]);
         #[cfg(feature = "board-158")]
         expected.extend_from_slice(&[158, 158]);
+        #[cfg(feature = "board-mmc3-chrram")]
+        expected.extend_from_slice(&[192, 192, 194, 194, 195, 195]);
         assert_eq!(
             moved, expected,
             "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \

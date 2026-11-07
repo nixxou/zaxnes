@@ -24,6 +24,7 @@ default = [
     "board-105",
     "board-116",
     "board-119",
+    "board-mmc3-chrram",
     "board-153",
     "board-155",
     "board-68",

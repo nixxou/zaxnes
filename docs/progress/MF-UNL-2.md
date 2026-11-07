@@ -24,7 +24,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   the family. **119 must come out byte-identical**, and the step proves it two ways: an
   exhaustive table test over all 256 register values in both CHR modes, and a golden-core dump
   over a mapper-119 image.
-- [ ] **2/9 — `board-mmc3-chrram`.** 74, 192, 194 as three monomorphisations of that form, and
+- [x] **2/9 — `board-mmc3-chrram`.** 74, 192, 194 as three monomorphisations of that form, and
   195 with the page's run-time GAL. `registry.rs` arms, `SUPPORTED_MAPPERS`,
   `board_memory_sizes`, and the tests the census lists.
 - [ ] **3/9 — `board-mmc3-scramble`.** `Mmc3Scramble`, one board holding an `Mmc3` with six
@@ -203,3 +203,71 @@ carries the argument, and the plan's item 1 above records the choice.
 One more thing this step had to notice: a Cargo feature comment naming `chr_ram_windows` fails
 `req_arch_002_the_crate_has_no_platform_dependency`, which scans the manifest's text for
 `windows`. The comment says "the byte of per-slot source flags" instead.
+
+## Step 2 — `board-mmc3-chrram`: 74, 192, 194 and 195
+
+Four `const` monomorphisations of the form step 1 built, behind one feature that **implies
+`board-119`** (the mechanism is 119's; this adds the rows of the family's page that were not
+here) and one new `IrqBoard` variant:
+
+| alias | row of *MMC3 with CHR ROM and CHR RAM* |
+| --- | --- |
+| `Mmc3ChrRam74 = Mmc3ChrRam<0x08, 0x09, 2>` | first RAM bank 8, 2 banks, not mirrored |
+| `Mmc3ChrRam192 = Mmc3ChrRam<0x08, 0x0B, 4>` | first RAM bank 8, 4 banks, not mirrored |
+| `Mmc3ChrRam194 = Mmc3ChrRam<0x00, 0x01, 2>` | first RAM bank 0, 2 banks, not mirrored |
+| `WaixingFs303 = Mmc3Board<false, 0, 0, 8, false, true, false>` | the GAL: the window is a register, the chip 8 KiB |
+
+`Mmc3ChrRamBoard` (`cartridges/mappers/mmc3_chrram.rs`) holds the four, and
+`IrqBoard::Mmc3ChrRam(Box<…>)` holds it. **The box earns its place**: measured on this tree,
+`size_of::<IrqBoard>()` is **200** and `size_of::<Mmc3>()` **192** with the feature on and with
+it off, and `size_of::<Board>()` **1376** in both — so neither the enum MF-6b step 1 priced one
+byte of displacement in nor the MMC3's own struct moved. (195's `chr_ram_gal` byte landed in
+padding `Mmc3Board` already had, which is the same thing MF-6a2 step 3 found for
+`chr_ram_windows`.)
+
+### Mapper 195's GAL
+
+`Mmc3Board::gal_window` is the page's eight-row table read as **one three-bit field** — `(Z, L, L)`
+= bits 6, 3 and 1 — which is what its diagram's own arrow draws and what makes the page's list
+`$80, $82, $88, $8A, $C0, $C2, $C8, $CA` consecutive. So it is one table and not two, bits 5, 2
+and 0 are don't-cares, bit 4 (`D`) wins over the field, and bit 7 "Must be 1".
+
+The register is latched by **a PPU write to a window the CHR-ROM drives**, which is the page's
+"Writes to CHR ROM" read as the only way a board with one PPU write line can tell a register
+write from a RAM write. It lives in `chr_ram_write`'s existing "the ROM chip drives this window,
+so the write goes nowhere" branch, so no other board of the family gains an instruction.
+
+Two question tickets, both referenced from the code:
+
+* **Q-142** — 195's window and its power-on state. The census says `(0x00, 0x03, 4)`, which is
+  Mesen's static registration and the `$82` row; the page says the window is the GAL's, its
+  power-on is `$80` (`$28-$2B`) and the chip is **8 KiB**, because its own worked example
+  ("`$80` … selects different 4 KiB … from `$88` … but the same 4 KiB as `$82` … because CHR A13
+  is not connected") cannot be true of a 4 KiB chip. The page is implemented; the ticket records
+  that the census's reading is defensible for the *hacked* *Captain Tsubasa II* images the page
+  itself names, and that the choice made here runs those too.
+* **Q-143** — 192's "If the NES 2.0 header is present, 74 and 192 should be emulated
+  identically, as NES 2.0 specifies CHR RAM size elsewhere". Not implemented: the board's chip is
+  the board's, which is the contract `board_memory_sizes`'s own doc comment states, and taking RAM
+  away from a 192 image whose header said 2 KiB is the worse of the two errors.
+
+### Two latches a new MMC3 number has to be added to, and the test that caught it
+
+`Cartridge::watches_ppu_reads` and `watches_ppu_bus_without_read` are tested **before** the
+`Board` dispatch, so a number missing from either has its A12 counter silently never clocked.
+All four were added to both, and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`
+is what found it: the new `req_core_114_…` IRQ test failed first, and that sweep then failed on
+its own expected list. §4.3's warning, exactly as MF-6a3 step 1 recorded it for 119.
+
+### Tests from the pages
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_chr_ram_family_puts_its_own_window_on_the_ram_chip` | per number: every bank of the window is a writable RAM; one below `FIRST` and one above `LAST` are ROM and swallow a write; **`FIRST + SIZE` is ROM**, which is the `RAM mirrored? No` column and what separates these three from the TQROM; and the chip is the row's size |
+| `req_core_100_mapper_195_gal_moves_the_chr_ram_window_at_run_time` | all 256 register values against all 256 bank numbers, the 8 KiB chip, the `$80` power-on, "Must be 1", `$CA`/`D` = only CHR-ROM, and the page's worked example about CHR A13 |
+| `req_core_114_the_chr_ram_family_keeps_the_mmc3s_scanline_counter` | per number: the counter asserts on the fifth A12 rise with latch 4 and not before, and `$A001` protects the PRG-RAM — `IrqBoard`'s entry condition, and the two latches above |
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **948 passed, 0 failed, 9 ignored** (+3 over step 1) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |

@@ -68,6 +68,7 @@ pub struct Mmc3Board<
     const CHR_RAM_LAST: u8,
     const CHR_RAM_KIB: u8,
     const CHR_RAM_MIRRORED: bool,
+    const CHR_RAM_GAL: bool,
     const MULTICART: bool,
 > {
     banks: BankWindows,
@@ -112,6 +113,15 @@ pub struct Mmc3Board<
     /// byte lands in the padding this struct already has where eight could not.
     #[cfg(feature = "board-119")]
     chr_ram_windows: u8,
+    /// Mapper 195, the Waixing FS303: the GAL's `CHRB` register, which moves the CHR-RAM window
+    /// at run time (MF-UNL-2 step 2). Latched by a PPU write to a CHR-**ROM** window; see
+    /// [`Mmc3Board::gal_window`] and [`Mmc3Board::chr_ram_write`].
+    ///
+    /// **Not** derived: no other register implies it, so it is the one byte this lot appends to
+    /// the save-state block — behind the `const` that is the only reason the field exists, so no
+    /// byte of any other board's block moves (REQ-CORE-090).
+    #[cfg(feature = "board-mmc3-chrram")]
+    chr_ram_gal: u8,
     /// Mappers 47 and 37: the outer register at $6000-$7FFF, three bits wide.
     ///
     /// 047 is `[.... ...B]` and 037 `[.... .QBB]`, so bits 3-7 are not latched by either — which
@@ -140,10 +150,10 @@ pub struct Mmc3Board<
 }
 
 /// The MMC3 and the MMC6, mapper 4 and mapper 118.
-pub type Mmc3 = Mmc3Board<false, 0, 0, 0, false, false>;
+pub type Mmc3 = Mmc3Board<false, 0, 0, 0, false, false, false>;
 
 /// The Acclaim MC-ACC, mapper 4 submapper 3.
-pub type McAcc = Mmc3Board<true, 0, 0, 0, false, false>;
+pub type McAcc = Mmc3Board<true, 0, 0, 0, false, false, false>;
 
 /// `docs/review/UNL-census.md` §7.2's own alias for the CHR-RAM family: "the 1 KiB CHR banks in
 /// `FIRST..=LAST` come from the CHR-RAM chip, the rest from CHR-ROM", with `SIZE` the chip's own
@@ -154,7 +164,48 @@ pub type McAcc = Mmc3Board<true, 0, 0, 0, false, false>;
 /// column set, so it is spelled out as [`Tqrom`] below.
 #[cfg(feature = "board-mmc3-chrram")]
 pub type Mmc3ChrRam<const FIRST: u8, const LAST: u8, const SIZE: u8> =
-    Mmc3Board<false, FIRST, LAST, SIZE, false, false>;
+    Mmc3Board<false, FIRST, LAST, SIZE, false, false, false>;
+
+/// Mapper 74, the Waixing **43-393 / 43-406 / 860908C** PCB: "an MMC3 clone together with a
+/// 74LS138 and a 74LS139 to redirect 1 KiB CHR-ROM banks #8 and #9 to 2 KiB of CHR-RAM"
+/// (nesdev, "INES Mapper 074").
+///
+/// *機甲戰士* (the *Metal Max* translation), *甲A — China Soccer League*,
+/// *第四次: 机器人大战* and the original 1997 *風雲 — Traitor Legend*.
+#[cfg(feature = "board-mmc3-chrram")]
+pub type Mmc3ChrRam74 = Mmc3ChrRam<0x08, 0x09, 2>;
+
+/// Mapper 192, the Waixing **FS308**: 74's board with twice the RAM — "CHR Pages $08-$0B are
+/// CHR-RAM, other pages are CHR-ROM" (nesdev, "INES Mapper 192"), which that page calls
+/// "effectively the same as INES Mapper 074 but with twice as much CHR RAM".
+///
+/// *Ying Lie Qun Xia Zhuan*.
+#[cfg(feature = "board-mmc3-chrram")]
+pub type Mmc3ChrRam192 = Mmc3ChrRam<0x08, 0x0B, 4>;
+
+/// Mapper 194, whose page names no board: "an additional 2k of CHR-RAM which is selectable. CHR
+/// Pages $00-$01 are CHR-RAM, other pages are CHR-ROM. Apart from that, this mapper behaves
+/// exactly like your typical MMC3" (nesdev, "INES Mapper 194", quoting Disch).
+///
+/// *Dai-2-Ji — Super Robot Taisen*, the port.
+#[cfg(feature = "board-mmc3-chrram")]
+pub type Mmc3ChrRam194 = Mmc3ChrRam<0x00, 0x01, 2>;
+
+/// Mapper 195, the Waixing **FS303**: an MMC3 clone "with a GAL that can dynamically change
+/// which CHR banks are mapped to RAM" (nesdev, "INES Mapper 195").
+///
+/// **`GAL` is set, so `FIRST` and `LAST` are not read at all** — the window comes from the
+/// board's own `CHRB` register, [`Mmc3Board::gal_window`]. `SIZE` is **8** and not the census's
+/// 4: the page's "The PCB mounts 32 KiB of CHR-RAM, although address lines for only 8 KiB are
+/// connected" is what the chip can address, and three of its lines is exactly what makes the
+/// page's own worked example true — "setting $80 ($28-$2B) will select different 4 KiB of
+/// CHR-RAM from setting $88 ($4C-$4F), but the same 4 KiB as setting $82 ($00-$03), because CHR
+/// A13 is not connected to CHR-RAM". A 4 KiB chip could not tell `$28-$2B` from `$4C-$4F`.
+///
+/// *哥伦布传 — 黄金中文版* (the *Columbus* translation) and *天神之剑* (the *Crystalis* port);
+/// *天使之翼 2* is a hack and *赌神* a re-release. **Q-142** holds the power-on question.
+#[cfg(feature = "board-mmc3-chrram")]
+pub type WaixingFs303 = Mmc3Board<false, 0, 0, 8, false, true, false>;
 
 /// The Nintendo TQROM, mapper 119: the MMC3 with a CHR-RAM chip beside its CHR-ROM, **CHR A16**
 /// choosing between them.
@@ -170,7 +221,7 @@ pub type Mmc3ChrRam<const FIRST: u8, const LAST: u8, const SIZE: u8> =
 /// `RAM mirrored? Yes`, and the one-line behaviour "CHR A16 switches between CHR ROM and CHR
 /// RAM". See [`Mmc3Board::CHR_RAM_MIRRORED`].
 #[cfg(feature = "board-119")]
-pub type Tqrom = Mmc3Board<false, 0x40, 0x7F, 8, true, false>;
+pub type Tqrom = Mmc3Board<false, 0x40, 0x7F, 8, true, false, false>;
 
 /// Nintendo's two MMC3 multicarts, mappers 47 and 37: an MMC3 whose PRG and CHR bank numbers
 /// carry one or two more address lines from an outer register at $6000-$7FFF.
@@ -180,7 +231,7 @@ pub type Tqrom = Mmc3Board<false, 0x40, 0x7F, 8, true, false>;
 /// two pages' own wiring, and [`Mmc3Board::multicart_outer_write`] for the condition both of
 /// them put on the register.
 #[cfg(feature = "board-mmc3-multicart")]
-pub type Mmc3Multicart = Mmc3Board<false, 0, 0, 0, false, true>;
+pub type Mmc3Multicart = Mmc3Board<false, 0, 0, 0, false, false, true>;
 
 impl<
         const MC_ACC: bool,
@@ -188,8 +239,18 @@ impl<
         const CHR_RAM_LAST: u8,
         const CHR_RAM_KIB: u8,
         const CHR_RAM_MIRRORED: bool,
+        const CHR_RAM_GAL: bool,
         const MULTICART: bool,
-    > Mmc3Board<MC_ACC, CHR_RAM_FIRST, CHR_RAM_LAST, CHR_RAM_KIB, CHR_RAM_MIRRORED, MULTICART>
+    >
+    Mmc3Board<
+        MC_ACC,
+        CHR_RAM_FIRST,
+        CHR_RAM_LAST,
+        CHR_RAM_KIB,
+        CHR_RAM_MIRRORED,
+        CHR_RAM_GAL,
+        MULTICART,
+    >
 {
     /// Whether this monomorphisation carries a CHR-RAM chip beside its CHR-ROM: the `SIZE`
     /// column of the family's page, zero on every board that does not.
@@ -238,14 +299,86 @@ impl<
     /// generalise into; the page is what `board-119` has implemented since MF-6a3 step 1, and
     /// this lot's own rule is that no existing mapper's emulation moves.
     /// `req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers` is the gate.
+    /// On mapper 195 the window is not a `const` pair at all: see [`Mmc3Board::gal_window`].
     #[cfg(feature = "board-119")]
-    const fn chr_ram_selected(bank: u8) -> bool {
+    fn chr_ram_selected(&self, bank: u8) -> bool {
+        #[cfg(feature = "board-mmc3-chrram")]
+        if CHR_RAM_GAL {
+            return match Self::gal_window(self.chr_ram_gal) {
+                Some((first, last)) => bank >= first && bank <= last,
+                None => false,
+            };
+        }
+
         let bank = if CHR_RAM_MIRRORED {
             bank & CHR_RAM_LAST
         } else {
             bank
         };
         bank >= CHR_RAM_FIRST && bank <= CHR_RAM_LAST
+    }
+
+    /// The power-on `CHRB` of mapper 195's GAL, which its page states: **`$80`**. See
+    /// [`Mmc3Board::gal_window`].
+    #[cfg(feature = "board-mmc3-chrram")]
+    const GAL_POWER_ON: u8 = 0x80;
+
+    /// Mapper 195's GAL: which 1 KiB CHR banks the `CHRB` register puts on the CHR-RAM chip,
+    /// as `(first, last)`, or `None` for "all of CHR-ROM" (MF-UNL-2 step 2).
+    ///
+    /// nesdev ("INES Mapper 195"), the Waixing **FS303**, whose MMC3 clone comes "with a GAL that
+    /// can dynamically change which CHR banks are mapped to RAM". The register is written "via
+    /// the PPU", and the page's diagram is
+    ///
+    /// ```text
+    /// CHRB~[1Z.D L.L.]
+    ///       || | | |
+    ///       |+-|-+-+---------------- Select first bank and size of CHR RAM:
+    ///       || |                      $80 = $28-$2B      $C0 = $46-$47
+    ///       || |                      $82 = $00-$03      $C2 = $7C-$7D
+    ///       || |                      $88 = $4C-$4F      $C8 = $0A-$0B
+    ///       || |                      $8A = $64-$67      $CA = only CHR ROM
+    ///       || +-------------------- If 1, ignore above and always enable CHR ROM / disable CHR RAM
+    ///       |+---------------------- Number of banks of CHR RAM, 0=4KiB, 1=2KiB
+    ///       +----------------------- Must be 1
+    /// Power-on value: $80
+    /// ```
+    ///
+    /// **The eight rows are one three-bit field**, which is what the diagram's own arrow says:
+    /// the "Select first bank and size" line reaches `Z` (bit 6) *and* both `L` bits (bits 3 and
+    /// 1), and `(Z, L, L)` counted as a number walks the page's list in the order the page writes
+    /// it — `$80, $82, $88, $8A, $C0, $C2, $C8, $CA`. So this is one eight-entry table and not
+    /// two four-entry ones, and `Z`'s own annotation ("0=4KiB, 1=2KiB") falls out of it: the
+    /// first four rows are four banks wide and the last four are two.
+    ///
+    /// Bits 5, 2 and 0 are don't-cares, and **bit 4 (`D`) wins over the field**.
+    ///
+    /// Mesen 2 does **not** implement the GAL: it registers the number as the static
+    /// `MMC3_ChrRam(0x00, 0x03, 4)`, which is the `$82` row. `docs/review/UNL-census.md` §7.2
+    /// quotes that registration *and* asks for "the page's run-time GAL" in the same sentence,
+    /// and the two disagree about the power-on state — the page's is `$80`, `$28-$2B`. **Q-142**
+    /// holds both readings and the choice; the page's is implemented.
+    #[cfg(feature = "board-mmc3-chrram")]
+    const fn gal_window(register: u8) -> Option<(u8, u8)> {
+        // "If 1, ignore above and always enable CHR ROM / disable CHR RAM."
+        if register & 0x10 != 0 {
+            return None;
+        }
+
+        // `(Z, L, L)` = bits 6, 3 and 1, in that order.
+        let row = ((register >> 4) & 0x04) | ((register >> 2) & 0x02) | ((register >> 1) & 0x01);
+        let (first, banks) = match row {
+            0 => (0x28, 4),
+            1 => (0x00, 4),
+            2 => (0x4C, 4),
+            3 => (0x64, 4),
+            4 => (0x46, 2),
+            5 => (0x7C, 2),
+            6 => (0x0A, 2),
+            // `$CA = only CHR ROM`.
+            _ => return None,
+        };
+        Some((first, first + banks - 1))
     }
 
     /// The 1 KiB CHR bank number window `window` shows, re-derived from the bank registers.
@@ -314,6 +447,8 @@ impl<
             irq_prescaler: 0,
             #[cfg(feature = "board-119")]
             chr_ram_windows: 0,
+            #[cfg(feature = "board-mmc3-chrram")]
+            chr_ram_gal: Self::GAL_POWER_ON,
             #[cfg(feature = "board-mmc3-multicart")]
             outer: 0,
             dots_per_clock,
@@ -523,7 +658,7 @@ impl<
     fn refresh_chr_source(&mut self) {
         let mut mask = 0u8;
         for window in 0..BankWindows::CHR_WINDOWS {
-            if Self::chr_ram_selected(self.chr_bank_of_window(window)) {
+            if self.chr_ram_selected(self.chr_bank_of_window(window)) {
                 mask |= 1u8 << window;
             }
         }
@@ -620,7 +755,22 @@ impl<
         let index = usize::from(address) & 0x1FFF;
         let window = index / BankWindows::CHR_WINDOW_SIZE;
         if self.chr_ram_windows & (1u8 << window) == 0 {
-            // The ROM chip drives this window: the write goes nowhere.
+            // **Mapper 195's GAL latches here**, and the page is what puts it on this branch:
+            // "The games write, via the PPU, to specific CHR banks in order to select both which
+            // and how many CHR banks are mapped to RAM instead of ROM. **Writes to CHR ROM** in
+            // multiples of 1 KiB." A write to a RAM window is a RAM write and a write to a ROM
+            // window is the register — which is the only way a board with one PPU write line
+            // could tell the two apart.
+            //
+            // Bit 7 "Must be 1", so a byte without it is not a `CHRB` value and the window is
+            // left where it was. On every other board of the family this branch is what it was:
+            // the ROM chip drives the window and the write goes nowhere.
+            #[cfg(feature = "board-mmc3-chrram")]
+            if CHR_RAM_GAL && value & 0x80 != 0 {
+                self.chr_ram_gal = value;
+                self.update_banks();
+            }
+
             return;
         }
 
@@ -695,9 +845,18 @@ impl<
         const CHR_RAM_LAST: u8,
         const CHR_RAM_KIB: u8,
         const CHR_RAM_MIRRORED: bool,
+        const CHR_RAM_GAL: bool,
         const MULTICART: bool,
     > Mapper
-    for Mmc3Board<MC_ACC, CHR_RAM_FIRST, CHR_RAM_LAST, CHR_RAM_KIB, CHR_RAM_MIRRORED, MULTICART>
+    for Mmc3Board<
+        MC_ACC,
+        CHR_RAM_FIRST,
+        CHR_RAM_LAST,
+        CHR_RAM_KIB,
+        CHR_RAM_MIRRORED,
+        CHR_RAM_GAL,
+        MULTICART,
+    >
 {
     banked!();
 
@@ -723,6 +882,13 @@ impl<
         if MULTICART {
             writer.write_u8(self.outer);
         }
+
+        // Mapper 195's GAL register, on the same terms: behind the `const`, so the family's
+        // other four numbers and every board above append nothing (MF-UNL-2 step 2).
+        #[cfg(feature = "board-mmc3-chrram")]
+        if CHR_RAM_GAL {
+            writer.write_u8(self.chr_ram_gal);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -742,6 +908,11 @@ impl<
         #[cfg(feature = "board-mmc3-multicart")]
         if MULTICART {
             self.outer = reader.read_u8()?;
+        }
+
+        #[cfg(feature = "board-mmc3-chrram")]
+        if CHR_RAM_GAL {
+            self.chr_ram_gal = reader.read_u8()?;
         }
 
         // The windows again from the registers, over the PRG-ROM loaded: a state of the same
@@ -890,6 +1061,11 @@ impl<
         #[cfg(feature = "board-mmc3-multicart")]
         {
             self.outer = 0;
+        }
+        // "Power-on value: $80" (nesdev, "INES Mapper 195").
+        #[cfg(feature = "board-mmc3-chrram")]
+        {
+            self.chr_ram_gal = Self::GAL_POWER_ON;
         }
         self.a12.reset();
         // `chr_ram_windows` comes back here too: `update_banks` refreshes it on a CHR-RAM board.

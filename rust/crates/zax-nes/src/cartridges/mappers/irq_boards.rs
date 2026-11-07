@@ -1,3 +1,5 @@
+#[cfg(feature = "board-mmc3-chrram")]
+use super::Mmc3ChrRamBoard;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::Mmc3Multicart;
 #[cfg(feature = "board-105")]
@@ -108,6 +110,18 @@ pub enum IrqBoard {
     /// Mappers 47 and 37, Nintendo's two MMC3 multicarts (MF-6a3 step 1).
     #[cfg(feature = "board-mmc3-multicart")]
     Mmc3Multicart(Mmc3Multicart),
+    /// Mappers 74, 192, 194 and 195, the other four members of mapper 119's own family
+    /// (MF-UNL-2 step 2) — **one variant for the four**, each of them a `const`
+    /// monomorphisation of [`super::Mmc3Board`]. [`Mmc3ChrRamBoard`]'s own note has both halves
+    /// of that: why four monomorphisations cannot be one Rust type, and why they can still be
+    /// one arm here.
+    ///
+    /// **Boxed**, on the same measurement [`IrqBoard::Somari`] is boxed on: inline, an
+    /// `Mmc3Board` plus a discriminant is the variant that would set this enum's size, and
+    /// MF-6b step 1 priced one byte of displacement in that payload at +0.009 % to +0.027 % on
+    /// eleven of lot PR-1's thirteen ROMs. Boxed, the enum is the size MF-6a3 step 1 measured.
+    #[cfg(feature = "board-mmc3-chrram")]
+    Mmc3ChrRam(Box<Mmc3ChrRamBoard>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -170,6 +184,8 @@ macro_rules! inner {
             IrqBoard::Tqrom($b) => $body,
             #[cfg(feature = "board-mmc3-multicart")]
             IrqBoard::Mmc3Multicart($b) => $body,
+            #[cfg(feature = "board-mmc3-chrram")]
+            IrqBoard::Mmc3ChrRam($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]

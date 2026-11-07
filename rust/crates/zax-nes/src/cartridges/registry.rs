@@ -16,6 +16,8 @@ use super::mappers::EepromPort;
 use super::mappers::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::mappers::Jv001;
+#[cfg(feature = "board-mmc3-chrram")]
+use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
 #[cfg(feature = "board-namcot108")]
@@ -114,6 +116,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-jaleco-72-92-86")]
     72,
     73,
+    #[cfg(feature = "board-mmc3-chrram")]
+    74,
     #[cfg(feature = "board-small-boards")]
     75,
     #[cfg(feature = "board-namcot108")]
@@ -198,6 +202,12 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     184,
     #[cfg(feature = "board-small-boards")]
     185,
+    #[cfg(feature = "board-mmc3-chrram")]
+    192,
+    #[cfg(feature = "board-mmc3-chrram")]
+    194,
+    #[cfg(feature = "board-mmc3-chrram")]
+    195,
     #[cfg(feature = "board-namcot108")]
     206,
     #[cfg(feature = "board-taito-x1")]
@@ -308,6 +318,24 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-119")]
         119 => BoardMemorySizes {
             chr_ram: Some(Tqrom::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // The other four members of the TQROM's family, for the arm above's reason in the same
+        // words: the `Size of RAM` column of nesdev's *MMC3 with CHR ROM and CHR RAM* is the
+        // chip the board carries beside its CHR-ROM, and **no header field can state it** --
+        // byte 5 of an iNES 1.0 header is the CHR-*ROM* size and REQ-CORE-012's CHR-RAM default
+        // only applies to an image with no CHR-ROM at all. 74 and 194 carry 2 KiB, 192 4 KiB,
+        // and 195 **8 KiB**, which is its page's "32 KiB of CHR-RAM, although address lines for
+        // only 8 KiB are connected" and not the width of its window (MF-UNL-2 step 2).
+        //
+        // 192's page adds the one case where the header does speak: "If the NES 2.0 header is
+        // present, 74 and 192 should be emulated identically, as NES 2.0 specifies CHR RAM size
+        // elsewhere." This build does not take that path -- the board's chip is the board's,
+        // which is the rule every arm of this function follows, and the two numbers then differ
+        // by the one thing their pages differ by. Q-143 records it.
+        #[cfg(feature = "board-mmc3-chrram")]
+        74 | 192 | 194 | 195 => BoardMemorySizes {
+            chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
             ..BoardMemorySizes::default()
         },
         // Mappers 47 and 37: the outer register *is* the board's decode of $6000-$7FFF, so
@@ -778,6 +806,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         116 => Board::IrqBoard(IrqBoard::Somari(Box::new(Somari::new(memory)))),
         #[cfg(feature = "board-119")]
         119 => Board::IrqBoard(IrqBoard::Tqrom(Tqrom::new(memory, mapper))),
+        // MF-UNL-2 step 2: the other four numbers of that same family, one `const`
+        // monomorphisation each behind one `IrqBoard` variant -- see `Mmc3ChrRamBoard`'s own
+        // note. 195 is the only one whose window moves at run time (its GAL, Q-142).
+        #[cfg(feature = "board-mmc3-chrram")]
+        74 | 192 | 194 | 195 => Board::IrqBoard(IrqBoard::Mmc3ChrRam(Box::new(
+            Mmc3ChrRamBoard::new(memory, mapper)?,
+        ))),
         // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two
         // numbers differ only in what the outer register's bits drive, which is a field test
         // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.
