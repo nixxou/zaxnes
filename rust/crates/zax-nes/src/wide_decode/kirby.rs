@@ -60,10 +60,11 @@ impl MarginDecoder for Kirby {
             + i32::from(memory.ram(CAMERA_Y))
             + i32::from(memory.ram(CAMERA_Y_FINE));
         // While the camera moves, the work RAM is a frame ahead of the picture: the row's own
-        // scroll places it. Its 512-pixel plane of two nametables repeats across the room, and
-        // the camera only picks the repeat (the one whose left edge is nearest to it).
-        let ring = row.ring_x();
-        let left = camera_x - (camera_x - ring + 256).rem_euclid(512) + 256;
+        // scroll places it. The game draws the room in one nametable's width (the horizontal
+        // nametable bit plays no part), so that scroll repeats every 256 pixels across the room,
+        // and the camera only picks the repeat (the one whose left edge is nearest to it).
+        let ring = row.ring_x() & 0xFF;
+        let left = camera_x - (camera_x - ring + 128).rem_euclid(256) + 128;
         if left < 0 {
             return false;
         }
