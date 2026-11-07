@@ -9,8 +9,8 @@ sample ring: the emulation core, the resampler and the filters are untouched.
 
 ## Plan — 10 steps
 
-- [ ] **1. Plan.** This file.
-- [ ] **2. Verify the findings.** Read the audio path and confirm or refute each of the five
+- [x] **1. Plan.** This file.
+- [x] **2. Verify the findings.** Read the audio path and confirm or refute each of the five
       findings with `file:line`. Write the question ticket for the spec clauses the owner's
       design contradicts (REQ-AUD-003 silence blocks, the latency note, the ring capacity).
 - [ ] **3. Pull output.** The SDL device is opened with a callback that reads the APU sample
@@ -62,4 +62,64 @@ longer starve the device, and a late producer can no longer cause a block of zer
 
 ## Notes per step
 
-(filled in as the steps are done)
+### Step 2 — the findings, verified against the code at `v0.4.2`
+
+All five are **confirmed**. Line numbers are those of `v0.4.2`; paths are relative to
+`rust/crates/`.
+
+**1. Silence blocks inserted mid-stream — confirmed.**
+`zax-platform/src/audio.rs:105-114` (`AudioOutput::pump`) computes
+`blocks_to_queue(self.queue.size())` and calls `fill` that many times unconditionally; it has
+no way to know whether the filler has data. `blocks_to_queue`
+(`zax-platform/src/audio.rs:42-44`) tops the SDL queue up to `BLOCK_COUNT = 4` blocks
+(`audio.rs:23`). `zax-app/src/audio/audio_mixer.rs:325-335` (`mix_emulation`) asks the source
+for `frames` samples and, when `written < frames`, *returns having mixed nothing*: the block
+keeps the zeros `fill` wrote at `audio_mixer.rs:260`. The source
+(`zax-app/src/emulation/host/jobs.rs:319-322`) is `AudioReader::read_samples`, whose ring read
+is all-or-nothing — `zax-nes/src/apu/mod.rs:140-142` returns `Ok(0)` without consuming
+anything when `available < needed`. So a ring holding 511 samples yields a full block of zeros
+while the SDL queue still holds up to three other blocks: a 10.7 ms hole with a discontinuity
+at each edge. This is REQ-AUD-003 to the letter; see Q-153 §1.
+
+**2. Rate control settles below its target — confirmed.**
+`zax-app/src/emulation/host/mod.rs:1245-1267` (`correct_audio_drift`). It is proportional only
+(`-error * 0.002`, `mod.rs:1259`) with no integral term, so a steady clock offset leaves a
+steady error: at the ±0.5 % cap (`Apu2A03::MAX_RATIO_ADJUSTMENT`, `apu/mod.rs:274`) the
+residual error needed to produce even a 0.1 % correction is 50 % of the target. The target is
+`2 * BLOCK = 1024` samples ≈ 21 ms (`mod.rs:1246`), measured on the **APU ring only**
+(`mod.rs:1253`) — the SDL queue, which holds the other 30–40 ms, is never looked at. It also
+runs *before* the frames and before the pump in both branches of the tick
+(`mod.rs:672-688`). The deficit it leaves is paid in the silence blocks of finding 1.
+
+**3. Output buffer too short for a 3D main thread — confirmed.**
+`BLOCK_COUNT = 4` blocks of 512 frames (`zax-platform/src/audio.rs:19-23`) is 42.7 ms at
+48 kHz, and a partly played block counts as pending (`audio.rs:43`), so the real floor is
+nearer 32 ms. It is refilled once per rendered frame, from `pump_audio`
+(`zax-app/src/application.rs:1876-1897`), on the main thread. `video.half_rate_3d` renders at
+33.3 ms (`zax-settings/src/table.rs:800-808`), which is at or past that floor before any hitch.
+
+**4. Pause / resume / save-state load — confirmed.**
+The console gain is the 3.33 s linear fade of REQ-AUD-020
+(`zax-app/src/audio/audio_mixer.rs:307-310`, driven from
+`zax-app/src/emulation/host/mod.rs:1032-1037`), but the ring runs dry one or two blocks after
+the last emulated frame, so what is actually heard is the abrupt end of finding 1 while the
+gain is still ≈ 1 — a hard cut, not a fade. On resume the ring holds whatever sub-512 fragment
+was left (nothing drains it: `apu/mod.rs:140-142` never consumes a short read), so that stale
+fragment is the first thing played. After a state load the ring is deliberately emptied
+(`apu/mod.rs:496-498`, called from `apu/mod.rs:933`), and after a pacer reset it is empty too,
+so the pump interleaves silence blocks with signal blocks for as long as the producer is
+behind. `AudioOutput::flush` (`zax-platform/src/audio.rs:117-119`) exists and has **no caller**
+anywhere in the workspace.
+
+**5. No headroom; gain applied per block — confirmed.**
+`mix_emulation` reads `self.emulation_gain.value()` once per block
+(`zax-app/src/audio/audio_mixer.rs:336`) and applies that single value to all 512 frames, so a
+fade is a staircase of 10.7 ms steps. The only limiting is the hard clamp at
+`audio_mixer.rs:264-266`, and the APU's own `OUTPUT_GAIN` of 1.526 (`apu/mod.rs:284`) plus
+expansion audio and the high-pass overshoot can reach it.
+
+**Spec conflicts recorded in `spec/changes/Q-153.md`**: the silence-block clause of
+REQ-AUD-003 (§1), the « < 40 ms » latency note (§2), the ring capacity against a 200 ms
+latency (§3, the core's ring is fixed at 208 ms at 48 kHz and
+`zax-nes/tests/audio_pacing_tests.rs:262-274` asserts that bound), and the 50 ms rollback hole
+of REQ-AUD-012 against a full prefill (§4).
