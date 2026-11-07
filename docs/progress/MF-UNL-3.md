@@ -40,7 +40,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   three places this lot had to choose. The Cargo feature comments are written as each feature is
   added (steps 1 to 4); **the eight `docs/review/BOARD-FEATURES.md` rows state step 7's figures
   and are therefore in step 7's commit**, which is the order MF-UNL-2 used for the same reason.
-- [ ] **7/9 — the callgrind campaign, and the documentation it carries.** PR-1's thirteen ROMs
+- [x] **7/9 — the callgrind campaign, and the documentation it carries.** PR-1's thirteen ROMs
   and level 2's five games against `452e8464`, every compared commit built from `git archive` in
   a fresh directory, the feature decision for each of the eight boards, and the eight rows of
   `docs/review/BOARD-FEATURES.md` with those figures in them.
@@ -517,3 +517,125 @@ is deliberately absent from `registry::has_bus_conflicts` — that function appl
 `Cartridge::cpu_write` *before* `Mapper::write_register` sees the value, which would destroy the
 bit 0 this board has to take from the ROM. If a second such board appears, the shape to consider
 is a per-board enum on `Cartridge::bus_conflicts` rather than a second `bool`; the ticket says so.
+
+## Step 7 — the callgrind campaign, the feature decision, and the eight rows
+
+Four binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, which is then deleted:
+
+| label | tree |
+| --- | --- |
+| `unl3base` | **`452e8464`**, the lot's base commit |
+| `unl3` | `15dc2b85`, the lot through step 6, the eight features in `default` |
+| `unl3off` | the same source with the eight features **out of `default`** — no new board code reachable |
+| `unl3swap` | the same source as `unl3` with **two disjoint `create_board` arms exchanged** (13 and 15) — identical emulation, different layout |
+
+Roots: `ZAX_TEST_ROMS=/mnt/g/3dsen/cleanroom/assets-free/test-roms`,
+`ZAX_COMM_ROMS=/mnt/g/3dsen/demo/roms`, `ZAX_L2_ROMS=/mnt/g/3dsen/test-originals`,
+`ZAX_L2_PACKS=/mnt/g/3dsen/campaign/play-user/profiles` (the 101 profiles).
+
+### PR-1's thirteen ROMs, 300 frames, no pack — `unl3` against `unl3base`
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `m1` | 4 881 032 832 | 4 881 156 821 | **+123 989** | **+0.003** |
+| `oamstr` | 3 318 452 244 | 3 318 535 757 | +83 513 | **+0.003** |
+| `m0` | 5 517 236 272 | 5 517 331 925 | +95 653 | +0.002 |
+| `m4` | 5 467 939 168 | 5 467 987 467 | +48 299 | +0.001 |
+| `mm2` | 6 017 960 116 | 6 017 997 927 | +37 811 | +0.001 |
+| `readbuf` | 6 834 507 968 | 6 834 560 209 | +52 241 | +0.001 |
+| `smb1` | 5 996 316 823 | 5 996 370 887 | +54 064 | +0.001 |
+| `vblnmi` | 3 308 255 325 | 3 308 302 362 | +47 037 | +0.001 |
+| `metroid` | 5 115 560 322 | 5 115 575 056 | +14 734 | +0.000 |
+| `mmc5` | 11 266 784 281 | 11 266 818 591 | +34 310 | +0.000 |
+| `duelito` | 7 380 433 040 | 7 380 444 409 | +11 369 | +0.000 |
+| `z2` | 6 291 541 293 | 6 291 545 394 | +4 101 | +0.000 |
+| `smb3` | 7 949 430 378 | 7 949 418 861 | **−11 517** | −0.000 |
+| **total** | 79 345 450 062 | 79 346 045 666 | **+595 604** | **+0.001** |
+
+**Worst ROM +0.003 %**, against a tolerance of +0.02 %.
+
+**And the per-symbol diff says what the lot's own cost is, which is one function.** On `m1`, the
+only symbol of this project that moves is `NesBus::write_internal` **+74 561** (13 091 522 →
+13 166 083) — the eight arms this lot adds to the `DecodeBoard` match that `Board::write_register`
+inlines, on an MMC1 ROM that reaches none of them. Everything else above 20 000 on any ROM of the
+set is the harness's own start-up: `getgeneric` +34 172, `luaH_getshortstr` +32 657 and one
+`hashbrown` insert +23 447, the same three on `m0`, `m1` and `oamstr` to the instruction.
+
+### Level 2's five games, 600 frames, packs loaded, inputs pressed
+
+| game | `core` delta | `core` % | `total` delta | `total` % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | **+0** | +0.000 | −1 665 547 | −0.012 |
+| `smb3` | **+0** | +0.000 | +3 191 965 | **+0.013** |
+| `zelda2` | **+0** | +0.000 | −855 472 | −0.006 |
+| `metroid` | +9 952 | +0.000 | −158 254 | −0.001 |
+| `mm2` | +18 944 | +0.000 | +158 556 | +0.001 |
+
+**All ten figures are inside the tolerance** — which makes MF-UNL-3 the first of the MF-UNL lots
+with nothing to explain away. `ppu`, `apu` and `draw_list` are identical to the instruction on
+every game but `smb3`, whose `draw_list` moves by +4 676 in 418 M (+0.001 %); the whole of
+`smb3`'s +3.19 M is `convert` +3 155 289 and `lua_hooks` +3 072 622, and the per-function diff
+is `luaH_getshortstr` **+3 427 861** with no symbol of this project moving by 300 000.
+
+### The two controls, and what they say about the `total` column
+
+| | PR-1 set total | level-2 `core` | level-2 `total` |
+| --- | ---: | --- | --- |
+| `unl3off` vs `unl3base` | **−62 379 (−0.000 %)**, worst ROM `mm2` +0.001 % | **all five +0, identical to the instruction** | −0.001 % to **+0.022 %** (`smb3`) |
+| `unl3swap` vs `unl3` | **−97 496 (−0.000 %)**, worst ROM `metroid`/`mm2` +0.001 % | **all five +0** | −0.002 % to **+0.016 %** (`smb1`) |
+
+**`unl3off` is the measurement worth keeping.** It is the lot's own source with the eight features
+out of `default`, so no new board code is reachable and **its emulation is the base commit's byte
+for byte** — and it is `smb3/total` **+0.022 %**, which is *above* the owner's tolerance and above
+the lot's own +0.013 %, while every one of its five `core` figures is identical to the instruction.
+`unl3swap` says the same from the other side: two binaries with identical emulation differ by
++0.016 % on `smb1/total`.
+
+So the reading `BOARD-FEATURES.md` has carried since MF-UNL-2 step 7 is confirmed by a build that
+changes no behaviour at all: **on a level-2 run with a pack loaded, `core` is the figure the
+tolerance applies to and `total` is not resolvable below about 0.02 %.** This lot does not need
+that argument — all ten of its own figures are inside — and it is recorded because it is the
+cleanest demonstration of it the project has.
+
+**Gated off, the shipped-today build pays nothing**: PR-1 set total −62 379 with seven of
+thirteen below the base, and all five level-2 `core` figures +0. So the nine numbers are reachable
+or unreachable for the price of a flag, in either direction, which is the owner's rule.
+
+### The feature decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-nina03` | **`default`** | PR-1 worst +0.003 %, all five level-2 `core` +0.000 %, all five `total` inside |
+| `board-38` | **`default`** | the same measurement; the eight were measured together, as every MF lot measures its own boards together |
+| `board-107` | **`default`** | the same |
+| `board-143` | **`default`** | the same |
+| `board-144` | **`default`** | the same |
+| `board-145` | **`default`** | the same |
+| `board-149` | **`default`** | the same |
+| `board-190` | **`default`** | the same |
+
+`parked-boards` is unchanged: it still holds `board-vs-system` alone. **No figure of this lot is
+outside the owner's tolerance on either instrument**, so nothing here needs the park, and nothing
+is dropped either way: each of the eight is one `--no-default-features --features …` away.
+
+### The documentation this step carries
+
+* **Eight rows in `docs/review/BOARD-FEATURES.md`**, between `board-189` and the `parked-boards`
+  umbrella, each with this step's figures in the two cost columns and the decision `**on**`.
+* **One new section** above "MF-CART lifted the limit", `MF-UNL-3's two control builds`, with the
+  three-row table above and what it means for the `total` column.
+* The `--no-default-features` and `parked-boards` test counts in that file are brought to this
+  lot's (**783** unchanged and **962**, against **909** by default), the "how to turn a board off"
+  command gains the eight names, and the "worst figure among the features in `default`" line
+  becomes **+0.003 %** — this lot's, where it was `board-116`'s +0.0020 %.
+* **Eight Cargo feature comments**, each ending in the same six-line figure block, so a reader who
+  flips a feature finds the number beside it.
+
+### Disk and machine
+
+G: stayed above **35 GiB** free through the campaign: the 12-configuration matrix of step 5 had
+left `rust/target-mf` at **26.3 GB**, which was deleted before the first clean build (its figures
+being recorded), and each of the four build directories was deleted by `build-clean.sh` as soon as
+its binary was copied out. The four tars were removed afterwards. No GPU campaign, no background
+command — every long run in the foreground with its output read, as the headless rule requires.

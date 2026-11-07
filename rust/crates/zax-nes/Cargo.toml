@@ -317,6 +317,13 @@ board-133 = ["board-decode-boards"]
 # gives this board "Bus conflicts: No", so a dump that needed it is a mislabelled mapper-3 image
 # and its header is the fix. `Nina03`'s own note has the argument and a test pins the silence.
 # Implies `board-decode-boards`.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-nina03 = ["board-decode-boards"]
 
 # Lot MF-UNL-3's **seven single-latch boards**, one feature each and **one** `DecodeBoard`
@@ -329,6 +336,13 @@ board-nina03 = ["board-decode-boards"]
 # also trigger a bankswitch" is implemented as the same decode (A15 ignored) and recorded in
 # **Q-147**, because the page says "very likely" rather than asserting it. "PRG RAM capacity:
 # None", so `board_memory_sizes` clears $6000-$7FFF and the latch at $7000 is reachable.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-38 = ["board-decode-boards"]
 
 # Mapper 107, the Magicseries board of *Magic Dragon*: one `[BBBB BBBb]` register over the whole
@@ -336,6 +350,13 @@ board-38 = ["board-decode-boards"]
 # 32 KiB PRG bank the upper **seven**, which is the page's diagram and MesenCE's reading where
 # FCEUX takes three bits. Its "it's currently unknown whether this mapper suffers from bus
 # conflicts or not" is answered **no** and recorded in **Q-147**.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-107 = ["board-decode-boards"]
 
 # Mapper 143, the Sachen **TCA-01** of *Dancing Blocks* and *Magical Mathematics*: "an NROM
@@ -344,6 +365,13 @@ board-107 = ["board-decode-boards"]
 # bits, with bits 7-6 open bus. The census asked for the inversion of the *written* bits; the
 # page has no write side at all, and **Q-145** records that the page wins. The one board of this
 # lot that needs a forward, `try_read_prg`, which `DecodeBoard` has carried since MF-UNL-1.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-143 = ["board-decode-boards"]
 
 # Mapper 144, the **AGCI 50282** of *Death Race*: "a intentionally defective variant of the
@@ -355,16 +383,37 @@ board-143 = ["board-decode-boards"]
 # function as its Nestopia candidate. **Not** on `registry::has_bus_conflicts`: that generic path
 # would AND bit 0 away before the board could put the ROM's back. **Q-146** records all three of
 # the page's candidates and the census's own figure, which none of them produces.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-144 = ["board-decode-boards"]
 
 # Mapper 145, the Sachen **SA-72007** of *Sidewinder*: `$4100: [C... ....]` under mask $E100,
 # one 8 KiB CHR bank bit, and the bit is **bit 7**. No PRG bank line: an NROM with a CHR switch.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-145 = ["board-decode-boards"]
 
 # Mapper 149, the Sachen **SA-0036** of *Taiwan Mahjong 16*: the same one bit, "just like mapper
 # 145, but moves the register to overlap with PRG ROM and so **has bus conflicts**" -- mask
 # $8000, so every address in $8000-$FFFF is the register, and the AND with the ROM byte is
 # `registry::has_bus_conflicts`'s generic path.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-149 = ["board-decode-boards"]
 
 # Mapper 190, the Zemina board of *Magic Kid Googoo*: the one of the lot's seven with more than
@@ -374,6 +423,13 @@ board-149 = ["board-decode-boards"]
 # address's A1-A0 picking the window. 8 KiB of RAM at $6000-$7FFF, which its *Banks* section
 # states and `board_memory_sizes` therefore does too. The four CHR bytes live in the shared
 # variant's one savestate block, as mapper 36's CHR latch lives in `Jv001`'s.
+#
+# Measured with the lot's other seven against `452e8464` (MF-UNL-3 step 7): PR-1's thirteen ROMs
+# worst `m1`/`oamstr` +0.003 %, set total +595 604 (+0.001 %); level 2 all five `core` inside at
+# +0.000 %, three of them identical to the instruction, and **all five `total` inside too**,
+# -0.012 % to +0.013 %. The lot's own source with the eight features out of `default` -- the
+# emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
+# spread is. See `docs/review/BOARD-FEATURES.md`.
 board-190 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
