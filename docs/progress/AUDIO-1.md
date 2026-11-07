@@ -33,7 +33,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
 - [x] **7. Counters.** Underrun events, average latency, current rate adjustment, minimum and
       maximum ring fill, in the performance overlay and logged once per second when the frame
       profiler is on.
-- [ ] **8. Tests.** Ring/callback logic without a device; rate control against a simulated
+- [x] **8. Tests.** Ring/callback logic without a device; rate control against a simulated
       device clock; main-thread stalls.
 - [ ] **9. Measurements.** Main-thread frame time before and after, 2D and 3D, desktop release
       build; golden-core byte-identical to `v0.4.2`; Android and PortMaster `cargo check`.
@@ -353,3 +353,25 @@ beyond means the controller is saturated and the latency is drifting faster than
 `audio_rate_adjustment` and a separate window timer on the host both turned out to belong in
 `RateControl` (it is the one thing the host already steps with the tick's real time), which also
 kept `EmulationHost::new` under the hundred-line clippy limit.
+
+### Step 8 — the tests
+
+Every test the work order asks for, none of them needing a device: the stream is driven by
+calling `render_block` directly, with a `ConsoleSamples` the test fills by hand.
+
+| test | what it pins down |
+|---|---|
+| `req_aud_003_a_late_console_is_held_and_faded_rather_than_zeroed` | a late producer yields **no zero block**: the samples it had are played, the last is held and ramped, no two neighbouring samples jump by more than the ramp allows, one under-run is counted |
+| `q153_the_prefill_gates_playback` | one sample short of the target the output is exact silence and the ring is untouched; the sample that completes it opens the gate and the signal is ramped in |
+| `q153_a_resume_clears_the_ring_and_ramps_back_in` | a resynchronisation plays nothing stale, waits for half the latency and no more, ramps in, counts no under-run |
+| `q153_a_forty_millisecond_stall_at_sixty_of_latency_does_not_under_run` | finding 3: a 40 ms stall of the main thread at 60 ms of latency gives **0** under-runs; a 120 ms stall is noticed; and — the control that the harness measures what it claims — 40 ms at 30 ms of latency, which is what v0.4.2's four queued blocks amounted to, does under-run |
+| `req_aud_005_a_drifting_device_clock_neither_under_runs_nor_drifts_away` | the closed loop: the real stream, the real `RateControl` and a device clock ±0,03 % off, ten minutes each way → **0** under-runs, latency settled within the 3 ms dead band |
+| `req_aud_005_an_hour_against_a_drifting_clock_under_runs_nothing` | the same over a **full hour** (about 200 000 blocks). `#[ignore]`d: 0,7 s in release, most of a minute in debug |
+| `rate_control`'s eight unit tests | the law itself: dead band, capped and opposing proportional, the accumulation absorbing an offset inside the dead band, one resynchronisation per excursion, no correction while prefilling, idling keeping what was learnt, and the open-loop simulation over an hour with the measurement lag included |
+
+The closed-loop test is the one that would have caught finding 2: v0.4.2's proportional-only
+controller needed a standing error to correct anything, and that standing error was paid in
+blocks of silence.
+
+Release run of `zax-app`, `zax-platform`, `zax-settings` and `zax-nes`: all green, with
+`--include-ignored` on `audio_tests` too (19 tests, 0,74 s).

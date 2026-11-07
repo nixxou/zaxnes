@@ -267,6 +267,138 @@ fn q153_a_resume_clears_the_ring_and_ramps_back_in() {
     );
 }
 
+/// Plays `seconds` of audio: the device pulls blocks while a producer that runs at real time
+/// tops the ring up, except during a stall of `stall_ms` in the middle. Returns the under-runs.
+///
+/// This is finding 3 in miniature: the v0.4.2 output held about 32 ms, so a rendered frame
+/// longer than that put a hole in the sound whatever the core had produced.
+fn play_through_a_stall(latency_ms: f32, stall_ms: f32, seconds: f32) -> u64 {
+    let (mut stream, control, queue) = stream(latency_ms);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    // The producer fills the ring to the target before the device starts, as a game does.
+    feed(&queue, frames_of_ms(RATE, latency_ms), 0.5);
+    let blocks = (frames_of_ms(RATE, seconds * 1000.0) / BLOCK).max(2);
+    let stall_at = blocks / 2;
+    #[allow(clippy::cast_precision_loss)] // a few hundred blocks
+    let block_ms = BLOCK as f32 * 1000.0 / RATE as f32;
+    let mut owed = 0.0_f32;
+    for block in 0..blocks {
+        // The producer owes one block's worth of samples per block consumed, and nothing at all
+        // while the main thread is stalled.
+        owed += block_ms;
+        if block == stall_at {
+            // The stall: the device keeps pulling, the producer adds nothing.
+            let mut stalled = 0.0;
+            while stalled < stall_ms {
+                let _ = block_of(&mut stream);
+                stalled += block_ms;
+            }
+            continue;
+        }
+        if owed >= block_ms {
+            feed(&queue, frames_of_ms(RATE, owed), 0.5);
+            owed = 0.0;
+        }
+        let _ = block_of(&mut stream);
+    }
+    control.underruns()
+}
+
+/// Finding 3 and Q-153 §2: at the default latency a 40 ms stall of the main thread — a shader
+/// compile, a Lua collection, the 33,3 ms frames of `video.half_rate_3d` — no longer puts a hole
+/// in the sound. A stall well past the latency still does, and then it is one event with a ramp
+/// at each end rather than a block of zeros.
+#[test]
+fn q153_a_forty_millisecond_stall_at_sixty_of_latency_does_not_under_run() {
+    assert_eq!(
+        play_through_a_stall(60.0, 40.0, 2.0),
+        0,
+        "a 40 ms stall under-ran at 60 ms of latency"
+    );
+    // Twice the latency cannot be covered by any buffer of that size.
+    assert!(
+        play_through_a_stall(60.0, 120.0, 2.0) >= 1,
+        "a 120 ms stall should have been noticed"
+    );
+    // And the buffer the owner had in v0.4.2, about 32 ms, could not take 40 ms.
+    assert!(
+        play_through_a_stall(30.0, 40.0, 2.0) >= 1,
+        "the test harness is not measuring what it claims"
+    );
+}
+
+/// REQ-AUD-004 and REQ-AUD-005, closed loop: the real stream, the real rate controller and a
+/// device whose clock is `drift` off the emulation's, run for `minutes` of audio. Returns the
+/// under-runs and the latency the controller ended on, in milliseconds.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // block and sample counts are small and positive by construction
+fn play_against_a_drifting_clock(latency_ms: f32, drift: f64, minutes: f64) -> (u64, f32) {
+    let (mut stream, control, queue) = stream(latency_ms);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    feed(&queue, frames_of_ms(RATE, latency_ms), 0.5);
+
+    let mut rate = zax_app::audio::rate_control::RateControl::new();
+    let cap = 0.005; // Apu2A03::MAX_RATIO_ADJUSTMENT
+    let block_seconds = f64::from(BLOCK as u32) / f64::from(RATE);
+    let blocks = (minutes * 60.0 / block_seconds) as usize;
+    let mut adjustment = 0.0;
+    let mut owed = 0.0_f64;
+    let mut block = vec![0.0_f32; BLOCK * 2];
+    for _ in 0..blocks {
+        // The core produces a block's worth of its own time, which is a device block scaled by
+        // the correction in force and by the difference between the two clocks.
+        owed += f64::from(BLOCK as u32) * (1.0 + adjustment) / (1.0 + drift);
+        let whole = owed.floor() as usize;
+        owed -= owed.floor();
+        feed(&queue, whole, 0.5);
+        // The device pulls, then the host corrects on what the audio thread measured.
+        stream.render_block(&mut block);
+        adjustment = rate
+            .step(
+                f64::from(control.average_fill()) * 1000.0 / f64::from(RATE)
+                    - f64::from(latency_ms),
+                block_seconds,
+                control.playing(),
+                cap,
+            )
+            .adjustment;
+    }
+    let settled = control.average_fill() * 1000.0 / RATE as f32;
+    (control.underruns(), settled)
+}
+
+/// REQ-AUD-004 acceptance and REQ-AUD-005: with the sound card's clock a few hundredths of a
+/// percent off the emulation's, the latency holds and **nothing** under-runs. v0.4.2 paid that
+/// same offset in blocks of silence, because its proportional-only controller needed a standing
+/// error to correct anything at all (finding 2).
+#[test]
+fn req_aud_005_a_drifting_device_clock_neither_under_runs_nor_drifts_away() {
+    for drift in [0.000_3, -0.000_3] {
+        let (underruns, settled) = play_against_a_drifting_clock(60.0, drift, 10.0);
+        assert_eq!(underruns, 0, "drift {drift}: {underruns} under-runs");
+        assert!(
+            (settled - 60.0).abs() < 3.0,
+            "drift {drift}: settled at {settled} ms"
+        );
+    }
+}
+
+/// The same over a full hour, which is what the work order asks for. Ignored by default: it
+/// renders about two hundred thousand blocks, which is a few seconds in release and most of a
+/// minute in debug.
+#[test]
+#[ignore = "an hour of simulated audio; run with --include-ignored"]
+fn req_aud_005_an_hour_against_a_drifting_clock_under_runs_nothing() {
+    let (underruns, settled) = play_against_a_drifting_clock(60.0, 0.000_3, 60.0);
+    assert_eq!(underruns, 0, "{underruns} under-runs over the hour");
+    assert!((settled - 60.0).abs() < 3.0, "settled at {settled} ms");
+}
+
 /// REQ-AUD-006 and vector A2: the console gain is `V`, so a quarter volume gives a quarter of the
 /// peak. The mixer computes the gain, the audio thread applies it.
 #[test]
