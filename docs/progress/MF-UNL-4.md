@@ -112,7 +112,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 - [x] **7/9 — the callgrind campaign, per hook.** PR-1's thirteen ROMs and level 2's five games
   against `16a30564`, one binary per hook added, every compared commit built from `git archive` in
   a fresh directory. The feature decision and the `BOARD-FEATURES.md` row.
-- [ ] **8/9 — golden-core against the base commit, and the full check.** Byte-identical over the
+- [x] **8/9 — golden-core against the base commit, and the full check.** Byte-identical over the
   98 commercial originals; `cargo test --release -p zax-nes -p zax-harness`; the ignored tests with
   `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
 - [ ] **9/9 — the journal, the census note and the final pass.**
@@ -777,3 +777,60 @@ G: stayed above **29 GiB** free: `rust/target-mf` was at 6.7 GB and was deleted 
 clean build (its figures being recorded), and each of the nine build directories was deleted by
 `build-clean.sh` as soon as its binary was copied out. No GPU campaign, no background command —
 every long run in the foreground with its output read, as the headless rule requires.
+
+---
+
+## Step 8 — golden-core against the base commit, and the full check
+
+### The binary that was measured is the binary the commit builds
+
+Step 7's figures come from `unl4fix`, which was built from a `make-tree.sh --worktree` tar before
+the step's own commit existed. So the first thing this step did was build `unl4ship` from
+**`107c53d9`** by `git archive` into a fresh directory and compare:
+
+    92df5735398b4ba09d9dd19c3c9dc312  zax-harness-unl4fix
+    92df5735398b4ba09d9dd19c3c9dc312  zax-harness-unl4ship
+
+**Byte-identical**, so every figure of step 7 is the commit's.
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `16a30564` (`unl4base`) against the lot (`unl4ship`) | **byte-identical** |
+| `16a30564` against the lot with `board-jy-asic` out of `default` (`unl4off`) | **byte-identical** |
+
+`md5 f79e7df842c3ee43e7d9b67861a927b5` for all three 98-line dumps — **the same digest MF-UNL-2
+step 9 and MF-UNL-3 step 8 both recorded**, so three lots and twenty-five mapper numbers later no
+commercial original's pixels, tile records, cycles, audio digest or blargg status has moved.
+golden-core runs with no hack code, so there is nothing between the ROM and the core.
+
+### The suite, with the ROM roots set
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1011 passed, 0 failed, 9 ignored** |
+| the same `--no-fail-fast -- --include-ignored`, with `ZAXNES_ROMS=…/demo/roms` and `ZAXNES_TEST_ROMS=…/assets-free/test-roms` | **1020 passed, 0 failed, 0 ignored** |
+
+The nine ignored are the ROM-driven ones, and the second row is the proof they ran rather than
+passing vacuously: nine moved out of the ignored column and into the passing one.
+
+### fmt and clippy, in every configuration the lot adds
+
+| configuration | `cargo test --release -p zax-nes` | clippy `-D warnings` |
+| --- | --- | :-: |
+| `default` | **948 / 0 / 8** | clean |
+| `--features board-jy-asic-tile-latch` | **948 / 0 / 8** | clean |
+| `--no-default-features` | **783 / 0 / 8** | clean |
+| `--features parked-boards` | **1001 / 0 / 8** | clean |
+| `--no-default-features --features board-jy-asic` | **822 / 0 / 8** | clean |
+| `--no-default-features --features board-jy-asic-tile-latch` | **822 / 0 / 8** | clean |
+
+`cargo fmt --all -- --check` clean. **The two tile-latch configurations have the same test count as
+their siblings and not more**, because the two tests swap:
+`req_core_033_jy_asic_without_the_tile_latch_feature_the_emitter_cannot_move_the_latch` is compiled
+when the feature is **off** and `req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board`
+when it is on. Both halves of the contract are therefore tested, and neither configuration is the
+one where nobody looks.
