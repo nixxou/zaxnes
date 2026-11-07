@@ -19,6 +19,7 @@ mod castlevania;
 mod excitebike;
 mod ff1;
 pub mod guest;
+mod kirby;
 mod megaman;
 mod megaman1;
 mod megaman2;
@@ -284,6 +285,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman5::SOURCE_CRC_EUROPE => Some(&megaman5::MEGAMAN5_EUROPE),
         megaman6::SOURCE_CRC | megaman6::SOURCE_CRC_JAPAN => Some(&megaman6::MegaMan6),
         metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
+        kirby::SOURCE_CRC => Some(&kirby::Kirby),
         _ => None,
     }
 }
