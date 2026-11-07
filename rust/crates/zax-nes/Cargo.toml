@@ -54,6 +54,7 @@ default = [
     "board-149",
     "board-190",
     "board-jy-asic",
+    "board-163",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -449,6 +450,23 @@ board-190 = ["board-decode-boards"]
 # at `Ppu2C02::read_nametable_inner` **80 instructions in all three test binaries, identical to
 # the instruction**; `rust/docs/PERFORMANCE-HISTORY.md` section 5.18 has it.
 board-jy-asic = []
+
+# Mapper 163, the 南晶 (Nanjing) FC-001 -- the board of most of that publisher's catalogue, and the
+# first of lot MF-UNL-5's three Chinese-RPG boards. Four write ports and one read port in
+# $5000-$5FFF: a 32 KiB PRG bank composed from `$5000`, `$5200` and a mode bit of `$5300` (six bank
+# bits, 2 MiB), a D0/D1 swap on the two bank ports, a feedback/protection latch at `$5100-$5101`
+# read back **inverted** at `$5500-$5501`, 8 KiB of battery-backed PRG-RAM, and -- the mechanism
+# that names the lot -- a **4 KiB CHR-RAM page latched off the PPU address bus**: CHR A12 becomes
+# PPU A9 as it stood on the last rise of PPU A13, so the left pattern table draws the top half of
+# any nametable and the right one the bottom half, whatever the scroll. Six original titles,
+# *牧场物语 - Harvest Moon*, *水浒神兽*, *暗黑破坏神 - Diablo*, *轩辕剑外传 之 天之痕*,
+# *Final Fantasy IV* and *雷电皇 比卡丘传说* among them.
+#
+# A `DecodeBoard` variant shared with the lot's other PPU-latched board, and the number is in both
+# of the PPU watch lists of `cartridges::mod` -- the rise of A13 is an address change, which is the
+# only thing `Mapper::on_ppu_address_bus` sees. Submapper 1's ADPCM chip is deferred with the rest
+# of the expansion audio (census §7.2); `Mapper::expansion_audio_output` stays `None`.
+board-163 = ["board-decode-boards"]
 
 # **Not a board: one mechanism of `board-jy-asic`**, on the `board-68-chr-nametables` precedent and
 # the owner's rule of 2026-11-06 ("A costly *mechanism* of a board ... is implemented too, behind

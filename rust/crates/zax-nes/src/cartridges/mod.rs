@@ -345,6 +345,12 @@ pub struct Cartridge {
 // four go in both lists on the reason the step-1 comment above gives for 119.
 // MF-UNL-2 step 3 adds 114, 115, 121, 123, 182 and 187 for the same reason: each
 // one holds an `Mmc3` whose counter is the chip's.
+// MF-UNL-5 step 1 adds mapper 163, the Nanjing FC-001, to **both** lists, for
+// mapper 96's reason and not an IRQ's: its 4 KiB CHR-RAM page is CHR A12 driven
+// from "PPU A9 latched on last rise of PPU A13", so the board must hear the
+// rendering's own fetches *and* a bare $2006 write that drives the address into
+// $2000-$3FFF with no fetch behind it. The board has no IRQ at all, which makes
+// it the second number in either list with none. See `ChrWindowBoard`'s own note.
 ///
 /// **Extracted from `Cartridge::create` by MF-UNL-2 step 3**, which took that function past
 /// `clippy::too_many_lines` -- six more numbers in each list. Two `const fn` of the mapper
@@ -370,6 +376,7 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 121
             | 123
             | 158
+            | 163
             | 182
             | 187
             | 189
@@ -404,6 +411,7 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 121
             | 123
             | 158
+            | 163
             | 182
             | 187
             | 189
@@ -1294,6 +1302,13 @@ mod tests {
         expected.extend_from_slice(&[121, 121, 123, 123]);
         #[cfg(feature = "board-158")]
         expected.extend_from_slice(&[158, 158]);
+        // MF-UNL-5 step 1: the Nanjing FC-001 keeps the previous PPU address whatever its CHR
+        // switch is set to, because the page makes the latch a property of the address lines and
+        // not of the enable -- so a game turning the switch on mid-frame does not read a stale
+        // edge. That one byte pair is what makes the number move here, exactly as mapper 96's
+        // does above.
+        #[cfg(feature = "board-163")]
+        expected.extend_from_slice(&[163, 163]);
         #[cfg(feature = "board-mmc3-scramble")]
         expected.extend_from_slice(&[182, 182, 187, 187]);
         // MF-UNL-2 steps 4 and 5: the UNL-KOF97 and the TXC 189, both of which hold an `Mmc3`.

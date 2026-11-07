@@ -62,6 +62,8 @@ use super::mappers::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
+#[cfg(feature = "board-163")]
+use super::mappers::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
@@ -241,6 +243,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     158,
     #[cfg(feature = "board-eeprom")]
     159,
+    #[cfg(feature = "board-163")]
+    163,
     #[cfg(feature = "board-jv001")]
     172,
     #[cfg(feature = "board-jv001")]
@@ -593,6 +597,24 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-jy-asic")]
         35 => BoardMemorySizes {
             prg_ram: Some(BankWindows::PRG_WINDOW_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 163"), its *Banks* section: "CPU $6000-$7FFF: 8 KiB unbanked
+        // PRG-RAM, battery-backed" and "PPU $0000-$1FFF: 8 KiB unbanked CHR-RAM bank, 4 KiB can be
+        // automatically switched". Both figures are what REQ-CORE-012's defaults would give an
+        // iNES 1.0 image with no CHR-ROM anyway, and both are stated because the page states them
+        // and no iNES 1.0 header field can be trusted to: byte 8 is unreliable and byte 5 is the
+        // CHR-*ROM* size. The CHR row matters on its own account -- the board's automatic switch
+        // selects a 4 KiB page of **this** chip, so a bigger allocation would put pages the
+        // hardware cannot address behind PPU A12 (MF-UNL-5 step 1).
+        //
+        // The page says "battery-backed", and whether a host persists the bytes is still the
+        // dump's own battery bit: `Cartridge::battery_ram` is what REQ-CORE-095 exposes and it
+        // reads `header.has_battery`, as it does for every board in this function.
+        #[cfg(feature = "board-163")]
+        163 => BoardMemorySizes {
+            prg_ram: Some(ChrWindowBoard::PRG_RAM_SIZE),
+            chr_ram: Some(ChrWindowBoard::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 038"): "PRG RAM capacity: **None**", and here the window is in
@@ -965,6 +987,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         190 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
             memory,
             LatchBoard::Zemina190,
+        ))),
+        // MF-UNL-5 step 1: the 南晶 (Nánjīng) FC-001, whose 4 KiB CHR-RAM page is latched off the
+        // **rise of PPU A13** and taken from PPU A9 -- the second board in this core whose CHR
+        // window is the PPU address bus rather than a register, after mapper 96. Its feedback
+        // latch at $5100-$5101, read back inverted at $5500-$5501, is the protection.
+        #[cfg(feature = "board-163")]
+        163 => Board::DecodeBoard(DecodeBoard::ChrWindowBoard(ChrWindowBoard::new(
+            memory,
+            ChrWindowKind::NanjingFc001,
         ))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by

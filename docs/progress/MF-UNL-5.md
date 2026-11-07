@@ -56,7 +56,7 @@ boards is a submapper-0 cartridge.
 ## Steps
 
 - [x] **0/7** — the plan: this file.
-- [ ] **1/7** — `board-163`, the Nánjīng FC-001: the four write ports, the feedback latch, the PRG
+- [x] **1/7** — `board-163`, the Nánjīng FC-001: the four write ports, the feedback latch, the PRG
   composition, and the 4 KiB CHR-RAM page latched off the rise of PPU A13.
 - [ ] **2/7** — `board-162`, the Wàixīng FS304: the second kind of the same variant, its own PRG
   composition from the same four registers.
@@ -69,3 +69,89 @@ boards is a submapper-0 cartridge.
 - [ ] **6/7** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
 - [ ] **7/7** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
+
+---
+
+## Step 1 — the Nánjīng FC-001, and a CHR window that is the PPU's address bus
+
+`board-163`, in `default`. One new module, `cartridges/mappers/chr_window.rs`, one new
+`DecodeBoard` variant (`ChrWindowBoard`, with a `ChrWindowKind` field so that the lot's second
+PPU-latched board joins it rather than the enum), two forwards widened, and the number in **both**
+PPU watch lists.
+
+### The register map, from nesdev's *INES Mapper 163*
+
+| port | mask | what it is |
+| --- | --- | --- |
+| `$5000`, write | `$FF00` | `C... PPPP` — the CHR switch (bit 7) and PRG A18..A15 |
+| `$5100-$5101`, write | `$FF01` | the feedback latch, `.... .F.E`, `A0` picking the action |
+| `$5200`, write | `$FF00` | `.... ..PP` — PRG A20..A19 |
+| `$5300`, write | `$FF00` | `.... .A?B` — `B` swaps D0/D1 on the bank ports, `A` sources A15/A16 |
+| `$5500-$5501`, read | `$F300` | `.... .F..` — the **inverted** feedback bit |
+
+**The PRG bank is six bits** — `A15 | A16<<1 | A17<<2 | A18<<3 | A19<<4 | A20<<5`, 2 MiB — and the
+page's own arithmetic check is what pins the composition: "All registers are initialized to $00 on
+reset", and "because reset clears the A bit, games will boot in 32 KiB PRG-ROM bank **#3**". With
+`A` clear the two low bits are forced to `11b`, which is bank 3 and nothing else. The *Notes*
+confirm it from the other side — "cartridges should be dumped with `$5300=$04`", `$04` being the
+`A` bit alone.
+
+**The read mask is `$F300` and not `$FF00`**, which is worth writing down because it is not a
+typo: `$5500 & $F300` is `$5100`, so the port answers at every `$5xxx` address whose A9 is clear
+and whose A8 is set — `$51xx`, `$55xx`, `$59xx`, `$5Dxx` — and the feedback *write* port is one of
+those four windows. One hardware decode, read two ways, and the test walks all four.
+
+### The CHR window, which is the mechanism the lot is named after
+
+> 0: CHR A12=PPU A12 (disable auto-switch)
+> 1: CHR A12=PPU A9 latched on last rise of PPU A13 (enable auto-switch)
+
+With bit 7 of `$5000` clear the 8 KiB chip is flat. With it set, **CHR A12 stops being the fetch's
+own A12** and becomes a latch, so `map_chr_4k(0, page)` and `map_chr_4k(4, page)` both show the
+same page and `$0000` and `$1000` read the same byte — which is the only way to say "the left
+pattern table is used for the top half of any nametable, and the right pattern table for the
+bottom half, regardless of the scroll position" in a bank-window core.
+
+PPU A13 rises when the address enters `$2000-$3FFF`; A9 of such an address is the half of the
+nametable being read. So the hook is `Mapper::on_ppu_address_bus` and the board is in **both** of
+§4.3's latches, mapper 96's reason in the same words: a bare `$2006` write that drives the address
+across that boundary is the same rise, and neither this core nor the board can tell it from a
+fetch's. `req_core_102_mapper_163_latches_its_chr_page_from_the_rise_of_ppu_a13` drives the
+without-read entry point explicitly, which is the observation that proves membership of the second
+list — the field itself is private to the crate.
+
+**The latch is kept while the switch is off.** The page makes it a property of the address lines,
+not of the enable, so a game that turns the switch on mid-frame does not read a stale edge; only
+the window update is skipped. That is also what makes the number move in
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`, whose expected list gains it.
+
+### Three readings, one of them a ticket
+
+| what | the choice | why |
+| --- | --- | --- |
+| **the swap bit's range** | the two **bank** ports (`$5000`, `$5200`) and **not** `$5100` | the page says "swap D0,D1 on writes to `$5000-$5200`", a range that textually contains `$5100` — but that port's two data bits are the feedback latch's `F` and `E`, not bank lines, and the only purpose the page gives the bit is "to obtain the correct PRG bank order". **Q-155**, pinned by `q_155_mapper_163_swaps_d0_and_d1_on_the_two_bank_ports_only` |
+| **where the swap acts** | on the **write** path, so the latch holds the swapped value | that is where the hardware puts it: two data pins exchanged on the way into the latch. Clearing `B` afterwards therefore does not re-swap a bank already written, and the test pins that too |
+| **the undriven bits of the read** | zero | the page draws bit 2 and says nothing about the other seven; this board drives bit 2 and leaves the rest clear |
+
+### Submapper 1 is deferred, and the deferral is pinned
+
+"Submapper 1 denotes a PCB that mounts the same ADPCM chip used in NES 2.0 Mapper 419 … used only
+on the 真 Samurai Spirits - 武士道列传: 侍魂 (NJ-033) cartridge." §7.2 scopes the lot to submapper 0;
+`req_core_075_mapper_163_has_no_expansion_audio_and_no_irq_horizon` loads a **submapper-1** image,
+runs ten frames and requires `expansion_audio_output` `None`, `ppu_irq_horizon`
+`Some(i64::MAX)` and no IRQ — so the gap is a pinned decision and not an omission. One cartridge
+is concerned and it is not one of the six category-A titles.
+
+### The memories
+
+`registry::board_memory_sizes` gains a row: `prg_ram: Some(8 KiB)` and `chr_ram: Some(8 KiB)`, both
+on the page's *Banks* section. The CHR row earns its place on its own account — the automatic
+switch selects a 4 KiB page of **this** chip, so REQ-CORE-012's 32 KiB default would put pages the
+hardware cannot address behind PPU A12. The page says "battery-backed" and the dump's own battery
+bit still decides whether a host persists the bytes, as it does for every board in that function.
+
+### What it measures to the suites
+
+**1017 passed, 0 failed, 9 ignored** for `-p zax-nes -p zax-harness` (MF-UNL-4 left it at
+1011/0/9): the board's six tests and nothing else. `cargo fmt --check` clean and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

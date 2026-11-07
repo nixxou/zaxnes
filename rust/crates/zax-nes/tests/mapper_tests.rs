@@ -37,7 +37,8 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     feature = "board-77",
     feature = "board-96",
     feature = "board-111",
-    feature = "board-119"
+    feature = "board-119",
+    feature = "board-163"
 ))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
@@ -141,6 +142,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   boxed `IrqBoard` variant -- behind `board-jy-asic` (MF-UNL-4). 209 is the page's
     //   "standard implementation", 211 and 35 are the same board (Q-149 and Q-148) and 90 is the
     //   one with a jumper that inhibits its nametable registers.
+    // * 163, the 南晶 (Nanjing) FC-001, the first of lot MF-UNL-5's three Chinese-RPG boards and
+    //   the second board in this core whose CHR window is latched off the **PPU address bus** --
+    //   CHR A12 from "PPU A9 latched on last rise of PPU A13" -- behind `board-163`
+    //   (MF-UNL-5 step 1);
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -164,7 +169,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
-    let additions: [(i32, bool); 88] = [
+    let additions: [(i32, bool); 89] = [
         (19, true),
         (24, true),
         (26, true),
@@ -234,6 +239,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (157, eeprom),
         (158, cfg!(feature = "board-158")),
         (159, eeprom),
+        (163, cfg!(feature = "board-163")),
         (172, jv001),
         (173, jv001),
         (180, true),
@@ -8995,4 +9001,329 @@ fn q_152_jy_asic_a_write_to_a_rom_nametable_is_dropped() {
     // FOLLOW_MIRRORING and the PPU never asks the board at all.
     core.mapper_write(0xD000, 0x00);
     assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+}
+
+// ------------------------------------------- Nanjing FC-001 (163)
+
+/// Drives the PPU's address bus across the edge the Nánjīng FC-001 latches on: out of
+/// $2000-$3FFF, then into `address`. The board latches PPU A9 on the **rise of PPU A13** and on
+/// nothing else, so both halves of the walk matter.
+#[cfg(feature = "board-163")]
+fn latch_a13_rise(core: &mut NesCore, address: u16) {
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 1);
+    cartridge.on_ppu_address_bus(address, 2);
+}
+
+/// The four 8 KiB PRG windows as bank numbers, for a board whose banks are 32 KiB: the fixture
+/// fills each 8 KiB bank with its own number, so a 32 KiB bank `b` reads `[4b, 4b+1, 4b+2, 4b+3]`.
+#[cfg(feature = "board-163")]
+fn prg_32k_bank(bank: usize) -> [u8; 4] {
+    std::array::from_fn(|slot| (bank * 4 + slot) as u8)
+}
+
+/// nesdev ("INES Mapper 163"): the PRG bank is `A15 | A16<<1 | A17<<2 | A18<<3 | A19<<4 | A20<<5`
+/// with `PPPP` of `$5000` giving A18..A15 and `..PP` of `$5200` giving A20..A19 — and
+/// "**because reset clears the A bit, games will boot in 32 KiB PRG-ROM bank #3**", the mode
+/// register's `A` ($5300 bit 2) forcing `PRG A15/A16=11b` while it is clear (MF-UNL-5 step 1).
+#[cfg(feature = "board-163")]
+#[test]
+fn req_core_102_mapper_163_boots_in_bank_3_and_composes_six_bank_bits() {
+    // 128 banks of 8 KiB is 1 MiB, i.e. 32 banks of 32 KiB: five of the six bank bits, which is
+    // as far as the fixture's numbered banks reach.
+    let mut core = MapperRom::new(163).prg(128).chr(0).load();
+    assert_eq!(163, core.cartridge().unwrap().mapper_number());
+
+    // "All registers are initialized to $00 on reset", and bank #3 is what that composes.
+    assert_eq!(prg_32k_bank(3), core.prg_windows());
+
+    // With `A` still clear, `$5000`'s two low bits reach nothing: A15 and A16 stay `11b` and only
+    // A18..A17 move. $00 to $03 are all bank 3; $04 is A17, so bank 7; $08 is A18, so bank 11.
+    for value in [0x00u8, 0x01, 0x02, 0x03] {
+        core.mapper_write(0x5000, value);
+        assert_eq!(
+            prg_32k_bank(3),
+            core.prg_windows(),
+            "$5000={value:#04X} with A clear"
+        );
+    }
+    core.mapper_write(0x5000, 0x04);
+    assert_eq!(prg_32k_bank(7), core.prg_windows(), "A17");
+    core.mapper_write(0x5000, 0x08);
+    assert_eq!(
+        prg_32k_bank(11),
+        core.prg_windows(),
+        "A18, with A15/A16 still 11b"
+    );
+
+    // "$5300=$04" is the `A` bit alone, which the page's *Notes* call the dumping configuration:
+    // "Mapper 163 cartridges should be dumped with $5300=$04 to obtain the correct PRG bank
+    // order". With it set, all four bits of `$5000` are the bank.
+    core.mapper_write(0x5300, 0x04);
+    for value in 0..16u8 {
+        core.mapper_write(0x5000, value);
+        assert_eq!(
+            prg_32k_bank(usize::from(value)),
+            core.prg_windows(),
+            "$5000={value:#04X} with A set"
+        );
+    }
+
+    // `.... ..PP` of `$5200` is A20..A19, bits 5-4 of the bank number. A 1 MiB image has 32 banks
+    // of 32 KiB, so A19 is the top bit it can show and A20 wraps.
+    core.mapper_write(0x5000, 0x00);
+    core.mapper_write(0x5200, 0x01);
+    assert_eq!(prg_32k_bank(16), core.prg_windows(), "A19");
+    core.mapper_write(0x5200, 0x02);
+    assert_eq!(
+        prg_32k_bank(0),
+        core.prg_windows(),
+        "A20 wraps on a 1 MiB image"
+    );
+    core.mapper_write(0x5200, 0x03);
+    assert_eq!(
+        prg_32k_bank(16),
+        core.prg_windows(),
+        "A20|A19 wraps onto A19"
+    );
+
+    // "CPU $6000-$7FFF: 8 KiB unbanked PRG-RAM" and "PPU $0000-$1FFF: 8 KiB ... CHR-RAM bank".
+    assert_eq!(
+        (8 * 1024, 8 * 1024),
+        (
+            core.cartridge().unwrap().memory().prg_ram().len(),
+            core.cartridge().unwrap().memory().chr_ram().len()
+        )
+    );
+}
+
+/// **The mechanism that names the lot**: "Enable automatic 4 KiB CHR-RAM switch … 1: CHR A12=PPU
+/// A9 latched on last rise of PPU A13", which the page describes as "the left pattern table is
+/// used for the the top half of any nametable, and the right pattern table for the bottom half of
+/// any nametable, **regardless of the scroll position**".
+///
+/// The census asks for exactly this test: "a PPU fetch at an address in one quarter of the window
+/// selects one 4 KiB page and a fetch in another selects another, **with no register write between
+/// them** — the test that distinguishes this hook from register-driven banking" (MF-UNL-5 step 1).
+#[cfg(feature = "board-163")]
+#[test]
+fn req_core_102_mapper_163_latches_its_chr_page_from_the_rise_of_ppu_a13() {
+    let mut core = MapperRom::new(163).prg(16).chr(0).load();
+
+    // With the switch off the 8 KiB chip is flat: CHR A12 is the fetch's own A12, so $0000 and
+    // $1000 are two different pages and no PPU address changes that.
+    chr_write(&mut core, 0x0000, 0xC0);
+    chr_write(&mut core, 0x1000, 0xC1);
+    for address in [0x2000u16, 0x2200, 0x23FF] {
+        latch_a13_rise(&mut core, address);
+        assert_eq!(
+            (0xC0, 0xC1),
+            (peek(&core, 0x0000), peek(&core, 0x1000)),
+            "the switch is off"
+        );
+    }
+
+    // Bit 7 of `$5000` turns the switch on. Now CHR A12 is the latch, so **both** halves of the
+    // pattern-table space show the same 4 KiB page: $0000 and $1000 read the same byte.
+    core.mapper_write(0x5000, 0x80);
+    latch_a13_rise(&mut core, 0x2000); // A9 clear: the top half of a nametable, page 0.
+    assert_eq!((0xC0, 0xC0), (peek(&core, 0x0000), peek(&core, 0x1000)));
+    latch_a13_rise(&mut core, 0x2200); // A9 set: the bottom half, page 1.
+    assert_eq!((0xC1, 0xC1), (peek(&core, 0x0000), peek(&core, 0x1000)));
+
+    // **No register write between them**, which is the census's own criterion: four fetches, four
+    // answers, and the only thing that moved is the PPU address.
+    for (address, byte) in [
+        (0x2000u16, 0xC0u8),
+        (0x2200, 0xC1),
+        (0x2100, 0xC0),
+        (0x23C0, 0xC1),
+    ] {
+        latch_a13_rise(&mut core, address);
+        assert_eq!(byte, peek(&core, 0x0000), "a fetch at {address:#06X}");
+    }
+
+    // And it is the **rise** and not a decode: once the address is inside $2000-$3FFF, moving it
+    // within the range latches nothing. Page 0 is selected, and walking to $2200 leaves it.
+    latch_a13_rise(&mut core, 0x2000);
+    for address in [0x2200u16, 0x2600, 0x3E00, 0x2FFF] {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 3);
+        assert_eq!(
+            0xC0,
+            peek(&core, 0x0000),
+            "no second rise at {address:#06X}"
+        );
+    }
+
+    // A bare `$2006` write is such a rise too, the page's latch being on the address lines and
+    // not on /RD: this core cannot tell it apart from a fetch's, and neither can the board.
+    // `Cartridge::on_ppu_address_bus_without_read` is the entry point behind the second of §4.3's
+    // two flags, and it answers nothing unless the number is in that list — so this is the
+    // observation that proves the board is in **both**.
+    {
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus_without_read(0x0000, 4);
+        cartridge.on_ppu_address_bus_without_read(0x2200, 5);
+    }
+    assert_eq!(0xC1, peek(&core, 0x0000), "a bare $2006 write latches too");
+}
+
+/// The feedback latch: a write to `$5100` latches `.... .F.E`, a write to `$5101` "flip[s] the
+/// latched F bit when E=1" and ignores the written `F`, and a read of `$5500-$5501` under mask
+/// `$F300` answers the "inverted value of latched F bit" in bit 2 (MF-UNL-5 step 1).
+#[cfg(feature = "board-163")]
+#[test]
+fn req_core_102_mapper_163_answers_its_feedback_register_inverted() {
+    let mut core = MapperRom::new(163).prg(16).chr(0).load();
+
+    // Power-on: F is clear, so the read is its inverse, bit 2 set.
+    assert_eq!(0x04, core.read_memory(0x5500));
+
+    // "A=0: Value latched" — $5100 latches F (bit 2) and E (bit 0) both.
+    core.mapper_write(0x5100, 0x04);
+    assert_eq!(0x00, core.read_memory(0x5500), "F set reads back inverted");
+    core.mapper_write(0x5100, 0x00);
+    assert_eq!(0x04, core.read_memory(0x5500));
+
+    // "A=1: Flip the latched F bit when E=1" — and only when E is set.
+    core.mapper_write(0x5101, 0x00);
+    assert_eq!(0x04, core.read_memory(0x5500), "E clear flips nothing");
+    core.mapper_write(0x5101, 0x01);
+    assert_eq!(0x00, core.read_memory(0x5500), "E set flips F");
+    core.mapper_write(0x5101, 0x01);
+    assert_eq!(0x04, core.read_memory(0x5500), "and flips it back");
+    // "A=1: Ignored" for the written F: $05 is E set and F set, and only the flip happens.
+    core.mapper_write(0x5101, 0x05);
+    assert_eq!(0x00, core.read_memory(0x5500));
+
+    // Mask $F300 reads A15-A12 and A9-A8: `$5500 & $F300` is `$5100`, so the port answers at every
+    // $5xxx address with A9 clear and A8 set, and at no other. The four windows the mask leaves
+    // are $51xx, $55xx, $59xx and $5Dxx.
+    for address in [
+        0x5100u16, 0x5101, 0x51FF, 0x5500, 0x5501, 0x55AA, 0x5900, 0x5DFF,
+    ] {
+        assert_eq!(
+            0x00,
+            core.read_memory(address),
+            "{address:#06X} is the port"
+        );
+    }
+}
+
+/// `$5300` bit 0: "Swap D0,D1 on writes to $5000-$5200", which the page gives as the way "to obtain
+/// the correct PRG bank order".
+///
+/// **Q-155** is the range: the page's own words contain `$5100`, whose two data bits are the
+/// feedback latch's and not bank lines. This build swaps the two **bank** ports and leaves the
+/// feedback port alone, and this test pins both halves of that choice.
+#[cfg(feature = "board-163")]
+#[test]
+fn q_155_mapper_163_swaps_d0_and_d1_on_the_two_bank_ports_only() {
+    let mut core = MapperRom::new(163).prg(128).chr(0).load();
+
+    // `A` set, so all four bits of `$5000` are the bank; then the swap bit beside it. $05 is
+    // `A`|`B`, which is "PRG A15/A16 from $5000" and "swap D0,D1".
+    core.mapper_write(0x5300, 0x05);
+    for (written, bank) in [
+        (0x01u8, 2usize),
+        (0x02, 1),
+        (0x03, 3),
+        (0x09, 10),
+        (0x06, 5),
+    ] {
+        core.mapper_write(0x5000, written);
+        assert_eq!(
+            prg_32k_bank(bank),
+            core.prg_windows(),
+            "$5000={written:#04X} swapped"
+        );
+    }
+
+    // The swap is on the **write** path: clearing `B` afterwards does not re-swap a bank already
+    // latched. $01 was written swapped and is bank 2; it stays bank 2.
+    core.mapper_write(0x5000, 0x01);
+    core.mapper_write(0x5300, 0x04);
+    assert_eq!(
+        prg_32k_bank(2),
+        core.prg_windows(),
+        "the latch holds the swapped value"
+    );
+
+    // And the feedback port is **not** swapped. The observation that separates the two readings is
+    // the flip: with the swap applied to $5101 as well, $01 would arrive as $02, whose E is clear,
+    // and nothing would flip.
+    core.mapper_write(0x5300, 0x05);
+    core.mapper_write(0x5100, 0x00);
+    assert_eq!(0x04, core.read_memory(0x5500));
+    core.mapper_write(0x5101, 0x01);
+    assert_eq!(0x00, core.read_memory(0x5500), "E=1 flips F, unswapped");
+}
+
+/// §7.1 item 2 of `docs/review/UNL-census.md`, for this lot's first board: a save-state round-trip
+/// with the board's **own** registers dirtied first, and the battery PRG-RAM with it.
+///
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` sweeps every number of
+/// `SUPPORTED_MAPPERS` and dirties each through `$8000-$E001` and `$6000`. **Not one of this
+/// board's registers is at any of those addresses** — all four write ports are in $5000-$53FF and
+/// the CHR page comes off the PPU bus — so the generic sweep says nothing about the bytes this
+/// board appends.
+#[cfg(feature = "board-163")]
+#[test]
+fn req_core_090_mapper_163_round_trips_its_four_ports_its_latch_and_its_battery_ram() {
+    let mut core = MapperRom::new(163).prg(128).chr(0).battery().load();
+
+    // Every port, and the PPU-bus latch with the switch on so that it reaches the windows.
+    core.mapper_write(0x5300, 0x05);
+    core.mapper_write(0x5000, 0x8A);
+    core.mapper_write(0x5200, 0x02);
+    core.mapper_write(0x5100, 0x04);
+    core.mapper_write(0x5101, 0x01);
+    latch_a13_rise(&mut core, 0x2200);
+    core.write_memory(0x6123, 0x7E);
+
+    let state = core.save_state(true).unwrap();
+    let windows = core.prg_windows();
+    let chr = core.chr_windows();
+    let feedback = core.read_memory(0x5500);
+    assert_eq!(0x04, feedback, "F was set and then flipped back");
+
+    // Move everything the board has, then come back.
+    core.mapper_write(0x5300, 0x00);
+    core.mapper_write(0x5000, 0x00);
+    core.mapper_write(0x5101, 0x01);
+    latch_a13_rise(&mut core, 0x2000);
+    for _ in 0..5 {
+        core.run_frame(0);
+    }
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(windows, core.prg_windows(), "the PRG windows");
+    assert_eq!(chr, core.chr_windows(), "the latched CHR page");
+    assert_eq!(feedback, core.read_memory(0x5500), "the feedback latch");
+    assert_eq!(state, core.save_state(true).unwrap(), "the whole block");
+
+    // "8 KiB unbanked PRG-RAM, battery-backed": the byte is in what REQ-CORE-095 exposes.
+    assert_eq!(0x7E, core.read_memory(0x6123));
+    let saved = core.export_battery_ram().to_vec();
+    assert_eq!(8 * 1024, saved.len());
+    assert_eq!(0x7E, saved[0x0123]);
+}
+
+/// The board has no IRQ and no expansion audio, which §7.2 step 4 asks be pinned so that the
+/// deferral of submapper 1's ADPCM chip is visible as a deliberate gap and not an omission.
+#[cfg(feature = "board-163")]
+#[test]
+fn req_core_075_mapper_163_has_no_expansion_audio_and_no_irq_horizon() {
+    let mut core = MapperRom::new(163).prg(16).chr(0).submapper(1).load();
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(None, cartridge.expansion_audio_output());
+    assert_eq!(Some(i64::MAX), cartridge.ppu_irq_horizon());
+    assert!(!cartridge.irq_asserted());
+
+    // Ten frames of a submapper-1 image: the board runs, the chip is simply not there.
+    for _ in 0..10 {
+        core.run_frame(0);
+    }
+    assert!(!core.cartridge().unwrap().irq_asserted());
 }

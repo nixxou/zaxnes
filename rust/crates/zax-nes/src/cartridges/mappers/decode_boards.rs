@@ -15,6 +15,7 @@
     feature = "board-144",
     feature = "board-145",
     feature = "board-149",
+    feature = "board-163",
     feature = "board-190",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
@@ -29,6 +30,8 @@ compile_error!(
 
 #[cfg(feature = "board-111")]
 use super::Cheapocabra;
+#[cfg(feature = "board-163")]
+use super::ChrWindowBoard;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
@@ -159,6 +162,11 @@ pub enum DecodeBoard {
         feature = "board-190"
     ))]
     SingleLatch(SingleLatch),
+    // Appended by MF-UNL-5 step 1, the first board of a lot whose three are all of this shape.
+    /// Mapper 163, the 南晶 (Nánjīng) FC-001 — the first board of this enum whose CHR window is
+    /// latched off the PPU address bus since mapper 96, and the second in it altogether.
+    #[cfg(feature = "board-163")]
+    ChrWindowBoard(ChrWindowBoard),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -197,6 +205,8 @@ macro_rules! inner {
                 feature = "board-190"
             ))]
             DecodeBoard::SingleLatch($b) => $body,
+            #[cfg(feature = "board-163")]
+            DecodeBoard::ChrWindowBoard($b) => $body,
         }
     };
 }
@@ -287,8 +297,13 @@ impl Mapper for DecodeBoard {
     /// **Mapper 143 joins it in MF-UNL-3 step 3**, whose protection read is at the same $4100
     /// under the same mask and whose board has no write side at all. Nothing else of this lot
     /// overrides the hook, so the other eight numbers of it keep `Mapper`'s own default here.
+    ///
+    /// **And mapper 163 in MF-UNL-5 step 1**, whose feedback register is read at $5500-$5501 under
+    /// mask $F300 — the fourth board of the enum to want the hook and the third publisher's
+    /// protection scheme to be a read below $8000.
     #[cfg(any(
         feature = "board-143",
+        feature = "board-163",
         feature = "board-jv001",
         feature = "board-sachen-8reg"
     ))]
@@ -301,16 +316,17 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.ppu_write(memory, address, value));
     }
 
-    /// Forwarded for mapper 96 alone (MF-6c step 8), the one board here whose whole mechanism
-    /// is the PPU address bus. Behind `Cartridge::watches_ppu_reads` and
-    /// `Cartridge::watches_ppu_bus_without_read`, so no board outside those two latches reaches
-    /// this dispatch at all; `OekaKids::on_ppu_address_bus` carries `#[inline(never)]` so that
-    /// the arm this adds beside the three A12 counters' is a `callq` and not a body.
+    /// Forwarded for mapper 96 (MF-6c step 8) and mapper 163 (MF-UNL-5 step 1), the two boards
+    /// here whose whole mechanism is the PPU address bus. Behind `Cartridge::watches_ppu_reads`
+    /// and `Cartridge::watches_ppu_bus_without_read`, so no board outside those two latches
+    /// reaches this dispatch at all; `OekaKids::on_ppu_address_bus` and
+    /// `ChrWindowBoard::on_ppu_address_bus` both carry `#[inline(never)]` so that the arm this
+    /// adds beside the three A12 counters' is a `callq` and not a body.
     ///
-    /// **Behaviour-neutral for the other three boards here**: none of them overrides it, so each
-    /// takes `Mapper`'s empty default, which is what the un-forwarded dispatch did for the whole
+    /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
+    /// `Mapper`'s empty default, which is what the un-forwarded dispatch did for the whole
     /// variant.
-    #[cfg(feature = "board-96")]
+    #[cfg(any(feature = "board-96", feature = "board-163"))]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }
