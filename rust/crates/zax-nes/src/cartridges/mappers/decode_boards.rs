@@ -5,10 +5,14 @@
 // of this enum adds its feature to the `any` below**, and to nothing else -- the module, the
 // `Board` variant, its `dispatch!` arm and the registry's `use` are all behind the umbrella.
 #[cfg(not(any(
+    feature = "board-38",
     feature = "board-77",
     feature = "board-96",
+    feature = "board-107",
     feature = "board-111",
     feature = "board-133",
+    feature = "board-145",
+    feature = "board-149",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-nina03",
@@ -35,6 +39,13 @@ use super::OekaKids;
 use super::Sachen72008;
 #[cfg(feature = "board-sachen-8reg")]
 use super::Sachen8Reg;
+#[cfg(any(
+    feature = "board-38",
+    feature = "board-107",
+    feature = "board-145",
+    feature = "board-149"
+))]
+use super::SingleLatch;
 #[cfg(feature = "board-vs-system")]
 use super::VsBoard;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -128,6 +139,17 @@ pub enum DecodeBoard {
     /// Mappers 79 and 146, the AVE NINA-03/06 and the Sachen 3015 / SA-016.
     #[cfg(feature = "board-nina03")]
     Nina03(Nina03),
+    // Appended by MF-UNL-3 step 2, and it is the last variant that lot adds: the seven
+    // single-latch boards share **one** of them, with a runtime field saying which, exactly as
+    // `Jv001` above holds six numbers and `Namcot108` five.
+    /// Mappers 38, 107, 143, 144, 145, 149 and 190, lot MF-UNL-3's seven single-latch boards.
+    #[cfg(any(
+        feature = "board-38",
+        feature = "board-107",
+        feature = "board-145",
+        feature = "board-149"
+    ))]
+    SingleLatch(SingleLatch),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -156,6 +178,13 @@ macro_rules! inner {
             DecodeBoard::Sachen72008($b) => $body,
             #[cfg(feature = "board-nina03")]
             DecodeBoard::Nina03($b) => $body,
+            #[cfg(any(
+                feature = "board-38",
+                feature = "board-107",
+                feature = "board-145",
+                feature = "board-149"
+            ))]
+            DecodeBoard::SingleLatch($b) => $body,
         }
     };
 }

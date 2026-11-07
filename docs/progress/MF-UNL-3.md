@@ -20,13 +20,13 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 
 ## The steps
 
-- [ ] **0/9 — the plan.** This file: the nine numbers, the page each is built from, the eight
+- [x] **0/9 — the plan.** This file: the nine numbers, the page each is built from, the eight
   features, the shape each board takes in this tree, and the **five** places this lot leaves the
   census's own prescription for the number's page.
 - [x] **1/9 — `board-nina03`.** `Nina03`, the $4100 control register for 79 and 146, its
   `registry.rs` arm, `SUPPORTED_MAPPERS`, `board_memory_sizes`, and the tests the census lists —
   including the anti-test for the FCEUX CNROM switch this lot deliberately leaves out.
-- [ ] **2/9 — `SingleLatch`, and the four plain latches: 38, 107, 145, 149.** One
+- [x] **2/9 — `SingleLatch`, and the four plain latches: 38, 107, 145, 149.** One
   `SmallBoard`-style `DecodeBoard` variant holding the seven remaining boards as a runtime field,
   on the `Jv001` precedent, with four of the seven wired and tested.
 - [ ] **3/9 — `board-143` and `board-144`,** the two boards of that variant that are not a bank
@@ -262,4 +262,63 @@ mapper-3 image and its header is the fix. `Nina03`'s doc comment carries the arg
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **964 passed, 0 failed, 9 ignored** (961 / 0 / 9 at `452e8464`, +3) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |
+
+## Step 2 — `SingleLatch`, and the four plain latches: 38, 107, 145, 149
+
+`SingleLatch` (`cartridges/mappers/single_latch.rs`) is **one `DecodeBoard` variant for all
+seven** of the lot's single-latch boards, with a `LatchBoard` field saying which — the shape
+`Jv001` uses for six numbers and `Namcot108` for five, and the one the census asks for ("one
+`SmallBoard`-style variant holding the seven remaining latches"). Seven `DecodeBoard` arms would
+still have been free of the `Board` dispatch, which is what MF-6c step 6 paid for; what they
+would have cost is seven arms in each of that enum's ten inner matches.
+
+The field is a runtime field and not a `const`, for `Jv001`'s own reason: every difference
+between the seven is read only by `write_register` and `update_banks`, i.e. only on a CPU write
+to the board's own window.
+
+| # | window | the page's register | this build |
+| ---: | --- | --- | --- |
+| 38 | `$7000-$7FFF` **and `$F000-$FFFF`** | `[xxxx CCPP]` | `address & $7000 == $7000` — A15 not decoded, which is the page's *Hardware* note (**Q-147**) |
+| 107 | `$8000-$FFFF` | `[BBBB BBBb]` | `chr_8k(v)`, `prg_32k(v >> 1)`: eight bits of CHR and seven of PRG |
+| 145 | `$4100`, mask `$E100` | `[C... ....]` | `chr_8k((v >> 7) & 1)`, PRG bank 0 |
+| 149 | `$8000`, mask **`$8000`** | the same | the same, plus `has_bus_conflicts` |
+
+Three registry rows besides the four `create_board` arms and the four `SUPPORTED_MAPPERS`
+entries:
+
+* **`board_memory_sizes`: mapper 38 gets `prg_ram: Some(0)`** — "PRG RAM capacity: None" *and*
+  the register is the upper half of that window, so it is mappers 140's and 184's arm for both of
+  their reasons at once;
+* **`has_bus_conflicts`: mapper 149 is `true`**, on its page's own "moves the register to
+  overlap with PRG ROM and so has bus conflicts", with no submapper clause to qualify it;
+* and that function's comment now records why **38, 79, 107 and 145 are absent** — including
+  107's "it's currently unknown whether this mapper suffers from bus conflicts or not", answered
+  **no** and filed as Q-147.
+
+### What the tests had to notice
+
+**Bit 7 of mapper 107's register is invisible in a power-of-two image.** `$88` and `$08` differ
+by 128 in the CHR field and by 64 in the PRG field, and sixteen 8 KiB CHR banks wrap both to the
+same bank — the first version of the test asserted a difference that cannot exist and failed on
+it. The test now proves the field layout on a 256 KiB/128 KiB image and then the **top bit** on a
+second image of **24** 8 KiB PRG banks and 24 1 KiB CHR banks, a count that divides neither
+distance.
+
+**Mapper 149's bank 1 is only reachable over an `$FF` PRG bank.** The generic conflict path ANDs
+the written value with the ROM byte and a numbered bank carries bits 0-3 alone, so a `$80` write
+over bank 0 latches nothing — which `MapperRom::prg_bank_all_ones` exists for, and which the test
+then asserts in *both* directions: `$80` over the `$FF` bank switches, `$80` over a numbered bank
+does not.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_38_banks_from_7000_and_from_f000` | `PP` and `CC` as separate fields; **$F000 and $FFFF are the same latch**; $6FFF, $6000, $8000 and $EFFF are not |
+| `req_core_102_mapper_107_honours_all_eight_bits_of_its_one_register` | bit 0 reaches CHR and not PRG; a bank above 7; **bit 7 in both fields**; the whole of $8000-$FFFF is the register and nothing below it |
+| `req_core_102_mappers_145_and_149_switch_chr_from_bit_7_alone` | bit 7 and no other bit; no PRG bank line on either; 145's mask $E100 and 149's mask $8000; and 149's conflict both ways |
+| `req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied` | §7.1 item 2 per board, with a second dirtying that `assert_ne!` proves is not vacuous, and a reset |
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **968 passed, 0 failed, 9 ignored** (+4 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |

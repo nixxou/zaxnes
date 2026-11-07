@@ -46,6 +46,10 @@ default = [
     "board-sachen-8reg",
     "board-133",
     "board-nina03",
+    "board-38",
+    "board-107",
+    "board-145",
+    "board-149",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -311,6 +315,35 @@ board-133 = ["board-decode-boards"]
 # and its header is the fix. `Nina03`'s own note has the argument and a test pins the silence.
 # Implies `board-decode-boards`.
 board-nina03 = ["board-decode-boards"]
+
+# Lot MF-UNL-3's **seven single-latch boards**, one feature each and **one** `DecodeBoard`
+# variant for all seven (`SingleLatch`, with a runtime field saying which board it is -- the
+# `Jv001` and `Namcot108` shape). Each page documents one latch and nothing else; the feature
+# names follow `BOARD-FEATURES.md`'s rule of one per number where there is no family.
+#
+# Mapper 38, the Bit Corp. **UNL-PCI556** of *Crime Busters*: `[xxxx CCPP]` at $7000-$7FFF, a
+# 32 KiB PRG bank and an 8 KiB CHR bank. The page's "writes to $F000-$FFFF are very likely to
+# also trigger a bankswitch" is implemented as the same decode (A15 ignored) and recorded in
+# **Q-147**, because the page says "very likely" rather than asserting it. "PRG RAM capacity:
+# None", so `board_memory_sizes` clears $6000-$7FFF and the latch at $7000 is reachable.
+board-38 = ["board-decode-boards"]
+
+# Mapper 107, the Magicseries board of *Magic Dragon*: one `[BBBB BBBb]` register over the whole
+# of $8000-$FFFF driving CHR and PRG at once -- the 8 KiB CHR bank is **all eight** bits and the
+# 32 KiB PRG bank the upper **seven**, which is the page's diagram and MesenCE's reading where
+# FCEUX takes three bits. Its "it's currently unknown whether this mapper suffers from bus
+# conflicts or not" is answered **no** and recorded in **Q-147**.
+board-107 = ["board-decode-boards"]
+
+# Mapper 145, the Sachen **SA-72007** of *Sidewinder*: `$4100: [C... ....]` under mask $E100,
+# one 8 KiB CHR bank bit, and the bit is **bit 7**. No PRG bank line: an NROM with a CHR switch.
+board-145 = ["board-decode-boards"]
+
+# Mapper 149, the Sachen **SA-0036** of *Taiwan Mahjong 16*: the same one bit, "just like mapper
+# 145, but moves the register to overlap with PRG ROM and so **has bus conflicts**" -- mask
+# $8000, so every address in $8000-$FFFF is the register, and the AND with the ROM byte is
+# `registry::has_bus_conflicts`'s generic path.
+board-149 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

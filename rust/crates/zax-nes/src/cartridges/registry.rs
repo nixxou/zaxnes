@@ -62,6 +62,13 @@ use super::mappers::{
 };
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
+#[cfg(any(
+    feature = "board-38",
+    feature = "board-107",
+    feature = "board-145",
+    feature = "board-149"
+))]
+use super::mappers::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
 use super::{BankWindows, Board, CartridgeMemory};
@@ -107,6 +114,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     36,
     #[cfg(feature = "board-mmc3-multicart")]
     37,
+    #[cfg(feature = "board-38")]
+    38,
     41,
     #[cfg(feature = "board-mmc3-multicart")]
     47,
@@ -164,6 +173,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     101,
     #[cfg(feature = "board-105")]
     105,
+    #[cfg(feature = "board-107")]
+    107,
     #[cfg(feature = "board-111")]
     111,
     #[cfg(feature = "board-mmc3-scramble")]
@@ -187,10 +198,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     136,
     #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-145")]
+    145,
     #[cfg(feature = "board-nina03")]
     146,
     #[cfg(feature = "board-jv001")]
     147,
+    #[cfg(feature = "board-149")]
+    149,
     #[cfg(feature = "board-sachen-8reg")]
     150,
     // Mapper 151 needs the VRC1 **and** the VS layer: the number is the deprecated one for that
@@ -536,6 +551,15 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 038"): "PRG RAM capacity: **None**", and here the window is in
+        // the way as well -- the board's "Bank select ($7000-$7FFF)" is the upper half of it.
+        // This is mapper 140's and 184's arm above for both of their reasons at once
+        // (MF-UNL-3 step 2).
+        #[cfg(feature = "board-38")]
+        38 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 206"), the Namco 108 family: `PRG RAM: None`, the page adding
         // "with the rare exception" of the *Magical Puzzle Popils* prototype, which carries
         // "8 KiB battery-backed". So the window is open bus on these five numbers unless the
@@ -662,6 +686,17 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // (`IremLrog017.h:12`, `HasBusConflicts` true).
         #[cfg(feature = "board-77")]
         77 => true,
+        // *INES Mapper 149* is "just like mapper 145, but moves the register to overlap with PRG
+        // ROM and so **has bus conflicts**" -- the page's own words, with no submapper clause
+        // and nothing qualifying them (MF-UNL-3 step 2).
+        //
+        // **Mappers 38, 79, 107 and 145 are deliberately absent.** 38, 79 and 145 carry the row
+        // "Bus conflicts: No" and keep their register below $8000, where the PRG-ROM does not
+        // drive; 107's page says "it's currently **unknown** whether this mapper suffers from
+        // bus conflicts or not", answered **no** here because that is the reading which latches
+        // what a game wrote, and recorded in Q-147.
+        #[cfg(feature = "board-149")]
+        149 => true,
         11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
@@ -832,6 +867,29 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // 148 and gives this board no bus conflicts.
         #[cfg(feature = "board-nina03")]
         79 | 146 => Board::DecodeBoard(DecodeBoard::Nina03(Nina03::new(memory, mapper))),
+        // MF-UNL-3 step 2: the four plain latches of the lot's seven single-latch boards, one
+        // `DecodeBoard` variant between them with a runtime field saying which. `SingleLatch`'s
+        // own note has the table of the four pages.
+        #[cfg(feature = "board-38")]
+        38 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::BitCorp38,
+        ))),
+        #[cfg(feature = "board-107")]
+        107 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Magic107,
+        ))),
+        #[cfg(feature = "board-145")]
+        145 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Sachen145,
+        ))),
+        #[cfg(feature = "board-149")]
+        149 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Sachen149,
+        ))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

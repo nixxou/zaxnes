@@ -126,7 +126,12 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   (MF-UNL-2 step 5);
     // * 79 and 146, the AVE NINA-03/06 and the Sachen 3015 / SA-016 that nesdev's one page for
     //   both numbers calls "functionally identical" -- one `DecodeBoard` variant and one latch
-    //   at $4100 -- behind `board-nina03` (MF-UNL-3 step 1).
+    //   at $4100 -- behind `board-nina03` (MF-UNL-3 step 1);
+    // * 38 (Bit Corp. UNL-PCI556), 107 (Magicseries), 145 (Sachen SA-72007) and 149 (Sachen
+    //   SA-0036), four of lot MF-UNL-3's seven single-latch boards: **one** `DecodeBoard`
+    //   variant for all seven with a runtime field saying which, one Cargo feature each
+    //   (`board-38`, `board-107`, `board-145`, `board-149`) because the owner's rule is one
+    //   feature per board that costs (MF-UNL-3 step 2).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -149,13 +154,14 @@ fn req_core_100_every_required_mapper_is_registered() {
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
-    let additions: [(i32, bool); 77] = [
+    let additions: [(i32, bool); 81] = [
         (19, true),
         (24, true),
         (26, true),
         (33, small),
         (36, jv001),
         (37, multicart),
+        (38, cfg!(feature = "board-38")),
         (47, multicart),
         (48, true),
         (65, true),
@@ -187,6 +193,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         // two numbers that exist only on that machine.
         (99, cfg!(feature = "board-vs-system")),
         (105, cfg!(feature = "board-105")),
+        (107, cfg!(feature = "board-107")),
         (111, cfg!(feature = "board-111")),
         (114, scramble),
         (115, scramble),
@@ -199,8 +206,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (133, cfg!(feature = "board-133")),
         (136, jv001),
         (140, small),
+        (145, cfg!(feature = "board-145")),
         (146, nina03),
         (147, jv001),
+        (149, cfg!(feature = "board-149")),
         (150, sachen),
         (151, cfg!(feature = "board-vs-system")),
         (152, small),
@@ -7401,5 +7410,267 @@ fn req_core_090_the_nina_03_latch_survives_a_save_and_restore() {
         core.reset();
         assert_eq!([0, 1, 2, 3], core.prg_windows(), "mapper {mapper}");
         assert_eq!(0, core.chr_bank(0x0000), "mapper {mapper}");
+    }
+}
+
+// ------------------------- the seven single-latch boards of MF-UNL-3, steps 2 to 4
+
+/// nesdev ("INES Mapper 038"), *Bank select ($7000-$7FFF)*: `[xxxx CCPP]`, bits 1-0 the 32 KiB
+/// PRG bank and bits 3-2 the 8 KiB CHR bank — four of each, which is the page's 128 KiB of PRG
+/// and 32 KiB of CHR (MF-UNL-3 step 2).
+///
+/// The $F000 half is the page's *Hardware* note — "writes to $F000-$FFFF are **very likely** to
+/// also trigger a bankswitch" — implemented as the same decode and recorded in **Q-147**.
+#[cfg(feature = "board-38")]
+#[test]
+fn req_core_102_mapper_38_banks_from_7000_and_from_f000() {
+    let mut core = MapperRom::new(38).prg(16).chr(32).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // `PP` is the 32 KiB PRG bank.
+    core.mapper_write(0x7000, 0x03);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000), "`PP` is not the CHR bank");
+
+    // `CC` is the 8 KiB CHR bank, two bits above it.
+    core.mapper_write(0x7000, 0x0C);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(24, core.chr_bank(0x0000));
+    assert_eq!(31, core.chr_bank(0x1C00), "one 8 KiB bank over the range");
+
+    // A $F000 write is the same latch: A15 is not decoded.
+    core.mapper_write(0xF000, 0x06);
+    assert_eq!([8, 9, 10, 11], core.prg_windows(), "$F000 switches too");
+    assert_eq!(8, core.chr_bank(0x0000));
+    core.mapper_write(0xFFFF, 0x09);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "and so does $FFFF");
+    assert_eq!(16, core.chr_bank(0x0000));
+
+    // $6FFF is not: A12 is clear. Nor is $6000, which is why `board_memory_sizes` taking the
+    // window's RAM away does not put a register there.
+    for address in [0x6FFFu16, 0x6000, 0x8000, 0xEFFF] {
+        core.mapper_write(address, 0x03);
+        assert_eq!(
+            [4, 5, 6, 7],
+            core.prg_windows(),
+            "{address:#06X} is no register"
+        );
+        assert_eq!(16, core.chr_bank(0x0000), "{address:#06X}");
+    }
+}
+
+/// nesdev ("INES Mapper 107"): `[BBBB BBBb]`, the 8 KiB CHR bank from **all eight** bits and the
+/// 32 KiB PRG bank from the upper **seven** — "unusually, bits 1-7 is used to switch both CHR and
+/// PRG banks simultaneously" (MF-UNL-3 step 2).
+///
+/// **The eight bits are the census's own test**: "a bank number above 7 is reachable", where
+/// "FCEUX implements only the bottom 3 bits of the unified register, however `MesenCE` supports
+/// the full 8 bits".
+#[cfg(feature = "board-107")]
+#[test]
+fn req_core_102_mapper_107_honours_all_eight_bits_of_its_one_register() {
+    let mut core = MapperRom::new(107).prg(32).chr(128).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // Bit 0 reaches the CHR bank and not the PRG bank: the two fields are one place apart.
+    core.mapper_write(0x8000, 0x01);
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "bit 0 is not PRG A15");
+    assert_eq!(8, core.chr_bank(0x0000), "bit 0 is CHR A13");
+
+    // Bank 2 of 32 KiB is register value 4 or 5.
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(40, core.chr_bank(0x0000));
+
+    // **Above bank 7**, which is what the three-bit reading cannot reach: CHR bank 8 of the
+    // image's sixteen, and PRG bank 4 of its eight.
+    core.mapper_write(0x8000, 0x08);
+    assert_eq!([16, 17, 18, 19], core.prg_windows(), "PRG bank 4");
+    assert_eq!(64, core.chr_bank(0x0000), "CHR bank 8");
+    assert_eq!(71, core.chr_bank(0x1C00));
+
+    // The whole of $8000-$FFFF is the register; nothing below it is.
+    core.mapper_write(0xFFFF, 0x00);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    for address in [0x4100u16, 0x6000, 0x7FFF] {
+        core.mapper_write(address, 0x05);
+        assert_eq!(
+            [0, 1, 2, 3],
+            core.prg_windows(),
+            "{address:#06X} is no register"
+        );
+    }
+
+    // **Bit 7 needs an image whose bank count does not swallow it.** $88 and $08 differ by 128
+    // in the CHR field and by 64 in the PRG field, and a power-of-two image wraps both away:
+    // on the sixteen 8 KiB CHR banks above, $88 and $08 are the same bank. 192 KiB of PRG is
+    // **24** 8 KiB banks and 24 KiB of CHR is 24 1 KiB banks, neither of which divides either
+    // distance, so the top bit is visible in both fields at once.
+    let mut wide = MapperRom::new(107).prg(24).chr(24).load();
+    wide.mapper_write(0x8000, 0x08);
+    assert_eq!(
+        [16, 17, 18, 19],
+        wide.prg_windows(),
+        "PRG bank 4 of 24 banks"
+    );
+    assert_eq!(16, wide.chr_bank(0x0000), "CHR bank 8 of 24 banks");
+    wide.mapper_write(0x8000, 0x88);
+    assert_eq!(
+        [8, 9, 10, 11],
+        wide.prg_windows(),
+        "bit 7 reached the PRG field: $88 >> 1 is bank 68"
+    );
+    assert_eq!(
+        8,
+        wide.chr_bank(0x0000),
+        "and the CHR field: $88 is 8 KiB bank 136"
+    );
+}
+
+/// nesdev ("INES Mapper 145") and ("INES Mapper 149"): `[C... ....]` — **bit 7** — selects the
+/// 8 KiB CHR bank, at `$4100` under mask $E100 on the SA-72007 and at `$8000` under mask
+/// **$8000** on the SA-0036, which "moves the register to overlap with PRG ROM and so **has bus
+/// conflicts**" (MF-UNL-3 step 2).
+///
+/// 149's bank 1 is only reachable over a PRG bank whose bytes are `$FF`: the generic conflict
+/// path of `Cartridge::cpu_write` ANDs the written value with the ROM byte, and a numbered bank
+/// carries bits 0-3 alone — which is what `MapperRom::prg_bank_all_ones` exists for.
+#[cfg(any(feature = "board-145", feature = "board-149"))]
+#[test]
+fn req_core_102_mappers_145_and_149_switch_chr_from_bit_7_alone() {
+    #[cfg(feature = "board-145")]
+    {
+        let mut core = MapperRom::new(145).prg(4).chr(16).load();
+        assert_eq!(
+            [0, 1, 2, 3],
+            core.prg_windows(),
+            "an NROM-256 image, unbanked"
+        );
+        assert_eq!(0, core.chr_bank(0x0000));
+
+        // Bit 7 and nothing else: $7F changes nothing, $80 switches.
+        core.mapper_write(0x4100, 0x7F);
+        assert_eq!(0, core.chr_bank(0x0000), "bits 6-0 are not the bank");
+        core.mapper_write(0x4100, 0x80);
+        assert_eq!(8, core.chr_bank(0x0000), "bit 7 is the bank");
+        assert_eq!(15, core.chr_bank(0x1C00), "one 8 KiB bank over the range");
+        assert_eq!([0, 1, 2, 3], core.prg_windows(), "no PRG bank line");
+
+        // Mask $E100: $4300 and $5F00 are the same latch, $4000 and $6100 are not, and
+        // $8000-$FFFF is not — this board's register is below $6000 and it has no conflicts.
+        core.mapper_write(0x4300, 0x00);
+        assert_eq!(0, core.chr_bank(0x0000));
+        core.mapper_write(0x5F00, 0x80);
+        assert_eq!(8, core.chr_bank(0x0000));
+        for address in [0x4000u16, 0x6100, 0x8000, 0xFFFF] {
+            core.mapper_write(address, 0x00);
+            assert_eq!(8, core.chr_bank(0x0000), "{address:#06X} is no register");
+        }
+    }
+
+    #[cfg(feature = "board-149")]
+    {
+        // PRG bank 1 is all `$FF`, so a write landing in $A000-$BFFF keeps its bit 7.
+        let mut core = MapperRom::new(149)
+            .prg(4)
+            .chr(16)
+            .prg_bank_all_ones(1)
+            .load();
+        assert_eq!(0, core.chr_bank(0x0000));
+
+        // Mask $8000, so every address above $7FFF is the register — here $A000, over the
+        // `$FF` bank, which is the only way a conflicting board latches bit 7 at all.
+        core.mapper_write(0xA000, 0x80);
+        assert_eq!(8, core.chr_bank(0x0000), "bit 7 over an $FF ROM byte");
+        assert_eq!(15, core.chr_bank(0x1C00));
+        core.mapper_write(0xBFFF, 0x00);
+        assert_eq!(0, core.chr_bank(0x0000), "and back");
+
+        // **The conflict is the board's own page**: the same write over a *numbered* bank, whose
+        // bytes are 0, latches nothing.
+        core.mapper_write(0xA000, 0x80);
+        assert_eq!(8, core.chr_bank(0x0000));
+        core.mapper_write(0x8000, 0x7F);
+        assert_eq!(
+            0,
+            core.chr_bank(0x0000),
+            "$8000 is bank 0, whose bytes are 0: the AND clears the bank"
+        );
+
+        // Nothing below $8000 is the register: A15 is the whole mask.
+        core.mapper_write(0xA000, 0x80);
+        assert_eq!(8, core.chr_bank(0x0000));
+        for address in [0x4100u16, 0x6000, 0x7FFF] {
+            core.mapper_write(address, 0x00);
+            assert_eq!(8, core.chr_bank(0x0000), "{address:#06X} is no register");
+        }
+    }
+}
+
+/// REQ-CORE-090/091 and REQ-CORE-004 for the four boards of step 2: the latch, saved, restored
+/// and reset, with the state dirtied first.
+///
+/// §7.1 item 2 asks for this per board, and the two generic sweeps cannot do it for two of the
+/// four: `req_core_090_the_mapper_state_survives_a_save_and_restore` and
+/// `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` write
+/// $5000-$E001, which reaches mapper 107's and 149's register but not mapper 38's $7000 or
+/// mapper 145's $4100.
+#[cfg(any(
+    feature = "board-38",
+    feature = "board-107",
+    feature = "board-145",
+    feature = "board-149"
+))]
+#[test]
+fn req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied() {
+    // Per board: the register's address, the value to latch, and the value to dirty it with
+    // afterwards — all three from the board's own page.
+    let boards: &[(usize, u16, u8, u8)] = &[
+        #[cfg(feature = "board-38")]
+        (38, 0x7000, 0x0D, 0x02),
+        #[cfg(feature = "board-107")]
+        (107, 0x8000, 0x05, 0x02),
+        #[cfg(feature = "board-145")]
+        (145, 0x4100, 0x80, 0x00),
+        // 149 writes over PRG bank 1, which the image below fills with `$FF` so that the
+        // conflicting write keeps bit 7.
+        #[cfg(feature = "board-149")]
+        (149, 0xA000, 0x80, 0x00),
+    ];
+
+    for &(mapper, port, dirty, later) in boards {
+        let mut core = MapperRom::new(mapper)
+            .prg(16)
+            .chr(32)
+            .prg_bank_all_ones(1)
+            .load();
+        core.mapper_write(port, dirty);
+        let banks = (core.prg_windows(), core.chr_windows());
+
+        let state = core.save_state(true).unwrap();
+        core.mapper_write(port, later);
+        assert_ne!(
+            banks,
+            (core.prg_windows(), core.chr_windows()),
+            "mapper {mapper}: the second write has to move something, or the test is vacuous"
+        );
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows()),
+            "mapper {mapper}"
+        );
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+
+        core.reset();
+        assert_eq!(
+            0,
+            core.chr_bank(0x0000),
+            "mapper {mapper}: a reset puts the latch back to zero"
+        );
     }
 }

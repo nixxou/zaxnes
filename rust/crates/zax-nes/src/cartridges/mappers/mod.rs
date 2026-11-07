@@ -80,6 +80,13 @@ mod rambo1;
 mod sachen_72008;
 #[cfg(feature = "board-sachen-8reg")]
 mod sachen_8reg;
+#[cfg(any(
+    feature = "board-38",
+    feature = "board-107",
+    feature = "board-145",
+    feature = "board-149"
+))]
+mod single_latch;
 #[cfg(feature = "board-small-boards")]
 mod small_boards;
 #[cfg(feature = "board-116")]
@@ -180,6 +187,13 @@ pub use rambo1::{Rambo1, Rambo1Board};
 pub use sachen_72008::Sachen72008;
 #[cfg(feature = "board-sachen-8reg")]
 pub use sachen_8reg::Sachen8Reg;
+#[cfg(any(
+    feature = "board-38",
+    feature = "board-107",
+    feature = "board-145",
+    feature = "board-149"
+))]
+pub use single_latch::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-small-boards")]
 pub use small_boards::SmallBoard;
 #[cfg(feature = "board-116")]
