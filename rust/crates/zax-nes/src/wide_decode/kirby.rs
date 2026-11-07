@@ -59,14 +59,19 @@ impl MarginDecoder for Kirby {
         let camera_y = (i32::from(memory.ram(CAMERA_Y_HIGH)) << 8)
             + i32::from(memory.ram(CAMERA_Y))
             + i32::from(memory.ram(CAMERA_Y_FINE));
-        // The picture's columns start at the camera's tile: its fine scroll is the row's.
-        if camera_x & 7 != i32::from(row.fine_x) {
+        // While the camera moves, the work RAM is a frame ahead of the picture: the row's own
+        // scroll places it. Its 512-pixel plane of two nametables repeats across the room, and
+        // the camera only picks the repeat (the one whose left edge is nearest to it).
+        let ring = row.ring_x();
+        let left = camera_x - (camera_x - ring + 256).rem_euclid(512) + 256;
+        if left < 0 {
             return false;
         }
-        let first = camera_x >> 3;
+        let first = left >> 3;
         let fine_y = i32::from(row.v >> 12);
-        let world_y = camera_y + row.line - fine_y;
-        if world_y < 0 || world_y & 7 != 0 {
+        // The camera's line, a frame early too, rounded to the row's tile.
+        let world_y = (camera_y + row.line - fine_y + 4) & !7;
+        if world_y < 0 {
             return false;
         }
         let tile_row = world_y >> 3;
