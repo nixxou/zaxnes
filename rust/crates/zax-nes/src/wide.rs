@@ -536,6 +536,11 @@ impl WideExtension {
         self.stall > 0
     }
 
+    /// Clears the overclock register (`$5006`): no extra CPU time from the next frame on.
+    pub fn clear_overclock(&mut self) {
+        self.overclock = 0;
+    }
+
     /// Ends the overclock now: the game is waiting for the next frame (see
     /// `BuiltinPatch::idle_loop`), the cycles left would only run its wait loop.
     pub fn end_stall(&mut self) {

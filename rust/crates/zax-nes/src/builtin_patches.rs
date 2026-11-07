@@ -127,6 +127,9 @@ pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
 pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
+/// Name of the Kirby's Adventure (USA) (Rev 1) pack (aids only: its widescreen is the margin
+/// decoder's).
+pub const KIRBY_USA_REV1: &str = "Kirby's Adventure (USA) (Rev 1) aids";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -215,7 +218,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 57] = [
+pub const PATCHES: [BuiltinPatch; 58] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1438,6 +1441,28 @@ pub const PATCHES: [BuiltinPatch; 57] = [
         idle_loop: Some((0xC581, 0xC584)),
     },
     BuiltinPatch {
+        name: KIRBY_USA_REV1,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (USA) (Rev 1)",
+        source_crc: 0x5ED6_F221,
+        // A hack pack of aids only (`kirbywide`, `tools/build_pack.py`): "No slowdown", the
+        // gameplay loop's wait for the next frame ($E48C) through the pack's code, which asks for
+        // 255 lines of overclock and goes on at once when the NMI already came while the frame
+        // ran (the game's wait clears that count first, losing a frame). The widescreen is the
+        // margin decoder's.
+        bps: include_bytes!("../patches/kirby-usa-rev1.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The game's wait ($C067): LDA $39 / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
         name: NOVA_THE_SQUIRREL,
         game: "Nova the Squirrel",
         rom_name: "Nova the Squirrel",
@@ -1482,6 +1507,18 @@ pub const PATCHES: [BuiltinPatch; 57] = [
 ];
 
 /// The options of the Nova the Squirrel pack: its two testing aids.
+/// The options of the Kirby's Adventure pack.
+const KIRBY_OPTIONS: &[HackOption] = &[
+    // 255 lines of overclock and no frame lost to an NMI that came while the frame ran.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
 const NOVA_OPTIONS: &[HackOption] = &[
     HackOption {
         key: "level_select",
@@ -2537,13 +2574,15 @@ mod tests {
     fn the_built_in_patches_are_well_formed() {
         for patch in PATCHES {
             // A hack pack: it reads, and its widescreen is one of its components, unless it is
-            // a pack of aids alone (Nova the Squirrel).
+            // a pack of aids alone (Nova the Squirrel; Kirby's Adventure, whose code runs in
+            // the execution zone).
             if crate::hack_pack::is_pack(patch.bps) {
                 let pack = crate::hack_pack::HackPack::read(patch.bps);
                 assert!(
                     pack.is_some_and(|pack| {
                         pack.component(crate::hack_pack::WIDESCREEN).is_some()
-                            || (!pack.components.is_empty() && pack.code.is_empty())
+                            || (!pack.components.is_empty()
+                                && (pack.code.is_empty() || patch.boot_zone))
                     }),
                     "{}",
                     patch.name

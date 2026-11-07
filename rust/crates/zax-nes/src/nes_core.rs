@@ -580,10 +580,13 @@ impl NesCore {
         let decoder = self.margin_decoder();
         self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
 
-        // The overclock ends once the game waits for the next frame, when its patch says where.
+        // The overclock ends once the game waits for the next frame, when its patch says where
+        // (the patch applied, or the one whose hack pack gives the ROM its aids: an aid may ask
+        // for the overclock).
         let idle_loop = self
             .builtin_patch
             .and_then(crate::builtin_patches::by_name)
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
             .and_then(|patch| patch.idle_loop);
 
         self.bus.ppu_mut().clear_frame_boundary();
@@ -827,6 +830,7 @@ impl NesCore {
         let Some(cartridge) = self.bus.cartridge_mut() else {
             return;
         };
+        let mut turned_off = false;
         for option in patch.options {
             let Some(component) = pack.component(option.key) else {
                 continue;
@@ -836,7 +840,13 @@ impl NesCore {
             if on != (self.aids_on & mask != 0) {
                 component.apply(cartridge.rom_mut().prg_rom_mut(), on);
                 self.aids_on ^= mask;
+                turned_off |= !on;
             }
+        }
+        // An aid's code may have asked for the overclock, which nothing would clear once its
+        // hooks are gone; a widescreen running sets it again every frame.
+        if turned_off {
+            self.bus.ppu_mut().wide_mut().clear_overclock();
         }
         self.boot_pack_zone();
     }
