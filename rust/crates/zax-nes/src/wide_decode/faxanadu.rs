@@ -19,9 +19,10 @@
 //!   also in RAM (`$66`-`$69`);
 //! * a block's sub-palette is the low two bits of its attribute byte.
 //!
-//! `$63` is the screen on display, or the one the game slides to from the start of the slide;
-//! `$0D` counts the screens slid through (bit 0 the nametable of the one at rest) and `$0C` the
-//! pixels of the slide under way, `$54` its direction (0 left, 1 right, 2 up, 3 down). Past an
+//! `$63` is the screen on display, or the one the game slides to from the moment it chose it
+//! (some 17 frames before the slide starts); `$0D` counts the screens slid through (bit 0 the
+//! nametable of the one at rest) and `$0C` the pixels of the slide under way, `$54` its direction
+//! (0 left, 1 right, 2 up, 3 down, `$FF` none). Past an
 //! area's end (no link) the margin stays empty. A row whose screen edges are not what the decoder
 //! reads there (a vertical slide, a building's inside the decoder does not know, the text box
 //! drawn over the screen's edge) keeps the nametables'.
@@ -44,6 +45,10 @@ const SLIDE_X: u16 = 0x000C;
 const SLIDE_SCREENS: u16 = 0x000D;
 const SLIDE_DIRECTION: u16 = 0x0054;
 const SCROLL_Y: u16 = 0x0057;
+/// `$54`: a slide to the left, to the right, or none under way.
+const LEFT: u8 = 0;
+const RIGHT: u8 = 1;
+const AT_REST: u8 = 0xFF;
 
 /// The bank of the areas' block tables and links.
 const AREA_BANK: usize = 3;
@@ -71,13 +76,30 @@ impl MarginDecoder for Faxanadu {
         let Some(area) = Area::new(memory) else {
             return false;
         };
-        // The nametable of the screen `$63`: the next one while a slide to the right is under
-        // way (`$0D` moves on at its end), the one at rest otherwise.
+        // The work RAM is a frame ahead of the picture, whose rows were drawn with the scroll of
+        // the frame before; so the slide is placed from its direction and the row's own scroll,
+        // not from `$0C`. Once the game has chosen the next screen, `$63` is that screen, about
+        // 17 frames before the slide starts, and keeps a nametable until its end: the one `$0D`
+        // moves to, next to the one at rest (`$0D` moves on at the start of a slide to the left,
+        // at the end of one to the right).
         let screens_slid = i32::from(memory.ram(SLIDE_SCREENS));
-        let sliding_right = memory.ram(SLIDE_DIRECTION) == 1 && memory.ram(SLIDE_X) != 0;
-        let screen_nametable = (screens_slid + i32::from(sliding_right)) & 1;
-        // The tile column, counted from the screen `$63`'s left edge, at the picture's left.
-        let first = ((row.ring_x() >> 3) - screen_nametable * 32 + 32).rem_euclid(64) - 32;
+        let direction = memory.ram(SLIDE_DIRECTION);
+        let slide_x = memory.ram(SLIDE_X);
+        let (screen_nametable, side) = match direction {
+            LEFT if slide_x != 0 => (screens_slid & 1, LEFT),
+            LEFT | RIGHT => ((screens_slid + 1) & 1, direction),
+            _ => (screens_slid & 1, AT_REST),
+        };
+        // The tile column, counted from the screen `$63`'s left edge, at the picture's left: the
+        // picture shows `$63` and the screen it is slid in from, to its right for a slide to the
+        // left (0 to 32 columns on), to its left for a slide to the right (0 to 32 columns back).
+        let ring = ((row.ring_x() >> 3) - screen_nametable * 32).rem_euclid(64);
+        let first = match side {
+            LEFT => ring,
+            RIGHT if ring > 0 => ring - 64,
+            RIGHT => 0,
+            _ => (ring + 32).rem_euclid(64) - 32,
+        };
 
         let current = memory.ram(SCREEN);
         let mut cache: Vec<(i32, Option<Vec<u8>>)> = Vec::new();
@@ -98,8 +120,9 @@ impl MarginDecoder for Faxanadu {
             area.tile(block, column & 1, tile_row & 1)
         };
 
-        // The screen's two edge columns must show what the level data gives there.
-        for column in [0, 31] {
+        // The screen's edge columns must show what the level data gives there: column 1 for
+        // the left, column 0 being the one a slide to the left draws after it shows (redrawn).
+        for column in [1, 31] {
             let shown = (memory.nametable)(nametable_address(*row, column));
             if tile_at(first + column).map(|(tile, _)| tile) != Some(shown) {
                 return false;
@@ -115,6 +138,11 @@ impl MarginDecoder for Faxanadu {
             }
         }
         true
+    }
+
+    /// A slide to the left shows the column it brings in a frame before drawing it.
+    fn redrawn_left_columns(&self) -> i32 {
+        1
     }
 }
 
