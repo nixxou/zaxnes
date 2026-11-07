@@ -13,7 +13,7 @@ use zax_settings::values::SettingValue;
 
 use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
-use crate::audio::audio_mixer::AudioSampleSource;
+use crate::audio::stream::ApuSamples;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
@@ -314,13 +314,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
-                if let Some(mixer) = &mut self.mixer {
-                    let reader = session.core().audio_reader();
-                    let source: AudioSampleSource = Box::new(move |destination| {
-                        // A mono read cannot be refused; an empty buffer reads as silence.
-                        reader.read_samples(destination, false).unwrap_or(0)
-                    });
-                    mixer.set_emulation_source(Some(source));
+                if let Some(audio) = &self.audio {
+                    // The audio thread reads the core's ring itself from here on (Q-153).
+                    audio.set_console(Some(Box::new(ApuSamples::new(
+                        session.core().audio_reader(),
+                    ))));
                 }
                 session.set_smooth_gc(self.settings.get(SettingId::EmuLuaSmoothGc).as_bool());
                 self.session = Some(session);

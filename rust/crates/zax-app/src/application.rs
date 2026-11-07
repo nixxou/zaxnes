@@ -30,6 +30,7 @@ use zax_settings::values::SettingValue;
 use crate::app_log;
 use crate::app_options::AppOptions;
 use crate::audio::audio_assets::AudioAssets;
+use crate::audio::stream::{self as audio_stream, AudioLink, AudioStream, ProgramWriter};
 use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
 use crate::demo_game;
@@ -193,7 +194,14 @@ struct Running {
     graphics: Graphics,
     input: SdlInput,
     source: DesktopInputSource,
+    /// The open device. Nothing reads it: it is held so that it outlives the stream it pulls
+    /// from, since dropping it closes the device and stops the callbacks.
+    #[allow(dead_code)]
     audio: Option<AudioOutput>,
+    /// The main thread's end of the stream's programme ring (menu music, interface sounds).
+    program: Option<ProgramWriter>,
+    /// The block the mixer produces the programme into, allocated once.
+    program_block: Vec<f32>,
     host: AppHost,
     window: HostWindow,
     pacing: VideoPacing,
@@ -315,7 +323,14 @@ impl Running {
         let bindings = load_bindings(&mut bindings_store, options.handheld);
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
-        let (audio, sample_rate) = open_audio(options, window.sdl());
+        let latency_ms = audio_stream::DEFAULT_LATENCY_MS;
+        let opened = open_audio(options, window.sdl(), latency_ms);
+        let OpenedAudio {
+            output: audio,
+            sample_rate,
+            link,
+            program,
+        } = opened;
         let parts = HostParts {
             paths: &paths,
             model,
@@ -324,7 +339,7 @@ impl Running {
             store,
             asset_root: asset_root.as_deref(),
             sample_rate,
-            audio_open: audio.is_some(),
+            audio: link,
             view,
         };
         let mut host = build_host(parts);
@@ -353,6 +368,9 @@ impl Running {
             input,
             source,
             audio,
+            program,
+            // One block of programme, the size the mixer works in.
+            program_block: vec![0.0; crate::audio::audio_mixer::BLOCK * 2],
             host,
             window,
             pacing,
@@ -435,7 +453,12 @@ impl Running {
         };
         self.carry_out_ui_effects();
         let mark = self.clock.start();
-        pump_audio(&mut self.host, self.audio.as_mut(), real);
+        pump_audio(
+            &mut self.host,
+            self.program.as_ref(),
+            &mut self.program_block,
+            real,
+        );
         self.clock.stop(Stage::Audio, mark);
         let budget = self.frame_budget();
         self.pipeline
@@ -1001,7 +1024,7 @@ struct HostParts<'a> {
     store: SettingsStore,
     asset_root: Option<&'a Path>,
     sample_rate: u32,
-    audio_open: bool,
+    audio: Option<AudioLink>,
     view: SceneView,
 }
 
@@ -1017,7 +1040,7 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
         EmulationHostOptions::new(parts.paths.clone(), parts.model, parts.scene, parts.catalog);
     options.mixer = Some(mixer);
     options.script_log = Some(Box::new(|| Box::new(ConsoleScriptLog)));
-    options.audio_device_open = parts.audio_open;
+    options.audio = parts.audio;
     options.log = Some(Box::new(log));
     options.settings_store = Some(parts.store);
     options.confirm_with_interface = true;
@@ -1450,19 +1473,58 @@ fn publish_settings_to_scene(model: &SettingsModel, scene: &mut SceneState) {
     scene.camera.snap_to_setpoints();
 }
 
-fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl) -> (Option<AudioOutput>, u32) {
+/// What opening the audio device produced: the device itself, and the handles the main thread
+/// keeps on the stream it now owns (Q-153).
+struct OpenedAudio {
+    output: Option<AudioOutput>,
+    sample_rate: u32,
+    link: Option<AudioLink>,
+    program: Option<ProgramWriter>,
+}
+
+fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl, latency_ms: f32) -> OpenedAudio {
     let default_rate = u32::try_from(PREFERRED_SAMPLE_RATE).unwrap_or(48_000);
+    let silent = OpenedAudio {
+        output: None,
+        sample_rate: default_rate,
+        link: None,
+        program: None,
+    };
     if !options.audio {
-        return (None, default_rate);
+        return silent;
     }
-    match AudioOutput::open(sdl) {
-        Ok(output) => {
+    // The stream is built inside, once SDL has said what rate and block size it gave us: both
+    // size its buffers, and the rate turns the latency in milliseconds into frames.
+    let opened = AudioOutput::open(sdl, |freq, block_frames| {
+        let rate = u32::try_from(freq).unwrap_or(default_rate);
+        let target = audio_stream::frames_of_ms(rate, latency_ms);
+        let (stream, control, console, program) = AudioStream::open(rate, block_frames, target);
+        let link = AudioLink {
+            control,
+            console,
+            sample_rate: rate,
+        };
+        let render: Box<dyn zax_platform::AudioRender> = Box::new(stream);
+        (render, (link, program))
+    });
+    match opened {
+        Ok((output, (link, program))) => {
             let rate = u32::try_from(output.sample_rate()).unwrap_or(default_rate);
-            (Some(output), rate)
+            log(&format!(
+                "audio: {rate} Hz, blocks of {} frames, target latency {:.0} ms.",
+                output.block_frames(),
+                link.target_ms()
+            ));
+            OpenedAudio {
+                output: Some(output),
+                sample_rate: rate,
+                link: Some(link),
+                program: Some(program),
+            }
         }
         Err(error) => {
             log(&format!("no audio output ({error}); the host runs silent."));
-            (None, default_rate)
+            silent
         }
     }
 }
@@ -1873,26 +1935,29 @@ fn forward_events(
     }
 }
 
-fn pump_audio(host: &mut AppHost, audio: Option<&mut AudioOutput>, real: f64) {
+/// Keeps the menu music and the interface sounds a few tens of milliseconds ahead of the audio
+/// thread (Q-153). The console's samples do not pass through here any more: the audio thread
+/// reads the core's ring itself, so a long frame on this thread cannot starve the device.
+///
+/// The mixer's clock advances with the programme it produced, and the ring is drained in real
+/// time, so the fades of REQ-AUD-020 and REQ-AUD-022 keep their real-time slope.
+fn pump_audio(host: &mut AppHost, program: Option<&ProgramWriter>, block: &mut [f32], real: f64) {
     let Some(mixer) = host.mixer_mut() else {
         return;
     };
-    match audio {
-        Some(output) => {
-            // The device pulls as many whole blocks as it has free buffers; the mixer's own
-            // clock therefore advances with the audio it produced, which is real time.
-            match output.pump(|buffer| mixer.fill(buffer)) {
-                Ok(0) => mixer.advance(real),
-                Ok(_) => {}
-                Err(error) => {
-                    log(&format!("audio output: {error}"));
-                    mixer.advance(real);
-                }
-            }
-        }
+    let Some(writer) = program else {
         // No device: the fades and the music selection still advance, so the state machine
         // behaves identically in silence.
-        None => mixer.advance(real),
+        mixer.advance(real);
+        return;
+    };
+    let mut missing = writer.missing_frames();
+    while missing > 0 {
+        let frames = missing.min(block.len() / 2);
+        let slice = &mut block[..frames * 2];
+        mixer.fill(slice);
+        writer.push(slice);
+        missing -= frames;
     }
 }
 

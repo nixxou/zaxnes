@@ -5,10 +5,14 @@
 
 mod common;
 
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
 use common::{LoopHarness, TemporaryRoot};
 use zax_app::audio::audio_assets::{AudioAssets, TRACK_FILE_NAMES};
 use zax_app::audio::audio_mixer::{BLOCK, MUSIC_GAIN_FACTOR, SOUND_GAIN_FACTOR};
 use zax_app::audio::fade_gain::FULL_FADE_SECONDS;
+use zax_app::audio::stream::{frames_of_ms, AudioControl, AudioStream, ConsoleSamples, RAMP_MS};
 use zax_app::audio::{AudioMixer, TrackRandom, UiAudioLibrary, UiSound};
 use zax_app::emulation::commands::Command;
 use zax_app::persistence::app_settings::{AppSettings, AppSettingsMut};
@@ -18,6 +22,57 @@ const RATE: u32 = 48_000;
 
 fn mixer() -> AudioMixer {
     AudioMixer::new(RATE, None, TrackRandom::new(1))
+}
+
+/// A console the test feeds by hand, standing in for the APU's ring.
+struct FakeConsole {
+    queue: Arc<Mutex<VecDeque<f32>>>,
+}
+
+impl ConsoleSamples for FakeConsole {
+    fn available(&self) -> usize {
+        self.queue.lock().unwrap().len()
+    }
+
+    fn read(&mut self, out: &mut [f32]) -> usize {
+        let mut queue = self.queue.lock().unwrap();
+        let wanted = out.len().min(queue.len());
+        for slot in out.iter_mut().take(wanted) {
+            *slot = queue.pop_front().unwrap();
+        }
+        wanted
+    }
+}
+
+/// A stream at the configured latency, with a console the test fills, and no programme.
+fn stream(latency_ms: f32) -> (AudioStream, Arc<AudioControl>, Arc<Mutex<VecDeque<f32>>>) {
+    let target = frames_of_ms(RATE, latency_ms);
+    let (stream, control, slot, _program) = AudioStream::open(RATE, BLOCK, target);
+    let queue = Arc::new(Mutex::new(VecDeque::new()));
+    *slot.lock().unwrap() = Some(Box::new(FakeConsole {
+        queue: Arc::clone(&queue),
+    }));
+    (stream, control, queue)
+}
+
+/// Pushes `count` samples of `value` into the console's queue.
+fn feed(queue: &Arc<Mutex<VecDeque<f32>>>, count: usize, value: f32) {
+    let mut queue = queue.lock().unwrap();
+    for _ in 0..count {
+        queue.push_back(value);
+    }
+}
+
+/// Renders one block and returns it.
+fn block_of(stream: &mut AudioStream) -> Vec<f32> {
+    let mut block = vec![0.0_f32; BLOCK * 2];
+    stream.render_block(&mut block);
+    block
+}
+
+/// The frames of the left channel.
+fn left(block: &[f32]) -> Vec<f32> {
+    block.chunks_exact(2).map(|pair| pair[0]).collect()
 }
 
 fn near(actual: f32, expected: f32, tolerance: f32) {
@@ -75,64 +130,86 @@ fn write_wave(audio: &WaveAudio) -> Vec<u8> {
 /// REQ-AUD-002: the console signal is monophonic and goes to both channels unchanged.
 #[test]
 fn req_aud_002_the_console_signal_is_duplicated_on_both_channels() {
-    let mut mixer = mixer();
-    mixer.set_emulation_audible(true);
-    mixer.set_emulation_source(Some(Box::new(|destination| {
-        for (index, value) in destination.iter_mut().enumerate() {
-            *value = if index % 2 == 0 { 0.5 } else { -0.5 };
-        }
-        destination.len()
-    })));
+    let (mut stream, control, queue) = stream(20.0);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    feed(&queue, frames_of_ms(RATE, 200.0), 0.5);
 
-    let mut block = vec![0.0_f32; BLOCK * 2];
-    mixer.fill(&mut block);
+    // One block opens the prefill gate and ramps in; the next is the signal proper.
+    let _ = block_of(&mut stream);
+    let block = block_of(&mut stream);
 
-    for frame in block.chunks(2) {
-        near(frame[0], frame[1], 1e-6);
+    for pair in block.chunks_exact(2) {
+        near(pair[0], pair[1], 1e-6);
     }
     assert_ne!(block[0], 0.0);
 }
 
-/// REQ-AUD-003: a block is taken all or nothing. When the core has less than a whole block the
-/// console contribution is digital silence.
+/// REQ-AUD-003 as amended by Q-153 §1: a console that runs out mid-block no longer turns the
+/// whole block into zeros. The samples it did have are played, the last one is held and ramped
+/// to zero, the block holds no discontinuity, and one under-run is counted.
 #[test]
-fn req_aud_003_an_incomplete_block_becomes_silence() {
-    let mut mixer = mixer();
-    mixer.set_emulation_audible(true);
-    let available = BLOCK / 2;
-    mixer.set_emulation_source(Some(Box::new(move |destination| {
-        if destination.len() > available {
-            // All or nothing, exactly as NesCore::read_audio behaves (REQ-CORE-071).
-            return 0;
+fn req_aud_003_a_late_console_is_held_and_faded_rather_than_zeroed() {
+    let (mut stream, control, queue) = stream(20.0);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    // Enough for the gate plus two whole blocks and a third of a block.
+    let prefill = frames_of_ms(RATE, 20.0).max(BLOCK);
+    feed(&queue, prefill + (BLOCK / 3), 0.75);
+
+    let mut last = Vec::new();
+    for _ in 0..4 {
+        let block = block_of(&mut stream);
+        if control.underruns() > 0 {
+            last = left(&block);
+            break;
         }
-        destination.fill(0.75);
-        destination.len()
-    })));
+    }
 
-    let mut block = vec![1.0_f32; BLOCK * 2];
-    mixer.fill(&mut block);
-
-    assert!(block.iter().all(|value| *value == 0.0));
-    assert_eq!(mixer.underrun_blocks, 1);
+    assert_eq!(control.underruns(), 1, "the drought is counted once");
+    assert!(!last.is_empty(), "the under-run block was not reached");
+    // Not the digital silence REQ-AUD-003 used to demand: the held signal is still there.
+    assert!(
+        last.iter().any(|value| value.abs() > 0.1),
+        "the block is silent: {:?}",
+        &last[..8]
+    );
+    // And no discontinuity: the ramp of RAMP_MS cannot move faster than one full scale over
+    // that time, so neighbouring samples stay close.
+    #[allow(clippy::cast_precision_loss)] // the rate is a small integer
+    let per_sample = 1000.0 / (RATE as f32 * RAMP_MS);
+    for pair in last.windows(2) {
+        assert!(
+            (pair[1] - pair[0]).abs() <= per_sample + 1e-3,
+            "a jump of {} between {} and {}",
+            (pair[1] - pair[0]).abs(),
+            pair[0],
+            pair[1]
+        );
+    }
+    // The tail has reached zero by the end of the block.
+    near(last[last.len() - 1], 0.0, 1e-6);
 }
 
 /// REQ-AUD-006 and vector A2: the console gain is `V`, so a quarter volume gives a quarter of the
-/// peak.
+/// peak. The mixer computes the gain, the audio thread applies it.
 #[test]
 fn req_aud_006_the_console_gain_is_the_volume() {
     let mut mixer = mixer();
     mixer.set_emulation_audible(true);
     mixer.set_volume(0.25);
-    mixer.set_emulation_source(Some(Box::new(|destination| {
-        destination.fill(1.0);
-        destination.len()
-    })));
+    near(mixer.emulation_gain(), 0.25, 1e-5);
 
-    let mut block = vec![0.0_f32; BLOCK * 2];
-    mixer.fill(&mut block);
+    let (mut stream, control, queue) = stream(20.0);
+    control.set_console_active(true);
+    control.set_console_gain(mixer.emulation_gain());
+    feed(&queue, frames_of_ms(RATE, 200.0), 1.0);
+
+    // Two blocks: the first opens the gate and ramps the gain and the envelope in.
+    let _ = block_of(&mut stream);
+    let block = block_of(&mut stream);
 
     near(block[0], 0.25, 1e-5);
-    near(mixer.emulation_gain(), 0.25, 1e-5);
 }
 
 /// REQ-AUD-020 acceptance: the first launch after start-up begins at gain `V`, and a complete
@@ -230,19 +307,39 @@ fn req_aud_040_interface_sounds_share_a_single_voice() {
     assert!(!mixer.sound_playing());
 }
 
-/// REQ-AUD-010: in Paused and Stopped no emulated frame produces samples, so the console output
-/// is exact silence and an empty buffer is not counted as an under-run.
+/// REQ-AUD-010 and vector A6: in Paused and Stopped no emulated frame produces samples, so the
+/// console output becomes exact silence — well inside the 100 ms the vector allows — and a dry
+/// ring is not counted as an under-run.
 #[test]
 fn req_aud_010_pausing_gives_digital_silence() {
-    let mut mixer = mixer();
-    mixer.set_emulation_audible(false);
-    mixer.set_emulation_source(Some(Box::new(|_| 0)));
+    let (mut stream, control, queue) = stream(20.0);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    feed(&queue, frames_of_ms(RATE, 200.0), 0.75);
+    let _ = block_of(&mut stream);
+    assert_ne!(block_of(&mut stream)[0], 0.0, "the console is playing");
 
-    let mut block = vec![1.0_f32; BLOCK * 2];
-    mixer.fill(&mut block);
+    // The game stops producing: the ramp of Q-153 §1 takes the signal down, and what is left in
+    // the ring is not played.
+    control.set_console_active(false);
+    let mut blocks = 0;
+    loop {
+        let block = block_of(&mut stream);
+        blocks += 1;
+        if block.iter().all(|value| *value == 0.0) {
+            break;
+        }
+        assert!(blocks < 5, "the output never reached digital silence");
+    }
 
-    assert!(block.iter().all(|value| *value == 0.0));
-    assert_eq!(mixer.underrun_blocks, 0);
+    #[allow(clippy::cast_precision_loss)] // a handful of blocks
+    let elapsed_ms = (blocks * BLOCK) as f32 * 1000.0 / RATE as f32;
+    assert!(elapsed_ms < 100.0, "silence took {elapsed_ms} ms");
+    assert_eq!(
+        control.underruns(),
+        0,
+        "a paused console is not an under-run"
+    );
 }
 
 /// REQ-AUD-030: a menu track does not loop, and when one ends while the music is active a

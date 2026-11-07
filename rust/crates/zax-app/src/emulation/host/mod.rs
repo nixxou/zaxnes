@@ -35,6 +35,7 @@ use super::notification_center::NotificationCenter;
 use super::rollback_history::RollbackHistory;
 use super::speed_setting;
 use crate::achievements::AchievementSystem;
+use crate::audio::stream::AudioLink;
 use crate::audio::AudioMixer;
 use crate::frame_profiler::{Stage, StageClock, StageTimes};
 use crate::game_session::{GameSession, SessionEvent, SessionFrame};
@@ -124,8 +125,9 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     pub clock: Option<Clock>,
     /// Where the host logs.
     pub log: Option<LogFn>,
-    /// Whether an audio device is open, which turns on the drift correction.
-    pub audio_device_open: bool,
+    /// The handles on the audio thread's stream; none when no device opened, and then the host
+    /// drives no rate control (Q-153).
+    pub audio: Option<AudioLink>,
     /// The settings and game list files; none when nothing is persisted.
     pub settings_store: Option<SettingsStore>,
     /// Whether deletions wait for the interface's confirmation (REQ-UI-110).
@@ -147,7 +149,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             now: None,
             clock: None,
             log: None,
-            audio_device_open: false,
+            audio: None,
             settings_store: None,
             confirm_with_interface: false,
         }
@@ -168,7 +170,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     now: Now,
     log: LogFn,
     modal_window_open: bool,
-    audio_device_open: bool,
+    audio: Option<AudioLink>,
+    /// The correction last asked of the core, for the overlay.
+    audio_rate_adjustment: f64,
     confirm_with_interface: bool,
     pending: VecDeque<(Command, CommandArgs)>,
     hotkeys: HotkeyTracker,
@@ -267,7 +271,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             now,
             clock,
             log,
-            audio_device_open,
+            audio,
             settings_store,
             confirm_with_interface,
         } = options;
@@ -309,7 +313,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             now,
             log: log.unwrap_or_else(|| Box::new(|_| {})),
             modal_window_open: false,
-            audio_device_open,
+            audio,
+            audio_rate_adjustment: 0.0,
             confirm_with_interface,
             pending: VecDeque::new(),
             hotkeys: HotkeyTracker::new(),
@@ -434,6 +439,45 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The program's audio mix, for writing.
     pub fn mixer_mut(&mut self) -> Option<&mut AudioMixer> {
         self.mixer.as_mut()
+    }
+
+    /// The handles on the audio thread's stream, when a device is open.
+    #[must_use]
+    pub const fn audio(&self) -> Option<&AudioLink> {
+        self.audio.as_ref()
+    }
+
+    /// One line on the state of the audio output, for the performance overlay and the
+    /// per-second line of the profiler's log: the latency measured against the one asked for,
+    /// the correction in force, the extremes of the ring's fill and the under-runs (Q-153 §6).
+    #[must_use]
+    pub fn audio_report(&self) -> Option<String> {
+        let audio = self.audio.as_ref()?;
+        let rate = audio.sample_rate;
+        let extremes = audio.control.extreme_fill().map_or_else(
+            || "-".to_owned(),
+            |(least, most)| {
+                #[allow(clippy::cast_precision_loss)] // fills are a few thousand frames
+                let (least, most) = (least as f32, most as f32);
+                format!(
+                    "{:.0}-{:.0} ms",
+                    crate::audio::stream::ms_of_frames(rate, least),
+                    crate::audio::stream::ms_of_frames(rate, most)
+                )
+            },
+        );
+        Some(format!(
+            "latency {:.1} / {:.0} ms  [{extremes}]  rate {:+.3} %  underruns {}{}",
+            audio.measured_ms(),
+            audio.target_ms(),
+            self.audio_rate_adjustment * 100.0,
+            audio.control.underruns(),
+            if audio.control.playing() {
+                ""
+            } else {
+                "  prefilling"
+            }
+        ))
     }
 
     /// The settings and game list files.
@@ -1036,6 +1080,23 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             mixer.set_volume(self.settings.effective_volume());
             mixer.set_menu_music_enabled(self.settings.menu_music());
         }
+        self.publish_audio_state();
+    }
+
+    /// Tells the audio thread the gain to play the console at and whether to expect samples
+    /// from it (Q-153). The gain is the fade of REQ-AUD-020, which the mixer still owns; the
+    /// audio thread follows it per sample.
+    fn publish_audio_state(&self) {
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        let gain = self.mixer.as_ref().map_or(0.0, AudioMixer::emulation_gain);
+        audio.control.set_console_gain(gain);
+        // A dry ring is only an under-run while a game is actually producing samples; in every
+        // other state it is the silence REQ-AUD-010 asks for.
+        let producing = self.state == EmulationState::Running
+            && self.session.as_ref().is_some_and(GameSession::has_rom);
+        audio.control.set_console_active(producing);
     }
 
     fn apply_speed(&mut self) {
@@ -1244,7 +1305,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     fn correct_audio_drift(&mut self) {
         const TARGET: usize = 2 * crate::audio::audio_mixer::BLOCK;
-        if !self.audio_device_open || self.state != EmulationState::Running {
+        if self.audio.is_none() || self.state != EmulationState::Running {
             return;
         }
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
@@ -1291,8 +1352,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if dispose_session {
                 session.dispose(&mut self.settings, &mut self.scene);
                 self.battery.detach();
-                if let Some(mixer) = &mut self.mixer {
-                    mixer.set_emulation_source(None);
+                if let Some(audio) = &self.audio {
+                    audio.set_console(None);
                 }
             } else {
                 self.session = Some(session);

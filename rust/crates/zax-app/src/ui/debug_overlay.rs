@@ -113,12 +113,14 @@ pub fn draw(ui: &Ui, host: &AppHost, chrome_height: f32, info: &DebugInfo<'_>) {
             .current_track()
             .map_or_else(|| "none".to_owned(), |track| track.to_string());
         ui.text(format!(
-            "audio {} Hz  emu gain {:.3}  music {:.4}  track {track}  underruns {}",
+            "audio {} Hz  emu gain {:.3}  music {:.4}  track {track}",
             mixer.sample_rate(),
             mixer.emulation_gain(),
             mixer.music_gain(),
-            mixer.underrun_blocks
         ));
+        if let Some(line) = host.audio_report() {
+            ui.text(line);
+        }
     }
     ui.separator();
     ui.text_wrapped(info.gl_renderer);

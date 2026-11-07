@@ -13,7 +13,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
 - [x] **2. Verify the findings.** Read the audio path and confirm or refute each of the five
       findings with `file:line`. Write the question ticket for the spec clauses the owner's
       design contradicts (REQ-AUD-003 silence blocks, the latency note, the ring capacity).
-- [ ] **3. Pull output.** The SDL device is opened with a callback that reads the APU sample
+- [x] **3. Pull output.** The SDL device is opened with a callback that reads the APU sample
       ring directly on SDL's audio thread. Menu music and interface sounds are *precomputed*
       by the mixer on the main thread into an auxiliary stereo ring, so the callback never
       touches a file, an allocation or the mixer's state machine. No silence is ever inserted
@@ -123,3 +123,59 @@ REQ-AUD-003 (§1), the « < 40 ms » latency note (§2), the ring capacity again
 latency (§3, the core's ring is fixed at 208 ms at 48 kHz and
 `zax-nes/tests/audio_pacing_tests.rs:262-274` asserts that bound), and the 50 ms rollback hole
 of REQ-AUD-012 against a full prefill (§4).
+
+### Step 3 — the pull output
+
+`zax-platform/src/audio.rs` is now a callback device: `AudioOutput::open` takes a factory, hands
+it the rate and the block size SDL negotiated, and gives SDL an `AudioRender` to pull from. The
+`AudioQueue`, `BLOCK_COUNT` and `blocks_to_queue` are gone with the push model. **No `unsafe`
+was needed**: the `AudioCallback` trait of the `sdl2` crate is safe Rust, so the exception the
+work order allowed is not used anywhere.
+
+`zax-app/src/audio/stream.rs` is the renderer, and all the policy lives there, device-free and
+testable:
+
+* the console is read from the APU ring through `ConsoleSamples` (`ApuSamples` over
+  `AudioReader`; a test installs a fake). Partial reads: the ring's own read is all-or-nothing,
+  so it is asked for exactly `min(available, wanted)`.
+* a prefill gate: nothing is read until the ring holds the target (the first start) or half of
+  it (any later resynchronisation, Q-153 §4), never less than one block.
+* on a real drought, one `underruns` event, the last sample held and ramped to zero over
+  `RAMP_MS` = 6 ms, and the gate closes again so the next blocks do not each underrun.
+* the menu music and the interface sounds come from a separate stereo ring the mixer fills
+  `PROGRAM_AHEAD_MS` = 48 ms ahead on the main thread; a shortfall there is ramped too and is
+  *not* counted, since it is a dip of a signal at gain 0,02 and not a hole in the game's sound.
+* the console gain is followed **per sample** (`GAIN_SLEW_MS` = 8 ms), which also removes the
+  block-sized staircase of finding 5.
+* the final clamp happens once, on the sum, in the callback.
+
+`AudioMixer` keeps the whole fade state machine of SPEC-11 §3.3 and loses only the console:
+`set_emulation_source`, `AudioSampleSource`, `mix_emulation` and `underrun_blocks` are gone, and
+`fill` no longer clamps (the callback does). The host publishes `emulation_gain()` and whether
+the console is producing into `AudioControl` on every `publish_state`.
+
+The host's `audio_device_open: bool` became `audio: Option<AudioLink>` — the control block, the
+console slot and the device's rate. `EmulationHost::audio_report()` is the one line the overlay
+and the profiler's log share.
+
+Locks on the audio thread: the APU's ring (the core's own, one acquisition per callback instead
+of the producer's one per sample), the console slot, and the programme ring. All three hold only
+numbers and a memcpy; the critical sections are sub-microsecond. A lock-free ring would mean
+changing the core, which the work order forbids.
+
+One unrelated test fix: `asset_free_startup_tests.rs`'s repository scan excluded `rust/target`
+with `Path::starts_with`, which matches whole components and therefore missed the `target-au`
+directory this lot builds into — the `.obj` files of a bundled SDL2 then read as assets of the
+repository. It now skips any `rust/target*`, so the test no longer depends on what
+`CARGO_TARGET_DIR` is called.
+
+Build note for whoever resumes: `cargo test -p zax-app` needs SDL2. There is no `SDL2.lib` on
+this machine, so the runs below use `--features zax-app/bundled` with Visual Studio's CMake on
+`PATH` (`C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\
+Microsoft\CMake\CMake\bin`). `TMP`/`TEMP` must be **Windows-style** paths or `link.exe` cannot
+create its temporaries.
+
+Result: `cargo fmt --check` clean, `cargo clippy -p zax-platform -p zax-app --all-targets
+--features zax-app/bundled -- -D warnings` clean, every `zax-app` and `zax-platform` test green
+(the four REQ-AUD tests that drove the console through the mixer now drive the stream, and
+`req_aud_003` asserts the new hold-and-fade instead of the block of zeros).

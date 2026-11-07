@@ -17,7 +17,7 @@ pub mod wave;
 pub mod wgpu_display;
 pub mod window;
 
-pub use audio::AudioOutput;
+pub use audio::{AudioOutput, AudioRender};
 pub use icon::{WindowIconImage, WindowIconState, WindowIconTarget};
 pub use pacing::{DisplayPacingState, DisplaySurface};
 pub use wave::{WaveAudio, WaveError};

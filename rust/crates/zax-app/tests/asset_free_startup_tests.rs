@@ -199,6 +199,18 @@ fn req_pub_001_the_command_line_resolves_the_generic_entries_without_assets() {
     assert_eq!(profile_resolver::list(None).unwrap().len(), 2);
 }
 
+/// Whether `relative` is inside the Cargo build output, whatever `CARGO_TARGET_DIR` called it
+/// (`rust/target`, `rust/target-au`, …). A path comparison would not do: `starts_with` matches
+/// whole components, so `rust/target` does not cover `rust/target-au`, and the `.obj` files a
+/// bundled SDL2 leaves there would read as assets of the repository.
+fn is_build_output(relative: &Path) -> bool {
+    let mut parts = relative.components();
+    parts.next().is_some_and(|part| part.as_os_str() == "rust")
+        && parts
+            .next()
+            .is_some_and(|part| part.as_os_str().to_string_lossy().starts_with("target"))
+}
+
 // REQ-PUB-002
 #[test]
 fn req_pub_002_the_repository_carries_no_asset_file() {
@@ -220,7 +232,7 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
             // and the golden pictures the render tests compare with carry their own rules.
             let relative = entry.path().strip_prefix(repository).unwrap();
             !(relative.starts_with(".git")
-                || relative.starts_with("rust/target")
+                || is_build_output(relative)
                 || relative.starts_with("rust/test-roms")
                 || relative.starts_with("rust/goldens")
                 || relative.starts_with("tests/roms")
