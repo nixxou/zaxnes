@@ -125,9 +125,8 @@ impl VsPpuModel {
     ///
     /// Two of the five values are not on that page's table, which lists the `-02`, `-03` and
     /// `-04` only, and are the ones `third_party/mesen2`'s `NesPpu.cpp` has (`Ppu2C05A` `0x1B`,
-    /// `Ppu2C05E` nothing driven); the three the page does give agree with it to the bit. The
-    /// gap is recorded in `docs/progress/MF-VS.md` and marked as a provisional choice in the
-    /// lot's Q ticket.
+    /// `Ppu2C05E` nothing driven); the three the page does give agree with it to the bit.
+    /// **Q-136 question 2** records those two rows as a provisional choice.
     #[must_use]
     pub const fn status_identifier(self) -> (u8, u8) {
         match self {
@@ -591,9 +590,9 @@ impl VsSystem {
     /// left to right would put switch 2 in bit 3 and switch 8 in bit 2 — the reverse of what is
     /// below. The reading taken is that the page lists the bits of a range **high first**, as
     /// every register diagram on the wiki does, so bit 4 is switch 2 and bit 7 switch 8; it is
-    /// also what `third_party/mesen2`'s `VsControlManager::ReadRam` does, bit for bit. Marked as
-    /// a provisional choice in the lot's Q ticket, because the consequence of being wrong is a
-    /// game reading its options mirrored and nothing worse.
+    /// also what `third_party/mesen2`'s `VsControlManager::ReadRam` does, bit for bit.
+    /// **Q-136 question 1** records it as a provisional choice: the consequence of being wrong is
+    /// a game reading its cabinet options mirrored and nothing worse.
     ///
     /// Bit 7 is 0: this build is always the primary CPU, the `DualSystem`'s second being a
     /// recorded gap.

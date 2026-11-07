@@ -10,10 +10,12 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
-**No board is parked, and `parked-boards` is empty and still wired.** It was empty through MF-6b
-and MF-6a3, wired so that a later lot which did park a board would find the switch ready; **MF-6c
-step 2 put `board-taito-x1` in it and step 9 `board-111`, and MF-CART step 5 took both back
-out.** Every board this build has is in `default`.
+**One feature is parked: `board-vs-system`, the Nintendo VS. System** (MF-VS step 7). The
+umbrella was empty through MF-6b and MF-6a3, wired so that a later lot which did park a board
+would find the switch ready; **MF-6c step 2 put `board-taito-x1` in it and step 9 `board-111`,
+MF-CART step 5 took both back out, and MF-VS step 7 put the VS. System in.** Every *cartridge*
+board this build has is in `default`; the VS. System is one flag away
+(`--features parked-boards`), and the figures that put it there are in its row below.
 
 **Both were parked on one instruction, and it was not theirs — MF-CART removed the instruction.**
 `Cartridge::default_cpu_read` held the inlined `Board::try_read_prg` jump table, and past a
@@ -67,12 +69,23 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-96` | 96 | the Bandai Oeka Kids board: a 32 KiB PRG bank and a 16 KiB outer CHR bank from one CPU register, and the 4 KiB inner CHR-RAM page **latched off the PPU address bus** on the entry into $2000-$2FFF -- including a bare $2006 write. In **both** PPU-bus latches and the first number in either with no IRQ; one `DecodeBoard` variant and one new forward. The Oeka Kids tablet is a recorded gap, and "Bus conflicts: partly" is Q-135. Implies `board-decode-boards` | 2 | worst `duelito` **+70 187 (+0.001 %)**, set total +223 036, `m4` +31 167 on the dispatch it joins (MF-6c step 8, vs `8496c503`) | four `core` **+0** and `smb3/core` **−20 823**; three `total` figures above the baseline at +0.000 %, +0.002 % and +0.004 %, **all inside the tolerance**, and all of them Lua's `ltable.c`. `Board::on_ppu_address_bus` **157 → 161** | **on** | as above |
 | `board-111` | 111 | the Membler Industries GTROM / Cheapocabra: a 32 KiB PRG bank, an 8 KiB CHR-RAM bank, **two 8 KiB banks of four distinct nametables** served through `read_nametable` (the fourth body of that dispatch), an SST39SF040 the game saves into, and two LEDs. One `DecodeBoard` variant and three forwards; implies `board-decode-boards`. The LEDs, the register's read side and the flash's persistence are recorded gaps | **7** homebrew | **un-parked by MF-CART step 5**: `mmc5` **−12 564 290 (−0.111 %)**, worst ROM `mm2`/`oamstr` **+0.002 %**, set total **−24 997 757** (vs `mfct-0-44f77f72`). MF-6c step 9 had measured `mmc5` +7 423 140 (+0.066 %) — one unit of `Cartridge::default_cpu_read`'s quantum, which MF-CART step 4 removed. The board measured **without** its nametable banks gave the same +7 416 670 then, so the fifth `DecodeBoard` variant was the cause and the mechanism was free; `read_nametable_inner` stays at **75 with four bodies** | four `core` **below or equal**, `mm2/core` +0.002 %, worst `total` −0.017 % to +0.000 % (MF-CART step 5) | **on** | `cargo build -p zax-nes --no-default-features --features <the others>` |
 | `board-taito-x1` | 80, 207, 82, 552 | the Taito X1-005 and X1-017, two `SmallBoard` variants; implies `board-small-boards` | **13** | **un-parked by MF-CART step 5**: `mmc5` **−12 576 627 (−0.112 %)**, worst ROM `mm2` **+0.001 %**, set total **−25 190 380** (vs `mfct-0-44f77f72`). MF-6c step 2 had measured `mmc5` +7 456 756 (+0.066 %) and MF-CART step 1 measured the same two variants at **three** units, +22 370 268 (+0.198 %) — all of it the one instruction step 4 removed | **all five `core` below or equal**, `mm2/core` +0.002 %, worst `total` +0.000 % (MF-CART step 5) | **on** | as above |
-| `parked-boards` | — | the umbrella: every board left out of `default`. **Empty since MF-CART step 5**, and still wired, so that a later lot which does park a board adds it here and nowhere else | — | — | — | **off, and a no-op** | `cargo build -p zax-nes --features parked-boards` |
+| `board-vs-system` | 99, 151 | the **Nintendo VS. System**, single-screen: the arcade machine and the two mapper numbers that exist only on it. Mapper 99 is the VS board itself, **one `DecodeBoard` variant** (no `Board` discriminant); 151 is a VRC1 on a VS board, **a parameter of the existing VRC1** and no variant at all. One feature for the whole machine because its pieces are not separable — the PPU's master-palette remap and the RC2C05's two register quirks, the coin slots, the service button and the eight DIP switches at `$4016`/`$4017`, the swapped sticks, the per-ROM table keyed by the data CRC, and the board — all answering one question settled at load, `crate::vs::VsSystem`. Implies `board-decode-boards` | **74 dumps** in the public NES 2.0 header database (55 of them mapper 99), *Vs. Castlevania*, *Vs. Super Mario Bros.*, *Vs. Excitebike*, *Vs. Gradius* among them | **PARKED**: **every one of the thirteen slower**, `duelito` **+0.083 %**, `readbuf` +0.077 %, `z2` +0.067 %, down to `mmc5` +0.026 % and `oamstr` +0.001 %; set total **+36 862 173 (+0.046 %)** (MF-VS step 7, vs `f1278f46`). **Gated off: set total +90 052 (+0.000 %), worst ROM +0.001 %** | **all ten figures above**, `zelda2/core` **+0.057 %** down to `smb3/total` +0.034 %. **Gated off: all five `core` +0.000 %** (+64 to +22 400 instructions on 11-15 G) and worst `total` `smb3` +0.019 % | **off** | `cargo build -p zax-nes --features parked-boards`, and `cargo build -p zax-harness --features parked-boards` for the `vs` subcommand beside it |
+| `parked-boards` | 99, 151 | the umbrella: every board left out of `default`. Empty from MF-CART step 5 until **MF-VS step 7**, which put `board-vs-system` in it — so a reader who wants every board this build has turns on this one flag | as that row | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
 +0.02 %. That figure is `board-116`'s, measured by MF-6a3 step 4; the two features MF-CART step 5
 brought in are +0.001 % and +0.002 % on their worst ROM, and the tree they came into is
 **−25 551 352 (−0.032 %)** on PR-1's thirteen against `44f77f72`, the lot's own baseline.
+
+**And the worst figure of the one feature that is *not* in `default` is +0.083 %**, four times the
+tolerance: `board-vs-system`'s, measured by MF-VS step 7. What makes it the first row of this table
+whose cost is **not** its own board's is where the figure sits —
+`Ppu2C02::run_dots` +1.1 M to +2.4 M and `Ppu2C02::background_fetch` +0.2 M to +2.4 M, on **every**
+ROM of the set, including the ones whose games have no VS layer to run. Those are per-dot paths the
+lot does not touch at any line. §5.16 of `rust/docs/PERFORMANCE-HISTORY.md` has the two probes that
+attributed it: the `$2002` identifier is about a quarter, the 32 bytes step 2 added to `Ppu2C02`
+are **nothing**, and `Ppu2C02::read_pattern_planes` is identical to the instruction in all three
+builds.
 
 ## MF-CART lifted the limit, and these two sections are what it lifted
 
@@ -165,12 +178,14 @@ There is no `--no-feature` flag in Cargo, so turning one board off means naming 
         board-94,board-105,board-111,board-116,board-153,board-155,board-158,board-68,\
         board-68-chr-nametables,board-77,board-96,board-eeprom,board-jaleco-72-92-86,\
         board-mmc3-multicart,board-namcot108,board-small-boards,board-taito-x1
-    # ... which is every board but `board-119`.
+    # ... which is every board but `board-119`. `board-vs-system` is in neither list: it is
+    # parked, so `default` does not have it and `--features parked-boards` is how it comes on.
 
 and `cargo test -p zax-nes --no-default-features` is the configuration with **every** board off —
 **783 passed, 0 failed, 7 ignored**, against **862** by default since MF-CART step 5 put the last
-two features in it. `--features parked-boards` is now the same build as `default`, that list being
-empty, and the suites run it anyway so that the switch cannot rot. Every configuration (each
+two features in it. `--features parked-boards` is **no longer** the same build as `default`: MF-VS step 7 put
+`board-vs-system` in the umbrella, so that configuration is the one with the VS. System and its 45
+tests (**907 passed, 0 failed, 7 ignored** against 862 by default). Every configuration (each
 feature alone, none, all, and all plus `parked-boards`) builds, passes clippy `-D warnings` and
 passes its tests; MF-6a3 step 3's table has the per-feature test counts.
 

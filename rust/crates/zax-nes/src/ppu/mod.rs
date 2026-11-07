@@ -1004,6 +1004,12 @@ impl Ppu2C02 {
             // the frame one dot shorter (NTSC only, REQ-CORE-015). The mask is read here,
             // at the dot that is dropped, and not one dot earlier: that single dot is what
             // ppu_vbl_nmi test 10 measures.
+            //
+            // Q-136 question 3: **a VS. System PPU is treated as a 2C02 here**, and no allowed
+            // page says whether an RP2C03, an RP2C04 or an RC2C05 skips the dot. Mesen 2
+            // restricts the skip to the 2C02 and gives no reason; the provisional choice is to
+            // change nothing, so a lot that settles the question changes this one condition and
+            // no structure.
             self.dot = 1;
         }
 

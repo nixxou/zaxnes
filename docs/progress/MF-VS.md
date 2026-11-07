@@ -109,7 +109,7 @@ implements it.
   thirteen with `callgrind-set.sh` + `callgrind-diff.py`, clean `git archive` builds, the three
   `Cpu6502::step` inlinings, `zone_offset` and `read_pattern_planes` on the dump; the feature's
   place in `default` decided by the figures.
-* [ ] **8/10** — the documents: the `BOARD-FEATURES.md` row, `PERFORMANCE-HISTORY.md` §5.16, the
+* [x] **8/10** — the documents: the `BOARD-FEATURES.md` row, `PERFORMANCE-HISTORY.md` §5.16, the
   gaps, the Q tickets, `MF-6-inventory.md` §6 item 3 answered, the journal.
 * [ ] **9/10** — the check: fmt; clippy `-D warnings` on the crates touched in both configurations;
   `cargo test --release -p zax-nes -p zax-harness` in both; the ignored suite with the two ROM
@@ -572,3 +572,36 @@ Green after the park: `zax-nes` **862 / 0 / 7** by default — *exactly* MF-CART
 default build being unchanged — **907 / 0 / 7** with `--features parked-boards`, **783 / 0 / 7**
 with `--no-default-features`; `zax-harness` **63 / 0 / 1** by default and **70 / 0 / 1** with
 `--features parked-boards`. fmt and clippy `-D warnings` clean in all five configurations.
+
+### Step 8 — the documents, and Q-136
+
+* **`docs/review/BOARD-FEATURES.md`**: the `board-vs-system` row, with both runs' figures and the
+  gated-off figures beside them; the opening paragraph rewritten (the umbrella is no longer empty,
+  and "every board this build has is in `default`" is now "every *cartridge* board"); the
+  `parked-boards` row; the "how to turn a board off" list noting that this feature is in neither
+  list; the per-configuration test counts (`--features parked-boards` is no longer the same build
+  as `default`); and a paragraph after the "worst figure in `default`" line saying what makes this
+  the first row whose cost is not its own board's.
+* **`rust/docs/PERFORMANCE-HISTORY.md` §5.16**, four findings: the cost is in two per-dot PPU
+  functions the lot does not touch; the 32 bytes of `palette_raw` are **not** it (the probe that
+  refuted it took one build, and refuting a layout hypothesis before reshaping is the transferable
+  part); the `$2002` identifier is three instructions per read, a quarter of the figure and not
+  enough; and `read_pattern_planes` is identical to the instruction in all three builds. §5.15's
+  forward-looking paragraph gains the pointer: **the lot followed its advice exactly and was
+  charged by the PPU**, which that advice does not cover.
+* **`docs/review/MF-6-inventory.md`**: §6 item 3 answered — all four pieces it priced in October
+  exist, the per-ROM table turned out to need no judgement at all (the public database has the 74
+  rows), and "none of them in the cartridge layer" was right and is exactly why the lot is parked.
+  Rows 99 and 151 updated, 151's with the database's own agreement that its two titles are mapper
+  75 with console type 1.
+* **`spec/changes/Q-136.md`**, three readings the public pages do not settle, each implemented
+  provisionally and referenced in the code: the DIP-switch bit order (the page's ranges read
+  high-first, which Mesen's own code matches bit for bit); the RC2C05-01's and RC2C05-05's `$2002`
+  identifiers, which the page's table does not list; and whether a VS PPU skips the odd-frame dot —
+  no allowed page says, Mesen restricts the skip to the 2C02 without a reason, and the provisional
+  choice is to change **nothing**, so a lot that settles it changes one condition and no structure.
+  A fourth thing is recorded as a gap rather than asked as a question: an index remap cannot say
+  "this index is black on this chip", which is the real 2C03's grey ramp, and the brief settles it.
+* **`journal/JOURNAL.md`**: the session entry, in the journal's French. Appended in binary as
+  UTF-8 — an older section of that file carries a cp1252 byte, so reading it whole and rewriting it
+  would have rewritten bytes this lot has no business touching.

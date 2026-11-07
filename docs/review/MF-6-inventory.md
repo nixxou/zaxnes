@@ -124,7 +124,7 @@ them.
 | **95** | NAMCOT-3425 | Namco | yes | 1 (*Dragon Buster*) | **nametable control from the CHR register**: CHR A15 drives CIRAM A10 |
 | **96** | Oeka Kids (discrete: 74161, 7402, 7474) | Bandai | yes | 2 (*Oeka Kids: Anpanman no Hiragana Daisuki*, *…to Oekaki Shiyou!!*) | **CHR banking driven by the PPU address bus**: a fetch in $2000-$2FFF selects the 4 KiB CHR page from address bits 8-9, so the board must see **every** address-bus change, not only reads. Also wants the Oeka Kids tablet as an input device |
 | **97** | Irem TAM-S1 | Irem | yes | 1 (*Kaiketsu Yanchamaru*) | none, and no bus conflicts |
-| **99** | VS System | Nintendo | yes | arcade | coin/DIP inputs, a different palette, a 2-bank CHR select. **Set aside by the owner**; see §6 |
+| **99** | VS System | Nintendo | yes | arcade | coin/DIP inputs, a different palette, a 2-bank CHR select. **Reopened by the owner on 2026-11-06 and implemented by lot MF-VS**, behind `board-vs-system`, which step 7 of that lot **parked** (`docs/review/BOARD-FEATURES.md`); see §6 |
 | **105** | NES-EVENT | Nintendo | yes | **1 in NesCartDB** (*Nintendo World Championships 1990*) | MMC1-based; **a 30-bit M2 CPU-cycle counter** firing an IRQ at a DIP-selected bit (bits 28-25, ≈5-10 min NTSC) |
 | **140** | Jaleco JF-11, JF-14 | Jaleco | yes | page gives one example (*Bio Senshi Dan*) | none. GNROM with the register moved to $6000-$7FFF, so **no PRG-RAM** |
 | **152** | Bandai 74161/7432, with mirroring control | Bandai | yes | 2 on the page (*Arkanoid 2*, *Gegege no Kitarou 2*) | one-screen mirroring; **bus conflicts** |
@@ -172,7 +172,7 @@ MF-5a did exactly this for mapper 26 ("one `address` rewrite, decided by a load-
 | 207 | Taito X1-005 alternate | the **80** board of MF-6c | the mirroring bits' meaning |
 | 552 | Taito X1-017 correct order | the **82** board of MF-6c | the bank order |
 | 92 | Jaleco JF-19 | the **72** board of MF-6c | PRG size and one command bit |
-| 151 | VRC1 on a VS board | the **75** board of MF-6a | nothing but the VS System wrapper, which §6 sets aside |
+| 151 | VRC1 on a VS board | the **75** board of MF-6a | nothing but the VS System wrapper. **Implemented by lot MF-VS step 4** as a *parameter* of that board and no variant at all: the public NES 2.0 header database records the two titles the number exists for — *Vs. Gradius* and *Vs. The Goonies* — as **mapper 75 with console type 1**, which is this row's own claim from the other side |
 | 4 sub 3 | Acclaim MC-ACC | `McAcc` | **already done**: MR-4-3's finding, shipped as "the same code, monomorphised with the difference as a `const` parameter, so the MMC3 proper pays nothing" (`registry.rs:188-193`) |
 | 34 sub 1/2 | NINA-001, BNROM | `Mapper034` | **already done**: MR-34-1, resolved by `mapper_34_is_nina` (`registry.rs:52-59`) |
 
@@ -945,6 +945,34 @@ and DIP-switch input surface, a different palette, a two-bank CHR select, and a 
 configuration table — four pieces, none of them in the cartridge layer, three of them in SPEC-08
 and SPEC-06 territory. **Mapper 151** (VRC1 on a VS board) goes out with it, which is why §5 has
 75 in MF-6a and 151 nowhere.
+
+> **Reopened on 2026-11-06 and built: lot MF-VS, `docs/progress/MF-VS.md`.** All four pieces this
+> item priced exist, and the price turned out to be in a fifth place none of them named.
+>
+> * **The per-ROM table is generated, not written.** The public NES 2.0 ROM header database has
+>   21 339 games of which exactly **74** carry `<console type="1">`, each with its PPU, its
+>   hardware type and its stick wiring beside the CRC-32 of the data **without the header** —
+>   which is byte for byte the key `builtin_patches::data_crc` already computes. So the "per-ROM
+>   configuration table" cost no judgement calls at all.
+> * **The palette is an index remap, and it is free.** nesdev's "PPU palettes" offers the four
+>   RP2C04 master palettes as LUTs into the ordered palette, and the lot applies the LUT **where
+>   palette RAM is written** — a handful of times a frame — rather than per pixel.
+>   `Ppu2C02::read_pattern_planes` is identical to the instruction with the feature on and off.
+> * **The two-bank CHR select is one `DecodeBoard` variant and one new forward**, `$4016` being a
+>   CPU register no cartridge previously saw; a non-VS game pays one test of a `bool`.
+> * **The coin and DIP surface is on `InputPorts`** and is read only by the `$4016`/`$4017` arm,
+>   which `NesBus::read_io_register` already keeps `#[cold]` and out of line.
+> * **And the fifth place: the PPU.** This item's "none of them in the cartridge layer" was right,
+>   and is exactly why the lot is parked. §5.16 of `rust/docs/PERFORMANCE-HISTORY.md` has it: the
+>   feature costs **+0.083 % on the worst of PR-1's thirteen ROMs** and is above the tolerance on
+>   all ten level-2 figures, and the cost sits in `Ppu2C02::run_dots` and
+>   `Ppu2C02::background_fetch` — per-dot paths the lot does not touch at any line — and not in
+>   anything it wrote. Gated off, the same tree is **+0.000 %**. So `board-vs-system` is in
+>   `parked-boards` and `--features parked-boards` is the one flag that turns the machine on.
+>
+> The **dual-screen** VS. System, the four protection boards, the VS. Zapper and the app's UI
+> binding stay out, each detected and named in the load note rather than silently dropped. Three
+> readings the public pages do not settle are **Q-136**.
 
 **4. The FDS: out of scope.** A disk drive, not a mapper. REQ-CORE-075 names its audio among the
 optional expansion chips without the spec ever asking for the drive, and `MapperFactory`'s

@@ -1320,6 +1320,77 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.16 Lot MF-VS: the limit §5.15 did not cover is the **PPU**, and a feature is parked on it
+
+§5.15 ended with advice: "The twelve MF-UNL lots and MF-VS can therefore plan on **one shared enum
+variant per board, with no limit they will reach**, and should not add a `Board` discriminant
+without measuring it." **MF-VS followed it exactly — one `DecodeBoard` variant for mapper 99, no
+new `Board` discriminant, mapper 151 a parameter of the existing VRC1 — and was charged four times
+the tolerance anyway.** The charge did not come from the cartridge layer at all. It came from the
+PPU, which is the part §5.15's probes never touched, and MF-VS is the first lot to add fields and
+dispatch arms there.
+
+**The figures** (`mfvs-1-93ebee1f` against `mfvs-0-f1278f46`, four clean `git archive` builds):
+
+| | |
+| --- | --- |
+| PR-1's thirteen | **every one slower**: `duelito` **+0.083 %**, `readbuf` +0.077 %, `z2` +0.067 %, `metroid` +0.051 %, `m0` +0.049 %, `m1` and `mm2` +0.044 %, `smb1` +0.042 %, `m4` and `smb3` +0.034 %, `vblnmi` +0.030 %, `mmc5` +0.026 %, `oamstr` +0.001 %. Set total **+36 862 173 (+0.046 %)** |
+| level 2 | **all ten above**: `zelda2/core` **+0.057 %**, `metroid/core` +0.055 %, `mm2/core` +0.053 %, `smb1/core` +0.052 %, `smb3/core` +0.044 %, the `total` column +0.034 % to +0.045 % |
+| the same tree **gated off** | set total **+90 052 (+0.000 %)**, worst ROM **+0.001 %**; level 2 **all five `core` +0.000 %** (+64 to +22 400 instructions on 11 to 15 G) and worst `total` `smb3` +0.019 % |
+
+So `board-vs-system` is in `parked-boards` (`docs/review/BOARD-FEATURES.md`), and the shipped
+default build is the baseline to within a hundredth of the tolerance. Four findings.
+
+**1. The cost is in two per-dot PPU functions the lot does not touch at any line.** The per-symbol
+diff: `Ppu2C02::run_dots` **+1 144 469 to +2 417 230 on every ROM that renders** and
+`Ppu2C02::background_fetch` **+166 634 to +2 417 230**, plus
+`Board::intercept_cpu_write` going **0 → +171 936..+1 806 867** (a dispatch that was inlined into
+`Cartridge::cpu_write` and is now a call) with `NesBus::write_internal` −101 312..−1 248 494
+against it. `run_dots` and `background_fetch` contain no VS code and no VS test; what changed under
+them is that `Ppu2C02` grew three fields and `Ppu2C02::write` grew a `bool` test in two of its
+eight arms. **§5.14's rule, measured once more and now on a new dispatch: a board's cost is not its
+own, and the sign is LLVM's choice.**
+
+**2. The 32 bytes are not the cost, and the probe that says so is worth copying.** The lot added
+`Ppu2C02::palette_raw`, a second 32-byte copy of palette RAM, so that a `$2007` read still gives
+back the byte the game wrote while the pixel path reads the remapped one. The obvious suspicion was
+that inserting 32 bytes into that struct moved the hot fields' offsets and cost the addressing
+modes. A build with the array removed measures set total **+36 724 970** against the tip's
++36 862 173 — **the same figure**. *Before* reshaping a struct to chase a layout cost, measure the
+struct's size out of the hypothesis: this one took one build and refuted it.
+
+**3. The `$2002` identifier is three instructions per read, which is a quarter of the figure and
+not enough.** The RC2C05 "returns an identifier in bits 4-0 instead of PPU open bus", implemented
+as `(decay & vs_status_latch_mask) | vs_status_id` — two bytes set at load, `0x1F` and `0x00` on
+every other PPU, so the value is the `decay & 0x1F` the register always answered, with **no branch
+and no model to test**. A build with that expression reverted to the immediate measures set total
+**+26 801 979**, so the two field loads and the `or` are **+10 060 194**, landing exactly where
+they should: `duelito` **+0.083 % → +0.034 %**, `readbuf` +0.077 % → +0.032 %, `vblnmi`
++0.030 % → +0.002 %, and nowhere else. **But the residue is still +0.024 % to +0.051 % on eleven of
+thirteen**, so no shape of that one register would have saved the feature — which is why the lot
+parked it instead of reshaping and re-measuring. A lot that wants the VS. System in `default` has
+to attack finding 1, not this.
+
+**4. `Ppu2C02::read_pattern_planes` is identical to the instruction in all three builds**, which is
+the claim the brief asked to be proved and the one that matters for the design: **96 388 300** on
+`mmc5`, 95 062 640 on `smb3`, 48 633 600 on `m4`, and 221 447 100 to 240 214 760 on the five
+level-2 games, the same numbers in the baseline, the parked build and the un-parked one. The three
+`Cpu6502::step` inlinings hold too — `step`, `branch` and `resolve` one symbol each at
+419 548 544 / 163 582 727 / 61 863 835 on `mmc5` in all three — and `WideExtension::zone_offset` is
+a symbol of its own in none of them. The per-pixel and per-instruction paths really are untouched:
+what the lot pays, it pays in block placement around them.
+
+**The shape that made that possible, and the rule behind it.** A VS PPU differs from a 2C02 by the
+*order* of its 64-colour master palette, and nesdev's "PPU palettes" offers the implementation —
+"Emulator authors may implement the 2C04 variants as a LUT indexing the ordered palette". The lot
+applies that LUT **where palette RAM is written**, a handful of times a frame, beside the
+`palette_marked` shadow AMD-050 already maintains there "here and not per pixel"; palette RAM
+became three arrays (`palette_raw` what the game wrote, `palette` what the chip shows,
+`palette_marked` that plus the opacity bit) and **every output of the core already resolved the
+middle one**, so no consumer changed and `snapshot_palette` was not touched. **A per-pixel
+transformation of palette data belongs on the palette write, not on the pixel**: the ratio is 32
+bytes a frame against 61 440.
+
 ### 5.15 Lot MF-CART: the limit on new boards, lifted — and the new limit, measured
 
 For nine measurements of MF-6c and two of MF-CART, **every new board cost `mmc5` a whole number of
@@ -1391,6 +1462,11 @@ nothing is dead code LLVM could prune). Against the shipped tree:
 
 The twelve MF-UNL lots and MF-VS can therefore plan on **one shared enum variant per board, with
 no limit they will reach**, and should not add a `Board` discriminant without measuring it.
+
+> **MF-VS did exactly that and was charged anyway — by the PPU, not the cartridge layer.** §5.16
+> has its figures and the two probes that attributed them; the advice above still holds for the
+> cartridge layer and says nothing about a lot that also adds fields and dispatch arms to
+> `Ppu2C02`, which is what the VS. System needs and what parked its feature.
 
 **4. The remaining quantum is `push_expansion_audio`, and MF-6a3's figure reproduces to the
 instruction.** Both `Board`-discriminant probes move that function by **+8 934 160** on `mmc5` —
