@@ -163,6 +163,8 @@ pub struct JyCompany {
 }
 
 impl JyCompany {
+    /// 1 KiB, the unit of a CHR window and of a ROM nametable.
+    const CHR_BANK_SIZE: usize = 0x0400;
     /// 8 KiB, the unit of a PRG window.
     const PRG_BANK_SIZE: usize = 0x2000;
 
@@ -302,6 +304,63 @@ impl JyCompany {
             }
     }
 
+    /// What [`Mapper::nametable_page`] answers for logical table `table`.
+    ///
+    /// The page gives the four `$B00x` registers two jobs and a jumper that cancels both:
+    ///
+    /// * **Extended Mirroring** (`$D001` bit 3): "Enabled, ignore MM bits, use $B000-$B003
+    ///   bit 0" — one CIRAM bank per table, which is §4.5 of the inventory's *cheap* level.
+    /// * **ROM nametables** (`$D000` bit 5): the table comes from a 1 KiB CHR bank instead, for
+    ///   all four tables when `$D000` bit 6 is set and otherwise for the ones whose `$B00x`
+    ///   bit 7 **differs** from `$D002` bit 7. That is `SERVED_BY_CARTRIDGE`, the dear level, and
+    ///   [`JyCompany::read_nametable`] is the body.
+    /// * **mapper 90's jumper**, which "inhibits … ROM nametables and Extended Mirroring that
+    ///   would otherwise be enabled via register": both, so the four registers "have no
+    ///   function" and the layout is `$D001`'s MM bits alone.
+    ///
+    /// **ROM nametables are tested before Extended Mirroring**, and the page's own last line of
+    /// the `$B00x` section is why: "enabling ROM nametables via $D005 bit 5 and all $B00x
+    /// registers having bit 7 match $D002 bit 7 effectively duplicates the functionality of
+    /// Extended Mirroring". With bit 5 set and bit 6 clear the per-table decode *already*
+    /// contains Extended Mirroring's own answer — `$B00x` bit 0 as the CIRAM bank — so the two
+    /// orders agree wherever both bits are set and bit 6 is clear, and where bit 6 is set the
+    /// page's "enabled globally for all nametables" leaves nothing to choose. This is a
+    /// derivation and not a guess, which is why it is not a Q ticket.
+    fn nametable_page_of(&self, table: usize) -> i32 {
+        if self.jumper_inhibits_nametables {
+            return super::super::Cartridge::FOLLOW_MIRRORING;
+        }
+
+        if self.rom_nametables {
+            if self.rom_nametables_all {
+                return super::super::Cartridge::SERVED_BY_CARTRIDGE;
+            }
+
+            // "$B000 bit 0: Select 1 KiB CIRAM bank … if $B000 bit 7 **matches** $D002 bit 7"
+            // and the CHR bank "if $B000 bit 7 **differs** from $D002 bit 7".
+            if (self.nametable_low[table] & 0x80 != 0) != self.nametable_select_invert {
+                return super::super::Cartridge::SERVED_BY_CARTRIDGE;
+            }
+
+            return i32::from(self.nametable_low[table] & 0x01);
+        }
+
+        if self.extended_mirroring {
+            return i32::from(self.nametable_low[table] & 0x01);
+        }
+
+        super::super::Cartridge::FOLLOW_MIRRORING
+    }
+
+    /// Recomputes the four-entry cache [`Mapper::nametable_page`] reads.
+    ///
+    /// A field and not a `match`, for the reason `Mmc3Board::nametable_pages` gives: that dispatch
+    /// is consulted once per nametable fetch. Derived, so it is **not** in the save-state block
+    /// and `load_registers` recomputes it — MF-5a step 3's `level` lesson.
+    fn refresh_nametable_pages(&mut self) {
+        self.nametable_pages = std::array::from_fn(|table| self.nametable_page_of(table));
+    }
+
     fn update_banks(&mut self) {
         match self.prg_mode & 0x03 {
             // 32 KiB: "$8003: Select 32 KiB PRG-ROM bank at CPU $8000-$FFFF". The register's
@@ -364,6 +423,8 @@ impl JyCompany {
                 }
             }
         }
+
+        self.refresh_nametable_pages();
     }
 
     /// `$5800`-`$5803`: the multiplier's two operands, the accumulator and the test register.
@@ -669,6 +730,8 @@ impl Mapper for JyCompany {
         self.multiplier = reader.read_u8()?;
         self.accumulator = reader.read_u8()?;
         self.test_register = reader.read_u8()?;
+        // Derived, and therefore not in the block: MF-5a step 3's `level` lesson.
+        self.refresh_nametable_pages();
         Ok(())
     }
 
@@ -836,6 +899,29 @@ impl Mapper for JyCompany {
 
     fn nametable_page(&self, table: i32) -> i32 {
         self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
+    }
+
+    /// A nametable byte out of CHR-ROM: "$B000/$B004 (LSB/MSB): Select 1 KiB CHR bank at PPU
+    /// $2000-$23FF", and the three others the same way.
+    ///
+    /// The bank is the **whole sixteen bits** of the register pair, bit 7 of the LSB included —
+    /// the page gives that bit the ROM/CIRAM select *and* leaves it in the bank number, and says
+    /// nothing about masking the pair to the outer bank the way it does for `$900x`/`$A00x`.
+    /// Mesen 2 reads it the same way.
+    ///
+    /// **This is the body Q-123 is about, and it costs nothing here**: it sits inside the
+    /// `IrqBoard::read_nametable` forward mapper 68 already pays for, so `Board::read_nametable`
+    /// does not grow an arm. MF-UNL-4 step 1 measured `Ppu2C02::read_nametable_inner` at **80
+    /// instructions with and without a sixth body, identical to the instruction**;
+    /// `rust/docs/PERFORMANCE-HISTORY.md` §5.18 has the figures and the rule for the next lot.
+    ///
+    /// Reached only behind a `SERVED_BY_CARTRIDGE` answer from [`Mapper::nametable_page`], so a
+    /// cartridge of this board with its nametable registers idle never calls it.
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        let table = usize::from(address >> 10) & 3;
+        let bank =
+            usize::from(self.nametable_low[table]) | (usize::from(self.nametable_high[table]) << 8);
+        memory.read_chr_direct(bank * Self::CHR_BANK_SIZE + (usize::from(address) & 0x03FF))
     }
 
     /// Writes CHR-RAM, gated by `$D002` bit 6.

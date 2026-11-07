@@ -103,7 +103,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
   `on_ppu_address_bus`, `irq_asserted`, and `ppu_irq_horizon` answering `None`.
 - [x] **4/9 — the MMC4-like CHR latch.** $D003 bit 7, the two latches, the four 4 KiB registers
   they pick between, and `advance_chr_latch` for the tile emitter.
-- [ ] **5/9 — the nametables, the jumper and the $6000-$7FFF window.** Extended Mirroring
+- [x] **5/9 — the nametables, the jumper and the $6000-$7FFF window.** Extended Mirroring
   ($D001 bit 3), ROM nametables for all ($D000 bits 5 and 6) and for some ($D002 bit 7), 90's
   jumper, 35's 8 KiB of WRAM, and $D000 bit 7's 8 KiB PRG-ROM bank at $6000-$7FFF.
 - [ ] **6/9 — the question tickets, the four sweeps and the clippy configurations.** Q-148 to
@@ -468,4 +468,87 @@ a fetch of the latch tile switches the bank, and the latch is per pattern table)
 `req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board`.
 
 `cargo test --release -p zax-nes`: **941 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 5 — the nametables, and mapper 90's jumper
+
+Four `$B00x` registers, two mechanisms and a jumper that cancels both:
+
+| mechanism | the register | what it answers | §4.5's level |
+| --- | --- | --- | --- |
+| **Extended Mirroring** | `$D001` bit 3 | a CIRAM bank per table, from `$B00x` bit 0 | the **cheap** one: `nametable_page` |
+| **ROM nametables, for all** | `$D000` bits 5 and 6 | `SERVED_BY_CARTRIDGE` for all four | the **dear** one: `read_nametable` |
+| **ROM nametables, selected** | `$D000` bit 5, bit 6 clear, `$D002` bit 7 | per table: ROM when `$B00x` bit 7 **differs** from `$D002` bit 7, and a CIRAM bank from bit 0 otherwise | both at once |
+| **mapper 90's jumper** | the PCB | neither: "their function is supressed" | — |
+
+**This is the only board in the build that reaches both of §4.5's levels from the same four
+registers**, which is why all four numbers are in `nametable_pages_vary`: `Cartridge` re-asks the
+four pages after every CPU write to the cartridge, and on this board a `$B000` or `$D000` write can
+move a table from CIRAM page 0 to a CHR-ROM bank and back.
+
+### The precedence the page does not state, and the derivation that settles it
+
+Nothing says what happens when `$D000` bit 5 and `$D001` bit 3 are **both** set. The page's own
+last line of the `$B00x` section is the answer: "enabling ROM nametables via $D005 bit 5 and all
+$B00x registers having bit 7 match $D002 bit 7 effectively duplicates the functionality of Extended
+Mirroring". With bit 5 set and bit 6 clear the per-table decode *already contains* Extended
+Mirroring's own answer — `$B00x` bit 0 as the CIRAM bank — so the two orders agree there; and where
+bit 6 is also set, "ROM nametables enabled globally for all nametables" leaves nothing to choose.
+ROM nametables are therefore tested first. A derivation and not a guess, so no ticket.
+
+### Q-149: 211 and 35 are 209, and Extended Mirroring is `$D001` bit 3
+
+Mesen 2 has **no decode of `$D001` bit 3 at all**: its `_advancedNtControl` is `$D000` bit 5, and
+it uses that one bit for both ROM nametables and the per-table CIRAM select — then special-cases
+211 as `(_advancedNtControl || MapperID == 211) && MapperID != 90`, so 211 behaves "as though N
+were always set". The page calls that reading its own history: "the mapper was defined when the
+function of register $D001 bit 3 was not known, and is a mere duplicate of INES Mapper 209 **with
+correct emulation**". With the register decoded there is nothing left for the special case to do.
+
+`q_149_jy_asic_mapper_211_is_mapper_209_and_not_n_always_set` is the test, and its first assertion
+is the one that matters: all three of 211, 35 and 209 **power on with their nametable registers
+idle**, where Mesen 2's 211 is already answering a CIRAM bank per table from four registers nobody
+has written.
+
+### Q-152: a write to a ROM nametable
+
+Mesen 2's comment on the mechanism is "This behavior only affects reads, not writes", citing a
+nesdev forum thread: the CIRAM byte behind a ROM nametable is still written and still there. **This
+core cannot express that at one address.** `Mapper::nametable_page` answers once for both
+directions, `SERVED_BY_CARTRIDGE` sends the write to the board, and the board has no access to
+console VRAM. So the write is dropped — `Mapper::write_nametable`'s default, which is why
+`IrqBoard` needs no forward for it — and **Q-152** records the gap with
+`q_152_jy_asic_a_write_to_a_rom_nametable_is_dropped` pinning the behaviour. It is the same kind of
+gap as Q-151's IRQ source 3: a hardware behaviour this core's shape cannot carry, not a reading of
+the page.
+
+### Where the body went, and what it cost
+
+`JyCompany::read_nametable` sits inside the `IrqBoard::read_nametable` forward **mapper 68 already
+pays for**, so `Board::read_nametable` does not grow an arm — the `#[cfg]` on that forward gains
+`board-jy-asic` and nothing else changes. Step 1 measured the alternative: a sixth `Board` arm body
+and a sixth body inside the forward both left `Ppu2C02::read_nametable_inner` at **80 instructions,
+identical to the instruction**, so neither shape costs anything and the cheaper one is free by
+construction. That forward's own doc comment now carries the measurement, for the lot that reads it
+next.
+
+The bank is the **whole sixteen bits** of the `$B00x`/`$B04x` pair, bit 7 of the LSB included: the
+page gives that bit the ROM/CIRAM select *and* leaves it in the bank number, and states no
+outer-bank mask for the nametable pair — its "always masked to the outer bank size" sentence is
+about `$900x`/`$A00x`. Mesen 2 reads it the same way.
+
+### Tests from the page
+
+`q_149_jy_asic_extended_mirroring_is_d001_bit_3`,
+`req_core_100_jy_asic_serves_all_four_nametables_from_chr_rom` (the census's own test: a
+`$2000`-`$2FFF` read returns CHR-ROM and not CIRAM),
+`…_selects_rom_nametables_table_by_table` (the `$D002` bit 7 inversion, both ways round),
+`…_nametable_bank_is_the_whole_register_pair`, `…_mapper_90_inhibits_both_nametable_mechanisms`
+(and that 90 keeps every *other* register of the chip),
+`q_149_jy_asic_mapper_211_is_mapper_209_and_not_n_always_set` and
+`q_152_jy_asic_a_write_to_a_rom_nametable_is_dropped`.
+
+`cargo test --release -p zax-nes`: **948 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

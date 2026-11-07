@@ -2457,7 +2457,7 @@ fn req_core_100_mapper_96_latches_its_chr_page_from_the_ppu_address_bus() {
 // ------------------------------------------- GTROM / Cheapocabra (111)
 
 /// Reads a nametable byte the way the PPU does, through the board when it serves its own.
-#[cfg(feature = "board-111")]
+#[cfg(any(feature = "board-111", feature = "board-jy-asic"))]
 fn nametable(core: &NesCore, address: u16) -> u8 {
     core.cartridge().unwrap().read_nametable(address)
 }
@@ -8706,4 +8706,260 @@ fn req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_boar
     assert_eq!(saved, cartridge.chr_latch_state());
     assert_eq!(4, cartridge.ppu_peek(0x0000, ChrFetch::Background));
     assert_eq!(12, cartridge.ppu_peek(0x1000, ChrFetch::Background));
+}
+
+/// Extended Mirroring, `$D001` bit 3: "Enabled, ignore MM bits, use $B000-$B003 bit 0".
+///
+/// One CIRAM bank per logical table, which is §4.5 of the inventory's *cheap* level — a
+/// `nametable_page` answer and not a `read_nametable` body. Mesen 2 has no decode of this bit at
+/// all and reads `$D000` bit 5 for the same job (Q-149).
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_149_jy_asic_extended_mirroring_is_d001_bit_3() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+
+    // With the bit clear the four tables follow `$D001`'s MM bits, whatever `$B00x` says.
+    for slot in 0u16..4 {
+        core.mapper_write(0xB000 | slot, 0x01);
+    }
+    assert_eq!(
+        [-1, -1, -1, -1],
+        nametable_pages(&core),
+        "MM bits in charge"
+    );
+
+    // With it set, bit 0 of each register is that table's CIRAM bank.
+    core.mapper_write(0xD001, 0x08);
+    assert_eq!([1, 1, 1, 1], nametable_pages(&core));
+    for (slot, bit) in [(0u16, 0u8), (1, 1), (2, 1), (3, 0)] {
+        core.mapper_write(0xB000 | slot, bit);
+    }
+    assert_eq!([0, 1, 1, 0], nametable_pages(&core), "a bank per table");
+
+    // Only bit 0: the other seven are the ROM/CIRAM select and the CHR bank's LSB.
+    core.mapper_write(0xB000, 0xFE);
+    assert_eq!([0, 1, 1, 0], nametable_pages(&core));
+
+    // And back: clearing the bit puts the MM bits back in charge.
+    core.mapper_write(0xD001, 0x00);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+}
+
+/// ROM nametables for **all** four tables: `$D000` bit 5 set and bit 6 set.
+///
+/// "$B000/$B004 (LSB/MSB): Select 1 KiB CHR bank at PPU $2000-$23FF", and the three others the
+/// same way — so a `$2000`-`$2FFF` read returns CHR-ROM and not CIRAM, which is the census's own
+/// test.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_serves_all_four_nametables_from_chr_rom() {
+    // 256 KiB of CHR, so that bank $85 exists rather than wrapping: the page gives bit 7 of the
+    // LSB the ROM/CIRAM select *and* leaves it in the bank number, which the last case needs.
+    let mut core = MapperRom::new(209).prg(64).chr(256).load();
+    core.mapper_write(0xD000, 0x60); // ROM nametables, for all.
+    assert_eq!(
+        [-2, -2, -2, -2],
+        nametable_pages(&core),
+        "SERVED_BY_CARTRIDGE for all four"
+    );
+
+    // Each register pair is a 1 KiB CHR bank, and the fixture fills bank `b` with `b`.
+    for (slot, bank) in [(0u16, 0x05u8), (1, 0x11), (2, 0x20), (3, 0x3F)] {
+        core.mapper_write(0xB000 | slot, bank);
+        core.mapper_write(0xB004 | slot, 0x00);
+    }
+    assert_eq!(
+        [0x05, 0x11, 0x20, 0x3F],
+        [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|address| nametable(&core, address)),
+        "one CHR bank per table"
+    );
+
+    // Within a table, the low ten bits are the offset in that 1 KiB bank.
+    assert_eq!(0x05, nametable(&core, 0x23FF));
+    assert_eq!(0x11, nametable(&core, 0x2401));
+
+    // Bit 7 of the LSB is in the bank number as well as being the select: with bit 6 set the
+    // select is not consulted, so $85 is bank $85 and the fixture's byte for it is $85.
+    core.mapper_write(0xB000, 0x85);
+    assert_eq!(0x85, nametable(&core, 0x2000), "bit 7 is part of the bank");
+}
+
+/// ROM nametables for **selected** tables: `$D000` bit 5 set, bit 6 clear, and `$D002` bit 7
+/// deciding which value of `$B00x` bit 7 means ROM.
+///
+/// "0: $B00x bit 7=0 selects CIRAM, $B00x bit 7=1 selects ROM nametable / 1: $B00x bit 7=1 selects
+/// CIRAM, $B00x bit 7=0 selects ROM nametable" — so the table is ROM exactly when the two bits
+/// **differ**.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_selects_rom_nametables_table_by_table() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x20); // ROM nametables, selected individually.
+
+    // $D002 bit 7 clear: bit 7 set selects ROM, bit 7 clear selects a CIRAM bank from bit 0.
+    for (slot, value) in [(0u16, 0x80u8), (1, 0x00), (2, 0x81), (3, 0x01)] {
+        core.mapper_write(0xB000 | slot, value);
+    }
+    assert_eq!(
+        [-2, 0, -2, 1],
+        nametable_pages(&core),
+        "bit 7 differs = ROM"
+    );
+
+    // $D002 bit 7 set inverts the test, and only that: the CIRAM banks are still bit 0.
+    core.mapper_write(0xD002, 0x80);
+    assert_eq!([0, -2, 1, -2], nametable_pages(&core), "inverted");
+
+    // The two tables that are ROM read their own CHR bank; $B001 is $00 and $B003 is $01.
+    core.mapper_write(0xB005, 0x00);
+    core.mapper_write(0xB007, 0x00);
+    assert_eq!(
+        [0x00, 0x01],
+        [nametable(&core, 0x2400), nametable(&core, 0x2C00)]
+    );
+
+    // "These registers have no function if neither ROM nametables ($D000 bit 5) nor Extended
+    // Mirroring ($D001 bit 3) are enabled."
+    core.mapper_write(0xD000, 0x00);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+}
+
+/// The `$B004`-`$B007` MSBs reach the bank number, which is what makes the ROM nametables able to
+/// address the whole 1 MiB of CHR the chip allows.
+///
+/// Unlike `$900x`/`$A00x`, the page states **no** outer-bank mask for the nametable pair — its
+/// "always masked to the outer bank size" sentence is about the CHR bank registers — so the pair
+/// is the whole sixteen bits. Mesen 2 reads it the same way.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_nametable_bank_is_the_whole_register_pair() {
+    let mut core = MapperRom::new(209).prg(64).chr(640).load();
+    core.mapper_write(0xD000, 0x60);
+
+    // Bank $0105 is past the 256 KiB a `$900x` register could reach on its own.
+    core.mapper_write(0xB000, 0x05);
+    core.mapper_write(0xB004, 0x01);
+    // The fixture fills 1 KiB bank `b` with `b as u8`, so bank $0105 carries $05 — the same byte
+    // as bank $05. What distinguishes them is the *second* half of the bank: $0106 against $06.
+    core.mapper_write(0xB001, 0x06);
+    core.mapper_write(0xB005, 0x01);
+    assert_eq!(
+        [0x05, 0x06],
+        [nametable(&core, 0x2000), nametable(&core, 0x2400)]
+    );
+
+    // With the MSB back to zero the same LSBs name banks $05 and $06, which read the same two
+    // bytes — so this test proves the MSB is *decoded*, and the outer-CHR-bank test proves the
+    // window table can tell the two apart.
+    core.mapper_write(0xB004, 0x00);
+    core.mapper_write(0xB005, 0x00);
+    assert_eq!(
+        [0x05, 0x06],
+        [nametable(&core, 0x2000), nametable(&core, 0x2400)]
+    );
+}
+
+/// Mapper 90's jumper: "inhibits, via jumper, ROM nametables and Extended Mirroring that would
+/// otherwise be enabled via register", and "their function is supressed via a jumper on some PCB
+/// variants that are denoted by iNES Mapper 090".
+///
+/// **Both** mechanisms, so the four `$B00x` registers "have no function" and the layout is
+/// `$D001`'s MM bits whatever any of the three registers says. The other three numbers are the
+/// same board with the jumper uncut.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_mapper_90_inhibits_both_nametable_mechanisms() {
+    let mut m90 = MapperRom::new(90).prg(64).chr(64).load();
+    let mut m209 = MapperRom::new(209).prg(64).chr(64).load();
+
+    for core in [&mut m90, &mut m209] {
+        // Everything on at once: ROM nametables for all, Extended Mirroring, and four registers.
+        core.mapper_write(0xD000, 0x60);
+        core.mapper_write(0xD001, 0x08);
+        for slot in 0u16..4 {
+            core.mapper_write(0xB000 | slot, 0x81);
+        }
+    }
+
+    assert_eq!(
+        [-1, -1, -1, -1],
+        nametable_pages(&m90),
+        "90's jumper inhibits both"
+    );
+    assert_eq!(
+        [-2, -2, -2, -2],
+        nametable_pages(&m209),
+        "and 209's does not"
+    );
+
+    // 90 still has every other register of the chip: the arrangement bits, the banking and the
+    // multiplier. Only the nametable registers are cut.
+    m90.mapper_write(0xD001, 0x01);
+    assert_eq!(Nm::Horizontal, m90.cartridge().unwrap().mirroring());
+    m90.mapper_write(0x5800, 0x0F);
+    m90.mapper_write(0x5801, 0x11);
+    assert_eq!(0xFF, m90.read_memory(0x5800));
+}
+
+/// **Q-149**: 211 is "a mere duplicate of INES Mapper 209 **with correct emulation**", so it is
+/// 209's board bit for bit — and 35 is too.
+///
+/// Mesen 2 special-cases 211 as `(_advancedNtControl || MapperID == 211) && MapperID != 90`, which
+/// is the historical definition the page itself calls a misunderstanding: "the mapper was defined
+/// when the function of register $D001 bit 3 was not known". With the register decoded there is
+/// nothing left for the special case to do, and the page says so.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_149_jy_asic_mapper_211_is_mapper_209_and_not_n_always_set() {
+    let mut m211 = MapperRom::new(211).prg(64).chr(64).load();
+    let mut m35 = MapperRom::new(35).prg(64).chr(64).load();
+    let mut m209 = MapperRom::new(209).prg(64).chr(64).load();
+
+    // Power-on: the nametable registers are idle on all three, where Mesen 2's 211 would already
+    // be answering a CIRAM bank per table from four registers nobody has written.
+    for (number, core) in [(211, &m211), (35, &m35), (209, &m209)] {
+        assert_eq!(
+            [-1, -1, -1, -1],
+            nametable_pages(core),
+            "{number} powers on with its nametable registers idle"
+        );
+    }
+
+    // And the three answer identically once a game asks: Extended Mirroring from $D001 bit 3.
+    for core in [&mut m211, &mut m35, &mut m209] {
+        core.mapper_write(0xD001, 0x08);
+        for (slot, bit) in [(0u16, 1u8), (1, 0), (2, 0), (3, 1)] {
+            core.mapper_write(0xB000 | slot, bit);
+        }
+    }
+    let expected = [1, 0, 0, 1];
+    for (number, core) in [(211, &m211), (35, &m35), (209, &m209)] {
+        assert_eq!(expected, nametable_pages(core), "{number}");
+    }
+}
+
+/// **Q-152**: a write to a nametable the board serves from CHR-ROM is dropped, where the hardware
+/// leaves the CIRAM byte behind it intact.
+///
+/// Mesen 2's own comment on the mechanism is "This behavior only affects reads, not writes", and
+/// the forum thread it cites says the CIRAM is still written and still there. This core cannot
+/// express "read from ROM, write to CIRAM" at one address: `Mapper::nametable_page` answers once
+/// for both directions, and `SERVED_BY_CARTRIDGE` sends the write to the board, which has no
+/// access to console VRAM. So the write is dropped and the ticket records it.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_152_jy_asic_a_write_to_a_rom_nametable_is_dropped() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x60); // ROM nametables, for all four.
+    core.mapper_write(0xB000, 0x05);
+    core.mapper_write(0xB004, 0x00);
+    assert_eq!(0x05, nametable(&core, 0x2000));
+
+    core.cartridge_mut().unwrap().write_nametable(0x2000, 0x5A);
+    assert_eq!(0x05, nametable(&core, 0x2000), "CHR-ROM ignores the write");
+
+    // And with the mechanism off, the console's own VRAM is back in charge: the page is
+    // FOLLOW_MIRRORING and the PPU never asks the board at all.
+    core.mapper_write(0xD000, 0x00);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
 }

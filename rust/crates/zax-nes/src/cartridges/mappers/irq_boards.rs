@@ -364,10 +364,11 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.nametable_page(table))
     }
 
-    /// Forwarded for mapper 68 alone, and **only behind `board-68-chr-nametables`**: this is the
-    /// third distinct body of the dispatch Q-123 measured a cap of two on, and the owner's rule of
-    /// 2026-11-06 is what puts it here ("A costly *mechanism* of a board … is implemented too,
-    /// behind its own feature if it costs more than the board itself").
+    /// Forwarded for mapper 68 behind `board-68-chr-nametables` and for the J.Y. Company ASIC
+    /// behind `board-jy-asic`: this is the dispatch Q-123 measured a cap of two bodies on, and the
+    /// owner's rule of 2026-11-06 is what put the first of the two here ("A costly *mechanism* of
+    /// a board … is implemented too, behind its own feature if it costs more than the board
+    /// itself").
     ///
     /// **MF-6c step 4 re-measured Q-123's ceiling and did not find it.** MF-5a built five shapes
     /// for a third arm on a tree seven lots older and the best of them took
@@ -376,10 +377,19 @@ impl Mapper for IrqBoard {
     /// **+17 007 in total** with `readbuf` — the CNROM whose whole run is fetches — **−78 628**.
     /// The cap is re-stated rather than quoted, which is what the step was asked to do.
     ///
+    /// **MF-UNL-4 step 1 asked a third time, and this is where the answer lands.** `Board`'s own
+    /// dispatch already had five distinct bodies; a sixth was measured in two shapes — as its own
+    /// `Board` arm and as one more body *inside this forward* — and `read_nametable_inner` came out
+    /// **80 instructions in all three binaries, identical to the instruction**, with PR-1's worst
+    /// ROM at +0.002 % and all five level-2 `core` figures at +0. So the J.Y. ASIC's nametables
+    /// cost `Board`'s dispatches nothing at all: the arm mapper 68 bought is the one they use, and
+    /// the rule for the next lot is to put its body inside a shared variant's existing forward.
+    /// `rust/docs/PERFORMANCE-HISTORY.md` §5.18 has the figures.
+    ///
     /// **Behaviour-neutral for the other boards of this variant**: none of them overrides it, and
     /// none answers `SERVED_BY_CARTRIDGE` from `nametable_page`, so this body is never reached for
     /// them.
-    #[cfg(feature = "board-68-chr-nametables")]
+    #[cfg(any(feature = "board-68-chr-nametables", feature = "board-jy-asic"))]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
     }
