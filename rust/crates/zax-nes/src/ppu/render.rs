@@ -62,8 +62,11 @@ impl Ppu2C02 {
         self.oam_eval_latch = 0;
         self.eval_sprite = 0;
         self.eval_byte = 0;
-        self.secondary_oam_addr = 0;
-        self.sprite_in_range = false;
+        #[cfg(feature = "ppu-exact-sprite-eval")]
+        {
+            self.secondary_oam_addr = 0;
+            self.sprite_in_range = false;
+        }
         self.eval_found = 0;
         self.overflow_copy = 0;
         self.eval_finished = false;
@@ -467,6 +470,89 @@ impl Ppu2C02 {
 
     // ---------------------------------------------------------------- sprites
 
+    /// Sprite evaluation for the *next* line, **the default build's shape**: dots 1 to 64 clear
+    /// the secondary OAM, dots 65 to 256 walk the 64 sprites four bytes at a time, with the range
+    /// test taken on the byte whose index is 0 (nesdev, "PPU sprite evaluation"). The overflow
+    /// flag follows the hardware, byte-increment bug included.
+    ///
+    /// This is `11407930`'s body to the instruction. The exact pipeline — the hardware's byte
+    /// counter in two independently clocked halves, which wins three `AccuracyCoin` rows and
+    /// measures +0.041 % to +0.133 % on PR-1's thirteen and +0.057 % to +0.127 % on all ten
+    /// level-2 figures — is the `ppu-exact-sprite-eval` arm below. See `MF-4e.md` step 4 and
+    /// `docs/review/BOARD-FEATURES.md`.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    fn run_sprite_evaluation(&mut self, dot: i32) {
+        if dot == 65 {
+            self.eval_sprite = i32::from(self.oam_address >> 2);
+            self.eval_byte = i32::from(self.oam_address & 0x03);
+            self.eval_found = 0;
+            self.overflow_copy = 0;
+            self.eval_finished = false;
+            self.sprite_zero_found = false;
+        }
+
+        if (dot & 1) == 1 {
+            // Odd dots read primary OAM.
+            #[allow(clippy::cast_sign_loss)] // Masked to 0..=255.
+            let index = (((self.eval_sprite * 4) + self.eval_byte) & 0xFF) as usize;
+            self.oam_eval_latch = self.oam[index];
+            return;
+        }
+
+        if self.eval_finished {
+            return;
+        }
+
+        if self.eval_found < SPRITES_PER_LINE_I32 {
+            #[allow(clippy::cast_sign_loss)] // Both are small and non-negative.
+            let slot = ((self.eval_found * 4) + self.eval_byte) as usize;
+            self.secondary_oam[slot] = self.oam_eval_latch;
+            if self.eval_byte == 0 {
+                if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
+                    if self.eval_sprite == 0 {
+                        self.sprite_zero_found = true;
+                    }
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 0..64.
+                    if let Some(source) = self.secondary_source.get_mut(self.eval_found as usize) {
+                        *source = self.eval_sprite as u8;
+                    }
+
+                    self.eval_byte = 1;
+                } else {
+                    self.next_sprite();
+                }
+            } else {
+                self.eval_byte += 1;
+                if self.eval_byte == 4 {
+                    self.eval_byte = 0;
+                    self.eval_found += 1;
+                    self.next_sprite();
+                }
+            }
+
+            return;
+        }
+
+        // Eight sprites found: the ninth in-range sprite raises the overflow flag, and the
+        // hardware then increments both the sprite and the byte index, which is the famous
+        // false-positive bug.
+        if self.overflow_copy > 0 {
+            self.overflow_copy -= 1;
+            self.eval_byte += 1;
+            if self.eval_byte == 4 {
+                self.eval_byte = 0;
+                self.next_sprite();
+            }
+        } else if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
+            self.sprite_overflow = true;
+            self.overflow_copy = 3;
+            self.eval_byte = 1;
+        } else {
+            self.eval_byte = (self.eval_byte + 1) & 0x03;
+            self.next_sprite();
+        }
+    }
+
     /// Sprite evaluation for the *next* line, dot by dot: dots 1 to 64 clear the secondary OAM,
     /// dots 65 to 256 scan the 64 sprites (nesdev, "PPU sprite evaluation"), odd dots reading one
     /// byte of primary OAM into the copy buffer and even dots deciding what to do with it.
@@ -497,6 +583,7 @@ impl Ppu2C02 {
     ///
     /// `third_party/mesen2`'s `NesPpu<T>::ProcessSpriteEvaluation` is the shape this follows, and
     /// the comments it carries from the nesdev page are reproduced at the branches they belong to.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     fn run_sprite_evaluation(&mut self, dot: i32) {
         if (dot & 1) == 1 {
             if dot == 65 {
@@ -612,6 +699,7 @@ impl Ppu2C02 {
     /// Out of line on purpose. It runs on no dot at all of a line carrying eight sprites or fewer,
     /// which is almost every line of almost every game, so inlining it would only lengthen the
     /// body that every dot of every visible line does pay for (MF-3b rule 4).
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     #[inline(never)]
     fn evaluate_with_a_full_secondary_oam(&mut self) {
         // "As seen above, a side effect of the OAM write disable signal is to turn writes to the
@@ -651,6 +739,7 @@ impl Ppu2C02 {
     }
 
     /// A write to a full secondary OAM is a read from it, into the copy buffer.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     fn read_back_secondary_oam(&mut self) {
         #[allow(clippy::cast_sign_loss)] // Masked to 0..32.
         let slot = (self.secondary_oam_addr & 0x1F) as usize;
@@ -661,10 +750,22 @@ impl Ppu2C02 {
     /// sprite not on this line costing one even dot and nothing more. The copy ends when the
     /// sprite half wraps back to 0, which is how an evaluation that started misaligned stops
     /// part-way through a sprite.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     fn next_sprite(&mut self) {
         self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
         self.eval_byte = 0;
         if self.eval_sprite == 0 {
+            self.eval_finished = true;
+        }
+    }
+
+    /// `11407930`'s own body: the byte index is the caller's business here, so this only moves the
+    /// sprite index and stops the copy when it runs off the end of OAM.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    fn next_sprite(&mut self) {
+        self.eval_sprite += 1;
+        if self.eval_sprite >= 64 {
+            self.eval_sprite = 0;
             self.eval_finished = true;
         }
     }

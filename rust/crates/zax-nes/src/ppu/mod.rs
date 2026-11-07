@@ -307,12 +307,14 @@ pub struct Ppu2C02 {
     /// unconditionally and nothing outside that window reads it. A state is taken between frames,
     /// so there is no such window to be in the middle of, and adding a field would have meant a
     /// new format version for a value that is always 0 where a block can be written.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     secondary_oam_addr: i32,
     /// Whether the evaluation is in the middle of copying a sprite it has judged in range. It is
     /// **latched**, not recomputed per byte: the range test runs on every even dot, but once it
     /// has said yes the four bytes are copied without asking again.
     ///
     /// Not in the savestate, for the reason given on `secondary_oam_addr`.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     sprite_in_range: bool,
     eval_found: i32,
     overflow_copy: i32,
@@ -444,7 +446,9 @@ impl Ppu2C02 {
             oam_eval_latch: 0,
             eval_sprite: 0,
             eval_byte: 0,
+            #[cfg(feature = "ppu-exact-sprite-eval")]
             secondary_oam_addr: 0,
+            #[cfg(feature = "ppu-exact-sprite-eval")]
             sprite_in_range: false,
             eval_found: 0,
             overflow_copy: 0,
@@ -1446,6 +1450,11 @@ impl Ppu2C02 {
     ///
     /// [`Self::peek`] keeps answering `oam[oam_address]`: it is the side-effect-free host accessor
     /// of REQ-CORE-081 and must report what the program wrote, not what the chip is clocking.
+    ///
+    /// Behind `ppu-exact-sprite-eval` with the evaluation it reads from: the copy buffer only
+    /// carries the right byte per dot if the byte counter is the hardware's. The default build
+    /// keeps `11407930`'s answer, below.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
     fn read_oam(&self) -> u8 {
         if self.rendering_enabled() && self.scanline < VISIBLE_SCANLINES {
             if (1..=64).contains(&self.dot) {
@@ -1462,6 +1471,25 @@ impl Ppu2C02 {
             #[allow(clippy::cast_sign_loss)] // Clamped to 0..=63.
             let index = (((since / 8) * 4) + (since % 8).min(3)) as usize;
             return self.secondary_oam[index];
+        }
+
+        self.oam[usize::from(self.oam_address)]
+    }
+
+    /// Reads OAM through `$2004`, **the default build's answer** — `11407930`'s body to the
+    /// instruction.
+    ///
+    /// Bits 2 to 4 of a sprite's attribute byte do not exist in the chip, so the masked value is
+    /// what was stored (see `write_oam`). During the 64 dots in which the secondary OAM is cleared,
+    /// reads return `$FF` (nesdev, "PPU sprite evaluation"); the rest of the time they answer from
+    /// the OAM address, which is the approximation the exact arm above replaces.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    fn read_oam(&self) -> u8 {
+        if self.rendering_enabled()
+            && self.scanline < VISIBLE_SCANLINES
+            && (1..=64).contains(&self.dot)
+        {
+            return 0xFF;
         }
 
         self.oam[usize::from(self.oam_address)]

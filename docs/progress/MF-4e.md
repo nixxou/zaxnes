@@ -49,7 +49,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 * [x] **2/7** — the `$2007` read during rendering: Q-125's rule **and** AMD-021 R2-005, the
   inverted unit test flipped, the owner's widescreen state whole.
 * [x] **3/7** — sprite evaluation per dot and the shift-register pipelines; each row gained named.
-* [ ] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
+* [x] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
   so. `Ppu2C02::read`'s +11 instructions while the function is open.
 * [ ] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
 * [ ] **6/7** — the check: fmt, clippy, the suites, the ignored suite, the campaign row by row
@@ -346,3 +346,132 @@ because it has neither. Replacing it means eight counters and sixteen shift regi
 hottest code in the program (step 1: `run_dots` is 57 % to 62 % of the core). That is a lot of its
 own, with its own feature gate and its own measurement, and it is named here rather than
 half-started.
+
+## Step 4 — the pipeline is above the tolerance on both runs, so it is behind its own feature
+
+Four clean `git archive` builds, each in a fresh directory with its own target folder, deleted as
+soon as its binary was copied out: `4e-0-11407930` (the baseline), `4e-s2b` (step 2 alone),
+`4e-1-s3` (steps 2 and 3, the pipeline in `default`) and `4e-2-gated` (the shipped tree, the
+pipeline out of `default`).
+
+### Step 2 alone is inside the tolerance, so it is in every build
+
+`4e-s2b` against the baseline, PR-1's thirteen:
+
+| | figure |
+| --- | --- |
+| the eleven ROMs whose behaviour does not move | **+0.000 % to +0.005 %**, worst `readbuf` +0.002 %; `m4` is −0.005 % |
+| `duelito` | −4.022 % — **behaviour** |
+| `smb3` | +0.241 % — **behaviour** |
+
+Duelito and Super Mario Bros. 3 are two of the three ROMs golden-core says changed picture, and
+their symbol diffs say the same thing a second way: Duelito's move is −72 M on
+`ConversionEngine::convert`, −66 M on `DrawListBuilder::build` and −66 M on
+`Segmenter::grow_background` — the 3D engine doing *less* work because the frame it converts is
+different. They are read out of the performance question, as MF-4d-fix step 5 read the same ROMs
+out of it.
+
+So the `$2007` rule, which Q-125 and AMD-021 R2-005 both require, **stays in `default`**.
+
+### Step 3's pipeline is above it on both runs
+
+`4e-1-s3` against the baseline:
+
+| | figure |
+| --- | --- |
+| PR-1's thirteen | **above on nine of the eleven**: `metroid` **+0.133 %**, `z2` +0.107 %, `mm2` +0.083 %, `smb1` +0.083 %, `m0` +0.068 %, `m1` +0.056 %, `readbuf` +0.056 %, `mmc5` +0.045 %, `m4` +0.041 %, with `vblnmi` +0.008 % and `oamstr` +0.001 % inside |
+| level 2 | **all ten above**: `zelda2/core` **+0.127 %**, `metroid/core` +0.119 %, `smb1/core` +0.108 %, `mm2/core` +0.107 %, `smb3/core` +0.086 %, and the five `total` figures +0.057 % to +0.123 % |
+
+Against a tolerance of +0.02 % per ROM on both runs, that is nine of eleven and ten of ten over.
+The owner's rule says what happens next and the step did it: the pipeline is behind
+**`ppu-exact-sprite-eval`**, out of `default`, and **not dropped** — one flag gives it. It is
+deliberately *not* in `parked-boards`, which is the umbrella for left-out boards.
+
+### Gated off it costs nothing, which is the measurement that matters most
+
+`4e-2-gated` against `4e-s2b` — the same tree with the feature out of `default`, against step 2
+alone:
+
+* PR-1's thirteen: set total **−91 994 (−0.000 %)**, worst ROM **+0.001 %**, every delta inside the
+  ±50 000 per-ROM noise floor ZR-1 and ZR-2 measured for this instrument.
+* And **symbol by symbol it is the baseline exactly**: `run_sprite_evaluation`, `background_fetch`,
+  `run_dots`, `paint_sprite` and `rebuild_sprite_line` are identical to the instruction on `mmc5`,
+  `smb3`, `m4`, `vblnmi` and `readbuf`.
+
+`4e-2-gated` against the **baseline**, which is what a user of the shipped build gets:
+
+* PR-1's thirteen: **+0.000 % to +0.006 %** on the eleven (worst `z2` +0.006 %), with `duelito`
+  −4.022 % and `smb3` +0.241 % the two behavioural ones.
+* Level 2: every `core` figure **+0.000 % to +0.002 %**, inside the tolerance. One `total` figure is
+  marginally outside it, `smb1/total` **+0.021 %**, and the stage table says exactly what it is:
+
+| `smb1` stage | baseline | gated default | delta |
+| --- | ---: | ---: | --- |
+| `ppu` (`run_dots`) | 6 592 688 325 | 6 592 688 325 | **+0, identical** |
+| `apu` | 1 933 200 654 | 1 933 200 654 | **+0, identical** |
+| `draw_list` | 127 208 122 | 127 208 122 | **+0, identical** |
+| `core` | 11 515 129 187 | 11 515 171 382 | +42 195, +0.000 % |
+| `convert` | 1 192 633 199 | 1 195 164 146 | +2 530 947 |
+| `lua_hooks` | 900 873 128 | 903 407 063 | +2 533 935 |
+
+**The emulated core is identical and the whole of the move is in the 3D conversion and the Lua
+frame hooks**, which is the same signature as Duelito's on the other run: step 2's required rule
+moves a captured row, so the conversion converts a different frame. It is behaviour, not code cost,
+and `ppu` being equal to the instruction is the proof that the per-dot path is untouched.
+
+### The post-LTO checks the brief names, one by one
+
+Exclusive counts from the callgrind annotations of all three clean builds:
+
+| | baseline | gated default | feature on |
+| --- | ---: | ---: | ---: |
+| **`Cpu6502::step`** (`mmc5`) | 419 548 544 | **419 548 544** | **419 548 544** |
+| **`Cpu6502::branch`** | 163 582 727 | **163 582 727** | **163 582 727** |
+| **`Cpu6502::resolve`** | 61 863 835 | **61 863 835** | **61 863 835** |
+| **`Ppu2C02::read_pattern_planes`** (`mmc5`) | 96 388 300 | **96 388 300** | **96 388 300** |
+| `Ppu2C02::read_pattern_planes` (`readbuf`) | 88 146 700 | **88 146 700** | **88 146 700** |
+| `Ppu2C02::run_dots` (`mmc5`) | 3 104 067 813 | **3 104 067 813** | 3 104 138 908 |
+
+1. **The three `Cpu6502::step` inlinings hold, 0 / 0 / 0.** `step`, `branch` and `resolve` are one
+   symbol each in every build and identical to the instruction on `mmc5`, `smb3`, `m4`, `vblnmi`
+   and `readbuf`.
+2. **`WideExtension::zone_offset` is not dearer**: it is not a symbol of its own in any of the three
+   builds — inlined into the fetch path, as every earlier lot found it — so no new symbol appeared
+   and nothing moved.
+3. **`Ppu2C02::read_pattern_planes` is identical to the instruction in all three**, which is MF-VS's
+   own answer for the same symbol at the same figure. The per-pixel path really is untouched.
+4. With the feature **on**, exactly two symbols move: `run_sprite_evaluation` (+2 529 920 on
+   `mmc5`, +2 967 616 on `smb3`, +1 247 352 on `m4`) and `background_fetch` (+2 417 230, +2 359 872,
+   +1 220 906). The second is a **layout effect and not a line of work** — this lot does not touch
+   `background_fetch` — which is MF-3b rule 4 again: a longer callee re-lays the block that calls
+   it. With the feature **off** both are identical to the baseline.
+
+### `Ppu2C02::read`'s eleven instructions: not owed, and step 2 pays a little back
+
+Q-125 asked this lot to try to win back the +11 instructions per register read that MF-4d-fix gave
+up. **It was already won**, by MF-5a's `#[inline(never)]` on `Ppu2C02::read_data`, whose doc comment
+prices the remainder at one `movq` per register read. Re-measured here rather than re-derived:
+
+| `Ppu2C02::read`, exclusive | baseline | gated default |
+| --- | ---: | ---: |
+| `mmc5` | 287 286 413 | **287 286 413 — identical** |
+| `vblnmi` | 23 513 461 | **23 513 461 — identical** |
+| `readbuf` | 196 735 568 | **196 369 553 — −366 015** |
+
+So the function is not dearer anywhere and is **cheaper on the `$2007`-heaviest ROM of the set**.
+The reason is step 2, read as the mirror of MF-4d-fix step 5: giving the `$2007` arm back a
+`fetching()` branch gives it a body of its own again, which is the layout MF-4d step 6 had bought by
+accident and the back-out returned. This lot gets a piece of it back **as a by-product of a rule it
+had to ship anyway**, which is the honest version of "the +11 are won".
+
+### The two configurations, and their tallies
+
+| build | `AccuracyCoin` | suite |
+| --- | --- | --- |
+| `default` | **129 / 147** | 926 / 0 / 8 |
+| `--features parked-boards` | 129 / 147 | 978 / 0 / 8 |
+| `--features ppu-exact-sprite-eval` | **132 / 147** | 926 / 0 / 8 |
+
+The guard test carries both floors (`cfg!(feature = …)`, 129 or 132) and names step 3's three rows
+only in the configuration that ships them, so neither build can silently lose a row. It is renamed
+`req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green`.

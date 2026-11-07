@@ -501,7 +501,7 @@ fn accuracy_coin() -> Option<(usize, serde_json::Map<String, serde_json::Value>)
 /// The score is asserted as a floor and the eight rows by name, so that a lot which fixes more
 /// does not have to edit this test while one that breaks any of these does.
 #[test]
-fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
+fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green() {
     let Some((passed, tests)) = accuracy_coin() else {
         println!(
             "skipped: set {} to a copy of assets-free/test-roms/ to run this",
@@ -522,9 +522,19 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
     // back on `v`, and it no longer reaches the captured row, which is where the collision
     // actually was. The row is in the named list below again and R2-005's own ignored test
     // (`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`) passes beside it.
+    // **Two floors, because the lot ships two configurations.** Step 2's `$2007` rule is in every
+    // build and is worth the 129; step 3's exact sprite-evaluation pipeline is behind
+    // `ppu-exact-sprite-eval`, out of `default` because it measures +0.041 % to +0.133 % on PR-1's
+    // thirteen and above the tolerance on all ten level-2 figures, and it is worth three more:
+    // `Address $2004 behavior`, `Arbitrary Sprite zero` and `Misaligned OAM behavior`.
+    let floor = if cfg!(feature = "ppu-exact-sprite-eval") {
+        132
+    } else {
+        129
+    };
     assert!(
-        passed >= 129,
-        "AccuracyCoin scored {passed}/147, which is under lot MF-4e's 129"
+        passed >= floor,
+        "AccuracyCoin scored {passed}/147, which is under lot MF-4e's {floor}"
     );
 
     // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
@@ -572,6 +582,22 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
     ] {
         let row = tests[name].as_str().unwrap();
         assert!(row.starts_with("pass"), "{name}: {row}");
+    }
+
+    // MF-4e step 3's three, named only in the configuration that ships them.
+    if cfg!(feature = "ppu-exact-sprite-eval") {
+        for name in [
+            // A `$2004` read during rendering answers from the OAM copy buffer, and from the
+            // secondary OAM on the sprite-fetch dots.
+            "PPU Misc. / Address $2004 behavior",
+            // Sprite zero is whatever dot 66 looks at, not OAM index 0.
+            "Sprite Evaluation / Arbitrary Sprite zero",
+            // The range test on every even dot, and the conditional realignment after a slot.
+            "Sprite Evaluation / Misaligned OAM behavior",
+        ] {
+            let row = tests[name].as_str().unwrap();
+            assert!(row.starts_with("pass"), "{name}: {row}");
+        }
     }
 }
 

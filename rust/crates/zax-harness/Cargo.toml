@@ -26,6 +26,13 @@ wgpu = ["zax-render/wgpu"]
 # build whose core has no VS layer wants. `docs/review/BOARD-FEATURES.md` has the switch.
 vs-system = ["zax-nes/board-vs-system"]
 
+# The core's exact sprite-evaluation pipeline (lot MF-4e step 3), out of `default` because it is
+# above the owner's tolerance on both runs. A pass-through for the same reason `vs-system` is one:
+# Cargo cannot see a dependency's feature from a test, and
+# `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green` has to know which
+# configuration it is scoring — 129 / 147 without it, 132 / 147 with it.
+ppu-exact-sprite-eval = ["zax-nes/ppu-exact-sprite-eval"]
+
 [dependencies]
 serde_json.workspace = true
 sha2 = "0.10"

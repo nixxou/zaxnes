@@ -229,6 +229,26 @@ board-taito-x1 = ["board-small-boards"]
 # VS. System on.
 parked-boards = ["board-vs-system"]
 
+# **Not a board: the PPU's exact sprite-evaluation pipeline** (lot MF-4e step 3). The owner's rule
+# is written for boards but the reason behind it is the figure, so it is applied here unchanged.
+#
+# With this on, the sprite evaluation is the hardware's byte counter in two independently clocked
+# halves against a second counter over the secondary OAM, and a `$2004` read during rendering
+# answers from the OAM copy buffer instead of from `oam[oam_address]`. It wins three
+# `AccuracyCoin` rows — `Address $2004 behavior`, `Arbitrary Sprite zero` and `Misaligned OAM
+# behavior`, 129 → 132 / 147 — and it is **above the tolerance on both runs**: PR-1's thirteen are
+# +0.041 % to +0.133 % on the eleven ROMs whose behaviour does not move (worst `metroid` +0.133 %),
+# and all ten level-2 figures are above at +0.057 % to +0.127 %. So it is out of `default`, and
+# **not dropped**: one flag gives the exact pipeline.
+#
+# It is deliberately **not** in `parked-boards`, which is the umbrella for left-out *boards*; a
+# build that wants everything asks for both. `docs/review/BOARD-FEATURES.md` has the row and the
+# command.
+#
+# The `$2007`-during-rendering rule of step 2 is **not** behind this: it is required by Q-125 and
+# AMD-021 R2-005, and it measures +0.000 % to +0.005 % on the eleven, so it is in every build.
+ppu-exact-sprite-eval = []
+
 [dev-dependencies]
 sha2 = "0.10"
 zax-goldens = { path = "../zax-goldens" }
