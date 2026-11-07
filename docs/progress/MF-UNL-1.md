@@ -31,7 +31,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   save-state round trip and the reset sweep in every configuration the lot adds; a save-state
   round trip per board with the mapper state dirtied first; `cargo fmt --check` and clippy
   `-D warnings` in the four configurations.
-- [ ] **5/8 — the documentation.** Three rows in `docs/review/BOARD-FEATURES.md`, the Cargo
+- [x] **5/8 — the documentation.** Three rows in `docs/review/BOARD-FEATURES.md`, the Cargo
   feature comments, and Q-140.
 - [ ] **6/8 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `481f683d`, every compared commit built from `git archive` in a fresh directory, and the
@@ -170,6 +170,26 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 5 — the documentation
+
+Three rows in `docs/review/BOARD-FEATURES.md`, between `board-vs-system` and the `parked-boards`
+umbrella, with the cost columns filled by step 6; the `--no-default-features` and
+`parked-boards` test counts in that file brought to this lot's (783 / 0 / 8 and 934 / 0 / 8
+against 881 by default); the three features added to its "how to turn a board off" command; and
+one Cargo feature comment each in `rust/crates/zax-nes/Cargo.toml`.
+
+Two question tickets, both in `spec/changes/` and both referenced from the code:
+
+* **Q-140** — mapper 173 and bus conflicts. The census gives the number `bus`; the page gives the
+  board no such line and its *撲克精靈* paragraph is an argument that the board has **none**.
+  Provisional choice: no bus conflicts, which is also Mesen 2's reading. The ticket records that
+  the choice is observationally cheap either way on this family — no board of the six uses the
+  value written at $8000-$FFFF — and names what would overturn it.
+* **Q-141** — "Single-screen, page 1" in R7 mode 3 of mappers 150 and 243. The page names its two
+  screens `S0` and `S1` four lines above, so "page 1" is `S1` and this build selects
+  `SingleScreenB`; Mesen 2 reads the same line as screen A. The ticket records both readings and
+  the symptom if the choice is wrong (a one-screen game drawing on the page it is not writing).
 
 ### Step 4 — the feature matrix
 
