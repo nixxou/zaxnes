@@ -312,6 +312,7 @@ impl Ppu2C02 {
     /// Replaces the margins of the frame just captured with the tiles `decoder` reads from the
     /// game's memory, row by row; a row the decoder does not handle keeps its nametable
     /// columns. The centre 256 pixels are left as captured.
+    #[allow(clippy::too_many_lines)] // One pass over the rows, its parts sharing their locals.
     pub(crate) fn decode_margins(
         &mut self,
         decoder: &dyn MarginDecoder,
@@ -342,6 +343,8 @@ impl Ppu2C02 {
         // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
         let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
         let mut decoded_above = None;
+        let row_ends = self.row_ends();
+        self.playfield_end = None;
         for (row_index, ref captured, strip) in self.rows_to_decode() {
             if strip && decoded_above != Some(row_index) {
                 continue; // A strip goes with the row above it (its number), once decoded.
@@ -378,6 +381,8 @@ impl Ppu2C02 {
             }
             decoded_above = Some(row_index);
             decoded_rows[row_index] = true;
+            let end = (captured.y + 8).min(row_ends[row_index]);
+            self.playfield_end = Some(self.playfield_end.map_or(end, |last| last.max(end)));
             if let Some(to) = redrawn_to.get_mut(row_index).filter(|_| left_columns > 0) {
                 *to = column_x(left_columns, fine_x);
             }
@@ -1083,6 +1088,13 @@ impl Ppu2C02 {
     /// middle columns are the PPU's own picture; the sides are composed from the tile records
     /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
     /// sprite number winning) over the universal backdrop.
+    /// The picture line the rows the margin decoder decoded this frame end at (the playfield's
+    /// bottom, a status bar under it), `None` when it decoded none.
+    #[must_use]
+    pub const fn playfield_end(&self) -> Option<i16> {
+        self.playfield_end
+    }
+
     /// Whether the decoder of the frame just run asks the screen's top and bottom lines hidden
     /// with a vertical margin too ([`crate::wide_decode::MarginDecoder::hides_overscan`]).
     #[must_use]

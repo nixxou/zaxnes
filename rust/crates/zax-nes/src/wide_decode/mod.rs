@@ -239,6 +239,15 @@ pub trait MarginDecoder: Sync {
     fn masking_sprites(&self, _memory: &DecoderMemory<'_>) -> Option<MaskingSprites> {
         None
     }
+
+    /// The fraction of a pixel, in 256ths, the game's camera is past the column its scroll shows
+    /// (read after the frame: the next picture's), for the experimental smooth scrolling
+    /// (`smooth_scroll`): a camera that moves 1.33 pixels a frame shows steps of 1, 1 and 2, and
+    /// the host shifts the playfield by the fraction to make them even. `None`, as by default,
+    /// when the decoder does not know it.
+    fn camera_fraction(&self, _memory: &DecoderMemory<'_>) -> Option<u8> {
+        None
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if

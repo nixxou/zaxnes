@@ -75,6 +75,10 @@ pub struct NesCore {
     aids_on: u8,
     /// The options the host set last.
     host_options: u8,
+    /// The experimental smooth scrolling (option `smooth_scroll`): the camera's fraction read
+    /// after the last frame (the next picture's), and the shift of the picture just made.
+    camera_fraction: Option<u8>,
+    picture_shift: Option<(f32, i32)>,
     /// The state of the real frame of a run-ahead sequence (AMD-041 REQ-LOOP-065 step 2), kept
     /// from one real frame to the next so that nothing is allocated per frame. Empty, and never
     /// touched, while run-ahead is off.
@@ -110,6 +114,8 @@ impl NesCore {
             pack: None,
             aids_on: 0,
             host_options: 0,
+            camera_fraction: None,
+            picture_shift: None,
             real_frame: CoreState::default(),
             real_frame_held: false,
         }
@@ -606,6 +612,7 @@ impl NesCore {
         if let Some(decoder) = decoder {
             self.decode_margins(decoder);
         }
+        self.smooth_scroll(decoder);
 
         self.frame_count += 1;
 
@@ -720,6 +727,47 @@ impl NesCore {
     }
 
     /// Has `decoder` fill the margins of the frame just run from the game's memory.
+    /// The experimental smooth scrolling: with the option `smooth_scroll` of the patch running
+    /// on, the picture just made is shown shifted left by the fraction of a pixel its camera was
+    /// past its scroll (read after the frame before: the RAM is a frame ahead of the picture), down
+    /// to the playfield's bottom ([`NesCore::picture_shift`]). Nothing read with the option off.
+    fn smooth_scroll(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
+        let on = self
+            .builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .and_then(|patch| patch.options.iter().find(|o| o.key == "smooth_scroll"))
+            .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0);
+        let Some(decoder) = decoder.filter(|_| on) else {
+            self.camera_fraction = None;
+            self.picture_shift = None;
+            return;
+        };
+        let end = self.bus.ppu().playfield_end();
+        self.picture_shift = self
+            .camera_fraction
+            .zip(end)
+            .map(|(fraction, end)| (f32::from(fraction) / 256.0, i32::from(end)));
+        let (ram, _, cartridge) = self.bus.decoder_parts();
+        self.camera_fraction = cartridge.and_then(|cartridge| {
+            decoder.camera_fraction(&crate::wide_decode::DecoderMemory {
+                ram,
+                prg_ram: cartridge.memory().prg_ram(),
+                prg_rom: cartridge.rom().prg_rom(),
+                nametable: &|_| 0,
+                nametable_written: &|_| 0,
+            })
+        });
+    }
+
+    /// The experimental smooth scrolling's shift of the picture of the frame just run: the
+    /// fraction of a pixel (0 to 1) to move the playfield left by, and the picture line (screen
+    /// lines, the vertical margin excluded) it ends at; `None` while the option is off or the
+    /// picture has no playfield the decoder knows.
+    #[must_use]
+    pub const fn picture_shift(&self) -> Option<(f32, i32)> {
+        self.picture_shift
+    }
+
     fn decode_margins(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
         let (ram, ppu, cartridge) = self.bus.decoder_parts();
         let Some(cartridge) = cartridge else {

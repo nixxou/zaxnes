@@ -250,6 +250,9 @@ pub struct FixedMeshes<'a> {
     /// The quad of a widescreen 2D-mode picture, made for the margin of the displayed picture
     /// (`interop::wide_quad_for`); `None` when the picture is 256 pixels wide.
     pub wide_picture_quad: Option<&'a Arc<TileMesh>>,
+    /// The two bands of the 2D picture while the experimental smooth scrolling shifts its
+    /// playfield (`interop::picture_bands_for`), the playfield's first.
+    pub picture_bands: Option<(&'a Arc<TileMesh>, &'a Arc<TileMesh>)>,
 }
 
 impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
@@ -283,6 +286,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 fixed,
                 frame.nes_picture,
                 frame.nes_picture_height,
+                scene.picture_shift.map(|(shift, _)| shift),
             )?
         {
             return Ok(());
@@ -328,10 +332,33 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         fixed: FixedMeshes<'_>,
         picture: &[u8],
         height: usize,
+        shift: Option<f32>,
     ) -> Result<bool, R::Error> {
         let Some((width, height)) = crate::interop::picture_size(picture.len(), height) else {
             return Ok(false);
         };
+        if let (Some(shift), Some((playfield, rest))) = (shift, fixed.picture_bands) {
+            let Some(texture) = residency.picture(picture, height)? else {
+                return Ok(false);
+            };
+            #[allow(clippy::cast_precision_loss)] // 256 to 1280, 240 to 720.
+            let texture_size = Vector2::new(width as f32, height as f32);
+            let moved = Mat4::translation(Vec3::new(-shift, 0.0, 0.0));
+            for (band, model) in [(playfield, moved), (rest, Mat4::IDENTITY)] {
+                let Some(mesh) = residency.mesh(band)? else {
+                    continue;
+                };
+                self.lists.opaque.push(DrawItem {
+                    color_mode: 1,
+                    texture: Some(texture),
+                    texture_size,
+                    receive_shadow: false,
+                    clip: true,
+                    ..DrawItem::plain(mesh, model, (band.bounds_min(), band.bounds_max()))
+                });
+            }
+            return Ok(true);
+        }
         let quad = if (width, height) == (256, 240) {
             fixed.picture_quad
         } else {

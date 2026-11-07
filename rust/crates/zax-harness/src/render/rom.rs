@@ -161,6 +161,10 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     let mut picture = Vec::new();
     let picture_height = host.core.wide_picture_into(&mut picture);
+    scene.picture_shift = host.core.picture_shift();
+    if let Some((shift, split)) = scene.picture_shift {
+        println!("render: smooth scrolling shift {shift:.3} pixel above line {split}");
+    }
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
     scene.game_running = true;

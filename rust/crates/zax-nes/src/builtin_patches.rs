@@ -1518,6 +1518,15 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 2,
         default: true,
     },
+    // Experimental (owner request): the playfield shifted by the camera's fraction of a pixel,
+    // its steps of 1, 1 and 2 pixels made even (the margin decoder's `camera_fraction`).
+    HackOption {
+        key: "smooth_scroll",
+        label: "Smooth scrolling (experimental)",
+        label_fr: "Défilement lissé (expérimental)",
+        bit: 3,
+        default: false,
+    },
 ];
 
 const NOVA_OPTIONS: &[HackOption] = &[

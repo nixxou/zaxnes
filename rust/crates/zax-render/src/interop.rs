@@ -213,6 +213,71 @@ pub fn wide_quad_for(
     )))
 }
 
+/// The two bands of the 2D picture the experimental smooth scrolling draws apart, and the
+/// margins and split (screen line) they were made for.
+pub type PictureBands = ((u16, u16, u16), Arc<TileMesh>, Arc<TileMesh>);
+
+/// The bands of the picture `picture` split at screen line `split` (the playfield above it, the
+/// rest under it), reusing `cached` when made for the same margins and split; `None` for a
+/// picture of the wrong size or a split off the screen.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: the bands are two whole triangles each.
+pub fn picture_bands_for(
+    picture: &[u8],
+    height: usize,
+    split: i32,
+    cached: Option<PictureBands>,
+) -> Result<Option<PictureBands>, TriangleCountError> {
+    let Some((width, height)) = picture_size(picture.len(), height) else {
+        return Ok(None);
+    };
+    let (Ok(margin), Ok(margin_y), Ok(split)) = (
+        u16::try_from((width - 256) / 2),
+        u16::try_from((height - 240) / 2),
+        u16::try_from(split),
+    ) else {
+        return Ok(None);
+    };
+    if split == 0 || split >= 240 {
+        return Ok(None);
+    }
+    let key = (margin, margin_y, split);
+    if let Some(cached) = cached.filter(|(cached, _, _)| *cached == key) {
+        return Ok(Some(cached));
+    }
+    let split_line = f32::from(margin_y) + f32::from(split);
+    let total = 240.0 + (2.0 * f32::from(margin_y));
+    Ok(Some((
+        key,
+        Arc::new(picture_band(margin, margin_y, 0.0, split_line)?),
+        Arc::new(picture_band(margin, margin_y, split_line, total)?),
+    )))
+}
+
+/// The picture lines `from` to `to` (the vertical margin included) of [`picture_quad_wide`].
+fn picture_band(
+    margin: u16,
+    margin_y: u16,
+    from: f32,
+    to: f32,
+) -> Result<TileMesh, TriangleCountError> {
+    let left = -f32::from(margin);
+    let width = 256.0 + (2.0 * f32::from(margin));
+    let picture_top = geometry::SCENE_HEIGHT + f32::from(margin_y);
+    let (top, bottom) = (picture_top - from, picture_top - to);
+    let normal = Vec3::new(0.0, 0.0, -1.0);
+    let right = left + width;
+    let vertices = vec![
+        MeshVertex::new(Vec3::new(left, bottom, 0.0), normal, Vec2::new(0.0, to)),
+        MeshVertex::new(Vec3::new(left, top, 0.0), normal, Vec2::new(0.0, from)),
+        MeshVertex::new(Vec3::new(right, top, 0.0), normal, Vec2::new(width, from)),
+        MeshVertex::new(Vec3::new(right, bottom, 0.0), normal, Vec2::new(width, to)),
+    ];
+    TileMesh::new(vertices, vec![0, 1, 2, 0, 2, 3])
+}
+
 /// [`picture_quad`] for a widescreen picture: `margin` more pixels on each side, x from
 /// -margin to 256 + margin, and `margin_y` more above and below, the texture coordinates still in
 /// texels of the larger picture.

@@ -31,6 +31,7 @@ const CAMERA_Y: u16 = 0x00E0;
 const CAMERA_Y_HIGH: u16 = 0x00E1;
 const CAMERA_X_FINE: u16 = 0x01A3;
 const CAMERA_Y_FINE: u16 = 0x01A4;
+const CAMERA_X_FRACTION: u16 = 0x0071;
 
 /// PRG-RAM, from `$6000`.
 const ROOM_WIDTH: usize = 0x07EE;
@@ -105,6 +106,12 @@ impl MarginDecoder for Kirby {
             }
         }
         true
+    }
+
+    /// `$71`: the camera's fraction of a pixel across (its own: it stays as it is while the camera
+    /// rests on the room's edge with Kirby still walking).
+    fn camera_fraction(&self, memory: &DecoderMemory<'_>) -> Option<u8> {
+        Some(memory.ram(CAMERA_X_FRACTION))
     }
 
     /// The game hides the background's leftmost 8 pixels (PPUMASK `$18`) and draws there the
