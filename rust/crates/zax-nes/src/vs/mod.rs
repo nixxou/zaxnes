@@ -97,6 +97,56 @@ impl VsPpuModel {
         }
     }
 
+    /// What a `$2002` read answers below the three flags: `(latch_mask, identifier)`.
+    ///
+    /// `latch_mask` is the bits that come from the PPU's own data-bus latch and `identifier` the
+    /// bits the chip drives itself. On every PPU but an RC2C05 that is `(0x1F, 0x00)` — bits 0
+    /// to 4 open, nothing driven — which is the 2C02's own behaviour (nesdev, "PPU registers";
+    /// `ppu_open_bus` tests 6 and 7).
+    ///
+    /// **The RC2C05 drives them instead**: "The 2C05 series of arcade PPUs returns an identifier
+    /// in bits 4-0 instead of PPU open bus" (nesdev, "PPU registers"), and that page's table
+    /// gives a *mask* beside each value, because the RC2C05-02's covers **six** bits and not
+    /// five:
+    ///
+    /// | PPU | mask | value |
+    /// | --- | ---: | ---: |
+    /// | RC2C05-01 | `$1F` | `$1B` |
+    /// | RC2C05-02 | `$3F` | `$3D` |
+    /// | RC2C05-03 | `$1F` | `$1C` |
+    /// | RC2C05-04 | `$1F` | `$1B` |
+    /// | RC2C05-05 | `$1F` | `$00` |
+    ///
+    /// The mask the page gives is the bits the chip drives, so the latch mask returned here is
+    /// its complement inside bits 0 to 5 — `0x00` for the four variants whose mask is `$1F`,
+    /// since nothing of bits 0 to 4 is left open. The RC2C05-02's `$3F`/`$3D` forces bit 5, the
+    /// sprite-overflow flag's bit, to 1 for good, which the `or` below does exactly.
+    ///
+    /// Two of the five values are not on that page's table, which lists the `-02`, `-03` and
+    /// `-04` only, and are the ones `third_party/mesen2`'s `NesPpu.cpp` has (`Ppu2C05A` `0x1B`,
+    /// `Ppu2C05E` nothing driven); the three the page does give agree with it to the bit. The
+    /// gap is recorded in `docs/progress/MF-VS.md` and marked as a provisional choice in the
+    /// lot's Q ticket.
+    #[must_use]
+    pub const fn status_identifier(self) -> (u8, u8) {
+        match self {
+            // The `-01` and the `-04` answer the same `$1B`, which the page's table gives twice
+            // and which a game therefore cannot use to tell those two apart.
+            Self::Rc2c05_01 | Self::Rc2c05_04 => (0x00, 0x1B),
+            Self::Rc2c05_02 => (0x00, 0x3D),
+            Self::Rc2c05_03 => (0x00, 0x1C),
+            // The RC2C05-05 drives bits 0 to 4 with nothing: the identifier is zero, and the
+            // latch stays shut, which is what makes it distinguishable from a 2C02 all the same.
+            Self::Rc2c05_05 => (0x00, 0x00),
+            // Every RP2C03, RC2C03 and RP2C04 answers like a 2C02 here.
+            Self::Rc2c03
+            | Self::Rp2c04_0001
+            | Self::Rp2c04_0002
+            | Self::Rp2c04_0003
+            | Self::Rp2c04_0004 => (0x1F, 0x00),
+        }
+    }
+
     /// Whether this is an RC2C05, the family that swaps `$2000` and `$2001` and answers an
     /// identity in `$2002`'s low bits (nesdev, "Vs. System"). Step 3 of the lot is that pair.
     #[must_use]

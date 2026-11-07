@@ -91,8 +91,8 @@ implements it.
 * [x] **1/10** — detection: byte 7 bit 0 and NES 2.0 console type 1 (and extended type 1), byte 13's
   two nibbles, the per-ROM CRC table, the load message, the `VsPpuModel` and `VsHardware` types.
 * [x] **2/10** — the palettes: the four RP2C04 LUTs and the 2C03/2C05 identity, chosen at load and
-  applied in `snapshot_palette` and the margin palette.
-* [ ] **3/10** — the RC2C05: the `$2000`/`$2001` write swap and the `$2002` ID.
+  applied where palette RAM is written (the plan said `snapshot_palette`; see the step).
+* [x] **3/10** — the RC2C05: the `$2000`/`$2001` write swap and the `$2002` ID.
 * [ ] **4/10** — mapper 99 as a `DecodeBoard` member, the `$4016` write forward, the 40 KiB PRG
   bank; mapper 151 as a parameter of the VRC1.
 * [ ] **5/10** — the inputs: two coin slots, the service button, the eight DIP switches at
@@ -257,4 +257,49 @@ reaches the pixel image (a backdrop written `$01` comes out `$27` on an RP2C04-0
 entry 1); and a savestate round trip puts the shown palette back through the remap.
 
 Green: **886 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
+`-D warnings` clean in all three configurations.
+
+### Step 3 — the RC2C05's two quirks, both as arithmetic
+
+**`$2002`.** nesdev's "PPU registers" is the page that has it: "The 2C05 series of arcade PPUs
+returns an identifier in bits 4-0 instead of PPU open bus", with a table that gives a **mask**
+beside each value — and the mask matters, because the RC2C05-02's is `$3F` and not `$1F`, so that
+chip drives **six** bits and the sprite-overflow flag's bit is 1 for good.
+
+| PPU | mask | value |
+| --- | ---: | ---: |
+| RC2C05-01 | `$1F` | `$1B` |
+| RC2C05-02 | `$3F` | `$3D` |
+| RC2C05-03 | `$1F` | `$1C` |
+| RC2C05-04 | `$1F` | `$1B` |
+| RC2C05-05 | `$1F` | `$00` |
+
+The page's own table lists the `-02`, `-03` and `-04`; those three agree to the bit with
+`third_party/mesen2`'s `NesPpu.cpp`, and the `-01` (`$1B`, the same value as the `-04`, so a game
+cannot tell those two apart) and the `-05` (nothing driven) are that file's. **The two rows no
+allowed page gives are named as such** here, in the code, and in the lot's Q ticket.
+
+The register became `(self.decay & self.vs_status_latch_mask) | self.vs_status_id`, two bytes set
+at load. On every PPU but an RC2C05 they are `0x1F` and `0x00`, so the value is the `decay & 0x1F`
+the register always answered — **an `and` and an `or`, no branch, and nothing asking which chip
+this is**. Step 7 measures what the two field loads cost on the ROMs that poll `$2002`; the point
+of recording it here is that if the figure is above tolerance it is this expression and not a test
+that has to change.
+
+**The swap.** nesdev's "Vs. System": the 2C05 "swaps the meanings of `$2000` and `$2001`". The
+swap lives **inside the `$2000` and `$2001` arms of `Ppu2C02::write` and nowhere else**, as one
+`bool` read, so the `$2003` to `$2007` arms are byte for byte what they were — which is the whole
+reason not to swap the register *number*, since that would have put a compare on `$2007`, written
+thousands of times a frame. The `$2000` body moved into an `#[inline] fn write_control` so that the
+`$2001` arm can reach it; the `$2000` arm is the same body it was.
+
+Six tests. The identifier per variant, read with the bus latch at `$00` **and** at `$FF` — the
+point being that the value does not depend on the latch, which is exactly how an RC2C05 differs
+from a 2C02; the RC2C05-02's bit 5 driven while the other four leave it to the flag; the 2C02, the
+RP2C03/RC2C03 and the four RP2C04 all leaving bits 0 to 4 open, latch and all; and the swap proved
+through PPUMASK's greyscale bit, which is the cheapest observable there is — a backdrop of `$21`
+comes out `$20` when the grey mask applies — checked in both directions on all five RC2C05s, on a
+non-RC2C05 VS image, and on a plain NES image.
+
+Green: **891 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
 `-D warnings` clean in all three configurations.

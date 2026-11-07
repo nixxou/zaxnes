@@ -636,6 +636,181 @@ fn the_remap_reaches_the_pixel_image() {
     );
 }
 
+// ------------------------------------------------------------------ the RC2C05
+
+/// Loads a synthetic VS image whose byte 13 asks for `model`, with no palette written.
+fn vs_core(model: VsPpuModel) -> NesCore {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x09, byte13_of(model), 0), "SyntheticVs.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.vs_system().map(VsSystem::ppu), Some(model));
+    core
+}
+
+/// Writes PPU register `register` as the CPU would.
+fn ppu_write(core: &mut NesCore, register: u16, value: u8) {
+    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
+    ppu.write(register, value, cartridge);
+}
+
+/// Reads PPU register `register` as the CPU would, side effects included.
+fn ppu_read(core: &mut NesCore, register: u16) -> u8 {
+    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
+    ppu.read(register, cartridge)
+}
+
+/// nesdev, "PPU registers": "The 2C05 series of arcade PPUs returns an identifier in bits 4-0
+/// instead of PPU open bus". So the value does not depend on what the data-bus latch holds —
+/// which is the whole difference from the 2C02, whose bits 0 to 4 *are* that latch
+/// (`ppu_open_bus` tests 6 and 7).
+#[test]
+fn an_rc2c05_drives_the_low_bits_of_2002_with_its_identifier() {
+    let expected = [
+        (VsPpuModel::Rc2c05_01, 0x1Bu8),
+        (VsPpuModel::Rc2c05_02, 0x3D),
+        (VsPpuModel::Rc2c05_03, 0x1C),
+        (VsPpuModel::Rc2c05_04, 0x1B),
+        (VsPpuModel::Rc2c05_05, 0x00),
+    ];
+
+    for (model, identifier) in expected {
+        for latch in [0x00u8, 0xFF] {
+            let mut core = vs_core(model);
+            // A write to any register loads the whole bus latch (`ppu_open_bus` test 2);
+            // `$2003` is the one that does nothing else of interest.
+            ppu_write(&mut core, 3, latch);
+            assert_eq!(
+                ppu_read(&mut core, 2) & 0x3F,
+                identifier,
+                "{} with the latch at {latch:#04X}",
+                model.name()
+            );
+        }
+    }
+}
+
+/// Every other PPU — the 2C02, the RP2C03/RC2C03 and the four RP2C04 — leaves bits 0 to 4 of
+/// `$2002` open, which is the behaviour the register always had. The brief's "a plain NES image
+/// proving none of it is active", for `$2002`.
+#[test]
+fn every_other_ppu_leaves_the_low_bits_of_2002_open() {
+    let mut nes = NesCore::new();
+    let load = nes.load_rom(&image(0, 0x00, 0, 0), "SyntheticNes.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    let mut cores = vec![nes];
+    for model in [
+        VsPpuModel::Rc2c03,
+        VsPpuModel::Rp2c04_0001,
+        VsPpuModel::Rp2c04_0002,
+        VsPpuModel::Rp2c04_0003,
+        VsPpuModel::Rp2c04_0004,
+    ] {
+        cores.push(vs_core(model));
+    }
+
+    for core in &mut cores {
+        ppu_write(core, 3, 0xFF);
+        assert_eq!(ppu_read(core, 2) & 0x1F, 0x1F, "the latch was all ones");
+        ppu_write(core, 3, 0x00);
+        assert_eq!(ppu_read(core, 2) & 0x1F, 0x00, "the latch was all zeroes");
+    }
+}
+
+/// The three flags of bits 5 to 7 keep their places on an RC2C05, except the RC2C05-02's bit 5:
+/// the page's table gives that variant a **six**-bit mask (`$3F`) with the value `$3D`, so the
+/// bit the sprite-overflow flag lives in is driven to 1 for good.
+#[test]
+fn the_rc2c05_02_drives_bit_5_as_well() {
+    let mut core = vs_core(VsPpuModel::Rc2c05_02);
+    ppu_write(&mut core, 3, 0x00);
+    assert_eq!(ppu_read(&mut core, 2) & 0x20, 0x20);
+
+    // The other four leave bit 5 to the flag, which is clear on a machine that has not drawn.
+    for model in [
+        VsPpuModel::Rc2c05_01,
+        VsPpuModel::Rc2c05_03,
+        VsPpuModel::Rc2c05_04,
+        VsPpuModel::Rc2c05_05,
+    ] {
+        let mut core = vs_core(model);
+        ppu_write(&mut core, 3, 0x00);
+        assert_eq!(ppu_read(&mut core, 2) & 0x20, 0x00, "{}", model.name());
+    }
+}
+
+/// Paints one frame with rendering off and returns a visible pixel, which is the backdrop —
+/// greyed when PPUMASK bit 0 is set (the colour is masked with `$30`).
+fn backdrop_with(model: VsPpuModel, register: u16) -> u8 {
+    let mut core = vs_core(model);
+    // $3F00 = $21, a colour the grey mask changes: $21 & $30 is $20.
+    ppu_write(&mut core, 6, 0x3F);
+    ppu_write(&mut core, 6, 0x00);
+    ppu_write(&mut core, 7, 0x21);
+    // The register under test, with the greyscale bit of PPUMASK and nothing else.
+    ppu_write(&mut core, register, 0x01);
+    core.run_frame(0);
+
+    let mut picture = Vec::new();
+    core.ppu().pixel_frame_indices_into(&mut picture);
+    picture[256 * 120 + 128]
+}
+
+/// nesdev, "Vs. System": the 2C05 "swaps the meanings of `$2000` and `$2001`". PPUMASK's
+/// greyscale bit is the cheapest proof — on an RC2C05 it is `$2000` that greys the picture and
+/// `$2001` that does not, and on every other PPU the other way round.
+#[test]
+fn the_rc2c05_swaps_2000_and_2001() {
+    // Neither the RC2C05 nor the RP2C03 remaps the palette, so $21 stays $21.
+    assert!(VsPpuModel::Rc2c05_01.palette_lut().is_none());
+    assert!(VsPpuModel::Rc2c03.palette_lut().is_none());
+
+    for model in [
+        VsPpuModel::Rc2c05_01,
+        VsPpuModel::Rc2c05_02,
+        VsPpuModel::Rc2c05_03,
+        VsPpuModel::Rc2c05_04,
+        VsPpuModel::Rc2c05_05,
+    ] {
+        assert_eq!(
+            backdrop_with(model, 0),
+            0x20,
+            "{}: a $2000 write should reach PPUMASK",
+            model.name()
+        );
+        assert_eq!(
+            backdrop_with(model, 1),
+            0x21,
+            "{}: a $2001 write should reach PPUCTRL and leave the colour alone",
+            model.name()
+        );
+    }
+
+    // A VS. System that is not an RC2C05 keeps the ordinary wiring.
+    assert_eq!(backdrop_with(VsPpuModel::Rc2c03, 1), 0x20);
+    assert_eq!(backdrop_with(VsPpuModel::Rc2c03, 0), 0x21);
+}
+
+/// And a plain NES image keeps it too: the brief's "a plain NES image proving none of it is
+/// active", for the register swap.
+#[test]
+fn a_plain_nes_image_does_not_swap_2000_and_2001() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x00, 0, 0), "SyntheticNes.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert!(core.vs_system().is_none());
+
+    ppu_write(&mut core, 6, 0x3F);
+    ppu_write(&mut core, 6, 0x00);
+    ppu_write(&mut core, 7, 0x21);
+    ppu_write(&mut core, 1, 0x01);
+    core.run_frame(0);
+
+    let mut picture = Vec::new();
+    core.ppu().pixel_frame_indices_into(&mut picture);
+    assert_eq!(picture[256 * 120 + 128], 0x20, "$2001 greys a NES picture");
+}
+
 /// The savestate carries palette RAM as the game wrote it — the format is unchanged — and a
 /// restore puts the shown palette back through the remap (REQ-CORE-090, REQ-CORE-091).
 #[test]

@@ -40,6 +40,12 @@ pub const VRAM_SIZE: usize = 4096;
 /// Size of OAM.
 pub const OAM_SIZE: usize = 256;
 
+/// The bits of a `$2002` read that come from the PPU's own bus latch on a 2C02: bits 0 to 4,
+/// which the flags of bits 5 to 7 leave alone (nesdev, "PPU registers"; `ppu_open_bus` tests 6
+/// and 7). An RC2C05 drives them with an identifier instead
+/// ([`Ppu2C02::vs_status_latch_mask`]).
+const STATUS_LATCH_BITS: u8 = 0x1F;
+
 /// Size of palette RAM, in bytes (REQ-CORE-045).
 pub const PALETTE_SIZE: usize = 32;
 
@@ -180,6 +186,28 @@ pub struct Ppu2C02 {
     /// [`Self::palette_marked`] exists for. Configuration, so no reset clears it.
     #[cfg(feature = "board-vs-system")]
     vs_palette: Option<&'static [u8; crate::vs::LUT_LEN]>,
+    /// Which bits of a `$2002` read come from the PPU's own bus latch: `0x1F` on every PPU but
+    /// an RC2C05, and **`0x00`** on one, because that chip drives those bits with an identifier
+    /// instead of leaving them open (nesdev, "PPU registers": "The 2C05 series of arcade PPUs
+    /// returns an identifier in bits 4-0 instead of PPU open bus").
+    ///
+    /// Chosen once at load with [`Self::vs_status_id`]. The pair is **arithmetic and not a
+    /// test**: the read computes `(decay & vs_status_latch_mask) | vs_status_id`, which for every
+    /// other PPU is `decay & 0x1F | 0` — the same value the register had before the lot — with no
+    /// branch and nothing asking which chip this is.
+    #[cfg(feature = "board-vs-system")]
+    vs_status_latch_mask: u8,
+    /// The identifier an RC2C05 drives into `$2002`, `0x00` on every other PPU; see
+    /// [`Self::vs_status_latch_mask`].
+    #[cfg(feature = "board-vs-system")]
+    vs_status_id: u8,
+    /// Whether `$2000` and `$2001` mean each other: the RC2C05 "swaps the meanings of `$2000`
+    /// and `$2001`" (nesdev, "Vs. System"), `false` on every other PPU.
+    ///
+    /// Read **only by the `$2000` and `$2001` arms** of [`Self::write`], the two rarest arms of
+    /// that dispatch, so the `$2003` to `$2007` paths are byte for byte what they were.
+    #[cfg(feature = "board-vs-system")]
+    vs_swap_control_mask: bool,
     decay_stamp: [i64; 8],
 
     timing: RegionTiming,
@@ -341,6 +369,12 @@ impl Ppu2C02 {
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
             #[cfg(feature = "board-vs-system")]
             vs_palette: None,
+            #[cfg(feature = "board-vs-system")]
+            vs_status_latch_mask: STATUS_LATCH_BITS,
+            #[cfg(feature = "board-vs-system")]
+            vs_status_id: 0,
+            #[cfg(feature = "board-vs-system")]
+            vs_swap_control_mask: false,
             decay_stamp: [0; 8],
             timing: RegionTiming::default(),
             dot: 0,
@@ -626,13 +660,69 @@ impl Ppu2C02 {
     /// Chooses the VS. System PPU, or goes back to the 2C02 with `None` (lot MF-VS).
     ///
     /// Called once, by `NesBus::set_vs_system` at load time and before the power-on. What it
-    /// stores is the *answer* — the master-palette remap — and not the model, so that no path of
-    /// the PPU ever asks which chip this is. Palette RAM is rebuilt through the new remap so
-    /// that choosing a PPU is correct even on a machine that already has bytes in it.
+    /// stores are the *answers* — the master-palette remap, the two bytes a `$2002` read is built
+    /// from and one `bool` — and never the model, so that no path of the PPU ever asks which chip
+    /// this is. Palette RAM is rebuilt through the new remap so that choosing a PPU is correct
+    /// even on a machine that already has bytes in it.
     #[cfg(feature = "board-vs-system")]
     pub fn set_vs_ppu(&mut self, vs: Option<&crate::vs::VsSystem>) {
         self.vs_palette = vs.and_then(crate::vs::VsSystem::palette_lut);
+        let (latch_mask, id) = match vs.map(crate::vs::VsSystem::ppu) {
+            Some(model) => model.status_identifier(),
+            None => (STATUS_LATCH_BITS, 0),
+        };
+        self.vs_status_latch_mask = latch_mask;
+        self.vs_status_id = id;
+        self.vs_swap_control_mask = vs.is_some_and(crate::vs::VsSystem::is_rc2c05);
         self.refresh_palette_views();
+    }
+
+    /// The bits of a `$2002` read that are **not** the three flags: the PPU's own bus latch on a
+    /// 2C02 (`ppu_open_bus` tests 6 and 7), and an RC2C05's identifier instead of it.
+    ///
+    /// Two field reads, an `and` and an `or`, with no branch and no model to test: on every PPU
+    /// but an RC2C05 the mask is [`STATUS_LATCH_BITS`] and the identifier 0, so the value is the
+    /// `decay & 0x1F` this register always answered.
+    #[cfg(feature = "board-vs-system")]
+    #[inline]
+    const fn status_open_bus(&self) -> u8 {
+        (self.decay & self.vs_status_latch_mask) | self.vs_status_id
+    }
+
+    /// Without the VS. System there is no identifier and this is the expression the register
+    /// always had.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[inline]
+    const fn status_open_bus(&self) -> u8 {
+        self.decay & STATUS_LATCH_BITS
+    }
+
+    /// Whether `$2000` and `$2001` mean each other; see [`Self::vs_swap_control_mask`].
+    #[cfg(feature = "board-vs-system")]
+    #[inline]
+    const fn swaps_control_and_mask(&self) -> bool {
+        self.vs_swap_control_mask
+    }
+
+    /// Without the VS. System they never do, and the two arms collapse to their old bodies.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[allow(clippy::unused_self)]
+    #[inline]
+    const fn swaps_control_and_mask(&self) -> bool {
+        false
+    }
+
+    /// The `$2000` write: PPUCTRL, the two nametable bits of `t`, and the cartridge's hook.
+    ///
+    /// Its own function only so that the RC2C05's swap can reach it from the `$2001` arm as
+    /// well; `#[inline]`, so the `$2000` arm is the body it always was.
+    #[inline]
+    fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
+        self.control = value;
+        self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
+        if let Some(cartridge) = cartridge {
+            cartridge.on_ppu_control(value);
+        }
     }
 
     /// The colour index the PPU shows for the index `written` into palette RAM: the VS. System's
@@ -985,7 +1075,7 @@ impl Ppu2C02 {
                 // Bits 0 to 4 of PPUSTATUS come from the PPU's own bus latch and are not
                 // refreshed by the read; bits 5 to 7 are the flags and do refresh it
                 // (ppu_open_bus tests 6 and 7).
-                let mut status = self.decay & 0x1F;
+                let mut status = self.status_open_bus();
                 if self.vblank_flag {
                     status |= 0x80;
                 }
@@ -1177,15 +1267,25 @@ impl Ppu2C02 {
         self.refresh_decay(value, 0xFF);
 
         match register & 0x07 {
+            // **The RC2C05 swaps the meanings of `$2000` and `$2001`** (nesdev, "Vs. System"),
+            // which is why these two arms ask one `bool` settled at load and the five arms below
+            // ask nothing: a swap of the register *numbers* would have cost every write a
+            // compare, and `$2007` is written thousands of times a frame.
             0 => {
-                self.control = value;
-                self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
-                if let Some(cartridge) = cartridge.as_deref_mut() {
-                    cartridge.on_ppu_control(value);
+                if self.swaps_control_and_mask() {
+                    self.mask = value;
+                } else {
+                    self.write_control(value, cartridge.as_deref_mut());
                 }
             }
 
-            1 => self.mask = value,
+            1 => {
+                if self.swaps_control_and_mask() {
+                    self.write_control(value, cartridge.as_deref_mut());
+                } else {
+                    self.mask = value;
+                }
+            }
 
             3 => self.oam_address = value,
 
