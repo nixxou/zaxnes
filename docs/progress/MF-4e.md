@@ -43,8 +43,8 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 
 ## Steps
 
-* [ ] **0/7** — the plan, the fourteen rows named, and the reading.
-* [ ] **1/7** — reproduce `11407930`: PR-1's thirteen and the level-2 ten on clean builds, and the
+* [x] **0/7** — the plan, the fourteen rows named, and the reading.
+* [x] **1/7** — reproduce `11407930`: PR-1's thirteen and the level-2 ten on clean builds, and the
   128/147 tally.
 * [ ] **2/7** — the `$2007` read during rendering: Q-125's rule **and** AMD-021 R2-005, the
   inverted unit test flipped, the owner's widescreen state whole.
@@ -102,3 +102,54 @@ independent: step 4 must be read before step 5, and step 5's board figure is a f
 this lot to win back, is **already won**: MF-5a put `#[inline(never)]` on `Ppu2C02::read_data`,
 whose doc comment prices the remainder at one `movq` per register read (+0.0068 % on `ppu_vbl_nmi`).
 Step 4 re-measures rather than re-derives it, and says what is left.
+
+## Step 1 — the baseline, reproduced on clean builds
+
+One clean `git archive` build, `4e-0-11407930`, extracted into a fresh directory with its own
+`CARGO_TARGET_DIR` and deleted as soon as the binary was copied out
+(`tools/perf/build-clean.sh`, `PERFORMANCE-HISTORY.md` §2 and §3). WSL2 Ubuntu 24.04, the same
+rustc the host has, valgrind 3.22.0. Driver: `rust/target-mf/mf4e.sh`, MF-VS's `mfvs.sh` with the
+label prefix changed; scratch, never staged.
+
+### PR-1's thirteen — 300 frames, no warm-up, no pack, whole process
+
+| ROM | board | instructions |
+| --- | --- | ---: |
+| `vblnmi` | MMC1 | 3 308 292 911 |
+| `oamstr` | NROM | 3 318 469 131 |
+| `m1` | MMC1 | 4 881 216 772 |
+| `m4` | MMC3 | 5 468 202 302 |
+| `m0` | NROM | 5 517 385 415 |
+| `metroid` | MMC1 | 5 115 577 073 |
+| `smb1` | NROM | 5 996 352 321 |
+| `mm2` | MMC1 | 6 017 939 540 |
+| `z2` | MMC1 | 6 291 468 406 |
+| `readbuf` | CNROM | 6 834 496 898 |
+| `duelito` | NROM | 7 380 402 471 |
+| `smb3` | MMC3 | 7 949 350 376 |
+| `mmc5` | MMC5 | 11 266 794 458 |
+| **set total** | | **79 345 948 174** |
+
+### Level 2 — five commercial games with their 3D packs, 600 frames after 120 of warm-up, inputs pressed
+
+The two rows the bar is read on, `total` (`bench_core::run`) and `core` (`NesCore::run_frame`),
+with `ppu` (`Ppu2C02::run_dots`) beside them because it is the stage this lot rewrites:
+
+| game | `total` | `core` | `ppu` |
+| --- | ---: | ---: | ---: |
+| `smb1` | 13 586 403 437 | 11 515 129 187 | 6 592 688 325 |
+| `metroid` | 13 735 232 285 | 11 146 862 384 | 6 926 069 765 |
+| `zelda2` | 15 358 777 362 | 12 774 928 372 | 7 290 065 073 |
+| `mm2` | 18 976 670 562 | 12 037 146 109 | 6 966 284 120 |
+| `smb3` | 24 187 953 646 | 15 314 947 822 | 9 522 809 031 |
+
+**`run_dots` is 57 % to 62 % of `core` on all five games.** That is the number that sets this lot's
+posture: the per-dot pipeline is the single largest block of emulated work there is, so the
++0.02 % tolerance is about one part in five thousand of a path that runs 89 342 times a frame.
+
+### The tally
+
+`zax-harness test-roms --filter AccuracyCoin --no-shots` on the host build of the tip:
+**128/147**, and the nineteen failures are the nineteen tabulated above — the fourteen in scope
+with their codes and the five APU/DMA rows that are not. This is MF-4d-fix's 128 and MF-VS's,
+unchanged.
