@@ -115,7 +115,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 - [x] **8/9 — golden-core against the base commit, and the full check.** Byte-identical over the
   98 commercial originals; `cargo test --release -p zax-nes -p zax-harness`; the ignored tests with
   `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
-- [ ] **9/9 — the journal, the census note and the final pass.**
+- [x] **9/9 — the journal, the census note and the final pass.**
 
 ---
 
@@ -834,3 +834,65 @@ their siblings and not more**, because the two tests swap:
 when the feature is **off** and `req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board`
 when it is on. Both halves of the contract are therefore tested, and neither configuration is the
 one where nobody looks.
+
+---
+
+## Step 9 — the journal, the census note, and the final pass
+
+### The journal
+
+`G:/3dsen/cleanroom/journal/JOURNAL.md` gains the lot's R3 entry (role, date, folders consulted,
+deliverables) and a short closing entry. It names `107c53d9` as the commit the figures and the
+golden-core dump belong to, because that is the commit whose `git archive` build is byte-identical
+to the measured binary — steps 8 and 9 add documentation only.
+
+### The census note
+
+§7.2's MF-UNL-4 section gains its **Shipped** block, in the shape MF-UNL-2 and MF-UNL-3 use, and it
+records the two things a reader of the plan would otherwise get wrong:
+
+* **the step list's ordering was right and its risk assessment was not.** Putting the nametable
+  question first is what made the lot cheap, and the answer was zero — for the third time.
+* **the cost was in none of the four hooks.** It was in the *tile emitter's* three CHR-latch
+  methods, which are not a hardware hook at all, and step 6's "per hook added, not just at the end"
+  is what named them.
+
+The five places the lot left the census's or Mesen 2's reading for the page's are listed with their
+tickets, which is what MF-UNL-2 step 9 asked each later lot to do.
+
+### The final pass
+
+| | |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| clippy `-D warnings`, `zax-nes`, six configurations | clean in all six |
+| clippy `-D warnings`, `zax-harness` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **1011 / 0 / 9** |
+| the same with `--include-ignored` and the two ROM roots | **1020 / 0 / 0** |
+| golden-core, 98 originals, 1 200 frames | **byte-identical** to `16a30564`, with and without the feature; `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+| PR-1's thirteen ROMs | **no ROM slower**, worst `mm2` / `mmc5` **+0.000 %**, set total **−329 825** |
+| level 2's five games | all five `core` **+0, identical to the instruction**; all five `total` inside, worst `smb1` **+0.003 %** |
+
+| invariant | checked |
+| --- | --- |
+| `NesCore::STATE_VERSION` and the save-state format | `git diff 16a30564 HEAD -- state.rs nes_core.rs` is **empty**; the one block added belongs to a board that did not exist at the base commit |
+| no `unsafe` | **0** lines added |
+| nothing under `spec/` but new tickets | Q-148 to Q-152 and nothing else |
+| no emulation change to an existing mapper | golden-core byte-identical, and the four numbers are new |
+| `Board`'s shape | `size_of::<Board>()` **1376**, `size_of::<IrqBoard>()` **208**, both unchanged |
+| lines removed | **13** across the whole lot in `rust/`, all of them rewritten in place |
+
+### What the lot leaves open
+
+* **Q-148 to Q-152**, each implemented on its provisional choice and pinned by a named test.
+  **Q-150 and Q-151 are the two a reviewer can close in one session**: every item of both is one
+  register write away from an answer and R0 has the thirteen titles' images. Q-152 needs one
+  breakpoint on `$D000`.
+* **The structural fix the lot measured and did not make.** A `chr_latch` latch on `Cartridge` —
+  §4.10's own mechanism, the one that made seven other hooks free — makes **ten of PR-1's thirteen
+  ROMs faster, by −0.058 % to −0.103 %**, and the three whose boards have a latch slower, `mmc5` by
+  +0.326 %. That is a lot of its own, with the MMC2's and the MMC3's figures as its subject, and
+  `board-jy-asic-tile-latch` is the feature that would come back into `default` if it worked.
+* **No ROM runs any of the four numbers.** §5 of the census counted it: every test of this lot is
+  written from the page's register tables. The thirteen titles R0 would have to source are listed
+  in §7.2, and they are the most-played unlicensed NES software there is.

@@ -1167,6 +1167,39 @@ latch, and the lot exists to do them all at once in the manner of MF-6a's `Small
 
 #### MF-UNL-4 — the J.Y. Company ASIC
 
+> **Shipped.** `docs/progress/MF-UNL-4.md` is the lot's own write-up: four numbers, **one** board,
+> and **two** features — `board-jy-asic` in `default` and `board-jy-asic-tile-latch` out of it.
+>
+> **The "main risk" of step 1 was not one, and the real cost was in none of the four hooks.**
+> Q-123's ceiling was asked a third time, in two shapes, and `Ppu2C02::read_nametable_inner` is
+> **80 instructions in all three binaries, identical to the instruction**
+> (`rust/docs/PERFORMANCE-HISTORY.md` §5.18). What did cost is the **tile emitter's** three CHR-latch
+> methods — `chr_latch_state`, `set_chr_latch_state`, `advance_chr_latch`, which are not a hardware
+> hook at all — at `mmc5` **+0.373 %** and `smb3/core` **+0.287 %** on level 2, all of it in
+> `Ppu2C02::run_dots`. Four shapes were measured and the best was still over, so the mechanism is
+> behind the second feature, on `board-68-chr-nametables`'s precedent; the board itself is **below
+> the base commit on all thirteen of PR-1's ROMs**, with all five level-2 `core` figures at +0.
+> **Step 6's "measure per hook added, not just at the end" is what found it**, and it named the
+> hook rather than the lot.
+>
+> **Five of the steps and descriptions below were written from Mesen 2 rather than from the page,
+> and the page won every time:**
+>
+> * the roster's "`Mapper35`" for **35** is a wholly different and much smaller board, where the
+>   page says 35 is 209 "but explicitly specifies 8 KiB of WRAM … an exact duplicate" (**Q-148**);
+> * Mesen 2 does not decode `$D001` bit 3 at all and special-cases **211** as "N always set",
+>   where the page calls that its own history and 211 "a mere duplicate of INES Mapper 209 with
+>   correct emulation" (**Q-149**);
+> * **five** places of bank arithmetic, in four of which Mesen 2 contradicts itself (**Q-150**);
+> * **three** readings of the IRQ counter, and IRQ source 3 — "CPU writes" — which this core has no
+>   hook to cadence (**Q-151**);
+> * and a write to a cartridge-served nametable, which `SERVED_BY_CARTRIDGE` cannot route
+>   separately from the read (**Q-152**).
+>
+> The step list below is left as written, because its ordering — the nametable question first — is
+> what made the lot cheap, and because the census's own numbers for the board (13 titles, 1 feature)
+> were right.
+
 **Board and feature**: `board-jy-asic` (35, 90, 209, 211). **4 numbers, 1 feature, ~8 h,
 13 original titles.**
 
