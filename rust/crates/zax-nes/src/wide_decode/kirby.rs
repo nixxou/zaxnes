@@ -53,43 +53,48 @@ impl MarginDecoder for Kirby {
         let Some(room) = Room::new(memory) else {
             return false;
         };
+        // `$01A3` and `$01A4` shake the picture (when Kirby lands hard, a few pixels either
+        // way): signed.
         let camera_x = (i32::from(memory.ram(CAMERA_X_HIGH)) << 8)
             + i32::from(memory.ram(CAMERA_X))
-            + i32::from(memory.ram(CAMERA_X_FINE));
+            + i32::from(i8::from_ne_bytes([memory.ram(CAMERA_X_FINE)]));
         let camera_y = (i32::from(memory.ram(CAMERA_Y_HIGH)) << 8)
             + i32::from(memory.ram(CAMERA_Y))
-            + i32::from(memory.ram(CAMERA_Y_FINE));
+            + i32::from(i8::from_ne_bytes([memory.ram(CAMERA_Y_FINE)]));
         // While the camera moves, the work RAM is a frame ahead of the picture: the row's own
         // scroll places it. The game draws the room in one nametable's width (the horizontal
         // nametable bit plays no part), so that scroll repeats every 256 pixels across the room,
         // and the camera only picks the repeat (the one whose left edge is nearest to it).
         let ring = row.ring_x() & 0xFF;
+        // (A shake may put the picture a few pixels before the room's start: the columns there
+        // have nothing.)
         let left = camera_x - (camera_x - ring + 128).rem_euclid(256) + 128;
-        if left < 0 {
-            return false;
-        }
         let first = left >> 3;
-        // Down, the same: the game draws a screen of the room (192 lines) in the nametable's
-        // first 24 tile rows, so the row's tile row repeats every 24 rows down the room, and the
-        // camera (a frame early, a few lines off at most) picks the repeat.
+        // Down, the same, but the game lays the room out in two ways: a screen of the room (192
+        // lines) in the nametable's first 24 tile rows while the camera rests on it, and the
+        // nametable's 30 tile rows in turn while it scrolls down the room (falling into the hub).
+        // The row's tile row repeats every 24 or every 30 rows, the camera (a frame early, a few
+        // lines off at most) picks the repeat, and the row's edge columns, which must show what
+        // the map gives there, pick the layout.
         let fine_y = i32::from(row.v >> 12);
         let ring_row = i32::from(row.coarse_y());
-        if ring_row >= SCREEN_HEIGHT >> 3 {
-            return false;
-        }
         let near = (camera_y + row.line - fine_y) >> 3;
-        let tile_row = near - (near - ring_row + 12).rem_euclid(24) + 12;
-        if tile_row < 0 {
+        // The candidate of each layout, the nearest to the camera's row first (on a plain sky
+        // both may pass).
+        let mut candidates = [24, 30].map(|repeat| {
+            (ring_row < repeat)
+                .then(|| near - (near - ring_row + repeat / 2).rem_euclid(repeat) + repeat / 2)
+        });
+        candidates
+            .sort_by_key(|tile_row| tile_row.map_or(i32::MAX, |tile_row| (tile_row - near).abs()));
+        let Some(tile_row) = candidates
+            .into_iter()
+            .flatten()
+            .find(|&tile_row| tile_row >= 0 && edges_match(&room, memory, *row, first, tile_row))
+        else {
             return false;
-        }
+        };
 
-        // The row's edge columns must show what the map gives there.
-        for column in [1, 30] {
-            let shown = (memory.nametable)(nametable_address(*row, column));
-            if room.tile(first + column, tile_row).map(|(tile, _)| tile) != Some(shown) {
-                return false;
-            }
-        }
         for column in columns {
             if let Some((tile, palette)) = room.tile(first + column, tile_row) {
                 out.push(DecodedTile {
@@ -118,6 +123,24 @@ impl MarginDecoder for Kirby {
     fn redrawn_right_columns(&self) -> i32 {
         2
     }
+}
+
+/// Whether the row's edge columns show what the map gives at tile row `tile_row`, the row's
+/// first tile column being `first`.
+fn edges_match(
+    room: &Room<'_>,
+    memory: &DecoderMemory<'_>,
+    row: BackgroundRow,
+    first: i32,
+    tile_row: i32,
+) -> bool {
+    // Not the second column: turning round to scroll left, the game draws the column coming in
+    // a frame late, and for that frame the second column (under the mask but for its last two
+    // pixels) still shows the other side of the room.
+    [2, 30].into_iter().all(|column| {
+        let shown = (memory.nametable)(nametable_address(row, column));
+        room.tile(first + column, tile_row).map(|(tile, _)| tile) == Some(shown)
+    })
 }
 
 /// The PPU address of screen column `column` of `row`, on the plane of two nametables side by
