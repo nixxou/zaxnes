@@ -38,7 +38,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   `-D warnings` in each.
 - [ ] **7/9 — the documentation.** Four rows in `docs/review/BOARD-FEATURES.md`, the Cargo
   feature comments, and the question tickets.
-- [ ] **8/9 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
+- [x] **8/9 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `186b5656`, every compared commit built from `git archive` in a fresh directory, and the
   feature decision for each of the four boards.
 - [ ] **9/9 — golden-core against the base commit**, the full check with `ZAXNES_ROMS` and
@@ -521,3 +521,156 @@ The default configuration had been clean after every step, and three of the eigh
 3. **The new save-state test is 128 lines**, being a twelve-row table written twice. It carries
    `#[allow(clippy::too_many_lines)]` with that reason, which is the idiom
    `registry::board_memory_sizes` and `registry::create_board` already use.
+
+## Step 8 — the callgrind campaign, and the feature decision
+
+Four binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, which is then deleted:
+
+| label | tree |
+| --- | --- |
+| `unl2base` | **`186b5656`**, the lot's base commit |
+| `unl2` | `0a82356e`, the lot through step 6, the four features in `default` |
+| `unl2off` | the same source with the four features **out of `default`** — no new board code reachable |
+| `unl2swap` | the same source as `unl2` with **two disjoint `create_board` arms exchanged** (13 and 15) — identical emulation, different layout |
+
+### PR-1's thirteen ROMs, 300 frames, no pack — `unl2` against `unl2base`
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `mm2` | 6 017 923 833 | 6 017 978 407 | **+54 574** | **+0.001** |
+| `smb3` | 7 949 351 196 | 7 949 367 650 | +16 454 | +0.000 |
+| `metroid` | 5 115 547 532 | 5 115 553 914 | +6 382 | +0.000 |
+| `readbuf` | 6 834 486 788 | 6 834 492 520 | +5 732 | +0.000 |
+| `mmc5` | 11 266 805 060 | 11 266 805 167 | +107 | +0.000 |
+| `duelito` | 7 380 415 210 | 7 380 395 941 | −19 269 | −0.000 |
+| `z2` | 6 291 507 543 | 6 291 487 048 | −20 495 | −0.000 |
+| `oamstr` | 3 318 473 547 | 3 318 469 891 | −3 656 | −0.000 |
+| `vblnmi` | 3 308 318 948 | 3 308 272 631 | −46 317 | −0.001 |
+| `smb1` | 5 996 368 692 | 5 996 320 441 | −48 251 | −0.001 |
+| `m1` | 4 881 157 614 | 4 881 032 639 | −124 975 | −0.003 |
+| `m0` | 5 517 381 473 | 5 517 255 852 | −125 621 | −0.002 |
+| `m4` | 5 468 214 161 | 5 467 934 071 | **−280 090** | −0.005 |
+| **total** | 79 345 951 597 | 79 345 366 172 | **−585 425** | **−0.001** |
+
+**Worst ROM +0.001 %**, against a tolerance of +0.02 %, and the set total is below the base.
+`m4` — the MMC3 this lot generalises — is the biggest *gain* in the set.
+
+**And the generalisation of step 1 cost mapper 4 nothing at all.** The only `Mmc3Board` symbol in
+the diff is `update_banks`, and it moves only by being *renamed*:
+
+    -155,224   155,224 -> 0       Mmc3Board<false, false, false>::update_banks
+    +155,224         0 -> 155,224 Mmc3Board<false, 0, 0, 0, false, false, false>::update_banks
+
+the same count to the instruction on `m4`, and the same pair at 817 035 on `smb3`. That is the
+figure MF-6a2 step 3 and MF-6a3 step 1 pinned, unchanged by replacing one `const bool` with five
+`const`s.
+
+The one function that did move is `Board::write_register`, **0 → +181 686** on `mm2`, +249 228 on
+`smb3` and +122 292 on `z2`, with `NesBus::write_internal` down by about the same on each — one
+body leaving the inliner and reappearing as its own symbol. Net on `mm2` is +54 574, which is the
+worst ROM of the set.
+
+### Level 2's five games, 600 frames, packs loaded, inputs pressed
+
+| game | `core` delta | `core` % | `total` delta | `total` % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | **+0** | +0.000 | −730 194 | −0.005 |
+| `mm2` | +122 464 | +0.001 | −201 857 | −0.001 |
+| `zelda2` | +53 560 | +0.000 | −1 139 381 | −0.007 |
+| `metroid` | +7 082 | +0.000 | +24 819 | +0.000 |
+| `smb3` | +150 473 | +0.001 | **+9 391 449** | **+0.039** |
+
+**All five `core` figures are inside the tolerance** — +0.000 % to +0.001 %, one of them identical
+to the instruction — and four of the five `total` figures are inside it, three of them *below* the
+base. The fifth, `smb3/total` **+0.039 %**, is outside, and the rest of this step is what it is.
+
+### Where `smb3/total` is, and why it is not the boards'
+
+The stage table of that one run says it in one line:
+
+| stage | base | lot | % |
+| --- | ---: | ---: | ---: |
+| `apu` | 2 370 188 700 | 2 370 188 700 | **+0.000, equal** |
+| `ppu` | 9 522 788 208 | 9 522 788 208 | **+0.000, equal** |
+| `draw_list` | 418 220 905 | 418 220 905 | **+0.000, equal** |
+| `core` | 15 314 926 999 | 15 315 077 472 | +0.001 |
+| `convert` | 2 977 986 793 | 2 987 160 640 | **+0.308** |
+| `lua_hooks` | 1 718 710 459 | 1 727 884 304 | **+0.534** |
+| `total` | 24 190 240 661 | 24 199 632 110 | +0.039 |
+
+`ppu`, `apu` and `draw_list` are **identical to the instruction**; the whole move is in `convert`
+and `lua_hooks`, which is the 3D engine converting against a differently-laid-out heap. The
+per-function diff, exclusive counts, names it:
+
+| symbol | delta |
+| --- | ---: |
+| `luaH_getshortstr` | **+7 120 332** |
+| `getgeneric` | **+2 247 528** |
+| `Mmc3Board::update_banks` | −2 836 959 / **+2 836 959** (the same symbol, renamed) |
+| `Board::write_register` | +817 768 |
+| `NesBus::write_internal` | −667 295 |
+| `luaH_set` | −343 754 |
+| `__memcmp_avx2_movbe` | +215 135 |
+| **PROGRAM TOTALS** | **+9 386 976** |
+
+Lua's string-key hash table is **+9.37 M of the +9.39 M**. No symbol of this project moves by
+more than +817 768, and that one is paid back by −667 295 in its caller.
+
+### The same-behaviour pair settles it, and the spread is bigger than the tolerance
+
+`unl2swap` is `unl2`'s source with two **disjoint** arms of `registry::create_board` exchanged —
+mappers 13 and 15, neither of them touched by this lot. The same boards, the same registers, the
+same emulation; a different binary layout. Against each other:
+
+| | `core` | `total` |
+| --- | ---: | ---: |
+| `smb1` | **+0** | −1 887 183 (**−0.014 %**) |
+| `mm2` | **+0** | −61 914 (−0.000 %) |
+| `metroid` | **+0** | +107 996 (+0.001 %) |
+| `smb3` | **+0** | **−8 302 849 (−0.034 %)** |
+| `zelda2` | **+0** | +1 938 474 (+0.013 %) |
+
+Two binaries whose emulation is identical differ by **−0.034 % to +0.013 %** on `total` and by
+**nothing at all** on `core`. And against the base commit the variant gives `smb3/total`
+**+0.005 %** where `unl2` gives +0.039 %, and `smb1/total` −0.019 % where `unl2` gives −0.005 %.
+
+So `smb3/total` has an instrument spread of **0.034 %** on this tree, against a tolerance of
+0.02 %: the figure is **inside the spread of an instrument that cannot resolve it**. That is the
+finding MF-UNL-1 step 6 recorded with a 0.016 % spread and `board-77`'s row with a +0.024 % on the
+same game, "entirely Lua's `ltable.c`" — now with a pair whose spread is twice the tolerance.
+
+PR-1's thirteen, where there is no pack and no Lua at all, show the same pair at worst ROM
++0.001 % and set total +81 913 (+0.000 %), which is what an instrument spread looks like on the
+instrument that *can* resolve this lot.
+
+### Gated off, the shipped-today build pays nothing
+
+`unl2off` against `unl2base` — the lot's source with the four features out of `default`:
+
+* PR-1's thirteen: set total **−132 022 (−0.000 %)**, worst ROM `mm2` / `oamstr` **+0.001 %**,
+  seven of thirteen below the base.
+* Level 2: **all five `core` figures +0, identical to the instruction.** `total` −0.007 %
+  (`smb1`) to +0.008 % (`zelda2`), which is the same spread the same-behaviour pair shows.
+
+So the twelve numbers are reachable or unreachable for the price of a flag, in either direction,
+which is the owner's rule.
+
+### The feature decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-mmc3-chrram` | **`default`** | PR-1 worst +0.001 %, all five level-2 `core` at or below +0.001 % |
+| `board-mmc3-scramble` | **`default`** | the same measurement; the four were measured together, as MF-6a3 step 1, MF-6c step 2 and MF-UNL-1 step 6 measured their lots' boards together |
+| `board-263` | **`default`** | the same |
+| `board-189` | **`default`** | the same |
+
+`parked-boards` is unchanged: it still holds `board-vs-system` alone. **`smb3/total +0.039 %` is
+the one figure outside the tolerance and it does not park a board**, for three reasons stated
+together: the per-function diff puts 9.37 M of its 9.39 M in Lua's `ltable.c` and no symbol of
+this project above +817 768; the stage table has `ppu`, `apu` and `draw_list` identical to the
+instruction; and a pair of binaries with identical emulation moves that same figure by 0.034 %,
+which is the instrument's spread and is larger than the tolerance itself. The five level-2 `core`
+figures — the emulated core, which is what these twelve boards *are* — are +0.000 % to +0.001 %.
+
+Nothing is dropped either way: each of the four is one `--no-default-features --features …` away.
