@@ -74,7 +74,7 @@ table — they are the columns the comments were already quoting.
 * [x] **2/6** — the override at load: `vs::corrected_board`, `RomImage::correct_vs_board`, the
   `load_rom` order, `has_submapper`, the load message.
 * [x] **3/6** — the tests: the brief's four cases, plus the regression itself as a synthetic image.
-* [ ] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
+* [x] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
   the three `Cpu6502::step` inlinings 0 / 0 / 0, `zone_offset` not dearer.
 * [ ] **5/6** — the documents: Q-138, `MF-VS.md`'s "For R0" paragraph answered, the journal.
 * [ ] **6/6** — the check: fmt; clippy `-D warnings` in both configurations; the suites in both; the
@@ -270,3 +270,65 @@ The six tests, the brief's four among them:
 Green: `zax-nes` + `zax-harness` **926 / 0 / 8** by default — still exactly MF-4e's — and
 **986 / 0 / 8** with `parked-boards` (980 after step 2 plus this step's 6). fmt clean, clippy
 `-D warnings --all-targets` clean in both configurations.
+
+### Step 4 — the measurement: the emulated core is identical to the instruction
+
+**Two clean `git archive` builds**, each in a fresh directory with its own target folder
+(`tools/perf/build-clean.sh`, `PERFORMANCE-HISTORY.md` §2 and §3), under WSL's Ubuntu with
+valgrind 3.22.0: `mfvsfix-0-0aee4241`, the baseline, and `mfvsfix-1-e0af7b50`, the tip of step 3.
+The driver is `rust/target-mf/mfvsfix.sh`, four lines of environment around the project's own
+scripts, exactly as MF-VS's `mfvs.sh` and MF-CART's `mfct.sh` were. G: had **17 GB** free
+throughout, against the brief's floor of 5 GB; each build directory is deleted by the script as soon
+as its binary is copied out, and the callgrind dumps were deleted as soon as the figures below were
+read.
+
+#### The bar: all five `core` figures are **+0 instructions**
+
+`l2-diff.py --bar`, level 2 (the five commercial games with their 3D packs, 600 frames after 120 of
+warm-up, inputs pressed):
+
+| | baseline | tip | delta | |
+| --- | ---: | ---: | ---: | --- |
+| `smb1/core` | 11 515 171 382 | 11 515 171 382 | **+0** | +0.000 % |
+| `metroid/core` | 11 146 931 701 | 11 146 931 701 | **+0** | +0.000 % |
+| `mm2/core` | 12 037 277 089 | 12 037 277 089 | **+0** | +0.000 % |
+| `zelda2/core` | 12 775 199 516 | 12 775 199 516 | **+0** | +0.000 % |
+| `smb3/core` | 15 314 932 509 | 15 314 932 509 | **+0** | +0.000 % |
+| `zelda2/total` | 15 360 224 299 | 15 359 220 731 | −1 003 568 | −0.007 % |
+| `smb1/total` | 13 588 954 929 | 13 588 317 906 | −637 023 | −0.005 % |
+| `metroid/total` | 13 735 150 674 | 13 735 186 327 | +35 653 | +0.000 % |
+| `mm2/total` | 18 976 728 310 | 18 976 961 245 | +232 935 | +0.001 % |
+| `smb3/total` | 24 188 563 051 | 24 190 399 111 | +1 836 060 | +0.008 % |
+
+**`core` is `NesCore::run_frame`, and it is byte-identical on all five games** — not "within
+tolerance", identical to the instruction. That is the sharpest possible form of this lot's claim:
+every line it adds runs at **load** time, so the emulated machine is not merely as fast as the
+baseline's, it is the same code. The `total` row is `bench_core::run`, which includes the one
+`load_rom` and the pack load, and it moves by **−0.007 % to +0.008 %** — three ROMs above the
+baseline and two below, the worst being `smb3` at +0.008 %, less than half of the +0.02 %
+tolerance and the ordinary block-placement lottery of §5.14 rather than work.
+
+#### The three pinned symbols, identical in both builds
+
+* **The three `Cpu6502::step` inlinings hold, 0 / 0 / 0.** `step`, `branch` and `resolve` are
+  **one symbol each** in both binaries and identical to the instruction: 830 026 257 / 398 544 181 /
+  275 870 142 on `smb3` and 891 759 992 / 310 831 812 / 221 852 286 on `zelda2`, the same numbers on
+  both sides.
+* **`WideExtension::zone_offset` is not dearer**: it is not a symbol of its own in either build —
+  inlined into the fetch path, as every earlier lot found it — so no new symbol appeared and nothing
+  moved.
+* **`Ppu2C02::read_pattern_planes` is identical to the instruction** on all five games:
+  229 524 480 (`smb3`), 229 862 440 (`mm2`), 221 447 100 (`smb1`), 228 740 100 (`metroid`),
+  240 214 760 (`zelda2`).
+
+#### golden-core: byte-identical over 98 originals and 1 200 frames
+
+Both clean binaries were run as `golden-core /mnt/g/3DSen/test-originals <out>.jsonl 1200` — the 98
+commercial originals, 1 200 frames each. The two digest files are **byte-identical** under `cmp` and
+carry the same md5 (`8f51ed74…`). Nothing of the behaviour of any commercial game moved, which is
+what the `+0` on all five `core` figures says from the other side.
+
+So the default build is the baseline, by every instrument the brief names. The correction is
+`#[cfg]`-gated and reachable only through `--features parked-boards`, and the two lines the default
+build does compile — `InesHeader::has_submapper`, which is `self.is_nes20` there, and the `load_rom`
+restructure — cost the emulated core nothing at all.
