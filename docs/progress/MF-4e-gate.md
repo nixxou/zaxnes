@@ -265,3 +265,51 @@ row rather than the code (the function's comment and the feature's row both say 
 covered); and what happens next either way — if the owner validates the picture the feature joins
 `default` and `SMALLEST_GAP` collapses back to a single 2, which puts Q-137 point 2 back in front;
 if he invalidates it, the four-variant table measured on SMB3 is where to reopen.
+
+## Step 3 — fmt, clippy and the suites in every configuration
+
+### The matrix
+
+| check | `default` | `ppu-2007-render-read` | `parked-boards` | `ppu-exact-sprite-eval` |
+| --- | --- | --- | --- | --- |
+| `cargo fmt --check` | clean | clean | clean | clean |
+| clippy `-D warnings`, `zax-nes` + `zax-harness`, `--all-targets` | clean | clean | clean | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **925 / 0 / 8** | **926 / 0 / 8** | **985 / 0 / 8** | **925 / 0 / 8** |
+| `--ignored --no-fail-fast --test-threads=1`, both ROM folders | **7 of 8** | **7 of 8** | **7 of 8** | not run |
+| `AccuracyCoin` | **128 / 147** | **129 / 147** | 128 / 147 | 131 / 147 |
+
+`cargo fmt` is one check for the tree and not four — it does not read features — but it is listed
+per column because clippy is genuinely four runs and the two are always reported together. The
+fifth configuration, both PPU features, is **926 / 0 / 8** and **132 / 147**.
+
+**No new `allow` anywhere.** The only thing clippy had to say about this lot was
+`items_after_statements` on the restored test, where the second nested `fn` sat below the first
+`assert_eq!`; both helpers now stand at the top of the body, which is the shape the file's other
+tests use.
+
+### The ignored suite, test by test
+
+The same eight tests in all three configurations run, none skipped for a missing ROM:
+
+| ignored test | `default` | `ppu-2007-render-read` | `parked-boards` |
+| --- | --- | --- | --- |
+| **`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** | **pass**, `SMALLEST_GAP == 3` | **pass**, `SMALLEST_GAP == 2` | **pass**, 3 |
+| **`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack`** | **pass** | **pass** | **pass** |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | pass | pass | pass |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | pass | pass | pass |
+| `req_core_113_dmc_dma_during_read4_is_p3` | pass | pass | pass |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | pass | pass | pass |
+| `the_cost_of_one_capture_and_one_restore` | pass | pass | pass |
+| `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom` | **fail**, out of scope | **fail** | **fail** |
+
+**R2-005's test passes on both sides of the gate**, which is the pair this lot had to keep: the
+default build satisfies criterion 2 with the geometry `11407930` had and the bound at **3**, and the
+feature build satisfies it with MF-4e's geometry and the bound at 2. The one failure in every
+configuration is the known Zelda II patch-detection test, which the brief puts out of scope and
+which fails identically on the baseline, on MF-4e's tree and on MF-VS-fix's.
+
+And `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` — the test that
+exists because of the widescreen symptom the owner reported against MF-4d — passes in **both**
+configurations, so this lot's gate is not what the owner will be looking at when he validates: the
+harness-level widescreen regression is clean either way, and what he is judging is the 58 and 18-19
+frames R0's A/B found.
