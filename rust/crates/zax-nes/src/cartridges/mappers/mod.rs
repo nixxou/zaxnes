@@ -66,6 +66,8 @@ mod nrom;
 #[cfg(feature = "board-96")]
 mod oeka_kids;
 mod rambo1;
+#[cfg(feature = "board-133")]
+mod sachen_72008;
 #[cfg(feature = "board-sachen-8reg")]
 mod sachen_8reg;
 #[cfg(feature = "board-small-boards")]
@@ -152,6 +154,8 @@ pub use oeka_kids::OekaKids;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};
+#[cfg(feature = "board-133")]
+pub use sachen_72008::Sachen72008;
 #[cfg(feature = "board-sachen-8reg")]
 pub use sachen_8reg::Sachen8Reg;
 #[cfg(feature = "board-small-boards")]

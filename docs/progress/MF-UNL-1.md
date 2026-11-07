@@ -24,7 +24,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **2/8 — `board-sachen-8reg`.** `Sachen8Reg`, the index/data pair at $4100/$4101 (mask
   $C101) with registers 0, 1 and 3 as **no-ops**, R7's four mirroring modes (one of which is a
   nametable-page override), and 243's extra CHR bit on R2.
-- [ ] **3/8 — `board-133`.** The 72-pin decode, with the choice between the 60-pin (Namco-108
+- [x] **3/8 — `board-133`.** The 72-pin decode, with the choice between the 60-pin (Namco-108
   clone, $8000/$8001, mask $E001, analog feedback) and the 72-pin ($4100, mask $E100) decodes
   recorded in a code comment.
 - [ ] **4/8 — the four sweeps and the feature matrix.** `req_core_100_*`, `req_core_102_*`, the
@@ -169,4 +169,16 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 3 — `board-133`
+
+`Sachen72008` is the lot's third and last `DecodeBoard` variant and adds **no** forward: one
+latch, one byte of savestate. The 60-pin Sachen 3009's Namco-108 decode and its analog feedback
+path are **not** built, and the page's own closing sentence is the reason — recorded in
+`Sachen72008`'s doc comment as the lot asked.
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **944 passed, 0 failed, 9 ignored** (+3 over step 2) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |

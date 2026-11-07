@@ -40,6 +40,7 @@ default = [
     "board-111",
     "board-jv001",
     "board-sachen-8reg",
+    "board-133",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -210,6 +211,14 @@ board-jv001 = ["board-decode-boards"]
 # `S0-S0-S0-S1` -- a per-table layout no `NametableMirroring` can say. Implies
 # `board-decode-boards`.
 board-sachen-8reg = ["board-decode-boards"]
+
+# Mapper 133, the Sachen 72008 / UNL-SA-72008 (MF-UNL-1 step 3): *Jovial Race* and the Joy Van
+# release of *盜帥 - Master Chu and the Drunkard Hu*. One latch, `$4100: [.... .PCC]` under mask
+# $E100. The page documents the number twice -- the 60-pin Sachen 3009 is a Namco-108 clone with
+# an analog feedback path -- and says itself that "only the 72-pin variant requires emulation";
+# `Sachen72008`'s own note records that choice. One `DecodeBoard` variant, no new forward.
+# Implies `board-decode-boards`.
+board-133 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

@@ -109,7 +109,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   protection ASIC -- one chip, one `DecodeBoard` variant -- behind `board-jv001`
     //   (MF-UNL-1 step 1);
     // * 150 and 243, Sachen's eight-register ASIC -- one class in Mesen 2, one `DecodeBoard`
-    //   variant here -- behind `board-sachen-8reg` (MF-UNL-1 step 2).
+    //   variant here -- behind `board-sachen-8reg` (MF-UNL-1 step 2);
+    // * 133, the Sachen 72008's one latch, behind `board-133` (MF-UNL-1 step 3).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -129,7 +130,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
     let jv001 = cfg!(feature = "board-jv001");
     let sachen = cfg!(feature = "board-sachen-8reg");
-    let additions: [(i32, bool); 62] = [
+    let additions: [(i32, bool); 63] = [
         (19, true),
         (24, true),
         (26, true),
@@ -170,6 +171,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (118, true),
         (119, cfg!(feature = "board-119")),
         (132, jv001),
+        (133, cfg!(feature = "board-133")),
         (136, jv001),
         (140, small),
         (147, jv001),
@@ -5820,4 +5822,87 @@ fn req_core_090_the_sachen_eight_register_asic_survives_a_save_and_restore() {
         );
         assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
     }
+}
+
+// ------------------------------------------- the Sachen 72008 (133), MF-UNL-1 step 3
+
+/// nesdev ("INES Mapper 133"), the 72-pin half of the page: "Mask: $E100, $4100: [.... .PCC] -
+/// 32 KiB PRG bank and 8 KiB CHR bank". The 60-pin Sachen 3009's Namco-108 decode is
+/// deliberately not built — the page's own closing sentence is that "only the 72-pin variant
+/// requires emulation" — and `Sachen72008`'s note records the choice (MF-UNL-1 step 3).
+#[cfg(feature = "board-133")]
+#[test]
+fn req_core_102_mapper_133_banks_prg_and_chr_from_one_latch_at_4100() {
+    let mut core = MapperRom::new(133).prg(8).chr(32).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // `CC` is the 8 KiB CHR bank.
+    core.mapper_write(0x4100, 0x03);
+    assert_eq!(24, core.chr_bank(0x0000));
+    assert_eq!(31, core.chr_bank(0x1C00), "one 8 KiB bank over the range");
+    // `P` is the 32 KiB PRG bank, above it.
+    core.mapper_write(0x4100, 0x05);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(8, core.chr_bank(0x0000), "and `CC` went back to 1");
+    core.mapper_write(0x4100, 0x00);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+}
+
+/// The latch's mask, "$E100", which decodes A15-A13 and A8 and nothing else: the register
+/// repeats every other page through $4000-$5FFF and is **not** reachable from $6000-$7FFF or
+/// from $8000-$FFFF.
+///
+/// Mesen 2 decodes `(addr & $6100) == $4100` over a $4100-$FFFF window, one address line
+/// narrower, which also answers at $C100-$DFFF; this build takes the page's mask (MF-UNL-1
+/// step 3).
+#[cfg(feature = "board-133")]
+#[test]
+fn req_core_102_the_sachen_72008_latch_answers_only_under_mask_e100() {
+    let mut core = MapperRom::new(133).prg(8).chr(32).load();
+
+    // $4300 and $5F00 are the same latch as $4100.
+    core.mapper_write(0x4300, 0x02);
+    assert_eq!(16, core.chr_bank(0x0000));
+    core.mapper_write(0x5F00, 0x01);
+    assert_eq!(8, core.chr_bank(0x0000));
+
+    // A8 clear is not the latch.
+    core.mapper_write(0x4000, 0x03);
+    assert_eq!(8, core.chr_bank(0x0000), "A8 clear is no register");
+
+    // Neither is $6100, which is why the board needs no `intercept_cpu_write` and keeps the
+    // header's PRG-RAM.
+    core.mapper_write(0x6100, 0x03);
+    assert_eq!(8, core.chr_bank(0x0000), "no register in $6000-$7FFF");
+
+    // Nor $C100, where Mesen's narrower mask would answer.
+    core.mapper_write(0xC100, 0x03);
+    assert_eq!(8, core.chr_bank(0x0000), "no register above $8000");
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+}
+
+/// REQ-CORE-090/091 and REQ-CORE-004 for the board: one byte, saved, restored and reset.
+#[cfg(feature = "board-133")]
+#[test]
+fn req_core_090_the_sachen_72008_latch_survives_a_save_and_restore() {
+    let mut core = MapperRom::new(133).prg(8).chr(32).load();
+    core.mapper_write(0x4100, 0x06);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(16, core.chr_bank(0x0000));
+
+    let state = core.save_state(true).unwrap();
+    core.mapper_write(0x4100, 0x01);
+    assert_eq!(8, core.chr_bank(0x0000));
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(16, core.chr_bank(0x0000));
+    assert_eq!(state, core.save_state(true).unwrap());
+
+    core.reset();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
 }

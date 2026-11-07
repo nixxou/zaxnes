@@ -8,6 +8,7 @@
     feature = "board-77",
     feature = "board-96",
     feature = "board-111",
+    feature = "board-133",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-sachen-8reg",
@@ -27,6 +28,8 @@ use super::Jv001;
 use super::Mapper;
 #[cfg(feature = "board-96")]
 use super::OekaKids;
+#[cfg(feature = "board-133")]
+use super::Sachen72008;
 #[cfg(feature = "board-sachen-8reg")]
 use super::Sachen8Reg;
 #[cfg(feature = "board-vs-system")]
@@ -114,6 +117,10 @@ pub enum DecodeBoard {
     /// Mappers 150 and 243, Sachen's eight-register ASIC.
     #[cfg(feature = "board-sachen-8reg")]
     Sachen8Reg(Sachen8Reg),
+    // Appended by MF-UNL-1 step 3, the lot's last board and the smallest of the three.
+    /// Mapper 133, the Sachen 72008.
+    #[cfg(feature = "board-133")]
+    Sachen72008(Sachen72008),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -138,6 +145,8 @@ macro_rules! inner {
             DecodeBoard::Jv001($b) => $body,
             #[cfg(feature = "board-sachen-8reg")]
             DecodeBoard::Sachen8Reg($b) => $body,
+            #[cfg(feature = "board-133")]
+            DecodeBoard::Sachen72008($b) => $body,
         }
     };
 }

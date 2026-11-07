@@ -25,6 +25,8 @@ use super::mappers::NesEvent;
 use super::mappers::Nrom;
 #[cfg(feature = "board-96")]
 use super::mappers::OekaKids;
+#[cfg(feature = "board-133")]
+use super::mappers::Sachen72008;
 #[cfg(feature = "board-sachen-8reg")]
 use super::mappers::Sachen8Reg;
 #[cfg(feature = "board-116")]
@@ -157,6 +159,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     119,
     #[cfg(feature = "board-jv001")]
     132,
+    #[cfg(feature = "board-133")]
+    133,
     #[cfg(feature = "board-jv001")]
     136,
     #[cfg(feature = "board-small-boards")]
@@ -471,6 +475,10 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // **Mapper 133 is deliberately absent too**, and for the same reason: its latch is at
+        // $4100 under mask $E100, which `$6100 & $E100` cannot be, and the page gives the Sachen
+        // 72008 no PRG-RAM line either way (MF-UNL-1 step 3).
+        //
         // **The six JV001 numbers are deliberately absent** (36, 132, 136, 147, 172, 173), and
         // the reason is mapper 97's above in the same words: not one of the six pages documents
         // any PRG-RAM, and not one of them says the board has none either. Nothing forces the
@@ -730,6 +738,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // and R6 drive and nothing else, so it is one board with one `bool`.
         #[cfg(feature = "board-sachen-8reg")]
         150 | 243 => Board::DecodeBoard(DecodeBoard::Sachen8Reg(Sachen8Reg::new(memory, mapper))),
+        // MF-UNL-1 step 3: the Sachen 72008's one latch. The page's 60-pin decode -- a Namco-108
+        // clone with an analog feedback path -- is deliberately not built; `Sachen72008`'s own
+        // note has the page's sentence that settles it.
+        #[cfg(feature = "board-133")]
+        133 => Board::DecodeBoard(DecodeBoard::Sachen72008(Sachen72008::new(memory))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.
