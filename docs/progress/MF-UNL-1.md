@@ -38,7 +38,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   feature decision for each of the three boards.
 - [x] **7/8 — golden-core against the base commit** over the 98 commercial originals, and the
   full check with `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
-- [ ] **8/8 — the journal and the final pass.**
+- [x] **8/8 — the journal and the final pass.**
 
 ## The nine numbers, and the page each is built from
 
@@ -170,6 +170,63 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 8 — the final pass
+
+`git diff --stat 481f683d HEAD`:
+
+    docs/progress/MF-UNL-1.md                            | 377 +++++
+    docs/review/BOARD-FEATURES.md                        |  42 +-
+    rust/crates/zax-nes/Cargo.toml                       |  36 ++
+    .../zax-nes/src/cartridges/mappers/decode_boards.rs  |  51 +-
+    rust/crates/zax-nes/src/cartridges/mappers/jv001.rs  | 539 +++++
+    rust/crates/zax-nes/src/cartridges/mappers/mod.rs    |  12 +
+    .../zax-nes/src/cartridges/mappers/sachen_72008.rs   | 103 +++
+    .../zax-nes/src/cartridges/mappers/sachen_8reg.rs    | 234 +++
+    rust/crates/zax-nes/src/cartridges/mod.rs            |   8 +-
+    rust/crates/zax-nes/src/cartridges/registry.rs       |  69 ++
+    rust/crates/zax-nes/tests/mapper_tests.rs            | 720 ++++++-
+    11 files changed, 2183 insertions(+), 8 deletions(-)
+
+**Eight deletions in the whole lot**, and they are all the two lines a `matches!` list and a
+`use` block grew. The one file of the existing core that changes at all is
+`cartridges/mod.rs`, by **two numbers in `nametable_pages_vary`** (150 and 243) and the comment
+that says why. `registry.rs` gains nine `SUPPORTED_MAPPERS` entries, three `create_board` arms,
+one `board_memory_sizes` row, two comments naming the seven numbers deliberately *absent* from
+that function, and one `#[allow(clippy::too_many_lines)]`. `decode_boards.rs` gains three
+variants, three `inner!` arms, three features in the umbrella's `compile_error!` guard and two
+widened `#[cfg]`s on forwards that already existed.
+
+**No existing mapper changes behaviour and no save format changes.** `NesCore::STATE_VERSION`
+stays at 8 and `WIDE_STATE_VERSION` at 9; the diff touches neither `nes_core.rs` nor `state.rs`,
+and every new `save_registers` block is inside a board no earlier state can name. golden-core over
+the 98 commercial originals is byte-identical to `481f683d`'s (step 7), which is that claim
+measured rather than asserted.
+
+#### The final check, on the committed tree
+
+| gate | result |
+| --- | --- |
+| `cargo fmt --all --check` | **clean** |
+| clippy `-D warnings`, `-p zax-nes`, **default** | **clean** |
+| clippy `-D warnings`, `-p zax-nes`, `--no-default-features` | **clean** |
+| clippy `-D warnings`, `-p zax-nes`, `--features parked-boards` | **clean** |
+| clippy `-D warnings`, `-p zax-nes`, **each new feature alone** and the three together | **clean** |
+| clippy `-D warnings`, `-p zax-harness` | **clean** |
+| `cargo test --release -p zax-nes -p zax-harness` | **944 / 0 / 9** |
+| the same, `--no-fail-fast -- --include-ignored`, `ZAXNES_ROMS` + `ZAXNES_TEST_ROMS` | **953 / 0 / 0** |
+| golden-core, 98 commercial originals, 1 200 frames | **byte-identical to `481f683d`** |
+| PR-1's thirteen ROMs | worst **+0.001 %**, set total **−0.000 %** |
+| level 2's five games, `core` | **all five at or below the base** |
+| level 2's five games, `total` | four inside; `smb3` +0.023 %, attributed to Lua's `ltable.c` by a same-behaviour pair (step 6) |
+| `unsafe` | **none** |
+| `spec/` | untouched but for the two new tickets, Q-140 and Q-141 |
+
+**Disk**: G: stayed between 23 and 31 GiB free, above the brief's 5 GiB floor. Four clean builds,
+each in its own fresh directory with its own `CARGO_TARGET_DIR` and deleted as soon as its binary
+was out; the tars removed after. No GPU campaign, and never two test suites at once.
+
+The journal entry is in `G:/3dsen/cleanroom/journal/JOURNAL.md`, dated 2026-11-07.
 
 ### Step 7 — golden-core, and the full check with the ROM roots set
 
