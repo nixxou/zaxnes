@@ -97,7 +97,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
   PRG registers with the four modes, the sixteen $9000-$A007 CHR registers with the four modes and
   the $D003 outer bank, and $D000-$D003. The four `registry.rs` arms, the four `SUPPORTED_MAPPERS`
   entries, the four `board_memory_sizes` rows, the save-state block.
-- [ ] **3/9 — the IRQ.** One prescaler and one counter, four sources (three of them clocked, see
+- [x] **3/9 — the IRQ.** One prescaler and one counter, four sources (three of them clocked, see
   Q-151), up/down/off counting, the $C006 XOR register, the $C001 prescaler mask, and the page's
   "disabling acknowledges, inhibits counting and resets the prescaler to zero". `on_cpu_cycle`,
   `on_ppu_address_bus`, `irq_asserted`, and `ppu_irq_horizon` answering `None`.
@@ -310,3 +310,89 @@ future reader will want to find deliberate.
 
 `cargo test --release -p zax-nes`: **924 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 3 — the IRQ: one prescaler, one counter, three clocks, and four readings Mesen 2 does not share
+
+The page's own three steps are the whole counter:
+
+1. "When **counting is enabled** and the counter is clocked from the source selected by $C001
+   bits 0-1, the prescaler is increased/decreased (depending on $C001 bits 6-7)."
+2. "If the AND-masked prescaler (according to $C001 bit 2) wraps, meaning it is zero after
+   increasing or **matches the prescaler mask after decreasing**, the IRQ counter is
+   increased/decreased."
+3. "If the IRQ counter wraps, meaning it is zero after increasing or $FF after decreasing, an IRQ
+   is generated. Disabling the IRQ via registers $C000 or $C002 acknowledges it."
+
+plus the gloss under the register list: "'Disabling' acknowledges a pending IRQ, **inhibits
+counting**, and **resets the prescaler to zero**. 'Enabling' means that counting is no longer
+inhibited."
+
+### Where each source lands
+
+| `$C001` bits 1-0 | the page | this core |
+| ---: | --- | --- |
+| **0** | CPU M2 rise | `Mapper::on_cpu_cycle`, behind `clocks_on_cpu_cycle` |
+| **1** | PPU A12 rise, **unfiltered**, eight per scanline | `Mapper::on_ppu_address_bus`, a raw edge against `last_ppu_address` |
+| **2** | PPU reads, 170 per scanline | the same hook, every call |
+| **3** | CPU writes | **nothing — Q-151** |
+
+**Unfiltered is the one word that keeps this board away from
+[`A12Watcher`](crate::cartridges::A12Watcher).** The MMC3's counter needs that filter to tell a
+real rise from the two-dot dips of the fetch pipeline and so counts one rise a scanline; this one
+counts all eight. `req_core_114_jy_asic_a12_counting_is_unfiltered` is the TC0690's own filter test
+in this file with the opposite expectation — seven rises with two-dot dips leave it alone and the
+eighth fires it.
+
+**`last_ppu_address` is kept whatever the source is**, so that a game selecting source 1 mid-frame
+does not read a stale edge. That one byte is what makes all four numbers appear in
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`'s expected list, and the four
+numbers are in both PPU latch lists (A12 is driven by `$2006`/`$2007` as much as by a fetch) and in
+`clocks_on_cpu_cycle`.
+
+**`ppu_irq_horizon` is `None`**, and not by this board's choice: `IrqBoard` answers `None` for the
+whole variant and does not forward the method, because MF-6b step 4 measured any forward at
+`NesBus::catch_up_ppu` 188 → 190 instructions and `mmc5` +9 214 379 over 300 frames. It is also the
+honest answer for two of the four sources, which *are* the PPU's bus.
+`jy_asic_ppu_irq_horizon_is_none_for_every_source` pins the property the census asks for over all
+sixteen combinations of source and direction.
+
+### Q-151: four readings of the counter that leave Mesen 2
+
+| | Mesen 2's `JyCompany.h` | the page | the test |
+| --- | --- | --- | --- |
+| **counting while disabled** | the prescaler and counter advance; `_irqEnabled` is tested only before asserting | "'Disabling' … **inhibits counting**" | `q_151_jy_asic_disabled_counting_does_not_advance_the_counter` |
+| **the prescaler on disable** | left where it was | "**resets the prescaler to zero**" | `q_151_jy_asic_disabling_the_irq_resets_the_prescaler_to_zero` |
+| **the prescaler's wrap going down** | `if(--prescaler == 0)` — a wrap off a prescaler of **one** | "**matches the prescaler mask** after decreasing" — a wrap off **zero** | `q_151_jy_asic_prescaler_wraps_when_it_reaches_the_mask_going_down` |
+| **IRQ source 3, "CPU writes"** | `_console->GetCpu()->IsCpuWrite()` | the source exists | **no hook in this core**: `q_151_jy_asic_irq_source_3_selects_a_counter_that_does_not_advance` |
+
+The fourth is this core's gap and not a reading of the page. `Mapper::on_cpu_cycle` is told that a
+CPU cycle elapsed and not whether it was a write, and a CPU write to RAM never reaches the
+cartridge at all — so a hook would mean a new parameter on a per-cycle signature that every board
+in the library shares, which the lot's performance rule forbids. The register is decoded and kept,
+so a save state carries the game's own selection and a lot that adds the hook has one test to come
+and rewrite. It is the same kind of gap as MR-30-4's UNROM 512 flash and MF-6c step 3's Datach
+barcode scanner.
+
+### Tests from the page
+
+`req_core_114_jy_asic_counts_cpu_m2_rises_on_source_0` (one cycle when both values are one short,
+512 when the counter is two short, so the prescaler's 256-cycle period is measured and not
+assumed), `…_prescaler_mask_is_ff_or_07`, `…_counts_up_down_or_not_at_all` (directions 0 and 3
+must not count at all), `…_xors_the_prescaler_and_counter_writes`,
+`…_irq_source_selection_picks_one_clock_and_not_the_other` (the census's own test: M2 counts and
+A12 does not, and the reverse), `…_a12_counting_is_unfiltered`,
+`…_irq_registers_accept_address_bit_11` (the `$F007` mask, the one window of the chip that does),
+`jy_asic_ppu_irq_horizon_is_none_for_every_source`, and the four Q-151 tests.
+
+**One test had to leave `mapper_write` behind.**
+`q_151_jy_asic_disabling_the_irq_resets_the_prescaler_to_zero` counts single cycles, and that
+helper ticks the bus twice before every write — enough to wrap a prescaler set one short on
+purpose. It writes through `write_memory` instead, which is the first test in this file to need
+that distinction.
+
+`cargo test --release -p zax-nes`: **936 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean — the latter after splitting
+`write_register` into three (`write_arithmetic_register`, `write_irq_register`,
+`write_config_register`), the IRQ window having taken it past `clippy::too_many_lines`.

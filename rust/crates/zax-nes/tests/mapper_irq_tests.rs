@@ -1055,3 +1055,348 @@ fn req_core_100_an_a12_dip_shorter_than_the_filter_does_not_clock_the_tc0690() {
         "a twenty-four-dot dip did not clock the counter"
     );
 }
+
+// ------------------------------------- the J.Y. Company ASIC (35, 90, 209, 211), MF-UNL-4
+
+/// Arms the board's counter: the source, the direction, the prescaler mask, then the prescaler
+/// and counter values, then the enable.
+///
+/// `$C004` and `$C005` are written **after** `$C006`, because the page says the written value is
+/// `XORed` with the content of that register before being stored; this helper leaves it at zero
+/// so that a caller writes plain values.
+#[cfg(feature = "board-jy-asic")]
+fn arm_jy_irq(core: &mut NesCore, source: u8, direction: u8, prescaler: u8, counter: u8) {
+    core.mapper_write(0xC001, (direction << 6) | source);
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, prescaler);
+    core.mapper_write(0xC005, counter);
+    core.mapper_write(0xC003, 0x00); // "$C003: IRQ Enable".
+}
+
+/// IRQ source 0, "CPU M2 rise": the prescaler and the counter in series on the CPU clock.
+///
+/// With the prescaler mask `$FF` and both values set so that one more count wraps each, the IRQ
+/// comes on the very next cycle; with the counter one short of wrapping it takes 256 more.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_counts_cpu_m2_rises_on_source_0() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    arm_jy_irq(&mut core, 0, 1, 0xFF, 0xFF);
+    assert_eq!(
+        1,
+        tick_until_irq(&mut core, 8),
+        "prescaler and counter wrap"
+    );
+
+    // One prescaler period is 256 CPU cycles, so a counter two short of wrapping is 512.
+    core.mapper_write(0xC002, 0x00); // disable: acknowledges and resets the prescaler.
+    assert!(!irq(&core));
+    arm_jy_irq(&mut core, 0, 1, 0x00, 0xFE);
+    assert_eq!(
+        512,
+        tick_until_irq(&mut core, 4096),
+        "two prescaler periods"
+    );
+}
+
+/// `$C001` bit 2, the prescaler mask: "0: $FF / 1: $07".
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_prescaler_mask_is_ff_or_07() {
+    let mut core = MapperRom::new(209).prg(64).load();
+
+    // Mask $07: the counter is clocked every eight CPU cycles, so a counter one short of
+    // wrapping takes eight.
+    core.mapper_write(0xC001, (1 << 6) | 0x04);
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, 0x00);
+    core.mapper_write(0xC005, 0xFF);
+    core.mapper_write(0xC003, 0x00);
+    assert_eq!(8, tick_until_irq(&mut core, 64), "the $07 mask");
+
+    core.mapper_write(0xC002, 0x00);
+    arm_jy_irq(&mut core, 0, 1, 0x00, 0xFF);
+    assert_eq!(256, tick_until_irq(&mut core, 1024), "the $FF mask");
+}
+
+/// `$C001` bits 7-6: "0: Counting disabled / 1: Increase / 2: Decrease / 3: Counting disabled".
+///
+/// And the page's wrap conditions, one per direction: the counter fires when it "is zero after
+/// increasing or $FF after decreasing".
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_counts_up_down_or_not_at_all() {
+    for direction in [0u8, 3] {
+        let mut core = MapperRom::new(209).prg(64).load();
+        arm_jy_irq(&mut core, 0, direction, 0xFF, 0xFF);
+        assert_eq!(
+            -1,
+            tick_until_irq(&mut core, 2048),
+            "direction {direction} must not count"
+        );
+    }
+
+    // Up: $FF + 1 is zero, which fires.
+    let mut core = MapperRom::new(209).prg(64).load();
+    arm_jy_irq(&mut core, 0, 1, 0xFF, 0xFF);
+    assert_eq!(1, tick_until_irq(&mut core, 8), "up, from $FF");
+
+    // Down: 0 - 1 is $FF, which fires. The prescaler's own wrap is the same condition one level
+    // up — "matches the prescaler mask after decreasing" — so a prescaler of zero wraps at once.
+    let mut core = MapperRom::new(209).prg(64).load();
+    arm_jy_irq(&mut core, 0, 2, 0x00, 0x00);
+    assert_eq!(1, tick_until_irq(&mut core, 8), "down, from zero");
+}
+
+/// **Q-151**, second half: "If the AND-masked prescaler … wraps, meaning it is zero after
+/// increasing or **matches the prescaler mask after decreasing**".
+///
+/// Mesen 2 writes `if(--prescaler == 0)`, which wraps off a prescaler of **one** — one count
+/// earlier than the page. With the $07 mask and the prescaler set to 1, the page's rule needs two
+/// clocks to reach the counter and Mesen's needs one; this test requires the page's.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_151_jy_asic_prescaler_wraps_when_it_reaches_the_mask_going_down() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    core.mapper_write(0xC001, (2 << 6) | 0x04); // down, mask $07, source 0.
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, 0x01); // prescaler 1.
+    core.mapper_write(0xC005, 0x00); // counter 0: one clock of it fires.
+    core.mapper_write(0xC003, 0x00);
+
+    // 1 -> 0 clocks nothing; 0 -> 7 is the wrap, and that clock reaches the counter.
+    core.bus_mut().tick();
+    assert!(!irq(&core), "a prescaler of 1 going to 0 is not a wrap");
+    core.bus_mut().tick();
+    assert!(irq(&core), "0 going to the mask is the wrap");
+}
+
+/// **Q-151**, first half: "'Disabling' acknowledges a pending IRQ, inhibits counting, and resets
+/// the prescaler to zero."
+///
+/// All three, and the third is the one Mesen 2 does not do. With the $FF mask, a prescaler left
+/// at $FF is one clock from wrapping; disabled and re-enabled, the page's reset means it is 256
+/// clocks away again.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_151_jy_asic_disabling_the_irq_resets_the_prescaler_to_zero() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    // Written through `write_memory` and not `mapper_write`, because this test counts single
+    // cycles and that helper ticks the bus twice before every write.
+    core.write_memory(0xC001, 1 << 6); // up, mask $FF, source 0.
+    core.write_memory(0xC006, 0x00);
+    core.write_memory(0xC004, 0xFE);
+    core.write_memory(0xC005, 0xFF);
+    core.write_memory(0xC003, 0x00);
+
+    // One clock takes the prescaler to $FF, which is not yet a wrap.
+    core.bus_mut().tick();
+    assert!(!irq(&core));
+
+    // Disable, then enable again without rewriting $C004: the prescaler starts from zero, so the
+    // counter is a whole prescaler period away. Mesen 2 would leave it at $FF and fire next
+    // cycle.
+    core.write_memory(0xC002, 0x00);
+    core.write_memory(0xC003, 0x00);
+    assert_eq!(
+        256,
+        tick_until_irq(&mut core, 1024),
+        "the prescaler was reset, not left at $FF"
+    );
+
+    // And "acknowledges a pending IRQ": $C000 with bit 0 clear does the same as $C002.
+    assert!(irq(&core));
+    core.write_memory(0xC000, 0x00);
+    assert!(!irq(&core), "$C000 bit 0 clear acknowledges");
+    core.write_memory(0xC003, 0x00);
+    assert!(!irq(&core), "and re-enabling does not bring it back");
+}
+
+/// **Q-151**, third half: "inhibits counting" means the prescaler does not move while the IRQ is
+/// disabled.
+///
+/// Mesen 2 clocks the prescaler and the counter whatever the enable says and tests it only before
+/// asserting, so a long disabled stretch there advances the counter invisibly. The page's gloss
+/// on disabling says otherwise, and this test requires the page's.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_151_jy_asic_disabled_counting_does_not_advance_the_counter() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    core.mapper_write(0xC001, (1 << 6) | 0x04); // up, mask $07, source 0.
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, 0x00);
+    core.mapper_write(0xC005, 0xFF);
+
+    // Not enabled: a thousand cycles must leave the counter where it is.
+    for _ in 0..1000 {
+        core.bus_mut().tick();
+    }
+    assert!(!irq(&core));
+
+    // Enabled, the counter is still one clock of the prescaler from wrapping, which is eight
+    // CPU cycles. If the disabled stretch had counted, those eight would be elsewhere.
+    core.mapper_write(0xC003, 0x00);
+    assert_eq!(8, tick_until_irq(&mut core, 64));
+}
+
+/// `$C006`, the `XOR` register: the page says the written value is `XORed` with the content of
+/// `$C006` before being stored — on `$C004` and `$C005`, and not on `$C006` itself.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_xors_the_prescaler_and_counter_writes() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    core.mapper_write(0xC001, 1 << 6); // up, mask $FF, source 0.
+    core.mapper_write(0xC006, 0xFF);
+    core.mapper_write(0xC004, 0x00); // stored as $FF.
+    core.mapper_write(0xC005, 0x00); // stored as $FF.
+    core.mapper_write(0xC003, 0x00);
+    assert_eq!(
+        1,
+        tick_until_irq(&mut core, 8),
+        "both values are the complement of what was written"
+    );
+
+    // And the same two writes with the XOR register clear are 256 * 256 cycles away.
+    core.mapper_write(0xC002, 0x00);
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, 0x00);
+    core.mapper_write(0xC005, 0x00);
+    core.mapper_write(0xC003, 0x00);
+    assert_eq!(-1, tick_until_irq(&mut core, 4096));
+}
+
+/// The census's own test: "with the source set to M2, the counter advances on CPU cycles and not
+/// on A12 edges; with it set to A12, the reverse."
+///
+/// And the page's "unfiltered, eight per scanline", which is what keeps this board away from the
+/// MMC3's A12 filter: every rise counts, however short the dip before it.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_irq_source_selection_picks_one_clock_and_not_the_other() {
+    // Source 0: CPU cycles count, A12 rises do not.
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    arm_jy_irq(&mut core, 0, 1, 0xFF, 0xFF);
+    for address in [0x0000u16, 0x1000, 0x0000, 0x1000] {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 0);
+    }
+    assert!(!irq(&core), "source 0 must ignore A12");
+    assert_eq!(1, tick_until_irq(&mut core, 8), "and count M2");
+
+    // Source 1: A12 rises count, CPU cycles do not.
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    arm_jy_irq(&mut core, 1, 1, 0xFF, 0xFF);
+    for _ in 0..600 {
+        core.bus_mut().tick();
+    }
+    assert!(!irq(&core), "source 1 must ignore M2");
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 0);
+    cartridge.on_ppu_address_bus(0x1000, 1);
+    assert!(irq(&core), "one unfiltered A12 rise is one count");
+
+    // Source 2: every PPU read counts, A12 or not — "170 per scanline".
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    arm_jy_irq(&mut core, 2, 1, 0xFF, 0xFF);
+    for _ in 0..600 {
+        core.bus_mut().tick();
+    }
+    assert!(!irq(&core), "source 2 must ignore M2");
+    core.cartridge_mut().unwrap().on_ppu_address_bus(0x2000, 0);
+    assert!(irq(&core), "a nametable fetch is a PPU read");
+}
+
+/// The dip the MMC3's filter would swallow and this board must not: "PPU A12 rise (unfiltered,
+/// eight per scanline)".
+///
+/// Eight rises a scanline is the pattern of the fetch pipeline — the two-dot nametable and
+/// attribute fetches at $2xxx between each pair of pattern fetches at $1xxx — and the TC0690's
+/// own test in this file is the same experiment with the opposite expectation.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_a12_counting_is_unfiltered() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    // Mask $07 and a counter one short, so the eighth rise of the line is the one that fires.
+    core.mapper_write(0xC001, (1 << 6) | 0x04 | 0x01); // up, mask $07, source 1.
+    core.mapper_write(0xC006, 0x00);
+    core.mapper_write(0xC004, 0x00);
+    core.mapper_write(0xC005, 0xFF);
+    core.mapper_write(0xC003, 0x00);
+
+    // Eight rises with two-dot dips between them, which an MMC3 counts as **one**.
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..7 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(!irq(&core), "seven rises");
+
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x2000, 56);
+    cartridge.on_ppu_address_bus(0x1000, 58);
+    assert!(irq(&core), "the eighth rise of a line must count");
+}
+
+/// **Q-151**, fourth half: IRQ source 3, "CPU writes", has no hook in this core to hang on.
+///
+/// `Mapper::on_cpu_cycle` is told that a CPU cycle elapsed and not whether it was a write, and a
+/// CPU write to RAM never reaches the cartridge at all — so the counter does not advance on
+/// source 3. The ticket records the gap; this test pins the behaviour so that a lot which adds
+/// the hook has to come and rewrite it.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_151_jy_asic_irq_source_3_selects_a_counter_that_does_not_advance() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    arm_jy_irq(&mut core, 3, 1, 0xFF, 0xFF);
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut core, 4096),
+        "source 3 is not clocked in this core"
+    );
+
+    // And the register is kept, so a save state carries the game's own selection: switching to
+    // source 0 counts from where the game left the prescaler and the counter.
+    core.mapper_write(0xC001, 1 << 6);
+    assert_eq!(1, tick_until_irq(&mut core, 8));
+}
+
+/// `ppu_irq_horizon` answers `None` for every IRQ source, which is the property MF-6b's lots
+/// pinned for every IRQ board and the census asks for by name.
+///
+/// It is `None` for the whole `IrqBoard` variant, not per source: MF-6b step 4 measured any
+/// forward of that dispatch at `NesBus::catch_up_ppu` 188 → 190 instructions and `mmc5`
+/// +9 214 379 over 300 frames. The stronger property is what the test requires.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn jy_asic_ppu_irq_horizon_is_none_for_every_source() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    assert_eq!(None, core.cartridge().unwrap().ppu_irq_horizon());
+    for source in 0u8..4 {
+        for direction in 0u8..4 {
+            core.mapper_write(0xC001, (direction << 6) | source);
+            assert_eq!(
+                None,
+                core.cartridge().unwrap().ppu_irq_horizon(),
+                "source {source}, direction {direction}"
+            );
+        }
+    }
+}
+
+/// `$C000`-`$C007`'s mask is `$F007`, and the page says so in the opposite words to every other
+/// window of the chip: "Writes are accepted even if address bit 11 is set."
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_114_jy_asic_irq_registers_accept_address_bit_11() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    // The whole arming sequence through the A11-set aliases of each register.
+    core.mapper_write(0xC801, 1 << 6);
+    core.mapper_write(0xCFFE, 0x00);
+    core.mapper_write(0xC8FC, 0xFF);
+    core.mapper_write(0xCBFD, 0xFF);
+    core.mapper_write(0xC80B, 0x00);
+    assert_eq!(1, tick_until_irq(&mut core, 8), "mask $F007, A11 accepted");
+
+    // And A3-A10 are don't-care, so $CFFA is $C002.
+    core.mapper_write(0xCFFA, 0x00);
+    assert!(!irq(&core));
+}

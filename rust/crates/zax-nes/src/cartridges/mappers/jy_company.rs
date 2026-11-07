@@ -366,6 +366,94 @@ impl JyCompany {
         }
     }
 
+    /// `$5800`-`$5803`: the multiplier's two operands, the accumulator and the test register.
+    /// Mask `$F803`, and the solder pad register is read-only.
+    fn write_arithmetic_register(&mut self, address: u16, value: u8) {
+        match address & 0xF803 {
+            0x5800 => self.multiplicand = value,
+            0x5801 => self.multiplier = value,
+            // "$5802 write: Increase accumulator by written value."
+            0x5802 => self.accumulator = self.accumulator.wrapping_add(value),
+            // "$5803 write: Reset accumulator to 0 and set test register to written value."
+            0x5803 => {
+                self.accumulator = 0;
+                self.test_register = value;
+            }
+            _ => {}
+        }
+    }
+
+    /// `$C000`-`$C007`, mask `$F007`: the only window of the chip whose writes are "accepted even
+    /// if address bit 11 is set", which is why there is no `0x0800` guard here.
+    fn write_irq_register(&mut self, address: u16, value: u8) {
+        match address & 0x07 {
+            // "`.... ...E` — Disable (0)/Enable (1) IRQ generation."
+            0 => {
+                if value & 0x01 == 0 {
+                    self.disable_irq();
+                } else {
+                    self.irq_enabled = true;
+                }
+            }
+            // "`DD.. EPSS`".
+            1 => {
+                self.irq_direction = (value >> 6) & 0x03;
+                self.irq_c007_mode = value & 0x08 != 0;
+                self.irq_small_prescaler = value & 0x04 != 0;
+                self.irq_source = value & 0x03;
+            }
+            2 => self.disable_irq(),
+            3 => self.irq_enabled = true,
+            // "(*) The written value is XORed with the content of register $C006 before being
+            // stored." Both of these, and not `$C006` itself.
+            4 => self.irq_prescaler = value ^ self.irq_xor,
+            5 => self.irq_counter = value ^ self.irq_xor,
+            6 => self.irq_xor = value,
+            // "$C007: Configure unknown mode … Its functionality is not known, and no known game
+            // uses it." Kept so that a save state carries what a game wrote.
+            _ => self.irq_c007 = value,
+        }
+    }
+
+    /// `$D000`-`$D003`, the four configuration registers, with A11 already tested by the caller.
+    fn write_config_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        match address & 0x03 {
+            0 => {
+                self.prg_mode = value & 0x03;
+                self.prg_last_switchable = value & 0x04 != 0;
+                self.chr_mode = (value >> 3) & 0x03;
+                self.rom_nametables = value & 0x20 != 0;
+                self.rom_nametables_all = value & 0x40 != 0;
+                self.prg_rom_at_6000 = value & 0x80 != 0;
+            }
+            1 => {
+                self.arrangement = value & 0x03;
+                self.extended_mirroring = value & 0x08 != 0;
+                // The page's arrangements are this core's mirrorings reversed: "0:
+                // Horizontal (A10)" puts $2000 and $2400 on different pages, which is
+                // `Vertical` here.
+                memory.set_mirroring(match self.arrangement {
+                    0 => NametableMirroring::Vertical,
+                    1 => NametableMirroring::Horizontal,
+                    2 => NametableMirroring::SingleScreenA,
+                    _ => NametableMirroring::SingleScreenB,
+                });
+            }
+            2 => {
+                self.chr_write_enabled = value & 0x40 != 0;
+                self.nametable_select_invert = value & 0x80 != 0;
+            }
+            _ => {
+                // `4.Lc cPPC`.
+                self.mmc4_mode = value & 0x80 != 0;
+                self.outer_chr_512k = value & 0x20 != 0;
+                self.outer_chr_bank = (value >> 3) & 0x03;
+                self.outer_prg_bank = (value >> 1) & 0x03;
+                self.outer_chr_a18 = value & 0x01 != 0;
+            }
+        }
+    }
+
     /// The 16-bit product of the two multiplier operands. "After writing the two operands to
     /// $5800 and $5801, the result can be read 8 M2 cycles later; if the registers are read from
     /// earlier than that, intermediate results are obtained." The intermediate results are not
@@ -373,6 +461,76 @@ impl JyCompany {
     /// reading too, and no documented game reads the registers early.
     fn product(&self) -> u16 {
         u16::from(self.multiplicand) * u16::from(self.multiplier)
+    }
+
+    /// `$C001` bits 1-0: "0: CPU M2 rise / 1: PPU A12 rise (unfiltered, eight per scanline) /
+    /// 2: PPU reads (170 per scanline) / 3: CPU writes".
+    const SOURCE_CPU_M2: u8 = 0;
+    const SOURCE_PPU_A12: u8 = 1;
+    const SOURCE_PPU_READ: u8 = 2;
+
+    /// "'Disabling' acknowledges a pending IRQ, inhibits counting, and resets the prescaler to
+    /// zero" — all three, from `$C000` with bit 0 clear and from `$C002`.
+    ///
+    /// Mesen 2 acknowledges and inhibits but leaves the prescaler where it was (Q-151).
+    fn disable_irq(&mut self) {
+        self.irq_enabled = false;
+        self.irq_pending = false;
+        self.irq_prescaler = 0;
+    }
+
+    /// One clock of the selected source, through the prescaler and into the counter.
+    ///
+    /// The page's three numbered steps, in order:
+    ///
+    /// 1. "When counting is enabled and the counter is clocked from the source selected by $C001
+    ///    bits 0-1, the prescaler is increased/decreased (depending on $C001 bits 6-7)."
+    /// 2. "If the AND-masked prescaler (according to $C001 bit 2) wraps, meaning it is zero after
+    ///    increasing or **matches the prescaler mask after decreasing**, the IRQ counter is
+    ///    increased/decreased."
+    /// 3. "If the IRQ counter wraps, meaning it is zero after increasing or $FF after decreasing,
+    ///    an IRQ is generated."
+    ///
+    /// Two of the three leave Mesen 2, and **Q-151** records both. Step 1's "when counting is
+    /// enabled" is the `irq_enabled` test: the page's own gloss on disabling says it "inhibits
+    /// counting", where Mesen clocks the prescaler whatever the enable says and tests it only
+    /// before asserting. Step 2's decreasing case is `prescaler == mask`, the value a decrement
+    /// from zero leaves; Mesen's `if(--prescaler == 0)` wraps one count earlier, off a prescaler
+    /// of **one**.
+    ///
+    /// The bits above the mask are left alone in both directions, which is Mesen's reading and
+    /// the only one that makes `$C001` bit 2 a *mask* rather than a width.
+    fn tick_irq(&mut self) {
+        if !self.irq_enabled {
+            return;
+        }
+
+        let mask = if self.irq_small_prescaler { 0x07 } else { 0xFF };
+        let wrapped = match self.irq_direction {
+            1 => {
+                let next = (self.irq_prescaler & mask).wrapping_add(1) & mask;
+                self.irq_prescaler = (self.irq_prescaler & !mask) | next;
+                next == 0
+            }
+            2 => {
+                let next = (self.irq_prescaler & mask).wrapping_sub(1) & mask;
+                self.irq_prescaler = (self.irq_prescaler & !mask) | next;
+                next == mask
+            }
+            // "0: Counting disabled" and "3: Counting disabled".
+            _ => return,
+        };
+        if !wrapped {
+            return;
+        }
+
+        if self.irq_direction == 1 {
+            self.irq_counter = self.irq_counter.wrapping_add(1);
+            self.irq_pending |= self.irq_counter == 0;
+        } else {
+            self.irq_counter = self.irq_counter.wrapping_sub(1);
+            self.irq_pending |= self.irq_counter == 0xFF;
+        }
     }
 }
 
@@ -537,6 +695,59 @@ impl Mapper for JyCompany {
         }
     }
 
+    fn irq_asserted(&self) -> bool {
+        self.irq_pending
+    }
+
+    /// `None`, and it is not a choice this board gets to make: [`super::IrqBoard`] answers `None`
+    /// for the whole variant and does not forward this method, because MF-6b step 4 measured any
+    /// forward at `NesBus::catch_up_ppu` 188 → 190 instructions and `mmc5` +9 214 379 over 300
+    /// frames.
+    ///
+    /// It is also the honest answer for three of this board's four IRQ sources. `Some(i64::MAX)`
+    /// means "nothing the PPU does can change the IRQ line", which holds only for source 0 (CPU
+    /// M2) and source 3 (CPU writes); sources 1 and 2 are the PPU's own bus, so a board that
+    /// could answer per-source would still have to answer `None` whenever a game selects one of
+    /// them, and no bound at all is always correct. `jy_asic_ppu_irq_horizon_is_none_for_every_source`
+    /// pins the property the census asks for.
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        None
+    }
+
+    /// IRQ source 0, "CPU M2 rise" — the power-on setting of `$C001`, and the one the census
+    /// calls "a CPU-cycle IRQ".
+    fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        if self.irq_source == Self::SOURCE_CPU_M2 {
+            self.tick_irq();
+        }
+    }
+
+    /// IRQ sources 1 and 2 — "PPU A12 rise (unfiltered, eight per scanline)" and "PPU reads
+    /// (170 per scanline)".
+    ///
+    /// **Unfiltered**, which is the one word that keeps this board away from
+    /// [`A12Watcher`](crate::cartridges::A12Watcher): the MMC3's counter needs the filter to tell
+    /// a real rise from the short dips of the fetch pipeline, and this one counts every rise the
+    /// bus shows, eight a scanline instead of one.
+    ///
+    /// `last_ppu_address` is kept whatever the source is, so that selecting source 1 mid-frame
+    /// does not read a stale edge — which is why all four numbers appear in
+    /// `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`'s expected list.
+    fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
+        let clock = match self.irq_source {
+            // "2: PPU reads (170 per scanline)" — every fetch, whatever the address.
+            Self::SOURCE_PPU_READ => true,
+            // "1: PPU A12 rise (unfiltered, eight per scanline)".
+            Self::SOURCE_PPU_A12 => address & 0x1000 != 0 && self.last_ppu_address & 0x1000 == 0,
+            _ => false,
+        };
+        if clock {
+            self.tick_irq();
+        }
+
+        self.last_ppu_address = address;
+    }
+
     fn nametable_page(&self, table: i32) -> i32 {
         self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
     }
@@ -556,19 +767,7 @@ impl Mapper for JyCompany {
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
-            // Mask $F803 on $5800-$5803; the solder pad register is read-only.
-            match address & 0xF803 {
-                0x5800 => self.multiplicand = value,
-                0x5801 => self.multiplier = value,
-                // "$5802 write: Increase accumulator by written value."
-                0x5802 => self.accumulator = self.accumulator.wrapping_add(value),
-                // "$5803 write: Reset accumulator to 0 and set test register to written value."
-                0x5803 => {
-                    self.accumulator = 0;
-                    self.test_register = value;
-                }
-                _ => {}
-            }
+            self.write_arithmetic_register(address, value);
             return;
         }
 
@@ -600,47 +799,20 @@ impl Mapper for JyCompany {
                     }
                 }
             }
+            // "Mask: $F007. Writes are **accepted** even if address bit 11 is set" — the one
+            // window of this chip that does not test A11. No window moves either: the IRQ
+            // registers are not bank registers.
+            0xC000 => {
+                self.write_irq_register(address, value);
+                return;
+            }
             // Mask $F803 on all four of $D000-$D003.
             0xD000 => {
                 if address & 0x0800 != 0 {
                     return;
                 }
 
-                match address & 0x03 {
-                    0 => {
-                        self.prg_mode = value & 0x03;
-                        self.prg_last_switchable = value & 0x04 != 0;
-                        self.chr_mode = (value >> 3) & 0x03;
-                        self.rom_nametables = value & 0x20 != 0;
-                        self.rom_nametables_all = value & 0x40 != 0;
-                        self.prg_rom_at_6000 = value & 0x80 != 0;
-                    }
-                    1 => {
-                        self.arrangement = value & 0x03;
-                        self.extended_mirroring = value & 0x08 != 0;
-                        // The page's arrangements are this core's mirrorings reversed: "0:
-                        // Horizontal (A10)" puts $2000 and $2400 on different pages, which is
-                        // `Vertical` here.
-                        memory.set_mirroring(match self.arrangement {
-                            0 => NametableMirroring::Vertical,
-                            1 => NametableMirroring::Horizontal,
-                            2 => NametableMirroring::SingleScreenA,
-                            _ => NametableMirroring::SingleScreenB,
-                        });
-                    }
-                    2 => {
-                        self.chr_write_enabled = value & 0x40 != 0;
-                        self.nametable_select_invert = value & 0x80 != 0;
-                    }
-                    _ => {
-                        // `4.Lc cPPC`.
-                        self.mmc4_mode = value & 0x80 != 0;
-                        self.outer_chr_512k = value & 0x20 != 0;
-                        self.outer_chr_bank = (value >> 3) & 0x03;
-                        self.outer_prg_bank = (value >> 1) & 0x03;
-                        self.outer_chr_a18 = value & 0x01 != 0;
-                    }
-                }
+                self.write_config_register(memory, address, value);
             }
             _ => return,
         }

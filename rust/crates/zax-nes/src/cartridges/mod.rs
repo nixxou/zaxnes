@@ -1265,12 +1265,19 @@ mod tests {
         // the expected list is built rather than written — a number whose board is off is not
         // in `SUPPORTED_MAPPERS`, so the sweep never reaches it.
         let mut expected = vec![4, 4, 5, 5];
+        // MF-UNL-4 step 3: the J.Y. Company ASIC keeps the previous PPU address whatever its IRQ
+        // source is, so that a game selecting source 1 ("PPU A12 rise, unfiltered") mid-frame
+        // does not read a stale edge. That one byte is what makes all four numbers move here.
+        #[cfg(feature = "board-jy-asic")]
+        expected.extend_from_slice(&[35, 35]);
         #[cfg(feature = "board-mmc3-multicart")]
         expected.extend_from_slice(&[37, 37, 47, 47]);
         expected.extend_from_slice(&[48, 48, 64, 64]);
         // MF-UNL-2 step 2: the other four of the TQROM's CHR-RAM family, for 119's own reason.
         #[cfg(feature = "board-mmc3-chrram")]
         expected.extend_from_slice(&[74, 74]);
+        #[cfg(feature = "board-jy-asic")]
+        expected.extend_from_slice(&[90, 90]);
         // MF-6c step 8: the Oeka Kids board latches its CHR bank on the entry into
         // $2000-$2FFF, which the rendered line below reaches.
         #[cfg(feature = "board-96")]
@@ -1294,6 +1301,8 @@ mod tests {
         expected.extend_from_slice(&[189, 189]);
         #[cfg(feature = "board-mmc3-chrram")]
         expected.extend_from_slice(&[192, 192, 194, 194, 195, 195]);
+        #[cfg(feature = "board-jy-asic")]
+        expected.extend_from_slice(&[209, 209, 211, 211]);
         #[cfg(feature = "board-263")]
         expected.extend_from_slice(&[263, 263]);
         assert_eq!(
