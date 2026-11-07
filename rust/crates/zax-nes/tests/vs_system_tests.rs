@@ -1438,3 +1438,294 @@ fn a_savestate_restores_the_shown_palette_through_the_remap() {
         .expect("the state is this machine's");
     assert_eq!(core.ppu().snapshot_palette(), shown);
 }
+
+// ------------------------------------------- the table corrects a wrong header (MF-VS-fix)
+
+/// The CRC-32 table of the polynomial `$EDB88320`, which is the one
+/// `zax_nes::builtin_patches::data_crc` uses and the one the header database is indexed by.
+fn crc_table() -> [u32; 256] {
+    let mut table = [0u32; 256];
+    for (index, entry) in table.iter_mut().enumerate() {
+        let mut value = u32::try_from(index).unwrap_or(0);
+        for _ in 0..8 {
+            value = if value & 1 == 0 {
+                value >> 1
+            } else {
+                (value >> 1) ^ 0xEDB8_8320
+            };
+        }
+        *entry = value;
+    }
+    table
+}
+
+/// Sets the four bytes of `data` at `at` so that the CRC-32 of **the whole of `data`** is
+/// `wanted`; the callers pass the image's data region (`image[16..]`) and not the image, because
+/// the key of the table is the CRC of the PRG and CHR bytes with the header excluded.
+///
+/// **Why a test needs this.** The table is keyed by the CRC of the PRG and CHR bytes of a real
+/// dump, and no commercial ROM may appear in a test — so a synthetic image has to be given a
+/// CRC that is in the table. CRC-32 is affine over its 32-bit register, which makes that an
+/// arithmetic question rather than a search: walking the register **backwards** from the wanted
+/// value through the bytes after `at` gives the register state the four bytes must produce, four
+/// more backward steps give the four table indices they must use (each index is the unique one
+/// whose entry has the register's top byte), and walking forwards from the state before `at` then
+/// gives each byte as `index ^ (state & 0xFF)`. The callers assert the result, so a mistake here
+/// fails loudly rather than quietly weakening a test.
+fn force_crc32(data: &mut [u8], at: usize, wanted: u32) {
+    let table = crc_table();
+    let index_of = |register: u32| {
+        table
+            .iter()
+            .position(|entry| entry >> 24 == register >> 24)
+            .expect("the CRC-32 table's entries have distinct top bytes")
+    };
+    // Backwards from the wanted CRC through every byte after the four, then four steps more.
+    let mut register = wanted ^ 0xFFFF_FFFF;
+    for &byte in data[at + 4..].iter().rev() {
+        let index = index_of(register);
+        register =
+            ((register ^ table[index]) << 8) | u32::from(u8::try_from(index).unwrap_or(0) ^ byte);
+    }
+
+    let mut indices = [0usize; 4];
+    for slot in (0..4).rev() {
+        indices[slot] = index_of(register);
+        register = (register ^ table[indices[slot]]) << 8;
+    }
+
+    // Forwards from the state before the four bytes, which is what each index is paired with.
+    let mut state = 0xFFFF_FFFFu32;
+    for &byte in &data[..at] {
+        state = (state >> 8) ^ table[usize::from(state.to_le_bytes()[0] ^ byte)];
+    }
+    for slot in 0..4 {
+        let byte = u8::try_from(indices[slot]).unwrap_or(0) ^ state.to_le_bytes()[0];
+        data[at + slot] = byte;
+        state = (state >> 8) ^ table[usize::from(state.to_le_bytes()[0] ^ byte)];
+    }
+}
+
+/// An iNES **1.0** image of `prg_16k` 16 KiB PRG banks and no CHR-ROM, with byte 7 bit 0 set and
+/// `mapper` written the iNES way, whose data CRC is `wanted` — the shape of a circulating VS dump.
+///
+/// The four bytes the CRC is forced through sit just below the three vectors, so the vectors stay
+/// readable and the PRG banks keep the `0x10 + index` fill the other fixtures use.
+fn ines_1_0_vs_image(mapper: u8, prg_16k: usize, wanted: u32) -> Vec<u8> {
+    let prg = prg_16k * 16 * 1024;
+    let mut image = vec![0u8; 16 + prg];
+    image[..4].copy_from_slice(b"NES\x1A");
+    image[4] = u8::try_from(prg_16k).expect("a small fixture");
+    image[5] = 0; // No CHR-ROM: REQ-CORE-012 then gives the image 32 KiB of CHR-RAM.
+    image[6] = (mapper & 0x0F) << 4;
+    image[7] = (mapper & 0xF0) | 0x01; // The iNES 1.0 Vs. Unisystem bit, and no NES 2.0.
+
+    for bank in 0..prg / (8 * 1024) {
+        let start = 16 + bank * 8 * 1024;
+        image[start..start + 8 * 1024].fill(0x10 + u8::try_from(bank).unwrap_or(0));
+    }
+    let vectors = 16 + prg - 6;
+    for slot in 0..3 {
+        image[vectors + 2 * slot] = 0x00;
+        image[vectors + 2 * slot + 1] = 0x80;
+    }
+
+    force_crc32(&mut image[16..], prg - 10, wanted);
+    assert_eq!(
+        zax_nes::builtin_patches::data_crc(&image),
+        wanted,
+        "the fixture must hash to the row it is standing in for"
+    );
+    image
+}
+
+/// **The defect.** A circulating iNES 1.0 dump of *Vs. Castlevania* announces mapper 99 and no
+/// CHR-ROM; the board is a `UxROM` (mapper 2, submapper 2) with 8 KiB of CHR-RAM, which the table
+/// has recorded since MF-VS step 1. The table's board wins, and the load message says it did.
+#[test]
+fn a_mapper_99_chr_0_header_loads_as_the_table_says() {
+    let mut core = NesCore::new();
+    let image = ines_1_0_vs_image(99, 8, 0xFFBE_F374);
+
+    // What the header says on its own, before anything corrects it.
+    let header = header_of(&image);
+    assert_eq!(header.mapper, 99);
+    assert_eq!(header.chr_rom_size, 0);
+    assert_eq!(header.chr_ram_size, 32 * 1024); // REQ-CORE-012's default.
+    assert!(!header.is_nes20);
+
+    let load = core.load_rom(&image, "SyntheticVsCastlevania.nes");
+    assert!(load.success, "{:?}", load.error);
+    let cartridge = core.cartridge().expect("a ROM is loaded");
+    assert_eq!(
+        cartridge.mapper_number(),
+        2,
+        "the table's board, not the header's"
+    );
+
+    let corrected = cartridge.rom().header();
+    assert_eq!(corrected.mapper, 2);
+    assert_eq!(corrected.submapper, 2);
+    assert!(
+        corrected.has_submapper(),
+        "the table is a source of submappers"
+    );
+    assert_eq!(corrected.prg_rom_size, 128 * 1024);
+    assert_eq!(corrected.chr_rom_size, 0);
+    assert_eq!(
+        corrected.chr_ram_size,
+        8 * 1024,
+        "the board's CHR-RAM, not the default"
+    );
+    assert_eq!(corrected.mirroring, NametableMirroring::FourScreen);
+
+    // The 8 KiB of CHR-RAM is there and it is RAM: a pattern byte can be written and read back,
+    // which is what the image loaded as a mapper-99 board could not do at all.
+    assert_eq!(cartridge.memory().chr_ram().len(), 8 * 1024);
+    core.cartridge_mut()
+        .expect("loaded")
+        .ppu_write(0x0000, 0x5A);
+    assert_eq!(chr_bank_byte(&core), 0x5A);
+
+    // And the VS. System itself is still the row's: detection ran before the correction.
+    let vs = core.vs_system().expect("a VS image");
+    assert_eq!(vs.source(), VsSource::RomTable);
+    assert_eq!(vs.ppu(), VsPpuModel::Rp2c04_0002);
+    assert_eq!(vs.title(), Some("Vs. Castlevania"));
+
+    let note = load.note.expect("a VS image carries a load note");
+    assert!(note.contains("Vs. Castlevania"), "{note}");
+    assert!(note.contains("corrected by the VS table"), "{note}");
+    assert!(note.contains("mapper 99 is mapper 2 submapper 2"), "{note}");
+    assert!(note.contains("8 KiB of CHR-RAM"), "{note}");
+}
+
+/// The two `UxROM` rows are mapper 2 **submapper 2**, "Bus conflicts present" (nesdev, "NES 2.0
+/// submappers"), and a submapper an iNES 1.0 header cannot carry has to reach the one rule that
+/// reads it. The observable is the conflict itself: a write of `$00` to a PRG byte holding `$11`
+/// latches `$00 & $11`, so the bank does not move.
+#[test]
+fn the_tables_submapper_reaches_the_bus_conflict_rule() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&ines_1_0_vs_image(99, 8, 0xFFBE_F374), "Conflicts.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    // $8000-$BFFF is the switchable 16 KiB window of a UxROM; bank 0 fills it with $10 and $11.
+    assert_eq!(core.read_memory(0x8000), 0x10);
+    assert_eq!(core.read_memory(0xA000), 0x11);
+
+    // A write of $03 at $A000, where the ROM holds $11, latches $03 & $11 = $01: bank 1.
+    core.write_memory(0xA000, 0x03);
+    assert_eq!(core.read_memory(0x8000), 0x12, "bank 1 is filled with $12");
+}
+
+/// A header that already says what the table says is not altered, and carries no correction in
+/// its note: the table is a correction and not a rewrite.
+#[test]
+fn a_correct_header_is_not_altered() {
+    let mut core = NesCore::new();
+    // Battle City's row: mapper 99, 32 KiB of PRG and 16 KiB of CHR, four-screen.
+    let mut image = vs_board_image(99, 4, 2);
+    // ... as an iNES 1.0 header with byte 7 bit 0, which is the form the table exists for, and
+    // with four-screen mirroring in byte 6 bit 3 so that nothing at all disagrees.
+    image[6] = ((0x63 & 0x0F) << 4) | 0x08;
+    image[7] = (0x63 & 0xF0) | 0x01;
+    force_crc32(&mut image[16..], 0, 0x0135_7944);
+    assert_eq!(zax_nes::builtin_patches::data_crc(&image), 0x0135_7944);
+
+    let before = header_of(&image);
+    let load = core.load_rom(&image, "SyntheticBattleCity.nes");
+    assert!(load.success, "{:?}", load.error);
+    let after = core.cartridge().expect("loaded").rom().header();
+    assert_eq!(after, &before, "nothing in the header moved");
+    assert!(!after.has_submapper(), "and no submapper appeared");
+
+    let note = load.note.expect("a VS image carries a load note");
+    assert!(note.contains("Battle City"), "{note}");
+    assert!(!note.contains("corrected"), "{note}");
+}
+
+/// A VS image the table does not know keeps its header, whatever that header says — which is the
+/// same rule the PPU default follows ("unknown VS image … so the plain NES palette").
+#[test]
+fn an_unknown_vs_crc_keeps_its_header() {
+    let mut core = NesCore::new();
+    // A CRC no row has: the fixture's own, unforced.
+    let mut image = ines_1_0_vs_image(2, 2, 0xFFBE_F374);
+    image[16] ^= 0xFF; // Any byte will do; it moves the CRC off the row.
+    assert!(zax_nes::builtin_patches::data_crc(&image) != 0xFFBE_F374);
+
+    let before = header_of(&image);
+    let load = core.load_rom(&image, "UnknownVs.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.cartridge().expect("loaded").rom().header(), &before);
+    assert_eq!(
+        core.vs_system().expect("a VS image").source(),
+        VsSource::Default
+    );
+    let note = load.note.expect("a VS image carries a load note");
+    assert!(note.contains("unknown VS image"), "{note}");
+    assert!(!note.contains("corrected"), "{note}");
+}
+
+/// **A NES image is never looked up in this table**, even when its data CRC is a row's. The gate
+/// is `VsSystem::is_vs_image`, which byte 7 bit 0 of this image does not satisfy.
+#[test]
+fn a_non_vs_image_with_a_colliding_crc_is_not_touched() {
+    let mut core = NesCore::new();
+    let mut image = ines_1_0_vs_image(2, 8, 0xFFBE_F374);
+    image[7] = 0x00; // Not a VS. System: byte 7 bit 0 clear, and mapper 2 is no VS number.
+    assert_eq!(zax_nes::builtin_patches::data_crc(&image), 0xFFBE_F374);
+
+    let before = header_of(&image);
+    assert!(!VsSystem::is_vs_image(&before));
+    let load = core.load_rom(&image, "PlainNes.nes");
+    assert!(load.success, "{:?}", load.error);
+    let after = core.cartridge().expect("loaded").rom().header();
+    assert_eq!(after, &before, "a NES image's header is never corrected");
+    // Which is also why it keeps REQ-CORE-012's 32 KiB of CHR-RAM and the row's submapper 2
+    // never reaches it: no bus conflicts on a submapper-0 dump of mapper 2 (MR-1b).
+    assert_eq!(after.chr_ram_size, 32 * 1024);
+    assert!(core.vs_system().is_none());
+    assert_eq!(load.note, None);
+
+    core.write_memory(0xA000, 0x03);
+    assert_eq!(core.read_memory(0x8000), 0x16, "bank 3, with no conflict");
+}
+
+/// A **NES 2.0** header is trusted: it has a field for every one of these and a dumper filled
+/// them. Only a mapper that contradicts the table is overridden, and then the message says so
+/// (Q-138).
+#[test]
+fn a_nes20_header_is_trusted_except_on_the_mapper() {
+    let mut core = NesCore::new();
+
+    // Battle City's data, under a NES 2.0 header that says mapper 99 with 8 KiB of CHR-RAM and
+    // vertical mirroring -- none of which the table agrees with, and all of which stands.
+    let mut image = vs_board_image(99, 4, 0);
+    image[6] = ((0x63 & 0x0F) << 4) | 0x01; // Mapper 99 and vertical mirroring.
+    image[11] = 0x07; // 64 << 7 = 8 KiB of CHR-RAM.
+    force_crc32(&mut image[16..], 0, 0x0135_7944);
+    let load = core.load_rom(&image, "Nes20BattleCity.nes");
+    assert!(load.success, "{:?}", load.error);
+    let header = core.cartridge().expect("loaded").rom().header();
+    assert_eq!(header.mapper, 99, "the table agrees, so nothing is touched");
+    assert_eq!(header.chr_ram_size, 8 * 1024);
+    assert_eq!(header.mirroring, NametableMirroring::Vertical);
+    assert!(!load.note.unwrap_or_default().contains("table wins"));
+
+    // The same data under a NES 2.0 header claiming mapper 2: the table wins on the mapper and
+    // on nothing else, and the note says which.
+    let mut image = vs_board_image(2, 4, 0);
+    image[11] = 0x07;
+    force_crc32(&mut image[16..], 0, 0x0135_7944);
+    let load = core.load_rom(&image, "Nes20WrongMapper.nes");
+    assert!(load.success, "{:?}", load.error);
+    let header = core.cartridge().expect("loaded").rom().header();
+    assert_eq!(header.mapper, 99, "the table's mapper");
+    assert_eq!(header.chr_ram_size, 8 * 1024, "and the header's CHR-RAM");
+    let note = load.note.expect("a VS image carries a load note");
+    assert!(note.contains("the NES 2.0 header says mapper 2"), "{note}");
+    assert!(note.contains("the VS table says mapper 99"), "{note}");
+    assert!(note.contains("the table wins"), "{note}");
+}

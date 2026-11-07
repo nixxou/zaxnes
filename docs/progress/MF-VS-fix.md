@@ -73,7 +73,7 @@ table — they are the columns the comments were already quoting.
   database, the accessors, and a test that pins every row's board field by field.
 * [x] **2/6** — the override at load: `vs::corrected_board`, `RomImage::correct_vs_board`, the
   `load_rom` order, `has_submapper`, the load message.
-* [ ] **3/6** — the tests: the brief's four cases, plus the regression itself as a synthetic image.
+* [x] **3/6** — the tests: the brief's four cases, plus the regression itself as a synthetic image.
 * [ ] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
   the three `Cpu6502::step` inlinings 0 / 0 / 0, `zone_offset` not dearer.
 * [ ] **5/6** — the documents: Q-138, `MF-VS.md`'s "For R0" paragraph answered, the journal.
@@ -209,3 +209,64 @@ Green: `zax-nes` + `zax-harness` **926 passed, 0 failed, 8 ignored** by default 
 926 — and **980 / 0 / 8** with `parked-boards` (978 at MF-4e plus step 1's two). fmt clean; clippy
 `-D warnings --all-targets` clean on `zax-nes` by default, with `--features parked-boards` and with
 `--no-default-features`.
+
+### Step 3 — the tests, and the fixture that made them possible
+
+**The problem the step had to solve first.** The table is keyed by the CRC-32 of a real dump's PRG
+and CHR bytes, and no commercial ROM may appear in a test — so a *synthetic* image has to be given a
+CRC that is **in the table**. Searching for one is 2³² work. But CRC-32 is affine over its 32-bit
+register, so it is arithmetic instead: `force_crc32(data, at, wanted)` sets four bytes of `data` at
+`at` so that the whole slice hashes to `wanted`.
+
+> Walk the register **backwards** from `wanted` through every byte after the four — each backward
+> step is determined, because the register's top byte names the one table entry that was used
+> (the 256 entries of the `$EDB88320` table have 256 distinct top bytes, which the helper's
+> `expect` states) — and that gives the state the four bytes must produce. Four more backward steps
+> give the four table **indices** they must use: the low byte of each intermediate state is unknown,
+> but it never reaches the next step's top byte, so the indices fall out all the same. Then walk
+> **forwards** from the state before `at`: byte *k* is `index_k ^ (state_k & 0xFF)`.
+
+Every caller asserts `data_crc(image) == wanted` afterwards, so an error in the helper fails loudly
+instead of quietly weakening a test. The algorithm was checked against `zlib.crc32` at three offsets
+before it was written in Rust.
+
+**One bug worth recording.** The first version forced the CRC over the whole image, header included
+— and `data_crc` hashes the data *without* the 16-byte header, so every fixture missed its row.
+The helper's doc now says what the caller must pass (`image[16..]`), because the two slices are easy
+to confuse and the failure is a silent "the table does not know this dump".
+
+The six tests, the brief's four among them:
+
+1. **`a_mapper_99_chr_0_header_loads_as_the_table_says`** — the defect itself. An iNES 1.0 image
+   with 128 KiB of PRG, byte 5 = 0 and mapper 99 in bytes 6/7, hashing to `0xFFBEF374`. Before the
+   load the header says mapper 99, no CHR-ROM and REQ-CORE-012's 32 KiB of CHR-RAM; after it the
+   cartridge is **mapper 2**, the header is submapper 2 with 128 KiB of PRG, no CHR-ROM, **8 KiB**
+   of CHR-RAM and four-screen, `has_submapper()` is true, and a pattern byte written at `$0000` is
+   read back — which the mapper-99 board could not do at all. The VS. System is still the row's
+   (`VsSource::RomTable`, RP2C04-0002, "Vs. Castlevania"), which is the proof detection ran *before*
+   the correction, and the note names the correction field by field.
+2. **`the_tables_submapper_reaches_the_bus_conflict_rule`** — the submapper's one live consequence,
+   proved through the conflict and not through the field: `$A000` holds `$11`, a write of `$03`
+   there latches `$03 & $11 = $01`, and `$8000` comes up bank 1. Without
+   `InesHeader::has_submapper` the write would latch `$03` and the bank would be 3.
+3. **`a_correct_header_is_not_altered`** — *Battle City*'s row under an iNES 1.0 header that already
+   says mapper 99, 32 KiB of PRG, 16 KiB of CHR and four-screen: the header after the load is
+   `assert_eq!`-equal to the header before it, `has_submapper()` is still false, and the note
+   carries the title but no correction.
+4. **`an_unknown_vs_crc_keeps_its_header`** — one byte of the data flipped, so the CRC is no row's:
+   the header stands and the VS layer falls back to `VsSource::Default`, the "unknown VS image …
+   plain NES palette" rule.
+5. **`a_non_vs_image_with_a_colliding_crc_is_not_touched`** — the same data hashing to
+   *Vs. Castlevania*'s CRC exactly, with byte 7 bit 0 **clear** and mapper 2 (no VS number). The
+   header is untouched, there is no VS. System, there is no note, the image keeps its 32 KiB of
+   CHR-RAM, and the row's submapper 2 never reaches it: a write of `$03` at `$A000` selects bank 3
+   with no conflict, which is MR-1b's rule for a submapper-0 dump of mapper 2.
+6. **`a_nes20_header_is_trusted_except_on_the_mapper`** — *Battle City*'s data under a NES 2.0
+   header twice. Saying mapper 99 with 8 KiB of CHR-RAM and **vertical** mirroring, all three of
+   which the table disagrees with: all three stand. Saying **mapper 2**: the mapper becomes the
+   table's 99, the header's CHR-RAM stays its own 8 KiB, and the note is "the NES 2.0 header says
+   mapper 2, the VS table says mapper 99 for Battle City and the table wins".
+
+Green: `zax-nes` + `zax-harness` **926 / 0 / 8** by default — still exactly MF-4e's — and
+**986 / 0 / 8** with `parked-boards` (980 after step 2 plus this step's 6). fmt clean, clippy
+`-D warnings --all-targets` clean in both configurations.
