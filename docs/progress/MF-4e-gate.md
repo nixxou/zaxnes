@@ -501,3 +501,52 @@ That probe also refuted this lot's first guess at the 96-byte size difference fr
 of about 30 000 strings in each binary, **6** differ, and all six are machine-code byte runs that
 happen to be printable, with no source path and no panic location among them. It is the ten
 commits, and the same-behaviour pair above is what locates it there.
+
+## What this lot leaves open
+
+1. **The owner's eye**, which is the whole point: he validates Super Mario Bros. 3 and Zelda II and
+   then either the feature joins `default` — in which case `SMALLEST_GAP` collapses back to a
+   single 2 and **Q-137 point 2 is in front again** — or MF-4e step 2's rule is reopened, and the
+   four-variant table measured on SMB3 (the doc comment on
+   `Ppu2C02::increment_vram_address`, and `MF-4e.md` step 2) is where to start.
+2. **Q-139**: the project rule in those words and binding on later lots; and the name, which says
+   "read" for an access rule.
+3. **Q-137 on the substance** — the reading of R2-005's exception as being about the nature of the
+   increment rather than its instant is still an extension of the text. Only the urgency of its
+   second request has gone.
+4. **Nothing else of MF-4e moved.** `ppu-exact-sprite-eval` keeps its figures and its place out of
+   `default`; `board-vs-system` stays parked; MF-4e's six unwon `AccuracyCoin` rows and the
+   `OAM Corruption` `$2003`-write mechanism are still that lot's open list, untouched here.
+
+## Step 6 — the journal, and the final pass on the committed tree
+
+`G:/3dsen/cleanroom/journal/JOURNAL.md` gains the lot's entry: role, date, base and reference
+commits, folders consulted, why the lot exists in R0's own figures, the six steps, what the gate
+hands back to Q-137, the eleven golden-core rows, **the two negative results**, the disk-space
+note, the save-state statement and the open items.
+
+Re-run on the committed tree, nothing uncommitted but `rust/target-mf/` (scratch, never staged):
+
+| configuration | `cargo fmt --check` | clippy `-D warnings` | `cargo test --release -p zax-nes -p zax-harness` |
+| --- | --- | --- | --- |
+| `default` | clean | clean | **925 passed, 0 failed, 8 ignored** |
+| `--features ppu-2007-render-read` | clean | clean | **926 passed, 0 failed, 8 ignored** |
+| `--features parked-boards` | clean | clean | **985 passed, 0 failed, 8 ignored** |
+| `--features ppu-exact-sprite-eval` | clean | clean | (step 3: 925 / 0 / 8) |
+
+### Disk and machine
+
+`rust/target-mf/debug` — **18 GB** of rebuildable cargo scratch left by an earlier session, 7.8 GB
+of it `incremental` — was deleted at the start, which took G: from **17 GB** free to 35 GB. It
+never went below **33 GB** afterwards, well above the brief's 5 GB floor. Five clean `git archive`
+builds were made, each in a fresh directory with its own `CARGO_TARGET_DIR` and each deleted as
+soon as its binary was copied out; the callgrind annotations, the WSL scratch root and the host's
+probe binaries and tars were deleted as their figures were recorded. **No GPU campaign of any
+kind.**
+
+### The lot in one line
+
+**The default build renders this path exactly as `11407930` does** — golden-core byte-identical
+over 98 commercial originals at 1 200 frames, the campaign's 331 rows identical field by field,
+`AccuracyCoin` back at 128, R2-005's bound back at 3, and the emulated core at **+0 instructions on
+all fifteen figures of both callgrind runs** — **and one flag gives the rule back.**
