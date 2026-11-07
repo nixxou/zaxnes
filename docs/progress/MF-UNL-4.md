@@ -106,7 +106,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 - [x] **5/9 — the nametables, the jumper and the $6000-$7FFF window.** Extended Mirroring
   ($D001 bit 3), ROM nametables for all ($D000 bits 5 and 6) and for some ($D002 bit 7), 90's
   jumper, 35's 8 KiB of WRAM, and $D000 bit 7's 8 KiB PRG-ROM bank at $6000-$7FFF.
-- [ ] **6/9 — the question tickets, the four sweeps and the clippy configurations.** Q-148 to
+- [x] **6/9 — the question tickets, the four sweeps and the clippy configurations.** Q-148 to
   Q-151, the four sweeps over `SUPPORTED_MAPPERS` in every configuration the lot adds, and
   `cargo fmt --check` plus clippy `-D warnings` in the four configurations the brief names.
 - [ ] **7/9 — the callgrind campaign, per hook.** PR-1's thirteen ROMs and level 2's five games
@@ -552,3 +552,90 @@ about `$900x`/`$A00x`. Mesen 2 reads it the same way.
 
 `cargo test --release -p zax-nes`: **948 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 6 — five question tickets, the four sweeps, and the four configurations
+
+### The tickets
+
+| ticket | what it records | where the code points at it |
+| --- | --- | --- |
+| **Q-148** | mapper 35 is 209's board with 8 KiB of WRAM, where Mesen 2 builds a wholly different and much smaller board for it | `registry::create_board`'s one arm for the four numbers, and mapper 35's `board_memory_sizes` row |
+| **Q-149** | Extended Mirroring is `$D001` bit 3, so **mapper 211 is mapper 209** — Mesen 2 decodes that bit nowhere and special-cases 211 instead | `JyCompany::nametable_page_of`, the `$D001` arm of `write_config_register` |
+| **Q-150** | **five** places the bank arithmetic differs from Mesen 2's `JyCompany.h` | `prg_register`, `prg_bank`, `prg_last_bank`, `chr_bank`, `chr_4k_register`, `move_chr_latch` |
+| **Q-151** | **three** readings of the IRQ page Mesen 2 does not share, and **IRQ source 3, which this core has no hook for** | `tick_irq`, `disable_irq`, `on_cpu_cycle` |
+| **Q-152** | a write to a cartridge-served nametable: `SERVED_BY_CARTRIDGE` answers for both directions, and this mechanism needs it to answer for one | `JyCompany::read_nametable`, and the absence of a `write_nametable` beside it |
+
+**Four of the five are "the number's own page wins"**, which is MF-UNL-2's rule and this lot's
+brief. The two that are not readings of the page are Q-151's fourth item and Q-152: both are gaps
+in what this core's *shape* can carry — a per-CPU-cycle hook that does not say whether the cycle
+was a write, and one nametable answer for two directions — recorded rather than silently dropped,
+in the manner of MR-30-4's UNROM 512 flash and MF-6c step 3's Datach barcode scanner.
+
+In four of Q-150's five items **the page is internally consistent and Mesen 2 is not**, which is
+what makes them transcription findings rather than judgement calls. The sharpest is item 2: Mesen 2
+reads `$8003` as a 32 KiB bank for the `$6000` window (`prgRegs[3] * 4 + 3`, the page's formula)
+and as an 8 KiB bank for `$8000`-`$FFFF` (`SelectPrgPage4x(0, prgRegs[3])`) in the same build.
+
+### §7.1's four sweeps
+
+`req_core_100_every_required_mapper_is_registered`,
+`req_core_102_any_other_mapper_is_refused`,
+`req_core_090_the_mapper_state_survives_a_save_and_restore` and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` hold in all four
+configurations. The first is the one this lot had to extend: its `additions` table grew from 84 to
+88 rows, and it is built from `cfg!` so that a featured number is expected exactly when its feature
+is on.
+
+Three more sweeps are this board's own entry conditions and all three had to be told about it:
+
+* **`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`** — the board keeps
+  `last_ppu_address` whatever its IRQ source is, so all four numbers move on the bus and all four
+  are in that test's expected list. The check is the invariant and not the list, so forgetting the
+  latch would have failed loudly.
+* **`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`** — the board must *not* move on a
+  bare CPU cycle, and does not: `$C001`'s power-on direction is 0, "Counting disabled", so
+  `tick_irq` returns before touching a field. The four numbers are in `clocks_on_cpu_cycle` all the
+  same, because source 0 is the power-on source.
+* **`mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd`** — all four
+  numbers are in **both** PPU latch lists, A12 being driven by `$2006` and `$2007` as much as by a
+  fetch.
+
+### The four configurations
+
+| configuration | `cargo test --release -p zax-nes` | clippy `-D warnings` |
+| --- | --- | :-: |
+| `default` | **948 / 0 / 8** (941 at step 4, 909 at the base commit) | clean |
+| `--no-default-features` | **783 / 0 / 8** — the figure `BOARD-FEATURES.md` records, **unchanged** | clean |
+| `--features parked-boards` | **1001 / 0 / 8** (962 at the base commit) | clean |
+| `--no-default-features --features board-jy-asic` | **822 / 0 / 8** (+39 over the bare build) | clean |
+
+`cargo fmt --all -- --check` clean, and `cargo test --release -p zax-harness` passes.
+
+**The feature alone is +39 and `default` is +39 over the base commit too**, which is the shape to
+expect: no test of this lot is shared with another feature, the board being a family of its own.
+
+**Clippy found two things in `default` and nothing the matrix added.** Both were in this board's own
+code: `clippy::if_same_then_else` on the two IRQ-source arms of `on_ppu_address_bus`, which became
+one `match` yielding a `bool`; and `clippy::too_many_lines` on `write_register` at 102 lines, which
+became three methods (`write_arithmetic_register`, `write_irq_register`, `write_config_register`).
+Unlike MF-UNL-3, whose degenerate `board-143`-alone configuration found three real faults, this
+lot's one-feature build found none — a single board with a single feature has no shared-variant
+`cfg` list to get wrong.
+
+### The two enums' sizes
+
+| | |
+| --- | --- |
+| `size_of::<Board>()` | **1376**, the figure MF-UNL-2 step 2 and MF-UNL-3 step 5 both measured — **no new discriminant** |
+| `size_of::<IrqBoard>()` | **208**, unchanged |
+| `size_of::<JyCompany>()` | **200** |
+
+**That 200 is why the variant is boxed**, and it is closer than the plan assumed: unboxed, a
+`JyCompany` plus a discriminant would be **exactly** this enum's current 208 bytes, so whether it
+set the high-water mark would come down to how rustc places the tag. MF-6b step 1 priced one byte
+of displacement in that payload at **+0.009 % to +0.027 % on eleven of lot PR-1's thirteen ROMs**,
+which is a coin the lot has no reason to toss: boxed, the enum is provably the size MF-6a3 step 1
+measured, and the price is one pointer dereference per forwarded call for a cartridge of this board
+and nothing for anyone else.

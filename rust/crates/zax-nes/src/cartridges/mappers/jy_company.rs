@@ -226,9 +226,9 @@ impl JyCompany {
     /// `$D000` bits 1-0's mode-3 bit reversal applied.
     ///
     /// "3: 8 KiB banking, but with bank numbers **bits 0-6 reversed**" — bit 0 ↔ bit 6,
-    /// bit 1 ↔ bit 5, bit 2 ↔ bit 4, and bit 3 to itself. Mesen 2's `InvertPrgBits` drops bit 3
-    /// (Q-150); the page's "bits 0-6" includes it, and a seven-bit reversal that left the middle
-    /// bit out would not be a reversal.
+    /// bit 1 ↔ bit 5, bit 2 ↔ bit 4, and bit 3 to itself. Mesen 2's `InvertPrgBits` drops bit 3:
+    /// **Q-150** item 1. The page's "bits 0-6" includes it, and a seven-bit reversal that left
+    /// the middle bit out would not be a reversal.
     fn prg_register(&self, index: usize) -> i32 {
         let value = self.prg[index];
         if self.prg_mode == 3 {
@@ -272,7 +272,7 @@ impl JyCompany {
     /// `$D003` bit 5 chooses the mask: "0: Mask $900x/$A00x to 256 KiB, use C / 1: Mask
     /// $900x/$A00x to 512 KiB, ignore C", with `cc` (bits 4-3) always the 512 KiB outer bank and
     /// `C` (bit 0) the 256 KiB one inside it. Mesen 2 drops the mask and the outer bank entirely
-    /// in the `L=1` case and uses the raw 16-bit register instead (Q-150).
+    /// in the `L=1` case and uses the raw 16-bit register instead: **Q-150** item 3.
     fn chr_bank(&self, index: usize) -> i32 {
         let register = i32::from(self.chr_low[index]) | (i32::from(self.chr_high[index]) << 8);
         let bank_1k = register * Self::CHR_UNIT_1K[usize::from(self.chr_mode) & 3];
@@ -313,7 +313,8 @@ impl JyCompany {
     /// * **ROM nametables** (`$D000` bit 5): the table comes from a 1 KiB CHR bank instead, for
     ///   all four tables when `$D000` bit 6 is set and otherwise for the ones whose `$B00x`
     ///   bit 7 **differs** from `$D002` bit 7. That is `SERVED_BY_CARTRIDGE`, the dear level, and
-    ///   [`JyCompany::read_nametable`] is the body.
+    ///   [`JyCompany::read_nametable`] is the body. **Q-149**: Mesen 2 decodes neither `$D001`
+    ///   bit 3 nor the two mechanisms separately, and special-cases mapper 211 instead.
     /// * **mapper 90's jumper**, which "inhibits … ROM nametables and Extended Mirroring that
     ///   would otherwise be enabled via register": both, so the four registers "have no
     ///   function" and the layout is `$D001`'s MM bits alone.
@@ -365,7 +366,8 @@ impl JyCompany {
         match self.prg_mode & 0x03 {
             // 32 KiB: "$8003: Select 32 KiB PRG-ROM bank at CPU $8000-$FFFF". The register's
             // unit is a 32 KiB bank, which is four of `BankWindows`'s, and the hard-wired case
-            // is the outer bank's last 32 KiB.
+            // is the outer bank's last 32 KiB. Q-150 item 2: Mesen 2 reads the register as an
+            // 8 KiB bank here and as a 32 KiB one for the $6000 window, in the same build.
             0 => {
                 let base = self.prg_last_bank(4);
                 for slot in 0..4 {
@@ -552,7 +554,7 @@ impl JyCompany {
     /// Mesen 2 moves the same latches on the same hook, but gates them on **`MapperID == 209`**
     /// rather than on `$D003` bit 7 — so mapper 90's *Mighty Morphin' Power Rangers III*, which
     /// the page says "uses MMC4-like mode for displaying title screen", would not get it there.
-    /// The page gates the mode on the register for every number of the chip (Q-150).
+    /// The page gates the mode on the register for every number of the chip: **Q-150** item 5.
     fn move_chr_latch(&mut self, address: u16) {
         if !self.mmc4_mode || address >= 0x2000 {
             return;
@@ -575,7 +577,8 @@ impl JyCompany {
     /// "'Disabling' acknowledges a pending IRQ, inhibits counting, and resets the prescaler to
     /// zero" — all three, from `$C000` with bit 0 clear and from `$C002`.
     ///
-    /// Mesen 2 acknowledges and inhibits but leaves the prescaler where it was (Q-151).
+    /// Mesen 2 acknowledges and inhibits but leaves the prescaler where it was: **Q-151** item 2,
+    /// and "inhibits counting" is item 1.
     fn disable_irq(&mut self) {
         self.irq_enabled = false;
         self.irq_pending = false;
@@ -594,8 +597,8 @@ impl JyCompany {
     /// 3. "If the IRQ counter wraps, meaning it is zero after increasing or $FF after decreasing,
     ///    an IRQ is generated."
     ///
-    /// Two of the three leave Mesen 2, and **Q-151** records both. Step 1's "when counting is
-    /// enabled" is the `irq_enabled` test: the page's own gloss on disabling says it "inhibits
+    /// Two of the three leave Mesen 2, and **Q-151** items 1 and 3 record both. Step 1's "when
+    /// counting is enabled" is the `irq_enabled` test: the page's own gloss on disabling says it "inhibits
     /// counting", where Mesen clocks the prescaler whatever the enable says and tests it only
     /// before asserting. Step 2's decreasing case is `prescaler == mask`, the value a decrement
     /// from zero leaves; Mesen's `if(--prescaler == 0)` wraps one count earlier, off a prescaler
@@ -917,6 +920,12 @@ impl Mapper for JyCompany {
     ///
     /// Reached only behind a `SERVED_BY_CARTRIDGE` answer from [`Mapper::nametable_page`], so a
     /// cartridge of this board with its nametable registers idle never calls it.
+    ///
+    /// **There is no `write_nametable` beside it, and that is Q-152.** Mesen 2's own comment on
+    /// the mechanism is "This behavior only affects reads, not writes" — the CIRAM byte behind the
+    /// overlay is still written and still there — and this core cannot express that: one
+    /// `nametable_page` answer routes both directions, and the board has no access to console
+    /// VRAM. The write is dropped, which is right for the write and loses the byte underneath.
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         let table = usize::from(address >> 10) & 3;
         let bank =
