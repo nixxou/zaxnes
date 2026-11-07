@@ -225,6 +225,48 @@ fn q153_the_prefill_gates_playback() {
     assert_eq!(control.underruns(), 0, "waiting is not an under-run");
 }
 
+/// Q-153 §4: a resume, a state load or a rewind empties the ring and asks the stream to prefill
+/// again. Nothing stale is replayed (REQ-AUD-010), the mid-stream prefill is half the latency so
+/// the hole stays inside the 50 ms REQ-AUD-012 allows, and the signal is ramped in, not switched
+/// on.
+#[test]
+fn q153_a_resume_clears_the_ring_and_ramps_back_in() {
+    let latency_ms = 60.0;
+    let (mut stream, control, queue) = stream(latency_ms);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    feed(&queue, frames_of_ms(RATE, 300.0), 0.75);
+    let _ = block_of(&mut stream);
+    assert!(control.playing(), "the stream did not start");
+
+    // What the host does on a resume: empty the core's ring, then ask for a resynchronisation.
+    queue.lock().unwrap().clear();
+    control.request_resync();
+    assert!(
+        block_of(&mut stream).iter().all(|value| value.abs() < 0.76),
+        "the held tail must not exceed the signal"
+    );
+    assert!(!control.playing());
+
+    // Half the latency is enough to start again, and no more than that is waited for.
+    let half = frames_of_ms(RATE, latency_ms / 2.0);
+    feed(&queue, half - BLOCK, 0.5);
+    assert!(
+        block_of(&mut stream).iter().all(|value| *value == 0.0),
+        "the gate opened before half the latency"
+    );
+    feed(&queue, frames_of_ms(RATE, 300.0), 0.5);
+    let block = block_of(&mut stream);
+    assert!(control.playing());
+    near(block[0], 0.0, 0.01); // ramped in
+    assert!(block[block.len() - 1].abs() > 0.1); // and up by the end of the block
+    assert_eq!(
+        control.underruns(),
+        0,
+        "a resynchronisation the host asked for is not an under-run"
+    );
+}
+
 /// REQ-AUD-006 and vector A2: the console gain is `V`, so a quarter volume gives a quarter of the
 /// peak. The mixer computes the gain, the audio thread applies it.
 #[test]

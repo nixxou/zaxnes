@@ -1059,8 +1059,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // capture every time the menu appears.
             self.refresh_two_dimensional_cover();
         }
+        let was_running = self.state == EmulationState::Running;
         self.state = next;
         self.publish_state();
+        if next == EmulationState::Running {
+            // Q-153 §4: the ring is empty or holds a stale fragment of the moment the game
+            // stopped at, so it is emptied and prefilled again rather than played as it is, and
+            // the signal is ramped in. Leaving Running needs nothing: `publish_state` has just
+            // told the audio thread the console has stopped producing, and it ramps out over a
+            // few milliseconds instead of ending on the hard cut of finding 4.
+            self.resynchronise_audio();
+        } else if was_running {
+            // The latency the controller learnt belongs to the fill that is about to drain.
+            self.audio_rate.restart();
+        }
     }
 
     fn publish_state(&mut self) {

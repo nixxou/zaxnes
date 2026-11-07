@@ -562,12 +562,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.core_mut().reset();
             session.reset_frame_counter();
         }
-        // REQ-AUD-010: no sound of the previous session is ever replayed.
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .drop_pending_samples();
         self.rollback.clear();
         self.frame_steps.clear();
         self.fast_forward.clear();
@@ -576,6 +570,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.start_achievements(job.state.as_ref());
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
+        // REQ-AUD-010: no sound of the previous session is ever replayed. `set_state` has
+        // already done this when the game was not running, but a slot loaded while it plays
+        // leaves the state alone, so it is asked for here too (Q-153 §4). The call empties the
+        // core's ring and makes the stream prefill and ramp in rather than cut.
+        self.resynchronise_audio();
         Step::Finished
     }
 

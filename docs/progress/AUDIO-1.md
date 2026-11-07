@@ -27,7 +27,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
       milliseconds by the audio callback and averaged over about a second; the correction is a
       dead band, a capped proportional term and a slowly accumulating term. Only at 100 % speed
       and not while recording. A far drift resynchronises.
-- [ ] **6. Pause, resume, state load, rewind.** A short ramp to zero when the console stops
+- [x] **6. Pause, resume, state load, rewind.** A short ramp to zero when the console stops
       producing; on resume a clear, a prefill and a ramp in. The same on save-state load and on
       rewind. `AudioOutput::flush` is actually called.
 - [ ] **7. Counters.** Underrun events, average latency, current rate adjustment, minimum and
@@ -275,3 +275,42 @@ and is gone.
 
 fmt and clippy `-D warnings` clean; `zax-app` (8 new unit tests in `rate_control`) and `zax-nes`
 tests green.
+
+### Step 6 — pause, resume, state load, rewind
+
+One entry point, `EmulationHost::resynchronise_audio`: it empties the core's ring, bumps the
+control block's resynchronisation counter and clears what the rate controller had learnt. The
+stream then waits for half the configured latency (30 ms at the default) and ramps the signal in.
+
+Wired at:
+
+* **`set_state`, entering Running** — the resume of a pause, and every transition a load or a
+  rollback makes. Leaving Running needs nothing of its own: `publish_state` tells the audio
+  thread the console has stopped producing and the stream ramps out over `RAMP_MS` = 6 ms. That
+  ramp *is* the "short ramp to zero when the console stops producing" the work order asks for;
+  the 3,33 s fade of REQ-AUD-020 is still there underneath and still governs the gain, but what
+  the ear hears at the moment the ring runs dry is now a 6 ms ramp instead of the hard cut of
+  finding 4. Leaving Running also restarts the controller, since the fill it learnt from is
+  about to drain.
+* **`finish_launch`** — a game starting, and a slot loaded **while the game plays**, which
+  leaves the state at Running so `set_state` returns early. The explicit
+  `drop_pending_samples()` that used to sit there is gone: `resynchronise_audio` does it and
+  arms the gate as well.
+* **the rollback** (`save_states.rs`) — same reason: a rewind taken while running does not
+  change the state. REQ-AUD-012 tolerates the discontinuity and asks for no silence over 50 ms;
+  the mid-stream prefill is half the latency, so 30 ms at the default (Q-153 §4 records that a
+  user who chooses a latency above 100 ms accepts a longer hole).
+
+**On `AudioOutput::flush`.** Finding 4 is right that it was never called, but in a pull model it
+has no successor: there is no queue of blocks outside the ring to drop, so the two things that
+needed flushing — the stale sub-512 fragment in the core's ring and the blocks already handed to
+SDL — are now handled by `resynchronise_audio` and by the gate. The method is gone rather than
+left uncalled. `AudioOutput` keeps `pause`/`resume` for the device itself; nothing calls them,
+because REQ-AUD-013 says losing focus must not cut the sound and an explicit suspend already
+pauses the game, which silences the console through the ramp.
+
+New test `q153_a_resume_clears_the_ring_and_ramps_back_in`: after a resynchronisation nothing
+stale comes out, the gate opens at half the latency and not before, the first sample of the new
+signal is still near zero (ramped in, not switched on), and the whole thing counts no under-run.
+
+fmt and clippy `-D warnings` clean; all `zax-app` tests green (16 in `audio_tests`).
