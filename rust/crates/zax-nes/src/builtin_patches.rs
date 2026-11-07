@@ -127,9 +127,9 @@ pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
 pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
-/// Name of the Kirby's Adventure (USA) (Rev 1) pack (aids only: its widescreen is the margin
-/// decoder's).
-pub const KIRBY_USA_REV1: &str = "Kirby's Adventure (USA) (Rev 1) aids";
+/// Name of the Kirby's Adventure (USA) (Rev 1) pack: the widescreen's "No slowdown" (the margins
+/// are the margin decoder's).
+pub const KIRBY_USA_REV1: &str = "Kirby's Adventure (USA) (Rev 1) widescreen";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -1445,10 +1445,11 @@ pub const PATCHES: [BuiltinPatch; 58] = [
         game: "Kirby's Adventure",
         rom_name: "Kirby's Adventure (USA) (Rev 1)",
         source_crc: 0x5ED6_F221,
-        // A hack pack of aids only (`kirbywide`, `tools/build_pack.py`): "No slowdown", the
+        // A hack pack (`kirbywide`, `tools/build_pack.py`) whose widescreen component is "No
+        // slowdown" (its option bit read by the pack's code), as in the other games: the
         // gameplay loop's wait for the next frame ($E48C) through the pack's code, which asks for
         // 255 lines of overclock and goes on at once when the NMI already came while the frame
-        // ran (the game's wait clears that count first, losing a frame). The widescreen is the
+        // ran (the game's wait clears that count first, losing a frame). The margins are the
         // margin decoder's.
         bps: include_bytes!("../patches/kirby-usa-rev1.zxpk"),
         options: KIRBY_OPTIONS,
@@ -2574,15 +2575,13 @@ mod tests {
     fn the_built_in_patches_are_well_formed() {
         for patch in PATCHES {
             // A hack pack: it reads, and its widescreen is one of its components, unless it is
-            // a pack of aids alone (Nova the Squirrel; Kirby's Adventure, whose code runs in
-            // the execution zone).
+            // a pack of aids alone (Nova the Squirrel).
             if crate::hack_pack::is_pack(patch.bps) {
                 let pack = crate::hack_pack::HackPack::read(patch.bps);
                 assert!(
                     pack.is_some_and(|pack| {
                         pack.component(crate::hack_pack::WIDESCREEN).is_some()
-                            || (!pack.components.is_empty()
-                                && (pack.code.is_empty() || patch.boot_zone))
+                            || (!pack.components.is_empty() && pack.code.is_empty())
                     }),
                     "{}",
                     patch.name

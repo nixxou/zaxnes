@@ -316,6 +316,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
             Some(&ng3::NinjaGaiden3)
         }
         crate::builtin_patches::SMB3_USA => Some(&smb3::USA),
+        crate::builtin_patches::KIRBY_USA_REV1 => Some(&kirby::Kirby),
         crate::builtin_patches::SMB3_JAPAN | crate::builtin_patches::SMB3_JAPAN_REV1 => {
             Some(&smb3::JAPAN)
         }

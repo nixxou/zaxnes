@@ -125,8 +125,11 @@ impl MarginDecoder for Kirby {
     }
 }
 
-/// Whether the row's edge columns show what the map gives at tile row `tile_row`, the row's
-/// first tile column being `first`.
+/// Whether the row shows what the map gives at tile row `tile_row`, the row's first tile column
+/// being `first`: every column from the third to the thirtieth, one aside (an object the game
+/// draws in the nametable, a block being broken). Two columns alone were not enough: a screen
+/// that is not the room (the intro, a level's title card) matched the last room's map there now
+/// and then, and its rows got that room's margins.
 fn edges_match(
     room: &Room<'_>,
     memory: &DecoderMemory<'_>,
@@ -134,13 +137,21 @@ fn edges_match(
     first: i32,
     tile_row: i32,
 ) -> bool {
-    // Not the second column: turning round to scroll left, the game draws the column coming in
-    // a frame late, and for that frame the second column (under the mask but for its last two
-    // pixels) still shows the other side of the room.
-    [2, 30].into_iter().all(|column| {
+    // Not the first two columns: turning round to scroll left, the game draws the column coming
+    // in a frame late, and for that frame the second column (under the mask but for its last two
+    // pixels) still shows the other side of the room; nor the last one, coming in scrolling
+    // right.
+    let mut misses = 0;
+    for column in 2..=29 {
         let shown = (memory.nametable)(nametable_address(row, column));
-        room.tile(first + column, tile_row).map(|(tile, _)| tile) == Some(shown)
-    })
+        if room.tile(first + column, tile_row).map(|(tile, _)| tile) != Some(shown) {
+            misses += 1;
+            if misses > 1 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The PPU address of screen column `column` of `row`, on the plane of two nametables side by
