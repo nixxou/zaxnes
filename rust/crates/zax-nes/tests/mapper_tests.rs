@@ -8528,3 +8528,182 @@ fn req_core_100_jy_asic_chr_write_enable_gates_chr_ram() {
         "write-protected again"
     );
 }
+
+/// Drives the board's MMC4-like latch the way a pattern fetch does: through the PPU address bus,
+/// which is where the page puts it and where `IrqBoard` already forwards the hook.
+#[cfg(feature = "board-jy-asic")]
+fn jy_fetch(core: &mut NesCore, address: u16) {
+    core.cartridge_mut().unwrap().on_ppu_address_bus(address, 0);
+}
+
+/// The census's own test: "a fetch of the latch tile switches the bank for subsequent fetches, and
+/// the latch is per pattern table".
+///
+/// "In 4 KiB CHR banking mode with MMC4 mode on: $9000/$A000 … when latch =0, $9002/$A002 … when
+/// latch =1" for PPU `$0000`-`$0FFF`, and `$9004`/`$9006` the same way for `$1000`-`$1FFF`; "the
+/// latch is set to 0 when the PPU reads from $0FD8-$0FDF/$1FD8-$1FDF and to 1 when the PPU reads
+/// from $0FE8-$0FEF/$1FE8-$1FEF".
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_039_jy_asic_mmc4_latch_picks_one_of_two_banks_per_pattern_table() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x08); // 4 KiB CHR banking.
+    core.mapper_write(0xD003, 0x80); // MMC4-like mode on.
+    core.mapper_write(0x9000, 0x01); // $0000 with latch 0: 4 KiB bank 1.
+    core.mapper_write(0x9002, 0x02); // $0000 with latch 1: bank 2.
+    core.mapper_write(0x9004, 0x03); // $1000 with latch 0: bank 3.
+    core.mapper_write(0x9006, 0x04); // $1000 with latch 1: bank 4.
+
+    // Power-on selects the latch-0 registers, which is also the layout the mode-off case gives.
+    assert_eq!([4, 12], [peek(&core, 0x0000), peek(&core, 0x1000)]);
+
+    // The low window's latch, and only it.
+    jy_fetch(&mut core, 0x0FE8);
+    assert_eq!([8, 12], [peek(&core, 0x0000), peek(&core, 0x1000)], "low 1");
+    jy_fetch(&mut core, 0x0FD8);
+    assert_eq!([4, 12], [peek(&core, 0x0000), peek(&core, 0x1000)], "low 0");
+
+    // The high window's, and only it.
+    jy_fetch(&mut core, 0x1FE8);
+    assert_eq!(
+        [4, 16],
+        [peek(&core, 0x0000), peek(&core, 0x1000)],
+        "high 1"
+    );
+    jy_fetch(&mut core, 0x1FD8);
+    assert_eq!(
+        [4, 12],
+        [peek(&core, 0x0000), peek(&core, 0x1000)],
+        "high 0"
+    );
+}
+
+/// The latch ranges are eight addresses wide, not one: "$0FD8-$0FDF" and "$0FE8-$0FEF", which is
+/// tile `$FD`'s and tile `$FE`'s second bit plane, all eight rows.
+///
+/// That is the MMC4's rule and not the MMC2's — mapper 9 reacts to the single address `$0FD8` —
+/// and it is why [`JyCompany`]'s `advance_chr_latch` is the MMC4's body.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_039_jy_asic_latch_range_is_the_whole_row_of_the_tile() {
+    for low in 0u16..8 {
+        let mut core = MapperRom::new(209).prg(64).chr(64).load();
+        core.mapper_write(0xD000, 0x08);
+        core.mapper_write(0xD003, 0x80);
+        core.mapper_write(0x9002, 0x02);
+        jy_fetch(&mut core, 0x0FE8 | low);
+        assert_eq!(8, peek(&core, 0x0000), "$0FE8 + {low} must latch");
+    }
+
+    // And an address outside the two ranges does not: $0FF8 is tile $FF's second plane.
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x08);
+    core.mapper_write(0xD003, 0x80);
+    core.mapper_write(0x9002, 0x02);
+    for address in [0x0FC8u16, 0x0FD0, 0x0FE0, 0x0FF8, 0x0FD8 - 0x0100] {
+        jy_fetch(&mut core, address);
+        assert_eq!(0, peek(&core, 0x0000), "{address:#06X} must not latch");
+    }
+}
+
+/// `$D003` bit 7 is what enables the mode, for **every** number of the chip.
+///
+/// With the bit clear the page's plain 4 KiB layout applies — "$9000/$A000: … at PPU $0000-$0FFF"
+/// and "$9004/$A004: … at PPU $1000-$1FFF" — which is the same register table read with both
+/// latches at 0, so a fetch of the latch tile changes nothing at all.
+///
+/// Mesen 2 gates its latch on `MapperID == 209` instead, so mapper 90's *Mighty Morphin' Power
+/// Rangers III* — the title the page names as the one that "uses MMC4-like mode for displaying
+/// title screen" — would not get it there. This test runs all four numbers (Q-150).
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_150_jy_asic_mmc4_mode_is_d003_bit_7_on_every_number() {
+    for mapper in [35usize, 90, 209, 211] {
+        let mut core = MapperRom::new(mapper).prg(64).chr(64).load();
+        core.mapper_write(0xD000, 0x08); // 4 KiB CHR banking, MMC4 mode still off.
+        core.mapper_write(0x9002, 0x02);
+        jy_fetch(&mut core, 0x0FE8);
+        assert_eq!(0, peek(&core, 0x0000), "{mapper}: the mode is off");
+
+        core.mapper_write(0xD003, 0x80);
+        jy_fetch(&mut core, 0x0FE8);
+        assert_eq!(8, peek(&core, 0x0000), "{mapper}: the mode is on");
+    }
+}
+
+/// A peek never moves a latch (REQ-CORE-033), and neither does a fetch above `$1FFF`.
+///
+/// The second half is this board's own: its latch sits on `Mapper::on_ppu_address_bus`, which sees
+/// the nametable and attribute fetches of every rendered line as well as the pattern fetches, so
+/// the `address >= 0x2000` test is what keeps `$2FD8` out of it.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_033_jy_asic_a_peek_never_moves_its_latch() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x08);
+    core.mapper_write(0xD003, 0x80);
+    core.mapper_write(0x9002, 0x02);
+    core.mapper_write(0x9006, 0x04);
+
+    let cartridge = core.cartridge().unwrap();
+    let before = cartridge.chr_latch_state();
+    for address in 0..0x2000u16 {
+        let _ = cartridge.ppu_peek(address, ChrFetch::Background);
+    }
+    assert_eq!(
+        before,
+        cartridge.chr_latch_state(),
+        "a peek is side-effect free"
+    );
+
+    // $2FD8 and $3FE8 are nametable and palette space: the latch must not see them.
+    for address in [0x2FD8u16, 0x2FE8, 0x3FD8, 0x3FE8] {
+        jy_fetch(&mut core, address);
+    }
+    assert_eq!(
+        before,
+        core.cartridge().unwrap().chr_latch_state(),
+        "nothing above $1FFF is a pattern fetch"
+    );
+}
+
+/// REQ-CORE-039's own contract: the tile emitter reads the latch state, walks the line forward
+/// with `advance_chr_latch`, then puts the saved value back — and the emulation is unchanged
+/// either way.
+///
+/// `$0FD8`-`$0FDF` is tile `$FD`'s second bit plane and `$0FE8`-`$0FEF` is tile `$FE`'s, so the
+/// page's two address ranges are the MMC4's two tile numbers and this board's
+/// `advance_chr_latch` is `Mmc2`'s body.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x08);
+    core.mapper_write(0xD003, 0x80);
+    core.mapper_write(0x9000, 0x01);
+    core.mapper_write(0x9002, 0x02);
+    core.mapper_write(0x9004, 0x03);
+    core.mapper_write(0x9006, 0x04);
+
+    let cartridge = core.cartridge_mut().unwrap();
+    let saved = cartridge.chr_latch_state();
+    assert_eq!(0, saved, "both latches power on at 0");
+
+    // Tile $FE of the low table, then tile $FD of the high one: one latch each, and the view the
+    // emitter would record moves with them.
+    cartridge.advance_chr_latch(0x0000, 0xFE);
+    assert_eq!(8, cartridge.ppu_peek(0x0000, ChrFetch::Background));
+    cartridge.advance_chr_latch(0x1000, 0xFE);
+    assert_eq!(16, cartridge.ppu_peek(0x1000, ChrFetch::Background));
+    assert_eq!(0b11, cartridge.chr_latch_state());
+
+    // A tile that is neither moves nothing.
+    cartridge.advance_chr_latch(0x0000, 0x42);
+    assert_eq!(0b11, cartridge.chr_latch_state());
+
+    // Put it back, and the board is where the emulation left it.
+    cartridge.set_chr_latch_state(saved);
+    assert_eq!(saved, cartridge.chr_latch_state());
+    assert_eq!(4, cartridge.ppu_peek(0x0000, ChrFetch::Background));
+    assert_eq!(12, cartridge.ppu_peek(0x1000, ChrFetch::Background));
+}

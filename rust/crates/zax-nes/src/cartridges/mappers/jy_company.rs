@@ -463,6 +463,48 @@ impl JyCompany {
         u16::from(self.multiplicand) * u16::from(self.multiplier)
     }
 
+    /// Sets latch `window` to `value`, recomputing the windows only when it moved.
+    ///
+    /// The test matters: this runs on the PPU's address bus, 57 600-odd times a frame on a
+    /// cartridge of this board, and all but a handful of those addresses leave both latches where
+    /// they are. It is `Mmc2::set_latch`'s own shape, for the same reason.
+    fn set_latch(&mut self, window: usize, value: u8) {
+        if self.chr_latch[window] == value {
+            return;
+        }
+
+        self.chr_latch[window] = value;
+        self.update_banks();
+    }
+
+    /// The MMC4-like latch on a PPU read of `address`.
+    ///
+    /// "If MMC4-like bankswitching mode is enabled via $D003 bit 7, the latch is set to 0 when
+    /// the PPU reads from $0FD8-$0FDF/$1FD8-$1FDF and to 1 when the PPU reads from
+    /// $0FE8-$0FEF/$1FE8-$1FEF."
+    ///
+    /// **Both latches move whatever the CHR banking mode is**, and only mode 1 reads them. The
+    /// page's "only meaningful in 4 KiB CHR-ROM banking mode" says where the latch *matters*, not
+    /// where it moves, and a latch frozen by a mode change would be a second piece of state the
+    /// page does not describe. [`JyCompany::chr_4k_register`] is the one place the value is used.
+    ///
+    /// Mesen 2 moves the same latches on the same hook, but gates them on **`MapperID == 209`**
+    /// rather than on `$D003` bit 7 — so mapper 90's *Mighty Morphin' Power Rangers III*, which
+    /// the page says "uses MMC4-like mode for displaying title screen", would not get it there.
+    /// The page gates the mode on the register for every number of the chip (Q-150).
+    fn move_chr_latch(&mut self, address: u16) {
+        if !self.mmc4_mode || address >= 0x2000 {
+            return;
+        }
+
+        let window = usize::from(address & 0x1000 != 0);
+        match address & 0x0FF8 {
+            0x0FD8 => self.set_latch(window, 0),
+            0x0FE8 => self.set_latch(window, 1),
+            _ => {}
+        }
+    }
+
     /// `$C001` bits 1-0: "0: CPU M2 rise / 1: PPU A12 rise (unfiltered, eight per scanline) /
     /// 2: PPU reads (170 per scanline) / 3: CPU writes".
     const SOURCE_CPU_M2: u8 = 0;
@@ -602,6 +644,16 @@ impl Mapper for JyCompany {
         self.outer_prg_bank = reader.read_u8()?;
         self.outer_chr_a18 = reader.read_bool()?;
         reader.read_into(&mut self.chr_latch)?;
+        // Validated and not masked: a latch of 2 or more would index `chr_low` out of its eight
+        // registers through `chr_4k_register`, so a corrupt block has to be refused rather than
+        // quietly repaired. `Mmc2` gets this for free from `StateReader::read_index`; this board
+        // keeps the two latches in the block as bytes, so the check is here.
+        if self.chr_latch.iter().any(|latch| *latch > 1) {
+            return Err(InvalidState::corrupt(format!(
+                "Corrupt savestate: J.Y. ASIC CHR latches {:?} are not 0 or 1.",
+                self.chr_latch
+            )));
+        }
         self.irq_enabled = reader.read_bool()?;
         self.irq_source = reader.read_u8()?;
         self.irq_direction = reader.read_u8()?;
@@ -746,6 +798,40 @@ impl Mapper for JyCompany {
         }
 
         self.last_ppu_address = address;
+        self.move_chr_latch(address);
+    }
+
+    /// The MMC4-like latches, as an opaque pair: bit 0 is the low window's and bit 1 the high
+    /// window's.
+    ///
+    /// The tile emitter reads this, walks the line forward with
+    /// [`Mapper::advance_chr_latch`] so that each record carries the pattern the hardware would
+    /// show at that column, then writes the saved value back (REQ-CORE-039) — the same contract
+    /// the MMC2's own three methods keep.
+    fn chr_latch_state(&self) -> i32 {
+        i32::from(self.chr_latch[0] | (self.chr_latch[1] << 1))
+    }
+
+    fn set_chr_latch_state(&mut self, state: i32) {
+        self.chr_latch = [
+            u8::from(state & 0x01 != 0),
+            u8::from((state >> 1) & 0x01 != 0),
+        ];
+        self.update_banks();
+    }
+
+    /// Moves the latch of `pattern_table` as the fetch of `tile` would.
+    ///
+    /// `$0FD8`-`$0FDF` is tile `$FD`'s second bit plane, all eight rows, and `$0FE8`-`$0FEF` is
+    /// tile `$FE`'s — so the page's two address ranges *are* the MMC4's two tile numbers, which is
+    /// why this body is `Mmc2::advance_chr_latch`'s.
+    fn advance_chr_latch(&mut self, pattern_table: i32, tile: i32) {
+        let window = usize::from(pattern_table & 0x1000 != 0);
+        if tile == 0xFD {
+            self.set_latch(window, 0);
+        } else if tile == 0xFE {
+            self.set_latch(window, 1);
+        }
     }
 
     fn nametable_page(&self, table: i32) -> i32 {

@@ -101,7 +101,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
   Q-151), up/down/off counting, the $C006 XOR register, the $C001 prescaler mask, and the page's
   "disabling acknowledges, inhibits counting and resets the prescaler to zero". `on_cpu_cycle`,
   `on_ppu_address_bus`, `irq_asserted`, and `ppu_irq_horizon` answering `None`.
-- [ ] **4/9 — the MMC4-like CHR latch.** $D003 bit 7, the two latches, the four 4 KiB registers
+- [x] **4/9 — the MMC4-like CHR latch.** $D003 bit 7, the two latches, the four 4 KiB registers
   they pick between, and `advance_chr_latch` for the tile emitter.
 - [ ] **5/9 — the nametables, the jumper and the $6000-$7FFF window.** Extended Mirroring
   ($D001 bit 3), ROM nametables for all ($D000 bits 5 and 6) and for some ($D002 bit 7), 90's
@@ -396,3 +396,76 @@ that distinction.
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean — the latter after splitting
 `write_register` into three (`write_arithmetic_register`, `write_irq_register`,
 `write_config_register`), the IRQ window having taken it past `clippy::too_many_lines`.
+
+---
+
+## Step 4 — the MMC4-like CHR latch, on the hook the page names
+
+"If MMC4-like bankswitching mode is enabled via $D003 bit 7, the latch is set to 0 when the PPU
+**reads** from $0FD8-$0FDF/$1FD8-$1FDF and to 1 when the PPU reads from $0FE8-$0FEF/$1FE8-$1FEF",
+and in 4 KiB CHR banking with the mode on the four registers are `$9000`/`$9002` for
+PPU `$0000`-`$0FFF` and `$9004`/`$9006` for `$1000`-`$1FFF`, each with its `$A00x` MSB.
+
+### Why `on_ppu_address_bus` and not `ppu_read`
+
+The MMC2 and MMC4 of this build put their latch on `Mapper::ppu_read`, and `Board::ppu_read` has an
+arm for them. **`IrqBoard` does not override that method** — its arm is `Mapper`'s default, which
+calls the forwarded `ppu_peek` — so overriding it would add a distinct body to a dispatch §4.10 of
+the inventory prices at "one arm's worth, +16 measured" for **every board of the enum**, eleven of
+which have no latch.
+
+`Mapper::on_ppu_address_bus` is already forwarded, already `#[inline(never)]`, and already sees
+every PPU read: "the nametable byte, the attribute byte, the two background planes, the two
+discarded nametable fetches of dots 338 and 340, and every sprite pattern plane". The page says the
+latch moves on a read, and that is the hook for reads. Mesen 2 puts the same latch on the same hook
+(`NotifyVramAddressChange`).
+
+The cost of being on that hook is one test — `address >= 0x2000` — which
+`req_core_033_jy_asic_a_peek_never_moves_its_latch` pins from the other side: `$2FD8` and `$3FE8`
+are nametable and palette space and must not reach the latch.
+[`JyCompany::set_latch`] then recomputes the windows **only when the latch moved**, which is
+`Mmc2::set_latch`'s own shape and matters here for the same reason: 57 600-odd calls a frame, all
+but a handful of them leaving both latches alone.
+
+### The tile emitter's three methods
+
+REQ-CORE-039's contract — read the latch state, walk the line with `advance_chr_latch`, put the
+saved value back — needs `chr_latch_state`, `set_chr_latch_state` and `advance_chr_latch`, and
+`IrqBoard` forwards all three for this board alone. None of them is on a rendering path: they run
+once per captured line, and only when a 3D pack asked for records.
+
+**`advance_chr_latch`'s body is `Mmc2`'s**, and the reason is arithmetic rather than imitation:
+`$0FD8`-`$0FDF` is tile `$FD`'s **second bit plane, all eight rows**, and `$0FE8`-`$0FEF` is tile
+`$FE`'s — so the page's two address ranges *are* the MMC4's two tile numbers.
+`req_core_039_jy_asic_latch_range_is_the_whole_row_of_the_tile` walks all eight addresses of a
+range and five addresses outside them.
+
+### One more place the page beats Mesen 2 (Q-150)
+
+Mesen 2 gates its latch on **`_romInfo.MapperID == 209`** and never looks at `$D003` bit 7. The
+page gates it on the register, for every number of the chip — and the one title it names as using
+the mode, *Mighty Morphin' Power Rangers III* ("uses MMC4-like mode for displaying title screen"),
+is listed under **mapper 209**, while the mode is as available to 90, 211 and 35.
+`q_150_jy_asic_mmc4_mode_is_d003_bit_7_on_every_number` runs all four.
+
+**Both latches move whatever the CHR banking mode is**, and only mode 1 reads them. "Only
+meaningful in 4 KiB CHR-ROM banking mode" says where the latch *matters*, not where it moves, and a
+latch frozen by a mode change would be a second piece of state the page does not describe.
+
+### The save state
+
+The two latches are in the block as bytes, and `load_registers` **refuses** a block whose latch is
+2 or more rather than masking it: `chr_4k_register` indexes the eight CHR registers through the
+latch, so a corrupt value would index out of them. The MMC2 gets that check for free from
+`StateReader::read_index`; this board keeps the pair compact and does it by hand.
+
+### Tests from the page
+
+`req_core_039_jy_asic_mmc4_latch_picks_one_of_two_banks_per_pattern_table` (the census's own test:
+a fetch of the latch tile switches the bank, and the latch is per pattern table),
+`…_latch_range_is_the_whole_row_of_the_tile`, `q_150_jy_asic_mmc4_mode_is_d003_bit_7_on_every_number`,
+`req_core_033_jy_asic_a_peek_never_moves_its_latch` and
+`req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board`.
+
+`cargo test --release -p zax-nes`: **941 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
