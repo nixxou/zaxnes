@@ -69,13 +69,19 @@ impl MarginDecoder for Kirby {
             return false;
         }
         let first = left >> 3;
+        // Down, the same: the game draws a screen of the room (192 lines) in the nametable's
+        // first 24 tile rows, so the row's tile row repeats every 24 rows down the room, and the
+        // camera (a frame early, a few lines off at most) picks the repeat.
         let fine_y = i32::from(row.v >> 12);
-        // The camera's line, a frame early too, rounded to the row's tile.
-        let world_y = (camera_y + row.line - fine_y + 4) & !7;
-        if world_y < 0 {
+        let ring_row = i32::from(row.coarse_y());
+        if ring_row >= SCREEN_HEIGHT >> 3 {
             return false;
         }
-        let tile_row = world_y >> 3;
+        let near = (camera_y + row.line - fine_y) >> 3;
+        let tile_row = near - (near - ring_row + 12).rem_euclid(24) + 12;
+        if tile_row < 0 {
+            return false;
+        }
 
         // The row's edge columns must show what the map gives there.
         for column in [1, 30] {
