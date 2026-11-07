@@ -1320,6 +1320,52 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.18 Lot MF-UNL-4: Q-123's ceiling asked a third time, and `read_nametable_inner` does not move at all
+
+Q-123 is this project's oldest standing performance ceiling: a **third** distinct arm body in the
+`Mapper::read_nametable` dispatch took `Ppu2C02::read_nametable_inner` from 132 instructions to 109
+"for every game in the library", measured by lot MF-5a, and the conclusion written on
+`<Board as Mapper>::read_nametable` was that a board needing cartridge-served nametables "has to
+reuse one of the two existing arms". MF-6c asked it twice more and got zero both times (114 → 75 at
+the third body, **75 again** at the fourth). §7.2 of `docs/review/UNL-census.md` nonetheless makes
+it lot MF-UNL-4's "main risk" and puts the measurement first, so step 1 of that lot asked a third
+time — with two shapes rather than one, because by then the dispatch had **five** bodies and the
+interesting question had changed.
+
+| shape | what it is |
+| --- | --- |
+| `unl4base` | `16a30564`, five bodies: the MMC5's `ExRAM`/fill, the UNROM 512's four-screen CHR-RAM, the GTROM's, and the two forwards `IrqBoard::read_nametable` (mapper 68) and `DecodeBoard::read_nametable` (mapper 111) |
+| `nt6board` | a **sixth `Board` arm body**, the shape the census feared: the same CHR-ROM indexed load given to `Fme7`, a direct `Board` variant |
+| `nt6irq` | the same body given to `Sunsoft3`, so it lands **inside** the `IrqBoard::read_nametable` forward mapper 68 already pays for — the shape the J.Y. ASIC ships as |
+
+Both bodies are dead code (neither board's `nametable_page` ever answers `SERVED_BY_CARTRIDGE`),
+which is the point: Q-123's own finding is that "the trigger is the third distinct body, **not its
+size**", so a body that is merely *present* in the dispatch is the whole experiment.
+
+**`Ppu2C02::read_nametable_inner` is 80 instructions in all three binaries, and 113 426 776
+instructions dynamically on `m4` in all three — identical to the instruction.**
+`Ppu2C02::read_pattern_planes` is 48 633 600 on `m4`, and identical on all thirteen ROMs of lot
+PR-1's set in all three. On the whole process:
+
+| | PR-1 set total | PR-1 worst ROM | level-2 `core` | level-2 `total` |
+| --- | ---: | --- | --- | --- |
+| `nt6board` vs base | **+59 925 (+0.000 %)** | `oamstr`/`m1` **+0.001 %** | not run | not run |
+| `nt6irq` vs base | **+243 250 (+0.000 %)** | `oamstr` **+0.002 %** | **all five +0, identical to the instruction** | −0.017 % to **+0.001 %** (`mm2`) |
+
+**The ceiling is not there, and this is the measurement that says why nobody should look for it
+again.** MF-5a's 132 → 109 was a property of a tree where `read_nametable_inner` still held the
+`dispatch!` folded in behind its `page == SERVED_BY_CARTRIDGE` test; on this tree the dispatch
+leaves that function by a tail call and the function is 80 instructions whatever the arm count.
+What a `read_nametable` body costs now is whatever LLVM does to the *rest* of the module, which
+is the same lottery §5.15 describes for a new `Board` discriminant and is measured the same way —
+against the whole-process count per ROM, not against a symbol.
+
+The practical rule for the next lot is narrower and cheaper than Q-123's: **put the body inside a
+shared variant's existing forward.** `nt6irq` adds no arm to `Board::read_nametable` at all, and
+MF-CART step 6's "twelve more variants in a shared enum cost `mmc5` +3 695" is the figure that
+applies to it. Q-123 itself stands unchanged for the VRC6 — it is a provisional *behaviour* choice,
+not a performance one, and no game is known to want the mode.
+
 ### 5.17 Lot MF-4e: §5.16's limit, met head-on — the per-dot pipeline is **57 % to 62 % of the core**
 
 §5.16 found lot MF-VS's cost in `Ppu2C02::run_dots` and `Ppu2C02::background_fetch` and closed with

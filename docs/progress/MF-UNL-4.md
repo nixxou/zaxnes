@@ -88,10 +88,10 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 - [ ] **0/9 — the plan.** This file: the four numbers, the one page they share, the two `bool`s
   that are the per-number wiring, the four places this lot leaves a prescription for the page, the
   `IrqBoard` variant and why each of the four hooks is free in `Board`'s dispatches.
-- [ ] **1/9 — settle the nametable question.** A sixth `Mapper::read_nametable` body measured
-  against Q-123's ceiling on this tree, with the figure in `rust/docs/PERFORMANCE-HISTORY.md`. The
-  board ships through the existing `IrqBoard` forward if it costs what MF-6c measured, and is
-  parked if it does not.
+- [x] **1/9 — settle the nametable question.** A sixth `Mapper::read_nametable` body measured
+  against Q-123's ceiling on this tree, in two shapes, with the figures in
+  `rust/docs/PERFORMANCE-HISTORY.md` §5.18. **`Ppu2C02::read_nametable_inner` does not move at
+  all**, so the board serves its nametables itself and the feature ships.
 - [ ] **2/9 — `JyCompany`, the register map and the banking modes.** $5000/$5400/$5C00 solder pad,
   the $5800-$5801 multiplier, the $5802-$5803 accumulator and test register, the four $8000-$8003
   PRG registers with the four modes, the sixteen $9000-$A007 CHR registers with the four modes and
@@ -116,3 +116,89 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
   98 commercial originals; `cargo test --release -p zax-nes -p zax-harness`; the ignored tests with
   `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
 - [ ] **9/9 — the journal, the census note and the final pass.**
+
+---
+
+## Step 1 — the nametable question, settled: the ceiling is not there
+
+§7.2's step 1 says "Measure a third `Mapper::read_nametable` body against the Q-123 ceiling. If it
+costs what Q-123 measured, the board serves nametables through the existing CHR-ROM path instead
+and the feature ships; if it does not fit at all, the board is **parked**." Two things about that
+sentence had to be fixed before it could be obeyed:
+
+* a body would be the **sixth**, not the third — `Board::read_nametable` dispatches the MMC5's
+  `ExRAM`/fill, the UNROM 512's four-screen CHR-RAM, the GTROM's, and the two forwards
+  `IrqBoard::read_nametable` (mapper 68, MF-6c step 4) and `DecodeBoard::read_nametable`
+  (mapper 111, MF-6c step 9);
+* and "serves nametables through the existing CHR-ROM path instead" is not an alternative to
+  measuring. There is no existing CHR-ROM nametable path a *second* board can borrow: mapper 68's
+  body indexes its own two registers. What there is, is mapper 68's **forward** —
+  `IrqBoard::read_nametable` — and a body put inside that forward adds nothing to `Board`'s own
+  dispatch. So the step measured both shapes.
+
+### The three binaries
+
+| label | tree |
+| --- | --- |
+| `unl4base` | **`16a30564`**, the lot's base commit, five bodies |
+| `nt6board` | the same source with a **sixth `Board` arm body**: the CHR-ROM indexed load the J.Y. board will use, given to `Fme7`, which is a direct `Board` variant — the shape the census feared |
+| `nt6irq` | the same body given to `Sunsoft3`, so it lands **inside** mapper 68's `IrqBoard::read_nametable` forward — the shape this lot ships |
+
+Each built by `build-clean.sh` from its own tar into a fresh directory with its own
+`CARGO_TARGET_DIR`, which is then deleted. Both bodies are **dead code** — neither board's
+`nametable_page` ever answers `SERVED_BY_CARTRIDGE` — and that is the experiment: Q-123's own
+finding is that "the trigger is the third distinct body, **not its size**", so a body merely
+*present* in the dispatch is what has to be priced.
+
+### The symbol Q-123 is about
+
+| | `unl4base` | `nt6board` | `nt6irq` |
+| --- | ---: | ---: | ---: |
+| `Ppu2C02::read_nametable_inner`, static | **80** | **80** | **80** |
+| `Ppu2C02::read_nametable_inner` on `m4`, 300 frames | **113 426 776** | **113 426 776** | **113 426 776** |
+| `Ppu2C02::read_pattern_planes` on `m4` | 48 633 600 | 48 633 600 | 48 633 600 |
+
+**Identical to the instruction, statically and dynamically, in all three.** `read_pattern_planes`
+is identical on all thirteen ROMs of the set in all three as well. MF-5a's 132 → 109 was a property
+of a tree where that function still held the `dispatch!` folded in behind its
+`page == SERVED_BY_CARTRIDGE` test; here the dispatch leaves by a tail call and the function is 80
+instructions whatever the arm count.
+
+### PR-1's thirteen ROMs, 300 frames, no pack
+
+| | set total | % | worst ROM |
+| --- | ---: | ---: | --- |
+| `nt6board` vs `unl4base` | **+59 925** | **+0.000** | `m1` +26 341 (**+0.001 %**), `oamstr` +0.000 % |
+| `nt6irq` vs `unl4base` | **+243 250** | **+0.000** | `oamstr` +50 496 (**+0.002 %**), `m0` +0.001 % |
+
+`readbuf` — the CNROM whose whole run is fetches, and the ROM MF-6c step 4 saw move by −78 628 —
+is **−49 190** for `nt6board` and **−36 210** for `nt6irq`. Against the owner's +0.02 % per ROM,
+the worst figure of either shape is a tenth of the tolerance.
+
+### Level 2's five games, 600 frames, packs loaded, inputs pressed — `nt6irq` against the base
+
+| game | `core` delta | `core` % | `total` delta | `total` % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | **+0** | +0.000 | −2 258 325 | −0.017 |
+| `smb3` | **+0** | +0.000 | −4 117 632 | −0.017 |
+| `zelda2` | **+0** | +0.000 | −590 043 | −0.004 |
+| `metroid` | **+0** | +0.000 | −82 536 | −0.001 |
+| `mm2` | **+0** | +0.000 | +131 986 | **+0.001** |
+
+**All five `core` figures are identical to the instruction**, `apu`, `ppu` and `draw_list` on every
+game too, and the only `total` above the base is `mm2` at +0.001 %, whose whole move is
+`convert` +115 746 and `lua_hooks` +115 746 — the same number twice, which is the Lua column the
+performance rule names and MF-UNL-3 step 7 priced at ±0.022 % between two binaries with identical
+emulation.
+
+### The decision
+
+**The board serves its own nametables, and the body goes inside `IrqBoard::read_nametable`.** No
+park, no second feature for the mechanism — the shape mapper 68 needed `board-68-chr-nametables`
+for costs nothing here, because mapper 68 already bought the arm in `Board`'s dispatch and this
+board shares it. `rust/docs/PERFORMANCE-HISTORY.md` §5.18 is the write-up, with the rule for the
+next lot: put the body inside a shared variant's existing forward.
+
+Disk: G: stayed above 31 GiB free; each of the three build directories was deleted by
+`build-clean.sh` as soon as its binary was copied out, and the three tars afterwards. Every run in
+the foreground with its output read, as the headless rule requires.
