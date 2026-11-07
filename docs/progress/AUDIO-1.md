@@ -35,7 +35,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
       profiler is on.
 - [x] **8. Tests.** Ring/callback logic without a device; rate control against a simulated
       device clock; main-thread stalls.
-- [ ] **9. Measurements.** Main-thread frame time before and after, 2D and 3D, desktop release
+- [x] **9. Measurements.** Main-thread frame time before and after, 2D and 3D, desktop release
       build; golden-core byte-identical to `v0.4.2`; Android and PortMaster `cargo check`.
 - [ ] **10. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
       with the ROM variables, journal entry.
@@ -375,3 +375,90 @@ blocks of silence.
 
 Release run of `zax-app`, `zax-platform`, `zax-settings` and `zax-nes`: all green, with
 `--include-ignored` on `audio_tests` too (19 tests, 0,74 s).
+
+### Step 9 — the measurements
+
+**Golden-core: byte-identical.** `v0.4.2` was extracted with `git archive` into a throwaway tree
+(inside `target-au`, since nothing there is ever staged, and deleted afterwards), its harness
+built, and both run over the 98 ROMs of `G:/3DSen/test-originals` at 1200 frames each:
+
+```
+6ae5cd1dd246d67dc330e9a690aac15f1c5356fc55ff1ed5a048e51662906daa  v0.4.2
+6ae5cd1dd246d67dc330e9a690aac15f1c5356fc55ff1ed5a048e51662906daa  audio-fix
+cmp: BYTE-IDENTICAL   (98 ROMs, 145 334 bytes)
+```
+
+Which is what the diff already said: `git diff v0.4.2 -- rust/crates/zax-nes rust/crates/zax-harness
+rust/crates/zax-goldens` is empty. Of the harness's dependencies only `zax-settings` changed, by
+one descriptor, and `golden_core.rs` does not mention settings at all.
+
+**Frame time.** Release build, Castlevania (USA), 1280×720, vsync on, `ZAXNES_PROFILE=1`,
+`--smoke-emulated 1200` (20 s of play), RTX 3050, 24 CPUs; the last three two-second windows of
+each run. The figures are mean/max milliseconds per displayed frame.
+
+| | audio stage | whole frame |
+|---|---|---|
+| v0.4.2, 2D | 0,01-0,02 / 0,01-0,17 | 16,66 / 17,31-17,45 |
+| audio-fix, 2D | **0,00 / 0,00-0,01** | 16,66 / 16,99-18,29 |
+| v0.4.2, 3D (default profile) | 0,01 / 0,01-0,03 | 16,66-16,67 / 17,79-28,00 |
+| audio-fix, 3D | **0,00 / 0,00** | 16,66-16,67 / 17,46-17,91 |
+
+The audio stage got **cheaper**, which is what the design predicts: the main thread no longer
+mixes the console signal, no longer converts a block to 16-bit PCM and no longer calls into SDL.
+All it does now is copy the menu music and the interface sounds into a ring, and in the menu —
+where the console is silent — that is all there ever was. The whole frame is pinned at 16,66 ms
+by vsync in every run; the maxima differ by less than the run-to-run noise (the 28,00 ms in one
+v0.4.2 3D window is a first-window shader-and-mesh hitch, not a steady cost).
+
+**So it is on by default.** No option, nothing behind a switch: there is no cost to hide.
+
+**The counters, from the same runs** (and this is what the design is for):
+
+```
+2D:  audio  latency 57.0 / 60 ms  [46-68 ms]  rate -0.005 %  underruns 0
+3D:  audio  latency 60.2 / 60 ms  [49-71 ms]  rate +0.021 %  underruns 0
+```
+
+The latency holds on its target, the extremes straddle it by about ±11 ms (one emulated frame of
+production either side, which is the shape of the sawtooth and not a drift), the correction
+settles at this machine's real clock offset of two hundredths of a percent, and **nothing
+under-ran** over twenty seconds of play in either mode.
+
+**Two defects this run found and fixed** — neither visible to a unit test, which is why the work
+order asked for the measurement:
+
+1. *The latency measurement was a block low.* `record_fill` recorded what was **left** after the
+   callback took its block, so a nominal 60 ms read as 31 ms and the controller held the ring a
+   whole block fuller than it had been told to. It now records what was waiting when the device
+   came for its block, which is the latency in the plain sense and the number
+   `audio.latency_ms` promises.
+2. *The first start of a game got half a prefill.* `set_state(Running)` and `finish_launch` each
+   asked for a resynchronisation, and the stream's "have I ever played" flag could flip between
+   the two, so the second call downgraded the first start to the mid-stream half-prefill — the
+   game began with half its margin and spent ten seconds climbing to the configured latency. The
+   rule is now race-free and better: half the target **only while something is actually being
+   heard** (a rollback, a slot loaded mid-game, a drought), the whole target whenever the output
+   is already silent (a game starting, a resume from a pause), where the wait costs nothing
+   audible.
+
+**Android and PortMaster: not checkable on this machine, and here is why that is safe to say.**
+`cargo check -p zax-android --target aarch64-linux-android` fails in `sdl2-sys`'s build script
+for want of `ANDROID_NDK_HOME` (no NDK installed), and `aarch64-unknown-linux-gnu` is not an
+installed target and has no cross linker here. What was checked instead:
+
+* `cargo check -p zax-app --no-default-features --features android` — clean;
+* `cargo check -p zax-app --no-default-features --features firmware-sdl` — clean.
+
+Those are the two feature sets those builds use; the features only decide **how SDL2 is linked**
+(bundled static, bundled shared, firmware shared), never which API is called. And the new code
+contains no `cfg` of any kind outside `cfg(test)`: the callback device is plain `sdl2::audio`,
+and `SDL_OpenAudioDevice` with a callback is the older and more universally supported of the two
+SDL2 audio paths — `SDL_QueueAudio`, which v0.4.2 used, is the newer one.
+
+**SMB3, Zelda II and the widescreen** are untouched: nothing outside the audio path changed, the
+core and the 3D engine are byte-identical to `v0.4.2`, and their tests are in the green runs
+above.
+
+The four profiler logs are in the session scratchpad (`bench/before-2d.log`, `before-3d.log`,
+`after-2d.log`, `after-3d.log`); the extracted `v0.4.2` tree was deleted afterwards (G: back to
+18 GB free).

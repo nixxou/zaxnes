@@ -452,7 +452,6 @@ pub struct AudioStream {
     /// Frames the ring must hold before the console is read again; 0 while playing.
     prefill: usize,
     seen_resync: u32,
-    started: bool,
 }
 
 impl AudioStream {
@@ -495,7 +494,6 @@ impl AudioStream {
             program_hold: [0.0; CHANNELS],
             prefill: target_frames.max(scratch),
             seen_resync: 0,
-            started: false,
         };
         (stream, control, console, writer)
     }
@@ -546,10 +544,17 @@ impl AudioStream {
     }
 
     /// The fill the ring must reach before the console is read again. Never less than one block,
-    /// or the gate would open on too little and underrun on the very next read.
+    /// or the gate would open on too little and under-run on the very next read.
+    ///
+    /// Half the target only when something is actually being heard — a rollback, a slot loaded
+    /// mid-game, a drought — so that the hole stays inside the 50 ms REQ-AUD-012 allows. While
+    /// the output is already silent (a game starting, a resume from a pause) the wait costs
+    /// nothing audible and the whole target is taken, which is what gives the game its full
+    /// margin from its first note (Q-153 §4).
     fn resume_prefill(&self) -> usize {
         let target = self.control.target_frames();
-        let wanted = if self.started { target / 2 } else { target };
+        let audible = self.console_envelope.level > 0.0;
+        let wanted = if audible { target / 2 } else { target };
         wanted.max(self.mono.len())
     }
 
@@ -566,7 +571,6 @@ impl AudioStream {
                 available = source.available();
                 if self.prefill > 0 && available >= self.prefill {
                     self.prefill = 0;
-                    self.started = true;
                     self.control.playing.store(true, Ordering::Relaxed);
                 }
                 if self.prefill == 0 && active {
@@ -592,12 +596,16 @@ impl AudioStream {
             self.mono[frame] = self.console_hold * envelope * gain;
         }
         if active {
+            // `available` is what was waiting when the device came for its block — the latency
+            // in the plain sense, and the number the user asked for with `audio.latency_ms`.
+            // Measuring what is *left* after the read would read a whole block low, and the
+            // controller would then hold the ring a block fuller than it was told to.
+            //
             // While the gate is shut the average is *set*, not blended: when the gate opens it
             // must already read the real fill, or the rate controller would see a latency a
             // second out of date and take the start of a game for a drift worth resynchronising.
             let weight = if was_gated { 1.0 } else { self.fill_weight };
-            self.control
-                .record_fill(available.saturating_sub(read), weight);
+            self.control.record_fill(available, weight);
         }
     }
 
