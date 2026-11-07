@@ -51,7 +51,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 * [x] **3/7** — sprite evaluation per dot and the shift-register pipelines; each row gained named.
 * [x] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
   so. `Ppu2C02::read`'s +11 instructions while the function is open.
-* [ ] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
+* [x] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
 * [ ] **6/7** — the check: fmt, clippy, the suites, the ignored suite, the campaign row by row
   against MF-VS's 331, golden-core over the commercial originals.
 
@@ -475,3 +475,29 @@ had to ship anyway**, which is the honest version of "the +11 are won".
 The guard test carries both floors (`cfg!(feature = …)`, 129 or 132) and names step 3's three rows
 only in the configuration that ships them, so neither build can silently lose a row. It is renamed
 `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green`.
+
+## Step 5 — the VS. System, re-measured on the reorganised code: the same figure, so it stays parked
+
+MF-VS step 7 parked `board-vs-system` at `duelito` +0.083 % and set total +36 862 173, with the cost
+in `run_dots` and `background_fetch` — "per-dot paths this lot never touches". Lot MF-4e does touch
+them, so the question is open again: a fifth clean build, `4e-3-vson`, identical to the shipped tree
+except that `board-vs-system` is back in `zax-nes`'s `default` and `vs-system` in `zax-harness`'s,
+measured against **this lot's own default** (`4e-2-gated`) and not against `11407930`.
+
+| run | figure |
+| --- | --- |
+| PR-1's thirteen | **twelve of thirteen above**: `duelito` **+0.087 %**, `readbuf` +0.076 %, `z2` +0.066 %, `metroid` +0.052 %, `m0` +0.049 %, `m1` and `mm2` +0.044 %, `smb1` +0.042 %, `m4` +0.037 %, `smb3` +0.034 %, `vblnmi` +0.030 %, `mmc5` +0.026 %; `oamstr` +0.001 % is the one inside. Set total **+36 979 368 (+0.047 %)** |
+| level 2 | **all ten above**: `zelda2/core` **+0.057 %**, `metroid/core` +0.055 %, `mm2/core` +0.053 %, `smb1/core` +0.052 %, `smb3/core` +0.044 %, and the five `total` figures +0.008 % to +0.050 % |
+
+**The figure is MF-VS's, reproduced:** `duelito` +0.087 % against +0.083 %, set total +36 979 368
+against +36 862 173, and `zelda2/core` **+0.057 %** — MF-VS's own number to three decimal places.
+
+So the per-dot reorganisation does **not** reach the VS cost, which is the useful finding: §5.16
+located that cost in `run_dots` and `background_fetch`, and a lot that rewrote the evaluation inside
+`run_dots` and re-laid `background_fetch` around it moved the VS figure by less than a thousandth of
+itself. The cost is therefore in the *struct and the load-time question* the VS layer adds, not in
+the dot loop's shape — which is what MF-VS's probes A and C had already pointed at.
+
+`board-vs-system` **stays parked**, `BOARD-FEATURES.md` records the re-measurement in its row, and
+`PERFORMANCE-HISTORY.md` gains **§5.17**, whose first finding is the ratio that frames this whole
+lot: `run_dots` is 57 % to 62 % of `NesCore::run_frame` on all five level-2 games.

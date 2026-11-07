@@ -1320,6 +1320,61 @@ oscillators being on the CPU clock itself. The whole chip costs the set nothing 
 ROMs move up by 424 to 19 213 instructions against the board-only step, one to two orders of
 magnitude inside the ~10⁵ whole-process floor.
 
+### 5.17 Lot MF-4e: §5.16's limit, met head-on — the per-dot pipeline is **57 % to 62 % of the core**
+
+§5.16 found lot MF-VS's cost in `Ppu2C02::run_dots` and `Ppu2C02::background_fetch` and closed with
+"per-dot paths this lot never touches". Lot MF-4e is the lot that touches them, and it measured the
+reason that matters before it changed anything.
+
+**`run_dots` is 57 % to 62 % of `NesCore::run_frame` on every one of the five level-2 games**:
+6 592 688 325 of 11 515 129 187 on `smb1`, 6 926 069 765 of 11 146 862 384 on `metroid`,
+7 290 065 073 of 12 774 928 372 on `zelda2`, 6 966 284 120 of 12 037 146 109 on `mm2` and
+9 522 809 031 of 15 314 947 822 on `smb3`. The per-dot pipeline is the single largest block of
+emulated work the program has, entered 89 342 times a frame, so the +0.02 % tolerance is about one
+part in five thousand of it. That number is why this section exists: it is the ratio any future lot
+touching a per-dot path should expect to be judged against.
+
+**Four findings.**
+
+1. **The exact sprite evaluation costs +0.041 % to +0.133 %, and no shape of it was going to be
+   free.** The hardware's evaluation is a byte counter in two independently clocked halves against a
+   second counter over the secondary OAM; it has strictly more state and strictly more branches per
+   even dot than the sprite-at-a-time loop it replaces, on 96 even dots of every one of 240 visible
+   lines. It is behind `ppu-exact-sprite-eval`, out of `default`.
+
+2. **A behaviour change on the `$2007` path is nearly free, and the two ROMs that look expensive are
+   not.** The rule Q-125 and AMD-021 R2-005 both require measures **+0.000 % to +0.005 %** on the
+   eleven PR-1 ROMs whose behaviour does not move. `duelito` reads −4.022 % and `smb3` +0.241 %, and
+   both are pictures rather than code: Duelito's diff is −72 M on `ConversionEngine::convert`, −66 M
+   on `DrawListBuilder::build` and −66 M on `Segmenter::grow_background`, the 3D engine doing *less*
+   work on a different frame. **A per-ROM figure whose move lands in `zax_engine3d` symbols is a
+   behaviour change, not a cost** — that is the cheapest test available for telling the two apart,
+   and it is cheaper than golden-core.
+
+3. **A level-2 `total` can move while `core` does not, and the stage table says which.** `smb1/total`
+   is +0.021 %, marginally over the tolerance, while `smb1/ppu`, `smb1/apu` and `smb1/draw_list` are
+   **identical to the instruction** and `smb1/core` is +0.000 %. All of the move is `convert`
+   +2 530 947 and `lua_hooks` +2 533 935. **`total` over and `core` equal means the conversion is
+   converting a different frame**, which is a reason to look at the captured rows and not at the
+   emulated core.
+
+4. **MF-3b rule 4 fires on a function the lot does not touch.** With the exact pipeline on, exactly
+   two symbols move: `run_sprite_evaluation`, which the lot rewrote, and `background_fetch`, which
+   it does not touch at all (+2 417 230 on `mmc5`, +2 359 872 on `smb3`, +1 220 906 on `m4`). A
+   longer callee re-lays the block that calls it. Gated off, both are identical to the baseline.
+
+**And one figure returned.** MF-4d-fix left `Ppu2C02::read` about eleven instructions per register
+read dearer, as a pure layout effect, and Q-125 asked MF-4e to win it back. MF-5a had already won
+most of it with `#[inline(never)]` on `Ppu2C02::read_data`; the rest came back here **as a
+by-product of step 2's rule**, because giving the `$2007` arm a `fetching()` branch gives it a body
+of its own again. Re-measured: `Ppu2C02::read` is identical on `mmc5` (287 286 413) and `vblnmi`
+(23 513 461) and **366 015 instructions cheaper on `readbuf`**, the `$2007`-heaviest ROM of the set.
+That closes the loop MF-4d step 6 opened by accident.
+
+**`Ppu2C02::read_pattern_planes` is identical to the instruction in all three builds** — 96 388 300
+on `mmc5`, 88 146 700 on `readbuf` — as it was through MF-VS. The per-pixel path has now survived
+two consecutive lots that reorganised the code around it.
+
 ### 5.16 Lot MF-VS: the limit §5.15 did not cover is the **PPU**, and a feature is parked on it
 
 §5.15 ended with advice: "The twelve MF-UNL lots and MF-VS can therefore plan on **one shared enum
