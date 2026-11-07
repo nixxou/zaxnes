@@ -58,10 +58,29 @@ fn amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line() {
 
     // The criterion itself: the split line never emits a row.
     assert_eq!(0, at_split_line);
-    // The same fact seen from the banner side: the first banner row (line 195) is no longer
-    // two lines after a row of the split line.
+
+    // **The banner side, and the bound lot MF-4e moved from 3 to 2** (Q-137). This assertion is
+    // not the criterion — `at_split_line` above is — it is a restatement of it in terms of the
+    // geometry the rows end up with, and that geometry is exactly what lot MF-4e changed.
+    //
+    // R2-005 criterion 2's second half reads "la première rangée du bandeau est émise **à la ligne
+    // suivante**". Until this lot, the banner's first row was emitted on line **195**, two lines
+    // after the split: a `$2007` access during rendering moved `v` by the PPUCTRL step, so the
+    // borrowed Y increment the hardware performs was missing and the row phase arrived late. With
+    // the rule back, that row is emitted on line **194** — the line that follows the split, which
+    // is what the sentence asks for.
+    //
+    // The pair that is two lines apart is therefore lines **192 and 194**, and **neither of them
+    // is the split line** (193); the criterion is untouched. It appears on **10 of the 5 000
+    // frames**, and they are the same ten the `ROWS_WITHOUT_SPLIT + 1` bound below already carves
+    // out as the grid phase of Q-059 — their row sets are
+    // `{-1, 7, …, 183, 191, 193, 201, …, 233}`, 31 rows. Nothing else in the run comes within 7.
+    //
+    // The row count is unchanged: 960 captured tiles over 60 frames of golden-core, the baseline's
+    // own figure, against the 928 of the variant that let the increment reach neither row field
+    // and so **lost** this row rather than moving it. The two bounds below are untouched.
     assert!(
-        smallest_gap >= 3,
+        smallest_gap >= 2,
         "two rows only {smallest_gap} lines apart"
     );
     // No frame carries more than one row above the thirty of a split-free image, and the

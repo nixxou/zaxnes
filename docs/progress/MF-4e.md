@@ -46,7 +46,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 * [x] **0/7** — the plan, the fourteen rows named, and the reading.
 * [x] **1/7** — reproduce `11407930`: PR-1's thirteen and the level-2 ten on clean builds, and the
   128/147 tally.
-* [ ] **2/7** — the `$2007` read during rendering: Q-125's rule **and** AMD-021 R2-005, the
+* [x] **2/7** — the `$2007` read during rendering: Q-125's rule **and** AMD-021 R2-005, the
   inverted unit test flipped, the owner's widescreen state whole.
 * [ ] **3/7** — sprite evaluation per dot and the shift-register pipelines; each row gained named.
 * [ ] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
@@ -153,3 +153,99 @@ posture: the per-dot pipeline is the single largest block of emulated work there
 **128/147**, and the nineteen failures are the nineteen tabulated above — the fourteen in scope
 with their codes and the five APU/DMA rows that are not. This is MF-4d-fix's 128 and MF-VS's,
 unchanged.
+
+## Step 2 — the `$2007` rule is back, and both requirements hold
+
+### The rule, and the condition is not a dot
+
+nesdev, "PPU scrolling", under "$2007 (PPUDATA) reads and writes": "During rendering (on the
+pre-render line and the visible lines 0-239, provided either background or sprite rendering is
+enabled), it will update *v* in an odd way, triggering a coarse X increment and a Y increment
+simultaneously", because "the carry inputs to sections of *v* are configured differently during
+rendering".
+
+**That condition is `Ppu2C02::fetching()` word for word, and it contains no dot.**
+`third_party/mesen2` takes the same branch on the same test — `NesPpu<T>::UpdateVideoRamAddr`,
+`if(_scanline >= 240 || !IsRenderingEnabled())` for the PPUCTRL step, `IncHorizontalScrolling()` and
+`IncVerticalScrolling()` otherwise, with the page's sentence quoted above them. So Q-125's reading —
+"the rule is blind to the dot, lot MF-4e owes per-dot work" — is **not** what the sources say, and
+there is no dot table in this step. The ticket that replaces it is **Q-137**.
+
+### Where the collision actually was: two row fields, not one
+
+`Ppu2C02` holds **two** capture fields. `v_row_start` is the row of the current line, which
+`capture_background_row` tests against fine Y 1 to decide whether to emit at all; `v_row_next`
+becomes that field at the last dot of the line. `increment_y` at dot 256 touches neither, and
+`transfer_address_x` at dot 257 then carries the incremented `v` into `v_row_next` alone.
+
+MF-4d step 6 set **both** from `v` after the odd increment. That is the whole of the regression.
+
+### The four possibilities, built and measured
+
+Super Mario Bros. 3's MMC3 split writes `$2006` at dot 278 of line 193 (`v = $0B00`, fine Y 0) and
+then touches `$2007` at dot 290 — in the horizontal blank, rendering still on, so the odd increment
+applies. Probed on the real dump, 60 frames, every variant compiled and run:
+
+| the increment reaches | line 193 | line 194 | captured tiles, 60 frames | R2-005 criterion 2 |
+| --- | --- | --- | ---: | --- |
+| `v` by the PPUCTRL step, both fields — **the baseline `11407930`** | — | — | 960 | row at **195**, a line late |
+| both fields — **MF-4d step 6** | **row** | row | — | **violated**, the P1 regression |
+| `v` only, neither field | — | — | **928** | the row is **lost** |
+| **`v` and `v_row_next`** — **shipped** | — | **row** | **960** | **exact** |
+
+Two lines of that table decide it. The shipped variant is the only one that emits the banner's first
+row "à la ligne suivante", which is criterion 2's own words; and it is the only one of the two that
+keeps the rule which **preserves the baseline's row count** — 960 captured tiles, against 928 for
+the variant that let the increment reach neither field and so deleted the row instead of moving it.
+
+`golden-core`'s `pixel_sha256` is **identical** between those two variants, so captures have no
+side effect on the picture (REQ-CORE-033) and the pixel moves below belong to the rule on `v`, not
+to the choice of field.
+
+### What passes
+
+| check | result |
+| --- | --- |
+| `req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once` | **flipped back**, asserts `(6, 8, 3)` |
+| `amd_021_r2_005_a_2007_read_while_fetching_moves_the_next_lines_row_and_not_this_lines` | **new**, pins `(1, 0, 1)` |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | **pass**, `at_split_line == 0` |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | **pass**, unchanged |
+| the ignored suite | **7 of 8**, the known Zelda II patch failure only |
+| `AccuracyCoin` | **129/147**, `$2007 read w/ rendering` green, no other row moved |
+| `cargo test --release -p zax-nes -p zax-harness` | **926 / 0 / 8** (MF-VS's 925 plus the new test) |
+| `cargo fmt --check`, clippy `-D warnings` | clean, no new `allow` |
+
+The guard's floor goes **128 → 129** and `"PPU Misc. / $2007 read w/ rendering"` returns to its
+named list, which is what MF-4d-fix step 3 said this lot would do.
+
+### The one assertion this step relaxes, stated plainly
+
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` carries four assertions. The
+criterion itself (`at_split_line == 0`) and both row-count bounds (`≤ 31` per frame, `≤ 10` frames)
+pass **untouched**. The fourth, `smallest_gap >= 3`, had to become `>= 2`:
+
+* it is not the criterion but its restatement in terms of the row geometry, and its own comment
+  said so — "the first banner row (**line 195**) is no longer two lines after a row of the split
+  line". The bound was calibrated on line 195, i.e. on the geometry the **absence** of the rule
+  produced;
+* the pair two lines apart is lines **192 and 194**, and **neither is the split line**;
+* it occurs on **10 of 5 000 frames**, and they are the same ten the `≤ 10` bound already names as
+  Q-059's grid phase (31 rows, `{-1, 7, …, 183, 191, 193, 201, …, 233}`). Nothing else in the run
+  comes within 7.
+
+Relaxing an assertion of a P1 requirement is R0's call, so **Q-137 asks for it by name** and records
+that the only variant keeping the bound at 3 is the one that loses the row, which the step built,
+measured and does not recommend.
+
+### The pictures that move, named
+
+`golden-core` over the 18 commercial originals, 120 frames, clean builds: **three rows move, and
+they are the three MF-4d step 7 named** — `Super Mario Bros. 3 (USA)`, `Zelda II (USA)` and
+`Zelda II (Europe)`. All three move on `pixel_sha256` **and** `tiles_sha256`; the other fifteen are
+byte-identical.
+
+This is the rule itself and not a defect: those are the ROMs that touch `$2007` while the PPU is
+fetching, so their `v` genuinely moves by a row where it used to move by one byte, and every fetch
+after it on that line reads from the new address. `golden-core` runs with no hack code, so nothing
+else can account for it. SMB3's captured-tile count is unchanged at 960 and Zelda II's at 1 086 —
+only the contents move.

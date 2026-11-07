@@ -571,8 +571,11 @@ impl Ppu2C02 {
     /// title: `Address $2004 behavior` 6 is called "writing to `$2004` on a visible scanline" and
     /// its code notes that "the CPU write occurs on **dot 321 of the pre-render line**".
     ///
-    /// The `$2007` quirk that shared this predicate until lot MF-4d-fix is deferred to lot MF-4e;
-    /// see [`Self::increment_vram_address`] and `Q-125`.
+    /// It is also, **word for word**, the condition the nesdev "PPU scrolling" page states for
+    /// `$2007`'s odd increment: "on the pre-render line and the visible lines 0-239, provided
+    /// either background or sprite rendering is enabled". The two quirks share this predicate
+    /// again, as they did before lot MF-4d-fix; see [`Self::increment_vram_address`], Q-125 and
+    /// Q-137.
     const fn fetching(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
@@ -648,6 +651,29 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn fine_x(&self) -> i32 {
         self.fine_x as i32
+    }
+
+    /// Fine Y of the address the row of the **current** line would be captured from — the
+    /// `v_row_start` of AMD-021 R2-005, which is `v` shorn of the two end-of-line reloads and of
+    /// the increment a `$2007` access borrows from the fetch pipeline (Q-137).
+    ///
+    /// It is the field [`Ppu2C02::capture_background_row`] tests against 1 to decide whether a row
+    /// is emitted at all, so it is the one observable that separates this lot's rule from the one
+    /// MF-4d shipped.
+    #[must_use]
+    pub const fn captured_row_fine_y(&self) -> i32 {
+        ((self.v_row_start >> 12) & 0x07) as i32
+    }
+
+    /// Fine Y of the address that becomes the **next** line's captured row — the `v_row_next` of
+    /// AMD-021 R2-005, which the two end-of-line reloads and the increment a `$2007` access
+    /// borrows from the fetch pipeline all do reach (Q-137).
+    ///
+    /// Together with [`Self::captured_row_fine_y`] it is the pair that decides *which* line emits
+    /// a row, and the two are what separates this lot's rule from the three variants it rejected.
+    #[must_use]
+    pub const fn next_row_fine_y(&self) -> i32 {
+        ((self.v_row_next >> 12) & 0x07) as i32
     }
 
     /// The margin decoder's own background palette for the frame just run, if any (the decoded
@@ -1390,37 +1416,77 @@ impl Ppu2C02 {
         self.oam_address = self.oam_address.wrapping_add(1);
     }
 
-    // Q-125: **a `$2007` access made while the PPU is fetching moves `v` by a coarse X increment
-    // and a Y increment at once on hardware**, not by the 1 or 32 of PPUCTRL (nesdev, "PPU
-    // registers": "it will update v in an odd way, triggering a coarse X increment and a Y
-    // increment simultaneously"; `third_party/mesen2` takes the same branch, and
-    // `AccuracyCoin`'s `$2007 Read w/ Rendering` 2 asks for the vertical half by name).
-    //
-    // That rule shipped in lot MF-4d step 6 and was **backed out here**, in lot MF-4d-fix: the
-    // increment it produces is right only for the dot the access actually lands on, and applied
-    // dot-blind it broke AMD-021 R2-005 criterion 2 (a background row on Super Mario Bros. 3's
-    // split line on 4 986 of 5 000 frames) and moved the pictures of Super Mario Bros. 3 and
-    // Zelda II in golden-core. R2-005 is a P1 requirement; one `AccuracyCoin` row is not.
-    //
-    // Lot MF-4e owns the per-dot work and must satisfy **both** the rule and R2-005. Until then
-    // the ordinary PPUCTRL step applies on every line, which is `d96d73b7`'s behaviour.
-    //
-    // **No `#[inline]`, which is `d96d73b7`'s shape and was checked both ways.** MF-4d step 6
-    // needed the attribute because its `fetching` branch pushed this body past the inliner's
-    // budget; without the branch the body is small again and LLVM inlines it unasked — 0
-    // definitions and 0 call sites in the post-LTO dump on both targets. Adding the attribute
-    // back was measured and changes nothing: `ppu_vbl_nmi`, 300 frames, callgrind, whole
-    // process, 3 331 792 209 without it against 3 331 799 091 with it.
-    //
-    // It is **not** the lever on the cost this back-out gives back, which is a block-layout flip
-    // inside [`Self::read`] — see `docs/progress/MF-4d-fix.md` step 5.
+    /// The address increment a `$2007` access owes, which is **not the same increment** while the
+    /// PPU is fetching (REQ-CORE-112, Q-125, Q-137).
+    ///
+    /// nesdev, "PPU scrolling", under "$2007 (PPUDATA) reads and writes": "During rendering (on
+    /// the pre-render line and the visible lines 0-239, provided either background or sprite
+    /// rendering is enabled), it will update *v* in an odd way, triggering a coarse X increment
+    /// and a Y increment simultaneously", because "the carry inputs to sections of *v* are
+    /// configured differently during rendering". That condition is [`Self::fetching`] word for
+    /// word — **it is not a function of the dot** — and `third_party/mesen2` takes the same
+    /// branch. `AccuracyCoin`'s `$2007 read w/ rendering` 2 asks for the vertical half by name.
+    ///
+    /// # Why this shipped, broke a P1, and is back
+    ///
+    /// Lot MF-4d step 6 delivered the rule and lot MF-4d-fix backed it out: it broke AMD-021
+    /// R2-005 criterion 2 — Super Mario Bros. 3 emitted a background row on its split line on
+    /// 4 986 of 5 000 frames — and cut the owner's widescreen ground row in half. Q-125 read that
+    /// as the increment being "blind to the dot" and deferred the per-dot work to lot MF-4e.
+    ///
+    /// **The collision was never on the dot, and never on `v`.** It was on `v_row_start`. MF-4d's
+    /// body set `v_row_start = v` *after* the branch, so the Y half of the odd increment moved the
+    /// captured row's fine Y — and [`Ppu2C02::capture_background_row`] emits a row exactly when
+    /// that fine Y is 1. One split line whose fine Y was 0 became one that was, which is the
+    /// spurious row per frame R2-005 counted and the half-block shift the margin decoder drew.
+    ///
+    /// So the two requirements are reconciled by **which of the two row fields the increment
+    /// reaches**, not by when it happens. The increment a `$2007` access borrows during rendering
+    /// *is the fetch pipeline's own* — the page says so: the same carry chain, differently
+    /// configured — and R2-005 holds the pipeline's vertical increment out of **line L's** row
+    /// while letting it reach **line L + 1's**. That is already exactly how the dot-256 increment
+    /// is handled: [`Self::increment_y`] touches neither field, and `transfer_address_x` at dot
+    /// 257 then carries the incremented `v` into `v_row_next` alone. This path does the same, so
+    /// `v_row_next` follows `v` and `v_row_start` does not.
+    ///
+    /// # The four possibilities, and why this is the one
+    ///
+    /// Measured on Super Mario Bros. 3, whose MMC3 split writes `$2006` at dot 278 of line 193 and
+    /// then touches `$2007` at dot 290 — in the horizontal blank, with rendering still on, so the
+    /// odd increment applies. Which line emits the banner's first background row:
+    ///
+    /// | the increment reaches | line 193 | line 194 | R2-005 criterion 2 |
+    /// | --- | --- | --- | --- |
+    /// | `v` by the PPUCTRL step, both fields (`11407930`) | — | — | row at **195**, a line late |
+    /// | both fields (MF-4d step 6) | **row** | row | **violated**, the P1 regression |
+    /// | `v` only, neither field | — | — | the row is **lost** altogether |
+    /// | **`v` and `v_row_next`** | — | **row** | **exact** |
+    ///
+    /// The criterion reads "Super Mario Bros. 3 … n'émet aucune rangée de fond à la ligne où le
+    /// split écrit `$2006` ; **la première rangée du bandeau est émise à la ligne suivante**".
+    /// Only the last row of that table satisfies both halves of the sentence, and it is **stricter
+    /// than the baseline**, which emitted that row at line 195.
+    ///
+    /// R2-005's text excludes "l'incrément vertical **de fin de ligne**" and this one is not at
+    /// the end of a line, so that is a reading of the requirement rather than its letter:
+    /// **Q-137** files it with the provisional choice marked.
     fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
-        let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
-        self.v = self.v.wrapping_add(step) & 0x7FFF;
+        if self.fetching() {
+            // Q-137: the pipeline's own increment. It does **not** reach `v_row_start` — the row
+            // of the line the access is made in, which is R2-005's exception — and it **does**
+            // reach `v_row_next`, which becomes the row start of the next line, exactly as dot
+            // 257 carries the dot-256 increment forward.
+            self.increment_coarse_x();
+            self.increment_y();
+            self.v_row_next = self.v;
+        } else {
+            let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
+            self.v = self.v.wrapping_add(step) & 0x7FFF;
 
-        // A CPU write reaches the row of the line it is made in (R2-005).
-        self.v_row_start = self.v;
-        self.v_row_next = self.v;
+            // A CPU write reaches the row of the line it is made in (R2-005).
+            self.v_row_start = self.v;
+            self.v_row_next = self.v;
+        }
 
         // The incremented address goes back on the PPU bus, so a $2007 access that steps
         // across $1000 clocks an MMC3 counter — which is what mmc3_irq_tests "A12 clocking"

@@ -411,7 +411,9 @@ impl Ppu2C02 {
             };
     }
 
-    fn increment_coarse_x(&mut self) {
+    /// `pub(super)` for [`Ppu2C02::increment_vram_address`]: a `$2007` access made while the PPU
+    /// is fetching borrows this increment and [`Self::increment_y`] at once (Q-137).
+    pub(super) fn increment_coarse_x(&mut self) {
         if (self.v & 0x001F) == 0x001F {
             self.v = (self.v & !0x001F) ^ 0x0400;
         } else {
@@ -419,7 +421,10 @@ impl Ppu2C02 {
         }
     }
 
-    fn increment_y(&mut self) {
+    /// The vertical increment of dot 256. It touches **neither** `v_row_start` nor `v_row_next`:
+    /// R2-005 holds the end-of-line vertical increment out of the row captured for this line, and
+    /// Q-137 extends that to the copy of this increment a `$2007` access borrows.
+    pub(super) fn increment_y(&mut self) {
         if (self.v & 0x7000) != 0x7000 {
             self.v += 0x1000;
             return;

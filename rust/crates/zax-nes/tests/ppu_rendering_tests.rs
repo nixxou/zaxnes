@@ -206,23 +206,21 @@ fn park_on_scanline(fixture: &mut TileFixture, scanline: i32) {
     }
 }
 
-/// **Q-125: this test is inverted on purpose, and pins a deferred behaviour.** On hardware a
-/// `$2007` access made while the PPU is fetching does not add 1 or 32 — it triggers a coarse X
-/// increment and a Y increment at once (nesdev, "PPU registers"; `AccuracyCoin`'s `$2007 Read w/
-/// Rendering` 2, REQ-CORE-112). That rule shipped in lot MF-4d step 6 and lot MF-4d-fix **backed
-/// it out**: applied blind to the dot the access lands on it breaks AMD-021 R2-005 criterion 2,
-/// a P1 requirement, on Super Mario Bros. 3's split line. Lot MF-4e owns the per-dot work and
-/// must satisfy both; when it does, this test goes back to asserting `(6, 8, 3)` on the visible
-/// line and loses this note.
+/// A `$2007` access made while the PPU is fetching does not add the 1 or 32 of PPUCTRL: it
+/// triggers a coarse X increment and a Y increment **at once** (nesdev, "PPU scrolling", "$2007
+/// (PPUDATA) reads and writes"; `AccuracyCoin`'s `$2007 read w/ rendering` 2, REQ-CORE-112).
 ///
-/// It is inverted rather than `#[ignore]`d so that it keeps running: an ignored test pins nothing
-/// and would let the rule come back by accident, whereas this one states the shipped behaviour on
-/// every suite and MF-4e has to come here to change it.
+/// **This test was inverted by lot MF-4d-fix and lot MF-4e flips it back**, which is the deferral
+/// Q-125 asked for closing where the rule returns. It asserts `(6, 8, 3)` on the visible line
+/// again. What makes the rule compatible with AMD-021 R2-005 this time is not the dot the access
+/// lands on — the page's condition has no dot in it — but that the borrowed increment no longer
+/// reaches `v_row_start`: see [`zax_nes::ppu::Ppu2C02::increment_vram_address`] and Q-137, and
+/// `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` for the other half of the pair.
 ///
 /// The access is made on the PPU directly so that no dot passes between the two readings of `v`
 /// and the difference is the increment itself and nothing else.
 #[test]
-fn req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_125() {
+fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
     // v = $2105: coarse X 5, coarse Y 8, fine Y 2.
     fn v_after_a_2007_read(scanline: i32) -> (i32, i32, i32) {
         let mut fixture = TileFixture::new();
@@ -239,12 +237,52 @@ fn req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_1
         (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y())
     }
 
-    // On a visible line, with rendering on: the PPUCTRL step of 1 applies, so coarse X moves and
-    // fine Y does **not**. The hardware rule would give (6, 8, 3) — Q-125, lot MF-4e.
-    assert_eq!((6, 8, 2), v_after_a_2007_read(100));
+    // On a visible line, with rendering on: both increments, so coarse X moves **and** fine Y
+    // does. Coarse Y stays at 8 because fine Y was 2 and only carries out of 7.
+    assert_eq!((6, 8, 3), v_after_a_2007_read(100));
 
-    // In vblank, the same, and here it is the hardware's own answer: nothing is fetched.
+    // In vblank nothing is fetched, so the PPUCTRL step of 1 applies and fine Y stands.
     assert_eq!((6, 8, 2), v_after_a_2007_read(250));
+}
+
+/// The increment a `$2007` access borrows from the fetch pipeline reaches the row of the **next**
+/// line and not the row of the line it is made in (AMD-021 R2-005 criterion 2, Q-137) — the
+/// unit-scale statement of what `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`
+/// measures over 5 000 frames of a commercial ROM.
+///
+/// Both halves of criterion 2's sentence are here. "N'émet aucune rangée de fond à la ligne où le
+/// split écrit `$2006`" is the middle figure staying at the fine Y the `$2006` write left; "la
+/// première rangée du bandeau est émise à la ligne suivante" is the third moving to the 1 that
+/// emits, which is what makes the row appear on the **next** line rather than being lost. The same
+/// access made outside rendering is a CPU address change and reaches both.
+#[test]
+fn amd_021_r2_005_a_2007_read_while_fetching_moves_the_next_lines_row_and_not_this_lines() {
+    // fine Y 0 going in, so the pipeline's Y increment takes it to the 1 that emits a row.
+    fn fine_ys(scanline: i32) -> (i32, i32, i32) {
+        let mut fixture = TileFixture::new();
+        fixture.set_control(0x00);
+        fixture.set_mask(0x1E);
+        park_on_scanline(&mut fixture, scanline);
+
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.write(6, 0x01, None); // v = $0105: coarse X 5, coarse Y 8, fine Y 0.
+        ppu.write(6, 0x05, None);
+        ppu.read(7, None);
+        (
+            ppu.fine_y(),
+            ppu.captured_row_fine_y(),
+            ppu.next_row_fine_y(),
+        )
+    }
+
+    // Fetching: `v` reaches fine Y 1 and so does the next line's row, while this line's row stays
+    // at the 0 the `$2006` write left. Had this line's row followed `v`, Super Mario Bros. 3's
+    // split line would emit a spurious row; had the next line's row not followed it, that row
+    // would be lost instead of moving down one line.
+    assert_eq!((1, 0, 1), fine_ys(100));
+
+    // In vblank the PPUCTRL step applies and both rows follow `v`, all three still at fine Y 0.
+    assert_eq!((0, 0, 0), fine_ys(250));
 }
 
 /// `AccuracyCoin`'s `Address $2004 behavior` 6, 7 and A (REQ-CORE-112): a `$2004` write made

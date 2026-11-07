@@ -515,15 +515,16 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
     // mistaking `Implied Dummy Reads`' backup of the zero page for the end of the run (see
     // `coin.rs`).
     //
-    // **129 → 128, and the row given up is `PPU Misc. / $2007 read w/ rendering`** (Q-125). Lot
-    // MF-4d step 6 turned it green with a rule that is right on hardware but blind to the dot
-    // the access lands on, and that rule broke AMD-021 R2-005 criterion 2 — a P1 requirement —
-    // on Super Mario Bros. 3's split line. Lot MF-4d-fix backed it out; lot MF-4e owns the
-    // per-dot work and must bring the row back **with** R2-005 passing, at which point this
-    // floor goes to 129 again and the row returns to the list below.
+    // **128 → 129, and the row taken back is `PPU Misc. / $2007 read w/ rendering`** (Q-125,
+    // Q-137). Lot MF-4d step 6 turned it green with a rule that is right on hardware, and lot
+    // MF-4d-fix backed it out because as shipped it broke AMD-021 R2-005 criterion 2 — a P1
+    // requirement — on Super Mario Bros. 3's split line. Lot MF-4e holds **both**: the rule is
+    // back on `v`, and it no longer reaches the captured row, which is where the collision
+    // actually was. The row is in the named list below again and R2-005's own ignored test
+    // (`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`) passes beside it.
     assert!(
-        passed >= 128,
-        "AccuracyCoin scored {passed}/147, which is under lot MF-4d-fix's 128"
+        passed >= 129,
+        "AccuracyCoin scored {passed}/147, which is under lot MF-4e's 129"
     );
 
     // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
@@ -563,10 +564,11 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4d_turned_green() {
         "CPU Behavior 2 / DMC Reload Timing",
         // MF-4d step 5: a `$2002` read samples the sprite flags about 1.9 dots after bit 7.
         "Sprite Evaluation / $2002 flag timing",
-        // `PPU Misc. / $2007 read w/ rendering` stood here from MF-4d step 6 until lot
-        // MF-4d-fix backed that step's `$2007` half out (Q-125). It is a `fail 2` again, and
-        // lot MF-4e puts it back — together with AMD-021 R2-005, which the rule as shipped
-        // broke.
+        // MF-4e step 2: a `$2007` access during rendering triggers a coarse X and a Y increment
+        // at once (Q-125), and the borrowed increment is kept out of the captured row so that
+        // AMD-021 R2-005 holds with it (Q-137). The row stood here from MF-4d step 6, came out
+        // when MF-4d-fix backed that half out, and is back.
+        "PPU Misc. / $2007 read w/ rendering",
     ] {
         let row = tests[name].as_str().unwrap();
         assert!(row.starts_with("pass"), "{name}: {row}");
