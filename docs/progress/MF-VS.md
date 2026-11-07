@@ -48,13 +48,14 @@ implements it.
    DIP switches, the coin and service lines and the swapped-port flag. Nothing downstream asks
    "which PPU is this?" per dot, per pixel or per register: each consumer is handed the *answer* at
    load — a `&'static [u8; 64]` palette LUT, a `u8` of status bits, a `bool`.
-2. **The palette is an index remap, applied where the palette leaves the PPU.** The core's pixels
-   are 6-bit NES colour indices and the RGB table is the host's (`zax_engine3d::palette`,
-   SPEC-04 §4.1, a player setting). A VS PPU differs from the 2C02 by the *order* of its master
-   palette, which the nesdev page itself says may be implemented as a LUT into the ordered palette.
-   `Ppu2C02::snapshot_palette` is the **one** place the 32 palette bytes leave the core
-   (`nes_core.rs`, once per frame) and `margin_palette` the only other; the remap goes there.
-   A NES image pays one test per frame and the per-pixel path is untouched —
+2. **The palette is an index remap, applied where palette RAM is written.** The core's pixels are
+   6-bit NES colour indices and the RGB table is the host's (`zax_engine3d::palette`, SPEC-04 §4.1,
+   a player setting). A VS PPU differs from the 2C02 by the *order* of its master palette, which
+   the nesdev page itself says may be implemented as a LUT into the ordered palette. The plan put
+   the remap at `Ppu2C02::snapshot_palette`, the one place the 32 bytes leave the core; **step 2
+   found a strictly better place and took it** — the one palette-RAM *write*, beside the
+   `palette_marked` shadow that already exists there for the same reason. A NES image pays
+   nothing at all, not even a per-frame test, and the per-pixel path is untouched:
    `Ppu2C02::read_pattern_planes` must come out of the dump unchanged.
 3. **The RC2C05's two quirks are arithmetic, not a branch.** `$2002`'s low five bits become
    `(decay & status_latch_mask) | status_id`, two fields set at load (`0x1F` and `0x00` for every
@@ -89,7 +90,7 @@ implements it.
 * [x] **0/10** — the plan: the baseline read, the design above settled, this file. No code.
 * [x] **1/10** — detection: byte 7 bit 0 and NES 2.0 console type 1 (and extended type 1), byte 13's
   two nibbles, the per-ROM CRC table, the load message, the `VsPpuModel` and `VsHardware` types.
-* [ ] **2/10** — the palettes: the four RP2C04 LUTs and the 2C03/2C05 identity, chosen at load and
+* [x] **2/10** — the palettes: the four RP2C04 LUTs and the 2C03/2C05 identity, chosen at load and
   applied in `snapshot_palette` and the margin palette.
 * [ ] **3/10** — the RC2C05: the `$2000`/`$2001` write swap and the `$2002` ID.
 * [ ] **4/10** — mapper 99 as a `DecodeBoard` member, the `$4016` write forward, the 40 KiB PRG
@@ -198,3 +199,62 @@ from the same call.
 Green: **880 passed, 0 failed, 7 ignored** by default (862 at the baseline plus this step's 18),
 **783 / 0 / 7** with `--no-default-features`, fmt clean and clippy `-D warnings` clean on `zax-nes`
 in all three configurations and on `zax-harness`.
+
+### Step 2 — the palettes, and a better place for the remap than the plan had
+
+**The four tables are the page's own.** nesdev's "PPU palettes" offers the implementation
+directly — "Emulator authors may implement the 2C04 variants as a LUT indexing the ordered
+palette" — and gives four 64-byte `PaletteLUT_2C04_000x` arrays. Those are in
+`src/vs/palettes.rs` value for value. Cross-checked against `third_party/mesen2`'s
+`NesDefaultVideoFilter.cpp`, whose `_unscrambledPalettes` holds the same four tables in decimal:
+**every one of the 256 entries agrees**, which is two independent sources for each.
+
+The RP2C03, the RC2C03 and the RC2C05 have **no table at all** — `palette_lut()` is `None` — because
+their master palette *is* the ordered one (the page's note on the 2C05-99 variant: "believed to be
+identical to that of the 2C03"). That `None` is also the brief's rule for an unidentified image,
+"gets the RP2C03 (plain NES palette)", so the default costs nothing and means exactly what it says.
+
+**The plan said the remap goes in `snapshot_palette`; the tree offered somewhere strictly better,
+and the step took it.** `Ppu2C02` already keeps a *derived* copy of palette RAM, `palette_marked`,
+rebuilt on the one register write "here and not per pixel" (AMD-050 REQ-CORE-049's own comment).
+The VS remap is the same shape of problem, so palette RAM became **three** arrays:
+
+* `palette_raw` — what the game wrote. Six bits, and what a `$2007` read of `$3F00`-`$3F1F` gives
+  back, because palette RAM sits *before* the chip's colour decoder and a read never sees it. It is
+  also what the state blob carries, so the savestate format is **unchanged** and a NES state is
+  byte for byte the same block it was.
+* `palette` — what the PPU *shows*: `palette_raw` through the remap, and the identity on every NES
+  image. Every output of the core already resolves this array — the pixel image of REQ-CORE-048,
+  the tile records, the backdrop, the frame batch's 32 bytes — so **nothing downstream changed at
+  all**.
+* `palette_marked` — as before, derived from `palette`.
+
+So the cost of a VS palette is **one array lookup per palette-RAM write**, a handful per frame, and
+**`snapshot_palette` is untouched**: it is still the same `const fn` returning `palette` with the
+four mirrors filled in. There is no per-frame test either, which is better than the plan's budget
+of one. Four read paths moved from `palette` to `palette_raw` (the `$2007` read, the register peek
+and the two VRAM reads) and the single write path now fills all three; `refresh_marked_palette`
+became `refresh_palette_views` and rebuilds the two derived arrays from the raw one at the three
+places that replace the whole palette — the power-up fill, the state restore, and the new
+`set_vs_ppu`.
+
+The margin palette is **deliberately not remapped**: it belongs to the widescreen hack packs, which
+exist only for the fifteen commercial NES games they were built for, and "any 3D profile or
+widescreen pack variant for VS images" is one of the lot's recorded gaps. A VS image cannot have
+one, so a branch there would be dead code.
+
+One consequence named rather than hidden: the real 2C03 renders some of the 2C02's grey-ramp
+entries as black, which an **index** remap cannot express, because the table the indices are
+coloured in is the player's choice (`video.nes_palette`, eleven of them) and not the chip's DAC.
+The brief settles it in one phrase — "plain NES palette" — and it is in the gap list.
+
+Six tests: the four tables are four different non-identity remaps holding the same multiset of
+indices (the page's "same master palette … different permutations"); the 2C03 and the five 2C05s
+have none; a synthetic image **per PPU model** writes all 32 palette bytes and checks each one
+against the chosen table while `$2007` still reads back what was written; a plain NES image whose
+byte 13 *claims* an RP2C04-0004 gets no remap, because byte 7 does not say Vs. System; the remap
+reaches the pixel image (a backdrop written `$01` comes out `$27` on an RP2C04-0002, the page's
+entry 1); and a savestate round trip puts the shown palette back through the remap.
+
+Green: **886 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
+`-D warnings` clean in all three configurations.

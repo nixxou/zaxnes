@@ -31,7 +31,7 @@ impl Ppu2C02 {
     pub fn save_machine_state(&self, writer: &mut StateWriter) {
         writer.write_blob(&self.vram);
         writer.write_blob(&self.oam);
-        writer.write_blob(&self.palette);
+        writer.write_blob(&self.palette_raw);
         writer.write_i32(self.dot);
         writer.write_i32(self.scanline);
         writer.write_i32(self.dot_accumulator);
@@ -82,10 +82,13 @@ impl Ppu2C02 {
         self.sprite_line_stale = true;
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
-        reader.read_blob_into(&mut self.palette)?;
+        reader.read_blob_into(&mut self.palette_raw)?;
         // AMD-050 REQ-CORE-049: the shadow palette is derived, so it is not in the blob (the
-        // state of a 1.x savestate has to keep reading) and is rebuilt here instead.
-        self.refresh_marked_palette();
+        // state of a 1.x savestate has to keep reading) and is rebuilt here instead. **The blob
+        // carries palette RAM as the game wrote it**, which is what it always carried: the
+        // shown palette of lot MF-VS step 2 is the second derived view and is rebuilt with the
+        // first, so the format is unchanged and a NES savestate is byte for byte the same.
+        self.refresh_palette_views();
         self.dot = reader.read_i32()?;
         self.scanline = reader.read_i32()?;
         self.dot_accumulator = reader.read_i32()?;

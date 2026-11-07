@@ -9,7 +9,29 @@
 //! The header fields themselves are REQ-CORE-012's.
 
 use zax_nes::rom::InesHeader;
-use zax_nes::vs::{rom_table, VsHardware, VsPpuModel, VsSource, VsSystem, VsWiring};
+use zax_nes::vs::{rom_table, VsHardware, VsPpuModel, VsSource, VsSystem, VsWiring, LUT_LEN};
+use zax_nes::NesCore;
+
+/// The ten PPU models, in the order byte 13's low nibble names them.
+const MODELS: [VsPpuModel; 10] = [
+    VsPpuModel::Rc2c03,
+    VsPpuModel::Rp2c04_0001,
+    VsPpuModel::Rp2c04_0002,
+    VsPpuModel::Rp2c04_0003,
+    VsPpuModel::Rp2c04_0004,
+    VsPpuModel::Rc2c05_01,
+    VsPpuModel::Rc2c05_02,
+    VsPpuModel::Rc2c05_03,
+    VsPpuModel::Rc2c05_04,
+    VsPpuModel::Rc2c05_05,
+];
+
+/// Byte 13's low nibble for `model`, so that a synthetic image can ask for it by name.
+fn byte13_of(model: VsPpuModel) -> u8 {
+    (0x0..=0x0Fu8)
+        .find(|&nibble| VsPpuModel::from_nes20_byte13(nibble) == model)
+        .unwrap_or_else(|| panic!("no byte 13 names {}", model.name()))
+}
 
 /// A 32 KiB-PRG, 8 KiB-CHR image whose header bytes the caller sets.
 ///
@@ -400,4 +422,236 @@ fn the_core_keeps_the_vs_system_and_reports_it() {
     assert!(core.vs_system().is_some());
     core.close_rom();
     assert!(core.vs_system().is_none());
+}
+
+// ------------------------------------------------------------------ the master palettes
+
+/// nesdev, "PPU palettes": "All four 2C04 PPUs contain the same master palette, but in different
+/// permutations", offered as a LUT into the ordered palette. So each of the four arrays holds 64
+/// six-bit indices, the four are different from one another, none of them is the identity, and
+/// each holds the same multiset of indices as the others.
+#[test]
+fn the_four_rp2c04_luts_are_four_different_remaps_of_the_ordered_palette() {
+    let luts: Vec<&[u8; LUT_LEN]> = [
+        VsPpuModel::Rp2c04_0001,
+        VsPpuModel::Rp2c04_0002,
+        VsPpuModel::Rp2c04_0003,
+        VsPpuModel::Rp2c04_0004,
+    ]
+    .iter()
+    .map(|model| model.palette_lut().expect("an RP2C04 has a remap"))
+    .collect();
+
+    for (index, lut) in luts.iter().enumerate() {
+        assert!(
+            lut.iter().all(|&entry| entry < 0x40),
+            "RP2C04-000{} holds an index outside the 64 colours",
+            index + 1
+        );
+        assert!(
+            lut.iter()
+                .enumerate()
+                .any(|(from, &to)| u8::try_from(from).unwrap_or(0xFF) != to),
+            "RP2C04-000{} is the identity",
+            index + 1
+        );
+    }
+
+    for first in 0..luts.len() {
+        for second in (first + 1)..luts.len() {
+            assert_ne!(
+                luts[first],
+                luts[second],
+                "RP2C04-000{} and RP2C04-000{} are the same table",
+                first + 1,
+                second + 1
+            );
+        }
+    }
+
+    let sorted = |lut: &[u8; LUT_LEN]| {
+        let mut entries = lut.to_vec();
+        entries.sort_unstable();
+        entries
+    };
+    for lut in &luts[1..] {
+        assert_eq!(sorted(luts[0]), sorted(lut));
+    }
+}
+
+/// Every PPU whose master palette *is* the ordered one has no remap at all, which is both the
+/// 2C03's case and the brief's rule for an unidentified VS image ("the plain NES palette").
+#[test]
+fn the_2c03_and_the_2c05_have_no_remap() {
+    for model in MODELS {
+        let expected = matches!(
+            model,
+            VsPpuModel::Rp2c04_0001
+                | VsPpuModel::Rp2c04_0002
+                | VsPpuModel::Rp2c04_0003
+                | VsPpuModel::Rp2c04_0004
+        );
+        assert_eq!(
+            model.palette_lut().is_some(),
+            expected,
+            "{} should {}have a remap",
+            model.name(),
+            if expected { "" } else { "not " }
+        );
+    }
+}
+
+// ------------------------------------------------------------------ chosen at load
+
+/// What entry `entry` of palette RAM holds after `$00`..`$1F` have been written in order into
+/// `$3F00`..`$3F1F`.
+///
+/// `$3F10`, `$3F14`, `$3F18` and `$3F1C` **are** `$3F00`, `$3F04`, `$3F08` and `$3F0C`
+/// (REQ-CORE-045), so the write to the mirror lands on the same cell and, coming second, is the
+/// byte that stays: the four background entries and their four mirrors all hold `$10`, `$14`,
+/// `$18` and `$1C`.
+fn written_at(entry: usize) -> u8 {
+    let entry = u8::try_from(entry).unwrap_or(0);
+    if entry % 4 == 0 {
+        entry | 0x10
+    } else {
+        entry
+    }
+}
+
+/// Points `$2006` at `$3F00 | entry` and reads `$2007`, the way a game reads palette RAM back.
+fn read_palette_through_2007(core: &mut NesCore, entry: u8) -> u8 {
+    for byte in [0x3F, entry] {
+        let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
+        ppu.write(6, byte, cartridge);
+    }
+    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
+    ppu.read(7, cartridge) & 0x3F
+}
+
+/// Loads a synthetic VS image whose byte 13 asks for `model` and writes the 32 bytes `$00`..`$1F`
+/// into palette RAM through `$2006`/`$2007`.
+fn core_with_palette(model: VsPpuModel) -> NesCore {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x09, byte13_of(model), 0), "SyntheticVs.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.vs_system().map(VsSystem::ppu), Some(model));
+
+    core.write_memory(0x2006, 0x3F);
+    core.write_memory(0x2006, 0x00);
+    for entry in 0..32u8 {
+        core.write_memory(0x2007, entry);
+    }
+    core
+}
+
+/// A synthetic image per PPU model: the palette chosen at load is the one the frame batch
+/// carries, and palette RAM still reads back exactly what the game wrote.
+#[test]
+fn the_palette_chosen_at_load_is_the_one_the_batch_carries() {
+    for model in MODELS {
+        let mut core = core_with_palette(model);
+        let shown = core.ppu().snapshot_palette();
+
+        for (entry, &actual) in shown.iter().enumerate() {
+            let written = written_at(entry);
+            let expected = match model.palette_lut() {
+                Some(lut) => lut[usize::from(written)],
+                None => written,
+            };
+            assert_eq!(
+                actual,
+                expected,
+                "{}: entry {entry:#04X}, written {written:#04X}",
+                model.name()
+            );
+        }
+
+        // Palette RAM sits before the chip's colour decoder, so a `$2007` read gives the written
+        // byte back whether there is a remap or not. `NesCore::read_memory` is the debugger's
+        // side-effect-free peek and answers 0 for every register (REQ-CORE-080), so the read has
+        // to go through the PPU itself.
+        for entry in 0..32usize {
+            assert_eq!(
+                read_palette_through_2007(&mut core, u8::try_from(entry).unwrap_or(0)),
+                written_at(entry),
+                "{}: $3F{entry:02X} reads back what the game wrote",
+                model.name()
+            );
+        }
+    }
+}
+
+/// The same image without the VS bit: no remap anywhere. This is the brief's "a plain NES image
+/// proving none of it is active", for the palette.
+#[test]
+fn a_plain_nes_image_has_no_remap_at_all() {
+    let mut core = NesCore::new();
+    // Byte 13 claims an RP2C04-0004, and byte 7 does not say Vs. System: the byte is not read.
+    let load = core.load_rom(&image(0, 0x08, 0x05, 0), "SyntheticNes.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert!(core.vs_system().is_none());
+
+    core.write_memory(0x2006, 0x3F);
+    core.write_memory(0x2006, 0x00);
+    for entry in 0..32u8 {
+        core.write_memory(0x2007, entry);
+    }
+
+    let shown = core.ppu().snapshot_palette();
+    for (entry, &actual) in shown.iter().enumerate() {
+        assert_eq!(actual, written_at(entry), "entry {entry:#04X}");
+    }
+}
+
+/// The remap reaches the **pixel** image too, and for free: the picture of REQ-CORE-048 resolves
+/// through the shown palette, so a backdrop written as `$01` comes out as the chip's colour for
+/// `$01` with no per-pixel work at all.
+#[test]
+fn the_remap_reaches_the_pixel_image() {
+    // Entry 1 of the page's `PaletteLUT_2C04_0002` is $27.
+    let model = VsPpuModel::Rp2c04_0002;
+    assert_eq!(
+        model.palette_lut().expect("an RP2C04 has a remap")[0x01],
+        0x27
+    );
+
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x09, byte13_of(model), 0), "SyntheticVs.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    core.write_memory(0x2006, 0x3F);
+    core.write_memory(0x2006, 0x00);
+    core.write_memory(0x2007, 0x01);
+    // Rendering off, so every visible dot is the backdrop.
+    core.write_memory(0x2001, 0x00);
+    core.run_frame(0);
+
+    let mut picture = Vec::new();
+    core.ppu().pixel_frame_indices_into(&mut picture);
+    assert_eq!(picture.len(), 256 * 240, "the whole visible image");
+    assert!(
+        picture.iter().all(|&pixel| pixel == 0x27),
+        "the backdrop should be the chip's colour for $01 and not $01 itself"
+    );
+}
+
+/// The savestate carries palette RAM as the game wrote it — the format is unchanged — and a
+/// restore puts the shown palette back through the remap (REQ-CORE-090, REQ-CORE-091).
+#[test]
+fn a_savestate_restores_the_shown_palette_through_the_remap() {
+    let mut core = core_with_palette(VsPpuModel::Rp2c04_0003);
+    let shown = core.ppu().snapshot_palette();
+    let state = core.save_state(false).expect("a ROM is loaded");
+
+    core.write_memory(0x2006, 0x3F);
+    core.write_memory(0x2006, 0x00);
+    for _ in 0..32 {
+        core.write_memory(0x2007, 0x30);
+    }
+    assert_ne!(core.ppu().snapshot_palette(), shown);
+
+    core.try_load_state(&state, 0)
+        .expect("the state is this machine's");
+    assert_eq!(core.ppu().snapshot_palette(), shown);
 }

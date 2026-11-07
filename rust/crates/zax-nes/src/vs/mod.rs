@@ -17,8 +17,10 @@
 //! *detected* and named in the load note, and the image then runs as a single screen with
 //! ordinary controllers.
 
+mod palettes;
 mod roms;
 
+pub use palettes::LUT_LEN;
 pub use roms::{rom_table, VsRom};
 
 use crate::rom::InesHeader;
@@ -374,6 +376,13 @@ impl VsSystem {
     #[must_use]
     pub const fn is_rc2c05(&self) -> bool {
         self.ppu.is_rc2c05()
+    }
+
+    /// The PPU's master palette as a remap into the ordered palette, or `None` when it **is**
+    /// the ordered palette; see [`VsPpuModel::palette_lut`].
+    #[must_use]
+    pub const fn palette_lut(&self) -> Option<&'static [u8; LUT_LEN]> {
+        self.ppu.palette_lut()
     }
 
     /// The message the host logs when a VS image is loaded: what was detected, where from, and

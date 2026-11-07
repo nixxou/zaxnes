@@ -285,6 +285,7 @@ impl NesBus {
     #[cfg(feature = "board-vs-system")]
     pub fn set_vs_system(&mut self, vs: Option<crate::vs::VsSystem>) {
         self.input.set_vs_system(vs);
+        self.ppu.set_vs_ppu(self.input.vs());
     }
 
     /// The attached cartridge, if any.

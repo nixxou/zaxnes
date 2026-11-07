@@ -142,19 +142,44 @@ pub struct Ppu2C02 {
     vram_written: Vec<u32>,
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
+    /// Palette RAM **as the game wrote it**, six bits an entry: what a `$2007` read of
+    /// `$3F00`-`$3F1F` gives back and what the state blob carries, because palette RAM sits
+    /// before the chip's colour decoder and a read never sees that decoder.
+    ///
+    /// On a NES image it is equal to [`Self::palette`] byte for byte, written in the same breath
+    /// by the one register write below; the two differ only on a VS. System whose PPU has a
+    /// scrambled master palette (lot MF-VS step 2).
+    palette_raw: [u8; PALETTE_SIZE],
+    /// Palette RAM **as the PPU shows it**: `palette_raw` with the VS. System's master-palette
+    /// remap applied, and the identity on every NES image.
+    ///
+    /// This is the entry the whole output of the core resolves — the pixel image of
+    /// REQ-CORE-048, the tile records, the backdrop and the frame batch's 32 bytes — so applying
+    /// the remap *here*, once per palette write, is what keeps a VS palette out of every
+    /// per-pixel path (see [`Self::vs_palette`]).
     palette: [u8; PALETTE_SIZE],
     /// `palette` with the opacity bit of AMD-050 REQ-CORE-049 already set on every entry but
     /// entry 0: `palette[i] | 0x40` for `i ≥ 1`, `palette[0]` for entry 0.
     ///
-    /// Derived, so it is **not** in the state blob (`ppu/state.rs` writes `palette` alone) and is
-    /// rebuilt wherever `palette` is written — the one register write, the power-up fill and the
-    /// state restore, none of them in a per-pixel path.
+    /// Derived, so it is **not** in the state blob (`ppu/state.rs` writes `palette_raw` alone)
+    /// and is rebuilt wherever palette RAM is written — the one register write, the power-up
+    /// fill and the state restore, none of them in a per-pixel path.
     ///
     /// It is what makes the opacity mask free. The pixel functions resolve a palette **index**
     /// that is 0 exactly where the pixel is transparent (see `render::span_pixel`), so reading
     /// this table instead of `palette`, with the colour mask widened to `0x7F`/`0x70`, carries
     /// the bit with the same indexed load and the same `AND` as before the amendment.
     palette_marked: [u8; PALETTE_SIZE],
+    /// The VS. System PPU's master palette as a remap of the 64 colour indices, or `None` for a
+    /// NES image **and** for every VS PPU whose master palette is the ordered one — the RP2C03,
+    /// the RC2C03 and the RC2C05 (nesdev, "PPU palettes"; `crate::vs::VsPpuModel::palette_lut`).
+    ///
+    /// Chosen **once at load** by [`Self::set_vs_ppu`] and read in exactly one place, the
+    /// palette-RAM write of [`Self::write_vram_inner`]: a game writes a handful of palette bytes
+    /// a frame and the PPU draws 61 440 pixels, which is the same argument
+    /// [`Self::palette_marked`] exists for. Configuration, so no reset clears it.
+    #[cfg(feature = "board-vs-system")]
+    vs_palette: Option<&'static [u8; crate::vs::LUT_LEN]>,
     decay_stamp: [i64; 8],
 
     timing: RegionTiming,
@@ -311,8 +336,11 @@ impl Ppu2C02 {
             vram_written: vec![0; VRAM_SIZE],
             vram_clock: 0,
             oam: [0; OAM_SIZE],
+            palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
+            #[cfg(feature = "board-vs-system")]
+            vs_palette: None,
             decay_stamp: [0; 8],
             timing: RegionTiming::default(),
             dot: 0,
@@ -595,13 +623,53 @@ impl Ppu2C02 {
         self.margin_palette
     }
 
-    /// Rebuilds [`Self::palette_marked`] from `palette`. Called wherever the whole palette is
-    /// replaced — the power-up fill and a state restore — and never per pixel.
-    pub(super) fn refresh_marked_palette(&mut self) {
+    /// Chooses the VS. System PPU, or goes back to the 2C02 with `None` (lot MF-VS).
+    ///
+    /// Called once, by `NesBus::set_vs_system` at load time and before the power-on. What it
+    /// stores is the *answer* — the master-palette remap — and not the model, so that no path of
+    /// the PPU ever asks which chip this is. Palette RAM is rebuilt through the new remap so
+    /// that choosing a PPU is correct even on a machine that already has bytes in it.
+    #[cfg(feature = "board-vs-system")]
+    pub fn set_vs_ppu(&mut self, vs: Option<&crate::vs::VsSystem>) {
+        self.vs_palette = vs.and_then(crate::vs::VsSystem::palette_lut);
+        self.refresh_palette_views();
+    }
+
+    /// The colour index the PPU shows for the index `written` into palette RAM: the VS. System's
+    /// master-palette remap, and the identity everywhere else.
+    ///
+    /// `written` is already six bits ([`Self::write_vram_inner`] masks it), so the lookup cannot
+    /// leave the 64-entry table.
+    #[cfg(feature = "board-vs-system")]
+    const fn shown_palette_entry(&self, written: u8) -> u8 {
+        match self.vs_palette {
+            Some(lut) => lut[(written & 0x3F) as usize],
+            None => written,
+        }
+    }
+
+    /// Without the VS. System there is no remap, and this is the identity the optimiser removes.
+    /// It keeps the receiver so that the one call site reads the same in both configurations.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[allow(clippy::unused_self)]
+    const fn shown_palette_entry(&self, written: u8) -> u8 {
+        written
+    }
+
+    /// Rebuilds [`Self::palette`] from [`Self::palette_raw`] and [`Self::palette_marked`] from
+    /// that. Called wherever the whole palette is replaced — the power-up fill, a state restore
+    /// and the choice of a VS PPU — and never per pixel.
+    pub(super) fn refresh_palette_views(&mut self) {
+        for index in 0..PALETTE_SIZE {
+            self.palette[index] = self.shown_palette_entry(self.palette_raw[index]);
+        }
         self.palette_marked = marked_palette(&self.palette);
     }
 
     /// Returns the 32 palette bytes of the batch, mirrors filled in (REQ-CORE-045).
+    ///
+    /// The bytes are the ones the PPU *shows*, so a VS. System's master-palette remap is already
+    /// in them and the frame batch needs no knowledge of it (lot MF-VS step 2).
     #[must_use]
     pub const fn snapshot_palette(&self) -> [u8; PALETTE_SIZE] {
         let mut out = self.palette;
@@ -620,8 +688,8 @@ impl Ppu2C02 {
     pub fn reset(&mut self) {
         self.vram.fill(0);
         self.oam.fill(0);
-        self.palette.fill(0);
-        self.refresh_marked_palette();
+        self.palette_raw.fill(0);
+        self.refresh_palette_views();
         self.decay_stamp.fill(0);
         self.pixels.fill(0);
 
@@ -1035,7 +1103,7 @@ impl Ppu2C02 {
         if is_palette_address(address) {
             // Palette reads are immediate and only drive six bits; the buffer still
             // takes the mirrored nametable byte "underneath" the palette (nesdev).
-            value = (self.palette[palette_index(address)] & self.palette_read_mask())
+            value = (self.palette_raw[palette_index(address)] & self.palette_read_mask())
                 | (self.decay & 0xC0);
             self.refresh_decay(value, 0x3F);
             self.read_buffer = self.read_vram_inner(
@@ -1087,7 +1155,7 @@ impl Ppu2C02 {
             7 => {
                 let address = self.v & 0x3FFF;
                 if is_palette_address(address) {
-                    self.palette[palette_index(address)]
+                    self.palette_raw[palette_index(address)]
                 } else if (1..READ_BUFFER_READY_DOTS)
                     .contains(&(self.ppu_clock - self.read_buffer_clock))
                 {
@@ -1319,7 +1387,7 @@ impl Ppu2C02 {
             return self.read_nametable_inner(address, cart.as_deref());
         }
 
-        self.palette[palette_index(address)]
+        self.palette_raw[palette_index(address)]
     }
 
     /// Side-effect-free read of the PPU bus, for the tile emitter: the cartridge is only
@@ -1334,7 +1402,7 @@ impl Ppu2C02 {
             return self.read_nametable_inner(address, cartridge);
         }
 
-        self.palette[palette_index(address)]
+        self.palette_raw[palette_index(address)]
     }
 
     /// Writes the PPU bus at `address` (masked to 14 bits); a [`PpuBusAccess::Cpu`] write
@@ -1377,10 +1445,16 @@ impl Ppu2C02 {
 
         // Palette entries are 6 bits wide.
         let index = palette_index(address);
-        self.palette[index] = value & 0x3F;
+        let written = value & 0x3F;
+        self.palette_raw[index] = written;
+        // The colour the chip shows for that entry: the identity on a NES image, and a VS.
+        // System's master-palette permutation otherwise (lot MF-VS step 2). Here, for the reason
+        // the shadow entry below is here.
+        let shown = self.shown_palette_entry(written);
+        self.palette[index] = shown;
         // AMD-050 REQ-CORE-049: the shadow entry follows, here and not per pixel. A game writes
         // a handful of palette bytes a frame; the PPU reads 61 440 pixels.
-        self.palette_marked[index] = mark(index, value & 0x3F);
+        self.palette_marked[index] = mark(index, shown);
     }
 
     /// Tells the cartridge which address the PPU is **reading**, so that an MMC3-style board can
