@@ -71,7 +71,7 @@ table — they are the columns the comments were already quoting.
   table (74 rows, 0 differences), the design above settled, this file. No code.
 * [x] **1/6** — the table carries the board: `VsBoardSpec`, the 74 rows regenerated from the
   database, the accessors, and a test that pins every row's board field by field.
-* [ ] **2/6** — the override at load: `vs::corrected_board`, `RomImage::correct_vs_board`, the
+* [x] **2/6** — the override at load: `vs::corrected_board`, `RomImage::correct_vs_board`, the
   `load_rom` order, `has_submapper`, the load message.
 * [ ] **3/6** — the tests: the brief's four cases, plus the regression itself as a synthetic image.
 * [ ] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
@@ -161,3 +161,51 @@ the baseline plus this step's 2); fmt clean; clippy `-D warnings --all-targets` 
 by default and with `--features parked-boards`. One lint needed a decision: `similar_names` rejects
 `chr_rom_size` beside `chr_ram_size`, which are `InesHeader`'s own two names for the same two
 fields, so the `allow` is on `VsBoardSpec::new` with the reason written there.
+
+### Step 2 — the override, in four pieces and one order
+
+**`vs::corrected_board(header, data_crc, image_len) -> Option<(InesHeader, String)>`** is the
+decision, and it is `pub(crate)`: it refuses an image `VsSystem::is_vs_image` does not hold for, it
+refuses a CRC no row matches, and it refuses a header that already agrees with the row. What it
+returns is a whole corrected header plus the sentence the load message carries. The two readings the
+brief states are the two branches:
+
+* **iNES 1.0** — the mapper, the submapper, the PRG-ROM and CHR-ROM sizes, the CHR-RAM size and the
+  mirroring are the row's wherever they disagree.
+* **NES 2.0** — returns `None` unless `header.mapper != row.board().mapper()`, and then changes the
+  mapper and the submapper and nothing else.
+
+**`RomImage::correct_vs_board(data_crc)`** applies it: the header is replaced and the two bank
+vectors are **re-split from `raw`**, because a header can be right about a 128 KiB total and wrong
+about where it divides. It is the only writer of the new header, `#[cfg]`-gated, and it is called
+from exactly one place.
+
+**`load_rom`'s order is now explicit, and it had to change.** The old body was
+`RomImage::try_load(loaded, name).and_then(Cartridge::create)`, one chained expression — and the
+correction has to sit *between* those two calls, which is the only moment the header exists and
+nothing has been built from it. So the chain became two `match`es with the same two error arms, with
+the data CRC computed above them (it only ever needed `image`) and the VS block between them. The
+**detection** moved up with it and now reads `rom.header()` *before* the correction, which is forced
+and not cosmetic: `VsSystem::is_vs_image` treats mapper 99 and mapper 151 as VS signals in their own
+right, so an image whose console byte says nothing would stop being a VS image the instant the table
+rewrote that number. Detect, then correct.
+
+**`InesHeader::has_submapper()`**, and why the flag exists. Every submapper-dependent rule in this
+core is written `if header.is_nes20 { header.submapper } else { 0 }`, because an iNES 1.0 header has
+no such field. After a correction it has one, from a source that does. So `InesHeader` gains
+`board_from_vs_table: bool` **behind the feature**, `has_submapper()` is
+`is_nes20 || board_from_vs_table` with the feature and `is_nes20` without it, and
+`registry::has_bus_conflicts` is the one call site that asks it — the one rule the table's submapper
+reaches, since the database gives *Vs. Castlevania* and *Vs. Top Gun* mapper 2 **submapper 2**, "Bus
+conflicts present". The other two submapper call sites are deliberately untouched: mapper 34's two
+boards and the MMC6 are not VS numbers, so asking there would be dead code.
+
+**One refactor the lint forced, and it is an improvement.** The two added lines pushed
+`InesHeader::try_parse` to 101 of clippy's 100 allowed, so the CHR-RAM block came out as a free
+`chr_ram_size(is_nes20, byte11, chr_rom_size)` beside the `nes20_prg_ram_size` and `nes20_rom_size`
+that were already there. Same arithmetic, REQ-CORE-012's default and its floor in one place.
+
+Green: `zax-nes` + `zax-harness` **926 passed, 0 failed, 8 ignored** by default — *exactly* MF-4e's
+926 — and **980 / 0 / 8** with `parked-boards` (978 at MF-4e plus step 1's two). fmt clean; clippy
+`-D warnings --all-targets` clean on `zax-nes` by default, with `--features parked-boards` and with
+`--no-default-features`.

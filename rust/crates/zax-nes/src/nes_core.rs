@@ -319,8 +319,9 @@ impl NesCore {
         let loaded = patched
             .as_ref()
             .map_or(image, |patched| patched.image.as_slice());
-        let cartridge = match RomImage::try_load(loaded, name).and_then(Cartridge::create) {
-            Ok(cartridge) => cartridge,
+        #[allow(unused_mut)] // The VS. System's board correction is the one writer.
+        let mut rom = match RomImage::try_load(loaded, name) {
+            Ok(rom) => rom,
             Err(error) => {
                 self.close_rom();
                 return RomLoadResult::fail(error.failure, error.message);
@@ -328,6 +329,39 @@ impl NesCore {
         };
 
         let crc = crate::builtin_patches::data_crc(image);
+
+        // The VS. System of the image, settled once, before the power-on: an arcade board, its
+        // PPU model and its stick wiring are detected from the header and from the CRC of the
+        // data, never from anything the machine does later (lot MF-VS step 1).
+        //
+        // **Detection first, then the board correction, and the order is forced** (lot
+        // MF-VS-fix step 2): mapper 99 and mapper 151 are themselves VS signals, so an image
+        // whose header carries no console byte would stop being a VS image the moment the table
+        // rewrote that number. The correction then happens before `Cartridge::create`, which is
+        // the whole point — the board is chosen from the corrected header.
+        #[cfg(feature = "board-vs-system")]
+        let note = {
+            let vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            let note = vs.as_ref().map(crate::vs::VsSystem::load_note).map(|note| {
+                match rom.correct_vs_board(crc) {
+                    Some(correction) => format!("{note}; {correction}"),
+                    None => note,
+                }
+            });
+            self.bus.set_vs_system(vs);
+            note
+        };
+        #[cfg(not(feature = "board-vs-system"))]
+        let note: Option<String> = None;
+
+        let cartridge = match Cartridge::create(rom) {
+            Ok(cartridge) => cartridge,
+            Err(error) => {
+                self.close_rom();
+                return RomLoadResult::fail(error.failure, error.message);
+            }
+        };
+
         // The header's region, unless the dump is known to be of another one.
         let region =
             crate::rom::region_exception(crc).unwrap_or_else(|| cartridge.rom().announced_region());
@@ -342,19 +376,6 @@ impl NesCore {
             .map_or(0, crate::builtin_patches::BuiltinPatch::default_options);
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
-
-        // The VS. System of the image, settled once, before the power-on: an arcade board, its
-        // PPU model and its stick wiring are detected from the header and from the CRC of the
-        // data, never from anything the machine does later (lot MF-VS step 1).
-        #[cfg(feature = "board-vs-system")]
-        let note = {
-            let vs = crate::vs::VsSystem::detect(cartridge.rom().header(), crc);
-            let note = vs.as_ref().map(crate::vs::VsSystem::load_note);
-            self.bus.set_vs_system(vs);
-            note
-        };
-        #[cfg(not(feature = "board-vs-system"))]
-        let note: Option<String> = None;
 
         self.bus.attach(Some(cartridge));
         self.install_pack(Some(image));

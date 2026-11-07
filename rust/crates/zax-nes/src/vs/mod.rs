@@ -26,6 +26,123 @@ pub use roms::{rom_table, VsBoardSpec, VsRom};
 use crate::rom::InesHeader;
 use crate::state::{InvalidState, StateReader, StateWriter};
 
+/// The header a VS. System image should load under, when the per-ROM table knows the dump and the
+/// image's own header disagrees with it, and the sentence the load message then carries.
+///
+/// **The defect this exists for** (lot MF-VS-fix). Circulating iNES 1.0 dumps of
+/// *Vs. Castlevania* and *Vs. Top Gun* announce **mapper 99 with 0 KiB of CHR-ROM**; the boards
+/// are `UxROM` (mapper 2, submapper 2) with 8 KiB of CHR-RAM. Loaded as the header says, the image
+/// comes up with the mapper-99 board fetching its patterns from a CHR-ROM that is not there and
+/// the screen stays empty. The table has known the right answer since MF-VS step 1 — it was in a
+/// comment. Many VS dumps carry mapper 99 by default in old header sets, so the rule is the
+/// table's and not one dump's.
+///
+/// **Who wins.** An **iNES 1.0** header describes a board with four fields and a nibble, and the
+/// database row keyed by the CRC of this very data describes it with six; every field of the row
+/// that disagrees wins. A **NES 2.0** header is trusted — it has a field for all of this and a
+/// dumper filled them — **unless it contradicts the table on the mapper**, in which case the
+/// mapper and the submapper are the table's and the message says so. Nothing else of a NES 2.0
+/// header is touched: getting the mapper wrong does not make a header wrong about a size
+/// (**Q-138** records that reading).
+///
+/// **What it never does.** It is reached only for an image [`VsSystem::is_vs_image`] already
+/// holds for, so a NES image whose data CRC happened to collide with a row is not touched. It
+/// never grows the image: `announced_size` after the correction is checked against the bytes
+/// there are, and sizes that would not fit are left as the header had them (which cannot happen
+/// for a dump whose CRC matched the row — the CRC is of the data the header delimits — and is
+/// refused rather than trusted all the same).
+///
+/// Returns `None` when there is nothing to correct, which is the case for every correctly
+/// headered dump and for every VS image the table does not know.
+#[must_use]
+pub(crate) fn corrected_board(
+    header: &InesHeader,
+    data_crc: u32,
+    image_len: usize,
+) -> Option<(InesHeader, String)> {
+    if !VsSystem::is_vs_image(header) {
+        return None;
+    }
+
+    let row = roms::find(data_crc)?;
+    let board = row.board();
+    let mut corrected = header.clone();
+    corrected.mapper = board.mapper();
+    corrected.submapper = board.submapper();
+
+    if header.is_nes20 {
+        // Trusted on everything but the mapper, and only when it contradicts the table there.
+        if header.mapper == board.mapper() {
+            return None;
+        }
+
+        corrected.board_from_vs_table = true;
+        return Some((
+            corrected,
+            format!(
+                "the NES 2.0 header says mapper {}, the VS table says mapper {} for {} \
+                 and the table wins",
+                header.mapper,
+                board.mapper(),
+                row.title()
+            ),
+        ));
+    }
+
+    corrected.chr_ram_size = board.chr_ram_size();
+    corrected.mirroring = board.mirroring();
+    corrected.prg_rom_size = board.prg_rom_size();
+    corrected.chr_rom_size = board.chr_rom_size();
+    if image_len < corrected.announced_size() {
+        // Defensive: the row's split is not the one these bytes can hold, so keep the header's.
+        corrected.prg_rom_size = header.prg_rom_size;
+        corrected.chr_rom_size = header.chr_rom_size;
+    }
+
+    if corrected.mapper == header.mapper
+        && corrected.submapper == header.submapper
+        && corrected.prg_rom_size == header.prg_rom_size
+        && corrected.chr_rom_size == header.chr_rom_size
+        && corrected.chr_ram_size == header.chr_ram_size
+        && corrected.mirroring == header.mirroring
+    {
+        return None;
+    }
+
+    corrected.board_from_vs_table = true;
+    let mut fields = Vec::with_capacity(4);
+    if corrected.mapper != header.mapper || corrected.submapper != header.submapper {
+        fields.push(format!(
+            "mapper {} is mapper {} submapper {}",
+            header.mapper, corrected.mapper, corrected.submapper
+        ));
+    }
+    if corrected.prg_rom_size != header.prg_rom_size
+        || corrected.chr_rom_size != header.chr_rom_size
+    {
+        fields.push(format!(
+            "{} KiB of PRG-ROM and {} KiB of CHR-ROM",
+            corrected.prg_rom_size / 1024,
+            corrected.chr_rom_size / 1024
+        ));
+    }
+    if corrected.chr_ram_size != header.chr_ram_size {
+        fields.push(format!("{} KiB of CHR-RAM", corrected.chr_ram_size / 1024));
+    }
+    if corrected.mirroring != header.mirroring {
+        fields.push(format!("{:?} mirroring", corrected.mirroring));
+    }
+
+    Some((
+        corrected,
+        format!(
+            "the iNES 1.0 header of {} is corrected by the VS table: {}",
+            row.title(),
+            fields.join(", ")
+        ),
+    ))
+}
+
 /// Which PPU a VS. board carries (nesdev, "NES 2.0" byte 13 and "PPU palettes").
 ///
 /// The variants keep the chips' own part numbers; `Rc2c03` stands for every RP2C03 and RC2C03

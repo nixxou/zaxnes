@@ -487,9 +487,18 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
 /// **A submapper-0 dump of mappers 2, 3 and 7 has none**, which is what
 /// `mr_bus_1_uxrom_without_a_submapper_has_no_conflict` pins and what MR-1b asked be kept: the
 /// submapper is the gate, and most dumps of those boards carry no submapper at all.
+///
+/// The gate is [`InesHeader::has_submapper`] and not `is_nes20` because of the one other source
+/// of a submapper this core has: the VS. System table, whose two `UxROM` rows the public NES 2.0
+/// database records as **submapper 2** (lot MF-VS-fix step 2). In the default build that method
+/// *is* `is_nes20`.
 #[must_use]
 pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
-    let submapper = if header.is_nes20 { header.submapper } else { 0 };
+    let submapper = if header.has_submapper() {
+        header.submapper
+    } else {
+        0
+    };
     match mapper {
         2 | 3 | 7 => submapper == 2,
         // *INES Mapper 180* gives the board "Bus conflicts: Yes" with no submapper clause: the

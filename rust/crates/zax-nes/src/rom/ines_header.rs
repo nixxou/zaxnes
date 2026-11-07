@@ -61,6 +61,16 @@ pub struct InesHeader {
     /// (nesdev, "NES 2.0"), whose `$04`, `$05` and `$07` are the three VS. System wirings
     /// (`crate::vs::VsWiring`). Exposed for the reason [`Self::byte6`] is.
     pub byte15: u8,
+    /// True when the board below came from the VS. System table and not from the header
+    /// (`crate::vs::corrected_board`, lot MF-VS-fix step 2).
+    ///
+    /// It makes [`Self::submapper`] meaningful on an **iNES 1.0** header, which has no submapper
+    /// field: the public NES 2.0 database records *Vs. Castlevania* and *Vs. Top Gun* as mapper 2
+    /// **submapper 2**, "Bus conflicts present", and a corrected header carries that number from a
+    /// source that has it. Nothing else changes: a header this flag is set on has been rewritten
+    /// field by field already, and [`Self::is_nes20`] still says what the *file* carried.
+    #[cfg(feature = "board-vs-system")]
+    pub board_from_vs_table: bool,
     /// Bit 1 of byte 6: the PRG-RAM is battery backed (REQ-CORE-095).
     pub has_battery: bool,
     /// Bit 2 of byte 6: a 512-byte trainer follows the header.
@@ -86,6 +96,24 @@ impl InesHeader {
 
     /// PRG-RAM always mapped at $6000-$7FFF unless the mapper disables it (REQ-CORE-012).
     pub const DEFAULT_PRG_RAM_SIZE: usize = 8 * 1024;
+
+    /// Whether [`Self::submapper`] is a number some source actually gave, which is the condition
+    /// every submapper-dependent rule in this core is written under.
+    ///
+    /// It is `is_nes20` and nothing else, because an iNES 1.0 header has no such field — plus,
+    /// behind `board-vs-system`, a header the VS. System table corrected
+    /// ([`Self::board_from_vs_table`]).
+    #[must_use]
+    pub const fn has_submapper(&self) -> bool {
+        #[cfg(feature = "board-vs-system")]
+        {
+            self.is_nes20 || self.board_from_vs_table
+        }
+        #[cfg(not(feature = "board-vs-system"))]
+        {
+            self.is_nes20
+        }
+    }
 
     /// Offset of the PRG-ROM inside the ROM image, trainer accounted for.
     #[must_use]
@@ -172,24 +200,7 @@ impl InesHeader {
             )
         };
 
-        let mut chr_ram = if is_nes20 {
-            let shift = byte11 & 0x0F;
-            if shift == 0 {
-                0
-            } else {
-                64usize << shift
-            }
-        } else if chr_size == 0 {
-            // No CHR-ROM means the cartridge carries 32 KiB of CHR-RAM (REQ-CORE-012).
-            Self::DEFAULT_CHR_RAM_SIZE
-        } else {
-            0
-        };
-
-        if chr_size == 0 && chr_ram == 0 {
-            chr_ram = Self::DEFAULT_CHR_RAM_SIZE;
-        }
-
+        let chr_ram = chr_ram_size(is_nes20, byte11, chr_size);
         let prg_ram = if is_nes20 {
             nes20_prg_ram_size(image[10])
         } else {
@@ -233,10 +244,36 @@ impl InesHeader {
             byte15: if is_nes20 { image[15] } else { 0 },
             mirroring,
             byte6,
+            // Parsing never consults the table; `crate::vs::corrected_board` is what sets it.
+            #[cfg(feature = "board-vs-system")]
+            board_from_vs_table: false,
             has_battery: (byte6 & 0x02) != 0,
             has_trainer: (byte6 & 0x04) != 0,
             region,
         })
+    }
+}
+
+/// CHR-RAM size: NES 2.0's byte 11 shift, or REQ-CORE-012's "no CHR-ROM means 32 KiB of
+/// CHR-RAM", with that default as the floor for an image that has neither.
+fn chr_ram_size(is_nes20: bool, byte11: u8, chr_rom_size: usize) -> usize {
+    let announced = if is_nes20 {
+        let shift = byte11 & 0x0F;
+        if shift == 0 {
+            0
+        } else {
+            64usize << shift
+        }
+    } else if chr_rom_size == 0 {
+        InesHeader::DEFAULT_CHR_RAM_SIZE
+    } else {
+        0
+    };
+
+    if chr_rom_size == 0 && announced == 0 {
+        InesHeader::DEFAULT_CHR_RAM_SIZE
+    } else {
+        announced
     }
 }
 

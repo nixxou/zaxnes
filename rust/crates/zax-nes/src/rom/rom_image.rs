@@ -96,6 +96,30 @@ impl RomImage {
         })
     }
 
+    /// Re-reads the image under the board the VS. System table records for it, when the table
+    /// knows the dump and the header disagrees; returns the sentence the load message carries
+    /// (lot MF-VS-fix step 2).
+    ///
+    /// **Here and nowhere else**: this is the one point where the header has been parsed and
+    /// nothing has been built from it yet, so [`crate::cartridges::Cartridge::create`] picks the
+    /// board, the bus-conflict rule and the memory sizes from the corrected header exactly as it
+    /// does for any image — no board, no registry arm and no mapper learns that a table exists.
+    /// `crate::vs::corrected_board` is what decides, and it answers `None` for an image that is
+    /// not a VS. System, for a VS image the table does not know and for a header that is right.
+    ///
+    /// The banks are re-split from [`Self::raw`] because the correction may move the PRG/CHR
+    /// boundary: a header can be wrong about where its 128 KiB divide and right about the total.
+    #[cfg(feature = "board-vs-system")]
+    pub(crate) fn correct_vs_board(&mut self, data_crc: u32) -> Option<String> {
+        let (header, note) = crate::vs::corrected_board(&self.header, data_crc, self.raw.len())?;
+        self.header = header;
+        self.prg_rom =
+            self.raw[self.header.prg_rom_offset()..self.header.chr_rom_offset()].to_vec();
+        self.chr_rom =
+            self.raw[self.header.chr_rom_offset()..self.header.announced_size()].to_vec();
+        Some(note)
+    }
+
     /// The parsed header.
     #[must_use]
     pub const fn header(&self) -> &InesHeader {
