@@ -36,7 +36,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **6/8 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `481f683d`, every compared commit built from `git archive` in a fresh directory, and the
   feature decision for each of the three boards.
-- [ ] **7/8 — golden-core against the base commit** over the 98 commercial originals, and the
+- [x] **7/8 — golden-core against the base commit** over the 98 commercial originals, and the
   full check with `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
 - [ ] **8/8 — the journal and the final pass.**
 
@@ -170,6 +170,46 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 7 — golden-core, and the full check with the ROM roots set
+
+#### golden-core over the 98 commercial originals, 1 200 frames each
+
+The two Linux binaries of step 6 — `unl1base` from `481f683d` and `unl1` from the lot's tree, each
+built clean — run against the same set with the same frame count:
+
+    zax-harness-<label> golden-core /mnt/g/3DSen/test-originals gc-<label>.jsonl 1200
+
+| pair | rows differing |
+| --- | ---: |
+| **`481f683d` → this lot** | **0 — `diff` of the two 98-row JSONL files is clean** |
+
+**Byte-identical**, which is the lot's requirement met at the strongest strength the instrument
+offers: `pixel_sha256`, `tiles_sha256`, the audio hash and the cycle counts all agree on every one
+of the 98 ROMs over 1 200 frames each. golden-core runs with no hack code, so there is nothing
+else the comparison could be measuring — and nothing else it needed to measure, this lot changing
+no line any existing board or the PPU reaches.
+
+#### The suite, with the ROM roots set
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms     ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms     cargo test --release -p zax-nes -p zax-harness --no-fail-fast -- --include-ignored
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **944 passed, 0 failed, 9 ignored** |
+| the same, `--include-ignored --no-fail-fast`, roots set | **953 passed, 0 failed, 0 ignored** |
+
+**Nine of nine ignored tests run and pass**, which is what the two variables buy: without them
+they pass vacuously. The nine are `req_core_113_dmc_dma_during_read4_is_p3`,
+`the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact`,
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`,
+`the_cost_of_one_capture_and_one_restore`,
+`mr_bus_1_uxrom_submapper_2_write_is_anded_with_the_rom_byte`,
+`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`,
+`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` and two more in
+`zax-harness`. **None of them exercises a number of this lot** — no file in
+`assets-free/test-roms` uses any of the nine (§5 of the census) — so what they prove is that the
+lot moved nothing they do cover.
 
 ### Step 6 — the callgrind campaign, and the feature decision
 
