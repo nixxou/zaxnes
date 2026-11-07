@@ -94,6 +94,12 @@ impl MarginDecoder for Kirby {
         }
         true
     }
+
+    /// The game hides the background's leftmost 8 pixels (PPUMASK `$18`) and draws there the
+    /// column coming in.
+    fn decodes_masked_column(&self) -> bool {
+        true
+    }
 }
 
 /// The PPU address of screen column `column` of `row`, on the plane of two nametables side by
