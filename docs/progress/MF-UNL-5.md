@@ -60,7 +60,7 @@ boards is a submapper-0 cartridge.
   composition, and the 4 KiB CHR-RAM page latched off the rise of PPU A13.
 - [x] **2/7** — `board-162`, the Wàixīng FS304: the second kind of the same variant, its own PRG
   composition from the same four registers.
-- [ ] **3/7** — `board-178`, the Wàixīng FS305 / Nánjīng NJ0430: $4800-$4803, the four PRG modes,
+- [x] **3/7** — `board-178`, the Wàixīng FS305 / Nánjīng NJ0430: $4800-$4803, the four PRG modes,
   the mirroring register and the banked PRG-RAM window.
 - [ ] **4/7** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
@@ -219,3 +219,82 @@ bank line.
 **1022 passed, 0 failed, 9 ignored** (step 1 left it at 1017/0/9): five new tests, one of them the
 cross-board pair. `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings`
 clean.
+
+---
+
+## Step 3 — the Wàixīng FS305, the board this lot's own heading does not describe
+
+`board-178`, in `default`. One new module, `cartridges/mappers/waixing_fs305.rs`, one new
+`DecodeBoard` variant, **one** new forward (`prg_ram_window`), and the number in **neither** PPU
+watch list.
+
+### What the page says, against what §7.2 says
+
+The census's heading is "the Chinese-RPG boards with a PPU-driven CHR-RAM window" and its rationale
+is that "all three select a 4 KiB CHR-RAM page from the PPU address lines rather than from a
+register". Three sentences of *INES Mapper 178* contradict that, and MF-UNL-2's rule applies:
+
+| what | §7.2 | the page | where it lands |
+| --- | --- | --- | --- |
+| the CHR window | a 4 KiB page from the PPU address lines | "PPU $0000-$1FFF: **8 KiB unbanked CHR-RAM**", and the chipset "is designed for using 8 KiB of chip-internal unbanked CHR-RAM". **PPU A9, PPU A13, a 4 KiB CHR window and CHR switching appear nowhere on the page** | no PPU hook, neither watch list, and `q_154_mapper_178_has_no_ppu_driven_chr_window` is the anti-test |
+| the ports | "the four registers", in a section whose other two boards use $5000-$5300 | **$4800, $4801, $4802, $4803** | the decode, and the same test's last block: a write at $5000-$5300 moves nothing |
+| the PRG-RAM | "battery-backed", like the lot's other two | "8 KiB **switchable** PRG-RAM bank" from "PRG-RAM A20?..A13", and no battery mentioned | `Mapper::prg_ram_window`, and `min_prg_ram` rather than an exact size |
+
+**Q-154** records all three. The board is still the right third member of the lot: it is the census
+roster's third Chinese-RPG board, its titles are the ones §7.2 lists, and the two mechanisms it
+*does* have are new to this enum.
+
+### The four PRG modes, as this core's two 16 KiB windows
+
+| mode | $8000-$BFFF | $C000-$FFFF | the page |
+| ---: | --- | --- | --- |
+| 0 | `(L & 6) \| H<<3` | `(L & 6) \| 1 \| H<<3` | "NROM-256/BNROM (PRG A14=CPU A14)" |
+| 1 | `(L & 7) \| H<<3` | `7 \| H<<3` | "UNROM (PRG A14..16=111b if CPU A14=1)" |
+| 2 | `(L & 7) \| H<<3` | the same | "NROM-128" |
+| 3 | `(L & 7) \| H<<3` | `(L & 1) \| 6 \| H<<3` | "UNROM but with bit 0 of \"fixed\" bank selectable (PRG A15..16=11b if CPU A14=1)" |
+
+Mode 0 masks `L`'s bit 0 away because the page says A14 is the **CPU's** line there, and the test
+pins exactly that: `$4801=$00` and `$4801=$01` give the same windows in mode 0 and different ones
+in modes 1 to 3. Mode 3 is mode 1 with A14 of the fixed half handed back to the register, which is
+what "bit 0 of the fixed bank selectable" says and what the test walks over all eight inner values.
+
+### The banked PRG-RAM window, which is the enum's first
+
+`DecodeBoard` gains its first `prg_ram_window` forward: "PRG-RAM is mapped to CPU $6000-$7FFF and
+is banked in 8 KiB amounts", all eight bits of `$4803`. It is MF-CART's hook, asked **once per CPU
+write** and cached on `Cartridge`, so no board's read path grows; the other eleven boards of the
+enum take `Mapper`'s own default through the forward, which is the whole chip at offset zero —
+byte-identical to what the un-forwarded dispatch gave them.
+
+`req_core_102_mapper_178_banks_its_prg_ram_from_4803` writes a distinct byte into each of four
+banks of a 32 KiB chip, reads all four back, checks that bank 4 and bank 255 wrap onto banks 0 and
+3 the way the missing address lines of a smaller chip would, finds every bank's byte in
+`export_battery_ram`, and then does the whole thing again on an image that declares no RAM at all —
+where the 8 KiB floor makes every bank the same chip.
+
+### Three sentences of the page this build deliberately does not act on
+
+1. **The two swapped-register dumps** (*宠物: 小精灵 IV*, CRC32 `0xB0B13DBD`, and
+   *Education Computer 32-in-1*, `0xF834F634`). §7.2 step 3 asks for a comment and not a
+   workaround, "the page attribut[ing] it to bad dumps, not to a hardware variant", and the
+   board's doc comment is that note. A CRC32 table would make two bad dumps run and every good
+   dump of the same titles stop.
+2. **"Supposedly, the new PRG bank is only committed when $4801 is written."** The page's own next
+   clause rejects it — "Emulating this supposed behavior however will break Ping Pong" — so the
+   board recomputes on every register write.
+3. **"The Waixing FS305 circuit board connects PRG A14 directly to CPU A14, making all PRG banking
+   modes except BNROM unusable."** A fact about one of the PCBs the number covers, and no header
+   field distinguishes an FS305 from an NJ0430. The chipset is emulated; a game on an FS305 selects
+   mode 0 anyway, which is the mode in which the two PCBs agree.
+
+Submappers 1 (the infrared sensor's IRQ), 2 (the TMS5220 speech chip) and 3 (the solder-pad
+read-out) are deferred by §7.2, and the Dendy timing the educational variants want is a
+console-timing matter.
+`req_core_075_mapper_178_has_no_expansion_audio_and_no_irq_on_any_submapper` loads all three
+submappers, runs ten frames of each, and requires silence and no IRQ — so each deferral is a pinned
+decision.
+
+### What it measures to the suites
+
+**1028 passed, 0 failed, 9 ignored** (step 2 left it at 1022/0/9): six new tests.
+`cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

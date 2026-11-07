@@ -51,6 +51,8 @@ use super::mappers::Tengen800037;
 use super::mappers::Tqrom;
 #[cfg(feature = "board-vs-system")]
 use super::mappers::VsBoard;
+#[cfg(feature = "board-178")]
+use super::mappers::WaixingFs305;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
@@ -251,6 +253,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     172,
     #[cfg(feature = "board-jv001")]
     173,
+    #[cfg(feature = "board-178")]
+    178,
     180,
     #[cfg(feature = "board-mmc3-scramble")]
     182,
@@ -620,6 +624,31 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         162 | 163 => BoardMemorySizes {
             prg_ram: Some(ChrWindowBoard::PRG_RAM_SIZE),
             chr_ram: Some(ChrWindowBoard::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 178"), whose *Banks* section is the only statement of this
+        // board's memories -- the page has no capacity table at all:
+        //
+        //   CPU $6000-$7FFF: 8 KiB switchable PRG-RAM bank
+        //   PPU $0000-$1FFF: 8 KiB unbanked CHR-RAM
+        //
+        // The CHR figure is the chip the page says the chipset "is designed for", and it is the
+        // one REQ-CORE-012's default gives an image with no CHR-ROM; it is stated because the page
+        // states it and byte 5 of an iNES 1.0 header is the CHR-*ROM* size.
+        //
+        // **The PRG-RAM figure is deliberately a floor and not an exact size**, which is the
+        // MMC1-SOROM and MMC5 shape of this struct's `min_prg_ram` field and the one thing this
+        // function can honestly say: the window is 8 KiB, the register driving it is eight bits
+        // wide over "PRG-RAM A20?..A13" -- the question mark is the page's -- and nothing on the
+        // page fixes how much RAM a given cartridge carries. So an image's own header decides the
+        // size and the board is guaranteed its one window, the modulo in
+        // `WaixingFs305::prg_ram_window` standing in for the address lines a smaller chip does not
+        // have. Q-154 records it with the rest of what this number's page does not say
+        // (MF-UNL-5 step 3).
+        #[cfg(feature = "board-178")]
+        178 => BoardMemorySizes {
+            chr_ram: Some(WaixingFs305::CHR_RAM_SIZE),
+            min_prg_ram: BankWindows::PRG_WINDOW_SIZE,
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 038"): "PRG RAM capacity: **None**", and here the window is in
@@ -1010,6 +1039,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             ChrWindowKind::WaixingFs304,
         ))),
+        // MF-UNL-5 step 3: the 外星 (Wàixīng) FS305 / 南晶 (Nánjīng) NJ0430, whose four
+        // registers are at **$4800-$4803** and whose CHR is unbanked -- the board of this lot that
+        // its section heading does not describe (Q-154). Its own mechanism is the banked PRG-RAM
+        // window at $6000-$7FFF, which is `Mapper::prg_ram_window`.
+        #[cfg(feature = "board-178")]
+        178 => Board::DecodeBoard(DecodeBoard::WaixingFs305(WaixingFs305::new(memory))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

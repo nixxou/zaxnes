@@ -56,6 +56,7 @@ default = [
     "board-jy-asic",
     "board-163",
     "board-162",
+    "board-178",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -483,6 +484,25 @@ board-163 = ["board-decode-boards"]
 # `board-163`'s variant, so with both features on the lot pays one discriminant for two boards.
 # The number is in both of the PPU watch lists of `cartridges::mod`, for 163's reason.
 board-162 = ["board-decode-boards"]
+
+# Mapper 178, the 外星 (Waixing) **FS305**, the 南晶 (Nanjing) **NJ0430** and the Jncota, Hengge
+# Dianzi and GameStar / Belsonic boards that carry the same chipset -- the lot's third board and
+# the one whose own page does **not** give it the PPU-driven CHR window the census's section
+# heading promises (Q-154): its CHR is "8 KiB unbanked CHR-RAM" and no sentence of the page
+# mentions PPU A9, PPU A13 or a 4 KiB CHR window at all. So the board is in neither PPU watch list
+# and overrides no PPU hook.
+#
+# What it does have is four registers at **$4800-$4803** (not $5000-$5300): a mirroring bit and a
+# two-bit PRG mode (BNROM / UNROM / NROM-128 / UNROM with a selectable fixed-bank A14), an inner
+# 16 KiB bank, an eight-bit outer bank, and an **8 KiB banked PRG-RAM window** at $6000-$7FFF
+# driven by all eight bits of $4803 -- `Mapper::prg_ram_window`, the hook MF-CART built. Two
+# originals the census names, *宠物: 小精灵 IV* and *Ping Pong*, plus the educational computers.
+#
+# A `DecodeBoard` variant of its own: a different decode, a different window layout and no PPU
+# hook, so it shares nothing with the lot's other two but the enum. Submappers 1 (infrared sensor
+# IRQ), 2 (TMS5220 speech) and 3 (solder-pad read-out) are deferred by census §7.2, as is the
+# Dendy timing the educational variants want.
+board-178 = ["board-decode-boards"]
 
 # **Not a board: one mechanism of `board-jy-asic`**, on the `board-68-chr-nametables` precedent and
 # the owner's rule of 2026-11-06 ("A costly *mechanism* of a board ... is implemented too, behind

@@ -33,14 +33,16 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// decode, on the Irem LROG017 (77) it is the $0800-$1FFF half of the split, and on the Oeka
 /// Kids board (96) it is the 4 KiB CHR-RAM page the PPU address bus last latched, on the GTROM
 /// (111) it is the 8 KiB CHR half of a 32 KiB chip whose other half is the nametables, and on the
-/// two Chinese-RPG boards (162, 163) it is the 8 KiB chip whose A12 their switch overrides.
+/// two Chinese-RPG boards (162, 163) it is the 8 KiB chip whose A12 their switch overrides, and on
+/// the FS305 (178) it is the 8 KiB chip no register of the board can move at all (Q-154).
 #[cfg(any(
     feature = "board-77",
     feature = "board-96",
     feature = "board-111",
     feature = "board-119",
     feature = "board-162",
-    feature = "board-163"
+    feature = "board-163",
+    feature = "board-178"
 ))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
@@ -151,6 +153,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 162, the 外星 (Waixing) FS304, the same four ports and the same CHR-RAM latch with a PRG
     //   composition of its own -- one `ChrWindowKind` and **no** second variant -- behind
     //   `board-162` (MF-UNL-5 step 2);
+    // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
+    //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
+    //   PPU-driven CHR window, which is what its own page says against the census's section
+    //   heading (Q-154) -- behind `board-178` (MF-UNL-5 step 3);
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -174,7 +180,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
-    let additions: [(i32, bool); 90] = [
+    let additions: [(i32, bool); 91] = [
         (19, true),
         (24, true),
         (26, true),
@@ -248,6 +254,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (163, cfg!(feature = "board-163")),
         (172, jv001),
         (173, jv001),
+        (178, cfg!(feature = "board-178")),
         (180, true),
         (182, scramble),
         (184, small),
@@ -9560,4 +9567,309 @@ fn req_core_075_mapper_162_has_no_expansion_audio_and_no_irq_horizon() {
     assert_eq!(None, cartridge.expansion_audio_output());
     assert_eq!(Some(i64::MAX), cartridge.ppu_irq_horizon());
     assert!(!cartridge.irq_asserted());
+}
+
+// ------------------------------------------- Waixing FS305 / Nanjing NJ0430 (178)
+
+/// nesdev ("INES Mapper 178"): the four registers are at **$4800-$4803**, and `$4800`'s two mode
+/// bits pick one of four PRG arrangements out of an inner bank (`$4801`, PRG A16..A14) and an
+/// eight-bit outer bank (`$4802`, PRG A24?..A17) — so a 16 KiB bank number is `L | H<<3`
+/// (MF-UNL-5 step 3).
+#[cfg(feature = "board-178")]
+#[test]
+fn req_core_102_mapper_178_has_four_prg_modes_from_an_inner_and_an_outer_bank() {
+    let mut core = MapperRom::new(178).prg(32).chr(0).load();
+    assert_eq!(178, core.cartridge().unwrap().mapper_number());
+
+    // Power-on: every register clear, so mode 0 (BNROM) with the first 32 KiB at $8000-$FFFF.
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(Nm::Vertical, core.mirroring(), "$4800 bit 0 clear");
+
+    // Mode 0, "NROM-256/BNROM (PRG A14=CPU A14)": A14 is the CPU's line, so bit 0 of the inner
+    // bank reaches nothing and the two halves are one 32 KiB bank. $01 and $00 are the same.
+    for value in [0x00u8, 0x01] {
+        core.mapper_write(0x4801, value);
+        assert_eq!(
+            [0, 1, 2, 3],
+            core.prg_windows(),
+            "mode 0, $4801={value:#04X}"
+        );
+    }
+    core.mapper_write(0x4801, 0x02);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "mode 0, A15");
+    core.mapper_write(0x4801, 0x04);
+    assert_eq!([8, 9, 10, 11], core.prg_windows(), "mode 0, A16");
+
+    // Mode 1 ($4800 = $02), "UNROM (PRG A14..16=111b if CPU A14=1)": the inner bank drives
+    // $8000-$BFFF with all three bits, and $C000-$FFFF is fixed to 16 KiB bank 7 of the outer
+    // bank, which on a 256 KiB image with outer 0 is the eighth 16 KiB bank.
+    core.mapper_write(0x4800, 0x02);
+    for inner in 0..8u8 {
+        core.mapper_write(0x4801, inner);
+        let low = inner * 2;
+        assert_eq!(
+            [low, low + 1, 14, 15],
+            core.prg_windows(),
+            "mode 1, $4801={inner:#04X}"
+        );
+    }
+
+    // Mode 2 ($4800 = $04), "NROM-128": one 16 KiB bank in both halves.
+    core.mapper_write(0x4800, 0x04);
+    for inner in 0..8u8 {
+        core.mapper_write(0x4801, inner);
+        let low = inner * 2;
+        assert_eq!(
+            [low, low + 1, low, low + 1],
+            core.prg_windows(),
+            "mode 2, $4801={inner:#04X}"
+        );
+    }
+
+    // Mode 3 ($4800 = $06), "UNROM but with bit 0 of \"fixed\" bank selectable (PRG A15..16=11b if
+    // CPU A14=1)": the fixed half is 16 KiB bank 6 or 7 of the outer bank, picked by $4801 bit 0.
+    core.mapper_write(0x4800, 0x06);
+    for inner in 0..8u8 {
+        core.mapper_write(0x4801, inner);
+        let low = inner * 2;
+        let fixed = ((inner & 0x01) | 0x06) * 2;
+        assert_eq!(
+            [low, low + 1, fixed, fixed + 1],
+            core.prg_windows(),
+            "mode 3, $4801={inner:#04X}"
+        );
+    }
+
+    // The outer bank is three bits up from the window, i.e. 128 KiB a step. On a 256 KiB image
+    // outer 1 is the second half, and in mode 1 both windows move with it.
+    core.mapper_write(0x4800, 0x02);
+    core.mapper_write(0x4801, 0x00);
+    core.mapper_write(0x4802, 0x01);
+    assert_eq!([16, 17, 30, 31], core.prg_windows(), "the outer bank");
+    core.mapper_write(0x4802, 0x02);
+    assert_eq!([0, 1, 14, 15], core.prg_windows(), "and it wraps");
+}
+
+/// `$4800` bit 0: "Nametable mirroring — 0: Vertical, 1: Horizontal", which is the one register of
+/// this board the two other boards of the lot do not have at all (theirs is hard-wired).
+#[cfg(feature = "board-178")]
+#[test]
+fn req_core_102_mapper_178_takes_both_mirroring_arrangements_from_4800() {
+    // The header says horizontal; the register must win in both directions.
+    let mut core = MapperRom::new(178).prg(32).chr(0).mirroring(1).load();
+    assert_eq!(
+        Nm::Vertical,
+        core.mirroring(),
+        "the register, not the header"
+    );
+
+    for (value, expected) in [
+        (0x01u8, Nm::Horizontal),
+        (0x00, Nm::Vertical),
+        (0x07, Nm::Horizontal),
+        (0x06, Nm::Vertical),
+    ] {
+        core.mapper_write(0x4800, value);
+        assert_eq!(expected, core.mirroring(), "$4800={value:#04X}");
+    }
+
+    // And a reset puts it back to the power-on arrangement, which is the cleared register's.
+    core.mapper_write(0x4800, 0x01);
+    core.reset();
+    assert_eq!(Nm::Vertical, core.mirroring());
+}
+
+/// "PRG-RAM is mapped to CPU $6000-$7FFF and is banked in 8 KiB amounts" from `$4803`, over a chip
+/// the page sizes as "PRG-RAM A20?..A13" — the one mechanism this board brings that neither of the
+/// lot's other two has, and the first **banked** PRG-RAM window in `DecodeBoard` (MF-UNL-5 step 3).
+#[cfg(feature = "board-178")]
+#[test]
+fn req_core_102_mapper_178_banks_its_prg_ram_from_4803() {
+    // 32 KiB of battery-backed PRG-RAM: four of the board's 8 KiB banks, which is what an NES 2.0
+    // header can state and an iNES 1.0 one cannot.
+    let mut core = MapperRom::new(178)
+        .prg(32)
+        .chr(0)
+        .battery()
+        .prg_ram(0, 32 * 1024)
+        .load();
+    assert_eq!(
+        32 * 1024,
+        core.cartridge().unwrap().memory().prg_ram().len()
+    );
+
+    // A different byte in each bank, written through the window the register selects.
+    for bank in 0..4u8 {
+        core.mapper_write(0x4803, bank);
+        core.write_memory(0x6000, 0x50 | bank);
+        core.write_memory(0x7FFF, 0x60 | bank);
+    }
+    for bank in 0..4u8 {
+        core.mapper_write(0x4803, bank);
+        assert_eq!(
+            0x50 | bank,
+            core.read_memory(0x6000),
+            "bank {bank} at $6000"
+        );
+        assert_eq!(
+            0x60 | bank,
+            core.read_memory(0x7FFF),
+            "bank {bank} at $7FFF"
+        );
+    }
+
+    // All eight bits are the register, and the wrap is the chip's: bank 4 is bank 0 again on a
+    // 32 KiB chip, which is what the address lines a smaller chip does not have would do.
+    core.mapper_write(0x4803, 0x04);
+    assert_eq!(0x50, core.read_memory(0x6000), "bank 4 wraps onto bank 0");
+    core.mapper_write(0x4803, 0xFF);
+    assert_eq!(0x53, core.read_memory(0x6000), "bank 255 wraps onto bank 3");
+
+    // The whole chip is what a host persists, and the bytes of every bank are in it.
+    core.mapper_write(0x4803, 0x00);
+    let saved = core.export_battery_ram().to_vec();
+    assert_eq!(32 * 1024, saved.len());
+    for bank in 0..4usize {
+        assert_eq!(0x50 | bank as u8, saved[bank * 8 * 1024]);
+    }
+
+    // And an image that declares nothing still gets its one window, `board_memory_sizes` giving
+    // the board a floor of 8 KiB (Q-154): every bank is then the same chip.
+    let mut plain = MapperRom::new(178).prg(32).chr(0).load();
+    assert_eq!(
+        8 * 1024,
+        plain.cartridge().unwrap().memory().prg_ram().len()
+    );
+    plain.write_memory(0x6010, 0x9A);
+    for bank in [0x01u8, 0x7F, 0xFF] {
+        plain.mapper_write(0x4803, bank);
+        assert_eq!(
+            0x9A,
+            plain.read_memory(0x6010),
+            "one chip, bank {bank:#04X}"
+        );
+    }
+}
+
+/// **Q-154**: this board's own page gives it no PPU-driven CHR window, where the census's §7.2
+/// heading puts it in a lot named after one.
+///
+/// *Banks* says "PPU $0000-$1FFF: **8 KiB unbanked CHR-RAM**", the overview says the chipset "is
+/// designed for using 8 KiB of chip-internal unbanked CHR-RAM", and no sentence of the page
+/// mentions PPU A9, PPU A13, a 4 KiB CHR window or CHR switching. So the board is in **neither**
+/// PPU watch list, and this test is the anti-test that says so: the PPU address bus moves and the
+/// CHR window does not.
+#[cfg(feature = "board-178")]
+#[test]
+fn q_154_mapper_178_has_no_ppu_driven_chr_window() {
+    let mut core = MapperRom::new(178).prg(32).chr(0).load();
+
+    // Two different bytes in the two 4 KiB halves of the unbanked chip.
+    chr_write(&mut core, 0x0000, 0x71);
+    chr_write(&mut core, 0x1000, 0x72);
+
+    // Drive the bus across every edge the lot's other two boards latch on — the rise of A13 with
+    // A9 clear and with A9 set, by both entry points — and require the window not to move.
+    for address in [0x2000u16, 0x2200, 0x23C0, 0x2FFF, 0x3F00] {
+        {
+            let cartridge = core.cartridge_mut().unwrap();
+            cartridge.on_ppu_address_bus(0x0000, 1);
+            cartridge.on_ppu_address_bus(address, 2);
+            cartridge.on_ppu_address_bus_without_read(0x0000, 3);
+            cartridge.on_ppu_address_bus_without_read(address, 4);
+        }
+        assert_eq!(
+            (0x71, 0x72),
+            (peek(&core, 0x0000), peek(&core, 0x1000)),
+            "the chip is unbanked, whatever the PPU address does ({address:#06X})"
+        );
+    }
+
+    // Nor does any register of the board move it: the four ports are the two PRG banks, the mode
+    // and the PRG-RAM bank, and none of them is a CHR line.
+    for (address, value) in [
+        (0x4800u16, 0x07u8),
+        (0x4801, 0x07),
+        (0x4802, 0xFF),
+        (0x4803, 0xFF),
+    ] {
+        core.mapper_write(address, value);
+        assert_eq!(
+            (0x71, 0x72),
+            (peek(&core, 0x0000), peek(&core, 0x1000)),
+            "{address:#06X}={value:#04X} is not a CHR line"
+        );
+    }
+
+    // The registers are at $4800-$4803 and **not** at $5000-$5300, which is the other half of
+    // Q-154: a write where the lot's other two boards keep their ports changes nothing here.
+    let before = core.prg_windows();
+    for address in [0x5000u16, 0x5100, 0x5200, 0x5300] {
+        core.mapper_write(address, 0x05);
+        assert_eq!(before, core.prg_windows(), "{address:#06X} is not a port");
+    }
+}
+
+/// §7.1 item 2 for the lot's third board: a save-state round-trip with its own four registers
+/// dirtied, the banked PRG-RAM window included.
+#[cfg(feature = "board-178")]
+#[test]
+fn req_core_090_mapper_178_round_trips_its_four_registers_and_its_ram_bank() {
+    let mut core = MapperRom::new(178)
+        .prg(32)
+        .chr(0)
+        .battery()
+        .prg_ram(0, 32 * 1024)
+        .load();
+
+    core.mapper_write(0x4800, 0x03); // mode 1, horizontal.
+    core.mapper_write(0x4801, 0x05);
+    core.mapper_write(0x4802, 0x01);
+    core.mapper_write(0x4803, 0x02);
+    core.write_memory(0x6789, 0x4B);
+
+    let state = core.save_state(true).unwrap();
+    let windows = core.prg_windows();
+    let mirroring = core.mirroring();
+    let ram_byte = core.read_memory(0x6789);
+
+    // Move every register, and the RAM window with them.
+    core.mapper_write(0x4800, 0x04);
+    core.mapper_write(0x4801, 0x00);
+    core.mapper_write(0x4802, 0x00);
+    core.mapper_write(0x4803, 0x00);
+    for _ in 0..5 {
+        core.run_frame(0);
+    }
+    assert_ne!(windows, core.prg_windows(), "the move must be visible");
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(windows, core.prg_windows(), "the PRG windows");
+    assert_eq!(mirroring, core.mirroring(), "the mirroring bit");
+    assert_eq!(ram_byte, core.read_memory(0x6789), "the PRG-RAM window");
+    assert_eq!(state, core.save_state(true).unwrap(), "the whole block");
+}
+
+/// The board has no IRQ and no expansion audio, which is what makes the deferral of submappers 1
+/// (the infrared sensor's IRQ), 2 (the TMS5220 speech chip) and 3 (the solder-pad read-out)
+/// invisible to every other board (§7.2 step 4).
+#[cfg(feature = "board-178")]
+#[test]
+fn req_core_075_mapper_178_has_no_expansion_audio_and_no_irq_on_any_submapper() {
+    for submapper in [1u8, 2, 3] {
+        let mut core = MapperRom::new(178)
+            .prg(32)
+            .chr(0)
+            .submapper(submapper)
+            .load();
+        for _ in 0..10 {
+            core.run_frame(0);
+        }
+
+        let cartridge = core.cartridge().unwrap();
+        assert_eq!(None, cartridge.expansion_audio_output(), "{submapper}");
+        assert_eq!(Some(i64::MAX), cartridge.ppu_irq_horizon(), "{submapper}");
+        assert!(!cartridge.irq_asserted(), "{submapper}");
+    }
 }

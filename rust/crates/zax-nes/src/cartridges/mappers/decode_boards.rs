@@ -17,6 +17,7 @@
     feature = "board-149",
     feature = "board-162",
     feature = "board-163",
+    feature = "board-178",
     feature = "board-190",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
@@ -58,6 +59,8 @@ use super::Sachen8Reg;
 use super::SingleLatch;
 #[cfg(feature = "board-vs-system")]
 use super::VsBoard;
+#[cfg(feature = "board-178")]
+use super::WaixingFs305;
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::{JalecoJf13, JalecoJf17};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -169,6 +172,12 @@ pub enum DecodeBoard {
     /// mapper 96.
     #[cfg(any(feature = "board-162", feature = "board-163"))]
     ChrWindowBoard(ChrWindowBoard),
+    // Appended by MF-UNL-5 step 3, the lot's last board and the one its section heading describes
+    // least well: this one has no PPU-driven CHR window at all (Q-154).
+    /// Mapper 178, the 外星 (Wàixīng) FS305 / 南晶 (Nánjīng) NJ0430 — four PRG modes and the
+    /// enum's first **banked** PRG-RAM window.
+    #[cfg(feature = "board-178")]
+    WaixingFs305(WaixingFs305),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -209,6 +218,8 @@ macro_rules! inner {
             DecodeBoard::SingleLatch($b) => $body,
             #[cfg(any(feature = "board-162", feature = "board-163"))]
             DecodeBoard::ChrWindowBoard($b) => $body,
+            #[cfg(feature = "board-178")]
+            DecodeBoard::WaixingFs305($b) => $body,
         }
     };
 }
@@ -279,6 +290,22 @@ impl Mapper for DecodeBoard {
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         inner!(self, b => b.ppu_peek(memory, address, fetch))
+    }
+
+    /// Forwarded for mapper 178 alone (MF-UNL-5 step 3), the one board of this enum whose
+    /// $6000-$7FFF window is a **banked** RAM chip: "PRG-RAM is mapped to CPU $6000-$7FFF and is
+    /// banked in 8 KiB amounts", from all eight bits of its `$4803`.
+    ///
+    /// Asked once per CPU write and **not** once per CPU read, which is lot MF-CART's whole point:
+    /// `Cartridge` caches the answer beside `rom_windows`, so no `Board` dispatch is on the read
+    /// path of that window for any board.
+    ///
+    /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
+    /// `Mapper`'s own default — the whole chip at offset zero — which is what the un-forwarded
+    /// dispatch gave the variant.
+    #[cfg(feature = "board-178")]
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        inner!(self, b => b.prg_ram_window(memory))
     }
 
     /// Forwarded for the JV001 family alone (MF-UNL-1 step 1), whose protection register is at
