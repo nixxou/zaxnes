@@ -313,3 +313,72 @@ exists because of the widescreen symptom the owner reported against MF-4d — pa
 configurations, so this lot's gate is not what the owner will be looking at when he validates: the
 harness-level widescreen regression is clean either way, and what he is judging is the 58 and 18-19
 frames R0's A/B found.
+
+## Step 4 — golden-core is byte-identical to `11407930`, and the campaign is `11407930`'s to the field
+
+One clean `git archive` build of **`11407930`** in its own directory with its own
+`CARGO_TARGET_DIR`, deleted as soon as the binary was copied out, and three host binaries of this
+tree (`default`, `ppu-2007-render-read`, both features) kept only for these runs.
+
+### golden-core, 98 commercial originals, 1 200 frames
+
+`golden-core /g/3DSen/test-originals <out>.jsonl 1200` — MF-VS-fix step 4's own set and frame count.
+
+| pair | rows differing |
+| --- | ---: |
+| **`11407930` → this lot's `default`** | **0 — `diff` of the two JSONL files is clean** |
+| this lot's `default` → `ppu-2007-render-read` | **11** |
+
+**The first line is the lot's requirement and it is met at the strongest available strength**: the
+two 98-row files are byte-identical, so `pixel_sha256`, `tiles_sha256`, the audio hash and the
+cycle counts all agree on every one of the 98 ROMs over 1 200 frames each. golden-core runs with no
+hack code, so there is nothing else the comparison could be measuring.
+
+### The eleven rows the feature moves, and they are a sharper result than MF-4e's
+
+Every one of them moves on `pixel_sha256` **and** `tiles_sha256`, and the set is:
+
+| game | dumps that move |
+| --- | ---: |
+| **Super Mario Bros. 3** | **8** — Europe, Europe VC, Japan, Japan Rev 1, Japan Rev 1 VC, USA, USA Rev 1, USA Rev 1 VC |
+| **Zelda II** | **3** — USA, Europe, Europe Rev 2 |
+| every other commercial original | **0** |
+
+MF-4e step 2 named three ROMs out of its 18-ROM set; on the 98-ROM set the answer is **every dump
+of Super Mario Bros. 3 and every dump of Zelda II, all eleven of them, and no other commercial game
+at all**. That is an independent confirmation of R0's A/B from the other direction: he sampled
+frames of 5 SMB3 dumps and 2 Zelda II dumps against v0.4.2 and found 58 of 681 and 18-19 of 1 001
+differing; golden-core hashes whole frames of all 98 originals and finds **exactly those two games
+and nothing else**. The rule's blast radius is now bounded by measurement rather than by inference,
+and it is bounded to the two games the owner named.
+
+### The campaign, 331 rows, field by field
+
+`test-roms` over `assets-free/test-roms`, compared on every field but `ms` (wall clock) and `shot`
+(`--no-shots`), with the `AccuracyCoin` row's 147 `detail.tests` keys compared one by one:
+
+| pair | summary objects | rows differing |
+| --- | --- | ---: |
+| **`11407930` → this lot's `default`** | **equal** | **0** |
+| `11407930` → this lot's `ppu-2007-render-read` | equal | 2 |
+| MF-VS-fix's `default` → this lot's `ppu-2007-render-read` | equal | **0** |
+| MF-VS-fix's `default` → this lot's `default` | equal | 2 |
+
+    331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+in all of them. **The first and third lines are the two halves of what a gate has to prove**: with
+the feature off the campaign is the baseline's, to the field, on all 331 rows — including
+`Duelito`'s screen string and all 147 `AccuracyCoin` test keys; and with the feature on it is
+MF-VS-fix's, to the field, on all 331 rows. The gate therefore selects between two campaigns that
+already existed and introduces no third.
+
+The two rows that do move between the configurations are the two MF-4e step 2 named, in the
+opposite direction:
+
+| row | `11407930` / this `default` | with the feature | why no verdict moves |
+| --- | --- | --- | --- |
+| `AccuracyCoin/AccuracyCoin.nes` | **128 / 147** | **129 / 147** | one `detail.tests` key of 147, `PPU Misc. / $2007 read w/ rendering` `fail 2` ↔ `pass`. The campaign's verdict for this ROM is `fail` either way, so no total moves |
+| `nes-test-roms/other/Duelito.nes` | screen A | screen B | a **`manual`** row: the campaign records the screen and has no documented verdict for it. Duelito reads `$2007` while the PPU is fetching, which is the rule by name |
+
+**No verdict falls or rises in any configuration**, which is why the four summary objects compare
+equal as objects and not merely as totals.
