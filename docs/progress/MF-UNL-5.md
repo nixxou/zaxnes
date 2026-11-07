@@ -58,7 +58,7 @@ boards is a submapper-0 cartridge.
 - [x] **0/7** — the plan: this file.
 - [x] **1/7** — `board-163`, the Nánjīng FC-001: the four write ports, the feedback latch, the PRG
   composition, and the 4 KiB CHR-RAM page latched off the rise of PPU A13.
-- [ ] **2/7** — `board-162`, the Wàixīng FS304: the second kind of the same variant, its own PRG
+- [x] **2/7** — `board-162`, the Wàixīng FS304: the second kind of the same variant, its own PRG
   composition from the same four registers.
 - [ ] **3/7** — `board-178`, the Wàixīng FS305 / Nánjīng NJ0430: $4800-$4803, the four PRG modes,
   the mirroring register and the banked PRG-RAM window.
@@ -155,3 +155,67 @@ bit still decides whether a host persists the bytes, as it does for every board 
 **1017 passed, 0 failed, 9 ignored** for `-p zax-nes -p zax-harness` (MF-UNL-4 left it at
 1011/0/9): the board's six tests and nothing else. `cargo fmt --check` clean and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 2 — the Wàixīng FS304, which is the same four ports read differently
+
+`board-162`, in `default`. **No new `Board` or `DecodeBoard` variant**: the number is a second
+`ChrWindowKind` in the variant step 1 paid for, which is `SingleLatch`'s shape for seven boards and
+`Jv001`'s for six. What the step adds to the tree is one enum variant, one arm in `prg_bank`, one
+arm in `mapper_number`, one arm in the `$5100` decode, a kind test in `bank_port_value`, and the
+number in six tables.
+
+### The PRG composition, and the two mode bits where 163 has one
+
+> `B` ($5300.0) — PRG A15 mode: 0: PRG A15=$5100.1; 1: PRG A15=1 if `A`=0, PRG A15=$5000.0 if `A`=1
+>
+> `A` ($5300.2) — PRG A16 mode: 0: PRG A16=1; 1: PRG A16=$5000.1
+
+with `$5000` reading `C... PPpq` — `PP` is A18..A17 whatever the mode is, `p` is A16 "if $5300.2=1"
+and `q` is A15 "if $5300.0=1 **and** $5300.2=1". `$5200` is A20..A19 as on the FC-001.
+
+**The page's own arithmetic check is the boot bank again**: "Games boot in PRG bank #2 since reset
+initializes all registers to $00". `B`=0 gives A15 = `$5100.1` = 0 and `A`=0 gives A16 = 1, so the
+bank is 2 — and 2 is what the implementation composes, which is the evidence that the four
+annotation lines have been read the right way round. The test walks all four states of the two mode
+bits, and the `A`|`B` state is the one in which this board and the FC-001 read `$5000`'s low nibble
+identically.
+
+### Two places the kind matters, and one of them is a bug if it is missed
+
+| where | why |
+| --- | --- |
+| `bank_port_value` | `$5300` bit 0 is 163's **swap** bit and 162's **A15 mode** bit. Without the kind test the FS304 would exchange D0 and D1 of every bank port write whenever a game selected "PRG A15=1 if A=0" — i.e. scramble its own banks |
+| `try_read_prg` | 162 has no readable register. The method is behind `board-163` and tests the kind inside, so a 162-only build has no feedback decode at all and takes `Mapper`'s default |
+
+### The test the two pages wrote for each other
+
+Each page's *Notes* give a dumper the same one-register check, from its own side:
+
+> (162) To ensure that a cartridge to be dumped is really INES Mapper 162, write $04 to $5300 and
+> verify that $5100.1 **changes** the PRG bank.
+>
+> (163) To verify that the cartridge is really mapper 163, you can rule out INES Mapper 162 by
+> writing $04 to $5300 and verifying that $5100.1 does **not** change the PRG bank.
+
+`req_core_102_the_two_chr_window_boards_differ_by_the_dumpers_own_test` is that pair of sentences
+as one test — two cores, the same two writes, opposite assertions — plus the other half of the
+difference from the same state: only the FC-001 answers a read of the `$F300` window. It is behind
+`all(board-162, board-163)`, the two numbers it compares.
+
+### Everything else is shared, and the step says so by not changing it
+
+The CHR switch, the masks, the save-state block, the memories row (`162 | 163` on one arm, both
+pages giving the same two lines), the PPU watch lists, the `on_ppu_address_bus` forward and the
+`mf_3b` expected list — all of them take the number without a second body.
+`req_core_102_mapper_162_latches_the_same_chr_page_from_the_ppu_address_bus` re-runs the census's
+own criterion on the second board rather than trusting the sharing, and adds one assertion step 1
+had no reason to make: turning the CHR switch on must not disturb the PRG bank, bit 7 not being a
+bank line.
+
+### What it measures to the suites
+
+**1022 passed, 0 failed, 9 ignored** (step 1 left it at 1017/0/9): five new tests, one of them the
+cross-board pair. `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings`
+clean.

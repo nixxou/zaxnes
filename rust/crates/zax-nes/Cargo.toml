@@ -55,6 +55,7 @@ default = [
     "board-190",
     "board-jy-asic",
     "board-163",
+    "board-162",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -467,6 +468,21 @@ board-jy-asic = []
 # only thing `Mapper::on_ppu_address_bus` sees. Submapper 1's ADPCM chip is deferred with the rest
 # of the expansion audio (census §7.2); `Mapper::expansion_audio_output` stays `None`.
 board-163 = ["board-decode-boards"]
+
+# Mapper 162, the 外星 (Waixing) FS304 -- the lot's second Chinese-RPG board and the same four
+# write ports as `board-163` under the same masks, including the automatic 4 KiB CHR-RAM switch
+# (CHR A12 from PPU A9, latched on the rise of PPU A13). What differs is the PRG composition: two
+# mode bits in `$5300` instead of one, PRG A16 and A15 each with a source of their own, and a bank
+# line on `$5100` where the FC-001 has its feedback latch -- which is exactly the difference each
+# page's *Notes* tell a dumper to test for ("write $04 to $5300 and verify that $5100.1 changes the
+# PRG bank"). No feedback register, no swap bit, 8 KiB of battery-backed PRG-RAM, hard-wired
+# mirroring. Six original titles, *Mummy - 神鬼传奇*, *法老王 - Pharaoh*, *西游记后传* and
+# *火焰纹章 - 圣战的系谱* among them, plus three 南晶 releases on the same board.
+#
+# **One `ChrWindowKind` and no new `Board` or `DecodeBoard` variant**: the number shares
+# `board-163`'s variant, so with both features on the lot pays one discriminant for two boards.
+# The number is in both of the PPU watch lists of `cartridges::mod`, for 163's reason.
+board-162 = ["board-decode-boards"]
 
 # **Not a board: one mechanism of `board-jy-asic`**, on the `board-68-chr-nametables` precedent and
 # the owner's rule of 2026-11-06 ("A costly *mechanism* of a board ... is implemented too, behind

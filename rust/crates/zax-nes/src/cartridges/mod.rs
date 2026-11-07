@@ -351,6 +351,9 @@ pub struct Cartridge {
 // rendering's own fetches *and* a bare $2006 write that drives the address into
 // $2000-$3FFF with no fetch behind it. The board has no IRQ at all, which makes
 // it the second number in either list with none. See `ChrWindowBoard`'s own note.
+// MF-UNL-5 step 2 adds mapper 162, the Waixing FS304, for 163's reason in the
+// same words: the two pages give the same CHR-RAM switch in the same three lines
+// and the two boards share one `DecodeBoard` variant.
 ///
 /// **Extracted from `Cartridge::create` by MF-UNL-2 step 3**, which took that function past
 /// `clippy::too_many_lines` -- six more numbers in each list. Two `const fn` of the mapper
@@ -376,6 +379,7 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 121
             | 123
             | 158
+            | 162
             | 163
             | 182
             | 187
@@ -411,6 +415,7 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 121
             | 123
             | 158
+            | 162
             | 163
             | 182
             | 187
@@ -1307,6 +1312,8 @@ mod tests {
         // not of the enable -- so a game turning the switch on mid-frame does not read a stale
         // edge. That one byte pair is what makes the number move here, exactly as mapper 96's
         // does above.
+        #[cfg(feature = "board-162")]
+        expected.extend_from_slice(&[162, 162]);
         #[cfg(feature = "board-163")]
         expected.extend_from_slice(&[163, 163]);
         #[cfg(feature = "board-mmc3-scramble")]

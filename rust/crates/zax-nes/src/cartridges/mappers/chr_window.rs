@@ -15,23 +15,34 @@ pub enum ChrWindowKind {
     /// Mapper 163, the 南晶 (Nánjīng) FC-001 (MF-UNL-5 step 1).
     #[cfg(feature = "board-163")]
     NanjingFc001,
+    /// Mapper 162, the 外星 (Wàixīng) FS304 (MF-UNL-5 step 2).
+    #[cfg(feature = "board-162")]
+    WaixingFs304,
 }
 
-/// iNES mapper **163**: the 南晶 (Nánjīng) **FC-001**, the board of most of that publisher's
-/// catalogue, which selects a 4 KiB CHR-RAM page **from the PPU address lines** rather than from a
-/// register (REQ-CORE-102, MF-UNL-5 step 1).
+/// iNES mappers **163 and 162**: the 南晶 (Nánjīng) **FC-001** and the 外星 (Wàixīng) **FS304**,
+/// the two boards that select a 4 KiB CHR-RAM page **from the PPU address lines** rather than from
+/// a register (REQ-CORE-102, MF-UNL-5 steps 1 and 2).
 ///
-/// nesdev's **"INES Mapper 163"**, whose *Banks* section is the whole of the board's memories:
+/// Two pages, nesdev's **"INES Mapper 163"** and **"INES Mapper 162"**, and they describe one
+/// register window with one mechanism in it. Both *Banks* sections are the same four lines, and
+/// they are the whole of each board's memories:
 ///
 /// * **"CPU $6000-$7FFF: 8 KiB unbanked PRG-RAM, battery-backed"**;
 /// * **"CPU $8000-$FFFF: 32 KiB switchable PRG-ROM bank"**, whose bank number is composed out of
-///   two write ports and a mode bit;
+///   three write ports and two mode bits;
 /// * **"PPU $0000-$1FFF: 8 KiB unbanked CHR-RAM bank, 4 KiB can be automatically switched"**;
 /// * **"Nametable mirroring: hard-wired"**, so the header decides it and no register does.
 ///
-/// # The automatic CHR-RAM switch, which is what puts this board in its lot
+/// The two are different silicon from different publishers that share a register map because one
+/// copied the other: 162's *Notes* say its 南晶 titles perform "a protection check that verifies
+/// the behavior described above", i.e. the 外星 board's, and each page gives the same
+/// one-register test for telling a dump of one from a dump of the other (below).
 ///
-/// Bit 7 of the port at $5000 is the enable, and the page writes three lines against it:
+/// # The automatic CHR-RAM switch, which is what puts these boards in their lot
+///
+/// Bit 7 of the port at $5000 is the enable, and both pages write the same three lines against
+/// it:
 ///
 /// ```text
 /// D~7654 3210
@@ -54,42 +65,42 @@ pub enum ChrWindowKind {
 /// > of any nametable, and the right pattern table for the bottom half of any nametable,
 /// > **regardless of the scroll position**.
 ///
-/// So this is [`super::OekaKids`]'s mechanism with a different edge and a different bit, and the
-/// board goes in **both** of §4.3's latches for the reason that one does: the rise of A13 is an
+/// So this is [`super::OekaKids`]'s mechanism with a different edge and a different bit, and these
+/// boards go in **both** of §4.3's latches for the reason that one does: the rise of A13 is an
 /// address change, and `Cartridge::on_ppu_address_bus` is the only hook that sees one. A bare
 /// `$2006` write that takes the address from below $2000 to $2000 or above is such a rise and
 /// latches too — this core cannot tell it apart from a fetch's, and neither can the board, which
 /// has only the address lines to go on. [`Cartridge::watches_ppu_reads`] and
-/// [`Cartridge::watches_ppu_bus_without_read`] therefore both carry the number.
+/// [`Cartridge::watches_ppu_bus_without_read`] therefore both carry 162 and 163.
 ///
 /// [`Cartridge::watches_ppu_reads`]: super::super::Cartridge
 /// [`Cartridge::watches_ppu_bus_without_read`]: super::super::Cartridge
 ///
 /// The price is the `None` [`super::DecodeBoard`] already answers to `Mapper::chr_view` for every
 /// board in it: `Ppu2C02::run_visible_span` takes a whole line of dots without telling the
-/// cartridge anything, and a board that must hear every address cannot afford that path. The board
-/// has **no IRQ**, so [`Mapper::ppu_irq_horizon`] keeps `Mapper`'s own `Some(i64::MAX)` default —
-/// its /IRQ line cannot change through anything the PPU does, because it has none.
+/// cartridge anything, and a board that must hear every address cannot afford that path. Both
+/// boards have **no IRQ**, so [`Mapper::ppu_irq_horizon`] keeps `Mapper`'s own `Some(i64::MAX)`
+/// default — their /IRQ line cannot change through anything the PPU does, because they have none.
 ///
-/// # The ports, under the page's own masks
+/// # The ports, under the pages' own masks
 ///
-/// | port | mask | what it is |
-/// | --- | --- | --- |
-/// | `$5000`, write | `$FF00` | `C... PPPP` — the CHR switch and PRG A18..A15 |
-/// | `$5100-$5101`, write | `$FF01` | the **feedback** latch, `A0` picking the action |
-/// | `$5200`, write | `$FF00` | `.... ..PP` — PRG A20..A19 |
-/// | `$5300`, write | `$FF00` | `.... .A?B` — `B` swaps D0 and D1, `A` sources PRG A15/A16 |
-/// | `$5500-$5501`, read | `$F300` | `.... .F..` — the inverted feedback bit |
+/// | port | mask | mapper 163 | mapper 162 |
+/// | --- | --- | --- | --- |
+/// | `$5000`, write | `$FF00` | `C... PPPP` — the CHR switch and PRG A18..A15 | `C... PPpq` — the CHR switch, PRG A18..A17, and `p`/`q` for A16/A15 behind the mode bits |
+/// | `$5100`, write | `$FF01` on 163, `$FF00` on 162 | the **feedback** latch, `A0` picking the action | `.... ..p.` — "PRG A15 if $5300.0=0" |
+/// | `$5200`, write | `$FF00` | `.... ..PP` — PRG A20..A19 | the same |
+/// | `$5300`, write | `$FF00` | `.... .A?B` — `B` swaps D0 and D1, `A` sources PRG A15/A16 | `.... .A.B` — an A16 mode bit and an A15 mode bit |
+/// | `$5500-$5501`, read | `$F300` | `.... .F..` — the inverted feedback bit | the board has no readable register |
 ///
 /// Mask `$FF00` reads A15-A8 and nothing below, so each write port repeats through its own 256
-/// bytes: `$5000-$50FF` is the first and `$5300-$53FF` the last. **The feedback write port reads
-/// A0 as well**, which is its `$FF01`.
+/// bytes: `$5000-$50FF` is the first and `$5300-$53FF` the last. **Only 163's feedback write port
+/// reads A0 as well**, which is its `$FF01`.
 ///
-/// `Cartridge::cpu_write` hands this board every write outside $6000-$7FFF, so the decode needs no
-/// [`Mapper::intercept_cpu_write`] body; and because every port is below $8000 the PRG-ROM never
-/// drives the bus during one, which is why the page gives the board no bus conflicts.
+/// `Cartridge::cpu_write` hands these boards every write outside $6000-$7FFF, so the decode needs
+/// no [`Mapper::intercept_cpu_write`] body; and because every port is below $8000 the PRG-ROM
+/// never drives the bus during one, which is why neither page gives either board bus conflicts.
 ///
-/// # The PRG composition, the mode register and the boot bank
+/// # Mapper 163's PRG composition, its mode register and its boot bank
 ///
 /// ```text
 /// $5000:  C... PPPP        $5200:  .... ..PP        $5300:  .... .A?B
@@ -137,7 +148,47 @@ pub enum ChrWindowKind {
 /// two ways. Bits other than 2 are not driven by the chip and this board answers them zero;
 /// nothing in the page says what sits there.
 ///
-/// # Submapper 1 is deferred, and the page says what it is
+/// # Mapper 162's PRG composition and its two mode bits
+///
+/// ```text
+/// $5000:  C... PPpq      $5100:  .... ..p.      $5200:  .... ..PP      $5300:  .... .A.B
+///              || |               +- A15 if            ++- A20..A19             | +- A15 mode
+///              || +- A15 if          $5300.0=0                                  +--- A16 mode
+///              ||    $5300.0=1 and $5300.2=1
+///              |+--- A16 if $5300.2=1
+///              ++--- A18..A17
+/// ```
+///
+/// with the two mode bits spelled out by the page as
+///
+/// > `B` — PRG A15 mode: 0: PRG A15=$5100.1; 1: PRG A15=1 if `A`=0, PRG A15=$5000.0 if `A`=1
+/// >
+/// > `A` — PRG A16 mode: 0: PRG A16=1; 1: PRG A16=$5000.1
+///
+/// and the page's own check of that arithmetic: "Games boot in PRG bank #2 since reset initializes
+/// all registers to $00" — `B`=0 gives A15 = `$5100.1` = 0, `A`=0 gives A16 = 1, so the bank is 2.
+///
+/// The board has **no swap bit and no feedback register**. `$5300` bit 0 means something else
+/// entirely here, which is why `ChrWindowBoard::bank_port_value` tests the kind and not the bit
+/// alone — without that test the FS304 would scramble every bank it writes — and `$5100` is a
+/// bank line, which is why `Mapper::try_read_prg` is behind `board-163`.
+///
+/// # The one-register test that tells a dump of one number from a dump of the other
+///
+/// Each page's *Notes* give it, from its own side:
+///
+/// > (162) To ensure that a cartridge to be dumped is really INES Mapper 162, write $04 to $5300
+/// > and verify that $5100.1 **changes** the PRG bank.
+/// >
+/// > (163) To verify that the cartridge is really mapper 163, you can rule out INES Mapper 162 by
+/// > writing $04 to $5300 and verifying that $5100.1 does **not** change the PRG bank.
+///
+/// `$04` sets `A` and clears `B`. On 162 that is "PRG A15=$5100.1", so the bank moves; on 163
+/// `$5100` carries no bank line at all, so it does not. This build reproduces both sides, and
+/// `req_core_102_the_two_chr_window_boards_differ_by_the_dumpers_own_test` is that pair of
+/// sentences as one test.
+///
+/// # Mapper 163's submapper 1 is deferred, and the page says what it is
 ///
 /// "Submapper 1 denotes a PCB that mounts the same ADPCM chip used in NES 2.0 Mapper 419 with the
 /// PCB code NJ-YUYIN0106 … used only on the 真 Samurai Spirits - 武士道列传: 侍魂 (NJ-033)
@@ -217,6 +268,28 @@ impl ChrWindowBoard {
                 };
                 high | i32::from(low)
             }
+            // 162: A18..A17 are `$5000` bits 3-2 whatever the mode is, and A16 and A15 each have
+            // a mode bit of their own.
+            #[cfg(feature = "board-162")]
+            ChrWindowKind::WaixingFs304 => {
+                let a17_a18 = i32::from(self.port_5000 & 0x0C);
+                // "PRG A16 mode: 0: PRG A16=1; 1: PRG A16=$5000.1" -- `A` is $5300 bit 2.
+                let a16 = if self.port_5300 & 0x04 == 0 {
+                    1
+                } else {
+                    i32::from((self.port_5000 >> 1) & 0x01)
+                };
+                // "PRG A15 mode: 0: PRG A15=$5100.1; 1: PRG A15=1 if A=0, PRG A15=$5000.0 if
+                // A=1" -- `B` is $5300 bit 0.
+                let a15 = if self.port_5300 & 0x01 == 0 {
+                    i32::from((self.port_5100 >> 1) & 0x01)
+                } else if self.port_5300 & 0x04 == 0 {
+                    1
+                } else {
+                    i32::from(self.port_5000 & 0x01)
+                };
+                high | a17_a18 | (a16 << 1) | a15
+            }
         }
     }
 
@@ -242,21 +315,29 @@ impl ChrWindowBoard {
         self.update_chr();
     }
 
-    /// `$5300` bit 0: "Swap D0,D1 on writes to $5000-$5200." Applied to the two **bank** ports and
-    /// not to the feedback port, which is Q-155.
+    /// Mapper 163's `$5300` bit 0: "Swap D0,D1 on writes to $5000-$5200." Applied to the two
+    /// **bank** ports and not to the feedback port, which is Q-155.
     ///
     /// The swap is on the **write** path and not on the composition, which is where the hardware
     /// puts it: the two data pins are exchanged on the way into the latch, so flipping `$5300` bit
     /// 0 afterwards does not re-swap a bank already written.
+    ///
+    /// **Mapper 162 has no swap bit at all** and its own `$5300` bit 0 is the A15 *mode*, so the
+    /// kind test is not an optimisation: without it the FS304 would scramble every bank it writes.
+    // With `board-162` alone no board here has a swap bit, so the body reads no field of `self`.
+    #[cfg_attr(not(feature = "board-163"), allow(clippy::unused_self))]
     fn bank_port_value(&self, value: u8) -> u8 {
-        if self.port_5300 & 0x01 == 0 {
-            return value;
+        #[cfg(feature = "board-163")]
+        if self.kind == ChrWindowKind::NanjingFc001 && self.port_5300 & 0x01 != 0 {
+            return (value & 0xFC) | ((value & 0x01) << 1) | ((value >> 1) & 0x01);
         }
 
-        (value & 0xFC) | ((value & 0x01) << 1) | ((value >> 1) & 0x01)
+        value
     }
 
-    /// The feedback read: "Inverted value of latched F bit" in bit 2, and nothing else driven.
+    /// Mapper 163's feedback read: "Inverted value of latched F bit" in bit 2, and nothing else
+    /// driven.
+    #[cfg(feature = "board-163")]
     fn feedback_read(&self) -> u8 {
         !self.port_5100 & 0x04
     }
@@ -269,6 +350,8 @@ impl Mapper for ChrWindowBoard {
         match self.kind {
             #[cfg(feature = "board-163")]
             ChrWindowKind::NanjingFc001 => 163,
+            #[cfg(feature = "board-162")]
+            ChrWindowKind::WaixingFs304 => 162,
         }
     }
 
@@ -303,9 +386,14 @@ impl Mapper for ChrWindowBoard {
         self.update_banks();
     }
 
-    /// Reads the feedback port, the one readable register the board has. Below $8000, where
-    /// `Cartridge::default_cpu_read` falls through to this dispatch; $8000-$FFFF takes the answer
-    /// out of the windows, as `Mapper`'s own default would.
+    /// Reads mapper 163's feedback port, the one readable register either board has. Below $8000,
+    /// where `Cartridge::default_cpu_read` falls through to this dispatch; $8000-$FFFF takes the
+    /// answer out of the windows, as `Mapper`'s own default would.
+    ///
+    /// **Behind `board-163`**, because mapper 162 has no readable register: with that feature off
+    /// the whole method is absent and the board takes `Mapper`'s default, which is this body's
+    /// `$8000-$FFFF` half and nothing else.
+    #[cfg(feature = "board-163")]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if address >= 0x8000 {
             return self
@@ -313,7 +401,9 @@ impl Mapper for ChrWindowBoard {
                 .read_prg(address, memory.rom().prg_rom(), memory.prg_ram());
         }
 
-        if address & Self::FEEDBACK_READ_MASK == Self::FEEDBACK_READ {
+        if self.kind == ChrWindowKind::NanjingFc001
+            && address & Self::FEEDBACK_READ_MASK == Self::FEEDBACK_READ
+        {
             return Some(self.feedback_read());
         }
 
@@ -331,18 +421,28 @@ impl Mapper for ChrWindowBoard {
                 self.port_5000 = self.bank_port_value(value);
                 self.update_banks();
             }
-            // The feedback latch, which has **no bank line at all**: that is the one thing a
-            // dumper's "write $04 to $5300 and see whether $5100.1 moves the bank" check tells
-            // this number apart from mapper 162 by.
-            0x5100 => {
-                if address & 0x01 == 0 {
-                    // "A=0: Value latched", for `F` (bit 2) and `E` (bit 0) both.
-                    self.port_5100 = value & 0x05;
-                } else if value & 0x01 != 0 {
-                    // "A=1: Flip the latched F bit when E=1", the written `F` ignored.
-                    self.port_5100 ^= 0x04;
+            // The one port whose *meaning* differs between the two boards rather than its
+            // arithmetic, and the one thing a dumper's "write $04 to $5300 and see whether
+            // $5100.1 moves the bank" check tells the two numbers apart by.
+            0x5100 => match self.kind {
+                // 163: the feedback latch, with **no bank line at all**.
+                #[cfg(feature = "board-163")]
+                ChrWindowKind::NanjingFc001 => {
+                    if address & 0x01 == 0 {
+                        // "A=0: Value latched", for `F` (bit 2) and `E` (bit 0) both.
+                        self.port_5100 = value & 0x05;
+                    } else if value & 0x01 != 0 {
+                        // "A=1: Flip the latched F bit when E=1", the written `F` ignored.
+                        self.port_5100 ^= 0x04;
+                    }
                 }
-            }
+                // 162: `.... ..p.`, "PRG A15 if $5300.0=0".
+                #[cfg(feature = "board-162")]
+                ChrWindowKind::WaixingFs304 => {
+                    self.port_5100 = value;
+                    self.update_banks();
+                }
+            },
             0x5200 => {
                 self.port_5200 = self.bank_port_value(value);
                 self.update_banks();

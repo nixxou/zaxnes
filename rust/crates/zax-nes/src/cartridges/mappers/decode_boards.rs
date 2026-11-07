@@ -15,6 +15,7 @@
     feature = "board-144",
     feature = "board-145",
     feature = "board-149",
+    feature = "board-162",
     feature = "board-163",
     feature = "board-190",
     feature = "board-jaleco-72-92-86",
@@ -30,7 +31,7 @@ compile_error!(
 
 #[cfg(feature = "board-111")]
 use super::Cheapocabra;
-#[cfg(feature = "board-163")]
+#[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::ChrWindowBoard;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
@@ -163,9 +164,10 @@ pub enum DecodeBoard {
     ))]
     SingleLatch(SingleLatch),
     // Appended by MF-UNL-5 step 1, the first board of a lot whose three are all of this shape.
-    /// Mapper 163, the 南晶 (Nánjīng) FC-001 — the first board of this enum whose CHR window is
-    /// latched off the PPU address bus since mapper 96, and the second in it altogether.
-    #[cfg(feature = "board-163")]
+    /// Mappers 163 and 162, the 南晶 (Nánjīng) FC-001 and the 外星 (Wàixīng) FS304 — the second
+    /// and third boards of this enum whose CHR window is latched off the PPU address bus, after
+    /// mapper 96.
+    #[cfg(any(feature = "board-162", feature = "board-163"))]
     ChrWindowBoard(ChrWindowBoard),
 }
 
@@ -205,7 +207,7 @@ macro_rules! inner {
                 feature = "board-190"
             ))]
             DecodeBoard::SingleLatch($b) => $body,
-            #[cfg(feature = "board-163")]
+            #[cfg(any(feature = "board-162", feature = "board-163"))]
             DecodeBoard::ChrWindowBoard($b) => $body,
         }
     };
@@ -316,8 +318,8 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.ppu_write(memory, address, value));
     }
 
-    /// Forwarded for mapper 96 (MF-6c step 8) and mapper 163 (MF-UNL-5 step 1), the two boards
-    /// here whose whole mechanism is the PPU address bus. Behind `Cartridge::watches_ppu_reads`
+    /// Forwarded for mapper 96 (MF-6c step 8) and mappers 163 and 162 (MF-UNL-5 steps 1 and 2),
+    /// the boards here whose whole CHR mechanism is the PPU address bus. Behind `Cartridge::watches_ppu_reads`
     /// and `Cartridge::watches_ppu_bus_without_read`, so no board outside those two latches
     /// reaches this dispatch at all; `OekaKids::on_ppu_address_bus` and
     /// `ChrWindowBoard::on_ppu_address_bus` both carry `#[inline(never)]` so that the arm this
@@ -326,7 +328,7 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s empty default, which is what the un-forwarded dispatch did for the whole
     /// variant.
-    #[cfg(any(feature = "board-96", feature = "board-163"))]
+    #[cfg(any(feature = "board-96", feature = "board-162", feature = "board-163"))]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }

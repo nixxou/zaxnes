@@ -62,7 +62,7 @@ use super::mappers::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
-#[cfg(feature = "board-163")]
+#[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::mappers::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
@@ -243,6 +243,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     158,
     #[cfg(feature = "board-eeprom")]
     159,
+    #[cfg(feature = "board-162")]
+    162,
     #[cfg(feature = "board-163")]
     163,
     #[cfg(feature = "board-jv001")]
@@ -611,8 +613,11 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // The page says "battery-backed", and whether a host persists the bytes is still the
         // dump's own battery bit: `Cartridge::battery_ram` is what REQ-CORE-095 exposes and it
         // reads `header.has_battery`, as it does for every board in this function.
-        #[cfg(feature = "board-163")]
-        163 => BoardMemorySizes {
+        //
+        // nesdev ("INES Mapper 162") states the same two lines of the same two chips for the
+        // 外星 FS304, so the two numbers are one arm (MF-UNL-5 step 2).
+        #[cfg(any(feature = "board-162", feature = "board-163"))]
+        162 | 163 => BoardMemorySizes {
             prg_ram: Some(ChrWindowBoard::PRG_RAM_SIZE),
             chr_ram: Some(ChrWindowBoard::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
@@ -996,6 +1001,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         163 => Board::DecodeBoard(DecodeBoard::ChrWindowBoard(ChrWindowBoard::new(
             memory,
             ChrWindowKind::NanjingFc001,
+        ))),
+        // MF-UNL-5 step 2: the 外星 (Wàixīng) FS304, the same four ports and the same CHR-RAM
+        // latch with a PRG composition of its own -- two mode bits where 163 has one, and a bank
+        // line on `$5100` where 163 has its feedback latch. One `ChrWindowKind` and no variant.
+        #[cfg(feature = "board-162")]
+        162 => Board::DecodeBoard(DecodeBoard::ChrWindowBoard(ChrWindowBoard::new(
+            memory,
+            ChrWindowKind::WaixingFs304,
         ))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
