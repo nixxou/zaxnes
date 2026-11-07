@@ -450,6 +450,32 @@ board-190 = ["board-decode-boards"]
 # the instruction**; `rust/docs/PERFORMANCE-HISTORY.md` section 5.18 has it.
 board-jy-asic = []
 
+# **Not a board: one mechanism of `board-jy-asic`**, on the `board-68-chr-nametables` precedent and
+# the owner's rule of 2026-11-06 ("A costly *mechanism* of a board ... is implemented too, behind
+# its own feature if it costs more than the board itself").
+#
+# The J.Y. ASIC's MMC4-like CHR latch is in `default` -- `$D003` bit 7 and the two latches move on
+# the PPU's address bus like any other board's register. What this feature adds is the **tile
+# emitter's view** of it: `Mapper::chr_latch_state`, `set_chr_latch_state` and `advance_chr_latch`
+# forwarded through `IrqBoard`, so that a 3D tile record of a mapper-90 game carries the pattern
+# the hardware would show at that column rather than the bank the latch holds at capture time
+# (REQ-CORE-039). It is the MMC2's and the MMC4's contract, offered to a third board.
+#
+# Three bodies in those three dispatches re-lay `Ppu2C02::run_dots` out, and that function is 57 %
+# to 62 % of `NesCore::run_frame`. MF-UNL-4 step 7 measured four shapes against `16a30564`:
+# the forwards as first written cost `mmc5` **+0.374 %** and `smb3` +0.229 %; `#[inline(never)]`
+# on all three -- what this feature ships -- costs `metroid` **+0.030 %** with five of thirteen
+# ROMs over the tolerance; a `chr_latch` latch on `Cartridge` costs `mmc5` +0.326 % while making
+# ten ROMs *faster*; and not forwarding them at all is below the base commit on all thirteen.
+#
+# **With it off the emulation is identical**, which is why it can be a feature at all: `Mapper`'s
+# defaults are 0, nothing and nothing, so the tile emitter saves 0, moves nothing and restores 0.
+# Out of `default`, and **not** in `parked-boards` -- that umbrella is for left-out *boards*, and
+# the two PPU features set the precedent for a mechanism asked for by name:
+#
+#     cargo build -p zax-nes --features board-jy-asic-tile-latch
+board-jy-asic-tile-latch = ["board-jy-asic"]
+
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
 # (MF-6c step 3). REQ-CORE-100's mapper-16 row makes the EEPROM "P3"; MR-1's table records "no

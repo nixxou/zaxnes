@@ -8635,7 +8635,10 @@ fn q_150_jy_asic_mmc4_mode_is_d003_bit_7_on_every_number() {
 ///
 /// The second half is this board's own: its latch sits on `Mapper::on_ppu_address_bus`, which sees
 /// the nametable and attribute fetches of every rendered line as well as the pattern fetches, so
-/// the `address >= 0x2000` test is what keeps `$2FD8` out of it.
+/// the `address >= 0x2000` test is what keeps `$2FD8` out of it. Both halves are read through
+/// `ppu_peek` and not through `chr_latch_state`, so that the test means the same thing with
+/// `board-jy-asic-tile-latch` off — that feature is what makes the latch state *visible*, not
+/// what makes it move.
 #[cfg(feature = "board-jy-asic")]
 #[test]
 fn req_core_033_jy_asic_a_peek_never_moves_its_latch() {
@@ -8643,16 +8646,18 @@ fn req_core_033_jy_asic_a_peek_never_moves_its_latch() {
     core.mapper_write(0xD000, 0x08);
     core.mapper_write(0xD003, 0x80);
     core.mapper_write(0x9002, 0x02);
+    core.mapper_write(0x9004, 0x03);
     core.mapper_write(0x9006, 0x04);
+    let before = [peek(&core, 0x0000), peek(&core, 0x1000)];
+    assert_eq!([0, 12], before, "both latches power on at 0");
 
     let cartridge = core.cartridge().unwrap();
-    let before = cartridge.chr_latch_state();
     for address in 0..0x2000u16 {
         let _ = cartridge.ppu_peek(address, ChrFetch::Background);
     }
     assert_eq!(
         before,
-        cartridge.chr_latch_state(),
+        [peek(&core, 0x0000), peek(&core, 0x1000)],
         "a peek is side-effect free"
     );
 
@@ -8662,9 +8667,37 @@ fn req_core_033_jy_asic_a_peek_never_moves_its_latch() {
     }
     assert_eq!(
         before,
-        core.cartridge().unwrap().chr_latch_state(),
+        [peek(&core, 0x0000), peek(&core, 0x1000)],
         "nothing above $1FFF is a pattern fetch"
     );
+}
+
+/// **The feature `board-jy-asic-tile-latch` off is REQ-CORE-033 exactly**: the tile emitter saves
+/// 0, moves nothing and restores 0, so it cannot disturb the latch the emulation uses.
+///
+/// `Mapper`'s three defaults are `0`, nothing and nothing, and with the feature off `IrqBoard`
+/// forwards none of the three — so this is what the whole contract reduces to. MF-UNL-4 step 7
+/// measured the forwards at `mmc5` +0.374 % and the best shape of them at `metroid` +0.030 %,
+/// against a tolerance of +0.02 % per ROM, which is why there is a feature to be off.
+#[cfg(all(feature = "board-jy-asic", not(feature = "board-jy-asic-tile-latch")))]
+#[test]
+fn req_core_033_jy_asic_without_the_tile_latch_feature_the_emitter_cannot_move_the_latch() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x08);
+    core.mapper_write(0xD003, 0x80);
+    core.mapper_write(0x9002, 0x02);
+
+    // The board's own latch still moves on the bus, which is the emulation.
+    jy_fetch(&mut core, 0x0FE8);
+    assert_eq!(8, peek(&core, 0x0000), "the latch itself is in `default`");
+
+    // And the emitter's three methods are the inert defaults.
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(0, cartridge.chr_latch_state());
+    cartridge.advance_chr_latch(0x0000, 0xFD);
+    assert_eq!(8, cartridge.ppu_peek(0x0000, ChrFetch::Background));
+    cartridge.set_chr_latch_state(0);
+    assert_eq!(8, cartridge.ppu_peek(0x0000, ChrFetch::Background));
 }
 
 /// REQ-CORE-039's own contract: the tile emitter reads the latch state, walks the line forward
@@ -8674,7 +8707,7 @@ fn req_core_033_jy_asic_a_peek_never_moves_its_latch() {
 /// `$0FD8`-`$0FDF` is tile `$FD`'s second bit plane and `$0FE8`-`$0FEF` is tile `$FE`'s, so the
 /// page's two address ranges are the MMC4's two tile numbers and this board's
 /// `advance_chr_latch` is `Mmc2`'s body.
-#[cfg(feature = "board-jy-asic")]
+#[cfg(feature = "board-jy-asic-tile-latch")]
 #[test]
 fn req_core_039_jy_asic_advance_chr_latch_walks_the_line_without_moving_the_board() {
     let mut core = MapperRom::new(209).prg(64).chr(64).load();

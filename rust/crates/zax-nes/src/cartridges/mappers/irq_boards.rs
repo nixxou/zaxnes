@@ -468,28 +468,60 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.ppu_write(memory, address, value));
     }
 
-    /// The three CHR-latch methods, forwarded for the J.Y. Company ASIC alone (MF-UNL-4): its
-    /// `$D003` bit 7 is an MMC4-like latch, and the tile emitter reads the latch state, walks the
-    /// line forward so that each record carries the pattern the hardware would show at that
-    /// column, then puts the saved value back (REQ-CORE-039).
+    /// The three CHR-latch methods, forwarded for the J.Y. Company ASIC alone (MF-UNL-4) and
+    /// **only behind `board-jy-asic-tile-latch`** — a second feature for one mechanism of one
+    /// board, which the owner's rule of 2026-11-06 is what allows ("A costly *mechanism* of a
+    /// board … is implemented too, behind its own feature if it costs more than the board
+    /// itself") and which MF-UNL-4 step 7 measured four shapes of.
     ///
-    /// **None of them is on a rendering path.** The latch itself moves in
-    /// [`IrqBoard::on_ppu_address_bus`], which is where the page puts it; these three are the
-    /// tile emitter's, which runs once per captured line and only when a 3D pack asked for
-    /// records. They are **behaviour-neutral for the other boards of this enum**: none of the
-    /// eleven overrides any of the three, so each one's own default is the `Mapper` body the
-    /// un-forwarded dispatch gave them — `0`, nothing, and nothing.
-    #[cfg(feature = "board-jy-asic")]
+    /// **The board is free and these three are not.** `$D003` bit 7's latch itself lives in
+    /// [`IrqBoard::on_ppu_address_bus`] and is in `default`; what is behind the feature is the
+    /// *tile emitter's* view of it — `Ppu2C02` reads the latch state once per captured line,
+    /// walks the line with `advance_chr_latch` so that each record carries the pattern the
+    /// hardware would show at that column, then puts the saved value back (REQ-CORE-039).
+    ///
+    /// Three bodies in those three dispatches re-lay `Ppu2C02::run_dots` out, and that function
+    /// is **57 % to 62 % of `NesCore::run_frame`** (PERFORMANCE-HISTORY §5.17). Measured against
+    /// `16a30564` over 300 frames of lot PR-1's thirteen ROMs:
+    ///
+    /// | shape | worst ROM | set total |
+    /// | --- | --- | ---: |
+    /// | the three forwards as first written | `mmc5` **+0.374 %**, `smb3` +0.229 % | +79 123 279 |
+    /// | the same three `#[inline(never)]` | `metroid` **+0.030 %**, five ROMs over tolerance | +7 771 829 |
+    /// | a `chr_latch` latch on `Cartridge`, §4.10's own mechanism | `mmc5` **+0.326 %** — and ten ROMs **faster**, by up to −0.103 % | +16 981 759 |
+    /// | **not forwarded at all** | **no ROM slower**, `smb3` −48 914 | **−417 513** |
+    ///
+    /// The whole of every figure is `run_dots` and `emit_sprite`, in spill churn: it is MF-6a
+    /// step 2's finding on `Board::chr_view` one dispatch along. The third row is the interesting
+    /// one — gating the three calls makes the *library* measurably faster and the three boards
+    /// that keep a latch measurably slower, so the structural fix is a lot of its own and not
+    /// this one's.
+    ///
+    /// **With the feature off the emulation is identical**, which is the point: `Mapper`'s
+    /// defaults are `0`, nothing and nothing, so the tile emitter saves 0, moves nothing and
+    /// restores 0, and the board's own latch — which only `on_ppu_address_bus` moves — never
+    /// sees it. REQ-CORE-033's "the emulation is unchanged whether or not records were built"
+    /// holds exactly. What is lost is that a 3D tile **record** of a mapper-90 game carries the
+    /// bank the latch holds at capture time rather than the one the hardware would show at that
+    /// column — the same thing every board but the MMC2 and the MMC4 gets, and no 3D pack exists
+    /// for any of the thirteen titles (§5 of `docs/review/UNL-census.md`: there is no ROM to run).
+    ///
+    /// They are **behaviour-neutral for the other boards of this enum** in either configuration:
+    /// none of the eleven overrides any of the three.
+    #[cfg(feature = "board-jy-asic-tile-latch")]
+    #[inline(never)]
     fn chr_latch_state(&self) -> i32 {
         inner!(self, b => b.chr_latch_state())
     }
 
-    #[cfg(feature = "board-jy-asic")]
+    #[cfg(feature = "board-jy-asic-tile-latch")]
+    #[inline(never)]
     fn set_chr_latch_state(&mut self, state: i32) {
         inner!(self, b => b.set_chr_latch_state(state));
     }
 
-    #[cfg(feature = "board-jy-asic")]
+    #[cfg(feature = "board-jy-asic-tile-latch")]
+    #[inline(never)]
     fn advance_chr_latch(&mut self, pattern_table: i32, tile: i32) {
         inner!(self, b => b.advance_chr_latch(pattern_table, tile));
     }

@@ -109,7 +109,7 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 - [x] **6/9 — the question tickets, the four sweeps and the clippy configurations.** Q-148 to
   Q-151, the four sweeps over `SUPPORTED_MAPPERS` in every configuration the lot adds, and
   `cargo fmt --check` plus clippy `-D warnings` in the four configurations the brief names.
-- [ ] **7/9 — the callgrind campaign, per hook.** PR-1's thirteen ROMs and level 2's five games
+- [x] **7/9 — the callgrind campaign, per hook.** PR-1's thirteen ROMs and level 2's five games
   against `16a30564`, one binary per hook added, every compared commit built from `git archive` in
   a fresh directory. The feature decision and the `BOARD-FEATURES.md` row.
 - [ ] **8/9 — golden-core against the base commit, and the full check.** Byte-identical over the
@@ -639,3 +639,141 @@ of displacement in that payload at **+0.009 % to +0.027 % on eleven of lot PR-1'
 which is a coin the lot has no reason to toss: boxed, the enum is provably the size MF-6a3 step 1
 measured, and the price is one pointer dereference per forwarded call for a cartridge of this board
 and nothing for anyone else.
+
+---
+
+## Step 7 — the callgrind campaign per hook, and the one hook that cost
+
+§7.2 step 6 asked for "the PR-1 + level-2 measurement **per hook added**, not just at the end — the
+lesson of MF-6a3 step 1, where two `Board` discriminants cost `mmc5` +0.080 %". **That instruction
+is what found this lot's regression**, and a campaign run only at the end would have found it too
+but not told anyone which of four hooks to blame.
+
+Ten binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with its
+own `CARGO_TARGET_DIR`, which is then deleted. Roots: `ZAX_TEST_ROMS=…/assets-free/test-roms`,
+`ZAX_COMM_ROMS=…/demo/roms`, `ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…` (the 101 profiles).
+
+| label | tree |
+| --- | --- |
+| `unl4base` | **`16a30564`**, the lot's base commit |
+| `unl4h2` | `894127f9`, step 2 — the board, the register map, the banking modes, **no hook** |
+| `unl4h3` | `cba4c3d9`, step 3 — **+ the three IRQ hooks** (`on_cpu_cycle`, `on_ppu_address_bus`, `irq_asserted`) |
+| `unl4h4` | `ed17e94d`, step 4 — **+ the three CHR-latch forwards** |
+| `unl4` | `02fdf8e4`, step 6 — **+ the nametables**, the lot as first written |
+| `unl4va` | the same with `#[inline(never)]` on the three latch forwards |
+| `unl4vd` | the same with a `chr_latch` **latch on `Cartridge`**, §4.10's own mechanism |
+| `unl4vc` | the same with the three latch forwards **removed** |
+| `unl4fix` | **what ships**: `unl4vc` plus the mechanism behind `board-jy-asic-tile-latch` |
+| `unl4off` | the shipped source with `board-jy-asic` out of `default` — the control |
+
+### The per-hook table: PR-1's thirteen ROMs, 300 frames, no pack, each against `16a30564`
+
+| stage | set total | % | worst ROM |
+| --- | ---: | ---: | --- |
+| `unl4h2` — the board and the banking modes | **−521 735** | −0.001 | **none slower** |
+| `unl4h3` — **+ the CPU-cycle IRQ, the A12 IRQ and `irq_asserted`** | **−376 639** | −0.000 | **none slower** |
+| `unl4h4` — + the three CHR-latch forwards | **+78 746 640** | **+0.099** | `mmc5` **+0.373 %**, `smb3` +0.229 % |
+| `unl4` — + the nametables | +78 874 044 | +0.099 | the same |
+| **`unl4fix` — what ships** | **−329 825** | **−0.000** | `mm2` / `mmc5` **+0.000 %** (+623, +29 237) |
+
+**Two of the four hooks are below the base commit on all thirteen ROMs, and the third costs nothing
+measurable.** `unl4h3` — the board with its whole register map, its four banking modes and *all
+three* IRQ hooks — is faster than the base on every ROM of the set, which is what `IrqBoard`
+already forwarding them buys. The nametables, the hook §7.2 called "the lot's main risk", are
+`unl4h4` → `unl4` **+127 404 on the set total**, worst ROM +0.001 %, which is step 1's measurement
+confirmed in the shipped shape.
+
+**The cost is the fourth hook, and it is not a hook at all.** The three CHR-latch methods
+`IrqBoard` forwards for the tile emitter — `chr_latch_state`, `set_chr_latch_state`,
+`advance_chr_latch` — cost **+0.373 % on `mmc5` and +0.229 % on `smb3`**, on boards that have no
+latch. The whole of it is `Ppu2C02::run_dots` (+42 073 718 on `mmc5`, +18 180 420 on `smb3`) and
+`Ppu2C02::emit_sprite`, in spill churn: `Ppu2C02::end_capture_line` reads the latch state once per
+captured line, `run_dots` inlines it, and that function is **57 % to 62 % of `NesCore::run_frame`**
+(PERFORMANCE-HISTORY §5.17). It is MF-6a step 2's finding about `Board::chr_view` one dispatch
+along.
+
+### The level-2 instrument says the same thing, louder
+
+| build | `core` | `total` |
+| --- | --- | --- |
+| `unl4h3` | **all five +0, identical to the instruction** | −0.022 % to +0.000 % |
+| `unl4` (the three forwards as written) | **all five above**: `smb3` **+0.287 %**, `zelda2` +0.016 %, `smb1` +0.007 %, `mm2` and `metroid` +0.004 % | `smb3` **+0.173 %** |
+| **`unl4fix`** | **all five +0, identical to the instruction** | −0.016 % to **+0.003 %** (`smb1`) |
+| `unl4off` | all five **+0** | −0.021 % to +0.000 % |
+
+`smb3/core` +0.287 % is the clearest figure this lot produced: the level-2 `core` column is the one
+PR-1 and level 2 agree on, and three latch bodies moved it fourteen times the tolerance.
+
+### Four shapes of the mechanism, and the one that ships
+
+| shape | set total | worst ROM | verdict |
+| --- | ---: | --- | --- |
+| the three forwards as first written | +79 123 279 (+0.099 %) | `mmc5` **+0.374 %** | far over |
+| the same three `#[inline(never)]` | +7 771 829 (+0.010 %) | `metroid` **+0.030 %**, five ROMs over | over, and the best of the four |
+| a `chr_latch` latch on `Cartridge` | +16 981 759 (+0.021 %) | `mmc5` **+0.326 %** — and **ten ROMs faster**, by up to −0.103 % | over |
+| **not forwarded at all** | **−417 513 (−0.001 %)** | **none slower** | keepable |
+
+**The third row is the interesting one and the reason it is written down.** §4.10 of the inventory
+is a table of hooks made free by a `bool` on `Cartridge`, and this is the one place that mechanism
+was tried and did not work: gating the three calls makes `duelito`, `m0`, `m1`, `metroid`, `mm2`,
+`readbuf`, `smb1`, `vblnmi`, `z2` and `oamstr` **measurably faster** — −0.058 % to −0.103 %, which
+is a large figure by this project's standards — and `m4`, `mmc5` and `smb3`, the three ROMs whose
+boards *do* have a latch or a big one, measurably slower. So the structural fix is worth a lot of
+its own, with the MMC2's and the MMC3's figures as its subject, and it is not this lot's to make.
+
+### The decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-jy-asic` | **`default`** | PR-1 **no ROM slower**, worst +0.000 %, set total −329 825; level 2 all five `core` **+0** and all five `total` inside, worst `smb1` +0.003 % |
+| `board-jy-asic-tile-latch` | **out of `default`** | the best of four shapes is `metroid` +0.030 % with five of thirteen ROMs over the tolerance; `smb3/core` +0.287 % on level 2 for the first shape |
+
+**The board is not parked.** The owner's rule parks a board above the tolerance, and this board is
+below it on both instruments; what is above it is **one mechanism** of the board, and the owner's
+rule of 2026-11-06 is written for exactly that — "A costly *mechanism* of a board
+(Sunsoft-4's CHR-ROM nametables through `read_nametable` …) is implemented too, behind its own
+feature if it costs more than the board itself". `board-68-chr-nametables` is the precedent and
+this is the second instance.
+
+**`board-jy-asic-tile-latch` is not in `parked-boards` either**, and `BOARD-FEATURES.md`'s own
+sentence is why: "that umbrella is for left-out *boards*, and a build that wants everything asks
+for the flags by name". The two PPU features set that precedent; this is the first board mechanism
+to follow it.
+
+**What is lost with the feature off, exactly.** Nothing of the emulation: `Mapper`'s three defaults
+are `0`, nothing and nothing, so the tile emitter saves 0, moves nothing and restores 0, and the
+board's own latch — which only `on_ppu_address_bus` moves — never sees it. REQ-CORE-033's "the
+emulation is unchanged whether or not records were built" holds **exactly**, and
+`req_core_033_jy_asic_without_the_tile_latch_feature_the_emitter_cannot_move_the_latch` pins it.
+What is lost is that a 3D tile **record** of a mapper-90 game carries the bank the latch holds at
+capture time rather than the one the hardware would show at that column — which is what every board
+but the MMC2 and the MMC4 gets, and **no 3D pack exists for any of the thirteen titles**: §5 of the
+census counted that there is no ROM to run either.
+
+### The control
+
+`unl4off` is the shipped source with `board-jy-asic` out of `default`, so no board code is
+reachable and its emulation is the base commit's byte for byte: PR-1 set total **+5 326
+(+0.000 %)**, worst ROM `oamstr` +0.001 %, and all five level-2 `core` figures **+0**. So the four
+numbers are reachable or unreachable for the price of a flag in either direction, which is the
+owner's rule.
+
+### The documentation this step carries
+
+* **Two rows in `docs/review/BOARD-FEATURES.md`**, `board-jy-asic` and
+  `board-jy-asic-tile-latch`, with this step's figures in both cost columns.
+* The `--no-default-features` and `parked-boards` counts in that file are brought to this lot's
+  (**783** unchanged and **1001**, against **948** by default), the "how to turn a board off"
+  command gains `board-jy-asic`, and the note on the features that are out of `default` gains the
+  third one.
+* **Two Cargo feature comments**, the second of which carries all four shapes' figures so that a
+  reader who flips it finds them beside it.
+* `IrqBoard`'s own doc comment on the three methods carries the same four-row table, which is
+  where the next lot touching `Board::chr_latch_state` will read it.
+
+### Disk and machine
+
+G: stayed above **29 GiB** free: `rust/target-mf` was at 6.7 GB and was deleted before the first
+clean build (its figures being recorded), and each of the nine build directories was deleted by
+`build-clean.sh` as soon as its binary was copied out. No GPU campaign, no background command —
+every long run in the foreground with its output read, as the headless rule requires.
