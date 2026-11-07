@@ -287,9 +287,33 @@ pub struct Ppu2C02 {
     pattern_shift_high: u16,
     attribute_shift_low: u16,
     attribute_shift_high: u16,
+    /// The OAM copy buffer: the byte the evaluation latched on the last odd dot, which is also
+    /// what a `$2004` read sees while the PPU is fetching (see [`Ppu2C02::read_oam`]).
     oam_eval_latch: u8,
+    /// The high six bits of the evaluation's OAM address — the sprite it stands on. mesen2's
+    /// `_spriteAddrH`.
     eval_sprite: i32,
+    /// The low two bits — the byte within that sprite. mesen2's `_spriteAddrL`. It is **not**
+    /// always a byte index: an evaluation that starts misaligned (`$2003` left a value that is not
+    /// a multiple of four) reads its first byte at that offset and interprets it as a Y
+    /// coordinate, which is the whole of `AccuracyCoin`'s `Misaligned OAM behavior`.
     eval_byte: i32,
+    /// The write pointer into `secondary_oam`, 0 to 32, counted in **bytes and not sprites**
+    /// (mesen2's `_secondaryOamAddr`). At 32 the secondary OAM is full and its writes turn into
+    /// reads, which is `AccuracyCoin`'s `Frozen OAM2 Increment`.
+    ///
+    /// **Not in the savestate, and the format does not move for it.** Like `secondary_source`
+    /// above, it is alive only between dots 65 and 256 of a visible line: dot 65 assigns it
+    /// unconditionally and nothing outside that window reads it. A state is taken between frames,
+    /// so there is no such window to be in the middle of, and adding a field would have meant a
+    /// new format version for a value that is always 0 where a block can be written.
+    secondary_oam_addr: i32,
+    /// Whether the evaluation is in the middle of copying a sprite it has judged in range. It is
+    /// **latched**, not recomputed per byte: the range test runs on every even dot, but once it
+    /// has said yes the four bytes are copied without asking again.
+    ///
+    /// Not in the savestate, for the reason given on `secondary_oam_addr`.
+    sprite_in_range: bool,
     eval_found: i32,
     overflow_copy: i32,
     eval_finished: bool,
@@ -420,6 +444,8 @@ impl Ppu2C02 {
             oam_eval_latch: 0,
             eval_sprite: 0,
             eval_byte: 0,
+            secondary_oam_addr: 0,
+            sprite_in_range: false,
             eval_found: 0,
             overflow_copy: 0,
             eval_finished: false,
@@ -1387,17 +1413,55 @@ impl Ppu2C02 {
         self.write_oam(value);
     }
 
-    /// Reads OAM through $2004.
+    /// Reads OAM through `$2004`.
     ///
     /// Bits 2 to 4 of a sprite's attribute byte do not exist in the chip, so the masked
-    /// value is what was stored (see `write_oam`). During the 64 dots in which the secondary
-    /// OAM is cleared, reads return $FF (nesdev, "PPU sprite evaluation").
+    /// value is what was stored (see `write_oam`).
+    ///
+    /// # During rendering it is not OAM that answers, it is the copy buffer
+    ///
+    /// On a visible line with rendering on, the address `$2003` holds is not what the chip is
+    /// reading: the sprite evaluation owns the OAM address counter for the whole line, so a
+    /// `$2004` read sees **the byte the evaluation last latched** — the "OAM copy buffer" — and not
+    /// `oam[oam_address]` (nesdev, "PPU sprite evaluation"; `third_party/mesen2`'s
+    /// `_oamCopybuffer`). Three windows, which is what `AccuracyCoin`'s `Address $2004 behavior`
+    /// walks:
+    ///
+    /// * **dots 1 to 64**, the secondary-OAM clear: `$FF`, which is what the clear is writing and
+    ///   therefore what the buffer holds. Test 4, "will always read `$FF`".
+    /// * **dots 65 to 256**, the evaluation proper: [`Self::oam_eval_latch`], refreshed on every
+    ///   odd dot from the sprite and byte the evaluation stands on. Test 8 reads at about dot 130
+    ///   with OAM holding `oam[i] == i` and requires a value that is **neither `$00` nor `$FF`** —
+    ///   the address is "changing every other ppu cycle", so the only wrong answers are the two
+    ///   that mean "nothing is moving".
+    /// * **dot 0 and dots 257 to 340**, the sprite fetches: the secondary OAM, at the byte the
+    ///   fetch of that dot is reading, `((dot − 257) / 8) * 4 + min((dot − 257) % 8, 3)`. Test 9
+    ///   reads at about dot 310 of line 0 and requires `$FF`, which is what the clear left there
+    ///   because evaluation does not run on the pre-render line.
+    ///
+    /// Deriving the window from the dot costs the per-dot path **nothing**: the evaluation already
+    /// maintains `oam_eval_latch`, and the secondary-OAM index is arithmetic on `dot` done only
+    /// when a read actually lands. `third_party/mesen2` takes the same shortcut and says why —
+    /// "this is done here for performance. It's faster to only do this here when it's needed".
+    ///
+    /// [`Self::peek`] keeps answering `oam[oam_address]`: it is the side-effect-free host accessor
+    /// of REQ-CORE-081 and must report what the program wrote, not what the chip is clocking.
     fn read_oam(&self) -> u8 {
-        if self.rendering_enabled()
-            && self.scanline < VISIBLE_SCANLINES
-            && (1..=64).contains(&self.dot)
-        {
-            return 0xFF;
+        if self.rendering_enabled() && self.scanline < VISIBLE_SCANLINES {
+            if (1..=64).contains(&self.dot) {
+                return 0xFF;
+            }
+
+            if (65..=256).contains(&self.dot) {
+                return self.oam_eval_latch;
+            }
+
+            // Dot 0 belongs to the previous line's last fetch, so it clamps to the same byte as
+            // dot 320 rather than wrapping to a negative step.
+            let since = (self.dot - 257).clamp(0, 63);
+            #[allow(clippy::cast_sign_loss)] // Clamped to 0..=63.
+            let index = (((since / 8) * 4) + (since % 8).min(3)) as usize;
+            return self.secondary_oam[index];
         }
 
         self.oam[usize::from(self.oam_address)]

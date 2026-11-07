@@ -62,6 +62,8 @@ impl Ppu2C02 {
         self.oam_eval_latch = 0;
         self.eval_sprite = 0;
         self.eval_byte = 0;
+        self.secondary_oam_addr = 0;
+        self.sprite_in_range = false;
         self.eval_found = 0;
         self.overflow_copy = 0;
         self.eval_finished = false;
@@ -465,21 +467,52 @@ impl Ppu2C02 {
 
     // ---------------------------------------------------------------- sprites
 
-    /// Sprite evaluation for the *next* line: dots 1 to 64 clear the secondary OAM, dots 65
-    /// to 256 scan the 64 sprites (nesdev, "PPU sprite evaluation"). The overflow flag
-    /// follows the hardware, byte-increment bug included.
+    /// Sprite evaluation for the *next* line, dot by dot: dots 1 to 64 clear the secondary OAM,
+    /// dots 65 to 256 scan the 64 sprites (nesdev, "PPU sprite evaluation"), odd dots reading one
+    /// byte of primary OAM into the copy buffer and even dots deciding what to do with it.
+    ///
+    /// # Why it is a state machine over two address halves and not a loop over sprites
+    ///
+    /// The evaluation does not walk sprites; it walks a **byte counter** whose two halves —
+    /// [`Ppu2C02::eval_sprite`] and [`Ppu2C02::eval_byte`] — are clocked by different rules at
+    /// different times, while a second counter, [`Ppu2C02::secondary_oam_addr`], walks the
+    /// secondary OAM in bytes. Almost every `AccuracyCoin` row on the two sprite-evaluation pages
+    /// is a consequence of those three facts rather than of the nominal "copy four bytes per
+    /// sprite":
+    ///
+    /// * the range test runs on **every even dot**, against whatever the copy buffer holds, so an
+    ///   evaluation started at an address that is not a multiple of four reads its first byte at
+    ///   that offset and treats it as a Y coordinate (`Misaligned OAM behavior`);
+    ///   [`Ppu2C02::sprite_in_range`] latches the answer so the remaining bytes copy without
+    ///   asking again;
+    /// * the realignment at the end of a sprite is **conditional**: the low two bits of the
+    ///   address are reset only if the last byte copied, read as a Y coordinate, is *not* itself
+    ///   in range — so a misalignment can propagate from one sprite to the next;
+    /// * once `secondary_oam_addr` reaches 32 the OAM write-disable signal turns the secondary
+    ///   OAM's **writes into reads**, and the copy buffer starts reporting what is already there
+    ///   (`Frozen OAM2 Increment`, `Misaligned OAM2 Address`);
+    /// * sprite zero is whichever sprite dot 66 happens to look at (`Arbitrary Sprite zero`);
+    /// * and past eight sprites the counter clocks *both* halves at once, which is the famous
+    ///   overflow false positive.
+    ///
+    /// `third_party/mesen2`'s `NesPpu<T>::ProcessSpriteEvaluation` is the shape this follows, and
+    /// the comments it carries from the nesdev page are reproduced at the branches they belong to.
     fn run_sprite_evaluation(&mut self, dot: i32) {
-        if dot == 65 {
-            self.eval_sprite = i32::from(self.oam_address >> 2);
-            self.eval_byte = i32::from(self.oam_address & 0x03);
-            self.eval_found = 0;
-            self.overflow_copy = 0;
-            self.eval_finished = false;
-            self.sprite_zero_found = false;
-        }
-
         if (dot & 1) == 1 {
-            // Odd dots read primary OAM.
+            if dot == 65 {
+                // The evaluation takes the OAM address as it stands, whatever `$2003` left in it,
+                // and splits it into the two halves it then clocks separately.
+                self.eval_sprite = i32::from(self.oam_address >> 2);
+                self.eval_byte = i32::from(self.oam_address & 0x03);
+                self.secondary_oam_addr = 0;
+                self.sprite_in_range = false;
+                self.eval_found = 0;
+                self.overflow_copy = 0;
+                self.eval_finished = false;
+                self.sprite_zero_found = false;
+            }
+
+            // Odd dots read one byte of primary OAM into the copy buffer.
             #[allow(clippy::cast_sign_loss)] // Masked to 0..=255.
             let index = (((self.eval_sprite * 4) + self.eval_byte) & 0xFF) as usize;
             self.oam_eval_latch = self.oam[index];
@@ -487,63 +520,151 @@ impl Ppu2C02 {
         }
 
         if self.eval_finished {
-            return;
-        }
-
-        if self.eval_found < SPRITES_PER_LINE_I32 {
-            #[allow(clippy::cast_sign_loss)] // Both are small and non-negative.
-            let slot = ((self.eval_found * 4) + self.eval_byte) as usize;
-            self.secondary_oam[slot] = self.oam_eval_latch;
-            if self.eval_byte == 0 {
-                if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
-                    if self.eval_sprite == 0 {
-                        self.sprite_zero_found = true;
-                    }
-                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 0..64.
-                    if let Some(source) = self.secondary_source.get_mut(self.eval_found as usize) {
-                        *source = self.eval_sprite as u8;
-                    }
-
-                    self.eval_byte = 1;
-                } else {
-                    self.next_sprite();
-                }
-            } else {
-                self.eval_byte += 1;
-                if self.eval_byte == 4 {
-                    self.eval_byte = 0;
-                    self.eval_found += 1;
-                    self.next_sprite();
-                }
+            // The copy is over, but the sprite half of the counter keeps turning, and a write to
+            // a full secondary OAM is a read from it.
+            self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+            if self.secondary_oam_addr >= 4 * SPRITES_PER_LINE_I32 {
+                self.read_back_secondary_oam();
             }
 
             return;
         }
 
-        // Eight sprites found: the ninth in-range sprite raises the overflow flag, and the
-        // hardware then increments both the sprite and the byte index, which is the famous
-        // false-positive bug.
-        if self.overflow_copy > 0 {
-            self.overflow_copy -= 1;
-            self.eval_byte += 1;
-            if self.eval_byte == 4 {
-                self.eval_byte = 0;
-                self.next_sprite();
-            }
-        } else if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
-            self.sprite_overflow = true;
-            self.overflow_copy = 3;
-            self.eval_byte = 1;
-        } else {
-            self.eval_byte = (self.eval_byte + 1) & 0x03;
+        // The range test: on every even dot, against the copy buffer, latched until the four bytes
+        // of the sprite it accepted have been copied.
+        if !self.sprite_in_range
+            && self.in_sprite_range(self.oam_eval_latch)
+            && !self.sprite_in_margin()
+        {
+            self.sprite_in_range = true;
+        }
+
+        if self.secondary_oam_addr >= 4 * SPRITES_PER_LINE_I32 {
+            self.evaluate_with_a_full_secondary_oam();
+            return;
+        }
+
+        #[allow(clippy::cast_sign_loss)] // 0..32 by the test above.
+        let slot = self.secondary_oam_addr as usize;
+        self.secondary_oam[slot] = self.oam_eval_latch;
+
+        if !self.sprite_in_range {
+            // Nothing to copy: on to the next sprite, realigned.
             self.next_sprite();
+            return;
+        }
+
+        // **Sprite zero is the first sprite the evaluation looks at, not OAM index 0**
+        // (`AccuracyCoin`'s `Arbitrary Sprite zero`; mesen2 sets `_sprite0Added` on `_cycle == 66`
+        // with the same comment, "this happens even if this isn't actually the first sprite in OAM
+        // (i.e because OAMADDR was not 0 when evaluation started)"). Dot 66 is the first even dot
+        // of the evaluation, so it is the dot that judges the first Y coordinate read — whichever
+        // sprite `$2003` left the counter on.
+        if dot == 66 {
+            self.sprite_zero_found = true;
+        }
+
+        // The widescreen extension needs to know which primary sprite each slot came from, and a
+        // slot begins where the byte counter is a multiple of four. `trailing_zeros() >= 2` is
+        // `& 3 == 0` written the way `clippy::verbose_bit_mask` asks for, and is exact here
+        // because 0 has 32 trailing zeros.
+        if self.secondary_oam_addr.trailing_zeros() >= 2 {
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 0..8, 0..64.
+            if let Some(source) = self
+                .secondary_source
+                .get_mut((self.secondary_oam_addr >> 2) as usize)
+            {
+                *source = self.eval_sprite as u8;
+            }
+        }
+
+        self.eval_byte += 1;
+        self.secondary_oam_addr += 1;
+        if self.eval_byte >= 4 {
+            self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+            self.eval_byte = 0;
+            if self.eval_sprite == 0 {
+                self.eval_finished = true;
+            }
+        }
+
+        // The end of a slot is read off the **secondary** counter and not off `eval_byte`, which
+        // mesen2 records as required "to replicate a hardware bug noticed in
+        // oam_flicker_test_reenable when disabling & re-enabling rendering on a single scanline".
+        if self.secondary_oam_addr.trailing_zeros() >= 2 {
+            self.sprite_in_range = false;
+            self.eval_found = self.secondary_oam_addr >> 2;
+
+            // A misaligned evaluation would normally resync here and read the next entry's first
+            // byte as its Y. It only does so if the last byte copied, read as a Y coordinate, is
+            // **not** itself in range for this line — otherwise the low two bits stand and the
+            // next sprite is misread as well.
+            if self.eval_byte != 0 && !self.in_sprite_range(self.oam_eval_latch) {
+                self.eval_byte = 0;
+            }
         }
     }
 
+    /// An even dot of the evaluation once eight sprites have been found: the ninth in-range sprite
+    /// raises the overflow flag, and the hardware then clocks **both** halves of the address
+    /// counter, which is the famous false positive.
+    ///
+    /// Out of line on purpose. It runs on no dot at all of a line carrying eight sprites or fewer,
+    /// which is almost every line of almost every game, so inlining it would only lengthen the
+    /// body that every dot of every visible line does pay for (MF-3b rule 4).
+    #[inline(never)]
+    fn evaluate_with_a_full_secondary_oam(&mut self) {
+        // "As seen above, a side effect of the OAM write disable signal is to turn writes to the
+        // secondary OAM into reads from it."
+        self.read_back_secondary_oam();
+
+        if !self.sprite_in_range {
+            // Not on this line: the evaluation bug, both halves at once.
+            self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+            self.eval_byte = (self.eval_byte + 1) & 0x03;
+            if self.eval_sprite == 0 {
+                self.eval_finished = true;
+            }
+
+            return;
+        }
+
+        self.sprite_overflow = true;
+        self.eval_byte += 1;
+        if self.eval_byte == 4 {
+            self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+            self.eval_byte = 0;
+        }
+
+        if self.overflow_copy == 0 {
+            self.overflow_copy = 3;
+        } else {
+            self.overflow_copy -= 1;
+            if self.overflow_copy == 0 {
+                // "After it finishes 'fetching' this sprite (and setting the overflow flag), it
+                // realigns back at the beginning of this line and then continues here on the next
+                // sprite."
+                self.eval_finished = true;
+                self.eval_byte = 0;
+            }
+        }
+    }
+
+    /// A write to a full secondary OAM is a read from it, into the copy buffer.
+    fn read_back_secondary_oam(&mut self) {
+        #[allow(clippy::cast_sign_loss)] // Masked to 0..32.
+        let slot = (self.secondary_oam_addr & 0x1F) as usize;
+        self.oam_eval_latch = self.secondary_oam[slot];
+    }
+
+    /// On to the next sprite with the byte half realigned — the evaluation's commonest step, a
+    /// sprite not on this line costing one even dot and nothing more. The copy ends when the
+    /// sprite half wraps back to 0, which is how an evaluation that started misaligned stops
+    /// part-way through a sprite.
     fn next_sprite(&mut self) {
-        self.eval_sprite += 1;
-        if self.eval_sprite >= 64 {
-            self.eval_sprite = 0;
+        self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+        self.eval_byte = 0;
+        if self.eval_sprite == 0 {
             self.eval_finished = true;
         }
     }

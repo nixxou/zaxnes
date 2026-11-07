@@ -48,7 +48,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
   128/147 tally.
 * [x] **2/7** — the `$2007` read during rendering: Q-125's rule **and** AMD-021 R2-005, the
   inverted unit test flipped, the owner's widescreen state whole.
-* [ ] **3/7** — sprite evaluation per dot and the shift-register pipelines; each row gained named.
+* [x] **3/7** — sprite evaluation per dot and the shift-register pipelines; each row gained named.
 * [ ] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
   so. `Ppu2C02::read`'s +11 instructions while the function is open.
 * [ ] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
@@ -249,3 +249,100 @@ fetching, so their `v` genuinely moves by a row where it used to move by one byt
 after it on that line reads from the new address. `golden-core` runs with no hack code, so nothing
 else can account for it. SMB3's captured-tile count is unchanged at 960 and Zelda II's at 1 086 —
 only the contents move.
+
+## Step 3 — sprite evaluation as a byte counter, and four rows by name
+
+### What the evaluation actually is
+
+The old `run_sprite_evaluation` walked **sprites**: a slot index (`eval_found`), a byte index inside
+the sprite, and a range test taken only on the byte whose index was 0. The hardware walks a **byte
+counter in two independently clocked halves** — `eval_sprite` and `eval_byte`, mesen2's
+`_spriteAddrH`/`_spriteAddrL` — against a **second** counter that walks the secondary OAM in bytes,
+`secondary_oam_addr` (`_secondaryOamAddr`). Almost every row on the two sprite-evaluation pages is
+a consequence of that difference, not of the nominal four-bytes-per-sprite copy:
+
+* the range test runs on **every even dot** against the copy buffer, so an evaluation that starts
+  at an address which is not a multiple of four reads its first byte at that offset and judges it
+  as a Y coordinate. `sprite_in_range` **latches** the answer so the remaining bytes copy without
+  asking again;
+* the realignment at the end of a slot is **conditional** — the low two bits are reset only if the
+  last byte copied, read as a Y coordinate, is *not* itself in range, so a misalignment propagates;
+* the end of a slot is read off the **secondary** counter, not off `eval_byte`, which mesen2
+  records as needed "to replicate a hardware bug noticed in `oam_flicker_test_reenable`";
+* at 32 bytes the OAM write-disable signal turns the secondary OAM's **writes into reads**;
+* sprite zero is whatever **dot 66** looks at, not OAM index 0.
+
+### The `$2004` read during rendering: it is not OAM that answers
+
+On a visible line with rendering on, the evaluation owns the address counter for the whole line, so
+a `$2004` read sees the **OAM copy buffer** — our `oam_eval_latch` — and not `oam[oam_address]`.
+Three windows: `$FF` for dots 1 to 64 (what the clear is writing), the copy buffer for 65 to 256,
+and the **secondary** OAM for dot 0 and 257 to 340, at
+`((dot − 257) / 8) * 4 + min((dot − 257) % 8, 3)`.
+
+That is what `Address $2004 behavior` 8 and 9 walk: test 8 reads at about dot 130 with OAM holding
+`oam[i] == i` and requires a byte that is **neither `$00` nor `$FF`** — the two answers that mean
+"nothing is moving" — and test 9 reads at about dot 310 of line 0 and requires `$FF`, which is what
+the clear left in the secondary OAM because evaluation does not run on the pre-render line.
+
+**It costs the per-dot path nothing.** The window is arithmetic on `dot`, done only when a read
+lands; the copy buffer is a field the evaluation already maintained. `oam_address` is deliberately
+**not** updated per even dot even though the hardware's counter is: inside dots 65 to 256 the only
+observer is this read, which uses the copy buffer; dots 257 to 320 overwrite it with 0 anyway; and a
+`$2004` write while fetching never reaches OAM. So 96 stores a line are saved for no observable
+difference, and this comment is the record that it was a choice.
+
+### The tally: 128 → **132 / 147**, four rows, each named
+
+| row | was | now | what won it |
+| --- | --- | --- | --- |
+| `PPU Misc. / $2007 read w/ rendering` | `fail 2` | **pass** | step 2's rule |
+| `PPU Misc. / Address $2004 behavior` | `fail 8` | **pass** | the copy buffer and the secondary-OAM window |
+| `Sprite Evaluation / Arbitrary Sprite zero` | `fail 2` | **pass** | sprite zero is what dot 66 looks at |
+| `Sprite Evaluation / Misaligned OAM behavior` | `fail 1` | **pass** | the per-even-dot range test and the conditional realignment |
+
+No row fell. `cargo test --release -p zax-nes -p zax-harness` is **926 / 0 / 8**, the ignored suite
+is **7 of 8** with the known Zelda II patch failure, and fmt and clippy `-D warnings` are clean with
+no new `allow`.
+
+### The OAM address bug: built, measured, and **taken back out**
+
+nesdev's OAMADDR note and mesen2's `_cycle < 9` block both carry it — if OAMADDR is not under eight
+when rendering starts, the eight bytes at `OAMADDR & $F8` are copied over the first eight bytes of
+OAM, one byte per dot on dots 1 to 8 of the pre-render line. It was implemented, gated on rendering
+being enabled as mesen2 is (with mesen2's own reason: "otherwise `oam_stress` test fails
+immediately"), and measured. The result:
+
+* it broke **eleven** of the project's own requirement tests — `req_core_116` (the overflow flag),
+  three `req_core_042_v3` tile-contract tests, two `req_core_041`, `req_core_048`, `req_core_062`,
+  `amd_021_r2_006` and the two sprite-limit tests — because their fixtures write OAM through `$2004`
+  and leave OAMADDR at eight or more, so the first two sprites were overwritten;
+* and it won **nothing**: with it in, `AccuracyCoin` is **132/147**, and with it out, `AccuracyCoin`
+  is **132/147**. `OAM Corruption` stops on code 2 either way.
+
+`OAM Corruption`'s test 2 is therefore after a **different** mechanism, and the ROM says which: the
+`Arbitrary Sprite zero` commentary describes a corruption that fires on the **`$2003` write itself**
+("writing to `$2003` can copy 8 bytes of OAM from `$20` to `$27`, and paste these values at the old
+PPUOAMAddress & `$F8` [and] the new PPUOAMAddress & `$F8`"), notes it "appears to only happen on
+CPU/PPU clock alignment 3", and then writes its fixtures twice over so that it cannot affect the
+result. Eleven requirement tests is not a price worth paying for a row that does not move, so the
+code is out; a lot that wants `OAM Corruption` should take the `$2003`-write mechanism and the
+alignment question together, and will have to revisit those eleven fixtures.
+
+### The shift-register pipelines: **not attempted, and here is why**
+
+Six rows remain in scope that this step does not touch: `Stale Sprite Shift Regs` 3, `Stale BG Shift
+Registers` 3, `BG Serial In` 2, `ALE + Read` 2, `Hybrid Addresses` 2, and the two stress tests.
+Reading the ROM's own commentary, `Stale Sprite Shift Regs` tests 3, 5 and 6 need the **per-slot X
+counter and 8-bit shifter** the hardware has: "each sprite being drawn has their own shifter
+counter… when halted, the sprite is being drawn and the sprite shifter is shifting; when counting,
+the counter is simply decremented until it reaches zero… if the ppu is rendering on dot 339, then
+the shifter counters are set to counting."
+
+Our sprite layer is `rebuild_sprite_line`, which paints a whole 256-byte line array from the eight
+slots' X positions. It cannot express "disabling rendering stops the shifters but not the counters",
+because it has neither. Replacing it means eight counters and sixteen shift registers clocked on
+**every one of the 256 visible dots of every visible line** — the per-pixel path, the single
+hottest code in the program (step 1: `run_dots` is 57 % to 62 % of the core). That is a lot of its
+own, with its own feature gate and its own measurement, and it is named here rather than
+half-started.
