@@ -62,7 +62,7 @@ boards is a submapper-0 cartridge.
   composition from the same four registers.
 - [x] **3/7** — `board-178`, the Wàixīng FS305 / Nánjīng NJ0430: $4800-$4803, the four PRG modes,
   the mirroring register and the banked PRG-RAM window.
-- [ ] **4/7** — the question tickets, the four sweeps, the save-state round-trips and the feature
+- [x] **4/7** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
 - [ ] **5/7** — the callgrind campaign per board against the base commit, and the feature decision
   for each.
@@ -298,3 +298,58 @@ decision.
 
 **1028 passed, 0 failed, 9 ignored** (step 2 left it at 1022/0/9): six new tests.
 `cargo fmt --check` clean, `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 4 — two question tickets, the four sweeps, and the six configurations
+
+### The tickets
+
+| ticket | what it holds |
+| --- | --- |
+| **Q-154** | mapper 178's page against §7.2's section heading, in three parts: **no PPU-driven CHR window at all** ("8 KiB unbanked CHR-RAM", and PPU A9, PPU A13, CHR A12 and CHR switching appear nowhere on the page), the registers at **$4800-$4803** and not $5000-$5300, and a **switchable** PRG-RAM window the page never calls battery-backed. Plus the two readings this build had to take without the page: the register decode (the four addresses literally, no mask being given) and the PRG-RAM size (`min_prg_ram`, the header deciding) |
+| **Q-155** | mapper 163's "swap D0,D1 on writes to **$5000-$5200**", a range that textually contains the feedback port at `$5100`. This build swaps the two *bank* ports only; the ticket gives the four-write sequence that distinguishes the two readings observably, and notes the smaller choice of answering zero on the feedback read's seven undrawn bits |
+
+Both carry a code reference (`// Q-154` on `WaixingFs305::PORT_FIRST`, `// Q-155` on
+`ChrWindowBoard::bank_port_value`) and a named test. **Q-155 is the one a reviewer can close in a
+session**: the ticket's own four writes on a real mapper-163 dump with the swap bit set answer it.
+
+### The four sweeps of §7.1 item 1
+
+All four are existing tests that reach every number of `SUPPORTED_MAPPERS`, so the three new
+numbers joined them by being registered:
+
+| sweep | what it checks for 162, 163 and 178 |
+| --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | the expected-additions table, **built from the features** so that a number is expected exactly when its feature is on; the table is now 91 rows and the ascending-order assertion covers the three insertions |
+| `req_core_102_any_other_mapper_is_refused` | unchanged — none of the three is on the refused list |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | loads each number with a battery, writes `$8000-$E001` and `$6000`, runs frames, saves, moves, restores, and requires the re-saved bytes identical. It reaches none of this lot's own ports, which is why each board also has its own round-trip (§7.1 item 2, step 1 / 2 / 3) |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | the reset path of all three, including `$5000`, which **is** a port of two of them |
+
+and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` — the invariant, not a list —
+gains 162 and 163 in its expected vector and is the test that would have caught a missing watch-list
+entry. **178 is deliberately absent from it**, which is Q-154 in test form: the board does not move
+on that bus.
+
+### The six configurations
+
+clippy `-D warnings` on `zax-nes` `--all-targets` **and** its tests, in every configuration the lot
+adds plus the two §7.1 requires:
+
+| configuration | clippy | tests |
+| --- | :-: | --- |
+| `default` | clean | **965 passed, 0 failed, 8 ignored** (MF-UNL-4 left it at 948) |
+| `--no-default-features` | clean | **783 / 0 / 8** — unchanged by this lot, as by the three before it, every test of it being behind one of its features |
+| `--features parked-boards` | clean | **1018 / 0 / 8** (the VS. System's 45 beside the default's 965, less the 8 of its own that overlap) |
+| `--no-default-features --features board-163` | clean | 789 / 0 / 8 |
+| `--no-default-features --features board-162` | clean | 787 / 0 / 8 |
+| `--no-default-features --features board-178` | clean | 789 / 0 / 8 |
+
+`board-162` alone is two tests short of `board-163` alone because
+`req_core_102_the_two_chr_window_boards_differ_by_the_dumpers_own_test` is behind
+`all(board-162, board-163)` and the lot's 162 set has five tests against 163's six.
+
+**One thing the single-feature configurations found**, and nothing else did: with `board-162` alone
+the two feedback-read constants are unreachable, and `-D warnings` is `-D dead_code`. They are now
+behind `board-163` beside the method that uses them. That is the fourth lot in a row in which the
+*alone* configurations caught something the default build cannot see.

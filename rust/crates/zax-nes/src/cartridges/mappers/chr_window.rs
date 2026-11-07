@@ -222,9 +222,11 @@ impl ChrWindowBoard {
     /// mask reads A15-A8, so the four write ports are $50xx, $51xx, $52xx and $53xx.
     const PORT_MASK: u16 = 0xFF00;
 
-    /// "Feedback Read ($5500-$5501, read), Mask: $F300" — A15-A12 and A9-A8, which `$5500 & $F300`
-    /// makes `$5100`: every $5xxx address with A9 clear and A8 set.
+    /// Mapper 163's "Feedback Read ($5500-$5501, read), Mask: $F300" — A15-A12 and A9-A8, which
+    /// `$5500 & $F300` makes `$5100`: every $5xxx address with A9 clear and A8 set.
+    #[cfg(feature = "board-163")]
     const FEEDBACK_READ_MASK: u16 = 0xF300;
+    #[cfg(feature = "board-163")]
     const FEEDBACK_READ: u16 = 0x5100;
 
     /// "8 KiB unbanked PRG-RAM, battery-backed", the page's *Banks* section. Whether a host
@@ -324,6 +326,7 @@ impl ChrWindowBoard {
     ///
     /// **Mapper 162 has no swap bit at all** and its own `$5300` bit 0 is the A15 *mode*, so the
     /// kind test is not an optimisation: without it the FS304 would scramble every bank it writes.
+    // Q-155
     // With `board-162` alone no board here has a swap bit, so the body reads no field of `self`.
     #[cfg_attr(not(feature = "board-163"), allow(clippy::unused_self))]
     fn bank_port_value(&self, value: u8) -> u8 {

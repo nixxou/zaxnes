@@ -122,6 +122,7 @@ impl WaixingFs305 {
     /// The four registers, at the four addresses the page names. **No mask is given**, and that is
     /// part of Q-154: the decode here is the four addresses themselves, which is what the page
     /// writes. A board that decoded less would answer a mirror no game is documented to use.
+    // Q-154
     const PORT_FIRST: u16 = 0x4800;
     const PORT_LAST: u16 = 0x4803;
 
