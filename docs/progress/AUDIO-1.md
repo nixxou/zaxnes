@@ -30,7 +30,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
 - [x] **6. Pause, resume, state load, rewind.** A short ramp to zero when the console stops
       producing; on resume a clear, a prefill and a ramp in. The same on save-state load and on
       rewind. `AudioOutput::flush` is actually called.
-- [ ] **7. Counters.** Underrun events, average latency, current rate adjustment, minimum and
+- [x] **7. Counters.** Underrun events, average latency, current rate adjustment, minimum and
       maximum ring fill, in the performance overlay and logged once per second when the frame
       profiler is on.
 - [ ] **8. Tests.** Ring/callback logic without a device; rate control against a simulated
@@ -314,3 +314,42 @@ stale comes out, the gate opens at half the latency and not before, the first sa
 signal is still near zero (ramped in, not switched on), and the whole thing counts no under-run.
 
 fmt and clippy `-D warnings` clean; all `zax-app` tests green (16 in `audio_tests`).
+
+### Step 7 — the counters
+
+`AudioControl` carries them all as atomics the audio thread writes and the main thread reads:
+`underruns`, `rendered_frames`, `average_fill` (the one-second average the rate controller also
+uses), `playing`, and the extremes of the ring's fill.
+
+The extremes are **double-buffered**: the callback keeps a live minimum and maximum with
+`fetch_min`/`fetch_max`, and `close_window` — which the host calls once a second, timed by
+`RateControl::window_closed` — moves them to the pair the readers see and starts another window.
+Without that, the overlay (drawn every frame) would read the window still filling and show a
+minimum and a maximum a few milliseconds old and all but equal.
+
+`EmulationHost::audio_report()` is the single line both readers share:
+
+```
+latency 59.4 / 60 ms  [56-63 ms]  rate +0.028 %  underruns 0
+```
+
+— the measured latency against the configured one, the extremes of the last complete second,
+the correction the controller is asking of the core as a percentage, the count of droughts since
+the device opened, and `prefilling` while the gate is shut.
+
+* **The performance overlay** (F12, `ui/debug_overlay.rs`) shows it under the mixer's line,
+  which keeps the sample rate, the console gain, the music gain and the track.
+* **The log**, once a second, while the frame profiler is on (`ZAXNES_PROFILE=1` or
+  `ui.profiler`), from `Application::log_audio_counters`. The profiler's own report stays on its
+  two-second window; the audio line has its own timer so it lands every second as the work order
+  asks.
+
+How to read them: `underruns` should stay at **0**. The measured latency should sit within two or
+three milliseconds of the target and the extremes should straddle it; a minimum falling towards
+0 means the main thread is being starved and the latency wants raising. `rate` should settle at
+this machine's clock offset — a few hundredths of a percent — and anything pinned at ±0,250 % or
+beyond means the controller is saturated and the latency is drifting faster than it can hold.
+
+`audio_rate_adjustment` and a separate window timer on the host both turned out to belong in
+`RateControl` (it is the one thing the host already steps with the tick's real time), which also
+kept `EmulationHost::new` under the hundred-line clippy limit.

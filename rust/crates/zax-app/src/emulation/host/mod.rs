@@ -1387,6 +1387,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         } else {
             self.audio_rate.idle(real_seconds)
         };
+        // The window the overlay and the per-second log report on (Q-153 §6).
+        if self.audio_rate.window_closed(real_seconds) {
+            audio.control.close_window();
+        }
         if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
             if session
                 .core_mut()

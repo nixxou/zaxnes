@@ -67,6 +67,7 @@ pub struct RateControl {
     offset: f64,
     cooldown: f64,
     adjustment: f64,
+    window: f64,
 }
 
 impl RateControl {
@@ -77,7 +78,20 @@ impl RateControl {
             offset: 0.0,
             cooldown: 0.0,
             adjustment: 0.0,
+            window: 0.0,
         }
+    }
+
+    /// Advances the one-second window of the counters and says whether it just closed
+    /// (Q-153 §6). It lives here because this is the one thing the host already steps with the
+    /// real time of the tick.
+    pub fn window_closed(&mut self, seconds: f64) -> bool {
+        self.window += seconds;
+        if self.window < 1.0 {
+            return false;
+        }
+        self.window = 0.0;
+        true
     }
 
     /// The correction asked for at the last step, for the overlay.

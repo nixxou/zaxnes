@@ -219,6 +219,8 @@ struct Running {
     resolution: AutomaticResolution,
     /// The save state slot `--load-state` asks for, until the game accepts the load.
     pending_state_load: Option<i32>,
+    /// When the audio counters were last written to the log.
+    audio_logged_at: Instant,
 }
 
 /// The state of the automatic resolution between two displayed frames.
@@ -383,6 +385,7 @@ impl Running {
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
             pending_state_load: options.load_state,
+            audio_logged_at: Instant::now(),
         })
     }
 
@@ -494,6 +497,10 @@ impl Running {
     /// Hands the frame that began at `begin` to the profiler and logs its report when a window
     /// is over: the stages, the threads, then the Lua hooks.
     fn end_profiled_frame(&mut self, begin: Instant, emulated: u32) {
+        if self.profiler.is_none() {
+            return;
+        }
+        self.log_audio_counters();
         let Some(profiler) = self.profiler.as_mut() else {
             return;
         };
@@ -510,6 +517,20 @@ impl Running {
             if let Some(line) = self.resolution_report() {
                 log(&line);
             }
+        }
+    }
+
+    /// Writes the audio counters to the log once a second while the profiler is on (Q-153 §6):
+    /// the latency measured against the one asked for, the extremes of the ring's fill over the
+    /// last second, the correction in force and the count of droughts.
+    fn log_audio_counters(&mut self) {
+        let now = Instant::now();
+        if now.duration_since(self.audio_logged_at) < Duration::from_secs(1) {
+            return;
+        }
+        self.audio_logged_at = now;
+        if let Some(line) = self.host.audio_report() {
+            log(&format!("audio  {line}"));
         }
     }
 

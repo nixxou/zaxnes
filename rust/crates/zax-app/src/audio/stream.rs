@@ -174,6 +174,8 @@ pub struct AudioControl {
     fill_average: AtomicU32,
     fill_minimum: AtomicU32,
     fill_maximum: AtomicU32,
+    window_minimum: AtomicU32,
+    window_maximum: AtomicU32,
 }
 
 impl AudioControl {
@@ -191,6 +193,8 @@ impl AudioControl {
             fill_average: AtomicU32::new(bits(0.0)),
             fill_minimum: AtomicU32::new(u32::MAX),
             fill_maximum: AtomicU32::new(0),
+            window_minimum: AtomicU32::new(u32::MAX),
+            window_maximum: AtomicU32::new(0),
         };
         control.set_target_frames(target_frames);
         control
@@ -268,22 +272,31 @@ impl AudioControl {
         f32::from_bits(self.fill_average.load(Ordering::Relaxed))
     }
 
-    /// The least and the most the ring held since the last [`reset_extremes`](Self::reset_extremes),
-    /// in frames. `None` while nothing has been measured.
+    /// The least and the most the ring held over the last **complete** window, in frames.
+    /// `None` until one window has closed.
+    ///
+    /// The window is double-buffered on purpose: the overlay is drawn every frame, and reading
+    /// the window that is still filling would show a minimum and a maximum a few milliseconds
+    /// old and all but equal.
     #[must_use]
     pub fn extreme_fill(&self) -> Option<(usize, usize)> {
-        let minimum = self.fill_minimum.load(Ordering::Relaxed);
+        let minimum = self.window_minimum.load(Ordering::Relaxed);
         if minimum == u32::MAX {
             return None;
         }
-        let maximum = self.fill_maximum.load(Ordering::Relaxed);
+        let maximum = self.window_maximum.load(Ordering::Relaxed);
         Some((minimum as usize, maximum as usize))
     }
 
-    /// Starts a new window for [`extreme_fill`](Self::extreme_fill).
-    pub fn reset_extremes(&self) {
-        self.fill_minimum.store(u32::MAX, Ordering::Relaxed);
-        self.fill_maximum.store(0, Ordering::Relaxed);
+    /// Ends the window [`extreme_fill`](Self::extreme_fill) reports and starts another. The host
+    /// calls it once a second.
+    pub fn close_window(&self) {
+        let minimum = self.fill_minimum.swap(u32::MAX, Ordering::Relaxed);
+        let maximum = self.fill_maximum.swap(0, Ordering::Relaxed);
+        if minimum != u32::MAX {
+            self.window_minimum.store(minimum, Ordering::Relaxed);
+            self.window_maximum.store(maximum, Ordering::Relaxed);
+        }
     }
 
     fn record_fill(&self, fill: usize, weight: f32) {
