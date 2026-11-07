@@ -100,6 +100,17 @@ impl MarginDecoder for Kirby {
     fn decodes_masked_column(&self) -> bool {
         true
     }
+
+    /// The attribute byte the game writes for the column coming in under the mask also colours
+    /// the visible column next to it (scrolling right) ...
+    fn redrawn_left_columns(&self) -> i32 {
+        2
+    }
+
+    /// ... and, scrolling left, the column at the right edge sharing its place in the nametable.
+    fn redrawn_right_columns(&self) -> i32 {
+        2
+    }
 }
 
 /// The PPU address of screen column `column` of `row`, on the plane of two nametables side by
