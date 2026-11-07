@@ -339,6 +339,16 @@ impl Residency for WgpuResidency<'_> {
             .textures
             .picture(self.device, self.queue, picture, height))
     }
+
+    fn overlay(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<TextureHandle>, Self::Error> {
+        Ok(self
+            .textures
+            .overlay(self.device, self.queue, picture, height))
+    }
 }
 
 type WgpuDrawItem = DrawItem<MeshHandle, TextureHandle>;

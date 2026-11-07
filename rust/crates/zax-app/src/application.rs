@@ -2131,7 +2131,8 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     // the two, and nothing of the session is reloaded to switch.
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
-        state.picture_height = session.copy_nes_picture(&mut state.picture);
+        state.picture_height =
+            session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
         scene.picture_shift = session.nes_picture_shift();
         // The cut sides left out, the scene's background showing there; in Resize the head-on
         // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
@@ -2156,6 +2157,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     } else {
         scene.picture_crop = zax_profiles::values::Vec4F::new(0.0, 0.0, 0.0, 0.0);
         scene.picture_shift = None;
+        scene.picture_overlay.clear();
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();

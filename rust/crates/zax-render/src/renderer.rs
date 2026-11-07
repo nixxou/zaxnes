@@ -65,6 +65,7 @@ struct GlResidency<'a> {
     meshes: &'a mut MeshCache,
     textures: &'a mut TextureCache,
     picture: &'a mut NesPictureTexture,
+    overlay: &'a mut NesPictureTexture,
 }
 
 impl Residency for GlResidency<'_> {
@@ -82,6 +83,10 @@ impl Residency for GlResidency<'_> {
 
     fn picture(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
         self.picture.upload(picture, height)
+    }
+
+    fn overlay(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.overlay.upload(picture, height)
     }
 }
 
@@ -130,6 +135,8 @@ pub struct SceneRenderer {
     shadow_map: ShadowMap,
     skybox: SkyboxPass,
     picture: NesPictureTexture,
+    /// The sprites the experimental smooth scrolling draws apart (`SceneState::picture_overlay`).
+    overlay: NesPictureTexture,
     linear: LinearColorBuffer,
     linear_palette: LinearPalette,
     /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
@@ -235,6 +242,7 @@ impl SceneRenderer {
             meshes: MeshCache::new(&gl),
             skybox: SkyboxPass::new(&gl, assets),
             picture: NesPictureTexture::new(&gl),
+            overlay: NesPictureTexture::new(&gl),
             linear: LinearColorBuffer::new(&gl)?,
             linear_palette: LinearPalette::new(&gl)?,
             convert_palette,
@@ -331,6 +339,7 @@ impl SceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
             picture: &mut self.picture,
+            overlay: &mut self.overlay,
         };
         self.wide_picture_quad = interop::wide_quad_for(
             frame.nes_picture,

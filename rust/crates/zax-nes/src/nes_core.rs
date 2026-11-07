@@ -83,6 +83,13 @@ pub struct NesCore {
     camera_read: Option<(i32, u8)>,
     camera_decoupled: bool,
     picture_shift: Option<(f32, i32)>,
+    /// The sprites that move with the camera (Kirby, the camera on him), which the shift must
+    /// leave where they are: their record indices in the picture just made, and their screen
+    /// places; the camera's pixels the last picture showed, and every sprite's place there.
+    steady_sprites: Vec<i32>,
+    steady_places: Vec<(i16, i16)>,
+    shown_camera: Option<i32>,
+    sprite_places: Vec<(i16, i16)>,
     /// The state of the real frame of a run-ahead sequence (AMD-041 REQ-LOOP-065 step 2), kept
     /// from one real frame to the next so that nothing is allocated per frame. Empty, and never
     /// touched, while run-ahead is off.
@@ -122,6 +129,10 @@ impl NesCore {
             camera_read: None,
             camera_decoupled: false,
             picture_shift: None,
+            steady_sprites: Vec::new(),
+            steady_places: Vec::new(),
+            shown_camera: None,
+            sprite_places: Vec::new(),
             real_frame: CoreState::default(),
             real_frame_held: false,
         }
@@ -738,15 +749,18 @@ impl NesCore {
     /// past its scroll (read after the frame before: the RAM is a frame ahead of the picture), down
     /// to the playfield's bottom ([`NesCore::picture_shift`]). Nothing read with the option off.
     fn smooth_scroll(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
+        // An aid of the game's hack pack (in the Hacks), with or without its widescreen patch.
         let on = self
             .builtin_patch
             .and_then(crate::builtin_patches::by_name)
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
             .and_then(|patch| patch.options.iter().find(|o| o.key == "smooth_scroll"))
             .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0);
         let Some(decoder) = decoder.filter(|_| on) else {
             self.camera_fraction = None;
             self.camera_read = None;
             self.picture_shift = None;
+            self.steady_sprites.clear();
             return;
         };
         let end = self.bus.ppu().playfield_end();
@@ -754,6 +768,7 @@ impl NesCore {
             .camera_fraction
             .zip(end)
             .map(|(fraction, end)| (f32::from(fraction) / 256.0, i32::from(end)));
+        self.find_steady_sprites();
         let (ram, _, cartridge) = self.bus.decoder_parts();
         let read = cartridge.and_then(|cartridge| {
             decoder.camera_position(&crate::wide_decode::DecoderMemory {
@@ -782,6 +797,45 @@ impl NesCore {
         if !self.camera_decoupled || self.camera_fraction.is_none() {
             self.camera_fraction = Some(fraction);
         }
+    }
+
+    /// The sprites of the picture just made that move with the camera: a sprite at the same
+    /// place on the screen as in the picture before while the camera moved (or, the camera still,
+    /// at a place found so before). The shift leaves them where they are.
+    fn find_steady_sprites(&mut self) {
+        let shown = self.camera_read.map(|(pixels, _)| pixels);
+        let moved = shown.is_some() && self.shown_camera.is_some() && shown != self.shown_camera;
+        self.shown_camera = shown;
+        let split = self.picture_shift.map_or(0, |(_, split)| split);
+        let all = std::mem::take(&mut self.sprite_places);
+        let steady = std::mem::take(&mut self.steady_places);
+        let reference = if moved { all } else { steady };
+        self.steady_sprites.clear();
+        for record in self.bus.ppu().tile_records() {
+            if record.background {
+                continue;
+            }
+            let place = (record.x, record.y);
+            self.sprite_places.push(place);
+            if i32::from(record.y) < split && reference.contains(&place) {
+                self.steady_sprites.push(record.index);
+                self.steady_places.push(place);
+            }
+        }
+    }
+
+    /// Moves the sprites that move with the camera out of `picture` (the wide picture of the
+    /// frame just run) into `overlay`, transparent (`0xFF`) elsewhere, for the experimental
+    /// smooth scrolling; `overlay` is left empty while the playfield is not shifted or no sprite
+    /// moves with the camera.
+    pub fn split_steady_sprites(&self, picture: &mut [u8], overlay: &mut Vec<u8>) {
+        if self.picture_shift.is_none() || self.steady_sprites.is_empty() {
+            overlay.clear();
+            return;
+        }
+        self.bus
+            .ppu()
+            .split_steady_sprites(picture, overlay, &self.steady_sprites);
     }
 
     /// The experimental smooth scrolling's shift of the picture of the frame just run: the

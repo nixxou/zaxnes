@@ -529,6 +529,112 @@ impl Ppu2C02 {
             .map_or(i32::MAX, |&end| i32::from(end))
     }
 
+    /// Moves the sprites `steady` (record indices) of the wide picture `picture` (made by
+    /// [`Ppu2C02::wide_picture_into`]) to `overlay`, a picture of the same size, transparent
+    /// (`0xFF`) but for them; where they showed, `picture` gets what is under them. For the
+    /// experimental smooth scrolling: the playfield is shifted by the camera's fraction of a
+    /// pixel, but a sprite that moves with the camera (Kirby, the camera on him) must not be.
+    pub fn split_steady_sprites(&self, picture: &mut [u8], overlay: &mut Vec<u8>, steady: &[i32]) {
+        overlay.clear();
+        overlay.resize(picture.len(), 0xFF);
+        let margin = self.frame_margin;
+        let margin_y = self.frame_vertical_margin;
+        let width = SCREEN_WIDTH_I32 + (2 * margin);
+        let height = i32::try_from(picture.len()).unwrap_or(0) / width.max(1);
+        let is_steady = |record: &TileRecord| !record.background && steady.contains(&record.index);
+        for record in self
+            .tiles
+            .records()
+            .iter()
+            .filter(|record| is_steady(record))
+        {
+            for py in 0..8 {
+                for px in 0..8 {
+                    let (x, y) = (i32::from(record.x) + px, i32::from(record.y) + py);
+                    let (column, row) = (x + margin, y + margin_y);
+                    if !(0..width).contains(&column) || !(0..height).contains(&row) {
+                        continue;
+                    }
+                    let Ok(at) = usize::try_from((row * width) + column) else {
+                        continue;
+                    };
+                    let (entry, steady_chosen) = self.composed_entry(x, y, &is_steady, false);
+                    if !steady_chosen || overlay[at] != 0xFF {
+                        continue;
+                    }
+                    overlay[at] = self.entry_colour(entry);
+                    let (under, _) = self.composed_entry(x, y, &is_steady, true);
+                    picture[at] = self.entry_colour(under);
+                }
+            }
+        }
+    }
+
+    /// The palette entry shown at (`x`, `y`) composed from the records in the NES order, the
+    /// records `skip` says left out when `skipping`, and whether a record `skip` names won.
+    fn composed_entry(
+        &self,
+        x: i32,
+        y: i32,
+        skip: &dyn Fn(&TileRecord) -> bool,
+        skipping: bool,
+    ) -> (u8, bool) {
+        let mut front: Option<(i32, u8, bool)> = None;
+        let mut behind: Option<(i32, u8, bool)> = None;
+        let mut background: Option<u8> = None;
+        for record in self.tiles.records() {
+            let named = skip(record);
+            if skipping && named {
+                continue;
+            }
+            let (Ok(column), Ok(row)) = (
+                usize::try_from(x - i32::from(record.x)),
+                usize::try_from(y - i32::from(record.y)),
+            ) else {
+                continue;
+            };
+            let Some(pixel) = record
+                .displayed_pixel(column, row)
+                .filter(|&pixel| pixel != 0)
+            else {
+                continue;
+            };
+            if record.background {
+                background = Some(if record.palette >= 4 {
+                    MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                } else {
+                    (record.palette * 4) + pixel
+                });
+                continue;
+            }
+            let entry = 0x10 + (record.palette * 4) + pixel;
+            let slot = if record.hidden {
+                &mut behind
+            } else {
+                &mut front
+            };
+            if slot.is_none_or(|(index, _, _)| record.index < index) {
+                *slot = Some((record.index, entry, named));
+            }
+        }
+        match (front, background, behind) {
+            (Some((_, entry, named)), _, _) | (None, None, Some((_, entry, named))) => {
+                (entry, named)
+            }
+            (None, Some(entry), _) => (entry, false),
+            (None, None, None) => (0, false),
+        }
+    }
+
+    /// The colour of palette entry `entry` of the wide picture (the margin palette's from
+    /// `MARGIN_ENTRIES` up), as the frame ended.
+    fn entry_colour(&self, entry: u8) -> u8 {
+        match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
+            (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
+            _ => self.shown_palette[palette_index(0x3F00 | u16::from(entry))],
+        }
+    }
+
     /// Drops the sprite records of `sprites` ([`MarginDecoder::masking_sprites`]): both halves
     /// of an 8 x 16 sprite (its number, and 64 more for the lower half); the second page (128 up)
     /// is not the game's OAM.

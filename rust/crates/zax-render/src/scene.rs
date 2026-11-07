@@ -265,6 +265,10 @@ pub struct SceneState {
     /// playfield left by and the screen line it ends at (the status bar under it stays), or
     /// `None` (Rust-only, owner request).
     pub picture_shift: Option<(f32, i32)>,
+    /// With `picture_shift`, the sprites that move with the camera, drawn apart and not shifted:
+    /// a picture of the 2D picture's size, transparent (`interop::HIDDEN_PIXEL`) elsewhere, or
+    /// empty.
+    pub picture_overlay: Vec<u8>,
     /// The shape the subjective camera follows, or `None` (REQ-SCN-021). In FPV it decides
     /// which tiles count as occluders and are drawn at half opacity (REQ-SCN-022).
     pub followed_shape: Option<ShapeId>,
@@ -294,6 +298,7 @@ impl Default for SceneState {
             picture_tilt: [0.0; 2],
             picture_crop: Vec4F::new(0.0, 0.0, 0.0, 0.0),
             picture_shift: None,
+            picture_overlay: Vec::new(),
             followed_shape: None,
             real_time: 0.0,
             emulated_time: 0.0,

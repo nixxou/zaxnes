@@ -87,7 +87,23 @@ pub trait Residency {
         picture: &[u8],
         height: usize,
     ) -> Result<Option<Self::Texture>, Self::Error>;
+
+    /// The sprites the experimental smooth scrolling draws apart (`SceneState::picture_overlay`),
+    /// uploaded as a second picture of the same kind, or `None` when it has the wrong size.
+    ///
+    /// # Errors
+    ///
+    /// When the GPU object cannot be created.
+    fn overlay(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<Self::Texture>, Self::Error>;
 }
+
+/// How far in front of the 2D picture the sprites the smooth scrolling draws apart are, in
+/// scene units: in front of it for the depth test, too little to show.
+const OVERLAY_NUDGE: f32 = 0.05;
 
 /// One tile, backdrop or picture quad ready to draw.
 #[derive(Debug, Clone, Copy)]
@@ -287,6 +303,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 frame.nes_picture,
                 frame.nes_picture_height,
                 scene.picture_shift.map(|(shift, _)| shift),
+                &scene.picture_overlay,
             )?
         {
             return Ok(());
@@ -333,6 +350,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         picture: &[u8],
         height: usize,
         shift: Option<f32>,
+        overlay: &[u8],
     ) -> Result<bool, R::Error> {
         let Some((width, height)) = crate::interop::picture_size(picture.len(), height) else {
             return Ok(false);
@@ -356,6 +374,27 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                     clip: true,
                     ..DrawItem::plain(mesh, model, (band.bounds_min(), band.bounds_max()))
                 });
+            }
+            // The sprites that move with the camera, where they are, a little in front.
+            let whole = if (width, height) == (256, 240) {
+                Some(fixed.picture_quad)
+            } else {
+                fixed.wide_picture_quad
+            };
+            if let (Some(quad), false) = (whole, overlay.is_empty()) {
+                if let (Some(texture), Some(mesh)) =
+                    (residency.overlay(overlay, height)?, residency.mesh(quad)?)
+                {
+                    let model = Mat4::translation(Vec3::new(0.0, 0.0, -OVERLAY_NUDGE));
+                    self.lists.opaque.push(DrawItem {
+                        color_mode: 1,
+                        texture: Some(texture),
+                        texture_size,
+                        receive_shadow: false,
+                        clip: true,
+                        ..DrawItem::plain(mesh, model, (quad.bounds_min(), quad.bounds_max()))
+                    });
+                }
             }
             return Ok(true);
         }

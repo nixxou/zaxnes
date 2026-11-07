@@ -162,6 +162,16 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     let mut picture = Vec::new();
     let picture_height = host.core.wide_picture_into(&mut picture);
     scene.picture_shift = host.core.picture_shift();
+    host.core
+        .split_steady_sprites(&mut picture, &mut scene.picture_overlay);
+    if !scene.picture_overlay.is_empty() {
+        let kept = scene
+            .picture_overlay
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF)
+            .count();
+        println!("render: smooth scrolling keeps {kept} sprite pixels where they are");
+    }
     if let Some((shift, split)) = scene.picture_shift {
         println!("render: smooth scrolling shift {shift:.3} pixel above line {split}");
     }

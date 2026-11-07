@@ -1518,8 +1518,10 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 2,
         default: true,
     },
-    // Experimental (owner request): the playfield shifted by the camera's fraction of a pixel,
-    // its steps of 1, 1 and 2 pixels made even (the margin decoder's `camera_fraction`).
+    // Experimental (owner request), in the Hacks (a component of the pack with no hook): the
+    // playfield shifted by the camera's fraction of a pixel, its steps of 1, 1 and 2 pixels made
+    // even (the margin decoder's `camera_position`), the sprites that move with the camera
+    // left where they are.
     HackOption {
         key: "smooth_scroll",
         label: "Smooth scrolling (experimental)",
