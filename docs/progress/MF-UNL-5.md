@@ -68,7 +68,7 @@ boards is a submapper-0 cartridge.
   for each.
 - [x] **6/7** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
-- [ ] **7/7** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
+- [x] **7/7** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
 ---
 
@@ -515,3 +515,61 @@ touches none of it.
 | no change to the save-state format of existing boards | `NesCore::STATE_VERSION` unchanged; the only blocks added belong to two boards that did not exist at the base commit |
 | safe Rust | no `unsafe` anywhere in the lot |
 | nothing edited under `spec/` but new Q tickets | `Q-154.md` and `Q-155.md`, both new |
+
+---
+
+## Step 7 — `BOARD-FEATURES.md`, the census note, the journal and the final pass
+
+### The documentation this step carries
+
+* **Three rows in `docs/review/BOARD-FEATURES.md`** — `board-163`, `board-162` and `board-178` —
+  each with step 5's figures in both cost columns, the mechanism it brings, the tickets it carries
+  and the one command that flips it. The `--no-default-features` and `parked-boards` counts are
+  brought to this lot's (**783** unchanged and **1018**, against **965** by default), and the "how
+  to turn a board off" command gains the three names.
+* **A new section in that file**, *MF-UNL-5 is the first lot with no figure outside the tolerance
+  on either column*: the floor measurement (`unl5off`, whose emulation does not change and which
+  is `smb3/total` +0.016 % all the same), the three same-behaviour pairs three lots have now built,
+  and the per-board shape — 163 alone +225 155, +162 +323 610, all three +451 305, with the *same
+  five* level-2 `core` figures to the instruction in all three builds.
+* **A note at the head of §7.2's MF-UNL-5 section in `docs/review/UNL-census.md`**, which says
+  plainly that **the section's own heading is wrong about one of its three boards** and why, points
+  at Q-154 and Q-155, and records the two things the next reader of that section needs: that 162
+  and 163 are one mechanism and one variant, and that the lot's measurement is the cleanest of the
+  five.
+* **A journal entry** in `G:/3dsen/cleanroom/journal/JOURNAL.md`, in the log's own language, with
+  the role, the date, the folders consulted, the deliverables, the figures and the two open
+  tickets.
+* **Two question tickets** under `spec/changes/`, `Q-154.md` and `Q-155.md`, each with its
+  provisional choice, its code reference and the observation that would close it.
+
+### The final pass
+
+| | |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **1028 / 0 / 9** |
+| the same with `--include-ignored` and both ROM roots | **1037 / 0 / 0** |
+| golden-core, 98 originals, 1 200 frames | **byte-identical** to `4a1cbffe`, with and without the three features; `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+| clippy `-D warnings`, `zax-nes --all-targets` | clean in all **six** configurations: `default` (965 / 0 / 8), `--no-default-features` (783 / 0 / 8), `--features parked-boards` (1018 / 0 / 8), and each of `board-163` (789), `board-162` (787) and `board-178` (789) alone |
+| clippy `-D warnings`, `zax-harness --all-targets` | clean |
+| PR-1's thirteen ROMs | worst ROM **+0.001 %**, set total +451 305 (+0.001 %) |
+| level 2's five games | all five `core` inside (+0 on three), all five `total` inside, worst **+0.016 %** |
+| the feature decision | **all three in `default`**; nothing parked |
+
+### What this lot leaves for whoever comes next
+
+**Q-154's first question is a decision and not a measurement**: either §7.2's heading is to be
+corrected, or the census knows a source for mapper 178's CHR window that the number's page does not
+carry. Everything else in the ticket follows from that answer. **Q-155 closes with four register
+writes** on a real mapper-163 image, and the ticket spells them out.
+
+And the thing no lot of this plan can do, in §7.2's own words: **there is no ROM here that runs any
+of the three numbers.** Every test of this lot is written from the register table of its board's own
+page, which is why §6 of the census graded documentation before §7 ordered the work.
+
+### Lot totals
+
+**3 numbers, 3 boards, 3 features, 17 tests, 2 question tickets, ~13 original titles**, measured at
+worst ROM +0.001 % on the instrument that can resolve a board and worst +0.016 % on the one that
+cannot resolve below about 0.02 % at all.

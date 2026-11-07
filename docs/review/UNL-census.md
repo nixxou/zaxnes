@@ -1290,6 +1290,37 @@ cartridge, so the lot preserves everything that made them A. 178's educational v
   save file, for all three.
 * `expansion_audio_output` is `None` and `ppu_irq_horizon` is `None` for all three.
 
+> **Built by lot MF-UNL-5 (2026-11-08), and the heading above is wrong about one of the three
+> boards.** `board-163`, `board-162` and `board-178`, all three in `default`; the figures are in
+> `docs/review/BOARD-FEATURES.md` and the account in `docs/progress/MF-UNL-5.md`.
+>
+> **Mapper 178 has no PPU-driven CHR-RAM window.** Its own page gives it "PPU $0000-$1FFF: 8 KiB
+> **unbanked** CHR-RAM" and a chipset "designed for using 8 KiB of chip-internal unbanked
+> CHR-RAM", and **PPU A9, PPU A13, CHR A12 and CHR switching appear nowhere on it**. Its four
+> registers are at **$4800-$4803**, not $5000-$5300, and its PRG-RAM is a **switchable** 8 KiB
+> window over a chip of up to 2 MiB rather than the "battery-backed" one this paragraph promises
+> for all three. So the premise above holds for 162 and 163 and not for 178, which is in the lot
+> for its four PRG banking modes and that banked PRG-RAM window instead; the number is in neither
+> of §4.3's PPU watch lists and overrides no PPU hook. **Q-154** records all three divergences,
+> with the two readings the page left open (the register decode, no mask being given, and how much
+> PRG-RAM an image with no NES 2.0 field should get). This is MF-UNL-2's rule applied a fifth
+> time: the number's own page wins.
+>
+> Two further notes for whoever reads this section next. **The CHR window of 162 and 163 is one
+> mechanism and one `DecodeBoard` variant**, not two: the two pages give the same three lines
+> ("CHR A12=PPU A9 latched on last rise of PPU A13") and the boards differ only in how they
+> compose a PRG bank and in whether `$5100` is a bank line or a feedback latch -- which is exactly
+> what each page's *Notes* tell a dumper to test for, and
+> `req_core_102_the_two_chr_window_boards_differ_by_the_dumpers_own_test` is that pair of
+> sentences as one test. And **163's swap bit is Q-155**: "swap D0,D1 on writes to $5000-$5200" is
+> a range that textually contains the feedback port, and this build swaps the two bank ports only.
+>
+> The lot's measurement is the cleanest of the five so far: worst PR-1 ROM **+0.001 %**, all five
+> level-2 `core` figures identical across the three boards (three of them **+0**), worst `total`
+> **+0.016 %** against a control whose emulation does not change at all and which moves the same
+> column by +0.016 %. golden-core byte-identical over the 98 commercial originals, at the digest
+> MF-UNL-2, MF-UNL-3 and MF-UNL-4 all recorded.
+
 **Titles R0 should run**: *牧场物语 — Harvest Moon* (NJ011), *水浒神兽* (NJ019),
 *暗黑破坏神 — Diablo* (NJ037), *轩辕剑外传 之 天之痕* (NJ045),
 *Final Fantasy IV — 最终幻想 4* (NJ098), *雷电皇 比卡丘传说* (NJ046) (Nánjīng);
