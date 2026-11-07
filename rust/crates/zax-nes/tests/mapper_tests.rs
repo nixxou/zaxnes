@@ -104,7 +104,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 96 (the Bandai Oeka Kids board, whose CHR page is latched off the PPU address bus),
     //   behind `board-96` (MF-6c step 8);
     // * 111 (the Membler Industries GTROM / Cheapocabra, seven homebrew titles), behind
-    //   `board-111` (MF-6c step 9).
+    //   `board-111` (MF-6c step 9);
+    // * 36, 132, 136, 147, 172 and 173, the six boards of the TXC 05-00002-010 / Sachen JV001
+    //   protection ASIC -- one chip, one `DecodeBoard` variant -- behind `board-jv001`
+    //   (MF-UNL-1 step 1).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -122,11 +125,13 @@ fn req_core_100_every_required_mapper_is_registered() {
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
-    let additions: [(i32, bool); 54] = [
+    let jv001 = cfg!(feature = "board-jv001");
+    let additions: [(i32, bool); 60] = [
         (19, true),
         (24, true),
         (26, true),
         (33, small),
+        (36, jv001),
         (37, multicart),
         (47, multicart),
         (48, true),
@@ -161,7 +166,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
+        (132, jv001),
+        (136, jv001),
         (140, small),
+        (147, jv001),
         (151, cfg!(feature = "board-vs-system")),
         (152, small),
         (153, cfg!(feature = "board-153")),
@@ -171,6 +179,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         (157, eeprom),
         (158, cfg!(feature = "board-158")),
         (159, eeprom),
+        (172, jv001),
+        (173, jv001),
         (180, true),
         (184, small),
         (185, small),
@@ -5189,4 +5199,397 @@ fn req_core_100_the_somari_does_not_disturb_the_three_chips_it_holds() {
         mmc1.prg_windows(),
         "no supervisor register on mapper 1"
     );
+}
+
+// ------------------------------------------- the JV001 / TXC 05-00002-010 protection ASIC
+// ------------------------------------------- (36, 132, 136, 147, 172, 173), MF-UNL-1 step 1
+
+/// The chip's "load" sequence: `$4102` takes the Input, `$4100` copies it into the accumulator
+/// (complemented while Invert is set), and the caller then latches Output with `$8000`.
+#[cfg(feature = "board-jv001")]
+fn jv001_load(core: &mut NesCore, input: u8) {
+    core.mapper_write(0x4102, input);
+    core.mapper_write(0x4100, 0x00);
+}
+
+/// nesdev ("INES Mapper 036"): the chip's six data pins are CPU **D4-D5** on TXC's 01-22000-400,
+/// `read $4100: [xxRR xxxx]` and `write $4102: [..PP ....]`; the 32 KiB PRG bank comes from
+/// Output and the 8 KiB CHR bank from a latch of the board's own — "Mask: $E200, write $4200:
+/// [.... CCCC]" (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_36_puts_the_chip_on_d4_d5_and_its_chr_latch_at_4200() {
+    let mut core = MapperRom::new(36).prg(16).chr(128).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // $4102 = $30 is `PP` = 3 on D4-D5; Invert is clear at power-on on this number, so $4100
+    // copies it straight through and $8000 clocks it onto the PRG pins: 32 KiB bank 3.
+    jv001_load(&mut core, 0x30);
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+
+    // And the protection read answers the same bits back on D4-D5 and drives nothing else.
+    assert_eq!(0x30, core.read_memory(0x4100));
+
+    // The CHR latch is the board's, not the chip's: four bits at $4200 under mask $E200.
+    core.mapper_write(0x4200, 0x05);
+    assert_eq!(40, core.chr_bank(0x0000));
+    assert_eq!(47, core.chr_bank(0x1C00), "one 8 KiB bank over the range");
+    // $6200 is not it -- `$6200 & $E200` is `$6200` -- so the window stays inside $4000-$5FFF.
+    core.mapper_write(0x6200, 0x02);
+    assert_eq!(40, core.chr_bank(0x0000), "no register in $6000-$7FFF");
+}
+
+/// nesdev ("INES Mapper 132"): the chip on CPU D0-D3, and "write $8000: Copy R register to PRG
+/// A15, CHR A14, CHR A13 banking pins sequentially" — Output bit 2 the 32 KiB PRG bank and bits
+/// 1-0 the 8 KiB CHR bank (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_132_drives_prg_a15_and_chr_a14_a13_from_one_output() {
+    let mut core = MapperRom::new(132).prg(16).chr(32).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    jv001_load(&mut core, 0x07);
+    // The bank pins do not move until $8000 clocks Output: that is what makes the board look
+    // like a CNROM to the game.
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "Output not latched yet");
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(24, core.chr_bank(0x0000));
+
+    assert_eq!(0x07, core.read_memory(0x4100));
+}
+
+/// The protection: "Games will also check the lower three or four bits of $4100 for the correct
+/// value after several increment and inversion operations as a copy-protection measure" (nesdev,
+/// "INES Mapper 132"), over the three widths the family has — three bits on 132, four on 136 and
+/// six on 172 (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_the_jv001_answers_4100_incremented_and_inverted_over_its_own_width() {
+    // ---- three bits, mapper 132: the accumulator is `S`+`RRR` masked to $07.
+    let mut m132 = MapperRom::new(132).prg(16).chr(32).load();
+    jv001_load(&mut m132, 0x05);
+    assert_eq!(0x05, m132.read_memory(0x4100), "copied through");
+
+    // "write $4101: [.... ...V] - Invert Mode", and then $4100 copies `~PP`.
+    m132.mapper_write(0x4101, 0x01);
+    m132.mapper_write(0x4100, 0x00);
+    assert_eq!(
+        0x05 ^ 0x07,
+        m132.read_memory(0x4100) & 0x07,
+        "the low three bits come back complemented"
+    );
+
+    // "write $4103: [.... ...C] - Increment Mode", and then $4100 counts.
+    m132.mapper_write(0x4103, 0x01);
+    m132.mapper_write(0x4100, 0x00);
+    assert_eq!(
+        (0x05 ^ 0x07) + 1,
+        m132.read_memory(0x4100) & 0x07,
+        "incremented over three bits"
+    );
+
+    // ---- four bits, mapper 136: the same chip with the mask at $0F, and **Invert set at
+    // power-on**, which is the one piece of power-on state either account of the chip gives.
+    let mut m136 = MapperRom::new(136).prg(8).chr(64).load();
+    jv001_load(&mut m136, 0x03);
+    assert_eq!(
+        0x03 ^ 0x0F,
+        m136.read_memory(0x4100) & 0x0F,
+        "Invert is set at power-on on this wiring"
+    );
+    m136.mapper_write(0x4103, 0x01);
+    m136.mapper_write(0x4100, 0x00);
+    assert_eq!(
+        (0x03 ^ 0x0F) + 1,
+        m136.read_memory(0x4100) & 0x0F,
+        "incremented over four bits"
+    );
+
+    // ---- six bits, mapper 172: "Games will check the lower six bits of $4100". The two bits
+    // above the accumulator are the Input latch's own, "inverted if Invert==1".
+    let mut m172 = MapperRom::new(172).prg(4).chr(32).load();
+    jv001_load(&mut m172, 0x00);
+    assert_eq!(
+        0x3F,
+        m172.read_memory(0x4100) & 0x3F,
+        "all six bits complemented from a zero Input"
+    );
+}
+
+/// nesdev ("INES Mapper 172"): "the bit order D0-D5 is *reversed*". The reversal is a bit
+/// permutation **in the board's wiring**, so it shows on what the chip's Output selects and not
+/// on a value that goes in through it and comes back out through it (MF-UNL-1 step 1).
+///
+/// This is the test that proves the parameter is wired, and the second half is the reason it is
+/// written against the *bank* and not against the read: a complement commutes with a bit
+/// permutation and `reverse6` is an involution, so `reverse(!reverse(v))` is `!v` — the read
+/// path cancels the reversal exactly. The banking pins are inside the chip and do not.
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_172_reverses_d0_d5_where_it_shows_on_the_bank() {
+    // The same CPU byte into the same sequence on both boards. On 136 `$01` is Input bit 0, so
+    // the accumulator takes it and Output's low nibble is `!1 & $0F` = $0E; on 172 the byte
+    // arrives at the chip as `$20`, which is **above** the four-bit accumulator, so the
+    // accumulator loads zero and Output is `$0F` with `$20` above it.
+    let mut m136 = MapperRom::new(136).prg(8).chr(64).load();
+    jv001_load(&mut m136, 0x01);
+    m136.mapper_write(0x8000, 0x00);
+    // Output $0E, "CHR ROM bank = (Output & 7)" = 6.
+    assert_eq!(48, m136.chr_bank(0x0000));
+
+    let mut m172 = MapperRom::new(172).prg(4).chr(32).load();
+    jv001_load(&mut m172, 0x01);
+    m172.mapper_write(0x8000, 0x00);
+    // Output $2F, "8 KiB CHR-ROM bank number := (Output &3)" = 3, where 136's own Output would
+    // have given bank 2 under the same formula.
+    assert_eq!(24, m172.chr_bank(0x0000));
+    assert_eq!(2, 0x0E & 0x03);
+
+    // The read path, where the reversal cancels: both boards answer `!v` over six bits for the
+    // same written byte, and that is an identity and not an accident.
+    let mut a = MapperRom::new(136).prg(8).chr(64).load();
+    let mut b = MapperRom::new(172).prg(4).chr(32).load();
+    for input in [0x00u8, 0x13, 0x15, 0x2A, 0x3F] {
+        jv001_load(&mut a, input);
+        jv001_load(&mut b, input);
+        assert_eq!(
+            (!input) & 0x3F,
+            a.read_memory(0x4100) & 0x3F,
+            "136, input {input:#04X}"
+        );
+        assert_eq!(
+            a.read_memory(0x4100) & 0x3F,
+            b.read_memory(0x4100) & 0x3F,
+            "the reversal is its own inverse on a round trip, input {input:#04X}"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 172"): "$8000-$FFFF: Output ← Register; nametable mirroring changes
+/// (Horizontal if Invert==0, Vertical if Invert==1)". The one number of the six whose board has
+/// a mirroring wire at all (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_172_takes_its_mirroring_from_invert_on_an_8000_write() {
+    let mut core = MapperRom::new(172).prg(4).chr(32).load();
+    // Invert is set at power-on on this wiring, and `reset` is where the board says so.
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // **Invert arrives on CPU bit 5 here and not on bit 0**, which is the reversed bus seen
+    // from the other side: the page says so in as many words, "$4101: Invert ← bit 5 of written
+    // value", where 132's and 173's say `[.... ...V]`. $20 is the bit, $01 is nothing.
+    core.mapper_write(0x4101, 0x20);
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring(), "Invert still set");
+
+    core.mapper_write(0x4101, 0x00); // Invert clear.
+    assert_eq!(
+        Nm::Vertical,
+        core.mirroring(),
+        "the wire is clocked by the $8000 write and not by $4101"
+    );
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+
+    core.mapper_write(0x4101, 0x01); // Bit 0 is not the Invert pin on this board.
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(Nm::Horizontal, core.mirroring(), "bit 0 is not the wire");
+
+    core.mapper_write(0x4101, 0x20); // Invert set.
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // And no other number of the family has the wire: 136's board hardwires it.
+    let mut m136 = MapperRom::new(136).prg(8).chr(64).load();
+    let before = m136.mirroring();
+    m136.mapper_write(0x4101, 0x01);
+    m136.mapper_write(0x8000, 0x00);
+    assert_eq!(before, m136.mirroring(), "mapper 136 has no mirroring wire");
+}
+
+/// nesdev ("INES Mapper 136"): "CHR ROM bank = (Output & 7)" and "PRG ROM bank = (Output >> 4) &
+/// 1", the latter for *Mahjong Companion* alone — a line Mesen 2's `Sachen_136` does not
+/// implement and this build does, the page being the source of truth (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_136_banks_chr_from_output_and_prg_from_bit_4() {
+    let mut core = MapperRom::new(136).prg(8).chr(64).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+
+    // Input $13: `$3` into the accumulator (complemented, Invert being set) and `$10` above it.
+    // Output is then `$1C`: CHR bank 4, PRG bank 1.
+    jv001_load(&mut core, 0x13);
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(32, core.chr_bank(0x0000));
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(0x2C, core.read_memory(0x4100) & 0x3F);
+}
+
+/// nesdev ("INES Mapper 147"), the Sachen 3018's 60-pin release: the chip's pins are CPU
+/// **D2-D7**, so every byte is the chip's value rotated by two, and the Output diagram puts
+/// "PRG-ROM bank select (A15-A16)" on register bits 5 and 0 with "CHR-ROM bank select (A13-A16)"
+/// on bits 4-1 (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_147_puts_the_chip_on_d2_d7() {
+    let mut core = MapperRom::new(147).prg(16).chr(128).load();
+
+    // $94 rotated right two is $25 at the chip: Input $5 into the accumulator (complemented,
+    // Invert being set, so the accumulator is $A) and $20 above it. Output is $2A -- PRG bank
+    // 2 from bits 5 and 0, CHR bank 5 from bits 4-1.
+    jv001_load(&mut core, 0x94);
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(40, core.chr_bank(0x0000));
+
+    // And the read is the same rotation the other way: "Returns Register bits 0-5 on CPU data
+    // bus bits 2-7".
+    assert_eq!(0x6B, core.read_memory(0x4100));
+}
+
+/// nesdev ("INES Mapper 173"): "copy bottom two bits of internal register 'RRR' to CHR A15 and
+/// CHR A13 banking pins", with $4101's "value … immediately inverted and used as CHR A14". The
+/// page's shorter formula line, `(Output &1) | (~Invert <<1)`, is the same wiring with CHR A15
+/// left out; this build takes all three bits, which is Mesen 2's reading too (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_173_drives_chr_a14_from_the_inverse_of_invert() {
+    let mut core = MapperRom::new(173).prg(4).chr(64).load();
+    // Invert is clear at power-on on this wiring, so CHR A14 is high before the game writes
+    // anything at all: bank 2.
+    assert_eq!(16, core.chr_bank(0x0000));
+
+    jv001_load(&mut core, 0x03);
+    core.mapper_write(0x8000, 0x00);
+    // Output $3: A13 from bit 0, A15 from bit 1, A14 still high -- bank 7.
+    assert_eq!(56, core.chr_bank(0x0000));
+
+    // "This value is immediately inverted and used as CHR A14": the bank moves on the $4101
+    // write, with no $8000 behind it.
+    core.mapper_write(0x4101, 0x01);
+    assert_eq!(40, core.chr_bank(0x0000), "A14 low, bank 5");
+    core.mapper_write(0x4101, 0x00);
+    assert_eq!(56, core.chr_bank(0x0000), "A14 high again, bank 7");
+}
+
+/// nesdev ("INES Mapper 173"), the 小瑪琍 board: it "uses the Mapper 173 circuit board but
+/// replaces the 32 KiB CHR-ROM chip with a SGS M2764A 8 KiB UVEPROM. Its pin 27 function is
+/// /PGM instead of the normal A14. Setting Invert on this board just disables CHR-ROM."
+///
+/// So on an image with 8 KiB of CHR-ROM the Invert bit is a chip-enable and not a bank bit, and
+/// the board shows nothing while it is set (MF-UNL-1 step 1).
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_102_mapper_173_with_an_8_kib_chr_rom_disables_it_on_invert() {
+    let mut core = MapperRom::new(173).prg(4).chr(8).load();
+    assert_eq!(0, core.chr_bank(0x0000));
+    assert_eq!(7, core.chr_bank(0x1C00), "the one 8 KiB chip, unbanked");
+
+    core.mapper_write(0x4101, 0x01);
+    assert_eq!(0, core.chr_bank(0x0000), "CHR-ROM disabled");
+    assert_eq!(0, core.chr_bank(0x1C00), "CHR-ROM disabled");
+
+    core.mapper_write(0x4101, 0x00);
+    assert_eq!(7, core.chr_bank(0x1C00), "and back");
+
+    // An image with the number's usual 32 KiB keeps all three bank bits: Invert is CHR A14
+    // there and not a chip enable.
+    let mut big = MapperRom::new(173).prg(4).chr(32).load();
+    big.mapper_write(0x4101, 0x01);
+    assert_eq!(0, big.chr_bank(0x0000), "A14 low, bank 0");
+    big.mapper_write(0x4101, 0x00);
+    assert_eq!(16, big.chr_bank(0x0000), "A14 high, bank 2");
+}
+
+/// Q-140, and the one place this lot leaves `docs/review/UNL-census.md` for the page: **mapper
+/// 173's board has no bus conflicts**, and that is what lets *撲克精靈* run on it.
+///
+/// The census's §6.2 row and its test list give the number `bus`. Its page gives the board no
+/// bus-conflict line at all, and the paragraph the census is reading says the opposite of what
+/// the row does: *撲克精靈* "writes the actual 8 KiB bank number to $8000 to copy Register into
+/// Output, making it potentially CNROM-compatible. It will not run as Mapper 3 on emulators that
+/// emulate bus conflicts (such as FCEUX) though, nor will it run on an actual Nintendo CNROM
+/// board, for the same reason." Giving the JV001 board conflicts would reproduce, on the one
+/// title the number exists for, the failure that sentence describes.
+///
+/// Both halves are pinned: the write reaches the latch whole on 173, and the same write on a
+/// CNROM **with** conflicts loses its bank — which is the page's sentence, reproduced.
+#[cfg(feature = "board-jv001")]
+#[test]
+fn q_140_mapper_173_has_no_bus_conflicts_and_a_cnrom_with_them_loses_the_bank() {
+    // The game's own move: load the bank into the chip, then store the bank number at $8000.
+    // The 32 KiB PRG window's first bank is numbered 0, so a board with conflicts would AND
+    // every written byte to zero.
+    let mut core = MapperRom::new(173).prg(4).chr(64).load();
+    jv001_load(&mut core, 0x03);
+    assert_eq!(
+        0u8,
+        core.read_memory(0x8000),
+        "the ROM byte under the write"
+    );
+    core.mapper_write(0x8000, 0x07);
+    assert_eq!(56, core.chr_bank(0x0000), "bank 7, the chip's own Output");
+
+    // The byte written is not used at all on this board -- the write only clocks Output -- so
+    // the bank is the same whatever the game stores and whatever the ROM holds under it.
+    for value in [0x00u8, 0x07, 0xFF, 0x5A] {
+        core.mapper_write(0x8000, value);
+        assert_eq!(56, core.chr_bank(0x0000), "stored {value:#04X}");
+    }
+
+    // The other half of the page's sentence: the same sequence on a CNROM board that does have
+    // conflicts (submapper 2, MR-BUS-1) latches `value & rom`, which is zero here.
+    let mut cnrom = MapperRom::new(3).prg(4).chr(64).submapper(2).load();
+    assert_eq!(0u8, cnrom.read_memory(0x8000));
+    cnrom.mapper_write(0x8000, 0x07);
+    assert_eq!(
+        0,
+        cnrom.chr_bank(0x0000),
+        "a CNROM with bus conflicts loses the bank, which is why the number exists"
+    );
+}
+
+/// REQ-CORE-090/091 for the family: every byte of the chip survives a save and a restore, with
+/// the state dirtied first — including the two flags and the bits above the accumulator, which
+/// no bank window can show.
+#[cfg(feature = "board-jv001")]
+#[test]
+fn req_core_090_the_jv001_chip_survives_a_save_and_restore() {
+    for mapper in [36usize, 132, 136, 147, 172, 173] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(128).load();
+        // Dirty every register the chip has: Input and its high bits, Invert, Increment, the
+        // accumulator through a load and an increment, Output through the latch, and mapper
+        // 36's own CHR latch.
+        core.mapper_write(0x4101, 0x01);
+        core.mapper_write(0x4102, 0x35);
+        core.mapper_write(0x4100, 0x00);
+        core.mapper_write(0x4103, 0x01);
+        core.mapper_write(0x4100, 0x00);
+        core.mapper_write(0x8000, 0x00);
+        core.mapper_write(0x4200, 0x09);
+
+        let state = core.save_state(true).unwrap();
+        let windows = (core.prg_windows(), core.chr_windows(), core.mirroring());
+        let protection = core.read_memory(0x4100);
+
+        // Move it somewhere else, then come back.
+        core.mapper_write(0x4101, 0x00);
+        core.mapper_write(0x4102, 0x00);
+        core.mapper_write(0x4100, 0x00);
+        core.mapper_write(0x8000, 0x00);
+        core.mapper_write(0x4200, 0x00);
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(
+            windows,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "mapper {mapper}"
+        );
+        assert_eq!(protection, core.read_memory(0x4100), "mapper {mapper}");
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+    }
 }

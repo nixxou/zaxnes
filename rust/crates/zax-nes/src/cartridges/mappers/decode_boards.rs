@@ -9,6 +9,7 @@
     feature = "board-96",
     feature = "board-111",
     feature = "board-jaleco-72-92-86",
+    feature = "board-jv001",
     feature = "board-vs-system"
 )))]
 compile_error!(
@@ -20,6 +21,8 @@ compile_error!(
 use super::Cheapocabra;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
+#[cfg(feature = "board-jv001")]
+use super::Jv001;
 use super::Mapper;
 #[cfg(feature = "board-96")]
 use super::OekaKids;
@@ -98,6 +101,12 @@ pub enum DecodeBoard {
     /// Mapper 99, the Nintendo VS. System board.
     #[cfg(feature = "board-vs-system")]
     VsBoard(VsBoard),
+    // Appended by MF-UNL-1 step 1, the first unlicensed board of this enum: six mapper numbers
+    // and one variant, which is the shape `SmallBoard` and `Namcot108` already use for a family.
+    /// Mappers 36, 132, 136, 147, 172 and 173, the TXC 05-00002-010 / Sachen JV001 protection
+    /// ASIC.
+    #[cfg(feature = "board-jv001")]
+    Jv001(Jv001),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -118,6 +127,8 @@ macro_rules! inner {
             DecodeBoard::Cheapocabra($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
+            #[cfg(feature = "board-jv001")]
+            DecodeBoard::Jv001($b) => $body,
         }
     };
 }
@@ -188,6 +199,26 @@ impl Mapper for DecodeBoard {
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         inner!(self, b => b.ppu_peek(memory, address, fetch))
+    }
+
+    /// Forwarded for the JV001 family alone (MF-UNL-1 step 1), whose protection register is at
+    /// $4100 — below $8000, where `Cartridge::default_cpu_read` falls through to this dispatch.
+    ///
+    /// **`#[inline(never)]`, and that is the whole reason the hook is this one**:
+    /// [`super::SmallBoard::try_read_prg`]'s own note has the measurement, and it is MF-6c step
+    /// 2's. `Board::try_read_prg` carries `#[inline(always)]` and folds into
+    /// `Cartridge::try_cpu_read`; with the decode behind an `#[inline(never)]` forward the arm
+    /// this variant contributes to that inlined jump table is **one `callq`**, whatever this
+    /// enum grows to later. Answering from `Mapper::cpu_peek_override` instead was measured at
+    /// +0.111 % on lot PR-1's set.
+    ///
+    /// **Behaviour-neutral for the five boards already here**: none of them overrides it, so
+    /// each takes `Mapper`'s own default — `self.banks().and_then(BankWindows::read_prg)` —
+    /// which is the answer the un-forwarded dispatch gave the whole variant.
+    #[cfg(feature = "board-jv001")]
+    #[inline(never)]
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        inner!(self, b => b.try_read_prg(memory, address))
     }
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

@@ -14,6 +14,8 @@ use super::mappers::DecodeBoard;
 use super::mappers::EepromPort;
 #[cfg(feature = "board-77")]
 use super::mappers::IremLrog017;
+#[cfg(feature = "board-jv001")]
+use super::mappers::Jv001;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
 #[cfg(feature = "board-namcot108")]
@@ -87,6 +89,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-small-boards")]
     33,
     34,
+    #[cfg(feature = "board-jv001")]
+    36,
     #[cfg(feature = "board-mmc3-multicart")]
     37,
     41,
@@ -149,8 +153,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     118,
     #[cfg(feature = "board-119")]
     119,
+    #[cfg(feature = "board-jv001")]
+    132,
+    #[cfg(feature = "board-jv001")]
+    136,
     #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-jv001")]
+    147,
     // Mapper 151 needs the VRC1 **and** the VS layer: the number is the deprecated one for that
     // board on a VS. System board, so it is advertised only when both are built, which
     // `board-vs-system` implying `board-small-boards` is what guarantees.
@@ -171,6 +181,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     158,
     #[cfg(feature = "board-eeprom")]
     159,
+    #[cfg(feature = "board-jv001")]
+    172,
+    #[cfg(feature = "board-jv001")]
+    173,
     180,
     #[cfg(feature = "board-small-boards")]
     184,
@@ -439,6 +453,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // **The six JV001 numbers are deliberately absent** (36, 132, 136, 147, 172, 173), and
+        // the reason is mapper 97's above in the same words: not one of the six pages documents
+        // any PRG-RAM, and not one of them says the board has none either. Nothing forces the
+        // question — the chip's window is $4100-$4103 under mask $E103 and the board's own CHR
+        // latch on mapper 36 is $4200 under $E200, so `$6100 & $E103` is `$6100` and no address
+        // in $6000-$7FFF can reach a register of this family. The header decides, as it does for
+        // mapper 97 (MF-UNL-1 step 1).
         _ => BoardMemorySizes::default(),
     }
 }
@@ -542,6 +563,10 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
 
 /// Builds the board of `mapper` for `memory`, or `None` when it is not implemented.
 #[must_use]
+// One arm per board, each with the lot that added it and the page it is built from: a flat
+// table, as `board_memory_sizes` above is. MF-UNL-1 step 1's six-number arm is the one that
+// crossed the threshold.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Board> {
     Some(match mapper {
         0 => Board::Nrom(Nrom),
@@ -674,6 +699,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // whose PRG-ROM is an SST39SF040 the game writes into (Q-117, MR-30-4).
         #[cfg(feature = "board-111")]
         111 => Board::DecodeBoard(DecodeBoard::Cheapocabra(Cheapocabra::new(memory))),
+        // MF-UNL-1 step 1: the TXC 05-00002-010 / Sachen JV001 protection ASIC, one chip on six
+        // boards from four publishers. The number picks the wiring -- the CPU data pins the
+        // chip's six are on, the accumulator width, which Output bits reach which banking pin,
+        // and whether a $8000 write drives the mirroring -- and `Jv001`'s own note has the
+        // table. One `DecodeBoard` variant for all six, on the `Namcot108` precedent.
+        #[cfg(feature = "board-jv001")]
+        36 | 132 | 136 | 147 | 172 | 173 => {
+            Board::DecodeBoard(DecodeBoard::Jv001(Jv001::new(memory, mapper)))
+        }
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

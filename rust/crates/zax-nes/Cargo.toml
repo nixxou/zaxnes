@@ -38,6 +38,7 @@ default = [
     "board-small-boards",
     "board-taito-x1",
     "board-111",
+    "board-jv001",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -183,6 +184,19 @@ board-111 = ["board-decode-boards"]
 # touch — moving by +1.0 M to +2.4 M on every ROM, which is §5.14's lottery and not work.
 # `Ppu2C02::read_pattern_planes` is **identical to the instruction** in all three builds.
 board-vs-system = ["board-decode-boards"]
+
+# Mappers 36, 132, 136, 147, 172 and 173 -- the TXC 05-00002-010 / Sachen JV001 protection ASIC,
+# **one chip on six boards from four publishers** (MF-UNL-1 step 1). About twenty TXC, Idea-Tek,
+# Super Mega and Sachen originals, *Strike Wolf*, *F-15 City War*, *Creatom*, *Venice Beach
+# Volley*, *撲克精靈* and *未来小子* among them.
+#
+# One feature and one `DecodeBoard` variant for the whole family, which is §6.1 of
+# `docs/review/UNL-census.md`'s finding read as `BOARD-FEATURES.md` note 1 asks: Mesen 2 builds
+# five classes for these six numbers, and what differs between them is the CPU data-bus wiring,
+# the accumulator width and which Output bits reach which banking pin -- fields of one board, on
+# the `Namcot108` precedent. One forward this enum did not have, `try_read_prg`, because the
+# protection register is at $4100. Implies `board-decode-boards`.
+board-jv001 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

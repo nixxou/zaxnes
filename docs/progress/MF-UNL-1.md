@@ -17,7 +17,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 
 - [x] **0/8 — the plan.** This file: the nine numbers, the sources read for each, the three
   features, and the shape each board takes in this tree.
-- [ ] **1/8 — `board-jv001`, the chip.** `Jv001` in `cartridges/mappers/jv001.rs`, a
+- [x] **1/8 — `board-jv001`, the chip.** `Jv001` in `cartridges/mappers/jv001.rs`, a
   `DecodeBoard` variant: the ASIC's six registers, the $4100-$4103 window (mask $E103), the
   $8000-$FFFF latch, and the six wirings as fields. `registry.rs` arms, `SUPPORTED_MAPPERS`
   entries, `board_memory_sizes` rows, and the tests the census lists from each page.
@@ -144,4 +144,16 @@ decode, the analog feedback path is not modelled, and the comment says why.
 
 ## The figures
 
-Filled in by step 6 and step 7.
+### Step 1 — `board-jv001`
+
+`Jv001` is **one `DecodeBoard` variant** and one new forward on that enum, `try_read_prg`
+(`#[inline(never)]`, the shape MF-6c step 2 measured). `SmallBoard` and `IrqBoard` grow nothing;
+`Board` grows no discriminant. Three clippy allows were added with their reasons: a
+`match_same_arms` on `Jv001::chr_bank` (132 and 172 answer `Output & 3` for two different
+documented reasons), and `too_many_lines` on `registry::create_board`, which the six-number arm
+pushed to 103 — the attribute `board_memory_sizes` beside it already carries.
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **936 passed, 0 failed, 9 ignored** (925 / 0 / 9 at `481f683d`: **+11 tests**) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
