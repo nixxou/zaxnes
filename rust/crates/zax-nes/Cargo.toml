@@ -38,7 +38,6 @@ default = [
     "board-small-boards",
     "board-taito-x1",
     "board-111",
-    "board-vs-system",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -171,7 +170,18 @@ board-111 = ["board-decode-boards"]
 # (`crate::vs::VsSystem`). Turning any one of them off would leave a VS image running wrong
 # rather than running as a NES.
 #
-# What it costs is in `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-VS.md` step 7.
+# **Parked**, and the figures are MF-VS step 7's against `f1278f46`: every one of lot PR-1's
+# thirteen ROMs is slower, `+0.026 %` (`mmc5`) to `+0.083 %` (`duelito`), set total
+# `+36 862 173 (+0.046 %)`, and level 2 is `+0.034 %` to `+0.057 %` on all ten figures — against
+# a tolerance of `+0.02 %` per ROM. **Gated off it costs nothing**: the same tree with this
+# feature out of `default` is set total `+90 052 (+0.000 %)`, worst ROM `+0.001 %`, all five
+# level-2 `core` figures `+0.000 %` and the worst `total` `smb3 +0.019 %`.
+#
+# Where the figure is: about a quarter of it is the `$2002` identifier (step 7's probe measured
+# the feature without it at set total `+26 801 979`, `duelito` `+0.083 % → +0.034 %`), and the
+# rest is `Ppu2C02::run_dots` and `Ppu2C02::background_fetch` — per-dot paths this lot does not
+# touch — moving by +1.0 M to +2.4 M on every ROM, which is §5.14's lottery and not work.
+# `Ppu2C02::read_pattern_planes` is **identical to the instruction** in all three builds.
 board-vs-system = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
@@ -213,7 +223,11 @@ board-taito-x1 = ["board-small-boards"]
 # every left-out board at once, and with the list empty it is a no-op that still builds, which
 # the suites check (`--features parked-boards` is one of the three configurations every step
 # runs).
-parked-boards = []
+#
+# **MF-VS step 7 put `board-vs-system` in it**, so the umbrella is no longer empty: that feature's
+# own note above has the figures, and `--features parked-boards` is the one flag that turns the
+# VS. System on.
+parked-boards = ["board-vs-system"]
 
 [dev-dependencies]
 sha2 = "0.10"

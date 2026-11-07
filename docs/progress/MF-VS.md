@@ -72,6 +72,8 @@ implements it.
 6. **One Cargo feature, `board-vs-system`**, gating all of it: the board, the PPU fields, the input
    surface, the table, the save-state block and the tests. In `default` if it measures inside
    +0.02 % per ROM on both runs, in `parked-boards` otherwise (`docs/review/BOARD-FEATURES.md`).
+   **Step 7 measured it above the tolerance on both runs and parked it**, and measured the gated-off
+   build at +0.000 % — so `parked-boards`, empty since MF-CART, holds this one feature.
 
 ## Out of scope, recorded as gaps (owner's list)
 
@@ -103,7 +105,7 @@ implements it.
   it as a gap; see the step.
 * [x] **6/10** — the harness: a `vs` command that loads an image, sets DIP switches, inserts a coin
   and prints what the core reports.
-* [ ] **7/10** — the measurement: level 2 with `callgrind-l2.sh` + `l2-diff.py --bar`, PR-1's
+* [x] **7/10** — the measurement: level 2 with `callgrind-l2.sh` + `l2-diff.py --bar`, PR-1's
   thirteen with `callgrind-set.sh` + `callgrind-diff.py`, clean `git archive` builds, the three
   `Cpu6502::step` inlinings, `zone_offset` and `read_pattern_planes` on the dump; the feature's
   place in `default` decided by the figures.
@@ -478,3 +480,95 @@ message that says what is wrong.
 
 Green: `zax-harness` **70 passed, 0 failed, 1 ignored** (63 at the baseline plus this step's 7),
 **63 / 0 / 1** with `--no-default-features`, fmt and clippy `-D warnings` clean both ways.
+
+### Step 7 — the measurement, and the feature is parked
+
+**Four clean `git archive` builds**, each in a fresh directory with its own target folder
+(`tools/perf/build-clean.sh`, `PERFORMANCE-HISTORY.md` §2 and §3), run under WSL's Ubuntu 24.04
+with rustc 1.99.1 and valgrind 3.22.0 — the same rustc the host has. Labels
+`mfvs-<step>-<8 chars>`, the 15 characters MF-6a step 0 measured as the length that keeps
+`load_profile` and `lua_hooks` comparable. The driver is `rust/target-mf/mfvs.sh`, four lines of
+environment around the project's own scripts, exactly as MF-CART's `mfct.sh` was.
+
+> **Before any of it: the drive.** G: had 8.0 GB free and C: 196 MB, against the brief's floor of
+> 5 GB and a clean build's ~4 GB. `rust/target-mf/release`, a 15.5 GB **rebuildable** cargo cache
+> from earlier lots, was deleted (step 9 rebuilds it) along with MF-CART's two leftover clean-build
+> directories, which took G: to 24 GB. Each build directory is deleted by the script as soon as its
+> binary is copied out, and the callgrind `.out` dumps were deleted as soon as the figures below
+> were read.
+
+#### The verdict: above the tolerance on both runs, so `board-vs-system` is parked
+
+`mfvs-1-93ebee1f` (the lot with the feature in `default`) against `mfvs-0-f1278f46`:
+
+| | figure |
+| --- | --- |
+| PR-1's thirteen | **every one slower**: `duelito` **+0.083 %**, `readbuf` +0.077 %, `z2` +0.067 %, `metroid` +0.051 %, `m0` +0.049 %, `m1` +0.044 %, `mm2` +0.044 %, `smb1` +0.042 %, `m4` +0.034 %, `smb3` +0.034 %, `vblnmi` +0.030 %, `mmc5` +0.026 %, `oamstr` +0.001 %. Set total **+36 862 173 (+0.046 %)** |
+| level 2 | **all ten above**: `zelda2/core` **+0.057 %**, `metroid/core` +0.055 %, `mm2/core` +0.053 %, `smb1/core` +0.052 %, `smb3/core` +0.044 %, and the five `total` figures +0.034 % to +0.045 % |
+
+Against a tolerance of **+0.02 % per ROM on both runs**, that is nine of thirteen and ten of ten
+over. The owner's rule says what happens next and the step did it: the feature is **out of
+`default` and in `parked-boards`**, which is no longer empty, and `zax-harness`'s own `default` goes
+with it so that the `vs` subcommand is not in a build whose core has no VS layer. **The board is
+not dropped** — `--features parked-boards` is one flag and gives the whole machine on both sides.
+
+#### Gated off it costs nothing, and that is the measurement that matters most
+
+`mfvs-3-parked` — the identical tree with the feature out of `default` — against the same baseline:
+
+* PR-1's thirteen: set total **+90 052 (+0.000 %)**, worst ROM **+0.001 %**; six ROMs above the
+  baseline by 14 173 to 66 429 instructions and seven below it.
+* Level 2: **all five `core` figures +0.000 %** (+64, +384, +433, +2 515 and +22 400 instructions
+  on 11 to 15 **billion**), and the worst `total` is `smb3` **+0.019 %**, inside the tolerance, with
+  `zelda2` +0.001 %, `smb1` and `metroid` +0.000 % and `mm2` below the baseline.
+
+So the gating is clean: the shipped default build is the baseline to within a figure a hundredth
+the size of the tolerance. That is the proof MF-6a3 step 3 established for nine features at once
+and it holds for a tenth.
+
+#### The three pinned symbols, identical to the instruction in all three builds
+
+* **The three `Cpu6502::step` inlinings hold, 0 / 0 / 0.** `step`, `branch` and `resolve` are one
+  symbol each in every build, at **419 548 544 / 163 582 727 / 61 863 835** on `mmc5` — the same
+  numbers in the baseline, the parked build and the un-parked one.
+* **`Ppu2C02::read_pattern_planes` is unchanged**, which is what the brief asks for by name:
+  **96 388 300** on `mmc5`, 95 062 640 on `smb3`, 48 633 600 on `m4`, and 221 447 100 to
+  240 214 760 on the five level-2 games — **identical to the instruction in all three builds**. The
+  per-pixel path really is untouched, which is the whole claim of the design's points 2 and 3.
+* **`WideExtension::zone_offset` is not dearer**: it is not a symbol of its own in any of the three
+  builds (inlined into the fetch path, as every earlier lot found it), so no new symbol appeared
+  and nothing moved.
+
+#### Where the figure is, measured with two probes rather than guessed
+
+**Probe A, `mfvs-2-noraw`: `palette_raw` is not the cost.** Step 2 added 32 bytes to `Ppu2C02` for
+the faithful `$2007` read-back, and the obvious suspicion was that growing the struct moved the
+hot fields' offsets. A build with that array removed — `palette` holding the shown byte, the read
+paths and the state blob back on it — measures set total **+36 724 970** against the tip's
++36 862 173: **the same figure**. So the array costs nothing and step 2's exact read-back stays.
+
+**Probe C, `mfvs-4-no2002`: the `$2002` identifier is a quarter of it, and removing it would not
+be enough.** A build with step 3's `(decay & latch_mask) | id` reverted to the immediate
+`decay & 0x1F` measures set total **+26 801 979 (+0.034 %)** — so the identifier is
+**+10 060 194**, and it lands where it should: `duelito` **+0.083 % → +0.034 %**, `readbuf`
++0.077 % → +0.032 %, `vblnmi` +0.030 % → +0.002 %. Three instructions on a `$2002` read, on the
+three ROMs of the set that poll it. **But the residue is still +0.024 % to +0.051 % on eleven of
+thirteen**, so no shape of that one register saves the feature, which is why the step parked it
+rather than reshaping and re-measuring.
+
+**What the residue actually is**, from the per-symbol diff: `Ppu2C02::run_dots` **+1 144 469 to
++2 417 230 on every ROM that renders** and `Ppu2C02::background_fetch` +166 634 to +2 417 230 —
+**per-dot paths this lot does not touch at any line** — plus
+`Board::intercept_cpu_write` going from **0 to +171 936..+1 806 867** (a dispatch that used to be
+inlined into `Cartridge::cpu_write` and is now a call) with `NesBus::write_internal`
+−101 312..−1 248 494 against it. That is §5.14's rule, unchanged and now measured once more: **a
+board's cost is not its own, and the sign is LLVM's choice.** What is new, and §5.15 did not
+cover, is where it came from: §5.15 measured twelve extra *shared-enum variants* as free and warned
+only about a new `Board` **discriminant**. This lot added neither — one `DecodeBoard` variant and
+no discriminant — and was charged anyway, by the **PPU**, which is the first lot to add fields and
+arms there. `PERFORMANCE-HISTORY.md` §5.16 records it as the limit a VS-class lot meets.
+
+Green after the park: `zax-nes` **862 / 0 / 7** by default — *exactly* MF-CART's baseline, the
+default build being unchanged — **907 / 0 / 7** with `--features parked-boards`, **783 / 0 / 7**
+with `--no-default-features`; `zax-harness` **63 / 0 / 1** by default and **70 / 0 / 1** with
+`--features parked-boards`. fmt and clippy `-D warnings` clean in all five configurations.

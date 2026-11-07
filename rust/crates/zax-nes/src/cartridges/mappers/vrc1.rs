@@ -54,6 +54,9 @@ impl Vrc1 {
     /// iNES mapper number of the same chip on a VS. System board.
     pub const VS_MAPPER: i32 = 151;
 
+    // Without the VS layer mapper 151 is not registered, so the number the board was built for
+    // can only be 75 and nothing reads the argument.
+    #[cfg_attr(not(feature = "board-vs-system"), allow(unused_variables))]
     pub(crate) fn new(memory: &CartridgeMemory, mapper: i32) -> Self {
         Self {
             banks: windows_for(memory),
