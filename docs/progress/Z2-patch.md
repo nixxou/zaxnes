@@ -172,4 +172,67 @@ Both tests are `#[ignore]`d and gated on `ZAXNES_ROMS`.
 
 ## Step 3 — the check
 
-To come.
+All five gates on the committed tree (`109dff24`), each run in the foreground, one at a time.
+
+| gate | result |
+| --- | --- |
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | clean (and with `-p zax-harness` too) |
+| `cargo test --release -p zax-nes -p zax-harness` | **925 passed, 0 failed, 9 ignored** |
+| the same `--no-fail-fast -- --ignored`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set | **9 passed, 0 failed** |
+| `zax-harness packs G:/3dsen/test-originals`, before and after | **byte-identical**, md5 `5e98bf22…`, 99 lines |
+
+### The `--ignored` suite: nine of nine
+
+The brief asks for "8 of 8"; the count is 9 because step 2 added one test to the eight. The
+previously failing one is among them, and nothing else moved:
+
+| test | before | now |
+| --- | --- | --- |
+| `builtin_patches::…::the_zelda_ii_patch_applies_to_the_usa_rom` | **failed** since ZR-1 | **ok** |
+| `builtin_patches::…::a_change_to_the_chr_rom_alone_still_takes_the_zelda_ii_patch` | — (new) | **ok** |
+| `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` | ok | ok |
+| `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` | ok | ok |
+| `req_core_113_dmc_dma_during_read4_is_p3` | ok | ok |
+| `the_sprite_dma_and_dmc_dma_collision_is_not_cycle_exact` | ok | ok |
+| `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` | ok | ok |
+| `the_cost_of_one_capture_and_one_restore` | ok | ok |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` | ok | ok |
+
+`925 / 0 / 9` is MF-4e-gate's `925 / 0 / 8` with step 2's one new `#[ignore]`d test: no test was
+removed, none was un-ignored, and the default suite's count did not move.
+
+### `packs` before and after: identical, dump by dump
+
+Both runs are the release `zax-harness` of this worktree, the "before" one built from
+`b9586937`'s `builtin_patches.rs` restored into the tree for the build and checked back out
+immediately (`git status` clean after, bar the untracked `rust/target-mf/`). The two outputs are
+identical byte for byte — same md5, so identical on all 98 rows and the summary — which is what
+the diff predicts, every hunk of it being inside `#[cfg(test)] mod tests`.
+
+| | before | after |
+| --- | ---: | ---: |
+| by CRC | 45 | 45 |
+| by signatures | 52 | 52 |
+| no pack (Blaster Master USA Beta) | 1 | 1 |
+| `whole / in part / none` | 97 / 0 / 1 | 97 / 0 / 1 |
+
+The three Zelda II dumps the patches target, unchanged and still found by their own CRC:
+
+```
+Zelda II (USA)           widescreen by CRC: widescreen[core,enemies,world map,edge spawns] invincible[invincible]
+Zelda II (Europe)        widescreen by CRC: widescreen[core,enemies,world map,edge spawns] invincible[invincible]
+Zelda II (Europe) (Rev 2) widescreen by CRC: widescreen[core,enemies,world map,edge spawns] invincible[invincible]
+```
+
+Nothing outside `mod tests` changed, so emulation, performance and the save-state format are
+untouched by construction; the identical `packs` output is the measurement that says so.
+
+## Outcome
+
+The test was wrong, not the integrity check. The checksum covers the PRG-ROM and the CHR-ROM both
+(step 1), and a ROM whose hooked code is intact takes a pack by its signatures on purpose — Q-108
+§2's default level, and 52 of the 98 original dumps' only way in. The test now flips a byte the
+pack reads, a new test pins the CHR-only case with the design's three records in its doc comment,
+and the two other BPS-era assertions of the block are replaced by what a hack pack actually does.
+Nine of nine `--ignored` tests pass; the last known failure of the suite is closed.
