@@ -122,7 +122,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let taito_x1 = cfg!(feature = "board-taito-x1");
     let eeprom = cfg!(feature = "board-eeprom");
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
-    let additions: [(i32, bool); 52] = [
+    let additions: [(i32, bool); 54] = [
         (19, true),
         (24, true),
         (26, true),
@@ -153,12 +153,16 @@ fn req_core_100_every_required_mapper_is_registered() {
         (95, namcot),
         (96, cfg!(feature = "board-96")),
         (97, small),
+        // MF-VS step 4: mapper 99 is the VS. System board itself and 151 the VRC1 on a VS board,
+        // two numbers that exist only on that machine.
+        (99, cfg!(feature = "board-vs-system")),
         (105, cfg!(feature = "board-105")),
         (111, cfg!(feature = "board-111")),
         (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
         (140, small),
+        (151, cfg!(feature = "board-vs-system")),
         (152, small),
         (153, cfg!(feature = "board-153")),
         (154, namcot),

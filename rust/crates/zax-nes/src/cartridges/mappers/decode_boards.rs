@@ -23,6 +23,8 @@ use super::IremLrog017;
 use super::Mapper;
 #[cfg(feature = "board-96")]
 use super::OekaKids;
+#[cfg(feature = "board-vs-system")]
+use super::VsBoard;
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::{JalecoJf13, JalecoJf17};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -91,6 +93,11 @@ pub enum DecodeBoard {
     /// Mapper 111, the Membler Industries GTROM / Cheapocabra board.
     #[cfg(feature = "board-111")]
     Cheapocabra(Cheapocabra),
+    // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
+    // cartridge write, which is the only thing that makes it unusual here.
+    /// Mapper 99, the Nintendo VS. System board.
+    #[cfg(feature = "board-vs-system")]
+    VsBoard(VsBoard),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -109,6 +116,8 @@ macro_rules! inner {
             DecodeBoard::OekaKids($b) => $body,
             #[cfg(feature = "board-111")]
             DecodeBoard::Cheapocabra($b) => $body,
+            #[cfg(feature = "board-vs-system")]
+            DecodeBoard::VsBoard($b) => $body,
         }
     };
 }

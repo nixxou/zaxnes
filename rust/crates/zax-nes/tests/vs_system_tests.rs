@@ -8,6 +8,7 @@
 //! two nibbles and byte 15's default expansion device, and "Vs. System" for the machine itself.
 //! The header fields themselves are REQ-CORE-012's.
 
+use zax_nes::cartridges::ChrFetch;
 use zax_nes::rom::InesHeader;
 use zax_nes::vs::{rom_table, VsHardware, VsPpuModel, VsSource, VsSystem, VsWiring, LUT_LEN};
 use zax_nes::NesCore;
@@ -809,6 +810,249 @@ fn a_plain_nes_image_does_not_swap_2000_and_2001() {
     let mut picture = Vec::new();
     core.ppu().pixel_frame_indices_into(&mut picture);
     assert_eq!(picture[256 * 120 + 128], 0x20, "$2001 greys a NES picture");
+}
+
+// ------------------------------------------------------------------ mapper 99 and mapper 151
+
+/// A NES 2.0 VS image of `mapper` with `prg_8k` 8 KiB PRG banks and `chr_8k` 8 KiB CHR banks,
+/// each PRG bank filled with `0x10 + index` and each CHR bank with `0xA0 + index`.
+///
+/// 40 KiB of PRG is not a whole number of the 16 KiB units byte 4 counts, so that size is written
+/// in NES 2.0's exponent-multiplier form (byte 9's nibble `$F`): `5 << 13`, which is the shape
+/// *Vs. Gumshoe*'s own header has.
+fn vs_board_image(mapper: u8, prg_8k: usize, chr_8k: usize) -> Vec<u8> {
+    let prg = prg_8k * 8 * 1024;
+    let chr = chr_8k * 8 * 1024;
+    let mut image = vec![0u8; 16 + prg + chr];
+    image[..4].copy_from_slice(b"NES\x1A");
+    image[6] = (mapper & 0x0F) << 4;
+    // NES 2.0, console type 1, so that the image is a VS. System however it is detected.
+    image[7] = (mapper & 0xF0) | 0x09;
+
+    if prg % (16 * 1024) == 0 {
+        image[4] = u8::try_from(prg / (16 * 1024)).expect("a small fixture");
+    } else {
+        assert_eq!(
+            prg,
+            40 * 1024,
+            "only the 40 KiB layout needs the other form"
+        );
+        image[4] = (13 << 2) | 2; // 5 << 13 = 40960.
+        image[9] = 0x0F;
+    }
+    image[5] = u8::try_from(chr / (8 * 1024)).expect("a small fixture");
+
+    for bank in 0..prg_8k {
+        let start = 16 + bank * 8 * 1024;
+        image[start..start + 8 * 1024].fill(0x10 + u8::try_from(bank).unwrap_or(0));
+    }
+    for bank in 0..chr_8k {
+        let start = 16 + prg + bank * 8 * 1024;
+        image[start..start + 8 * 1024].fill(0xA0 + u8::try_from(bank).unwrap_or(0));
+    }
+    image
+}
+
+/// The byte the PPU fetches at `$0000`, which is the 8 KiB CHR bank the board selects.
+fn chr_bank_byte(core: &NesCore) -> u8 {
+    core.cartridge()
+        .expect("a ROM is loaded")
+        .ppu_peek(0x0000, ChrFetch::Background)
+}
+
+/// nesdev, "INES Mapper 099" and "Vs. System": the board's one register is **bit 2 of a `$4016`
+/// write**, and it selects the 8 KiB CHR bank.
+#[test]
+fn mapper_99_selects_its_chr_bank_through_4016_bit_2() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(99, 4, 2), "Mapper99.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.cartridge().expect("loaded").mapper_number(), 99);
+    assert!(core.vs_system().is_some());
+
+    assert_eq!(chr_bank_byte(&core), 0xA0, "bank 0 at power-on");
+
+    core.write_memory(0x4016, 0x04);
+    assert_eq!(chr_bank_byte(&core), 0xA1, "bit 2 selects bank 1");
+
+    core.write_memory(0x4016, 0x00);
+    assert_eq!(chr_bank_byte(&core), 0xA0, "and clearing it goes back");
+
+    // The two low bits of that write are the controller strobe and the `DualSystem` line, which
+    // is why the page says a game keeps its own copy of the value: neither moves the bank.
+    for value in [0x01u8, 0x02, 0x03] {
+        core.write_memory(0x4016, value);
+        assert_eq!(
+            chr_bank_byte(&core),
+            0xA0,
+            "{value:#04X} is not the select bit"
+        );
+    }
+    for value in [0x05u8, 0x06, 0x07, 0xFF] {
+        core.write_memory(0x4016, value);
+        assert_eq!(
+            chr_bank_byte(&core),
+            0xA1,
+            "{value:#04X} carries the select bit"
+        );
+    }
+}
+
+/// The page's 40 KiB variant: "Only *Vs. Gumshoe* uses the 40 KiB PRG configuration … the 8 KiB
+/// banks are sequenced as 0, 1, 2, 3, 0 alternate, empty", so the same bit additionally swaps the
+/// bank at `$8000-$9FFF` — and `$A000-$FFFF` is the fixed 24 KiB whatever it says.
+#[test]
+fn mapper_99_switches_the_8k_prg_bank_only_on_the_40k_layout() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(99, 5, 2), "Mapper99Gumshoe.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(
+        core.cartridge().expect("loaded").rom().prg_rom().len(),
+        40960
+    );
+
+    let windows = |core: &NesCore| {
+        [0x8000u16, 0xA000, 0xC000, 0xE000].map(|address| core.read_memory(address))
+    };
+
+    assert_eq!(windows(&core), [0x10, 0x11, 0x12, 0x13], "banks 0, 1, 2, 3");
+    core.write_memory(0x4016, 0x04);
+    assert_eq!(
+        windows(&core),
+        [0x14, 0x11, 0x12, 0x13],
+        "the alternate bank 4 at $8000, the fixed 24 KiB untouched"
+    );
+    core.write_memory(0x4016, 0x00);
+    assert_eq!(windows(&core), [0x10, 0x11, 0x12, 0x13]);
+
+    // A 32 KiB image has no fifth bank for the bit to reach, and its PRG never moves.
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(99, 4, 2), "Mapper99.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(windows(&core), [0x10, 0x11, 0x12, 0x13]);
+    core.write_memory(0x4016, 0x04);
+    assert_eq!(
+        windows(&core),
+        [0x10, 0x11, 0x12, 0x13],
+        "32 KiB: PRG is fixed"
+    );
+    // The CHR bank still moves, the two halves of the register being one bit.
+    assert_eq!(chr_bank_byte(&core), 0xA1);
+}
+
+/// The board's 2 KiB of work RAM, not the iNES default of 8 KiB ("CPU `$6000-$7FFF`: 2 KiB RAM"),
+/// mirrored four times across the window because the board decodes no more address lines.
+#[test]
+fn mapper_99_has_two_kibibytes_of_work_ram_mirrored() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(99, 4, 2), "Mapper99.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(core.read_memory(0x6000), 0x5A);
+    for mirror in [0x6800u16, 0x7000, 0x7800] {
+        assert_eq!(
+            core.read_memory(mirror),
+            0x5A,
+            "{mirror:#06X} mirrors $6000"
+        );
+    }
+
+    core.write_memory(0x77FF, 0xA5);
+    assert_eq!(core.read_memory(0x67FF), 0xA5);
+}
+
+/// The select bit is in the savestate, so a restore puts the banks back (REQ-CORE-090).
+#[test]
+fn the_select_bit_is_in_the_savestate() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(99, 5, 2), "Mapper99Gumshoe.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    core.write_memory(0x4016, 0x04);
+    let state = core.save_state(false).expect("a ROM is loaded");
+    core.write_memory(0x4016, 0x00);
+    assert_eq!(chr_bank_byte(&core), 0xA0);
+    assert_eq!(core.read_memory(0x8000), 0x10);
+
+    core.try_load_state(&state, 0)
+        .expect("the state is this machine's");
+    assert_eq!(chr_bank_byte(&core), 0xA1);
+    assert_eq!(core.read_memory(0x8000), 0x14);
+}
+
+/// Mapper 151 is the VRC1 on a VS board: the same chip, the same registers, a different number.
+#[test]
+fn mapper_151_is_the_vrc1_and_a_vs_system() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(151, 8, 8), "Mapper151.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.cartridge().expect("loaded").mapper_number(), 151);
+    assert!(core.vs_system().is_some());
+
+    // The VRC1's $8000 register: bits 3-0 are the 8 KiB PRG bank at $8000.
+    core.write_memory(0x8000, 0x05);
+    assert_eq!(core.read_memory(0x8000), 0x15);
+    // $E000 is the low four bits of the 4 KiB CHR bank at PPU $0000; bank 2 of 4 KiB is the
+    // second half of the 8 KiB bank 1.
+    core.write_memory(0xE000, 0x02);
+    assert_eq!(chr_bank_byte(&core), 0xA1);
+
+    // And mapper 75, the same board off a VS board, is not a VS. System.
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(75, 8, 8), "Mapper75.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.cartridge().expect("loaded").mapper_number(), 75);
+    // The fixture's header says console type 1, so it *is* detected as a VS image — which is the
+    // point: the number is not what makes 75 a VS board, the header is.
+    assert!(core.vs_system().is_some());
+
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(75, 0x00, 0, 0), "Mapper75Nes.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert!(
+        core.vs_system().is_none(),
+        "mapper 75 alone is not a VS image"
+    );
+}
+
+/// A `$4016` write reaches the cartridge **only** on the one board whose register it is: the
+/// brief's "a plain NES image proving none of it is active", for the board.
+#[test]
+fn a_4016_write_leaves_every_other_board_alone() {
+    // A UxROM VS image — the shape *Vs. Castlevania* has — whose PRG bank is its own register.
+    let mut core = NesCore::new();
+    let load = core.load_rom(&vs_board_image(2, 8, 1), "Mapper2Vs.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert!(
+        core.vs_system().is_some(),
+        "console type 1 is in the fixture"
+    );
+
+    let at_power_on = core.read_memory(0x8000);
+    // The UxROM register banks 16 KiB at a time, so bank 3 is the pair of 8 KiB banks 6 and 7.
+    core.write_memory(0x8000, 0x03);
+    let before = core.read_memory(0x8000);
+    assert_eq!(before, 0x16, "the UxROM register took its 16 KiB bank 3");
+    assert_ne!(before, at_power_on);
+    for value in [0x00u8, 0x04, 0xFF] {
+        core.write_memory(0x4016, value);
+        assert_eq!(
+            core.read_memory(0x8000),
+            before,
+            "{value:#04X} at $4016 must not reach a UxROM"
+        );
+    }
+
+    // And a plain NES image: its CHR and PRG are untouched by any $4016 write.
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x00, 0, 0), "SyntheticNes.nes");
+    assert!(load.success, "{:?}", load.error);
+    let chr = chr_bank_byte(&core);
+    for value in [0x00u8, 0x04, 0xFF] {
+        core.write_memory(0x4016, value);
+        assert_eq!(chr_bank_byte(&core), chr);
+    }
 }
 
 /// The savestate carries palette RAM as the game wrote it — the format is unchanged — and a

@@ -22,9 +22,16 @@ use crate::NametableMirroring;
 ///
 /// The one condition worth spelling out is the page's: "the mirroring bit is ignored if the
 /// cartridge is wired for 4-screen VRAM, as is typical for Vs. System games using the VRC1" —
-/// so a four-screen header keeps its layout whatever `$9000` says. Mapper 151 is this board on a
-/// VS System board and §6 of `docs/review/MF-6-inventory.md` sets the VS System aside, so 151 is
-/// not registered.
+/// so a four-screen header keeps its layout whatever `$9000` says.
+///
+/// **Mapper 151 is this same chip on a VS. System board** and is registered since lot MF-VS
+/// step 4. It is a *parameter* and not a board: the register set is identical, the four-screen
+/// condition above is already the one every VS image meets, and the public NES 2.0 header
+/// database records the two titles the number exists for — *Vs. Gradius* and *Vs. The Goonies* —
+/// as **mapper 75 with console type 1**, which is the same statement from the other side. All
+/// that differs is the number [`Mapper::mapper_number`] reports; the VS layer itself comes from
+/// `crate::vs::VsSystem::detect`, which treats both numbers as a VS image whatever the header's
+/// console type says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vrc1 {
     banks: BankWindows,
@@ -34,15 +41,27 @@ pub struct Vrc1 {
     chr: [u8; 2],
     /// A four-screen header, which makes `$9000` bit 0 a no-op. Settled at load.
     four_screen: bool,
+    /// Built for mapper **151**, the number for this chip on a VS. System board, rather than for
+    /// mapper 75. Nothing but [`Mapper::mapper_number`] reads it.
+    #[cfg(feature = "board-vs-system")]
+    vs_number: bool,
 }
 
 impl Vrc1 {
-    pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+    /// iNES mapper number of the Konami VRC1 proper.
+    pub const MAPPER: i32 = 75;
+
+    /// iNES mapper number of the same chip on a VS. System board.
+    pub const VS_MAPPER: i32 = 151;
+
+    pub(crate) fn new(memory: &CartridgeMemory, mapper: i32) -> Self {
         Self {
             banks: windows_for(memory),
             prg: [0, 1, 2],
             chr: [0; 2],
             four_screen: memory.rom().header().mirroring == NametableMirroring::FourScreen,
+            #[cfg(feature = "board-vs-system")]
+            vs_number: mapper == Self::VS_MAPPER,
         }
     }
 
@@ -60,8 +79,19 @@ impl Vrc1 {
 impl Mapper for Vrc1 {
     banked!();
 
+    #[cfg(feature = "board-vs-system")]
     fn mapper_number(&self) -> i32 {
-        75
+        if self.vs_number {
+            Self::VS_MAPPER
+        } else {
+            Self::MAPPER
+        }
+    }
+
+    /// Without the VS layer mapper 151 is not registered, so the board is always the VRC1 proper.
+    #[cfg(not(feature = "board-vs-system"))]
+    fn mapper_number(&self) -> i32 {
+        Self::MAPPER
     }
 
     fn save_registers(&self, writer: &mut StateWriter) {

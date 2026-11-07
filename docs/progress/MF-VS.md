@@ -93,7 +93,7 @@ implements it.
 * [x] **2/10** — the palettes: the four RP2C04 LUTs and the 2C03/2C05 identity, chosen at load and
   applied where palette RAM is written (the plan said `snapshot_palette`; see the step).
 * [x] **3/10** — the RC2C05: the `$2000`/`$2001` write swap and the `$2002` ID.
-* [ ] **4/10** — mapper 99 as a `DecodeBoard` member, the `$4016` write forward, the 40 KiB PRG
+* [x] **4/10** — mapper 99 as a `DecodeBoard` member, the `$4016` write forward, the 40 KiB PRG
   bank; mapper 151 as a parameter of the VRC1.
 * [ ] **5/10** — the inputs: two coin slots, the service button, the eight DIP switches at
   `$4016`/`$4017`, the swapped ports, the coin counter at `$4020`-`$5FFF`; the core API; the save
@@ -302,4 +302,61 @@ comes out `$20` when the grey mask applies — checked in both directions on all
 non-RC2C05 VS image, and on a plain NES image.
 
 Green: **891 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
+`-D warnings` clean in all three configurations.
+
+### Step 4 — mapper 99, mapper 151, and the one forward the lot adds
+
+**Mapper 99 is a `DecodeBoard` variant, the sixth**, and costs the `Board` enum no discriminant:
+no IRQ, no bus conflicts, no mirroring register (every VS image is four-screen). `VsBoard` holds a
+`BankWindows`, one `bool` of register and one `bool` settled at load.
+
+What the page gives and the board does:
+
+* **The register is bit 2 of a `$4016` write**, "Select both PRG ROM and CHR ROM bank" (nesdev,
+  "INES Mapper 099"), which nesdev's "Vs. System" states from the other side in its `$4016` write
+  layout — "Bit 2: 8 KiB CHR ROM bank selection (Mapper 99 only)". The other two low bits of that
+  write are the controller strobe and the `DualSystem` line, which is why the page notes a game
+  keeps its own copy of the value; a test sweeps all eight low values and only the four with bit 2
+  move the bank.
+* **The PRG half exists only above 32 KiB.** "Only *Vs. Gumshoe* uses the 40 KiB PRG configuration
+  … the 8 KiB banks are sequenced as 0, 1, 2, 3, 0 alternate, empty", done in hardware by "an
+  additional wire connecting the 2A03's OUT2 pin to address line A13". So the bit picks 8 KiB bank
+  0 or bank **4** at `$8000` and `$A000-$FFFF` is the fixed 24 KiB; on a 32 KiB image there is no
+  fifth bank and PRG never moves, while the CHR half still does.
+* **2 KiB of work RAM** at `$6000-$7FFF` and not the iNES default of 8 KiB, mirrored four times
+  across the window.
+
+Writing that 40 KiB fixture turned up a detail worth recording: **40 KiB is not a whole number of
+the 16 KiB units byte 4 counts**, so a *Vs. Gumshoe* header has to use NES 2.0's
+exponent-multiplier form — byte 9's nibble `$F`, byte 4 `(13 << 2) | 2`, which is `5 << 13`. The
+existing parser already handles it (`nes20_rom_size`), and the test fixture is the proof.
+
+**The one new forward.** `$4016` is a CPU register and no cartridge ever saw a write to it. Step 0
+flagged this as the one piece of new code on a path that is not cold — every game strobes the
+controllers a few times a frame — and the shape chosen keeps it to **one test of a `bool`**:
+`NesBus::attach` asks once whether the cartridge is a mapper-99 board, beside the
+`expansion_audio` flag it already sets there, and the `$4016` write arm then tests that flag. No
+`Board` dispatch is consulted, and the forward reuses `Cartridge::cpu_write` exactly as it is: it
+reaches `Mapper::write_register` with the address unchanged and refreshes the ROM windows after,
+which is what a bank switch needs. Step 7 measures it.
+
+**Mapper 151 is a parameter and not a board**, which the data settled in step 1: the public header
+database records *Vs. Gradius* and *Vs. The Goonies*, the only two titles the number exists for, as
+**mapper 75 with console type 1**. So `Vrc1::new` takes the number, `mapper_number` reports
+whichever it was built for, and `SmallBoard` grows no variant. The VRC1's own note already carried
+the page's condition that matters here — "the mirroring bit is ignored if the cartridge is wired
+for 4-screen VRAM, as is typical for Vs. System games using the VRC1" — and that is the condition
+every VS image meets, so the board needed no other change.
+
+Two gaps recorded, both named in the board's own doc comment: the page's "unlike all other
+mappers, an undersize mapper 99 image implies open bus instead of mirroring" (this core wraps bank
+numbers for every board, and Mesen 2 says the same of itself — "it doesn't look like any game
+actually rely on this behavior? So not implemented for now"), and the `DualSystem`'s swap of the
+2 KiB at `$6000-$7FFF` between two CPUs.
+
+Six tests, and one existing test extended: `req_core_100_every_required_mapper_is_registered` now
+carries 99 and 151 behind the feature, which is what keeps the registry honest in every
+configuration.
+
+Green: **897 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
 `-D warnings` clean in all three configurations.

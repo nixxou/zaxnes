@@ -31,6 +31,8 @@ use super::mappers::Sunsoft4;
 use super::mappers::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::mappers::Tqrom;
+#[cfg(feature = "board-vs-system")]
+use super::mappers::VsBoard;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
@@ -135,6 +137,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     96,
     #[cfg(feature = "board-small-boards")]
     97,
+    #[cfg(feature = "board-vs-system")]
+    99,
     101,
     #[cfg(feature = "board-105")]
     105,
@@ -147,6 +151,11 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     119,
     #[cfg(feature = "board-small-boards")]
     140,
+    // Mapper 151 needs the VRC1 **and** the VS layer: the number is the deprecated one for that
+    // board on a VS. System board, so it is advertised only when both are built, which
+    // `board-vs-system` implying `board-small-boards` is what guarantees.
+    #[cfg(feature = "board-vs-system")]
+    151,
     #[cfg(feature = "board-small-boards")]
     152,
     #[cfg(feature = "board-153")]
@@ -234,6 +243,10 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
 #[must_use]
+// One arm per board that dictates a size, each with the page that says so: a flat table, like
+// `create_board` above it and `opcode_table`'s matrix. MF-VS step 4's mapper-99 arm is the one
+// that crossed the threshold.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemorySizes {
     match mapper {
         // MR-34-2, nesdev ("INES Mapper 034"): the NINA boards have "8 KiB of unbanked
@@ -253,6 +266,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         },
         5 => BoardMemorySizes {
             min_prg_ram: Mmc5::MAX_PRG_RAM_SIZE,
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 099"): "CPU $6000-$7FFF: 2 KiB RAM", not the iNES default of 8 KiB
+        // (`VsBoard::PRG_RAM_SIZE` has the rest, the `DualSystem`'s sharing of it included).
+        #[cfg(feature = "board-vs-system")]
+        99 => BoardMemorySizes {
+            prg_ram: Some(VsBoard::PRG_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 119"): "Both TQROM games used 8 KiB CHR RAM", beside the CHR-ROM
@@ -593,7 +613,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         #[cfg(feature = "board-small-boards")]
         70 | 152 => Board::SmallBoard(SmallBoard::Bandai74161(Bandai74161::new(memory, mapper))),
         #[cfg(feature = "board-small-boards")]
-        75 => Board::SmallBoard(SmallBoard::Vrc1(Vrc1::new(memory))),
+        // MF-VS step 4: mapper 151 is the **same** VRC1 on a VS. System board, and the public
+        // NES 2.0 header database agrees -- it records *Vs. Gradius* and *Vs. The Goonies*, the
+        // two titles the number exists for, as mapper 75 with console type 1. So the number is a
+        // parameter of the board and not a board: `Vrc1` reports whichever of the two it was
+        // built for, the VS layer comes from `crate::vs::VsSystem::detect` (which treats both
+        // numbers as a VS image whatever the console type says), and `SmallBoard` grows no
+        // variant.
+        75 => Board::SmallBoard(SmallBoard::Vrc1(Vrc1::new(memory, mapper))),
+        #[cfg(feature = "board-vs-system")]
+        151 => Board::SmallBoard(SmallBoard::Vrc1(Vrc1::new(memory, mapper))),
         #[cfg(feature = "board-small-boards")]
         232 => Board::SmallBoard(SmallBoard::Bf9096(Bf9096::new(memory))),
         // MF-6a step 4: CNROM with the security diodes. `CnRomProtect`'s note says why it
@@ -636,6 +665,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // whose PRG-ROM is an SST39SF040 the game writes into (Q-117, MR-30-4).
         #[cfg(feature = "board-111")]
         111 => Board::DecodeBoard(DecodeBoard::Cheapocabra(Cheapocabra::new(memory))),
+        // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
+        // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
+        // nothing else.
+        #[cfg(feature = "board-vs-system")]
+        99 => Board::DecodeBoard(DecodeBoard::VsBoard(VsBoard::new(memory))),
         // MF-6b step 1: the boards whose counter can pull /IRQ, behind one discriminant.
         // `IrqBoard`'s note has the measurement that put them there.
         73 => Board::IrqBoard(IrqBoard::Vrc3(Vrc3::new(memory))),

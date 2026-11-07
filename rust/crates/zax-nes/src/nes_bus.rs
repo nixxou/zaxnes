@@ -1,4 +1,6 @@
 use crate::apu::Apu2A03;
+#[cfg(feature = "board-vs-system")]
+use crate::cartridges::mappers::VsBoard;
 use crate::cartridges::Cartridge;
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
@@ -106,6 +108,11 @@ pub struct NesBus {
     /// cycle it belongs to is run (REQ-CORE-073, REQ-CORE-075). Only the MMC5 sets it; it is
     /// never read on the per-cycle path, `apu_batching` standing in for it there.
     expansion_audio: bool,
+    /// Whether the cartridge is a mapper-99 board, the one board whose register is a `$4016`
+    /// write, asked once in [`NesBus::attach`] beside `expansion_audio`. See
+    /// [`NesBus::write_vs_port`]; `false` for every other image, including every other VS one.
+    #[cfg(feature = "board-vs-system")]
+    vs_port: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -161,6 +168,8 @@ impl NesBus {
             deferred_ppu: false,
             apu_lag: 0,
             expansion_audio: false,
+            #[cfg(feature = "board-vs-system")]
+            vs_port: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -288,6 +297,32 @@ impl NesBus {
         self.ppu.set_vs_ppu(self.input.vs());
     }
 
+    /// Hands a `$4016` write to the cartridge, for the **one** board whose register is a CPU
+    /// register: mapper 99's PRG and CHR bank select is bit 2 of that write (nesdev, "INES
+    /// Mapper 099" and "Vs. System"; lot MF-VS step 4).
+    ///
+    /// `$4016` is the controller strobe, so every game writes it a few times a frame and this is
+    /// not a cold path — but what a non-VS game pays is **one test of a `bool`** settled in
+    /// [`Self::attach`], beside the `expansion_audio` flag and in the same cache line. No `Board`
+    /// dispatch is consulted, and `Cartridge::cpu_write` is the existing path: it reaches
+    /// `Mapper::write_register` with the address unchanged and refreshes the ROM windows after,
+    /// which is exactly what a bank switch needs.
+    #[cfg(feature = "board-vs-system")]
+    #[inline]
+    fn write_vs_port(&mut self, value: u8) {
+        if self.vs_port {
+            if let Some(cartridge) = self.cartridge.as_mut() {
+                cartridge.cpu_write(VsBoard::PORT, value);
+            }
+        }
+    }
+
+    /// Without the VS layer no board listens to `$4016`, and the call is nothing.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[inline]
+    #[allow(clippy::unused_self)]
+    fn write_vs_port(&mut self, _value: u8) {}
+
     /// The attached cartridge, if any.
     #[must_use]
     pub const fn cartridge(&self) -> Option<&Cartridge> {
@@ -313,6 +348,15 @@ impl NesBus {
         if !self.expansion_audio {
             // A board with no expansion audio leaves the APU's `M` at 0 for good.
             self.apu.set_expansion_level(0);
+        }
+        // Mapper 99 is the one board whose register is a **CPU** register: bit 2 of a `$4016`
+        // write (lot MF-VS step 4). Settled here, once, so that the write path below asks one
+        // `bool` and never the `Board` enum.
+        #[cfg(feature = "board-vs-system")]
+        {
+            self.vs_port = cartridge
+                .as_ref()
+                .is_some_and(|cartridge| cartridge.mapper_number() == VsBoard::MAPPER);
         }
         self.cartridge = cartridge;
     }
@@ -1151,7 +1195,10 @@ impl NesBus {
                 // `self.cycles` is the write's own cycle: the bus ticks, then performs the
                 // access. The strobe's reload waits for the next put cycle (see
                 // [`InputPorts::write`]).
-                0x4016 => self.input.write(value, self.cycles),
+                0x4016 => {
+                    self.input.write(value, self.cycles);
+                    self.write_vs_port(value);
+                }
                 _ => {
                     self.sync_apu();
                     let dmc_load_delay = self.apu.write(address, value);
