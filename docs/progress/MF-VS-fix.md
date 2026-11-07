@@ -76,7 +76,7 @@ table — they are the columns the comments were already quoting.
 * [x] **3/6** — the tests: the brief's four cases, plus the regression itself as a synthetic image.
 * [x] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
   the three `Cpu6502::step` inlinings 0 / 0 / 0, `zone_offset` not dearer.
-* [ ] **5/6** — the documents: Q-138, `MF-VS.md`'s "For R0" paragraph answered, the journal.
+* [x] **5/6** — the documents: Q-138, `MF-VS.md`'s "For R0" paragraph answered, the journal.
 * [ ] **6/6** — the check: fmt; clippy `-D warnings` in both configurations; the suites in both; the
   ignored suite with the two ROM variables; the campaign, 331 rows identical to MF-4e's.
 
@@ -332,3 +332,29 @@ So the default build is the baseline, by every instrument the brief names. The c
 `#[cfg]`-gated and reachable only through `--features parked-boards`, and the two lines the default
 build does compile — `InesHeader::has_submapper`, which is `self.is_nes20` there, and the `load_rom`
 restructure — cost the emulated core nothing at all.
+
+### Step 5 — the documents, and Q-138
+
+* **`spec/changes/Q-138.md`**, one question: on a **NES 2.0** header, how far does the brief's "the
+  table wins too" reach? Two readings — the mapper alone, or the whole board as for an iNES 1.0
+  header — and the lot took the first, with three reasons (the two header formats are not equally
+  informed, and the one the defect is about *cannot state* a CHR-RAM size at all; a wrong mapper
+  does not imply a wrong size; and the load message names the override either way). It is an
+  ambiguity of the **owner's brief** and not of the spec or of the public pages, which the ticket
+  says in its own words. Referenced in the code at the NES 2.0 branch of `vs::corrected_board`. The
+  ticket also records the row's PRG-RAM size as deliberately absent rather than forgotten:
+  `registry::board_memory_sizes` answers that from the mapper number, as it does for every board.
+* **`docs/progress/MF-VS.md`**: the lot's own closing "For R0" paragraph is answered in place,
+  because the sentence R0 found false is in it — "*VS. Castlevania* is a mapper-2 image the table
+  gives an RP2C04-0002" was true of the table and false of the load. The note names *Vs. Top Gun* as
+  the second dump in the same position and points at this file and at Q-138.
+* **`docs/review/BOARD-FEATURES.md`**: the `board-vs-system` row says what MF-VS-fix made the table
+  carry and why, and its level-2 column gains step 4's figure — the gated-off build at **+0
+  instructions on all five `core` figures** against `0aee4241`.
+* **`journal/JOURNAL.md`**: the session entry, in the journal's French. Appended **in binary as
+  UTF-8**, as MF-VS step 8 did and for the same reason: an older section of that file carries a
+  cp1252 byte, so reading it whole and rewriting it would rewrite bytes this lot has no business
+  touching.
+
+Nothing else under `G:/3dsen/cleanroom/spec/` is changed, Q-138 excepted, and 138 was the next free
+number (137 is MF-4e's).

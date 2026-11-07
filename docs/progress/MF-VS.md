@@ -659,3 +659,12 @@ parked-boards`): *VS. Castlevania* is a mapper-2 image the table gives an RP2C04
 `$4016` wiring, and *VS. Excitebike* a mapper-99 image with an RP2C04-0003 (the `EB4-3` sets) or an
 RP2C04-0004 (`EB4-4 A`) — all four CRCs are in the table, so the detection path to check is
 `VsSource::RomTable` and not the header's. Three provisional readings want a decision: **Q-136**.
+
+> **Answered, and the sentence above was the defect.** R0 ran the dumps and *VS. Castlevania*
+> came up with an empty screen: "a mapper-2 image the table gives an RP2C04-0002" was true of the
+> table and false of the **load**, because the circulating iNES 1.0 header of that dump announces
+> mapper 99 with 0 KiB of CHR-ROM and nothing read the table's `// mapper 2` comment. Lot
+> **MF-VS-fix** (`docs/progress/MF-VS-fix.md`) made the board a column of every row and gave the
+> table the last word over a header that disagrees with it; *VS. Top Gun* was in the same position
+> and is fixed by the same rule. **Q-138** records the one reading of the owner's brief that the
+> fix had to choose.

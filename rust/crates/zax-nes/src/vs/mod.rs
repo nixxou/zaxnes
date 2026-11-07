@@ -72,6 +72,9 @@ pub(crate) fn corrected_board(
 
     if header.is_nes20 {
         // Trusted on everything but the mapper, and only when it contradicts the table there.
+        // The brief's "the table wins too" reaches the mapper and the submapper and stops: a
+        // NES 2.0 header has a field for every one of the others and a dumper filled them, and a
+        // wrong mapper does not make a size wrong. Q-138 is the reading and what it would cost.
         if header.mapper == board.mapper() {
             return None;
         }
