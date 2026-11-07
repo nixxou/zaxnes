@@ -111,7 +111,7 @@ implements it.
   place in `default` decided by the figures.
 * [x] **8/10** — the documents: the `BOARD-FEATURES.md` row, `PERFORMANCE-HISTORY.md` §5.16, the
   gaps, the Q tickets, `MF-6-inventory.md` §6 item 3 answered, the journal.
-* [ ] **9/10** — the check: fmt; clippy `-D warnings` on the crates touched in both configurations;
+* [x] **9/10** — the check: fmt; clippy `-D warnings` on the crates touched in both configurations;
   `cargo test --release -p zax-nes -p zax-harness` in both; the ignored suite with the two ROM
   variables; the campaign's 331 rows field by field against MF-CART's.
 
@@ -605,3 +605,57 @@ with `--no-default-features`; `zax-harness` **63 / 0 / 1** by default and **70 /
 * **`journal/JOURNAL.md`**: the session entry, in the journal's French. Appended in binary as
   UTF-8 — an older section of that file carries a cp1252 byte, so reading it whole and rewriting it
   would have rewritten bytes this lot has no business touching.
+
+### Step 9 — the check
+
+| | |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| clippy `-D warnings --all-targets`, **five** configurations | `zax-nes` default, `--features parked-boards`, `--no-default-features`; `zax-harness` default, `--features parked-boards` — **all clean** |
+| `cargo test --release -p zax-nes -p zax-harness` | **925 passed, 0 failed, 8 ignored** — *exactly* MF-CART's 925 |
+| the same with `--features zax-nes/parked-boards,zax-harness/parked-boards` | **977 / 0 / 8** (the 45 VS core tests and the 7 harness ones) |
+| `--no-fail-fast -- --ignored`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set, **both** configurations | **7 passed, 1 failed** each time. The failure is `the_zelda_ii_patch_applies_to_the_usa_rom`, the known one the brief puts out of scope. **`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` ok and `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` ok** in both |
+| the campaign, against MF-CART's `camp-cart.json` | **331 rows, summaries equal as objects, 0 rows differing on any field** but `ms` and `shot` — run **twice**, with the default build and with the VS-enabled one |
+| golden-core, 98 of the owner's originals × 1200 frames | **the digest files of all three clean binaries are byte-identical** — the baseline `f1278f46`, the shipped default with the feature parked, and the feature un-parked — and carry the same md5 as the two Windows release builds |
+
+**Golden-core is the strongest form of the claim the whole design rests on**, so it is worth
+stating plainly: a tree with the VS. System compiled **in** produces, over 98 commercial games and
+1 200 frames each, digest files identical byte for byte to the baseline's. Not "within tolerance" —
+identical. Nothing of the arcade machine is active for a NES image.
+
+**One method note, because it cost a wrong report before it was caught.** The campaign was first
+run as `./target-mf/release/zax-harness.exe`, straight after a `cargo test --release … --features
+zax-nes/parked-boards,…`. Cargo had left **that** configuration's binary at that path, so the run
+measured the VS-enabled build while the write-up said "the default build"; the two binaries turned
+out to be byte-identical under `md5sum`, which is what gave it away. Both were then rebuilt
+explicitly, each verified by whether `zax-harness vs` exists in it, and both runs are in the table
+above. **After a feature-flagged `cargo test`, the binary at `target/release/<name>` is that
+configuration's**; copy it out under a name of its own before building the next one.
+
+## The lot in one page
+
+**What exists.** A VS. System image loads, runs and can be driven: detection from the header or
+from a 74-row table keyed by the data CRC, the ten master palettes, the RC2C05's two register
+quirks, mappers 99 and 151, two coin slots, a service button, eight DIP switches, the swapped
+sticks, the cabinet in the savestate, and `zax-harness vs` to drive it. Behind one Cargo feature,
+`board-vs-system`, which is **parked**: `--features parked-boards` turns the machine on, and
+`cargo build -p zax-harness --features parked-boards` brings the subcommand with it.
+
+**Why it is parked, in one sentence.** The feature costs **+0.083 % on the worst of PR-1's thirteen
+ROMs** and is above the +0.02 % tolerance on all ten level-2 figures, and the cost is not in
+anything the lot wrote: it is in `Ppu2C02::run_dots` and `Ppu2C02::background_fetch`, per-dot paths
+this lot does not touch at any line. Gated off, the same tree is **+90 052 instructions on the set
+(+0.000 %)** and **+0.000 % on all five level-2 cores**, and golden-core is byte-identical.
+
+**What a lot that wants it in `default` has to attack.** Not the `$2002` register — step 7 measured
+removing it and eleven of thirteen ROMs stay above the tolerance. Finding 1 of
+`PERFORMANCE-HISTORY.md` §5.16: three new fields on `Ppu2C02` and a `bool` test in two of
+`Ppu2C02::write`'s eight arms re-roll the block placement of that struct's two hottest functions.
+§5.15 lifted the limit on the cartridge layer and said nothing about the PPU, because no lot had
+added anything there; this one did, and §5.16 is the figure.
+
+**For R0.** The owner's dumps run through `zax-harness vs` (built with `--features
+parked-boards`): *VS. Castlevania* is a mapper-2 image the table gives an RP2C04-0002 and the
+`$4016` wiring, and *VS. Excitebike* a mapper-99 image with an RP2C04-0003 (the `EB4-3` sets) or an
+RP2C04-0004 (`EB4-4 A`) — all four CRCs are in the table, so the detection path to check is
+`VsSource::RomTable` and not the header's. Three provisional readings want a decision: **Q-136**.
