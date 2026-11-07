@@ -307,7 +307,7 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // 8 KiB).
         #[cfg(feature = "board-119")]
         119 => BoardMemorySizes {
-            chr_ram: Some(Tqrom::TQROM_CHR_RAM_SIZE),
+            chr_ram: Some(Tqrom::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // Mappers 47 and 37: the outer register *is* the board's decode of $6000-$7FFF, so

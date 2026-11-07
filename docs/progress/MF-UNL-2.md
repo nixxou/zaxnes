@@ -16,10 +16,10 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 
 ## The steps
 
-- [ ] **0/9 — the plan.** This file: the twelve numbers, the page each is built from, the four
+- [x] **0/9 — the plan.** This file: the twelve numbers, the page each is built from, the four
   features, the shape each board takes in this tree, and the two places this lot leaves the
   census's own prescription for the number's page.
-- [ ] **1/9 — the generalisation, and the lot's own regression gate.** `board-119`'s CHR-RAM
+- [x] **1/9 — the generalisation, and the lot's own regression gate.** `board-119`'s CHR-RAM
   chip select becomes the `const`-parameter form of the census, shared by all five numbers of
   the family. **119 must come out byte-identical**, and the step proves it two ways: an
   exhaustive table test over all 256 register values in both CHR modes, and a golden-core dump
@@ -125,3 +125,81 @@ is §4.10's rule.
 `Mapper::try_read_prg` is forwarded for the first time on this enum, behind
 `board-mmc3-scramble` alone: 121's protection array and 187's protection read are both below
 $6000 and *The King of Fighters '96* depends on the second one.
+
+## Step 1 — the generalisation, and the lot's own regression gate
+
+`Mmc3Board`'s `const TQROM: bool` is gone; in its place are the four columns of nesdev's
+*MMC3 with CHR ROM and CHR RAM*:
+
+```rust
+pub struct Mmc3Board<
+    const MC_ACC: bool,
+    const CHR_RAM_FIRST: u8,
+    const CHR_RAM_LAST: u8,
+    const CHR_RAM_KIB: u8,
+    const CHR_RAM_MIRRORED: bool,
+    const MULTICART: bool,
+>
+```
+
+with `Mmc3ChrRam<FIRST, LAST, SIZE>` as the census's own three-parameter alias and
+`Tqrom = Mmc3Board<false, 0x40, 0x7F, 8, true, false>`. `if TQROM` became
+`if Self::HAS_CHR_RAM` (`CHR_RAM_KIB != 0`) in the four places it stood, so mappers 4, 118, the
+MC-ACC and the two multicarts keep bodies in which the whole mechanism is compile-time dead.
+
+Three functions carry the generalisation:
+
+| | |
+| --- | --- |
+| `Mmc3Board::chr_ram_selected` | the census's sentence — `FIRST..=LAST` is the RAM — behind `MIRRORED`, which reduces the bank by `& LAST` first |
+| `Mmc3Board::chr_bank_of_window` | the 1 KiB bank number a window shows, re-derived from the registers; `refresh_chr_source` and `chr_ram_offset` now share it (it was the body of `tqrom_ram_offset`) |
+| `Mmc3Board::CHR_RAM_BANK_MASK` | `SIZE - 1`, the chip's own bank lines; `saturating_sub` so the no-chip monomorphisations have a defined mask |
+
+`refresh_chr_source` is now one pass over the eight windows instead of eight hand-written
+`bit(register, slot)` terms: MF-6a3 step 1 could assume a 2 KiB register's two halves land on
+the same chip, because its select was one line, and a general `FIRST..=LAST` window cannot be
+assumed that.
+
+### The gate, and the fact that the census's literal reading would have broken it
+
+**`req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers`** — the new test —
+walks **all 256 values** of a bank register through a 1 KiB register in CHR mode 0, the same
+register in CHR mode 1, and a 2 KiB register, and asserts the chip *and* the offset from one
+byte. It is written so that it can say both at once: the image has a **64-bank** CHR-ROM, whose
+numbered banks therefore read `0..=63`, and the eight CHR-RAM banks are filled with `$40 | bank`
+— outside that space, so `$40 | k` means "the RAM chip, bank `k`" and nothing else can.
+
+| | |
+| --- | --- |
+| the test, run at `186b5656` with the old code | **passes** |
+| the test, run after the generalisation | **passes** |
+
+And golden-core, over three mapper-119 images made by patching bytes 6 and 7 of
+`holy-mapperel`'s `M4_P256K_C256K`, `M4_P128K` and `M4_P128K_CR8K` (a scratch directory, nothing
+committed), 1 200 frames each:
+
+    zax-harness golden-core <dir> gc119-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `186b5656` against the lot through step 1 | **byte-identical**, `md5 c36d16e8…` both |
+
+**Both halves of the gate are sensitive to exactly the rule at issue**, which was checked by
+breaking it on purpose: with `MIRRORED` set to `false` — the census's literal
+`(0x40, 0x7F, 8)`, which is Mesen 2's `page >= _firstRamBank && page <= _lastRamBank` — the
+golden-core dump **differs** from `186b5656`'s and the new test **fails**. So the fourth column
+of the family's page is not a formality: reading the census's pair as a closed range is an
+observable change to mapper 119, and the lot's own rule forbids it. `Mmc3Board::chr_ram_selected`
+carries the argument, and the plan's item 1 above records the choice.
+
+`pixels_sha256` of those three images is the same for mapper 4 and mapper 119 and
+`tiles_sha256` is not, so what the dump is sensitive to is the CHR *source*, which is the point.
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **945 passed, 0 failed, 9 ignored** (944/0/9 at `186b5656`, +1 for the gate) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+One more thing this step had to notice: a Cargo feature comment naming `chr_ram_windows` fails
+`req_arch_002_the_crate_has_no_platform_dependency`, which scans the manifest's text for
+`windows`. The comment says "the byte of per-slot source flags" instead.

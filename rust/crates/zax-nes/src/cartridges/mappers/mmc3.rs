@@ -31,25 +31,45 @@ use crate::NametableMirroring;
 /// comparing `address & $1000` against a field instead of against zero would have cost two
 /// instructions, and MR-4-3's own conclusion was that "no MMC3 game pays a branch".
 ///
-/// **`TQROM` is mapper 119 and `MULTICART` is mappers 47 and 37**, each a `const` parameter for
-/// the same reason and each behind a Cargo feature (`board-119`, `board-mmc3-multicart`). MF-6a2
-/// step 3 built all three, measured **six** shapes and reverted them on that lot's stop-the-lot
-/// condition; the owner's tolerance of 2026-11-06 accepts their cost and MF-6a3 rebuilt them
-/// from its write-up. The shape here is that step's **C**, which was the best of the six:
-/// two `const` parameters (so mapper 4 and 118 keep their own monomorphisation), the TQROM's
-/// `ppu_peek`/`ppu_write` bodies `#[inline(never)]`, one `update_banks` body whose outer-bank
-/// arithmetic is compile-time dead off the multicart, and the outer register's decode out of
-/// line. Shape **A** — the same two parameters with everything inlined — took
-/// `Board::ppu_peek` from 271 instructions to **583** and cost `m4` **3.4 M over 300 frames**,
-/// and `#[inline(never)]` on the one body recovered 8.0 M of set total; shape **D**, one
-/// parameter and one `Board` variant for all three numbers, was *worse* on `m4` (+750 676
-/// against +258 640).
+/// **The `CHR_RAM_*` parameters are the CHR-RAM family and `MULTICART` is mappers 47 and 37**,
+/// each a `const` parameter for the same reason and each behind a Cargo feature (`board-119`,
+/// `board-mmc3-chrram`, `board-mmc3-multicart`). MF-6a2 step 3 built all three, measured **six**
+/// shapes and reverted them on that lot's stop-the-lot condition; the owner's tolerance of
+/// 2026-11-06 accepts their cost and MF-6a3 rebuilt them from its write-up. The shape here is
+/// that step's **C**, which was the best of the six: `const` parameters (so mapper 4 and 118 keep
+/// their own monomorphisation), the CHR-RAM board's `ppu_peek`/`ppu_write` bodies
+/// `#[inline(never)]`, one `update_banks` body whose outer-bank arithmetic is compile-time dead
+/// off the multicart, and the outer register's decode out of line. Shape **A** — the same
+/// parameters with everything inlined — took `Board::ppu_peek` from 271 instructions to **583**
+/// and cost `m4` **3.4 M over 300 frames**, and `#[inline(never)]` on the one body recovered
+/// 8.0 M of set total; shape **D**, one parameter and one `Board` variant for all three numbers,
+/// was *worse* on `m4` (+750 676 against +258 640).
 ///
-/// Four monomorphisations are instantiated and no other: `Mmc3Board<false, false, false>`
-/// ([`Mmc3`], mappers 4 and 118), `<true, false, false>` ([`McAcc`]), `<false, true, false>`
-/// ([`Tqrom`]) and `<false, false, true>` ([`Mmc3Multicart`]).
+/// # The CHR-RAM family, and the four columns of its page (MF-UNL-2 step 1)
+///
+/// nesdev's *MMC3 with CHR ROM and CHR RAM* lists every MMC3-like number that carries a CHR-RAM
+/// chip beside its CHR-ROM, and the table has **four** columns: the number, the **first RAM
+/// bank**, the **size of RAM** in 1 KiB banks, and **"RAM mirrored?"**. So the generalisation
+/// `docs/review/UNL-census.md` §7.2 asks for — `Mmc3ChrRam<FIRST, LAST, SIZE>`, "the 1 KiB CHR
+/// banks in `FIRST..=LAST` come from the CHR-RAM chip, the rest from CHR-ROM" — carries three of
+/// them, and the fourth is [`Mmc3Board::CHR_RAM_MIRRORED`]. Its own note says why it cannot be
+/// dropped.
+///
+/// [`Mmc3ChrRam`] is the census's three-parameter alias and the four numbers of
+/// `board-mmc3-chrram` are written through it; [`Tqrom`] is mapper 119, the one member of the
+/// family that was already here, and the only one whose `MIRRORED` is set.
+///
+/// Monomorphisations are instantiated for mappers 4/118, 4 submapper 3, the two multicarts and
+/// one per CHR-RAM number, and no other.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mmc3Board<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> {
+pub struct Mmc3Board<
+    const MC_ACC: bool,
+    const CHR_RAM_FIRST: u8,
+    const CHR_RAM_LAST: u8,
+    const CHR_RAM_KIB: u8,
+    const CHR_RAM_MIRRORED: bool,
+    const MULTICART: bool,
+> {
     banks: BankWindows,
     a12: A12Watcher,
     bank: [u8; 8],
@@ -78,7 +98,7 @@ pub struct Mmc3Board<const MC_ACC: bool, const TQROM: bool, const MULTICART: boo
     /// MR-4-3: A12 falls left before the next clock of the scanline counter, counting down from
     /// 7. Only `MC_ACC` reads it, and only `MC_ACC` writes it to the savestate.
     irq_prescaler: u8,
-    /// TQROM (mapper 119): one bit per 1 KiB CHR window, **set when that window reads the
+    /// The CHR-RAM family: one bit per 1 KiB CHR window, **set when that window reads the
     /// CHR-RAM chip** rather than the CHR-ROM. Derived state — refreshed by `update_banks` when
     /// a register commits, and brought back by `load_registers` through the same call, so no
     /// savestate byte carries it (MF-5a step 3's `level` lesson, REQ-CORE-091).
@@ -119,37 +139,139 @@ pub struct Mmc3Board<const MC_ACC: bool, const TQROM: bool, const MULTICART: boo
     irq_pending: bool,
 }
 
-/// The MMC3 and the MMC6, mapper 4 and mapper 118 (`Mmc3Board<false, false, false>`).
-pub type Mmc3 = Mmc3Board<false, false, false>;
+/// The MMC3 and the MMC6, mapper 4 and mapper 118.
+pub type Mmc3 = Mmc3Board<false, 0, 0, 0, false, false>;
 
-/// The Acclaim MC-ACC, mapper 4 submapper 3 (`Mmc3Board<true, false, false>`).
-pub type McAcc = Mmc3Board<true, false, false>;
+/// The Acclaim MC-ACC, mapper 4 submapper 3.
+pub type McAcc = Mmc3Board<true, 0, 0, 0, false, false>;
 
-/// The Nintendo TQROM, mapper 119: the MMC3 with a CHR-RAM chip beside its CHR-ROM, bit 6 of
-/// the CHR bank number choosing between them (`Mmc3Board<false, true, false>`).
+/// `docs/review/UNL-census.md` §7.2's own alias for the CHR-RAM family: "the 1 KiB CHR banks in
+/// `FIRST..=LAST` come from the CHR-RAM chip, the rest from CHR-ROM", with `SIZE` the chip's own
+/// size in 1 KiB banks.
+///
+/// The four numbers of `board-mmc3-chrram` are written through it, each with the row nesdev's
+/// *MMC3 with CHR ROM and CHR RAM* gives it. Mapper 119 is **not**: its row has the fourth
+/// column set, so it is spelled out as [`Tqrom`] below.
+#[cfg(feature = "board-mmc3-chrram")]
+pub type Mmc3ChrRam<const FIRST: u8, const LAST: u8, const SIZE: u8> =
+    Mmc3Board<false, FIRST, LAST, SIZE, false, false>;
+
+/// The Nintendo TQROM, mapper 119: the MMC3 with a CHR-RAM chip beside its CHR-ROM, **CHR A16**
+/// choosing between them.
 ///
 /// nesdev ("INES Mapper 119"): "Bit 6 of the CHR bank number is used to switch between the CHR
 /// ROM chip and the CHR RAM chip", the board doing it with "a 74HC32 IC" whose output "controls
 /// the CHR ROM's enable line. PPU A13 is ORed with CHR A16 in order to create a /CE signal for
 /// the CHR ROM", and "Both TQROM games used 8 KiB CHR RAM". The two titles are *High Speed* and
 /// *Pin\*Bot*.
+///
+/// **`MIRRORED` is set, and that is the whole of this number's difference from the other four**
+/// (MF-UNL-2 step 1): *MMC3 with CHR ROM and CHR RAM* gives 119 first RAM bank "**64, 192**",
+/// `RAM mirrored? Yes`, and the one-line behaviour "CHR A16 switches between CHR ROM and CHR
+/// RAM". See [`Mmc3Board::CHR_RAM_MIRRORED`].
 #[cfg(feature = "board-119")]
-pub type Tqrom = Mmc3Board<false, true, false>;
+pub type Tqrom = Mmc3Board<false, 0x40, 0x7F, 8, true, false>;
 
 /// Nintendo's two MMC3 multicarts, mappers 47 and 37: an MMC3 whose PRG and CHR bank numbers
-/// carry one or two more address lines from an outer register at $6000-$7FFF
-/// (`Mmc3Board<false, false, true>`).
+/// carry one or two more address lines from an outer register at $6000-$7FFF.
 ///
 /// 47 is *Super Spike V'Ball + Nintendo World Cup*, 37 *Super Mario Bros. + Tetris + Nintendo
 /// World Cup* (PAL). See [`Mmc3Board::multicart_prg`] and [`Mmc3Board::multicart_chr`] for the
 /// two pages' own wiring, and [`Mmc3Board::multicart_outer_write`] for the condition both of
 /// them put on the register.
 #[cfg(feature = "board-mmc3-multicart")]
-pub type Mmc3Multicart = Mmc3Board<false, false, true>;
+pub type Mmc3Multicart = Mmc3Board<false, 0, 0, 0, false, true>;
 
-impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
-    Mmc3Board<MC_ACC, TQROM, MULTICART>
+impl<
+        const MC_ACC: bool,
+        const CHR_RAM_FIRST: u8,
+        const CHR_RAM_LAST: u8,
+        const CHR_RAM_KIB: u8,
+        const CHR_RAM_MIRRORED: bool,
+        const MULTICART: bool,
+    > Mmc3Board<MC_ACC, CHR_RAM_FIRST, CHR_RAM_LAST, CHR_RAM_KIB, CHR_RAM_MIRRORED, MULTICART>
 {
+    /// Whether this monomorphisation carries a CHR-RAM chip beside its CHR-ROM: the `SIZE`
+    /// column of the family's page, zero on every board that does not.
+    ///
+    /// It replaces MF-6a3 step 1's `TQROM` parameter and is used in exactly the places that
+    /// `if TQROM` was, so mappers 4, 118, the MC-ACC and the two multicarts keep bodies in which
+    /// the whole mechanism is compile-time dead.
+    const HAS_CHR_RAM: bool = CHR_RAM_KIB != 0;
+
+    /// The chip's own bank lines, as a mask of the 1 KiB bank number.
+    ///
+    /// The chip has as many address lines above the kilobyte as its size needs — three on the
+    /// TQROM's 8 KiB — so the low `log2(SIZE)` bits of the bank number are its whole address
+    /// above the kilobyte and every bank above `SIZE` aliases down onto it. That is the page's
+    /// `RAM mirrored?` **inside** the chip, which holds for all five numbers: `FIRST` is a
+    /// multiple of `SIZE` in every row of the table, so `bank & mask` and
+    /// `(bank - FIRST) & mask` are the same number.
+    ///
+    /// `saturating_sub` and not `- 1`, so that the boards with no chip (`SIZE` = 0) have a
+    /// well-defined mask of zero rather than a const-evaluation underflow.
+    const CHR_RAM_BANK_MASK: u8 = CHR_RAM_KIB.saturating_sub(1);
+
+    /// Whether the 1 KiB CHR bank `bank` comes from the CHR-RAM chip rather than the CHR-ROM.
+    ///
+    /// The census's own sentence is "the 1 KiB CHR banks in `FIRST..=LAST` come from the CHR-RAM
+    /// chip, the rest from CHR-ROM", and that is the body — **behind `MIRRORED`**, which is the
+    /// fourth column of nesdev's *MMC3 with CHR ROM and CHR RAM* and cannot be folded into the
+    /// pair.
+    ///
+    /// **Mapper 119 is why.** That page's table gives 119 first RAM bank "**64, 192**" — two
+    /// numbers — and its *Behaviour* section the reason: "119: CHR A16 switches between CHR ROM
+    /// and CHR RAM". The select is **one bank line** and not a comparison, so CHR A17 (bit 7) is
+    /// a don't-care and banks `$C0-$FF` read the RAM exactly as `$40-$7F` do. The same holds of
+    /// 191, whose line is CHR A17. The numbers of `board-mmc3-chrram` are the page's `No` rows:
+    /// their select is a genuine range, decoded on the board by a 74LS138/74LS139 pair (74's
+    /// page) or a GAL (195's).
+    ///
+    /// With `MIRRORED` set the bank number is reduced by `& LAST` before the range test, which is
+    /// exactly "the lines above the window are not connected": `$C0 & $7F` is `$40`, and
+    /// `bank & $7F >= $40` is bit 6 of `bank` — the expression MF-6a3 step 1 wrote by hand.
+    ///
+    /// **Mesen 2 reads it the other way and this build does not follow it.** Its registration is
+    /// `MMC3_ChrRam(0x40, 0x7F, 8)` and `MMC3_ChrRam::SelectChrPage` tests
+    /// `page >= _firstRamBank && page <= _lastRamBank`, under which a bank of `$C0-$FF` reads the
+    /// CHR-ROM. `docs/review/UNL-census.md` §7.2 quotes that registration as the form to
+    /// generalise into; the page is what `board-119` has implemented since MF-6a3 step 1, and
+    /// this lot's own rule is that no existing mapper's emulation moves.
+    /// `req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers` is the gate.
+    #[cfg(feature = "board-119")]
+    const fn chr_ram_selected(bank: u8) -> bool {
+        let bank = if CHR_RAM_MIRRORED {
+            bank & CHR_RAM_LAST
+        } else {
+            bank
+        };
+        bank >= CHR_RAM_FIRST && bank <= CHR_RAM_LAST
+    }
+
+    /// The 1 KiB CHR bank number window `window` shows, re-derived from the bank registers.
+    ///
+    /// Which registers drive which windows is bit 7 of `$8000`, the same swap `update_banks`
+    /// makes: four windows take the two 2 KiB registers R0 and R1, two windows each, and the
+    /// other four take R2-R5 one each. A 2 KiB register "ignores bit 0", so its two windows show
+    /// `v & $FE` and `v | $01`.
+    ///
+    /// The number is re-derived from the register here rather than read off [`BankWindows`],
+    /// because the window table holds the bank wrapped modulo the *CHR-ROM's* size and that wrap
+    /// need not preserve the chip-select line or the chip's own low bits.
+    #[cfg(feature = "board-119")]
+    fn chr_bank_of_window(&self, window: usize) -> u8 {
+        let high = usize::from(self.select & 0x80 != 0) * 4;
+        if window >= high && window < high + 4 {
+            // The 2 KiB half: R0 over the first two windows of it, R1 over the next two.
+            let register = (window - high) >> 1;
+            (self.bank[register] & 0xFE) | u8::from((window - high) & 1 != 0)
+        } else {
+            // The 1 KiB half: R2-R5, one window each, starting at `low` = 4 - high, so the
+            // register is `2 + (window - low)`. `window + high` is at least 4 here.
+            self.bank[window + high - 2]
+        }
+    }
+
     pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let header = memory.rom().header();
         let is_txsrom = mapper_number == 118;
@@ -224,11 +346,12 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
     /// offset and no division is left on the access path.
     pub(crate) const MMC6_PRG_RAM_SIZE: usize = 0x0400;
 
-    /// The TQROM's own CHR-RAM chip (mapper 119): nesdev, "Both TQROM games used 8 KiB CHR
-    /// RAM". Settled at load by `registry::board_memory_sizes`, because no header field can
-    /// state it — see that arm.
+    /// This board's own CHR-RAM chip, in bytes: the `SIZE` column of nesdev's *MMC3 with CHR ROM
+    /// and CHR RAM*, which for the TQROM is "Both TQROM games used 8 KiB CHR RAM". Settled at
+    /// load by `registry::board_memory_sizes`, because no header field can state it — see that
+    /// arm.
     #[cfg(feature = "board-119")]
-    pub(crate) const TQROM_CHR_RAM_SIZE: usize = 0x2000;
+    pub(crate) const CHR_RAM_SIZE: usize = CHR_RAM_KIB as usize * 1024;
 
     fn mmc6_offset(address: u16) -> usize {
         usize::from(address & 0x03FF)
@@ -388,32 +511,22 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
         }
     }
 
-    /// The TQROM's chip select: which of the eight 1 KiB CHR windows read the CHR-RAM chip
-    /// (mapper 119). See [`Mmc3Board::chr_ram_windows`].
+    /// The chip select: which of the eight 1 KiB CHR windows read the CHR-RAM chip. See
+    /// [`Mmc3Board::chr_ram_windows`] and [`Mmc3Board::chr_ram_selected`].
     ///
-    /// The select is a line of the **bank number**, so a 2 KiB register — which "ignores bit 0"
-    /// — puts **both** of its 1 KiB windows on the same chip: `(v >> 1) * 2` is `v & $FE`, so
-    /// bit 6 of the written byte is bit 6 of both 1 KiB banks. Which registers drive which
-    /// windows is bit 7 of $8000, the same swap `update_banks` makes.
+    /// One pass over the eight windows, each asked for its own bank number
+    /// ([`Mmc3Board::chr_bank_of_window`]) and that number put to the select. MF-6a3 step 1 wrote
+    /// the TQROM's eight bits out by hand — the select being a single line, a 2 KiB register's two
+    /// halves were known to land on the same chip — and the generalisation cannot assume that of
+    /// a `FIRST..=LAST` window, so each window is decided on its own bank.
     #[cfg(feature = "board-119")]
     fn refresh_chr_source(&mut self) {
-        let high = usize::from(self.select & 0x80 != 0) * 4;
-        let low = 4 - high;
-        let bit = |register: usize, slot: usize| -> u8 {
-            if self.bank[register] & 0x40 == 0 {
-                0
-            } else {
-                1u8 << slot
+        let mut mask = 0u8;
+        for window in 0..BankWindows::CHR_WINDOWS {
+            if Self::chr_ram_selected(self.chr_bank_of_window(window)) {
+                mask |= 1u8 << window;
             }
-        };
-        let mask = bit(0, high)
-            | bit(0, high + 1)
-            | bit(1, high + 2)
-            | bit(1, high + 3)
-            | bit(2, low)
-            | bit(3, low + 1)
-            | bit(4, low + 2)
-            | bit(5, low + 3);
+        }
         self.chr_ram_windows = mask;
     }
 
@@ -447,34 +560,22 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
         }
 
         #[cfg(feature = "board-119")]
-        if TQROM {
+        if Self::HAS_CHR_RAM {
             self.refresh_chr_source();
         }
     }
 
-    /// Where in the 8 KiB CHR-RAM chip window `window` starts, when the chip select puts it
-    /// there (mapper 119).
+    /// Where in the CHR-RAM chip window `window` starts, when the chip select puts it there.
     ///
-    /// The chip has **three** bank lines, so the low three bits of the bank number are its whole
-    /// address above the kilobyte. The bank number is re-derived from the register here rather
-    /// than read off [`BankWindows`], because the window table holds the bank wrapped modulo the
-    /// *CHR-ROM's* size and that wrap need not preserve bit 2.
+    /// The chip's own bank lines are its whole address above the kilobyte — three of them on the
+    /// TQROM's 8 KiB — which is [`Mmc3Board::CHR_RAM_BANK_MASK`].
     #[cfg(feature = "board-119")]
-    fn tqrom_ram_offset(&self, window: usize) -> usize {
-        let high = usize::from(self.select & 0x80 != 0) * 4;
-        let bank = if window >= high && window < high + 4 {
-            // The 2 KiB half: R0 over the first two windows of it, R1 over the next two.
-            let register = (window - high) >> 1;
-            (self.bank[register] & 0xFE) | u8::from((window - high) & 1 != 0)
-        } else {
-            // The 1 KiB half: R2-R5, one window each, starting at `low` = 4 - high, so the
-            // register is `2 + (window - low)`. `window + high` is at least 4 here.
-            self.bank[window + high - 2]
-        };
-        usize::from(bank & 0x07) * BankWindows::CHR_WINDOW_SIZE
+    fn chr_ram_offset(&self, window: usize) -> usize {
+        usize::from(self.chr_bank_of_window(window) & Self::CHR_RAM_BANK_MASK)
+            * BankWindows::CHR_WINDOW_SIZE
     }
 
-    /// A TQROM CHR fetch (mapper 119).
+    /// A CHR fetch on a board of the CHR-RAM family.
     ///
     /// **`#[inline(never)]`, and MF-6a2 step 3 measured why.** `Board::ppu_peek`'s arms are
     /// inlined into `Ppu2C02::background_fetch`, 7 % to 11 % of every ROM of lot PR-1's set;
@@ -489,7 +590,7 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
     /// holds the raw register wrapped modulo the CHR-ROM's banks, which is that window's offset.
     #[cfg(feature = "board-119")]
     #[inline(never)]
-    fn tqrom_read(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+    fn chr_ram_read(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         let index = usize::from(address) & 0x1FFF;
         let window = index / BankWindows::CHR_WINDOW_SIZE;
         if self.chr_ram_windows & (1u8 << window) == 0 {
@@ -501,21 +602,21 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
             return 0;
         }
 
-        let offset = self.tqrom_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
+        let offset = self.chr_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
         ram[super::super::wrap_offset(offset, ram.len())]
     }
 
-    /// A PPU write on a TQROM (mapper 119).
+    /// A PPU write on a board of the CHR-RAM family.
     ///
-    /// `Mapper::ppu_write`'s default drops every write on a board that has CHR-ROM, and a TQROM
-    /// has both chips — so without this the CHR-RAM would be unreachable.
+    /// `Mapper::ppu_write`'s default drops every write on a board that has CHR-ROM, and these
+    /// boards have both chips — so without this the CHR-RAM would be unreachable.
     /// `req_core_100_tqrom_a_write_to_a_ram_selected_window_is_not_swallowed` is §5 of the
     /// inventory's own wording for it. `#[inline(never)]` for the reason
-    /// [`Mmc3Board::tqrom_read`] carries: `Board::ppu_write`'s arms are inlined into
+    /// [`Mmc3Board::chr_ram_read`] carries: `Board::ppu_write`'s arms are inlined into
     /// `NesBus::write_internal`, which a `$2007` write arrives through.
     #[cfg(feature = "board-119")]
     #[inline(never)]
-    fn tqrom_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+    fn chr_ram_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         let index = usize::from(address) & 0x1FFF;
         let window = index / BankWindows::CHR_WINDOW_SIZE;
         if self.chr_ram_windows & (1u8 << window) == 0 {
@@ -523,7 +624,7 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
             return;
         }
 
-        let offset = self.tqrom_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
+        let offset = self.chr_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
         let ram = memory.chr_ram_mut();
         if !ram.is_empty() {
             let len = ram.len();
@@ -588,8 +689,15 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool>
     }
 }
 
-impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
-    for Mmc3Board<MC_ACC, TQROM, MULTICART>
+impl<
+        const MC_ACC: bool,
+        const CHR_RAM_FIRST: u8,
+        const CHR_RAM_LAST: u8,
+        const CHR_RAM_KIB: u8,
+        const CHR_RAM_MIRRORED: bool,
+        const MULTICART: bool,
+    > Mapper
+    for Mmc3Board<MC_ACC, CHR_RAM_FIRST, CHR_RAM_LAST, CHR_RAM_KIB, CHR_RAM_MIRRORED, MULTICART>
 {
     banked!();
 
@@ -609,7 +717,7 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
 
         // Appended **behind** the existing versioning and behind the `const` that is the only
         // reason the field exists, so no byte of mapper 4's, 118's or the MC-ACC's block moves
-        // (REQ-CORE-090). The TQROM has nothing to append: `chr_ram_windows` is derived and
+        // (REQ-CORE-090). The CHR-RAM family has nothing to append: `chr_ram_windows` is derived and
         // `load_registers` brings it back through `update_banks`.
         #[cfg(feature = "board-mmc3-multicart")]
         if MULTICART {
@@ -656,11 +764,12 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
         &self,
         memory: &'m crate::cartridges::CartridgeMemory,
     ) -> Option<crate::cartridges::ChrView<'m>> {
-        // A TQROM cannot answer: a `ChrView` is one slice plus eight offsets and has no way to
+        // A board with two chips cannot answer: a `ChrView` is one slice plus eight offsets and
+        // has no way to
         // say "this window is the other chip". `None` is the body the MMC5 and the RAMBO-1
         // already give, so it adds nothing to that dispatch (MF-6a step 2's finding, reused).
         #[cfg(feature = "board-119")]
-        if TQROM {
+        if Self::HAS_CHR_RAM {
             return None;
         }
 
@@ -676,10 +785,10 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
             .map(|banks| crate::cartridges::ChrView::new(chr, banks))
     }
 
-    /// The TQROM's two chips (mapper 119), and `Mapper::ppu_peek`'s own default for every other
-    /// monomorphisation — written out rather than inherited so that the three that are **not** a
-    /// TQROM tail-merge with the shared default arm of `Board::ppu_peek`, which MF-6a2 step 3
-    /// measured at 272 instructions against the baseline's 271.
+    /// The CHR-RAM family's two chips, and `Mapper::ppu_peek`'s own default for every other
+    /// monomorphisation — written out rather than inherited so that the ones that are **not** of
+    /// the family tail-merge with the shared default arm of `Board::ppu_peek`, which MF-6a2
+    /// step 3 measured at 272 instructions against the baseline's 271.
     ///
     /// The whole override is behind `board-119`: with that feature off, `Mmc3Board` has no
     /// `ppu_peek` of its own and mapper 4 takes the trait default exactly as it did before.
@@ -690,8 +799,8 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
         address: u16,
         _fetch: crate::cartridges::ChrFetch,
     ) -> u8 {
-        if TQROM {
-            return self.tqrom_read(memory, address);
+        if Self::HAS_CHR_RAM {
+            return self.chr_ram_read(memory, address);
         }
 
         let chr_rom = memory.rom().chr_rom();
@@ -705,12 +814,12 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
         )
     }
 
-    /// The TQROM's CHR-RAM (mapper 119), and `Mapper::ppu_write`'s own default otherwise; see
-    /// [`Mmc3Board::tqrom_write`] and the note on `ppu_peek` above.
+    /// The family's CHR-RAM, and `Mapper::ppu_write`'s own default otherwise; see
+    /// [`Mmc3Board::chr_ram_write`] and the note on `ppu_peek` above.
     #[cfg(feature = "board-119")]
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if TQROM {
-            return self.tqrom_write(memory, address, value);
+        if Self::HAS_CHR_RAM {
+            return self.chr_ram_write(memory, address, value);
         }
 
         if memory.rom().chr_rom().is_empty() {
@@ -783,7 +892,7 @@ impl<const MC_ACC: bool, const TQROM: bool, const MULTICART: bool> Mapper
             self.outer = 0;
         }
         self.a12.reset();
-        // `chr_ram_windows` comes back here too: `update_banks` refreshes it on a TQROM.
+        // `chr_ram_windows` comes back here too: `update_banks` refreshes it on a CHR-RAM board.
         self.update_banks();
     }
 

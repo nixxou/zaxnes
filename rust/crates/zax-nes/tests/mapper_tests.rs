@@ -4732,6 +4732,85 @@ fn req_core_100_tqrom_a_write_to_a_ram_selected_window_is_not_swallowed() {
     );
 }
 
+/// Fills the TQROM's eight 1 KiB CHR-RAM banks with `$40 | bank`, through a RAM-selected window.
+///
+/// `$40 | bank` is **outside** the byte space of a 64-bank CHR-ROM: a numbered-bank image fills
+/// ROM bank `b` with `b`, and [`BankWindows::map_chr_1k`] wraps the bank number modulo the ROM's
+/// 64, so every ROM window reads a byte in `0..=63`. A read of `$40 | k` therefore says "the RAM
+/// chip, bank `k`" and nothing else can — which is what makes the exhaustive test below able to
+/// name the chip *and* the offset from one byte.
+#[cfg(feature = "board-119")]
+fn fill_tqrom_chr_ram(core: &mut NesCore) {
+    for bank in 0..8u8 {
+        core.mmc3_bank(2, 0x40 | bank);
+        chr_write(core, 0x1000, 0x40 | bank);
+    }
+}
+
+/// **The regression gate of lot MF-UNL-2 step 1**, and the one place this lot can test against
+/// something that already works: mapper 119's chip select and RAM offset over **all 256 values**
+/// of a bank register, in both CHR modes and through both register widths.
+///
+/// The claim is the family page's, not a range: *MMC3 with CHR ROM and CHR RAM* gives mapper 119
+/// first RAM bank "**64, 192**", `RAM mirrored? **Yes**`, and in its *Behaviour* section "119:
+/// **CHR A16** switches between CHR ROM and CHR RAM". One bank line, so
+///
+/// * the chip is the **RAM** exactly when bit 6 of the bank number is set — `$40-$7F` *and*
+///   `$C0-$FF`, which is why the page names two first banks;
+/// * the offset inside the 8 KiB chip is the low three bits of the bank number, the chip having
+///   three address lines above the kilobyte, so banks `$40`, `$48`, … `$78`, `$C0`, … all alias.
+///
+/// Mesen 2 registers the number as `MMC3_ChrRam(0x40, 0x7F, 8)` and reads that pair as a closed
+/// range, under which `$C0-$FF` would read the CHR-**ROM**. `docs/review/UNL-census.md` §7.2
+/// quotes the registration; the page is what this build implements, and what it implemented
+/// before the generalisation. This test is the proof that nothing moved.
+#[cfg(feature = "board-119")]
+#[test]
+fn req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers() {
+    let mut core = MapperRom::new(119).prg(16).chr(64).load();
+    fill_tqrom_chr_ram(&mut core);
+
+    // What a window showing bank `value` must read: the RAM marker when CHR A16 is set, and the
+    // ROM's own bank number — wrapped modulo its 64 banks — when it is not.
+    let expected = |value: u8| -> u8 {
+        if value & 0x40 == 0 {
+            value % 64
+        } else {
+            0x40 | (value & 0x07)
+        }
+    };
+
+    for value in 0..=255u8 {
+        // A 1 KiB register (R2) in CHR mode 0, at PPU $1000-$13FF.
+        core.mmc3_bank(2, value);
+        assert_eq!(
+            expected(value),
+            peek(&core, 0x1000),
+            "CHR mode 0, R2 = {value:#04X}"
+        );
+
+        // The same register in CHR mode 1, where bit 7 of $8000 has moved the 1 KiB half to
+        // $0000-$03FF. The select is a line of the bank number, so the window it lands in
+        // changes nothing.
+        txsrom_bank_in_chr_mode_1(&mut core, 2, value);
+        assert_eq!(
+            expected(value),
+            peek(&core, 0x0000),
+            "CHR mode 1, R2 = {value:#04X}"
+        );
+
+        // A 2 KiB register (R0) in CHR mode 0, at PPU $0000-$07FF. It "ignores bit 0", so its
+        // two 1 KiB windows show banks `value & $FE` and `value | $01` — both on whichever chip
+        // bit 6 of the one register names, and the RAM offsets differ in bit 0 only.
+        core.mmc3_bank(0, value);
+        assert_eq!(
+            (expected(value & 0xFE), expected(value | 0x01)),
+            (peek(&core, 0x0000), peek(&core, 0x0400)),
+            "CHR mode 0, R0 = {value:#04X}"
+        );
+    }
+}
+
 /// nesdev ("INES Mapper 047"): $6000-$7FFF is `[.... ...B]`, "each block has 128k PRG and 128k
 /// CHR", and $8000-$FFFF is the "Same as MMC3 for selected block".
 ///

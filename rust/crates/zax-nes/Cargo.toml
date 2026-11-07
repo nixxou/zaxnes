@@ -78,8 +78,24 @@ board-116 = []
 
 # Mapper 119, the Nintendo TQROM: *High Speed* and *Pin\*Bot*. A `const` parameter of the
 # MMC3's board, with its CHR-RAM chip's select, its two `#[inline(never)]` fetch bodies and the
-# 8 KiB in `board_memory_sizes` (MF-6a3 step 1).
+# 8 KiB in `board_memory_sizes` (MF-6a3 step 1). MF-UNL-2 step 1 generalised that parameter into
+# the four of `Mmc3Board`'s `CHR_RAM_*` set -- the four columns of nesdev's *MMC3 with CHR ROM and
+# CHR RAM* -- and this feature is still the whole mechanism: with it off no board of the family
+# compiles at all.
 board-119 = []
+
+# Mappers 74, 192, 194 and 195 -- the Waixing 43-393/43-406/860908C, FS308, the unnamed board of
+# *Dai-2-Ji Super Robot Taisen* and the Waixing FS303: the **other four members of mapper 119's
+# own family**, an MMC3 with a CHR-RAM chip beside its CHR-ROM so that a game can draw Chinese
+# characters (MF-UNL-2 step 2). Six Waixing originals and ports, *哥伦布传*, *甲A*,
+# *第四次: 机器人大战* and *天神之剑* among them.
+#
+# One feature and four `const` monomorphisations of `Mmc3Board`, which is why it **implies
+# `board-119`**: the mechanism is that feature's -- the chip select, the two `#[inline(never)]`
+# fetch bodies, the byte of per-slot source flags -- and this one adds the rows of the family's
+# page that were not here, plus 195's run-time GAL. One `IrqBoard` variant for the four, holding
+# the inner enum `Mmc3ChrRamBoard`.
+board-mmc3-chrram = ["board-119"]
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the
