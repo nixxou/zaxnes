@@ -1031,6 +1031,14 @@ it; where two numbers share a title the roster in §6.2 says so.
 
 #### MF-UNL-2 — the MMC3 clones that need nothing new
 
+> **Shipped.** `docs/progress/MF-UNL-2.md` is the lot's own write-up: twelve numbers, four
+> features, all four in `default`. Three of the steps below were written from Mesen 2's
+> registrations rather than from the numbers' own pages and the pages won — step 1's
+> `(0x40, 0x7F, 8)` for mapper 119 (**Q-142**'s first half: reading that pair as a closed range
+> is an observable change to a mapper already in `default`, which the lot's own gate caught),
+> step 2's `(0x00, 0x03, 4)` for mapper 195 (**Q-142**), and step 3's bit order for mapper 123's
+> `$5800` (**Q-144**). **Q-143** records one more, 192's NES 2.0 CHR-RAM-size override.
+
 **Boards and features**: `board-mmc3-chrram` (74, 192, 194, 195); `board-mmc3-scramble` (114, 115,
 121, 123, 182, 187); `board-263` (UNL-KOF97); `board-189` (TXC 01-22017/22018).
 **12 numbers, 4 features, ~7 h, ~26 original titles.**

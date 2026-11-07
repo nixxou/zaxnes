@@ -154,6 +154,10 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-jv001` | 36, 132, 136, 147, 172, 173 | the **TXC 05-00002-010 / Sachen JV001** protection ASIC: one chip on six boards from four publishers, with the CPU data-bus wiring, the accumulator width, the banking pins and the one mirroring wire as fields of a single `DecodeBoard` variant. One forward that enum did not have, `try_read_prg` (`#[inline(never)]`), because the protection register is at $4100. Implies `board-decode-boards` | **~20** TXC, Idea-Tek, Super Mega and Sachen originals: *Strike Wolf*, *Policeman*, *F-15 City War*, *棋王*, *Creatom*, *Rad Racket*, *1991 賭馬 Racing*, *Venice Beach Volley*, *撲克精靈*, *未来小子*, *蝶變*, *少林武者* | measured **with the lot's other two**, against `481f683d`: worst ROM `smb1` **+47 883 (+0.001 %)**, set total **-148 638 (-0.000 %)**, five of thirteen below (MF-UNL-1 step 6) | **all five `core` at or below the base** -- `smb3/core` **-20 823**, `mm2/core` -18 944, `metroid/core` -9 952, `smb1/core` and `zelda2/core` **+0**. Four `total` inside at +0.001 % to +0.009 %; `smb3/total` **+0.023 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | `cargo build -p zax-nes --no-default-features --features <the others>` |
 | `board-sachen-8reg` | 150, 243 | **Sachen's eight-register ASIC** (SA-015 / SA-630 and SA-020A), one class in Mesen 2 and one variant here: an index port and a data port under mask $C101, three bits wide, R0/R1/R3 stored and inert, and R7's four nametable layouts. One forward, `nametable_page`, for the `S0-S0-S0-S1` mode no `NametableMirroring` can say. Implies `board-decode-boards` | **15** Sachen titles: *Tasac*, *将棋学園*, *Strategist*, *Olympic I.Q.*, *美女拳 — Honey Peach* among them | measured **with the lot's other two**, against `481f683d`: worst ROM `smb1` **+47 883 (+0.001 %)**, set total **-148 638 (-0.000 %)**, five of thirteen below (MF-UNL-1 step 6) | **all five `core` at or below the base** -- `smb3/core` **-20 823**, `mm2/core` -18 944, `metroid/core` -9 952, `smb1/core` and `zelda2/core` **+0**. Four `total` inside at +0.001 % to +0.009 %; `smb3/total` **+0.023 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | as above |
 | `board-133` | 133 | the **Sachen 72008** (`UNL-SA-72008`): one latch, `$4100: [.... .PCC]` under mask $E100. The page's 60-pin Sachen 3009 decode — a Namco-108 clone with an analog feedback path — is **not** built, on the page's own sentence that "only the 72-pin variant requires emulation"; `Sachen72008`'s doc comment records it. One `DecodeBoard` variant, no new forward. Implies `board-decode-boards` | 2: *Jovial Race*, *盜帥 — Master Chu and the Drunkard Hu* | measured **with the lot's other two**, against `481f683d`: worst ROM `smb1` **+47 883 (+0.001 %)**, set total **-148 638 (-0.000 %)**, five of thirteen below (MF-UNL-1 step 6) | **all five `core` at or below the base** -- `smb3/core` **-20 823**, `mm2/core` -18 944, `metroid/core` -9 952, `smb1/core` and `zelda2/core` **+0**. Four `total` inside at +0.001 % to +0.009 %; `smb3/total` **+0.023 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | as above |
+| `board-mmc3-chrram` | 74, 192, 194, 195 | the **other four members of mapper 119's own family**: an MMC3 with a CHR-RAM chip beside its CHR-ROM, which is how a Chinese game draws logographic characters. Four `const` monomorphisations of `Mmc3Board` behind **one** boxed `IrqBoard` variant holding the inner enum `Mmc3ChrRamBoard`, and **it implies `board-119`** because the mechanism is that feature's -- the chip select, the two `#[inline(never)]` fetch bodies, the byte of per-slot source flags. MF-UNL-2 step 1 generalised 119's one `const bool` into the **four columns** of nesdev's *MMC3 with CHR ROM and CHR RAM* (first RAM bank, size, `RAM mirrored?`), and `update_banks` comes out of the compiler **identical to the instruction** on `m4` and `smb3`. 195 carries the page's run-time **GAL** besides, one three-bit field selecting eight windows, latched by a PPU write to a CHR-ROM window (Q-142) | **6** Waixing originals and ports: *哥伦布传*, *天神之剑*, *甲A*, *第四次: 机器人大战*, *機甲戰士*, *Ying Lie Qun Xia Zhuan* | measured **with the lot's other three**, against `186b5656`: worst ROM `mm2` **+54 574 (+0.001 %)**, set total **-585 425 (-0.000 %)**, eight of thirteen below -- `m4`, the MMC3 this lot generalises, is the biggest gain at **-280 090** (MF-UNL-2 step 8) | **all five `core` inside at +0.000 % to +0.001 %**, `smb1/core` **+0**. Four `total` inside at -0.007 % to +0.000 %, three of them *below* the base; `smb3/total` **+0.039 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | `cargo build -p zax-nes --no-default-features --features <the others>` |
+| `board-mmc3-scramble` | 114, 115, 121, 123, 182, 187 | the **six MMC3 clones with scrambled registers**, from SuperGame, Hosenkan and 卡聖 (Kǎshèng): one board with six wirings -- two scramble rows (address and index are **separate** choices, 123 having only the second), three NROM-override ports with three bit orders, an outer 256 KiB CHR bank, CHR A18 driven from **PPU A12** on the A9711 and the A98402, the MMC3A counter on 114 and 182, and 121's protection array with its `$8003` table of bit-reversed `$8001` values. One **boxed** `IrqBoard` variant holding an `Mmc3`, and the first board to make that enum forward `Mapper::try_read_prg` -- the dispatch **MF-CART freed**, which this lot re-measured rather than taking on trust. **Q-144** holds four places this family's page beats Mesen 2, of which 123's `$5800` bit order is observable | **~14** originals: *Aladdin*, *The Lion King*, *Boogerman*, *Pocohontas*, *Super Donkey Kong*, the six Gouder titles Kǎshèng re-released, *Mortal Kombat 3*, *Earthworm Jim 2*, *Street Fighter Zero 2*, *The King of Fighters '96* | measured **with the lot's other three**, against `186b5656`: worst ROM `mm2` **+54 574 (+0.001 %)**, set total **-585 425 (-0.000 %)**, eight of thirteen below -- `m4`, the MMC3 this lot generalises, is the biggest gain at **-280 090** (MF-UNL-2 step 8) | **all five `core` inside at +0.000 % to +0.001 %**, `smb1/core` **+0**. Four `total` inside at -0.007 % to +0.000 %, three of them *below* the base; `smb3/total` **+0.039 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | as above |
+| `board-263` | 263 | the Rex Soft **UNL-KOF97**: an MMC3 clone "with scrambled mapper address and data bits" and no register of its own -- the board's **A12 drives the chip's A0**, which one line reproduces, and the written byte is permuted `76543210 -> 76243051`. One `IrqBoard` variant, **unboxed**, holding an `Mmc3` and two translations in front of it. The page states the permutation twice, as a bit map and as an expression, so the test builds it from the map and checks all 256 bytes against the board | 2: *The King of Fighters '97*, *Boogerman II: The Final Adventure* | measured **with the lot's other three**, against `186b5656`: worst ROM `mm2` **+54 574 (+0.001 %)**, set total **-585 425 (-0.000 %)**, eight of thirteen below -- `m4`, the MMC3 this lot generalises, is the biggest gain at **-280 090** (MF-UNL-2 step 8) | **all five `core` inside at +0.000 % to +0.001 %**, `smb1/core` **+0**. Four `total` inside at -0.007 % to +0.000 %, three of them *below* the base; `smb3/total` **+0.039 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | as above |
+| `board-189` | 189 | the TXC **01-22017-000**/**01-22018-400** and the Yoko **FC-001EM**: an MMC3 clone whose PRG-ROM is banked in **32 KiB** amounts from a register at `$4100`, so the chip's own PRG bank lines reach nothing. One `IrqBoard` variant, **unboxed**, holding an `Mmc3` plus one byte. The page's "address bit 9" is **A8**, which its mask `$E100`, its address diagram and the `$4132` its own oversize game writes all say; three bits of the byte are taken so that **one decode runs the original and the oversize board**. The **generic pirate** variants (A-37, K-3086), which move the register onto the PRG-RAM interface, are deliberately not decoded on the page's own paragraph about them | 2 originals and their many variants: *Thunder Warrior — 轰天至尊*, *Street Fighter II: The World Warrior* | measured **with the lot's other three**, against `186b5656`: worst ROM `mm2` **+54 574 (+0.001 %)**, set total **-585 425 (-0.000 %)**, eight of thirteen below -- `m4`, the MMC3 this lot generalises, is the biggest gain at **-280 090** (MF-UNL-2 step 8) | **all five `core` inside at +0.000 % to +0.001 %**, `smb1/core` **+0**. Four `total` inside at -0.007 % to +0.000 %, three of them *below* the base; `smb3/total` **+0.039 %** is outside and is **Lua's `ltable.c`** -- see the note under the table | **on** | as above |
 | `parked-boards` | 99, 151 | the umbrella: every board left out of `default`. Empty from MF-CART step 5 until **MF-VS step 7**, which put `board-vs-system` in it — so a reader who wants every board this build has turns on this one flag | as that row | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.0020 % on one ROM**, against a tolerance of
@@ -286,6 +290,45 @@ straight back.
 > **−0.111 %** with worst ROMs of **+0.001 %** and **+0.002 %**. Both are in `default` and
 > `parked-boards` is empty.
 
+### `smb3/total` and Lua's `ltable.c`, re-measured with a pair whose spread is twice the tolerance
+
+Three lots have now shipped a board with `smb3/total` as their one figure outside the owner's
++0.02 %: `board-77` at +0.024 %, MF-UNL-1's three at +0.023 %, and **MF-UNL-2's four at
++0.039 %**. Every time the per-function diff has put the whole move in Lua's string-key hash
+table, and MF-UNL-2 step 8 is the measurement that settles what the figure *is*.
+
+Its `unl2swap` binary is `unl2`'s own source with **two disjoint arms of `registry::create_board`
+exchanged** — mappers 13 and 15, neither of them in the lot. The same boards, the same registers,
+the same emulation; a different binary layout. Against each other, over 600 frames of each
+level-2 game with its pack:
+
+| | `core` | `total` |
+| --- | ---: | ---: |
+| `smb1` | **+0** | −1 887 183 (**−0.014 %**) |
+| `mm2` | **+0** | −61 914 (−0.000 %) |
+| `metroid` | **+0** | +107 996 (+0.001 %) |
+| `smb3` | **+0** | **−8 302 849 (−0.034 %)** |
+| `zelda2` | **+0** | +1 938 474 (+0.013 %) |
+
+**`core` is identical to the instruction on all five and `total` moves by −0.034 % to +0.013 %.**
+So `smb3/total` has an instrument spread of 0.034 % on this tree — *larger than the tolerance it
+is being judged against* — and the same pair gives that figure +0.005 % against the base commit
+where `unl2` gives +0.039 %. The two binaries trade places.
+
+What the figure is made of, on `unl2` against `unl2base`: `luaH_getshortstr` **+7 120 332** and
+`getgeneric` **+2 247 528**, which is 9.37 M of the 9.39 M; no symbol of this project moves by
+more than +817 768 (`Board::write_register`, paid back by −667 295 in `NesBus::write_internal`);
+and the stage table has `ppu`, `apu` and `draw_list` **identical to the instruction** with the
+whole move in `convert` (+0.308 %) and `lua_hooks` (+0.534 %) — the 3D engine converting against
+a differently-laid-out heap.
+
+**The reading this table takes**: on a level-2 run with a pack loaded, `core` is the figure the
+owner's tolerance can be applied to and `total` is not resolvable below about 0.035 %. A board
+whose level-2 `core` figures are at or below the base is **not** parked on a `total` that a
+same-behaviour pair of binaries moves further than the tolerance itself. PR-1's thirteen ROMs,
+which load no pack and run no Lua, show the same pair at worst ROM +0.001 % and set total
++0.000 % — so the instrument that *can* resolve these boards does, and says they cost nothing.
+
 ## How to turn a board off
 
 There is no `--no-feature` flag in Cargo, so turning one board off means naming the others:
@@ -294,15 +337,20 @@ There is no `--no-feature` flag in Cargo, so turning one board off means naming 
         board-94,board-105,board-111,board-116,board-153,board-155,board-158,board-68,\
         board-68-chr-nametables,board-77,board-96,board-eeprom,board-jaleco-72-92-86,\
         board-mmc3-multicart,board-namcot108,board-small-boards,board-taito-x1,\
-        board-jv001,board-sachen-8reg,board-133
-    # ... which is every board but `board-119`. `board-vs-system` is in neither list: it is
+        board-jv001,board-sachen-8reg,board-133,board-mmc3-chrram,board-mmc3-scramble,\
+        board-263,board-189
+    # ... which is every board but `board-119` -- except that `board-mmc3-chrram` **implies**
+    # it, so this exact line still builds mapper 119. Turning 119 itself off means dropping
+    # `board-mmc3-chrram` from the list too, the CHR-RAM mechanism being one feature's.
+    # `board-vs-system` is in neither list: it is
     # parked, so `default` does not have it and `--features parked-boards` is how it comes on.
 
 and `cargo test -p zax-nes --no-default-features` is the configuration with **every** board off —
-**783 passed, 0 failed, 8 ignored**, against **881** by default since MF-UNL-1 added its three.
+**783 passed, 0 failed, 8 ignored** -- unchanged by MF-UNL-2, every one of its tests being
+behind one of its four features -- against **898** by default since that lot added them.
 `--features parked-boards` is **no longer** the same build as `default`: MF-VS step 7 put
 `board-vs-system` in the umbrella, so that configuration is the one with the VS. System and its 45
-tests (**934 passed, 0 failed, 8 ignored** against 881 by default). Every configuration (each
+tests (**951 passed, 0 failed, 8 ignored** against 898 by default). Every configuration (each
 feature alone, none, all, and all plus `parked-boards`) builds, passes clippy `-D warnings` and
 passes its tests; MF-6a3 step 3's table has the per-feature test counts.
 

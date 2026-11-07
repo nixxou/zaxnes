@@ -99,6 +99,12 @@ board-119 = []
 # fetch bodies, the byte of per-slot source flags -- and this one adds the rows of the family's
 # page that were not here, plus 195's run-time GAL. One `IrqBoard` variant for the four, holding
 # the inner enum `Mmc3ChrRamBoard`.
+#
+# Measured with the lot's other three against `186b5656` (MF-UNL-2 step 8): PR-1's thirteen ROMs
+# worst `mm2` +0.001 %, set total -585 425 (-0.000 %), eight of thirteen below; level 2 all five
+# `core` inside at +0.000 % to +0.001 %. The one figure outside the tolerance is `smb3/total`
+# +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
+# -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-mmc3-chrram = ["board-119"]
 
 # Mappers 114, 115, 121, 123, 182 and 187 -- the SuperGame/Hosenkan board and the Kasheng
@@ -112,6 +118,12 @@ board-mmc3-chrram = ["board-119"]
 # precedent: no number has all three additions and none has anything else. It is the first board
 # to make `IrqBoard` forward `Mapper::try_read_prg`, which 121's protection array and 187's
 # protection read need.
+#
+# Measured with the lot's other three against `186b5656` (MF-UNL-2 step 8): PR-1's thirteen ROMs
+# worst `mm2` +0.001 %, set total -585 425 (-0.000 %), eight of thirteen below; level 2 all five
+# `core` inside at +0.000 % to +0.001 %. The one figure outside the tolerance is `smb3/total`
+# +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
+# -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-mmc3-scramble = []
 
 # NES 2.0 mapper 263, the Rex Soft **UNL-KOF97** board (MF-UNL-2 step 4): an MMC3 clone with
@@ -121,6 +133,12 @@ board-mmc3-scramble = []
 #
 # One `IrqBoard` variant, unboxed, holding an `Mmc3` and two translations in front of it. No
 # other register: the page documents none.
+#
+# Measured with the lot's other three against `186b5656` (MF-UNL-2 step 8): PR-1's thirteen ROMs
+# worst `mm2` +0.001 %, set total -585 425 (-0.000 %), eight of thirteen below; level 2 all five
+# `core` inside at +0.000 % to +0.001 %. The one figure outside the tolerance is `smb3/total`
+# +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
+# -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-263 = []
 
 # Mapper 189, the TXC **01-22017-000**/**01-22018-400** and the Yoko **FC-001EM** (MF-UNL-2
@@ -131,6 +149,12 @@ board-263 = []
 # One `IrqBoard` variant, unboxed, holding an `Mmc3` plus one byte. The generic pirate boards of
 # the same number -- A-37 and K-3086, which move the register onto the PRG-RAM interface -- are
 # deliberately not decoded; `Mmc3Txc189` has the page paragraph that settles it.
+#
+# Measured with the lot's other three against `186b5656` (MF-UNL-2 step 8): PR-1's thirteen ROMs
+# worst `mm2` +0.001 %, set total -585 425 (-0.000 %), eight of thirteen below; level 2 all five
+# `core` inside at +0.000 % to +0.001 %. The one figure outside the tolerance is `smb3/total`
+# +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
+# -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-189 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*

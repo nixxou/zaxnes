@@ -36,7 +36,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **6/9 — the four sweeps and the feature matrix.** Every configuration the lot adds, plus
   `--no-default-features` and `--features parked-boards`; `cargo fmt --check` and clippy
   `-D warnings` in each.
-- [ ] **7/9 — the documentation.** Four rows in `docs/review/BOARD-FEATURES.md`, the Cargo
+- [x] **7/9 — the documentation.** Four rows in `docs/review/BOARD-FEATURES.md`, the Cargo
   feature comments, and the question tickets.
 - [x] **8/9 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `186b5656`, every compared commit built from `git archive` in a fresh directory, and the
@@ -674,3 +674,46 @@ which is the instrument's spread and is larger than the tolerance itself. The fi
 figures — the emulated core, which is what these twelve boards *are* — are +0.000 % to +0.001 %.
 
 Nothing is dropped either way: each of the four is one `--no-default-features --features …` away.
+
+## Step 7 — the documentation
+
+**Four rows in `docs/review/BOARD-FEATURES.md`**, between `board-133` and the `parked-boards`
+umbrella, each with step 8's figures in the two cost columns and the decision `**on**`. The
+`--no-default-features` and `parked-boards` test counts in that file are brought to this lot's
+(**783** unchanged and **951**, against **898** by default), and the "how to turn a board off"
+command gains the four names — with one correction it forced: that command's comment used to say
+"which is every board but `board-119`", and `board-mmc3-chrram` **implies** `board-119`, so the
+line as written still builds mapper 119. The comment now says so and says what to drop.
+
+**One new section under that table**, `smb3/total` and Lua's `ltable.c`. Three lots have now
+shipped a board whose one figure outside the owner's tolerance is that one — `board-77` at
++0.024 %, MF-UNL-1's three at +0.023 %, this lot's four at +0.039 % — and step 8's
+same-behaviour pair is the measurement that says what it is: **`core` identical to the
+instruction on all five games and `total` moving by −0.034 % to +0.013 %** between two binaries
+whose emulation is the same. The section states the reading the table now takes: on a level-2 run
+with a pack loaded, `core` is the figure the tolerance applies to and `total` is not resolvable
+below about 0.035 %.
+
+**Four Cargo feature comments** in `rust/crates/zax-nes/Cargo.toml`, each ending in the same
+six-line figure block, so a reader who flips a feature finds the number beside it. (And a second
+brush with `req_arch_002_the_crate_has_no_platform_dependency`, which scans that manifest's text
+for `windows`: the figure block says "level 2 all five `core`" rather than naming any window.)
+
+**One note in `docs/review/UNL-census.md` §7.2**, under the MF-UNL-2 heading, recording that the
+lot shipped and that **three of its own steps were written from Mesen 2's registrations where the
+numbers' pages disagree** — 119's `(0x40, 0x7F, 8)`, 195's `(0x00, 0x03, 4)` and 123's `$5800`
+bit order. That is the one thing a future lot of this plan should read before starting: the
+census's §6.2 graded the *documentation* of each number and its §7.2 steps were drafted from
+Mesen's `MapperFactory`, so the step text and the page can differ, and the page wins.
+
+### The three question tickets
+
+| ticket | the question | the choice |
+| --- | --- | --- |
+| **Q-142** | mapper 195's CHR-RAM window: the census's fixed `(0x00, 0x03, 4)` or the page's run-time GAL, and what its power-on is | **the page**: the GAL, power-on `$80` (`$28-$2B`), an **8 KiB** chip because the page's own worked example about CHR A13 cannot be true of a 4 KiB one, and the register latched by a PPU write to a CHR-ROM window. The ticket records that the census's reading is right for the *hacked* *Captain Tsubasa II* images the page itself names, and that this choice runs those too |
+| **Q-143** | 192's "If the NES 2.0 header is present, 74 and 192 should be emulated identically, as NES 2.0 specifies CHR RAM size elsewhere" | **not implemented**: the board's chip is the board's, which is `board_memory_sizes`'s own contract, and taking RAM away from a 192 image whose header said 2 KiB is the worse of the two errors — mapper 97's precedent in that function |
+| **Q-144** | **four** places the scrambled family's pages beat Mesen 2, and five things of Mesen's that are on no page | **the pages**. The one that is observable is 123's `$5800` bit order — the page's diagram puts the bank's bit 1 at register bit **4** and `MMC3_123.h` reads bit **3**, so half of all `$5800` values differ and *Mortal Kombat 3* would jump into the wrong 16 KiB bank. **No mapper-123 image is available to this project**, so nothing here can settle it and a reviewer with a ROM should |
+
+Q-142's first half is the one the lot could settle by itself, and it did: reading the census's
+`(0x40, 0x7F, 8)` as a closed range is an **observable change to mapper 119**, which step 1's
+gate caught both ways.
