@@ -1030,7 +1030,12 @@ impl Ppu2C02 {
 
         // The PPU blanks its first 8 columns when the game asks for it, which in a wide picture
         // would be a black band in the middle: they are composed too.
-        let composed_from = if self.left_column_masked() { 8 } else { 0 };
+        // (PPUMASK and the palette as the frame ended: see `shown_palette`.)
+        let composed_from = if (self.shown_mask & 0x06) == 0x06 {
+            0
+        } else {
+            8
+        };
         // The PPU's own lines; a row across the top or bottom edge whose centre was decoded is
         // composed from its records, on the screen too.
         let (top, bottom) = self.centre_lines;
@@ -1089,7 +1094,7 @@ impl Ppu2C02 {
         let colour = |entry: u8| -> u8 {
             match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
                 (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
-                _ => self.palette[palette_index(0x3F00 | u16::from(entry))],
+                _ => self.shown_palette[palette_index(0x3F00 | u16::from(entry))],
             }
         };
         for row in 0..height {
@@ -1205,7 +1210,7 @@ impl Ppu2C02 {
         screen_rows: &std::ops::Range<usize>,
     ) {
         let records = self.tiles.records();
-        let backdrop = self.palette[palette_index(0x3F00)];
+        let backdrop = self.shown_palette[palette_index(0x3F00)];
         for record in records
             .iter()
             .filter(|r| !r.background && (r.index >= 128 || r.x < 0))
@@ -1238,7 +1243,7 @@ impl Ppu2C02 {
                     let entry = 0x3F10 | u16::from(record.palette * 4) | u16::from(pixel);
                     let slot = &mut out[(row * width) + column];
                     if !record.hidden || *slot == backdrop {
-                        *slot = self.palette[palette_index(entry)];
+                        *slot = self.shown_palette[palette_index(entry)];
                     }
                 }
             }

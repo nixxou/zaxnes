@@ -110,6 +110,12 @@ pub struct Ppu2C02 {
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
     palette: [u8; PALETTE_SIZE],
+    /// The palette and PPUMASK as the frame just drawn ended (its vblank's first line), which the
+    /// wide 2D picture is coloured with. Not saved: with run-ahead the host composes that picture
+    /// once the real frame's state is back, whose palette is a frame older than the pixels and
+    /// records it keeps; the first column, composed with it, showed a fade a step late.
+    shown_palette: [u8; PALETTE_SIZE],
+    shown_mask: u8,
     decay_stamp: [i64; 8],
 
     timing: RegionTiming,
@@ -259,6 +265,8 @@ impl Ppu2C02 {
             vram_clock: 0,
             oam: [0; OAM_SIZE],
             palette: [0; PALETTE_SIZE],
+            shown_palette: [0; PALETTE_SIZE],
+            shown_mask: 0,
             decay_stamp: [0; 8],
             timing: RegionTiming::default(),
             dot: 0,
@@ -780,6 +788,8 @@ impl Ppu2C02 {
                 // The frame boundary always fires; the flag itself can be suppressed by a
                 // read of $2002 one dot earlier (nesdev, "PPU frame timing").
                 self.vblank_just_started = true;
+                self.shown_palette = self.palette;
+                self.shown_mask = self.mask;
                 if !self.suppress_vblank {
                     self.vblank_flag = true;
                 }
