@@ -546,6 +546,7 @@ impl AudioStream {
         let target_gain = self.control.console_gain();
         let mut available = 0;
         let mut read = 0;
+        let was_gated = self.prefill > 0;
         {
             let mut slot = guard(&self.console);
             if let Some(source) = slot.as_mut() {
@@ -578,8 +579,12 @@ impl AudioStream {
             self.mono[frame] = self.console_hold * envelope * gain;
         }
         if active {
+            // While the gate is shut the average is *set*, not blended: when the gate opens it
+            // must already read the real fill, or the rate controller would see a latency a
+            // second out of date and take the start of a game for a drift worth resynchronising.
+            let weight = if was_gated { 1.0 } else { self.fill_weight };
             self.control
-                .record_fill(available.saturating_sub(read), self.fill_weight);
+                .record_fill(available.saturating_sub(read), weight);
         }
     }
 

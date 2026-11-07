@@ -9,6 +9,7 @@ pub mod audio_assets;
 pub mod audio_mixer;
 pub mod chip_voices;
 pub mod fade_gain;
+pub mod rate_control;
 pub mod stream;
 pub mod synth_audio_library;
 pub mod ui_sound;

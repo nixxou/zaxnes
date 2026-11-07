@@ -23,7 +23,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
 - [x] **4. Latency setting and prefill.** `audio.latency_ms` (default 60, range 20–200) in the
       options' Audio tab, in the settings file, with the English and French strings. Playback
       starts, and restarts, only once the ring holds the configured latency.
-- [ ] **5. Rate control on what is really buffered.** The ring fill is measured as a latency in
+- [x] **5. Rate control on what is really buffered.** The ring fill is measured as a latency in
       milliseconds by the audio callback and averaged over about a second; the correction is a
       dead band, a capped proportional term and a slowly accumulating term. Only at 100 % speed
       and not while recording. A far drift resynchronises.
@@ -221,3 +221,57 @@ is ramped in rather than switched on, and no under-run is counted for the wait.
 
 fmt and clippy `-D warnings` clean on `zax-settings`, `zax-platform`, `zax-app`; every test of
 those three crates green (15 in `audio_tests`).
+
+### Step 5 — the rate control
+
+`zax-app/src/audio/rate_control.rs`, a state machine of three numbers with its own unit tests;
+the host only feeds it the error and passes the result to the core.
+
+The error is **the latency the audio thread measured, in milliseconds, minus the configured
+target** — `AudioControl::average_fill`, recorded in the callback after each read and smoothed
+with a one-second weight. The old controller measured `available_samples()` from the main
+thread, just after producing a frame, against a target of 1024 samples, and never saw the SDL
+queue that held most of the latency.
+
+The law:
+
+| term | value | why |
+|---|---|---|
+| dead band | 3 ms | the pitch does not wander for an error nobody can hear |
+| proportional | 1,25e-4 per ms, capped at 0,25 % | reacts to a real excursion |
+| accumulation | 4e-5 per ms per second, capped at 0,06 % | cancels the clock offset, so the latency settles *on* its target |
+| leak of the accumulation | 0,05 per second | the damping, see below |
+| resynchronisation | 50 ms, with a 2 s cooldown | a stall or a fast-forward burst is not a clock offset |
+
+**The leak is not decoration.** A dead band in front of the proportional term leaves the loop
+undamped inside it: the ring's fill and the accumulated correction form an oscillator of period
+`2π / √(1000 · OFFSET_GAIN)` ≈ 31 s and nothing opposes it, so the latency would swing a couple
+of milliseconds for ever (and, with the one-second lag of the measurement adding phase, slowly
+grow until it left the dead band). The leak damps it for a residual error of
+`LEAK · drift / OFFSET_GAIN` ≈ 0,4 ms at a drift of 0,03 % — far inside the dead band.
+
+Gating, as the work order asks: the correction runs only in Running, at exactly 100 % speed,
+outside a fast-forward burst and outside a recording (REQ-AUD-011 — the core retimes its own
+resampler for the speed factor — and a recorded movie must not depend on this machine's sound
+card). Elsewhere `idle` sends 0 to the core but **keeps** what was learnt of the clock, since
+the sound card has not changed. A resynchronisation does clear it: the fill it was learnt from
+is gone.
+
+Measured, by simulating the closed loop at 60 steps a second with the one-second measurement lag
+included (`a_device_clock_off_by_three_hundredths_of_a_percent_settles_inside_the_dead_band`):
+a device clock 0,03 % fast or slow, over **one simulated hour**, never moves the fill more than
+**1,36 ms** from the target after the first minute and never takes the ring below 40 ms of the
+60 ms target — so the stream has nothing to under-run on. At ten times that drift (0,1 %) the
+accumulation saturates, the proportional term carries the rest, and the ring still holds above
+30 ms.
+
+One subtlety fixed in the stream while it was being measured: the averaged fill is now *set*
+rather than blended while the prefill gate is shut, so that on the block where the gate opens the
+controller reads the real fill. Blending from a stale value would have shown it a 60 ms error at
+the start of every game and had it resynchronise for nothing.
+
+`audio_rate_adjustment` on the host turned out to be a duplicate of `RateControl::adjustment()`
+and is gone.
+
+fmt and clippy `-D warnings` clean; `zax-app` (8 new unit tests in `rate_control`) and `zax-nes`
+tests green.
