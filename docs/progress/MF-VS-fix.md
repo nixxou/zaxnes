@@ -69,7 +69,7 @@ table — they are the columns the comments were already quoting.
 
 * [x] **0/6** — the plan: the baseline read, the database re-derived and compared to the committed
   table (74 rows, 0 differences), the design above settled, this file. No code.
-* [ ] **1/6** — the table carries the board: `VsBoardSpec`, the 74 rows regenerated from the
+* [x] **1/6** — the table carries the board: `VsBoardSpec`, the 74 rows regenerated from the
   database, the accessors, and a test that pins every row's board field by field.
 * [ ] **2/6** — the override at load: `vs::corrected_board`, `RomImage::correct_vs_board`, the
   `load_rom` order, `has_submapper`, the load message.
@@ -116,3 +116,48 @@ only mapper 30's board reads that byte's mirroring bits as a pair (MR-30-1) and 
 by the same CRC.
 
 Free space on G: at the start of the lot: **17 GB**, against the brief's floor of 5 GB.
+
+### Step 1 — the board is a column
+
+`VsRom` gains one field, `board: VsBoardSpec`, and `VsBoardSpec` is six: the mapper, the
+submapper, the PRG-ROM, CHR-ROM and CHR-RAM sizes and the mirroring, each one attribute of the row's
+database entry and each with its own accessor. The 74 rows were **regenerated**, not edited: a script
+matched every `VsRom::new` literal in the committed file and inserted the `VsBoardSpec::new` call
+built from the database entry of that row's CRC, so no title, PPU model, hardware type or wiring was
+retyped and none changed. The trailing comment lost its `mapper NN,` half — that half is now the
+board's first field — and kept the database's own category (`Vs. System`, `Bad Dumps`, `Homebrew`,
+`Bootleg Hacks`, `Compatibility Hacks`), which no column holds.
+
+**The proof the columns are the database's**, re-run on the committed file after `cargo fmt`:
+`scratchpad/check_boards.py` parses all **74** rows out of `vs/roms.rs` and compares **nine**
+columns each — CRC, PPU model, hardware type, wiring, mapper, submapper, PRG-ROM, CHR-ROM, CHR-RAM
+and mirroring — against the rows it re-derives from `nes20db.xml`. **0 differences.**
+
+Three things the data says that the step did not assume:
+
+* **Two rows, not one, are the defect.** `FFBEF374` *Vs. Castlevania* and `8C0C2DF5`
+  *Vs. Top Gun* are both `mapper="2" submapper="2"`, 128 KiB of PRG, **no CHR-ROM** and 8 KiB of
+  CHR-RAM. They are the only two rows of the 74 with any CHR-RAM, and they are exactly the two an
+  iNES 1.0 header announcing mapper 99 and CHR 0 breaks.
+* **Only three rows have a submapper at all**: those two (`2`/`2`, which nesdev's "NES 2.0
+  submappers" makes "Bus conflicts present") and `21A653C7` *Super Sky Kid* (`206`/`1`). The 206
+  submapper reaches nothing in this core — `Namcot108` does not read one — so the submapper's one
+  live consequence is the bus-conflict rule of the two UxROM boards, which is why step 2 has to make
+  the field authoritative rather than merely present.
+* **All 74 rows are `mirroring="4"`.** The four-screen VRAM was already an assumption of the lot
+  (`VsBoard` has no mirroring register, and the VRC1 ignores its own bit on a VS board); it is now a
+  column, and a test asserts the invariant over the whole table rather than trusting the sentence.
+
+Two tests: `the_rows_carry_the_board_the_database_records` writes out six rows field by field — the
+two with CHR-RAM, the two 40 KiB PRG images of nesdev's "INES Mapper 099", the one row with a
+non-bus-conflict submapper and the mapper-75 VRC1 — so that a change to the generated table shows up
+in a diff; and `every_board_of_the_table_is_one_this_build_can_run` holds the four invariants over
+all 74 rows: the mapper is in `NesCore::SUPPORTED_MAPPERS`, the mirroring is four-screen, the PRG-ROM
+is a non-zero multiple of 8 KiB (40 KiB and 24 KiB rows exist, so 16 KiB would be the wrong unit),
+and `chr_rom_size == 0` **if and only if** `chr_ram_size != 0`.
+
+Green: `zax-nes` **47 passed, 0 failed** on `vs_system_tests` with `--features parked-boards` (45 at
+the baseline plus this step's 2); fmt clean; clippy `-D warnings --all-targets` clean on `zax-nes`
+by default and with `--features parked-boards`. One lint needed a decision: `similar_names` rejects
+`chr_rom_size` beside `chr_ram_size`, which are `InesHeader`'s own two names for the same two
+fields, so the `allow` is on `VsBoardSpec::new` with the reason written there.

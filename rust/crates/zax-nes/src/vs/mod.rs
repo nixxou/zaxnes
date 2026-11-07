@@ -21,7 +21,7 @@ mod palettes;
 mod roms;
 
 pub use palettes::LUT_LEN;
-pub use roms::{rom_table, VsRom};
+pub use roms::{rom_table, VsBoardSpec, VsRom};
 
 use crate::rom::InesHeader;
 use crate::state::{InvalidState, StateReader, StateWriter};

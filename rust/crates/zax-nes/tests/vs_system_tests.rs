@@ -11,7 +11,7 @@
 use zax_nes::cartridges::ChrFetch;
 use zax_nes::rom::InesHeader;
 use zax_nes::vs::{rom_table, VsHardware, VsPpuModel, VsSource, VsSystem, VsWiring, LUT_LEN};
-use zax_nes::NesCore;
+use zax_nes::{NametableMirroring, NesCore};
 
 /// The ten PPU models, in the order byte 13's low nibble names them.
 const MODELS: [VsPpuModel; 10] = [
@@ -339,6 +339,89 @@ fn four_known_dumps_have_the_configuration_the_database_gives_them() {
         assert_eq!(row.ppu(), ppu, "{title}");
         assert_eq!(row.hardware(), hardware, "{title}");
         assert_eq!(row.wiring(), wiring, "{title}");
+    }
+}
+
+/// Lot MF-VS-fix step 1: a row carries the **board** the database records, and the two rows the
+/// defect is about are the two with CHR-RAM. REQ-CORE-012 is what makes them the hard case: an
+/// iNES 1.0 image with no CHR-ROM gets 32 KiB of CHR-RAM by default and these boards have 8.
+#[test]
+fn the_rows_carry_the_board_the_database_records() {
+    let expected = [
+        // (CRC, title, mapper, submapper, PRG-ROM, CHR-ROM, CHR-RAM)
+        (
+            0xFFBE_F374u32,
+            "Vs. Castlevania",
+            2,
+            2,
+            128 * 1024,
+            0,
+            8 * 1024,
+        ),
+        (0x8C0C_2DF5, "Vs. Top Gun", 2, 2, 128 * 1024, 0, 8 * 1024),
+        // The two 40 KiB PRG images of nesdev's "INES Mapper 099", the size that is not a whole
+        // number of the 16 KiB units byte 4 counts (MF-VS step 4).
+        (0x07A2_F3B2, "Vs. Gumshoe", 99, 0, 40 * 1024, 16 * 1024, 0),
+        (
+            0x70FF_B591,
+            "Raid on Bungeling Bay",
+            99,
+            0,
+            40 * 1024,
+            16 * 1024,
+            0,
+        ),
+        // The one row with a submapper that is not a bus-conflict bit.
+        (
+            0x21A6_53C7,
+            "Super Sky Kid",
+            206,
+            1,
+            32 * 1024,
+            32 * 1024,
+            0,
+        ),
+        // Mapper 75, the VRC1 the deprecated number 151 also names (MF-VS step 4).
+        (0xEE8A_F512, "Vs. Gradius", 75, 0, 64 * 1024, 64 * 1024, 0),
+    ];
+
+    for (crc, title, mapper, submapper, prg, chr, chr_ram) in expected {
+        let row = rom_table()
+            .iter()
+            .find(|row| row.crc() == crc)
+            .unwrap_or_else(|| panic!("{title} is missing from the table"));
+        let board = row.board();
+        assert_eq!(row.title(), title);
+        assert_eq!(board.mapper(), mapper, "{title}");
+        assert_eq!(board.submapper(), submapper, "{title}");
+        assert_eq!(board.prg_rom_size(), prg, "{title}");
+        assert_eq!(board.chr_rom_size(), chr, "{title}");
+        assert_eq!(board.chr_ram_size(), chr_ram, "{title}");
+    }
+}
+
+/// What all 74 boards have in common, which is what step 2's correction relies on: a mapper this
+/// build runs, four-screen VRAM, some PRG-ROM, and exactly one of the two CHR memories.
+#[test]
+fn every_board_of_the_table_is_one_this_build_can_run() {
+    for row in rom_table() {
+        let board = row.board();
+        let title = row.title();
+        assert!(
+            NesCore::SUPPORTED_MAPPERS.contains(&board.mapper()),
+            "{title}: mapper {} is not registered",
+            board.mapper()
+        );
+        // Every VS. System board is wired for four-screen VRAM, which is also the condition the
+        // VRC1 of mappers 75 and 151 ignores its mirroring bit under (MF-VS step 4).
+        assert_eq!(board.mirroring(), NametableMirroring::FourScreen, "{title}");
+        assert!(board.prg_rom_size() >= 8 * 1024, "{title}");
+        assert_eq!(board.prg_rom_size() % (8 * 1024), 0, "{title}");
+        assert_eq!(
+            board.chr_rom_size() == 0,
+            board.chr_ram_size() != 0,
+            "{title}: a board has CHR-ROM or CHR-RAM and not both"
+        );
     }
 }
 
