@@ -25,6 +25,8 @@ use super::mappers::NesEvent;
 use super::mappers::Nrom;
 #[cfg(feature = "board-96")]
 use super::mappers::OekaKids;
+#[cfg(feature = "board-sachen-8reg")]
+use super::mappers::Sachen8Reg;
 #[cfg(feature = "board-116")]
 use super::mappers::Somari;
 #[cfg(feature = "board-68")]
@@ -161,6 +163,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     140,
     #[cfg(feature = "board-jv001")]
     147,
+    #[cfg(feature = "board-sachen-8reg")]
+    150,
     // Mapper 151 needs the VRC1 **and** the VS layer: the number is the deprecated one for that
     // board on a VS. System board, so it is advertised only when both are built, which
     // `board-vs-system` implying `board-small-boards` is what guarantees.
@@ -199,6 +203,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     228,
     #[cfg(feature = "board-small-boards")]
     232,
+    #[cfg(feature = "board-sachen-8reg")]
+    243,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -450,6 +456,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // image declares a battery, which is the one board the page excepts.
         #[cfg(feature = "board-namcot108")]
         76 | 88 | 95 | 154 | 206 if !header.has_battery => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 150" and "INES Mapper 243"): both ports of Sachen's eight-register
+        // ASIC are decoded under **mask $C101**, which reads A15, A14, A8 and A0 and nothing
+        // else, so the index and data registers repeat through the whole of $4100-$7FFF --
+        // `$6100 & $C101` is `$4100`. The window has to be the registers and not RAM, or a game
+        // writing its CHR bank at $6101 would write work RAM instead; neither page gives the
+        // board any PRG-RAM. The same arm, and the same reason, that mappers 47, 37, 140, 184
+        // and the Jaleco JF-13 are on above (MF-UNL-1 step 2).
+        #[cfg(feature = "board-sachen-8reg")]
+        150 | 243 => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -708,6 +726,10 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         36 | 132 | 136 | 147 | 172 | 173 => {
             Board::DecodeBoard(DecodeBoard::Jv001(Jv001::new(memory, mapper)))
         }
+        // MF-UNL-1 step 2: Sachen's eight-register ASIC. The number picks which CHR pins R2, R4
+        // and R6 drive and nothing else, so it is one board with one `bool`.
+        #[cfg(feature = "board-sachen-8reg")]
+        150 | 243 => Board::DecodeBoard(DecodeBoard::Sachen8Reg(Sachen8Reg::new(memory, mapper))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

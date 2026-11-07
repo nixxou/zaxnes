@@ -107,7 +107,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   `board-111` (MF-6c step 9);
     // * 36, 132, 136, 147, 172 and 173, the six boards of the TXC 05-00002-010 / Sachen JV001
     //   protection ASIC -- one chip, one `DecodeBoard` variant -- behind `board-jv001`
-    //   (MF-UNL-1 step 1).
+    //   (MF-UNL-1 step 1);
+    // * 150 and 243, Sachen's eight-register ASIC -- one class in Mesen 2, one `DecodeBoard`
+    //   variant here -- behind `board-sachen-8reg` (MF-UNL-1 step 2).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -126,7 +128,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let eeprom = cfg!(feature = "board-eeprom");
     let jaleco = cfg!(feature = "board-jaleco-72-92-86");
     let jv001 = cfg!(feature = "board-jv001");
-    let additions: [(i32, bool); 60] = [
+    let sachen = cfg!(feature = "board-sachen-8reg");
+    let additions: [(i32, bool); 62] = [
         (19, true),
         (24, true),
         (26, true),
@@ -170,6 +173,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (136, jv001),
         (140, small),
         (147, jv001),
+        (150, sachen),
         (151, cfg!(feature = "board-vs-system")),
         (152, small),
         (153, cfg!(feature = "board-153")),
@@ -188,6 +192,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (207, taito_x1),
         (210, true),
         (232, small),
+        (243, sachen),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions
@@ -5590,6 +5595,229 @@ fn req_core_090_the_jv001_chip_survives_a_save_and_restore() {
             "mapper {mapper}"
         );
         assert_eq!(protection, core.read_memory(0x4100), "mapper {mapper}");
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+    }
+}
+
+// ------------------------------------------- Sachen's eight-register ASIC (150, 243),
+// ------------------------------------------- MF-UNL-1 step 2
+
+/// The board's one idiom: select a register at the index port, then write it at the data port.
+#[cfg(feature = "board-sachen-8reg")]
+fn sachen_write(core: &mut NesCore, register: u8, value: u8) {
+    core.mapper_write(0x4100, register);
+    core.mapper_write(0x4101, value);
+}
+
+/// nesdev ("INES Mapper 150"), the Sachen SA-015 / SA-630: "R4: .... ...C (CHR A15)", "R5:
+/// .... ..PP (PRG A16..A15)", "R6: .... ..BA (CHR A14..A13)" — and "Registers 0-3 are completely
+/// unused", which this build encodes as a **no-op and not an `unreachable!`** because "All three
+/// bits in all eight registers are fully readable and writable" (MF-UNL-1 step 2).
+#[cfg(feature = "board-sachen-8reg")]
+#[test]
+fn req_core_102_mapper_150_banks_chr_from_r4_and_r6_and_prg_from_r5() {
+    let mut core = MapperRom::new(150).prg(16).chr(64).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // R4 is CHR A15, two bits above R6's pair.
+    sachen_write(&mut core, 4, 0x01);
+    assert_eq!(32, core.chr_bank(0x0000));
+    // R6 is CHR A14-A13, under it.
+    sachen_write(&mut core, 6, 0x03);
+    assert_eq!(56, core.chr_bank(0x0000));
+    assert_eq!(63, core.chr_bank(0x1C00), "one 8 KiB bank over the range");
+    // R5 is the 32 KiB PRG bank.
+    sachen_write(&mut core, 5, 0x02);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+
+    // The four registers the page calls unused: written, stored, read back, and **nothing
+    // moves**. Mapper 150 has nothing on R2 either; 243 is the number that does.
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    for register in [0u8, 1, 2, 3] {
+        sachen_write(&mut core, register, 0x07);
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "R{register} has no external effect"
+        );
+        assert_eq!(
+            0x07,
+            core.read_memory(0x4101),
+            "R{register} is readable all the same"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 243"), the Sachen SA-020A of *美女拳 - Honey Peach*: the same ASIC with
+/// "R2: CHR A13", "R4: CHR A14" and "R6: CHR A16..A15", so the CHR field is four bits where 150's
+/// is three, and R0, R1 and R3 have "no external effect" (MF-UNL-1 step 2).
+#[cfg(feature = "board-sachen-8reg")]
+#[test]
+fn req_core_102_mapper_243_adds_chr_a13_on_r2() {
+    let mut core = MapperRom::new(243).prg(16).chr(128).load();
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // R2 is the bottom CHR bit on this number and nothing at all on 150.
+    sachen_write(&mut core, 2, 0x01);
+    assert_eq!(8, core.chr_bank(0x0000));
+    sachen_write(&mut core, 4, 0x01);
+    assert_eq!(24, core.chr_bank(0x0000));
+    sachen_write(&mut core, 6, 0x03);
+    assert_eq!(120, core.chr_bank(0x0000));
+    sachen_write(&mut core, 5, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    for register in [0u8, 1, 3] {
+        sachen_write(&mut core, register, 0x07);
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "R{register} has no external effect"
+        );
+        assert_eq!(0x07, core.read_memory(0x4101));
+    }
+
+    // And the same byte on R2 does move the bank here, which is the whole difference between
+    // the two numbers.
+    sachen_write(&mut core, 2, 0x00);
+    assert_eq!(112, core.chr_bank(0x0000), "R2 is CHR A13 on mapper 243");
+}
+
+/// R7's four layouts, on both numbers (nesdev, "INES Mapper 150" and "INES Mapper 243"):
+///
+/// ```text
+/// R7: ...  .MM.
+///      0: S0-S0-S0-S1 (lower right unique, or vertically-flipped L)
+///      1: Horizontal
+///      2: Vertical
+///      3: Single-screen, page 1
+/// ```
+///
+/// Mode 0 is the one this core cannot say with a `NametableMirroring`, so it comes out of
+/// `Mapper::nametable_page`; mode 3 is **Q-141**, "page 1" being `S1` in the page's own notation
+/// where Mesen 2 reads it as screen A (MF-UNL-1 step 2).
+#[cfg(feature = "board-sachen-8reg")]
+#[test]
+fn q_141_the_sachen_eight_register_asic_has_four_nametable_layouts() {
+    for mapper in [150usize, 243] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+
+        // Mode 0 at power-on, R7 being zero: three tables on page 0 and the fourth on page 1.
+        assert_eq!(
+            [0, 0, 0, 1],
+            nametable_pages(&core),
+            "mapper {mapper}, the vertically-flipped L"
+        );
+
+        // `MM` is bits 2-1 of the three-bit register, so the four modes are 0, 2, 4 and 6.
+        sachen_write(&mut core, 7, 0x02);
+        assert_eq!(Nm::Horizontal, core.mirroring(), "mapper {mapper}");
+        assert_eq!(
+            [-1, -1, -1, -1],
+            nametable_pages(&core),
+            "and the pages follow the mirroring again"
+        );
+
+        sachen_write(&mut core, 7, 0x04);
+        assert_eq!(Nm::Vertical, core.mirroring(), "mapper {mapper}");
+
+        // Q-141: "Single-screen, page 1" is `S1`, the page naming its two screens `S0` and `S1`
+        // one row above. Mesen 2 reads the same line as screen A.
+        sachen_write(&mut core, 7, 0x06);
+        assert_eq!(Nm::SingleScreenB, core.mirroring(), "mapper {mapper}");
+
+        // And back to the layout no mirroring can name.
+        sachen_write(&mut core, 7, 0x00);
+        assert_eq!([0, 0, 0, 1], nametable_pages(&core), "mapper {mapper}");
+
+        // Bit 0 of R7 is not part of `MM`.
+        sachen_write(&mut core, 7, 0x03);
+        assert_eq!(Nm::Horizontal, core.mirroring(), "mapper {mapper}");
+    }
+}
+
+/// "Mask: $C101" on both ports (nesdev, "INES Mapper 150"), which decodes A15, A14, A8 and A0
+/// and nothing else — so the index and the data registers repeat through the whole of
+/// $4100-$7FFF, and `registry::board_memory_sizes` has to give the board no PRG-RAM or a write
+/// at $6101 would land in work RAM instead of in the ASIC (MF-UNL-1 step 2).
+#[cfg(feature = "board-sachen-8reg")]
+#[test]
+fn req_core_102_the_sachen_eight_register_ports_repeat_up_to_7fff() {
+    let mut core = MapperRom::new(150).prg(16).chr(64).load();
+
+    // $6100 / $6101 are the same two ports as $4100 / $4101.
+    core.mapper_write(0x6100, 0x04);
+    core.mapper_write(0x6101, 0x01);
+    assert_eq!(32, core.chr_bank(0x0000), "CHR A15 set from $6101");
+    assert_eq!(0x01, core.read_memory(0x6101), "and readable there too");
+
+    // So are $5300 / $5301 and $7F00 / $7F01: only A15, A14, A8 and A0 are decoded.
+    core.mapper_write(0x7F00, 0x05);
+    core.mapper_write(0x7F01, 0x03);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+
+    // An address with A8 clear is not a port at all, whatever else it holds.
+    core.mapper_write(0x4000, 0x06);
+    core.mapper_write(0x4001, 0x02);
+    assert_eq!(
+        [12, 13, 14, 15],
+        core.prg_windows(),
+        "A8 clear is no register"
+    );
+    assert_eq!(
+        32,
+        core.chr_bank(0x0000),
+        "and R6 was not written through $4001 either"
+    );
+
+    // The index port is write-only -- the page gives "read/write" to the data port alone -- so
+    // a read of it is open bus, which this core answers as 0.
+    assert_eq!(0x00, core.read_memory(0x4100));
+
+    // $8000-$FFFF cannot be a port under this mask: `$8100 & $C101` is `$8100`.
+    core.mapper_write(0x8100, 0x04);
+    core.mapper_write(0x8101, 0x00);
+    assert_eq!([12, 13, 14, 15], core.prg_windows(), "no port above $8000");
+}
+
+/// REQ-CORE-090/091: the eight registers and the index survive a save and a restore, with the
+/// state dirtied first — including the three the page calls unused, which no bank window can
+/// show and only the data port can prove (MF-UNL-1 step 2).
+#[cfg(feature = "board-sachen-8reg")]
+#[test]
+fn req_core_090_the_sachen_eight_register_asic_survives_a_save_and_restore() {
+    for mapper in [150usize, 243] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(128).load();
+        for register in 0u8..8 {
+            sachen_write(&mut core, register, (register + 1) & 0x07);
+        }
+        sachen_write(&mut core, 3, 0x05);
+        core.mapper_write(0x4100, 0x03); // Leave the index somewhere non-zero.
+
+        let state = core.save_state(true).unwrap();
+        let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+        let pages = nametable_pages(&core);
+        assert_eq!(0x05, core.read_memory(0x4101), "mapper {mapper}");
+
+        for register in 0u8..8 {
+            sachen_write(&mut core, register, 0x00);
+        }
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "mapper {mapper}"
+        );
+        assert_eq!(pages, nametable_pages(&core), "mapper {mapper}");
+        assert_eq!(
+            0x05,
+            core.read_memory(0x4101),
+            "mapper {mapper}: R3 came back, and the index with it"
+        );
         assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
     }
 }

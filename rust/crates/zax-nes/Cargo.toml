@@ -39,6 +39,7 @@ default = [
     "board-taito-x1",
     "board-111",
     "board-jv001",
+    "board-sachen-8reg",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -197,6 +198,18 @@ board-vs-system = ["board-decode-boards"]
 # the `Namcot108` precedent. One forward this enum did not have, `try_read_prg`, because the
 # protection register is at $4100. Implies `board-decode-boards`.
 board-jv001 = ["board-decode-boards"]
+
+# Mappers 150 and 243, Sachen's eight-register ASIC on the SA-015 / SA-630 and the SA-020A
+# (MF-UNL-1 step 2). Fifteen Sachen titles -- *Tasac*, *Olympic I.Q.*, *Shogi Gakuen*,
+# *Strategist*, *美女拳 - Honey Peach* among them.
+#
+# One feature and one `DecodeBoard` variant for both numbers, which is the granularity Mesen 2
+# measures them at too (it builds one class, `Sachen74LS374N`, for the pair). An index port and a
+# data port under mask $C101, three bits wide, with R0/R1/R3 stored and inert. One forward this
+# enum did not have for a board of this shape, `nametable_page`, because R7's mode 0 is
+# `S0-S0-S0-S1` -- a per-table layout no `NametableMirroring` can say. Implies
+# `board-decode-boards`.
+board-sachen-8reg = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

@@ -21,7 +21,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   `DecodeBoard` variant: the ASIC's six registers, the $4100-$4103 window (mask $E103), the
   $8000-$FFFF latch, and the six wirings as fields. `registry.rs` arms, `SUPPORTED_MAPPERS`
   entries, `board_memory_sizes` rows, and the tests the census lists from each page.
-- [ ] **2/8 — `board-sachen-8reg`.** `Sachen8Reg`, the index/data pair at $4100/$4101 (mask
+- [x] **2/8 — `board-sachen-8reg`.** `Sachen8Reg`, the index/data pair at $4100/$4101 (mask
   $C101) with registers 0, 1 and 3 as **no-ops**, R7's four mirroring modes (one of which is a
   nametable-page override), and 243's extra CHR bit on R2.
 - [ ] **3/8 — `board-133`.** The 72-pin decode, with the choice between the 60-pin (Namco-108
@@ -156,4 +156,17 @@ pushed to 103 — the attribute `board_memory_sizes` beside it already carries.
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **936 passed, 0 failed, 9 ignored** (925 / 0 / 9 at `481f683d`: **+11 tests**) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 2 — `board-sachen-8reg`
+
+`Sachen8Reg` is a second `DecodeBoard` variant and **one** new forward on that enum beyond step
+1's, `nametable_page` (`#[inline(never)]`, behind `Cartridge::nametable_pages_vary`, which gains
+150 and 243). Mode 0 of R7 is a page override and not a `read_nametable` body, so Q-123's
+two-body dispatch is untouched. `board_memory_sizes` gains a real row — `prg_ram: Some(0)` —
+because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |

@@ -398,9 +398,15 @@ impl Cartridge {
             // for all four tables always: its two 8 KiB nametable banks hold two sets of four
             // distinct tables where this core's VRAM holds one (nesdev, "GTROM": "the mapper
             // always uses 4-screen mirroring").
+            // MF-UNL-1 step 2 adds mappers 150 and 243, Sachen's eight-register ASIC, whose R7
+            // mode 0 is `S0-S0-S0-S1` -- "lower right unique, or vertically-flipped L" -- three
+            // tables on CIRAM page 0 and the fourth on page 1 (nesdev, "INES Mapper 150" and
+            // "INES Mapper 243"). §4.5's cheap level: a page override and not a `read_nametable`
+            // body, so Q-123's dispatch is untouched. The board's other three modes go through
+            // `memory.set_mirroring` like every other mirroring register.
             nametable_pages_vary: matches!(
                 mapper,
-                5 | 19 | 24 | 26 | 68 | 95 | 111 | 118 | 158 | 207
+                5 | 19 | 24 | 26 | 68 | 95 | 111 | 118 | 150 | 158 | 207 | 243
             ),
             bus_conflicts,
             // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
