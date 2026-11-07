@@ -134,7 +134,7 @@ impl SingleLatch {
             // the bottom 3 bits of the unified register, however MesenCE supports the full 8
             // bits", and a board with 32 KiB windows over the page's PRG-ROM needs more than
             // three.
-            #[cfg(feature = "board-107")]
+            #[cfg(feature = "board-107")] // Q-147
             LatchBoard::Magic107 => {
                 self.banks.map_prg_32k(i32::from(self.register >> 1));
                 self.banks.map_chr_8k(i32::from(self.register));
@@ -277,7 +277,7 @@ impl Mapper for SingleLatch {
             // the decode is A14, A13 and A12 set and **A15 ignored**, which is the census's
             // "implemented as the same decode" and is recorded in Q-147 because the page says
             // "very likely" rather than asserting it.
-            #[cfg(feature = "board-38")]
+            #[cfg(feature = "board-38")] // Q-147
             LatchBoard::BitCorp38 if address & 0x7000 == 0x7000 => Some(value & 0x0F),
             // The whole of $8000-$FFFF is the register, and the whole byte is the register.
             #[cfg(feature = "board-107")]
@@ -302,7 +302,7 @@ impl Mapper for SingleLatch {
             // which destroys bit 0 before the board could put the ROM's back. The byte is read
             // here instead, through the windows as they stand -- i.e. before this write moves
             // them, which is the order the hardware latches in.
-            #[cfg(feature = "board-144")]
+            #[cfg(feature = "board-144")] // Q-146
             LatchBoard::Agci144 if address >= 0x8000 => {
                 let rom = self
                     .banks
@@ -359,7 +359,7 @@ impl Mapper for SingleLatch {
     /// *Dancing Blocks* "relies extensively on the values of uninitialized memory", which the
     /// page mentions and which is a property of the console's 2 KiB of work RAM and not of this
     /// board — recorded here because the census asks that it be, and deliberately not a test.
-    #[cfg(feature = "board-143")]
+    #[cfg(feature = "board-143")] // Q-145
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if address >= 0x8000 {
             return self

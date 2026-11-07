@@ -729,7 +729,7 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // away before the board saw it, so `SingleLatch` reads the ROM byte and does the
         // arithmetic itself (`LatchBoard::Agci144`, MF-UNL-3 step 3).
         #[cfg(feature = "board-149")]
-        149 => true,
+        149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),

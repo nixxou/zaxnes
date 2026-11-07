@@ -36,11 +36,14 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **5/9 — the four sweeps, the save-state round trip and the feature matrix.** Each of the
   eight features alone, all eight, none, `default` and `--features parked-boards`; `cargo fmt
   --check` and clippy `-D warnings` in each.
-- [ ] **6/9 — the documentation.** Eight rows in `docs/review/BOARD-FEATURES.md`, the Cargo
-  feature comments, and the question tickets.
-- [ ] **7/9 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
-  `452e8464`, every compared commit built from `git archive` in a fresh directory, and the feature
-  decision for each of the eight boards.
+- [x] **6/9 — the question tickets, and their code references.** Q-145, Q-146 and Q-147, the
+  three places this lot had to choose. The Cargo feature comments are written as each feature is
+  added (steps 1 to 4); **the eight `docs/review/BOARD-FEATURES.md` rows state step 7's figures
+  and are therefore in step 7's commit**, which is the order MF-UNL-2 used for the same reason.
+- [ ] **7/9 — the callgrind campaign, and the documentation it carries.** PR-1's thirteen ROMs
+  and level 2's five games against `452e8464`, every compared commit built from `git archive` in
+  a fresh directory, the feature decision for each of the eight boards, and the eight rows of
+  `docs/review/BOARD-FEATURES.md` with those figures in them.
 - [ ] **8/9 — golden-core against the base commit**, and the full check with `ZAXNES_ROMS` and
   `ZAXNES_TEST_ROMS` set.
 - [ ] **9/9 — the journal and the final pass.**
@@ -496,3 +499,21 @@ None of the three is reachable from `default`, which is what the matrix is for.
 `SingleLatch` is **24 bytes below the enum that holds it**, so neither variant this lot adds is
 the one that sets `DecodeBoard`'s size — which is why the four bytes mapper 190's CHR registers
 cost are free to the other six boards and to every board MF-6c and MF-UNL-1 put in that enum.
+
+## Step 6 — the three question tickets
+
+Each is a place where this lot had to choose, each is implemented on the provisional choice, and
+each is referenced from the code with `// Q-NNN`.
+
+| ticket | the question | the choice |
+| --- | --- | --- |
+| **Q-145** | mapper 143's protection read: the census's "logical inversion of the **written** bits", or the page's inversion of the **address**'s A5-A0 | **the page.** The board has no write side at all — "an NROM circuit board with a simple form of protection", "a 74138 and a 74368", no *Banks* section — and `DDDDDD` sits inside the page's *address* pattern. A test written from the census's sentence could not have passed against any reading the page admits. The two open-bus bits read as 0, which is `Jv001`'s own compromise |
+| **Q-146** | mapper 144's bus conflict: which of the page's **three** candidate formulas, and the census's expected figure, which none of them produces | **the page's own "most succinct" form**, `ROM[address] & (written \| 1)` — the same function as its Nestopia candidate; FCEUX's "ignores writes to $8000" is a workaround for one address and is not a rule. The census asks that `$FF` over a ROM byte of `$00` give `$FE`; all three candidates give `$00`, and `$FE` is a fourth reading in which bits 7-1 do not conflict at all — which the page's "almost identical to the revision B Color Dreams boards" denies. **A reviewer with a *Death Race* dump should close it**: the readings differ on every write whose bit 0 is clear |
+| **Q-147** | two places a page states a possibility rather than a fact: mapper 38's "writes to $F000-$FFFF are **very likely** to also trigger a bankswitch", and mapper 107's "it's currently **unknown** whether this mapper suffers from bus conflicts" | **the page's inference** for 38 (A15 is not decoded, so `$F000-$FFFF` is the same register) and **no conflicts** for 107. The second is chosen on which error is recoverable: a board wrongly given conflicts latches `written & ROM` on every write, where one wrongly denied them runs a game that relied on the AND slightly differently — and no documentation claims any game does |
+
+Q-146 is the one a reviewer should take first. It is also the one that forced a structural note:
+**mapper 144 is the first board in this build whose bus conflict is not the generic AND**, so it
+is deliberately absent from `registry::has_bus_conflicts` — that function applies its `bool` in
+`Cartridge::cpu_write` *before* `Mapper::write_register` sees the value, which would destroy the
+bit 0 this board has to take from the ROM. If a second such board appears, the shape to consider
+is a per-board enum on `Cartridge::bus_conflicts` rather than a second `bool`; the ticket says so.
