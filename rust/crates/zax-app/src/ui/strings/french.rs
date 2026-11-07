@@ -267,6 +267,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.audio.volume", "Volume général"),
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
+    ("setting.audio.latency_ms", "Latence de sortie (ms)"),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Pad tactile"),
     ("setting.ui.fullscreen", "Plein écran"),

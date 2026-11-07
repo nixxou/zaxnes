@@ -191,6 +191,40 @@ fn req_aud_003_a_late_console_is_held_and_faded_rather_than_zeroed() {
     near(last[last.len() - 1], 0.0, 1e-6);
 }
 
+/// Q-153 §2: playback starts only once the ring holds the configured latency. Until then the
+/// output is silence — there is nothing to hold yet — and nothing is counted as an under-run.
+#[test]
+fn q153_the_prefill_gates_playback() {
+    let latency_ms = 60.0;
+    let (mut stream, control, queue) = stream(latency_ms);
+    control.set_console_active(true);
+    control.set_console_gain(1.0);
+    let target = frames_of_ms(RATE, latency_ms);
+
+    // One block short of the target: still silent, and the samples are untouched.
+    feed(&queue, target - 1, 0.75);
+    let block = block_of(&mut stream);
+    assert!(
+        block.iter().all(|value| *value == 0.0),
+        "the gate let the signal through early"
+    );
+    assert!(!control.playing());
+    assert_eq!(
+        queue.lock().unwrap().len(),
+        target - 1,
+        "samples were eaten"
+    );
+
+    // The last sample arrives: the gate opens and the signal is ramped in.
+    feed(&queue, 1, 0.75);
+    let block = block_of(&mut stream);
+    assert!(control.playing());
+    assert!(block.iter().any(|value| value.abs() > 0.1));
+    // Ramped in, not switched on: the first sample is still near zero.
+    near(block[0], 0.0, 0.01);
+    assert_eq!(control.underruns(), 0, "waiting is not an under-run");
+}
+
 /// REQ-AUD-006 and vector A2: the console gain is `V`, so a quarter volume gives a quarter of the
 /// peak. The mixer computes the gain, the audio thread applies it.
 #[test]

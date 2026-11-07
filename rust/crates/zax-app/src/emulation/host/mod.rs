@@ -16,6 +16,7 @@ mod movies;
 mod save_states;
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use time::OffsetDateTime;
 use zax_nes::NesRegion;
@@ -35,7 +36,7 @@ use super::notification_center::NotificationCenter;
 use super::rollback_history::RollbackHistory;
 use super::speed_setting;
 use crate::achievements::AchievementSystem;
-use crate::audio::stream::AudioLink;
+use crate::audio::stream::{self as stream, AudioLink};
 use crate::audio::AudioMixer;
 use crate::frame_profiler::{Stage, StageClock, StageTimes};
 use crate::game_session::{GameSession, SessionEvent, SessionFrame};
@@ -1083,6 +1084,49 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.publish_audio_state();
     }
 
+    /// Empties the core's ring and asks the stream to prefill again before it plays: no stale
+    /// fragment of the previous moment is replayed (REQ-AUD-010), and the signal is ramped in
+    /// rather than cut (Q-153 §4). What a resume, a state load, a rewind, a reset or a change
+    /// of the latency needs.
+    pub(super) fn resynchronise_audio(&mut self) {
+        let Some(control) = self.audio.as_ref().map(|audio| Arc::clone(&audio.control)) else {
+            return;
+        };
+        if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+            session
+                .core_mut()
+                .bus_mut()
+                .apu_mut()
+                .drop_pending_samples();
+        }
+        control.request_resync();
+    }
+
+    /// Applies `audio.latency_ms`: the target the stream prefills to and the rate controller
+    /// aims at. A value the core's ring cannot hold is clamped and the clamp is logged (Q-153
+    /// §3).
+    fn apply_audio_latency(&mut self) {
+        let Some(audio) = self.audio.clone() else {
+            return;
+        };
+        let wanted = self.settings.audio_latency_ms();
+        let usable = stream::usable_latency_ms(
+            audio.sample_rate,
+            stream::core_ring_samples(audio.sample_rate),
+            wanted,
+        );
+        if usable < wanted - 0.5 {
+            self.log(&format!(
+                "audio latency {wanted:.0} ms is more than the core's ring can hold; using {usable:.0} ms."
+            ));
+        }
+        let before = audio.control.target_frames();
+        audio.set_target_ms(usable);
+        if audio.control.target_frames() != before {
+            self.resynchronise_audio();
+        }
+    }
+
     /// Tells the audio thread the gain to play the console at and whether to expect samples
     /// from it (Q-153). The gain is the fade of REQ-AUD-020, which the mixer still owns; the
     /// audio thread follows it per sample.
@@ -1192,6 +1236,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => {
                 self.publish_state();
             }
+            SettingId::AudioLatencyMs => self.apply_audio_latency(),
             SettingId::UiLanguage => {
                 // AMD-035 §1: the change applies immediately. Everything the interface draws
                 // reads the table through the language, and the models that cache their labels

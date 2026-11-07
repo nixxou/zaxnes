@@ -1244,6 +1244,26 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Mute"),
     );
+    // Rust-only (AUDIO-1, Q-153 §2): how much audio the core's ring is held at before the
+    // device plays it. SPEC-11 fixes no setting — REQ-AUD-003's notes only aim at a total
+    // latency below 60 ms — but the cause of the pops is a main thread that occasionally takes
+    // longer than the buffer, and that depends on the machine and on the 3D scene. Not exposed
+    // to Lua: it is a property of the output, not of the game.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::AudioLatencyMs,
+            SettingKind::Int,
+            SettingValue::Int(60),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Audio,
+        )
+        .with_domain(Domain::range(20.0, 200.0))
+        // No libretro option: REQ-AUD-007 leaves the latency to the host in that frontend, and
+        // the normative list of REQ-PERS-081 is not to grow. The options window draws a whole
+        // slider over the domain on its own.
+        .with_label("Output latency (ms)"),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::UiShowFps,

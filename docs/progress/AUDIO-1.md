@@ -20,7 +20,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
       while data is merely late: on a real underrun the last sample is held and faded to zero
       over a few milliseconds, the event is counted, and the signal is faded back in when data
       returns.
-- [ ] **4. Latency setting and prefill.** `audio.latency_ms` (default 60, range 20–200) in the
+- [x] **4. Latency setting and prefill.** `audio.latency_ms` (default 60, range 20–200) in the
       options' Audio tab, in the settings file, with the English and French strings. Playback
       starts, and restarts, only once the ring holds the configured latency.
 - [ ] **5. Rate control on what is really buffered.** The ring fill is measured as a latency in
@@ -179,3 +179,45 @@ Result: `cargo fmt --check` clean, `cargo clippy -p zax-platform -p zax-app --al
 --features zax-app/bundled -- -D warnings` clean, every `zax-app` and `zax-platform` test green
 (the four REQ-AUD tests that drove the console through the mixer now drive the stream, and
 `req_aud_003` asserts the new hold-and-fade instead of the block of zeros).
+
+### Step 4 — the latency setting and the prefill
+
+`audio.latency_ms`, `SettingKind::Int`, default 60, domain 20–200, scope User, theme Audio
+(`zax-settings/src/table.rs`, in `reimplementation_extras` with the other Rust-only settings).
+It is persisted by key, like every other setting, so no field number of the original's format is
+needed. It appears in the options window's **Audio** tab on its own — the theme places it, and
+`draw_int` draws a whole slider over the domain — with `setting.audio.latency_ms` in English
+("Output latency (ms)") and French ("Latence de sortie (ms)").
+
+Deliberately **no** libretro core option: REQ-AUD-007 leaves the latency to the host in that
+frontend, and the normative list of REQ-PERS-081 is not to grow. The slider needs no
+discretisation since the setting is whole.
+
+Two clamps:
+
+* the setting's own domain, 20–200 ms;
+* `usable_latency_ms`, which bounds the target to what the core's ring can hold with room for
+  the rate controller (`capacity − CONTROL_HEADROOM_MS`, 70 ms = the 50 ms resynchronisation
+  threshold plus one emulated frame of production). At 48 kHz the ring is 10 000 samples
+  ≈ 208 ms, so the effective maximum is about 138 ms; the clamp is logged once when it bites.
+  `core_ring_samples` mirrors the core's `max(10 000, rate / 5)` because the target has to be
+  decided when the device opens, before any core exists — a read of the core's rule, not a
+  change to it. Q-153 §3 records the conflict with the work order's "capacity at least twice
+  the latency".
+
+The prefill gate itself is in the stream: the first start waits for the whole target, any later
+resynchronisation for half of it, never less than one block. `EmulationHost::resynchronise_audio`
+is the one entry point — it empties the core's ring and bumps the control block's counter — and
+is used here by a latency change; step 6 wires it to the rest.
+
+Not added to the handheld options screen: that screen is a short curated list (owner request)
+and the work order asks for the options' Audio tab.
+
+Two test registries had to learn the new key: `zax-settings/tests/catalogue.rs` (the list of
+Rust-only additions beyond REQ-PERS-001) and nothing else, since the setting is not a libretro
+option. New test `q153_the_prefill_gates_playback`: one sample short of the target the output is
+exact silence and the ring is untouched; the sample that completes it opens the gate, the signal
+is ramped in rather than switched on, and no under-run is counted for the wait.
+
+fmt and clippy `-D warnings` clean on `zax-settings`, `zax-platform`, `zax-app`; every test of
+those three crates green (15 in `audio_tests`).

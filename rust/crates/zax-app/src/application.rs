@@ -323,7 +323,7 @@ impl Running {
         let bindings = load_bindings(&mut bindings_store, options.handheld);
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
-        let latency_ms = audio_stream::DEFAULT_LATENCY_MS;
+        let latency_ms = model.audio_latency_ms();
         let opened = open_audio(options, window.sdl(), latency_ms);
         let OpenedAudio {
             output: audio,
@@ -1497,7 +1497,19 @@ fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl, latency_ms: f32) -> OpenedA
     // size its buffers, and the rate turns the latency in milliseconds into frames.
     let opened = AudioOutput::open(sdl, |freq, block_frames| {
         let rate = u32::try_from(freq).unwrap_or(default_rate);
-        let target = audio_stream::frames_of_ms(rate, latency_ms);
+        // What the core's ring can hold bounds the latency, since the core is not to change
+        // (Q-153 §3).
+        let usable = audio_stream::usable_latency_ms(
+            rate,
+            audio_stream::core_ring_samples(rate),
+            latency_ms,
+        );
+        if usable < latency_ms - 0.5 {
+            log(&format!(
+                "audio latency {latency_ms:.0} ms is more than the core's ring can hold; using {usable:.0} ms."
+            ));
+        }
+        let target = audio_stream::frames_of_ms(rate, usable);
         let (stream, control, console, program) = AudioStream::open(rate, block_frames, target);
         let link = AudioLink {
             control,

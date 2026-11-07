@@ -607,6 +607,34 @@ impl AudioRender for AudioStream {
     }
 }
 
+/// Room the rate controller needs above the target, in milliseconds: its resynchronisation
+/// threshold plus one emulated frame of production.
+pub const CONTROL_HEADROOM_MS: f32 = 70.0;
+
+/// The capacity the core gives its output ring at `sample_rate`: at least 10 000 mono samples,
+/// otherwise 200 ms (SPEC-02 REQ-CORE-071, `Apu2A03::set_sample_rate`).
+///
+/// Mirrored here because the target latency has to be decided when the device opens, before any
+/// core exists. It is a read of the core's rule, not a change to it.
+#[must_use]
+pub fn core_ring_samples(sample_rate: u32) -> usize {
+    zax_nes::apu::Apu2A03::MIN_BUFFER_SAMPLES.max(sample_rate as usize / 5)
+}
+
+/// The target latency the core's ring can really hold, in milliseconds (Q-153 §3).
+///
+/// The ring is `max(10 000, rate / 5)` mono samples — 208 ms at 48 kHz — and the work order
+/// forbids touching the core, so a configured latency above what the ring can hold with room
+/// for the controller to work is clamped. At 48 kHz the effective maximum is about 138 ms; a
+/// device opened at 96 kHz can use the whole 20–200 ms range.
+#[must_use]
+pub fn usable_latency_ms(sample_rate: u32, capacity_samples: usize, wanted_ms: f32) -> f32 {
+    #[allow(clippy::cast_precision_loss)] // a capacity is a few tens of thousands of samples
+    let capacity_ms = ms_of_frames(sample_rate, capacity_samples as f32);
+    let ceiling = (capacity_ms - CONTROL_HEADROOM_MS).max(MIN_LATENCY_MS);
+    wanted_ms.clamp(MIN_LATENCY_MS, MAX_LATENCY_MS).min(ceiling)
+}
+
 /// `milliseconds` of audio at `sample_rate`, in frames, at least one.
 #[must_use]
 pub fn frames_of_ms(sample_rate: u32, milliseconds: f32) -> usize {
