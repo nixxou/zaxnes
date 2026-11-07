@@ -41,7 +41,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **8/9 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `186b5656`, every compared commit built from `git archive` in a fresh directory, and the
   feature decision for each of the four boards.
-- [ ] **9/9 — golden-core against the base commit**, the full check with `ZAXNES_ROMS` and
+- [x] **9/9 — golden-core against the base commit**, the full check with `ZAXNES_ROMS` and
   `ZAXNES_TEST_ROMS` set, and the journal.
 
 ## The twelve numbers, and the page each is built from
@@ -717,3 +717,79 @@ Mesen's `MapperFactory`, so the step text and the page can differ, and the page 
 Q-142's first half is the one the lot could settle by itself, and it did: reading the census's
 `(0x40, 0x7F, 8)` as a closed range is an **observable change to mapper 119**, which step 1's
 gate caught both ways.
+
+## Step 9 — golden-core, the full check, and the journal
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3DSen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `186b5656` against the lot | **byte-identical** |
+| `186b5656` against the lot with the four features out of `default` | **byte-identical** |
+
+`md5 f79e7df842c3ee43e7d9b67861a927b5` for all three 98-line dumps. golden-core runs with no hack
+code, so there is nothing between the ROM and the core: no commercial original's pixels, tile
+records, cycles, audio digest or blargg status moves. And the mapper-119 dumps of step 1 are still
+byte-identical with all five boards built and in `default`.
+
+### The suite, with the ROM roots set
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms \
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms \
+      cargo test --release -p zax-nes -p zax-harness --no-fail-fast -- --include-ignored
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **961 passed, 0 failed, 9 ignored** (944 / 0 / 9 at `186b5656`, **+17**) |
+| the same, `--include-ignored --no-fail-fast`, roots set | **970 passed, 0 failed, 0 ignored** |
+
+**Nine of nine ignored tests run and pass**, which is what the two variables buy; without them
+they pass vacuously. **None of the nine exercises a number of this lot** — no file in
+`assets-free/test-roms` uses any of the 199 unlicensed numbers (§5 of the census) — so what they
+prove is that the lot moved nothing they do cover.
+
+### The diff, and the four hard rules
+
+    git diff --stat 186b5656 HEAD
+     15 files changed, 4243 insertions(+), 144 deletions(-)
+
+Eleven `.rs` files, of which **four are new** (`mmc3_chrram.rs`, `mmc3_scramble.rs`,
+`mmc3_kof97.rs`, `mmc3_txc189.rs`). The 140 deleted lines in `rust/` are all refactor: the
+`TQROM` parameter and the two bodies it named in `mmc3.rs`, and the two `matches!` lifted out of
+`Cartridge::create` in `cartridges/mod.rs`.
+
+| rule | check |
+| --- | --- |
+| no change to the emulation of an existing mapper | golden-core byte-identical over the 98 originals **and** over three mapper-119 images; `Mmc3Board::update_banks` identical to the instruction on `m4` and `smb3` |
+| no change to the save-state format of existing boards | `git diff 186b5656 HEAD -- state.rs nes_core.rs` is **empty**, so `NesCore::STATE_VERSION` is untouched; the one byte this lot appends is mapper 195's GAL register, behind the `const` that is the only reason the field exists |
+| safe Rust | `grep -c "^+.*\bunsafe\b"` over the whole diff: **0** |
+| no absolute path with a user name in a committed file | none; the campaign's paths live in the scratchpad |
+
+### Disk and machine
+
+G: stayed above **17 GiB** free throughout, well above the 5 GiB floor. Four clean builds in the
+WSL2 Ubuntu, each deleted by `build-clean.sh` as soon as its binary was copied out; the four tars
+removed afterwards. No GPU campaign, no background command — every long run in the foreground
+with its output read, as the headless rule requires.
+
+### What is open
+
+* **Q-142**, **Q-143** and **Q-144**, all three implemented on their provisional choice and each
+  pinned by a named test. Q-144's first item is the one a reviewer should close: 123's `$5800`
+  bit order is observable and **no mapper-123 image is available to this project**.
+* **Mapper 115's `$6002` solder-pad register**: the page gives the field `[.... .VVV]` and never
+  the value, and no game in its list is said to read it, so the window is open bus.
+* **Mapper 195's compatible board with 4 KiB of PRG-RAM at CPU `$5000-$5FFF`** (*天神之剑*): the
+  page recognises that board by the NES 2.0 header alone and this core has no `$5000-$5FFF` RAM
+  window on any board. Recorded, not implemented.
+* **No ROM runs any of the twelve numbers.** Every test of this lot is written from the pages'
+  own register tables, which is why §6 of the census graded documentation. The twenty-six titles
+  R0 would have to source are listed in §7.2.
+* **A note for the MF-UNL lots that follow**: §7.2's steps were drafted from Mesen 2's
+  `MapperFactory`, and **three of this lot's steps contradicted the numbers' own pages** —
+  119's `(0x40, 0x7F, 8)`, 195's `(0x00, 0x03, 4)` and 123's `$5800` bit order. Read the page
+  before the step.
+
+The journal entry is in `G:/3dsen/cleanroom/journal/JOURNAL.md`, dated 2026-11-07.
