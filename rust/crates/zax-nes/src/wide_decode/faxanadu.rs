@@ -32,8 +32,13 @@ use super::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 /// The decoder.
 pub struct Faxanadu;
 
-/// CRC-32 of the ROM's data, iNES header excluded.
+/// CRC-32 of the ROM's data, iNES header excluded. Every build has the screens' loader, the
+/// areas' tables (banks 0-3) and the RAM of (USA); the variants come by their pack's signatures.
 pub const SOURCE_CRC: u32 = 0x57DD_23D1;
+/// (USA) (Rev 1), (Europe) and (Japan).
+pub const SOURCE_CRC_REV1: u32 = 0xE71D_B268;
+pub const SOURCE_CRC_EUROPE: u32 = 0x76C1_61E3;
+pub const SOURCE_CRC_JAPAN: u32 = 0xA80F_A181;
 
 const AREA: u16 = 0x0024;
 const SCREEN: u16 = 0x0063;

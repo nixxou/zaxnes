@@ -31,7 +31,7 @@
 //! | Mega Man 6 (USA), and Rockman 6 (Japan) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; the Japanese build's own pack; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
 //! | Mega Man 3 (USA), Rockman 3 (Japan), (Europe) and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; a pack per build, the European ones PAL with NTSC twins; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
 //! | Mega Man (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman (Japan) and the conversions by its signatures; the European build's pack, PAL, and the same as NTSC; "Invincible" a component of its own, with or without the advanced mode (`mm1wide`, `tools/build.py --pack`) |
-//! | Faxanadu (USA) | testing aids only (the margin decoder alone widens the game) | a hack pack (`crate::hack_pack`) of three components: "Invincible" (the routine taking the HP returns at once), the level select (a new game starts at the temple the buttons held at START pick, with a rank and an outfit made for that town) and "Infinite money" (the shops always find gold enough, the purse full); their code in the zone fantôme, the ROM keeping its size (`faxanaduwide`, `tools/build_pack.py`) |
+//! | Faxanadu (USA), (Europe) and (Japan) | testing aids only (the margin decoder alone widens the game) | a hack pack (`crate::hack_pack`) of three components: "Invincible" (the routine taking the HP returns at once), the level select (a new game starts at the temple the buttons held at START pick, with a rank and an outfit made for that town) and "Infinite money" (the shops always find gold enough, the purse full); their code in the zone fantôme, the ROM keeping its size; (USA) Rev 1 and the translations by the (USA) pack's signatures, the European and Japanese builds' own packs, the European one PAL with an NTSC twin (`faxanaduwide`, `tools/build_pack.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -145,6 +145,11 @@ pub const KIRBY_EUROPE_NTSC: &str = "Kirby's Adventure (Europe) (NTSC) widescree
 pub const KIRBY_GERMANY: &str = "Kirby's Adventure (Germany) widescreen";
 /// Name of the Faxanadu (USA) pack (testing aids only: its widescreen is the margin decoder's).
 pub const FAXANADU_USA: &str = "Faxanadu (USA) aids";
+/// Name of the Faxanadu (Europe) pack, and of its NTSC twin.
+pub const FAXANADU_EUROPE: &str = "Faxanadu (Europe) aids";
+pub const FAXANADU_EUROPE_NTSC: &str = "Faxanadu (Europe) (NTSC) aids";
+/// Name of the Faxanadu (Japan) pack.
+pub const FAXANADU_JAPAN: &str = "Faxanadu (Japan) aids";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -233,7 +238,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 65] = [
+pub const PATCHES: [BuiltinPatch; 68] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1603,7 +1608,8 @@ pub const PATCHES: [BuiltinPatch; 65] = [
         // starts at the temple of the town the buttons held at START pick, as a password does,
         // with a rank and an outfit made for that town) and "Infinite money" (the shops always
         // find gold enough, the purse full); their code in the execution zone. The widescreen
-        // is the margin decoder's.
+        // is the margin decoder's. Its signatures also take (USA) Rev 1 (the routines at the
+        // same places, a far call's operands elsewhere) and the translations and hacks of both.
         bps: include_bytes!("../patches/faxanadu-usa.zxpk"),
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
@@ -1614,6 +1620,58 @@ pub const PATCHES: [BuiltinPatch; 65] = [
         boot_zone: true,
         zone_data: false,
         // The frame's wait: LDA $10 / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xCA29, 0xCA2B)),
+    },
+    BuiltinPatch {
+        name: FAXANADU_EUROPE,
+        game: "Faxanadu",
+        rom_name: "Faxanadu (Europe)",
+        source_crc: 0x76C1_61E3,
+        // The (USA) pack built for the European ROM: (USA) Rev 1's code, PAL.
+        bps: include_bytes!("../patches/faxanadu-europe.zxpk"),
+        options: FAXANADU_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        zone_data: false,
+        idle_loop: Some((0xCA29, 0xCA2B)),
+    },
+    BuiltinPatch {
+        name: FAXANADU_EUROPE_NTSC,
+        game: "Faxanadu",
+        rom_name: "Faxanadu (Europe)",
+        source_crc: 0x76C1_61E3,
+        // The European build's CRC, its PAL entry above taking it first: this one is for the
+        // ROMs of the European code whose header says NTSC, taken by their signatures
+        // (`tools/build_pack.py <rom> <out> --ntsc`).
+        bps: include_bytes!("../patches/faxanadu-europe-ntsc.zxpk"),
+        options: FAXANADU_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        zone_data: false,
+        idle_loop: Some((0xCA29, 0xCA2B)),
+    },
+    BuiltinPatch {
+        name: FAXANADU_JAPAN,
+        game: "Faxanadu",
+        rom_name: "Faxanadu (Japan)",
+        source_crc: 0xA80F_A181,
+        // The (USA) pack built for the Japanese code: the same RAM and the same routines but
+        // its fixed bank's far call and gold routines $C8 bytes on, a prologue before the
+        // introduction, the password's stats routine elsewhere in bank 12.
+        bps: include_bytes!("../patches/faxanadu-japan.zxpk"),
+        options: FAXANADU_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        zone_data: false,
         idle_loop: Some((0xCA29, 0xCA2B)),
     },
     BuiltinPatch {

@@ -314,7 +314,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
         kirby::SOURCE_CRC => Some(&kirby::Kirby),
         crc if kirby::OTHER_CRCS.contains(&crc) => Some(&kirby::Kirby),
-        faxanadu::SOURCE_CRC => Some(&faxanadu::Faxanadu),
+        faxanadu::SOURCE_CRC | faxanadu::SOURCE_CRC_REV1 | faxanadu::SOURCE_CRC_EUROPE
+        | faxanadu::SOURCE_CRC_JAPAN => Some(&faxanadu::Faxanadu),
         _ => None,
     }
 }
@@ -368,6 +369,10 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
             Some(&ff1::FinalFantasy)
         }
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
+        crate::builtin_patches::FAXANADU_USA
+        | crate::builtin_patches::FAXANADU_EUROPE
+        | crate::builtin_patches::FAXANADU_EUROPE_NTSC
+        | crate::builtin_patches::FAXANADU_JAPAN => Some(&faxanadu::Faxanadu),
         crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::USA),
         crate::builtin_patches::BLASTERMASTER_JAPAN => Some(&blastermaster::JAPAN),
         crate::builtin_patches::BLASTERMASTER_EUROPE
