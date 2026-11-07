@@ -382,3 +382,122 @@ opposite direction:
 
 **No verdict falls or rises in any configuration**, which is why the four summary objects compare
 equal as objects and not merely as totals.
+
+## Step 5 — the callgrind bar: the emulated core is +0 on every figure of both runs
+
+Five clean `git archive` builds in the WSL2 Ubuntu 24.04 (valgrind 3.22.0, rustc 1.99.1), each
+extracted into a fresh directory with its own `CARGO_TARGET_DIR` and **deleted as soon as its
+binary was copied out** (`tools/perf/build-clean.sh`). Driver `target-mf/mf4eg.sh`, MF-VS-fix's
+`mfvsfix.sh` with the label prefix changed; scratch, never staged. All five labels are **16
+characters**, which is MF-6a step 0's rule — equal path lengths keep `load_profile` and `lua_hooks`
+comparable.
+
+| label | what it is |
+| --- | --- |
+| `mf4eg-0-11407930` | the baseline the brief names |
+| `mf4eg-1-6dd1bcf1` | **this lot's shipped default**, the rule gated off |
+| `mf4eg-2-privvis0` | the same, with `increment_coarse_x`/`increment_y` back to **private** |
+| `mf4eg-3-15c84cd5` | the **branch tip** this lot started from, whose default has the rule |
+| `mf4eg-4-ruleonwt` | this worktree **with `ppu-2007-render-read` in `default`** |
+
+### The bar as the brief states it: `11407930` → this lot's default
+
+**PR-1's thirteen**, 300 frames, no warm-up, whole process:
+
+| | figure |
+| --- | --- |
+| every ROM | **+0.000 % or +0.001 %**; six are *below* the baseline (`m0` −10 011, `oamstr` −12 518, `m1` −4 766, `m4` −3 014, `z2` −163) and the worst above is `mmc5` **+58 213 (+0.001 %)** |
+| set total | 79 346 060 407 → 79 346 211 570, **+151 163 (+0.0002 %)** |
+| `duelito` and `smb3` | **+4 850 and +30 049** — and this is a *behaviour* check, not a cost one: when the rule is in, MF-4e step 4 measured these two at **−4.022 % and +0.241 %**. At ±0.000 % they are emulating the same frames, which is the baseline's behaviour confirmed a third way after golden-core and the campaign |
+
+**Level 2**, five games with their 3D packs, 600 frames after 120 of warm-up:
+
+| column | result |
+| --- | --- |
+| **`core`** (`NesCore::run_frame`) | **+0 instructions on all five.** 11 146 862 384 / 12 037 146 109 / 11 515 129 187 / 15 314 947 822 / 12 774 928 372, identical to the instruction |
+| **`ppu`** (`Ppu2C02::run_dots`) | **+0 on all five** |
+| **`apu`** | **+0 on all five** |
+| `draw_list` | +0 on four; `smb3` +2 203 |
+| `load_profile`, `lua_hooks`, `convert` | move, in **both** directions |
+| `total` | **−0.030 %** (`smb1`) and −0.022 % (`smb3`) *below*; +0.001 %, +0.001 % and +0.004 % above |
+
+**The emulated core meets the bar exactly, at zero, on every figure of both runs.** `core`, `ppu`
+and `apu` are identical to the instruction on all five games — fifteen figures, fifteen zeroes.
+
+### Where the +151 163 is, named symbol by symbol
+
+An all-symbol diff of the callgrind annotations on all thirteen ROMs. The movers are, in order of
+size: `luaH_getshortstr`, `getgeneric`, `luaH_set`, `luaS_newlstr`, `mainpositionTV`, `luaH_newkey`
+— **Lua's string hash table** — then libc's `__vfscanf_internal`, `____strtoul_l_internal`,
+`_int_malloc`, `_IO_*`, `memcpy`/`memcmp`/`memset`, and Rust's float formatter.
+
+**Filter Lua, libc and `core`/`std`/`alloc` out and the residue per ROM is +106 to +521
+instructions** — on 3.3 to 11.3 **billion** — and it is `_IO_sputbackc` +88, `getdelim` +81,
+`_IO_setb` +29, `pthread_getattr_np` +24, Lua's GC `reallymarkobject`, and one
+`zax_settings::catalogue` hash-map lookup of a few dozen. The first six of those carry the **same
+value on every one of the thirteen ROMs**, which is what a fixed load-time cost looks like and not
+emulation.
+
+**Not one symbol of the emulated core moves anywhere**, and the eleven pinned symbols are identical
+to the instruction on `mmc5`, `smb3`, `m4`, `vblnmi` and `readbuf`:
+
+| | baseline | this lot's default |
+| --- | ---: | ---: |
+| `Cpu6502::step` / `branch` / `resolve` (`mmc5`) | 419 548 544 / 163 582 727 / 61 863 835 | **identical, 0 / 0 / 0** |
+| `Ppu2C02::read_pattern_planes` (`mmc5`, `readbuf`) | 96 388 300 / 88 146 700 | **identical** |
+| `Ppu2C02::run_dots` (`mmc5`) | 3 104 067 813 | **identical** |
+| `Ppu2C02::run_sprite_evaluation`, `background_fetch`, `paint_sprite`, `rebuild_sprite_line` | — | **identical on all five ROMs** |
+| **`Ppu2C02::read`** (`mmc5`, `vblnmi`) | 287 286 413 / 23 513 461 | **identical** |
+| `WideExtension::zone_offset` | not a symbol of its own | **still not one** — inlined into the fetch path, as every earlier lot found |
+
+**`Ppu2C02::read` is the one that mattered and it did not move.** MF-4d-fix step 5 and Q-125
+measured that taking this branch out costs that function about **+11 instructions per register
+read**, +0.161 % on `readbuf`; it is the reason this lot used two `#[cfg]` bodies rather than a
+folded `cfg!`. The honest result is that **the precaution was unnecessary**: the function is
+identical to the instruction with the branch and without it, in all four builds. MF-4e step 4 had
+predicted exactly this and said why — MF-5a's `#[inline(never)]` on `Ppu2C02::read_data` has since
+insulated the dispatch, so the layout no longer hinges on that arm having a body. The two bodies
+cost nothing and are still the right shape (the default build's token stream for the function is
+the baseline's), but the +11 instructions are not a live risk any more and this is the measurement
+that says so.
+
+### And the residue is not this lot's — proved with a same-behaviour pair
+
+`11407930` is **ten commits** behind this lot: MF-4e's six, MF-VS-fix's seven minus the overlap. So
+that comparison measures this lot *plus* everything in between. To isolate this lot, a pair whose
+**behaviour is identical**: the branch tip `15c84cd5`, whose `default` has the rule, against this
+worktree **with `ppu-2007-render-read` put into `default`** — same emulation, so the only difference
+is this lot's own source.
+
+| | figure |
+| --- | --- |
+| set total | 79 068 925 559 → 79 068 894 622, **−30 937 (−0.000 %)** — *below* the tip |
+| every ROM | within **±57 758**, all +0.000 % / −0.001 %, and it moves **both ways**: six faster (`duelito` −57 758, `m1` −18 415, `m4` −15 486, `readbuf` −12 389, `smb3` −26 163), seven slower (worst `z2` +35 435) |
+| pinned symbols | **identical to the instruction** on `mmc5`, `smb3` and `vblnmi`, `Ppu2C02::read` included |
+| non-Lua/libc residue | **−148** on `mmc5` and **−169** on `z2` — negative |
+
+`duelito` −57 758 and `smb3` −26 163 are the behaviour check for this pair too: with the rule on
+both sides they are at ±0.001 %, where a behaviour difference would put them in the millions.
+
+**So this lot's own code is at or below the branch tip, and the +151 163 against `11407930` belongs
+to the ten commits in between** — which is the same Lua-hash-table lottery MF-6a, MF-6b, MF-6c and
+MF-CART each attributed by name, moving in both directions and landing on no symbol of this
+project.
+
+### The visibility question, settled by byte-identity rather than by argument
+
+Step 1 kept `pub(super)` on `increment_coarse_x` and `increment_y` unconditionally and the doc
+comment claims visibility "is not a codegen input for an item that is crate-private either way".
+`mf4eg-2-privvis0` is that claim built: the same tree with both functions back to private.
+
+    7781224  03e1627053753fda  zax-harness-mf4eg-1-6dd1bcf1
+    7781224  03e1627053753fda  zax-harness-mf4eg-2-privvis0   <- cmp: IDENTICAL
+
+**Byte-identical, same SHA-256.** So the unconditional `pub(super)` costs exactly zero bytes and
+zero instructions, and the comment is a measurement now rather than a reasonable belief.
+
+That probe also refuted this lot's first guess at the 96-byte size difference from `11407930`
+(7 781 128 → 7 781 224): it is **not** the visibility, and it is not a string-table change either —
+of about 30 000 strings in each binary, **6** differ, and all six are machine-code byte runs that
+happen to be printable, with no source path and no panic location among them. It is the ten
+commits, and the same-behaviour pair above is what locates it there.
