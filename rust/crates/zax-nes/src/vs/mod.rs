@@ -24,6 +24,7 @@ pub use palettes::LUT_LEN;
 pub use roms::{rom_table, VsRom};
 
 use crate::rom::InesHeader;
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// Which PPU a VS. board carries (nesdev, "NES 2.0" byte 13 and "PPU palettes").
 ///
@@ -232,6 +233,13 @@ impl VsHardware {
     }
 }
 
+/// The start and select bits of a host's port byte, swapped: the cabinet's start button of that
+/// port's player sits where a NES controller puts Select, and the third- and fourth-player start
+/// lines of a `DualSystem` sit where it puts Start (see [`VsSystem::input_word`]).
+const fn start_in_select_slot(start_select: u8) -> u8 {
+    ((start_select & 0x04) << 1) | ((start_select & 0x08) >> 1)
+}
+
 /// Which stick is player one's (nesdev, "Vs. System": "Left stick connects to `$4017`; right
 /// stick connects to `$4016`. Games vary on which stick represents player one", and
 /// "NES 2.0" byte 15, whose `$04` is "Vs. System (1P via `$4016`)" and `$05`
@@ -292,6 +300,15 @@ pub struct VsSystem {
     wiring: VsWiring,
     source: VsSource,
     title: Option<&'static str>,
+    /// The eight DIP switches, bit `n` being switch `n + 1`. All off at load: the brief takes the
+    /// defaults "from the per-ROM table when the source gives them, otherwise all off", and the
+    /// header database the table is built from records none (see `roms`).
+    dip: u8,
+    /// Frames each coin slot's line is still held for, counted down by [`Self::begin_frame`]; a
+    /// host that drives the line itself uses [`Self::set_coin`] instead (lot MF-VS step 5).
+    coin_frames: [u8; Self::COIN_SLOTS],
+    /// Whether the service button is held.
+    service: bool,
 }
 
 impl VsSystem {
@@ -389,6 +406,9 @@ impl VsSystem {
             wiring,
             source,
             title,
+            dip: 0,
+            coin_frames: [0; Self::COIN_SLOTS],
+            service: false,
         }
     }
 
@@ -433,6 +453,208 @@ impl VsSystem {
     #[must_use]
     pub const fn palette_lut(&self) -> Option<&'static [u8; LUT_LEN]> {
         self.ppu.palette_lut()
+    }
+
+    // ----------------------------------------------------------------- the cabinet
+
+    /// Number of coin slots a Unisystem cabinet has.
+    pub const COIN_SLOTS: usize = 2;
+
+    /// Number of DIP switches.
+    pub const DIP_SWITCHES: usize = 8;
+
+    /// How many frames [`Self::insert_coin`] holds a coin line for.
+    ///
+    /// A real coin passing the slot closes the switch for some tens of milliseconds, and a game
+    /// samples it once a frame; one frame would be a race against where in the frame the host
+    /// asked. Four is what `third_party/mesen2`'s `VsInputButtons` uses
+    /// (`InsertCoinFrameCount = 4`) and what this takes. A host that wants to drive the line
+    /// itself — a movie, a test — uses [`Self::set_coin`] and ignores this.
+    pub const COIN_FRAMES: u8 = 4;
+
+    /// The eight DIP switches as a byte, bit `n` being switch `n + 1`.
+    #[must_use]
+    pub const fn dip_switches(&self) -> u8 {
+        self.dip
+    }
+
+    /// Sets all eight DIP switches at once.
+    pub const fn set_dip_switches(&mut self, switches: u8) {
+        self.dip = switches;
+    }
+
+    /// Whether DIP switch `switch` (**1** to 8, as the cabinet's manual numbers them) is on;
+    /// `false` for any other number.
+    #[must_use]
+    pub const fn dip_switch(&self, switch: usize) -> bool {
+        if switch == 0 || switch > Self::DIP_SWITCHES {
+            return false;
+        }
+
+        self.dip & (1 << (switch - 1)) != 0
+    }
+
+    /// Turns DIP switch `switch` (1 to 8) on or off; any other number is ignored.
+    pub const fn set_dip_switch(&mut self, switch: usize, on: bool) {
+        if switch == 0 || switch > Self::DIP_SWITCHES {
+            return;
+        }
+
+        let bit = 1u8 << (switch - 1);
+        if on {
+            self.dip |= bit;
+        } else {
+            self.dip &= !bit;
+        }
+    }
+
+    /// Drops a coin into slot `slot` (**1** or 2): the line is held for [`Self::COIN_FRAMES`]
+    /// frames and then released. Any other slot number is ignored.
+    pub const fn insert_coin(&mut self, slot: usize) {
+        if slot == 0 || slot > Self::COIN_SLOTS {
+            return;
+        }
+
+        self.coin_frames[slot - 1] = Self::COIN_FRAMES;
+    }
+
+    /// Holds or releases slot `slot`'s line directly, for a host that times the coin itself.
+    pub const fn set_coin(&mut self, slot: usize, held: bool) {
+        if slot == 0 || slot > Self::COIN_SLOTS {
+            return;
+        }
+
+        self.coin_frames[slot - 1] = if held { u8::MAX } else { 0 };
+    }
+
+    /// Whether slot `slot`'s line is held.
+    #[must_use]
+    pub const fn coin(&self, slot: usize) -> bool {
+        if slot == 0 || slot > Self::COIN_SLOTS {
+            return false;
+        }
+
+        self.coin_frames[slot - 1] != 0
+    }
+
+    /// Whether the service button is held.
+    #[must_use]
+    pub const fn service_button(&self) -> bool {
+        self.service
+    }
+
+    /// Holds or releases the service button, which a cabinet's operator presses to give a free
+    /// credit.
+    pub const fn set_service_button(&mut self, held: bool) {
+        self.service = held;
+    }
+
+    /// Releases the coin lines a frame older than [`Self::COIN_FRAMES`]; called once per frame by
+    /// [`crate::input::InputPorts::begin_frame`].
+    ///
+    /// A line held with [`Self::set_coin`] stays at [`u8::MAX`] and is never counted down, which
+    /// is what makes that call "hold it until I say otherwise".
+    pub const fn begin_frame(&mut self) {
+        let mut slot = 0;
+        while slot < Self::COIN_SLOTS {
+            if self.coin_frames[slot] != 0 && self.coin_frames[slot] != u8::MAX {
+                self.coin_frames[slot] -= 1;
+            }
+
+            slot += 1;
+        }
+    }
+
+    /// The bits a VS. System drives into a `$4016` or `$4017` read **above** the controller's
+    /// serial bit, which on a NES would be the stale bus contents (nesdev, "Vs. System").
+    ///
+    /// `$4016` read:
+    ///
+    /// ```text
+    /// 7  bit  0
+    /// ---- ----
+    /// Cba. .sD0
+    /// |||| ||||
+    /// |||| |||+- the right stick's serial data
+    /// |||| ||+-- always 0
+    /// |||| |+--- the service button
+    /// ||++-+---- DIP switches 1 and 2
+    /// |++------- coin inserted, slots 1 and 2
+    /// +--------- CPU identifier: 0 on the primary, 1 on a `DualSystem`'s secondary
+    /// ```
+    ///
+    /// `$4017` read: the left stick's serial data in bit 0, 0 in bit 1, and **DIP switches 3 to
+    /// 8 in bits 2 to 7** — which makes that half the identity on this byte's bits 2 to 7.
+    ///
+    /// **One ambiguity of the page's wording, resolved and marked.** It gives the two ranges as
+    /// "Bits 3-4: DIP switches '2' and '1'" and "Bits 2-7: DIP switches 8 through 3", which read
+    /// left to right would put switch 2 in bit 3 and switch 8 in bit 2 — the reverse of what is
+    /// below. The reading taken is that the page lists the bits of a range **high first**, as
+    /// every register diagram on the wiki does, so bit 4 is switch 2 and bit 7 switch 8; it is
+    /// also what `third_party/mesen2`'s `VsControlManager::ReadRam` does, bit for bit. Marked as
+    /// a provisional choice in the lot's Q ticket, because the consequence of being wrong is a
+    /// game reading its options mirrored and nothing worse.
+    ///
+    /// Bit 7 is 0: this build is always the primary CPU, the `DualSystem`'s second being a
+    /// recorded gap.
+    #[must_use]
+    pub const fn port_bits(&self, port: usize) -> u8 {
+        if port == 0 {
+            let mut bits = (self.dip & 0x03) << 3;
+            if self.service {
+                bits |= 0x04;
+            }
+
+            if self.coin_frames[0] != 0 {
+                bits |= 0x20;
+            }
+
+            if self.coin_frames[1] != 0 {
+                bits |= 0x40;
+            }
+
+            bits
+        } else {
+            // Switches 3 to 8 are bits 2 to 7 of both bytes, so this half is a mask.
+            self.dip & 0xFC
+        }
+    }
+
+    /// The frame's input word as the cabinet's wiring presents it to the two ports, from the word
+    /// the host latched for players 1 and 2 (nesdev, "Vs. System"; lot MF-VS step 5).
+    ///
+    /// **Two things are not what a NES does**, and both come from the page's own bit lists —
+    /// `$4016` shifts out "A, B, 1, 3, Up, Down, Left, Right" and `$4017` "A, B, 2, 4, Up, Down,
+    /// Left, Right", where a NES controller shifts A, B, **Select, Start**, Up, Down, Left,
+    /// Right (nesdev, "Standard controller"):
+    ///
+    /// 1. **There is no Select on a cabinet.** What a NES reads as Select is the *start button*
+    ///    of the player that stick belongs to — "1" on `$4016`, "2" on `$4017` — and what it
+    ///    reads as Start is the start button of players 3 and 4, which only a `DualSystem` has.
+    ///    So the two bits are swapped inside each port byte: the host's Start reaches the start
+    ///    button and its Select lands on the unused third-player line.
+    /// 2. **Which stick is player one's is a property of the game** ([`VsWiring`]). For
+    ///    [`VsWiring::PlayerOneOnPort1`] the two **sticks** swap — A, B and the four directions —
+    ///    while the start buttons do **not**, because "1" is wired to `$4016` whichever stick the
+    ///    game reads first.
+    ///
+    /// Applied once per frame by [`crate::input::InputPorts::begin_frame`], never per read.
+    #[must_use]
+    pub const fn input_word(&self, host_word: u16) -> u16 {
+        const STICK: u8 = 0xF3; // A, B, Up, Down, Left, Right.
+        const START_SELECT: u8 = 0x0C;
+
+        let [player_one, player_two] = host_word.to_le_bytes();
+        let (stick_on_port_0, stick_on_port_1) = if self.wiring.swaps_sticks() {
+            (player_two, player_one)
+        } else {
+            (player_one, player_two)
+        };
+
+        u16::from_le_bytes([
+            (stick_on_port_0 & STICK) | start_in_select_slot(player_one & START_SELECT),
+            (stick_on_port_1 & STICK) | start_in_select_slot(player_two & START_SELECT),
+        ])
     }
 
     /// The message the host logs when a VS image is loaded: what was detected, where from, and
@@ -480,5 +702,45 @@ impl VsSystem {
         }
 
         note
+    }
+
+    // ----------------------------------------------------------------- the savestate
+
+    /// Appends the **cabinet's** state to `writer`: the eight DIP switches, the two coin lines
+    /// and the service button (REQ-CORE-090).
+    ///
+    /// Everything else here was chosen at load from the image and cannot differ between a save
+    /// and its restore — the PPU model, the hardware type, the wiring — so none of it is in the
+    /// block; the mapper-99 board's bank select is in that board's own registers, where every
+    /// board's are.
+    ///
+    /// **The format version is untouched, and the reason is not an oversight.** These bytes are
+    /// written only for a machine that *has* a VS. System plugged in, so a NES block is byte for
+    /// byte the block it was and REQ-CORE-091's older versions keep loading. A block that carries
+    /// them can only have been written by a build with `board-vs-system` that had loaded a VS
+    /// image, and the reader is in exactly the same position — it knows the machine before it
+    /// reads. A future lot that *grows* this block gates the growth on
+    /// [`crate::state::StateReader::format_version`], which is what that accessor is for.
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.dip);
+        for frames in self.coin_frames {
+            writer.write_u8(frames);
+        }
+
+        writer.write_bool(self.service);
+    }
+
+    /// Restores the cabinet's state (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.dip = reader.read_u8()?;
+        for slot in 0..Self::COIN_SLOTS {
+            self.coin_frames[slot] = reader.read_u8()?;
+        }
+
+        self.service = reader.read_bool()?;
+        Ok(())
     }
 }

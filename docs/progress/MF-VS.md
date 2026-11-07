@@ -79,6 +79,8 @@ implements it.
   `$4016` write's bit 1 and the shared 2 KiB at `$6000`-`$7FFF`. Byte 13's hardware types $5 and $6
   are *detected* and named in the load message, and the image then runs as a single screen.
 * the **VS. Zapper** games' light gun.
+* the cabinet's **coin counter** at `$4020`-`$5FFF`, a mechanical counter nothing a game can
+  observe is driven by (dropped by step 5, which explains why).
 * the four **protection boards** byte 13's hardware types $1-$4 name (RBI Baseball, TKO Boxing,
   Super Xevious, VS. Ice Climber Japan): detected and named, not emulated.
 * the app's **UI binding** of the coin, service and DIP inputs: the core API and a harness command
@@ -95,9 +97,10 @@ implements it.
 * [x] **3/10** — the RC2C05: the `$2000`/`$2001` write swap and the `$2002` ID.
 * [x] **4/10** — mapper 99 as a `DecodeBoard` member, the `$4016` write forward, the 40 KiB PRG
   bank; mapper 151 as a parameter of the VRC1.
-* [ ] **5/10** — the inputs: two coin slots, the service button, the eight DIP switches at
-  `$4016`/`$4017`, the swapped ports, the coin counter at `$4020`-`$5FFF`; the core API; the save
-  state behind the existing versioning.
+* [x] **5/10** — the inputs: two coin slots, the service button, the eight DIP switches at
+  `$4016`/`$4017`, the swapped ports; the core API; the save state behind the existing versioning.
+  The coin *counter* at `$4020`-`$5FFF` is **not** in the owner's scope list and the step dropped
+  it as a gap; see the step.
 * [ ] **6/10** — the harness: a `vs` command that loads an image, sets DIP switches, inserts a coin
   and prints what the core reports.
 * [ ] **7/10** — the measurement: level 2 with `callgrind-l2.sh` + `l2-diff.py --bar`, PR-1's
@@ -359,4 +362,73 @@ carries 99 and 151 behind the feature, which is what keeps the registry honest i
 configuration.
 
 Green: **897 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
+`-D warnings` clean in all three configurations.
+
+### Step 5 — the cabinet, and the one ambiguity of the page's wording
+
+**The two reads, from nesdev's "Vs. System".** `$4016` carries the service button in bit 2, DIP
+switches 1 and 2 in bits 3 and 4, the two coin lines in bits 5 and 6 and the CPU identifier in
+bit 7 (0 here, always the primary); `$4017` carries switches 3 to 8 in bits 2 to 7, which makes
+that half of `port_bits` a **mask** — `dip & 0xFC` — because switch *n* is bit *n* − 1 of the DIP
+byte and bit *n* − 1 of the port. Bit 1 is always 0 on both. On a NES those three top bits are the
+stale bus; on a cabinet they are driven, so the VS read **replaces** the open-bus bits rather than
+adding to them, which is what Mesen's `GetOpenBusMask` returning 0 says too.
+
+**The ambiguity, resolved and marked.** The page gives its two ranges as "Bits 3-4: DIP switches
+'2' and '1'" and "Bits 2-7: DIP switches 8 through 3". Read left to right those put switch 2 in
+bit 3 and switch 8 in bit 2 — the reverse of what is implemented. The reading taken is that the
+page lists a range's bits **high first**, as every register diagram on the wiki does, which makes
+bit 4 switch 2 and bit 7 switch 8; `third_party/mesen2`'s `VsControlManager::ReadRam` does exactly
+that, bit for bit, on both ports. Marked as a provisional choice in the lot's Q ticket: the
+consequence of the other reading would be a game reading its options mirrored and nothing worse.
+
+**The sticks, and the two things that are not a NES.** The page's own bit lists are
+"A, B, 1, 3, Up, Down, Left, Right" for `$4016` and "A, B, 2, 4, Up, Down, Left, Right" for
+`$4017`, where a NES controller shifts A, B, **Select, Start**, Up, Down, Left, Right. So:
+
+1. **A cabinet has no Select.** What a NES reads as Select is the *start button* of that stick's
+   player — "1" on `$4016`, "2" on `$4017` — and what it reads as Start is the start line of
+   players 3 and 4, which only a `DualSystem` has. The two bits are therefore swapped inside each
+   port byte, so the host's Start reaches the start button.
+2. **Which stick is player one's is the game's**, from byte 15 (`$04` "1P via `$4016`", `$05` "1P
+   via `$4017`"). For `$05` the **sticks** swap — A, B and the four directions — and the start
+   buttons do **not**, because "1" is wired to `$4016` whichever stick the game reads first. That
+   asymmetry is the one piece of this that is not obvious from either source alone, and it is what
+   Mesen's `RemapControllerButtons` does in three steps (swap the raw states, swap Start and
+   Select back between the ports, then swap Start and Select inside each).
+
+Applied **once per frame** in `InputPorts::begin_frame`, never per read; the read side is one test
+of an `Option` inside `InputPorts::read`, on the path `NesBus::read_io_register` already keeps
+`#[cold]` and out of line.
+
+**A coin is a pulse, and the API says so both ways.** `insert_coin(slot)` holds the line for four
+frames and releases it — a real coin closes the switch for tens of milliseconds and a game samples
+it once a frame, so one frame would be a race against where in the frame the host asked; four is
+`third_party/mesen2`'s `InsertCoinFrameCount`. `set_coin(slot, held)` is the other way, for a host
+that times it itself, and a line held that way is never counted down. The switches are numbered
+**1 to 8** and the slots **1 to 2**, as a cabinet's manual numbers them, and an out-of-range ask is
+ignored rather than a panic.
+
+**The savestate keeps its version, and that is a decision and not an omission.** The cabinet's four
+bytes — the DIP byte, the two coin counters, the service button — are appended to `InputPorts`'s
+block **only for a machine that has a cabinet**. So a NES block is byte for byte the block it was,
+REQ-CORE-091's older versions keep loading, and a block that carries the four bytes can only have
+been written by a build with the feature that had loaded a VS image — which is exactly the position
+the reader is in, since the state carries the ROM. A test pins the arithmetic: two images differing
+only in byte 7's VS bit, loaded under names of the **same length** (a savestate carries the ROM
+name), give blocks four bytes apart.
+
+**One thing dropped from the plan, and it is the plan that was wrong.** Step 0 listed the coin
+counter at `$4020`-`$5FFF` — "write 1, delay, 0 to increment" — which is **not** in the owner's
+scope list for this lot. It drives a mechanical counter inside the cabinet, changes nothing a game
+can observe, and would have put a test on the generic `$4020`-`$5FFF` write path for that. It is a
+recorded gap instead.
+
+Ten tests: each of the eight switches on its own bit and on its own port (and on neither of the
+other port's); all eight at once; a coin in each slot, visible then released on the fifth frame; a
+held line that never releases; the service button, held rather than pulsed; a plain NES image still
+reading the stale bus above the serial bit; the start-in-the-Select-slot remap; the stick swap with
+the start buttons staying put; the savestate round trip; and the out-of-range asks.
+
+Green: **907 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
 `-D warnings` clean in all three configurations.

@@ -1055,6 +1055,287 @@ fn a_4016_write_leaves_every_other_board_alone() {
     }
 }
 
+// ------------------------------------------------------------------ the cabinet
+
+/// Reads `$4016` (port 0) or `$4017` (port 1) with its side effects, the serial bit masked off:
+/// what is left is what the cabinet drives.
+fn cabinet_bits(core: &mut NesCore, port: usize) -> u8 {
+    core.bus_mut().read_input_port(port, 0xFF) & 0xFE
+}
+
+/// nesdev, "Vs. System": `$4016` carries the service button in bit 2 and DIP switches 1 and 2 in
+/// bits 3 and 4; `$4017` carries switches 3 to 8 in bits 2 to 7. Bit 1 is always 0 and `$4016`
+/// bit 7 is the CPU identifier, 0 on the primary.
+#[test]
+fn the_eight_dip_switches_are_readable_at_4016_and_4017() {
+    let mut core = vs_core(VsPpuModel::Rc2c03);
+
+    // All off: nothing but the serial bit, which `cabinet_bits` masks away.
+    assert_eq!(cabinet_bits(&mut core, 0), 0x00);
+    assert_eq!(cabinet_bits(&mut core, 1), 0x00);
+
+    let expected = [
+        (1usize, 0, 0x08u8),
+        (2, 0, 0x10),
+        (3, 1, 0x04),
+        (4, 1, 0x08),
+        (5, 1, 0x10),
+        (6, 1, 0x20),
+        (7, 1, 0x40),
+        (8, 1, 0x80),
+    ];
+
+    for (switch, port, bit) in expected {
+        let vs = core.vs_system_mut().expect("a VS image");
+        vs.set_dip_switches(0);
+        vs.set_dip_switch(switch, true);
+        assert!(core.vs_system().expect("a VS image").dip_switch(switch));
+
+        assert_eq!(
+            cabinet_bits(&mut core, port),
+            bit,
+            "DIP switch {switch} should be bit {bit:#04X} of port {port}"
+        );
+        // And it is on that port only.
+        assert_eq!(
+            cabinet_bits(&mut core, 1 - port),
+            0x00,
+            "DIP switch {switch}"
+        );
+    }
+
+    // All eight at once: both halves of the byte, and bit 1 still 0 on either port.
+    core.vs_system_mut()
+        .expect("a VS image")
+        .set_dip_switches(0xFF);
+    assert_eq!(cabinet_bits(&mut core, 0), 0x18);
+    assert_eq!(cabinet_bits(&mut core, 1), 0xFC);
+
+    // Bit 7 of $4016 is the CPU identifier and this build is always the primary.
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x80, 0x00);
+}
+
+/// A coin in slot 1 shows in `$4016` bit 5 and one in slot 2 in bit 6, and the line is released
+/// after [`VsSystem::COIN_FRAMES`] frames.
+#[test]
+fn a_coin_is_visible_at_4016_and_then_released() {
+    for (slot, bit) in [(1usize, 0x20u8), (2, 0x40)] {
+        let mut core = vs_core(VsPpuModel::Rc2c03);
+        assert_eq!(cabinet_bits(&mut core, 0) & 0x60, 0x00);
+
+        core.vs_system_mut().expect("a VS image").insert_coin(slot);
+        assert!(core.vs_system().expect("a VS image").coin(slot));
+        assert_eq!(cabinet_bits(&mut core, 0) & 0x60, bit, "slot {slot}");
+        // The other slot stays open, and $4017 never carries a coin.
+        assert_eq!(cabinet_bits(&mut core, 1) & 0x60, 0x00);
+
+        // The line is held for four frames and released on the fifth.
+        for frame in 0..u32::from(VsSystem::COIN_FRAMES) {
+            assert_eq!(
+                cabinet_bits(&mut core, 0) & 0x60,
+                bit,
+                "slot {slot} on frame {frame}"
+            );
+            core.run_frame(0);
+        }
+
+        assert_eq!(
+            cabinet_bits(&mut core, 0) & 0x60,
+            0x00,
+            "slot {slot} released"
+        );
+    }
+}
+
+/// A line a host holds itself is never counted down, which is what [`VsSystem::set_coin`] is for.
+#[test]
+fn a_held_coin_line_stays_held() {
+    let mut core = vs_core(VsPpuModel::Rc2c03);
+    core.vs_system_mut().expect("a VS image").set_coin(1, true);
+    for _ in 0..32 {
+        core.run_frame(0);
+        assert_eq!(cabinet_bits(&mut core, 0) & 0x20, 0x20);
+    }
+
+    core.vs_system_mut().expect("a VS image").set_coin(1, false);
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x20, 0x00);
+}
+
+/// The service button is `$4016` bit 2 and is held for as long as the host holds it.
+#[test]
+fn the_service_button_is_4016_bit_2() {
+    let mut core = vs_core(VsPpuModel::Rc2c03);
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x04, 0x00);
+
+    core.vs_system_mut()
+        .expect("a VS image")
+        .set_service_button(true);
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x04, 0x04);
+    core.run_frame(0);
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x04, 0x04, "it is not a pulse");
+    assert_eq!(cabinet_bits(&mut core, 1) & 0x04, 0x00, "nor on $4017");
+
+    core.vs_system_mut()
+        .expect("a VS image")
+        .set_service_button(false);
+    assert_eq!(cabinet_bits(&mut core, 0) & 0x04, 0x00);
+}
+
+/// A plain NES image keeps the stale bus contents in bits 5 to 7 of a `$4016` read (nesdev), so
+/// nothing of the cabinet is active: the brief's "a plain NES image proving none of it is
+/// active", for the inputs.
+#[test]
+fn a_plain_nes_image_still_reads_open_bus_above_the_serial_bit() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x00, 0, 0), "SyntheticNes.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert!(core.vs_system().is_none());
+
+    for port in 0..2 {
+        assert_eq!(
+            core.bus_mut().read_input_port(port, 0xE0) & 0xFE,
+            0xE0,
+            "port {port} shows the stale bus"
+        );
+        assert_eq!(core.bus_mut().read_input_port(port, 0x00) & 0xFE, 0x00);
+    }
+}
+
+/// The word of a frame, as the two ports see it after the cabinet's wiring.
+fn wired_word(wiring: VsWiring, host_word: u16) -> u16 {
+    // Byte 15 `$04` is "1P via $4016" and `$05` "1P via $4017".
+    let byte15 = match wiring {
+        VsWiring::PlayerOneOnPort0 => 0x04,
+        VsWiring::PlayerOneOnPort1 => 0x05,
+        VsWiring::Zapper => 0x07,
+    };
+    let mut core = NesCore::new();
+    let load = core.load_rom(&image(0, 0x09, 0, byte15), "SyntheticVs.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(core.vs_system().expect("a VS image").wiring(), wiring);
+
+    core.bus_mut().input_mut().begin_frame(host_word);
+    core.bus_mut().input().input_word()
+}
+
+/// nesdev, "Vs. System": `$4016` shifts out "A, B, 1, 3, Up, Down, Left, Right", so what a NES
+/// controller calls **Select** is the start button of that stick's player. The host's Start
+/// therefore has to land in the Select slot.
+#[test]
+fn the_cabinet_puts_the_start_button_where_select_would_be() {
+    // Player 1 presses Start (bit 3), player 2 presses Select (bit 2).
+    let word = wired_word(VsWiring::PlayerOneOnPort0, 0x0408);
+    assert_eq!(
+        word, 0x0804,
+        "player one's Start becomes button 1 (bit 2) and player two's Select button 4 (bit 3)"
+    );
+
+    // The six stick bits are untouched: A, B and the four directions.
+    let word = wired_word(VsWiring::PlayerOneOnPort0, 0xF3F3);
+    assert_eq!(word, 0xF3F3);
+}
+
+/// And which stick is player one's is the game's: for byte 15 `$05` the **sticks** swap while the
+/// start buttons stay with their own port, "1" being wired to `$4016` whichever stick the game
+/// reads first.
+#[test]
+fn byte_15_05_swaps_the_two_sticks_and_not_the_start_buttons() {
+    // Player 1 holds Right (bit 7) and Start (bit 3); player 2 holds A (bit 0).
+    let host = u16::from_le_bytes([0x88, 0x01]);
+
+    let plain = wired_word(VsWiring::PlayerOneOnPort0, host);
+    assert_eq!(
+        plain.to_le_bytes(),
+        [0x84, 0x01],
+        "port 0 keeps player one's Right, with Start moved into the Select slot"
+    );
+
+    let swapped = wired_word(VsWiring::PlayerOneOnPort1, host);
+    assert_eq!(
+        swapped.to_le_bytes(),
+        [0x05, 0x80],
+        "the sticks swapped — player two's A on port 0, player one's Right on port 1 — and \
+         player one's start button still on port 0"
+    );
+
+    // A VS. Zapper game takes the unswapped wiring, its light gun being a recorded gap.
+    assert_eq!(wired_word(VsWiring::Zapper, host), plain);
+}
+
+/// The cabinet is in the savestate, appended only for a machine that has one (REQ-CORE-090,
+/// REQ-CORE-091).
+#[test]
+fn the_cabinet_survives_a_save_and_restore() {
+    let mut core = vs_core(VsPpuModel::Rc2c03);
+    {
+        let vs = core.vs_system_mut().expect("a VS image");
+        vs.set_dip_switches(0xA5);
+        vs.set_service_button(true);
+        vs.insert_coin(2);
+    }
+    let state = core.save_state(false).expect("a ROM is loaded");
+
+    {
+        let vs = core.vs_system_mut().expect("a VS image");
+        vs.set_dip_switches(0x00);
+        vs.set_service_button(false);
+        vs.set_coin(2, false);
+    }
+    assert_eq!(cabinet_bits(&mut core, 1), 0x00);
+
+    core.try_load_state(&state, 0)
+        .expect("the state is this machine's");
+    let vs = core.vs_system().expect("a VS image");
+    assert_eq!(vs.dip_switches(), 0xA5);
+    assert!(vs.service_button());
+    assert!(vs.coin(2));
+    assert!(!vs.coin(1));
+    assert_eq!(cabinet_bits(&mut core, 1), 0xA4, "switches 3 to 8 of $A5");
+}
+
+/// A NES image's savestate is byte for byte the block it was before the lot, which is what
+/// "appended only for a machine that has a cabinet" buys (REQ-CORE-091).
+#[test]
+fn a_nes_savestate_carries_no_cabinet_bytes() {
+    // **The two names are the same length on purpose**: a savestate carries the ROM name
+    // (REQ-CORE-014), so a shorter one would hide a byte of the difference.
+    let mut nes = NesCore::new();
+    let load = nes.load_rom(&image(0, 0x00, 0, 0), "Synthetic0.nes");
+    assert!(load.success, "{:?}", load.error);
+    let nes_state = nes.save_state(false).expect("a ROM is loaded").len();
+
+    let mut vs = NesCore::new();
+    // The same image but for byte 7's VS bit, so the two blocks differ only by the cabinet.
+    let load = vs.load_rom(&image(0, 0x01, 0, 0), "Synthetic1.nes");
+    assert!(load.success, "{:?}", load.error);
+    let vs_state = vs.save_state(false).expect("a ROM is loaded").len();
+
+    assert_eq!(
+        vs_state - nes_state,
+        4,
+        "the cabinet is one DIP byte, two coin counters and the service button"
+    );
+}
+
+/// Out of range asks are ignored rather than panicking: a host's UI counts its switches from 1.
+#[test]
+fn the_cabinet_ignores_numbers_outside_its_own() {
+    let mut core = vs_core(VsPpuModel::Rc2c03);
+    let vs = core.vs_system_mut().expect("a VS image");
+
+    vs.set_dip_switch(0, true);
+    vs.set_dip_switch(9, true);
+    assert_eq!(vs.dip_switches(), 0x00);
+    assert!(!vs.dip_switch(0));
+    assert!(!vs.dip_switch(9));
+
+    vs.insert_coin(0);
+    vs.insert_coin(3);
+    assert!(!vs.coin(0));
+    assert!(!vs.coin(3));
+    assert_eq!(vs.port_bits(0) & 0x60, 0x00);
+}
+
 /// The savestate carries palette RAM as the game wrote it — the format is unchanged — and a
 /// restore puts the shown palette back through the remap (REQ-CORE-090, REQ-CORE-091).
 #[test]

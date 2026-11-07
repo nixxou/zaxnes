@@ -167,6 +167,18 @@ impl InputPorts {
     /// Latches the input word of a new frame (REQ-CORE-022). While the strobe is held high
     /// the shift registers reload continuously.
     pub fn begin_frame(&mut self, input_word: u16) {
+        // A VS. System's cabinet counts its coin lines down and its wiring presents the word to
+        // the two ports its own way: **once a frame, here, and never per read** (lot MF-VS
+        // step 5, `crate::vs::VsSystem::input_word`).
+        #[cfg(feature = "board-vs-system")]
+        let input_word = match self.vs.as_deref_mut() {
+            Some(vs) => {
+                vs.begin_frame();
+                vs.input_word(input_word)
+            }
+            None => input_word,
+        };
+
         self.input_word = input_word;
         if self.strobe {
             self.reload();
@@ -262,7 +274,15 @@ impl InputPorts {
             bit
         };
 
-        // Bits 5 to 7 of a $4016/$4017 read are the stale bus contents (nesdev).
+        // Bits 5 to 7 of a $4016/$4017 read are the stale bus contents (nesdev) — **except on a
+        // VS. System**, where the cabinet drives bits 2 to 7 with the coin slots, the service
+        // button and the eight DIP switches (`crate::vs::VsSystem::port_bits`). One test of an
+        // `Option`, on a path `NesBus::read_io_register` already keeps `#[cold]` and out of line.
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs.as_deref() {
+            return bit | vs.port_bits(port);
+        }
+
         bit | (open_bus & 0xE0)
     }
 
@@ -357,6 +377,14 @@ impl InputPorts {
             writer.write_i32(self.zapper[port].x);
             writer.write_i32(self.zapper[port].y);
         }
+
+        // The cabinet, **for a VS machine only**, so that a NES block is byte for byte the block
+        // it was: see `crate::vs::VsSystem::save_state` for why that leaves the format version
+        // alone.
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs.as_deref() {
+            vs.save_state(writer);
+        }
     }
 
     /// Restores the port state from `reader` (REQ-CORE-091).
@@ -391,6 +419,13 @@ impl InputPorts {
             let x = reader.read_i32()?;
             let y = reader.read_i32()?;
             self.zapper[port] = ZapperPosition::new(x, y);
+        }
+
+        // The machine the block is being loaded into is the one the block was written from — the
+        // state carries the ROM — so the reader knows whether these bytes are there.
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs.as_deref_mut() {
+            vs.load_state(reader)?;
         }
 
         Ok(())
