@@ -101,7 +101,7 @@ implements it.
   `$4016`/`$4017`, the swapped ports; the core API; the save state behind the existing versioning.
   The coin *counter* at `$4020`-`$5FFF` is **not** in the owner's scope list and the step dropped
   it as a gap; see the step.
-* [ ] **6/10** — the harness: a `vs` command that loads an image, sets DIP switches, inserts a coin
+* [x] **6/10** — the harness: a `vs` command that loads an image, sets DIP switches, inserts a coin
   and prints what the core reports.
 * [ ] **7/10** — the measurement: level 2 with `callgrind-l2.sh` + `l2-diff.py --bar`, PR-1's
   thirteen with `callgrind-set.sh` + `callgrind-diff.py`, clean `git archive` builds, the three
@@ -432,3 +432,49 @@ the start buttons staying put; the savestate round trip; and the out-of-range as
 
 Green: **907 / 0 / 7** by default, **783 / 0 / 7** with `--no-default-features`, fmt and clippy
 `-D warnings` clean in all three configurations.
+
+### Step 6 — the harness command
+
+`zax-harness vs <rom.nes>` loads a VS image, drives its cabinet and reports. It is the brief's "a
+harness command or option to set DIP switches and insert a coin", and it is also how a VS dump can
+be run at all before any UI exists:
+
+    zax-harness vs VsCastlevania.nes --dip 0xA5 --coin 1 --service --frames 600 --press start
+
+Options: `--frames`, `--dip <byte>` (decimal or `0x`), `--switch <n>[=on|off]` (repeatable, 1 to
+8), `--coin <slot>` (repeatable, 1 or 2), `--service`, `--press <buttons>` and `--quiet`. The
+report names the PPU model, the hardware type, the wiring, where the configuration came from, the
+mapper number, whether the palette is remapped, the DIP switches by number, the coin and service
+lines, **both port reads as bytes**, and the input word the two ports end up with after the
+cabinet's wiring — which is the quickest way to see the stick swap. The last line is a one-line
+summary `--quiet` keeps on its own.
+
+**A pass-through feature, because Cargo cannot see a dependency's.** `zax-harness` gains
+`vs-system = ["zax-nes/board-vs-system"]`, in its own `default` so that the crate's default build
+has the same core as `zax-nes`'s default; with it off the subcommand does not exist, which is what
+a build whose core has no VS layer wants. If step 7 parks the board, the two defaults move
+together.
+
+**Two things the step got wrong first and fixed**, both worth recording because both are the kind
+of bug that passes once and fails later:
+
+* **The digest cancelled itself.** The per-frame digest started as rotate-and-xor, and on a VS
+  image whose palette RAM is still all zeroes every one of the 32 bytes is the *same* remapped
+  colour — after 64 such bytes a 7-bit rotate-and-xor returns to zero, so a two-frame run reported
+  a digest of 0 and a three-frame run did not. It is FNV-1a now, over the palette **and** the
+  picture.
+* **The tests raced on one file name.** The scratch folder is `temp_dir()/zax-harness-vs-<pid>`,
+  shared by every test in the binary, and three tests wrote their fixture as `vs99.nes`: one test
+  read another's header and saw the wrong PPU. Each test now writes a name of its own, and the
+  helper's doc says why.
+
+Seven tests: the report's contents field by field (including `$4016` = `$2C` and `$4017` = `$A4`
+for DIP `$A5` with a coin in slot 1 and the service button held); `--quiet`; the digest stable
+across two identical runs and different across a different frame count; `--press` through both
+wirings, checked on the printed word; `--switch` on its own and composed with `--dip`; a non-VS
+image and a non-ROM both refused with the reason; mapper 151 accepted on its number alone, with
+the brief's "unknown VS image … plain NES palette" note; and every wrong argument refused with a
+message that says what is wrong.
+
+Green: `zax-harness` **70 passed, 0 failed, 1 ignored** (63 at the baseline plus this step's 7),
+**63 / 0 / 1** with `--no-default-features`, fmt and clippy `-D warnings` clean both ways.

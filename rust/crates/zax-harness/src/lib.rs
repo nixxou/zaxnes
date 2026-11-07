@@ -13,5 +13,7 @@ pub mod packs;
 pub mod profile_tool;
 pub mod render;
 pub mod test_roms;
+#[cfg(feature = "vs-system")]
+pub mod vs;
 
 pub use error::HarnessError;

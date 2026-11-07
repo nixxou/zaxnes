@@ -7,8 +7,18 @@ license.workspace = true
 publish.workspace = true
 
 [features]
+# Mirrors `zax-nes`'s own default, so that `cargo test -p zax-harness` builds the same core the
+# crate's own default builds and `zax-harness vs` is there when the board is.
+default = ["vs-system"]
+
 # The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
 wgpu = ["zax-render/wgpu"]
+
+# `zax-harness vs`, the command that drives a VS. System cabinet (lot MF-VS step 6). It needs the
+# core's own `board-vs-system`, and Cargo cannot see a dependency's feature from here, so the
+# command is behind this pass-through: with it off the subcommand does not exist, which is what a
+# build whose core has no VS layer wants. `docs/review/BOARD-FEATURES.md` has the switch.
+vs-system = ["zax-nes/board-vs-system"]
 
 [dependencies]
 serde_json.workspace = true
