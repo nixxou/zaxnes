@@ -27,7 +27,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **3/8 — `board-133`.** The 72-pin decode, with the choice between the 60-pin (Namco-108
   clone, $8000/$8001, mask $E001, analog feedback) and the 72-pin ($4100, mask $E100) decodes
   recorded in a code comment.
-- [ ] **4/8 — the four sweeps and the feature matrix.** `req_core_100_*`, `req_core_102_*`, the
+- [x] **4/8 — the four sweeps and the feature matrix.** `req_core_100_*`, `req_core_102_*`, the
   save-state round trip and the reset sweep in every configuration the lot adds; a save-state
   round trip per board with the mapper state dirtied first; `cargo fmt --check` and clippy
   `-D warnings` in the four configurations.
@@ -170,6 +170,32 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 4 — the feature matrix
+
+Every configuration below builds, passes `cargo fmt --check` and clippy `-D warnings` on
+`zax-nes`, and runs the four sweeps of §7.1 — `req_core_100_every_required_mapper_is_registered`
+(whose expected list is **built** from the features, so each configuration checks its own),
+`req_core_102_any_other_mapper_is_refused`, `req_core_090_the_mapper_state_survives_a_save_and_restore`
+and `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`.
+
+| configuration | `cargo test -p zax-nes` | clippy `-D warnings` |
+| --- | --- | :-: |
+| `default` | **881 / 0 / 8** (862 / 0 / 7 at `481f683d`) | clean |
+| `--no-default-features` | **783 / 0 / 8** — the figure `BOARD-FEATURES.md` already records, unchanged | clean |
+| `--features parked-boards` | **934 / 0 / 8** (907 at the base) | clean |
+| `--no-default-features --features board-jv001` | **794 / 0 / 8** (+11) | clean |
+| `--no-default-features --features board-sachen-8reg` | **788 / 0 / 8** (+5) | clean |
+| `--no-default-features --features board-133` | **786 / 0 / 8** (+3) | clean |
+| `--no-default-features` + all three | **802 / 0 / 8** (+19, the three sums) | clean |
+
+The ignored count is 8 in every configuration and 9 for `-p zax-nes -p zax-harness` together,
+which is `481f683d`'s; this lot adds no ignored test, because **no ROM in
+`assets-free/test-roms` uses any of the nine numbers** (§5 of the census).
+
+And the umbrella still refuses to be selected alone —
+`cargo build -p zax-nes --no-default-features --features board-decode-boards` stops at
+`decode_boards.rs`'s own `compile_error!`, whose `any(…)` list gained the lot's three features.
 
 ### Step 3 — `board-133`
 
