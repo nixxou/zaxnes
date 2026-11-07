@@ -117,6 +117,12 @@ impl MarginDecoder for Kirby {
         Some((pixels, memory.ram(CAMERA_X_FRACTION)))
     }
 
+    /// The status bar's split comes 1 to 7 lines under the playfield's last row the PPU kept,
+    /// depending on the camera's height: those lines would have no margins.
+    fn decodes_split_strips(&self) -> bool {
+        true
+    }
+
     /// The game hides the background's leftmost 8 pixels (PPUMASK `$18`) and draws there the
     /// column coming in.
     fn decodes_masked_column(&self) -> bool {

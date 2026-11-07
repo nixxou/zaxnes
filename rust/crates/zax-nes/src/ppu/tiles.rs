@@ -345,8 +345,9 @@ impl Ppu2C02 {
         let mut decoded_above = None;
         let row_ends = self.row_ends();
         self.playfield_end = None;
+        let strips = decoder.decodes_split_strips();
         for (row_index, ref captured, strip) in self.rows_to_decode() {
-            if strip && decoded_above != Some(row_index) {
+            if strip && (!strips || decoded_above != Some(row_index)) {
                 continue; // A strip goes with the row above it (its number), once decoded.
             }
             // The decoder may read the nametables, as the PPU saw them for this row: with the
@@ -1354,9 +1355,10 @@ impl Ppu2C02 {
         if hidden {
             return;
         }
-        // Its lines from `end` on are another row's (picture lines, the record's own coordinates).
+        // In the margins, its lines from `end` on are another row's (picture lines, the record's
+        // own coordinates); in the centre, the columns a decoder redraws keep them whole.
         let lines = (end - i32::from(record.y)).clamp(0, 8);
-        for py in 0..lines {
+        for py in 0..8i32 {
             let Ok(row) = usize::try_from(top + py) else {
                 continue;
             };
@@ -1365,7 +1367,7 @@ impl Ppu2C02 {
             };
             for px in 0..8i32 {
                 let x = left + px;
-                if (from..to).contains(&x) {
+                if (from..to).contains(&x) || (py >= lines && !(0..SCREEN_WIDTH_I32).contains(&x)) {
                     continue;
                 }
                 let Ok(column) = usize::try_from(x + self.frame_margin) else {

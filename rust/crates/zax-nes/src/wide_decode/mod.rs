@@ -248,6 +248,15 @@ pub trait MarginDecoder: Sync {
     fn camera_position(&self, _memory: &DecoderMemory<'_>) -> Option<(i32, u8)> {
         None
     }
+
+    /// Whether the decoder also reads the strip of a few lines between the playfield's last
+    /// row the PPU kept and a split under it (a status bar), which the PPU keeps no row of (it
+    /// keeps a row on the line its fine Y scroll is 1): read on one tile row down with the row
+    /// above's scroll. Off by default (Super Mario Bros. 3's title screen has such a strip that
+    /// is not the playfield's).
+    fn decodes_split_strips(&self) -> bool {
+        false
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
