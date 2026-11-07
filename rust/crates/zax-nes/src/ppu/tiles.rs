@@ -341,7 +341,7 @@ impl Ppu2C02 {
         self.margin_palette = decoder.margin_palette(memory);
         // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
         let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
-        for (row_index, captured) in self.captured_rows.iter().enumerate() {
+        for (row_index, captured) in self.rows_to_decode().iter().enumerate() {
             let Some(captured) = captured else {
                 continue;
             };
@@ -444,6 +444,79 @@ impl Ppu2C02 {
         if let Some(sprites) = masking {
             self.drop_masking_sprites(sprites);
         }
+    }
+
+    /// The rows [`Ppu2C02::decode_margins`] decodes: the captured rows, and in the slot after a
+    /// captured row whose next captured row starts less than 16 lines below it but more than 8
+    /// (a split: a status bar under the playfield), the strip in between, read on with the same
+    /// scroll one tile row down. The PPU keeps a row on the line its fine Y scroll is 1, so a
+    /// strip of a few lines above a split has none, and those lines would have no margin.
+    fn rows_to_decode(&self) -> [Option<CapturedRow>; 31] {
+        let mut rows = self.captured_rows;
+        for index in 0..rows.len() - 1 {
+            let (Some(captured), None) = (self.captured_rows[index], self.captured_rows[index + 1])
+            else {
+                continue;
+            };
+            let Some(next_y) = self.captured_rows[index + 1..]
+                .iter()
+                .flatten()
+                .map(|next| next.y)
+                .next()
+            else {
+                continue;
+            };
+            let strip = captured.y + 8;
+            if next_y <= strip || next_y >= strip + 8 {
+                continue;
+            }
+            let v = captured.row.v;
+            let coarse_y = (v >> 5) & 0x1F;
+            let v = match coarse_y {
+                29 => (v & !0x03E0) ^ 0x0800,
+                31 => v & !0x03E0,
+                _ => v + 0x20,
+            };
+            rows[index + 1] = Some(CapturedRow {
+                row: BackgroundRow {
+                    line: captured.row.line + 8,
+                    v,
+                    ..captured.row
+                },
+                y: strip,
+                ..captured
+            });
+        }
+        rows
+    }
+
+    /// The picture line each background row's records stop at in the wide picture: the start
+    /// of the next row the PPU kept, when it comes before the row's end (a split's row, the
+    /// status bar, begins higher than the row above it ends), by row number.
+    fn row_ends(&self) -> [i16; 31] {
+        let mut ends = [i16::MAX; 31];
+        let mut next = i16::MAX;
+        for (end, row) in ends.iter_mut().zip(self.captured_rows.iter()).rev() {
+            *end = next;
+            if let Some(row) = row {
+                next = row.y;
+            }
+        }
+        ends
+    }
+
+    /// The picture line `record` stops at in the wide picture: a background row stops where the
+    /// next row the PPU kept begins (a split higher than its end: the status bar's top a few
+    /// lines under the playfield's last row); `ends` is [`Ppu2C02::row_ends`].
+    fn record_end(&self, record: &TileRecord, ends: &[i16; 31]) -> i32 {
+        if !record.background {
+            return i32::MAX;
+        }
+        let row_width = 33 + (2 * (self.frame_margin / 8));
+        usize::try_from(record.index / row_width)
+            .ok()
+            .and_then(|row| ends.get(row))
+            .map_or(i32::MAX, |&end| i32::from(end))
     }
 
     /// Drops the sprite records of `sprites` ([`MarginDecoder::masking_sprites`]): both halves
@@ -1071,8 +1144,10 @@ impl Ppu2C02 {
         // of a lower priority does not show there (the NES picks the sprite first, then puts it
         // behind the background; Super Mario Bros. 3 hides its piranha plants in their pipes so).
         let mut behind = vec![i32::MAX; width * height];
+        let row_ends = self.row_ends();
         let mut paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
-            self.paint_side_tile(record, base, out, width, &centres, &mut behind);
+            let end = self.record_end(record, &row_ends);
+            self.paint_side_tile(record, base, out, width, &centres, &mut behind, end);
         };
         let records = self.tiles.records();
         for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
@@ -1141,6 +1216,7 @@ impl Ppu2C02 {
         width: usize,
         centres: &[(i32, i32)],
         behind: &mut [i32],
+        end: i32,
     ) {
         let priority = sprite_priority(record.index);
         let top = i32::from(record.y) + self.frame_vertical_margin;
@@ -1155,7 +1231,9 @@ impl Ppu2C02 {
         if hidden {
             return;
         }
-        for py in 0..8i32 {
+        // Its lines from `end` on are another row's (picture lines, the record's own coordinates).
+        let lines = (end - i32::from(record.y)).clamp(0, 8);
+        for py in 0..lines {
             let Ok(row) = usize::try_from(top + py) else {
                 continue;
             };
