@@ -44,7 +44,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   and level 2's five games against `452e8464`, every compared commit built from `git archive` in
   a fresh directory, the feature decision for each of the eight boards, and the eight rows of
   `docs/review/BOARD-FEATURES.md` with those figures in them.
-- [ ] **8/9 — golden-core against the base commit**, and the full check with `ZAXNES_ROMS` and
+- [x] **8/9 — golden-core against the base commit**, and the full check with `ZAXNES_ROMS` and
   `ZAXNES_TEST_ROMS` set.
 - [ ] **9/9 — the journal and the final pass.**
 
@@ -639,3 +639,54 @@ left `rust/target-mf` at **26.3 GB**, which was deleted before the first clean b
 being recorded), and each of the four build directories was deleted by `build-clean.sh` as soon as
 its binary was copied out. The four tars were removed afterwards. No GPU campaign, no background
 command — every long run in the foreground with its output read, as the headless rule requires.
+
+## Step 8 — golden-core against the base commit, and the full check
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `452e8464` (`unl3base`) against the lot (`unl3`) | **byte-identical** |
+| `452e8464` against the lot with the eight features out of `default` (`unl3off`) | **byte-identical** |
+
+`md5 f79e7df842c3ee43e7d9b67861a927b5` for all three 98-line dumps — **the same digest MF-UNL-2
+step 9 recorded**, so two lots and twenty-one mapper numbers later no commercial original's
+pixels, tile records, cycles, audio digest or blargg status has moved. golden-core runs with no
+hack code, so there is nothing between the ROM and the core.
+
+### The suite, with the ROM roots set
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms \
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms \
+      cargo test --release -p zax-nes -p zax-harness --no-fail-fast -- --include-ignored
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **972 passed, 0 failed, 9 ignored** (961 / 0 / 9 at `452e8464`, **+11**) |
+| the same, `--include-ignored --no-fail-fast`, roots set | **981 passed, 0 failed, 0 ignored** |
+
+**Nine of nine ignored tests run and pass**, which is what the two variables buy; without them
+they pass vacuously. **None of the nine exercises a number of this lot** — no file in
+`assets-free/test-roms` uses any of the 199 unlicensed numbers (§5 of the census) — so what they
+prove is that the lot moved nothing they do cover.
+
+### The diff, and the four hard rules
+
+    git diff --stat 452e8464 HEAD
+     9 files changed, 2211 insertions(+), 9 deletions(-)
+
+Six `.rs` files, of which **two are new** (`nina03.rs`, `single_latch.rs`).
+
+| rule | check |
+| --- | --- |
+| no change to the emulation of an existing mapper | golden-core **byte-identical** over the 98 originals, and at the same digest MF-UNL-2 left; `git diff` touches no existing board's file |
+| no change to the save-state format of existing boards | `git diff 452e8464 HEAD -- state.rs nes_core.rs` is **empty**, so `NesCore::STATE_VERSION` is untouched; the only blocks this lot appends belong to boards that did not exist at the base commit |
+| safe Rust | `grep -c "^+.*\bunsafe\b"` over the whole diff: **0** |
+| no absolute path with a user name in a committed file | none; the campaign's tars and notes lived in the scratchpad and were deleted |
+
+**Three deleted lines in the whole lot**, all of them a line this lot rewrote in place:
+`DecodeBoard::try_read_prg`'s `cfg` (which gains `board-143`), the end of
+`req_core_100_every_required_mapper_is_registered`'s comment list, and that test's `additions`
+array length (75 → 84).
