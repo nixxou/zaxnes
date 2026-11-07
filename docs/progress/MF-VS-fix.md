@@ -77,7 +77,7 @@ table — they are the columns the comments were already quoting.
 * [x] **4/6** — the measurement: the default build at `0aee4241`'s figures (the bar and golden-core),
   the three `Cpu6502::step` inlinings 0 / 0 / 0, `zone_offset` not dearer.
 * [x] **5/6** — the documents: Q-138, `MF-VS.md`'s "For R0" paragraph answered, the journal.
-* [ ] **6/6** — the check: fmt; clippy `-D warnings` in both configurations; the suites in both; the
+* [x] **6/6** — the check: fmt; clippy `-D warnings` in both configurations; the suites in both; the
   ignored suite with the two ROM variables; the campaign, 331 rows identical to MF-4e's.
 
 ## What each step found
@@ -358,3 +358,55 @@ restructure — cost the emulated core nothing at all.
 
 Nothing else under `G:/3dsen/cleanroom/spec/` is changed, Q-138 excepted, and 138 was the next free
 number (137 is MF-4e's).
+
+### Step 6 — the check
+
+| | |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| clippy `-D warnings --all-targets`, **five** configurations | `zax-nes` default, `--features parked-boards`, `--no-default-features`; `zax-harness` default, `--features parked-boards` — **all clean** |
+| `cargo test --release -p zax-nes -p zax-harness` | **926 passed, 0 failed, 8 ignored** — *exactly* MF-4e's 926 |
+| the same with `--features zax-nes/parked-boards,zax-harness/parked-boards` | **986 / 0 / 8** (MF-4e's 978 plus this lot's 8) |
+| `--no-fail-fast -- --ignored`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set, **both** configurations | **7 passed, 1 failed** each time. The failure is `the_zelda_ii_patch_applies_to_the_usa_rom`, the known one the brief puts out of scope. **`golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` ok and `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` ok** in both |
+| the campaign, against MF-4e's `camp-4e-default.json` | **331 rows, summaries equal as objects, 0 rows differing on any field** but `ms` and `shot` — run **twice**, with the default build and with the VS-enabled one |
+
+**The campaign is identical in both configurations and not only in the default one**, which is worth
+stating plainly: turning the VS. System on — table correction included — changes nothing about any of
+the 331 free test ROMs, because not one of them is a VS image. The two binaries were rebuilt
+explicitly and each verified by whether `zax-harness vs` exists in it before its run, which is
+MF-VS step 9's method note: after a feature-flagged `cargo test`, the binary at
+`target/release/<name>` is *that* configuration's, so each was copied out under a name of its own
+(their md5s differ, so the two runs really are two builds).
+
+The 1 200-frame golden test deserves its own line because it is the second independent form of step
+4's claim: **291 ROMs against the digests committed in `rust/goldens/core-goldens.jsonl`**, which
+were produced before this lot, pass in **both** configurations.
+
+G: had **17 GB** free at the end, as at the start; the two clean build trees, the callgrind dumps,
+the golden-core outputs and the WSL scratch root were all deleted as soon as their figures were
+read.
+
+## The lot in one page
+
+**The defect.** The VS table knew *Vs. Castlevania* was a mapper-2 board in a comment, and the
+loader followed the header, which says mapper 99 with no CHR-ROM. Empty screen. *Vs. Top Gun* was
+the same dump-header mistake on the same board; they are the only two of the 74 rows with CHR-RAM,
+and so the only two the mistake can break this way.
+
+**The fix.** Every row carries the board the public NES 2.0 database records — mapper, submapper,
+PRG-ROM, CHR-ROM, CHR-RAM, mirroring, re-derived and checked column by column against the database
+— and `vs::corrected_board`, between `RomImage::try_load` and `Cartridge::create`, gives the table
+the last word over an iNES 1.0 header that disagrees. A NES 2.0 header keeps everything but a
+mapper the table contradicts (Q-138). `InesHeader::has_submapper` is what lets the table's
+submapper 2 reach the one rule that reads it. The load message names every field it changed.
+
+**What it costs the shipped build: nothing, measured three ways.** All five level-2 `core` figures
+are **+0 instructions** against `0aee4241`; `golden-core` over 98 commercial originals and 1 200
+frames is **byte-identical**; the campaign's 331 rows are identical field by field. The three
+`Cpu6502::step` inlinings are 0 / 0 / 0, `read_pattern_planes` is identical to the instruction on
+all five games, and `zone_offset` is still not a symbol of its own.
+
+**For R0.** `zax-harness vs <dump>` built with `--features parked-boards` now loads
+*Vs. Castlevania* and *Vs. Top Gun* as mapper-2 boards with 8 KiB of CHR-RAM whatever their headers
+say, and prints the correction on the load line. The one reading that wants a decision is
+**Q-138**; MF-VS's own three, **Q-136**, are still open.
