@@ -112,15 +112,19 @@ impl SingleLatch {
 
     /// The 32 KiB PRG bank and the 8 KiB CHR bank the latch selects, one arm per page.
     fn update_banks(&mut self) {
-        let register = i32::from(self.register);
+        // Each arm reads `self.register` itself rather than a binding above the `match`: with
+        // `--features board-143` alone the only arm is a board with no register at all, and a
+        // binding no arm reads is a warning (`-D warnings` is the gate every configuration of
+        // this lot passes).
         match self.board {
             // "xxxx CCPP: ||++- Select 32 KB PRG ROM bank for CPU $8000-$FFFF, ++--- Select
             // 8 KB CHR ROM bank for PPU $0000-$1FFF" (nesdev, "INES Mapper 038"): four banks of
             // each, which is the page's 128 KiB of PRG and 32 KiB of CHR.
             #[cfg(feature = "board-38")]
             LatchBoard::BitCorp38 => {
-                self.banks.map_prg_32k(register & 0x03);
-                self.banks.map_chr_8k((register >> 2) & 0x03);
+                self.banks.map_prg_32k(i32::from(self.register & 0x03));
+                self.banks
+                    .map_chr_8k(i32::from((self.register >> 2) & 0x03));
             }
             // "BBBB BBBb: ++++ ++++- Select 8 KiB CHR bank at PPU $0000-$1FFF, ++++ +++--
             // Select 32 KiB PRG ROM bank at CPU $8000-$FFFF" (nesdev, "INES Mapper 107"). The
@@ -132,8 +136,8 @@ impl SingleLatch {
             // three.
             #[cfg(feature = "board-107")]
             LatchBoard::Magic107 => {
-                self.banks.map_prg_32k(register >> 1);
-                self.banks.map_chr_8k(register);
+                self.banks.map_prg_32k(i32::from(self.register >> 1));
+                self.banks.map_chr_8k(i32::from(self.register));
             }
             // "An NROM circuit board with a simple form of protection" (nesdev, "INES Mapper
             // 143"): no bank register at all, so the whole board is one 32 KiB PRG window —
@@ -153,8 +157,8 @@ impl SingleLatch {
             // [`SingleLatch::write_register`].
             #[cfg(feature = "board-144")]
             LatchBoard::Agci144 => {
-                self.banks.map_prg_32k(register & 0x03);
-                self.banks.map_chr_8k(register >> 4);
+                self.banks.map_prg_32k(i32::from(self.register & 0x03));
+                self.banks.map_chr_8k(i32::from(self.register >> 4));
             }
             // "$4100: [C... ....] - select 8 KiB CHR bank" (nesdev, "INES Mapper 145") and
             // "$8000: [C... ....]" (nesdev, "INES Mapper 149"). **The bit is bit 7**, which is
@@ -164,12 +168,12 @@ impl SingleLatch {
             #[cfg(feature = "board-145")]
             LatchBoard::Sachen145 => {
                 self.banks.map_prg_32k(0);
-                self.banks.map_chr_8k((register >> 7) & 0x01);
+                self.banks.map_chr_8k(i32::from(self.register >> 7));
             }
             #[cfg(feature = "board-149")]
             LatchBoard::Sachen149 => {
                 self.banks.map_prg_32k(0);
-                self.banks.map_chr_8k((register >> 7) & 0x01);
+                self.banks.map_chr_8k(i32::from(self.register >> 7));
             }
             // nesdev ("INES Mapper 190"), the three windows of its *Banks* section:
             //
@@ -182,7 +186,7 @@ impl SingleLatch {
             // bytes, the page's `D~[CCCC CCCC]`.
             #[cfg(feature = "board-190")]
             LatchBoard::Zemina190 => {
-                self.banks.map_prg_16k(0, register & 0x0F);
+                self.banks.map_prg_16k(0, i32::from(self.register & 0x0F));
                 self.banks.map_prg_16k(2, 0);
                 for slot in 0..4 {
                     self.banks.map_chr_2k(slot * 2, i32::from(self.chr[slot]));
@@ -274,10 +278,10 @@ impl Mapper for SingleLatch {
             // "implemented as the same decode" and is recorded in Q-147 because the page says
             // "very likely" rather than asserting it.
             #[cfg(feature = "board-38")]
-            LatchBoard::BitCorp38 if address & 0x7000 == 0x7000 => value & 0x0F,
+            LatchBoard::BitCorp38 if address & 0x7000 == 0x7000 => Some(value & 0x0F),
             // The whole of $8000-$FFFF is the register, and the whole byte is the register.
             #[cfg(feature = "board-107")]
-            LatchBoard::Magic107 if address >= 0x8000 => value,
+            LatchBoard::Magic107 if address >= 0x8000 => Some(value),
             // **Mapper 144's resistor, and the one of the page's three candidate formulas this
             // build takes.** "A 300 Ω resistor was added between CPU D0 and the combination of
             // mapper hardware and ROM. The effect of this is that only the ROM's least
@@ -304,25 +308,31 @@ impl Mapper for SingleLatch {
                     .banks
                     .read_prg(address, memory.rom().prg_rom(), memory.prg_ram())
                     .unwrap_or(0xFF);
-                rom & (value | 0x01)
+                Some(rom & (value | 0x01))
             }
             // "Mask: $E100", so $4100-$41FF and its mirrors up to $5Fxx, and nothing in
             // $6000-$7FFF or above $8000 (nesdev, "INES Mapper 145").
             #[cfg(feature = "board-145")]
-            LatchBoard::Sachen145 if address & 0xE100 == 0x4100 => value & 0x80,
+            LatchBoard::Sachen145 if address & 0xE100 == 0x4100 => Some(value & 0x80),
             // "Mask: $8000": **A15 alone**, so every address in $8000-$FFFF is the register --
             // which is the page's own account of the difference from 145, "moves the register to
             // overlap with PRG ROM and so has bus conflicts". The AND with the ROM byte is
             // `registry::has_bus_conflicts`'s, applied by `Cartridge::cpu_write` before this
             // function sees the value.
             #[cfg(feature = "board-149")]
-            LatchBoard::Sachen149 if address & 0x8000 == 0x8000 => value & 0x80,
-            // Any address that is not this board's window.
-            _ => return,
+            LatchBoard::Sachen149 if address & 0x8000 == 0x8000 => Some(value & 0x80),
+            // Any address that is not this board's window -- and **every** address on mapper
+            // 143, whose board has no write side at all. `Option` and not a `return` because
+            // `--features board-143` alone leaves this `match` with that one arm, and a `match`
+            // all of whose arms diverge makes everything after it unreachable (which is a
+            // warning, and `-D warnings` is the gate every configuration of this lot passes).
+            _ => None,
         };
 
-        self.register = latched;
-        self.update_banks();
+        if let Some(latched) = latched {
+            self.register = latched;
+            self.update_banks();
+        }
     }
 
     /// PRG-ROM above $8000, and **mapper 143's protection read** below it.

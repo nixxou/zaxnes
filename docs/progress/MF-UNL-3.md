@@ -33,7 +33,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   latch: 143's protection read (through the `try_read_prg` forward `board-jv001` already added)
   and 144's resistor rule.
 - [x] **4/9 — `board-190`,** the last of the seven and the only one with more than one window.
-- [ ] **5/9 — the four sweeps, the save-state round trip and the feature matrix.** Each of the
+- [x] **5/9 — the four sweeps, the save-state round trip and the feature matrix.** Each of the
   eight features alone, all eight, none, `default` and `--features parked-boards`; `cargo fmt
   --check` and clippy `-D warnings` in each.
 - [ ] **6/9 — the documentation.** Eight rows in `docs/review/BOARD-FEATURES.md`, the Cargo
@@ -428,3 +428,71 @@ the comment now says what the four zeroes mean.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **972 passed, 0 failed, 9 ignored** (+2 over step 3) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |
+
+## Step 5 — the four sweeps, the save-state round trips, and the twelve-configuration matrix
+
+**Eight features is eleven configurations plus the umbrella's refusal**, which is the largest
+matrix any lot of the plan runs and the reason §7.2 prices this lot at eight hours.
+
+| configuration | `cargo test -p zax-nes` | clippy `-D warnings` |
+| --- | --- | :-: |
+| `default` | **909 / 0 / 8** (898 / 0 / 8 at `452e8464`) | clean |
+| `--no-default-features` | **783 / 0 / 8** — the figure `BOARD-FEATURES.md` records, **unchanged** | clean |
+| `--features parked-boards` | **962 / 0 / 8** (951 at the base) | clean |
+| `--no-default-features --features board-nina03` | 786 / 0 / 8 (+3) | clean |
+| `--no-default-features --features board-38` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features --features board-107` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features --features board-143` | 784 / 0 / 8 (+1) | clean |
+| `--no-default-features --features board-144` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features --features board-145` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features --features board-149` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features --features board-190` | 785 / 0 / 8 (+2) | clean |
+| `--no-default-features` + all eight | **794 / 0 / 8** (+11) | clean |
+| `default`, both crates | **972 / 0 / 9** | clean (`zax-harness` too) |
+
+The eight deltas sum to **+16** and all eight together is **+11**, and the difference is exactly
+the tests two or more features share: `req_core_102_mappers_145_and_149_switch_chr_from_bit_7_alone`
+is one test for two boards, and `req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied`
+one for five.
+
+And the umbrella still refuses to be selected alone:
+`cargo build -p zax-nes --no-default-features --features board-decode-boards` stops at
+`decode_boards.rs`'s own `compile_error!`, whose `any` list this lot extended by eight names.
+
+§7.1's four sweeps — `req_core_100_every_required_mapper_is_registered`,
+`req_core_102_any_other_mapper_is_refused`, `req_core_090_the_mapper_state_survives_a_save_and_restore`
+and `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` — hold in all
+twelve. The first is the one this lot had to extend, and its table is built from `cfg!` so that a
+featured number is expected exactly when its feature is on.
+
+### Three things only the matrix found, all three in `--features board-143` alone
+
+That configuration is the lot's degenerate case — **a board with no write side at all** — and it
+is the only one of the twelve that failed anything:
+
+1. **`DecodeBoard`'s `inner!` arm had the wrong `cfg` list.** The variant, the `use` and the
+   module gate had been extended to seven features and the macro's own arm to four, so with only
+   `board-143` on, ten of that enum's inner matches became non-exhaustive. The failure is loud
+   (`E0004`), which is the one mercy of a shared-variant enum.
+2. **A `match` all of whose arms diverge makes the code after it unreachable.**
+   `SingleLatch::write_register` ended its decode with `_ => return`, and with 143 the only board
+   there is no other arm — so `self.register = latched` was unreachable and `-D warnings` refused
+   it. The decode now yields an `Option` and the assignment is behind `if let`, which is also the
+   honest shape: this function has boards that latch nothing.
+3. **A binding no arm reads is a warning too.** `update_banks` hoisted
+   `let register = i32::from(self.register)` above its `match`, and mapper 143 has no register;
+   each arm now reads `self.register` itself.
+
+None of the three is reachable from `default`, which is what the matrix is for.
+
+### The two enums' sizes
+
+| | |
+| --- | --- |
+| `size_of::<Board>()` | **1376**, the figure MF-UNL-2 step 2 measured — no new discriminant |
+| `size_of::<DecodeBoard>()` | **144** |
+| `size_of::<SingleLatch>()` | **120** |
+
+`SingleLatch` is **24 bytes below the enum that holds it**, so neither variant this lot adds is
+the one that sets `DecodeBoard`'s size — which is why the four bytes mapper 190's CHR registers
+cost are free to the other six boards and to every board MF-6c and MF-UNL-1 put in that enum.

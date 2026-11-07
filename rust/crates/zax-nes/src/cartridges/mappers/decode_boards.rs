@@ -190,8 +190,11 @@ macro_rules! inner {
             #[cfg(any(
                 feature = "board-38",
                 feature = "board-107",
+                feature = "board-143",
+                feature = "board-144",
                 feature = "board-145",
-                feature = "board-149"
+                feature = "board-149",
+                feature = "board-190"
             ))]
             DecodeBoard::SingleLatch($b) => $body,
         }
