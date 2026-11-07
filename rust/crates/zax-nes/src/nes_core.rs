@@ -76,8 +76,12 @@ pub struct NesCore {
     /// The options the host set last.
     host_options: u8,
     /// The experimental smooth scrolling (option `smooth_scroll`): the camera's fraction read
-    /// after the last frame (the next picture's), and the shift of the picture just made.
+    /// after the last frame (the next picture's), the camera's pixels and fraction read last,
+    /// whether the fraction left the camera (turned round 256 with the pixels still: its last
+    /// coupled value kept until they move), and the shift of the picture just made.
     camera_fraction: Option<u8>,
+    camera_read: Option<(i32, u8)>,
+    camera_decoupled: bool,
     picture_shift: Option<(f32, i32)>,
     /// The state of the real frame of a run-ahead sequence (AMD-041 REQ-LOOP-065 step 2), kept
     /// from one real frame to the next so that nothing is allocated per frame. Empty, and never
@@ -115,6 +119,8 @@ impl NesCore {
             aids_on: 0,
             host_options: 0,
             camera_fraction: None,
+            camera_read: None,
+            camera_decoupled: false,
             picture_shift: None,
             real_frame: CoreState::default(),
             real_frame_held: false,
@@ -739,6 +745,7 @@ impl NesCore {
             .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0);
         let Some(decoder) = decoder.filter(|_| on) else {
             self.camera_fraction = None;
+            self.camera_read = None;
             self.picture_shift = None;
             return;
         };
@@ -748,8 +755,8 @@ impl NesCore {
             .zip(end)
             .map(|(fraction, end)| (f32::from(fraction) / 256.0, i32::from(end)));
         let (ram, _, cartridge) = self.bus.decoder_parts();
-        self.camera_fraction = cartridge.and_then(|cartridge| {
-            decoder.camera_fraction(&crate::wide_decode::DecoderMemory {
+        let read = cartridge.and_then(|cartridge| {
+            decoder.camera_position(&crate::wide_decode::DecoderMemory {
                 ram,
                 prg_ram: cartridge.memory().prg_ram(),
                 prg_rom: cartridge.rom().prg_rom(),
@@ -757,6 +764,24 @@ impl NesCore {
                 nametable_written: &|_| 0,
             })
         });
+        let Some((pixels, fraction)) = read else {
+            self.camera_fraction = None;
+            self.camera_read = None;
+            return;
+        };
+        // A fraction that goes round 256 with the pixels still is no longer the camera's (Kirby
+        // turning round, the camera at rest): its last value is kept until the pixels move, the
+        // picture still rather than shaking.
+        match self.camera_read {
+            Some((last, _)) if last != pixels => self.camera_decoupled = false,
+            Some((_, last)) if fraction.abs_diff(last) > 128 => self.camera_decoupled = true,
+            None => self.camera_decoupled = false,
+            _ => {}
+        }
+        self.camera_read = Some((pixels, fraction));
+        if !self.camera_decoupled || self.camera_fraction.is_none() {
+            self.camera_fraction = Some(fraction);
+        }
     }
 
     /// The experimental smooth scrolling's shift of the picture of the frame just run: the

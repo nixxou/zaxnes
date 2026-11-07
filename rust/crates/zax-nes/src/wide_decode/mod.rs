@@ -240,12 +240,12 @@ pub trait MarginDecoder: Sync {
         None
     }
 
-    /// The fraction of a pixel, in 256ths, the game's camera is past the column its scroll shows
-    /// (read after the frame: the next picture's), for the experimental smooth scrolling
-    /// (`smooth_scroll`): a camera that moves 1.33 pixels a frame shows steps of 1, 1 and 2, and
+    /// The game's camera across, in pixels and the fraction of a pixel past them in 256ths (read
+    /// after the frame: the next picture's), for the experimental smooth scrolling
+    /// (`smooth_scroll`): a camera that moves 1.3 pixels a frame shows steps of 1, 1 and 2, and
     /// the host shifts the playfield by the fraction to make them even. `None`, as by default,
     /// when the decoder does not know it.
-    fn camera_fraction(&self, _memory: &DecoderMemory<'_>) -> Option<u8> {
+    fn camera_position(&self, _memory: &DecoderMemory<'_>) -> Option<(i32, u8)> {
         None
     }
 }

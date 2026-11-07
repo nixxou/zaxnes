@@ -108,10 +108,13 @@ impl MarginDecoder for Kirby {
         true
     }
 
-    /// `$71`: the camera's fraction of a pixel across (its own: it stays as it is while the camera
-    /// rests on the room's edge with Kirby still walking).
-    fn camera_fraction(&self, memory: &DecoderMemory<'_>) -> Option<u8> {
-        Some(memory.ram(CAMERA_X_FRACTION))
+    /// `$DE:$DD` and `$71`, the camera's fraction of a pixel across (its own: it stays as it is
+    /// while the camera rests on the room's edge with Kirby still walking; but while Kirby turns
+    /// round with the camera at rest it goes on turning without the pixels following, which the
+    /// core sees and leaves out).
+    fn camera_position(&self, memory: &DecoderMemory<'_>) -> Option<(i32, u8)> {
+        let pixels = (i32::from(memory.ram(CAMERA_X_HIGH)) << 8) + i32::from(memory.ram(CAMERA_X));
+        Some((pixels, memory.ram(CAMERA_X_FRACTION)))
     }
 
     /// The game hides the background's leftmost 8 pixels (PPUMASK `$18`) and draws there the
