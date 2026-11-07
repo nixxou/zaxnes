@@ -33,7 +33,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   `-D warnings` in the four configurations.
 - [x] **5/8 — the documentation.** Three rows in `docs/review/BOARD-FEATURES.md`, the Cargo
   feature comments, and Q-140.
-- [ ] **6/8 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
+- [x] **6/8 — the callgrind campaign.** PR-1's thirteen ROMs and level 2's five games against
   `481f683d`, every compared commit built from `git archive` in a fresh directory, and the
   feature decision for each of the three boards.
 - [ ] **7/8 — golden-core against the base commit** over the 98 commercial originals, and the
@@ -170,6 +170,113 @@ because mask $C101 puts both ports inside $6000-$7FFF. Q-141 is mode 3.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **941 passed, 0 failed, 9 ignored** (+5 over step 1) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+### Step 6 — the callgrind campaign, and the feature decision
+
+Four binaries, each built by `build-clean.sh` from a `git archive` (or `git ls-files`) tar into a
+**fresh** directory with its own `CARGO_TARGET_DIR`, which is then deleted:
+
+| label | tree |
+| --- | --- |
+| `unl1base` | **`481f683d`**, the lot's base commit |
+| `unl1` | `3214eb87`, the lot through step 5, the three features in `default` |
+| `unl1off` | the same source with the three features **out of `default`** — no new board code reachable |
+| `unl1swap` | the same source as `unl1` with **two disjoint `create_board` arms swapped** — identical emulation, different layout |
+
+#### PR-1's thirteen ROMs, 300 frames, no pack — `unl1` against `unl1base`
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 5 996 342 771 | 5 996 390 654 | **+47 883** | **+0.001** |
+| `readbuf` | 6 834 481 600 | 6 834 510 597 | +28 997 | +0.000 |
+| `duelito` | 7 380 412 743 | 7 380 439 413 | +26 670 | +0.000 |
+| `oamstr` | 3 318 458 847 | 3 318 468 347 | +9 500 | +0.000 |
+| `metroid` | 5 115 544 329 | 5 115 551 860 | +7 531 | +0.000 |
+| `m0` | 5 517 376 709 | 5 517 382 587 | +5 878 | +0.000 |
+| `mmc5` | 11 266 782 006 | 11 266 779 975 | −2 031 | −0.000 |
+| `z2` | 6 291 504 795 | 6 291 500 773 | −4 022 | −0.000 |
+| `mm2` | 6 017 968 607 | 6 017 962 145 | −6 462 | −0.000 |
+| `smb3` | 7 949 377 635 | 7 949 353 143 | −24 492 | −0.000 |
+| `vblnmi` | 3 308 318 704 | 3 308 266 130 | −52 574 | −0.002 |
+| `m4` | 5 468 255 607 | 5 468 199 057 | −56 550 | −0.001 |
+| `m1` | 4 881 265 531 | 4 881 136 565 | −128 966 | −0.003 |
+| **total** | 79 346 089 884 | 79 345 941 246 | **−148 638** | **−0.000** |
+
+**Worst ROM +0.001 %**, against a tolerance of +0.02 %, and the set total is below the base.
+
+#### Level 2's five games, 600 frames, packs loaded, inputs pressed
+
+| game | `core` delta | `core` % | `total` delta | `total` % |
+| --- | ---: | ---: | ---: | ---: |
+| `metroid` | **−9 952** | −0.000 | +95 510 | +0.001 |
+| `mm2` | **−18 944** | −0.000 | +125 160 | +0.001 |
+| `smb1` | **+0** | +0.000 | +1 148 500 | +0.008 |
+| `smb3` | **−20 823** | −0.000 | +5 666 251 | **+0.023** |
+| `zelda2` | **+0** | +0.000 | +1 333 089 | +0.009 |
+
+**All five `core` figures are at or below the base**, three of them below and two identical to
+the instruction. Four of the five `total` figures are inside the tolerance. The fifth,
+`smb3/total` **+0.023 %**, is outside it, and the rest of this step is what it is.
+
+#### Where `smb3/total` is, and why it is not the boards'
+
+The per-function diff of that one run, exclusive counts, `unl1` against `unl1base`:
+
+| symbol | delta |
+| --- | ---: |
+| `luaH_getshortstr` | **+23 042 742** and **−20 058 471** (two annotation entries) |
+| `getgeneric` | **+9 291 059** and **−7 043 815** |
+| `luaH_set` | +330 712 |
+| `__memcmp_avx2_movbe` | +109 057 |
+| `__memcpy_avx_unaligned_erms` | +33 795 |
+| `Board::chr_peek_view` | **−20 823** |
+| PROGRAM TOTALS | **+5 668 674** |
+
+Lua's string-key hash table **is** the figure. No symbol of this project moves by more than
+20 823 on that game and the one that does moves **down**; the stage table says the same —
+`core`, `ppu`, `apu` and `draw_list` are `+0` or below and the whole move is in `convert`
+(+0.190 %) and `lua_hooks` (+0.335 %), the 3D engine converting against a differently-laid-out
+heap.
+
+**The same-behaviour pair settles it.** `unl1swap` is `unl1`'s source with two **disjoint** match
+arms of `registry::create_board` exchanged: the same boards, the same registers, the same
+emulation, a different binary layout. Against each other:
+
+| | `core` | `total` |
+| --- | ---: | ---: |
+| `metroid` | **+0** | −115 283 (−0.001 %) |
+| `mm2` | **+0** | −47 965 (−0.000 %) |
+| `smb1` | **+0** | +2 146 044 (**+0.016 %**) |
+| `smb3` | **+0** | −2 536 876 (**−0.010 %**) |
+| `zelda2` | **+0** | +1 027 482 (+0.007 %) |
+
+Two binaries whose emulation is identical differ by **−0.010 % to +0.016 %** on `total` and by
+**nothing at all** on `core`. And against the base commit the variant is `smb1/total`
+**+0.024 %** where `unl1` is +0.008 %, and `smb3/total` +0.013 % where `unl1` is +0.023 % — the
+two games trade places. `smb3/total` +0.023 % is inside the spread of an instrument that cannot
+resolve it, which is the same finding `board-77`'s row records (+0.024 % on the same game,
+"entirely Lua's `ltable.c`") now with a pair behind it.
+
+#### Gated off, the shipped-today build pays nothing
+
+`unl1off` against `unl1base` — the lot's source with the three features out of `default`:
+
+* PR-1's thirteen: set total **−7 224 (−0.000 %)**, worst ROM `metroid` / `readbuf`
+  **+0.001 %**, six of thirteen below.
+* Level 2: **all five `core` figures +0, identical to the instruction**; `total` +0.000 % to
+  **+0.004 %** (`smb1`), every one inside the tolerance.
+
+#### The feature decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-jv001` | **`default`** | PR-1 worst +0.001 %, all five level-2 `core` at or below the base |
+| `board-sachen-8reg` | **`default`** | the same measurement; the three were measured together, as MF-6a3 step 1 and MF-6c step 2 measured their steps' boards together |
+| `board-133` | **`default`** | the same |
+
+`parked-boards` is unchanged: it still holds `board-vs-system` alone. No board of this lot is
+above the tolerance on any figure the instrument can resolve, and none is dropped — all three are
+one `--no-default-features --features …` away either direction, which is the owner's rule.
 
 ### Step 5 — the documentation
 
