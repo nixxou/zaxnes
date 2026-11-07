@@ -33,7 +33,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   A18 that 121 and 187 drive from PPU A12.
 - [x] **4/9 — `board-263`.** The address map and the data permutation.
 - [x] **5/9 — `board-189`.** The 32 KiB PRG bank register over a stock MMC3.
-- [ ] **6/9 — the four sweeps and the feature matrix.** Every configuration the lot adds, plus
+- [x] **6/9 — the four sweeps and the feature matrix.** Every configuration the lot adds, plus
   `--no-default-features` and `--features parked-boards`; `cargo fmt --check` and clippy
   `-D warnings` in each.
 - [ ] **7/9 — the documentation.** Four rows in `docs/review/BOARD-FEATURES.md`, the Cargo
@@ -442,3 +442,82 @@ test drives the counter to prove it is there.
 | `req_core_100_mapper_263_permutes_every_one_of_the_256_written_bytes` | the page's bit map against the board's expression, over all 256 bytes |
 | `req_core_100_mapper_263_drives_the_mmc3s_a0_from_a12` | the whole bank layout against a plain mapper-4 image of the same ROM, plus the three registers an address table alone cannot reach — `$A000`'s mirroring, and `$C000`/`$D000`/`$F000` as the latch, the reload and the enable |
 | `req_core_100_mapper_189_banks_32_kib_of_prg_from_4100` | all eight 32 KiB banks from bits 4-6; the MMC3's own PRG registers reaching nothing; `$4132`; `$4000` not decoded; the low nibble not decoded; PRG A17 wrapping on 128 KiB; and the MMC3's CHR banking, mirroring and counter intact |
+
+## Step 6 — the four sweeps, the save-state round trip, and the feature matrix
+
+### The two sweeps this lot had to write itself
+
+§7.1's four sweeps (`req_core_100_every_required_mapper_is_registered`,
+`req_core_102_any_other_mapper_is_refused`, the registry round-trip and `board_memory_sizes`)
+all hold in every configuration below, and so do
+`req_core_090_the_mapper_state_survives_a_save_and_restore` and
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`, which sweep every
+number of `SUPPORTED_MAPPERS`.
+
+**But those last two dirty nothing this lot added.** They write `$8000-$E001` and `$6000`, which
+is where every board of the earlier lots keeps its registers, and **not one** of this lot's own
+additions is at any of those addresses: 195's GAL is written through the *PPU*, 123's override is
+at `$5800`, 187's at `$5000`, 121's protection ports at `$5000`/`$5180`/`$8003`, 189's bank at
+`$4100`, and 114's and 115's outer CHR bank at `$6001`. So §7.1 item 2 — "a save-state round-trip
+per board with mapper state dirtied first" — needed two tests of its own:
+
+| test | what it does |
+| --- | --- |
+| `req_core_090_every_board_of_mf_unl_2_round_trips_with_its_own_registers_dirtied` | per number: dirty the chip *and* this board's own ports, save, run five frames, **dirty this board's own ports differently**, then load and require the board's own layout and the whole re-saved block back |
+| `amd_061_a_reset_puts_every_board_of_mf_unl_2_back_to_its_power_on_state` | the same dirtying, then a reset, then the power-on layout — which for 195 is the `$80` row and not all zeroes |
+
+**The second dirtying is the whole point and it was added after the first version failed to
+earn its keep.** A round-trip that only saves, waits and loads passes on a board whose appended
+byte never reaches the state at all, because the live field still holds what the capture held.
+Checked by breaking it on purpose: with mapper 195's `chr_ram_gal` removed from
+`save_registers`/`load_registers`, the first version **passed** and the present one **fails** on
+"the byte PPU `$1000` shows, which is the CHR *source*". Two further things that version got
+wrong and this one states:
+
+* the observations have to be **board-only** (the four PRG windows, the eight CHR offsets and one
+  CHR byte), because the whole-machine state moves on its own over five frames and makes any
+  `assert_ne!` against it trivially true;
+* the image has to be **512 CHR banks** and the CHR comparison has to be on **offsets**, because
+  CHR A18 is a move of exactly 256 banks and a numbered-bank image reads the same byte 256 banks
+  apart — so bytes could not see 114's and 115's `$6001` at all;
+* **74, 192, 194 and 263 append nothing**, their whole block being the chip's, so the
+  second-dirtying assertion is skipped for those four rather than asserted falsely.
+
+### The feature matrix
+
+Every configuration builds, passes `cargo fmt --check` and clippy `-D warnings` on `zax-nes`,
+and runs the sweeps above.
+
+| configuration | `cargo test -p zax-nes` | clippy `-D warnings` |
+| --- | --- | :-: |
+| `default` | **898 / 0 / 8** (881 / 0 / 8 at `186b5656`) | clean |
+| `--no-default-features` | **783 / 0 / 8** — the figure `BOARD-FEATURES.md` records, **unchanged** | clean |
+| `--features parked-boards` | **951 / 0 / 8** (934 at the base) | clean |
+| `--no-default-features --features board-mmc3-chrram` | **789 / 0 / 8** (+6) | clean |
+| `--no-default-features --features board-mmc3-scramble` | **791 / 0 / 8** (+8) | clean |
+| `--no-default-features --features board-263` | **785 / 0 / 8** (+2) | clean |
+| `--no-default-features --features board-189` | **784 / 0 / 8** (+1) | clean |
+| `--no-default-features` + all four | **802 / 0 / 8** (+19) | clean |
+| `default`, both crates | **961 / 0 / 9** | clean (`zax-harness` too) |
+
+The four deltas sum to +17 and all four together is +19: the two extra are the per-board
+save-state and reset tests above, which are gated on `all(…)` of the four features because they
+sweep all twelve numbers in one loop.
+
+And the umbrella still refuses to be selected alone —
+`cargo build -p zax-nes --no-default-features --features board-decode-boards` stops at
+`decode_boards.rs`'s own `compile_error!`.
+
+### Three things only the matrix found
+
+The default configuration had been clean after every step, and three of the eight were not:
+
+1. **`Mmc3Board::HAS_CHR_RAM` and `CHR_RAM_BANK_MASK` are dead with `board-119` off.** Both are
+   read only inside bodies that feature gates, so both now carry the same gate — which is also
+   the honest statement of what they are: part of the CHR-RAM mechanism and not of the MMC3.
+2. **`Mmc3Board::refresh_banks` was not reachable from `board-189` alone.** Its `cfg` listed
+   `board-116` and `board-mmc3-scramble`; the TXC 189 holds an `Mmc3` and lays a 32 KiB bank over
+   it, so it is the third caller.
+3. **The new save-state test is 128 lines**, being a twelve-row table written twice. It carries
+   `#[allow(clippy::too_many_lines)]` with that reason, which is the idiom
+   `registry::board_memory_sizes` and `registry::create_board` already use.

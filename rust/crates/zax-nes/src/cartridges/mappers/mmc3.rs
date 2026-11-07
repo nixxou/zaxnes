@@ -258,6 +258,7 @@ impl<
     /// It replaces MF-6a3 step 1's `TQROM` parameter and is used in exactly the places that
     /// `if TQROM` was, so mappers 4, 118, the MC-ACC and the two multicarts keep bodies in which
     /// the whole mechanism is compile-time dead.
+    #[cfg(feature = "board-119")]
     const HAS_CHR_RAM: bool = CHR_RAM_KIB != 0;
 
     /// The chip's own bank lines, as a mask of the 1 KiB bank number.
@@ -271,6 +272,7 @@ impl<
     ///
     /// `saturating_sub` and not `- 1`, so that the boards with no chip (`SIZE` = 0) have a
     /// well-defined mask of zero rather than a const-evaluation underflow.
+    #[cfg(feature = "board-119")]
     const CHR_RAM_BANK_MASK: u8 = CHR_RAM_KIB.saturating_sub(1);
 
     /// Whether the 1 KiB CHR bank `bank` comes from the CHR-RAM chip rather than the CHR-ROM.
@@ -667,12 +669,16 @@ impl<
 
     /// Recomputes the windows from the registers, for a board that holds this chip and writes
     /// its own outer bank or PRG override over them: mapper 116 (MF-6a3 step 4) and the six
-    /// scrambled boards of `board-mmc3-scramble` (MF-UNL-2 step 3). Behind those two features,
-    /// its only callers.
+    /// scrambled boards of `board-mmc3-scramble` and the TXC 189 (MF-UNL-2 steps 3 and 5).
+    /// Behind those three features, its only callers.
     ///
     /// Recomputing before the overlay is what makes such a board's refresh **idempotent**: the
     /// windows that go into it never already carry one, so no write can count a bank twice.
-    #[cfg(any(feature = "board-116", feature = "board-mmc3-scramble"))]
+    #[cfg(any(
+        feature = "board-116",
+        feature = "board-mmc3-scramble",
+        feature = "board-189"
+    ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
     }

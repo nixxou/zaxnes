@@ -3082,6 +3082,267 @@ fn req_core_090_the_mapper_state_survives_a_save_and_restore() {
     }
 }
 
+/// §7.1 item 2 of `docs/review/UNL-census.md`: "A save-state round-trip per board with mapper
+/// state dirtied first" — for the twelve numbers of lot MF-UNL-2, each through **its own**
+/// registers.
+///
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` sweeps every number of
+/// `SUPPORTED_MAPPERS` and dirties each one through `$8000-$E001` and `$6000`, which is where
+/// every board of the earlier lots keeps its registers. **Not one of this lot's own additions is
+/// at any of those addresses**: mapper 195's GAL register is written through the *PPU*, 123's
+/// override is at `$5800`, 187's at `$5000`, 121's protection ports at `$5000`/`$5180`/`$8003`,
+/// 189's bank at `$4100`, and 114's and 115's outer CHR bank at `$6001`. So the generic sweep
+/// proves the chip's block round-trips and says nothing about the bytes this lot appends.
+///
+/// This test writes each board's own ports, saves, runs five frames, restores, and requires the
+/// re-saved bytes to be identical — which is the sweep's own criterion and covers every field
+/// including the derived ones (REQ-CORE-090, REQ-CORE-091).
+#[cfg(all(
+    feature = "board-mmc3-chrram",
+    feature = "board-mmc3-scramble",
+    feature = "board-263",
+    feature = "board-189"
+))]
+#[test]
+// The function *is* a twelve-row table -- one arm per board, with the page each register
+// comes from -- written twice, once to dirty and once to move what was dirtied.
+#[allow(clippy::too_many_lines)]
+fn req_core_090_every_board_of_mf_unl_2_round_trips_with_its_own_registers_dirtied() {
+    // What the board itself shows, and nothing of the machine around it: the four PRG windows
+    // and the eight CHR window **offsets**. The offsets and not the bytes, because a 512-bank
+    // CHR-ROM filled with bank numbers reads the same byte 256 banks apart -- and CHR A18 is
+    // exactly a move of 256 banks, so bytes could not see 114's and 115's `$6001`.
+    fn board_layout(core: &NesCore) -> ([u8; 4], Option<[usize; 8]>) {
+        (
+            core.prg_windows(),
+            core.cartridge()
+                .unwrap()
+                .chr_peek_view()
+                .map(|view| view.offsets()),
+        )
+    }
+
+    for mapper in [
+        74usize, 114, 115, 121, 123, 182, 187, 189, 192, 194, 195, 263,
+    ] {
+        let mut core = MapperRom::new(mapper).prg(32).chr(512).battery().load();
+
+        // The MMC3 underneath, at whichever addresses this board sends $8000/$8001 to.
+        let submapper1 = false;
+        for register in 0..8u8 {
+            match mapper {
+                263 => {
+                    // A12 drives A0 and the data is permuted, so the index has to be the byte
+                    // that permutes to the register number. `reverse` is a search, which a test
+                    // may do.
+                    let permute = |v: u8| -> u8 {
+                        (v & 0xD8)
+                            | ((v & 0x20) >> 4)
+                            | ((v & 0x04) << 3)
+                            | ((v & 0x02) >> 1)
+                            | ((v & 0x01) << 2)
+                    };
+                    let unpermute = |want: u8| -> u8 {
+                        (0..=255u8)
+                            .find(|candidate| permute(*candidate) == want)
+                            .unwrap_or(want)
+                    };
+                    core.mapper_write(0x8000, unpermute(register));
+                    core.mapper_write(0x9000, unpermute(register + 0x11));
+                }
+                114 | 115 | 123 | 182 | 187 => {
+                    scrambled_mmc3_bank(&mut core, mapper, submapper1, register, register + 0x11);
+                }
+                _ => core.mmc3_bank(register, register + 0x11),
+            }
+        }
+
+        // And then this board's own, one line per page.
+        match mapper {
+            // The GAL's `CHRB`, through a PPU write to a window the CHR-ROM drives: bank $3F is
+            // in no row of the page's table. `$8A` selects $64-$67, and R2 is then parked *in*
+            // that window so that the register is **observable** -- bank $64 reads the RAM chip
+            // under `$8A` and the CHR-ROM under the `$C8` written after the capture.
+            195 => {
+                core.mmc3_bank(2, 0x3F);
+                chr_write(&mut core, 0x1000, 0x8A);
+                core.mmc3_bank(2, 0x64);
+                chr_write(&mut core, 0x1000, 0x5E);
+            }
+            // The outer CHR bank at $6001, and the NROM override at $6000.
+            114 | 115 | 182 => {
+                core.mapper_write(0x6001, 0x01);
+                core.mapper_write(0x6000, 0xA5);
+            }
+            // The override at $5800, with M at bit 6.
+            123 => core.mapper_write(0x5800, 0x40 | 0x25),
+            // The override at $5000, and a protection read for good measure.
+            187 => {
+                core.mapper_write(0x5000, 0xAA);
+                let _ = core.read_memory(0x5000);
+            }
+            // The protection index, the A9713's outer bank, and the $8003 table with a
+            // bit-reversed $8001 behind it.
+            121 => {
+                core.mapper_write(0x5000, 0x02);
+                core.mapper_write(0x5180, 0x80);
+                core.mapper_write(0x8003, 0x26);
+                core.mapper_write(0x8001, 0x02);
+            }
+            // The 32 KiB bank.
+            189 => core.mapper_write(0x4100, 0x30),
+            _ => {}
+        }
+
+        // The counter too, at the addresses this board sends $C000-$E001 to, and two frames so
+        // that it has run.
+        if matches!(mapper, 114 | 182) {
+            core.mapper_write(0xA001, 0x20); // means $C000
+            core.mapper_write(0xC001, 0x00); // means $C001
+            core.mapper_write(0xE001, 0x00); // means $E001
+        } else if mapper == 263 {
+            core.mapper_write(0xC000, 0x00); // $C000 permutes to 0, which is latch 0
+            core.mapper_write(0xD000, 0x00);
+            core.mapper_write(0xF000, 0x00);
+        } else {
+            core.mapper_write(0xC000, 0x20);
+            core.mapper_write(0xC001, 0x00);
+            core.mapper_write(0xE001, 0x00);
+        }
+        for _ in 0..2 {
+            core.run_frame(0);
+        }
+
+        let state = core.save_state(true).unwrap();
+        let layout = board_layout(&core);
+        let chr_byte = peek(&core, 0x1000);
+
+        for _ in 0..5 {
+            core.run_frame(0);
+        }
+
+        // **And then the board's own registers again, differently** -- without this the test
+        // would pass on a board whose appended byte is never written to the state at all,
+        // because the live field would still hold what the capture held. Each line below must
+        // move the layout, and the assertions after the load are what prove it came back.
+        match mapper {
+            // `$C8` selects $0A-$0B, where `$8A` selected $64-$67.
+            195 => {
+                core.mmc3_bank(2, 0x3F);
+                chr_write(&mut core, 0x1000, 0xC8);
+            }
+            114 | 115 | 182 => {
+                core.mapper_write(0x6001, 0x00);
+                core.mapper_write(0x6000, 0x8C);
+            }
+            123 => core.mapper_write(0x5800, 0x40 | 0x10),
+            187 => core.mapper_write(0x5000, 0x8C),
+            121 => {
+                core.mapper_write(0x5000, 0x01);
+                core.mapper_write(0x5180, 0x00);
+                core.mapper_write(0x8003, 0x2A);
+                core.mapper_write(0x8001, 0x3E);
+            }
+            189 => core.mapper_write(0x4100, 0x10),
+            _ => {}
+        }
+        // **74, 192, 194 and 263 append nothing**: their whole save block is the chip's, which
+        // `req_core_090_the_mapper_state_survives_a_save_and_restore` already covers, so there
+        // is no second write to make and nothing for this assertion to prove. Every other board
+        // of the lot has at least one byte of its own, and for those the second write above
+        // **must** move what the board shows — otherwise the assertions below would pass on a
+        // board that never wrote that byte to the state at all, because the live field would
+        // still hold what the capture held. (That is not hypothetical: the first version of this
+        // test did exactly that, and dropping mapper 195's GAL byte from `save_registers` on
+        // purpose did not fail it.)
+        if !matches!(mapper, 74 | 192 | 194 | 263) {
+            assert_ne!(
+                (layout, chr_byte),
+                (board_layout(&core), peek(&core, 0x1000)),
+                "mapper {mapper}: the second set of register writes must move what the board \
+                 shows, or the assertions below prove nothing about the bytes this lot appends"
+            );
+        }
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(layout, board_layout(&core), "mapper {mapper}: the windows");
+        assert_eq!(
+            chr_byte,
+            peek(&core, 0x1000),
+            "mapper {mapper}: the byte PPU $1000 shows, which is the CHR *source* and so the \
+             only observation that can see mapper 195's GAL register"
+        );
+        assert_eq!(
+            state,
+            core.save_state(true).unwrap(),
+            "mapper {mapper}: the whole block, derived fields included"
+        );
+    }
+}
+
+/// AMD-061's own sweep, `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`,
+/// reaches every number of `SUPPORTED_MAPPERS` — and for the same reason as the save-state sweep
+/// above it dirties none of this lot's own registers. This one does, and then asks for the
+/// power-on layout back.
+///
+/// Mapper 195's power-on is the one that is not all zeroes: its `CHRB` powers on at `$80`
+/// (Q-142), so after a reset banks `$28-$2B` are the RAM chip again whatever the GAL was left
+/// holding.
+#[cfg(all(
+    feature = "board-mmc3-chrram",
+    feature = "board-mmc3-scramble",
+    feature = "board-263",
+    feature = "board-189"
+))]
+#[test]
+fn amd_061_a_reset_puts_every_board_of_mf_unl_2_back_to_its_power_on_state() {
+    for mapper in [
+        74usize, 114, 115, 121, 123, 182, 187, 189, 192, 194, 195, 263,
+    ] {
+        let core = MapperRom::new(mapper).prg(32).chr(64).load();
+        let power_on = (core.prg_windows(), core.chr_windows(), core.mirroring());
+
+        let mut core = core;
+        for register in 0..8u8 {
+            core.mapper_write(0x8000, register);
+            core.mapper_write(0x8001, register + 0x11);
+        }
+        match mapper {
+            195 => {
+                core.mmc3_bank(2, 0x3F);
+                chr_write(&mut core, 0x1000, 0x8A);
+            }
+            114 | 115 | 182 => {
+                core.mapper_write(0x6001, 0x01);
+                core.mapper_write(0x6000, 0xA5);
+            }
+            123 => core.mapper_write(0x5800, 0x40 | 0x25),
+            187 => core.mapper_write(0x5000, 0xAA),
+            121 => {
+                core.mapper_write(0x5180, 0x80);
+                core.mapper_write(0x8003, 0x26);
+                core.mapper_write(0x8001, 0x02);
+            }
+            189 => core.mapper_write(0x4100, 0x30),
+            _ => {}
+        }
+        core.mapper_write(0xA000, 0x01);
+
+        core.reset();
+
+        assert_eq!(
+            power_on,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "mapper {mapper}: a reset must give the power-on layout back"
+        );
+        assert!(
+            !core.cartridge().unwrap().irq_asserted(),
+            "mapper {mapper}: and no pending IRQ"
+        );
+    }
+}
+
 #[test]
 fn req_core_095_battery_backed_prg_ram_is_exposed_and_survives_a_reload() {
     for mapper in [1usize, 4, 5, 10] {
