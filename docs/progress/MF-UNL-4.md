@@ -85,14 +85,14 @@ worth, +16 measured" for every board in the enum. Mesen 2 puts the same latch on
 
 ## The steps
 
-- [ ] **0/9 — the plan.** This file: the four numbers, the one page they share, the two `bool`s
+- [x] **0/9 — the plan.** This file: the four numbers, the one page they share, the two `bool`s
   that are the per-number wiring, the four places this lot leaves a prescription for the page, the
   `IrqBoard` variant and why each of the four hooks is free in `Board`'s dispatches.
 - [x] **1/9 — settle the nametable question.** A sixth `Mapper::read_nametable` body measured
   against Q-123's ceiling on this tree, in two shapes, with the figures in
   `rust/docs/PERFORMANCE-HISTORY.md` §5.18. **`Ppu2C02::read_nametable_inner` does not move at
   all**, so the board serves its nametables itself and the feature ships.
-- [ ] **2/9 — `JyCompany`, the register map and the banking modes.** $5000/$5400/$5C00 solder pad,
+- [x] **2/9 — `JyCompany`, the register map and the banking modes.** $5000/$5400/$5C00 solder pad,
   the $5800-$5801 multiplier, the $5802-$5803 accumulator and test register, the four $8000-$8003
   PRG registers with the four modes, the sixteen $9000-$A007 CHR registers with the four modes and
   the $D003 outer bank, and $D000-$D003. The four `registry.rs` arms, the four `SUPPORTED_MAPPERS`
@@ -202,3 +202,111 @@ next lot: put the body inside a shared variant's existing forward.
 Disk: G: stayed above 31 GiB free; each of the three build directories was deleted by
 `build-clean.sh` as soon as its binary was copied out, and the three tars afterwards. Every run in
 the foreground with its output read, as the headless rule requires.
+
+---
+
+## Step 2 — the register map, the banking modes, and the four numbers
+
+`rust/crates/zax-nes/src/cartridges/mappers/jy_company.rs`: one struct, the whole register map,
+and the four `registry.rs` arms. The IRQ registers ($C000-$C007) and the nametable registers
+($B000-$B007) are **decoded and kept** from this step so that the save-state block is the shape it
+will stay; what they *drive* is steps 3 and 5.
+
+### The windows, and their masks
+
+| window | mask | decoded here |
+| --- | --- | --- |
+| `$5000`, `$5400`, `$5C00` read | `$FFFF` | the solder pad, answering 0 |
+| `$5800`-`$5801` | `$F803` | the unsigned 8×8→16 multiplier |
+| `$5802`-`$5803` | `$F803` | the accumulator and the test register |
+| `$8000`-`$8003` | `$F803` | the four PRG registers, seven bits each |
+| `$9000`-`$9007` / `$A000`-`$A007` | `$F807` | the eight CHR registers, LSB and MSB |
+| `$B000`-`$B003` / `$B004`-`$B007` | `$F807` | the four nametable registers, LSB and MSB |
+| `$C000`-`$C007` | `$F007` | the IRQ — the one window that **accepts** A11 |
+| `$D000`-`$D003` | `$F803` | the modes, the arrangement, the PPU configuration, the outer bank |
+
+**The one place the page's two masks overlap is `$5C00`**, which is the solder pad under `$FFFF`
+and the product's low byte under `$F803`. The page settles it in its own sentence — "Apparently,
+the address of this register is fully decoded, as the SC-128 version of *Final Fight 3*, which
+otherwise happily randomizes the masked-off address bits, keeps A0-A11 constantly at zero to read
+from this register" — so the three fully decoded addresses are tested first.
+`req_core_100_jy_asic_solder_pad_register_is_fully_decoded` pins it, and records that Mesen 2
+decodes `$5C00` as the product.
+
+### Where the registers are read, and the dispatch that is *not* used
+
+`$5000`-`$5FFF` and the `$6000`-`$7FFF` ROM window are answered in **`Mapper::try_read_prg`**,
+which `IrqBoard` already forwards (it was `board-mmc3-scramble`'s doing, for 121's protection
+array), and **not** in `Mapper::cpu_read_override`, which `IrqBoard` does not forward and which is
+`#[inline(always)]` on every CPU read of an MMC5 game. `Cartridge::default_cpu_read` reaches
+`try_read_prg` for every address of `$4020`-`$FFFF` that is not readable PRG-RAM, which is exactly
+the three windows this board answers — so the whole read decode costs `Board`'s dispatches nothing,
+and the board has no read side effect to need the other method for.
+
+### The bank arithmetic, and the four places it leaves Mesen 2
+
+The page's outer-bank rule is one sentence per memory — "The PRG-ROM bank selected via
+$8000-$8003 is always masked to the outer bank size (512/256/128 KiB, depending on PCB/mapper
+number). Accessing more than that requires manipulating the Outer Bank register at $D003" — and
+`$D003`'s `4.Lc cPPC` is that register. For these four numbers the outer PRG bank is 512 KiB, so a
+PRG register is six bits wide and `PP` is PRG A19-A20; a CHR register is masked to 256 or 512 1 KiB
+banks depending on `L`, with `C` as CHR A18 and `cc` as CHR A19-A20.
+
+Four readings of that arithmetic differ from Mesen 2's `JyCompany.h`, and **Q-150** records all
+four:
+
+1. **PRG mode 3's bit reversal keeps bit 3.** "bits 0-6 reversed" maps bit 3 to itself; Mesen's
+   `InvertPrgBits` writes the other six and drops it, so `$08` selects bank 0 there and bank 8
+   here. `q_150_jy_asic_prg_mode_3_reverses_bit_3_onto_itself` walks all seven bits.
+2. **32 KiB mode's register is a 32 KiB bank.** The page says "$8003: Select 32 KiB PRG-ROM bank
+   at CPU $8000-$FFFF" and gives the `$6000` window "$8003 SHL 2 OR 3" — the same bank's last
+   8 KiB page. Mesen maps `SelectPrgPage4x(0, prgRegs[3])`, four *consecutive 8 KiB* pages from the
+   register, while using `prgRegs[3] * 4 + 3` for `$6000`: the two cannot both be right, and the
+   page's reading is the one they agree on.
+3. **`L=1` still masks, and still uses `cc`.** "1: Mask $900x/$A00x to 512 KiB, ignore C" leaves
+   `cc` as CHR A19-A20; Mesen drops the mask and the outer bank entirely in that case and uses the
+   raw sixteen-bit `$900x | $A00x << 8`.
+4. **`$D003` bit 7 is the MMC4-like mode and nothing else.** The page: "only meaningful in 4 KiB
+   CHR-ROM banking mode". Mesen reads the same bit as a `_mirrorChr` that folds CHR registers 2 and
+   3 onto 0 and 1 in modes 2 and 3, which no line of the page describes.
+
+### The four numbers
+
+`registry.rs` gives 35, 90, 209 and 211 one arm. 209, 211 and 35 build the **same** board — the
+page calls 211 "a mere duplicate of INES Mapper 209 with correct emulation" (**Q-149**) and 35 "an
+exact duplicate" whose only difference is the 8 KiB of WRAM it states (**Q-148**) — and 90 is that
+board with `jumper_inhibits_nametables` set, which step 5 is where it shows. 35's whole
+implementation is its `board_memory_sizes` row.
+
+`nametable_pages_vary` gains all four (step 5 is what makes them vary), and both PPU latch lists
+and `clocks_on_cpu_cycle` gain them too (step 3). The numbers are in those `matches!` whatever
+`board-jy-asic` says, for mapper 68's reason: one `matches!` is one `matches!`, and a number whose
+board is off is never created.
+
+### Tests from the page
+
+`req_core_100_jy_asic_multiplies_two_bytes_into_a_sixteen_bit_product` (table-driven, as the census
+asks, with `$FF × $FF = $FE01` for the unsignedness), `…_accumulates_and_keeps_a_test_register`,
+`…_solder_pad_register_is_fully_decoded`, `…_has_four_prg_banking_modes`,
+`…_fixes_the_last_window_to_the_outer_banks_last`, `…_masks_the_prg_bank_to_the_outer_bank`,
+`…_has_four_chr_banking_modes`, `…_outer_chr_bank_picks_its_own_mask`,
+`…_ignores_a_write_with_address_bit_11_set`, `…_maps_a_prg_rom_bank_at_6000_on_demand`,
+`…_arrangement_bits_are_this_cores_mirroring_reversed`, `…_chr_write_enable_gates_chr_ram`,
+`q_148_jy_asic_mapper_35_is_mapper_209_with_8_kib_of_wram`,
+`q_150_jy_asic_prg_mode_3_reverses_bit_3_onto_itself` and
+`req_core_090_jy_asic_round_trips_its_whole_register_set`.
+
+**One test needed a new instrument.** The numbered-bank fixture fills 1 KiB CHR bank `b` with
+`b as u8`, so banks 0 and 256 read the same byte — and this board's outer CHR bank reaches bank
+512. `chr_banks()` reads the raw window offsets off `Cartridge::chr_peek_view().offsets()`, which
+is the only way to see them, and `…_outer_chr_bank_picks_its_own_mask` is the test that needs it.
+
+**`$D002` bit 6 is decoded, and it is write-protected at power-on.** The page gives bit 6 a CHR
+write-enable meaning and says "Bit 6 only matters when using CHR-RAM"; every register is zero at
+power-on, so a CHR-RAM image of one of these numbers has to ask for the RAM before it can fill it.
+Mesen 2 does not decode the bit at all. It is not a Q ticket because the page is not ambiguous — it
+is recorded here, and in `…_chr_write_enable_gates_chr_ram`, because it is a power-on default a
+future reader will want to find deliberate.
+
+`cargo test --release -p zax-nes`: **924 passed / 0 failed / 8 ignored**. `cargo fmt --check` and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

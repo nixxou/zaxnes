@@ -1,0 +1,650 @@
+use super::{windows_for, Mapper};
+use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
+use crate::NametableMirroring;
+
+/// iNES mappers **35, 90, 209 and 211**: 晶太 (Jīngtài) / J.Y. Company's proprietary ASIC
+/// (MF-UNL-4).
+///
+/// nesdev, "J.Y. Company ASIC" — **one page for all four numbers**, to which `INES Mapper 035`,
+/// `INES Mapper 090`, `INES Mapper 209` and `INES Mapper 211` all redirect. The chip is the one
+/// behind thirteen of Hummer Team's unlicensed ports (*Super Mario World*, *Aladdin*,
+/// *Final Fight 3*, *Tekken 2*, *Donkey Kong Country 4*, *Contra Spirits*, …), which
+/// `docs/review/UNL-census.md` §1.6 calls "by a wide margin, the most-played unlicensed NES
+/// software there is".
+///
+/// # The register map
+///
+/// | window | mask | what it is |
+/// | --- | --- | --- |
+/// | `$5000`, `$5400`, `$5C00` (read) | `$FFFF` | board solder pad, `JJ.. ....` |
+/// | `$5800`-`$5801` | `$F803` | unsigned 8×8→16 hardware multiplier |
+/// | `$5802`-`$5803` | `$F803` | an accumulator and a test register |
+/// | `$8000`-`$8003` | `$F803` | the four PRG bank registers |
+/// | `$9000`-`$9007` / `$A000`-`$A007` | `$F807` | the eight CHR bank registers, LSB / MSB |
+/// | `$B000`-`$B003` / `$B004`-`$B007` | `$F807` | the four nametable registers, LSB / MSB |
+/// | `$C000`-`$C007` | `$F007` | the IRQ |
+/// | `$D000`-`$D003` | `$F803` | the banking modes, the mirroring, the PPU configuration and the outer bank |
+///
+/// The `$F803`/`$F807` masks mean a write is **ignored when address bit 11 is set**, so each
+/// window is only the low 2 KiB of its 4 KiB block; `$C00x` alone accepts bit 11, its mask being
+/// `$F007`. The page states each one separately and this board tests each one separately.
+///
+/// # The four numbers, and the two `bool`s between them
+///
+/// | number | the page's words |
+/// | ---: | --- |
+/// | **209** | "the **standard implementation**, used for most single-game cartridges" |
+/// | **90** | "inhibits, **via jumper**, ROM nametables and Extended Mirroring that would otherwise be enabled via register" |
+/// | **211** | "a mere duplicate of INES Mapper 209 **with correct emulation**" — "no such PCB exists in real hardware" |
+/// | **35** | "like Mapper 209 but explicitly specifies 8 KiB of WRAM … an exact duplicate" |
+///
+/// So 209, 211 and 35 are the **same** board here and 90 is that board with
+/// [`JyCompany::jumper_inhibits_nametables`] set; 35's difference is in
+/// `registry::board_memory_sizes` and not in this file at all. Q-148 and Q-149 record the two
+/// places that leaves Mesen 2 — which builds a wholly different and much smaller board for 35,
+/// and special-cases 211 as "N always set" against its own page's sentence.
+///
+/// # Where the hooks go
+///
+/// The board is an [`IrqBoard`](super::IrqBoard) variant, which is what makes the census's "four
+/// hooks at once" affordable: that enum **already forwards** `on_cpu_cycle`,
+/// `on_ppu_address_bus`, `irq_asserted`, `nametable_page`, `read_nametable`, `prg_ram_enabled`
+/// and `try_read_prg`, so this board adds **no arm to any `Board` dispatch**. MF-UNL-4 step 1
+/// measured the one that was supposed to be dear — `Mapper::read_nametable`, Q-123's ceiling —
+/// at `Ppu2C02::read_nametable_inner` **80 instructions in all three binaries, identical to the
+/// instruction**; `rust/docs/PERFORMANCE-HISTORY.md` §5.18 has it.
+///
+/// The MMC4-like CHR latch is on `on_ppu_address_bus` and **not** on `Mapper::ppu_read`, which
+/// `IrqBoard` does not override: the page says the latch moves when "the PPU **reads** from
+/// $0FD8-$0FDF", every such read already reaches `Cartridge::on_ppu_address_bus`, and overriding
+/// `ppu_read` would add a distinct body to a dispatch §4.10 of the inventory prices at "one arm's
+/// worth, +16 measured" for every board of the enum. Mesen 2 puts the same latch on the same hook.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JyCompany {
+    banks: BankWindows,
+    mapper_number: i32,
+    /// Mapper 90's jumper: "inhibits … ROM nametables and Extended Mirroring that would
+    /// otherwise be enabled via register". The one per-number parameter of the board itself.
+    jumper_inhibits_nametables: bool,
+
+    /// `$8000`-`$8003`, seven bits each. Their unit is the PRG banking mode's: an 8 KiB bank in
+    /// modes 2 and 3, a 16 KiB bank in mode 1, a 32 KiB bank in mode 0.
+    prg: [u8; 4],
+    /// `$9000`-`$9007`, the CHR bank registers' LSBs.
+    chr_low: [u8; 8],
+    /// `$A000`-`$A007`, their MSBs.
+    chr_high: [u8; 8],
+    /// `$B000`-`$B003`: a CIRAM bank in bit 0, the ROM/CIRAM select in bit 7, and the LSB of a
+    /// 1 KiB CHR bank in all eight bits at once — the page gives bit 7 all three jobs.
+    nametable_low: [u8; 4],
+    /// `$B004`-`$B007`, the MSBs of those CHR banks.
+    nametable_high: [u8; 4],
+
+    /// `$D000` bits 1-0: 0 = 32 KiB, 1 = 16 KiB, 2 = 8 KiB, 3 = 8 KiB with the bank numbers'
+    /// bits 0-6 reversed.
+    prg_mode: u8,
+    /// `$D000` bit 2: the `$E000`/`$C000`/`$8000`-`$FFFF` bank is switchable via `$8003` rather
+    /// than hard-wired to the last bank of the outer bank.
+    prg_last_switchable: bool,
+    /// `$D000` bits 4-3: 0 = 8 KiB, 1 = 4 KiB, 2 = 2 KiB, 3 = 1 KiB.
+    chr_mode: u8,
+    /// `$D000` bit 5: ROM nametables enabled.
+    rom_nametables: bool,
+    /// `$D000` bit 6: ROM nametables for **all** four tables, rather than for the ones
+    /// `$B00x` bit 7 selects against `$D002` bit 7.
+    rom_nametables_all: bool,
+    /// `$D000` bit 7: `$6000`-`$7FFF` shows an 8 KiB PRG-ROM bank instead of WRAM.
+    prg_rom_at_6000: bool,
+
+    /// `$D001` bits 1-0, the nametable arrangement. The page's names are *arrangements* and this
+    /// core's are *mirrorings*, which are each other's opposites: "0: Horizontal (A10)" is
+    /// [`NametableMirroring::Vertical`].
+    arrangement: u8,
+    /// `$D001` bit 3: Extended Mirroring — the CIRAM bank of each table from `$B00x` bit 0.
+    extended_mirroring: bool,
+
+    /// `$D002` bit 6: CHR write-enable. "Bit 6 only matters when using CHR-RAM."
+    chr_write_enabled: bool,
+    /// `$D002` bit 7: which value of `$B00x` bit 7 means ROM. Clear → bit 7 set selects ROM.
+    nametable_select_invert: bool,
+
+    /// `$D003` bit 7: the MMC4-like automatic CHR bankswitching mode, "only meaningful in 4 KiB
+    /// CHR-ROM banking mode".
+    mmc4_mode: bool,
+    /// `$D003` bit 5, `L`: mask `$900x`/`$A00x` to 512 KiB and ignore `C`, rather than to
+    /// 256 KiB and use it.
+    outer_chr_512k: bool,
+    /// `$D003` bits 4-3, `cc`: the 512 KiB outer CHR bank, CHR A19-A20.
+    outer_chr_bank: u8,
+    /// `$D003` bits 2-1, `PP`: the 512 KiB outer PRG bank, PRG A19-A20.
+    outer_prg_bank: u8,
+    /// `$D003` bit 0, `C`: the 256 KiB outer CHR bank, CHR A18. Ignored when `L` is set.
+    outer_chr_a18: bool,
+
+    /// The two MMC4-like latches, one per pattern table, each 0 or 1.
+    chr_latch: [u8; 2],
+
+    /// `$C000` bit 0, `$C002` and `$C003`. The page gives it three jobs at once: "'Disabling'
+    /// acknowledges a pending IRQ, inhibits counting, and resets the prescaler to zero."
+    irq_enabled: bool,
+    /// `$C001` bits 1-0: 0 = CPU M2 rise, 1 = PPU A12 rise, 2 = PPU reads, 3 = CPU writes.
+    irq_source: u8,
+    /// `$C001` bits 7-6: 0 and 3 disable counting, 1 increases, 2 decreases.
+    irq_direction: u8,
+    /// `$C001` bit 2: the prescaler mask is `$07` rather than `$FF`.
+    irq_small_prescaler: bool,
+    /// `$C001` bit 3: enables the `$C007` mode, "Its functionality is not known, and no known
+    /// game uses it."
+    irq_c007_mode: bool,
+    /// `$C007`, kept so that the save state carries what a game wrote.
+    irq_c007: u8,
+    irq_prescaler: u8,
+    irq_counter: u8,
+    /// `$C006`: XORed into what `$C004` and `$C005` write.
+    irq_xor: u8,
+    irq_pending: bool,
+    /// The previous PPU address, for the unfiltered A12 rise of IRQ source 1.
+    last_ppu_address: u16,
+
+    /// `$5800` write, the multiplicand.
+    multiplicand: u8,
+    /// `$5801` write, the multiplier.
+    multiplier: u8,
+    /// `$5802`: a write adds to it, `$5803` resets it to zero.
+    accumulator: u8,
+    /// `$5803`, the test register.
+    test_register: u8,
+
+    /// What [`Mapper::nametable_page`] answers for the four logical tables. A field and not a
+    /// `match`, for the reason `Mmc3Board::nametable_pages` gives: that dispatch is consulted
+    /// once per nametable fetch. Derived — `load_registers` recomputes it.
+    nametable_pages: [i32; 4],
+}
+
+impl JyCompany {
+    /// 8 KiB, the unit of a PRG window.
+    const PRG_BANK_SIZE: usize = 0x2000;
+
+    /// The outer PRG bank size of all four numbers, in 8 KiB banks: "The outer PRG bank size is
+    /// 512 KiB" (the page, on mapper 209, and 35, 90 and 211 are the same PCB family).
+    const OUTER_PRG_BANKS: i32 = 512 / 8;
+    /// The same in 1 KiB CHR banks, in the two sizes `$D003` bit 5 chooses between.
+    const OUTER_CHR_BANKS_256K: i32 = 256;
+    const OUTER_CHR_BANKS_512K: i32 = 512;
+
+    pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
+        let mut board = Self {
+            banks: windows_for(memory),
+            mapper_number,
+            jumper_inhibits_nametables: mapper_number == 90,
+            prg: [0; 4],
+            chr_low: [0; 8],
+            chr_high: [0; 8],
+            nametable_low: [0; 4],
+            nametable_high: [0; 4],
+            prg_mode: 0,
+            prg_last_switchable: false,
+            chr_mode: 0,
+            rom_nametables: false,
+            rom_nametables_all: false,
+            prg_rom_at_6000: false,
+            arrangement: 0,
+            extended_mirroring: false,
+            chr_write_enabled: false,
+            nametable_select_invert: false,
+            mmc4_mode: false,
+            outer_chr_512k: false,
+            outer_chr_bank: 0,
+            outer_prg_bank: 0,
+            outer_chr_a18: false,
+            chr_latch: [0; 2],
+            irq_enabled: false,
+            irq_source: 0,
+            irq_direction: 0,
+            irq_small_prescaler: false,
+            irq_c007_mode: false,
+            irq_c007: 0,
+            irq_prescaler: 0,
+            irq_counter: 0,
+            irq_xor: 0,
+            irq_pending: false,
+            last_ppu_address: 0,
+            multiplicand: 0,
+            multiplier: 0,
+            accumulator: 0,
+            test_register: 0,
+            nametable_pages: [super::super::Cartridge::FOLLOW_MIRRORING; 4],
+        };
+        board.update_banks();
+        board
+    }
+
+    /// The bank number of one of the four PRG registers, in the **mode's own unit**, with
+    /// `$D000` bits 1-0's mode-3 bit reversal applied.
+    ///
+    /// "3: 8 KiB banking, but with bank numbers **bits 0-6 reversed**" — bit 0 ↔ bit 6,
+    /// bit 1 ↔ bit 5, bit 2 ↔ bit 4, and bit 3 to itself. Mesen 2's `InvertPrgBits` drops bit 3
+    /// (Q-150); the page's "bits 0-6" includes it, and a seven-bit reversal that left the middle
+    /// bit out would not be a reversal.
+    fn prg_register(&self, index: usize) -> i32 {
+        let value = self.prg[index];
+        if self.prg_mode == 3 {
+            i32::from(
+                (value & 0x01) << 6
+                    | (value & 0x02) << 4
+                    | (value & 0x04) << 2
+                    | (value & 0x08)
+                    | (value & 0x10) >> 2
+                    | (value & 0x20) >> 4
+                    | (value & 0x40) >> 6,
+            )
+        } else {
+            i32::from(value)
+        }
+    }
+
+    /// An 8 KiB PRG bank, masked to the 512 KiB outer bank and placed in it by `$D003` bits 2-1.
+    ///
+    /// "The PRG-ROM bank selected via $8000-$8003 is always masked to the outer bank size …
+    /// Accessing more than that requires manipulating the Outer Bank register at $D003."
+    fn prg_bank(&self, bank_8k: i32) -> i32 {
+        (bank_8k & (Self::OUTER_PRG_BANKS - 1))
+            | (i32::from(self.outer_prg_bank) * Self::OUTER_PRG_BANKS)
+    }
+
+    /// The 8 KiB bank the `$E000`/`$C000`/`$8000` window shows: `$8003` when `$D000` bit 2 says
+    /// switchable, and otherwise "hard-wired to the last bank **within the outer bank**", which
+    /// is why it is the outer bank's last and not the image's.
+    fn prg_last_bank(&self, scale: i32) -> i32 {
+        if self.prg_last_switchable {
+            self.prg_bank(self.prg_register(3) * scale)
+        } else {
+            self.prg_bank(Self::OUTER_PRG_BANKS - scale)
+        }
+    }
+
+    /// The 1 KiB CHR bank one of the eight registers selects, in the **mode's own unit**,
+    /// already scaled to 1 KiB, masked to the outer bank size and placed in the outer bank.
+    ///
+    /// `$D003` bit 5 chooses the mask: "0: Mask $900x/$A00x to 256 KiB, use C / 1: Mask
+    /// $900x/$A00x to 512 KiB, ignore C", with `cc` (bits 4-3) always the 512 KiB outer bank and
+    /// `C` (bit 0) the 256 KiB one inside it. Mesen 2 drops the mask and the outer bank entirely
+    /// in the `L=1` case and uses the raw 16-bit register instead (Q-150).
+    fn chr_bank(&self, index: usize) -> i32 {
+        let register = i32::from(self.chr_low[index]) | (i32::from(self.chr_high[index]) << 8);
+        let bank_1k = register * Self::CHR_UNIT_1K[usize::from(self.chr_mode) & 3];
+        let outer = i32::from(self.outer_chr_bank) * Self::OUTER_CHR_BANKS_512K;
+        if self.outer_chr_512k {
+            (bank_1k & (Self::OUTER_CHR_BANKS_512K - 1)) | outer
+        } else {
+            (bank_1k & (Self::OUTER_CHR_BANKS_256K - 1))
+                | (i32::from(self.outer_chr_a18) * Self::OUTER_CHR_BANKS_256K)
+                | outer
+        }
+    }
+
+    /// How many 1 KiB banks one unit of each CHR mode is: 8 KiB, 4 KiB, 2 KiB, 1 KiB.
+    const CHR_UNIT_1K: [i32; 4] = [8, 4, 2, 1];
+
+    /// Which of the eight CHR registers serves the 4 KiB window `window` (0 or 1) under the
+    /// MMC4-like mode.
+    ///
+    /// "$9000/$A000 … when latch =0 / $9002/$A002 … when latch =1" for `$0000`-`$0FFF`, and
+    /// `$9004`/`$9006` the same way for `$1000`-`$1FFF`. With the mode off the page's plain
+    /// 4 KiB layout is `$9000` and `$9004`, which is the same table read with both latches at 0.
+    fn chr_4k_register(&self, window: usize) -> usize {
+        window * 4
+            + if self.mmc4_mode {
+                usize::from(self.chr_latch[window]) * 2
+            } else {
+                0
+            }
+    }
+
+    fn update_banks(&mut self) {
+        match self.prg_mode & 0x03 {
+            // 32 KiB: "$8003: Select 32 KiB PRG-ROM bank at CPU $8000-$FFFF". The register's
+            // unit is a 32 KiB bank, which is four of `BankWindows`'s, and the hard-wired case
+            // is the outer bank's last 32 KiB.
+            0 => {
+                let base = self.prg_last_bank(4);
+                for slot in 0..4 {
+                    self.banks
+                        .map_prg_8k(slot, base + i32::try_from(slot).unwrap_or(0));
+                }
+            }
+            // 16 KiB: "$8001: … at CPU $8000-$BFFF" and "$8003: … at CPU $C000-$FFFF".
+            1 => {
+                let low = self.prg_bank(self.prg_register(1) * 2);
+                self.banks.map_prg_8k(0, low);
+                self.banks.map_prg_8k(1, low + 1);
+                let high = self.prg_last_bank(2);
+                self.banks.map_prg_8k(2, high);
+                self.banks.map_prg_8k(3, high + 1);
+            }
+            // 8 KiB, with and without mode 3's bit reversal.
+            _ => {
+                for slot in 0..3 {
+                    let bank = self.prg_bank(self.prg_register(slot));
+                    self.banks.map_prg_8k(slot, bank);
+                }
+                self.banks.map_prg_8k(3, self.prg_last_bank(1));
+            }
+        }
+
+        match self.chr_mode & 0x03 {
+            0 => {
+                let bank = self.chr_bank(0);
+                for slot in 0..BankWindows::CHR_WINDOWS {
+                    self.banks
+                        .map_chr_1k(slot, bank + i32::try_from(slot).unwrap_or(0));
+                }
+            }
+            1 => {
+                for window in 0..2 {
+                    let bank = self.chr_bank(self.chr_4k_register(window));
+                    for page in 0..4 {
+                        self.banks
+                            .map_chr_1k(window * 4 + page, bank + i32::try_from(page).unwrap_or(0));
+                    }
+                }
+            }
+            2 => {
+                for window in 0..4 {
+                    let bank = self.chr_bank(window * 2);
+                    self.banks.map_chr_1k(window * 2, bank);
+                    self.banks.map_chr_1k(window * 2 + 1, bank + 1);
+                }
+            }
+            _ => {
+                for slot in 0..BankWindows::CHR_WINDOWS {
+                    let bank = self.chr_bank(slot);
+                    self.banks.map_chr_1k(slot, bank);
+                }
+            }
+        }
+    }
+
+    /// The 16-bit product of the two multiplier operands. "After writing the two operands to
+    /// $5800 and $5801, the result can be read 8 M2 cycles later; if the registers are read from
+    /// earlier than that, intermediate results are obtained." The intermediate results are not
+    /// modelled — the product is whole as soon as both operands are in — which is Mesen 2's
+    /// reading too, and no documented game reads the registers early.
+    fn product(&self) -> u16 {
+        u16::from(self.multiplicand) * u16::from(self.multiplier)
+    }
+}
+
+impl Mapper for JyCompany {
+    banked!();
+
+    fn mapper_number(&self) -> i32 {
+        self.mapper_number
+    }
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_raw(&self.prg);
+        writer.write_raw(&self.chr_low);
+        writer.write_raw(&self.chr_high);
+        writer.write_raw(&self.nametable_low);
+        writer.write_raw(&self.nametable_high);
+        writer.write_u8(self.prg_mode);
+        writer.write_bool(self.prg_last_switchable);
+        writer.write_u8(self.chr_mode);
+        writer.write_bool(self.rom_nametables);
+        writer.write_bool(self.rom_nametables_all);
+        writer.write_bool(self.prg_rom_at_6000);
+        writer.write_u8(self.arrangement);
+        writer.write_bool(self.extended_mirroring);
+        writer.write_bool(self.chr_write_enabled);
+        writer.write_bool(self.nametable_select_invert);
+        writer.write_bool(self.mmc4_mode);
+        writer.write_bool(self.outer_chr_512k);
+        writer.write_u8(self.outer_chr_bank);
+        writer.write_u8(self.outer_prg_bank);
+        writer.write_bool(self.outer_chr_a18);
+        writer.write_raw(&self.chr_latch);
+        writer.write_bool(self.irq_enabled);
+        writer.write_u8(self.irq_source);
+        writer.write_u8(self.irq_direction);
+        writer.write_bool(self.irq_small_prescaler);
+        writer.write_bool(self.irq_c007_mode);
+        writer.write_u8(self.irq_c007);
+        writer.write_u8(self.irq_prescaler);
+        writer.write_u8(self.irq_counter);
+        writer.write_u8(self.irq_xor);
+        writer.write_bool(self.irq_pending);
+        writer.write_i32(i32::from(self.last_ppu_address));
+        writer.write_u8(self.multiplicand);
+        writer.write_u8(self.multiplier);
+        writer.write_u8(self.accumulator);
+        writer.write_u8(self.test_register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_into(&mut self.prg)?;
+        reader.read_into(&mut self.chr_low)?;
+        reader.read_into(&mut self.chr_high)?;
+        reader.read_into(&mut self.nametable_low)?;
+        reader.read_into(&mut self.nametable_high)?;
+        self.prg_mode = reader.read_u8()?;
+        self.prg_last_switchable = reader.read_bool()?;
+        self.chr_mode = reader.read_u8()?;
+        self.rom_nametables = reader.read_bool()?;
+        self.rom_nametables_all = reader.read_bool()?;
+        self.prg_rom_at_6000 = reader.read_bool()?;
+        self.arrangement = reader.read_u8()?;
+        self.extended_mirroring = reader.read_bool()?;
+        self.chr_write_enabled = reader.read_bool()?;
+        self.nametable_select_invert = reader.read_bool()?;
+        self.mmc4_mode = reader.read_bool()?;
+        self.outer_chr_512k = reader.read_bool()?;
+        self.outer_chr_bank = reader.read_u8()?;
+        self.outer_prg_bank = reader.read_u8()?;
+        self.outer_chr_a18 = reader.read_bool()?;
+        reader.read_into(&mut self.chr_latch)?;
+        self.irq_enabled = reader.read_bool()?;
+        self.irq_source = reader.read_u8()?;
+        self.irq_direction = reader.read_u8()?;
+        self.irq_small_prescaler = reader.read_bool()?;
+        self.irq_c007_mode = reader.read_bool()?;
+        self.irq_c007 = reader.read_u8()?;
+        self.irq_prescaler = reader.read_u8()?;
+        self.irq_counter = reader.read_u8()?;
+        self.irq_xor = reader.read_u8()?;
+        self.irq_pending = reader.read_bool()?;
+        self.last_ppu_address = u16::try_from(reader.read_i32()? & 0xFFFF).unwrap_or(0);
+        self.multiplicand = reader.read_u8()?;
+        self.multiplier = reader.read_u8()?;
+        self.accumulator = reader.read_u8()?;
+        self.test_register = reader.read_u8()?;
+        Ok(())
+    }
+
+    /// Every register is zero at power-on, so `$D001`'s arrangement 0 is the mirroring the board
+    /// drives — the page's "Horizontal (A10)", which is [`NametableMirroring::Vertical`] here.
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
+        *self = Self::new(memory, self.mapper_number);
+        memory.set_mirroring(NametableMirroring::Vertical);
+    }
+
+    /// `$D000` bit 7 clear: "Map WRAM, if present, otherwise open bus". Set: the window is an
+    /// 8 KiB PRG-ROM bank, so the RAM is not readable there and [`Mapper::try_read_prg`] answers
+    /// instead.
+    fn prg_ram_enabled(&self) -> bool {
+        !self.prg_rom_at_6000
+    }
+
+    /// `$8000`-`$FFFF` through the window table, `$5000`-`$5FFF`'s readable registers, and
+    /// `$6000`-`$7FFF` when `$D000` bit 7 maps PRG-ROM there.
+    ///
+    /// **This and not [`Mapper::cpu_read_override`]**, which `IrqBoard` does not forward: that
+    /// dispatch is `#[inline(always)]` and on every CPU read of an MMC5 game, and a forward
+    /// would give it a new body for the sake of a board that has no read side effect at all.
+    /// `Cartridge::default_cpu_read` reaches this method for every address of `$4020`-`$FFFF`
+    /// that is not readable PRG-RAM, which is exactly the three windows above.
+    ///
+    /// The order of the two `$5xxx` tests is the page's own: the solder pad register is
+    /// "Mask: $FFFF" at exactly `$5000`, `$5400` and `$5C00` — "Apparently, the address of this
+    /// register is fully decoded, as the SC-128 version of *Final Fight 3*, which otherwise
+    /// happily randomizes the masked-off address bits, keeps A0-A11 constantly at zero to read
+    /// from this register" — while the multiplier's mask is `$F803`, under which `$5C00` would
+    /// also be `$5800`. Fully decoded wins for those three addresses.
+    ///
+    /// The solder pad answers **0**: `JJ.. ....` selects "different title screens or game counts
+    /// on multicarts", a dump carries no record of how the pads were cut, and 0 is the setting
+    /// Mesen 2 reports too.
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        if address >= 0x8000 {
+            return self
+                .banks
+                .read_prg(address, memory.rom().prg_rom(), memory.prg_ram());
+        }
+
+        match address {
+            0x5000 | 0x5400 | 0x5C00 => Some(0),
+            0x5001..=0x5FFF => match address & 0xF803 {
+                0x5800 => Some(u8::try_from(self.product() & 0x00FF).unwrap_or(0)),
+                0x5801 => Some(u8::try_from(self.product() >> 8).unwrap_or(0)),
+                0x5802 => Some(self.accumulator),
+                0x5803 => Some(self.test_register),
+                // Inside $5000-$5FFF but not a register of this chip: open bus.
+                _ => None,
+            },
+            0x6000..=0x7FFF if self.prg_rom_at_6000 => {
+                let rom = memory.rom().prg_rom();
+                if rom.is_empty() {
+                    return None;
+                }
+
+                // "if register $D000 bit 7 is set, $8003 also selects an 8 KiB PRG-ROM bank at
+                // CPU $6000-$7FFF, which is $8003 in 8 KiB banking mode; $8003 SHL 1 OR 1 in
+                // 16 KiB banking mode; $8003 SHL 2 OR 3 in 32 KiB banking mode."
+                let bank = self.prg_bank(match self.prg_mode & 0x03 {
+                    0 => self.prg_register(3) * 4 + 3,
+                    1 => self.prg_register(3) * 2 + 1,
+                    _ => self.prg_register(3),
+                });
+                let count = i32::try_from(rom.len() / Self::PRG_BANK_SIZE)
+                    .unwrap_or(1)
+                    .max(1);
+                let base =
+                    usize::try_from(bank.rem_euclid(count)).unwrap_or(0) * Self::PRG_BANK_SIZE;
+                Some(rom[(base + usize::from(address - 0x6000)) % rom.len()])
+            }
+            _ => None,
+        }
+    }
+
+    fn nametable_page(&self, table: i32) -> i32 {
+        self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
+    }
+
+    /// Writes CHR-RAM, gated by `$D002` bit 6.
+    ///
+    /// "CHR write-enable — 0: disabled, CHR memory is write-protected / 1: enabled", and
+    /// "Bit 6 only matters when using CHR-RAM", which is why the test is only reached on a board
+    /// with no CHR-ROM. **Power-on is write-protected**, the register being zero: a CHR-RAM image
+    /// of one of these numbers has to ask for the RAM before it can fill it, which is what the
+    /// register means. Mesen 2 does not decode this bit at all.
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if memory.rom().chr_rom().is_empty() && self.chr_write_enabled {
+            self.banks.write_chr(address, value, memory.chr_ram_mut());
+        }
+    }
+
+    fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if address < 0x8000 {
+            // Mask $F803 on $5800-$5803; the solder pad register is read-only.
+            match address & 0xF803 {
+                0x5800 => self.multiplicand = value,
+                0x5801 => self.multiplier = value,
+                // "$5802 write: Increase accumulator by written value."
+                0x5802 => self.accumulator = self.accumulator.wrapping_add(value),
+                // "$5803 write: Reset accumulator to 0 and set test register to written value."
+                0x5803 => {
+                    self.accumulator = 0;
+                    self.test_register = value;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match address & 0xF000 {
+            // Mask $F803: "writes are ignored if address bit 11 is set".
+            0x8000 => {
+                if address & 0x0800 == 0 {
+                    self.prg[usize::from(address) & 0x03] = value & 0x7F;
+                }
+            }
+            // Mask $F807.
+            0x9000 => {
+                if address & 0x0800 == 0 {
+                    self.chr_low[usize::from(address) & 0x07] = value;
+                }
+            }
+            0xA000 => {
+                if address & 0x0800 == 0 {
+                    self.chr_high[usize::from(address) & 0x07] = value;
+                }
+            }
+            0xB000 => {
+                if address & 0x0800 == 0 {
+                    let index = usize::from(address) & 0x03;
+                    if address & 0x04 == 0 {
+                        self.nametable_low[index] = value;
+                    } else {
+                        self.nametable_high[index] = value;
+                    }
+                }
+            }
+            // Mask $F803 on all four of $D000-$D003.
+            0xD000 => {
+                if address & 0x0800 != 0 {
+                    return;
+                }
+
+                match address & 0x03 {
+                    0 => {
+                        self.prg_mode = value & 0x03;
+                        self.prg_last_switchable = value & 0x04 != 0;
+                        self.chr_mode = (value >> 3) & 0x03;
+                        self.rom_nametables = value & 0x20 != 0;
+                        self.rom_nametables_all = value & 0x40 != 0;
+                        self.prg_rom_at_6000 = value & 0x80 != 0;
+                    }
+                    1 => {
+                        self.arrangement = value & 0x03;
+                        self.extended_mirroring = value & 0x08 != 0;
+                        // The page's arrangements are this core's mirrorings reversed: "0:
+                        // Horizontal (A10)" puts $2000 and $2400 on different pages, which is
+                        // `Vertical` here.
+                        memory.set_mirroring(match self.arrangement {
+                            0 => NametableMirroring::Vertical,
+                            1 => NametableMirroring::Horizontal,
+                            2 => NametableMirroring::SingleScreenA,
+                            _ => NametableMirroring::SingleScreenB,
+                        });
+                    }
+                    2 => {
+                        self.chr_write_enabled = value & 0x40 != 0;
+                        self.nametable_select_invert = value & 0x80 != 0;
+                    }
+                    _ => {
+                        // `4.Lc cPPC`.
+                        self.mmc4_mode = value & 0x80 != 0;
+                        self.outer_chr_512k = value & 0x20 != 0;
+                        self.outer_chr_bank = (value >> 3) & 0x03;
+                        self.outer_prg_bank = (value >> 1) & 0x03;
+                        self.outer_chr_a18 = value & 0x01 != 0;
+                    }
+                }
+            }
+            _ => return,
+        }
+
+        self.update_banks();
+    }
+}

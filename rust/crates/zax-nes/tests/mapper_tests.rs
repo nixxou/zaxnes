@@ -136,7 +136,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   (the AGCI 50282 of Death Race, mapper 11's board with a 300 ohm resistor on CPU D0), two
     //   more of the same variant, behind `board-143` and `board-144` (MF-UNL-3 step 3);
     // * 190 (the Zemina board of Magic Kid Googoo), the last of that variant's seven and the
-    //   only one with more than one window, behind `board-190` (MF-UNL-3 step 4).
+    //   only one with more than one window, behind `board-190` (MF-UNL-3 step 4);
+    // * 35, 90, 209 and 211, the J.Y. Company ASIC -- one chip, four PCB configurations, one
+    //   boxed `IrqBoard` variant -- behind `board-jy-asic` (MF-UNL-4). 209 is the page's
+    //   "standard implementation", 211 and 35 are the same board (Q-149 and Q-148) and 90 is the
+    //   one with a jumper that inhibits its nametable registers.
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -159,11 +163,13 @@ fn req_core_100_every_required_mapper_is_registered() {
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
-    let additions: [(i32, bool); 84] = [
+    let jy = cfg!(feature = "board-jy-asic");
+    let additions: [(i32, bool); 88] = [
         (19, true),
         (24, true),
         (26, true),
         (33, small),
+        (35, jy),
         (36, jv001),
         (37, multicart),
         (38, cfg!(feature = "board-38")),
@@ -188,6 +194,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (86, jaleco),
         (88, namcot),
         (89, small),
+        (90, jy),
         (92, jaleco),
         (93, small),
         (94, cfg!(feature = "board-94")),
@@ -241,7 +248,9 @@ fn req_core_100_every_required_mapper_is_registered() {
         (195, chrram),
         (206, namcot),
         (207, taito_x1),
+        (209, jy),
         (210, true),
+        (211, jy),
         (232, small),
         (243, sachen),
         (263, cfg!(feature = "board-263")),
@@ -7951,4 +7960,571 @@ fn req_core_090_mapper_190_round_trips_its_prg_bank_and_its_four_chr_registers()
         "bank 0, and the first bank fixed"
     );
     assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
+}
+
+// ------------------------------------- the J.Y. Company ASIC (35, 90, 209, 211), MF-UNL-4
+
+/// The 1 KiB CHR bank each of the eight windows shows, straight off the window table.
+///
+/// `chr_windows()` reads the *first byte* of each window, and the numbered-bank fixture fills
+/// 1 KiB bank `b` with `b as u8` — so banks 0 and 256 are indistinguishable through it, while
+/// this board's outer CHR bank register reaches bank 512. `Cartridge::chr_peek_view` carries the
+/// raw window offsets, which is the only way to see them.
+#[cfg(feature = "board-jy-asic")]
+fn chr_banks(core: &NesCore) -> [usize; 8] {
+    core.cartridge()
+        .unwrap()
+        .chr_peek_view()
+        .unwrap()
+        .offsets()
+        .map(|offset| offset / 0x0400)
+}
+
+/// The 8×8→16 hardware multiplier of `$5800`-`$5801`, table-driven as the census asks.
+///
+/// "$5800 write: 8-bit Unsigned Multiplicand / $5801 write: 8-bit Unsigned Multiplier (and begin
+/// multiplying) / $5800 read: Unsigned 16-bit Product (low byte) / $5801 read: … (high byte)".
+/// Unsigned: $FF × $FF is $FE01 and not $0001.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_multiplies_two_bytes_into_a_sixteen_bit_product() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    for (a, b) in [
+        (0x00u8, 0x00u8),
+        (0x01, 0x01),
+        (0x12, 0x34),
+        (0x10, 0x10),
+        (0xFF, 0x01),
+        (0xFF, 0xFF),
+        (0x80, 0x02),
+        (0x7F, 0x7F),
+    ] {
+        core.mapper_write(0x5800, a);
+        core.mapper_write(0x5801, b);
+        let product = u16::from(a) * u16::from(b);
+        assert_eq!(
+            product & 0x00FF,
+            u16::from(core.read_memory(0x5800)),
+            "{a:#04X} * {b:#04X} low"
+        );
+        assert_eq!(
+            product >> 8,
+            u16::from(core.read_memory(0x5801)),
+            "{a:#04X} * {b:#04X} high"
+        );
+    }
+
+    // Mask $F803: A2-A10 are don't-care, so $5804 and $5BFD are $5800 and $5801 again.
+    core.mapper_write(0x5804, 0x03);
+    core.mapper_write(0x5BFD, 0x05);
+    assert_eq!(15, core.read_memory(0x5FFC), "mask $F803 on the product");
+}
+
+/// `$5802`-`$5803`, the accumulator and the test register. Mesen 2 implements neither.
+///
+/// "$5802 write: Increase accumulator by written value / $5803 write: Reset accumulator to 0 and
+/// set test register to written value / $5802 read: Read accumulator value / $5803 read: Read
+/// test register".
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_accumulates_and_keeps_a_test_register() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    assert_eq!(
+        0,
+        core.read_memory(0x5802),
+        "the accumulator powers on at 0"
+    );
+    assert_eq!(0, core.read_memory(0x5803));
+
+    core.mapper_write(0x5802, 0x10);
+    core.mapper_write(0x5802, 0x05);
+    assert_eq!(0x15, core.read_memory(0x5802), "increased, not replaced");
+
+    // Eight bits wide, so it wraps rather than saturating.
+    core.mapper_write(0x5802, 0xFF);
+    assert_eq!(0x14, core.read_memory(0x5802));
+
+    core.mapper_write(0x5803, 0x7E);
+    assert_eq!(0, core.read_memory(0x5802), "$5803 resets the accumulator");
+    assert_eq!(0x7E, core.read_memory(0x5803), "and sets the test register");
+}
+
+/// The board solder pad register, and the one place the page's two masks overlap.
+///
+/// It is "Mask: $FFFF" at exactly `$5000`, `$5400` and `$5C00` — "Apparently, the address of this
+/// register is fully decoded, as the SC-128 version of *Final Fight 3*, which otherwise happily
+/// randomizes the masked-off address bits, keeps A0-A11 constantly at zero to read from this
+/// register" — while the multiplier's is `$F803`, under which `$5C00` is also `$5800`. The fully
+/// decoded register wins for those three addresses, which is what this test pins: Mesen 2 decodes
+/// `$5C00` as the product's low byte.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_solder_pad_register_is_fully_decoded() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    core.mapper_write(0x5800, 0x10);
+    core.mapper_write(0x5801, 0x10);
+    assert_eq!(0x00, core.read_memory(0x5800), "$0100 low");
+    assert_eq!(0x01, core.read_memory(0x5801), "$0100 high");
+
+    // The three fully decoded addresses answer the pads, which a dump does not record: 0.
+    for address in [0x5000u16, 0x5400, 0x5C00] {
+        assert_eq!(0, core.read_memory(address), "{address:#06X} is the pads");
+    }
+
+    // One address along, the $F803 mask is back in charge of the $5800 block.
+    assert_eq!(0x00, core.read_memory(0x5C04), "$5C04 is $5800 again");
+    assert_eq!(0x01, core.read_memory(0x5C05), "$5C05 is $5801");
+}
+
+/// The four PRG banking modes of `$D000` bits 1-0, with the last window switchable.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_has_four_prg_banking_modes() {
+    let mut core = MapperRom::new(209).prg(64).load();
+
+    // Power-on: mode 0, 32 KiB, and bit 2 clear so the window is "hard-wired to the last bank
+    // within the outer bank" — the last 32 KiB of 512 KiB.
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+
+    // Mode 0, switchable: "$8003: Select 32 KiB PRG-ROM bank at CPU $8000-$FFFF".
+    core.mapper_write(0xD000, 0x04);
+    core.mapper_write(0x8003, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "32 KiB bank 1");
+
+    // Mode 1, 16 KiB: "$8001: … at CPU $8000-$BFFF" and "$8003: … at CPU $C000-$FFFF".
+    core.mapper_write(0xD000, 0x05);
+    core.mapper_write(0x8001, 0x02);
+    core.mapper_write(0x8003, 0x03);
+    assert_eq!([4, 5, 6, 7], core.prg_windows(), "16 KiB banks 2 and 3");
+
+    // Mode 2, 8 KiB: one register per window.
+    core.mapper_write(0xD000, 0x06);
+    for slot in 0u16..4 {
+        core.mapper_write(0x8000 | slot, 0x11 + slot as u8);
+    }
+    assert_eq!(
+        [17, 18, 19, 20],
+        core.prg_windows(),
+        "8 KiB, four registers"
+    );
+
+    // Mode 3 is mode 2 with the bank numbers' bits 0-6 reversed; see the Q-150 test. $11 is
+    // 001 0001, which reversed is 100 0100 = $44, masked to the outer bank's six bits = 4; $12
+    // gives 36, $13 gives 100 -> 36 again, and $14 gives 20.
+    core.mapper_write(0xD000, 0x07);
+    assert_eq!(
+        [4, 36, 36, 20],
+        core.prg_windows(),
+        "the same four registers, reversed"
+    );
+}
+
+/// `$D000` bit 2 clear: "Hard-wired to the last bank", and the page's "within the outer bank" is
+/// what makes it the 512 KiB window's last and not the image's.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_fixes_the_last_window_to_the_outer_banks_last() {
+    let mut core = MapperRom::new(209).prg(128).load();
+
+    // A 1 MiB image, so the outer bank matters: with $D003 bits 2-1 clear the hard-wired bank is
+    // 63 and not 127 — the last of the **first** 512 KiB.
+    core.mapper_write(0xD000, 0x02); // mode 2, hard-wired.
+    core.mapper_write(0x8000, 0x05);
+    core.mapper_write(0x8001, 0x06);
+    core.mapper_write(0x8002, 0x07);
+    core.mapper_write(0x8003, 0x08); // ignored while the window is hard-wired.
+    assert_eq!([5, 6, 7, 63], core.prg_windows());
+
+    core.mapper_write(0xD000, 0x01); // mode 1, hard-wired: the last 16 KiB.
+    assert_eq!([12, 13, 62, 63], core.prg_windows());
+
+    core.mapper_write(0xD000, 0x00); // mode 0, hard-wired: the last 32 KiB.
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+
+    // $D003 bits 2-1 move all of it into the second 512 KiB, the hard-wired bank included.
+    core.mapper_write(0xD003, 0x02);
+    assert_eq!([124, 125, 126, 127], core.prg_windows(), "outer PRG bank 1");
+    // And with bit 2 set the last window follows $8003 into that outer bank too.
+    core.mapper_write(0xD000, 0x06);
+    assert_eq!([69, 70, 71, 72], core.prg_windows());
+}
+
+/// **Q-150**: "3: 8 KiB banking, but with bank numbers **bits 0-6 reversed**", and bit 3 is one of
+/// those seven bits.
+///
+/// Mesen 2's `InvertPrgBits` maps bits 0, 1 and 2 to 6, 5 and 4 and bits 4, 5 and 6 to 2, 1 and 0,
+/// and **drops bit 3 entirely** — a value of `$08` selects bank 0 there and bank 8 here. A
+/// seven-bit reversal that left the middle bit out would not be a reversal, so the page wins.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_150_jy_asic_prg_mode_3_reverses_bit_3_onto_itself() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    core.mapper_write(0xD000, 0x07); // mode 3, switchable last window.
+
+    // One bit at a time, through the window at $8000: bit n becomes bit 6-n.
+    let cases: [(u8, usize); 7] = [
+        (0x40, 1),
+        (0x20, 2),
+        (0x10, 4),
+        (0x08, 8), // the bit Mesen 2 drops.
+        (0x04, 16),
+        (0x02, 32),
+        // Bit 0 becomes bit 6, which is 64 — outside the 64-bank outer window, so the page's
+        // "always masked to the outer bank size" makes it bank 0.
+        (0x01, 0),
+    ];
+    for (written, expected) in cases {
+        core.mapper_write(0x8000, written);
+        assert_eq!(
+            expected as u8,
+            core.prg_windows()[0],
+            "mode 3, {written:#04X} reversed"
+        );
+    }
+
+    // And a palindrome in seven bits comes back as itself: $2A is 010 1010 either way round.
+    core.mapper_write(0x8000, 0x2A);
+    assert_eq!(0x2A & 0x3F, core.prg_windows()[0]);
+}
+
+/// "The PRG-ROM bank selected via $8000-$8003 is always masked to the outer bank size (512/256/128
+/// KiB, depending on PCB/mapper number). Accessing more than that requires manipulating the Outer
+/// Bank register at $D003."
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_masks_the_prg_bank_to_the_outer_bank() {
+    let mut core = MapperRom::new(209).prg(128).load();
+    core.mapper_write(0xD000, 0x06); // 8 KiB, switchable.
+
+    // Sixty-four 8 KiB banks make the 512 KiB outer bank, so bit 6 of the register is masked off
+    // rather than reaching PRG A19.
+    core.mapper_write(0x8000, 0x40);
+    assert_eq!(0, core.prg_windows()[0], "bank 64 is masked to bank 0");
+    core.mapper_write(0x8000, 0x41);
+    assert_eq!(1, core.prg_windows()[0]);
+
+    // $D003 bits 2-1 are what reaches A19-A20.
+    core.mapper_write(0xD003, 0x02);
+    assert_eq!(65, core.prg_windows()[0], "outer bank 1 plus bank 1");
+}
+
+/// The four CHR banking modes of `$D000` bits 4-3.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_has_four_chr_banking_modes() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+
+    // Power-on: mode 0, one 8 KiB bank, register 0.
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    core.mapper_write(0x9000, 0x01);
+    assert_eq!([8, 9, 10, 11, 12, 13, 14, 15], core.chr_windows(), "8 KiB");
+
+    // Mode 1, two 4 KiB banks: "$9000/$A000 … at PPU $0000-$0FFF" and "$9004/$A004 … at PPU
+    // $1000-$1FFF" with the MMC4-like mode off.
+    core.mapper_write(0xD000, 0x08);
+    core.mapper_write(0x9000, 0x01);
+    core.mapper_write(0x9004, 0x03);
+    assert_eq!([4, 5, 6, 7, 12, 13, 14, 15], core.chr_windows(), "4 KiB");
+
+    // Mode 2, four 2 KiB banks, from the even registers.
+    core.mapper_write(0xD000, 0x10);
+    for window in 0u16..4 {
+        core.mapper_write(0x9000 | (window * 2), 0x04 + window as u8);
+    }
+    assert_eq!([8, 9, 10, 11, 12, 13, 14, 15], core.chr_windows(), "2 KiB");
+
+    // Mode 3, eight 1 KiB banks, from all eight.
+    core.mapper_write(0xD000, 0x18);
+    for window in 0u16..8 {
+        core.mapper_write(0x9000 | window, 0x20 + window as u8);
+    }
+    assert_eq!(
+        [32, 33, 34, 35, 36, 37, 38, 39],
+        core.chr_windows(),
+        "1 KiB"
+    );
+}
+
+/// `$D003`'s outer CHR bank: `L` picks the mask, `cc` is CHR A19-A20 and `C` is CHR A18.
+///
+/// "0: Mask $900x/$A00x to 256 KiB, use C / 1: Mask $900x/$A00x to 512 KiB, ignore C", with the
+/// `$A00x` register the MSB of the bank number. Mesen 2 drops both the mask and the outer bank in
+/// the `L=1` case and uses the raw sixteen-bit register instead (Q-150).
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_outer_chr_bank_picks_its_own_mask() {
+    let mut core = MapperRom::new(209).prg(64).chr(640).load();
+    core.mapper_write(0xD000, 0x18); // 1 KiB banking, so a register is a 1 KiB bank.
+
+    // L clear: the mask is 256 banks, so the MSB register cannot reach past it…
+    core.mapper_write(0x9000, 0x05);
+    core.mapper_write(0xA000, 0x01);
+    assert_eq!(5, chr_banks(&core)[0], "masked to 256 KiB");
+
+    // …and `C` is what reaches CHR A18 instead.
+    core.mapper_write(0xD003, 0x01);
+    assert_eq!(256 + 5, chr_banks(&core)[0], "C is CHR A18");
+
+    // L set: the mask is 512 banks, the MSB reaches bank bit 8, and `C` is ignored.
+    core.mapper_write(0xD003, 0x21);
+    assert_eq!(256 + 5, chr_banks(&core)[0], "the MSB, and C ignored");
+    core.mapper_write(0xA000, 0x00);
+    assert_eq!(5, chr_banks(&core)[0]);
+
+    // `cc` is CHR A19-A20 in both halves.
+    core.mapper_write(0xD003, 0x28); // L set, cc = 1.
+    assert_eq!(512 + 5, chr_banks(&core)[0], "cc with L set");
+    core.mapper_write(0xD003, 0x08); // L clear, cc = 1, C clear.
+    assert_eq!(512 + 5, chr_banks(&core)[0], "cc with L clear");
+}
+
+/// The `$F803` and `$F807` masks: "writes are ignored if address bit 11 is set".
+///
+/// The page states it for `$8000`-`$8003`, `$9000`-`$A007`, `$B000`-`$B007` and `$D000`-`$D003`
+/// separately and says the opposite for `$C000`-`$C007` — "Mask: $F007. Writes are accepted even
+/// if address bit 11 is set" — so each window is tested on its own.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_ignores_a_write_with_address_bit_11_set() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+    core.mapper_write(0xD000, 0x1E); // 8 KiB PRG switchable, 1 KiB CHR.
+    core.mapper_write(0x8000, 0x11);
+    core.mapper_write(0x9000, 0x22);
+    let banks = (core.prg_windows(), core.chr_windows());
+
+    for address in [0x8800u16, 0x8FFF, 0x9800, 0xA800, 0xB800, 0xD800, 0xDFFF] {
+        core.mapper_write(address, 0x7F);
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows()),
+            "{address:#06X} has A11 set and must be ignored"
+        );
+    }
+
+    // And the low half of each block is the register, A2-A10 being don't-care on $8000-$8003.
+    core.mapper_write(0x87FC, 0x05);
+    assert_eq!(5, core.prg_windows()[0], "$87FC is $8000");
+    core.mapper_write(0x97F8, 0x06);
+    assert_eq!(6, core.chr_windows()[0], "$97F8 is $9000");
+}
+
+/// `$D000` bit 7: "1: Map 8 KiB PRG-ROM bank selected via $8003 (appropriately shifted and
+/// right-filled with binary 1 in 16/32 KiB PRG modes)".
+///
+/// The page's three formulas, one per mode: "$8003 in 8 KiB banking mode; $8003 SHL 1 OR 1 in
+/// 16 KiB banking mode; $8003 SHL 2 OR 3 in 32 KiB banking mode". With the bit clear the window
+/// is WRAM, which `board_memory_sizes` gives every one of the four numbers.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_maps_a_prg_rom_bank_at_6000_on_demand() {
+    let mut core = MapperRom::new(209).prg(64).load();
+
+    // Bit 7 clear: 8 KiB of WRAM, readable and writable.
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000), "WRAM while bit 7 is clear");
+
+    core.mapper_write(0x8003, 0x09);
+    core.mapper_write(0xD000, 0x86); // 8 KiB mode, switchable, ROM at $6000.
+    assert_eq!(9, core.read_memory(0x6000), "$8003 in 8 KiB mode");
+    core.write_memory(0x6000, 0xFF);
+    assert_eq!(9, core.read_memory(0x6000), "and ROM ignores a write");
+
+    core.mapper_write(0xD000, 0x85); // 16 KiB mode: SHL 1 OR 1.
+    assert_eq!(9 * 2 + 1, core.read_memory(0x6000));
+
+    core.mapper_write(0xD000, 0x84); // 32 KiB mode: SHL 2 OR 3.
+    assert_eq!((9 * 4 + 3) & 0x3F, core.read_memory(0x6000));
+
+    // Bit 7 clear again, and the WRAM is where it was: the window moved, not the chip.
+    core.mapper_write(0xD000, 0x06);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+}
+
+/// **Q-148**: mapper 35 is mapper 209 "but explicitly specifies 8 KiB of WRAM", and that sentence
+/// is the whole of the number.
+///
+/// Mesen 2 builds a wholly different and much smaller board for 35 — four PRG registers, eight
+/// CHR registers, an MMC3-style *filtered* A12 counter and a mirroring bit, with no multiplier, no
+/// banking modes and no nametable control. The page says the two numbers are "an exact duplicate",
+/// so this build gives 35 the same board and the difference lands in `board_memory_sizes`.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn q_148_jy_asic_mapper_35_is_mapper_209_with_8_kib_of_wram() {
+    let mut m35 = MapperRom::new(35).prg(64).load();
+    let mut m209 = MapperRom::new(209).prg(64).load();
+
+    // The same board: the multiplier the page gives the chip and Mesen 2's mapper 35 has not.
+    for core in [&mut m35, &mut m209] {
+        core.mapper_write(0x5800, 0x0F);
+        core.mapper_write(0x5801, 0x11);
+        assert_eq!(0xFF, core.read_memory(0x5800));
+        assert_eq!(0x00, core.read_memory(0x5801));
+    }
+
+    // And the same banking modes, which Mesen 2's mapper 35 also has not.
+    for core in [&mut m35, &mut m209] {
+        core.mapper_write(0xD000, 0x05);
+        core.mapper_write(0x8001, 0x02);
+        core.mapper_write(0x8003, 0x03);
+        assert_eq!([4, 5, 6, 7], core.prg_windows());
+    }
+
+    // 8 KiB of WRAM, stated by the number rather than defaulted by the header: the whole window
+    // holds distinct bytes, so it is 8 KiB of chip and not a smaller one mirrored.
+    for (address, value) in [(0x6000u16, 0x3C), (0x6FFF, 0x5A), (0x7FFF, 0xA5)] {
+        m35.write_memory(address, value);
+    }
+    assert_eq!(
+        [0x3C, 0x5A, 0xA5],
+        [0x6000u16, 0x6FFF, 0x7FFF].map(|address| m35.read_memory(address))
+    );
+}
+
+/// REQ-CORE-090/091 and REQ-CORE-004 for the J.Y. Company ASIC, whose state is the largest of any
+/// board in `IrqBoard`: twenty-eight register bytes, some thirty mode bits, the two CHR latches,
+/// the IRQ and the three arithmetic registers.
+///
+/// Dirtied first, as `docs/review/BOARD-FEATURES.md` requires, and dirtied **differently** after
+/// the save, which is the shape MF-UNL-2 step 6 found necessary: a round-trip that only saves and
+/// loads passes on a board whose appended byte never reached the state at all.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_090_jy_asic_round_trips_its_whole_register_set() {
+    let mut core = MapperRom::new(209).prg(64).chr(64).load();
+
+    core.mapper_write(0xD000, 0x1E); // 8 KiB PRG switchable, 1 KiB CHR.
+    for slot in 0u16..4 {
+        core.mapper_write(0x8000 | slot, 0x05 + slot as u8);
+    }
+    for slot in 0u16..8 {
+        core.mapper_write(0x9000 | slot, 0x10 + slot as u8);
+        core.mapper_write(0xA000 | slot, 0x00);
+    }
+    for slot in 0u16..4 {
+        core.mapper_write(0xB000 | slot, 0x80 | slot as u8);
+        core.mapper_write(0xB004 | slot, 0x02);
+    }
+    core.mapper_write(0xD001, 0x09); // Extended Mirroring, arrangement 1.
+    core.mapper_write(0xD002, 0xC0); // CHR write-enable and the ROM select inverted.
+    core.mapper_write(0xD003, 0x29); // L, cc, PP and C — but not the MMC4 mode.
+    core.mapper_write(0x5800, 0x12);
+    core.mapper_write(0x5801, 0x34);
+    core.mapper_write(0x5802, 0x56);
+    core.mapper_write(0xC006, 0x0F); // the XOR register.
+    core.mapper_write(0xC004, 0xF0);
+    core.mapper_write(0xC005, 0x3C);
+    core.mapper_write(0xC001, 0x4F);
+    core.mapper_write(0xC003, 0x00);
+
+    let before = (
+        core.prg_windows(),
+        chr_banks(&core),
+        nametable_pages(&core),
+        core.read_memory(0x5800),
+        core.read_memory(0x5801),
+        core.read_memory(0x5802),
+    );
+    let state = core.save_state(true).unwrap();
+
+    // Dirty every group differently.
+    core.mapper_write(0xD000, 0x00);
+    core.mapper_write(0xD001, 0x00);
+    core.mapper_write(0xD002, 0x00);
+    core.mapper_write(0xD003, 0x00);
+    for slot in 0u16..4 {
+        core.mapper_write(0x8000 | slot, 0x3F);
+        core.mapper_write(0xB000 | slot, 0x00);
+    }
+    for slot in 0u16..8 {
+        core.mapper_write(0x9000 | slot, 0x00);
+    }
+    core.mapper_write(0x5800, 0x00);
+    core.mapper_write(0x5801, 0x00);
+    core.mapper_write(0x5803, 0x00);
+    core.mapper_write(0xC002, 0x00);
+    assert_ne!(before.0, core.prg_windows());
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(
+        before,
+        (
+            core.prg_windows(),
+            chr_banks(&core),
+            nametable_pages(&core),
+            core.read_memory(0x5800),
+            core.read_memory(0x5801),
+            core.read_memory(0x5802),
+        )
+    );
+    assert_eq!(state, core.save_state(true).unwrap());
+
+    // REQ-CORE-004: every register back to zero, which is 32 KiB PRG mode with the window
+    // hard-wired to the outer bank's last 32 KiB and one 8 KiB CHR bank.
+    core.reset();
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    assert_eq!(Nm::Vertical, core.cartridge().unwrap().mirroring());
+    assert_eq!(0, core.read_memory(0x5802));
+}
+
+/// `$D001` bits 1-0, and the one place the page's vocabulary is this core's reversed.
+///
+/// The page names *arrangements* — "0: Horizontal (A10), 1: Vertical (A11), 2: One-screen, page 0
+/// (GND), 3: One-screen, page 1 (VCC)" — where [`Nm`] names *mirrorings*, which are each other's
+/// opposites: a horizontal arrangement driven from A10 puts `$2000` and `$2400` on different
+/// pages, which is [`Nm::Vertical`]. Mesen 2 reads the two bits the same way round.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_arrangement_bits_are_this_cores_mirroring_reversed() {
+    let mut core = MapperRom::new(209).prg(64).load();
+    for (bits, expected) in [
+        (0x00u8, Nm::Vertical),
+        (0x01, Nm::Horizontal),
+        (0x02, Nm::SingleScreenA),
+        (0x03, Nm::SingleScreenB),
+    ] {
+        core.mapper_write(0xD001, bits);
+        assert_eq!(
+            expected,
+            core.cartridge().unwrap().mirroring(),
+            "arrangement {bits}"
+        );
+    }
+}
+
+/// `$D002` bit 6, the CHR write-enable: "0: disabled, CHR memory is write-protected / 1: enabled,
+/// CHR memory is write-enabled", and "Bit 6 only matters when using CHR-RAM".
+///
+/// **Power-on is write-protected**, every register being zero, so a CHR-RAM image of one of these
+/// numbers has to ask for the RAM before it can fill it. Mesen 2 does not decode the bit at all.
+#[cfg(feature = "board-jy-asic")]
+#[test]
+fn req_core_100_jy_asic_chr_write_enable_gates_chr_ram() {
+    let mut core = MapperRom::new(209).prg(64).chr(0).load();
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.ppu_write(0x0000, 0x5A);
+    assert_eq!(
+        0,
+        cartridge.ppu_peek(0x0000, ChrFetch::Background),
+        "write-protected at power-on"
+    );
+
+    core.mapper_write(0xD002, 0x40);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.ppu_write(0x0000, 0x5A);
+    assert_eq!(
+        0x5A,
+        cartridge.ppu_peek(0x0000, ChrFetch::Background),
+        "write-enabled"
+    );
+
+    core.mapper_write(0xD002, 0x00);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.ppu_write(0x0000, 0x00);
+    assert_eq!(
+        0x5A,
+        cartridge.ppu_peek(0x0000, ChrFetch::Background),
+        "write-protected again"
+    );
 }

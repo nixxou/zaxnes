@@ -354,11 +354,13 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
     matches!(
         mapper,
         4 | 5
+            | 35
             | 37
             | 47
             | 48
             | 64
             | 74
+            | 90
             | 96
             | 114
             | 115
@@ -374,6 +376,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 192
             | 194
             | 195
+            | 209
+            | 211
             | 263
     )
 }
@@ -384,11 +388,13 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
 const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
     matches!(
         mapper,
-        4 | 37
+        4 | 35
+            | 37
             | 47
             | 48
             | 64
             | 74
+            | 90
             | 96
             | 114
             | 115
@@ -404,6 +410,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 192
             | 194
             | 195
+            | 209
+            | 211
             | 263
     )
 }
@@ -499,9 +507,30 @@ impl Cartridge {
             // "INES Mapper 243"). §4.5's cheap level: a page override and not a `read_nametable`
             // body, so Q-123's dispatch is untouched. The board's other three modes go through
             // `memory.set_mirroring` like every other mirroring register.
+            // MF-UNL-4 step 5 adds mappers 35, 90, 209 and 211, the J.Y. Company ASIC, which
+            // answers a CIRAM page per table under Extended Mirroring ($D001 bit 3, "use
+            // $B000-$B003 bit 0") and `SERVED_BY_CARTRIDGE` per table under ROM nametables
+            // ($D000 bit 5) -- the only board here that reaches **both** of §4.5's two levels
+            // from the same four registers (nesdev, "J.Y. Company ASIC"). All four numbers are
+            // in the latch whatever `board-jy-asic` says, for mapper 68's reason above: one
+            // `matches!` is one `matches!`, and a number whose board is off is never created.
             nametable_pages_vary: matches!(
                 mapper,
-                5 | 19 | 24 | 26 | 68 | 95 | 111 | 118 | 150 | 158 | 207 | 243
+                5 | 19
+                    | 24
+                    | 26
+                    | 35
+                    | 68
+                    | 90
+                    | 95
+                    | 111
+                    | 118
+                    | 150
+                    | 158
+                    | 207
+                    | 209
+                    | 211
+                    | 243
             ),
             bus_conflicts,
             // The two lists are `watches_ppu_reads` and `watches_ppu_bus_without_read` below,
@@ -531,6 +560,9 @@ impl Cartridge {
             // MF-6c step 3 adds 157 and 159 for the same reason, in the same words: "All
             // registers function the same way as INES Mapper 016, submapper 5, except that the
             // serial EEPROM is not a 24C02 but Xicor's X24C01" (nesdev, "INES Mapper 159").
+            // MF-UNL-4 step 3 adds 35, 90, 209 and 211, the J.Y. Company ASIC, whose IRQ
+            // source 0 -- "CPU M2 rise", and the power-on setting of $C001 -- is this clock
+            // (nesdev, "J.Y. Company ASIC").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -543,6 +575,7 @@ impl Cartridge {
                     | 25
                     | 26
                     | 27
+                    | 35
                     | 48
                     | 64
                     | 65
@@ -550,10 +583,13 @@ impl Cartridge {
                     | 69
                     | 73
                     | 85
+                    | 90
                     | 105
                     | 153
                     | 157
                     | 159
+                    | 209
+                    | 211
             ),
         };
         cartridge.reset();

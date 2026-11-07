@@ -16,6 +16,8 @@ use super::mappers::EepromPort;
 use super::mappers::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::mappers::Jv001;
+#[cfg(feature = "board-jy-asic")]
+use super::mappers::JyCompany;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
@@ -113,6 +115,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-small-boards")]
     33,
     34,
+    #[cfg(feature = "board-jy-asic")]
+    35,
     #[cfg(feature = "board-jv001")]
     36,
     #[cfg(feature = "board-mmc3-multicart")]
@@ -159,6 +163,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     88,
     #[cfg(feature = "board-small-boards")]
     89,
+    #[cfg(feature = "board-jy-asic")]
+    90,
     #[cfg(feature = "board-jaleco-72-92-86")]
     92,
     #[cfg(feature = "board-small-boards")]
@@ -262,7 +268,11 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     206,
     #[cfg(feature = "board-taito-x1")]
     207,
+    #[cfg(feature = "board-jy-asic")]
+    209,
     210,
+    #[cfg(feature = "board-jy-asic")]
+    211,
     225,
     228,
     #[cfg(feature = "board-small-boards")]
@@ -569,6 +579,19 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // dump's own battery bit decides, as it does for every board here.
         #[cfg(feature = "board-190")]
         190 => BoardMemorySizes {
+            prg_ram: Some(BankWindows::PRG_WINDOW_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("J.Y. Company ASIC"): mapper 35 "is like Mapper 209 but **explicitly specifies
+        // 8 KiB of WRAM**. In the presence of a valid NES 2.0 header, which has its own PRG-RAM
+        // field, INES Mapper 035 is an exact duplicate of INES Mappers 209." That sentence is the
+        // *whole* difference between the two numbers, so this row is the whole of mapper 35's
+        // implementation (MF-UNL-4 step 2). The other three numbers take REQ-CORE-012's default,
+        // which is the same 8 KiB for an iNES 1.0 image and the header's own figure for an
+        // NES 2.0 one -- the page's `wrammax` is 8K for the chip either way. The page says nothing
+        // about a battery, so a dump's own battery bit decides, as it does for every board here.
+        #[cfg(feature = "board-jy-asic")]
+        35 => BoardMemorySizes {
             prg_ram: Some(BankWindows::PRG_WINDOW_SIZE),
             ..BoardMemorySizes::default()
         },
@@ -1008,6 +1031,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.
         #[cfg(feature = "board-mmc3-multicart")]
         37 | 47 => Board::IrqBoard(IrqBoard::Mmc3Multicart(Mmc3Multicart::new(memory, mapper))),
+        // MF-UNL-4: the J.Y. Company ASIC, one chip and four PCB configurations. 209 is the
+        // page's "standard implementation"; **211 and 35 are the same board here**, the page
+        // calling 211 "a mere duplicate of INES Mapper 209 with correct emulation" (Q-149) and 35
+        // "an exact duplicate" whose only difference is the 8 KiB of WRAM it states, which is this
+        // file's `board_memory_sizes` row and not the board's code (Q-148). 90 is the one number
+        // with a parameter: its jumper "inhibits … ROM nametables and Extended Mirroring".
+        #[cfg(feature = "board-jy-asic")]
+        35 | 90 | 209 | 211 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
+            memory, mapper,
+        )))),
         _ => return None,
     })
 }

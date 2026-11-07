@@ -1,3 +1,5 @@
+#[cfg(feature = "board-jy-asic")]
+use super::JyCompany;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
@@ -193,6 +195,26 @@ pub enum IrqBoard {
     /// of the body it already has.
     #[cfg(feature = "board-68")]
     Sunsoft4(Sunsoft4),
+    /// Mappers 35, 90, 209 and 211, the J.Y. Company ASIC (MF-UNL-4) — **the largest board in
+    /// this enum and the one that needed the most of it**.
+    ///
+    /// `docs/review/UNL-census.md` §7.2 calls it "the only board in the plan needing **four**
+    /// hooks at once — a CPU-cycle IRQ *and* an A12 scanline IRQ with a selectable clock source,
+    /// an MMC4-style CHR latch, and nametables served from CHR-ROM". Every one of those four is
+    /// a method **this variant already forwards** for an earlier board: `on_cpu_cycle` and
+    /// `irq_asserted` for the six boards MF-6b put here, `on_ppu_address_bus` for the MMC3
+    /// clones, and `nametable_page` plus `read_nametable` for mapper 68 (MF-6c step 4). So the
+    /// four hooks cost `Board`'s dispatches **nothing**, and the only new bodies are inside this
+    /// enum's own inner matches — the trade [`IrqBoard`]'s note calls "one inner match … for the
+    /// whole lot instead of one per board".
+    ///
+    /// **Boxed**, on [`IrqBoard::Somari`]'s own measurement: a [`JyCompany`] is a `BankWindows`,
+    /// twenty-eight register bytes, some thirty mode bits and a four-entry derived page cache,
+    /// which inline would be the variant that sets this enum's size — and MF-6b step 1 priced one
+    /// byte of displacement in that payload at +0.009 % to +0.027 % on eleven of lot PR-1's
+    /// thirteen ROMs. Boxed, the enum is the size MF-6a3 step 1 measured.
+    #[cfg(feature = "board-jy-asic")]
+    JyCompany(Box<JyCompany>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -223,6 +245,8 @@ macro_rules! inner {
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]
             IrqBoard::Sunsoft4($b) => $body,
+            #[cfg(feature = "board-jy-asic")]
+            IrqBoard::JyCompany($b) => $body,
         }
     };
 }
@@ -285,7 +309,8 @@ impl Mapper for IrqBoard {
         feature = "board-105",
         feature = "board-116",
         feature = "board-119",
-        feature = "board-68"
+        feature = "board-68",
+        feature = "board-jy-asic"
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -333,7 +358,7 @@ impl Mapper for IrqBoard {
     /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
     /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
     /// anybody else.
-    #[cfg(any(feature = "board-158", feature = "board-68"))]
+    #[cfg(any(feature = "board-158", feature = "board-68", feature = "board-jy-asic"))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))
@@ -374,7 +399,7 @@ impl Mapper for IrqBoard {
     /// measured `Mmc5::try_read_prg` and `Cartridge::try_cpu_read` **identical to the
     /// instruction** with `Board` at thirty-six, thirty-eight and thirty-nine variants. Step 8
     /// of this lot re-measures it rather than taking that on trust.
-    #[cfg(feature = "board-mmc3-scramble")]
+    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-jy-asic"))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
     }
@@ -431,6 +456,32 @@ impl Mapper for IrqBoard {
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.ppu_write(memory, address, value));
+    }
+
+    /// The three CHR-latch methods, forwarded for the J.Y. Company ASIC alone (MF-UNL-4): its
+    /// `$D003` bit 7 is an MMC4-like latch, and the tile emitter reads the latch state, walks the
+    /// line forward so that each record carries the pattern the hardware would show at that
+    /// column, then puts the saved value back (REQ-CORE-039).
+    ///
+    /// **None of them is on a rendering path.** The latch itself moves in
+    /// [`IrqBoard::on_ppu_address_bus`], which is where the page puts it; these three are the
+    /// tile emitter's, which runs once per captured line and only when a 3D pack asked for
+    /// records. They are **behaviour-neutral for the other boards of this enum**: none of the
+    /// eleven overrides any of the three, so each one's own default is the `Mapper` body the
+    /// un-forwarded dispatch gave them — `0`, nothing, and nothing.
+    #[cfg(feature = "board-jy-asic")]
+    fn chr_latch_state(&self) -> i32 {
+        inner!(self, b => b.chr_latch_state())
+    }
+
+    #[cfg(feature = "board-jy-asic")]
+    fn set_chr_latch_state(&mut self, state: i32) {
+        inner!(self, b => b.set_chr_latch_state(state));
+    }
+
+    #[cfg(feature = "board-jy-asic")]
+    fn advance_chr_latch(&mut self, pattern_table: i32, tile: i32) {
+        inner!(self, b => b.advance_chr_latch(pattern_table, tile));
     }
 
     fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {

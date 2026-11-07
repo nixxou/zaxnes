@@ -53,6 +53,7 @@ default = [
     "board-145",
     "board-149",
     "board-190",
+    "board-jy-asic",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -431,6 +432,23 @@ board-149 = ["board-decode-boards"]
 # emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
 # spread is. See `docs/review/BOARD-FEATURES.md`.
 board-190 = ["board-decode-boards"]
+
+# Mappers 35, 90, 209 and 211, the J.Y. Company ASIC (晶太, Jingtai) -- one chip, four PCB
+# configurations, and `docs/review/UNL-census.md` calls it "the only board in the plan needing
+# **four** hooks at once": a CPU-cycle IRQ *and* an A12 scanline IRQ with a selectable clock
+# source, an MMC4-style CHR latch, and nametables served from CHR-ROM. It carries thirteen of
+# Hummer Team's unlicensed ports -- *Super Mario World*, *Aladdin*, *Final Fight 3*, *Tekken 2*,
+# *Donkey Kong Country 4*, *Contra Spirits*, *Mortal Kombat II Special*, *Mickey Mania 7*, *Tiny
+# Toon Adventures 6*, *Warioland II*, *Shin Samurai Spirits 2*, *Mighty Morphin' Power Rangers
+# III* and *Super Aladdin* -- plus a hardware multiplier, an accumulator, four PRG and four CHR
+# banking modes, Extended Mirroring and an 8 KiB PRG-ROM window at $6000-$7FFF.
+#
+# It is an `IrqBoard` variant, which is what makes the four hooks affordable: that enum already
+# forwards every one of them for an earlier board, so `Board`'s own dispatches do not grow an arm.
+# MF-UNL-4 step 1 priced the one Q-123 said was capped -- `Mapper::read_nametable` --
+# at `Ppu2C02::read_nametable_inner` **80 instructions in all three test binaries, identical to
+# the instruction**; `rust/docs/PERFORMANCE-HISTORY.md` section 5.18 has it.
+board-jy-asic = []
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
