@@ -202,3 +202,66 @@ the format would make the two builds' states incompatible, and this one does not
 No `unsafe`. `cargo fmt --check` clean and clippy `-D warnings` clean on `zax-nes` and `zax-harness`
 `--all-targets` in **four** configurations (`default`, the new feature, `parked-boards`,
 `ppu-exact-sprite-eval`), with no new `allow`.
+
+## Step 2 — the row, and the project rule the lot actually adds
+
+### `docs/review/BOARD-FEATURES.md`: one section for the two PPU features
+
+The file's opening had one paragraph for "the one feature in this table that is not a board". There
+are now two, they are out of `default` **for two different reasons**, and that difference is worth
+more than a row. So the paragraph became a section, **"Two features in this table are not boards:
+the PPU features"**, with a table each on the shape every board row in the file already uses —
+what it wins, the figures on both runs, gated off, default, the command — plus a line the board
+rows do not need:
+
+| | `ppu-2007-render-read` | `ppu-exact-sprite-eval` |
+| --- | --- | --- |
+| what it wins | `AccuracyCoin` 128 → **129** | **+3 rows**, 128 → **131** |
+| **what it changes on screen** | **4 golden-core ROMs**: SMB3, both Zelda IIs, `Duelito.nes` | **no commercial original**; 2 free ROMs, both test ROMs for the behaviour |
+| PR-1's thirteen | **inside**: +0.000 % to +0.005 % | **above on nine of eleven**: up to +0.133 % |
+| level 2 | every `core` +0.000 % to +0.002 % | **all ten above** |
+| in `default` | **off** | **off** |
+| why | **the picture, not the figure** | the figure |
+
+Three things the section states that were not written down anywhere before:
+
+1. **The four combinations are 128 / 129 / 131 / 132**, so the two features are independent and the
+   guard's floor is a sum. MF-4e only ever reported 132 because step 2's rule sat underneath step
+   3's; **131 is new information** this lot measured.
+2. **The one command that gives both**, with `zax-harness` beside `zax-nes` and the reason the
+   harness needs it (the `AccuracyCoin` guard has to know what it is scoring).
+3. The paragraph under the board table that read "the worst figure of **the one feature** that is
+   not in `default`" now says "the one **board** feature", because that sentence had already been
+   false since MF-4e and this lot makes it two ways false. The heading above the MF-CART paragraph
+   — whose "Both were parked on one instruction" meant `board-taito-x1` and `board-111` and would
+   now read as the two PPU features — names those two boards instead.
+
+### The ticket: **Q-139**, and it is not a question about behaviour
+
+`G:/3dsen/cleanroom/spec/changes/Q-139.md`. It records two things and asks three.
+
+**What it records.** First, a **project rule that is new**, because the owner's rule of 2026-11-06
+is a *cost* rule and this feature is inside the tolerance:
+
+> **A change that moves what the player sees in a game the owner watches waits for the owner's eye,
+> whatever it costs.**
+
+Orthogonal to the cost rule, and the two PPU features are now the two worked examples — one out of
+`default` for the figure, one for the picture.
+
+Second, **what the gate hands back to Q-137 without being asked**. MF-4e step 2 relaxed
+`smallest_gap >= 3` to `>= 2` on a **P1** requirement's own test and Q-137 has been waiting on R0
+for that relaxation ever since. With the rule gated, `SMALLEST_GAP` is **3 without the feature** and
+2 with it, both measured passing: criterion 2 itself never moved, its geometric restatement is at
+full strength in `default`, and the relaxed form only exists in a build asked for by name. Q-137
+stays open on the substance — the reading of R2-005's exception is still an extension of the text
+rather than the text — but **the urgency of its second request falls away**, because no relaxation
+reaches the default delivery any more.
+
+**What it asks**, none of it blocking: whether the project rule is right in those words and binding
+on later lots; whether the feature should be renamed `ppu-2007-render-access`, since the
+register-7 **write** borrows the same increment and the name follows the brief and `AccuracyCoin`'s
+row rather than the code (the function's comment and the feature's row both say the write is
+covered); and what happens next either way — if the owner validates the picture the feature joins
+`default` and `SMALLEST_GAP` collapses back to a single 2, which puts Q-137 point 2 back in front;
+if he invalidates it, the four-variant table measured on SMB3 is where to reopen.

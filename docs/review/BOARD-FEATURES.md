@@ -17,27 +17,88 @@ MF-CART step 5 took both back out, and MF-VS step 7 put the VS. System in.** Eve
 board this build has is in `default`; the VS. System is one flag away
 (`--features parked-boards`), and the figures that put it there are in its row below.
 
-**One feature in this table is not a board: `ppu-exact-sprite-eval`** (MF-4e step 3). The owner's
-rule is written for boards, but what is behind it is the figure, so lot MF-4e applied it unchanged
-to a piece of the PPU. With the feature on, the sprite evaluation is the hardware's byte counter in
-two independently clocked halves against a second counter over the secondary OAM, and a `$2004`
-read during rendering answers from the OAM copy buffer instead of from `oam[oam_address]`.
+## Two features in this table are not boards: the PPU features
+
+The owner's rule is written for boards, but what is behind it is the **figure**, so lot MF-4e
+applied it unchanged to two pieces of the PPU. Lot MF-4e-gate then added a second reason a piece of
+the PPU can be left out of `default`, and it is **not** a figure:
+
+> **A change that moves what the player sees in a game the owner watches waits for the owner's eye,
+> whatever it costs.**
+
+Both features are out of `default` and **neither is in `parked-boards`**: that umbrella is for
+left-out *boards*, and a build that wants everything asks for the flags by name. They are
+independent — the four combinations score 128 / 129 / 131 / 132 on `AccuracyCoin` — and the one
+command that gives both is
+
+    cargo build -p zax-nes     --features ppu-2007-render-read,ppu-exact-sprite-eval
+    cargo build -p zax-harness --features ppu-2007-render-read,ppu-exact-sprite-eval
+
+`zax-harness` needs the flags too, through its own pass-throughs: Cargo cannot see a dependency's
+feature from a test, and `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green`
+has to know which configuration it is scoring.
+
+### `ppu-2007-render-read` — the `$2007`-during-rendering rule (MF-4e step 2, gated by MF-4e-gate)
+
+With the feature on, a `$2007` access — the read *and* the register-7 write; the name follows
+`AccuracyCoin`'s row and not the code — made while the PPU is fetching moves `v` by a **coarse X
+increment and a Y increment at once** instead of by PPUCTRL's 1 or 32 (nesdev, "PPU scrolling",
+"$2007 (PPUDATA) reads and writes"; `third_party/mesen2`'s `UpdateVideoRamAddr` takes the same
+branch). The borrowed increment reaches `v_row_next` but **not** `v_row_start`, which is what lets
+AMD-021 R2-005 criterion 2 hold with it. With it off, `Ppu2C02::increment_vram_address` is
+`11407930`'s body line for line.
 
 | | figure |
 | --- | --- |
-| what it wins | `AccuracyCoin` **129 → 132 / 147**: `Address $2004 behavior`, `Arbitrary Sprite zero`, `Misaligned OAM behavior` |
+| what it wins | `AccuracyCoin` **128 → 129 / 147**: `PPU Misc. / $2007 read w/ rendering` (132 with `ppu-exact-sprite-eval` beside it) |
+| what it changes on screen | **4 ROMs in golden-core, which runs with no hack code**: `Super Mario Bros. 3 (USA)`, `Zelda II (USA)`, `Zelda II (Europe)` and `nes-test-roms/other/Duelito.nes`, all on `pixel_sha256` *and* `tiles_sha256`. The captured-tile counts do **not** move — SMB3 960, both Zelda IIs 1 086 — only the contents |
+| PR-1's thirteen | **inside the tolerance**: +0.000 % to +0.005 % on the eleven ROMs whose behaviour does not move, worst `readbuf` +0.002 %, `m4` −0.005 %. `duelito` −4.022 % and `smb3` +0.241 % are the two whose *behaviour* moves, read out of the performance question |
+| level 2 | every `core` figure +0.000 % to +0.002 %. The one `total` outside is `smb1` +0.021 %, and its stage table says why: `ppu`, `apu` and `draw_list` are **identical to the instruction** and the whole move is in `convert` and `lua_hooks` — the 3D engine converting a different frame |
+| gated off | the default build is **byte-identical to `11407930` in golden-core over the 98 commercial originals**, and no higher than it on either callgrind run (MF-4e-gate steps 4 and 5) |
+| in `default` | **off** |
+| the command | `cargo build -p zax-nes --features ppu-2007-render-read`, and `cargo build -p zax-harness --features ppu-2007-render-read` so the `AccuracyCoin` guard scores the right configuration |
+
+**Why it is off, which is not the usual reason.** It is **inside** the tolerance; it was in
+`default` when MF-4e shipped. R0's dense A/B of the 3D packs against **v0.4.2** (2026-11-07) found
+it moving the picture in exactly the two games the owner watches most — *Super Mario Bros. 3*,
+**58 of 681 sampled frames** over 5 dumps, and *Zelda II*, **18-19 of 1 001** over 2 — with and
+without a pack. And SMB3's split line under the widescreen hack is where the owner saw a bug the
+last time this rule shipped: lot MF-4d shipped it, the ground row above the status bar came out cut
+and shifted by half a block, and MF-4d-fix backed it out. **The rule may well be right** — the
+hardware sources are not in doubt and MF-4e reconciled it with R2-005 — but the owner validates it
+by eye before it is the default, and until then the default build renders this path as v0.4.2 does.
+
+**What the gate buys back, beyond the picture.** MF-4e step 2 had to relax one assertion of
+`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` from `smallest_gap >= 3` to `>= 2`,
+because the rule moves the banner's first row from line 195 to line 194 and that puts lines 192 and
+194 two apart. Q-137 had to ask R0 for the relaxation by name. With the rule out of `default`, **the
+restatement of a P1 requirement is back at full strength in the build the owner runs** and the
+relaxed form only exists in a build asked for by name. `SMALLEST_GAP` in that test is the one knob.
+
+### `ppu-exact-sprite-eval` — the exact sprite-evaluation pipeline (MF-4e step 3)
+
+With the feature on, the sprite evaluation is the hardware's byte counter in two independently
+clocked halves against a second counter over the secondary OAM, and a `$2004` read during rendering
+answers from the OAM copy buffer instead of from `oam[oam_address]`.
+
+| | figure |
+| --- | --- |
+| what it wins | `AccuracyCoin` **+3 rows**: `Address $2004 behavior`, `Arbitrary Sprite zero`, `Misaligned OAM behavior` — 128 → **131 / 147**, or 129 → **132** with `ppu-2007-render-read` beside it |
+| what it changes on screen | **no commercial original at all** (`diff` clean over all 18 of MF-4e's set) and **two free ROMs**, both test ROMs for the very behaviour it changes: `rastesam4.nes` and `read2004.nes` |
 | PR-1's thirteen | **above on nine of the eleven** whose behaviour does not move: `metroid` **+0.133 %**, `z2` +0.107 %, `mm2` and `smb1` +0.083 %, down to `m4` +0.041 %; `vblnmi` +0.008 % and `oamstr` +0.001 % inside |
 | level 2 | **all ten above**: `zelda2/core` **+0.127 %** down to `smb3/total` +0.057 % |
 | gated off | set total **−91 994 (−0.000 %)**, worst ROM **+0.001 %**, and `run_sprite_evaluation`, `background_fetch`, `run_dots`, `paint_sprite` and `rebuild_sprite_line` **identical to the instruction** on five ROMs |
 | in `default` | **off** |
 | the command | `cargo build -p zax-nes --features ppu-exact-sprite-eval`, and `cargo build -p zax-harness --features ppu-exact-sprite-eval` so the `AccuracyCoin` guard scores the right configuration |
 
-It is **not** in `parked-boards`: that umbrella is for left-out *boards*, and a build that wants
-everything asks for both flags. The `$2007`-during-rendering rule of MF-4e step 2 is **not** behind
-it — Q-125 and AMD-021 R2-005 both require that rule, and it measures +0.000 % to +0.005 % on the
-eleven, so it is in every build.
+**Why it is off: the ordinary reason, the figure.** Above the +0.02 % tolerance on nine of PR-1's
+eleven and on all ten level-2 figures, against a path `run_dots` makes 57 % to 62 % of
+`NesCore::run_frame` on all five level-2 games. Not dropped — one flag gives the exact pipeline.
 
-**Both were parked on one instruction, and it was not theirs — MF-CART removed the instruction.**
+## The boards, and the one instruction that used to park two of them
+
+**`board-taito-x1` and `board-111` were parked on one instruction, and it was not theirs — MF-CART
+removed the instruction.**
 `Cartridge::default_cpu_read` held the inlined `Board::try_read_prg` jump table, and past a
 certain pressure LLVM materialised `&self.board` above it for that table's *cold* arms (mapper
 116's boxed `IrqBoard::Somari(Box<Somari>)`, and the arms that are `#[inline(never)]`), where it
@@ -97,8 +158,10 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 brought in are +0.001 % and +0.002 % on their worst ROM, and the tree they came into is
 **−25 551 352 (−0.032 %)** on PR-1's thirteen against `44f77f72`, the lot's own baseline.
 
-**And the worst figure of the one feature that is *not* in `default` is +0.083 %**, four times the
-tolerance: `board-vs-system`'s, measured by MF-VS step 7. What makes it the first row of this table
+**And the worst figure of the one *board* feature that is not in `default` is +0.083 %**, four times
+the tolerance: `board-vs-system`'s, measured by MF-VS step 7. (The two PPU features above are also
+out of `default`, one of them for a reason that is not a figure at all.) What makes it the first row
+of this table
 whose cost is **not** its own board's is where the figure sits —
 `Ppu2C02::run_dots` +1.1 M to +2.4 M and `Ppu2C02::background_fetch` +0.2 M to +2.4 M, on **every**
 ROM of the set, including the ones whose games have no VS layer to run. Those are per-dot paths the
