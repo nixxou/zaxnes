@@ -498,8 +498,11 @@ fn accuracy_coin() -> Option<(usize, serde_json::Map<String, serde_json::Value>)
 /// `AccuracyCoin`'s own tally and the rows lot MF-4b turned green, which the campaign's single
 /// `fail` row cannot show (REQ-CORE-110, REQ-CORE-111, REQ-CORE-112, REQ-CORE-113).
 ///
-/// The score is asserted as a floor and the eight rows by name, so that a lot which fixes more
-/// does not have to edit this test while one that breaks any of these does.
+/// The score is asserted as a floor and the rows by name, so that a lot which fixes more does not
+/// have to edit this test while one that breaks any of these does. The floor and the named list
+/// both depend on the configuration: two PPU features are out of `default` and each is worth a
+/// known number of rows, so a build cannot silently lose a row it ships nor be asked for one it
+/// does not (Q-139).
 #[test]
 fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green() {
     let Some((passed, tests)) = accuracy_coin() else {
@@ -515,26 +518,36 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green() {
     // mistaking `Implied Dummy Reads`' backup of the zero page for the end of the run (see
     // `coin.rs`).
     //
-    // **128 → 129, and the row taken back is `PPU Misc. / $2007 read w/ rendering`** (Q-125,
-    // Q-137). Lot MF-4d step 6 turned it green with a rule that is right on hardware, and lot
-    // MF-4d-fix backed it out because as shipped it broke AMD-021 R2-005 criterion 2 — a P1
-    // requirement — on Super Mario Bros. 3's split line. Lot MF-4e holds **both**: the rule is
-    // back on `v`, and it no longer reaches the captured row, which is where the collision
-    // actually was. The row is in the named list below again and R2-005's own ignored test
-    // (`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`) passes beside it.
-    // **Two floors, because the lot ships two configurations.** Step 2's `$2007` rule is in every
-    // build and is worth the 129; step 3's exact sprite-evaluation pipeline is behind
-    // `ppu-exact-sprite-eval`, out of `default` because it measures +0.041 % to +0.133 % on PR-1's
-    // thirteen and above the tolerance on all ten level-2 figures, and it is worth three more:
-    // `Address $2004 behavior`, `Arbitrary Sprite zero` and `Misaligned OAM behavior`.
-    let floor = if cfg!(feature = "ppu-exact-sprite-eval") {
-        132
-    } else {
-        129
-    };
+    // **The floor is a sum of three terms, because two PPU features are out of `default`** and
+    // each is worth a known number of rows (Q-125, Q-137, Q-139). 128 is the figure every build
+    // has; `ppu-2007-render-read` adds one row and `ppu-exact-sprite-eval` three, so the four
+    // combinations are 128 / 129 / 131 / 132 and each row is named below only in the configuration
+    // that ships it.
+    //
+    // **`ppu-2007-render-read`, +1: `PPU Misc. / $2007 read w/ rendering`.** Lot MF-4d step 6
+    // turned it green with a rule that is right on hardware, and lot MF-4d-fix backed it out
+    // because as shipped it broke AMD-021 R2-005 criterion 2 — a P1 requirement — on Super Mario
+    // Bros. 3's split line. Lot MF-4e holds **both**: the rule is back on `v`, and it no longer
+    // reaches the captured row, which is where the collision actually was, so R2-005's own ignored
+    // test (`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`) passes beside it. Lot
+    // MF-4e-gate then took it out of `default` — not for a figure, it measures +0.000 % to
+    // +0.005 % on PR-1's eleven, but because R0's A/B of the 3D packs found it moving the picture
+    // of Super Mario Bros. 3 and Zelda II, which the owner validates by eye first.
+    //
+    // **`ppu-exact-sprite-eval`, +3**: the exact sprite-evaluation pipeline of MF-4e step 3, out of
+    // `default` because it measures +0.041 % to +0.133 % on PR-1's thirteen and above the tolerance
+    // on all ten level-2 figures. `Address $2004 behavior`, `Arbitrary Sprite zero` and
+    // `Misaligned OAM behavior`.
+    let mut floor = 128;
+    if cfg!(feature = "ppu-2007-render-read") {
+        floor += 1;
+    }
+    if cfg!(feature = "ppu-exact-sprite-eval") {
+        floor += 3;
+    }
     assert!(
         passed >= floor,
-        "AccuracyCoin scored {passed}/147, which is under lot MF-4e's {floor}"
+        "AccuracyCoin scored {passed}/147, which is under this configuration's {floor}"
     );
 
     // Nothing may be left unrun or retired: the drive measures its progress by the result bytes
@@ -574,14 +587,21 @@ fn req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green() {
         "CPU Behavior 2 / DMC Reload Timing",
         // MF-4d step 5: a `$2002` read samples the sprite flags about 1.9 dots after bit 7.
         "Sprite Evaluation / $2002 flag timing",
-        // MF-4e step 2: a `$2007` access during rendering triggers a coarse X and a Y increment
-        // at once (Q-125), and the borrowed increment is kept out of the captured row so that
-        // AMD-021 R2-005 holds with it (Q-137). The row stood here from MF-4d step 6, came out
-        // when MF-4d-fix backed that half out, and is back.
-        "PPU Misc. / $2007 read w/ rendering",
     ] {
         let row = tests[name].as_str().unwrap();
         assert!(row.starts_with("pass"), "{name}: {row}");
+    }
+
+    // MF-4e step 2's one, named only in the configuration that ships it. A `$2007` access during
+    // rendering triggers a coarse X and a Y increment at once (Q-125), and the borrowed increment
+    // is kept out of the captured row so that AMD-021 R2-005 holds with it (Q-137). The row stood
+    // in the list above from MF-4d step 6, came out when MF-4d-fix backed that half out, went back
+    // in at MF-4e step 2, and is here behind its feature since MF-4e-gate (Q-139).
+    if cfg!(feature = "ppu-2007-render-read") {
+        let row = tests["PPU Misc. / $2007 read w/ rendering"]
+            .as_str()
+            .unwrap();
+        assert!(row.starts_with("pass"), "$2007 read w/ rendering: {row}");
     }
 
     // MF-4e step 3's three, named only in the configuration that ships them.

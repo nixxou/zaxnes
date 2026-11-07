@@ -604,8 +604,10 @@ impl Ppu2C02 {
     /// It is also, **word for word**, the condition the nesdev "PPU scrolling" page states for
     /// `$2007`'s odd increment: "on the pre-render line and the visible lines 0-239, provided
     /// either background or sprite rendering is enabled". The two quirks share this predicate
-    /// again, as they did before lot MF-4d-fix; see [`Self::increment_vram_address`], Q-125 and
-    /// Q-137.
+    /// **in the build that has the `$2007` rule**, as they did before lot MF-4d-fix; that rule is
+    /// behind `ppu-2007-render-read` and out of `default` since lot MF-4e-gate, so in the default
+    /// build this predicate serves the `$2004` quirk alone. See [`Self::increment_vram_address`],
+    /// Q-125, Q-137 and Q-139.
     const fn fetching(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
@@ -688,8 +690,10 @@ impl Ppu2C02 {
     /// the increment a `$2007` access borrows from the fetch pipeline (Q-137).
     ///
     /// It is the field [`Ppu2C02::capture_background_row`] tests against 1 to decide whether a row
-    /// is emitted at all, so it is the one observable that separates this lot's rule from the one
-    /// MF-4d shipped.
+    /// is emitted at all, so it is the one observable that separates MF-4e's rule from the one
+    /// MF-4d shipped — and, since lot MF-4e-gate, the one that says which of the two builds is
+    /// running: with `ppu-2007-render-read` off this field follows `v` through a `$2007` access on
+    /// every line, which is `11407930`'s behaviour (Q-139).
     #[must_use]
     pub const fn captured_row_fine_y(&self) -> i32 {
         ((self.v_row_start >> 12) & 0x07) as i32
@@ -700,7 +704,8 @@ impl Ppu2C02 {
     /// borrows from the fetch pipeline all do reach (Q-137).
     ///
     /// Together with [`Self::captured_row_fine_y`] it is the pair that decides *which* line emits
-    /// a row, and the two are what separates this lot's rule from the three variants it rejected.
+    /// a row, and the two are what separates MF-4e's rule from the three variants it rejected —
+    /// and, with `ppu-2007-render-read` off, what shows that both fields follow `v` again (Q-139).
     #[must_use]
     pub const fn next_row_fine_y(&self) -> i32 {
         ((self.v_row_next >> 12) & 0x07) as i32
@@ -1509,7 +1514,8 @@ impl Ppu2C02 {
     }
 
     /// The address increment a `$2007` access owes, which is **not the same increment** while the
-    /// PPU is fetching (REQ-CORE-112, Q-125, Q-137).
+    /// PPU is fetching — **behind `ppu-2007-render-read`, and out of `default`** (REQ-CORE-112,
+    /// Q-125, Q-137, Q-139).
     ///
     /// nesdev, "PPU scrolling", under "$2007 (PPUDATA) reads and writes": "During rendering (on
     /// the pre-render line and the visible lines 0-239, provided either background or sprite
@@ -1562,6 +1568,30 @@ impl Ppu2C02 {
     /// R2-005's text excludes "l'incrément vertical **de fin de ligne**" and this one is not at
     /// the end of a line, so that is a reading of the requirement rather than its letter:
     /// **Q-137** files it with the provisional choice marked.
+    ///
+    /// # Why it is behind a feature and out of `default` (lot MF-4e-gate, Q-139)
+    ///
+    /// Not because it is dear — step 4 measured it at +0.000 % to +0.005 % on the eleven ROMs of
+    /// PR-1's set whose behaviour does not move, which is well inside the owner's tolerance — but
+    /// because of **what it changes on screen**. R0's dense A/B of the 3D packs against v0.4.2
+    /// found it moving the picture in exactly the two games the owner watches most: *Super Mario
+    /// Bros. 3* (5 dumps, 58 of 681 sampled frames differ) and *Zelda II* (2 dumps, 18-19 of
+    /// 1 001), with and without a pack. SMB3's split line under the widescreen hack is where the
+    /// owner saw a bug the last time this rule shipped, and lot MF-4d-fix backed it out for that.
+    ///
+    /// So the rule waits on the owner's eye, and until then the default build renders this path as
+    /// `11407930` does — which is the `else` arm, and is `11407930`'s whole body. The two arms are
+    /// two `#[cfg]` bodies rather than one body with a `cfg!` in it so that the default build's
+    /// token stream is the baseline's exactly: MF-4d-fix step 5 measured that giving this arm a
+    /// body of its own re-lays [`Self::read`] by about eleven instructions per register read, so
+    /// the presence of the branch is itself a measurable thing and the gate must remove it rather
+    /// than fold it.
+    ///
+    /// `ppu-2007-render-read` is a **read** in name only: both `$2007` paths come here, the write
+    /// of register 7 as much as [`Self::read_data`], and the rule applies to both. The name
+    /// follows the handle the owner and `AccuracyCoin` share for it — the row it wins back is
+    /// called `PPU Misc. / $2007 read w/ rendering`.
+    #[cfg(feature = "ppu-2007-render-read")]
     fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
         if self.fetching() {
             // Q-137: the pipeline's own increment. It does **not** reach `v_row_start` — the row
@@ -1579,6 +1609,29 @@ impl Ppu2C02 {
             self.v_row_start = self.v;
             self.v_row_next = self.v;
         }
+
+        // The incremented address goes back on the PPU bus, so a $2007 access that steps
+        // across $1000 clocks an MMC3 counter — which is what mmc3_irq_tests "A12 clocking"
+        // measures (tests 5 and 6).
+        self.notify_address_bus(self.v & 0x3FFF, cart);
+    }
+
+    /// The default build's increment: the 1 or 32 of PPUCTRL **on every line**, fetching or not,
+    /// reaching both captured-row fields — which is `11407930`'s body line for line, and so
+    /// v0.4.2's behaviour on this path.
+    ///
+    /// The hardware rule, why it is right, and why the owner's eye gates it are all on the
+    /// `ppu-2007-render-read` body above; this arm carries no argument of its own beyond being the
+    /// baseline. `cargo build -p zax-nes --features ppu-2007-render-read` is the one flag that
+    /// swaps them, and `docs/review/BOARD-FEATURES.md` has the row (Q-139).
+    #[cfg(not(feature = "ppu-2007-render-read"))]
+    fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
+        let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
+        self.v = self.v.wrapping_add(step) & 0x7FFF;
+
+        // A CPU write reaches the row of the line it is made in (R2-005).
+        self.v_row_start = self.v;
+        self.v_row_next = self.v;
 
         // The incremented address goes back on the PPU bus, so a $2007 access that steps
         // across $1000 clocks an MMC3 counter — which is what mmc3_irq_tests "A12 clocking"

@@ -417,7 +417,10 @@ impl Ppu2C02 {
     }
 
     /// `pub(super)` for [`Ppu2C02::increment_vram_address`]: a `$2007` access made while the PPU
-    /// is fetching borrows this increment and [`Self::increment_y`] at once (Q-137).
+    /// is fetching borrows this increment and [`Self::increment_y`] at once (Q-137) — **in a build
+    /// with `ppu-2007-render-read`**, which is out of `default` (Q-139). The visibility is not
+    /// `#[cfg]`'d with it: the item is crate-private either way, so it is not a codegen input, and
+    /// the fetch pipeline right here is this function's other caller in every build.
     pub(super) fn increment_coarse_x(&mut self) {
         if (self.v & 0x001F) == 0x001F {
             self.v = (self.v & !0x001F) ^ 0x0400;
@@ -428,7 +431,9 @@ impl Ppu2C02 {
 
     /// The vertical increment of dot 256. It touches **neither** `v_row_start` nor `v_row_next`:
     /// R2-005 holds the end-of-line vertical increment out of the row captured for this line, and
-    /// Q-137 extends that to the copy of this increment a `$2007` access borrows.
+    /// Q-137 extends that to the copy of this increment a `$2007` access borrows — which only
+    /// exists in a build with `ppu-2007-render-read`, out of `default` (Q-139). The dot-256 half
+    /// of the sentence is the requirement's letter and is in every build.
     pub(super) fn increment_y(&mut self) {
         if (self.v & 0x7000) != 0x7000 {
             self.v += 0x1000;

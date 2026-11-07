@@ -245,9 +245,34 @@ parked-boards = ["board-vs-system"]
 # build that wants everything asks for both. `docs/review/BOARD-FEATURES.md` has the row and the
 # command.
 #
-# The `$2007`-during-rendering rule of step 2 is **not** behind this: it is required by Q-125 and
-# AMD-021 R2-005, and it measures +0.000 % to +0.005 % on the eleven, so it is in every build.
+# The `$2007`-during-rendering rule of step 2 is **not** behind this: it has its own feature,
+# `ppu-2007-render-read` below, which lot MF-4e-gate added. It was in every build when MF-4e
+# shipped — the figure is +0.000 % to +0.005 % on the eleven — and R0 took it out of `default` on
+# 2026-11-07 for what it changes on screen rather than for what it costs.
 ppu-exact-sprite-eval = []
+
+# **Not a board either: the `$2007`-during-rendering rule** (lot MF-4e step 2, gated by lot
+# MF-4e-gate). With this on, a `$2007` access — the read *and* the register-7 write — made while
+# the PPU is fetching moves `v` by a coarse X increment and a Y increment at once instead of by
+# PPUCTRL's 1 or 32, and that borrowed increment reaches `v_row_next` but **not** `v_row_start`,
+# which is what lets AMD-021 R2-005 criterion 2 hold with it (Q-125, Q-137). With it off,
+# `Ppu2C02::increment_vram_address` is `11407930`'s body line for line.
+#
+# `AccuracyCoin` **128 → 129 / 147**, the row `PPU Misc. / $2007 read w/ rendering`; 132 with
+# `ppu-exact-sprite-eval` beside it.
+#
+# **This one is not parked for a figure.** It measures +0.000 % to +0.005 % on the eleven ROMs of
+# PR-1's set whose behaviour does not move, well inside the owner's +0.02 % tolerance. It is out of
+# `default` because of **what it changes on screen**: R0's dense A/B of the 3D packs against v0.4.2
+# (2026-11-07) found it moving the picture in the two games the owner watches most — *Super Mario
+# Bros. 3*, 58 of 681 sampled frames over 5 dumps, and *Zelda II*, 18-19 of 1 001 over 2 — with and
+# without a pack, and SMB3's split line under the widescreen hack is where the owner saw a bug the
+# last time this rule shipped (lot MF-4d, backed out by MF-4d-fix). The owner validates it by eye
+# before it is the default; until then the default build renders this path as v0.4.2 does.
+#
+# Not in `parked-boards`, for the reason `ppu-exact-sprite-eval` is not: that umbrella is for
+# left-out *boards*. `docs/review/BOARD-FEATURES.md` has the row and the command.
+ppu-2007-render-read = []
 
 [dev-dependencies]
 sha2 = "0.10"

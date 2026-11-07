@@ -210,15 +210,22 @@ fn park_on_scanline(fixture: &mut TileFixture, scanline: i32) {
 /// triggers a coarse X increment and a Y increment **at once** (nesdev, "PPU scrolling", "$2007
 /// (PPUDATA) reads and writes"; `AccuracyCoin`'s `$2007 read w/ rendering` 2, REQ-CORE-112).
 ///
-/// **This test was inverted by lot MF-4d-fix and lot MF-4e flips it back**, which is the deferral
-/// Q-125 asked for closing where the rule returns. It asserts `(6, 8, 3)` on the visible line
-/// again. What makes the rule compatible with AMD-021 R2-005 this time is not the dot the access
-/// lands on — the page's condition has no dot in it — but that the borrowed increment no longer
-/// reaches `v_row_start`: see [`zax_nes::ppu::Ppu2C02::increment_vram_address`] and Q-137, and
+/// **This test was inverted by lot MF-4d-fix and lot MF-4e flipped it back**, which is the
+/// deferral Q-125 asked for closing where the rule returns. It asserts `(6, 8, 3)` on the visible
+/// line again. What makes the rule compatible with AMD-021 R2-005 is not the dot the access lands
+/// on — the page's condition has no dot in it — but that the borrowed increment no longer reaches
+/// `v_row_start`: see [`zax_nes::ppu::Ppu2C02::increment_vram_address`] and Q-137, and
 /// `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` for the other half of the pair.
+///
+/// **Behind `ppu-2007-render-read` since lot MF-4e-gate** (Q-139), with the rule it pins. The
+/// default build runs
+/// `req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_125` below in its
+/// place, so one of the two states the shipped behaviour in every configuration and neither build
+/// can change this path silently.
 ///
 /// The access is made on the PPU directly so that no dot passes between the two readings of `v`
 /// and the difference is the increment itself and nothing else.
+#[cfg(feature = "ppu-2007-render-read")]
 #[test]
 fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
     // v = $2105: coarse X 5, coarse Y 8, fine Y 2.
@@ -245,6 +252,79 @@ fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
     assert_eq!((6, 8, 2), v_after_a_2007_read(250));
 }
 
+/// **The default build's half of the pair: the rule is off, so a `$2007` access steps by PPUCTRL's
+/// amount on every line** — `11407930`'s behaviour, and v0.4.2's (Q-139).
+///
+/// This is the test lot MF-4d-fix inverted and lot MF-4e flipped back, restored here for the
+/// configuration that does not ship the rule. It is `#[cfg]`'d rather than `#[ignore]`d for
+/// MF-4d-fix's own reason: an ignored test pins nothing and would let the rule come back by
+/// accident, whereas exactly one of this test and
+/// `req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once` runs in every
+/// configuration, each stating the behaviour its build actually ships.
+///
+/// Why the rule is behind a feature at all is not that it is wrong — nesdev's "PPU scrolling" page
+/// and `AccuracyCoin`'s `$2007 read w/ rendering` 2 both have it, and
+/// [`zax_nes::ppu::Ppu2C02::increment_vram_address`] carries the whole derivation. It is that R0's
+/// A/B of the 3D packs found it moving the picture of Super Mario Bros. 3 and Zelda II, which the
+/// owner validates by eye before it is the default.
+///
+/// **Both row fields are asserted beside the increment**, which the inverted test of MF-4d-fix
+/// could not do because the accessors did not exist yet: with the rule off, a `$2007` access is an
+/// ordinary CPU address change on every line and so reaches `v_row_start` as well as `v_row_next`.
+/// That is what puts Super Mario Bros. 3's banner row back on line 195 and lets
+/// `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` keep its `smallest_gap >= 3`.
+#[cfg(not(feature = "ppu-2007-render-read"))]
+#[test]
+fn req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_125() {
+    // v = $2105: coarse X 5, coarse Y 8, fine Y 2.
+    fn v_after_a_2007_read(scanline: i32) -> (i32, i32, i32) {
+        let mut fixture = TileFixture::new();
+        fixture.set_control(0x00); // Step of 1.
+        fixture.set_mask(0x1E); // Rendering enabled.
+        park_on_scanline(&mut fixture, scanline);
+
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.write(6, 0x21, None);
+        ppu.write(6, 0x05, None);
+        assert_eq!((5, 8, 2), (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y()));
+
+        ppu.read(7, None);
+        (ppu.coarse_x(), ppu.coarse_y(), ppu.fine_y())
+    }
+
+    // The three fine Ys the captured rows are decided on, from a `v` whose fine Y is 0.
+    fn fine_ys(scanline: i32) -> (i32, i32, i32) {
+        let mut fixture = TileFixture::new();
+        fixture.set_control(0x00);
+        fixture.set_mask(0x1E);
+        park_on_scanline(&mut fixture, scanline);
+
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.write(6, 0x01, None); // v = $0105: coarse X 5, coarse Y 8, fine Y 0.
+        ppu.write(6, 0x05, None);
+        ppu.read(7, None);
+        (
+            ppu.fine_y(),
+            ppu.captured_row_fine_y(),
+            ppu.next_row_fine_y(),
+        )
+    }
+
+    // On a visible line, with rendering on: the PPUCTRL step of 1 applies, so coarse X moves and
+    // fine Y does **not**. The feature build gives (6, 8, 3) — Q-125, Q-137, Q-139.
+    assert_eq!((6, 8, 2), v_after_a_2007_read(100));
+
+    // In vblank, the same, and here it is the hardware's own answer: nothing is fetched.
+    assert_eq!((6, 8, 2), v_after_a_2007_read(250));
+
+    // And the captured rows: a CPU address change reaches both fields on every line, fetching or
+    // not, so nothing moves off the fine Y the `$2006` write left. The feature build gives
+    // (1, 0, 1) on the visible line — see
+    // `amd_021_r2_005_a_2007_read_while_fetching_moves_the_next_lines_row_and_not_this_lines`.
+    assert_eq!((0, 0, 0), fine_ys(100));
+    assert_eq!((0, 0, 0), fine_ys(250));
+}
+
 /// The increment a `$2007` access borrows from the fetch pipeline reaches the row of the **next**
 /// line and not the row of the line it is made in (AMD-021 R2-005 criterion 2, Q-137) — the
 /// unit-scale statement of what `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`
@@ -255,6 +335,11 @@ fn req_core_112_a_2007_read_while_fetching_increments_coarse_x_and_y_at_once() {
 /// première rangée du bandeau est émise à la ligne suivante" is the third moving to the 1 that
 /// emits, which is what makes the row appear on the **next** line rather than being lost. The same
 /// access made outside rendering is a CPU address change and reaches both.
+///
+/// **Behind `ppu-2007-render-read` since lot MF-4e-gate** (Q-139): it pins the rule, so it runs
+/// where the rule does. The default build's statement of the same three fields is the last block
+/// of `req_core_112_a_2007_read_while_fetching_still_steps_by_the_ppuctrl_amount_q_125`.
+#[cfg(feature = "ppu-2007-render-read")]
 #[test]
 fn amd_021_r2_005_a_2007_read_while_fetching_moves_the_next_lines_row_and_not_this_lines() {
     // fine Y 0 going in, so the pipeline's Y increment takes it to the 1 that emits a row.

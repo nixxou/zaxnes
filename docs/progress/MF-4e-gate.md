@@ -107,3 +107,98 @@ feature wins back is literally called `PPU Misc. / $2007 read w/ rendering`.
 
 925 is `11407930`'s own count, which is the arithmetic sanity check: MF-4e added one test and
 inverted one, so a build with the rule off is back to the baseline's number exactly.
+
+## Step 1 — the gate, and the default build is `11407930` on this path
+
+### The code: two `#[cfg]` bodies, and the off one is the baseline's five lines
+
+`Ppu2C02::increment_vram_address` is now two functions under `#[cfg(feature =
+"ppu-2007-render-read")]` and `#[cfg(not(...))]`. The off body is `11407930`'s **line for line** —
+`git show 11407930:…/ppu/mod.rs` against it is the same five statements and the same two comments,
+checked before the first build.
+
+**Two bodies rather than one body with a `cfg!` in it**, and the reason is measured rather than
+stylistic: MF-4d-fix step 5 and Q-125 established that *the presence of this branch* re-lays
+`Ppu2C02::read` by about **+11 instructions per register read** — "a new arm with a body of its own
+can flip a whole dispatch's shape", MF-3b rule 4. A gate that folds a constant `false` leaves the
+arm in the source and asks LLVM to be the one that removes it; a gate that `#[cfg]`s it out means
+the default build's token stream for this function *is* the baseline's. Step 5 measures whether
+that was enough.
+
+`run_sprite_evaluation` in `ppu/render.rs` already uses exactly this idiom for
+`ppu-exact-sprite-eval`, so the file gains no new shape.
+
+### Everything that moved, and the three things that deliberately did not
+
+| file | change |
+| --- | --- |
+| `zax-nes/Cargo.toml` | `ppu-2007-render-read = []`, out of `default`, out of `parked-boards`, with its own note: what it changes, the row it wins, the figure, and **that R0 parked it for the picture and not the figure** |
+| `zax-harness/Cargo.toml` | the pass-through, for the reason `vs-system` and `ppu-exact-sprite-eval` have one |
+| `ppu/mod.rs` | the two bodies; `fetching`'s note (it serves the `$2004` quirk alone in `default`); the two row accessors' notes |
+| `ppu/render.rs` | `increment_coarse_x` and `increment_y` keep `pub(super)`, and say why the visibility is not `#[cfg]`'d with the caller |
+| `ppu_rendering_tests.rs` | the two tests that pin the rule behind the feature; **the inverted test back**, with the row fields asserted beside the `(6, 8, 2)` |
+| `background_row_split_tests.rs` | `SMALLEST_GAP`, 2 behind the feature and **3 in `default`** |
+| `test_roms_tests.rs` | the floor as a sum — 128, +1, +3 — and the `$2007` row named only where it ships |
+
+Not gated: `Ppu2C02::fetching` itself (the `$2004`-write quirk of MF-4d step 6 is in every build and
+that predicate is its own), the `pub(super)` on the two increment halves (crate-private either way,
+so not a codegen input), and the `captured_row_fine_y` / `next_row_fine_y` accessors (they report
+fields that exist in both builds, and the default build's own test now uses them).
+
+### The suites, five configurations
+
+| configuration | `cargo test --release -p zax-nes -p zax-harness` |
+| --- | --- |
+| `default` | **925 / 0 / 8** |
+| `--features ppu-2007-render-read` | **926 / 0 / 8** |
+| `--features parked-boards` | **985 / 0 / 8** |
+| `--features ppu-exact-sprite-eval` | **925 / 0 / 8** |
+| both PPU features | **926 / 0 / 8** |
+
+MF-VS-fix's counts were 926 and 986, and **the −1 in each is accounted for exactly**: the gate
+turns MF-4e's two tests into one in the default build (two behind the feature, the restored
+inverted one without it), so the default build is back to `11407930`'s own **925** and the feature
+build is MF-VS-fix's 926. `ppu-exact-sprite-eval` adds no test, which is why it is 925 alone and
+926 with the other.
+
+**One flake, named because it is not this lot's.** The first multi-threaded run of the
+both-features configuration ended in `STATUS_ACCESS_VIOLATION` inside `test_roms_tests`'s
+fourteen-test target. Re-run `--test-threads=1`: **14 passed**. Re-run multi-threaded: **926 / 0 /
+8**, clean. Fourteen concurrent test-ROM drives is the condition, not the feature — the same target
+passed multi-threaded in the four other configurations on the first attempt.
+
+### `AccuracyCoin`: the floor's arithmetic, verified on all four combinations
+
+| configuration | score | `PPU Misc. / $2007 read w/ rendering` |
+| --- | ---: | --- |
+| `default` | **128 / 147** | **`fail 2`** |
+| `ppu-2007-render-read` | **129 / 147** | **`pass`** |
+| `ppu-exact-sprite-eval` | **131 / 147** | `fail 2` |
+| both | **132 / 147** | `pass` |
+
+128 is MF-4d-fix's figure and `11407930`'s. 129, 131 and 132 are 128 + 1, + 3 and + 1 + 3, so the
+guard's three-term floor is not an assumption but a measurement, and the 131 is new information:
+MF-4e only ever reported 132 because step 2's rule was underneath step 3's.
+
+### The ignored suite in the default build, and the assertion that comes back un-relaxed
+
+`--ignored --no-fail-fast --test-threads=1` with `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set:
+**7 of 8**, the one failure being `builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`
+— the known one the brief puts out of scope, which fails identically on the baseline.
+
+Both tests the brief names pass:
+
+* **`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** — and it passes with
+  `SMALLEST_GAP == 3`, not 2. **This is the best single thing the gate does.** MF-4e step 2 had to
+  relax that bound from 3 to 2 and Q-137 had to ask R0 for the relaxation by name; with the rule
+  out of `default`, the restatement of a **P1** requirement is back at full strength in the build
+  the owner runs, and the relaxed form only exists in a build asked for by name.
+* **`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack`** — ZR-2's own
+  regression test, pass.
+
+**Save states**: no field added, removed or reordered; nothing new serialised; `save_state` and
+`load_state` untouched. `NesCore::STATE_VERSION` stays at 8, and it has to: a feature that changed
+the format would make the two builds' states incompatible, and this one does not touch a field.
+No `unsafe`. `cargo fmt --check` clean and clippy `-D warnings` clean on `zax-nes` and `zax-harness`
+`--all-targets` in **four** configurations (`default`, the new feature, `parked-boards`,
+`ppu-exact-sprite-eval`), with no new `allow`.

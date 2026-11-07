@@ -30,8 +30,16 @@ vs-system = ["zax-nes/board-vs-system"]
 # above the owner's tolerance on both runs. A pass-through for the same reason `vs-system` is one:
 # Cargo cannot see a dependency's feature from a test, and
 # `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green` has to know which
-# configuration it is scoring — 129 / 147 without it, 132 / 147 with it.
+# configuration it is scoring — 128 / 147 with neither of the two PPU features, 131 / 147 with
+# this one alone.
 ppu-exact-sprite-eval = ["zax-nes/ppu-exact-sprite-eval"]
+
+# The core's `$2007`-during-rendering rule (lot MF-4e step 2), out of `default` since lot
+# MF-4e-gate — not for a figure but because R0 validates by eye what it changes in Super Mario
+# Bros. 3 and Zelda II first. A pass-through for the same reason the two above are:
+# `req_core_110_accuracy_coin_keeps_the_rows_mf_4b_to_mf_4e_turned_green` has to know which
+# configuration it is scoring, and this feature is worth exactly one row of it.
+ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 
 [dependencies]
 serde_json.workspace = true
