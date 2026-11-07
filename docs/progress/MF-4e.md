@@ -54,6 +54,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 * [x] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
 * [x] **6/7** — the check: fmt, clippy, the suites, the ignored suite, the campaign row by row
   against MF-VS's 331, golden-core over the commercial originals.
+* [x] **7/7** — the journal, and the final pass on the committed tree.
 
 ## Step 0 — the plan
 
@@ -601,3 +602,24 @@ which takes the next free number and marks its choice provisional.
    OAMADDR at eight or more.
 4. **`board-vs-system` stays parked** at the same figure MF-VS measured, and §5.17 records that the
    cost is in the VS layer's struct and load-time question rather than in the dot loop's shape.
+
+## Step 7 — the journal, and the final pass on the committed tree
+
+`G:/3dsen/cleanroom/journal/JOURNAL.md` gains the lot's entry: role, date, folders consulted, what
+is delivered, what is parked and at what figure, the four ROMs whose pictures move, the checks, the
+negative result (the OAM address bug built and removed), the disk-space note, the deliverables and
+the open items.
+
+Re-run on the committed tree, nothing uncommitted:
+
+| configuration | `cargo fmt --check` | clippy `-D warnings` | `cargo test --release -p zax-nes -p zax-harness` |
+| --- | --- | --- | --- |
+| `default` | clean | clean | **926 passed, 0 failed, 8 ignored** |
+| `--features parked-boards` | clean | clean | **978 passed, 0 failed, 8 ignored** |
+| `--features ppu-exact-sprite-eval` | clean | clean | **926 passed, 0 failed, 8 ignored** |
+
+Six clean `git archive` builds were made over the lot — `4e-0-11407930`, `4e-s2`, `4e-s2b`,
+`4e-1-s3`, `4e-2-gated`, `4e-3-vson`, plus one for golden-core with the feature on — each in a fresh
+directory with its own `CARGO_TARGET_DIR`, each deleted as soon as its binary was copied out. G:
+stayed between 18 and 17 GB free throughout, above the brief's 5 GB floor, and the callgrind dumps
+were deleted as their figures were read.
