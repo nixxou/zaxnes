@@ -52,7 +52,7 @@ Out of scope, named so the tally is accounted for: `APU Register Activation` 6, 
 * [x] **4/7** — performance: both runs, the post-LTO checks, and the feature if the tolerance says
   so. `Ppu2C02::read`'s +11 instructions while the function is open.
 * [x] **5/7** — the VS. System re-measured; into `default` if it is within tolerance on both runs.
-* [ ] **6/7** — the check: fmt, clippy, the suites, the ignored suite, the campaign row by row
+* [x] **6/7** — the check: fmt, clippy, the suites, the ignored suite, the campaign row by row
   against MF-VS's 331, golden-core over the commercial originals.
 
 ## Step 0 — the plan
@@ -501,3 +501,103 @@ the dot loop's shape — which is what MF-VS's probes A and C had already pointe
 `board-vs-system` **stays parked**, `BOARD-FEATURES.md` records the re-measurement in its row, and
 `PERFORMANCE-HISTORY.md` gains **§5.17**, whose first finding is the ratio that frames this whole
 lot: `run_dots` is 57 % to 62 % of `NesCore::run_frame` on all five level-2 games.
+
+## Step 6 — the check, in all three configurations
+
+### fmt, clippy and the suites
+
+| check | `default` | `--features parked-boards` | `--features ppu-exact-sprite-eval` |
+| --- | --- | --- | --- |
+| `cargo fmt --check` | clean | clean | clean |
+| clippy `-D warnings` on `zax-nes` and `zax-harness`, `--all-targets` | clean, **no new `allow`** | clean | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **926 / 0 / 8** | **978 / 0 / 8** | **926 / 0 / 8** |
+| `--ignored --no-fail-fast`, both ROM folders | **7 of 8** | **7 of 8** | **7 of 8** |
+
+MF-VS's counts were 925 / 0 / 8 and 977 / 0 / 8; the +1 in each is
+`amd_021_r2_005_a_2007_read_while_fetching_moves_the_next_lines_row_and_not_this_lines`, the test
+step 2 added. The one ignored failure in every configuration is
+`builtin_patches::tests::the_zelda_ii_patch_applies_to_the_usa_rom`, which the brief puts out of
+scope and which fails identically on the baseline.
+
+The two ignored tests the brief names by name both pass in all three configurations:
+**`amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line`** and
+**`zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack`**.
+
+### The campaign, row by row against MF-VS's 331
+
+`zax-harness test-roms` over `assets-free/test-roms`, compared field by field with MF-VS's
+campaign (ignoring `ms`, wall clock, and `shot`):
+
+    331 ROMs, 214 pass, 5 fail, 0 timeout, 1 unsupported, 111 manual
+
+**identical totals to MF-VS's, in both configurations** — the summary objects compare equal as
+objects. The rows that differ:
+
+| configuration | rows | which, and why |
+| --- | ---: | --- |
+| `default` | **2** | `AccuracyCoin` 128 → **129** (`$2007 read w/ rendering` green, step 2); `Duelito` screen, a `manual` row with no documented verdict |
+| `ppu-exact-sprite-eval` | **4** | `AccuracyCoin` 128 → **132** (three more rows, step 3); `Duelito`; **`rastesam4.nes`**; **`read2004.nes`** |
+
+**No verdict falls in either configuration.** Duelito, `rastesam4` and `read2004` are all `manual`
+rows — the campaign records their screen and has no documented verdict for them — which is why the
+totals do not move. And each is named by what changed it: Duelito reads `$2007` while the PPU is
+fetching, which is step 2's rule; `read2004.nes` is the `$2004`-read test ROM, which is step 3's
+copy buffer by name; `rastesam4.nes` is an MMC3 raster demo whose sprites it moves.
+
+Within the `AccuracyCoin` row, `.detail.tests` moves on **one** key in `default` and **four** in the
+feature build; the other 146 and 143 are unchanged.
+
+### golden-core, every ROM whose pixels change named
+
+`golden-core` over the 18 commercial originals at 120 frames and the 331 free ROMs at 1 200 frames,
+on clean `git archive` builds:
+
+| set | baseline → **default** | **default** → **feature on** |
+| --- | --- | --- |
+| 18 commercial, 120 frames | **3 rows**: `Super Mario Bros. 3 (USA)`, `Zelda II (USA)`, `Zelda II (Europe)` | **0 — `diff` clean** |
+| 331 free, 1 200 frames | **1 row**: `nes-test-roms/other/Duelito.nes` | **2 rows**: `rastesam4.nes`, `read2004.nes` |
+
+**Four ROMs move between the baseline and the shipped default, and all four are step 2's rule.**
+SMB3, both Zelda II dumps and Duelito are exactly the set MF-4d step 7 named as moved by the
+`$2007`-during-rendering rule, and golden-core runs with no hack code, so nothing else can account
+for them. Their `v` genuinely moves by a row where it used to move by one byte, and every fetch
+after it on that line reads the new address. SMB3's captured-tile count is unchanged at **960** and
+both Zelda II dumps' at **1 086** — only the contents move, which is the difference between this
+lot's rule and MF-4d's (which added a row) or the variant that lost one (928).
+
+**The exact pipeline moves no commercial original at all** — `diff` clean over all 18 — and two free
+ROMs, both of them test ROMs for the very behaviour it changes. `rastesam4.nes` moves on audio as
+well as pixels, which is expected of an MMC3 raster demo whose IRQ timing follows its sprites.
+
+**And the default build is identical where the feature is off**, which step 4 established three
+ways: set total −91 994 (−0.000 %) against step 2 alone, every pinned symbol identical to the
+instruction on five ROMs, and `golden-core` default against feature-on moving zero of the 18
+commercial rows.
+
+### Save states
+
+No field added, removed or reordered; nothing new serialised; `save_state` and `load_state`
+untouched. **The format does not move**, and `NesCore::STATE_VERSION` stays at 8. The two fields
+step 3 adds, `secondary_oam_addr` and `sprite_in_range`, are deliberately **not** in the blob: they
+are alive only between dots 65 and 256 of a visible line, dot 65 assigns both unconditionally, and a
+state is taken between frames — so a new format version would have been spent on two values that are
+always 0 where a block can be written. Both carry that reasoning as a doc comment, and both are
+themselves behind the feature.
+
+No `unsafe`. Nothing under `G:/3dsen/cleanroom/spec/` was edited except the new ticket **Q-137**,
+which takes the next free number and marks its choice provisional.
+
+## What this lot leaves open
+
+1. **Q-137** needs R0: the reading of R2-005's exception (the nature of the increment, not its
+   instant), and the one assertion the lot relaxed, `smallest_gap >= 3` → `>= 2`.
+2. **Six `AccuracyCoin` rows** remain in scope and unwon: `Stale Sprite Shift Regs` 3,
+   `Stale BG Shift Registers` 3, `BG Serial In` 2, `ALE + Read` 2, `Hybrid Addresses` 2 and the two
+   stress tests. They need the per-slot X counters and 8-bit shifters that would replace
+   `rebuild_sprite_line` on the per-pixel path — a lot of its own, with its own feature and its own
+   measurement, sized by step 1's ratio: `run_dots` is 57 % to 62 % of the core.
+3. **`OAM Corruption`** wants the `$2003`-write mechanism, not the frame-start one step 3 built and
+   removed; a lot that takes it must also revisit the eleven requirement-test fixtures that leave
+   OAMADDR at eight or more.
+4. **`board-vs-system` stays parked** at the same figure MF-VS measured, and §5.17 records that the
+   cost is in the VS layer's struct and load-time question rather than in the dot loop's shape.
