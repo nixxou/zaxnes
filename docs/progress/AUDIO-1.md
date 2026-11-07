@@ -37,7 +37,7 @@ sample ring: the emulation core, the resampler and the filters are untouched.
       device clock; main-thread stalls.
 - [x] **9. Measurements.** Main-thread frame time before and after, 2D and 3D, desktop release
       build; golden-core byte-identical to `v0.4.2`; Android and PortMaster `cargo check`.
-- [ ] **10. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
+- [x] **10. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
       with the ROM variables, journal entry.
 
 ## Design
@@ -462,3 +462,81 @@ above.
 The four profiler logs are in the session scratchpad (`bench/before-2d.log`, `before-3d.log`,
 `after-2d.log`, `after-3d.log`); the extracted `v0.4.2` tree was deleted afterwards (G: back to
 18 GB free).
+
+### Step 10 — the final pass
+
+* `cargo fmt --check` — clean.
+* `cargo clippy -p zax-platform -p zax-settings -p zax-app --all-targets --features
+  zax-app/bundled -- -D warnings` — clean. No `#[allow]` was added to silence anything: the one
+  that exists (`dead_code` on the `Running::audio` field) says that the field is the device's
+  RAII handle, and the two `too_many_lines` warnings the new host fields caused were fixed by
+  removing duplicated state rather than by an allow.
+* `cargo test --release --no-fail-fast -p zax-platform -p zax-settings -p zax-app --features
+  zax-app/bundled -- --include-ignored`, with `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+  `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`:
+  **810 passed, 0 failed, 0 ignored** across 51 test binaries. Nothing was left vacuous: the
+  ignored count came out at zero, so every ROM-gated test really ran.
+* **golden-core: byte-identical to `v0.4.2`**, re-run on the final tree
+  (`6ae5cd1dd246d67dc330e9a690aac15f1c5356fc55ff1ed5a048e51662906daa`, 98 ROMs). `git diff v0.4.2`
+  over `zax-nes`, `zax-harness`, `zax-goldens`, `zax-engine3d`, `zax-render`, `zax-profiles` and
+  `zax-scripting` is empty: the core, the 3D engine and the renderer were not touched at all.
+* **Frame time: the change costs nothing and is on by default.** See step 9 for the table; the
+  audio stage went from 0,01-0,02 ms to 0,00 ms of mean per displayed frame, in 2D and in 3D.
+  There is nothing to put behind an option.
+
+## What the owner should listen for
+
+1. **The pops themselves.** Play the games where they were worst, and especially with
+   `video.half_rate_3d` on — the 33,3 ms frames of that mode were at or past the whole output
+   buffer of v0.4.2, so it should be the clearest difference.
+2. **Pausing and resuming.** The sound should now *stop* rather than be cut: a 6 ms ramp instead
+   of the ring running dry mid-note. On resume it fades in over the same 6 ms after a 60 ms wait.
+3. **Rewind (`,`) and quick load.** A short dip, about 30 ms, with a ramp at each end; no click
+   and no fragment of the moment before.
+4. **A loud game with expansion audio** (VRC6, N163, VRC7). Nothing changed there deliberately —
+   see the note on headroom below — so it should sound exactly as before.
+5. **The menu music and the interface sounds.** Unchanged in level and in behaviour; the only
+   difference is that they are produced 48 ms ahead instead of up to 43 ms, which is within the
+   same order.
+6. **`audio.latency_ms`** in Options → Audio. 60 ms is the default. Lower it until the pops come
+   back to find this machine's floor; raise it if a heavy 3D scene still stutters. Above about
+   138 ms at 48 kHz it is clamped by the core's ring and the log says so (Q-153 §3).
+
+## How to read the new counters
+
+Press **F12** for the performance overlay; the audio line sits under the mixer's:
+
+```
+latency 57.0 / 60 ms  [46-68 ms]  rate -0.005 %  underruns 0
+```
+
+| field | meaning | what is healthy |
+|---|---|---|
+| `latency a / b` | the fill the audio thread measured, averaged over a second, against `audio.latency_ms` | `a` within two or three milliseconds of `b` |
+| `[low-high]` | the least and the most the ring held over the **last complete second** | straddling the target by about one emulated frame either side (±11 ms at 60 Hz); a low falling towards 0 means the main thread is being starved and the latency wants raising |
+| `rate ±x %` | the correction being asked of the core's resampler | settles at this machine's clock offset, a few hundredths of a percent; pinned at ±0,250 % or beyond means the controller is saturated |
+| `underruns n` | droughts of the console signal since the device opened | **0**. Any increase is a pop, and now a ramped one rather than a block of zeros |
+| `prefilling` | appears while the gate is shut | only at a game start, a resume, a state load or a rewind, and only for a few tens of milliseconds |
+
+With the frame profiler on (`ZAXNES_PROFILE=1`, or Options → Interface → profiler) the same line
+goes to the log once a second, prefixed `audio`.
+
+## Headroom: left alone, and why
+
+Finding 5 is real — the APU's `OUTPUT_GAIN` of 1,526 plus expansion audio plus the high-pass
+overshoot can reach the ±1 clamp — but the work order allows the fix only "if it changes no
+golden", and neither candidate passes that test against the **spec** rather than the goldens:
+
+* a fixed −3 dB breaks REQ-AUD-006 and test vector A1, which say the gain at `V = 1` is exactly
+  1 and a peak of *x* comes out at *x*;
+* a soft limiter with a knee below full scale alters samples in, say, 0,8 to 1,0 that were never
+  clipped, which is an audible change to every loud game and not a bug fix.
+
+So the hard clamp of SPEC-11 §4 stays. What *was* fixed is the other half of finding 5: the gain
+is now applied **per sample** by the audio thread instead of once per 512-frame block, so a fade
+is no longer a staircase of 10,7 ms steps, and the final clamp happens once on the sum of the
+console and the programme instead of twice.
+
+If the owner does hear clipping on a specific expansion-audio game, the right lever is a
+limiter **behind an option that is off by default** — which this lot deliberately did not add,
+because no such clipping was reported.
