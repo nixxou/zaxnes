@@ -15,6 +15,7 @@
     feature = "board-144",
     feature = "board-145",
     feature = "board-149",
+    feature = "board-190",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-nina03",
@@ -47,7 +48,8 @@ use super::Sachen8Reg;
     feature = "board-143",
     feature = "board-144",
     feature = "board-145",
-    feature = "board-149"
+    feature = "board-149",
+    feature = "board-190"
 ))]
 use super::SingleLatch;
 #[cfg(feature = "board-vs-system")]
@@ -153,7 +155,8 @@ pub enum DecodeBoard {
         feature = "board-143",
         feature = "board-144",
         feature = "board-145",
-        feature = "board-149"
+        feature = "board-149",
+        feature = "board-190"
     ))]
     SingleLatch(SingleLatch),
 }

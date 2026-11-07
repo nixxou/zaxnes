@@ -68,7 +68,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
     feature = "board-143",
     feature = "board-144",
     feature = "board-145",
-    feature = "board-149"
+    feature = "board-149",
+    feature = "board-190"
 ))]
 use super::mappers::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-taito-x1")]
@@ -249,6 +250,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     187,
     #[cfg(feature = "board-189")]
     189,
+    #[cfg(feature = "board-190")]
+    190,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
     #[cfg(feature = "board-mmc3-chrram")]
@@ -555,6 +558,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-nina03")]
         79 | 146 => BoardMemorySizes {
             prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 190"), its *Banks* section's first line: "CPU $6000-$7FFF: 8 KiB
+        // RAM". The page has no capacity table at all -- it is one of the shortest in the census
+        // -- so the `Banks` list is the only statement of the board's memories, and it states
+        // this one. The figure is what REQ-CORE-012's default would give an iNES 1.0 image
+        // anyway; it is stated because the page states it and byte 8 of an iNES 1.0 header
+        // cannot be trusted to (MF-UNL-3 step 4). The page says nothing about a battery, so a
+        // dump's own battery bit decides, as it does for every board here.
+        #[cfg(feature = "board-190")]
+        190 => BoardMemorySizes {
+            prg_ram: Some(BankWindows::PRG_WINDOW_SIZE),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 038"): "PRG RAM capacity: **None**", and here the window is in
@@ -921,6 +936,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         149 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
             memory,
             LatchBoard::Sachen149,
+        ))),
+        // MF-UNL-3 step 4: the last of the seven, and the only one with more than one window.
+        #[cfg(feature = "board-190")]
+        190 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Zemina190,
         ))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by

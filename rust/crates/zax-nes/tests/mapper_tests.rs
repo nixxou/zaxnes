@@ -134,7 +134,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   feature per board that costs (MF-UNL-3 step 2);
     // * 143 (the Sachen TCA-01, an NROM board whose only register is a protection read) and 144
     //   (the AGCI 50282 of Death Race, mapper 11's board with a 300 ohm resistor on CPU D0), two
-    //   more of the same variant, behind `board-143` and `board-144` (MF-UNL-3 step 3).
+    //   more of the same variant, behind `board-143` and `board-144` (MF-UNL-3 step 3);
+    // * 190 (the Zemina board of Magic Kid Googoo), the last of that variant's seven and the
+    //   only one with more than one window, behind `board-190` (MF-UNL-3 step 4).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -157,7 +159,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
-    let additions: [(i32, bool); 83] = [
+    let additions: [(i32, bool); 84] = [
         (19, true),
         (24, true),
         (26, true),
@@ -233,6 +235,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (185, small),
         (187, scramble),
         (189, cfg!(feature = "board-189")),
+        (190, cfg!(feature = "board-190")),
         (192, chrram),
         (194, chrram),
         (195, chrram),
@@ -7815,4 +7818,137 @@ fn req_core_102_mapper_144_lets_the_roms_bit_0_win_its_bus_conflict() {
             "{address:#06X} is no register"
         );
     }
+}
+
+/// nesdev ("INES Mapper 190"), the Zemina board of *Magic Kid Googoo* — the one board of this
+/// lot's seven with more than one window (MF-UNL-3 step 4):
+///
+/// ```text
+/// CPU $6000-$7FFF:  8 KiB RAM
+/// CPU $8000-$BFFF:  16 KiB switchable PRG ROM bank
+/// CPU $C000-$FFFF:  16 KiB PRG ROM, fixed to the FIRST bank
+/// PPU $0000-$1FFF:  four 2 KiB switchable CHR ROM banks
+///
+/// CHR bank select ($A000-$BFFF):  A~[101. .... .... ..bb]  D~[CCCC CCCC]
+/// PRG bank select ($8000-$9FFF, $C000-$DFFF):  A~[1P0. .... .... ....]  D~[.... .PPP]
+/// ```
+///
+/// Three things this test exists to pin, each of which an implementation could plausibly get
+/// wrong: the fixed window is the **first** bank and not the last; `P` is an **address** line
+/// (A14), so the same data byte selects two different banks from the two ports; and `bb` is the
+/// address's A1-A0, so one byte reaches one 2 KiB window.
+#[cfg(feature = "board-190")]
+#[test]
+fn req_core_102_mapper_190_banks_three_windows_from_two_ports() {
+    let mut core = MapperRom::new(190).prg(32).chr(64).load();
+
+    // Power-on: PRG bank 0 at $8000-$BFFF and the **first** bank fixed at $C000-$FFFF, so the
+    // four 8 KiB windows are 0, 1, 0, 1 — which is what separates this board from every
+    // UxROM-like one in this build, where they would be 0, 1, 30, 31.
+    assert_eq!([0, 1, 0, 1], core.prg_windows());
+    // All four CHR registers power on at 0, so each 2 KiB window shows 2 KiB bank 0 — the eight
+    // 1 KiB windows are four copies of banks 0 and 1 and not a linear layout.
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
+
+    // `[.... .PPP]` at $8000-$9FFF: three bits, the low eight 16 KiB banks.
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([10, 11, 0, 1], core.prg_windows(), "16 KiB bank 5");
+    core.mapper_write(0x9FFF, 0x07);
+    assert_eq!([14, 15, 0, 1], core.prg_windows(), "the whole port, bank 7");
+
+    // **`P` is A14.** The same data byte written to $C000-$DFFF selects bank 8 + 7 = 15, not 7.
+    core.mapper_write(0xC000, 0x07);
+    assert_eq!(
+        [30, 31, 0, 1],
+        core.prg_windows(),
+        "bank 15: `P` came from A14"
+    );
+    core.mapper_write(0xD000, 0x00);
+    assert_eq!([16, 17, 0, 1], core.prg_windows(), "bank 8, not bank 0");
+
+    // A13 set is neither port, so $E000-$FFFF and $A000's PRG field reach nothing.
+    core.mapper_write(0xE000, 0x03);
+    assert_eq!([16, 17, 0, 1], core.prg_windows(), "$E000 is no PRG port");
+    core.mapper_write(0xFFFF, 0x03);
+    assert_eq!([16, 17, 0, 1], core.prg_windows(), "nor is $FFFF");
+
+    // `bb` is A1-A0 of the address, and the byte is a whole 2 KiB bank number: four ports, four
+    // windows, each of two 1 KiB halves.
+    core.mapper_write(0xA000, 0x04);
+    assert_eq!([8, 9, 0, 1, 0, 1, 0, 1], core.chr_windows(), "window 0");
+    core.mapper_write(0xA001, 0x05);
+    assert_eq!([8, 9, 10, 11, 0, 1, 0, 1], core.chr_windows(), "window 1");
+    core.mapper_write(0xA002, 0x06);
+    assert_eq!([8, 9, 10, 11, 12, 13, 0, 1], core.chr_windows(), "window 2");
+    core.mapper_write(0xBFFF, 0x07);
+    assert_eq!(
+        [8, 9, 10, 11, 12, 13, 14, 15],
+        core.chr_windows(),
+        "window 3, from $BFFF — the port is the whole of $A000-$BFFF"
+    );
+
+    // The CHR port is not the PRG port: A13 set is what tells them apart.
+    assert_eq!(
+        [16, 17, 0, 1],
+        core.prg_windows(),
+        "the PRG bank did not move"
+    );
+
+    // Nothing below $8000 is a register: the board's $6000-$7FFF is RAM, which
+    // `board_memory_sizes` gives it on the page's own "CPU $6000-$7FFF: 8 KiB RAM".
+    core.write_memory(0x6000, 0x42);
+    assert_eq!(0x42, core.read_memory(0x6000), "8 KiB of RAM at $6000");
+    for address in [0x4100u16, 0x6000, 0x7FFF] {
+        core.mapper_write(address, 0x03);
+        assert_eq!(
+            [16, 17, 0, 1],
+            core.prg_windows(),
+            "{address:#06X} is no register"
+        );
+    }
+}
+
+/// REQ-CORE-090/091 and REQ-CORE-004 for mapper 190, the one board of `SingleLatch` whose state
+/// is five bytes and not one: the 16 KiB PRG bank **and** the four 2 KiB CHR registers
+/// (MF-UNL-3 step 4).
+///
+/// It is not in `req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied`'s
+/// table because that table is one port and one byte per board. The four CHR registers are what
+/// this test exists for: it dirties all five, saves, dirties all five differently, loads, and
+/// requires every window back — which is the shape MF-UNL-2 step 6 found necessary when a
+/// round-trip that only saves and loads passed on a board whose appended byte never reached the
+/// state at all.
+#[cfg(feature = "board-190")]
+#[test]
+fn req_core_090_mapper_190_round_trips_its_prg_bank_and_its_four_chr_registers() {
+    let mut core = MapperRom::new(190).prg(32).chr(64).load();
+    core.mapper_write(0xC000, 0x03); // PRG bank 11, through the high port.
+    for slot in 0u16..4 {
+        core.mapper_write(0xA000 | slot, 0x0C + slot as u8);
+    }
+    let banks = (core.prg_windows(), core.chr_windows());
+    assert_eq!([22, 23, 0, 1], banks.0);
+    assert_eq!([24, 25, 26, 27, 28, 29, 30, 31], banks.1);
+
+    let state = core.save_state(true).unwrap();
+
+    // Dirty all five differently, so that a field missing from the block cannot pass.
+    core.mapper_write(0x8000, 0x01);
+    for slot in 0u16..4 {
+        core.mapper_write(0xA000 | slot, slot as u8);
+    }
+    assert_ne!(banks, (core.prg_windows(), core.chr_windows()));
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(banks, (core.prg_windows(), core.chr_windows()));
+    assert_eq!(state, core.save_state(true).unwrap());
+
+    core.reset();
+    assert_eq!(
+        [0, 1, 0, 1],
+        core.prg_windows(),
+        "bank 0, and the first bank fixed"
+    );
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
 }

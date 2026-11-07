@@ -35,11 +35,15 @@ pub enum LatchBoard {
     /// Mapper 149, the Sachen SA-0036 of *Taiwan Mahjong 16*.
     #[cfg(feature = "board-149")]
     Sachen149,
+    /// Mapper 190, the Zemina board of *Magic Kid Googoo* — the one of the seven with more than
+    /// one window.
+    #[cfg(feature = "board-190")]
+    Zemina190,
 }
 
-/// iNES mappers **38, 107, 143, 144, 145 and 149** (and, from step 4, **190**): the seven boards
-/// of lot MF-UNL-3 that are one latch each, **sharing one [`super::DecodeBoard`] variant** in the
-/// manner MF-6a step 2 established for [`super::SmallBoard`] (MF-UNL-3 steps 2 to 4).
+/// iNES mappers **38, 107, 143, 144, 145, 149 and 190**: the seven boards of lot MF-UNL-3 that
+/// are one latch each, **sharing one [`super::DecodeBoard`] variant** in the manner MF-6a step 2
+/// established for [`super::SmallBoard`] (MF-UNL-3 steps 2 to 4).
 ///
 /// One board per feature, one feature per `LatchBoard` variant, and the whole of what each
 /// number's own nesdev page documents:
@@ -52,6 +56,7 @@ pub enum LatchBoard {
 /// | 144 | AGCI 50282 | $8000-$FFFF | mapper 11's `[CCCC PPPP]`, latched through a bus conflict in which **the ROM's bit 0 always wins** |
 /// | 145 | Sachen SA-72007 | $4100, mask $E100 | `[C... ....]` — one 8 KiB CHR bank bit, at **bit 7** |
 /// | 149 | Sachen SA-0036 | $8000, mask **$8000** | the same bit, moved onto the PRG window, so **with bus conflicts** |
+/// | 190 | Zemina | $8000-$9FFF, $A000-$BFFF, $C000-$DFFF | three windows: a 16 KiB PRG bank whose top bit is **the address's A14**, four 2 KiB CHR banks picked by the address's A1-A0, and 16 KiB fixed to the **first** bank |
 ///
 /// # Why one variant, and why a field
 ///
@@ -79,8 +84,16 @@ pub enum LatchBoard {
 pub struct SingleLatch {
     banks: BankWindows,
     /// The one latch. Each board masks it to the field its own page draws, so the byte is the
-    /// register and not the written value.
+    /// register and not the written value. On mapper 190 it is the four-bit 16 KiB PRG bank,
+    /// the high bit of which comes from the address and not from the data.
     register: u8,
+    /// **Mapper 190's four 2 KiB CHR registers**, and nothing on the other six.
+    ///
+    /// In the family's one block, which is what sharing a variant means: [`super::Jv001`] keeps
+    /// mapper 36's CHR latch in all six of its numbers' savestates for the same reason, and
+    /// four bytes is what a seven-board variant costs the six that do not use them. Every board
+    /// here is new in this lot, so no existing savestate format moves (REQ-CORE-090).
+    chr: [u8; 4],
     /// Which of the seven boards this is.
     board: LatchBoard,
 }
@@ -90,6 +103,7 @@ impl SingleLatch {
         let mut latch = Self {
             banks: windows_for(memory),
             register: 0,
+            chr: [0; 4],
             board,
         };
         latch.update_banks();
@@ -157,6 +171,23 @@ impl SingleLatch {
                 self.banks.map_prg_32k(0);
                 self.banks.map_chr_8k((register >> 7) & 0x01);
             }
+            // nesdev ("INES Mapper 190"), the three windows of its *Banks* section:
+            //
+            //     CPU $8000-$BFFF: 16 KiB switchable PRG ROM bank
+            //     CPU $C000-$FFFF: 16 KiB PRG ROM, fixed to the FIRST bank
+            //     PPU $0000-$1FFF: four 2 KiB switchable CHR ROM banks
+            //
+            // The fixed window is **bank 0** and not the last bank, which is what separates this
+            // board from every UxROM-like one in this build; the four CHR registers hold whole
+            // bytes, the page's `D~[CCCC CCCC]`.
+            #[cfg(feature = "board-190")]
+            LatchBoard::Zemina190 => {
+                self.banks.map_prg_16k(0, register & 0x0F);
+                self.banks.map_prg_16k(2, 0);
+                for slot in 0..4 {
+                    self.banks.map_chr_2k(slot * 2, i32::from(self.chr[slot]));
+                }
+            }
         }
     }
 }
@@ -178,21 +209,26 @@ impl Mapper for SingleLatch {
             LatchBoard::Sachen145 => 145,
             #[cfg(feature = "board-149")]
             LatchBoard::Sachen149 => 149,
+            #[cfg(feature = "board-190")]
+            LatchBoard::Zemina190 => 190,
         }
     }
 
     fn save_registers(&self, writer: &mut StateWriter) {
         writer.write_u8(self.register);
+        writer.write_raw(&self.chr);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         // The windows themselves are in the block `Mapper::save_state` wrote before this one.
         self.register = reader.read_u8()?;
+        reader.read_into(&mut self.chr)?;
         Ok(())
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
         self.register = 0;
+        self.chr = [0; 4];
         self.update_banks();
     }
 
@@ -203,6 +239,32 @@ impl Mapper for SingleLatch {
     #[cfg_attr(not(feature = "board-144"), allow(unused_variables))]
     #[inline(never)]
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        // **Mapper 190 is the one board here with two registers**, so it is decoded before the
+        // single-latch `match` rather than inside it (nesdev, "INES Mapper 190"):
+        //
+        //     CHR-ROM bank select ($A000-$BFFF):  A~[101. .... .... ..bb]  D~[CCCC CCCC]
+        //     PRG-ROM bank select ($8000-$9FFF, $C000-$DFFF):
+        //                                         A~[1P0. .... .... ....]  D~[.... .PPP]
+        //
+        // `bb` picks which 2 KiB window the byte lands in, and **`P` is an address line**: A14,
+        // so $8000-$9FFF writes the low eight 16 KiB banks and $C000-$DFFF the high eight. A13
+        // set is neither register, which is why $E000-$FFFF reaches nothing.
+        #[cfg(feature = "board-190")]
+        {
+            if matches!(self.board, LatchBoard::Zemina190) {
+                if address & 0xE000 == 0xA000 {
+                    self.chr[usize::from(address & 0x0003)] = value;
+                    self.update_banks();
+                } else if address & 0xA000 == 0x8000 {
+                    let high = if address & 0x4000 == 0 { 0x00 } else { 0x08 };
+                    self.register = high | (value & 0x07);
+                    self.update_banks();
+                }
+
+                return;
+            }
+        }
+
         let latched = match self.board {
             // "Bank select ($7000-$7FFF)", plus the page's *Hardware* note: "Writes to
             // $F000-$FFFF are **very likely** to also trigger a bankswitch, but well behaved

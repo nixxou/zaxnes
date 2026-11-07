@@ -52,6 +52,7 @@ default = [
     "board-144",
     "board-145",
     "board-149",
+    "board-190",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -365,6 +366,15 @@ board-145 = ["board-decode-boards"]
 # $8000, so every address in $8000-$FFFF is the register, and the AND with the ROM byte is
 # `registry::has_bus_conflicts`'s generic path.
 board-149 = ["board-decode-boards"]
+
+# Mapper 190, the Zemina board of *Magic Kid Googoo*: the one of the lot's seven with more than
+# one window. A 16 KiB PRG bank at $8000-$BFFF whose **top bit is the address's A14** -- so
+# $8000-$9FFF writes the low eight banks and $C000-$DFFF the high eight -- 16 KiB fixed to the
+# **first** bank at $C000-$FFFF, and four 2 KiB CHR banks written at $A000-$BFFF with the
+# address's A1-A0 picking the window. 8 KiB of RAM at $6000-$7FFF, which its *Banks* section
+# states and `board_memory_sizes` therefore does too. The four CHR bytes live in the shared
+# variant's one savestate block, as mapper 36's CHR latch lives in `Jv001`'s.
+board-190 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

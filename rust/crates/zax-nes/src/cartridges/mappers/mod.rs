@@ -86,7 +86,8 @@ mod sachen_8reg;
     feature = "board-143",
     feature = "board-144",
     feature = "board-145",
-    feature = "board-149"
+    feature = "board-149",
+    feature = "board-190"
 ))]
 mod single_latch;
 #[cfg(feature = "board-small-boards")]
@@ -195,7 +196,8 @@ pub use sachen_8reg::Sachen8Reg;
     feature = "board-143",
     feature = "board-144",
     feature = "board-145",
-    feature = "board-149"
+    feature = "board-149",
+    feature = "board-190"
 ))]
 pub use single_latch::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-small-boards")]

@@ -32,7 +32,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **3/9 — `board-143` and `board-144`,** the two boards of that variant that are not a bank
   latch: 143's protection read (through the `try_read_prg` forward `board-jv001` already added)
   and 144's resistor rule.
-- [ ] **4/9 — `board-190`,** the last of the seven and the only one with more than one window.
+- [x] **4/9 — `board-190`,** the last of the seven and the only one with more than one window.
 - [ ] **5/9 — the four sweeps, the save-state round trip and the feature matrix.** Each of the
   eight features alone, all eight, none, `default` and `--features parked-boards`; `cargo fmt
   --check` and clippy `-D warnings` in each.
@@ -383,4 +383,48 @@ to dirty, so the `assert_ne!` that keeps the round-trip honest could not hold.
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **970 passed, 0 failed, 9 ignored** (+2 over step 2) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |
+
+## Step 4 — `board-190`: the last of the seven, and the only one with more than one window
+
+`LatchBoard::Zemina190` and four more bytes on `SingleLatch`. The page is one of the shortest in
+the census — no capacity table at all, just a *Banks* list and two register diagrams — and three
+of its statements are the ones an implementation gets wrong:
+
+1. **The fixed window is the *first* bank.** "CPU $C000-$FFFF: 16 KiB PRG ROM, fixed to the FIRST
+   bank", so the four 8 KiB windows power on as 0, 1, **0, 1** where every UxROM-like board in
+   this build would show 0, 1, 30, 31.
+2. **`P` is an address line.** `A~[1P0. .... .... ....]` with `D~[.... .PPP]`: A14 is bit 3 of the
+   16 KiB bank number, so $8000-$9FFF writes the low eight banks and $C000-$DFFF the high eight,
+   and the *same* data byte selects two different banks from the two ports. A13 set is neither
+   port, which is why $E000-$FFFF reaches nothing.
+3. **`bb` is the address's A1-A0** and the data is a whole 2 KiB bank number, so one byte reaches
+   one of four windows.
+
+The board is decoded **before** the single-latch `match` of `write_register` rather than inside
+it, because it is the one board here with two ports; `register` carries its 16 KiB PRG bank and
+the new `chr: [u8; 4]` its four CHR registers. Those four bytes are in the **family's one
+savestate block** and are therefore paid by the six boards that do not use them — which is what
+sharing a variant means, and is what `Jv001` already does with mapper 36's CHR latch. Every board
+in the variant is new in this lot, so no existing savestate format moves.
+
+`board_memory_sizes` gains a row: **8 KiB of PRG-RAM**, on the page's own first *Banks* line
+("CPU $6000-$7FFF: 8 KiB RAM"). It is the figure REQ-CORE-012's default would give an iNES 1.0
+image anyway and is stated because the page states it.
+
+### What the tests had to notice
+
+**The power-on CHR layout of a four-register board is not linear.** All four registers are 0, so
+each 2 KiB window shows 2 KiB bank 0 and the eight 1 KiB windows read `0, 1, 0, 1, 0, 1, 0, 1` —
+four copies, not `0..7`. The first run of both tests asserted a linear layout and failed on it;
+the comment now says what the four zeroes mean.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_190_banks_three_windows_from_two_ports` | the **first** bank fixed at $C000; three bits from each PRG port and **A14 as the fourth**; $E000 and $FFFF are no port; the four CHR windows one at a time, including from $BFFF; the CHR port does not move the PRG bank; the 8 KiB of RAM at $6000 reads back what was written; nothing below $8000 is a register |
+| `req_core_090_mapper_190_round_trips_its_prg_bank_and_its_four_chr_registers` | all **five** registers dirtied, saved, dirtied differently and restored — MF-UNL-2 step 6's shape, which is what catches a field missing from the block |
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **972 passed, 0 failed, 9 ignored** (+2 over step 3) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |
