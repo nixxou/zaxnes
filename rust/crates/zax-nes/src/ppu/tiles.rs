@@ -341,10 +341,11 @@ impl Ppu2C02 {
         self.margin_palette = decoder.margin_palette(memory);
         // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
         let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
-        for (row_index, captured) in self.rows_to_decode().iter().enumerate() {
-            let Some(captured) = captured else {
-                continue;
-            };
+        let mut decoded_above = None;
+        for (row_index, ref captured, strip) in self.rows_to_decode() {
+            if strip && decoded_above != Some(row_index) {
+                continue; // A strip goes with the row above it (its number), once decoded.
+            }
             // The decoder may read the nametables, as the PPU saw them for this row: with the
             // mirroring the row was drawn with, not the one in place now that the frame is over.
             // Until 2026-11 the decoders read them with the frame's last mirroring. Ninja Gaiden
@@ -367,14 +368,15 @@ impl Ppu2C02 {
                 ..*memory
             };
             let fine_x = i32::from(captured.row.fine_x);
-            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
-            // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
+            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose pixels
+            // begin at 256 - fine X, and goes on while it starts left of the edge.
             let last = 32 + extra - i32::from(fine_x == 0);
             let mut columns = (-extra..first_centre).chain(first_right..=last);
             tiles.clear();
             if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
                 continue;
             }
+            decoded_above = Some(row_index);
             decoded_rows[row_index] = true;
             if let Some(to) = redrawn_to.get_mut(row_index).filter(|_| left_columns > 0) {
                 *to = column_x(left_columns, fine_x);
@@ -382,8 +384,6 @@ impl Ppu2C02 {
             if let Some(from) = redrawn_from.get_mut(row_index).filter(|_| first_right < 32) {
                 *from = column_x(first_right, fine_x);
             }
-            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
-            let row_number = row_index as i32;
             for &DecodedTile {
                 column,
                 tile,
@@ -398,7 +398,7 @@ impl Ppu2C02 {
                     plane1,
                     x,
                     captured.y,
-                    (row_number * row_width) + column + extra,
+                    (i32::try_from(row_index).unwrap_or(0) * row_width) + column + extra,
                     false,
                     false,
                     false,
@@ -446,18 +446,19 @@ impl Ppu2C02 {
         }
     }
 
-    /// The rows [`Ppu2C02::decode_margins`] decodes: the captured rows, and in the slot after a
-    /// captured row whose next captured row starts less than 16 lines below it but more than 8
-    /// (a split: a status bar under the playfield), the strip in between, read on with the same
-    /// scroll one tile row down. The PPU keeps a row on the line its fine Y scroll is 1, so a
-    /// strip of a few lines above a split has none, and those lines would have no margin.
-    fn rows_to_decode(&self) -> [Option<CapturedRow>; 31] {
-        let mut rows = self.captured_rows;
-        for index in 0..rows.len() - 1 {
-            let (Some(captured), None) = (self.captured_rows[index], self.captured_rows[index + 1])
-            else {
+    /// The rows [`Ppu2C02::decode_margins`] decodes, by row number and with whether each is a
+    /// strip: the captured rows, each followed, when the next captured row starts more than 8
+    /// but less than 16 lines below it (a split: a status bar under the playfield), by the strip
+    /// in between, read on with its scroll one tile row down under its number. The PPU keeps a
+    /// row on the line its fine Y scroll is 1, so a strip of a few lines above a split has none,
+    /// and those lines would have no margin.
+    fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
+        let mut rows = Vec::with_capacity(32);
+        for (index, captured) in self.captured_rows.iter().enumerate() {
+            let Some(captured) = *captured else {
                 continue;
             };
+            rows.push((index, captured, false));
             let Some(next_y) = self.captured_rows[index + 1..]
                 .iter()
                 .flatten()
@@ -471,21 +472,25 @@ impl Ppu2C02 {
                 continue;
             }
             let v = captured.row.v;
-            let coarse_y = (v >> 5) & 0x1F;
-            let v = match coarse_y {
+            let v = match (v >> 5) & 0x1F {
                 29 => (v & !0x03E0) ^ 0x0800,
                 31 => v & !0x03E0,
                 _ => v + 0x20,
             };
-            rows[index + 1] = Some(CapturedRow {
-                row: BackgroundRow {
-                    line: captured.row.line + 8,
-                    v,
-                    ..captured.row
+            let row = BackgroundRow {
+                line: captured.row.line + 8,
+                v,
+                ..captured.row
+            };
+            rows.push((
+                index,
+                CapturedRow {
+                    row,
+                    y: strip,
+                    ..captured
                 },
-                y: strip,
-                ..captured
-            });
+                true,
+            ));
         }
         rows
     }
