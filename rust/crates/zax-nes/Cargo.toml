@@ -26,6 +26,8 @@ default = [
     "board-119",
     "board-mmc3-chrram",
     "board-mmc3-scramble",
+    "board-263",
+    "board-189",
     "board-153",
     "board-155",
     "board-68",
@@ -111,6 +113,25 @@ board-mmc3-chrram = ["board-119"]
 # to make `IrqBoard` forward `Mapper::try_read_prg`, which 121's protection array and 187's
 # protection read need.
 board-mmc3-scramble = []
+
+# NES 2.0 mapper 263, the Rex Soft **UNL-KOF97** board (MF-UNL-2 step 4): an MMC3 clone with
+# "scrambled mapper address and data bits" -- A12 wired to the chip A0, and the written byte
+# permuted 76543210 -> 76243051. Two originals, *The King of Fighters 97* and
+# *Boogerman II: The Final Adventure*.
+#
+# One `IrqBoard` variant, unboxed, holding an `Mmc3` and two translations in front of it. No
+# other register: the page documents none.
+board-263 = []
+
+# Mapper 189, the TXC **01-22017-000**/**01-22018-400** and the Yoko **FC-001EM** (MF-UNL-2
+# step 5): an MMC3 clone whose PRG-ROM is banked in 32 KiB amounts by a register at $4100, so the
+# chip PRG bank lines reach nothing. Two originals and their many variants, *Thunder Warrior*
+# and *Street Fighter II: The World Warrior*.
+#
+# One `IrqBoard` variant, unboxed, holding an `Mmc3` plus one byte. The generic pirate boards of
+# the same number -- A-37 and K-3086, which move the register onto the PRG-RAM interface -- are
+# deliberately not decoded; `Mmc3Txc189` has the page paragraph that settles it.
+board-189 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

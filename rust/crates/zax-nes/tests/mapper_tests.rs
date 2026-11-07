@@ -120,7 +120,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   `board-mmc3-chrram` (MF-UNL-2 step 2);
     // * 114, 115, 121, 123, 182 and 187, the six MMC3 clones with scrambled registers, an outer
     //   CHR bank and an NROM-like PRG override -- one board with six wirings, one boxed
-    //   `IrqBoard` variant -- behind `board-mmc3-scramble` (MF-UNL-2 step 3).
+    //   `IrqBoard` variant -- behind `board-mmc3-scramble` (MF-UNL-2 step 3);
+    // * 263, the Rex Soft UNL-KOF97, behind `board-263` (MF-UNL-2 step 4);
+    // * 189, the TXC 01-22017/01-22018 and the Yoko FC-001EM, behind `board-189`
+    //   (MF-UNL-2 step 5).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -142,7 +145,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen = cfg!(feature = "board-sachen-8reg");
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
-    let additions: [(i32, bool); 73] = [
+    let additions: [(i32, bool); 75] = [
         (19, true),
         (24, true),
         (26, true),
@@ -209,6 +212,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (184, small),
         (185, small),
         (187, scramble),
+        (189, cfg!(feature = "board-189")),
         (192, chrram),
         (194, chrram),
         (195, chrram),
@@ -217,6 +221,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (210, true),
         (232, small),
         (243, sachen),
+        (263, cfg!(feature = "board-263")),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions
@@ -4831,6 +4836,257 @@ fn req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers() {
             "CHR mode 0, R0 = {value:#04X}"
         );
     }
+}
+
+// ------------------------------------------- the UNL-KOF97 (263) and the TXC 189,
+// ------------------------------------------- MF-UNL-2 steps 4 and 5
+
+/// nesdev ("NES 2.0 Mapper 263"): "The data written to the MMC3 clone has the following bit order
+/// compared to a regular MMC3:
+///
+/// ```text
+/// Written bit 76543210
+///             --------
+/// Actual bit  76243051
+/// ```
+///
+/// Which means that to get from the written data to the actual data, the following operation must
+/// be performed:
+///
+/// ```text
+/// Val = (Val & 0xD8) | ((Val & 0x20) >> 4) | ((Val & 4) << 3) | ((Val & 2) >> 1) | ((Val & 1) << 2);
+/// ```"
+///
+/// The page states the permutation **twice**, and the board implements the expression — so this
+/// test builds it from the **bit map** instead, over all 256 inputs, and the two statements prove
+/// each other. The board is read through its own CHR register, which takes the permuted byte as
+/// a 1 KiB bank number: the image has 256 numbered banks, so the byte that comes out is the byte
+/// that landed.
+#[cfg(feature = "board-263")]
+#[test]
+fn req_core_100_mapper_263_permutes_every_one_of_the_256_written_bytes() {
+    // `Actual bit 76243051` under `Written bit 76543210`: the actual value's bit at position
+    // `i` is the written value's bit at `SOURCE[i]`, positions counted from 7 down.
+    const SOURCE: [u32; 8] = [7, 6, 2, 4, 3, 0, 5, 1];
+    let expected = |written: u8| -> u8 {
+        let mut actual = 0u8;
+        for (offset, source) in SOURCE.iter().enumerate() {
+            let bit = 7 - u32::try_from(offset).unwrap_or(0);
+            if written & (1 << source) != 0 {
+                actual |= 1 << bit;
+            }
+        }
+        actual
+    };
+
+    let mut core = MapperRom::new(263).prg(16).chr(256).load();
+
+    // The **index** is permuted too -- it is a byte written to the same clone -- so selecting
+    // register 2 means writing the byte that permutes to 2, which is the first thing a test of
+    // this board has to notice.
+    let select_r2 = (0..=255u8)
+        .find(|candidate| expected(*candidate) == 0x02)
+        .expect("the permutation is a bijection on the byte");
+
+    // R2 is at PPU $1000-$13FF in CHR mode 0. The MMC3's $8000 is written at $8000 on this
+    // board -- A12 clear -- and its $8001 at $9000, A12 set.
+    for written in 0..=255u8 {
+        core.mapper_write(0x8000, select_r2);
+        core.mapper_write(0x9000, written);
+        assert_eq!(
+            expected(written),
+            peek(&core, 0x1000),
+            "263: the byte written as {written:#04X}"
+        );
+    }
+}
+
+/// nesdev ("NES 2.0 Mapper 263"): "**A12 is used for the MMC3's A0**", with the page's own
+/// eight-row table.
+///
+/// | written | `$8000` | `$9000` | `$A000` | `$B000` | `$C000` | `$D000` | `$E000` | `$F000` |
+/// | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+/// | MMC3 | `$8000` | `$8001` | `$A000` | `$A001` | `$C000` | `$C001` | `$E000` | `$E001` |
+///
+/// Checked the way the census asks the 114 scramble to be checked: the whole bank layout against
+/// a plain mapper-4 image of the same ROM, written through the scrambled pair — and then the
+/// three registers an address table alone cannot reach, `$A001`'s mirroring, `$C000`'s latch and
+/// `$E001`'s enable.
+#[cfg(feature = "board-263")]
+#[test]
+fn req_core_100_mapper_263_drives_the_mmc3s_a0_from_a12() {
+    let banks = [0x02u8, 0x04, 0x11, 0x12, 0x13, 0x14, 0x05, 0x06];
+
+    let mut reference = MapperRom::new(4).prg(16).chr(64).load();
+    for (register, value) in banks.iter().copied().enumerate() {
+        reference.mmc3_bank(u8::try_from(register).unwrap(), value);
+    }
+
+    // The permutation is on the data, so the *value* written has to be the one that permutes to
+    // what the reference wrote. `permute` is an involution on no bit in particular, so the
+    // inverse is built by search over the 256 bytes.
+    let permute = |v: u8| -> u8 {
+        (v & 0xD8) | ((v & 0x20) >> 4) | ((v & 0x04) << 3) | ((v & 0x02) >> 1) | ((v & 0x01) << 2)
+    };
+    let unpermute = |want: u8| -> u8 {
+        (0..=255u8)
+            .find(|candidate| permute(*candidate) == want)
+            .expect("the permutation is a bijection on the byte")
+    };
+
+    let mut core = MapperRom::new(263).prg(16).chr(64).load();
+    for (register, value) in banks.iter().copied().enumerate() {
+        // $8000 is at $8000 (A12 clear) and $8001 at $9000 (A12 set).
+        core.mapper_write(0x8000, unpermute(u8::try_from(register).unwrap()));
+        core.mapper_write(0x9000, unpermute(value));
+    }
+
+    assert_eq!(reference.prg_windows(), core.prg_windows(), "263: PRG");
+    assert_eq!(reference.chr_windows(), core.chr_windows(), "263: CHR");
+
+    // $A001 means the MMC3's mirroring register, and $B000 means its $A001 -- the PRG-RAM
+    // protection. So a write of 1 at $A000 is horizontal and one at $B000 is not.
+    core.mapper_write(0xA000, unpermute(0x01));
+    assert_eq!(Nm::Horizontal, core.mirroring(), "263: $A000");
+    core.mapper_write(0xA000, unpermute(0x00));
+    assert_eq!(Nm::Vertical, core.mirroring(), "263: $A000 = 0");
+
+    // $C000 means the latch, $D000 the reload and $F000 the enable: three A12 rises with a latch
+    // of 2 give one IRQ, and the same writes made at the *unscrambled* addresses give none.
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, unpermute(0x02));
+    core.mapper_write(0xD000, unpermute(0x00));
+    core.mapper_write(0xF000, unpermute(0x00));
+    for i in 0..3i64 {
+        let cart = core.cartridge_mut().unwrap();
+        cart.on_ppu_address_bus(0x0000, 10_000 + i * 100);
+        cart.on_ppu_address_bus(0x1000, 10_000 + i * 100 + 50);
+    }
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "263: $C000/$D000/$F000 are the latch, the reload and the enable"
+    );
+}
+
+/// nesdev ("INES Mapper 189"): "`D~[..PP ....]` `A~[010. ...1 .... ....]`
+/// `(Address & $E100)==$4100` … The original board variants switch four 32 KiB PRG-ROM banks
+/// based on bits 4 and 5 on writes to CPU $4100-$5FFF (address bit 9 must be set)", and for the
+/// oversize board `D~[.PPP ....]`, "PRG A17..A15".
+///
+/// The census's own wording is "a `$4100` write with A9 set switches the 32 KiB bank; one with A9
+/// clear does not" — and **"address bit 9" is A8, the ninth line**, which the page says three
+/// ways: its mask `$E100` reads A8 and not A9, its address diagram sets the bit in the nibble
+/// that is bits 11-8, and the oversize game "still writes to the original `$4132` address", which
+/// has A8 set and A9 clear. So the test is `$4100` against `$4000`.
+#[cfg(feature = "board-189")]
+#[test]
+fn req_core_100_mapper_189_banks_32_kib_of_prg_from_4100() {
+    let mut core = MapperRom::new(189).prg(32).chr(64).load();
+
+    // Power-on is bank 0, the whole of $8000-$FFFF, and the MMC3's own R6/R7 reach nothing.
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "189: the first 32 KiB");
+    core.mmc3_bank(6, 0x09);
+    core.mmc3_bank(7, 0x0A);
+    assert_eq!(
+        [0, 1, 2, 3],
+        core.prg_windows(),
+        "189: the MMC3's PRG registers reach nothing on this board"
+    );
+
+    // Bits 4-5 of the written byte, over all four banks of a 256 KiB image.
+    for bank in 0..4u8 {
+        core.mapper_write(0x4100, bank << 4);
+        let base = bank * 4;
+        assert_eq!(
+            [base, base + 1, base + 2, base + 3],
+            core.prg_windows(),
+            "189: $4100 = {:#04X}",
+            bank << 4
+        );
+    }
+
+    // The oversize board's third bit, PRG A17, which this 256 KiB image can address: banks 4-7
+    // are the second 128 KiB and no original-board image reaches them.
+    for bank in 4..8u8 {
+        core.mapper_write(0x4100, bank << 4);
+        let base = bank * 4;
+        assert_eq!(
+            [base, base + 1, base + 2, base + 3],
+            core.prg_windows(),
+            "189: the oversize board's PRG A17, $4100 = {:#04X}",
+            bank << 4
+        );
+    }
+
+    // The mask is $E100: A8 set and A15-A13 = 010. $4132 is the address the oversize game
+    // actually writes, and $4000 -- A8 clear -- is not decoded at all.
+    core.mapper_write(0x4132, 0x30);
+    assert_eq!(
+        [12, 13, 14, 15],
+        core.prg_windows(),
+        "189: $4132 is the address Mario Fighter III writes"
+    );
+    core.mapper_write(0x4000, 0x00);
+    assert_eq!(
+        [12, 13, 14, 15],
+        core.prg_windows(),
+        "189: A8 clear is not the register"
+    );
+    // And the low nibble of the byte is not the bank: that is the generic pirate boards' wiring,
+    // which this build deliberately does not decode.
+    core.mapper_write(0x4100, 0x01);
+    assert_eq!(
+        [0, 1, 2, 3],
+        core.prg_windows(),
+        "189: only the upper nibble is the bank"
+    );
+
+    // **One decode runs the original board too**, which is why the third bit is taken rather
+    // than masked away: on the 128 KiB of a *Thunder Warrior* image PRG A17 wraps, so the four
+    // banks its two bits name are the only four there are.
+    let mut small = MapperRom::new(189).prg(16).chr(64).load();
+    small.mapper_write(0x4100, 0x40);
+    assert_eq!(
+        [0, 1, 2, 3],
+        small.prg_windows(),
+        "189: PRG A17 wraps on the original board's 128 KiB"
+    );
+    small.mapper_write(0x4100, 0x30);
+    assert_eq!(
+        [12, 13, 14, 15],
+        small.prg_windows(),
+        "189: and its own two bits reach all four banks"
+    );
+
+    // Everything else is a stock MMC3: its CHR banking, its mirroring and its counter.
+    core.mmc3_bank(2, 0x07);
+    assert_eq!(
+        7,
+        core.chr_bank(0x1000),
+        "189: the MMC3's CHR banking is intact"
+    );
+    core.mapper_write(0xA000, 0x01);
+    assert_eq!(
+        Nm::Horizontal,
+        core.mirroring(),
+        "189: and its mirroring register"
+    );
+
+    // The counter is built although *Thunder Warrior*'s 28-pin PT8154 has none: nothing in an
+    // image distinguishes the two boards, and a dump that never writes $C000-$E001 never sees it.
+    core.write_memory(0x2001, 0x00);
+    core.mapper_write(0xC000, 0x02);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for i in 0..3i64 {
+        let cart = core.cartridge_mut().unwrap();
+        cart.on_ppu_address_bus(0x0000, 10_000 + i * 100);
+        cart.on_ppu_address_bus(0x1000, 10_000 + i * 100 + 50);
+    }
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "189: the fully functional MMC3 clone Street Fighter II needs"
+    );
 }
 
 // ------------------------------------------- the six scrambled MMC3 clones (114, 115, 121,

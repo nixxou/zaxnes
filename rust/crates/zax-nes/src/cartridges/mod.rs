@@ -370,9 +370,11 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 158
             | 182
             | 187
+            | 189
             | 192
             | 194
             | 195
+            | 263
     )
 }
 
@@ -398,9 +400,11 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 158
             | 182
             | 187
+            | 189
             | 192
             | 194
             | 195
+            | 263
     )
 }
 
@@ -1249,8 +1253,13 @@ mod tests {
         expected.extend_from_slice(&[158, 158]);
         #[cfg(feature = "board-mmc3-scramble")]
         expected.extend_from_slice(&[182, 182, 187, 187]);
+        // MF-UNL-2 steps 4 and 5: the UNL-KOF97 and the TXC 189, both of which hold an `Mmc3`.
+        #[cfg(feature = "board-189")]
+        expected.extend_from_slice(&[189, 189]);
         #[cfg(feature = "board-mmc3-chrram")]
         expected.extend_from_slice(&[192, 192, 194, 194, 195, 195]);
+        #[cfg(feature = "board-263")]
+        expected.extend_from_slice(&[263, 263]);
         assert_eq!(
             moved, expected,
             "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \

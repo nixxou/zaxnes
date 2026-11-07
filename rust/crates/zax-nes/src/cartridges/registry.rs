@@ -18,10 +18,14 @@ use super::mappers::IremLrog017;
 use super::mappers::Jv001;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
+#[cfg(feature = "board-263")]
+use super::mappers::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::mappers::Mmc3Scramble;
+#[cfg(feature = "board-189")]
+use super::mappers::Mmc3Txc189;
 #[cfg(feature = "board-namcot108")]
 use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
@@ -216,6 +220,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     185,
     #[cfg(feature = "board-mmc3-scramble")]
     187,
+    #[cfg(feature = "board-189")]
+    189,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
     #[cfg(feature = "board-mmc3-chrram")]
@@ -233,6 +239,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     232,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    #[cfg(feature = "board-263")]
+    263,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -852,6 +860,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         114 | 115 | 121 | 123 | 182 | 187 => Board::IrqBoard(IrqBoard::Mmc3Scramble(Box::new(
             Mmc3Scramble::new(memory, mapper)?,
         ))),
+        // MF-UNL-2 step 4: the Rex Soft UNL-KOF97, an MMC3 with its register address and its
+        // written data permuted and nothing else. A12 drives the chip's A0.
+        #[cfg(feature = "board-263")]
+        263 => Board::IrqBoard(IrqBoard::Mmc3Kof97(Mmc3Kof97::new(memory))),
+        // MF-UNL-2 step 5: the TXC 01-22017/01-22018 and the Yoko FC-001EM, an MMC3 whose
+        // PRG-ROM is banked in 32 KiB amounts from $4100. The generic pirate variants of the
+        // same number are deliberately not decoded; `Mmc3Txc189`'s own note has the page's
+        // paragraph that settles it.
+        #[cfg(feature = "board-189")]
+        189 => Board::IrqBoard(IrqBoard::Mmc3Txc189(Mmc3Txc189::new(memory))),
         // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two
         // numbers differ only in what the outer register's bits drive, which is a field test
         // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.

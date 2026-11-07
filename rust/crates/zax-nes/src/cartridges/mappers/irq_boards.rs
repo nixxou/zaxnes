@@ -1,9 +1,13 @@
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
+#[cfg(feature = "board-263")]
+use super::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::Mmc3Multicart;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::Mmc3Scramble;
+#[cfg(feature = "board-189")]
+use super::Mmc3Txc189;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
 #[cfg(feature = "board-116")]
@@ -131,6 +135,20 @@ pub enum IrqBoard {
     /// adds its own registers, so inline it would set this enum's size.
     #[cfg(feature = "board-mmc3-scramble")]
     Mmc3Scramble(Box<Mmc3Scramble>),
+    /// NES 2.0 mapper 263, the Rex Soft UNL-KOF97 board: an MMC3 with its register address and
+    /// its written data permuted (MF-UNL-2 step 4).
+    ///
+    /// **Not boxed**: the board is an `Mmc3` and one more word of nothing, so it is the size of
+    /// the `Tqrom` variant this enum already has and sets no new high-water mark.
+    #[cfg(feature = "board-263")]
+    Mmc3Kof97(Mmc3Kof97),
+    /// Mapper 189, the TXC 01-22017/01-22018 and the Yoko FC-001EM: an MMC3 whose PRG-ROM is
+    /// banked in 32 KiB amounts from a register at $4100 (MF-UNL-2 step 5).
+    ///
+    /// **Not boxed**, for `IrqBoard::Mmc3Kof97`'s reason: the board is an `Mmc3` plus one byte,
+    /// which lands in the padding that struct already has.
+    #[cfg(feature = "board-189")]
+    Mmc3Txc189(Mmc3Txc189),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -197,6 +215,10 @@ macro_rules! inner {
             IrqBoard::Mmc3ChrRam($b) => $body,
             #[cfg(feature = "board-mmc3-scramble")]
             IrqBoard::Mmc3Scramble($b) => $body,
+            #[cfg(feature = "board-263")]
+            IrqBoard::Mmc3Kof97($b) => $body,
+            #[cfg(feature = "board-189")]
+            IrqBoard::Mmc3Txc189($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]

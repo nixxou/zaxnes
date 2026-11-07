@@ -31,8 +31,8 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   wirings: the two scramble patterns, the outer CHR bank, the three NROM override registers,
   115's IRQ rule against 114's, 121's protection array and extended PRG banking, and the CHR
   A18 that 121 and 187 drive from PPU A12.
-- [ ] **4/9 — `board-263`.** The address map and the data permutation.
-- [ ] **5/9 — `board-189`.** The 32 KiB PRG bank register over a stock MMC3.
+- [x] **4/9 — `board-263`.** The address map and the data permutation.
+- [x] **5/9 — `board-189`.** The 32 KiB PRG bank register over a stock MMC3.
 - [ ] **6/9 — the four sweeps and the feature matrix.** Every configuration the lot adds, plus
   `--no-default-features` and `--features parked-boards`; `cargo fmt --check` and clippy
   `-D warnings` in each.
@@ -361,3 +361,84 @@ The decision is the same one, made at the same moment, from the same numbers.
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **956 passed, 0 failed, 9 ignored** (+8 over step 2) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+## Steps 4 and 5 — `board-263` and `board-189`
+
+Both are an `Mmc3` with something in front of it, so both are the `Somari` shape again and
+neither needs boxing: `Mmc3Kof97` is an `Mmc3` and nothing else and `Mmc3Txc189` an `Mmc3` plus
+one byte, so each is the size of the `Tqrom` variant this enum already had.
+
+### `board-263` — the Rex Soft UNL-KOF97
+
+Two translations in front of the chip and no register of its own, which is all its page
+documents.
+
+* **The address**: "A12 is used for the MMC3's A0", which one line reproduces —
+  `(address & $E000) | ((address >> 12) & 1)` walks the page's eight-row table exactly. The
+  board's A12 is a bit an MMC3 ignores entirely, which is what makes it free to carry A0.
+* **The data**: `76543210 → 76243051`, implemented as the page's own expression
+  `(V & 0xD8) | ((V & 0x20) >> 4) | ((V & 4) << 3) | ((V & 2) >> 1) | ((V & 1) << 2)`.
+
+The page states the permutation **twice** — once as a bit map and once as that expression — so
+`req_core_100_mapper_263_permutes_every_one_of_the_256_written_bytes` builds it from the **bit
+map** and checks all 256 inputs against the board. The two statements prove each other.
+
+The first run of that test failed, and the reason is worth recording: **the register index is
+permuted too**, being a byte written to the same clone, so selecting R2 means writing the byte
+that permutes to 2. That is the first thing a test of this board has to notice and the test now
+says so in a comment.
+
+The page's own *Note* is about the dumps and not the board — "Most versions of *The King of
+Fighters '97* are hacked for Mapper 4. Several of them also fail to disable the frame IRQ,
+freezing on emulators that accurately power-on with the frame IRQ enabled" — and this core does
+power on with it enabled (REQ-CORE-113), so such a dump freezes here too, correctly and on the
+APU rather than on the board. Recorded in `Mmc3Kof97`'s own note.
+
+### `board-189` — the TXC 01-22017/01-22018 and the Yoko FC-001EM
+
+A 32 KiB PRG bank register over a stock MMC3, and the chip's PRG bank lines reach nothing: the
+number exists because the board "bank[s] PRG-ROM in 32 KiB amounts, like AxROM, BNROM and
+GNROM", so `R6` and `R7` latch and drive no window, which the test asserts directly.
+
+**"Address bit 9" is A8, the ninth line**, and the page says so three ways: its mask `$E100`
+reads A15, A14, A13 and **A8**; its address diagram `A~[010. ...1 .... ....]` sets the bit in the
+nibble that is bits 11-8; and the oversize game "still writes to the original `$4132` address",
+which has A8 set and A9 **clear**. So the decode is `(address & $E100) == $4100`, the census's
+"a `$4100` write with A9 set" is `$4100` against `$4000`, and the test uses `$4132` by name.
+
+**Three bits of the byte are taken, not two**, which is the page's own *Generalized definition
+for emulation* read for the case it describes — "respond to writes to `$4100-$5FFF` with address
+bit 9 set, and only use the upper nibble of the data byte being written". The oversize board's
+`[.PPP ....]` is the original's `[..PP ....]` with PRG A17 above it, and on the original board's
+128 KiB that bit wraps away, so **one decode runs both boards**. The test makes that claim on two
+images, a 256 KiB one where all eight banks are reachable and a 128 KiB one where the third bit
+wraps.
+
+**The generic pirate boards are deliberately not decoded** — A-37/810809-C and
+K-3086/810836-C, which move the register onto the MMC3's PRG-RAM interface at `$6000` — and the
+page's own paragraph is the reason: "There are countless pirated variants of the (already
+unauthorized) *Street Fighter II* 8-bit backport. … doing so requires **modifying the PRG-ROM
+content** to change the write address". Mesen 2 decodes the whole of `$4120-$7FFF` and ORs the
+two nibbles of every byte to cover them. The same shape, and the same reason, as the 60-pin
+decode `Sachen72008` records. The test pins it: `$4100 = $01` changes nothing.
+
+**The PT8154's missing counter is not a parameter.** *Thunder Warrior*'s 28-pin PT8154 "is a
+stripped-down MMC3 without any IRQ functionality" and *Street Fighter II*'s 40-pin pair "needs a
+fully functional MMC3 clone" — and **nothing in an image distinguishes them**: the page gives the
+number no submapper and the boards differ in pin count. So the counter is built, unchanged, and a
+*Thunder Warrior* dump simply never writes `$C000-$E001`, which is the harmless direction. The
+test drives the counter to prove it is there.
+
+### The check for both steps
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **959 passed, 0 failed, 9 ignored** (+3 over step 3) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+| golden-core over the three mapper-119 images, against `186b5656` | **still byte-identical** with all five boards built and in `default` |
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_mapper_263_permutes_every_one_of_the_256_written_bytes` | the page's bit map against the board's expression, over all 256 bytes |
+| `req_core_100_mapper_263_drives_the_mmc3s_a0_from_a12` | the whole bank layout against a plain mapper-4 image of the same ROM, plus the three registers an address table alone cannot reach — `$A000`'s mirroring, and `$C000`/`$D000`/`$F000` as the latch, the reload and the enable |
+| `req_core_100_mapper_189_banks_32_kib_of_prg_from_4100` | all eight 32 KiB banks from bits 4-6; the MMC3's own PRG registers reaching nothing; `$4132`; `$4000` not decoded; the low nibble not decoded; PRG A17 wrapping on 128 KiB; and the MMC3's CHR banking, mirroring and counter intact |
