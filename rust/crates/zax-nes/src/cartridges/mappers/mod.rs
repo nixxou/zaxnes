@@ -70,6 +70,8 @@ mod namco163;
 mod namcot108;
 #[cfg(feature = "board-105")]
 mod nes_event;
+#[cfg(feature = "board-nina03")]
+mod nina03;
 mod nrom;
 #[cfg(feature = "board-96")]
 mod oeka_kids;
@@ -166,6 +168,8 @@ pub use namco163::{Namco163, NamcoVariant};
 pub use namcot108::Namcot108;
 #[cfg(feature = "board-105")]
 pub use nes_event::NesEvent;
+#[cfg(feature = "board-nina03")]
+pub use nina03::Nina03;
 pub use nrom::Nrom;
 #[cfg(feature = "board-96")]
 pub use oeka_kids::OekaKids;

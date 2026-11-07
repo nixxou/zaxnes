@@ -30,6 +30,8 @@ use super::mappers::Mmc3Txc189;
 use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
 use super::mappers::NesEvent;
+#[cfg(feature = "board-nina03")]
+use super::mappers::Nina03;
 use super::mappers::Nrom;
 #[cfg(feature = "board-96")]
 use super::mappers::OekaKids;
@@ -131,6 +133,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-77")]
     77,
     78,
+    #[cfg(feature = "board-nina03")]
+    79,
     #[cfg(feature = "board-taito-x1")]
     80,
     #[cfg(feature = "board-taito-x1")]
@@ -183,6 +187,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     136,
     #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-nina03")]
+    146,
     #[cfg(feature = "board-jv001")]
     147,
     #[cfg(feature = "board-sachen-8reg")]
@@ -521,6 +527,15 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("NINA-003-006"), the one page of mappers 79 and 146: "PRG RAM capacity:
+        // **None**", which is mapper 30's reason above and not mapper 140's -- the board's
+        // register is at $4100 under mask $E100, so `$6100 & $E100` is `$6100` and nothing
+        // forces the question; the page states it, so this does (MF-UNL-3 step 1).
+        #[cfg(feature = "board-nina03")]
+        79 | 146 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 206"), the Namco 108 family: `PRG RAM: None`, the page adding
         // "with the rare exception" of the *Magical Puzzle Popils* prototype, which carries
         // "8 KiB battery-backed". So the window is open bus on these five numbers unless the
@@ -810,6 +825,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // note has the page's sentence that settles it.
         #[cfg(feature = "board-133")]
         133 => Board::DecodeBoard(DecodeBoard::Sachen72008(Sachen72008::new(memory))),
+        // MF-UNL-3 step 1: the AVE NINA-03/06 and the Sachen 3015 / SA-016, which nesdev's one
+        // page for both numbers calls "functionally identical". One latch at $4100 under mask
+        // $E100, and FCEUX's extra CNROM switch at $8000-$FFFF deliberately left out --
+        // `Nina03`'s own note has the page's last line, which attributes that latch to mapper
+        // 148 and gives this board no bus conflicts.
+        #[cfg(feature = "board-nina03")]
+        79 | 146 => Board::DecodeBoard(DecodeBoard::Nina03(Nina03::new(memory, mapper))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

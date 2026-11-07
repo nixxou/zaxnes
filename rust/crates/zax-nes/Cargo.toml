@@ -45,6 +45,7 @@ default = [
     "board-jv001",
     "board-sachen-8reg",
     "board-133",
+    "board-nina03",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -295,6 +296,21 @@ board-sachen-8reg = ["board-decode-boards"]
 # `Sachen72008`'s own note records that choice. One `DecodeBoard` variant, no new forward.
 # Implies `board-decode-boards`.
 board-133 = ["board-decode-boards"]
+
+# Mappers 79 and 146 -- American Video Entertainment's NINA-03 and NINA-06, and the 60-pin
+# Sachen 3015 / SA-016 that nesdev's own page calls "functionally identical" to them
+# (MF-UNL-3 step 1). The largest single catalogue in the census: about nineteen AVE titles,
+# *Dudes with Attitude*, *Deathbots*, *Krazy Kreatures*, *Tiles of Fate*, *Impossible Mission
+# II*, *Ultimate League Soccer* and *Wally Bear and the NO! Gang* among them, plus Sachen's
+# *Magical Mathematics* and the Joy Van releases.
+#
+# One `DecodeBoard` variant and one register, `$4100: [.... PCCC]` under mask $E100 -- a 32 KiB
+# PRG bank and an 8 KiB CHR bank. **FCEUX's extra CNROM switch at $8000-$FFFF is deliberately
+# not implemented**: the page's own last line attributes a latch at $8000 to mapper **148** and
+# gives this board "Bus conflicts: No", so a dump that needed it is a mislabelled mapper-3 image
+# and its header is the fix. `Nina03`'s own note has the argument and a test pins the silence.
+# Implies `board-decode-boards`.
+board-nina03 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

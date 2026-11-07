@@ -11,6 +11,7 @@
     feature = "board-133",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
+    feature = "board-nina03",
     feature = "board-sachen-8reg",
     feature = "board-vs-system"
 )))]
@@ -26,6 +27,8 @@ use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::Jv001;
 use super::Mapper;
+#[cfg(feature = "board-nina03")]
+use super::Nina03;
 #[cfg(feature = "board-96")]
 use super::OekaKids;
 #[cfg(feature = "board-133")]
@@ -121,6 +124,10 @@ pub enum DecodeBoard {
     /// Mapper 133, the Sachen 72008.
     #[cfg(feature = "board-133")]
     Sachen72008(Sachen72008),
+    // Appended by MF-UNL-3 step 1, the first board of a lot whose eight are all of this shape.
+    /// Mappers 79 and 146, the AVE NINA-03/06 and the Sachen 3015 / SA-016.
+    #[cfg(feature = "board-nina03")]
+    Nina03(Nina03),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -147,6 +154,8 @@ macro_rules! inner {
             DecodeBoard::Sachen8Reg($b) => $body,
             #[cfg(feature = "board-133")]
             DecodeBoard::Sachen72008($b) => $body,
+            #[cfg(feature = "board-nina03")]
+            DecodeBoard::Nina03($b) => $body,
         }
     };
 }

@@ -23,7 +23,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [ ] **0/9 — the plan.** This file: the nine numbers, the page each is built from, the eight
   features, the shape each board takes in this tree, and the **five** places this lot leaves the
   census's own prescription for the number's page.
-- [ ] **1/9 — `board-nina03`.** `Nina03`, the $4100 control register for 79 and 146, its
+- [x] **1/9 — `board-nina03`.** `Nina03`, the $4100 control register for 79 and 146, its
   `registry.rs` arm, `SUPPORTED_MAPPERS`, `board_memory_sizes`, and the tests the census lists —
   including the anti-test for the FCEUX CNROM switch this lot deliberately leaves out.
 - [ ] **2/9 — `SingleLatch`, and the four plain latches: 38, 107, 145, 149.** One
@@ -234,3 +234,32 @@ Its `cfg` gains `board-143`.
 `registry::has_bus_conflicts`: that function's generic path ANDs the written value with the ROM
 byte, which destroys the ROM's bit 0 before the board can see it. **149 is** on it — "has bus
 conflicts" with nothing qualifying it, so the generic AND is exactly right.
+
+## Step 1 — `board-nina03`: the AVE NINA-03/06 and the Sachen 3015 / SA-016
+
+`Nina03` (`cartridges/mappers/nina03.rs`), one `DecodeBoard` variant and one byte: the
+`[.... PCCC]` latch under mask $E100, bits 2-0 the 8 KiB CHR bank and bit 3 the 32 KiB PRG bank.
+Two numbers on one board, because the page says in so many words that they are one board.
+
+`board_memory_sizes` gives both numbers `prg_ram: Some(0)` — on the page's **"PRG RAM capacity:
+None"** and not because the register is in the way. `$6100 & $E100` is `$6100`, so nothing forces
+the question here the way mappers 140 and 184 force it; the page states it, so the function does.
+
+**FCEUX's CNROM switch at $8000-$FFFF is not implemented, and it is a decision.** The page's own
+closing line gives a latch at $8000-$FFFF to mapper **148** — "the same bit assignment in the data
+latch, but moves the latch register to the CPU $8000-$FFFF register, **introducing bus
+conflicts**" — and gives *this* board "Bus conflicts: No", which is only true of a board whose
+register the PRG-ROM does not drive. So a dump that wants a CHR switch at $8000 is a mislabelled
+mapper-3 image and its header is the fix. `Nina03`'s doc comment carries the argument and
+`req_core_102_mapper_79_ignores_a_write_at_8000` pins the silence on four addresses.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_the_nina_03_banks_prg_and_chr_from_one_latch_at_4100` | both numbers: `CCC` is three bits of an eight-bank CHR-ROM and reaches no PRG window, `P` is bit 3 and is two 32 KiB banks, and the two fields are independent |
+| `req_core_102_mapper_79_ignores_a_write_at_8000` | the page's enumerated mirrors ($4300, $5F00, $41FF) are the same latch; A8 clear is not ($4000, $4200, $5E00); $6100 is not; and **$8000, $8100, $C100 and $FFFF change neither window** |
+| `req_core_090_the_nina_03_latch_survives_a_save_and_restore` | §7.1 item 2 for this board, which the two generic sweeps cannot reach: they write $5000-$E001 and this board's only register is $4100 |
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **964 passed, 0 failed, 9 ignored** (961 / 0 / 9 at `452e8464`, +3) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |

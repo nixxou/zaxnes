@@ -123,7 +123,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   `IrqBoard` variant -- behind `board-mmc3-scramble` (MF-UNL-2 step 3);
     // * 263, the Rex Soft UNL-KOF97, behind `board-263` (MF-UNL-2 step 4);
     // * 189, the TXC 01-22017/01-22018 and the Yoko FC-001EM, behind `board-189`
-    //   (MF-UNL-2 step 5).
+    //   (MF-UNL-2 step 5);
+    // * 79 and 146, the AVE NINA-03/06 and the Sachen 3015 / SA-016 that nesdev's one page for
+    //   both numbers calls "functionally identical" -- one `DecodeBoard` variant and one latch
+    //   at $4100 -- behind `board-nina03` (MF-UNL-3 step 1).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -145,7 +148,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen = cfg!(feature = "board-sachen-8reg");
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
-    let additions: [(i32, bool); 75] = [
+    let nina03 = cfg!(feature = "board-nina03");
+    let additions: [(i32, bool); 77] = [
         (19, true),
         (24, true),
         (26, true),
@@ -166,6 +170,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (76, namcot),
         (77, cfg!(feature = "board-77")),
         (78, true),
+        (79, nina03),
         (80, taito_x1),
         (82, taito_x1),
         (85, true),
@@ -194,6 +199,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (133, cfg!(feature = "board-133")),
         (136, jv001),
         (140, small),
+        (146, nina03),
         (147, jv001),
         (150, sachen),
         (151, cfg!(feature = "board-vs-system")),
@@ -7274,4 +7280,126 @@ fn req_core_090_the_sachen_72008_latch_survives_a_save_and_restore() {
     core.reset();
     assert_eq!([0, 1, 2, 3], core.prg_windows());
     assert_eq!(0, core.chr_bank(0x0000));
+}
+
+// ------------------------------------- the AVE NINA-03/06 (79, 146), MF-UNL-3 step 1
+
+/// nesdev ("NINA-003-006"), the one page of both numbers: `A~[010x xxx1 xxxx xxxx]`,
+/// `D~[.... PCCC]` — bits 2-0 the 8 KiB CHR bank and bit 3 the 32 KiB PRG bank. The address
+/// pattern reads A15, A14, A13 and A8, which is mask $E100 against $4100 (MF-UNL-3 step 1).
+///
+/// 146 "denotes the 60-pin Sachen 3015 and SA-016 (chip-on-board) circuit boards, which are
+/// functionally identical", so the two numbers are one board and the loop is the assertion.
+#[cfg(feature = "board-nina03")]
+#[test]
+fn req_core_102_the_nina_03_banks_prg_and_chr_from_one_latch_at_4100() {
+    for mapper in [79usize, 146] {
+        let mut core = MapperRom::new(mapper).prg(8).chr(64).load();
+        assert_eq!([0, 1, 2, 3], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(0, core.chr_bank(0x0000), "mapper {mapper}");
+
+        // `CCC` is three bits wide: eight 8 KiB banks of the page's 64 KiB of CHR-ROM.
+        core.mapper_write(0x4100, 0x07);
+        assert_eq!(56, core.chr_bank(0x0000), "mapper {mapper}: CHR bank 7");
+        assert_eq!(
+            63,
+            core.chr_bank(0x1C00),
+            "mapper {mapper}: one 8 KiB bank over the whole range"
+        );
+        assert_eq!(
+            [0, 1, 2, 3],
+            core.prg_windows(),
+            "mapper {mapper}: `CCC` is not the PRG bank"
+        );
+
+        // `P` is bit 3, above it: two 32 KiB banks of the page's 64 KiB of PRG-ROM.
+        core.mapper_write(0x4100, 0x08);
+        assert_eq!(
+            [4, 5, 6, 7],
+            core.prg_windows(),
+            "mapper {mapper}: PRG bank 1"
+        );
+        assert_eq!(
+            0,
+            core.chr_bank(0x0000),
+            "mapper {mapper}: and `CCC` went back to 0"
+        );
+
+        core.mapper_write(0x4100, 0x0C);
+        assert_eq!([4, 5, 6, 7], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(32, core.chr_bank(0x0000), "mapper {mapper}: both fields");
+    }
+}
+
+/// The window the page enumerates — "$4100-$41FF, $4300-$43FF, $45xx, $47xx, …, $5Dxx, and
+/// $5Fxx" — which is mask $E100: A8 set, A15-A13 `010`, and nothing else decoded.
+///
+/// **The write at $8000 is the anti-test the census asks for.** FCEUX gives this board a CNROM
+/// switch there; this build does not, because the page's own last line attributes a latch at
+/// $8000-$FFFF to mapper **148** and gives this board "Bus conflicts: No" (see `Nina03`'s note).
+#[cfg(feature = "board-nina03")]
+#[test]
+fn req_core_102_mapper_79_ignores_a_write_at_8000() {
+    let mut core = MapperRom::new(79).prg(8).chr(64).load();
+
+    // The mirrors the page lists are the same latch.
+    core.mapper_write(0x4300, 0x02);
+    assert_eq!(16, core.chr_bank(0x0000));
+    core.mapper_write(0x5F00, 0x03);
+    assert_eq!(24, core.chr_bank(0x0000));
+    core.mapper_write(0x41FF, 0x01);
+    assert_eq!(8, core.chr_bank(0x0000));
+
+    // A8 clear is not the latch: $4000, $4200 and $5E00 are all outside the pattern.
+    for address in [0x4000u16, 0x4200, 0x5E00] {
+        core.mapper_write(address, 0x05);
+        assert_eq!(8, core.chr_bank(0x0000), "{address:#06X} is no register");
+    }
+
+    // Nor is $6100: `$6100 & $E100` is `$6100`, which is why the board needs no
+    // `intercept_cpu_write` body.
+    core.mapper_write(0x6100, 0x05);
+    assert_eq!(8, core.chr_bank(0x0000), "no register in $6000-$7FFF");
+
+    // And the deliberate omission: no CNROM switch at $8000-$FFFF, on any of its addresses.
+    for address in [0x8000u16, 0x8100, 0xC100, 0xFFFF] {
+        core.mapper_write(address, 0x05);
+        assert_eq!(
+            8,
+            core.chr_bank(0x0000),
+            "{address:#06X}: FCEUX's CNROM switch is mapper 148's board, not this one"
+        );
+        assert_eq!([0, 1, 2, 3], core.prg_windows(), "{address:#06X}");
+    }
+}
+
+/// REQ-CORE-090/091 and REQ-CORE-004 for the board: one byte, saved, restored and reset.
+///
+/// The sweeps `req_core_090_the_mapper_state_survives_a_save_and_restore` and
+/// `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` write
+/// $5000-$E001 and reach **no** register of this board, so §7.1's "save-state round-trip per
+/// board with mapper state dirtied first" needs this test of its own.
+#[cfg(feature = "board-nina03")]
+#[test]
+fn req_core_090_the_nina_03_latch_survives_a_save_and_restore() {
+    for mapper in [79usize, 146] {
+        let mut core = MapperRom::new(mapper).prg(8).chr(64).load();
+        core.mapper_write(0x4100, 0x0A);
+        assert_eq!([4, 5, 6, 7], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(16, core.chr_bank(0x0000), "mapper {mapper}");
+
+        let state = core.save_state(true).unwrap();
+        core.mapper_write(0x4100, 0x01);
+        assert_eq!(8, core.chr_bank(0x0000), "mapper {mapper}");
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!([4, 5, 6, 7], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(16, core.chr_bank(0x0000), "mapper {mapper}");
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+
+        core.reset();
+        assert_eq!([0, 1, 2, 3], core.prg_windows(), "mapper {mapper}");
+        assert_eq!(0, core.chr_bank(0x0000), "mapper {mapper}");
+    }
 }
