@@ -27,7 +27,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **2/9 — `board-mmc3-chrram`.** 74, 192, 194 as three monomorphisations of that form, and
   195 with the page's run-time GAL. `registry.rs` arms, `SUPPORTED_MAPPERS`,
   `board_memory_sizes`, and the tests the census lists.
-- [ ] **3/9 — `board-mmc3-scramble`.** `Mmc3Scramble`, one board holding an `Mmc3` with six
+- [x] **3/9 — `board-mmc3-scramble`.** `Mmc3Scramble`, one board holding an `Mmc3` with six
   wirings: the two scramble patterns, the outer CHR bank, the three NROM override registers,
   115's IRQ rule against 114's, 121's protection array and extended PRG banking, and the CHR
   A18 that 121 and 187 drive from PPU A12.
@@ -270,4 +270,94 @@ its own expected list. §4.3's warning, exactly as MF-6a3 step 1 recorded it for
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **948 passed, 0 failed, 9 ignored** (+3 over step 1) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |
+
+## Step 3 — `board-mmc3-scramble`: 114, 115, 121, 123, 182 and 187
+
+`Mmc3Scramble` (`cartridges/mappers/mmc3_scramble.rs`) is **one board with six wirings** on the
+`Jv001` precedent, and it **holds** an `Mmc3` on `Somari`'s and `NesEvent`'s: the chip keeps its
+own registers and is asked to recompute from them after every write, then the board lays its own
+banking over. `IrqBoard::Mmc3Scramble(Box<…>)` holds it, boxed for the reason `Somari` is.
+
+What the number picks:
+
+| field | 114 | 182 | 115 | 123 | 187 | 121 |
+| --- | --- | --- | --- | --- | --- | --- |
+| address scramble | sub 0 / sub 1 | sub 0 | — | — | — | — |
+| index scramble | sub 0 / sub 1 | sub 0 | — | **sub 0's** | — | — |
+| override port | `$6000` / `$E001` | the same | `$6000` / `$E003` | `$5800` / `$F800` | `$5000` / `$F001` | — |
+| outer CHR bank | `$6001` | `$6001` | `$6001` | — | — | `$5180` |
+| CHR A18 from PPU A12 | — | — | — | — | **yes** | **yes** |
+| IRQ revision | **A (MMC3A)** | **A** | B (MMC3C) | B | B | B |
+| protection | — | — | — | — | one read | the array, `$8003`'s table |
+
+Three things the step had to get right that the census's sentence does not say:
+
+1. **The address scramble and the index scramble are two choices, not one.** 123 scrambles
+   indices and not addresses — "drops … register address scrambling while retaining index
+   register scrambling (using the same pattern)" — so `Mmc3Scramble` carries two row numbers.
+2. **The override-enable bit is bit 7 on three diagrams and bit 6 on 123's.** `[.M31 .2S0]`
+   puts `M` one place right. The first run of
+   `req_core_100_the_nrom_override_takes_prg_away_from_the_mmc3` failed on exactly that, which
+   is what the test is for.
+3. **115's "sharp" IRQ rule is this build's default, and the contrast that tests it is 114.**
+   The census writes the test as "latch = 0 asserts on every scanline, where the MMC3 proper does
+   not", and in *this* build the MMC3 proper is revision B and **does** — REQ-CORE-114's own
+   `mmc3_test_2` test 6. So 115 needs no code at all and 114 needs
+   `Mmc3Board::force_irq_revision_a`, whose note carries both pages' sentences.
+
+Two additive methods on `BankWindows`, both behind the feature and both **idempotent** so that
+the overlay can be re-applied after every write: `remap_prg_banks(mask, bits)` for an outer PRG
+bank that is an address *line* (115's A18, 121's `$5180`), and `or_chr_banks(from_slot, bits)`
+for CHR A18 — whose `from_slot` **is** the PPU-A12 wiring, four windows and not eight.
+
+`IrqBoard` forwards `Mapper::try_read_prg` for the first time, for 121's protection array and
+187's protection read. This is the dispatch MF-CART freed, and step 8 re-measures it.
+
+### Q-144 — four places this family's page beats Mesen 2, and one that is observable
+
+The ticket holds all four with the symptom of each; the one that matters is the first:
+
+* **123's `$5800` bank field.** The page's diagram puts the bank's bit 1 at register bit **4**
+  and flags the field "(notice the bit order)"; `MMC3_123.h` reads register bit **3**. Half of
+  all `$5800` values differ between the two readings, so *Mortal Kombat 3* would jump into the
+  wrong 16 KiB bank. **No mapper-123 image is available to this project**, so nothing here can
+  settle it and a reviewer with a ROM should.
+* **114 and 182's one-to-one address map**, which 114's page argues from a comparison of
+  *Aladdin* with *Super Aladdin* and which Mesen implements in two different refuted ways.
+* **115's `$6000` bit 6, "PRG A18"**, the one field of that register with no "If M=1" qualifier,
+  which Mesen does not read at all.
+* **121's and 187's CHR A18 from PPU A12**, "regardless of what the MMC3 is set to do", where
+  Mesen drives it from the MMC3's CHR mode instead.
+
+And four things of Mesen's that are on no page and are deliberately not built: 115's `$5080`,
+187's `$6000`, 121's `$5180` power-on of `$80` ("Hack for Super 3-in-1" in its own source) and
+121's second protection array, which the page attributes to FCEUX rather than asserting.
+
+115's own readable register, the **`$6002` solder pad**, is a recorded gap: the page gives the
+field and never the value, and no game in its list is said to read it.
+
+### One refactor this step forced
+
+`Cartridge::create` went past `clippy::too_many_lines` with six more numbers in each of the two
+PPU-bus latch lists, so those two `matches!` are now the free `const fn` `watches_ppu_reads` and
+`watches_ppu_bus_without_read`, with the whole of the lot-by-lot commentary moved onto the first.
+The decision is the same one, made at the same moment, from the same numbers.
+
+### Tests from the pages
+
+| test | what it pins |
+| --- | --- |
+| `req_core_100_the_scrambled_boards_reproduce_an_unscrambled_mmc3` | all seven wirings against a plain mapper-4 image of the same ROM: the scrambled address **and** index give the same PRG and CHR layout, and on 114/182 the *unscrambled* pair does not |
+| `req_core_100_the_nrom_override_takes_prg_away_from_the_mmc3` | 114, 115, 123 and 187: NROM-128 shows one 16 KiB bank twice, NROM-256 a 32 KiB window, the MMC3's own registers stop reaching the bus while the override is set, and come back when it is cleared |
+| `req_core_100_the_outer_chr_bank_of_114_and_115_is_chr_a18` | `$6001` bit 0 moves the CHR window by exactly 256 KiB, and back |
+| `req_core_100_mappers_121_and_187_drive_chr_a18_from_ppu_a12` | the left pattern table in the first 256 KiB half and the right in the second, **in both CHR modes** — which is the only form in which the page and Mesen differ |
+| `req_core_114_mapper_114_disables_the_irq_on_a_zero_latch_and_115_does_not` | 1 IRQ over three A12 rises on 114 and 182, 3 on 115, 121, 123 and 187 |
+| `req_core_100_mappers_121_and_187_answer_their_protection_reads` | 121's four-byte array over all four indices and at a second address under its mask, that only bits 0-1 are the index, and that 187's read has bit 7 set |
+| `req_core_100_mapper_121_banks_prg_from_bit_reversed_8001_values` | `$26`/`$28`/`$2A` bank `$E000`/`$C000`/`$A000` from the bit-reversed `$8001`, `$26` is sticky on a later `$8001`, `$2F` keeps what was selected, and an invalid index lets the MMC3's own banking back |
+| `req_core_100_mapper_182_tolerates_the_zero_its_games_write_at_startup` | the page's own observation about Hosenkan's games, as the census asks |
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **956 passed, 0 failed, 9 ignored** (+8 over step 2) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes` | clean |

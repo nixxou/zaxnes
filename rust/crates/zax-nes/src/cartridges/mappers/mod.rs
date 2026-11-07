@@ -57,6 +57,8 @@ mod mmc2;
 mod mmc3;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
+#[cfg(feature = "board-mmc3-scramble")]
+mod mmc3_scramble;
 mod mmc5;
 mod multicart;
 mod namco163;
@@ -145,6 +147,8 @@ pub use mmc3::{McAcc, Mmc3};
 pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs303};
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-scramble")]
+pub use mmc3_scramble::Mmc3Scramble;
 pub use mmc5::Mmc5;
 pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,

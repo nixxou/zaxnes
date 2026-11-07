@@ -44,6 +44,10 @@ fn chr_write(core: &mut NesCore, address: u16, value: u8) {
 }
 
 #[test]
+// The function *is* the two tables REQ-CORE-100 and REQ-CORE-102 ask for, plus the page or
+// lot each addition came from. MF-UNL-2 step 3's six numbers are the ones that crossed the
+// threshold.
+#[allow(clippy::too_many_lines)]
 fn req_core_100_every_required_mapper_is_registered() {
     // REQ-CORE-100's own table.
     let required: [i32; 31] = [
@@ -113,7 +117,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 133, the Sachen 72008's one latch, behind `board-133` (MF-UNL-1 step 3);
     // * 74, 192, 194 and 195, the other four members of mapper 119's CHR-RAM family -- four
     //   `const` monomorphisations of the MMC3's board behind one `IrqBoard` variant -- behind
-    //   `board-mmc3-chrram` (MF-UNL-2 step 2).
+    //   `board-mmc3-chrram` (MF-UNL-2 step 2);
+    // * 114, 115, 121, 123, 182 and 187, the six MMC3 clones with scrambled registers, an outer
+    //   CHR bank and an NROM-like PRG override -- one board with six wirings, one boxed
+    //   `IrqBoard` variant -- behind `board-mmc3-scramble` (MF-UNL-2 step 3).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -134,7 +141,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let jv001 = cfg!(feature = "board-jv001");
     let sachen = cfg!(feature = "board-sachen-8reg");
     let chrram = cfg!(feature = "board-mmc3-chrram");
-    let additions: [(i32, bool); 67] = [
+    let scramble = cfg!(feature = "board-mmc3-scramble");
+    let additions: [(i32, bool); 73] = [
         (19, true),
         (24, true),
         (26, true),
@@ -172,9 +180,13 @@ fn req_core_100_every_required_mapper_is_registered() {
         (99, cfg!(feature = "board-vs-system")),
         (105, cfg!(feature = "board-105")),
         (111, cfg!(feature = "board-111")),
+        (114, scramble),
+        (115, scramble),
         (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
+        (121, scramble),
+        (123, scramble),
         (132, jv001),
         (133, cfg!(feature = "board-133")),
         (136, jv001),
@@ -193,8 +205,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (172, jv001),
         (173, jv001),
         (180, true),
+        (182, scramble),
         (184, small),
         (185, small),
+        (187, scramble),
         (192, chrram),
         (194, chrram),
         (195, chrram),
@@ -4817,6 +4831,494 @@ fn req_core_100_tqrom_chr_ram_select_is_chr_a16_over_all_256_bank_numbers() {
             "CHR mode 0, R0 = {value:#04X}"
         );
     }
+}
+
+// ------------------------------------------- the six scrambled MMC3 clones (114, 115, 121,
+// ------------------------------------------- 123, 182, 187), MF-UNL-2 step 3
+
+/// Loads bank register `register` of an MMC3 the long way round, through whichever addresses
+/// `mapper`'s board scrambles `$8000` and `$8001` to.
+///
+/// nesdev ("INES Mapper 114"), submapper 0: a write meant for the MMC3's `$8000` is made at
+/// `$A000` and one meant for its `$8001` at `$C000`; submapper 1 puts the second at `$8001`.
+/// The index itself is scrambled too, so the register number is passed through the page's
+/// `$8000 index written` table on the way in.
+#[cfg(feature = "board-mmc3-scramble")]
+fn scrambled_mmc3_bank(
+    core: &mut NesCore,
+    mapper: usize,
+    submapper1: bool,
+    register: u8,
+    value: u8,
+) {
+    const INDEX_A: [u8; 8] = [0, 3, 1, 5, 6, 7, 2, 4];
+    const INDEX_B: [u8; 8] = [0, 2, 5, 3, 6, 1, 7, 4];
+
+    let (select, data, table): (u16, u16, Option<[u8; 8]>) = match (mapper, submapper1) {
+        // 114 submapper 0 and 182: $8000 is written at $A000, $8001 at $C000.
+        (114, false) | (182, _) => (0xA000, 0xC000, Some(INDEX_A)),
+        // 114 submapper 1: $8000 at $A000, $8001 at $8001.
+        (114, true) => (0xA000, 0x8001, Some(INDEX_B)),
+        // 123: no address scrambling, index scrambling with submapper 0's pattern.
+        (123, _) => (0x8000, 0x8001, Some(INDEX_A)),
+        // 115, 187, 121: neither.
+        _ => (0x8000, 0x8001, None),
+    };
+
+    // The table maps *written* index to *meant* register, so a test that wants register `r`
+    // has to write the index the table sends there.
+    let written = table.map_or(register, |table| {
+        // The tables are permutations of 0-7, so the search always lands.
+        let index = table.iter().position(|meant| *meant == register);
+        index.and_then(|i| u8::try_from(i).ok()).unwrap_or(register)
+    });
+    core.mapper_write(select, written);
+    core.mapper_write(data, value);
+}
+
+/// nesdev ("INES Mapper 114"), both submappers' `Address written` / `MMC3 register meant` and
+/// `$8000 index written` / `MMC3 register meant` tables, read **one-to-one** as that page's own
+/// *Notes* require.
+///
+/// The claim: a write made at the *scrambled* address with the *scrambled* index produces the
+/// same bank layout as the plain MMC3 of the same image, and a write made at the unscrambled
+/// address does not. 182 is 114 submapper 0 and 123 scrambles the index alone, so both are swept
+/// here beside it; 115, 187 and 121 scramble nothing and stand as the control.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_the_scrambled_boards_reproduce_an_unscrambled_mmc3() {
+    // The layout a plain MMC3 reaches after loading R0-R5 and R6-R7.
+    let banks = [0x02u8, 0x04, 0x11, 0x12, 0x13, 0x14, 0x05, 0x06];
+    let mut reference = MapperRom::new(4).prg(16).chr(64).load();
+    for (register, value) in banks.iter().copied().enumerate() {
+        reference.mmc3_bank(u8::try_from(register).unwrap(), value);
+    }
+    let expected_prg = reference.prg_windows();
+    let expected_chr = reference.chr_windows();
+
+    for (mapper, submapper1) in [
+        (114usize, false),
+        (114, true),
+        (115, false),
+        (121, false),
+        (123, false),
+        (182, false),
+        (187, false),
+    ] {
+        let mut rom = MapperRom::new(mapper).prg(16).chr(64);
+        if submapper1 {
+            rom = rom.submapper(1);
+        }
+        let mut core = rom.load();
+
+        for (register, value) in banks.iter().copied().enumerate() {
+            scrambled_mmc3_bank(
+                &mut core,
+                mapper,
+                submapper1,
+                u8::try_from(register).unwrap(),
+                value,
+            );
+        }
+
+        assert_eq!(
+            expected_prg,
+            core.prg_windows(),
+            "mapper {mapper} submapper {}: PRG",
+            u8::from(submapper1)
+        );
+        assert_eq!(
+            expected_chr,
+            core.chr_windows(),
+            "mapper {mapper} submapper {}: CHR",
+            u8::from(submapper1)
+        );
+    }
+
+    // And the other half of the claim: on a board that scrambles addresses, writing at the
+    // *unscrambled* pair does **not** reach the same registers. $8000 on a 114 means the MMC3's
+    // $A001 -- the PRG-RAM protection -- so a bank written that way never lands.
+    for (mapper, submapper1) in [(114usize, false), (114, true), (182, false)] {
+        let mut rom = MapperRom::new(mapper).prg(16).chr(64);
+        if submapper1 {
+            rom = rom.submapper(1);
+        }
+        let mut core = rom.load();
+        for (register, value) in banks.iter().copied().enumerate() {
+            core.mmc3_bank(u8::try_from(register).unwrap(), value);
+        }
+
+        assert_ne!(
+            expected_prg,
+            core.prg_windows(),
+            "mapper {mapper}: an unscrambled write must not reach the MMC3's own registers"
+        );
+    }
+}
+
+/// The NROM-like PRG override of 114, 115, 123 and 187, which every one of their pages describes
+/// in the same two sentences: bit 7 is "0: Use PRG bank from MMC3 … 1: Ignore PRG bank from
+/// MMC3", and the field selects a "16 KiB PRG-ROM bank at CPU $8000-$BFFF **and** $C000-$FFFF"
+/// with one bit optionally "replace[d] … with CPU A14".
+///
+/// So with the override set the MMC3's own PRG registers stop reaching $8000-$FFFF, and clearing
+/// it restores them — which is the census's own wording for this test. The per-number part is
+/// where the bank's four bits sit in the byte, and **123's bit order is the page's**: its
+/// diagram `[.M31 .2S0]` puts the bank's bits 3, 2, 1 and 0 at register bits 5, 2, 4 and 0, and
+/// the page flags it with "(notice the bit order)". Q-144 records that Mesen 2 reads register
+/// bit 3 where the page's diagram has bit 4.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_the_nrom_override_takes_prg_away_from_the_mmc3() {
+    // (mapper, port, the byte that selects 16 KiB bank 5 in NROM-128 mode, the NROM-256 bit)
+    let cases: [(usize, u16, u8, u8); 4] = [
+        // 114: `M.S. BBBb`, bank in bits 3-0, S in bit 5.
+        (114, 0x6000, 0x80 | 0x05, 0x20),
+        // 115: `MPN. PPPp`, the same field, N in bit 5.
+        (115, 0x6000, 0x80 | 0x05, 0x20),
+        // 123: `.M31 .2S0`, M in bit 6 -- bank 5 is bits 2 and 0 of the bank, so register bits
+        // 2 and 0.
+        (123, 0x5800, 0x40 | 0x04 | 0x01, 0x02),
+        // 187: `M.NB BBb.`, bank in bits 4-1, N in bit 5.
+        (187, 0x5000, 0x80 | (0x05 << 1), 0x20),
+    ];
+
+    for (mapper, port, nrom128, nrom256_bit) in cases {
+        let mut core = MapperRom::new(mapper).prg(32).chr(64).load();
+
+        // The MMC3's own banking first, so that the override has something to take away.
+        scrambled_mmc3_bank(&mut core, mapper, false, 6, 0x09);
+        scrambled_mmc3_bank(&mut core, mapper, false, 7, 0x0A);
+        assert_eq!(
+            [9, 10, 30, 31],
+            core.prg_windows(),
+            "mapper {mapper}: the MMC3's own layout"
+        );
+
+        // NROM-128: the same 16 KiB bank at both halves, so banks 10 and 11 twice.
+        core.mapper_write(port, nrom128);
+        assert_eq!(
+            [10, 11, 10, 11],
+            core.prg_windows(),
+            "mapper {mapper}: NROM-128 bank 5 at both halves"
+        );
+
+        // The MMC3's registers go on latching and go on not reaching the bus.
+        scrambled_mmc3_bank(&mut core, mapper, false, 6, 0x03);
+        assert_eq!(
+            [10, 11, 10, 11],
+            core.prg_windows(),
+            "mapper {mapper}: the MMC3's PRG registers are overridden"
+        );
+
+        // NROM-256: "Replace bit 0 with CPU A14", so the even/odd pair of 16 KiB banks -- bank 5
+        // with its low bit cleared is 4, which is 8 KiB banks 8..11.
+        core.mapper_write(port, nrom128 | nrom256_bit);
+        assert_eq!(
+            [8, 9, 10, 11],
+            core.prg_windows(),
+            "mapper {mapper}: NROM-256 is a 32 KiB window"
+        );
+
+        // And clearing bit 7 (bit 6 on 123) restores the MMC3's own, which has kept latching.
+        core.mapper_write(port, 0x00);
+        assert_eq!(
+            [3, 10, 30, 31],
+            core.prg_windows(),
+            "mapper {mapper}: the MMC3's banking comes back"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 114"): "`$6001`: `[.... ...+]` Select 256 KiB CHR-ROM bank at PPU
+/// $0000-$1FFF", and 115's "`$6001`: `[.... ...C]` CHR A18".
+///
+/// One bit above the MMC3's seven, so the same CHR register reads two different 256 KiB halves
+/// of a 512 KiB CHR-ROM depending on it.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_the_outer_chr_bank_of_114_and_115_is_chr_a18() {
+    for mapper in [114usize, 115, 182] {
+        // 512 banks of 1 KiB: CHR A18 reaches the second half.
+        let mut core = MapperRom::new(mapper).prg(16).chr(512).load();
+        scrambled_mmc3_bank(&mut core, mapper, false, 2, 0x05);
+
+        // The numbered banks only carry eight bits, so bank 5 and bank 261 both read 5; the
+        // offset is what the test reads instead.
+        let offset = |core: &NesCore| {
+            core.cartridge()
+                .unwrap()
+                .chr_peek_view()
+                .map(|view| view.offsets()[4])
+        };
+        let low = offset(&core);
+        core.mapper_write(0x6001, 0x01);
+        let high = offset(&core);
+
+        assert_ne!(
+            low, high,
+            "mapper {mapper}: $6001 bit 0 must move the window by 256 KiB"
+        );
+        assert_eq!(
+            Some(low.unwrap() + 256 * 1024),
+            high,
+            "mapper {mapper}: and by exactly 256 KiB"
+        );
+
+        core.mapper_write(0x6001, 0x00);
+        assert_eq!(low, offset(&core), "mapper {mapper}: and back");
+    }
+}
+
+/// nesdev ("INES Mapper 121" and "INES Mapper 187"), the same sentence on both pages: "CHR A18
+/// (the second half of CHR-ROM) is directly selected by **PPU A12**, regardless of what the MMC3
+/// is set to do. This means that the 'left' pattern table always uses the first and the 'right'
+/// pattern table always uses the second 256 KiB half of CHR-ROM."
+///
+/// So a fetch in $0000-$0FFF and one in $1000-$1FFF land in different 256 KiB halves **with
+/// identical MMC3 CHR registers**, which is the census's own wording — and "regardless of what
+/// the MMC3 is set to do" is checked by flipping `$8000` bit 7, the CHR mode, which is where
+/// Mesen 2 reads the line from instead.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_mappers_121_and_187_drive_chr_a18_from_ppu_a12() {
+    /// The second 256 KiB half of a 512 KiB CHR-ROM, in bytes.
+    const HALF: usize = 256 * 1024;
+    /// The four 1 KiB windows of PPU $0000-$0FFF, the "left" pattern table.
+    const HALF_SLOTS: usize = 4;
+
+    for mapper in [121usize, 187] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(512).load();
+
+        // Every CHR register on the same bank, so only the window's own address can separate
+        // the two pattern tables.
+        for register in 0..6u8 {
+            scrambled_mmc3_bank(&mut core, mapper, false, register, 0x00);
+        }
+
+        for chr_mode in [0x00u8, 0x80] {
+            core.mapper_write(0x8000, chr_mode);
+            let offsets = core
+                .cartridge()
+                .unwrap()
+                .chr_peek_view()
+                .expect("an MMC3 clone answers a peek view")
+                .offsets();
+
+            for (slot, offset) in offsets.iter().enumerate().take(HALF_SLOTS) {
+                assert!(
+                    *offset < HALF,
+                    "mapper {mapper} CHR mode {chr_mode:#04X} slot {slot}: the left pattern                      table must be in the first 256 KiB half, not at {offset:#X}"
+                );
+            }
+            for (slot, offset) in offsets.iter().enumerate().skip(HALF_SLOTS) {
+                assert!(
+                    (HALF..2 * HALF).contains(offset),
+                    "mapper {mapper} CHR mode {chr_mode:#04X} slot {slot}: the right pattern                      table must be in the second 256 KiB half, not at {offset:#X}"
+                );
+            }
+            // And the two tables show the *same* bank 256 KiB apart, which is what "regardless
+            // of what the MMC3 is set to do" means with every CHR register on bank 0.
+            assert_eq!(
+                offsets[0] + HALF,
+                offsets[4],
+                "mapper {mapper} CHR mode {chr_mode:#04X}: exactly one 256 KiB half apart"
+            );
+        }
+    }
+}
+
+/// The two IRQ rules this family carries, which are each other's negation and are each stated by
+/// name:
+///
+/// * **114** (and 182) — "IRQ behavior resembles that of the MMC3A, i.e. a latch value of zero
+///   **disables** the IRQ, on which *Aladdin* depends" (nesdev, "INES Mapper 114");
+/// * **115** — "IRQ behavior resembles 'Sharp' behavior, i.e. a latch value of zero causes an
+///   IRQ **on every scanline**, on which the Chinese version of *幽☆遊☆白書 Final* depends"
+///   (nesdev, "INES Mapper 115").
+///
+/// The census's own wording for this test is "115's sharp IRQ: latch = 0 asserts on every
+/// scanline, where the MMC3 proper does not" — and in *this* build the MMC3 proper is revision B
+/// and **does**, which is REQ-CORE-114's own `mmc3_test_2` test 6. So the contrast that tests the
+/// parameter is 115 against **114**, which is what is checked here; 123, 187 and 121 take the
+/// chip as it comes, their pages stating no rule, and are swept with 115.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_114_mapper_114_disables_the_irq_on_a_zero_latch_and_115_does_not() {
+    for (mapper, expected) in [
+        (114usize, 1),
+        (182, 1),
+        (115, 3),
+        (121, 3),
+        (123, 3),
+        (187, 3),
+    ] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+        core.write_memory(0x2001, 0x00); // No rendering: only the rises below clock it.
+        core.mapper_write(0xC000, 0x00); // Latch $00 -- the MMC3's own address on every board
+        core.mapper_write(0xC001, 0x00); // of the six, because no scramble row moves $C00x
+        core.mapper_write(0xE001, 0x00); // except 114's, and 114's sends $C000 to $8001.
+
+        // 114 and 182 scramble $C000/$C001/$E001 away, so the three writes above have to be made
+        // at the addresses that *mean* them.
+        if matches!(mapper, 114 | 182) {
+            core.mapper_write(0xA001, 0x00); // means $C000: the latch.
+            core.mapper_write(0xC001, 0x00); // means $C001: the reload.
+            core.mapper_write(0xE001, 0x00); // means $E001: enable.
+        }
+
+        let mut irqs = 0;
+        for i in 0..3i64 {
+            {
+                let cart = core.cartridge_mut().unwrap();
+                cart.on_ppu_address_bus(0x0000, 10_000 + i * 100);
+                cart.on_ppu_address_bus(0x1000, 10_000 + i * 100 + 50);
+            }
+
+            if core.cartridge().unwrap().irq_asserted() {
+                irqs += 1;
+                // Acknowledge and re-enable, at the addresses that mean $E000 and $E001 -- which
+                // no scramble row moves.
+                core.mapper_write(0xE000, 0x00);
+                core.mapper_write(0xE001, 0x00);
+            }
+        }
+
+        assert_eq!(
+            expected, irqs,
+            "mapper {mapper}: a latch of $00 must give {expected} IRQ(s) over three rises"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 121"), the A9711's protection: "Returns the value from the four-byte
+/// protection array (`$83, $83, $42, $00`) indexed by the previous write to `$5000-$5FFF`", and
+/// 187's: "*The King of Fighters '96* reads from here and only expects bit 7 of the value being
+/// returned to be set."
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_mappers_121_and_187_answer_their_protection_reads() {
+    let mut core = MapperRom::new(121).prg(16).chr(64).load();
+    for (index, expected) in [(0u8, 0x83u8), (1, 0x83), (2, 0x42), (3, 0x00)] {
+        core.mapper_write(0x5000, index);
+        assert_eq!(
+            expected,
+            core.read_memory(0x5000),
+            "121: index {index} of the protection array"
+        );
+        // "Mask: probably $F000": the whole of $5000-$5FFF answers.
+        assert_eq!(expected, core.read_memory(0x5ABC), "121: and at $5ABC");
+    }
+
+    // The index is two bits wide (`[.... ..II]`), so bits 2-7 of the written byte are not it.
+    core.mapper_write(0x5000, 0xFE);
+    assert_eq!(
+        0x42,
+        core.read_memory(0x5000),
+        "121: only bits 0-1 are the index"
+    );
+
+    let core = MapperRom::new(187).prg(16).chr(64).load();
+    let value = core.read_memory(0x5123);
+    assert_ne!(
+        0,
+        value & 0x80,
+        "187: KOF '96 only expects bit 7 of the protection read to be set, and it must be"
+    );
+}
+
+/// nesdev ("INES Mapper 121"), the A9711's `$8003` protection table and its `$8001` latch: the
+/// value written to `$8001` "with the lower six bits reversed" banks `$E000`, `$C000` or `$A000`
+/// according to the index written to `$8003`, and "If an invalid index has been selected, the
+/// `$A000`/`$C000`/`$E000` banks selected via `$8003` expire, and normal MMC3 PRG-ROM banking is
+/// restored."
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_mapper_121_banks_prg_from_bit_reversed_8001_values() {
+    let mut core = MapperRom::new(121).prg(32).chr(64).load();
+
+    // The MMC3's own layout first, so that the expiry at the end has something to restore.
+    core.mapper_write(0x8000, 0x06);
+    core.mapper_write(0x8001, 0x09);
+    core.mapper_write(0x8000, 0x07);
+    core.mapper_write(0x8001, 0x0A);
+    assert_eq!([9, 10, 30, 31], core.prg_windows(), "the MMC3's own layout");
+
+    // `$8001` = $0C is `001100` in six bits, reversed `001100` -> $0C again, which is a poor
+    // witness; $02 is `000010`, reversed `010000` = $10 = bank 16.
+    // Index $26 banks $E000 (window 3).
+    core.mapper_write(0x8003, 0x26);
+    core.mapper_write(0x8001, 0x02);
+    assert_eq!(
+        16,
+        core.prg_windows()[3],
+        "index $26: $E000 takes the bit-reversed $8001 value"
+    );
+
+    // "apply subsequent writes to $8001 to this index as well": another $8001 write moves it
+    // without touching $8003.
+    core.mapper_write(0x8001, 0x04); // `000100` -> `001000` = $08.
+    assert_eq!(8, core.prg_windows()[3], "index $26 is sticky on $8001");
+
+    // Index $28 banks $C000 (window 2) and $2A banks $A000 (window 1).
+    core.mapper_write(0x8003, 0x28);
+    core.mapper_write(0x8001, 0x02);
+    assert_eq!(16, core.prg_windows()[2], "index $28: $C000");
+    core.mapper_write(0x8003, 0x2A);
+    core.mapper_write(0x8001, 0x02);
+    assert_eq!(16, core.prg_windows()[1], "index $2A: $A000");
+
+    // "$2F: Do nothing, but keep the $A000/$C000/$E000 banks previously selected via $8003."
+    let kept = core.prg_windows();
+    core.mapper_write(0x8003, 0x2F);
+    core.mapper_write(0x8001, 0x3F);
+    assert_eq!(
+        kept,
+        core.prg_windows(),
+        "index $2F keeps what was selected"
+    );
+
+    // "All other indices: Restore normal MMC3 PRG-ROM banking." The MMC3's own registers have
+    // gone on latching underneath -- $8003 is also a $8000 write, so the index it last wrote is
+    // the MMC3's select too, and the $8001 writes above landed in whichever register that named.
+    core.mapper_write(0x8003, 0x00);
+    let restored = core.prg_windows();
+    assert_ne!(
+        kept, restored,
+        "an invalid index must let the MMC3's own banking back"
+    );
+    assert_eq!(
+        [30, 31],
+        [restored[2], restored[3]],
+        "and the MMC3's two fixed windows are the image's last two again"
+    );
+}
+
+/// nesdev ("INES Mapper 114"), the page's own observation about 182's games: "Because Hosenkan's
+/// games make no use of the `$6000-$6001` registers, other than **writing zero to both of them
+/// on startup**, some implementations (such as the `EverDrive` N8's) do not emulate the `$600x`
+/// registers."
+///
+/// So the board has to tolerate that pair of writes and nothing else: a zero at `$6000` leaves
+/// bit 7 clear, which is "Use PRG bank from MMC3", and a zero at `$6001` leaves CHR A18 clear.
+/// The census lists this as a test in so many words.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn req_core_100_mapper_182_tolerates_the_zero_its_games_write_at_startup() {
+    let mut core = MapperRom::new(182).prg(16).chr(64).load();
+    for register in 0..8u8 {
+        scrambled_mmc3_bank(&mut core, 182, false, register, register + 1);
+    }
+    let before = (core.prg_windows(), core.chr_windows());
+
+    core.mapper_write(0x6000, 0x00);
+    core.mapper_write(0x6001, 0x00);
+
+    assert_eq!(
+        before,
+        (core.prg_windows(), core.chr_windows()),
+        "the zero Hosenkan's games write at startup must change nothing"
+    );
 }
 
 // ------------------------------------------- the other four of mapper 119's CHR-RAM family

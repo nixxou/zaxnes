@@ -313,6 +313,97 @@ pub struct Cartridge {
     clocks_on_cpu_cycle: bool,
 }
 
+/// Whether `mapper`'s board moves when the PPU puts an address on its bus during a read
+/// ([`Cartridge::watches_ppu_reads`]).
+///
+// The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
+// since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
+// three identical nametable reads. See the two fields. A new board with an A12
+// counter belongs in both lists; one that waits on /RD, in the first only.
+// MF-6b step 4 adds the Taito TC0690 (48), whose counter is the MMC3's and is
+// clocked through the same A12 filter (nesdev, "INES Mapper 048"), so it is in both.
+// MF-6b step 5 adds Tengen's 800037 (158), which is a RAMBO-1 and so watches A12
+// exactly as mapper 64 does.
+// MF-6a3 step 1 adds the TQROM (119) and the two MMC3 multicarts (47, 37): all
+// three *are* the MMC3's board, so all three are in both lists. §4.3's warning,
+// and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` is the test
+// that catches it -- it failed with its own expected list until both were extended.
+// The three numbers are **not** behind their Cargo features here: a number whose
+// board is off is not in `SUPPORTED_MAPPERS`, so no cartridge of it is ever
+// created and the arm is unreachable either way. One `matches!` is also one
+// `matches!` whatever the features, which is what keeps this load-time decision
+// out of the diff when a feature is flipped.
+// MF-6c step 8 adds mapper 96, the Oeka Kids board, to **both** lists, and it is
+// the first number in either with no IRQ at all: its 4 KiB CHR bank is latched
+// off the PPU address bus on the entry into $2000-$2FFF, and its page says the
+// latch "occurs regardless of whether the PPU or game code initiated the address
+// change, enabling software to manually select CHR pages by writing specific
+// values to $2006" -- so it needs the rendering's fetches *and* the bare writes.
+// See `OekaKids`'s own note, which does not settle MR-1's question for the MMC2.
+// MF-UNL-2 step 2 adds 74, 192, 194 and 195, the other four members of mapper
+// 119's CHR-RAM family: all four *are* the MMC3's board, counter included, so all
+// four go in both lists on the reason the step-1 comment above gives for 119.
+// MF-UNL-2 step 3 adds 114, 115, 121, 123, 182 and 187 for the same reason: each
+// one holds an `Mmc3` whose counter is the chip's.
+///
+/// **Extracted from `Cartridge::create` by MF-UNL-2 step 3**, which took that function past
+/// `clippy::too_many_lines` -- six more numbers in each list. Two `const fn` of the mapper
+/// number and nothing else: the decision is the same one, made at the same moment, and no board
+/// of either list moves an instruction.
+const fn watches_ppu_reads(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        4 | 5
+            | 37
+            | 47
+            | 48
+            | 64
+            | 74
+            | 96
+            | 114
+            | 115
+            | 116
+            | 118
+            | 119
+            | 121
+            | 123
+            | 158
+            | 182
+            | 187
+            | 192
+            | 194
+            | 195
+    )
+}
+
+/// The second of the two lists [`watches_ppu_reads`] documents: the boards that also move when
+/// the PPU's address lines are driven with **/RD high**. Every A12 counter is in both; the
+/// MMC5's in-frame detection is in the first only.
+const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        4 | 37
+            | 47
+            | 48
+            | 64
+            | 74
+            | 96
+            | 114
+            | 115
+            | 116
+            | 118
+            | 119
+            | 121
+            | 123
+            | 158
+            | 182
+            | 187
+            | 192
+            | 194
+            | 195
+    )
+}
+
 impl Cartridge {
     /// Returned by [`Cartridge::nametable_page`] when the board leaves the layout to
     /// [`Cartridge::mirroring`], which is what every mapper but MMC5 does.
@@ -409,41 +500,10 @@ impl Cartridge {
                 5 | 19 | 24 | 26 | 68 | 95 | 111 | 118 | 150 | 158 | 207 | 243
             ),
             bus_conflicts,
-            // The MMC3 board (4, 118, and the MC-ACC submapper of 4), the RAMBO-1 (64) and —
-            // since MF-4c applied MR-5-4 — the MMC5 (5), whose in-frame detection listens for
-            // three identical nametable reads. See the two fields. A new board with an A12
-            // counter belongs in both lists; one that waits on /RD, in the first only.
-            // MF-6b step 4 adds the Taito TC0690 (48), whose counter is the MMC3's and is
-            // clocked through the same A12 filter (nesdev, "INES Mapper 048"), so it is in both.
-            // MF-6b step 5 adds Tengen's 800037 (158), which is a RAMBO-1 and so watches A12
-            // exactly as mapper 64 does.
-            // MF-6a3 step 1 adds the TQROM (119) and the two MMC3 multicarts (47, 37): all
-            // three *are* the MMC3's board, so all three are in both lists. §4.3's warning,
-            // and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` is the test
-            // that catches it -- it failed with its own expected list until both were extended.
-            // The three numbers are **not** behind their Cargo features here: a number whose
-            // board is off is not in `SUPPORTED_MAPPERS`, so no cartridge of it is ever
-            // created and the arm is unreachable either way. One `matches!` is also one
-            // `matches!` whatever the features, which is what keeps this load-time decision
-            // out of the diff when a feature is flipped.
-            // MF-6c step 8 adds mapper 96, the Oeka Kids board, to **both** lists, and it is
-            // the first number in either with no IRQ at all: its 4 KiB CHR bank is latched
-            // off the PPU address bus on the entry into $2000-$2FFF, and its page says the
-            // latch "occurs regardless of whether the PPU or game code initiated the address
-            // change, enabling software to manually select CHR pages by writing specific
-            // values to $2006" -- so it needs the rendering's fetches *and* the bare writes.
-            // See `OekaKids`'s own note, which does not settle MR-1's question for the MMC2.
-            // MF-UNL-2 step 2 adds 74, 192, 194 and 195, the other four members of mapper
-            // 119's CHR-RAM family: all four *are* the MMC3's board, counter included, so all
-            // four go in both lists on the reason the step-1 comment above gives for 119.
-            watches_ppu_reads: matches!(
-                mapper,
-                4 | 5 | 37 | 47 | 48 | 64 | 74 | 96 | 116 | 118 | 119 | 158 | 192 | 194 | 195
-            ),
-            watches_ppu_bus_without_read: matches!(
-                mapper,
-                4 | 37 | 47 | 48 | 64 | 74 | 96 | 116 | 118 | 119 | 158 | 192 | 194 | 195
-            ),
+            // The two lists are `watches_ppu_reads` and `watches_ppu_bus_without_read` below,
+            // which carry the numbers and the lot that added each.
+            watches_ppu_reads: watches_ppu_reads(mapper),
+            watches_ppu_bus_without_read: watches_ppu_bus_without_read(mapper),
             mapper_number: mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
@@ -1175,13 +1235,20 @@ mod tests {
         // $2000-$2FFF, which the rendered line below reaches.
         #[cfg(feature = "board-96")]
         expected.extend_from_slice(&[96, 96]);
+        // MF-UNL-2 step 3: the six scrambled boards, each of which holds an `Mmc3`.
+        #[cfg(feature = "board-mmc3-scramble")]
+        expected.extend_from_slice(&[114, 114, 115, 115]);
         #[cfg(feature = "board-116")]
         expected.extend_from_slice(&[116, 116]);
         expected.extend_from_slice(&[118, 118]);
         #[cfg(feature = "board-119")]
         expected.extend_from_slice(&[119, 119]);
+        #[cfg(feature = "board-mmc3-scramble")]
+        expected.extend_from_slice(&[121, 121, 123, 123]);
         #[cfg(feature = "board-158")]
         expected.extend_from_slice(&[158, 158]);
+        #[cfg(feature = "board-mmc3-scramble")]
+        expected.extend_from_slice(&[182, 182, 187, 187]);
         #[cfg(feature = "board-mmc3-chrram")]
         expected.extend_from_slice(&[192, 192, 194, 194, 195, 195]);
         assert_eq!(

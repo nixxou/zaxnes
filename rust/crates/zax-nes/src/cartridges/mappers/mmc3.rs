@@ -666,10 +666,33 @@ impl<
     }
 
     /// Recomputes the windows from the registers, for a board that holds this chip and writes
-    /// its own outer bank over them (mapper 116). Behind `board-116`, its only caller.
-    #[cfg(feature = "board-116")]
+    /// its own outer bank or PRG override over them: mapper 116 (MF-6a3 step 4) and the six
+    /// scrambled boards of `board-mmc3-scramble` (MF-UNL-2 step 3). Behind those two features,
+    /// its only callers.
+    ///
+    /// Recomputing before the overlay is what makes such a board's refresh **idempotent**: the
+    /// windows that go into it never already carry one, so no write can count a bank twice.
+    #[cfg(any(feature = "board-116", feature = "board-mmc3-scramble"))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
+    }
+
+    /// Forces the **revision A** scanline counter, for a board that holds this chip and whose
+    /// own page states the rule (MF-UNL-2 step 3).
+    ///
+    /// nesdev ("INES Mapper 114"): "IRQ behavior resembles that of the MMC3A, i.e. **a latch
+    /// value of zero disables the IRQ**, on which *Aladdin* depends", and 115's page says the
+    /// same of 114 in the other vocabulary — "Mapper 114's IRQ behavior resembles 'NEC'
+    /// behavior". That is exactly [`Mmc3Board::irq_revision_a`], which mapper 4 reaches through
+    /// NES 2.0 submapper 4; these boards are not mapper 4 and carry no submapper, so the board
+    /// that holds the chip sets it at load.
+    ///
+    /// The counterpart needs no call: 115's "Sharp" rule — "a latch value of zero causes an IRQ
+    /// on every scanline, on which the Chinese version of *幽☆遊☆白書 Final* depends" — is this
+    /// build's **default** revision B, so 115 takes the chip as it comes.
+    #[cfg(feature = "board-mmc3-scramble")]
+    pub(crate) fn force_irq_revision_a(&mut self) {
+        self.irq_revision_a = true;
     }
 
     fn update_banks(&mut self) {

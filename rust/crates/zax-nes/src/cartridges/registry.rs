@@ -20,6 +20,8 @@ use super::mappers::Jv001;
 use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
+#[cfg(feature = "board-mmc3-scramble")]
+use super::mappers::Mmc3Scramble;
 #[cfg(feature = "board-namcot108")]
 use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
@@ -156,11 +158,19 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     105,
     #[cfg(feature = "board-111")]
     111,
+    #[cfg(feature = "board-mmc3-scramble")]
+    114,
+    #[cfg(feature = "board-mmc3-scramble")]
+    115,
     #[cfg(feature = "board-116")]
     116,
     118,
     #[cfg(feature = "board-119")]
     119,
+    #[cfg(feature = "board-mmc3-scramble")]
+    121,
+    #[cfg(feature = "board-mmc3-scramble")]
+    123,
     #[cfg(feature = "board-jv001")]
     132,
     #[cfg(feature = "board-133")]
@@ -198,10 +208,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-jv001")]
     173,
     180,
+    #[cfg(feature = "board-mmc3-scramble")]
+    182,
     #[cfg(feature = "board-small-boards")]
     184,
     #[cfg(feature = "board-small-boards")]
     185,
+    #[cfg(feature = "board-mmc3-scramble")]
+    187,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
     #[cfg(feature = "board-mmc3-chrram")]
@@ -336,6 +350,23 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-mmc3-chrram")]
         74 | 192 | 194 | 195 => BoardMemorySizes {
             chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
+            ..BoardMemorySizes::default()
+        },
+        // Mappers 114, 115 and 182: the `$600x` pair **is** the board's decode of $6000-$7FFF,
+        // so there is no RAM behind that window. Both pages put the registers under a mask that
+        // leaves no room for any -- 114's "probably $E001" repeats $6000/$6001 every two bytes
+        // through the whole 8 KiB and 115's $E003 repeats $6000-$6003 every four -- and both say
+        // in the same words that "the $600x registers are **not connected to the MMC3 clone's
+        // WRAM interface** and thus function regardless of whether WRAM is enabled or not", so
+        // the window cannot be RAM that a WRAM enable gates. The same arm, and the same reason,
+        // that mappers 47, 37, 140, 184, 150 and 243 are on above (MF-UNL-2 step 3).
+        //
+        // **121, 123 and 187 are deliberately absent**: every register of those three is
+        // **below** $6000 -- $5000-$5FFF, $5800-$5FFF and $5000 -- so nothing forces the
+        // question and the header decides, which is mapper 97's precedent in this function.
+        #[cfg(feature = "board-mmc3-scramble")]
+        114 | 115 | 182 => BoardMemorySizes {
+            prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
         // Mappers 47 and 37: the outer register *is* the board's decode of $6000-$7FFF, so
@@ -812,6 +843,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         #[cfg(feature = "board-mmc3-chrram")]
         74 | 192 | 194 | 195 => Board::IrqBoard(IrqBoard::Mmc3ChrRam(Box::new(
             Mmc3ChrRamBoard::new(memory, mapper)?,
+        ))),
+        // MF-UNL-2 step 3: the six MMC3 clones with scrambled registers, an outer CHR bank and
+        // an NROM-like PRG override. One board with six wirings -- the number picks the two
+        // scramble rows, the override's port and bit order, whether CHR A18 follows PPU A12 and
+        // whether the counter is the MMC3A's -- and `Mmc3Scramble`'s own note has the table.
+        #[cfg(feature = "board-mmc3-scramble")]
+        114 | 115 | 121 | 123 | 182 | 187 => Board::IrqBoard(IrqBoard::Mmc3Scramble(Box::new(
+            Mmc3Scramble::new(memory, mapper)?,
         ))),
         // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two
         // numbers differ only in what the outer register's bits drive, which is a field test

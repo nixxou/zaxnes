@@ -152,6 +152,51 @@ impl BankWindows {
         }
     }
 
+    /// Rewrites every 8 KiB PRG window's bank number as `(bank & mask) | bits`, each re-wrapped
+    /// as [`Self::map_prg_8k`] wraps it.
+    ///
+    /// The counterpart of [`Self::offset_chr_banks`] for a board whose **outer PRG bank is an
+    /// address line** rather than an addend: mapper 115's `$6000` bit 6 is "PRG A18" and mapper
+    /// 121's `$5180` bit 7 selects an outer 256 KiB bank, and both pages describe the MMC3's own
+    /// bits as sitting *below* that line. `mask` is what the MMC3 still drives, so the call is
+    /// **idempotent** whenever `bits & mask == 0`, which is the only way these boards use it.
+    ///
+    /// Additive: behind `board-mmc3-scramble`, its only caller.
+    #[cfg(feature = "board-mmc3-scramble")]
+    pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
+        for slot in 0..Self::PRG_WINDOWS {
+            if self.prg_is_ram[slot] {
+                continue;
+            }
+
+            let bank = i32::try_from(self.prg_offset[slot] / Self::PRG_WINDOW_SIZE).unwrap_or(0);
+            self.map_prg_8k(slot, (bank & mask) | bits);
+        }
+    }
+
+    /// ORs `bits` into the bank number of the 1 KiB CHR windows from `from_slot` on, each
+    /// re-wrapped as [`Self::map_chr_1k`] wraps it.
+    ///
+    /// `from_slot` is what makes this the **CHR A18 driven by PPU A12** of the Kǎshèng A9711 and
+    /// A98402 (mappers 121 and 187): nesdev gives both boards "CHR A18 (the second half of
+    /// CHR-ROM) is directly selected by PPU A12, regardless of what the MMC3 is set to do. This
+    /// means that the 'left' pattern table always uses the first and the 'right' pattern table
+    /// always uses the second 256 KiB half of CHR-ROM" — so the four windows of PPU $1000-$1FFF
+    /// carry the line and the four of $0000-$0FFF do not. `from_slot` = 0 is the same boards'
+    /// outer CHR bank, which is a line over all eight.
+    ///
+    /// `OR` and not `+`, because a line is what both pages describe, and it is what makes the
+    /// call idempotent: the bank a window already carries may already have the bit.
+    ///
+    /// Additive: behind `board-mmc3-scramble`, its only caller.
+    #[cfg(feature = "board-mmc3-scramble")]
+    pub fn or_chr_banks(&mut self, from_slot: usize, bits: i32) {
+        for slot in from_slot..Self::CHR_WINDOWS {
+            let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);
+            self.map_chr_1k(slot, bank | bits);
+        }
+    }
+
     // ---------------------------------------------------------------- bus
 
     /// Reads PRG-ROM, or PRG-RAM when the window shows it, at `address`; `None` below

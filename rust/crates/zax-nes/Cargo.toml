@@ -25,6 +25,7 @@ default = [
     "board-116",
     "board-119",
     "board-mmc3-chrram",
+    "board-mmc3-scramble",
     "board-153",
     "board-155",
     "board-68",
@@ -97,6 +98,19 @@ board-119 = []
 # page that were not here, plus 195's run-time GAL. One `IrqBoard` variant for the four, holding
 # the inner enum `Mmc3ChrRamBoard`.
 board-mmc3-chrram = ["board-119"]
+
+# Mappers 114, 115, 121, 123, 182 and 187 -- the SuperGame/Hosenkan board and the Kasheng
+# SFC-02B, A9711/A9713, UNL-H2288 and A98402: six MMC3 clones that add some of the same three
+# things to the chip -- scrambled register addresses and indices, an outer 256 KiB CHR bank, and
+# an NROM-like PRG override register (MF-UNL-2 step 3). About fourteen originals, *Aladdin*,
+# *The Lion King*, *Boogerman*, the six Gouder titles Kasheng re-released, *Mortal Kombat 3*,
+# *Street Fighter Zero 2* and *The King of Fighters 96* among them.
+#
+# One feature, one board with six wirings and one boxed `IrqBoard` variant, on the `Jv001`
+# precedent: no number has all three additions and none has anything else. It is the first board
+# to make `IrqBoard` forward `Mapper::try_read_prg`, which 121's protection array and 187's
+# protection read need.
+board-mmc3-scramble = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

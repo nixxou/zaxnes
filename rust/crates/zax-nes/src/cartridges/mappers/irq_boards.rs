@@ -2,6 +2,8 @@
 use super::Mmc3ChrRamBoard;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::Mmc3Multicart;
+#[cfg(feature = "board-mmc3-scramble")]
+use super::Mmc3Scramble;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
 #[cfg(feature = "board-116")]
@@ -122,6 +124,13 @@ pub enum IrqBoard {
     /// eleven of lot PR-1's thirteen ROMs. Boxed, the enum is the size MF-6a3 step 1 measured.
     #[cfg(feature = "board-mmc3-chrram")]
     Mmc3ChrRam(Box<Mmc3ChrRamBoard>),
+    /// Mappers 114, 115, 121, 123, 182 and 187, the six MMC3 clones with scrambled registers,
+    /// an outer CHR bank and an NROM-like PRG override (MF-UNL-2 step 3).
+    ///
+    /// **Boxed**, on [`IrqBoard::Somari`]'s own measurement: the board *holds* an `Mmc3` and
+    /// adds its own registers, so inline it would set this enum's size.
+    #[cfg(feature = "board-mmc3-scramble")]
+    Mmc3Scramble(Box<Mmc3Scramble>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -186,6 +195,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Multicart($b) => $body,
             #[cfg(feature = "board-mmc3-chrram")]
             IrqBoard::Mmc3ChrRam($b) => $body,
+            #[cfg(feature = "board-mmc3-scramble")]
+            IrqBoard::Mmc3Scramble($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]
@@ -324,6 +335,26 @@ impl Mapper for IrqBoard {
     #[cfg(feature = "board-68-chr-nametables")]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
+    }
+
+    /// Forwarded for `board-mmc3-scramble` alone, and 121 and 187 are why: both answer a
+    /// **protection read below `$6000`** -- 121 from its four-byte array, 187 with a byte whose
+    /// bit 7 *The King of Fighters 96* requires -- and `Mapper::try_read_prg`'s default answers
+    /// `None` there.
+    ///
+    /// It is **behaviour-neutral for the other boards of this enum**: none of the ten overrides
+    /// it, so each one's own default is `self.banks().and_then(...read_prg...)`, which is the
+    /// same answer the un-forwarded dispatch gave them.
+    ///
+    /// This is the dispatch lot MF-CART freed. MF-6c measured nine shapes against
+    /// `Cartridge::default_cpu_read`'s inlined copy of its jump table at `mmc5` +7 456 756
+    /// instructions over 300 frames a time; MF-CART step 4 inlined that function away and
+    /// measured `Mmc5::try_read_prg` and `Cartridge::try_cpu_read` **identical to the
+    /// instruction** with `Board` at thirty-six, thirty-eight and thirty-nine variants. Step 8
+    /// of this lot re-measures it rather than taking that on trust.
+    #[cfg(feature = "board-mmc3-scramble")]
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        inner!(self, b => b.try_read_prg(memory, address))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
