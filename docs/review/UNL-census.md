@@ -1100,6 +1100,26 @@ Mapper **119 is literally a member of the first family** — Mesen builds 74, 11
 
 #### MF-UNL-3 — AVE, and the single-latch boards
 
+> **Shipped.** `docs/progress/MF-UNL-3.md` is the lot's own write-up: nine numbers, eight
+> features, all eight in `default`, and **no figure outside the owner's tolerance on either
+> instrument** -- worst PR-1 ROM +0.003 %, all five level-2 `core` figures at +0.000 % and all
+> five `total` figures inside too. **Five** of the steps below were written from a reading the
+> numbers' own pages do not support, and the pages won:
+>
+> * step 2's test for **143** asks for "the logical inversion of the **written** bits", where the
+>   page's `DDDDDD` is the **address**'s A5-A0 and the board has no write side at all (**Q-145**);
+> * step 2's test for **144** asks that `$FF` over a ROM byte of `$00` yield bank `$FE`, which
+>   none of the three formulas the page offers produces -- all three give `$00` (**Q-146**);
+> * **38**'s `$F000-$FFFF` decode is the page's own inference and not its assertion, and **107**'s
+>   bus conflicts are "currently unknown" on the page (**Q-147**);
+> * **145**'s bank bit is **bit 7**, `[C... ....]`, which "a one-register CHR bank switch" does
+>   not say.
+>
+> The one structural finding worth carrying forward: **mapper 144 is the first board in this build
+> whose bus conflict is not the generic AND**, so it is deliberately absent from
+> `registry::has_bus_conflicts` and does the arithmetic itself. A second such board wants a
+> per-board enum there rather than a second `bool`.
+
 **Boards and features**: `board-nina03` (79, 146); `board-38`; `board-107`; `board-143`;
 `board-144`; `board-145`; `board-149`; `board-190`. **9 numbers, 8 features, ~8 h, ~27 titles.**
 

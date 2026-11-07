@@ -46,7 +46,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
   `docs/review/BOARD-FEATURES.md` with those figures in them.
 - [x] **8/9 — golden-core against the base commit**, and the full check with `ZAXNES_ROMS` and
   `ZAXNES_TEST_ROMS` set.
-- [ ] **9/9 — the journal and the final pass.**
+- [x] **9/9 — the journal and the final pass.**
 
 ## The nine numbers, and the page each is built from
 
@@ -690,3 +690,47 @@ Six `.rs` files, of which **two are new** (`nina03.rs`, `single_latch.rs`).
 `DecodeBoard::try_read_prg`'s `cfg` (which gains `board-143`), the end of
 `req_core_100_every_required_mapper_is_registered`'s comment list, and that test's `additions`
 array length (75 → 84).
+
+## Step 9 — the journal, the census note, and the final pass
+
+### The final check, in the form the lot's brief asks for
+
+| | |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| clippy `-D warnings` on `zax-nes --all-targets`, **twelve configurations** | **all clean** — `default`, `--no-default-features`, `--features parked-boards`, each of the eight features alone, and all eight together |
+| `cargo test --release -p zax-nes -p zax-harness` | **972 / 0 / 9** (961 / 0 / 9 at `452e8464`) |
+| the same, `--include-ignored --no-fail-fast`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set | **981 / 0 / 0** |
+| golden-core over the 98 originals, against `452e8464` | **byte-identical**, `md5 f79e7df842c3ee43e7d9b67861a927b5` — MF-UNL-2's own digest |
+| the callgrind figures | PR-1 worst ROM **+0.003 %**, set total +0.001 %; level 2 all five `core` **+0.000 %** and all five `total` inside, worst `smb3` +0.013 % |
+| the feature decision | **all eight in `default`**; `parked-boards` unchanged |
+| `board-decode-boards` alone | still refused by its own `compile_error!` |
+
+### The census note
+
+`docs/review/UNL-census.md` §7.2 gains a **Shipped** note under the MF-UNL-3 heading, in the shape
+MF-UNL-2 left for this lot: what shipped, and **which steps of §7.2 the numbers' own pages
+contradict**. Five of them do here — 143's read, 144's figure, 38's `$F000` decode, 107's bus
+conflicts and 145's bit 7 — where MF-UNL-2 found three, and the note names the Q ticket for each.
+It also carries the one structural finding: mapper 144 is the first board whose bus conflict is not
+the generic AND.
+
+### What is open
+
+* **Q-145**, **Q-146** and **Q-147**, all three implemented on their provisional choice and each
+  pinned by a named test. **Q-146 is the one a reviewer should close**: the page's three candidate
+  formulas and the census's own figure differ on every write whose bit 0 is clear, and no
+  mapper-144 image is available to this project.
+* **Mapper 38's `$F000-$FFFF` decode** is the page's inference and not its assertion (Q-147). If a
+  *Crime Busters* dump misbehaves, `LatchBoard::BitCorp38`'s guard is the one line to narrow.
+* **Mapper 107's bus conflicts** are "currently unknown" on its page and are answered **no**
+  (Q-147). A *Magic Dragon* dump closes it in one write.
+* **No ROM runs any of the nine numbers.** §5 of the census counted it — no file in
+  `assets-free/test-roms` uses any of the 199 unlicensed numbers — so every test of this lot is
+  written from the pages' own register tables. The twenty-one titles R0 would have to source are
+  listed in §7.2, nineteen of them AVE's.
+* **A note for the MF-UNL lots that follow**, which is MF-UNL-2's own with a bigger number: §7.2's
+  steps were drafted from Mesen 2's `MapperFactory`, and **five of this lot's nine numbers** had a
+  step or a test that the number's page does not support. Read the page before the step — and read
+  the *whole* page: 143's write side does not exist, which only the absence of a *Banks* section
+  says.
