@@ -11,6 +11,8 @@
     feature = "board-107",
     feature = "board-111",
     feature = "board-133",
+    feature = "board-143",
+    feature = "board-144",
     feature = "board-145",
     feature = "board-149",
     feature = "board-jaleco-72-92-86",
@@ -42,6 +44,8 @@ use super::Sachen8Reg;
 #[cfg(any(
     feature = "board-38",
     feature = "board-107",
+    feature = "board-143",
+    feature = "board-144",
     feature = "board-145",
     feature = "board-149"
 ))]
@@ -146,6 +150,8 @@ pub enum DecodeBoard {
     #[cfg(any(
         feature = "board-38",
         feature = "board-107",
+        feature = "board-143",
+        feature = "board-144",
         feature = "board-145",
         feature = "board-149"
     ))]
@@ -271,7 +277,15 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for the five boards already here**: none of them overrides it, so
     /// each takes `Mapper`'s own default — `self.banks().and_then(BankWindows::read_prg)` —
     /// which is the answer the un-forwarded dispatch gave the whole variant.
-    #[cfg(any(feature = "board-jv001", feature = "board-sachen-8reg"))]
+    ///
+    /// **Mapper 143 joins it in MF-UNL-3 step 3**, whose protection read is at the same $4100
+    /// under the same mask and whose board has no write side at all. Nothing else of this lot
+    /// overrides the hook, so the other eight numbers of it keep `Mapper`'s own default here.
+    #[cfg(any(
+        feature = "board-143",
+        feature = "board-jv001",
+        feature = "board-sachen-8reg"
+    ))]
     #[inline(never)]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))

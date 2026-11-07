@@ -131,7 +131,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   SA-0036), four of lot MF-UNL-3's seven single-latch boards: **one** `DecodeBoard`
     //   variant for all seven with a runtime field saying which, one Cargo feature each
     //   (`board-38`, `board-107`, `board-145`, `board-149`) because the owner's rule is one
-    //   feature per board that costs (MF-UNL-3 step 2).
+    //   feature per board that costs (MF-UNL-3 step 2);
+    // * 143 (the Sachen TCA-01, an NROM board whose only register is a protection read) and 144
+    //   (the AGCI 50282 of Death Race, mapper 11's board with a 300 ohm resistor on CPU D0), two
+    //   more of the same variant, behind `board-143` and `board-144` (MF-UNL-3 step 3).
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -154,7 +157,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let chrram = cfg!(feature = "board-mmc3-chrram");
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
-    let additions: [(i32, bool); 81] = [
+    let additions: [(i32, bool); 83] = [
         (19, true),
         (24, true),
         (26, true),
@@ -206,6 +209,8 @@ fn req_core_100_every_required_mapper_is_registered() {
         (133, cfg!(feature = "board-133")),
         (136, jv001),
         (140, small),
+        (143, cfg!(feature = "board-143")),
+        (144, cfg!(feature = "board-144")),
         (145, cfg!(feature = "board-145")),
         (146, nina03),
         (147, jv001),
@@ -7609,17 +7614,23 @@ fn req_core_102_mappers_145_and_149_switch_chr_from_bit_7_alone() {
     }
 }
 
-/// REQ-CORE-090/091 and REQ-CORE-004 for the four boards of step 2: the latch, saved, restored
+/// REQ-CORE-090/091 and REQ-CORE-004 for the boards of `SingleLatch`: the latch, saved, restored
 /// and reset, with the state dirtied first.
 ///
-/// §7.1 item 2 asks for this per board, and the two generic sweeps cannot do it for two of the
-/// four: `req_core_090_the_mapper_state_survives_a_save_and_restore` and
+/// §7.1 item 2 asks for this per board, and the two generic sweeps cannot do it for three of
+/// them: `req_core_090_the_mapper_state_survives_a_save_and_restore` and
 /// `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` write
-/// $5000-$E001, which reaches mapper 107's and 149's register but not mapper 38's $7000 or
-/// mapper 145's $4100.
+/// $5000-$E001, which reaches mapper 107's, 144's and 149's register but not mapper 38's $7000
+/// or mapper 145's $4100.
+///
+/// **Mapper 143 is deliberately not in the table**: its board has no write side at all, so there
+/// is no state to dirty and the `assert_ne!` below could not hold. What it has instead is
+/// `req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits`, which asserts that
+/// no write anywhere moves a window — and the generic sweep still round-trips its block.
 #[cfg(any(
     feature = "board-38",
     feature = "board-107",
+    feature = "board-144",
     feature = "board-145",
     feature = "board-149"
 ))]
@@ -7632,6 +7643,10 @@ fn req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied() {
         (38, 0x7000, 0x0D, 0x02),
         #[cfg(feature = "board-107")]
         (107, 0x8000, 0x05, 0x02),
+        // 144 writes into $A000-$BFFF, where the image below has an `$FF` bank: the board's own
+        // conflict makes `$FF & ($32 | 1)` the latched `$33`.
+        #[cfg(feature = "board-144")]
+        (144, 0xA000, 0x32, 0x00),
         #[cfg(feature = "board-145")]
         (145, 0x4100, 0x80, 0x00),
         // 149 writes over PRG bank 1, which the image below fills with `$FF` so that the
@@ -7671,6 +7686,133 @@ fn req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied() {
             0,
             core.chr_bank(0x0000),
             "mapper {mapper}: a reset puts the latch back to zero"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 143"), the whole of the board: `A:[010. ...1 ..DD DDDD] -> [xxii iiii]`,
+/// "reads provide the logical inversion of DDDDDD in the bits iiiiii", bits 7-6 open bus, and
+/// **no bankswitching register at all** (MF-UNL-3 step 3).
+///
+/// `DDDDDD` is **the address**, bits A5-A0. The census's own test asks for "the logical
+/// inversion of the **written** bits", which a board whose only chips are "a 74138 and a 74368"
+/// cannot do and which this page's diagram does not say; the page wins and **Q-145** records it.
+/// The test therefore walks all 64 values of A5-A0 and asserts the inversion of each, and then
+/// asserts that a *write* changes nothing.
+#[cfg(feature = "board-143")]
+#[test]
+fn req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits() {
+    let mut core = MapperRom::new(143).prg(4).chr(8).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "an NROM board, unbanked");
+
+    // All 64 values of the address's low six bits, at $4100 and at one of the page's mirrors.
+    for low in 0u16..64 {
+        for base in [0x4100u16, 0x4140, 0x5F00] {
+            let address = base | low;
+            // The two bits the page calls open bus read as 0, for `Jv001`'s own reason.
+            let expected = (!low as u8) & 0x3F;
+            assert_eq!(
+                expected,
+                core.read_memory(address),
+                "{address:#06X}: the inversion of A5-A0"
+            );
+        }
+    }
+
+    // A8 clear is not the port: `$4000 & $E100` is `$4000`, so the read is open bus — which this
+    // core answers with the last value on the bus, not with the board.
+    assert_ne!(
+        0x3F,
+        core.read_memory(0x4000),
+        "A8 clear is not the protection port"
+    );
+
+    // And there is no write side: nothing a game writes anywhere moves a window.
+    for address in [0x4100u16, 0x4140, 0x5F00, 0x6000, 0x7000, 0x8000, 0xFFFF] {
+        core.mapper_write(address, 0x0F);
+        assert_eq!(
+            [0, 1, 2, 3],
+            core.prg_windows(),
+            "{address:#06X}: this board has no bank register"
+        );
+        assert_eq!(0, core.chr_bank(0x0000), "{address:#06X}");
+    }
+
+    // The protection read still answers after all of that: it is wiring and has no state.
+    assert_eq!(0x3F, core.read_memory(0x4100));
+    assert_eq!(0x3E, core.read_memory(0x4101));
+}
+
+/// nesdev ("INES Mapper 144"), the AGCI 50282 of *Death Race*: mapper 11's `[CCCC PPPP]`
+/// register, latched through a bus conflict in which **the ROM's least significant bit always
+/// wins** — "a 300 Ω resistor was added between CPU D0 and the combination of mapper hardware
+/// and ROM" (MF-UNL-3 step 3).
+///
+/// This build takes the page's third candidate, which it calls "most succinct",
+/// `EffectiveData = (ROM[address] & (WrittenData | 1))` — the same function as its first,
+/// Nestopia 1.4.0's `(WrittenData & ROM[address]) | (ROM[address] & 1)`. The second, FCEUX
+/// 2.1.5's "ignores writes to 0x8000", is a workaround for one address and is not taken.
+///
+/// **The census's own figure is not produced by any of the three** — it asks that "$FF over a
+/// ROM byte of $00 yields bank $FE", where all three give `$00` — so the test pins the rule the
+/// page states instead: with the ROM byte's bit 0 set and the written bit 0 clear, the effective
+/// bit 0 is the **ROM's**. Q-146 records it.
+#[cfg(feature = "board-144")]
+#[test]
+fn req_core_102_mapper_144_lets_the_roms_bit_0_win_its_bus_conflict() {
+    // PRG bank 3 is all `$FF`, so a write into $E000-$FFFF conflicts against `$FF`; every other
+    // bank carries its own number, whose bit 0 is the bank's.
+    let mut core = MapperRom::new(144)
+        .prg(16)
+        .chr(32)
+        .prg_bank_all_ones(3)
+        .load();
+    // Window 3 is that bank at power-on, so `$E000` is where a write meets `$FF`.
+    assert_eq!([0, 1, 2, 255], core.prg_windows());
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // Over an `$FF` ROM byte the conflict changes nothing at all: `$FF & ($32 | 1)` is `$33`,
+    // which is CHR bank 3 and PRG bank 3.
+    //
+    // **$E100 and not $E000**, which the first version of this test got wrong: the fixture puts
+    // an endless loop and the three vectors at the start and end of the *last* PRG bank, so the
+    // byte at $E000 of that bank is the `JMP`'s `$4C` and not the bank's own number.
+    core.mapper_write(0xE100, 0x32);
+    assert_eq!([12, 13, 14, 15], core.prg_windows(), "PRG bank 3 of four");
+    assert_eq!(24, core.chr_bank(0x0000), "CHR bank 3 of four");
+
+    // **The rule.** $E100 now shows numbered bank 15, whose bytes are `$0F`, and the written
+    // value's bit 0 is clear: a plain Color Dreams AND would give `$0F & $30` = `$00` and PRG
+    // bank 0, and the resistor gives `$0F & ($30 | 1)` = `$01` and PRG bank **1**.
+    core.mapper_write(0xE100, 0x30);
+    assert_eq!(
+        [4, 5, 6, 7],
+        core.prg_windows(),
+        "the ROM's bit 0 won: bank 1, where an unmodified mapper 11 would show bank 0"
+    );
+    assert_eq!(
+        0,
+        core.chr_bank(0x0000),
+        "the ROM byte masked the CHR field"
+    );
+
+    // Bits 7-1 are the ordinary AND, and the numbered banks show it: $8100 is bank 4, whose
+    // bytes are `$04`, so a written `$FF` latches `$04 & $FF` = `$04` — PRG bank 0, not 3.
+    core.mapper_write(0x8100, 0xFF);
+    assert_eq!(
+        [0, 1, 2, 255],
+        core.prg_windows(),
+        "$FF became the ROM's own $04"
+    );
+    assert_eq!(0, core.chr_bank(0x0000));
+
+    // Nothing below $8000 is the register.
+    for address in [0x4100u16, 0x6000, 0x7FFF] {
+        core.mapper_write(address, 0x32);
+        assert_eq!(
+            [0, 1, 2, 255],
+            core.prg_windows(),
+            "{address:#06X} is no register"
         );
     }
 }

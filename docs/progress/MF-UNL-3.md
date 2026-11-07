@@ -29,7 +29,7 @@ Branch: `mapper-review`. Worktree: the `wt-mappers` worktree.
 - [x] **2/9 — `SingleLatch`, and the four plain latches: 38, 107, 145, 149.** One
   `SmallBoard`-style `DecodeBoard` variant holding the seven remaining boards as a runtime field,
   on the `Jv001` precedent, with four of the seven wired and tested.
-- [ ] **3/9 — `board-143` and `board-144`,** the two boards of that variant that are not a bank
+- [x] **3/9 — `board-143` and `board-144`,** the two boards of that variant that are not a bank
   latch: 143's protection read (through the `try_read_prg` forward `board-jv001` already added)
   and 144's resistor rule.
 - [ ] **4/9 — `board-190`,** the last of the seven and the only one with more than one window.
@@ -321,4 +321,66 @@ does not.
 | | |
 | --- | --- |
 | `cargo test --release -p zax-nes -p zax-harness` | **968 passed, 0 failed, 9 ignored** (+4 over step 1) |
+| `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |
+
+## Step 3 — `board-143` and `board-144`: the two that are not a bank latch
+
+Two more `LatchBoard` variants, two more features, and the two places in this lot where the
+number's own page and the census's own test cannot both be right.
+
+### 143 — the protection read, and the census's "written bits"
+
+The board has **no write side at all**: "an NROM circuit board with a simple form of protection",
+"consistent with a 74138 and a 74368", and one read under mask $E100 whose answer is the logical
+inversion of the **address**'s bits A5-A0. The census asks for "the logical inversion of the
+written bits"; a 74368 is an inverting bus buffer with nothing to latch into, the page's diagram
+names `DDDDDD` inside the *address* pattern, and `req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits`
+walks all 64 of them. **Q-145** records the divergence.
+
+The read goes through `Mapper::try_read_prg`, which `DecodeBoard` has forwarded since MF-UNL-1
+step 1 for `Jv001`'s port at the same $4100; that forward's `cfg` gains `board-143` and nothing
+else moves. The two bits the page calls open bus read as **0**, which is `Jv001`'s own compromise
+for the same reason — the hook returns a byte and cannot see the CPU data bus.
+
+*Dancing Blocks*' reliance on uninitialised RAM is in the board's doc comment and is **not** a
+test, as the census asks: it is a property of the console's 2 KiB and not of this board.
+
+### 144 — the resistor, and a figure that no formula on the page produces
+
+`EffectiveData = ROM[address] & (WrittenData | 1)`, the page's own "most succinct" candidate and
+the same function as its Nestopia one; FCEUX's "ignores writes to 0x8000" is a workaround for one
+address and is not taken. The register itself is mapper 11's `[CCCC PPPP]`, read exactly as
+`ColorDreams` reads it, because it is the same latch on the same board.
+
+**The board is deliberately not on `registry::has_bus_conflicts`.** That function's generic path
+ANDs the written value with the ROM byte inside `Cartridge::cpu_write`, which destroys bit 0
+before the board could put the ROM's bit 0 back. `SingleLatch` reads the byte itself, through the
+windows as they stand — i.e. before this write moves them, which is the order the hardware
+latches in — and that function's comment now records both why 144 is absent and why 149 is
+present.
+
+**The census's figure is not any of the three formulas.** It asks that a write of `$FF` over a
+ROM byte of `$00` yield bank `$FE`; all three candidates give `$00`, and the rule the page
+states is about bit 0 alone. The test pins that rule instead — `$0F & ($30 | 1)` is `$01`, PRG
+bank **1**, where an unmodified mapper 11 would show bank 0 — and **Q-146** records it.
+
+### One thing the test had to notice
+
+**The fixture's last PRG bank does not read as its own number at $E000.** `MapperRom::image`
+writes an endless loop (`4C 00 E0`) at the start of the last 8 KiB bank and the three vectors at
+its end, so a bus-conflict test that writes to $E000 conflicts against `$4C`. The first run
+failed on exactly that; the test writes to **$E100** and says so.
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits` | all 64 address values at $4100, $4140 and $5F00; A8 clear is not the port; **no write anywhere moves a window**; and the read is stateless |
+| `req_core_102_mapper_144_lets_the_roms_bit_0_win_its_bus_conflict` | an `$FF` ROM byte latches the whole value; a ROM byte with bit 0 set and a written bit 0 clear gives the **ROM's** bit 0; bits 7-1 are the ordinary AND; nothing below $8000 is the register |
+
+144 joins `req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied`; **143 is
+deliberately not in that table** and the test says why — a board with no write side has no state
+to dirty, so the `assert_ne!` that keeps the round-trip honest could not hold.
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **970 passed, 0 failed, 9 ignored** (+2 over step 2) |
 | `cargo fmt --check`, clippy `-D warnings` on `zax-nes --all-targets` | clean |

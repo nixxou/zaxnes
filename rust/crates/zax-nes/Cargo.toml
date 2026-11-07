@@ -48,6 +48,8 @@ default = [
     "board-nina03",
     "board-38",
     "board-107",
+    "board-143",
+    "board-144",
     "board-145",
     "board-149",
 ]
@@ -334,6 +336,25 @@ board-38 = ["board-decode-boards"]
 # FCEUX takes three bits. Its "it's currently unknown whether this mapper suffers from bus
 # conflicts or not" is answered **no** and recorded in **Q-147**.
 board-107 = ["board-decode-boards"]
+
+# Mapper 143, the Sachen **TCA-01** of *Dancing Blocks* and *Magical Mathematics*: "an NROM
+# circuit board with a simple form of protection", whose whole register section is a **read** --
+# `A:[010. ...1 ..DD DDDD] -> [xxii iiii]`, the logical inversion of the **address**'s low six
+# bits, with bits 7-6 open bus. The census asked for the inversion of the *written* bits; the
+# page has no write side at all, and **Q-145** records that the page wins. The one board of this
+# lot that needs a forward, `try_read_prg`, which `DecodeBoard` has carried since MF-UNL-1.
+board-143 = ["board-decode-boards"]
+
+# Mapper 144, the **AGCI 50282** of *Death Race*: "a intentionally defective variant of the
+# Color Dreams board (mapper 11)", with "a 300 Ω resistor ... between CPU D0 and the combination
+# of mapper hardware and ROM" so that "only the ROM's least significant bit always wins bus
+# conflicts". The register is mapper 11's `[CCCC PPPP]` and this build reads its two fields
+# exactly as `ColorDreams` does; what the number adds is the latched value,
+# `ROM[address] & (written | 1)` -- the page's own "most succinct" formula, which is the same
+# function as its Nestopia candidate. **Not** on `registry::has_bus_conflicts`: that generic path
+# would AND bit 0 away before the board could put the ROM's back. **Q-146** records all three of
+# the page's candidates and the census's own figure, which none of them produces.
+board-144 = ["board-decode-boards"]
 
 # Mapper 145, the Sachen **SA-72007** of *Sidewinder*: `$4100: [C... ....]` under mask $E100,
 # one 8 KiB CHR bank bit, and the bit is **bit 7**. No PRG bank line: an NROM with a CHR switch.

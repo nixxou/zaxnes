@@ -65,6 +65,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
     feature = "board-38",
     feature = "board-107",
+    feature = "board-143",
+    feature = "board-144",
     feature = "board-145",
     feature = "board-149"
 ))]
@@ -198,6 +200,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     136,
     #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-143")]
+    143,
+    #[cfg(feature = "board-144")]
+    144,
     #[cfg(feature = "board-145")]
     145,
     #[cfg(feature = "board-nina03")]
@@ -592,6 +598,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // latch on mapper 36 is $4200 under $E200, so `$6100 & $E103` is `$6100` and no address
         // in $6000-$7FFF can reach a register of this family. The header decides, as it does for
         // mapper 97 (MF-UNL-1 step 1).
+        //
+        // **Mappers 107, 143, 144, 145 and 149 are deliberately absent too** (MF-UNL-3 steps 2
+        // and 3), and again for mapper 97's reason: not one of their pages documents any
+        // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
+        // 145's ports are at $4100 under mask $E100 and 107's, 144's and 149's are above $8000 —
+        // so the header decides. Mapper 144 is mapper 11's board, which has no arm here either.
         _ => BoardMemorySizes::default(),
     }
 }
@@ -690,11 +702,17 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // ROM and so **has bus conflicts**" -- the page's own words, with no submapper clause
         // and nothing qualifying them (MF-UNL-3 step 2).
         //
-        // **Mappers 38, 79, 107 and 145 are deliberately absent.** 38, 79 and 145 carry the row
-        // "Bus conflicts: No" and keep their register below $8000, where the PRG-ROM does not
-        // drive; 107's page says "it's currently **unknown** whether this mapper suffers from
-        // bus conflicts or not", answered **no** here because that is the reading which latches
-        // what a game wrote, and recorded in Q-147.
+        // **Mappers 38, 79, 107, 143 and 145 are deliberately absent.** 38, 79 and 145 carry the
+        // row "Bus conflicts: No" and keep their register below $8000, where the PRG-ROM does not
+        // drive; 143 has no write side at all; 107's page says "it's currently **unknown**
+        // whether this mapper suffers from bus conflicts or not", answered **no** here because
+        // that is the reading which latches what a game wrote, and recorded in Q-147.
+        //
+        // **And mapper 144 is absent for the opposite reason**: that board *does* have bus
+        // conflicts, of a shape this function cannot express. Its 300 Ω resistor makes the ROM's
+        // **bit 0** win whatever the CPU drove, and the generic path below would AND that bit
+        // away before the board saw it, so `SingleLatch` reads the ROM byte and does the
+        // arithmetic itself (`LatchBoard::Agci144`, MF-UNL-3 step 3).
         #[cfg(feature = "board-149")]
         149 => true,
         11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -879,6 +897,20 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         107 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
             memory,
             LatchBoard::Magic107,
+        ))),
+        // MF-UNL-3 step 3: the two boards of that variant that are not a bank latch. 143 has no
+        // write side at all -- its one register is a protection *read* at $4100 -- and 144 is
+        // mapper 11's board with a resistor on CPU D0, so it does its own bus-conflict
+        // arithmetic rather than taking `has_bus_conflicts`'s generic AND.
+        #[cfg(feature = "board-143")]
+        143 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Tca143,
+        ))),
+        #[cfg(feature = "board-144")]
+        144 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::Agci144,
         ))),
         #[cfg(feature = "board-145")]
         145 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
