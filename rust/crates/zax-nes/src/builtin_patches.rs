@@ -2487,18 +2487,26 @@ mod tests {
         assert_eq!(apply(&image), None);
     }
 
+    /// The Zelda II (USA) ROM from `ZAXNES_ROMS`, or `None` when the folder is not set or does not
+    /// hold it: the tests that need it are `#[ignore]`d, and skip.
+    fn zelda2_usa_rom() -> Option<Vec<u8>> {
+        let folder = std::env::var_os("ZAXNES_ROMS")?;
+        let path = std::path::Path::new(&folder).join("Zelda II - The Adventure of Link (USA).nes");
+        std::fs::read(path).ok()
+    }
+
     /// Needs `ZAXNES_ROMS` with `Zelda II - The Adventure of Link (USA).nes`.
     #[test]
     #[ignore = "needs a commercial ROM (ZAXNES_ROMS)"]
     fn the_zelda_ii_patch_applies_to_the_usa_rom() {
-        let Some(folder) = std::env::var_os("ZAXNES_ROMS") else {
+        let Some(image) = zelda2_usa_rom() else {
             return;
         };
-        let path = std::path::Path::new(&folder).join("Zelda II - The Adventure of Link (USA).nes");
-        let Ok(image) = std::fs::read(path) else {
-            return;
-        };
-        // `apply` checks the source and target checksums of the patch: a `Some` is the build.
+        // The patch is found by the CRC-32 of the ROM's data, the build it is made for.
+        assert_eq!(
+            for_data_crc(data_crc(&image)).map(|patch| patch.name),
+            Some(ZELDA2_USA)
+        );
         let patched = apply(&image).map(|rom| rom.image).unwrap_or_default();
         assert_eq!(patched.len(), image.len());
         assert_eq!(patched[..16], image[..16], "the player's header is kept");
@@ -2518,19 +2526,100 @@ mod tests {
         assert_eq!(data_crc(&image), data_crc(&trainer));
         assert!(apply(&trainer).is_some());
 
-        // A hack of the ROM (one byte changed here) takes the patch only when it is forced.
+        // A ROM hack that changes the code the hack hooks does not take the patch. The byte
+        // flipped is the first of the widescreen's first hook, read from the pack as it resolves
+        // against this ROM rather than written here, so it follows the hack when `z2pack` moves
+        // it; `HackPack::resolve` lists a component's hooks group by group, so it belongs to the
+        // "core" group, the one every other group requires (a component applies only when its
+        // first group does). A change the pack does not look at is another matter and another
+        // test: `a_change_to_the_chr_rom_alone_still_takes_the_zelda_ii_patch`.
+        let zelda = by_name(ZELDA2_USA).expect("the patch");
+        let (_, dump) = pack_for(&image).expect("the pack of the dump");
+        let hooked = dump
+            .component(crate::hack_pack::WIDESCREEN)
+            .expect("its widescreen")
+            .hooks[0]
+            .0;
+        let (start, _) = data_bounds(&image);
         let mut hack = image.clone();
-        let last = hack.len() - 1;
-        hack[last] ^= 0x01;
+        hack[start + hooked] ^= 0x01;
         assert!(apply(&hack).is_none());
-        let zelda = by_name(ZELDA2_USA);
-        let forced = apply_with(&hack, zelda)
-            .map(|rom| rom.image)
-            .unwrap_or_default();
-        assert_eq!(forced.len(), hack.len());
-        // The patch applies to data of the size it was made for only.
-        assert_eq!(source_size(zelda.unwrap()), Some(image.len() - 16));
-        assert!(apply_with(&hack[..hack.len() - 8192], zelda).is_none());
+        // Its aid hooks other bytes and is untouched: the pack's components are judged apart, so
+        // the refusal above is the widescreen's own and not the pack going unrecognised.
+        let (patch, applied) = pack_for(&hack).expect("the pack by signatures");
+        assert_eq!(patch.name, ZELDA2_USA);
+        assert!(applied.component(crate::hack_pack::WIDESCREEN).is_none());
+        assert!(zelda.is_aid("invincible"));
+        assert!(applied.component("invincible").is_some());
+        // Forcing does not help, and must not: it only leaves the checksums of a BPS patch
+        // unasked (`apply_bps_checked`), and every built-in patch is a hack pack, whose hooks are
+        // checked byte by byte whatever the CRC. `zax-app` gates its own force button on the same
+        // rule (`ui::handheld::hacks`: a hack pack is never forced, its signatures decide), and
+        // `source_size`, which reads the size out of a BPS header, has none to read in a pack.
+        assert!(apply_with(&hack, Some(zelda)).is_none());
+        assert_eq!(source_size(zelda), None);
+    }
+
+    /// A change to the CHR-ROM alone leaves the patch in place: the Zelda II pack hooks 46 places
+    /// and checks 12, every one of them in the PRG-ROM, so a recolour, a translation of the
+    /// graphics or another dump's CHR still takes the hack — by the pack's signatures, the CRC-32
+    /// the patch records having moved with the byte.
+    ///
+    /// Deliberate, and not a checksum left too loose. `15927846` ("Hack packs, format 2"), the
+    /// commit that made this patch a pack, opens with "a pack can now follow other dumps,
+    /// translations and ROM hacks of its game"; `docs/HACK-PACKS.md` reports this very experiment
+    /// ("checked on a Mega Man 6 ROM with one byte changed outside the hooks: the pack applies"),
+    /// without forcing; and `spec/changes/Q-108.md` §2 names the signature search one of the three
+    /// ways a patch is chosen, marks it *vérifié* — forcing being the only unverified one — and
+    /// makes "origine et compatibles" the default level. It is load-bearing: of the 98 original
+    /// dumps of `test-originals`, `zax-harness packs` finds 52 by their signatures and 45 by their
+    /// CRC, the Virtual Console, Switch Online and other re-release dumps among the 52.
+    ///
+    /// Needs `ZAXNES_ROMS` with `Zelda II - The Adventure of Link (USA).nes`.
+    #[test]
+    #[ignore = "needs a commercial ROM (ZAXNES_ROMS)"]
+    fn a_change_to_the_chr_rom_alone_still_takes_the_zelda_ii_patch() {
+        let Some(image) = zelda2_usa_rom() else {
+            return;
+        };
+        let (start, end) = data_bounds(&image);
+        assert_eq!(end, image.len(), "the dump is no overdump");
+        // Where the CHR-ROM starts, as `data_bounds` reads a size (iNES, or NES 2.0 with its high
+        // bits): the last byte of the data is past it, so it is a CHR byte and not a PRG one.
+        let nes2 = image[7] & 0x0C == 0x08;
+        let prg_units =
+            usize::from(image[4]) | (usize::from(if nes2 { image[9] & 0x0F } else { 0 }) << 8);
+        let chr_at = start + prg_units * 16 * 1024;
+        let last = image.len() - 1;
+        assert!(chr_at < end && last >= chr_at);
+
+        let (_, dump) = pack_for(&image).expect("the pack of the dump");
+        let mut recoloured = image.clone();
+        recoloured[last] ^= 0x01;
+
+        // The CRC the patch records covers the whole data, the CHR-ROM included, so the fast path
+        // no longer finds it...
+        assert_ne!(data_crc(&recoloured), data_crc(&image));
+        assert!(for_data_crc(data_crc(&recoloured)).is_none());
+        // ... and the signatures do, with the same components and the same groups as the dump.
+        let (patch, applied) = pack_for(&recoloured).expect("the pack by signatures");
+        assert_eq!(patch.name, ZELDA2_USA);
+        assert_eq!(applied.components, dump.components);
+        let patched = apply(&recoloured).expect("the patch applies by signatures");
+        assert_eq!(patched.name, ZELDA2_USA);
+        assert_eq!(patched.image.len(), recoloured.len());
+
+        // The same for a CHR-ROM short of 8 KiB: the PRG-ROM, and so every hook and every check,
+        // is where the pack looks for it. (A PRG-ROM of another size is another matter — the pack
+        // places its hooks by 16 KiB bank, the last counted from the end, which `hack_pack`'s own
+        // tests cover.)
+        let short = &image[..image.len() - 8 * 1024];
+        assert!(for_data_crc(data_crc(short)).is_none());
+        assert_eq!(
+            pack_for(short).map(|(patch, _)| patch.name),
+            Some(ZELDA2_USA)
+        );
+        assert_eq!(apply(short).map(|rom| rom.image.len()), Some(short.len()));
     }
 
     #[test]

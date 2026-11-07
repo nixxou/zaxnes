@@ -109,7 +109,7 @@ the widescreen's `core` group, which is PRG by construction.
 
 The block dates from `ff049f17` ("Forcing a widescreen patch on another version; ROM CRC over the
 data only"), when every patch was a BPS and `apply` really did stand or fall by a checksum. The
-Zelda II patch became a pack at `15927846`, and **all 51 built-in patches are packs today** (0
+Zelda II patch became a pack at `15927846`, and **all 57 built-in patches are packs today** (0
 BPS). Three of the block's assertions are BPS-era claims; the test fails on the first and so
 never reaches the other two:
 
@@ -129,7 +129,46 @@ decide)*".
 
 ## Step 2 — the fix
 
-To come: the test, on the side step 1 names.
+The test was wrong, so the diff is test code only: `builtin_patches.rs`'s `mod tests`, no change to
+any function. Four changes and one new test.
+
+1. **A helper**, `zelda2_usa_rom()`, so the two ROM tests share the `ZAXNES_ROMS` lookup and skip
+   the same way when the ROM is absent.
+2. **The hack the test builds** is now a byte of the code the hack hooks: the first byte of the
+   widescreen's first hook, read from the pack **as it resolves against this ROM** rather than
+   written as a magic offset, so it follows the hack when `z2pack` moves it. `HackPack::resolve`
+   lists a component's hooks group by group, so it belongs to the `core` group — the one every
+   other group requires — which is what makes `apply` refuse rather than drop one group.
+   Step 1 measured that: 5 of the 46 hooks refuse, and they are `core`'s five.
+3. **The refusal is shown to be the widescreen's own** and not the pack going unrecognised: the
+   aid `invincible`, judged apart, still applies to the same image (`pack_for` names the Zelda II
+   patch, `component(WIDESCREEN)` is `None`, `component("invincible")` is `Some`).
+4. **The `forced` assertion is turned round, and the two other BPS-era assertions replaced.**
+   Forcing does *not* help and must not: it only leaves a BPS patch's checksums unasked, and a
+   pack's hooks are checked byte by byte whatever the CRC — so `apply_with(&hack, Some(zelda))` is
+   `None` too, and `source_size(zelda)` is `None` because a pack has no BPS header to read a size
+   from. The comment names `zax-app`'s identical gate (`ui/handheld/hacks.rs`, `!is_pack`).
+   The first assertion of the test is now the positive one it was missing: the dump is found
+   **by its CRC**, so the two tests say which path each image takes.
+
+**The new test**, `a_change_to_the_chr_rom_alone_still_takes_the_zelda_ii_patch`, pins the design
+the old assertion contradicted. The last byte of the image, which the **header** proves is a CHR
+byte (`data_bounds`'s own size reading, NES 2.0 high bits included — Zelda II's header is NES 2.0),
+is flipped; the CRC moves and `for_data_crc` no longer finds the patch; the signatures do, with the
+**same components and the same groups as the untouched dump** (`AppliedPack::components` compared
+whole), and `apply` returns the patch under its own name at the ROM's own size. Then the same for a
+CHR-ROM short of 8 KiB — which is the image the old test's last assertion expected to be refused.
+Its doc comment carries the design and its three records (`15927846`, `docs/HACK-PACKS.md`,
+Q-108 §2) and the 52-of-98 figure, so the next person to see it has the argument and not a bare
+expectation.
+
+Both tests are `#[ignore]`d and gated on `ZAXNES_ROMS`.
+
+| at this step | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | clean |
+| the nine `builtin_patches` tests, `--include-ignored`, `ZAXNES_ROMS` set | **9 passed, 0 failed** |
 
 ## Step 3 — the check
 
