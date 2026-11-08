@@ -90,7 +90,18 @@ that point at all; "n/s" = the project does not support the number.
 | Q-151 §4 | 35/90/209/211 | IRQ source 3 ("CPU writes") | documented | not clocked | clocked (CPU-level) | not clocked | not clocked | clocked, cartridge writes only | **OPEN (gap)** |
 | Q-152 | 35/90/209/211 | a write to a ROM nametable | silent | dropped | **reaches CIRAM** | dropped | dropped | dropped | **CONFIRMED** |
 
-*(rows for Q-154 onward are appended by the later batches of this lot)*
+| Q-154 §1 | 178 | a PPU-driven 4 KiB CHR-RAM window | none | none | none | none | none | none | **CONFIRMED** |
+| Q-154 §2 | 178 | the register decode | `$4800-$4803`, no mask | those four | `$4800-$4FFF` | `$4800-$4FFF` | `$4800`/`$4801`/`$4802` | `$4800-$48FF` | **OPEN** |
+| Q-154 §3 | 178 | PRG-RAM: size / battery | 8 KiB window, banked, no battery line | floor 8 KiB, header decides, battery bit decides | 32 KiB, never battery | 32 KiB, battery bit decides | none served | header decides | **CONFIRMED** |
+| Q-155 | 163 | which ports the `$5300` bit 0 swap covers | "$5000-$5200" (ambiguous) | `$5000`, `$5200` — reading (b) | no swap | no swap | no swap | **all three — reading (a)** | **OPEN → (a) likely** |
+| Q-155 | 163 | the feedback read's other seven bits | silent | 0 | register mix | register mix | `$5300` byte | **0** | **CONFIRMED** |
+| Q-156 | 268 | the register lockout | works, and keeps the WRAM | implemented, MMC3 mode only | implemented, MMC3 mode only | implemented, MMC3 mode only | n/s | implemented, **no mode gate** | **CONFIRMED** |
+| Q-157 | 268 | the thirteen PCB codes | six submapper groups | 0/1 served, rest refused | one layout for all | **0-9 served, 10/11 refused** | n/s | 0-9 served, 10/11 fall through | **CONFIRMED (form)** |
+| Q-158 §1 | 268 | PRG A25 and the interleaved reset row | documented | first half | — | — | n/s | — | **OPEN** |
+| Q-158 §2 | 268 | a PRG/CHR size ceiling | — | none | — | — | n/s | — | **CONFIRMED** |
+| Q-159 | 268 | `$xxx3` bit 5, PRG-RAM at `$5000-$5FFF` | one clause | COOLBOY only, chip's 2nd 4 KiB, `$A001`-gated | — | an unconditional write window (crash hack) | n/s | — | **OPEN** |
+
+*(rows for Q-160 onward are appended by the later batches of this lot)*
 
 ---
 
@@ -680,6 +691,174 @@ it, which is the ticket's own reading: the right answer costs a change to the
 `SERVED_BY_CARTRIDGE` contract, and nobody but Mesen 2 has paid it. The ticket's choice stands and its
 test stays as the thing to rewrite if that contract ever grows a direction.
 
+## Q-154 — mapper 178 (Waixing FS305)
+
+Boards: Mesen 2 `Core/NES/Mappers/Waixing/Waixing178.h`; FCEUX `src/boards/178.cpp`; Nestopia UE
+`source/core/board/NstBoardWaixingSgzlz.cpp` (named "Waixing San Guo Zhong Lie Zhuan"); puNES
+`src/core/mappers/mapper_178.c`.
+
+* **§1, no PPU-driven CHR window: CONFIRMED, four for four.** Mesen 2 sets an 8 KiB CHR page once in
+  `InitMapper` and never again, with `GetChrPageSize() 0x2000` and no VRAM address hook; FCEUX's
+  `Sync` calls `setchr8(0)` unconditionally; puNES's `chr_fix_178` maps a fixed 8 KiB page (and
+  takes `reg[3]` as a CHR bank only for mapper **551**, a different number); Nestopia's board has no
+  CHR handling at all. **Not one of the four has a PPU hook, a 4 KiB CHR window or a CHR A12
+  substitution for this number** — so the lot's section heading, and not the implementation, is what
+  was wrong, which is exactly what the ticket asks R0 to confirm. The anti-test
+  `q_154_mapper_178_has_no_ppu_driven_chr_window` is the right shape.
+* **§2, the register decode: OPEN, and no project decodes only four addresses.** Mesen 2
+  (`RegisterStartAddress 0x4800` / `RegisterEndAddress 0x4FFF`, register index `addr & 0x03`) and
+  FCEUX (`src/boards/178.cpp`, `SetWriteHandler(0x4800, 0x4fff, M178Write)`) both decode
+  **`$4800-$4FFF`** with A1-A0; puNES decodes **`$4800-$48FF`** (`mapper_178.c:66`,
+  `switch (address & 0xFF00) case 0x4800`); Nestopia decodes **three single addresses**,
+  `$4800`/`$4801`/`$4802`, and gives `$4800` the mirroring alone
+  (`NstBoardWaixingSgzlz.cpp`, its `SubReset` map). So the four are genuinely split and the page
+  states no mask. Keep the page's literal four addresses. **If a dump ever shows a mirror in use,
+  `$4800-$4FFF` has two votes**, which is also the ticket's own guess ("a board of this era would more
+  likely decode `$4800-$4FFF` with A1-A0"); that is one constant in `WaixingFs305::PORT_LAST`'s place
+  and a widened test.
+* **§3, the PRG-RAM: CONFIRMED on the battery, informative on the size.** On the battery the page
+  says nothing and this build lets the dump's battery bit decide. **FCEUX does exactly that** —
+  `Mapper178_Init` allocates the RAM and calls `addSaveGameBuf` only `if (info->battery)`. puNES maps
+  it through its `auto` helper, which follows the header. Mesen 2 declares it `GetWorkRamSize()`,
+  i.e. **never** persisted. Nestopia serves no `$6000` window at all. So 2-1 for "the header decides",
+  which is this build's rule and `board_memory_sizes`'s rule everywhere else: **CONFIRMED**, and
+  §7.2's "all three also want battery-backed PRG-RAM" is wrong for this number.
+  On the **size**, both Mesen 2 and FCEUX fix it at **32 KiB** — four 8 KiB banks, which is all the
+  two low bits of `$4803` that either of them reads can reach. This build's `min_prg_ram: 8 KiB` with
+  the header deciding serves that case when the header declares it and falls back to one mirrored
+  chip when it does not, so nothing is broken; but **32 KiB is the figure to adopt if R0 wants an
+  exact one**, and it is the answer to the ticket's third question.
+
+## Q-155 — mapper 163's "swap D0,D1 on writes to `$5000-$5200`"
+
+**This is the ticket the cross-check moved furthest, and in the direction the ticket rejected.**
+
+* **Mesen 2** (`Core/NES/Mappers/Unlicensed/Nanjing.h`), **FCEUX** (`src/boards/164.cpp`, the
+  `Write2`/`Mapper163_Init` half) and **Nestopia UE**
+  (`source/core/board/NstBoardNanjing.cpp:157-160`) all latch `$5300` and use it **only in the
+  protection reads**. None of the three implements a D0/D1 swap at all, so none of them has an opinion
+  on its scope.
+* **puNES implements the swap, and implements it on all three ports — reading (a).**
+  `src/core/mappers/mapper_163.c:66-100`: the `$5000` arm, the **`$5100` arm** and the `$5200` arm each
+  begin by exchanging D0 and D1 when `reg[3] & 0x01` is set. The `$5101` strobe test that flips the
+  feedback bit is then applied to the **swapped** value (`:80-82`), which is precisely the sequence
+  this ticket constructs as the discriminator.
+* And puNES carries a **hardware reason for its one exception**, in its own comment at `:88-90`:
+  1 MiB games wire both of the ASIC's PRG A19 and A20 outputs to ROM A19, "effectively exempting this
+  register from the bit-swap", so `$5200` is swapped only on images of 2 MiB or more. That is an
+  *output*-side exemption, which is coherent with the swap itself sitting on the ASIC's **data input
+  pins** — i.e. on everything the `$5xxx` decode latches, `$5100` included.
+
+**Verdict: OPEN, leaning to reading (a).** The count is 1-0 with three abstentions, so this is not a
+CHANGE on the arithmetic of votes; but the one project that has the mechanism chose the reading this
+build rejected, and did so with a note about the board's wiring. That is the acceptance vector the
+ticket asked for ("Confirm reading (b), or supply reading (a) with the sequence above as its
+acceptance vector"), and §CHANGE 4 holds the edit so a later lot does not have to re-derive it.
+
+**The smaller reading in the same function: CONFIRMED.** On the feedback read this build drives bit 2
+and answers zero elsewhere; **puNES does the same** (`mapper_163.c:105`, the answer is the inverted
+feedback bit alone, every other bit zero). Mesen 2 and FCEUX answer an OR of several registers and
+Nestopia answers the whole `$5300` byte, none of which the page describes. Two of four, and the two
+that agree are this build and the only other project that models the port as a port.
+
+## Q-156 to Q-159 — mapper 268 (COOLBOY / MINDKIDS)
+
+**Nestopia UE does not support the number**, so these four tickets are a three-way comparison. Mesen
+2's board is `Core/NES/Mappers/Mmc3Variants/MMC3_Coolboy.h` and says so in its first comment line
+("Mostly taken from FCEUX's code"); FCEUX's is `src/boards/coolboy.cpp` (CaH4e3 and Cluster, 2018),
+whose header comment is a transcription of the same four register diagrams the page carries; puNES's
+is `src/core/mappers/mapper_268.c`.
+
+### Q-156 — the lockout
+
+**CONFIRMED, three for three, and §7.2's "implemented as a no-op" is simply wrong.**
+
+* **FCEUX** `src/boards/coolboy.cpp:286`: `if ((EXPREGS[3] & 0x90) != 0x80) EXPREGS[A & 3] = V;`, with
+  its own comment "Deny any further writes when 7th bit is 1 AND 4th is 0" — bit 7 set **and** the
+  banking mode in MMC3 mode, which is this build's condition exactly. And the WRAM write happens
+  first and independently (`:281-283` calling `AA6023WramWrite`, which is gated on the MMC3's
+  `$A001`): the page's three-instruction sequence works.
+* **Mesen 2** `MMC3_Coolboy.h:94-101`: the same two steps in the same order — `WritePrgRam` when
+  `RegA001 & 0x80`, then the registers only when `(_exRegs[3] & 0x90) != 0x80`.
+* **puNES** `mapper_268.c:74`: `if (!(m268.reg[3] & 0x80) || ((address & 0x07) == 2))` — bit 7 blocks
+  every register **but the one at `$xxx2`**, which is the page's parenthesis implemented literally
+  (Mesen 2 and FCEUX block `$xxx2` too, since they mask the index to two bits and gate the whole
+  write). **puNES does not gate on the banking mode**, so its lockout also works in GNROM mode, which
+  the page's two "Lockout DOES NOT work in this mode" sentences deny.
+* Also worth recording, since the ticket raises it: **whether the bit can be cleared.** All three
+  projects re-read the register on every write exactly as this build does — none latches a separate
+  flag — so the bit is sticky until a reset in all four implementations. The ticket's smaller reading
+  is the consensus.
+
+So on the one point §7.2 got wrong, three of three agree with the page and with this build, and one
+of them annotates the condition in the same words. **This ticket can be closed in this build's
+favour**; what remains is for §7.2's step 3 to be corrected, which is what the ticket asks.
+
+### Q-157 — the thirteen PCB codes, and what "leave the rest refusing" means
+
+**Reading (b) CONFIRMED in form; and the cross-check shows the four layouts this build refuses are
+implementable.**
+
+* **FCEUX** is reading (b) exactly: `CommonInit` (`src/boards/coolboy.cpp:408-438`) switches the
+  register base on the submapper (`$7000` for 2, `$6000` for 0/4/6/8, `$5000` for 1/3/5/7/9), sets
+  four layout flags `flag23`, `flag45`, `flag67`, `flag89` for the four non-COOLBOY groups, and for
+  anything else calls `FCEU_PrintError("Submapper #%d is not supported", submapper)` — i.e. it serves
+  submappers 0 to 9 and **refuses 10/11**.
+* **puNES** has the same five groups (`mapper_268.c:106-133`, `switch (info.mapper.submapper & ~1)`
+  with arms for 2, 4, 6 and a `default` for 0/1, plus the submapper-8/9 CHR-RAM write protect at
+  `:161`), but its `default` also swallows 10/11, so a submapper-10 dump runs on the COOLBOY layout
+  rather than being refused.
+* **Mesen 2** reads no submapper at all: one layout, one register base (`RegisterStartAddress`
+  `$6000`), nothing refused — reading (a).
+
+So the *principle* this build chose is FCEUX's, including the error message, and the three
+implementations between them demonstrate the premise reading (b) rests on: the groups really do need
+separate arms (both FCEUX and puNES have them, and they are not small). **CONFIRMED.**
+
+What the cross-check adds is an opportunity rather than a correction: the four layouts this build
+refuses (submapper groups 2/3, 4/5, 6/7 and 8/9) are implemented by **two** of the three projects
+that support the number, and two of the features behind them are named in both — the submapper-6/7
+**two-chip PRG select** (FCEUX `:239-242`, `flag67 && EXPREGS[0] & 0x08` adding `ROM_size` as a chip
+offset; puNES `:126-132`, the same thing expressed as a half-ROM offset) and the submapper-8/9
+**CHR-RAM write protect** (FCEUX `:135-140`; puNES `:161`). See §CHANGE 5 — this is a scope note, not
+a defect: nothing the lot exists to preserve is behind a refused submapper, as the ticket says.
+
+### Q-158 — the 64 MiB mapping
+
+**OPEN, and all three are silent.** Not one of Mesen 2, FCEUX or puNES reads `$6001` bit 0 or `$6003`
+bit 0 as SC0/SC1, and none has any PRG A25 line; FCEUX's and puNES's only multi-chip mechanism is the
+submapper-6/7 chip select described above, which is the page's `D` bit on the J-852C and a different
+thing. So the interleaved reset row — the one a bank-window core cannot express — is unimplemented
+everywhere, and this build's "answer the first 32 MiB half" is no worse than the field. Keep it; the
+falsifier stays a 64 MiB dump whose two halves differ at the reset vector, and the page itself says
+the existing multicarts duplicate both halves.
+
+**Part 2 (the size ceiling): CONFIRMED by inspection of this build's own loader**, nothing to
+cross-check — but worth one observation from FCEUX: `GenMMC3_Init(info, 2048, …)` caps that board's
+PRG at **2048** 8 KiB banks, i.e. 16 MiB, so FCEUX *does* have the ceiling §7.2 feared and this build
+does not. That is the shape of the check §7.2 asked for, found in a project rather than in this
+repository, and it is why the ticket's "no ceiling was added either" is the right call.
+
+### Q-159 — `$xxx3` bit 5, "Also enable PRG RAM in `$5000-$5FFF`"
+
+**OPEN, and nobody implements the bit.** Mesen 2 and puNES do not decode it at all. FCEUX installs a
+`$5000-$5FFF` **write** handler whenever the register base is not `$5000`
+(`src/boards/coolboy.cpp:385-386`) — unconditionally, not from the bit — and its own comment says why:
+"some games access random unmapped areas and crashes because of KT-008 PCB hack in MMC3 source lol".
+That is a crash workaround, not the page's mechanism, and there is no matching read handler.
+
+So this build is the only implementation of the clause anywhere, and all three of its readings stand
+unchallenged:
+
+* **(1) a COOLBOY only** — supported indirectly: on a MINDKIDS the register file *is* `$5000-$5FFF` in
+  all three projects (FCEUX `regs_base = 0x5000`, puNES `m268tmp.rstart = 0x5000`), so there is no
+  address left for RAM there, which is this build's argument;
+* **(2) CPU A0-A12 straight through** — untested anywhere;
+* **(3) "Also" adds a window, `$A001` still gates it** — consistent with all three projects' handling
+  of the `$6000-$7FFF` window, which is `$A001`-gated in every one of them.
+
+Keep all three. The observation that closes it is still one dump that sets the bit.
+
 ---
 
 ## CHANGE — ready-to-use fix descriptions for a later lot
@@ -758,6 +937,53 @@ affected and the risk to existing boards.)*
   composition that runs on every bank refresh for those two numbers. Measure as a feature, per the
   owner's rule.
 
+### CHANGE 4 — mapper 163's D0/D1 swap should probably cover `$5100` as well (conditional)
+
+* **Ticket**: Q-155, reading (a). **Do not apply without R0's confirmation** — the page is ambiguous
+  and the evidence is one implementation, but that implementation is the only one that has the
+  mechanism at all.
+* **File / function**: `rust/crates/zax-nes/src/cartridges/mappers/chr_window.rs`,
+  `ChrWindowBoard::bank_port_value` (and its call sites).
+* **The edit**: apply the D0/D1 exchange to the `$5100-$5101` feedback port too, not only to `$5000`
+  and `$5200` — i.e. make the swap a property of the `$5xxx` decode's data path rather than of the two
+  bank ports. The swap must be applied **before** the `$5101` "flip F when E=1" test reads bit 0, so
+  that a game writing `$01` to `$5101` with the swap on arrives as `$02` and flips nothing. That is
+  the sequence the ticket already documents as the discriminator, with its expected answer inverted
+  (`$5500` answers `$04` instead of `$00`).
+* **A second, independent change worth adopting with it** (puNES has it and no page states it):
+  exempt `$5200` from the swap on images **smaller than 2 MiB**, because on a 1 MiB board both of the
+  ASIC's PRG A19 and A20 outputs go to ROM A19
+  (`third_party/punes/src/core/mappers/mapper_163.c:88-93`). If reading (a) is adopted without this,
+  the 1 MiB titles get a wrong outer bank whenever the swap bit is set.
+* **Titles affected**: the six category-A mapper-163 titles, and only those that set `$5300` bit 0;
+  the page's own *Notes* ("cartridges should be dumped with `$5300=$04`") means most dumps circulate
+  with the swap **off**, so the blast radius is small and the symptom is a failed protection check
+  rather than a wrong tile.
+* **Risk to existing boards**: `ChrWindowBoard` carries mappers 162, 163 and (per the lot) their
+  siblings; the swap is gated on `$5300` bit 0, which only mapper 163 has, so no other number is
+  reachable. No save-state byte moves. The existing `q_155_…` test's expectations invert, which is
+  the point of the test.
+
+### CHANGE 5 — mapper 268's refused submapper groups are implementable (scope note)
+
+* **Ticket**: Q-157. **Not a defect**: no original title is behind a refused submapper, as the ticket
+  establishes. This entry exists so that a lot which decides to widen the board does not start from
+  the page alone.
+* **Where to look**: FCEUX `third_party/fceux/src/boards/coolboy.cpp` and puNES
+  `third_party/punes/src/core/mappers/mapper_268.c` both implement the four layouts this build
+  refuses, as a register base plus one flag per group (FCEUX `:408-438`; puNES `:106-133`). The two
+  features that are more than a bit shuffle are named in both: the submapper-**6/7** two-chip PRG
+  select (the page's `D` bit, FCEUX `:239-242`, puNES `:126-132`) and the submapper-**8/9** CHR-RAM
+  write protect (FCEUX `:135-140`, puNES `:161`).
+* **The shape this build would need**: `Mmc3Outer::new` already answers `None` above submapper 1, so
+  the change is a `const` row per group behind that gate — the ticket's own "each is a `const` table
+  and a handful of `match` arms". Both projects put the register base in a variable rather than a
+  constant, which is also what submappers 2/3's `$7000-$7FFF` window needs.
+* **Risk**: none to the served submappers if the new arms are `const`-selected at load; the board is
+  already feature-gated. Submapper 10/11 should **stay refused** — FCEUX refuses them too, with an
+  error message, and puNES silently runs them on the COOLBOY layout, which is the failure mode
+  reading (b) exists to avoid.
+
 ---
 
 ## OPEN — the points that stay as they are, and what would close each
@@ -773,3 +999,7 @@ affected and the risk to existing boards.)*
 | Q-150 §3 | the CHR mask and outer bank with `L=1` | masked to 512 KiB, `cc` applies | a J.Y. image with more than 512 KiB of CHR-ROM that sets `$D003` bit 5. puNES agrees with this build; Mesen 2, FCEUX and Nestopia use the raw 16-bit register pair, which is one FCEUX-derived expression. |
 | Q-151 §2 | disabling resets the prescaler | yes | a game that disables and re-enables without rewriting `$C004`. Only puNES implements the page's third effect; the other three simply omit it. |
 | Q-151 §4 | IRQ source 3, "CPU writes" | documented, not clocked | whether any of the thirteen titles writes `$C001` with bits 1-0 = 3. FCEUX and Nestopia have the same gap; Mesen 2 implements it with a CPU-level "is this a write" query this core has not got; **puNES gets a cheap partial** by clocking on cartridge writes only, which this core could copy on the existing `Cartridge::cpu_write` path. |
+| Q-154 §2 | 178's register decode | `$4800-$4803` exactly | a mapper-178 game writing a mirror (`$4C00`, `$4801`+`$100`…). **No project decodes only four addresses**: Mesen 2 and FCEUX use `$4800-$4FFF`, puNES `$4800-$48FF`, Nestopia three single addresses. If a mirror is ever seen in use, `$4800-$4FFF` has two votes. |
+| Q-155 | 163's D0/D1 swap scope | reading (b), `$5000` and `$5200` | **the lean has changed**: puNES is the only project with the mechanism and it implements reading (a) — all three ports, `$5100` included — with a hardware note about the 1 MiB boards' A19/A20 wiring. One mapper-163 game that sets `$5300` bit 0 and uses the protection closes it. See §CHANGE 4. |
+| Q-158 §1 | 268's PRG A25 interleave | the first 32 MiB half | a 64 MiB dump whose halves differ at the reset vector. **None of the three projects that support the number implements SC0/SC1 or PRG A25 at all**, so this build is not behind the field. |
+| Q-159 | 268's `$5000-$5FFF` PRG-RAM | COOLBOY only, the chip's second 4 KiB, `$A001`-gated | one dump that sets `$xxx3` bit 5. **Nobody implements the bit**: FCEUX's `$5000` write window is an unconditional crash workaround by its own comment, and Mesen 2 and puNES do not decode it. All three of this build's readings stand unchallenged. |

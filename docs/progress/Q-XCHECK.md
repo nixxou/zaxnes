@@ -14,7 +14,7 @@ appended `## Cross-check (Q-XCHECK)` section on each ticket file in `spec/change
 | --- | --- | --- |
 | 1/6 | Q-140, Q-141, Q-142, Q-143, Q-144, Q-145, Q-146, Q-147 | **done** |
 | 2/6 | Q-148, Q-149, Q-150, Q-151, Q-152 (J.Y. Company ASIC) | **done** |
-| 3/6 | Q-154, Q-155, Q-156, Q-157, Q-158, Q-159 (178, 163, 268) | pending |
+| 3/6 | Q-154, Q-155, Q-156, Q-157, Q-158, Q-159 (178, 163, 268) | **done** |
 | 4/6 | Q-160, Q-161, Q-162, Q-163 (8259, 112/193, 298, 218) | pending |
 | 5/6 | Q-164, Q-165, Q-166, Q-167, Q-168 (12, 14, 83/264, 91) | pending |
 | 6/6 | Q-169, Q-170, Q-171, Q-172 + final check | pending |
@@ -70,5 +70,30 @@ agrees with this build it agrees on details Mesen's and FCEUX's shared ancestor 
 * **Two divergences the ticket did not know about**, recorded: FCEUX compares `$B00x` bit 7 against
   `$D001` bit 7 where the page and the other three use `$D002`; and Mesen 2's 16 KiB PRG mode treats
   `$8003` as an 8 KiB bank while shifting `$8001`.
+
+## Batch 3/6 — done
+
+Tickets Q-154 to Q-159 (mappers 178, 163 and 268). Ten more verdict rows. Nestopia UE does not
+support mapper 268, so those four tickets are a three-way comparison.
+
+* **Q-156 is the clean win of the batch**: the mapper-268 lockout is implemented by all three
+  projects that support the number, and **FCEUX uses this build's exact condition and annotates it in
+  the same words** ("7th bit is 1 AND 4th is 0"), with the WRAM write happening first and
+  independently. §7.2's "implement it as a no-op" has no support anywhere.
+* **Q-154 §1 is a four-for-four CONFIRMED**: no project gives mapper 178 any CHR banking, so the
+  lot's section heading was what was wrong. §3 confirms the battery rule (FCEUX uses the dump's bit
+  exactly as this build does) and supplies the figure the ticket asked for: Mesen 2 and FCEUX both fix
+  the PRG-RAM at **32 KiB**.
+* **Q-155's lean has reversed.** Three projects do not implement mapper 163's D0/D1 swap at all;
+  **puNES does, and applies it to `$5100` too — reading (a)** — with a hardware note about 1 MiB
+  boards wiring both ASIC PRG A19/A20 outputs to ROM A19. The verdict stays OPEN (one vote, three
+  abstentions) but §CHANGE 4 now holds the edit, including puNES's size-dependent exemption.
+* **Q-157** is CONFIRMED in form — FCEUX refuses unimplemented submappers with an error exactly as
+  this build does — and adds a scope note (§CHANGE 5): the four groups this build refuses are
+  implemented by two of the three projects, and their two non-trivial features are named in both.
+* **Q-158 and Q-159 are OPEN because everyone is silent**: nobody implements SC0/SC1 or PRG A25, and
+  nobody decodes `$xxx3` bit 5 (FCEUX's `$5000` window is a crash workaround by its own comment). One
+  incidental finding: FCEUX *does* cap that board's PRG at 16 MiB, which is the ceiling §7.2 feared —
+  in a project, not here.
 
 `git status`: clean except `rust/target-mf/` (untracked build output, never staged).
