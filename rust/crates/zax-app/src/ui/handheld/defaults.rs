@@ -45,7 +45,7 @@ fn defaults() -> [(SettingId, SettingValue); 11] {
         (SettingId::EmuCatchUp, SettingValue::Enum(5)),
         // The smooth scrolling from the run-ahead does nothing without run-ahead or at 60 Hz:
         // off, as both are on a handheld (owner request: on by default but there).
-        (SettingId::VideoSmoothScrollAhead, SettingValue::Bool(false)),
+        (SettingId::EmuSmoothScrollAhead, SettingValue::Bool(false)),
     ]
 }
 

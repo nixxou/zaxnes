@@ -1673,21 +1673,22 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
     );
 }
 
-/// `video.smooth_scroll_ahead` (Rust-only).
+/// `emu.smooth_scroll_ahead` (Rust-only).
 fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
     // Rust-only, experimental (owner request): the playfield drawn between two frames on a
     // display faster than the game, from the scroll the PPU drew in the run-ahead's real frame
-    // and the frame shown; in the video options, without effect unless run-ahead is on and the
+    // and the frame shown; in the emulation options (and each game's, with its run-ahead),
+    // without effect unless run-ahead is on and the
     // display shows more than 60 frames a second. Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
-            SettingId::VideoSmoothScrollAhead,
+            SettingId::EmuSmoothScrollAhead,
             SettingKind::Bool,
             // On (owner request); off on a handheld (its defaults).
             SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::Immediate,
-            SettingTheme::Video,
+            SettingTheme::Emulation,
         )
         .with_label("Smooth scrolling (interpolated from run-ahead)"),
     );

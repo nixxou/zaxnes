@@ -298,7 +298,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     ("setting.video.remove_sprite_limit", "Remove the limit of 8 sprites per line"),
     (
-        "setting.video.smooth_scroll_ahead",
+        "setting.emu.smooth_scroll_ahead",
         "Smooth scrolling (interpolated from run-ahead)",
     ),
     ("setting.video.overscan_ntsc_top", "Overscan NTSC: top"),

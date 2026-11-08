@@ -2145,7 +2145,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host
         .settings()
-        .get(SettingId::VideoSmoothScrollAhead)
+        .get(SettingId::EmuSmoothScrollAhead)
         .as_bool()
         && host.settings().get(SettingId::EmuRunAhead).as_int() >= 1
         && host.display_rate > 61.0;

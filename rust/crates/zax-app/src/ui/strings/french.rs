@@ -295,7 +295,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Écran large : attendre les objets entiers aux bords dessinés",
     ),
     (
-        "setting.video.smooth_scroll_ahead",
+        "setting.emu.smooth_scroll_ahead",
         "Défilement lissé (interpolé par run-ahead)",
     ),
     (
