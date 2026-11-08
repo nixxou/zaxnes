@@ -40,13 +40,14 @@ the discrete boards, VRC2/VRC4, RAMBO-1, Bandai FCG, SS88006, Irem G-101, the mu
 | 15 | 100-in-1 Contra Function 16 | 7 OK, 1 DIFFERS |
 | 16 | Bandai FCG-1/2 and LZ93D50 | 7 OK, 1 OPEN |
 | 18 | Jaleco SS88006 | 7 OK, 1 DIFFERS |
+| 21, 22, 23, 25, 27 | Konami VRC2 and VRC4 | 10 OK, 1 DIFFERS |
 
 Plus one shared section, **the bus conflict re-counted**, which carries the four new votes for
 the eight boards that share `registry::has_bus_conflicts`.
 
 ## Boards remaining
 
-21/22/23/25/27 (VRC2/VRC4), 28, 30, 32, 34, 41, 64 (RAMBO-1), 71, 87/101, 156, 225, 228.
+28, 30, 32, 34, 41, 64 (RAMBO-1), 71, 87/101, 156, 225, 228.
 
 ## Notes for whoever resumes this
 

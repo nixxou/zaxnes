@@ -1577,4 +1577,111 @@ overrides reading its two bits — the same three-line shape `Mmc3Board` has
 
 Count: 7 OK, 1 DIFFERS, 0 OPEN.
 
+---
+
+## Mappers 21, 22, 23, 25 and 27 — Konami VRC2 and VRC4
+
+Page: *VRC2 and VRC4* (<https://www.nesdev.org/wiki/VRC2_and_VRC4>), *NES 2.0 submappers*.
+Ours: `mappers/vrc2_vrc4.rs`, `mappers/vrc_irq.rs`. Theirs:
+`fceux/src/boards/vrc2and4.cpp`, `nestopia/source/core/board/NstBoardKonamiVrc2.cpp` and
+`NstBoardKonamiVrc4.cpp`, `punes/src/core/mappers/VRC2and4.c` and `mapper_021.c` …
+`mapper_027.c`, `nintendulator-mappers/src/iNES/mapper021.cpp` … `mapper027.cpp`.
+
+MR-21-1, MR-21-2 and MR-21-3 were all fixed in MF-1, so the variant table, the VRC2's missing
+swap mode and mapper 27 are settled. Re-verified against the page, plus one thing MR-1 did not
+look for.
+
+### The variant table and the register map — OK
+
+- **Nine wirings, resolved from the mapper number and the NES 2.0 submapper, with an OR'd
+  fallback when the submapper is absent** — OK (`vrc2_vrc4.rs:34-54`,
+  `vrc2_vrc4.rs:58-68`). Every address-line pair matches the page's table, including VRC4c's
+  A6/A7 — the one pair no OR of A0-A3 can reach, which is why the fallback cannot cover it.
+  Nestopia parameterises the same two lines (`NstBoardKonamiVrc2.cpp:83-85`,
+  `prgLineA`/`prgLineB`), puNES and Nintendulator each have a per-number file that fixes them.
+- **Mapper 22 is always VRC2a and mapper 27 always the pirate board** — OK
+  (`vrc2_vrc4.rs:36-37`). FCEUX agrees for 22, with the reason in a comment: "no IRQ (all
+  mapper 22 games are VRC2)" (`vrc2and4.cpp:208`).
+- **VRC2a ignores the low bit of the CHR bank number (the value is right-shifted by one)** —
+  OK (`vrc2_vrc4.rs:180`, `vrc2_vrc4.rs:318-322`), the page's own wording.
+- **$8000 and $A000 are the two switchable 8 KiB PRG banks, five bits each; $C000-$DFFF is the
+  second-to-last bank and $E000-$FFFF the last** — OK (`vrc2_vrc4.rs:306-316`,
+  `vrc2_vrc4.rs:385`, `vrc2_vrc4.rs:422`). Same in all four.
+- **$9002 bit 1 is the PRG swap mode, and it moves the switchable bank to $C000 while $8000
+  becomes the second-to-last** — OK (`vrc2_vrc4.rs:412`, `vrc2_vrc4.rs:307-313`), the page's
+  "when M is set" case.
+- **$9000-$9001 mirroring: 0 vertical, 1 horizontal, 2 one-screen lower, 3 one-screen upper on
+  a VRC4; one bit only on a VRC2** — OK (`vrc2_vrc4.rs:394-410`). This is MR-21-2 and the page
+  confirms both halves; Nestopia uses its one-bit `NMT_SWAP_HV` helper across the whole of
+  $9000-$9FFF for the VRC2 (`NstBoardKonamiVrc2.cpp:80`), which is the same thing.
+- **$B000-$E003: each CHR bank is a nibble pair, low four bits at the even address and the high
+  bits at the odd one** — OK (`vrc2_vrc4.rs:425-436`).
+- **The high half of a VRC2 CHR register is four bits, not five** — OK in effect. The page says
+  the VRC2 "only has 4 high bits of CHR select"; this build uses a five-bit mask for every
+  variant but mapper 27 (`vrc2_vrc4.rs:183`). A VRC2b/c tops out at 256 KiB of CHR, 256 banks
+  of 1 KiB, so the ninth bit is folded away by the bank mask. Equivalent on every real image.
+- **$F000-$F003 are the VRC4 IRQ, and a VRC2 has none** — OK (`vrc2_vrc4.rs:437-440`,
+  `vrc2_vrc4.rs:275-280`), shared with the VRC6 through `VrcIrq`. FCEUX installs no IRQ hook at
+  all for mapper 22 (`vrc2and4.cpp:208-210`).
+
+### VRC2-1 — the VRC2's single-bit latch at $6000-$6FFF is not implemented — DIFFERS
+
+**Point.** The page describes a feature that is not a bank register at all: "The VRC2 was
+supposed to have shipped with a Microwire interface for save games. However, Konami never used
+it", and the consequence — games "rely on the two Data pins being connected to each other, and
+so expect to be able to read the written value back". A write to $6000-$6FFF latches one bit
+and a read returns it, the rest of the byte being open bus. The page names the games that need
+it: **Contra (J)** and **Ganbare Goemon 2 (J)**.
+
+**This build.** No latch. `Vrc2Vrc4` has no $6000 path at all, and `try_read_prg` answers
+`None` below $8000 (`vrc2_vrc4.rs:369-372` refuses writes below $8000 as well). What happens
+instead depends entirely on the header:
+
+- an **iNES 1.0** dump gets REQ-CORE-012's default 8 KiB of PRG-RAM, so a write to $6000 is
+  stored in RAM and read back — the whole byte rather than one bit, which satisfies the games'
+  check **by accident**;
+- an **NES 2.0** dump that correctly declares **no** PRG-RAM gets none, so $6000 reads open
+  bus and the written value is lost.
+
+**The others.** The two that model it both gate it on exactly that condition:
+
+| | $6000-$6FFF on a VRC2 | file:line |
+| --- | --- | --- |
+| this build | PRG-RAM if the header gives any, otherwise open bus | `vrc2_vrc4.rs:369-372` |
+| Nestopia | **the one-bit latch, installed only when the board has no WRAM** | `NstBoardKonamiVrc2.cpp:74-76` (`if (!board.GetWram())`) |
+| puNES | **the one-bit latch, installed only when the image is NES 2.0 and declares no WRAM**; a read returns the latched bit in D0 with the rest of the byte open bus | `VRC2and4.c:51-56`, `VRC2and4.c:153-158` |
+| FCEUX | PRG-RAM, unconditionally allocated | `vrc2and4.cpp:129-130` |
+| Nintendulator | PRG-RAM, unconditionally mapped | `mapper022.cpp:15` |
+| Mesen 2 | not raised by MR-1 | — |
+
+**Verdict: DIFFERS** — from the page, and from the two implementations that read it carefully.
+This build is in FCEUX's and Nintendulator's position: the games work because there happens to
+be RAM where the latch should be.
+
+**Which games it affects, and which are known affected.** The page names them: **Contra (J)**
+and **Ganbare Goemon 2 (J)**, both mapper 23 or 25 VRC2 titles and both well known. They are
+**not** affected today, because every common dump of them is iNES 1.0 and gets the default
+PRG-RAM. They become affected the moment someone loads a properly headered NES 2.0 dump that
+declares no PRG-RAM — which is what a modern, correct dump of a VRC2 cartridge *is*, since the
+cartridge has no RAM chip. The failure would be a hang or a reset loop at boot, because the
+check is a protection check.
+
+**Risk of a fix.** None for any protected game — SMB3, Zelda II and the widescreen packs are
+not VRC2. The condition is narrow by construction: install the latch only when the board has no
+PRG-RAM, which is both Nestopia's and puNES's gate, so an iNES 1.0 dump keeps the RAM it has
+today and nothing changes for it.
+
+**What a fix would look like.** One `u8` field on `Vrc2Vrc4`, set only when the variant is a
+VRC2 and `memory.prg_ram()` is empty; `intercept_cpu_write` latches bit 0 (or whichever bit the
+page's diagram names) on a write in $6000-$6FFF, and `try_read_prg` answers it there. Both are
+off every hot path — the board already has an `intercept_cpu_write`-shaped hook for mapper 14's
+mirror guard.
+
+**Test ROMs.** `assets-free/test-roms/nes-test-roms/m22chrbankingtest` — a VRC2a CHR banking
+test, which would exercise the VRC2a right-shift of `vrc2_vrc4.rs:318-322` directly. **Not run
+by the project today**, and it is one of only four mapper-specific ROM tests in the suite (with
+`mmc3_test`, `mmc5test` and `exram`). Nothing tests the $6000 latch.
+
+Count: 10 OK, 1 DIFFERS, 0 OPEN.
+
 <!-- NEXT-BOARD -->
