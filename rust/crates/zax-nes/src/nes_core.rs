@@ -199,11 +199,16 @@ impl NesCore {
         if u32::from_le_bytes([header[0], header[1], header[2], header[3]]) != Self::STATE_MAGIC {
             return None;
         }
+        // MF-UNL-9 added the two version-8/9 arms with the bump that made 8 and 9 the *previous*
+        // pair: without them a state written by the build before this lot would answer `None`
+        // here and the host would stop recognising it, which is the one way bumping the format
+        // could have broken a file it still loads.
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
-            Self::STATE_VERSION => Some(false),
-            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_6 | Self::WIDE_STATE_VERSION_5 => {
-                Some(true)
-            }
+            Self::STATE_VERSION | Self::STATE_VERSION_8 => Some(false),
+            Self::WIDE_STATE_VERSION
+            | Self::WIDE_STATE_VERSION_9
+            | Self::WIDE_STATE_VERSION_6
+            | Self::WIDE_STATE_VERSION_5 => Some(true),
             _ => None,
         }
     }
@@ -242,16 +247,25 @@ impl NesCore {
 
     /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
     /// the APU channel, mixer and resampler state, L1d the mapper bank windows, latches and
-    /// IRQ counters, and RU-3a the MMC5's sound registers (REQ-CORE-090, AMD-054
-    /// REQ-CORE-075).
-    pub const STATE_VERSION: i32 = 8;
+    /// IRQ counters, RU-3a the MMC5's sound registers, and MF-UNL-9 the flash chip's changed
+    /// sectors (REQ-CORE-090, AMD-054 REQ-CORE-075).
+    pub const STATE_VERSION: i32 = 10;
 
     /// The earlier block, without the MMC5's sound registers; still read (REQ-CORE-091).
     pub const STATE_VERSION_4: i32 = 4;
 
+    /// The earlier block, without the flash chip's changed sectors; still read. It is the one
+    /// every state written between RU-3a and MF-UNL-9 carries, and the only board that lost
+    /// anything by not having the bytes is mapper 111, which did not persist its flash at all
+    /// before this lot.
+    pub const STATE_VERSION_8: i32 = 8;
+
     /// Version of a block that also carries the widescreen extension registers: written only
     /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
-    pub const WIDE_STATE_VERSION: i32 = 9;
+    pub const WIDE_STATE_VERSION: i32 = 11;
+
+    /// The earlier widescreen block, without the flash chip's changed sectors; still read.
+    pub const WIDE_STATE_VERSION_9: i32 = 9;
 
     /// The earlier widescreen block, without the MMC5's sound registers; still read.
     pub const WIDE_STATE_VERSION_7: i32 = 7;
@@ -272,6 +286,7 @@ impl NesCore {
         matches!(
             version,
             Self::WIDE_STATE_VERSION
+                | Self::WIDE_STATE_VERSION_9
                 | Self::WIDE_STATE_VERSION_7
                 | Self::WIDE_STATE_VERSION_6
                 | Self::WIDE_STATE_VERSION_5
@@ -281,6 +296,7 @@ impl NesCore {
     /// Whether `version` is one this build reads at all.
     const fn is_known_state_version(version: i32) -> bool {
         version == Self::STATE_VERSION
+            || version == Self::STATE_VERSION_8
             || version == Self::STATE_VERSION_4
             || Self::is_wide_state_version(version)
     }
@@ -288,7 +304,22 @@ impl NesCore {
     /// Whether a block of `version` carries the MMC5's sound registers, which RU-3a added at
     /// the end of that board's own registers (AMD-054 REQ-CORE-075). An older block loads
     /// with the board's sound left silent, which it also is after a reset.
+    ///
+    /// **The threshold is a number and no longer [`Self::STATE_VERSION`]**: the two were the same
+    /// until MF-UNL-9 bumped the format, and a comparison against the current version would have
+    /// quietly stopped reading the registers out of every version-8 and version-9 block the
+    /// moment it moved. The plain and the widescreen numbering interleave — 4, then 5-7, then 8,
+    /// 9, 10, 11 — so one `>=` covers both as long as it names the version the registers
+    /// appeared in.
     pub(crate) const fn state_version_has_mmc5_audio(version: i32) -> bool {
+        version >= Self::STATE_VERSION_8
+    }
+
+    /// Whether a block of `version` carries the flash chip's changed sectors, which MF-UNL-9
+    /// added at the end of the cartridge's own section (REQ-CORE-090, REQ-CORE-095). An older
+    /// block loads with the chip holding what the dump holds, which is what a fresh power-on
+    /// gives; only mapper 111 has a flash chip, and before this lot it persisted nothing at all.
+    pub(crate) const fn state_version_has_flash(version: i32) -> bool {
         version >= Self::STATE_VERSION
     }
 
@@ -498,6 +529,42 @@ impl NesCore {
         target[..count].copy_from_slice(&data[..count]);
         self.battery_ram_imported = true;
         true
+    }
+
+    /// The flash chip's changed sectors, for a host to persist beside the battery file
+    /// (REQ-CORE-095, MF-UNL-9 step 2). **Empty** when no ROM is loaded, when the board's PRG-ROM
+    /// is mask ROM, or when the game has not written the chip — so a host can write a file only
+    /// when this is non-empty and never create one for the hundreds of boards that cannot save
+    /// this way.
+    ///
+    /// This is the second of the two save media of this build and the only one that is not RAM.
+    /// The GTROM (mapper 111) is the one board with it, and nesdev is categorical that it has no
+    /// other: "Both of these mappers lack PRG RAM for game saves but the configuration of both
+    /// boards make it possible to erase and rewrite sections of the chip using NES software." The
+    /// file is the **changed sectors** and not an image of the chip, which is what
+    /// `docs/review/UNL-census.md` §7.2 asks for: one flashed 4 KiB sector of a 512 KiB chip is
+    /// about 4 KiB on disk.
+    ///
+    /// Unlike [`Self::export_battery_ram`] it returns an owned buffer, because the changed sectors
+    /// are not contiguous in any memory this core holds.
+    #[must_use]
+    pub fn export_flash_save(&self) -> Vec<u8> {
+        self.bus
+            .cartridge()
+            .map_or_else(Vec::new, |cartridge| cartridge.memory().export_flash_save())
+    }
+
+    /// Loads a file written by [`Self::export_flash_save`] (REQ-CORE-095). Returns `false` when
+    /// no ROM is loaded, the board has no flash chip, or `data` is not a file this build reads —
+    /// and in every one of those cases the chip is left exactly as it was.
+    ///
+    /// No counterpart of `battery_ram_imported` is needed: the flash lives in the PRG-ROM image,
+    /// which neither a reset nor `Cartridge::clear_volatile_ram` touches, so an imported save
+    /// survives a power cycle the way the real chip does.
+    pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
+        self.bus
+            .cartridge_mut()
+            .is_some_and(|cartridge| cartridge.memory_mut().import_flash_save(data))
     }
 
     fn power_on(&mut self) {

@@ -93,6 +93,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
 use super::mappers::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
+#[cfg(feature = "board-111")]
+use super::FlashRom;
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
 
@@ -365,6 +367,11 @@ pub(crate) struct BoardMemorySizes {
     pub prg_ram: Option<usize>,
     pub chr_ram: Option<usize>,
     pub min_prg_ram: usize,
+    /// Sector size of the flash chip the board's PRG-ROM **is**, for a board whose game saves by
+    /// writing it, and `None` for a board whose PRG-ROM is mask ROM (MF-UNL-9 step 1). The size
+    /// is the chip's erase unit, so it is also the unit of the dirty set and of the save file;
+    /// see [`super::FlashRom`].
+    pub flash_sector: Option<usize>,
 }
 
 /// Which of the two mapper-34 boards a dump is (nesdev, "INES Mapper 034"): "Submapper 1
@@ -584,6 +591,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         111 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: Some(Cheapocabra::CHR_RAM_SIZE),
+            // nesdev ("GTROM"): "a Microchip SST39SF040 flash chip as the PRG ROM storage
+            // device", and "Both of these mappers lack PRG RAM for game saves but the
+            // configuration of both boards make it possible to erase and rewrite sections of the
+            // chip using NES software". This board's PRG-ROM **is** the save medium, so it is
+            // the one row of this table with a flash sector (MF-UNL-9 step 1).
+            flash_sector: Some(FlashRom::SST39SF040_SECTOR),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 096"): "PRG RAM capacity: No", and "CHR capacity: 32 KiB RAM" --

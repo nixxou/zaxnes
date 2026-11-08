@@ -9,6 +9,7 @@ mod a12_watcher;
 mod banked;
 mod board;
 mod chr_fetch;
+mod flash;
 pub mod mappers;
 pub mod registry;
 
@@ -16,6 +17,8 @@ pub use a12_watcher::A12Watcher;
 pub use banked::{BankWindows, ChrView};
 pub use board::Board;
 pub use chr_fetch::ChrFetch;
+pub use flash::FlashRom;
+pub(crate) use flash::{FlashCommand, FlashCommandState};
 
 use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -47,6 +50,15 @@ pub struct CartridgeMemory {
     /// uninitialised (see [`registry::battery_offset`]). Derived from the ROM at load, so it is
     /// not part of the savestate.
     battery_offset: usize,
+    /// The flash chip standing in for the PRG-ROM on the one board of this build whose game saves
+    /// by writing it (MF-UNL-9 step 1), and `None` — one pointer, last field — on every other.
+    ///
+    /// **Boxed, and last.** The bytes a game flashes live in `rom` where every read already finds
+    /// them; this side-table only records which sectors moved, it is read when a state or a save
+    /// file is written and never on a bus access, and keeping it to one null pointer is what keeps
+    /// it off the layout of the fields that *are* read per access (`docs/review/BOARD-FEATURES.md`;
+    /// [`flash`]'s own note, decision 1).
+    flash: Option<Box<flash::FlashRom>>,
 }
 
 impl CartridgeMemory {
@@ -63,6 +75,11 @@ impl CartridgeMemory {
         let chr_ram_size = sizes.chr_ram.unwrap_or(rom.header().chr_ram_size);
         let mirroring = rom.header().mirroring;
         let battery_offset = registry::battery_offset(rom.mapper(), prg_ram_size);
+        // The one board whose PRG-ROM is a flash chip its game writes gets the side-table that
+        // records what it wrote; every other board gets `None` (MF-UNL-9 step 1).
+        let flash = sizes
+            .flash_sector
+            .map(|sector| Box::new(flash::FlashRom::new(rom.prg_rom().len(), sector)));
         let mut memory = Self {
             rom,
             prg_ram: vec![0; prg_ram_size],
@@ -70,6 +87,7 @@ impl CartridgeMemory {
             mirroring,
             cpu_cycle: 0,
             battery_offset,
+            flash,
         };
         memory.load_trainer();
         memory
@@ -161,6 +179,72 @@ impl CartridgeMemory {
         if self.rom.chr_rom().is_empty() && !self.chr_ram.is_empty() {
             let len = self.chr_ram.len();
             self.chr_ram[wrap_offset(offset, len)] = value;
+        }
+    }
+
+    /// The flash chip this board's PRG-ROM is, when it is one (MF-UNL-9 step 1); `None` on every
+    /// other board. A host reads it to know whether there is a save file to keep.
+    #[must_use]
+    pub fn flash(&self) -> Option<&FlashRom> {
+        self.flash.as_deref()
+    }
+
+    /// Programs one byte of the flash, the `$A0` command: the byte is `ANDed` with what is there,
+    /// because flash can only clear bits, and the sector is marked changed.
+    ///
+    /// A board with no flash row in [`registry::board_memory_sizes`] still gets the write, so the
+    /// behaviour of a board that had one before this module existed is unchanged.
+    pub(crate) fn flash_program(&mut self, offset: usize, value: u8) {
+        let rom = self.rom.prg_rom_mut();
+        if let Some(flash) = &mut self.flash {
+            flash.program(rom, offset, value);
+        } else if let Some(byte) = rom.get_mut(offset) {
+            *byte &= value;
+        }
+    }
+
+    /// Erases the flash sector `offset` falls in to `$FF`, the `$80`/`$30` command, and marks it
+    /// changed.
+    pub(crate) fn flash_erase_sector(&mut self, offset: usize) {
+        let rom = self.rom.prg_rom_mut();
+        if let Some(flash) = &mut self.flash {
+            flash.erase_sector(rom, offset);
+        }
+    }
+
+    /// The changed sectors as a save file, empty when the board has no flash or nothing has been
+    /// written (MF-UNL-9 step 4).
+    #[must_use]
+    pub fn export_flash_save(&self) -> Vec<u8> {
+        self.flash
+            .as_ref()
+            .map_or_else(Vec::new, |flash| flash.export_save(self.rom.prg_rom()))
+    }
+
+    /// Applies such a file. `false` when the board has no flash or the file is not one this build
+    /// reads, in which case the chip is left as it was.
+    pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
+        let rom = self.rom.prg_rom_mut();
+        self.flash
+            .as_mut()
+            .is_some_and(|flash| flash.import_save(rom, data))
+    }
+
+    /// Appends the changed sectors to a savestate block; writes **nothing at all** for a board
+    /// with no flash, which is what keeps every other board's block byte for byte what it was
+    /// (MF-UNL-9 step 3).
+    fn save_flash_state(&self, writer: &mut StateWriter) {
+        if let Some(flash) = &self.flash {
+            flash.save_state(self.rom.prg_rom(), writer);
+        }
+    }
+
+    /// Restores them, reading nothing for a board with no flash.
+    fn load_flash_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        let rom = self.rom.prg_rom_mut();
+        match &mut self.flash {
+            Some(flash) => flash.load_state(rom, reader),
+            None => Ok(()),
         }
     }
 }
@@ -671,6 +755,13 @@ impl Cartridge {
         &self.memory
     }
 
+    /// The shared memories, mutably, for the host-facing save paths of `NesCore`: importing a
+    /// flash save file is the one of them that writes a memory no board register reaches
+    /// (MF-UNL-9 step 2).
+    pub const fn memory_mut(&mut self) -> &mut CartridgeMemory {
+        &mut self.memory
+    }
+
     /// Consumes the cartridge and returns the ROM image it was built from.
     #[must_use]
     pub fn into_rom(self) -> RomImage {
@@ -1163,6 +1254,11 @@ impl Cartridge {
         writer.write_u8(self.memory.mirroring as u8);
         writer.write_i64(self.memory.cpu_cycle);
         self.board.save_state(writer);
+        // The flash chip's changed sectors, and **nothing at all** for the other boards: this
+        // call appends zero bytes unless `board_memory_sizes` gave the board a flash sector, so
+        // every existing board's block is byte for byte what it was before MF-UNL-9 and the one
+        // difference in its state file is the version number in the header.
+        self.memory.save_flash_state(writer);
     }
 
     /// Restores the cartridge state from `reader` (REQ-CORE-091). The cartridge must have
@@ -1185,6 +1281,12 @@ impl Cartridge {
         })?;
         self.memory.cpu_cycle = reader.read_i64()?;
         let loaded = self.board.load_state(reader);
+        // The flash, from the version of the format that first carried it. A state written before
+        // MF-UNL-9 has no such bytes and loads with the chip holding what the dump holds, which
+        // is also what a fresh power-on gives (REQ-CORE-091).
+        if loaded.is_ok() && crate::NesCore::state_version_has_flash(reader.format_version()) {
+            self.memory.load_flash_state(reader)?;
+        }
         self.refresh_nametable_pages();
         self.refresh_rom_windows();
         loaded

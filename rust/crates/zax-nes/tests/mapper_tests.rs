@@ -2749,6 +2749,288 @@ fn req_core_100_the_gtrom_programs_and_erases_its_own_prg_rom() {
     );
 }
 
+/// The chip's two unlock writes. They are on **chip** addresses $5555 and $2AAA, so they are only
+/// reachable while the register holds **PRG bank 0**, where they are CPU $D555 and $AAAA — which
+/// is the pair nesdev names in those terms (MF-UNL-9).
+#[cfg(feature = "board-111")]
+fn gtrom_unlock(core: &mut NesCore) {
+    core.mapper_write(0xD555, 0xAA);
+    core.mapper_write(0xAAAA, 0x55);
+}
+
+/// `$5555:$AA`, `$2AAA:$55`, `$5555:$80`, `$5555:$AA`, `$2AAA:$55`, `ADDR:$30` — the sector erase.
+#[cfg(feature = "board-111")]
+fn gtrom_erase(core: &mut NesCore, address: u16) {
+    gtrom_unlock(core);
+    core.mapper_write(0xD555, 0x80);
+    gtrom_unlock(core);
+    core.mapper_write(address, 0x30);
+}
+
+/// `$5555:$AA`, `$2AAA:$55`, `$5555:$A0`, `ADDR:DATA` — the byte program.
+#[cfg(feature = "board-111")]
+fn gtrom_program(core: &mut NesCore, address: u16, value: u8) {
+    gtrom_unlock(core);
+    core.mapper_write(0xD555, 0xA0);
+    core.mapper_write(address, value);
+}
+
+/// How many sectors of the chip a game has written.
+#[cfg(feature = "board-111")]
+fn gtrom_dirty_sectors(core: &NesCore) -> usize {
+    core.cartridge()
+        .unwrap()
+        .memory()
+        .flash()
+        .unwrap() // Mapper 111's PRG-ROM is a flash chip; no other board's is.
+        .dirty_sectors()
+}
+
+/// A GTROM with **three** sectors of its chip written: `$A123` = `$3C` and `$E010` = `$C3` in PRG
+/// bank 0 (chip sectors 10 and 14), and bank 3's sector 26 erased whole. The register is left
+/// holding bank 0.
+///
+/// The third one is the interesting one. The unlock pair is only reachable in bank 0 — chip
+/// `$5555` is CPU `$D555` there and nowhere else — so a game that flashes another bank unlocks in
+/// bank 0 and moves the register **before the last write of the sequence**, which is a CPU-bus
+/// write the chip never sees. Chip address `$1A123`, four banks along from bank 0's `$A123`.
+#[cfg(feature = "board-111")]
+fn gtrom_flashed() -> NesCore {
+    let mut core = MapperRom::new(111).prg(64).chr(0).load();
+    // A game erases before it programs, because programming only clears bits; after the erase the
+    // sector is $FF and any value fits.
+    gtrom_erase(&mut core, 0xA123);
+    gtrom_program(&mut core, 0xA123, 0x3C);
+    gtrom_erase(&mut core, 0xE010);
+    gtrom_program(&mut core, 0xE010, 0xC3);
+
+    gtrom_unlock(&mut core);
+    core.mapper_write(0xD555, 0x80);
+    gtrom_unlock(&mut core);
+    core.mapper_write(0x5000, 0x03);
+    core.mapper_write(0xA123, 0x30);
+    assert_eq!(0xFF, core.read_memory(0xA123), "bank 3's sector was erased");
+    core.mapper_write(0x5000, 0x00);
+
+    assert_eq!(0x3C, core.read_memory(0xA123), "bank 0's sector was not");
+    assert_eq!(0xC3, core.read_memory(0xE010));
+    assert_eq!(3, gtrom_dirty_sectors(&core));
+    core
+}
+
+/// **The save file**, which MF-UNL-9 step 1 added and which is the whole reason the census grades
+/// this one mapper number an L: nesdev ("GTROM") is categorical that the chip is the board's only
+/// save medium —
+///
+/// > Both of these mappers lack PRG RAM for game saves but the configuration of both boards make
+/// > it possible to erase and rewrite sections of the chip using NES software.
+///
+/// — and the census asks that the file be "the changed sectors rather than a separate RAM image"
+/// (REQ-CORE-095).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_095_the_gtrom_flash_save_is_the_changed_sectors() {
+    // A chip nothing has written has nothing to save, so a host writes no file at all for the
+    // overwhelming majority of sessions.
+    let fresh = MapperRom::new(111).prg(64).chr(0).load();
+    assert_eq!(0, gtrom_dirty_sectors(&fresh));
+    assert!(
+        fresh.export_flash_save().is_empty(),
+        "a fresh chip has nothing to save"
+    );
+
+    // **The changed sectors, and not an image of the chip**: three 4 KiB sectors and a short
+    // header, against a 512 KiB chip.
+    let core = gtrom_flashed();
+    let save = core.export_flash_save();
+    assert!(
+        (3 * 4 * 1024..4 * 4 * 1024).contains(&save.len()),
+        "three sectors and a header, not the 512 KiB chip: {} bytes",
+        save.len()
+    );
+    // The two programmed bytes **appear in the file**, each inside the $FF of its erased sector.
+    assert!(
+        save.windows(3).any(|bytes| bytes == [0xFF, 0x3C, 0xFF]),
+        "the byte programmed at $A123 is in the file"
+    );
+    assert!(
+        save.windows(3).any(|bytes| bytes == [0xFF, 0xC3, 0xFF]),
+        "and the one at $E010"
+    );
+
+    // The file read back into a fresh machine: the two bytes, the whole erased sector around the
+    // first of them, the sector of another bank, and nothing else.
+    let mut reloaded = MapperRom::new(111).prg(64).chr(0).load();
+    assert_eq!(1, reloaded.read_memory(0xA123), "the dump's own byte");
+    assert!(reloaded.import_flash_save(&save));
+    assert_eq!(0x3C, reloaded.read_memory(0xA123));
+    assert_eq!(
+        0xFF,
+        reloaded.read_memory(0xA000),
+        "the erased sector came back whole"
+    );
+    assert_eq!(0xFF, reloaded.read_memory(0xAFFF));
+    assert_eq!(
+        1,
+        reloaded.read_memory(0xB000),
+        "and no sector the file did not name"
+    );
+    assert_eq!(0xC3, reloaded.read_memory(0xE010));
+    reloaded.mapper_write(0x5000, 0x03);
+    assert_eq!(0xFF, reloaded.read_memory(0xA123), "bank 3's sector too");
+
+    // A reset keeps all of it: a flash chip is not volatile memory, and this is the one save
+    // medium of this build that `Cartridge::clear_volatile_ram` cannot reach.
+    reloaded.reset();
+    assert_eq!(0x3C, reloaded.read_memory(0xA123));
+    assert_eq!(3, gtrom_dirty_sectors(&reloaded));
+
+    // A file this build does not read changes nothing, the way `import_battery_ram` refuses a
+    // board with no battery.
+    assert!(!reloaded.import_flash_save(&[]));
+    assert!(!reloaded.import_flash_save(b"not a flash save file at all"));
+    assert!(
+        !reloaded.import_flash_save(&save[..save.len() - 1]),
+        "a truncated file is refused"
+    );
+    assert_eq!(
+        0x3C,
+        reloaded.read_memory(0xA123),
+        "and the chip is left as it was"
+    );
+}
+
+/// The savestate half of the census's test: "a flashed byte survives a save-state round-trip"
+/// (REQ-CORE-090, REQ-CORE-091).
+///
+/// Before MF-UNL-9 the cartridge's section of the block carried this board's three registers and
+/// no flash at all, so a flashed byte was lost by a round trip; the changed sectors are now
+/// written at the end of that section behind `NesCore::state_version_has_flash`.
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_090_the_gtrom_flashed_sectors_come_back_with_its_registers() {
+    let core = gtrom_flashed();
+    let state = core.save_state(true).unwrap();
+
+    let mut other = MapperRom::new(111).prg(64).chr(0).load();
+    other.try_load_state(&state, 0).unwrap();
+    assert_eq!(0x3C, other.read_memory(0xA123));
+    assert_eq!(0xC3, other.read_memory(0xE010));
+    assert_eq!(3, gtrom_dirty_sectors(&other));
+    other.mapper_write(0x5000, 0x03);
+    assert_eq!(0xFF, other.read_memory(0xA123), "bank 3's sector too");
+
+    // And a state loaded into a machine that flashed something **else** leaves the chip holding
+    // what the state holds and no more: the sector this third machine erased is the dump's again.
+    // That is what the per-sector pristine copy of `FlashRom` is for, and it is the one thing a
+    // save file alone would not have needed.
+    let mut third = MapperRom::new(111).prg(64).chr(0).load();
+    gtrom_erase(&mut third, 0xC000);
+    assert_eq!(0xFF, third.read_memory(0xC000));
+    third.try_load_state(&state, 0).unwrap();
+    assert_eq!(0x3C, third.read_memory(0xA123));
+    assert_eq!(
+        2,
+        third.read_memory(0xC000),
+        "the sector this machine erased and the state did not is the dump's again"
+    );
+    assert_eq!(
+        3,
+        gtrom_dirty_sectors(&third),
+        "and its dirty set is the state's three sectors"
+    );
+}
+
+/// The counterpart of `req_core_095_a_cartridge_without_a_battery_exposes_nothing` for the second
+/// save medium: a board whose PRG-ROM is mask ROM has no flash chip, exposes no file and refuses
+/// one (REQ-CORE-095, MF-UNL-9 step 2).
+#[test]
+fn req_core_095_a_board_without_a_flash_chip_exposes_nothing() {
+    let mut core = load(4);
+    assert!(core.cartridge().unwrap().memory().flash().is_none());
+
+    let empty: [u8; 0] = [];
+    assert_eq!(core.export_flash_save(), empty);
+    assert!(!core.import_flash_save(&[1, 2, 3]));
+}
+
+/// "This means the mapper always uses 4-screen mirroring and can neither use nor benefit from a
+/// switch to control the nametable arrangement" — so neither the header's flag nor any value of
+/// the register can make it anything else (MF-UNL-9).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_100_the_gtrom_is_four_screen_whatever_the_header_says() {
+    // Byte 6 bit 0 is the vertical/horizontal flag and bit 3 the four-screen one: all four
+    // combinations, including the two that ask for something else.
+    for bits in [0x00u8, 0x01, 0x08, 0x09] {
+        let mut core = MapperRom::new(111).prg(64).chr(0).mirroring(bits).load();
+        assert_eq!(Nm::FourScreen, core.mirroring(), "header bits {bits:#04X}");
+        assert_eq!(
+            [-2, -2, -2, -2],
+            nametable_pages(&core),
+            "header bits {bits:#04X}: served by the cartridge, all four"
+        );
+
+        // Every value of the register — both nametable banks, both CHR banks, both LEDs — leaves
+        // it four-screen, because there is no bit that could do anything else.
+        for register in [0x00u8, 0x10, 0x20, 0x30, 0xC0, 0xFF] {
+            core.mapper_write(0x5000, register);
+            assert_eq!(
+                Nm::FourScreen,
+                core.mirroring(),
+                "header {bits:#04X}, register {register:#04X}"
+            );
+        }
+
+        core.reset();
+        assert_eq!(Nm::FourScreen, core.mirroring(), "and after a reset");
+    }
+}
+
+/// The two LEDs: "The LED lights on the board are universally unsupported at this time", and this
+/// build has no host surface for an indicator on a cartridge either, so bits 6 and 7 are decoded
+/// into the register byte — which puts them in the savestate for free — and drive nothing.
+///
+/// What they must not do is disturb anything they share that byte with, which is everything the
+/// board has (MF-UNL-9).
+#[cfg(feature = "board-111")]
+#[test]
+fn req_core_100_the_gtrom_led_bits_change_nothing_observable() {
+    let mut core = MapperRom::new(111).prg(64).chr(0).load();
+
+    // PRG bank 10, CHR bank 1, nametable bank 1, both LEDs on.
+    core.mapper_write(0x5000, 0x3A);
+    chr_write(&mut core, 0x0000, 0x11);
+    nametable_write(&mut core, 0x2000, 0x22);
+    let windows = core.prg_windows();
+    for leds in [0x40u8, 0x80, 0xC0] {
+        core.mapper_write(0x5000, 0x3A | leds);
+        assert_eq!(windows, core.prg_windows(), "LEDs {leds:#04X}");
+        assert_eq!(0x11, peek(&core, 0x0000), "LEDs {leds:#04X}: the CHR bank");
+        assert_eq!(
+            0x22,
+            nametable(&core, 0x2000),
+            "LEDs {leds:#04X}: the nametable bank"
+        );
+        assert_eq!(Nm::FourScreen, core.mirroring(), "LEDs {leds:#04X}");
+    }
+
+    // Nor the flash: the LEDs are written through the register window and the chip only sees
+    // $8000-$FFFF, so an LED write in the middle of a command sequence does not abort it. Bank 0
+    // throughout, because that is where the chip's unlock addresses are reachable.
+    core.mapper_write(0x5000, 0x20);
+    gtrom_erase(&mut core, 0xA123);
+    gtrom_unlock(&mut core);
+    core.mapper_write(0x5000, 0xE0); // Both LEDs off, same banks.
+    core.mapper_write(0xD555, 0xA0);
+    core.mapper_write(0xA123, 0x3C);
+    assert_eq!(
+        0x3C,
+        core.read_memory(0xA123),
+        "an LED write is not a chip write"
+    );
+}
+
 #[test]
 fn req_core_100_jaleco_ss88006_loads_its_banks_one_nibble_at_a_time() {
     let mut core = MapperRom::new(18).prg(32).chr(32).load();

@@ -1,5 +1,5 @@
 use super::{windows_for, Mapper};
-use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::cartridges::{BankWindows, CartridgeMemory, FlashCommand, FlashCommandState};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
@@ -62,17 +62,25 @@ use crate::NametableMirroring;
 /// board has two, so a CHR bank number above 1 would address the nametable half. It cannot
 /// happen — the page gives the CHR field one bit.
 ///
-/// # The flash, and the two gaps
+/// # The flash, which is this board's **only** way to save
 ///
 /// Like the UNROM 512 the board carries a "Microchip SST39SF040 flash chip" and the PRG-ROM is
-/// what a game saves into: "Programs must execute from RAM while erasing and writing".
-/// [`Cheapocabra::step_flash`] is the same state machine [`super::UnRom512`] got from R0's answer
-/// to **Q-117**, on this board's chip addressing — the register's bank in the top bits, the 32 KiB
-/// window below it — and with the same two scopes left out, which are the gaps MR-30-4 records for
-/// that board in the same words:
+/// what a game saves into: "Programs must execute from RAM while erasing and writing". The page is
+/// explicit that there is no other medium:
 ///
-/// * **persistence is out of scope.** The flash is changed in memory and a reload loses it
-///   (Q-117, to be settled with REQ-CORE-095).
+/// > Both of these mappers lack PRG RAM for game saves but the configuration of both boards make
+/// > it possible to erase and rewrite sections of the chip using NES software.
+///
+/// so persisting the chip is persisting the saves of all seven titles. The command sequences are
+/// the chip's and live in [`FlashCommandState`]; the sectors a game has written and the save file
+/// of them live in [`crate::cartridges::FlashRom`], which `board_memory_sizes` gives this board
+/// and no other. **MF-UNL-9 step 1 closed the persistence gap MF-6c step 9 recorded**: a flashed
+/// sector now survives a savestate round trip and reaches a save file of its own
+/// (`Cheapocabra::step_flash`, `CartridgeMemory::export_flash_save`).
+///
+/// One scope of the chip is still left out, and it is the gap MR-30-4 records for the UNROM 512 in
+/// the same words:
+///
 /// * **the software-ID commands ($90 and $F0) are not implemented**, exactly as on the shipped
 ///   UNROM 512: the sequences that matter for saving are the erase and the program, and a board
 ///   answering a *read* with chip status would need a body in `Board::cpu_read_override`, which
@@ -81,9 +89,10 @@ use crate::NametableMirroring;
 /// And two of the board's own:
 ///
 /// * **the two LEDs** (bits 7 and 6) are decoded and kept — they are in the register byte, so they
-///   are in the save state for free — and drive nothing. This build has no host surface for an
-///   indicator on the cartridge, the gap MF-6c step 8 records for the Oeka Kids tablet in the same
-///   words.
+///   are in the save state for free — and drive nothing, which is also what every other emulator
+///   does: "The LED lights on the board are universally unsupported at this time". This build has
+///   no host surface for an indicator on the cartridge, the gap MF-6c step 8 records for the Oeka
+///   Kids tablet in the same words.
 /// * **"reading from the register effectively writes the value of open bus"**, which the page's own
 ///   sentence continues: "so bitwise manipulation will require keeping a copy of the mapper
 ///   register's value in RAM". The register is **write-only** here, and the argument is the owner's
@@ -100,10 +109,14 @@ pub struct Cheapocabra {
     /// a board whose chip is the 32 KiB `board_memory_sizes` gives it.
     ///
     nametable_base: usize,
-    /// How far through an SST39SF040 command sequence the chip is (Q-117, MR-30-4).
-    flash_step: u8,
-    /// Whether the sequence under way is the erase one rather than the program one.
-    flash_erasing: bool,
+    /// How far through an SST39SF040 command sequence the chip is, and whether that sequence is
+    /// the erase one (Q-117, MR-30-4).
+    ///
+    /// **The board holds the sequence and the memory holds the sectors**, which is what keeps this
+    /// board's savestate block byte for byte what MF-6c step 9 shipped: these two values were
+    /// already two of its three fields and [`Mapper::save_registers`] still writes them in the
+    /// same order and the same widths. See [`FlashCommandState`]'s own note.
+    flash: FlashCommandState,
 }
 
 impl Cheapocabra {
@@ -113,17 +126,12 @@ impl Cheapocabra {
     /// The nametable half of it: two banks of 8 KiB, each covering PPU $2000-$3FFF whole.
     const NAMETABLE_SIZE: usize = 16 * 1024;
 
-    /// The two SST39SF040 command addresses, on the **chip's** address lines (Q-117).
-    const UNLOCK_5555: u32 = 0x5555;
-    const UNLOCK_2AAA: u32 = 0x2AAA;
-
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
             register: 0,
             nametable_base: memory.chr_ram().len().saturating_sub(Self::NAMETABLE_SIZE),
-            flash_step: 0,
-            flash_erasing: false,
+            flash: FlashCommandState::default(),
         }
     }
 
@@ -156,65 +164,27 @@ impl Cheapocabra {
     ///
     /// The chip recognises its unlock writes on **chip** addresses $5555 and $2AAA, which is R0's
     /// answer to Q-117 and what [`super::UnRom512::step_flash`]'s own note argues at length; on
-    /// this board they are reachable in bank 0 at CPU $D555 and $AAAA. The sequences are the
-    /// chip's and not the board's, so they are the same two:
-    ///
-    /// * erase a 4 KiB sector — `$5555:$AA`, `$2AAA:$55`, `$5555:$80`, `$5555:$AA`, `$2AAA:$55`,
-    ///   `ADDR:$30`;
-    /// * program a byte — `$5555:$AA`, `$2AAA:$55`, `$5555:$A0`, `ADDR:DATA`.
+    /// this board they are reachable in bank 0 at CPU $D555 and $AAAA, which the page names in
+    /// those terms. The sequences themselves are the chip's and not the board's, so MF-UNL-9 step
+    /// 1 moved them into [`FlashCommandState::write`] where a second flash board will find them;
+    /// what stays here is the board's half — the chip address, and which sector of the ROM a CPU
+    /// address falls in.
     ///
     /// `$90` and `$F0`, the software-ID pair, are not implemented; see the struct's own note.
     #[inline(never)]
     fn step_flash(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        match (self.flash_step, self.chip_address(address), value) {
-            (0 | 3, Self::UNLOCK_5555, 0xAA) | (1 | 4, Self::UNLOCK_2AAA, 0x55) => {
-                self.flash_step += 1;
+        match self.flash.write(self.chip_address(address), value) {
+            FlashCommand::None => {}
+            FlashCommand::Program => {
+                if let Some(offset) = self.banks.prg_rom_offset(address) {
+                    memory.flash_program(offset, value);
+                }
             }
-            (2, Self::UNLOCK_5555, 0x80) => {
-                self.flash_erasing = true;
-                self.flash_step = 3;
+            FlashCommand::EraseSector => {
+                if let Some(offset) = self.banks.prg_rom_offset(address) {
+                    memory.flash_erase_sector(offset);
+                }
             }
-            (2, Self::UNLOCK_5555, 0xA0) => {
-                self.flash_erasing = false;
-                self.flash_step = 6;
-            }
-            (5, _, 0x30) if self.flash_erasing => {
-                self.erase_sector(memory, address);
-                self.flash_step = 0;
-            }
-            (6, _, _) => {
-                self.program_byte(memory, address, value);
-                self.flash_step = 0;
-            }
-            // Anything else aborts the sequence.
-            _ => self.flash_step = 0,
-        }
-    }
-
-    /// Erases the 4 KiB flash sector `address` falls in, to $FF.
-    fn erase_sector(&self, memory: &mut CartridgeMemory, address: u16) {
-        let Some(offset) = self.banks.prg_rom_offset(address) else {
-            return;
-        };
-
-        let sector = offset & !0x0FFF;
-        let rom = memory.prg_rom_mut();
-        let end = (sector + 0x1000).min(rom.len());
-        if sector < end {
-            rom[sector..end].fill(0xFF);
-        }
-    }
-
-    /// Programs one byte. Flash can only clear bits, so the byte written is ANDed with what is
-    /// already there — a game that has not erased the sector first sees exactly that.
-    fn program_byte(&self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        let Some(offset) = self.banks.prg_rom_offset(address) else {
-            return;
-        };
-
-        let rom = memory.prg_rom_mut();
-        if let Some(byte) = rom.get_mut(offset) {
-            *byte &= value;
         }
     }
 }
@@ -226,16 +196,21 @@ impl Mapper for Cheapocabra {
         111
     }
 
+    /// Three fields in the order MF-6c step 9 shipped them — the register, the sequence step and
+    /// the erase flag — and MF-UNL-9 did not move a byte of them: the sectors the game has flashed
+    /// are written by `CartridgeMemory` at the end of the cartridge's own section, behind
+    /// `NesCore::state_version_has_flash`.
     fn save_registers(&self, writer: &mut StateWriter) {
         writer.write_u8(self.register);
-        writer.write_u8(self.flash_step);
-        writer.write_bool(self.flash_erasing);
+        writer.write_u8(self.flash.step());
+        writer.write_bool(self.flash.erasing());
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.register = reader.read_u8()?;
-        self.flash_step = reader.read_u8()?;
-        self.flash_erasing = reader.read_bool()?;
+        let step = reader.read_u8()?;
+        let erasing = reader.read_bool()?;
+        self.flash.restore(step, erasing);
         Ok(())
     }
 
@@ -245,8 +220,9 @@ impl Mapper for Cheapocabra {
         // whichever bank it powers on in, and bank 0 is the one a dump is laid out from. Mesen 2
         // uses its configurable power-on byte here, which is the same choice when that is zero.
         self.register = 0;
-        self.flash_step = 0;
-        self.flash_erasing = false;
+        // The chip abandons any sequence under way; what it has already been programmed with
+        // stays programmed, which is the whole point of a flash chip.
+        self.flash.reset();
         // "The mapper always uses 4-screen mirroring": the four tables are served from the
         // cartridge whatever this says, and it says the same thing for anything that asks the
         // cartridge what its arrangement is.

@@ -98,20 +98,99 @@ Four decisions, each with its reason:
 
 ## Steps
 
-- [x] **0/8** — the plan: this file, the inventory above and the base commit.
-- [ ] **1/8** — `FlashRom` in `CartridgeMemory`: the SST39SF040's command sequence, the
-  dirty-sector set with its pristine copy, and the save-file encoding.
-- [ ] **2/8** — `Cheapocabra` on it: the command machine delegates, the written sectors are
-  recorded, and the board's emulation is unchanged to the instruction.
-- [ ] **3/8** — the flash in the save state, behind the version check, with states written before
-  this lot still loading.
-- [ ] **4/8** — the core's save-file API, and what is handed to the host.
-- [ ] **5/8** — the four tests the census lists that are not here: the save file, the save-state
-  round trip of a flashed sector, four-screen regardless of the header's flag, and the LED bits.
-- [ ] **6/8** — the four sweeps, the feature configurations, `fmt` and clippy.
-- [ ] **7/8** — the callgrind campaign against the base commit, and the feature decision.
-- [ ] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
-  `BOARD-FEATURES.md`, the census note, the journal and the final pass.
+**The step list was renumbered from eight to six after step 0**, and the commit that opened the lot
+is the one `MF-UNL-9 (0/8)` in the log. The reason is that the plan's steps 1-5 do not compile
+apart: the module, the board on it, the savestate section and the save-file API are one object
+seen from four sides — `Cheapocabra` cannot program a sector before `FlashRom` exists, `FlashRom`
+has no caller before `Cheapocabra` uses it, and neither has a test before the API is there. Rather
+than commit four trees that do not build, they are one step. Nothing was dropped: the table at the
+end of step 1 below lists each of the five against what it produced.
+
+- [x] **0/8** — the plan: this file, the inventory above and the base commit. (Numbered 0/8; the
+  list below is the renumbered one.)
+- [x] **1/6** — the flash, whole: `FlashRom` and `FlashCommandState` in a new module, the
+  `CartridgeMemory` field and its five methods, the `board_memory_sizes` row, `Cheapocabra` on it,
+  the savestate section behind the version check, the core's save-file API, and the four tests the
+  census lists that were not here.
+- [ ] **2/6** — the four sweeps, the feature configurations, `fmt` and clippy in the four
+  configurations the instruction names.
+- [ ] **3/6** — the callgrind campaign against the base commit, and the feature decision.
+- [ ] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
+  ROM roots.
+- [ ] **5/6** — `BOARD-FEATURES.md`, the census note and the journal.
+- [ ] **6/6** — the final pass.
+
+## Step 1 — the flash, whole
+
+### What each of the plan's five steps became
+
+| plan step | where it landed |
+| --- | --- |
+| 1 — a `FlashRom` memory kind: command sequence, dirty-sector set, save file of the changed sectors | `rust/crates/zax-nes/src/cartridges/flash.rs`, a new module: `FlashCommandState` (the chip's command machine), `FlashCommand` (what a finished sequence asks for) and `FlashRom` (the sectors). `CartridgeMemory::flash`, `flash_program`, `flash_erase_sector`, `export_flash_save`, `import_flash_save`, `save_flash_state`, `load_flash_state`. `BoardMemorySizes::flash_sector`, and mapper 111's row giving it `FlashRom::SST39SF040_SECTOR` |
+| 2 — `Gtrom`: the PRG bank, bit 5's two nametable pages, forced four-screen | **already shipped by MF-6c step 9** and not rewritten; `Cheapocabra::step_flash` now delegates the decode and the two commands, and that is the only change to the board's behaviour-bearing code |
+| 3 — bits 6-7 decoded and discarded with the page's "currently universally unsupported" quoted | the sentence is now in `Cheapocabra`'s struct note, in the page's own words ("The LED lights on the board are universally unsupported at this time"), and `req_core_100_the_gtrom_led_bits_change_nothing_observable` is the test |
+| 4 — §7.1's three common things, with the round trip extended to a **flashed** sector | `req_core_090_the_gtrom_flashed_sectors_come_back_with_its_registers`; the sweeps are step 2 of this list |
+| the save-file API | `NesCore::export_flash_save` / `NesCore::import_flash_save`, beside `export_battery_ram` / `import_battery_ram` |
+
+### The four decisions of the plan, as built
+
+1. **Nothing is on a read path.** A programmed byte goes into `prg_rom` where every PRG read
+   already finds it. `FlashRom` is read when a state or a save file is written and never on a bus
+   access, and the field is `Option<Box<FlashRom>>` — one null pointer on the 198 other numbers.
+2. **The dirty set and the undo data are one `Vec`.** `FlashRom::original` holds the pristine
+   contents of every sector a command has touched, taken on the first write to it, and the sectors
+   with an entry *are* the dirty set. The undo half is not decoration: `load_state` has to load a
+   state into a core whose flash was written *differently*, which is revert-then-apply, and the
+   last assertion of the round-trip test is exactly that case.
+3. **The save file is the changed sectors.** `"ZXFL"`, a version, the sector size, then
+   `(index, contents)` per changed sector. Three flashed sectors of a 512 KiB chip measure 12 KiB
+   and a header, which the test asserts as a bound rather than hoping for.
+4. **A sector is the chip's sector**, 4 KiB, and it is the unit of the erase command, of the dirty
+   set and of the file at once.
+
+### The savestate format, and the one place the bump could have broken a file
+
+The flash goes at the **end of the cartridge's section**, after the board's own registers, and
+`CartridgeMemory::save_flash_state` writes **zero bytes** when the board has no flash — so every
+other board's block is byte for byte what it was, and the only difference in their files is the
+version number in the header. `Cheapocabra`'s own block is unchanged too: its three fields are
+still a `u8`, a `u8` and a `bool` in that order, which is why the command machine stayed on the
+board (`FlashCommandState`'s own note) instead of moving into `CartridgeMemory` with the sectors.
+
+`STATE_VERSION` went **8 → 10** and `WIDE_STATE_VERSION` **9 → 11**, with 8 and 9 kept as
+`STATE_VERSION_8` and `WIDE_STATE_VERSION_9` and still read. Two consequences had to be handled
+rather than inherited:
+
+* **`state_version_has_mmc5_audio` was `version >= STATE_VERSION`**, which was correct only while
+  that constant *was* the threshold. Left alone it would have stopped reading the MMC5's sound
+  registers out of every version-8 and version-9 block the moment the constant moved. It now names
+  `STATE_VERSION_8`, the version the registers appeared in.
+* **`state_uses_widescreen` matched the version numbers literally**, so after the bump a state
+  written by the build before this lot would have answered `None` and the host would have stopped
+  recognising it. The two arms for 8 and 9 are added. (That function still has no arm for
+  `WIDE_STATE_VERSION_7`, which `is_wide_state_version` does accept — a pre-existing asymmetry,
+  recorded here and deliberately not touched by this lot.)
+
+### The four tests the census asked for and the one it did not
+
+| test | the census item |
+| --- | --- |
+| `req_core_095_the_gtrom_flash_save_is_the_changed_sectors` | "a flashed byte … appears in the save file", and the file being the changed sectors: the empty file of a chip nothing wrote, the 12 KiB bound against a 512 KiB chip, both programmed bytes found inside the `$FF` of their erased sectors, a reload into a fresh machine, a reset keeping it, and three refusals that leave the chip as it was |
+| `req_core_090_the_gtrom_flashed_sectors_come_back_with_its_registers` | "a flashed byte survives a save-state round-trip", plus the revert case |
+| `req_core_100_the_gtrom_is_four_screen_whatever_the_header_says` | "Mirroring is four-screen regardless of the header's flag" — all four values of byte 6's two mirroring bits, six values of the register, and after a reset |
+| `req_core_100_the_gtrom_led_bits_change_nothing_observable` | "The LED bits change nothing observable" — the PRG windows, the CHR bank, the nametable bank and the mirroring across all three LED combinations, and an LED write in the middle of a flash sequence not aborting it |
+| `req_core_095_a_board_without_a_flash_chip_exposes_nothing` | not asked for: the counterpart of `req_core_095_a_cartridge_without_a_battery_exposes_nothing` for the second save medium |
+
+**A finding worth recording, because the first draft of the save-file test was wrong on it.** The
+chip's unlock writes are on chip addresses `$5555` and `$2AAA`, and
+`chip_address = (bank << 15) | (addr & 0x7FFF)` can only produce those with **bank 0** — so the
+unlock pair is reachable at CPU `$D555`/`$AAAA` and *nowhere else*. A game that flashes a sector of
+another bank must unlock in bank 0 and move the register **before the last write of the sequence**,
+which is a CPU-bus write the chip never sees. `gtrom_flashed` does exactly that for its third
+sector, so the suite now covers the only route by which fifteen of the sixteen banks can be
+written at all.
+
+The three tests MF-6c step 9 wrote are untouched and still pass.
 
 ## Sources consulted
 
