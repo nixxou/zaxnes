@@ -142,6 +142,7 @@ impl Mmc3Outer {
         // The page's own table: "right → $6000-$6FFF … NES 2.0 Submapper bit 0 = 0 … UNIF MAPR
         // COOLBOY", "left → $5000-$5FFF … bit 0 = 1 … MINDKIDS". Submappers 2 to 11 are refused;
         // the type's own note and Q-157 have the reason.
+        // Q-157
         let port = match submapper {
             0 => 0x6000,
             1 => 0x5000,
@@ -191,6 +192,7 @@ impl Mmc3Outer {
     /// any WRAM write would inadvertently change the outer bank registers". A no-op lockout
     /// would do exactly that to every one of the nine Chinese RPGs: the first byte a save routine
     /// wrote to `$6003` would re-bank the cartridge.
+    // Q-156
     const fn locked_out(&self) -> bool {
         self.outer[3] & 0x80 != 0 && !Self::gnrom_mode(self.outer[3])
     }
@@ -228,6 +230,7 @@ impl Mmc3Outer {
     /// field distinguishes one: on an image of 32 MiB or less the bit is above the PRG-ROM's own
     /// lines and [`BankWindows::map_prg_8k`] wraps it away, which is the same thing the hardware's
     /// missing address line does.
+    // Q-158
     const fn prg_a25(&self) -> i32 {
         if self.outer[1] & 0x01 == 0 && self.outer[3] & 0x01 != 0 {
             1
@@ -427,6 +430,7 @@ impl Mmc3Outer {
     ///
     /// The MMC3's `$A001` still gates it, which "also" implies: the bit adds a window, it does not
     /// add an enable.
+    // Q-159
     const fn extra_ram_window(&self) -> bool {
         self.port == 0x6000 && self.outer[3] & 0x20 != 0
     }

@@ -36,7 +36,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
   at $5000-$5FFF.
 - [x] **3/8** — the size ceiling: a 64 MiB image loads, a bigger declaration is refused, the
   SC0/SC1 half-select, and the `board_memory_sizes` row.
-- [ ] **4/8** — the question tickets, the four sweeps, the save-state round-trip and the feature
+- [x] **4/8** — the question tickets, the four sweeps, the save-state round-trip and the feature
   configurations.
 - [ ] **5/8** — the callgrind campaign against the base commit, and the feature decision.
 - [ ] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
@@ -300,3 +300,68 @@ pins both halves, the mixed cartridge with two chips side by side included.
 
 **1042 passed, 0 failed, 9 ignored** (step 2 left it at 1039/0/9): three tests. `cargo fmt --all
 -- --check` clean and `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 4 — four question tickets, the four sweeps, the round-trip and the configurations
+
+### The tickets
+
+| ticket | what it holds |
+| --- | --- |
+| **Q-156** | §7.2 step 3's "the lockout … implemented as a **no-op**" against the page's own *WRAM usage* section, which is three instructions of 6502 and a paragraph about why the bit exists. MF-UNL-2's rule applies: the page wins, the lockout is implemented, and the ticket asks that §7.2's sentence be corrected so a later lot does not stub it again. Plus the one reading the page cannot settle: whether the bit can be **cleared** once set (this build re-reads `$xxx3` rather than latching a flag, so it is sticky until a reset) |
+| **Q-157** | which of the thirteen PCB codes the board serves, i.e. what "leave the rest refusing" means. The page indexes the codes by **submapper** and the six groups do not share a register layout — four `$xxx0` diagrams and three `$xxx1` diagrams — so submappers 0 and 1 are served (six codes, all twelve titles) and 2 to 11 are refused with REQ-CORE-011's typed cause. The ticket has the table of what each refused group would have got wrong, and records mapper 224's absence |
+| **Q-158** | the 64 MiB mapping's first row, "PRG A25=PRG A0", which interleaves two 32 MiB chips byte by byte and is the **reset** state: no `BankWindows` window can say it, so this build answers the first half — the half the page says the existing multicarts duplicate their boot code into. **Part 2 of the same ticket** records that §7.2 step 2's "lift the PRG/CHR size ceiling in the loader" describes a ceiling this loader does not have, with the five places on the path read one by one |
+| **Q-159** | `$xxx3` bit 5's "Also enable PRG RAM in `$5000-$5FFF`", one clause with no mapping behind it: three readings (a COOLBOY only, CPU A0-A12 straight through, and "also" adding a window rather than an enable), each with what would close it. The ticket also offers the cheaper alternative — not serving the window at all until a dump is found — because no title the census counts is said to use it |
+
+All four carry a `// Q-NNN` reference in `mmc3_outer.rs` and a named test. **Q-156 is the one a
+reviewer can close in a session**: it is a reading of two documents that are both in front of them,
+not a measurement.
+
+### The four sweeps of §7.1 item 1
+
+| sweep | what it checks for 268 |
+| --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | the expected-additions table, **built from the features**, is now **92** rows and the ascending-order assertion covers the insertion |
+| `req_core_102_any_other_mapper_is_refused` | unchanged — 268 is not on the refused list, and `Cartridge::is_supported(268)` is true even for the submappers the board declines |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | reaches the number by registration; it writes `$8000-$E001` and `$6000`, and of this board's six registers only `$xxx0` is at any of those — which is why the board also has its own round-trip below |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | the reset path, including a `$6000` write, which **is** a register of this board |
+
+and `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched` — the invariant, not a list —
+gains `268` in its expected vector **once** rather than twice, because the sweep builds every
+number at submappers 0 *and* 3 and this is the first number in `SUPPORTED_MAPPERS` that refuses
+one. All three in-crate sweeps now go through `latched_cartridge`, which skips a refused pair and
+asserts the pair was mapper 268's and the cause `UnsupportedMapper`, so they still fail on any
+other refusal.
+
+### The save-state round-trip (§7.1 item 2)
+
+`req_core_090_mapper_268_round_trips_its_six_outer_registers` writes all six registers, the eight
+MMC3 ones, a byte into the CHR-RAM chip `$xxx4` selected and a byte into the WRAM behind the
+register window; saves; moves every one of the six; requires the PRG and CHR layouts, the CHR-RAM
+byte and the WRAM byte back, and the **re-saved block identical byte for byte**. Then it resets and
+requires the power-on layout, which is AMD-061 §5 for this board.
+
+The block is `Mmc3`'s own followed by six bytes, appended behind it — so no byte of mapper 4's,
+118's or any other board's state moved (REQ-CORE-090). `chr_ram_windows` is derived and carries no
+byte: `load_registers` brings it back through `refresh`.
+
+### The configurations
+
+clippy `-D warnings` on `zax-nes --all-targets` **and** its tests, in every configuration the lot
+adds plus the two §7.1 requires, and on `zax-harness --all-targets` in `default`:
+
+| configuration | clippy | tests |
+| --- | :-: | --- |
+| `default` | clean | **980 passed, 0 failed, 8 ignored** (MF-UNL-5 left it at 965) |
+| `--no-default-features` | clean | **783 / 0 / 8** — unchanged by this lot, as by the four before it |
+| `--features parked-boards` | clean | **1033 / 0 / 8** (the VS. System's 53 beside the default's 980, less the 8 that overlap) |
+| `--no-default-features --features board-268` | clean | **798 / 0 / 8** |
+| `zax-harness --all-targets`, `default` | clean | — |
+
+**All fifteen of the lot's tests are reachable with `board-268` alone** — 798 against 783 — which
+is the first MF-UNL lot in five where the *alone* configuration found nothing: there is one
+feature and one board, so there is no cross-board test to gate and no constant that only a second
+board's code reads.
+
+`cargo test --release -p zax-nes -p zax-harness` is **1043 / 0 / 9** (step 3 left it at 1042/0/9).

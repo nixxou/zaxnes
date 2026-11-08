@@ -10740,3 +10740,71 @@ fn req_core_012_mapper_268_keeps_its_8_kib_of_wram_and_takes_its_chr_from_the_he
     assert_eq!(64 * 1024, cartridge.memory().rom().chr_rom().len());
     assert_eq!(0x2000, cartridge.memory().chr_ram().len());
 }
+
+/// §7.1 item 2 for this lot's one board: a save-state round-trip with **all six** outer registers
+/// dirtied, the CHR-RAM chip of `$xxx4`'s mixed mode included (MF-UNL-6 step 4).
+///
+/// The generic sweep `req_core_090_the_mapper_state_survives_a_save_and_restore` reaches this
+/// number by being registered, but it writes `$8000-$E001` and `$6000` — and of this board's six
+/// registers only `$xxx0` is at any of those addresses. So the six are written here, the state is
+/// taken, every one of them is moved, and the restored block is required to be identical byte for
+/// byte.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_090_mapper_268_round_trips_its_six_outer_registers() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&coolboy_chr_image(64), "CoolboyChr.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    // The layout the board powers on with, for the reset check at the end.
+    let power_on = (coolboy_banks(&core), core.chr_windows());
+
+    // The MMC3 underneath, then the board's own six.
+    for register in 0..8u8 {
+        core.mmc3_bank(register, register + 0x11);
+    }
+    core.mapper_write(0x6000, 0x44); // Masks and the A19 offset.
+    core.mapper_write(0x6001, 0x82); // G, L and the SC0 bit.
+    core.mapper_write(0x6002, 0x75); // The GNROM CHR offset and its bitmask.
+    core.mapper_write(0x6003, 0x02); // `R`, with the banking mode left in MMC3 mode.
+    core.mapper_write(0x6004, 0x11); // Mixed CHR-RAM/CHR-ROM: R0's pair, whose value is $11.
+    core.mapper_write(0x6005, 0x10); // `$xxx5`, which this build latches and does not act on.
+    chr_write(&mut core, 0x0000, 0x7E); // Into the CHR-RAM the line above selected.
+    core.write_memory(0x7456, 0x4B); // And the WRAM behind the register window.
+
+    let state = core.save_state(true).unwrap();
+    let prg = coolboy_banks(&core);
+    let chr = core.chr_windows();
+    let ram_byte = core.read_memory(0x7456);
+
+    // Move every one of the six, and the chip select with them.
+    for register in 0..6u16 {
+        core.mapper_write(0x6000 + register, 0x00);
+    }
+    for _ in 0..5 {
+        core.run_frame(0);
+    }
+    assert_ne!(prg, coolboy_banks(&core), "the move must be visible in PRG");
+    assert_ne!(chr, core.chr_windows(), "and in CHR");
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(prg, coolboy_banks(&core), "the PRG windows");
+    assert_eq!(
+        chr,
+        core.chr_windows(),
+        "the CHR windows and the chip select"
+    );
+    assert_eq!(0x7E, core.chr_bank(0x0000), "the CHR-RAM byte");
+    assert_eq!(ram_byte, core.read_memory(0x7456), "the WRAM");
+    assert_eq!(state, core.save_state(true).unwrap(), "the whole block");
+
+    // AMD-061 §5: and a reset puts all six back to zero beside the MMC3's own, which is the
+    // layout the board powered on with — a 512 KiB MMC3 with the CHR-ROM in every window.
+    core.reset();
+    assert_eq!(
+        power_on,
+        (coolboy_banks(&core), core.chr_windows()),
+        "a reset clears all six outer registers"
+    );
+}
