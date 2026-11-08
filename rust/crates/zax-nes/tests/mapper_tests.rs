@@ -499,10 +499,15 @@ fn req_core_100_mmc1_disables_prg_ram_with_bit_4_of_the_prg_register() {
 /// nesdev ("MMC1"), SNROM: the board "uses the upper CHR bank select line coming out of the
 /// mapper (CHR A16; bit 4 of bank number) as an additional chip enable for the PRG-RAM".
 ///
-/// **The image is an NES 2.0 one since MF-LEG-1 step 1** (report entry MMC1-1): the `E` bit now
-/// needs a header that declares the 8 KiB of CHR-RAM *and* the 8 KiB of work RAM, because those
-/// two declarations are the only thing that tells an SNROM from an SGROM. The behaviour the test
-/// asserts is unchanged.
+/// **Behind `mmc1-snrom-e-bit`, which is off in `default` since MF-LEG-1B** (Q-176): R0's answer
+/// is that this build follows puNES and the four other emulators and does not apply the bit, so
+/// what the test asserts is the behaviour of the *feature* build and not of the shipped one.
+/// `mf_leg_1b_the_snrom_e_bit_is_not_applied_in_the_default_build` is the other side of it, and
+/// `Mmc1::is_snrom` carries the argument in full.
+///
+/// The image is the SNROM row of the board table declared the NES 2.0 way — which the size test
+/// the feature restores also accepts, byte 10 or no byte 10.
+#[cfg(feature = "mmc1-snrom-e-bit")]
 #[test]
 fn req_core_100_mmc1_snrom_disables_prg_ram_with_bit_4_of_the_chr_register() {
     // 128 KiB PRG, 8 KiB CHR-RAM, 8 KiB battery PRG-RAM: the SNROM row of the board table,
@@ -554,91 +559,50 @@ fn req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enab
     }
 }
 
-/// **MF-LEG-1 step 1, report entry MMC1-1**: an **iNES 1.0** mapper-1 dump with CHR-RAM does not
-/// get the SNROM's `E` bit, because that header cannot tell an SNROM from an SGROM.
+/// **MF-LEG-1B, Q-176, report entry MMC1-1**: in the build that ships, the SNROM `E` bit is not
+/// applied **at all** — not to an iNES 1.0 dump, and not to a dump that declares the board
+/// outright — and `$E000` bit 4 is the only wire to the PRG-RAM's chip enable.
 ///
-/// This is the whole popular set — *The Legend of Zelda*, *Zelda II*, *Metroid*,
-/// *Final Fantasy*, *Mega Man 2* — every one of which the old three-way size test read as an
-/// SNROM and handed a second PRG-RAM chip enable on a bit that is a meaningless CHR bank number
-/// on an 8 KiB CHR-RAM board. It is also what all five of FCEUX, Nestopia, puNES, Nintendulator
-/// and Mesen 2 do (`docs/review/LEGACY-XCHECK.md`, MMC1-1).
+/// R0's answer to Q-176, 2026-11-08: this build follows puNES and the four other cross-checked
+/// emulators, none of which implements the bit, one of which removed it over a named regression
+/// (*Witch n' Wiz*). `Mmc1::is_snrom` carries the whole argument, including why no board test
+/// can be written that both spares the popular iNES 1.0 set — *The Legend of Zelda*, *Zelda II*,
+/// *Metroid*, *Final Fantasy*, *Mega Man 2* — and sees the work-RAM chip `holy-mapperel`'s own
+/// SNROM images test without declaring.
 ///
-/// The `$E000` half of the chip enable, which every MMC1 board wires, is untouched: the last two
-/// assertions are the regression guard that this fix narrowed the board test and not the bit.
-///
-/// **Behind `mmc1-snrom-header`, which is off in `default`** (Q-176): the narrowing reverts the two
-/// `holy-mapperel` SNROM rows that lot MF-3 step 1 exists to have fixed, so whether it ships is
-/// R0's decision and not this lot's.
-#[cfg(feature = "mmc1-snrom-header")]
+/// The last three assertions are the regression guard that the decision took the `E` bit away
+/// and not the chip enable: `R` of `$E000` still disables, on both dumps.
+#[cfg(not(feature = "mmc1-snrom-e-bit"))]
 #[test]
-fn mf_leg_1_mmc1_an_ines_1_0_dump_with_chr_ram_does_not_get_the_snrom_e_bit() {
-    // The shape of a Zelda II dump: 128 KiB PRG, no CHR-ROM, battery, no NES 2.0 fields.
-    let mut core = MapperRom::new(1).prg(16).chr(0).battery().load();
-    core.write_memory(0x6000, 0x5A);
-    assert_eq!(0x5A, core.read_memory(0x6000));
-
-    // Bit 4 of $A000 is a CHR bank number here and nothing else.
-    core.mmc1_write(0xA000, 0x10);
-    core.write_memory(0x6000, 0xA5);
-    assert_eq!(
-        0xA5,
-        core.read_memory(0x6000),
-        "the `E` bit fired on an iNES 1.0 dump"
-    );
-
-    core.mmc1_write(0xE000, 0x10);
-    assert_eq!(0, core.read_memory(0x6000), "`W` of $E000 still disables");
-    core.mmc1_write(0xE000, 0x00);
-    assert_eq!(0xA5, core.read_memory(0x6000));
-}
-
-/// **MF-LEG-1 step 1, report entry MMC1-1**: the three NES 2.0 declarations that are *not* enough
-/// on their own, so that the gate cannot be widened by accident.
-///
-/// An SNROM declares no CHR-ROM, 8 KiB of CHR-RAM in byte 11 **and** 8 KiB of work RAM in byte
-/// 10. A dump missing any one of the three is an SGROM as far as this core can tell, and
-/// `nes20_prg_ram_size` floors byte 10 at the 8 KiB default, so the byte itself has to be
-/// non-zero — a declared *zero* reads back as 8 KiB and must not pass.
-///
-/// Behind `mmc1-snrom-header` for the reason the test above gives (Q-176).
-#[cfg(feature = "mmc1-snrom-header")]
-#[test]
-fn mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations() {
-    // Byte 11 declared, byte 10 **zero**: an SGROM, which has no work-RAM chip at all.
-    let no_work_ram = MapperRom::new(1)
+fn mf_leg_1b_the_snrom_e_bit_is_not_applied_in_the_default_build() {
+    // The shape of a Zelda II or Metroid dump: 128 KiB PRG, no CHR-ROM, battery, no NES 2.0
+    // fields — which the old size test read as an SNROM, REQ-CORE-012 having floored its work
+    // RAM at 8 KiB.
+    let ines1 = MapperRom::new(1).prg(16).chr(0).battery();
+    // And the board declared the NES 2.0 way, all three memories: no header can get the bit
+    // either, the decision being about the bit and not about the evidence.
+    let declared = MapperRom::new(1)
         .prg(16)
         .chr(0)
         .chr_ram(8 * 1024)
-        .prg_ram(0, 0);
-    // Byte 10 declared, byte 11 absent: REQ-CORE-012's 32 KiB of CHR-RAM, which no MMC1 board
-    // carries, so the header has said nothing about the CHR.
-    let no_chr_declaration = MapperRom::new(1).prg(16).chr(0).prg_ram(8 * 1024, 0);
-    // Both declared, but 16 KiB of CHR-RAM: not the 8 KiB board.
-    let wrong_chr_ram = MapperRom::new(1)
-        .prg(16)
-        .chr(0)
-        .chr_ram(16 * 1024)
-        .prg_ram(8 * 1024, 0);
+        .prg_ram(0, 8 * 1024)
+        .battery();
 
-    for rom in [no_work_ram, no_chr_declaration, wrong_chr_ram] {
+    for rom in [ines1, declared] {
         let mut core = rom.load();
-        core.write_memory(0x6000, 0x3C);
-        core.mmc1_write(0xA000, 0x10);
-        core.write_memory(0x6000, 0x3C);
-        assert_eq!(0x3C, core.read_memory(0x6000));
-    }
+        core.write_memory(0x6000, 0x5A);
+        assert_eq!(0x5A, core.read_memory(0x6000));
 
-    // And the three together do pass, with the work RAM declared volatile rather than battery
-    // backed: the chip is what matters, not where it is persisted.
-    let mut snrom = MapperRom::new(1)
-        .prg(16)
-        .chr(0)
-        .chr_ram(8 * 1024)
-        .prg_ram(8 * 1024, 0)
-        .load();
-    snrom.write_memory(0x6000, 0x3C);
-    snrom.mmc1_write(0xA000, 0x10);
-    assert_eq!(0, snrom.read_memory(0x6000));
+        // Bit 4 of $A000 is a CHR bank number here and nothing else.
+        core.mmc1_write(0xA000, 0x10);
+        core.write_memory(0x6000, 0xA5);
+        assert_eq!(0xA5, core.read_memory(0x6000), "the `E` bit fired");
+
+        core.mmc1_write(0xE000, 0x10);
+        assert_eq!(0, core.read_memory(0x6000), "`R` of $E000 still disables");
+        core.mmc1_write(0xE000, 0x00);
+        assert_eq!(0xA5, core.read_memory(0x6000));
+    }
 }
 
 // ---------------------------------------------------------------- the MMC1A, submapper 3

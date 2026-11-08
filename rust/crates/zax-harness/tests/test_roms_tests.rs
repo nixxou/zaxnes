@@ -12,14 +12,15 @@
 //!   answer to Q-114 restates it for REQ-CORE-114). `5-MMC3`, the revision B half, passes. If
 //!   6 ever started passing, 5 would have stopped, and that would be a regression against the
 //!   spec rather than a fix.
-//! * every Holy Mapperel board the suite carries passes in the **default** build. MF-3 flipped
-//!   eight of its rows: the two SNROM boards used to **fail** on `$A000` bit 4 not disabling the
-//!   work RAM (step 1), and six were `unsupported` before their mappers were added — the two
-//!   mapper-69 ones (step 3), the mapper-118 one (step 5), the two mapper-180 ones (step 6) and
-//!   the mapper-78.3 one (step 7).
-//! * those **two SNROM rows fail again** with `mmc1-snrom-header` on, which is why they are
-//!   `SNROM_ROW` and not `Outcome::Pass`. See that constant and Q-176: the feature is off in
-//!   `default` precisely because it reverts them.
+//! * every Holy Mapperel board the suite carries passes in the **default** build **but two**.
+//!   MF-3 flipped eight of its rows: the two SNROM boards used to **fail** on `$A000` bit 4 not
+//!   disabling the work RAM (step 1), and six were `unsupported` before their mappers were
+//!   added — the two mapper-69 ones (step 3), the mapper-118 one (step 5), the two mapper-180
+//!   ones (step 6) and the mapper-78.3 one (step 7).
+//! * those **two SNROM rows fail again in `default` since MF-LEG-1B**, and pass with
+//!   `mmc1-snrom-e-bit` on, which is why they are `SNROM_ROW` and not `Outcome::Pass`. That is
+//!   R0's answer to Q-176 and not a regression: see the constant, and `Mmc1::is_snrom` for the
+//!   argument. They are `expected` failures in the report, like `mmc3_test/6-MMC6`.
 
 // A test: a missing ROM or an unreadable directory should fail it outright.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -29,20 +30,24 @@ use std::path::PathBuf;
 use zax_harness::test_roms::{self, Outcome};
 use zax_nes::cartridges::mappers::Mmc1;
 
-/// What the suite's two **SNROM** rows do, which depends on how the build was compiled
-/// (`mmc1-snrom-header`, off in `default`; Q-176).
+/// What the suite's two **SNROM** rows do, which is exactly whether the build applies the SNROM
+/// `E` bit (`mmc1-snrom-e-bit`, **off** in `default` since MF-LEG-1B; Q-176).
 ///
 /// `M1_P128K.nes` and `M1_P128K_CR8K.nes` announce themselves as "SNROM (MMC1)", report "8K PRG
 /// RAM OK" and probe detailed digit `4000`, "$A000 bit 4 does not disable WRAM (SNROM), or
-/// disables it (all but SNROM)" — and their NES 2.0 headers declare **no** PRG-RAM in byte 10. So
-/// they pass under the three-way size test lot MF-3 step 1 built for them, and fail under
-/// MF-LEG-1's header-declared rule, which cannot see the work-RAM chip the ROM is testing. The
-/// row is written this way rather than pinned either way because the choice between the hardware
-/// test and the header is R0's.
-const SNROM_ROW: Outcome = if Mmc1::SNROM_NEEDS_A_DECLARED_HEADER {
-    Outcome::Fail
-} else {
+/// disables it (all but SNROM)". They are the only two rows of the suite that reach the SNROM
+/// half of that digit, so they **fail in the shipped build and pass with the feature on** —
+/// R0's answer to Q-176, which is that this build follows puNES and the four other emulators and
+/// does not apply the bit at all. `zax-nes`'s `Mmc1::is_snrom` has the five votes, the named
+/// regression and the reason; `report::diagnose` marks the row `expected`, so the generated
+/// report calls it a required failure rather than a defect.
+///
+/// It is written over the constant rather than pinned so that a build either way is checked, and
+/// so that whichever row is the failure is the one the feature explains.
+const SNROM_ROW: Outcome = if Mmc1::SNROM_E_BIT {
     Outcome::Pass
+} else {
+    Outcome::Fail
 };
 
 /// The directory `ZAXNES_TEST_ROMS` names, or `None` when the variable is unset or does not

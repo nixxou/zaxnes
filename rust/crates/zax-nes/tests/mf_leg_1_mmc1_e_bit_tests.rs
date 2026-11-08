@@ -1,12 +1,17 @@
-//! **The extra check lot MF-LEG-1 step 1 owes the owner** (report entry MMC1-1).
+//! **The extra check lot MF-LEG-1 step 1 owes the owner** (report entry MMC1-1), and the same
+//! evidence under lot **MF-LEG-1B**, which carries the change further.
 //!
-//! Narrowing `Mmc1::is_snrom` to boards the header declares takes the SNROM `E` bit away from
-//! every iNES 1.0 mapper-1 dump with CHR-RAM — which is the whole popular set, *Zelda II*,
-//! *Metroid*, *Mega Man 2*, *Final Fantasy* among them. Removing the bit can only ever
-//! *re-enable* PRG-RAM that was switched off, so a game that works today keeps working; what the
-//! owner asked be proved is the stronger statement, that the fix changes **nothing** for those
-//! games — i.e. that under the **old** rule the RAM would never have been switched off during a
-//! run in the first place.
+//! Taking the SNROM `E` bit away takes it away from every iNES 1.0 mapper-1 dump with CHR-RAM —
+//! which is the whole popular set, *Zelda II*, *Metroid*, *Mega Man 2*, *Final Fantasy* among
+//! them. Removing the bit can only ever *re-enable* PRG-RAM that was switched off, so a game that
+//! works today keeps working; what the owner asked be proved is the stronger statement, that the
+//! change moves **nothing** for those games — i.e. that under the **old** rule the RAM would
+//! never have been switched off during a run in the first place.
+//!
+//! MF-LEG-1 step 1 narrowed `Mmc1::is_snrom` to boards an NES 2.0 header declares; MF-LEG-1B's
+//! answer to Q-176 drops the bit outright in `default`. The check is the same either way and
+//! holds for both, because what it establishes is about the **old** rule: the games never reach
+//! the bit at all.
 //!
 //! The question reduces to one bit. On a board the old test fired on, the `E` bit *is* bit 4 of
 //! the committed CHR bank 0 register ([`Mmc1::chr_bank0_has_the_e_bit`]), so "the old rule would
@@ -76,7 +81,8 @@ fn mmc1(core: &NesCore) -> &zax_nes::cartridges::mappers::Mmc1 {
 }
 
 /// REQ-CORE-100, report entry MMC1-1: none of the five games ever commits the SNROM `E` bit, so
-/// the narrowed board test of MF-LEG-1 step 1 changes nothing for any of them.
+/// neither MF-LEG-1 step 1's narrowed board test nor MF-LEG-1B's dropping the bit changes
+/// anything for any of them.
 #[test]
 #[ignore = "needs the user's ROMs: set ZAXNES_ROMS to the folder holding the five mapper-1 dumps"]
 fn mf_leg_1_the_five_mapper_1_games_never_commit_the_snrom_e_bit() {

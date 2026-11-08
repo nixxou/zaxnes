@@ -41,6 +41,12 @@ pub struct Mmc1 {
     /// The same bit of CHR bank 0, which only an SNROM wires (see [`Mmc1::is_snrom`]) as a
     /// second chip enable for the PRG-RAM: `$10` on an SNROM that is not a mapper 155, `$00`
     /// everywhere else.
+    ///
+    /// **Behind `mmc1-snrom-e-bit`, off in `default`** — the owner's decision of lot MF-LEG-1B,
+    /// Q-176, written out at length under *the SNROM `E` bit* below. With the feature off this
+    /// field does not exist, `Mmc1` is the base commit's layout minus one byte, and
+    /// [`Mmc1::refresh_prg_ram_disable`] is one load and one `and`.
+    #[cfg(feature = "mmc1-snrom-e-bit")]
     chr_disable_mask: u8,
     /// Bit 3 of the PRG register, masked: `$08` on an **MMC1A** — NES 2.0 mapper 1 submapper 3 —
     /// and `$00` on every other board (MF-LEG-1 step 5, report entry MMC1-4).
@@ -117,12 +123,15 @@ impl Mmc1 {
         let is_155 = cfg!(feature = "board-155") && memory.rom().mapper() == 155;
         // NES 2.0 mapper 1 submapper 3, the MMC1A (MF-LEG-1 step 5): `R` of `$E000` is not a
         // PRG-RAM disable on that revision -- "PRG-RAM is always enabled at $6000-$7FFF" -- so
-        // `prg_disable_mask` is zero for it too. `chr_disable_mask` is **not**: that bit belongs
-        // to the SNROM *board*, which wires CHR A16 to the RAM's second chip enable whichever
-        // revision of the ASIC is on it, and only mapper 155's page removes a wire. No dump is
-        // known that is both an SNROM and a declared MMC1A, so the two readings have nothing to
-        // disagree about today; see `Mmc1::mmc1a_fixed_mask`.
+        // `prg_disable_mask` is zero for it too. `chr_disable_mask`, where this build has it at
+        // all, is **not**: that bit belongs to the SNROM *board*, which wires CHR A16 to the
+        // RAM's second chip enable whichever revision of the ASIC is on it, and only mapper
+        // 155's page removes a wire. No dump is known that is both an SNROM and a declared
+        // MMC1A, so the two readings have nothing to disagree about; see
+        // `Mmc1::mmc1a_fixed_mask`. With `mmc1-snrom-e-bit` off -- the default -- the question
+        // does not arise, the MMC1A keeping its RAM through both bits.
         let is_mmc1a = cfg!(feature = "board-mmc1a") && header.is_nes20 && header.submapper == 3;
+        #[cfg(feature = "mmc1-snrom-e-bit")]
         let chr_wired = u8::from(!is_155) << 4;
         let prg_wired = u8::from(!(is_155 || is_mmc1a)) << 4;
         Self {
@@ -138,6 +147,7 @@ impl Mmc1 {
             ram_bank_shift,
             ram_bank_mask,
             prg_disable_mask: prg_wired,
+            #[cfg(feature = "mmc1-snrom-e-bit")]
             chr_disable_mask: if Self::is_snrom(memory) { chr_wired } else { 0 },
             #[cfg(feature = "board-mmc1a")]
             mmc1a_fixed_mask: if is_mmc1a { 0x08 } else { 0 },
@@ -145,92 +155,93 @@ impl Mmc1 {
         }
     }
 
-    /// Whether this image is on an SNROM board, where bit 4 of the CHR bank registers disables
-    /// the PRG-RAM.
-    ///
-    /// nesdev ("MMC1"), SNROM: the board, "which only supports 8 KiB of CHR-ROM/-RAM, uses the
-    /// upper CHR bank select line coming out of the mapper (CHR A16; bit 4 of bank number) as an
-    /// additional chip enable for the PRG-RAM", the `E` bit of both CHR bank registers being
-    /// "PRG-RAM disable (0: enable, 1: open bus)". The same line is something else on every
-    /// other MMC1 board that has it at all: on SUROM and SXROM bit 4 is `P`, the 256 KiB outer
-    /// PRG bank, and on the CHR-ROM boards (SJROM, SKROM, SLROM) it is CHR A16, a real bank
-    /// line. So the three sizes of the board page's table are what the board is recognised by,
-    /// and they are exactly the three the Holy Mapperel driver probes before it decides which way
-    /// its `4xxx` digit goes (`holy-mapperel/README.md`: "$A000 bit 4 does not disable WRAM
-    /// (SNROM), or $A000 bit 4 disables WRAM (all but SNROM)"):
-    ///
-    /// | board | PRG-ROM | PRG-RAM | CHR |
-    /// | --- | --- | --- | --- |
-    /// | SNROM | 128/256 KiB | 8 KiB | 8 KiB RAM/ROM |
-    /// | SOROM | 128/256 KiB | **16 KiB** | 8 KiB RAM/ROM |
-    /// | SUROM | **512 KiB** | 8 KiB | 8 KiB RAM/ROM |
-    /// | SXROM | 128/256/512 KiB | **32 KiB** | 8 KiB RAM/ROM |
-    ///
-    /// # The header must say so — lot MF-LEG-1 step 1, report entry MMC1-1
-    ///
-    /// The three sizes above are the SNROM's, but they are also the **SGROM's**: that board is
-    /// the same 128/256 KiB PRG with 8 KiB of CHR-RAM and no work RAM at all, and an iNES 1.0
-    /// header cannot tell the two apart — it has no CHR-RAM field, and REQ-CORE-012 hands every
-    /// mapper-1 dump the default 8 KiB of PRG-RAM whether the cartridge carries a chip or not.
-    /// So the old three-way size test fired on **every** iNES 1.0 mapper-1 dump with CHR-RAM,
-    /// which is the whole popular set — *The Legend of Zelda*, *Zelda II*, *Metroid*,
-    /// *Final Fantasy*, *Mega Man 2*, *Castlevania II* — and gave each of them a second PRG-RAM
-    /// chip enable on bit 4 of `$A000`, where on an 8 KiB CHR-RAM board that bit is a meaningless
-    /// CHR bank number. A game that writes it loses its save.
-    ///
-    /// The cross-check (`docs/review/LEGACY-XCHECK.md`, MMC1-1) found all five of FCEUX,
-    /// Nestopia, puNES, Nintendulator and Mesen 2 declining the `E` bit outright, puNES having
-    /// **removed** it over a named regression (*Witch n' Wiz*). The page and `holy-mapperel`'s
-    /// `4xxx` digit are on the other side, and AMD-061 makes the public documentation prevail —
-    /// so the bit stays, and what narrows is the board test: the `E` bit applies only where the
-    /// header gives **positive evidence** of an SNROM, and an iNES 1.0 dump is left on the
-    /// five-emulator convention. That is option (a) of the entry's three, the one it asks for.
-    ///
-    /// Positive evidence is an **NES 2.0** header that declares
-    ///
-    /// * no CHR-ROM and exactly 8 KiB of CHR-RAM in byte 11 — the SNROM/SGROM shape, where
-    ///   byte 11 of zero would instead mean REQ-CORE-012's 32 KiB default and so say nothing;
-    /// * a non-zero byte 10 whose total is exactly 8 KiB — the work-RAM chip the SGROM has not.
-    ///   Byte 10 must be tested on its own, because `InesHeader::prg_ram_size` floors at 8 KiB
-    ///   (`rom::ines_header::nes20_prg_ram_size`), so a declared **zero** reads back as the
-    ///   default;
-    /// * at most 256 KiB of PRG-ROM, which is the same comparison `update_banks` uses for
-    ///   `outer`, so the two readings of bit 4 can never both be live.
-    ///
-    /// # And why it is behind a feature that is **off** by default — Q-176
-    ///
-    /// The entry states that the suite "does not actually exercise the SNROM side" and that
-    /// "`Mmc1::is_snrom` returns false for all twelve" `M1_*` images. **Both are wrong**, and
-    /// MF-LEG-1 step 8 found out by running the suite: `M1_P128K.nes` and `M1_P128K_CR8K.nes` are
-    /// NES 2.0, declare no CHR-ROM and 8 KiB of CHR-RAM in byte 11, and declare **no PRG-RAM** in
-    /// byte 10 — so the size test above saw REQ-CORE-012's 8 KiB default and returned *true* for
-    /// them. The two ROMs announce themselves as "SNROM (MMC1)", report "8K PRG RAM OK", and probe
-    /// digit `4000`. They **fail** under the rule above and they pass without it; lot MF-3 step 1
-    /// exists to make exactly those two rows pass.
-    ///
-    /// So the hardware test and the header-declared rule cannot both be satisfied for that dump:
-    /// the ROM is a correct test of a board that has a work-RAM chip, and its own header does not
-    /// declare one. The owner's rule is right about real dumps and the test ROM is right about the
-    /// hardware, and choosing between them is not this lot's call — so the narrowing is behind
-    /// **`mmc1-snrom-header`**, off in `default`, and `Mmc1::SNROM_NEEDS_A_DECLARED_HEADER` says
-    /// which way a build was compiled. Q-176 has the evidence and the question.
-    #[cfg(feature = "mmc1-snrom-header")]
-    fn is_snrom(memory: &CartridgeMemory) -> bool {
-        let header = memory.rom().header();
-        header.is_nes20
-            && header.prg_rom_size <= 256 * 1024
-            && header.chr_rom_size == 0
-            && header.chr_ram_size == BankWindows::PRG_WINDOW_SIZE
-            && header.byte10 != 0
-            && header.prg_ram_size == BankWindows::PRG_WINDOW_SIZE
-            && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
-    }
+    // ------------------------------------------------------------------ the SNROM `E` bit
+    //
+    // **Behind `mmc1-snrom-e-bit`, which is OFF in `default`.** The owner's decision of lot
+    // MF-LEG-1B, taken on 2026-11-08 in answer to Q-176: by default this build applies no `E`
+    // bit at all, and `$E000` bit 4 -- the `R` bit, and never on an MMC1A -- is the only wire to
+    // the PRG-RAM's chip enable. The feature restores the behaviour every build from MF-3 to
+    // MF-LEG-1 shipped, the three-way size test included. What follows is why, because the
+    // documentation and the implementations disagree and the decision goes against the page.
+    //
+    // **What the page says.** nesdev ("MMC1"), SNROM: the board, "which only supports 8 KiB of
+    // CHR-ROM/-RAM, uses the upper CHR bank select line coming out of the mapper (CHR A16; bit 4
+    // of bank number) as an additional chip enable for the PRG-RAM", and the `E` bit of both CHR
+    // bank registers is "PRG-RAM disable (0: enable, 1: open bus)". The bit exists, it is an
+    // SNROM-only wire, and the page is unambiguous about it. On every other MMC1 board that
+    // line is something else: `P`, the 256 KiB outer PRG bank, on SUROM and SXROM, and CHR A16,
+    // a real bank line, on SJROM, SKROM and SLROM.
+    //
+    // **What the test ROM says.** `holy-mapperel` takes the page's side and reserves detailed
+    // digit `4xxx` for exactly this question -- "$A000 bit 4 does not disable WRAM (SNROM), or
+    // $A000 bit 4 disables WRAM (all but SNROM)" (`holy-mapperel/README.md:201-203`). Two of its
+    // twelve `M1_*` images reach the SNROM half: `M1_P128K.nes` and `M1_P128K_CR8K.nes` announce
+    // themselves as "SNROM (MMC1)", report "8K PRG RAM OK" and probe that digit. Their headers
+    // are NES 2.0 with 128 KiB of PRG, no CHR-ROM, 8 KiB of CHR-RAM in byte 11 and **byte 10 =
+    // `$00`**, i.e. no work RAM declared at all -- the chip the ROM then tests is the one
+    // REQ-CORE-012's 8 KiB default handed it. So the suite expects the bit to work, and these
+    // two rows **fail in the default build**. They are marked as required failures rather than
+    // left to read as a regression, and they are asserted to pass with the feature on
+    // (`SNROM_ROW` in `zax-harness/tests/test_roms_tests.rs`, over [`Mmc1::SNROM_E_BIT`]).
+    //
+    // **What the implementations do.** Not one of the five cross-checked emulators applies it;
+    // all five disable the PRG-RAM from `$E000` bit 4 alone. Read, not copied; paths relative to
+    // `third_party/`, and `docs/review/LEGACY-XCHECK.md` entry MMC1-1 has the table:
+    //
+    // * FCEUX, `fceux/src/boards/mmc1.cpp:40-49` -- the work-RAM read and write handlers test
+    //   `DRegs[3]` bit 4 and the mapper-155 flag, and nothing else;
+    // * Nestopia UE, `nestopia/source/core/board/NstBoardMmc1.cpp:138-146` -- `Mmc1::UpdateWrk`
+    //   takes the enable from the PRG register's disable bit, and only when the revision is
+    //   not A;
+    // * Nintendulator, `nintendulator-mappers/src/Hardware/h_MMC1.cpp:132-137` --
+    //   `GetWRAMEnabled` returns true on an MMC1A and otherwise the complement of `Regs[3]`
+    //   bit 4;
+    // * Mesen 2, `mesen2/Core/NES/Mappers/Nintendo/MMC1.h:85-87` and `:131` -- only the `$E000`
+    //   write sets the flag that the work RAM's access type is then read from;
+    // * puNES, `punes/src/core/mappers/MMC1.c:124-154` -- and this is the interesting vote. It
+    //   **has** the `E`-bit expression, written out in full with the page's own bit diagram
+    //   quoted above it (`:125-143`), and it is **commented out** (`:147-151`) with a named
+    //   regression immediately above (`:145-146`): with the check live, *Witch n' Wiz* shows
+    //   corrupted screens after the save-slot selection. The shipped expression below it
+    //   (`:152-154`) is `$E000` bit 4 on an MMC1B and nothing on an MMC1A. The same comment
+    //   records the community's own reading -- that emulators tend not to implement the bit
+    //   because it was not confirmed until October 2010.
+    //
+    // **Why no board test can save it.** The `E` bit only bites on a board that has it, and this
+    // core cannot tell that board apart. The SNROM's row of the *SxROM* table -- 128/256 KiB of
+    // PRG, 8 KiB of PRG-RAM, 8 KiB of CHR-RAM or -ROM -- is also the **SGROM's**, which has no
+    // work-RAM chip at all: an iNES 1.0 header has no CHR-RAM field, and REQ-CORE-012 floors
+    // every mapper-1 image at 8 KiB of PRG-RAM whether the cartridge carries the chip or not. So
+    // the size test fires on every iNES 1.0 mapper-1 dump with CHR-RAM -- *The Legend of Zelda*,
+    // *Metroid*, *Final Fantasy*, *Mega Man 2*, *Castlevania II*, SGROM dumps included -- and
+    // hands each a second chip enable on a bit that is a meaningless CHR bank number on an 8 KiB
+    // CHR-RAM board. MF-LEG-1 step 1 built the other rule, an NES 2.0 header declaring all three
+    // memories; it is **removed** with its feature `mmc1-snrom-header`, because the two test ROMs
+    // above are precisely the dumps it reads wrong, and because under this decision the default
+    // build asks the question of no dump at all.
+    //
+    // **Why the owner chose compatibility.** AMD-061 makes the public documentation prevail, and
+    // this is the one place in the mapper work where it is set aside deliberately rather than by
+    // oversight -- so the reason is recorded here and in Q-176 rather than left to be inferred.
+    // The bit's only observable effect is to take a work RAM **away**: dropping it can re-enable
+    // RAM that was switched off and can never switch off RAM that was on, so no game that runs
+    // today can break and one named game is fixed. Against that, a build that applies it stands
+    // alone among six, on a popular set it cannot identify, for a wire no shipped game
+    // exercises -- MF-LEG-1 step 1's extra check played *Zelda II* in both regions, *Metroid*,
+    // *Mega Man 2* and *Final Fantasy* for 3600 frames each, 181 M instructions, sampling the
+    // register after every CPU instruction, and not one of them commits bit 4 to `$A000`
+    // (`zax-nes/tests/mf_leg_1_mmc1_e_bit_tests.rs`). The price is two conformance rows that say
+    // so out loud, and the bit stays reachable behind one flag for whoever wants the page's
+    // hardware rather than the convention.
 
-    /// The three-way size test as every lot from MF-3 to this one's base commit shipped it, which
-    /// is what `default` still compiles (Q-176): the PRG-RAM size is the **effective** one, so a
-    /// dump that cannot be told from an SNROM is an SNROM here, as it is for the test ROM's own
-    /// driver.
-    #[cfg(not(feature = "mmc1-snrom-header"))]
+    /// Whether this image is on an SNROM board, where bit 4 of the CHR bank registers disables
+    /// the PRG-RAM — the three-way size test every build from MF-3 to MF-LEG-1 shipped, and what
+    /// `mmc1-snrom-e-bit` restores exactly.
+    ///
+    /// The PRG-RAM size read is the **effective** one, so a dump that cannot be told from an
+    /// SNROM is an SNROM here, as it is for the test ROM's own driver. See *the SNROM `E` bit*
+    /// above for why that is the whole difficulty, and why the default build asks nothing.
+    #[cfg(feature = "mmc1-snrom-e-bit")]
     fn is_snrom(memory: &CartridgeMemory) -> bool {
         let header = memory.rom().header();
         header.prg_rom_size <= 256 * 1024
@@ -238,20 +249,22 @@ impl Mmc1 {
             && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
     }
 
-    /// Whether this build gates the SNROM `E` bit on the header declaring the board
-    /// (`mmc1-snrom-header`, off in `default`), for the two `holy-mapperel` rows whose expected
-    /// outcome depends on it. See [`Mmc1::is_snrom`] and Q-176.
-    pub const SNROM_NEEDS_A_DECLARED_HEADER: bool = cfg!(feature = "mmc1-snrom-header");
+    /// Whether this build applies the SNROM `E` bit at all (`mmc1-snrom-e-bit`, **off** in
+    /// `default`), for the two `holy-mapperel` rows that are exactly that question. See *the
+    /// SNROM `E` bit* above and Q-176.
+    pub const SNROM_E_BIT: bool = cfg!(feature = "mmc1-snrom-e-bit");
 
     /// Whether the committed CHR bank 0 register carries the SNROM `E` bit — bit 4, the second
-    /// PRG-RAM chip enable (see [`Mmc1::is_snrom`]).
+    /// PRG-RAM chip enable of *the SNROM `E` bit* above.
     ///
     /// **`pub`, and the one reason it is**: MF-LEG-1 step 1 owes the owner an extra check that
-    /// narrowing [`Mmc1::is_snrom`] moves none of the five games whose dumps the old heuristic
-    /// read as SNROMs, and the only exact way to ask that of a running game is to watch this bit
-    /// after every CPU instruction — "the `E` bit would have disabled the RAM" is "this bit was
-    /// set", on any board the old test fired on. `mf_leg_1_mmc1_e_bit_tests.rs` is the only
-    /// caller. A `const fn` over one field, on no path at all.
+    /// taking the `E` bit away moves none of the five games whose dumps the old size test read as
+    /// SNROMs, and the only exact way to ask that of a running game is to watch this bit after
+    /// every CPU instruction — "the old rule would have disabled the RAM" is "this bit was set",
+    /// on any board that test fired on. It is MF-LEG-1B's evidence too, the decision being the
+    /// same change carried further: `mf_leg_1_mmc1_e_bit_tests.rs` is the only caller. A
+    /// `const fn` over one field, on no path at all, and **not** behind `mmc1-snrom-e-bit` — the
+    /// check has to run in the build that ships.
     #[must_use]
     pub const fn chr_bank0_has_the_e_bit(&self) -> bool {
         self.chr0 & 0x10 != 0
@@ -307,24 +320,31 @@ impl Mmc1 {
         self.chr0 = value;
     }
 
-    /// Recomputes [`Mmc1::prg_ram_disabled`] from the two registers that drive it.
+    /// Recomputes [`Mmc1::prg_ram_disabled`] from the registers that drive it.
     ///
-    /// Bit 4 of the PRG register disables the RAM on every board that has the chip; on an SNROM
-    /// bit 4 of CHR bank 0 does too. The page gives CHR bank 1 the same `E` bit, "ignored in
-    /// 8 KiB mode", and then requires that "SNROM's `E` bit and SO/U/XROM's `P` and `S` bits in
-    /// both CHR bank registers must be set to the same values" — so for any program the page
-    /// admits, CHR bank 0 is the whole answer, and that is also the register Holy Mapperel
-    /// names. (Mesen 2 implements only the `$E000` half, `MMC1.h:87`; AMD-061 makes the public
-    /// documentation prevail where the two disagree.)
+    /// Bit 4 of the PRG register — `R` of `$E000` — disables the RAM on every board that has the
+    /// chip, and that is the whole of it in the **default** build: MF-LEG-1B's decision is that
+    /// the SNROM `E` bit is not applied, and with `mmc1-snrom-e-bit` off the second term is a
+    /// constant zero, so the expression is one load, one `and` and a test. See *the SNROM `E`
+    /// bit* above for the five votes and the reason.
+    ///
+    /// With the feature on, bit 4 of CHR bank 0 joins it on an SNROM. The page gives CHR bank 1
+    /// the same `E` bit, "ignored in 8 KiB mode", and then requires that "SNROM's `E` bit and
+    /// SO/U/XROM's `P` and `S` bits in both CHR bank registers must be set to the same values" —
+    /// so for any program the page admits, CHR bank 0 is the whole answer, and that is also the
+    /// register Holy Mapperel names.
     ///
     /// Mapper 155 is this chip on a board that does not wire the disable: nesdev
     /// ("INES Mapper 155") gives it as MMC1 "with the WRAM disable bit removed", and Mesen 2
-    /// implements it by holding the flag at false (`MMC1_155.h:9`). Here it is the two masks
-    /// being zero, so the whole expression is two loads, two `and`s and a test whatever the
-    /// board — see [`Mmc1::prg_disable_mask`] for the measurement that made it a mask.
+    /// implements it by holding the flag at false (`MMC1_155.h:9`). Here it is the masks being
+    /// zero, so the shape of the expression is the same whatever the board — see
+    /// [`Mmc1::prg_disable_mask`] for the measurement that made it a mask.
     fn refresh_prg_ram_disable(&mut self) {
-        self.prg_ram_disabled =
-            ((self.prg & self.prg_disable_mask) | (self.chr0 & self.chr_disable_mask)) != 0;
+        #[cfg(feature = "mmc1-snrom-e-bit")]
+        let e_bit = self.chr0 & self.chr_disable_mask;
+        #[cfg(not(feature = "mmc1-snrom-e-bit"))]
+        let e_bit = 0u8;
+        self.prg_ram_disabled = ((self.prg & self.prg_disable_mask) | e_bit) != 0;
     }
 
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
@@ -440,8 +460,8 @@ impl Mapper for Mmc1 {
         }
     }
 
-    /// Bit 4 of the PRG register disables the PRG-RAM chip, and on an SNROM bit 4 of CHR bank 0
-    /// as well (nesdev, "MMC1"). Both are folded into one bool by
+    /// Bit 4 of the PRG register disables the PRG-RAM chip (nesdev, "MMC1"), and with
+    /// `mmc1-snrom-e-bit` on, bit 4 of CHR bank 0 on an SNROM as well. Folded into one bool by
     /// [`Mmc1::refresh_prg_ram_disable`].
     fn prg_ram_enabled(&self) -> bool {
         !self.prg_ram_disabled

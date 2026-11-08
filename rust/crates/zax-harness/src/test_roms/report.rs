@@ -313,6 +313,9 @@ pub struct Diagnosis {
 /// 4, dont toutes les images iNES 1.0, gardent la révision B de REQ-CORE-100, et REQ-CORE-114
 /// (`mmc3_test_2` n° 6) reste exigé pour elles". In all three pairs the revision B half passes
 /// here, which is the result the spec asks for.
+///
+/// The `m1_p128k` row — which matches both `M1_P128K` and `M1_P128K_CR8K` — is the fourth of
+/// that kind, and the only one whose expectation turns on a feature: MF-LEG-1B, Q-176.
 const SPECIFIC: [(&str, Diagnosis); 7] = [
     (
         "mmc3_irq_tests/5.mmc3_rev_a",
@@ -356,14 +359,16 @@ const SPECIFIC: [(&str, Diagnosis); 7] = [
         "holy-mapperel/testroms/m1_p128k",
         Diagnosis {
             text: "MMC1 on an SNROM board: `$A000` bit 4 does not disable the work RAM \
-                   (detailed digits `4000`). The eleven other MMC1 boards — SJROM, SKROM, \
-                   SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone. \
-                   **Passes in the default build since MF-3 step 1.** It fails again with \
-                   `mmc1-snrom-header` on (MF-LEG-1, Q-176): this dump's NES 2.0 header declares \
-                   no PRG-RAM in byte 10, so a rule that asks the header to name the board cannot \
-                   see the work-RAM chip the ROM reports as \"8K PRG RAM OK\" and then tests. \
-                   Required to fail in that configuration and not in `default`.",
-            expected: zax_nes::cartridges::mappers::Mmc1::SNROM_NEEDS_A_DECLARED_HEADER,
+                   (detailed digits `4000`) — the SNROM `E` bit, and the eleven other MMC1 \
+                   boards (SJROM, SKROM, SUROM, SXROM) are clean, so this is that CHR-register \
+                   line alone. **Required to fail in the default build** (MF-LEG-1B, Q-176): \
+                   the owner's decision is that this build follows puNES, FCEUX, Nestopia UE, \
+                   Nintendulator and Mesen 2, none of which applies the bit and one of which \
+                   removed it over a named regression, so the PRG-RAM is disabled by `$E000` \
+                   bit 4 only. The two rows pass with `mmc1-snrom-e-bit` on, which is the \
+                   page's behaviour kept reachable. Not a defect and not a regression: \
+                   `zax-nes`'s `Mmc1::is_snrom` has the argument in full.",
+            expected: !zax_nes::cartridges::mappers::Mmc1::SNROM_E_BIT,
         },
     ),
     (
