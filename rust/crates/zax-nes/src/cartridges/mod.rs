@@ -1336,7 +1336,7 @@ mod tests {
         // submapper 3 is neither mapper 12's refused Magic Card 4M (that is submapper 1) nor
         // anything on mapper 14's page, so `latched_cartridge` builds both halves of each pair.
         #[cfg(feature = "board-huang1")]
-        expected.extend_from_slice(&[12, 12]);
+        expected.extend_from_slice(&[12, 12, 14, 14]);
         // MF-UNL-4 step 3: the J.Y. Company ASIC keeps the previous PPU address whatever its IRQ
         // source is, so that a game selecting source 1 ("PPU A12 rise, unfiltered") mid-frame
         // does not read a stale edge. That one byte is what makes all four numbers move here.

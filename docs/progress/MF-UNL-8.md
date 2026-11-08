@@ -46,7 +46,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **0/8** — the plan: this file.
 - [x] **1/8** — `board-huang1`, mapper **12**: the Huang-1 as an MMC3A clone, the outer CHR
   register at $4132 and its read side.
-- [ ] **2/8** — `board-huang1`, mapper **14**: the supervisor at $A131 over the sub-board's own
+- [x] **2/8** — `board-huang1`, mapper **14**: the supervisor at $A131 over the sub-board's own
   registers, two modes, three CHR A18 bits and the page's two Nestopia caveats.
 - [ ] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
 - [ ] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
@@ -289,3 +289,130 @@ expected list of `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched
 [PROGRESS] MF-UNL-8 step 1/8 done: mapper 12 is the Huang-1 as an MMC3A clone and not mapper 116's
 board — the page refutes §7.2 — with one GAL register at $4132, its language-bit read, submapper 1
 refused and `or_chr_banks_each` the per-window CHR A18 table MF-6b step 6 named.
+
+---
+
+## Step 2 — mapper 14, the same ASIC with a PAL that sits on top of it
+
+The same feature, the same module and the same `IrqBoard` variant; one `Vrc2Vrc4` field beside the
+`Mmc3`, two `cfg` widenings and one new `cfg`'d field on `Vrc2Vrc4` with three guards that read it.
+
+### MF-6b step 6's design, implemented to the bit
+
+That step decided mapper 14 out of mapper 116's board and recorded its design as a four-row table.
+Every row held when the page was read again, and the one that matters most is the **bit
+positions**:
+
+```text
+D~7654 3210
+  ---------
+  A.B. C.M.
+  | |  | +-- Mapper mode (0: VRC2, 1: MMC3)
+  | |  +---- CHR A18 for PPU $0000-$0FFF
+  | +------- CHR A18 for PPU $1000-$17FF
+  +--------- CHR A18 for PPU $1800-$1FFF
+```
+
+**Bit 1** is the mode and **bits 3, 5 and 7** the three lines, which is what MF-6b step 6 wrote.
+A prose summary of the same page gives bit 0 and bits 2/4/6 — one place lower throughout — and the
+diagram's own columns settle it. The `D~7654 3210` header was read column by column against the
+`A.B. C.M.` row and the pointer lines under it before a line of this step was written; the step-0
+section of this file has the transcript.
+
+So: `MODE_BIT_14 = 0x02`, `CHR_A18_BITS_14 = [0x08, 0x20, 0x80]`, and `chr_a18_windows` returns
+`[low, low, low, low, middle, middle, high, high]` — the **unequal** groups that are the reason
+this is a board and not mapper 116's `C` bit. `or_chr_banks_each` is what carries them, which is
+step 1's method doing the job MF-6b step 6 named it for.
+
+### Two modes and no MMC1
+
+The page's own sentence is "a supervisor register for selecting CHR A18 and for switching between
+MMC3 and VRC2 modes (A0/A1, VRC2b)". One mode bit, two chips, and no value of the register can
+reach a third — which a test pins, because mapper 116's three-mode board is the thing a reader
+would expect here. The VRC2 half is `VrcVariant::Vrc2b`, the same configuration mapper 116 asks
+for, so it is `Vrc2Vrc4::new_vrc2b` with one rule added rather than a new variant.
+
+### The page's two Nestopia-sourced rules, and its own caveat
+
+> According to Nestopia's mapper source code, **mirroring can only be controlled in VRC2 mode**,
+> and **the VRC2 PRG and mirroring registers do not respond to address mirrors**. These behaviors
+> contradict other emulators and have not been verified on original hardware.
+
+Both are implemented, and the page's last sentence is in the code comment and in Q-165 — this is
+the one place in the lot where the page itself says its rule is unverified, and the choice is to
+follow it rather than the emulators it says it contradicts.
+
+* **Mirroring from the VRC2 alone.** The MMC3 half's one mirroring register is `$A000` and it has
+  no other function, so on this board it drives nothing. `Mmc3Board::ignore_a000` is already
+  exactly that condition — mapper 4's NES 2.0 submapper 2, a four-screen header and the TxSROM
+  reach it at load — so the step adds `force_ignore_a000`, the shape `force_irq_revision_a`
+  already had, and no field and no branch anywhere.
+* **No address mirrors on the VRC2's PRG and mirroring registers.** One `cfg`'d `bool` on
+  `Vrc2Vrc4` and three guards, `exact_prg_and_mirroring_decode` / `ignores_mirror`, on the
+  `$8000`, `$9000` and `$A000` arms of `write_register`. All three registers have their low twelve
+  address bits clear, so "is a mirror" is `address & 0x0FFF != 0` — one test for the three. This is
+  the `board-298` precedent to the letter: **with `board-huang1` off the field and the three guards
+  do not exist**, so `Vrc2Vrc4` and every function of it is byte for byte what `c895a93a` shipped
+  and the five Konami numbers pay nothing.
+
+And the second rule is what makes the first one's register reachable at all, which is the part of
+this board that only falls out when both are implemented: `$A131` is a mirror of the VRC2's
+`$A000`, so in VRC2 mode a supervisor write does **not** clobber the chip's second PRG bank.
+
+### The overlap at $A131, and the order
+
+`$A131 & $E001` is `$A001` — the MMC3's PRG-RAM protect register — and `$A131` sits in the VRC2's
+`$A000` block, so one write is two writes. Census §7.2 states the order ("the board's decode runs
+*before* the sub-board's") and `Huang1::write_register` does that: the supervisor is latched first
+and the write then goes to the chip the **new** mode names.
+
+The test the census asks for is written on the side-effect this makes observable without inventing
+a probe: in MMC3 mode, writing `$02` to `$A131` is MMC3 mode *and* `$A001` with bit 7 clear, so the
+PRG-RAM goes away — `try_cpu_peek(0x6000)` turns from `Some` to `None` — and `$82` brings it back.
+In VRC2 mode nothing of the pair reaches the chip, for the page's own reason above.
+
+The decode is `$A131` **exactly**, which is the page's "Mask: $FFFF?" with the page's own question
+mark; Q-165 records that the page is unsure. It matters because every near miss is a real register
+of the sub-board — `$A130`/`$A132` are the MMC3's `$A000`/`$A001` and the whole `$A000` block is
+the VRC2's PRG register — so a board that decoded loosely would switch mode on an ordinary bank
+write. Seven near misses are tested.
+
+### The save-state block
+
+Mapper 14 writes the supervisor byte, the MMC3's block and the VRC2's; **mapper 12 writes only the
+first two**, because its board has no VRC2 at all. That is `Mmc3Board`'s own shape for mapper 195's
+GAL byte and the two multicarts' outer register — a block carries what the board has. Within mapper
+14's half, mapper 116's reason governs: the page requires each chip to keep its own registers across
+a mode switch, so both are written whatever the mode is, and the supervisor goes first so the mode
+is known before any block is read. On load both chips are put back to their register-derived windows
+before the lines go on, which is mapper 116's `load_state` line for line.
+
+### What stayed out
+
+* **`force_chr_registers`** (the VRC2 CHR registers powering up to `$FF`) is mapper 116's alone:
+  that page says "one version of *Somari the Adventurer* relies on this" and mapper 14's page says
+  nothing of the kind, so the `cfg` on that method was **not** widened.
+* **The MMC3A counter** is mapper 12's alone, for the same reason read the other way: only that
+  page states it (Q-165).
+* **Mapper 238** stays out, as MF-6b step 6 left it: its page is one sentence about *Contra
+  Fighter* with no register, no mask, no mode and no submapper, and a board cannot be written from
+  it. This lot does not change that, and `board-huang1` is the code a later lot would parameterise.
+
+### Tests
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_14_switches_between_two_modes_from_a131` | bit 1, the power-on mode, each chip's registers surviving a round trip through the other, and that **no value reaches an MMC1** |
+| `req_core_102_mapper_14_drives_three_chr_a18_bits_over_unequal_window_groups` | one case per group — windows 0-3, 4-5 and 6-7 — all three at once, clearing them, and the lines holding in VRC2 mode as well |
+| `q_165_mapper_14_supervisor_writes_are_seen_by_the_sub_board_at_the_same_address` | the overlap in MMC3 mode through `$A001` bit 7, and its absence in VRC2 mode through the mirror rule |
+| `q_165_mapper_14_takes_its_mirroring_from_the_vrc2_alone_and_from_no_mirror` | `$9000` working, five of its mirrors not, `$A000` inert in MMC3 mode, and the arrangement surviving the switch |
+| `q_165_mapper_14_decodes_the_supervisor_register_at_a131_exactly` | seven near misses, each of which is a sub-board register |
+| `req_core_102_mapper_14_leaves_mapper_116_and_the_vrc_numbers_alone` | `$A131` is nothing on mapper 116, and a real VRC2b (mapper 23 submapper 3) still answers `$A003` and `$9003` |
+
+`cargo test --release -p zax-nes`: all suites green, **319** in `mapper_tests`. `cargo fmt` clean;
+clippy `-D warnings --all-targets` clean in `default` and in
+`--no-default-features --features board-huang1`.
+
+[PROGRESS] MF-UNL-8 step 2/8 done: mapper 14 is MF-6b step 6's table to the bit — bit 1 the mode and
+bits 3, 5 and 7 three CHR A18 lines over unequal groups — with the supervisor at $A131 seen by the
+sub-board in MMC3 mode and ignored in VRC2 mode, which is the page's own mirror rule doing the work.

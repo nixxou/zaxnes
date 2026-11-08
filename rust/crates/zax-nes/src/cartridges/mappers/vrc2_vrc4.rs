@@ -126,6 +126,18 @@ pub struct Vrc2Vrc4 {
     /// on every CPU cycle of a VRC game.
     #[cfg(feature = "board-298")]
     ack_without_enable_copy: bool,
+    /// iNES mapper **14**, the Gouder SL-1632: "the VRC2 PRG and mirroring registers do not
+    /// respond to address mirrors" (MF-UNL-8 step 2). So `$8000`, `$9000` and `$A000` answer at
+    /// those addresses exactly and at no other address of their `$1000` blocks — which is what
+    /// keeps that board's supervisor register at `$A131` off its own PRG register.
+    ///
+    /// **Behind its own feature**, on [`Vrc2Vrc4::ack_without_enable_copy`]'s reason in the same
+    /// words: with `board-huang1` off this struct and every function of it is byte for byte what
+    /// the lot's base commit shipped, because the five Konami numbers may not pay for a sixth that
+    /// is not theirs. Load-time, from the constructor the board calls, so no savestate byte carries
+    /// it and the block of mappers 21/22/23/25/27 is unchanged (REQ-CORE-090).
+    #[cfg(feature = "board-huang1")]
+    exact_prg_and_mirroring_decode: bool,
 }
 
 impl Vrc2Vrc4 {
@@ -174,6 +186,8 @@ impl Vrc2Vrc4 {
             irq: VrcIrq::new(),
             #[cfg(feature = "board-298")]
             ack_without_enable_copy: mapper_number == 298,
+            #[cfg(feature = "board-huang1")]
+            exact_prg_and_mirroring_decode: false,
         }
     }
 
@@ -183,7 +197,12 @@ impl Vrc2Vrc4 {
     /// half-register and A0 the nibble, which is what this build's mapper-23 arm computes with
     /// `index = addr & 3`. A mapper-116 image declares no VRC submapper, so the variant is asked
     /// for directly instead of being resolved from the header.
-    #[cfg(feature = "board-116")]
+    ///
+    /// **Mapper 14's VRC2 mode is the same configuration** — nesdev ("INES Mapper 014") names it
+    /// in the same parenthesis, "(A0/A1, VRC2b)" — so that board asks through
+    /// [`Vrc2Vrc4::new_huang1_vrc2b`], which is this constructor plus the one rule its page adds
+    /// (MF-UNL-8 step 2).
+    #[cfg(any(feature = "board-116", feature = "board-huang1"))]
     pub(crate) fn new_vrc2b(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let lines = VrcVariant::Vrc2b.index_lines();
         Self {
@@ -197,9 +216,31 @@ impl Vrc2Vrc4 {
         }
     }
 
-    /// Recomputes the windows from the registers (mapper 116); see
+    /// Mapper 14's VRC2 mode: [`Vrc2Vrc4::new_vrc2b`] plus the one thing that board's page adds
+    /// to it, "the VRC2 PRG and mirroring registers do not respond to address mirrors" — see
+    /// [`Vrc2Vrc4::exact_prg_and_mirroring_decode`] and [`Vrc2Vrc4::ignores_mirror`]
+    /// (MF-UNL-8 step 2).
+    #[cfg(feature = "board-huang1")]
+    pub(crate) fn new_huang1_vrc2b(memory: &CartridgeMemory, mapper_number: i32) -> Self {
+        Self {
+            exact_prg_and_mirroring_decode: true,
+            ..Self::new_vrc2b(memory, mapper_number)
+        }
+    }
+
+    /// Whether a write at `address` must be **dropped** because it is an address mirror of the
+    /// PRG or the mirroring register on a board that answers neither (mapper 14).
+    ///
+    /// The three registers the rule covers are `$8000`, `$9000` and `$A000`, all of which have
+    /// their low twelve address bits clear, so "is a mirror" is one test for the three.
+    #[cfg(feature = "board-huang1")]
+    const fn ignores_mirror(&self, address: u16) -> bool {
+        self.exact_prg_and_mirroring_decode && address & 0x0FFF != 0
+    }
+
+    /// Recomputes the windows from the registers (mappers 116, 14); see
     /// [`super::Mmc3Board::refresh_banks`].
-    #[cfg(feature = "board-116")]
+    #[cfg(any(feature = "board-116", feature = "board-huang1"))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
     }
@@ -332,10 +373,23 @@ impl Mapper for Vrc2Vrc4 {
         let index = self.register_index(address);
         match address & 0xF000 {
             0x8000 => {
+                // Mapper 14: "the VRC2 PRG and mirroring registers do not respond to address
+                // mirrors". With `board-huang1` off these three guards do not exist and the five
+                // Konami numbers compile as they did before this lot.
+                #[cfg(feature = "board-huang1")]
+                if self.ignores_mirror(address) {
+                    return;
+                }
+
                 self.prg0 = value & 0x1F;
                 self.update_banks();
             }
             0x9000 => {
+                #[cfg(feature = "board-huang1")]
+                if self.ignores_mirror(address) {
+                    return;
+                }
+
                 if self.is_vrc2 {
                     // MR-21-2, nesdev ("VRC2 and VRC4"): "VRC2 does not have a Swap Mode and
                     // the bank this register will switch is always the $8000-$9FFF bank", so
@@ -359,6 +413,11 @@ impl Mapper for Vrc2Vrc4 {
                 }
             }
             0xA000 => {
+                #[cfg(feature = "board-huang1")]
+                if self.ignores_mirror(address) {
+                    return;
+                }
+
                 self.prg1 = value & 0x1F;
                 self.update_banks();
             }

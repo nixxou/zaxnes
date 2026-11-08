@@ -737,6 +737,25 @@ impl<
         self.irq_revision_a = true;
     }
 
+    /// Makes `$A000` inert, for a board that holds this chip and whose own page takes the
+    /// mirroring away from it (MF-UNL-8 step 2).
+    ///
+    /// nesdev ("INES Mapper 014"): "According to Nestopia's mapper source code, **mirroring can
+    /// only be controlled in VRC2 mode**, and the VRC2 PRG and mirroring registers do not respond
+    /// to address mirrors. These behaviors contradict other emulators and have not been verified
+    /// on original hardware." The Gouder SL-1632's PAL routes the mirroring from the VRC2 half of
+    /// the Huang-1 and from nowhere else, so the MMC3 half's one mirroring register — `$A000`, and
+    /// it has no other function — drives nothing on that board.
+    ///
+    /// [`Mmc3Board::ignore_a000`] is already exactly that condition: mapper 4's NES 2.0 submapper
+    /// 2 ("MMC3C with hard-wired mirroring"), a four-screen header and the TxSROM reach it at load.
+    /// This board is none of the three and carries no such submapper, so the board that holds the
+    /// chip sets it — the shape [`Mmc3Board::force_irq_revision_a`] above already has.
+    #[cfg(feature = "board-huang1")]
+    pub(crate) fn force_ignore_a000(&mut self) {
+        self.ignore_a000 = true;
+    }
+
     fn update_banks(&mut self) {
         self.refresh_nametable_pages();
 

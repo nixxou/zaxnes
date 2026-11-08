@@ -188,6 +188,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   "functions exclusively as an MMC3A clone", with a GAL16V8 adding an outer CHR register at
     //   $4132 and a language-bit read at the same address -- behind `board-huang1` (MF-UNL-8
     //   step 1, Q-164). Submapper 1, the Front Fareast Magic Card 4M, is refused at load;
+    // * 14, the Gouder SL-1632 (`UNL-SL1632`): the same ASIC with a PAL that "moves the supervisor
+    //   register address to $A131, **overlapping the MMC3 and VRC2 registers there**" -- two modes
+    //   and no MMC1, and **three** independent CHR A18 bits over the unequal window groups
+    //   $0000-$0FFF, $1000-$17FF and $1800-$1FFF -- behind `board-huang1` (MF-UNL-8 step 2,
+    //   Q-165). MF-6b step 6 decided the number out of mapper 116's board on those differences;
     // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
@@ -217,8 +222,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
-    let additions: [(i32, bool); 102] = [
+    let additions: [(i32, bool); 103] = [
         (12, huang1),
+        (14, huang1),
         (19, true),
         (24, true),
         (26, true),
@@ -6896,6 +6902,282 @@ fn req_core_102_mapper_12_leaves_the_mmc3_numbers_alone() {
         huang.cartridge().unwrap().memory().prg_ram().len(),
         "a mapper-12 submapper byte is not an MMC6's"
     );
+}
+
+/// nesdev ("INES Mapper 014"), the supervisor register at `$A131`:
+///
+/// ```text
+/// D~7654 3210
+///   ---------
+///   A.B. C.M.
+///   | |  | +-- Mapper mode (0: VRC2, 1: MMC3)
+///   | |  +---- CHR A18 for PPU $0000-$0FFF
+///   | +------- CHR A18 for PPU $1000-$17FF
+///   +--------- CHR A18 for PPU $1800-$1FFF
+/// ```
+///
+/// **Bit 1** is the mode and **bits 3, 5 and 7** the three lines. The board powers on in MMC3
+/// mode (Q-165), and the two chips' layouts are unmistakable: an MMC3's `$8000`/`$8001`
+/// select-and-value pair against a VRC2's two independent 8 KiB registers at `$8000` and `$A000`.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_14_switches_between_two_modes_from_a131() {
+    let mut core = MapperRom::new(14).prg(32).chr(128).load();
+    // Power-on: MMC3 mode, so R6 = 0, R7 = 1 and the last two 8 KiB banks fixed.
+    assert_eq!([0, 1, 30, 31], core.prg_windows(), "power-on is MMC3 mode");
+    core.mmc3_bank(6, 3);
+    core.mmc3_bank(7, 5);
+    assert_eq!([3, 5, 30, 31], core.prg_windows(), "the MMC3's own layout");
+
+    // VRC2 mode: bit 1 clear. Its two PRG registers are nothing like the MMC3's pair.
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x8000, 0x07);
+    core.mapper_write(0xA000, 0x09);
+    assert_eq!([7, 9, 30, 31], core.prg_windows(), "the VRC2's own layout");
+
+    // And back: each chip kept its own registers, which is what the ASIC's page requires of it.
+    core.mapper_write(0xA131, 0x02);
+    assert_eq!(
+        [3, 5, 30, 31],
+        core.prg_windows(),
+        "the MMC3's registers held"
+    );
+    core.mapper_write(0xA131, 0x00);
+    assert_eq!([7, 9, 30, 31], core.prg_windows(), "and the VRC2's did too");
+
+    // **There is no MMC1 mode**: the page gives the register one mode bit, so bits 0 and 2 are a
+    // CHR line and nothing, and no value of it can reach a third chip. Bit 0 set with bit 1 clear
+    // is still the VRC2.
+    core.mapper_write(0xA131, 0x01);
+    assert_eq!(
+        [7, 9, 30, 31],
+        core.prg_windows(),
+        "no MMC1 mode on this PCB"
+    );
+}
+
+/// The three CHR A18 bits, one case per window group — the test census §7.2 asks for by name:
+/// "with the three bits set differently, windows 0-3, 4-5 and 6-7 land in different 256 KiB
+/// halves."
+///
+/// MF-6b step 6 called this "a different CHR path" and it is why mapper 14 is a board and not a
+/// parameter of mapper 116: that number's one `C` bit is CHR A18 for the whole of CHR, and no
+/// addend over eight equal windows can say a table whose A18 changes at `$1000` and again at
+/// `$1800`.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_14_drives_three_chr_a18_bits_over_unequal_window_groups() {
+    let mut core = MapperRom::new(14).prg(16).chr(512).load();
+    let a18 = 256 * 0x400;
+    let base = chr_offsets(&core);
+    let carries = |core: &NesCore| chr_offsets(core).map(|offset| offset >= a18);
+
+    core.mapper_write(0xA131, 0x02); // MMC3 mode, no lines.
+    assert_eq!([false; 8], carries(&core));
+
+    core.mapper_write(0xA131, 0x02 | 0x08); // Bit 3: PPU $0000-$0FFF.
+    assert_eq!(
+        [true, true, true, true, false, false, false, false],
+        carries(&core),
+        "bit 3 is the four 1 KiB windows of $0000-$0FFF"
+    );
+
+    core.mapper_write(0xA131, 0x02 | 0x20); // Bit 5: PPU $1000-$17FF.
+    assert_eq!(
+        [false, false, false, false, true, true, false, false],
+        carries(&core),
+        "bit 5 is the two of $1000-$17FF and not the four of $1000-$1FFF"
+    );
+
+    core.mapper_write(0xA131, 0x02 | 0x80); // Bit 7: PPU $1800-$1FFF.
+    assert_eq!(
+        [false, false, false, false, false, false, true, true],
+        carries(&core),
+        "bit 7 is the two of $1800-$1FFF"
+    );
+
+    core.mapper_write(0xA131, 0x02 | 0xA8); // All three.
+    assert_eq!([true; 8], carries(&core));
+    core.mapper_write(0xA131, 0x02);
+    assert_eq!(base, chr_offsets(&core), "and clearing them puts it back");
+
+    // The lines are the board's and not the chip's, so they hold in VRC2 mode too.
+    core.mapper_write(0xA131, 0x20);
+    assert_eq!(
+        [false, false, false, false, true, true, false, false],
+        carries(&core),
+        "bit 5 in VRC2 mode"
+    );
+}
+
+/// The overlap, and the order census §7.2 states for it: "a write to $A131 switches mode *and* is
+/// seen by the sub-board's register at the same address — the ordering test that the overlap makes
+/// necessary", with "the board's decode runs *before* the sub-board's".
+///
+/// `$A131 & $E001` is `$A001`, the MMC3's PRG-RAM protect register, so in MMC3 mode a supervisor
+/// write is also a `$A001` write — and `$A001`'s bit 7 is the RAM enable, so writing `$02` there
+/// (MMC3 mode, no CHR lines) **disables the PRG-RAM** as a side effect. That is the overlap
+/// showing, and it is observable without inventing a probe.
+///
+/// In VRC2 mode nothing reaches the chip, and that is the page's own second rule rather than a
+/// choice: "the VRC2 PRG and mirroring registers do not respond to address mirrors", and `$A131`
+/// is a mirror of the VRC2's `$A000` PRG register (Q-165).
+#[cfg(feature = "board-huang1")]
+#[test]
+fn q_165_mapper_14_supervisor_writes_are_seen_by_the_sub_board_at_the_same_address() {
+    // MMC3 mode: $A131 is $A001, and the MMC3 powers on with the RAM enabled and writable.
+    let mut core = MapperRom::new(14).prg(16).chr(64).load();
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(
+        Some(0x5A),
+        core.cartridge().unwrap().try_cpu_peek(0x6000),
+        "the MMC3's RAM is enabled"
+    );
+
+    // $02 is MMC3 mode with bit 7 clear, which is $A001's "PRG-RAM disabled".
+    core.mapper_write(0xA131, 0x02);
+    assert_eq!(
+        [0, 1, 14, 15],
+        core.prg_windows(),
+        "still MMC3 mode, so the supervisor half of the write landed"
+    );
+    assert_eq!(
+        None,
+        core.cartridge().unwrap().try_cpu_peek(0x6000),
+        "and the $A001 half landed too: the overlap is real"
+    );
+
+    // $82 puts bit 7 back, which re-enables it — the same write doing both jobs again.
+    core.mapper_write(0xA131, 0x82);
+    assert_eq!(Some(0x5A), core.cartridge().unwrap().try_cpu_peek(0x6000));
+    assert_eq!([0, 1, 14, 15], core.prg_windows(), "and still MMC3 mode");
+
+    // VRC2 mode: $A131 is a mirror of $A000 and the chip does not answer mirrors, so the VRC2's
+    // second PRG register keeps its power-on value of 1 through any number of supervisor writes.
+    let mut core = MapperRom::new(14).prg(16).chr(64).load();
+    core.mapper_write(0xA131, 0x00); // VRC2 mode.
+    assert_eq!([0, 1, 14, 15], core.prg_windows(), "the VRC2's power-on");
+    // Every value here keeps bit 1 clear, or the board would be in MMC3 mode and $A000 would be
+    // the MMC3's inert mirroring register instead of the VRC2's second PRG register.
+    for value in [0x00u8, 0x08, 0x20, 0x80, 0xA9] {
+        core.mapper_write(0xA131, value);
+        assert_eq!(
+            1,
+            core.prg_windows()[1],
+            "{value:#04X}: $A131 is a mirror of $A000 and the VRC2 ignores it"
+        );
+    }
+
+    // And $A000 itself is not a mirror, so that one does land.
+    core.mapper_write(0xA000, 0x09);
+    assert_eq!(9, core.prg_windows()[1]);
+}
+
+/// The other half of the page's Nestopia paragraph, on both registers it covers.
+///
+/// > According to Nestopia's mapper source code, **mirroring can only be controlled in VRC2
+/// > mode**, and **the VRC2 PRG and mirroring registers do not respond to address mirrors**. These
+/// > behaviors contradict other emulators and have not been verified on original hardware.
+///
+/// Both are implemented, the page's own caveat is in the code comment, and Q-165 records that the
+/// page says plainly it is unverified. The first rule is the MMC3's `$A000` made inert; the second
+/// covers `$9000` as well as the two PRG registers.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn q_165_mapper_14_takes_its_mirroring_from_the_vrc2_alone_and_from_no_mirror() {
+    let mut core = MapperRom::new(14).prg(16).chr(64).load();
+
+    // VRC2 mode: $9000 bit 0 is the arrangement, and it is the only thing on this board that
+    // moves the mirroring.
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x9000, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.mapper_write(0x9000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // A mirror of $9000 does nothing, which is the second rule.
+    for address in [0x9001u16, 0x9002, 0x9003, 0x90FF, 0x9FFF] {
+        core.mapper_write(address, 0x01);
+        assert_eq!(
+            Nm::Vertical,
+            core.mirroring(),
+            "{address:#06X} is a mirror of $9000"
+        );
+    }
+
+    // MMC3 mode: $A000 is the chip's mirroring register and it is inert here, so the arrangement
+    // the VRC2 last set survives the mode switch and every $A000 write in it.
+    core.mapper_write(0xA131, 0x02);
+    for value in [0x00u8, 0x01] {
+        core.mapper_write(0xA000, value);
+        assert_eq!(
+            Nm::Vertical,
+            core.mirroring(),
+            "mirroring can only be controlled in VRC2 mode"
+        );
+    }
+
+    // And the mode switch itself does not move it either way round.
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x9000, 0x01);
+    core.mapper_write(0xA131, 0x02);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// "Mask: $FFFF?" — the question mark is the page's, so the decode is the one the page states and
+/// Q-165 records that the page is unsure of it: `$A131` and no other address.
+///
+/// It matters because every near miss is a real register of the sub-board: `$A130` and `$A132` are
+/// `$A000`/`$A001` mirrors on the MMC3, `$A131`'s own block is the VRC2's PRG register, and a
+/// board that decoded the supervisor loosely would switch mode on an ordinary bank write.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn q_165_mapper_14_decodes_the_supervisor_register_at_a131_exactly() {
+    for address in [0xA130u16, 0xA132, 0xA111, 0xA031, 0xB131, 0x2131, 0xA133] {
+        let mut core = MapperRom::new(14).prg(32).chr(128).load();
+        core.mmc3_bank(6, 3);
+        core.mmc3_bank(7, 5);
+        core.mapper_write(address, 0x00); // Would be VRC2 mode if it were the register.
+        assert_eq!(
+            [3, 5, 30, 31],
+            core.prg_windows(),
+            "{address:#06X} is not the supervisor register, so this is still the MMC3"
+        );
+    }
+
+    let mut core = MapperRom::new(14).prg(32).chr(128).load();
+    core.mmc3_bank(6, 3);
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x8000, 0x07);
+    assert_eq!(
+        7,
+        core.prg_windows()[0],
+        "$A131 exactly is the supervisor register"
+    );
+}
+
+/// Nothing of mapper 14 reaches mapper 116 or the five Konami numbers, which is the whole point of
+/// the feature's shape: the VRC2 rule is a load-time field set by this board's constructor alone.
+#[cfg(all(feature = "board-huang1", feature = "board-116"))]
+#[test]
+fn req_core_102_mapper_14_leaves_mapper_116_and_the_vrc_numbers_alone() {
+    // Mapper 116's supervisor register is at $4100 and $A131 is nothing on it.
+    let mut somari = MapperRom::new(116).prg(32).chr(128).load();
+    somari.mmc3_bank(6, 3);
+    somari.mapper_write(0xA131, 0x00);
+    assert_eq!(
+        [3, 1, 30, 31],
+        somari.prg_windows(),
+        "no $A131 on mapper 116"
+    );
+
+    // And a VRC2b of mapper 23 submapper 3 still answers its PRG and mirroring registers at every
+    // mirror, because the rule is mapper 14's field and not the variant's.
+    let mut vrc = MapperRom::new(23).submapper(3).prg(16).chr(32).load();
+    vrc.mapper_write(0xA003, 0x09);
+    assert_eq!(9, vrc.prg_windows()[1], "a real VRC2b answers $A003");
+    vrc.mapper_write(0x9003, 0x01);
+    assert_eq!(Nm::Horizontal, vrc.mirroring(), "and $9003");
 }
 
 // ------------------------------------------- the JV001 / TXC 05-00002-010 protection ASIC

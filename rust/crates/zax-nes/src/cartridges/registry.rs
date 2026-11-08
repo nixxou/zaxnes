@@ -115,6 +115,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-huang1")]
     12,
     13,
+    // The Gouder SL-1632, the same ASIC with a PAL that moves the supervisor register to $A131 and
+    // gives it two modes and three CHR A18 bits (MF-UNL-8 step 2).
+    #[cfg(feature = "board-huang1")]
+    14,
     15,
     16,
     18,
@@ -825,6 +829,11 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // gives the SL-5020B no PRG-RAM line either way, and the board is an MMC3 clone whose
         // $A001 gates the window, so the header decides -- mapper 4's own answer (MF-UNL-8 step 1).
         //
+        // **Mapper 14 is deliberately absent too**, and for mapper 97's reason rather than mapper
+        // 133's: its page has no capacity rows at all, so it documents no PRG-RAM and does not say
+        // the board has none, and nothing forces the question -- the supervisor register is at
+        // $A131, above the window. The header decides (MF-UNL-8 step 2).
+        //
         // **Mappers 107, 143, 144, 145 and 149 are deliberately absent too** (MF-UNL-3 steps 2
         // and 3), and again for mapper 97's reason: not one of their pages documents any
         // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
@@ -996,6 +1005,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         #[cfg(feature = "board-huang1")]
         12 => Board::IrqBoard(IrqBoard::Huang1(Box::new(Huang1::new(memory, mapper)))),
         13 => Board::CpRom(CpRom::new(memory)),
+        // MF-UNL-8 step 2: the Gouder SL-1632 (`UNL-SL1632`), the same Huang-1 with a PAL that
+        // "moves the supervisor register address to $A131, overlapping the MMC3 and VRC2 registers
+        // there" -- two modes and no MMC1, three independent CHR A18 bits over unequal window
+        // groups, and the page's two Nestopia-sourced rules. MF-6b step 6 decided the number "a
+        // second board, not a parameter" on exactly those differences; `Huang1`'s own note has the
+        // table and Q-165 the four things the page does not say.
+        #[cfg(feature = "board-huang1")]
+        14 => Board::IrqBoard(IrqBoard::Huang1(Box::new(Huang1::new(memory, mapper)))),
         15 => Board::Mapper015(Mapper015::new(memory)),
         // MF-6c step 1: mapper 153 is the same LZ93D50 on a board with 8 KiB of battery-backed
         // WRAM, an outer PRG bank on $8000-$8003 and no CHR banking. A parameter of mapper 16's
