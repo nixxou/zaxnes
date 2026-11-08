@@ -1731,3 +1731,36 @@ unconfigurable constants where every other project has a user setting** — mapp
 all three cases that the value is a wire or a pad with no header field. If a host surface for
 per-cartridge configuration is ever built, those are its first three customers, and two of them
 (mapper 83's pad, mapper 262's jumper) are documented to change what a game *displays*.
+
+---
+
+## Appendix — a fifth source: `third_party/nintendulator-mappers`
+
+The journal records that `quietust/nintendulator-mappers` was cloned after this lot's brief was
+written and added to it by a supplementary message. It is **not** one of the four the brief names and
+it is a **partial** set — one file per number under `src/iNES/`, covering mappers 83, 90, 91, 107, 112,
+114, 115, 137-141, 143, 145-150, 164, 182, 191-194, 206, 218 and others, but **none of** 12, 14, 121,
+123, 163, 178, 187, 195, 209/211, 246, 262, 268, 292 or 298. So it cannot speak to either of the two
+CHANGEs with visible in-game effects, and the body of this report stands as the four-way cross-check
+the brief asked for. What it does reach, it was read on; the licence note above covers it too (it is
+GPL, read and not copied).
+
+**It moves three verdicts and seconds four more:**
+
+| point | what Nintendulator does | effect on the verdict |
+| --- | --- | --- |
+| Q-161 (b), mapper 112's 2 KiB CHR selects | `mapper112.cpp:20-21` stores `CHR[n] >> 1`: **bit 0 discarded** | a fourth vote for the 206's rule; now **4-1**, with Mesen 2 alone keeping the bit |
+| Q-168 §3a, mapper 91 submapper 0's counter | `mapper091.cpp:44-48` increments once per rendered scanline and asserts **every** time the count is ≥ 8 — no stop, no reload | a third vote for **"keeps running"**; now **3-2** in this build's favour, where it was two-two |
+| Q-163, mapper 218's window table | `mapper218.cpp:18-26` derives the same `va10` of 1/0/2/3 from iNES byte 6 bits 3 and 0 and then does `SetCHR_NT1(i, (i >> va10) & 1)` for **all sixteen** 1 KiB windows — pattern tables and nametables in one loop | a **fourth** independent implementation, and the only one that writes the whole thing as the single expression this build uses |
+| Q-145, mapper 143's protection read | `mapper143.cpp:14` is `(~Addr & 0x3F) \| (OpenBus & 0xC0)` | a fifth vote for the inversion of the **address**, and a **third** for true open bus in bits 7-6 (against two for a constant `01`) — so this build's `00` is now the only reading with no support |
+| Q-147 §2, mapper 107's register width | `mapper107.cpp:12-13` uses bits 7-1 for the 32 KiB bank and all eight for CHR | a fourth vote for the whole byte |
+| Q-144 §3, mapper 115's `$6000` bit 6 | `mapper115.cpp:17` reads bits 3-0 and bit 7 and **nothing else** — no bit 6, no bit 5, no `$5080` | **five** of five now silent on PRG A18; the point stays OPEN for want of a >256 KiB image |
+| Q-161, mapper 193's shifted CHR bytes | `mapper193.cpp:17-19` is `CHR[0] >> 2`, `CHR[1] >> 1`, `CHR[2] >> 1`, with four registers and no `$6004` | a fifth vote for the shifted-byte reading; a fourth omission of the mirroring register |
+
+**One non-comparison worth recording.** Nintendulator's `mapper150.cpp:56` names the number
+*"Sachen (SA-72008-VX)"* and implements a single-latch board with a 32 KiB PRG bit and a two-bit CHR
+field — **a different board from the Sachen eight-register ASIC this build and the other four build
+for mapper 150**. So it has no R7, no mirroring modes and nothing to say about Q-141; a reader
+comparing the two should not take its silence for a third opinion. Its `mapper164.cpp:13` likewise
+gives mapper 164 a plain 8 KiB PRG-RAM window and **no EEPROM**, so puNES remains the only
+implementation Q-170 can be checked against.

@@ -197,4 +197,12 @@ and the three singletons 262/292/246). Twenty-nine more verdict rows: twenty-two
 * **Eight CHANGEs** are recorded with their file, function, edit, affected titles and risk; the two
   with visible in-game effects are CHANGE 1 (mapper 123's `$5800` bank bit) and CHANGE 6 (mapper 12's
   language bit), and CHANGE 8 would unpark `board-292`.
+* **A fifth source was consulted**, after the four the brief names: `third_party/nintendulator-mappers`
+  (cloned by the owner mid-lot, per the journal). It is a **partial** set and covers **none** of the
+  numbers behind the two visible-effect CHANGEs, so the body of the report stands as the four-way
+  cross-check that was asked for; the appendix records what it reaches. It **moves three verdicts**:
+  Q-161 (b) to 4-1, **Q-168 §3a to 3-2 in this build's favour** (it keeps the mapper-91 counter
+  running), and Q-163 to four for four. It also leaves this build's mapper-143 open-bus choice (`00`)
+  as the only reading with no support anywhere — three projects drive true open bus and two a constant
+  `01`.
 * `git status`: clean except `rust/target-mf/` (untracked build output, never staged).
