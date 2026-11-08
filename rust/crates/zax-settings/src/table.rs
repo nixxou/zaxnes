@@ -796,11 +796,19 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         // reads 3 and one of -1 reads 0 (REQ-LOOP-064) — and only the published labels change,
         // which is what turns the row into the list of AMD-041 §3. The interface translates them
         // through `option.<label>`; the value written to the settings file is the number.
-        .with_domain(Domain::stepped(0.0, 3.0, 1.0, 0).with_labels(&[
+        // Rust-only (owner request): up to 10 frames, to try a game's own lag to the absurd.
+        .with_domain(Domain::stepped(0.0, 10.0, 1.0, 0).with_labels(&[
             "Run-ahead off",
             "1 frame (Recommended)",
             "2 frames",
             "3 frames",
+            "4 frames",
+            "5 frames",
+            "6 frames",
+            "7 frames",
+            "8 frames",
+            "9 frames",
+            "10 frames",
         ]))
         .with_lua("RunAheadFrames")
         .with_label("Run-ahead"),

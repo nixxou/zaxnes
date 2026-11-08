@@ -77,6 +77,25 @@ fn choices(id: SettingId) -> Vec<(i32, String)> {
         .collect()
 }
 
+/// [`step`] for a setting the page has no row of (a game's own run-ahead): its domain's bounds
+/// and step, round from the last value to the first.
+fn step_by_domain(id: SettingId, settings: &mut SettingsModel, step: i32) {
+    let domain = catalogue::descriptor(id).domain();
+    let (Some(minimum), Some(maximum)) = (domain.minimum(), domain.maximum()) else {
+        return;
+    };
+    let increment = domain.step().filter(|step| *step > 0.0).unwrap_or(1.0);
+    let mut value = settings.get(id).as_double() + f64::from(step) * increment;
+    if value > maximum {
+        value = minimum;
+    } else if value < minimum {
+        value = maximum;
+    }
+    #[allow(clippy::cast_possible_truncation)] // within the setting's bounds
+    let value = SettingValue::Int(value.round() as i32);
+    settings.set(id, value);
+}
+
 /// The value of the setting `id` as the page shows it.
 #[must_use]
 pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
@@ -97,7 +116,17 @@ pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
                     |(_, label)| text::label_of_option(&label),
                 )
         }
-        SettingKind::Int => value.as_int().to_string(),
+        SettingKind::Int => {
+            // A stepped number with labels (the run-ahead's "2 frames") shows its label.
+            let current = value.as_int();
+            choices(id)
+                .into_iter()
+                .nth(usize::try_from(current).unwrap_or(usize::MAX))
+                .map_or_else(
+                    || current.to_string(),
+                    |(_, label)| text::label_of_option(&label),
+                )
+        }
         _ => {
             let shown = format!("{:.2}", value.as_double());
             shown.trim_end_matches('0').trim_end_matches('.').to_owned()
@@ -109,6 +138,7 @@ pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
 /// step (a twentieth of its range when it has none) and stops at its bounds.
 pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
     let Some(row) = row_of(id) else {
+        step_by_domain(id, settings, step);
         return;
     };
     match row.descriptor.kind() {

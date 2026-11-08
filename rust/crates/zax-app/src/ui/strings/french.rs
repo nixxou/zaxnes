@@ -276,6 +276,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.1 frame (Recommended)", "1 frame (recommandé)"),
     ("option.2 frames", "2 frames"),
     ("option.3 frames", "3 frames"),
+    ("option.10 frames", "10 frames"),
+    ("option.9 frames", "9 frames"),
+    ("option.8 frames", "8 frames"),
+    ("option.7 frames", "7 frames"),
+    ("option.6 frames", "6 frames"),
+    ("option.5 frames", "5 frames"),
+    ("option.4 frames", "4 frames"),
     ("setting.emu.lua_smooth_gc", "Nettoyage mémoire Lua lissé"),
     ("setting.emu.lua_optimized", "Lua optimisé (unsafe)"),
     (

@@ -278,6 +278,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.1 frame (Recommended)", "1 frame (Recommended)"),
     ("option.2 frames", "2 frames"),
     ("option.3 frames", "3 frames"),
+    ("option.10 frames", "10 frames"),
+    ("option.9 frames", "9 frames"),
+    ("option.8 frames", "8 frames"),
+    ("option.7 frames", "7 frames"),
+    ("option.6 frames", "6 frames"),
+    ("option.5 frames", "5 frames"),
+    ("option.4 frames", "4 frames"),
     ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
     ("setting.emu.lua_optimized", "Optimized Lua (unsafe)"),
     (

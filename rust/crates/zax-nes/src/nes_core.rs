@@ -674,7 +674,10 @@ impl NesCore {
     // ----------------------------------------------------------------- run-ahead
 
     /// Largest run-ahead the core accepts (AMD-041 REQ-LOOP-064).
-    pub const MAX_RUN_AHEAD: u8 = 3;
+    ///
+    /// Rust-only (owner request): 10 instead of the 3 of AMD-041, to try a game's own lag to the
+    /// absurd; every frame of it costs a whole emulated frame.
+    pub const MAX_RUN_AHEAD: u8 = 10;
 
     /// Runs the frames one **real** frame of run-ahead is made of (AMD-041 REQ-LOOP-065) and
     /// leaves the core in the state of the **displayed** frame, the last one in advance.
