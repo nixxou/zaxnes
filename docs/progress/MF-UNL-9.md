@@ -118,7 +118,7 @@ end of step 1 below lists each of the five against what it produced.
 - [x] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
 - [x] **5/6** — Q-169, `BOARD-FEATURES.md`, the census note and the journal.
-- [ ] **6/6** — the final pass.
+- [x] **6/6** — the final pass.
 
 ## Step 1 — the flash, whole
 
@@ -448,6 +448,62 @@ whoever writes a flash test next; and the host wiring left to R0.
 `G:/3dsen/cleanroom/journal/JOURNAL.md`, in the French of the entries before it: role, date, folders
 consulted, the base commit, what was delivered, the figures, the format-version change with its two
 inherited-comparison traps, the verification table, Q-169 and the bank-0 finding.
+
+## Step 6 — the final pass
+
+| check | result |
+| --- | --- |
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, `zax-nes`, **four** configurations | clean in `default`, `--no-default-features`, `--features parked-boards` and `--no-default-features --features board-111` |
+| clippy `-D warnings --all-targets`, `zax-harness` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **1 109 / 0 / 9** |
+| the same with `--include-ignored --no-fail-fast` and both ROM roots | **1 118 / 0 / 0** |
+| the four sweeps over `SUPPORTED_MAPPERS` | green in each of the four configurations (step 2) |
+| golden-core against the base commit | **byte-identical**, `f79e7df842c3ee43e7d9b67861a927b5` |
+| the campaign and the feature decision | step 3: `board-111` stays in `default`, no second feature, nothing parked |
+| `unsafe` | none |
+| new `allow` of a lint | none |
+| `NesCore::STATE_VERSION` | **changed, 8 → 10** (and `WIDE_STATE_VERSION` 9 → 11), which is what the lot was asked to do: "add the flash data behind a version check that keeps old states loading". 8 and 9 are still read, and the two comparisons that would have broken silently are fixed by name (step 1) |
+| an existing board's save-state format | **none moved.** For a board with no flash the new section writes zero bytes; `Cheapocabra`'s own block is still `u8`, `u8`, `bool` in that order, which is why the command machine stayed on the board |
+| the emulation of an existing mapper | **unchanged, and measured**: golden-core byte-identical over 98 originals, level-2 `core` identical to the instruction on five games, no emulation symbol moved on eighteen ROMs |
+| anything under `spec/` | only the new ticket, `spec/changes/Q-169.md` |
+
+### The measured binary is the shipped commit's — shown rather than assumed
+
+MF-UNL-8 closed by building a third binary from its last commit and getting the same md5. **That
+does not hold here, and the reason is worth writing down**: step 5 added doc comments to
+`flash.rs` and `nes_core.rs`, so the shipped tree's *sources* differ from the measured tree's.
+`build-clean.sh` passes `CARGO_PROFILE_RELEASE_STRIP=false` so callgrind has symbols, which means
+the debug info — and therefore the whole-file md5 — moves with every line number.
+
+So the identity was checked at the level that matters:
+
+| | `mfunl9-1-flash` (measured, `f18eb44e`) | `mfunl9-2-ship` (`baf25b84`) |
+| --- | --- | --- |
+| whole binary | `c390d7a63faee1dc39798825b36ff084` | `ef4cb0fb5539aba502c24d25dfd669df` |
+| **`.text`** | `ddf6bdd27166840a27c73453ad582220` | **the same** |
+| **`.rodata`** | `2468d336713db1c5147d93fb99f362cd` | **the same** |
+| golden-core over the 98 originals | `f79e7df842c3ee43e7d9b67861a927b5` | **the same**, and `cmp`-identical to the base's |
+
+**Every instruction and every constant of the shipped commit is what step 3 measured**, and the
+only sections that moved are the ones a stripped release build would not have. Three golden-core
+runs — base, measured, shipped — one digest.
+
+## Summary
+
+| | |
+| --- | --- |
+| numbers | **1** (111), already present; the lot is its save path |
+| Cargo features added | **0**; `board-111` stays in `default`, nothing parked |
+| new module | `rust/crates/zax-nes/src/cartridges/flash.rs` — `FlashRom`, `FlashCommandState`, `FlashCommand` |
+| new public core API | `NesCore::export_flash_save`, `NesCore::import_flash_save`, `CartridgeMemory::flash` |
+| savestate format | 8 → 10 / 9 → 11, older still read, no existing board's bytes moved |
+| tests added | **5** (4 behind `board-111`, 1 in every configuration) |
+| tests behind `board-111` | 3 → **7** |
+| question tickets | **1** (Q-169); **no** §7.2-versus-page contradiction found, the first MF-UNL lot in four without one |
+| gaps closed | the flash's persistence (MF-6c step 9's first recorded gap, Q-117's deferral) |
+| gaps kept, with their argument | the software-ID commands `$90`/`$F0`, the two LEDs, the register's read side, and the host wiring (Q-169 §3) |
+| cost | level-2 `core` **+0 on all five games**; PR-1 worst ROM +0.001 % against a +0.001 % floor |
 
 ## Sources consulted
 
