@@ -815,6 +815,19 @@ tests are written from the boards' own register tables — which is why the four
 than usual: two of them (Q-160's mirroring pair, Q-161's CHR low bit) are observable in a few frames
 of a real dump and in no other way this build has.
 
+### The lot's **last** commit builds the measured binary too
+
+Step 9's own commit `d39a358a` adds three documentation files over `e09b0696` and nothing else, so
+`unl7final` was built from it by `git archive` into a fresh directory and compared:
+
+    5c6dede05c967e6d46a0646dc47295af  zax-harness-unl7
+    5c6dede05c967e6d46a0646dc47295af  zax-harness-unl7ship
+    5c6dede05c967e6d46a0646dc47295af  zax-harness-unl7final
+
+**Three binaries, one md5.** MF-UNL-6 step 8 is the step that asked this be proved rather than
+assumed — a `git archive` tar carries `docs/` as surely as it carries `src/` — and it holds for
+every commit of this lot from step 7 on.
+
 ## The lot is closed
 
 Six boards, nine numbers, six features in `default`, no board parked, no `Board` variant added, no
