@@ -792,6 +792,31 @@ board-vrc2-latch = []
 # it is outside this lot's scope. `docs/progress/MF-LEG-1.md` step 5 records it as the follow-up.
 board-mmc1a = []
 
+# **Not a board: the MMC1's SNROM board test** (MF-LEG-1 steps 1 and 8, report entry MMC1-1;
+# **Q-176**). With this on, the SNROM `E` bit — bit 4 of the CHR bank registers as a second chip
+# enable for the PRG-RAM — applies only where an **NES 2.0** header gives positive evidence of the
+# board: no CHR-ROM, 8 KiB of CHR-RAM in byte 11, a non-zero byte 10 totalling 8 KiB, and at most
+# 256 KiB of PRG-ROM. With it off, `Mmc1::is_snrom` is the three-way size test every lot from MF-3
+# to this one's base commit shipped, so an iNES 1.0 dump with CHR-RAM and REQ-CORE-012's default
+# 8 KiB of work RAM is an SNROM — which all five cross-checked emulators decline to do, and which
+# is what entry MMC1-1 asks be narrowed.
+#
+# **It is off in `default`, and not for a figure.** `holy-mapperel`'s `M1_P128K.nes` and
+# `M1_P128K_CR8K.nes` announce themselves as "SNROM (MMC1)", report "8K PRG RAM OK" and probe
+# detailed digit `4000`, "$A000 bit 4 does not disable WRAM (SNROM), or disables it (all but
+# SNROM)" — and their headers declare **no** PRG-RAM in byte 10. So they pass with the feature off
+# and **fail** with it on, reverting the two rows lot MF-3 step 1 exists to have fixed. The entry
+# believed the suite did not exercise the SNROM side; it does. The hardware test is right about the
+# board and the owner's rule is right about real dumps, and the two cannot both be satisfied for a
+# dump whose header under-declares the cartridge it tests, so the choice is R0's. Q-176 has the
+# evidence; `Mmc1::SNROM_NEEDS_A_DECLARED_HEADER` is how a test asks which way a build went.
+#
+# Not in `parked-boards`, which is the umbrella for left-out *boards*, for the reason
+# `ppu-exact-sprite-eval` and `ppu-2007-render-read` are not in it either.
+# `cargo build -p zax-nes --features mmc1-snrom-header` is the one flag that turns it on, and
+# `docs/review/BOARD-FEATURES.md` has the row.
+mmc1-snrom-header = []
+
 # Mapper 29, the Sealie Computing **RET-CUFROM revD** (MF-UNL-7 step 6): "allocated on 15-nov-2013
 # to implement some homebrew games, including *Glider*".
 #

@@ -22,14 +22,21 @@ owner's to keep as they are, and MMC5-1 is lot MF-LEG-2.
 | 5 | MMC1A: NES 2.0 submapper 3 | MMC1-4 |
 | 6 | Irem G-101: *Major League* on the upper one-screen page | 32-1 |
 | 7 | golden-core over the 98 originals against the base commit | — |
-| 8 | the callgrind campaign and the feature decision per board | — |
-| 9 | the final check, and the report annotations | — |
+| 8 | **step 1 behind a feature, off by default**: the hardware test ROM contradicts the rule | MMC1-1 |
+| 9 | the callgrind campaign and the feature decision per board | — |
+| 10 | the final check, and the report annotations | — |
+
+**The plan grew one step at step 8.** Running the ROM-gated suite with both roots set — which the
+final check asks for and which nothing before step 8 had done — showed that step 1's narrowing
+makes two `holy-mapperel` rows fail that lot MF-3 step 1 exists to have fixed. That is a decision
+for R0, so the narrowing is now behind a feature off by default, and the step that does it is its
+own. Steps 2 to 6 are untouched.
 
 ## Steps
 
-- [x] 1/9 MMC1 SNROM (MMC1-1) — the `E` bit only on NES 2.0 evidence, and the extra check
+- [x] 1/10 MMC1 SNROM (MMC1-1) — the `E` bit only on NES 2.0 evidence, and the extra check
 
-### 1/9 — MMC1 SNROM: the `E` bit needs the header's word (entry MMC1-1)
+### 1/10 — MMC1 SNROM: the `E` bit needs the header's word (entry MMC1-1)
 
 **What the entry asked for.** Option (a) of its three: keep the `E` bit — the page and
 `holy-mapperel`'s `4xxx` digit want it, and AMD-061 makes the public documentation prevail — but
@@ -68,8 +75,9 @@ One `pub const fn chr_bank0_has_the_e_bit` was added to `Mmc1` for it, over one 
 | `Final Fantasy (USA).nes` | 3600 | 35 637 469 | no |
 
 **181 million instructions and not one commit of bit 4 to `$A000`.** So the fix changes nothing for
-any of the five, the condition of the lot instruction is met, and **the fix is unconditional — no
-Cargo feature.**
+any of the five and the condition of the lot instruction is met. (It was therefore unconditional as
+step 1 shipped. **Step 8 put it behind `mmc1-snrom-header`, off in `default`**, for a reason this
+step had not looked for: two `holy-mapperel` rows. See step 8 and Q-176.)
 
 **Tests.** The two existing SNROM tests keep their behaviour; the positive one now loads an NES 2.0
 image, which needed a `chr_ram(bytes)` builder on `MapperRom` (byte 11). Two new ones:
@@ -77,13 +85,14 @@ image, which needed a `chr_ram(bytes)` builder on `MapperRom` (byte 11). Two new
 with the `$E000` half still disabling as the regression guard — and
 `mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations`, which walks the three ways a
 dump can fall short (byte 10 zero, byte 11 absent, 16 KiB of CHR-RAM) and then the shape that
-passes. `cargo test --release -p zax-nes -p zax-harness`: **1157 passed, 0 failed, 10 ignored**.
+passes, both behind `mmc1-snrom-header` since step 8. `cargo test --release -p zax-nes -p
+zax-harness`: **1157 passed, 0 failed, 10 ignored**.
 
 Two comments that read `Mmc1::is_snrom`'s old signature — the NES-EVENT's `prg_ram_enabled`
 override and its test — were corrected; the override itself is unchanged and still necessary.
-- [x] 2/9 VRC2 (VRC2-1) — the one-bit latch at `$6000`-`$6FFF`
+- [x] 2/10 VRC2 (VRC2-1) — the one-bit latch at `$6000`-`$6FFF`
 
-### 2/9 — the VRC2's Microwire latch (entry VRC2-1)
+### 2/10 — the VRC2's Microwire latch (entry VRC2-1)
 
 **The page.** nesdev ("VRC2 and VRC4"): the chip "was supposed to have shipped with a Microwire
 interface for save games. However, Konami never used it", and the games "rely on the two Data pins
@@ -147,9 +156,9 @@ of RAM** — the format difference and nothing else.
 `cargo test --release -p zax-nes -p zax-harness`: **1161 passed, 0 failed, 10 ignored**.
 `--no-default-features`: 788 passed, 0 failed, 9 ignored. Clippy `-D warnings --all-targets` on
 `zax-nes`: clean.
-- [x] 3/9 CPROM (13-1) — bus conflicts on the bank register
+- [x] 3/10 CPROM (13-1) — bus conflicts on the bank register
 
-### 3/9 — the CPROM's bank register has bus conflicts (entry 13-1)
+### 3/10 — the CPROM's bank register has bus conflicts (entry 13-1)
 
 **One number.** `registry::has_bus_conflicts`'s unconditional list is now
 `11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185`. nesdev ("CPROM") carries the same
@@ -176,9 +185,9 @@ the `$x100` addresses are the numbered fill, which is why `prg_windows()` reads 
 
 `cargo test --release -p zax-nes -p zax-harness`: **1162 passed, 0 failed, 10 ignored**.
 `cargo fmt --all -- --check` and clippy `-D warnings --all-targets` on `zax-nes`: clean.
-- [x] 4/9 Jaleco SS88006 (18-2) — `$9002`
+- [x] 4/10 Jaleco SS88006 (18-2) — `$9002`
 
-### 4/9 — the Jaleco SS88006's `$9002` (entry 18-2)
+### 4/10 — the Jaleco SS88006's `$9002` (entry 18-2)
 
 **The page.** nesdev ("INES Mapper 018") gives `$9002` as `.... ..WR`, bit 0 "PRG RAM chip enable
 (0: disable; 1: enable)" and bit 1 "Write protection (0: deny writes; 1: allow writes)", and names
@@ -217,9 +226,9 @@ that the round trip is still byte-identical.
 
 `cargo test --release -p zax-nes -p zax-harness`: **1164 passed, 0 failed, 10 ignored**. fmt and
 clippy `-D warnings --all-targets` on `zax-nes`: clean.
-- [x] 5/9 MMC1A (MMC1-4) — NES 2.0 submapper 3
+- [x] 5/10 MMC1A (MMC1-4) — NES 2.0 submapper 3
 
-### 5/9 — the MMC1A, NES 2.0 mapper 1 submapper 3 (entry MMC1-4)
+### 5/10 — the MMC1A, NES 2.0 mapper 1 submapper 3 (entry MMC1-4)
 
 **What the page actually says**, which is not quite what the entry says. nesdev ("MMC1") prints the
 `R` bit of `$E000` as the one place the two ASIC revisions differ:
@@ -290,9 +299,9 @@ in **every** configuration.
 `--no-default-features`: 792 passed, 0 failed, 9 ignored. fmt clean; clippy `-D warnings
 --all-targets` clean in all four configurations (default, `--no-default-features`, and each of
 `board-mmc1a` and `board-vrc2-latch` alone).
-- [x] 6/9 Irem G-101 (32-1) — *Major League* on the upper page
+- [x] 6/10 Irem G-101 (32-1) — *Major League* on the upper page
 
-### 6/9 — *Major League* on the upper one-screen page (entry 32-1)
+### 6/10 — *Major League* on the upper one-screen page (entry 32-1)
 
 **One enum variant.** nesdev ("INES Mapper 032"): "Major League wants hardwired 1-screen
 mirroring. (CIRAM A10 is tied to **+5V** on this game)." A10 held high is the **second** physical
@@ -315,9 +324,9 @@ mirroring of a submapper-1 dump. It was the only test in the suite the change to
 
 `cargo test --release -p zax-nes -p zax-harness`: **1167 passed, 0 failed, 10 ignored**. fmt and
 clippy clean.
-- [x] 7/9 golden-core over the 98 originals
+- [x] 7/10 golden-core over the 98 originals
 
-### 7/9 — golden-core over the 98 originals, against the base commit
+### 7/10 — golden-core over the 98 originals, against the base commit
 
 ```
 zax-harness golden-core G:/3dsen/test-originals gc98-<label>.jsonl 1200
@@ -362,5 +371,75 @@ work RAM** — it is an SGROM — loses it, which is the whole point of the narr
 which the report's "For the owner" entry 2 names first, **was never affected either way**: its
 dumps carry 128 KiB of CHR-ROM, which the old size test already excluded. Worth saying plainly to
 the owner, because the entry reads as though it were at risk.
-- [ ] 8/9 the callgrind campaign and the feature decisions
-- [ ] 9/9 the final check and the report annotations
+- [x] 8/10 step 1 behind `mmc1-snrom-header`, off by default (Q-176)
+
+### 8/10 — step 1 behind a feature, off by default: the hardware test ROM says otherwise (Q-176)
+
+**What happened.** The final check asks for the ROM-gated suite with both roots set. Run for the
+first time in this lot, it fails one case:
+
+```
+holy-mapperel/testroms/M1_P128K.nes: expected pass, got fail —
+  SNROM (MMC1): detailed 4000 (WRAM 4: $A000 bit 4 does not disable WRAM (SNROM), or
+  disables it (all but SNROM)); 128K PRG ROM, 8K PRG RAM OK, 8K CHR RAM OK
+```
+
+**The report's entry MMC1-1 is wrong on a point of fact, and this is it.** The entry says the
+suite's twelve `M1_*` images contain no SNROM-shaped one, that therefore "`Mmc1::is_snrom` returns
+false for all twelve", and that the suite "does not actually exercise the SNROM side". Reading the
+headers:
+
+| image | NES 2.0 | CHR-ROM | byte 10 | byte 11 | old rule | new rule |
+| --- | :-: | :-: | --- | --- | :-: | :-: |
+| `M1_P128K.nes` | yes | none | `$00` | `$07` (8 KiB) | **SNROM** | not |
+| `M1_P128K_CR8K.nes` | yes | none | `$00` | `$07` | **SNROM** | not |
+| the other ten | yes | present, or 512 KiB PRG | — | — | not | not |
+
+The entry is right that **no image declares the SNROM shape** — none has ≤ 256 KiB of PRG, 8 KiB of
+CHR-RAM *and* a work-RAM declaration. What it missed is that the old rule did not read the
+declaration: it read the **effective** PRG-RAM size, which REQ-CORE-012 floors at 8 KiB, so those
+two images *were* SNROMs here. They announce themselves as "SNROM (MMC1)", they report
+"8K PRG RAM OK" — the ROM found the work RAM the core gave it — and they probe digit `4000`. They
+passed before this lot, and **lot MF-3 step 1 exists to have made them pass**: its own note quotes
+this exact failure text.
+
+**So the two sources cannot both be satisfied.** The ROM is a correct hardware test of a board that
+has a work-RAM chip; its own NES 2.0 header does not declare one. A rule that asks the header to
+name the board cannot see the chip the ROM is testing. The owner's rule is right about real dumps —
+step 7's header table shows it keeping the bit on the three genuine SNROMs and taking it off the
+SGROM — and the test ROM is right about the hardware.
+
+**The decision is R0's, not this lot's**, so the narrowing is behind **`mmc1-snrom-header`**, out of
+`default`:
+
+* with the feature **off** — the shipped build — `Mmc1::is_snrom` is the three-way size test every
+  lot from MF-3 to this one's base commit shipped, character for character, and the two rows pass;
+* with it **on**, the owner's rule applies and the two rows fail.
+
+It is **not** in `parked-boards`: that umbrella is for boards left out for a figure, and this is
+neither a board nor a figure — the precedent is `ppu-exact-sprite-eval` and `ppu-2007-render-read`,
+both out of `default` for what they change rather than what they cost.
+`cargo build -p zax-nes --features mmc1-snrom-header` is the one flag.
+
+**How the tests stay green both ways.** `Mmc1::SNROM_NEEDS_A_DECLARED_HEADER`, a `pub const` over
+`cfg!`, lets a test ask which way a build went. The harness's expectation for the two rows is
+`SNROM_ROW`, that constant's answer, rather than `Outcome::Pass` pinned either way; the stale
+`Diagnosis` entry for `m1_p128k` in `report.rs` — left behind by MF-3 and never updated — now
+explains both configurations and takes its `expected` flag from the same constant. The two
+narrowing tests of step 1 are `#[cfg(feature = "mmc1-snrom-header")]`; everything else in step 1 is
+unconditional, including the `#[ignore]`d five-ROM extra check, whose statement (no game commits
+the bit) is true in both configurations.
+
+**Tests, with `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set and `--include-ignored --no-fail-fast`:**
+
+| configuration | result |
+| --- | --- |
+| `default` | **1175 passed, 0 failed, 0 ignored** |
+| `--features zax-nes/mmc1-snrom-header` | **1177 passed, 0 failed, 0 ignored** |
+
+The two extra are step 1's narrowing tests, which only exist in the gated build.
+
+**Q-176** carries the evidence and the question for R0: which of the hardware test ROM and the
+header-declared rule wins for a dump whose header under-declares the cartridge it tests.
+- [ ] 9/10 the callgrind campaign and the feature decisions
+- [ ] 10/10 the final check and the report annotations

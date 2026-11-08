@@ -565,6 +565,11 @@ fn req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enab
 ///
 /// The `$E000` half of the chip enable, which every MMC1 board wires, is untouched: the last two
 /// assertions are the regression guard that this fix narrowed the board test and not the bit.
+///
+/// **Behind `mmc1-snrom-header`, which is off in `default`** (Q-176): the narrowing reverts the two
+/// `holy-mapperel` SNROM rows that lot MF-3 step 1 exists to have fixed, so whether it ships is
+/// R0's decision and not this lot's.
+#[cfg(feature = "mmc1-snrom-header")]
 #[test]
 fn mf_leg_1_mmc1_an_ines_1_0_dump_with_chr_ram_does_not_get_the_snrom_e_bit() {
     // The shape of a Zelda II dump: 128 KiB PRG, no CHR-ROM, battery, no NES 2.0 fields.
@@ -594,6 +599,9 @@ fn mf_leg_1_mmc1_an_ines_1_0_dump_with_chr_ram_does_not_get_the_snrom_e_bit() {
 /// 10. A dump missing any one of the three is an SGROM as far as this core can tell, and
 /// `nes20_prg_ram_size` floors byte 10 at the 8 KiB default, so the byte itself has to be
 /// non-zero — a declared *zero* reads back as 8 KiB and must not pass.
+///
+/// Behind `mmc1-snrom-header` for the reason the test above gives (Q-176).
+#[cfg(feature = "mmc1-snrom-header")]
 #[test]
 fn mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations() {
     // Byte 11 declared, byte 10 **zero**: an SGROM, which has no work-RAM chip at all.

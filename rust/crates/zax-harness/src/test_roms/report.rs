@@ -357,8 +357,13 @@ const SPECIFIC: [(&str, Diagnosis); 7] = [
         Diagnosis {
             text: "MMC1 on an SNROM board: `$A000` bit 4 does not disable the work RAM \
                    (detailed digits `4000`). The eleven other MMC1 boards — SJROM, SKROM, \
-                   SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone.",
-            expected: false,
+                   SUROM, SXROM — are clean, so this is the SNROM CHR-register line alone. \
+                   **Passes in the default build since MF-3 step 1.** It fails again with \
+                   `mmc1-snrom-header` on (MF-LEG-1, Q-176): this dump's NES 2.0 header declares \
+                   no PRG-RAM in byte 10, so a rule that asks the header to name the board cannot \
+                   see the work-RAM chip the ROM reports as \"8K PRG RAM OK\" and then tests. \
+                   Required to fail in that configuration and not in `default`.",
+            expected: zax_nes::cartridges::mappers::Mmc1::SNROM_NEEDS_A_DECLARED_HEADER,
         },
     ),
     (

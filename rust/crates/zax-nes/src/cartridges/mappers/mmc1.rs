@@ -197,9 +197,24 @@ impl Mmc1 {
     /// * at most 256 KiB of PRG-ROM, which is the same comparison `update_banks` uses for
     ///   `outer`, so the two readings of bit 4 can never both be live.
     ///
-    /// `holy-mapperel`'s twelve `M1_*` images stay as they were — none of them is this shape,
-    /// which is exactly what the entry observed — so the suite's `4xxx` digit still passes on the
-    /// "all but SNROM" side it does exercise.
+    /// # And why it is behind a feature that is **off** by default — Q-176
+    ///
+    /// The entry states that the suite "does not actually exercise the SNROM side" and that
+    /// "`Mmc1::is_snrom` returns false for all twelve" `M1_*` images. **Both are wrong**, and
+    /// MF-LEG-1 step 8 found out by running the suite: `M1_P128K.nes` and `M1_P128K_CR8K.nes` are
+    /// NES 2.0, declare no CHR-ROM and 8 KiB of CHR-RAM in byte 11, and declare **no PRG-RAM** in
+    /// byte 10 — so the size test above saw REQ-CORE-012's 8 KiB default and returned *true* for
+    /// them. The two ROMs announce themselves as "SNROM (MMC1)", report "8K PRG RAM OK", and probe
+    /// digit `4000`. They **fail** under the rule above and they pass without it; lot MF-3 step 1
+    /// exists to make exactly those two rows pass.
+    ///
+    /// So the hardware test and the header-declared rule cannot both be satisfied for that dump:
+    /// the ROM is a correct test of a board that has a work-RAM chip, and its own header does not
+    /// declare one. The owner's rule is right about real dumps and the test ROM is right about the
+    /// hardware, and choosing between them is not this lot's call — so the narrowing is behind
+    /// **`mmc1-snrom-header`**, off in `default`, and `Mmc1::SNROM_NEEDS_A_DECLARED_HEADER` says
+    /// which way a build was compiled. Q-176 has the evidence and the question.
+    #[cfg(feature = "mmc1-snrom-header")]
     fn is_snrom(memory: &CartridgeMemory) -> bool {
         let header = memory.rom().header();
         header.is_nes20
@@ -210,6 +225,23 @@ impl Mmc1 {
             && header.prg_ram_size == BankWindows::PRG_WINDOW_SIZE
             && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
     }
+
+    /// The three-way size test as every lot from MF-3 to this one's base commit shipped it, which
+    /// is what `default` still compiles (Q-176): the PRG-RAM size is the **effective** one, so a
+    /// dump that cannot be told from an SNROM is an SNROM here, as it is for the test ROM's own
+    /// driver.
+    #[cfg(not(feature = "mmc1-snrom-header"))]
+    fn is_snrom(memory: &CartridgeMemory) -> bool {
+        let header = memory.rom().header();
+        header.prg_rom_size <= 256 * 1024
+            && header.chr_rom_size <= BankWindows::PRG_WINDOW_SIZE
+            && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
+    }
+
+    /// Whether this build gates the SNROM `E` bit on the header declaring the board
+    /// (`mmc1-snrom-header`, off in `default`), for the two `holy-mapperel` rows whose expected
+    /// outcome depends on it. See [`Mmc1::is_snrom`] and Q-176.
+    pub const SNROM_NEEDS_A_DECLARED_HEADER: bool = cfg!(feature = "mmc1-snrom-header");
 
     /// Whether the committed CHR bank 0 register carries the SNROM `E` bit — bit 4, the second
     /// PRG-RAM chip enable (see [`Mmc1::is_snrom`]).
