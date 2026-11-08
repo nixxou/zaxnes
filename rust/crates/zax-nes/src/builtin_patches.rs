@@ -1529,6 +1529,16 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 3,
         default: false,
     },
+    // Experimental (owner request), in the Hacks: the smooth scrolling, and on a display faster
+    // than the game the playfield drawn between two frames too (the camera's motion to the next
+    // frame, known a frame early from the RAM), its own option to compare the two.
+    HackOption {
+        key: "smooth_scroll_120",
+        label: "Smooth scrolling 120 Hz (experimental)",
+        label_fr: "Défilement lissé 120 Hz (expérimental)",
+        bit: 4,
+        default: false,
+    },
 ];
 
 const NOVA_OPTIONS: &[HackOption] = &[

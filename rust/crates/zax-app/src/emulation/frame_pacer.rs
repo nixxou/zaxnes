@@ -163,6 +163,21 @@ impl FramePacer {
         self.clock_resets += 1;
     }
 
+    /// How far into the frame period the last emulated frame began the clock was at `time` (on
+    /// the pacer's clock, [`FramePacer::elapsed_seconds`]), 0 to 1: 0 past the next frame's time
+    /// (the game paused or running late shows its picture as it is). A host takes the time its
+    /// display frame starts, right after the last buffer swap, which the work of the frame (an
+    /// emulated frame or none) does not move.
+    #[must_use]
+    pub fn phase_at(&self, time: f64) -> f64 {
+        let period = 1.0 / self.effective_rate();
+        let left = self.next_due - time;
+        if left <= 0.0 || left > period {
+            return 0.0;
+        }
+        1.0 - (left / period)
+    }
+
     /// How many emulated frames are due now, at most `max_backlog`. Any further backlog is
     /// abandoned, so the game slows down instead of suddenly speeding up.
     pub fn due_frames(&mut self) -> u32 {

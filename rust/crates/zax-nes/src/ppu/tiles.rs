@@ -321,6 +321,7 @@ impl Ppu2C02 {
     ) {
         let extra = self.frame_margin / 8;
         if extra == 0 {
+            self.find_playfield_end(decoder, memory, cart);
             return;
         }
         let row_width = 33 + (2 * extra);
@@ -458,6 +459,40 @@ impl Ppu2C02 {
     /// in between, read on with its scroll one tile row down under its number. The PPU keeps a
     /// row on the line its fine Y scroll is 1, so a strip of a few lines above a split has none,
     /// and those lines would have no margin.
+    /// Without margins, the playfield's bottom only ([`Ppu2C02::playfield_end`]), for the smooth
+    /// scrolling without the widescreen: the rows the decoder places, nothing painted. Only when
+    /// asked ([`Ppu2C02::set_wants_playfield_end`]): nothing read otherwise.
+    pub(crate) fn find_playfield_end(
+        &mut self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+    ) {
+        self.playfield_end = None;
+        if !self.wants_playfield_end {
+            return;
+        }
+        let row_ends = self.row_ends();
+        let mut tiles = Vec::new();
+        for (row_index, ref captured, strip) in self.rows_to_decode() {
+            if strip {
+                continue;
+            }
+            let layout = captured.layout;
+            let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
+            let written = |address: u16| self.nametable_written_as(address, cart, layout);
+            let memory = &DecoderMemory {
+                nametable: &nametable,
+                nametable_written: &written,
+                ..*memory
+            };
+            if decoder.decode_row(memory, &captured.row, &mut std::iter::empty(), &mut tiles) {
+                let end = (captured.y + 8).min(row_ends[row_index]);
+                self.playfield_end = Some(self.playfield_end.map_or(end, |last| last.max(end)));
+            }
+        }
+    }
+
     fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
         let mut rows = Vec::with_capacity(32);
         for (index, captured) in self.captured_rows.iter().enumerate() {
@@ -1200,6 +1235,12 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn playfield_end(&self) -> Option<i16> {
         self.playfield_end
+    }
+
+    /// Whether the frames to come find their playfield's bottom without margins too (the smooth
+    /// scrolling without the widescreen).
+    pub fn set_wants_playfield_end(&mut self, wanted: bool) {
+        self.wants_playfield_end = wanted;
     }
 
     /// Whether the decoder of the frame just run asks the screen's top and bottom lines hidden

@@ -238,6 +238,8 @@ pub struct Ppu2C02 {
     /// The picture line the rows the margin decoder decoded end at (the playfield's bottom: a
     /// status bar under it), `None` when it decoded none.
     playfield_end: Option<i16>,
+    /// Whether [`Ppu2C02::playfield_end`] is found without margins too.
+    wants_playfield_end: bool,
     /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
@@ -341,6 +343,7 @@ impl Ppu2C02 {
             centre_lines: (0, 240),
             hides_overscan: false,
             playfield_end: None,
+            wants_playfield_end: false,
             margin_palette: None,
         }
     }

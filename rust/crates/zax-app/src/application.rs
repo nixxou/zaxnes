@@ -226,6 +226,9 @@ struct Running {
     /// stages.
     profiler: Option<FrameProfiler>,
     clock: StageClock,
+    /// The displayed and emulated frames counted since `rate_since`, logged every 5 s.
+    rate_count: (u32, u32),
+    rate_since: Instant,
     /// The pipelined frames (`emu.pipeline`).
     pipeline: Pipelined,
     /// The automatic resolution (`video.dynamic_resolution`).
@@ -407,6 +410,8 @@ impl Running {
             last: Instant::now(),
             profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
             clock: StageClock::new(profiling),
+            rate_count: (0, 0),
+            rate_since: Instant::now(),
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
             pending_state_load: options.slot.clone(),
@@ -434,6 +439,24 @@ impl Running {
     }
 
     /// One displayed frame. Returns false once the application is to close.
+    /// Logs the displayed and emulated frame rates every 5 seconds (the display's own rate
+    /// seen, for the smooth scrolling between frames).
+    fn log_rates(&mut self, emulated: u32) {
+        self.rate_count.0 += 1;
+        self.rate_count.1 += emulated;
+        let seconds = self.rate_since.elapsed().as_secs_f64();
+        if seconds >= 5.0 {
+            let (shown, run) = self.rate_count;
+            log(&format!(
+                "frame rate: {:.1} displayed, {:.1} emulated per second",
+                f64::from(shown) / seconds,
+                f64::from(run) / seconds
+            ));
+            self.rate_count = (0, 0);
+            self.rate_since = Instant::now();
+        }
+    }
+
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
         self.follow_the_editor_setting();
@@ -444,6 +467,7 @@ impl Running {
         if self.pump_events() {
             return Ok(false);
         }
+        self.state.frame_time = self.host.pacer.elapsed_seconds();
         let now = Instant::now();
         let delta = now.duration_since(self.last).as_secs_f64();
         self.last = now;
@@ -469,6 +493,8 @@ impl Running {
         self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
         let emulated = self.host.tick(real, &snapshot);
+        self.log_rates(emulated);
+        self.state.emulated_now = emulated;
         self.source.end_sample();
         if let Some(mark) = mark {
             // The emulated frames' own stages are counted apart from the rest of the tick.
@@ -650,7 +676,7 @@ impl Running {
             self.host.state() == EmulationState::Running,
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
-        );
+        ) && !self.state.picture_between;
         Ok(ViewPlan {
             view_height,
             size: (scene_width, scene_height),
@@ -1731,6 +1757,15 @@ struct RunState {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
+    /// every display frame is then drawn, a new emulated frame or not.
+    picture_between: bool,
+    /// The emulated frames of this display frame, and the scrolling debug log
+    /// (`ZAXNES_SCROLL_LOG`, a file path): one line per display frame.
+    emulated_now: u32,
+    /// When this display frame began, on the frame pacer's clock.
+    frame_time: f64,
+    scroll_log: Option<std::fs::File>,
 }
 
 impl RunState {
@@ -1749,6 +1784,11 @@ impl RunState {
             was_two_dimensional: false,
             picture: Vec::new(),
             picture_height: 0,
+            picture_between: false,
+            emulated_now: 0,
+            frame_time: 0.0,
+            scroll_log: std::env::var_os("ZAXNES_SCROLL_LOG")
+                .and_then(|path| std::fs::File::create(path).ok()),
         }
     }
 }
@@ -2063,6 +2103,9 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
+    let phase = host.pacer.phase_at(state.frame_time);
+    state.picture_between = false;
     let (widescreen, widescreen_y) = widescreen_margin(
         host.settings().get(SettingId::VideoWidescreen).as_int(),
         host.settings()
@@ -2134,6 +2177,27 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         state.picture_height =
             session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
         scene.picture_shift = session.nes_picture_shift();
+        // Experimental (owner request): on a display faster than the game, the playfield drawn
+        // between two frames, along the camera's motion to the next one.
+        if let (Some((shift, split)), Some(motion)) =
+            (scene.picture_shift, session.nes_picture_motion())
+        {
+            #[allow(clippy::cast_possible_truncation)] // 0 to 1.
+            let along = motion * phase as f32;
+            scene.picture_shift = Some((shift + along, split));
+            state.picture_between = true;
+            if let Some(file) = state.scroll_log.as_mut() {
+                use std::io::Write as _;
+                let camera = session.nes_picture_camera().unwrap_or(0.0);
+                let _ = writeln!(
+                    file,
+                    "{:.5} {} {phase:.4} {camera:.4} {shift:.4} {motion:.4} {:.4}",
+                    state.frame_time,
+                    state.emulated_now,
+                    camera + f64::from(shift) + f64::from(along),
+                );
+            }
+        }
         // The cut sides left out, the scene's background showing there; in Resize the head-on
         // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
         // whatever margin the 3D conversion was asked for.

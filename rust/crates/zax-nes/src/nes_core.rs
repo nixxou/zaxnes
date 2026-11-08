@@ -83,6 +83,11 @@ pub struct NesCore {
     camera_read: Option<(i32, u8)>,
     camera_decoupled: bool,
     picture_shift: Option<(f32, i32)>,
+    /// With the option `smooth_scroll_120`, how far the camera moves from the picture just made
+    /// to the next one, in pixels (the RAM is a frame ahead of the picture: it is known now).
+    picture_motion: Option<f32>,
+    /// The camera the picture just made shows, in pixels (for a debug log of the scrolling).
+    picture_camera: Option<f64>,
     /// The sprites that move with the camera (Kirby, the camera on him), which the shift must
     /// leave where they are: their record indices in the picture just made, and their screen
     /// places; the camera's pixels the last picture showed, and every sprite's place there.
@@ -129,6 +134,8 @@ impl NesCore {
             camera_read: None,
             camera_decoupled: false,
             picture_shift: None,
+            picture_motion: None,
+            picture_camera: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
             shown_camera: None,
@@ -629,7 +636,19 @@ impl NesCore {
         if let Some(decoder) = decoder {
             self.decode_margins(decoder);
         }
-        self.smooth_scroll(decoder);
+        // The smooth scrolling is an aid: without the widescreen (its built-in patches off), the
+        // decoder of the game's hack pack reads the camera and finds the playfield's bottom.
+        let aid_decoder = decoder.or_else(|| {
+            self.pack
+                .as_ref()
+                .and_then(|(patch, _)| crate::wide_decode::for_patch(patch.name))
+        });
+        if decoder.is_none() {
+            if let Some(aid_decoder) = aid_decoder {
+                self.find_playfield_end(aid_decoder);
+            }
+        }
+        self.smooth_scroll(aid_decoder);
 
         self.frame_count += 1;
 
@@ -749,13 +768,19 @@ impl NesCore {
     /// past its scroll (read after the frame before: the RAM is a frame ahead of the picture), down
     /// to the playfield's bottom ([`NesCore::picture_shift`]). Nothing read with the option off.
     fn smooth_scroll(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
-        // An aid of the game's hack pack (in the Hacks), with or without its widescreen patch.
-        let on = self
-            .builtin_patch
-            .and_then(crate::builtin_patches::by_name)
-            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
-            .and_then(|patch| patch.options.iter().find(|o| o.key == "smooth_scroll"))
-            .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0);
+        // Aids of the game's hack pack (in the Hacks), with or without its widescreen patch; the
+        // displayed picture's motion between frames (`smooth_scroll_120`) needs the shift too.
+        let option_on = |key: &str| {
+            self.builtin_patch
+                .and_then(crate::builtin_patches::by_name)
+                .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
+                .and_then(|patch| patch.options.iter().find(|option| option.key == key))
+                .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0)
+        };
+        let between = option_on("smooth_scroll_120");
+        let on = between || option_on("smooth_scroll");
+        self.picture_motion = None;
+        self.bus.ppu_mut().set_wants_playfield_end(on);
         let Some(decoder) = decoder.filter(|_| on) else {
             self.camera_fraction = None;
             self.camera_read = None;
@@ -763,6 +788,12 @@ impl NesCore {
             self.steady_sprites.clear();
             return;
         };
+        // The camera where the picture just made shows it, before the next one is read.
+        let shown = self
+            .camera_read
+            .zip(self.camera_fraction)
+            .map(|((pixels, _), fraction)| f64::from(pixels) + f64::from(fraction) / 256.0);
+        self.picture_camera = shown;
         let end = self.bus.ppu().playfield_end();
         self.picture_shift = self
             .camera_fraction
@@ -797,6 +828,36 @@ impl NesCore {
         if !self.camera_decoupled || self.camera_fraction.is_none() {
             self.camera_fraction = Some(fraction);
         }
+        // Where the next picture will show it: the motion between the two, a jump (a door, a
+        // room changed) left out.
+        if between {
+            let next = self
+                .camera_fraction
+                .map(|fraction| f64::from(pixels) + f64::from(fraction) / 256.0);
+            #[allow(clippy::cast_possible_truncation)] // A few pixels.
+            {
+                self.picture_motion = shown
+                    .zip(next)
+                    .map(|(shown, next)| (next - shown) as f32)
+                    .filter(|motion| motion.abs() < 4.0);
+            }
+        }
+    }
+
+    /// With the option `smooth_scroll_120`, how far the camera moves from the picture of the frame
+    /// just run to the next, in pixels: a host that shows the picture several times draws its
+    /// playfield that much further along ([`NesCore::picture_shift`] plus the motion times the
+    /// part of the frame gone by). `None` with the option off or the camera jumping.
+    #[must_use]
+    pub const fn picture_motion(&self) -> Option<f32> {
+        self.picture_motion
+    }
+
+    /// The camera the picture of the frame just run shows, in pixels and fractions of one (with
+    /// the smooth scrolling on), for a host's debug log.
+    #[must_use]
+    pub const fn picture_camera(&self) -> Option<f64> {
+        self.picture_camera
     }
 
     /// The sprites of the picture just made that move with the camera: a sprite at the same
@@ -845,6 +906,23 @@ impl NesCore {
     #[must_use]
     pub const fn picture_shift(&self) -> Option<(f32, i32)> {
         self.picture_shift
+    }
+
+    /// The playfield's bottom alone, for the smooth scrolling without margins (nothing read
+    /// unless it was turned on: [`crate::ppu::Ppu2C02::set_wants_playfield_end`]).
+    fn find_playfield_end(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
+        let (ram, ppu, cartridge) = self.bus.decoder_parts();
+        let Some(cartridge) = cartridge else {
+            return;
+        };
+        let memory = crate::wide_decode::DecoderMemory {
+            ram,
+            prg_ram: cartridge.memory().prg_ram(),
+            prg_rom: cartridge.rom().prg_rom(),
+            nametable: &|_| 0,
+            nametable_written: &|_| 0,
+        };
+        ppu.find_playfield_end(decoder, &memory, Some(cartridge));
     }
 
     fn decode_margins(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
