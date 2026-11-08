@@ -69,7 +69,7 @@ with the first and not the second has a module nothing calls. The six below are 
       `--no-default-features`, `--features parked-boards`, `board-164` alone).
 - [x] **4/6** the callgrind campaign against `909c0edd`, the feature decision and the
       `BOARD-FEATURES.md` row.
-- [ ] **5/6** golden-core byte-identical over the 98 originals, and the full
+- [x] **5/6** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
 - [ ] **6/6** the census note, the journal, the close.
 
@@ -345,3 +345,63 @@ on `smb3` and **nothing of this build above 100 000 on `smb1` at all**. `zelda2`
 figure in that table that is neither a control's nor the instrument's.
 
 [PROGRESS] MF-UNL-10 step 4/6 done: the campaign
+
+## Step 5 — golden-core, the full run with both ROM roots, and the test this lot had not run
+
+### The invariant test that caught a missing row
+
+`cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored` failed on
+`cartridges::tests::mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`, and the lot's
+own steps had not run it: steps 1 to 3 ran `--test mapper_tests` and the four sweeps, and this one
+lives in the **library**'s `#[cfg(test)] mod tests`, which `--test mapper_tests` does not build.
+
+The test is the invariant *plus* an expected list — "the board is driven directly … and the flag is
+required to be `true` wherever that moves the board's state", then `assert_eq!(moved, expected)` so
+that an accidental **addition** is caught as surely as an omission. Mapper 164 moves on the PPU
+address bus and was not in that list. The row is now there, twice, the board refusing no submapper
+where mapper 268 is in it once (Q-157), and the five lines pushed the function to 102 of
+`clippy::too_many_lines`' 100 — so it carries the `#[allow]` that
+`registry::board_memory_sizes` and `req_core_100_every_required_mapper_is_registered` carry, for
+the reason they do: the body is a flat table.
+
+The change is inside `#[cfg(test)]`, so no shipped byte moves; step 6 measures that rather than
+asserting it.
+
+Re-run in all four configurations after the fix, `--lib` **and** `--test mapper_tests`:
+
+| configuration | clippy `-D warnings` | `--lib` | `--test mapper_tests` |
+| --- | --- | ---: | ---: |
+| default | clean | 64 passed, 2 ignored | 350 passed |
+| `--no-default-features` | clean | 64 passed, 2 ignored | 103 passed |
+| `--features parked-boards` | clean | 64 passed, 2 ignored | 350 passed |
+| `--no-default-features --features board-164` | clean | 64 passed, 2 ignored | 112 passed |
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `909c0edd` (`mfunl10-0-base`) against the lot (`mfunl10-1-lot`) | **byte-identical** (`cmp`, not just the digest) |
+| the digest | `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+
+**That is the digest MF-UNL-2 through MF-UNL-9 all recorded.** Nine lots, and not one pixel of a
+commercial original has moved — which is what the lot brief asks of this one: "golden-core over the
+98 originals must be byte-identical to the base commit's."
+
+It is the measurement that matters most for the one figure this lot does carry. PR-1 has
+`NesBus::write_internal` +445 122 on `m4`, a function every board compiles and every CPU write
+runs; 98 games at 1 200 frames each, byte-identical, is what separates "the compiler laid that
+function out differently" from "a board's behaviour moved".
+
+### The full run with both ROM roots
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+    cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored
+
+**1 127 passed, 0 failed, 0 ignored.** The same command without the two variables and without
+`--include-ignored` is **1 118 passed, 0 failed, 9 ignored** — so the nine ROM-driven tests really
+ran rather than passing vacuously, which is the check the brief asks for in those words.
+
+[PROGRESS] MF-UNL-10 step 5/6 done: golden-core and the full run

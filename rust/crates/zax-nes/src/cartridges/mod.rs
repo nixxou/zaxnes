@@ -1400,6 +1400,10 @@ mod tests {
     /// board's state. A future lot adding an A12 counter, or a second board that listens for
     /// nametable fetches, and forgetting the flag fails here.
     #[test]
+    // The expected list below *is* one row per lot that added a board to either latch, each with
+    // the page or the chip it came from -- a flat table, as `registry::board_memory_sizes` is.
+    // MF-UNL-10's mapper 164 is the arm that crossed the threshold.
+    #[allow(clippy::too_many_lines)]
     fn mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched() {
         let line = one_rendered_line();
         let mut moved = Vec::new();
@@ -1528,6 +1532,11 @@ mod tests {
         expected.extend_from_slice(&[162, 162]);
         #[cfg(feature = "board-163")]
         expected.extend_from_slice(&[163, 163]);
+        // MF-UNL-10 step 2: mapper 164 latches CHR A12 and CHR A3 on the rise of PPU A13, which
+        // is 163's mechanism with a second line on it. **Twice**, the board refusing no
+        // submapper.
+        #[cfg(feature = "board-164")]
+        expected.extend_from_slice(&[164, 164]);
         #[cfg(feature = "board-mmc3-scramble")]
         expected.extend_from_slice(&[182, 182, 187, 187]);
         // MF-UNL-2 steps 4 and 5: the UNL-KOF97 and the TXC 189, both of which hold an `Mmc3`.
