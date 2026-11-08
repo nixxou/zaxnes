@@ -38,7 +38,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
   SC0/SC1 half-select, and the `board_memory_sizes` row.
 - [x] **4/8** — the question tickets, the four sweeps, the save-state round-trip and the feature
   configurations.
-- [ ] **5/8** — the callgrind campaign against the base commit, and the feature decision.
+- [x] **5/8** — the callgrind campaign against the base commit, and the feature decision.
 - [ ] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
   both ROM roots.
 - [ ] **7/8** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
@@ -365,3 +365,99 @@ feature and one board, so there is no cross-board test to gate and no constant t
 board's code reads.
 
 `cargo test --release -p zax-nes -p zax-harness` is **1043 / 0 / 9** (step 3 left it at 1042/0/9).
+
+---
+
+## Step 5 — the callgrind campaign, and one feature in `default`
+
+Three binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, which is then deleted. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles` (the 101 `.3dn`
+profiles).
+
+| label | tree |
+| --- | --- |
+| `unl6base` | **`a4315007`**, the lot's base commit |
+| `unl6` | **`499e1aa2`**, step 4 — the lot as it ships |
+| `unl6off` | the shipped source with `board-268` **out of `default`** — the control, whose emulation is the base commit's: with the feature off the number is not in `SUPPORTED_MAPPERS`, so no cartridge of it can exist |
+
+### The base measurement was already on disk, and that is a check and not a shortcut
+
+`zax-harness-unl6base` is **byte-identical** (`md5 2f56dfb40b4093a7569f8f6f45b13506`) to
+MF-UNL-5's own `zax-harness-unl5` *and* to its `zax-harness-unl5ship` — the lot's base commit
+adds only documentation over the commit MF-UNL-5 measured. So `cg-unl5` and `l2-unl5` are this
+lot's base figures, this lot's deltas are directly comparable with MF-UNL-5's, and the whole
+campaign is on one instrument. The base was built anyway, to prove the identity rather than assume
+it.
+
+`unl6off` is **not** byte-identical to the base, and the reason is worth writing down: the two PPU
+watch lists in `cartridges::mod` gain `| 268` **unconditionally**, which is the "one `matches!` is
+one `matches!`" precedent mappers 68, 111 and the J.Y. ASIC's four numbers already set in that
+file. The *emulation* is identical either way — a number whose board is off is never created — so
+`unl6off` is the same-behaviour pair the brief asks for, and it is also the measurement of what
+gating the feature off costs.
+
+### PR-1's thirteen ROMs, 300 frames, no pack, each against `a4315007`
+
+| stage | set total | % | worst ROM | ROMs below |
+| --- | ---: | ---: | --- | ---: |
+| **`unl6` — the lot** | **−150 669** | **−0.000** | `vblnmi` **+0.001 %** (+20 578) | 7 |
+| `unl6off` — the control | **−36 771** | −0.000 | `smb1` / `vblnmi` **+0.001 %** | 8 |
+
+**The worst ROM of the lot is +0.001 %, a twentieth of the tolerance, and the set total is
+below the base commit.** The control's worst ROM is the same +0.001 % on two of the same ROMs, so
+on this instrument the board costs less than the spread of gating it off — the cleanest reading
+the PR-1 set can give, and the same reading MF-UNL-5 got.
+
+### Level 2: five games, 600 frames with their 3D packs, inputs pressed
+
+| build | `core` | `total` |
+| --- | --- | --- |
+| **`unl6`** | **all five +0, identical to the instruction** | −0.008 % (`smb1`) to **+0.0195 %** (`smb3`) |
+| `unl6off` | **all five +0** | −0.015 % (`smb1`) to +0.001 % (`metroid`) |
+
+`ppu`, `apu` and `draw_list` are **+0 to the instruction** on all five games in both builds too,
+`zelda2/draw_list` +1 337 excepted. So nothing this project runs per dot, per cycle or per tile
+moved at all.
+
+**Every figure of both columns is inside the owner's +0.02 %**, which is what the brief asks be
+checked per ROM on `total` as well as on `core`. `smb3/total` **+0.0195 %** is the one figure near
+the edge, and the next section is the same-behaviour pair the brief requires for it.
+
+### `smb3/total`, shown with its pair as the brief requires
+
+| `smb3`, `unl6` vs `unl6base` | |
+| --- | --- |
+| `core`, `ppu`, `apu`, `draw_list` | **+0, identical to the instruction** |
+| `convert` | +4 293 796 (**+0.144 %**) |
+| `lua_hooks` | +4 335 824 (**+0.253 %**) |
+| the only symbols above 300 000 | `luaH_getshortstr` **+4 308 974**, `__memcpy_avx_unaligned_erms` +432 596 |
+
+So 4.31 M of a 4.73 M whole-run move is **one Lua function** — `ltable.c`'s short-string hash
+lookup — and **no symbol of this project moves by 300 000 on any of the five games**.
+
+**The pair is `unl6off`**, whose emulation is the base commit's. On the same instrument it moves
+the same symbol by comparable amounts in the *other* direction: `luaH_getshortstr` **−1 288 850**
+on `smb1` and **−1 000 081** on `zelda2`, with `getgeneric` −1 330 708 and −718 136 and `luaH_set`
++344 074 — a build that changes no emulation at all moving that one column by over a million
+instructions a game, both ways. That is the finding MF-UNL-2 step 8, MF-UNL-3 step 7 and MF-UNL-5
+step 5 each recorded, and this lot confirms it a fourth time. The tolerance is **not** redefined:
+the figure is inside it, and what is recorded is where it comes from.
+
+### The decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-268` | **`default`** | PR-1 worst ROM **+0.001 %**, set total **−150 669**; level 2 **all five `core` +0 to the instruction**, worst `total` +0.0195 %, every figure inside the tolerance |
+
+**No board is parked**, and `parked-boards` keeps the one feature it has had since MF-VS. The
+gating is free either way — `unl6off` is set total −36 771 with all five level-2 `core` figures
++0 — so the owner's rule gives no reason to move the one board out of `default`.
+
+### Disk and machine
+
+G: stayed above **18 GiB** free throughout. Each of the three build directories was deleted by
+`build-clean.sh` as soon as its binary was copied out; the three source tars were deleted after
+the last build. No GPU campaign; every long run in the foreground with its output read, as the
+headless rule requires.
