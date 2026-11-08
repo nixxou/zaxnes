@@ -23,7 +23,7 @@ separate lot).
 - [x] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
 - [x] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
 - [x] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
-- [ ] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
+- [x] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
 - [ ] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
 - [ ] 10/10 — the final check: fmt, clippy ×4, tests, golden-core, the figures
 
@@ -376,3 +376,33 @@ build); clippy `-D warnings` on `zax-nes --all-targets` in default, `--no-defaul
 
 The measurement that decides whether `board-292` can leave `parked-boards` is step 9. R0 decides the
 move itself.
+
+### 8/10 — the ticket and report annotations
+
+A step of its own because the protocol forbids writing a hash that does not exist yet. Every line
+below names the commit of the step that made the change.
+
+**Tickets** (`G:/3dsen/cleanroom/spec/changes/`, outside this repository, so written to disk and not
+staged here):
+
+| ticket | hash | what moved |
+| --- | --- | --- |
+| Q-144 | `aad58095` | §1's `$5800` bank bit 1, and a note that §4 (121/187's CHR A18) is still open |
+| Q-142 | `09f6fdbf` | the `$5000-$5FFF` window, closing its own last *What would overturn it* bullet; points at Q-173 |
+| Q-164 | `0ee7c7c3` | §3's language bit, `$00` → `$01` |
+| Q-145 | `781b0e5b` | the two undriven bits, and the hook its own note made conditional |
+| Q-172 | `c916d5bf`, `c7dc165b` | §1.3's unbanked chip and §2's zero-page read |
+
+**Q-173** was raised in step 3 and carries its own "Fixed in MF-FIX" line pointing at that step.
+
+**The report** (`docs/review/Q-XCHECK.md`): a line on CHANGE 1, 2, 6, 7 and 8, and one in the §Q-145
+section, which has no CHANGE entry of its own. Two of them say more than "applied":
+
+* **CHANGE 2's** records that the entry's own fix description is wrong on its sources — it puts the
+  window inside the WRAM where both implementations put it past the WRAM — and what was built
+  instead, with the `battery_offset` argument for the head-not-tail layout and the correction that
+  the entry's risk assessment was right about the shape and wrong about the blast radius.
+* **CHANGE 7's** records the three simplifications it does not mention.
+
+CHANGE 3, 4 and 5 are untouched: the first two wait for a ROM observation and the third is a
+separate lot.

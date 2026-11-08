@@ -498,6 +498,22 @@ side. Two notes for the record:
 * puNES additionally answers `$FF` for `$5000-$5FFF` reads with A8 **clear** (`:36-38`), which no page
   describes; this build leaves them to the default path, and so do the other three.
 
+**Fixed in MF-FIX (`781b0e5b`)**, the second note above included: the two undriven bits now answer the
+**open bus**, which the appendix's fifth source takes to three votes against two for `01` and none
+for this build's zero. The hook the note made conditional — "if `Mapper::try_read_prg` ever gains the
+data bus" — was built rather than waited for: `CartridgeMemory::cpu_edge_bus`, filled by the
+already-`#[cold]` `NesBus::read_wide_window` before the cartridge is asked, behind one `bool` on
+`NesBus` settled at `attach`. Behind the feature `board-143-open-bus`; with it off the two bits read
+zero again. The test is at bus level (`q_145_mapper_143_leaves_its_two_top_bits_to_the_open_bus` in
+`memory_access_tests.rs`), because `NesCore::read_memory` is `NesBus::peek` and drives nothing.
+
+Worth recording alongside the vote: **`01` and open bus agree on every address this board decodes**
+whenever the bus holds the high byte of the address being read, which it does for an absolute read —
+mask `$E100` against `$4100` is A15 clear and A14 set, so the high byte is `$41-$5F` and its bits 7-6
+are `01`. The two majorities are closer than three-against-two makes them look, which is also why no
+game can be expected to depend on the difference. puNES's extra `$FF` for A8 clear stays
+unimplemented, with the other three.
+
 ## Q-146 — mapper 144's bus-conflict formula
 
 **The point**: the page offers three candidate formulas and calls its own the most succinct;
@@ -1497,6 +1513,13 @@ affected and the risk to existing boards.)*
 * **Also worth doing**: a note in Q-144 recording that nesdev's own page is self-contradictory here,
   and (R0's call) a message to the wiki so the diagram and the prose stop disagreeing.
 
+**Fixed in MF-FIX (`aad58095`).** Applied as described, one term. No existing test walked `$5800`
+with bits 3 and 4 unequal — the two cases that write the port are blind to the difference and `$65`'s
+bank is 13 under both readings — so instead of changing a case the lot **added**
+`q_144_mapper_123_takes_the_banks_bit_1_from_register_bit_3`, which pins bit 3 moving the bank, bit 4
+being inert, and the two together adding nothing to what bit 3 selected. The doc-comment table row
+and the Mesen-2 paragraph were rewritten as this entry asks.
+
 ### CHANGE 2 — mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF` (a gap to close)
 
 * **Ticket**: Q-142, last bullet of "What would overturn it". This is an **omission** this build
@@ -1518,6 +1541,29 @@ affected and the risk to existing boards.)*
   +0.02 % tolerance. Mapper 195's board is `Mmc3Board`, so the forward may already exist for that
   variant; if it does not, this change and **Q-167's mapper 83.2** want the same forward and should
   be costed together. That pairing is the main reason to record this entry.
+
+**Fixed in MF-FIX (`09f6fdbf`), but not as described — this entry's own fix description is wrong on
+its sources.** It says the window goes "over the second 4 KiB of the board's 8 KiB WRAM"; both
+implementations put it **past** the WRAM, not inside it. FCEUX's `Mapper195_Init` passes
+`GenMMC3_Init(info, 512, 256, 16, …)` — 16 KiB of WRAM, where every other MMC3 clone in that file
+passes 8 or 0 — and maps 4 KiB **bank 2** of it at `$5000` (`mmc3.cpp:1036-1041`, `:1044`); puNES
+maps the same bank 2 over `wram_fix_MMC3_base`'s 8 KiB bank 0 at `$6000`
+(`mapper_195.c:134-137`, `MMC3.c:237-251`). The page's own verb says the same thing: the compatible
+board "**adds** 4 KiB of non-battery-backed PRG-RAM".
+
+So what was built is a chip of its own: 12 KiB in one allocation, the extra 4 KiB at the **head** and
+the ordinary WRAM behind it, `battery_offset` answering `0x1000`. The head and not the tail is what
+does the work — `Cartridge::battery_ram` is a tail slice by construction, so this is what keeps the
+page's "non-battery-backed" true and leaves a battery-backed mapper-195 save file byte-for-byte what
+it was.
+
+This entry's risk assessment was right about the shape and wrong about the blast radius. `Mmc3Board`
+is untouched: the window lives on the inner enum `Mmc3ChrRamBoard`, through `try_read_prg` and
+`write_register`, so neither `Board::try_read_prg` nor `Board::intercept_cpu_write` gains an arm. The
+one new dispatch is `IrqBoard::prg_ram_window`, which `$6000`'s offset makes necessary, and it
+carries its own feature `board-195-prg-ram-5000` so it can be parked without touching mappers 74,
+192, 194 or the plain FS303. **Q-173** holds the two questions this entry left to R0 — the NES 2.0
+gate (built: unconditional) and the layout.
 
 ### CHANGE 3 — mappers 121 and 187's CHR A18 polarity (conditional on a ROM)
 
@@ -1613,6 +1659,10 @@ affected and the risk to existing boards.)*
   that puNES makes it user-settable — which is the shape to adopt if a host surface for per-cartridge
   configuration ever exists (see the solder-pad note under Q-166 §2).
 
+**Fixed in MF-FIX (`0ee7c7c3`).** Applied exactly as described, including the test change and the
+comment naming all four readings and puNES's user-settable shape as the one to adopt if a host
+surface for per-cartridge configuration ever exists.
+
 ### CHANGE 7 — mapper 262's CHR-RAM chip is probably unbanked
 
 * **Ticket**: Q-172 §1.3, whose own text names this as the alternative and prices it at three lines.
@@ -1632,6 +1682,13 @@ affected and the risk to existing boards.)*
 * **Risk**: none to other boards — `chr_ram_offset` is mapper 262's alone. The test in Q-172 §1.1's
   second half (banks `$11`/`$19` being one kilobyte and `$12` another) inverts: every bank becomes the
   same kilobyte for a given window, and what distinguishes the windows is the PPU address.
+
+**Fixed in MF-FIX (`c916d5bf`).** Applied as described: `Mmc3Shero::chr_ram_offset` answers the
+window index. Both affected tests inverted as this entry predicted. Three simplifications followed
+that the entry does not mention: `CHR_RAM_BANK_MASK` became dead, `chr_ram_read` and `chr_ram_write`
+collapse to one index and lose their `self` (clippy's `unused_self`, so both are now associated
+functions), and `Mmc3Board::chr_bank_of_window` loses `board-262` from its `cfg` list — mapper 292
+is now its only caller outside `board-119`. Mapper 119 keeps its own banked reading.
 
 ### CHANGE 8 — mapper 292 needs no bus latch, which would unpark `board-292`
 
@@ -1661,6 +1718,30 @@ affected and the risk to existing boards.)*
   today. That is a smaller hook than the write latch (a read of two fixed addresses on a path that
   already runs only for this board's window) but it is still a core change, so **R0 should scope it
   before a lot takes it**.
+
+**Fixed in MF-FIX (`c7dc165b`).** Applied as described, and the blocker this entry names was
+built rather than waited for. The board reads `$6A` into Extra Data Register #0 and `$FF` into #1;
+`CartridgeMemory::cpu_write_latch`, its two accessors and the store at the top of
+`NesBus::write_internal` are **deleted**.
+
+The hook is a two-byte snapshot `NesBus::read_wide_window` takes before the cartridge is asked, under
+one `bool` on `NesBus` settled at `attach` — the shape `vs_port` already has. That function was the
+right place and is smaller than this entry supposed: it already runs on exactly the reads able to
+reach a window below `$8000` (`$4020-$7FFF`), it is already `#[cold]` and `#[inline(never)]`, and
+`NesBus` is the only thing holding both the bus and the work RAM. The same hook serves Q-145's
+mapper-143 open-bus bits, built one step earlier, which is why one flag covers both numbers.
+
+Two notes this entry does not have. **The selection stays the page's `R` bit alone**: Mesen 2 and
+puNES both test `(index & 0xE0) == 0xC0` — `A` and `B` set *and* `R` clear — where the page says only
+"when the Extra Index Register's `R` bit is 0" and also that "The game keeps both bits enabled at all
+times", so the two agree on every byte the game writes and `R` alone is the weaker claim. And **the
+tests had to move to a real `CpuBus::read`**: a call straight to `Cartridge::try_cpu_read` leaves the
+snapshot untouched and would fill a register from whatever it last held.
+
+The narrowing is named in both doc comments, with this entry's own warning — if a second mapper-292
+image appears that stages elsewhere, the latch is the general answer and its price is already
+measured. The measurement that decides whether `board-292` leaves `parked-boards` is MF-FIX step 9;
+**R0 decides the move**.
 
 ---
 
