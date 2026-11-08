@@ -478,6 +478,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(VsBoard::PRG_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
+        // The VRC2's Microwire latch replaces the work RAM, it does not sit beside it (MF-LEG-1
+        // step 2, report entry VRC2-1; Q-174). A cartridge whose NES 2.0 header declares no
+        // PRG-RAM **has no RAM chip**, and what answers $6000-$6FFF there is the chip's own
+        // one-bit latch: see `Vrc2Vrc4::has_microwire_latch` for the gate, which is Nestopia's and
+        // puNES's, and `Vrc2Vrc4::microwire_latch` for the latch. Without this arm REQ-CORE-012's
+        // 8 KiB floor would keep the RAM on top of the latch and $7000-$7FFF would answer RAM
+        // where the page says "only ever return open bus".
+        #[cfg(feature = "board-vrc2-latch")]
+        22 | 23 | 25 if Vrc2Vrc4::has_microwire_latch(mapper, header) => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 119"): "Both TQROM games used 8 KiB CHR RAM", beside the CHR-ROM
         // the same board carries. **No header field can state it**: byte 5 of an iNES 1.0
         // header is the CHR-*ROM* size, and REQ-CORE-012's CHR-RAM default only applies to an

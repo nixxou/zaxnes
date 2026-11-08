@@ -139,9 +139,67 @@ pub struct Vrc2Vrc4 {
     /// it and the block of mappers 21/22/23/25/27 is unchanged (REQ-CORE-090).
     #[cfg(feature = "board-huang1")]
     exact_prg_and_mirroring_decode: bool,
+    /// The VRC2's **Microwire latch at `$6000`-`$6FFF`**, `Some(bit)` on a board that has it and
+    /// `None` on every other (MF-LEG-1 step 2, report entry VRC2-1; **Q-174**).
+    ///
+    /// nesdev ("VRC2 and VRC4") describes a serial EEPROM port Konami designed and never used,
+    /// `.... .SCD`, and then what the silicon actually does: `.... ...L`, "1-bit latch value
+    /// (r/w)". Several games, "including Contra (J) and Ganbare Goemon 2 (J), rely on the two Data
+    /// pins being connected to each other, and so expect to be able to read the written value
+    /// back"; the page's own example is that "both `LDA $6100` and `LDA $6000` will return
+    /// `$60|latch`" — the bit in D0 and open bus above it — and that "reads from `$7000-$7FFF` only
+    /// ever return open bus".
+    ///
+    /// **It is installed by [`Vrc2Vrc4::has_microwire_latch`] and only there**: the condition is
+    /// an NES 2.0 header that declares no PRG-RAM, on one of the three numbers whose VRC2 variant
+    /// that header names. That is Nestopia's gate (`NstBoardKonamiVrc2.cpp:74-76`,
+    /// `if (!board.GetWram())`) and puNES's (`VRC2and4.c:51-56`, NES 2.0 and no WRAM), and it is
+    /// what leaves an iNES 1.0 dump with the 8 KiB of REQ-CORE-012 PRG-RAM that makes the two
+    /// games work here by accident. `registry::board_memory_sizes` asks the same question and gives
+    /// such a board **no PRG-RAM at all**, so `$6000`-`$7FFF` is this latch and open bus and
+    /// nothing else — the cartridge has no RAM chip.
+    ///
+    /// **Not in the savestate** (Q-174 section 2). Writing it would add a byte to the block of
+    /// mappers 21, 22, 23, 25 and 27, which REQ-CORE-090 and this lot's instruction both forbid,
+    /// and a state written before this step would then be one byte short and stop loading. So
+    /// `load_registers` leaves the live latch alone: a machine powered on has the power-on 0, and a
+    /// machine that loads a state keeps the bit it had. The two games read the latch back
+    /// immediately after writing it, during their boot protection check, so no state taken after
+    /// boot can observe the difference.
+    #[cfg(feature = "board-vrc2-latch")]
+    microwire_latch: Option<u8>,
 }
 
 impl Vrc2Vrc4 {
+    /// Whether this image is on a VRC2 board that answers [`Vrc2Vrc4::microwire_latch`] at
+    /// `$6000`-`$6FFF` instead of carrying a work-RAM chip there.
+    ///
+    /// Two conditions, both of them the header's:
+    ///
+    /// * **the board declares no PRG-RAM** — `byte10 == 0` on an NES 2.0 header, tested on the byte
+    ///   and not on `InesHeader::prg_ram_size`, which floors at 8 KiB
+    ///   (`rom::ines_header::nes20_prg_ram_size`) so that a declared *zero* reads back as the
+    ///   default. An iNES 1.0 header has no such field and therefore never satisfies this;
+    /// * **the variant is a VRC2 the header names** — mapper 22, which is always a VRC2a, or
+    ///   mapper 23 or 25 with the submapper that says VRC2b or VRC2c. Submapper 0 of 23 and 25 is
+    ///   the OR'd heuristic of [`Vrc2Vrc4::new`] and keeps the VRC4's features, so it is not a
+    ///   VRC2 as far as this core is concerned and does not get the latch.
+    ///
+    /// Mapper 27's board is a VRC4 clone and mappers 14 and 116 are other people's boards that hold
+    /// a VRC2 among other things, so none of the three is here — see [`Vrc2Vrc4::new_vrc2b`],
+    /// which clears the field for the two that come through it.
+    #[cfg(feature = "board-vrc2-latch")]
+    pub(crate) fn has_microwire_latch(
+        mapper_number: i32,
+        header: &crate::rom::InesHeader,
+    ) -> bool {
+        matches!(mapper_number, 22 | 23 | 25)
+            && header.is_nes20
+            && header.byte10 == 0
+            && VrcVariant::resolve(mapper_number, header.is_nes20, header.submapper)
+                .is_some_and(VrcVariant::is_vrc2)
+    }
+
     pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let header = memory.rom().header();
         let variant = VrcVariant::resolve(mapper_number, header.is_nes20, header.submapper);
@@ -189,6 +247,12 @@ impl Vrc2Vrc4 {
             ack_without_enable_copy: mapper_number == 298,
             #[cfg(feature = "board-huang1")]
             exact_prg_and_mirroring_decode: false,
+            #[cfg(feature = "board-vrc2-latch")]
+            microwire_latch: if Self::has_microwire_latch(mapper_number, header) {
+                Some(0)
+            } else {
+                None
+            },
         }
     }
 
@@ -203,6 +267,12 @@ impl Vrc2Vrc4 {
     /// in the same parenthesis, "(A0/A1, VRC2b)" — so that board asks through
     /// [`Vrc2Vrc4::new_huang1_vrc2b`], which is this constructor plus the one rule its page adds
     /// (MF-UNL-8 step 2).
+    ///
+    /// **Neither board gets the Microwire latch.** `$6000`-`$7FFF` belongs to the board that holds
+    /// this chip and not to the chip: mapper 116's supervisor register is at `$4100` and mapper
+    /// 14's at `$A131`, and both pages give their board work RAM in the usual place. The field is
+    /// cleared here because [`Vrc2Vrc4::new`] is asked for mapper **23** below, so the predicate
+    /// would otherwise answer for a number this image does not have.
     #[cfg(any(feature = "board-116", feature = "board-huang1"))]
     pub(crate) fn new_vrc2b(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let lines = VrcVariant::Vrc2b.index_lines();
@@ -213,6 +283,8 @@ impl Vrc2Vrc4 {
             chr_shift: false,
             chr_high_mask: 0x1F,
             mapper_number,
+            #[cfg(feature = "board-vrc2-latch")]
+            microwire_latch: None,
             ..Self::new(memory, 23)
         }
     }
@@ -363,11 +435,52 @@ impl Mapper for Vrc2Vrc4 {
         self.prg1 = 1;
         self.swap_prg = false;
         self.irq.reset();
+        // The latch powers on at 0, and a board that has none stays without one: the field is the
+        // board's wiring as much as its value (see `Vrc2Vrc4::microwire_latch`).
+        #[cfg(feature = "board-vrc2-latch")]
+        if self.microwire_latch.is_some() {
+            self.microwire_latch = Some(0);
+        }
+
         self.update_banks();
+    }
+
+    /// The VRC2's Microwire latch at `$6000`-`$6FFF` (Q-174), and nothing else below `$8000`.
+    ///
+    /// **`#[cfg]` on the method and not inside it**: with `board-vrc2-latch` off there is no
+    /// override, the trait default serves this board, and its arm of the `#[inline(always)]`
+    /// `Board::try_read_prg` dispatch is byte for byte what the lot's base commit compiled —
+    /// which is the pinned read path lots PR-1, MF-5b and MF-CART all measured on.
+    ///
+    /// **The top seven bits read 0 and the page says open bus** — "both `LDA $6100` and
+    /// `LDA $6000` will return `$60|latch`". Q-174 section 1 holds the choice and the reason: a
+    /// board below `$8000` has no way to the bus byte in this build except the `cpu_edge_bus` hook
+    /// of `board-143-open-bus`, which is **parked** for the cost of the test that fills it
+    /// (MF-FIX step 9.3, `mmc5` +0.036 %). D0 is what the two games read, and no source describes
+    /// a game reading the other seven.
+    #[cfg(feature = "board-vrc2-latch")]
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        if let Some(latch) = self.microwire_latch {
+            if (0x6000..0x7000).contains(&address) {
+                return Some(latch);
+            }
+        }
+
+        self.banks()
+            .and_then(|banks| banks.read_prg(address, memory.rom().prg_rom(), memory.prg_ram()))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
+            // The Microwire latch keeps bit 0 of a write to $6000-$6FFF (Q-174). This arm is
+            // reached only by a write below $8000 that `Cartridge::cpu_write` found no PRG-RAM
+            // for — on a latched board there is none by construction, and on every other VRC
+            // board the write was already dropped here.
+            #[cfg(feature = "board-vrc2-latch")]
+            if self.microwire_latch.is_some() && (0x6000..0x7000).contains(&address) {
+                self.microwire_latch = Some(value & 0x01);
+            }
+
             return;
         }
 

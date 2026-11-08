@@ -3203,6 +3203,152 @@ fn req_core_100_vrc2a_addresses_chr_in_2_kib_units() {
     assert_eq!((0x46 >> 1) & 0x3F, core.chr_bank(0x0000));
 }
 
+// ---------------------------------------------------------------- the VRC2's Microwire latch
+//
+// MF-LEG-1 step 2, report entry VRC2-1; Q-174. nesdev ("VRC2 and VRC4"): the chip "was supposed
+// to have shipped with a Microwire interface for save games. However, Konami never used it", and
+// the games "rely on the two Data pins being connected to each other, and so expect to be able to
+// read the written value back" -- `.... ...L`, "1-bit latch value (r/w)", with "open bus for the
+// top 7 bits" and "$7000-$7FFF only ever return open bus". Contra (J) and Ganbare Goemon 2 (J)
+// are the two titles the page names.
+
+/// REQ-CORE-100: the latch is installed on a VRC2 whose NES 2.0 header declares no PRG-RAM, it
+/// keeps bit 0 of a write and answers it anywhere in `$6000`-`$6FFF`, and `$7000`-`$7FFF` is open
+/// bus rather than work RAM.
+#[cfg(feature = "board-vrc2-latch")]
+#[test]
+fn req_core_100_the_vrc2_latches_one_bit_at_6000_when_the_header_declares_no_prg_ram() {
+    // Mapper 22 is always a VRC2a, so the header names the variant by the number alone;
+    // `prg_ram(0, 0)` is the NES 2.0 byte 10 of a cartridge with no RAM chip.
+    let mut core = MapperRom::new(22).chr(64).prg_ram(0, 0).load();
+    assert!(
+        core.cartridge().unwrap().memory().prg_ram().is_empty(),
+        "the board has no RAM chip"
+    );
+
+    // D0 of what was written, and nothing of the other seven bits (Q-174 section 1).
+    core.write_memory(0x6000, 0xA5);
+    assert_eq!(0x01, core.read_memory(0x6000));
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x00, core.read_memory(0x6000));
+
+    // The whole of $6000-$6FFF is the same latch: the page's own example is that "both
+    // `LDA $6100` and `LDA $6000` will return `$60|latch`".
+    core.write_memory(0x6FFF, 0x01);
+    assert_eq!(0x01, core.read_memory(0x6100));
+    assert_eq!(0x01, core.read_memory(0x6FFF));
+
+    // And $7000-$7FFF is open bus, which this core answers as zero — not the 8 KiB of work RAM
+    // REQ-CORE-012 would otherwise have floored the board at.
+    core.write_memory(0x7000, 0xFF);
+    assert_eq!(0x00, core.read_memory(0x7000));
+    assert_eq!(0x00, core.read_memory(0x7FFF));
+}
+
+/// REQ-CORE-100: an **iNES 1.0** VRC2 dump keeps its REQ-CORE-012 work RAM and the whole byte
+/// reads back, which is the behaviour that makes *Contra (J)* and *Ganbare Goemon 2 (J)* pass
+/// their protection check here by accident. That is the gate Nestopia and puNES both use, and the
+/// reason this fix cannot move a dump anybody has.
+#[test]
+fn mf_leg_1_an_ines_1_0_vrc2_dump_keeps_its_work_ram() {
+    let mut core = MapperRom::new(22).chr(64).load();
+    assert_eq!(
+        8 * 1024,
+        core.cartridge().unwrap().memory().prg_ram().len(),
+        "REQ-CORE-012's default"
+    );
+    core.write_memory(0x6000, 0xA5);
+    assert_eq!(0xA5, core.read_memory(0x6000), "the whole byte, from RAM");
+    core.write_memory(0x7FFF, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x7FFF));
+}
+
+/// REQ-CORE-100: which of the five Konami numbers the latch reaches. Only a **VRC2 the header
+/// names** — mapper 22, or 23 and 25 with the submapper that says VRC2b or VRC2c. Submapper 0 of
+/// 23 and 25 is the OR'd heuristic of `Vrc2Vrc4::new`, which keeps the VRC4's features, so it is
+/// not a VRC2 here; mapper 21 has no VRC2 variant at all and mapper 27's board is a VRC4 clone.
+#[test]
+fn mf_leg_1_only_a_header_named_vrc2_gets_the_microwire_latch() {
+    // Declares no PRG-RAM, and is a VRC2: the latch.
+    for (mapper, submapper) in [(22u8, None), (23, Some(3u8)), (25, Some(3))] {
+        let mut rom = MapperRom::new(usize::from(mapper)).chr(64).prg_ram(0, 0);
+        if let Some(submapper) = submapper {
+            rom = rom.submapper(submapper);
+        }
+
+        let core = rom.load();
+        let has_latch = cfg!(feature = "board-vrc2-latch");
+        assert_eq!(
+            has_latch,
+            core.cartridge().unwrap().memory().prg_ram().is_empty(),
+            "mapper {mapper} submapper {submapper:?}"
+        );
+    }
+
+    // Declares no PRG-RAM and is **not** a header-named VRC2: REQ-CORE-012's 8 KiB floor, as
+    // before this step.
+    for (mapper, submapper) in [
+        (21u8, Some(1u8)), // a VRC4a
+        (23, None),        // submapper 0: the OR'd heuristic, a VRC4 as far as this core goes
+        (25, None),
+        (25, Some(1)), // a VRC4b
+        (27, None),    // the pirate VRC4 board
+    ] {
+        let mut rom = MapperRom::new(usize::from(mapper)).chr(64).prg_ram(0, 0);
+        if let Some(submapper) = submapper {
+            rom = rom.submapper(submapper);
+        }
+
+        let mut core = rom.load();
+        assert_eq!(
+            8 * 1024,
+            core.cartridge().unwrap().memory().prg_ram().len(),
+            "mapper {mapper} submapper {submapper:?}"
+        );
+        core.write_memory(0x6000, 0xA5);
+        assert_eq!(
+            0xA5,
+            core.read_memory(0x6000),
+            "mapper {mapper} submapper {submapper:?} answered a latch"
+        );
+    }
+}
+
+/// REQ-CORE-090/091 and Q-174 section 2: the latch is **not** in the savestate, so the block of
+/// mappers 21, 22, 23, 25 and 27 is byte for byte what it was before this step and a state
+/// written before it still loads. A state loaded into a running machine leaves the live latch
+/// alone, which is what this pins.
+#[cfg(feature = "board-vrc2-latch")]
+#[test]
+fn q_174_the_vrc2_microwire_latch_is_not_in_the_savestate() {
+    let mut core = MapperRom::new(22).chr(64).prg_ram(0, 0).load();
+    core.write_memory(0x6000, 0x01);
+    let state = core.save_state(false).expect("a state");
+
+    core.write_memory(0x6000, 0x00);
+    assert_eq!(0x00, core.read_memory(0x6000));
+    assert!(core.try_load_state(&state, 0).is_ok());
+    assert_eq!(
+        0x00,
+        core.read_memory(0x6000),
+        "the state carried a latch byte"
+    );
+
+    // And the block is the same length as the same board's without the latch, which is the
+    // statement about the format: the only difference between the two images is the header's
+    // byte 10, and `prg_ram` is written as a length-prefixed blob either way.
+    let plain = MapperRom::new(22)
+        .chr(64)
+        .load()
+        .save_state(false)
+        .expect("a state");
+    assert_eq!(
+        plain.len() - 8 * 1024,
+        state.len(),
+        "the latched board's state is the other's minus its 8 KiB of RAM"
+    );
+}
+
 #[test]
 fn req_core_100_vrc4_builds_each_chr_bank_from_two_nibbles() {
     let mut core = MapperRom::new(23).chr(64).load();

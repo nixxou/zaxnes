@@ -25,7 +25,7 @@
 //! root set.
 
 // The ROM run is long and its bookkeeping is plain; the test helpers panic on a failed setup.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
 

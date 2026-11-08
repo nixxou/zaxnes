@@ -74,6 +74,7 @@ default = [
     "board-219",
     "board-262",
     "board-246",
+    "board-vrc2-latch",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -743,6 +744,28 @@ board-193 = ["board-namcot108"]
 # write to $F003 and nothing anywhere else, and **no savestate byte** -- the flag comes from the
 # mapper number, so the block of mappers 21/22/23/25/27 is unchanged.
 board-298 = []
+
+# The VRC2's **Microwire one-bit latch at $6000-$6FFF** (MF-LEG-1 step 2, report entry VRC2-1;
+# Q-174). nesdev ("VRC2 and VRC4"): the chip "was supposed to have shipped with a Microwire
+# interface for save games. However, Konami never used it", and the games "rely on the two Data
+# pins being connected to each other, and so expect to be able to read the written value back" --
+# `.... ...L`, "1-bit latch value (r/w)", with "open bus for the top 7 bits". *Contra (J)* and
+# *Ganbare Goemon 2 (J)* are the two titles the page names.
+#
+# **Installed only when the header declares no PRG-RAM and the VRC2 variant is the header's**, which
+# is both Nestopia's gate (`if (!board.GetWram())`) and puNES's (NES 2.0 and no WRAM): so an iNES
+# 1.0 dump keeps the 8 KiB of REQ-CORE-012 PRG-RAM it has today, which is what makes the two games
+# work here by accident, and a correct NES 2.0 dump of a cartridge that has no RAM chip gets the
+# latch the hardware has instead of open bus.
+#
+# **A feature of its own**, on `board-298`'s reason in the same words: with it off this board's
+# struct and every function of it is byte for byte what the lot's base commit shipped, because the
+# five Konami numbers may not pay for a register only three of them can have. What it costs with the
+# feature on is one `is_some` on a write **below $8000** -- a write that reaches `write_register`
+# there today only to be dropped -- and one `is_some` in `Mapper::try_read_prg`, whose arm this
+# board already had a body for. **No savestate byte**: see `Vrc2Vrc4::microwire_latch` and Q-174
+# section 2.
+board-vrc2-latch = []
 
 # Mapper 29, the Sealie Computing **RET-CUFROM revD** (MF-UNL-7 step 6): "allocated on 15-nov-2013
 # to implement some homebrew games, including *Glider*".
