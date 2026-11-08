@@ -190,7 +190,11 @@ impl BankWindows {
     /// A17 **and CHR A17** from the MMC3", and the Kǎshèng A9461 masks "PRG-ROM and CHR-ROM banks
     /// … to 128 KiB" under its own two outer bits, so both numbers need the same `(bank & mask) |
     /// bits` on *both* bank tables.
-    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-215"))]
+    #[cfg(any(
+        feature = "board-mmc3-scramble",
+        feature = "board-215",
+        feature = "board-219"
+    ))]
     pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::PRG_WINDOWS {
             if self.prg_is_ram[slot] {
@@ -240,7 +244,7 @@ impl BankWindows {
     /// `remap_prg_banks` states.
     ///
     /// Additive: behind the three features of MF-UNL-11, its only callers.
-    #[cfg(feature = "board-215")]
+    #[cfg(any(feature = "board-215", feature = "board-219"))]
     pub fn remap_chr_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::CHR_WINDOWS {
             let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);

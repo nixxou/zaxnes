@@ -506,6 +506,9 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // MF-UNL-11 step 1: the UNL-8237 and UNL-8237A hold an `Mmc3`, counter included, and
             // the scramble of `$5007` leaves every one of the chip's IRQ ports reachable.
             | 215
+            // MF-UNL-11 step 3: the A9461's counter is the chip's in both of its modes -- its
+            // `$C000-$E001` are "as on regular MMC3" whatever `$8002` bit 5 holds.
+            | 219
             | 263
             | 264
             // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
@@ -558,6 +561,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 211
             // MF-UNL-11 step 1: the UNL-8237's MMC3 counter; see the list above.
             | 215
+            // MF-UNL-11 step 3: the A9461's MMC3 counter; see the list above.
+            | 219
             | 263
             | 264
             // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
@@ -1564,6 +1569,10 @@ mod tests {
         // 114's reason. **Twice**: submapper 1 is the UNL-8237A and the board refuses neither.
         #[cfg(feature = "board-215")]
         expected.extend_from_slice(&[215, 215]);
+        // MF-UNL-11 step 3: the A9461 holds an `Mmc3`, so it moves for 114's reason. **Twice**:
+        // the page gives the number no submapper and the board refuses neither half of the pair.
+        #[cfg(feature = "board-219")]
+        expected.extend_from_slice(&[219, 219]);
         #[cfg(feature = "board-263")]
         expected.extend_from_slice(&[263, 263]);
         #[cfg(feature = "board-cony")]

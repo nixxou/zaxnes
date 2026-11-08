@@ -6,6 +6,8 @@ use super::Huang1;
 use super::JyCompany;
 #[cfg(feature = "board-91")]
 use super::Mapper091;
+#[cfg(feature = "board-219")]
+use super::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
 #[cfg(feature = "board-208")]
@@ -190,6 +192,14 @@ pub enum IrqBoard {
     /// protection read -- is a method this variant already forwards for mappers 121 and 187.
     #[cfg(feature = "board-208")]
     Mmc3Gouder208(Box<Mmc3Gouder208>),
+    /// iNES mapper 219, the Kasheng **A9461** (MF-UNL-11 step 3): an MMC3 clone with a second
+    /// **extended** banking mode -- four independent 8 KiB PRG windows and eight 1 KiB CHR
+    /// windows reached through a wider register index -- above a 128 KiB outer bank of its own.
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// sixteen bytes of extended bank registers, so inline it would set this enum's size.
+    #[cfg(feature = "board-219")]
+    Mmc3A9461(Box<Mmc3A9461>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -329,6 +339,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Unl8237($b) => $body,
             #[cfg(feature = "board-208")]
             IrqBoard::Mmc3Gouder208($b) => $body,
+            #[cfg(feature = "board-219")]
+            IrqBoard::Mmc3A9461($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]

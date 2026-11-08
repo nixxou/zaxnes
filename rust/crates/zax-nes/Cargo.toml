@@ -70,6 +70,7 @@ default = [
     "board-91",
     "board-215",
     "board-208",
+    "board-219",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -211,6 +212,22 @@ board-215 = []
 # `board_memory_sizes` row gives submapper 0 no PRG-RAM, because its $6800 register *is* the
 # board's decode of that window.
 board-208 = []
+
+# Mapper 219, the Kasheng **A9461** (MF-UNL-11 step 3): an MMC3 clone with a second, **extended**
+# banking mode that $8002 bit 5 opens -- four independent 8 KiB PRG banks, each with a separate
+# register of its own and a bank field that is
+# **bit-reversed**, a CHR bank-number latch supplying bits 4-6 of every following CHR switch, a
+# "pseudo 2 KiB" 1 KiB switch over PPU $0000-$0FFF whose quarter number is also bit 0 of its bank,
+# and a plain 1 KiB switch over $1000-$1FFF -- above a two-bit 128 KiB outer PRG **and** CHR bank
+# at $5002/$5003. With the mode bit clear the board is an MMC3 masked to 128 KiB. One original
+# title, *Toy Story*, with the *Super 1997 4-in-1* multicart beside it.
+#
+# One boxed `IrqBoard` variant holding an `Mmc3` and sixteen bytes of extended bank registers.
+# **Q-171** records the two readings the page forces: the mode bit is latched by $8002 alone while
+# the index is latched by every even address of the window -- the only way its five-bit `R RRRR`
+# field and its six-bit extended index values can both be true -- and `Mask: $5003` is read as
+# $F003, because taken literally it would decode $D002/$D003, the chip's own IRQ ports.
+board-219 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

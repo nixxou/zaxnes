@@ -684,7 +684,8 @@ impl<
         feature = "board-mmc3-scramble",
         feature = "board-189",
         feature = "board-215",
-        feature = "board-208"
+        feature = "board-208",
+        feature = "board-219"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();

@@ -224,7 +224,7 @@ bullets asks for something no page states. The ticket also holds five things the
 - [x] **0/8** the plan — this note.
 - [x] **1/8** `board-215`: the board, its registry wiring and the eight-pattern tests.
 - [x] **2/8** `board-208`: the board, the 256-byte table and the protection tests.
-- [ ] **3/8** `board-219`: the board, the extended mode and its tests.
+- [x] **3/8** `board-219`: the board, the extended mode and its tests.
 - [ ] **4/8** §7.1's three common things, part one: the four sweeps over `SUPPORTED_MAPPERS` in the
       six configurations, and a save-state round-trip per board with its registers dirtied.
 - [ ] **5/8** `cargo fmt --check` and clippy `-D warnings` in the six configurations: default,
@@ -350,3 +350,74 @@ down the left edge.
 clippy `-D warnings` clean.
 
 [PROGRESS] MF-UNL-11 step 2/8 done: board-208
+
+## Step 3 — `board-219`, the Kasheng A9461 and its extended mode
+
+`Mmc3A9461` (`…/mappers/mmc3_a9461.rs`): an `Mmc3` held, a second banking mode behind `$8002`
+bit 5, and a two-bit 128 KiB outer bank over PRG **and** CHR. One boxed `IrqBoard` variant.
+
+### The reading that makes the page consistent, and it is the only one
+
+The `$8002` diagram's `R RRRR` field is **five** bits and the extended index values run to `$26`,
+which needs six — so the sixth is bit 5, the mode bit itself. That alone is a contradiction: the
+extended PRG indices `$23-$26` carry bit 5 **set** and all three CHR index patterns
+(`..00 1..0`, `..00 1RR1`, `..01 RR.1`) carry it **clear**, while every one of the four sections
+says "used only if `$8002` bit 5=1". Both hold only if
+
+* the **mode** is latched by a write to `$8002` and by no other even address, and
+* the **index** is latched by every even address of `$8000-$9FFF`.
+
+which is also why the page annotates `$8002` bits 6 and 7 as "PRG A14 inversion" and "CHR A12
+inversion": those are the MMC3's own `$8000` bits, so `$8002` *is* the chip's `$8000` port with
+bit 5 given a meaning, and an even write always reaches the chip.
+`q_171_mapper_219_latches_the_mode_bit_from_8002_and_the_index_from_every_even_address` asserts it
+from both sides — a `$8000` write with bit 5 set does not open the mode, and a `$8000` write with
+bit 5 clear (which every CHR index is) does not close it. In extended mode the **odd** writes are
+this board's own registers and never reach the chip, so clearing the mode bit gives an MMC3 back
+with the bank registers it had.
+
+### The extended registers
+
+| index | datum | what |
+| --- | --- | --- |
+| `..10 .RRR`, `$23-$26` | `..BB BB..` | an 8 KiB PRG bank, its four bits **reversed**, at the window `RRR` names (6 → `$8000` … 3 → `$E000`) |
+| `..00 1..0` / `..01 ...0`, `$08-$1E` even | `.... .654` | the CHR bank-number latch: bits 4-6 of every following CHR switch |
+| `..00 1RR1`, `$09-$0F` odd | `BBBB BBB.` | a 1 KiB CHR bank in one quarter of PPU `$0000-$0FFF`, **with bit 1 of the index ORed into bit 0 of the bank** |
+| `..01 RR.1`, `$11-$1F` odd | `BBBB BBB.` | a 1 KiB CHR bank in one quarter of PPU `$1000-$1FFF` |
+
+**The "pseudo 2 KiB" of the third row's title is that index bit**, and it is the only place in
+this board where an address bit reaches a bank number: one bank written to all four quarters comes
+out `$0A $0B $0A $0B`, two 2 KiB pairs built from two 1 KiB switches. The test asserts exactly
+that.
+
+### `Mask: $5003` is read as `$F003` (Q-171)
+
+Taken literally the page's mask decodes A14, A12, A1 and A0 and **not A15**, so `$D002`/`$D003` —
+the chip's own IRQ latch and reload — would be the outer bank register too.
+`q_171_mapper_219_decodes_the_outer_bank_inside_5000_5fff_and_not_at_d002` pins the choice from
+both ends: `$5FFE`/`$5FFF` are aliases of the pair and do bank, `$D002`/`$D003` do not — and the
+same write is then shown to have reached the counter, so the test proves where it went and not
+only where it did not.
+
+### The six tests
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_219_banks_four_independent_prg_windows_in_extended_mode` | §7.2's own bullet, both halves; the four banks are **1, 2, 4, 8**, one bit each, which is what pins the reversal — bank 1 is written as `$20` and bank 8 as `$04` |
+| `…_is_an_mmc3_masked_to_128_kib_under_its_outer_bank` | the chip's banks masked to A16 and the outer two bits handing A17-A18 back, all four outer banks of **both** halves inside a 512 KiB image |
+| `…_switches_chr_through_a_latch_and_two_pseudo_switches` | the pseudo-2 KiB pairing, the four 1 KiB windows of the second table, and the latch reached through both of its index patterns |
+| `q_171_…_latches_the_mode_bit_from_8002_and_the_index_from_every_even_address` | the reading above |
+| `q_171_…_decodes_the_outer_bank_inside_5000_5fff_and_not_at_d002` | the `$F003` reading |
+| `req_core_095_…_leaves_6000_7fff_to_the_header_and_decodes_nothing_there` | **no `board_memory_sizes` arm**, and the other half of the mask question: a literal `$5003` would decode `$7002`/`$7003` and that window could then not be RAM |
+
+### One thing the lot nearly shipped broken
+
+`req_arch_002_the_crate_has_no_platform_dependency` reads `zax-nes/Cargo.toml` as text and
+forbids the substring `windows`, among five crate names. This step's feature comment used the word
+in its ordinary sense and the test caught it; the comment is reworded. Worth recording because the
+check is on the manifest's prose and not on its dependency table.
+
+`cargo test --release -p zax-nes`: all suites pass, `mapper_tests` 365 → **371**. fmt clean,
+clippy `-D warnings` clean.
+
+[PROGRESS] MF-UNL-11 step 3/8 done: board-219

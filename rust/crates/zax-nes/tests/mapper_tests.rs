@@ -224,6 +224,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   with a **256-byte protection lookup table** -- an index at $5000-$57FF and four registers
     //   at $5800-$5FFF holding the CPU datum XORed with the indexed entry -- behind `board-208`
     //   (MF-UNL-11 step 2, Q-171);
+    // * 219, the Kasheng A9461: an MMC3 clone with a second **extended** banking mode that $8002
+    //   bit 5 opens -- four independent 8 KiB PRG windows with a bit-reversed bank field, a CHR
+    //   bank-number latch, a "pseudo 2 KiB" 1 KiB switch whose quarter number is also bit 0 of
+    //   its bank, and a plain 1 KiB switch -- over a two-bit 128 KiB outer PRG and CHR bank at
+    //   $5002/$5003 -- behind `board-219` (MF-UNL-11 step 3, Q-171);
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -250,7 +255,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 109] = [
+    let additions: [(i32, bool); 110] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -355,6 +360,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (211, jy),
         (215, cfg!(feature = "board-215")),
         (218, cfg!(feature = "board-218")),
+        (219, cfg!(feature = "board-219")),
         (232, small),
         (243, sachen),
         (263, cfg!(feature = "board-263")),
@@ -15041,4 +15047,318 @@ fn req_core_114_mapper_208_keeps_the_mmc3s_scanline_counter() {
         core.mapper_write(0xE000, 0x00);
         assert!(!core.cartridge().unwrap().irq_asserted());
     }
+}
+
+// ------------------------------------------- the Kasheng A9461 (219), lot MF-UNL-11 step 3
+
+/// nesdev ("INES Mapper 219"), *Extended PRG-ROM Bank Index (`$8000`, `$23-$26`)/Data (`$8001`)*:
+/// the index names one of four 8 KiB windows — "6: `$8000-$9FFF`, 5: `$A000-$BFFF`,
+/// 4: `$C000-$DFFF`, 3: `$E000-$FFFF`" — and the datum is `..BB BB..`, "bits 0-3 (**reversed
+/// order**) of 8 KiB PRG-ROM bank number".
+///
+/// §7.2 of `docs/review/UNL-census.md` asks for "with `$8002` bit 5 set, the four PRG windows are
+/// independent; with it clear, the board is an MMC3". Both halves are here, and the four banks
+/// chosen are **1, 2, 4 and 8** — one bit each — because that is what pins the reversal: a bank of
+/// 1 is written as `$20`, the value's *top* live bit, and a bank of 8 as `$04`, its bottom one.
+#[cfg(feature = "board-219")]
+#[test]
+fn req_core_102_mapper_219_banks_four_independent_prg_windows_in_extended_mode() {
+    let mut core = MapperRom::new(219).prg(16).chr(32).load();
+    assert_eq!(
+        [0, 1, 14, 15],
+        core.prg_windows(),
+        "the MMC3's own power-on layout, masked to 128 KiB"
+    );
+
+    // $8002 bit 5 opens the extended mode, and nothing of the mode's own registers has been
+    // written yet, so all four windows are bank 0.
+    core.mapper_write(0x8002, 0x20);
+    assert_eq!([0, 0, 0, 0], core.prg_windows());
+
+    // (the index, the window it names, the datum, the bank that datum reverses to)
+    for (index, slot, datum, bank) in [
+        (0x26u8, 0usize, 0x20u8, 1u8),
+        (0x25, 1, 0x10, 2),
+        (0x24, 2, 0x08, 4),
+        (0x23, 3, 0x04, 8),
+    ] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, datum);
+        assert_eq!(
+            bank,
+            core.prg_windows()[slot],
+            "index {index:#04X}: datum {datum:#04X} is bank {bank} at window {slot}"
+        );
+    }
+    assert_eq!(
+        [1, 2, 4, 8],
+        core.prg_windows(),
+        "and the four windows are independent"
+    );
+
+    // "with it clear, the board is an MMC3": the chip kept its own registers all along, because
+    // the odd writes above never reached it.
+    core.mapper_write(0x8002, 0x00);
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+
+    // And the extended registers survive the trip, which is what makes them registers.
+    core.mapper_write(0x8002, 0x20);
+    assert_eq!([1, 2, 4, 8], core.prg_windows());
+}
+
+/// "MMC3 Bank Register (`$8000`/`$8001`) … Used when `$8002` bit 5=0. … PRG-ROM and CHR-ROM banks
+/// masked to **128 KiB**", with the two bits of `$5002`/`$5003` above that mask: "bit 0 / bit 1 of
+/// 128 KiB outer PRG-ROM and CHR-ROM bank".
+///
+/// So in MMC3 mode the chip drives PRG A13-A16 and CHR A10-A16 and the outer register drives
+/// A17-A18 of both — which this test shows by giving the chip bank numbers whose top bit the mask
+/// drops and then handing that bit back from `$5002`.
+#[cfg(feature = "board-219")]
+#[test]
+fn req_core_102_mapper_219_is_an_mmc3_masked_to_128_kib_under_its_outer_bank() {
+    // 512 KiB of each, so that all four outer banks of both halves are inside the image.
+    let mut core = MapperRom::new(219).prg(64).chr(512).load();
+    core.mmc3_bank(6, 0x13);
+    core.mmc3_bank(7, 0x05);
+    core.mmc3_bank(2, 0x85);
+    assert_eq!(
+        [0x03, 0x05, 0x0E, 0x0F],
+        core.prg_windows(),
+        "PRG A17 is not the chip's: $13 is bank 3 and the fixed windows are 14 and 15"
+    );
+    assert_eq!(
+        0x05,
+        core.chr_windows()[4],
+        "and CHR A17 is not the chip's either: $85 is bank 5"
+    );
+
+    // (the two writes, the outer bank they leave, the PRG window it puts bank 3 in)
+    // $5002 is bit 0, `.... ...B`; $5003 is bit 1 and it is **bit 5** of the datum, `..B. ....`.
+    let chr = |core: &NesCore| {
+        core.cartridge()
+            .unwrap()
+            .chr_peek_view()
+            .map(|view| view.offsets()[4])
+    };
+    for (bit0, bit1, outer) in [
+        (0x01u8, 0x00u8, 1u8),
+        (0x01, 0x20, 3),
+        (0x00, 0x20, 2),
+        (0x00, 0x00, 0),
+    ] {
+        core.mapper_write(0x5002, bit0);
+        core.mapper_write(0x5003, bit1);
+        // 16 PRG banks of 8 KiB per outer bank, and 128 CHR banks of 1 KiB.
+        assert_eq!(
+            [
+                0x03 + outer * 0x10,
+                0x05 + outer * 0x10,
+                0x0E + outer * 0x10,
+                0x0F + outer * 0x10
+            ],
+            core.prg_windows(),
+            "outer bank {outer}: PRG A17-A18"
+        );
+        assert_eq!(
+            Some((5 + usize::from(outer) * 128) * 1024),
+            chr(&core),
+            "outer bank {outer}: CHR A17-A18"
+        );
+    }
+
+    // The page's "The Outer Bank register must be initialized to $03 for the menu to appear" is a
+    // statement about the menu's own code, so the board powers on at zero and a reset says so.
+    core.reset();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+}
+
+/// The three CHR sections of the extended mode, which are one latch and two switches:
+///
+/// * *CHR-ROM Bank Number Latch Index (`$8000`, `$08-$1E`, **even**)*, datum `.... .654` — "bits
+///   4-6 OR'd with next CHR-ROM switch's data";
+/// * *CHR-ROM Pseudo 2 KiB switch Index (`$8000`, `$09-$0F`, **odd**)*, `..00 1RR1`, `RR` picking
+///   one of the four quarters of PPU `$0000-$0FFF`, with the datum "OR'd with bit 1 SHR 1 of the
+///   value written to `$8000`";
+/// * *CHR-ROM 1 KiB switch Index (`$8000`, `$11-$1F`, odd)*, `..01 RR.1`, `RR` picking one of the
+///   four quarters of PPU `$1000-$1FFF`.
+///
+/// **The "pseudo 2 KiB" of that title is the index bit**, and the first block below is what it
+/// means: one bank number written to two consecutive quarters comes out as a consecutive *pair*,
+/// because the odd quarter's own index bit is bit 0 of its bank. That is a 2 KiB switch built out
+/// of two 1 KiB ones, and it is the only place in this board where an address bit reaches a bank
+/// number.
+#[cfg(feature = "board-219")]
+#[test]
+fn req_core_102_mapper_219_switches_chr_through_a_latch_and_two_pseudo_switches() {
+    let mut core = MapperRom::new(219).prg(16).chr(256).load();
+    core.mapper_write(0x8002, 0x20);
+
+    // The pseudo 2 KiB switch: `$09`, `$0B`, `$0D`, `$0F` are the four quarters of $0000-$0FFF,
+    // and the same datum -- bank $0A, the field being `BBBB BBB.` -- lands as $0A in the even
+    // quarters and $0B in the odd ones.
+    for index in [0x09u8, 0x0B, 0x0D, 0x0F] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, 0x0A << 1);
+    }
+    assert_eq!(
+        [0x0A, 0x0B, 0x0A, 0x0B],
+        core.chr_windows()[..4],
+        "one bank number over four quarters is two 2 KiB pairs"
+    );
+
+    // The 1 KiB switch over $1000-$1FFF: `$11`, `$15`, `$19`, `$1D`, and no index bit reaches
+    // the bank here.
+    for (index, bank) in [(0x11u8, 0x20u8), (0x15, 0x21), (0x19, 0x22), (0x1D, 0x23)] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, bank << 1);
+    }
+    assert_eq!(
+        [0x20, 0x21, 0x22, 0x23],
+        core.chr_windows()[4..],
+        "four independent 1 KiB windows over the second pattern table"
+    );
+
+    // The latch supplies bits 4-6 of every switch that follows it, from its own bits 0-2.
+    core.mapper_write(0x8000, 0x08);
+    core.mapper_write(0x8001, 0x02);
+    core.mapper_write(0x8000, 0x11);
+    core.mapper_write(0x8001, 0x03 << 1);
+    assert_eq!(
+        0x23,
+        core.chr_windows()[4],
+        "bank $03 with the latch's $02 shifted into bits 4-6"
+    );
+
+    // `..01 ...0` is the same latch register as `..00 1..0`, which is what the page's "or" means.
+    core.mapper_write(0x8000, 0x10);
+    core.mapper_write(0x8001, 0x05);
+    core.mapper_write(0x8000, 0x11);
+    core.mapper_write(0x8001, 0x03 << 1);
+    assert_eq!(0x53, core.chr_windows()[4], "$10 is the latch too");
+
+    // It reaches the pseudo 2 KiB switch in the same words.
+    core.mapper_write(0x8000, 0x09);
+    core.mapper_write(0x8001, 0x04 << 1);
+    assert_eq!(0x54, core.chr_windows()[0]);
+}
+
+/// **Q-171, the reading the page forces**: its `R RRRR` field is five bits wide and its extended
+/// index values run to `$26`, which needs six — so the sixth is bit 5, the mode bit itself. The
+/// extended PRG indices `$23-$26` carry that bit **set** and all three CHR index patterns carry
+/// it **clear**, yet every one of the four sections says "used only if `$8002` bit 5=1".
+///
+/// Both statements can only hold if the **mode** is latched by a write to `$8002` and the
+/// **index** by any even address of the window, which is what this test asserts from both sides:
+/// a `$8000` write with bit 5 set does not open the mode, and a `$8000` write with bit 5 clear
+/// does not close it.
+#[cfg(feature = "board-219")]
+#[test]
+fn q_171_mapper_219_latches_the_mode_bit_from_8002_and_the_index_from_every_even_address() {
+    let mut core = MapperRom::new(219).prg(16).chr(32).load();
+
+    // A $8000 write carrying bit 5 does not open the extended mode: were it the index alone that
+    // decided, this would, and the CHR sections could never be reached.
+    core.mapper_write(0x8000, 0x26);
+    core.mapper_write(0x8001, 0x20);
+    assert_eq!(
+        [0, 1, 14, 15],
+        core.prg_windows(),
+        "$8000 does not latch the mode, so that write was the chip's own R6 index and datum"
+    );
+
+    core.mapper_write(0x8002, 0x20);
+    core.mapper_write(0x8000, 0x26);
+    core.mapper_write(0x8001, 0x20);
+    assert_eq!(1, core.prg_windows()[0], "$8002 does latch it");
+
+    // And a $8000 write with bit 5 clear -- which every CHR index is -- does not close it.
+    core.mapper_write(0x8000, 0x09);
+    core.mapper_write(0x8001, 0x0A << 1);
+    assert_eq!(
+        (1u8, 0x0Au8),
+        (core.prg_windows()[0], core.chr_windows()[0]),
+        "a CHR index leaves the mode alone and switches CHR"
+    );
+
+    // $8002 with bit 5 clear closes it, and the chip's registers are where they were.
+    core.mapper_write(0x8002, 0x00);
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+}
+
+/// **Q-171**: the page gives the outer bank register `Mask: $5003`, which taken literally decodes
+/// A14, A12, A1 and A0 and **not A15** — so `$D002` and `$D003`, the MMC3's own IRQ latch and
+/// reload, would be the outer bank register as well. The window implemented is `$F003`: the two
+/// addresses the page's section titles name and their aliases inside `$5000-$5FFF`.
+#[cfg(feature = "board-219")]
+#[test]
+fn q_171_mapper_219_decodes_the_outer_bank_inside_5000_5fff_and_not_at_d002() {
+    let mut core = MapperRom::new(219).prg(64).chr(32).load();
+    core.mmc3_bank(6, 0x01);
+    assert_eq!(0x01, core.prg_windows()[0]);
+
+    // An alias inside the window: $5FFE is $5002 and $5FFF is $5003.
+    core.mapper_write(0x5FFE, 0x01);
+    assert_eq!(0x11, core.prg_windows()[0]);
+    core.mapper_write(0x5FFF, 0x20);
+    assert_eq!(0x31, core.prg_windows()[0]);
+    core.mapper_write(0x5002, 0x00);
+    core.mapper_write(0x5003, 0x00);
+    assert_eq!(0x01, core.prg_windows()[0]);
+
+    // $D002 and $D003 are the chip's IRQ latch and reload, and they do not bank anything.
+    core.mapper_write(0xD002, 0x01);
+    core.mapper_write(0xD003, 0x20);
+    assert_eq!(
+        0x01,
+        core.prg_windows()[0],
+        "$D002/$D003 are not the outer bank register"
+    );
+
+    // And that pair really did reach the counter: $D002 is a latch of 1, $D003 reloads, and the
+    // IRQ fires on the rise after it.
+    core.mapper_write(0xE001, 0x00);
+    for clock in 0..4i64 {
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus(0x0000, clock * 200);
+        cartridge.on_ppu_address_bus(0x1000, clock * 200 + 100);
+    }
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "the write at $D002/$D003 was the IRQ latch and reload"
+    );
+}
+
+/// `registry::board_memory_sizes` has **no arm** for this number: both of its registers are below
+/// `$6000`, so nothing forces the question and the header decides — mappers 121, 123 and 187's
+/// choice, and mapper 97's precedent in that function.
+///
+/// It is also the other half of the `$F003` reading above: the page's `Mask: $5003` taken
+/// literally would decode `$7002`/`$7003` too, and then the window could not be RAM at all.
+#[cfg(feature = "board-219")]
+#[test]
+fn req_core_095_mapper_219_leaves_6000_7fff_to_the_header_and_decodes_nothing_there() {
+    let mut core = MapperRom::new(219).prg(32).chr(32).battery().load();
+    core.mapper_write(0xA001, 0x80);
+    core.mmc3_bank(6, 0x01);
+    let windows = (core.prg_windows(), core.chr_windows());
+
+    for (address, value) in [
+        (0x6000u16, 0x11u8),
+        (0x7002, 0x22),
+        (0x7003, 0x33),
+        (0x7FFF, 0x44),
+    ] {
+        core.write_memory(address, value);
+        assert_eq!(
+            value,
+            core.read_memory(address),
+            "{address:#06X} is PRG-RAM and the board does not decode it"
+        );
+    }
+
+    assert_eq!(
+        windows,
+        (core.prg_windows(), core.chr_windows()),
+        "and no write in $6000-$7FFF moved a window"
+    );
 }

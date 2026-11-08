@@ -69,6 +69,8 @@ mod mapper091;
 mod mmc1;
 mod mmc2;
 mod mmc3;
+#[cfg(feature = "board-219")]
+mod mmc3_a9461;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
 #[cfg(feature = "board-208")]
@@ -202,6 +204,8 @@ pub use mmc3::Tqrom;
 pub use mmc3::{McAcc, Mmc3};
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs303};
+#[cfg(feature = "board-219")]
+pub use mmc3_a9461::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
 #[cfg(feature = "board-208")]

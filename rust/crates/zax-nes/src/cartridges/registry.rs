@@ -26,6 +26,8 @@ use super::mappers::JyCompany;
 use super::mappers::MagicFloor;
 #[cfg(feature = "board-91")]
 use super::mappers::Mapper091;
+#[cfg(feature = "board-219")]
+use super::mappers::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-208")]
@@ -346,6 +348,9 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     215,
     #[cfg(feature = "board-218")]
     218,
+    // The Kasheng A9461, an MMC3 clone with an extended banking mode (MF-UNL-11 step 3).
+    #[cfg(feature = "board-219")]
+    219,
     225,
     228,
     #[cfg(feature = "board-small-boards")]
@@ -1435,6 +1440,14 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // paragraph that settles it.
         #[cfg(feature = "board-189")]
         189 => Board::IrqBoard(IrqBoard::Mmc3Txc189(Mmc3Txc189::new(memory))),
+        // MF-UNL-11 step 3: the Kasheng A9461, an MMC3 clone whose `$8002` bit 5 opens an
+        // extended mode -- four independent 8 KiB PRG windows and eight 1 KiB CHR windows behind
+        // a wider register index -- above a two-bit 128 KiB outer bank at $5002/$5003. The page
+        // gives the number no submapper, so there is nothing to refuse.
+        #[cfg(feature = "board-219")]
+        219 => Board::IrqBoard(IrqBoard::Mmc3A9461(Box::new(Mmc3A9461::new(
+            memory, mapper,
+        )))),
         // MF-UNL-11 step 2: the unnamed Gouder board of the Street Fighter IV backport, an
         // MMC3 clone whose PRG-ROM is banked in 32 KiB amounts from a register at $4800/$6800,
         // with a 256-byte protection lookup table behind four registers at $5800-$5FFF.
