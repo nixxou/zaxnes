@@ -22,6 +22,7 @@
     feature = "board-178",
     feature = "board-190",
     feature = "board-218",
+    feature = "board-246",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-nina03",

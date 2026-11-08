@@ -500,3 +500,41 @@ the reading. AMD-061's global sweep passes over 246 unchanged because the addres
 
 **392** is the figure to compare the configurations of step 5 against: 379 at the lot's base
 commit plus this lot's thirteen.
+
+## Step 5 — the six configurations
+
+`cargo fmt --check` is **clean** over the whole workspace, and clippy with `-D warnings` on
+`zax-nes` — the one crate this lot touches — is clean in all six:
+
+| configuration | clippy | `mapper_tests` |
+| --- | --- | ---: |
+| `default` | **clean** | **392** passed / 0 failed |
+| `--no-default-features` | **clean** | 103 |
+| `--features parked-boards` | **clean** | **392** |
+| `--no-default-features --features board-262` | **clean** | 108 |
+| `--no-default-features --features board-292` | **clean** | 109 |
+| `--no-default-features --features board-246` | **clean** | 108 |
+
+`--all-targets` in every row, so the tests are linted too. The full `cargo test --release -p
+zax-nes` is green in `default`, `--no-default-features` and `--features parked-boards`.
+
+**392 against a base of 375**: this lot adds **seventeen** tests, and the three single-feature
+rows account for sixteen of them — 5 for 262, 6 for 292, 5 for 246. The seventeenth is
+`amd_061_a_reset_puts_both_mmc3_boards_of_mf_unl_12_back_to_their_power_on_state`, which is
+`#[cfg(all(feature = "board-262", feature = "board-292"))]` and so runs in `default` and in
+`parked-boards` and in neither single-feature build. That arithmetic is the check: a test gated on
+a feature it does not need would show up here as a row that is too high, and one gated on a
+feature it does need but did not name would show up as a build failure.
+
+### What the single-feature builds caught, and it is the same class of thing every lot's do
+
+**`board-246` alone did not compile.** `DecodeBoard`'s file opens with a `compile_error!` behind a
+`cfg(not(any(…)))` over every board of that enum — the guard that turns
+`--features board-decode-boards` on its own into one clear error instead of nine confusing ones —
+and its `any` list is the one place a new member of the enum has to be named that is *not* implied
+by anything else. The feature was in `default`, so every other configuration had another board of
+the enum on and the list's omission was invisible.
+
+That is MF-UNL-11 step 5's finding in a different file (there it was `IrqBoard::try_read_prg`'s
+`cfg` list, caught by the `board-208`-alone build), and the rule it gives is the same: **a `cfg`
+list is never implied by the variant it belongs to.**
