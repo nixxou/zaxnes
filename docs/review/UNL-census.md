@@ -1333,6 +1333,39 @@ cartridge, so the lot preserves everything that made them A. 178's educational v
 
 **Board and feature**: `board-268`. **1 number, 1 feature, ~8 h, 12 original titles.**
 
+> **Implemented (MF-UNL-6, `docs/progress/MF-UNL-6.md`), with two of this section's own steps
+> corrected by the number's page.** Four things the next reader of this section needs:
+>
+> 1. **"Leave the rest refusing" is read by submapper, and that is what the page's structure
+>    allows.** nesdev indexes the thirteen PCB codes by NES 2.0 submapper, in six groups, and the
+>    groups do **not** share a register layout — `$xxx0` has four distinct bit diagrams on that
+>    page and `$xxx1` three, and submappers 2/3 move the window to `$7000-$7FFF`. So the board is
+>    submappers **0 and 1**: one layout, six of the thirteen codes (COOLBOY, MINDKIDS, KT-008,
+>    YH2018A, JTH-813 and the unnamed mixed-CHR board) and **all twelve titles**. Submappers 2 to
+>    11 are refused at load with REQ-CORE-011's typed cause. **Q-157**.
+> 2. **Step 3's "the lockout … implemented as a no-op" is wrong and the page says why.** The
+>    page's own *WRAM usage* section is three instructions of 6502 and a paragraph explaining that
+>    on a COOLBOY the register window **is** the lower half of the WRAM window, so the lockout is
+>    the only thing that lets a game have both; its own conclusion for the mode where the bit does
+>    nothing is that "any WRAM write would inadvertently change the outer bank registers". A no-op
+>    lockout would do that to every one of the nine Chinese RPGs. MF-UNL-2's rule applies: the page
+>    wins, the lockout is implemented. **Q-156**, which asks that this step be amended.
+> 3. **Step 2's "lift the PRG/CHR size ceiling in the loader" describes a ceiling this build does
+>    not have.** `InesHeader::try_parse`, `nes20_rom_size`, `RomImage::try_load` and
+>    `BankWindows::new` were each read: none imposes a maximum, and an over-size *declaration* is
+>    already refused by the truncation check. So step 2's deliverable became step 4's regression
+>    test and nothing else. What *is* real in the 64 MiB story is PRG A25's reset state —
+>    "PRG A25=PRG A0", a byte-by-byte interleave of two 32 MiB chips, which no bank window can say;
+>    this build answers the first half, the one the page says the existing multicarts duplicate
+>    their boot code into. **Q-158** holds both halves.
+> 4. **The measurement is the cleanest of the six lots.** Worst PR-1 ROM **+0.001 %** with the set
+>    total **below** the base commit (−150 669), all five level-2 `core` figures **+0 to the
+>    instruction** with `ppu`, `apu` and `draw_list` +0 as well, worst level-2 `total` +0.0195 %
+>    (`smb3`), of whose 4.73 M **4.31 M is Lua's `luaH_getshortstr`**. A sixteenth `IrqBoard`
+>    variant holding an `Mmc3` costs nothing an instrument can resolve. **Q-159** is the one
+>    remaining reading of a register: `$xxx3` bit 5's second PRG-RAM window at `$5000-$5FFF`, one
+>    clause with no mapping behind it.
+
 **Why it is its own lot, and the one thing to watch**: twelve original titles — nine Chinese RPGs
 and three modern licensed reissues (*Gravity Trooper Metal Storm*, *Holy Diver*, *Quest Forge*,
 through Retro-Bit / Piko Interactive) — behind an MMC3 whose outer registers take it from 512 KiB

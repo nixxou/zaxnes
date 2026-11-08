@@ -171,6 +171,7 @@ same flag passed to `zax-harness` or `zax-app` as `--features zax-nes/<name>` re
 | `board-163` | 163 | the 南晶 (Nánjīng) **FC-001**, the board of most of that publisher's catalogue: four write ports and one read port in $5000-$5FFF under four different masks -- a 32 KiB PRG bank composed from six bank bits (2 MiB) across `$5000`, `$5200` and a mode bit of `$5300`, a D0/D1 swap on the two bank ports (**Q-155**), and a feedback/protection latch at `$5100-$5101` read back **inverted** at `$5500-$5501` under mask `$F300`. 8 KiB of battery-backed PRG-RAM, hard-wired mirroring. The mechanism that names its lot: a **4 KiB CHR-RAM page latched off the PPU address bus** -- "CHR A12=PPU A9 latched on last rise of PPU A13" -- so the left pattern table draws the top half of any nametable and the right one the bottom half, whatever the scroll. The number is in **both** PPU watch lists, mapper 96's reason in the same words. Submapper 1's ADPCM chip is deferred with the rest of the expansion audio. One `DecodeBoard` variant shared with `board-162`; implies `board-decode-boards` | **6**: *牧场物语 — Harvest Moon*, *水浒神兽*, *暗黑破坏神 — Diablo*, *轩辕剑外传 之 天之痕*, *Final Fantasy IV — 最终幻想 4*, *雷电皇 比卡丘传说* | measured **per board** against `4a1cbffe` (MF-UNL-5 step 5): `board-163` alone worst ROM `m1` **+0.001 %**, set total +225 155; with `board-162` worst `m1` **+0.002 %**, set total +323 610, four of thirteen below; **all three on**, worst ROM +0.001 % on six of them and set total **+451 305 (+0.001 %)**. The control -- the same source with the three features out of `default`, so no board code is reachable -- is itself `vblnmi` **+0.002 %**, so the lot's worst ROM is the gating's own figure | **all five `core` figures identical to the instruction across the three boards**: `smb1`, `smb3` and `zelda2` **+0**, `metroid` +9 952 and `mm2` +18 944 (both +0.000 %, and both the figure MF-UNL-1 and MF-UNL-3 measured for their own lots). All five `total` inside: -0.000 % to **+0.016 %** (`smb1`), whose stage table has `core`, `ppu`, `apu` and `draw_list` **+0** and whose per-function diff is `getgeneric` +1 380 172 and `luaH_getshortstr` +1 255 652 -- the same-behaviour control moves the same column by +0.013 % to +0.016 % | **on** | `cargo build -p zax-nes --no-default-features --features <the others>` |
 | `board-162` | 162 | the 外星 (Wàixīng) **FS304**: the same four ports under the same masks as `board-163`, and **the same CHR-RAM latch**, with a PRG composition of its own -- two mode bits in `$5300` instead of one, PRG A16 and A15 each with a source, and a bank line on `$5100` where the FC-001 has its feedback latch. That last difference is what each page's *Notes* tell a dumper to test for, from opposite sides ("write $04 to $5300 and verify that $5100.1 **changes** the PRG bank" / "**does not**"), and `req_core_102_the_two_chr_window_boards_differ_by_the_dumpers_own_test` is that pair of sentences as one test. No feedback register, no swap bit. **One `ChrWindowKind` and no second `Board` or `DecodeBoard` variant**; implies `board-decode-boards` | **6**: *Mummy — 神鬼传奇*, *法老王 — Pharaoh*, *西游记后传*, *火焰纹章 — 圣战的系谱*, *Zelda 传说: 三神之力*, plus three 南晶 releases on the same board | measured **per board** against `4a1cbffe` (MF-UNL-5 step 5): `board-163` alone worst ROM `m1` **+0.001 %**, set total +225 155; with `board-162` worst `m1` **+0.002 %**, set total +323 610, four of thirteen below; **all three on**, worst ROM +0.001 % on six of them and set total **+451 305 (+0.001 %)**. The control -- the same source with the three features out of `default`, so no board code is reachable -- is itself `vblnmi` **+0.002 %**, so the lot's worst ROM is the gating's own figure | **all five `core` figures identical to the instruction across the three boards**: `smb1`, `smb3` and `zelda2` **+0**, `metroid` +9 952 and `mm2` +18 944 (both +0.000 %, and both the figure MF-UNL-1 and MF-UNL-3 measured for their own lots). All five `total` inside: -0.000 % to **+0.016 %** (`smb1`), whose stage table has `core`, `ppu`, `apu` and `draw_list` **+0** and whose per-function diff is `getgeneric` +1 380 172 and `luaH_getshortstr` +1 255 652 -- the same-behaviour control moves the same column by +0.013 % to +0.016 % | **on** | as above |
 | `board-178` | 178 | the 外星 **FS305**, the 南晶 **NJ0430** and the Jncota, Hengge Dianzi and GameStar / Belsonic boards of the same chipset -- **and the board whose own page does not give it the PPU-driven CHR window its lot's section heading promises** (**Q-154**): its CHR is "8 KiB unbanked CHR-RAM" and PPU A9, PPU A13, CHR A12 and CHR switching appear nowhere on it, so the number is in **neither** PPU watch list and overrides no PPU hook. What it has instead is four registers at **$4800-$4803** (not $5000-$5300) -- a mirroring bit and a two-bit PRG mode (BNROM / UNROM / NROM-128 / UNROM with a selectable fixed-bank A14), a three-bit inner bank and an eight-bit outer bank -- and an **8 KiB banked PRG-RAM window** at $6000-$7FFF from all eight bits of `$4803`, which is this enum's first `Mapper::prg_ram_window` forward. Three sentences of the page are deliberately not acted on: the two swapped-register dumps (a comment, per census §7.2), the commit-on-`$4801` theory the page itself rejects, and the FS305's hardwired PRG A14. Submappers 1 to 3 deferred. Its own `DecodeBoard` variant; implies `board-decode-boards` | 2 the census names: *宠物: 小精灵 IV*, *Ping Pong*, plus the educational computers | measured **per board** against `4a1cbffe` (MF-UNL-5 step 5): `board-163` alone worst ROM `m1` **+0.001 %**, set total +225 155; with `board-162` worst `m1` **+0.002 %**, set total +323 610, four of thirteen below; **all three on**, worst ROM +0.001 % on six of them and set total **+451 305 (+0.001 %)**. The control -- the same source with the three features out of `default`, so no board code is reachable -- is itself `vblnmi` **+0.002 %**, so the lot's worst ROM is the gating's own figure | **all five `core` figures identical to the instruction across the three boards**: `smb1`, `smb3` and `zelda2` **+0**, `metroid` +9 952 and `mm2` +18 944 (both +0.000 %, and both the figure MF-UNL-1 and MF-UNL-3 measured for their own lots). All five `total` inside: -0.000 % to **+0.016 %** (`smb1`), whose stage table has `core`, `ppu`, `apu` and `draw_list` **+0** and whose per-function diff is `getgeneric` +1 380 172 and `luaH_getshortstr` +1 255 652 -- the same-behaviour control moves the same column by +0.013 % to +0.016 % | **on** | as above |
+| `board-268` | 268 | the 聚芯 **AA6023** ASIC (SMD132 / SMD133) of the **COOLBOY** and **MINDKIDS** boards: an MMC3 clone with **six outer bank registers** under mask `$F007`, at $6000-$6FFF or $5000-$5FFF by the submapper's bit 0, which take the chip from 512 KiB to **32 MiB** of PRG-ROM (64 MiB on the YH2018A, **Q-158**). Four PRG mask bits that read in *opposite* directions, so the board **powers on as a 512 KiB MMC3** and a game above that has to open the lines first; four banking modes -- the oversize MMC3, a GNROM page, and the two "weird" ones the page's own *Notes* say no cartridge uses; a mixed CHR-ROM/CHR-RAM window at `$xxx4` that "replicate[s] … INES Mapper 074 and INES Mapper 194"; and a **register lockout** which census §7.2 asks be a no-op and the page's *WRAM usage* section says is the only thing letting a game keep WRAM behind the register window (**Q-156**, the page wins). **Submappers 0 and 1 only** -- six of the thirteen PCB codes, and the six that carry every title -- the other nine refused at load with REQ-CORE-011's cause (**Q-157**); `$xxx3` bit 5's second RAM window is **Q-159**. One boxed `IrqBoard` variant holding an `Mmc3`, counter included, so the number is in **both** PPU watch lists | **12**: nine Chinese RPGs (*大话水浒*, *楚留香新传*, *魔道劫*, *口袋妖怪: 叶绿* vols 1-3, three *最终幻想* titles, *神奇宝贝*) and three licensed reissues (*Gravity Trooper Metal Storm*, *Holy Diver*, *Quest Forge*), plus the multicarts the chipset was made for | measured against `a4315007` (MF-UNL-6 step 5): worst ROM `vblnmi` **+0.001 %** and set total **−150 669 (−0.000 %)**, i.e. *below* the base commit, with seven of thirteen below. The control -- the same source with the feature out of `default` -- is itself `smb1`/`vblnmi` **+0.001 %**, so the board costs less than the spread of gating it off | **all five `core` figures +0, identical to the instruction**, and `ppu`, `apu` and `draw_list` too. All five `total` inside: -0.008 % to **+0.0195 %** (`smb3`), of whose 4.73 M **4.31 M is `luaH_getshortstr`** alone and no symbol of this project moves by 300 000 on any of the five games; the same-behaviour control moves that one symbol by −1 288 850 on `smb1` and −1 000 081 on `zelda2` | **on** | as above |
 | `parked-boards` | 99, 151 | the umbrella: every board left out of `default`. Empty from MF-CART step 5 until **MF-VS step 7**, which put `board-vs-system` in it — so a reader who wants every board this build has turns on this one flag | as that row | as that row | as that row | **off** | `cargo build -p zax-nes --features parked-boards` |
 
 **Worst figure among the features in `default`: +0.003 % on one ROM**, against a tolerance of
@@ -278,6 +279,32 @@ what four lots have now confirmed: **163 alone** is PR-1 set total +225 155, **1
 the *same five* level-2 `core` figures to the instruction. One `DecodeBoard` variant and a handful
 of `match` arms is what a board of this shape costs now, and MF-CART step 6's twelve-variant
 measurement is why.
+
+## MF-UNL-6 is the second such lot, and its PR-1 set total is below the base commit
+
+Lot MF-UNL-6 added **one** board and nothing of either instrument is above +0.02 % either -- worst
+PR-1 ROM **+0.001 %** (`vblnmi`), set total **−150 669**, which is *below* `a4315007`; all five
+level-2 `core` figures **+0 to the instruction**, with `ppu`, `apu` and `draw_list` +0 as well;
+worst level-2 `total` **+0.0195 %** (`smb3`). So MF-UNL-5's reading holds for a board four times
+its size: a sixteenth `IrqBoard` variant holding an `Mmc3`, six registers and two `#[inline(never)]`
+CHR bodies is **free** on the instrument that can resolve a board.
+
+Two things this lot adds to the account above.
+
+**The base measurement was reused, and the reuse is itself the check.** `zax-harness-unl6base`,
+built fresh from `a4315007`, is byte-identical to MF-UNL-5's own `zax-harness-unl5` and
+`zax-harness-unl5ship` (`md5 2f56dfb4…`) -- the base commit adds only documentation over the commit
+that lot measured. So two lots' deltas are on literally one instrument, and a lot whose base commit
+is a documentation-only successor of the last one need not re-measure the base: it need only prove
+the binary is the same, which is one build.
+
+**The `total` column's floor is now measured in both directions.** This lot's control (`unl6off`,
+the feature out of `default`, emulation identical) moves `luaH_getshortstr` by **−1 288 850** on
+`smb1` and **−1 000 081** on `zelda2` where the lot moves it by **+4 308 974** on `smb3`. Four lots
+have built such a pair, and the figure is the same each time: a `total` move of one to four million
+instructions on a run with a pack loaded belongs to Lua's `ltable.c` and not to a board. What is new
+is the sign -- the earlier pairs were all positive -- so the column's spread is about ±0.02 % and
+not a drift.
 
 ## MF-CART lifted the limit, and these two sections are what it lifted
 
@@ -412,7 +439,7 @@ There is no `--no-feature` flag in Cargo, so turning one board off means naming 
         board-jv001,board-sachen-8reg,board-133,board-mmc3-chrram,board-mmc3-scramble,\
         board-263,board-189,\
         board-nina03,board-38,board-107,board-143,board-144,board-145,\
-        board-149,board-190,board-jy-asic,board-163,board-162,board-178
+        board-149,board-190,board-jy-asic,board-163,board-162,board-178,\n        board-268
     # ... which is every board but `board-119` -- except that `board-mmc3-chrram` **implies**
     # it, so this exact line still builds mapper 119. Turning 119 itself off means dropping
     # `board-mmc3-chrram` from the list too, the CHR-RAM mechanism being one feature's.
@@ -423,12 +450,13 @@ There is no `--no-feature` flag in Cargo, so turning one board off means naming 
     # two PPU features are.
 
 and `cargo test -p zax-nes --no-default-features` is the configuration with **every** board off —
-**783 passed, 0 failed, 8 ignored** -- unchanged by MF-UNL-2, MF-UNL-3, MF-UNL-4 and MF-UNL-5,
-every one of their tests being behind one of their features -- against **965** by default since
-MF-UNL-5 added seventeen for its three boards.
+**783 passed, 0 failed, 8 ignored** -- unchanged by MF-UNL-2, MF-UNL-3, MF-UNL-4, MF-UNL-5 and
+MF-UNL-6, every one of their tests being behind one of their features -- against **980** by default
+since MF-UNL-6 added fifteen for its one board. `--no-default-features --features board-268` is
+**798 / 0 / 8**, so all fifteen are reachable with that feature alone.
 `--features parked-boards` is **no longer** the same build as `default`: MF-VS step 7 put
 `board-vs-system` in the umbrella, so that configuration is the one with the VS. System and its 45
-tests (**1018 passed, 0 failed, 8 ignored** against 965 by default). Every configuration (each
+tests (**1033 passed, 0 failed, 8 ignored** against 980 by default). Every configuration (each
 feature alone, none, all, and all plus `parked-boards`) builds, passes clippy `-D warnings` and
 passes its tests; MF-6a3 step 3's table has the per-feature test counts.
 

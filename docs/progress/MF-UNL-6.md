@@ -41,7 +41,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
 - [x] **5/8** — the callgrind campaign against the base commit, and the feature decision.
 - [x] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
   both ROM roots.
-- [ ] **7/8** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
+- [x] **7/8** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
 (Eight steps and not seven: the size ceiling §7.2 asks for in its step 2 is a loader question
 rather than a board one, and it carries its own tests.)
@@ -523,3 +523,72 @@ touches none of it.
 | no change to the save-state format of existing boards | `NesCore::STATE_VERSION` unchanged; the six bytes added are appended behind `Mmc3`'s own block and behind the `cfg` that is the only reason the board exists |
 | safe Rust | no `unsafe` anywhere in the lot |
 | nothing edited under `spec/` but new Q tickets | `Q-156.md`, `Q-157.md`, `Q-158.md` and `Q-159.md`, all new |
+
+---
+
+## Step 7 — `BOARD-FEATURES.md`, the census note, the journal and the final pass
+
+### The documentation this step carries
+
+* **One row in `docs/review/BOARD-FEATURES.md`** — `board-268` — with step 5's figures in both
+  cost columns, the mechanism it brings, the four tickets it carries and the one command that flips
+  it. The `--no-default-features` and `parked-boards` counts are brought to this lot's (**783**
+  unchanged and **1033**, against **980** by default, and **798** with `board-268` alone), and the
+  "how to turn a board off" command gains the name.
+* **A new section in that file**, *MF-UNL-6 is the second such lot, and its PR-1 set total is below
+  the base commit*, with the two things this lot adds to that account: that a lot whose base commit
+  is a documentation-only successor of the last one need only **prove the binary identical** rather
+  than re-measure the base (one build instead of two campaigns), and that the `total` column's
+  floor is now measured in **both directions** — the control moves `luaH_getshortstr` by −1.29 M
+  and −1.00 M where the lot moves it by +4.31 M, so the column's spread is about ±0.02 % and not a
+  drift.
+* **A four-point note at the head of §7.2's MF-UNL-6 section in `docs/review/UNL-census.md`**:
+  how "leave the rest refusing" was read, that step 3's no-op lockout is refuted by the page, that
+  step 2's size ceiling does not exist in this loader, and the measurement.
+* **A journal entry** in `G:/3dsen/cleanroom/journal/JOURNAL.md`, in the log's own language, with
+  the role, the date, the folders consulted, the deliverables, the figures and the four open
+  tickets.
+* **Four question tickets** under `spec/changes/` — `Q-156.md`, `Q-157.md`, `Q-158.md` and
+  `Q-159.md` — each with its provisional choice, its code reference and the observation that would
+  close it.
+
+### The final pass
+
+| | |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **1043 / 0 / 9** |
+| the same with `--include-ignored` and both ROM roots | **1052 / 0 / 0** |
+| golden-core, 98 originals, 1 200 frames | **byte-identical** to `a4315007`, with and without the feature; `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+| clippy `-D warnings`, `zax-nes --all-targets` | clean in all **four** configurations: `default` (980 / 0 / 8), `--no-default-features` (783 / 0 / 8), `--features parked-boards` (1033 / 0 / 8) and `board-268` alone (798 / 0 / 8) |
+| clippy `-D warnings`, `zax-harness --all-targets` | clean |
+| PR-1's thirteen ROMs | worst ROM **+0.001 %**, set total **−150 669 (−0.000 %)** |
+| level 2's five games | all five `core` **+0 to the instruction**, all five `total` inside, worst **+0.0195 %** |
+| the feature decision | **`board-268` in `default`**; nothing parked |
+| `unsafe` | none |
+| `NesCore::STATE_VERSION` | **8**, unchanged |
+
+### What this lot leaves for whoever comes next
+
+**Q-156 closes in a session** and is the only one of the four that does: it is a reading of §7.2's
+own step list against a page a reviewer has in front of them, and the answer changes no code —
+only whether the census sentence stands. **Q-157 is a decision of principle**: either the four
+remaining register layouts are to be built (a `const` table and a handful of `match` arms each, no
+title behind any of them, none testable against a dump) or §7.2's "leave the rest refusing" means
+what this lot read it to mean. **Q-158 and Q-159 need an image** — a 64 MiB dump whose two 32 MiB
+halves differ at the reset vector, and any mapper-268 dump that sets `$xxx3` bit 5 at all.
+
+Three mechanisms are recorded as not implemented, each commented where it is missing: `$xxx5`'s
+mega-UNROM mode (the page names no cartridge that arms it), the Spritemind flash-write path ("no
+cart has been discovered so far that makes use of this feature"), and the four refused submappers'
+register layouts.
+
+And the thing no lot of this plan can do, in §7.2's own words: **there is no ROM here that runs
+this number.** Every one of the lot's fifteen tests is written from the register table of its
+board's own page, which is why §6 of the census graded documentation before §7 ordered the work.
+
+### Lot totals
+
+**1 number, 1 board, 1 feature, 15 tests, 4 question tickets, ~12 original titles**, measured at
+worst ROM **+0.001 %** with the PR-1 set total *below* the base commit, and at **+0 to the
+instruction** on all five level-2 `core` figures.
