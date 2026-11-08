@@ -16,7 +16,7 @@ appended `## Cross-check (Q-XCHECK)` section on each ticket file in `spec/change
 | 2/6 | Q-148, Q-149, Q-150, Q-151, Q-152 (J.Y. Company ASIC) | **done** |
 | 3/6 | Q-154, Q-155, Q-156, Q-157, Q-158, Q-159 (178, 163, 268) | **done** |
 | 4/6 | Q-160, Q-161, Q-162, Q-163 (8259, 112/193, 298, 218) | **done** |
-| 5/6 | Q-164, Q-165, Q-166, Q-167, Q-168 (12, 14, 83/264, 91) | pending |
+| 5/6 | Q-164, Q-165, Q-166, Q-167, Q-168 (12, 14, 83/264, 91) | **done** |
 | 6/6 | Q-169, Q-170, Q-171, Q-172 + final check | pending |
 
 ## Batch 1/6 — done
@@ -120,5 +120,34 @@ CHANGE.
   the 2 KiB nametable memory, none through a nametable-page hook, and FCEUX writes this build's
   four-row table out as a literal array with the comment "this could be done by bit logic, but this is
   self-documenting". Reading (b) is right.
+
+## Batch 5/6 — done
+
+Tickets Q-164 to Q-168 (mappers 12, 14, 83/264 and 91). Twenty-four more verdict rows: fifteen
+CONFIRMED, six OPEN, **one CHANGE**.
+
+* **Q-164 §3 is the second CHANGE of the lot**: `Huang1::LANGUAGE_BIT` should be `$01`, not `$00`.
+  FCEUX initialises its mapper-12 read register to 1 with the comment "chinese is default" and
+  Nestopia answers a hard-coded `0x01`; the page says the GAL is wired to Chinese in every known copy,
+  so this build's `$00` selects English in *Dragon Ball Z 5*. One constant, one test line (§CHANGE 6).
+* **Q-164 §1 and §4 are clean**: no project gives mapper 12 a supervisor register or a VRC2/MMC1 mode
+  (the census's `Somari` claim is wrong), and three of the four refresh the windows inside the `$4132`
+  write while **FCEUX alone latches** — the page's attribution of that behaviour to FCEUX is verified.
+* **Q-165 §1 is four for four on the bit positions** (mode at bit 1, A18 at bits 3/5/7), so the prose
+  paraphrase MF-6b step 6 rejected is refuted everywhere. §5a is the interesting OPEN: **Nestopia
+  implements "mirroring only in VRC2 mode" in this build's exact shape** — MMC3-mode `$A000`
+  re-applies the VRC2's `$9000` value and ignores the datum — which verifies both the page's
+  attribution *and* its "contradicts other emulators" caveat, since the other three contradict it.
+  One free observation: this build's exact-address VRC2 decode is stricter than anyone's and is **not
+  needed** for the `$A131` protection it was adopted for (A1/A0 alone suffice).
+* **Q-166/Q-167**: the solder pad is a **user dip switch in all three** projects that support the
+  number, which is exactly the host surface the ticket says the constant should wire to; nobody
+  implements the `$8318` IRQ source, so this build is ahead there; and **puNES implements 83.2**, the
+  refused variant, in the layout Q-167 documents — so that refusal is now only a mechanism cost, and
+  it wants the same `Mapper::prg_ram_window` forward as mapper 195's `$5000` window.
+* **Q-168**: puNES is the only other project with mapper 91's outer bank register or submapper 1, and
+  it confirms **the outer bank's bit order** (A2 = PRG A18, the diagram's columns), the `$8000-$9FFF`
+  decode, the 5/4 counter's borrow-out firing, "last bank of the inner 128 KiB" and `$6004` =
+  horizontal. Only submapper 0's free-running-vs-stops question stays open, two-two.
 
 `git status`: clean except `rust/target-mf/` (untracked build output, never staged).

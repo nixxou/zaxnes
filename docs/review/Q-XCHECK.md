@@ -116,7 +116,31 @@ that point at all; "n/s" = the project does not support the number.
 | Q-163 | 218 | the 2 KiB serves the pattern tables too | "mapped as CHR-RAM" | yes, reading (b) | **yes** | **yes** | n/s | **yes** | **CONFIRMED** |
 | Q-163 | 218 | the four wirings' window table | derived | A10/A11/A12/A13 per iNES byte 6 | identical | identical | n/s | identical | **CONFIRMED** |
 
-*(rows for Q-164 onward are appended by the later batches of this lot)*
+| Q-164 §1 | 12 | one chip (MMC3A clone), not mapper 116's board | one chip | one chip | one chip | one chip | one chip | one chip | **CONFIRMED** |
+| Q-164 §2 | 12 | `$4132`'s power-on value | not given | zero | zero | zero | zero | zero | **CONFIRMED** |
+| Q-164 §3 | 12 | which value of the language bit is Chinese | not said; "Chinese in all known copies" | `$00` | — | **1** ("chinese is default") | **`$01`** | a dip switch | **CHANGE** |
+| Q-164 §4 | 12 | `$4132` writes take effect immediately | yes (the PCB) | yes | yes | **no (latched)** | yes | yes | **CONFIRMED** |
+| Q-164 §5 | 12 | submapper 1 (Magic Card 4M) | copier hardware | refused | run as an MMC3A | run as an MMC3A | run as an MMC3A | **run as the FFE board** | **CONFIRMED** |
+| Q-165 §1 | 14 | the supervisor register's bit positions | the diagram: 1/3/5/7 | 1/3/5/7 | 1/3/5/7 | 1/3/5/7 | 1/3/5/7 | 1/3/5/7 | **CONFIRMED** |
+| Q-165 §2 | 14 | the decode | `$A131`, mask doubted | the full 16 bits | `addr == $A131` | `A == $A131` | `(addr & $A131) == $A131` | `address == $A131` | **CONFIRMED** |
+| Q-165 §3 | 14 | the supervisor's power-on value | not given | `$02` (MMC3 mode) | `0` (VRC2) | `0` (VRC2) | `0` (VRC2) | `0` (VRC2) | **OPEN** |
+| Q-165 §4 | 14 | which chip takes a mode-changing write | not said | the **new** mode's | the new mode's | the new mode's | the new mode's | neither (dropped) | **CONFIRMED** |
+| Q-165 §5a | 14 | mirroring only in VRC2 mode | yes (per Nestopia) | implemented | no | no | **implemented** | no | **OPEN** |
+| Q-165 §5b | 14 | the VRC2 registers ignore address mirrors | yes (per Nestopia) | exact addresses | A1/A0 decoded | A1/A0 decoded | A1/A0 decoded | fully mirrored | **CONFIRMED** |
+| Q-165 §6 | 14 | no MMC3A, no VRC2 `$FF` CHR power-on | not stated for 14 | neither given | neither | neither | neither | neither | **CONFIRMED** |
+| Q-166 §1 | 83 | the scratch RAM's decode | printed mask impossible; the `A~` row | `(a & $F30C) == $5100` | `$5100-$5103` | `$5100-$5103` | n/s | A8/A10 over `$5000-$5FFF` | **OPEN** |
+| Q-166 §2 | 83 | the solder pad at `$5000` | nothing configures it | `const $00`, zeros above | **a 2-bit dip switch**, open bus above | **a reset-cycled switch**, open bus above | n/s | **a dip switch** | **CONFIRMED (gap)** |
+| Q-166 §3 | 83 | the `$8318` IRQ source select | "not known which bit" | any non-zero = A12 | — | — | n/s | — | **OPEN** |
+| Q-166 §4 | 83 | `$6000-$7FFF` in PRG modes 0/1 | not said | the same composition | — | — | n/s | **same, enable is mode-independent** | **CONFIRMED** |
+| Q-167 | 83.2 | the PRG-NVRAM variant | documented | refused | n/s | n/s | n/s | **implemented** | **CONFIRMED (form)** |
+| Q-168 §1 | 91 | `$8000-$9FFF` outer bank: A2 = PRG A18 | the diagram's columns | A2 = A18 | — | — | — | **A2 = A18** | **CONFIRMED** |
+| Q-168 §2 | 91 | "Mask: unknown" | the page's own range | `$8000-$9FFF` | — | — | — | **`$8000-$9FFF`** | **CONFIRMED** |
+| Q-168 §3a | 91.0 | the ÷64 counter's firing rule | not stated | carry out, keeps running | repeats (MMC3 latch 7) | **stops at 8** | stops at 8 | **stops at 8** | **OPEN** |
+| Q-168 §3b | 91.1 | the 5/4 M2 counter fires on the borrow | not stated | borrow out | — | — | — | **borrow out** | **CONFIRMED** |
+| Q-168 §4 | 91.0 | "hard-wired to last bank" of what | not said | of the inner 128 KiB | of the ROM | of the ROM | of the ROM | **of the inner 128 KiB** | **CONFIRMED** |
+| Q-168 §5 | 91.1 | `$6004` selects horizontal | the page's word | horizontal | — | — | — | **horizontal** | **CONFIRMED** |
+
+*(rows for Q-169 onward are appended by the last batch of this lot)*
 
 ---
 
@@ -1044,6 +1068,186 @@ own argument ("it is the same chip either way"). **Nothing to change, and the ti
 answered: reading (b) is right, and reading (a) is only reachable with a PPU/cartridge boundary change
 that two of the three projects happen to have.**
 
+## Q-164 — mapper 12 (Huang-1 on the SL-5020B)
+
+Boards: Mesen 2 `Core/NES/Mappers/Mmc3Variants/MMC3_12.h`; FCEUX `src/boards/mmc3.cpp:377-409`;
+Nestopia UE `source/core/board/NstBoardRexSoftDb5z.cpp`; puNES
+`src/core/mappers/mapper_012.c`.
+
+* **§1, one chip: CONFIRMED four for four.** Every project builds mapper 12 as an **MMC3 clone with
+  one extra register** and nothing else — Mesen 2 and Nestopia as `MMC3`/`Mmc3` subclasses, FCEUX
+  through `GenMMC3_Init` with `isRevB = 0`, puNES through `init_MMC3`. **No project gives the number a
+  supervisor register, a VRC2 mode or an MMC1 mode**, so the census's "it is `Somari` with one more
+  register" is wrong and the page is right. The MMC3A requirement is honoured where it is expressible:
+  Mesen 2 `MMC3_12.h:11` (`ForceMmc3RevAIrqs`), FCEUX `mmc3.cpp:409` (`isRevB = 0`).
+* **§2, the power-on value: CONFIRMED four for four at zero.** Mesen 2 `_chrSelection = 0` in
+  `InitMapper`, FCEUX `EXPREGS[0] = EXPREGS[1] = 0` (`mmc3.cpp:393`), Nestopia `exReg = 0`, puNES
+  `memset(&m012, 0)`.
+* **§3, the language bit: CHANGE.** See §CHANGE 6. **FCEUX initialises it to 1 with the comment
+  "chinese is default"** (`mmc3.cpp:394`) and **Nestopia answers a hard-coded `0x01`**
+  (`NstBoardRexSoftDb5z.cpp:83`); puNES answers a user dip switch
+  (`mapper_012.c:75`); Mesen 2 does not implement the read. This build answers `$00`, which on two
+  projects' reading selects **English** on a board the page says is wired to Chinese in every known
+  copy.
+* **§4, writes take effect immediately: CONFIRMED, and the page's attribution is verified.** Mesen 2
+  calls `UpdateState()` in the write (`MMC3_12.h:42`), Nestopia calls `Mmc3::UpdateChr()`
+  (`NstBoardRexSoftDb5z.cpp:73`), puNES calls `MMC3_chr_fix()` (`mapper_012.c:67`). **FCEUX's
+  `M12Write` (`mmc3.cpp:383-386`) sets the two latches and calls no refresh at all**, so the change
+  lands on the next MMC3 CHR register write — exactly the behaviour the page describes as FCEUX's and
+  says the homebrew *Ultimate Mortal Kombat III* depends on. Three for three with this build and the
+  PCB.
+* **The A18 wiring itself is five for five**: per **pattern table**, from register bits 0 and 4 —
+  Mesen 2 `MMC3_12.h:27-32`, FCEUX `(EXPREGS[(A & 0x1000) >> 12] << 8)` (`mmc3.cpp:380`), Nestopia
+  `exReg << ((address & 0x1000) ? 4 : 8) & 0x100` (`:88`), puNES
+  `(m012.reg << (((address >> 10) >= 4) ? 4 : 8)) & 0x0100` (`mapper_012.c:88`). Not in dispute, but it
+  is the half of the board the census got right and worth recording as unanimous.
+* **§5, submapper 1: CONFIRMED as a defensible refusal, with one project doing better.** Mesen 2,
+  FCEUX and Nestopia read no submapper, so a Magic Card 4M image runs on them as an MMC3A clone it is
+  not. **puNES routes it to its Front Fareast board** — `mapper_012.c:31-32`,
+  `if (info.mapper.submapper == 1) map_init_006()`. So refusing is better than three of the four do,
+  and the fourth shows the alternative: delegate to an FFE implementation, which this build does not
+  have (the census leaves mappers 6, 8 and 17 out). Keep the refusal.
+
+## Q-165 — mapper 14 (Gouder SL-1632)
+
+Boards: Mesen 2 `Core/NES/Mappers/Mmc3Variants/MMC3_14.h`; FCEUX `src/boards/sl1632.cpp`; Nestopia UE
+`source/core/board/NstBoardRexSoftSl1632.cpp`; puNES `src/core/mappers/mapper_014.c`.
+
+* **§1, the bit positions: CONFIRMED four for four, and the prose paraphrase is refuted.** All four
+  read the mode at **bit 1** and the three CHR A18 lines at **bits 3, 5 and 7** — Mesen 2
+  `_mode & 0x02` / `0x08` / `0x20` / `0x80` (`MMC3_14.h:36-38`, `:69`), FCEUX
+  `(bbrk & 0x08) << 5` / `(bbrk & 0x20) << 3` / `(bbrk & 0x80) << 1` and `if (bbrk & 2)`
+  (`sl1632.cpp:49-51`, `:64`), Nestopia `exMode & 0x2U` plus a shift table, puNES `chr_base()`'s three
+  arms (`mapper_014.c:133-139`) and `m014.reg & 0x02`. **And all four group the windows exactly as
+  this build does**: bit 3 over `$0000-$0FFF`, bit 5 over `$1000-$17FF`, bit 7 over `$1800-$1FFF`.
+  Nothing anywhere supports the one-place-lower reading.
+* **§2, the decode: CONFIRMED.** Mesen 2 `addr == 0xA131` (`MMC3_14.h:65`), FCEUX `A == 0xA131`
+  (`sl1632.cpp:63`) and puNES `address == 0xA131` (`mapper_014.c:74`) are **exact equality**, as this
+  build is. Nestopia uses `(address & 0xA131) == 0xA131` (`NstBoardRexSoftSl1632.cpp:135`), which is
+  looser but still recognises `$A131`. So the page's doubted "Mask: $FFFF?" is three for three.
+* **§3, the power-on value: OPEN, and this build is the outlier.** Mesen 2 (`_mode = 0` in
+  `InitMapper`), FCEUX (`bbrk` left at its static zero) and Nestopia (`exMode = 0` in `SubReset`) and
+  puNES (`memset`) all start in **VRC2 mode**; this build starts at `$02`, MMC3 mode. But none of the
+  three *chose* VRC2 mode — it is zero-initialised memory in every case, not a finding, and the page
+  gives no value. Keep `$02`, and note that both modes reach a reset vector (FCEUX's VRC2 half fixes
+  the same last two 8 KiB banks), so the one known title runs either way. **What would close it**: a
+  *Samurai Spirits* trace showing whether it writes `$A131` before it banks.
+* **§4, which chip takes a mode-changing write: CONFIRMED 3-1 for "after".** Mesen 2 assigns `_mode`
+  and *then* tests it (`MMC3_14.h:65-71`), FCEUX the same (`sl1632.cpp:63-66`), and Nestopia the same
+  — and both FCEUX and Nestopia then forward the write to the MMC3, where `$A131 & $E001` is `$A001`,
+  **the same register this build gives it** (Nestopia spells it out: `case 0xA001:
+  Mmc3::NES_DO_POKE(A001, …)`). puNES alone consumes the supervisor write entirely
+  (`mapper_014.c:74-78`, a bare `return`).
+* **§5a, "mirroring can only be controlled in VRC2 mode": OPEN, and the page's attribution is
+  verified.** **Nestopia implements it, and in this build's exact shape**:
+  `NstBoardRexSoftSl1632.cpp:152`, the MMC3-mode `$A000` arm is `SetMirroringVH( exNmt )` — it
+  re-applies the value the **VRC2's `$9000`** last set and ignores the datum, which is
+  `Mmc3Board::force_ignore_a000` plus "whatever `$9000` last set survives a mode switch". Mesen 2,
+  FCEUX and puNES all forward MMC3-mode `$A000` to the MMC3's own mirroring, i.e. they contradict it —
+  which is precisely what the page says ("These behaviors contradict other emulators and have not been
+  verified on original hardware"). So the page's sentence is Nestopia's, the page's caveat is accurate,
+  and the lot's rule (the page wins) stands with the caveat recorded. **What would close it**: original
+  hardware, as the page says.
+* **§5b, "the VRC2 PRG and mirroring registers do not respond to address mirrors": CONFIRMED in
+  substance.** Mesen 2 (`addr & 0xF003`), FCEUX (`A & 0xF003`, `sl1632.cpp:78`) and Nestopia
+  (`address & 0xF003`) all **decode A1 and A0**, so the VRC2's `$8000` answers at `$8000` and not at
+  `$8001-$8003` — which is the rule. puNES uses a fully mirrored VRC2 (`address & 0xF000` plus the
+  A0/A1 pin map), i.e. a real VRC2. **This build is stricter than any of them** (the three registers
+  answer at those addresses exactly, A2-A11 decoded as well), and one observation is worth recording:
+  the stricter form is **not needed** for the consequence it was adopted for. `$A131 & $F003` is
+  `$A001`, not `$A000`, so A1/A0 alone already stop a supervisor write from clobbering the VRC2's
+  second PRG bank. A later lot could relax the decode to `& $F003` and keep the protection.
+* **§6, no MMC3A and no VRC2 `$FF` power-on for this number: CONFIRMED four for four.** None of the
+  four forces the revision-A counter for mapper 14 (FCEUX notably *does* for mapper 12, three lines
+  away) and none powers its CHR registers on at `$FF`.
+
+## Q-166 and Q-167 — the Cony / Yoko board (mappers 83 and 264)
+
+**Nestopia UE does not support either number.** Mesen 2 is `Core/NES/Mappers/Unlicensed/Mapper83.h`
+plus `Yoko` for 264; FCEUX is `src/boards/yoko.cpp` with two init variants; puNES is
+`src/core/mappers/mapper_083.c` for **both** numbers.
+
+* **Q-166 §1, the scratch RAM's decode: OPEN.** The page's printed mask is impossible and nobody
+  implements the `A~` row's undecoded bits. Mesen 2 claims exactly `$5100-$5103`
+  (`Mapper83.h:37`) and so does FCEUX (`yoko.cpp:171-172`, with `low[A & 3]`); puNES decodes the four
+  registers across the **whole** of `$5000-$5FFF`, discriminating the pad from the RAM by a single
+  address bit (`mapper_083.c:148`, A8 on mapper 83 and A10 on mapper 264). So three implementations,
+  three decodes, and the only thing all of them share is that **the four addresses themselves must
+  work** — which this build satisfies. Keep the `A~` reading; it is the page's only self-consistent
+  statement, and the mirrors it admits (`$5110`) are reachable by nobody else, so nothing can depend on
+  them. Note puNES's bit-based split as an alternative if a dump ever shows a mirror in use.
+* **Q-166 §2, the solder pad: CONFIRMED as a gap, and the shape of the answer is now known.** All
+  three projects expose the pad **to the user**: Mesen 2 declares `GetDipSwitchCount() 2`
+  (`Mapper83.h:19`) and answers `$5000` with `(openBus & 0xFC) | GetDipSwitches()` (`:104-105`);
+  FCEUX keeps a `dip` that its **reset handler cycles** (`yoko.cpp:181`, `dip = (dip + 1) & 3`) and
+  answers `(X.DB & 0xFC) | dip` (`:142`); puNES answers `dipswitch.value`. So the page's "the good
+  value is not always 0 or 3" is handled by letting the user pick, which is exactly the "host surface
+  for per-cartridge configuration" the ticket says this constant should be wired to. Two further
+  details: all three use **true open bus** in bits 7-2 where this build answers zero, and FCEUX's two
+  init variants differ in the pad's default (`dip = 3` for one board, `0` for the other), which is
+  evidence that the default is per-PCB and not per-chip.
+* **Q-166 §3, the `$8318` IRQ source: OPEN, and this build is ahead of the field.** **No project
+  implements the register.** Mesen 2 decrements once per CPU cycle and fires at zero
+  (`Mapper83.h:61-66`), FCEUX subtracts the elapsed cycles (`yoko.cpp:197-204`), puNES's `$83xx`
+  switch ignores index `$18` entirely. All three therefore implement the page's **default** value's
+  behaviour (CPU M2) and nothing else. This build's "any non-zero value selects A12" is unrebutted and
+  is the only reading that gives both documented values their documented meaning. Keep it.
+* **Q-166 §4, `$6000-$7FFF` in PRG modes 0 and 1: CONFIRMED by puNES.** `wram_fix_083`
+  (`mapper_083.c:226-232`) gates the window on `m083.mode & 0x20` — the mode register's bit 5 —
+  **independently of the PRG banking mode**, and uses the `$8303` register's value in every mode,
+  which is this build's "the same composition in every mode" and its reading that bit 5 is not
+  silently mode-dependent.
+* **Q-167, the five PCBs: CONFIRMED in form, and 83.2 is implementable.** puNES serves **83.2**, the
+  one variant this build refuses: `m083tmp.use_wram = (submapper == 2)` (`mapper_083.c:84`) and
+  `memmap_wram_8k(0, MMCPU(0x6000), m083.outer >> 6)` (`:227`) — the 32 KiB PRG-NVRAM banked from the
+  PRG base register's top two bits, with `wram_set_nvram_size(S32K)` at load, exactly the layout this
+  ticket documents in its "what would reopen it" paragraph. puNES also **infers the submapper from the
+  CHR size** on an iNES 1.0 image (`:75-82`: ≥1 MiB → 83.2, ≥512 KiB → 83.1) and gives mapper 264 its
+  own address permutation (`:112`), which is the page's A11/A10 → A9/A8 rewiring. Mesen 2 and FCEUX
+  read no submapper at all, so a 83.2 dump runs on them with PRG-ROM where the NVRAM should be.
+  So this build's refusal is the second-best outcome of four and the mechanism cost is the only thing
+  standing in the way — see §CHANGE 2's note that mapper 195's `$5000` window wants the same
+  `Mapper::prg_ram_window` forward.
+
+## Q-168 — mapper 91
+
+**puNES is the only other project that implements the outer bank register or submapper 1**, and where
+it does, it agrees with this build on every point the ticket decided.
+
+* **§1, the outer bank's bit order: CONFIRMED.** `mapper_091.c:119` latches
+  `m091.reg = address & 0xFF` — **the address, not the datum**, which is the page's `A~` header — and
+  `:158` composes `base = (m091.reg << 3) & ~0x0F`, i.e. **register bit 2 → bank bit 5 (PRG A18) and
+  bit 1 → bank bit 4 (PRG A17)**. That is the diagram's column order, which is this build's
+  `Mapper091::outer_prg`, and it refutes the "ascending list" reading. The CHR half matches too:
+  `chr_fix_091`'s `base = (m091.reg & 0x01) << 8` is the page's `C` at bit 0 driving CHR A19.
+* **§2, "Mask: unknown": CONFIRMED.** puNES decodes `case 0x8000: case 0x9000:` — the page's own
+  `$8000-$9FFF` range and nothing tighter.
+* **§3a, submapper 0's firing rule: OPEN, two-two.** This build's free-running ÷64 counter has Mesen 2
+  on its side in effect — `Mapper91.h` borrows the MMC3's counter with a latch of **7**, which reloads
+  and so **repeats** — while FCEUX (`src/boards/91.cpp:68`, `if (IRQCount < 8 && IRQa)`) and puNES
+  (`mapper_091.c:139`, the same condition) implement the ticket's named alternative: the counter
+  **stops at 8 and does not fire again until restarted**. A second, shared observation: all three
+  implement the counter as **eight filtered scanline ticks** rather than sixty-four unfiltered A12
+  rises, which is the same thing while rendering is on and a different thing while it is off. Keep the
+  free-running reading (it is what a ÷64 ripple counter's carry out does) and note that the two
+  readings differ only for a game that does not acknowledge.
+* **§3b, submapper 1's 5/4 counter: CONFIRMED.** `mapper_091.c:147-152`: a two-bit prescaler, and
+  every fourth M2 cycle `counter -= 5` with the IRQ asserted when the counter **goes at or below
+  zero** — the borrow out, exactly this build's "the step whose starting value is below five". Nobody
+  else implements this submapper at all.
+* **§4, "hard-wired to last bank" of what: CONFIRMED.** puNES maps `$C000` and `$E000` as
+  `base | (0xFE & mask)` and `base | (0xFF & mask)` with `mask = 0x0F` (`mapper_091.c:157-164`) — the
+  last bank **within the outer 128 KiB bank**, which is this build's reading and the one that lets the
+  outer register reach the fixed half of its own bank. The same lines confirm the other half of the
+  decision: the two switchable registers are masked to four bits, so their upper bits are not latched.
+* **§5, the mirroring vocabulary: CONFIRMED.** `mapper_091.c:78-85`: `$6004` sets horizontal and
+  `$6005` vertical, which is the page's own word taken literally and this build's choice. The ticket's
+  point that mapper 83's page and mapper 91's page use opposite vocabularies is borne out: puNES's
+  mapper-83 mirroring arm reads the mode register's `NN` field the other way round.
+* **§6, the census under-prices the lot: CONFIRMED.** puNES's mapper 91 has two counters (one per
+  submapper), five register groups on submapper 1 and the outer bank register — the same inventory this
+  build built and more than §7.2's "one counter and four groups".
+
 ---
 
 ## CHANGE — ready-to-use fix descriptions for a later lot
@@ -1169,6 +1373,31 @@ affected and the risk to existing boards.)*
   error message, and puNES silently runs them on the COOLBOY layout, which is the failure mode
   reading (b) exists to avoid.
 
+### CHANGE 6 — mapper 12's language bit should read `$01`, not `$00`
+
+* **Ticket**: Q-164 §3. **Priority**: second only to CHANGE 1 — it has a visible effect on the
+  number's main title and the fix is one constant.
+* **File / constant**: `rust/crates/zax-nes/src/cartridges/mappers/huang1.rs`,
+  `Huang1::LANGUAGE_BIT` — change `$00` to `$01`. (Bits 7-1 stay zero; only bit 0 is the jumper.)
+* **The evidence**: the page says the GAL16V8 has the value hard-wired "to Chinese text in all known
+  copies" and does not say which value that is. **FCEUX initialises its read register to 1 with the
+  comment "chinese is default"** (`third_party/fceux/src/boards/mmc3.cpp:394`) and **Nestopia answers a
+  hard-coded `0x01`** (`third_party/nestopia/source/core/board/NstBoardRexSoftDb5z.cpp:83`). puNES
+  answers a user dip switch, so it takes no position; Mesen 2 does not implement the read at all. Two
+  independent projects, one of them labelling the value, against a constant this build picked for
+  uniformity with its other narrow registers.
+* **Titles affected**: *Dragon Ball Z 5* — under `$00` the game selects **English** text where every
+  known cartridge shows Chinese. Nothing else on the number reads `$4132`.
+* **Risk to existing boards**: none. The constant is read only by mapper 12's `try_read_prg` arm; no
+  other number reaches `Huang1`'s read side (mapper 14's supervisor register is write-only). No
+  save-state byte, no dispatch, no hot path.
+* **Also worth doing in the same edit**: the test
+  `req_core_102_mapper_12_answers_a_read_of_4132_with_the_language_bit` asserts `Some(0)` at `$4132`;
+  it becomes `Some(1)`, and its assertion that the board drives nothing outside the `$E100` mask is
+  unchanged. The comment naming the choice should record that FCEUX and Nestopia both answer 1 and
+  that puNES makes it user-settable — which is the shape to adopt if a host surface for per-cartridge
+  configuration ever exists (see the solder-pad note under Q-166 §2).
+
 ---
 
 ## OPEN — the points that stay as they are, and what would close each
@@ -1188,3 +1417,8 @@ affected and the risk to existing boards.)*
 | Q-155 | 163's D0/D1 swap scope | reading (b), `$5000` and `$5200` | **the lean has changed**: puNES is the only project with the mechanism and it implements reading (a) — all three ports, `$5100` included — with a hardware note about the 1 MiB boards' A19/A20 wiring. One mapper-163 game that sets `$5300` bit 0 and uses the protection closes it. See §CHANGE 4. |
 | Q-158 §1 | 268's PRG A25 interleave | the first 32 MiB half | a 64 MiB dump whose halves differ at the reset vector. **None of the three projects that support the number implements SC0/SC1 or PRG A25 at all**, so this build is not behind the field. |
 | Q-159 | 268's `$5000-$5FFF` PRG-RAM | COOLBOY only, the chip's second 4 KiB, `$A001`-gated | one dump that sets `$xxx3` bit 5. **Nobody implements the bit**: FCEUX's `$5000` write window is an unconditional crash workaround by its own comment, and Mesen 2 and puNES do not decode it. All three of this build's readings stand unchallenged. |
+| Q-165 §3 | 14's supervisor power-on | `$02`, MMC3 mode | a *Samurai Spirits* trace showing whether it writes `$A131` before it banks. All four other implementations start in **VRC2 mode** — but every one of them gets that from zero-initialised memory rather than from a decision, and the page gives no value. Both modes reach a reset vector. |
+| Q-165 §5a | 14's "mirroring only in VRC2 mode" | implemented | original hardware, as the page itself says. **Nestopia implements the rule in this build's exact shape** (MMC3-mode `$A000` re-applies the VRC2's `$9000` value and ignores the datum), which verifies the page's attribution; Mesen 2, FCEUX and puNES contradict it, which is what the page says they do. |
+| Q-166 §1 | 83's scratch RAM decode | the `A~` row, `(a & $F30C) == $5100` | a dump using a mirror. Three projects, three decodes: Mesen 2 and FCEUX claim exactly `$5100-$5103`, puNES splits `$5000-$5FFF` by one address bit. All that is shared is that the four addresses must work, which this build satisfies. |
+| Q-166 §3 | 83's `$8318` IRQ source | any non-zero selects A12 | a source for which data bit is decisive. **No project implements the register**; all three hard-wire the CPU-M2 source, i.e. the page's default value. This build is ahead of the field and unrebutted. |
+| Q-168 §3a | 91 submapper 0's ÷64 counter | a carry out that keeps running | a mapper-91 game that does not acknowledge. Mesen 2 repeats (an MMC3 latch of 7), FCEUX and puNES **stop at 8** — the ticket's named alternative — so it is two-two. All three count eight *filtered* scanline ticks rather than sixty-four unfiltered A12 rises, which differs only while rendering is off. |
