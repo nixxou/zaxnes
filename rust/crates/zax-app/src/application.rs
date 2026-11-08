@@ -457,6 +457,7 @@ impl Running {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // One host frame, its steps in their order.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
         self.follow_the_editor_setting();
@@ -1833,9 +1834,13 @@ fn tint_smooth_band(
     let from = if start <= 0 { 0 } else { line(start) };
     let to = if end >= 240 { height } else { line(end) };
     for row in picture.chunks_mut(width.max(1)).take(to).skip(from) {
-        row.iter_mut().for_each(|pixel| recolour(pixel, 0x06));
+        for pixel in row.iter_mut() {
+            recolour(pixel, 0x06);
+        }
     }
-    overlay.iter_mut().for_each(|pixel| recolour(pixel, 0x0A));
+    for pixel in overlay.iter_mut() {
+        recolour(pixel, 0x0A);
+    }
 }
 
 fn to_i32(value: u32) -> i32 {
@@ -2146,6 +2151,7 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+#[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
