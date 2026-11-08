@@ -320,4 +320,92 @@ measurably **cheaper** on the emulated core of every mapper-1 game and identical
 and the feature build is the base commit's emulation to the instruction. The only figure above the
 tolerance anywhere in the campaign is `smb1`'s level-2 whole process, which the same binary
 reproduces against itself.
-- [ ] 5/5 the final check
+- [x] 5/5 the final check
+
+### 5/5 — the final check
+
+`zax-app` cannot build in this worktree, as the brief says; the crates this lot touches are
+`zax-nes` (the MMC1, and one comment on the NES-EVENT) and `zax-harness` (the `holy-mapperel`
+expectation and the `m1_p128k` diagnosis). `CARGO_TARGET_DIR=rust/target-mf`, `TMP`/`TEMP` in
+`rust/target-mf/tmp`.
+
+**Formatting.** `cargo fmt -p zax-nes -p zax-harness -- --check` clean.
+
+**Clippy, `-D warnings`, `--all-targets`** — the four configurations the brief asks for:
+
+| configuration | crates | result |
+| --- | --- | --- |
+| `default` | `zax-nes`, `zax-harness` | clean |
+| `--features zax-nes/mmc1-snrom-e-bit` (the new feature alone) | `zax-nes`, `zax-harness` | clean |
+| `--features zax-nes/parked-boards` | `zax-nes`, `zax-harness` | clean |
+| `--no-default-features` | `zax-nes` | clean |
+
+**Tests.**
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1166 passed, 0 failed, 10 ignored** |
+| the same `--no-fail-fast -- --include-ignored` with `ZAXNES_ROMS=G:/3dsen/demo/roms` and `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` | **1176 passed, 0 failed, 0 ignored** |
+| the same plus `--features zax-nes/mmc1-snrom-e-bit` | **1176 passed, 0 failed, 0 ignored** |
+| the same plus `--features zax-nes/parked-boards` | **1237 passed, 0 failed, 0 ignored** |
+| `cargo test --release -p zax-nes --no-default-features` | 790 passed, 0 failed, 9 ignored |
+
+The ten ignored are the ROM-gated ones, MF-LEG-1 step 1's five-ROM extra check among them; with
+the roots set they do work rather than returning early, and **the `holy-mapperel` suite only runs
+with `ZAXNES_TEST_ROMS` set**, which is where this lot's two rows are checked — `Fail` in the
+first two runs and `Pass` in the third, asserted by name either way. `parked-boards` is 1237 and
+not MF-LEG-1's recorded 1244 for the reason step 3 establishes: 1237 is the base commit's own
+number.
+
+**golden-core over the 98 originals**, re-run from the final tree (binary md5
+`9ec6a04f156fa3dacc42bcc2a087c053`):
+
+| build | md5 of the digest |
+| --- | --- |
+| `e2507f56`, the base commit, built from `git archive` in a fresh tree | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `default` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/mmc1-snrom-e-bit` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical in all four** (`cmp`, not only the digest), and identical to the digest thirteen
+lots have now recorded.
+
+**Save states.** Not one byte changed. `Mmc1::save_registers` writes the shift register, the
+shift count, the three register bytes and the last-write cycle, and no mask: `chr_disable_mask`
+was load-time derived state and its disappearance from the struct cannot be seen by the format.
+`load_registers` still calls `refresh_prg_ram_disable`, which is what recomputes
+`prg_ram_disabled` (REQ-CORE-091). An MMC1 state written by any earlier build loads into this one
+and vice versa, and no other board is touched at all.
+
+**The figures and the feature decision**, which is the last thing the brief asks — §4.5 has the
+table. In one line: **nothing is parked, and the shipped build is cheaper than its base** by
+2 944 to 10 656 core instructions on each of the three mapper-1 level-2 games and `+0` to the
+instruction on the two that are not, while `mmc1-snrom-e-bit` reproduces the base commit's
+emulation exactly, `+0` on all five.
+
+**The one figure a reader should not misread**: `m1` **+0.008 %** on PR-1 in the shipped build.
+`m1` is `M1_P128K.nes`, the ROM of Q-176; with the `E` bit withdrawn its `4000` digit fails and
+from there it runs different code. The same-emulation control (`mmc1-snrom-e-bit` against the base)
+puts `m1` at **+0.000 %**, so the figure is this lot's decision showing up as emulation and not a
+cost. MF-LEG-1 step 9 measured the same +0.008 % on `m1` for the inverse change.
+
+## What this lot leaves behind
+
+* **Q-176 is closed**, with its *Decision* section and the commit that carries it.
+* **Entry MMC1-1's verdict line no longer describes the shipped build**, and the entry says so:
+  this build now agrees with all five cross-checked emulators and departs from the nesdev page,
+  deliberately and for a reason recorded at the bit's own site. That is the first place in the
+  mapper work where AMD-061 is set aside by decision rather than by oversight, which is why the
+  reasoning is in the code and not only in the ticket.
+* **Two `holy-mapperel` rows are required failures in `default`** and pass with one flag. They
+  are marked `expected` so no report ever reads them as defects, and they are asserted both ways
+  so neither can drift.
+* **A correction to MF-LEG-1's final check**: its `parked-boards` figure of 1244 does not
+  reproduce and the base commit gives 1237 (step 3).
+* **A worse level-2 floor than any lot has recorded**: the same binary measured twice moves
+  `smb1` by **+0.029 %**, above the owner's tolerance. The `stages.txt` `core` row is `+0` across
+  identical binaries and is the instrument to use instead (step 4.1). The next lot that measures
+  a level-2 whole-process figure under about 0.03 % should treat it as noise.
+* **The follow-up MF-LEG-1 step 5 already named is still open**: mapper 155 is the same ASIC
+  revision as the MMC1A and does not get the `R` bit's A17 in this build, being outside that
+  lot's scope. Nothing in this lot changes it.
