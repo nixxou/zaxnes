@@ -164,6 +164,12 @@ pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
         kind => {
             let increment = if row.step > 0.0 {
                 row.step
+            } else if let Some(step) = row.descriptor.domain().step().filter(|step| *step > 0.0) {
+                // A stepped number the window shows as a list (the run-ahead): its own step.
+                step
+            } else if kind == SettingKind::Int {
+                // A whole number moves by one at least: half a step rounds back where it was.
+                ((row.maximum - row.minimum) / 20.0).max(1.0)
             } else {
                 (row.maximum - row.minimum) / 20.0
             };

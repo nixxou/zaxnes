@@ -500,3 +500,25 @@ mod tests {
         assert_eq!(0, model.options().len());
     }
 }
+
+#[cfg(test)]
+mod run_ahead_rows {
+    use zax_settings::values::SettingValue;
+
+    use super::*;
+
+    /// A game's run-ahead offers every value, whether it has one of its own or not.
+    #[test]
+    fn a_game_s_run_ahead_offers_every_value() {
+        let global = SettingsModel::new();
+        for own in [None, Some(0), Some(10)] {
+            let options: GameOptions = own
+                .map(|value| vec![(SettingId::EmuRunAhead, SettingValue::Int(value))])
+                .unwrap_or_default();
+            let model =
+                GameOptionsModel::new(std::path::PathBuf::new(), String::new(), &global, options);
+            let choices = model.choices(OptionRow::Setting(SettingId::EmuRunAhead));
+            assert_eq!(11, choices.len(), "{own:?}: {choices:?}");
+        }
+    }
+}
