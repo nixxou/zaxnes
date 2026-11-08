@@ -132,10 +132,17 @@ impl MarginDecoder for Kirby {
 }
 
 /// Whether the row shows what the map gives at tile row `tile_row`, the row's first tile column
-/// being `first`: every column from the third to the thirtieth, one aside (an object the game
-/// draws in the nametable, a block being broken). Two columns alone were not enough: a screen
-/// that is not the room (the intro, a level's title card) matched the last room's map there now
-/// and then, and its rows got that room's margins.
+/// being `first`: every column from the third to the thirtieth, [`EDGE_MISSES`] aside (an object
+/// the game draws in the nametable, a block being broken). Two columns alone were not enough: a
+/// screen that is not the room (the intro, a level's title card) matched the last room's map
+/// there now and then, and its rows got that room's margins.
+///
+/// Three: a 16-pixel block of the map the game changed a frame before it draws it (a door of the
+/// hub opening: the map has the doorway, the nametable still the star box, two columns on each
+/// of its two rows, which then went without margins for that frame), and a column besides.
+/// The columns of a row [`edges_match`] lets differ from the map.
+const EDGE_MISSES: u32 = 3;
+
 fn edges_match(
     room: &Room<'_>,
     memory: &DecoderMemory<'_>,
@@ -152,7 +159,7 @@ fn edges_match(
         let shown = (memory.nametable)(nametable_address(row, column));
         if room.tile(first + column, tile_row).map(|(tile, _)| tile) != Some(shown) {
             misses += 1;
-            if misses > 1 {
+            if misses > EDGE_MISSES {
                 return false;
             }
         }
