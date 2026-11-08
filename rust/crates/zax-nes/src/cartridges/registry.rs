@@ -8,6 +8,8 @@
 
 #[cfg(feature = "board-111")]
 use super::mappers::Cheapocabra;
+#[cfg(feature = "board-cony")]
+use super::mappers::Cony;
 #[cfg(feature = "board-decode-boards")]
 use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
@@ -178,6 +180,9 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     80,
     #[cfg(feature = "board-taito-x1")]
     82,
+    // The Cony / Yoko ASIC, with NES 2.0 mapper 264 at the end of this list (MF-UNL-8 step 3).
+    #[cfg(feature = "board-cony")]
+    83,
     85,
     #[cfg(feature = "board-jaleco-72-92-86")]
     86,
@@ -326,6 +331,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     243,
     #[cfg(feature = "board-263")]
     263,
+    #[cfg(feature = "board-cony")]
+    264,
     #[cfg(feature = "board-268")]
     268,
     #[cfg(feature = "board-298")]
@@ -794,6 +801,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // can say. So the dump decides, and `Sachen8259::new` reads which of the two it is.
         #[cfg(feature = "board-sachen8259")]
         137 | 138 | 139 | 141 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 083"), the *Banks* section: "CPU $6000-$7FFF: 8 KiB switchable
+        // window into 32 KiB PRG-NVRAM (Mapper 83.2)/**into PRG-ROM (all others)**". So on the four
+        // PCBs this build serves there is no RAM behind that window at all -- it is a PRG-ROM bank
+        // when $8100 bit 5 enables one and open bus when it does not -- and `Cony::try_read_prg`
+        // answers it. 83.2, the one variant that would want RAM here, is refused at load (Q-167).
+        // This is mappers 47 and 37's arm above for a different reason: not a register in the way,
+        // but a window the board drives from ROM (MF-UNL-8 step 3).
+        #[cfg(feature = "board-cony")]
+        83 | 264 => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -1331,6 +1350,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.
         #[cfg(feature = "board-mmc3-multicart")]
         37 | 47 => Board::IrqBoard(IrqBoard::Mmc3Multicart(Mmc3Multicart::new(memory, mapper))),
+        // MF-UNL-8 step 3: the Cony / Yoko chip-on-board ASIC, "the same chip-on-board ASIC" on
+        // five PCBs that the mapper number and the NES 2.0 submapper pick between. One board with
+        // four parameters -- the address remap of mapper 264, the 2 KiB CHR rewiring of 83.1 and
+        // 264, the inner PRG bank's width and the PRG base's bit layout -- on the `Jv001`
+        // precedent. `Cony::new` answers `None` for **submapper 2**, the one PCB whose
+        // $6000-$7FFF is PRG-NVRAM rather than PRG-ROM, so a dump of it is refused with
+        // REQ-CORE-011's message (Q-167).
+        #[cfg(feature = "board-cony")]
+        83 | 264 => Board::IrqBoard(IrqBoard::Cony(Box::new(Cony::new(memory, mapper)?))),
         // MF-UNL-4: the J.Y. Company ASIC, one chip and four PCB configurations. 209 is the
         // page's "standard implementation"; **211 and 35 are the same board here**, the page
         // calling 211 "a mere duplicate of INES Mapper 209 with correct emulation" (Q-149) and 35

@@ -193,6 +193,12 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   and no MMC1, and **three** independent CHR A18 bits over the unequal window groups
     //   $0000-$0FFF, $1000-$17FF and $1800-$1FFF -- behind `board-huang1` (MF-UNL-8 step 2,
     //   Q-165). MF-6b step 6 decided the number out of mapper 116's board on those differences;
+    // * 83 and 264, the Cony / Yoko chip-on-board ASIC -- "the same chip-on-board ASIC" on five
+    //   PCBs, of which this build serves four: a PRG base, a mode register, a 16-bit counter whose
+    //   clock is selectable between CPU M2 and PPU A12, four 8 KiB PRG registers, eight 1 KiB CHR
+    //   registers (four 2 KiB ones on 83.1 and 264), a solder-pad read and four bytes of scratch
+    //   RAM -- behind `board-cony` (MF-UNL-8 step 3). Submapper 2, the one PCB with PRG-NVRAM at
+    //   $6000, is refused at load (Q-167);
     // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
@@ -222,7 +228,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
-    let additions: [(i32, bool); 103] = [
+    let cony = cfg!(feature = "board-cony");
+    let additions: [(i32, bool); 105] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -251,6 +258,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (79, nina03),
         (80, taito_x1),
         (82, taito_x1),
+        (83, cony),
         (85, true),
         (86, jaleco),
         (88, namcot),
@@ -325,6 +333,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (232, small),
         (243, sachen),
         (263, cfg!(feature = "board-263")),
+        (264, cony),
         (268, cfg!(feature = "board-268")),
         (298, cfg!(feature = "board-298")),
         (552, taito_x1),
@@ -6418,8 +6427,12 @@ fn somari_mode(core: &mut NesCore, value: u8) {
 /// banks: the two would read the same byte. The offsets distinguish them.
 ///
 /// Mappers 12 and 14 use it for the same reason: their CHR A18 is the same 256-bank move, applied
-/// per window group (MF-UNL-8).
-#[cfg(any(feature = "board-116", feature = "board-huang1"))]
+/// per window group. So does mapper 83.3, whose `CC` bits are CHR A19-A18 (MF-UNL-8).
+#[cfg(any(
+    feature = "board-116",
+    feature = "board-cony",
+    feature = "board-huang1"
+))]
 fn chr_offsets(core: &NesCore) -> [usize; 8] {
     core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
 }
@@ -12477,4 +12490,407 @@ fn req_core_090_mapper_29_survives_a_save_and_restore() {
     assert_eq!(0x77, core.chr_bank(0x0400), "the CHR-RAM byte");
     assert_eq!(0x88, core.read_memory(0x6000), "the WRAM byte");
     assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ------------------------------------ the Cony / Yoko ASIC (83, 264), MF-UNL-8 step 3
+
+/// Mapper 264's address rewiring, as the page's own five-row table: it "connects CPU A11.A10 to
+/// the ASIC's A9..A8 inputs, so all addresses change accordingly".
+///
+/// | register | mapper 83 | mapper 264 |
+/// | --- | --- | --- |
+/// | the mode register | `$8100` | `$8400` |
+/// | the IRQ counter | `$8200` | `$8800` |
+/// | the 8 KiB PRG banks | `$8300` | `$8C00` |
+/// | the IRQ clock source | `$8318` | `$8C18` |
+/// | the scratch RAM | `$5100` | `$5400` |
+#[cfg(feature = "board-cony")]
+fn cony_register(mapper: usize, address: u16) -> u16 {
+    if mapper == 264 {
+        // The inverse of the board's own `asic_address`: ASIC A9-A8 come back out on CPU A11-A10.
+        (address & 0xF0FF) | ((address & 0x0300) << 2)
+    } else {
+        address
+    }
+}
+
+#[cfg(feature = "board-cony")]
+fn cony_write(core: &mut NesCore, mapper: usize, address: u16, value: u8) {
+    core.mapper_write(cony_register(mapper, address), value);
+}
+
+/// The PRG base at `$8000` (`PPPP PPPP`, "PRG A21..A14") and the four banking modes of `$8100`
+/// bits 4-3, in the page's own words:
+///
+/// * **0**: "PRG A17/A16..A14=1 if CPU A14=1 (`UxROM`)";
+/// * **1**: "None (NROM-128)";
+/// * **2**: "PRG A17/A16..A13 from 4x8 KiB PRG registers";
+/// * **3**: "Same as 2".
+///
+/// With "the $E000-$FFFF window ... hard-wired to the last (inner) bank" in modes 2 and 3, and the
+/// inner bank 256 KiB on this PCB.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_cony_banks_prg_in_the_four_modes_of_its_mode_register() {
+    let mut core = MapperRom::new(83).prg(32).chr(64).load();
+    // Power-on is mode 0 with a base of zero: UxROM, so the last 16 KiB of the inner bank is
+    // fixed at $C000 and the reset vector is reachable out of a cold start.
+    assert_eq!([0, 1, 30, 31], core.prg_windows(), "mode 0, base 0");
+
+    // The base is a 16 KiB unit: $04 is PRG A14-A21 = 4, which is 8 KiB bank 8.
+    core.mapper_write(0x8000, 0x04);
+    assert_eq!(
+        [8, 9, 30, 31],
+        core.prg_windows(),
+        "mode 0 switches the low 16 KiB and fixes the high one"
+    );
+
+    // Mode 1, NROM-128: CPU A14 reaches no PRG line, so the one 16 KiB bank appears twice.
+    core.mapper_write(0x8100, 0x08);
+    assert_eq!([8, 9, 8, 9], core.prg_windows(), "mode 1 is NROM-128");
+
+    // Modes 2 and 3: the four 8 KiB registers, with $E000 hard-wired to the last inner bank.
+    for mode in [0x10u8, 0x18] {
+        core.mapper_write(0x8100, mode);
+        core.mapper_write(0x8300, 3);
+        core.mapper_write(0x8301, 5);
+        core.mapper_write(0x8302, 7);
+        assert_eq!(
+            [3, 5, 7, 31],
+            core.prg_windows(),
+            "mode {mode:#04X}: three registers and the last inner bank"
+        );
+    }
+
+    // The register is five bits, `...p PPPP`, so bits 7-5 of a write are not latched.
+    core.mapper_write(0x8300, 0xE3);
+    assert_eq!(3, core.prg_windows()[0], "`...p PPPP` is five bits");
+
+    // $8300-$830F is the register file under the page's own mask, `(Address AND $8310)=$8300`, so
+    // A3 is undecoded and $8308 is $8300 again.
+    core.mapper_write(0x8308, 9);
+    assert_eq!(9, core.prg_windows()[0], "A3 is not in the $8310 mask");
+}
+
+/// `$8310`-`$8317`, "CHR-ROM A17..A10" per 1 KiB window on mapper 83.0 -- and the rewiring that
+/// makes 83.1 and 264 bank in **2 KiB** amounts instead.
+///
+/// > Mappers 83.1 and 264 increase the CHR-ROM size from 256 to 512 KiB by connecting CHR-ROM A10
+/// > to PPU A10 and CHR-ROM A11..A18 to the mapper ASIC's A10..A17 outputs ... As a result,
+/// > CHR-ROM is banked in 2 KiB rather than 1 KiB amounts, using on the the four CHR bank
+/// > registers 0, 1, 6 and 7.
+///
+/// The page's own address table is what picks those four: the ASIC sees `$0000`/`$0400` as reg 0,
+/// `$0800`/`$0C00` as reg 1, `$1000`/`$1400` as **reg 6** and `$1800`/`$1C00` as **reg 7** -- so
+/// registers 2 to 5 drive nothing at all on those two PCBs, which is the half of this a reader
+/// would get wrong.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_cony_banks_chr_in_1_kib_on_83_0_and_in_2_kib_on_83_1_and_264() {
+    // 83.0: eight 1 KiB windows from eight registers.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    for register in 0..8u16 {
+        core.mapper_write(0x8310 + register, u8::try_from(register).unwrap() + 1);
+    }
+    assert_eq!([1, 2, 3, 4, 5, 6, 7, 8], core.chr_windows());
+
+    // 83.1 and 264: four 2 KiB windows from registers 0, 1, 6 and 7.
+    for mapper in [83usize, 264] {
+        let mut core = if mapper == 83 {
+            MapperRom::new(83).submapper(1).prg(16).chr(256).load()
+        } else {
+            MapperRom::new(264).prg(16).chr(256).load()
+        };
+
+        for (register, bank) in [(0u16, 1u8), (1, 2), (6, 3), (7, 4)] {
+            cony_write(&mut core, mapper, 0x8310 + register, bank);
+        }
+        assert_eq!(
+            [2, 3, 4, 5, 6, 7, 8, 9],
+            core.chr_windows(),
+            "mapper {mapper}: four 2 KiB banks"
+        );
+
+        // And the four registers the rewiring disconnects drive nothing.
+        for register in 2..6u16 {
+            cony_write(&mut core, mapper, 0x8310 + register, 0x7F);
+        }
+        assert_eq!(
+            [2, 3, 4, 5, 6, 7, 8, 9],
+            core.chr_windows(),
+            "mapper {mapper}: registers 2-5 are not connected"
+        );
+    }
+}
+
+/// The rows of the page's mapper-264 table, each tested by writing the **mapper-83** address on a
+/// mapper-264 image and finding that it did something else -- which is the only way to show a
+/// rewiring rather than assert it.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_mapper_264_moves_every_register_by_the_a11_a10_rewiring() {
+    // $8400 is the mode register and $8C00 the first 8 KiB PRG register.
+    let mut core = MapperRom::new(264).prg(32).chr(256).load();
+    core.mapper_write(0x8400, 0x10); // Mode 2.
+    core.mapper_write(0x8C00, 3);
+    assert_eq!(
+        [3, 0, 0, 15],
+        core.prg_windows(),
+        "$8400 and $8C00 are the ASIC's, with a 128 KiB inner bank"
+    );
+
+    // So $8100 is the PRG **base** on this PCB (ASIC $8000) and not the mode register. The inner
+    // bank is 128 KiB here, so only the base's A17 and above show: $08 is PRG A14-A21 = 8, which
+    // is 8 KiB bank 16, and the four registers drive A13-A16 inside it.
+    core.mapper_write(0x8100, 0x08);
+    assert_eq!(
+        [19, 16, 16, 31],
+        core.prg_windows(),
+        "$8100 is the PRG base on this PCB, not the mode register"
+    );
+
+    // $8C18 is the IRQ clock source and $8318 is not, so writing $FF at $8318 must leave the
+    // counter on CPU M2.
+    let mut core = MapperRom::new(264).prg(16).chr(256).load();
+    core.mapper_write(0x8400, 0x80); // Arm the counter, counting up.
+    core.mapper_write(0x8318, 0xFF); // Not the source register here.
+    core.mapper_write(0x8800, 0xFE);
+    core.mapper_write(0x8801, 0xFF);
+    for _ in 0..2 {
+        core.bus_mut().tick();
+    }
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "$8318 is not the source register on mapper 264, so M2 still counts"
+    );
+
+    // And $5400-$5403 is the scratch RAM where mapper 83 has $5100-$5103.
+    let mut core = MapperRom::new(264).prg(16).chr(256).load();
+    core.mapper_write(0x5400, 0x5A);
+    assert_eq!(Some(0x5A), core.cartridge().unwrap().try_cpu_peek(0x5400));
+    core.mapper_write(0x5100, 0xA5);
+    assert_eq!(
+        Some(0x5A),
+        core.cartridge().unwrap().try_cpu_peek(0x5400),
+        "$5100 is not the scratch RAM on mapper 264"
+    );
+}
+
+/// `$8100` bit 5, "1: Map 8 KiB PRG-ROM bank to CPU $6000", with "register $8303 appl[ying] to the
+/// $6000-$7FFF window, if enabled in the Mode register".
+///
+/// The window is PRG-**ROM** on all four PCBs this build serves -- the page's *Banks* section gives
+/// it "into 32 KiB PRG-NVRAM (Mapper 83.2)/into PRG-ROM (all others)" and 83.2 is refused -- so
+/// `board_memory_sizes` gives both numbers no PRG-RAM and the board answers the window itself.
+/// With bit 5 clear there is nothing there at all, which `try_cpu_peek` shows as `None` rather than
+/// as a zero the board drove.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_cony_maps_a_prg_rom_bank_at_6000_when_the_mode_register_says_so() {
+    let mut core = MapperRom::new(83).prg(32).chr(64).load();
+    assert_eq!(
+        None,
+        core.cartridge().unwrap().try_cpu_peek(0x6000),
+        "power-on: no window and no RAM at $6000"
+    );
+
+    core.mapper_write(0x8100, 0x10 | 0x20); // Mode 2, $6000 enabled.
+    core.mapper_write(0x8303, 9);
+    assert_eq!(
+        Some(9),
+        core.cartridge().unwrap().try_cpu_peek(0x6000),
+        "$8303 is the $6000-$7FFF window"
+    );
+    assert_eq!(
+        Some(9),
+        core.cartridge().unwrap().try_cpu_peek(0x7FFF),
+        "and the whole 8 KiB of it"
+    );
+
+    // The other three registers are the $8000/$A000/$C000 windows and not this one.
+    core.mapper_write(0x8300, 3);
+    core.mapper_write(0x8301, 5);
+    core.mapper_write(0x8302, 7);
+    assert_eq!([3, 5, 7, 31], core.prg_windows());
+    assert_eq!(Some(9), core.cartridge().unwrap().try_cpu_peek(0x6000));
+
+    // Bit 5 clear takes the window away again; a write there is not RAM either.
+    core.mapper_write(0x8100, 0x10);
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(None, core.cartridge().unwrap().try_cpu_peek(0x6000));
+}
+
+/// `$8100` bits 1-0, `NN`, the nametable arrangement -- and the page gives both namings, which are
+/// each other's opposites: "0: Horizontal (**Vertical mirroring**)", "1: Vertical (**Horizontal
+/// mirroring**)", "2: Single screen 0", "3: Single screen 1". This core's `NametableMirroring` is
+/// the one in the page's own parentheses.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_cony_sets_its_mirroring_from_the_mode_register() {
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    for (bits, expected) in [
+        (0x00u8, Nm::Vertical),
+        (0x01, Nm::Horizontal),
+        (0x02, Nm::SingleScreenA),
+        (0x03, Nm::SingleScreenB),
+    ] {
+        core.mapper_write(0x8100, bits);
+        assert_eq!(expected, core.mirroring(), "NN = {bits}");
+    }
+
+    // The mode register is one byte: the arrangement rides along with the banking mode and the
+    // other four bits, so a write that sets mode 2 also sets the arrangement.
+    core.mapper_write(0x8100, 0x10 | 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// Submapper 3, the **N-C44/82-08-24J** 4-in-1: a PRG base of `CCPP PPPP` where the other PCBs
+/// have `PPPP PPPP`, so "PRG A19..A14" in the low six bits and "CHR-ROM A19..A18" in the top two --
+/// and a **128 KiB** inner PRG bank, because "PRG Base A17 is only modified on mappers 83.0, 83.1
+/// and 83.2, and not on 83.3 and 264".
+///
+/// The inner bank's width is the whole of what that sentence changes, and it is visible in mode 2:
+/// with a 256 KiB inner bank the base's low five bits are inside it and contribute nothing, where
+/// with a 128 KiB one the base's A17 sits above the register's four bits and selects the half.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_102_mapper_83_submapper_3_has_a_128_kib_inner_prg_bank_and_an_outer_chr_bank() {
+    let mut core = MapperRom::new(83).submapper(3).prg(32).chr(512).load();
+    core.mapper_write(0x8100, 0x10); // Mode 2.
+    core.mapper_write(0x8000, 0x08); // `CCPP PPPP`: PRG A14-A19 = 8, so 8 KiB bank 16.
+    core.mapper_write(0x8300, 3);
+    core.mapper_write(0x8301, 5);
+    core.mapper_write(0x8302, 7);
+    assert_eq!(
+        [19, 21, 23, 31],
+        core.prg_windows(),
+        "the base's A17 is above the register's A13-A16, and $E000 is the last inner bank"
+    );
+
+    // The `p` bit of `...p PPPP` is PRG A17, and on this PCB it "has no effect".
+    core.mapper_write(0x8300, 0x10 | 3);
+    assert_eq!(19, core.prg_windows()[0], "the p bit has no effect on 83.3");
+
+    // And the top two bits of the base are CHR A19-A18, an outer 256 KiB CHR bank.
+    let a18 = 256 * 0x400;
+    core.mapper_write(0x8310, 1);
+    assert_eq!(0x400, chr_offsets(&core)[0], "no outer bank yet");
+    core.mapper_write(0x8000, 0x40 | 0x08);
+    assert_eq!(0x400 + a18, chr_offsets(&core)[0], "`CC` = 1 is CHR A18");
+    assert_eq!(
+        [19, 21, 23, 31],
+        core.prg_windows(),
+        "and the PRG half of the same register is unchanged"
+    );
+}
+
+/// The solder pad at `$5000` (`(Address AND $F100)=$5000`) and the four bytes of scratch RAM at
+/// `$5100`-`$5103`, which is the test census §7.2 asks for by name.
+///
+/// The pad answers **0** and that is a recorded gap (Q-166): "the 'good' value is not always 0 or
+/// 3", and **no field of any header records how a pad was cut**, so §7.2's "returns the configured
+/// value" has no configuration to read. What the test pins is the decode -- the board answers
+/// inside each mask and drives nothing outside it -- and that the scratch RAM is RAM.
+///
+/// The scratch RAM's printed mask, "(Address AND $8310)=$8300", is a copy of the PRG bank
+/// register's and cannot be right: `$5100 AND $8310` is `$0100`. The address pattern
+/// `A~[0101 ..01 .... 00AA]` is used instead (Q-166).
+#[cfg(feature = "board-cony")]
+#[test]
+fn q_166_cony_reads_its_solder_pad_at_5000_and_its_four_scratch_bytes_at_5100() {
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+
+    // The pad: every mirror the $F100 mask admits, which is A8 clear in $5000-$5FFF.
+    for address in [0x5000u16, 0x50FF, 0x5200, 0x5A00, 0x5EFF] {
+        assert_eq!(
+            Some(0x00),
+            core.cartridge().unwrap().try_cpu_peek(address),
+            "{address:#06X} is the solder pad"
+        );
+    }
+
+    // The scratch RAM reads back what was written, one byte per address.
+    for (index, value) in [0x11u8, 0x22, 0x33, 0x44].into_iter().enumerate() {
+        core.mapper_write(0x5100 + u16::try_from(index).unwrap(), value);
+    }
+    for (index, value) in [0x11u8, 0x22, 0x33, 0x44].into_iter().enumerate() {
+        assert_eq!(
+            Some(value),
+            core.cartridge()
+                .unwrap()
+                .try_cpu_peek(0x5100 + u16::try_from(index).unwrap()),
+            "scratch byte {index}"
+        );
+    }
+
+    // A4 is undecoded in the pattern, so $5110 is $5100 again; A2 is decoded, so $5104 is not.
+    core.mapper_write(0x5110, 0x99);
+    assert_eq!(Some(0x99), core.cartridge().unwrap().try_cpu_peek(0x5100));
+    assert_eq!(
+        None,
+        core.cartridge().unwrap().try_cpu_peek(0x5104),
+        "A2 is decoded, so $5104 is not the scratch RAM"
+    );
+
+    // And nothing of either register exists outside $5000-$5FFF.
+    for address in [0x4100u16, 0x4F00, 0x6100] {
+        assert_eq!(
+            None,
+            core.cartridge().unwrap().try_cpu_peek(address),
+            "{address:#06X} is neither register"
+        );
+    }
+}
+
+/// Submapper 2, the **N-C88-1603/83-08-19J** 4-in-1 of *Dragon Ball Party*: the one PCB of the five
+/// whose `$6000`-`$7FFF` is 32 KiB of **PRG-NVRAM** rather than PRG-ROM, with its bank in the PRG
+/// base register's top two bits and the `6` bit of the mode register overridden -- "the circuit
+/// board hardware around the ASIC forces CPU $6000-$7FFF to PRG-RAM instead".
+///
+/// That window is [`Mapper::prg_ram_window`], a method `IrqBoard` does not forward, so the PCB
+/// would add a body to a `Board` dispatch for a multicart that carries no original title. It is
+/// refused at load with REQ-CORE-011's message; **Q-167** has the argument and MF-UNL-6's Q-157 is
+/// the precedent.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_011_mapper_83_submapper_2_wants_prg_nvram_at_6000_and_is_refused() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(
+        &MapperRom::new(83).submapper(2).prg(32).chr(256).image(),
+        "DragonBallParty.nes",
+    );
+    assert!(!load.success);
+    assert!(load.error.unwrap().contains("83"));
+    assert!(!core.is_running());
+
+    // The other three submappers of mapper 83, and mapper 264, all load.
+    for submapper in [0u8, 1, 3] {
+        let core = MapperRom::new(83)
+            .submapper(submapper)
+            .prg(32)
+            .chr(256)
+            .load();
+        assert_eq!(83, core.cartridge().unwrap().mapper_number());
+    }
+    assert_eq!(
+        264,
+        MapperRom::new(264)
+            .prg(32)
+            .chr(256)
+            .load()
+            .cartridge()
+            .unwrap()
+            .mapper_number()
+    );
+    // An iNES 1.0 image has no submapper byte, so it is the standard PCB and not the refused one.
+    assert_eq!(
+        83,
+        MapperRom::new(83)
+            .prg(32)
+            .chr(256)
+            .load()
+            .cartridge()
+            .unwrap()
+            .mapper_number()
+    );
 }

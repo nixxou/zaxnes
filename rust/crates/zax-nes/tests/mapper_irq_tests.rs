@@ -1567,3 +1567,151 @@ fn q_162_no_vrc4_acknowledge_reloads_the_counter_on_either_chip() {
         );
     }
 }
+
+// ---------------------------------------------- the Cony / Yoko ASIC (83, 264), MF-UNL-8 step 3
+
+/// Arms the counter: the mode register with `C` set and `D` as asked, then the LSB and the MSB.
+///
+/// The order is the page's: "Writing to the LSB acknowledges a pending IRQ; writing to the **MSB
+/// enables counting if bit C in the Mode register was previously set**", so the mode register has
+/// to come first and the MSB last.
+#[cfg(feature = "board-cony")]
+fn arm_cony_irq(core: &mut NesCore, down: bool, counter: u16) {
+    let mode = 0x80 | if down { 0x40 } else { 0x00 };
+    core.mapper_write(0x8100, mode);
+    core.mapper_write(0x8200, u8::try_from(counter & 0x00FF).unwrap());
+    core.mapper_write(0x8201, u8::try_from(counter >> 8).unwrap());
+}
+
+/// The page's whole IRQ paragraph, clause by clause (nesdev, "INES Mapper 083"):
+///
+/// > When counting is enabled and **the counter is not zero**, the counter is incremented or
+/// > decremented according to the Mode register's **D** bit. If the counter is then zero,
+/// > **counting is disabled**, and an IRQ is raised.
+///
+/// Three clauses and each one is a case here: a counter at zero does not move, the direction is
+/// the mode register's, and the firing turns the counter off so a game must write the MSB again.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_114_cony_counts_up_or_down_and_disables_itself_at_zero() {
+    // Counting up: $FFFE needs two clocks to wrap to zero.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    arm_cony_irq(&mut core, false, 0xFFFE);
+    assert_eq!(2, tick_until_irq(&mut core, 1000), "up from $FFFE");
+
+    // Counting down: 2 needs two clocks.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    arm_cony_irq(&mut core, true, 0x0002);
+    assert_eq!(2, tick_until_irq(&mut core, 1000), "down from 2");
+
+    // "Counting is disabled": acknowledging through the LSB clears the IRQ and the counter does
+    // not start again by itself, however long it runs.
+    core.mapper_write(0x8200, 0x05);
+    assert!(!irq(&core), "the LSB write acknowledges");
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut core, 1000),
+        "and counting stays disabled until the MSB is written again"
+    );
+    core.mapper_write(0x8201, 0x00);
+    assert_eq!(5, tick_until_irq(&mut core, 1000), "re-armed, down from 5");
+
+    // "The counter is not zero": a counter sitting at zero never fires, even armed and enabled.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    arm_cony_irq(&mut core, true, 0x0000);
+    assert_eq!(-1, tick_until_irq(&mut core, 2000), "zero does not move");
+
+    // "If bit C in the Mode register was previously set": with `C` clear the MSB write enables
+    // nothing at all.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    core.mapper_write(0x8100, 0x40); // D set, C clear.
+    core.mapper_write(0x8200, 0x02);
+    core.mapper_write(0x8201, 0x00);
+    assert_eq!(-1, tick_until_irq(&mut core, 1000), "C was not set");
+}
+
+/// `$8318`, the clock source: "The default value `$00` selects CPU M2 cycles as the source of the
+/// IRQ counter, and a value of `$FF` selects **unfiltered** PPU A12 rising edges as the source,
+/// clocking the counter eight times per rendered scanline."
+///
+/// The same experiment as the J.Y. ASIC's, and the same two directions: the selected clock counts
+/// and the other one does not. "It's not known which of the eight data bits is decisive", so
+/// **Q-166** records that any non-zero value is A12 — the only reading that gives both documented
+/// values their documented meaning — and the test walks four of them.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_114_cony_irq_source_selection_picks_one_clock_and_not_the_other() {
+    // $00, the default: CPU cycles count and A12 rises do not.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    arm_cony_irq(&mut core, true, 0x0001);
+    for address in [0x0000u16, 0x1000, 0x0000, 0x1000] {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 0);
+    }
+    assert!(!irq(&core), "the M2 source must ignore A12");
+    assert_eq!(1, tick_until_irq(&mut core, 8), "and count M2");
+
+    // Any non-zero value: A12 rises count and CPU cycles do not.
+    for source in [0xFFu8, 0x01, 0x80, 0x10] {
+        let mut core = MapperRom::new(83).prg(16).chr(64).load();
+        core.mapper_write(0x8318, source);
+        arm_cony_irq(&mut core, true, 0x0001);
+        for _ in 0..600 {
+            core.bus_mut().tick();
+        }
+        assert!(!irq(&core), "{source:#04X}: the A12 source must ignore M2");
+
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus(0x0000, 0);
+        cartridge.on_ppu_address_bus(0x1000, 1);
+        assert!(
+            irq(&core),
+            "{source:#04X}: one unfiltered A12 rise is one count"
+        );
+    }
+
+    // **Unfiltered**, which is what keeps this board away from the MMC3's A12 filter: eight rises
+    // with two-dot dips between them, which an MMC3 counts as one.
+    let mut core = MapperRom::new(83).prg(16).chr(64).load();
+    core.mapper_write(0x8318, 0xFF);
+    arm_cony_irq(&mut core, true, 0x0008);
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..7 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(!irq(&core), "seven rises");
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x2000, 56);
+    cartridge.on_ppu_address_bus(0x1000, 58);
+    assert!(irq(&core), "the eighth rise of a line must count");
+}
+
+/// The property census §7.2 asks for on both of this lot's IRQ boards: "`ppu_irq_horizon` is
+/// `None` whenever the source is not A12".
+///
+/// It is `None` for **every** source, and that is not a choice either board gets to make:
+/// [`IrqBoard`](zax_nes::cartridges::mappers::IrqBoard) answers `None` for the whole variant and
+/// does not forward the method, because MF-6b step 4 measured any forward at
+/// `NesBus::catch_up_ppu` 188 → 190 instructions and `mmc5` +9 214 379 over 300 frames. `None` is
+/// "no bound is known, so the PPU runs in step with the CPU", which is always correct — and for a
+/// board whose clock source a game may change mid-frame it is also the only honest answer, so the
+/// census's "whenever" is satisfied by the stronger statement.
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_114_cony_ppu_irq_horizon_is_none_for_every_source() {
+    for mapper in [83usize, 264] {
+        for source in [0x00u8, 0x01, 0xFF] {
+            let mut core = if mapper == 83 {
+                MapperRom::new(83).prg(16).chr(64).load()
+            } else {
+                MapperRom::new(264).prg(16).chr(256).load()
+            };
+            core.mapper_write(if mapper == 83 { 0x8318 } else { 0x8C18 }, source);
+            assert_eq!(
+                None,
+                core.cartridge().unwrap().ppu_irq_horizon(),
+                "mapper {mapper}, source {source:#04X}"
+            );
+        }
+    }
+}

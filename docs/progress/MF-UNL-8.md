@@ -48,7 +48,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
   register at $4132 and its read side.
 - [x] **2/8** — `board-huang1`, mapper **14**: the supervisor at $A131 over the sub-board's own
   registers, two modes, three CHR A18 bits and the page's two Nestopia caveats.
-- [ ] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
+- [x] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
 - [ ] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
 - [ ] **5/8** — the question tickets.
 - [ ] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
@@ -416,3 +416,126 @@ clippy `-D warnings --all-targets` clean in `default` and in
 [PROGRESS] MF-UNL-8 step 2/8 done: mapper 14 is MF-6b step 6's table to the bit — bit 1 the mode and
 bits 3, 5 and 7 three CHR A18 lines over unequal groups — with the supervisor at $A131 seen by the
 sub-board in MMC3 mode and ignored in VRC2 mode, which is the page's own mirror rule doing the work.
+
+---
+
+## Step 3 — the Cony / Yoko ASIC: one chip, five PCBs, four of them built
+
+`board-cony`, in `default`, implying nothing. One new module, `cartridges/mappers/cony.rs`; one new
+boxed `IrqBoard` variant; three `cfg` lists extended by one feature each; and two numbers in each of
+the three latched lists of `cartridges::mod`.
+
+### One board and not five, because the page says so
+
+> The distinction between mappers 83 and 264 as well as NES 2.0 Submappers denote different printed
+> circuit boards that all incorporate the **same chip-on-board ASIC**.
+
+So `ConyVariant` is four rows and four `const fn`, on the `Jv001` and `Namcot108` precedent, and the
+difference between the PCBs is **four parameters**:
+
+| parameter | what differs | which PCBs |
+| --- | --- | ---: |
+| `remaps_addresses` | "connects CPU A11.A10 to the ASIC's A9..A8 inputs, so all addresses change accordingly" | 264 |
+| `banks_chr_in_2k` | CHR-ROM A11..A18 on the ASIC's A10..A17, so 2 KiB banks through registers 0, 1, 6 and 7 | 83.1, 264 |
+| `inner_prg_mask` | "the former have a 256 KiB inner PRG bank, and the latter a 128 KiB" | `$1F` on 83.0/83.1, `$0F` on 83.3/264 |
+| the PRG base layout | `PPPP PPPP` against `CCPP PPPP` | 83.3 is the odd one |
+
+**The address remap is one expression**, and the page's own five-row table is what checks it:
+`(address & 0xF0FF) | ((address & 0x0C00) >> 2)` reproduces `$5100`→`$5400`, `$8100`→`$8400`,
+`$8200`→`$8800`, `$8300`→`$8C00` and `$8318`→`$8C18` exactly. The ASIC's own A11-A10 come out zero,
+which every mask on the page leaves undecoded anyway. Its test is written the only way a rewiring
+can be shown rather than asserted: on a mapper-264 image the **mapper-83** address is written and
+found to be a *different* register — `$8100` is the PRG base there, and `$8318` is no register at
+all, so the counter stays on M2 when `$FF` is written to it.
+
+**`inner_prg_mask` is also what makes "the `p` bit (PRG A17) has no effect on mappers 83.3 and 264"
+true without a second test**, which is the kind of thing that only falls out if the mask is the
+thing being modelled rather than the sentence.
+
+### The register map, and the three masks that differ in two address bits
+
+The page gives the four registers above `$8300` three masks — `(Address AND $8310)=$8300`,
+`(Address AND $8318)=$8310` and `(Address AND $8318)=$8318` — which differ in A4 and A3 and nothing
+else. So the decode is `asic & 0x8300` into four arms and then two bit tests, and `$8308`-`$830F` is
+the PRG register file again because A3 is not in **its** mask; a test pins that rather than leaving
+it to a reader.
+
+The PRG composition is the page's three modes, in 8 KiB bank units with A13 at bit 0:
+
+* mode 0, UxROM: `base | low` for the two windows of `$8000`-`$BFFF` and
+  `base | (mask & !1) | low` for the two of `$C000`-`$FFFF` — "PRG A17/A16..A14=1 if CPU A14=1";
+* mode 1, NROM-128: `base | low` throughout, so CPU A14 reaches no PRG line and the 16 KiB bank
+  appears twice;
+* modes 2 and 3: `(base & !mask) | (register & mask)`, with `$E000`-`$FFFF` at
+  `(base & !mask) | mask` — "hard-wired to the last (inner) bank".
+
+### The IRQ, clause by clause
+
+> When counting is enabled and **the counter is not zero**, the counter is incremented or
+> decremented according to the Mode register's **D** bit. If the counter is then zero, **counting
+> is disabled**, and an IRQ is raised.
+
+All three clauses are in `Cony::tick_irq` and each one is a case in
+`req_core_114_cony_counts_up_or_down_and_disables_itself_at_zero`: a counter at zero does not move
+(so an armed board with a zero counter is silent for ever), the direction is the mode register's,
+and the firing turns counting off — so after an acknowledge through the LSB the counter stays
+silent until the MSB is written again. The arm is the page's "writing to the MSB enables counting
+if bit `C` in the Mode register was **previously** set", which is one test on the mode byte at the
+moment of the MSB write.
+
+The clock source is `$8318`, "unfiltered PPU A12 rising edges" against "CPU M2 cycles", and both
+hooks were already forwarded by `IrqBoard` for the J.Y. ASIC — the other board in that enum with
+two sources. `last_ppu_address` is kept whatever the source is, the J.Y. ASIC's own reason, which is
+why both numbers are in the two PPU watch lists whatever `$8318` holds.
+
+### Submapper 2 is refused, and that is the lot's one scope decision
+
+The N-C88-1603 4-in-1 of *Dragon Ball Party* is the one PCB of the five whose `$6000`-`$7FFF` is
+32 KiB of **PRG-NVRAM** rather than PRG-ROM, with its bank in the PRG base register's top two bits
+— "the circuit board hardware around the ASIC forces CPU $6000-$7FFF to PRG-RAM instead". That
+window is `Mapper::prg_ram_window`, which `IrqBoard` **does not forward**, so the PCB would put a
+new body in a `Board` dispatch for a multicart that carries no original title in the census's
+roster. It is refused at load with REQ-CORE-011's message, on MF-UNL-6's Q-157 precedent, and
+**Q-167** has the argument. 83.0, 83.1, 83.3 and 264 are all built; 83.3 costs two `const` rows.
+
+### The window at $6000, and `prg_ram: Some(0)`
+
+The page's *Banks* section gives `$6000`-`$7FFF` as "8 KiB switchable window into 32 KiB PRG-NVRAM
+(Mapper 83.2)/**into PRG-ROM (all others)**", so on the four PCBs this build serves there is no RAM
+behind that window at all: it is a PRG-ROM bank when `$8100` bit 5 enables one and **open bus** when
+it does not. `board_memory_sizes` gives both numbers `prg_ram: Some(0)`, `Cony::prg_ram_enabled`
+answers `false`, and `Cony::try_read_prg` answers the window — the `JyCompany` shape. The test shows
+the difference between "nothing there" and "a zero the board drove" with `try_cpu_peek`.
+
+### The solder pad, and a printed mask that cannot be right
+
+`$5000` answers **0** and that is a recorded gap (Q-166): the page says "the 'good' value is not
+always 0 or 3" and **no field of any header records how a pad was cut**, so §7.2's "returns the
+configured value" has no configuration to read. A `const` and not a field, so no savestate byte
+carries a figure nothing can set.
+
+The scratch RAM's printed mask is "(Address AND $8310)=$8300", which is a copy of the PRG bank
+register's line and cannot be right — `$5100 AND $8310` is `$0100`. The address pattern
+`A~[0101 ..01 .... 00AA]` is used instead, i.e. `(asic & 0xF30C) == 0x5100`, and Q-166 records it.
+The test walks that decode: `$5110` is `$5100` again (A4 undecoded) and `$5104` is not (A2 decoded).
+
+### Tests
+
+Eight in `mapper_tests` and three in `mapper_irq_tests`: the four PRG modes and the five-bit
+register, 1 KiB against 2 KiB CHR with **registers 2-5 disconnected** on the two large-CHR PCBs,
+the 264 rewiring shown four ways, the `$6000` window on and off, the four mirroring values, 83.3's
+128 KiB inner bank and its outer CHR bank, the solder pad and the scratch RAM, submapper 2 refused
+with the other four loading — and the three IRQ tests: the counter's three clauses, the source
+selection in both directions with the unfiltered eight-rises-a-line case, and
+`ppu_irq_horizon` `None` for every source on both numbers, which is the property census §7.2 asks
+for.
+
+`cargo test --release -p zax-nes`: all suites green, **327** in `mapper_tests` and **61** in
+`mapper_irq_tests`. `cargo fmt --check` clean; clippy `-D warnings --all-targets` clean in
+`default`, `--no-default-features`, `--features parked-boards` and
+`--no-default-features --features board-cony`.
+
+[PROGRESS] MF-UNL-8 step 3/8 done: the Cony / Yoko ASIC is one board with four parameters — the
+264 rewiring as one expression, the 2 KiB CHR of 83.1 and 264 through registers 0, 1, 6 and 7, two
+inner-bank widths and two base layouts — with submapper 2 refused for the PRG-NVRAM window it alone
+needs.

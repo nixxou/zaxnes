@@ -65,6 +65,7 @@ default = [
     "board-218",
     "board-29",
     "board-huang1",
+    "board-cony",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -704,6 +705,36 @@ board-jy-asic-tile-latch = ["board-jy-asic"]
 # that enum's entry condition -- and one new `BankWindows` method, `or_chr_banks_each`, which is the
 # per-window CHR A18 table MF-6b step 6 named before it existed. No new `Board` discriminant.
 board-huang1 = []
+
+# iNES mapper 83 and NES 2.0 mapper 264, the **Cony / Yoko** chip-on-board ASIC (MF-UNL-8 step 3).
+# Four originals the census counts -- *Street Fighter II Pro* and variants, *Fatal Fury 2*,
+# *World Heroes 2'* and *Super Blaster VII Turbo 28* -- plus *Mortal Kombat II/V Pro* and
+# *Master Fighter VI* on the 264 PCB.
+#
+# "The distinction between mappers 83 and 264 as well as NES 2.0 Submappers denote different
+# printed circuit boards that all incorporate the **same chip-on-board ASIC**", so this is **one
+# board with four parameters** on the `Jv001` precedent and not five boards: the address remap of
+# mapper 264 ("connects CPU A11.A10 to the ASIC's A9..A8 inputs", one expression), the 2 KiB CHR
+# rewiring of 83.1 and 264 (CHR-ROM A11..A18 on the ASIC's A10..A17, so only registers 0, 1, 6 and
+# 7 are used), the inner PRG bank's width (256 KiB on 83.0/83.1, 128 KiB on 83.3/264) and the PRG
+# base register's bit layout.
+#
+# The register map is the page's whole *Registers* section: a PRG base at $8000, a mode register at
+# $8100 (mirroring, four PRG banking modes, the $6000 window, the IRQ direction and the IRQ arm), a
+# 16-bit counter at $8200-$8201 whose **clock is selectable between CPU M2 and PPU A12** ($8318),
+# four 8 KiB PRG registers at $8300-$8303, eight 1 KiB CHR registers at $8310-$8317, the solder-pad
+# read at $5000 and four bytes of scratch RAM at $5100-$5103.
+#
+# **Submapper 2 is refused at load**: the N-C88-1603 4-in-1 is the one PCB whose $6000-$7FFF is
+# 32 KiB of PRG-NVRAM rather than PRG-ROM, with its bank in the PRG base register, which needs
+# `Mapper::prg_ram_window` forwarded through `IrqBoard` -- a body in a `Board` dispatch this lot has
+# no measurement for, for a multicart that carries no original title. MF-UNL-6's Q-157 is the
+# precedent and **Q-167** records it. **Q-166** records the four things the page leaves open,
+# including a printed register mask that cannot be right.
+#
+# One boxed `IrqBoard` variant, and every hook it needs is one that enum already forwards for the
+# J.Y. ASIC -- the other board in there with two clock sources.
+board-cony = []
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

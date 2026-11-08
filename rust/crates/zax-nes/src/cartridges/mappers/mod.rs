@@ -31,6 +31,8 @@ mod cheapocabra;
 mod chr_window;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
+#[cfg(feature = "board-cony")]
+mod cony;
 mod daou306;
 #[cfg(feature = "board-decode-boards")]
 mod decode_boards;
@@ -144,6 +146,8 @@ pub use cheapocabra::Cheapocabra;
 pub use chr_window::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
+#[cfg(feature = "board-cony")]
+pub use cony::Cony;
 pub use daou306::Daou306;
 #[cfg(feature = "board-decode-boards")]
 pub use decode_boards::DecodeBoard;

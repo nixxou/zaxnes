@@ -373,6 +373,13 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 48
             | 64
             | 74
+            // MF-UNL-8 step 3: the Cony / Yoko ASIC, whose $8318 selects "unfiltered PPU A12
+            // rising edges" as its counter's clock. In both lists, and **not** behind
+            // `board-cony` here for mapper 68's reason: one `matches!` is one `matches!`, and a
+            // number whose board is off is never created. The pair is also in the lists whatever
+            // $8318 holds, because the board keeps the previous PPU address whatever the source
+            // is -- the J.Y. ASIC's own reason.
+            | 83
             | 90
             | 96
             | 114
@@ -394,6 +401,7 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 209
             | 211
             | 263
+            | 264
             // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
             | 268
     )
@@ -414,6 +422,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 48
             | 64
             | 74
+            // MF-UNL-8 step 3: the Cony / Yoko ASIC's A12 source; see the list above.
+            | 83
             | 90
             | 96
             | 114
@@ -435,6 +445,7 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 209
             | 211
             | 263
+            | 264
             // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
             | 268
     )
@@ -606,6 +617,9 @@ impl Cartridge {
             // MF-UNL-7 step 4 adds NES 2.0 mapper 298, whose board "uses a VRC4 clone in the
             // VRC4b configuration" -- the same chip, the same counter and the same clock, with one
             // documented difference at $F003 (nesdev, "NES 2.0 Mapper 298").
+            // MF-UNL-8 step 3 adds 83 and 264, the Cony / Yoko ASIC, whose $8318 default value
+            // "$00 selects CPU M2 cycles as the source of the IRQ counter" -- this clock, and the
+            // board's power-on setting (nesdev, "INES Mapper 083").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -625,6 +639,7 @@ impl Cartridge {
                     | 67
                     | 69
                     | 73
+                    | 83
                     | 85
                     | 90
                     | 105
@@ -633,6 +648,7 @@ impl Cartridge {
                     | 159
                     | 209
                     | 211
+                    | 264
                     | 298
             ),
         };
@@ -1348,6 +1364,14 @@ mod tests {
         // MF-UNL-2 step 2: the other four of the TQROM's CHR-RAM family, for 119's own reason.
         #[cfg(feature = "board-mmc3-chrram")]
         expected.extend_from_slice(&[74, 74]);
+        // MF-UNL-8 step 3: the Cony / Yoko ASIC keeps the previous PPU address whatever `$8318`
+        // holds, so that a game selecting the A12 source mid-frame does not read a stale edge --
+        // the J.Y. ASIC's own reason, and that one byte is what makes both numbers move here.
+        // **Twice each**: submapper 3 is a PCB of its own on mapper 83 (the N-C44 4-in-1) and
+        // nothing on 264, and neither is the submapper 2 this board refuses, so
+        // `latched_cartridge` builds both halves of both pairs.
+        #[cfg(feature = "board-cony")]
+        expected.extend_from_slice(&[83, 83]);
         #[cfg(feature = "board-jy-asic")]
         expected.extend_from_slice(&[90, 90]);
         // MF-6c step 8: the Oeka Kids board latches its CHR bank on the entry into
@@ -1386,6 +1410,8 @@ mod tests {
         expected.extend_from_slice(&[209, 209, 211, 211]);
         #[cfg(feature = "board-263")]
         expected.extend_from_slice(&[263, 263]);
+        #[cfg(feature = "board-cony")]
+        expected.extend_from_slice(&[264, 264]);
         // MF-UNL-6: mapper 268's board holds an `Mmc3`, so it moves for 114's reason. **Once and
         // not twice**: submapper 3 is one of the seven PCB codes this board refuses, so
         // `latched_cartridge` skips that half of the pair (Q-157).

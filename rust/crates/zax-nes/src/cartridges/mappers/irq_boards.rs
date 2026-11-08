@@ -1,3 +1,5 @@
+#[cfg(feature = "board-cony")]
+use super::Cony;
 #[cfg(feature = "board-huang1")]
 use super::Huang1;
 #[cfg(feature = "board-jy-asic")]
@@ -244,6 +246,18 @@ pub enum IrqBoard {
     /// two numbers and no other board — §4.10's rule.
     #[cfg(feature = "board-huang1")]
     Huang1(Box<Huang1>),
+    /// iNES mapper 83 and NES 2.0 mapper 264, the Cony / Yoko ASIC (MF-UNL-8 step 3): a 16-bit
+    /// counter whose clock is **selectable between CPU M2 and PPU A12**, so the board answers
+    /// **yes** to [`Mapper::irq_asserted`] and belongs here.
+    ///
+    /// Every hook it needs is one this variant already forwards for the J.Y. ASIC, which is the
+    /// other board in here with two clock sources: `on_cpu_cycle`, `on_ppu_address_bus`,
+    /// `irq_asserted` and `try_read_prg`.
+    ///
+    /// **Boxed**, on [`IrqBoard::Somari`]'s own measurement: a [`Cony`] is a `BankWindows`, a
+    /// register file of fifteen bytes and the counter, which inline would set this enum's size.
+    #[cfg(feature = "board-cony")]
+    Cony(Box<Cony>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -280,6 +294,8 @@ macro_rules! inner {
             IrqBoard::JyCompany($b) => $body,
             #[cfg(feature = "board-huang1")]
             IrqBoard::Huang1($b) => $body,
+            #[cfg(feature = "board-cony")]
+            IrqBoard::Cony($b) => $body,
         }
     };
 }
@@ -344,6 +360,7 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-68",
+        feature = "board-cony",
         feature = "board-huang1",
         feature = "board-jy-asic"
     ))]
@@ -455,6 +472,7 @@ impl Mapper for IrqBoard {
     #[cfg(any(
         feature = "board-mmc3-scramble",
         feature = "board-268",
+        feature = "board-cony",
         feature = "board-huang1",
         feature = "board-jy-asic"
     ))]
