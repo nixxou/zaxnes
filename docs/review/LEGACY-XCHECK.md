@@ -588,4 +588,281 @@ today.
 
 Count: 4 OK, 0 DIFFERS, 0 OPEN.
 
+---
+
+## Mapper 4 — MMC3 (TxROM), MMC6 and the MC-ACC
+
+Pages: *MMC3* (<https://www.nesdev.org/wiki/MMC3>), *MMC6*
+(<https://www.nesdev.org/wiki/MMC6>), *NES 2.0 submappers*. Ours: `mappers/mmc3.rs`
+(the generic `Mmc3Board`, of which `Mmc3` and `McAcc` are two monomorphisations),
+`cartridges/a12_watcher.rs`, `registry.rs:1185-1187` for the MC-ACC dispatch.
+Theirs: `fceux/src/boards/mmc3.cpp`, `nestopia/source/core/board/NstBoardMmc3.cpp` and `.hpp`,
+`punes/src/core/mappers/MMC3.c`, `punes/src/core/mappers/mapper_004.c`,
+`punes/src/core/irqA12.c` and `irqA12.h`, `nintendulator-mappers/src/Hardware/h_MMC3.cpp`,
+`nintendulator-mappers/src/iNES/mapper004.cpp`,
+`mesen2/Core/NES/Mappers/Nintendo/MMC3.h`.
+
+This is the board MR-1 examined hardest — nine findings, six fixed in MF-1, one in MF-2 — so
+the register map is re-verified briefly and the weight goes on the IRQ, where the four new
+sources disagree with each other more than they disagree with this build.
+
+### The register map — OK
+
+- **$8000 is `CPxx xRRR`**: bits 2-0 select R0-R7, bit 6 swaps the $8000 and $C000 PRG
+  windows, bit 7 inverts the CHR layout (`mmc3.rs:790-807`, `mmc3.rs:1238-1241`). Same in all
+  four: FCEUX recomputes both layouts from the same two bits (`mmc3.cpp:76-101`), Nestopia XORs
+  the window index with bits derived from them (`NstBoardMmc3.cpp:283-302`), puNES the same
+  (`MMC3.c:208-236`), Nintendulator XORs the bank index (`h_MMC3.cpp:73-83`).
+- **$8001 writes the selected register** — OK (`mmc3.rs:1242-1245`), all four the same.
+- **The fixed windows: $A000-$BFFF is always R7, and the un-swapped half of
+  $8000/$C000 is always the second-to-last bank, with the last bank at $E000** — OK
+  (`mmc3.rs:791-799`). All four the same (`mmc3.cpp:84-85`, `NstBoardMmc3.cpp:287-290`,
+  `MMC3.c:209-216`, `h_MMC3.cpp:73-78`).
+- **R0 and R1 are 2 KiB and ignore bit 0** — OK (`mmc3.rs:803-804`, `bank[n] >> 1` into a 2 KiB
+  window). The others expand the pair into two 1 KiB windows with bit 0 forced low and high
+  (`mmc3.cpp:91-94`, `NstBoardMmc3.cpp:224-225`, `h_MMC3.cpp:155-158`). Same banks. MR-1
+  re-checked this and it stands.
+- **$A000 bit 0: 1 = horizontal, 0 = vertical** — OK (`mmc3.rs:1246-1253`). All four read the
+  bit the same way round: FCEUX inverts it into its own enum, which comes out the same
+  (`mmc3.cpp:253`), puNES (`MMC3.c:252-263`), Nintendulator drives CIRAM A10 from PPU A11 when
+  the bit is set (`h_MMC3.cpp:66-71`), Nestopia stores it and derives the same table
+  (`NstBoardMmc3.cpp:238-240`).
+- **A four-screen header suppresses $A000 entirely** — OK (`mmc3.rs:451-453`,
+  `mmc3.rs:1247`), and a three-way agreement: puNES returns early from its mirroring update
+  with the same comment (`MMC3.c:252-257`), and Nestopia simply does not install a handler on
+  $A000 when the board is four-screen (`NstBoardMmc3.cpp:90-95`). FCEUX and Nintendulator leave
+  the PPU's four-screen wiring to absorb it.
+- **$A001: bit 7 is the PRG-RAM chip enable, bit 6 the write protect** — OK
+  (`mmc3.rs:1146-1160`). Three of the four agree exactly: Nestopia makes the read permission
+  bit 7 and the write permission "bit 7 set and bit 6 clear" (`NstBoardMmc3.cpp:238-247`),
+  puNES computes read from bit 7 and write from read-and-not-bit-6 (`MMC3.c:240-243`),
+  Nintendulator gates reads on bit 7 (`h_MMC3.cpp:91-100`) and blocks writes on bit 6
+  (`h_MMC3.cpp:144-148`). **FCEUX implements neither**: it stores $A001 and then maps
+  $6000-$7FFF as plain readable/writable RAM, consulting the register only in its bootleg
+  derivatives (`mmc3.cpp:174`, `mmc3.cpp:286-289`, and the only in-file use at
+  `mmc3.cpp:623`, a non-MMC3 board). Four to one for this build.
+- **$C000 latch, $C001 reload, $E000 disable-and-acknowledge, $E001 enable** — OK
+  (`mmc3.rs:1263-1277`). All four the same (`mmc3.cpp:181-186`, `NstBoardMmc3.cpp:249-271`,
+  `MMC3.c:114-137`, `h_MMC3.cpp:178-193`).
+- **$E000 acknowledges a pending IRQ as well as disabling** — OK (`mmc3.rs:1274-1275`); all
+  four clear the CPU line there too.
+- **The MC-ACC (submapper 3) is a board of its own** — OK. `registry.rs:1185-1187` builds
+  `McAcc` for a NES 2.0 mapper 4 with submapper 3, which counts A12 **falls** divided by eight
+  instead of filtering rises (`mmc3.rs:430-439`, `mmc3.rs:1285-1306`), and whose $C001 resets
+  the prescaler (`mmc3.rs:1269-1271`). This is the page's own description of the Acclaim part.
+  Nestopia has the board as a separate class (`NstBoardAcclaimMcAcc.cpp`); the other three do
+  not implement it at all. MR-4-3 raised it and MF-1/MF-2 closed it; re-confirmed here.
+
+### MMC3-1 — the revision A/B difference, and what the other four actually do — OK
+
+**Point.** The page: revision A "checks the IRQ counter transition 1→0, whether from
+decrementing or reloading", giving a **single** IRQ when the latch is $00; revisions B and C
+generate an IRQ "when the scanline counter is *equal* to 0", giving one on **every** clock
+when the latch is $00. The page elsewhere attributes the repeating behaviour to Sharp MMC3B and
+MMC3C and the single IRQ to Sharp MMC3A and all NEC parts, and *NES 2.0 submappers* gives
+mapper 4 submapper 4 as "NEC MMC3 (Loading latch with 0 disables IRQ)".
+
+**This build.** Revision B by default; revision A when the header declares submapper 4
+(`mmc3.rs:457`). The revision A condition is "the counter was moving" — non-zero before the
+clock **or** a reload pending (`mmc3.rs:947`) — which is the page's "whether from decrementing
+or reloading" and therefore yields exactly one IRQ with a latch of $00.
+
+**The others.**
+
+| | default revision | latch $00 gives | reads the submapper? | file:line |
+| --- | --- | --- | --- | --- |
+| this build | B | an IRQ on every clock | yes, submapper 4 → A | `mmc3.rs:457`, `mmc3.rs:937-951` |
+| FCEUX | B | an IRQ on every clock | no | `mmc3.cpp:60`, `mmc3.cpp:207-219` |
+| Nestopia | B | an IRQ on every clock | no — the revision comes from its board database | `NstBoardMmc3.cpp:38`, `NstBoardMmc3.hpp:64-78` |
+| puNES | **A** | a single IRQ | yes, submapper 4 → the *repeating* clock | `irqA12.h:33-53`, `MMC3.c:171-181`, `mapper_004.c:59-61` |
+| Nintendulator | **A**, always | a single IRQ | no | `h_MMC3.cpp:194-210` |
+| Mesen 2 | B | an IRQ on every clock | yes, submapper 3 (its MC-ACC) | — |
+
+Two things worth recording:
+
+- **This build and Nestopia implement revision A identically**, down to the expression:
+  Nestopia's clock computes "counter non-zero or reload pending" before the reload and ANDs it
+  with a `persistent` flag that is false only for its REV_A (`NstBoardMmc3.hpp:64-78`). FCEUX
+  implements revision A with the reload term **missing** (`mmc3.cpp:214`: the pre-clock count
+  alone), so on FCEUX a revision A part with a latch of $00 gives *no* IRQ at all rather than
+  one — which contradicts the page's "single IRQ".
+- **puNES has the two revisions the wrong way round.** Its default clock requires the saved
+  previous counter to be non-zero, which is revision A's single-IRQ behaviour
+  (`irqA12.h:33-53`), and the clock it installs *for submapper 4*, the NEC part the page says
+  gives a single IRQ, fires whenever the counter is zero — revision B's repeating behaviour
+  (`MMC3.c:171-181`, selected at `mapper_004.c:59-61`). Nintendulator applies revision A to
+  every mapper-4 image.
+
+**Verdict: OK.** This build matches the page on both revisions, matches Nestopia exactly on the
+revision A expression, matches FCEUX, Nestopia and Mesen on the default, and is the only one
+besides Mesen that reads the submapper correctly. REQ-CORE-100 pins revision B for the default
+and `mmc3_test_2` test 6 requires it, so nothing here asks to move.
+
+### MMC3-2 — the A12 filter: this build's shape is the majority's, its length is in the middle — OK
+
+**Point.** The page: the counter is clocked by a rising edge of A12 "after the line has
+remained low for three falling edges of M2". Three M2 falls is about nine PPU dots. MR-A12-1
+already settled the *unit* question against Mesen.
+
+**This build.** `A12Watcher::rose` accepts a rise when A12 has been low for at least ten dots
+(`a12_watcher.rs:71-80`, `A12Watcher::MMC3_FILTER_DOTS = 10`) — a **low-duration** filter, the
+page's own shape.
+
+**The others — two different shapes, and one that does not model A12 at all.**
+
+| | shape | threshold | file:line |
+| --- | --- | --- | --- |
+| this build | A12 must have been low for N dots | 10 dots (≈3.3 CPU cycles) | `a12_watcher.rs:41`, `a12_watcher.rs:71-80` |
+| Nintendulator | A12 must have been low for N dots | **8 dots** | `h_MMC3.cpp:194-210` (an 8-dot countdown rearmed on every high) |
+| Mesen 2 | A12 must have been low for N dots | ≈9 dots | — (settled in MR-A12-1) |
+| Nestopia | at least N dots since the **previous accepted rise** | 16 dots | `NstBoardMmc3.hpp:42-45`, `NstTimer.hpp:154-182` |
+| puNES | more than N dots since the **previous accepted rise** | 18 dots | `irqA12.h:30`, `irqA12.h:34` |
+| FCEUX | no A12 model: one clock per rendered scanline, from the PPU's hblank hook | — | `mmc3.cpp:221-223`, `mmc3.cpp:345` |
+
+**Verdict: OK.** On shape this build is with Nintendulator and Mesen — the three that model what
+the page describes — against Nestopia's and puNES's "minimum interval between clocks", which is
+a different filter that happens to behave the same during ordinary rendering. On length, ten
+dots sits between Nintendulator's eight and Mesen's nine on one side and nothing on the other,
+and all three bracket the documented three M2 falls. The readings only part on an A12 low of
+7-9 dots, which MR-A12-1 already recorded as unproducible by any rendering pattern, and on
+rapid hand-clocking through $2006, where Nestopia and puNES would drop clocks this build
+accepts. FCEUX's scanline approximation is not a vote on the filter at all.
+
+### MMC3-3 — the $C001 reload glitch the page documents, and which this build does not need — OK
+
+**Point.** New enough on the page to be worth stating: a write to $C001 does not clear the
+counter on hardware. It "instantly set[s] the counter to a value above 127 to prevent it from
+reaching 0" — OR $F0 on an NEC MMC3A, OR $FF on an NEC MMC3B-C, OR $80 on a Sharp MMC3A-C —
+and the reload from $C000 then happens at the next A12 rise.
+
+**This build.** $C001 sets the counter to **0** and raises the reload flag
+(`mmc3.rs:1264-1266`).
+
+**The others.** All four do what this build does: counter to zero plus a reload flag
+(`mmc3.cpp:183` sets only the flag, `NstBoardMmc3.cpp:255-259`, `MMC3.c:117-128`,
+`h_MMC3.cpp:178-186`). None of them implements the OR-mask glitch.
+
+**Verdict: OK, and provably equivalent.** The MMC3 has no readable counter, so the only way the
+value between the $C001 write and the next A12 rise can be observed is through the next clock —
+and at that clock both readings take the same branch: this build because the counter is zero
+*and* the reload flag is set, hardware because the reload flag is set. It is also equivalent
+under revision A: this build's "moving" test is satisfied by the pending reload
+(`mmc3.rs:947`), and hardware's by the OR'd value being non-zero. Recorded because the page's
+wording invites the reader to think a fix is needed; it is not.
+
+### MMC3-4 — the power-on bank registers and $A001 — OPEN, and benign
+
+**Point.** The page: "Because the values in R6, R7, and $8000 are unspecified at power on, the
+reset vector must point into $E000-$FFFF, and code must initialize these before jumping out of
+$E000-$FFFF." It gives no power-on value for $A001 either.
+
+**This build.** R0-R5 = 0, R6 = 0, R7 = 1, $8000 = 0, $A001 = $80 — PRG-RAM enabled and
+writable (`mmc3.rs:1162-1171`, `mmc3.rs:482-488`); on an MMC6, $A001 = $00, which *is*
+documented (MR-4-7).
+
+**The others.**
+
+| | the eight CHR registers R0-R5 | R6, R7 | $A001 | file:line |
+| --- | --- | --- | --- | --- |
+| this build | all 0 | 0, 1 | $80 | `mmc3.rs:1163-1166`, `mmc3.rs:482-488` |
+| FCEUX | 0, 2, 4, 5, 6, 7 | 0, 1 | 0, and never consulted | `mmc3.cpp:103-115`, `mmc3.cpp:278` |
+| puNES | 0, 2, 4, 5, 6, 7 | 0, 1 | **$80** | `MMC3.c:183-199` |
+| Nestopia | the identity, 0…7 as eight 1 KiB banks | 0, 1 (its other two slots are the fixed $3E/$3F) | disabled **and** unwritable | `NstBoardMmc3.cpp:61-74` |
+| Nintendulator | the identity, 0…7 | the last four 8 KiB banks | $80 for an iNES image, 0 otherwise, "for compatibility" | `h_MMC3.cpp:30-45` |
+| Mesen 2 | all 0 | 0 | 0 | — (MR-4-4) |
+
+**Verdict: OPEN**, closing the same way MR-PWR-1 closed it: the page says the values are
+unspecified, so no layout can be called wrong. Two pieces of new information, though:
+
+- **The vote on $A001 goes this build's way.** MR-4-5 kept $80 because it is the only value
+  that lets blargg's MMC3 ROMs — which never write $A001 — use the PRG-RAM from a cold start.
+  puNES powers $A001 up at exactly $80 (`MMC3.c:197`) and Nintendulator at $80 for every iNES
+  image, with a comment giving the same reason ("for compatibility, enable RAM by default").
+  Three of six against Nestopia's disabled-and-unwritable, Mesen's 0 and FCEUX's
+  stored-but-ignored.
+- **On the CHR registers this build is alone.** R6 = 0 and R7 = 1 are shared with FCEUX,
+  puNES and Nestopia, but all four of the others power the *CHR* registers up to something
+  monotonic — the identity 0…7, or 0, 2, 4, 5, 6, 7, which is the same layout expressed in
+  the register's own units — where this build leaves all six at zero, so the first pattern
+  table is eight copies of CHR bank 0 until the game writes $8001 six times. Nothing in the
+  page forbids it and no game can rely on it, but if the project ever wants a frame of a
+  not-yet-initialised MMC3 game to look like it does elsewhere, the monotonic seeding is the
+  four-way consensus and costs a six-element array initialiser at load.
+
+**What would settle it.** Nothing public can: the page states the values are undefined.
+
+### MMC3-5 — a $C001 write in the same cycle as an A12 clock — OPEN
+
+**Point.** puNES carries a mechanism no other source mentions: a `race` record taken on every
+$C001 write, holding the counter and reload flag as they stood *before* the write, so that an
+A12 clock arriving in the same cycle is computed against the pre-write values
+(`MMC3.c:117-128`, used at `irqA12.h:38-41`).
+
+**This build.** No such mechanism. `write_register`'s $C001 arm and `on_ppu_address_bus` are
+ordered by whichever the bus calls first (`mmc3.rs:1264-1271`, `mmc3.rs:1285-1306`).
+
+**The others.** FCEUX, Nestopia, Nintendulator and Mesen have nothing equivalent.
+
+**Verdict: OPEN.** One implementation out of six thought the race worth modelling, and its
+source does not say which game made it necessary; the page does not describe the race at all.
+Five-to-one is not a majority this build is on the wrong side of, but a lone implementer who
+went to the trouble of recording two shadow fields usually had a symptom. Consequence if it
+matters: one scanline of IRQ timing on a game that writes $C001 from inside a tight raster
+loop.
+
+**What would settle it.** `assets-free/test-roms/nes-test-roms/mmc3_irq_tests` and
+`mmc3_test_2`, run on this build with the IRQ cycle reported; neither targets this race
+specifically, so strictly it needs a new test ROM that writes $C001 at a known dot of a known
+scanline and reports the IRQ cycle.
+
+### MMC3-6 — the IRQ assertion delay — OPEN
+
+**Point.** puNES delays the CPU IRQ line by one CPU cycle after the counter reaches zero, and
+by two when the clock lands on the penultimate cycle of an instruction, with a comment
+explaining that its CPU/PPU synchronisation runs one CPU clock ahead
+(`irqA12.h:56-67`, `mapper_004.c:67`).
+
+**This build.** `clock_irq_counter` raises `irq_pending` immediately (`mmc3.rs:948-949`) and
+`Mapper::irq_asserted` answers from it (`mmc3.rs:1125-1127`).
+
+**The others.** Nintendulator asserts immediately (`h_MMC3.cpp:204-206`); Nestopia routes the
+assertion through its own A12 timer, which has a template `Delay` parameter defaulting to zero
+and left at zero for the plain MMC3 (`NstBoardMmc3.hpp:112-117`); FCEUX asserts from the
+scanline hook. MR-64-4 examined the same question on the RAMBO-1, where the page *does*
+document a delay.
+
+**Verdict: OPEN**, and probably an artefact of puNES's own scheduling rather than hardware —
+its comment says so. Recorded because it is the one place where a source adds latency this
+build does not have, and because the symptom would be identical to MMC3-5's: an IRQ serviced
+one instruction later.
+
+### The MMC6, re-checked against the new sources
+
+MR-4-1, MR-4-6, MR-4-7 and MR-4-8 all concerned the MMC6 and all four were fixed in MF-1. Of
+the four new sources only two implement the chip at all: puNES behind submapper 1, with a
+512-byte RAM region and its own read handler that answers 0 from the disabled half and open bus
+when neither half is readable (`mapper_004.c:51-58`, `mapper_004.c:70-77`), and FCEUX behind a
+board flag with a 1 KiB RAM at $7000-$7FFF (`mmc3.cpp:260-266`, `mmc3.cpp:281-284`).
+Nintendulator and Nestopia do not have it as a mapper-4 submapper.
+
+- **The 1 KiB size** (MR-4-6) — confirmed by FCEUX's `WRAMSIZE == 1024` test (`mmc3.cpp:281`).
+- **Open bus when no half is readable** (MR-4-8) — confirmed by puNES, which returns the
+  incoming open-bus byte in exactly that case (`mapper_004.c:72-74`). This build's
+  `cpu_peek_override` now does the same.
+- **$A001 held at zero while the RAM is disabled** (MR-4-7) — neither of the two models it;
+  the page states it, and this build follows the page.
+
+**Verdict: OK on all three**, with MR-4-7 resting on the page alone.
+
+**Test ROMs.** The richest set of any board here. In
+`assets-free/test-roms/nes-test-roms`: `mmc3_test` and `mmc3_test_2` (six numbered tests
+including the latch-$00 revision question of MMC3-1), `mmc3_irq_tests`, and `scanline` /
+`scanline-a1` which depend on the A12 counter. In `assets-free/test-roms/holy-mapperel`:
+`M4_P128K.nes`, `M4_P128K_CR8K.nes`, `M4_P128K_CR32K.nes`, `M4_P256K_C256K.nes`. The project
+**does** run part of this: REQ-CORE-114 names `mmc3_test_2` and MR-1 records tests 1-5 passing
+and test 6 as the revision gate, so the MMC3 is the one board of the 26 whose IRQ is covered by
+a ROM test in the harness. `mmc3_irq_tests` and the four `M4_*` images are not run.
+
+Count: 12 OK, 0 DIFFERS, 3 OPEN.
+
 <!-- NEXT-BOARD -->
