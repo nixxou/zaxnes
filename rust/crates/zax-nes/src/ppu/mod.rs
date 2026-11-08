@@ -240,6 +240,11 @@ pub struct Ppu2C02 {
     playfield_end: Option<i16>,
     /// Whether [`Ppu2C02::playfield_end`] is found without margins too.
     wants_playfield_end: bool,
+    /// The scroll of each visible line as it was drawn (x on the 512-pixel plane, y on the
+    /// 480-line one), kept only while [`Ppu2C02::set_tracks_line_scroll`] asks: the smooth
+    /// scrolling finds the band that scrolls in it.
+    line_scroll: Vec<Option<(u16, u16)>>,
+    tracks_line_scroll: bool,
     /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
@@ -344,6 +349,8 @@ impl Ppu2C02 {
             hides_overscan: false,
             playfield_end: None,
             wants_playfield_end: false,
+            line_scroll: Vec::new(),
+            tracks_line_scroll: false,
             margin_palette: None,
         }
     }

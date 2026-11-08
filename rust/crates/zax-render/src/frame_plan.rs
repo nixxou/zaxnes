@@ -302,7 +302,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 fixed,
                 frame.nes_picture,
                 frame.nes_picture_height,
-                scene.picture_shift.map(|(shift, _)| shift),
+                scene.picture_shift.map(|(shift, _, _)| shift),
                 &scene.picture_overlay,
             )?
         {

@@ -144,6 +144,9 @@ impl Ppu2C02 {
 
     /// Emits the background row owed by visible line `line`, at its last dot (R2-005).
     pub(super) fn end_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
+        if self.tracks_line_scroll {
+            self.keep_line_scroll(line);
+        }
         if self.background_enabled() {
             let saved_latch = cart.as_deref().map_or(0, Cartridge::chr_latch_state);
             self.capture_background_row(line, cart);
@@ -508,27 +511,61 @@ impl Ppu2C02 {
         }
     }
 
-    /// The playfield's horizontal scroll as the PPU drew it (the picture's top band of rows with
-    /// one scroll, `0..=255` across a nametable), and the line that band ends at: what the smooth
-    /// scrolling from the run-ahead knows of a game without reading its memory. `None` without a
-    /// captured row.
-    #[must_use]
-    pub fn playfield_scroll(&self) -> Option<(i32, i16)> {
-        let row_ends = self.row_ends();
-        let mut band: Option<(i32, i16)> = None;
-        for (index, captured) in self.captured_rows.iter().enumerate() {
-            let Some(captured) = captured else {
-                continue;
-            };
-            let scroll = captured.row.ring_x() & 0xFF;
-            let end = (captured.y + 8).min(row_ends[index]);
-            match band {
-                None => band = Some((scroll, end)),
-                Some((first, _)) if first == scroll => band = Some((scroll, end)),
-                Some(_) => break,
-            }
+    /// Keeps the scroll line `line` is drawn with (the left-edge shadow of the internal address
+    /// at its end, as the rows: R2-005), or none for a line without background.
+    fn keep_line_scroll(&mut self, line: i32) {
+        let Ok(line) = usize::try_from(line) else {
+            return;
+        };
+        if self.line_scroll.len() < 240 {
+            self.line_scroll.resize(240, None);
         }
-        band
+        let v = self.v_row_start;
+        let scroll = self.background_enabled().then(|| {
+            let x = ((v >> 10) & 1) << 8 | (v & 0x1F) << 3 | u16::from(self.fine_x);
+            let y = ((v >> 11) & 1) * 240 + ((v >> 5) & 0x1F) * 8 + ((v >> 12) & 7);
+            (x, y)
+        });
+        // A write the line's end takes (a split's, from an IRQ past its pixels) shows from the line
+        // after: the scroll kept at the end of line L is the one line L + 1 is drawn with; line 0
+        // is drawn with the one it starts with.
+        if line == 0 {
+            self.line_scroll[0] = scroll.map(|(x, y)| (x, (y + 479) % 480));
+        }
+        if let Some(slot) = self.line_scroll.get_mut(line + 1) {
+            *slot = scroll;
+        }
+    }
+
+    /// The band of the picture that scrolls, as the PPU drew it: the most lines in a row drawn
+    /// with one scroll across and going on one line down each (a status bar, at the top, at the
+    /// bottom or both, has a scroll of its own and breaks the run), at least 16. Its scroll across
+    /// on the 512-pixel plane, its first line and the line after its last: what the smooth
+    /// scrolling from the run-ahead knows of a game without reading its memory. `None` while the
+    /// lines' scroll is not kept ([`Ppu2C02::set_tracks_line_scroll`]) or no band is long enough.
+    #[must_use]
+    pub fn playfield_scroll(&self) -> Option<(i32, i16, i16)> {
+        let mut best: Option<(i32, usize, usize)> = None;
+        let mut start = 0;
+        let mut previous: Option<(u16, u16)> = None;
+        let lines = self.line_scroll.len();
+        for line in 0..=lines {
+            let here = self.line_scroll.get(line).copied().flatten();
+            let goes_on = matches!((previous, here), (Some((px, py)), Some((x, y)))
+                if x == px && y == (py + 1) % 480);
+            if !goes_on {
+                if let Some((x, _)) = previous {
+                    let length = line - start;
+                    if length >= 16 && best.is_none_or(|(_, from, to)| length > to - from) {
+                        best = Some((i32::from(x), start, line));
+                    }
+                }
+                start = line;
+            }
+            previous = here;
+        }
+        let (x, from, to) = best?;
+        Some((x, i16::try_from(from).ok()?, i16::try_from(to).ok()?))
     }
 
     fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
@@ -1279,6 +1316,15 @@ impl Ppu2C02 {
     /// scrolling without the widescreen).
     pub fn set_wants_playfield_end(&mut self, wanted: bool) {
         self.wants_playfield_end = wanted;
+    }
+
+    /// Whether the frames to come keep the scroll of each line ([`Ppu2C02::playfield_scroll`]):
+    /// nothing kept otherwise.
+    pub fn set_tracks_line_scroll(&mut self, tracked: bool) {
+        self.tracks_line_scroll = tracked;
+        if !tracked {
+            self.line_scroll.clear();
+        }
     }
 
     /// Whether the decoder of the frame just run asks the screen's top and bottom lines hidden

@@ -305,7 +305,7 @@ struct FramePipeline {
     /// Its rows.
     picture_height: usize,
     /// Its experimental smooth scrolling shift ([`NesCore::picture_shift`]).
-    picture_shift: Option<(f32, i32)>,
+    picture_shift: Option<(f32, i32, i32)>,
     /// Its camera motion to the next frame ([`NesCore::picture_motion`]).
     picture_motion: Option<f32>,
     /// Its sprites that move with the camera, moved out of it ([`NesCore::split_steady_sprites`]).
@@ -1589,7 +1589,7 @@ impl GameSession {
     /// The experimental smooth scrolling's shift of the picture [`GameSession::copy_nes_picture`]
     /// copies ([`NesCore::picture_shift`]).
     #[must_use]
-    pub fn nes_picture_shift(&self) -> Option<(f32, i32)> {
+    pub fn nes_picture_shift(&self) -> Option<(f32, i32, i32)> {
         if self.pipeline.in_flight || self.pipeline.pending.is_some() {
             self.pipeline.picture_shift
         } else {

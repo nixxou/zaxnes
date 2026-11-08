@@ -301,6 +301,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "setting.emu.smooth_scroll_ahead",
         "Smooth scrolling (interpolated from run-ahead)",
     ),
+    (
+        "setting.emu.smooth_scroll_view",
+        "Show the smooth scrolling's band (red, still sprites green)",
+    ),
     ("setting.video.overscan_ntsc_top", "Overscan NTSC: top"),
     ("setting.video.overscan_ntsc_bottom", "Overscan NTSC: bottom"),
     ("setting.video.overscan_ntsc_left", "Overscan NTSC: left"),

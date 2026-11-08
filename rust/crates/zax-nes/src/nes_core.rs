@@ -82,7 +82,7 @@ pub struct NesCore {
     camera_fraction: Option<u8>,
     camera_read: Option<(i32, u8)>,
     camera_decoupled: bool,
-    picture_shift: Option<(f32, i32)>,
+    picture_shift: Option<(f32, i32, i32)>,
     /// With the option `smooth_scroll_120`, how far the camera moves from the picture just made
     /// to the next one, in pixels (the RAM is a frame ahead of the picture: it is known now).
     picture_motion: Option<f32>,
@@ -788,6 +788,8 @@ impl NesCore {
         self.bus
             .ppu_mut()
             .set_wants_playfield_end(on && decoder.is_some());
+        let tracked = on || self.smooth_ahead;
+        self.bus.ppu_mut().set_tracks_line_scroll(tracked);
         if !on {
             self.camera_fraction = None;
             self.camera_read = None;
@@ -802,15 +804,21 @@ impl NesCore {
             .zip(self.camera_fraction)
             .map(|((pixels, _), fraction)| f64::from(pixels) + f64::from(fraction) / 256.0);
         self.picture_camera = shown;
-        // The playfield's bottom: the report's, the decoder's, else the rows the PPU drew.
+        // The band that scrolls: as the PPU drew it, its bottom the report's when it gives one;
+        // else from the top down to the decoder's bottom.
+        let band = self.bus.ppu().playfield_scroll();
+        let start = band.map_or(0, |(_, start, _)| start);
         let end = report
             .and_then(|report| report.end)
-            .or_else(|| self.bus.ppu().playfield_end())
-            .or_else(|| self.bus.ppu().playfield_scroll().map(|(_, end)| end));
-        self.picture_shift = self
-            .camera_fraction
-            .zip(end)
-            .map(|(fraction, end)| (f32::from(fraction) / 256.0, i32::from(end)));
+            .or_else(|| band.map(|(_, _, end)| end))
+            .or_else(|| self.bus.ppu().playfield_end());
+        self.picture_shift = self.camera_fraction.zip(end).map(|(fraction, end)| {
+            (
+                f32::from(fraction) / 256.0,
+                i32::from(start),
+                i32::from(end),
+            )
+        });
         self.find_steady_sprites(self.camera_read.map(|(pixels, _)| pixels));
         let read = if let Some(report) = report {
             self.report_age = Some(0);
@@ -912,8 +920,9 @@ impl NesCore {
             return;
         }
         let current = self.bus.ppu().playfield_scroll();
-        let previous = std::mem::replace(&mut self.last_scroll, current.map(|(scroll, _)| scroll));
-        let Some((scroll, end)) = current else {
+        let previous =
+            std::mem::replace(&mut self.last_scroll, current.map(|(scroll, _, _)| scroll));
+        let Some((scroll, start, end)) = current else {
             self.picture_shift = None;
             self.picture_motion = None;
             self.steady_sprites.clear();
@@ -921,12 +930,12 @@ impl NesCore {
         };
         // A few pixels a frame at most; more is a jump (a door, a room changed), not shown moving.
         let motion = previous
-            .map(|previous| (scroll - previous + 128).rem_euclid(256) - 128)
+            .map(|previous| (scroll - previous + 256).rem_euclid(512) - 256)
             .filter(|motion| motion.abs() <= 8)
             .unwrap_or(0);
         #[allow(clippy::cast_precision_loss)] // A few pixels.
         let motion = motion as f32;
-        self.picture_shift = Some((-motion, i32::from(end)));
+        self.picture_shift = Some((-motion, i32::from(start), i32::from(end)));
         self.picture_motion = Some(motion);
         self.find_steady_sprites(Some(scroll));
     }
@@ -934,7 +943,9 @@ impl NesCore {
     fn find_steady_sprites(&mut self, shown: Option<i32>) {
         let moved = shown.is_some() && self.shown_camera.is_some() && shown != self.shown_camera;
         self.shown_camera = shown;
-        let split = self.picture_shift.map_or(0, |(_, split)| split);
+        let band = self
+            .picture_shift
+            .map_or(0..0, |(_, start, end)| start..end);
         let all = std::mem::take(&mut self.sprite_places);
         let steady = std::mem::take(&mut self.steady_places);
         let reference = if moved { all } else { steady };
@@ -945,7 +956,7 @@ impl NesCore {
             }
             let place = (record.x, record.y);
             self.sprite_places.push(place);
-            if i32::from(record.y) < split && reference.contains(&place) {
+            if band.contains(&i32::from(record.y)) && reference.contains(&place) {
                 self.steady_sprites.push(record.index);
                 self.steady_places.push(place);
             }
@@ -971,7 +982,7 @@ impl NesCore {
     /// lines, the vertical margin excluded) it ends at; `None` while the option is off or the
     /// picture has no playfield the decoder knows.
     #[must_use]
-    pub const fn picture_shift(&self) -> Option<(f32, i32)> {
+    pub const fn picture_shift(&self) -> Option<(f32, i32, i32)> {
         self.picture_shift
     }
 

@@ -299,6 +299,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Défilement lissé (interpolé par run-ahead)",
     ),
     (
+        "setting.emu.smooth_scroll_view",
+        "Afficher la zone du défilement lissé (rouge, sprites fixes en vert)",
+    ),
+    (
         "setting.video.remove_sprite_limit",
         "Supprimer la limite de 8 sprites par ligne",
     ),

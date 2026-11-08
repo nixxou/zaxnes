@@ -264,7 +264,7 @@ pub struct SceneState {
     /// The experimental smooth scrolling of the 2D picture: the fraction of a pixel to move the
     /// playfield left by and the screen line it ends at (the status bar under it stays), or
     /// `None` (Rust-only, owner request).
-    pub picture_shift: Option<(f32, i32)>,
+    pub picture_shift: Option<(f32, i32, i32)>,
     /// With `picture_shift`, the sprites that move with the camera, drawn apart and not shifted:
     /// a picture of the 2D picture's size, transparent (`interop::HIDDEN_PIXEL`) elsewhere, or
     /// empty.

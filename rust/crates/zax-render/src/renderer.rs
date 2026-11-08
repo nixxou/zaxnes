@@ -347,10 +347,10 @@ impl SceneRenderer {
             self.wide_picture_quad.take(),
         )?;
         self.picture_bands = match scene.picture_shift.filter(|_| scene.two_dimensional_mode) {
-            Some((_, split)) => interop::picture_bands_for(
+            Some((_, start, end)) => interop::picture_bands_for(
                 frame.nes_picture,
                 frame.nes_picture_height,
-                split,
+                (start, end),
                 self.picture_bands.take(),
             )?,
             None => None,

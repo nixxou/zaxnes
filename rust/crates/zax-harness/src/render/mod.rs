@@ -61,6 +61,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
   --sprite-limit <mode>    kept (default), removed or smart: the 8 sprites per line of the picture
   --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so captures stay comparable)
+  --smooth-ahead <0|1>     the smooth scrolling from the run-ahead (emu.smooth_scroll_ahead), off by default
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            (and as tall) as the widescreen margins make them
   --load-state <file>      restore a state block (written by --save-state) after the reset
@@ -156,6 +157,8 @@ pub struct Options {
     /// conversion results are only comparable at N equal (REQ-ARCH-012 amended), so a plain
     /// `render` is the campaign's own capture whatever the application's default is.
     pub run_ahead: u8,
+    /// The smooth scrolling from the run-ahead (`emu.smooth_scroll_ahead`), off by default.
+    pub smooth_ahead: bool,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -233,6 +236,7 @@ impl Options {
             hack_options: None,
             sprite_limit: SpriteLimit::Kept,
             run_ahead: 0,
+            smooth_ahead: false,
             save_state: None,
             dump_mem: None,
             trace_ram: None,
@@ -367,6 +371,7 @@ impl Options {
                 };
             }
             "--run-ahead" => self.run_ahead = Self::run_ahead_of(integer(value)?)?,
+            "--smooth-ahead" => self.smooth_ahead = integer(value)? != 0,
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--trace-ram" => self.trace_ram = Some(PathBuf::from(value)),
@@ -643,6 +648,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             hack_options: options.hack_options,
             sprite_limit: options.sprite_limit,
             run_ahead: options.run_ahead,
+            smooth_ahead: options.smooth_ahead,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
             trace_ram: options.trace_ram.as_deref(),

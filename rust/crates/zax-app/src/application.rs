@@ -1812,6 +1812,32 @@ impl RunState {
     }
 }
 
+/// The view of the smooth scrolling (`emu.smooth_scroll_view`): the band it slides of `picture`
+/// (NES colour indexes, `height` rows, its vertical margin centred) in reds, its brightness kept,
+/// the sprites it keeps still (`overlay`) in greens; the blacks stay black.
+fn tint_smooth_band(
+    picture: &mut [u8],
+    height: usize,
+    (start, end): (i32, i32),
+    overlay: &mut [u8],
+) {
+    const HIDDEN: u8 = 0xFF;
+    let recolour = |pixel: &mut u8, hue: u8| {
+        if *pixel != HIDDEN && *pixel & 0x0F < 0x0D {
+            *pixel = (*pixel & !0x0F) | hue;
+        }
+    };
+    let width = picture.len() / height.max(1);
+    let margin_y = height.saturating_sub(240) / 2;
+    let line = |screen: i32| usize::try_from(screen).map_or(0, |screen| margin_y + screen);
+    let from = if start <= 0 { 0 } else { line(start) };
+    let to = if end >= 240 { height } else { line(end) };
+    for row in picture.chunks_mut(width.max(1)).take(to).skip(from) {
+        row.iter_mut().for_each(|pixel| recolour(pixel, 0x06));
+    }
+    overlay.iter_mut().for_each(|pixel| recolour(pixel, 0x0A));
+}
+
 fn to_i32(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
@@ -2124,6 +2150,10 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
     let phase = host.pacer.phase_at(state.frame_time);
+    let show_band = host
+        .settings()
+        .get(SettingId::EmuSmoothScrollView)
+        .as_bool();
     state.picture_between = false;
     let (widescreen, widescreen_y) = widescreen_margin(
         host.settings().get(SettingId::VideoWidescreen).as_int(),
@@ -2207,12 +2237,12 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         scene.picture_shift = session.nes_picture_shift();
         // Experimental (owner request): on a display faster than the game, the playfield drawn
         // between two frames, along the camera's motion to the next one.
-        if let (Some((shift, split)), Some(motion)) =
+        if let (Some((shift, start, end)), Some(motion)) =
             (scene.picture_shift, session.nes_picture_motion())
         {
             #[allow(clippy::cast_possible_truncation)] // 0 to 1.
             let along = motion * phase as f32;
-            scene.picture_shift = Some((shift + along, split));
+            scene.picture_shift = Some((shift + along, start, end));
             state.picture_between = true;
             if let Some(file) = state.scroll_log.as_mut() {
                 use std::io::Write as _;
@@ -2223,6 +2253,16 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
                     state.frame_time,
                     state.emulated_now,
                     camera + f64::from(shift) + f64::from(along),
+                );
+            }
+        }
+        if show_band {
+            if let Some((_, start, end)) = scene.picture_shift {
+                tint_smooth_band(
+                    &mut state.picture,
+                    state.picture_height,
+                    (start, end),
+                    &mut scene.picture_overlay,
                 );
             }
         }

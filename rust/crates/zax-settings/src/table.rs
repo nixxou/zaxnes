@@ -1692,6 +1692,19 @@ fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
         )
         .with_label("Smooth scrolling (interpolated from run-ahead)"),
     );
+    // Rust-only (owner request): the band the smooth scrolling slides tinted red, the sprites it
+    // keeps still green, to see what it does. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuSmoothScrollView,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_label("Show the smooth scrolling's band"),
+    );
 }
 
 /// `video.remove_sprite_limit` (Rust-only).

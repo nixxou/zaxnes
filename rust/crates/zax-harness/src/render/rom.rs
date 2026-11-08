@@ -74,12 +74,31 @@ pub struct RomRequest<'a> {
     pub sprite_limit: SpriteLimit,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 for the campaign's own captures.
     pub run_ahead: u8,
+    /// The smooth scrolling from the run-ahead.
+    pub smooth_ahead: bool,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
     pub dump_mem: Option<&'a Path>,
     /// Where to write the CPU's 2 KiB of work RAM after every frame, one after the other.
     pub trace_ram: Option<&'a Path>,
+}
+
+/// The smooth scrolling of the picture just made: its shift and the sprites it keeps still, told.
+fn smooth_scrolling(core: &NesCore, picture: &mut [u8], scene: &mut SceneState) {
+    scene.picture_shift = core.picture_shift();
+    core.split_steady_sprites(picture, &mut scene.picture_overlay);
+    if !scene.picture_overlay.is_empty() {
+        let kept = scene
+            .picture_overlay
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF)
+            .count();
+        println!("render: smooth scrolling keeps {kept} sprite pixels where they are");
+    }
+    if let Some((shift, start, end)) = scene.picture_shift {
+        println!("render: smooth scrolling shift {shift:.3} pixel from line {start} to {end}");
+    }
 }
 
 /// Runs the ROM and builds the scene of its last frame.
@@ -89,6 +108,7 @@ pub struct RomRequest<'a> {
 /// [`HarnessError::Rom`] when the ROM is refused, [`HarnessError::Script`] when the Lua runtime
 /// cannot be installed, [`HarnessError::Engine`] when the engine refuses the profile and
 /// [`HarnessError::Io`] when a file cannot be read or written.
+#[allow(clippy::too_many_lines)] // One run of the ROM, step by step.
 pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError> {
     let profile = request.profile;
     let file_name = file_name(request.rom);
@@ -118,6 +138,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     }
     host.core.set_sprite_limit(request.sprite_limit);
     host.run_ahead = request.run_ahead.min(zax_nes::NesCore::MAX_RUN_AHEAD);
+    host.core.set_smooth_scroll_ahead(request.smooth_ahead);
     let frames = request.frames;
     let mut records = Vec::new();
     let mut trace = Vec::new();
@@ -161,20 +182,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     let mut picture = Vec::new();
     let picture_height = host.core.wide_picture_into(&mut picture);
-    scene.picture_shift = host.core.picture_shift();
-    host.core
-        .split_steady_sprites(&mut picture, &mut scene.picture_overlay);
-    if !scene.picture_overlay.is_empty() {
-        let kept = scene
-            .picture_overlay
-            .iter()
-            .filter(|&&pixel| pixel != 0xFF)
-            .count();
-        println!("render: smooth scrolling keeps {kept} sprite pixels where they are");
-    }
-    if let Some((shift, split)) = scene.picture_shift {
-        println!("render: smooth scrolling shift {shift:.3} pixel above line {split}");
-    }
+    smooth_scrolling(&host.core, &mut picture, &mut scene);
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
     scene.game_running = true;
