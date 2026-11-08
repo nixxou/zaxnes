@@ -418,7 +418,7 @@ four new votes are counted here once.
 | 3 CNROM | submapper 2 | submapper 2 | submapper 2 (`datalatch.cpp:192`) | always, on a database-identified CNROM (`NstBoardCxRom.cpp:71`) | submapper 2 (`mapper_003.c:64-67`) | never (`mapper003.cpp:18`) | submapper 2 |
 | 7 AxROM | submapper 2 ("submapper 0: emulators *shouldn't* emulate bus conflicts") | submapper 2 | never (`datalatch.cpp:204`) | on a database-identified AMROM/AOROM (`NstBoardAxRom.cpp:37`, `:51-54`) | submapper 2 (`mapper_007.c:45-48`) | never (`mapper007.cpp:24`) | submapper 2 |
 | 11 Color Dreams | always | always | never (`datalatch.cpp:227`) | — | — | never (`mapper011.cpp:18`) | always |
-| 13 CPROM | — | never | never (`datalatch.cpp:243`) | always (`NstBoardCxRom.cpp:81`) | — | never (`mapper013.cpp:19`) | never |
+| 13 CPROM | **"Subject to bus conflicts: Yes"** | never | never (`datalatch.cpp:243`) | always (`NstBoardCxRom.cpp:81`) | always (`mapper_013.c:46`) | never (`mapper013.cpp:19`) | never |
 | 66 GxROM | **"Yes"**, unconditional | always | never (`datalatch.cpp:279`) | always (`NstBoardGxRom.cpp:45`) | never (`mapper_066.c:44-48`) | never (`mapper066.cpp:18`) | never |
 | 30 UNROM 512 | submapper 2, or submapper 0 without battery | the same | — | battery means none (`NstBoardUxRom.cpp:74`) | — | — | the same |
 | 34 BNROM | BNROM yes, NINA no | the same | — | — | — | — | the same |
@@ -437,8 +437,9 @@ Two conclusions, both reassuring and one new:
   written value. MR-66-1 already recorded Mesen's omission; the new information is that three
   more emulators omit it too. This build follows the page, so the verdict stays **OK** — see
   mapper 66 below for what it would take to be wrong.
-- **CPROM is the mirror image**: Nestopia gives it conflicts and the page does not mention them,
-  so this build's "none" is the majority and the page's silence.
+- **CPROM is the one row that turned into a finding.** The *CPROM* board page carries
+  "Subject to bus conflicts: Yes" in its characteristics table, Nestopia and puNES both
+  implement it, and this build does not — see mapper 13 below.
 
 ---
 
@@ -1077,5 +1078,308 @@ first hand; running `mmc5test_v2` would quantify MMC5-1 rather than leave it as 
 checklist. There is no audio test ROM for the MMC5, so MMC5-2 stays a documentation question.
 
 Count: 16 OK, 1 DIFFERS, 1 OPEN.
+
+---
+
+## Mappers 9 and 10 — MMC2 (PxROM) and MMC4 (FxROM)
+
+Pages: *MMC2* (<https://www.nesdev.org/wiki/MMC2>), *MMC4*
+(<https://www.nesdev.org/wiki/MMC4>). Ours: `mappers/mmc2.rs` (one type for both).
+Theirs: `fceux/src/boards/mmc2and4.cpp`, `nestopia/source/core/board/NstBoardMmc2.cpp` and
+`NstBoardMmc4.cpp`, `punes/src/core/mappers/MMC2.c`, `mapper_009.c` and `mapper_010.c`,
+`nintendulator-mappers/src/Hardware/h_MMC2.cpp`,
+`nintendulator-mappers/src/iNES/mapper009.cpp` and `mapper010.cpp`.
+
+### The register map and the PRG layout — OK
+
+- **$A000 PRG bank (4 bits), $B000/$C000 the two CHR registers of the $0000 window,
+  $D000/$E000 those of the $1000 window, $F000 bit 0 the mirroring** — OK
+  (`mmc2.rs:139-158`). The order is the page's: $B000 is the register used when latch 0 = $FD,
+  $C000 when it is $FE, and the same pair for latch 1. All four agree
+  (`mmc2and4.cpp:58-64`, `NstBoardMmc2.cpp:114-119`, `MMC2.c:45-63`, `h_MMC2.cpp:82-86`).
+- **$F000 bit 0: 1 = horizontal, 0 = vertical** — OK (`mmc2.rs:146-152`), the page's wording
+  exactly; FCEUX inverts into its own enum and lands on the same answer
+  (`mmc2and4.cpp:63`).
+- **MMC2's PRG: 8 KiB switchable at $8000, the last three 8 KiB banks fixed** — OK
+  (`mmc2.rs:37-40`), identical in all four (`mmc2and4.cpp:46-50`, `MMC2.c:108-112`,
+  `mapper009.cpp:12`).
+- **MMC4's PRG: 16 KiB switchable at $8000, the last 16 KiB fixed** — OK
+  (`mmc2.rs:34-35`), same in all four (`mmc2and4.cpp:42-44`).
+- **MMC4 has 8 KiB of fixed PRG-RAM; MMC2 has none except on the PlayChoice board** — OK in
+  effect. FCEUX maps the RAM only for mapper 10 (`mmc2and4.cpp:95-99`) and Nintendulator only
+  in `mapper010.cpp:15`; this build gives both boards the REQ-CORE-012 default, which is the
+  same note as NROM — observable only by a program that reads $6000 on an MMC2 expecting open
+  bus, and the only MMC2 game is *Mike Tyson's Punch-Out!!*.
+- **The latch is consulted on the fetch and moved after it** — OK (`mmc2.rs:160-164`: the
+  value is read first, then `move_latches` runs), so the register change takes effect from the
+  next fetch. All four do the same: FCEUX, Nestopia and Nintendulator hook the PPU read and
+  swap the bank after returning the byte (`mmc2and4.cpp:67-89`, `NstBoardMmc2.cpp:96-112`,
+  `h_MMC2.cpp:95-110`), puNES hooks "after read CHR" (`MMC2.c:72-88`).
+- **The CHR register field width** — OK, with the page wider than this build. The *MMC2* page
+  gives the CHR registers as **bits 5-0**, six bits; this build masks to five
+  (`mmc2.rs:142-145`), as does puNES (`mapper_009.c:41-43`). FCEUX and Nestopia store the
+  whole byte and let the CHR size reduce it (`mmc2and4.cpp:59-62`,
+  `NstBoardMmc2.cpp:117`). Equivalent on every real image: *Punch-Out!!* carries 128 KiB of
+  CHR, thirty-two 4 KiB banks, so bit 5 addresses nothing.
+
+### MMC2/4-1 — the MMC2's asymmetric latch decode: this build and one other get it right — OK
+
+**Point.** The *MMC2* page is unusually specific, and the two windows are **not** symmetrical:
+
+- latch 0 moves on a PPU read of **exactly $0FD8** or **exactly $0FE8**, and the page explains
+  the consequence — it "only switches on the *top row* of the 8x8 tile";
+- latch 1 moves on a read anywhere in **$1FD8-$1FDF** or **$1FE8-$1FEF**, and so "switches on
+  *every row* of the 8x8 tile".
+
+The MMC4 page gives both windows the eight-address ranges.
+
+**This build.** Implements the asymmetry, explicitly and only for mapper 9: `move_latches`
+tests the two exact addresses for the $0xxx window when the board is an MMC2 and the ranges
+when it is an MMC4, and uses the ranges for the $1xxx window on both (`mmc2.rs:49-73`).
+
+**The others.**
+
+| | $0xxx window | $1xxx window | file:line |
+| --- | --- | --- | --- |
+| this build (mapper 9) | exactly $0FD8 / $0FE8 | $1FD8-$1FDF / $1FE8-$1FEF | `mmc2.rs:50-66` |
+| this build (mapper 10) | $0FD8-$0FDF / $0FE8-$0FEF | the same | `mmc2.rs:51-55` |
+| Nintendulator | exactly $0FD8 / $0FE8, with the comment "different from Read7!" | the eight-address range | `h_MMC2.cpp:95-110`, `h_MMC2.cpp:112-126` |
+| Nestopia | the eight-address range | the eight-address range | `NstBoardMmc2.cpp:101-106` (`address & 0xFF8`) |
+| FCEUX | **$0FD0-$0FDF / $0FE0-$0FEF** — the whole sixteen | the same | `mmc2and4.cpp:67-89` (`A & 0xF0`) |
+| puNES | **$0FD0-$0FDF / $0FE0-$0FEF** | the same | `MMC2.c:72-88` (`address & 0xFFF0`) |
+
+**Verdict: OK**, and this is the most precise point in the batch. Only this build and
+Nintendulator reproduce the page's asymmetry — and Nintendulator's own comment shows its author
+noticed the same thing. Nestopia widens the $0xxx window to eight addresses, and FCEUX and
+puNES widen both windows to sixteen, which also makes mapper 9 and mapper 10 identical in those
+two emulators. The difference is reachable: *Punch-Out!!* draws its background from the $0xxx
+window, so a tile fetched at $0FD9-$0FDF would move the latch on FCEUX, puNES and Nestopia and
+not here or on hardware. That this build is on the page's side is worth stating because it is a
+detail the single Mesen comparison of MR-1 could not establish.
+
+One extra path neither the page nor the others have: **puNES also moves the latch on a $2006
+write** (`MMC2.c:89-91`, routing its `update_r2006` hook into the same decoder). Nothing
+documents that, and no other implementation does it.
+
+### MMC2/4-2 — the power-on latch value — OPEN
+
+**Point.** Neither page states the power-on value of the two latches.
+
+**This build.** Both latches select the **$FE** register (`mmc2.rs:27-28`, `mmc2.rs:133-135`).
+
+**The others.** FCEUX powers both at $FE (`mmc2and4.cpp:93`); puNES powers both at **$FD**
+(`MMC2.c:94-99`, `latch[0] = 0`, `latch[1] = 2`); Nintendulator powers both at **$FD**
+(`h_MMC2.cpp:28-32`, `LatchState[i] = 0`); Nestopia powers both at **$FD**
+(`NstBoardMmc2.cpp:36-43`, `selector[0] = 0`, `selector[1] = 2`).
+
+**Verdict: OPEN**, three to two against this build, with nothing in either page to appeal to.
+It is benign: *Punch-Out!!* and the MMC4 titles (*Fire Emblem*, *Famicom Wars*) write all four
+CHR registers in their reset code, and until they do all four registers read 0 here anyway, so
+the choice is invisible. Recorded only because three of the four chose the other value.
+
+**What would settle it.** A power-on CHR read on hardware before any $B000-$E000 write. No
+public test ROM does this; `holy-mapperel`'s `M9_P128K_C64K.nes` and the two `M10_*` images
+exercise the latches but after initialising the registers.
+
+**Test ROMs.** `assets-free/test-roms/holy-mapperel/testroms/M9_P128K_C64K.nes`,
+`M10_P128K_C64K_W8K.nes` and `M10_P128K_C64K_S8K.nes` — the last two also covering the MMC4's
+PRG-RAM in its work-RAM and battery forms. None is run by the project today. Running `M9` would
+check MMC2/4-1 at first hand, since the driver reads known CHR addresses and reports the bank
+it saw.
+
+Count: 8 OK, 0 DIFFERS, 1 OPEN.
+
+---
+
+## Mapper 11 — Color Dreams
+
+Pages: *INES Mapper 011* (<https://www.nesdev.org/wiki/INES_Mapper_011>), *Color Dreams*
+(<https://www.nesdev.org/wiki/Color_Dreams>). Ours: `mappers/discrete.rs:421-469`.
+Theirs: `fceux/src/boards/datalatch.cpp:219-228`,
+`punes/src/core/mappers/mapper_011.c`, `nintendulator-mappers/src/iNES/mapper011.cpp`.
+Nestopia has no mapper-11 board class in `source/core/board/`, so this board is a four-way
+comparison.
+
+- **The latch is `CCCC LLPP`: bits 1-0 the 32 KiB PRG bank, bits 7-4 the 8 KiB CHR bank, bits
+  3-2 the CIC lockout defeat** — OK, and this is MR-11-1 confirmed from a second direction.
+  This build masks PRG to two bits and CHR to four (`discrete.rs:437-438`); Nintendulator
+  masks to exactly the same two fields (`mapper011.cpp:12-13`); FCEUX takes four PRG bits
+  (`datalatch.cpp:222`) and puNES the whole byte (`mapper_011.c:55`), both relying on the
+  128 KiB PRG size to reduce it, which it does. MR-1 withdrew its own finding here and the
+  page's diagram is on this build's side; the two extra votes split the same way Mesen's did,
+  for the same oversized-image reason.
+- **The whole of $8000-$FFFF decodes** — OK (`discrete.rs:464`), all three the same.
+- **Bus conflicts, unconditionally** — OK per the page ("All commercially-released games are
+  subject to bus conflicts"), and this build and Mesen are the only two that implement them;
+  see the shared table. The *Color Dreams* board page adds that only the *Free Fall*
+  prototype carries conflict-prevention logic, which is why the condition has no submapper
+  clause here.
+- **Power-on latch 0** — OK (`discrete.rs:458-461`), all three the same.
+
+Count: 4 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 13 — CPROM
+
+Page: *CPROM* (<https://www.nesdev.org/wiki/CPROM>). Ours: `mappers/discrete.rs:360-419`.
+Theirs: `fceux/src/boards/datalatch.cpp:234-244`,
+`nestopia/source/core/board/NstBoardCxRom.cpp:79-85`, `punes/src/core/mappers/mapper_013.c`,
+`nintendulator-mappers/src/iNES/mapper013.cpp`.
+
+- **$0000-$0FFF fixed to CHR-RAM bank 0, $1000-$1FFF switched by bits 1-0, PRG not banked** —
+  OK (`discrete.rs:383-387`, `discrete.rs:415`). Identical in all four
+  (`datalatch.cpp:236-240`, `NstBoardCxRom.cpp:79-85`, `mapper_013.c:57-60`,
+  `mapper013.cpp:12-14`).
+- **16 KiB of CHR-RAM, "in two 8KiB RAMs"** — OK, forced regardless of the header
+  (`discrete.rs:374`, `CpRom::CHR_RAM_SIZE`). This was MR-13-1 and MF-1 fixed it; the page's
+  wording is unchanged.
+- **The nametable arrangement is wired vertical** — OK, and this build is the only one that
+  enforces it. The page's characteristics table says "Nametable mirroring: Vertical" with no
+  solder pad, which is MR-13-2; `CpRom::reset` sets it (`discrete.rs:408-409`), while FCEUX,
+  Nestopia, puNES and Nintendulator all leave the header to decide (`mapper013.cpp:17` calls
+  `iNES_SetMirroring`). Equivalent on the one real dump, whose header says vertical, and
+  better than the others on a mis-headered one.
+- **Power-on latch 0** — OK (`discrete.rs:406-411`).
+
+### 13-1 — the board has bus conflicts and this build does not implement them — DIFFERS
+
+**Point.** The *CPROM* characteristics table carries the row **"Subject to bus conflicts:
+Yes"**, with no submapper clause — the same unqualified row the *GxROM* page has, and which
+`registry::has_bus_conflicts` already honours for mapper 66.
+
+**This build.** `registry::has_bus_conflicts` has no arm for 13 (`registry.rs:1105-1159`), so
+the latch stores whatever the CPU wrote.
+
+**The others.** Nestopia maps the board through its bus-conflict-aware CHR swap helper
+(`NstBoardCxRom.cpp:81`, `CHR_SWAP_4K_1_BC`) and puNES ANDs the written value with the PRG-ROM
+byte at the same address before storing it (`mapper_013.c:46`). FCEUX passes `busc = 0`
+(`datalatch.cpp:243`), Nintendulator passes `FALSE` (`mapper013.cpp:19`), and Mesen does not
+implement it. Three against three, with the page on the other three's side.
+
+**Verdict: DIFFERS** — against the page and against half the field. MR-1's MR-BUS-1 enumerated
+the boards whose pages carry the row and this one was missed, which is understandable: mapper 13
+was reviewed for its CHR-RAM size and its mirroring, not its write path.
+
+**Which games it affects, and which are known affected.** One cartridge exists: *Videomation*,
+and it is the only game the page lists. **Whether it is affected is not knowable from here** —
+it depends on whether *Videomation* ever writes a CHR bank number that differs from the PRG-ROM
+byte at the address it writes to. Games on conflict-prone boards normally write through a table
+whose values match, which is exactly why the hardware tolerates the conflict, so the likeliest
+answer is that nothing changes either way.
+
+**Risk of a fix.** None measurable. `has_bus_conflicts` is evaluated once at load and the AND
+happens on the board's write path, which for this board is reached by a single `STA` per bank
+change. SMB3, Zelda II and the widescreen packs are not mapper 13. The *only* risk is the one
+the fix is meant to produce: if *Videomation* does write a mismatched value, it would start
+banking differently — which is why the fix should be verified against the game rather than
+assumed.
+
+**What a fix would look like.** One number added to the unconditional list at
+`registry.rs:1156`, beside 11, 66, 70, 78 and the rest. The machinery is already there.
+
+- **No PRG-RAM** — the page says "PRG RAM: None" where this build gives the board the
+  REQ-CORE-012 default 8 KiB. Same note as NROM and MMC2; FCEUX allocates none for this board
+  either (`datalatch.cpp:243`, `wram = 0`). Not counted separately.
+
+Count: 4 OK, 1 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 15 — the 100-in-1 Contra Function 16 multicart
+
+Page: *INES Mapper 015* (<https://www.nesdev.org/wiki/INES_Mapper_015>). Ours:
+`mappers/multicart.rs:116-208`. Theirs: `fceux/src/boards/15.cpp`,
+`punes/src/core/mappers/mapper_015.c`, `nintendulator-mappers/src/iNES/mapper015.cpp`.
+Nestopia has no mapper-15 class, so this is a four-way comparison.
+
+MR-1b settled this board against the page and Q-110 holds what is left for the spec's owner.
+The three new sources are unusually informative, because two of them carry comments explaining
+choices.
+
+- **The mode comes from address bits 1-0 and the value is the bank register** — OK
+  (`multicart.rs:187-193`). Same in all three (`15.cpp:38`, `mapper_015.c:56`,
+  `mapper015.cpp:11-38` via its `Mode` field).
+- **`B` is bits 5-0, and bit 6 is the mirroring bit** — OK (`multicart.rs:132`,
+  `multicart.rs:159`). FCEUX and puNES use the same two fields (`15.cpp:37`, `15.cpp:51`,
+  `mapper_015.c:54`, `mapper_015.c:77-82`). This is AMD-021's reading and MR-1b confirmed it
+  from the page; the two extra votes agree.
+- **Mode 1's fixed window is `B | 7`, the last 16 KiB of the 128 KiB block** — OK, and now
+  confirmed three times over. This is the point MR-1 called "the heaviest" and AMD-061 §2
+  changed: FCEUX ORs 7 into the upper two 8 KiB windows in mode 1 and not in mode 3
+  (`15.cpp:47-56`), puNES writes `bank | 0x07` literally (`mapper_015.c:61`), and
+  Nintendulator spells the intent out by masking to the block first and then forcing the low
+  three bits, `(BankReg & 0x38) | 0x07` (`mapper015.cpp:21`). Three independent
+  implementations of exactly the expression this build now uses, and the one point where the
+  four new sources overturn nothing and confirm an amendment.
+- **Mode 2 maps the same 8 KiB everywhere, with bit 7 as PRG A13** — OK
+  (`multicart.rs:147-151`); FCEUX (`15.cpp:43-46`) and puNES (`mapper_015.c:65-70`) both
+  compute `(B << 1) | (value >> 7)` and repeat it across all four windows. The page's "PRG
+  A13 if SS=2, ignored otherwise" is implemented by all three the same way.
+- **Mode 3 maps the same 16 KiB at $8000 and $C000** — OK (`multicart.rs:152-155`); same in
+  both (`15.cpp:48-56` with the OR suppressed, `mapper_015.c:71-74`).
+- **Mode 0 is two consecutive 16 KiB banks, `B` and `B+1`** — OK, two to two. This build
+  (`multicart.rs:135-138`) and FCEUX (`15.cpp:39-42`, `(B << 1) + i` in 8 KiB units) keep
+  bit 0 of the field, so a 32 KiB window can sit on an odd 16 KiB boundary; puNES maps a
+  32 KiB bank of `B >> 1` (`mapper_015.c:57-59`) and Nintendulator `(B & 0x3E) >> 1`
+  (`mapper015.cpp:17`), both of which discard that bit. The page's "bits 5-0 are PRG
+  A19..A14" makes `B` a 16 KiB index, so this build's reading is the page's; the two aligned
+  readings only differ on an image whose menu puts a 32 KiB game at an odd 16 KiB offset.
+- **Mirroring: bit 6 set = horizontal** — OK (`multicart.rs:159`); FCEUX inverts into its own
+  enum and lands on the same answer (`15.cpp:37`), puNES states it directly
+  (`mapper_015.c:78-82`), Nintendulator drives CIRAM A10 from PPU A11 when the bit is set
+  (`mapper015.cpp:35-37`).
+
+### 15-1 — the CHR-RAM write protection: two emulators disabled it on purpose — DIFFERS
+
+**Point.** The page: "CHR-RAM is write-protected in PRG banking modes 0 and 3, and
+write-enabled in modes 1 and 2."
+
+**This build.** Protects modes 0 and 3 (`multicart.rs:195-207`). This is MR-15-1 and MF-1
+(969c1b2e) implemented it.
+
+**The others.**
+
+| | protects CHR-RAM in | file:line |
+| --- | --- | --- |
+| this build | modes 0 and 3 | `multicart.rs:199-202` |
+| Mesen 2 | modes 0 and 3 | MR-1b |
+| FCEUX | **mode 3 only**, deliberately | `15.cpp:64-70` |
+| puNES | **never** | `mapper_015.c` has no CHR write path at all |
+| Nintendulator | **never**, deliberately | `mapper015.cpp:34` |
+
+The two deliberate choices come with reasons written in the source, and they are the point of
+this entry. FCEUX's comment says there appear to be **two different mapper-15 boards** — "the
+one for 110in1 or 168in1 carts with complex multi game features" and "a simplified version for
+subor/waixing chinese originals and hacks with no different modes, working only in mode 0 and
+which does not expect there is any CHR write protection" — and that "protecting CHR writes only
+for mode 3 fixes the problem, all roms may be run on the same source again"
+(`15.cpp:64-70`). Nintendulator's is shorter: "For compatibility with mapper hacks, do not
+write-protect" (`mapper015.cpp:34`).
+
+**Verdict: DIFFERS** — from the majority of emulators, not from the page. This build and Mesen
+follow the page; FCEUX follows it halfway for a named compatibility reason and puNES and
+Nintendulator decline entirely.
+
+**Which games it affects, and which are known affected.** Mapper-15 images that write CHR-RAM
+while in mode 0. FCEUX's comment says these exist and names the family — the Subor and Waixing
+Chinese originals and their hacks, which run only in mode 0 — but not an individual title, so
+**the affected set is known by family and not by name**. The 110-in-1 and 168-in-1 multicarts
+the page describes are the ones the protection is for. None of this touches a protected game:
+mapper 15 is not SMB3, not Zelda II and not in the widescreen packs.
+
+**Risk of a fix.** This is one to think about before touching. Relaxing the protection to
+mode 3 only would match FCEUX and make the mode-0-only hacks work, at the cost of the page's
+stated behaviour and of Mesen's agreement with it; keeping it as it is risks a blank or
+corrupt screen on exactly the images FCEUX describes. The cost either way is one condition in
+`ppu_write` (`multicart.rs:200`), so this is a correctness judgement and not an engineering
+one.
+
+**What would make the decision.** A mapper-15 Subor or Waixing image run on this build: if the
+screen is blank or the tiles are wrong where FCEUX's is right, the protection is too strict for
+that family and the mode-3-only reading is the better default. That is a concrete, cheap
+experiment and it is the one thing this review cannot do from the sources.
+
+Count: 7 OK, 1 DIFFERS, 0 OPEN.
 
 <!-- NEXT-BOARD -->

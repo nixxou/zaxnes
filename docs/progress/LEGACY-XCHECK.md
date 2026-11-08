@@ -34,14 +34,18 @@ the discrete boards, VRC2/VRC4, RAMBO-1, Bandai FCG, SS88006, Irem G-101, the mu
 | 66 | GxROM | 4 OK |
 | 4 | MMC3, MMC6, MC-ACC | 12 OK, 3 OPEN |
 | 5 | MMC5 (ExROM) + expansion audio | 16 OK, 1 DIFFERS, 1 OPEN |
+| 9, 10 | MMC2 (PxROM), MMC4 (FxROM) | 8 OK, 1 OPEN |
+| 11 | Color Dreams | 4 OK |
+| 13 | CPROM | 4 OK, 1 DIFFERS |
+| 15 | 100-in-1 Contra Function 16 | 7 OK, 1 DIFFERS |
 
 Plus one shared section, **the bus conflict re-counted**, which carries the four new votes for
 the eight boards that share `registry::has_bus_conflicts`.
 
 ## Boards remaining
 
-9/10 (MMC2/MMC4), 11, 13, 15, 16, 18, 21/22/23/25/27 (VRC2/VRC4), 28,
-30, 32, 34, 41, 64 (RAMBO-1), 71, 87/101, 156, 225, 228.
+16, 18, 21/22/23/25/27 (VRC2/VRC4), 28, 30, 32, 34, 41, 64 (RAMBO-1), 71, 87/101, 156, 225,
+228.
 
 ## Notes for whoever resumes this
 
