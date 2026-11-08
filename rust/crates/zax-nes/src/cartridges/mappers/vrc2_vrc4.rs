@@ -36,6 +36,11 @@ impl VrcVariant {
         match (mapper_number, submapper) {
             (22, _) => Some(Self::Vrc2a),
             (27, _) => Some(Self::Vrc427),
+            // NES 2.0 mapper 298, whose page names the configuration outright: "The board uses a
+            // VRC4 clone in the VRC4b configuration (CPU 0x02s to VRC4 A0, CPU 0x01s to VRC4 A1)"
+            // -- which is this table's `[1, 0]` (MF-UNL-7 step 4).
+            #[cfg(feature = "board-298")]
+            (298, _) => Some(Self::Vrc4b),
             (21, 1) => Some(Self::Vrc4a),
             (21, 2) => Some(Self::Vrc4c),
             (23, 1) => Some(Self::Vrc4f),
@@ -71,6 +76,25 @@ impl VrcVariant {
 
 /// iNES mappers 21, 22, 23, 25 and 27, Konami VRC2 and VRC4 (REQ-CORE-100): the same silicon
 /// with the register address lines wired differently.
+///
+/// # And NES 2.0 mapper **298**, behind `board-298` (MF-UNL-7 step 4)
+///
+/// The unlicensed *Lethal Weapon* — a backport of Konami's *Lethal Enforcers*, not the licensed
+/// game of that name. Its page gives no register list at all, because it needs none: "The board
+/// uses a VRC4 clone in the VRC4b configuration (CPU 0x02s to VRC4 A0, CPU 0x01s to VRC4 A1)",
+/// which is [`VrcVariant::Vrc4b`] exactly, and then states **one** difference —
+///
+/// > writing to $F003 only acknowledges a pending IRQ, but it does not move the 'A' control bit
+/// > to the 'E' control bit [the way an original VRC4 does].
+///
+/// — which is one `bool` and one three-line method ([`Vrc2Vrc4::acknowledge_irq`]), both behind
+/// the feature. That is the shape the lot instruction asks for ("a `const` parameter on
+/// `Vrc2Vrc4` selecting `Vrc4b` plus the one documented difference … in the manner of `McAcc`"),
+/// read as a load-time field rather than a monomorphisation for the reason
+/// [`super::Namcot108`]'s own note gives at length: a second monomorphisation of this board needs
+/// a second `Board` discriminant, and MF-6c steps 2 to 5 priced one of those at `mmc5` +0.066 %
+/// against a tolerance of +0.02 %. A field costs the five Konami numbers one test on a write to
+/// $F003 and nothing anywhere else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vrc2Vrc4 {
     banks: BankWindows,
@@ -92,6 +116,16 @@ pub struct Vrc2Vrc4 {
     /// seven fields it replaces were written to the save state in exactly the order
     /// [`VrcIrq::save_state`] writes them, so the block is unchanged.
     irq: VrcIrq,
+    /// NES 2.0 mapper 298: the acknowledge register clears the pending IRQ and **does not** copy
+    /// `A` into `E` (MF-UNL-7 step 4). Load-time, from the mapper number, so no savestate byte
+    /// carries it and the block of mappers 21/22/23/25/27 is unchanged (REQ-CORE-090).
+    ///
+    /// **Behind its own feature, so that with `board-298` off this struct and every function of it
+    /// is byte for byte what the lot's base commit shipped**: the five Konami numbers may not pay
+    /// for a sixth that is not theirs, and this struct's layout is one `Board::irq_asserted` reads
+    /// on every CPU cycle of a VRC game.
+    #[cfg(feature = "board-298")]
+    ack_without_enable_copy: bool,
 }
 
 impl Vrc2Vrc4 {
@@ -138,6 +172,8 @@ impl Vrc2Vrc4 {
             prg1: 1,
             swap_prg: false,
             irq: VrcIrq::new(),
+            #[cfg(feature = "board-298")]
+            ack_without_enable_copy: mapper_number == 298,
         }
     }
 
@@ -200,8 +236,29 @@ impl Vrc2Vrc4 {
             0 => self.irq.write_latch_nibble(value, false),
             1 => self.irq.write_latch_nibble(value, true),
             2 => self.irq.write_control(value),
-            _ => self.irq.acknowledge(),
+            _ => self.acknowledge_irq(),
         }
+    }
+
+    /// The acknowledge register, `$F003` on a VRC4b, and **the one documented difference of NES
+    /// 2.0 mapper 298** (MF-UNL-7 step 4).
+    ///
+    /// Konami's chip "will acknowledge the pending IRQ, and copy the A bit to the E bit"; that
+    /// board's page says "writing to $F003 only acknowledges a pending IRQ, but it does not move
+    /// the 'A' control bit to the 'E' control bit [the way an original VRC4 does]". So the clone
+    /// re-enables nothing, and a game that armed `A` and then acknowledged is left with the
+    /// counter **off** where a real VRC4 would have turned it back on.
+    ///
+    /// With `board-298` off this is `self.irq.acknowledge()` and nothing else, which is what the
+    /// five Konami numbers compiled to before this step.
+    fn acknowledge_irq(&mut self) {
+        #[cfg(feature = "board-298")]
+        if self.ack_without_enable_copy {
+            self.irq.acknowledge_pending_only();
+            return;
+        }
+
+        self.irq.acknowledge();
     }
 
     fn update_banks(&mut self) {

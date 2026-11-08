@@ -590,6 +590,9 @@ impl Cartridge {
             // MF-UNL-4 step 3 adds 35, 90, 209 and 211, the J.Y. Company ASIC, whose IRQ
             // source 0 -- "CPU M2 rise", and the power-on setting of $C001 -- is this clock
             // (nesdev, "J.Y. Company ASIC").
+            // MF-UNL-7 step 4 adds NES 2.0 mapper 298, whose board "uses a VRC4 clone in the
+            // VRC4b configuration" -- the same chip, the same counter and the same clock, with one
+            // documented difference at $F003 (nesdev, "NES 2.0 Mapper 298").
             clocks_on_cpu_cycle: matches!(
                 mapper,
                 5 | 16
@@ -617,6 +620,7 @@ impl Cartridge {
                     | 159
                     | 209
                     | 211
+                    | 298
             ),
         };
         cartridge.reset();

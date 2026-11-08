@@ -61,6 +61,7 @@ default = [
     "board-sachen8259",
     "board-112",
     "board-193",
+    "board-298",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -542,6 +543,25 @@ board-112 = ["board-namcot108"]
 # changing mirroring at run-time" is a note about the catalogue and not about the register, so
 # $6004 is implemented and tested (Q-161).
 board-193 = ["board-namcot108"]
+
+# NES 2.0 mapper 298 (MF-UNL-7 step 4): the unlicensed *Lethal Weapon*, a backport of Konami's
+# *Lethal Enforcers* and not the licensed game of that name.
+#
+# Its page gives no register list, because it needs none: "The board uses a VRC4 clone in the VRC4b
+# configuration (CPU 0x02s to VRC4 A0, CPU 0x01s to VRC4 A1)" -- which is `VrcVariant::Vrc4b`
+# exactly -- and then states **one** difference, "writing to $F003 only acknowledges a pending IRQ,
+# but it does not move the 'A' control bit to the 'E' control bit". So the feature is one `bool` on
+# `Vrc2Vrc4`, one three-line method on it and one `const fn` on `VrcIrq`, all three behind the
+# feature, plus the number in `SUPPORTED_MAPPERS`, in `create_board` and in
+# `Cartridge::clocks_on_cpu_cycle`.
+#
+# **A load-time field and not a `const` monomorphisation**, which is the one place this feature
+# departs from §7.2's wording ("in the manner of `McAcc`"): a second monomorphisation of this board
+# needs a second `Board` discriminant, and MF-6c steps 2 to 5 priced one of those at `mmc5`
+# +0.066 % against a tolerance of +0.02 %. The field costs the five Konami numbers one test on a
+# write to $F003 and nothing anywhere else, and **no savestate byte** -- the flag comes from the
+# mapper number, so the block of mappers 21/22/23/25/27 is unchanged.
+board-298 = []
 
 # Mappers 137, 138, 139 and 141, the Sachen **8259** -- one chip with four wirings (MF-UNL-7
 # step 1). An index port at $4100 and a data port at $4101 under mask $C101, three bits wide, the

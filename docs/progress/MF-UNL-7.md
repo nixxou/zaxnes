@@ -45,7 +45,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
   shift, the four mirroring modes and the CHR-RAM board.
 - [x] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
 - [x] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
-- [ ] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
+- [x] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
 - [ ] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
 - [ ] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
 - [ ] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
@@ -320,3 +320,75 @@ configurations (default, `--no-default-features`, `--features parked-boards`,
 `--no-default-features --features board-193`). `mapper_tests` **299/0/0** by default, 114/0/0 with
 the feature alone, 102/0/0 with no features, 299/0/0 with `parked-boards`; the three latch sweeps
 pass in every one.
+
+---
+
+## Step 4 — mapper 298, a VRC4b clone with its own acknowledge
+
+`board-298`, in `default`, with no dependency on anything. One `bool` on `Vrc2Vrc4`, one
+three-line method on it, one `const fn` on `VrcIrq`, one arm in `VrcVariant::resolve`, the number
+in `SUPPORTED_MAPPERS`, in `create_board` and in `Cartridge::clocks_on_cpu_cycle`, and a note in
+`board_memory_sizes` saying why there is no row. **No new module, no enum variant anywhere, and no
+savestate byte.**
+
+### The page is one sentence of configuration and one of difference
+
+> The board uses a VRC4 clone in the VRC4b configuration (CPU 0x02s to VRC4 A0, CPU 0x01s to VRC4
+> A1).
+
+which is `VrcVariant::Vrc4b`'s `index_lines` of `[1, 0]` exactly — so the whole register file comes
+for free, and `req_core_102_mapper_298_is_a_vrc4b_bank_for_bank` is the test: the same writes
+through mapper 25 submapper 1 and through 298 give the same four PRG windows, the same CHR bank and
+the same mirroring. The assertion that makes it a *`VRC4b`* check and not a *VRC4* one is the CHR
+nibble pair: the high nibble of CHR register 0 is at **$B002**, where a `VRC4f` would put it at
+$B001.
+
+> writing to $F003 only acknowledges a pending IRQ, but it does not move the 'A' control bit to the
+> 'E' control bit [the way an original VRC4 does].
+
+$F003 is the acknowledge on a `VRC4b` (index 3 from A1 and A0 both set), and $F001 is its control
+register — which is why the page can name one address and no registers at all.
+
+### Why a field and not a `const` parameter
+
+§7.2 asks for "a `const` parameter on `Vrc2Vrc4` selecting `Vrc4b` … in the manner of `McAcc`".
+Taken literally that is a second monomorphisation of this board, and a second monomorphisation
+needs a second `Board` discriminant — which MF-6c steps 2 to 5 priced at `mmc5` **+0.066 %**
+against a tolerance of +0.02 %. `McAcc` could afford its discriminant because MR-4-3's difference
+is read on *every PPU fetch*; this one is read on a write to $F003.
+
+So it is a load-time `bool`, the shape `Namcot108`'s own note argues for at length, and
+`acknowledge_pending_only` is a second method on `VrcIrq` rather than a flag inside it — because
+one byte more in that struct moves `pending`'s offset inside `Vrc2Vrc4`, `Vrc6` and `Vrc7`, and
+MF-6b step 1 priced that at eleven of PR-1's thirteen ROMs, +0.009 % to +0.027 %.
+
+### The A/B, and what it shows
+
+`req_core_114_mapper_298_acknowledges_at_f003_without_copying_a_into_e` runs the same sequence on
+both chips, twice over:
+
+| | mapper 25.1 (Konami) | mapper 298 (the clone) |
+| --- | --- | --- |
+| `E`=1, `A`=0, fire, then $F003 | the counter **stops** (`A` copied into `E`) | it **fires again** |
+| `E`=0, `A`=1, then $F003 | the counter **starts** (256 ticks to the first IRQ) | it never starts |
+
+Both chips acknowledge the pending IRQ; only Konami's moves the enable.
+
+### Q-162: the census describes the difference as something else
+
+§7.2's test line is "a write to $F003 acknowledges an IRQ and does **not reload the counter** — the
+single difference from mapper 21/25". That is not a difference: a VRC4's acknowledge does not
+reload either, and only `$F001` with `E` set does ("If E is set, the IRQ counter is reloaded with
+the latch value"). The page wins, which is MF-UNL-2's rule, and
+`q_162_no_vrc4_acknowledge_reloads_the_counter_on_either_chip` pins the half of the census's
+sentence that is true — of **both** chips.
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-298`). `mapper_tests` **301/0/0** and `mapper_irq_tests`
+**57/0/0** by default; 104/0/0 and 42/0/0 with the feature alone; 102/0/0 and 40/0/0 with no
+features; 301/0/0 and 57/0/0 with `parked-boards`. The three latch sweeps pass in every one, and
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` is what would have caught the number
+missing from `clocks_on_cpu_cycle`.

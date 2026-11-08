@@ -1400,3 +1400,115 @@ fn req_core_114_jy_asic_irq_registers_accept_address_bit_11() {
     core.mapper_write(0xCFFA, 0x00);
     assert!(!irq(&core));
 }
+
+// ---------------------------------------------------------------- NES 2.0 mapper 298,
+// ---------------------------------------------------------------- MF-UNL-7 step 4
+
+/// Arms the counter of a `VRC4b` in cycle mode with a latch of $FE, so that it fires on the
+/// second tick, and with the `A` bit of the control register set to `a`.
+///
+/// The addresses are the `VRC4b`'s own: "CPU 0x02s to VRC4 A0, CPU 0x01s to VRC4 A1", so $F000 is
+/// the latch's low nibble, **$F002 its high one, $F001 the control register and $F003 the
+/// acknowledge** — which is why the page can say "$F003" and mean the acknowledge without naming
+/// a single register of the chip.
+#[cfg(feature = "board-298")]
+fn arm_vrc4b_counter(core: &mut NesCore, a: u8) {
+    core.write_memory(0xF000, 0x0E); // Latch low nibble.
+    core.write_memory(0xF002, 0x0F); // Latch high nibble: $FE.
+    core.write_memory(0xF001, 0x06 | a); // Cycle mode, enabled, `A` as asked.
+}
+
+/// **The one documented difference of NES 2.0 mapper 298**, as a direct A/B against the `VRC4b`
+/// this build already had — mapper 25 submapper 1 (nesdev, "NES 2.0 Mapper 298", MF-UNL-7 step 4):
+///
+/// > writing to $F003 only acknowledges a pending IRQ, but it does not move the 'A' control bit to
+/// > the 'E' control bit [the way an original VRC4 does].
+///
+/// So with `A` clear, acknowledging on Konami's chip *disables* the counter and acknowledging on
+/// the clone leaves it running — and the clone fires again where the original goes quiet.
+#[cfg(feature = "board-298")]
+#[test]
+fn req_core_114_mapper_298_acknowledges_at_f003_without_copying_a_into_e() {
+    // The original: `A` clear, so the acknowledge turns the counter off.
+    let mut konami = MapperRom::new(25).submapper(1).chr(32).load();
+    arm_vrc4b_counter(&mut konami, 0x00);
+    assert_eq!(2, tick_until_irq(&mut konami, 1000), "the VRC4b fires");
+    konami.write_memory(0xF003, 0x00);
+    assert!(!irq(&konami), "and the acknowledge clears it");
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut konami, 1000),
+        "A clear, copied into E: Konami's counter stops"
+    );
+
+    // The clone: the same sequence, and the counter keeps running because `E` was not touched.
+    let mut clone = MapperRom::new(298).chr(32).load();
+    arm_vrc4b_counter(&mut clone, 0x00);
+    assert_eq!(2, tick_until_irq(&mut clone, 1000), "the clone fires too");
+    clone.write_memory(0xF003, 0x00);
+    assert!(!irq(&clone), "the acknowledge still clears the pending IRQ");
+    assert_eq!(
+        2,
+        tick_until_irq(&mut clone, 1000),
+        "but E is untouched, so the counter fires again"
+    );
+
+    // And the other way round: `A` set with `E` clear is the arrangement a VRC4 game uses to arm
+    // the counter *from* an acknowledge. Konami's chip starts counting; the clone never does.
+    let mut konami = MapperRom::new(25).submapper(1).chr(32).load();
+    konami.write_memory(0xF001, 0x05); // Cycle mode, not enabled, A set.
+    assert_eq!(-1, tick_until_irq(&mut konami, 300), "not enabled yet");
+    konami.write_memory(0xF003, 0x00);
+    assert_eq!(
+        256,
+        tick_until_irq(&mut konami, 1000),
+        "A copied into E starts the counter from 0"
+    );
+
+    let mut clone = MapperRom::new(298).chr(32).load();
+    clone.write_memory(0xF001, 0x05);
+    assert_eq!(-1, tick_until_irq(&mut clone, 300), "not enabled yet");
+    clone.write_memory(0xF003, 0x00);
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut clone, 1000),
+        "and the clone's acknowledge cannot start it at all"
+    );
+}
+
+/// Q-162: the census's own description of this difference is "a write to $F003 acknowledges an IRQ
+/// and does **not reload the counter**", and that is not what separates the two chips — a VRC4's
+/// acknowledge does not reload the counter either. Only `$F001` with `E` set does, which is the
+/// page's "If E is set, the IRQ counter is reloaded with the latch value".
+///
+/// The page wins, which is MF-UNL-2's rule, and this test pins the half of the census's sentence
+/// that **is** true of both chips: neither acknowledge reloads (MF-UNL-7 step 4).
+#[cfg(feature = "board-298")]
+#[test]
+fn q_162_no_vrc4_acknowledge_reloads_the_counter_on_either_chip() {
+    for mapper in [25usize, 298] {
+        let mut core = if mapper == 25 {
+            MapperRom::new(25).submapper(1).chr(32).load()
+        } else {
+            MapperRom::new(298).chr(32).load()
+        };
+
+        // Latch $FE, enabled in cycle mode with `A` set so that both chips keep counting through
+        // the acknowledge. The counter reloads once, on the control write.
+        arm_vrc4b_counter(&mut core, 0x01);
+        assert_eq!(2, tick_until_irq(&mut core, 1000), "mapper {mapper}");
+
+        // The firing itself reloaded the counter to $FE, so the next IRQ is two ticks away. An
+        // acknowledge in the middle of that must not put it back to $FE a second time, or the
+        // period would be three.
+        core.write_memory(0xF003, 0x00);
+        core.bus_mut().tick();
+        assert!(!irq(&core), "mapper {mapper}: one tick in");
+        core.write_memory(0xF003, 0x00);
+        assert_eq!(
+            1,
+            tick_until_irq(&mut core, 1000),
+            "mapper {mapper}: the second acknowledge did not reload"
+        );
+    }
+}

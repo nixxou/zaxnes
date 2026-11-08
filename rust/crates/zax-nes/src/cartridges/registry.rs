@@ -311,6 +311,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     263,
     #[cfg(feature = "board-268")]
     268,
+    #[cfg(feature = "board-298")]
+    298,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -760,6 +762,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // in $6000-$7FFF can reach a register of this family. The header decides, as it does for
         // mapper 97 (MF-UNL-1 step 1).
         //
+        // **NES 2.0 mapper 298 is deliberately absent**, and the reason is mapper 97's: its page
+        // has no capacity rows at all, so it documents no PRG-RAM and does not say the board has
+        // none either, and nothing forces the question -- every register of a VRC4b is above
+        // $8000. The header decides, as it does for the five Konami numbers, none of which has a
+        // row here either (MF-UNL-7 step 4).
+        //
         // **Mapper 112 is deliberately absent**, and the reason is mapper 97's: its page has no
         // capacity table at all, so it documents no PRG-RAM and does not say the board has none
         // either, and nothing forces the question -- all three of its ports are at $8000, $A000
@@ -936,6 +944,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         16 => Board::BandaiFcg(BandaiFcg::new(memory, mapper)),
         18 => Board::JalecoSs88006(JalecoSs88006::new(memory)),
         21 | 22 | 23 | 25 | 27 => Board::Vrc2Vrc4(Vrc2Vrc4::new(memory, mapper)),
+        // MF-UNL-7 step 4: NES 2.0 mapper 298, the unlicensed *Lethal Weapon*. Its page gives no
+        // register list because it needs none -- "a VRC4 clone in the VRC4b configuration" -- and
+        // states one difference, at $F003. One `bool` on the board above and no variant of its
+        // own; `Vrc2Vrc4`'s own note has why a monomorphisation would have cost `mmc5` +0.066 %.
+        #[cfg(feature = "board-298")]
+        298 => Board::Vrc2Vrc4(Vrc2Vrc4::new(memory, mapper)),
         // Mapper 26 is the VRC6b, the same chip with A0 and A1 swapped (nesdev, "VRC6").
         19 | 210 => Board::Namco163(Namco163::new(memory, mapper)),
         24 | 26 => Board::Vrc6(Vrc6::new(memory, mapper)),

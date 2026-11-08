@@ -165,6 +165,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 193, NTDEC's TC-112 -- five registers at $6000-$6004 under mask $E007, three CHR windows
     //   of **unequal** width and one switchable PRG window of four -- which shares `Namcot108`'s
     //   window table and savestate block and nothing else, behind `board-193` (MF-UNL-7 step 3);
+    // * 298, the unlicensed *Lethal Weapon*: "a VRC4 clone in the VRC4b configuration" whose one
+    //   documented difference is that "$F003 only acknowledges a pending IRQ, but it does not move
+    //   the 'A' control bit to the 'E' control bit" -- one `bool` on `Vrc2Vrc4` and no variant --
+    //   behind `board-298` (MF-UNL-7 step 4);
     // * 137, 138, 139 and 141, the Sachen 8259 -- one chip with four wirings (the 8259D, B, C and
     //   A, in that order of number), an index/data pair at $4100/$4101 under mask $C101 and a
     //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
@@ -198,7 +202,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 98] = [
+    let additions: [(i32, bool); 99] = [
         (19, true),
         (24, true),
         (26, true),
@@ -298,6 +302,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (243, sachen),
         (263, cfg!(feature = "board-263")),
         (268, cfg!(feature = "board-268")),
+        (298, cfg!(feature = "board-298")),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions
@@ -11492,6 +11497,112 @@ fn req_core_090_mapper_193_survives_a_save_and_restore() {
         ),
         banks
     );
+    let state = core.save_state(true).unwrap();
+
+    core.reset();
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(
+        banks,
+        (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+    assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ------------------------------------------- NES 2.0 mapper 298, MF-UNL-7 step 4
+
+/// "The board uses a VRC4 clone in the `VRC4b` configuration (CPU 0x02s to VRC4 A0, CPU 0x01s to
+/// VRC4 A1)" (nesdev, "NES 2.0 Mapper 298"), and that sentence is the whole of the board's
+/// register documentation — so the test is that the number *is* a `VRC4b`, bank for bank, against
+/// the `VRC4b` this build already had: mapper 25 submapper 1.
+///
+/// The wiring is what the assertions turn on. On a `VRC4b`, bit 0 of the register index comes from
+/// **A1** and bit 1 from **A0**, so $B002 is the *high* nibble of CHR register 0 where a `VRC4f`
+/// would put the high nibble at $B001 (MF-UNL-7 step 4).
+#[cfg(feature = "board-298")]
+#[test]
+fn req_core_102_mapper_298_is_a_vrc4b_bank_for_bank() {
+    let banks = |mapper: usize| {
+        let mut core = if mapper == 25 {
+            MapperRom::new(25).submapper(1).prg(16).chr(32).load()
+        } else {
+            MapperRom::new(298).prg(16).chr(32).load()
+        };
+
+        // $8000 and $A000 are the two 8 KiB PRG registers on every variant.
+        core.write_memory(0x8000, 0x05);
+        core.write_memory(0xA000, 0x09);
+
+        // CHR register 0: the low nibble at $B000 and the high one at **$B002**, which is the
+        // VRC4b's A0/A1 swap and not a VRC4f's.
+        core.write_memory(0xB000, 0x04);
+        let low_only = core.chr_bank(0x0000);
+        core.write_memory(0xB002, 0x01);
+
+        // And the mirroring register, $9000 with the index below 2.
+        core.write_memory(0x9000, 0x01);
+
+        (
+            core.prg_windows(),
+            low_only,
+            core.chr_bank(0x0000),
+            core.mirroring(),
+        )
+    };
+
+    assert_eq!(
+        ([5, 9, 14, 15], 4, 20, Nm::Horizontal),
+        banks(25),
+        "the VRC4b this build already had"
+    );
+    assert_eq!(banks(25), banks(298), "and mapper 298 is the same board");
+}
+
+/// REQ-CORE-090/091: mapper 298 round-trips through `Vrc2Vrc4`'s **own, unchanged** savestate
+/// block — the eight CHR registers, the two PRG bytes, the swap flag and `VrcIrq`'s seven fields,
+/// and **no byte of its own**, because the one thing that makes this number different comes from
+/// the mapper number at load (MF-UNL-7 step 4).
+#[cfg(feature = "board-298")]
+#[test]
+fn req_core_090_mapper_298_keeps_the_vrc4s_save_block() {
+    let dirty = |mapper: usize| {
+        let mut core = if mapper == 25 {
+            MapperRom::new(25).submapper(1).prg(16).chr(32).load()
+        } else {
+            MapperRom::new(298).prg(16).chr(32).load()
+        };
+        core.write_memory(0x8000, 0x05);
+        core.write_memory(0xA000, 0x09);
+        core.write_memory(0x9001, 0x02); // Swap mode.
+        for slot in 0u16..8 {
+            let group = 0xB000 + (slot >> 1) * 0x1000;
+            // Bit 0 of the register index is CPU A1 on a `VRC4b`, so the low nibble of a CHR
+            // register is at $xy00 or $xy01 and its high nibble two bytes above.
+            let half = slot & 1;
+            core.write_memory(group + half, u8::try_from(slot).unwrap() + 1);
+            core.write_memory(group + half + 0x0002, 0x01);
+        }
+        core.write_memory(0xF000, 0x0A);
+        core.write_memory(0xF002, 0x0C);
+        core.write_memory(0xF001, 0x06);
+        core
+    };
+
+    // The same banks the VRC4b reaches from the same writes, which is what says the block being
+    // round-tripped is that board's and not a new one.
+    assert_eq!(
+        {
+            let other = dirty(25);
+            (other.prg_windows(), other.chr_windows(), other.mirroring())
+        },
+        {
+            let mine = dirty(298);
+            (mine.prg_windows(), mine.chr_windows(), mine.mirroring())
+        }
+    );
+
+    let mut core = dirty(298);
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
     let state = core.save_state(true).unwrap();
 
     core.reset();

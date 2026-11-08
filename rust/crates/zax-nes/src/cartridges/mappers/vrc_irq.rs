@@ -103,6 +103,23 @@ impl VrcIrq {
         self.enabled = self.enable_after_ack;
     }
 
+    /// The **first half of it only**, which is the one documented difference of NES 2.0 mapper
+    /// 298's VRC4 clone: "writing to $F003 only acknowledges a pending IRQ, but it does not move
+    /// the 'A' control bit to the 'E' control bit [the way an original VRC4 does]" (nesdev,
+    /// "NES 2.0 Mapper 298", MF-UNL-7 step 4).
+    ///
+    /// A second method and not a `bool` on this type, for the reason [`Vrc3Irq`]'s own note gives
+    /// about its latch: one byte more in this struct moves `pending`'s offset inside
+    /// [`super::Vrc2Vrc4`], [`super::Vrc6`] and [`super::Vrc7`], and those three offsets are
+    /// *operands* in the per-board blocks `Board::irq_asserted` is compiled to inside
+    /// `Cpu6502::branch`. MF-6b step 1 priced that move at eleven of lot PR-1's thirteen ROMs,
+    /// +0.009 % to +0.027 %. The flag that selects between the two acknowledges lives on the
+    /// board, where it is behind `board-298` and costs the counter nothing.
+    #[cfg(feature = "board-298")]
+    pub const fn acknowledge_pending_only(&mut self) {
+        self.pending = false;
+    }
+
     /// One CPU cycle.
     ///
     /// `#[inline]` deliberately: this is `Board::on_cpu_cycle`'s arm for five mapper numbers
