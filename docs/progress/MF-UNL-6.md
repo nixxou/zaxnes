@@ -42,9 +42,12 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
 - [x] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
   both ROM roots.
 - [x] **7/8** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
+- [x] **8/8** — the shipped commit builds the measured binary, and the lot is closed.
 
 (Eight steps and not seven: the size ceiling §7.2 asks for in its step 2 is a loader question
-rather than a board one, and it carries its own tests.)
+rather than a board one, and it carries its own tests. The eighth is the one check the earlier
+lots left open — that the *last* commit, documentation included, is the one the figures came
+from, and not merely the commit the campaign was run against.)
 
 ---
 
@@ -592,3 +595,40 @@ board's own page, which is why §6 of the census graded documentation before §7
 **1 number, 1 board, 1 feature, 15 tests, 4 question tickets, ~12 original titles**, measured at
 worst ROM **+0.001 %** with the PR-1 set total *below* the base commit, and at **+0 to the
 instruction** on all five level-2 `core` figures.
+
+---
+
+## Step 8 — the shipped commit builds the measured binary
+
+Step 6 proved that `c1376dc3` — the commit step 5's figures were taken against — builds the binary
+that was measured. Three documentation commits followed it, and the earlier lots stopped there:
+MF-UNL-5 step 6 compared its step-5 commit and not its last one, so a stray source edit in a
+documentation step would have gone unchecked.
+
+So this step rebuilt `zax-harness` from **`c519d41c`**, the lot's last commit, by `git archive`
+into a fresh directory:
+
+    4b457c6c14d74216f57327b95b2a4fda  zax-harness-unl6        (499e1aa2, step 4 — measured)
+    4b457c6c14d74216f57327b95b2a4fda  zax-harness-unl6ship    (c1376dc3, step 5)
+    4b457c6c14d74216f57327b95b2a4fda  zax-harness-unl6final   (c519d41c, step 7)
+
+**Byte-identical, all three.** Steps 5, 6 and 7 touched `docs/` and `spec/` and nothing the
+compiler reads, so every figure in this note is the figure of the tree as it ships — not of an
+earlier one.
+
+### The lot, closed
+
+| | |
+| --- | --- |
+| numbers | **268** |
+| boards | one, `Mmc3Outer`, a boxed sixteenth `IrqBoard` variant holding an `Mmc3` |
+| features | one, `board-268`, in `default` |
+| tests | **15**, all fifteen reachable with the feature alone |
+| question tickets | **Q-156**, **Q-157**, **Q-158**, **Q-159** |
+| original titles | **~12** |
+| PR-1's thirteen ROMs | worst **+0.001 %**, set total **−150 669**, *below* the base commit |
+| level 2's five games | all five `core` **+0 to the instruction**; worst `total` **+0.0195 %**, of which 4.31 M is one Lua symbol |
+| golden-core, 98 originals | **byte-identical**, `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+| suites | **1043 / 0 / 9**, and **1052 / 0 / 0** with both ROM roots |
+
+G: 18 GiB free at the close; every build directory and every source tar deleted.
