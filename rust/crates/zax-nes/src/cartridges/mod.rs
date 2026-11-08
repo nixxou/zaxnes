@@ -390,6 +390,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 209
             | 211
             | 263
+            // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
+            | 268
     )
 }
 
@@ -426,6 +428,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 209
             | 211
             | 263
+            // MF-UNL-6: mapper 268's board holds an `Mmc3`, counter included.
+            | 268
     )
 }
 
@@ -1164,6 +1168,29 @@ mod tests {
         image
     }
 
+    /// The cartridge of `mapper` / `submapper`, or `None` when the registry refuses that pair.
+    ///
+    /// **Mapper 268 is the one number that refuses a submapper**, and the sweeps below have to
+    /// let it: it serves submappers 0 and 1 — the COOLBOY and MINDKIDS layouts of the AA6023 —
+    /// and `docs/review/UNL-census.md` §7.2 asks that the PCB codes it does not serve be refused
+    /// rather than run on a register layout that is not theirs (Q-157, MF-UNL-6 step 1). Any
+    /// other refusal, and any refusal for another cause, is still a failure of the sweep.
+    fn latched_cartridge(mapper: i32, submapper: u8) -> Option<Cartridge> {
+        let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
+            .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+        match Cartridge::create(rom) {
+            Ok(cartridge) => Some(cartridge),
+            Err(error) => {
+                assert_eq!(
+                    (268, crate::rom::RomLoadFailure::UnsupportedMapper),
+                    (mapper, error.failure),
+                    "mapper {mapper}.{submapper}: {error:?}"
+                );
+                None
+            }
+        }
+    }
+
     /// The addresses of one rendered line as the PPU puts them on the cartridge's bus, in order:
     /// per tile the nametable byte, the attribute byte and the two pattern planes (each driven
     /// one dot before it is latched), then the two discarded nametable fetches of dots 338 and
@@ -1211,10 +1238,9 @@ mod tests {
         for &mapper in registry::SUPPORTED_MAPPERS {
             // Submapper 3 of mapper 4 is the Acclaim MC-ACC, a board of its own (MR-4-3).
             for submapper in [0u8, 3] {
-                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
-                let mut cartridge = Cartridge::create(rom)
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let Some(mut cartridge) = latched_cartridge(mapper, submapper) else {
+                    continue;
+                };
                 let latched = cartridge.watches_ppu_reads;
                 let before = cartridge.board.clone();
 
@@ -1327,6 +1353,11 @@ mod tests {
         expected.extend_from_slice(&[209, 209, 211, 211]);
         #[cfg(feature = "board-263")]
         expected.extend_from_slice(&[263, 263]);
+        // MF-UNL-6: mapper 268's board holds an `Mmc3`, so it moves for 114's reason. **Once and
+        // not twice**: submapper 3 is one of the seven PCB codes this board refuses, so
+        // `latched_cartridge` skips that half of the pair (Q-157).
+        #[cfg(feature = "board-268")]
+        expected.push(268);
         assert_eq!(
             moved, expected,
             "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \
@@ -1347,10 +1378,9 @@ mod tests {
         let mut moved = Vec::new();
         for &mapper in registry::SUPPORTED_MAPPERS {
             for submapper in [0u8, 3] {
-                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
-                let mut cartridge = Cartridge::create(rom)
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let Some(mut cartridge) = latched_cartridge(mapper, submapper) else {
+                    continue;
+                };
                 let latched = cartridge.clocks_on_cpu_cycle;
                 let before = cartridge.board.clone();
 
@@ -1402,10 +1432,9 @@ mod tests {
     fn mf_4c_the_write_latch_is_the_read_latch_minus_the_boards_that_wait_on_rd() {
         for &mapper in registry::SUPPORTED_MAPPERS {
             for submapper in [0u8, 3] {
-                let rom = RomImage::try_load(&image(mapper, submapper), "latch.nes")
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
-                let cartridge = Cartridge::create(rom)
-                    .unwrap_or_else(|e| panic!("mapper {mapper}.{submapper}: {e:?}"));
+                let Some(cartridge) = latched_cartridge(mapper, submapper) else {
+                    continue;
+                };
                 assert!(
                     !cartridge.watches_ppu_bus_without_read || cartridge.watches_ppu_reads,
                     "mapper {mapper} submapper {submapper}: watches the PPU's writes without \

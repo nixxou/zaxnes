@@ -24,6 +24,8 @@ use super::mappers::Mmc3ChrRamBoard;
 use super::mappers::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::mappers::Mmc3Multicart;
+#[cfg(feature = "board-268")]
+use super::mappers::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::mappers::Mmc3Scramble;
 #[cfg(feature = "board-189")]
@@ -291,6 +293,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     243,
     #[cfg(feature = "board-263")]
     263,
+    #[cfg(feature = "board-268")]
+    268,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -1099,6 +1103,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // written data permuted and nothing else. A12 drives the chip's A0.
         #[cfg(feature = "board-263")]
         263 => Board::IrqBoard(IrqBoard::Mmc3Kof97(Mmc3Kof97::new(memory))),
+        // MF-UNL-6: the AA6023 of the COOLBOY and MINDKIDS boards, an MMC3 with six outer bank
+        // registers and up to 32 MiB of PRG-ROM. `Mmc3Outer::new` answers `None` for submappers
+        // 2 to 11 -- the seven PCB codes whose register layout is not this one -- so a dump of
+        // those is refused with REQ-CORE-011's message rather than run on the wrong lines
+        // (Q-157).
+        #[cfg(feature = "board-268")]
+        268 => Board::IrqBoard(IrqBoard::Mmc3Outer(Box::new(Mmc3Outer::new(
+            memory, mapper,
+        )?))),
         // MF-UNL-2 step 5: the TXC 01-22017/01-22018 and the Yoko FC-001EM, an MMC3 whose
         // PRG-ROM is banked in 32 KiB amounts from $4100. The generic pirate variants of the
         // same number are deliberately not decoded; `Mmc3Txc189`'s own note has the page's

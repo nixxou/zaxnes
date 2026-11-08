@@ -63,6 +63,8 @@ mod mmc3;
 mod mmc3_chrram;
 #[cfg(feature = "board-263")]
 mod mmc3_kof97;
+#[cfg(feature = "board-268")]
+mod mmc3_outer;
 #[cfg(feature = "board-mmc3-scramble")]
 mod mmc3_scramble;
 #[cfg(feature = "board-189")]
@@ -175,6 +177,8 @@ pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs
 pub use mmc3_chrram::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
 pub use mmc3_kof97::Mmc3Kof97;
+#[cfg(feature = "board-268")]
+pub use mmc3_outer::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 pub use mmc3_scramble::Mmc3Scramble;
 #[cfg(feature = "board-189")]

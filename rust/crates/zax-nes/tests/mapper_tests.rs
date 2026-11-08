@@ -180,7 +180,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
-    let additions: [(i32, bool); 91] = [
+    let additions: [(i32, bool); 92] = [
         (19, true),
         (24, true),
         (26, true),
@@ -273,6 +273,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (232, small),
         (243, sachen),
         (263, cfg!(feature = "board-263")),
+        (268, cfg!(feature = "board-268")),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions
@@ -9871,5 +9872,346 @@ fn req_core_075_mapper_178_has_no_expansion_audio_and_no_irq_on_any_submapper() 
         assert_eq!(None, cartridge.expansion_audio_output(), "{submapper}");
         assert_eq!(Some(i64::MAX), cartridge.ppu_irq_horizon(), "{submapper}");
         assert!(!cartridge.irq_asserted(), "{submapper}");
+    }
+}
+
+// ------------------------------------------------- the AA6023 of the COOLBOY boards (268)
+
+/// A mapper-268 image of `prg_bytes` bytes of PRG-ROM and 8 KiB of CHR-RAM, every 8 KiB PRG bank
+/// marked with its own **sixteen-bit** number in its first two bytes (MF-UNL-6).
+///
+/// `MapperRom` cannot serve this board, twice over: byte 4 of an iNES 1.0 header holds 16 KiB
+/// units in **one** byte, and a single fill byte per bank cannot name a bank above 255 where this
+/// board has twelve bank bits. So the size goes in NES 2.0's **exponent-multiplier** form — "if
+/// the MSB nibble is $F, the size is `(low & 3) * 2 + 1` shifted left by `low >> 2`" — and the
+/// bank number in two bytes, which [`coolboy_banks`] reads back.
+#[cfg(feature = "board-268")]
+fn coolboy_image(prg_bytes: usize, submapper: u8) -> Vec<u8> {
+    assert!(prg_bytes.is_power_of_two() && prg_bytes >= 0x4000);
+    let exponent = prg_bytes.trailing_zeros() as u8;
+    let mut image = vec![0u8; 16 + prg_bytes];
+    image[..4].copy_from_slice(&[0x4E, 0x45, 0x53, 0x1A]);
+    // The exponent form with multiplier 1, so the size is exactly `1 << exponent`.
+    image[4] = exponent << 2;
+    image[6] = 0xC0; // Mapper bits 0-3 of 268 = $C.
+    image[7] = 0x08; // NES 2.0; mapper bits 4-7 are zero.
+    image[8] = (submapper << 4) | 0x01; // The submapper, and mapper bits 8-11 = 1.
+    image[9] = 0x0F; // The PRG size's MSB nibble: the exponent form.
+    image[11] = 0x07; // 8 KiB of CHR-RAM: the header's `64 << shift`.
+
+    for bank in 0..prg_bytes / 0x2000 {
+        let start = 16 + bank * 0x2000;
+        image[start] = (bank >> 8) as u8;
+        image[start + 1] = bank as u8;
+    }
+
+    image
+}
+
+/// The four 8 KiB PRG bank numbers the windows show, read off the markers [`coolboy_image`] wrote.
+#[cfg(feature = "board-268")]
+fn coolboy_banks(core: &NesCore) -> [u16; 4] {
+    [0x8000u16, 0xA000, 0xC000, 0xE000].map(|address| {
+        (u16::from(core.read_memory(address)) << 8) | u16::from(core.read_memory(address + 1))
+    })
+}
+
+/// Loads a mapper-268 image and checks the number came through the twelve-bit mapper field.
+#[cfg(feature = "board-268")]
+fn coolboy(prg_bytes: usize, submapper: u8) -> NesCore {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&coolboy_image(prg_bytes, submapper), "Coolboy.nes");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(268, core.cartridge().unwrap().mapper_number());
+    core
+}
+
+/// nesdev ("NES 2.0 Mapper 268"): **the board powers on as a 512 KiB MMC3**, and that is not a
+/// quirk but the whole reason the chipset works in a multicart (MF-UNL-6 step 1).
+///
+/// The four PRG mask bits do not all read the same way round — A17 and A18 come "from 0: MMC3;
+/// 1: offset" and A19 and A20 "from 0: offset; 1: MMC3" — so with every register clear the MMC3
+/// drives A13 to A18 and an offset of zero drives A19 and A20. A plain MMC3 write that selects a
+/// bank above 512 KiB is therefore **truncated**, which is why the page says that "a great number
+/// of Chinese cartridges use the ASIC as a simple MMC3 clone and thus are usually found set to
+/// INES Mapper 004", and why the games that are not have to open the lines first.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_powers_on_as_a_512_kib_mmc3() {
+    // 2 MiB, which is the MMC3's own ceiling: the whole of this test is inside it, so the single
+    // fill byte of `MapperRom` names every bank.
+    let mut core = MapperRom::new(268).prg(256).chr(64).load();
+
+    // The MMC3's power-on layout, clipped to the first 512 KiB: $FE and $FF become $3E and $3F.
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+
+    // A bank above 512 KiB asked for through the chip alone: bits 6 and 7 of the register are
+    // masked away and bank $45 lands on bank $05.
+    core.mmc3_bank(6, 0x45);
+    assert_eq!(
+        [0x05, 1, 62, 63],
+        core.prg_windows(),
+        "A19 and A20 are masked off"
+    );
+
+    // `$6001` bits 6 and 5 are "PRG A19/A20 from 1: MMC3", so with them set the chip reaches the
+    // whole 2 MiB and the fixed banks are the image's own last two again.
+    core.mapper_write(0x6001, 0x60);
+    assert_eq!(
+        [0x45, 1, 0xFE, 0xFF],
+        core.prg_windows(),
+        "the MMC3's own 2 MiB"
+    );
+
+    // The other route to the same bank: with the masks back to zero, A19 is the **offset's** own
+    // bit 2 of `EEE`, so `$6000 = $04` puts bank $45 back where the chip could not.
+    core.mapper_write(0x6001, 0x00);
+    core.mapper_write(0x6000, 0x04);
+    assert_eq!(
+        [0x45, 0x41, 0x7E, 0x7F],
+        core.prg_windows(),
+        "A19 from the offset"
+    );
+
+    // The offset is an address **line** and not an addend: it replaces the bit rather than adding
+    // to it, so the same write with the mask open leaves the chip's own A19 in charge.
+    core.mapper_write(0x6001, 0x60);
+    assert_eq!([0x45, 1, 0xFE, 0xFF], core.prg_windows(), "the mask wins");
+}
+
+/// The census's own test for this lot — "an outer-bank write selects a bank above 512 KiB" —
+/// walked one address line at a time over an 8 MiB image (MF-UNL-6 step 1).
+///
+/// With all four mask bits handed to the offset the MMC3 drives A13 to A16 only, so the granule
+/// is 128 KiB and the two fixed windows are the **selected** granule's last two rather than the
+/// image's — which is what makes `$FE` and `$FF` the right fixed banks on this board, and what
+/// the page's own banking mode `$00` means by "CCKKJEEE … a way to select one of 256 different
+/// 128 KiB PRG MMC3 games".
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_selects_a_bank_above_512_kib_from_its_outer_registers() {
+    let mut core = coolboy(8 * 1024 * 1024, 0);
+    // The power-on MMC3, clipped to its first 512 KiB: $FE and $FF become $3E and $3F.
+    assert_eq!(
+        [0, 1, 0x3E, 0x3F],
+        coolboy_banks(&core),
+        "the power-on MMC3"
+    );
+
+    // `$6000` bit 6 = B (A17 from the offset), `$6001` bit 7 = G (A18 from the offset), and bits
+    // 6 and 5 clear leave A19 and A20 with the offset too.
+    for (register, value, line, bank) in [
+        (0x6000u16, 0x40u8, "no line", 0x000u16),
+        (0x6000, 0x41, "A17", 0x010),
+        (0x6000, 0x42, "A18", 0x020),
+        (0x6000, 0x44, "A19", 0x040),
+        (0x6001, 0x90, "A20", 0x080),
+        (0x6001, 0x84, "A21", 0x100),
+        (0x6001, 0x88, "A22", 0x200),
+    ] {
+        // The register this row does not write goes back to "every mask bit to the offset".
+        if register == 0x6000 {
+            core.mapper_write(0x6001, 0x80);
+        } else {
+            core.mapper_write(0x6000, 0x40);
+        }
+        core.mapper_write(register, value);
+        assert_eq!(
+            [bank, bank | 0x01, bank | 0x0E, bank | 0x0F],
+            coolboy_banks(&core),
+            "{line}: {register:#06X} = {value:#04X}"
+        );
+    }
+
+    // And the MMC3 underneath still drives the four bits it is left: the granule's own banks.
+    core.mapper_write(0x6000, 0x40);
+    core.mapper_write(0x6001, 0x88);
+    core.mmc3_bank(6, 0x0A);
+    assert_eq!(
+        [0x20A, 0x201, 0x20E, 0x20F],
+        coolboy_banks(&core),
+        "the MMC3 inside the selected 128 KiB"
+    );
+}
+
+/// The page's own address table: "right → `$6000-$6FFF` … Submapper bit 0 = 0 … UNIF MAPR
+/// **COOLBOY**", "left → `$5000-$5FFF` … bit 0 = 1 … **MINDKIDS**" — and **mask `$F007`**, which
+/// makes the whole 4 KiB window the register file (MF-UNL-6 step 1).
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_answers_at_6000_on_a_coolboy_and_at_5000_on_a_mindkids() {
+    for (submapper, port, other) in [(0u8, 0x6000u16, 0x5000u16), (1, 0x5000, 0x6000)] {
+        let mut core = coolboy(8 * 1024 * 1024, submapper);
+        assert_eq!(
+            [0, 1, 0x3E, 0x3F],
+            coolboy_banks(&core),
+            "submapper {submapper}"
+        );
+
+        // The other board's port is not decoded at all.
+        core.mapper_write(other + 1, 0x80);
+        core.mapper_write(other, 0x44);
+        assert_eq!(
+            [0, 1, 0x3E, 0x3F],
+            coolboy_banks(&core),
+            "submapper {submapper}: {other:#06X} is the other board's port"
+        );
+
+        // Its own is, and so is every copy of it the mask leaves: `$F007` reads A12-A15 and
+        // A0-A2 and nothing between, so the six registers repeat through the whole page.
+        core.mapper_write(port + 0x0A01, 0x80);
+        core.mapper_write(port + 0x0FF8, 0x44);
+        assert_eq!(
+            [0x40, 0x41, 0x4E, 0x4F],
+            coolboy_banks(&core),
+            "submapper {submapper}: the mask is $F007"
+        );
+
+        // `$xxx6` and `$xxx7` are inside the window and are not registers: the ASIC provides six.
+        core.mapper_write(port + 6, 0xFF);
+        core.mapper_write(port + 7, 0xFF);
+        assert_eq!(
+            [0x40, 0x41, 0x4E, 0x4F],
+            coolboy_banks(&core),
+            "submapper {submapper}: six of the eight addresses are registers"
+        );
+    }
+}
+
+/// **Q-156**: §7.2 step 3 asks for the lockout "implemented as a no-op with the reason in a
+/// comment" and the page refutes that, so MF-UNL-2's rule applies and the page wins.
+///
+/// nesdev gives `$xxx3` bit 7 as "Lockout (prevent further writes to all registers but the one at
+/// `$xxx2`, only works in MMC3 mode)", and its *WRAM usage* section is why it cannot be a no-op:
+/// on a COOLBOY the register window **is** the lower half of the WRAM window, so a game sets the
+/// registers up with the MMC3's WRAM disabled, sets the lockout, and only then enables the WRAM.
+/// With a no-op lockout the first byte a save routine wrote to `$6003` would re-bank the
+/// cartridge.
+#[cfg(feature = "board-268")]
+#[test]
+fn q_156_mapper_268_locks_its_registers_out_and_keeps_the_wram_behind_them() {
+    let mut core = coolboy(8 * 1024 * 1024, 0);
+    core.mapper_write(0x6001, 0x80);
+    core.mapper_write(0x6000, 0x44);
+    assert_eq!([0x40, 0x41, 0x4E, 0x4F], coolboy_banks(&core));
+
+    // The page's own sequence, in its own order.
+    core.mapper_write(0xA001, 0x00); // Disable WRAM.
+    core.mapper_write(0x6003, 0x80); // Enable Lockout.
+    core.mapper_write(0xA001, 0x80); // Enable WRAM.
+
+    // Every register but `$xxx2` is held, so a WRAM write anywhere in $6000-$6FFF no longer banks
+    // — and every one of those bytes reaches the WRAM, which is the point of the sequence.
+    let writes = [
+        (0x6000u16, 0x11u8),
+        (0x6001, 0x22),
+        (0x6003, 0x33),
+        (0x6004, 0x44),
+        (0x6123, 0x5A),
+    ];
+    for (address, value) in writes {
+        core.mapper_write(address, value);
+        assert_eq!(
+            [0x40, 0x41, 0x4E, 0x4F],
+            coolboy_banks(&core),
+            "{address:#06X} must be locked out"
+        );
+    }
+    for (address, value) in writes {
+        assert_eq!(
+            value,
+            core.read_memory(address),
+            "the WRAM behind {address:#06X}"
+        );
+    }
+
+    // The lockout is not a latch of the write itself: it is bit 7 of `$xxx3` read every time, and
+    // the page says it "only works in MMC3 mode" — so a board left in GNROM mode takes writes
+    // again. `$xxx3` cannot be written while the lockout holds, so this is shown from the other
+    // side, on a second cartridge: with the GNROM bit set beside the lockout bit, `$xxx0` moves.
+    let mut core = coolboy(8 * 1024 * 1024, 0);
+    core.mapper_write(0x6001, 0x80);
+    core.mapper_write(0x6003, 0x80 | 0x10);
+    core.mapper_write(0x6000, 0x44);
+    assert_ne!(
+        [0, 1, 0x3E, 0x3F],
+        coolboy_banks(&core),
+        "lockout does not work in GNROM mode"
+    );
+}
+
+/// §7.2's "leave the rest refusing", read as the page's own index: it groups the thirteen PCB
+/// codes by **submapper**, and the groups do not share a register layout — `$xxx0` has four
+/// distinct bit diagrams on that page and `$xxx1` three. So this board is submappers **0 and 1**,
+/// which is six of the thirteen codes and the six that carry all twelve titles, and submappers 2
+/// to 11 are refused with REQ-CORE-011's typed cause (**Q-157**, MF-UNL-6 step 1).
+#[cfg(feature = "board-268")]
+#[test]
+fn q_157_mapper_268_serves_two_submappers_and_refuses_the_nine_whose_layout_differs() {
+    assert!(
+        Cartridge::is_supported(268),
+        "the number itself is supported"
+    );
+
+    for submapper in 0..=1u8 {
+        let mut core = NesCore::new();
+        let load = core.load_rom(&coolboy_image(512 * 1024, submapper), "Coolboy.nes");
+        assert!(load.success, "submapper {submapper}: {:?}", load.error);
+    }
+
+    for submapper in 2..=11u8 {
+        let mut core = NesCore::new();
+        let load = core.load_rom(&coolboy_image(512 * 1024, submapper), "Coolboy.nes");
+        assert!(!load.success, "submapper {submapper} must be refused");
+        assert_eq!(
+            zax_nes::rom::RomLoadFailure::UnsupportedMapper,
+            load.failure,
+            "submapper {submapper}"
+        );
+        assert!(
+            load.error.unwrap().contains("268"),
+            "submapper {submapper}: the message names the number"
+        );
+        assert!(!core.is_running(), "submapper {submapper}");
+    }
+}
+
+/// nesdev's *Notes*: "AA6023's IRQ operator follows MMC3 **'NEC' behavior**, i.e. a latch value
+/// of zero disables IRQ" — which is `Mmc3Board::irq_revision_a`, the counter mapper 4 reaches
+/// through NES 2.0 submapper 4 and mappers 114 and 182 through their own page's wording.
+///
+/// The contrast is the one
+/// `req_core_114_mapper_114_disables_the_irq_on_a_zero_latch_and_115_does_not` draws: in this
+/// build the MMC3 proper is revision B and gives **three** IRQs over three rises with a latch of
+/// `$00` (REQ-CORE-114's own `mmc3_test_2` test 6), where this board gives one.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_114_mapper_268_disables_the_irq_on_a_zero_latch() {
+    for (mapper, expected) in [(4usize, 3), (268, 1)] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+        core.write_memory(0x2001, 0x00); // No rendering: only the rises below clock it.
+        core.mapper_write(0xC000, 0x00);
+        core.mapper_write(0xC001, 0x00);
+        core.mapper_write(0xE001, 0x00);
+
+        let mut irqs = 0;
+        for i in 0..3i64 {
+            {
+                let cartridge = core.cartridge_mut().unwrap();
+                cartridge.on_ppu_address_bus(0x0000, 10_000 + i * 100);
+                cartridge.on_ppu_address_bus(0x1000, 10_000 + i * 100 + 50);
+            }
+
+            if core.cartridge().unwrap().irq_asserted() {
+                irqs += 1;
+                core.mapper_write(0xE000, 0x00);
+                core.mapper_write(0xE001, 0x00);
+            }
+        }
+
+        assert_eq!(
+            expected, irqs,
+            "mapper {mapper}: a latch of $00 must give {expected} IRQ(s) over three rises"
+        );
     }
 }

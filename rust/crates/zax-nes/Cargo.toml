@@ -57,6 +57,7 @@ default = [
     "board-163",
     "board-162",
     "board-178",
+    "board-268",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -503,6 +504,28 @@ board-162 = ["board-decode-boards"]
 # IRQ), 2 (TMS5220 speech) and 3 (solder-pad read-out) are deferred by census §7.2, as is the
 # Dendy timing the educational variants want.
 board-178 = ["board-decode-boards"]
+
+# NES 2.0 mapper 268, the 聚芯 **AA6023** ASIC (SMD132 / SMD133) of the **COOLBOY** and **MINDKIDS**
+# boards -- an MMC3 clone with **six outer bank registers** above the chip's own, which take it from
+# the MMC3's 512 KiB to **32 MiB** of PRG-ROM (64 MiB on the YH2018A PCB), plus a GNROM-style
+# banking mode, two "weird" modes, a mixed CHR-ROM/CHR-RAM window and a register lockout that is
+# what lets a game keep WRAM behind the register window (lot MF-UNL-6).
+#
+# Twelve original titles, which is why census §7.2 gives the number a lot of its own: nine Chinese
+# RPGs -- *大话水浒*, *楚留香新传*, *魔道劫*, *口袋妖怪: 叶绿* (vols 1-3), three *最终幻想* titles
+# and *神奇宝贝* -- and the three modern licensed reissues *Gravity Trooper Metal Storm*,
+# *Holy Diver* and *Quest Forge*.
+#
+# **Submappers 0 and 1 only**, which is six of the thirteen PCB codes the page lists and the six
+# that carry every one of the twelve titles: the page indexes the codes by submapper and the groups
+# do not share a register layout, so §7.2's "leave the rest refusing" is read as refusing
+# submappers 2 to 11 at load with REQ-CORE-011's message (Q-157). Mapper 224 is the same chipset
+# and has no title, so it is not added.
+#
+# One boxed `IrqBoard` variant holding an `Mmc3`, on the `board-mmc3-scramble` precedent: the board
+# *is* the MMC3's board, counter included, so it answers yes to `Mapper::irq_asserted`, which is
+# that enum's entry condition.
+board-268 = []
 
 # **Not a board: one mechanism of `board-jy-asic`**, on the `board-68-chr-nametables` precedent and
 # the owner's rule of 2026-11-06 ("A costly *mechanism* of a board ... is implemented too, behind

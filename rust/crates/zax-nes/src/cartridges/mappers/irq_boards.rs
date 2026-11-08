@@ -6,6 +6,8 @@ use super::Mmc3ChrRamBoard;
 use super::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
 use super::Mmc3Multicart;
+#[cfg(feature = "board-268")]
+use super::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::Mmc3Scramble;
 #[cfg(feature = "board-189")]
@@ -151,6 +153,13 @@ pub enum IrqBoard {
     /// which lands in the padding that struct already has.
     #[cfg(feature = "board-189")]
     Mmc3Txc189(Mmc3Txc189),
+    /// NES 2.0 mapper 268, the AA6023 ASIC of the COOLBOY and MINDKIDS boards: an MMC3 with six
+    /// outer bank registers above the chip's own, up to 32 MiB of PRG-ROM (MF-UNL-6).
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// its own register file, so inline it would set this enum's size.
+    #[cfg(feature = "board-268")]
+    Mmc3Outer(Box<Mmc3Outer>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -241,6 +250,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Kof97($b) => $body,
             #[cfg(feature = "board-189")]
             IrqBoard::Mmc3Txc189($b) => $body,
+            #[cfg(feature = "board-268")]
+            IrqBoard::Mmc3Outer($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]
@@ -309,6 +320,7 @@ impl Mapper for IrqBoard {
         feature = "board-105",
         feature = "board-116",
         feature = "board-119",
+        feature = "board-268",
         feature = "board-68",
         feature = "board-jy-asic"
     ))]
@@ -326,17 +338,18 @@ impl Mapper for IrqBoard {
     /// — the same answer the un-forwarded dispatch gave them. The two multicarts need nothing
     /// from it either: they carry no PRG-RAM at all, and the condition their outer register puts
     /// on itself reads `Mmc3Board::prg_ram_writable` directly.
-    #[cfg(any(feature = "board-116", feature = "board-119"))]
+    #[cfg(any(feature = "board-116", feature = "board-119", feature = "board-268"))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
     }
 
-    /// Forwarded for the two MMC3 multicarts alone (47 and 37, MF-6a3 step 1), whose outer
-    /// register *is* the board's decode of $6000-$7FFF — see
-    /// `Mmc3Board::multicart_outer_write`. No other board of this enum overrides it, so the arm
-    /// this adds to `Board::intercept_cpu_write` answers `false` for all seven of them exactly
-    /// as the un-forwarded dispatch did.
-    #[cfg(feature = "board-mmc3-multicart")]
+    /// Forwarded for the two MMC3 multicarts (47 and 37, MF-6a3 step 1), whose outer register *is*
+    /// the board's decode of $6000-$7FFF — see `Mmc3Board::multicart_outer_write` — and for
+    /// mapper 268, whose six outer registers are at $6000-$6FFF or $5000-$5FFF and whose window
+    /// is the WRAM's as well (MF-UNL-6 step 1). No other board of this enum overrides it, so the
+    /// arm this adds to `Board::intercept_cpu_write` answers `false` for all of them exactly as
+    /// the un-forwarded dispatch did.
+    #[cfg(any(feature = "board-mmc3-multicart", feature = "board-268"))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,

@@ -683,6 +683,24 @@ impl<
         self.update_banks();
     }
 
+    /// `$8000` itself, for a board that holds this chip and has to know which windows the chip's
+    /// own bank registers drive: bit 6 is the PRG mode and bit 7 the CHR swap (MF-UNL-6 step 1).
+    ///
+    /// Behind `board-268`, its only caller. [`Mmc3Outer`](super::Mmc3Outer) recomputes all twelve
+    /// windows itself rather than laying an overlay over the chip's, because mapper 268's outer
+    /// register replaces *address lines* of both bank numbers — see that type's `refresh`.
+    #[cfg(feature = "board-268")]
+    pub(crate) const fn select(&self) -> u8 {
+        self.select
+    }
+
+    /// One of the eight bank registers, for the board above. `index` is masked to the eight the
+    /// chip has, which is what `$8000`'s own three bits do.
+    #[cfg(feature = "board-268")]
+    pub(crate) const fn bank_register(&self, index: usize) -> u8 {
+        self.bank[index & 0x07]
+    }
+
     /// Forces the **revision A** scanline counter, for a board that holds this chip and whose
     /// own page states the rule (MF-UNL-2 step 3).
     ///
@@ -696,7 +714,11 @@ impl<
     /// The counterpart needs no call: 115's "Sharp" rule — "a latch value of zero causes an IRQ
     /// on every scanline, on which the Chinese version of *幽☆遊☆白書 Final* depends" — is this
     /// build's **default** revision B, so 115 takes the chip as it comes.
-    #[cfg(feature = "board-mmc3-scramble")]
+    ///
+    /// **Mapper 268 is the third caller** (MF-UNL-6 step 1): its page's *Notes* say "AA6023's IRQ
+    /// operator follows MMC3 'NEC' behavior, i.e. a latch value of zero disables IRQ", which is
+    /// 114's sentence in the other vocabulary.
+    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-268"))]
     pub(crate) fn force_irq_revision_a(&mut self) {
         self.irq_revision_a = true;
     }
