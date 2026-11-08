@@ -36,6 +36,9 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// What a finished command sequence asks the chip to do, the return of
 /// [`FlashCommandState::write`].
+///
+/// Behind `board-111` with the machine itself: a board that issues no sequence needs neither.
+#[cfg(feature = "board-111")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FlashCommand {
     /// Nothing yet: the write advanced the sequence, or aborted it.
@@ -55,6 +58,7 @@ pub(crate) enum FlashCommand {
 /// loading" and otherwise *not* to change the board's save-state format. Keeping the machine where
 /// its bytes already are keeps that block byte for byte what it was; what moves here is the
 /// decode, which is the chip's and not the board's.
+#[cfg(feature = "board-111")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct FlashCommandState {
     /// How many bytes of the sequence under way have landed.
@@ -63,6 +67,7 @@ pub(crate) struct FlashCommandState {
     erasing: bool,
 }
 
+#[cfg(feature = "board-111")]
 impl FlashCommandState {
     /// The two command addresses, on the **chip's** address lines (Q-117). On the GTROM they are
     /// reachable in PRG bank 0 at CPU $D555 and $AAAA, which is what the page's own
@@ -160,6 +165,7 @@ pub struct FlashRom {
 impl FlashRom {
     /// The SST39SF040's sector, "a Microchip SST39SF040 flash chip" being the chip both boards
     /// carry: 4 KiB, the unit of its sector-erase command.
+    #[cfg(feature = "board-111")]
     pub(crate) const SST39SF040_SECTOR: usize = 4 * 1024;
 
     /// Magic that opens a flash save file, `"ZXFL"`. A file format and not a savestate block, so
@@ -180,6 +186,7 @@ impl FlashRom {
     }
 
     /// The sector `offset` falls in, or `None` when it is past the end of the chip.
+    #[cfg(feature = "board-111")]
     fn sector_of(&self, offset: usize) -> Option<usize> {
         let sector = offset / self.sector_size;
         if sector < self.original.len() {
@@ -212,6 +219,7 @@ impl FlashRom {
     /// Flash can only clear bits, so the byte written is `ANDed` with what is already there — a game
     /// that has not erased the sector first sees exactly that, which is the chip and not an
     /// approximation of it.
+    #[cfg(feature = "board-111")]
     pub(crate) fn program(&mut self, rom: &mut [u8], offset: usize, value: u8) {
         let Some(sector) = self.sector_of(offset) else {
             return;
@@ -224,6 +232,7 @@ impl FlashRom {
     }
 
     /// Erases to `$FF` the sector `offset` falls in, the `$80`/`$30` command.
+    #[cfg(feature = "board-111")]
     pub(crate) fn erase_sector(&mut self, rom: &mut [u8], offset: usize) {
         let Some(sector) = self.sector_of(offset) else {
             return;

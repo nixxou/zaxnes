@@ -18,6 +18,11 @@ pub use banked::{BankWindows, ChrView};
 pub use board::Board;
 pub use chr_fetch::ChrFetch;
 pub use flash::FlashRom;
+// The command machine belongs to the board that issues the sequences, and mapper 111 is the one
+// board of this build that does; a second flash board adds its feature here and to the four `cfg`s
+// of [`flash`] that go with it. `FlashRom` itself stays unconditional: the field, the save file
+// and the savestate section are on paths every configuration compiles.
+#[cfg(feature = "board-111")]
 pub(crate) use flash::{FlashCommand, FlashCommandState};
 
 use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
@@ -194,6 +199,7 @@ impl CartridgeMemory {
     ///
     /// A board with no flash row in [`registry::board_memory_sizes`] still gets the write, so the
     /// behaviour of a board that had one before this module existed is unchanged.
+    #[cfg(feature = "board-111")]
     pub(crate) fn flash_program(&mut self, offset: usize, value: u8) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -205,6 +211,7 @@ impl CartridgeMemory {
 
     /// Erases the flash sector `offset` falls in to `$FF`, the `$80`/`$30` command, and marks it
     /// changed.
+    #[cfg(feature = "board-111")]
     pub(crate) fn flash_erase_sector(&mut self, offset: usize) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {

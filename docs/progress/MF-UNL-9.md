@@ -112,7 +112,7 @@ end of step 1 below lists each of the five against what it produced.
   `CartridgeMemory` field and its five methods, the `board_memory_sizes` row, `Cheapocabra` on it,
   the savestate section behind the version check, the core's save-file API, and the four tests the
   census lists that were not here.
-- [ ] **2/6** — the four sweeps, the feature configurations, `fmt` and clippy in the four
+- [x] **2/6** — the four sweeps, the feature configurations, `fmt` and clippy in the four
   configurations the instruction names.
 - [ ] **3/6** — the callgrind campaign against the base commit, and the feature decision.
 - [ ] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
@@ -191,6 +191,75 @@ sector, so the suite now covers the only route by which fifteen of the sixteen b
 written at all.
 
 The three tests MF-6c step 9 wrote are untouched and still pass.
+
+## Step 2 — the sweeps, the configurations, `fmt` and clippy
+
+**This lot adds no Cargo feature.** The flash is a mechanism of `board-111`, and the owner's rule
+puts a mechanism behind its own feature only "if it costs more than the board itself", which
+step 3's measurement is what settles. So the instruction's "each new feature alone" is
+`--no-default-features --features board-111`, and the four configurations are the four below.
+
+### Where the flash had to be gated, and where it deliberately was not
+
+`--no-default-features` turned up four dead-code errors under `-D warnings`, and the fix draws the
+line the module's note already argued:
+
+* **gated on `board-111`** — `FlashCommand`, `FlashCommandState` and its `impl`,
+  `FlashRom::SST39SF040_SECTOR`, `FlashRom::sector_of`, `FlashRom::program`,
+  `FlashRom::erase_sector`, `CartridgeMemory::flash_program`, `CartridgeMemory::flash_erase_sector`.
+  All of them are about *issuing* a command, and mapper 111 is the one board that issues one.
+* **not gated** — `FlashRom` itself, the `CartridgeMemory::flash` field, `flash()`,
+  `export_flash_save`, `import_flash_save`, `save_flash_state`, `load_flash_state`, and
+  `NesCore::export_flash_save` / `import_flash_save`. These are on paths every configuration
+  compiles, and the two public ones answer "empty" and `false` rather than disappearing: the host
+  API must not change shape with a board feature, because `zax-app` is built once.
+
+A second flash board adds its feature to those eight `cfg`s and to the `pub(crate) use` in
+`cartridges/mod.rs`, which that line's comment says in place.
+
+### clippy `-D warnings`, `--all-targets`
+
+| configuration | result |
+| --- | --- |
+| default | clean |
+| `--no-default-features` | clean |
+| `--features parked-boards` | clean |
+| `--no-default-features --features board-111` | clean |
+
+`cargo fmt --all --check`: clean. **No new `allow` of any lint**, in the source or in the tests.
+
+### The suites, per configuration
+
+| configuration | passed | failed | ignored |
+| --- | ---: | ---: | ---: |
+| default | **1 046** | 0 | 8 |
+| `--no-default-features` | **784** | 0 | 8 |
+| `--features parked-boards` | **1 099** | 0 | 8 |
+| `--no-default-features --features board-111` | **791** | 0 | 8 |
+
+791 − 784 = **7**, which is `board-111`'s own tests: MF-6c step 9's three and this lot's four.
+(MF-6c step 10 recorded three behind the feature; the count is now seven.) The eighth test this lot
+wrote, `req_core_095_a_board_without_a_flash_chip_exposes_nothing`, is *not* gated — it asserts
+what a board **without** a flash chip does, so it belongs in every configuration, and it is one of
+the 784.
+
+### The four sweeps over `SUPPORTED_MAPPERS`, run explicitly in each of the four
+
+| sweep | default | `--no-default-features` | `parked-boards` | `board-111` alone |
+| --- | :-: | :-: | :-: | :-: |
+| `req_core_100_every_required_mapper_is_registered` | ok | ok | ok | ok |
+| `req_core_102_any_other_mapper_is_refused` | ok | ok | ok | ok |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` (the registry round trip, with every board's registers dirtied) | ok | ok | ok | ok |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | ok | ok | ok | ok |
+
+The `board_memory_sizes` row for 111 gained a **third** column this lot — `flash_sector` beside
+`prg_ram: Some(0)` and `chr_ram: Some(32 KiB)` — and both sides of it are asserted:
+`req_core_095_the_gtrom_flash_save_is_the_changed_sectors` requires `memory().flash()` to be
+`Some` for 111, and `req_core_095_a_board_without_a_flash_chip_exposes_nothing` requires it to be
+`None` for a board whose PRG-ROM is mask ROM.
+
+`cargo test --release -p zax-nes -p zax-harness` also passes whole; it is re-run in step 6 against
+the tree that ships.
 
 ## Sources consulted
 
