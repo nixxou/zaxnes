@@ -1678,14 +1678,32 @@ fn mr_21_3_a_declared_vrc2b_has_no_irq_counter() {
 ///
 /// We have no submapper handling on this board (`iremg101.rs`), so *Major League* takes its
 /// mirroring from the header and then from every $9000 write.
+///
+/// **Fixed in MF-1, and the page settles the page in MF-LEG-1 step 6** (report entry 32-1).
+/// "CIRAM A10 is tied to **+5V** on this game" — A10 held *high* is the **upper** 1 KiB page,
+/// `SingleScreenB`, which is what puNES uses (`mirroring_SCR1`). Mesen's `ScreenAOnly` quoted
+/// above is the lower page and is the one point of this finding where this build now follows the
+/// page against Mesen, AMD-061 §1; the other three emulators do not implement the case at all.
+/// It is unobservable to the game — all four logical tables show the one physical page whichever
+/// of the two it is — and is recorded for a savestate compared across emulators and for this
+/// project's 3D nametable path.
 #[test]
 fn mr_32_1_irem_g101_submapper_1_is_fixed_one_screen() {
-    let core = MapperRom::new(32).prg(8).chr(16).submapper(1).load();
+    let mut core = MapperRom::new(32).prg(8).chr(16).submapper(1).load();
 
     assert_eq!(
-        zax_nes::NametableMirroring::SingleScreenA,
+        zax_nes::NametableMirroring::SingleScreenB,
         core.mirroring(),
-        "submapper 1 ties CIRAM A10 high: one-screen whatever the header says"
+        "submapper 1 ties CIRAM A10 high: the upper page, whatever the header says"
+    );
+
+    // And $9000 stays entirely disabled, which is the other half of the same finding: neither
+    // the mirroring bit nor the PRG mode bit may reach the board.
+    core.mapper_write(0x9000, 0x03);
+    assert_eq!(
+        zax_nes::NametableMirroring::SingleScreenB,
+        core.mirroring(),
+        "$9000 moved the mirroring of a submapper-1 dump"
     );
 }
 

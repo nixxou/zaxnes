@@ -290,7 +290,31 @@ in **every** configuration.
 `--no-default-features`: 792 passed, 0 failed, 9 ignored. fmt clean; clippy `-D warnings
 --all-targets` clean in all four configurations (default, `--no-default-features`, and each of
 `board-mmc1a` and `board-vrc2-latch` alone).
-- [ ] 6/9 Irem G-101 (32-1) — *Major League* on the upper page
+- [x] 6/9 Irem G-101 (32-1) — *Major League* on the upper page
+
+### 6/9 — *Major League* on the upper one-screen page (entry 32-1)
+
+**One enum variant.** nesdev ("INES Mapper 032"): "Major League wants hardwired 1-screen
+mirroring. (CIRAM A10 is tied to **+5V** on this game)." A10 held high is the **second** physical
+nametable, which is `NametableMirroring::SingleScreenB`; `IremG101::reset` set `SingleScreenA`, the
+lower page. puNES uses `mirroring_SCR1`, the same page as the wiki; the other three emulators do
+not implement the case, and **Mesen's `ScreenAOnly` is the lower page** — so this is the one point
+of the finding where this build now follows the page against Mesen, which AMD-061 §1 requires.
+
+**Unobservable to the game**, which is why the entry records it rather than raising it: all four
+logical nametables show the one physical page whichever of the two it is, and the other kilobyte of
+CIRAM is never addressed. It is recorded for the two things that *can* see it — a savestate
+compared across emulators, and this project's 3D nametable path if it ever reads the unselected
+page.
+
+**No feature, nothing on any path**: the variant is chosen in `reset`.
+
+**Tests.** `mr_32_1_irem_g101_submapper_1_is_fixed_one_screen` now expects the upper page, and
+gained the other half of its own finding as a second assertion: a `$9000` write must not move the
+mirroring of a submapper-1 dump. It was the only test in the suite the change touched.
+
+`cargo test --release -p zax-nes -p zax-harness`: **1167 passed, 0 failed, 10 ignored**. fmt and
+clippy clean.
 - [ ] 7/9 golden-core over the 98 originals
 - [ ] 8/9 the callgrind campaign and the feature decisions
 - [ ] 9/9 the final check and the report annotations

@@ -5,8 +5,9 @@ use crate::NametableMirroring;
 
 /// iNES mapper 32, Irem G-101: two 8 KiB PRG banks, eight 1 KiB CHR banks, PRG swap mode.
 ///
-/// NES 2.0 submapper 1 is *Major League*, whose board ties CIRAM A10 high and leaves $9000
-/// undecoded (MR-32-1).
+/// NES 2.0 submapper 1 is *Major League*, whose board ties CIRAM A10 **high** — the upper 1 KiB
+/// page, `NametableMirroring::SingleScreenB` — and leaves $9000 undecoded (MR-32-1, and MF-LEG-1
+/// step 6 for which of the two pages it is).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IremG101 {
     banks: BankWindows,
@@ -76,7 +77,15 @@ impl Mapper for IremG101 {
         self.prg1 = 1;
         self.swap_prg = false;
         if self.major_league {
-            memory.set_mirroring(NametableMirroring::SingleScreenA);
+            // **The upper page since MF-LEG-1 step 6** (report entry 32-1). The page: "Major
+            // League wants hardwired 1-screen mirroring. (CIRAM A10 is tied to **+5V** on this
+            // game)" -- A10 held high selects the second physical nametable, which is
+            // `SingleScreenB`. puNES uses `mirroring_SCR1`, the same page; the other three do not
+            // implement the case at all. Unobservable to the game, all four logical tables showing
+            // the one physical page whichever it is, and recorded for the two things that can see
+            // it: a savestate compared across emulators, and this project's 3D nametable path if
+            // it ever reads the unselected kilobyte.
+            memory.set_mirroring(NametableMirroring::SingleScreenB);
         }
 
         self.update_banks();
