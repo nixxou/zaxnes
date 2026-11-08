@@ -115,7 +115,7 @@ end of step 1 below lists each of the five against what it produced.
 - [x] **2/6** — the four sweeps, the feature configurations, `fmt` and clippy in the four
   configurations the instruction names.
 - [x] **3/6** — the callgrind campaign against the base commit, and the feature decision.
-- [ ] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
+- [x] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
 - [ ] **5/6** — `BOARD-FEATURES.md`, the census note and the journal.
 - [ ] **6/6** — the final pass.
@@ -370,6 +370,38 @@ Three things follow, and each is a decision rather than an omission:
    — and `BOARD-FEATURES.md`'s note 1 is explicit that "the granularity is the granularity the
    measurements exist at".
 3. **Nothing moves into `parked-boards`**, which keeps `board-vs-system` as its only entry.
+
+## Step 4 — golden-core, and the full run with both ROM roots
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `7972e5f3` (`mfunl9-0-base`) against the lot (`mfunl9-1-flash`) | **byte-identical** (`cmp`, not just the digest) |
+| the digest | `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+
+**That is the digest MF-UNL-2, MF-UNL-3, MF-UNL-4, MF-UNL-5, MF-UNL-6, MF-UNL-7 and MF-UNL-8 all
+recorded.** Eight lots, and not one pixel of a commercial original has moved.
+
+It matters more here than in the lots before it, because this is the first lot to touch code every
+board compiles: `CartridgeMemory` gained a field, `Cartridge::save_state` and
+`Cartridge::load_state` each gained a call, and `NesCore::STATE_VERSION` moved. A digest taken over
+98 games at 1 200 frames each is what turns "those three changes are inert for every board but 111"
+from an argument into a measurement.
+
+### The full run with both ROM roots
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+    cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored
+
+**1 118 passed, 0 failed, 0 ignored.** The same command without `--include-ignored` and without the
+two variables is **1 109 / 0 / 9**, so the nine move out of the ignored column and into the passing
+one — which is the proof that they ran rather than passed vacuously. (1 109 + 9 = 1 118.)
+
+1 118 against MF-UNL-8's 1 113 is **+5**, this lot's five tests.
 
 ## Sources consulted
 
