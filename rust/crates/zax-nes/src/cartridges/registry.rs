@@ -38,6 +38,8 @@ use super::mappers::Mmc3Outer;
 use super::mappers::Mmc3Scramble;
 #[cfg(feature = "board-189")]
 use super::mappers::Mmc3Txc189;
+#[cfg(feature = "board-215")]
+use super::mappers::Mmc3Unl8237;
 #[cfg(feature = "board-namcot108")]
 use super::mappers::Namcot108;
 #[cfg(feature = "board-105")]
@@ -332,6 +334,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     210,
     #[cfg(feature = "board-jy-asic")]
     211,
+    // The Sugar Softec UNL-8237 and UNL-8237A, an MMC3 clone with one of eight run-time
+    // selectable register scrambles (MF-UNL-11 step 1).
+    #[cfg(feature = "board-215")]
+    215,
     #[cfg(feature = "board-218")]
     218,
     225,
@@ -1408,6 +1414,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // paragraph that settles it.
         #[cfg(feature = "board-189")]
         189 => Board::IrqBoard(IrqBoard::Mmc3Txc189(Mmc3Txc189::new(memory))),
+        // MF-UNL-11 step 1: the Sugar Softec UNL-8237 and UNL-8237A, an MMC3 clone whose
+        // register addresses and bank indices are permuted by one of eight patterns `$5007`
+        // selects at run time, with outer PRG and CHR banks at `$5001` and an NROM-like PRG
+        // override at `$5000`. NES 2.0 submapper 1 is the UNL-8237A, which differs in the bit
+        // assignment of `$5001` and in nothing else, so there is nothing to refuse.
+        #[cfg(feature = "board-215")]
+        215 => Board::IrqBoard(IrqBoard::Mmc3Unl8237(Box::new(Mmc3Unl8237::new(
+            memory, mapper,
+        )))),
         // MF-6a3 step 1: Nintendo's two MMC3 multicarts in one monomorphisation. The two
         // numbers differ only in what the outer register's bits drive, which is a field test
         // in `Mmc3Board::multicart_prg` and nowhere on a fetch or a cycle path.

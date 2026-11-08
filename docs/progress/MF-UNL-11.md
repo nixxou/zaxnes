@@ -222,7 +222,7 @@ bullets asks for something no page states. The ticket also holds five things the
 ### The nine steps
 
 - [x] **0/8** the plan — this note.
-- [ ] **1/8** `board-215`: the board, its registry wiring and the eight-pattern tests.
+- [x] **1/8** `board-215`: the board, its registry wiring and the eight-pattern tests.
 - [ ] **2/8** `board-208`: the board, the 256-byte table and the protection tests.
 - [ ] **3/8** `board-219`: the board, the extended mode and its tests.
 - [ ] **4/8** §7.1's three common things, part one: the four sweeps over `SUPPORTED_MAPPERS` in the
@@ -236,3 +236,55 @@ bullets asks for something no page states. The ticket also holds five things the
 - [ ] **8/8** Q-171, the census note, the journal, the close.
 
 [PROGRESS] MF-UNL-11 step 0/8 done: the plan
+
+## Step 1 — `board-215`, the UNL-8237 and UNL-8237A
+
+`Mmc3Unl8237` (`rust/crates/zax-nes/src/cartridges/mappers/mmc3_unl8237.rs`): an `Mmc3` held, the
+three registers of `$5000-$5FFF` under mask `$F007`, the page's two eight-row scramble tables and
+`refresh` = `refresh_banks` → `apply_override` → `apply_outer`, which is `Mmc3Scramble`'s own
+idempotence argument. One boxed `IrqBoard` variant, **no `Board` discriminant**.
+
+### What the outer banks are, in bank-number arithmetic
+
+| `$5000` bit 6 | PRG inner mask (8 KiB banks) | CHR inner mask (1 KiB banks) | what `$5001` adds |
+| --- | ---: | ---: | --- |
+| 0 — "256 KiB outer bank" | `$1F`, A13-A17 | `$FF`, A10-A17 | the 256 KiB bank above it |
+| 1 — "128 KiB outer bank" | `$0F`, A13-A16 | `$7F`, A10-A16 | **A17** from `$5001` bits 4 and 5, and the 256 KiB bank above that |
+
+So `apply_outer` is one `(bank & inner) | outer` per window on **both** tables, which is why
+`BankWindows::remap_chr_banks` had to exist: `or_chr_banks` cannot clear the line bit 6 replaces.
+`remap_prg_banks`'s `cfg` list grows one feature and its body does not move.
+
+**A consequence worth stating, because every expectation in this step's tests turns on it**: the
+MMC3's two fixed windows are the last two banks *of the inner region* and not of the chip. On a
+512 KiB image with `$5001` = 0 the layout is `[R6, R7, 30, 31]`, not `[…, 62, 63]` — the chip
+addresses 256 KiB and `$5001` says which 256 KiB. The MMC3's own power-on `R7` is **1**
+(`Mmc3Board::reset`), so the board's power-on layout is `[0, 1, -2, -1]` under the outer bank of 3
+that `$5001`'s `$xF` gives it: `[96, 97, 126, 127]` on a 1.5 MiB image.
+
+### The eight tests
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_215_runs_each_of_the_eight_5007_patterns_over_the_whole_bank_table` | §7.2's eight cases: per mode, **all eight** bank registers through the scrambled index/data pair plus the mirroring port — two columns of the address table, all eight data entries, and a third column |
+| `…_decodes_5000_5001_and_5007_under_mask_f007` | `$5FF8` is `$5000`; `$5002`-`$5006` are not decoded |
+| `…_overrides_the_prg_banking_with_nrom_128_and_nrom_256` | bit 7, bits 0-3, bit 5, and "ignore bits 0-3/5" when bit 7 is clear |
+| `…_puts_the_outer_256_kib_banks_above_the_mmc3_on_the_unl_8237` | submapper 0's `CCPP`: four PRG outer banks and four CHR outer banks |
+| `…_reads_5001_the_other_way_on_the_unl_8237a` | submapper 1's overlaid diagram: **bit 0 moves PRG only, bit 2 CHR only**, bit 1 both one line apart, bit 3 A20 on both |
+| `…_replaces_prg_a17_and_chr_a17_from_5001_under_5000_bit_6` | the same register value read with the line from the chip and from `$5001`, each line on its own |
+| `amd_061_mapper_215_resets_the_outer_bank_register_to_its_power_up_value` | the page's *Note* on the M2 interruption |
+| `req_core_095_mapper_215_leaves_6000_7fff_to_the_header_and_decodes_nothing_there` | **no `board_memory_sizes` arm**, which is 121/123/187's choice: every register is below `$6000` |
+
+The discriminating pair of the submapper-1 test is what makes it worth writing: under the
+alternative reading of that diagram (CHR at bits 2/1/0) `$5001` bit 0 would move the CHR window,
+and it does not. 1.5 MiB of each memory is what puts A18, A19 **and** A20 of both halves inside
+the image, so all six rows are real reads.
+
+Two lists outside the board grew the number, both caught by `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`:
+`watches_ppu_reads`, `watches_ppu_bus_without_read` and that test's own expected list — the board
+holds an `Mmc3`, counter included, which is mapper 114's reason in the same words.
+
+`cargo test --release -p zax-nes`: **all suites pass**, `mapper_tests` 350 → **358**. fmt clean,
+clippy `-D warnings` clean on `zax-nes`.
+
+[PROGRESS] MF-UNL-11 step 1/8 done: board-215

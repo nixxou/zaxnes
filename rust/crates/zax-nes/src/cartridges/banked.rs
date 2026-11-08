@@ -185,8 +185,12 @@ impl BankWindows {
     /// bits as sitting *below* that line. `mask` is what the MMC3 still drives, so the call is
     /// **idempotent** whenever `bits & mask == 0`, which is the only way these boards use it.
     ///
-    /// Additive: behind `board-mmc3-scramble`, its only caller.
-    #[cfg(feature = "board-mmc3-scramble")]
+    /// **MF-UNL-11's three boards are the second, third and fourth callers**, and they are the
+    /// reason [`Self::remap_chr_banks`] below exists: the UNL-8237's `$5000` bit 6 "replace[s] PRG
+    /// A17 **and CHR A17** from the MMC3", and the Kǎshèng A9461 masks "PRG-ROM and CHR-ROM banks
+    /// … to 128 KiB" under its own two outer bits, so both numbers need the same `(bank & mask) |
+    /// bits` on *both* bank tables.
+    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-215"))]
     pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::PRG_WINDOWS {
             if self.prg_is_ram[slot] {
@@ -218,6 +222,29 @@ impl BankWindows {
         for slot in from_slot..Self::CHR_WINDOWS {
             let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);
             self.map_chr_1k(slot, bank | bits);
+        }
+    }
+
+    /// Rewrites every 1 KiB CHR window's bank number as `(bank & mask) | bits`, each re-wrapped
+    /// as [`Self::map_chr_1k`] wraps it — [`Self::remap_prg_banks`]'s counterpart on the CHR
+    /// table (MF-UNL-11 step 1).
+    ///
+    /// [`Self::or_chr_banks`] above cannot serve these boards, because their outer line has to
+    /// **replace** a line the MMC3 drives rather than sit above it: nesdev ("INES Mapper 215")
+    /// gives `$5000` bit 6 as "1: Replace PRG A17 and CHR A17 with `$5001` bits 4 and 5", which
+    /// means clearing bit 7 of the 1 KiB bank number before setting it, and nesdev ("INES Mapper
+    /// 219") masks the chip's own banks "to 128 KiB" under two outer bits that are above them.
+    ///
+    /// `mask` is what the chip still drives, so the call is **idempotent** whenever
+    /// `bits & mask == 0` — the only way these boards use it, and the same contract
+    /// `remap_prg_banks` states.
+    ///
+    /// Additive: behind the three features of MF-UNL-11, its only callers.
+    #[cfg(feature = "board-215")]
+    pub fn remap_chr_banks(&mut self, mask: i32, bits: i32) {
+        for slot in 0..Self::CHR_WINDOWS {
+            let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);
+            self.map_chr_1k(slot, (bank & mask) | bits);
         }
     }
 

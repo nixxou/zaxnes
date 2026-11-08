@@ -215,6 +215,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   `board-eeprom`'s two I2C parts, sharing its persistence path and not its code -- and the
     //   **1 bpp video mode**, CHR A3 from PPU A0 and CHR A12 from PPU A9 "both latched on last
     //   rise of PPU A13" -- behind `board-164` (MF-UNL-10, Q-170);
+    // * 215, the Sugar Softec **UNL-8237** (submapper 0) and **UNL-8237A** (submapper 1): an
+    //   MMC3 clone whose register addresses and bank indices are permuted by one of **eight**
+    //   patterns a register at $5007 selects at run time, with outer PRG and CHR banks at $5001
+    //   and an NROM-like PRG override at $5000 -- behind `board-215` (MF-UNL-11 step 1, Q-171);
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -241,7 +245,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 107] = [
+    let additions: [(i32, bool); 108] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -343,6 +347,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (209, jy),
         (210, true),
         (211, jy),
+        (215, cfg!(feature = "board-215")),
         (218, cfg!(feature = "board-218")),
         (232, small),
         (243, sachen),
@@ -14352,4 +14357,339 @@ fn req_core_075_mapper_164_has_no_irq_and_moves_no_window_on_the_ppu_bus() {
         core.run_frame(0);
     }
     assert!(!core.cartridge().unwrap().irq_asserted());
+}
+
+// ------------------------------------------- the Sugar Softec UNL-8237 / UNL-8237A (215),
+// ------------------------------------------- lot MF-UNL-11 step 1
+
+/// nesdev ("INES Mapper 215"), *MMC3-compatible registers*: the whole of `$8000-$FFFF`'s
+/// behaviour is two tables indexed by `$5007`, an **address** permutation and a permutation of
+/// the low three **data** bits of the register that means the MMC3's `$8000`.
+///
+/// §7.2 of `docs/review/UNL-census.md` asks for "each of the eight `$5007` patterns produces its
+/// documented bank layout — eight cases, one per pattern, which is the only way to prove the table
+/// is transcribed right", and this is that test: per mode it programs **all eight** MMC3 bank
+/// registers through the scrambled index/data pair and asks for the whole twelve-window layout.
+/// So each case pins two columns of the address table and all eight entries of the data row, and a
+/// third column with the mirroring register.
+///
+/// The index values below are the **inverse** of the page's data row — the page gives
+/// written → meant and a test has to go the other way — and two of them are a cross-check on the
+/// transcription: mode 1's inverse is `[0, 3, 1, 5, 6, 7, 2, 4]`, which is mapper 114 submapper
+/// 0's own `INDEX_SCRAMBLE` row, and mode 4's row is mapper 114 submapper 1's. The same chip
+/// family and the same two permutations, arrived at from two different pages.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_runs_each_of_the_eight_5007_patterns_over_the_whole_bank_table() {
+    // (mode, the written address that means the MMC3's $8000, the one that means its $8001,
+    //  the one that means its $A000, the eight values that select bank registers 0-7)
+    let patterns: [(u8, u16, u16, u16, [u8; 8]); 8] = [
+        (0, 0x8000, 0x8001, 0xA000, [0, 1, 2, 3, 4, 5, 6, 7]),
+        (1, 0xA000, 0xC000, 0x8001, [0, 3, 1, 5, 6, 7, 2, 4]),
+        (2, 0x8000, 0x8001, 0xA000, [0, 3, 5, 7, 2, 1, 6, 4]),
+        (3, 0x8001, 0xA000, 0xA001, [0, 7, 5, 2, 6, 4, 1, 3]),
+        (4, 0xA000, 0x8001, 0xC000, [0, 5, 1, 3, 7, 2, 4, 6]),
+        (5, 0x8000, 0x8001, 0xA000, [0, 1, 2, 3, 4, 5, 6, 7]),
+        (6, 0x8000, 0x8001, 0xA000, [0, 1, 2, 3, 4, 5, 6, 7]),
+        (7, 0x8000, 0x8001, 0xA000, [0, 1, 2, 3, 4, 5, 6, 7]),
+    ];
+    // R0-R7, picked so that every one of the twelve windows shows a distinct bank: R0 and R1 are
+    // the 2 KiB registers, whose low bit the chip ignores.
+    let values: [u8; 8] = [0x10, 0x12, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0B];
+
+    for (mode, port_index, port_data, port_mirroring, index_values) in patterns {
+        let mut core = MapperRom::new(215).prg(64).chr(256).load();
+        // $5001 powers up at $xF, which on a 512 KiB image is an outer bank that is not there;
+        // the outer lines have their own tests and this one wants the chip's own numbers.
+        core.mapper_write(0x5001, 0x00);
+        core.mapper_write(0x5007, mode);
+
+        for register in 0..8usize {
+            core.mapper_write(port_index, index_values[register]);
+            core.mapper_write(port_data, values[register]);
+        }
+
+        assert_eq!(
+            [0x09, 0x0B, 30, 31],
+            core.prg_windows(),
+            "$5007 = {mode}: R6 at $8000, R7 at $A000, the region's last two fixed"
+        );
+        assert_eq!(
+            [0x10, 0x11, 0x12, 0x13, 0x04, 0x05, 0x06, 0x07],
+            core.chr_windows(),
+            "$5007 = {mode}: R0 and R1 over the 2 KiB halves, R2-R5 over the 1 KiB quarters"
+        );
+
+        // The third column each row names: the written address that means $A000, the one
+        // register of the eight whose effect is not a bank.
+        core.mapper_write(port_mirroring, 0x01);
+        assert_eq!(Nm::Horizontal, core.mirroring(), "$5007 = {mode}: $A000");
+        core.mapper_write(port_mirroring, 0x00);
+        assert_eq!(
+            Nm::Vertical,
+            core.mirroring(),
+            "$5007 = {mode}: $A000 again"
+        );
+    }
+}
+
+/// The three registers are at `$5000`, `$5001` and `$5007` under **mask `$F007`**, so they repeat
+/// every eight bytes through the whole of `$5000-$5FFF` and `$5002`-`$5006` are not decoded.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_decodes_5000_5001_and_5007_under_mask_f007() {
+    let mut core = MapperRom::new(215).prg(64).chr(256).load();
+    core.mapper_write(0x5001, 0x00);
+    let plain = core.prg_windows();
+    assert_eq!([0, 1, 30, 31], plain, "the MMC3's own power-on layout");
+
+    // $5FF8 is $5000: the mask reads A15-A12 and A2-A0 and nothing between.
+    core.mapper_write(0x5FF8, 0x80 | 0x05);
+    assert_eq!(
+        [10, 11, 10, 11],
+        core.prg_windows(),
+        "the NROM-128 override through the last alias of $5000"
+    );
+
+    // $5002-$5006 are five addresses the mask names and the page does not.
+    for address in [0x5002u16, 0x5003, 0x5004, 0x5005, 0x5006] {
+        core.mapper_write(address, 0xFF);
+    }
+    assert_eq!(
+        [10, 11, 10, 11],
+        core.prg_windows(),
+        "$5002-$5006 are not decoded"
+    );
+
+    core.mapper_write(0x5FF0, 0x00);
+    assert_eq!(plain, core.prg_windows(), "and back to the MMC3's banking");
+}
+
+/// nesdev ("INES Mapper 215"), `$5000`: bit 7 "Ignore PRG bank from MMC3; apply bits 0-3/5",
+/// bits 0-3 "Select 16 KiB PRG-ROM bank at CPU `$8000-$BFFF` and `$C000-$FFFF`" and bit 5
+/// "0: Do not replace bit 0 (NROM-128) / 1: Replace bit 0 with CPU A14 (NROM-256)".
+///
+/// The same override, and the same two sentences, as mappers 114, 115, 123 and 187.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_overrides_the_prg_banking_with_nrom_128_and_nrom_256() {
+    let mut core = MapperRom::new(215).prg(64).chr(256).load();
+    core.mapper_write(0x5001, 0x00);
+    core.mmc3_bank(6, 0x03);
+    core.mmc3_bank(7, 0x04);
+    assert_eq!([3, 4, 30, 31], core.prg_windows());
+
+    // NROM-128: the same 16 KiB bank 5 at both windows, so banks 10 and 11 twice.
+    core.mapper_write(0x5000, 0x80 | 0x05);
+    assert_eq!([10, 11, 10, 11], core.prg_windows());
+
+    // NROM-256: bit 0 replaced by CPU A14, so one 32 KiB view out of the even/odd pair 4/5.
+    core.mapper_write(0x5000, 0x80 | 0x20 | 0x05);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+
+    // "0: Use PRG bank from MMC3; ignore bits 0-3/5" -- and the chip's registers were never
+    // touched, so they come straight back.
+    core.mapper_write(0x5000, 0x20 | 0x05);
+    assert_eq!([3, 4, 30, 31], core.prg_windows());
+}
+
+/// `$5001`'s outer banks on **submapper 0**, the UNL-8237: `..cp CCPP`, "Select 256 KiB Outer
+/// PRG-ROM bank (PRG A18/A19)" at bits 1-0 and "Select 256 KiB Outer CHR-ROM bank (CHR A18/A19)"
+/// at bits 3-2.
+///
+/// 1.5 MiB of each, so that all four outer banks of both halves are inside the image and none of
+/// them wraps: the numbered banks only carry eight bits, so the CHR half is read through
+/// `chr_peek_view`'s offsets as mappers 114 and 115 already are.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_puts_the_outer_256_kib_banks_above_the_mmc3_on_the_unl_8237() {
+    let mut core = MapperRom::new(215).prg(192).chr(1536).load();
+    core.mmc3_bank(6, 0x01);
+    core.mmc3_bank(2, 0x05);
+
+    for outer in 0..4u8 {
+        core.mapper_write(0x5001, outer);
+        assert_eq!(
+            1 + outer * 32,
+            core.prg_windows()[0],
+            "$5001 bits 1-0 = {outer}: PRG A18/A19, 32 banks of 8 KiB each"
+        );
+    }
+
+    for outer in 0..4u8 {
+        core.mapper_write(0x5001, outer << 2);
+        assert_eq!(
+            Some((5 + usize::from(outer) * 256) * 1024),
+            core.cartridge()
+                .unwrap()
+                .chr_peek_view()
+                .map(|view| view.offsets()[4]),
+            "$5001 bits 3-2 = {outer}: CHR A18/A19, 256 banks of 1 KiB each"
+        );
+    }
+}
+
+/// `$5001`'s outer banks on **submapper 1**, the UNL-8237A: the page's diagram is two bit rows
+/// overlaid, `P.PP` over `CCC.`, and this test is what pins the reading **Q-171** records —
+/// PRG A20/A19/A18 at bits 3/1/0 and CHR A20/A19/A18 at bits 3/2/1.
+///
+/// Bits 0 and 2 are what discriminate it: **bit 0 moves PRG and not CHR**, which the alternative
+/// reading (CHR at bits 2/1/0) could not produce, and **bit 2 moves CHR and not PRG**. Bit 1
+/// moves both, one line apart, and bit 3 is A20 on both — 1.5 MiB of each is what puts all three
+/// of those lines inside the image, so every one of the six assertions below is a real read and
+/// not a wrap.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_reads_5001_the_other_way_on_the_unl_8237a() {
+    let mut core = MapperRom::new(215).submapper(1).prg(192).chr(1536).load();
+    core.mmc3_bank(6, 0x01);
+    core.mmc3_bank(2, 0x05);
+
+    let chr = |core: &NesCore| {
+        core.cartridge()
+            .unwrap()
+            .chr_peek_view()
+            .map(|view| view.offsets()[4])
+    };
+
+    // (the value written to $5001, the PRG outer bank, the CHR outer bank)
+    for (written, prg_outer, chr_outer) in [
+        (0x00u8, 0u8, 0usize),
+        (0x01, 1, 0), // bit 0: PRG A18 only.
+        (0x02, 2, 1), // bit 1: PRG A19 and CHR A18.
+        (0x04, 0, 2), // bit 2: CHR A19 only.
+        (0x08, 4, 4), // bit 3: A20 on both; only the PRG half is inside the image.
+        (0x03, 3, 1),
+    ] {
+        core.mapper_write(0x5001, written);
+        assert_eq!(
+            1 + prg_outer * 32,
+            core.prg_windows()[0],
+            "$5001 = {written:#04X}: PRG outer bank {prg_outer}"
+        );
+        assert_eq!(
+            Some((5 + chr_outer * 256) * 1024),
+            chr(&core),
+            "$5001 = {written:#04X}: CHR outer bank {chr_outer}"
+        );
+    }
+}
+
+/// nesdev ("INES Mapper 215"), `$5000` bit 6: "0: Do not replace PRG A17 and CHR A17 from the
+/// MMC3 (256 KiB outer bank) / 1: Replace PRG A17 and CHR A17 with `$5001` bits 4 and 5,
+/// respectively (128 KiB outer bank)".
+///
+/// So the bit takes one line away from the chip on each table and hands it to `$5001`: the
+/// register value that carries the line is the same before and after, and what changes is where
+/// the line comes from.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_102_mapper_215_replaces_prg_a17_and_chr_a17_from_5001_under_5000_bit_6() {
+    let mut core = MapperRom::new(215).prg(64).chr(256).load();
+    core.mapper_write(0x5001, 0x00);
+    // Bank 17 is PRG A17 set with A16-A13 holding 1; bank $85 is CHR A17 set with $05 below it.
+    core.mmc3_bank(6, 0x11);
+    core.mmc3_bank(2, 0x85);
+    assert_eq!(0x11, core.prg_windows()[0], "A17 from the MMC3");
+    assert_eq!(0x85, core.chr_windows()[4], "and CHR A17 from the MMC3");
+
+    // Bit 6 set, $5001 bits 4 and 5 clear: both lines are now zero whatever the chip holds.
+    core.mapper_write(0x5000, 0x40);
+    assert_eq!(
+        0x01,
+        core.prg_windows()[0],
+        "PRG A17 replaced by $5001 bit 4"
+    );
+    assert_eq!(
+        0x05,
+        core.chr_windows()[4],
+        "CHR A17 replaced by $5001 bit 5"
+    );
+
+    // And each line on its own, which is the "respectively" of the page's sentence.
+    core.mapper_write(0x5001, 0x10);
+    assert_eq!([0x11, 0x05], [core.prg_windows()[0], core.chr_windows()[4]]);
+    core.mapper_write(0x5001, 0x20);
+    assert_eq!([0x01, 0x85], [core.prg_windows()[0], core.chr_windows()[4]]);
+    core.mapper_write(0x5001, 0x30);
+    assert_eq!([0x11, 0x85], [core.prg_windows()[0], core.chr_windows()[4]]);
+
+    // Bit 6 clear again: the chip drives both lines and `$5001` bits 4-5 reach nothing.
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!([0x11, 0x85], [core.prg_windows()[0], core.chr_windows()[4]]);
+    core.mapper_write(0x5001, 0x00);
+    assert_eq!([0x11, 0x85], [core.prg_windows()[0], core.chr_windows()[4]]);
+}
+
+/// nesdev ("INES Mapper 215"), *Note*: "The Outer Bank Register is reset to its power-up value if
+/// a Reset has been detected via an interruption of the M2 signal. This makes it difficult to dump
+/// these cartridges using a Kazzo device."
+///
+/// The power-up value is **`$xF`** — the low nibble fixed, the high one unknown, which **Q-171**
+/// records — so what a reset must restore is an outer bank of 3 on both halves of submapper 0,
+/// and `$5000` and `$5007` with it.
+#[cfg(feature = "board-215")]
+#[test]
+fn amd_061_mapper_215_resets_the_outer_bank_register_to_its_power_up_value() {
+    let core = MapperRom::new(215).prg(192).chr(1536).load();
+    let power_on = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    // $xF on a 1.5 MiB image is the fourth 256 KiB bank of each half, which is a layout the
+    // chip's own zeroed registers could not produce.
+    assert_eq!(
+        [96, 97, 126, 127],
+        power_on.0,
+        "the outer bank is 3 out of reset, over the MMC3's own [0, 1, -2, -1]"
+    );
+
+    let mut core = core;
+    core.mapper_write(0x5007, 0x03);
+    core.mapper_write(0x5001, 0x00);
+    core.mapper_write(0x5000, 0x80 | 0x20 | 0x05);
+    core.mapper_write(0x8001, 0x06); // $5007 = 3: the written $8001 means the MMC3's $8000.
+    core.mapper_write(0xA000, 0x07); // and the written $A000 its $8001.
+    assert_ne!(
+        power_on,
+        (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+
+    core.reset();
+    assert_eq!(
+        power_on,
+        (core.prg_windows(), core.chr_windows(), core.mirroring()),
+        "a reset gives the power-on layout back, $5001 included"
+    );
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}
+
+/// `registry::board_memory_sizes` has **no arm** for this number, which is the same choice, and
+/// the same reason, as mappers 121, 123 and 187: every register of the board is **below `$6000`**,
+/// so nothing forces the question and the header decides (mapper 97's precedent in that
+/// function).
+///
+/// What that has to mean on the bus is this test: a battery-backed image gets its 8 KiB at
+/// `$6000-$7FFF` and the board does not decode a byte of it.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_095_mapper_215_leaves_6000_7fff_to_the_header_and_decodes_nothing_there() {
+    let mut core = MapperRom::new(215).prg(64).chr(256).battery().load();
+    core.mapper_write(0x5001, 0x00);
+    core.mmc3_bank(6, 0x03);
+    // The MMC3's own $A001: chip enable and write enable.
+    core.mapper_write(0xA001, 0x80);
+    let windows = (core.prg_windows(), core.chr_windows());
+
+    for (address, value) in [(0x6000u16, 0x11u8), (0x6800, 0x22), (0x7FFF, 0x33)] {
+        core.write_memory(address, value);
+        assert_eq!(
+            value,
+            core.read_memory(address),
+            "{address:#06X} is PRG-RAM and the board does not decode it"
+        );
+    }
+
+    assert_eq!(
+        windows,
+        (core.prg_windows(), core.chr_windows()),
+        "and no write below $8000 outside $5000-$5FFF moved a window"
+    );
 }

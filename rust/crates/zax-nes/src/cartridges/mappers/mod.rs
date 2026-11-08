@@ -79,6 +79,8 @@ mod mmc3_outer;
 mod mmc3_scramble;
 #[cfg(feature = "board-189")]
 mod mmc3_txc189;
+#[cfg(feature = "board-215")]
+mod mmc3_unl8237;
 mod mmc5;
 mod multicart;
 mod namco163;
@@ -208,6 +210,8 @@ pub use mmc3_outer::Mmc3Outer;
 pub use mmc3_scramble::Mmc3Scramble;
 #[cfg(feature = "board-189")]
 pub use mmc3_txc189::Mmc3Txc189;
+#[cfg(feature = "board-215")]
+pub use mmc3_unl8237::Mmc3Unl8237;
 pub use mmc5::Mmc5;
 pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,

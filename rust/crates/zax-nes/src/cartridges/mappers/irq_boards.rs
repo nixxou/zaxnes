@@ -18,6 +18,8 @@ use super::Mmc3Outer;
 use super::Mmc3Scramble;
 #[cfg(feature = "board-189")]
 use super::Mmc3Txc189;
+#[cfg(feature = "board-215")]
+use super::Mmc3Unl8237;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
 #[cfg(feature = "board-116")]
@@ -166,6 +168,17 @@ pub enum IrqBoard {
     /// its own register file, so inline it would set this enum's size.
     #[cfg(feature = "board-268")]
     Mmc3Outer(Box<Mmc3Outer>),
+    /// iNES mapper 215, the Sugar Softec **UNL-8237** and **UNL-8237A** (MF-UNL-11 step 1): an
+    /// MMC3 clone whose register addresses and bank indices are permuted by one of **eight
+    /// run-time selectable patterns**, with outer PRG and CHR banks and an NROM-like PRG
+    /// override.
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// its own three registers, so inline it would set this enum's size. Every method it needs is
+    /// one this variant already forwards for an earlier MMC3 clone, so `Board`'s own dispatches
+    /// grow nothing.
+    #[cfg(feature = "board-215")]
+    Mmc3Unl8237(Box<Mmc3Unl8237>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -301,6 +314,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Txc189($b) => $body,
             #[cfg(feature = "board-268")]
             IrqBoard::Mmc3Outer($b) => $body,
+            #[cfg(feature = "board-215")]
+            IrqBoard::Mmc3Unl8237($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]

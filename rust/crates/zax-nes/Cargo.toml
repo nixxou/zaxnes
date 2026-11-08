@@ -68,6 +68,7 @@ default = [
     "board-huang1",
     "board-cony",
     "board-91",
+    "board-215",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -179,6 +180,21 @@ board-263 = []
 # +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
 # -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-189 = []
+
+# Mapper 215, the Sugar Softec **UNL-8237** (submapper 0) and **UNL-8237A** (submapper 1)
+# (MF-UNL-11 step 1): an MMC3 clone whose register addresses and bank indices are permuted by
+# **one of eight patterns a register at $5007 selects at run time**, with outer PRG and CHR banks
+# at $5001 and an NROM-like PRG override at $5000. Four originals -- *Earthworm Jim 2*,
+# *Mortal Kombat 3*, *Mortal Kombat 3 Extra 60* and *Pocahontas Part 2* -- plus the eight
+# multicarts the chipset was made for.
+#
+# One boxed `IrqBoard` variant holding an `Mmc3` and three register bytes, on
+# `board-mmc3-scramble`'s precedent: the scramble is two eight-row `const` tables and not a
+# second chip, and five of the eight address rows are the identity, so a multicart's menu runs as
+# an ordinary MMC3 before any $5007 write. The one addition outside the board is
+# `BankWindows::remap_chr_banks`, `remap_prg_banks`'s counterpart on the CHR table, which $5000
+# bit 6's "replace PRG A17 **and CHR A17** from the MMC3" needs.
+board-215 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the
