@@ -25,6 +25,17 @@ pub struct Kirby;
 /// CRC-32 of the ROM's data, iNES header excluded: (USA) (Rev 1).
 pub const SOURCE_CRC: u32 = 0x5ED6_F221;
 
+/// The other builds' (USA, Canada, Japan, Europe, France, Germany): the same RAM, so the same
+/// decoder.
+pub const OTHER_CRCS: [u32; 6] = [
+    0xD779_4AFC,
+    0x3708_8EFF,
+    0xE4A7_D436,
+    0x2C08_8DC5,
+    0xB2EF_7F4B,
+    0x127D_76F4,
+];
+
 const CAMERA_X: u16 = 0x00DD;
 const CAMERA_X_HIGH: u16 = 0x00DE;
 const CAMERA_Y: u16 = 0x00E0;

@@ -130,6 +130,18 @@ pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
 /// Name of the Kirby's Adventure (USA) (Rev 1) pack: the widescreen's "No slowdown" (the margins
 /// are the margin decoder's).
 pub const KIRBY_USA_REV1: &str = "Kirby's Adventure (USA) (Rev 1) widescreen";
+/// Name of the Kirby's Adventure (USA) widescreen patch.
+pub const KIRBY_USA: &str = "Kirby's Adventure (USA) widescreen";
+/// Name of the Kirby's Adventure (Canada) widescreen patch.
+pub const KIRBY_CANADA: &str = "Kirby's Adventure (Canada) widescreen";
+/// Name of the Hoshi no Kirby - Yume no Izumi no Monogatari (Japan) widescreen patch.
+pub const KIRBY_JAPAN: &str = "Hoshi no Kirby - Yume no Izumi no Monogatari (Japan) widescreen";
+/// Name of the Kirby's Adventure (Europe) widescreen patch.
+pub const KIRBY_EUROPE: &str = "Kirby's Adventure (Europe) widescreen";
+/// Name of the Kirby's Adventure (Europe) widescreen patch.
+pub const KIRBY_EUROPE_NTSC: &str = "Kirby's Adventure (Europe) (NTSC) widescreen";
+/// Name of the Kirby's Adventure (Germany) widescreen patch.
+pub const KIRBY_GERMANY: &str = "Kirby's Adventure (Germany) widescreen";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -218,7 +230,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 58] = [
+pub const PATCHES: [BuiltinPatch; 64] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1461,6 +1473,121 @@ pub const PATCHES: [BuiltinPatch; 58] = [
         boot_zone: true,
         zone_data: false,
         // The game's wait ($C067): LDA $39 / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_USA,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (USA)",
+        source_crc: 0xD779_4AFC,
+        // The first USA build (PRG0): its fixed bank as the Rev 1's, banks of the aids moved. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-usa.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_CANADA,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Canada)",
+        source_crc: 0x3708_8EFF,
+        // The Canadian build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-canada.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_JAPAN,
+        game: "Kirby's Adventure",
+        rom_name: "Hoshi no Kirby - Yume no Izumi no Monogatari (Japan)",
+        source_crc: 0xE4A7_D436,
+        // The Japanese build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-japan.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_EUROPE,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Europe)",
+        source_crc: 0x2C08_8DC5,
+        // The European build (PAL), which the French one takes by its signatures (the same code). The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-europe.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_EUROPE_NTSC,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Europe)",
+        source_crc: 0x2C08_8DC5,
+        // The European build's CRC, its PAL entry above taking it first: this one is for the ROMs of the
+        // European code whose header says NTSC, taken by their signatures (`build_pack.py --ntsc`). The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-europe-ntsc.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_GERMANY,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Germany)",
+        source_crc: 0x127D_76F4,
+        // The German build (PAL): one of Kirby's checklists apart from the European build's. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-germany.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
         idle_loop: Some((0xC070, 0xC072)),
     },
     BuiltinPatch {

@@ -312,6 +312,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman6::SOURCE_CRC | megaman6::SOURCE_CRC_JAPAN => Some(&megaman6::MegaMan6),
         metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
         kirby::SOURCE_CRC => Some(&kirby::Kirby),
+        crc if kirby::OTHER_CRCS.contains(&crc) => Some(&kirby::Kirby),
         _ => None,
     }
 }
@@ -342,7 +343,13 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
             Some(&ng3::NinjaGaiden3)
         }
         crate::builtin_patches::SMB3_USA => Some(&smb3::USA),
-        crate::builtin_patches::KIRBY_USA_REV1 => Some(&kirby::Kirby),
+        crate::builtin_patches::KIRBY_USA_REV1
+        | crate::builtin_patches::KIRBY_USA
+        | crate::builtin_patches::KIRBY_CANADA
+        | crate::builtin_patches::KIRBY_JAPAN
+        | crate::builtin_patches::KIRBY_EUROPE
+        | crate::builtin_patches::KIRBY_EUROPE_NTSC
+        | crate::builtin_patches::KIRBY_GERMANY => Some(&kirby::Kirby),
         crate::builtin_patches::SMB3_JAPAN | crate::builtin_patches::SMB3_JAPAN_REV1 => {
             Some(&smb3::JAPAN)
         }

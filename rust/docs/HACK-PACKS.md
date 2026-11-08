@@ -297,7 +297,14 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   pack's code while the widescreen runs or an aid is on (`NesCore::boot_pack_zone`). Metroid too (`docs/hacks/metroid/WIDESCREEN-HACK.md`): its
   code from the window to the zone fantôme, its one table made a test, groups (core, enemies,
   doors, previews, its two aids) with checks; the USA pack and the European one, the same code
-  for PAL; 111 of a pool of 116 ROMs take a whole pack, 2 all but the doors. A "dirty" iNES header (bytes 12 to 15 not
+  for PAL; 111 of a pool of 116 ROMs take a whole pack, 2 all but the doors. Kirby's Adventure
+  too (`kirbywide`, `tools/build_pack.py`): its code in the zone fantôme from the start; every
+  place it hooks and every routine of the game its code calls found in each build's own ROM by a
+  signature (the Rev 1's bytes, the build's addresses left out), each required once, and the
+  level select's list made from that build's door lists; a pack per build: USA Rev 1 and the
+  first USA build (PRG0), Canada and Japan (their fixed bank's code a few bytes further), Europe
+  (PAL, which France takes, with its NTSC twin) and Germany (one checklist of Kirby's apart); 37
+  of its 41 ROMs take a whole pack, 1 all but the invincibility. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its
