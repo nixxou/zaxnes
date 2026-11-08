@@ -7330,9 +7330,16 @@ fn req_core_102_mapper_12_decodes_4132_under_e100_and_acts_at_once() {
 /// `.... ...A`, under the same `$E100` mask as the write side.
 ///
 /// The page does not say which value is Chinese — "the GAL16V8 has the value hard-wired (to
-/// Chinese text in all known copies)" — so the figure is **Q-164**'s choice. What the test pins is
-/// the shape the page does give: the board answers inside the mask and nothing outside it, so an
-/// address the mask excludes is open bus and not a zero the board drove.
+/// Chinese text in all known copies)" — so the figure is a choice. **Q-164 §3** made it zero;
+/// `docs/review/Q-XCHECK.md` §CHANGE 6 overturned that and MF-FIX made it **`$01`**, because
+/// FCEUX initialises its read register to 1 with the comment "chinese is default"
+/// (`mmc3.cpp:394`) and Nestopia UE answers a hard-coded `0x01` (`NstBoardRexSoftDb5z.cpp:83`).
+/// puNES makes it a user dip switch and Mesen 2 has no read side, so two projects name the value
+/// and none contradicts it; under `$00` the game selects **English**.
+///
+/// The second half of the test is the shape the page does give, and this fix does not touch it:
+/// the board answers inside the `$E100` mask and nothing outside it, so an address the mask
+/// excludes is open bus and not a byte the board drove.
 #[cfg(feature = "board-huang1")]
 #[test]
 fn req_core_102_mapper_12_answers_a_read_of_4132_with_the_language_bit() {
@@ -7340,9 +7347,9 @@ fn req_core_102_mapper_12_answers_a_read_of_4132_with_the_language_bit() {
     let cartridge = core.cartridge().unwrap();
     for address in [0x4132u16, 0x4100, 0x41FF, 0x4300, 0x5100, 0x5FFF] {
         assert_eq!(
-            Some(0x00),
+            Some(0x01),
             cartridge.try_cpu_peek(address),
-            "{address:#06X} is the language bit"
+            "{address:#06X} is the language bit, and it is 1 -- Chinese (CHANGE 6)"
         );
     }
 

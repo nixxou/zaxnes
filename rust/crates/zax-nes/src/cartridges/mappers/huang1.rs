@@ -113,11 +113,29 @@ impl Huang1 {
     /// sign of either. Either such a solder pad is hidden underneath the GAL16V8, or the GAL16V8
     /// has the value hard-wired (to Chinese text in all known copies)."
     ///
-    /// The page does **not** say which value is Chinese, so the figure is a choice and **Q-164**
-    /// records it: zero, which is what the one dump of the one game that reads it is reported to
-    /// show. Bits 7-1 are open bus on the hardware and zero here, which is this build's answer for
-    /// every such read (the Sachen TCA-01's `[xxii iiii]` is the precedent).
-    const LANGUAGE_BIT: u8 = 0x00;
+    /// The page does **not** say which value is Chinese, so the figure is a choice. **Q-164 §3**
+    /// recorded it provisionally as zero; the cross-check overturned that and **MF-FIX set it to
+    /// `$01`** (`docs/review/Q-XCHECK.md` §CHANGE 6):
+    ///
+    /// * **FCEUX** initialises its read register to **1** with the comment *"chinese is default"*
+    ///   (`third_party/fceux/src/boards/mmc3.cpp:394`) — the only source anywhere that labels the
+    ///   value;
+    /// * **Nestopia UE** answers a hard-coded **`0x01`**
+    ///   (`third_party/nestopia/source/core/board/NstBoardRexSoftDb5z.cpp:83`);
+    /// * **puNES** answers a user dip switch (`mapper_012.c:75`), so it takes no position;
+    /// * **Mesen 2** does not implement the read at all.
+    ///
+    /// Two independent projects, one of them naming the language, against a constant this build
+    /// had picked for uniformity with its other narrow registers. Under `$00` *Dragon Ball Z 5*
+    /// selects **English** on a board the page says is hard-wired to Chinese in every known copy.
+    ///
+    /// Bits 7-1 are open bus on the hardware and zero here, which is this build's answer for every
+    /// such read. **The shape to adopt if a host surface for per-cartridge configuration ever
+    /// exists is puNES's**: the page's "Either such a solder pad is hidden underneath the GAL16V8,
+    /// or the GAL16V8 has the value hard-wired" makes the jumper a property of the cartridge, not
+    /// of the mapper — see the solder-pad note under Q-166 §2.
+    // Q-164
+    const LANGUAGE_BIT: u8 = 0x01;
 
     pub(crate) fn new(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let mut board = Self {

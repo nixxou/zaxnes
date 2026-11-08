@@ -19,7 +19,7 @@ separate lot).
 - [x] 1/10 — the progress note and the base commit
 - [x] 2/10 — CHANGE 1: mapper 123's `$5800` bank field takes its bit 1 from register bit 3
 - [x] 3/10 — CHANGE 2: mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF`
-- [ ] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
+- [x] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
 - [ ] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
 - [ ] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
 - [ ] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
@@ -141,3 +141,37 @@ Checks: fmt; clippy `-D warnings` on `zax-nes --all-targets` in default, `--no-d
 and `--no-default-features --features board-mmc3-chrram`; `cargo test --release -p zax-nes` green
 (387 in `mapper_tests`), and 109 green in `mapper_tests` with the new feature off. A row for the
 feature is in `docs/review/BOARD-FEATURES.md` with its figures pointing at step 9.
+
+### 4/10 — CHANGE 6, mapper 12's language bit
+
+`Huang1::LANGUAGE_BIT` (`rust/crates/zax-nes/src/cartridges/mappers/huang1.rs`): `$00` → `$01`.
+One constant. Bits 7-1 stay zero; only bit 0 is the jumper.
+
+Why: nesdev ("INES Mapper 012") says the GAL16V8 has the value hard-wired "to Chinese text in all
+known copies" and never says *which* value that is, so the figure was always a choice — Q-164 §3
+made it zero for uniformity with this build's other narrow registers. The cross-check settled it the
+other way: **FCEUX initialises its read register to 1 with the comment "chinese is default"**
+(`third_party/fceux/src/boards/mmc3.cpp:394`), the only source anywhere that labels the value, and
+**Nestopia UE answers a hard-coded `0x01`**
+(`third_party/nestopia/source/core/board/NstBoardRexSoftDb5z.cpp:83`). puNES answers a user dip
+switch (`mapper_012.c:75`), so it takes no position, and Mesen 2 has no read side at all. Two
+independent projects for `$01`, none against.
+
+Titles affected: *Dragon Ball Z 5* — under `$00` the game selected **English** text where every
+known cartridge shows Chinese. Nothing else on the number reads `$4132`.
+
+Risk: none. The constant is read only by mapper 12's `try_read_prg` arm; mapper 14's supervisor
+register is write-only, so no other number reaches `Huang1`'s read side. No save-state byte (it is
+a `const`, not state), no dispatch, no hot path.
+
+**Tests**: `req_core_102_mapper_12_answers_a_read_of_4132_with_the_language_bit` asserted
+`Some(0x00)` at the six in-mask addresses and now asserts `Some(0x01)`. Its second half — that the
+board drives nothing outside the `$E100` mask, so an excluded address is open bus and not a byte the
+board drove — is unchanged, which is the half the fix must not disturb.
+
+The doc comment on the constant now records all four readings and that puNES's user-settable shape
+is the one to adopt if a host surface for per-cartridge configuration ever exists (the solder-pad
+note under Q-166 §2), since the page makes the jumper a property of the cartridge.
+
+Checks: fmt; clippy `-D warnings` on `zax-nes --all-targets`; `cargo test --release -p zax-nes`
+green.
