@@ -552,7 +552,7 @@ impl NesBus {
             self.ppu.write_oam_dma(value);
         }
 
-        self.ppu.wide_mut().latch_sprites();
+        self.ppu.wide_mut().latch_sprites(page);
     }
 
     /// A read of the widescreen extension's PRG window: the byte of PRG-ROM it shows there.
