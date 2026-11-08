@@ -527,8 +527,12 @@ impl Mapper for IrqBoard {
     /// of this lot re-measures it rather than taking that on trust.
     /// **Mapper 12 is the fourth board to need it** (MF-UNL-8 step 1): its GAL answers a read of
     /// `$4132` with a language bit, and `Mapper::try_read_prg`'s default answers `None` there.
+    /// **Mapper 208 is the fifth** (MF-UNL-11 step 2): its four protection registers answer a read
+    /// of `$5800-$5FFF`, which is what the game's own check reads. The `board-208`-alone
+    /// configuration of step 5 is what caught that this list is not implied by the variant.
     #[cfg(any(
         feature = "board-mmc3-scramble",
+        feature = "board-208",
         feature = "board-268",
         feature = "board-cony",
         feature = "board-huang1",

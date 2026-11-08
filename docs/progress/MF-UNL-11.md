@@ -227,8 +227,8 @@ bullets asks for something no page states. The ticket also holds five things the
 - [x] **3/8** `board-219`: the board, the extended mode and its tests.
 - [x] **4/8** §7.1's second common thing: a save-state round-trip per board with its own
       registers dirtied, and a reset per board.
-- [ ] **5/8** the four sweeps over `SUPPORTED_MAPPERS`, `cargo fmt --check` and clippy `-D warnings` in the six configurations: default,
-      `--no-default-features`, `--features parked-boards`, and each of the three features alone.
+- [x] **5/8** §7.1's first and third common things: the four sweeps, `cargo fmt --check` and
+      clippy `-D warnings` in the six configurations.
 - [ ] **6/8** the callgrind campaign against `01850f36`, the feature decision per board and the
       three `BOARD-FEATURES.md` rows.
 - [ ] **7/8** golden-core byte-identical over the 98 originals, and the full
@@ -455,3 +455,49 @@ helper's `cfg` list grows this lot's three features.
 clippy `-D warnings` clean.
 
 [PROGRESS] MF-UNL-11 step 4/8 done: the round trips and the resets
+
+## Step 5 — the six configurations
+
+None of the three features implies another, so the matrix is the three alone plus the three
+umbrellas. `cargo fmt --check` is clean over the whole workspace.
+
+| configuration | clippy `-D warnings` on `zax-nes --all-targets` | `--test mapper_tests` |
+| --- | --- | ---: |
+| default | clean | **375 passed, 0 failed** |
+| `--no-default-features` | clean | **103 passed, 0 failed** |
+| `--features parked-boards` | clean | **375 passed, 0 failed** |
+| `--no-default-features --features board-215` | clean | **112 passed, 0 failed** |
+| `--no-default-features --features board-208` | clean | **111 passed, 0 failed** |
+| `--no-default-features --features board-219` | clean | **110 passed, 0 failed** |
+
+The three single-feature counts against the 103 of the empty build are **9, 8 and 7** — this
+lot's own tests, every one of them running with its board's feature as the **only** board feature,
+which is what the owner's rule means by reachable behind its feature. 375 − 350 at the base commit
+is the lot's 25 tests: 8 + 7 + 6 from the three pages, three round trips and one reset.
+
+§7.1's first common thing, the four sweeps over `SUPPORTED_MAPPERS`, in each of the six:
+
+| sweep | default | none | `parked-boards` | 215 | 208 | 219 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | ok | ok | ok | ok | ok | ok |
+| `req_core_102_any_other_mapper_is_refused` | ok | ok | ok | ok | ok | ok |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | ok | ok | ok | ok | ok | ok |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | ok | ok | ok | ok | ok | ok |
+
+The `board_memory_sizes` row is asserted from the boards' own tests, as MF-UNL-10 step 3 did:
+`req_core_095_mapper_208_gives_submapper_0_no_prg_ram_and_leaves_submapper_1_the_headers` from
+both sides of 208's arm, and the two `…_leaves_6000_7fff_to_the_header_…` tests for the two
+numbers that deliberately have none.
+
+### What the `board-208`-alone configuration caught
+
+`IrqBoard::try_read_prg` is a **forwarded** method behind its own `cfg(any(…))` list, not one the
+variant implies: with `board-208` as the only board feature, that list was off and the protection
+read of `$5800-$5FFF` fell through to the trait default, so three of the lot's tests failed with
+open bus where a protection register should have been. `board-208` is now the fifth entry in the
+list. In `default` the change is a no-op — `board-mmc3-scramble` already turns the method on — so
+nothing but that one configuration could have found it, which is the whole point of running it.
+
+`cargo test --release -p zax-nes -p zax-harness`: every suite passes.
+
+[PROGRESS] MF-UNL-11 step 5/8 done: the six configurations
