@@ -71,7 +71,7 @@ with the first and not the second has a module nothing calls. The six below are 
       `BOARD-FEATURES.md` row.
 - [x] **5/6** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
-- [ ] **6/6** the census note, the journal, the close.
+- [x] **6/6** the census note, the journal, the close.
 
 [PROGRESS] MF-UNL-10 step 0/6 done: the plan
 
@@ -405,3 +405,69 @@ function out differently" from "a board's behaviour moved".
 ran rather than passing vacuously, which is the check the brief asks for in those words.
 
 [PROGRESS] MF-UNL-10 step 5/6 done: golden-core and the full run
+
+## Step 6 — the final pass, the census note and the journal
+
+### The measured binary is the one the commit ships, shown and not assumed
+
+| | `mfunl10-1-lot` (measured, `69672291`) | `mfunl10-3-ship` (`229334a2`) |
+| --- | --- | --- |
+| whole binary | `d4d92c446abb1cafd5194ccbf35d3b1e` | **the same** |
+| `.text` | `2abfe3367f9200df0b16ffdedd49d8c9` | **the same** |
+| `.rodata` | `866c8cb7221651ba0a952a01f8c0a35b` | **the same** |
+| golden-core over the 98 originals | `f79e7df842c3ee43e7d9b67861a927b5` | **the same**, and `cmp`-identical to the base's |
+
+The **whole** md5 matches, not only the two sections — MF-UNL-9 had to fall back on sections
+because its last step added doc comments to `.rs` files and `build-clean.sh` keeps symbols, so the
+debug info moved with the line numbers. Here step 5's change is entirely inside
+`#[cfg(test)] mod tests`, which a release build does not compile at all, and the binary says so.
+Three golden-core runs — base, measured, shipped — one digest.
+
+### The lot against the brief
+
+| the brief asks | what was done |
+| --- | --- |
+| `board-164` with its **full** register table | the five ports of the page under its own `$FF00` mask, both PRG modes, both semi-fixed-bank shapes, the `$5100` outer bits, mirroring behind the mode bit |
+| the **93C66 512-byte serial EEPROM over Microwire**, a third EEPROM shape | `Eeprom93C66`: all seven instructions of DS20001795F table 1-4 in the **x8** organisation, the start bit, nine address bits, the dummy zero, the sequential read, the 93C commit edge, the EWEN/EWDS latch |
+| **share the existing persistence path** | the bytes are in `prg_ram` behind `registry::battery_offset`, `Eeprom24C0X`'s own layout; `Cartridge::battery_ram` is what a host reads and nothing of it changed |
+| **do not change the existing EEPROM boards' behaviour or save format** | `eeprom24c0x.rs` and `bandai_fcg.rs` are **untouched**; `board-eeprom`'s tests pass unchanged in all four configurations |
+| its `registry.rs` arm, `SUPPORTED_MAPPERS` entry, `board_memory_sizes` row | all three, plus a `battery_offset` arm (that function becomes a `match`, mapper 1's SOROM case unchanged) and both PPU-address-bus lists |
+| rows in `BOARD-FEATURES.md` | one row, and the "worst figure in `default`" paragraph updated to this lot's +0.009 % |
+| the tests the census lists from each page | nine tests, the census's four and five more from the register table (step 2's table) |
+| a Q ticket per §7.2 claim the page contradicts | **Q-170**, three of them, plus the four readings the page leaves open |
+| the emulation of an existing mapper | **unchanged, and measured**: golden-core byte-identical over 98 originals; level-2 `ppu`/`apu`/`draw_list` identical to the instruction on five games |
+| the save-state format of existing boards | unchanged: the board's block is appended inside its own `Board` arm, `NesCore::STATE_VERSION` does not move, and no other board writes a byte more |
+| +0.02 % per ROM on **each ROM's total** | PR-1 worst `m4` **+0.009 %**; level-2 worst `total` `smb1` **+0.008 %**. Nothing over the tolerance, so the rule's same-behaviour-pair clause has no subject — the floor was measured anyway |
+| a board over tolerance is parked | **no subject**: `board-164` is inside and stays in `default` |
+
+### Summary
+
+| | |
+| --- | --- |
+| numbers | **1** (164) |
+| Cargo features added | **1**, `board-164` (implies `board-decode-boards`), **in `default`** |
+| new modules | `mappers/eeprom93c66.rs` (`Eeprom93C66`), `mappers/pec9588.rs` (`Pec9588`) |
+| `Board` discriminants added | **0** — one `DecodeBoard` variant |
+| forwards whose `cfg` grew | `prg_ram_window` (2nd board), `try_read_prg` (5th), `on_ppu_address_bus` (4th) |
+| savestate format | **unchanged**; the board's own block only |
+| save file | the EEPROM's **512 bytes**, through `Cartridge::battery_ram` |
+| tests added | **9**, plus one row in the `mf_3b` invariant list and one test-helper `cfg` |
+| tickets | **Q-170** |
+| PR-1 | worst ROM `m4` **+0.009 %**, set total +0.001 %, floor +0.000 % |
+| level 2 | `core` +0 to +0.001 %, every `total` inside, `ppu`/`apu`/`draw_list` +0 on all five |
+| golden-core | **byte-identical**, `f79e7df842c3ee43e7d9b67861a927b5` |
+| suites | 1 127 / 0 / 0 with both ROM roots; four configurations green on `--lib` and `--test mapper_tests` |
+
+### What is left, and to whom
+
+* **R0 must source the six games.** §5 of the census is the condition: no file in
+  `assets-free/test-roms` uses any of the 199 numbers, so the nine tests are written from the
+  register table and the datasheet and nothing here has ever run a mapper-164 ROM.
+* **Q-170 §2's four readings** stay provisional until one of those games is read back — the DAT
+  line's undriven level, the volatile RAM's size, the unpopulated second chip and the write-path
+  question.
+* **§7.2 of `docs/review/UNL-census.md` should be corrected** on the three claims Q-170 §1 records.
+  The note added to its MF-UNL-10 section carries them so the next reader is not misled; the plan
+  is a review document and not a source of truth, which is why the page was followed.
+
+[PROGRESS] MF-UNL-10 step 6/6 done: the lot is closed

@@ -971,7 +971,7 @@ register table**, which is why §6 graded documentation, and the "titles R0 shou
 | **MF-UNL-7** — the Sachen 8259, the 206 clones and two homebrew boards | 6 | 9 | ~7 h | **10** | 1.4 |
 | **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board — **shipped** | 3 | 5 | ~8.5 h | **10** | 1.2 |
 | **MF-UNL-9** — Cheapocabra (GTROM) — **shipped** | 1 | 1 | ~6 h | **7** | 1.2 |
-| **MF-UNL-10** — Dōngdá PEC-9588 | 1 | 1 | ~7 h | **6** | 0.9 |
+| **MF-UNL-10** — Dōngdá PEC-9588 — **shipped** | 1 | 1 | ~7 h | **6** | 0.9 |
 | **MF-UNL-11** — the Kǎshèng protection MMC3s | 3 | 3 | ~7 h | **6** | 0.9 |
 | **MF-UNL-12** — the last three singletons | 3 | 3 | ~7 h | **4** | 0.6 |
 | **total** | **37** | **60** | **~89 h** | **~171** | |
@@ -1689,6 +1689,65 @@ reaches the save file; the 1 bpp mode changes which CHR bits a pattern fetch con
 from $5300.
 
 **Titles R0 should run**: the six above.
+
+> **Note added by lot MF-UNL-10 (2026-11-08), which shipped this section.**
+>
+> **Three of this section's own claims are wrong against nesdev's "INES Mapper 164", and the page
+> wins** — MF-UNL-2's rule, with **Q-170** as the ticket:
+>
+> 1. step 1's "93C66 is 512 bytes at **16-bit words**" against the page's "The EEPROM's *ORG* pin
+>    is tied to **GND**, selecting a word size of 8 bits". 512 bytes either way, but the
+>    organisation decides the **address width** — nine bits (x8) against eight (x16) — so every
+>    command is a different length and a game's bit stream would desynchronise under the wrong one.
+> 2. step 1's "Shared with, or shared by, 157/159's X24C01 and 24C02". It cannot be: those are
+>    **two-wire I²C** parts with a START condition on SDA and an acknowledge bit, this is
+>    **three-wire Microwire** with a chip select, a start *bit*, a two-bit opcode and no
+>    acknowledge at all. `Eeprom93C66` is a second type. What the two **do** share is the thing
+>    that matters — the **persistence path**: neither holds its own bytes, both take the slice the
+>    board owns, and that slice is in `prg_ram` behind `registry::battery_offset`. No existing save
+>    format moves.
+> 3. step 1's "in `CartridgeMemory`" for the *device*. The device is a board field, as `EepromPort`
+>    is on `BandaiFcg`; the 512 **bytes** are what goes in `CartridgeMemory`.
+>
+> **The sequencing note is moot and was right to be written.** It says this lot "should follow
+> MF-6c, not precede it" because 157/159's EEPROM would be most of step 1. MF-6c step 3 did ship
+> first — and it bought this lot **nothing of the state machine** (§2 above) and **everything of
+> the persistence**: `battery_offset`, the bytes-in-`prg_ram` layout and `Cartridge::battery_ram`
+> are reused unchanged, and they are the half that would have been argued about.
+>
+> **This board is the first here to put two memories in `prg_ram` at once.** The volatile chip the
+> CPU addresses comes first and the EEPROM behind it, with `battery_offset` pointing at the EEPROM
+> and `Mapper::prg_ram_window` stopping the CPU's window at the volatile chip — which is what the
+> MMC1's SOROM gave that function its second parameter for. The volatile size is **2 KiB mirrored**
+> and not 8 KiB, because the page says "all known carts mount either no or a 2 KiB RAM chip which
+> is then mirrored three times" and no header this build reads can say which (Q-170 §2.3).
+>
+> **The 1 bpp mode cost nothing of its own, and the section over-states it as half an L.** It is
+> `ChrWindowBoard`'s mechanism — "latched on last rise of PPU A13", MF-UNL-5's own sentence — with
+> a **second line** on the same edge, so the number joins both of §4.3's PPU lists for mappers
+> 96/162/163's reason. And unlike those three **no window moves on the latch**: CHR A3 is below the
+> 1 KiB window granularity, so `on_ppu_address_bus` stores two bits and the substitution is a
+> masked `|` in the fetch path. One consequence to record: `Mapper::chr_peek_view` answers `None`
+> while the mode is on, there being no set of window offsets a per-tile latch can be written as.
+>
+> **The one figure this lot carries, and it is not either mechanism's.** PR-1's worst ROM is `m4`
+> **+0.009 %** against the owner's +0.02 %, and the only symbol of this build that moves anywhere
+> in the thirteen is `NesBus::write_internal` — the inlining of the **second** distinct body in
+> `DecodeBoard::prg_ram_window`, which `cpu_read_windows` runs after every CPU write. The
+> `#[inline(never)]` every board of that shape carries was built and measured too and is **twice as
+> expensive** (eleven ROMs instead of four), so it is deliberately absent; `Pec9588::prg_ram_window`
+> carries the table. The same-binary floor is +0.000 % with **no emulation symbol moving at all**,
+> so unlike the five lots before it this one's figure is a real cost rather than instrument spread
+> — and golden-core over the 98 originals is still byte-identical, which is what says the layout
+> moved and no behaviour did.
+>
+> **What is left, and it is §5's condition and not an omission**: no ROM of this number exists in
+> `assets-free/test-roms`, so the nine tests are written from the register table and the
+> datasheet. R0 would have to source the six games; four readings the page leaves open are recorded
+> in Q-170 §2 rather than guessed, the DAT line's undriven level and the write-path question among
+> them.
+>
+> See `docs/progress/MF-UNL-10.md`, `spec/changes/Q-170.md` and `docs/review/BOARD-FEATURES.md`.
 
 ---
 
