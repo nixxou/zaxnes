@@ -72,6 +72,8 @@ use super::SingleLatch;
 use super::VsBoard;
 #[cfg(feature = "board-178")]
 use super::WaixingFs305;
+#[cfg(feature = "board-246")]
+use super::G0151;
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::{JalecoJf13, JalecoJf17};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -207,6 +209,12 @@ pub enum DecodeBoard {
     /// Mapper 164, the 东达 (Dōngdá) PEC-9588 and its 93C66 Microwire EEPROM.
     #[cfg(feature = "board-164")]
     Pec9588(Pec9588),
+    // Appended by MF-UNL-12 step 3, the last board of the last MF-UNL lot: the first of this enum
+    // whose PRG window is **not** cacheable, and the first to need `intercept_cpu_write`.
+    /// iNES mapper 246, the G0151-1 of 封神榜 — eight bank registers, 2 KiB of battery PRG-RAM at
+    /// `$6800-$6FFF`, and PRG A17 forced high on a read of `$FFE4-$FFE7` and three more ranges.
+    #[cfg(feature = "board-246")]
+    G0151(G0151),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -256,6 +264,8 @@ macro_rules! inner {
             DecodeBoard::MagicFloor($b) => $body,
             #[cfg(feature = "board-164")]
             DecodeBoard::Pec9588($b) => $body,
+            #[cfg(feature = "board-246")]
+            DecodeBoard::G0151($b) => $body,
         }
     };
 }
@@ -349,6 +359,46 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.prg_ram_window(memory))
     }
 
+    /// Forwarded for mapper 246 alone (MF-UNL-12 step 3), the one board here whose
+    /// `$E000-$FFFF` window must **not** be cached: its page forces PRG A17 high on a read of
+    /// four small ranges inside it, so `Cartridge::read_rom_window` cannot answer and that window
+    /// is [`super::NO_ROM_WINDOW`].
+    ///
+    /// Asked once per CPU write to the cartridge and not once per read, through the single
+    /// `Board::cpu_read_windows` dispatch lot MF-CART step 4 built for exactly that — which is
+    /// also where its cost is, one more body inlined there. MF-UNL-10 step 2 priced one such body
+    /// at `m4` **+0.009 %**, this table's worst figure in `default`, so step 6 of this lot
+    /// measures it rather than assuming.
+    ///
+    /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
+    /// `Mapper`'s own default — the four offsets of its `BankWindows` — which is what the
+    /// un-forwarded dispatch gave the whole variant.
+    #[cfg(feature = "board-246")]
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        inner!(self, b => b.rom_windows(memory))
+    }
+
+    /// Forwarded for mapper 246 alone (MF-UNL-12 step 3), the one board here with registers
+    /// **inside** `$6000-$7FFF` and a RAM chip behind the same window: `Cartridge::cpu_write`
+    /// routes that range to PRG-RAM whenever the cartridge has any, so without this hook the eight
+    /// bank registers could not be written at all.
+    ///
+    /// A CPU write to the cartridge is "the rarest bus event there is", and
+    /// `G0151::intercept_cpu_write` carries `#[inline(never)]` so that the arm this adds to
+    /// `Board::intercept_cpu_write` is a `callq` and not a body.
+    ///
+    /// **Behaviour-neutral for every other board here**: none of them overrides it, so each
+    /// answers `false` through `Mapper`'s own default exactly as the un-forwarded dispatch did.
+    #[cfg(feature = "board-246")]
+    fn intercept_cpu_write(
+        &mut self,
+        memory: &mut CartridgeMemory,
+        address: u16,
+        value: u8,
+    ) -> bool {
+        inner!(self, b => b.intercept_cpu_write(memory, address, value))
+    }
+
     /// Forwarded for the JV001 family alone (MF-UNL-1 step 1), whose protection register is at
     /// $4100 — below $8000, where `Cartridge::default_cpu_read` falls through to this dispatch.
     ///
@@ -373,10 +423,16 @@ impl Mapper for DecodeBoard {
     /// protection scheme to be a read below $8000.
     /// **And mapper 164 in MF-UNL-10 step 2**, whose Microwire port is read at $5500 under the
     /// same $FF00 mask its four write ports use.
+    /// **And mapper 246 in MF-UNL-12 step 3**, the fifth board of this enum to want the hook and
+    /// the first whose reason is not a protection register below `$8000`: its page forces PRG A17
+    /// high on a read of `$FFE4-$FFE7`, `$FFEC-$FFEF`, `$FFF4-$FFF7` or `$FFFC-$FFFF`, which is a
+    /// bank that depends on the address *within* a window — so that window is
+    /// [`super::NO_ROM_WINDOW`] and every read of `$E000-$FFFF` arrives here.
     #[cfg(any(
         feature = "board-143",
         feature = "board-163",
         feature = "board-164",
+        feature = "board-246",
         feature = "board-jv001",
         feature = "board-sachen-8reg"
     ))]

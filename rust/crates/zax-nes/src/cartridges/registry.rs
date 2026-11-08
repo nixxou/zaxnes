@@ -77,6 +77,8 @@ use super::mappers::Tqrom;
 use super::mappers::VsBoard;
 #[cfg(feature = "board-178")]
 use super::mappers::WaixingFs305;
+#[cfg(feature = "board-246")]
+use super::mappers::G0151;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
@@ -361,6 +363,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     232,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    // The G0151-1 of 封神榜: eight bank registers, battery PRG-RAM at $6800-$6FFF and a forced
+    // PRG A17 on four read ranges (MF-UNL-12 step 3).
+    #[cfg(feature = "board-246")]
+    246,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
     // four-screen mirroring (MF-UNL-12 step 1).
     #[cfg(feature = "board-262")]
@@ -531,6 +537,20 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-208")]
         208 if !(header.is_nes20 && header.submapper == 1) => BoardMemorySizes {
             prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 246"): "CPU $6800-$6FFF: **2 KiB PRG-RAM, battery-banked**", not the
+        // iNES default of 8 KiB -- the same reading, and the same reason, as mapper 99's arm above.
+        // The window is 2 KiB and the chip is 2 KiB, so `Mapper::prg_ram_window`'s own default
+        // mirrors it four times across $6000-$7FFF; `G0151`'s note has that choice and the board's
+        // own register decode, which wins over the mirror (MF-UNL-12 step 3, Q-172).
+        //
+        // "battery-banked", and whether a host persists the bytes is still the dump's own battery
+        // bit: `Cartridge::battery_ram` is what REQ-CORE-095 exposes and it reads
+        // `header.has_battery`, as it does for every board in this function.
+        #[cfg(feature = "board-246")]
+        246 => BoardMemorySizes {
+            prg_ram: Some(G0151::PRG_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // Mapper 292: "There are four extra registers that are filled by writing or reading (!)
@@ -1511,6 +1531,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         292 => Board::IrqBoard(IrqBoard::Mmc3Dragonfighter(Box::new(
             Mmc3Dragonfighter::new(memory, mapper),
         ))),
+        // MF-UNL-12 step 3: the G0151-1, "used only for the Taiwanese game 封神榜". Four 8 KiB PRG
+        // banks at $6000-$6003 and four 2 KiB CHR banks at $6004-$6007 under one mask, 2 KiB of
+        // battery PRG-RAM at $6800-$6FFF, hard-wired mirroring from the header, and PRG A17 forced
+        // high on a read of $FFE4-$FFE7, $FFEC-$FFEF, $FFF4-$FFF7 or $FFFC-$FFFF -- which is why
+        // the $E000-$FFFF window is `NO_ROM_WINDOW`. No IRQ, so `DecodeBoard` and not `IrqBoard`.
+        #[cfg(feature = "board-246")]
+        246 => Board::DecodeBoard(DecodeBoard::G0151(G0151::new(memory))),
         // MF-UNL-11 step 2: the unnamed Gouder board of the Street Fighter IV backport, an
         // MMC3 clone whose PRG-ROM is banked in 32 KiB amounts from a register at $4800/$6800,
         // with a 256-byte protection lookup table behind four registers at $5800-$5FFF.

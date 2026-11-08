@@ -42,6 +42,8 @@ mod eeprom24c0x;
 #[cfg(feature = "board-164")]
 mod eeprom93c66;
 mod fme7;
+#[cfg(feature = "board-246")]
+mod g0151;
 #[cfg(feature = "board-huang1")]
 mod huang1;
 mod irem_h3001;
@@ -175,6 +177,8 @@ pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]
 pub use eeprom93c66::Eeprom93C66;
 pub use fme7::Fme7;
+#[cfg(feature = "board-246")]
+pub use g0151::G0151;
 #[cfg(feature = "board-huang1")]
 pub use huang1::Huang1;
 pub use irem_h3001::IremH3001;

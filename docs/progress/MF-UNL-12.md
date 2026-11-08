@@ -352,3 +352,96 @@ board's save block grows by a byte in any configuration. Recorded as Q-172 §2.
 | `cargo fmt --check` | **clean** |
 | `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | **clean** |
 | `cargo test --release -p zax-nes` | **all green**, 47 suites, 0 failed |
+
+## Step 3 — `board-246`, the G0151-1
+
+`rust/crates/zax-nes/src/cartridges/mappers/g0151.rs`, one [`DecodeBoard`] variant — the board has
+**no counter**, which is that enum's entry condition — holding a `BankWindows` and eight register
+bytes. No `Board` discriminant.
+
+### What the board is
+
+| | the page |
+| --- | --- |
+| PRG | four 8 KiB banks at `$6000-$6003`, `D~[..bb bbbb]`, "PRG A18..A13" |
+| CHR | four 2 KiB banks at `$6004-$6007`, `D~[bbbb bbbb]`, "CHR A18..A11" |
+| mask | `A~[0110 0000 000. .?rr]` — `address & $FFE4 == $6000` / `$6004`, so the register window is `$6000-$601F` |
+| PRG-RAM | "CPU `$6800-$6FFF`: 2 KiB PRG-RAM, **battery-banked**" |
+| mirroring | "hard-wired and set by the iNES header" — no register, and no IRQ at all |
+| power-on | "Register `$6003` is set to `$FF` at power-on **only**" |
+| the read | "When reading from `$FFE4-$FFE7`, `$FFEC-$FFEF`, `$FFF4-$FFF7`, or `$FFFC-$FFFF`, PRG A17 is forced high, as if register `$6003` were OR'd with `$10`" |
+
+**The register mask and the read condition are the same number.** `A~[0110 0000 000. .0rr]` is
+`address & $FFE4 == $6000`; the four read ranges are `address & $FFE4 == $FFE4` — A15-A5 all set
+with A2 set, A4, A3, A1 and A0 free. One constant, `G0151::DECODE_MASK`, serves both, and the test
+walks all 32 addresses of `$FFE0-$FFFF` rather than asserting the four ranges by hand.
+
+### The two new forwards on `DecodeBoard`, and why each is unavoidable
+
+* **the PRG read cache.** The forced A17 depends on the address *within* the `$E000-$FFFF` window,
+  and `Cartridge::read_rom_window` answers a CPU read of `$8000-$FFFF` from a four-entry table
+  before the board is consulted at all. `Mapper::rom_windows`'s own documentation states the rule
+  — a board whose reads must go through the board "must return `NO_ROM_WINDOW` for them" — and
+  `read_rom_window`'s `debug_assert_eq!` against `Mapper::try_read_prg` is what catches a board
+  that does not. So this board answers `NO_ROM_WINDOW` for the **fourth window alone**; the other
+  three keep the fast path, which is three quarters of the game's code.
+
+  This is **the one body of the lot that lands inside `Board`'s CPU-read-window dispatch**, where
+  MF-UNL-10 step 2 measured `m4` **+0.009 %** — this table's worst figure in `default` — for one
+  such body. Step 6 measures it.
+* **`intercept_cpu_write`.** The eight registers and the RAM chip share the `$6000-$7FFF` window
+  that `Cartridge::cpu_write` routes to PRG-RAM, so without the hook no register could be written.
+  `G0151::intercept_cpu_write` is `#[inline(never)]`, so the arm it adds to that dispatch is a
+  `callq`.
+
+`try_read_prg` is a third forward `DecodeBoard` already had — for four protection reads below
+`$8000` — whose `cfg` list this number joins, and it is where the forcing is computed.
+
+### The three things Q-172 records for this number
+
+1. **the register window is `$6000-$601F`, not `$6000-$67FF`.** §7.2's test bullet says the latter,
+   which is Mesen's decode; the page's mask requires A11-A5 all clear. The test is written from the
+   mask: all 32 addresses it names are registers, and `$6400` — which it does not name — is the RAM
+   chip.
+2. **the 2 KiB chip appears four times across `$6000-$7FFF`.** The page gives it one window,
+   `$6800-$6FFF`, which is A11 of the board's own decode; `Mapper::prg_ram_window` is a base and a
+   wrap asked once per CPU write and cannot say "and nowhere else". A short chip mirrored inside
+   the window is mapper 164's row's reading of the same shape, and the register decode wins over
+   it.
+3. **"`$FF` at power-on **only**" means a reset leaves `$6003` alone.** The word "only" is the
+   whole of it: the board has no reset line to that register, so the bank the vectors are fetched
+   through is whatever the game last wrote. The other seven go back to zero.
+
+And the page's *See also* — the forum thread *"Why does Fong Shen Bang only work in
+Famiclones?"* — is recorded in the board's own note as **not a statement about the board**:
+whether the game runs is console timing, this build targets NTSC/PAL/Dendy, and the board has no
+timing of its own to condition on.
+
+### Tests (4 new, all from the page)
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_246_banks_four_prg_windows_and_four_chr_pairs` | the eight registers, each field's own width (six bits of PRG against eight of CHR), and that no register moves the hard-wired mirroring |
+| `req_core_102_mapper_246_forces_prg_a17_on_the_eight_addresses_of_its_own_mask` | all 32 addresses of `$FFE0-$FFFF`, each checked against `address & $FFE4 == $FFE4`; that the forcing is an **OR of one bit** (a register that already has it reads the same bank everywhere); and that it is a different *bank* and not merely a different number |
+| `req_core_095_mapper_246_keeps_its_battery_ram_at_6800_and_its_registers_at_6000` | a 2 KiB battery slice; a round trip at `$6800`, `$6C00` and `$6FFF`; all 32 register addresses moving a bank and touching no RAM; and `$6400`/`$6C00` being one byte of the mirrored chip |
+| `amd_061_mapper_246_keeps_its_last_prg_bank_across_a_reset` | "power-on **only**", twice over, with the four CHR registers going back to zero beside it |
+
+### The check at this step
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | **clean** |
+| `cargo test --release -p zax-nes` | **all green** |
+| `cargo test -p zax-nes --test mapper_tests` (**dev** profile, `debug_assert` live) | **388 passed / 0 failed** |
+
+The dev-profile run is in the table on purpose: `Cartridge::read_rom_window`'s
+`debug_assert_eq!(Some(value), self.board.try_read_prg(…))` is the assertion that a board which
+changes its bank per address inside a window must not be in the cache, and it is compiled out of
+the release profile the other three rows use.
+
+**And one failure worth recording, because it is a trap for the next lot.**
+`req_arch_002_the_crate_has_no_platform_dependency` greps `zax-nes/Cargo.toml` for the literal
+`windows` among its forbidden crate names — so a feature comment that writes `rom_windows` or
+"the other three windows" fails a test about platform dependencies. `BankWindows` is safe
+(capital W). This step's first draft tripped it; the comment is phrased around it.

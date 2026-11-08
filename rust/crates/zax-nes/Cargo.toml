@@ -73,6 +73,7 @@ default = [
     "board-219",
     "board-262",
     "board-292",
+    "board-246",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -272,6 +273,32 @@ board-262 = []
 # It is also the first board of `IrqBoard` to need `Mapper::cpu_read_override`, forwarded
 # `#[inline(never)]` there for the reason `try_read_prg` carries it.
 board-292 = []
+
+# iNES mapper 246, the **G0151-1** board of 封神榜 (MF-UNL-12 step 3): four 8 KiB PRG banks at
+# $6000-$6003 and four 2 KiB CHR banks at $6004-$6007, both under the mask
+# `A~[0110 0000 000. .?rr]` ($FFE4), 2 KiB of battery PRG-RAM at the unusual $6800-$6FFF, hard-wired
+# mirroring from the header, and **PRG A17 forced high on a read of $FFE4-$FFE7, $FFEC-$FFEF,
+# $FFF4-$FFF7 or $FFFC-$FFFF** -- which is the register mask again, `address & $FFE4 == $FFE4`. One
+# original title, and the page says so: "used only for the Taiwanese game 封神榜".
+#
+# One `DecodeBoard` variant -- the board has no counter, which is that enum's entry condition -- and
+# **two new forwards on it**, both for this number alone:
+#
+# * the PRG read cache's four-entry answer, because the forced A17 depends on the address *within*
+#   the $E000-$FFFF window: that window must be `NO_ROM_WINDOW`, so `Cartridge::read_rom_window`
+#   cannot serve it and every read of it reaches the board. The other three keep the fast path.
+#   This is the one body of the lot that lands inside the single `Board` dispatch lot MF-CART
+#   step 4 built for the CPU read path, where MF-UNL-10 step 2 measured +0.009 % on `m4` for one
+#   such body.
+# * `intercept_cpu_write`, because the eight registers and the RAM chip share the $6000-$7FFF window
+#   `Cartridge::cpu_write` routes to PRG-RAM.
+#
+# **Q-172** records three things: the register window the page's mask actually gives ($6000-$601F,
+# not §7.2's "$6000-$67FF", which is Mesen's decode), the three mirrors of a 2 KiB chip across
+# $6000-$7FFF that `Mapper::prg_ram_window` cannot refuse, and "Register $6003 is set to $FF at
+# power-on **only**" -- so a reset leaves that one register alone, which is what AMD-061's sweep
+# would otherwise have contradicted.
+board-246 = ["board-decode-boards"]
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

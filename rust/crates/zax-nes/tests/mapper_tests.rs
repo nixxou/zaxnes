@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 112] = [
+    let additions: [(i32, bool); 113] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -364,6 +364,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (219, cfg!(feature = "board-219")),
         (232, small),
         (243, sachen),
+        (246, cfg!(feature = "board-246")),
         (262, cfg!(feature = "board-262")),
         (263, cfg!(feature = "board-263")),
         (264, cony),
@@ -6756,6 +6757,7 @@ fn somari_mode(core: &mut NesCore, value: u8) {
     feature = "board-208",
     feature = "board-215",
     feature = "board-219",
+    feature = "board-246",
     feature = "board-262",
     feature = "board-292"
 ))]
@@ -16093,4 +16095,236 @@ fn req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window() {
             "{address:#06X}: the board decodes it and drives nothing"
         );
     }
+}
+
+// -------------------- MF-UNL-12 step 3: mapper 246, the G0151-1
+
+/// nesdev ("INES Mapper 246"), the two register diagrams:
+///
+/// ```text
+/// PRG-ROM bank select ($6000-$6003), write    CHR-ROM bank select ($6004-$6007), write
+///  A~[0110 0000 000. .0rr] D~[..bb bbbb]       A~[0110 0000 000. .1rr] D~[bbbb bbbb]
+///                      ||       PRG A18..A13                       ||     CHR A18..A11
+/// ```
+///
+/// §7.2's first test bullet, "the eight bank registers", with each field's own width shown: the
+/// PRG field is **six** bits and the CHR field **eight**, so a PRG register ignores what a CHR
+/// register at the same datum would use.
+#[cfg(feature = "board-246")]
+#[test]
+fn req_core_102_mapper_246_banks_four_prg_windows_and_four_chr_pairs() {
+    let mut core = MapperRom::new(246).prg(64).chr(512).load();
+    assert_eq!(
+        [0, 0, 0, 0x3F],
+        core.prg_windows(),
+        "power-on: three zeroed registers and $6003 at $FF, masked to bank $3F"
+    );
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
+
+    for (register, bank) in [(0u16, 0x11u8), (1, 0x22), (2, 0x13), (3, 0x24)] {
+        core.write_memory(0x6000 + register, bank);
+    }
+    assert_eq!([0x11, 0x22, 0x13, 0x24], core.prg_windows());
+
+    // "PRG A18..A13" is six bits: bits 6 and 7 of the datum reach nothing.
+    core.write_memory(0x6000, 0xC0 | 0x11);
+    assert_eq!(
+        [0x11, 0x22, 0x13, 0x24],
+        core.prg_windows(),
+        "the PRG field is six bits wide"
+    );
+
+    // "CHR A18..A11" is eight: the 2 KiB bank numbers go to $FF, which on a 512 KiB CHR-ROM is
+    // the last pair.
+    for (register, bank) in [(4u16, 0x02u8), (5, 0x11), (6, 0x40), (7, 0xFF)] {
+        core.write_memory(0x6000 + register, bank);
+    }
+    assert_eq!(
+        [
+            0x02 * 2 * 1024,
+            (0x02 * 2 + 1) * 1024,
+            0x11 * 2 * 1024,
+            (0x11 * 2 + 1) * 1024,
+            0x40 * 2 * 1024,
+            (0x40 * 2 + 1) * 1024,
+            0xFF * 2 * 1024,
+            (0xFF * 2 + 1) * 1024
+        ],
+        chr_offsets(&core),
+        "four 2 KiB CHR windows, eight bits each"
+    );
+
+    // "Nametable mirroring is hard-wired and set by the iNES header": no register moves it.
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    for register in 0..8u16 {
+        core.write_memory(0x6000 + register, 0xFF);
+        assert_eq!(Nm::Horizontal, core.mirroring(), "register {register}");
+    }
+}
+
+/// **The address mask and the forced-read condition are the same number**, which this test is
+/// written to show rather than to assume.
+///
+/// The diagrams give `A~[0110 0000 000. .0rr]` — `address & $FFE4 == $6000`, A4, A3 and the two
+/// `r` bits free — and the page's first bullet gives "When reading from CPU address
+/// `$FFE4-$FFE7`, `$FFEC-$FFEF`, `$FFF4-$FFF7`, or `$FFFC-$FFFF`, PRG A17 is forced high, as if
+/// register `$6003` were OR'd with `$10`". Those four ranges are exactly
+/// `address & $FFE4 == $FFE4`: A15-A5 all set with A2 set, and A4, A3, A1 and A0 free.
+///
+/// So the loop walks all 32 addresses of `$FFE0-$FFFF` and checks each one against the mask —
+/// sixteen forced, sixteen not — which is §7.2's third test bullet done exhaustively. `$10` in the
+/// six-bit PRG field is bit 4, i.e. **PRG A17**.
+#[cfg(feature = "board-246")]
+#[test]
+fn req_core_102_mapper_246_forces_prg_a17_on_the_eight_addresses_of_its_own_mask() {
+    // 512 KiB of PRG so that every one of the six bank bits is inside the image, and bank $3F
+    // filled with $FF so the forced and unforced banks read differently.
+    let mut core = MapperRom::new(246)
+        .prg(64)
+        .chr(32)
+        .prg_bank_all_ones(0x2F)
+        .load();
+    // $6003 = $0F: bank $0F unforced, bank $1F forced. Neither is the power-on $3F.
+    core.write_memory(0x6003, 0x0F);
+    assert_eq!(0x0F, core.read_memory(0xE000), "the window's own bank");
+    assert_eq!(
+        0x0F,
+        core.read_memory(0xFFE0),
+        "and $FFE0, which is not forced"
+    );
+
+    for low in 0xE0..=0xFFu16 {
+        let address = 0xFF00 | low;
+        let forced = address & 0xFFE4 == 0xFFE4;
+        assert_eq!(
+            if forced { 0x1F } else { 0x0F },
+            core.read_memory(address),
+            "{address:#06X}: forced = {forced}"
+        );
+    }
+
+    // The forcing is an OR of one bit and not an addend: with the bit already set in the register
+    // the forced ranges read the same bank as the rest of the window.
+    core.write_memory(0x6003, 0x1F);
+    for low in 0xE0..=0xFFu16 {
+        assert_eq!(
+            0x1F,
+            core.read_memory(0xFF00 | low),
+            "$6003 already has bit 4: {:#06X}",
+            0xFF00u16 | low
+        );
+    }
+
+    // And bank $2F is the one filled with $FF, so the forcing is visible as a *different bank*
+    // and not merely as a different number: $6003 = $0F forces to $1F, $6003 = $1F to $1F, and
+    // $6003 = $2F to $3F.
+    core.write_memory(0x6003, 0x2F);
+    assert_eq!(
+        0xFF,
+        core.read_memory(0xE000),
+        "the window shows bank $2F, the all-ones one"
+    );
+    // $FFF4 and not $FFFC: the last six bytes of the image are the fixture's own vectors, so
+    // bank $3F does not read its fill byte there.
+    assert_eq!(
+        0x3F,
+        core.read_memory(0xFFF4),
+        "and a forced address reads bank $3F instead"
+    );
+
+    // The other three windows are untouched by all of this, which is what keeps them on
+    // `Cartridge::read_rom_window`'s fast path. The fourth reads `$FF` because bank $2F is the
+    // all-ones one and `prg_windows` reads a byte, not a bank number.
+    assert_eq!([0, 0, 0, 0xFF], core.prg_windows());
+}
+
+/// §7.2's second test bullet: "a PRG-RAM write at `$6800-$6FFF` survives a round-trip and a write
+/// at `$6000-$67FF` does **not** reach PRG-RAM (it is a bank register)".
+///
+/// **Q-172**: the page's mask makes the register window `$6000-$601F` and not `$6000-$67FF` — A11
+/// to A5 must all be clear — so the bullet is Mesen's decode and the page's is narrower. The test
+/// is written from the mask: the 32 addresses it names are registers, and an address the mask does
+/// not name is the RAM chip mirrored, which `Mapper::prg_ram_window` cannot refuse.
+#[cfg(feature = "board-246")]
+#[test]
+fn req_core_095_mapper_246_keeps_its_battery_ram_at_6800_and_its_registers_at_6000() {
+    let mut core = MapperRom::new(246).prg(64).chr(32).battery().load();
+    assert_eq!(
+        0x0800,
+        core.cartridge().unwrap().battery_ram().len(),
+        "2 KiB, battery-banked, and the whole chip is the battery slice"
+    );
+
+    // The page's own window: a write survives a round trip.
+    for (address, value) in [(0x6800u16, 0x5Au8), (0x6C00, 0x3C), (0x6FFF, 0xA5)] {
+        core.write_memory(address, value);
+        assert_eq!(
+            value,
+            core.read_memory(address),
+            "{address:#06X} is the chip"
+        );
+    }
+
+    // All 32 addresses the mask names are bank registers and reach no RAM. Bit 2 picks PRG from
+    // CHR and bits 1-0 the register, with A4 and A3 free — so every one of them decodes.
+    let windows = (core.prg_windows(), chr_offsets(&core));
+    for low in 0x00..0x20u16 {
+        let address = 0x6000 | low;
+        core.write_memory(address, 0x07);
+        assert_ne!(
+            (core.prg_windows(), chr_offsets(&core)),
+            windows,
+            "{address:#06X} is a bank register"
+        );
+        // and the chip is untouched by it.
+        assert_eq!(0x5A, core.read_memory(0x6800));
+        for register in 0..8u16 {
+            core.write_memory(0x6000 + register, if register == 3 { 0x0F } else { 0x00 });
+        }
+    }
+
+    // An address the mask does **not** name: the 2 KiB chip mirrored, which is Q-172's third
+    // point. $6400 is A10 of the chip and A11 clear, so it is the chip's own $0400.
+    core.write_memory(0x6400, 0x11);
+    assert_eq!(0x11, core.read_memory(0x6400));
+    assert_eq!(
+        0x11,
+        core.read_memory(0x6C00),
+        "$6400 and $6C00 are one byte of a 2 KiB chip"
+    );
+}
+
+/// **Q-172**: "Register `$6003` is set to `$FF` at power-on **only**."
+///
+/// The word "only" is the whole of this test. AMD-061's own sweep asks every board for its
+/// power-on state back after a reset, and this board cannot give it: the page says the register
+/// has no reset line, so the bank the vectors are fetched through is whatever the game last wrote.
+/// The other seven registers go back to zero, which the page gives no value for and which is this
+/// build's default for a register no page states.
+#[cfg(feature = "board-246")]
+#[test]
+fn amd_061_mapper_246_keeps_its_last_prg_bank_across_a_reset() {
+    let mut core = MapperRom::new(246).prg(64).chr(512).load();
+    assert_eq!([0, 0, 0, 0x3F], core.prg_windows(), "power-on");
+
+    for register in 0..8u16 {
+        core.write_memory(0x6000 + register, 0x11 + register as u8);
+    }
+    assert_eq!([0x11, 0x12, 0x13, 0x14], core.prg_windows());
+
+    core.reset();
+    assert_eq!(
+        [0, 0, 0, 0x14],
+        core.prg_windows(),
+        "$6003 keeps its value -- `$FF` is a power-on value and not a reset value"
+    );
+    assert_eq!(
+        [0, 1, 0, 1, 0, 1, 0, 1],
+        core.chr_windows(),
+        "and the four CHR registers do go back to zero"
+    );
+
+    // A second reset says the same thing, which is what makes it the register and not a leftover.
+    core.reset();
+    assert_eq!([0, 0, 0, 0x14], core.prg_windows());
 }
