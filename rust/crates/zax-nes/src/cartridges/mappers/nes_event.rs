@@ -230,9 +230,12 @@ impl Mapper for NesEvent {
 
     /// `W` of `$E000`, "WRAM disable (same as MMC1)" — **and not [`Mmc1::prg_ram_enabled`]**,
     /// which this board must not delegate. A *Nintendo World Championships* dump is 256 KiB of
-    /// PRG, no CHR-ROM and 8 KiB of PRG-RAM, which is exactly `Mmc1::is_snrom`'s signature, so
-    /// the chip would also read bit 4 of `$A000` as a second chip enable — and bit 4 of `$A000`
-    /// is this board's timer control. Starting the timer would switch the save RAM off.
+    /// PRG, no CHR-ROM and 8 KiB of PRG-RAM, which is the SNROM's shape, so a dump that declared
+    /// its 8 KiB of CHR-RAM and its 8 KiB of work RAM would satisfy `Mmc1::is_snrom` and the chip
+    /// would read bit 4 of `$A000` as a second chip enable — and bit 4 of `$A000` is this board's
+    /// timer control. Starting the timer would switch the save RAM off. (Before MF-LEG-1 step 1
+    /// the size test alone was enough, so an iNES 1.0 dump was caught too; the override is here
+    /// either way, because the board's `W` is the only wire to that RAM.)
     fn prg_ram_enabled(&self) -> bool {
         self.mmc1.prg_register() & 0x10 == 0
     }

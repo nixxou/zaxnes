@@ -22,6 +22,7 @@ pub struct MapperRom {
     battery: bool,
     submapper: Option<u8>,
     prg_ram_byte10: Option<u8>,
+    chr_ram_byte11: Option<u8>,
     prg_bank_all_ones: Option<usize>,
 }
 
@@ -36,6 +37,7 @@ impl MapperRom {
             battery: false,
             submapper: None,
             prg_ram_byte10: None,
+            chr_ram_byte11: None,
             prg_bank_all_ones: None,
         }
     }
@@ -101,6 +103,25 @@ impl MapperRom {
         self
     }
 
+    /// NES 2.0 byte 11, the **CHR-RAM** size, stored as `64 << shift` like byte 10's two
+    /// nibbles. Setting it makes the image an NES 2.0 one.
+    ///
+    /// The MMC1 needs it since MF-LEG-1 step 1: an SNROM is told from an SGROM by the header
+    /// declaring 8 KiB of CHR-RAM and 8 KiB of PRG-RAM, where REQ-CORE-012 gives an iNES 1.0
+    /// image with no CHR-ROM 32 KiB of CHR-RAM and no way to say otherwise.
+    pub fn chr_ram(mut self, bytes: usize) -> Self {
+        assert!(
+            bytes == 0 || (bytes >= 64 && (bytes / 64).is_power_of_two()),
+            "byte 11 stores 64 << shift"
+        );
+        self.chr_ram_byte11 = Some(if bytes == 0 {
+            0
+        } else {
+            (bytes / 64).trailing_zeros() as u8
+        });
+        self
+    }
+
     /// The iNES image.
     pub fn image(&self) -> Vec<u8> {
         let mapper = self.mapper;
@@ -113,12 +134,19 @@ impl MapperRom {
         image[6] =
             (((mapper & 0x0F) << 4) as u8) | self.mirroring | if self.battery { 0x02 } else { 0 };
         image[7] = (mapper & 0xF0) as u8;
-        if self.submapper.is_some() || self.prg_ram_byte10.is_some() || mapper >> 8 != 0 {
+        if self.submapper.is_some()
+            || self.prg_ram_byte10.is_some()
+            || self.chr_ram_byte11.is_some()
+            || mapper >> 8 != 0
+        {
             image[7] |= 0x08; // NES 2.0.
             image[8] = (self.submapper.unwrap_or(0) << 4) | ((mapper >> 8) & 0x0F) as u8;
             // Byte 10 of zero reads back as the 8 KiB default, which is what an iNES image
             // gets too, so an image that only wants a submapper is unaffected.
             image[10] = self.prg_ram_byte10.unwrap_or(0);
+            // Byte 11 of zero on an image with no CHR-ROM reads back as REQ-CORE-012's 32 KiB,
+            // which is what an iNES image gets, so the same holds for this one.
+            image[11] = self.chr_ram_byte11.unwrap_or(0);
         }
 
         for bank in 0..self.prg_banks_8k {

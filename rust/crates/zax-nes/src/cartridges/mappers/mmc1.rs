@@ -97,10 +97,10 @@ impl Mmc1 {
     /// "PRG-RAM disable (0: enable, 1: open bus)". The same line is something else on every
     /// other MMC1 board that has it at all: on SUROM and SXROM bit 4 is `P`, the 256 KiB outer
     /// PRG bank, and on the CHR-ROM boards (SJROM, SKROM, SLROM) it is CHR A16, a real bank
-    /// line. So the three sizes of the board page's table settle it, and they are exactly the
-    /// three the Holy Mapperel driver probes before it decides which way its `4xxx` digit goes
-    /// (`holy-mapperel/README.md`: "$A000 bit 4 does not disable WRAM (SNROM), or $A000 bit 4
-    /// disables WRAM (all but SNROM)"):
+    /// line. So the three sizes of the board page's table are what the board is recognised by,
+    /// and they are exactly the three the Holy Mapperel driver probes before it decides which way
+    /// its `4xxx` digit goes (`holy-mapperel/README.md`: "$A000 bit 4 does not disable WRAM
+    /// (SNROM), or $A000 bit 4 disables WRAM (all but SNROM)"):
     ///
     /// | board | PRG-ROM | PRG-RAM | CHR |
     /// | --- | --- | --- | --- |
@@ -109,23 +109,63 @@ impl Mmc1 {
     /// | SUROM | **512 KiB** | 8 KiB | 8 KiB RAM/ROM |
     /// | SXROM | 128/256/512 KiB | **32 KiB** | 8 KiB RAM/ROM |
     ///
-    /// A 512 KiB PRG-ROM is excluded by the same comparison `update_banks` uses for `outer`, so
-    /// the two readings of bit 4 can never both be live.
+    /// # The header must say so — lot MF-LEG-1 step 1, report entry MMC1-1
     ///
-    /// **The CHR test is on the header's CHR-*ROM*, not on the CHR-RAM buffer.** An NES 2.0
-    /// image gives its CHR-RAM size exactly (`M1_P128K.nes` declares 8 KiB in byte 11), but
-    /// REQ-CORE-012 hands an iNES 1.0 image with no CHR-ROM **32 KiB** of CHR-RAM, which no
-    /// MMC1 board carries: every CHR-RAM MMC1 board — SNROM, SOROM, SUROM, SXROM, SGROM — has
-    /// 8 KiB and no more, so a declared CHR-ROM of 0 is itself the 8 KiB board. Reading the
-    /// padded buffer instead would leave every iNES 1.0 SNROM dump — The Legend of Zelda,
-    /// Zelda II, Final Fantasy — on the wrong wiring. The PRG-RAM size is the effective one,
-    /// which for iNES 1.0 is the 8 KiB default: a dump that cannot be told from an SNROM is an
-    /// SNROM here, as it is for the test ROM's own driver.
+    /// The three sizes above are the SNROM's, but they are also the **SGROM's**: that board is
+    /// the same 128/256 KiB PRG with 8 KiB of CHR-RAM and no work RAM at all, and an iNES 1.0
+    /// header cannot tell the two apart — it has no CHR-RAM field, and REQ-CORE-012 hands every
+    /// mapper-1 dump the default 8 KiB of PRG-RAM whether the cartridge carries a chip or not.
+    /// So the old three-way size test fired on **every** iNES 1.0 mapper-1 dump with CHR-RAM,
+    /// which is the whole popular set — *The Legend of Zelda*, *Zelda II*, *Metroid*,
+    /// *Final Fantasy*, *Mega Man 2*, *Castlevania II* — and gave each of them a second PRG-RAM
+    /// chip enable on bit 4 of `$A000`, where on an 8 KiB CHR-RAM board that bit is a meaningless
+    /// CHR bank number. A game that writes it loses its save.
+    ///
+    /// The cross-check (`docs/review/LEGACY-XCHECK.md`, MMC1-1) found all five of FCEUX,
+    /// Nestopia, puNES, Nintendulator and Mesen 2 declining the `E` bit outright, puNES having
+    /// **removed** it over a named regression (*Witch n' Wiz*). The page and `holy-mapperel`'s
+    /// `4xxx` digit are on the other side, and AMD-061 makes the public documentation prevail —
+    /// so the bit stays, and what narrows is the board test: the `E` bit applies only where the
+    /// header gives **positive evidence** of an SNROM, and an iNES 1.0 dump is left on the
+    /// five-emulator convention. That is option (a) of the entry's three, the one it asks for.
+    ///
+    /// Positive evidence is an **NES 2.0** header that declares
+    ///
+    /// * no CHR-ROM and exactly 8 KiB of CHR-RAM in byte 11 — the SNROM/SGROM shape, where
+    ///   byte 11 of zero would instead mean REQ-CORE-012's 32 KiB default and so say nothing;
+    /// * a non-zero byte 10 whose total is exactly 8 KiB — the work-RAM chip the SGROM has not.
+    ///   Byte 10 must be tested on its own, because `InesHeader::prg_ram_size` floors at 8 KiB
+    ///   (`rom::ines_header::nes20_prg_ram_size`), so a declared **zero** reads back as the
+    ///   default;
+    /// * at most 256 KiB of PRG-ROM, which is the same comparison `update_banks` uses for
+    ///   `outer`, so the two readings of bit 4 can never both be live.
+    ///
+    /// `holy-mapperel`'s twelve `M1_*` images stay as they were — none of them is this shape,
+    /// which is exactly what the entry observed — so the suite's `4xxx` digit still passes on the
+    /// "all but SNROM" side it does exercise.
     fn is_snrom(memory: &CartridgeMemory) -> bool {
         let header = memory.rom().header();
-        header.prg_rom_size <= 256 * 1024
-            && header.chr_rom_size <= BankWindows::PRG_WINDOW_SIZE
+        header.is_nes20
+            && header.prg_rom_size <= 256 * 1024
+            && header.chr_rom_size == 0
+            && header.chr_ram_size == BankWindows::PRG_WINDOW_SIZE
+            && header.byte10 != 0
+            && header.prg_ram_size == BankWindows::PRG_WINDOW_SIZE
             && memory.prg_ram().len() == BankWindows::PRG_WINDOW_SIZE
+    }
+
+    /// Whether the committed CHR bank 0 register carries the SNROM `E` bit — bit 4, the second
+    /// PRG-RAM chip enable (see [`Mmc1::is_snrom`]).
+    ///
+    /// **`pub`, and the one reason it is**: MF-LEG-1 step 1 owes the owner an extra check that
+    /// narrowing [`Mmc1::is_snrom`] moves none of the five games whose dumps the old heuristic
+    /// read as SNROMs, and the only exact way to ask that of a running game is to watch this bit
+    /// after every CPU instruction — "the `E` bit would have disabled the RAM" is "this bit was
+    /// set", on any board the old test fired on. `mf_leg_1_mmc1_e_bit_tests.rs` is the only
+    /// caller. A `const fn` over one field, on no path at all.
+    #[must_use]
+    pub const fn chr_bank0_has_the_e_bit(&self) -> bool {
+        self.chr0 & 0x10 != 0
     }
 
     // ------------------------------------------------------------ the NES-EVENT's five lines

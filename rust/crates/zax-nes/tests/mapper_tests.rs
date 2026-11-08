@@ -498,10 +498,22 @@ fn req_core_100_mmc1_disables_prg_ram_with_bit_4_of_the_prg_register() {
 ///
 /// nesdev ("MMC1"), SNROM: the board "uses the upper CHR bank select line coming out of the
 /// mapper (CHR A16; bit 4 of bank number) as an additional chip enable for the PRG-RAM".
+///
+/// **The image is an NES 2.0 one since MF-LEG-1 step 1** (report entry MMC1-1): the `E` bit now
+/// needs a header that declares the 8 KiB of CHR-RAM *and* the 8 KiB of work RAM, because those
+/// two declarations are the only thing that tells an SNROM from an SGROM. The behaviour the test
+/// asserts is unchanged.
 #[test]
 fn req_core_100_mmc1_snrom_disables_prg_ram_with_bit_4_of_the_chr_register() {
-    // 128 KiB PRG, CHR-RAM, 8 KiB PRG-RAM: the SNROM row of the board table.
-    let mut core = MapperRom::new(1).prg(16).chr(0).battery().load();
+    // 128 KiB PRG, 8 KiB CHR-RAM, 8 KiB battery PRG-RAM: the SNROM row of the board table,
+    // declared.
+    let mut core = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .chr_ram(8 * 1024)
+        .prg_ram(0, 8 * 1024)
+        .battery()
+        .load();
     core.write_memory(0x6000, 0x5A);
     assert_eq!(0x5A, core.read_memory(0x6000));
 
@@ -540,6 +552,81 @@ fn req_core_100_mmc1_only_an_snrom_reads_bit_4_of_the_chr_register_as_a_ram_enab
         core.write_memory(0x6000, 0x3C);
         assert_eq!(0x3C, core.read_memory(0x6000));
     }
+}
+
+/// **MF-LEG-1 step 1, report entry MMC1-1**: an **iNES 1.0** mapper-1 dump with CHR-RAM does not
+/// get the SNROM's `E` bit, because that header cannot tell an SNROM from an SGROM.
+///
+/// This is the whole popular set — *The Legend of Zelda*, *Zelda II*, *Metroid*,
+/// *Final Fantasy*, *Mega Man 2* — every one of which the old three-way size test read as an
+/// SNROM and handed a second PRG-RAM chip enable on a bit that is a meaningless CHR bank number
+/// on an 8 KiB CHR-RAM board. It is also what all five of FCEUX, Nestopia, puNES, Nintendulator
+/// and Mesen 2 do (`docs/review/LEGACY-XCHECK.md`, MMC1-1).
+///
+/// The `$E000` half of the chip enable, which every MMC1 board wires, is untouched: the last two
+/// assertions are the regression guard that this fix narrowed the board test and not the bit.
+#[test]
+fn mf_leg_1_mmc1_an_ines_1_0_dump_with_chr_ram_does_not_get_the_snrom_e_bit() {
+    // The shape of a Zelda II dump: 128 KiB PRG, no CHR-ROM, battery, no NES 2.0 fields.
+    let mut core = MapperRom::new(1).prg(16).chr(0).battery().load();
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    // Bit 4 of $A000 is a CHR bank number here and nothing else.
+    core.mmc1_write(0xA000, 0x10);
+    core.write_memory(0x6000, 0xA5);
+    assert_eq!(
+        0xA5,
+        core.read_memory(0x6000),
+        "the `E` bit fired on an iNES 1.0 dump"
+    );
+
+    core.mmc1_write(0xE000, 0x10);
+    assert_eq!(0, core.read_memory(0x6000), "`W` of $E000 still disables");
+    core.mmc1_write(0xE000, 0x00);
+    assert_eq!(0xA5, core.read_memory(0x6000));
+}
+
+/// **MF-LEG-1 step 1, report entry MMC1-1**: the three NES 2.0 declarations that are *not* enough
+/// on their own, so that the gate cannot be widened by accident.
+///
+/// An SNROM declares no CHR-ROM, 8 KiB of CHR-RAM in byte 11 **and** 8 KiB of work RAM in byte
+/// 10. A dump missing any one of the three is an SGROM as far as this core can tell, and
+/// `nes20_prg_ram_size` floors byte 10 at the 8 KiB default, so the byte itself has to be
+/// non-zero — a declared *zero* reads back as 8 KiB and must not pass.
+#[test]
+fn mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations() {
+    // Byte 11 declared, byte 10 **zero**: an SGROM, which has no work-RAM chip at all.
+    let no_work_ram = MapperRom::new(1).prg(16).chr(0).chr_ram(8 * 1024).prg_ram(0, 0);
+    // Byte 10 declared, byte 11 absent: REQ-CORE-012's 32 KiB of CHR-RAM, which no MMC1 board
+    // carries, so the header has said nothing about the CHR.
+    let no_chr_declaration = MapperRom::new(1).prg(16).chr(0).prg_ram(8 * 1024, 0);
+    // Both declared, but 16 KiB of CHR-RAM: not the 8 KiB board.
+    let wrong_chr_ram = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .chr_ram(16 * 1024)
+        .prg_ram(8 * 1024, 0);
+
+    for rom in [no_work_ram, no_chr_declaration, wrong_chr_ram] {
+        let mut core = rom.load();
+        core.write_memory(0x6000, 0x3C);
+        core.mmc1_write(0xA000, 0x10);
+        core.write_memory(0x6000, 0x3C);
+        assert_eq!(0x3C, core.read_memory(0x6000));
+    }
+
+    // And the three together do pass, with the work RAM declared volatile rather than battery
+    // backed: the chip is what matters, not where it is persisted.
+    let mut snrom = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .chr_ram(8 * 1024)
+        .prg_ram(8 * 1024, 0)
+        .load();
+    snrom.write_memory(0x6000, 0x3C);
+    snrom.mmc1_write(0xA000, 0x10);
+    assert_eq!(0, snrom.read_memory(0x6000));
 }
 
 // ---------------------------------------------------------------- UxROM, CNROM, AxROM
@@ -5296,9 +5383,11 @@ fn req_core_100_the_nes_event_carries_eight_kib_of_chr_ram() {
 /// **The trap of this board**, and the reason it does not delegate `Mapper::prg_ram_enabled` to
 /// the MMC1 it holds. Disch gives `$E000` as `[...W BBBB]` with "`W` = WRAM disable (same as
 /// MMC1)" — so `W` is the only wire to the 8 KiB of PRG-RAM. But a *Nintendo World
-/// Championships* dump is 256 KiB of PRG with no CHR-ROM and 8 KiB of PRG-RAM, which is exactly
-/// the signature `Mmc1::is_snrom` reads as an SNROM, and on an SNROM bit 4 of `$A000` is a second
-/// chip enable for that RAM. Bit 4 of `$A000` here is the **timer**: starting the tournament
+/// Championships* dump is 256 KiB of PRG with no CHR-ROM and 8 KiB of PRG-RAM, which is the
+/// SNROM's shape — so a dump declaring those sizes the NES 2.0 way is what `Mmc1::is_snrom` reads
+/// as an SNROM, and on an SNROM bit 4 of `$A000` is a second chip enable for that RAM. Before
+/// MF-LEG-1 step 1 the sizes alone were enough and an iNES 1.0 dump was caught as well; the trap
+/// is the same either way. Bit 4 of `$A000` here is the **timer**: starting the tournament
 /// clock would switch the save RAM off, and it powers on set, so the RAM would never be readable
 /// at all.
 #[test]
