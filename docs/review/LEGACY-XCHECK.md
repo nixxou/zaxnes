@@ -1382,4 +1382,199 @@ experiment and it is the one thing this review cannot do from the sources.
 
 Count: 7 OK, 1 DIFFERS, 0 OPEN.
 
+---
+
+## Mapper 16 — Bandai FCG (FCG-1/2 and LZ93D50)
+
+Page: *INES Mapper 016* (<https://www.nesdev.org/wiki/INES_Mapper_016>). Ours:
+`mappers/bandai_fcg.rs`. Theirs: `fceux/src/boards/bandai.cpp`,
+`nestopia/source/core/board/NstBoardBandaiLz93d50.cpp`,
+`punes/src/core/mappers/LZ93D50.c`, `nintendulator-mappers/src/iNES/mapper016.cpp`.
+
+- **$x000-$x007 the eight 1 KiB CHR banks, $x008 the 16 KiB PRG bank, $x009 the mirroring,
+  $x00A the IRQ control, $x00B/$x00C the IRQ value, $x00D the EEPROM port** — OK
+  (`bandai_fcg.rs:338-388`). All four decode the same sixteen registers
+  (`bandai.cpp:257-277`, `NstBoardBandaiLz93d50.cpp:66-80`, `LZ93D50.c:95-130`,
+  `mapper016.cpp:370-382`).
+- **The register window is $8000-$800F on the LZ93D50 and $6000-$600F on the FCG-1/2** — OK,
+  and submapper-aware: `register_floor` chooses between them at load
+  (`bandai_fcg.rs:138-160`). FCEUX decodes $6000-$FFFF for both (`bandai.cpp:309`), which is a
+  superset; the page splits them by submapper as this build does.
+- **$x009 mirroring: 0 vertical, 1 horizontal, 2 one-screen A, 3 one-screen B** — OK
+  (`bandai_fcg.rs:356-361`), the page's order, same in all four.
+- **The IRQ counter counts down on every M2 cycle while enabled** — OK
+  (`bandai_fcg.rs:420-430`).
+- **$x00A acknowledges the IRQ, sets the enable from bit 0, and copies the latch into the
+  counter on an LZ93D50** — OK (`bandai_fcg.rs:362-372`). FCEUX
+  (`bandai.cpp:275`), Nestopia (`NstBoardBandaiLz93d50.cpp:182-188`) and puNES
+  (`LZ93D50.c:109-117`) all copy a latch; **Nintendulator has no latch at all** and lets
+  $x00B/$x00C write the counter directly on every mapper-16 image (`mapper016.cpp:379-380`),
+  which is the FCG-1/2 behaviour applied unconditionally.
+- **MR-16-1: submapper 4 writes the counter directly** — OK and now a sharper result than MR-1
+  could reach. This build is the only one of the five that keys the latch on the submapper
+  (`bandai_fcg.rs:109`, `bandai_fcg.rs:166-177`); FCEUX, Nestopia and puNES always latch and
+  Nintendulator never does. MF-1's fix is right and is the page's reading.
+- **The IRQ fires when the counter holds zero** — OK, and this build and Nestopia are
+  expression-for-expression identical: this build decrements then tests `< 0`
+  (`bandai_fcg.rs:425-429`) and Nestopia returns `(count-- & 0xFFFF) == 0`
+  (`NstBoardBandaiLz93d50.cpp:202-205`); both therefore fire on the clock whose pre-decrement
+  value was zero.
+
+### 16-1 — whether the counter keeps counting after the IRQ — OPEN
+
+**Point.** The page says the counter "decreases on every M2 cycle" and that an IRQ is generated
+when it "holds a value of zero". It does **not** say what happens next.
+
+**This build.** The counter wraps to $FFFF and keeps counting, so the IRQ repeats every 65 536
+cycles until the game writes $x00A (`bandai_fcg.rs:427-428`).
+
+**The others.** Nestopia wraps and keeps counting (`NstBoardBandaiLz93d50.cpp:202-205`), as
+does Nintendulator (`mapper016.cpp:352-356`). FCEUX stops: it fires once, sets the counter to
+−1 and **clears its own enable flag** (`bandai.cpp:289-296`). puNES stops too, by a different
+route — its condition is `count && !(--count)`, so once the counter reaches zero it never
+decrements again (`LZ93D50.c:155-162`).
+
+**Verdict: OPEN**, three to two in this build's favour but with nothing in the page to settle
+it. The practical difference is a spurious second IRQ 65 536 CPU cycles (about 37 ms, two
+frames) after the first, on a game that enables the counter and then never writes $x00A again.
+Games that use the IRQ for a raster effect rewrite $x00A every frame and cannot see it; a game
+that uses it as a one-shot timer could.
+
+**What would settle it.** A hardware capture of the /IRQ line on *Famicom Jump II* — the title
+FCEUX singles out in its save-state comment as needing the latch — left running past one wrap.
+No public test ROM covers mapper 16.
+
+### 16-2 — the "IRQ immediately" case of $x00A — OK
+
+**Point.** The page: "If a write to this register enables counting while the counter is holding
+a value of zero, an IRQ is generated immediately."
+
+**This build.** Not modelled as a special case, and it does not need to be: `$x00A` loads the
+counter from the latch and the next `on_cpu_cycle` finds it at zero and fires
+(`bandai_fcg.rs:369`, `bandai_fcg.rs:425-429`), so the IRQ arrives one CPU cycle later than
+"immediately".
+
+**The others.** puNES models it explicitly, scheduling the IRQ with a one-cycle delay when
+$x00A enables counting with a zero reload (`LZ93D50.c:112-114`). FCEUX, Nestopia and
+Nintendulator do not model it at all.
+
+**Verdict: OK.** One CPU cycle, and puNES's own implementation of the special case also inserts
+a one-cycle delay — so the two agree on the number even though only one of them wrote the rule
+down.
+
+**Test ROMs.** None for mapper 16 in `assets-free`.
+
+Count: 7 OK, 0 DIFFERS, 1 OPEN.
+
+---
+
+## Mapper 18 — Jaleco SS88006
+
+Page: *INES Mapper 018* (<https://www.nesdev.org/wiki/INES_Mapper_018>). Ours:
+`mappers/jaleco_ss88006.rs`. Theirs: `fceux/src/boards/18.cpp`,
+`nestopia/source/core/board/NstBoardJalecoSs88006.cpp`,
+`punes/src/core/mappers/mapper_018.c`, `nintendulator-mappers/src/iNES/mapper018.cpp`.
+
+- **Every bank register is a nibble pair, low nibble at the even address and high at the odd
+  one** — OK (`jaleco_ss88006.rs:20-26`, `jaleco_ss88006.rs:134-154`): three PRG banks over
+  $8000-$9001 and eight 1 KiB CHR banks over $A000-$D003, with $E000-$FFFF fixed to the last
+  bank. Identical in all four (`18.cpp:41-56`, `NstBoardJalecoSs88006.cpp:216-219`,
+  `mapper_018.c:70-78`, `mapper018.cpp:100-140`).
+- **$E000-$E003 are the four nibbles of the IRQ reload value, least significant first** — OK
+  (`jaleco_ss88006.rs:156-159`); same in all four (`18.cpp:59-62`, `mapper018.cpp:142-145`).
+- **$F000 reloads the counter and acknowledges; $F001 sets the enable and the width and
+  acknowledges** — OK (`jaleco_ss88006.rs:42-60`). FCEUX acknowledges on $F001 only
+  (`18.cpp:63-64`); Nintendulator acknowledges on $F000 (`mapper018.cpp:152-153`); this build
+  does both, which is the page.
+- **The width bits: bit 3 gives 4 bits, bit 2 gives 8, bit 1 gives 12, none gives 16, "F
+  overrides E overrides T"** — OK, and a four-way agreement on the priority order:
+  `jaleco_ss88006.rs:51-59`, `NstBoardJalecoSs88006.cpp:266-269`, `mapper_018.c:166-174`,
+  `mapper018.cpp:33-39`. **FCEUX has no width modes at all** — its counter is always 16 bits
+  (`18.cpp:98-105`), which makes it the only one of the five that cannot run a game using the
+  4-bit mode as a scanline timer.
+- **$F002 mirroring: 0 horizontal, 1 vertical, 2 one-screen A, 3 one-screen B** — OK
+  (`jaleco_ss88006.rs:61-66`), the page's order; FCEUX stores the same two bits
+  (`18.cpp:65`).
+- **$F003, the µPD7755C ADPCM sound** — not implemented, and REQ-CORE-075 leaves it optional.
+  None of the four implements it either (FCEUX's `18.cpp` has no $F003 arm), so there is
+  nothing to compare. MR-18-1 already recorded this.
+
+### 18-1 — the IRQ fires on the wrap, and three of the five fire a cycle early — OK
+
+**Point.** The page's worked example is the whole argument: "if the counter is in 4-bit mode and
+contains $1232, it counts down to $1230, then **wraps to $123F where an IRQ is triggered**".
+Two things follow — the IRQ is on the wrap and not on the transition to zero, and the wrap
+affects only the counted field, leaving the bits above it alone.
+
+**This build.** Exactly that: the clock that finds the counted field at zero raises the IRQ and
+sets that field to its mask, leaving the high bits (`jaleco_ss88006.rs:169-181`).
+
+**The others.** Nestopia (`NstBoardJalecoSs88006.cpp:286-289`) and puNES
+(`mapper_018.c:175`) both compute `(count & mask) && !(--count & mask)` — they fire one cycle
+earlier, when the field *leaves* 1, and they decrement the whole 16-bit counter so the wrap
+carries into the high bits. Mesen does the same (MR-18-1). Nintendulator fires on the same
+cycle as this build — `if (!(IRQcounter & IRQmask)) SetIRQ(0)` before the decrement
+(`mapper018.cpp:64-68`) — but then decrements the whole counter too, so its $1230 becomes
+$122F and not $123F. FCEUX has no field at all.
+
+**Verdict: OK**, and it strengthens MF-2's closure of MR-18-1: of the six implementations, this
+build is the only one that reproduces both halves of the page's example — the firing cycle *and*
+the field-only wrap. Nintendulator gets the cycle, Nestopia, puNES and Mesen get neither.
+Audible/visible consequence: one CPU cycle of IRQ phase, and, on a game that reloads a narrow
+width and reads the counter's effect over many wraps, a drift the others accumulate and this
+build does not.
+
+### 18-2 — $9002, the PRG-RAM enable and write protect, is not implemented — DIFFERS
+
+**Point.** The page gives $9002 as `.... ..WR`: bit 0 is the PRG-RAM chip enable and bit 1
+allows writes — the same pair of functions the MMC3's $A001 carries, and the page says so
+("same as MMC3").
+
+**This build.** `write_register`'s $9000-group arm handles only indices 0 and 1, the high PRG
+bank's two nibbles, and falls through for $9002 and $9003
+(`jaleco_ss88006.rs:140-145`). `JalecoSs88006` does not override `prg_ram_enabled` or
+`prg_ram_writable`, so it takes the trait defaults — always enabled, always writable.
+
+**The others.**
+
+| | $9002 | file:line |
+| --- | --- | --- |
+| this build | ignored | `jaleco_ss88006.rs:140-145` |
+| Nestopia | implemented: bit 0 the read permission, bit 1 the write permission, and the board powers up with **both denied** | `NstBoardJalecoSs88006.cpp:90`, `:201-205`, `:77` |
+| puNES | implemented: read from bit 0, write from read-and-bit-1 | `mapper_018.c:197-200` |
+| FCEUX | ignored — $6000-$7FFF is mapped as plain readable/writable RAM and no handler decodes $9002 | `18.cpp:91`, `18.cpp:92` |
+| Nintendulator | ignored — `SetPRG_RAM8(0x6, 0)` unconditionally | `mapper018.cpp:19` |
+| Mesen 2 | implemented (MR-1 raised no finding against it) | — |
+
+**Verdict: DIFFERS** — against the page and against three of the five. Nestopia's choice is the
+telling one: it powers the board up with the RAM **unreadable and unwritable**, which only works
+if every mapper-18 game writes $9002 before touching its save — so the games do write it, and
+the register is live rather than vestigial.
+
+**Which games it can affect, and which are known affected.** The battery-backed mapper-18
+titles — *Pizza Pop!*, the *Moero!! Pro Yakyuu* family, *Shin Moero!! Pro Yakyuu* — plus any
+mapper-18 game that uses $6000-$7FFF as work RAM. **No game is known to be affected**: the
+failure mode needs a game that *relies* on the protection, i.e. that writes to $6000-$7FFF
+while the chip is disabled and expects the write to be discarded. That is the shape of a
+save-protection routine run during a crash or a reset, which is exactly what the MMC3's
+equivalent bit exists for and exactly what no emulator author has reported a symptom from.
+Reading is the safer half: with the chip disabled the window should be open bus here and
+answers RAM.
+
+**Risk of a fix.** None for the protected games — SMB3, Zelda II and the widescreen packs are
+not mapper 18. The real risk is the one Nestopia's power-on value hints at: if the two
+permission bits are implemented *and* the board is powered up denied, a game that happens not to
+write $9002 loses its save RAM entirely. The safe fix is to implement the bits but power up
+**permitted**, which is what puNES does and what this build's MMC3 already does for the same
+reason (MR-4-5).
+
+**What a fix would look like.** One more arm in the $9000 group of `write_register`
+(`jaleco_ss88006.rs:140-145`) storing the byte, plus `prg_ram_enabled` and `prg_ram_writable`
+overrides reading its two bits — the same three-line shape `Mmc3Board` has
+(`mmc3.rs:1146-1160`). Both are load-free and off every hot path.
+
+**Test ROMs.** None for mapper 18 in `assets-free`.
+
+Count: 7 OK, 1 DIFFERS, 0 OPEN.
+
 <!-- NEXT-BOARD -->
