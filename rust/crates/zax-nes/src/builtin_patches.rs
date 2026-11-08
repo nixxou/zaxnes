@@ -1510,6 +1510,16 @@ pub const PATCHES: [BuiltinPatch; 58] = [
 /// The options of the Nova the Squirrel pack: its two testing aids.
 /// The options of the Kirby's Adventure pack.
 const KIRBY_OPTIONS: &[HackOption] = &[
+    // Kirby's checklists of state changes (one per state and ability, banks $14-$19) test the
+    // attack (B) then the jump (A) first: a button pressed on the frame Kirby turns round,
+    // starts walking or crouches is no longer lost. Our own reordering from our disassembly.
+    HackOption {
+        key: "input_priority",
+        label: "Jump and attack first",
+        label_fr: "Saut et attaque prioritaires",
+        bit: 0,
+        default: false,
+    },
     // 255 lines of overclock and no frame lost to an NMI that came while the frame ran.
     HackOption {
         key: "no_slowdown",
