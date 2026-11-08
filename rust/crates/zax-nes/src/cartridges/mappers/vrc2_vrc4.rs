@@ -161,9 +161,11 @@ pub struct Vrc2Vrc4 {
     ///
     /// **Not in the savestate** (Q-174 section 2). Writing it would add a byte to the block of
     /// mappers 21, 22, 23, 25 and 27, which REQ-CORE-090 and this lot's instruction both forbid,
-    /// and a state written before this step would then be one byte short and stop loading. So
-    /// `load_registers` leaves the live latch alone: a machine powered on has the power-on 0, and a
-    /// machine that loads a state keeps the bit it had. The two games read the latch back
+    /// and a state written before this step would then be one byte short and stop loading.
+    ///
+    /// **So a state load returns the latch to its power-on 0**, `NesCore::restore_state` building
+    /// a fresh `Cartridge` from the ROM before it reads the block — which is the same thing that
+    /// happens to every register this format does not carry. The two games read the latch back
     /// immediately after writing it, during their boot protection check, so no state taken after
     /// boot can observe the difference.
     #[cfg(feature = "board-vrc2-latch")]

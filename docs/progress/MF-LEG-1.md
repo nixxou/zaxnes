@@ -441,6 +441,20 @@ The two extra are step 1's narrowing tests, which only exist in the gated build.
 
 **Q-176** carries the evidence and the question for R0: which of the hardware test ROM and the
 header-declared rule wins for a dump whose header under-declares the cartridge it tests.
+
+**R0 answered while step 9's measurements were running** (`journal/JOURNAL.md`, 2026-11-08 21:28),
+and the answer is entry MMC1-1's option **(b)**, further than this step's question went: by default
+the `E` bit is **not applied at all** — puNES's position and the other four's — the bit is kept
+behind a feature **`mmc1-snrom-e-bit`** off by default, and the two `holy-mapperel` rows are marked
+as **expected failures** in the default build, which is what `Diagnosis { expected: true }` is for
+and what `mmc3_test/6-MMC6` already uses. `mmc1-snrom-header` is then to be **removed**.
+
+**That work is lot MF-LEG-1B**, scheduled after this lot and before MF-LEG-2, with its own brief —
+so MF-LEG-1 does not do it, and what this lot ships is the provisional choice above. Whoever picks
+MF-LEG-1B up should expect to *delete* `mmc1-snrom-header` and `Mmc1::SNROM_NEEDS_A_DECLARED_HEADER`
+rather than extend them: under (b), `Mmc1::is_snrom`, `Mmc1::chr_disable_mask` and the two-register
+form of `Mmc1::refresh_prg_ram_disable` are all dead in the default build, which is the entry's own
+"and (b) is free". `SNROM_ROW` in the harness is the one place the row's expectation lives.
 - [x] 9/10 the callgrind campaign and the feature decisions
 
 ### 9/10 — the callgrind campaign, and the three feature decisions
@@ -561,4 +575,123 @@ both instruments, so the "no exclusion for performance" rule is not reached at a
 `mmc1-snrom-header` is out of `default` for what it changes (two `holy-mapperel` rows) and not for
 what it costs, which is why it is **not** in `parked-boards` either — the same place
 `ppu-exact-sprite-eval` and `ppu-2007-render-read` sit, and for the same reason.
-- [ ] 10/10 the final check and the report annotations
+- [x] 10/10 the final check and the report annotations
+
+### 10/10 — the final check
+
+**fmt.** `cargo fmt --all -- --check`: clean.
+
+**clippy `-D warnings --all-targets`**, the four configurations the lot owes plus two:
+
+| configuration | `zax-nes` | `zax-harness` |
+| --- | --- | --- |
+| `default` | clean | clean |
+| `--no-default-features` | clean | clean |
+| `--features parked-boards` | clean | clean |
+| `board-vrc2-latch` alone | clean | clean |
+| `board-mmc1a` alone | clean | clean |
+| `mmc1-snrom-header` alone | clean | clean |
+
+`zax-app` cannot build in this worktree, as the brief says; the crates this lot touches are
+`zax-nes` (five boards, the registry) and `zax-harness` (the `holy-mapperel` expectation and the
+`m1_p128k` diagnosis of step 8).
+
+**Tests.**
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1166 passed, 0 failed, 10 ignored** |
+| the same `--no-fail-fast -- --include-ignored` with `ZAXNES_ROMS=G:/3dsen/demo/roms` and `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` | **1176 passed, 0 failed, 0 ignored** |
+| the same plus `--features zax-nes/mmc1-snrom-header` | **1178 passed, 0 failed, 0 ignored** |
+| the same plus `--features parked-boards` | **1244 passed, 0 failed, 0 ignored** |
+| `cargo test --release -p zax-nes --no-default-features` | 790 passed, 0 failed, 9 ignored |
+
+The ten ignored are the ROM-gated ones, this lot's five-ROM extra check among them; with the roots
+set they do work rather than returning early, and **the `holy-mapperel` suite is what step 8 came
+out of** — it is only run when `ZAXNES_TEST_ROMS` points at the collection. The two extra in the
+`mmc1-snrom-header` row are step 1's narrowing tests, which only exist in that build.
+
+**golden-core over the 98 originals**, re-run from the final tree (binary md5
+`9fccce0d1cd6d500a8d63e5943a67ba8`):
+
+| build | md5 of the digest |
+| --- | --- |
+| `a775d0e7`, the base commit, built from `git archive` in a fresh tree | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `default` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/mmc1-snrom-header` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical in all four**, and identical to the digest twelve lots have recorded.
+
+**Save states.** No board's block changed: not one savestate byte was added anywhere in the lot
+(Q-174 and Q-175 are the two registers that stay out, and why). The one memory that changed size is
+a latched VRC2's PRG-RAM, 8 KiB to zero, and
+`req_core_091_a_state_with_the_old_8_kib_prg_ram_loads_into_a_latched_vrc2` pins that an 8 KiB blob
+loads into it — `Cartridge::load_state` reading both memories as prefixes, which lot MF-1 put there
+for the same reason.
+
+**A correction the final check produced**, worth recording because two Q tickets stated the
+opposite: **`NesCore::restore_state` builds a fresh `Cartridge` from the ROM** before it reads the
+block, so a register this format does not carry comes back at its *power-on* value after a load,
+not at the value the running machine had. Q-174 §2 and Q-175 §2 are corrected. It strengthens the
+mapper-18 argument — `$03` is the permissive value, so the only direction a load can move that
+board is the one that cannot lose a save — and it is why
+`q_174_the_vrc2_microwire_latch_is_not_in_the_savestate` now takes its state with the latch **set**:
+written the other way round the assertion passed whether or not the byte was in the format.
+
+**The figures and the feature decision for each board**, which is the last thing the brief asks:
+
+| board / feature | PR-1's thirteen, worst ROM | level 2, worst game | in `default`? |
+| --- | --- | --- | :-: |
+| the six fixes as shipped (mappers 1, 13, 18, 22/23/25, 32) | **+0.001 %**, the instrument's floor; set total **+578** | `smb1` +0.017 %, inside the ±0.018 % same-binary floor | yes |
+| `board-vrc2-latch` | `oamstr` **+0.002 %**; set total +103 283 | **none slower**, total −0.005 % | **yes** |
+| `board-mmc1a` | `mm2` **+0.001 %**; set total **−46 243** | mixed signs, total −0.004 % | **yes** |
+| `mmc1-snrom-header` | `m1` **+0.008 %** — the Q-176 test ROM's own path | `smb3` +0.002 %, total −0.001 % | **no — Q-176, not a figure** |
+
+**Nothing is parked for performance**: all three features are inside the owner's +0.02 % per ROM on
+both instruments, so that rule is never reached. `mmc1-snrom-header` is out of `default` for what it
+changes and stays reachable behind its flag, which is the owner's "no exclusion" rule honoured for a
+reason the rule did not anticipate.
+
+**The report annotations.** Each of the six entries fixed carries a "Fixed in MF-LEG-1 (`<hash>`)"
+paragraph: MMC1-1 `1cc4ce1f` (and `530979f7`), VRC2-1 `75d34118`, 13-1 `4807030a`, 18-2 `d172e5a6`,
+MMC1-4 `ba326895`, 32-1 `8b793d47`. Two further notes were added where the owner reads — after the
+summary table and in "For the owner" — because three of the entries are fixed differently from the
+way they are written, and because entry 2's headline name, *Zelda II*, turns out never to have been
+at risk.
+
+## Bilan
+
+**What changed.** Six readings of six board pages. Two are gaps the page names and this build had
+left (the VRC2's Microwire latch, the SS88006's `$9002`), one is a row MR-BUS-1's enumeration missed
+(the CPROM's bus conflicts), one is a header field never decoded (the MMC1A's submapper), one is an
+enum variant on the wrong side of a `+5V` (*Major League*), and one is a heuristic narrowed to what
+a header actually says (the SNROM `E` bit) — that last behind a feature, off by default.
+
+**What the lot found that the report had wrong.** Three things, all recorded in the entries
+themselves.
+
+1. **Entry MMC1-1's reading of the test ROM coverage.** It says `holy-mapperel` does not exercise
+   the SNROM side and that `is_snrom` returns false for all twelve `M1_*` images. It exercises it on
+   two rows and the old rule returned true for both, because it read the *effective* PRG-RAM size
+   and not the declaration. This is what put step 1 behind a feature and produced Q-176.
+2. **Entry MMC1-4's reading of the MMC1A's `R` bit.** "Bit 4 drives PRG A17"; the page says bit 3
+   drives A17 when bit 4 is set, and only for the fixed window.
+3. **Entry 2 of "For the owner" names *Zelda II* first**, and *Zelda II* was never affected: its
+   dumps carry 128 KiB of CHR-ROM, which the old size test already excluded. The dumps that really
+   sit on the switch are *Final Fantasy*, *The Legend of Zelda* and *Metroid*, and all three keep
+   the bit under the new rule as well, their headers declaring the board. The only dump the rule
+   moves is *Mega Man 2*, whose header correctly says it has no work RAM.
+
+**What it cost.** Nothing measurable: worst ROM +0.001 % on PR-1's thirteen — the floor — and a set
+total of +578 instructions out of 79.3 billion. Both board features are free, and the layout risk
+`board-mmc1a` was created for did not appear. The step also establishes something for the lots after
+it: the **level-2 instrument's same-binary floor on this machine is ±0.018 %**, measured on two
+independent pairs, which is the owner's whole tolerance — so a level-2 figure of that size is the
+instrument and not a cost, and a lot of this size cannot be judged on that column at all.
+
+**What is left open.** Q-174's two choices (the open-bus bits, the latch outside the savestate),
+Q-175's two (the power-on value, the same savestate question), **Q-176's three-way decision for R0**,
+and one follow-up this lot found and could not take: the page makes **mapper 155** the same MMC1A
+revision, so it should get the `R` bit's A17 too. That is one condition on one line and is outside
+the lot's scope.

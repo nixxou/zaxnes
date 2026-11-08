@@ -82,6 +82,21 @@ Two further tables sit inside the report rather than here, because they summaris
 came out **OK**: the shared bus-conflict re-count (eight boards, four new votes) and the MMC3
 revision A/B comparison.
 
+**Six of the nine DIFFERS rows were taken by lot MF-LEG-1** (`docs/progress/MF-LEG-1.md`), which
+left the two the owner keeps — mapper 15's CHR-RAM write protect and SZROM's bank bit — and the
+MMC5 split, which is a lot of its own. Each entry carries a "Fixed in MF-LEG-1" paragraph with its
+commit; the rows above are left as this report found them, so that the table and the fix read
+against each other.
+
+Two of those six are fixed differently from the way this table states them, both because the page
+says something narrower than the paraphrase:
+
+* **1 / MMC1A** — "bit 4 drives A17" is the entry's reading. The page gives `R` = 1 as "fixed bank
+  only affects A16..A14, **bit 3** directly controls A17", so it is bit 3, and only for the *fixed*
+  window of PRG modes 2 and 3.
+* **1 / SNROM** — the fix is behind `mmc1-snrom-header`, **off in `default`**, because two
+  `holy-mapperel` rows that pass today fail under it. That entry and **Q-176** have the headers.
+
 
 ---
 
@@ -273,6 +288,24 @@ and makes `is_snrom`, `chr_disable_mask` and the two-register form of
 does not ask for. (a) is the one to prefer and (b) is free; both are a change to `Mmc1::new`
 alone, and `refresh_prg_ram_disable` stays one expression either way.
 
+**Fixed in MF-LEG-1 (`1cc4ce1f`), and then put behind a feature off by default
+(`530979f7`).** Option (a) was built: `Mmc1::is_snrom` asks an NES 2.0 header for no CHR-ROM,
+8 KiB of CHR-RAM in byte 11, a non-zero byte 10 totalling 8 KiB and at most 256 KiB of PRG.
+**But two statements of this entry are wrong, and they are what sent the fix behind
+`mmc1-snrom-header` (Q-176).** `holy-mapperel`'s `M1_P128K.nes` and `M1_P128K_CR8K.nes` are NES
+2.0 with no CHR-ROM, 8 KiB of CHR-RAM in byte 11 and **byte 10 = `$00`** — so the old test saw
+REQ-CORE-012's 8 KiB default and returned *true* for them, where this entry says it "returns
+false for all twelve". They announce themselves as `SNROM (MMC1)`, report `8K PRG RAM OK` and
+probe digit `4000`, so the suite **does** exercise the SNROM side, on two rows that lot MF-3
+step 1 exists to have made pass. They fail under the narrowing. The hardware test is right about
+the board and the header rule is right about real dumps, and both cannot hold for a dump whose
+header under-declares the cartridge it tests, so `default` keeps the size test and the narrowing
+takes one flag. The entry's *Risk of a fix* is confirmed: the five named games were played for
+3600 frames each with the register sampled after **every CPU instruction** — 181 M instructions,
+not one commit of bit 4 to `$A000` — and golden-core over the 98 originals, 27 of them mapper 1,
+is byte-identical both ways. One more correction for the owner: **Zelda II was never affected**,
+its dumps carrying 128 KiB of CHR-ROM, which the old size test already excluded.
+
 ### MMC1-2 — SZROM takes the PRG-RAM bank from bit 4, not bit 3 — DIFFERS
 
 **Point.** *SxROM* gives SZROM 128/256 KiB PRG, **16 KiB PRG-RAM** and 16-64 KiB of CHR-**ROM**,
@@ -383,6 +416,20 @@ protected game is mapper 1 submapper 3.
 
 **Risk of a fix.** None. The condition is a header test at load; `wired` at `mmc1.rs:72` would
 gain `|| header.submapper == 3` and nothing on any hot path changes.
+
+**Fixed in MF-LEG-1 (`ba326895`)**, behind `board-mmc1a`, and **the entry's reading of the `R`
+bit is not the page's**. The page gives `R` = 1 on an MMC1A as "fixed bank only affects
+A16..A14, **bit 3** directly controls A17 across the entire $8000-$FFFF address range" — so it is
+bit 3 that drives A17, and only for the *fixed* window of PRG modes 2 and 3; the switchable
+window and 32 KiB mode have bit 3 as A17 already, which is the rest of that sentence. AMD-061
+makes the page prevail, so the two fixed-bank numbers are now `prg & r` and
+`((0x08 & !r) | (prg & r)) | 0x07`, a mask for the reason `Mmc1::prg_disable_mask`'s own note
+gives. Two further notes. The suppression is of `prg_disable_mask` **only**: the SNROM `E` bit is
+the board wiring CHR A16 to the RAM's second chip enable, whichever revision of the ASIC sits on
+it, where mapper 155's page removes a wire. And `Mapper::mapper_number` had to learn the
+difference, both boards now having a zero `prg_disable_mask`. **Follow-up for the owner, not in
+this entry**: the page makes **mapper 155** the same MMC1A revision, so it should get the `R`
+bit's A17 too; it is out of this lot's scope and is one condition on the same line.
 
 ### MMC1-5 — the power-on value of the control register, and of the PRG-RAM disable — OPEN
 
@@ -1312,6 +1359,11 @@ assumed.
 **What a fix would look like.** One number added to the unconditional list at
 `registry.rs:1156`, beside 11, 66, 70, 78 and the rest. The machinery is already there.
 
+**Fixed in MF-LEG-1 (`4807030a`)**, exactly as described: `13` joins the unconditional list.
+One existing test had to move with it — `req_core_100_cprom_fixes_the_first_4_kib_of_chr_ram`
+selected its CHR banks by writing `$8000`, which over the fixture's zero-filled PRG bank 0 now
+lands as 0 — and it is the only test in the suite the change touched.
+
 - **No PRG-RAM** — the page says "PRG RAM: None" where this build gives the board the
   REQ-CORE-012 default 8 KiB. Same note as NROM and MMC2; FCEUX allocates none for this board
   either (`datalatch.cpp:243`, `wram = 0`). Not counted separately.
@@ -1607,6 +1659,12 @@ reason (MR-4-5).
 overrides reading its two bits — the same three-line shape `Mmc3Board` has
 (`mmc3.rs:1146-1160`). Both are load-free and off every hot path.
 
+**Fixed in MF-LEG-1 (`d172e5a6`)**, in exactly that shape, with the power-on value this entry
+asks for: `$03`, both permitted. `$9003` is left undecoded, the page listing no register there.
+Q-175 records the two choices the page does not settle — the power-on value, where Nestopia
+comes up denied — and that the two bits stay **out of the savestate**, a byte at the end of this
+board's block leaving every older mapper-18 state one short of it.
+
 **Test ROMs.** None for mapper 18 in `assets-free`.
 
 Count: 7 OK, 1 DIFFERS, 0 OPEN.
@@ -1710,6 +1768,18 @@ VRC2 and `memory.prg_ram()` is empty; `intercept_cpu_write` latches bit 0 (or wh
 page's diagram names) on a write in $6000-$6FFF, and `try_read_prg` answers it there. Both are
 off every hot path — the board already has an `intercept_cpu_write`-shaped hook for mapper 14's
 mirror guard.
+
+**Fixed in MF-LEG-1 (`75d34118`)**, behind `board-vrc2-latch`, in that shape with two
+differences. The gate is the **header's** declaration and not `memory.prg_ram()`: byte 10 of an
+NES 2.0 header, because `nes20_prg_ram_size` floors at 8 KiB so the buffer is never empty on its
+own — `registry::board_memory_sizes` is what then gives such a board no PRG-RAM, the latch
+replacing the chip rather than sitting beside it, which is also what makes `$7000-$7FFF` the open
+bus the page requires. And the write is taken in `write_register`'s existing `address < 0x8000`
+arm rather than in `intercept_cpu_write`, so the board gains no dispatch body. Q-174 holds two
+choices this entry does not raise: the top seven bits read 0 where the page says open bus, the
+only hook that carries the bus byte to a board being behind the parked `board-143-open-bus`; and
+the bit is outside the savestate, a byte written only when the latch exists leaving every older
+state of the same ROM one short.
 
 **Test ROMs.** `assets-free/test-roms/nes-test-roms/m22chrbankingtest` — a VRC2a CHR banking
 test, which would exercise the VRC2a right-shift of `vrc2_vrc4.rs:318-322` directly. **Not run
@@ -1873,6 +1943,12 @@ page.
 
 **Risk of a fix.** None: one enum variant at `iremg101.rs:79`. *Major League* is the only
 affected game and it is not in the widescreen packs.
+
+**Fixed in MF-LEG-1 (`8b793d47`)**: `NametableMirroring::SingleScreenB`, the upper page, which
+is the page's +5V and puNES's `mirroring_SCR1`. It is the one point of this lot where the build
+now follows the page **against Mesen**, whose `ScreenAOnly` is the lower page — AMD-061 §1. The
+MR-32-1 test gained the other half of its own finding as a second assertion: a `$9000` write must
+not move the mirroring of a submapper-1 dump.
 
 Count: 4 OK, 1 DIFFERS, 0 OPEN.
 
@@ -2166,6 +2242,26 @@ it, and in several cases that evidence is a test ROM already sitting in `assets-
 Zelda II is mapper 1, and the widescreen packs are on boards the mapper work added later. Of the
 nine differences, only entry 2 touches a board any of them runs on, and the change it suggests
 can only *enable* memory that is currently switched off — a game working today keeps working.
+
+**And lot MF-LEG-1 confirmed that, by measurement rather than by argument.** Six of the nine were
+fixed; golden-core over the 98 original ROMs is **byte-identical** to the commit before the lot,
+and the five games of entry 2 were played for 3600 frames each with the register sampled after
+**every CPU instruction** — 181 million instructions, and not one of them ever writes the value
+that would have switched its save RAM off. Two corrections for the owner, both in the entries:
+
+* **Zelda II was never at risk at all.** Entry 2 names it first; its dumps carry 128 KiB of
+  CHR-ROM, which the old test already excluded. The games that really are on the switch are
+  *Final Fantasy*, *The Legend of Zelda* and *Metroid*, and the fix leaves all three exactly as
+  they are — their headers declare the board. The one dump the fix does change is *Mega Man 2*,
+  whose header says it has **no save RAM**, which is correct: that cartridge has none.
+* **Entry 2's fix is the one thing this lot did not switch on.** The hardware test ROM in the
+  repository disagrees with it — two of its boards pass today and fail under the fix, because the
+  dump that tests the switch does not declare the memory chip it is testing. The fix is built and
+  one flag away; **Q-176** sets out the choice, and it is the owner's.
+
+Entry 9's *Major League* is the only place this lot moved against Mesen 2 and with the hardware
+page; entries 4, 6 and 8's mapper-1 half went in unconditionally and cost nothing measurable
+(worst ROM +0.001 %, the instrument's own floor, over a thirteen-ROM set).
 
 **And the single best thing this lot found is not a difference at all.** The mapper-conformance
 test ROMs are already in the repository and the harness does not run any of them:

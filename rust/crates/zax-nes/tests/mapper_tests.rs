@@ -3545,17 +3545,19 @@ fn mf_leg_1_only_a_header_named_vrc2_gets_the_microwire_latch() {
 
 /// REQ-CORE-090/091 and Q-174 section 2: the latch is **not** in the savestate, so the block of
 /// mappers 21, 22, 23, 25 and 27 is byte for byte what it was before this step and a state
-/// written before it still loads. A state loaded into a running machine leaves the live latch
-/// alone, which is what this pins.
+/// written before it still loads.
+///
+/// The discriminating assertion is the one after the load: the state was taken with the latch
+/// **set**, and `NesCore::restore_state` builds a fresh cartridge from the ROM before reading the
+/// block, so the latch comes back at its power-on 0. Were it in the format it would come back set.
 #[cfg(feature = "board-vrc2-latch")]
 #[test]
 fn q_174_the_vrc2_microwire_latch_is_not_in_the_savestate() {
     let mut core = MapperRom::new(22).chr(64).prg_ram(0, 0).load();
     core.write_memory(0x6000, 0x01);
+    assert_eq!(0x01, core.read_memory(0x6000));
     let state = core.save_state(false).expect("a state");
 
-    core.write_memory(0x6000, 0x00);
-    assert_eq!(0x00, core.read_memory(0x6000));
     assert!(core.try_load_state(&state, 0).is_ok());
     assert_eq!(
         0x00,
@@ -3576,6 +3578,51 @@ fn q_174_the_vrc2_microwire_latch_is_not_in_the_savestate() {
         state.len(),
         "the latched board's state is the other's minus its 8 KiB of RAM"
     );
+}
+
+/// **The owner's rule for this lot: older states must keep loading** (REQ-CORE-091).
+///
+/// `board_memory_sizes` shrinks a latched VRC2's PRG-RAM from REQ-CORE-012's 8 KiB to **zero**, so
+/// a state of that ROM written by a build before MF-LEG-1 step 2 carries an 8 KiB blob for a buffer
+/// that is now empty. `Cartridge::load_state` reads both memories with
+/// `StateReader::read_blob_prefix_into` for exactly this reason — lot MF-1 shrank three boards'
+/// RAM the same way — so the longer blob is consumed and discarded and the registers behind it
+/// still parse.
+///
+/// The old build cannot be run here, so its state is stood in for by the **same board with the
+/// RAM**: an iNES 1.0 mapper-22 image, whose cartridge block is byte for byte what the old build
+/// wrote for the NES 2.0 one. `include_rom_image` is false so that the block is the rollback form,
+/// which carries no ROM to check the swap against.
+#[cfg(feature = "board-vrc2-latch")]
+#[test]
+fn req_core_091_a_state_with_the_old_8_kib_prg_ram_loads_into_a_latched_vrc2() {
+    let mut with_ram = MapperRom::new(22).chr(64).load();
+    with_ram.write_memory(0x6000, 0xA5);
+    with_ram.write_memory(0xB000, 0x03); // Move a CHR register, so the block is not all zeros.
+    let old_state = with_ram.save_state(false).expect("a state");
+
+    let mut latched = MapperRom::new(22).chr(64).prg_ram(0, 0).load();
+    assert_eq!(
+        0,
+        latched.cartridge().unwrap().memory().prg_ram().len(),
+        "the latched board carries no work RAM"
+    );
+    latched.write_memory(0x6000, 0x01); // The latch, which the state does not carry.
+
+    let loaded = latched
+        .try_load_state(&old_state, 0)
+        .expect("an 8 KiB PRG-RAM blob must load into a board that has none");
+    assert_eq!(
+        old_state.len(),
+        loaded.consumed,
+        "the blob was not consumed"
+    );
+    // The registers behind the blob arrived: CHR 0's low nibble is the 3 written above, which a
+    // VRC2a addresses in 2 KiB units ("the low bit is ignored"), so the window shows bank 1.
+    assert_eq!(0x01, latched.chr_bank(0x0000));
+    // And the latch is back at its power-on 0, the load having rebuilt the cartridge from the ROM
+    // (Q-174 section 2).
+    assert_eq!(0x00, latched.read_memory(0x6000));
 }
 
 #[test]

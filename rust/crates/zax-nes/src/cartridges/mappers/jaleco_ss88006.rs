@@ -36,9 +36,11 @@ pub struct JalecoSs88006 {
     ///
     /// **Not in the savestate**, for Q-174 section 2's reason in the same words: a byte written
     /// here would leave every mapper-18 state written before this step one short of the board's
-    /// block, and there is no per-board length to read it tolerantly against. A state loaded into
-    /// a running machine therefore keeps the permissions that machine has, and a machine powered
-    /// on has `$03`. Q-175 section 2 holds the choice.
+    /// block, and there is no per-board length to read it tolerantly against. A state load
+    /// therefore returns the register to `$03`, `NesCore::restore_state` building a fresh
+    /// `Cartridge` from the ROM before it reads the block — and `$03` is the permissive value, so
+    /// the one direction a load can move the board in is the one that cannot lose a save.
+    /// Q-175 section 2 holds the choice.
     prg_ram_protect: u8,
 }
 
