@@ -441,5 +441,124 @@ The two extra are step 1's narrowing tests, which only exist in the gated build.
 
 **Q-176** carries the evidence and the question for R0: which of the hardware test ROM and the
 header-declared rule wins for a dump whose header under-declares the cartridge it tests.
-- [ ] 9/10 the callgrind campaign and the feature decisions
+- [x] 9/10 the callgrind campaign and the feature decisions
+
+### 9/10 — the callgrind campaign, and the three feature decisions
+
+Binaries built by `rust/tools/perf/build-clean.sh` from their own tar into a **fresh** directory
+with its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`. The variant tars were
+made from the shipped tar by deleting or adding one line of zax-nes's `default` list
+(`rust/target-mf/variant-tar.sh`, `variant-tar-add.sh`, both scratch and neither committed).
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `leg1-base` | **`a775d0e7`**, the lot's base commit | `efcc1cd005cdf6ec975c164be9a8f4dd` |
+| `leg1-again` | a byte copy of the base, the **same-binary floor** | the same |
+| `leg1b-ship` | **the shipped configuration** (`530979f7`): the six fixes, `board-vrc2-latch` and `board-mmc1a` in `default`, `mmc1-snrom-header` out | `6ec0ea0ce0c33062b93d03ba74cc5b3e` |
+| `leg1b-off` | the shipped tree with **both board features out** of `default` — the four free fixes alone | `5476d3de7d7b76a294910977bffb8046` |
+| `leg1b-vrc2` | `leg1b-off` plus `board-vrc2-latch` | `da4a30e837cd70346a318f3ed4228131` |
+| `leg1b-mmc1a` | `leg1b-off` plus `board-mmc1a` | `c3cb7eb03120e743adb136cc219dfb4b` |
+| `leg1b-snrom` | the shipped configuration plus **`mmc1-snrom-header`** | `5b153d8bedb433c35aa5c47d10f08778` |
+| `leg1b-ship2` | a byte copy of `leg1b-ship`, the **second** same-binary floor | the same |
+
+**The base binary's md5 is `efcc1cd005cdf6ec975c164be9a8f4dd`, which is MF-FIX's shipped binary to
+the byte** — so this lot's base is that lot's measured binary, the **eleventh** lot in a row for
+which that holds, and built rather than assumed.
+
+A first set of six builds was measured before step 8 and is discarded: it carried the SNROM
+narrowing unconditionally, which is not what ships. Its one finding survives as a cross-check —
+`m1` +0.008 % against the base, the same figure `leg1b-snrom` gives below for the same cause.
+
+#### 9.1 The floor, measured twice on each instrument
+
+PR-1's thirteen, the base binary against its own byte copy: worst **+0.001 %** (`m0` +30 986,
+`oamstr` +32 548, `vblnmi` +17 300), set total −21 671. So **±0.001 % is noise on PR-1**, a
+twentieth of the tolerance, which is what MF-FIX recorded too.
+
+Level 2 is a different matter, and this is the step's most important figure:
+
+| pair (identical binaries) | `metroid` | `mm2` | `smb1` | `smb3` | `zelda2` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `leg1-base` vs `leg1-again` | −0.000 | +0.000 | +0.004 | −0.009 | **+0.014** |
+| `leg1b-ship` vs `leg1b-ship2` | +0.000 | −0.000 | −0.007 | **+0.018** | −0.006 |
+
+**The same binary measured twice differs by up to +0.018 % on a level-2 game.** The owner's
+tolerance is +0.02 % per ROM, so on this machine the level-2 instrument sits *at* its own noise
+floor and **cannot resolve anything this lot does**. Every level-2 figure below is inside that
+spread, and none of them should be read as a cost. PR-1 is the instrument with signal here.
+
+#### 9.2 The shipped configuration against the base commit
+
+PR-1's thirteen:
+
+| ROM | `leg1-base` | `leg1b-ship` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 276 144 | 3 308 310 018 | +33 874 | +0.001 |
+| `oamstr` | 3 318 463 579 | 3 318 481 961 | +18 382 | +0.001 |
+| `m1` | 4 881 121 571 | 4 881 147 212 | +25 641 | +0.001 |
+| `metroid` | 5 115 565 028 | 5 115 559 737 | −5 291 | −0.000 |
+| `m4` | 5 468 329 412 | 5 468 349 834 | +20 422 | +0.000 |
+| `m0` | 5 517 316 685 | 5 517 339 588 | +22 903 | +0.000 |
+| `smb1` | 5 996 382 100 | 5 996 347 410 | −34 690 | −0.001 |
+| `mm2` | 6 018 023 926 | 6 018 006 275 | −17 651 | −0.000 |
+| `z2` | 6 291 549 527 | 6 291 498 199 | −51 328 | −0.001 |
+| `readbuf` | 6 834 494 756 | 6 834 503 592 | +8 836 | +0.000 |
+| `duelito` | 7 380 435 837 | 7 380 441 958 | +6 121 | +0.000 |
+| `smb3` | 7 949 444 516 | 7 949 447 140 | +2 624 | +0.000 |
+| `mmc5` | 11 266 834 150 | 11 266 804 885 | −29 265 | −0.000 |
+| **total** | 79 346 237 231 | 79 346 237 809 | **+578** | +0.000 |
+
+**Worst ROM +0.001 %, which is the floor, and the set total is +578 instructions out of
+79 346 237 231.** The lot costs nothing measurable.
+
+Level 2: `smb1` +0.017 %, `zelda2` +0.014 %, `smb3` −0.003 %, `metroid` −0.001 %, `mm2` −0.000 %,
+total +0.004 %. All inside the ±0.018 % floor of §9.1 — `zelda2`'s +0.014 % is the number the
+identical binary produced, and `smb3`, which the identical binary moved +0.018 %, is *negative*
+here.
+
+#### 9.3 The attribution
+
+**The four fixes with no feature** (steps 3, 4, 6 and the MMC1A-less part of 5),
+`leg1-base` → `leg1b-off`: PR-1 worst `vblnmi` **+0.003 %** (+83 626), set total +90 530
+(+0.000 %), nine of thirteen inside ±0.001 %. Level 2 worst `smb3` +0.016 %, inside the floor.
+`vblnmi` is `ppu_vbl_nmi` and is on none of the four boards, so its +83 626 is code layout; it is
+a seventh of the tolerance.
+
+**`board-vrc2-latch` alone**, `leg1b-off` → `leg1b-vrc2`: PR-1 worst `oamstr` **+0.002 %**
+(+58 413), set total +103 283 (+0.000 %). Level 2: **no game slower, total −0.005 %** — the
+verdict line's own "keepable". No ROM of either set is a VRC board, so what moved is layout, and
+the one real cost — an `is_some` on a write below `$8000` and one in `try_read_prg` — is on paths
+these ROMs do not take. **Stays in `default`.**
+
+**`board-mmc1a` alone**, `leg1b-off` → `leg1b-mmc1a`: PR-1 worst `mm2` **+0.001 %** (+44 997), set
+total **−46 243**. Level 2 `smb1` +0.010 % against `smb3` −0.023 %, total −0.004 % — mixed signs,
+i.e. noise. **The layout risk this feature was created for did not materialise**: the byte on
+`Mmc1` cost `m1`, `mm2`, `metroid` and `z2` nothing beyond the floor, where MF-6b step 1 had
+priced one byte of displacement on a comparable struct at up to +0.027 %. **Stays in `default`.**
+
+**`mmc1-snrom-header` alone**, `leg1b-ship` → `leg1b-snrom`: PR-1 worst `m1` **+0.008 %**
+(+371 127), every other ROM inside ±0.001 %, set total +403 238 (+0.001 %). Level 2 worst `smb3`
++0.002 %, total −0.001 %.
+
+`m1` is `holy-mapperel/testroms/M1_P128K.nes` — **the very ROM of Q-176**. With the feature on it
+stops being an SNROM, its `4000` digit fails, and the ROM runs a different path; the +371 127 is
+that, not a code cost. The pre-step-8 build set measured the same +0.008 % on the same ROM from the
+same cause, which is the cross-check. Inside the tolerance by a factor of two and a half.
+
+#### 9.4 The decisions
+
+| feature | worst PR-1 ROM | worst level-2 game | in `default`? |
+| --- | --- | --- | :-: |
+| the six fixes as shipped | `vblnmi`/`oamstr`/`m1` **+0.001 %** (the floor); total **+578** | `smb1` +0.017 %, inside the ±0.018 % floor | yes |
+| `board-vrc2-latch` | `oamstr` **+0.002 %**; total +103 283 | none slower, total −0.005 % | **yes** |
+| `board-mmc1a` | `mm2` **+0.001 %**; total **−46 243** | mixed signs, total −0.004 % | **yes** |
+| `mmc1-snrom-header` | `m1` **+0.008 %** — the test ROM's own path, not a code cost | `smb3` +0.002 %, total −0.001 % | **no — Q-176, and not for its figure** |
+
+**Nothing is parked for a figure.** All three features are inside the owner's +0.02 % per ROM on
+both instruments, so the "no exclusion for performance" rule is not reached at all;
+`mmc1-snrom-header` is out of `default` for what it changes (two `holy-mapperel` rows) and not for
+what it costs, which is why it is **not** in `parked-boards` either — the same place
+`ppu-exact-sprite-eval` and `ppu-2007-render-read` sit, and for the same reason.
 - [ ] 10/10 the final check and the report annotations
