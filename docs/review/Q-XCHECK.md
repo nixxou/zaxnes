@@ -75,7 +75,22 @@ that point at all; "n/s" = the project does not support the number.
 | Q-147 §2 | 107 | bus conflicts | "unknown" | none | none | none | none | none | **CONFIRMED** |
 | Q-147 §2 | 107 | register width | 8 bits | 8 bits | 8 bits | 2/3 bits | 8 bits | the **address**, not the datum | **CONFIRMED** |
 
-*(rows for Q-148 onward are appended by the later batches of this lot)*
+| Q-148 | 35 | which board the number is | 209's, + 8 KiB WRAM | 209's | the SC-127 | the SC-127 | n/s | **209's** | **OPEN** |
+| Q-149 | 35/90/209/211 | `$D001` bit 3 = Extended Mirroring | yes | yes | — | — | — | **yes** | **CONFIRMED** |
+| Q-149 | 211 | a special case, or 209? | 209 | 209 | special-cased | special-cased | dip default "on" | **209** | **CONFIRMED** |
+| Q-149 | 35/90/209/211 | the per-table RAM/ROM compare | `$D002` bit 7 | `$D002` bit 7 | `$D002` bit 7 | `$D001` bit 7 | `$D002` bit 7 | `$D002` bit 7 | **CONFIRMED** |
+| Q-150 §1 | 35/90/209/211 | PRG mode 3 reverses bit 3 onto itself | yes | yes | no (six terms) | not implemented | no (six terms) | **yes** | **CONFIRMED** |
+| Q-150 §2 | 35/90/209/211 | `$8003` in 32 KiB mode | a 32 KiB bank | 32 KiB | **8 KiB** at `$8000`, 32 KiB at `$6000` | 32 KiB | 32 KiB | 32 KiB | **CONFIRMED** |
+| Q-150 §3 | 35/90/209/211 | with `L=1`, mask and outer bank still apply | yes | yes | no | no | no | **yes** | **OPEN** |
+| Q-150 §4 | 35/90/209/211 | `$D003` bit 7 folds CHR regs 2/3 in 2K/1K modes | no | no | **yes** | no | no | no | **CONFIRMED** |
+| Q-150 §5 | 35/90/209/211 | the MMC4-like latch is gated on `$D003` bit 7, all numbers | yes | yes | no gate, 209 only | no gate, 209 only | no gate, all numbers | **yes, all numbers** | **CONFIRMED** |
+| Q-151 §1 | 35/90/209/211 | a disabled counter does not advance | yes | yes | advances | advances | does not | does not | **CONFIRMED** |
+| Q-151 §2 | 35/90/209/211 | disabling resets the prescaler | yes | yes | no | no | no | **yes** | **OPEN** |
+| Q-151 §3 | 35/90/209/211 | the prescaler's down-wrap | at the mask | at the mask | at zero | at the mask | at the mask | at the mask | **CONFIRMED** |
+| Q-151 §4 | 35/90/209/211 | IRQ source 3 ("CPU writes") | documented | not clocked | clocked (CPU-level) | not clocked | not clocked | clocked, cartridge writes only | **OPEN (gap)** |
+| Q-152 | 35/90/209/211 | a write to a ROM nametable | silent | dropped | **reaches CIRAM** | dropped | dropped | dropped | **CONFIRMED** |
+
+*(rows for Q-154 onward are appended by the later batches of this lot)*
 
 ---
 
@@ -483,6 +498,188 @@ ever appears, but no page supports it.
   slip in puNES rather than as evidence. **CONFIRMED**: this build matches the page, Mesen 2 and
   Nestopia.
 
+## Q-148 to Q-152 — the J.Y. Company ASIC (mappers 35, 90, 209, 211)
+
+One finding governs all five tickets and should be read first: **puNES treats mappers 35, 90, 209 and
+211 as one board** (`third_party/punes/src/core/mappers.c:160-161`, `:316-317`, `:627-628`,
+`:633-634`, all four `case`s calling `map_init_209`), with exactly **one** per-number parameter —
+`init_JYASIC(info.mapper.id != 90, …)` at `src/core/mappers/mapper_209.c:43`. That is this build's
+shape to the letter: one board, no per-number difference but mapper 90's jumper. The shared chip
+model is `src/core/mappers/JYASIC.c` (535 lines) with the number-specific bank composition in
+`mapper_209.c`. Nestopia has three classes with shared code and differing dip-switch defaults
+(`source/core/board/NstBoardJyCompany.cpp`, 858 lines); Mesen 2 has one class plus a separate small
+board for 35; FCEUX has one file with two `is209`/`is211` flags (`src/boards/90.cpp`, 507 lines).
+
+So on the arithmetic tickets the tally is usually **the page + this build + puNES against Mesen 2 and
+FCEUX, with Nestopia splitting** — and puNES is a genuinely independent reading, because where it
+agrees with this build it agrees on details (the seven-bit reversal's middle bit, the `L=1` mask, the
+`$D003` bit 7 gate) that Mesen's and FCEUX's shared ancestor gets differently.
+
+### Q-148 — is mapper 35 the J.Y. ASIC's board, or a board of its own?
+
+* **the page** — "[INES Mapper 035] is like Mapper 209 but explicitly specifies 8 KiB of WRAM … an
+  exact duplicate of INES Mappers 209".
+* **this build** — mapper 209's board, with the 8 KiB stated in `board_memory_sizes`.
+* **Mesen 2** — `Core/NES/Mappers/JyCompany/Mapper35.h` (note the directory), a 75-line board with
+  four PRG registers at `$8000-$8003`, eight CHR registers at `$9000-$9007`, `$C002`/`$C003`/`$C005`
+  and `$D001`, and an MMC3-style **filtered A12** down-counter through `A12Watcher`.
+* **FCEUX** — `src/ines.cpp:567` maps mapper 35 to `UNLSC127_Init`, i.e. `src/boards/sc-127.cpp`,
+  which is the **UNL-SC-127** board and is the same register set and the same filtered-A12 counter as
+  Mesen's `Mapper35`. The entry's own UNIF board name is "Wario Land 2". So Mesen's class is this
+  board, and FCEUX is where it comes from (`src/unif.cpp:412` registers the same `SC-127`).
+* **Nestopia UE** — **no mapper 35 at all**: `source/core/board/NstBoardJyCompany.cpp`'s ines switch
+  goes from `case 34` straight to `case 36`.
+* **puNES** — mapper 209's board (`src/core/mappers.c:160-161`).
+
+**Verdict: OPEN**, and the cross-check hardened the question rather than settling it. Two useful
+observations:
+
+1. **The SC-127's registers are a strict subset of the J.Y. ASIC's addresses.** `$8000-$8003` are the
+   chip's four PRG registers in 8 KiB mode, `$9000-$9007` its eight CHR registers in 1 KiB mode,
+   `$D001` its nametable arrangement, and `$C002`/`$C003` its IRQ disable/enable with `$C005` its IRQ
+   counter. That is exactly this ticket's reason 3 ("a mapper-35 image whose game uses only the
+   registers Mesen's small board has runs identically on this build"), and it is now verified against
+   the register list rather than asserted.
+2. **The one register that is not a subset is the counter**, which is the ticket's own falsifier.
+   Both SC-127 implementations clock it from a **filtered PPU A12** and fire when it reaches zero
+   counting **down**; the J.Y. ASIC powers on with source 0 (CPU M2), a prescaler at `$C004` and a
+   direction in `$C001` bits 6-7. A dump that writes only `$C002`/`$C003`/`$C005` therefore gets a
+   scanline IRQ on the SC-127 board and an M2-rate (or stopped) counter on this one.
+
+So: keep the page's reading — it is the number's own documentation and puNES agrees — but **the
+observation that closes this ticket is now precisely specified**: does *Warioland II* write `$C001`
+and `$C004`? If it does not, the SC-127 board is what the dump was built for and this build needs
+either a submapper or a per-ROM exception. Two of the four run the number's one title on that board,
+which is the strongest argument available for it.
+
+### Q-149 — `$D001` bit 3 is Extended Mirroring, and mapper 211 is therefore mapper 209
+
+* **`$D001` bit 3** — **puNES decodes it.** `JYASIC.c:160` keeps bit 3 of `$D001` only for the numbers
+  whose per-number flag is set (`mode[1] = !extended_mode ? value & ~0x08 : value`), and
+  `JYASIC.c:462-469` is the mechanism: with bit 3 set and ROM nametables off, each of the four tables
+  takes its CIRAM page from `$B000-$B003` **bit 0**. That is the page's Extended Mirroring and this
+  build's `JyCompany::nametable_page_of`.
+  Mesen 2 (`JyCompany.h:354`, `_mirroringReg = value & 0x03`) and FCEUX
+  (`src/boards/90.cpp:96-104`, `switch (tkcom[1] & 3)`) decode two bits and no more; Nestopia
+  (`NstBoardJyCompany.cpp:841`, `SetMirroringVH01( regs.ctrl[1] )`) likewise.
+  **CONFIRMED** — the page and puNES against three that read only `MM`.
+* **mapper 211** — **puNES has no special case**: all four numbers go to `map_init_209` and the only
+  flag is `id != 90`. Mesen 2 has `|| _romInfo.MapperID == 211` twice (`JyCompany.h:260`, `:387`);
+  FCEUX has `((tkcom[0]&0x20&&is209)||is211)` (`src/boards/90.cpp:76`); Nestopia makes it a user **dip
+  switch** whose default is "controlled by the register" for 209 and "always on" for 211
+  (`NstBoardJyCompany.cpp:61-64`, `:832`). **CONFIRMED** — and the three dissenters' shape is exactly
+  the historical definition the page calls an error ("the mapper was defined when the function of
+  register `$D001` bit 3 was not known"), which is now visible as a lineage: decode the bit and the
+  special case has nothing left to do, which is what puNES demonstrates.
+* **a third point the ticket does not raise, found here**: the per-table RAM/ROM compare. The page
+  says `$B00x` bit 7 against **`$D002`** bit 7; this build, Mesen 2 (`JyCompany.h`, `_ntRegs` vs
+  `_chrBlockMode` register) , Nestopia (`NstBoardJyCompany.cpp:838`, `(banks.nmt[i] ^ regs.ctrl[2])`)
+  and puNES (`JYASIC.c:454`, `(mode[2] ^ nmt.reg[i]) & 0x80`) all use `$D002`; **FCEUX uses `$D001`
+  bit 7** (`src/boards/90.cpp:88`, `(tkcom[1]&0x80)==(names[x]&0x80)`). FCEUX alone. **CONFIRMED** for
+  this build.
+
+### Q-150 — the five places the page and Mesen 2 differ on bank arithmetic
+
+1. **PRG mode 3 reverses bits 0-6, bit 3 onto itself.** puNES's `prg_reverse_JYASIC`
+   (`JYASIC.c:519-534`) has **seven** terms, including `((value & 0x08) << 0)` with the comment
+   `// 0x08`. Identical to this build's `JyCompany::prg_register`. Mesen 2's `InvertPrgBits`
+   (`JyCompany.h:161`) has six and Nestopia's `Banks::Unscramble`
+   (`NstBoardJyCompany.cpp:434-443`) has the same six; FCEUX does not implement the mode at all — its
+   `tekprom` has `case 03: // bit reversion` falling through to the unreversed `case 02`
+   (`src/boards/90.cpp:121-122`). **CONFIRMED**: the page, this build and puNES; the six-term form is
+   a dropped middle term in one lineage and FCEUX's comment shows it was never written.
+2. **`$8003` is a 32 KiB bank in 32 KiB mode.** puNES `JYASIC.c:333-339` (`last_bank <<= 2`, four
+   consecutive 8 KiB banks) and `:421-426` (`$6000` = `prg[3] << 2 | 3`, the page's "SHL 2 OR 3") —
+   consistent. Nestopia `NstBoardJyCompany.cpp:717-720` (`SwapBank<SIZE_32K>((last & 0xF) | …)`) and
+   `:703-707` — consistent. FCEUX `src/boards/90.cpp:131` (`setprg32`) and `:129` — consistent.
+   **Mesen 2 alone is inconsistent with itself**: `JyCompany.h:174` is `SelectPrgPage4x(0,
+   prgRegs[3])`, four *8 KiB* pages from that register (its fixed default `0x3C` confirms the unit),
+   while `:177` is `prgRegs[3] * 4 + 3`. **CONFIRMED** — three of the four and the page. *(A second
+   Mesen inconsistency, not in the ticket: in 16 KiB mode `:182` shifts `prgRegs[1]` but `:183` does
+   not shift `prgRegs[3]`, so `$C000` takes it as an 8 KiB bank.)*
+3. **With `L=1` the CHR bank is still masked and `cc` still applies.** **puNES implements the page
+   exactly** — `mapper_209.c:66-75`: the base is `C` at bank bit 8 and `cc` at bits 9-10, and with
+   `L` set the base keeps only `cc` and the mask widens to nine bits. Identical to this build's
+   `JyCompany::chr_bank`. Mesen 2 (`JyCompany.h:212-216`), FCEUX (`src/boards/90.cpp:152`,
+   `if(!(tkcom[3]&0x20))`) and Nestopia (`NstBoardJyCompany.cpp:758-761`, `mask = 0xFFFF; bank = 0`)
+   all drop both when `L` is set and use the raw 16-bit register pair. **Verdict: OPEN** — 3-1 against
+   this build on the count, but the three are one expression (FCEUX's is the original) and the page is
+   explicit and internally consistent ("Mask `$900x`/`$A00x` to 512 KiB, ignore C", with `cc` never
+   qualified). Keep. **What would close it**: a J.Y. image with more than 512 KiB of CHR-ROM that sets
+   `$D003` bit 5 — below that size the two readings both wrap to the same bank.
+4. **`$D003` bit 7 is the MMC4-like mode and nothing else.** puNES never folds CHR registers
+   (`JYASIC.c:378-404`: 2 KiB mode uses registers 0, 2, 4, 6 and 1 KiB mode 0 to 7), nor does
+   Nestopia (`NstBoardJyCompany.cpp:790-813`) nor FCEUX (`src/boards/90.cpp:174-181`). Mesen 2's
+   `_mirrorChr` fold (`JyCompany.h:208`) is **Mesen's alone**. **CONFIRMED**, three of four and the
+   page.
+5. **The latch is gated on `$D003` bit 7, on every number.** **puNES gates on exactly that bit and
+   checks no mapper number**: `JYASIC.c:237` is `if (jyasic.mode[3] & 0x80)` around the
+   `$0FD8`/`$0FE8` decode, and `mapper_209.c` installs the hook for all four numbers. Identical to
+   this build. Mesen 2 (`JyCompany.h:387` region, `MapperID == 209`) and FCEUX
+   (`src/boards/90.cpp:390`, `if(is209)` with `chr[0]=0; chr[1]=4` forced otherwise) gate on the
+   **number** and not the bit; Nestopia gates on neither — its latch runs for all three numbers but
+   is conditioned only on the CHR 4 KiB mode (`NstBoardJyCompany.cpp:485-489`). **CONFIRMED** — the
+   page and puNES, with Nestopia agreeing on the half that matters most (the mode is not
+   mapper-specific).
+
+A detail worth recording because it is identical in all five implementations: the latch **values**.
+This build's `chr_4k_register` is `window * 4 + latch * 2` (registers 0/2 for the left table and 4/6
+for the right); puNES's latch arithmetic (`JYASIC.c:241`) yields `{0,2}` and `{4,6}`, Nestopia's
+(`:485`) the same expression, and FCEUX's `chr[]` is initialised to `{0,4}` (`src/boards/90.cpp:415`).
+Five for five.
+
+### Q-151 — the IRQ
+
+* **§1, "inhibits counting".** This build returns from `tick_irq` while disabled. **Nestopia agrees**
+  — its counter is only ever reached through `IsEnabled(source) && base.Clock()`
+  (`NstBoardJyCompany.cpp:420-431`) — and **puNES agrees** (`JYASIC.c:490-492`, an early return on
+  `!jyasic.irq.active`). Mesen 2 advances regardless and tests the flag only at the fire
+  (`JyCompany.h:442`); FCEUX does the same (`src/boards/90.cpp:331-347`, `CCL` tests `IRQa` only
+  inside the `if (IRQCount == 0)`). **CONFIRMED**, 3-2 for the page, and the page's own step 1 begins
+  "When counting is enabled".
+* **§2, "resets the prescaler to zero".** **Only puNES does it** (`JYASIC.c:122-126` for `$C000` with
+  bit 0 clear and `:134-137` for `$C002`, both setting `prescaler = 0`). Mesen 2, FCEUX
+  (`src/boards/90.cpp:250-252`) and Nestopia (`NstBoardJyCompany.cpp:611-619`) all leave the
+  prescaler where it was. **Verdict: OPEN.** Three omissions of a one-line documented effect are not
+  evidence that the page is wrong, and the page's gloss is unambiguous ("'Disabling' acknowledges a
+  pending IRQ, inhibits counting, and resets the prescaler to zero"). Keep. **What would close it**: a
+  game that disables and re-enables without rewriting `$C004` and whose raster effect lands a whole
+  prescaler period out — which is what this build's own test constructs.
+* **§3, the prescaler's down-wrap.** This build wraps when the decremented prescaler **matches the
+  mask**. FCEUX (`src/boards/90.cpp:365`), Nestopia (`NstBoardJyCompany.cpp:418`) and puNES
+  (`JYASIC.c:505`) all write the same condition. **Mesen 2 alone** wraps off a prescaler of one
+  (`JyCompany.h:432` region). **CONFIRMED**, 3-1 and the page.
+* **§4, IRQ source 3 ("CPU writes").** This build does not clock it. **FCEUX does not either** — its
+  three dispatchers cover sources 0, 1 and 2 (`src/boards/90.cpp:372`, `:378`, `:384`) and there is
+  no fourth. **Nestopia does not**: it names the mode (`NstBoardJyCompany.hpp:212`,
+  `MODE_CPU_WRITE`) and clocks only M2, A12 and PPU-read. **Mesen 2 does, completely**, by asking the
+  CPU (`JyCompany.h:373`, `_console->GetCpu()->IsCpuWrite()`) — which is exactly the hook this core
+  has not got, so Mesen 2 confirms the ticket's analysis of the cost rather than contradicting it.
+  **puNES clocks it partially**: `JYASIC.c:63-65` clocks the prescaler at the top of the cartridge's
+  own write handler, so cartridge-space writes count and zero-page writes do not — the page's "CPU
+  writes" is all writes. **Verdict: OPEN (a recorded gap)**, shared with two of the four. Worth adding
+  to the ticket: puNES's shape is a cheap partial that this core could copy for nothing (the
+  `Cartridge::cpu_write` path already exists) if a title turns out to select source 3 and to write
+  mostly to cartridge space; the full version needs the hook the ticket prices.
+
+### Q-152 — a write to a cartridge-served nametable
+
+* **Mesen 2** keeps the CIRAM byte under the overlay, installing the mapping on the **read** path only
+  and saying so in a comment that cites a nesdev forum thread (`JyCompany.h:385-387`).
+* **FCEUX** switches the nametable pointer itself (`src/boards/90.cpp:81`, `:89-91`,
+  `setntamem(CHRptr[0] + …, 0, x)`), whose second argument marks the page as **not RAM**, so a write
+  to it is discarded.
+* **Nestopia UE** swaps the nametable's *source* to CHR-ROM (`NstBoardJyCompany.cpp:838`), and a
+  write to a ROM source is discarded.
+* **puNES** maps it with `memmap_nmt_chrrom_1k`, whose implementation sets the region's write flag to
+  false (`src/core/memmap.c:1592-1596`, `BYTE wr = FALSE`), so the write is dropped.
+
+**Verdict: CONFIRMED.** Three of the four do exactly what this build does — drop the write and lose
+the byte underneath. Mesen 2's behaviour is the more accurate one and it is the only project that has
+it, which is the ticket's own reading: the right answer costs a change to the
+`SERVED_BY_CARTRIDGE` contract, and nobody but Mesen 2 has paid it. The ticket's choice stands and its
+test stays as the thing to rewrite if that contract ever grows a direction.
+
 ---
 
 ## CHANGE — ready-to-use fix descriptions for a later lot
@@ -572,3 +769,7 @@ affected and the risk to existing boards.)*
 | Q-144 §3 | 115's `$6000` bit 6 = PRG A18 | driven in both modes | a mapper-115 image larger than 256 KiB. None is known, and three of the four cap the board's PRG below the point where the bit could matter. |
 | Q-144 §4 | 121/187's CHR A18 | PPU A12, both modes, right table = second half | *Street Fighter Zero 2 '97* or *The King of Fighters '96*, one screen. See CHANGE 3. |
 | Q-147 §1 | 38's `$F000-$FFFF` | banks, as the page infers | a *Crime Busters* trace with a write in `$F000-$FFFF`, or a photograph of the UNL-PCI556's 74138 enables. All four decode `$7000-$7FFF` only (Nestopia widens downward to `$6000` instead). |
+| Q-148 | mapper 35's board | 209's board + 8 KiB WRAM | whether *Warioland II* writes `$C001` and `$C004`. Mesen 2 and FCEUX run the number's one title on the **UNL-SC-127** board, whose registers are a subset of the J.Y. ASIC's except for the counter: a filtered-A12 down-counter against this chip's prescaler-driven one. If the dump never selects a source, the SC-127 is what it was built for. |
+| Q-150 §3 | the CHR mask and outer bank with `L=1` | masked to 512 KiB, `cc` applies | a J.Y. image with more than 512 KiB of CHR-ROM that sets `$D003` bit 5. puNES agrees with this build; Mesen 2, FCEUX and Nestopia use the raw 16-bit register pair, which is one FCEUX-derived expression. |
+| Q-151 §2 | disabling resets the prescaler | yes | a game that disables and re-enables without rewriting `$C004`. Only puNES implements the page's third effect; the other three simply omit it. |
+| Q-151 §4 | IRQ source 3, "CPU writes" | documented, not clocked | whether any of the thirteen titles writes `$C001` with bits 1-0 = 3. FCEUX and Nestopia have the same gap; Mesen 2 implements it with a CPU-level "is this a write" query this core has not got; **puNES gets a cheap partial** by clocking on cartridge writes only, which this core could copy on the existing `Cartridge::cpu_write` path. |
