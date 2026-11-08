@@ -17,7 +17,7 @@ appended `## Cross-check (Q-XCHECK)` section on each ticket file in `spec/change
 | 3/6 | Q-154, Q-155, Q-156, Q-157, Q-158, Q-159 (178, 163, 268) | **done** |
 | 4/6 | Q-160, Q-161, Q-162, Q-163 (8259, 112/193, 298, 218) | **done** |
 | 5/6 | Q-164, Q-165, Q-166, Q-167, Q-168 (12, 14, 83/264, 91) | **done** |
-| 6/6 | Q-169, Q-170, Q-171, Q-172 + final check | pending |
+| 6/6 | Q-169, Q-170, Q-171, Q-172 + final check | **done** |
 
 ## Batch 1/6 — done
 
@@ -150,4 +150,51 @@ CONFIRMED, six OPEN, **one CHANGE**.
   decode, the 5/4 counter's borrow-out firing, "last bank of the inner 128 KiB" and `$6004` =
   horizontal. Only submapper 0's free-running-vs-stops question stays open, two-two.
 
-`git status`: clean except `rust/target-mf/` (untracked build output, never staged).
+## Batch 6/6 — done
+
+Tickets Q-169 to Q-172 (mapper 111's flash save, mapper 164's 93C66, the Kǎshèng trio 215/208/219,
+and the three singletons 262/292/246). Twenty-nine more verdict rows: twenty-two CONFIRMED, five OPEN,
+**two CHANGE**.
+
+* **Q-172 §2 is the most actionable finding of the whole lot.** **Mesen 2 and puNES both fill mapper
+  292's two data registers by reading the game's zero page at `$6A` and `$FF` directly**, not from a
+  bus latch, deriving it from the page's own "The game writes the desired values to zero page". So
+  §7.2's "no new hook" is right after all — by a route §7.2 did not describe — and the +1.098 % that
+  parked `board-292` is avoidable. §CHANGE 8 has the edit, the blocker (the board needs to read console
+  RAM) and the accuracy trade.
+* **Q-172 vindicates its own §0 method twice**: mapper 262's CHR-RAM select is bit **6** in all three
+  projects that support the number (the paraphrase that put it at bit 7 is refuted everywhere), and
+  **Mesen 2's four CHR A18 lines are `[3,3,2,2,0,0,1,1]` — this build's array to the entry, crossing
+  included.** §1.3 is a CHANGE the other way: all three serve the CHR-RAM chip **unbanked**, the
+  alternative the ticket names (§CHANGE 7).
+* **Q-171 is confirmed on five of six points by puNES alone**, including the one the ticket says the
+  page cannot settle: mapper 215 submapper 1's overlaid `$5001` rows are **PRG bits 3/1/0 and CHR bits
+  3/2/1** in puNES, this build's reading to the bit. Also 208's `$A000` inert on submapper 0 and live
+  on submapper 1, the index as the written value, 219's outer bank inside `$5000-$5FFF`, and the mode
+  bit latched only by `$8002`. §3 (`$5001`'s `$xF` power-up) is the one OPEN: Mesen 2 and puNES both
+  use `$03`.
+* **Q-170**: puNES is the only project that implements the 93C66, and it confirms **all three** of
+  §1's contradictions with §7.2 — **eight-bit words**, a separate device type, and the bytes in the
+  NVRAM slice — plus §2.1 (bit 6 decoded and inert, in a comment) and §2.4 (the 1 bpp substitution on
+  the write path).
+* **Q-169**: Mesen 2 independently reaches this build's three shapes (a medium beside the battery RAM
+  and not gated on the battery bit, a diff rather than a chip image, the diff in the savestate), while
+  FCEUX gates on the battery bit and stores the whole 512 KiB. Mesen 2 also implements the
+  `$90`/`$F0`/`$10` commands this build leaves out.
+* **Q-172 §3**: puNES forces mapper 246's PRG A17 under **exactly this build's `$FFE4` constant**, and
+  both FCEUX and puNES keep `$6003` across a soft reset as the page's "only" requires (Mesen 2 restores
+  it). The register window is the one OPEN — all three decode `$6000-$67FF`, §7.2's figure rather than
+  the page's mask.
+
+## Final check
+
+* Every ticket from **Q-140 to Q-172 except Q-153** has at least one verdict row in
+  `docs/review/Q-XCHECK.md`'s summary table (147 rows in total) **and** an appended
+  `## Cross-check (Q-XCHECK)` section in its own file under `spec/changes/`. Verified by enumeration.
+* **Q-153 is untouched** — zero occurrences of `Q-XCHECK` in it.
+* **No Rust code was changed**, no test was added or edited, and no file of any of the four projects
+  was copied from. Every citation is a `third_party/<project>/<path>:<line>` pointer.
+* **Eight CHANGEs** are recorded with their file, function, edit, affected titles and risk; the two
+  with visible in-game effects are CHANGE 1 (mapper 123's `$5800` bank bit) and CHANGE 6 (mapper 12's
+  language bit), and CHANGE 8 would unpark `board-292`.
+* `git status`: clean except `rust/target-mf/` (untracked build output, never staged).

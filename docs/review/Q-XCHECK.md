@@ -140,7 +140,35 @@ that point at all; "n/s" = the project does not support the number.
 | Q-168 §4 | 91.0 | "hard-wired to last bank" of what | not said | of the inner 128 KiB | of the ROM | of the ROM | of the ROM | **of the inner 128 KiB** | **CONFIRMED** |
 | Q-168 §5 | 91.1 | `$6004` selects horizontal | the page's word | horizontal | — | — | — | **horizontal** | **CONFIRMED** |
 
-*(rows for Q-169 onward are appended by the last batch of this lot)*
+| Q-169 §1 | 111 | the flash save is gated on the battery bit? | — | no | no (a user option) | **yes** | n/s | no | **CONFIRMED** |
+| Q-169 §2 | 111 | the file is a diff, not a chip image | — | changed sectors | a ROM diff/patch | the whole 512 KiB | n/s | — | **CONFIRMED** |
+| Q-169 §4 | 111 | the savestate carries the changed bytes | — | yes | yes (a ROM diff) | yes (the whole chip) | n/s | — | **CONFIRMED** |
+| Q-169 §3 | 111 | `$90`/`$F0`/`$10` unimplemented | documented | not built | **built** | partly | n/s | — | **CONFIRMED (gap)** |
+| Q-170 §1.1 | 164 | the 93C66's word size | **8-bit** (ORG to GND) | 8-bit | — | — | n/s | **8-bit** | **CONFIRMED** |
+| Q-170 §1.2 | 164 | a type of its own, not the I²C part | — | a second type | — | — | n/s | **a second type** | **CONFIRMED** |
+| Q-170 §1.3 | 164 | the 512 bytes live in the battery slice | — | `prg_ram` behind `battery_offset` | — | — | n/s | **the NVRAM slice** | **CONFIRMED** |
+| Q-170 §2.1 | 164 | the second EEPROM chip | "unpopulated on all known games" | bit 6 decoded, inert | — | — | n/s | **bit 6 decoded, inert** | **CONFIRMED** |
+| Q-170 §2.3 | 164 | the volatile RAM's size | 2 KiB mirrored on all known carts | 2 KiB mirrored | — | — | n/s | the header's, mirrored | **OPEN** |
+| Q-170 §2.4 | 164 | the 1 bpp substitution on PPU writes | written as a fetch | yes | — | — | n/s | **yes** | **CONFIRMED** |
+| Q-171 §1 | 208 | a "wrong code" state | none described | none | none | none | n/s | none | **CONFIRMED** |
+| Q-171 §2 | 215.1 | `$5001`'s two overlaid bit rows | ambiguous | PRG 3/1/0, CHR 3/2/1 | submapper 0's layout only | — | n/s | **PRG 3/1/0, CHR 3/2/1** | **CONFIRMED** |
+| Q-171 §3 | 215 | `$5001`'s power-up value | `$xF` | `$0F` | `$03` | — | n/s | `$03` | **OPEN** |
+| Q-171 §4 | 208.0 | `$A000` inert, the board's register instead | implied | inert | — | — | n/s | **inert, by submapper** | **CONFIRMED** |
+| Q-171 §5 | 208 | the protection index is the written value | ambiguous | the value | — | — | n/s | **the value** | **CONFIRMED** |
+| Q-171 §6.1 | 219 | the outer bank is inside `$5000-$5FFF` | "Mask: `$5003`" | `$F003` | — | — | n/s | **inside `$5000-$5FFF`** | **CONFIRMED** |
+| Q-171 §6.2 | 219 | the mode bit latched by `$8002` only | derived | yes | `$8002` decoded | — | n/s | **yes, `address & 0x0002`** | **CONFIRMED** |
+| Q-171 §6.2' | 219 | the extended CHR latch is persistent | "next" vs "latch" | persistent | — | — | n/s | **persistent** | **CONFIRMED** |
+| Q-172 §1.1 | 262 | `$4100`'s CHR-RAM select is bit 6 | the diagram's column | bit 6 | **bit 6** | — | **bit 6** | **bit 6** | **CONFIRMED** |
+| Q-172 §1.2 | 262 | the four CHR A18 lines are crossed | the annotations' columns | `[3,3,2,2,0,0,1,1]` | **identical** | — | — | — | **CONFIRMED** |
+| Q-172 §1.3 | 262 | the CHR-RAM chip's own address lines | silent | banked by the low 3 bits | **unbanked** | — | **unbanked** | **unbanked** | **CHANGE** |
+| Q-172 §1.4 | 262 | the jumper | no header field | `$00` | 0, reset-toggled | — | a dip switch | a dip switch | **CONFIRMED** |
+| Q-172 §2 | 292 | where the filled byte comes from | the last CPU write to any address | a bus latch on every write | **zero page `$6A`/`$FF` read directly** | — | — | **zero page `$6A`/`$FF` read directly** | **CHANGE** |
+| Q-172 §2.1 | 292 | `R` is bit 5 | the annotation's column | bit 5 | **bit 5** | — | — | **bit 5** | **CONFIRMED** |
+| Q-172 §2.2 | 292 | "registers 2/3" when CHR inversion is set | stated | the chip's own window bank | register 0 always | — | — | register 0 always | **OPEN** |
+| Q-172 §3.1 | 246 | the register window | `$6000-$601F` (`$FFE4`) | `$6000-$601F` | `$6000-$67FF` | `$6000-$67FF` | — | `$6000-$67FF` | **OPEN** |
+| Q-172 §3.1' | 246 | PRG A17 forced on `address & $FFE4 == $FFE4` | stated | the same constant | — | — | — | **the same constant** | **CONFIRMED** |
+| Q-172 §3.2 | 246 | the 2 KiB RAM window | `$6800-$6FFF` only | mirrored four times | mirrored twice | **exact** | — | **exact** | **CONFIRMED (cost)** |
+| Q-172 §3.3 | 246 | `$6003` is `$FF` at power-on **only** | "only" | kept across a reset | restored on reset | **kept** | — | **kept** | **CONFIRMED** |
 
 ---
 
@@ -1248,6 +1276,193 @@ it does, it agrees with this build on every point the ticket decided.
   submapper), five register groups on submapper 1 and the outer bank register — the same inventory this
   build built and more than §7.2's "one counter and four groups".
 
+## Q-169 — mapper 111's flash save
+
+This ticket is about REQ-CORE-095's shape rather than about a register, so the four can only show what
+the alternatives look like. Two of them do:
+
+* **Mesen 2** `Core/NES/Mappers/Homebrew/Cheapocabra.h` declares `GetSaveRamSize() 0` (`:20`) and
+  persists the chip as a **ROM patch** instead — `SaveBattery()` calls `SaveRom(_orgPrgRom)` (`:59-67`)
+  and `ApplySaveData()` calls `LoadRomPatch`, with `SerializeRomDiff(s, _orgPrgRom)` in the savestate
+  (`:47`). Gated not on the battery bit but on a **user option**, `DisableFlashSaves`. So decisions 1
+  (a medium beside the battery RAM, not the battery bit), 2 (a diff and not a chip image) and 4 (the
+  savestate carries the changed bytes) are each what Mesen 2 does, in its own vocabulary.
+* **FCEUX** `src/boards/cheapocabra.cpp:251-257` does the opposite on two of the three: `flash =
+  (info->battery != 0)` — **gated on the battery bit** — and it allocates a full 512 KiB `FLASHROM`
+  copy which it persists whole through `addSaveGameBuf` and puts whole into the savestate.
+* **puNES** has an `SST39SF040` model (`src/core/mappers/mapper_111.c:23`) and routes the board's
+  reads and writes through it.
+* **Nestopia UE** does not support the number.
+
+**Verdicts**: decisions 1, 2 and 4 **CONFIRMED** — Mesen 2 independently reaches the same three
+shapes, and FCEUX's battery-bit gate is the thing the ticket argues against (a GTROM dump is not
+required to set the bit, so FCEUX silently loses the save on a dump that does not). Decision 3 (a
+reset does not restore the chip) holds in all three: the bytes live in the PRG image.
+**The `$90`/`$F0` software-ID and `$10` chip-erase gap is CONFIRMED as a gap and Mesen 2 fills it** —
+`FlashSST39SF040.h:78-81` and `:108-115` implement `$80`/`$90`/`$A0`/`$F0` and the `$10` full erase.
+So the ticket's "no game of either board's roster reads the chip's ID" is the only thing keeping it
+out, and the cost (`Board::cpu_read_override`, +0.066 %) is the ticket's own figure.
+
+## Q-170 — mapper 164's 93C66
+
+**Only puNES implements the EEPROM at all, and it confirms every one of §1's three contradictions.**
+Mesen 2's `Waixing164` is a 16-bit PRG bank register and nothing else; FCEUX's `Mapper164_Init`
+(`src/boards/164.cpp`) likewise; Nestopia UE does not support the number.
+
+* **§1.1, the word size: CONFIRMED.** `src/core/mappers/mapper_164.c:69` is
+  `ee93cx6_init(wram_nvram_pnt(), wram_nvram_size(), 8)` — **eight-bit words**, the page's "the ORG pin
+  is tied to GND" and not §7.2's 16. puNES's device is also keyed to a **512-byte** part
+  (`:57`, `wram_nvram_size() == S512B`).
+* **§1.2, a type of its own: CONFIRMED.** puNES's Microwire part is `EE93Cx6.c`, a separate file from
+  its two-wire parts, exactly as `Eeprom93C66` is separate from `Eeprom24C0X` here.
+* **§1.3, where the bytes live: CONFIRMED.** `wram_nvram_pnt()` — the **NVRAM slice**, which is
+  puNES's equivalent of `battery_offset`'s region, not a field of the device.
+* **§2.1, the second chip: CONFIRMED.** `mapper_164.c:84-95` writes the device from `$5200` bits 4
+  (CS), 2 (CLK) and 0 (DI) and **transcribes the bit-6 "EEPROM #2 CS" line in a comment while driving
+  nothing with it** — bit 6 decoded and inert, which is this build's choice word for word.
+* **§2.2, the undriven DAT level: unresolved but narrowed.** puNES answers `$5500` bit 2 as the
+  **inversion of its device's `DO`** (`:107-111`, `ee93cx6_read() ? 0x00 : 0x04`), so the idle bit is
+  whatever its model idles at — the same question one level down. The page and the datasheet are still
+  the whole of the evidence; keep High-Z-reads-as-1.
+* **§2.3, the volatile RAM's size: OPEN.** puNES serves the `$6000` window from whatever the header
+  declares and **disables it when the header declares none** (`:201-209`), mirroring by its memory
+  map's own wrap. This build hard-codes 2 KiB mirrored. Both mirror; they differ on where the figure
+  comes from. The page's "all known carts mount either no or a 2 KiB chip" supports either, and puNES
+  is the only other data point.
+* **§2.4, the 1 bpp substitution on the write path: CONFIRMED.** puNES applies its latch function on
+  the **CHR write** path as well as the read path (`:126` and `:136`), and latches the two lines on the
+  **rise of PPU A13** (`:220-228`) from PPU A0 and A9 — the page's two source lines and this build's
+  `Pec9588::chr_address` on both paths.
+
+## Q-171 — the Kǎshèng protection MMC3s (215, 208, 219)
+
+Nestopia UE supports **208** (as `GOUDER_37017`) and **219** (as `UNL_A9746`) and not 215; FCEUX has
+all three; Mesen 2 has all three; puNES has all three. **puNES is the decisive witness on five of the
+six points, and it agrees with this build on every one of them.**
+
+* **§1, 208's "wrong code" state: CONFIRMED — there is none.** puNES's protection is two lines
+  (`src/core/mappers/mapper_208.c:106` latches the index, `:109` stores `value ^ table[index]`) with no
+  detection and no latched failure state, which is the page's mechanism and this build's. §7.2's
+  bullet describes behaviour no implementation has.
+* **§2, mapper 215 submapper 1's `$5001`: CONFIRMED, and the ambiguity is settled.** puNES
+  (`mapper_215.c:139-176`) composes, **for submapper 1 only**, PRG from `((reg[1] & 0x03) << 5) |
+  ((reg[1] & 0x08) << 4)` — register bits **3, 1 and 0** as PRG A20/A19/A18 — and CHR from
+  `((reg[1] & 0x0E) << 7)` — register bits **3, 2 and 1** as CHR A20/A19/A18. That is this build's
+  reading of the two overlaid rows, to the bit, including the sharing of bits 3 and 1 between the two
+  fields; and it keeps bits 4 and 5 as the two A17 lines (`:153`, `:175`). Mesen 2 implements only
+  submapper 0's `..cp CCPP` layout for both submappers
+  (`MMC3_215.h:55`, `:71`). **The ticket says "the page cannot distinguish them"; puNES does.**
+* **§3, `$5001`'s power-up value: OPEN.** The page says `$xF`; **Mesen 2 and puNES both power it on at
+  `$03`** (`MMC3_215.h:40`, `mapper_215.c:51`), i.e. the outer PRG bank at 3 and the outer CHR bank at
+  0 where the page's low nibble sets both. Nothing can see it before the first write and every game
+  writes `$5001` before it banks, so keep `$0F`; but two of the three implementations differ and the
+  page's `$x` only hides the high nibble.
+* **§4, 208's `$A000`: CONFIRMED, and puNES splits it by submapper exactly as this build does.**
+  `mapper_208.c:138-147`: submapper 1 takes the MMC3's own mirroring; **submapper 0 takes the board's
+  `$4800` register bit 5 and the MMC3's `$A000` drives nothing.** That is
+  `Mmc3Board::force_ignore_a000` on submapper 0 and live on submapper 1, which is this build's reading
+  of the two submappers' opening paragraphs.
+* **§5, the protection index: CONFIRMED.** puNES latches the **written value** (`:106`), not the
+  address — an 8-bit datum indexing a 256-entry table, which is this build's reading.
+* **§6.1, 219's outer bank window: CONFIRMED.** puNES decodes it at **`$5000-$5FFF`** with A0 choosing
+  which of the two bits (`mapper_219.c:60-67`) and has **nothing at `$D002`/`$D003`** — the page's
+  printed `Mask: $5003` taken as this build takes it. (puNES decodes only A0 where this build decodes
+  `$F003`; the point at issue — that `$D002` is the IRQ latch and not the outer bank — is identical.)
+* **§6.2, 219's mode bit: CONFIRMED exactly.** `mapper_219.c:70-74`: the `$8000`-group write always
+  reaches the chip, and `if (address & 0x0002) { m219.reg[1] = value & 0x20; }` latches the mode bit
+  **only when A1 is set, i.e. only from `$8002`**, while the index comes from the chip's own
+  `bank_to_update` on every even write. That is the derivation this ticket makes from the page's three
+  statements, implemented. And the extended CHR latch is **persistent** in puNES too (`:84-95`
+  accumulates into `mmc3.reg[index]` and nothing clears it), which is §6.2's last open reading.
+
+## Q-172 — the last three singletons (262, 292, 246)
+
+### Mapper 262 — the column readings are verified, the CHR-RAM banking is not
+
+* **§1.1, the CHR-RAM select is bit 6: CONFIRMED three for three.** Mesen 2 `_exReg & 0x40`
+  (`MMC3_StreetHeroes.h:44`), Nestopia `exReg & 0x40`
+  (`NstBoardSachenStreetHeroes.cpp:137`, `:157`), puNES `m262.reg & 0x40` (`mapper_262.c:90`).
+  **The paraphrase that put it at bit 7 is refuted everywhere** — which is the best possible vindication
+  of this ticket's raw-wikitext method.
+* **§1.2, the four CHR A18 lines are crossed: CONFIRMED by Mesen 2, identically.**
+  `MMC3_StreetHeroes.h:48-51` gives `$0000-$07FF` register bit **3**, `$0800-$0FFF` bit **2**,
+  `$1000-$17FF` bit **0** and `$1800-$1FFF` bit **1** — i.e. `[3, 3, 2, 2, 0, 0, 1, 1]` per 1 KiB
+  window, which is `Mmc3Shero::CHR_A18_LINES` to the entry, **crossing included**. An independent
+  reading of the same annotation columns.
+* **§1.3, the CHR-RAM chip's own address lines: CHANGE.** All three serve the chip **unbanked**: Mesen
+  2 maps one 8 KiB page (`:12-13`, `GetChrRamPageSize`/`GetChrRamSize` both `0x2000`, and `:45`
+  `SelectChrPage(0, 0, ChrRam)`), Nestopia the same
+  (`NstBoardSachenStreetHeroes.cpp:158`, `chr.Source(1).SwapBank<SIZE_8K,0x0000>(0)`), puNES maps each
+  1 KiB window to **its own slot** (`mapper_262.c:91`, `memmap_vram_1k(…, slot)`), which is PPU
+  A10-A12 straight through and so the same thing. This build banks it by the low three bits of the
+  MMC3's bank number. See §CHANGE 7 — and note this is the alternative the ticket itself names and
+  prices at three lines.
+* **§1.4, the jumper: CONFIRMED, and the gap's shape again.** Mesen 2 keeps a `_resetSwitch`
+  initialised to **0** and toggled by a soft reset (`:19`, `:34-38`); Nestopia answers a user dip
+  switch (`NstBoardSachenStreetHeroes.cpp:166`, `cartSwitches.GetRegion()`); puNES answers
+  `dipswitch.value` (`mapper_262.c:74`). So `JUMPER = $00` is Mesen 2's initial value and the page's
+  first-listed title, and all three make the choice **user-facing** — the third board in this report
+  whose unconfigurable constant is a host setting elsewhere (with mapper 83's solder pad and mapper
+  12's language bit).
+* **§1.5 and §1.6** (four-screen with an inert `$A000`, and the two guessed masks) are unobservable in
+  the three: Mesen 2 and puNES decode `$4100` alone or `$4000-$4FFF` rather than the page's `$C100`,
+  and none of them documents a four-screen decision. Nothing to add; this build's readings stand.
+
+### Mapper 292 — §7.2 was right that no new hook is needed, for a reason it did not give
+
+**This is the most actionable finding of the batch.** Mesen 2 and puNES both fill the board's two data
+registers by **reading the game's zero page directly**, not from a bus latch:
+
+* **Mesen 2** `Core/NES/Mappers/Unlicensed/DragonFighter.h:50-58`: on a read of `$6000-$7FFF` it takes
+  `DebugRead(0x6A)` or `DebugRead(0xFF)` depending on the control register.
+* **puNES** `src/core/mappers/mapper_292.c:86-98`: the same two addresses,
+  `m292.reg[1] = ram_rd(nidx, 0x06A)` or `m292.reg[2] = ram_rd(nidx, 0x0FF)`.
+
+Both are derived from the page's own sentence — "**The game writes the desired values to zero
+page**" — and both avoid the latch entirely. So **§7.2's "no new hook" is correct after all**, by a
+route §7.2 did not describe, and the +1.098 % that parked `board-292` is avoidable. See §CHANGE 8.
+
+* **§2.1, `R` is bit 5: CONFIRMED.** Both select between the two registers on bits 7-5 of the control
+  register (`(reg & 0xE0) == 0xC0` in puNES), so `R` is bit **5** and `A`/`B` are bits 7 and 6, as the
+  annotation's columns say. One divergence worth recording: both projects **require** `A` and `B` to be
+  set for the `$6A` register, where this build latches them and acts on neither — unobservable, since
+  the page says the game keeps both set.
+* **§2.2, "MMC3 registers 2/3 instead of register 0": OPEN.** Neither project implements it — both
+  take `mmc3.reg[0] >> 1` and `mmc3.reg[1] >> 1` **unconditionally**, ignoring the chip's CHR
+  inversion bit (Mesen 2 `:33-35`, puNES `:113-114`). The page states the behaviour and this build
+  implements it for nothing (the chip's own per-window bank number already follows the bit); keep it,
+  and note that the two implementations' silence means no game exercises it.
+* **§2.3, the *Errata*'s "better than original hardware" suggestion**: neither project implements it
+  either. Nothing to add.
+
+### Mapper 246 — two of three agree with the page where this build does
+
+* **§3.1, the register window: OPEN.** All three decode **`$6000-$67FF`** (Mesen 2
+  `Core/NES/Mappers/Unlicensed/Mapper246.h`'s `RegisterStartAddress`/`EndAddress`; FCEUX
+  `src/boards/246.cpp`'s `SetWriteHandler(0x6000, 0x67FF, …)`; puNES `mapper_246.c:69`), which is
+  §7.2's decode and not the page's `$FFE4` mask. Three against this build's narrower window, with no
+  reason given anywhere; the page's mask is explicit and requires A11-A5 clear. Keep it. The difference
+  is a write in `$6020-$67FF`: a register there, the RAM chip here.
+* **§3.1′, and the same mask on the read side: CONFIRMED.** **puNES forces PRG A17 under exactly this
+  constant** — `mapper_246.c:82`, `(address > 0xFF00) && (address & 0xFFE4) == 0xFFE4`, then
+  `(m246.prg[3] | 0x10) << 13` — which is `G0151::DECODE_MASK` serving both purposes, the very point
+  the ticket makes.
+* **§3.2, the 2 KiB window: CONFIRMED as a recorded cost, and two projects get it exact.** FCEUX
+  (`src/boards/246.cpp`, read and write handlers on `$6800-$6FFF` only) and puNES
+  (`mapper_246.c:109-112`, `memmap_disable_8k(0, MMCPU(0x6000))` then a 2 KiB window at `$6800`)
+  serve the chip at `$6800-$6FFF` **and nowhere else**, which is the page. Mesen 2 mirrors it twice.
+  So the ticket's diagnosis is right — "making it exact needs a per-address enable in that hook, which
+  is a `Mapper` change and not a board's" — and two implementations show it is worth having. The cost
+  stays recorded rather than paid.
+* **§3.3, `$6003` is `$FF` at power-on only: CONFIRMED 2-1.** FCEUX sets the four PRG registers in
+  `M246Power` and installs **no reset handler**; **puNES sets `m246.prg[3] = 0xFF` under
+  `if (info.reset >= HARD)`** (`mapper_246.c:52-58`), so a soft reset leaves it — this build's reading
+  exactly, and the page's "only". Mesen 2 restores it on every reset
+  (`Mapper246.h`'s `Reset(bool softReset)`), against the page. So AMD-061 §5's list is right to gain
+  this number.
+* **§3.4** (the *See also* forum thread) needs no cross-check; nothing in the three reads a console
+  timing for this board either.
+
 ---
 
 ## CHANGE — ready-to-use fix descriptions for a later lot
@@ -1398,6 +1613,55 @@ affected and the risk to existing boards.)*
   that puNES makes it user-settable — which is the shape to adopt if a host surface for per-cartridge
   configuration ever exists (see the solder-pad note under Q-166 §2).
 
+### CHANGE 7 — mapper 262's CHR-RAM chip is probably unbanked
+
+* **Ticket**: Q-172 §1.3, whose own text names this as the alternative and prices it at three lines.
+* **File / function**: `rust/crates/zax-nes/src/cartridges/mappers/mmc3_shero.rs`,
+  `Mmc3Shero::chr_ram_offset` — replace "bits 0-2 of whatever 1 KiB bank number the chip put in that
+  window" with the PPU address's own A10-A12, i.e. the window index, so the 8 Ki × 8 SRAM follows
+  PPU A0-A12 straight through.
+* **The evidence**: the page gives the chip a size and no banking, and **all three projects that
+  support the number serve it unbanked** — Mesen 2 maps one 8 KiB page
+  (`third_party/mesen2/Core/NES/Mappers/Mmc3Variants/MMC3_StreetHeroes.h:12-13`, `:45`), Nestopia the
+  same (`third_party/nestopia/source/core/board/NstBoardSachenStreetHeroes.cpp:158`), and puNES maps
+  each 1 KiB window to its own slot (`third_party/punes/src/core/mappers/mapper_262.c:91`), which is
+  the same wiring written per-window.
+* **Titles affected**: *Street Heroes* and *侍魂*, whenever `$4100` bit 6 selects the RAM. Under the
+  current reading a game that writes a tile through one CHR bank number and reads it back under
+  another sees a different kilobyte.
+* **Risk**: none to other boards — `chr_ram_offset` is mapper 262's alone. The test in Q-172 §1.1's
+  second half (banks `$11`/`$19` being one kilobyte and `$12` another) inverts: every bank becomes the
+  same kilobyte for a given window, and what distinguishes the windows is the PPU address.
+
+### CHANGE 8 — mapper 292 needs no bus latch, which would unpark `board-292`
+
+* **Ticket**: Q-172 §2. **This is the highest-value change in the report after CHANGE 1**, because it
+  removes a +1.098 % feature rather than fixing a byte.
+* **Files / functions**: `rust/crates/zax-nes/src/cartridges/mappers/mmc3_dragonfighter.rs`
+  (`Mmc3Dragonfighter::fill_data_register`), and the deletion of `CartridgeMemory::cpu_write_latch`
+  together with the `if let` at the top of `NesBus::write_internal` that feeds it.
+* **The change**: fill the two data registers from the console's **zero page** at `$6A` and `$FF`
+  instead of from the last-CPU-write latch, choosing between them on the control register's bits 7-5
+  exactly as now. Both other implementations do this: Mesen 2 reads `$6A`/`$FF` through its memory
+  manager (`third_party/mesen2/Core/NES/Mappers/Unlicensed/DragonFighter.h:50-58`) and puNES reads
+  them from RAM directly (`third_party/punes/src/core/mappers/mapper_292.c:86-98`). The page's own
+  sentence is the justification — "**The game writes the desired values to zero page**" — so this is
+  not a hack but the same observation read one step further on.
+* **What it buys**: `Cartridge::cpu_write`'s path and `NesBus::write_internal` lose the per-write
+  store that MF-UNL-12 step 6 measured at `oamstr` +0.026 % and `mmc5exram` +1.098 %. With the latch
+  gone the board is a read hook and two registers, and `board-292` can plausibly leave
+  `parked-boards`. **Measure it**: the ticket records that the latch store alone was +862 997 of
+  +874 540 instructions on `oamstr`, so removing it should recover almost all of that feature's cost.
+* **What it costs in accuracy**: generality. The latch is right for *any* `$6000-$7FFF` read; reading
+  `$6A`/`$FF` is right only for a game that stages its values there, which is what the page says the
+  one known game (*Dragon Fighter*) does. The honest shape is a comment naming the narrowing and the
+  page sentence it rests on — and a note that if a second mapper-292 image appears that stages
+  elsewhere, the latch is the general answer and its price is already measured.
+* **Blocker**: the board needs to read console RAM, which `Mapper::cpu_read_override` is not handed
+  today. That is a smaller hook than the write latch (a read of two fixed addresses on a path that
+  already runs only for this board's window) but it is still a core change, so **R0 should scope it
+  before a lot takes it**.
+
 ---
 
 ## OPEN — the points that stay as they are, and what would close each
@@ -1421,4 +1685,49 @@ affected and the risk to existing boards.)*
 | Q-165 §5a | 14's "mirroring only in VRC2 mode" | implemented | original hardware, as the page itself says. **Nestopia implements the rule in this build's exact shape** (MMC3-mode `$A000` re-applies the VRC2's `$9000` value and ignores the datum), which verifies the page's attribution; Mesen 2, FCEUX and puNES contradict it, which is what the page says they do. |
 | Q-166 §1 | 83's scratch RAM decode | the `A~` row, `(a & $F30C) == $5100` | a dump using a mirror. Three projects, three decodes: Mesen 2 and FCEUX claim exactly `$5100-$5103`, puNES splits `$5000-$5FFF` by one address bit. All that is shared is that the four addresses must work, which this build satisfies. |
 | Q-166 §3 | 83's `$8318` IRQ source | any non-zero selects A12 | a source for which data bit is decisive. **No project implements the register**; all three hard-wire the CPU-M2 source, i.e. the page's default value. This build is ahead of the field and unrebutted. |
+| Q-170 §2.3 | 164's volatile RAM size | 2 KiB mirrored | an NES 2.0 dump of any of the six games with byte 10's volatile nibble filled in. puNES is the only other data point and it takes the figure from the header, disabling the window when none is declared; both mirror. |
+| Q-171 §3 | 215's `$5001` power-up value | `$0F` | a corrected page, or a dump that depends on it. **Mesen 2 and puNES both power it on at `$03`** — outer PRG 3, outer CHR 0 — where the page's `$xF` sets both. Unobservable before the first write, and every game writes it before banking. |
+| Q-172 §2.2 | 292's "registers 2/3" | the chip's own per-window bank | a dump that sets the chip's CHR inversion bit. **Neither Mesen 2 nor puNES implements the clause** — both take registers 0 and 1 unconditionally — which suggests no game exercises it. This build's reading costs nothing, so keep it. |
+| Q-172 §3.1 | 246's register window | `$6000-$601F` (the page's `$FFE4`) | a mapper-246 write in `$6020-$67FF`. All three projects decode `$6000-$67FF`, which is §7.2's figure and not the page's mask; none gives a reason, and the page's mask requires A11-A5 clear. |
 | Q-168 §3a | 91 submapper 0's ÷64 counter | a carry out that keeps running | a mapper-91 game that does not acknowledge. Mesen 2 repeats (an MMC3 latch of 7), FCEUX and puNES **stop at 8** — the ticket's named alternative — so it is two-two. All three count eight *filtered* scanline ticks rather than sixty-four unfiltered A12 rises, which differs only while rendering is off. |
+
+---
+
+## Totals, and the one thing a reader should take away
+
+Thirty-two tickets, **147 verdict rows**:
+
+| verdict | rows | the shape of them |
+| --- | ---: | --- |
+| **CONFIRMED** | ~110 | including a dozen points where a ticket expected to stand alone and puNES turned out to have reached the identical reading |
+| **CHANGE** | 8 | CHANGE 1 (mapper 123's bank bit) and CHANGE 6 (mapper 12's language bit) have visible in-game effects; CHANGE 8 would unpark `board-292`; the rest are gaps or conditionals |
+| **OPEN** | ~18 | every one with a named observation that would close it |
+
+**The one methodological lesson.** The four projects are *not* four independent witnesses, and the
+report says so at every point where it matters. For the unlicensed MMC3 clones in particular, Mesen
+2's class, Nestopia's board and (less often) puNES's file are frequently FCEUX's expression character
+for character — mapper 123's bank field, mappers 121/187's CHR A18, the Sachen mirroring table,
+mapper 114's scrambled map. A 4-0 tally against this build means one thing when it is four codebases
+and another when it is one 2005 file quoted four times, and the useful discriminators turned out to
+be:
+
+1. **whether the projects' games run.** Mapper 123 is the clearest case: four emulators play *Mortal
+   Kombat 3*, and a wrong bit in a 16 KiB PRG field does not produce a playable game. That is the
+   closest thing to hardware evidence available on this side, and it is why CHANGE 1 is a change.
+2. **which project read the page rather than its predecessor.** For the J.Y. ASIC, mapper 195's GAL,
+   mapper 114's one-to-one map, mapper 215 submapper 1's overlaid rows, mapper 219's mode bit and
+   mapper 91's outer bank, **puNES is an independent reading of the same page** and it agrees with this
+   build on details the older lineage gets differently. Where puNES and this build agree against three
+   others, the three are usually one.
+3. **what a project's own comment says.** FCEUX's "chinese is default", its "Deny any further writes
+   when 7th bit is 1 AND 4th is 0", its "this could be done by bit logic, but this is
+   self-documenting", Mesen 2's "This behavior only affects reads, not writes" with a forum link,
+   puNES's note on the 1 MiB boards' A19/A20 wiring — each of those settled a ticket that the code
+   alone would have left ambiguous.
+
+A fourth observation, offered because three tickets independently ran into it: **this build has three
+unconfigurable constants where every other project has a user setting** — mapper 12's language bit
+(Q-164 §3), mapper 83's solder pad (Q-166 §2) and mapper 262's jumper (Q-172 §1.4). The pages say in
+all three cases that the value is a wire or a pad with no header field. If a host surface for
+per-cartridge configuration is ever built, those are its first three customers, and two of them
+(mapper 83's pad, mapper 262's jumper) are documented to change what a game *displays*.
