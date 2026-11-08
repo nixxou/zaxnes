@@ -65,10 +65,11 @@ with the first and not the second has a module nothing calls. The six below are 
 - [x] **0/6** the plan — this note.
 - [x] **1/6** the Microwire device and the board, with Q-170.
 - [x] **2/6** the tests the census lists from the page.
-- [ ] **3/6** `BOARD-FEATURES.md` row; fmt and clippy `-D warnings` in the four configurations
-      (default, `--no-default-features`, `--features parked-boards`, `board-164` alone).
+- [x] **3/6** fmt and clippy `-D warnings` plus the sweeps in the four configurations (default,
+      `--no-default-features`, `--features parked-boards`, `board-164` alone).
 - [ ] **4/6** the callgrind campaign against `909c0edd`: PR-1's thirteen ROMs and the five
-      level-2 games, **+0.02 % per ROM on each ROM's total**, and the feature decision.
+      level-2 games, **+0.02 % per ROM on each ROM's total**, the feature decision and the
+      `BOARD-FEATURES.md` row that carries the figures.
 - [ ] **5/6** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
 - [ ] **6/6** the census note, the journal, the close.
@@ -192,3 +193,44 @@ of §4.3's lists and not just the first.
 fmt and clippy `-D warnings` clean on `zax-nes --all-targets`.
 
 [PROGRESS] MF-UNL-10 step 2/6 done: the tests from the page
+
+## Step 3 — the four configurations
+
+`board-164 = ["board-decode-boards"]`, which the `board-164`-alone configuration is what caught:
+the umbrella every member of that enum implies is not optional, and `compile_error!` in
+`decode_boards.rs` names it. The lot's feature was added to that `cfg(not(any(…)))` list in step 1
+and to the `implies` here.
+
+The one test helper that had to grow a feature is `latch_a13_rise`, gated on
+`any(board-162, board-163)` by MF-UNL-5 and now on `board-164` too: mapper 164 latches on the same
+edge, which is the whole reason it is one helper.
+
+| configuration | `cargo fmt --check` | `clippy -p zax-nes --all-targets -- -D warnings` | `--test mapper_tests` |
+| --- | --- | --- | ---: |
+| default | clean | clean | **350 passed, 0 failed** |
+| `--no-default-features` | clean | clean | **103 passed, 0 failed** |
+| `--features parked-boards` | clean | clean | **350 passed, 0 failed** |
+| `--no-default-features --features board-164` | clean | clean | **112 passed, 0 failed** |
+
+The 112 against 103 is this lot's nine tests: every one of them runs with the board's feature as
+the **only** board feature, which is what the owner's rule means by reachable behind its feature.
+
+§7.1's first common thing, the four sweeps over `SUPPORTED_MAPPERS`, in each of the four:
+
+| sweep | default | `--no-default-features` | `parked-boards` | `board-164` alone |
+| --- | --- | --- | --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | ok | ok | ok | ok |
+| `req_core_102_any_other_mapper_is_refused` | ok | ok | ok | ok |
+| `req_core_090_the_mapper_state_survives_a_save_and_restore` | ok | ok | ok | ok |
+| `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` | ok | ok | ok | ok |
+
+The last two reach mapper 164 only in the configurations where it is on, and both write `$5000`
+and `$6000` — so the board's reset, its power-on window layout (bank 0 at `$8000`, bank `$1F` at
+`$C000`, forced vertical) and its whole savestate block are swept there as well as in the lot's
+own tests.
+
+The `board_memory_sizes` row is asserted from both sides: `2 KiB + 512` of PRG-RAM and 512 bytes of
+battery slice in `req_core_102_the_93c66_clocks_the_datasheets_seven_instructions`, and the
+window's own 2 KiB wrap in `q_170_mapper_164_mirrors_2_kib_of_volatile_ram_and_keeps_the_eeprom_out_of_the_window`.
+
+[PROGRESS] MF-UNL-10 step 3/6 done: the four configurations

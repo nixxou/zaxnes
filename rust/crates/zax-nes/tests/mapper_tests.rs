@@ -9884,7 +9884,10 @@ fn q_152_jy_asic_a_write_to_a_rom_nametable_is_dropped() {
 /// Drives the PPU's address bus across the edge the Nánjīng FC-001 latches on: out of
 /// $2000-$3FFF, then into `address`. The board latches PPU A9 on the **rise of PPU A13** and on
 /// nothing else, so both halves of the walk matter.
-#[cfg(any(feature = "board-162", feature = "board-163"))]
+///
+/// Mapper 164 latches on the same edge and takes a second line off it (MF-UNL-10 step 2), so the
+/// helper is shared with `board-164`.
+#[cfg(any(feature = "board-162", feature = "board-163", feature = "board-164"))]
 fn latch_a13_rise(core: &mut NesCore, address: u16) {
     let cartridge = core.cartridge_mut().unwrap();
     cartridge.on_ppu_address_bus(0x0000, 1);

@@ -784,7 +784,7 @@ board-91 = []
 # every board of that shape has carried `#[inline(never)]` since MF-6a step 1.
 #
 # See `docs/review/BOARD-FEATURES.md` for the measured cost and `docs/progress/MF-UNL-10.md`.
-board-164 = []
+board-164 = ["board-decode-boards"]
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
