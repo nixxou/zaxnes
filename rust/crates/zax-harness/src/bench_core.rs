@@ -46,7 +46,7 @@ pub struct Options {
     widescreen_y: i32,
     load_state: Option<PathBuf>,
     advanced: bool,
-    patch_bits: Option<u8>,
+    patch_bits: Option<u16>,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), **0 by default** so that a bench taken before
     /// this lot and one taken after it measure the same work (REQ-ARCH-012 amended).
     run_ahead: u8,
@@ -99,7 +99,7 @@ impl Options {
                 "--widescreen" => options.widescreen = i32::try_from(count()?).unwrap_or(0),
                 "--widescreen-y" => options.widescreen_y = i32::try_from(count()?).unwrap_or(0),
                 "--load-state" => options.load_state = Some(PathBuf::from(value)),
-                "--hack-options" => options.patch_bits = u8::try_from(count()?).ok(),
+                "--hack-options" => options.patch_bits = u16::try_from(count()?).ok(),
                 "--run-ahead" => {
                     options.run_ahead = u8::try_from(count()?)
                         .ok()

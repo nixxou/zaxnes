@@ -69,7 +69,7 @@ pub struct RomRequest<'a> {
     /// The movie played after the reset.
     pub movie: Option<&'a Path>,
     /// The built-in patch's option bits, when given (over the movie's).
-    pub hack_options: Option<u8>,
+    pub hack_options: Option<u16>,
     /// The limit of eight sprites per line of the picture.
     pub sprite_limit: SpriteLimit,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 for the campaign's own captures.
@@ -310,7 +310,7 @@ fn start_movie(
         }
     }
     let options = field("hackOptions");
-    if let Some(options) = options.and_then(|options| u8::try_from(options).ok()) {
+    if let Some(options) = options.and_then(|options| u16::try_from(options).ok()) {
         host.core.set_hack_options(options);
     }
     println!(

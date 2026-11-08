@@ -58,7 +58,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
   --no-builtin-patches     restore --load-state without the built-in ROM patches
   --advanced               apply the built-in patches of an advanced widescreen mode too
-  --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
+  --hack-options <bits>    the built-in patch's option bits (decimal, the low byte $500A; default its own)
   --sprite-limit <mode>    kept (default), removed or smart: the 8 sprites per line of the picture
   --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so captures stay comparable)
   --smooth-ahead <0|1>     the smooth scrolling from the run-ahead (emu.smooth_scroll_ahead), off by default
@@ -150,7 +150,7 @@ pub struct Options {
     /// The movie to play.
     pub movie: Option<PathBuf>,
     /// The built-in patch's option bits, when given.
-    pub hack_options: Option<u8>,
+    pub hack_options: Option<u16>,
     /// The limit of eight sprites per line of the picture.
     pub sprite_limit: SpriteLimit,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 by default: the suites of frames, tiles and
@@ -354,8 +354,8 @@ impl Options {
             "--movie" => self.movie = Some(PathBuf::from(value)),
             "--hack-options" => {
                 self.hack_options = Some(
-                    u8::try_from(integer(value)?)
-                        .map_err(|_| "--hack-options: 0 to 255".to_owned())?,
+                    u16::try_from(integer(value)?)
+                        .map_err(|_| "--hack-options: 0 to 65535".to_owned())?,
                 );
             }
             "--sprite-limit" => {

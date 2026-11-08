@@ -72,9 +72,9 @@ pub struct NesCore {
         crate::hack_pack::AppliedPack,
     )>,
     /// The options whose aid components are applied to the cartridge's PRG-ROM now.
-    aids_on: u8,
+    aids_on: u16,
     /// The options the host set last.
-    host_options: u8,
+    host_options: u16,
     /// The experimental smooth scrolling (option `smooth_scroll`): the camera's fraction read
     /// after the last frame (the next picture's), the camera's pixels and fraction read last,
     /// whether the fraction left the camera (turned round 256 with the pixels still: its last
@@ -906,7 +906,7 @@ impl NesCore {
             .and_then(crate::builtin_patches::by_name)
             .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
             .and_then(|patch| patch.options.iter().find(|option| option.key == key))
-            .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0)
+            .is_some_and(|option| self.host_options & (1 << (option.bit & 15)) != 0)
     }
 
     /// The experimental smooth scrolling from the run-ahead (option `smooth_scroll_ahead`), to
@@ -1100,9 +1100,10 @@ impl NesCore {
     }
 
     /// Sets the options of the built-in patch the player turned on, one bit each as the patch's
-    /// `options` say; the ROM reads them at `$500A`.
-    pub fn set_hack_options(&mut self, options: u8) {
-        self.bus.ppu_mut().wide_mut().set_host_options(options);
+    /// `options` say; the ROM reads the low byte at `$500A` (bits 8-15: aids only).
+    pub fn set_hack_options(&mut self, options: u16) {
+        let [rom_bits, _] = options.to_le_bytes();
+        self.bus.ppu_mut().wide_mut().set_host_options(rom_bits);
         self.host_options = options;
         self.sync_aids();
     }
@@ -1121,7 +1122,7 @@ impl NesCore {
             let Some(component) = pack.component(option.key) else {
                 continue;
             };
-            let mask = 1 << (option.bit & 7);
+            let mask = 1 << (option.bit & 15);
             let on = self.host_options & mask != 0;
             if on != (self.aids_on & mask != 0) {
                 component.apply(cartridge.rom_mut().prg_rom_mut(), on);
@@ -1448,7 +1449,8 @@ impl NesCore {
             components.push(crate::hack_pack::WIDESCREEN);
         }
         for option in patch.options {
-            if pack.component(option.key).is_some() && self.aids_on & (1 << (option.bit & 7)) != 0 {
+            if pack.component(option.key).is_some() && self.aids_on & (1 << (option.bit & 15)) != 0
+            {
                 components.push(option.key);
             }
         }

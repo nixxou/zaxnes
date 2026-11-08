@@ -27,13 +27,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .collect()
     }
 
-    /// The bits of `$500A` for the options as they are.
+    /// The option bits for the options as they are (the low byte: `$500A`).
     #[must_use]
-    pub fn hack_option_bits(&self) -> u8 {
+    pub fn hack_option_bits(&self) -> u16 {
         self.hack_options()
             .iter()
             .filter(|(_, on)| *on)
-            .fold(0, |bits, (option, _)| bits | (1 << (option.bit & 7)))
+            .fold(0, |bits, (option, _)| bits | (1 << (option.bit & 15)))
     }
 
     /// Turns option `index` of the game's patch the other way.

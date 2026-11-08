@@ -1528,6 +1528,16 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 1,
         default: false,
     },
+    // A testing aid: Select takes Kirby to the next level, through its world's hub door (the
+    // game's own entry), the boss after a world's levels, then the next world. Select no longer
+    // drops the ability. Bit 8: an aid only, the ROM's $500A bits all taken.
+    HackOption {
+        key: "level_select",
+        label: "Level select (Select: next level)",
+        label_fr: "Sélection de niveau (Select : niveau suivant)",
+        bit: 8,
+        default: false,
+    },
     // 255 lines of overclock and no frame lost to an NMI that came while the frame ran.
     HackOption {
         key: "no_slowdown",
@@ -1974,13 +1984,13 @@ fn zelda2_after_other_way_state(ram: &mut [u8]) {
 }
 
 impl BuiltinPatch {
-    /// The bits of `$500A` with every option as it is by default.
+    /// The option bits with every option as it is by default (the low byte: `$500A`).
     #[must_use]
-    pub fn default_options(&self) -> u8 {
+    pub fn default_options(&self) -> u16 {
         self.options
             .iter()
             .filter(|option| option.default)
-            .fold(0, |bits, option| bits | (1 << (option.bit & 7)))
+            .fold(0, |bits, option| bits | (1 << (option.bit & 15)))
     }
 
     /// Whether option `key` is an aid of the patch's hack pack: a component of its own, applied
@@ -2014,7 +2024,8 @@ pub struct HackOption {
     /// Its label in English and in French.
     pub label: &'static str,
     pub label_fr: &'static str,
-    /// Its bit of `$500A`.
+    /// Its bit: 0-7 the bit of `$500A` the ROM reads; 8-15 an aid's only (a component of the
+    /// pack, its hooks applied or not), which the ROM never sees.
     pub bit: u8,
     /// Whether it is on until the player says otherwise.
     pub default: bool,
