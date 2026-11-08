@@ -531,6 +531,12 @@ impl Cartridge {
             // from the same four registers (nesdev, "J.Y. Company ASIC"). All four numbers are
             // in the latch whatever `board-jy-asic` says, for mapper 68's reason above: one
             // `matches!` is one `matches!`, and a number whose board is off is never created.
+            // MF-UNL-7 step 1 adds mappers 137, 138, 139 and 141, the Sachen 8259, whose R7 mode 2
+            // is `(0,1,1,1)` -- one table on CIRAM page 0 and the other three on page 1, which is
+            // the eight-register ASIC's mode 0 read the other way round (nesdev, "Sachen 8259"
+            // and "INES Mapper 137"). §4.5's cheap level again: a page override and not a
+            // `read_nametable` body. All four are in the latch whatever `board-sachen8259` says,
+            // for mapper 68's reason above.
             nametable_pages_vary: matches!(
                 mapper,
                 5 | 19
@@ -542,6 +548,10 @@ impl Cartridge {
                     | 95
                     | 111
                     | 118
+                    | 137
+                    | 138
+                    | 139
+                    | 141
                     | 150
                     | 158
                     | 207

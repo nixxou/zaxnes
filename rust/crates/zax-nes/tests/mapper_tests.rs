@@ -36,7 +36,8 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// two Chinese-RPG boards (162, 163) it is the 8 KiB chip whose A12 their switch overrides, and on
 /// the FS305 (178) it is the 8 KiB chip no register of the board can move at all (Q-154), and on
 /// the AA6023 (268) it is the CHR-RAM chip `$xxx4`'s mixed mode puts behind a 2 KiB pair of
-/// windows.
+/// windows, and on the Sachen 8259 (141) it is the unbanked 8 KiB of the 2M-RAM-COB board, whose
+/// CHR registers drive nothing at all.
 #[cfg(any(
     feature = "board-77",
     feature = "board-96",
@@ -45,7 +46,8 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     feature = "board-162",
     feature = "board-163",
     feature = "board-178",
-    feature = "board-268"
+    feature = "board-268",
+    feature = "board-sachen8259"
 ))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
@@ -156,6 +158,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 162, the 外星 (Waixing) FS304, the same four ports and the same CHR-RAM latch with a PRG
     //   composition of its own -- one `ChrWindowKind` and **no** second variant -- behind
     //   `board-162` (MF-UNL-5 step 2);
+    // * 137, 138, 139 and 141, the Sachen 8259 -- one chip with four wirings (the 8259D, B, C and
+    //   A, in that order of number), an index/data pair at $4100/$4101 under mask $C101 and a
+    //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
+    //   (MF-UNL-7 step 1). The family page's own disclaimer governs all four and **Q-160** records
+    //   the two places it and mapper 137's page contradict each other;
     // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
@@ -183,7 +190,8 @@ fn req_core_100_every_required_mapper_is_registered() {
     let scramble = cfg!(feature = "board-mmc3-scramble");
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
-    let additions: [(i32, bool); 92] = [
+    let sachen8259 = cfg!(feature = "board-sachen8259");
+    let additions: [(i32, bool); 96] = [
         (19, true),
         (24, true),
         (26, true),
@@ -236,7 +244,11 @@ fn req_core_100_every_required_mapper_is_registered() {
         (132, jv001),
         (133, cfg!(feature = "board-133")),
         (136, jv001),
+        (137, sachen8259),
+        (138, sachen8259),
+        (139, sachen8259),
         (140, small),
+        (141, sachen8259),
         (143, cfg!(feature = "board-143")),
         (144, cfg!(feature = "board-144")),
         (145, cfg!(feature = "board-145")),
@@ -10807,4 +10819,331 @@ fn req_core_090_mapper_268_round_trips_its_six_outer_registers() {
         (coolboy_banks(&core), core.chr_windows()),
         "a reset clears all six outer registers"
     );
+}
+
+// ------------------------------------------- the Sachen 8259 (137, 138, 139, 141),
+// ------------------------------------------- MF-UNL-7 step 1
+
+/// The board's one idiom, which is the eight-register ASIC's: select a register at $4100, then
+/// write it at $4101. A helper of its own because the two boards are behind different features.
+#[cfg(feature = "board-sachen8259")]
+fn s8259_write(core: &mut NesCore, register: u8, value: u8) {
+    core.mapper_write(0x4100, register);
+    core.mapper_write(0x4101, value);
+}
+
+/// Every register the two pages document is reachable through the index/data pair, and each drives
+/// what its row says (nesdev, "Sachen 8259": "Chr Select (Internal 0-3)", "Chr Outer Bank
+/// (Internal 4)", "Prg Bank (Internal 5)", "Mode and Mirroring Select (Internal 7)";
+/// "INES Mapper 137" adds "CHR 3 Bit #3 (Internal 6)").
+///
+/// Measured on the 8259B, mapper 138, because it is the one variant whose bank unit *is* its
+/// window — "Passes PPU A[10:0] through to CHR ROM A[10:0]" and "6 bits of chr reg to CHR ROM
+/// A[16:11]" — so a register value and a 2 KiB bank number are the same number here, and the
+/// arithmetic of the other three is the next test's business (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn req_core_102_the_sachen_8259_reaches_registers_0_to_5_and_7() {
+    let mut core = MapperRom::new(138).prg(16).chr(128).load();
+
+    // Power-on: every register zero, so block 0 of CHR in all four windows and PRG bank 0. On the
+    // 8259B each window is 2 KiB and each takes its own register, so the first 2 KiB shows four
+    // times over.
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], core.chr_windows());
+
+    // R0-R3, "Select lower 3 bits of 2KiB CHR block": one register per block, three bits each.
+    for block in 0u8..4 {
+        s8259_write(&mut core, block, block + 1);
+    }
+    assert_eq!([2, 3, 4, 5, 6, 7, 8, 9], core.chr_windows());
+
+    // R4, "Select upper 3 bits of all four 2KiB CHR blocks": the same three bits above every one
+    // of them, so all four windows move by the same eight 2 KiB banks.
+    s8259_write(&mut core, 4, 0x01);
+    assert_eq!([18, 19, 20, 21, 22, 23, 24, 25], core.chr_windows());
+    s8259_write(&mut core, 4, 0x07);
+    assert_eq!([114, 115, 116, 117, 118, 119, 120, 121], core.chr_windows());
+
+    // R5, "Select 32KiB PRG bank for CPU $8000": three bits, over this image's four banks.
+    s8259_write(&mut core, 5, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    s8259_write(&mut core, 5, 0x02);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    s8259_write(&mut core, 5, 0x07);
+    assert_eq!([12, 13, 14, 15], core.prg_windows(), "and bank 7 wraps");
+
+    // R7, `.... .mms`: the mirroring mode. Mode 1 is `H` on the family page.
+    s8259_write(&mut core, 7, 0x02);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+
+    // R6 is **not** on the family page, and on these three numbers it drives nothing. The write
+    // still lands — the index is three bits wide — and the next test but one shows the single
+    // number where the bit is wired.
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    s8259_write(&mut core, 6, 0x07);
+    assert_eq!(
+        banks,
+        (core.prg_windows(), core.chr_windows(), core.mirroring()),
+        "R6 drives nothing on the 8259A, B and C"
+    );
+
+    // And there is **no read port**: the family page says nothing like mapper 150's "All three
+    // bits in all eight registers are fully readable and writable", so the data port is
+    // write-only here and a read of it is open bus, which this core answers as 0.
+    assert_eq!(0x00, core.read_memory(0x4101));
+    assert_eq!(0x00, core.read_memory(0x4100));
+}
+
+/// The *CHR Rewiring* table as arithmetic: the four wirings differ by how far the six register
+/// bits are shifted above the 2 KiB window the PPU's own A12-A11 chose (nesdev, "Sachen 8259").
+///
+/// With every register zero the shift alone is visible, and the three signatures are three
+/// pictures of the same silicon:
+///
+/// * the **8259B** (138) passes PPU A10-A0, so each window is its own 2 KiB bank and the first
+///   2 KiB shows four times;
+/// * the **8259A** (141) passes A11-A0, so A11 is an address line of a 4 KiB bank *and* the
+///   window selector, and the first 4 KiB shows twice;
+/// * the **8259C** (139) passes A12-A0, so the four windows are one contiguous 8 KiB bank.
+///
+/// The page's capacities are the same statement: 128, 256 and 512 KiB for six bits of register
+/// times a 2, 4 or 8 KiB unit.
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn req_core_102_the_sachen_8259_chr_shift_tells_its_four_wirings_apart() {
+    let windows = |mapper: usize| MapperRom::new(mapper).prg(16).chr(128).load().chr_windows();
+    assert_eq!([0, 1, 0, 1, 0, 1, 0, 1], windows(138), "the 8259B, shift 0");
+    assert_eq!([0, 1, 2, 3, 0, 1, 2, 3], windows(141), "the 8259A, shift 1");
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], windows(139), "the 8259C, shift 2");
+
+    // And one register value lands at a different bank on each: the same `R0 = 1` is 2 KiB bank
+    // 1, 2 and 4 respectively, which is CHR A11, A12 and A13 in the chip's own numbering.
+    for (mapper, expected) in [(138usize, 2u8), (141, 4), (139, 8)] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(128).load();
+        s8259_write(&mut core, 0, 0x01);
+        assert_eq!(
+            expected,
+            core.chr_bank(0x0000),
+            "mapper {mapper}: R0 = 1 reaches 1 KiB bank {expected}"
+        );
+    }
+
+    // The 8259D is the fourth, and it is not a shift at all: four **1 KiB** windows over
+    // $0000-$0FFF and "PPU $1000-$1FFF: fixed to last 4KiB of CHR ROM".
+    let mut core = MapperRom::new(137).prg(16).chr(128).load();
+    assert_eq!(
+        [0, 0, 0, 0, 124, 125, 126, 127],
+        core.chr_windows(),
+        "the 8259D, and its fixed upper half"
+    );
+    s8259_write(&mut core, 0, 0x01);
+    assert_eq!(1, core.chr_bank(0x0000), "one 1 KiB bank per register");
+    assert_eq!(0, core.chr_bank(0x0400), "and only its own window moves");
+}
+
+/// Mapper 137's own page gives the 8259D an R4 that is **one bit per block** where the family
+/// page's is three common upper bits, and an R6 the family page does not mention at all:
+///
+/// ```text
+/// ...0 0ccc   CHR register 0
+/// ...B 0ccc   CHR register 1
+/// ...C 0ccc   CHR register 2
+/// ...D Eccc   CHR register 3
+/// ```
+///
+/// with R4 `.... .DCB` and R6 `.... ...E`. So window 0 reaches eight 1 KiB banks, windows 1 and 2
+/// sixteen with a hole in the middle, and **only window 3 reaches the whole 32 KiB** the page
+/// gives the chip — which is what its two extra bits are for (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn req_core_102_mapper_137_puts_one_bit_of_r4_on_each_of_its_blocks() {
+    let mut core = MapperRom::new(137).prg(16).chr(32).load();
+
+    // `.... .DCB`: bit 0 is window 1's bit 4, bit 1 window 2's and bit 2 window 3's. Window 0 has
+    // no bit of R4 at all — its diagram is `...0 0ccc`.
+    s8259_write(&mut core, 4, 0x07);
+    assert_eq!([0, 16, 16, 16], core.chr_windows()[..4]);
+    s8259_write(&mut core, 4, 0x01);
+    assert_eq!([0, 16, 0, 0], core.chr_windows()[..4], "B alone");
+    s8259_write(&mut core, 4, 0x02);
+    assert_eq!([0, 0, 16, 0], core.chr_windows()[..4], "C alone");
+    s8259_write(&mut core, 4, 0x04);
+    assert_eq!([0, 0, 0, 16], core.chr_windows()[..4], "D alone");
+
+    // R6's `E` is bit **3** of CHR register 3 and of nothing else, so window 3 is the only one
+    // that can reach a bank with bit 3 set.
+    s8259_write(&mut core, 6, 0x01);
+    assert_eq!([0, 0, 0, 24], core.chr_windows()[..4], "D and E together");
+    s8259_write(&mut core, 4, 0x00);
+    assert_eq!([0, 0, 0, 8], core.chr_windows()[..4], "E alone");
+
+    // Which is what "only register 3 accesses the full ROM" means: 31 is the last 1 KiB bank of
+    // the 32 KiB the page gives the chip, and `D`, `E` and `ccc` together are the only field that
+    // reaches it.
+    s8259_write(&mut core, 3, 0x07);
+    s8259_write(&mut core, 4, 0x04);
+    assert_eq!(31, core.chr_bank(0x0C00), "the last bank of 32 KiB");
+}
+
+/// R7's four layouts, and **the one place the two pages contradict each other** (Q-160): the
+/// family page gives `0 = V, 1 = H, 2 = (0,1,1,1), 3 = 1scA` and mapper 137's page gives
+/// `0 = H, 1 = V, 2 = (0,1,1,1), 3 = 1scA`, so modes 0 and 1 are swapped between them. Each
+/// number takes its own page, which is MF-UNL-2's rule.
+///
+/// Mode 2 is the one this core cannot say with a `NametableMirroring` — one table on CIRAM page 0
+/// and the other three on page 1 — so it comes out of `Mapper::nametable_page`, which is the
+/// eight-register ASIC's mode 0 read the other way round (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn q_160_the_sachen_8259_swaps_mirroring_modes_0_and_1_between_its_two_pages() {
+    for (mapper, mode_0, mode_1) in [
+        (138usize, Nm::Vertical, Nm::Horizontal),
+        (139, Nm::Vertical, Nm::Horizontal),
+        (141, Nm::Vertical, Nm::Horizontal),
+        // The 8259D, whose own page is the second of the two.
+        (137, Nm::Horizontal, Nm::Vertical),
+    ] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(32).load();
+
+        // Mode 0 at power-on, R7 being zero.
+        assert_eq!(mode_0, core.mirroring(), "mapper {mapper}, mode 0");
+        assert_eq!([-1, -1, -1, -1], nametable_pages(&core), "mapper {mapper}");
+
+        // `mm` is bits 2-1, so the four modes are 0, 2, 4 and 6.
+        s8259_write(&mut core, 7, 0x02);
+        assert_eq!(mode_1, core.mirroring(), "mapper {mapper}, mode 1");
+
+        // `(0,1,1,1)`: a per-table layout, so `nametable_page` answers and the mirroring field is
+        // left where mode 1 put it.
+        s8259_write(&mut core, 7, 0x04);
+        assert_eq!(
+            [0, 1, 1, 1],
+            nametable_pages(&core),
+            "mapper {mapper}, mode 2"
+        );
+
+        s8259_write(&mut core, 7, 0x06);
+        assert_eq!(
+            Nm::SingleScreenA,
+            core.mirroring(),
+            "mapper {mapper}, mode 3 is 1scA on both pages"
+        );
+        assert_eq!(
+            [-1, -1, -1, -1],
+            nametable_pages(&core),
+            "and the pages follow the mirroring again"
+        );
+    }
+}
+
+/// Simple mode, R7 bit 0: "When simple mode is enabled, mirroring is fixed to V, ignoring the m
+/// bits, and all 4 CHR banks use the CHR bank 0 register" (nesdev, "Sachen 8259").
+///
+/// Mapper 137's own page says only "mirroring is fixed to _H_, and banks become weird". So the
+/// mirroring follows each number's own page — which is, on both pages, **that page's own mode 0**
+/// — and the banks follow the family page's concrete statement, there being no other; **Q-160**
+/// records that "weird" is all the 8259D's page says (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn q_160_simple_mode_puts_chr_block_0_in_every_window() {
+    let mut core = MapperRom::new(138).prg(16).chr(128).load();
+    for block in 0u8..4 {
+        s8259_write(&mut core, block, block + 1);
+    }
+    assert_eq!([2, 3, 4, 5, 6, 7, 8, 9], core.chr_windows());
+
+    // `s` set: every window reads R0, which is 1 — and R4's outer bits still apply, the page's
+    // sentence being about the bank registers.
+    s8259_write(&mut core, 7, 0x01);
+    assert_eq!([2, 3, 2, 3, 2, 3, 2, 3], core.chr_windows());
+    assert_eq!(
+        Nm::Vertical,
+        core.mirroring(),
+        "fixed to V on the family page"
+    );
+    s8259_write(&mut core, 4, 0x01);
+    assert_eq!([18, 19, 18, 19, 18, 19, 18, 19], core.chr_windows());
+
+    // "ignoring the m bits": mode 2's per-table layout does not come back while `s` is set.
+    s8259_write(&mut core, 7, 0x05);
+    assert_eq!([-1, -1, -1, -1], nametable_pages(&core));
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // And clearing `s` restores all four blocks and the `mm` field at once.
+    s8259_write(&mut core, 7, 0x04);
+    assert_eq!([18, 19, 20, 21, 22, 23, 24, 25], core.chr_windows());
+    assert_eq!([0, 1, 1, 1], nametable_pages(&core));
+
+    // Mapper 137's own page fixes it to `H` instead, and that is the whole of the difference.
+    let mut core = MapperRom::new(137).prg(16).chr(32).load();
+    s8259_write(&mut core, 7, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring(), "fixed to H on mapper 137");
+}
+
+/// The 2M-RAM-COB board of *Q-Boy*, which the family page gives as the one CHR-RAM cartridge of
+/// the family: it "replaces CHR-ROM with 8 KiB of unbanked CHR-RAM, and is usually set to mapper
+/// 141".
+///
+/// So an image with no CHR-ROM is a board with **no CHR bank lines at all**: the four CHR
+/// registers and the outer one are latched and drive nothing, the 8 KiB window stays where
+/// `BankWindows::new` put it, and the bytes the PPU writes come back where they were written
+/// (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn req_core_102_the_2m_ram_cob_board_has_no_chr_bank_lines() {
+    let mut core = MapperRom::new(141).prg(16).chr(0).load();
+
+    // 8 KiB of CHR-RAM, unbanked and zero-filled.
+    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0], core.chr_windows());
+    chr_write(&mut core, 0x0000, 0x5A);
+    chr_write(&mut core, 0x1C00, 0xA5);
+    assert_eq!(0x5A, core.chr_bank(0x0000));
+    assert_eq!(0xA5, core.chr_bank(0x1C00));
+
+    // Every CHR register written, and nothing moves: on a CHR-ROM board `R0 = 7` with `R4 = 7`
+    // would be 2 KiB bank 126 on this wiring.
+    for register in [0u8, 1, 2, 3, 4, 6] {
+        s8259_write(&mut core, register, 0x07);
+    }
+    assert_eq!(0x5A, core.chr_bank(0x0000), "the window has not moved");
+    assert_eq!(0xA5, core.chr_bank(0x1C00));
+
+    // The PRG bank and the mirroring are the chip's and not the CHR chip's, so they still work.
+    s8259_write(&mut core, 5, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    s8259_write(&mut core, 7, 0x02);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+}
+
+/// REQ-CORE-090/091: the eight registers and the index survive a save and a restore, with the
+/// state dirtied first — including R6 on the three numbers whose page does not mention it, which
+/// no bank window of those numbers can show (MF-UNL-7 step 1).
+#[cfg(feature = "board-sachen8259")]
+#[test]
+fn req_core_090_the_sachen_8259_survives_a_save_and_restore() {
+    for mapper in [137usize, 138, 139, 141] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(32).load();
+        for register in 0u8..8 {
+            s8259_write(&mut core, register, (register + 3) & 0x07);
+        }
+        // Leave the index somewhere that is not the last register written, so that the byte has to
+        // be in the block rather than implied by it.
+        core.mapper_write(0x4100, 0x02);
+
+        let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+        let pages = nametable_pages(&core);
+        let state = core.save_state(true).unwrap();
+
+        core.reset();
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(
+            banks,
+            (core.prg_windows(), core.chr_windows(), core.mirroring()),
+            "mapper {mapper}"
+        );
+        assert_eq!(pages, nametable_pages(&core), "mapper {mapper}");
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+    }
 }

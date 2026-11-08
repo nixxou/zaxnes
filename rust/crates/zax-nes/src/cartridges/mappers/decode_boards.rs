@@ -23,6 +23,7 @@
     feature = "board-jv001",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
+    feature = "board-sachen8259",
     feature = "board-vs-system"
 )))]
 compile_error!(
@@ -45,6 +46,8 @@ use super::Nina03;
 use super::OekaKids;
 #[cfg(feature = "board-133")]
 use super::Sachen72008;
+#[cfg(feature = "board-sachen8259")]
+use super::Sachen8259;
 #[cfg(feature = "board-sachen-8reg")]
 use super::Sachen8Reg;
 #[cfg(any(
@@ -178,6 +181,12 @@ pub enum DecodeBoard {
     /// enum's first **banked** PRG-RAM window.
     #[cfg(feature = "board-178")]
     WaixingFs305(WaixingFs305),
+    // Appended by MF-UNL-7 step 1, the first board of a lot whose six are all of this shape: four
+    // numbers and one variant, the fourth board of this enum to hold a whole family after `Jv001`
+    // (six), `SingleLatch` (seven) and `Nina03` (two).
+    /// Mappers 137, 138, 139 and 141, the Sachen 8259 — one chip with four wirings.
+    #[cfg(feature = "board-sachen8259")]
+    Sachen8259(Sachen8259),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -220,6 +229,8 @@ macro_rules! inner {
             DecodeBoard::ChrWindowBoard($b) => $body,
             #[cfg(feature = "board-178")]
             DecodeBoard::WaixingFs305($b) => $body,
+            #[cfg(feature = "board-sachen8259")]
+            DecodeBoard::Sachen8259($b) => $body,
         }
     };
 }
@@ -367,7 +378,15 @@ impl Mapper for DecodeBoard {
     /// `Cartridge::refresh_nametable_pages`, which pushed `Cartridge::cpu_write` past the
     /// inliner's budget and cost two MMC1 ROMs about 1.2 M instructions on a dispatch no MMC1
     /// reaches.
-    #[cfg(any(feature = "board-111", feature = "board-sachen-8reg"))]
+    ///
+    /// **And the Sachen 8259 in MF-UNL-7 step 1**, whose R7 mode 2 is `(0,1,1,1)` — one table on
+    /// CIRAM page 0 and the other three on page 1, which is the eight-register ASIC's mode 0 read
+    /// the other way round and the same §4.5 cheap level.
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-sachen-8reg",
+        feature = "board-sachen8259"
+    ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))

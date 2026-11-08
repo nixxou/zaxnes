@@ -41,7 +41,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 ## Steps
 
 - [x] **0/9** — the plan: this file.
-- [ ] **1/9** — `board-sachen8259`: the index/data pair, registers 0-5 and 7, the per-variant CHR
+- [x] **1/9** — `board-sachen8259`: the index/data pair, registers 0-5 and 7, the per-variant CHR
   shift, the four mirroring modes and the CHR-RAM board.
 - [ ] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
 - [ ] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
@@ -57,3 +57,106 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 (Ten entries and not eight: §7.2's step list puts 218 and 29 in one step, and they share nothing —
 one is the only board in this build with no CHR memory and the other is a plain latch — so each
 takes its own.)
+
+---
+
+## Step 1 — the Sachen 8259, one chip with four wirings
+
+`board-sachen8259`, in `default`, implying `board-decode-boards`. One new module,
+`cartridges/mappers/sachen_8259.rs`, one new `DecodeBoard` variant (no `Board` variant — MF-6c
+step 7's finding is that a board joining that enum is free to the rest of the library), four
+numbers in `nametable_pages_vary` and one `registry::board_memory_sizes` row for the four.
+
+### The ports, which are the eight-register ASIC's
+
+`$4100` index and `$4101` data, both `.... .rrr` / `.... .ddd` — three bits — under **mask
+$C101**. That is A15, A14, A8 and A0 and nothing between, so the pair repeats through the whole of
+$4100-$7FFF and `board_memory_sizes` has to give all four numbers `prg_ram: Some(0)`, exactly as
+MF-UNL-1 step 2 did for mappers 150 and 243: `$6100 & $C101` is `$4100`, and a game writing its
+CHR block at $6101 must reach the ASIC rather than work RAM.
+
+**One difference from that board, and it is an absence.** Mapper 150's page says "All three bits in
+all eight registers are fully readable and writable"; this one says nothing of the kind, so the
+data port is **write-only** here and the board leaves `Mapper::try_read_prg` at `Mapper`'s own
+default. `DecodeBoard::try_read_prg`'s `cfg` list is therefore unchanged by this lot.
+
+### The four wirings, read off the page's *CHR Rewiring* table as arithmetic
+
+The chip always chooses one of four CHR registers with "PPU A[12:11]", i.e. a 2 KiB window, and
+the variants differ in how many of the PPU's low lines it **passes through** to the CHR ROM:
+
+| variant | # | passes | the six register bits drive | capacity | as a 2 KiB bank |
+| --- | ---: | --- | --- | ---: | --- |
+| 8259B | 138 | PPU A10-A0 | CHR A16-A11 | 128 KiB | `bank` |
+| 8259A | 141 | PPU A11-A0 | CHR A17-A12 | 256 KiB | `(bank << 1) \| (w & 1)` |
+| 8259C | 139 | PPU A12-A0 | CHR A18-A13 | 512 KiB | `(bank << 2) \| (w & 3)` |
+
+A11 on the 8259A is both an address line of a 4 KiB bank *and* the window selector, which is the
+whole of that row; the C does the same thing one bit further. The page's three capacities are the
+arithmetic's own check — six bits of register times a 2, 4 or 8 KiB unit — and the test asserts
+the three power-on signatures those shifts produce with every register zero, which are different
+pictures of the same silicon: `[0,1,0,1,0,1,0,1]`, `[0,1,2,3,0,1,2,3]` and `[0,1,2,3,4,5,6,7]`.
+
+### The 8259D, which is mapper 137 and has a page of its own
+
+Four **1 KiB** windows over $0000-$0FFF and "PPU $1000-$1FFF: fixed to last 4KiB of CHR ROM", and
+an R4 that is one bit **per block** rather than three common upper bits:
+
+```text
+...0 0ccc   CHR register 0        Internal 4: .... .DCB
+...B 0ccc   CHR register 1        Internal 6: .... ...E
+...C 0ccc   CHR register 2
+...D Eccc   CHR register 3
+```
+
+So window 0 reaches eight banks, windows 1 and 2 sixteen with a hole in the middle, and **only
+window 3 reaches the whole 32 KiB** the page gives the chip. That is the page's own "only register
+3 accesses the full ROM", and it is why `Internal 6` exists at all — a register the family page
+does not mention.
+
+### Q-160: the two places the two pages contradict each other
+
+MF-UNL-2's rule is that the number's own page wins, so the 8259D takes mapper 137's page and the
+other three take the family page. The two differences are both in R7 (`.... .mms`):
+
+| | family page (138, 139, 141) | mapper 137's page |
+| --- | --- | --- |
+| `mm` = 0 | `V` | `H` |
+| `mm` = 1 | `H` | `V` |
+| `s` fixes the mirroring to | `V` | `H` |
+| `s` and the banks | "all 4 CHR banks use the CHR bank 0 register" | "banks become weird" |
+
+The first three lines are one statement once seen the right way round: **simple mode fixes the
+mirroring to that page's own mode 0**, on both pages, so one call says it for all four numbers.
+The fourth is a gap — "weird" is all the 8259D's page says — and the 137 board takes the family
+page's concrete sentence for want of any other. Q-160 records all four rows.
+
+`mm` = 2 is `(0,1,1,1)` on both pages: one table on CIRAM page 0 and the other three on page 1, a
+per-table layout no `NametableMirroring` can say, so it comes out of `Mapper::nametable_page` —
+§4.5's cheap level and the eight-register ASIC's mode 0 read the other way round. `mm` = 3 is
+`1scA` on both.
+
+### The 2M-RAM-COB board
+
+*Q-Boy*'s cartridge "replaces CHR-ROM with 8 KiB of unbanked CHR-RAM, and is usually set to mapper
+141". An image with no CHR-ROM is therefore a board with **no CHR bank lines**: `update_banks`
+returns after the PRG bank, the 8 KiB window stays where `BankWindows::new` put it, and a write to
+R0-R4 or R6 moves nothing. The registers are still latched, because the index and data ports are
+the chip's and not the CHR chip's — which is what the test pins, together with the PRG bank and the
+mirroring still working.
+
+### The attribution gap, recorded and not guessed
+
+The census asks for this by name. Two sentences are all the sources give, and two sentences are all
+this board claims: *The Great Wall* is the 8259D's "only one known" game with "32KiB PRG ROM and
+32KiB CHR ROM", and *Q-Boy* is the 2M-RAM-COB board "usually set to mapper 141". Nothing assigns a
+title to 138 or 139.
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in all four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-sachen8259`). `mapper_tests` **291/0/0** by default
+(282 before this step, plus the nine this step adds — eight tests and the sweep's four new rows),
+109/0/0 with the feature alone, 102/0/0 with no features, 291/0/0 with `parked-boards`; the three
+latch sweeps of `cartridges::tests` pass in every one.

@@ -41,6 +41,8 @@ use super::mappers::Nrom;
 use super::mappers::OekaKids;
 #[cfg(feature = "board-133")]
 use super::mappers::Sachen72008;
+#[cfg(feature = "board-sachen8259")]
+use super::mappers::Sachen8259;
 #[cfg(feature = "board-sachen-8reg")]
 use super::mappers::Sachen8Reg;
 #[cfg(feature = "board-116")]
@@ -211,8 +213,18 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     133,
     #[cfg(feature = "board-jv001")]
     136,
+    // The four wirings of the Sachen 8259, which are **not** in letter order: 137 is the 8259D,
+    // 138 the B, 139 the C and 141 the A (MF-UNL-7 step 1).
+    #[cfg(feature = "board-sachen8259")]
+    137,
+    #[cfg(feature = "board-sachen8259")]
+    138,
+    #[cfg(feature = "board-sachen8259")]
+    139,
     #[cfg(feature = "board-small-boards")]
     140,
+    #[cfg(feature = "board-sachen8259")]
+    141,
     #[cfg(feature = "board-143")]
     143,
     #[cfg(feature = "board-144")]
@@ -705,6 +717,23 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // The Sachen 8259's two ports are the same pair under the same **mask $C101** ("Registers
+        // should be masked with $C101"), so the row above's reason holds word for word: the index
+        // and data registers repeat through the whole of $4100-$7FFF, `$6100 & $C101` is `$4100`,
+        // and the window has to be the registers and not RAM or a game writing its CHR block at
+        // $6101 would write work RAM instead. Neither the family page nor mapper 137's gives the
+        // board any PRG-RAM (MF-UNL-7 step 1).
+        //
+        // **No CHR row**, which is mapper 268's reason rather than the TQROM's: the page gives no
+        // single figure to state. Its *CHR Rewiring* table gives a *maximum* per variant — 128 KiB
+        // on the 8259B, 256 KiB on the A, 512 KiB on the C, 32 KiB on the D — and the 2M-RAM-COB
+        // board of *Q-Boy* "replaces CHR-ROM with 8 KiB of unbanked CHR-RAM", which only the dump
+        // can say. So the dump decides, and `Sachen8259::new` reads which of the two it is.
+        #[cfg(feature = "board-sachen8259")]
+        137 | 138 | 139 | 141 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // **Mapper 133 is deliberately absent too**, and for the same reason: its latch is at
         // $4100 under mask $E100, which `$6100 & $E100` cannot be, and the page gives the Sachen
         // 72008 no PRG-RAM line either way (MF-UNL-1 step 3).
@@ -996,6 +1025,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // note has the page's sentence that settles it.
         #[cfg(feature = "board-133")]
         133 => Board::DecodeBoard(DecodeBoard::Sachen72008(Sachen72008::new(memory))),
+        // MF-UNL-7 step 1: the Sachen 8259, one chip with four wirings. The number picks how far
+        // the CHR register's six bits are shifted above the window the PPU's own address lines
+        // choose -- and, on mapper 137 alone, a 1 KiB layout with a fixed upper half and an R4
+        // that is one bit per block instead of three common upper bits. One `DecodeBoard` variant
+        // for all four, on the `Jv001` precedent; `Sachen8259`'s own note has the table and the
+        // two places its two pages disagree (Q-160).
+        #[cfg(feature = "board-sachen8259")]
+        137 | 138 | 139 | 141 => {
+            Board::DecodeBoard(DecodeBoard::Sachen8259(Sachen8259::new(memory, mapper)))
+        }
         // MF-UNL-3 step 1: the AVE NINA-03/06 and the Sachen 3015 / SA-016, which nesdev's one
         // page for both numbers calls "functionally identical". One latch at $4100 under mask
         // $E100, and FCEUX's extra CNROM switch at $8000-$FFFF deliberately left out --

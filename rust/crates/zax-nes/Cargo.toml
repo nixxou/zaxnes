@@ -58,6 +58,7 @@ default = [
     "board-162",
     "board-178",
     "board-268",
+    "board-sachen8259",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -504,6 +505,31 @@ board-162 = ["board-decode-boards"]
 # IRQ), 2 (TMS5220 speech) and 3 (solder-pad read-out) are deferred by census §7.2, as is the
 # Dendy timing the educational variants want.
 board-178 = ["board-decode-boards"]
+
+# Mappers 137, 138, 139 and 141, the Sachen **8259** -- one chip with four wirings (MF-UNL-7
+# step 1). An index port at $4100 and a data port at $4101 under mask $C101, three bits wide, the
+# same pair as `board-sachen-8reg`; eight internal registers of which the family page documents
+# R0-R3 (the CHR block select), R4 (the outer bank), R5 (a 32 KiB PRG bank) and R7 (`.... .mms`,
+# the mirroring mode and "simple" mode), and mapper 137's own page adds R6.
+#
+# The four wirings are the page's *CHR Rewiring* table as arithmetic: the 8259B (138) drives its
+# six register bits onto CHR A16-A11 with PPU A10-A0 passed through, the A (141) onto A17-A12 with
+# A11-A0 passed through and the C (139) onto A18-A13 with A12-A0 -- so the 2 KiB window the PPU's
+# A12-A11 chose takes the bank shifted 0, 1 or 2 places, and the chip reaches 128, 256 or 512 KiB.
+# The D (137) is the one with a page of its own: four **1 KiB** windows over $0000-$0FFF with
+# $1000-$1FFF "fixed to last 4KiB", and an R4 that is one bit **per block** rather than three
+# common upper bits, so only its fourth window reaches the whole 32 KiB.
+#
+# Two original titles: *The Great Wall* (the 8259D, "the only one known") and *Q-Boy* (the
+# **2M-RAM-COB** board, which "replaces CHR-ROM with 8 KiB of unbanked CHR-RAM" and is "usually set
+# to mapper 141"). The page's own disclaimer -- "gathered primarily from FCEU-mm ... it is likely
+# incomplete" -- governs all four numbers, and **Q-160** records the two places the family page and
+# mapper 137's contradict each other (mirroring modes 0 and 1, and what simple mode fixes them to).
+#
+# One `DecodeBoard` variant for all four, on the `Jv001` precedent, and one forward that enum
+# already had for `board-sachen-8reg`: `nametable_page`, because R7 mode 2 is `(0,1,1,1)` -- a
+# per-table layout no `NametableMirroring` can say. Implies `board-decode-boards`.
+board-sachen8259 = ["board-decode-boards"]
 
 # NES 2.0 mapper 268, the 聚芯 **AA6023** ASIC (SMD132 / SMD133) of the **COOLBOY** and **MINDKIDS**
 # boards -- an MMC3 clone with **six outer bank registers** above the chip's own, which take it from
