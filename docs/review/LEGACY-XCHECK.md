@@ -865,4 +865,217 @@ a ROM test in the harness. `mmc3_irq_tests` and the four `M4_*` images are not r
 
 Count: 12 OK, 0 DIFFERS, 3 OPEN.
 
+---
+
+## Mapper 5 — MMC5 (ExROM), with its expansion audio
+
+Pages: *MMC5* (<https://www.nesdev.org/wiki/MMC5>), *MMC5 audio*
+(<https://www.nesdev.org/wiki/MMC5_audio>). Ours: `mappers/mmc5.rs`, `apu/mmc5_audio.rs`,
+`apu/mmc5_pulse_channel.rs`. Theirs: `fceux/src/boards/mmc5.cpp`,
+`nestopia/source/core/board/NstBoardMmc5.cpp` and `.hpp`,
+`punes/src/core/mappers/mapper_005.c`, `punes/src/core/apu.h`,
+`nintendulator-mappers/src/Hardware/h_MMC5.cpp`,
+`nintendulator-mappers/src/Hardware/Sound/s_MMC5.cpp`,
+`mesen2/Core/NES/Mappers/Nintendo/MMC5.h`, `mesen2/Core/NES/Mappers/Audio/Mmc5Audio.h`.
+
+MR-1 reviewed this board against Mesen and MF-1 fixed MR-5-1, MR-5-3 and MR-5-5; MR-5-4 (the
+in-frame detection) was reworked into the bus-sniffing form the page describes, and Q-121 holds
+the one line the page does not pin. What the four new sources add is a clear majority on two
+things MR-1 could only see one side of: the split screen, and the audio's low-period cutoff.
+
+### The register map — OK
+
+- **$5100 PRG mode, $5101 CHR mode, $5104 ExRAM mode, $5105 nametable mapping, $5106/$5107
+  fill, $5113 PRG-RAM bank, $5114-$5117 PRG banks, $5120-$512B CHR banks, $5130 upper CHR bits,
+  $5203/$5204 IRQ, $5205/$5206 multiplier** — all decoded, all at the page's addresses and with
+  the page's fields (`mmc5.rs:163-205`). The four agree register for register
+  (`mmc5.cpp:490-570`, `NstBoardMmc5.cpp:1209-1420`, `mapper_005.c:182-300`,
+  `h_MMC5.cpp:477-560`).
+- **All four PRG modes, and the mask each window applies** — OK (`mmc5.rs:207-241`). puNES
+  writes the masks out per mode — the 32 KiB window takes the register's bits 6-2, the 16 KiB
+  windows bits 6-1 (`mapper_005.c:520-542`) — where this build derives them from the window
+  count; same banks.
+- **Bit 7 of $5114-$5116 chooses RAM or ROM, and $5117 is always ROM** — OK
+  (`mmc5.rs:227-241`); puNES tests the same bit (`mapper_005.c:544-545`). MR-1 proved this
+  predicate equivalent to Mesen's register-based one.
+- **$5102 = $02 and $5103 = $01 are both required to write PRG-RAM** — OK
+  (`mmc5.rs:547-549`), exactly the page's requirement; puNES stores the same pair
+  (`mapper_005.c:192`).
+- **$5203 = $00 never produces an IRQ** — OK (`mmc5.rs:313-314`), which is the page's "special
+  case".
+- **The pending flag sets whether or not the IRQ is enabled, and only the AND of the two drives
+  /IRQ** — OK: `detect_scanline` sets `irq_pending` unconditionally (`mmc5.rs:315`) and
+  `refresh_irq_line` ANDs it with the enable (`mmc5.rs:245-247`).
+- **$5204 read: bit 7 the pending flag, bit 6 in-frame, and reading clears the pending flag
+  only** — OK (`mmc5.rs:155-157`, `mmc5.rs:616-623`). The page also gives **bit 0** as an
+  "abnormal M2/CPU A0 sequence detection flag"; no implementation here or among the four exposes
+  it, and no game reads it.
+- **Scanline detection: three identical nametable reads then any PPU read, at PPU cycle 4** —
+  OK (`mmc5.rs:261-318`), the page's own mechanism, with `need_in_frame` making the first
+  detected line arm-and-zero without a compare. This is MR-5-3 and MR-5-4 as MF-1 left them.
+- **In-frame drops on the PPU going idle and on an $FFFA/$FFFB read** — OK
+  (`mmc5.rs:320-326`). The page lists two more triggers (the V-blank NMI and a PPUMASK
+  disable), both of which the idle counter reaches by a different route.
+- **The 64 KiB PRG-RAM forced regardless of the header** — OK (`registry.rs`
+  `minimum_prg_ram_size`, `Mmc5::MAX_PRG_RAM_SIZE = 64 KiB`), which MR-1 showed equivalent to
+  Mesen's "emulate as if a single 64k block existed" for an iNES image.
+- **$5113 masked to three bits** — OK with a note. The page says "bits 7-4 ignored", i.e. four
+  bits; this build and Mesen use three (`mmc5.rs:178`). Three bits address the whole 64 KiB,
+  so the fourth can only select a chip that no licensed board has.
+- **Expansion audio register map ($5000-$5007 two pulses, $5010 PCM mode/IRQ, $5011 raw PCM,
+  $5015 status), no sweep unit, envelopes and length counters both at a fixed 240 Hz, both PCM
+  modes, and the PCM IRQ on the CPU line** — OK, all of it the page's text, and the PCM IRQ
+  driving /IRQ is implemented here (`apu/mmc5_audio.rs:23-31`, `mmc5.rs:245-247`) where Mesen
+  left it a TODO. Nintendulator is the only one of the four that also implements read mode and
+  the IRQ (`s_MMC5.cpp:143-153`, `s_MMC5.cpp:186-226`).
+- **The output polarity is reversed relative to the APU** — OK. The page: "The polarity of all
+  MMC5 channels is reversed compared to the APU." This build subtracts `M` from the APU's `A`
+  (AMD-061 §6.2, `apu/mmc5_audio.rs:30-33`) and Mesen negates; FCEUX adds the amplitude into
+  its wave buffer (`mmc5.cpp:797`, `mmc5.cpp:827`), Nintendulator sums the two squares into its
+  positive accumulator (`s_MMC5.cpp:236-241`), and Nestopia sums through its ordinary external
+  channel path. Two of six follow the page and this build is one of them; the other three are
+  simply summing every channel with one sign, which is a mixer convention rather than a reading
+  of the board.
+
+### MMC5-1 — the vertical split and extended attribute mode are not implemented here and are implemented by all five others — DIFFERS
+
+**Point.** Two features of this board that change what is on screen:
+
+- **Extended attribute mode** ($5104 = %01). Each ExRAM byte supplies, per background tile, a
+  6-bit 4 KiB CHR bank and a 2-bit palette override (`AACC CCCC`), so the background escapes
+  both the 8x8 attribute grid and the single CHR window.
+- **Vertical split mode** ($5200-$5202). A tile-count threshold splits the screen vertically;
+  the split region scrolls independently, fetches its nametable from ExRAM only, and takes its
+  CHR from the $5202 bank.
+
+**This build.** Neither. The board's own doc comment says so in one sentence
+(`mmc5.rs:12-15`), `write_control` has no $5200-$5202 arm at all (`mmc5.rs:163-204`, which
+falls through to `_ => {}`), and `ex_ram_mode` 1 is treated exactly like mode 0.
+
+**The others.** All five implement both:
+
+| | split | extended attributes | file:line |
+| --- | --- | --- | --- |
+| FCEUX | yes | yes | `mmc5.cpp:568-570` ($5200-$5202), `mmc5.cpp:178-267` (the split and `MMC5HackCHRMode == 1` paths in the PPU read hook) |
+| Nestopia | yes | yes, and the two composed | `NstBoardMmc5.hpp:191-240` (`ClockSpliter`, `GetSpliterAttribute`, `FetchNtExtSplit`, `CRomExtSplit`), dispatched at `NstBoardMmc5.cpp:1038-1041` |
+| puNES | yes | yes | `mapper_005.c:243-256` ($5200-$5202 with side, threshold, scroll and bank), `mapper_005.c:459` (the per-tile 4 KiB bank), `mapper_005.c:494` (the per-tile palette) |
+| Nintendulator | yes | yes | `h_MMC5.cpp:18`, `h_MMC5.cpp:531-538`, `h_MMC5.cpp:576-599` |
+| Mesen 2 | yes | yes | `MMC5.h` `_verticalSplitEnabled`, `_splitTileNumber` (MR-1) |
+
+**Verdict: DIFFERS** — unanimously, five to one, and against the page. **This is not a
+regression and not an oversight**: REQ-CORE-100's mapper-5 row asks for "au minimum : modes de
+banques PRG et CHR, PRG-RAM, IRQ de ligne" and marks "ExRAM, attributs étendus, split
+vertical" as **P2**, so the spec itself records the gap, MR-1 recorded it, and the code comment
+records it. It is reported here because the brief asks for the comparison against the page and
+the majority, and because it is by a wide margin the largest *visible* difference in the whole
+v0.4.2 set.
+
+**Which games it affects, and which are known affected.** The page names them, which is better
+evidence than any of the five implementations:
+
+- **Extended attribute mode**: *Just Breed*, *Yakuman Tengoku*, and the Koei strategy titles —
+  *Nobunaga's Ambition II*, *Romance of the Three Kingdoms II*, *Uncharted Waters*, *Bandit
+  Kings of Ancient China*. On this build these render with the ordinary 8x8 attribute grid and
+  one CHR window, so backgrounds show wrong colours per tile and, where the per-tile bank
+  differs, wrong tiles.
+- **Vertical split**: *Uchuu Keibitai SDF* (the intro) and *Bandit Kings of Ancient China*
+  (the ending). On this build the split region is simply absent — the normal background is
+  drawn across the whole line.
+- **Not affected**: *Castlevania III* uses the PRG/CHR banking and the scanline IRQ, which are
+  implemented, so the most-played MMC5 game is not in this list.
+
+**Risk of a fix.** Contained but not trivial, and this is the part worth being honest about.
+Extended attribute mode needs the PPU's nametable and attribute fetches routed through the
+board per tile, which the current `nametable_page` / `ppu_peek` interface does not express:
+`chr_address` is called with a `ChrFetch` kind but not with the tile index, and the attribute
+byte is not asked of the board at all. The split needs a per-line tile counter fed from the
+PPU's fetch sequence. Both put work on the background fetch path, which the comments in
+`mmc5.rs` and `mmc3.rs` show is the one place this project has repeatedly measured regressions
+(`Mmc5::see_ppu_read` carries an `#[inline(never)]` and a callgrind figure for exactly this
+reason). SMB3, Zelda II and the widescreen packs are not mapper 5 and cannot be moved by a
+mapper-5 change, but a careless implementation could cost every game a few instructions per
+fetch. The safe shape is the one the board already uses: decide everything decidable per
+*register write*, and leave the per-fetch path a load and a branch.
+
+**What a fix would look like.** Three pieces, in order of value: (a) ExRAM mode 1's per-tile
+palette override, which is what the six Koei/Just Breed titles need most visibly and which
+needs only the attribute fetch to consult ExRAM; (b) the per-tile 4 KiB CHR bank from the same
+byte; (c) $5200-$5202 and the split tile counter, which is two games. (a) and (b) are one
+feature in the hardware and probably one change here.
+
+### MMC5-2 — the low-period cutoff: this build follows the page and three of the four do not — OK
+
+**Point.** *MMC5 audio* is explicit: "Frequency values less than 8 do not silence the MMC5
+pulse channels; they can output ultrasonic frequencies." The 2A03's pulse channels do silence
+below 8, as a side effect of the sweep unit's overflow logic; the MMC5's, having no sweep unit,
+do not.
+
+**This build.** No cutoff. This is where Q-111 ended up: `Mmc5PulseChannel` exists as a type of
+its own precisely so that it can drop the two units an APU pulse has — the sweep and the cut
+below period 8 — without touching the APU pulse that every game runs
+(`apu/mmc5_pulse_channel.rs:6-18`, and `output` at `:30-43` has no period test at all,
+quoting the page's sentence in its doc comment). AMD-061 §6.1 is the amendment that made it so.
+
+**The others — nobody agrees with anybody, and the page's own reading is the minority.**
+
+| | silences when | file:line |
+| --- | --- | --- |
+| this build | **never** | `apu/mmc5_pulse_channel.rs:30-43` |
+| puNES | **never** — its low-period cutoff lives in `sweep_silence` (`apu.h:103-110`), and the MMC5 squares never run a sweep, so the flag stays clear | `apu.h:125-130`, `mapper_005.c:507-518` |
+| Mesen 2 | **never**, with an `_isMmc5Square` flag threaded through its shared pulse class specifically to disable the cutoff for this board | MR-1 |
+| FCEUX | period + 1 < 8 | `mmc5.cpp:788`, `mmc5.cpp:818` |
+| Nestopia | period < 4 (`MIN_FRQ`) | `NstBoardMmc5.hpp:104`, `NstBoardMmc5.cpp:264-267` |
+| Nintendulator | period ≤ 1, with the reason in the comment: "JustBreed sets Freq=1 in places, which sounds very bad due to lack of downsampling" | `s_MMC5.cpp:55-57` |
+
+**Verdict: OK**, and worth recording as a success rather than a draw: the page, this build,
+puNES and Mesen have no cutoff; FCEUX, Nestopia and Nintendulator each invented a different
+threshold. Nintendulator's comment says *why*, and it is the useful part of this entry — an
+ultrasonic square aliases badly without downsampling, so three emulators added a cutoff the
+hardware does not have, as a resampling workaround. **The practical warning for this project is
+therefore the mirror image of a finding**: because this build correctly lets the channel run
+ultrasonic, *Just Breed* — the title Nintendulator names as setting period 1 — will put a
+near-Nyquist square through this project's output path, and whether that sounds like silence,
+a tone or aliasing noise depends entirely on the resampling downstream of
+`Mmc5Audio::output`. If anyone ever reports *Just Breed* sounding harsh on this build, the
+cause is here and the fix belongs in the resampler, not in the channel.
+
+MR-1's Q-111 table is therefore closed on both of its points: the cutoff went the page's way
+(AMD-061 §6.1), and so did the polarity (§6.2) — `apu/mixer.rs:34` quotes the same page, and
+`apu/mod.rs:14` records that `M` is subtracted from the APU's `A`.
+
+### MMC5-3 — the power-on value of $5104 — OPEN
+
+
+**Point.** The *MMC5* page gives reset values for several registers: $5100 = $03, $5102 = $01,
+$5103 = $10, $5104 = **$03**, $5117 = $FF, $5130 = $00, $5200/$5201 = $00.
+
+**This build.** $5100 = 3 ✓, $5117 = $FF ✓, $5130 = 0 ✓, $5102/$5103 = 0 (which is
+"not writable", the same effect as the page's pair) — and **$5104 = 0**, where the page says 3
+(`mmc5.rs:127-136`).
+
+**The others.** FCEUX powers up in mode 0 (`mmc5.cpp:1047`), Nestopia in mode 0
+(`NstBoardMmc5.cpp:94`, `EXRAM_MODE_PPU_NT`), puNES zeroes its whole state on a hard reset and then
+re-seeds $5100 to mode 3 and $5101 to mode 0 but not $5104 (`mapper_005.c:57-62`). Nintendulator zeroes the split registers explicitly and
+leaves the mode at zero (`h_MMC5.cpp:188`).
+
+**Verdict: OPEN.** The page gives a reset value and four of four implementations ignore it, so
+either the page's figure is an artefact of how it was measured or every emulator has the same
+harmless bug. Harmless is the operative word: mode 0 and mode 3 differ only in whether the CPU
+can read $5C00-$5FFF and whether the PPU can see ExRAM, and every MMC5 game writes $5104 in its
+reset code before using either.
+
+**What would settle it.** A power-on read of $5C00 on hardware before any write to $5104 — or,
+failing that, an authoritative edit to the page, since no emulator author appears to have
+believed it.
+
+**Test ROMs.** `assets-free/test-roms/nes-test-roms/mmc5test` and `mmc5test_v2`, and
+`assets-free/test-roms/nes-test-roms/exram`. These are the only mapper-specific ROM tests in
+the suite besides the MMC3's, and they are the ones that would exercise MMC5-1 and MMC5-3
+directly: `exram` is about the $5C00-$5FFF modes and `mmc5test_v2` covers the split and the
+scanline IRQ. **Neither is run by the project today.** Running `exram` would settle MMC5-3 at
+first hand; running `mmc5test_v2` would quantify MMC5-1 rather than leave it as a feature
+checklist. There is no audio test ROM for the MMC5, so MMC5-2 stays a documentation question.
+
+Count: 16 OK, 1 DIFFERS, 1 OPEN.
+
 <!-- NEXT-BOARD -->
