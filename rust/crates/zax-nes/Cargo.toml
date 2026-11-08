@@ -66,6 +66,7 @@ default = [
     "board-29",
     "board-huang1",
     "board-cony",
+    "board-91",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -735,6 +736,31 @@ board-huang1 = []
 # One boxed `IrqBoard` variant, and every hook it needs is one that enum already forwards for the
 # J.Y. ASIC -- the other board in there with two clock sources.
 board-cony = []
+
+# Mapper 91, the **JY830623C** / **YY840238C** (submapper 0) and the **EJ-006-1** (submapper 1)
+# (MF-UNL-8 step 4). Four originals on the J.Y. board -- *Street Fighter 3*, *Mortal Kombat II*,
+# *Dragon Ball Z 2* and *Mario & Sonic 2* -- plus the two *1995 Super HIK 4-in-1* multicarts.
+# **Submapper 1's *Super Fighter III* is not counted**: "the commonly available ROM image of
+# *Super Fighter III* is a mapper hack for INES Mapper 197", which is the page's own note about the
+# dumps in circulation, so that title is not evidence for this board (census §7.2).
+#
+# "Submapper 0 has a PA12-based IRQ counter and hard-wired mirroring; submapper 1 an M2-based IRQ
+# counter and selectable mirroring", and the two boards differ by **one mask bit** -- $F003 against
+# $F007 -- plus the four registers that bit makes reachable. So this is **one board with one
+# `bool`**: four 2 KiB CHR banks at $6000-$6003, two 8 KiB PRG banks at $7000-$7001, $C000-$FFFF
+# fixed to the last bank, IRQ stop and start ports with the value ignored, and on submapper 1 two
+# mirroring ports and a sixteen-bit counter register.
+#
+# Submapper 0 adds an **outer bank register whose diagram is an address and not a datum** -- `.PPC`
+# of a write anywhere in $8000-$9FFF, "Mask: unknown" -- giving CHR A19 and PRG A17-A18 above a
+# 128 KiB inner PRG bank. The two counters share nothing but their ports: 64 unfiltered A12 rises
+# on one, "counting down by five every fourth M2 cycle" on the other. **Q-168** records the four
+# things the page leaves open, the outer register's own bit order among them.
+#
+# One **unboxed** `IrqBoard` variant -- the board is a `BankWindows` and sixteen bytes, where that
+# enum already carries an `Mmc3Board` inline -- and no new `Board` discriminant. Both hooks it needs
+# are already forwarded there for the J.Y. ASIC and the Cony board.
+board-91 = []
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

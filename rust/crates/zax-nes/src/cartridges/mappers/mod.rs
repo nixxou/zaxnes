@@ -62,6 +62,8 @@ mod jv001;
 mod jy_company;
 #[cfg(feature = "board-218")]
 mod magic_floor;
+#[cfg(feature = "board-91")]
+mod mapper091;
 mod mmc1;
 mod mmc2;
 mod mmc3;
@@ -179,6 +181,8 @@ pub use jv001::Jv001;
 pub use jy_company::JyCompany;
 #[cfg(feature = "board-218")]
 pub use magic_floor::MagicFloor;
+#[cfg(feature = "board-91")]
+pub use mapper091::Mapper091;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
 #[cfg(feature = "board-mmc3-multicart")]

@@ -199,6 +199,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   registers (four 2 KiB ones on 83.1 and 264), a solder-pad read and four bytes of scratch
     //   RAM -- behind `board-cony` (MF-UNL-8 step 3). Submapper 2, the one PCB with PRG-NVRAM at
     //   $6000, is refused at load (Q-167);
+    // * 91, the JY830623C / YY840238C and the EJ-006-1 -- two boards that differ by **one mask
+    //   bit** ($F003 against $F007) and the four registers it makes reachable, with a PA12 counter
+    //   and hard-wired mirroring on one and an M2 counter and two mirroring ports on the other,
+    //   plus an outer bank register whose diagram is an **address** -- behind `board-91`
+    //   (MF-UNL-8 step 4, Q-168);
     // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
@@ -229,7 +234,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 105] = [
+    let additions: [(i32, bool); 106] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -264,6 +269,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (88, namcot),
         (89, small),
         (90, jy),
+        (91, cfg!(feature = "board-91")),
         (92, jaleco),
         (93, small),
         (94, cfg!(feature = "board-94")),
@@ -6427,9 +6433,11 @@ fn somari_mode(core: &mut NesCore, value: u8) {
 /// banks: the two would read the same byte. The offsets distinguish them.
 ///
 /// Mappers 12 and 14 use it for the same reason: their CHR A18 is the same 256-bank move, applied
-/// per window group. So does mapper 83.3, whose `CC` bits are CHR A19-A18 (MF-UNL-8).
+/// per window group. So do mapper 83.3, whose `CC` bits are CHR A19-A18, and mapper 91's submapper
+/// 0, whose outer register drives CHR A19 (MF-UNL-8).
 #[cfg(any(
     feature = "board-116",
+    feature = "board-91",
     feature = "board-cony",
     feature = "board-huang1"
 ))]
@@ -12892,5 +12900,207 @@ fn req_core_011_mapper_83_submapper_2_wants_prg_nvram_at_6000_and_is_refused() {
             .cartridge()
             .unwrap()
             .mapper_number()
+    );
+}
+
+// ------------------------------------------- mapper 91, the JY830623C and the EJ-006-1,
+// ------------------------------------------- MF-UNL-8 step 4
+
+/// The four register groups the page lists, on both boards: four 2 KiB CHR banks at
+/// `$6000`-`$6003`, two 8 KiB PRG banks at `$7000`-`$7001`, and `$C000`-`$FFFF` "hard-wired to
+/// last bank".
+///
+/// On submapper 0 the outer register is "PRG A17-A18" above a **128 KiB inner bank**, so the two
+/// bank registers drive A13-A16 and the fixed 16 KiB is the last of that inner bank — the same
+/// reading of the same words the Cony board's `$E000` window takes. Submapper 1 has no outer
+/// register at all, the page gives its two bank registers no diagram, and its fixed 16 KiB is the
+/// ROM's last.
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_102_mapper_91_banks_two_prg_windows_and_four_2_kib_chr_windows() {
+    // Submapper 0, with a 128 KiB inner bank over a 256 KiB ROM.
+    let mut core = MapperRom::new(91).prg(32).chr(64).load();
+    assert_eq!(
+        [0, 0, 14, 15],
+        core.prg_windows(),
+        "power-on: bank 0 twice and the last of the inner bank fixed"
+    );
+    core.mapper_write(0x7000, 3);
+    core.mapper_write(0x7001, 5);
+    assert_eq!([3, 5, 14, 15], core.prg_windows());
+
+    // The registers drive A13-A16 alone on this board, so bits above the inner bank are not
+    // latched -- that is what the outer register is for.
+    core.mapper_write(0x7000, 0x13);
+    assert_eq!(
+        3,
+        core.prg_windows()[0],
+        "A17 and above are the outer bank's"
+    );
+
+    // Four 2 KiB CHR windows, one register each.
+    for register in 0..4u16 {
+        core.mapper_write(0x6000 + register, u8::try_from(register).unwrap() + 1);
+    }
+    assert_eq!([2, 3, 4, 5, 6, 7, 8, 9], core.chr_windows());
+
+    // Submapper 1: no inner bank, so all eight bits of each register reach the ROM and the fixed
+    // 16 KiB is the ROM's own last.
+    let mut core = MapperRom::new(91).submapper(1).prg(32).chr(64).load();
+    core.mapper_write(0x7000, 0x13);
+    core.mapper_write(0x7001, 0x15);
+    assert_eq!([19, 21, 30, 31], core.prg_windows());
+}
+
+/// "Mask: `$F003`/`$F007` (submapper 0/1)" — **one bit, and it is the whole submapper**.
+///
+/// With the mask at `$03`, `$6004` and `$6005` are CHR registers 0 and 1 again and `$6006`/`$6007`
+/// are registers 2 and 3, which is exactly a board with "hard-wired mirroring" and no counter
+/// register; `$7006` and `$7007` are then indices 2 and 3, which is where that board's IRQ ports
+/// are. The test writes each address on each board and shows the two decodes apart.
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_102_mapper_91_decodes_its_registers_under_f003_or_f007_by_submapper() {
+    // Submapper 0: $6004 is CHR register 0 and $6006 is CHR register 2.
+    let mut core = MapperRom::new(91).prg(16).chr(64).load();
+    core.mapper_write(0x6004, 7);
+    core.mapper_write(0x6006, 9);
+    assert_eq!(
+        [14, 15, 0, 1, 18, 19, 0, 1],
+        core.chr_windows(),
+        "the $F003 mask folds $6004-$6007 back onto the four CHR registers"
+    );
+    assert_eq!(
+        MapperRom::new(91).prg(16).chr(64).load().mirroring(),
+        core.mirroring(),
+        "hard-wired mirroring: the header's, and no register moves it"
+    );
+
+    // And every mirror of a CHR register the mask admits is that register: A11-A2 are undecoded.
+    core.mapper_write(0x6FFC, 3);
+    assert_eq!(6, core.chr_windows()[0], "$6FFC is CHR register 0");
+
+    // Submapper 1: $6004 and $6005 are the mirroring ports and $6006/$6007 the counter, so none of
+    // the four touches CHR at all.
+    let mut core = MapperRom::new(91).submapper(1).prg(16).chr(64).load();
+    for register in 0..4u16 {
+        core.mapper_write(0x6000 + register, u8::try_from(register).unwrap() + 1);
+    }
+    let banks = core.chr_windows();
+    for address in [0x6004u16, 0x6005, 0x6006, 0x6007] {
+        core.mapper_write(address, 0x7F);
+    }
+    assert_eq!(banks, core.chr_windows(), "$6004-$6007 are not CHR here");
+}
+
+/// "$6004: Select **horizontal mirroring**, value ignored" and "$6005: Select **vertical
+/// mirroring**, value ignored" — submapper 1 only.
+///
+/// The page uses the *mirroring* vocabulary here where mapper 83's page gives both namings, so this
+/// takes the word the page uses rather than inverting it; **Q-168** records that the two pages of
+/// this lot are not consistent with each other about it.
+#[cfg(feature = "board-91")]
+#[test]
+fn q_168_mapper_91_submapper_1_selects_mirroring_from_6004_and_6005() {
+    let mut core = MapperRom::new(91).submapper(1).prg(16).chr(64).load();
+    core.mapper_write(0x6004, 0x00);
+    assert_eq!(Nm::Horizontal, core.mirroring(), "the value is ignored");
+    core.mapper_write(0x6005, 0xFF);
+    assert_eq!(Nm::Vertical, core.mirroring(), "and ignored here too");
+    core.mapper_write(0x6004, 0xA5);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+
+    // Every mirror the $F007 mask admits reaches them: A11-A3 are undecoded.
+    core.mapper_write(0x6FFD, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring(), "$6FFD is $6005");
+
+    // And neither port exists on submapper 0, whose mirroring is hard-wired: whatever the header's
+    // byte 6 said at load is what the board shows, through both ports and whatever the value.
+    for bits in [0x00u8, 0x01] {
+        let mut core = MapperRom::new(91).prg(16).chr(64).mirroring(bits).load();
+        let wired = core.mirroring();
+        for address in [0x6004u16, 0x6005] {
+            core.mapper_write(address, 0x00);
+            assert_eq!(
+                wired,
+                core.mirroring(),
+                "{address:#06X} does not move a hard-wired board"
+            );
+        }
+    }
+}
+
+/// The outer bank register of submapper 0, whose diagram is an **`A~`** and not a `D~`:
+///
+/// ```text
+/// A~FEDC BA98 7654 3210
+///   -------------------
+///   .... .... .... .PPC
+///                   ||+- Select outer 512 KiB CHR-ROM bank (CHR A19)
+///                   ++-- Select outer 128 KiB PRG-ROM bank (PRG A17-A18)
+/// ```
+///
+/// So which address of `$8000`-`$9FFF` a game writes is the register and the byte it writes is not
+/// read at all — which this test shows by writing the **same value** to four addresses and getting
+/// four layouts. `C` is A0 and `PP` is A2-A1, taken MSB-first as every other nesdev field diagram
+/// is (**Q-168**: the page's own label writes the pair ascending, which is the one place it could
+/// be read the other way, and the difference is the two middle PRG banks).
+#[cfg(feature = "board-91")]
+#[test]
+fn q_168_mapper_91_submapper_0_takes_its_outer_bank_from_the_address_written() {
+    // A19 is the 512 KiB boundary — "select outer **512 KiB** CHR-ROM bank" — so a megabyte of
+    // CHR is what it takes to show the line at all.
+    let mut core = MapperRom::new(91).prg(64).chr(1024).load();
+    core.mapper_write(0x7000, 3);
+    core.mapper_write(0x7001, 5);
+    core.mapper_write(0x6000, 1);
+    let a19 = 512 * 0x400;
+
+    // `PP` = 0: the first 128 KiB.
+    assert_eq!([3, 5, 14, 15], core.prg_windows());
+    assert!(chr_offsets(&core)[0] < a19, "no CHR A19 yet");
+
+    // A0 alone is CHR A19 and moves no PRG bank at all.
+    core.mapper_write(0x8001, 0x00);
+    assert_eq!([3, 5, 14, 15], core.prg_windows(), "A0 is not a PRG line");
+    assert!(
+        chr_offsets(&core)[0] >= a19,
+        "A0 is CHR A19, from the address and not the datum"
+    );
+
+    // A1 is PRG A17 and A2 is PRG A18, so $8002 is the second 128 KiB and $8004 the third.
+    core.mapper_write(0x8002, 0x00);
+    assert_eq!([19, 21, 30, 31], core.prg_windows(), "A1 is PRG A17");
+    assert!(chr_offsets(&core)[0] < a19, "and A0 is clear again");
+
+    core.mapper_write(0x8004, 0x00);
+    assert_eq!([35, 37, 46, 47], core.prg_windows(), "A2 is PRG A18");
+
+    core.mapper_write(0x8007, 0x00);
+    assert_eq!([51, 53, 62, 63], core.prg_windows(), "both lines at once");
+    assert!(chr_offsets(&core)[0] >= a19, "and CHR A19 with them");
+
+    // The datum really is ignored: the same address with every value gives the same layout.
+    for value in [0x00u8, 0xFF, 0x5A] {
+        core.mapper_write(0x8002, value);
+        assert_eq!(
+            [19, 21, 30, 31],
+            core.prg_windows(),
+            "{value:#04X}: the value written is not the register"
+        );
+    }
+
+    // The page's own range is $8000-$9FFF. Submapper 1 has no such register, so the same writes
+    // move nothing there.
+    let mut core = MapperRom::new(91).submapper(1).prg(64).chr(1024).load();
+    core.mapper_write(0x7000, 3);
+    let before = core.prg_windows();
+    for address in [0x8001u16, 0x8002, 0x8004, 0x9007] {
+        core.mapper_write(address, 0x00);
+    }
+    assert_eq!(
+        before,
+        core.prg_windows(),
+        "submapper 1 has no outer bank register"
     );
 }

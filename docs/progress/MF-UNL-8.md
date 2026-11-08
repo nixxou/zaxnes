@@ -49,7 +49,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **2/8** — `board-huang1`, mapper **14**: the supervisor at $A131 over the sub-board's own
   registers, two modes, three CHR A18 bits and the page's two Nestopia caveats.
 - [x] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
-- [ ] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
+- [x] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
 - [ ] **5/8** — the question tickets.
 - [ ] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
 - [ ] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
@@ -539,3 +539,112 @@ for.
 264 rewiring as one expression, the 2 KiB CHR of 83.1 and 264 through registers 0, 1, 6 and 7, two
 inner-bank widths and two base layouts — with submapper 2 refused for the PRG-NVRAM window it alone
 needs.
+
+---
+
+## Step 4 — mapper 91: two boards whose difference is one mask bit
+
+`board-91`, in `default`, implying nothing. One new module,
+`cartridges/mappers/mapper091.rs`; one **unboxed** `IrqBoard` variant; the number in all three
+latched lists of `cartridges::mod`.
+
+### One `bool`, and it carries five differences
+
+> Submapper 0 has a PA12-based IRQ counter and hard-wired mirroring; submapper 1 an M2-based IRQ
+> counter and selectable mirroring.
+
+Behind that sentence the page gives every register "Mask: `$F003`/`$F007` (submapper 0/1)", and
+**that one bit is the whole submapper**: with the mask at `$03`, `$6004` and `$6005` fold back onto
+CHR registers 0 and 1, `$6006`/`$6007` onto registers 2 and 3, and `$7006`/`$7007` land on indices
+2 and 3 — which is exactly a board with hard-wired mirroring, no counter register and the IRQ ports
+where submapper 0's page puts them. So `Mapper091::index_mask` is the board, and the registers
+submapper 1 "adds" are the four the mask makes reachable. Its test writes each of those four
+addresses on each board and shows the two decodes apart rather than asserting them.
+
+### The outer bank register is an address and not a datum
+
+```text
+A~FEDC BA98 7654 3210
+  -------------------
+  .... .... .... .PPC
+                  ||+- Select outer 512 KiB CHR-ROM bank (CHR A19)
+                  ++-- Select outer 128 KiB PRG-ROM bank (PRG A17-A18)
+```
+
+The diagram header is **`A~`**: *which* address of `$8000`-`$9FFF` a game writes is the register and
+the byte it writes is not read at all. The test shows that by writing the **same value** to four
+addresses and getting four layouts, and then the same address with three values and getting one.
+
+Two things it leaves open, both in **Q-168**:
+
+* **Which of A2 and A1 is PRG A18.** Every other field diagram on nesdev is MSB-first and writes a
+  multi-bit range *descending* ("PRG A21..A14", "CHR-ROM A19..A18"); this one writes "PRG A17-A18"
+  **ascending** with a hyphen. This build takes the diagram's column order — A2 is A18, A1 is A17 —
+  because the columns are the convention and the label is prose. The alternative swaps the two
+  middle 128 KiB banks and nothing else.
+* **"Mask: unknown"**, so the page's own range `$8000`-`$9FFF` is the decode and A15-A13 are the
+  only bits tested above A2.
+
+A19 is the 512 KiB boundary, which is why the test needs a **megabyte** of CHR to show the line at
+all — the first draft used 512 KiB and the window wrapped back onto the first bank, which is the
+kind of thing only a real assertion catches.
+
+### Two counters that share nothing but their ports
+
+* **Submapper 0**: "a binary counter clocked by PPU A12, and simply counts a fixed number of **64
+  unfiltered rises** of PPU A12." Six stages whose carry out is the IRQ, so
+  `(counter + 1) % 64 == 0`. **Unfiltered** is the word that keeps it away from `A12Watcher`, and
+  the test drives sixty-three rises with two-dot dips between them — the pattern an MMC3's filter
+  counts as one — before the sixty-fourth fires.
+* **Submapper 1**: "a binary counter clocked by the M2 signal with a **factor of 5/4**, meaning
+  counting down by five every fourth M2 cycle." A two-bit prescaler and a sixteen-bit counter
+  `$6006`/`$6007` write **directly** — the page gives the board no latch beside it, "Set IRQ
+  Counter LSB/MSB" — so `$7007` reloads nothing and only clears the prescaler.
+
+  **The IRQ is the borrow out, and that is forced rather than chosen**: a step of five lands on
+  exactly zero only when the counter is a multiple of five, so a board that fired at zero would
+  mostly never fire. A counter of 20 therefore fires after twenty M2 cycles (15, 10, 5, 0, borrow)
+  and `$0100` after 208. The first draft of the test assumed the fire-at-zero reading and said
+  sixteen; the arithmetic is in Q-168 with the alternative named.
+
+Each test also shows the *other* clock doing nothing — 20 000 M2 cycles on submapper 0 and 200 A12
+rises on submapper 1 — which is the pair census §7.2 asks for on this board as it does on the Cony
+one.
+
+### What the page says and this follows, against the lot's other page
+
+`$6004`/`$6005` are "Select **horizontal mirroring**" and "Select **vertical mirroring**", value
+ignored. The page uses the *mirroring* vocabulary where mapper 83's page gives both namings
+("0: Horizontal (Vertical mirroring)"), so this takes the word each page uses — which means the two
+boards of one lot read the same-looking sentence two different ways, and Q-168 records that rather
+than harmonising them behind the pages' backs.
+
+### Where it sits, and the row
+
+`IrqBoard::Mapper091(Mapper091)`, **unboxed** on `Mmc3Kof97`'s reason: the board is a
+`BankWindows` and sixteen bytes where that enum already carries a whole `Mmc3Board` inline for the
+TQROM. Both hooks the two submappers need are already forwarded there. The number is in
+`clocks_on_cpu_cycle` (submapper 1's M2), in both PPU watch lists (submapper 0's A12) and in
+`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`'s expected list **twice** — the
+board keeps `last_ppu_address` on both submappers so that neither reads a stale edge.
+
+`board_memory_sizes` gives the number `prg_ram: Some(0)`: the register file *is* the board's decode
+of `$6000`-`$7FFF` and the mask leaves no address in those 8 KiB that is not a register, which is
+mappers 114, 115, 182 and 193's arm in the same words.
+
+### Tests
+
+Four in `mapper_tests` — the two PRG windows and the four 2 KiB CHR windows on both boards, the
+`$F003`/`$F007` decode shown both ways, the two mirroring ports with the value ignored and a
+hard-wired board that both of them cannot move, and the address-driven outer register in six cases
+— and three in `mapper_irq_tests`: each counter with its own clock and against the other's, and
+`ppu_irq_horizon` `None` on both submappers.
+
+`cargo test --release -p zax-nes`: all suites green, **331** in `mapper_tests` and **64** in
+`mapper_irq_tests`. `cargo fmt --check` clean; clippy `-D warnings --all-targets` clean in six
+configurations — `default`, `--no-default-features`, `--features parked-boards` and each of the
+lot's three features alone.
+
+[PROGRESS] MF-UNL-8 step 4/8 done: mapper 91's two boards are one board and one `bool`, because the
+$F003/$F007 mask *is* the submapper; its outer register is an address and not a datum, and its two
+counters are 64 unfiltered A12 rises against a borrow out of five-every-four M2 cycles.

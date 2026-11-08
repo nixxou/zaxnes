@@ -1715,3 +1715,143 @@ fn req_core_114_cony_ppu_irq_horizon_is_none_for_every_source() {
         }
     }
 }
+
+// -------------------------------------------- mapper 91's two counters, MF-UNL-8 step 4
+
+/// Submapper 0's counter: "a binary counter clocked by PPU A12, and simply counts a fixed number of
+/// **64 unfiltered rises** of PPU A12", with "IRQ Start/Reset ($7007, write)" and "IRQ
+/// Stop/Acknowledge ($7006, write)", the value ignored on both.
+///
+/// Six stages and the carry out is the IRQ, so it fires on the sixty-fourth rise and keeps
+/// counting; **Q-168** records that "a binary counter" is what settles that against a counter
+/// which stops there.
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_114_mapper_91_submapper_0_fires_on_the_sixty_fourth_unfiltered_a12_rise() {
+    let mut core = MapperRom::new(91).prg(16).chr(64).load();
+    core.mapper_write(0x7007, 0x00); // Start, the value ignored.
+
+    // Sixty-three rises with two-dot dips between them, which the MMC3's filter would swallow.
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..63 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(!irq(&core), "sixty-three rises");
+
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x2000, 512);
+    cartridge.on_ppu_address_bus(0x1000, 514);
+    assert!(irq(&core), "the sixty-fourth fires");
+
+    // "IRQ Stop/Acknowledge", and then the counter does not run at all.
+    core.mapper_write(0x7006, 0x00);
+    assert!(!irq(&core), "stopped and acknowledged");
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..200 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(!irq(&core), "a stopped counter counts nothing");
+
+    // Started again, it counts from zero: "IRQ Start/**Reset**".
+    core.mapper_write(0x7007, 0x00);
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..63 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(
+        !irq(&core),
+        "sixty-three again, so the start reset the count"
+    );
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x2000, 512);
+    cartridge.on_ppu_address_bus(0x1000, 514);
+    assert!(irq(&core));
+
+    // And M2 is not this board's clock.
+    let mut core = MapperRom::new(91).prg(16).chr(64).load();
+    core.mapper_write(0x7007, 0x00);
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut core, 20_000),
+        "submapper 0 must ignore M2"
+    );
+}
+
+/// Submapper 1's counter: "a binary counter clocked by the M2 signal with a **factor of 5/4**,
+/// meaning counting down by five every fourth M2 cycle", loaded directly by "$6006: Set IRQ Counter
+/// LSB" and "$6007: Set IRQ Counter MSB".
+///
+/// The IRQ is the counter's **borrow out**, which is the only workable reading of "a binary
+/// counter" here: a step of five from a sixteen-bit value lands on exactly zero only when the value
+/// is a multiple of five, so a board that fired at zero would mostly never fire at all. So a
+/// counter of `n` fires on the step whose starting value is below five — `4 * (floor(n / 5) + 1)`
+/// M2 cycles — and **Q-168** records that against the reading which fires one step earlier.
+///
+/// The page also gives the board **no latch beside the counter** — `$6006`/`$6007` *are* the
+/// counter, "Set IRQ Counter LSB/MSB" — so `$7007` reloads nothing (Q-168).
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_114_mapper_91_submapper_1_counts_down_by_five_every_fourth_m2_cycle() {
+    // 20 goes 15, 10, 5, 0 and borrows on the fifth step: twenty M2 cycles.
+    let mut core = MapperRom::new(91).submapper(1).prg(16).chr(64).load();
+    core.mapper_write(0x6006, 20);
+    core.mapper_write(0x6007, 0);
+    core.mapper_write(0x7007, 0x00); // Start, the prescaler at zero.
+    assert_eq!(20, tick_until_irq(&mut core, 1000), "20 at five per four");
+
+    // A sixteen-bit counter: $0100 is 256, which needs 52 steps of five and so 208 cycles.
+    let mut core = MapperRom::new(91).submapper(1).prg(16).chr(64).load();
+    core.mapper_write(0x6006, 0x00);
+    core.mapper_write(0x6007, 0x01);
+    core.mapper_write(0x7007, 0x00);
+    assert_eq!(208, tick_until_irq(&mut core, 2000), "the MSB is the MSB");
+
+    // "IRQ Stop/Acknowledge ($7006)": the counter stops and the line clears.
+    core.mapper_write(0x7006, 0x00);
+    assert!(!irq(&core));
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut core, 2000),
+        "a stopped counter counts nothing"
+    );
+
+    // And A12 is not this board's clock.
+    let mut core = MapperRom::new(91).submapper(1).prg(16).chr(64).load();
+    core.mapper_write(0x6006, 5);
+    core.mapper_write(0x6007, 0);
+    core.mapper_write(0x7007, 0x00);
+    let cartridge = core.cartridge_mut().unwrap();
+    for rise in 0..200 {
+        cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+        cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+    }
+    assert!(!irq(&core), "submapper 1 must ignore A12");
+}
+
+/// The property census §7.2 asks for on both of this lot's IRQ boards, read for the one whose
+/// clock is a **board** parameter rather than a register: "`ppu_irq_horizon` is `None` whenever the
+/// source is not A12".
+///
+/// It is `None` on both submappers, and that is not a choice this board gets to make:
+/// [`IrqBoard`](zax_nes::cartridges::mappers::IrqBoard) answers `None` for the whole variant and
+/// does not forward the method, because MF-6b step 4 measured any forward at
+/// `NesBus::catch_up_ppu` 188 → 190 instructions and `mmc5` +9 214 379 over 300 frames.
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_114_mapper_91_ppu_irq_horizon_is_none_on_both_submappers() {
+    for submapper in [0u8, 1] {
+        let core = MapperRom::new(91)
+            .submapper(submapper)
+            .prg(16)
+            .chr(64)
+            .load();
+        assert_eq!(
+            None,
+            core.cartridge().unwrap().ppu_irq_horizon(),
+            "submapper {submapper}"
+        );
+    }
+}

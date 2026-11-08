@@ -24,6 +24,8 @@ use super::mappers::Jv001;
 use super::mappers::JyCompany;
 #[cfg(feature = "board-218")]
 use super::mappers::MagicFloor;
+#[cfg(feature = "board-91")]
+use super::mappers::Mapper091;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
@@ -193,6 +195,9 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     89,
     #[cfg(feature = "board-jy-asic")]
     90,
+    // The JY830623C / YY840238C and the EJ-006-1, two boards and two counters (MF-UNL-8 step 4).
+    #[cfg(feature = "board-91")]
+    91,
     #[cfg(feature = "board-jaleco-72-92-86")]
     92,
     #[cfg(feature = "board-small-boards")]
@@ -816,6 +821,17 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 091"): every register of the chip is in $6000-$7FFF under
+        // "Mask: $F003/$F007 (submapper 0/1)", which reads A15-A12 and two or three low bits -- so
+        // the register file repeats every four or eight bytes through the whole 8 KiB and there is
+        // no address in that window which is not a register. Mappers 114, 115, 182 and 193's arm,
+        // in the same words, and the page gives the board no PRG-RAM line either way
+        // (MF-UNL-8 step 4).
+        #[cfg(feature = "board-91")]
+        91 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // **Mapper 133 is deliberately absent too**, and for the same reason: its latch is at
         // $4100 under mask $E100, which `$6100 & $E100` cannot be, and the page gives the Sachen
         // 72008 no PRG-RAM line either way (MF-UNL-1 step 3).
@@ -1359,6 +1375,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // REQ-CORE-011's message (Q-167).
         #[cfg(feature = "board-cony")]
         83 | 264 => Board::IrqBoard(IrqBoard::Cony(Box::new(Cony::new(memory, mapper)?))),
+        // MF-UNL-8 step 4: mapper 91's two boards, which differ by **one mask bit** and the four
+        // registers that bit makes reachable -- "submapper 0 has a PA12-based IRQ counter and
+        // hard-wired mirroring; submapper 1 an M2-based IRQ counter and selectable mirroring". One
+        // board with one `bool`; `Mapper091`'s own note has the table and Q-168 the four things the
+        // page does not say, the outer bank register's own bit order among them.
+        #[cfg(feature = "board-91")]
+        91 => Board::IrqBoard(IrqBoard::Mapper091(Mapper091::new(memory))),
         // MF-UNL-4: the J.Y. Company ASIC, one chip and four PCB configurations. 209 is the
         // page's "standard implementation"; **211 and 35 are the same board here**, the page
         // calling 211 "a mere duplicate of INES Mapper 209 with correct emulation" (Q-149) and 35

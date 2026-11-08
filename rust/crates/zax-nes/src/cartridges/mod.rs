@@ -381,6 +381,10 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // is -- the J.Y. ASIC's own reason.
             | 83
             | 90
+            // MF-UNL-8 step 4: mapper 91's submapper 0 counts "64 unfiltered rises of PPU A12",
+            // and the board keeps the previous PPU address on both submappers so that the number
+            // may be here whichever it is.
+            | 91
             | 96
             | 114
             | 115
@@ -425,6 +429,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             // MF-UNL-8 step 3: the Cony / Yoko ASIC's A12 source; see the list above.
             | 83
             | 90
+            // MF-UNL-8 step 4: mapper 91's A12 counter; see the list above.
+            | 91
             | 96
             | 114
             | 115
@@ -642,6 +648,9 @@ impl Cartridge {
                     | 83
                     | 85
                     | 90
+                    // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
+                    // every fourth M2 cycle" (nesdev, "INES Mapper 091").
+                    | 91
                     | 105
                     | 153
                     | 157
@@ -1374,6 +1383,10 @@ mod tests {
         expected.extend_from_slice(&[83, 83]);
         #[cfg(feature = "board-jy-asic")]
         expected.extend_from_slice(&[90, 90]);
+        // MF-UNL-8 step 4: mapper 91 keeps the previous PPU address on both submappers, so both
+        // halves of the pair move here even though only submapper 0's counter reads it.
+        #[cfg(feature = "board-91")]
+        expected.extend_from_slice(&[91, 91]);
         // MF-6c step 8: the Oeka Kids board latches its CHR bank on the entry into
         // $2000-$2FFF, which the rendered line below reaches.
         #[cfg(feature = "board-96")]

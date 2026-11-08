@@ -4,6 +4,8 @@ use super::Cony;
 use super::Huang1;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
+#[cfg(feature = "board-91")]
+use super::Mapper091;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
@@ -258,6 +260,19 @@ pub enum IrqBoard {
     /// register file of fifteen bytes and the counter, which inline would set this enum's size.
     #[cfg(feature = "board-cony")]
     Cony(Box<Cony>),
+    /// iNES mapper 91, the JY830623C / YY840238C and the EJ-006-1 (MF-UNL-8 step 4): two boards
+    /// with two counters — "submapper 0 has a PA12-based IRQ counter and hard-wired mirroring;
+    /// submapper 1 an M2-based IRQ counter and selectable mirroring" — so both answer **yes** to
+    /// [`Mapper::irq_asserted`].
+    ///
+    /// The two hooks the two submappers want, `on_cpu_cycle` and `on_ppu_address_bus`, are both
+    /// already forwarded here for the J.Y. ASIC and the Cony board, so `Board` grows nothing.
+    ///
+    /// **Not boxed**, on [`IrqBoard::Mmc3Kof97`]'s reason: the board is a `BankWindows` and sixteen
+    /// bytes, where this enum already carries a whole `Mmc3Board` inline for the TQROM, so it sets
+    /// no new high-water mark.
+    #[cfg(feature = "board-91")]
+    Mapper091(Mapper091),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -296,6 +311,8 @@ macro_rules! inner {
             IrqBoard::Huang1($b) => $body,
             #[cfg(feature = "board-cony")]
             IrqBoard::Cony($b) => $body,
+            #[cfg(feature = "board-91")]
+            IrqBoard::Mapper091($b) => $body,
         }
     };
 }
@@ -360,6 +377,7 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-68",
+        feature = "board-91",
         feature = "board-cony",
         feature = "board-huang1",
         feature = "board-jy-asic"
