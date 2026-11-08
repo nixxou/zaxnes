@@ -154,6 +154,10 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         dump_periodic_frame(&host, request, counter + 1)?;
         if request.trace_ram.is_some() {
             trace.extend((0..0x0800u16).map(|address| host.core.read_memory(address)));
+            // ZAXNES_TRACE_WRAM: the first 2 KiB of PRG-RAM too (a game's object tables).
+            if std::env::var_os("ZAXNES_TRACE_WRAM").is_some() {
+                trace.extend((0x6000..0x6800u16).map(|address| host.core.read_memory(address)));
+            }
         }
     }
     if let Some(path) = request.trace_ram {

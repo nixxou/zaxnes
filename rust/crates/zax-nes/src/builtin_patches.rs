@@ -1518,10 +1518,19 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 2,
         default: true,
     },
-    // Experimental (owner request), in the Hacks (a component of the pack with no hook): the
-    // playfield shifted by the camera's fraction of a pixel, its steps of 1, 1 and 2 pixels made
-    // even (the margin decoder's `camera_position`), the sprites that move with the camera
-    // left where they are.
+    // The enemies and objects in the margins (owner request): spawned a margin further than
+    // the game does while 3 enemy slots are free at least (else as the game does, at its own
+    // column), kept until they leave the margins, their sprites drawn there.
+    HackOption {
+        key: "margin_enemies",
+        label: "Enemies in the margins",
+        label_fr: "Ennemis dans les marges",
+        bit: 4,
+        default: true,
+    },
+    // Experimental (owner request), in the Hacks: the playfield shifted by the camera's
+    // fraction of a pixel, which the pack's code reports (`report_camera`), the sprites that move
+    // with the camera left where they are.
     HackOption {
         key: "smooth_scroll",
         label: "Smooth scrolling (from game RAM)",
