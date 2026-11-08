@@ -50,7 +50,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
 - [x] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
-- [ ] **8/9** — the callgrind campaign against the base commit, and the feature decision per board.
+- [x] **8/9** — the callgrind campaign against the base commit, and the feature decision per board.
 - [ ] **9/9** — golden-core, the full `--include-ignored` run with both ROM roots,
   `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
@@ -616,3 +616,119 @@ exactly what it exists to refuse, and a comment is not a safe exception to carve
 It is also the reason this step runs the **whole** `zax-nes` suite in each configuration rather
 than `mapper_tests` and the lib: the earlier steps' per-step checks would never have reached
 `core_lifecycle_tests`.
+
+---
+
+## Step 8 — the callgrind campaign, and all six features in `default`
+
+Three binaries, each built by `build-clean.sh` from its own tar into a **fresh** directory with its
+own `CARGO_TARGET_DIR`, which is then deleted. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `unl7base` | **`fc64566a`**, the lot's base commit | `4b457c6c14d74216f57327b95b2a4fda` |
+| `unl7` | **`29ae50be`**, step 7 — the lot as it ships | `5c6dede05c967e6d46a0646dc47295af` |
+| `unl7off` | the shipped source with **all six features out of `default`** — the control, whose emulation is the base commit's: a number whose board is off is not in `SUPPORTED_MAPPERS`, so no cartridge of it can exist | `b8102ab0e6b487c1eafbf370a44ab3b7` |
+
+### The base measurement was already on disk, and that is a check and not a shortcut
+
+`zax-harness-unl7base` is **byte-identical** to MF-UNL-6's own `zax-harness-unl6final` — the same
+md5 — because that lot's last commit added only its progress note over the commit it measured. So
+`cg-unl6` and `l2-unl6` *are* this lot's base figures, this lot's deltas are directly comparable
+with MF-UNL-6's, and the whole campaign is on one instrument. The base was built anyway, to prove
+the identity rather than assume it; it is the fourth lot in a row where that check has held.
+
+`unl7off` is **not** byte-identical to the base, and the reason is the familiar one: four load-time
+`matches!` lists in `cartridges::mod` gain numbers **unconditionally** —
+`nametable_pages_vary` gains 137, 138, 139, 141 and 218, and `clocks_on_cpu_cycle` gains 298 —
+which is the "one `matches!` is one `matches!`" precedent mappers 68, 111 and the J.Y. ASIC's four
+numbers already set in that file. The *emulation* is identical either way, so `unl7off` is the
+same-behaviour pair the brief asks for and is also the measurement of what gating the six features
+off costs.
+
+### PR-1's thirteen ROMs, 300 frames, no pack, each against `fc64566a`
+
+| stage | set total | % | worst ROM | ROMs below |
+| --- | ---: | ---: | --- | ---: |
+| **`unl7` — the lot** | **−438 522** | **−0.001** | `z2` **+16 158, +0.0003 %** | 9 |
+| `unl7off` — the control | +219 989 | +0.000 | `oamstr` **+51 586, +0.002 %** | 4 |
+
+**The worst ROM of the lot is +0.0003 %** — about a seventieth of the tolerance — **and the set
+total is below the base commit.** The only two symbols that moved by 100 000 on any ROM are
+`NesBus::write_internal` on `m1` (**−149 122**) and `m4` (**−226 381**): the two ROMs whose games
+write cartridge registers often, and both *faster*.
+
+And the control's worst ROM is **+0.002 %, six times the lot's own** — a build that changes no
+emulation at all. On this instrument the six boards cost less than the spread of gating them off,
+which is the cleanest reading the PR-1 set can give and the same reading MF-UNL-5 and MF-UNL-6 got.
+
+### Level 2: five games, 600 frames with their 3D packs, inputs pressed
+
+| build | `core` | `total` |
+| --- | --- | --- |
+| **`unl7`** | `smb1` and `zelda2` **+0, identical to the instruction**; the other three −0.000 % (−19 904, −37 888, −37 092) | **all five below the base**, −0.000 % (`mm2`) to **−0.017 %** (`smb3`) |
+| `unl7off` | **all five +0, identical to the instruction** | three above: `mm2` +0.000 %, `smb3` +0.011 %, `smb1` **+0.018 %** |
+
+**`ppu` and `apu` are +0 to the instruction on all five games in both builds**, and `draw_list` on
+three of five (`smb3` −2 297 and `zelda2` −10 423 the exceptions). So nothing this project runs per
+dot, per cycle or per tile moved at all.
+
+**Every figure of the lot's own row is at or below the base commit**, on `total` as well as on
+`core` — which is what the brief asks be checked per ROM — so there is no figure of this lot that
+needs a same-behaviour pair at all. The one that does is the control's, and it is the same story a
+fourth time.
+
+### The control's `smb1/total` +0.018 %, shown with its stages as the brief requires
+
+| `smb1`, `unl7off` vs `unl7base` | |
+| --- | --- |
+| `core`, `ppu`, `apu`, `draw_list` | **+0, identical to the instruction** |
+| `convert` | +2 464 672 (+0.206 %) |
+| `lua_hooks` | +2 457 754 (+0.272 %) |
+| the symbols above 300 000 | `getgeneric` **+1 359 740**, `luaH_getshortstr` **+686 627**, `luaH_set` **+350 111** |
+
+So the whole of a 2.47 M move on a build **whose emulation is the base commit's** is Lua's
+`ltable.c`, and `smb3`'s +0.011 % is the same three functions (`getgeneric` +4 523 844,
+`luaH_getshortstr` −1 279 905). The lot's own build moves the same column the *other* way —
+`luaH_getshortstr` −1 234 423 on `smb1`, −3 928 752 on `smb3`, −1 355 425 on `zelda2` — and **no
+symbol of this project moves by 300 000 on any of the five games in either build**.
+
+That is the finding MF-UNL-2 step 8, MF-UNL-3 step 7, MF-UNL-5 step 5 and MF-UNL-6 step 5 each
+recorded, and this lot confirms it a fifth time: the Lua hash column moves by a megabyte of
+instructions a game between two binaries with identical emulation. **The tolerance is not
+redefined**; what is recorded is where the figure comes from, and in this lot it is the *control*
+that needed the pair and not the ship.
+
+### The decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-sachen8259` | **`default`** | |
+| `board-112` | **`default`** | |
+| `board-193` | **`default`** | |
+| `board-298` | **`default`** | |
+| `board-218` | **`default`** | |
+| `board-29` | **`default`** | PR-1 worst ROM **+0.0003 %**, set total **−438 522**; level 2 **all five `core` and all five `total` at or below the base**, `ppu` and `apu` +0 to the instruction |
+
+**No board is parked**, and `parked-boards` keeps the one feature it has had since MF-VS.
+
+The six are measured **together**, which is the precedent MF-UNL-2, MF-UNL-3 and MF-UNL-5 set for a
+multi-board lot, and the figures are what make that honest here rather than merely convenient: the
+lot's largest `core` move on any level-2 game is **−37 888** and its largest PR-1 move is
+`m4`'s **−226 381**, both negative, with the whole set and all ten level-2 figures below the base.
+For a single board to be over +0.02 % another would have to be more than that below it, and
+nothing in the stage tables is anywhere near that size — the biggest *positive* figure in the lot's
+entire campaign is `mm2/lua_hooks` +27 043, on a game whose `total` is −875.
+
+**Q-163's open question is answered for the cost half**: mapper 218's fifth `read_nametable` body,
+the second inside `DecodeBoard`, is free on this instrument. `metroid`, which has no cartridge
+nametables at all, is `−155 877` whole-run.
+
+### Disk and machine
+
+G: stayed at **14 GiB** free throughout, well above the 5 GiB floor. Each of the three build
+directories was deleted by `build-clean.sh` as soon as its binary was copied out, and the three
+tars were deleted once the binaries existed. No GPU ran: `bench-core` and the level-2 harness are
+both headless.
