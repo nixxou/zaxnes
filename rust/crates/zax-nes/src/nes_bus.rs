@@ -113,6 +113,16 @@ pub struct NesBus {
     /// [`NesBus::write_vs_port`]; `false` for every other image, including every other VS one.
     #[cfg(feature = "board-vs-system")]
     vs_port: bool,
+    /// Whether the cartridge is a board that reads the **cartridge-edge data bus** when it answers
+    /// a CPU read below `$8000` — mapper 143's protection read, whose two top bits the page calls
+    /// open bus (Q-145, MF-FIX). Asked once in [`NesBus::attach`], beside `vs_port` and for the
+    /// same reason: the fill site then asks one `bool` and never the `Board` enum.
+    ///
+    /// `false` for every other image, so the only thing a game on any other board pays for this
+    /// is this flag's test, in a function that is already `#[cold]`
+    /// ([`NesBus::read_wide_window`]).
+    #[cfg(feature = "board-143-open-bus")]
+    edge_bus_board: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -170,6 +180,8 @@ impl NesBus {
             expansion_audio: false,
             #[cfg(feature = "board-vs-system")]
             vs_port: false,
+            #[cfg(feature = "board-143-open-bus")]
+            edge_bus_board: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -357,6 +369,15 @@ impl NesBus {
             self.vs_port = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| cartridge.mapper_number() == VsBoard::MAPPER);
+        }
+        // Q-145 / MF-FIX: mapper 143 is the one board that reads the cartridge-edge data bus,
+        // for the two bits its page calls open bus. Settled here for `read_wide_window`'s reason
+        // the `vs_port` note above gives in the same words.
+        #[cfg(feature = "board-143-open-bus")]
+        {
+            self.edge_bus_board = cartridge
+                .as_ref()
+                .is_some_and(|cartridge| cartridge.mapper_number() == 143);
         }
         self.cartridge = cartridge;
     }
@@ -1156,6 +1177,26 @@ impl NesBus {
     #[cold]
     #[inline(never)]
     fn read_wide_window(&mut self, address: u16) -> Option<u8> {
+        // Q-145 / MF-FIX: the cartridge-edge data bus, for the one board that answers a read
+        // below $8000 with some of its bits undriven -- mapper 143's `[xxii iiii]`, whose `xx`
+        // the page calls open bus. **The fill is here and the read is in the board** for the
+        // reason `CartridgeMemory::cpu_write_latch` gives from the other direction: this is the
+        // function that already runs on exactly the reads that can reach such a window
+        // ($4020-$7FFF), it is already `#[cold]` and `#[inline(never)]`, and `NesBus` is the
+        // only thing that has the bus in hand.
+        //
+        // No address test: the board's window is $4100-$5FFF under mask $E100, and a store made
+        // on a $6xxx read is simply overwritten by the next $4100 one before anybody reads it,
+        // so the value is always the bus of the cycle before the read that uses it. One `bool`
+        // and nothing else for every other game, and nothing at all with the feature off.
+        #[cfg(feature = "board-143-open-bus")]
+        if self.edge_bus_board {
+            let edge = self.external_bus();
+            if let Some(cartridge) = self.cartridge.as_mut() {
+                cartridge.memory_mut().set_cpu_edge_bus(edge);
+            }
+        }
+
         if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
             if let Some(value) = self.wide_window_read(address) {
                 return Some(value);

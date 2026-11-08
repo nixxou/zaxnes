@@ -21,7 +21,7 @@ separate lot).
 - [x] 3/10 — CHANGE 2: mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF`
 - [x] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
 - [x] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
-- [ ] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
+- [x] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
 - [ ] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
 - [ ] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
 - [ ] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
@@ -235,3 +235,68 @@ the lot's protocol forbids. The entry was popped and dropped immediately, `git d
 confirmed the working tree identical to it beforehand, and the stash list is back to the one
 unrelated entry it held at the start (`stash@{0}: On delta/v2-4-bend`). No commit was touched. It
 should not have been done and was not repeated.
+
+### 6/10 — Q-145, mapper 143's two open-bus bits
+
+nesdev ("INES Mapper 143") gives the Sachen TCA-01 one read, `[xxii iiii]`, with `ii iiii` the
+inversion of the address's low six bits and `xx` annotated **open bus**. This build answered zero
+in those two bits, for a reason that was true: `Mapper::try_read_prg` is handed `CartridgeMemory`
+and an address and had no way to the data bus.
+
+The cross-check made zero the only reading with no support anywhere. Three projects put the real
+bus there — **FCEUX** (`sachen.cpp:389-394`), **puNES** (`mapper_143.c:35`) and
+`third_party/nintendulator-mappers` (`mapper143.cpp:14`, `(~Addr & 0x3F) | (OpenBus & 0xC0)`) —
+against two that force `01` (Mesen 2 `Sachen_143.h:24`, Nestopia UE `NstBoardSachenTca01.cpp:65`).
+So the hook was built.
+
+**The mechanism**, which is the whole of this step's cost:
+
+* `CartridgeMemory::cpu_edge_bus`, a `u8` behind the new feature, with a getter and a setter — the
+  same shape as `cpu_write_latch` one field up, and **not in the savestate** for the same reason:
+  a transient bus byte the next such read overwrites, with nothing derived from it in between. No
+  board's block grows by a byte in any configuration.
+* `NesBus::edge_bus_board`, a `bool` settled in `attach` from the mapper number. This is `vs_port`'s
+  shape and its note's words: the fill site then asks one `bool` and never the `Board` enum.
+* the fill in **`NesBus::read_wide_window`**, which is where it belongs: that function already runs
+  on exactly the reads able to reach a window below `$8000` (`$4020-$7FFF`), it is already `#[cold]`
+  and `#[inline(never)]`, it runs *before* the cartridge is asked, and `NesBus` is the only thing
+  with the bus in hand. No address test — the board's window is `$4100-$5FFF` under mask `$E100`,
+  and a store made on a `$6xxx` read is overwritten by the next `$4100` one before anybody reads
+  it, so the value is always the bus of the access before the read that uses it.
+* `SingleLatch::try_read_prg` ORs `memory.cpu_edge_bus() & 0xC0` into the six bits it drives.
+
+`external_bus()` and not `data_bus`: the cartridge edge is the external bus, and `data_bus` is set
+*after* `read_internal` returns, so at the moment of the fill it holds the previous access — which
+is exactly what open bus means.
+
+**A feature of its own, `board-143-open-bus` (implies `board-143`), in `default`.** It is the only
+thing in this build that gives a board the cartridge-edge data bus, so it is the only part with a
+price, and the fill site is the path an MMC5 reading `ExRAM` through `$5C00` is measured on
+(10.6 M instructions per 300 frames of `mmc5exram` already attributed to it). With the feature off
+the two bits read zero again, which is what MF-UNL-3 built: parking it costs mapper 143 nothing a
+game can observe. Step 9 has the figure.
+
+**Tests.** `req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits` now masks with
+`& 0x3F` and owns the six driven bits alone, because it reads through `NesCore::read_memory` =
+`NesBus::peek`, which is `&self`, drives no bus and so can never see the two top bits move. The new
+`q_145_mapper_143_leaves_its_two_top_bits_to_the_open_bus` lives in `memory_access_tests.rs` — the
+file that already owns REQ-CORE-081 — and makes **real** `CpuBus` reads: it drives the bus with a
+work-RAM write, reads `$4100`, and asserts `0x3F | (driver & 0xC0)` for six driver bytes, then that
+the two bits follow the bus up and down again at a mirror of the port (which a stale field would
+fail), then the `$C0`-open-bus case at both ends of A5-A0 (which a missing mask would fail).
+
+`common::bus_with(image, name)` is new in `tests/common/mod.rs`: `loaded_core`'s body for an
+arbitrary image instead of the minimal ROM, so a test can make real bus accesses against a chosen
+board.
+
+**One thing worth recording about the vote**: `01` and open bus agree on every address this board
+decodes whenever the bus holds the high byte of the address being read, which it does for an
+absolute read — mask `$E100` against `$4100` is A15 clear and A14 set, so the high byte is `$41-$5F`
+and its bits 7-6 are `01`. The two majorities are closer than three-against-two makes them look,
+and that is also why no game can be expected to depend on the difference. The doc comment on
+`SingleLatch::try_read_prg` records it.
+
+Checks: fmt; `cargo test --release -p zax-nes` green; clippy `-D warnings` on
+`zax-nes --all-targets` in default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-143-open-bus` and `--no-default-features --features
+board-143` (the feature off, where the board's own test still passes).

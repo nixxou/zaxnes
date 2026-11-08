@@ -85,6 +85,27 @@ pub struct CartridgeMemory {
     /// same argument `flash` above makes for itself one field up, from the other direction.
     #[cfg(feature = "board-292")]
     cpu_write_latch: u8,
+    /// The byte the **cartridge-edge data bus** was holding when the CPU read now being answered
+    /// began, for the one board whose page leaves some of its bits undriven (Q-145, MF-FIX).
+    ///
+    /// nesdev ("INES Mapper 143") gives the TCA-01's protection read as `[xxii iiii]`, with `ii
+    /// iiii` the inversion of the address's low six bits and `xx` annotated **open bus**. Nothing
+    /// drives bits 7-6, so what a game reads there is whatever last travelled the bus — and this
+    /// is that byte. [`Mapper::try_read_prg`] has no other way to it: it is handed
+    /// `CartridgeMemory` and an address and nothing else.
+    ///
+    /// **Filled by `NesBus::read_wide_window`**, which is the function that already runs on
+    /// exactly the reads able to reach such a window and is already `#[cold]`; a `bool` on
+    /// `NesBus` settled at `attach` keeps it to one test for every other game. Behind
+    /// `board-143-open-bus`, so a build without that feature has neither the field nor the fill
+    /// and the board answers zero in those two bits, as it did before MF-FIX.
+    ///
+    /// **Not in the savestate** (REQ-CORE-090/091), for `cpu_write_latch`'s reason above: it is a
+    /// transient bus byte that the next such read overwrites, nothing is derived from it between
+    /// two reads, and no board register holds it. So no board's block grows by a byte in any
+    /// configuration and golden-core is unmoved.
+    #[cfg(feature = "board-143-open-bus")]
+    cpu_edge_bus: u8,
 }
 
 impl CartridgeMemory {
@@ -116,6 +137,8 @@ impl CartridgeMemory {
             flash,
             #[cfg(feature = "board-292")]
             cpu_write_latch: 0,
+            #[cfg(feature = "board-143-open-bus")]
+            cpu_edge_bus: 0,
         };
         memory.load_trainer();
         memory
@@ -193,6 +216,21 @@ impl CartridgeMemory {
     #[cfg(feature = "board-292")]
     pub fn latch_cpu_write(&mut self, value: u8) {
         self.cpu_write_latch = value;
+    }
+
+    /// The byte the cartridge-edge data bus held when the CPU read now being answered began; see
+    /// [`CartridgeMemory::cpu_edge_bus`].
+    #[cfg(feature = "board-143-open-bus")]
+    #[must_use]
+    pub const fn cpu_edge_bus(&self) -> u8 {
+        self.cpu_edge_bus
+    }
+
+    /// Records `value` as that byte. Called by `NesBus::read_wide_window` before the cartridge is
+    /// asked, and only for a cartridge whose board reads it.
+    #[cfg(feature = "board-143-open-bus")]
+    pub fn set_cpu_edge_bus(&mut self, value: u8) {
+        self.cpu_edge_bus = value;
     }
 
     /// CPU cycles elapsed since power-on, as the cartridge sees them.

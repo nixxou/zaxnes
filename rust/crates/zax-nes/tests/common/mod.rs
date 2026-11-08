@@ -214,6 +214,21 @@ pub fn loaded_core(program: Option<&[u8]>) -> (Cpu6502, NesBus) {
     (cpu, bus)
 }
 
+/// The same, for an arbitrary image rather than the minimal ROM: a powered-on bus with `image`'s
+/// cartridge attached, so that a test can make **real** `CpuBus` reads and writes against a
+/// particular board.
+///
+/// `NesCore::read_memory`/`write_memory` are `NesBus::peek`/`poke`, which drive no data bus, so
+/// this is the only way to observe anything a board answers *from* the bus — mapper 143's two
+/// open-bus bits are the case it was added for (Q-145).
+pub fn bus_with(image: &[u8], name: &str) -> NesBus {
+    let rom = RomImage::try_load(image, name).unwrap();
+    let mut bus = NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
+    bus.attach(Some(Cartridge::create(rom).unwrap()));
+    bus.ppu_mut().reset();
+    bus
+}
+
 /// A machine with `image` loaded.
 pub fn machine_with(image: &[u8], name: &str) -> NesCore {
     let mut machine = NesCore::new();

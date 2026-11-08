@@ -233,3 +233,66 @@ fn req_core_045_palette_entries_are_six_bits_wide() {
 
     assert_eq!(0x3F, capture_palette(&mut core)[3]);
 }
+
+/// **Q-145**, settled by `docs/review/Q-XCHECK.md` and applied by MF-FIX: mapper 143's protection
+/// read leaves its two top bits to the **open bus**.
+///
+/// nesdev ("INES Mapper 143") gives the Sachen TCA-01 one read and no write side:
+///
+/// ```text
+/// A:[010. ...1 ..DD DDDD] -> [xxii iiii]
+///                ++-++++------||++-++++-- reads provide the logical inversion of DDDDDD
+///                             ++--------- open bus
+/// ```
+///
+/// The six `ii` bits are `req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits`'s
+/// in `mapper_tests.rs`. The `xx` are this test's. They used to read zero, because
+/// `Mapper::try_read_prg` is handed `CartridgeMemory` and an address and had no way to the data
+/// bus; the cross-check made zero the only reading with no support anywhere — **FCEUX**
+/// (`sachen.cpp:389-394`), **puNES** (`mapper_143.c:35`) and `nintendulator-mappers`
+/// (`mapper143.cpp:14`, `(~Addr & 0x3F) | (OpenBus & 0xC0)`) all put the real bus there, against
+/// Mesen 2's and Nestopia's hard-coded `01` — so MF-FIX gave the board the bus.
+///
+/// **It has to be a bus-level test.** `NesCore::read_memory` is `NesBus::peek`, which is `&self`
+/// and drives nothing, so a peek can never show these two bits moving. A real `CpuBus::read` can,
+/// and what it must show is the byte of the access *before* it, which is what open bus is.
+#[cfg(feature = "board-143-open-bus")]
+#[test]
+fn q_145_mapper_143_leaves_its_two_top_bits_to_the_open_bus() {
+    use common::mapper_fixture::MapperRom;
+
+    let mut bus = common::bus_with(&MapperRom::new(143).prg(4).chr(8).image(), "M143.nes");
+
+    // A write to work RAM drives both buses, so the next read's undriven bits are that byte's.
+    // $4100's own six driven bits are the inversion of A5-A0 = 0, i.e. $3F, in every case.
+    for driver in [0xC0u8, 0x80, 0x40, 0x00, 0xFF, 0x3F] {
+        bus.write(0x0000, driver);
+        assert_eq!(
+            0x3F | (driver & 0xC0),
+            bus.read(0x4100),
+            "driver {driver:#04X}: bits 7-6 are the open bus and 5-0 the board's"
+        );
+    }
+
+    // And the two bits follow the bus rather than the address: the same read at a mirror of the
+    // port answers the same two bits, which a hard-coded `01` would also do but a *stale* field
+    // would not -- the fill happens on every such read.
+    bus.write(0x0000, 0xC0);
+    assert_eq!(
+        0xFF,
+        bus.read(0x5F00),
+        "$5F00 is the port too, and bits 7-6 are $C0"
+    );
+    bus.write(0x0000, 0x00);
+    assert_eq!(0x3F, bus.read(0x5F00), "and they follow the bus down again");
+
+    // A5-A0 still drive bits 5-0 under an open bus of all ones, which is the one combination
+    // that would hide a sign-extension or a missing mask.
+    bus.write(0x0000, 0xFF);
+    assert_eq!(0xFF, bus.read(0x4100), "A5-A0 = 0 inverts to $3F under $C0");
+    assert_eq!(
+        0xC0,
+        bus.read(0x413F),
+        "A5-A0 = $3F inverts to $00 under $C0"
+    );
+}

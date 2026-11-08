@@ -420,10 +420,27 @@ impl Mapper for SingleLatch {
     /// The address pattern is mask $E100 against $4100 again, the window three other boards of
     /// this lot and [`super::Sachen72008`] share.
     ///
-    /// The two bits the page calls open bus read as **0** and not as the last value on the bus,
-    /// for the reason [`super::Jv001`]'s own note gives: this hook returns a whole byte and
-    /// cannot see the CPU data bus, and no page asks a game to read past the bits its board
-    /// drives.
+    /// **The two bits the page calls open bus answer the bus, since MF-FIX** (`docs/review/
+    /// Q-XCHECK.md` §Q-145). They used to read 0, for the reason [`super::Jv001`]'s own note
+    /// gives — this hook returns a whole byte and was handed nothing that could see the CPU data
+    /// bus. The cross-check made that the only reading with no support anywhere: **FCEUX**
+    /// (`src/boards/sachen.cpp:389-394`) and **puNES** (`src/core/mappers/mapper_143.c:35`) put
+    /// the real data bus there, and so does `third_party/nintendulator-mappers`
+    /// (`mapper143.cpp:14`, `(~Addr & 0x3F) | (OpenBus & 0xC0)`) — three for true open bus against
+    /// **Mesen 2** (`Core/NES/Mappers/Sachen/Sachen_143.h:24`) and **Nestopia UE**
+    /// (`source/core/board/NstBoardSachenTca01.cpp:65`), which force the two bits to `01`. Zero
+    /// had none.
+    ///
+    /// So the hook it needed was built: [`CartridgeMemory::cpu_edge_bus`], filled by
+    /// `NesBus::read_wide_window` before the cartridge is asked. Behind
+    /// `board-143-open-bus`; with that feature off the two bits are zero again, which is the
+    /// state MF-UNL left and the fallback if the figure parks the feature.
+    ///
+    /// Note that `01` and open bus **agree on every address this board decodes** whenever the bus
+    /// holds the high byte of the address being read, which it does for an absolute read: mask
+    /// `$E100` against `$4100` is A15 clear and A14 set, so the high byte is `$41-$5F` and its
+    /// bits 7-6 are `01`. The two majorities are closer than the vote makes them look, and that
+    /// is also why no game can be expected to depend on the difference.
     ///
     /// *Dancing Blocks* "relies extensively on the values of uninitialized memory", which the
     /// page mentions and which is a property of the console's 2 KiB of work RAM and not of this
@@ -440,7 +457,12 @@ impl Mapper for SingleLatch {
             // The mask makes the truncation: `address & $3F` is six bits.
             #[allow(clippy::cast_possible_truncation)]
             let low = (address & 0x003F) as u8;
-            return Some(!low & 0x3F);
+            // Bits 7-6: the page's `xx`, open bus. Zero with the feature off.
+            #[cfg(feature = "board-143-open-bus")]
+            let undriven = memory.cpu_edge_bus() & 0xC0;
+            #[cfg(not(feature = "board-143-open-bus"))]
+            let undriven = 0x00;
+            return Some((!low & 0x3F) | undriven);
         }
 
         None

@@ -8793,6 +8793,13 @@ fn req_core_090_every_single_latch_board_round_trips_with_its_latch_dirtied() {
 /// cannot do and which this page's diagram does not say; the page wins and **Q-145** records it.
 /// The test therefore walks all 64 values of A5-A0 and asserts the inversion of each, and then
 /// asserts that a *write* changes nothing.
+///
+/// **This test owns the six bits the board drives and nothing else.** Bits 7-6 are the page's
+/// `xx`, open bus, which MF-FIX made answer the cartridge-edge data bus
+/// (`docs/review/Q-XCHECK.md` §Q-145) — so they are masked off here and
+/// `q_145_mapper_143_leaves_its_two_top_bits_to_the_open_bus` in `memory_access_tests.rs` owns
+/// them instead. It has to be that file: `NesCore::read_memory` is `NesBus::peek`, which is
+/// `&self` and drives no bus at all, so only a real `CpuBus::read` can observe them.
 #[cfg(feature = "board-143")]
 #[test]
 fn req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits() {
@@ -8803,11 +8810,10 @@ fn req_core_102_mapper_143_answers_the_inversion_of_its_own_address_bits() {
     for low in 0u16..64 {
         for base in [0x4100u16, 0x4140, 0x5F00] {
             let address = base | low;
-            // The two bits the page calls open bus read as 0, for `Jv001`'s own reason.
             let expected = (!low as u8) & 0x3F;
             assert_eq!(
                 expected,
-                core.read_memory(address),
+                core.read_memory(address) & 0x3F,
                 "{address:#06X}: the inversion of A5-A0"
             );
         }

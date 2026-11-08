@@ -50,6 +50,7 @@ default = [
     "board-38",
     "board-107",
     "board-143",
+    "board-143-open-bus",
     "board-144",
     "board-145",
     "board-149",
@@ -543,6 +544,16 @@ board-107 = ["board-decode-boards"]
 # emulation of the base commit -- is itself `smb3/total` +0.022 %, which is what that column's
 # spread is. See `docs/review/BOARD-FEATURES.md`.
 board-143 = ["board-decode-boards"]
+
+# Mapper 143's two **open-bus** bits: the `xx` of the TCA-01 protection read's `[xxii iiii]`
+# (Q-145, MF-FIX). A feature of its own, and not part of `board-143`, because it is the only thing
+# in this build that gives a board the cartridge-edge data bus and so the only thing with a price:
+# one `bool` on `NesBus`, settled at `attach`, tested in the already-`#[cold]`
+# `NesBus::read_wide_window`, which runs on every CPU read of $4020-$7FFF -- the path an MMC5
+# reading its `ExRAM` through $5C00 is measured on. With it off those two bits read zero, which is
+# what MF-UNL-3 built and what the fallback is if the figure parks it; the six bits the board does
+# drive are the same either way. See `docs/review/BOARD-FEATURES.md` and MF-FIX step 9.
+board-143-open-bus = ["board-143"]
 
 # Mapper 144, the **AGCI 50282** of *Death Race*: "a intentionally defective variant of the
 # Color Dreams board (mapper 11)", with "a 300 Ω resistor ... between CPU D0 and the combination
