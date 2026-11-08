@@ -973,7 +973,7 @@ register table**, which is why §6 graded documentation, and the "titles R0 shou
 | **MF-UNL-9** — Cheapocabra (GTROM) — **shipped** | 1 | 1 | ~6 h | **7** | 1.2 |
 | **MF-UNL-10** — Dōngdá PEC-9588 — **shipped** | 1 | 1 | ~7 h | **6** | 0.9 |
 | **MF-UNL-11** — the Kǎshèng protection MMC3s — **shipped** | 3 | 3 | ~7 h | **6** | 0.9 |
-| **MF-UNL-12** — the last three singletons | 3 | 3 | ~7 h | **4** | 0.6 |
+| **MF-UNL-12** — the last three singletons — **shipped** | 3 | 3 | ~7 h | **4** | 0.6 |
 | **total** | **37** | **60** | **~89 h** | **~171** | |
 
 The title counts double-count nothing within a lot but do count a title once per board that carries
@@ -1879,6 +1879,71 @@ Last because the ratio is lowest. Each is nonetheless a clean board with a compl
 
 **Titles R0 should run**: *Street Heroes*, *侍魂 — Samurai Spirits* (262); *Dragon Fighter* (292);
 *封神榜 — Fēngshénbǎng: Fúmó Sān Tàizǐ* (246).
+
+
+> **Shipped, MF-UNL-12, 2026-11-08 — and it is the last lot of MF-UNL.** Three numbers, three
+> boards, three Cargo features, **two of them in `default` and one parked**. `board-262` (the
+> Sachen UNL-SHERO) and `board-292` (the BMW8544) are boxed `IrqBoard` variants each holding an
+> `Mmc3`; `board-246` (the G0151-1) is a `DecodeBoard` variant, the page giving it no counter at
+> all. **No `Board` discriminant.** 17 tests, 1 ticket (**Q-172**), 9 commits.
+>
+> **This section's step 2 carries the one claim of §7.2 that a page overrides, and it is the claim
+> that decides the lot.** The step says of mapper 292 that "`Cartridge::cpu_read` already reaches
+> that window, so **no new hook**". Half of that is right — `Mapper::cpu_read_override` is a
+> `&mut self` read hook and the register fill lives there. The other half is not: the page's own
+> *Latch Register* section makes the filled byte "the data of the last CPU write **to any
+> address**" and says the game "writes the desired values to **zero page**", and a zero-page write
+> is RAM that reaches no cartridge in this core. So the latch *is* a new hook — one byte on
+> `CartridgeMemory`, stored by `NesBus::write_internal` on every CPU write — and it is half of why
+> that board is parked.
+>
+> **`board-292` is the first and only board of the twelve MF-UNL lots to be parked**, and the
+> second cartridge board of this build after the VS. System. Measured against `c02fc02c` and
+> attributed to that feature alone: **all thirteen of PR-1's ROMs slower**, `mmc5exram`
+> **+1.098 %** — fifty-five times the tolerance — `oamstr` +0.026 %, `vblnmi` +0.020 %, set total
+> +0.164 %. Two causes and **neither has a fix**: `Board::cpu_read_override` gains a *body*, so
+> `IrqBoard` leaves that dispatch's empty arm and the MMC5 — the one board that reaches
+> `Cartridge::try_cpu_read` on every CPU read — pays +122 851 006; and the latch store, which is
+> `oamstr`'s +0.026 % **on its own**, so splitting the board into two features would save neither.
+> With it parked the shipped tree is **worst ROM +0.003 %** and set total +795 012 (+0.001 %), and
+> `mmc5` is back at +0.001 %.
+>
+> **The park is a figure and not a behaviour change, and golden-core is what says so**: over the 98
+> commercial originals at 1 200 frames each the shipped tree is byte-identical to the base
+> commit's **and so is the tree with `board-292` on**, both at digest
+> `f79e7df842c3ee43e7d9b67861a927b5` — the one eleven lots have now recorded.
+>
+> **Two of this lot's readings live in the columns of one ASCII diagram**, mapper 262's `$4100`
+> write register, and a prose paraphrase of it got both wrong: the CHR-ROM/CHR-RAM select is bit
+> **6** and not bit 7, and the four CHR A18 lines are **crossed** against their regions — bit 1 is
+> `$1800-$1FFF` and bit 0 `$1000-$17FF`, the `8421` the diagram labels them with being their weight
+> and not their order. Every page of this lot was therefore read as **raw wikitext**
+> (`?action=raw`), where the header line, the rule and the field line are column-aligned. That is a
+> method the next lot should inherit, and Q-172 §0 says so.
+>
+> **§7.2's test bullet for 246 is Mesen's decode and not the page's**, in the same way MF-UNL-2
+> found three of them to be: it asks for "a write at `$6000-$67FF`", where the page's mask
+> (`A~[0110 0000 000. .0rr]`) requires A11-A5 all clear and so gives a register window of
+> `$6000-$601F`. The page wins, and the test is written from the mask — 32 addresses, with `$6400`
+> shown to be the RAM chip instead. **And the same mask is the forced-A17 read condition**:
+> `address & $FFE4 == $FFE4` is exactly `$FFE4-$FFE7`, `$FFEC-$FFEF`, `$FFF4-$FFF7` and
+> `$FFFC-$FFFF`, which one test walks over all 32 addresses of `$FFE0-$FFFF` rather than asserting
+> by hand.
+>
+> **One finding for the next lot that is not about a board**: this machine's valgrind 3.22
+> **silently** declines to read the shipped binary's symbols — no warning, no `Reading syms from`
+> line — because of a `GNU_RELRO` segment whose `MemSiz` equals its `FileSiz`, a deterministic
+> linker-layout property of that feature set. The whole-process `Ir` is still exact and is what the
+> level-2 row is measured on; the stage table comes from the two neighbouring trees, one of which
+> has the lot's **identical emulation** and gives `core` **+0 on all five games**.
+>
+> **What is left, and it is §5's condition and not an omission**: no ROM of these three numbers
+> exists in `assets-free/test-roms`, so all 17 tests are written from the register tables. R0 would
+> have to source the four titles, and Q-172 §4 is a table of the eight readings a dump would settle
+> with the cost of each being wrong — none above "three lines" except mapper 262's title jumper,
+> which needs a submapper the page does not define.
+>
+> See `docs/progress/MF-UNL-12.md`, `spec/changes/Q-172.md` and `docs/review/BOARD-FEATURES.md`.
 
 ### 7.3 The category-A boards this plan excludes, and the only reasons left
 

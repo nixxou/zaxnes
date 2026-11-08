@@ -753,3 +753,60 @@ ran rather than passing vacuously, which is the check the brief asks for.
 1 162 against MF-UNL-11's 1 152 is **ten** tests, not the lot's seventeen: seven of them need
 `board-292` and that feature is parked, so they run under `--features parked-boards` and not in
 `default`. Step 5's `mapper_tests` table is where all seventeen are accounted for.
+
+## Step 8 — the final pass, Q-172, the census note and the journal
+
+### The shipped binary is the measured binary, to the byte
+
+`make-tree.sh --worktree` was taken of the tree as it ships and built by `build-clean.sh` in a
+fresh directory of its own:
+
+| | md5 |
+| --- | --- |
+| `mfunl12-5-verify`, the shipped tree | `aee4243f1e16e7aaf876751751f68262` |
+| `mfunl12-4-ship`, the **measured** binary | `aee4243f1e16e7aaf876751751f68262` |
+
+**Identical** — three independent builds of that configuration now, all three the same md5 — so
+step 6's and step 7's figures are the shipped commit's to the byte. Steps 7 and 8 touch only
+Markdown and the Cargo manifest's **comments**, which do not reach codegen.
+
+### What this step wrote
+
+| file | what |
+| --- | --- |
+| `spec/changes/Q-172.md` | **new**. Nine readings across the three numbers, a §0 on the method (raw wikitext) and a §4 table of what a dump would falsify with the cost of each being wrong |
+| `docs/review/BOARD-FEATURES.md` | three rows, the `parked-boards` row's mapper list and the "worst figure in `default`" paragraph |
+| `docs/review/UNL-census.md` | §7.2's table marks the lot **shipped**, and the MF-UNL-12 section gains the note every shipped lot has |
+| `rust/crates/zax-nes/Cargo.toml` | `board-292`'s own note gains the park, its figures and its two causes (step 6) |
+| `journal/JOURNAL.md` | the lot's entry, the **MF-UNL-1 to 12 summary** the brief asks for, and the roster of unanswered tickets |
+
+### The lot, end to end
+
+| | |
+| --- | --- |
+| numbers | **3** — 262, 292, 246 |
+| features | **3** — `board-262` and `board-246` in `default`, **`board-292` parked** |
+| `Board` discriminants | **0** — two `IrqBoard` variants, one `DecodeBoard` variant |
+| new forwards | three on `IrqBoard` (`cpu_read_override`, `cpu_peek_override`, and `try_read_prg`'s `cfg` widened), two on `DecodeBoard` (the PRG read cache, `intercept_cpu_write`) plus `try_read_prg`'s `cfg` |
+| outside a board | **one** — `CartridgeMemory::cpu_write_latch` and one store in `NesBus::write_internal`, both behind `board-292` |
+| existing boards' behaviour | **unchanged**, and golden-core over the 98 originals says so — with the parked feature **on** as well |
+| tests | **17**; `mapper_tests` 385 in `default`, 392 with `parked-boards` |
+| tickets | **1**, Q-172 |
+| commits | **9**, `00451797` to this one |
+
+### The three things this lot would tell the next one
+
+1. **Read the diagram, not the prose, and read it as raw wikitext.** Two of mapper 262's five
+   readings are column positions, and a paraphrase of that one diagram got both wrong — the select
+   bit and the order of four lines. `?action=raw` on a nesdev page gives the columns the author
+   aligned.
+2. **A `cfg` list is never implied by the variant it belongs to.** The `board-246`-alone build did
+   not compile, because `DecodeBoard`'s `compile_error!` guard lists every member of that enum and
+   nothing else names a new one. MF-UNL-11 found the same thing in `IrqBoard::try_read_prg`'s list.
+   The single-feature configurations are the only build that can find it.
+3. **A board that wants a `&mut self` read hook is expensive and the cost is structural.**
+   `Board::cpu_read_override` carries `#[inline(always)]` and folds into `Cartridge::try_cpu_read`,
+   which the MMC5 reaches on every CPU read; a shared enum leaving that dispatch's **empty** arm
+   cost `mmc5exram` +1.098 %. There is no `#[inline(never)]` that recovers it, because what is paid
+   is the arm and not the call. The next board whose registers a read fills should expect to be
+   parked — or to come with a redesign of that hook.
