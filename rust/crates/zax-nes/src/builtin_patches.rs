@@ -1520,6 +1520,14 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 0,
         default: false,
     },
+    // A testing aid: no damage and no knock-back from enemies and spikes (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
     // 255 lines of overclock and no frame lost to an NMI that came while the frame ran.
     HackOption {
         key: "no_slowdown",
