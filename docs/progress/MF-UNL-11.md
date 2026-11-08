@@ -233,7 +233,7 @@ bullets asks for something no page states. The ticket also holds five things the
       three `BOARD-FEATURES.md` rows.
 - [x] **7/8** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
-- [ ] **8/8** Q-171, the census note, the journal, the close.
+- [x] **8/8** Q-171, the census note, the journal, the close.
 
 [PROGRESS] MF-UNL-11 step 0/8 done: the plan
 
@@ -651,3 +651,77 @@ ran rather than passing vacuously, which is the check the brief asks for.
 1 152 against MF-UNL-10's 1 127 is this lot's **25** tests.
 
 [PROGRESS] MF-UNL-11 step 7/8 done: golden-core and the full run
+
+## Step 8 — the final pass, Q-171, the census note and the journal
+
+### The shipped binary is the measured binary, to the byte
+
+`make-tree.sh --worktree` was taken of the tree as it ships and built by `build-clean.sh` in a
+fresh directory of its own:
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mfunl11-1-lot` | `2b38776c`, the measured binary | `d031eddea93ab222efc8cbbf61dd5b67` |
+| `mfunl11-2-ship` | the shipped tree, steps 6-8 included | **the same** |
+
+The **whole** md5 and not only `.text` and `.rodata`: steps 6, 7 and 8 touch nothing but Markdown,
+so there is not even a debug-info difference to account for — which is the cleanest form of this
+check any lot has had, and it means step 6's figures are the shipped commit's to the instruction.
+No third golden-core run is needed either: the binary is byte-identical, so its digest cannot
+differ.
+
+### Q-171
+
+`spec/changes/Q-171.md`. **One** claim of §7.2 that no page carries — "a wrong code leaves the
+board in the state the page describes" (208), of a page that describes no wrong-code state at all —
+and **five** readings the three pages force, each pinned by a test:
+
+| § | the question | taken |
+| ---: | --- | --- |
+| 2 | 215 submapper 1's `$5001`: two overlaid bit rows, four register bits for six outer lines | PRG A20/A19/A18 = bits 3/1/0, CHR A20/A19/A18 = bits 3/2/1, pinned by the one bit that moves PRG and not CHR; the alternative recorded |
+| 3 | 215's `$5001` power-up `$xF` | `$0F`, unobservable out of reset because `$5000` bit 6 is clear |
+| 4 | 208's `$A000` | inert on submapper 0, live on submapper 1 — the page's own control |
+| 5 | 208's protection index: value or address | the written value |
+| 6.1 | 219's `Mask: $5003` | `$F003`, so the chip keeps `$D002`/`$D003` |
+| 6.2 | 219's five-bit index field against its six-bit index values | the mode latched by `$8002` alone, the index by every even address — the only consistent reading |
+
+§6.2 also records the one thing that section leaves open: the CHR latch is "next CHR-ROM switch's
+data" in its annotation and unqualified in its prose, and **persistent** is taken, which is what
+the register's own name says and the only reading needing no undescribed behaviour.
+
+### The census note
+
+`docs/review/UNL-census.md` §7.2's MF-UNL-11 row is marked **shipped** and the section carries the
+note. Beyond the six Q-171 items it records three things a reader of the plan alone would get
+wrong:
+
+* **the section's title names one of the three publishers.** Only 219 is Kǎshèng; 215 is Sugar
+  Softec and 208 Gouder, which §2.5's own rows already say. The grouping is by mechanism.
+* **219's "partial" documentation is only partly partial** — what is missing is a submapper and a
+  power-on value, not a register — and **208's page is complete to the byte**, its 256-byte table
+  included.
+* **the lot's figure, and the floor that makes it a figure.**
+
+### The journal
+
+`journal/JOURNAL.md`, one entry in the register the file keeps: role, base commit, folders
+consulted, the three sources, the deliverables, the three boards, what Q-171 holds, the
+measurements, the suites, the two things a single configuration caught, and what is left to R0.
+
+### The close
+
+| | |
+| --- | --- |
+| numbers | **3** — 215, 208, 219 |
+| features | **3**, `board-215`, `board-208`, `board-219`, **all three in `default`** |
+| `Board` discriminants added | **0** — three `IrqBoard` variants, each boxed, each holding an `Mmc3` |
+| added outside the boards | one `BankWindows` method (`remap_chr_banks`), five widened `cfg` lists, two accessors given a caller |
+| existing boards' behaviour | **unchanged**, and golden-core over the 98 originals says so |
+| tests | **25**; `mapper_tests` 350 → 375, full suite 1 127 → 1 152 |
+| PR-1, thirteen ROMs | worst **+0.001 %**, set total **−122 054**; the floor is worse on both |
+| level 2, five games | `core` **+0 on all five**; worst `total` +0.013 %, against a floor of +0.007 % on the same game |
+| tickets | **Q-171** |
+
+The lot is closed.
+
+[PROGRESS] MF-UNL-11 step 8/8 done: the close

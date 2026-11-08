@@ -972,7 +972,7 @@ register table**, which is why §6 graded documentation, and the "titles R0 shou
 | **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board — **shipped** | 3 | 5 | ~8.5 h | **10** | 1.2 |
 | **MF-UNL-9** — Cheapocabra (GTROM) — **shipped** | 1 | 1 | ~6 h | **7** | 1.2 |
 | **MF-UNL-10** — Dōngdá PEC-9588 — **shipped** | 1 | 1 | ~7 h | **6** | 0.9 |
-| **MF-UNL-11** — the Kǎshèng protection MMC3s | 3 | 3 | ~7 h | **6** | 0.9 |
+| **MF-UNL-11** — the Kǎshèng protection MMC3s — **shipped** | 3 | 3 | ~7 h | **6** | 0.9 |
 | **MF-UNL-12** — the last three singletons | 3 | 3 | ~7 h | **4** | 0.6 |
 | **total** | **37** | **60** | **~89 h** | **~171** | |
 
@@ -1781,6 +1781,68 @@ anything is hard.
 
 **Titles R0 should run**: *Earthworm Jim 2*, *Mortal Kombat 3*, *Mortal Kombat 3 Extra 60*,
 *Pocahontas Part 2* (215); *快打傳説 — Street Fighter IV* (208); *Toy Story* (219).
+
+> **Note added by lot MF-UNL-11 (2026-11-08), which shipped this section.** Three numbers, three
+> boards, **three Cargo features, all three in `default`** — `board-215`, `board-208` and
+> `board-219`. The section's own estimate holds: nothing here needed a hook this build did not
+> have, and the whole lot is three `IrqBoard` variants, three boards holding an `Mmc3`, one new
+> `BankWindows` method and five widened `cfg` lists.
+>
+> **The section's title names one of the three publishers, and the roster above is the accurate
+> one.** Only **219** is Kǎshèng (the **A9461**); 215 is **Sugar Softec**'s UNL-8237 and UNL-8237A,
+> and 208 is the unnamed **Gouder** board — §2.5's rows say so and this heading does not. The
+> grouping is by mechanism: an MMC3 plus a protection register plus an extended banking mode.
+>
+> **The three steps are the pages' own and this is the first MF-UNL lot for which that is nearly
+> true throughout.** MF-UNL-2's rule — §7.2 was drafted from Mesen's `MapperFactory`, so where it
+> and a number's page differ the page wins — found **one** case here, and it is in a *test* bullet
+> rather than a step: "a wrong code leaves the board in the state the page describes" (208)
+> describes behaviour the page does not give, there being no wrong-code state at all. What
+> **Q-171** mostly records instead is five places where a page is ambiguous or self-contradictory
+> and the implementation had to choose, each pinned by a test:
+>
+> * **215 submapper 1's `$5001`** is two overlaid bit rows with four register bits carrying six
+>   outer lines; the reading taken is pinned by the one bit that moves PRG and not CHR, and the
+>   alternative is recorded because the page cannot distinguish them.
+> * **215's `$5001` power-up `$xF`** leaves the two A17 lines unknown; `$0F` is used and nothing can
+>   observe it out of reset, `$5000` bit 6 being clear.
+> * **208's `$A000`** is made inert, the page's register list having no such section and putting
+>   mirroring among the board's own registers — with its own submapper 1 as the control, which says
+>   the opposite in so many words.
+> * **219's `Mask: $5003`** is read as `$F003`, because taken literally it makes `$D002`/`$D003` —
+>   the chip's IRQ latch and reload — the outer bank register too.
+> * **219's mode bit** is latched by `$8002` alone and its index by every even address of the
+>   window, which is the **only** reading under which its five-bit `R RRRR` field, its six-bit
+>   extended index values and its four "used only if `$8002` bit 5=1" sections are all true at once.
+>
+> **One thing the section calls partial is only partly partial.** §2.5 grades 219's documentation
+> *partial*, and what is actually missing is a submapper and a power-on value, not a register: all
+> four extended registers, both outer bits and both modes are fully diagrammed, and the one gap the
+> lot had to fill by reading is §6.2's. By contrast 208's page is **complete to the byte**, its
+> 256-byte lookup table included — and that table's own regularity (four groups of four rows, one
+> four-byte cycle per row parity) is what let the test rebuild it from structure instead of copying
+> the array, so a slip in either encoding fails.
+>
+> **The lot costs nothing measurable, and the floor is what says so.** PR-1's worst ROM is
+> **+0.001 %** against the owner's +0.02 % and the set total is **below** the base commit's, with
+> **no emulation symbol moving anywhere in the thirteen**; the same binary run twice is worse on
+> both. Level 2's `core` is **+0 on all five games, identical to the instruction**, and the one
+> `total` above +0.01 % — `smb1` +0.013 % — is the Lua column, which the **level-2 floor** moves by
+> +0.007 % on that same game with an identical binary. That floor was run because this figure was
+> the lot's largest, not because the tolerance required it.
+>
+> **It is also the re-measurement MF-CART step 4 asked for.** Three variants added to a shared
+> `Board` enum at once, and `mmc5` — the one ROM whose every CPU read reached
+> `Cartridge::default_cpu_read` before that step inlined it away — is **−10 209**. MF-6c's eleven
+> measurements of +7 456 756 a variant are gone and stay gone.
+>
+> **What is left, and it is §5's condition and not an omission**: no ROM of these three numbers
+> exists in `assets-free/test-roms`, so all 25 tests are written from the register tables. R0 would
+> have to source the six titles — and 208's page gives the one check a dump would settle in one
+> line, the game "executing code at `$5800`, which in the case of proper emulation of the
+> protection scheme will result in the execution of a JMP opcode to a desired address".
+>
+> See `docs/progress/MF-UNL-11.md`, `spec/changes/Q-171.md` and `docs/review/BOARD-FEATURES.md`.
 
 ---
 
