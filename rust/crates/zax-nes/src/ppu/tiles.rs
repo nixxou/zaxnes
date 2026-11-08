@@ -415,8 +415,18 @@ impl Ppu2C02 {
             }
         }
 
-        let (edge_rows, centre_lines) =
-            self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+        // Too few rows placed: not the game's screen (the decoder's minimum), no margins at all.
+        let placed = decoded_rows.iter().filter(|decoded| **decoded).count();
+        let (edge_rows, centre_lines) = if placed < decoder.minimum_rows() {
+            records.clear();
+            decoded_rows = [false; 31];
+            redrawn_from = [256; 30];
+            redrawn_to = [0; 30];
+            self.playfield_end = None;
+            (Vec::new(), (0, 240))
+        } else {
+            self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records)
+        };
         self.centre_lines = centre_lines;
         self.hides_overscan = decoder.hides_overscan();
         self.redrawn_from = redrawn_from;
@@ -474,6 +484,7 @@ impl Ppu2C02 {
         }
         let row_ends = self.row_ends();
         let mut tiles = Vec::new();
+        let mut placed = 0;
         for (row_index, ref captured, strip) in self.rows_to_decode() {
             if strip {
                 continue;
@@ -487,9 +498,13 @@ impl Ppu2C02 {
                 ..*memory
             };
             if decoder.decode_row(memory, &captured.row, &mut std::iter::empty(), &mut tiles) {
+                placed += 1;
                 let end = (captured.y + 8).min(row_ends[row_index]);
                 self.playfield_end = Some(self.playfield_end.map_or(end, |last| last.max(end)));
             }
+        }
+        if placed < decoder.minimum_rows() {
+            self.playfield_end = None;
         }
     }
 

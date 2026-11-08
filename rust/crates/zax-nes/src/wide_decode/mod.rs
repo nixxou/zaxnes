@@ -257,6 +257,14 @@ pub trait MarginDecoder: Sync {
     fn decodes_split_strips(&self) -> bool {
         false
     }
+
+    /// The fewest rows of a frame the decoder must place for any of them to get margins: a
+    /// screen that is not the game's (an intro, with the last room played still in the battery
+    /// RAM) can have a blank row or two that happen to match that room, while a room shown has
+    /// most of its rows placed. 0 by default: every row placed gets its margins.
+    fn minimum_rows(&self) -> usize {
+        0
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if

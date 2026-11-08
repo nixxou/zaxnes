@@ -113,6 +113,13 @@ impl MarginDecoder for Kirby {
         true
     }
 
+    /// The map of the last room played stays in the battery RAM: on the intro after power-on,
+    /// its blank bottom rows matched a blank row of that map now and then, and showed that
+    /// room's tiles beside them. A room shown places nearly all of its 22 playfield rows.
+    fn minimum_rows(&self) -> usize {
+        8
+    }
+
     /// The game hides the background's leftmost 8 pixels (PPUMASK `$18`) and draws there the
     /// column coming in.
     fn decodes_masked_column(&self) -> bool {
