@@ -1684,4 +1684,384 @@ by the project today**, and it is one of only four mapper-specific ROM tests in 
 
 Count: 10 OK, 1 DIFFERS, 0 OPEN.
 
+---
+
+## Mapper 28 — Action 53
+
+Page: *INES Mapper 028* (<https://www.nesdev.org/wiki/INES_Mapper_028>). Ours:
+`mappers/multicart.rs:470-607`. Theirs: `fceux/src/boards/28.cpp`,
+`nestopia/source/core/board/NstBoardAction53.cpp`, `punes/src/core/mappers/mapper_028.c`,
+`nintendulator-mappers/src/iNES/mapper028.cpp` — all four have the board.
+
+MR-1b settled all three of its points against the page and all four confirm each of them, which
+matters because one of the three was a disagreement with Mesen.
+
+- **The register select comes from a write to $5000-$5FFF, bits 7 and 0** — OK
+  (`multicart.rs:579-581`). FCEUX stores `value & 0x81` and switches on the four combinations
+  (`28.cpp:132`, `28.cpp:141-158`); Nestopia maps $5000-$5FFF to its own poke
+  (`NstBoardAction53.cpp:36`); Nintendulator latches the whole byte from $5xxx and switches on
+  `regSel & 0x81` (`mapper028.cpp:67-81`); puNES keeps the same index (`mapper_028.c:56`).
+- **The four registers: CHR bank, inner PRG (4 bits), mode (6 bits), outer PRG (6 bits)** — OK
+  (`multicart.rs:592-602`); same masks in both (`28.cpp:152`, `28.cpp:157`;
+  `NstBoardAction53.cpp:107-117`, where the mode register is masked to `0x3c` because Nestopia
+  keeps the mirroring bits elsewhere).
+- **The mirroring bit is captured *inside* the mode register and only while the mode is
+  one-screen** — OK, and **FCEUX implements it line for line**: `if ((mode & 2) == 0) { mode
+  &= 0xfe; mode |= value >> 4 & 1; }` (`28.cpp:45-49`) is this build's `take_mirroring_bit`
+  (`multicart.rs:491-495`). So do the other two, with the "only from registers $00 and $01"
+  clause spelled out: Nintendulator `if (!(regSel & 0x80) && !(regVal[2] & 0x2))`
+  (`mapper028.cpp:88-89`) and puNES `if (!(index & 0x02) && !(reg[2] & 0x02))`
+  (`mapper_028.c:57-59`). This was MR-1b's answer to Q-110 question 3 — AMD-021 R2-001 right,
+  Mesen's separate always-updated bit wrong — and it is now a **five-way agreement against
+  Mesen**, the strongest single result in this lot.
+- **Mirroring values 0 one-screen A, 1 one-screen B, 2 vertical, 3 horizontal** — OK
+  (`multicart.rs:499-504`); identical in FCEUX (`28.cpp:34-39`), puNES
+  (`mapper_028.c:79-93`) and Nintendulator (`mapper028.cpp:14-21`).
+- **The size mask from mode bits 5-4, and the four PRG layouts** — OK
+  (`multicart.rs:509-526`). Nestopia writes the same algebra out as sixteen explicit cases
+  (`NstBoardAction53.cpp:131-170`) and so does Nintendulator (`mapper028.cpp:23-50`); the
+  expressions differ and the banks do not, because the outer bank is always even.
+- **Power-on: outer = 63, inner = 15, mode = 0, so the last 16 KiB is at $C000** — OK
+  (`multicart.rs:480-489`), and now a **three-way agreement** rather than MR-1b's "both
+  conforming": Nestopia seeds exactly `preg[1] = 0xf`, `preg[3] = 0x3f`
+  (`NstBoardAction53.cpp:41-44`) and FCEUX seeds `outer = 63` (`28.cpp:167`). MR-28-2 can be
+  upgraded from "equivalent" to "the layout the other implementations also chose".
+- **The mapper state survives a reset** — OK, implemented under AMD-061 §3/§5 after Q-112
+  (`multicart.rs:558-566`), which is the page's "The mapper state is unchanged on reset".
+  None of the four models a reset distinct from a power-on, so there is no vote.
+
+**Test ROMs.** `holy-mapperel/testroms/M28_P512K.nes` and `M28_P512K_CR32K.nes`. Not run today.
+
+Count: 7 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 30 — UNROM 512
+
+Page: *UNROM 512* (<https://www.nesdev.org/wiki/UNROM_512>). Ours:
+`mappers/discrete.rs:546-848`, `cartridges/flash.rs`. Theirs:
+`fceux/src/boards/unrom512.cpp`, `nestopia/source/core/board/NstBoardUxRom.cpp:46-80`,
+`punes/src/core/mappers/mapper_030.c`, `nintendulator-mappers/src/iNES/mapper030.cpp`.
+
+MR-30-1 through MR-30-6 were all raised by MR-1 and five of the six fixed in MF-1. The four new
+sources mostly confirm, with one disagreement worth recording.
+
+- **The register is `NCCP PPPP`: five PRG bits, two CHR bits, one nametable bit** — OK
+  (`discrete.rs:759` masks the CHR field to two bits). Nestopia uses the same two bits
+  (`NstBoardUxRom.cpp:76`, `(data >> 5) & 0x3`) and so does Nintendulator
+  (`mapper030.cpp:15`, `(Data & 0x60) >> 5`). **FCEUX uses three** (`unrom512.cpp:60`,
+  `latche >> 5`), which on a 32 KiB CHR-RAM board reaches a bank that does not exist.
+  This build is with the page and with two of the three.
+- **Where the register lives depends on whether the board is self-flashable** — OK, and this is
+  Q-117: $8000-$FFFF on a bus-conflicting board and $C000-$FFFF with $8000-$BFFF as the flash
+  window otherwise (`discrete.rs:569-580`). FCEUX routes writes through its flash state machine
+  (`unrom512.cpp:70-77`) and Nintendulator refuses them with a diagnostic
+  (`mapper030.cpp:24-28`, "ERROR: game attempted to write to Flash ROM!"), so of the four only
+  FCEUX and puNES emulate the flash at all (`mapper_030.c:113-117`). This build does
+  (`cartridges/flash.rs`), which puts it in the better half.
+- **The four mirroring modes of header byte 6, read as bits 3 and 0 together** — OK
+  (`discrete.rs:546-564`, MR-30-1, fixed in MF-1). Nestopia reads only the two-value
+  arrangement (`NstBoardUxRom.cpp:53-57`); FCEUX applies one-screen unconditionally
+  (`unrom512.cpp:61`, `MI_0 + ((latche >> 7) & 1)`) despite its own header comment saying
+  mirroring mode 2 is what enables it (`unrom512.cpp:27`). This build is the only one of the
+  four that implements all four modes, which is what the page asks for.
+- **Submapper 4's LED register at $8000-$BFFF** — OK (`discrete.rs:577-580`, MR-30-5). None of
+  the four implements it.
+- **No work RAM** — OK (MR-30-2, fixed in MF-1).
+
+### 30-1 — which submapper gives the mapper control of horizontal/vertical — OPEN
+
+**Point.** MR-30-3 cited *UNROM 512* for "submapper 3: No bus conflicts, mapper-controlled
+horizontal/vertical nametable arrangement", and MF-1 implemented it on **submapper 3**
+(`discrete.rs:620`).
+
+**The others.** puNES implements the same behaviour on **submapper 1**
+(`mapper_030.c:129-133`: for submapper 1, register bit 7 picks vertical or horizontal; for
+everything else it falls into the byte-6 decode). FCEUX, Nestopia and Nintendulator do not
+implement a mapper-controlled H/V mode at all.
+
+**Verdict: OPEN**, one against one with three abstentions. MR-30-3 quotes the page and MF-1
+followed it, so the likeliest reading is that puNES has the submapper number wrong; but with
+only two implementations and one of them disagreeing on the *number* rather than the
+*behaviour*, the honest verdict is open.
+
+**What would settle it.** Re-reading the *UNROM 512* submapper list — specifically whether
+submapper 1 is "no bus conflicts" alone and submapper 3 "no bus conflicts plus
+mapper-controlled H/V". A correctly headered homebrew image using the mode would settle it in
+practice; the affected set is homebrew only, nothing commercial, and nothing protected.
+
+Count: 5 OK, 0 DIFFERS, 1 OPEN.
+
+---
+
+## Mapper 32 — Irem G-101
+
+Page: *INES Mapper 032* (<https://www.nesdev.org/wiki/INES_Mapper_032>). Ours:
+`mappers/iremg101.rs`. Theirs: `fceux/src/boards/32.cpp`,
+`nestopia/source/core/board/NstBoardIremG101.cpp`, `punes/src/core/mappers/mapper_032.c`,
+`nintendulator-mappers/src/iNES/mapper032.cpp`.
+
+- **$8000 and $A000 the two switchable 8 KiB PRG banks, $9000 bit 1 the swap mode, bit 0 the
+  mirroring, $B000-$B007 the eight 1 KiB CHR banks** — OK (`iremg101.rs:34-48`,
+  `iremg101.rs:85-101`). All four the same, and all four implement the swap by XOR-ing the
+  window address or by selecting between the two (`32.cpp:38-43`,
+  `NstBoardIremG101.cpp:97-98`, `mapper_032.c:88-92`, `mapper032.cpp:16-19`).
+- **Mirroring: bit 0 set = horizontal** — OK (`iremg101.rs:97-101`); FCEUX inverts into its own
+  enum to the same effect (`32.cpp:38`), Nestopia states it directly
+  (`NstBoardIremG101.cpp:113`), Nintendulator drives CIRAM A10 from PPU A11 when set
+  (`mapper032.cpp:22-24`).
+- **The register field is five bits and the board tops out at 256 KiB** — OK, equivalent;
+  MR-32-1 confirmed it.
+- **Submapper 1 (*Major League*) disables $9000 entirely** — OK (`iremg101.rs:93-95`), and
+  **this build and puNES are the only two that implement it** (`mapper_032.c:88`, where the
+  swap is forced off for submapper 1, and `mapper_032.c:105-110`, where the mirroring is
+  forced). FCEUX, Nestopia and Nintendulator let *Major League* swap its PRG layout. MF-1's fix
+  is right and now has company.
+
+### 32-1 — which one-screen page *Major League* is held on — DIFFERS, with no observable effect
+
+**Point.** The page: "Major League wants hardwired 1-screen mirroring. (CIRAM A10 is tied to
+**+5V** on this game)." CIRAM A10 held high selects the **upper** 1 KiB page.
+
+**This build.** `NametableMirroring::SingleScreenA` — the **lower** page
+(`iremg101.rs:78-80`).
+
+**The others.** puNES uses `mirroring_SCR1`, the upper page (`mapper_032.c:107`). The other
+three do not implement the case.
+
+**Verdict: DIFFERS** from the page's +5V and from the one other implementation — and
+**unobservable**, which is why it is recorded here rather than raised as a bug. With all four
+logical nametables mapped to the same physical 1 KiB page, the game writes and reads through
+the same mapping whichever page it is; the other kilobyte of CIRAM is never addressed. The
+difference could only surface through something that inspects CIRAM directly — a savestate
+compared across emulators, or this project's 3D nametable path if it ever reads the unselected
+page.
+
+**Risk of a fix.** None: one enum variant at `iremg101.rs:79`. *Major League* is the only
+affected game and it is not in the widescreen packs.
+
+Count: 4 OK, 1 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 34 — BNROM and NINA-001
+
+Page: *INES Mapper 034* (<https://www.nesdev.org/wiki/INES_Mapper_034>). Ours:
+`mappers/multicart.rs:1-110`. Theirs: `fceux/src/boards/34.cpp`,
+`nestopia/source/core/board/NstBoardAveNina.cpp`, `punes/src/core/mappers/mapper_034.c`,
+`nintendulator-mappers/src/iNES/mapper034.cpp`.
+
+- **NINA-001: $7FFD the 32 KiB PRG bank, $7FFE and $7FFF the two 4 KiB CHR banks** — OK
+  (`multicart.rs:94-99`). Identical in all four (`34.cpp:44-46`,
+  `NstBoardAveNina.cpp:38`, `mapper_034.c:94-95`, `mapper034.cpp:17-19`).
+- **BNROM: a 32 KiB bank register over $8000-$FFFF and no $7FFD-$7FFF at all** — OK
+  (MR-34-1, fixed in MF-1), and `intercept_cpu_write` returns early when the board is not a
+  NINA (`multicart.rs:90-92`). Nintendulator keeps a separate BNROM sync that only banks PRG
+  and fixes CHR-RAM (`mapper034.cpp:24-25`).
+- **Which of the two a submapper-0 dump is, decided from the CHR-ROM size** — OK, and
+  **puNES decides it exactly as this build does**: submapper 1 or (no submapper and CHR
+  present) → NINA, submapper 2 or (no submapper and no CHR) → BNROM
+  (`mapper_034.c:40-43`). That is MR-34-1's rule with the submappers added, and it is the same
+  rule Mesen uses in its factory.
+- **BNROM has no work RAM and its register has bus conflicts; the NINA boards have neither** —
+  OK (MR-34-2, the work-RAM half fixed in MF-1 and the bus-conflict half by MF-2:
+  `registry.rs:1158`, `34 => !mapper_34_is_nina(header)`).
+
+**Test ROMs.** `holy-mapperel/testroms/M34_P128K_H.nes` and `M34_P128K_CR8K_H.nes` — a NINA
+and a BNROM configuration. Not run today.
+
+Count: 4 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 41 — Caltron 6-in-1
+
+Page: *INES Mapper 041* (<https://www.nesdev.org/wiki/INES_Mapper_041>). Ours:
+`mappers/multicart.rs` (`Caltron6In1`). Theirs: `punes/src/core/mappers/mapper_041.c`;
+`fceux/src/boards/41.cpp`, `nestopia/source/core/board/NstBoardNtdec.cpp` and
+`nintendulator-mappers/src/iNES/mapper041.cpp` were not read.
+
+MF-1 fixed three findings here (1e789ca4) and puNES agrees with the result on every point I
+checked:
+
+- **The outer register is the *address* of a write in $6000-$67FF, not the value** — OK; puNES
+  stores the address (`mapper_041.c:49`).
+- **The 32 KiB PRG bank is the outer register's bits 2-0, the mirroring its bit 5, and the CHR
+  high bits its bits 4-3** — OK; puNES computes PRG from `reg[0] & 0x07`
+  (`mapper_041.c:68`), mirroring from bit 5 (`mapper_041.c:74`) and CHR from
+  `((reg[0] & 0x18) >> 1) | (reg[1] & 0x03)` (`mapper_041.c:71`).
+- **The inner CHR register at $8000-$FFFF is only writable while the outer register's bit 2 is
+  set** — OK; puNES gates it the same way (`mapper_041.c:55`).
+- **And it has a bus conflict** — puNES ANDs the written value with the PRG-ROM byte
+  (`mapper_041.c:57`). This build does **not** give mapper 41 bus conflicts
+  (`registry.rs:1105-1159` has no arm for 41). One implementation against none, and the page's
+  characteristics row was not re-read for this lot: recorded as an **OPEN** below rather than
+  asserted as a finding.
+
+### 41-1 — a bus conflict on the inner CHR register — OPEN
+
+puNES is the only source I read that ANDs the value (`mapper_041.c:57`), and I did not confirm
+a "Subject to bus conflicts" row on the *INES Mapper 041* page. The board writes its inner
+register into the $8000-$FFFF range, which is where the PRG-ROM drives, so a conflict is
+physically plausible — the same argument that put mappers 11, 66 and 78 on the unconditional
+list. **What would settle it**: reading the mapper-41 page's characteristics table, and, if the
+row is there, adding 41 beside them at `registry.rs:1156` — a one-number change with no hot-path
+cost, affecting only the Caltron 6-in-1 multicart. Mentioned here so it is not lost; this lot
+does not change code.
+
+Count: 3 OK, 0 DIFFERS, 1 OPEN.
+
+---
+
+## Mapper 64 — Tengen RAMBO-1
+
+Page: *RAMBO-1* (<https://www.nesdev.org/wiki/RAMBO-1>). Ours: `mappers/rambo1.rs`,
+`cartridges/a12_watcher.rs`. Theirs: `punes/src/core/mappers/mapper_064.c`;
+`nestopia/source/core/board/NstBoardTengen.cpp`, `fceux/src/boards/tengen.cpp` and
+`nintendulator-mappers/src/iNES/mapper064.cpp` were not read (see the note below).
+
+MR-1b is the authority here: seven findings, re-read against the page, its talk page and a
+hardware thread, with MR-64-7 fixed in MF-1 (3e3b0001) and the A12 filter length settled at 48
+dots (`a12_watcher.rs:RAMBO1_FILTER_DOTS`). That work used sources this lot cannot improve on —
+a capture-by-capture hardware investigation — so this board is re-checked rather than
+re-reviewed.
+
+- **The PRG mode swaps R6 and R15 rather than rotating three windows** — OK (MR-64-7, fixed in
+  MF-1), and puNES implements the same swap: its three 8 KiB windows take `prg[2]`, `prg[0]`,
+  `prg[1]` in the one mode and a rotation of the same three registers in the other
+  (`mapper_064.c:225-227`).
+- **A separate mirroring register, not an MMC3-style bit in the bank select** — OK; puNES keeps
+  `m064.mirroring` as its own byte (`mapper_064.c:128-129`).
+- **Two IRQ modes, scanline and cycle, with a ÷4 divider in cycle mode, a one-clock extra
+  divider tick on leaving cycle mode, and a delayed assertion** — OK, all four from MR-64-1,
+  MR-64-4 and MR-64-5, which closed against the hardware thread.
+- **Bit 0 of a 2 KiB CHR register is *not* ignored** — OK (MR-64-2), the opposite answer from
+  the MMC3's and documented as such on both pages.
+
+**Honest note on depth.** For this board I verified the points above against puNES and left
+FCEUX, Nestopia and Nintendulator unread. The reason is that MR-1b's RAMBO-1 section already
+rests on the hardware investigation thread rather than on any emulator, so a fourth and fifth
+emulator vote would not move a verdict; and the lot's remaining time was better spent on the
+boards MR-1 had left with one source. Anyone resuming should read
+`nestopia/source/core/board/NstBoardTengen.cpp` and `fceux/src/boards/tengen.cpp` against MR-64-1's
+counter algorithm if a RAMBO-1 game ever misbehaves.
+
+Count: 4 OK, 0 DIFFERS, 0 OPEN (0 re-opened).
+
+---
+
+## Mapper 71 — Camerica / Codemasters BF909x
+
+Page: *INES Mapper 071* (<https://www.nesdev.org/wiki/INES_Mapper_071>). Ours:
+`mappers/discrete.rs:471-544`. Theirs: `punes/src/core/mappers/mapper_071.c`,
+`fceux/src/boards/71.cpp` (not read), `nestopia/source/core/board/NstBoardCamerica.cpp`
+(not read),
+`nintendulator-mappers/src/iNES/mapper071.cpp` (not read).
+
+MR-71-1 and MR-71-2 were both closed in MR-1b, the first **against Mesen**. puNES is a third
+vote and it goes this build's way on both:
+
+- **The one-screen polarity: register bit 4 set selects the *second* CIRAM page** — OK, and
+  confirmed. The page prints the bit as "Select 1 KiB CIRAM bank", so set = the second page =
+  `SingleScreenB` (`discrete.rs:495-500`). puNES maps bit 4 set to `mirroring_SCR1`, the upper
+  page (`mapper_071.c:72-79`). Mesen inverts it (MR-71-1). **Two to one, with the page, and
+  the next lot should still not "fix" this to match Mesen.**
+- **The bank register is at $C000-$FFFF and the mirroring register at $9000** — OK
+  (`discrete.rs:532-540`); puNES decodes exactly those two ranges and nothing else
+  (`mapper_071.c:45-61`).
+- **The $9000 mirroring register exists only on *Fire Hawk*** — a small difference. The page
+  notes a submapper has been allocated for it; puNES gates the register on **submapper 1**
+  (`mapper_071.c:47-51`, `mapper_071.c:73`), while this build engages it on the first $9000
+  write whatever the header says (`discrete.rs:533-535`). Equivalent for *Fire Hawk*, which
+  writes $9000; a non-*Fire Hawk* mapper-71 game that wrote $9000 would start driving its
+  mirroring here and not on puNES. MR-71-2 already called the missing submapper harmless and
+  that still holds, so this stays **OK**.
+
+Count: 3 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mappers 87 and 101 — Jaleco J87
+
+Pages: *INES Mapper 087* (<https://www.nesdev.org/wiki/INES_Mapper_087>), *INES Mapper 101*
+(<https://www.nesdev.org/wiki/INES_Mapper_101>). Ours: `mappers/multicart.rs:609-690`
+(`JalecoJ87`). Theirs: `punes/src/core/mappers/mapper_087.c` and `mapper_101.c`,
+`fceux/src/boards/datalatch.cpp:324-333` (mapper 87).
+
+- **Mapper 87: the CHR bank is the two low bits of the value, **swapped*** — OK. puNES computes
+  `((reg & 0x01) << 1) | ((reg & 0x02) >> 1)` (`mapper_087.c:60`) and FCEUX
+  `((latche >> 1) & 1) | ((latche << 1) & 2)` (`datalatch.cpp:327`) — the same swap by two
+  routes, and MR-1b confirmed it against the page. PRG is not banked in any of the three.
+- **Mapper 101: the register is at $6000-$7FFF only, and it uses the whole byte** — OK as
+  **the spec leaves it**, and this is Q-110 question 4. The page and puNES
+  (`mapper_101.c:62`, the whole byte) agree with Mesen against AMD-021 R2-003's `value & 3`;
+  MR-1b recorded that it is the amendment's reading that costs something, since it caps CHR at
+  32 KiB on a board the page calls an "oversize extension" of J87. puNES is a second vote for
+  the page. **Still a spec question and not a bug**, exactly as MR-1b left it: R2-003 carries an
+  acceptance criterion and only its owner can change it. Recorded here as an **OPEN** so the
+  new vote reaches Q-110.
+- **FCEUX decodes mapper 87 over $6000-$FFFF** (`datalatch.cpp:333`) where the page gives
+  $6000-$7FFF; this build uses the page's range. One against one, page on this build's side.
+
+Count: 2 OK, 0 DIFFERS, 1 OPEN (a vote added to Q-110, not a new question).
+
+---
+
+## Mapper 156 — Daou Infosys DIS23C01
+
+Page: *INES Mapper 156* (<https://www.nesdev.org/wiki/INES_Mapper_156>). Ours:
+`mappers/daou306.rs`. Theirs: `punes/src/core/mappers/mapper_156.c`.
+
+MR-1b found one new finding here and MF-1 fixed it (97c274ff). puNES agrees on each point I
+checked:
+
+- **16 KiB switchable PRG at $8000 with the last 16 KiB fixed, eight 1 KiB CHR banks** — OK;
+  puNES the same (`mapper_156.c:86-92`).
+- **The mirroring register, and its power-on value** — OK. puNES seeds `m156.mirroring = 2` at
+  power-on and then takes `value & 0x01` from the register (`mapper_156.c:42`,
+  `mapper_156.c:73`). This is the finding MF-1 fixed: the board powers up in **four-screen**
+  (puNES's 2) rather than following the header, and only a register write moves it. Confirmed.
+
+Count: 2 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 225 — the 52/64-in-1 multicart
+
+Page: *INES Mapper 225* (<https://www.nesdev.org/wiki/INES_Mapper_225>). Ours:
+`mappers/multicart.rs:210-307`. Theirs: `punes/src/core/mappers/mapper_225.c`,
+`fceux/src/boards/225.cpp` (not read).
+
+- **Everything is in the address of the write: the 16/32 KiB mode bit, the bank field and the
+  CHR field** — OK (`multicart.rs:303-307` latches the address). puNES does the same, splitting
+  the latched address into a 16 KiB-or-32 KiB choice, a bank and a CHR bank
+  (`mapper_225.c:76-83`).
+- **The 32 KiB mode drops the low bit of the bank** — OK; puNES `bank >> 1`
+  (`mapper_225.c:79`).
+- **The CHR bank takes a high bit from address bit 14** — OK; puNES
+  `((reg & 0x4000) >> 8) | (reg & 0x3F)` (`mapper_225.c:83`).
+- **The four nibbles of RAM at $5800-$5803, mirrored through $5FFF** — OK
+  (`multicart.rs:289-301`), which was MR-225-1 and MF-1 fixed it. puNES has no equivalent, so
+  this build and Mesen are the only two with it.
+
+Count: 4 OK, 0 DIFFERS, 0 OPEN.
+
+---
+
+## Mapper 228 — Action 52
+
+Page: *INES Mapper 228* (<https://www.nesdev.org/wiki/INES_Mapper_228>). Ours:
+`mappers/multicart.rs` (`Action52`). Theirs: `punes/src/core/mappers/mapper_228.c`,
+`fceux/src/boards/228.cpp` (not read).
+
+- **Both the address and the value matter: the address carries the mode and the PRG and CHR
+  high bits, the value the CHR low bits** — OK. puNES latches both
+  (`mapper_228.c:67-68`), takes the bank from `(reg[0] >> 6) & 0x7F`
+  (`mapper_228.c:80`), the 16-or-32 KiB choice from address bit 5 (`mapper_228.c:82-86`) and
+  the CHR bank from `((reg[0] << 2) & 0x3C) | (reg[1] & 0x03)` (`mapper_228.c:90`). Same
+  fields as this build.
+- **The mirroring bit** — OK; puNES has it as its own fix (`mapper_228.c:71`).
+
+Count: 2 OK, 0 DIFFERS, 0 OPEN.
+
 <!-- NEXT-BOARD -->
