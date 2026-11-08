@@ -59,24 +59,94 @@ addressing applies to PPU **writes**).
 
 ### The six steps
 
+§7.2's steps 1 and 2 are **one commit**: the device is reachable only from the board, so a tree
+with the first and not the second has a module nothing calls. The six below are the lot's own.
+
 - [x] **0/6** the plan — this note.
-- [ ] **1/6** `Eeprom93C66`: the Microwire device behind `board-164`. The datasheet's seven
-      instructions (READ, WRITE, ERASE, ERAL, WRAL, EWEN, EWDS), the start bit, nine address bits,
-      the dummy zero before read data, sequential read, the 93C-variant commit edge, the
-      EWEN/EWDS latch, and RDY/BSY on DO. Bytes in a caller-owned slice, `Eeprom24C0X`'s shape.
-      Save-state block. Q-170.
-- [ ] **2/6** `Pec9588`: the five registers, both PRG modes, the two fixed-bank shapes, the
-      $5100 outer bits, mirroring, the 1 bpp CHR addressing and the Microwire port. A
-      `DecodeBoard` variant; `registry.rs` arm, `SUPPORTED_MAPPERS` entry, `board_memory_sizes`
-      row, `battery_offset` arm, both PPU-bus lists, the `board-164` feature.
-- [ ] **3/6** the tests the census lists from the page, plus §7.1's three common things in every
+- [x] **1/6** the Microwire device and the board, with Q-170.
+- [ ] **2/6** the tests the census lists from the page, plus §7.1's three common things in every
       configuration the lot adds.
-- [ ] **4/6** `BOARD-FEATURES.md` row; fmt and clippy `-D warnings` in the four configurations
+- [ ] **3/6** `BOARD-FEATURES.md` row; fmt and clippy `-D warnings` in the four configurations
       (default, `--no-default-features`, `--features parked-boards`, `board-164` alone).
-- [ ] **5/6** the callgrind campaign against `909c0edd`: PR-1's thirteen ROMs and the five
+- [ ] **4/6** the callgrind campaign against `909c0edd`: PR-1's thirteen ROMs and the five
       level-2 games, **+0.02 % per ROM on each ROM's total**, and the feature decision.
-- [ ] **6/6** golden-core byte-identical over the 98 originals; the full
-      `--include-ignored --no-fail-fast` suite with both ROM roots; the census note and the
-      journal.
+- [ ] **5/6** golden-core byte-identical over the 98 originals, and the full
+      `--include-ignored --no-fail-fast` suite with both ROM roots.
+- [ ] **6/6** the census note, the journal, the close.
 
 [PROGRESS] MF-UNL-10 step 0/6 done: the plan
+
+## Step 1 — the Microwire device and the board
+
+### `Eeprom93C66` (`rust/crates/zax-nes/src/cartridges/mappers/eeprom93c66.rs`)
+
+Table 1-4 of DS20001795F in full — seven instructions, a start bit, a two-bit opcode, **nine**
+address bits and eight data bits on the two that write:
+
+| instruction | opcode | address field | data | what it does |
+| --- | --- | --- | --- | --- |
+| READ | `10` | `A8..A0` | — | a dummy zero, then `D7..D0`, then the next word, sequentially while CS is high |
+| WRITE | `01` | `A8..A0` | `D7..D0` | the word, committed on the **rising edge of CLK on the last data bit** (the 93C variant) |
+| ERASE | `11` | `A8..A0` | — | the word to `$FF` |
+| ERAL | `00` | `10xxxxxxx` | — | the array to `$FF` |
+| WRAL | `00` | `01xxxxxxx` | `D7..D0` | the array to the datum |
+| EWEN | `00` | `11xxxxxxx` | — | programming enabled |
+| EWDS | `00` | `00xxxxxxx` | — | programming disabled, which is the power-on state |
+
+The four behavioural claims, each quoted in the module note: the start bit is "CS and DI … both
+high with respect to the positive edge of CLK for the first time"; "a dummy zero bit precedes the
+8-bit … output string" and "sequential read is possible when CS is held high"; the 93C commit edge
+above, which is why a game that never lowers CS still saves; and "the 93XX66A/B/C powers up in the
+Erase/Write Disable (EWDS) state", so a WRITE before an EWEN changes nothing.
+
+The bytes are **not** in the type — `Eeprom24C0X`'s shape exactly — so the two EEPROM boards share
+one persistence path and this one's reset cannot wipe a save.
+
+### `Pec9588` (`…/mappers/pec9588.rs`)
+
+| port | mask | what |
+| --- | --- | --- |
+| `$5000` w | `$FF00` | `CSQM PPPp` — 1 bpp enable, fixed-bank select, PRG A18, mode bit, A17..A14 |
+| `$5100` w | `$FF00` | `.... ..PP` — PRG A20..A19 |
+| `$5200` w | `$FF00` | `.T.S .C.D` — DI, CLK, chip 1 CS, chip 2 CS |
+| `$5300` w | `$FF00` | `M... ....` — mirroring when `$5000.4` is set |
+| `$5500` r | `$FF00` | `.... .A..` — DAT in, **inverted** |
+
+The bit order of the two PRG modes is the page's own, and the page proves it twice: `111p0` read
+A18-first is `$1C`/`$1E`, the pair it names, where A14-first would be 7/15; and `11111` is bank
+`$1F`, which its note about the reset vectors being "at the end of 16 KiB bank #31" confirms from
+the game's side. So the 16 KiB bank is `A14 | A15<<1 | … | A20<<6` and in BxROM mode the same
+nibble is A18..A15, i.e. the 32 KiB bank number itself.
+
+**1 bpp mode is `ChrWindowBoard`'s latch with a second line on the same edge**: CHR A12 from PPU
+A9 and CHR A3 from PPU A0, "both latched on last rise of PPU A13". Three consequences:
+
+* mapper 164 joins **both** of `Cartridge`'s PPU-address-bus lists, for mappers 96/162/163's
+  reason and not an IRQ's — the board has none;
+* **no window moves on the latch**, unlike those three: A3 is below the 1 KiB window granularity,
+  so the substitution is in `Pec9588::chr_address` on `ppu_peek` and `ppu_write` and
+  `on_ppu_address_bus` stores two bits and returns;
+* `chr_peek_view` answers `None` while the mode is on (Q-170 §2.4).
+
+### What it cost the rest of the library
+
+**No `Board` discriminant**: one `DecodeBoard` variant. Three forwards grow their `cfg` by this
+feature — `prg_ram_window` (second board), `try_read_prg` (fifth) and `on_ppu_address_bus`
+(fourth) — and all three are behaviour-neutral for the boards already there, which take `Mapper`'s
+own default as the un-forwarded dispatch gave them. `Pec9588::ppu_peek` is the one new *body* in a
+per-fetch dispatch and is `#[inline(never)]`.
+
+`registry.rs`: the `SUPPORTED_MAPPERS` entry, the `create_board` arm, the `board_memory_sizes` row
+(2 KiB + 512) and a `battery_offset` arm — that function becomes a `match`, mapper 1's SOROM case
+unchanged.
+
+`cargo build -p zax-nes` and `cargo clippy -p zax-nes --all-targets -- -D warnings` clean;
+`cargo test -p zax-nes --test mapper_tests` **341 passed, 0 failed**, the four sweeps included
+(`req_core_100_every_required_mapper_is_registered` with the new row,
+`req_core_102_any_other_mapper_is_refused`,
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+`req_core_090_the_mapper_state_survives_a_save_and_restore`).
+
+The generic save-state sweep **dirties nothing of this board** — its ports are at `$5000-$5500`
+and the sweep writes `$8000-$E001` and `$6000` — which is the MF-UNL-2 situation and what step 2's
+own round-trip test is for.

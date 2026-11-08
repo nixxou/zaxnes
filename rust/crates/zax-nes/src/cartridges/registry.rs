@@ -47,6 +47,8 @@ use super::mappers::Nina03;
 use super::mappers::Nrom;
 #[cfg(feature = "board-96")]
 use super::mappers::OekaKids;
+#[cfg(feature = "board-164")]
+use super::mappers::Pec9588;
 #[cfg(feature = "board-133")]
 use super::mappers::Sachen72008;
 #[cfg(feature = "board-sachen8259")]
@@ -292,6 +294,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     162,
     #[cfg(feature = "board-163")]
     163,
+    #[cfg(feature = "board-164")]
+    164,
     #[cfg(feature = "board-jv001")]
     172,
     #[cfg(feature = "board-jv001")]
@@ -690,6 +694,24 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             chr_ram: Some(ChrWindowBoard::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
+        // MF-UNL-10 step 2, nesdev ("INES Mapper 164"): the one board here with **two** memories
+        // in `prg_ram` at once. Its *Banks* section gives "CPU $6000-$7FFF: 0-8 KiB unbanked
+        // PRG-RAM, not battery-backed" and "PPU $0000-$1FFF: 8 KiB unbanked CHR-RAM", and its
+        // opening paragraph gives the save medium: "PRG-RAM is never battery-backed; all games
+        // save the game state to a 93C66 512-byte serial EEPROM."
+        //
+        // So the allocation is the volatile chip -- 2 KiB, "all known carts mount either no or a
+        // 2 KiB RAM chip which is then mirrored three times across the respective address range"
+        // (Q-170) -- plus the EEPROM's 512 bytes behind it, and `battery_offset` below puts
+        // REQ-CORE-095's battery slice at the EEPROM alone. That is the `Eeprom24C0X` layout of
+        // mappers 157 and 159 with a volatile chip in front of it, which is what the MMC1's SOROM
+        // gave `battery_offset` its second parameter for.
+        #[cfg(feature = "board-164")]
+        164 => BoardMemorySizes {
+            prg_ram: Some(Pec9588::PRG_RAM_SIZE),
+            chr_ram: Some(Pec9588::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 178"), whose *Banks* section is the only statement of this
         // board's memories -- the page has no capacity table at all:
         //
@@ -910,10 +932,15 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
 /// `mr_1_5_an_sxrom_keeps_its_whole_ram_battery_backed` pin both halves.
 #[must_use]
 pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
-    if mapper == 1 && prg_ram_size == 2 * BankWindows::PRG_WINDOW_SIZE {
-        BankWindows::PRG_WINDOW_SIZE
-    } else {
-        0
+    match mapper {
+        1 if prg_ram_size == 2 * BankWindows::PRG_WINDOW_SIZE => BankWindows::PRG_WINDOW_SIZE,
+        // MF-UNL-10 step 2: mapper 164's PRG-RAM is a volatile chip the CPU addresses followed by
+        // the 512 bytes of its 93C66, which is the only non-volatile medium on the board -- "all
+        // games save the game state to a 93C66 512-byte serial EEPROM". So the battery slice is
+        // the EEPROM and not the RAM, and the save file is 512 bytes whatever the RAM chip is.
+        #[cfg(feature = "board-164")]
+        164 => Pec9588::VOLATILE_RAM_SIZE,
+        _ => 0,
     }
 }
 
@@ -1292,6 +1319,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             ChrWindowKind::WaixingFs304,
         ))),
+        // MF-UNL-10 step 2: the 东达 (Dōngdá) PEC-9588 / 燕城 (Yànchéng) cy2000-3, whose five
+        // ports are at $5000-$53FF and $5500 and whose save medium is a 93C66 serial EEPROM over
+        // Microwire. The **fourth** board of this enum whose CHR addressing is latched off the
+        // rise of PPU A13, after 96, 163 and 162 -- and the first to latch two lines on it, CHR
+        // A12 from PPU A9 and CHR A3 from PPU A0, which is the page's 1 bpp video mode.
+        #[cfg(feature = "board-164")]
+        164 => Board::DecodeBoard(DecodeBoard::Pec9588(Pec9588::new(memory))),
         // MF-UNL-5 step 3: the 外星 (Wàixīng) FS305 / 南晶 (Nánjīng) NJ0430, whose four
         // registers are at **$4800-$4803** and whose CHR is unbanked -- the board of this lot that
         // its section heading does not describe (Q-154). Its own mechanism is the banked PRG-RAM

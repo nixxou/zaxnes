@@ -18,6 +18,7 @@
     feature = "board-149",
     feature = "board-162",
     feature = "board-163",
+    feature = "board-164",
     feature = "board-178",
     feature = "board-190",
     feature = "board-218",
@@ -48,6 +49,8 @@ use super::Mapper;
 use super::Nina03;
 #[cfg(feature = "board-96")]
 use super::OekaKids;
+#[cfg(feature = "board-164")]
+use super::Pec9588;
 #[cfg(feature = "board-133")]
 use super::Sachen72008;
 #[cfg(feature = "board-sachen8259")]
@@ -199,6 +202,11 @@ pub enum DecodeBoard {
     /// Mapper 218, the single-chip homebrew board of *Magic Floor*.
     #[cfg(feature = "board-218")]
     MagicFloor(MagicFloor),
+    // Appended by MF-UNL-10 step 2, the lot's one board: the fourth of this enum whose CHR
+    // addressing is latched off the PPU address bus, and the first to carry a serial EEPROM.
+    /// Mapper 164, the 东达 (Dōngdá) PEC-9588 and its 93C66 Microwire EEPROM.
+    #[cfg(feature = "board-164")]
+    Pec9588(Pec9588),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -246,6 +254,8 @@ macro_rules! inner {
             DecodeBoard::Sachen8259($b) => $body,
             #[cfg(feature = "board-218")]
             DecodeBoard::MagicFloor($b) => $body,
+            #[cfg(feature = "board-164")]
+            DecodeBoard::Pec9588($b) => $body,
         }
     };
 }
@@ -329,7 +339,12 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s own default — the whole chip at offset zero — which is what the un-forwarded
     /// dispatch gave the variant.
-    #[cfg(feature = "board-178")]
+    ///
+    /// **And mapper 164 in MF-UNL-10 step 2**, the second board here to want it and the only one
+    /// whose window is *shorter* than its PRG-RAM: the 512 bytes of its 93C66 sit behind the
+    /// volatile chip in the same `Vec`, where REQ-CORE-095's battery slice finds them, and the
+    /// CPU's $6000-$7FFF window must stop at the volatile chip and mirror inside it.
+    #[cfg(any(feature = "board-164", feature = "board-178"))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
     }
@@ -356,9 +371,12 @@ impl Mapper for DecodeBoard {
     /// **And mapper 163 in MF-UNL-5 step 1**, whose feedback register is read at $5500-$5501 under
     /// mask $F300 — the fourth board of the enum to want the hook and the third publisher's
     /// protection scheme to be a read below $8000.
+    /// **And mapper 164 in MF-UNL-10 step 2**, whose Microwire port is read at $5500 under the
+    /// same $FF00 mask its four write ports use.
     #[cfg(any(
         feature = "board-143",
         feature = "board-163",
+        feature = "board-164",
         feature = "board-jv001",
         feature = "board-sachen-8reg"
     ))]
@@ -381,7 +399,14 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s empty default, which is what the un-forwarded dispatch did for the whole
     /// variant.
-    #[cfg(any(feature = "board-96", feature = "board-162", feature = "board-163"))]
+    /// **And mapper 164 in MF-UNL-10 step 2**, which latches *two* lines on the same rise of
+    /// PPU A13 — CHR A12 from PPU A9, as 162 and 163 do, and CHR A3 from PPU A0.
+    #[cfg(any(
+        feature = "board-96",
+        feature = "board-162",
+        feature = "board-163",
+        feature = "board-164"
+    ))]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }

@@ -208,6 +208,12 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
     //   heading (Q-154) -- behind `board-178` (MF-UNL-5 step 3);
+    // * 164, the 东达 PEC-9588 / 燕城 cy2000-3: five ports at $5000/$5100/$5200/$5300/$5500, two
+    //   PRG banking modes with two shapes of semi-fixed bank, mirroring from $5300 behind the mode
+    //   bit, a **93C66 512-byte serial EEPROM over Microwire** -- a third EEPROM shape beside
+    //   `board-eeprom`'s two I2C parts, sharing its persistence path and not its code -- and the
+    //   **1 bpp video mode**, CHR A3 from PPU A0 and CHR A12 from PPU A9 "both latched on last
+    //   rise of PPU A13" -- behind `board-164` (MF-UNL-10, Q-170);
     //
     // **The expected list is built and not written**, because the board features decide which
     // numbers the registry advertises. The numbers of REQ-CORE-100's own table are in no
@@ -234,7 +240,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 106] = [
+    let additions: [(i32, bool); 107] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -316,6 +322,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (159, eeprom),
         (162, cfg!(feature = "board-162")),
         (163, cfg!(feature = "board-163")),
+        (164, cfg!(feature = "board-164")),
         (172, jv001),
         (173, jv001),
         (178, cfg!(feature = "board-178")),

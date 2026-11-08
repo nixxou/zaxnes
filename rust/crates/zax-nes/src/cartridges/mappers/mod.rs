@@ -39,6 +39,8 @@ mod decode_boards;
 mod discrete;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
+#[cfg(feature = "board-164")]
+mod eeprom93c66;
 mod fme7;
 #[cfg(feature = "board-huang1")]
 mod huang1;
@@ -89,6 +91,8 @@ mod nina03;
 mod nrom;
 #[cfg(feature = "board-96")]
 mod oeka_kids;
+#[cfg(feature = "board-164")]
+mod pec9588;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -158,6 +162,8 @@ pub use discrete::{
 };
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
+#[cfg(feature = "board-164")]
+pub use eeprom93c66::Eeprom93C66;
 pub use fme7::Fme7;
 #[cfg(feature = "board-huang1")]
 pub use huang1::Huang1;
@@ -216,6 +222,8 @@ pub use nina03::Nina03;
 pub use nrom::Nrom;
 #[cfg(feature = "board-96")]
 pub use oeka_kids::OekaKids;
+#[cfg(feature = "board-164")]
+pub use pec9588::Pec9588;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};

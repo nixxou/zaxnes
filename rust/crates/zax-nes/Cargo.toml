@@ -56,6 +56,7 @@ default = [
     "board-jy-asic",
     "board-163",
     "board-162",
+    "board-164",
     "board-178",
     "board-268",
     "board-sachen8259",
@@ -761,6 +762,29 @@ board-cony = []
 # enum already carries an `Mmc3Board` inline -- and no new `Board` discriminant. Both hooks it needs
 # are already forwarded there for the J.Y. ASIC and the Cony board.
 board-91 = []
+
+# Mapper 164, the 东达 (Dōngdá) PEC-9588 *Pyramid Educational Computer* and the 燕城 (Yànchéng)
+# cy2000-3 board (MF-UNL-10). Six originals the census counts: *Final Fantasy 太空戰士 V* (G-003),
+# *大話西游* (G-004), *櫻桃小丸子* (G-005), *岳飛傳* (G-006), *Dark Seed - 黑暗之蛊* (G-009) and
+# *口袋精靈: 金* (Pokémon: Gold Edition).
+#
+# **An L in the census for two mechanisms, and both are the board's own.** First a **93C66
+# 512-byte serial EEPROM over Microwire** — a third EEPROM shape beside `board-eeprom`'s two I²C
+# parts and necessarily a second type, there being no framing in common between a two-wire bus with
+# START conditions and a three-wire one with a chip select and a start bit (Q-170). It shares what
+# matters instead: the **persistence path**, its 512 bytes living in `prg_ram` behind
+# `registry::battery_offset` as `Eeprom24C0X`'s do, so neither EEPROM board's save format moves.
+# Second the **1 bpp video mode**, which takes CHR A3 from PPU A0 and CHR A12 from PPU A9, "both
+# latched on last rise of PPU A13" — mapper 163's mechanism with a second line on the same edge,
+# and the reason 164 is in both of `Cartridge`'s PPU-address-bus lists.
+#
+# One `DecodeBoard` variant and **no `Board` discriminant**; `Mapper::prg_ram_window` forwarded
+# there for the second time, `try_read_prg` for the fifth and `on_ppu_address_bus` for the fourth.
+# `Pec9588::ppu_peek` is the one new *body* in a per-fetch dispatch, out of line for the reason
+# every board of that shape has carried `#[inline(never)]` since MF-6a step 1.
+#
+# See `docs/review/BOARD-FEATURES.md` for the measured cost and `docs/progress/MF-UNL-10.md`.
+board-164 = []
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games

@@ -487,6 +487,11 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 158
             | 162
             | 163
+            // MF-UNL-10 step 2: mapper 164 latches CHR A12 from "PPU A9 … on last rise of PPU
+            // A13" exactly as 162 and 163 do, and CHR A3 from PPU A0 on the same rise -- its
+            // 1 bpp video mode. In both lists for those two numbers' reason, and it has no IRQ
+            // either. See `Pec9588`'s own note.
+            | 164
             | 182
             | 187
             | 189
@@ -533,6 +538,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 158
             | 162
             | 163
+            // MF-UNL-10 step 2: mapper 164's two CHR latches; see the list above.
+            | 164
             | 182
             | 187
             | 189
