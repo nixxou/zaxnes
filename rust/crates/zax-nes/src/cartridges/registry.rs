@@ -194,6 +194,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     107,
     #[cfg(feature = "board-111")]
     111,
+    #[cfg(feature = "board-112")]
+    112,
     #[cfg(feature = "board-mmc3-scramble")]
     114,
     #[cfg(feature = "board-mmc3-scramble")]
@@ -746,6 +748,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // in $6000-$7FFF can reach a register of this family. The header decides, as it does for
         // mapper 97 (MF-UNL-1 step 1).
         //
+        // **Mapper 112 is deliberately absent**, and the reason is mapper 97's: its page has no
+        // capacity table at all, so it documents no PRG-RAM and does not say the board has none
+        // either, and nothing forces the question -- all three of its ports are at $8000, $A000
+        // and $E000, above the window. The header decides (MF-UNL-7 step 2). **It is not on the
+        // five Namco numbers' arm above**, although it shares their board: that arm is the Namco
+        // 108 page's `PRG RAM: None` and its *Magical Puzzle Popils* exception, and neither
+        // sentence is on mapper 112's page.
+        //
         // **Mappers 107, 143, 144, 145 and 149 are deliberately absent too** (MF-UNL-3 steps 2
         // and 3), and again for mapper 97's reason: not one of their pages documents any
         // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
@@ -937,6 +947,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // `Namcot108`'s own note on why the differences are fields and not `const` parameters.
         #[cfg(feature = "board-namcot108")]
         76 | 88 | 95 | 154 | 206 => Board::Namcot108(Namcot108::new(memory, mapper)),
+        // MF-UNL-7 step 2: mapper 112, which its page calls "quite similar to iNES Mapper 206 ...
+        // however, the registers appears to be scrambled a bit". The scramble is in the **ports
+        // and the register order** and nothing else, so it is one `bool` on the board above and
+        // not a board: `Namcot108::write_register_112` has the rotation, the three ports and the
+        // two things the page does not say (Q-161).
+        #[cfg(feature = "board-112")]
+        112 => Board::Namcot108(Namcot108::new(memory, mapper)),
         // MF-6a step 2: five boards that are a register decode and nothing else, sharing one
         // `Board` discriminant. `SmallBoard`'s note has the measurement that put them there.
         #[cfg(feature = "board-small-boards")]

@@ -43,7 +43,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **0/9** — the plan: this file.
 - [x] **1/9** — `board-sachen8259`: the index/data pair, registers 0-5 and 7, the per-variant CHR
   shift, the four mirroring modes and the CHR-RAM board.
-- [ ] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
+- [x] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
 - [ ] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
 - [ ] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
 - [ ] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
@@ -160,3 +160,87 @@ configurations (default, `--no-default-features`, `--features parked-boards`,
 (282 before this step, plus the nine this step adds — eight tests and the sweep's four new rows),
 109/0/0 with the feature alone, 102/0/0 with no features, 291/0/0 with `parked-boards`; the three
 latch sweeps of `cartridges::tests` pass in every one.
+
+---
+
+## Step 2 — mapper 112, the 206 with its ports split and its order rotated
+
+`board-112`, in `default`, implying `board-namcot108`. **No new module, no new `Board` variant, no
+new `DecodeBoard` variant and no new savestate shape**: one `bool` on `Namcot108`, one function
+beside its `write_register`, one `SUPPORTED_MAPPERS` entry, one `create_board` arm and a note in
+`board_memory_sizes` saying why there is no row.
+
+### Why it is a parameter and not a board
+
+The page's own sentence is the whole argument:
+
+> This mapper is quite similar to iNES Mapper 206, which resembles an simplified MMC3; however,
+> the registers appears to be scrambled a bit.
+
+And the scramble turns out to be **entirely above the register file**. Below it — the two 8 KiB
+PRG windows, the last two fixed to the end, the two 2 KiB CHR windows and the four 1 KiB ones —
+the board *is* the 206, window for window, so `Namcot108::update_banks` is reused to the line and
+the savestate block is the same eight bank bytes plus the select that MF-6a step 1 wrote. That is
+the shape the lot instruction asks for by name ("reuse it through parameters **without** moving the
+existing boards' hot path or save-state format").
+
+**With `board-112` off, `Namcot108` is byte for byte what MF-6a step 1 shipped**: the field, the
+function and the branch are all behind the feature, so the five Namco numbers cannot pay for a
+sixth that is not theirs.
+
+### The two halves of the scramble
+
+**The ports.** Three under the page's own mask `$E001`, where the 206 has an even/odd pair:
+
+```text
+Bank select ($8000)     Bank data ($A000)     Nametable arrangement ($E000)
+xxxx xRRR               DDDD DDDD             xxxx xxxN
+```
+
+$8001, $A001, $C000, $C001 and $E001 are inside that mask and are **not** registers: the page
+names three addresses and the decode answers three.
+
+**The order — a rotation by six.** `RRR` names the 206's `(RRR + 6) mod 8`:
+
+| `RRR` | the page's own line | the 206's register |
+| ---: | --- | ---: |
+| 0 | 8 KB PRG ROM bank at $8000-$9FFF | R6 |
+| 1 | 8 KB PRG ROM bank at $A000-$BFFF | R7 |
+| 2 | 2 KB CHR bank at PPU $0000-$07FF | R0 |
+| 3 | 2 KB CHR bank at PPU $0800-$0FFF | R1 |
+| 4-7 | 1 KB CHR bank at PPU $1000 / $1400 / $1800 / $1C00 | R2-R5 |
+
+`req_core_102_mapper_112_rotates_the_206s_register_order_by_six` is the census's test in both
+directions: eight bytes through mapper 112's ports at its own indices give exactly the windows
+eight bytes through a **mapper 206** give at the rotated indices, and the same eight written
+unrotated give something else (`[4, 6, 14, 15]` / `[20, 21, 20, 21, 22, 23, 5, 9]`, the PRG banks
+landing where the CHR registers belong).
+
+### Q-161: the two things the page does not say
+
+* **$C000-$DFFF.** The page lists eight selects covering two PRG windows and the whole of CHR, and
+  says nothing about the upper 16 KiB. The 206's "the last two 8KiB banks [are] fixed to the end"
+  is taken: it is the board this one is "quite similar to", and a board with no vectors cannot run.
+* **the low bit of the two 2 KiB CHR selects.** The 206's page is explicit that "only bits 5-1
+  exist for 2KB CHR banks"; this one gives the data port a whole byte and uses the MMC3's own
+  wording, "Select 2 KB CHR bank". The 206's rule is taken, because it is a property of the
+  silicon the page says this is — the register drives CHR A11 upwards and the window's own A10
+  comes from the PPU. `q_161_mapper_112_ignores_the_low_bit_of_its_two_2_kib_chr_selects` pins
+  both sides: selects 2 and 3 ignore bit 0, selects 4-7 do not.
+
+### One thing it does say, worth quoting
+
+> Nametable arrangement (0: horizontal (A10); 1: vertical (A11))
+
+The parentheses settle it. `horizontal (A10)` is CIRAM A10 driven from **PPU A10**, which is this
+core's `NametableMirroring::Vertical` — the two logical tables distinct across A10 — so the
+numbering is the MMC3's own "0: vertical; 1: horizontal" after all and the word "horizontal" is
+about the *arrangement of the screens* rather than the mirroring. The test asserts both values.
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-112`). `mapper_tests` **295/0/0** by default, 114/0/0 with
+the feature alone, 102/0/0 with no features, 295/0/0 with `parked-boards`; the three latch sweeps
+pass in every one.

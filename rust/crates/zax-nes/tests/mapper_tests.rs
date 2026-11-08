@@ -158,6 +158,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     // * 162, the 外星 (Waixing) FS304, the same four ports and the same CHR-RAM latch with a PRG
     //   composition of its own -- one `ChrWindowKind` and **no** second variant -- behind
     //   `board-162` (MF-UNL-5 step 2);
+    // * 112, the board its page calls "quite similar to iNES Mapper 206 ... however, the registers
+    //   appears to be scrambled a bit" -- three ports at $8000/$A000/$E000 and the 206's eight
+    //   register indices rotated by six, which is **one `bool` on `Namcot108`** and not a board --
+    //   behind `board-112` (MF-UNL-7 step 2, Q-161);
     // * 137, 138, 139 and 141, the Sachen 8259 -- one chip with four wirings (the 8259D, B, C and
     //   A, in that order of number), an index/data pair at $4100/$4101 under mask $C101 and a
     //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
@@ -191,7 +195,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 96] = [
+    let additions: [(i32, bool); 97] = [
         (19, true),
         (24, true),
         (26, true),
@@ -234,6 +238,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (105, cfg!(feature = "board-105")),
         (107, cfg!(feature = "board-107")),
         (111, cfg!(feature = "board-111")),
+        (112, cfg!(feature = "board-112")),
         (114, scramble),
         (115, scramble),
         (116, cfg!(feature = "board-116")),
@@ -11146,4 +11151,197 @@ fn req_core_090_the_sachen_8259_survives_a_save_and_restore() {
         assert_eq!(pages, nametable_pages(&core), "mapper {mapper}");
         assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
     }
+}
+
+// ------------------------------------------- mapper 112, the 206 with its ports split,
+// ------------------------------------------- MF-UNL-7 step 2
+
+/// Mapper 112's idiom: an index at **$8000** and the byte at **$A000**, where the 206 has an
+/// even/odd pair at $8000/$8001 (nesdev, "INES Mapper 112").
+#[cfg(feature = "board-112")]
+fn m112_write(core: &mut NesCore, register: u8, value: u8) {
+    core.mapper_write(0x8000, register);
+    core.mapper_write(0xA000, value);
+}
+
+/// "Quite similar to iNES Mapper 206 … however, the registers appears to be scrambled a bit", and
+/// the scramble is a **rotation by six**: `RRR` names the 206's `(RRR + 6) mod 8`, so 0 and 1 are
+/// the two PRG windows where the 206 has them last, and 2-7 are the CHR registers where the 206
+/// has them first.
+///
+/// The test is the census's: the scrambled order produces a 206's bank layout, and the
+/// unscrambled order does not (MF-UNL-7 step 2).
+#[cfg(all(feature = "board-112", feature = "board-namcot108"))]
+#[test]
+fn req_core_102_mapper_112_rotates_the_206s_register_order_by_six() {
+    // `RRR` => the value this test writes through it. Read down the page's own list: two 8 KiB
+    // PRG banks, two 2 KiB CHR banks, four 1 KiB CHR banks.
+    let values: [(u8, u8); 8] = [
+        (0, 5),
+        (1, 9),
+        (2, 4),
+        (3, 6),
+        (4, 20),
+        (5, 21),
+        (6, 22),
+        (7, 23),
+    ];
+
+    let mut core = MapperRom::new(112).prg(16).chr(32).load();
+    // Power-on is the 206's: R6 and R7 at banks 0 and 1, the last two 8 KiB banks fixed to the
+    // end, and the whole CHR register file zero.
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    assert_eq!([0, 1, 0, 1, 0, 0, 0, 0], core.chr_windows());
+
+    for (register, value) in values {
+        m112_write(&mut core, register, value);
+    }
+    let scrambled = (core.prg_windows(), core.chr_windows());
+    assert_eq!(
+        ([5, 9, 14, 15], [4, 5, 6, 7, 20, 21, 22, 23]),
+        scrambled,
+        "the page's own eight selects, in the windows the page gives them"
+    );
+
+    // The same eight bytes through a **206**, each at the register the rotation names. Same
+    // silicon below the register file, so the same windows to the slot.
+    let mut namco = MapperRom::new(206).prg(16).chr(32).load();
+    for (register, value) in values {
+        namco.mmc3_bank((register.wrapping_add(6)) & 0x07, value);
+    }
+    assert_eq!(
+        scrambled,
+        (namco.prg_windows(), namco.chr_windows()),
+        "mapper 112's layout is the 206's"
+    );
+
+    // And the unscrambled order is not: the same eight bytes written through mapper 112's ports
+    // at the 206's own indices put the PRG banks where the CHR registers belong.
+    let mut unscrambled = MapperRom::new(112).prg(16).chr(32).load();
+    for (register, value) in values {
+        m112_write(&mut unscrambled, (register.wrapping_add(6)) & 0x07, value);
+    }
+    assert_ne!(
+        scrambled,
+        (unscrambled.prg_windows(), unscrambled.chr_windows()),
+        "the rotation is not a no-op"
+    );
+    assert_eq!(
+        ([4, 6, 14, 15], [20, 21, 20, 21, 22, 23, 5, 9]),
+        (unscrambled.prg_windows(), unscrambled.chr_windows()),
+        "and this is where the unrotated bytes land"
+    );
+}
+
+/// The three ports the page names and the five addresses inside its own mask that it does not:
+/// select at $8000, data at $A000, nametable at $E000, "Mask: $E001" (MF-UNL-7 step 2).
+///
+/// The nametable row is worth its own assertion because of how the page writes it —
+/// "0: horizontal (A10); 1: vertical (A11)". The parentheses settle it: `horizontal (A10)` is
+/// CIRAM A10 driven from PPU A10, which is this core's `Vertical`, so the numbering is the MMC3's
+/// own "0: vertical; 1: horizontal" after all.
+#[cfg(feature = "board-112")]
+#[test]
+fn req_core_102_mapper_112_decodes_three_ports_under_mask_e001() {
+    let mut core = MapperRom::new(112).prg(16).chr(32).load();
+
+    // The mask reads A15, A14, A13 and A0, so $9FFE is the select port and $BFFE the data one.
+    core.mapper_write(0x9FFE, 0x00);
+    core.mapper_write(0xBFFE, 0x07);
+    assert_eq!([7, 1, 14, 15], core.prg_windows(), "the ports repeat");
+
+    // $8001, $A001 and $E001 are inside the mask and are **not** registers: the page names three
+    // addresses and this decode answers three.
+    let before = (core.prg_windows(), core.chr_windows());
+    core.mapper_write(0x8001, 0x01);
+    core.mapper_write(0xA001, 0x0B);
+    assert_eq!(
+        before,
+        (core.prg_windows(), core.chr_windows()),
+        "the odd halves are not the register pair"
+    );
+
+    // Nor is $C000-$DFFF, which the page does not mention at all. The window there is the 206's
+    // "fixed to the end" and nothing can move it (Q-161).
+    core.mapper_write(0xC000, 0x00);
+    core.mapper_write(0xC001, 0x0B);
+    assert_eq!(
+        before,
+        (core.prg_windows(), core.chr_windows()),
+        "$C000-$DFFF is not a port"
+    );
+    assert_eq!([14, 15], core.prg_windows()[2..], "and the top is fixed");
+
+    // $E000: `xxxx xxxN`.
+    core.mapper_write(0xE000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring(), "0: horizontal (A10)");
+    core.mapper_write(0xE000, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring(), "1: vertical (A11)");
+    core.mapper_write(0xE000, 0xFE);
+    assert_eq!(Nm::Vertical, core.mirroring(), "bit 0 alone");
+}
+
+/// Q-161's second half: the page gives the data port a whole byte, `DDDD DDDD`, and uses the
+/// MMC3's own wording — "Select 2 KB CHR bank" — for selects 2 and 3, without restating the 206's
+/// "only bits 5-1 exist for 2KB CHR banks".
+///
+/// The 206's rule is taken, because that is the board this one is "quite similar to" and because
+/// it is a property of the silicon: the register drives CHR A11 upwards and the window's own A10
+/// comes from the PPU. So the two 2 KiB selects ignore bit 0 and the four 1 KiB ones do not
+/// (MF-UNL-7 step 2).
+#[cfg(feature = "board-112")]
+#[test]
+fn q_161_mapper_112_ignores_the_low_bit_of_its_two_2_kib_chr_selects() {
+    let mut core = MapperRom::new(112).prg(16).chr(32).load();
+
+    // Selects 2 and 3: an odd byte and the even one below it are the same 2 KiB bank.
+    for (register, slot) in [(2u8, 0usize), (3, 2)] {
+        m112_write(&mut core, register, 0x04);
+        let even = core.chr_windows();
+        m112_write(&mut core, register, 0x05);
+        assert_eq!(even, core.chr_windows(), "register {register}, bit 0");
+        assert_eq!(
+            [4, 5],
+            core.chr_windows()[slot..slot + 2],
+            "register {register} shows 1 KiB banks 4 and 5"
+        );
+    }
+
+    // Selects 4-7 are 1 KiB registers and every bit of them counts.
+    m112_write(&mut core, 4, 0x11);
+    assert_eq!(17, core.chr_bank(0x1000));
+    m112_write(&mut core, 4, 0x10);
+    assert_eq!(16, core.chr_bank(0x1000), "bit 0 is a bank bit here");
+}
+
+/// REQ-CORE-090/091: the eight registers and the index survive a save and a restore, with the
+/// state dirtied first. The block is `Namcot108`'s own and **unchanged** — eight bank bytes and
+/// the select — which is what lets this number share the board (MF-UNL-7 step 2).
+#[cfg(feature = "board-112")]
+#[test]
+fn req_core_090_mapper_112_survives_a_save_and_restore() {
+    let mut core = MapperRom::new(112).prg(16).chr(32).load();
+    for register in 0u8..8 {
+        m112_write(&mut core, register, register * 3 + 1);
+    }
+    core.mapper_write(0xE000, 0x01);
+    // An index that is not the last register written, so the byte has to be in the block.
+    core.mapper_write(0x8000, 0x03);
+
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    let state = core.save_state(true).unwrap();
+
+    core.reset();
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(
+        banks,
+        (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+    assert_eq!(state, core.save_state(true).unwrap());
+
+    // And the restored index is the one that was saved: the next data write lands at register 3,
+    // which the rotation makes the 206's R1 — the 2 KiB CHR window at $0800.
+    core.mapper_write(0xA000, 0x0C);
+    assert_eq!([12, 13], core.chr_windows()[2..4]);
 }

@@ -43,6 +43,14 @@ use crate::NametableMirroring;
 ///   N being one-screen select (0 = 1ScA, 1 = 1ScB). The page states the difference this board
 ///   is here to pin: "the nametable control bit is present over the entire 32kB range; unlike
 ///   the associated Namco 108 which is only present at $8000-$9FFF".
+///
+/// # The sixth number, which is not a Namco board at all
+///
+/// **112** is an unlicensed clone (MF-UNL-7 step 2) whose page says it is "quite similar to iNES
+/// Mapper 206, which resembles an simplified MMC3; however, the registers appears to be scrambled
+/// a bit". It is here, behind `board-112`, because the scramble is in the **ports and the register
+/// order** and nothing else: the window table this board composes, `update_banks` included, is the
+/// 206's to the line. See [`Namcot108::write_register_112`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Namcot108 {
     banks: BankWindows,
@@ -63,6 +71,14 @@ pub struct Namcot108 {
     nametable_from_chr: bool,
     /// Mapper 154: bit 6 of **any** write to $8000-$FFFF is a one-screen select.
     one_screen_register: bool,
+    /// Mapper 112: the select, data and mirroring ports are at $8000, $A000 and $E000 under mask
+    /// $E001, and the eight register indices are the 206's rotated by six (MF-UNL-7 step 2).
+    ///
+    /// **Behind its own feature, so that with `board-112` off this struct and every function of it
+    /// is byte for byte what MF-6a step 1 shipped**: the owner's rule is one feature per board
+    /// that costs, and the five Namco numbers may not pay for a sixth that is not theirs.
+    #[cfg(feature = "board-112")]
+    scrambled_ports: bool,
 }
 
 impl Namcot108 {
@@ -82,6 +98,75 @@ impl Namcot108 {
             chr_a16_from_a12: mapper_number == 88 || mapper_number == 154,
             nametable_from_chr: mapper_number == 95,
             one_screen_register: mapper_number == 154,
+            #[cfg(feature = "board-112")]
+            scrambled_ports: mapper_number == 112,
+        }
+    }
+
+    /// Mapper 112's register decode, and the whole of what it adds to this board
+    /// (nesdev, "INES Mapper 112", MF-UNL-7 step 2).
+    ///
+    /// Three ports under the page's own **mask $E001** where the 206 has two under $E001:
+    ///
+    /// ```text
+    /// Bank select ($8000)     Bank data ($A000)     Nametable arrangement ($E000)
+    /// xxxx xRRR               DDDD DDDD             xxxx xxxN
+    /// ```
+    ///
+    /// The 206 reaches its pair at $8000 (even) and $8001 (odd); this board puts the data port at
+    /// $A000 instead, which is the first half of the page's "the registers appears to be scrambled
+    /// a bit". **$8001, $A001, $C000, $C001 and $E001 are inside the mask and are not registers**:
+    /// the page names three addresses and this decode answers three.
+    ///
+    /// # The second half of the scramble is a rotation by six
+    ///
+    /// | `RRR` | what the page says it selects | the 206's register |
+    /// | ---: | --- | ---: |
+    /// | 0 | 8 KB PRG at $8000-$9FFF | R6 |
+    /// | 1 | 8 KB PRG at $A000-$BFFF | R7 |
+    /// | 2 | 2 KB CHR at PPU $0000-$07FF | R0 |
+    /// | 3 | 2 KB CHR at PPU $0800-$0FFF | R1 |
+    /// | 4-7 | 1 KB CHR at PPU $1000, $1400, $1800, $1C00 | R2-R5 |
+    ///
+    /// So `RRR` names the 206's `(RRR + 6) mod 8` and the windows are identical — which is why
+    /// this number is a parameter of this board and not a board: nothing below the register file
+    /// differs, and `Namcot108::update_banks` is reused to the line.
+    ///
+    /// # Two things the page does not say, and what this build does with them (Q-161)
+    ///
+    /// * **$C000-$DFFF.** The page lists eight `RRR` values covering two PRG windows and the whole
+    ///   of CHR, and says nothing about the upper 16 KiB. The 206's "the last two 8KiB banks [are]
+    ///   fixed to the end" is taken, because that is the board this one is "quite similar to" and
+    ///   because a board with no vectors cannot run.
+    /// * **the low bit of the two 2 KiB CHR registers.** The 206's page is explicit that "only bits
+    ///   5-1 exist for 2KB CHR banks"; this page gives the data port a whole byte and uses the
+    ///   MMC3's own wording, "Select 2 KB CHR bank", for selects 2 and 3. The 206's rule is taken —
+    ///   the register drives CHR A11 upwards and the window's A10 comes from the PPU, which is a
+    ///   property of the silicon the page says this is — so a 2 KiB select ignores bit 0.
+    ///
+    /// # And one it does say in a way worth quoting
+    ///
+    /// "Nametable arrangement (0: horizontal (A10); 1: vertical (A11))". The parentheses are what
+    /// settle it: `horizontal (A10)` is CIRAM A10 driven from **PPU A10**, which is this core's
+    /// [`NametableMirroring::Vertical`] — the two logical tables distinct across A10 — and `(A11)`
+    /// is [`NametableMirroring::Horizontal`]. The numbering is then the MMC3's own
+    /// "0: vertical; 1: horizontal" after all.
+    #[cfg(feature = "board-112")]
+    fn write_register_112(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        match address & 0xE001 {
+            // The whole byte is latched and masked where it is read, which is this board's own
+            // idiom one arm below and the MMC3's before it.
+            0x8000 => self.select = value,
+            0xA000 => {
+                self.bank[usize::from(self.select.wrapping_add(6) & 0x07)] = value;
+                self.update_banks();
+            }
+            0xE000 => memory.set_mirroring(if value & 0x01 == 0 {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            }),
+            _ => {}
         }
     }
 
@@ -203,6 +288,15 @@ impl Mapper for Namcot108 {
     #[inline(never)]
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
+            return;
+        }
+
+        // Mapper 112's three ports, before the five Namco numbers' two: the board is the same
+        // below the register file and nothing but this decode differs (MF-UNL-7 step 2). Behind
+        // the feature, so that with `board-112` off this function is what MF-6a step 1 shipped.
+        #[cfg(feature = "board-112")]
+        if self.scrambled_ports {
+            self.write_register_112(memory, address, value);
             return;
         }
 

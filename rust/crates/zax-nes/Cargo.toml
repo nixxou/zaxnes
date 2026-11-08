@@ -59,6 +59,7 @@ default = [
     "board-178",
     "board-268",
     "board-sachen8259",
+    "board-112",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -505,6 +506,22 @@ board-162 = ["board-decode-boards"]
 # IRQ), 2 (TMS5220 speech) and 3 (solder-pad read-out) are deferred by census §7.2, as is the
 # Dendy timing the educational variants want.
 board-178 = ["board-decode-boards"]
+
+# Mapper 112 (MF-UNL-7 step 2): the board its page calls "quite similar to iNES Mapper 206, which
+# resembles an simplified MMC3; however, the registers appears to be scrambled a bit". *Huang Di*
+# and *San Guo Zhi - Qun Xiong Zheng Ba*, both Asder / NTDEC.
+#
+# The scramble is in the **ports and the register order** and nothing else: a select port at $8000,
+# a data port at $A000 and a nametable port at $E000 under mask $E001 where the 206 has an even/odd
+# pair, and eight register indices that are the 206's rotated by six (`RRR` names the 206's
+# `(RRR + 6) mod 8`). Below the register file the board *is* the 206, window for window, so this is
+# **one `bool` on `board-namcot108`'s board** and not a board -- the shape §7.2 asks for by name --
+# and with the feature off `Namcot108` is byte for byte what MF-6a step 1 shipped. Implies
+# `board-namcot108`.
+#
+# **Q-161** records the two things the page does not say and this build takes from the 206: the
+# upper 16 KiB of PRG (fixed to the last two banks) and the low bit of the two 2 KiB CHR registers.
+board-112 = ["board-namcot108"]
 
 # Mappers 137, 138, 139 and 141, the Sachen **8259** -- one chip with four wirings (MF-UNL-7
 # step 1). An index port at $4100 and a data port at $4101 under mask $C101, three bits wide, the
