@@ -117,7 +117,7 @@ end of step 1 below lists each of the five against what it produced.
 - [x] **3/6** — the callgrind campaign against the base commit, and the feature decision.
 - [x] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
-- [ ] **5/6** — `BOARD-FEATURES.md`, the census note and the journal.
+- [x] **5/6** — Q-169, `BOARD-FEATURES.md`, the census note and the journal.
 - [ ] **6/6** — the final pass.
 
 ## Step 1 — the flash, whole
@@ -402,6 +402,52 @@ two variables is **1 109 / 0 / 9**, so the nine move out of the ignored column a
 one — which is the proof that they ran rather than passed vacuously. (1 109 + 9 = 1 118.)
 
 1 118 against MF-UNL-8's 1 113 is **+5**, this lot's five tests.
+
+## Step 5 — the ticket, the feature table, the census note and the journal
+
+### Q-169, and why this lot has exactly one ticket
+
+MF-UNL-2's rule is that where §7.2 and a number's own page differ, **the page wins**, and each case
+gets a ticket. **This lot found no such case.** §7.2's MF-UNL-9 agrees with nesdev's GTROM page on
+every point it states: the four-bit PRG field, bit 5's nametable selection, bits 6-7 as the two
+LEDs, the absence of PRG-RAM, the forced four-screen mirroring, and the SST39SF040. Three lots in a
+row have found contradictions; this section has none, and the census note records that as plainly as
+the earlier lots recorded the opposite.
+
+The ticket this lot does raise is the other kind — **the spec is incomplete**, which `CLAUDE.md`'s
+hard rules require a ticket for rather than a silent choice. **Q-169**: REQ-CORE-095 is written for
+"la PRG-RAM (8 Kio)" of "une ROM dont le bit 1 de l'octet 6 est à 1", and **none of those three
+terms describes this board** — it has no PRG-RAM, the battery bit does not say whether its game can
+save, and a flash chip is not volatile memory a reset could clear. **Q-117's own answer deferred
+this exact point to REQ-CORE-095** ("La persistance d'une flash reprogrammée reste hors périmètre, à
+traiter avec REQ-CORE-095") and it was never settled. The ticket carries the four provisional
+choices, the measurement that justifies the shape, and three points left to R0: the host wiring,
+whether the UNROM 512 should share the module, and the software-ID commands. Referenced as
+`Q-169` in `flash.rs`'s module note, on both `NesCore` save methods and on
+`state_version_has_flash`.
+
+### `BOARD-FEATURES.md`
+
+Mapper 111's row gained the mechanism and both sets of figures, and the file gained a section
+of its own — **"One mechanism in this table is not gated by a feature"** — because the header's
+"each feature gates … its save-state block" is not true of the flash and the exception needs its
+three reasons written down rather than discovered: it writes zero bytes for a board without a chip,
+the host API must not change shape with a board feature (`zax-app` is built once), and the figure
+is zero so a feature would be a switch with no measurement behind it.
+
+### The census note
+
+§7.2's table marks MF-UNL-9 **shipped**, and the section carries a note with the five things a
+reader of it next needs: that the board already existed and only step 1 was missing; that step 1 is
+right about the shape and the one thing it does not say (*where the bytes live*) is what decides
+the cost; the correction to the lot brief about parking; the bank-0 unlock finding, written for
+whoever writes a flash test next; and the host wiring left to R0.
+
+### The journal
+
+`G:/3dsen/cleanroom/journal/JOURNAL.md`, in the French of the entries before it: role, date, folders
+consulted, the base commit, what was delivered, the figures, the format-version change with its two
+inherited-comparison traps, the verification table, Q-169 and the bank-0 finding.
 
 ## Sources consulted
 

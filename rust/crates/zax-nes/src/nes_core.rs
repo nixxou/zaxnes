@@ -316,8 +316,8 @@ impl NesCore {
     }
 
     /// Whether a block of `version` carries the flash chip's changed sectors, which MF-UNL-9
-    /// added at the end of the cartridge's own section (REQ-CORE-090, REQ-CORE-095). An older
-    /// block loads with the chip holding what the dump holds, which is what a fresh power-on
+    /// added at the end of the cartridge's own section (REQ-CORE-090, REQ-CORE-095, **Q-169**). An
+    /// older block loads with the chip holding what the dump holds, which is what a fresh power-on
     /// gives; only mapper 111 has a flash chip, and before this lot it persisted nothing at all.
     pub(crate) const fn state_version_has_flash(version: i32) -> bool {
         version >= Self::STATE_VERSION
@@ -544,6 +544,12 @@ impl NesCore {
     /// file is the **changed sectors** and not an image of the chip, which is what
     /// `docs/review/UNL-census.md` §7.2 asks for: one flashed 4 KiB sector of a 512 KiB chip is
     /// about 4 KiB on disk.
+    ///
+    /// **Q-169**: REQ-CORE-095 describes the battery-backed PRG-RAM and says nothing about a
+    /// board whose save medium is its own ROM, which is why this is a second pair of methods and
+    /// not a widening of the first. It is deliberately **not** gated on the header's battery bit:
+    /// that bit does not describe this board, and a GTROM dump that leaves it clear can still
+    /// save.
     ///
     /// Unlike [`Self::export_battery_ram`] it returns an owned buffer, because the changed sectors
     /// are not contiguous in any memory this core holds.

@@ -11,6 +11,14 @@
 //! persisting it is persisting their saves — which is why `docs/review/UNL-census.md` §7.2 grades
 //! one mapper number an L and names this module's design "the step to design before coding".
 //!
+//! **Q-169** is the ticket: REQ-CORE-095 is written for "la PRG-RAM (8 Kio)" of "une ROM dont le
+//! bit 1 de l'octet 6 est à 1", and none of those three terms describes this board — it has no
+//! PRG-RAM, the battery bit does not say whether its game can save, and a flash chip is not
+//! volatile memory a reset could clear. Q-117's own answer deferred the point to that requirement
+//! ("La persistance d'une flash reprogrammée reste hors périmètre, à traiter avec REQ-CORE-095")
+//! and it was never settled, so the four decisions below are this lot's provisional choice and the
+//! ticket is where the argument for each one is.
+//!
 //! # Four decisions, and the reason for each
 //!
 //! 1. **Nothing here is on a read path.** A programmed byte goes into `prg_rom` exactly as the

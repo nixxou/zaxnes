@@ -970,7 +970,7 @@ register table**, which is why §6 graded documentation, and the "titles R0 shou
 | **MF-UNL-6** — COOLBOY / MINDKIDS | 1 | 1 | ~8 h | **12** | 1.5 |
 | **MF-UNL-7** — the Sachen 8259, the 206 clones and two homebrew boards | 6 | 9 | ~7 h | **10** | 1.4 |
 | **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board — **shipped** | 3 | 5 | ~8.5 h | **10** | 1.2 |
-| **MF-UNL-9** — Cheapocabra (GTROM) | 1 | 1 | ~6 h | **7** | 1.2 |
+| **MF-UNL-9** — Cheapocabra (GTROM) — **shipped** | 1 | 1 | ~6 h | **7** | 1.2 |
 | **MF-UNL-10** — Dōngdá PEC-9588 | 1 | 1 | ~7 h | **6** | 0.9 |
 | **MF-UNL-11** — the Kǎshèng protection MMC3s | 3 | 3 | ~7 h | **6** | 0.9 |
 | **MF-UNL-12** — the last three singletons | 3 | 3 | ~7 h | **4** | 0.6 |
@@ -1622,6 +1622,43 @@ model, and it is the whole of this lot's difficulty.
 * The LED bits change nothing observable.
 
 **Titles R0 should run**: the seven above.
+
+> **Note added by lot MF-UNL-9 (2026-11-08), which shipped this section.**
+>
+> **The board already existed.** MF-6c step 9 built `Cheapocabra` whole — the register, the PRG
+> bank, bit 4's two CHR banks, bit 5's two banks of four nametables, forced four-screen mirroring,
+> the LEDs and the SST39SF040's command sequences — so steps 2 and 3 above and three of the five
+> tests were already here and were not rewritten. What was missing was **step 1 and nothing else**,
+> which is the half this section itself calls "the whole of this lot's difficulty", plus two of the
+> five tests and the round trip of step 4.
+>
+> **This section's step 1 is right about the shape and right to ask that it be designed first.**
+> `FlashRom` is the memory kind, the dirty set is per 4 KiB sector and the save file is the changed
+> sectors, as asked. The one thing the section does not say, and which decides the cost, is *where
+> the bytes live*: they stay in the PRG-ROM image where every read already finds them, and the new
+> object records only which sectors moved. That is why a mechanism §7.1 would have priced as a new
+> save shape measured `core` **identical to the instruction** on all five level-2 games.
+>
+> **One correction to the lot brief, not to this section.** The brief said `board-111` was parked.
+> It is not: MF-6c step 9 parked it on one instruction of `Cartridge::default_cpu_read` that was
+> never the board's, MF-CART step 4 deleted that instruction and step 5 put the feature back in
+> `default`. A lot opening on a parked board should read `Cargo.toml` and
+> `BOARD-FEATURES.md` before the brief, which is what step 0 of this lot is.
+>
+> **A finding for whoever writes a flash test next.** The chip's unlock writes are on chip
+> addresses `$5555`/`$2AAA` and `chip_address = (bank << 15) | (addr & 0x7FFF)` can only reach them
+> with **bank 0**. So fifteen of the sixteen PRG banks can be flashed only by unlocking in bank 0
+> and moving the register *before the last write of the sequence* — a CPU-bus write the chip never
+> sees. A test that selects a bank and then issues the whole sequence in it programs nothing, and
+> looks like a broken implementation rather than a broken test.
+>
+> **What is left for R0**: the host wiring. The core exposes `NesCore::export_flash_save` /
+> `import_flash_save` and `zax-app` does not yet persist them; the file naming and the write
+> cadence are a host decision (SPEC-09), and `zax-app` cannot be built in the `wt-mappers`
+> worktree. Recorded in **Q-169** §3 with the other two open points — whether the UNROM 512 should
+> share the module, and the software-ID commands.
+>
+> See `docs/progress/MF-UNL-9.md`, `spec/changes/Q-169.md` and `docs/review/BOARD-FEATURES.md`.
 
 ---
 
