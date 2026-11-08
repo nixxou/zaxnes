@@ -206,5 +206,118 @@ one that joined it, and in a `parked-boards` build without the new feature those
 **So the `parked-boards` row is unchanged by this lot and MF-LEG-1's 1244 is a transcription
 error**, not a regression. Recorded here rather than silently re-stated, since the next lot will
 compare against it.
-- [ ] 4/5 the callgrind campaign
+- [x] 4/5 the callgrind campaign
+
+### 4/5 — the callgrind campaign
+
+Binaries built by `rust/tools/perf/build-clean.sh` from their own tar into a **fresh** directory
+with its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`. The feature variant
+was made from the shipped tar by adding one line to zax-nes's `default` list
+(`rust/target-mf/variant-tar-add.sh`, scratch, not committed).
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `leg1b-base` | **`e2507f56`**, the lot's base commit | `6ec0ea0ce0c33062b93d03ba74cc5b3e` |
+| `leg1b-ship` | **the shipped configuration** (`bcf622e2`): the `E` bit out of `default` | `64edf2c20f580029ca0898bc6a87feb3` |
+| `leg1b-ebit` | the shipped tree plus **`mmc1-snrom-e-bit`** in `default` | `100b8110bc42eb07a9e6ed979a195fc3` |
+| `leg1b-ship2` | a byte copy of `leg1b-ship`, the **same-binary floor** | the same |
+
+**The base binary's md5 is `6ec0ea0ce0c33062b93d03ba74cc5b3e`, which is MF-LEG-1's `leg1b-ship` —
+that lot's own measured shipped binary — to the byte.** So this lot's base is the previous lot's
+measured binary, the **twelfth** lot in a row for which that holds, and built rather than assumed.
+It holds although `e2507f56` is two commits later than the tree MF-LEG-1 measured, because
+everything it changed in `src/` was a comment: `git diff 530979f7 e2507f56 -- rust/crates/zax-nes/src/`
+has no non-comment line.
+
+#### 4.1 The floors
+
+**PR-1's thirteen**, the shipped binary against its own byte copy: worst `m1` **+0.001 %**
+(+59 358), set total +171 313 (+0.000 %). So **±0.001 % is noise on PR-1**, a twentieth of the
+tolerance, which is what MF-FIX and MF-LEG-1 both recorded.
+
+**Level 2 is worse than MF-LEG-1 measured it, and this lot's figures have to be read against
+that**:
+
+| pair (identical binaries) | `smb1` | `metroid` | `zelda2` | `mm2` | `smb3` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `leg1b-ship` vs `leg1b-ship2` | **+0.029** | +0.000 | −0.008 | +0.001 | −0.008 |
+
+**The same binary measured twice moves `smb1` by +0.029 %**, i.e. *above* the owner's +0.02 % per
+ROM. MF-LEG-1 step 9.1 recorded ±0.018 % from two pairs; this is a third pair and it is worse. The
+level-2 whole-process instrument therefore cannot resolve anything of this size, and a level-2
+whole-process figure under about 0.03 % is not evidence either way.
+
+**But the level-2 run also carries a stage breakdown, and that one is exact.**
+`callgrind-l2.sh` writes `stages.txt`, whose `core` row is the emulated core's own `Ir` —
+`NesCore::run_frame` and everything under it, with no conversion, no Lua and no draw list. Across
+the two identical binaries it is **+0 on all five games, identical to the instruction**. So `core`
+is the instrument to read here, and the whole-process noise is provably outside the emulation.
+
+#### 4.2 The emulated core, which is the measurement that matters
+
+| game | mapper | `leg1b-base` core `Ir` | `leg1b-ship` | delta | `leg1b-ebit` | delta vs base |
+| --- | :-: | ---: | ---: | ---: | ---: | ---: |
+| `smb1` | 0 | 11 515 129 187 | 11 515 129 187 | **+0** | 11 515 129 187 | **+0** |
+| `metroid` | 1 | 11 146 892 645 | 11 146 889 701 | **−2 944** | 11 146 892 645 | **+0** |
+| `zelda2` | 1 | 12 775 026 724 | 12 775 020 988 | **−5 736** | 12 775 026 724 | **+0** |
+| `mm2` | 1 | 12 037 321 533 | 12 037 310 877 | **−10 656** | 12 037 321 533 | **+0** |
+| `smb3` | 4 | 15 315 255 735 | 15 315 255 735 | **+0** | 15 315 255 735 | **+0** |
+
+Three statements, each exact to the instruction:
+
+1. **The shipped build is cheaper on every mapper-1 game and identical on every other.** `smb1`
+   (mapper 0) and `smb3` (mapper 4) do not move at all, and the three mapper-1 games are
+   *negative*, which is `Mmc1::refresh_prg_ram_disable` losing a load, a mask and an `or` and
+   `Mmc1` losing a byte. This lot does not cost; it refunds.
+2. **`mmc1-snrom-e-bit` on is the base commit's emulation exactly**, `+0` on all five games. That
+   is step 1's claim — "restores today's behaviour exactly" — measured rather than asserted.
+3. **The level-2 whole-process noise is outside the emulation.** `smb1`'s `core` is the same
+   number in all four labels while its whole-process figure swings ±0.03 %, which is
+   MF-UNL-12's finding again (there, 91 % of the same swing was one Lua symbol).
+
+#### 4.3 PR-1's thirteen
+
+**The lot as it ships, against the base commit**: worst ROM **`m1` +376 791 (+0.008 %)**, every
+other ROM inside ±0.001 % — the floor — and set total +412 552 (+0.001 %) of 79 346 126 844.
+
+**`m1` *is* `M1_P128K.nes`, the ROM of Q-176**, and its figure is this lot's decision showing up as
+emulation, not as a code cost: with the `E` bit gone the ROM's `4000` digit fails, so from that
+point the ROM runs different code. **The control proves it.** `leg1b-ebit` against `leg1b-base` is
+the same emulation on all thirteen, and there `m1` is **+19 316 (+0.000 %)** with the worst ROM
+`metroid` at +0.001 % and a set total of +123 316 (+0.000 %) — nothing. MF-LEG-1 step 9 measured
++0.008 % on `m1` for the *inverse* change for the same reason; the two lots bracket it.
+
+**`mmc1-snrom-e-bit` alone**, `leg1b-ship` → `leg1b-ebit`: `m1` **−357 475 (−0.007 %)** — the ROM
+going back to passing — worst other ROM `m4` +0.001 %, set total **−289 236**.
+
+#### 4.4 Level 2, whole process, for the record
+
+| pair | worst game | set total |
+| --- | --- | --- |
+| the lot as it ships, against the base | `zelda2` **+0.006 %** | +14 976 (+0.000 %) |
+| `mmc1-snrom-e-bit` on, against the base | `smb1` +0.023 % | +0.005 % |
+| `mmc1-snrom-e-bit` alone, against the shipped | `smb1` +0.036 % | +0.005 % |
+
+The shipped build's worst is +0.006 %, a fifth of this instrument's own floor. The two feature
+rows land on `smb1` **at and above** the tolerance — and `smb1` is **mapper 0**, which this
+feature cannot touch: its `core` is the same number to the instruction in every label (§4.2), and
+the same binary measured twice moves it +0.029 %. Those two figures are the instrument, not the
+feature.
+
+#### 4.5 The feature decision
+
+| feature | PR-1's thirteen | level 2, emulated core | level 2, whole process | in `default`? |
+| --- | --- | --- | --- | :-: |
+| **the lot as it ships** (no `E` bit) | worst `m1` **+0.008 %**, the test ROM's own path; every other ROM at the ±0.001 % floor; total +0.001 % | **−2 944 to −10 656 on the three mapper-1 games, +0 on the other two** | worst `zelda2` +0.006 % | — |
+| `mmc1-snrom-e-bit` | against the shipped build: `m1` **−0.007 %**, worst other +0.001 %, total **−289 236**. Against the base, same emulation: worst +0.001 %, `m1` +0.000 % | **+0 on all five, identical to the base commit** | `smb1` +0.036 % on a game it cannot touch, against a same-binary floor of +0.029 % on that game | **off — Q-176, and not for a figure** |
+
+**Nothing is parked, and nothing could be.** The owner's rule parks a *board* that costs more than
++0.02 % per ROM; this lot adds no board, and the one feature it adds is already out of `default` by
+R0's decision rather than by a figure. There is no cost to park either: the shipped build is
+measurably **cheaper** on the emulated core of every mapper-1 game and identical on every other,
+and the feature build is the base commit's emulation to the instruction. The only figure above the
+tolerance anywhere in the campaign is `smb1`'s level-2 whole process, which the same binary
+reproduces against itself.
 - [ ] 5/5 the final check
