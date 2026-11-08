@@ -445,3 +445,58 @@ the release profile the other three rows use.
 `windows` among its forbidden crate names — so a feature comment that writes `rom_windows` or
 "the other three windows" fails a test about platform dependencies. `BankWindows` is safe
 (capital W). This step's first draft tripped it; the comment is phrased around it.
+
+## Step 4 — §7.1's three common things
+
+### 1. The four sweeps over `SUPPORTED_MAPPERS`
+
+All four already exist and all four now reach the three numbers. Two of them needed the number
+**added** rather than merely passing, which is the point of having them:
+
+| sweep | what it took |
+| --- | --- |
+| `req_core_100_every_required_mapper_is_registered` | three rows in its `additions` table, 110 → **113** entries, each gated on its own feature; the table is order-sensitive, so 246 goes between 243 and 262 and 292 between 268 and 298 |
+| `req_core_102_any_other_mapper_is_refused` | unchanged — it sweeps 6, 116, 177 and 200, none of which this lot touches (§7.4) |
+| the registry round-trip (`Cartridge::SUPPORTED_MAPPERS` ascending, every number creating a board) | passes; the ascending assertion is what caught nothing because the entries were placed in order |
+| `mf_5a_every_board_that_moves_on_the_ppu_bus_is_latched` | **262 and 292 twice each** in its expected vector, plus both numbers in `watches_ppu_reads` and `watches_ppu_bus_without_read`. Without those two lists the boards' A12 counters would silently never be clocked — the correctness bug that test exists for |
+| `board_memory_sizes` | three new rows: 262 `chr_ram: Some(8192)`, 292 `prg_ram: Some(0)`, 246 `prg_ram: Some(2048)` |
+
+246 is in **neither** PPU-bus list and that is correct: its page gives it no counter and no latch
+at all, so nothing of it moves on the PPU's address bus.
+
+### 2. A save-state round trip per board, with the board's own state dirtied first
+
+`req_core_090_the_mapper_state_survives_a_save_and_restore` dirties `$5000`, `$6000` and
+`$8000-$E001`. Against this lot that reaches **one** byte of three boards: 292's index register is
+at `$6000`. Everything else is this step's business.
+
+| test | what the generic sweep could not reach |
+| --- | --- |
+| `req_core_090_mapper_262_round_trips_its_4100_register` | the one byte at `$4100` — **one byte with two jobs**, the CHR chip select and four CHR A18 lines, so a block that dropped it would restore the window table and still read the wrong chip. The layout helper carries the CHR **bytes** for exactly that |
+| `req_core_090_mapper_292_round_trips_the_two_registers_only_a_read_can_fill` | the two data registers, which **no sweep of this suite can write**: only a read of `$6000-$7FFF` fills them. Taken with the index left selecting #1, and the last four lines check that the restored index *is* the index — one more fill with no `$6000` write of its own must land in #1 |
+| `req_core_090_mapper_246_round_trips_its_eight_bank_registers` | seven of the eight registers, the battery chip behind the same window, and — the one thing a correct window table could still get wrong — that the **forced-A17 read follows the restored `$6003`** and not the table |
+
+### 3. The reset
+
+`amd_061_a_reset_puts_both_mmc3_boards_of_mf_unl_12_back_to_their_power_on_state`, on
+AMD-061's own sweep's pattern: dirty the board's own registers, require the power-on layout and no
+pending IRQ.
+
+**Mapper 246 is deliberately not in it**, and it is this lot's one exception to §7.1's shape: its
+page says "Register `$6003` is set to `$FF` at power-on **only**", so the board *cannot* come back
+to its power-on layout and must not be asked to.
+`amd_061_mapper_246_keeps_its_last_prg_bank_across_a_reset` is that number's own test and Q-172 §3
+the reading. AMD-061's global sweep passes over 246 unchanged because the addresses it dirties —
+`$5000`, `$6000`, `$8000-$E001` — reach the board's register 0 and not its register 3.
+
+### The check at this step
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | **clean** |
+| `cargo test --release -p zax-nes` | **all green**, `mapper_tests` **392 passed / 0 failed** |
+| `cargo test --release -p zax-harness` | **all green** |
+
+**392** is the figure to compare the configurations of step 5 against: 379 at the lot's base
+commit plus this lot's thirteen.

@@ -16328,3 +16328,230 @@ fn amd_061_mapper_246_keeps_its_last_prg_bank_across_a_reset() {
     core.reset();
     assert_eq!([0, 0, 0, 0x14], core.prg_windows());
 }
+
+// -------------------- MF-UNL-12's three save-state round trips and its reset,
+// -------------------- §7.1's second common thing
+
+/// What a board of this lot shows, and nothing of the machine around it: the four PRG windows, the
+/// eight CHR window **offsets**, the eight CHR **bytes** and the mirroring.
+///
+/// The offsets *and* the bytes, where MF-UNL-11's own helper took only the offsets: mapper 262 has
+/// two CHR chips and a register that picks between them, so two layouts can share every offset and
+/// still read differently. The bytes are what tell the chips apart.
+#[cfg(any(feature = "board-246", feature = "board-262", feature = "board-292"))]
+fn unl12_layout(core: &NesCore) -> ([u8; 4], [usize; 8], [u8; 8], Nm) {
+    (
+        core.prg_windows(),
+        chr_offsets(core),
+        core.chr_windows(),
+        core.mirroring(),
+    )
+}
+
+/// REQ-CORE-090/091, §7.1 item 2: mapper 262's one register is at **`$4100`**, and
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` dirties `$5000`, `$6000` and
+/// `$8000-$E001` — so that sweep proves the chip's block round-trips and says nothing about this
+/// board's own byte (MF-UNL-12 step 4).
+///
+/// The register is the interesting one precisely because it is **one byte with two jobs**: the CHR
+/// chip select and four CHR A18 lines. A block that dropped it would restore the window table and
+/// still read the wrong chip, which is why this test's layout carries the CHR bytes as well as the
+/// offsets.
+#[cfg(feature = "board-262")]
+#[test]
+fn req_core_090_mapper_262_round_trips_its_4100_register() {
+    let mut core = MapperRom::new(262).prg(32).chr(512).battery().load();
+    core.mmc3_bank(0, 0x10); // The chip's own registers, under the board's.
+    core.mmc3_bank(2, 0x21);
+    core.mapper_write(0x4100, 0x40 | 0x0F); // CHR-RAM, and all four A18 lines set.
+    chr_write(&mut core, 0x0000, 0x5A); // Bytes in the chip the select names.
+    chr_write(&mut core, 0x1000, 0x3C);
+    core.mapper_write(0xC000, 0x20); // The counter, so that it has run.
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl12_layout(&core);
+    // The CHR-RAM chip is what the PPU reads, and the two bytes written into it appear at every
+    // window whose bank number shares their low three bits -- the chip having only three address
+    // lines above the kilobyte. R0 = $10 puts $5A at windows 0 and 2 and $3C at 1 and 3; R2 = $21
+    // puts $3C at window 4 and the zeroed R3-R5 put $5A at 5, 6 and 7.
+    assert_eq!(
+        [0x5A, 0x3C, 0x5A, 0x3C, 0x3C, 0x5A, 0x5A, 0x5A],
+        layout.2,
+        "the CHR-RAM chip is what the PPU reads"
+    );
+
+    // Back to the CHR-ROM with no A18 line, which is a layout the chip's own registers cannot
+    // produce while the select is set.
+    core.mapper_write(0x4100, 0x00);
+    assert_ne!(layout, unl12_layout(&core), "the register moved the layout");
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl12_layout(&core), "and the state brought it back");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, the derived window table included"
+    );
+}
+
+/// REQ-CORE-090/091, §7.1 item 2: mapper 292 keeps **three** register bytes, and only one of them
+/// can be written at all — the other two are filled by a **read** of `$6000-$7FFF`, which no sweep
+/// of this suite performs (MF-UNL-12 step 4).
+///
+/// The round trip is taken with the index left selecting Extra Data Register #1, which is the
+/// state that can go wrong quietly: a block that restored the two data registers and dropped the
+/// index would round-trip every window and then put the *next* fill in the wrong register.
+/// The last four lines are that check.
+#[cfg(feature = "board-292")]
+#[test]
+fn req_core_090_mapper_292_round_trips_the_two_registers_only_a_read_can_fill() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).battery().load();
+    core.mapper_write(0xA001, 0x80);
+    core.mmc3_bank(0, 0x2A); // The chip's own CHR registers, which the XOR sits on.
+    core.mmc3_bank(1, 0x40);
+    core.mmc3_bank(6, 0x03); // and its PRG bank, which the board never touches.
+    core.mapper_write(0xA000, 0x01); // and its mirroring, likewise.
+    dragon_fill(&mut core, 0, 0x33);
+    dragon_fill(&mut core, 1, 0x40 | 0x1A);
+    core.mapper_write(0xC000, 0x20);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl12_layout(&core);
+
+    // Both data registers to zero, which no write could have done and which leaves the chip's
+    // own banks showing through.
+    dragon_fill(&mut core, 0, 0x00);
+    dragon_fill(&mut core, 1, 0x00);
+    assert_ne!(
+        layout,
+        unl12_layout(&core),
+        "the two data registers moved the layout"
+    );
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl12_layout(&core), "and the state brought it back");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, the index register included"
+    );
+
+    // The restored index has to *be* the index: one more fill, with no `$6000` write of its own,
+    // must land in Extra Data Register #1.
+    core.write_memory(0x0010, 0x07);
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        [0x1C * 1024, 0x1D * 1024, 0x1E * 1024, 0x1F * 1024],
+        chr_offsets(&core)[4..],
+        "still selecting register #1 after the restore"
+    );
+}
+
+/// REQ-CORE-090/091, §7.1 item 2: mapper 246's eight registers are at `$6000-$6007` and the
+/// generic sweep writes `$6000` alone, so seven of the eight are this test's business — and the
+/// battery RAM behind the same window is too (MF-UNL-12 step 4).
+#[cfg(feature = "board-246")]
+#[test]
+fn req_core_090_mapper_246_round_trips_its_eight_bank_registers() {
+    let mut core = MapperRom::new(246).prg(64).chr(512).battery().load();
+    for register in 0..8u16 {
+        core.write_memory(0x6000 + register, 0x11 + register as u8);
+    }
+    core.write_memory(0x6800, 0x5A); // The battery chip, behind the same window.
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl12_layout(&core);
+
+    for register in 0..8u16 {
+        core.write_memory(0x6000 + register, 0x00);
+    }
+    core.write_memory(0x6800, 0x00);
+    assert_ne!(
+        layout,
+        unl12_layout(&core),
+        "the eight registers moved the layout"
+    );
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl12_layout(&core), "and the state brought it back");
+    assert_eq!(0x5A, core.read_memory(0x6800), "the battery chip included");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, the derived window table included"
+    );
+
+    // And the forced-A17 read follows the restored `$6003` and not the window table, which is the
+    // one thing in this board that a correct window table could still get wrong.
+    assert_eq!(
+        0x14 | 0x10,
+        core.read_memory(0xFFE4),
+        "`$6003` came back as a register, not merely as a window"
+    );
+}
+
+/// AMD-061's own sweep, `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`,
+/// reaches all three numbers — and for the save-state sweep's reason it dirties almost none of
+/// their own registers. This one does, and then asks for the power-on layout back
+/// (MF-UNL-12 step 4).
+///
+/// **Mapper 246 is deliberately not here**, and that is this lot's one exception to the shape:
+/// its page says "Register `$6003` is set to `$FF` at power-on **only**", so the board cannot
+/// come back to its power-on layout and must not be asked to.
+/// `amd_061_mapper_246_keeps_its_last_prg_bank_across_a_reset` is that number's own test and
+/// Q-172 §3 the reading.
+#[cfg(all(feature = "board-262", feature = "board-292"))]
+#[test]
+fn amd_061_a_reset_puts_both_mmc3_boards_of_mf_unl_12_back_to_their_power_on_state() {
+    for mapper in [262usize, 292] {
+        let core = MapperRom::new(mapper).prg(32).chr(512).load();
+        let power_on = unl12_layout(&core);
+
+        let mut core = core;
+        core.mapper_write(0xA001, 0x80);
+        for register in 0..8u8 {
+            core.mapper_write(0x8000, register);
+            core.mapper_write(0x8001, register + 0x11);
+        }
+        match mapper {
+            262 => core.mapper_write(0x4100, 0x40 | 0x0F),
+            292 => {
+                dragon_fill(&mut core, 0, 0x33);
+                dragon_fill(&mut core, 1, 0x40 | 0x1A);
+            }
+            _ => {}
+        }
+        assert_ne!(
+            power_on,
+            unl12_layout(&core),
+            "mapper {mapper}: the board's own registers must move something"
+        );
+
+        core.reset();
+        assert_eq!(
+            power_on,
+            unl12_layout(&core),
+            "mapper {mapper}: a reset must give the power-on layout back"
+        );
+        assert!(
+            !core.cartridge().unwrap().irq_asserted(),
+            "mapper {mapper}: and no pending IRQ"
+        );
+    }
+}
