@@ -5911,10 +5911,13 @@ fn req_core_100_the_scrambled_boards_reproduce_an_unscrambled_mmc3() {
 ///
 /// So with the override set the MMC3's own PRG registers stop reaching $8000-$FFFF, and clearing
 /// it restores them — which is the census's own wording for this test. The per-number part is
-/// where the bank's four bits sit in the byte, and **123's bit order is the page's**: its
-/// diagram `[.M31 .2S0]` puts the bank's bits 3, 2, 1 and 0 at register bits 5, 2, 4 and 0, and
-/// the page flags it with "(notice the bit order)". Q-144 records that Mesen 2 reads register
-/// bit 3 where the page's diagram has bit 4.
+/// where the bank's four bits sit in the byte, and **123's bit order is the page's prose**: the
+/// bank's bits 3, 2, 1 and 0 are register bits 5, 2, 3 and 0, and register bit 4 is a
+/// don't-care. The page's diagram `[.M31 .2S0]` says bit 4 instead and contradicts the page's own
+/// twice-stated "ignore bits 0-3/5"; Q-144 §1 records that all four cross-checked emulators read
+/// bit 3, and MF-FIX applied it. This case uses bank 5, whose bits are 2 and 0, so it is blind to
+/// the difference — `q_144_mapper_123_takes_the_banks_bit_1_from_register_bit_3` is the test that
+/// sees it.
 #[cfg(feature = "board-mmc3-scramble")]
 #[test]
 fn req_core_100_the_nrom_override_takes_prg_away_from_the_mmc3() {
@@ -5976,6 +5979,74 @@ fn req_core_100_the_nrom_override_takes_prg_away_from_the_mmc3() {
             "mapper {mapper}: the MMC3's banking comes back"
         );
     }
+}
+
+/// Q-144 §1, settled by `docs/review/Q-XCHECK.md` and applied by MF-FIX: **mapper 123's `$5800`
+/// bank field takes its bit 1 from register bit 3, and register bit 4 is a don't-care.**
+///
+/// nesdev's mapper-123 page contradicts itself. Its register diagram is `D~[.M31 .2S0]`, which
+/// labels register bit **4** as the bank's bit 1 and leaves bit 3 unused; but the page's prose
+/// says, twice, to **ignore `$5800` bits 0-3 and 5**, and that is only true of a bank field whose
+/// bits are 5, 3, 2 and 0. All four cross-checked projects read bit 3 — Mesen 2's `MMC3_123.h`
+/// computes `(_exReg[0] & 0x08) >> 2`, and FCEUX, Nestopia UE and puNES agree — so the diagram is
+/// the error and the prose is the board.
+///
+/// The test walks the two bits one at a time with everything else clear, which is the only
+/// observation that separates the two readings: under the diagram's reading the `$08` write would
+/// move the bank and the `$10` write would not, and both assertions below would fail the other
+/// way round. Keeping the bit-4 case is the point — it is what stops the old reading from being
+/// restored silently.
+#[cfg(feature = "board-mmc3-scramble")]
+#[test]
+fn q_144_mapper_123_takes_the_banks_bit_1_from_register_bit_3() {
+    // 32 banks of 8 KiB = sixteen 16 KiB banks, so the field's bits 3, 2, 1 and 0 are all
+    // reachable without a wrap and bank 2 is distinguishable from bank 0.
+    let mut core = MapperRom::new(123usize).prg(32).chr(64).load();
+
+    // Bit 6 is `M` on this number ("Ignore PRG bank from MMC3"), bit 1 is `S` (NROM-128 here), so
+    // `$40` alone is bank 0 in NROM-128 mode: 16 KiB bank 0 at both halves.
+    core.mapper_write(0x5800, 0x40);
+    assert_eq!(
+        [0, 1, 0, 1],
+        core.prg_windows(),
+        "$5800 = $40: the override is on and the bank field is zero"
+    );
+
+    // Register bit 3 is the bank's bit 1, so bank 2 -- 8 KiB banks 4 and 5 at both halves.
+    core.mapper_write(0x5800, 0x40 | 0x08);
+    assert_eq!(
+        [4, 5, 4, 5],
+        core.prg_windows(),
+        "$5800 = $48: register bit 3 is the bank's bit 1 (the page's prose, all four emulators)"
+    );
+
+    // Register bit 4 is the don't-care, so the bank stays zero. Under the page's diagram this
+    // would be bank 2 and the two assertions would be the other way round.
+    core.mapper_write(0x5800, 0x40 | 0x10);
+    assert_eq!(
+        [0, 1, 0, 1],
+        core.prg_windows(),
+        "$5800 = $50: register bit 4 is inert (the page's diagram says it is the bank's bit 1)"
+    );
+
+    // And the two together are still bank 2, which pins bit 4 as inert rather than merely
+    // weaker: an implementation that ORed both bits into the bank's bit 1 would also pass the
+    // two assertions above.
+    core.mapper_write(0x5800, 0x40 | 0x18);
+    assert_eq!(
+        [4, 5, 4, 5],
+        core.prg_windows(),
+        "$5800 = $58: bit 4 adds nothing to what bit 3 already selected"
+    );
+
+    // The rest of the field is unchanged by this fix: bit 5 is the bank's bit 3, bit 2 its bit 2
+    // and bit 0 its bit 0, so $40|$25 is bank 13 -- 8 KiB banks 26 and 27.
+    core.mapper_write(0x5800, 0x40 | 0x25);
+    assert_eq!(
+        [26, 27, 26, 27],
+        core.prg_windows(),
+        "$5800 = $65: bank bits 3, 2 and 0 are register bits 5, 2 and 0, as before"
+    );
 }
 
 /// nesdev ("INES Mapper 114"): "`$6001`: `[.... ...+]` Select 256 KiB CHR-ROM bank at PPU

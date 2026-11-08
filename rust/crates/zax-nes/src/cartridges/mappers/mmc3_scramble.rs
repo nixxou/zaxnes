@@ -267,14 +267,20 @@ impl Mmc3Scramble {
     /// | ---: | --- | --- | --- |
     /// | 114, 182 | `M.S. BBBb` | bits 3-0 | bit 5 = `S` replaces the bank's bit 0 |
     /// | 115 | `MPN. PPPp` | bits 3-0, with bit 6 = PRG A18 above them | bit 5 = `N` |
-    /// | 123 | `.M31 .2S0` | bits **5, 4, 2, 0** → bank bits 3, 1, 2, 0 | bit 1 = `S` |
+    /// | 123 | `.M31 .2S0` | bits **5, 3, 2, 0** → bank bits 3, 1, 2, 0 | bit 1 = `S` |
     /// | 187 | `M.NB BBb.` | bits 4-1 | bit 5 = `N` |
     ///
-    /// **123's bit order is the page's and not Mesen 2's, and Q-144 holds the difference.** The
-    /// page's diagram labels register bit **4** as the bank's bit 1 and register bit 3 as unused,
-    /// and flags the field with "(notice the bit order)"; `MMC3_123.h` reads register bit 3
-    /// instead (`(_exReg[0] & 0x08) >> 2`). The two cannot both be right and the symptom is a
-    /// wrong 16 KiB bank in *Mortal Kombat 3*.
+    /// **123's bank bit 1 is register bit 3, which is the page's own prose and all four
+    /// emulators' reading against the page's diagram** — Q-144 §1 holds the difference and
+    /// MF-FIX applied it. nesdev's mapper-123 page contradicts itself: the register's diagram
+    /// `[.M31 .2S0]` puts the bank's bit 1 at register bit **4** and leaves bit 3 unused, while
+    /// the page's prose says to **ignore bits 0-3/5** twice, which only makes sense if bit 3 is
+    /// one of the bank's. All four cross-checked projects read bit 3 — Mesen 2
+    /// (`MMC3_123.h`, `(_exReg[0] & 0x08) >> 2`), FCEUX, Nestopia UE and puNES — so the diagram
+    /// is the error. Under the old reading half of the `$5800` values loaded the wrong 16 KiB
+    /// bank in *Mortal Kombat 3* (UNL-H2288) and *Earthworm Jim 2*. Register bit 4 is now the
+    /// don't-care, which `q_144_mapper_123_takes_the_banks_bit_1_from_register_bit_3` pins from
+    /// both sides.
     ///
     /// **115's PRG A18 is the page's and not Mesen 2's either.** Its bit 6 is annotated `PRG
     /// A18` with no "If M=1" qualifier, where every other field of that register has one, so the
@@ -315,12 +321,14 @@ impl Mmc3Scramble {
             OverridePort::Port6000Mask1 | OverridePort::Port6000Mask3 => {
                 (register & 0x0F, register & 0x20 != 0)
             }
-            // "notice the bit order": the bank's bits 3, 2, 1 and 0 are the register's 5, 2, 4
-            // and 0.
+            // "notice the bit order": the bank's bits 3, 2, 1 and 0 are the register's 5, 2, 3
+            // and 0, and register bit 4 is the don't-care. Q-144 §1 / MF-FIX: the page's diagram
+            // labels bit 4, but the page's own prose says "ignore bits 0-3/5" twice and all four
+            // emulators read bit 3.
             OverridePort::Port5800 => (
                 ((register >> 2) & 0x08)
                     | (register & 0x04)
-                    | ((register >> 3) & 0x02)
+                    | ((register >> 2) & 0x02)
                     | (register & 0x01),
                 register & 0x02 != 0,
             ),
