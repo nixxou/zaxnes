@@ -51,7 +51,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
 - [x] **8/9** — the callgrind campaign against the base commit, and the feature decision per board.
-- [ ] **9/9** — golden-core, the full `--include-ignored` run with both ROM roots,
+- [x] **9/9** — golden-core, the full `--include-ignored` run with both ROM roots,
   `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
 (Ten entries and not eight: §7.2's step list puts 218 and 29 in one step, and they share nothing —
@@ -732,3 +732,92 @@ G: stayed at **14 GiB** free throughout, well above the 5 GiB floor. Each of the
 directories was deleted by `build-clean.sh` as soon as its binary was copied out, and the three
 tars were deleted once the binaries existed. No GPU ran: `bench-core` and the level-2 harness are
 both headless.
+
+---
+
+## Step 9 — golden-core, the full check, and the lot's documentation
+
+### The binary that was measured is the binary the commit builds
+
+Step 8's figures come from `unl7`, built from step 7's commit `29ae50be`. Step 8 added only its own
+progress note, so this step built `unl7ship` from **`e09b0696`** by `git archive` into a fresh
+directory and compared:
+
+    5c6dede05c967e6d46a0646dc47295af  zax-harness-unl7
+    5c6dede05c967e6d46a0646dc47295af  zax-harness-unl7ship
+
+**Byte-identical**, so every figure of step 8 is the shipped commit's — the check MF-UNL-6 step 8
+added and the first lot to make it a step of its own.
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `fc64566a` (`unl7base`) against the lot (`unl7ship`) | **byte-identical** |
+| `fc64566a` against the lot with all six features out of `default` (`unl7off`) | **byte-identical** |
+
+`md5 f79e7df842c3ee43e7d9b67861a927b5` for all three 98-line dumps — **the digest MF-UNL-2 step 9,
+MF-UNL-3 step 8, MF-UNL-4 step 8, MF-UNL-5 step 6 and MF-UNL-6 step 6 all recorded**, so six lots
+and thirty-eight mapper numbers later no commercial original's pixels, tile records, cycles, audio
+digest or blargg status has moved. golden-core runs with no hack code, so there is nothing between
+the ROM and the core.
+
+### The suite, with the ROM roots set
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1069 passed, 0 failed, 9 ignored** |
+| the same `--no-fail-fast -- --include-ignored`, with `ZAXNES_ROMS=…/demo/roms` and `ZAXNES_TEST_ROMS=…/assets-free/test-roms` | **1078 passed, 0 failed, 0 ignored** |
+
+The nine ignored are the ROM-driven ones, and the second row is the proof they ran rather than
+passing vacuously: nine moved out of the ignored column and into the passing one.
+
+### fmt and clippy
+
+`cargo fmt --all -- --check` clean. `cargo clippy --all-targets -- -D warnings` clean on
+`zax-nes` in **nine** configurations — `default`, `--no-default-features`,
+`--features parked-boards`, and each of `board-29`, `board-112`, `board-193`, `board-218`,
+`board-298` and `board-sachen8259` alone with no defaults — and on `zax-harness` in `default`.
+`cargo test -p zax-nes` is all green in the same nine. `zax-app` does not build in this worktree
+and the lot touches none of it.
+
+### The owner's rules, one line each
+
+| rule | this lot |
+| --- | --- |
+| one feature per board that costs | six features, six boards, one each |
+| +0.02 % per ROM on PR-1's thirteen and level 2's five, `total` **and** `core` | worst PR-1 ROM **+0.0003 %** (set total **−438 522**); level 2 **all five `core` and all five `total` at or below the base commit**, `ppu` and `apu` +0 to the instruction on all five |
+| a board over the tolerance is parked, never dropped | none is over; `parked-boards` keeps the one feature it has had since MF-VS |
+| no exclusion for performance | all nine numbers are in `default` and each is reachable behind its own feature with `--no-default-features` too |
+| no change to the emulation of an existing mapper | golden-core **byte-identical** over the 98 originals, and all nine numbers are new. The two boards this lot parameterises are untouched with their features off: `Namcot108` and `Vrc2Vrc4` are byte for byte what they were, their new fields, branches and methods all behind `cfg` |
+| no change to the save-state format of existing boards | `NesCore::STATE_VERSION` unchanged and **not one existing block moved**: 112 and 193 reuse `Namcot108`'s eight bank bytes and select, 298 reuses `Vrc2Vrc4`'s without a byte of its own (its flag comes from the mapper number), 29 reuses `SingleLatch`'s, and 218 has no register at all. The one new block is the 8259's, nine bytes behind its own `cfg` |
+| safe Rust | no `unsafe` anywhere in the lot |
+| nothing edited under `spec/` but new Q tickets | `Q-160.md`, `Q-161.md`, `Q-162.md` and `Q-163.md`, all new |
+
+### What the lot ships
+
+| | |
+| --- | --- |
+| boards | **6**, in `DecodeBoard` (the 8259, Magic Floor), `LatchBoard` (the RET-CUFROM) and as parameters of two existing boards (112 and 193 on `Namcot108`, 298 on `Vrc2Vrc4`) |
+| numbers | **9** — 29, 112, 137, 138, 139, 141, 193, 218, 298 |
+| features | **6**, all in `default` |
+| `Board` variants added | **0** |
+| new tests | **26**, plus four rows in the registry sweep's built expected list |
+| original titles reachable | **10** |
+| question tickets | **4** |
+
+### And the one thing no lot of this plan can do
+
+Run a game. No file in `assets-free/test-roms` uses any of the nine numbers, so all twenty-six
+tests are written from the boards' own register tables — which is why the four tickets matter more
+than usual: two of them (Q-160's mirroring pair, Q-161's CHR low bit) are observable in a few frames
+of a real dump and in no other way this build has.
+
+## The lot is closed
+
+Six boards, nine numbers, six features in `default`, no board parked, no `Board` variant added, no
+existing savestate block moved, golden-core byte-identical over the 98 originals at the digest five
+earlier lots recorded, and the whole PR-1 set plus all ten level-2 figures at or below the base
+commit.

@@ -1452,6 +1452,46 @@ page says (137 is the D and the page gives *The Great Wall* as "the only known g
 *San Guo Zhi — Qun Xiong Zheng Ba* (112); *Fighting Hero*, *War in the Gulf* (193);
 *Lethal Weapon* (298); *Magic Floor*, *Starfight* (218); *Glider* (29).
 
+> **Shipped (MF-UNL-7, 2026-11-08), with four corrections to the steps above.** All six features
+> are in `default`; `docs/progress/MF-UNL-7.md` has the steps and `docs/review/BOARD-FEATURES.md`
+> the rows. MF-UNL-2's rule — the number's own page wins — applied four times, and each case has a
+> ticket:
+>
+> * **Step 1's register list is short by one.** It asks for "internal registers 0-3 …, 4 …, 5 …
+>   and 7", and the test line for "registers 0-5 and 7". The 8259D's own page (*INES Mapper 137*)
+>   documents a **register 6**, `.... ...E`, "Select bit #3 for CHR register 3" — the bit without
+>   which that variant cannot reach the whole 32 KiB of CHR the same page gives it. It is
+>   implemented, and so is that page's R4, which is one bit **per block** where the family page's is
+>   three common upper bits. **Q-160** also records that the two pages **contradict each other** on
+>   `mm` modes 0 and 1 and on what simple mode fixes the mirroring to; each number takes its own
+>   page.
+> * **Step 2 asks for a `const` parameter "in the manner of `McAcc`"**, which is a second `Board`
+>   discriminant — MF-6c steps 2 to 5 priced one at `mmc5` **+0.066 %** against a +0.02 %
+>   tolerance. It is a load-time `bool` instead, and the emulation is identical. **Q-162** records
+>   that, and that this step's own account of the difference ("does not reload the counter") is
+>   true of a Konami VRC4 as well: the page's clause is the `A`-to-`E` copy, which is what the A/B
+>   test asserts.
+> * **Step 5 prices mapper 218 at `Mapper::nametable_page`**, and that hook cannot make a
+>   *pattern-table* fetch read the console's VRAM — which is the half of that board that matters.
+>   The 2 KiB is held as the cartridge's CHR-RAM and the nametables are answered through
+>   `Mapper::read_nametable`, the GTROM's shape: one memory, both ranges. **Q-163** records it, and
+>   the measurement that says the fifth `read_nametable` body costs nothing.
+> * **Steps 3 and 4 leave four things to the 206** that mappers 112's and 193's own pages do not
+>   state — 112's $C000-$DFFF and the low bit of its two 2 KiB CHR selects, 193's mirroring
+>   register "no games are known to rely on" (implemented and tested, as this section asks) and
+>   193's PRG-RAM, which its own mask $E007 settles. **Q-161**.
+>
+> Two things this section gets exactly right and are worth confirming: **112 and 193 really are
+> reusable through parameters** — both are `bool` fields on `board-namcot108`'s board, with no new
+> module, no new enum variant and no savestate change, and with their features off `Namcot108` is
+> byte for byte what MF-6a step 1 shipped — and **29 is one latch**, an eighth `LatchBoard` variant
+> and the first of them with CHR-RAM.
+>
+> The campaign against `fc64566a`: worst PR-1 ROM **+0.0003 %**, set total **−438 522**, and **all
+> ten level-2 figures at or below the base commit** with `ppu` and `apu` +0 to the instruction on
+> all five games. golden-core over the 98 originals is byte-identical at
+> `md5 f79e7df842c3ee43e7d9b67861a927b5` — the digest MF-UNL-2 through MF-UNL-6 all recorded.
+
 ---
 
 #### MF-UNL-8 — Huang-1's last two numbers, Cony/Yoko, and J.Y.'s simple board
