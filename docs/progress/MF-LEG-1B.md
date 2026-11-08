@@ -150,6 +150,61 @@ failures, why it is not in `parked-boards`, and the flag. Its two figure cells s
 step 4*, where they are filled in. The "worst figure among the features in `default`" paragraph
 records the swap and notes that the shipped build now does **less** work than the base commit's
 on this path.
-- [ ] 3/5 golden-core and the full test run
+- [x] 3/5 golden-core and the full test run
+
+### 3/5 — golden-core over the 98 originals, and the suites with both ROM roots
+
+```
+zax-harness golden-core G:/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+The base commit was extracted with `git archive e2507f56` into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, built there, and the directory deleted once the figures were taken.
+
+| build | md5 of the 98-ROM digest |
+| --- | --- |
+| `e2507f56`, the base commit, fresh tree (binary md5 `f25cecfcd7fee6c7016ef10dca003550`) | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `default` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/mmc1-snrom-e-bit` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical in all four** — `cmp` on the files, not only the digests — and identical to the
+digest thirteen lots have now recorded. 98 ROMs run, 98 files.
+
+**Why it could not have moved.** The 98 use mappers 0, 1 (**27 ROMs**), 2, 3, 4 and 156, so only
+mapper 1 is in play, and MF-LEG-1 step 1's extra check already established that none of the five
+dumps the old size test read as SNROMs ever commits bit 4 to `$A000` — 3600 frames each, 181 M
+instructions, sampled after every CPU instruction. The 27 mapper-1 ROMs here are a second,
+independent run of that at 1200 frames each: a game that never sets the `E` bit cannot notice the
+bit being withdrawn. The digest holding with the feature **on** is the same statement from the
+other side.
+
+**The suites**, `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, `--no-fail-fast --
+--include-ignored`:
+
+| run | result |
+| --- | --- |
+| `default` | **1176 passed, 0 failed, 0 ignored** |
+| `--features zax-nes/mmc1-snrom-e-bit` | **1176 passed, 0 failed, 0 ignored** |
+| `--features zax-nes/parked-boards` | **1237 passed, 0 failed, 0 ignored** |
+
+**This is where the two `holy-mapperel` rows are actually proved**, the suite only running when
+`ZAXNES_TEST_ROMS` points at the collection: `SNROM_ROW` is `Fail` in the first run and `Pass` in
+the second, and `check` asserts the outcome of every ROM of the group by name, so neither row can
+drift unnoticed in either direction. The default and feature totals are equal because one test
+left `default` for the feature and one joined it.
+
+**A correction to MF-LEG-1's final check.** Its table records **1244** for the `parked-boards`
+run; the figure does not reproduce, and the base commit does not produce it either. The base
+commit built from `git archive` in the fresh tree above gives **1237 total** for the same command
+(1233 passed and 4 failed, the four being `bench_core_tests`, which needs `rust/test-roms/nestest.nes`
+— a file that is deliberately never committed, so a `git archive` tree cannot have it; in a real
+checkout they pass). 1237 is therefore the base commit's number as well as this tree's, which is
+what the diff requires: the only `#[test]` items this lot moves are one that left `default` and
+one that joined it, and in a `parked-boards` build without the new feature those cancel exactly.
+**So the `parked-boards` row is unchanged by this lot and MF-LEG-1's 1244 is a transcription
+error**, not a regression. Recorded here rather than silently re-stated, since the next lot will
+compare against it.
 - [ ] 4/5 the callgrind campaign
 - [ ] 5/5 the final check
