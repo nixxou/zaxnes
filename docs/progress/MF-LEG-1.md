@@ -315,6 +315,52 @@ mirroring of a submapper-1 dump. It was the only test in the suite the change to
 
 `cargo test --release -p zax-nes -p zax-harness`: **1167 passed, 0 failed, 10 ignored**. fmt and
 clippy clean.
-- [ ] 7/9 golden-core over the 98 originals
+- [x] 7/9 golden-core over the 98 originals
+
+### 7/9 — golden-core over the 98 originals, against the base commit
+
+```
+zax-harness golden-core G:/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+The base commit was extracted with `git archive a775d0e7` into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, built there, and the directory deleted once the digest was taken.
+
+| build | binary md5 | md5 of the 98-ROM digest |
+| --- | --- | --- |
+| `leg1-base` (`a775d0e7`, fresh tree) | `fad139512082b27b724803020e683b78` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `leg1-fix` (this tree, `default`) | `8a6159927e589ab7e6c032446c6f776a` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `leg1-parked` (this tree, `--features parked-boards`) | — | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical, and identical to the digest twelve lots have now recorded.** 98 ROMs run, 98
+files, both builds. It holds with `parked-boards` on as well, which is what makes the two new
+features' park decision in step 8 a figure and not a behaviour change.
+
+**Why it could not have moved, board by board.** The 98 use mappers 0 (10 ROMs), 1 (**27**),
+2 (16), 3 (4), 4 (40) and 156 (1). Four of the six fixes are on boards that are not there at all —
+13, 18, 22/23/25 and 32 — so only steps 1 and 5 could have shown, and step 5 only on a declared
+submapper 3, of which there is none (the three NES 2.0 headers among the 98 are *Castlevania
+[World][Konami Collector's Series]* submapper 2 and the two *Zelda II* dumps, submapper 0).
+
+**So the 27 mapper-1 ROMs are an independent second run of step 1's extra check**, at 1200 frames
+each instead of 3600 and over 27 dumps instead of five, and it agrees: the SNROM `E` bit fires on
+none of them.
+
+**And the headers say the fix is right in the right direction.** Reading bytes 5, 10 and 11 of the
+five dumps step 1 tested, plus *The Legend of Zelda*:
+
+| dump | NES 2.0 | CHR-ROM | byte 10 | byte 11 | SNROM before | SNROM now |
+| --- | :-: | :-: | --- | --- | :-: | :-: |
+| *Final Fantasy (USA)* | yes | none | `$70` (8 KiB NV) | `$07` (8 KiB) | yes | **yes** |
+| *The Legend of Zelda (USA)* | yes | none | `$70` | `$07` | yes | **yes** |
+| *Metroid (USA)* | yes | none | `$07` (8 KiB volatile) | `$07` | yes | **yes** |
+| *Mega Man 2 (USA)* | yes | none | `$00` — **no RAM chip** | `$07` | yes | **no** |
+| *Zelda II (USA)* and *(Europe)* | yes | 128 KiB | `$70` | — | no | no |
+
+The three cartridges that really are SNROMs keep the bit; *Mega Man 2*, whose header declares **no
+work RAM** — it is an SGROM — loses it, which is the whole point of the narrowing. And *Zelda II*,
+which the report's "For the owner" entry 2 names first, **was never affected either way**: its
+dumps carry 128 KiB of CHR-ROM, which the old size test already excluded. Worth saying plainly to
+the owner, because the entry reads as though it were at risk.
 - [ ] 8/9 the callgrind campaign and the feature decisions
 - [ ] 9/9 the final check and the report annotations
