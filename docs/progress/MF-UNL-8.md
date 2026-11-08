@@ -53,7 +53,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **5/8** — the question tickets.
 - [x] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
 - [x] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
-- [ ] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
+- [x] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
   `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
 (Nine entries and not six: §7.2's step list puts the two Huang-1 numbers in one step and they
@@ -939,3 +939,106 @@ headless.
 against a +0.0007 % noise floor measured on the same binary twice, and level-2 `core` identical to
 the instruction on three games and below the base on two; the one `total` over tolerance is
 `luaH_getshortstr`, which the same binary moves further against itself.
+
+---
+
+## Step 8 — the lot's acceptance gate and its documentation
+
+### The binary that was measured is the binary the commit builds
+
+Step 7's figures come from `unl8`, built from step 6's commit `12efb950`. Step 7 added only its own
+progress note, so this step built `unl8ship` from **`bb99fa1b`** by `git archive` into a fresh
+directory and compared:
+
+    cfdf90abb19687f52778442c9865e976  zax-harness-unl8
+    cfdf90abb19687f52778442c9865e976  zax-harness-unl8ship
+
+**Byte-identical**, so every figure of step 7 is the shipped commit's.
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `c895a93a` (`unl8base`) against the lot (`unl8ship`) | **byte-identical** |
+| `c895a93a` against the lot with all three features out of `default` (`unl8off`) | **byte-identical** |
+| the digest | `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+
+That is the digest **MF-UNL-2, MF-UNL-3, MF-UNL-4, MF-UNL-5, MF-UNL-6 and MF-UNL-7 all recorded**.
+Seven lots, forty-three numbers, and not one pixel of a commercial original has moved — which is
+what "no change to the emulation of an existing mapper" means when it is checked rather than
+asserted.
+
+### The full run with both ROM roots
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+    cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored
+
+**1 113 passed, 0 failed, 0 ignored.** Without the two variables the same command is
+**1 104 / 0 / 9**, so the nine ignored tests move from the ignored column into the passing one —
+which is the proof that they ran rather than passed vacuously.
+
+### The final pass
+
+| check | result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| clippy `-D warnings --all-targets`, `zax-nes`, six configurations | clean in `default`, `--no-default-features`, `--features parked-boards` and each of `board-huang1`, `board-cony`, `board-91` alone |
+| clippy `-D warnings --all-targets`, `zax-harness` | clean |
+| `cargo test --release -p zax-nes -p zax-harness` | **1 104 / 0 / 9** |
+| the same with `--include-ignored` and both ROM roots | **1 113 / 0 / 0** |
+| golden-core against the base commit | **byte-identical**, `f79e7df842c3ee43e7d9b67861a927b5` |
+| the campaign and the feature decision | step 7: all three in `default` |
+| `unsafe` | none |
+| `NesCore::STATE_VERSION` | unchanged |
+| an existing board's save-state format | **none moved** — mapper 14's one field on `Vrc2Vrc4` is behind `board-huang1` and carries no savestate byte, `Mmc3` gains none, and the three new boards write their state in their own blocks |
+| `spec/` | only the five new tickets |
+
+**Thirty-one new tests** (plus five rows in the registry sweep's built expected list), written from
+the four pages' register tables because **no ROM of any of these five numbers exists** under
+`assets-free/test-roms`.
+
+### The documentation
+
+* `docs/review/BOARD-FEATURES.md`: three rows, and a new section — *Lot MF-UNL-8's three boards, and
+  the measurement that changes how every figure above should be read* — which records the
+  non-determinism, states what it does **not** change (the tolerance, and every decision already in
+  the table, all inside it by one to two orders of magnitude) and what it does change (that a figure
+  of a few thousandths of a percent in that table is at or below the floor of the instrument that
+  produced it).
+* `docs/review/UNL-census.md`: the MF-UNL-8 section gains a **Shipped** note with the lot's five
+  corrections to §7.2's steps, the campaign in three lines, and the **two findings a later lot
+  should pick up** — `Somari`'s unreachable `save_state` override and the instrument's floor. The
+  §7.2 table row is marked shipped.
+* `G:/3dsen/cleanroom/journal/JOURNAL.md`: the lot's entry, in the form the six MF-UNL lots before
+  it use.
+
+### What this lot deliberately does not do, each one pinned by a test or a ticket
+
+* **Mapper 12's submapper 1**, the FFE Magic Card 4M — copier images with a trainer, §1.8's reason
+  for mappers 6, 8 and 17 (Q-164).
+* **Mapper 83's submapper 2** — the one PCB with PRG-NVRAM at `$6000`, which needs
+  `Mapper::prg_ram_window` forwarded through `IrqBoard` for a multicart with no original title
+  (Q-167).
+* **FCEUX's reading of `$4132`**, which mapper 12's page names as *not* the hardware's, with the
+  consequence written out: version 7.5 of the *Ultimate Mortal Kombat III* hack will not run
+  correctly here, exactly as it would not on the cartridge (Q-164).
+* **The Cony solder pad**, which no header field can configure (Q-166).
+* **Mapper 238**, left out as MF-6b step 6 left it: its page is one sentence about *Contra Fighter*
+  with no register, no mask, no mode and no submapper, and `board-huang1` is the code a later lot
+  would parameterise.
+* **`Somari`'s save-state format**, which the owner's rule forbids moving even though step 6 found
+  its override unreachable.
+
+### What is still open
+
+**Q-164 to Q-168**, each implemented on its provisional choice and each pinned by a named test. The
+one a reviewer closes most usefully is **Q-168**: the bit order of mapper 91's outer bank register
+is a reading of a diagram, and the two readings swap the two middle PRG banks. Q-165 wants a real
+image of the 8-character *Samurai Spirits*; Q-166 wants a decision of principle about the pad.
+
+[PROGRESS] MF-UNL-8 step 8/8 done: golden-core byte-identical over the 98 originals at the digest
+six lots recorded, 1 113/0/0 with both ROM roots, the measured binary identical to the shipped
+commit's, `BOARD-FEATURES.md`, the census note and the journal — the lot is closed.

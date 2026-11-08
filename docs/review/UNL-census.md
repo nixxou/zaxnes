@@ -969,7 +969,7 @@ register table**, which is why §6 graded documentation, and the "titles R0 shou
 | **MF-UNL-5** — the Chinese-RPG boards with a PPU-driven CHR-RAM window | 3 | 3 | ~8 h | **13** | 1.6 |
 | **MF-UNL-6** — COOLBOY / MINDKIDS | 1 | 1 | ~8 h | **12** | 1.5 |
 | **MF-UNL-7** — the Sachen 8259, the 206 clones and two homebrew boards | 6 | 9 | ~7 h | **10** | 1.4 |
-| **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board | 3 | 5 | ~8.5 h | **10** | 1.2 |
+| **MF-UNL-8** — Huang-1's last two numbers, Cony/Yoko and J.Y.'s simple board — **shipped** | 3 | 5 | ~8.5 h | **10** | 1.2 |
 | **MF-UNL-9** — Cheapocabra (GTROM) | 1 | 1 | ~6 h | **7** | 1.2 |
 | **MF-UNL-10** — Dōngdá PEC-9588 | 1 | 1 | ~7 h | **6** | 0.9 |
 | **MF-UNL-11** — the Kǎshèng protection MMC3s | 3 | 3 | ~7 h | **6** | 0.9 |
@@ -1538,6 +1538,50 @@ already wrote 14's design. 83/264 and 91 are both IRQ boards whose hooks are bui
 **Titles R0 should run**: *Dragon Ball Z 5* (12); *Samurai Spirits*, the 8-character version (14);
 *Street Fighter II Pro*, *Fatal Fury 2*, *World Heroes 2'*, *Super Blaster VII Turbo 28* (Cony);
 *Street Fighter 3*, *Mortal Kombat II*, *Dragon Ball Z 2*, *Mario & Sonic 2* (91).
+
+> **Shipped (MF-UNL-8, 2026-11-08), with five corrections to the steps above.** All three features
+> are in `default`; `docs/progress/MF-UNL-8.md` has the steps and `docs/review/BOARD-FEATURES.md`
+> the rows.
+>
+> 1. **Step 1's "it is `Somari` with one more register" is refuted by mapper 12's own page**: "The
+>    Huang-1 ASIC functions **exclusively as an MMC3A clone** on this PCB". That board has no
+>    supervisor register, no VRC2 mode and no MMC1 mode — what sits beside the chip is a GAL16V8
+>    with one write register and one read bit, both at `$4132`. So the lot reuses the **sub-chips**
+>    (`Mmc3`, `Vrc2Vrc4`) and not mapper 116's board, and `Somari` is not touched by a line
+>    (**Q-164**). It also needs the **MMC3A** counter, which only that page states.
+> 2. **Step 3's account of the Cony board never mentions that the number is five printed circuit
+>    boards.** Four are implemented as one board with four parameters; **83.2 is refused at load**
+>    because that PCB alone puts 32 KiB of PRG-NVRAM behind `$6000`, needing
+>    `Mapper::prg_ram_window` forwarded through `IrqBoard` for a 4-in-1 multicart with no original
+>    title (**Q-167**, on MF-UNL-6's Q-157 precedent).
+> 3. **Step 3's test list asks the solder pad to "return the configured value" and there is no
+>    configuration**: a pad is cut on the board and no header field records how, so the read
+>    answers 0 and the gap is recorded (**Q-166**, with a printed register mask on the same page
+>    that cannot be right — `$5100 AND $8310` is `$0100`).
+> 4. **Step 4 under-counts mapper 91 at "one IRQ counter and four register groups".** The page has
+>    **two** counters — 64 unfiltered A12 rises against a borrow out of five-every-four M2 cycles —
+>    five register groups on submapper 1, and an **outer bank register the step does not mention**,
+>    whose diagram is an *address* and not a datum. All of it is implemented (**Q-168**).
+> 5. **Step 2 held exactly**, and so did MF-6b step 6's design for mapper 14 — bit 1 the mode and
+>    bits 3, 5 and 7 three CHR A18 bits over unequal window groups — against a prose rendering of
+>    the same page that puts every field one place lower (**Q-165**).
+>
+> The campaign against `c895a93a`: worst PR-1 ROM **+0.0004 %** and set total **+25 740**, against a
+> noise floor of **+0.0007 %** and **+163 501** measured by running the base binary *twice*; level 2
+> `core` **identical to the instruction on three of the five games and below the base on two**, with
+> `ppu` and `apu` +0 on all five. golden-core over the 98 originals is byte-identical at
+> `md5 f79e7df842c3ee43e7d9b67861a927b5` — the digest MF-UNL-2 through MF-UNL-7 all recorded.
+>
+> **Two findings a later lot should pick up**, both recorded in `docs/progress/MF-UNL-8.md`:
+> `Board` and `IrqBoard` forward `save_registers`/`load_registers` and **not**
+> `save_state`/`load_state`, so [`Somari`]'s own `save_state` override has never been called and a
+> mapper-116 savestate carries only its active chip's window table — this lot could not fix it
+> without moving an existing board's save-state format, which the owner's rule forbids. And
+> `callgrind-set.sh`'s claim that "the Ir count is deterministic to the instruction" does not hold
+> on this machine: `core` is, `total` is not, and the floor is larger than this lot's whole PR-1
+> result.
+>
+> [`Somari`]: ../../rust/crates/zax-nes/src/cartridges/mappers/somari.rs
 
 ---
 
