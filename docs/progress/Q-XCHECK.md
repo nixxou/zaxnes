@@ -15,7 +15,7 @@ appended `## Cross-check (Q-XCHECK)` section on each ticket file in `spec/change
 | 1/6 | Q-140, Q-141, Q-142, Q-143, Q-144, Q-145, Q-146, Q-147 | **done** |
 | 2/6 | Q-148, Q-149, Q-150, Q-151, Q-152 (J.Y. Company ASIC) | **done** |
 | 3/6 | Q-154, Q-155, Q-156, Q-157, Q-158, Q-159 (178, 163, 268) | **done** |
-| 4/6 | Q-160, Q-161, Q-162, Q-163 (8259, 112/193, 298, 218) | pending |
+| 4/6 | Q-160, Q-161, Q-162, Q-163 (8259, 112/193, 298, 218) | **done** |
 | 5/6 | Q-164, Q-165, Q-166, Q-167, Q-168 (12, 14, 83/264, 91) | pending |
 | 6/6 | Q-169, Q-170, Q-171, Q-172 + final check | pending |
 
@@ -95,5 +95,30 @@ support mapper 268, so those four tickets are a three-way comparison.
   nobody decodes `$xxx3` bit 5 (FCEUX's `$5000` window is a crash workaround by its own comment). One
   incidental finding: FCEUX *does* cap that board's PRG at 16 MiB, which is the ceiling §7.2 feared —
   in a project, not here.
+
+## Batch 4/6 — done
+
+Tickets Q-160 to Q-163 (the Sachen 8259 family, mappers 112 and 193, mapper 298, mapper 218).
+Fourteen more verdict rows, and **every one of them CONFIRMED** — the first batch with no OPEN and no
+CHANGE.
+
+* **Q-160 §1**: Mesen 2 implements the per-page mirroring swap *exactly* as this build does — the
+  8259D on the mapper-137 page, the A/B/C on the family page — which is the question the ticket put to
+  R0. §3 and §4 are four for four (simple mode uses CHR register 0 on every variant; register 6
+  exists and drives the 8259D's fourth window).
+* **Q-161**: all four decisions confirmed. (b) is 3-1 with **Mesen 2 the only project that keeps bit 0
+  of the 2 KiB CHR selects**; (c) is confirmed by puNES, which implements `$6004` with this build's
+  polarity and is the only other project to use the page's `$E007` eight-register decode (the three
+  that mask to two bits could not reach `$6004` at all).
+* **Q-162 is the find of the batch.** puNES's mapper 298 is one line —
+  `init_VRC2and4(VRC24_VRC4, 0x02, 0x01, FALSE, …)` — and that fourth argument, `irq_repeated`, is
+  read in exactly one place: the `$F003` A→E copy. Every Konami number passes TRUE, 298 passes FALSE.
+  So the page's clause **and this build's load-time-bool architecture** are both independently
+  confirmed, and §7.2's "does not reload the counter" is confirmed as a paraphrase (no project reloads
+  on an acknowledge).
+* **Q-163 is bit-for-bit.** Mesen 2, FCEUX and puNES all serve mapper 218's **pattern tables** from
+  the 2 KiB nametable memory, none through a nametable-page hook, and FCEUX writes this build's
+  four-row table out as a literal array with the comment "this could be done by bit logic, but this is
+  self-documenting". Reading (b) is right.
 
 `git status`: clean except `rust/target-mf/` (untracked build output, never staged).

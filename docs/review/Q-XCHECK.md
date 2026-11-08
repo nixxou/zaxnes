@@ -101,7 +101,22 @@ that point at all; "n/s" = the project does not support the number.
 | Q-158 §2 | 268 | a PRG/CHR size ceiling | — | none | — | — | n/s | — | **CONFIRMED** |
 | Q-159 | 268 | `$xxx3` bit 5, PRG-RAM at `$5000-$5FFF` | one clause | COOLBOY only, chip's 2nd 4 KiB, `$A001`-gated | — | an unconditional write window (crash hack) | n/s | — | **OPEN** |
 
-*(rows for Q-160 onward are appended by the later batches of this lot)*
+| Q-160 §1 | 137 vs 138/139/141 | R7 `mm` 0/1 differ between the two pages | yes | each page's own | **each page's own** | one table for all four | one table for all four | the two differ (family value is a third thing) | **CONFIRMED** |
+| Q-160 §2 | 137 vs 138/139/141 | what `s` fixes mirroring to | that page's mode 0 | that page's mode 0 | **that page's mode 0** | V for all four | V for all four | **that page's mode 0** | **CONFIRMED** |
+| Q-160 §3 | 137/138/139/141 | "banks become weird" = all four windows from reg 0 | family page's sentence | yes | yes | yes | yes | yes | **CONFIRMED** |
+| Q-160 §4 | 137 | internal register 6 exists | yes (CHR bit 3) | implemented | implemented | implemented | implemented | implemented | **CONFIRMED** |
+| Q-161 (a) | 112 | `$C000-$FFFF` | not described | the 206's fixed last two | fixed | fixed | fixed | fixed | **CONFIRMED** |
+| Q-161 (b) | 112 | bit 0 of the two 2 KiB CHR selects | not described | discarded (the 206's rule) | **used** | discarded | discarded | discarded | **CONFIRMED** |
+| Q-161 (c) | 193 | the `$6004` mirroring register | documented, "no game uses it" | implemented, 1 = horizontal | — | — | — | **implemented, 1 = horizontal** | **CONFIRMED** |
+| Q-161 (c') | 193 | the register mask | `$E007` (A2 decoded) | `$E007` | `& 0x03` | `$6000-$6003` | `& 0x03` | **`& 0x07`** | **CONFIRMED** |
+| Q-161 (d) | 193 | PRG-RAM behind the register window | no capacity table | `Some(0)` | none | none | none | none | **CONFIRMED** |
+| Q-162 (a) | 298 | `$F003` acknowledges without copying A into E | yes | yes | ack only (non-VRC IRQ) | `$F003` = `$F001` | `$F003` = `$F001` | **yes, via a per-board flag** | **CONFIRMED** |
+| Q-162 (a') | 298 and 21/25 | does any acknowledge reload the counter? | no | no | no | no | no | no | **CONFIRMED** |
+| Q-162 (b) | 298 | a load-time flag on the shared VRC2/VRC4 board | — | load-time `bool` | its own board | its own board | its own board | **a load-time argument on the shared board** | **CONFIRMED** |
+| Q-163 | 218 | the 2 KiB serves the pattern tables too | "mapped as CHR-RAM" | yes, reading (b) | **yes** | **yes** | n/s | **yes** | **CONFIRMED** |
+| Q-163 | 218 | the four wirings' window table | derived | A10/A11/A12/A13 per iNES byte 6 | identical | identical | n/s | identical | **CONFIRMED** |
+
+*(rows for Q-164 onward are appended by the later batches of this lot)*
 
 ---
 
@@ -858,6 +873,176 @@ unchallenged:
   of the `$6000-$7FFF` window, which is `$A001`-gated in every one of them.
 
 Keep all three. The observation that closes it is still one dump that sets the bit.
+
+## Q-160 — the Sachen 8259's two pages
+
+Boards: Mesen 2 `Core/NES/Mappers/Sachen/Sachen8259.h` (one class, a four-valued variant enum);
+FCEUX `src/boards/sachen.cpp`'s `S8259*_Init` family (one file, a `type` integer); Nestopia UE
+`source/core/board/NstBoardSachenS8259.cpp` (one class, a board enum); puNES one file per number
+(`mapper_137.c`, `_138.c`, `_139.c`, `_141.c`).
+
+* **§1, modes 0 and 1 swapped between the two pages: CONFIRMED, and Mesen 2 does exactly what this
+  build does.** `Sachen8259.h:47-48`: mode 0 is `_variant == Sachen8259D ? Horizontal : Vertical` and
+  mode 1 the converse — i.e. **the 8259D follows the mapper-137 page and the A/B/C follow the family
+  page**, which is `Sachen8259::two_screen`'s single `bool` in this build. puNES also makes the two
+  numbers differ (`mapper_137.c:76-89` gives `mm`=0 horizontal; `mapper_138.c:77-90` gives `mm`=0
+  something else), though its family value is a third thing — `(0,0,0,1)`, which is the *other*
+  Sachen page's mode 0 (the 74LS374N's, Q-141) rather than vertical. FCEUX
+  (`src/boards/sachen.cpp:26-32`, `S74LS374MSync` shared by all four 8259 types **and** by the
+  74LS374N) and Nestopia (`NstBoardSachenS8259.cpp:103-111`, one 4×4 look-up table) use **one table
+  for all four numbers**, so on both of them the 8259D contradicts its own page. Two clean votes for
+  the per-page swap, one partial, two against — and the two against are the pair that share the
+  FCEU-mm table Q-141 already found wrong on two rows.
+* **§2, what `s` fixes the mirroring to: CONFIRMED, 3-2.** `Sachen8259.h:53-56` sets simple mode to
+  `_variant == Sachen8259D ? Horizontal : Vertical` — **each variant's own mode 0**, which is this
+  build's reading and the one thing the ticket says the two pages agree on once read the right way
+  round. puNES agrees (`mapper_137.c`'s `default` arm is horizontal, `mapper_138.c`'s is vertical, and
+  an odd `R7` lands in both). FCEUX forces `MI_V` for all four (`sachen.cpp:165`) and Nestopia forces
+  `lut[0]`, which is its vertical row, for all four.
+* **§3, "banks become weird": CONFIRMED four for four.** Every project reads **CHR register 0 for all
+  four windows** when `R7` bit 0 is set — Mesen 2 `_regs[simpleMode ? 0 : n]`
+  (`Sachen8259.h:61-71`), FCEUX `if (latch[7] & 1) bank = latch[0] …` (`sachen.cpp:140-144`),
+  Nestopia `regs[(regs[7] & 0x1U) ? 0 : n]` (`NstBoardSachenS8259.cpp:138-141`), puNES
+  `reg[(reg[7] & 0x01) ? 0 : n]` (`mapper_137.c:70-73`). So the family page's concrete sentence **is**
+  what the 8259D's "banks become weird" means, including on the 8259D itself, which is exactly this
+  build's reading.
+* **§4, internal register 6: CONFIRMED four for four, and §7.2's omission is only an omission.** All
+  four give the 8259D's fourth CHR window a bit 3 from register 6: Mesen 2
+  `((_regs[6] & 0x01) << 3)` (`Sachen8259.h:64`), FCEUX `((latch[6] & 1) << 3)`
+  (`sachen.cpp:154`), Nestopia `(regs[6] << 3 & 0x08U)` (`NstBoardSachenS8259.cpp:128`), puNES
+  `((m137.reg[6] & 0x01) << 3)` (`mapper_137.c:73`). And all four compose the other three windows
+  the same way this build does — register 4's bits 0, 1 and 2 at **bank bit 4** of windows 1, 2 and 3
+  respectively.
+* **A fifth point, not in the ticket, five for five**: the 8259D's `$1000-$1FFF` is the **last 4 KiB**
+  of CHR-ROM in every project (Mesen 2 `SelectChrPage4x(1, -4)`, FCEUX `setchr4(0x1000, ~0)`,
+  Nestopia `chr.SwapBank<SIZE_4K,0x1000>(~0U)`, puNES `memmap_auto_4k(0, MMPPU(0x1000), 0xFF)`) and in
+  this build (`sachen_8259.rs:31`, `:261`). Nothing in dispute, recorded because it is the half of the
+  8259D's CHR layout the ticket does not mention.
+
+So the two questions the ticket puts to R0 come back as: **this build's per-page reading is Mesen 2's
+exactly**, and the "weird banks" sentence is the consensus of all four. Nothing to change.
+
+## Q-161 — mappers 112 and 193
+
+* **(a) mapper 112's `$C000-$FFFF`: CONFIRMED four for four.** The page describes nothing there and
+  every project fixes the top: Mesen 2 `SelectPrgPage(2, -2)` and `(3, -1)`
+  (`Core/NES/Mappers/Ntdec/Mapper112.h:27-28`), FCEUX `setprg16(0xC000, ~0)`
+  (`src/boards/112.cpp:68`), puNES banks `0xFE`/`0xFF` (`mapper_112.c:86-89`), Nestopia maps only the
+  two switchable windows and leaves the rest on its board default (the last 16 KiB). This build's
+  borrowing of the 206's "last two fixed to the end" is unanimous.
+* **(b) bit 0 of the two 2 KiB CHR selects: CONFIRMED, 3-1.** FCEUX `setchr2(0x0000, reg[2] >> 1)`
+  (`src/boards/112.cpp:43`), puNES `memmap_auto_2k(…, m112.reg[2] >> 1)` (`mapper_112.c:93`) and
+  Nestopia `banks.chr[address] = data >> uint(address < 4)` (`NstBoardNtdec.cpp:125` — the shift
+  applied only to registers 2 and 3) all discard bit 0, which is the 206's "only bits 5-1 exist for
+  2KB CHR banks" and this build's reading. **Mesen 2 alone keeps it**:
+  `SelectChrPage2x(0, _registers[2])` (`Mapper112.h:45`) maps 1 KiB pages `page` and `page+1`
+  (`BaseMapper.cpp:413-417`), so an odd register value gives a misaligned pair. Three for three with
+  this build, and the dissenter is the one project whose helper makes the mistake easy.
+* **(c) mapper 193's `$6004` mirroring register: CONFIRMED by the one project that decodes it.**
+  **puNES implements it with this build's polarity** — `mapper_193.c:73-77`, `reg[4] & 0x01` →
+  horizontal, else vertical, which is the page's "0 = vertical, 1 = horizontal". Mesen 2
+  (`Core/NES/Mappers/Ntdec/NtdecTc112.h:23`, `switch(addr & 0x03)`), FCEUX
+  (`src/boards/193.cpp`, `SetWriteHandler(0x6000, 0x6003, …)`) and Nestopia
+  (`NstBoardNtdec.cpp:151-161`, `address & 0x03`) all decode **four** registers and have no mirroring
+  register at all — i.e. three omissions of a register the page documents and says no game uses, which
+  is not a contradiction. The census was right to ask for the test.
+* **(c′) and that is the same finding as the mask.** The page's "Range,Mask: `$6000-7FFF`, `$E007`"
+  decodes A2, which is the only way `$6004` is reachable; **this build and puNES both use the
+  eight-register decode** (`m193.reg[address & 0x07]`, `mapper_193.c:52`) while the other three mask
+  to two bits. So the three that have no `$6004` could not have one.
+* **(d) `prg_ram: Some(0)`: CONFIRMED four for four.** No project puts RAM behind mapper 193's
+  register window: Mesen 2 claims `$6000-$7FFF` as a register range, FCEUX allocates no WRAM for the
+  number at all, Nestopia maps the range to its poke handler, and in puNES the whole range is the
+  register file. The mask settles it, as the ticket says, and nobody disagrees.
+* **Two side notes.** The page's three CHR registers are a *shifted* byte in every project — FCEUX
+  `reg[0] >> 2`, `reg[1] >> 1`, `reg[2] >> 1` (`src/boards/193.cpp:40-42`), Nestopia the same
+  (`NstBoardNtdec.cpp:157-159`), Mesen 2 the same (`NtdecTc112.h:25-36`), puNES the same
+  (`mapper_193.c:67-70`) — which is this build's "the bank is the byte *shifted* and not masked".
+  And on mapper 112's mirroring bit, Mesen 2 (`Mapper112.h:60`, `value & 0x01 ? Horizontal :
+  Vertical`), FCEUX (`src/boards/112.cpp:40` + `:28`, `setmirror(mirror ^ 1)` with `MI_H = 0`,
+  `MI_V = 1`) and puNES (`mapper_112.c:96-100`) all read bit 0 set as horizontal, which is this
+  build's reading of the page's parentheses.
+
+## Q-162 — mapper 298's `$F003`
+
+**Both halves CONFIRMED, and puNES independently chose this build's architecture.**
+
+`third_party/punes/src/core/mappers/mapper_298.c:31` is one line:
+`init_VRC2and4(VRC24_VRC4, 0x02, 0x01, FALSE, info.reset)` — the shared VRC2/VRC4 chip model, in the
+**VRC4b** pin configuration (CPU `$02` to A0, `$01` to A1), with a fourth argument. That argument is
+`irq_repeated` (`VRC2and4.c:199`), and the **only** place it is read is the `$F003` arm of the IRQ
+register group: `VRC2and4.c:139`, `if (vrc2and4tmp.irq_repeated) { enabled = acknowledge; }` followed
+by the acknowledge. Every Konami number passes **TRUE** (`mapper_021.c:34`, `mapper_023.c:35`,
+`mapper_025.c:34`, `mapper_022.c:33`, `mapper_014.c:59`, `mapper_183.c:43`); **mapper 298 passes
+FALSE**.
+
+So puNES:
+
+1. implements **the page's clause and nothing else** — at `$F003` mapper 298 acknowledges a pending
+   IRQ and does **not** copy `A` into `E`, where the Konami chips do;
+2. with **the same shape this build chose**: one shared board, one **load-time** per-number flag, no
+   second class and no `const` monomorphisation. That is Q-162's item (b), confirmed by an
+   independent implementation rather than argued from a measurement.
+3. and it never touches the counter in that arm — so **"does not reload the counter" is true of both
+   chips**, which is item (a)'s other half: §7.2's sentence was a paraphrase, not a second
+   observation. **No project reloads the counter on an acknowledge**, Konami or clone.
+
+The other three do not model the number as a VRC4 at all, which is itself informative:
+
+* **Mesen 2** `Core/NES/Mappers/Ntdec/Tf1201.h` is a hand-written board whose IRQ is a 341/3 CPU-cycle
+  scaler, with a single enable bit at `$F001` and **`$F003` clearing the IRQ source and nothing else**
+  (`:115-117`). The *effect* matches the page — acknowledge only — but there is no `A` bit for the
+  question to arise about.
+* **FCEUX** `src/boards/tf-1201.cpp:82-83` makes `$F003` **a second copy of `$F001`**: it sets the
+  enable from the written value, acknowledges, and subtracts 8 from the counter outside vblank.
+* **Nestopia UE** does the same by mapping the two addresses to one handler
+  (`NstBoardUnlTf1201.cpp:62`, `Map(0xF003 + i, &Tf1201::Poke_F001)`).
+
+Neither of those two is the VRC4's acknowledge either, so neither contradicts the page's clause; they
+simply describe a different chip. Between the page, this build and puNES on one side and two
+hand-rolled scanline counters on the other, this build's reading stands and its *shape* is
+corroborated.
+
+## Q-163 — mapper 218 (Magic Floor)
+
+**CONFIRMED, three for three** (Nestopia UE does not support the number), and the agreement is
+bit-for-bit.
+
+All three projects serve the **pattern tables** from the 2 KiB nametable memory — which is the half
+`Mapper::nametable_page` cannot reach and the whole point of this ticket:
+
+* **Mesen 2** `Core/NES/Mappers/Homebrew/MagicFloor218.h:28` maps all eight 1 KiB pattern windows with
+  `ChrMemoryType::NametableRam`, choosing the page as `((i * 0x400) & mask)` where `mask` is `$0400`,
+  `$0800`, `$1000` or `$2000` — **the four PPU lines of this build's table**, derived from the header's
+  mirroring exactly as this build derives them (including `Byte6 & 0x01` picking screen A or B when
+  the four-screen bit is set).
+* **FCEUX** `src/boards/datalatch.cpp:483-490` writes the table out as a literal array, with the
+  comment "this could be done by bit logic, but this is self-documenting":
+  `0,1,0,1,0,1,0,1` / `0,0,1,1,0,0,1,1` / `0,0,0,0,1,1,1,1` / `0,0,0,0,0,0,0,0` for the four values of
+  the two header bits, pointed at `NTARAM`, with `PPUCHRRAM = 0xFF` so all eight are writable. **That
+  is this build's four rows, in order.**
+* **puNES** `src/core/mappers/mapper_218.c:40-62` computes the same thing: a shift of 1, 0, 2 or 3
+  from `iNES` byte 6 bits 3 and 0 (`va10()`), applied as `(i >> shift) & 1` for the eight pattern
+  windows and `((i | 0x08) >> shift) & 1` for the four nametables, through
+  `memmap_chrrom_nmt_1k` — the cartridge-side nametable memory serving the pattern tables, i.e.
+  **reading (b)**.
+
+Expand any of the three and you get this build's table, nametable column included:
+
+| line | iNES byte 6 | the four nametables | the eight pattern windows |
+| ---: | --- | --- | --- |
+| A10 | `$A1` | `0 1 0 1` | `0 1 0 1 0 1 0 1` |
+| A11 | `$A0` | `0 0 1 1` | `0 0 1 1 0 0 1 1` |
+| A12 | `$A8` | `0 0 0 0` | `0 0 0 0 1 1 1 1` |
+| A13 | `$A9` | `1 1 1 1` | `0 0 0 0 0 0 0 0` |
+
+And **no project does it through a nametable-page hook**: each one remaps the pattern-table windows,
+which is precisely §7.2's under-pricing. Mesen 2 and FCEUX point the PPU at the console's own RAM
+(the ticket's reading (a) made to work by a hook this core has not got) and puNES keeps the memory on
+the cartridge side as this build does; the two are indistinguishable to a game, which is the ticket's
+own argument ("it is the same chip either way"). **Nothing to change, and the ticket's question 1 is
+answered: reading (b) is right, and reading (a) is only reachable with a PPU/cartridge boundary change
+that two of the three projects happen to have.**
 
 ---
 
