@@ -44,7 +44,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **1/9** — `board-sachen8259`: the index/data pair, registers 0-5 and 7, the per-variant CHR
   shift, the four mirroring modes and the CHR-RAM board.
 - [x] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
-- [ ] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
+- [x] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
 - [ ] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
 - [ ] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
 - [ ] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
@@ -243,4 +243,80 @@ about the *arrangement of the screens* rather than the mirroring. The test asser
 configurations (default, `--no-default-features`, `--features parked-boards`,
 `--no-default-features --features board-112`). `mapper_tests` **295/0/0** by default, 114/0/0 with
 the feature alone, 102/0/0 with no features, 295/0/0 with `parked-boards`; the three latch sweeps
+pass in every one.
+
+---
+
+## Step 3 — mapper 193, NTDEC's TC-112
+
+`board-193`, in `default`, implying `board-namcot108`. A second `bool` on `Namcot108`, two
+functions beside its own, a `SUPPORTED_MAPPERS` entry, a `create_board` arm and a
+`board_memory_sizes` row. **No new module, no new `Board` or `DecodeBoard` variant, and the same
+savestate block.**
+
+### What it shares with the 206, and what it does not
+
+Nothing of the register file. The TC-112 has five registers at fixed addresses and no select/data
+pair at all:
+
+```text
+Range,Mask:   $6000-7FFF, $E007
+
+$6000:  [CCCC CC..]   CHR Reg 0        $6003:  [.... PPPP]   PRG Reg
+$6001:  [CCCC CCC.]   CHR Reg 1        $6004:  [.... ...M]   Mirroring
+$6002:  [CCCC CCC.]   CHR Reg 2
+```
+
+What it does share is the window table, the eight-byte register file and this struct's savestate
+block — which is what §7.2's "112 and 193 are near-206 boards and `board-namcot108` has the 206"
+asks be reused. `write_register_193` and `update_banks_193` have no line in common with the five
+Namco numbers', and both are behind the feature, so with `board-193` off `Namcot108` is byte for
+byte what MF-6a step 1 shipped.
+
+**One ordering detail matters.** Every other number of this board begins its decode with
+`if address < 0x8000 { return; }`; mapper 193's registers are *below* that line, so its branch
+comes first in `write_register`.
+
+### The three CHR windows, which are unequal
+
+```text
+  $0000                           $1000           $1800
++-------------------------------+---------------+---------------+
+|           <<$6000>>           |    <$6001>    |    <$6002>    |
++-------------------------------+---------------+---------------+
+```
+
+4 KiB, 2 KiB, 2 KiB — and **all three registers hold a 1 KiB bank number**, which is what makes
+their diagrams differ: `CCCC CC..` loses two bits because its window is 4 KiB and `CCCC CCC.` one
+because its windows are 2 KiB. So the bank is the byte *shifted* and not masked, exactly as the
+206's own R0 and R1 are shifted one place for their 2 KiB windows. The test writes an odd byte and
+the even one below it into each and asserts they are the same bank, then asserts the three widths
+by moving one window at a time.
+
+### PRG and the window the registers occupy
+
+`| $6003 | { -3} | { -2} | { -1} |`: one switchable 8 KiB window of four and the other three fixed
+to the **end**, from four bits over this image's sixteen banks.
+
+The mask `$E007` reads A15, A14, A13 and A2-A0, so the five registers repeat every eight bytes
+through the whole of $6000-$7FFF — which is why `board_memory_sizes` gives the number
+`prg_ram: Some(0)`, mappers 114, 115 and 182's row in the same words. $6005-$6007 are inside the
+window without being registers, and A15 being clear in the mask means **no write above $8000 can
+reach this board at all**; the test asserts both.
+
+### Q-161: the mirroring register the page tells you no game uses
+
+> No games are known to rely on changing mirroring at run-time. At least some games have
+> hard-wired mirroring.
+
+That is a note about the **catalogue** and not about the register, so $6004 is implemented and
+`q_161_mapper_193_changes_mirroring_from_6004` is the test the census asks for by name. The
+polarity is the page's own "0 = vertical, 1 = horizontal".
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-193`). `mapper_tests` **299/0/0** by default, 114/0/0 with
+the feature alone, 102/0/0 with no features, 299/0/0 with `parked-boards`; the three latch sweeps
 pass in every one.

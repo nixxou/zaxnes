@@ -286,6 +286,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     190,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
+    #[cfg(feature = "board-193")]
+    193,
     #[cfg(feature = "board-mmc3-chrram")]
     194,
     #[cfg(feature = "board-mmc3-chrram")]
@@ -719,6 +721,16 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 193"), NTDEC's TC-112: "Range,Mask: $6000-7FFF, $E007", which
+        // reads A15, A14, A13 and A2-A0 -- so the board's five registers repeat every eight bytes
+        // through the whole of $6000-$7FFF and the window has to be the registers and not RAM.
+        // This is mappers 114, 115 and 182's arm above in the same words, and the page gives the
+        // board no PRG-RAM line either way (MF-UNL-7 step 3).
+        #[cfg(feature = "board-193")]
+        193 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
         // The Sachen 8259's two ports are the same pair under the same **mask $C101** ("Registers
         // should be masked with $C101"), so the row above's reason holds word for word: the index
         // and data registers repeat through the whole of $4100-$7FFF, `$6100 & $C101` is `$4100`,
@@ -954,6 +966,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // two things the page does not say (Q-161).
         #[cfg(feature = "board-112")]
         112 => Board::Namcot108(Namcot108::new(memory, mapper)),
+        // MF-UNL-7 step 3: NTDEC's TC-112, five registers at $6000-$6004 under mask $E007 with
+        // three CHR windows of unequal width. It shares the board above for the window table, the
+        // eight-byte register file and the savestate block and for nothing else -- census §7.2's
+        // "112 and 193 are near-206 boards" -- and the two decodes have no line in common.
+        #[cfg(feature = "board-193")]
+        193 => Board::Namcot108(Namcot108::new(memory, mapper)),
         // MF-6a step 2: five boards that are a register decode and nothing else, sharing one
         // `Board` discriminant. `SmallBoard`'s note has the measurement that put them there.
         #[cfg(feature = "board-small-boards")]

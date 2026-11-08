@@ -60,6 +60,7 @@ default = [
     "board-268",
     "board-sachen8259",
     "board-112",
+    "board-193",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -522,6 +523,25 @@ board-178 = ["board-decode-boards"]
 # **Q-161** records the two things the page does not say and this build takes from the 206: the
 # upper 16 KiB of PRG (fixed to the last two banks) and the low bit of the two 2 KiB CHR registers.
 board-112 = ["board-namcot108"]
+
+# Mapper 193, NTDEC's **TC-112** (MF-UNL-7 step 3): *Fighting Hero* and *War in the Gulf*. Five
+# registers at $6000-$6004 under mask $E007 -- "$6000: [CCCC CC..]", "$6001: [CCCC CCC.]",
+# "$6002: [CCCC CCC.]", "$6003: [.... PPPP]", "$6004: [.... ...M]" -- driving **three CHR windows
+# of unequal width** (4 KiB at $0000, 2 KiB at $1000, 2 KiB at $1800, all three from 1 KiB bank
+# numbers the diagrams shift rather than mask), one switchable 8 KiB PRG window of four with the
+# other three fixed to the end, and mirroring.
+#
+# It shares `board-namcot108`'s board -- the window table, the eight-byte register file and the
+# savestate block -- which is what census §7.2's "112 and 193 are near-206 boards and
+# `board-namcot108` has the 206" asks be reused; the two decodes have no line in common, and with
+# the feature off `Namcot108` is byte for byte what MF-6a step 1 shipped. Implies
+# `board-namcot108`.
+#
+# The registers are the board's decode of $6000-$7FFF, so `board_memory_sizes` gives the number
+# `prg_ram: Some(0)` -- mappers 114, 115 and 182's row. The page's "no games are known to rely on
+# changing mirroring at run-time" is a note about the catalogue and not about the register, so
+# $6004 is implemented and tested (Q-161).
+board-193 = ["board-namcot108"]
 
 # Mappers 137, 138, 139 and 141, the Sachen **8259** -- one chip with four wirings (MF-UNL-7
 # step 1). An index port at $4100 and a data port at $4101 under mask $C101, three bits wide, the

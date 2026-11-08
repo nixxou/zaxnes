@@ -44,13 +44,19 @@ use crate::NametableMirroring;
 ///   is here to pin: "the nametable control bit is present over the entire 32kB range; unlike
 ///   the associated Namco 108 which is only present at $8000-$9FFF".
 ///
-/// # The sixth number, which is not a Namco board at all
+/// # The two numbers that are not Namco boards at all
 ///
 /// **112** is an unlicensed clone (MF-UNL-7 step 2) whose page says it is "quite similar to iNES
 /// Mapper 206, which resembles an simplified MMC3; however, the registers appears to be scrambled
 /// a bit". It is here, behind `board-112`, because the scramble is in the **ports and the register
 /// order** and nothing else: the window table this board composes, `update_banks` included, is the
 /// 206's to the line. See [`Namcot108::write_register_112`].
+///
+/// **193** is NTDEC's TC-112 (MF-UNL-7 step 3), and it is here on a weaker claim: five registers
+/// at $6000-$6004, three CHR windows of **unequal** width and no select/data pair at all, so what
+/// it shares with the 206 is the window table, the eight-byte register file and this struct's
+/// savestate block — which is what census §7.2's "112 and 193 are near-206 boards and
+/// `board-namcot108` has the 206" asks be reused. See [`Namcot108::write_register_193`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Namcot108 {
     banks: BankWindows,
@@ -79,6 +85,11 @@ pub struct Namcot108 {
     /// that costs, and the five Namco numbers may not pay for a sixth that is not theirs.
     #[cfg(feature = "board-112")]
     scrambled_ports: bool,
+    /// Mapper 193: five registers at $6000-$6004 under mask $E007, three CHR windows of unequal
+    /// width and one switchable PRG window of four (MF-UNL-7 step 3). Behind its own feature for
+    /// the reason [`Namcot108::scrambled_ports`] is.
+    #[cfg(feature = "board-193")]
+    ntdec_tc112: bool,
 }
 
 impl Namcot108 {
@@ -100,7 +111,84 @@ impl Namcot108 {
             one_screen_register: mapper_number == 154,
             #[cfg(feature = "board-112")]
             scrambled_ports: mapper_number == 112,
+            #[cfg(feature = "board-193")]
+            ntdec_tc112: mapper_number == 193,
         }
+    }
+
+    /// Mapper 193's register decode, NTDEC's TC-112 (nesdev, "INES Mapper 193", MF-UNL-7 step 3).
+    ///
+    /// ```text
+    /// Range,Mask:   $6000-7FFF, $E007
+    ///
+    /// $6000:  [CCCC CC..]   CHR Reg 0
+    /// $6001:  [CCCC CCC.]   CHR Reg 1
+    /// $6002:  [CCCC CCC.]   CHR Reg 2
+    /// $6003:  [.... PPPP]   PRG Reg
+    /// $6004:  [.... ...M]   Mirroring
+    /// ```
+    ///
+    /// The mask reads A15, A14, A13 and A2-A0, so the five repeat every eight bytes through the
+    /// whole of $6000-$7FFF and `$6005`-`$6007` are inside the window without being registers.
+    /// **That is why `registry::board_memory_sizes` gives this number `prg_ram: Some(0)`**: with
+    /// no RAM behind the window `Cartridge::cpu_write` walks past its PRG-RAM branch and
+    /// [`Mapper::write_register`] sees the address intact — the route mappers 114, 115, 182, 47,
+    /// 37, 140, 184, 150 and 243 already take.
+    ///
+    /// The three CHR registers all hold a **1 KiB** bank number, which is what makes the diagrams
+    /// differ: `CCCC CC..` loses two bits because its window is 4 KiB and `CCCC CCC.` one because
+    /// its windows are 2 KiB. So the bank is the byte shifted, not masked, exactly as the 206's
+    /// own R0 and R1 are shifted one place for their 2 KiB windows.
+    #[cfg(feature = "board-193")]
+    fn write_register_193(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        match address & 0xE007 {
+            // The whole byte is latched and shifted where it is read, this board's own idiom.
+            0x6000..=0x6003 => {
+                self.bank[usize::from(address & 0x0003)] = value;
+                self.update_banks();
+            }
+            // "$6004: [.... ...M] Mirroring: 0 = vertical, 1 = horizontal", and the page adds
+            // that "no games are known to rely on changing mirroring at run-time. At least some
+            // games have hard-wired mirroring" — a note about the catalogue and not about the
+            // register, so the register is implemented and tested (Q-161).
+            0x6004 => memory.set_mirroring(if value & 0x01 == 0 {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            }),
+            // $6005-$6007, and every address outside $6000-$7FFF: the mask puts A15 clear and
+            // A14, A13 set, so no write above $8000 can reach a register of this board at all.
+            _ => {}
+        }
+    }
+
+    /// Mapper 193's window table, which shares nothing with the 206's but the type it writes into
+    /// (nesdev, "INES Mapper 193", its *PRG Setup* and *CHR Setup* rows):
+    ///
+    /// ```text
+    ///       $8000   $A000   $C000   $E000
+    ///     +-------+-------+-------+-------+
+    ///     | $6003 | { -3} | { -2} | { -1} |
+    ///     +-------+-------+-------+-------+
+    ///
+    ///       $0000                           $1000           $1800
+    ///     +-------------------------------+---------------+---------------+
+    ///     |           <<$6000>>           |    <$6001>    |    <$6002>    |
+    ///     +-------------------------------+---------------+---------------+
+    /// ```
+    ///
+    /// One switchable 8 KiB PRG window of four with the other three fixed to the **end**, and the
+    /// three unequal CHR windows: 4 KiB, 2 KiB, 2 KiB.
+    #[cfg(feature = "board-193")]
+    fn update_banks_193(&mut self) {
+        self.banks.map_prg_8k(0, i32::from(self.bank[3] & 0x0F));
+        self.banks.map_prg_8k(1, -3);
+        self.banks.map_prg_8k(2, -2);
+        self.banks.map_prg_8k(3, -1);
+
+        self.banks.map_chr_4k(0, i32::from(self.bank[0] >> 2));
+        self.banks.map_chr_2k(4, i32::from(self.bank[1] >> 1));
+        self.banks.map_chr_2k(6, i32::from(self.bank[2] >> 1));
     }
 
     /// Mapper 112's register decode, and the whole of what it adds to this board
@@ -186,6 +274,15 @@ impl Namcot108 {
     }
 
     fn update_banks(&mut self) {
+        // Mapper 193's window table, which shares nothing with the five Namco numbers' but the
+        // type it writes into. Behind the feature, so that with `board-193` off this function is
+        // what MF-6a step 1 shipped.
+        #[cfg(feature = "board-193")]
+        if self.ntdec_tc112 {
+            self.update_banks_193();
+            return;
+        }
+
         self.refresh_nametable_pages();
 
         // "8K + 8K + 16K fixed": R6 at $8000, R7 at $A000, the last two banks at $C000 and
@@ -287,6 +384,14 @@ impl Mapper for Namcot108 {
     /// one costs all thirteen nothing at all (step 1's experiment X).
     #[inline(never)]
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        // Mapper 193's five registers are at **$6000-$7FFF**, below the guard every other number
+        // of this board starts with, so its decode comes first (MF-UNL-7 step 3).
+        #[cfg(feature = "board-193")]
+        if self.ntdec_tc112 {
+            self.write_register_193(memory, address, value);
+            return;
+        }
+
         if address < 0x8000 {
             return;
         }

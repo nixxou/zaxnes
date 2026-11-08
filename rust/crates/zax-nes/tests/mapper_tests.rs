@@ -162,6 +162,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   appears to be scrambled a bit" -- three ports at $8000/$A000/$E000 and the 206's eight
     //   register indices rotated by six, which is **one `bool` on `Namcot108`** and not a board --
     //   behind `board-112` (MF-UNL-7 step 2, Q-161);
+    // * 193, NTDEC's TC-112 -- five registers at $6000-$6004 under mask $E007, three CHR windows
+    //   of **unequal** width and one switchable PRG window of four -- which shares `Namcot108`'s
+    //   window table and savestate block and nothing else, behind `board-193` (MF-UNL-7 step 3);
     // * 137, 138, 139 and 141, the Sachen 8259 -- one chip with four wirings (the 8259D, B, C and
     //   A, in that order of number), an index/data pair at $4100/$4101 under mask $C101 and a
     //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
@@ -195,7 +198,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 97] = [
+    let additions: [(i32, bool); 98] = [
         (19, true),
         (24, true),
         (26, true),
@@ -283,6 +286,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (189, cfg!(feature = "board-189")),
         (190, cfg!(feature = "board-190")),
         (192, chrram),
+        (193, cfg!(feature = "board-193")),
         (194, chrram),
         (195, chrram),
         (206, namcot),
@@ -11344,4 +11348,158 @@ fn req_core_090_mapper_112_survives_a_save_and_restore() {
     // which the rotation makes the 206's R1 — the 2 KiB CHR window at $0800.
     core.mapper_write(0xA000, 0x0C);
     assert_eq!([12, 13], core.chr_windows()[2..4]);
+}
+
+// ------------------------------------------- mapper 193, NTDEC's TC-112, MF-UNL-7 step 3
+
+/// The three CHR windows are **unequal** and each comes from its own register (nesdev, "INES
+/// Mapper 193"):
+///
+/// ```text
+///   $0000                           $1000           $1800
+/// +-------------------------------+---------------+---------------+
+/// |           <<$6000>>           |    <$6001>    |    <$6002>    |
+/// +-------------------------------+---------------+---------------+
+/// ```
+///
+/// All three registers hold a **1 KiB** bank number, which is what makes their diagrams differ:
+/// `CCCC CC..` loses two bits because its window is 4 KiB and `CCCC CCC.` one because its windows
+/// are 2 KiB. So the bank is the byte shifted and not masked, exactly as the 206's own R0 and R1
+/// are shifted one place for their 2 KiB windows (MF-UNL-7 step 3).
+#[cfg(feature = "board-193")]
+#[test]
+fn req_core_102_mapper_193_banks_three_unequal_chr_windows() {
+    let mut core = MapperRom::new(193).prg(16).chr(64).load();
+
+    // Power-on: every register zero, so 1 KiB bank 0 at the head of all three windows.
+    assert_eq!([0, 1, 2, 3, 0, 1, 0, 1], core.chr_windows());
+
+    // $6000 drives the **4 KiB** window at $0000-$0FFF, and its low two bits do not exist.
+    core.mapper_write(0x6000, 0x08);
+    assert_eq!([8, 9, 10, 11], core.chr_windows()[..4]);
+    core.mapper_write(0x6000, 0x0B);
+    assert_eq!(
+        [8, 9, 10, 11],
+        core.chr_windows()[..4],
+        "`CCCC CC..`: the low two bits are not bank bits"
+    );
+
+    // $6001 drives the **2 KiB** window at $1000-$17FF and $6002 the one at $1800-$1FFF, each
+    // losing one bit.
+    core.mapper_write(0x6001, 0x10);
+    core.mapper_write(0x6002, 0x20);
+    assert_eq!([8, 9, 10, 11, 16, 17, 32, 33], core.chr_windows());
+    core.mapper_write(0x6001, 0x11);
+    core.mapper_write(0x6002, 0x21);
+    assert_eq!(
+        [8, 9, 10, 11, 16, 17, 32, 33],
+        core.chr_windows(),
+        "`CCCC CCC.`: the low bit is not a bank bit"
+    );
+
+    // And the three windows are genuinely different widths: one register moves 4 KiB of pattern
+    // space and the other two 2 KiB each.
+    core.mapper_write(0x6000, 0x00);
+    assert_eq!([0, 1, 2, 3, 16, 17, 32, 33], core.chr_windows());
+}
+
+/// One switchable 8 KiB PRG window of four, the other three "fixed to the last three banks"
+/// (nesdev, "INES Mapper 193", its *PRG Setup* row `| $6003 | { -3} | { -2} | { -1} |`), and
+/// `[.... PPPP]` is four bits over this image's sixteen banks (MF-UNL-7 step 3).
+#[cfg(feature = "board-193")]
+#[test]
+fn req_core_102_mapper_193_switches_one_prg_window_and_fixes_the_last_three() {
+    let mut core = MapperRom::new(193).prg(16).chr(64).load();
+    assert_eq!([0, 13, 14, 15], core.prg_windows());
+
+    core.mapper_write(0x6003, 0x05);
+    assert_eq!([5, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x6003, 0x0F);
+    assert_eq!([15, 13, 14, 15], core.prg_windows());
+
+    // Four bits, so bits 7-4 of the byte are not bank bits.
+    core.mapper_write(0x6003, 0xF5);
+    assert_eq!([5, 13, 14, 15], core.prg_windows());
+}
+
+/// "$6004: [.... ...M] Mirroring", with "Range,Mask: $6000-7FFF, $E007" — which reads A15, A14,
+/// A13 and A2-A0, so the five registers repeat every eight bytes through the whole of $6000-$7FFF
+/// and `registry::board_memory_sizes` has to give the number no PRG-RAM.
+///
+/// The page's "No games are known to rely on changing mirroring at run-time. At least some games
+/// have hard-wired mirroring" is a note about the **catalogue** and not about the register, so the
+/// register is implemented and this is the test the census asks for by name (Q-161, MF-UNL-7
+/// step 3).
+#[cfg(feature = "board-193")]
+#[test]
+fn q_161_mapper_193_changes_mirroring_from_6004() {
+    let mut core = MapperRom::new(193).prg(16).chr(64).load();
+
+    core.mapper_write(0x6004, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.mapper_write(0x6004, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    core.mapper_write(0x6004, 0xFE);
+    assert_eq!(Nm::Vertical, core.mirroring(), "bit 0 alone");
+
+    // The mask: $7FFC is $6004 and $7FFB is $6003, so the five repeat to the top of the window.
+    core.mapper_write(0x7FFC, 0x01);
+    assert_eq!(Nm::Horizontal, core.mirroring(), "the ports repeat");
+    core.mapper_write(0x7FFB, 0x07);
+    assert_eq!([7, 13, 14, 15], core.prg_windows());
+
+    // $6005-$6007 are inside the window and are **not** registers.
+    let before = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    for address in [0x6005u16, 0x6006, 0x6007] {
+        core.mapper_write(address, 0x00);
+    }
+    assert_eq!(
+        before,
+        (core.prg_windows(), core.chr_windows(), core.mirroring()),
+        "$6005-$6007 reach nothing"
+    );
+
+    // And no address above $8000 can be a register under this mask: A15 is clear in it.
+    for address in [0x8000u16, 0xE000, 0xE004, 0xFFFC] {
+        core.mapper_write(address, 0x00);
+    }
+    assert_eq!(
+        before,
+        (core.prg_windows(), core.chr_windows(), core.mirroring()),
+        "the board has no port above $8000"
+    );
+}
+
+/// REQ-CORE-090/091: the four bank registers survive a save and a restore, with the state dirtied
+/// first. The block is `Namcot108`'s own and **unchanged**, which is what lets this number share
+/// the board (MF-UNL-7 step 3).
+#[cfg(feature = "board-193")]
+#[test]
+fn req_core_090_mapper_193_survives_a_save_and_restore() {
+    let mut core = MapperRom::new(193).prg(16).chr(64).load();
+    core.mapper_write(0x6000, 0x14);
+    core.mapper_write(0x6001, 0x18);
+    core.mapper_write(0x6002, 0x1C);
+    core.mapper_write(0x6003, 0x09);
+    core.mapper_write(0x6004, 0x01);
+
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    assert_eq!(
+        (
+            [9, 13, 14, 15],
+            [20, 21, 22, 23, 24, 25, 28, 29],
+            Nm::Horizontal
+        ),
+        banks
+    );
+    let state = core.save_state(true).unwrap();
+
+    core.reset();
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(
+        banks,
+        (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+    assert_eq!(state, core.save_state(true).unwrap());
 }
