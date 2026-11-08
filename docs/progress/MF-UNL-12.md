@@ -223,3 +223,62 @@ brief restates from MF-UNL-2.
 [`IrqBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/irq_boards.rs
 [`DecodeBoard`]: ../../rust/crates/zax-nes/src/cartridges/mappers/decode_boards.rs
 [`IremLrog017`]: ../../rust/crates/zax-nes/src/cartridges/mappers/irem_lrog017.rs
+
+## Step 1 — `board-262`, the Sachen UNL-SHERO
+
+`rust/crates/zax-nes/src/cartridges/mappers/mmc3_shero.rs`, one boxed `IrqBoard` variant holding
+an `Mmc3` and **one register byte**. No `Board` discriminant, no new `BankWindows` method, and no
+`Mmc3Board` body changed: three `cfg` lists widened (`chr_bank_of_window`, `force_ignore_a000`,
+`refresh_banks`) and one more on `BankWindows::or_chr_banks_each`.
+
+### What the board is
+
+* **`$8000-$FFFF`** is the chip's, whole. The page's "Mask: probably `$E001`" *is* the MMC3's own
+  mask, so the guess decides nothing — every write is handed to the [`Mmc3`] and decoded there.
+* **`$4100` write**, `address & $C100 == $4100` as the page guesses it: bit **6** picks which CHR
+  chip the PPU reaches, bits 3-0 drive **CHR A18** over the four 2 KiB regions.
+* **`$4100` read**: the title jumper in bit 7, through `IrqBoard::try_read_prg` — a forward that
+  variant already had for five earlier boards, so `Board`'s dispatches grow nothing.
+* **8 KiB of CHR-RAM** beside the CHR-ROM, a `board_memory_sizes` row for the TQROM's reason (no
+  header field can state a CHR-RAM chip beside a CHR-ROM), banked by bits 0-2 of whatever 1 KiB
+  bank number the chip put in the window.
+* **four-screen** from the board's wiring, which is `NametableMirroring::FourScreen` plus
+  `Mmc3Board::force_ignore_a000` — `ppu::VRAM_SIZE` being 4 KiB is the whole of the "4 KiB of
+  additional VRAM".
+
+### The four readings Q-172 records, and why the page was read as raw wikitext
+
+| what | the page | implemented |
+| --- | --- | --- |
+| the CHR-ROM/-RAM select's bit | `.M.. 8421` under `Bit 7654 3210` | bit **6** — `M` is at the header's 6 and bit 7 is `.` |
+| the four A18 lines' regions | four annotation lines, each `+` naming its bit | bit 3 → `$0000`, bit 2 → `$0800`, bit **1** → `$1800`, bit **0** → `$1000` |
+| the CHR-RAM chip's address lines | **nothing at all** | the MMC3's own bank bits 0-2, the TQROM's reading |
+| the jumper | a board wiring; no submapper defined | **0**, *Street Heroes*, with the gap recorded |
+| `$A000` | "As normal MMC3", beside four-screen VRAM | inert, because a four-screen board drives CIRAM A10 **and** A11 |
+| the two masks | "probably `$E001`", "unknown, but probably `$C100`" | as written, both |
+
+The first two are column arithmetic, and a prose paraphrase of that diagram got **both** wrong —
+it put the select at bit 7 and the four regions in address order. That is why every diagram of
+this lot was taken from `?action=raw`.
+
+### Tests (4 new, all from the page)
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_262_selects_the_chr_ram_chip_from_4100_bit_6` | the select from **both** sides — bit 7 set changes nothing, bit 6 set swaps the chip — plus the chip's three address lines: banks `$11` and `$19` are one kilobyte and `$12` another |
+| `q_172_mapper_262_crosses_the_two_bottom_chr_a18_lines_against_their_regions` | one bit at a time over all eight windows, so the crossing is visible; then all four at once, which reaches every bank of a 512 KiB CHR-ROM; then twice, which is idempotent because a line is a line |
+| `q_172_mapper_262_is_four_screen_from_its_wiring_and_its_a000_is_inert` | four distinct kilobytes of VRAM for all four header mirroring bits, through five values of `$A000` and a reset |
+| `q_172_mapper_262_answers_its_title_jumper_under_the_pages_c100_mask` | the port answers at six addresses of `address & $C100 == $4100` |
+
+### The check at this step
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | **clean** |
+| `cargo test --release -p zax-nes` | **all green**, `mapper_tests` 379 passed / 0 failed |
+
+Two sweeps needed the number added rather than merely passing, which is the point of having
+them: `req_core_100_every_required_mapper_is_registered`'s `additions` table (110 → 111 entries)
+and `mf_5a_every_board_that_moves_on_the_ppu_bus_is_latched`'s expected vector — 262 **twice**,
+the page giving the number no submapper and the board refusing neither half of the pair.

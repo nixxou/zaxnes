@@ -81,6 +81,8 @@ mod mmc3_kof97;
 mod mmc3_outer;
 #[cfg(feature = "board-mmc3-scramble")]
 mod mmc3_scramble;
+#[cfg(feature = "board-262")]
+mod mmc3_shero;
 #[cfg(feature = "board-189")]
 mod mmc3_txc189;
 #[cfg(feature = "board-215")]
@@ -216,6 +218,8 @@ pub use mmc3_kof97::Mmc3Kof97;
 pub use mmc3_outer::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 pub use mmc3_scramble::Mmc3Scramble;
+#[cfg(feature = "board-262")]
+pub use mmc3_shero::Mmc3Shero;
 #[cfg(feature = "board-189")]
 pub use mmc3_txc189::Mmc3Txc189;
 #[cfg(feature = "board-215")]

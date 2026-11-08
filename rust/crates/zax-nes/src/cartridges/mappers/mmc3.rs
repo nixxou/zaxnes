@@ -393,8 +393,12 @@ impl<
     /// The number is re-derived from the register here rather than read off [`BankWindows`],
     /// because the window table holds the bank wrapped modulo the *CHR-ROM's* size and that wrap
     /// need not preserve the chip-select line or the chip's own low bits.
-    #[cfg(feature = "board-119")]
-    fn chr_bank_of_window(&self, window: usize) -> u8 {
+    ///
+    /// **`pub(crate)` and widened for mapper 262** (MF-UNL-12 step 1), whose 8 KiB CHR-RAM chip is
+    /// selected by a register rather than by a bank number and so needs exactly this answer: the
+    /// bank the chip drives at that window, before the window table's wrap.
+    #[cfg(any(feature = "board-119", feature = "board-262"))]
+    pub(crate) fn chr_bank_of_window(&self, window: usize) -> u8 {
         let high = usize::from(self.select & 0x80 != 0) * 4;
         if window >= high && window < high + 4 {
             // The 2 KiB half: R0 over the first two windows of it, R1 over the next two.
@@ -685,7 +689,8 @@ impl<
         feature = "board-189",
         feature = "board-215",
         feature = "board-208",
-        feature = "board-219"
+        feature = "board-219",
+        feature = "board-262"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
@@ -762,7 +767,13 @@ impl<
     /// `$A000` section and puts "mirroring control" among the board's own additional registers, so
     /// the chip's one mirroring register drives nothing there either. Its submapper 1 says the
     /// opposite in its own words and so does not call this (Q-171).
-    #[cfg(any(feature = "board-huang1", feature = "board-208"))]
+    ///
+    /// **Mapper 262 is the third caller** (MF-UNL-12 step 1): that board carries the 4 KiB of
+    /// nametable four-screen mirroring needs, so the cartridge drives CIRAM A10 **and** A11 and the
+    /// chip's one mirroring register reaches nothing -- which is the same condition a four-screen
+    /// *header* already reaches at load. Its page says "$A000: As normal MMC3" all the same, so the
+    /// choice is recorded in Q-172 and pinned by a test.
+    #[cfg(any(feature = "board-huang1", feature = "board-208", feature = "board-262"))]
     pub(crate) fn force_ignore_a000(&mut self) {
         self.ignore_a000 = true;
     }

@@ -167,8 +167,13 @@ impl BankWindows {
     /// re-apply it after every register write without remembering what it last laid down. The same
     /// reading, and the same reason, as [`Self::or_chr_banks`] above.
     ///
-    /// Additive: behind `board-huang1`, its only caller.
-    #[cfg(feature = "board-huang1")]
+    /// **Mapper 262 is the second caller** (MF-UNL-12 step 1): its `$4100` bits 3-0 are "Select
+    /// 256 KiB CHR-ROM bank" for the four 2 KiB regions, one CHR A18 line each, and the page's own
+    /// annotation order crosses the two bottom regions against the bits -- so the lines are not the
+    /// same line over all eight windows and not even monotone in the address.
+    ///
+    /// Additive: behind `board-huang1` and `board-262`, its only callers.
+    #[cfg(any(feature = "board-huang1", feature = "board-262"))]
     pub fn or_chr_banks_each(&mut self, bits: [i32; Self::CHR_WINDOWS]) {
         for (slot, line) in bits.into_iter().enumerate() {
             let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);

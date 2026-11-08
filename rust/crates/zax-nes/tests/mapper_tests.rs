@@ -39,6 +39,7 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// windows, and on the Sachen 8259 (141) it is the unbanked 8 KiB of the 2M-RAM-COB board, whose
 /// CHR registers drive nothing at all.
 #[cfg(any(
+    feature = "board-262",
     feature = "board-29",
     feature = "board-77",
     feature = "board-96",
@@ -255,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 110] = [
+    let additions: [(i32, bool); 111] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -363,6 +364,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (219, cfg!(feature = "board-219")),
         (232, small),
         (243, sachen),
+        (262, cfg!(feature = "board-262")),
         (263, cfg!(feature = "board-263")),
         (264, cony),
         (268, cfg!(feature = "board-268")),
@@ -6752,7 +6754,8 @@ fn somari_mode(core: &mut NesCore, value: u8) {
     feature = "board-huang1",
     feature = "board-208",
     feature = "board-215",
-    feature = "board-219"
+    feature = "board-219",
+    feature = "board-262"
 ))]
 fn chr_offsets(core: &NesCore) -> [usize; 8] {
     core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
@@ -15608,6 +15611,176 @@ fn amd_061_a_reset_puts_every_board_of_mf_unl_11_back_to_its_power_on_state() {
         assert!(
             !core.cartridge().unwrap().irq_asserted(),
             "mapper {mapper}: and no pending IRQ"
+        );
+    }
+}
+
+// -------------------- MF-UNL-12 step 1: mapper 262, the Sachen UNL-SHERO
+
+/// nesdev ("NES 2.0 Mapper 262"), the `$4100` **write** diagram: `.M.. 8421`, with `M` the
+/// "Select CHR-ROM/-RAM" bit — "0: CHR-ROM, 1: CHR-RAM".
+///
+/// **Q-172: `M` is bit 6 and not bit 7.** The diagram's three lines are `Bit 7654 3210`, a rule of
+/// nine dashes, and `.M.. 8421`; aligned, `M` sits where the header line has **6** and bit 7 is a
+/// `.`. The *read* diagram's `J` is the one at bit 7 — the two are not symmetrical — so this test
+/// asserts the select from both sides: a write with bit 7 set and bit 6 clear leaves the CHR-ROM
+/// in place, and one with bit 6 set swaps the chip.
+///
+/// The second half is the chip's own address lines, which the page does not state at all
+/// (Q-172 again): an 8 Ki × 8 SRAM has A0-A12, PPU A0-A9 drive its low ten and the MMC3's CHR bank
+/// lines the top three — so the chip is banked by **bits 0-2** of the 1 KiB bank number the chip
+/// put in that window, and banks `$11` and `$19` are the same kilobyte of RAM.
+#[cfg(feature = "board-262")]
+#[test]
+fn req_core_102_mapper_262_selects_the_chr_ram_chip_from_4100_bit_6() {
+    let mut core = MapperRom::new(262).prg(16).chr(512).load();
+    core.mmc3_bank(0, 0x10);
+    core.mmc3_bank(2, 0x11);
+    assert_eq!(0x10, peek(&core, 0x0000), "the CHR-ROM, at power-on");
+    assert_eq!(0x11, peek(&core, 0x1000), "and its 1 KiB half");
+
+    // Bit 7 is a `.` in the diagram: it latches into the register and selects nothing.
+    core.mapper_write(0x4100, 0x80);
+    assert_eq!(0x10, peek(&core, 0x0000), "bit 7 is not the select");
+
+    // Bit 6 is.
+    core.mapper_write(0x4100, 0x40);
+    chr_write(&mut core, 0x0000, 0x5A);
+    chr_write(&mut core, 0x1000, 0x3C);
+    assert_eq!(0x5A, peek(&core, 0x0000), "the CHR-RAM chip");
+    assert_eq!(0x3C, peek(&core, 0x1000));
+
+    // The chip's three lines: window 4's bank is R2, and `$11 & 7` is 1 — the same kilobyte
+    // `$19 & 7` names, which is what "the lines above the chip are not connected" means.
+    core.mmc3_bank(2, 0x19);
+    assert_eq!(
+        0x3C,
+        peek(&core, 0x1000),
+        "banks $11 and $19 are one kilobyte of an 8 KiB chip"
+    );
+    // and `$12 & 7` is 2, a different one.
+    core.mmc3_bank(2, 0x12);
+    assert_eq!(0x00, peek(&core, 0x1000), "bank $12 is another kilobyte");
+
+    // Back to the ROM, which no PPU write while the RAM was selected can have touched.
+    core.mapper_write(0x4100, 0x00);
+    assert_eq!(0x10, peek(&core, 0x0000));
+    assert_eq!(0x12, peek(&core, 0x1000));
+}
+
+/// The four high CHR bits of `$4100`, each "Select 256 KiB CHR-ROM bank" for one 2 KiB region —
+/// CHR A18, which is what takes this board above 256 KiB of CHR-ROM.
+///
+/// **Q-172: the four lines are not in address order.** Each annotation line's `+` names its bit,
+/// and read against the header they are bit 3 → `$0000-$07FF`, bit 2 → `$0800-$0FFF`, bit 1 →
+/// **`$1800-$1FFF`**, bit 0 → **`$1000-$17FF`**. So the four regions in address order take bits
+/// 3, 2, **0**, **1**: the `8421` the diagram labels those four bits with is their *weight*, and
+/// the bottom two regions are crossed over against it. One bit at a time is the only way to show
+/// it, and that crossing is the whole point of the loop below.
+///
+/// The offsets and not the bytes, for `chr_offsets`'s own reason: a 256-bank move reads the same
+/// fill byte.
+#[cfg(feature = "board-262")]
+#[test]
+fn q_172_mapper_262_crosses_the_two_bottom_chr_a18_lines_against_their_regions() {
+    let mut core = MapperRom::new(262).prg(16).chr(512).load();
+    // One distinct bank per window: R0 and R1 are the two 2 KiB registers, R2-R5 the four 1 KiB.
+    core.mmc3_bank(0, 0x00);
+    core.mmc3_bank(1, 0x10);
+    for register in 2..6u8 {
+        core.mmc3_bank(register, 0x20 + register);
+    }
+    let base = [0x00usize, 0x01, 0x10, 0x11, 0x22, 0x23, 0x24, 0x25];
+    assert_eq!(
+        base.map(|bank| bank * 1024),
+        chr_offsets(&core),
+        "the chip's own eight windows, all inside the first 256 KiB"
+    );
+
+    // (the bit of $4100, the two 1 KiB windows the page gives it)
+    for (bit, windows) in [(3u8, [0usize, 1]), (2, [2, 3]), (0, [4, 5]), (1, [6, 7])] {
+        core.mapper_write(0x4100, 1 << bit);
+        let expected: [usize; 8] = std::array::from_fn(|window| {
+            (base[window] + if windows.contains(&window) { 0x100 } else { 0 }) * 1024
+        });
+        assert_eq!(
+            expected,
+            chr_offsets(&core),
+            "$4100 bit {bit} is CHR A18 over windows {windows:?} and over no other"
+        );
+    }
+
+    // All four at once, which is the second 256 KiB half everywhere.
+    core.mapper_write(0x4100, 0x0F);
+    assert_eq!(
+        base.map(|bank| (bank + 0x100) * 1024),
+        chr_offsets(&core),
+        "and the board reaches every bank of a 512 KiB CHR-ROM"
+    );
+
+    // The line is a line and not an addend: setting it twice is setting it once.
+    core.mapper_write(0x4100, 0x0F);
+    assert_eq!(base.map(|bank| (bank + 0x100) * 1024), chr_offsets(&core));
+}
+
+/// "as well **4 KiB of additional VRAM for four-screen mirroring**" — the board carries the
+/// nametable the arrangement needs, so the mirroring is its wiring and not byte 6 of a header.
+/// `ppu::VRAM_SIZE` is 4 KiB, so this core's own VRAM *is* those four pages, which is mapper 77's
+/// reading of the same sentence.
+///
+/// **Q-172**: the page also says "`$A000`: As normal MMC3", and the two cannot both be literally
+/// true — a four-screen board drives CIRAM A10 **and** A11 from the cartridge, so the chip's one
+/// mirroring register reaches nothing. The second half of this test is that choice: every value of
+/// `$A000` leaves all four pages distinct, and so does a reset.
+#[cfg(feature = "board-262")]
+#[test]
+fn q_172_mapper_262_is_four_screen_from_its_wiring_and_its_a000_is_inert() {
+    let pages = |core: &NesCore| {
+        [0x2000u16, 0x2400, 0x2800, 0x2C00].map(|address| core.map_nametable(address))
+    };
+    for bits in [0x00u8, 0x01, 0x08, 0x09] {
+        let mut core = MapperRom::new(262).prg(16).chr(32).mirroring(bits).load();
+        assert_eq!(Nm::FourScreen, core.mirroring(), "header bits {bits:#04X}");
+        assert_eq!(
+            [0x0000, 0x0400, 0x0800, 0x0C00],
+            pages(&core),
+            "header bits {bits:#04X}: four pages, four distinct kilobytes of VRAM"
+        );
+
+        for value in [0x00u8, 0x01, 0x02, 0x03, 0xFF] {
+            core.mapper_write(0xA000, value);
+            assert_eq!(
+                Nm::FourScreen,
+                core.mirroring(),
+                "header {bits:#04X}, $A000 = {value:#04X}"
+            );
+            assert_eq!([0x0000, 0x0400, 0x0800, 0x0C00], pages(&core));
+        }
+
+        core.reset();
+        assert_eq!(Nm::FourScreen, core.mirroring(), "and after a reset");
+        assert_eq!([0x0000, 0x0400, 0x0800, 0x0C00], pages(&core));
+    }
+}
+
+/// The *read* side of `$4100`: `J... ....`, "Jumper value — 0: Game title is *Street Heroes*;
+/// 1: Game title is *侍魂 (Shìhún)* (Samurai Spirits)".
+///
+/// **Q-172**: the jumper is the board's wiring and **no header field can state which of the two
+/// titles a dump is** — the page defines no submapper either — so this build answers **0**, the
+/// page's first-listed title, and records the gap rather than inventing a heuristic. What this
+/// test pins is that the port answers at all, under the page's own "probably `$C100`" mask: A15
+/// clear, A14 set, A8 set, every other line free.
+#[cfg(feature = "board-262")]
+#[test]
+fn q_172_mapper_262_answers_its_title_jumper_under_the_pages_c100_mask() {
+    // No PRG-RAM declared, so that $6000-$7FFF reaches the board and the whole mask can be shown.
+    let core = MapperRom::new(262).prg(16).chr(32).load();
+    for address in [0x4100u16, 0x4101, 0x41FF, 0x4300, 0x5F00, 0x7F00] {
+        assert_eq!(
+            0x00,
+            core.read_memory(address),
+            "{address:#06X} is inside `address & $C100 == $4100`: the jumper, 0 for Street Heroes"
         );
     }
 }

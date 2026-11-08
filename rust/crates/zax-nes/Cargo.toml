@@ -71,6 +71,7 @@ default = [
     "board-215",
     "board-208",
     "board-219",
+    "board-262",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -228,6 +229,28 @@ board-208 = []
 # field and its six-bit extended index values can both be true -- and `Mask: $5003` is read as
 # $F003, because taken literally it would decode $D002/$D003, the chip's own IRQ ports.
 board-219 = []
+
+# NES 2.0 mapper 262, the Sachen **UNL-SHERO** (MF-UNL-12 step 1): an MMC3 clone with "both
+# CHR-ROM and 8 KiB of CHR-RAM, as well 4 KiB of additional VRAM for four-screen mirroring". One
+# port, $4100: bit **6** picks which CHR chip the PPU reaches, bits 3-0 drive CHR A18 over the four
+# 2 KiB regions -- in the page's own order, which gives bit 1 the region $1800-$1FFF and bit 0 the
+# region $1000-$17FF, crossing the two bottom regions against the "8421" weights the diagram labels
+# them with -- and a **read** of the same port answers the board's title jumper in bit 7. Two
+# original titles, *Street Heroes* and *侍魂 (Shìhún)*.
+#
+# One boxed `IrqBoard` variant holding an `Mmc3` and one register byte. The CHR-RAM chip is banked
+# by bits 0-2 of whatever 1 KiB bank number the chip put in the window -- the TQROM's arithmetic
+# through `Mmc3Board::chr_bank_of_window`, whose `cfg` this feature widens -- and the 8 KiB is a
+# `board_memory_sizes` row for the TQROM's reason: no header field can state a CHR-RAM chip beside
+# a CHR-ROM. The 4 KiB of four-screen VRAM is the console's own (`ppu::VRAM_SIZE`), so the board
+# only says `NametableMirroring::FourScreen` and takes `$A000` away from the chip.
+#
+# **Q-172** holds the four readings this page forces: the two masks it calls "probably" or
+# "unknown" and leaves as written, the select being bit **6** and the A18 lines being crossed
+# (both read off the diagram's column positions), the CHR-RAM chip's own three address lines,
+# which the page does not state at all, and the jumper -- a board wiring no header field can
+# declare, answered as 0 (*Street Heroes*) with the gap recorded.
+board-262 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

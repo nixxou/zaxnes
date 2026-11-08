@@ -20,6 +20,8 @@ use super::Mmc3Multicart;
 use super::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::Mmc3Scramble;
+#[cfg(feature = "board-262")]
+use super::Mmc3Shero;
 #[cfg(feature = "board-189")]
 use super::Mmc3Txc189;
 #[cfg(feature = "board-215")]
@@ -200,6 +202,15 @@ pub enum IrqBoard {
     /// sixteen bytes of extended bank registers, so inline it would set this enum's size.
     #[cfg(feature = "board-219")]
     Mmc3A9461(Box<Mmc3A9461>),
+    /// NES 2.0 mapper 262, the Sachen **UNL-SHERO** (MF-UNL-12 step 1): an MMC3 clone with 8 KiB
+    /// of CHR-RAM beside its CHR-ROM, a source select and four CHR A18 lines at `$4100`, and
+    /// four-screen mirroring.
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// its own register, so inline it would set this enum's size. `try_read_prg` -- the jumper --
+    /// is a method this variant already forwards for five earlier boards.
+    #[cfg(feature = "board-262")]
+    Mmc3Shero(Box<Mmc3Shero>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -341,6 +352,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Gouder208($b) => $body,
             #[cfg(feature = "board-219")]
             IrqBoard::Mmc3A9461($b) => $body,
+            #[cfg(feature = "board-262")]
+            IrqBoard::Mmc3Shero($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]
@@ -525,6 +538,8 @@ impl Mapper for IrqBoard {
     /// measured `Mmc5::try_read_prg` and `Cartridge::try_cpu_read` **identical to the
     /// instruction** with `Board` at thirty-six, thirty-eight and thirty-nine variants. Step 8
     /// of this lot re-measures it rather than taking that on trust.
+    /// **Mapper 262 is the sixth** (MF-UNL-12 step 1): a read of its `$4100` answers the board's
+    /// jumper bit, which is what tells *Street Heroes* from *侍魂*.
     /// **Mapper 12 is the fourth board to need it** (MF-UNL-8 step 1): its GAL answers a read of
     /// `$4132` with a language bit, and `Mapper::try_read_prg`'s default answers `None` there.
     /// **Mapper 208 is the fifth** (MF-UNL-11 step 2): its four protection registers answer a read
@@ -533,6 +548,7 @@ impl Mapper for IrqBoard {
     #[cfg(any(
         feature = "board-mmc3-scramble",
         feature = "board-208",
+        feature = "board-262",
         feature = "board-268",
         feature = "board-cony",
         feature = "board-huang1",

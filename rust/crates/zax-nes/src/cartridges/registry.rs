@@ -40,6 +40,8 @@ use super::mappers::Mmc3Multicart;
 use super::mappers::Mmc3Outer;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::mappers::Mmc3Scramble;
+#[cfg(feature = "board-262")]
+use super::mappers::Mmc3Shero;
 #[cfg(feature = "board-189")]
 use super::mappers::Mmc3Txc189;
 #[cfg(feature = "board-215")]
@@ -357,6 +359,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     232,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
+    // four-screen mirroring (MF-UNL-12 step 1).
+    #[cfg(feature = "board-262")]
+    262,
     #[cfg(feature = "board-263")]
     263,
     #[cfg(feature = "board-cony")]
@@ -544,6 +550,21 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-77")]
         77 => BoardMemorySizes {
             chr_ram: Some(IremLrog017::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("NES 2.0 Mapper 262"): the UNL-SHERO uses "an MMC3 clone with both CHR-ROM and
+        // **8 KiB of CHR-RAM**" (MF-UNL-12 step 1). **No header field can state it**, which is the
+        // TQROM's arm's reason in the same words: byte 5 of an iNES 1.0 header is the CHR-*ROM*
+        // size and REQ-CORE-012's CHR-RAM default only applies to an image with no CHR-ROM at all,
+        // so a UNL-SHERO dump would come up with none and its software-rendered text boxes would
+        // have nowhere to go.
+        //
+        // The 4 KiB of "additional VRAM for four-screen mirroring" the same sentence gives the
+        // board is **not** here: it is the console's own nametable RAM, `ppu::VRAM_SIZE` being
+        // 4 KiB, which is mapper 77's arm's reading of the same shape.
+        #[cfg(feature = "board-262")]
+        262 => BoardMemorySizes {
+            chr_ram: Some(Mmc3Shero::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // MR-13-1, nesdev ("CPROM") and REQ-CORE-100's mapper table: the board carries "16 KiB
@@ -1446,6 +1467,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // gives the number no submapper, so there is nothing to refuse.
         #[cfg(feature = "board-219")]
         219 => Board::IrqBoard(IrqBoard::Mmc3A9461(Box::new(Mmc3A9461::new(
+            memory, mapper,
+        )))),
+        // MF-UNL-12 step 1: the Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM beside its
+        // CHR-ROM. `$4100` bit 6 picks the chip and bits 3-0 drive CHR A18 over the four 2 KiB
+        // regions -- in the page's own order, which crosses the two bottom regions against the
+        // bits -- and a read of the same port answers the board's title jumper. The board is
+        // four-screen from its wiring, so the chip's `$A000` is inert (Q-172). The page gives the
+        // number no submapper, so there is nothing to refuse.
+        #[cfg(feature = "board-262")]
+        262 => Board::IrqBoard(IrqBoard::Mmc3Shero(Box::new(Mmc3Shero::new(
             memory, mapper,
         )))),
         // MF-UNL-11 step 2: the unnamed Gouder board of the Street Fighter IV backport, an
