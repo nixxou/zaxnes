@@ -502,8 +502,33 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // elsewhere." This build does not take that path -- the board's chip is the board's,
         // which is the rule every arm of this function follows, and the two numbers then differ
         // by the one thing their pages differ by. Q-143 records it.
+        // Mapper 195's own row, ahead of the family's: its PRG-RAM is **12 KiB**, the FS303
+        // compatible board's 4 KiB at CPU $5000-$5FFF followed by the ordinary 8 KiB of WRAM at
+        // $6000-$7FFF. nesdev ("INES Mapper 195") gives the window to a board that "**adds** 4
+        // KiB of non-battery-backed PRG-RAM … mapped to CPU $5000-$5FFF", and the two projects
+        // that implement it put it past the WRAM the same way -- FCEUX gives this number, and no
+        // other MMC3 clone, 16 KiB and maps 4 KiB bank 2 there (`mmc3.cpp:1036-1041`, `:1044`);
+        // puNES maps the same bank 2 (`mapper_195.c:134-137`).
+        //
+        // The extra chip is the **head** and the WRAM the tail, which is what `battery_offset`
+        // below needs to keep the save file 8 KiB and the page's "non-battery-backed" true; see
+        // `Mmc3ChrRamBoard::EXTRA_RAM_SIZE` for the table and Q-173 for what R0 is asked.
+        #[cfg(feature = "board-195-prg-ram-5000")]
+        195 => BoardMemorySizes {
+            prg_ram: Some(Mmc3ChrRamBoard::EXTRA_RAM_SIZE + 2 * BankWindows::PRG_WINDOW_SIZE),
+            chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
+            ..BoardMemorySizes::default()
+        },
+        // 195 again for the build with that feature off, where it is the plain FS303 of MF-UNL-2
+        // step 2 and its row is the family's. The two arms are spelled out rather than left to
+        // one `74 | 192 | 194 | 195` so that neither configuration has an unreachable pattern.
+        #[cfg(all(feature = "board-mmc3-chrram", not(feature = "board-195-prg-ram-5000")))]
+        195 => BoardMemorySizes {
+            chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-mmc3-chrram")]
-        74 | 192 | 194 | 195 => BoardMemorySizes {
+        74 | 192 | 194 => BoardMemorySizes {
             chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
             ..BoardMemorySizes::default()
         },
@@ -1035,6 +1060,14 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
         // the EEPROM and not the RAM, and the save file is 512 bytes whatever the RAM chip is.
         #[cfg(feature = "board-164")]
         164 => Pec9588::VOLATILE_RAM_SIZE,
+        // MF-FIX, CHANGE 2: mapper 195's FS303 compatible board carries two RAM chips, and the
+        // page says which of them the battery is not on -- "adds 4 KiB of **non-battery-backed**
+        // PRG-RAM … mapped to CPU $5000-$5FFF". That 4 KiB is the head of the allocation, so the
+        // battery slice is the 8 KiB of WRAM behind it and the save file stays the 8 KiB the
+        // eleven ordinary FS303 titles already wrote. Mapper 1's SOROM row above is the same
+        // arrangement with the sizes swapped.
+        #[cfg(feature = "board-195-prg-ram-5000")]
+        195 if prg_ram_size > Mmc3ChrRamBoard::EXTRA_RAM_SIZE => Mmc3ChrRamBoard::EXTRA_RAM_SIZE,
         _ => 0,
     }
 }

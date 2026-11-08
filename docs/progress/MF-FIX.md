@@ -17,8 +17,8 @@ separate lot).
 ## Steps
 
 - [x] 1/10 — the progress note and the base commit
-- [ ] 2/10 — CHANGE 1: mapper 123's `$5800` bank field takes its bit 1 from register bit 3
-- [ ] 3/10 — CHANGE 2: mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF`
+- [x] 2/10 — CHANGE 1: mapper 123's `$5800` bank field takes its bit 1 from register bit 3
+- [x] 3/10 — CHANGE 2: mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF`
 - [ ] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
 - [ ] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
 - [ ] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
@@ -74,3 +74,70 @@ and 187 take other arms of the same `match`. No save-state byte moves, no `Board
 no hot path.
 
 `cargo test --release -p zax-nes`: all green (386 in `mapper_tests`, the new test included).
+
+### 3/10 — CHANGE 2, mapper 195's 4 KiB of PRG-RAM at `$5000-$5FFF`
+
+The one thing of mapper 195's page MF-UNL-2 left out. nesdev ("INES Mapper 195"): "A compatible
+circuit board (with unknown PCB code) **adds** 4 KiB of non-battery-backed PRG-RAM (recognizable as
+such in the NES 2.0 header) mapped to CPU `$5000-$5FFF`", used by *天神之剑*.
+
+**The report's fix description is wrong on its own sources and this step does not follow it.** It
+says "over the second 4 KiB of the board's 8 KiB WRAM"; both implementations put the window *past*
+the WRAM, not inside it. FCEUX's `Mapper195_Init` passes `GenMMC3_Init(info, 512, 256, **16**,
+…)` — 16 KiB of WRAM, where every other MMC3 clone in that file passes 8 or 0 — and maps 4 KiB
+bank 2 of it at `$5000` (`mmc3.cpp:1036-1041`, `:1044`); puNES maps the same bank 2 over
+`wram_fix_MMC3_base`'s 8 KiB bank 0 at `$6000` (`mapper_195.c:134-137`, `MMC3.c:237-251`). The
+page's "adds" says the same thing. So the window is **a chip of its own**.
+
+**What was built.** Mapper 195's PRG-RAM is 12 KiB in one allocation:
+
+| bytes | chip | window | battery |
+| --- | --- | --- | --- |
+| `0x0000..0x1000` | the compatible board's 4 KiB | `$5000-$5FFF` | no |
+| `0x1000..0x3000` | the ordinary 8 KiB WRAM | `$6000-$7FFF` | yes, when the header says so |
+
+The extra chip is the **head** and not the tail, and that is the choice that does the work:
+`Cartridge::battery_ram` is `prg_ram[battery_offset..]`, a *tail* slice by construction (mapper 1's
+SOROM and mapper 164's 93C66 are the function's two other rows), so with the extra chip at the head
+`battery_offset` answers `0x1000`, the battery slice is the WRAM alone, the page's
+"non-battery-backed" stays true and **the save file of a battery-backed mapper-195 image is
+byte-for-byte what it was**. At the tail the battery would have covered it and every such save file
+would have grown from 8 KiB to 12 KiB.
+
+Files: `Mmc3ChrRamBoard::{EXTRA_RAM_SIZE, extra_ram_offset, has_extra_ram, prg_ram_window,
+try_read_prg, write_register}` in `mmc3_chrram.rs`; `IrqBoard::prg_ram_window` in `irq_boards.rs`;
+the mapper-195 rows of `registry::board_memory_sizes` and `registry::battery_offset`.
+
+`Mmc3Board` is **untouched**, deliberately: the window lives on the inner enum, so mappers 4, 118,
+119, 47 and 37 keep the code they had. The reads go through `Mmc3ChrRamBoard::try_read_prg` (the
+shape `Mmc3Outer::try_read_prg` already uses for mapper 268's second window) and the writes through
+`write_register`, which is where `Cartridge::cpu_write` sends everything outside `$6000-$7FFF` — so
+neither `Board::try_read_prg` nor `Board::intercept_cpu_write` gains an arm. `$A001` does not gate
+the chip: both implementations install a plain handler over the range.
+
+**A feature of its own, `board-195-prg-ram-5000` (implies `board-mmc3-chrram`), in `default`.**
+Putting `$6000` at `0x1000` is the one part with a price — it is the only reason this build makes
+`IrqBoard` forward `Mapper::prg_ram_window`, the cost Q-167 flagged and MF-6c steps 2 to 5 priced
+at `mmc5` +0.066 % for a new body in a `Board` dispatch. This one is a body in the *`IrqBoard`*
+dispatch, and **no ROM of the PR-1 thirteen or the five level-2 games is an `IrqBoard` board** —
+they are NROM, MMC1, the MMC3 of `Board::Mmc3`, CNROM and the MMC5 — so what is left to measure is
+code layout. Step 9 has the figure; with the feature off, mapper 195 is exactly the FS303 of
+MF-UNL-2 step 2, so parking it costs the other eleven titles nothing.
+
+**Q-173 raised**, because the report left two questions to R0 and `CLAUDE.md` forbids choosing
+silently: whether the window is unconditional (built: yes, as in FCEUX and puNES) or gated on the
+NES 2.0 header the page's parenthesis names, and which 4 KiB of the allocation it is (built: the
+head; the two implementations agree only on a 16 KiB chip, since puNES's `memmap_control_bank`
+wraps bank 2 to bank 0 on a 4 KiB one).
+
+**Tests**: `q_173_mapper_195_has_4_kib_of_prg_ram_at_5000` pins the four points — the whole 4 KiB
+read/write with A0-A11 straight through; neither window showing the other's bytes; `$A001` bits 7
+and 6 not reaching the chip; and the family's other three numbers having no window at `$5000`. The
+comment on `req_core_114_the_chr_ram_family_keeps_the_mmc3s_scanline_counter`, which recorded the
+omission, now records the fix, and that test's `$6000` assertions are what prove the WRAM window
+did not move.
+
+Checks: fmt; clippy `-D warnings` on `zax-nes --all-targets` in default, `--no-default-features`
+and `--no-default-features --features board-mmc3-chrram`; `cargo test --release -p zax-nes` green
+(387 in `mapper_tests`), and 109 green in `mapper_tests` with the new feature off. A row for the
+feature is in `docs/review/BOARD-FEATURES.md` with its figures pointing at step 9.

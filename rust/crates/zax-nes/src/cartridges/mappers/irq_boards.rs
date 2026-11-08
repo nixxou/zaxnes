@@ -452,6 +452,28 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.prg_ram_enabled())
     }
 
+    /// Forwarded for mapper 195 alone — the FS303 compatible board's 4 KiB of PRG-RAM at
+    /// `$5000-$5FFF`, which is the **head** of that board's allocation so that the page's
+    /// "non-battery-backed" stays true, leaving `$6000-$7FFF` at an offset of 4 KiB
+    /// (MF-FIX, CHANGE 2 of `docs/review/Q-XCHECK.md`; see
+    /// [`Mmc3ChrRamBoard::EXTRA_RAM_SIZE`](super::Mmc3ChrRamBoard::EXTRA_RAM_SIZE)).
+    ///
+    /// **It is the one dispatch this change adds**, which is why it carries its own feature:
+    /// Q-167 priced this forward before the window existed, and MF-6c steps 2 to 5 measured one
+    /// new body in a `Board` dispatch at `mmc5` +0.066 % against a +0.02 % tolerance. This one is
+    /// a body in the *`IrqBoard`* dispatch and not in `Board`'s, and no ROM of lot PR-1's
+    /// thirteen nor of the five level-2 games is an `IrqBoard` board at all — they are NROM,
+    /// MMC1, the MMC3 of `Board::Mmc3`, CNROM and the MMC5 — so what is left to measure is code
+    /// layout, not work done. MF-FIX step 9 has the figures.
+    ///
+    /// **Behaviour-neutral for the other boards of this enum**: no other variant overrides
+    /// `prg_ram_window`, and `Mmc3ChrRamBoard`'s own body answers the trait default for 74, 192
+    /// and 194, so every one of them gets the answer the un-forwarded dispatch gave it.
+    #[cfg(feature = "board-195-prg-ram-5000")]
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        inner!(self, b => b.prg_ram_window(memory))
+    }
+
     /// Forwarded for the TQROM alone (mapper 119, MF-6a3 step 1), which is an MMC3 board and so
     /// has the MMC3's $A001: bit 7 enables the RAM and **bit 6 write-protects it**. Without the
     /// forward, `Mapper::prg_ram_writable`'s default would answer

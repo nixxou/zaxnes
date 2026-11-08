@@ -25,6 +25,7 @@ default = [
     "board-116",
     "board-119",
     "board-mmc3-chrram",
+    "board-195-prg-ram-5000",
     "board-mmc3-scramble",
     "board-263",
     "board-189",
@@ -134,6 +135,16 @@ board-119 = []
 # +0.039 %, which is Lua's `ltable.c` -- a pair of binaries with identical emulation moves it by
 # -0.034 %. See `docs/review/BOARD-FEATURES.md`.
 board-mmc3-chrram = ["board-119"]
+
+# Mapper 195's **compatible board**: the 4 KiB of non-battery-backed PRG-RAM nesdev gives it at
+# CPU $5000-$5FFF, used by *天神之剑* (MF-FIX, CHANGE 2 of `docs/review/Q-XCHECK.md`; Q-142,
+# Q-173). A feature of its own, and not part of `board-mmc3-chrram`, because it is the one part of
+# the change with a price: it is the only thing in this build that makes `IrqBoard` forward
+# `Mapper::prg_ram_window`, which Q-167 had already priced as a risk, and the owner's rule is one
+# feature per board that costs. With it off, mapper 195 is exactly the FS303 of MF-UNL-2 step 2 --
+# an 8 KiB chip at $6000-$7FFF, nothing at $5000-$5FFF -- so parking it costs the other eleven
+# titles nothing.
+board-195-prg-ram-5000 = ["board-mmc3-chrram"]
 
 # Mappers 114, 115, 121, 123, 182 and 187 -- the SuperGame/Hosenkan board and the Kasheng
 # SFC-02B, A9711/A9713, UNL-H2288 and A98402: six MMC3 clones that add some of the same three

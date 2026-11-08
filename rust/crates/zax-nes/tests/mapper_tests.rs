@@ -6551,12 +6551,14 @@ fn req_core_100_mapper_195_gal_moves_the_chr_ram_window_at_run_time() {
 /// counter and `$A001` PRG-RAM protection are the MMC3's — and `IrqBoard`'s entry condition is
 /// that they answer *yes* to [`Mapper::irq_asserted`].
 ///
-/// 195's own page names one more thing this build takes from the header rather than the board:
-/// "A compatible circuit board (with unknown PCB code) adds 4 KiB of non-battery-backed PRG-RAM
-/// (recognizable as such in the NES 2.0 header) mapped to CPU $5000-$5FFF" — *天神之剑*. That
-/// window is **not** implemented and the reason is the page's own parenthesis: the header is the
-/// only indicator and this core has no $5000-$5FFF RAM window on any board. The test pins what
-/// the board does carry instead.
+/// 195's own page names one more thing: "A compatible circuit board (with unknown PCB code) adds
+/// 4 KiB of non-battery-backed PRG-RAM (recognizable as such in the NES 2.0 header) mapped to CPU
+/// $5000-$5FFF" — *天神之剑*. That window **was** the one thing of the page this build did not
+/// carry; MF-FIX added it behind `board-195-prg-ram-5000` once the cross-check found FCEUX and
+/// puNES both mapping it unconditionally (CHANGE 2, Q-173), and
+/// `q_173_mapper_195_has_4_kib_of_prg_ram_at_5000` is its test. This one pins the rest of the
+/// board, `$A001` included — and the `$6000` assertions below are what prove that putting the new
+/// chip at the head of the allocation left the WRAM window where it was.
 #[cfg(feature = "board-mmc3-chrram")]
 #[test]
 fn req_core_114_the_chr_ram_family_keeps_the_mmc3s_scanline_counter() {
@@ -6599,6 +6601,96 @@ fn req_core_114_the_chr_ram_family_keeps_the_mmc3s_scanline_counter() {
             0x5A,
             core.read_memory(0x6000),
             "mapper {mapper}: $A001 = $C0 write-protects"
+        );
+    }
+}
+
+/// **Q-173**, MF-FIX / CHANGE 2 of `docs/review/Q-XCHECK.md`: nesdev ("INES Mapper 195") gives the
+/// FS303 a compatible board that "**adds** 4 KiB of non-battery-backed PRG-RAM (recognizable as
+/// such in the NES 2.0 header) mapped to CPU `$5000-$5FFF`", used by *天神之剑* — Waixing's
+/// translation of *Crystalis*. This build did not carry the window; the cross-check found FCEUX
+/// (`mmc3.cpp:1036-1041`) and puNES (`mapper_195.c:134-137`) both mapping it on **every**
+/// mapper-195 image, and both putting it *past* the 8 KiB that `$6000-$7FFF` shows.
+///
+/// The four things this pins, in order:
+///
+/// 1. the window reads and writes, over the whole 4 KiB, with CPU A0-A11 straight through;
+/// 2. it is **a chip of its own** — the page's "adds" — so no byte of it is visible through
+///    `$6000-$7FFF` and no byte of the WRAM is visible through `$5000-$5FFF`;
+/// 3. the MMC3's `$A001` does **not** gate it, which is what makes it usable from reset and what
+///    both implementations do;
+/// 4. the other three numbers of the family have no such window, which is the discriminant for
+///    the per-variant test inside the board.
+#[cfg(feature = "board-195-prg-ram-5000")]
+#[test]
+fn q_173_mapper_195_has_4_kib_of_prg_ram_at_5000() {
+    let mut core = MapperRom::new(195usize).prg(16).chr(64).load();
+
+    // (1) The whole 4 KiB takes writes and gives them back, with A0-A11 straight through: the
+    // first, the last and one in the middle, and $5000 and $5FFF must not be the same byte.
+    for (address, value) in [(0x5000u16, 0x11u8), (0x5ABC, 0x22), (0x5FFF, 0x33)] {
+        core.write_memory(address, value);
+    }
+    for (address, value) in [(0x5000u16, 0x11u8), (0x5ABC, 0x22), (0x5FFF, 0x33)] {
+        assert_eq!(
+            value,
+            core.read_memory(address),
+            "$5000-$5FFF is 4 KiB of RAM, A0-A11 straight through ({address:#06X})"
+        );
+    }
+
+    // (2) A chip of its own. $A001 enables the WRAM, and then neither window shows the other's
+    // bytes: the extra chip is the head of the allocation and $6000-$7FFF starts behind it.
+    core.mapper_write(0xA001, 0x80);
+    core.write_memory(0x6000, 0x44);
+    core.write_memory(0x6ABC, 0x55);
+    core.write_memory(0x7FFF, 0x66);
+    assert_eq!(
+        [0x11, 0x22, 0x33],
+        [
+            core.read_memory(0x5000),
+            core.read_memory(0x5ABC),
+            core.read_memory(0x5FFF)
+        ],
+        "the WRAM writes must not have reached the $5000 chip"
+    );
+    assert_eq!(
+        [0x44, 0x55, 0x66],
+        [
+            core.read_memory(0x6000),
+            core.read_memory(0x6ABC),
+            core.read_memory(0x7FFF)
+        ],
+        "and the WRAM window is unmoved: 8 KiB, its own bytes"
+    );
+
+    // (3) $A001 does not gate the extra chip. Bit 7 clear disables the WRAM and bit 6 write-
+    // protects it; the $5000 window goes on reading and writing through both.
+    core.mapper_write(0xA001, 0xC0); // Enabled, write-protected.
+    core.write_memory(0x5ABC, 0x77);
+    assert_eq!(
+        0x77,
+        core.read_memory(0x5ABC),
+        "$A001 bit 6 write-protects the WRAM, not the compatible board's chip"
+    );
+    core.mapper_write(0xA001, 0x00); // Disabled.
+    core.write_memory(0x5ABC, 0x88);
+    assert_eq!(
+        0x88,
+        core.read_memory(0x5ABC),
+        "$A001 bit 7 disables the WRAM, not the compatible board's chip"
+    );
+
+    // (4) The family's other three numbers have no window there: a write is a register write
+    // their boards do not decode, and the read is not RAM.
+    for mapper in [74usize, 192, 194] {
+        let mut core = MapperRom::new(mapper).prg(16).chr(64).load();
+        core.mapper_write(0xA001, 0x80);
+        core.write_memory(0x5ABC, 0x99);
+        assert_ne!(
+            0x99,
+            core.read_memory(0x5ABC),
+            "mapper {mapper}: only 195's compatible board has the $5000 window"
         );
     }
 }
