@@ -952,8 +952,12 @@ directory and compared:
 
     cfdf90abb19687f52778442c9865e976  zax-harness-unl8
     cfdf90abb19687f52778442c9865e976  zax-harness-unl8ship
+    cfdf90abb19687f52778442c9865e976  zax-harness-unl8final
 
-**Byte-identical**, so every figure of step 7 is the shipped commit's.
+**Three binaries, one md5.** The third is `unl8final`, built the same way from **`b2b50dac`** — the
+lot's *last* commit, this note included — so the chain is closed at both ends: the figures of step 7
+are the shipped commit's, and the shipped commit is the one the lot ends on. golden-core run again
+from that third binary is `md5 f79e7df842c3ee43e7d9b67861a927b5`, the same digest.
 
 ### golden-core over the 98 commercial originals, 1 200 frames each
 
