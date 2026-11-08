@@ -39,7 +39,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
 - [x] **4/8** — the question tickets, the four sweeps, the save-state round-trip and the feature
   configurations.
 - [x] **5/8** — the callgrind campaign against the base commit, and the feature decision.
-- [ ] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
+- [x] **6/8** — golden-core against the base commit, and the full `--include-ignored` run with
   both ROM roots.
 - [ ] **7/8** — `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
@@ -461,3 +461,65 @@ G: stayed above **18 GiB** free throughout. Each of the three build directories 
 `build-clean.sh` as soon as its binary was copied out; the three source tars were deleted after
 the last build. No GPU campaign; every long run in the foreground with its output read, as the
 headless rule requires.
+
+---
+
+## Step 6 — golden-core against the base commit, and the full check
+
+### The binary that was measured is the binary the commit builds
+
+Step 5's figures come from `unl6`, built from step 4's commit `499e1aa2`. Step 5 added only its own
+progress note, so this step built `unl6ship` from **`c1376dc3`** by `git archive` into a fresh
+directory and compared:
+
+    4b457c6c14d74216f57327b95b2a4fda  zax-harness-unl6
+    4b457c6c14d74216f57327b95b2a4fda  zax-harness-unl6ship
+
+**Byte-identical**, so every figure of step 5 is the shipped commit's. (And `unl6base` is
+byte-identical to MF-UNL-5's own `unl5` and `unl5ship`, as step 5 recorded, so the whole campaign
+is on one instrument.)
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `a4315007` (`unl6base`) against the lot (`unl6ship`) | **byte-identical** |
+| `a4315007` against the lot with `board-268` out of `default` (`unl6off`) | **byte-identical** |
+
+`md5 f79e7df842c3ee43e7d9b67861a927b5` for all three 98-line dumps — **the digest MF-UNL-2 step 9,
+MF-UNL-3 step 8, MF-UNL-4 step 8 and MF-UNL-5 step 6 all recorded**, so five lots and twenty-nine
+mapper numbers later no commercial original's pixels, tile records, cycles, audio digest or blargg
+status has moved. golden-core runs with no hack code, so there is nothing between the ROM and the
+core.
+
+### The suite, with the ROM roots set
+
+| | |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1043 passed, 0 failed, 9 ignored** |
+| the same `--no-fail-fast -- --include-ignored`, with `ZAXNES_ROMS=…/demo/roms` and `ZAXNES_TEST_ROMS=…/assets-free/test-roms` | **1052 passed, 0 failed, 0 ignored** |
+
+The nine ignored are the ROM-driven ones, and the second row is the proof they ran rather than
+passing vacuously: nine moved out of the ignored column and into the passing one.
+
+### fmt and clippy
+
+`cargo fmt --all -- --check` clean. `cargo clippy -D warnings` clean on **both** crates the lot's
+tests touch — `zax-nes --all-targets` in all four configurations (step 4's table) and
+`zax-harness --all-targets` in `default`. `zax-app` does not build in this worktree and the lot
+touches none of it.
+
+### The owner's rules, one line each
+
+| rule | this lot |
+| --- | --- |
+| one feature per board that costs | one feature, one board |
+| +0.02 % per ROM on PR-1's thirteen and level 2's five, `total` **and** `core` | worst PR-1 ROM **+0.001 %** (set total **−150 669**); level 2 all five `core` **+0 to the instruction**, worst `total` **+0.0195 %** (`smb3`), whose 4.31 M is one Lua symbol |
+| a board over the tolerance is parked, never dropped | none is over; `parked-boards` keeps the one feature it has had since MF-VS |
+| no exclusion for performance | the number is in `default` and reachable behind its feature with `--no-default-features` too |
+| no change to the emulation of an existing mapper | golden-core **byte-identical** over the 98 originals, and 268 is a new number |
+| no change to the save-state format of existing boards | `NesCore::STATE_VERSION` unchanged; the six bytes added are appended behind `Mmc3`'s own block and behind the `cfg` that is the only reason the board exists |
+| safe Rust | no `unsafe` anywhere in the lot |
+| nothing edited under `spec/` but new Q tickets | `Q-156.md`, `Q-157.md`, `Q-158.md` and `Q-159.md`, all new |
