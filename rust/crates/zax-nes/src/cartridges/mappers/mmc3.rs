@@ -394,15 +394,15 @@ impl<
     /// because the window table holds the bank wrapped modulo the *CHR-ROM's* size and that wrap
     /// need not preserve the chip-select line or the chip's own low bits.
     ///
-    /// **`pub(crate)` and widened for mapper 262** (MF-UNL-12 step 1), whose 8 KiB CHR-RAM chip is
-    /// selected by a register rather than by a bank number and so needs exactly this answer: the
-    /// bank the chip drives at that window, before the window table's wrap.
+    /// **`pub(crate)` and widened for mapper 292** (MF-UNL-12 step 2): its page's "when Bit 7 in
+    /// the MMC3's index register is set, MMC3 registers 2/3 instead of register 0 apply" is exactly
+    /// "the bank the chip drives at that window", so asking per window is what makes that note
+    /// need no code of its own.
     ///
-    /// **And for mapper 292** (MF-UNL-12 step 2), which needs it for a second reason: its page's
-    /// "when Bit 7 in the MMC3's index register is set, MMC3 registers 2/3 instead of register 0
-    /// apply" is exactly "the bank the chip drives at that window", so asking per window is what
-    /// makes that note need no code of its own.
-    #[cfg(any(feature = "board-119", feature = "board-262", feature = "board-292"))]
+    /// **Mapper 262 was the other caller and no longer is**: MF-UNL-12 step 1 banked that board's
+    /// CHR-RAM chip by this answer's low three bits, and MF-FIX made the chip unbanked
+    /// (`docs/review/Q-XCHECK.md` §CHANGE 7, Q-172 §1.3), so `board-262` is off this `cfg` list.
+    #[cfg(any(feature = "board-119", feature = "board-292"))]
     pub(crate) fn chr_bank_of_window(&self, window: usize) -> u8 {
         let high = usize::from(self.select & 0x80 != 0) * 4;
         if window >= high && window < high + 4 {

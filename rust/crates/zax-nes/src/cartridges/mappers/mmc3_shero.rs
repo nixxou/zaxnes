@@ -62,19 +62,23 @@ use crate::NametableMirroring;
 ///   **`$1000-$17FF`**. The `8421` label is the four bits' weights; the bottom two 2 KiB regions
 ///   are crossed over against them. See [`Mmc3Shero::CHR_A18_LINES`].
 ///
-/// # The CHR-RAM chip's own three address lines
+/// # The CHR-RAM chip is **unbanked**
 ///
-/// The page gives the chip a size and no banking at all, and what addresses it follows from the
-/// board: an 8 Ki × 8 SRAM has A0-A12, PPU A0-A9 drive its low ten and the MMC3's own CHR bank
-/// lines A10-A12 the top three. So the chip is banked in 1 KiB amounts by **bits 0-2 of whatever
-/// 1 KiB bank number the chip put in that window**, which is [`Mmc3Board::chr_ram_offset`]'s
-/// arithmetic for the TQROM read through [`Mmc3Board::chr_bank_of_window`] — the accessor whose
-/// own note says why the bank has to come from the register and not from the window table. That
-/// is the same reading mapper 119 has carried since MF-6a3 step 1 and it is recorded in Q-172
-/// because the page itself does not state it.
+/// The page gives the chip a size and no banking at all. What addresses it had to be inferred from
+/// the board, and MF-UNL inferred it one way: an 8 Ki × 8 SRAM has A0-A12, PPU A0-A9 drive its low
+/// ten, so the MMC3's own CHR bank lines were taken to drive A10-A12 and the chip was banked in
+/// 1 KiB amounts by bits 0-2 of whatever bank number the chip put in the window — mapper 119's
+/// reading, which Q-172 §1.3 recorded along with the alternative.
 ///
-/// [`Mmc3Board::chr_ram_offset`]: super::Mmc3Board
-/// [`Mmc3Board::chr_bank_of_window`]: super::Mmc3Board
+/// **The cross-check settled it the other way and MF-FIX applied it** (`docs/review/Q-XCHECK.md`
+/// §CHANGE 7): all three projects that support the number serve the chip **unbanked**, so PPU
+/// A0-A12 go straight through and the MMC3's CHR bank lines reach it not at all. The three
+/// citations are on [`Mmc3Shero::chr_ram_offset`]. Under the old reading a game that wrote a tile
+/// through one bank number read it back under another as a different kilobyte; under this one the
+/// window alone decides, which is what the page's silence about banking most plausibly means.
+///
+/// Mapper 119 keeps its own reading: its page gives that chip CHR A16 as the select and the
+/// banking with it, and nothing in Q-172 touches it.
 ///
 /// # Four-screen, and what it does to `$A000`
 ///
@@ -118,9 +122,6 @@ impl Mmc3Shero {
     /// The CHR-RAM chip, "8 KiB of CHR-RAM", which `registry::board_memory_sizes` settles at load
     /// because no header field can state it — the TQROM's arm's reason in the same words.
     pub(crate) const CHR_RAM_SIZE: usize = 8 * 1024;
-
-    /// The chip's own bank lines as a mask of the 1 KiB bank number: three of them on 8 KiB.
-    const CHR_RAM_BANK_MASK: u8 = 0x07;
 
     /// Which bit of `$4100` drives CHR A18 over each of the eight 1 KiB windows.
     ///
@@ -195,16 +196,39 @@ impl Mmc3Shero {
         self.register & Self::CHR_RAM_SELECT != 0
     }
 
-    /// Where in the CHR-RAM chip the 1 KiB window `window` starts: bits 0-2 of the bank number
-    /// the chip put there, the chip's own three address lines above the kilobyte.
-    fn chr_ram_offset(&self, window: usize) -> usize {
-        usize::from(self.mmc3.chr_bank_of_window(window) & Self::CHR_RAM_BANK_MASK)
-            * BankWindows::CHR_WINDOW_SIZE
+    /// Where in the CHR-RAM chip the 1 KiB window `window` starts: **the window itself**, so the
+    /// 8 Ki × 8 SRAM follows PPU A0-A12 straight through and is not banked at all.
+    ///
+    /// **This was bits 0-2 of the bank number the chip put in the window, and MF-FIX changed it**
+    /// (`docs/review/Q-XCHECK.md` §CHANGE 7, Q-172 §1.3, which named this as the alternative). The
+    /// page gives the chip a size and no banking, and **all three projects that support the number
+    /// serve it unbanked**:
+    ///
+    /// * **Mesen 2** maps one 8 KiB page — `GetChrRamPageSize` and `GetChrRamSize` are both
+    ///   `0x2000` and `SelectChrPage` answers `SelectChrPage(0, 0, ChrRam)` for every slot
+    ///   (`third_party/mesen2/Core/NES/Mappers/Mmc3Variants/MMC3_StreetHeroes.h:12-13`, `:45`);
+    /// * **Nestopia UE** the same
+    ///   (`third_party/nestopia/source/core/board/NstBoardSachenStreetHeroes.cpp:158`);
+    /// * **puNES** maps each 1 KiB window to **its own slot** —
+    ///   `memmap_vram_1k(0, MMPPU(address), slot)`, where `slot` is `(address >> 10) & 7` and not
+    ///   the written bank (`third_party/punes/src/core/mappers/mapper_262.c:91`) — which is the
+    ///   same wiring written per window.
+    ///
+    /// So the MMC3's CHR bank lines do not reach this chip: a game that writes a tile through one
+    /// bank number reads it back under any other, which is what the old reading got wrong.
+    /// Mapper 119's [`Mmc3Board::chr_ram_offset`] is **not** touched by this — its page gives that
+    /// chip CHR A16 as the select and its own banking, and Q-172 §1.3 is about this board alone.
+    ///
+    /// [`Mmc3Board::chr_ram_offset`]: super::Mmc3Board
+    // Q-172
+    const fn chr_ram_offset(window: usize) -> usize {
+        window * BankWindows::CHR_WINDOW_SIZE
     }
 
-    /// The eight window offsets into the CHR-RAM chip, for [`Mmc3Shero::chr_peek_view`].
-    fn chr_ram_offsets(&self) -> [usize; BankWindows::CHR_WINDOWS] {
-        std::array::from_fn(|window| self.chr_ram_offset(window))
+    /// The eight window offsets into the CHR-RAM chip, for [`Mmc3Shero::chr_peek_view`]: the
+    /// identity, now that the chip is unbanked.
+    fn chr_ram_offsets() -> [usize; BankWindows::CHR_WINDOWS] {
+        std::array::from_fn(Self::chr_ram_offset)
     }
 
     /// A CHR fetch while the RAM chip is selected.
@@ -214,18 +238,24 @@ impl Mmc3Shero {
     /// `Ppu2C02::background_fetch`, 7 % to 11 % of every ROM of lot PR-1's set, and MF-6a2 step 3
     /// priced an inlined CHR-RAM decode there at 8.0 M of set total.
     ///
+    /// **Since MF-FIX the body is one index**: with the chip unbanked,
+    /// `chr_ram_offset(index / 1024) + (index % 1024)` *is* `index`, so the window arithmetic the
+    /// old reading needed has collapsed. The wrap stays because `registry::board_memory_sizes`
+    /// gives the chip its size and nothing forbids an image from having none.
+    ///
+    /// No `self`, for the same reason — which is why both of these are associated functions and
+    /// their call sites name the type.
+    ///
     /// [`Mmc3Board::chr_ram_read`]: super::Mmc3Board
     #[inline(never)]
-    fn chr_ram_read(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+    fn chr_ram_read(memory: &CartridgeMemory, address: u16) -> u8 {
         let index = usize::from(address) & 0x1FFF;
         let ram = memory.chr_ram();
         if ram.is_empty() {
             return 0;
         }
 
-        let offset = self.chr_ram_offset(index / BankWindows::CHR_WINDOW_SIZE)
-            + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
-        ram[super::super::wrap_offset(offset, ram.len())]
+        ram[super::super::wrap_offset(index, ram.len())]
     }
 
     /// A PPU write while the RAM chip is selected. `Mapper::ppu_write`'s default drops every
@@ -233,14 +263,12 @@ impl Mmc3Shero {
     /// CHR-RAM would be unreachable. `#[inline(never)]` for the reason above, one dispatch over:
     /// `Board::ppu_write`'s arms are inlined into `NesBus::write_internal`.
     #[inline(never)]
-    fn chr_ram_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+    fn chr_ram_write(memory: &mut CartridgeMemory, address: u16, value: u8) {
         let index = usize::from(address) & 0x1FFF;
-        let offset = self.chr_ram_offset(index / BankWindows::CHR_WINDOW_SIZE)
-            + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
         let ram = memory.chr_ram_mut();
         if !ram.is_empty() {
             let len = ram.len();
-            ram[super::super::wrap_offset(offset, len)] = value;
+            ram[super::super::wrap_offset(index, len)] = value;
         }
     }
 
@@ -337,13 +365,14 @@ impl Mapper for Mmc3Shero {
         None
     }
 
-    /// The chip the select names, through the windows that chip is banked by — so a 3D tile
-    /// record captured while the RAM is selected carries the RAM's bytes (REQ-CORE-037).
+    /// The chip the select names — so a 3D tile record captured while the RAM is selected carries
+    /// the RAM's bytes (REQ-CORE-037). The offsets are the identity since MF-FIX made the chip
+    /// unbanked; see [`Mmc3Shero::chr_ram_offset`].
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
         let banks = self.banks()?;
         if self.chr_ram_selected() {
             return Some(
-                ChrView::new(memory.chr_ram(), banks).with_offsets(self.chr_ram_offsets()),
+                ChrView::new(memory.chr_ram(), banks).with_offsets(Self::chr_ram_offsets()),
             );
         }
 
@@ -352,7 +381,7 @@ impl Mapper for Mmc3Shero {
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
         if self.chr_ram_selected() {
-            return self.chr_ram_read(memory, address);
+            return Self::chr_ram_read(memory, address);
         }
 
         self.banks()
@@ -361,7 +390,7 @@ impl Mapper for Mmc3Shero {
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if self.chr_ram_selected() {
-            self.chr_ram_write(memory, address, value);
+            Self::chr_ram_write(memory, address, value);
         }
     }
 

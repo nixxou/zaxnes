@@ -15800,10 +15800,20 @@ fn amd_061_a_reset_puts_every_board_of_mf_unl_11_back_to_its_power_on_state() {
 /// asserts the select from both sides: a write with bit 7 set and bit 6 clear leaves the CHR-ROM
 /// in place, and one with bit 6 set swaps the chip.
 ///
-/// The second half is the chip's own address lines, which the page does not state at all
-/// (Q-172 again): an 8 Ki × 8 SRAM has A0-A12, PPU A0-A9 drive its low ten and the MMC3's CHR bank
-/// lines the top three — so the chip is banked by **bits 0-2** of the 1 KiB bank number the chip
-/// put in that window, and banks `$11` and `$19` are the same kilobyte of RAM.
+/// The second half is the chip's own address lines, which the page does not state at all. Q-172
+/// §1.3 recorded two readings and MF-UNL-12 took mapper 119's — the chip banked by bits 0-2 of the
+/// bank number the chip put in the window. **`docs/review/Q-XCHECK.md` §CHANGE 7 settled it the
+/// other way and MF-FIX applied it**: the chip is **unbanked**, PPU A0-A12 straight through, which
+/// is what all three projects that support the number do — Mesen 2 one 8 KiB page
+/// (`MMC3_StreetHeroes.h:12-13`, `:45`), Nestopia UE the same
+/// (`NstBoardSachenStreetHeroes.cpp:158`), and puNES one slot per 1 KiB window keyed on
+/// `(address >> 10) & 7` rather than on the written bank (`mapper_262.c:91`).
+///
+/// So what the second half asserts now is the **inverse** of what it asserted: every bank number
+/// shows the same kilobyte for a given window, and what distinguishes the kilobytes is the PPU
+/// address. Both directions are checked, because "unbanked" is only interesting against a bank
+/// change that used to move it — `$11`, `$19` and `$12` through R2 are the three the old reading
+/// split two-to-one.
 #[cfg(feature = "board-262")]
 #[test]
 fn req_core_102_mapper_262_selects_the_chr_ram_chip_from_4100_bit_6() {
@@ -15824,22 +15834,33 @@ fn req_core_102_mapper_262_selects_the_chr_ram_chip_from_4100_bit_6() {
     assert_eq!(0x5A, peek(&core, 0x0000), "the CHR-RAM chip");
     assert_eq!(0x3C, peek(&core, 0x1000));
 
-    // The chip's three lines: window 4's bank is R2, and `$11 & 7` is 1 — the same kilobyte
-    // `$19 & 7` names, which is what "the lines above the chip are not connected" means.
-    core.mmc3_bank(2, 0x19);
+    // The chip is unbanked: window 4's bank is R2, and **no** value of it moves what $1000
+    // shows. $11 and $19 agreed under the old reading too ($11 & 7 == $19 & 7); $12 is the one
+    // that told the two readings apart, and it must now read the byte written above.
+    for bank in [0x19u8, 0x12, 0x00, 0xFF, 0x37] {
+        core.mmc3_bank(2, bank);
+        assert_eq!(
+            0x3C,
+            peek(&core, 0x1000),
+            "bank {bank:#04X}: the CHR-RAM chip is unbanked, so PPU $1000 is always its own              kilobyte (CHANGE 7)"
+        );
+    }
+
+    // And what *does* distinguish the kilobytes is the PPU address: $1800 is the next 1 KiB
+    // window along, so a write there must leave $1000 alone.
+    chr_write(&mut core, 0x1800, 0x7E);
     assert_eq!(
         0x3C,
         peek(&core, 0x1000),
-        "banks $11 and $19 are one kilobyte of an 8 KiB chip"
+        "$1000 is untouched by a $1800 write"
     );
-    // and `$12 & 7` is 2, a different one.
-    core.mmc3_bank(2, 0x12);
-    assert_eq!(0x00, peek(&core, 0x1000), "bank $12 is another kilobyte");
+    assert_eq!(0x7E, peek(&core, 0x1800), "$1800 is its own kilobyte");
 
-    // Back to the ROM, which no PPU write while the RAM was selected can have touched.
+    // Back to the ROM, which no PPU write while the RAM was selected can have touched. R2 holds
+    // $37 from the loop above, and the four-screen board's CHR A18 lines are all clear.
     core.mapper_write(0x4100, 0x00);
     assert_eq!(0x10, peek(&core, 0x0000));
-    assert_eq!(0x12, peek(&core, 0x1000));
+    assert_eq!(0x37, peek(&core, 0x1000));
 }
 
 /// The four high CHR bits of `$4100`, each "Select 256 KiB CHR-ROM bank" for one 2 KiB region —
@@ -16545,14 +16566,15 @@ fn req_core_090_mapper_262_round_trips_its_4100_register() {
 
     let state = core.save_state(true).unwrap();
     let layout = unl12_layout(&core);
-    // The CHR-RAM chip is what the PPU reads, and the two bytes written into it appear at every
-    // window whose bank number shares their low three bits -- the chip having only three address
-    // lines above the kilobyte. R0 = $10 puts $5A at windows 0 and 2 and $3C at 1 and 3; R2 = $21
-    // puts $3C at window 4 and the zeroed R3-R5 put $5A at 5, 6 and 7.
+    // The CHR-RAM chip is what the PPU reads, and since MF-FIX made that chip **unbanked**
+    // (CHANGE 7) each byte written into it appears at exactly the window its PPU address names
+    // and nowhere else: $5A at window 0 ($0000) and $3C at window 4 ($1000), the other six
+    // kilobytes still zero. Under the old bank-driven reading R0 = $10 and R2 = $21 spread the
+    // same two bytes over all eight windows, which is the inversion the fix produces.
     assert_eq!(
-        [0x5A, 0x3C, 0x5A, 0x3C, 0x3C, 0x5A, 0x5A, 0x5A],
+        [0x5A, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00],
         layout.2,
-        "the CHR-RAM chip is what the PPU reads"
+        "the CHR-RAM chip is what the PPU reads, unbanked"
     );
 
     // Back to the CHR-ROM with no A18 line, which is a layout the chip's own registers cannot

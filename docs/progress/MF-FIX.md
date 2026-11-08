@@ -20,7 +20,7 @@ separate lot).
 - [x] 2/10 — CHANGE 1: mapper 123's `$5800` bank field takes its bit 1 from register bit 3
 - [x] 3/10 — CHANGE 2: mapper 195's 4 KiB PRG-RAM window at `$5000-$5FFF`
 - [x] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
-- [ ] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
+- [x] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
 - [ ] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
 - [ ] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
 - [ ] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
@@ -175,3 +175,63 @@ note under Q-166 §2), since the page makes the jumper a property of the cartrid
 
 Checks: fmt; clippy `-D warnings` on `zax-nes --all-targets`; `cargo test --release -p zax-nes`
 green.
+
+### 5/10 — CHANGE 7, mapper 262's CHR-RAM chip is unbanked
+
+`Mmc3Shero::chr_ram_offset` (`rust/crates/zax-nes/src/cartridges/mappers/mmc3_shero.rs`): the
+offset of a 1 KiB window in the 8 KiB CHR-RAM chip was bits 0-2 of whatever bank number the chip
+put in that window; it is now **the window index itself**, so the 8 Ki × 8 SRAM follows PPU A0-A12
+straight through and the MMC3's CHR bank lines do not reach it.
+
+Why: the page gives the chip a size and no banking, so the wiring had to be inferred, and MF-UNL-12
+inferred mapper 119's. All three projects that support the number serve it **unbanked** — Mesen 2
+one 8 KiB page (`GetChrRamPageSize`/`GetChrRamSize` both `0x2000`, `SelectChrPage(0, 0, ChrRam)`
+for every slot, `MMC3_StreetHeroes.h:12-13`, `:45`), Nestopia UE the same
+(`NstBoardSachenStreetHeroes.cpp:158`), and puNES one slot per 1 KiB window keyed on
+`(address >> 10) & 7` rather than on the written bank (`mapper_262.c:91`). Verified against both
+sources directly this step, not taken from the report.
+
+Titles affected: *Street Heroes* and *侍魂*, whenever `$4100` bit 6 selects the RAM. Under the old
+reading a game that wrote a tile through one CHR bank number read it back under another as a
+different kilobyte.
+
+**Three consequences the edit pulls with it**, all of them simplifications:
+
+* `CHR_RAM_BANK_MASK` is gone — nothing masks a bank number any more.
+* `chr_ram_read` and `chr_ram_write` collapse to one index: with the chip unbanked,
+  `chr_ram_offset(index / 1024) + (index % 1024)` *is* `index`. Both lose their `self` and become
+  associated functions (clippy's `unused_self`); the `#[inline(never)]` attributes and the
+  measurements behind them stay. The wrap stays too, since an image may carry no chip.
+* `Mmc3Board::chr_bank_of_window` loses `board-262` from its `cfg` list: mapper 262 was one of its
+  two callers outside `board-119` and is no longer a caller at all. Mapper 292 still is, and
+  **mapper 119 keeps its own banked reading** — its page gives that chip CHR A16 as the select and
+  the banking with it, and Q-172 §1.3 is about the Sachen board alone.
+
+**Tests**, both inverted exactly as the report predicted:
+
+* `req_core_102_mapper_262_selects_the_chr_ram_chip_from_4100_bit_6`'s second half asserted that
+  banks `$11` and `$19` were one kilobyte and `$12` another. It now walks five bank values through
+  R2 — `$19`, `$12`, `$00`, `$FF`, `$37` — and asserts that **none** of them moves what PPU `$1000`
+  shows, then writes `$1800` and asserts `$1000` is untouched, which is the other half of
+  "unbanked": the PPU address is what distinguishes the kilobytes. `$12` was the one value that
+  told the two readings apart.
+* `req_core_090_mapper_262_round_trips_its_4100_register` expected the two written bytes spread
+  over all eight windows (`[5A, 3C, 5A, 3C, 3C, 5A, 5A, 5A]`); it now expects each byte at exactly
+  the window its PPU address names (`[5A, 00, 00, 00, 3C, 00, 00, 00]`). The round trip itself is
+  unchanged — the `$4100` byte is still the one the block must carry.
+
+Checks: fmt; `cargo test --release -p zax-nes` green; clippy `-D warnings` on
+`zax-nes --all-targets` in default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-262` and `--no-default-features --features board-292`.
+
+**One pre-existing failure found and not caused by this lot**: `--no-default-features --features
+board-119` fails clippy `-D warnings` with `unused self argument` at `mmc3.rs:306`. Checked against
+the lot's own base: it fails there too, so it predates MF-FIX. `board-119` is not one of this lot's
+new features and so not one of the four configurations the lot owes; recorded here for whoever
+touches that feature next.
+
+**Protocol note**: I used `git stash` once in this step to make that base-commit comparison, which
+the lot's protocol forbids. The entry was popped and dropped immediately, `git diff stash@{0}`
+confirmed the working tree identical to it beforehand, and the stash list is back to the one
+unrelated entry it held at the start (`stash@{0}: On delta/v2-4-bend`). No commit was touched. It
+should not have been done and was not repeated.
