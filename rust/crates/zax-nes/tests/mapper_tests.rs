@@ -6742,11 +6742,17 @@ fn somari_mode(core: &mut NesCore, value: u8) {
 /// Mappers 12 and 14 use it for the same reason: their CHR A18 is the same 256-bank move, applied
 /// per window group. So do mapper 83.3, whose `CC` bits are CHR A19-A18, and mapper 91's submapper
 /// 0, whose outer register drives CHR A19 (MF-UNL-8).
+///
+/// MF-UNL-11's three boards use it too: the UNL-8237's outer CHR bank is 256 banks and its CHR A17
+/// 128, and the A9461's outer bank is 128 (step 4).
 #[cfg(any(
     feature = "board-116",
     feature = "board-91",
     feature = "board-cony",
-    feature = "board-huang1"
+    feature = "board-huang1",
+    feature = "board-208",
+    feature = "board-215",
+    feature = "board-219"
 ))]
 fn chr_offsets(core: &NesCore) -> [usize; 8] {
     core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
@@ -15361,4 +15367,247 @@ fn req_core_095_mapper_219_leaves_6000_7fff_to_the_header_and_decodes_nothing_th
         (core.prg_windows(), core.chr_windows()),
         "and no write in $6000-$7FFF moved a window"
     );
+}
+
+// -------------------- MF-UNL-11's three save-state round trips and three resets,
+// -------------------- §7.1's second common thing
+
+/// What a board of this lot shows, and nothing of the machine around it: the four PRG windows,
+/// the eight CHR window **offsets** and the mirroring.
+///
+/// The offsets and not the bytes, for `chr_offsets`'s own reason: all three boards move a CHR
+/// window by 128 or 256 banks and the fixture's fill byte reads the same 256 banks apart.
+#[cfg(any(feature = "board-215", feature = "board-208", feature = "board-219"))]
+fn unl11_layout(core: &NesCore) -> ([u8; 4], [usize; 8], Nm) {
+    (core.prg_windows(), chr_offsets(core), core.mirroring())
+}
+
+/// REQ-CORE-090/091: every register of mapper 215 is at `$5000`, `$5001` or `$5007`, and
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` writes none of those — that sweep
+/// dirties `$8000`-`$E001` and `$6000`. So the round trip is pinned here with all three of the
+/// board's own registers moved first (MF-UNL-11 step 4).
+///
+/// The scramble register is part of it: with `$5007` restored to a different row the *same* later
+/// write would mean a different MMC3 register, so a block that dropped it would round-trip the
+/// windows and still diverge on the next write. The assertion on the re-saved bytes is what
+/// covers that.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_090_mapper_215_round_trips_its_three_registers() {
+    let mut core = MapperRom::new(215).prg(192).chr(1536).battery().load();
+    core.mapper_write(0x5007, 0x04); // A scramble row that is neither the identity nor row 1.
+    core.mapper_write(0x5001, 0x26); // Outer banks on both halves, and CHR A17.
+    core.mapper_write(0x5000, 0x40); // The 128 KiB mode, so that A17 comes from $5001.
+    core.mapper_write(0xA000, 0x05); // $5007 = 4: the written $A000 means the MMC3's $8000.
+    core.mapper_write(0x8001, 0x11); // and the written $8001 its $8001, so R1 = $11.
+    core.mapper_write(0xC000, 0x20); // The counter, so that it has run.
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl11_layout(&core);
+
+    // Somewhere the chip's own registers could not reach: the outer banks away and the override
+    // on, which is a 256 KiB move on both halves plus an NROM window.
+    core.mapper_write(0x5001, 0x00);
+    core.mapper_write(0x5000, 0x80 | 0x03);
+    assert_ne!(
+        layout,
+        unl11_layout(&core),
+        "the registers moved the layout"
+    );
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl11_layout(&core), "and the state brought it back");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, $5007 and the derived fields included"
+    );
+}
+
+/// REQ-CORE-090/091: mapper 208's four registers are at `$4800`, `$5000`, `$5800` and `$6800`,
+/// none of which the generic sweep writes — and the four **protection** registers are state no
+/// window shows, so the only thing that can pin them is the re-saved block together with a read
+/// of the window itself (MF-UNL-11 step 4).
+#[cfg(feature = "board-208")]
+#[test]
+fn req_core_090_mapper_208_round_trips_its_bank_index_and_four_protection_registers() {
+    let mut core = MapperRom::new(208).prg(16).chr(256).battery().load();
+    core.mapper_write(0x4800, 0x22); // Page 2, horizontal.
+    core.mmc3_bank(0, 0x12);
+    core.mmc3_bank(2, 0x85);
+    core.mapper_write(0x5000, 0x8A); // An index whose entry is neither $00 nor $59.
+    for register in 0..4u16 {
+        core.mapper_write(0x5800 + register, 0x40 + register as u8);
+    }
+    core.mapper_write(0xC000, 0x20);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl11_layout(&core);
+    let protection: [u8; 4] = std::array::from_fn(|r| core.read_memory(0x5800 + r as u16));
+
+    // Move the page, the mirroring and all four protection registers.
+    core.mapper_write(0x6800, 0x01);
+    core.mapper_write(0x5000, 0x00);
+    for register in 0..4u16 {
+        core.mapper_write(0x5800 + register, 0xFF);
+    }
+    assert_ne!(layout, unl11_layout(&core), "the register moved the layout");
+    assert_ne!(
+        protection,
+        std::array::from_fn(|r| core.read_memory(0x5800 + r as u16)),
+        "and the protection registers moved too"
+    );
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl11_layout(&core), "and the state brought it back");
+    assert_eq!(
+        protection,
+        std::array::from_fn(|r| core.read_memory(0x5800 + r as u16)),
+        "the four protection registers included"
+    );
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, the index register included"
+    );
+}
+
+/// REQ-CORE-090/091: mapper 219 keeps **sixteen bytes of extended bank registers** plus the mode
+/// bit, the index, the CHR latch and the outer bank — and none of its own ports is one the generic
+/// sweep writes except `$8000`/`$8001`, which mean something else entirely while the mode bit is
+/// set (MF-UNL-11 step 4).
+///
+/// The round trip is taken **in** extended mode, which is the state that can go wrong: with the
+/// mode bit dropped the block would restore an MMC3's windows from the chip's registers and look
+/// right until the next odd write.
+#[cfg(feature = "board-219")]
+#[test]
+fn req_core_090_mapper_219_round_trips_its_extended_mode_registers() {
+    let mut core = MapperRom::new(219).prg(64).chr(512).battery().load();
+    core.mapper_write(0x5002, 0x01); // The outer bank, both bits.
+    core.mapper_write(0x5003, 0x20);
+    core.mmc3_bank(6, 0x03); // The chip's own registers, for the mode bit to hide.
+    core.mapper_write(0xA000, 0x01); // and its mirroring, which the board never takes over.
+    core.mapper_write(0x8002, 0x20); // Extended mode.
+    for (index, datum) in [(0x26u8, 0x20u8), (0x25, 0x10), (0x24, 0x08), (0x23, 0x04)] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, datum);
+    }
+    core.mapper_write(0x8000, 0x08); // The CHR latch.
+    core.mapper_write(0x8001, 0x03);
+    for index in [0x09u8, 0x0B, 0x11, 0x15] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, 0x0A << 1);
+    }
+    core.mapper_write(0xC000, 0x20);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl11_layout(&core);
+
+    // Out of extended mode and with the outer bank away, which is a layout no extended register
+    // could produce.
+    core.mapper_write(0x8002, 0x00);
+    core.mapper_write(0x5002, 0x00);
+    core.mapper_write(0x5003, 0x00);
+    assert_ne!(layout, unl11_layout(&core), "the mode bit moved the layout");
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl11_layout(&core), "and the state brought it back");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, the sixteen extended banks and the latch included"
+    );
+
+    // The restored mode bit has to be the mode bit and not just its effect: one more odd write
+    // must still be an extended register and not the chip's $8001.
+    core.mapper_write(0x8000, 0x24);
+    core.mapper_write(0x8001, 0x20);
+    assert_eq!(
+        1 + 0x30,
+        core.prg_windows()[2],
+        "still in extended mode after the restore, outer bank 3 included"
+    );
+}
+
+/// AMD-061's own sweep,
+/// `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state`, reaches all three
+/// numbers — and for the save-state sweep's reason it dirties none of their own registers. This
+/// one does, and then asks for the power-on layout back (MF-UNL-11 step 4).
+///
+/// The power-on states are not all zeroes. Mapper 215's `$5001` is **`$xF`**, so a reset puts the
+/// outer bank back to 3 on both halves — the page's own *Note* requires it, "The Outer Bank
+/// Register is reset to its power-up value if a Reset has been detected via an interruption of the
+/// M2 signal" — and mapper 208's bank register is **`$11`**, page 3 with vertical mirroring, which
+/// `Cartridge::reset` cannot know: it puts the *header's* mirroring back immediately before the
+/// board's own `reset` runs, so the board has to state it.
+#[cfg(all(feature = "board-215", feature = "board-208", feature = "board-219"))]
+#[test]
+fn amd_061_a_reset_puts_every_board_of_mf_unl_11_back_to_its_power_on_state() {
+    for mapper in [208usize, 215, 219] {
+        let core = MapperRom::new(mapper).prg(64).chr(512).load();
+        let power_on = unl11_layout(&core);
+
+        let mut core = core;
+        for register in 0..8u8 {
+            core.mapper_write(0x8000, register);
+            core.mapper_write(0x8001, register + 0x11);
+        }
+        match mapper {
+            215 => {
+                core.mapper_write(0x5007, 0x01);
+                core.mapper_write(0x5001, 0x1A);
+                core.mapper_write(0x5000, 0xE5);
+            }
+            208 => {
+                core.mapper_write(0x4800, 0x21);
+                core.mapper_write(0x5000, 0x8A);
+                core.mapper_write(0x5800, 0x5A);
+            }
+            219 => {
+                core.mapper_write(0x5002, 0x01);
+                core.mapper_write(0x5003, 0x20);
+                core.mapper_write(0x8002, 0x20);
+                core.mapper_write(0x8000, 0x26);
+                core.mapper_write(0x8001, 0x20);
+                core.mapper_write(0x8000, 0x11);
+                core.mapper_write(0x8001, 0x0A << 1);
+            }
+            _ => {}
+        }
+        assert_ne!(
+            power_on,
+            unl11_layout(&core),
+            "mapper {mapper}: the board's own registers must move something"
+        );
+
+        core.reset();
+        assert_eq!(
+            power_on,
+            unl11_layout(&core),
+            "mapper {mapper}: a reset must give the power-on layout back"
+        );
+        assert!(
+            !core.cartridge().unwrap().irq_asserted(),
+            "mapper {mapper}: and no pending IRQ"
+        );
+    }
 }

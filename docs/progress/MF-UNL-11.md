@@ -225,9 +225,9 @@ bullets asks for something no page states. The ticket also holds five things the
 - [x] **1/8** `board-215`: the board, its registry wiring and the eight-pattern tests.
 - [x] **2/8** `board-208`: the board, the 256-byte table and the protection tests.
 - [x] **3/8** `board-219`: the board, the extended mode and its tests.
-- [ ] **4/8** §7.1's three common things, part one: the four sweeps over `SUPPORTED_MAPPERS` in the
-      six configurations, and a save-state round-trip per board with its registers dirtied.
-- [ ] **5/8** `cargo fmt --check` and clippy `-D warnings` in the six configurations: default,
+- [x] **4/8** §7.1's second common thing: a save-state round-trip per board with its own
+      registers dirtied, and a reset per board.
+- [ ] **5/8** the four sweeps over `SUPPORTED_MAPPERS`, `cargo fmt --check` and clippy `-D warnings` in the six configurations: default,
       `--no-default-features`, `--features parked-boards`, and each of the three features alone.
 - [ ] **6/8** the callgrind campaign against `01850f36`, the feature decision per board and the
       three `BOARD-FEATURES.md` rows.
@@ -421,3 +421,37 @@ check is on the manifest's prose and not on its dependency table.
 clippy `-D warnings` clean.
 
 [PROGRESS] MF-UNL-11 step 3/8 done: board-219
+
+## Step 4 — §7.1's second common thing: three round trips and three resets
+
+`req_core_090_the_mapper_state_survives_a_save_and_restore` sweeps every number of
+`SUPPORTED_MAPPERS` but dirties each one through `$8000`-`$E001` and `$6000` — and **not one of
+this lot's own registers is at any of those addresses**: 215's three are at `$5000`/`$5001`/
+`$5007`, 208's four at `$4800`/`$5000`/`$5800`/`$6800`, and 219's two outer bits at
+`$5002`/`$5003`. 219's extended registers *are* at `$8000`/`$8001`, which is worse than absent:
+while the mode bit is set those addresses mean something else entirely, and the generic sweep
+never sets it. So the sweep proves the chip's block round-trips and says nothing about the bytes
+this lot appends.
+
+| test | what it moves, and what would otherwise pass |
+| --- | --- |
+| `req_core_090_mapper_215_round_trips_its_three_registers` | all three registers, with `$5007` on a row that is neither the identity nor row 1. **A block that dropped `$5007` would round-trip the windows and diverge on the next write**, because the same written address would then mean a different MMC3 register — which is why the assertion on the re-saved bytes is the one that matters |
+| `req_core_090_mapper_208_round_trips_its_bank_index_and_four_protection_registers` | the page, the mirroring, the index and all four protection registers. **Those four are state no window shows**, so the test reads the `$5800-$5803` window back as well as comparing the block |
+| `req_core_090_mapper_219_round_trips_its_extended_mode_registers` | taken **in** extended mode, with sixteen extended bank bytes, the latch and the outer bank set. A block that dropped the mode bit would restore an MMC3's windows from the chip's own registers and look right until the next odd write — so the test ends with one more odd write and asks for an extended register |
+| `amd_061_a_reset_puts_every_board_of_mf_unl_11_back_to_its_power_on_state` | all three, each through its own ports |
+
+The reset test is the one that needs the two non-zero power-on states stated: 215's `$5001` is
+**`$xF`**, so a reset puts the outer bank back to 3 on both halves, which the page's *Note*
+requires; and 208's bank register is **`$11`**, page 3 with **vertical** mirroring, which
+`Cartridge::reset` cannot know — it puts the *header's* mirroring back immediately before calling
+the board's `reset`, so the board has to state its own.
+
+`unl11_layout` compares the four PRG windows, the eight CHR window **offsets** and the mirroring.
+The offsets and not the fixture's fill bytes, for `chr_offsets`'s own reason: all three boards move
+a CHR window by 128 or 256 banks and a numbered bank reads the same byte 256 banks apart. That
+helper's `cfg` list grows this lot's three features.
+
+`cargo test --release -p zax-nes`: all suites pass, `mapper_tests` 371 → **375**. fmt clean,
+clippy `-D warnings` clean.
+
+[PROGRESS] MF-UNL-11 step 4/8 done: the round trips and the resets
