@@ -120,7 +120,36 @@ alone with `--no-default-features`; `cargo build -p zax-nes` in all three featur
 
 The base commit's `default` run was 1166 as well: one test left `default` (behind the feature) and
 one joined it. The ten ignored are the ROM-gated ones; step 3 runs them.
-- [ ] 2/5 Q-176, entry MMC1-1, `BOARD-FEATURES.md`
+- [x] 2/5 Q-176, entry MMC1-1, `BOARD-FEATURES.md`
+
+### 2/5 — the three documents
+
+**Q-176** (`spec/changes/Q-176.md`) gets a **Decision** section and is **closed**: owner R0, date
+2026-11-08, answer (b) and further than (b) asks; the default (no `E` bit on any board, `$E000`
+bit 4 only, never on an MMC1A or a mapper 155); the feature `mmc1-snrom-e-bit` and what it
+restores exactly; what was removed; the two conformance rows and how they are marked; where the
+reasoning lives; and the commit. Its *Code reference* header is rewritten to the symbols that now
+exist, with a note that `mmc1-snrom-header` and `SNROM_NEEDS_A_DECLARED_HEADER` — which the body
+of the ticket discusses at length — are gone. Nothing in the analysis sections is rewritten: they
+are the record of the question, and the answer sits under them. *(Q-176 is in `spec/`, which this
+lot may not otherwise touch; the brief asks for this one append.)*
+
+**Entry MMC1-1** (`docs/review/LEGACY-XCHECK.md`) gets a **"Decided in MF-LEG-1B (`e1c4d60b`)"**
+paragraph above MF-LEG-1's, which it supersedes rather than replaces — the reasoning took two
+lots and the record should show it. It says plainly that the entry's own verdict line, **DIFFERS**,
+no longer describes the shipped build: this build now agrees with all five emulators and departs
+from the page, deliberately. Two other places are brought in line: the summary table's row
+(`**yes**` → `**no**, decided MF-LEG-1B`, and the verdict `**DIFFERS**` → `agrees with all five`)
+and the *"fixed differently from the way this table states them"* bullet, which described the
+removed header rule.
+
+**`docs/review/BOARD-FEATURES.md`**: the `mmc1-snrom-header` row is replaced by the
+`mmc1-snrom-e-bit` row — the page, the five emulators with their `file:line`, the named
+regression, the SNROM/SGROM indistinguishability, what the feature restores, the two required
+failures, why it is not in `parked-boards`, and the flag. Its two figure cells say *MF-LEG-1B
+step 4*, where they are filled in. The "worst figure among the features in `default`" paragraph
+records the swap and notes that the shipped build now does **less** work than the base commit's
+on this path.
 - [ ] 3/5 golden-core and the full test run
 - [ ] 4/5 the callgrind campaign
 - [ ] 5/5 the final check

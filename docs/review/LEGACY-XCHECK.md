@@ -57,7 +57,7 @@ means I did not read that source on that point and say so in the entry.
 
 | mapper | board | point | the page | this build | FCEUX | Nestopia | puNES | Nintendulator | Mesen 2 | verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | SNROM | `$A000` bit 4 disables PRG-RAM | yes, on SNROM | **yes** | no | no | reverted, named game | no | no | **DIFFERS** |
+| 1 | SNROM | `$A000` bit 4 disables PRG-RAM | yes, on SNROM | **yes** → **no**, decided MF-LEG-1B | no | no | reverted, named game | no | no | **DIFFERS** → agrees with all five |
 | 1 | SZROM | which CHR bit banks the 16 KiB PRG-RAM | bit 4 | **bit 3** | bit 3 | bit 3 | bit 4 | no banking | bit 2, "shouldn't happen" | **DIFFERS** |
 | 1 | SOROM | which `S` value selects the battery chip | silent | `S`=1 | `S`=1 | `S`=1 | `S`=0 | `S`=0 | `S`=0 | **OPEN** |
 | 1 | MMC1A | NES 2.0 submapper 3 | no PRG-RAM disable, bit 4 drives A17 | not handled | mapper 155 only | from the chip list | from the submapper | from the board name | from the database | **DIFFERS** |
@@ -94,8 +94,11 @@ says something narrower than the paraphrase:
 * **1 / MMC1A** — "bit 4 drives A17" is the entry's reading. The page gives `R` = 1 as "fixed bank
   only affects A16..A14, **bit 3** directly controls A17", so it is bit 3, and only for the *fixed*
   window of PRG modes 2 and 3.
-* **1 / SNROM** — the fix is behind `mmc1-snrom-header`, **off in `default`**, because two
-  `holy-mapperel` rows that pass today fail under it. That entry and **Q-176** have the headers.
+* **1 / SNROM** — **decided by R0 in MF-LEG-1B**, and not the way this table's row reads: the
+  shipped build applies **no `E` bit at all**, agreeing with all five emulators against the page,
+  and MF-LEG-1's header rule is gone. The page's behaviour is behind `mmc1-snrom-e-bit`, off in
+  `default`; the price is two `holy-mapperel` rows that are now required failures. That entry and
+  **Q-176** have the headers, the five votes and the reason.
 
 
 ---
@@ -288,7 +291,20 @@ and makes `is_snrom`, `chr_disable_mask` and the two-register form of
 does not ask for. (a) is the one to prefer and (b) is free; both are a change to `Mmc1::new`
 alone, and `refresh_prg_ram_disable` stays one expression either way.
 
-**Fixed in MF-LEG-1 (`1cc4ce1f`), and then put behind a feature off by default
+**Decided in MF-LEG-1B (`e1c4d60b`).** R0's answer to Q-176, 2026-11-08: the entry's option
+**(b)**, and further than (b) asks. By default this build applies **no `E` bit at all** — the
+PRG-RAM is disabled by `$E000` bit 4 only, and never on an MMC1A — which is what all five of
+FCEUX, Nestopia UE, puNES, Nintendulator and Mesen 2 do and what the table above records them
+doing. So this row's verdict **DIFFERS** no longer describes the shipped build: it now agrees
+with all five and departs from the page, deliberately, for the reason the code records at the
+bit's own site. The page's behaviour stays reachable behind **`mmc1-snrom-e-bit`**, off in
+`default`, which restores the three-way size test exactly; nothing is dropped, per the owner's
+"no exclusion" rule. The cost is `holy-mapperel`'s two SNROM rows, `M1_P128K` and
+`M1_P128K_CR8K`, which become **required failures** in `default` — marked `expected` in the
+harness report like `mmc3_test/6-MMC6`, and asserted to pass with the feature on.
+
+MF-LEG-1's own two commits are superseded by it and are recorded here because the reasoning took
+two lots. **Fixed in MF-LEG-1 (`1cc4ce1f`), and then put behind a feature off by default
 (`530979f7`).** Option (a) was built: `Mmc1::is_snrom` asks an NES 2.0 header for no CHR-ROM,
 8 KiB of CHR-RAM in byte 11, a non-zero byte 10 totalling 8 KiB and at most 256 KiB of PRG.
 **But two statements of this entry are wrong, and they are what sent the fix behind
@@ -297,7 +313,8 @@ alone, and `refresh_prg_ram_disable` stays one expression either way.
 REQ-CORE-012's 8 KiB default and returned *true* for them, where this entry says it "returns
 false for all twelve". They announce themselves as `SNROM (MMC1)`, report `8K PRG RAM OK` and
 probe digit `4000`, so the suite **does** exercise the SNROM side, on two rows that lot MF-3
-step 1 exists to have made pass. They fail under the narrowing. The hardware test is right about
+step 1 exists to have made pass. They fail under the narrowing, and under MF-LEG-1B's decision
+they fail for a different and better-documented reason. The hardware test is right about
 the board and the header rule is right about real dumps, and both cannot hold for a dump whose
 header under-declares the cartridge it tests, so `default` keeps the size test and the narrowing
 takes one flag. The entry's *Risk of a fix* is confirmed: the five named games were played for
