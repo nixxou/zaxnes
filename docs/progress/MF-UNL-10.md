@@ -67,9 +67,8 @@ with the first and not the second has a module nothing calls. The six below are 
 - [x] **2/6** the tests the census lists from the page.
 - [x] **3/6** fmt and clippy `-D warnings` plus the sweeps in the four configurations (default,
       `--no-default-features`, `--features parked-boards`, `board-164` alone).
-- [ ] **4/6** the callgrind campaign against `909c0edd`: PR-1's thirteen ROMs and the five
-      level-2 games, **+0.02 % per ROM on each ROM's total**, the feature decision and the
-      `BOARD-FEATURES.md` row that carries the figures.
+- [x] **4/6** the callgrind campaign against `909c0edd`, the feature decision and the
+      `BOARD-FEATURES.md` row.
 - [ ] **5/6** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
 - [ ] **6/6** the census note, the journal, the close.
@@ -234,3 +233,115 @@ battery slice in `req_core_102_the_93c66_clocks_the_datasheets_seven_instruction
 window's own 2 KiB wrap in `q_170_mapper_164_mirrors_2_kib_of_volatile_ram_and_keeps_the_eeprom_out_of_the_window`.
 
 [PROGRESS] MF-UNL-10 step 3/6 done: the four configurations
+
+## Step 4 — the campaign, and the one symbol of this build that moves
+
+Binaries built by `build-clean.sh` from their own `git archive` tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mfunl10-0-base` | **`909c0edd`**, the lot's base commit | `ef4cb0fb5539aba502c24d25dfd669df` |
+| `mfunl10-1-lot` | **`69672291`**, step 3 — the lot's last code commit | `d4d92c446abb1cafd5194ccbf35d3b1e` |
+| `mfunl10-2-noinline` | the working tree with `#[inline(never)]` on one method: the alternative shape, built, measured and discarded | — |
+| `mfunl10-0-again` | a byte copy of `mfunl10-0-base`, the **same-binary floor** | same md5 as the base |
+
+The base binary's md5 is **identical to MF-UNL-9's shipped binary** (`zax-harness-mfunl9-2-ship`),
+so this lot's base is that lot's measured binary to the byte — the seventh lot in a row for which
+that holds, and built rather than assumed.
+
+### The PR-1 set, thirteen ROMs, 300 frames
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| duelito | 7 380 437 081 | 7 380 415 757 | −21 324 | −0.000 |
+| m0 | 5 517 238 614 | 5 517 337 951 | +99 337 | +0.002 |
+| m1 | 4 880 979 272 | 4 881 150 120 | +170 848 | +0.004 |
+| m4 | 5 467 732 625 | 5 468 206 285 | **+473 660** | **+0.009** |
+| metroid | 5 115 535 791 | 5 115 572 501 | +36 710 | +0.001 |
+| mm2 | 6 017 978 798 | 6 018 009 599 | +30 801 | +0.001 |
+| mmc5 | 11 266 808 876 | 11 266 778 583 | −30 293 | −0.000 |
+| oamstr | 3 318 449 790 | 3 318 487 258 | +37 468 | +0.001 |
+| readbuf | 6 834 476 427 | 6 834 487 071 | +10 644 | +0.000 |
+| smb1 | 5 996 364 493 | 5 996 320 357 | −44 136 | −0.001 |
+| smb3 | 7 949 391 667 | 7 949 412 085 | +20 418 | +0.000 |
+| vblnmi | 3 308 287 184 | 3 308 280 239 | −6 945 | −0.000 |
+| z2 | 6 291 494 540 | 6 291 521 327 | +26 787 | +0.000 |
+| **total** | **79 345 175 158** | **79 345 979 133** | **+803 975** | **+0.001** |
+
+Worst ROM **+0.009 %** against a tolerance of **+0.02 %**, four of thirteen below.
+
+### The floor, and why this lot may not hide behind it
+
+MF-UNL-8 step 7 found that the determinism `callgrind-set.sh` claims does not hold for the whole
+process on this machine, and five lots since have reported figures smaller than that floor.
+**This lot's is not.** The base binary run twice:
+
+| | worst ROM | set total | emulation symbols that moved |
+| --- | ---: | ---: | --- |
+| base vs the **same binary** | `oamstr` **+0.000 %** (+11 524) | **−90 473** | **none**, at a 20 000 threshold |
+| base vs the **lot** | `m4` **+0.009 %** (+473 660) | +803 975 | `NesBus::write_internal` on four ROMs |
+
+So the figure is a real cost. It is still less than half the tolerance, and it is attributable to
+one instruction-level decision rather than to the board's own code.
+
+### What moved, and the shape that was chosen by measuring it
+
+At a 20 000 threshold the only symbol of this build that moved anywhere in the thirteen ROMs is
+**`NesBus::write_internal`**: `m4` **+445 122**, `m1` +141 527, `m0` +65 621, `smb3` +41 201. Every
+other mover is Lua's `ltable.c` (`luaH_getshortstr`, `getgeneric`), in both directions, and it
+moves by the same ±32 000 between two runs of the **same** binary.
+
+`write_internal` inlines `Cartridge::cpu_write`, which runs `Mapper::cpu_read_windows` after every
+CPU write to the cartridge — and that calls `DecodeBoard::prg_ram_window`, which this lot gives a
+**second distinct body** (mapper 178 had the only one). MF-6a step 1 priced exactly this and the
+answer it established is `#[inline(never)]`. **So that shape was built and measured too, and it is
+worse:**
+
+| shape | ROMs whose `write_internal` moves | worst ROM | PR-1 set total |
+| --- | ---: | ---: | ---: |
+| inlined — **shipped** | **4** of 13 | `m4` **+0.009 %** | **+803 975 (+0.001 %)** |
+| `#[inline(never)]` | **11** of 13 | `m1` +0.006 % | +1 590 577 (+0.002 %) |
+
+Out of line the *call site* lands in `write_internal` for every board instead of a body for one:
+`mmc5` +407 642, `m1` +308 168, `m4` +234 107, `readbuf` +175 123 and seven more. Twice the set
+total and three times as many ROMs, for a slightly better worst ROM. Both are inside the
+tolerance; the shipped tree is the lower of the two, and `Pec9588::prg_ram_window`'s own note
+carries this table so that a later lot does not re-add the attribute on the usual precedent.
+
+### Level 2, the five games with their 3D packs, 600 frames after 120 of warm-up
+
+| game | stage | base | lot | delta | % |
+| --- | --- | ---: | ---: | ---: | ---: |
+| metroid | core | 11 146 849 562 | 11 146 883 813 | +34 251 | +0.000 |
+| metroid | total | 13 735 121 268 | 13 735 166 276 | +45 008 | +0.000 |
+| mm2 | core | 12 037 230 685 | 12 037 289 565 | +58 880 | +0.000 |
+| mm2 | total | 18 976 662 258 | 18 976 682 959 | +20 701 | +0.000 |
+| smb1 | core | 11 515 129 187 | 11 515 129 187 | **+0** | **+0.000** |
+| smb1 | total | 13 588 230 618 | 13 589 335 899 | +1 105 281 | +0.008 |
+| smb3 | core | 15 315 040 380 | 15 315 191 123 | +150 743 | +0.001 |
+| smb3 | total | 24 189 638 381 | 24 191 334 113 | +1 695 732 | +0.007 |
+| zelda2 | core | 12 774 981 932 | 12 775 009 516 | +27 584 | +0.000 |
+| zelda2 | total | 15 359 014 140 | 15 359 212 480 | +198 340 | +0.001 |
+
+**`ppu`, `apu` and `draw_list` are identical to the instruction on all five games.** `core` is +0
+on `smb1` and +0.000 % to +0.001 % on the other four. **Every `total` is inside the tolerance**, so
+the lot's performance rule needs no same-behaviour pair — but the two largest, `smb3` +0.007 % and
+`smb1` +0.008 %, are the Lua column again and the symbols say so: `luaH_getshortstr` +1 014 983 and
+`luaH_set` +872 694 on `smb3`, +724 404 and +350 303 on `smb1`, against `write_internal` +123 223
+on `smb3` and **nothing of this build above 100 000 on `smb1` at all**. `zelda2`'s `getgeneric`
+**−691 040** in the same run is the other half of that column's spread.
+
+### The decision
+
+| feature | figure | decision |
+| --- | --- | --- |
+| `board-164` | PR-1 worst ROM **+0.009 %** (`m4`), set total +0.001 %; level-2 `core` +0 to +0.001 %, worst `total` +0.008 % — all against **+0.02 %** | **in `default`**, and no second feature: the two mechanisms the census calls an L cost nothing measurable of their own, the whole figure being one inlined body on the CPU **write** path |
+
+`docs/review/BOARD-FEATURES.md` has the row, and its "worst figure among the features in
+`default`" paragraph is updated: **+0.009 %**, this lot's, where it was +0.003 % — and the first
+figure in that table that is neither a control's nor the instrument's.
+
+[PROGRESS] MF-UNL-10 step 4/6 done: the campaign

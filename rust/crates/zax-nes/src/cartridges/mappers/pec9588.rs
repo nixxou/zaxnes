@@ -408,6 +408,23 @@ impl Mapper for Pec9588 {
     /// "0-8 KiB unbanked PRG-RAM, not battery-backed": the volatile chip, which is PRG-RAM up to
     /// [`Pec9588::eeprom_offset`] and not the EEPROM behind it. A 2 KiB chip "is then mirrored
     /// three times across the respective address range", which is this wrap.
+    ///
+    /// **Deliberately inlined, and that is this lot's one measured decision.** This is the second
+    /// distinct body in `DecodeBoard::prg_ram_window`, which `Mapper::cpu_read_windows` calls
+    /// after every CPU write to the cartridge, so it grows `Board::cpu_read_windows` and with it
+    /// `NesBus::write_internal` — the function MF-6a step 1 priced that way, and the one symbol of
+    /// this build that moves at all for this lot. **Both shapes were built and measured** (step 4
+    /// of `docs/progress/MF-UNL-10.md`):
+    ///
+    /// | shape | `write_internal` moves on | worst ROM | PR-1 set total |
+    /// | --- | ---: | ---: | ---: |
+    /// | inlined, i.e. this one | **4** of 13 ROMs | `m4` **+0.009 %** | **+803 975 (+0.001 %)** |
+    /// | `#[inline(never)]` | **11** of 13 | `m1` +0.006 % | +1 590 577 (+0.002 %) |
+    ///
+    /// So the attribute every other board of this shape carries is **wrong here**: out of line the
+    /// call site lands in `write_internal` for every board instead of a body for one, which is
+    /// twice the set total and three times as many ROMs. Both are inside the owner's +0.02 %, and
+    /// this is the lower of the two.
     fn prg_ram_window(&self, _memory: &CartridgeMemory) -> (usize, usize) {
         (0, self.eeprom_offset)
     }
