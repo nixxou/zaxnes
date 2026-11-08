@@ -25,7 +25,7 @@ separate lot).
 - [x] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
 - [x] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
 - [x] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
-- [ ] 10/10 — the final check: fmt, clippy ×4, tests, golden-core, the figures
+- [x] 10/10 — the final check: fmt, clippy ×4, tests, golden-core, the figures
 
 The annotations are a step of their own because the protocol forbids writing a hash that does not
 exist yet: every "Fixed in MF-FIX (`<hash>`)" line names the commit of the step that made the
@@ -766,3 +766,98 @@ numbers, which is what the lot's scope said and this is the check of it. That it
 | `board-292` | `mmc5` **+1.126 %** | `metroid` +0.001 % | **stays parked** — R0 decides the move |
 
 `docs/review/BOARD-FEATURES.md` carries the two new rows with these figures.
+
+### 10/10 — the final check
+
+**fmt.** `cargo fmt --all -- --check`: clean.
+
+**clippy `-D warnings`** on `zax-nes` and `zax-harness`, `--all-targets`, in the four configurations
+the lot owes plus one:
+
+| configuration | result |
+| --- | --- |
+| `default` | clean |
+| `--no-default-features` | clean |
+| `--features parked-boards` | clean |
+| `--no-default-features --features board-195-prg-ram-5000` | clean |
+| `--no-default-features --features board-143-open-bus` | clean |
+
+`zax-app` cannot build in this worktree, so it is out of scope as the brief says; the crates this
+lot touches are `zax-nes` (the boards, the bus, the cartridge) and `zax-harness` (nothing of it
+changed, but it is the binary every figure was measured on, so it is linted too).
+
+**One pre-existing failure, not this lot's.** `--no-default-features --features board-119` fails
+clippy `-D warnings` with `unused self argument` at `mmc3.rs:306`. Checked against the lot's own base
+commit, where it fails identically, so it predates MF-FIX; `board-119` is not one of this lot's new
+features and so not one of the four configurations the lot owes. Recorded for whoever touches that
+feature next.
+
+**Tests.**
+
+| run | result |
+| --- | --- |
+| `cargo test --release -p zax-nes -p zax-harness` | **1155 passed, 0 failed, 9 ignored** |
+| the same with `--no-fail-fast … -- --include-ignored` and `ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` | **1164 passed, 0 failed, 0 ignored** |
+| `cargo test --release -p zax-nes --features parked-boards` | green, all six mapper-292 tests included |
+
+The nine are the ROM-gated ones, and the roots are what make them do work rather than return early:
+with them set, `test_roms_tests` runs its fourteen cases in 7.8 s and the per-ROM skip count drops
+from 164 to 143 (the remainder being ROMs the free collection does not carry). `--no-fail-fast` is a
+**cargo** flag and not a libtest one — passed after `--` it is "Unrecognized option".
+
+**golden-core over the 98 originals**, re-run from the final tree:
+
+```
+zax-harness golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+| build | md5 |
+| --- | --- |
+| `mffix-0-base` (`12c669a9`) | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `mffix-6-final` (this tree) | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `mffix-2-292` (`board-292` on) | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical**, and identical to the digest eleven lots have recorded. `mffix-6-final`'s binary
+md5 is `efcc1cd005cdf6ec975c164be9a8f4dd` — **the same as `mffix-5-ship2`**, the binary step 9
+measured — so every figure in that step is this tree's and not an earlier one's.
+
+**The figures and the feature decision for each board**, which is the last thing the brief asks for:
+
+| board / feature | PR-1's thirteen, worst ROM | level 2, worst game | in `default`? |
+| --- | --- | --- | :-: |
+| mappers 12, 123, 143 (six bits), 195, 262, 292 — the emulation changes | `vblnmi` +0.001 %, inside the same-binary floor; set total **-540 775** | all five at or below the base; `zelda2` **-0.020 %** | yes, unconditionally |
+| `board-195-prg-ram-5000` | `smb1` **+0.001 %**; set total +215 578 | inside, within the shipped build | **yes** |
+| `board-143-open-bus` | `mmc5` **+0.036 %** | not measured separately — already over on PR-1 | **no, parked** |
+| `board-292` | `mmc5` **+1.126 %** | `metroid` +0.001 %, set total below the base | **no, stays parked** |
+
+`board-292` is the one the brief asked about explicitly: it is **not** within +0.02 % on every ROM of
+the PR-1 set — twelve of the thirteen are inside and `mmc5exram` is not — so it stays where it is,
+and R0 is not asked to move it. §9.4 has why the report expected otherwise.
+
+## Bilan
+
+**What changed.** Six readings of five pages, every one of them against this build and for the same
+kind of reason: the page was ambiguous or self-contradictory and every other implementation had
+chosen the other branch. Two have a visible effect on a game — mapper 123's bank bit (*Mortal Kombat
+3*, *Earthworm Jim 2*) and mapper 12's language bit (*Dragon Ball Z 5* in English where the hardware
+is Chinese) — one closes a gap the page named and this build had left (mapper 195's `$5000` window),
+one inverts a chip's addressing (mapper 262), one gives a board the bus it needed (mapper 143), and
+one replaces a general mechanism with the narrow one the page's own last sentence describes (mapper
+292), deleting a store that ran on every CPU write of every game in the library.
+
+**What the lot found that the report had wrong.** Two things, both recorded in the report itself:
+§CHANGE 2's fix description puts mapper 195's window inside the WRAM where both implementations put
+it past the WRAM, and §CHANGE 8 expects to unpark `board-292` by removing a latch that was never the
+binding cost. Neither was taken on trust, and both were checked by reading the two projects' sources
+directly.
+
+**What it cost.** Nothing, in the shipped configuration: every ROM of the PR-1 thirteen and every
+level-2 game is at or below the base commit, and the set totals are negative on both instruments.
+One feature is parked for its figure (`board-143-open-bus`, two bits of one read), one stays in
+`default` for its figure (`board-195-prg-ram-5000`), and the one the brief hoped to unpark does not
+clear the tolerance.
+
+**What is left open.** Q-173's two questions for R0 (mapper 195's window: the NES 2.0 gate, and which
+4 KiB), the unpark decision for `board-292` (answered by the figure, but formally R0's), and the
+three CHANGEs this lot deliberately did not take — CHANGE 3 and 4 wait for one screenshot each,
+CHANGE 5 is a lot of its own.
