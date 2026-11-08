@@ -229,7 +229,7 @@ bullets asks for something no page states. The ticket also holds five things the
       registers dirtied, and a reset per board.
 - [x] **5/8** §7.1's first and third common things: the four sweeps, `cargo fmt --check` and
       clippy `-D warnings` in the six configurations.
-- [ ] **6/8** the callgrind campaign against `01850f36`, the feature decision per board and the
+- [x] **6/8** the callgrind campaign against `01850f36`, the feature decision per board and the
       three `BOARD-FEATURES.md` rows.
 - [ ] **7/8** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
@@ -501,3 +501,117 @@ nothing but that one configuration could have found it, which is the whole point
 `cargo test --release -p zax-nes -p zax-harness`: every suite passes.
 
 [PROGRESS] MF-UNL-11 step 5/8 done: the six configurations
+
+## Step 6 — the campaign, and a lot that costs nothing measurable
+
+Binaries built by `build-clean.sh` from their own `git archive` tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mfunl11-0-base` | **`01850f36`**, the lot's base commit | `d4d92c446abb1cafd5194ccbf35d3b1e` |
+| `mfunl11-1-lot` | **`2b38776c`**, step 5 — the lot's last code commit | `d031eddea93ab222efc8cbbf61dd5b67` |
+| `mfunl11-0-again` | a byte copy of `mfunl11-0-base`, the **same-binary floor** | same md5 as the base |
+
+The base binary's md5 is **identical to MF-UNL-10's shipped binary** (`zax-harness-mfunl10-3-ship`
+and `-1-lot` both), so this lot's base is that lot's measured binary to the byte — the **eighth**
+lot in a row for which that holds, and built rather than assumed.
+
+### The PR-1 set, thirteen ROMs, 300 frames
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| duelito | 7 380 425 366 | 7 380 400 626 | −24 740 | −0.000 |
+| m0 | 5 517 311 068 | 5 517 312 364 | +1 296 | +0.000 |
+| m1 | 4 881 118 436 | 4 881 091 726 | −26 710 | −0.001 |
+| m4 | 5 468 173 957 | 5 468 148 039 | −25 918 | −0.000 |
+| metroid | 5 115 555 558 | 5 115 556 927 | +1 369 | +0.000 |
+| mm2 | 6 018 007 634 | 6 017 994 846 | −12 788 | −0.000 |
+| mmc5 | 11 266 796 935 | 11 266 786 726 | −10 209 | −0.000 |
+| oamstr | 3 318 454 125 | 3 318 464 799 | +10 674 | +0.000 |
+| readbuf | 6 834 511 568 | 6 834 482 778 | −28 790 | −0.000 |
+| smb1 | 5 996 363 392 | 5 996 344 729 | −18 663 | −0.000 |
+| smb3 | 7 949 476 038 | 7 949 410 397 | −65 641 | −0.001 |
+| vblnmi | 3 308 285 084 | 3 308 328 828 | **+43 744** | **+0.001** |
+| z2 | 6 291 504 063 | 6 291 538 385 | +34 322 | +0.001 |
+| **total** | **79 345 983 224** | **79 345 861 170** | **−122 054** | **−0.000** |
+
+Worst ROM **+0.001 %** against a tolerance of **+0.02 %**, seven of thirteen below, and the set
+total **below** the base commit's.
+
+### The floor is worse than the figure, and no emulation symbol moves at all
+
+| | worst ROM | set total | emulation symbols that moved |
+| --- | ---: | ---: | --- |
+| base vs the **lot** | `vblnmi` **+0.001 %** (+43 744) | **−122 054** | **none**, at a 20 000 threshold |
+| base vs the **same binary** | `m1` +0.001 % (+50 390), `m4` +50 957 | **+82 759** | **none** |
+
+Every symbol that moved in either run is Lua's `ltable.c` — `getgeneric` and `luaH_getshortstr`,
+in both directions, by ±20 000 to ±44 000 — and they move by the same amounts between two runs of
+the **same** binary. MF-UNL-8 step 7's finding that `callgrind-set.sh`'s determinism does not hold
+for the whole process on this machine is what this is, and unlike MF-UNL-10's figure **this lot's
+is inside it**: three new `IrqBoard` variants, three boards holding an `Mmc3`, one new
+`BankWindows` method and five widened `cfg` lists cost nothing a 20 000-instruction threshold can
+see.
+
+That is also the re-measurement MF-CART step 4 asked for and MF-UNL-2 step 8 promised: three
+variants added to a shared `Board` enum at once, and `Cartridge::try_cpu_read` does not move.
+`mmc5` — the one ROM whose every CPU read reached that function before step 4 inlined it away — is
+**−10 209**.
+
+### Level 2, the five games with their 3D packs, 600 frames after 120 of warm-up
+
+| game | stage | base | lot | delta | % |
+| --- | --- | ---: | ---: | ---: | ---: |
+| metroid | core | 11 146 883 813 | 11 146 883 813 | **+0** | **+0.000** |
+| metroid | total | 13 735 144 718 | 13 735 147 404 | +2 686 | +0.000 |
+| mm2 | core | 12 037 289 565 | 12 037 289 565 | **+0** | **+0.000** |
+| mm2 | total | 18 976 701 932 | 18 976 757 114 | +55 182 | +0.000 |
+| smb1 | core | 11 515 129 187 | 11 515 129 187 | **+0** | **+0.000** |
+| smb1 | total | 13 588 398 616 | 13 590 205 556 | +1 806 940 | **+0.013** |
+| smb3 | core | 15 315 191 123 | 15 315 191 123 | **+0** | **+0.000** |
+| smb3 | total | 24 191 384 463 | 24 187 507 015 | −3 877 448 | −0.016 |
+| zelda2 | core | 12 775 009 516 | 12 775 009 516 | **+0** | **+0.000** |
+| zelda2 | total | 15 359 932 329 | 15 359 460 188 | −472 141 | −0.003 |
+
+**`core` is +0 on all five games, identical to the instruction**, and so are `apu`, `ppu` and
+`draw_list`. Every `total` is inside the tolerance, so the lot's performance rule needs no
+same-behaviour pair — but the largest of them, `smb1` **+0.013 %**, is the Lua column and the
+stage table says so: `convert` +1 895 363 and `lua_hooks` +1 903 711 against `core` +0.
+
+**And the level-2 floor was run too**, which no earlier lot's write-up has: the same binary twice.
+
+| game | `core` | `total` |
+| --- | ---: | ---: |
+| metroid | +0 | +0.001 % |
+| mm2 | +0 | +0.000 % |
+| smb1 | +0 | **+0.007 %** |
+| smb3 | +0 | −0.001 % |
+| zelda2 | +0 | **−0.007 %** |
+
+So `core` is +0 everywhere on an identical binary, as it must be, and `total` on that instrument
+moves by up to ±0.007 % on the very game whose figure is the lot's largest. +0.013 % on `smb1` is
+that column's own spread and not a cost of these boards — stated with the measurement rather than
+asserted.
+
+### The decision
+
+| feature | figure | decision |
+| --- | --- | --- |
+| `board-215` | the three measured together: PR-1 worst ROM **+0.001 %**, set total −0.000 %; level-2 `core` **+0 on all five**, worst `total` +0.013 % against a floor of +0.007 % on the same game — all against **+0.02 %** | **in `default`** |
+| `board-208` | as above | **in `default`** |
+| `board-219` | as above | **in `default`** |
+
+**No second feature inside any of the three**, and nothing to park. The owner's rule prices a
+mechanism separately when it costs more than its board; here no symbol of the build moves at all,
+so there is nothing to separate. The three are measured **together** because they ship together
+and the figure is the instrument's either way; a per-feature split would be three more campaigns
+reporting the same spread.
+
+`docs/review/BOARD-FEATURES.md` has the three rows, and its "worst figure among the features in
+`default`" paragraph is extended rather than changed: MF-UNL-10's **+0.009 %** stands, and this
+lot's row is recorded as back among the ones whose figure is the instrument's.
+
+[PROGRESS] MF-UNL-11 step 6/8 done: the campaign
