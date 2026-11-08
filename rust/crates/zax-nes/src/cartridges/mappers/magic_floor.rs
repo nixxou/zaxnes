@@ -48,7 +48,7 @@ use crate::NametableMirroring;
 /// * **A13** — PPU A13 is 1 throughout $2000-$3FFF and 0 throughout $0000-$1FFF, so the
 ///   nametables are block 1 and both pattern tables are block 0.
 ///
-/// # Why the cartridge serves the nametables, and why that is not a liberty
+/// # Why the cartridge serves the nametables, and why that is not a liberty (Q-163)
 ///
 /// CIRAM is in the console, and a board that maps it into the pattern tables is asking for one
 /// 2 KiB memory to answer both windows — which this architecture cannot do with the PPU's own
@@ -63,6 +63,10 @@ use crate::NametableMirroring;
 /// cartridge and nametables from console VRAM would be two memories and *would* be wrong —
 /// *Magic Floor* writes its tiles through $2007 into the nametable window and reads them back as
 /// patterns, which is what the board exists for.
+///
+/// **Q-163** records the choice and the reason §7.2's own mechanism is not sufficient:
+/// `Mapper::nametable_page`, which it prices the whole board at, cannot make a *pattern-table*
+/// fetch read the console's VRAM, and the pattern tables are the half of this board that matters.
 ///
 /// This is the **fifth** distinct body of the `Mapper::read_nametable` dispatch Q-123 once
 /// measured a cap of two on, and the second inside [`super::DecodeBoard`] — so `Board`'s own jump

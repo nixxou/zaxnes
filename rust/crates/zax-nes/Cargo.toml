@@ -529,7 +529,7 @@ board-112 = ["board-namcot108"]
 
 # Mapper 193, NTDEC's **TC-112** (MF-UNL-7 step 3): *Fighting Hero* and *War in the Gulf*. Five
 # registers at $6000-$6004 under mask $E007 -- "$6000: [CCCC CC..]", "$6001: [CCCC CCC.]",
-# "$6002: [CCCC CCC.]", "$6003: [.... PPPP]", "$6004: [.... ...M]" -- driving **three CHR windows
+# "$6002: [CCCC CCC.]", "$6003: [.... PPPP]", "$6004: [.... ...M]" -- driving **three CHR regions
 # of unequal width** (4 KiB at $0000, 2 KiB at $1000, 2 KiB at $1800, all three from 1 KiB bank
 # numbers the diagrams shift rather than mask), one switchable 8 KiB PRG window of four with the
 # other three fixed to the end, and mirroring.
@@ -595,7 +595,7 @@ board-29 = ["board-decode-boards"]
 #
 # The 2 KiB is held as the cartridge's CHR-RAM and the nametables are answered through
 # `Mapper::read_nametable`, the GTROM's shape (MF-6c step 9): one memory has to answer both
-# windows, and `Mapper::ppu_peek` cannot reach the PPU's own VRAM. Which side of the connector
+# ranges, and `Mapper::ppu_peek` cannot reach the PPU's own VRAM. Which side of the connector
 # CIRAM sits on is invisible to a game; that the pattern tables and the nametables are the same
 # 2 KiB is not, and it is what the board exists for. One `DecodeBoard` variant, the **fifth**
 # distinct body of the `read_nametable` dispatch of Q-123 and the second inside that enum, so
@@ -612,7 +612,7 @@ board-218 = ["board-decode-boards"]
 # six register bits onto CHR A16-A11 with PPU A10-A0 passed through, the A (141) onto A17-A12 with
 # A11-A0 passed through and the C (139) onto A18-A13 with A12-A0 -- so the 2 KiB window the PPU's
 # A12-A11 chose takes the bank shifted 0, 1 or 2 places, and the chip reaches 128, 256 or 512 KiB.
-# The D (137) is the one with a page of its own: four **1 KiB** windows over $0000-$0FFF with
+# The D (137) is the one with a page of its own: four **1 KiB** pages over $0000-$0FFF with
 # $1000-$1FFF "fixed to last 4KiB", and an R4 that is one bit **per block** rather than three
 # common upper bits, so only its fourth window reaches the whole 32 KiB.
 #

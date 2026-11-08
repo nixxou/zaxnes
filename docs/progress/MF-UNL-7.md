@@ -48,7 +48,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
 - [x] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
 - [x] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
-- [ ] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
+- [x] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
 - [ ] **8/9** — the callgrind campaign against the base commit, and the feature decision per board.
 - [ ] **9/9** — golden-core, the full `--include-ignored` run with both ROM roots,
@@ -554,3 +554,65 @@ pass in every one.
 **All six boards of the lot are in, and the nine numbers are 29, 112, 137, 138, 139, 141, 193, 218
 and 298.** Steps 7 to 9 are the question tickets, the sweeps in every configuration the lot adds,
 the campaign and the final pass.
+
+---
+
+## Step 7 — four question tickets, and the sweeps in all nine configurations
+
+### The tickets
+
+MF-UNL-2's rule is that where §7.2 and a number's own page differ, **the page wins and the case is
+recorded**. Four cases came up, and all four are now in `spec/changes/`:
+
+| ticket | what it records |
+| --- | --- |
+| **Q-160** | The Sachen 8259's **two pages contradict each other**: `mm` modes 0 and 1 are swapped between *Sachen 8259* and *INES Mapper 137*, and so is what `s` fixes the mirroring to. Plus "banks become weird", which is not an implementation, and §7.2's register list, which omits the **register 6** mapper 137's own page documents |
+| **Q-161** | Four things mappers 112's and 193's pages do not say: 112's $C000-$DFFF and the low bit of its two 2 KiB CHR selects (both taken from the 206), 193's mirroring register that "no games are known to rely on", and 193's PRG-RAM, which its own mask settles |
+| **Q-162** | Mapper 298: §7.2's "does not reload the counter" is true of a Konami VRC4 as well, so it is **not the difference** — the page's `A`-to-`E` clause is. And "in the manner of `McAcc`" is a second `Board` discriminant, which MF-6c priced at `mmc5` +0.066 % against a +0.02 % tolerance, so the flag is a load-time `bool` |
+| **Q-163** | Mapper 218: §7.2 prices the whole board at `Mapper::nametable_page`, which **cannot make a pattern-table fetch read the console's VRAM** — and the pattern tables are the half of this board that matters. The 2 KiB is held on the cartridge's side and `read_nametable` answers the other window |
+
+Each is referenced from the code it governs and pinned by at least one test named after it:
+`q_160_the_sachen_8259_swaps_mirroring_modes_0_and_1_between_its_two_pages`,
+`q_160_simple_mode_puts_chr_block_0_in_every_window`,
+`q_161_mapper_112_ignores_the_low_bit_of_its_two_2_kib_chr_selects`,
+`q_161_mapper_193_changes_mirroring_from_6004`,
+`q_162_no_vrc4_acknowledge_reloads_the_counter_on_either_chip`, and — for Q-163, where the
+behaviour is the board rather than a clause —
+`req_core_102_mapper_218_serves_its_pattern_tables_from_ciram`.
+
+### §7.1's three common things, checked
+
+1. **The four sweeps over `SUPPORTED_MAPPERS`.** `req_core_100_every_required_mapper_is_registered`
+   (whose built expected list gains all nine numbers), `req_core_102_any_other_mapper_is_refused`,
+   `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+   `req_core_090_the_mapper_state_survives_a_save_and_restore` all walk the table, so every number
+   this lot adds is built, reset and round-tripped by them; the three in-crate latch sweeps
+   (`mf_3b`, `mf_5a`, `mf_4c`) build each number at submappers 0 and 3 besides.
+2. **A save-state round-trip per board with the mapper state dirtied first**, because the generic
+   sweep writes $8000-$E001 and $6000 and three of this lot's six boards keep their registers
+   somewhere else — the 8259's at $4100/$4101, mapper 193's at $6000-$6004, and mapper 218 has no
+   register at all. `req_core_090_the_sachen_8259_survives_a_save_and_restore`,
+   `req_core_090_mapper_112_survives_a_save_and_restore`,
+   `req_core_090_mapper_193_survives_a_save_and_restore`,
+   `req_core_090_mapper_298_keeps_the_vrc4s_save_block`,
+   `req_core_090_mapper_218_round_trips_its_two_kib_of_ciram` and
+   `req_core_090_mapper_29_survives_a_save_and_restore` are the six.
+3. **fmt, clippy and the suites in every configuration the lot adds.** `cargo fmt --check` clean,
+   and `cargo clippy -p zax-nes --all-targets -- -D warnings` clean plus `cargo test -p zax-nes`
+   all green in **nine** configurations: default, `--no-default-features`,
+   `--features parked-boards`, and each of `board-29`, `board-112`, `board-193`, `board-218`,
+   `board-298` and `board-sachen8259` alone with no defaults.
+
+### One thing the suites caught that nothing else would have
+
+`req_arch_002_the_crate_has_no_platform_dependency` reads `zax-nes/Cargo.toml` as **text** and
+asserts that it contains none of `sdl2`, `glow`, `imgui`, `winit`, `glutin`, `windows` — the Rust
+counterpart of the C# check on referenced assemblies. Three of this lot's new feature comments
+described a board's **bank windows**, and the substring tripped it in every configuration including
+`default`. The three sentences now say "regions", "ranges" and "pages", the manifest holds none of
+the six strings, and the test is right to be that blunt: a `windows = "0.5"` dependency line is
+exactly what it exists to refuse, and a comment is not a safe exception to carve out.
+
+It is also the reason this step runs the **whole** `zax-nes` suite in each configuration rather
+than `mapper_tests` and the lib: the earlier steps' per-step checks would never have reached
+`core_lifecycle_tests`.
