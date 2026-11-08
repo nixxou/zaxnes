@@ -51,7 +51,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
 - [x] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
 - [x] **5/8** — the question tickets.
-- [ ] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
+- [x] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
 - [ ] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
 - [ ] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
   `BOARD-FEATURES.md`, the census note, the journal and the final pass.
@@ -675,3 +675,107 @@ Q-168's item 5 are the two places a page is wrong or inconsistent rather than me
 two rules are unverified by its own page's admission, the Cony page prints a mask that cannot be
 right and a pad nothing can configure, submapper 2 is refused on a mechanism and not on content, and
 mapper 91's two counters have no stated firing rule at all.
+
+---
+
+## Step 6 — §7.1's first two common things, and one thing the round trip found
+
+### 1. The four sweeps over `SUPPORTED_MAPPERS`
+
+`req_core_100_every_required_mapper_is_registered` (whose **built** expected list gains all five
+numbers, so an accidental addition is caught as surely as an accidental removal),
+`req_core_102_any_other_mapper_is_refused`,
+`amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` and
+`req_core_090_the_mapper_state_survives_a_save_and_restore` all walk the table, so every number
+this lot adds is built, reset and round-tripped by them. The three in-crate latch sweeps
+(`mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`,
+`mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched`, and MF-4c's) build each number at
+submappers 0 and 3 besides — and `mf_3b`'s expected list had to be extended three times over this
+lot, once per board, which is exactly what §4.3 of the inventory keeps it for.
+
+### 2. A save-state round trip per board, with the registers dirtied first
+
+Needed because the generic sweep writes `$8000`-`$E001` and `$6000`, and **not one of this lot's
+four boards keeps its own registers only there**: mapper 12's GAL register is at `$4132`, mapper
+14's supervisor at `$A131` with a second chip's whole block behind it, the Cony board's file is at
+`$8300`-`$831F` and `$5100`-`$5103`, and mapper 91's is at `$6000`-`$7001` with an outer register
+that is an *address* in `$8000`-`$9FFF`.
+
+| test | what it moves before the capture |
+| --- | --- |
+| `req_core_090_mapper_12_round_trips_its_outer_chr_register` | `$4132` with both CHR A18 lines, two MMC3 bank registers and the counter, two frames run |
+| `req_core_090_mapper_14_round_trips_both_chips_and_the_supervisor` | the MMC3's pair, then the VRC2's two PRG registers and its mirroring in the other mode, then back with two of the three lines set — and it walks away **through** the other mode and changes its registers too, so nothing the capture held is still live. It also checks that mapper 12's block is **shorter** than mapper 14's |
+| `req_core_090_cony_round_trips_its_register_file_and_its_scratch_ram` | on both numbers: the mode register, the base, four PRG registers, four CHR registers, the clock source, the counter and all four scratch bytes — and the `$6000` window's content, read back through `try_cpu_peek` |
+| `req_core_090_mapper_91_round_trips_both_of_its_boards` | on both submappers: four CHR registers, two PRG registers, the outer register or the mirroring port, the counter register, and the counter itself clocked ten times on its own clock |
+| `amd_061_a_reset_puts_every_board_of_mf_unl_8_back_to_its_power_on_state` | all five numbers, each through a register the generic reset sweep does not write, with mapper 14's non-zero power-on (`$02`, MMC3 mode) among them |
+
+Each one asserts that the dirtying **moved the layout** before the capture is trusted — without
+that line a round-trip test passes on a board whose register never reaches the state at all,
+because the live field would still hold what the capture held.
+
+### The thing that found: `IrqBoard` does not forward `save_state`, so mapper 116's override is unreachable
+
+`req_core_090_mapper_14_round_trips_both_chips_and_the_supervisor` failed on its first run with the
+VRC2's registers back at their **power-on** values, and the reason is not mapper 14's:
+
+* `Cartridge::save_state` calls `Board::save_state`.
+* **`Board` does not override `save_state` or `load_state`** — it forwards `save_registers` and
+  `load_registers` — so `Mapper::save_state`'s default runs: `banks()`, then `save_registers()`.
+* **`IrqBoard` does not override them either**, for the same reason and in the same two methods.
+
+So a board inside either shared variant is reached **only** through
+`save_registers`/`load_registers`, and an override of `save_state` on such a board is dead code.
+`Huang1` was written with that override, on `Somari`'s model, and silently wrote nothing but the
+active chip's window table.
+
+**`Somari` has the same override and the same problem**, and it is mapper 116's: its own note
+explains at length why `save_state` is overridden "rather than `save_registers`/`load_registers`",
+and that override has never been called. What a mapper-116 savestate carries today is
+`Board::banks()` — *whichever chip the current mode names* — and nothing else: no supervisor
+register, no second or third chip, no IRQ state. `req_core_090_the_mapper_state_survives_a_save_and_restore`
+does not catch it because the sweep compares the re-saved **bytes**, and a block that holds only a
+window table is self-consistent after a restore.
+
+**This lot does not fix it**, and that is the owner's rule rather than a preference: "no change to
+the emulation of an existing mapper, and no change to the save-state format of existing boards".
+Moving mapper 116's block is exactly what a fix is. It is recorded here, in `Huang1`'s own
+`save_registers` note, and in the census note of step 8, with what the fix would be — move
+`Somari::save_state`'s body into `save_registers` and its `load_state`'s into `load_registers`,
+which is one mechanical change and a new savestate version for that one board.
+
+`Huang1` now writes its state through `save_registers`/`load_registers`. The default's leading
+`banks()` block stays in front of it and is **redundant but harmless**: `load_registers` ends by
+recomputing both chips' windows from their own registers and laying the CHR A18 lines back over the
+active one, so whatever the default wrote into whichever chip the pre-load mode named is overwritten
+before the state is used. `Cony` and `Mapper091` were written through `save_registers` from the
+start and were never affected.
+
+### 3. The configurations
+
+`cargo fmt --check` clean. `cargo clippy -p zax-nes --all-targets -- -D warnings` clean **and the
+whole `zax-nes` suite green** in six configurations — the three the lot adds, each alone with no
+defaults, plus `default`, `--no-default-features` and `--features parked-boards`:
+
+| configuration | tests passed |
+| --- | ---: |
+| `default` | **1 041** |
+| `--no-default-features` | 783 |
+| `--features parked-boards` | **1 094** |
+| `--no-default-features --features board-huang1` | 796 |
+| `--no-default-features --features board-cony` | 795 |
+| `--no-default-features --features board-91` | 791 |
+
+**0 failed in all six.** `cargo test --release -p zax-nes -p zax-harness` is **1 104 passed, 0
+failed**, and `cargo clippy -p zax-harness --all-targets -- -D warnings` is clean — the two crates
+this lot touches, which is the scope `zax-app`'s own note allows in this worktree.
+
+The whole suite and not `mapper_tests` alone, which is MF-UNL-7 step 7's lesson: that lot's
+`req_arch_002_the_crate_has_no_platform_dependency` reads `zax-nes/Cargo.toml` as **text** and
+refuses the substring `windows`, and three feature comments tripped it. This lot's three new
+comments were checked against it in every configuration; they say "regions", "ranges" and "window
+groups", and the test passes.
+
+[PROGRESS] MF-UNL-8 step 6/8 done: the four sweeps and the three latch sweeps reach all five
+numbers, five dedicated round trips move what the generic sweep cannot — and the first of them found
+that `Board` and `IrqBoard` forward `save_registers` and not `save_state`, so mapper 116's own
+override has never been called; `Huang1` is fixed and mapper 116's block is left exactly as it is.

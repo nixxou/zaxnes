@@ -255,24 +255,38 @@ impl Mapper for Huang1 {
         }
     }
 
-    /// The whole mapper state: the **outer register first**, then the chip's own complete block.
+    /// The whole mapper state: the **outer register first**, then each chip's own complete block.
     ///
-    /// [`Mapper::save_state`] and [`Mapper::load_state`] are overridden rather than
-    /// `save_registers`/`load_registers`, on [`super::Somari`]'s own reason read for one chip: the
-    /// defaults write `banks()` and then the registers, and the windows this board's `banks()`
-    /// shows **carry the outer CHR line** while the chip's registers do not. `Mmc3`'s own
-    /// `load_registers` recomputes the windows from its registers, so the line has to be laid back
-    /// over them after it — which is the one line [`Huang1::load_state`] adds and which no default
-    /// could have (REQ-CORE-090, REQ-CORE-091).
+    /// # Why this is `save_registers` and not `save_state`
     ///
-    /// **Mapper 14 writes both chips' blocks and mapper 12 only the MMC3's**, which is the shape
-    /// `Mmc3Board` already uses for mapper 195's GAL byte and the two multicarts' outer register:
-    /// a block carries what the board has, and mapper 12's board has no VRC2. Mapper 116's own
-    /// reason governs mapper 14's half — the page requires each chip to keep its own registers
-    /// across a mode switch, so both are written whatever the mode is, and the supervisor register
-    /// goes **first** so that every block has exactly one owner and the mode is known before any
-    /// of them is read.
-    fn save_state(&self, writer: &mut StateWriter) {
+    /// [`super::Somari`] overrides [`Mapper::save_state`] instead, with a note explaining that the
+    /// default's order would be wrong for a board whose `banks()` is "whichever chip the current
+    /// mode names". **That override is never called**: neither [`super::IrqBoard`] nor
+    /// `Board` forwards `save_state` or `load_state` — they forward
+    /// `save_registers`/`load_registers` — so for any board inside a shared variant the default
+    /// `Mapper::save_state` on `Board` is what runs, and it reaches a board's own code only through
+    /// these two methods. See MF-UNL-8 step 6, which found it and leaves mapper 116's block exactly
+    /// as it is, because the owner's rule forbids moving an existing board's save-state format.
+    ///
+    /// So the layout of this board's state is `Board`'s default in front —
+    /// `Board::banks()`, i.e. the active chip's window table — and then everything below. The
+    /// leading table is **redundant and harmless**: `load_registers` ends by recomputing both
+    /// chips' windows from their own registers and laying the CHR A18 lines back over the active
+    /// one, so whatever the default wrote into whichever chip the pre-load mode named is
+    /// overwritten before the state is used (REQ-CORE-090, REQ-CORE-091).
+    ///
+    /// # What is written
+    ///
+    /// The supervisor register **first**, so that every block below it has exactly one owner and
+    /// the mode is known before any of them is read — mapper 116's own reason, which holds whatever
+    /// dispatch calls this. Then the `Mmc3`'s complete block, and on **mapper 14 only** the
+    /// `Vrc2Vrc4`'s: a block carries what the board has, and mapper 12's board has no VRC2 at all.
+    /// That is `Mmc3Board`'s own shape for mapper 195's GAL byte and the two multicarts' outer
+    /// register.
+    ///
+    /// Both chips are written whatever the mode is, because the page requires each to keep its own
+    /// registers across a mode switch.
+    fn save_registers(&self, writer: &mut StateWriter) {
         writer.write_u8(self.supervisor);
         self.mmc3.save_state(writer);
         if self.mapper_number == 14 {
@@ -280,7 +294,7 @@ impl Mapper for Huang1 {
         }
     }
 
-    fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.supervisor = reader.read_u8()?;
         self.mmc3.load_state(reader)?;
         if self.mapper_number == 14 {
@@ -288,7 +302,7 @@ impl Mapper for Huang1 {
             // Both chips back to their **register-derived** windows before the lines go on, so a
             // state cannot come back with CHR A18 on a window that does not carry it: the MMC3's
             // own `load_registers` recomputes and the VRC2's does not, and `refresh` wants the
-            // inactive one consistent too. Mapper 116's `load_state` does this for the same reason.
+            // inactive one consistent too.
             self.mmc3.refresh_banks();
             self.vrc2.refresh_banks();
         }

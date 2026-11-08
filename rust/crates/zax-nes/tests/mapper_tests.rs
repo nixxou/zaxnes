@@ -13104,3 +13104,327 @@ fn q_168_mapper_91_submapper_0_takes_its_outer_bank_from_the_address_written() {
         "submapper 1 has no outer bank register"
     );
 }
+
+// -------------------- MF-UNL-8's four save-state round trips, §7.1's second common thing
+
+/// What a board of this lot shows, and nothing of the machine around it: the four PRG windows, the
+/// eight CHR window **offsets** and the mirroring.
+///
+/// The offsets and not the bytes, for `chr_offsets`'s own reason: three of the four boards move a
+/// CHR window by 256 or 512 banks and the fixture's fill byte reads the same 256 banks apart.
+#[cfg(any(feature = "board-91", feature = "board-cony", feature = "board-huang1"))]
+fn unl8_layout(core: &NesCore) -> ([u8; 4], [usize; 8], Nm) {
+    (core.prg_windows(), chr_offsets(core), core.mirroring())
+}
+
+/// REQ-CORE-090/091: mapper 12's GAL register is at **`$4132`**, which
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` never writes — that sweep dirties
+/// `$8000`-`$E001` and `$6000` — so the round trip is pinned here with the board's own register
+/// moved first (MF-UNL-8 step 1).
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_090_mapper_12_round_trips_its_outer_chr_register() {
+    let mut core = MapperRom::new(12).prg(32).chr(512).battery().load();
+    core.mmc3_bank(0, 0x12);
+    core.mmc3_bank(6, 3);
+    core.mapper_write(0x4132, 0x11); // Both CHR A18 lines.
+    core.mapper_write(0xC000, 0x20); // And the counter, so that it has run.
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl8_layout(&core);
+
+    // Move it somewhere the chip's own registers could not reach: the lines off, which is a
+    // 256-bank move on every window.
+    core.mapper_write(0x4132, 0x00);
+    assert_ne!(layout, unl8_layout(&core), "the register moved the layout");
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl8_layout(&core), "and the state brought it back");
+    assert_eq!(
+        state,
+        core.save_state(true).unwrap(),
+        "the whole block, derived fields included"
+    );
+}
+
+/// REQ-CORE-090/091: mapper 14 keeps **two chips' registers at once** — the page requires it, which
+/// is why the block carries both whatever the mode is — and its supervisor register is at `$A131`,
+/// an address the generic sweep does not write (MF-UNL-8 step 2).
+///
+/// The round trip is taken with each chip's registers set to a layout only that chip could produce,
+/// so that a state restored into a board sitting in the *other* mode would be caught.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_090_mapper_14_round_trips_both_chips_and_the_supervisor() {
+    let mut core = MapperRom::new(14).prg(32).chr(512).battery().load();
+
+    // The MMC3's own select-and-value pair, in MMC3 mode.
+    core.mmc3_bank(6, 3);
+    core.mmc3_bank(7, 5);
+    // The VRC2's two independent PRG registers and its mirroring, in VRC2 mode.
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x8000, 0x07);
+    core.mapper_write(0xA000, 0x09);
+    core.mapper_write(0x9000, 0x01);
+    // Back to MMC3 mode with two of the three CHR A18 lines set, and let the counter run.
+    core.mapper_write(0xA131, 0x02 | 0x08 | 0x80);
+    core.mapper_write(0xC000, 0x20);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    for _ in 0..2 {
+        core.run_frame(0);
+    }
+
+    let state = core.save_state(true).unwrap();
+    let layout = unl8_layout(&core);
+
+    // Walk away through the other mode and change its registers too, so that nothing the capture
+    // held is still live.
+    core.mapper_write(0xA131, 0x00);
+    core.mapper_write(0x8000, 0x02);
+    core.mapper_write(0xA000, 0x04);
+    assert_ne!(layout, unl8_layout(&core));
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(layout, unl8_layout(&core), "the MMC3 mode's own layout");
+    assert_eq!(state, core.save_state(true).unwrap());
+
+    // And the VRC2's registers came back with it: switching to its mode shows what was set before
+    // the capture and not what was written after it.
+    core.mapper_write(0xA131, 0x00);
+    assert_eq!(
+        [7, 9, 30, 31],
+        core.prg_windows(),
+        "the VRC2 kept its own registers across the round trip"
+    );
+    assert_eq!(Nm::Horizontal, core.mirroring(), "and its mirroring");
+
+    // Mapper 12's board has no VRC2, so its block is **shorter** than mapper 14's: a block carries
+    // what the board has, which is `Mmc3Board`'s own shape for mapper 195's GAL byte.
+    let twelve = MapperRom::new(12)
+        .prg(32)
+        .chr(512)
+        .battery()
+        .load()
+        .save_state(true)
+        .unwrap();
+    let fourteen = MapperRom::new(14)
+        .prg(32)
+        .chr(512)
+        .battery()
+        .load()
+        .save_state(true)
+        .unwrap();
+    assert!(
+        twelve.len() < fourteen.len(),
+        "mapper 12 writes no VRC2 block: {} against {}",
+        twelve.len(),
+        fourteen.len()
+    );
+}
+
+/// REQ-CORE-090/091: the Cony board's register file is at `$8000`-`$831F` and its four scratch
+/// bytes at `$5100`-`$5103`, and the generic sweep reaches only the first of those — `$8000` is the
+/// PRG base under this board's mask and nothing else it writes is a register here
+/// (MF-UNL-8 step 3).
+#[cfg(feature = "board-cony")]
+#[test]
+fn req_core_090_cony_round_trips_its_register_file_and_its_scratch_ram() {
+    for mapper in [83usize, 264] {
+        let mut core = if mapper == 83 {
+            MapperRom::new(83)
+                .submapper(1)
+                .prg(32)
+                .chr(256)
+                .battery()
+                .load()
+        } else {
+            MapperRom::new(264).prg(32).chr(256).battery().load()
+        };
+
+        cony_write(&mut core, mapper, 0x8100, 0x80 | 0x20 | 0x10 | 0x02); // Arm, $6000 on, mode 2, single-screen 0.
+        cony_write(&mut core, mapper, 0x8000, 0x04);
+        for (register, value) in [(0u16, 3u8), (1, 5), (2, 7), (3, 9)] {
+            cony_write(&mut core, mapper, 0x8300 + register, value);
+        }
+        for (register, value) in [(0u16, 1u8), (1, 2), (6, 3), (7, 4)] {
+            cony_write(&mut core, mapper, 0x8310 + register, value);
+        }
+        cony_write(&mut core, mapper, 0x8318, 0xFF); // The A12 clock source.
+        cony_write(&mut core, mapper, 0x8200, 0x34); // The counter, LSB then MSB.
+        cony_write(&mut core, mapper, 0x8201, 0x12);
+        for (index, value) in [0x11u8, 0x22, 0x33, 0x44].into_iter().enumerate() {
+            cony_write(
+                &mut core,
+                mapper,
+                0x5100 + u16::try_from(index).unwrap(),
+                value,
+            );
+        }
+
+        let state = core.save_state(true).unwrap();
+        let layout = unl8_layout(&core);
+        let window_6000 = core.cartridge().unwrap().try_cpu_peek(0x6000);
+        assert_eq!(Some(9), window_6000, "mapper {mapper}: $8303's window");
+
+        // Move every one of them.
+        cony_write(&mut core, mapper, 0x8100, 0x01);
+        cony_write(&mut core, mapper, 0x8000, 0x0A);
+        for register in 0..4u16 {
+            cony_write(&mut core, mapper, 0x8300 + register, 0x1F);
+        }
+        for register in 0..8u16 {
+            cony_write(&mut core, mapper, 0x8310 + register, 0x7E);
+        }
+        cony_write(&mut core, mapper, 0x8318, 0x00);
+        for index in 0..4u16 {
+            cony_write(&mut core, mapper, 0x5100 + index, 0x00);
+        }
+        assert_ne!(layout, unl8_layout(&core), "mapper {mapper}");
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed);
+        assert_eq!(layout, unl8_layout(&core), "mapper {mapper}: the windows");
+        assert_eq!(
+            window_6000,
+            core.cartridge().unwrap().try_cpu_peek(0x6000),
+            "mapper {mapper}: the $6000 window"
+        );
+        for (index, value) in [0x11u8, 0x22, 0x33, 0x44].into_iter().enumerate() {
+            assert_eq!(
+                Some(value),
+                core.cartridge().unwrap().try_cpu_peek(cony_register(
+                    mapper,
+                    0x5100 + u16::try_from(index).unwrap()
+                )),
+                "mapper {mapper}: scratch byte {index}"
+            );
+        }
+        assert_eq!(
+            state,
+            core.save_state(true).unwrap(),
+            "mapper {mapper}: the whole block, the clock source included"
+        );
+    }
+}
+
+/// REQ-CORE-090/091: mapper 91's register file is at `$6000`-`$7001` and its outer bank register is
+/// the **address** of a write to `$8000`-`$9FFF`, so the generic sweep's `$6000` write reaches one
+/// CHR register and its `$8000`-`$E001` writes reach the outer register by accident and nothing
+/// else. Both boards are round-tripped here with every register of each moved first
+/// (MF-UNL-8 step 4).
+#[cfg(feature = "board-91")]
+#[test]
+fn req_core_090_mapper_91_round_trips_both_of_its_boards() {
+    for submapper in [0u8, 1] {
+        let mut core = MapperRom::new(91)
+            .submapper(submapper)
+            .prg(64)
+            .chr(1024)
+            .battery()
+            .load();
+
+        for register in 0..4u16 {
+            core.mapper_write(0x6000 + register, u8::try_from(register).unwrap() + 1);
+        }
+        core.mapper_write(0x7000, 3);
+        core.mapper_write(0x7001, 5);
+        if submapper == 0 {
+            core.mapper_write(0x8003, 0x00); // The outer bank: CHR A19 and PRG A17.
+            core.mapper_write(0x7007, 0x00); // Start the A12 counter.
+            let cartridge = core.cartridge_mut().unwrap();
+            for rise in 0..10 {
+                cartridge.on_ppu_address_bus(0x2000, i64::from(rise) * 8);
+                cartridge.on_ppu_address_bus(0x1000, i64::from(rise) * 8 + 2);
+            }
+        } else {
+            core.mapper_write(0x6004, 0x00); // Horizontal mirroring.
+            core.mapper_write(0x6006, 0x34); // The counter, LSB then MSB.
+            core.mapper_write(0x6007, 0x12);
+            core.mapper_write(0x7007, 0x00); // Start the M2 counter.
+            for _ in 0..10 {
+                core.bus_mut().tick();
+            }
+        }
+
+        let state = core.save_state(true).unwrap();
+        let layout = unl8_layout(&core);
+
+        // Move every register the board has.
+        for register in 0..4u16 {
+            core.mapper_write(0x6000 + register, 0x7E);
+        }
+        core.mapper_write(0x7000, 0x0A);
+        core.mapper_write(0x7001, 0x0C);
+        if submapper == 0 {
+            core.mapper_write(0x8004, 0x00);
+        } else {
+            core.mapper_write(0x6005, 0x00);
+        }
+        assert_ne!(layout, unl8_layout(&core), "submapper {submapper}");
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed);
+        assert_eq!(
+            layout,
+            unl8_layout(&core),
+            "submapper {submapper}: the windows and the mirroring"
+        );
+        assert_eq!(
+            state,
+            core.save_state(true).unwrap(),
+            "submapper {submapper}: the whole block, the counter included"
+        );
+    }
+}
+
+/// AMD-061 §5's rule for this lot's four boards: a reset "puts the mapper back to its initial
+/// state", and the generic sweep
+/// `amd_061_a_reset_puts_every_board_but_mapper_28_back_to_its_power_on_state` dirties none of the
+/// registers these four keep outside `$8000`-`$E001` and `$6000`. This one does.
+///
+/// Mapper 14's power-on is the one that is not all zeroes: its supervisor register is `$02`, MMC3
+/// mode (Q-165), so after a reset the board is the MMC3 again whatever mode it was left in.
+#[cfg(all(feature = "board-91", feature = "board-cony", feature = "board-huang1"))]
+#[test]
+fn amd_061_a_reset_puts_every_board_of_mf_unl_8_back_to_its_power_on_state() {
+    for mapper in [12usize, 14, 83, 91, 264] {
+        let mut core = MapperRom::new(mapper).prg(32).chr(256).load();
+        let power_on = unl8_layout(&core);
+
+        match mapper {
+            12 => {
+                core.mapper_write(0x4132, 0x11);
+                core.mmc3_bank(6, 3);
+            }
+            14 => {
+                core.mapper_write(0xA131, 0x00); // VRC2 mode, no lines.
+                core.mapper_write(0x8000, 0x07);
+                core.mapper_write(0x9000, 0x01);
+            }
+            83 | 264 => {
+                cony_write(&mut core, mapper, 0x8100, 0x10 | 0x01);
+                cony_write(&mut core, mapper, 0x8000, 0x04);
+                cony_write(&mut core, mapper, 0x8300, 3);
+                cony_write(&mut core, mapper, 0x8310, 7);
+            }
+            _ => {
+                core.mapper_write(0x6000, 7);
+                core.mapper_write(0x7000, 3);
+                core.mapper_write(0x8003, 0x00);
+            }
+        }
+        assert_ne!(power_on, unl8_layout(&core), "mapper {mapper}: dirtied");
+
+        core.reset();
+        assert_eq!(power_on, unl8_layout(&core), "mapper {mapper}");
+        assert!(!core.cartridge().unwrap().irq_asserted());
+    }
+}
