@@ -31,7 +31,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
 - [x] **0/8** — the plan: this file.
 - [x] **1/8** — `Mmc3Outer`: the six outer registers, banking mode `$00` (the oversize MMC3),
   the register lockout, the registry arms and the two PPU watch lists.
-- [ ] **2/8** — the other three banking modes — `$10` (GNROM), `$40` and `$50` (the two "weird"
+- [x] **2/8** — the other three banking modes — `$10` (GNROM), `$40` and `$50` (the two "weird"
   ones) — the mixed CHR-ROM/CHR-RAM window of `$xxx4`, and the PRG-RAM window `$xxx3` bit 5 opens
   at $5000-$5FFF.
 - [ ] **3/8** — the size ceiling: a 64 MiB image loads, a bigger declaration is refused, the
@@ -142,4 +142,92 @@ and `mf_3b`'s expected vector gains `268` **once** rather than twice.
 
 **1034 passed, 0 failed, 9 ignored** for `-p zax-nes -p zax-harness` (the base commit left it at
 1028/0/9): six tests. `cargo fmt --all -- --check` clean and
+`cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 2 — the three other banking modes, the mixed CHR chip, and the window one clause opens
+
+Still `board-268`, no new variant and no new forward but one: `try_read_prg`, which `IrqBoard` has
+carried since MF-UNL-2 for mappers 121 and 187 and which the default build therefore already has.
+
+### The banking mode is **two** bits of `$xxx3` and the page names the modes by their value
+
+The legend of `$xxx3` draws one arrow across bits 6 and 4 and labels it "Banking mode", and the
+page's four sections are headed by the value of those two bits — `$00`, `$10`, `$40`, `$50`. So
+bit 4 is "GNROM mode" and bit 6 is "weird MMC3 mode", and the four combinations are the four
+sections. Each gets one test, which is the census's "each documented banking mode, one case each".
+
+| mode | what it is | the test |
+| ---: | --- | --- |
+| `$00` | the oversize MMC3 | step 1's two tests |
+| `$10` | "normal" GNROM: PRG A16/A15 from `QQ`, A14 from `R` or CPU A14 by `L`, CHR A16-A13 from `MMMM` with `TTT` **ANDed** in and A12-A10 from the PPU | `req_core_102_mapper_268_banks_a_gnrom_page_in_banking_mode_10` |
+| `$40` | "weird" MMC3: the two fixed PRG windows become **bank 0** instead of `$FE`/`$FF`, the odd window of each 2 KiB CHR pair becomes bank 0, and the LSB of R0 and R1 starts working | `req_core_102_mapper_268_fixes_the_top_windows_to_bank_zero_in_banking_mode_40` |
+| `$50` | both | `req_core_102_mapper_268_combines_both_rules_in_banking_mode_50` |
+
+Three readings this step had to take, each recorded in the code:
+
+* **"Supposedly this effect is completely ignored when MMC3 PRG ROM bank mode is inverted"** is
+  implemented as written, so the weird rule is applied only when `$8000` bit 6 is clear — and in
+  mode `$50` that makes `$10` and `$50` the *same* layout on an inverted chip, which is the
+  cleanest statement of "ignored" a test can make.
+* **the weird CHR rule does not apply in GNROM mode**, which is how "(These descriptions should not
+  be contradictory.)" is satisfied: in GNROM mode the MMC3's CHR registers reach nothing at all, so
+  a rule about their LSB has nothing to act on.
+* **bank 0 is a bank of the chip's own numbering**, so the weird rule is applied *before* the mask
+  and offset and the outer register still carries those two windows.
+
+`TTT` is taken literally as the page's "**ANDed** with CHR A16, A15, A14 in `MMMM`" — a register
+that can only clear a line of its own offset, which is what a multicart menu needs to keep a game
+inside its own CHR window — and `MMMM`'s own bit 0 (CHR A13) is never masked, the mask covering
+three lines and the field being four wide. `$xxx2` bit 7's own lock is tested from the same place,
+because GNROM mode is the only mode in which that register does anything at all.
+
+### `$xxx4`, and the sentence that pins its comparison
+
+> This register is only meaningful on cartridges that mount both CHR-ROM and CHR-RAM. By writing
+> the appropriate value to D1-D7, the functionality of INES Mapper 074 and INES Mapper 194 is
+> replicated.
+
+Mapper 74's CHR-RAM is banks `$08-$09` and mapper 194's `$00-$01`: each a 2 KiB **pair** whose two
+banks differ in D0 alone. So bits 7-1 name a pair and the comparison is `value >> 1`, where
+`value` is the MMC3 bank **register**'s byte and not the window's bank — which is why
+`chr_window_register` returns both. `$xxx4 = $09` *is* mapper 74 on this chipset and
+`$xxx4 = $01` is mapper 194, and the test asserts exactly that.
+
+The chip is reached through `ppu_peek` and `ppu_write`, both of which test a derived flag byte
+first — `chr_ram_windows`, zero on every cartridge that never writes `$xxx4` — and the CHR-RAM
+body is `#[inline(never)]`, which is `Mmc3Board::chr_ram_read`'s own measured shape (MF-6a2 step 3
+priced that body inlined at `Ppu2C02::background_fetch` 271 → 583 instructions). `chr_peek_view`
+answers `None` in mixed mode, the CHR-RAM family's own answer for the same reason: a `ChrView`
+cannot say "this window is the other chip".
+
+Three PCB rows of the page are **not** implemented and the code says so: the J-852C's PRG chip
+select (submappers 6/7), the SMD72A's CHR-RAM write protect (8/9) and the SMD172C-L1's
+single-screen mirroring (10/11) all belong to submappers this board refuses, and `$xxx5`'s
+mega-UNROM mode ("uses CHR A16 and A17 bits as PRG A18 and A19") is latched and inert — the page
+documents no released cartridge that sets it and its own *Notes* say the same of the weird modes.
+
+### `$xxx3` bit 5, which is one clause and two readings
+
+> `Z` — 1: Also enable PRG RAM in `$5000-$5FFF`
+
+That is the whole of it: no mapping for a 4 KiB window over an 8 KiB chip, and no game named that
+uses it. **Q-159** holds both readings:
+
+* **a COOLBOY only.** On a MINDKIDS the register file is at `$5000-$5FFF` under mask `$F007`,
+  which decodes the *whole* page — `$5400 & $F007` is `$5000` — so there is no room for RAM there
+  and the bit cannot mean what it says. The test shows it from that side: on a MINDKIDS, with the
+  bit set, a write at `$5400` still banks the cartridge.
+* **CPU A0-A12 straight through**, so the window shows the chip's second 4 KiB and `$5400` is
+  `$7400`. That is what an ASIC asserting a chip select over an unchanged address bus does, and it
+  is the only reading that needs no wiring the page does not give.
+
+"Also" is read as adding a window and not an enable, so the MMC3's `$A001` still gates both sides;
+the test pins the write-protected case.
+
+### What it measures to the suites
+
+**1039 passed, 0 failed, 9 ignored** (step 1 left it at 1034/0/9): five tests, one per banking mode
+beyond `$00` plus the mixed chip and the second RAM window. `cargo fmt --all -- --check` clean and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

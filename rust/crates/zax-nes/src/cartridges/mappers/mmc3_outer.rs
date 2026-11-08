@@ -112,6 +112,17 @@ pub struct Mmc3Outer {
     /// `$6000` on a COOLBOY and `$5000` on a MINDKIDS: the high nibble of the register window,
     /// which bit 0 of the submapper chooses. See [`Mmc3Outer::new`].
     port: u16,
+    /// Which of the eight 1 KiB CHR windows read the **CHR-RAM** chip rather than the CHR-ROM,
+    /// one bit per window — `$xxx4`'s mixed mode, which the page says "replicate[s] the
+    /// functionality of INES Mapper 074 and INES Mapper 194"
+    /// ([`Mmc3Outer::chr_ram_selected`]).
+    ///
+    /// Derived state, refreshed by [`Mmc3Outer::refresh`] after every write and brought back by
+    /// `load_registers` through the same call, so no savestate byte carries it (REQ-CORE-091) —
+    /// the shape `Mmc3Board::chr_ram_windows` already has for the same question. **Zero on every
+    /// cartridge that never writes `$xxx4`**, which is what keeps the two fetch paths below off
+    /// the CHR-RAM branch entirely.
+    chr_ram_windows: u8,
 }
 
 impl Mmc3Outer {
@@ -145,6 +156,7 @@ impl Mmc3Outer {
             mmc3: Mmc3::new(memory, mapper),
             outer: [0; Self::REGISTERS],
             port,
+            chr_ram_windows: 0,
         };
         // "AA6023's IRQ operator follows MMC3 'NEC' behavior, i.e. a latch value of zero
         // disables IRQ."
@@ -309,16 +321,170 @@ impl Mmc3Outer {
         }
     }
 
+    /// The low seven bits of a 1 KiB CHR bank — CHR A10 to A16 — in the banking mode the two
+    /// mode bits of `$xxx3` select.
+    ///
+    /// * **MMC3 mode**: the chip's own bank register, [`Mmc3Outer::chr_window_register`].
+    /// * **GNROM mode** (`$10` and `$50`): "CHR A16, A15, A14, and A13 come from MMMM controls.
+    ///   CHR A12, A11, and A10 come from PPU A12, A11, and A10" — so the window index *is* the
+    ///   three low bits and `$xxx2`'s low nibble the four above, with `TTT` **ANDed** into its top
+    ///   three. See [`Mmc3Outer::gnrom_chr_offset`].
+    /// * **"Weird" MMC3 mode** (`$40`): "The second half of each of the 2 KiB CHR banks is
+    ///   replaced with bank 0, and the LSB of MMC3 registers 0 and 1 work (instead of being
+    ///   replaced by PPU A10)." So the even window of each 2 KiB pair shows the register's whole
+    ///   byte, bit 0 included, and the odd one shows bank 0. The four 1 KiB registers are not
+    ///   concerned: the page's sentence is about the 2 KiB ones.
+    ///
+    /// **The weird rule does not apply in GNROM mode**, which is the reading mode `$50` needs:
+    /// "Combine the rules mentioned above for 'Normal' GNROM mode with 'Weird' MMC3 mode. (These
+    /// descriptions should not be contradictory.)" — and they are not, because in GNROM mode the
+    /// MMC3's CHR registers reach nothing at all, so a rule about their LSB has nothing to act on.
+    fn chr_inner_bank(&self, window: usize) -> u8 {
+        if Self::gnrom_mode(self.outer[3]) {
+            // The window index is PPU A12-A10, which is what a GNROM-style board puts straight
+            // through.
+            return u8::try_from(window).unwrap_or(0) | (self.gnrom_chr_offset() << 3);
+        }
+
+        let (value, bank) = self.chr_window_register(window);
+        if self.outer[3] & 0x40 != 0 {
+            let high = usize::from(self.mmc3.select() & 0x80 != 0) * 4;
+            if window >= high && window < high + 4 {
+                return if (window - high) & 1 == 0 { value } else { 0 };
+            }
+        }
+
+        bank
+    }
+
+    /// `$xxx2`'s GNROM CHR offset: `MMMM` (CHR A16, A15, A14, A13) with the `TTT` bitmask applied.
+    ///
+    /// nesdev gives `TTT` as the "GNROM CHR bitmask (**ANDed** with CHR A16, A15, A14 in MMMM)",
+    /// so the mask covers the field's top three bits and A13 — `MMMM`'s own bit 0 — is never
+    /// masked. The AND is the page's word and it is taken literally: the register can only ever
+    /// clear a line of its own offset, which is what a multicart menu needs to keep a game inside
+    /// its own CHR window.
+    fn gnrom_chr_offset(&self) -> u8 {
+        let register = self.outer[2];
+        register & 0x0F & (((register >> 3) & 0x0E) | 0x01)
+    }
+
+    /// The low four bits of an 8 KiB PRG bank in **GNROM mode** — CHR A13 to A16 of the page's
+    /// `PRG A16...13 from QQ, L, R, CPU A14, A13` — for window `slot`.
+    ///
+    /// nesdev, banking mode `$10`: "PRG A16 and A15 come from the `QQ` controls. When in 16 KiB
+    /// PRG mode (`L` control), PRG A14 comes from the `R` control. Otherwise, it comes from CPU
+    /// A14." PRG A13 is the CPU's own line in both, so the window index supplies it.
+    ///
+    /// Everything above A16 is still the mask-and-offset composition of MMC3 mode, which is the
+    /// page's own note on this mode: "The CHR and PRG mask registers STILL AFFECT THIS MODE,
+    /// allowing weird splicing of MMC3 banking (with 128 KiB granularity) overlaying GNROM-style
+    /// banking."
+    fn gnrom_prg_low(&self, slot: usize) -> i32 {
+        let slot = i32::try_from(slot).unwrap_or(0);
+        let r1 = i32::from(self.outer[1]);
+        let r3 = i32::from(self.outer[3]);
+        // `L`: 1 is a 32 KiB bank with PRG A14 = CPU A14, 0 a 16 KiB bank with A14 from `R`.
+        let a14 = if r1 & 0x02 != 0 {
+            (slot >> 1) & 0x01
+        } else {
+            (r3 >> 1) & 0x01
+        };
+        (slot & 0x01) | (a14 << 1) | (((r3 >> 2) & 0x03) << 2)
+    }
+
+    /// Whether `$xxx4` puts the MMC3 bank register value `value` on the **CHR-RAM** chip.
+    ///
+    /// nesdev: `$xxx4` is `UUUU UUUV`, bit 0 selecting "mixed CHR-RAM/CHR-ROM mode" and bits 7-1
+    /// the "MMC3 bank register value **D1-D7** that select CHR-RAM rather than CHR-ROM", with the
+    /// note that "by writing the appropriate value to D1-D7, the functionality of INES Mapper 074
+    /// and INES Mapper 194 is replicated".
+    ///
+    /// That note is what pins the comparison to `value >> 1`: mapper 74's RAM is CHR banks
+    /// `$08-$09` and mapper 194's `$00-$01`, each a 2 KiB pair whose two banks differ in D0 alone.
+    /// So the register names a pair, and `$xxx4 = $09` *is* mapper 74.
+    ///
+    /// **Only in MMC3 mode**, because the register is specified against an MMC3 bank register
+    /// value and GNROM mode has none; the page's own "only meaningful on cartridges that mount
+    /// both CHR-ROM and CHR-RAM" is the other half of its scope.
+    const fn chr_ram_selected(&self, value: u8) -> bool {
+        self.outer[4] & 0x01 != 0 && value >> 1 == self.outer[4] >> 1
+    }
+
+    /// Whether `$xxx3` bit 5 has opened the second PRG-RAM window.
+    ///
+    /// nesdev gives the bit as "1: **Also** enable PRG RAM in `$5000-$5FFF`", and that is the
+    /// whole of what the page says about it — no mapping for a 4 KiB window over an 8 KiB chip,
+    /// and no game named that uses it. **Q-159** records both readings this build had to take:
+    ///
+    /// * **a COOLBOY only.** On a MINDKIDS the register file is at `$5000-$5FFF` under mask
+    ///   `$F007`, which decodes the *whole* 4 KiB page, so there is no room for RAM there and the
+    ///   bit cannot mean what it says. The page's *WRAM usage* section points the same way: the
+    ///   window it worries about is the COOLBOY's.
+    /// * **CPU A0-A12 straight through**, so `$5000-$5FFF` shows the chip's second 4 KiB — the
+    ///   same bytes as `$7000-$7FFF`. That is what the ASIC asserting a chip select over an
+    ///   unchanged address bus does, and it is the only reading that needs no extra wiring.
+    ///
+    /// The MMC3's `$A001` still gates it, which "also" implies: the bit adds a window, it does not
+    /// add an enable.
+    const fn extra_ram_window(&self) -> bool {
+        self.port == 0x6000 && self.outer[3] & 0x20 != 0
+    }
+
+    /// The index in PRG-RAM of an address in the second window, or `None` when there is no RAM.
+    fn extra_ram_offset(memory: &CartridgeMemory, address: u16) -> Option<usize> {
+        let length = memory.prg_ram().len();
+        if length == 0 {
+            None
+        } else {
+            Some((usize::from(address) & 0x1FFF) % length)
+        }
+    }
+
+    /// A CHR fetch on a board whose `$xxx4` has put some windows on the CHR-RAM chip.
+    ///
+    /// `#[inline(never)]`, which is `Mmc3Board::chr_ram_read`'s own measured shape: that body
+    /// inlined took `Ppu2C02::background_fetch` from 271 instructions to 583 and cost three games
+    /// on other boards 3.4 M to 5.4 M over 300 frames (MF-6a2 step 3). The price is a `callq` per
+    /// fetch for a cartridge in mixed mode and nothing for anybody else — on this board not even
+    /// that, because [`Mmc3Outer::ppu_peek`] tests the flag byte first and a cartridge that never
+    /// writes `$xxx4` never arrives here.
+    #[inline(never)]
+    fn chr_ram_read(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        let index = usize::from(address) & 0x1FFF;
+        let window = index / BankWindows::CHR_WINDOW_SIZE;
+        let ram = memory.chr_ram();
+        if ram.is_empty() {
+            return 0;
+        }
+
+        let offset = self.chr_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
+        ram[super::super::wrap_offset(offset, ram.len())]
+    }
+
+    /// The bit of [`Mmc3Outer::chr_ram_windows`] that `address`'s 1 KiB window carries.
+    fn window_bit(address: u16) -> u8 {
+        1u8 << ((usize::from(address) & 0x1FFF) / BankWindows::CHR_WINDOW_SIZE)
+    }
+
+    /// Where in the CHR-RAM chip window `window` starts: the bank number the ASIC drives, with
+    /// the chip's own missing address lines standing in for the modulo, as
+    /// `Mmc3Board::chr_ram_offset` does for the TQROM's family.
+    fn chr_ram_offset(&self, window: usize) -> usize {
+        let bank = usize::try_from(self.chr_bank(window)).unwrap_or(0);
+        bank * BankWindows::CHR_WINDOW_SIZE
+    }
+
     /// The 1 KiB CHR bank number window `window` shows, outer bits included.
     ///
-    /// CHR A10-A16 are the MMC3's seven low bank bits. **CHR A17** is the mask bit `A` of
-    /// `$xxx0`: clear and the line is the MMC3's own bit 7, set and it is the single `D` bit
+    /// CHR A10-A16 are [`Mmc3Outer::chr_inner_bank`]. **CHR A17** is the mask bit `A` of
+    /// `$xxx0`: clear and the line is the inner bank's own bit 7, set and it is the single `D` bit
     /// beside it — a *replacement* and not an OR, which is what "CHR mask (CHR A17 from 0: MMC3;
     /// 1: alternate)" says. **CHR A18 and A19** are the `CC` pair, the same two bits that are
     /// PRG A23 and A24; the page notes they are the CHR offset "on CHR-ROM-having boards", which
     /// is the JTH-813 and its 1 MiB.
     fn chr_bank(&self, window: usize) -> i32 {
-        let (_, inner) = self.chr_window_register(window);
+        let inner = self.chr_inner_bank(window);
         let r0 = self.outer[0];
         let a17 = if r0 & 0x80 == 0 {
             i32::from(inner) & 0x80
@@ -339,18 +505,61 @@ impl Mmc3Outer {
     /// applied. The MMC3's own `update_banks` runs first on its own account (a `$8000-$FFFF`
     /// write goes through [`Mmc3`] before this is called) and writes the plain MMC3 layout; every
     /// window it wrote is overwritten here.
-    fn refresh(&mut self) {
+    /// The four 8 KiB PRG bank numbers the windows show, in the mode `$xxx3` selects.
+    ///
+    /// nesdev, banking mode `$40` ("weird" MMC3): "If MMC3 PRG ROM bank mode is 'normal'
+    /// (8+8+16F), then the PRG banks at `0xC000` and `0xE000` are fixed to 8 KiB **bank 0**,
+    /// instead of `0xFE` and `0xFF`. Supposedly this effect is **completely ignored** when MMC3
+    /// PRG ROM bank mode is inverted (8F+8+8+8F)." Both sentences are here, and the second is why
+    /// the rule is applied *before* the mask rather than to the windows: bank 0 is a bank of the
+    /// chip's own numbering, so the outer offset still carries it.
+    fn prg_banks(&self) -> [i32; BankWindows::PRG_WINDOWS] {
         let mask = self.prg_mmc3_mask();
         let bits = self.prg_offset() & !mask;
-        let prg = self.mmc3_prg_banks();
-        let chr: [i32; BankWindows::CHR_WINDOWS] =
-            std::array::from_fn(|window| self.chr_bank(window));
+        let mut prg = self.mmc3_prg_banks();
+        if self.outer[3] & 0x40 != 0 && self.mmc3.select() & 0x40 == 0 {
+            prg[2] = 0;
+            prg[3] = 0;
+        }
+
+        let gnrom = Self::gnrom_mode(self.outer[3]);
+        std::array::from_fn(|slot| {
+            let bank = (prg[slot] & mask) | bits;
+            if gnrom {
+                (bank & !0x0F) | self.gnrom_prg_low(slot)
+            } else {
+                bank
+            }
+        })
+    }
+
+    /// Recomputes all twelve windows from the MMC3's registers and this board's six, and with
+    /// them the derived flag byte of `$xxx4`'s mixed mode.
+    ///
+    /// Called after **every** write either side takes, on [`super::Somari::refresh`]'s own
+    /// idempotence argument — the chip keeps its registers and the composition is recomputed from
+    /// them, so nothing can be counted twice and the board does not have to remember what it last
+    /// applied. The MMC3's own `update_banks` runs first on its own account (a `$8000-$FFFF`
+    /// write goes through [`Mmc3`] before this is called) and writes the plain MMC3 layout; every
+    /// window it wrote is overwritten here.
+    fn refresh(&mut self) {
+        let prg = self.prg_banks();
+        let mut chr_ram_windows = 0u8;
+        let chr: [i32; BankWindows::CHR_WINDOWS] = std::array::from_fn(|window| {
+            if !Self::gnrom_mode(self.outer[3])
+                && self.chr_ram_selected(self.chr_window_register(window).0)
+            {
+                chr_ram_windows |= 1u8 << window;
+            }
+            self.chr_bank(window)
+        });
+        self.chr_ram_windows = chr_ram_windows;
 
         let Some(banks) = self.mmc3.banks_mut() else {
             return;
         };
         for (slot, bank) in prg.iter().enumerate() {
-            banks.map_prg_8k(slot, (bank & mask) | bits);
+            banks.map_prg_8k(slot, *bank);
         }
         for (slot, bank) in chr.iter().enumerate() {
             banks.map_chr_1k(slot, *bank);
@@ -446,6 +655,18 @@ impl Mapper for Mmc3Outer {
         address: u16,
         value: u8,
     ) -> bool {
+        // `$xxx3` bit 5's second window; see [`Mmc3Outer::extra_ram_window`] and Q-159. On a
+        // MINDKIDS it is never open, so the port test below still sees $5000-$5FFF.
+        if (0x5000..=0x5FFF).contains(&address) && self.extra_ram_window() {
+            if self.prg_ram_writable() {
+                if let Some(offset) = Self::extra_ram_offset(memory, address) {
+                    memory.prg_ram_mut()[offset] = value;
+                }
+            }
+
+            return true;
+        }
+
         if address & Self::PORT_MASK != self.port {
             return false;
         }
@@ -480,21 +701,61 @@ impl Mapper for Mmc3Outer {
         self.refresh();
     }
 
+    /// The second PRG-RAM window of `$xxx3` bit 5, and the MMC3's own decode for everything else.
+    ///
+    /// The window is read **here** and not through `Cartridge`'s cached base, which only covers
+    /// $6000-$7FFF; see [`Mmc3Outer::extra_ram_window`] and Q-159.
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        if (0x5000..=0x5FFF).contains(&address) && self.extra_ram_window() && self.prg_ram_enabled()
+        {
+            if let Some(offset) = Self::extra_ram_offset(memory, address) {
+                return Some(memory.prg_ram()[offset]);
+            }
+        }
+
+        self.mmc3.try_read_prg(memory, address)
+    }
+
     /// `None`, the body the MMC5 and the RAMBO-1 already give: the fetches clock the A12 counter.
     fn chr_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
         None
     }
 
+    /// `None` in mixed mode, which is `Mmc3Board::chr_peek_view`'s own answer for the CHR-RAM
+    /// family and for the same reason: "a `ChrView` is one slice plus eight offsets and has no way
+    /// to say 'this window is the other chip'".
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        self.mmc3.chr_peek_view(memory)
+        if self.chr_ram_windows == 0 {
+            self.mmc3.chr_peek_view(memory)
+        } else {
+            None
+        }
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
-        self.mmc3.ppu_peek(memory, address, fetch)
+        if self.chr_ram_windows & Self::window_bit(address) == 0 {
+            return self.mmc3.ppu_peek(memory, address, fetch);
+        }
+
+        self.chr_ram_read(memory, address)
     }
 
+    /// A PPU write: the CHR-RAM chip of `$xxx4`'s mixed mode, and the MMC3's own path otherwise —
+    /// which on a CHR-RAM-only cartridge is the window table and on a CHR-ROM one drops the write.
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        self.mmc3.ppu_write(memory, address, value);
+        if self.chr_ram_windows & Self::window_bit(address) == 0 {
+            self.mmc3.ppu_write(memory, address, value);
+            return;
+        }
+
+        let index = usize::from(address) & 0x1FFF;
+        let window = index / BankWindows::CHR_WINDOW_SIZE;
+        let offset = self.chr_ram_offset(window) + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
+        let ram = memory.chr_ram_mut();
+        if !ram.is_empty() {
+            let length = ram.len();
+            ram[super::super::wrap_offset(offset, length)] = value;
+        }
     }
 
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {

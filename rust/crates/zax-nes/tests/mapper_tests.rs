@@ -34,7 +34,9 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// Kids board (96) it is the 4 KiB CHR-RAM page the PPU address bus last latched, on the GTROM
 /// (111) it is the 8 KiB CHR half of a 32 KiB chip whose other half is the nametables, and on the
 /// two Chinese-RPG boards (162, 163) it is the 8 KiB chip whose A12 their switch overrides, and on
-/// the FS305 (178) it is the 8 KiB chip no register of the board can move at all (Q-154).
+/// the FS305 (178) it is the 8 KiB chip no register of the board can move at all (Q-154), and on
+/// the AA6023 (268) it is the CHR-RAM chip `$xxx4`'s mixed mode puts behind a 2 KiB pair of
+/// windows.
 #[cfg(any(
     feature = "board-77",
     feature = "board-96",
@@ -42,7 +44,8 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     feature = "board-119",
     feature = "board-162",
     feature = "board-163",
-    feature = "board-178"
+    feature = "board-178",
+    feature = "board-268"
 ))]
 fn chr_write(core: &mut NesCore, address: u16, value: u8) {
     core.cartridge_mut().unwrap().ppu_write(address, value);
@@ -10214,4 +10217,353 @@ fn req_core_114_mapper_268_disables_the_irq_on_a_zero_latch() {
             "mapper {mapper}: a latch of $00 must give {expected} IRQ(s) over three rises"
         );
     }
+}
+
+/// A mapper-268 image with **both** a CHR-ROM and a CHR-RAM chip, which is the "KT-???" row of
+/// the page's PCB table and the only configuration `$xxx4` is meaningful on (MF-UNL-6 step 2).
+///
+/// 256 KiB of PRG-ROM with the markers [`coolboy_banks`] reads, `chr_rom_1k` KiB of CHR-ROM with
+/// every 1 KiB bank filled with its own number, and 8 KiB of CHR-RAM — which only an NES 2.0
+/// header can declare beside a CHR-ROM, byte 11 being the CHR-RAM's own field.
+#[cfg(feature = "board-268")]
+fn coolboy_chr_image(chr_rom_1k: usize) -> Vec<u8> {
+    let prg_bytes = 256 * 1024;
+    let chr_bytes = chr_rom_1k * 1024;
+    let mut image = vec![0u8; 16 + prg_bytes + chr_bytes];
+    image[..4].copy_from_slice(&[0x4E, 0x45, 0x53, 0x1A]);
+    image[4] = (prg_bytes / (16 * 1024)) as u8;
+    image[5] = (chr_bytes / (8 * 1024)) as u8;
+    image[6] = 0xC0;
+    image[7] = 0x08; // NES 2.0.
+    image[8] = 0x01; // Submapper 0, mapper bits 8-11 = 1.
+    image[11] = 0x07; // 8 KiB of CHR-RAM beside the CHR-ROM.
+
+    for bank in 0..prg_bytes / 0x2000 {
+        let start = 16 + bank * 0x2000;
+        image[start] = (bank >> 8) as u8;
+        image[start + 1] = bank as u8;
+    }
+    for bank in 0..chr_rom_1k {
+        let start = 16 + prg_bytes + bank * 1024;
+        image[start..start + 1024].fill(bank as u8);
+    }
+
+    image
+}
+
+/// Banking mode **`$10`**, "normal" GNROM mode (MF-UNL-6 step 2).
+///
+/// nesdev: "PRG A16 and A15 come from the `QQ` controls. When in 16 KiB PRG mode (`L` control),
+/// PRG A14 comes from the `R` control. Otherwise, it comes from CPU A14. CHR A16, A15, A14, and
+/// A13 come from `MMMM` controls. CHR A12, A11, and A10 come from PPU A12, A11, and A10."
+///
+/// The two mask registers are opened to the offset first, so that the MMC3's own A17 and A18 are
+/// out of the way and what is left is the GNROM page alone — which is also the page's own note on
+/// this mode: "The CHR and PRG mask registers **STILL AFFECT THIS MODE**, allowing weird splicing
+/// of MMC3 banking (with 128 KiB granularity) overlaying GNROM-style banking." The last block
+/// below is that sentence.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_banks_a_gnrom_page_in_banking_mode_10() {
+    let mut core = MapperRom::new(268).prg(256).chr(128).load();
+    core.mapper_write(0x6000, 0x40); // B: PRG A17 from the offset.
+    core.mapper_write(0x6001, 0x80); // G: PRG A18 from the offset; H and I leave A19/A20 there.
+    core.mapper_write(0x6003, 0x10); // GNROM mode, `L` clear: 16 KiB banks.
+
+    // `L` = 0, `R` = 0: one 16 KiB bank at both halves, which is an NROM-128.
+    assert_eq!([0, 1, 0, 1], core.prg_windows(), "16 KiB, R = 0");
+    core.mapper_write(0x6003, 0x10 | 0x02); // `R` = 1.
+    assert_eq!([2, 3, 2, 3], core.prg_windows(), "16 KiB, R = 1");
+
+    // `L` = 1: a 32 KiB bank with PRG A14 back on CPU A14, which is an NROM-256.
+    core.mapper_write(0x6001, 0x82);
+    core.mapper_write(0x6003, 0x10);
+    assert_eq!([0, 1, 2, 3], core.prg_windows(), "32 KiB");
+
+    // `QQ` is PRG A16 and A15 above it, so the page walks in 32 KiB steps.
+    for (qq, bank) in [(0x00u8, 0u8), (0x04, 4), (0x08, 8), (0x0C, 12)] {
+        core.mapper_write(0x6003, 0x10 | qq);
+        assert_eq!(
+            [bank, bank + 1, bank + 2, bank + 3],
+            core.prg_windows(),
+            "QQ = {qq:#04X}"
+        );
+    }
+
+    // CHR: `MMMM` is A16-A13 and the window index is PPU A12-A10, so the eight windows are one
+    // 8 KiB page of the CHR-ROM selected in 8 KiB steps.
+    core.mapper_write(0x6002, 0x70 | 0x02); // TTT = 7 (nothing masked), MMMM = 2.
+    assert_eq!(
+        [16, 17, 18, 19, 20, 21, 22, 23],
+        core.chr_windows(),
+        "MMMM = 2"
+    );
+
+    // `TTT` is "ANDed with CHR A16, A15, A14 in MMMM", so clearing it collapses the offset to its
+    // own A13 — and A13 is `MMMM` bit 0, which the mask never covers.
+    core.mapper_write(0x6002, 0x0E);
+    assert_eq!(
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        core.chr_windows(),
+        "TTT = 0 masks A16-A14 away"
+    );
+    core.mapper_write(0x6002, 0x01);
+    assert_eq!(
+        [8, 9, 10, 11, 12, 13, 14, 15],
+        core.chr_windows(),
+        "and A13 comes through it"
+    );
+
+    // "GNROM CHR bitmask lock (1: prevents subsequent updates to S or T bits)": with bit 7 set a
+    // later write still moves `MMMM` and no longer `TTT`.
+    core.mapper_write(0x6002, 0x80 | 0x70 | 0x0E);
+    assert_eq!(
+        [112, 113, 114, 115, 116, 117, 118, 119],
+        core.chr_windows(),
+        "MMMM = $E with nothing masked"
+    );
+    core.mapper_write(0x6002, 0x02);
+    assert_eq!(
+        [16, 17, 18, 19, 20, 21, 22, 23],
+        core.chr_windows(),
+        "the lock keeps TTT = 7 and takes the new MMMM"
+    );
+
+    // And the mask registers still affect this mode: `EEE` bit 0 is PRG A17, so the whole GNROM
+    // page moves by 128 KiB.
+    core.mapper_write(0x6003, 0x10);
+    core.mapper_write(0x6000, 0x41);
+    assert_eq!([16, 17, 18, 19], core.prg_windows(), "A17 from the offset");
+}
+
+/// Banking mode **`$40`**, the "weird" MMC3 mode — which the page's own *Notes* say "no cart has
+/// been discovered so far that makes use of", and which is implemented because §7.2 step 1 asks
+/// for "the GNROM-style and 'weird' MMC3 variants it documents" (MF-UNL-6 step 2).
+///
+/// nesdev: "If MMC3 PRG ROM bank mode is 'normal' (8+8+16F), then the PRG banks at `0xC000` and
+/// `0xE000` are fixed to 8 KiB **bank 0**, instead of `0xFE` and `0xFF`. Supposedly this effect
+/// is **completely ignored** when MMC3 PRG ROM bank mode is inverted (8F+8+8+8F). The second half
+/// of each of the 2 KiB CHR banks is replaced with bank 0, and the LSB of MMC3 registers 0 and 1
+/// work (instead of being replaced by PPU A10)."
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_fixes_the_top_windows_to_bank_zero_in_banking_mode_40() {
+    let mut core = MapperRom::new(268).prg(256).chr(128).load();
+    core.mapper_write(0x6001, 0x60); // H and I: the chip drives A19 and A20 too.
+    core.mmc3_bank(6, 0x05);
+    core.mmc3_bank(7, 0x09);
+    assert_eq!([5, 9, 0xFE, 0xFF], core.prg_windows(), "a plain 2 MiB MMC3");
+
+    // The weird mode, with the MMC3's own PRG mode "normal".
+    core.mapper_write(0x6003, 0x40);
+    assert_eq!(
+        [5, 9, 0, 0],
+        core.prg_windows(),
+        "the two fixed banks are 0"
+    );
+
+    // "Completely ignored when MMC3 PRG ROM bank mode is inverted": $8000 bit 6 swaps the
+    // switchable window to $C000, and the rule stops applying.
+    core.mapper_write(0x8000, 0x40);
+    assert_eq!([0xFE, 9, 5, 0xFF], core.prg_windows(), "inverted: ignored");
+    core.mapper_write(0x6003, 0x00);
+    assert_eq!(
+        [0xFE, 9, 5, 0xFF],
+        core.prg_windows(),
+        "inverted: and the same without the mode"
+    );
+
+    // The CHR half, with the chip's PRG mode back to normal and its CHR swap clear, so that the
+    // two 2 KiB registers drive the first pattern table.
+    core.mapper_write(0x8000, 0x00);
+    core.mmc3_bank(0, 0x11);
+    core.mmc3_bank(1, 0x23);
+    for register in 2..6u8 {
+        core.mmc3_bank(register, 0x2E + register);
+    }
+    assert_eq!(
+        [0x10, 0x11, 0x22, 0x23, 0x30, 0x31, 0x32, 0x33],
+        core.chr_windows(),
+        "the MMC3's own CHR layout, bit 0 of R0 and R1 ignored"
+    );
+
+    core.mapper_write(0x6003, 0x40);
+    assert_eq!(
+        [0x11, 0, 0x23, 0, 0x30, 0x31, 0x32, 0x33],
+        core.chr_windows(),
+        "the LSB of R0 and R1 works and the second half of each pair is bank 0"
+    );
+}
+
+/// Banking mode **`$50`**, the "weird GNROM-ish" mode: "Combine the rules mentioned above for
+/// 'Normal' GNROM mode with 'Weird' MMC3 mode. (These descriptions should not be contradictory.)"
+/// (MF-UNL-6 step 2).
+///
+/// They are not contradictory, and this test is what that costs: in GNROM mode the MMC3's CHR
+/// registers reach nothing, so the weird rule about their LSB has nothing to act on, and what is
+/// left of "weird" is the two fixed **PRG** windows becoming bank 0 — visible here because the
+/// mask leaves the chip A17 and A18, so `$FE` and `$FF` carry bits the offset does not.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_combines_both_rules_in_banking_mode_50() {
+    let mut core = MapperRom::new(268).prg(256).chr(128).load();
+    core.mapper_write(0x6001, 0x02); // `L` = 1 (32 KiB GNROM pages); the masks stay at power-on.
+    core.mmc3_bank(6, 0x05);
+
+    core.mapper_write(0x6003, 0x10);
+    assert_eq!(
+        [0, 1, 0x32, 0x33],
+        core.prg_windows(),
+        "mode $10 splices the fixed banks' A17 and A18 over the GNROM page"
+    );
+
+    core.mapper_write(0x6003, 0x50);
+    assert_eq!(
+        [0, 1, 2, 3],
+        core.prg_windows(),
+        "mode $50 makes those two bank 0 first, so the page is whole"
+    );
+
+    // And the weird half is "completely ignored when MMC3 PRG ROM bank mode is inverted" here
+    // too, so with $8000 bit 6 set the two modes are the same layout.
+    core.mapper_write(0x8000, 0x40);
+    core.mapper_write(0x6003, 0x10);
+    let inverted = core.prg_windows();
+    core.mapper_write(0x6003, 0x50);
+    assert_eq!(
+        inverted,
+        core.prg_windows(),
+        "inverted: $10 and $50 agree, which is what 'completely ignored' means"
+    );
+    assert_eq!([48, 1, 2, 51], inverted);
+}
+
+/// `$xxx4`, the mixed CHR-ROM/CHR-RAM window — "only meaningful on cartridges that mount both
+/// CHR-ROM and CHR-RAM", and "by writing the appropriate value to D1-D7, the functionality of
+/// INES Mapper 074 and INES Mapper 194 is replicated" (MF-UNL-6 step 2).
+///
+/// That last sentence is what pins the comparison: mapper 74's CHR-RAM is banks `$08-$09` and
+/// mapper 194's `$00-$01`, each a 2 KiB pair whose two banks differ in D0 alone — so the register
+/// names a **pair** through bits 7-1, and `$xxx4 = $09` *is* mapper 74 on this chipset.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_102_mapper_268_mixes_chr_ram_into_its_chr_rom_windows() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(&coolboy_chr_image(64), "CoolboyChr.nes");
+    assert!(load.success, "{:?}", load.error);
+
+    // The MMC3's own CHR layout: R0 = $08 puts CHR-ROM banks $08 and $09 at the first 2 KiB.
+    core.mmc3_bank(0, 0x08);
+    core.mmc3_bank(1, 0x0C);
+    for register in 2..6u8 {
+        core.mmc3_bank(register, 0x10 + register);
+    }
+    assert_eq!(
+        [8, 9, 12, 13, 18, 19, 20, 21],
+        core.chr_windows(),
+        "CHR-ROM everywhere"
+    );
+
+    // `$xxx4 = $09`: mixed mode on, and D1-D7 = $04 — the register value $08, which is R0's.
+    core.mapper_write(0x6004, 0x09);
+    assert_eq!(
+        [0, 0, 12, 13, 18, 19, 20, 21],
+        core.chr_windows(),
+        "R0's 2 KiB pair reads the CHR-RAM chip, which is blank"
+    );
+
+    // And it is RAM: a PPU write to a selected window sticks, where one to a CHR-ROM window does
+    // not. `Mapper::ppu_write`'s default drops every write on a board that has CHR-ROM, so
+    // without the override the chip would be unreachable.
+    chr_write(&mut core, 0x0000, 0x5A);
+    chr_write(&mut core, 0x0400, 0x6B);
+    chr_write(&mut core, 0x1000, 0xFF);
+    assert_eq!(
+        [0x5A, 0x6B, 12, 13, 18, 19, 20, 21],
+        core.chr_windows(),
+        "the CHR-RAM takes the write and the CHR-ROM does not"
+    );
+
+    // The select follows the register value, not the window: pointing it at R1's byte moves the
+    // RAM pair to the second 2 KiB without touching the first.
+    core.mapper_write(0x6004, ((0x0C >> 1) << 1) | 0x01);
+    assert_eq!(
+        [8, 9, 0, 0, 18, 19, 20, 21],
+        core.chr_windows(),
+        "R1's pair instead"
+    );
+
+    // Bit 0 clear is "Select CHR-ROM only", and the whole mechanism goes away.
+    core.mapper_write(0x6004, 0x08);
+    assert_eq!(
+        [8, 9, 12, 13, 18, 19, 20, 21],
+        core.chr_windows(),
+        "CHR-ROM only again"
+    );
+
+    // Mapper 194's own row, on the same chipset: `$xxx4 = $01` is D1-D7 = 0, the pair $00-$01.
+    core.mmc3_bank(0, 0x00);
+    core.mapper_write(0x6004, 0x01);
+    assert_eq!(
+        [0x5A, 0x6B, 12, 13, 18, 19, 20, 21],
+        core.chr_windows(),
+        "the bytes written above are still in the RAM chip"
+    );
+}
+
+/// **Q-159**: `$xxx3` bit 5 is "1: Also enable PRG RAM in `$5000-$5FFF`", and that one clause is
+/// the whole of what the page says about it — no mapping for a 4 KiB window over an 8 KiB chip,
+/// and no game named that uses it (MF-UNL-6 step 2).
+///
+/// Two readings, both recorded in the ticket. **A COOLBOY only**: on a MINDKIDS the register file
+/// is at `$5000-$5FFF` under mask `$F007`, which decodes the whole page, so the bit cannot mean
+/// what it says there — and the last block below is that, from the other side. **CPU A0-A12
+/// straight through**, so the window shows the chip's second 4 KiB, the same bytes as
+/// `$7000-$7FFF`; that is what an ASIC asserting a chip select over an unchanged address bus
+/// does.
+#[cfg(feature = "board-268")]
+#[test]
+fn q_159_mapper_268_opens_a_second_prg_ram_window_at_5000_from_xxx3_bit_5() {
+    let mut core = coolboy(512 * 1024, 0);
+    core.mapper_write(0x7400, 0x5A);
+    core.mapper_write(0x7123, 0xA5);
+
+    // Closed, a write to $5000-$5FFF reaches nothing.
+    core.mapper_write(0x5400, 0xFF);
+    assert_eq!(0x5A, core.read_memory(0x7400), "the window is closed");
+
+    // Open, it is the chip's second 4 KiB.
+    core.mapper_write(0x6003, 0x20);
+    assert_eq!(0x5A, core.read_memory(0x5400), "$5400 is $7400");
+    assert_eq!(0xA5, core.read_memory(0x5123), "and $5123 is $7123");
+    core.mapper_write(0x5456, 0x3C);
+    assert_eq!(0x3C, core.read_memory(0x7456), "and it takes writes");
+
+    // "Also": the MMC3's own $A001 still gates it, the bit adding a window and not an enable.
+    core.mapper_write(0xA001, 0xC0); // Enabled (bit 7) and write-protected (bit 6).
+    core.mapper_write(0x5456, 0x00);
+    assert_eq!(
+        0x3C,
+        core.read_memory(0x5456),
+        "write-protected through $A001"
+    );
+
+    // Closed again, and the byte stays where it was.
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6003, 0x00);
+    core.mapper_write(0x5456, 0x00);
+    assert_eq!(0x3C, core.read_memory(0x7456), "closed again");
+
+    // On a MINDKIDS the same bit opens nothing, because that range is the register file: a write
+    // at $5400 is `$xxx0` through the mask and banks the cartridge.
+    let mut core = coolboy(512 * 1024, 1);
+    core.mapper_write(0x5001, 0x80);
+    core.mapper_write(0x5003, 0x20);
+    let before = coolboy_banks(&core);
+    core.mapper_write(0x5400, 0x44);
+    assert_ne!(
+        before,
+        coolboy_banks(&core),
+        "on a MINDKIDS $5400 is still $xxx0"
+    );
 }

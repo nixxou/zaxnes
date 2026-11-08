@@ -407,7 +407,7 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.read_nametable(memory, address))
     }
 
-    /// Forwarded for `board-mmc3-scramble` alone, and 121 and 187 are why: both answer a
+    /// Forwarded for `board-mmc3-scramble` and 121 and 187 are why: both answer a
     /// **protection read below `$6000`** -- 121 from its four-byte array, 187 with a byte whose
     /// bit 7 *The King of Fighters 96* requires -- and `Mapper::try_read_prg`'s default answers
     /// `None` there.
@@ -422,7 +422,11 @@ impl Mapper for IrqBoard {
     /// measured `Mmc5::try_read_prg` and `Cartridge::try_cpu_read` **identical to the
     /// instruction** with `Board` at thirty-six, thirty-eight and thirty-nine variants. Step 8
     /// of this lot re-measures it rather than taking that on trust.
-    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-jy-asic"))]
+    #[cfg(any(
+        feature = "board-mmc3-scramble",
+        feature = "board-268",
+        feature = "board-jy-asic"
+    ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
     }
