@@ -38,6 +38,8 @@ mod discrete;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 mod fme7;
+#[cfg(feature = "board-huang1")]
+mod huang1;
 mod irem_h3001;
 #[cfg(feature = "board-77")]
 mod irem_lrog017;
@@ -151,6 +153,8 @@ pub use discrete::{
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 pub use fme7::Fme7;
+#[cfg(feature = "board-huang1")]
+pub use huang1::Huang1;
 pub use irem_h3001::IremH3001;
 #[cfg(feature = "board-77")]
 pub use irem_lrog017::IremLrog017;

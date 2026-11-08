@@ -12,6 +12,8 @@ use super::mappers::Cheapocabra;
 use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
+#[cfg(feature = "board-huang1")]
+use super::mappers::Huang1;
 #[cfg(feature = "board-77")]
 use super::mappers::IremLrog017;
 #[cfg(feature = "board-jv001")]
@@ -108,6 +110,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     9,
     10,
     11,
+    // The Gouder SL-5020B, the Huang-1 ASIC "exclusively as an MMC3A clone" plus a GAL that adds
+    // an outer CHR register at $4132 (MF-UNL-8 step 1).
+    #[cfg(feature = "board-huang1")]
+    12,
     13,
     15,
     16,
@@ -813,6 +819,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // 108 page's `PRG RAM: None` and its *Magical Puzzle Popils* exception, and neither
         // sentence is on mapper 112's page.
         //
+        // **Mapper 12 is deliberately absent**, and the reason is mapper 133's above in the same
+        // words: its outer register is at $4132 under **mask $E100**, which `$6100 & $E100` cannot
+        // be, so no address in $6000-$7FFF can reach it and nothing forces the question. The page
+        // gives the SL-5020B no PRG-RAM line either way, and the board is an MMC3 clone whose
+        // $A001 gates the window, so the header decides -- mapper 4's own answer (MF-UNL-8 step 1).
+        //
         // **Mappers 107, 143, 144, 145 and 149 are deliberately absent too** (MF-UNL-3 steps 2
         // and 3), and again for mapper 97's reason: not one of their pages documents any
         // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
@@ -966,6 +978,23 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         7 => Board::AxRom(AxRom::new(memory)),
         9 | 10 => Board::Mmc2(Mmc2::new(memory, mapper)),
         11 => Board::ColorDreams(ColorDreams::new(memory)),
+        // MF-UNL-8 step 1: the Gouder SL-5020B. **Submapper 1 is refused**: it denotes "ROM images
+        // that have been extracted from disk images for the Front Fareast Magic Card 4M RAM
+        // cartridge", which is copier hardware whose images need a 512-byte trainer "initialized
+        // by JSRing to $7003 before JMPing to the game's reset vector" and the Super Magic Card's
+        // own register file -- §1.8 of `docs/review/UNL-census.md`'s reason for leaving mappers 6,
+        // 8 and 17 out, and census §7.2 says so of this submapper by name. A dump of it is refused
+        // with REQ-CORE-011's message rather than run as an MMC3A clone it is not (Q-164).
+        #[cfg(feature = "board-huang1")]
+        12 if memory.rom().header().is_nes20 && memory.rom().header().submapper == 1 => {
+            return None
+        }
+        // The SL-5020B itself: the Huang-1 "exclusively as an MMC3A clone" plus the GAL16V8's
+        // outer CHR register at $4132 and its language-bit read. `Huang1`'s own note has the table
+        // of this board against mapper 14's and against mapper 116's, and why the board holds an
+        // `Mmc3` rather than being a parameter of `Somari` (Q-164).
+        #[cfg(feature = "board-huang1")]
+        12 => Board::IrqBoard(IrqBoard::Huang1(Box::new(Huang1::new(memory, mapper)))),
         13 => Board::CpRom(CpRom::new(memory)),
         15 => Board::Mapper015(Mapper015::new(memory)),
         // MF-6c step 1: mapper 153 is the same LZ93D50 on a board with 8 KiB of battery-backed

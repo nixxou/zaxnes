@@ -1476,6 +1476,61 @@ fn req_core_114_mapper_298_acknowledges_at_f003_without_copying_a_into_e() {
     );
 }
 
+/// nesdev ("INES Mapper 012"): "The Huang-1 ASIC functions exclusively as an MMC3A clone on this
+/// PCB; **MMC3A-specific IRQ behavior is necessary for running *Dragon Ball Z 5***."
+///
+/// The MMC3A's rule is the one mapper 4 reaches through NES 2.0 submapper 4 and mappers 114 and 268
+/// through their own pages: **a latch value of zero disables the IRQ**. This build's reading of it
+/// is `Mmc3Board::clock_irq_counter`'s own — AMD-061 §8's criterion, where revision A "also demands
+/// that the counter was moving", so a latch of `$00` gives **exactly one** IRQ (the pending `$C001`
+/// reload lets the first clock through) where revision B fires on every rendered line.
+///
+/// A direct A/B against mapper 4 with the same image and the same sequence (MF-UNL-8 step 1).
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_114_mapper_12_has_the_mmc3a_counter_whose_zero_latch_disables_the_irq() {
+    // Both revisions let the first clock through, because both have a reload pending.
+    let mut boards: Vec<(usize, NesCore)> = vec![(4, MapperRom::new(4).chr(32).load())];
+    boards.push((12, MapperRom::new(12).chr(32).load()));
+    for (mapper, core) in &mut boards {
+        enable_scanline_counting(core);
+        core.mapper_write(0xC000, 0); // Latch zero.
+        core.mapper_write(0xC001, 0x00); // Reload on the next clock.
+        core.mapper_write(0xE001, 0x00); // Enable.
+        assert!(
+            tick_until_irq(core, 200_000) > 0,
+            "mapper {mapper}: the reload lets the first clock through"
+        );
+
+        // Acknowledge and re-enable, with the counter sitting at zero and no reload pending.
+        core.mapper_write(0xE000, 0x00);
+        core.mapper_write(0xE001, 0x00);
+        assert!(!irq(core), "mapper {mapper}: acknowledged");
+    }
+
+    assert!(
+        tick_until_irq(&mut boards[0].1, 200_000) > 0,
+        "revision B fires again on every line"
+    );
+    assert_eq!(
+        -1,
+        tick_until_irq(&mut boards[1].1, 200_000),
+        "the MMC3A's zero latch disables the IRQ from the second clock on"
+    );
+
+    // And a non-zero latch still fires repeatedly, so the counter is a counter and not switched
+    // off.
+    let mut huang = MapperRom::new(12).chr(32).load();
+    enable_scanline_counting(&mut huang);
+    huang.mapper_write(0xC000, 8);
+    huang.mapper_write(0xC001, 0x00);
+    huang.mapper_write(0xE001, 0x00);
+    assert!(tick_until_irq(&mut huang, 200_000) > 0);
+    huang.mapper_write(0xE000, 0x00);
+    huang.mapper_write(0xE001, 0x00);
+    assert!(tick_until_irq(&mut huang, 200_000) > 0);
+}
+
 /// Q-162: the census's own description of this difference is "a write to $F003 acknowledges an IRQ
 /// and does **not reload the counter**", and that is not what separates the two chips — a VRC4's
 /// acknowledge does not reload the counter either. Only `$F001` with `E` set does, which is the

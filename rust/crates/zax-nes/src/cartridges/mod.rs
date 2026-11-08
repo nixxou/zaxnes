@@ -363,6 +363,10 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
     matches!(
         mapper,
         4 | 5
+            // MF-UNL-8: mappers 12 and 14 hold an `Mmc3` whose counter is the Huang-1's own, so
+            // both are in both lists for mapper 116's reason -- which is the same chip's.
+            | 12
+            | 14
             | 35
             | 37
             | 47
@@ -401,7 +405,10 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
 const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
     matches!(
         mapper,
-        4 | 35
+        // MF-UNL-8: mappers 12 and 14, the Huang-1's MMC3 counter; see the list above.
+        4 | 12
+            | 14
+            | 35
             | 37
             | 47
             | 48
@@ -1324,6 +1331,12 @@ mod tests {
         // the expected list is built rather than written — a number whose board is off is not
         // in `SUPPORTED_MAPPERS`, so the sweep never reaches it.
         let mut expected = vec![4, 4, 5, 5];
+        // MF-UNL-8 steps 1 and 2: mappers 12 and 14 hold an `Mmc3` whose counter is the Huang-1's
+        // own, so both move for mapper 116's reason -- which is the same chip's. **Twice each**:
+        // submapper 3 is neither mapper 12's refused Magic Card 4M (that is submapper 1) nor
+        // anything on mapper 14's page, so `latched_cartridge` builds both halves of each pair.
+        #[cfg(feature = "board-huang1")]
+        expected.extend_from_slice(&[12, 12]);
         // MF-UNL-4 step 3: the J.Y. Company ASIC keeps the previous PPU address whatever its IRQ
         // source is, so that a game selecting source 1 ("PPU A12 rise, unfiltered") mid-frame
         // does not read a stale edge. That one byte is what makes all four numbers move here.

@@ -184,6 +184,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
     //   (MF-UNL-7 step 1). The family page's own disclaimer governs all four and **Q-160** records
     //   the two places it and mapper 137's page contradict each other;
+    // * 12, the Gouder SL-5020B: the same **Huang-1** ASIC `board-116` carries, on a PCB where it
+    //   "functions exclusively as an MMC3A clone", with a GAL16V8 adding an outer CHR register at
+    //   $4132 and a language-bit read at the same address -- behind `board-huang1` (MF-UNL-8
+    //   step 1, Q-164). Submapper 1, the Front Fareast Magic Card 4M, is refused at load;
     // * 178, the 外星 FS305 / 南晶 NJ0430, four registers at **$4800-$4803**, four PRG banking
     //   modes, mirroring from a register and a **banked** 8 KiB PRG-RAM window -- and **no**
     //   PPU-driven CHR window, which is what its own page says against the census's section
@@ -212,7 +216,9 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 101] = [
+    let huang1 = cfg!(feature = "board-huang1");
+    let additions: [(i32, bool); 102] = [
+        (12, huang1),
         (19, true),
         (24, true),
         (26, true),
@@ -6404,7 +6410,10 @@ fn somari_mode(core: &mut NesCore, value: u8) {
 /// Read through the view and not through [`MapperMachine::chr_windows`], because the fixture
 /// fills CHR bank N with `N as u8` and the outer bank of mapper 116 moves a window by **256**
 /// banks: the two would read the same byte. The offsets distinguish them.
-#[cfg(feature = "board-116")]
+///
+/// Mappers 12 and 14 use it for the same reason: their CHR A18 is the same 256-bank move, applied
+/// per window group (MF-UNL-8).
+#[cfg(any(feature = "board-116", feature = "board-huang1"))]
 fn chr_offsets(core: &NesCore) -> [usize; 8] {
     core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
 }
@@ -6667,6 +6676,225 @@ fn req_core_100_the_somari_does_not_disturb_the_three_chips_it_holds() {
         before,
         mmc1.prg_windows(),
         "no supervisor register on mapper 1"
+    );
+}
+
+// ------------------------------------------- the Huang-1's other two PCBs (12, 14), MF-UNL-8
+
+/// nesdev ("INES Mapper 012"): the GAL16V8's outer CHR register is at `$4132` with "Mask: $E100",
+/// holding `...B ...A` — **bit 0** is "CHR A18 when PPU A12=0" and **bit 4** "CHR A18 when PPU
+/// A12=1", so one line per pattern table.
+///
+/// Read through [`chr_offsets`] and not through [`MapperMachine::chr_windows`], for the reason that
+/// helper gives: the fixture fills CHR bank N with `N as u8` and CHR A18 moves a window by 256
+/// banks, so the two layouts would read the same byte.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_12_drives_chr_a18_per_pattern_table_from_4132() {
+    // 512 KiB of CHR, which is what the register exists for: "The GAL16V8 provides an outer CHR
+    // bank register at $4132 to support 512 KiB of CHR-ROM".
+    let mut core = MapperRom::new(12).prg(16).chr(512).load();
+    // The MMC3's own power-on layout: R0/R1 as two 2 KiB banks over $0000-$0FFF and R2-R5 as four
+    // 1 KiB banks over $1000-$1FFF, every register zero.
+    let base: [usize; 8] = [0, 0x400, 0, 0x400, 0, 0, 0, 0];
+    assert_eq!(base, chr_offsets(&core), "an MMC3 and nothing else yet");
+
+    let a18 = 256 * 0x400;
+    core.mapper_write(0x4132, 0x01);
+    assert_eq!(
+        [
+            base[0] + a18,
+            base[1] + a18,
+            base[2] + a18,
+            base[3] + a18,
+            base[4],
+            base[5],
+            base[6],
+            base[7]
+        ],
+        chr_offsets(&core),
+        "bit 0 is CHR A18 for PPU $0000-$0FFF alone"
+    );
+
+    core.mapper_write(0x4132, 0x10);
+    assert_eq!(
+        [
+            base[0],
+            base[1],
+            base[2],
+            base[3],
+            base[4] + a18,
+            base[5] + a18,
+            base[6] + a18,
+            base[7] + a18
+        ],
+        chr_offsets(&core),
+        "bit 4 is CHR A18 for PPU $1000-$1FFF alone"
+    );
+
+    core.mapper_write(0x4132, 0x11);
+    assert_eq!(
+        base.map(|offset| offset + a18),
+        chr_offsets(&core),
+        "both lines at once reach the second 256 KiB throughout"
+    );
+
+    // And with the register clear the second half is unreachable, which is the other half of the
+    // census's test: "with $4132 clear it is not".
+    core.mapper_write(0x4132, 0x00);
+    assert_eq!(base, chr_offsets(&core));
+    assert!(
+        chr_offsets(&core).iter().all(|offset| *offset < a18),
+        "no window reaches above 256 KiB with the register clear"
+    );
+}
+
+/// The register's decode, and the two things the page says about *when* it acts.
+///
+/// "Mask: $E100" is A15, A14, A13 and A8 and nothing else, so `$4132` repeats through the whole of
+/// `$4100`-`$5FFF` wherever A8 is set — and `$6100 & $E100` is `$6100`, so no address in
+/// $6000-$7FFF reaches it and the board keeps the PRG-RAM window an MMC3 has.
+///
+/// "Because this register is implemented outside the ASIC, it is **not affected by MMC3 $8000 bit
+/// 7**, and **writes take effect immediately**." Bit 7 of `$8000` swaps which of the chip's bank
+/// registers drive which windows; the line is laid over the windows afterwards, so the swap moves
+/// the banks and not which windows carry A18. **FCEUX's reading is deliberately not implemented**
+/// — it makes the register "a temporary latch … that takes effect on the next write to an MMC3 CHR
+/// bank register", and the page's own next sentence is that the homebrew *Ultimate Mortal Kombat
+/// III* "relies on FCEUX' behavior and would therefore not work on the original PCB" (Q-164).
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_12_decodes_4132_under_e100_and_acts_at_once() {
+    let a18 = 256 * 0x400;
+    for address in [0x4132u16, 0x4100, 0x41FF, 0x4300, 0x5100, 0x5F32, 0x5FFF] {
+        let mut core = MapperRom::new(12).prg(16).chr(512).load();
+        core.mapper_write(address, 0x11);
+        assert!(
+            chr_offsets(&core).iter().all(|offset| *offset >= a18),
+            "{address:#06X} is the outer CHR register"
+        );
+    }
+
+    // A8 clear is not the register, and neither is anything in the PRG-RAM window.
+    for address in [0x4032u16, 0x4232, 0x6132, 0x7132] {
+        let mut core = MapperRom::new(12).prg(16).chr(512).load();
+        core.mapper_write(address, 0x11);
+        assert!(
+            chr_offsets(&core).iter().all(|offset| *offset < a18),
+            "{address:#06X} is not the outer CHR register"
+        );
+    }
+
+    // Immediately, and not on the next CHR write: one write to $4132 and the windows have moved,
+    // with no MMC3 register touched between.
+    let mut core = MapperRom::new(12).prg(16).chr(512).load();
+    core.mmc3_bank(2, 9); // R2: the 1 KiB window at $1000.
+    assert_eq!(9 * 0x400, chr_offsets(&core)[4]);
+    core.mapper_write(0x4132, 0x10);
+    assert_eq!(
+        (256 + 9) * 0x400,
+        chr_offsets(&core)[4],
+        "the write took effect with no CHR register written after it"
+    );
+
+    // $8000 bit 7 moves the chip's registers between the halves and leaves the lines where they
+    // are: with only bit 0 set, PPU $0000-$0FFF carries A18 before and after the swap.
+    core.mapper_write(0x4132, 0x01);
+    let before = chr_offsets(&core);
+    assert!(before[..4].iter().all(|offset| *offset >= a18));
+    assert!(before[4..].iter().all(|offset| *offset < a18));
+    core.mapper_write(0x8000, 0x80);
+    let after = chr_offsets(&core);
+    assert_ne!(before, after, "the swap moved the chip's own banks");
+    assert!(
+        after[..4].iter().all(|offset| *offset >= a18),
+        "$0000-$0FFF still carries CHR A18 after the swap"
+    );
+    assert!(
+        after[4..].iter().all(|offset| *offset < a18),
+        "$1000-$1FFF still does not"
+    );
+}
+
+/// "*Dragon Ball Z 5* reads the same address to select between Chinese and English text",
+/// `.... ...A`, under the same `$E100` mask as the write side.
+///
+/// The page does not say which value is Chinese — "the GAL16V8 has the value hard-wired (to
+/// Chinese text in all known copies)" — so the figure is **Q-164**'s choice. What the test pins is
+/// the shape the page does give: the board answers inside the mask and nothing outside it, so an
+/// address the mask excludes is open bus and not a zero the board drove.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_12_answers_a_read_of_4132_with_the_language_bit() {
+    let core = MapperRom::new(12).prg(16).chr(64).load();
+    let cartridge = core.cartridge().unwrap();
+    for address in [0x4132u16, 0x4100, 0x41FF, 0x4300, 0x5100, 0x5FFF] {
+        assert_eq!(
+            Some(0x00),
+            cartridge.try_cpu_peek(address),
+            "{address:#06X} is the language bit"
+        );
+    }
+
+    for address in [0x4032u16, 0x4232, 0x5032] {
+        assert_eq!(
+            None,
+            cartridge.try_cpu_peek(address),
+            "{address:#06X} is outside the $E100 mask, so the board drives nothing"
+        );
+    }
+}
+
+/// Submapper 1 is the Front Fareast **Magic Card 4M**: "ROM images that have been extracted from
+/// disk images for the Front Fareast Magic Card 4M RAM cartridge", which need the Super Magic
+/// Card's own register file and a 512-byte trainer "initialized by `JSR`ing to $7003 before
+/// `JMP`ing to the game's reset vector".
+///
+/// That is copier hardware, which is §1.8 of `docs/review/UNL-census.md`'s reason for leaving
+/// mappers 6, 8 and 17 out, and census §7.2 leaves this submapper out by name. A dump of it is
+/// refused with REQ-CORE-011's message rather than run as an MMC3A clone it is not (Q-164).
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_011_mapper_12_submapper_1_is_the_magic_card_4m_and_is_refused() {
+    let mut core = NesCore::new();
+    let load = core.load_rom(
+        &MapperRom::new(12).prg(16).chr(64).submapper(1).image(),
+        "MagicCard4M.nes",
+    );
+    assert!(!load.success);
+    assert!(load.error.unwrap().contains("12"));
+    assert!(!core.is_running());
+
+    // Submapper 0 and an iNES 1.0 image are both the SL-5020B.
+    for rom in [
+        MapperRom::new(12).prg(16).chr(64),
+        MapperRom::new(12).prg(16).chr(64).submapper(0),
+    ] {
+        assert_eq!(12, rom.load().cartridge().unwrap().mapper_number());
+    }
+}
+
+/// Nothing of this board reaches mapper 4, 118 or 116: `$4132` is the outer register here and
+/// nothing at all on any of the three, and a mapper-12 image is not read as an MMC6 or an MMC3C
+/// however its submapper byte is set — `Mmc3::new` reads a submapper only for mapper 4, which is
+/// MF-6a3 step 1's tightening.
+#[cfg(feature = "board-huang1")]
+#[test]
+fn req_core_102_mapper_12_leaves_the_mmc3_numbers_alone() {
+    let mut mmc3 = MapperRom::new(4).prg(16).chr(512).load();
+    let before = chr_offsets(&mmc3);
+    mmc3.mapper_write(0x4132, 0x11);
+    assert_eq!(before, chr_offsets(&mmc3), "no $4132 on mapper 4");
+    assert_eq!(None, mmc3.cartridge().unwrap().try_cpu_peek(0x4132));
+
+    // Submapper 1 of mapper 4 is the MMC6, whose PRG-RAM is 1 KiB; the same byte on a mapper-12
+    // image is the Magic Card 4M and refused, so the only mapper-12 board there is has the 8 KiB
+    // an MMC3 has.
+    let huang = MapperRom::new(12).prg(16).chr(64).submapper(2).load();
+    assert_eq!(
+        8 * 1024,
+        huang.cartridge().unwrap().memory().prg_ram().len(),
+        "a mapper-12 submapper byte is not an MMC6's"
     );
 }
 

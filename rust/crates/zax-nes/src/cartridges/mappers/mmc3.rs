@@ -674,8 +674,13 @@ impl<
     ///
     /// Recomputing before the overlay is what makes such a board's refresh **idempotent**: the
     /// windows that go into it never already carry one, so no write can count a bank twice.
+    ///
+    /// **The fourth and fifth callers are mappers 12 and 14** (MF-UNL-8 steps 1 and 2), whose
+    /// outer CHR line is laid over these windows per window rather than as one addend; see
+    /// [`Huang1`](super::Huang1).
     #[cfg(any(
         feature = "board-116",
+        feature = "board-huang1",
         feature = "board-mmc3-scramble",
         feature = "board-189"
     ))]
@@ -718,7 +723,16 @@ impl<
     /// **Mapper 268 is the third caller** (MF-UNL-6 step 1): its page's *Notes* say "AA6023's IRQ
     /// operator follows MMC3 'NEC' behavior, i.e. a latch value of zero disables IRQ", which is
     /// 114's sentence in the other vocabulary.
-    #[cfg(any(feature = "board-mmc3-scramble", feature = "board-268"))]
+    ///
+    /// **Mapper 12 is the fourth** (MF-UNL-8 step 1): "The Huang-1 ASIC functions exclusively as an
+    /// MMC3A clone on this PCB" and "MMC3A-specific IRQ behavior is necessary for running *Dragon
+    /// Ball Z 5*" (nesdev, "INES Mapper 012"). Mapper 14's page says nothing of the kind, so that
+    /// number takes the chip as it comes.
+    #[cfg(any(
+        feature = "board-huang1",
+        feature = "board-mmc3-scramble",
+        feature = "board-268"
+    ))]
     pub(crate) fn force_irq_revision_a(&mut self) {
         self.irq_revision_a = true;
     }

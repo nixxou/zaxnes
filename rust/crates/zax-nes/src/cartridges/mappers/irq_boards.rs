@@ -1,3 +1,5 @@
+#[cfg(feature = "board-huang1")]
+use super::Huang1;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
 #[cfg(feature = "board-mmc3-chrram")]
@@ -224,6 +226,24 @@ pub enum IrqBoard {
     /// thirteen ROMs. Boxed, the enum is the size MF-6a3 step 1 measured.
     #[cfg(feature = "board-jy-asic")]
     JyCompany(Box<JyCompany>),
+    /// Mappers 12 and 14, the **Huang-1** ASIC's other two PCBs (MF-UNL-8 steps 1 and 2) — the
+    /// Gouder SL-5020B, where the chip "functions exclusively as an MMC3A clone", and the Gouder
+    /// SL-1632, where a PAL gives it two modes and a supervisor register at `$A131`.
+    ///
+    /// Here for [`IrqBoard::Somari`]'s reason, which is the same chip's: the board holds an
+    /// [`super::Mmc3`] whose counter is the chip's own, so it answers **yes** to
+    /// [`Mapper::irq_asserted`]. Every method it needs is one this variant **already forwards** for
+    /// an earlier board — `try_read_prg` for the scrambled MMC3 clones, `prg_ram_enabled` and
+    /// `prg_ram_writable` for the TQROM, `on_ppu_address_bus` for every MMC3 clone in here — so
+    /// `Board`'s own dispatches do not grow an arm.
+    ///
+    /// **Boxed**, on [`IrqBoard::Somari`]'s own measurement: mapper 14's board holds an `Mmc3`
+    /// *and* a `Vrc2Vrc4`, which inline would be the variant that sets this enum's size, and MF-6b
+    /// step 1 priced one byte of displacement in that payload at +0.009 % to +0.027 % on eleven of
+    /// lot PR-1's thirteen ROMs. The price is one pointer dereference per forwarded call for these
+    /// two numbers and no other board — §4.10's rule.
+    #[cfg(feature = "board-huang1")]
+    Huang1(Box<Huang1>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -258,6 +278,8 @@ macro_rules! inner {
             IrqBoard::Sunsoft4($b) => $body,
             #[cfg(feature = "board-jy-asic")]
             IrqBoard::JyCompany($b) => $body,
+            #[cfg(feature = "board-huang1")]
+            IrqBoard::Huang1($b) => $body,
         }
     };
 }
@@ -322,6 +344,7 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-68",
+        feature = "board-huang1",
         feature = "board-jy-asic"
     ))]
     fn prg_ram_enabled(&self) -> bool {
@@ -338,7 +361,12 @@ impl Mapper for IrqBoard {
     /// — the same answer the un-forwarded dispatch gave them. The two multicarts need nothing
     /// from it either: they carry no PRG-RAM at all, and the condition their outer register puts
     /// on itself reads `Mmc3Board::prg_ram_writable` directly.
-    #[cfg(any(feature = "board-116", feature = "board-119", feature = "board-268"))]
+    #[cfg(any(
+        feature = "board-116",
+        feature = "board-119",
+        feature = "board-268",
+        feature = "board-huang1"
+    ))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
     }
@@ -422,9 +450,12 @@ impl Mapper for IrqBoard {
     /// measured `Mmc5::try_read_prg` and `Cartridge::try_cpu_read` **identical to the
     /// instruction** with `Board` at thirty-six, thirty-eight and thirty-nine variants. Step 8
     /// of this lot re-measures it rather than taking that on trust.
+    /// **Mapper 12 is the fourth board to need it** (MF-UNL-8 step 1): its GAL answers a read of
+    /// `$4132` with a language bit, and `Mapper::try_read_prg`'s default answers `None` there.
     #[cfg(any(
         feature = "board-mmc3-scramble",
         feature = "board-268",
+        feature = "board-huang1",
         feature = "board-jy-asic"
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {

@@ -152,6 +152,30 @@ impl BankWindows {
         }
     }
 
+    /// ORs a **per-window** bit pattern into each 1 KiB CHR window's bank number, each
+    /// re-wrapped as [`Self::map_chr_1k`] wraps it.
+    ///
+    /// [`Self::offset_chr_banks`]'s counterpart for a board whose outer CHR line is **not the same
+    /// line over all eight windows**: the Huang-1 on mappers 12 and 14 drives CHR A18 from an
+    /// outer register, one bit per pattern table on mapper 12 and three bits over the unequal
+    /// groups `$0000-$0FFF`, `$1000-$17FF` and `$1800-$1FFF` on mapper 14. MF-6b step 6 named this
+    /// method before it existed — "`BankWindows` has no way to express a 1 KiB window table whose
+    /// A18 changes at `$1000` and again at `$1800` other than by computing it per window".
+    ///
+    /// `OR` and not `+`, because a line is what both pages describe, and it is what makes the call
+    /// **idempotent**: the bank a window already carries may already have the bit, so a board may
+    /// re-apply it after every register write without remembering what it last laid down. The same
+    /// reading, and the same reason, as [`Self::or_chr_banks`] above.
+    ///
+    /// Additive: behind `board-huang1`, its only caller.
+    #[cfg(feature = "board-huang1")]
+    pub fn or_chr_banks_each(&mut self, bits: [i32; Self::CHR_WINDOWS]) {
+        for (slot, line) in bits.into_iter().enumerate() {
+            let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);
+            self.map_chr_1k(slot, bank | line);
+        }
+    }
+
     /// Rewrites every 8 KiB PRG window's bank number as `(bank & mask) | bits`, each re-wrapped
     /// as [`Self::map_prg_8k`] wraps it.
     ///

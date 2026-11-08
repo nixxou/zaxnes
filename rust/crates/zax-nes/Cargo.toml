@@ -64,6 +64,7 @@ default = [
     "board-298",
     "board-218",
     "board-29",
+    "board-huang1",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -674,6 +675,35 @@ board-268 = []
 #
 #     cargo build -p zax-nes --features board-jy-asic-tile-latch
 board-jy-asic-tile-latch = ["board-jy-asic"]
+
+# Mappers 12 and 14, the **Huang-1** ASIC's other two PCBs (MF-UNL-8 steps 1 and 2) -- the same
+# chip `board-116` already carries as the SOMARI-P, on two boards that are neither mapper 116's nor
+# each other's. Two originals: Rex Soft's *Dragon Ball Z 5* (12) and the 8-character *Samurai
+# Spirits* (14).
+#
+# * **12**, the Gouder **SL-5020B**: "The Huang-1 ASIC functions exclusively as an MMC3A clone on
+#   this PCB" -- one mode, no supervisor register, no VRC2 and no MMC1 -- plus a GAL16V8 that adds
+#   an outer CHR register at **$4132** under mask $E100 (`...B ...A`, one CHR A18 per pattern
+#   table) and answers a read of the same address with a language bit. The counter is the MMC3A's,
+#   which the page says is "necessary for running *Dragon Ball Z 5*". **Submapper 1 is refused at
+#   load**: it is the Front Fareast Magic Card 4M, copier images with a trainer (census §1.8).
+# * **14**, the Gouder **SL-1632** (`UNL-SL1632`): the chip with a PAL that "moves the supervisor
+#   register address to **$A131**, overlapping the MMC3 and VRC2 registers there" -- **two** modes
+#   (bit 1; MMC3 and VRC2b, no MMC1) and **three** independent CHR A18 bits (bits 3, 5 and 7) over
+#   the unequal window groups $0000-$0FFF, $1000-$17FF and $1800-$1FFF. Its two Nestopia-sourced
+#   rules are implemented with the page's own caveat attached.
+#
+# **§7.2 says mapper 12 "is `Somari` with one more register" and the number's own page refutes it**
+# (Q-164), so what this feature reuses is the sub-chips and not mapper 116's board: an `Mmc3`
+# through the accessors `Somari` already needed, and a `Vrc2Vrc4` through the VRC2b constructor it
+# already had. With the feature off, every file of `board-116` and of the five Konami numbers is
+# byte for byte what the base commit shipped; with it on, their structs, their save-state blocks
+# and their hot paths are unchanged.
+#
+# One boxed `IrqBoard` variant for both numbers -- the board holds the chip's own counter, which is
+# that enum's entry condition -- and one new `BankWindows` method, `or_chr_banks_each`, which is the
+# per-window CHR A18 table MF-6b step 6 named before it existed. No new `Board` discriminant.
+board-huang1 = []
 
 # Mappers 157 and 159, the Bandai LZ93D50 boards with a serial EEPROM: the Datach Joint ROM
 # System (an internal X24C02 and, on *Battle Rush*, an external X24C01) and the four X24C01 games
