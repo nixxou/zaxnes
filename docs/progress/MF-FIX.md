@@ -24,7 +24,7 @@ separate lot).
 - [x] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
 - [x] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
 - [x] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
-- [ ] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
+- [x] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
 - [ ] 10/10 — the final check: fmt, clippy ×4, tests, golden-core, the figures
 
 The annotations are a step of their own because the protocol forbids writing a hash that does not
@@ -406,3 +406,363 @@ section, which has no CHANGE entry of its own. Two of them say more than "applie
 
 CHANGE 3, 4 and 5 are untouched: the first two wait for a ROM observation and the third is a
 separate lot.
+
+### 9/10 — the callgrind campaign, and two decisions
+
+Binaries built by `rust/tools/perf/build-clean.sh` from their own tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mffix-0-base` | **`12c669a9`**, the lot's base commit | `aee4243f1e16e7aaf876751751f68262` |
+| `mffix-0-again` | a byte copy of the base, the **same-binary floor** | the same |
+| `mffix-1-ship` | **`c7dc165b`**, step 7 — both new features in `default` | `e03643e23290b0010cfd139a3cdec22b` |
+| `mffix-2-292` | step 7 with **`board-292`** added to `default` | `6aaa76df2959758a6250075c80b6db2d` |
+| `mffix-3-no143ob` | step 7 with `board-143-open-bus` alone out of `default` | `efcc1cd005cdf6ec975c164be9a8f4dd` |
+| `mffix-4-off` | step 7 with **both** new features out of `default` | — |
+| `mffix-5-ship2` | **the shipped configuration**: 195's window in `default`, 143's open bus parked | `efcc1cd005cdf6ec975c164be9a8f4dd` |
+
+**The base binary's md5 is identical to MF-UNL-12's shipped binary** — so this lot's base is that
+lot's measured binary to the byte, the **tenth** lot in a row for which that holds, and built rather
+than assumed. And `mffix-5-ship2` is byte-identical to `mffix-3-no143ob`, which is what makes that
+variant's figures the shipped configuration's: parking a feature moves it between two lists and
+changes no resolved feature set for a `default` build.
+
+**Two environment notes, neither of them this lot's.**
+
+* On this machine's Valgrind 3.22.0 a run dies intermittently with `SIGILL` at a bogus address after
+  about 157 M of its instructions — roughly one run in two on `vblnmi`, occasionally elsewhere. It
+  happens to the **base** binary, whose md5 is MF-UNL-12's to the byte, so it is a property of the
+  environment. `rust/target-mf/one.sh` discards a run that SIGILLs and repeats it; only a run that
+  reaches `Collected` is kept, and every figure below came on the first attempt except `vblnmi`'s.
+* The annotations are unusable here: symbols come out as **raw addresses** despite
+  `CARGO_PROFILE_RELEASE_STRIP=false`, which is the same thing MF-UNL-12 recorded for its level-2
+  run. So this step attributes by **building each variant** rather than by reading per-symbol
+  diffs — the stronger method anyway, since a built variant answers "what does this feature cost"
+  directly instead of by inference. It is also why the level-2 table below has no `core` column:
+  `callgrind-l2.sh` builds that from function names. The owner's rule binds on the **totals**
+  ("totals, not only core"), and those are what the whole-process `Collected` figure is.
+
+### 9.1 The floor, measured twice
+
+The Ir count is not quite deterministic here — the same binary twice differs by up to 64 k
+instructions, about **±0.001 %**, which is a twentieth of the tolerance. Two independent floors, the
+base binary against its own byte copy and the shipped binary against the byte-identical
+`no143ob` build:
+
+#### The same-binary floor: the base binary measured twice
+
+| ROM | `mffix-0-base` | `mffix-0-again` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 253 228 | 3 308 259 720 | +6492 | +0.000 |
+| `oamstr` | 3 318 455 828 | 3 318 444 513 | -11315 | -0.000 |
+| `m1` | 4 881 143 644 | 4 881 140 036 | -3608 | -0.000 |
+| `metroid` | 5 115 669 625 | 5 115 605 791 | -63834 | -0.001 |
+| `m4` | 5 468 347 362 | 5 468 349 418 | +2056 | +0.000 |
+| `m0` | 5 517 358 269 | 5 517 361 667 | +3398 | +0.000 |
+| `smb1` | 5 996 423 306 | 5 996 390 548 | -32758 | -0.001 |
+| `mm2` | 6 018 041 221 | 6 018 071 116 | +29895 | +0.000 |
+| `z2` | 6 291 578 901 | 6 291 563 338 | -15563 | -0.000 |
+| `readbuf` | 6 834 566 875 | 6 834 554 989 | -11886 | -0.000 |
+| `duelito` | 7 380 498 812 | 7 380 474 750 | -24062 | -0.000 |
+| `smb3` | 7 949 479 168 | 7 949 503 548 | +24380 | +0.000 |
+| `mmc5` | 11 266 874 565 | 11 266 915 242 | +40677 | +0.000 |
+| **total** | 79 346 690 804 | 79 346 634 676 | -56128 | -0.000 |
+
+Worst ROM: `mm2` at **+0.000 %** (+29895). Set total -56128 (-0.000 %).
+
+#### The same-binary floor again: the shipped binary against `no143ob`, byte-identical to it
+
+| ROM | `mffix-3-no143ob` | `mffix-5-ship2` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 300 820 | 3 308 296 766 | -4054 | -0.000 |
+| `oamstr` | 3 318 494 544 | 3 318 464 325 | -30219 | -0.001 |
+| `m1` | 4 881 135 785 | 4 881 110 457 | -25328 | -0.001 |
+| `metroid` | 5 115 572 104 | 5 115 583 587 | +11483 | +0.000 |
+| `m4` | 5 468 342 880 | 5 468 319 425 | -23455 | -0.000 |
+| `m0` | 5 517 340 797 | 5 517 316 317 | -24480 | -0.000 |
+| `smb1` | 5 996 404 420 | 5 996 354 167 | -50253 | -0.001 |
+| `mm2` | 6 018 045 057 | 6 017 988 216 | -56841 | -0.001 |
+| `z2` | 6 291 530 029 | 6 291 533 052 | +3023 | +0.000 |
+| `readbuf` | 6 834 520 318 | 6 834 538 151 | +17833 | +0.000 |
+| `duelito` | 7 380 427 342 | 7 380 424 832 | -2510 | -0.000 |
+| `smb3` | 7 949 443 063 | 7 949 443 142 | +79 | +0.000 |
+| `mmc5` | 11 266 808 449 | 11 266 799 753 | -8696 | -0.000 |
+| **total** | 79 346 365 608 | 79 346 172 190 | -193418 | -0.000 |
+
+Worst ROM: `readbuf` at **+0.000 %** (+17833). Set total -193418 (-0.000 %).
+
+
+### 9.2 The lot as it ships
+
+#### The lot as it ships, against the base commit
+
+| ROM | `mffix-0-base` | `mffix-5-ship2` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 253 228 | 3 308 296 766 | +43538 | +0.001 |
+| `oamstr` | 3 318 455 828 | 3 318 464 325 | +8497 | +0.000 |
+| `m1` | 4 881 143 644 | 4 881 110 457 | -33187 | -0.001 |
+| `metroid` | 5 115 669 625 | 5 115 583 587 | -86038 | -0.002 |
+| `m4` | 5 468 347 362 | 5 468 319 425 | -27937 | -0.001 |
+| `m0` | 5 517 358 269 | 5 517 316 317 | -41952 | -0.001 |
+| `smb1` | 5 996 423 306 | 5 996 354 167 | -69139 | -0.001 |
+| `mm2` | 6 018 041 221 | 6 017 988 216 | -53005 | -0.001 |
+| `z2` | 6 291 578 901 | 6 291 533 052 | -45849 | -0.001 |
+| `readbuf` | 6 834 566 875 | 6 834 538 151 | -28724 | -0.000 |
+| `duelito` | 7 380 498 812 | 7 380 424 832 | -73980 | -0.001 |
+| `smb3` | 7 949 479 168 | 7 949 443 142 | -36026 | -0.000 |
+| `mmc5` | 11 266 874 565 | 11 266 799 753 | -74812 | -0.001 |
+| **total** | 79 346 690 804 | 79 346 172 190 | -518614 | -0.001 |
+
+Worst ROM: `vblnmi` at **+0.001 %** (+43538). Set total -518614 (-0.001 %).
+
+
+Every ROM at or below **+0.001 %**, which is the floor, and the set total **down** by half a million
+instructions. **Inside the tolerance on all thirteen.**
+
+### 9.3 The attribution
+
+With both new features out of `default` — so the build is the six fixes' emulation changes and
+nothing else, the deleted write latch included:
+
+#### The six fixes with both new features out of `default`, against the base commit
+
+| ROM | `mffix-0-base` | `mffix-4-off` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 253 228 | 3 308 301 202 | +47974 | +0.001 |
+| `oamstr` | 3 318 455 828 | 3 318 478 391 | +22563 | +0.001 |
+| `m1` | 4 881 143 644 | 4 881 089 351 | -54293 | -0.001 |
+| `metroid` | 5 115 669 625 | 5 115 564 874 | -104751 | -0.002 |
+| `m4` | 5 468 347 362 | 5 468 296 761 | -50601 | -0.001 |
+| `m0` | 5 517 358 269 | 5 517 331 219 | -27050 | -0.000 |
+| `smb1` | 5 996 423 306 | 5 996 340 171 | -83135 | -0.001 |
+| `mm2` | 6 018 041 221 | 6 017 992 922 | -48299 | -0.001 |
+| `z2` | 6 291 578 901 | 6 291 538 386 | -40515 | -0.001 |
+| `readbuf` | 6 834 566 875 | 6 834 513 299 | -53576 | -0.001 |
+| `duelito` | 7 380 498 812 | 7 380 411 536 | -87276 | -0.001 |
+| `smb3` | 7 949 479 168 | 7 949 440 723 | -38445 | -0.000 |
+| `mmc5` | 11 266 874 565 | 11 266 851 195 | -23370 | -0.000 |
+| **total** | 79 346 690 804 | 79 346 150 030 | -540774 | -0.001 |
+
+Worst ROM: `vblnmi` at **+0.001 %** (+47974). Set total -540774 (-0.001 %).
+
+
+So the six fixes together cost **nothing**: worst ROM +0.001 %, inside the floor, and a set total
+down 540 774. The latch's removal is the reason the figure is negative rather than zero.
+
+Then one feature at a time, each measured as the only difference between two builds:
+
+#### `board-195-prg-ram-5000` alone
+
+| ROM | `mffix-4-off` | `mffix-3-no143ob` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 301 202 | 3 308 300 820 | -382 | -0.000 |
+| `oamstr` | 3 318 478 391 | 3 318 494 544 | +16153 | +0.000 |
+| `m1` | 4 881 089 351 | 4 881 135 785 | +46434 | +0.001 |
+| `metroid` | 5 115 564 874 | 5 115 572 104 | +7230 | +0.000 |
+| `m4` | 5 468 296 761 | 5 468 342 880 | +46119 | +0.001 |
+| `m0` | 5 517 331 219 | 5 517 340 797 | +9578 | +0.000 |
+| `smb1` | 5 996 340 171 | 5 996 404 420 | +64249 | +0.001 |
+| `mm2` | 6 017 992 922 | 6 018 045 057 | +52135 | +0.001 |
+| `z2` | 6 291 538 386 | 6 291 530 029 | -8357 | -0.000 |
+| `readbuf` | 6 834 513 299 | 6 834 520 318 | +7019 | +0.000 |
+| `duelito` | 7 380 411 536 | 7 380 427 342 | +15806 | +0.000 |
+| `smb3` | 7 949 440 723 | 7 949 443 063 | +2340 | +0.000 |
+| `mmc5` | 11 266 851 195 | 11 266 808 449 | -42746 | -0.000 |
+| **total** | 79 346 150 030 | 79 346 365 608 | +215578 | +0.000 |
+
+Worst ROM: `smb1` at **+0.001 %** (+64249). Set total +215578 (+0.000 %).
+
+
+**`board-195-prg-ram-5000`: worst ROM +0.001 %, set total +215 578 (+0.000 %).** Inside the
+tolerance by a factor of twenty, and inside the floor. The `IrqBoard::prg_ram_window` forward that
+step 3 priced as the one risky part of CHANGE 2 is **free**, for the reason step 3 predicted: no ROM
+of the PR-1 thirteen and no level-2 game is an `IrqBoard` board, so the new body in that dispatch is
+never entered and all that could have moved is code layout. It did not. **Stays in `default`.**
+
+#### `board-143-open-bus` alone
+
+| ROM | `mffix-3-no143ob` | `mffix-1-ship` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 300 820 | 3 308 294 650 | -6170 | -0.000 |
+| `oamstr` | 3 318 494 544 | 3 318 435 237 | -59307 | -0.002 |
+| `m1` | 4 881 135 785 | 4 882 006 925 | +871140 | +0.018 |
+| `metroid` | 5 115 572 104 | 5 115 643 699 | +71595 | +0.001 |
+| `m4` | 5 468 342 880 | 5 469 213 694 | +870814 | +0.016 |
+| `m0` | 5 517 340 797 | 5 518 206 016 | +865219 | +0.016 |
+| `smb1` | 5 996 404 420 | 5 996 377 227 | -27193 | -0.000 |
+| `mm2` | 6 018 045 057 | 6 017 971 882 | -73175 | -0.001 |
+| `z2` | 6 291 530 029 | 6 291 507 614 | -22415 | -0.000 |
+| `readbuf` | 6 834 520 318 | 6 834 538 422 | +18104 | +0.000 |
+| `duelito` | 7 380 427 342 | 7 380 423 702 | -3640 | -0.000 |
+| `smb3` | 7 949 443 063 | 7 949 506 585 | +63522 | +0.001 |
+| `mmc5` | 11 266 808 449 | 11 270 903 088 | +4094639 | +0.036 |
+| **total** | 79 346 365 608 | 79 353 028 741 | +6663133 | +0.008 |
+
+Worst ROM: `mmc5` at **+0.036 %** (+4094639). Set total +6663133 (+0.008 %).
+
+
+**`board-143-open-bus`: `mmc5` +0.036 %, with `m1` +0.018 %, `m4` +0.016 % and `m0` +0.016 % behind
+it.** Over the +0.02 % tolerance on `mmc5exram`, and within a rounding of it on three more.
+
+The cause is the one step 6 named as the risk: the `samples_console` test in
+`NesBus::read_wide_window`, which runs on every CPU read of `$4020-$7FFF`. `mmc5exram` reads its
+`ExRAM` through `$5C00` a million times a run, and `m0`/`m1`/`m4` read PRG-RAM at `$6000-$7FFF`.
+It cannot be moved anywhere cheaper — that function is the only one that both runs on the reads able
+to reach the window and has the bus in hand — and it cannot be narrowed, because the cost is the
+**test**, not the store.
+
+**Decision: `board-143-open-bus` is parked.** Moved out of `default` into `parked-boards`, never
+dropped, which is the owner's rule; `--features parked-boards` is the one flag that turns it on. The
+cost in accuracy is two bits of one read on one board: with the feature off they read zero, which is
+what MF-UNL-3 built, the six bits the board does drive are identical either way, and **no mapper-143
+game can tell the two builds apart under the one use the page describes** — which is what Q-145's
+own note said before this lot and still says. It is the third parked feature of this build, after
+`board-vs-system` and `board-292`.
+
+### 9.4 `board-292`: still over, and the report's expectation is not met
+
+#### `board-292` on, against the base commit
+
+| ROM | `mffix-0-base` | `mffix-2-292` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 253 228 | 3 308 280 245 | +27017 | +0.001 |
+| `oamstr` | 3 318 455 828 | 3 318 490 280 | +34452 | +0.001 |
+| `m1` | 4 881 143 644 | 4 882 429 204 | +1285560 | +0.026 |
+| `metroid` | 5 115 669 625 | 5 115 676 046 | +6421 | +0.000 |
+| `m4` | 5 468 347 362 | 5 469 633 132 | +1285770 | +0.024 |
+| `m0` | 5 517 358 269 | 5 518 657 773 | +1299504 | +0.024 |
+| `smb1` | 5 996 423 306 | 5 996 375 984 | -47322 | -0.001 |
+| `mm2` | 6 018 041 221 | 6 017 983 764 | -57457 | -0.001 |
+| `z2` | 6 291 578 901 | 6 291 513 163 | -65738 | -0.001 |
+| `readbuf` | 6 834 566 875 | 6 834 510 626 | -56249 | -0.001 |
+| `duelito` | 7 380 498 812 | 7 380 417 294 | -81518 | -0.001 |
+| `smb3` | 7 949 479 168 | 7 949 543 615 | +64447 | +0.001 |
+| `mmc5` | 11 266 874 565 | 11 393 782 001 | +126907436 | +1.126 |
+| **total** | 79 346 690 804 | 79 477 293 127 | +130602323 | +0.165 |
+
+Worst ROM: `mmc5` at **+1.126 %** (+126907436). Set total +130602323 (+0.165 %).
+
+#### `board-292` on, against the lot as it ships
+
+| ROM | `mffix-5-ship2` | `mffix-2-292` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `vblnmi` | 3 308 296 766 | 3 308 280 245 | -16521 | -0.000 |
+| `oamstr` | 3 318 464 325 | 3 318 490 280 | +25955 | +0.001 |
+| `m1` | 4 881 110 457 | 4 882 429 204 | +1318747 | +0.027 |
+| `metroid` | 5 115 583 587 | 5 115 676 046 | +92459 | +0.002 |
+| `m4` | 5 468 319 425 | 5 469 633 132 | +1313707 | +0.024 |
+| `m0` | 5 517 316 317 | 5 518 657 773 | +1341456 | +0.024 |
+| `smb1` | 5 996 354 167 | 5 996 375 984 | +21817 | +0.000 |
+| `mm2` | 6 017 988 216 | 6 017 983 764 | -4452 | -0.000 |
+| `z2` | 6 291 533 052 | 6 291 513 163 | -19889 | -0.000 |
+| `readbuf` | 6 834 538 151 | 6 834 510 626 | -27525 | -0.000 |
+| `duelito` | 7 380 424 832 | 7 380 417 294 | -7538 | -0.000 |
+| `smb3` | 7 949 443 142 | 7 949 543 615 | +100473 | +0.001 |
+| `mmc5` | 11 266 799 753 | 11 393 782 001 | +126982248 | +1.127 |
+| **total** | 79 346 172 190 | 79 477 293 127 | +131120937 | +0.165 |
+
+Worst ROM: `mmc5` at **+1.127 %** (+126982248). Set total +131120937 (+0.165 %).
+
+
+**`board-292` does not clear the tolerance: `mmc5exram` +1.126 % against the base commit.** On level
+2 it is inside — worst game `metroid` +0.001 %, set total below the base — and on twelve of the
+thirteen PR-1 ROMs it is inside too. The one ROM that fails is the one that failed before, by the
+same margin.
+
+**`docs/review/Q-XCHECK.md` §CHANGE 8 expected this change to unpark the board and it does not.** The
+entry reasons from the latch: "the ticket records that the latch store alone was +862 997 of
++874 540 instructions on `oamstr`, so removing it should recover almost all of that feature's cost."
+That is true of `oamstr`, and the measurement confirms it — **`oamstr` goes from +0.026 % to
++0.002 %** against the shipped build, and `m0`, `m1` and `m4` roughly halve. But `oamstr` was never
+the binding ROM. MF-UNL-12 step 6.2 named **two** causes and `mmc5`'s +1.098 % was the *other* one:
+"`Board::cpu_read_override` gains a body. `IrqBoard` had no forward for it, so it shared that
+dispatch's **empty** arm — and that dispatch carries `#[inline(always)]`, pinned by lot PR-1 step 3,
+and folds into `Cartridge::try_cpu_read`, which the MMC5 reaches on **every CPU read**."
+
+CHANGE 8 does not touch that cause and could not: mapper 292's registers are filled *by a read*, so
+the board needs a `&mut self` read hook whatever the datum's source is. The entry's own sentence
+"with the latch gone the board is a read hook and two registers" is exactly right — and the read hook
+is the expensive half.
+
+**Decision: `board-292` stays in `parked-boards`.** No change to the shipped configuration; the lot
+does not move it and, per the owner's instruction, would not have moved it in either direction
+without R0. What the lot does buy is that the latch's cost is gone from **every game in the
+library**, parked board or not, which is why the shipped build is faster than its base.
+
+### 9.5 Level 2, the five games
+
+#### Level 2, the lot as it ships against the base commit
+
+| game | `mffix-0-base` | `mffix-5-ship2` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 13 590 240 999 | 13 589 961 088 | -279911 | -0.002 |
+| `metroid` | 13 736 148 307 | 13 736 060 771 | -87536 | -0.001 |
+| `zelda2` | 15 362 757 027 | 15 359 693 399 | -3063628 | -0.020 |
+| `mm2` | 18 977 422 970 | 18 977 335 566 | -87404 | -0.000 |
+| `smb3` | 24 194 127 204 | 24 192 305 624 | -1821580 | -0.008 |
+| **set** | 85 860 696 507 | 85 855 356 448 | -5340059 | -0.006 |
+
+Worst game: `mm2` at **-0.000 %** (-87404).
+
+#### Level 2, board-292 on against the base commit
+
+| game | `mffix-0-base` | `mffix-2-292` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 13 590 240 999 | 13 590 216 385 | -24614 | -0.000 |
+| `metroid` | 13 736 148 307 | 13 736 231 829 | +83522 | +0.001 |
+| `zelda2` | 15 362 757 027 | 15 361 021 404 | -1735623 | -0.011 |
+| `mm2` | 18 977 422 970 | 18 977 279 114 | -143856 | -0.001 |
+| `smb3` | 24 194 127 204 | 24 190 545 454 | -3581750 | -0.015 |
+| **set** | 85 860 696 507 | 85 855 294 186 | -5402321 | -0.006 |
+
+Worst game: `metroid` at **+0.001 %** (+83522).
+
+#### Level 2, board-292 on against the lot as it ships
+
+| game | `mffix-5-ship2` | `mffix-2-292` | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 13 589 961 088 | 13 590 216 385 | +255297 | +0.002 |
+| `metroid` | 13 736 060 771 | 13 736 231 829 | +171058 | +0.001 |
+| `zelda2` | 15 359 693 399 | 15 361 021 404 | +1328005 | +0.009 |
+| `mm2` | 18 977 335 566 | 18 977 279 114 | -56452 | -0.000 |
+| `smb3` | 24 192 305 624 | 24 190 545 454 | -1760170 | -0.007 |
+| **set** | 85 855 356 448 | 85 855 294 186 | -62262 | -0.000 |
+
+Worst game: `zelda2` at **+0.009 %** (+1328005).
+
+
+**Every game at or below the base in the shipped build** — worst `mm2` −0.000 %, set total
+−5 340 059 — and `board-292` inside the tolerance here too, worst `metroid` +0.001 %. `zelda2`'s
+−0.020 % and `smb3`'s −0.008 % in the shipped column are the write latch coming out of
+`NesBus::write_internal`, which is the one figure of this lot that is a gain rather than a cost.
+
+### 9.6 golden-core over the 98 originals
+
+```
+zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+| build | md5 of the 98-ROM digest |
+| --- | --- |
+| `mffix-0-base` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `mffix-5-ship2` (shipped) | `f79e7df842c3ee43e7d9b67861a927b5` |
+| `mffix-2-292` (`board-292` on) | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical**, and identical to the digest eleven lots have recorded. The six fixes change the
+emulation of mappers 12, 123, 143, 195, 262 and 292 and none of the 98 originals is one of those
+numbers, which is what the lot's scope said and this is the check of it. That it holds **with
+`board-292` on as well** is what makes the park a figure and not a behaviour change.
+
+### 9.7 The decisions, in one place
+
+| feature | worst PR-1 ROM | worst level-2 game | decision |
+| --- | --- | --- | --- |
+| the six fixes' emulation changes | `vblnmi` +0.001 % (the floor) | — | in, unconditionally |
+| `board-195-prg-ram-5000` | `smb1` +0.001 % | — | **`default`** |
+| `board-143-open-bus` | `mmc5` **+0.036 %** | — | **parked** |
+| `board-292` | `mmc5` **+1.126 %** | `metroid` +0.001 % | **stays parked** — R0 decides the move |
+
+`docs/review/BOARD-FEATURES.md` carries the two new rows with these figures.

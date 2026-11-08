@@ -50,7 +50,6 @@ default = [
     "board-38",
     "board-107",
     "board-143",
-    "board-143-open-bus",
     "board-144",
     "board-145",
     "board-149",
@@ -550,9 +549,19 @@ board-143 = ["board-decode-boards"]
 # in this build that gives a board the cartridge-edge data bus and so the only thing with a price:
 # one `bool` on `NesBus`, settled at `attach`, tested in the already-`#[cold]`
 # `NesBus::read_wide_window`, which runs on every CPU read of $4020-$7FFF -- the path an MMC5
-# reading its `ExRAM` through $5C00 is measured on. With it off those two bits read zero, which is
-# what MF-UNL-3 built and what the fallback is if the figure parks it; the six bits the board does
-# drive are the same either way. See `docs/review/BOARD-FEATURES.md` and MF-FIX step 9.
+# reading its `ExRAM` through $5C00 is measured on.
+#
+# **PARKED** (MF-FIX step 9). That `bool` test is over the owner's tolerance on the one ROM that
+# reads $5000-$5FFF a million times: `mmc5exram` **+0.036 %**, with `m1` +0.018 %, `m4` +0.016 %
+# and `m0` +0.016 % behind it, measured against the lot's base commit with the feature as the only
+# difference. The flag cannot be moved anywhere cheaper -- `read_wide_window` is the only function
+# that both runs on the reads able to reach the window and has the bus in hand -- and it cannot be
+# narrowed, the cost being the test and not the store.
+#
+# With it off the two bits read zero, which is what MF-UNL-3 built, and the six bits the board does
+# drive are identical either way: no mapper-143 game can tell the two builds apart under the one
+# use the page describes. `--features parked-boards` is the one flag that turns it on. See
+# `docs/review/BOARD-FEATURES.md` and MF-FIX step 9.
 board-143-open-bus = ["board-143"]
 
 # Mapper 144, the **AGCI 50282** of *Death Race*: "a intentionally defective variant of the
@@ -996,7 +1005,7 @@ board-taito-x1 = ["board-small-boards"]
 # own note above has the figures, and `--features parked-boards` is the one flag that turns the
 # VS. System on. **MF-UNL-12 step 6 put `board-292` beside it**, the one board of the twelve MF-UNL
 # lots that is over the tolerance; its own note has the figures and the two causes.
-parked-boards = ["board-vs-system", "board-292"]
+parked-boards = ["board-vs-system", "board-292", "board-143-open-bus"]
 
 # **Not a board: the PPU's exact sprite-evaluation pipeline** (lot MF-4e step 3). The owner's rule
 # is written for boards but the reason behind it is the figure, so it is applied here unchanged.
