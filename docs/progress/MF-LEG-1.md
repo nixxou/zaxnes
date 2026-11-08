@@ -147,7 +147,35 @@ of RAM** — the format difference and nothing else.
 `cargo test --release -p zax-nes -p zax-harness`: **1161 passed, 0 failed, 10 ignored**.
 `--no-default-features`: 788 passed, 0 failed, 9 ignored. Clippy `-D warnings --all-targets` on
 `zax-nes`: clean.
-- [ ] 3/9 CPROM (13-1) — bus conflicts on the bank register
+- [x] 3/9 CPROM (13-1) — bus conflicts on the bank register
+
+### 3/9 — the CPROM's bank register has bus conflicts (entry 13-1)
+
+**One number.** `registry::has_bus_conflicts`'s unconditional list is now
+`11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185`. nesdev ("CPROM") carries the same
+unqualified "Subject to bus conflicts: **Yes**" row that put 11, 66 and 78 there, against a bank
+register the page places at "$8000-$FFFF" — where the PRG-ROM drives. MR-BUS-1 enumerated the
+boards whose pages carry the row and missed this one; the cross-check's own "Counts" section
+records that as a gap in the enumeration, not a reversal of a verdict. Nestopia and puNES model the
+conflict, FCEUX, Nintendulator and Mesen 2 do not, and *Videomation* is the one cartridge.
+
+**No feature.** `has_bus_conflicts` is evaluated once at load into the `Cartridge::bus_conflicts`
+bool that every game already tests on every cartridge write, and the AND happens on a path reached
+by a single `STA` per bank change. Nothing is added anywhere.
+
+**Tests.** `mf_leg_1_the_cprom_bank_register_is_subject_to_bus_conflicts` walks the four windows:
+`$8100` over the zero-filled PRG bank 0 pulls every bit low and the register takes 0 whatever the
+CPU drove, `$A100` over bank 1 gives `3 & 1`, `$C100` gives `3 & 2`, `$E100` gives `3 & 3`.
+
+**One existing test had to move**, and it is the evidence the fix bites:
+`req_core_100_cprom_fixes_the_first_4_kib_of_chr_ram` selected its banks by writing `$8000`, which
+over the fixture's zero-filled bank 0 now lands as 0 — so it writes `$E100` instead. It is the only
+test in the suite the change touched (the whole suite was run to find out). Note for whoever writes
+the next one: `$E000` itself is the fixture's `JMP $E000` and carries `$4C`, not the bank number;
+the `$x100` addresses are the numbered fill, which is why `prg_windows()` reads there.
+
+`cargo test --release -p zax-nes -p zax-harness`: **1162 passed, 0 failed, 10 ignored**.
+`cargo fmt --all -- --check` and clippy `-D warnings --all-targets` on `zax-nes`: clean.
 - [ ] 4/9 Jaleco SS88006 (18-2) — `$9002`
 - [ ] 5/9 MMC1A (MMC1-4) — NES 2.0 submapper 3
 - [ ] 6/9 Irem G-101 (32-1) — *Major League* on the upper page

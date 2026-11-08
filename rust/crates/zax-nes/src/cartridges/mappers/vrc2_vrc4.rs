@@ -189,10 +189,7 @@ impl Vrc2Vrc4 {
     /// a VRC2 among other things, so none of the three is here — see [`Vrc2Vrc4::new_vrc2b`],
     /// which clears the field for the two that come through it.
     #[cfg(feature = "board-vrc2-latch")]
-    pub(crate) fn has_microwire_latch(
-        mapper_number: i32,
-        header: &crate::rom::InesHeader,
-    ) -> bool {
+    pub(crate) fn has_microwire_latch(mapper_number: i32, header: &crate::rom::InesHeader) -> bool {
         matches!(mapper_number, 22 | 23 | 25)
             && header.is_nes20
             && header.byte10 == 0

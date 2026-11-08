@@ -597,7 +597,11 @@ fn mf_leg_1_mmc1_an_ines_1_0_dump_with_chr_ram_does_not_get_the_snrom_e_bit() {
 #[test]
 fn mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations() {
     // Byte 11 declared, byte 10 **zero**: an SGROM, which has no work-RAM chip at all.
-    let no_work_ram = MapperRom::new(1).prg(16).chr(0).chr_ram(8 * 1024).prg_ram(0, 0);
+    let no_work_ram = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .chr_ram(8 * 1024)
+        .prg_ram(0, 0);
     // Byte 10 declared, byte 11 absent: REQ-CORE-012's 32 KiB of CHR-RAM, which no MMC1 board
     // carries, so the header has said nothing about the CHR.
     let no_chr_declaration = MapperRom::new(1).prg(16).chr(0).prg_ram(8 * 1024, 0);
@@ -1334,16 +1338,59 @@ fn req_core_100_color_dreams_splits_its_register_between_prg_and_chr() {
 #[test]
 fn req_core_100_cprom_fixes_the_first_4_kib_of_chr_ram() {
     let mut core = MapperRom::new(13).prg(4).chr(0).load();
-    core.write_memory(0x8000, 0x02);
+    // **$E100 and not $8000 since MF-LEG-1 step 3**: the board has bus conflicts (entry 13-1), so
+    // the value that reaches the register is the AND of the write with the PRG byte underneath it.
+    // The fixture numbers its 8 KiB banks, so $E100 carries $03 — which passes both of the two-bit
+    // bank numbers below. Written at $8000, over the zero-filled bank 0, the register would see 0
+    // whatever the CPU drove; $E000 itself is the fixture's `JMP $E000` and carries $4C.
+    core.write_memory(0xE100, 0x02);
     assert_eq!([0, 1, 2, 3], core.prg_windows());
     // CHR-RAM starts empty, so the banks are told apart by writing through the PPU.
     core.cartridge_mut().unwrap().ppu_write(0x1000, 0xAA);
-    core.write_memory(0x8000, 0x01);
+    core.write_memory(0xE100, 0x01);
     core.cartridge_mut().unwrap().ppu_write(0x1000, 0xBB);
     assert_eq!(0xBB, peek(&core, 0x1000));
-    core.write_memory(0x8000, 0x02);
+    core.write_memory(0xE100, 0x02);
     assert_eq!(0xAA, peek(&core, 0x1000));
     assert_eq!(0, peek(&core, 0x0000));
+}
+
+/// **MF-LEG-1 step 3, report entry 13-1** (REQ-CORE-100, MR-BUS-1): the CPROM's bank register is
+/// subject to bus conflicts.
+///
+/// nesdev ("CPROM") carries the row "Subject to bus conflicts: **Yes**" with no submapper clause —
+/// the same unqualified row that put mappers 11, 66 and 78 on `registry::has_bus_conflicts` — and
+/// places the register at "$8000-$FFFF", where the PRG-ROM drives. MR-BUS-1's enumeration missed
+/// this board. Nestopia and puNES model the conflict; FCEUX, Nintendulator and Mesen 2 do not.
+///
+/// The fixture numbers its 8 KiB PRG banks, so the ROM byte under the write *is* the window
+/// number: bank 0 pulls every bit low, bank 3 passes both bits of the two-bit bank field.
+#[test]
+fn mf_leg_1_the_cprom_bank_register_is_subject_to_bus_conflicts() {
+    let mut core = MapperRom::new(13).prg(4).chr(0).load();
+    // Mark the four CHR-RAM banks apart through the PPU, selecting each with a write whose ROM
+    // byte cannot pull its bits away: bank 3 of PRG carries $03.
+    for bank in 0..4u8 {
+        core.write_memory(0xE100, bank);
+        core.cartridge_mut().unwrap().ppu_write(0x1000, 0xA0 | bank);
+    }
+
+    // $8100 sits over PRG bank 0, filled with $00: every bit of the write is pulled low and the
+    // register takes 0 whatever the CPU drove.
+    core.write_memory(0x8100, 0x03);
+    assert_eq!(0xA0, peek(&core, 0x1000), "bank 0, not the written 3");
+
+    // $A100 is bank 1 ($01) and $C100 is bank 2 ($02): the AND, not the value.
+    core.write_memory(0xA100, 0x03);
+    assert_eq!(0xA1, peek(&core, 0x1000), "3 & 1 = 1");
+    core.write_memory(0xC100, 0x03);
+    assert_eq!(0xA2, peek(&core, 0x1000), "3 & 2 = 2");
+    core.write_memory(0xE100, 0x03);
+    assert_eq!(0xA3, peek(&core, 0x1000), "3 & 3 = 3");
+
+    // And the lower 4 KiB is still fixed to CHR-RAM bank 0, which the conflict does not touch:
+    // that is the byte the loop above wrote while the upper window showed the same bank.
+    assert_eq!(0xA0, peek(&core, 0x0000), "the lower window moved");
 }
 
 #[test]
@@ -3264,7 +3311,7 @@ fn mf_leg_1_an_ines_1_0_vrc2_dump_keeps_its_work_ram() {
 }
 
 /// REQ-CORE-100: which of the five Konami numbers the latch reaches. Only a **VRC2 the header
-/// names** — mapper 22, or 23 and 25 with the submapper that says VRC2b or VRC2c. Submapper 0 of
+/// names** — mapper 22, or 23 and 25 with the submapper that says `VRC2b` or `VRC2c`. Submapper 0 of
 /// 23 and 25 is the OR'd heuristic of `Vrc2Vrc4::new`, which keeps the VRC4's features, so it is
 /// not a VRC2 here; mapper 21 has no VRC2 variant at all and mapper 27's board is a VRC4 clone.
 #[test]

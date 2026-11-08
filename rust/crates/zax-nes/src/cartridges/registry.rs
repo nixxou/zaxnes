@@ -1125,6 +1125,15 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // line against the register at $8000-$FFFF (MF-6a step 2).
         // *INES Mapper 070* and *INES Mapper 152* file the Bandai 74161/7432 board under
         // "Mappers with bus conflicts" too (MF-6a step 3).
+        // *CPROM* carries the same unqualified "Subject to bus conflicts: Yes" row, against a
+        // bank register the page places at "$8000-$FFFF" -- where the PRG-ROM drives (MF-LEG-1
+        // step 3, report entry 13-1). MR-BUS-1 enumerated the boards whose pages carry the row and
+        // **missed this one**, which the cross-check records as a gap in that enumeration and not
+        // as a reversal of a verdict. Nestopia maps the board through its conflict-aware CHR swap
+        // (`NstBoardCxRom.cpp:81`, `CHR_SWAP_4K_1_BC`) and puNES ANDs the written value with the
+        // PRG byte at the same address (`mapper_013.c:46`); FCEUX, Nintendulator and Mesen 2 do
+        // not, three against three with the page on the other three's side. *Videomation* is the
+        // one cartridge.
         // Mesen 2 gives mapper 185 the CNROM board's conflicts (`CnromProtect.h:21`), which
         // the *CNROM* board page describes for the family (MF-6a step 4).
         // *INES Mapper 072* gives Jaleco's JF-17 "Bus conflicts: Yes" against its port at
@@ -1165,7 +1174,7 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // arithmetic itself (`LatchBoard::Agci144`, MF-UNL-3 step 3).
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
-        11 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
+        11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
         30 => submapper == 2 || (submapper == 0 && !header.has_battery),
         34 => !mapper_34_is_nina(header),
         _ => false,
