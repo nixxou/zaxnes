@@ -468,6 +468,7 @@ impl Running {
             return Ok(false);
         }
         self.state.frame_time = self.host.pacer.elapsed_seconds();
+        self.host.display_rate = self.display_rate();
         let now = Instant::now();
         let delta = now.duration_since(self.last).as_secs_f64();
         self.last = now;
@@ -1155,6 +1156,24 @@ impl Running {
             ));
         }
         self.window.frame_cap()
+    }
+
+    /// The frames the display shows a second: the display's refresh over the swap interval, or
+    /// the frame cap's rate (a high one when nothing caps the frames).
+    fn display_rate(&self) -> f64 {
+        let interval = self.window.vsync_interval();
+        if interval > 0 {
+            let refresh = self
+                .window
+                .window()
+                .display_mode()
+                .map_or(60, |mode| mode.refresh_rate)
+                .max(1);
+            return f64::from(refresh) / f64::from(interval);
+        }
+        self.window
+            .frame_cap()
+            .map_or(1000.0, |period| 1.0 / period.as_secs_f64().max(0.001))
     }
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
@@ -2122,6 +2141,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         u8::try_from(host.settings().get(SettingId::VideoNesPalette).as_int()).unwrap_or(0),
     );
     let hack_options = host.hack_option_bits();
+    // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
+    // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
+    let smooth_ahead = host
+        .settings()
+        .get(SettingId::VideoSmoothScrollAhead)
+        .as_bool()
+        && host.settings().get(SettingId::EmuRunAhead).as_int() >= 1
+        && host.display_rate > 61.0;
     let sprite_limit = match host
         .settings()
         .get(SettingId::VideoRemoveSpriteLimit)
@@ -2141,6 +2168,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if let Some(session) = host.session_mut() {
         session.set_overscan(overscan);
         session.core_mut().set_hack_options(hack_options);
+        session.core_mut().set_smooth_scroll_ahead(smooth_ahead);
         session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
         session

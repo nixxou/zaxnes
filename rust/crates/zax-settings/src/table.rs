@@ -808,6 +808,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     emulation_rust_only(out);
     emulation_pause_3d(out);
     video_rust_only(out);
+    video_smooth_scroll(out);
     video_sprite_limit(out);
     video_overscan(out);
     video_nes_palette(out);
@@ -1669,6 +1670,26 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Video,
         )
         .with_label("Widescreen: wait for whole objects at the drawn edges"),
+    );
+}
+
+/// `video.smooth_scroll_ahead` (Rust-only).
+fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only, experimental (owner request): the playfield drawn between two frames on a
+    // display faster than the game, from the scroll the PPU drew in the run-ahead's real frame
+    // and the frame shown; in the video options, without effect unless run-ahead is on and the
+    // display shows more than 60 frames a second. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoSmoothScrollAhead,
+            SettingKind::Bool,
+            // On (owner request); off on a handheld (its defaults).
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_label("Smooth scrolling (interpolated from run-ahead)"),
     );
 }
 

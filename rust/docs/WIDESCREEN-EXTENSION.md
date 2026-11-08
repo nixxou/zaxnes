@@ -153,8 +153,26 @@ until then.
 | `$5300`-`$53FF` | RAM | with `$5007` bit 2: a second page of 64 sprites, OAM format |
 | `$5400`-`$54FF` | RAM | with `$5007` bit 2: high byte of the x of its sprite *n* at `$5400 + 4n` |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM (power-on 0); `$5800`-`$5FFF` reads the PRG window instead while it is on |
+| `$57F0`-`$57F7` | RAM | the camera report of a hack's smooth scrolling (below), read and cleared by the core after each frame |
 
 Details:
+
+* **Camera report (smooth scrolling from the game's RAM).** A hack pack's aid `smooth_scroll`
+  hooks the game where it knows its camera (the gameplay loop after its logic, say) and its code
+  writes the camera of the picture the next frame shows: `$57F1`-`$57F2` across in pixels,
+  `$57F3` its fraction in 256ths, `$57F4`-`$57F6` the same down, `$57F7` the first screen line
+  under the scrolled playfield (a status bar's top), then the status `$57F0`, last: bit 0 across,
+  bit 1 its fraction, bit 2 down, bit 3 its fraction, bit 4 the playfield's bottom. Every part is
+  optional, and how the hack finds them is its own business (one variable, a camera worked out,
+  several display modes): a game reports only where it knows, and a frame without a report is not
+  smoothed (but for the two after a report, the frames a game runs late, its camera taken as
+  still). Without the bottom, the core takes the decoder's, else the band of rows the PPU drew
+  with the first row's scroll. The core reads it after the vblank starts, slides the playfield by
+  the fraction, and on a display faster than the game by the camera's motion to the next picture
+  times the part of the frame gone by; the sprites that move with the camera stay where they are.
+  Only the motion across is shown today; down is reported for later. Kirby's Adventure is the first
+  (`kirbywide`, `report_camera`). A margin decoder can give the camera instead
+  (`MarginDecoder::camera_position`), when no report comes.
 
 * **Margins.** Without a decoder the margin in use (`rom_margin`) is
   `min($5003, $5002, 128)` rounded down to a multiple of 8: 128 is what two nametables hold

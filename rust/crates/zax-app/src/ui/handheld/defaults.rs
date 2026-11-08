@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 10] {
+fn defaults() -> [(SettingId, SettingValue); 11] {
     [
         // Run-ahead (AMD-041, exposed as `Setting.RunAheadFrames` by AMD-040 REQ-LUA-114) costs
         // a whole extra emulated frame, plus a state saved and loaded, for every frame shown:
@@ -43,6 +43,9 @@ fn defaults() -> [(SettingId, SettingValue); 10] {
         // measured worse there than both None and 5 once the core had its own thread, because
         // the second frame of a pair waits for the emulation thread in series.
         (SettingId::EmuCatchUp, SettingValue::Enum(5)),
+        // The smooth scrolling from the run-ahead does nothing without run-ahead or at 60 Hz:
+        // off, as both are on a handheld (owner request: on by default but there).
+        (SettingId::VideoSmoothScrollAhead, SettingValue::Bool(false)),
     ]
 }
 

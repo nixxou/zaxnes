@@ -493,6 +493,29 @@ impl Ppu2C02 {
         }
     }
 
+    /// The playfield's horizontal scroll as the PPU drew it (the picture's top band of rows with
+    /// one scroll, `0..=255` across a nametable), and the line that band ends at: what the smooth
+    /// scrolling from the run-ahead knows of a game without reading its memory. `None` without a
+    /// captured row.
+    #[must_use]
+    pub fn playfield_scroll(&self) -> Option<(i32, i16)> {
+        let row_ends = self.row_ends();
+        let mut band: Option<(i32, i16)> = None;
+        for (index, captured) in self.captured_rows.iter().enumerate() {
+            let Some(captured) = captured else {
+                continue;
+            };
+            let scroll = captured.row.ring_x() & 0xFF;
+            let end = (captured.y + 8).min(row_ends[index]);
+            match band {
+                None => band = Some((scroll, end)),
+                Some((first, _)) if first == scroll => band = Some((scroll, end)),
+                Some(_) => break,
+            }
+        }
+        band
+    }
+
     fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
         let mut rows = Vec::with_capacity(32);
         for (index, captured) in self.captured_rows.iter().enumerate() {

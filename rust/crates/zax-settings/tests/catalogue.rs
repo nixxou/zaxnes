@@ -49,7 +49,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.builtin_patches, emu.catch_up, emu.catch_up_last_3d, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.editor_mode, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.half_rate_3d, video.widescreen, video.widescreen_advanced,
-    // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
+    // video.remove_sprite_limit, video.smooth_scroll_ahead, video.widescreen_extra,
+    // video.widescreen_strict_edges,
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request).
     assert_eq!(
@@ -97,6 +98,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.overscan_right",
             "video.overscan_top",
             "video.remove_sprite_limit",
+            "video.smooth_scroll_ahead",
             "video.widescreen",
             "video.widescreen_advanced",
             "video.widescreen_extra",

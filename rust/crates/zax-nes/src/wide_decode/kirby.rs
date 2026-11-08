@@ -31,7 +31,6 @@ const CAMERA_Y: u16 = 0x00E0;
 const CAMERA_Y_HIGH: u16 = 0x00E1;
 const CAMERA_X_FINE: u16 = 0x01A3;
 const CAMERA_Y_FINE: u16 = 0x01A4;
-const CAMERA_X_FRACTION: u16 = 0x0071;
 
 /// PRG-RAM, from `$6000`.
 const ROOM_WIDTH: usize = 0x07EE;
@@ -106,15 +105,6 @@ impl MarginDecoder for Kirby {
             }
         }
         true
-    }
-
-    /// `$DE:$DD` and `$71`, the camera's fraction of a pixel across (its own: it stays as it is
-    /// while the camera rests on the room's edge with Kirby still walking; but while Kirby turns
-    /// round with the camera at rest it goes on turning without the pixels following, which the
-    /// core sees and leaves out).
-    fn camera_position(&self, memory: &DecoderMemory<'_>) -> Option<(i32, u8)> {
-        let pixels = (i32::from(memory.ram(CAMERA_X_HIGH)) << 8) + i32::from(memory.ram(CAMERA_X));
-        Some((pixels, memory.ram(CAMERA_X_FRACTION)))
     }
 
     /// The status bar's split comes 1 to 7 lines under the playfield's last row the PPU kept,

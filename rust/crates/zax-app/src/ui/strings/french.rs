@@ -295,6 +295,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Écran large : attendre les objets entiers aux bords dessinés",
     ),
     (
+        "setting.video.smooth_scroll_ahead",
+        "Défilement lissé (interpolé par run-ahead)",
+    ),
+    (
         "setting.video.remove_sprite_limit",
         "Supprimer la limite de 8 sprites par ligne",
     ),

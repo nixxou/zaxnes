@@ -88,6 +88,14 @@ pub struct NesCore {
     picture_motion: Option<f32>,
     /// The camera the picture just made shows, in pixels (for a debug log of the scrolling).
     picture_camera: Option<f64>,
+    /// The playfield scroll the PPU drew in the frame run before (the run-ahead's real frame,
+    /// or the frame before without run-ahead), for the option `smooth_scroll_ahead`.
+    last_scroll: Option<i32>,
+    /// Frames since the last camera report of the game's hack ([`crate::wide::CameraReport`]),
+    /// while the smooth scrolling follows its reports.
+    report_age: Option<u8>,
+    /// Whether the smooth scrolling from the run-ahead is on (the host's option of each game).
+    smooth_ahead: bool,
     /// The sprites that move with the camera (Kirby, the camera on him), which the shift must
     /// leave where they are: their record indices in the picture just made, and their screen
     /// places; the camera's pixels the last picture showed, and every sprite's place there.
@@ -136,6 +144,9 @@ impl NesCore {
             picture_shift: None,
             picture_motion: None,
             picture_camera: None,
+            last_scroll: None,
+            report_age: None,
+            smooth_ahead: false,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
             shown_camera: None,
@@ -649,6 +660,7 @@ impl NesCore {
             }
         }
         self.smooth_scroll(aid_decoder);
+        self.smooth_scroll_ahead();
 
         self.frame_count += 1;
 
@@ -768,48 +780,58 @@ impl NesCore {
     /// past its scroll (read after the frame before: the RAM is a frame ahead of the picture), down
     /// to the playfield's bottom ([`NesCore::picture_shift`]). Nothing read with the option off.
     fn smooth_scroll(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
-        // Aids of the game's hack pack (in the Hacks), with or without its widescreen patch; the
-        // displayed picture's motion between frames (`smooth_scroll_120`) needs the shift too.
-        let option_on = |key: &str| {
-            self.builtin_patch
-                .and_then(crate::builtin_patches::by_name)
-                .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
-                .and_then(|patch| patch.options.iter().find(|option| option.key == key))
-                .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0)
-        };
-        let between = option_on("smooth_scroll_120");
-        let on = between || option_on("smooth_scroll");
+        // An aid of the game's hack pack (in the Hacks), with or without its widescreen patch: the
+        // camera its code reports, else the one a margin decoder reads.
+        let on = self.hack_option_on("smooth_scroll");
         self.picture_motion = None;
-        self.bus.ppu_mut().set_wants_playfield_end(on);
-        let Some(decoder) = decoder.filter(|_| on) else {
+        let report = self.bus.ppu_mut().wide_mut().take_camera_report();
+        self.bus
+            .ppu_mut()
+            .set_wants_playfield_end(on && decoder.is_some());
+        if !on {
             self.camera_fraction = None;
             self.camera_read = None;
+            self.report_age = None;
             self.picture_shift = None;
             self.steady_sprites.clear();
             return;
-        };
+        }
         // The camera where the picture just made shows it, before the next one is read.
         let shown = self
             .camera_read
             .zip(self.camera_fraction)
             .map(|((pixels, _), fraction)| f64::from(pixels) + f64::from(fraction) / 256.0);
         self.picture_camera = shown;
-        let end = self.bus.ppu().playfield_end();
+        // The playfield's bottom: the report's, the decoder's, else the rows the PPU drew.
+        let end = report
+            .and_then(|report| report.end)
+            .or_else(|| self.bus.ppu().playfield_end())
+            .or_else(|| self.bus.ppu().playfield_scroll().map(|(_, end)| end));
         self.picture_shift = self
             .camera_fraction
             .zip(end)
             .map(|(fraction, end)| (f32::from(fraction) / 256.0, i32::from(end)));
-        self.find_steady_sprites();
-        let (ram, _, cartridge) = self.bus.decoder_parts();
-        let read = cartridge.and_then(|cartridge| {
-            decoder.camera_position(&crate::wide_decode::DecoderMemory {
-                ram,
-                prg_ram: cartridge.memory().prg_ram(),
-                prg_rom: cartridge.rom().prg_rom(),
-                nametable: &|_| 0,
-                nametable_written: &|_| 0,
+        self.find_steady_sprites(self.camera_read.map(|(pixels, _)| pixels));
+        let read = if let Some(report) = report {
+            self.report_age = Some(0);
+            report.x
+        } else if let Some(age) = self.report_age.filter(|age| *age < 2) {
+            // A frame the game ran late reports nothing: its camera did not move.
+            self.report_age = Some(age + 1);
+            self.camera_read
+        } else {
+            self.report_age = None;
+            let (ram, _, cartridge) = self.bus.decoder_parts();
+            decoder.zip(cartridge).and_then(|(decoder, cartridge)| {
+                decoder.camera_position(&crate::wide_decode::DecoderMemory {
+                    ram,
+                    prg_ram: cartridge.memory().prg_ram(),
+                    prg_rom: cartridge.rom().prg_rom(),
+                    nametable: &|_| 0,
+                    nametable_written: &|_| 0,
+                })
             })
-        });
+        };
         let Some((pixels, fraction)) = read else {
             self.camera_fraction = None;
             self.camera_read = None;
@@ -830,17 +852,15 @@ impl NesCore {
         }
         // Where the next picture will show it: the motion between the two, a jump (a door, a
         // room changed) left out.
-        if between {
-            let next = self
-                .camera_fraction
-                .map(|fraction| f64::from(pixels) + f64::from(fraction) / 256.0);
-            #[allow(clippy::cast_possible_truncation)] // A few pixels.
-            {
-                self.picture_motion = shown
-                    .zip(next)
-                    .map(|(shown, next)| (next - shown) as f32)
-                    .filter(|motion| motion.abs() < 4.0);
-            }
+        let next = self
+            .camera_fraction
+            .map(|fraction| f64::from(pixels) + f64::from(fraction) / 256.0);
+        #[allow(clippy::cast_possible_truncation)] // A few pixels.
+        {
+            self.picture_motion = shown
+                .zip(next)
+                .map(|(shown, next)| (next - shown) as f32)
+                .filter(|motion| motion.abs() < 4.0);
         }
     }
 
@@ -863,8 +883,55 @@ impl NesCore {
     /// The sprites of the picture just made that move with the camera: a sprite at the same
     /// place on the screen as in the picture before while the camera moved (or, the camera still,
     /// at a place found so before). The shift leaves them where they are.
-    fn find_steady_sprites(&mut self) {
-        let shown = self.camera_read.map(|(pixels, _)| pixels);
+    /// Turns the smooth scrolling from the run-ahead on or off (an option of the host for every
+    /// game; the game's own smooth scrolling from its memory, when on, comes first).
+    pub fn set_smooth_scroll_ahead(&mut self, on: bool) {
+        self.smooth_ahead = on;
+    }
+
+    /// Whether option `key` of the game's patch, or of its hack pack's aids, is on.
+    fn hack_option_on(&self, key: &str) -> bool {
+        self.builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
+            .and_then(|patch| patch.options.iter().find(|option| option.key == key))
+            .is_some_and(|option| self.host_options & (1 << (option.bit & 7)) != 0)
+    }
+
+    /// The experimental smooth scrolling from the run-ahead (option `smooth_scroll_ahead`), to
+    /// compare with the one that reads the game's camera: nothing of the game known but the
+    /// scroll the PPU drew. With run-ahead, the frame shown is one ahead of the real frame run
+    /// just before it, whose scroll is known: the picture is shown shifted back to the real
+    /// frame's scroll, then slides to its own over the frame (the motion times the display's
+    /// phase), the run-ahead's frame of latency spent on it. Without run-ahead, the same a frame
+    /// late.
+    fn smooth_scroll_ahead(&mut self) {
+        // The game's own camera, when its hack reads it, comes first (owner request).
+        if !self.smooth_ahead || self.hack_option_on("smooth_scroll") {
+            self.last_scroll = None;
+            return;
+        }
+        let current = self.bus.ppu().playfield_scroll();
+        let previous = std::mem::replace(&mut self.last_scroll, current.map(|(scroll, _)| scroll));
+        let Some((scroll, end)) = current else {
+            self.picture_shift = None;
+            self.picture_motion = None;
+            self.steady_sprites.clear();
+            return;
+        };
+        // A few pixels a frame at most; more is a jump (a door, a room changed), not shown moving.
+        let motion = previous
+            .map(|previous| (scroll - previous + 128).rem_euclid(256) - 128)
+            .filter(|motion| motion.abs() <= 8)
+            .unwrap_or(0);
+        #[allow(clippy::cast_precision_loss)] // A few pixels.
+        let motion = motion as f32;
+        self.picture_shift = Some((-motion, i32::from(end)));
+        self.picture_motion = Some(motion);
+        self.find_steady_sprites(Some(scroll));
+    }
+
+    fn find_steady_sprites(&mut self, shown: Option<i32>) {
         let moved = shown.is_some() && self.shown_camera.is_some() && shown != self.shown_camera;
         self.shown_camera = shown;
         let split = self.picture_shift.map_or(0, |(_, split)| split);
