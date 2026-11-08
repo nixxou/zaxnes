@@ -709,3 +709,47 @@ The behaviour claim is step 7's golden-core, not this table.
 385 is 392 less the seven tests that need `board-292`: its five from step 2, its round trip from
 step 4, and the shared reset test, which is `cfg(all(board-262, board-292))`. `cargo fmt --check`
 and clippy `-D warnings` are clean in both.
+
+## Step 7 — golden-core, and the full run with both ROM roots
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `c02fc02c` (`mfunl12-0-base`) against the **shipped** tree (`mfunl12-4-ship`) | **byte-identical** (`cmp`, not just the digest) |
+| and against the tree with **all three features on**, `board-292` included (`mfunl12-1-lot`) | **byte-identical** |
+| the digest | `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+
+**That is the digest MF-UNL-2 through MF-UNL-11 all recorded.** Eleven lots, and not one pixel of a
+commercial original has moved — which is what the lot brief asks of this one in those words:
+"golden-core over the 98 originals must be byte-identical to the base commit's."
+
+**The second row is this lot's own addition to the pattern, and it is the row that matters here.**
+`board-292` is parked, so a reader could object that the shipped tree proves nothing about the code
+the park switches off — the latch field on `CartridgeMemory`, the store in
+`NesBus::write_internal`, the two new forwards on `IrqBoard`. That row is the answer: with all of
+it compiled in and reachable, 98 games at 1 200 frames each are **still byte-identical on every
+field golden-core records**. The parked feature is a *figure*, not a behaviour change, which is
+exactly the distinction the owner's "no exclusion for performance" rule rests on.
+
+It is also what turns the lot's structural claims into facts rather than intentions: three variants
+were added to the shared enums (two to `IrqBoard`, one to `DecodeBoard`), `Mmc3Board` grew two
+widened `cfg` lists and two accessors gained callers, `BankWindows::or_chr_banks_each` gained a
+second caller, `DecodeBoard` gained three forwards and `IrqBoard` three — every one of those is
+code that **existing** boards compile.
+
+### The full run with both ROM roots
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+    cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored
+
+**1 162 passed, 0 failed, 0 ignored.** The same command without the two variables and without
+`--include-ignored` is **1 153 passed, 0 failed, 9 ignored** — so the nine ROM-driven tests really
+ran rather than passing vacuously, which is the check the brief asks for.
+
+1 162 against MF-UNL-11's 1 152 is **ten** tests, not the lot's seventeen: seven of them need
+`board-292` and that feature is parked, so they run under `--features parked-boards` and not in
+`default`. Step 5's `mapper_tests` table is where all seventeen are accounted for.
