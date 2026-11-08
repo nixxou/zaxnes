@@ -47,7 +47,41 @@ copied**. No line of their code is transcribed in this report or anywhere in thi
 every behavioural statement below is a description in my own words, with a `file:line` citation
 so the reader can check it at the source.
 
-<!-- SUMMARY-TABLE -->
+## Summary table
+
+**177 points were checked across the 26 boards: 157 OK, 9 DIFFERS, 11 OPEN.** The table below
+is every point that is *not* OK — the points of difference. The OK points are listed per board
+in the sections that follow, briefly, with their citations; listing all 157 here would bury the
+twenty that matter. `—` means the source does not implement the feature at all; a blank cell
+means I did not read that source on that point and say so in the entry.
+
+| mapper | board | point | the page | this build | FCEUX | Nestopia | puNES | Nintendulator | Mesen 2 | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | SNROM | `$A000` bit 4 disables PRG-RAM | yes, on SNROM | **yes** | no | no | reverted, named game | no | no | **DIFFERS** |
+| 1 | SZROM | which CHR bit banks the 16 KiB PRG-RAM | bit 4 | **bit 3** | bit 3 | bit 3 | bit 4 | no banking | bit 2, "shouldn't happen" | **DIFFERS** |
+| 1 | SOROM | which `S` value selects the battery chip | silent | `S`=1 | `S`=1 | `S`=1 | `S`=0 | `S`=0 | `S`=0 | **OPEN** |
+| 1 | MMC1A | NES 2.0 submapper 3 | no PRG-RAM disable, bit 4 drives A17 | not handled | mapper 155 only | from the chip list | from the submapper | from the board name | from the database | **DIFFERS** |
+| 1 | MMC1 | power-on `$8000` and the PRG-RAM disable | "last bank", rest unspecified | `$0C`, RAM on | `$1F`, RAM on | `$0F`, RAM off on B3 | `$0C`, RAM on | `$0C`, RAM on | random\|`$0C`, RAM off on B | **OPEN** |
+| 4 | MMC3 | a `$C001` write racing an A12 clock | silent | not modelled | — | — | **modelled** | — | — | **OPEN** |
+| 4 | MMC3 | IRQ assertion delay | silent | none | n/a | none | 1-2 CPU cycles | none | none | **OPEN** |
+| 4 | MMC3 | power-on CHR registers | unspecified | all 0 | 0,2,4,5,6,7 | identity | 0,2,4,5,6,7 | identity | all 0 | **OPEN** |
+| 5 | MMC5 | vertical split and extended attributes | both documented | **neither** | both | both | both | both | both | **DIFFERS** |
+| 5 | MMC5 | power-on `$5104` | reset `$03` | 0 | 0 | 0 | 0 | 0 | | **OPEN** |
+| 9 | MMC2 | power-on latch value | silent | `$FE` | `$FE` | `$FD` | `$FD` | `$FD` | | **OPEN** |
+| 13 | CPROM | bus conflicts | **"Yes"** | **no** | no | yes | yes | no | no | **DIFFERS** |
+| 15 | AMD-021 R2-002 | CHR-RAM write protect | modes 0 and 3 | modes 0 and 3 | mode 3, deliberate | — | never | never, deliberate | modes 0 and 3 | **DIFFERS** |
+| 16 | LZ93D50 | does the counter keep counting after the IRQ | silent | yes | no, self-disables | yes | no, stalls at 0 | yes | | **OPEN** |
+| 18 | SS88006 | `$9002` PRG-RAM enable / write protect | `.... ..WR` | **not implemented** | no | yes, denied at power-on | yes | no | yes | **DIFFERS** |
+| 22/23/25 | VRC2 | the one-bit latch at `$6000-$6FFF` | documented, two games named | **not implemented** | RAM instead | **latch, gated on no WRAM** | **latch, gated on no WRAM** | RAM instead | | **DIFFERS** |
+| 30 | UNROM 512 | which submapper gives mapper-controlled H/V | submapper 3 (MR-30-3) | submapper 3 | — | — | submapper 1 | — | submapper 3 | **OPEN** |
+| 32 | G-101 sub 1 | which one-screen page *Major League* is held on | CIRAM A10 to +5V, i.e. upper | **lower (screen A)** | — | — | upper (screen B) | — | — | **DIFFERS** |
+| 41 | Caltron 6-in-1 | bus conflict on the inner CHR register | not re-read | no | | | yes | | | **OPEN** |
+| 101 | AMD-021 R2-003 | the CHR field width and the decode range | whole byte, `$6000-$7FFF` | per the spec | — | — | whole byte | — | whole byte | **OPEN** (Q-110) |
+
+Two further tables sit inside the report rather than here, because they summarise points that
+came out **OK**: the shared bus-conflict re-count (eight boards, four new votes) and the MMC3
+revision A/B comparison.
+
 
 ---
 
@@ -2064,4 +2098,107 @@ Page: *INES Mapper 228* (<https://www.nesdev.org/wiki/INES_Mapper_228>). Ours:
 
 Count: 2 OK, 0 DIFFERS, 0 OPEN.
 
-<!-- NEXT-BOARD -->
+---
+
+# For the owner
+
+Nine differences, ranked by how many people would notice. Two sentences each, no jargon.
+
+1. **MMC5 games lose the split screen and the per-tile colours (mapper 5).** Six Japanese
+   strategy and simulation games — *Just Breed*, the Koei titles like *Nobunaga's Ambition II*
+   and *Romance of the Three Kingdoms II* — draw their backgrounds with a feature this build
+   does not have, so their colours come out wrong; two more lose a split-screen effect
+   entirely. This is a known gap the specification itself marks as lower priority, and
+   *Castlevania III*, the popular MMC5 game, is not affected.
+
+2. **Zelda, Metroid and Final Fantasy could lose their saves if a game writes one particular
+   value (mapper 1).** This build implements a PRG-RAM switch that the hardware documentation
+   describes and that every other emulator — all five of them — deliberately ignores; one of
+   them removed it because a homebrew game broke. The games at risk are the biggest names on
+   the board, so this is the entry worth looking at first even though no commercial game is
+   known to trip it.
+
+3. **Contra (Japan) and Ganbare Goemon 2 work here only by luck (mappers 22/23/25).** Those
+   cartridges check a one-bit memory the board has instead of save RAM, and this build does not
+   have it; the games pass their check only because old-style ROM headers cause the emulator to
+   put 8 KiB of RAM there by accident. A properly made modern dump of either game, which says
+   the cartridge has no RAM, would hang at boot.
+
+4. **Videomation may bank its graphics differently from the hardware (mapper 13).** The board's
+   documentation says writes to it collide with the cartridge's own ROM, which changes the value
+   that gets stored, and this build does not model that collision. Half the other emulators do;
+   whether the one game on this board actually notices can only be found out by running it.
+
+5. **Chinese mapper-15 multicart hacks may show a blank or corrupt screen.** This build blocks
+   graphics writes in two of the board's four modes, exactly as the documentation says; two other
+   emulators deliberately stopped doing that because a family of hacked ROMs only works in the
+   mode where the block applies. Nothing commercial or Western is affected, and the choice is a
+   judgement call rather than a clear bug.
+
+6. **Mapper-18 games cannot protect their save RAM (mapper 18).** The board has a switch that
+   turns its save memory off and another that makes it read-only, and this build implements
+   neither, so a game that tries to guard its save during a crash cannot. Three of the five
+   other emulators have the same gap and no game is known to suffer from it, so this is tidiness
+   rather than a visible fault.
+
+7. **SZROM's one game puts its save in the wrong place (mapper 1).** *A Ressha de Ikou*, a
+   Japanese train simulator, is the only cartridge on this board variant, and this build reads
+   the wrong bit to choose which half of its save memory is in use. The fix is a single extra
+   case and nothing else on the board can reach it.
+
+8. **Two header variants of common boards are not recognised (mappers 1 and 30).** A correctly
+   labelled dump of an early MMC1 cartridge, and a homebrew UNROM-512 image that asks the board
+   to control its screen layout, are each run under the wrong rule here. No commercial game uses
+   either label.
+
+9. **Major League is held on the wrong half of the video memory (mapper 32).** The
+   documentation says the cartridge wires the screen selector high and this build wires it low.
+   Nothing can see the difference, because the game only ever uses the half it is given — it is
+   recorded for completeness.
+
+**Eleven more points are open**, meaning the documentation is silent or the emulators disagree
+and I could not settle it from the sources: power-on values on four boards, two MMC3 IRQ timing
+details that only one other emulator models, which chip an MMC1 SOROM save lands on, and three
+smaller ones. None of them is known to affect a game; each entry says what evidence would close
+it, and in several cases that evidence is a test ROM already sitting in `assets-free`.
+
+**Nothing in this report asks for a change to the games that must not move.** SMB3 is mapper 4,
+Zelda II is mapper 1, and the widescreen packs are on boards the mapper work added later. Of the
+nine differences, only entry 2 touches a board any of them runs on, and the change it suggests
+can only *enable* memory that is currently switched off — a game working today keeps working.
+
+**And the single best thing this lot found is not a difference at all.** The mapper-conformance
+test ROMs are already in the repository and the harness does not run any of them:
+`holy-mapperel` ships configurations for sixteen of the numbers under review — mappers 0, 1, 2,
+3, 4, 7, 9, 10, 11, 28, 34 and 66 among them — and `nes-test-roms` has `mmc3_test`,
+`mmc3_test_2`, `mmc3_irq_tests`, `mmc5test`, `mmc5test_v2`, `exram`, `MMC1_A12` and
+`m22chrbankingtest`. The project runs the CPU, PPU and APU suites and `mmc3_test_2`, and nothing
+else. Wiring the `holy-mapperel` set into the harness would check most of the register maps in
+this report at first hand, and would have settled four of the twenty entries above without any
+reading at all.
+
+## Counts
+
+| | |
+| --- | --- |
+| points checked | **177** |
+| **OK** | **157** |
+| **DIFFERS** | **9** |
+| **OPEN** | **11** |
+| boards with no difference at all | **13 of 26** |
+| MR-1b conclusions overturned by the new sources | **0** |
+| MR-1b conclusions independently confirmed | **14** |
+
+The last two rows are the result worth keeping: four more emulators and a second pass over the
+hardware pages did not reverse a single one of MR-1b's verdicts, and confirmed fourteen of them
+— including three where MR-1b had ruled **against** Mesen (mapper 71's one-screen polarity,
+mapper 28's captured mirroring bit, mapper 11's two-bit PRG field) and one where it ruled against
+Mesen's convention on the MMC1's outer bank. The nine differences this lot found are all in
+places MR-1 did not look: a board page's bus-conflict row, a register below $8000, a submapper
+byte, or a feature the spec had already deferred.
+
+One qualification on "overturned: 0". MR-BUS-1's **list** turned out to be incomplete rather
+than wrong: the *CPROM* board page carries the same unqualified "Subject to bus conflicts: Yes"
+row that put mappers 11, 66 and 78 on the list, and mapper 13 was not on it. That is a gap in
+the enumeration, not a reversal of a verdict, and mapper 41 may be a second instance of the same
+gap — see 41-1.
