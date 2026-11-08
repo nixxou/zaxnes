@@ -1863,6 +1863,15 @@ impl Ppu2C02 {
         let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             if let Some(cartridge) = cartridge {
+                // Lot MF-LEG-2: the MMC5 answers all four tables in extended attribute mode
+                // and with the vertical split on, CIRAM's included, so it is handed the VRAM
+                // it would otherwise not be able to read. Every other board's arm is
+                // `read_nametable`'s, unchanged — see `Mapper::read_nametable_from_vram`. This
+                // is the **whole** of the two features' footprint on the PPU's fetch path, and
+                // a board that does not take this branch cannot see it.
+                #[cfg(feature = "board-mmc5-exattr-split")]
+                return cartridge.read_nametable_from_vram(address, &self.vram);
+                #[cfg(not(feature = "board-mmc5-exattr-split"))]
                 return cartridge.read_nametable(address);
             }
         }
@@ -1884,6 +1893,16 @@ impl Ppu2C02 {
     ) -> u32 {
         let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
+            // Lot MF-LEG-2, and the same reason as in `write_nametable_byte`: a table the MMC5
+            // answers may still be CIRAM's, and a margin decoder asking when a byte was last
+            // written has to be told about it rather than given the 0 that means "never".
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            if let Some(offset) =
+                cartridge.and_then(|cartridge| cartridge.nametable_write_offset(address))
+            {
+                return self.vram_written.get(offset).copied().unwrap_or(0);
+            }
+
             return 0;
         }
         let offset = usize::try_from(page).map_or_else(
@@ -1896,6 +1915,24 @@ impl Ppu2C02 {
     fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
         let page = self.nametable_page(address, cart.as_deref());
         if page == Cartridge::SERVED_BY_CARTRIDGE {
+            // Lot MF-LEG-2: with the MMC5 answering every table, a `$2007` write to one that
+            // CIRAM still backs must reach CIRAM all the same — the board says where
+            // (`Mapper::nametable_write_offset`), because the page number the PPU would have
+            // used is the one it has just been told not to trust. A cold path: a game writes a
+            // nametable byte a few hundred times a frame, against the 17 000 fetches of one.
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            if let Some(offset) = cart
+                .as_deref()
+                .and_then(|cartridge| cartridge.nametable_write_offset(address))
+            {
+                self.vram[offset] = value;
+                if let Some(written) = self.vram_written.get_mut(offset) {
+                    *written = self.vram_clock;
+                }
+
+                return;
+            }
+
             if let Some(cartridge) = cart.as_deref_mut() {
                 cartridge.write_nametable(address, value);
                 return;

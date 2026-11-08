@@ -415,6 +415,39 @@ impl Mapper for Board {
         dispatch!(self, b => b.read_nametable(memory, address))
     }
 
+    /// **Not a `dispatch!`, deliberately** (lot MF-LEG-2). The paragraph above is the reason:
+    /// `read_nametable`'s dispatch holds exactly two distinct arm bodies and a third makes it a
+    /// jump table whose register pressure costs *every* board two instructions per nametable
+    /// fetch. So this one tests for the single board that overrides the method — the MMC5 with
+    /// `board-mmc5-exattr-split` on — and hands everything else to `read_nametable` unchanged,
+    /// which keeps that function and its bitset exactly as they are.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
+        match self {
+            Board::Mmc5(board) => board.read_nametable_from_vram(memory, address, vram),
+            _ => self.read_nametable(memory, address),
+        }
+    }
+
+    /// The same shape and the same reason as [`Board::read_nametable_from_vram`]: one test for
+    /// the MMC5, `None` for every other board.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn nametable_write_offset(&self, address: u16) -> Option<usize> {
+        match self {
+            Board::Mmc5(board) => board.nametable_write_offset(address),
+            _ => None,
+        }
+    }
+
+    /// Likewise: the MMC5's split is the only subscriber, so the other boards do not reach a
+    /// dispatch at all.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn on_tile_row_start(&mut self) {
+        if let Board::Mmc5(board) = self {
+            board.on_tile_row_start();
+        }
+    }
+
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         dispatch!(self, b => b.write_nametable(memory, address, value));
     }

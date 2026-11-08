@@ -1084,6 +1084,35 @@ board-taito-x1 = ["board-small-boards"]
 # lots that is over the tolerance; its own note has the figures and the two causes.
 parked-boards = ["board-vs-system", "board-292", "board-143-open-bus"]
 
+# The MMC5's **extended attribute mode** ($5104 = %01) and its **vertical split**
+# ($5200-$5202), lot MF-LEG-2 — the two features of report entry MMC5-1, whose verdict is
+# DIFFERS: all five cross-checked emulators implement them and this build did not, which the
+# entry calls "by a wide margin the largest *visible* difference in the whole v0.4.2 set".
+#
+# With it on, a background tile in mode 1 takes its palette and a 4 KiB CHR bank from the ExRAM
+# byte at its own nametable offset, and the split region takes its tile and attribute from ExRAM,
+# its patterns from $5202's bank and its vertical scroll from $5201. Titles: *Just Breed*, the
+# Koei strategy games (*Nobunaga's Ambition II*, *Romance of the Three Kingdoms II*, *Uncharted
+# Waters*, *Bandit Kings of Ancient China*) and *Yakuman Tengoku* for the attributes, *Uchuu
+# Keibitai SDF* and *Bandit Kings of Ancient China* for the split. **Castlevania III uses
+# neither**, so the most-played MMC5 game is not in the list.
+#
+# **Off by default by the owner's decision, taken before any measurement** — the figures are in
+# `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-LEG-2.md` step 5, and whether it joins
+# `default` is R0's and the owner's call. It is not in `parked-boards` either: that umbrella is
+# for boards left out *for a figure*, and this one is out for a decision.
+#
+# The whole thing hangs on a test `Ppu2C02::read_nametable_as` already makes — the MMC5 answers
+# `SERVED_BY_CARTRIDGE` for all four tables while either mode is armed and serves every
+# nametable-space byte through `Mapper::read_nametable_from_vram`, the one new hook — so **no
+# other board's fetch path changes, feature on or off**. See the banner in `mmc5.rs` for the
+# three points where the five emulators disagree and what this build chose.
+#
+# A savestate does not cross between the two configurations: with the feature on the MMC5's
+# block carries $5200-$5202 after its sound state. That is already true of every board feature
+# that changes what memories a cartridge has (`board-195-prg-ram-5000`, `board-vs-system`).
+board-mmc5-exattr-split = []
+
 # **Not a board: the PPU's exact sprite-evaluation pipeline** (lot MF-4e step 3). The owner's rule
 # is written for boards but the reason behind it is the figure, so it is applied here unchanged.
 #

@@ -575,6 +575,43 @@ pub trait Mapper {
         0
     }
 
+    /// [`Mapper::read_nametable`] with the console's VRAM, for the one board that answers every
+    /// nametable fetch while some of the four tables are still CIRAM's: the MMC5 in extended
+    /// attribute mode or with the vertical split on (lot MF-LEG-2).
+    ///
+    /// It exists so that the two features cost **no other board anything**, feature on or off.
+    /// `Ppu2C02::read_nametable_as` already branches on `page == SERVED_BY_CARTRIDGE`, so a
+    /// board that answers it is asked for the byte and the rest of the PPU's path is untouched;
+    /// the only thing the MMC5 lacked there was a way to read the CIRAM page `$5105` names, and
+    /// that is `vram`. The default body forwards, so no board but the MMC5 overrides it, and
+    /// **the `read_nametable` dispatch keeps its two arms** — the bitset `Board`'s own doc
+    /// comment says a third body turns into a jump table.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, _vram: &[u8]) -> u8 {
+        self.read_nametable(memory, address)
+    }
+
+    /// Where a **write** to nametable-space `address` lands in console VRAM on a board that
+    /// answers `SERVED_BY_CARTRIDGE` for a table CIRAM still backs, or `None` when the board
+    /// keeps or drops the byte itself — which is every board but the MMC5 with
+    /// `board-mmc5-exattr-split` on, and the MMC5 itself whenever `$5105` picks `ExRAM` or
+    /// fill mode. See [`Mapper::read_nametable_from_vram`].
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn nametable_write_offset(&self, _address: u16) -> Option<usize> {
+        None
+    }
+
+    /// The PPU is about to fetch the tiles of a line, at the dot where its fetch sequence for
+    /// that line begins. Only the MMC5's vertical split needs it, for the tile counter the page
+    /// describes as the "nametable fetch count (horizontally)" and the row counter that "resets
+    /// to the vertical scrolling value in `$5201` each v-blank" (lot MF-LEG-2).
+    ///
+    /// Once per rendered line and on no other board — one `bool` test on a path that runs 240
+    /// times a frame, which is why this is a hook of its own rather than a test inside the
+    /// fetch pipeline.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn on_tile_row_start(&mut self) {}
+
     /// Writes a nametable byte the board serves itself.
     fn write_nametable(&mut self, _memory: &mut CartridgeMemory, _address: u16, _value: u8) {}
 

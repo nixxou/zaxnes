@@ -17281,3 +17281,53 @@ fn amd_061_a_reset_puts_both_mmc3_boards_of_mf_unl_12_back_to_their_power_on_sta
         );
     }
 }
+
+/// Lot MF-LEG-2, and **both sides of the owner's decision in one test**: with
+/// `board-mmc5-exattr-split` off, `$5200`-`$5202` are registers the MMC5 does not decode and
+/// `$5104` mode %01 renders exactly as mode %00 does — which is what `docs/review/LEGACY-XCHECK.md`
+/// entry MMC5-1's verdict DIFFERS describes, five emulators to one and against the page. With the
+/// feature on, both move the picture, and the nineteen tests of
+/// `mf_leg_2_mmc5_exattr_split_tests.rs` say exactly how.
+///
+/// The observable is `Cartridge::nametable_page`: with the feature on, either mode armed makes
+/// the board answer `SERVED_BY_CARTRIDGE` for all four tables, which is the one hook the whole
+/// implementation hangs on; with it off the four pages are `$5105`'s alone, whatever `$5104` and
+/// `$5200` say.
+#[test]
+fn mf_leg_2_mmc5_the_two_substituting_modes_exist_only_behind_their_feature() {
+    use zax_nes::cartridges::mappers::Mmc5;
+
+    let mut core = MapperRom::new(5).prg(8).chr(16).load();
+    core.mapper_write(0x5105, 0x44); // Tables 0 and 2 on CIRAM 0, tables 1 and 3 on CIRAM 1.
+    let plain = [0, 1, 0, 1];
+    assert_eq!(
+        plain,
+        nametable_pages(&core),
+        "$5105 alone decides the four pages while neither mode is armed"
+    );
+
+    let served = [Cartridge::SERVED_BY_CARTRIDGE; 4];
+    let expected = if Mmc5::EXATTR_SPLIT { served } else { plain };
+
+    core.mapper_write(0x5104, 0x01); // Extended attribute mode.
+    assert_eq!(
+        expected,
+        nametable_pages(&core),
+        "ExRAM mode 1: the board answers every table with the feature on, and none without it"
+    );
+
+    core.mapper_write(0x5104, 0x00);
+    core.mapper_write(0x5200, 0x80 | 0x10); // Split enabled, threshold 16.
+    assert_eq!(
+        expected,
+        nametable_pages(&core),
+        "$5200 bit 7: the same, and with the feature off $5200 is not decoded at all"
+    );
+
+    core.mapper_write(0x5200, 0x00);
+    assert_eq!(
+        plain,
+        nametable_pages(&core),
+        "and clearing $5200 bit 7 gives $5105's pages back"
+    );
+}

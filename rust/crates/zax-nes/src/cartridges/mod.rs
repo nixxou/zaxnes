@@ -1337,6 +1337,32 @@ impl Cartridge {
         self.board.read_nametable(&self.memory, address)
     }
 
+    /// [`Cartridge::read_nametable`] with the console's VRAM, which the MMC5 needs while it
+    /// answers all four tables in extended attribute mode or with the split on — see
+    /// [`Mapper::read_nametable_from_vram`]. Every other board forwards to
+    /// [`Cartridge::read_nametable`] without reaching a dispatch.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    #[must_use]
+    pub fn read_nametable_from_vram(&self, address: u16, vram: &[u8]) -> u8 {
+        self.board
+            .read_nametable_from_vram(&self.memory, address, vram)
+    }
+
+    /// Where a write to a nametable the cartridge answers lands in console VRAM, or `None` when
+    /// the board keeps or drops the byte (see [`Mapper::nametable_write_offset`]).
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    #[must_use]
+    pub fn nametable_write_offset(&self, address: u16) -> Option<usize> {
+        self.board.nametable_write_offset(address)
+    }
+
+    /// The PPU is starting a line's background fetch sequence (see
+    /// [`Mapper::on_tile_row_start`]). Only the MMC5's vertical split subscribes.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    pub fn on_tile_row_start(&mut self) {
+        self.board.on_tile_row_start();
+    }
+
     /// Writes a nametable byte the cartridge serves itself.
     pub fn write_nametable(&mut self, address: u16, value: u8) {
         self.board.write_nametable(&mut self.memory, address, value);
