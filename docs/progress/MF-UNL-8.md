@@ -52,7 +52,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
 - [x] **5/8** — the question tickets.
 - [x] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
-- [ ] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
+- [x] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
 - [ ] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
   `BOARD-FEATURES.md`, the census note, the journal and the final pass.
 
@@ -779,3 +779,163 @@ groups", and the test passes.
 numbers, five dedicated round trips move what the generic sweep cannot — and the first of them found
 that `Board` and `IrqBoard` forward `save_registers` and not `save_state`, so mapper 116's own
 override has never been called; `Huang1` is fixed and mapper 116's block is left exactly as it is.
+
+---
+
+## Step 7 — the campaign, and an instrument that is not deterministic today
+
+Binaries built by `build-clean.sh` from their own tar into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, each deleted as soon as its binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `unl8base` | **`c895a93a`**, the lot's base commit | `5c6dede05c967e6d46a0646dc47295af` |
+| `unl8` | **`12efb950`**, step 6 — the lot's last code commit | `cfdf90abb19687f52778442c9865e976` |
+| `unl8off` | the shipped source with **all three features out of `default`** — the control, whose emulation is the base commit's | `d1ce3e6bc190381aeea38be055fddfa4` |
+
+`unl8base` is **byte-identical to MF-UNL-7's own `unl7final`** — the same md5 — because that lot's
+last commit added only its progress note over the commit it measured. That is the fifth lot in a row
+for which the identity has held, and this lot built the binary rather than assuming it.
+
+`unl8off` is not identical to the base, for the familiar reason: three load-time `matches!` lists in
+`cartridges::mod` gain numbers **unconditionally** — `watches_ppu_reads` and
+`watches_ppu_bus_without_read` gain 12, 14, 83, 91 and 264, and `clocks_on_cpu_cycle` gains 83, 91
+and 264 — which is the "one `matches!` is one `matches!`" precedent mappers 68 and 111 set in that
+file. The *emulation* is identical either way.
+
+### The finding that has to come first: the instrument is not deterministic on this machine today
+
+`callgrind-set.sh`'s own comment says "the Ir count is deterministic to the instruction: the same
+binary twice gives the same number". **It is not, today.** Two measurements say so:
+
+1. `cg-unl7` (MF-UNL-7's run of a binary with this md5) against `cg-unl8base` (this lot's run of
+   **the same bytes**) differs by `metroid` **−46 075**, `vblnmi` −27 580, `m4` −25 165,
+   `duelito` +17 761 — set total −129 279.
+2. So the base binary was run **again** under the label `unl8rep`, same machine, same session, same
+   roots. Against `cg-unl8base`: worst ROM `smb1` **+39 271 (+0.001 %)**, `m4` +35 256, `m1`
+   +33 046, set total **+163 501**.
+
+**That second figure is the honest reading of the whole campaign, because it is larger than
+anything this lot's code does.** The lot's worst ROM is +23 791 and its set total +25 740; the same
+binary against itself is +39 271 and +163 501. So every PR-1 figure below is **inside the
+instrument's own floor**, and the right conclusion is not "+0.0004 %" but "indistinguishable from
+the base commit on this instrument".
+
+The cause was not chased further — it is below everything this lot could act on, and the one thing
+that *is* deterministic is the thing that matters most, which the level-2 table shows below:
+**`core` is identical to the instruction across runs.** So the non-determinism is outside
+`NesCore::run_frame`.
+
+### PR-1's thirteen ROMs, 300 frames, no pack, each against `c895a93a`
+
+| comparison | set total | % | worst ROM | ROMs below |
+| --- | ---: | ---: | --- | ---: |
+| **`unl8` — the lot** | **+25 740** | **+0.00003** | `mm2` **+23 791, +0.0004 %** | 5 |
+| `unl8off` — the control | +100 260 | +0.0001 | `mm2` +33 608, +0.0006 % | 4 |
+| **the same binary twice** | **+163 501** | +0.0002 | `smb1` **+39 271, +0.0007 %** | 4 |
+
+The lot's worst ROM is **a fiftieth of the tolerance** and **half the noise floor's worst**; its set
+total is a sixth of the noise floor's. **No symbol moved by 100 000 on any of the thirteen ROMs in
+any of the three comparisons** — the project's own code does not appear at that threshold at all.
+
+(One annotation artefact, recorded because `callgrind-diff.py` prints it: `cg-unl8base/metroid.ann`'s
+`PROGRAM TOTALS` is 5 115 533 411 where its `.ir` says 5 115 533 538, a 127-instruction disagreement
+between `callgrind_annotate` and valgrind's own "Collected" line on that one file. It is 2.5 × 10⁻⁸
+of the run and the tool's own cross-check caught it, which is what that cross-check is for.)
+
+### Level 2: five games, 600 frames with their 3D packs, inputs pressed — **and both binaries run twice**
+
+Because `total` moved by megabytes and `core` did not, each binary was run **twice** at level 2. The
+four columns are the whole argument:
+
+**`core`, the emulation — deterministic to the instruction, and at or below the base on all five:**
+
+| game | base #1 | base #2 | lot #1 | lot #2 |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 11 515 129 187 | 11 515 129 187 | 11 515 129 187 | 11 515 129 187 |
+| `smb3` | 15 315 040 380 | 15 315 040 380 | 15 315 040 380 | 15 315 040 380 |
+| `zelda2` | 12 774 981 932 | 12 774 981 932 | 12 774 981 932 | 12 774 981 932 |
+| `mm2` | 12 037 249 629 | 12 037 249 629 | **12 037 230 685** | **12 037 230 685** |
+| `metroid` | 11 146 859 514 | 11 146 859 514 | **11 146 849 562** | **11 146 849 562** |
+
+**Three games identical to the instruction and two below it** (`mm2` −18 944, `metroid` −9 952),
+with each binary's two runs agreeing exactly. `ppu` and `apu` are **+0 to the instruction on all
+five games**, and `draw_list` on four of five (`smb3` +4 676).
+
+**`total` — not deterministic, and the sign of the lot's difference depends on which pair of runs
+is taken:**
+
+| game | base #1 | base #2 | lot #1 | lot #2 |
+| --- | ---: | ---: | ---: | ---: |
+| `smb1` | 13 587 511 857 | 13 589 145 693 | 13 590 593 879 | 13 588 859 527 |
+| `smb3` | 24 187 037 401 | 24 190 363 204 | 24 188 383 501 | 24 189 030 659 |
+| `zelda2` | 15 358 580 743 | 15 358 367 062 | 15 359 249 008 | 15 360 317 973 |
+| `mm2` | 18 976 676 951 | 18 976 730 984 | 18 976 634 448 | 18 976 615 339 |
+| `metroid` | 13 735 139 810 | 13 735 076 472 | 13 735 083 820 | 13 735 077 165 |
+
+* **The base against itself**: `smb3` **+3 325 803 (+0.014 %)**, `smb1` +1 633 836 (+0.012 %),
+  `zelda2` −213 681, `mm2` +54 033, `metroid` −63 338.
+* **base #1 against lot #1**: `smb1` **+3 082 022 (+0.023 %)**, `smb3` +1 346 100 (+0.006 %),
+  `zelda2` +668 265 (+0.004 %), `mm2` −42 503, `metroid` −55 990.
+* **base #2 against lot #2**: `smb1` **−286 166**, `smb3` **−1 332 545**, `zelda2` +1 950 911
+  (+0.013 %), `mm2` −115 645, `metroid` +693.
+
+So on one diagonal the lot is above the base on `smb1` and `smb3` and on the other it is **below
+both**, and the base's own spread on `smb3` (+0.014 %) is larger than the lot's difference on that
+game by either pairing.
+
+### The one figure over the tolerance, shown with its same-behaviour pair as the lot's rule requires
+
+**`smb1/total` +0.023 %** is the one figure of this campaign above +0.02 %. Its stage table:
+
+| `smb1`, lot #1 vs base #1 | |
+| --- | --- |
+| `core`, `ppu`, `apu`, `draw_list` | **+0, identical to the instruction** |
+| `convert` | +3 069 385 (+0.257 %) |
+| `lua_hooks` | +3 069 345 (+0.340 %) — the same number, so it is `convert`'s whole move |
+| the symbols above 300 000 | `luaH_getshortstr` **+3 570 176**, `luaH_set` **−343 975** |
+
+**The only two symbols above 300 000 in the lot's entire level-2 campaign are `luaH_getshortstr` and
+`luaH_set`** — Lua's `ltable.c` — on `smb1`, `smb3` and `zelda2`, and nothing of this project
+appears at all.
+
+**And the same-behaviour pair moves the same two functions, in both directions**: base against
+itself is `smb1` `luaH_set` **−687 324** and `luaH_getshortstr` **−680 490**, and `zelda2`
+`luaH_getshortstr` **+1 454 618** and `luaH_set` **+678 143**. So a megabyte of `ltable.c` moves
+between two runs of one binary.
+
+That is the finding MF-UNL-2 step 8, MF-UNL-3 step 7, MF-UNL-5 step 5, MF-UNL-6 step 5 and MF-UNL-7
+step 8 each recorded, and this lot adds the part they could not: the pair is **the same binary**
+rather than a differently-gated build of the same source, so there is no remaining reading under
+which the Lua column is the lot's. **The tolerance is not redefined**; what is recorded is where the
+figure comes from.
+
+### The decision
+
+| feature | decision | on what |
+| --- | :-: | --- |
+| `board-huang1` | **`default`** | |
+| `board-cony` | **`default`** | |
+| `board-91` | **`default`** | PR-1 worst ROM **+0.0004 %** against a noise floor of +0.0007 % on the same binary, set total **+25 740** against +163 501; level 2 **`core` identical to the instruction on three games and below the base on two**, `ppu` and `apu` +0 on all five, and the one `total` over the tolerance wholly `luaH_getshortstr` with a same-binary pair moving it further |
+
+**No board is parked**, and `parked-boards` keeps the one feature it has had since MF-VS.
+
+The three are measured **together**, which is the precedent every multi-board MF-UNL lot has set,
+and here the `core` column is what makes that honest rather than merely convenient: the lot's
+emulation is **identical to the base commit's to the instruction on three of the five level-2 games
+and below it on the other two**, so there is no per-board figure for one board to hide inside. The
+largest `core` move in the whole campaign is `mm2` **−18 944**, and it is negative.
+
+### Disk and machine
+
+G: went from 29 GiB free to **19 GiB** and never approached the 5 GiB floor; each build directory
+was deleted by `build-clean.sh` as soon as its binary was copied out, and the three tars were
+deleted once the campaign finished. No GPU ran: `bench-core` and the level-2 harness are both
+headless.
+
+[PROGRESS] MF-UNL-8 step 7/8 done: all three features stay in `default` — PR-1 worst ROM +0.0004 %
+against a +0.0007 % noise floor measured on the same binary twice, and level-2 `core` identical to
+the instruction on three games and below the base on two; the one `total` over tolerance is
+`luaH_getshortstr`, which the same binary moves further against itself.
