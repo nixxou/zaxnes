@@ -146,7 +146,23 @@ impl Ppu2C02 {
     pub(super) fn end_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
         if self.background_enabled() {
             let saved_latch = cart.as_deref().map_or(0, Cartridge::chr_latch_state);
+            // Lot MF-LEG-2, and the same contract as the latch beside it: the MMC5's per-tile
+            // state for extended attribute mode and the split is positioned per column by
+            // `capture_background_row` and has to come back afterwards, because the tile whose
+            // nametable byte was fetched at dot 337 has its attribute and pattern fetches on
+            // the **next** line (REQ-CORE-033). Always 0 on every other board.
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            let saved_capture = cart
+                .as_deref()
+                .map_or(0, Cartridge::background_capture_state);
+
             self.capture_background_row(line, cart);
+
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            if let Some(cartridge) = cart.as_deref_mut() {
+                cartridge.set_background_capture_state(saved_capture);
+            }
+
             restore_chr_latch(cart, saved_latch);
         }
     }
@@ -276,6 +292,17 @@ impl Ppu2C02 {
             }
 
             let nametable_address = 0x2000 | (table << 10) | (coarse_y << 5) | column;
+            // Lot MF-LEG-2: on the MMC5 with `board-mmc5-exattr-split`, the palette and the
+            // CHR bank of a background tile are per tile — mode 1 reads them from the `ExRAM`
+            // byte at the tile's own nametable offset, and the vertical split reads the tile
+            // itself from `ExRAM` — so the board's per-tile state has to be put on *this*
+            // column before its three reads below. It is restored after the loop, exactly as
+            // the MMC2/MMC4 latch is (REQ-CORE-033). No other board has anything to position.
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            if let Some(cartridge) = cart.as_deref_mut() {
+                cartridge.position_captured_background_tile(nametable_address, k, i32::from(y));
+            }
+
             let tile = self.read_nametable_inner(nametable_address, cart.as_deref());
             let attribute_address =
                 0x23C0 | (table << 10) | ((coarse_y & 0x1C) << 1) | (column >> 2);

@@ -612,6 +612,25 @@ pub trait Mapper {
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn on_tile_row_start(&mut self) {}
 
+    /// Opaque per-tile state of the two MMC5 substituting modes, for the tile capture to hold
+    /// while it walks a row out of display order and put back afterwards — the same
+    /// save/walk/restore REQ-CORE-033 and REQ-CORE-039 already make the capture do for the
+    /// MMC2 and MMC4 latches. Always 0 on every other board.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn background_capture_state(&self) -> u64 {
+        0
+    }
+
+    /// Restores what [`Mapper::background_capture_state`] took.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn set_background_capture_state(&mut self, _state: u64) {}
+
+    /// Positions that per-tile state on the tile the capture is about to read: its nametable
+    /// `address`, its screen tile `column` (which may be negative or above 31 under the
+    /// widescreen extension) and the screen `line` its top row is drawn on.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn position_captured_background_tile(&mut self, _address: u16, _column: i32, _line: i32) {}
+
     /// Writes a nametable byte the board serves itself.
     fn write_nametable(&mut self, _memory: &mut CartridgeMemory, _address: u16, _value: u8) {}
 

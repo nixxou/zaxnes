@@ -448,6 +448,32 @@ impl Mapper for Board {
         }
     }
 
+    /// One `Board` test rather than a `dispatch!`, for [`Board::read_nametable_from_vram`]'s
+    /// reason — and these three are on the **tile capture**'s path, which
+    /// `Ppu2C02::read_pattern_planes` sits on: the function lot MF-2 built
+    /// `read_nametable_inner`'s `#[inline(never)]` shield for.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn background_capture_state(&self) -> u64 {
+        match self {
+            Board::Mmc5(board) => board.background_capture_state(),
+            _ => 0,
+        }
+    }
+
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn set_background_capture_state(&mut self, state: u64) {
+        if let Board::Mmc5(board) = self {
+            board.set_background_capture_state(state);
+        }
+    }
+
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
+        if let Board::Mmc5(board) = self {
+            board.position_captured_background_tile(address, column, line);
+        }
+    }
+
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         dispatch!(self, b => b.write_nametable(memory, address, value));
     }

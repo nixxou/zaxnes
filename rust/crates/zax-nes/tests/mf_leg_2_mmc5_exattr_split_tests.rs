@@ -27,8 +27,10 @@
 // Tile numbers, bank numbers and pixel coordinates are all small.
 #![allow(
     clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
     clippy::cast_lossless,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::expect_used
 )]
 
 mod common;
@@ -793,4 +795,154 @@ fn mf_leg_2_the_split_registers_survive_a_savestate_round_trip() {
         fixture.core.pixel_frame_with_mask(),
         "$5200-$5202 come back with the state, and the frame is the one that was saved"
     );
+}
+
+// ------------------------------------------------------- the 3D view (REQ-CORE-037, SPEC-04)
+
+/// Asserts that **every pixel of every background tile record agrees with the 2D picture**: the
+/// records are what `zax-engine3d` builds its blocks from, so if a record's palette or pattern
+/// differed from the frame the 3D view and the 2D picture would show different colours for the
+/// same tile.
+///
+/// The check is pixel for pixel rather than palette for palette because the record carries both
+/// halves of the answer — `TileRecord::palette` and the two bit planes — and the two substituting
+/// modes move both: mode 1 the palette *and* the CHR bank, the split the tile itself *and* its
+/// attribute. A per-palette assertion would pass on a record that had taken the right palette
+/// from `ExRAM` and the wrong bank.
+fn assert_records_agree_with_the_picture(fixture: &mut TileFixture, what: &str) {
+    let batch = fixture.next_batch();
+    let records = batch.background();
+    assert_eq!(
+        30 * 32,
+        records.len(),
+        "{what}: a full frame with fine X 0 emits 32 records a row for 30 rows (REQ-CORE-038)"
+    );
+
+    let mut opaque = 0usize;
+    for record in &records {
+        for py in 0..8usize {
+            for px in 0..8usize {
+                let x = i32::from(record.x) + px as i32;
+                let y = i32::from(record.y) + py as i32;
+                if !(0..256).contains(&x) || !(0..240).contains(&y) {
+                    continue;
+                }
+
+                let pixel = record.displayed_pixel(px, py).expect("a tile position");
+                // Plane 1 of the test image is zero, so a pixel is colour 0 or colour 1 and the
+                // expected colour is the backdrop or entry 1 of the record's own sub-palette.
+                let expected = if pixel == 0 {
+                    BACKDROP
+                } else {
+                    (record.palette << 4) | 0x01
+                };
+                opaque += usize::from(pixel != 0);
+                assert_eq!(
+                    expected,
+                    pixel_at(&fixture.core, x as usize, y as usize),
+                    "{what}: the record at ({}, {}) disagrees with the picture at ({x}, {y})",
+                    record.x,
+                    record.y
+                );
+            }
+        }
+    }
+
+    assert!(
+        opaque > 1000,
+        "{what}: {opaque} opaque pixels is too few for the comparison to mean anything"
+    );
+}
+
+/// Extended attribute mode: the per-tile palette **and** the per-tile 4 KiB bank reach the tile
+/// records, so a 3D block is coloured as the 2D tile under it.
+///
+/// The `ExRAM` image gives every tile of the screen its own palette and its own bank — the
+/// palette cycling with the column and the bank with the row — so no two neighbouring blocks
+/// agree by accident and a record that had read the wrong `ExRAM` cell would show.
+#[test]
+fn mf_leg_2_mode_1_reaches_the_tile_records_with_the_same_palette_and_bank() {
+    let mut fixture = mmc5_fixture();
+    plain_background(&mut fixture, OPAQUE_TILE);
+
+    let mut ex_ram = [0u8; 1024];
+    for row in 0..30usize {
+        for column in 0..32usize {
+            let palette = (column % 4) as u8;
+            let bank = (row % CHR_BANKS_4K) as u8;
+            ex_ram[(row * 32) + column] = (palette << 6) | bank;
+        }
+    }
+    write_ex_ram(&mut fixture, 0, &ex_ram, 0x01);
+
+    assert_records_agree_with_the_picture(&mut fixture, "ExRAM mode 1");
+}
+
+/// The vertical split: the region's tiles, their `ExRAM` attribute and `$5202`'s bank reach the
+/// records too, so the 3D blocks of the split region show the split's artwork and not the
+/// ordinary background's.
+///
+/// `$5201` is a multiple of 8 here, and that is the lot's one honest limitation: a record is a
+/// whole 8x8 tile, so a region scrolled by a fraction of a tile straddles two `ExRAM` rows
+/// inside one band and no single record can carry both. The region's **tile** scroll reaches the
+/// records (the second half of this test moves it by one tile and checks the picture again); its
+/// fine scroll does not, and `docs/progress/MF-LEG-2.md` step 2 records that.
+#[test]
+fn mf_leg_2_the_split_reaches_the_tile_records_with_its_own_tiles() {
+    let mut fixture = mmc5_fixture();
+    plain_background(&mut fixture, OPAQUE_TILE);
+    arm_split(&mut fixture, false, 12, 0, 1);
+    // Every ExRAM cell its own tile, so each column and each row of the region differs.
+    write_ex_ram(
+        &mut fixture,
+        0,
+        &split_ex_ram(|row, column| (((row + column) % 15) + 1) as u8),
+        0x00,
+    );
+
+    assert_records_agree_with_the_picture(&mut fixture, "the split, $5201 = 0");
+
+    fixture.core.write_memory(0x5201, 0x08);
+    assert_records_agree_with_the_picture(&mut fixture, "the split, $5201 = 8");
+
+    fixture.core.write_memory(0x5200, 0x80 | 0x40 | 0x14); // Right side, threshold 20.
+    assert_records_agree_with_the_picture(&mut fixture, "the split, right side");
+}
+
+/// The two composed, which is the state *Bandit Kings of Ancient China* reaches: the records
+/// must agree with the picture when a line is partly the split's and partly mode 1's.
+#[test]
+fn mf_leg_2_the_two_modes_composed_reach_the_tile_records() {
+    let mut fixture = mmc5_fixture();
+    plain_background(&mut fixture, OPAQUE_TILE);
+    arm_split(&mut fixture, false, 8, 8, 2);
+    // Cells 0-7 of each row are tile numbers for the split; the rest are `AACC CCCC` bytes for
+    // mode 1, which reads the same 1 KiB the other way.
+    write_ex_ram(
+        &mut fixture,
+        0,
+        &split_ex_ram(|row, column| {
+            if column < 8 {
+                (((row + column) % 15) + 1) as u8
+            } else {
+                (((column % 4) as u8) << 6) | ((row % CHR_BANKS_4K) as u8)
+            }
+        }),
+        0x01,
+    );
+
+    assert_records_agree_with_the_picture(&mut fixture, "mode 1 and the split together");
+}
+
+/// And the counterpart that makes the three above worth having: with neither mode armed the
+/// records still agree, so the comparison is not passing because the capture and the picture
+/// share a bug.
+#[test]
+fn mf_leg_2_the_records_agree_with_the_picture_with_neither_mode_armed() {
+    let mut fixture = mmc5_fixture();
+    plain_background(&mut fixture, OPAQUE_TILE);
+    fixture.fill_vram(0x23C0, 64, 0xE4); // Palettes 0, 1, 2 and 3 across each quadrant row.
+    fixture.set_scroll(0, 0);
+
+    assert_records_agree_with_the_picture(&mut fixture, "neither mode armed");
 }

@@ -196,7 +196,85 @@ and on `zax-nes` alone with `--no-default-features`.
 The default build gains exactly one test over `ca1517dc` — the both-configuration one — and the
 feature build the nineteen of the new file beside it. The base commit's own three figures are
 re-measured against this tree at step 4, where the suites are run with both ROM roots set.
-- [ ] 2/6 the 3D view and the 2D-versus-3D palette agreement test
+- [x] 2/6 the 3D view and the 2D-versus-3D palette agreement test
+
+### 2/6 — the 3D view: the per-tile palette and the split's tiles in the records
+
+**Where the 3D conversion reads the per-tile palette.** `zax-engine3d` does not read the
+attribute table at all: a block's palette table is `tile.palette()` of the `TileRecord`
+(`draw_list.rs:481-487`, and `segmenter.rs:207`, `:259`, `:333`, `:376` group blocks by it), and
+the records come from `Ppu2C02::capture_background_row` (REQ-CORE-037), which reads each tile's
+nametable byte, its **attribute byte** and its two pattern planes through the inert path. So
+both overrides reach the converter through the capture, and **no hot path of the converter is
+touched for any game** — with the feature on or off.
+
+**The one thing the capture needed.** It walks a row **out of display order** at the end of the
+line, so the board's per-tile state — mode 1's `ExRAM` index, the split's column, row, tile and
+region flag — is whatever the last *rendered* fetch left. It therefore has to be positioned per
+captured column and then put back, and putting it back is not optional: the tile whose
+nametable byte was fetched at dot 337 has its attribute and pattern fetches on the **next**
+line and would otherwise find the capture's leftovers.
+
+That is exactly the save/walk/restore the capture already performs for the MMC2 and MMC4 latches
+(REQ-CORE-039, and REQ-CORE-033's "the emulation is identical whether or not the host registered
+a video callback"), so the three new hooks are that pair's shape without disturbing its
+contract — `Mmc5::chr_latch_state` stays the trait's 0:
+
+| hook | what it does |
+| --- | --- |
+| `Mapper::background_capture_state` | the per-tile state packed into one `u64` — six fields, 34 bits, which is why it is not an `i32` |
+| `Mapper::set_background_capture_state` | puts it back, in `end_capture_line` beside `restore_chr_latch` |
+| `Mapper::position_captured_background_tile(address, column, line)` | puts it on the tile about to be read |
+
+`Board`'s three forwarders are one `Board::Mmc5` test each and **not** a `dispatch!`, for
+`read_nametable_from_vram`'s reason squared: these sit on `Ppu2C02::read_pattern_planes`, the
+function lot MF-2 built `read_nametable_inner`'s `#[inline(never)]` shield for.
+
+`column` may be negative or above 31 — the widescreen extension captures `extra` columns on each
+side — and the split region is a property of the 32 columns the PPU draws, so a column outside
+them is never in it. `line` is the band's **top** screen line (`y`, which is `line - 1`), the one
+whose split row the band shows.
+
+**The one limitation, and it is in the code.** `Mmc5::split_capture` exists because the capture
+reads a tile's **eight rows at once** while a rendered line reads one: substituting the region's
+fine vertical scroll into all eight would collapse the tile to a single line, so the capture
+keeps the PPU's own low three address bits. The consequence is exact: the split's **tile** scroll
+reaches the 3D view and its **fine** scroll does not. A region scrolled by a fraction of a tile
+straddles two `ExRAM` rows inside one 8-pixel band, and no single 8x8 record can carry both — the
+same reason the capture emits one row per eight lines in the first place (REQ-CORE-037). The
+field's doc comment says so and the test below pins `$5201` to multiples of 8 and says why.
+
+**Not covered, and named rather than discovered later**: the widescreen margin decoders
+(`Ppu2C02::decode_margins` and `read_row_planes`) supply their own tile numbers and palettes out
+of the game's memory, so neither mode reaches them. It costs nothing today — the only MMC5 3D
+pack is *Castlevania III*'s, which uses neither mode — and a widescreen pack for *Just Breed* or
+a Koei title would need a decoder written against `ExRAM`, which is a lot of its own.
+
+**The tests**, four of them, and they are stronger than the brief's "2D-versus-3D palette
+agreement test on a synthetic frame" because the record carries **both** halves of the answer —
+the palette and the two bit planes — and the two modes move both. So
+`assert_records_agree_with_the_picture` checks all 960 records of a frame **pixel for pixel**
+against the 2D picture: a record that had taken the right palette from `ExRAM` and the wrong CHR
+bank would pass a palette-only comparison and fails this one. It also asserts the record count
+(30 x 32) and that more than a thousand pixels were opaque, so a frame that drew nothing cannot
+pass.
+
+| test | the frame it compares |
+| --- | --- |
+| `mode_1_reaches_the_tile_records_with_the_same_palette_and_bank` | mode 1 with the palette cycling by column and the bank by row, so no two neighbouring blocks agree by accident |
+| `the_split_reaches_the_tile_records_with_its_own_tiles` | the split at `$5201` = 0 and 8 and on both sides, every `ExRAM` cell its own tile |
+| `the_two_modes_composed_reach_the_tile_records` | the state *Bandit Kings of Ancient China* reaches: the same 1 KiB read as tile numbers inside the region and as `AACC CCCC` outside it |
+| `the_records_agree_with_the_picture_with_neither_mode_armed` | neither mode, so the comparison is not passing because the capture and the picture share a bug |
+
+**Checks at this step**: `cargo fmt -p zax-nes -p zax-harness --check` clean; clippy
+`--all-targets -- -D warnings` clean on both crates in `default`, with the feature and with
+`parked-boards`, and on `zax-nes` alone with `--no-default-features`.
+
+| `cargo test --release -p zax-nes -p zax-harness` | result |
+| --- | --- |
+| `default` | **1167 passed, 0 failed, 10 ignored** |
+| `--features zax-nes/board-mmc5-exattr-split` | **1190 passed, 0 failed, 10 ignored** |
+| `--features zax-nes/parked-boards` | **1228 passed, 0 failed, 10 ignored** |
 - [ ] 3/6 the report entry, `BOARD-FEATURES.md` and the Q tickets
 - [ ] 4/6 golden-core and the suites with both ROM roots
 - [ ] 5/6 the callgrind campaign

@@ -118,6 +118,20 @@ pub struct Mmc5 {
     /// [`Mmc5::reload_split_row`] for the one line of it this build had to choose.
     #[cfg(feature = "board-mmc5-exattr-split")]
     split_row: u8,
+    /// Whether the per-tile state above was positioned by the **tile capture** rather than by a
+    /// rendered fetch (see [`Mmc5::position_captured_tile`]).
+    ///
+    /// It changes one thing: the split's pattern fetch keeps the PPU's own low three address
+    /// bits instead of substituting the region's fine vertical scroll. The capture reads a
+    /// whole 8x8 tile — its eight rows at once, through
+    /// `Ppu2C02::read_pattern_planes` — and substituting one row number into all eight would
+    /// collapse the tile to a single line. The record it emits is therefore the split's tile as
+    /// a tile, which is what a 3D block is; the sub-tile offset of a fine-scrolled region is the
+    /// one thing the 3D view does not carry, and `docs/progress/MF-LEG-2.md` step 2 says so.
+    ///
+    /// Not in the savestate: the capture sets it and puts it back within one line.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    split_capture: bool,
     irq_target: i32,
     irq_enabled: bool,
     irq_pending: bool,
@@ -233,6 +247,8 @@ impl Mmc5 {
             split_tile: 0,
             #[cfg(feature = "board-mmc5-exattr-split")]
             split_row: 0,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            split_capture: false,
             irq_target: 0,
             irq_enabled: false,
             irq_pending: false,
@@ -609,6 +625,77 @@ impl Mmc5 {
         self.ex_ram[usize::from(self.ex_attr_index)]
     }
 
+    // ------------------------------------------- the tile capture (REQ-CORE-037, the 3D view)
+    //
+    // The tile records the 3D conversion is built from are emitted by
+    // `Ppu2C02::capture_background_row`, which walks the row **out of display order** at the end
+    // of the line and reads each tile's nametable byte, its attribute byte and its two pattern
+    // planes through the inert path. Both substituting modes are per tile, so the board's
+    // per-tile state has to be positioned per captured column — and then put back, because the
+    // tile whose nametable byte was fetched at dot 337 has its attribute and pattern fetches on
+    // the *next* line and would otherwise find the capture's leftovers.
+    //
+    // That is exactly the save/walk/restore the capture already performs for the MMC2 and MMC4
+    // latches (REQ-CORE-039, REQ-CORE-033: "the emulation is identical whether or not the host
+    // registered a video callback"), so these three methods are the same shape as
+    // `chr_latch_state` / `advance_chr_latch` / `set_chr_latch_state` without disturbing that
+    // pair's own contract — `Mmc5::chr_latch_state` stays the trait's 0.
+
+    /// The per-tile state of the two substituting modes, packed so that the capture can hold it
+    /// in one value. `u64` and not `i32`: the six fields are 34 bits.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn capture_state(&self) -> u64 {
+        u64::from(self.ex_attr_index)
+            | (u64::from(self.split_tile) << 10)
+            | (u64::from(self.split_row) << 20)
+            | (u64::from(self.split_column) << 28)
+            | (u64::from(self.split_in_region) << 33)
+            | (u64::from(self.split_capture) << 34)
+    }
+
+    /// Puts back what [`Mmc5::capture_state`] took.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn restore_capture_state(&mut self, state: u64) {
+        self.ex_attr_index = (state & 0x03FF) as u16;
+        self.split_tile = ((state >> 10) & 0x03FF) as u16;
+        self.split_row = ((state >> 20) & 0xFF) as u8;
+        self.split_column = ((state >> 28) & 0x1F) as u8;
+        self.split_in_region = (state >> 33) & 1 != 0;
+        self.split_capture = (state >> 34) & 1 != 0;
+    }
+
+    /// Positions the per-tile state on the tile the capture is about to read: `address` is its
+    /// nametable address, `column` its screen tile column and `line` the screen line its top
+    /// row is drawn on.
+    ///
+    /// `column` may be negative or above 31 — the widescreen extension captures `extra` columns
+    /// on each side — and the split region is a property of the 32 columns the PPU draws, so a
+    /// column outside them is never in it.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn position_captured_tile(&mut self, address: u16, column: i32, line: i32) {
+        self.ex_attr_index = address & 0x03FF;
+        if !self.split_enabled() {
+            return;
+        }
+
+        // The page's row for that line, as `Mmc5::reload_split_row` computes it for a rendered
+        // one. `rem_euclid`, because the row of the band the capture emits is the one drawn on
+        // its **top** line, which is `line - 1` for the first band of a frame.
+        let row = (line + i32::from(self.split_scroll)).rem_euclid(240);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..240.
+        {
+            self.split_row = row as u8;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..32.
+        let column5 = (column & 0x1F) as u8;
+        self.split_column = column5;
+        self.split_in_region = (0..32).contains(&column) && self.split_covers(column5);
+        self.split_capture = true;
+        if self.split_in_region {
+            self.split_tile = ((u16::from(self.split_row) & 0xF8) << 2) | u16::from(column5);
+        }
+    }
+
     /// The byte the board puts on the nametable data bus for `address`, with the two features
     /// on: the split's tile and attribute, mode 1's attribute, and otherwise the byte the PPU
     /// would have read on its own.
@@ -730,9 +817,15 @@ impl Mmc5 {
             // "$5202: all eight bits select a 4 KB CHR bank", with the page's "and the lowest 3
             // address bits of the pattern data" substituted from the split's own row, which is
             // the region's fine vertical scroll (Mesen `MMC5.h:513`).
+            //
+            // The tile capture reads the tile's eight rows at once and so keeps the PPU's own
+            // three bits: see [`Mmc5::split_capture`].
             let bank = usize::from(self.split_bank);
-            let fine_y = usize::from(self.split_row & 0x07);
-            let within = (usize::from(address) & 0x0FF8) | fine_y;
+            let within = if self.split_capture {
+                usize::from(address) & 0x0FFF
+            } else {
+                (usize::from(address) & 0x0FF8) | usize::from(self.split_row & 0x07)
+            };
             return Some((bank << 12) | within);
         }
 
@@ -887,6 +980,7 @@ impl Mapper for Mmc5 {
             self.split_in_region = false;
             self.split_tile = 0;
             self.split_row = 0;
+            self.split_capture = false;
         }
 
         // All three are derived from registers the block already carries, so no older block has
@@ -991,6 +1085,7 @@ impl Mapper for Mmc5 {
             self.split_in_region = false;
             self.split_tile = 0;
             self.split_row = 0;
+            self.split_capture = false;
         }
         self.irq_target = 0;
         self.irq_enabled = false;
@@ -1225,6 +1320,21 @@ impl Mapper for Mmc5 {
         if self.split_enabled() {
             self.reload_split_row();
         }
+    }
+
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn background_capture_state(&self) -> u64 {
+        self.capture_state()
+    }
+
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn set_background_capture_state(&mut self, state: u64) {
+        self.restore_capture_state(state);
+    }
+
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
+        self.position_captured_tile(address, column, line);
     }
 
     fn read_nametable(&self, _memory: &CartridgeMemory, address: u16) -> u8 {

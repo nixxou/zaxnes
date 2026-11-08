@@ -1363,6 +1363,30 @@ impl Cartridge {
         self.board.on_tile_row_start();
     }
 
+    /// Opaque per-tile state of the MMC5's two substituting modes, which the tile capture holds
+    /// while it walks a background row out of display order and puts back afterwards
+    /// (REQ-CORE-033). Always 0 on every other board — see
+    /// [`Mapper::background_capture_state`].
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    #[must_use]
+    pub fn background_capture_state(&self) -> u64 {
+        self.board.background_capture_state()
+    }
+
+    /// Restores what [`Cartridge::background_capture_state`] took.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    pub fn set_background_capture_state(&mut self, state: u64) {
+        self.board.set_background_capture_state(state);
+    }
+
+    /// Positions that state on the tile the capture is about to read (see
+    /// [`Mapper::position_captured_background_tile`]).
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    pub fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
+        self.board
+            .position_captured_background_tile(address, column, line);
+    }
+
     /// Writes a nametable byte the cartridge serves itself.
     pub fn write_nametable(&mut self, address: u16, value: u8) {
         self.board.write_nametable(&mut self.memory, address, value);
