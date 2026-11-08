@@ -231,7 +231,7 @@ bullets asks for something no page states. The ticket also holds five things the
       clippy `-D warnings` in the six configurations.
 - [x] **6/8** the callgrind campaign against `01850f36`, the feature decision per board and the
       three `BOARD-FEATURES.md` rows.
-- [ ] **7/8** golden-core byte-identical over the 98 originals, and the full
+- [x] **7/8** golden-core byte-identical over the 98 originals, and the full
       `--include-ignored --no-fail-fast` suite with both ROM roots.
 - [ ] **8/8** Q-171, the census note, the journal, the close.
 
@@ -615,3 +615,39 @@ reporting the same spread.
 lot's row is recorded as back among the ones whose figure is the instrument's.
 
 [PROGRESS] MF-UNL-11 step 6/8 done: the campaign
+
+## Step 7 — golden-core, and the full run with both ROM roots
+
+### golden-core over the 98 commercial originals, 1 200 frames each
+
+    zax-harness-<label> golden-core /mnt/g/3dsen/test-originals gc98-<label>.jsonl 1200
+
+| | |
+| --- | --- |
+| `01850f36` (`mfunl11-0-base`) against the lot (`mfunl11-1-lot`) | **byte-identical** (`cmp`, not just the digest) |
+| the digest | `md5 f79e7df842c3ee43e7d9b67861a927b5` |
+
+**That is the digest MF-UNL-2 through MF-UNL-10 all recorded.** Ten lots, and not one pixel of a
+commercial original has moved — which is what the lot brief asks of this one in those words:
+"golden-core over the 98 originals must be byte-identical to the base commit's."
+
+It is the measurement that turns the lot's two structural claims into facts rather than
+intentions. Three variants were added to `IrqBoard`, `Mmc3Board` grew five widened `cfg` lists and
+two accessors gained a caller, `BankWindows` gained a method, and `IrqBoard::try_read_prg`'s `cfg`
+list gained an entry — every one of those is code that **existing** boards compile. 98 games at
+1 200 frames each, byte-identical on every field golden-core records, is what separates "the
+boards were added beside the others" from "one of them moved".
+
+### The full run with both ROM roots
+
+    ZAXNES_ROMS=G:/3dsen/demo/roms
+    ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+    cargo test --release --no-fail-fast -p zax-nes -p zax-harness -- --include-ignored
+
+**1 152 passed, 0 failed, 0 ignored.** The same command without the two variables and without
+`--include-ignored` is **1 143 passed, 0 failed, 9 ignored** — so the nine ROM-driven tests really
+ran rather than passing vacuously, which is the check the brief asks for.
+
+1 152 against MF-UNL-10's 1 127 is this lot's **25** tests.
+
+[PROGRESS] MF-UNL-11 step 7/8 done: golden-core and the full run
