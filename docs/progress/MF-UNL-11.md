@@ -223,7 +223,7 @@ bullets asks for something no page states. The ticket also holds five things the
 
 - [x] **0/8** the plan — this note.
 - [x] **1/8** `board-215`: the board, its registry wiring and the eight-pattern tests.
-- [ ] **2/8** `board-208`: the board, the 256-byte table and the protection tests.
+- [x] **2/8** `board-208`: the board, the 256-byte table and the protection tests.
 - [ ] **3/8** `board-219`: the board, the extended mode and its tests.
 - [ ] **4/8** §7.1's three common things, part one: the four sweeps over `SUPPORTED_MAPPERS` in the
       six configurations, and a save-state round-trip per board with its registers dirtied.
@@ -288,3 +288,65 @@ holds an `Mmc3`, counter included, which is mapper 114's reason in the same word
 clippy `-D warnings` clean on `zax-nes`.
 
 [PROGRESS] MF-UNL-11 step 1/8 done: board-215
+
+## Step 2 — `board-208`, the Gouder board and its 256-byte table
+
+`Mmc3Gouder208` (`…/mappers/mmc3_gouder208.rs`): an `Mmc3` held with its PRG bank lines
+disconnected — the board banks **32 KiB** at a time, which is `Mmc3Txc189`'s shape — four ports
+below `$8000` and the page's `static uint8 lut[256]` as a `const`. One boxed `IrqBoard` variant.
+
+| port | mask | what |
+| --- | --- | --- |
+| `$4800-$4FFF`, `$6800-$6FFF` w | `$D800` | `..MP ...P` — the 32 KiB page in bits 4 and 0, mirroring in bit 5. Initial value **`$11`** |
+| `$5000-$57FF` w | `$F800` | the index into the 256-byte table the next `$5800` write uses |
+| `$5800-$5FFF` w | `$F800` | the four protection registers, `datum ^ table[index]`, picked by the two low address bits |
+| `$5800-$5FFF` r | `$F800` | the same four registers |
+
+**`$D800` is exactly the page's two windows and nothing else**: A14, A12 and A11 are decoded and
+A13 is not, so `$4800` and `$6800` both match while `$5800` and `$7800` — A11 set, A12 clear — do
+not. One mask for the pair rather than two tests.
+
+### The three things the page settles that §7.2 does not
+
+1. **`$A000` is inert** (Q-171). The page's register list has no `$A000` section and puts
+   "mirroring control" among the board's own additional registers, so `force_ignore_a000` — built
+   for mapper 14 — gets its second caller. Submapper 1 says the opposite in its own words
+   ("mirroring … performed using the normal MMC3 registers") and so does not call it.
+2. **The index is the written value**, not the address: "specifies the index into the 256-byte
+   table", a 256-entry table and an 8-bit datum against a 2 KiB window.
+3. **The `board_memory_sizes` row** gives submapper 0 `prg_ram: Some(0)`, because `$6800-$6FFF`
+   *is* the board's decode of that window — the arm 114, 115 and 182 are already on.
+   `Cartridge::cpu_write` returns at `$6000-$7FFF` whenever the cartridge has any PRG-RAM, so
+   without the row the register could not be written at all; the register answering there **is**
+   the assertion. Submapper 1 is excluded from the arm, having no register there.
+
+### Power-on is in `reset` and not in `new`
+
+"The initial value of this register is `$11`" — page 3, **vertical** mirroring — and a board
+cannot set the mirroring from `new`, which takes `&CartridgeMemory`. `Cartridge::create` ends with
+`cartridge.reset()`, and `Cartridge::reset` puts the header's mirroring back immediately before
+calling the board's, so `Mmc3Gouder208::reset` is the right and only place for it.
+
+### The seven tests
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_208_xors_a_write_against_the_pages_own_table` | **all 256 indices** read back through the mechanism, plus the XOR being a XOR (`$FF` complements, the entry itself stores zero), plus the complement of §7.2's missing bullet: the same datum under a different index stores a different byte |
+| `…_keeps_four_protection_registers_under_the_two_low_address_bits` | four registers, and `$5FFC-$5FFF` aliasing `$5800-$5803` |
+| `…_banks_32_kib_and_drives_the_mirroring_from_4800_and_6800` | the initial `$11`, bit 4 above bit 0, both windows, the mirroring bit, `$A000` inert, and `$4000`/`$5800`/`$7800`/`$6000` not decoded |
+| `…_keeps_the_mmc3s_chr_banking_and_loses_its_prg_banking` | the six CHR windows and their swap; `R6`/`R7` reaching nothing |
+| `…_submapper_1_takes_its_one_page_from_the_mmc3s_r6` | `R6 >> 2`, the chip's mirroring back, the board's four ports dead and `$5800` reading open bus |
+| `req_core_095_mapper_208_gives_submapper_0_no_prg_ram_and_leaves_submapper_1_the_headers` | the `board_memory_sizes` row from both sides |
+| `req_core_114_mapper_208_keeps_the_mmc3s_scanline_counter` | the four IRQ ports "identical to the respective MMC3 registers", on both submappers |
+
+**The table test does not copy the `const`.** It rebuilds the 256 entries from the *structure* the
+page's array has — four groups of four rows, one four-byte cycle for a group's even rows and
+another for its odd ones, written twice across the live half — so eight four-byte cycles in the
+test stand against 256 literals in the board, and a slip in either copy fails. The sixteen first
+bytes of the array, `59 59 59 59 00 08 00 08 59 59 59 59 01 09 01 09`, are that structure read
+down the left edge.
+
+`cargo test --release -p zax-nes`: all suites pass, `mapper_tests` 358 → **365**. fmt clean,
+clippy `-D warnings` clean.
+
+[PROGRESS] MF-UNL-11 step 2/8 done: board-208

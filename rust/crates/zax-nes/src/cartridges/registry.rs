@@ -28,6 +28,8 @@ use super::mappers::MagicFloor;
 use super::mappers::Mapper091;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
+#[cfg(feature = "board-208")]
+use super::mappers::Mmc3Gouder208;
 #[cfg(feature = "board-263")]
 use super::mappers::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
@@ -329,6 +331,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     206,
     #[cfg(feature = "board-taito-x1")]
     207,
+    // The unnamed Gouder board of the Street Fighter IV backport, an MMC3 clone with a 256-byte
+    // protection lookup table (MF-UNL-11 step 2).
+    #[cfg(feature = "board-208")]
+    208,
     #[cfg(feature = "board-jy-asic")]
     209,
     210,
@@ -492,6 +498,21 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // question and the header decides, which is mapper 97's precedent in this function.
         #[cfg(feature = "board-mmc3-scramble")]
         114 | 115 | 182 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // Mapper 208, submapper 0: the PRG bank and mirroring register answers at **$6800-$6FFF**
+        // as well as at $4800-$4FFF, so there is no RAM behind that window -- the same arm, and
+        // the same reason, as 114, 115 and 182 above (MF-UNL-11 step 2). `Cartridge::cpu_write`
+        // returns at $6000-$7FFF whenever the cartridge has any PRG-RAM, so without this row the
+        // register at $6800 could not be written at all.
+        //
+        // **Submapper 1 is deliberately excluded**: "There are no additional registers" on the
+        // copyright-stripped hack, so nothing forces the question there and the header decides --
+        // mapper 97's precedent in this function, and the same tightening mapper 4's own arm above
+        // makes for the MMC6.
+        #[cfg(feature = "board-208")]
+        208 if !(header.is_nes20 && header.submapper == 1) => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -1414,6 +1435,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // paragraph that settles it.
         #[cfg(feature = "board-189")]
         189 => Board::IrqBoard(IrqBoard::Mmc3Txc189(Mmc3Txc189::new(memory))),
+        // MF-UNL-11 step 2: the unnamed Gouder board of the Street Fighter IV backport, an
+        // MMC3 clone whose PRG-ROM is banked in 32 KiB amounts from a register at $4800/$6800,
+        // with a 256-byte protection lookup table behind four registers at $5800-$5FFF.
+        // Submapper 1 is the copyright-stripped hack, which has none of those registers and takes
+        // its one 32 KiB page from the chip's own R6 instead -- so there is nothing to refuse.
+        #[cfg(feature = "board-208")]
+        208 => Board::IrqBoard(IrqBoard::Mmc3Gouder208(Box::new(Mmc3Gouder208::new(
+            memory, mapper,
+        )))),
         // MF-UNL-11 step 1: the Sugar Softec UNL-8237 and UNL-8237A, an MMC3 clone whose
         // register addresses and bank indices are permuted by one of eight patterns `$5007`
         // selects at run time, with outer PRG and CHR banks at `$5001` and an NROM-like PRG

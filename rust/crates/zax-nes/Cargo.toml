@@ -69,6 +69,7 @@ default = [
     "board-cony",
     "board-91",
     "board-215",
+    "board-208",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -195,6 +196,21 @@ board-189 = []
 # `BankWindows::remap_chr_banks`, `remap_prg_banks`'s counterpart on the CHR table, which $5000
 # bit 6's "replace PRG A17 **and CHR A17** from the MMC3" needs.
 board-215 = []
+
+# Mapper 208, the unnamed **Gouder** board of the 快打傳説 *Street Fighter IV* backport (MF-UNL-11
+# step 2): an MMC3 clone whose PRG-ROM is banked in **32 KiB** amounts by a register at
+# $4800-$4FFF and $6800-$6FFF -- which also drives the mirroring, the chip's $A000 being inert --
+# with a **256-byte protection lookup table**: an index at $5000-$57FF, and four registers at
+# $5800-$5FFF that latch the CPU datum **XORed with the indexed entry** and answer a read of the
+# same window. One original title, and the page says so: "This mapper is used on exactly one known
+# game."
+#
+# One boxed `IrqBoard` variant holding an `Mmc3`, five register bytes and a 256-byte `const`.
+# Submapper 1 is the copyright-stripped hack, which has none of those registers: its one 32 KiB
+# page is the chip's own R6 shifted right twice, and its mirroring and IRQ are the chip's. The
+# `board_memory_sizes` row gives submapper 0 no PRG-RAM, because its $6800 register *is* the
+# board's decode of that window.
+board-208 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

@@ -71,6 +71,8 @@ mod mmc2;
 mod mmc3;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
+#[cfg(feature = "board-208")]
+mod mmc3_gouder208;
 #[cfg(feature = "board-263")]
 mod mmc3_kof97;
 #[cfg(feature = "board-268")]
@@ -202,6 +204,8 @@ pub use mmc3::{McAcc, Mmc3};
 pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs303};
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
+#[cfg(feature = "board-208")]
+pub use mmc3_gouder208::Mmc3Gouder208;
 #[cfg(feature = "board-263")]
 pub use mmc3_kof97::Mmc3Kof97;
 #[cfg(feature = "board-268")]

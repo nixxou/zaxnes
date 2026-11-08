@@ -8,6 +8,8 @@ use super::JyCompany;
 use super::Mapper091;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
+#[cfg(feature = "board-208")]
+use super::Mmc3Gouder208;
 #[cfg(feature = "board-263")]
 use super::Mmc3Kof97;
 #[cfg(feature = "board-mmc3-multicart")]
@@ -179,6 +181,15 @@ pub enum IrqBoard {
     /// grow nothing.
     #[cfg(feature = "board-215")]
     Mmc3Unl8237(Box<Mmc3Unl8237>),
+    /// iNES mapper 208, the unnamed Gouder board of the Street Fighter IV backport (MF-UNL-11
+    /// step 2): an MMC3 clone banking PRG-ROM 32 KiB at a time from a register of its own, with a
+    /// **256-byte protection lookup table** behind four registers at `$5800-$5FFF`.
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// its own register file, so inline it would set this enum's size. `try_read_prg` -- the
+    /// protection read -- is a method this variant already forwards for mappers 121 and 187.
+    #[cfg(feature = "board-208")]
+    Mmc3Gouder208(Box<Mmc3Gouder208>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -316,6 +327,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Outer($b) => $body,
             #[cfg(feature = "board-215")]
             IrqBoard::Mmc3Unl8237($b) => $body,
+            #[cfg(feature = "board-208")]
+            IrqBoard::Mmc3Gouder208($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]

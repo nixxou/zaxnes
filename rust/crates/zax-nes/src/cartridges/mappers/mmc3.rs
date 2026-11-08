@@ -683,7 +683,8 @@ impl<
         feature = "board-huang1",
         feature = "board-mmc3-scramble",
         feature = "board-189",
-        feature = "board-215"
+        feature = "board-215",
+        feature = "board-208"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
@@ -702,7 +703,10 @@ impl<
 
     /// One of the eight bank registers, for the board above. `index` is masked to the eight the
     /// chip has, which is what `$8000`'s own three bits do.
-    #[cfg(feature = "board-268")]
+    ///
+    /// **The second caller is mapper 208's submapper 1** (MF-UNL-11 step 2), whose page makes its
+    /// one 32 KiB PRG page "the bank register value SHR 2" of the chip's own `R6`.
+    #[cfg(any(feature = "board-268", feature = "board-208"))]
     pub(crate) const fn bank_register(&self, index: usize) -> u8 {
         self.bank[index & 0x07]
     }
@@ -752,7 +756,12 @@ impl<
     /// 2 ("MMC3C with hard-wired mirroring"), a four-screen header and the TxSROM reach it at load.
     /// This board is none of the three and carries no such submapper, so the board that holds the
     /// chip sets it — the shape [`Mmc3Board::force_irq_revision_a`] above already has.
-    #[cfg(feature = "board-huang1")]
+    ///
+    /// **Mapper 208 is the second caller** (MF-UNL-11 step 2): its page's register list has no
+    /// `$A000` section and puts "mirroring control" among the board's own additional registers, so
+    /// the chip's one mirroring register drives nothing there either. Its submapper 1 says the
+    /// opposite in its own words and so does not call this (Q-171).
+    #[cfg(any(feature = "board-huang1", feature = "board-208"))]
     pub(crate) fn force_ignore_a000(&mut self) {
         self.ignore_a000 = true;
     }
