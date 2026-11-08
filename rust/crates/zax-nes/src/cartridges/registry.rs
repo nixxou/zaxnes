@@ -18,6 +18,8 @@ use super::mappers::IremLrog017;
 use super::mappers::Jv001;
 #[cfg(feature = "board-jy-asic")]
 use super::mappers::JyCompany;
+#[cfg(feature = "board-218")]
+use super::mappers::MagicFloor;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
 #[cfg(feature = "board-263")]
@@ -301,6 +303,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     210,
     #[cfg(feature = "board-jy-asic")]
     211,
+    #[cfg(feature = "board-218")]
+    218,
     225,
     228,
     #[cfg(feature = "board-small-boards")]
@@ -721,6 +725,21 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-sachen-8reg")]
         150 | 243 => BoardMemorySizes {
             prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // nesdev ("INES Mapper 218"): "There is no CHR-ROM or CHR-RAM on the cartridge. Instead,
+        // the console's internal 2KiB nametable RAM is mapped as CHR-RAM", and "the cartridge
+        // board only contains a single PRG-ROM chip (up to 32KiB)" beside a CIC.
+        //
+        // So the board has **2 KiB of CHR-RAM and no PRG-RAM**, and both figures are the page's
+        // own rather than anything a header can say: byte 5 of an iNES 1.0 header is the CHR-*ROM*
+        // size, REQ-CORE-012's CHR-RAM default is 8 KiB, and byte 8 cannot be trusted. The 2 KiB
+        // is the console's nametable RAM, which this board maps into the pattern tables as well --
+        // see `MagicFloor`'s own note on why it is held here (MF-UNL-7 step 5).
+        #[cfg(feature = "board-218")]
+        218 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: Some(MagicFloor::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 193"), NTDEC's TC-112: "Range,Mask: $6000-7FFF, $E007", which
@@ -1157,6 +1176,13 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // window at $6000-$7FFF, which is `Mapper::prg_ram_window`.
         #[cfg(feature = "board-178")]
         178 => Board::DecodeBoard(DecodeBoard::WaixingFs305(WaixingFs305::new(memory))),
+        // MF-UNL-7 step 5: the single-chip homebrew board of *Magic Floor*, whose whole content
+        // is a PRG-ROM chip -- no register, no latch, no bank line and **no CHR memory**. The
+        // header's byte 6 picks which PPU address line drives CIRAM A10, and the 2 KiB of CIRAM
+        // answers the pattern tables and the nametables both; `MagicFloor`'s own note has why that
+        // 2 KiB lives on the cartridge's side of the connector here.
+        #[cfg(feature = "board-218")]
+        218 => Board::DecodeBoard(DecodeBoard::MagicFloor(MagicFloor::new(memory))),
         // MF-VS step 4: the VS. System board, whose one register is bit 2 of a `$4016` write --
         // a CPU register, forwarded here by `NesBus::write_internal` for a VS image and by
         // nothing else.

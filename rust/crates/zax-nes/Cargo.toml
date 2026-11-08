@@ -62,6 +62,7 @@ default = [
     "board-112",
     "board-193",
     "board-298",
+    "board-218",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -562,6 +563,25 @@ board-193 = ["board-namcot108"]
 # write to $F003 and nothing anywhere else, and **no savestate byte** -- the flag comes from the
 # mapper number, so the block of mappers 21/22/23/25/27 is unchanged.
 board-298 = []
+
+# Mapper 218, the single-chip homebrew board of *Magic Floor* and *Starfight* (MF-UNL-7 step 5) --
+# the only board in this build with **no register, no latch, no bank line and no CHR memory**.
+#
+# "There is no CHR-ROM or CHR-RAM on the cartridge. Instead, the console's internal 2KiB nametable
+# RAM is mapped as CHR-RAM", and the board "can be used in four configurations by wiring CIRAM A10
+# to one of the PPU A10..A13 address lines" -- which the header's byte 6 declares, its four-screen
+# bit picking the pair and its mirroring bit picking within it. Every access, pattern table or
+# nametable, lands at `((PPU A<line>) << 10) | (PPU A9..A0)`: one expression, because that is the
+# wiring.
+#
+# The 2 KiB is held as the cartridge's CHR-RAM and the nametables are answered through
+# `Mapper::read_nametable`, the GTROM's shape (MF-6c step 9): one memory has to answer both
+# windows, and `Mapper::ppu_peek` cannot reach the PPU's own VRAM. Which side of the connector
+# CIRAM sits on is invisible to a game; that the pattern tables and the nametables are the same
+# 2 KiB is not, and it is what the board exists for. One `DecodeBoard` variant, the **fifth**
+# distinct body of the `read_nametable` dispatch of Q-123 and the second inside that enum, so
+# `Board`'s own jump table does not grow. Implies `board-decode-boards`.
+board-218 = ["board-decode-boards"]
 
 # Mappers 137, 138, 139 and 141, the Sachen **8259** -- one chip with four wirings (MF-UNL-7
 # step 1). An index port at $4100 and a data port at $4101 under mask $C101, three bits wide, the

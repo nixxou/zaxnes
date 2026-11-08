@@ -19,6 +19,7 @@
     feature = "board-163",
     feature = "board-178",
     feature = "board-190",
+    feature = "board-218",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-nina03",
@@ -39,6 +40,8 @@ use super::ChrWindowBoard;
 use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::Jv001;
+#[cfg(feature = "board-218")]
+use super::MagicFloor;
 use super::Mapper;
 #[cfg(feature = "board-nina03")]
 use super::Nina03;
@@ -187,6 +190,11 @@ pub enum DecodeBoard {
     /// Mappers 137, 138, 139 and 141, the Sachen 8259 — one chip with four wirings.
     #[cfg(feature = "board-sachen8259")]
     Sachen8259(Sachen8259),
+    // Appended by MF-UNL-7 step 5: the first board of this enum with **no register at all**, and
+    // the second after mapper 111 to serve its own nametables.
+    /// Mapper 218, the single-chip homebrew board of *Magic Floor*.
+    #[cfg(feature = "board-218")]
+    MagicFloor(MagicFloor),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -231,6 +239,8 @@ macro_rules! inner {
             DecodeBoard::WaixingFs305($b) => $body,
             #[cfg(feature = "board-sachen8259")]
             DecodeBoard::Sachen8259($b) => $body,
+            #[cfg(feature = "board-218")]
+            DecodeBoard::MagicFloor($b) => $body,
         }
     };
 }
@@ -382,8 +392,13 @@ impl Mapper for DecodeBoard {
     /// **And the Sachen 8259 in MF-UNL-7 step 1**, whose R7 mode 2 is `(0,1,1,1)` — one table on
     /// CIRAM page 0 and the other three on page 1, which is the eight-register ASIC's mode 0 read
     /// the other way round and the same §4.5 cheap level.
+    ///
+    /// **And mapper 218 in MF-UNL-7 step 5**, which answers `SERVED_BY_CARTRIDGE` for all four
+    /// tables always: its 2 KiB *is* the console's nametable RAM, and the board maps the same
+    /// 2 KiB into the pattern tables.
     #[cfg(any(
         feature = "board-111",
+        feature = "board-218",
         feature = "board-sachen-8reg",
         feature = "board-sachen8259"
     ))]
@@ -396,13 +411,18 @@ impl Mapper for DecodeBoard {
     /// hold two sets of four distinct tables where this core's VRAM holds one. Reached only
     /// behind a `SERVED_BY_CARTRIDGE` answer from [`DecodeBoard::nametable_page`] above, so a
     /// board that does not serve its own nametables never calls either.
-    #[cfg(feature = "board-111")]
+    ///
+    /// **Mapper 218 joins it in MF-UNL-7 step 5**, and it is the fifth distinct body of that
+    /// dispatch in the core and the second inside this enum — so `Board::read_nametable`'s own
+    /// jump table does not grow by an entry, which is what MF-6c step 7 established for a board
+    /// joining here.
+    #[cfg(any(feature = "board-111", feature = "board-218"))]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
     }
 
-    /// The counterpart, for the same board and the same reason.
-    #[cfg(feature = "board-111")]
+    /// The counterpart, for the same two boards and the same reason.
+    #[cfg(any(feature = "board-111", feature = "board-218"))]
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_nametable(memory, address, value));
     }

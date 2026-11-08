@@ -537,6 +537,11 @@ impl Cartridge {
             // and "INES Mapper 137"). §4.5's cheap level again: a page override and not a
             // `read_nametable` body. All four are in the latch whatever `board-sachen8259` says,
             // for mapper 68's reason above.
+            // MF-UNL-7 step 5 adds mapper 218, the Magic Floor board, which answers
+            // `SERVED_BY_CARTRIDGE` for all four tables always: its 2 KiB *is* the console's
+            // nametable RAM and the board maps the same 2 KiB into the pattern tables, so one
+            // memory has to answer both windows (nesdev, "INES Mapper 218"). The number is in the
+            // latch whatever `board-218` says, for mapper 68's reason above.
             nametable_pages_vary: matches!(
                 mapper,
                 5 | 19
@@ -557,6 +562,7 @@ impl Cartridge {
                     | 207
                     | 209
                     | 211
+                    | 218
                     | 243
             ),
             bus_conflicts,

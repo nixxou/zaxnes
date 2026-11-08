@@ -46,7 +46,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **2/9** — `board-112`: the 206 with the page's three ports and its permuted register order.
 - [x] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
 - [x] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
-- [ ] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
+- [x] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
 - [ ] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
 - [ ] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
@@ -392,3 +392,102 @@ configurations (default, `--no-default-features`, `--features parked-boards`,
 features; 301/0/0 and 57/0/0 with `parked-boards`. The three latch sweeps pass in every one, and
 `mf_5a_every_board_that_moves_on_a_cpu_cycle_is_latched` is what would have caught the number
 missing from `clocks_on_cpu_cycle`.
+
+---
+
+## Step 5 — mapper 218, Magic Floor: the board with no CHR memory
+
+`board-218`, in `default`, implying `board-decode-boards`. One new module,
+`cartridges/mappers/magic_floor.rs`, one new `DecodeBoard` variant, two forwards that enum gains
+(`read_nametable` and `write_nametable`, which it had for mapper 111 alone), the number in
+`nametable_pages_vary`, one `SUPPORTED_MAPPERS` entry, one `create_board` arm and one
+`board_memory_sizes` row. **No `Board` variant.**
+
+### The whole board
+
+> There is no CHR-ROM or CHR-RAM on the cartridge. Instead, the console's internal 2KiB nametable
+> RAM is mapped as CHR-RAM.
+
+and "the cartridge board only contains a single PRG-ROM chip (up to 32KiB)" beside a CIC. **No
+register, no latch, no bank line and no CHR memory** — the only board in this build with nothing a
+game can write, which is why the census's own test line for it ends "**there is no CHR bank
+register to test**, which is the point".
+
+### The four configurations, and the one expression that is all four
+
+> [It] can be used in four configurations by wiring CIRAM A10 to one of the PPU A10..A13 address
+> lines.
+
+| iNES byte 6 | line | the page's name for it |
+| --- | --- | --- |
+| `$A1` | PPU A10 | Two-screen, Horizontal arrangement ("Vertical mirroring") |
+| `$A0` | PPU A11 | Two-screen, Vertical arrangement ("Horizontal mirroring") |
+| `$A8` | PPU A12 | Single-screen arrangement BLK0 |
+| `$A9` | PPU A13 | Single-screen arrangement BLK1 |
+
+Bit 3 of byte 6 — the four-screen flag — picks the pair and bit 0 picks within it; the two
+two-screen rows are the ordinary iNES reading of bit 0 after all (`0` is CIRAM A10 from PPU A11,
+`1` from PPU A10). Byte 6 is read whole, which is the shape MR-30-1 gave the UNROM 512 and the
+reason `InesHeader::byte6` is exposed.
+
+Every access, pattern table or nametable, then lands at
+
+```text
+CIRAM offset = ((PPU A<line>) << 10) | (PPU A9..A0)
+```
+
+**One expression, because that is the wiring** — A10 of the RAM comes from one PPU line and its
+nine low lines come from the PPU's. Everything the page describes falls out of it, and the test
+asserts it as eight 1 KiB pattern windows plus four nametables rather than as a claim:
+
+| line | the four nametables | the eight 1 KiB pattern windows |
+| ---: | --- | --- |
+| A10 | `0 1 0 1` | `0 1 0 1 0 1 0 1` |
+| A11 | `0 0 1 1` | `0 0 1 1 0 0 1 1` |
+| A12 | `0 0 0 0` | `0 0 0 0 1 1 1 1` |
+| A13 | `1 1 1 1` | `0 0 0 0 0 0 0 0` |
+
+and the page's two capacities come out as a count: a two-screen wiring shows **both** blocks inside
+one pattern table ("2KiB (128 tiles)") and a single-screen one shows a single block ("1KiB (64
+tiles)"). On the A12 wiring the block the background shows is the page's "swappable via PPUCTRL",
+because that register's pattern-table select *is* A12; on the A13 wiring the pattern tables never
+see block 1 at all.
+
+### Where the 2 KiB lives, and why that is not a liberty
+
+CIRAM is in the console, and a board that maps it into the pattern tables needs **one** 2 KiB
+memory to answer both windows — which this architecture cannot do with the PPU's own VRAM, because
+`Mapper::ppu_peek` has no way to reach it. So the 2 KiB is the cartridge's CHR-RAM
+(`board_memory_sizes` gives the board exactly that much and no PRG-RAM) and `nametable_page`
+answers `SERVED_BY_CARTRIDGE` for all four tables — MF-6c step 9's shape for the GTROM and
+MR-30-6's for the UNROM 512's four-screen mode.
+
+**It is the same chip either way.** Which side of the connector an emulator keeps CIRAM on is
+invisible to a game; that the pattern tables and the nametables are one memory is not, and it is
+what the board exists for — *Magic Floor* draws its tiles through the nametable window. A board
+that served patterns from the cartridge and nametables from console VRAM would be two memories and
+*would* be wrong. `req_core_102_mapper_218_serves_its_pattern_tables_from_ciram` pins it in both
+directions: a byte written at $2000 reads back through the pattern window, and a byte written at
+$0010 reads back at $2010.
+
+This is the **fifth** distinct body of the `Mapper::read_nametable` dispatch Q-123 once measured a
+cap of two on, and the **second inside `DecodeBoard`** — so `Board::read_nametable`'s own jump
+table does not grow by an entry, which is what MF-6c step 7 established for a board joining that
+enum. What it costs is step 8's to measure.
+
+### PRG, and the two things that are not emulated
+
+$8000-$FFFF is bank 0 of 32 KiB, unbanked, which a 16 KiB image shows twice as `Nrom` does. The
+test writes $FF at seven addresses from $6000 to $FFFF and asserts that **nothing moves** — the
+board has no register, and `board_memory_sizes` clearing $6000-$7FFF is what sends those writes to
+`Mapper::write_register`'s empty default rather than into work RAM.
+
+The CIC is not emulated, which is true of every board here and not a property of this one.
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-218`). `mapper_tests` **305/0/0** by default, 106/0/0 with
+the feature alone, 102/0/0 with no features, 305/0/0 with `parked-boards`; the three latch sweeps
+pass in every one.

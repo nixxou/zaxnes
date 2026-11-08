@@ -46,6 +46,7 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     feature = "board-162",
     feature = "board-163",
     feature = "board-178",
+    feature = "board-218",
     feature = "board-268",
     feature = "board-sachen8259"
 ))]
@@ -169,6 +170,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   documented difference is that "$F003 only acknowledges a pending IRQ, but it does not move
     //   the 'A' control bit to the 'E' control bit" -- one `bool` on `Vrc2Vrc4` and no variant --
     //   behind `board-298` (MF-UNL-7 step 4);
+    // * 218, the single-chip homebrew board of *Magic Floor* -- no register, no latch and **no
+    //   CHR memory**, the console's own 2 KiB of nametable RAM answering the pattern tables as
+    //   well, with the header's byte 6 saying which PPU address line drives CIRAM A10 -- behind
+    //   `board-218` (MF-UNL-7 step 5);
     // * 137, 138, 139 and 141, the Sachen 8259 -- one chip with four wirings (the 8259D, B, C and
     //   A, in that order of number), an index/data pair at $4100/$4101 under mask $C101 and a
     //   per-wiring CHR shift -- one `DecodeBoard` variant, behind `board-sachen8259`
@@ -202,7 +207,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 99] = [
+    let additions: [(i32, bool); 100] = [
         (19, true),
         (24, true),
         (26, true),
@@ -298,6 +303,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (209, jy),
         (210, true),
         (211, jy),
+        (218, cfg!(feature = "board-218")),
         (232, small),
         (243, sachen),
         (263, cfg!(feature = "board-263")),
@@ -11611,6 +11617,211 @@ fn req_core_090_mapper_298_keeps_the_vrc4s_save_block() {
     assert_eq!(
         banks,
         (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+    assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ------------------------------------------- mapper 218, Magic Floor, MF-UNL-7 step 5
+
+/// Loads a mapper-218 image in one of its four configurations. `byte6` is the header's own,
+/// which is how the board is wired: bit 3 picks the pair of lines and bit 0 picks within it.
+///
+/// The image declares **no CHR** — "There is no CHR-ROM or CHR-RAM on the cartridge" — so the
+/// 2 KiB the board gets is `registry::board_memory_sizes`'s and not a header field's.
+#[cfg(feature = "board-218")]
+fn magic_floor(byte6: u8) -> NesCore {
+    MapperRom::new(218).prg(4).chr(0).mirroring(byte6).load()
+}
+
+/// "There is no CHR-ROM or CHR-RAM on the cartridge. Instead, the console's internal 2KiB
+/// nametable RAM is mapped as CHR-RAM" (nesdev, "INES Mapper 218").
+///
+/// So a pattern-table fetch returns CIRAM, and **the nametable window and the pattern tables are
+/// the same 2 KiB**: a byte written through $2007 at $2000 comes back out of the pattern table the
+/// configuration puts it under. That is what the board exists for — *Magic Floor* draws its tiles
+/// through the nametable window — and it is the half of this board a test can state without naming
+/// a register, because **there is no CHR bank register to test**, which is the point
+/// (MF-UNL-7 step 5).
+#[cfg(feature = "board-218")]
+#[test]
+fn req_core_102_mapper_218_serves_its_pattern_tables_from_ciram() {
+    // CIRAM A10 from PPU A10: the two-screen configuration with vertical mirroring.
+    let mut core = magic_floor(0x01);
+
+    // Nothing banked, nothing readable yet: 2 KiB of RAM, zero-filled.
+    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0], core.chr_windows());
+
+    // A write into the **nametable** window comes back out of the **pattern** window, because
+    // they are one memory. $2000 is block 0 offset 0; $2400 is block 1 offset 0 under this wiring.
+    core.cartridge_mut().unwrap().write_nametable(0x2000, 0x5A);
+    core.cartridge_mut().unwrap().write_nametable(0x2400, 0xA5);
+    assert_eq!(0x5A, core.chr_bank(0x0000), "block 0 under the patterns");
+    assert_eq!(0xA5, core.chr_bank(0x0400), "block 1 beside it");
+
+    // And the other way round: a pattern-table write is visible in the nametables.
+    chr_write(&mut core, 0x0010, 0x3C);
+    assert_eq!(
+        0x3C,
+        core.cartridge().unwrap().read_nametable(0x2010),
+        "one memory, both windows"
+    );
+
+    // The board serves all four tables itself, which is what lets one memory answer both.
+    assert_eq!(
+        [
+            Cartridge::SERVED_BY_CARTRIDGE,
+            Cartridge::SERVED_BY_CARTRIDGE,
+            Cartridge::SERVED_BY_CARTRIDGE,
+            Cartridge::SERVED_BY_CARTRIDGE
+        ],
+        nametable_pages(&core)
+    );
+
+    // "A single PRG-ROM chip (up to 32KiB)", unbanked — and a 32 KiB image shows its two 16 KiB
+    // halves in order. There is no register, so nothing a game writes can move it.
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    for address in [0x6000u16, 0x7FFF, 0x8000, 0xA000, 0xC000, 0xE000, 0xFFFF] {
+        core.mapper_write(address, 0xFF);
+    }
+    assert_eq!(
+        (
+            [0, 1, 2, 3],
+            [0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5]
+        ),
+        (core.prg_windows(), core.chr_windows()),
+        "there is no register on this board at all"
+    );
+}
+
+/// The four configurations, which the board "can be used in … by wiring CIRAM A10 to one of the
+/// PPU A10..A13 address lines" and which the header's byte 6 declares (nesdev, "INES Mapper 218"):
+///
+/// | byte 6 | line | the page's name |
+/// | --- | --- | --- |
+/// | `$A1` | PPU A10 | Two-screen, Horizontal arrangement ("Vertical mirroring") |
+/// | `$A0` | PPU A11 | Two-screen, Vertical arrangement ("Horizontal mirroring") |
+/// | `$A8` | PPU A12 | Single-screen arrangement BLK0 |
+/// | `$A9` | PPU A13 | Single-screen arrangement BLK1 |
+///
+/// The test writes one distinguishable byte into each of the two 1 KiB blocks and then reads the
+/// four nametables and the two pattern tables, so each configuration shows up as a pattern of
+/// blocks rather than as a claim about it (MF-UNL-7 step 5).
+#[cfg(feature = "board-218")]
+#[test]
+fn req_core_102_mapper_218_wires_ciram_a10_to_one_of_four_ppu_lines() {
+    // Byte 6, the PPU line it names, the four nametables and the eight 1 KiB pattern windows.
+    // The marker bytes are $B0 in block 0 of the 2 KiB and $B1 in block 1.
+    for (byte6, line, tables, patterns) in [
+        // Two-screen: the nametables alternate across the line that drives CIRAM A10, and **both
+        // pattern tables show the whole 2 KiB** -- the page's "2KiB (128 tiles) CHR-RAM, also
+        // mapped to nametable data".
+        (
+            0x01u8,
+            10u32,
+            [0xB0u8, 0xB1, 0xB0, 0xB1],
+            [0xB0u8, 0xB1, 0xB0, 0xB1, 0xB0, 0xB1, 0xB0, 0xB1],
+        ),
+        (
+            0x00,
+            11,
+            [0xB0, 0xB0, 0xB1, 0xB1],
+            [0xB0, 0xB0, 0xB1, 0xB1, 0xB0, 0xB0, 0xB1, 0xB1],
+        ),
+        // Single-screen: PPU A12 is 0 throughout $2000-$2FFF and PPU A13 is 1 throughout it, so
+        // the nametables are all block 0 or all block 1 -- and each pattern table shows **1 KiB**,
+        // the page's "1KiB (64 tiles)". On the A12 wiring the block the background shows is
+        // "swappable via PPUCTRL", because that register's pattern-table select *is* A12; on the
+        // A13 wiring the patterns never see block 1 at all.
+        (
+            0x08,
+            12,
+            [0xB0, 0xB0, 0xB0, 0xB0],
+            [0xB0, 0xB0, 0xB0, 0xB0, 0xB1, 0xB1, 0xB1, 0xB1],
+        ),
+        (
+            0x09,
+            13,
+            [0xB1, 0xB1, 0xB1, 0xB1],
+            [0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0],
+        ),
+    ] {
+        let mut core = magic_floor(byte6);
+
+        // Block 0 through the pattern window, then block 1 through the nametable window: on each
+        // wiring, `$2000 | (1 << line)` is an address whose CIRAM A10 is high.
+        chr_write(&mut core, 0x0000, 0xB0);
+        core.cartridge_mut()
+            .unwrap()
+            .write_nametable(0x2000 | (1 << line), 0xB1);
+
+        let nametables: [u8; 4] = std::array::from_fn(|table| {
+            let address = 0x2000 | u16::try_from(table).unwrap() << 10;
+            core.cartridge().unwrap().read_nametable(address)
+        });
+        assert_eq!(tables, nametables, "byte 6 ${byte6:02X}, PPU A{line}");
+        assert_eq!(
+            patterns,
+            core.chr_windows(),
+            "byte 6 ${byte6:02X}, PPU A{line}: the eight 1 KiB pattern windows"
+        );
+
+        // The page's two capacities, as a count rather than a claim: a two-screen wiring shows
+        // both blocks inside one pattern table and a single-screen one shows a single block.
+        let blocks_in_one_table =
+            usize::from(patterns[..4].contains(&0xB0)) + usize::from(patterns[..4].contains(&0xB1));
+        assert_eq!(
+            usize::from(line == 10 || line == 11) + 1,
+            blocks_in_one_table,
+            "byte 6 ${byte6:02X}: 2 KiB on a two-screen wiring, 1 KiB on a single-screen one"
+        );
+    }
+}
+
+/// The arrangement the cartridge reports, which is **not** what the rendering reads — all four
+/// tables are `SERVED_BY_CARTRIDGE` — but is the honest answer for anything that asks, and
+/// survives a soft reset (AMD-061 §5, MF-UNL-7 step 5).
+#[cfg(feature = "board-218")]
+#[test]
+fn amd_061_mapper_218_reports_the_arrangement_its_wiring_gives() {
+    for (byte6, arrangement) in [
+        (0x01u8, Nm::Vertical),
+        (0x00, Nm::Horizontal),
+        (0x08, Nm::SingleScreenA),
+        (0x09, Nm::SingleScreenB),
+    ] {
+        let mut core = magic_floor(byte6);
+        assert_eq!(arrangement, core.mirroring(), "byte 6 ${byte6:02X}");
+        core.reset();
+        assert_eq!(
+            arrangement,
+            core.mirroring(),
+            "byte 6 ${byte6:02X} after a reset"
+        );
+    }
+}
+
+/// REQ-CORE-090/091: the board has **no register**, so what a savestate carries for it is the
+/// 2 KiB itself — which `Cartridge` writes as the CHR-RAM blob — and nothing else. The round trip
+/// is still worth pinning, because that blob is the nametables as well on this board
+/// (MF-UNL-7 step 5).
+#[cfg(feature = "board-218")]
+#[test]
+fn req_core_090_mapper_218_round_trips_its_two_kib_of_ciram() {
+    let mut core = magic_floor(0x01);
+    chr_write(&mut core, 0x0000, 0x11);
+    core.cartridge_mut().unwrap().write_nametable(0x2400, 0x22);
+
+    let state = core.save_state(true).unwrap();
+    chr_write(&mut core, 0x0000, 0x99);
+    assert_eq!(0x99, core.chr_bank(0x0000));
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(0x11, core.chr_bank(0x0000), "the pattern side");
+    assert_eq!(
+        0x22,
+        core.cartridge().unwrap().read_nametable(0x2400),
+        "and the nametable side of the same 2 KiB"
     );
     assert_eq!(state, core.save_state(true).unwrap());
 }

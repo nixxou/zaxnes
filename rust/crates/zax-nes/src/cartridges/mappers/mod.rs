@@ -56,6 +56,8 @@ mod jaleco_ss88006;
 mod jv001;
 #[cfg(feature = "board-jy-asic")]
 mod jy_company;
+#[cfg(feature = "board-218")]
+mod magic_floor;
 mod mmc1;
 mod mmc2;
 mod mmc3;
@@ -166,6 +168,8 @@ pub use jaleco_ss88006::JalecoSs88006;
 pub use jv001::Jv001;
 #[cfg(feature = "board-jy-asic")]
 pub use jy_company::JyCompany;
+#[cfg(feature = "board-218")]
+pub use magic_floor::MagicFloor;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
 #[cfg(feature = "board-mmc3-multicart")]
