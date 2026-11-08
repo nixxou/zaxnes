@@ -63,6 +63,7 @@ default = [
     "board-193",
     "board-298",
     "board-218",
+    "board-29",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -563,6 +564,24 @@ board-193 = ["board-namcot108"]
 # write to $F003 and nothing anywhere else, and **no savestate byte** -- the flag comes from the
 # mapper number, so the block of mappers 21/22/23/25/27 is unchanged.
 board-298 = []
+
+# Mapper 29, the Sealie Computing **RET-CUFROM revD** (MF-UNL-7 step 6): "allocated on 15-nov-2013
+# to implement some homebrew games, including *Glider*".
+#
+# One register over the whole of $8000-$FFFF under mask $8000, `[...P PPCC]` -- two bits of 8 KiB
+# CHR-**RAM** bank over "4x banks worth of full 8KB CHR ram" and three bits of 16 KiB PRG bank over
+# eight, with $C000-$FFFF fixed to the last bank, hard-wired vertical mirroring and "8KB of WRAM
+# mounted in the usual place".
+#
+# An **eighth** `LatchBoard` variant, so no new `DecodeBoard` variant and no new `Board` variant:
+# MF-UNL-3 step 2 built that enum for exactly this shape, and this is the first member of it with
+# CHR-RAM. Implies `board-decode-boards`.
+#
+# **The CopyNES flash-write path is not emulated**: "If EXP0 and R/W go low, /WR reaches the flash
+# ROM. When EXP0 is high, the internal bankswitching register gets accessed." EXP0 is a cartridge
+# edge pin a programmer drives, not a game, so the board always takes the second branch; the choice
+# is recorded in `SingleLatch`'s own note, as the census asks.
+board-29 = ["board-decode-boards"]
 
 # Mapper 218, the single-chip homebrew board of *Magic Floor* and *Starfight* (MF-UNL-7 step 5) --
 # the only board in this build with **no register, no latch, no bank line and no CHR memory**.

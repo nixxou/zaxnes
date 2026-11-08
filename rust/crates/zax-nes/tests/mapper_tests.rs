@@ -39,6 +39,7 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 /// windows, and on the Sachen 8259 (141) it is the unbanked 8 KiB of the 2M-RAM-COB board, whose
 /// CHR registers drive nothing at all.
 #[cfg(any(
+    feature = "board-29",
     feature = "board-77",
     feature = "board-96",
     feature = "board-111",
@@ -170,6 +171,10 @@ fn req_core_100_every_required_mapper_is_registered() {
     //   documented difference is that "$F003 only acknowledges a pending IRQ, but it does not move
     //   the 'A' control bit to the 'E' control bit" -- one `bool` on `Vrc2Vrc4` and no variant --
     //   behind `board-298` (MF-UNL-7 step 4);
+    // * 29, the Sealie Computing RET-CUFROM revD of *Glider*: one `[...P PPCC]` register over the
+    //   whole of $8000-$FFFF, two bits of 8 KiB CHR-RAM bank and three of 16 KiB PRG bank, an
+    //   **eighth** `LatchBoard` variant and the first of them with CHR-RAM -- behind `board-29`
+    //   (MF-UNL-7 step 6);
     // * 218, the single-chip homebrew board of *Magic Floor* -- no register, no latch and **no
     //   CHR memory**, the console's own 2 KiB of nametable RAM answering the pattern tables as
     //   well, with the header's byte 6 saying which PPU address line drives CIRAM A10 -- behind
@@ -207,10 +212,11 @@ fn req_core_100_every_required_mapper_is_registered() {
     let nina03 = cfg!(feature = "board-nina03");
     let jy = cfg!(feature = "board-jy-asic");
     let sachen8259 = cfg!(feature = "board-sachen8259");
-    let additions: [(i32, bool); 100] = [
+    let additions: [(i32, bool); 101] = [
         (19, true),
         (24, true),
         (26, true),
+        (29, cfg!(feature = "board-29")),
         (33, small),
         (35, jy),
         (36, jv001),
@@ -11823,5 +11829,142 @@ fn req_core_090_mapper_218_round_trips_its_two_kib_of_ciram() {
         core.cartridge().unwrap().read_nametable(0x2400),
         "and the nametable side of the same 2 KiB"
     );
+    assert_eq!(state, core.save_state(true).unwrap());
+}
+
+// ------------------------------------------- mapper 29, the RET-CUFROM, MF-UNL-7 step 6
+
+/// The Sealie Computing RET-CUFROM revD, "allocated on 15-nov-2013 to implement some homebrew
+/// games, including *Glider*" (nesdev, "INES Mapper 029"):
+///
+/// ```text
+/// Range,Mask:   $8000-FFFF, $8000
+///
+/// $8000:  [...P PPCC]
+/// ```
+///
+/// `CC` is the 8 KiB CHR-RAM bank over "4x banks worth of full 8KB CHR ram" and `PPP` the 16 KiB
+/// PRG bank over "8x 16KB PRG banks", with $C000-$FFFF fixed to the last. Four CHR banks, eight
+/// PRG banks, and writes to CHR-RAM visible on read-back — which is the census's own test list for
+/// this number (MF-UNL-7 step 6).
+#[cfg(feature = "board-29")]
+#[test]
+fn req_core_102_mapper_29_banks_four_chr_ram_banks_and_eight_prg_banks() {
+    // Eight 16 KiB PRG banks, and no CHR-ROM: the 32 KiB of CHR-RAM is the board's own, from
+    // `registry::board_memory_sizes`.
+    let mut core = MapperRom::new(29).prg(16).chr(0).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    assert_eq!(Nm::Vertical, core.mirroring(), "hard-wired for vertical");
+
+    // `PPP`, bits 4-2: eight 16 KiB banks, the last two 8 KiB windows fixed to the end.
+    for bank in 0u8..8 {
+        core.mapper_write(0x8000, bank << 2);
+        assert_eq!(
+            [bank * 2, bank * 2 + 1, 14, 15],
+            core.prg_windows(),
+            "PRG bank {bank}"
+        );
+    }
+
+    // `CC`, bits 1-0: four 8 KiB CHR-RAM banks. Each is written through the PPU and read back,
+    // which is the only way to tell four banks of RAM apart.
+    for bank in 0u8..4 {
+        core.mapper_write(0x8000, bank);
+        chr_write(&mut core, 0x0000, 0xC0 | bank);
+        chr_write(&mut core, 0x1FFF, 0xD0 | bank);
+    }
+    for bank in 0u8..4 {
+        core.mapper_write(0x8000, bank);
+        assert_eq!(0xC0 | bank, core.chr_bank(0x0000), "CHR-RAM bank {bank}");
+        assert_eq!(
+            0xD0 | bank,
+            core.cartridge()
+                .unwrap()
+                .ppu_peek(0x1FFF, ChrFetch::Background),
+            "the top of CHR-RAM bank {bank}"
+        );
+    }
+
+    // The two fields are independent, which the `...` of the diagram's top three bits is: a
+    // register of $1F is PRG bank 7 and CHR bank 3 at once.
+    core.mapper_write(0x8000, 0x1F);
+    assert_eq!([14, 15, 14, 15], core.prg_windows());
+    assert_eq!(0xC3, core.chr_bank(0x0000));
+    core.mapper_write(0x8000, 0xFF);
+    assert_eq!(
+        ([14, 15, 14, 15], 0xC3),
+        (core.prg_windows(), core.chr_bank(0x0000)),
+        "bits 7-5 are not register bits"
+    );
+}
+
+/// "Range,Mask: $8000-FFFF, $8000" — A15 alone, so **every** address in $8000-$FFFF is the
+/// register — and "8KB of WRAM mounted in the usual place", which is $6000-$7FFF and is therefore
+/// not the register (MF-UNL-7 step 6).
+#[cfg(feature = "board-29")]
+#[test]
+fn req_core_102_the_ret_cufrom_register_is_the_whole_of_8000_ffff() {
+    let mut core = MapperRom::new(29).prg(16).chr(0).load();
+
+    for address in [0x8000u16, 0x9ABC, 0xC000, 0xE001, 0xFFFF] {
+        core.mapper_write(address, 0x08);
+        assert_eq!([4, 5, 14, 15], core.prg_windows(), "${address:04X}");
+        core.mapper_write(address, 0x00);
+        assert_eq!([0, 1, 14, 15], core.prg_windows(), "${address:04X}");
+    }
+
+    // $6000-$7FFF is the WRAM the page gives the board, and a write there is RAM and not a
+    // register: the bank stays where it was and the byte comes back out.
+    core.mapper_write(0x8000, 0x0C);
+    core.write_memory(0x6789, 0x42);
+    assert_eq!(
+        [6, 7, 14, 15],
+        core.prg_windows(),
+        "the register is untouched"
+    );
+    assert_eq!(0x42, core.read_memory(0x6789), "and the WRAM answers");
+
+    // And below it nothing answers at all: the board has no port under $6000.
+    core.mapper_write(0x4100, 0x00);
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+}
+
+/// REQ-CORE-090/091: the latch and the 32 KiB of CHR-RAM survive a save and a restore, with the
+/// state dirtied first. The savestate block is `SingleLatch`'s own and unchanged — one register
+/// byte and the four bytes mapper 190 uses — which is what an eighth board of that variant costs
+/// the other seven (MF-UNL-7 step 6).
+#[cfg(feature = "board-29")]
+#[test]
+fn req_core_090_mapper_29_survives_a_save_and_restore() {
+    let mut core = MapperRom::new(29).prg(16).chr(0).load();
+    core.mapper_write(0x8000, 0x16); // PRG bank 5, CHR bank 2.
+    chr_write(&mut core, 0x0400, 0x77);
+    core.write_memory(0x6000, 0x88);
+
+    // The CHR window reads are the **bytes of CHR-RAM** and not bank numbers on this board, so
+    // the $77 written at $0400 is the second of the eight.
+    let banks = (core.prg_windows(), core.chr_windows(), core.mirroring());
+    assert_eq!(
+        ([10, 11, 14, 15], [0, 0x77, 0, 0, 0, 0, 0, 0], Nm::Vertical),
+        banks
+    );
+    let state = core.save_state(true).unwrap();
+
+    core.reset();
+    assert_eq!(
+        [0, 1, 14, 15],
+        core.prg_windows(),
+        "a reset clears the latch"
+    );
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(
+        banks,
+        (core.prg_windows(), core.chr_windows(), core.mirroring())
+    );
+    assert_eq!(0x77, core.chr_bank(0x0400), "the CHR-RAM byte");
+    assert_eq!(0x88, core.read_memory(0x6000), "the WRAM byte");
     assert_eq!(state, core.save_state(true).unwrap());
 }

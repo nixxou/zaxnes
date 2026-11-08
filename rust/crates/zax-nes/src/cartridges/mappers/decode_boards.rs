@@ -5,6 +5,7 @@
 // of this enum adds its feature to the `any` below**, and to nothing else -- the module, the
 // `Board` variant, its `dispatch!` arm and the registry's `use` are all behind the umbrella.
 #[cfg(not(any(
+    feature = "board-29",
     feature = "board-38",
     feature = "board-77",
     feature = "board-96",
@@ -54,6 +55,7 @@ use super::Sachen8259;
 #[cfg(feature = "board-sachen-8reg")]
 use super::Sachen8Reg;
 #[cfg(any(
+    feature = "board-29",
     feature = "board-38",
     feature = "board-107",
     feature = "board-143",
@@ -161,8 +163,10 @@ pub enum DecodeBoard {
     // Appended by MF-UNL-3 step 2, and it is the last variant that lot adds: the seven
     // single-latch boards share **one** of them, with a runtime field saying which, exactly as
     // `Jv001` above holds six numbers and `Namcot108` five.
-    /// Mappers 38, 107, 143, 144, 145, 149 and 190, lot MF-UNL-3's seven single-latch boards.
+    /// Mappers 38, 107, 143, 144, 145, 149 and 190, lot MF-UNL-3's seven single-latch boards,
+    /// and mapper 29, the Sealie RET-CUFROM that MF-UNL-7 step 6 adds to them.
     #[cfg(any(
+        feature = "board-29",
         feature = "board-38",
         feature = "board-107",
         feature = "board-143",
@@ -224,6 +228,7 @@ macro_rules! inner {
             #[cfg(feature = "board-nina03")]
             DecodeBoard::Nina03($b) => $body,
             #[cfg(any(
+                feature = "board-29",
                 feature = "board-38",
                 feature = "board-107",
                 feature = "board-143",

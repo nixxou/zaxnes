@@ -39,6 +39,10 @@ pub enum LatchBoard {
     /// one window.
     #[cfg(feature = "board-190")]
     Zemina190,
+    /// Mapper 29, the Sealie Computing **RET-CUFROM revD** of *Glider* — the **eighth** board of
+    /// this enum and the first of them with CHR-RAM (MF-UNL-7 step 6).
+    #[cfg(feature = "board-29")]
+    RetCufrom,
 }
 
 /// iNES mappers **38, 107, 143, 144, 145, 149 and 190**: the seven boards of lot MF-UNL-3 that
@@ -80,6 +84,30 @@ pub enum LatchBoard {
 /// read at $4100. [`super::DecodeBoard`] has carried that forward since MF-UNL-1 step 1 and it
 /// is `#[inline(never)]`, so the arm `Board::try_read_prg`'s `#[inline(always)]` folds into
 /// `Cartridge::try_cpu_read` is one `callq`; its `cfg` gains `board-143`.
+///
+/// # The eighth board, added by MF-UNL-7 step 6
+///
+/// | # | board | window | the page's register |
+/// | ---: | --- | --- | --- |
+/// | 29 | Sealie Computing **RET-CUFROM revD** | $8000-$FFFF, mask **$8000** | `[...P PPCC]` — two bits of 8 KiB CHR-**RAM** bank and three of 16 KiB PRG bank, with $C000-$FFFF fixed to the last |
+///
+/// It meets the entry condition unchanged — the page documents no counter, so [`Mapper::irq_asserted`]
+/// is `Mapper`'s own `false` — and it is the **first member of this enum with CHR-RAM**: "4x banks
+/// worth of full 8KB CHR ram", which `registry::board_memory_sizes` gives it along with the
+/// "8KB of WRAM mounted in the usual place" the same sentence names. It is also the only board here
+/// that sets a mirroring: the page says it "is hard-wired for vertical mirroring", so
+/// [`SingleLatch::reset`] says so too rather than leaving a dump's header to.
+///
+/// **The CopyNES flash-write path is not emulated**, which the census asks be recorded:
+///
+/// > If EXP0 and R/W go low, /WR reaches the flash ROM. When EXP0 is high, the internal
+/// > bankswitching register gets accessed.
+///
+/// EXP0 is a cartridge **edge pin**, driven by a programmer and not by a game, so a running game
+/// always takes the second branch — which is the branch this board implements. It is a programmer
+/// feature rather than a game one, and the owner's rule 4 (development cost out of proportion)
+/// settles the rest: the flash of [`super::UnRom512`] and [`super::Cheapocabra`] exists because
+/// games on those boards *save* through it, and no mapper-29 title does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SingleLatch {
     banks: BankWindows,
@@ -99,6 +127,10 @@ pub struct SingleLatch {
 }
 
 impl SingleLatch {
+    /// Mapper 29's CHR chip: "4x banks worth of full 8KB CHR ram" (nesdev, "INES Mapper 029").
+    #[cfg(feature = "board-29")]
+    pub(crate) const RET_CUFROM_CHR_RAM_SIZE: usize = 4 * 8 * 1024;
+
     pub(crate) fn new(memory: &CartridgeMemory, board: LatchBoard) -> Self {
         let mut latch = Self {
             banks: windows_for(memory),
@@ -192,6 +224,22 @@ impl SingleLatch {
                     self.banks.map_chr_2k(slot * 2, i32::from(self.chr[slot]));
                 }
             }
+            // nesdev ("INES Mapper 029"), whose *Banks* rows are
+            //
+            //     CPU $8000-$BFFF: 16 KiB switchable PRG ROM bank
+            //     CPU $C000-$FFFF: 16 KiB PRG ROM, fixed to the last bank
+            //     PPU $0000-$1FFF: 8 KiB switchable CHR RAM bank
+            //
+            // against the register `[...P PPCC]`: `CC` is the CHR-RAM bank over the page's
+            // "4x banks worth of full 8KB CHR ram" and `PPP` the 16 KiB PRG bank over its
+            // "8x 16KB PRG banks".
+            #[cfg(feature = "board-29")]
+            LatchBoard::RetCufrom => {
+                self.banks
+                    .map_prg_16k(0, i32::from((self.register >> 2) & 0x07));
+                self.banks.map_prg_16k(2, -1);
+                self.banks.map_chr_8k(i32::from(self.register & 0x03));
+            }
         }
     }
 }
@@ -215,6 +263,8 @@ impl Mapper for SingleLatch {
             LatchBoard::Sachen149 => 149,
             #[cfg(feature = "board-190")]
             LatchBoard::Zemina190 => 190,
+            #[cfg(feature = "board-29")]
+            LatchBoard::RetCufrom => 29,
         }
     }
 
@@ -230,9 +280,21 @@ impl Mapper for SingleLatch {
         Ok(())
     }
 
-    fn reset(&mut self, _memory: &mut CartridgeMemory) {
+    /// `memory` is written by the mapper-29 arm alone — the one board of the eight whose page
+    /// states a mirroring — so with `board-29` off the parameter is unused and says so.
+    #[cfg_attr(not(feature = "board-29"), allow(unused_variables))]
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.register = 0;
         self.chr = [0; 4];
+        // "It is hard-wired for vertical mirroring" (nesdev, "INES Mapper 029"). Stated here
+        // rather than left to a dump's header, because the page states it and byte 6 of an iNES
+        // 1.0 header is what a dumper happened to set; the other seven boards have no such line
+        // and keep whatever the header said.
+        #[cfg(feature = "board-29")]
+        if matches!(self.board, LatchBoard::RetCufrom) {
+            memory.set_mirroring(crate::NametableMirroring::Vertical);
+        }
+
         self.update_banks();
     }
 
@@ -321,6 +383,13 @@ impl Mapper for SingleLatch {
             // function sees the value.
             #[cfg(feature = "board-149")]
             LatchBoard::Sachen149 if address & 0x8000 == 0x8000 => Some(value & 0x80),
+            // "Range,Mask: $8000-FFFF, $8000": A15 alone again, so every address in $8000-$FFFF
+            // is the register, and the five bits of `[...P PPCC]` are what it keeps. The page
+            // gives this board no bus-conflict line, so it is not on
+            // `registry::has_bus_conflicts` -- which is also why the whole written value arrives
+            // here and not an AND of it with the ROM byte (nesdev, "INES Mapper 029").
+            #[cfg(feature = "board-29")]
+            LatchBoard::RetCufrom if address & 0x8000 == 0x8000 => Some(value & 0x1F),
             // Any address that is not this board's window -- and **every** address on mapper
             // 143, whose board has no write side at all. `Option` and not a `return` because
             // `--features board-143` alone leaves this `match` with that one arm, and a `match`

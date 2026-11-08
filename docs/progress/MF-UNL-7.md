@@ -47,7 +47,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
 - [x] **3/9** — `board-193`: the TC-112's three unequal CHR windows and its $6004 mirroring.
 - [x] **4/9** — `board-298`: the VRC4b `const` selection and the one documented difference.
 - [x] **5/9** — `board-218`: a board with no CHR memory, four CIRAM A10 wirings.
-- [ ] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
+- [x] **6/9** — `board-29`: the RET-CUFROM's one register, and the flash path that is not emulated.
 - [ ] **7/9** — the question tickets, the four sweeps, the save-state round-trips and the feature
   configurations.
 - [ ] **8/9** — the callgrind campaign against the base commit, and the feature decision per board.
@@ -491,3 +491,66 @@ configurations (default, `--no-default-features`, `--features parked-boards`,
 `--no-default-features --features board-218`). `mapper_tests` **305/0/0** by default, 106/0/0 with
 the feature alone, 102/0/0 with no features, 305/0/0 with `parked-boards`; the three latch sweeps
 pass in every one.
+
+---
+
+## Step 6 — mapper 29, the RET-CUFROM, as an eighth `SingleLatch` board
+
+`board-29`, in `default`, implying `board-decode-boards`. **No new module and no new variant of
+any enum but `LatchBoard`**: MF-UNL-3 step 2 built that one for exactly this shape, so the board is
+an eighth value of a runtime field, two arms in `SingleLatch::update_banks` and
+`write_register`, one in `mapper_number`, a mirroring line in `reset`, one `SUPPORTED_MAPPERS`
+entry, one `create_board` arm and one `board_memory_sizes` row.
+
+### The board
+
+```text
+Range,Mask:   $8000-FFFF, $8000
+
+$8000:  [...P PPCC]
+```
+
+`CC` is the 8 KiB CHR-**RAM** bank over "4x banks worth of full 8KB CHR ram" and `PPP` the 16 KiB
+PRG bank over "8x 16KB PRG banks", with $C000-$FFFF fixed to the last bank. Mask $8000 is A15
+alone, so **every** address in $8000-$FFFF is the register — mapper 149's decode, and the test
+walks five addresses from $8000 to $FFFF to say so. Bits 7-5 are not register bits, which the
+`...` of the diagram is and which a write of $FF pins.
+
+The page gives the board no bus-conflict line, so it is **not** on `registry::has_bus_conflicts`
+and the whole written value arrives at the latch.
+
+### Two things the page states flatly and no header can
+
+* "It is hard-wired for vertical mirroring" — so `SingleLatch::reset` says so, and it is the one
+  board of the eight that writes a mirroring at all. The other seven keep whatever their dump's
+  header said, because their pages have no such line.
+* "contains 8KB of WRAM mounted in the usual place", and "4x banks worth of full 8KB CHR ram" —
+  `board_memory_sizes` gives both. The CHR figure matters on its own account: REQ-CORE-012's
+  CHR-RAM default is 8 KiB, which would leave three of this board's four banks unaddressable.
+
+This is the **first member of `LatchBoard` with CHR-RAM**, which is why the census's test line for
+it ends "writes to CHR-RAM visible on read-back" — four banks of RAM cannot be told apart any other
+way, so the test writes a marker into each of the four and then reads all four back.
+
+### The CopyNES path, which is not emulated
+
+> If EXP0 and R/W go low, /WR reaches the flash ROM. When EXP0 is high, the internal bankswitching
+> register gets accessed.
+
+EXP0 is a cartridge **edge pin**, driven by a programmer and not by a game, so a running game
+always takes the second branch — the branch this board implements. The census asks that the choice
+be recorded in a comment and `SingleLatch`'s own note is where it is, with the reason the flash of
+the UNROM 512 and the GTROM *is* implemented: games on those boards save through it, and no
+mapper-29 title does.
+
+### Checks
+
+`cargo fmt --check` clean; clippy `-D warnings` on `zax-nes --all-targets` clean in four
+configurations (default, `--no-default-features`, `--features parked-boards`,
+`--no-default-features --features board-29`). `mapper_tests` **308/0/0** by default, 105/0/0 with
+the feature alone, 102/0/0 with no features, 308/0/0 with `parked-boards`; the three latch sweeps
+pass in every one.
+
+**All six boards of the lot are in, and the nine numbers are 29, 112, 137, 138, 139, 141, 193, 218
+and 298.** Steps 7 to 9 are the question tickets, the sweeps in every configuration the lot adds,
+the campaign and the final pass.

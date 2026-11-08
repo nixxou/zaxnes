@@ -75,6 +75,7 @@ use super::mappers::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
+    feature = "board-29",
     feature = "board-38",
     feature = "board-107",
     feature = "board-143",
@@ -120,6 +121,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     26,
     27,
     28,
+    #[cfg(feature = "board-29")]
+    29,
     30,
     32,
     #[cfg(feature = "board-small-boards")]
@@ -727,6 +730,21 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
+        // nesdev ("INES Mapper 029"), the Sealie RET-CUFROM: "It is hard-wired for vertical
+        // mirroring, and contains 8KB of WRAM mounted in the usual place", and "4x banks worth of
+        // full 8KB CHR ram". Two figures the page states flatly and no header field can be trusted
+        // to: byte 8 of an iNES 1.0 header is unreliable and byte 5 is the CHR-*ROM* size, where
+        // REQ-CORE-012's CHR-RAM default would give this board 8 KiB and leave three of its four
+        // banks unaddressable (MF-UNL-7 step 6).
+        //
+        // The page says nothing about a battery, so a dump's own battery bit decides, as it does
+        // for every board here.
+        #[cfg(feature = "board-29")]
+        29 => BoardMemorySizes {
+            prg_ram: Some(BankWindows::PRG_WINDOW_SIZE),
+            chr_ram: Some(SingleLatch::RET_CUFROM_CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 218"): "There is no CHR-ROM or CHR-RAM on the cartridge. Instead,
         // the console's internal 2KiB nametable RAM is mapped as CHR-RAM", and "the cartridge
         // board only contains a single PRG-ROM chip (up to 32KiB)" beside a CIC.
@@ -1146,6 +1164,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         149 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
             memory,
             LatchBoard::Sachen149,
+        ))),
+        // MF-UNL-7 step 6: the Sealie Computing RET-CUFROM revD, an **eighth** board of that
+        // variant and the first one with CHR-RAM: one register over the whole of $8000-$FFFF,
+        // `[...P PPCC]`, two bits of 8 KiB CHR-RAM bank and three of 16 KiB PRG bank, hard-wired
+        // vertical mirroring and 8 KiB of WRAM. The CopyNES flash-write path is deliberately not
+        // emulated; `SingleLatch`'s own note has the page's sentence and why.
+        #[cfg(feature = "board-29")]
+        29 => Board::DecodeBoard(DecodeBoard::SingleLatch(SingleLatch::new(
+            memory,
+            LatchBoard::RetCufrom,
         ))),
         // MF-UNL-3 step 4: the last of the seven, and the only one with more than one window.
         #[cfg(feature = "board-190")]

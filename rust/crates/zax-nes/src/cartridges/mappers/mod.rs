@@ -91,6 +91,7 @@ mod sachen_8259;
 #[cfg(feature = "board-sachen-8reg")]
 mod sachen_8reg;
 #[cfg(any(
+    feature = "board-29",
     feature = "board-38",
     feature = "board-107",
     feature = "board-143",
@@ -213,6 +214,7 @@ pub use sachen_8259::Sachen8259;
 #[cfg(feature = "board-sachen-8reg")]
 pub use sachen_8reg::Sachen8Reg;
 #[cfg(any(
+    feature = "board-29",
     feature = "board-38",
     feature = "board-107",
     feature = "board-143",
