@@ -72,6 +72,7 @@ default = [
     "board-208",
     "board-219",
     "board-262",
+    "board-292",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -251,6 +252,26 @@ board-219 = []
 # which the page does not state at all, and the jumper -- a board wiring no header field can
 # declare, answered as 0 (*Street Heroes*) with the gap recorded.
 board-262 = []
+
+# NES 2.0 mapper 292, the **BMW8544** / UNL-DRAGONFIGHTER (MF-UNL-12 step 2): an MMC3 clone whose
+# "PRG banking, mirroring and scanline IRQ work as on a normal MMC3" and whose **CHR banking does
+# not**. Four extra registers in $6000-$7FFF: an index register a **write** sets, two data registers
+# a **read** fills from the datum of the last CPU write to any address, and that latch itself. They
+# carry the eight XOR bits of the 2 KiB bank at PPU $0000-$07FF, CHR A18 of the 2 KiB bank at
+# $0800-$0FFF and the whole 4 KiB bank at $1000-$1FFF -- which is both the protection and the way
+# the board reaches 512 KiB of CHR-ROM. One original title, *Dragon Fighter* (the unlicensed one,
+# not Natsume's).
+#
+# One boxed `IrqBoard` variant holding an `Mmc3` and three register bytes, plus the **one new hook
+# of lot MF-UNL-12**: `CartridgeMemory::cpu_write_latch`, a byte `NesBus::write_internal` stores on
+# every CPU write. The page requires it -- "All CPU writes, including writes to zero page memory,
+# are visible on the cartridge connector … The game writes the desired values to zero page" -- and
+# §7.2's "no new hook" is the one claim of this lot's plan that a page overrides (**Q-172**). With
+# the feature off there is no field and no store: the byte and the `if let` are both behind it.
+#
+# It is also the first board of `IrqBoard` to need `Mapper::cpu_read_override`, forwarded
+# `#[inline(never)]` there for the reason `try_read_prg` carries it.
+board-292 = []
 
 # Mappers 47 and 37, Nintendo's two MMC3 multicarts: *Super Spike V'Ball + Nintendo World Cup*
 # and *Super Mario Bros. + Tetris + Nintendo World Cup*. One `const` monomorphisation of the

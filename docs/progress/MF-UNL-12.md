@@ -282,3 +282,73 @@ Two sweeps needed the number added rather than merely passing, which is the poin
 them: `req_core_100_every_required_mapper_is_registered`'s `additions` table (110 → 111 entries)
 and `mf_5a_every_board_that_moves_on_the_ppu_bus_is_latched`'s expected vector — 262 **twice**,
 the page giving the number no submapper and the board refusing neither half of the pair.
+
+## Step 2 — `board-292`, the BMW8544 / UNL-DRAGONFIGHTER
+
+`rust/crates/zax-nes/src/cartridges/mappers/mmc3_dragonfighter.rs`, one boxed `IrqBoard` variant
+holding an `Mmc3` and **three register bytes** — plus **this lot's one hook**, which is step 0.4's
+finding made real.
+
+### What the board is
+
+"PRG banking, mirroring and scanline IRQ work as on a normal MMC3", so all of that is the chip's
+and unchanged. What the board adds is the CHR half, computed per 1 KiB window from the page's
+three *Effective CHR banks* blocks:
+
+| region | the page's own C | what drives it |
+| --- | --- | --- |
+| PPU `$0000-$07FF` | `extraRegister[0] ^ (mmc3Register[0] >> 1)` | the chip's 2 KiB bank **XORed** with Extra0, and CHR A18 from Extra0 bit 7 |
+| PPU `$0800-$0FFF` | `((extraRegister[1] << 1) & 0x80) ^ (mmc3Register[1] >> 1)` | the chip's 2 KiB bank, with **only** CHR A18 from Extra1 bit 6 |
+| PPU `$1000-$1FFF` | `extraRegister[1] & 0x3F` | Extra1 alone; the chip drives nothing and "CHR A18: Always 0" |
+
+Two things fall out of reading those blocks as **address lines** rather than as three bank
+numbers, and both save code:
+
+* `CHR A10 = PPU A10` makes the chip's own bank bit 0 a don't-care in the two 2 KiB regions, so
+  the pair is a true 2 KiB window whatever odd bank the chip put there.
+* the note "when Bit 7 in the MMC3's index register is set, MMC3 registers **2/3** instead of
+  register 0 apply" needs **no code at all**: bit 7 of `$8000` is the chip's CHR inversion, so
+  what the chip drives at `$0000-$07FF` with it set *is* R2 and R3, and
+  `Mmc3Board::chr_bank_of_window` is already "the bank the chip drives at that window".
+
+### The hook, and the claim it overrides
+
+> §7.2, step 2: "`Cartridge::cpu_read` already reaches that window, so **no new hook**."
+
+The **read** needs none: `Mapper::cpu_read_override` is a `&mut self` hook
+`Cartridge::try_cpu_read` already calls first thing, forwarded here for the first time on
+`IrqBoard` and `#[inline(never)]` for `try_read_prg`'s reason. What §7.2 did not account for is
+**where the filled byte comes from** — "the data of the last CPU write **to any address**", with
+the game writing "the desired values to **zero page**". A zero-page write is RAM and reaches no
+cartridge in this core, and `NesBus::data_bus` is not it either: that byte is set by reads as well
+as writes, so at the instant of the `$6000` read it holds the high byte of that very address.
+
+So the lot's one addition outside a board:
+
+* `CartridgeMemory::cpu_write_latch`, one `u8` behind `#[cfg(feature = "board-292")]`;
+* one `if let` plus one store at the **top** of `NesBus::write_internal`, behind the same `cfg`.
+
+It is in `write_internal` and not in `Cartridge::cpu_write` because the latch has to see the RAM
+half of the address space, and it is a store into `CartridgeMemory` and not a `Board` dispatch
+because that function runs on every CPU write of every game. **Not in the savestate**: it is a
+transient bus byte the next CPU write overwrites, nothing is derived from it until a read of
+`$6000-$7FFF` asks, and the two data registers it feeds *are* in the board's own block — so no
+board's save block grows by a byte in any configuration. Recorded as Q-172 §2.
+
+### Tests (5 new, all from the page)
+
+| test | what it pins |
+| --- | --- |
+| `req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff` | §7.2's own test: the **read** moves the bank, and neither the `$6000` write nor the zero-page write does — even though the `$6000` write is itself what the latch then holds. Plus `$A001` clear, where nothing answers |
+| `req_core_102_mapper_292_computes_each_regions_bank_the_way_its_own_c_line_does` | the three C lines; that the XOR is an XOR (`$FF` gives the complement, `$00` the chip's own bank); that Extra1 moves **two** regions at once; and that no value of Extra1 takes `$1000-$1FFF` past the first 256 KiB |
+| `q_172_mapper_292_takes_registers_2_and_3_when_the_chips_chr_inversion_is_set` | the plural in "registers 2/3": with the inversion set R2 drives the first kilobyte and R3 the second, R4/R5 the `$0800` pair, and the XOR still applies through it |
+| `q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included` | the hook itself, from four addresses no cartridge is mapped at; that A and B drive nothing (the page's unverified hypothesis is not implemented); and that `R` is bit **5** and not bit 0 |
+| `req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window` | a battery dump's `$6000-$7FFF` is the register and not RAM: a write does not persist and a read drives nothing |
+
+### The check at this step
+
+| command | result |
+| --- | --- |
+| `cargo fmt --check` | **clean** |
+| `cargo clippy --release -p zax-nes --all-targets -- -D warnings` | **clean** |
+| `cargo test --release -p zax-nes` | **all green**, 47 suites, 0 failed |

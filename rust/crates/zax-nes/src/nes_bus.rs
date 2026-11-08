@@ -1173,6 +1173,19 @@ impl NesBus {
     }
 
     fn write_internal(&mut self, address: u16, value: u8) {
+        // MF-UNL-12 step 2: the one board whose page says it latches "the data of the last CPU
+        // write to any address" -- NES 2.0 mapper 292, whose game "writes the desired values to
+        // zero page" and then *reads* $6000-$7FFF to move them into a bank register. So the latch
+        // has to see the RAM half of the address space too, which is why it is here and not in
+        // `Cartridge::cpu_write`, and why it is one store into `CartridgeMemory` rather than a
+        // `Board` dispatch: this function runs on every CPU write of every game.
+        //
+        // Behind `board-292`: with that feature off there is no field and no store at all.
+        #[cfg(feature = "board-292")]
+        if let Some(cartridge) = self.cartridge.as_mut() {
+            cartridge.memory_mut().latch_cpu_write(value);
+        }
+
         if address < 0x2000 {
             self.ram[usize::from(address) & (RAM_SIZE - 1)] = value;
             return;

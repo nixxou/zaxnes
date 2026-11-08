@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 111] = [
+    let additions: [(i32, bool); 112] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -368,6 +368,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (263, cfg!(feature = "board-263")),
         (264, cony),
         (268, cfg!(feature = "board-268")),
+        (292, cfg!(feature = "board-292")),
         (298, cfg!(feature = "board-298")),
         (552, taito_x1),
     ];
@@ -6755,7 +6756,8 @@ fn somari_mode(core: &mut NesCore, value: u8) {
     feature = "board-208",
     feature = "board-215",
     feature = "board-219",
-    feature = "board-262"
+    feature = "board-262",
+    feature = "board-292"
 ))]
 fn chr_offsets(core: &NesCore) -> [usize; 8] {
     core.cartridge().unwrap().chr_peek_view().unwrap().offsets()
@@ -15781,6 +15783,314 @@ fn q_172_mapper_262_answers_its_title_jumper_under_the_pages_c100_mask() {
             0x00,
             core.read_memory(address),
             "{address:#06X} is inside `address & $C100 == $4100`: the jumper, 0 for Street Heroes"
+        );
+    }
+}
+
+// -------------------- MF-UNL-12 step 2: mapper 292, the BMW8544 / UNL-DRAGONFIGHTER
+
+/// A CPU read **with its side effects**, which is the only path that fills one of mapper 292's
+/// data registers: `NesCore::read_memory` is `Cartridge::try_cpu_peek` and goes to
+/// `Mapper::cpu_peek_override`, which this board deliberately leaves side-effect-free.
+#[cfg(feature = "board-292")]
+fn cpu_read(core: &mut NesCore, address: u16) -> Option<u8> {
+    core.cartridge_mut().unwrap().try_cpu_read(address)
+}
+
+/// What the game does, in the order the page describes it: select a data register with a **write**
+/// to `$6000-$7FFF`, put the datum somewhere in **zero page**, then **read** `$6000-$7FFF` so the
+/// board moves the latched byte into the register.
+///
+/// The order matters and the test would be wrong without it: the `$6000` write is itself a CPU
+/// write and so is itself latched, which is why the zero-page write comes second.
+#[cfg(feature = "board-292")]
+fn dragon_fill(core: &mut NesCore, register: u8, value: u8) {
+    // `A` and `B` are "Always 1" and `R` is bit 5.
+    core.mapper_write(0x6000, 0xC0 | (register << 5));
+    core.write_memory(0x0010, value);
+    cpu_read(core, 0x6000);
+}
+
+/// nesdev ("NES 2.0 Mapper 292"): "There are four extra registers that are filled by writing or
+/// reading **(!)** from the CPU `$6000-$7FFF` address range when PRG-RAM is enabled in the MMC3's
+/// `A001` register", and of each data register: "It is filled by *reading* from `$6000-$7FFF` …
+/// with the value that had been latched during the last CPU write to any address."
+///
+/// **This is the test §7.2 asks for — "a read at `$6000-$7FFF` changes the CHR bank, which is the
+/// test that proves the read path is wired"** — and it asserts the other half too: a *write* to
+/// the same window selects a register and fills nothing, even though the written byte is itself
+/// what the latch then holds.
+#[cfg(feature = "board-292")]
+#[test]
+fn req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).load();
+    // "when PRG-RAM is enabled in the MMC3's A001 register".
+    core.mapper_write(0xA001, 0x80);
+    assert_eq!(
+        [0, 1, 0, 1, 0, 1, 2, 3],
+        core.chr_windows(),
+        "power-on: both XOR registers zero, so the chip's own zeroed banks show through"
+    );
+
+    // Extra Data Register #1, `.BAA AAAA`: bits 5-0 are the 4 KiB bank at PPU $1000-$1FFF.
+    core.mapper_write(0x6000, 0xE0); // A, B and R = 1.
+    core.write_memory(0x0010, 0x05); // "The game writes the desired values to zero page."
+    assert_eq!(
+        [0, 1, 0, 1, 0, 1, 2, 3],
+        core.chr_windows(),
+        "neither the write to $6000 nor the one to zero page fills a data register"
+    );
+
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        [0, 1, 0, 1, 20, 21, 22, 23],
+        core.chr_windows(),
+        "the read does: 4 KiB bank 5 is 1 KiB banks 20-23"
+    );
+
+    // The latch moving on its own moves nothing, and a write to the window still moves nothing —
+    // which together are what make the *read* the trigger.
+    core.write_memory(0x0010, 0x0A);
+    assert_eq!([0, 1, 0, 1, 20, 21, 22, 23], core.chr_windows());
+    core.mapper_write(0x6000, 0xE0);
+    assert_eq!([0, 1, 0, 1, 20, 21, 22, 23], core.chr_windows());
+
+    // And the whole window reads, not just $6000.
+    core.write_memory(0x0010, 0x0A);
+    cpu_read(&mut core, 0x7FFF);
+    assert_eq!(
+        [0, 1, 0, 1, 40, 41, 42, 43],
+        core.chr_windows(),
+        "$7FFF is the same register window"
+    );
+
+    // With the chip's `$A001` enable clear the board's window answers nothing at all, which is
+    // the page's own condition on all four registers.
+    core.mapper_write(0xA001, 0x00);
+    core.mapper_write(0x6000, 0xC0); // Would select register 0 if it were decoded.
+    core.write_memory(0x0010, 0x7F);
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        [0, 1, 0, 1, 40, 41, 42, 43],
+        core.chr_windows(),
+        "PRG-RAM disabled: neither the select nor the fill happens"
+    );
+}
+
+/// The page's three *Effective CHR banks* blocks, each with its own C line, checked against the
+/// arithmetic they describe — §7.2's "the XOR values differ per pattern table" and "the
+/// effective-bank arithmetic checked against the page's own worked table".
+///
+/// `chrBank2K = extraRegister[0] ^ (mmc3Register[0] >> 1)` at PPU `$0000-$07FF`;
+/// `chrBank2K = ((extraRegister[1] << 1) & 0x80) ^ (mmc3Register[1] >> 1)` at `$0800-$0FFF`, where
+/// the only thing the extra register contributes is **CHR A18**; and
+/// `chrBank4K = extraRegister[1] & 0x3F` at `$1000-$1FFF`, where the chip contributes **nothing**
+/// and "CHR A18: Always 0, i.e. restricted to the first 256 KiB CHR-ROM half".
+#[cfg(feature = "board-292")]
+#[test]
+fn req_core_102_mapper_292_computes_each_regions_bank_the_way_its_own_c_line_does() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mmc3_bank(0, 0x2A); // R0: a 2 KiB bank of $15.
+    core.mmc3_bank(1, 0x40); // R1: a 2 KiB bank of $20.
+
+    dragon_fill(&mut core, 0, 0x03);
+    assert_eq!(
+        [0x16 * 2 * 1024, (0x16 * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "$0000-$07FF: $03 XOR $15 is $16, and CHR A10 is PPU A10"
+    );
+    assert_eq!(
+        [0x20 * 2 * 1024, (0x20 * 2 + 1) * 1024],
+        chr_offsets(&core)[2..4],
+        "$0800-$0FFF: the chip's R1 alone, Extra0 reaching nothing here"
+    );
+
+    // The XOR is an XOR and not an OR: $FF against the same R0 gives the complement.
+    dragon_fill(&mut core, 0, 0xFF);
+    assert_eq!(
+        [(0xFF ^ 0x15) * 2 * 1024, ((0xFF ^ 0x15) * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "$FF XOR $15 is $EA"
+    );
+    dragon_fill(&mut core, 0, 0x00);
+    assert_eq!(
+        [0x15 * 2 * 1024, (0x15 * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "and zero leaves the chip's own bank"
+    );
+
+    // Extra1 bit 6 is CHR A18 of the $0800-$0FFF pair, and bits 5-0 the 4 KiB bank of
+    // $1000-$1FFF: one register, two regions, and the test moves both at once.
+    dragon_fill(&mut core, 1, 0x40 | 0x07);
+    assert_eq!(
+        [(0xA0 * 2) * 1024, (0xA0 * 2 + 1) * 1024],
+        chr_offsets(&core)[2..4],
+        "$0800-$0FFF: R1's $20 with CHR A18 from Extra1 bit 6 is $A0"
+    );
+    assert_eq!(
+        [0x1C * 1024, 0x1D * 1024, 0x1E * 1024, 0x1F * 1024],
+        chr_offsets(&core)[4..],
+        "$1000-$1FFF: 4 KiB bank 7, and CHR A10-A11 are PPU A10-A11"
+    );
+
+    // "CHR A18: Always 0" there, so **no** value of Extra1 can take that region past the first
+    // 256 KiB — bit 7 is outside the field and bit 6 belongs to the other region.
+    dragon_fill(&mut core, 1, 0xFF);
+    assert_eq!(
+        [0xFC * 1024, 0xFD * 1024, 0xFE * 1024, 0xFF * 1024],
+        chr_offsets(&core)[4..],
+        "$FF is 4 KiB bank $3F: the top of the first 256 KiB and no further"
+    );
+}
+
+/// **Q-172**: "Note that when Bit 7 in the MMC3's index register is set, MMC3 registers **2/3**
+/// instead of register 0 apply" (and 4/5 instead of 1).
+///
+/// The reading implemented is the literal one: bit 7 of the chip's `$8000` is its CHR **inversion**
+/// bit, so what the chip drives at PPU `$0000-$07FF` with it set *is* R2 and R3, one kilobyte each
+/// — and taking the chip's own per-window 1 KiB bank number and shifting it right by one gives
+/// "register 0" with the bit clear and "registers 2/3" with it set, with no code of its own. The
+/// consequence the page's plural implies and this test pins is that the two kilobytes of
+/// `$0000-$07FF` are then **independent**: R2 drives the first and R3 the second.
+///
+/// `Mmc3Board::chr_bank_of_window` is the accessor that makes it so, which is why this board
+/// widens its `cfg` alongside mapper 262's.
+#[cfg(feature = "board-292")]
+#[test]
+fn q_172_mapper_292_takes_registers_2_and_3_when_the_chips_chr_inversion_is_set() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mmc3_bank(0, 0x2A); // R0 and R1, which the inversion moves out of the way.
+    core.mmc3_bank(1, 0x40);
+    core.mmc3_bank(2, 0x10); // R2 and R3, which it moves in.
+    core.mmc3_bank(3, 0x21);
+    core.mmc3_bank(4, 0x30); // R4 and R5, likewise for $0800-$0FFF.
+    core.mmc3_bank(5, 0x41);
+    dragon_fill(&mut core, 0, 0x00);
+
+    assert_eq!(
+        [0x15 * 2 * 1024, (0x15 * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "inversion clear: register 0's own 2 KiB bank"
+    );
+
+    core.mapper_write(0x8000, 0x80);
+    assert_eq!(
+        [(0x10 >> 1) * 2 * 1024, ((0x21 >> 1) * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "inversion set: R2 drives the first kilobyte and R3 the second"
+    );
+    assert_eq!(
+        [(0x30 >> 1) * 2 * 1024, ((0x41 >> 1) * 2 + 1) * 1024],
+        chr_offsets(&core)[2..4],
+        "and R4/R5 the $0800-$0FFF pair, which is the note's second half"
+    );
+    assert_eq!(
+        [0x00, 0x01, 0x02, 0x03].map(|bank: usize| bank * 1024),
+        chr_offsets(&core)[4..],
+        "$1000-$1FFF is Extra1's alone whichever way the chip is inverted"
+    );
+
+    // The XOR still applies through the inversion, which is what makes it registers 2/3 of the
+    // *same* formula and not a different one.
+    dragon_fill(&mut core, 0, 0x03);
+    assert_eq!(
+        [
+            ((0x10 >> 1) ^ 0x03) * 2 * 1024,
+            (((0x21 >> 1) ^ 0x03) * 2 + 1) * 1024
+        ],
+        chr_offsets(&core)[..2],
+    );
+}
+
+/// **Q-172, and the one claim of §7.2 that this page overrides.** The plan says of this step that
+/// "`Cartridge::cpu_read` already reaches that window, so **no new hook**"; the page's *Latch
+/// Register* section says "All CPU writes, **including writes to zero page memory**, are visible
+/// on the cartridge connector. The mapper keeps the data of the last CPU write to any address in a
+/// temporary latch register … The game writes the desired values to zero page."
+///
+/// A zero-page write is RAM and reaches no cartridge in this core, so the latch is a new hook:
+/// `CartridgeMemory::latch_cpu_write`, one store in `NesBus::write_internal` behind `board-292`.
+/// This test is what it buys — the value the board stores comes from a write to `$0010`, an
+/// address the cartridge is not mapped at — plus the two things the page says of the index
+/// register's other bits.
+#[cfg(feature = "board-292")]
+#[test]
+fn q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6000, 0xE0);
+
+    // Four addresses no cartridge is mapped at, each the "last CPU write" in turn.
+    for (address, value) in [
+        (0x0010u16, 0x05u8),
+        (0x00FF, 0x06),
+        (0x0400, 0x07),
+        (0x07FF, 0x08),
+    ] {
+        core.write_memory(address, value);
+        cpu_read(&mut core, 0x6000);
+        let bank = usize::from(value) * 4;
+        assert_eq!(
+            [bank, bank + 1, bank + 2, bank + 3].map(|b| b * 1024),
+            chr_offsets(&core)[4..],
+            "a write to {address:#06X} is what the next read of $6000 stores"
+        );
+    }
+
+    // "It's hypothesized that clearing the A and B bits may switch the two CHR pattern table
+    // halves to normal MMC3 CHR banking, but this has not yet been verified on real hardware.
+    // The game keeps both bits enabled at all times." So the two bits are latched into the
+    // register — which puts them in the savestate for free — and drive nothing.
+    let before = chr_offsets(&core);
+    core.mapper_write(0x6000, 0x20); // R = 1, A and B clear.
+    core.write_memory(0x0010, 0x08);
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        before,
+        chr_offsets(&core),
+        "A and B clear: the unverified hypothesis is not implemented"
+    );
+
+    // And `R` is bit 5 of the index and not bit 0: a value with bit 0 set and bit 5 clear picks
+    // Extra Data Register **#0**, which is the XOR of the other pattern table.
+    core.mmc3_bank(0, 0x00);
+    core.mapper_write(0x6000, 0xC1);
+    core.write_memory(0x0010, 0x11);
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        [0x11 * 2 * 1024, (0x11 * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "bit 0 of the index is not the select; bit 5 is"
+    );
+}
+
+/// REQ-CORE-095: "There are four extra registers that are filled by writing or reading (!) from
+/// the CPU `$6000-$7FFF` address range", so that window **is** the board's decode and
+/// `registry::board_memory_sizes` gives the number no PRG-RAM — the arm 114, 115, 182, 208 and the
+/// two MMC3 multicarts are already on.
+///
+/// Two things follow and both are asserted: a write there does not persist, and a read there
+/// drives nothing on the bus (`Some(None)`, which leaves the caller's open-bus value), so a game
+/// cannot mistake the register window for save RAM. The dump declares a battery, which is exactly
+/// the case the row has to win against.
+#[cfg(feature = "board-292")]
+#[test]
+fn req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window() {
+    let mut core = MapperRom::new(292).prg(32).chr(512).battery().load();
+    core.mapper_write(0xA001, 0x80);
+    for address in [0x6000u16, 0x6ABC, 0x7FFF] {
+        core.write_memory(address, 0x5A);
+        assert_ne!(
+            0x5A,
+            core.read_memory(address),
+            "{address:#06X} is the register window and not RAM"
+        );
+        assert_eq!(
+            None,
+            cpu_read(&mut core, address),
+            "{address:#06X}: the board decodes it and drives nothing"
         );
     }
 }

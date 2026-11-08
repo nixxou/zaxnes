@@ -30,6 +30,8 @@ use super::mappers::Mapper091;
 use super::mappers::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::mappers::Mmc3ChrRamBoard;
+#[cfg(feature = "board-292")]
+use super::mappers::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
 use super::mappers::Mmc3Gouder208;
 #[cfg(feature = "board-263")]
@@ -369,6 +371,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     264,
     #[cfg(feature = "board-268")]
     268,
+    // The BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose CHR banking is XORed with two
+    // registers a read of $6000-$7FFF fills (MF-UNL-12 step 2).
+    #[cfg(feature = "board-292")]
+    292,
     #[cfg(feature = "board-298")]
     298,
     #[cfg(feature = "board-taito-x1")]
@@ -524,6 +530,22 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // makes for the MMC6.
         #[cfg(feature = "board-208")]
         208 if !(header.is_nes20 && header.submapper == 1) => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // Mapper 292: "There are four extra registers that are filled by writing or reading (!)
+        // from the CPU $6000-$7FFF address range", so that whole window **is** the board's decode
+        // and there is no RAM behind it -- the same arm, and the same reason, as 114, 115, 182 and
+        // 208 above (MF-UNL-12 step 2). `Cartridge::cpu_write` returns at $6000-$7FFF whenever the
+        // cartridge has any PRG-RAM, so without this row the Extra Index Register could not be
+        // written at all; and with no RAM there `Cartridge::default_cpu_read` never shadows the
+        // board's own `cpu_read_override`, which is what fills a data register.
+        //
+        // The page's condition on the registers -- "when PRG-RAM is enabled in the MMC3's A001
+        // register" -- is still read, from `Mmc3Board::prg_ram_enabled`: it is the chip's own
+        // enable bit and does not need a chip behind it.
+        #[cfg(feature = "board-292")]
+        292 => BoardMemorySizes {
             prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
@@ -1479,6 +1501,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         262 => Board::IrqBoard(IrqBoard::Mmc3Shero(Box::new(Mmc3Shero::new(
             memory, mapper,
         )))),
+        // MF-UNL-12 step 2: the BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose PRG banking,
+        // mirroring and counter are the chip's and whose CHR banking is not. Two extra registers,
+        // selected by a write to $6000-$7FFF and **filled by a read** of the same window from the
+        // datum of the last CPU write to any address, carry the XOR of the 2 KiB bank at PPU
+        // $0000-$07FF, CHR A18 of the 2 KiB bank at $0800-$0FFF and the whole 4 KiB bank at
+        // $1000-$1FFF. The page gives the number no submapper, so there is nothing to refuse.
+        #[cfg(feature = "board-292")]
+        292 => Board::IrqBoard(IrqBoard::Mmc3Dragonfighter(Box::new(
+            Mmc3Dragonfighter::new(memory, mapper),
+        ))),
         // MF-UNL-11 step 2: the unnamed Gouder board of the Street Fighter IV backport, an
         // MMC3 clone whose PRG-ROM is banked in 32 KiB amounts from a register at $4800/$6800,
         // with a 256-byte protection lookup table behind four registers at $5800-$5FFF.

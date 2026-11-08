@@ -10,6 +10,8 @@ use super::Mapper091;
 use super::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
+#[cfg(feature = "board-292")]
+use super::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
 use super::Mmc3Gouder208;
 #[cfg(feature = "board-263")]
@@ -211,6 +213,15 @@ pub enum IrqBoard {
     /// is a method this variant already forwards for five earlier boards.
     #[cfg(feature = "board-262")]
     Mmc3Shero(Box<Mmc3Shero>),
+    /// NES 2.0 mapper 292, the **BMW8544** / UNL-DRAGONFIGHTER (MF-UNL-12 step 2): an MMC3 clone
+    /// whose CHR banking is XORed with two registers a **read** of `$6000-$7FFF` fills from the
+    /// board's write latch.
+    ///
+    /// **Boxed**, on [`IrqBoard::Mmc3Scramble`]'s own reason: the board *holds* an `Mmc3` and adds
+    /// its own three registers. It is the **first** board of this variant to need
+    /// [`Mapper::cpu_read_override`], which is the one forward this lot adds here.
+    #[cfg(feature = "board-292")]
+    Mmc3Dragonfighter(Box<Mmc3Dragonfighter>),
     /// Mapper 116, the Gouder SOMARI-P and its Huang ASIC: three chips in one board, of which
     /// only the MMC3 has an IRQ (MF-6a3 step 4).
     ///
@@ -354,6 +365,8 @@ macro_rules! inner {
             IrqBoard::Mmc3A9461($b) => $body,
             #[cfg(feature = "board-262")]
             IrqBoard::Mmc3Shero($b) => $body,
+            #[cfg(feature = "board-292")]
+            IrqBoard::Mmc3Dragonfighter($b) => $body,
             #[cfg(feature = "board-116")]
             IrqBoard::Somari($b) => $body,
             #[cfg(feature = "board-68")]
@@ -556,6 +569,33 @@ impl Mapper for IrqBoard {
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
+    }
+
+    /// Forwarded for mapper 292 alone (MF-UNL-12 step 2), the one board of this enum whose
+    /// registers are filled by a **read**: "There are four extra registers that are filled by
+    /// writing or reading (!) from the CPU $6000-$7FFF address range."
+    ///
+    /// **`#[inline(never)]`, for [`IrqBoard::try_read_prg`]'s reason one dispatch along.**
+    /// `Board::cpu_read_override` carries `#[inline(always)]` -- lot PR-1 step 3 pinned it,
+    /// because the MMC5 maps PRG-RAM into $8000-$DFFF and so reaches it on **every** CPU read --
+    /// and it folds into `Cartridge::try_cpu_read`. Out of line, the arm this variant contributes
+    /// to that inlined jump table is one `callq` whatever the enum grows to later.
+    ///
+    /// **Behaviour-neutral for the other boards of this enum**: none of the fourteen overrides
+    /// either method, so each one's own default is `Mapper::cpu_peek_override`'s `None` -- the
+    /// same answer the un-forwarded dispatch gave them.
+    #[cfg(feature = "board-292")]
+    #[inline(never)]
+    fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_read_override(memory, address))
+    }
+
+    /// The side-effect-free counterpart, for the same board and the same reason: without it
+    /// `Mapper::cpu_read_override`'s own default would route a host peek through the fill.
+    #[cfg(feature = "board-292")]
+    #[inline(never)]
+    fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_peek_override(memory, address))
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
