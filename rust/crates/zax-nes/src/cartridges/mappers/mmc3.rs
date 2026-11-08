@@ -738,7 +738,7 @@ impl<
     }
 
     /// Makes `$A000` inert, for a board that holds this chip and whose own page takes the
-    /// mirroring away from it (MF-UNL-8 step 2).
+    /// mirroring away from it (MF-UNL-8 step 2, **Q-165**).
     ///
     /// nesdev ("INES Mapper 014"): "According to Nestopia's mapper source code, **mirroring can
     /// only be controlled in VRC2 mode**, and the VRC2 PRG and mirroring registers do not respond

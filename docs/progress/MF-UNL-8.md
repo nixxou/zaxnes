@@ -50,7 +50,7 @@ with a same-behaviour pair and recorded; the tolerance is not redefined.
   registers, two modes, three CHR A18 bits and the page's two Nestopia caveats.
 - [x] **3/8** — `board-cony`: mappers **83** and **264**, four of the page's five PCB variants.
 - [x] **4/8** — `board-91`: both submappers, two IRQ counters, the address-driven outer register.
-- [ ] **5/8** — the question tickets.
+- [x] **5/8** — the question tickets.
 - [ ] **6/8** — the four sweeps, the save-state round-trips and the feature configurations.
 - [ ] **7/8** — the callgrind campaign against the base commit, and the feature decision per board.
 - [ ] **8/8** — golden-core, the full `--include-ignored` run with both ROM roots,
@@ -648,3 +648,30 @@ lot's three features alone.
 [PROGRESS] MF-UNL-8 step 4/8 done: mapper 91's two boards are one board and one `bool`, because the
 $F003/$F007 mask *is* the submapper; its outer register is an address and not a datum, and its two
 counters are 64 unfiltered A12 rises against a borrow out of five-every-four M2 cycles.
+
+---
+
+## Step 5 — five question tickets
+
+`G:/3dsen/cleanroom/spec/changes/Q-164.md` to `Q-168.md`, one per board plus one for the scope
+decision. Nothing else under `spec/` is touched.
+
+| ticket | what it records |
+| --- | --- |
+| **Q-164** | **§7.2 says mapper 12 is "`Somari` with one more register" and the number's own page refutes it** — "The Huang-1 ASIC functions exclusively as an MMC3A clone on this PCB" — plus `$4132`'s undocumented power-on, which value of the language bit is Chinese, the FCEUX latch the page names as *not* the hardware's with a homebrew hack depending on it, and submapper 1 refused as copier hardware |
+| **Q-165** | mapper 14: the bit positions where the page's **diagram** and a prose rendering of the same page disagree by one place throughout; "Mask: `$FFFF?`" with the page's own question mark; no power-on value; which chip latches a supervisor write that changes the mode; and **two rules the page says "have not been verified on original hardware"** — with the finding that the second of them is what keeps `$A131` off the VRC2's own PRG register, a consequence that is on neither page |
+| **Q-166** | the Cony page: a **printed register mask that cannot be right** (`$5100 AND $8310` is `$0100`, and the mask is character for character the preceding register's); a solder pad with **no configuration source in any header**, against §7.2's "returns the configured value"; "it's not known which of the eight data bits is decisive"; what `$6000`-`$7FFF` shows in PRG modes 0 and 1; and why `ppu_irq_horizon` answers the census's conditional with a stronger statement |
+| **Q-167** | **mapper 83 submapper 2 refused**, and that §7.2's account of the board never mentions there are five PCBs. The boundary is a *mechanism* boundary: that PCB alone needs `Mapper::prg_ram_window` forwarded through `IrqBoard`, an unmeasured `Board` dispatch body, for a 4-in-1 multicart with no original title — where 83.3 is also a multicart and is **implemented**, because it costs two `const` rows. The ticket ends with what reopening it would take |
+| **Q-168** | mapper 91: the outer register's bit order, where the page's **label writes the pair ascending** while every other nesdev field diagram is MSB-first; "Mask: unknown"; **neither counter has a stated firing rule**, with the arithmetic that makes submapper 1's borrow-out reading nearly forced; "hard-wired to last bank" — of what; **the two pages of this lot do not share a vocabulary for mirroring**, so the two boards read the same-looking sentence two different ways and each follows its own page; and that §7.2 under-counts the board at one counter and four register groups where the page has two counters, five groups and an outer register it does not mention |
+
+Three of the five are the MF-UNL-2 case the lot instruction names — "§7.2's steps were drafted from
+Mesen's `MapperFactory` and three of them contradicted the numbers' own pages: **the number's own
+page wins**" — and the one that bites hardest is Q-164, because it is the difference between a
+three-chip board and a one-chip board. Q-167 is a scope decision rather than a contradiction, and it
+is in a ticket because the lot's rule is that nothing is left out silently. Q-166's item 1 and
+Q-168's item 5 are the two places a page is wrong or inconsistent rather than merely silent.
+
+[PROGRESS] MF-UNL-8 step 5/8 done: five tickets — mapper 12 is not mapper 116's board, mapper 14's
+two rules are unverified by its own page's admission, the Cony page prints a mask that cannot be
+right and a pad nothing can configure, submapper 2 is refused on a mechanism and not on content, and
+mapper 91's two counters have no stated firing rule at all.

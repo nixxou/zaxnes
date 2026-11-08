@@ -127,7 +127,8 @@ pub struct Vrc2Vrc4 {
     #[cfg(feature = "board-298")]
     ack_without_enable_copy: bool,
     /// iNES mapper **14**, the Gouder SL-1632: "the VRC2 PRG and mirroring registers do not
-    /// respond to address mirrors" (MF-UNL-8 step 2). So `$8000`, `$9000` and `$A000` answer at
+    /// respond to address mirrors" (MF-UNL-8 step 2, **Q-165**). So `$8000`, `$9000` and `$A000`
+    /// answer at
     /// those addresses exactly and at no other address of their `$1000` blocks — which is what
     /// keeps that board's supervisor register at `$A131` off its own PRG register.
     ///
