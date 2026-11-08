@@ -15,6 +15,31 @@ pub struct JalecoSs88006 {
     irq_width: i32,
     irq_enabled: bool,
     irq_pending: bool,
+    /// `$9002`, the PRG-RAM protect register (MF-LEG-1 step 4, report entry 18-2; **Q-175**).
+    ///
+    /// nesdev ("INES Mapper 018") gives it as the MMC3's `$A001` under another address:
+    ///
+    /// ```text
+    /// 7  bit  0
+    /// ---------
+    /// .... ..WR
+    ///        ||
+    ///        |+- PRG RAM chip enable (0: disable; 1: enable)
+    ///        +-- Write protection (0: deny writes; 1: allow writes)
+    /// ```
+    ///
+    /// **Powered on at `$03`, both permitted**, which is Q-175 section 1: the page says nothing
+    /// about power-on, puNES and this build's own MMC3 come up permitted (MR-4-5), and Nestopia
+    /// comes up with **both denied** — which only works if every mapper-18 game writes the
+    /// register before touching its save. Permitted is the reading under which a game that never
+    /// writes `$9002` keeps its save RAM, and the entry asks for it by name.
+    ///
+    /// **Not in the savestate**, for Q-174 section 2's reason in the same words: a byte written
+    /// here would leave every mapper-18 state written before this step one short of the board's
+    /// block, and there is no per-board length to read it tolerantly against. A state loaded into
+    /// a running machine therefore keeps the permissions that machine has, and a machine powered
+    /// on has `$03`. Q-175 section 2 holds the choice.
+    prg_ram_protect: u8,
 }
 
 fn set_nibble(register: &mut u8, half: u16, nibble: u8) {
@@ -26,6 +51,9 @@ fn set_nibble(register: &mut u8, half: u16, nibble: u8) {
 }
 
 impl JalecoSs88006 {
+    /// `$9002` at power-on: the chip enabled and writes allowed (Q-175 section 1).
+    const PRG_RAM_PROTECT_AT_POWER_ON: u8 = 0x03;
+
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
@@ -36,6 +64,7 @@ impl JalecoSs88006 {
             irq_width: 16,
             irq_enabled: false,
             irq_pending: false,
+            prg_ram_protect: Self::PRG_RAM_PROTECT_AT_POWER_ON,
         }
     }
 
@@ -112,6 +141,19 @@ impl Mapper for JalecoSs88006 {
         self.irq_pending
     }
 
+    /// `$9002` bit 0, "PRG RAM chip enable (0: disable; 1: enable)" — the page's own words, and
+    /// "same as MMC3" for the pair (see [`JalecoSs88006::prg_ram_protect`]).
+    fn prg_ram_enabled(&self) -> bool {
+        self.prg_ram_protect & 0x01 != 0
+    }
+
+    /// `$9002` bit 1, "Write protection (0: deny writes; 1: allow writes)", **and** bit 0: a
+    /// disabled chip accepts no writes either. Same shape as `Mmc3Board::prg_ram_writable`, whose
+    /// bit 6 is the MMC3's inverted equivalent of this bit.
+    fn prg_ram_writable(&self) -> bool {
+        self.prg_ram_protect & 0x03 == 0x03
+    }
+
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
         self.prg = [0, 1, 2];
         self.chr = [0; 8];
@@ -120,6 +162,7 @@ impl Mapper for JalecoSs88006 {
         self.irq_width = 16;
         self.irq_enabled = false;
         self.irq_pending = false;
+        self.prg_ram_protect = Self::PRG_RAM_PROTECT_AT_POWER_ON;
         self.update_banks();
     }
 
@@ -141,6 +184,10 @@ impl Mapper for JalecoSs88006 {
                 if index < 2 {
                     set_nibble(&mut self.prg[2], index, nibble);
                     self.update_banks();
+                } else if index == 2 {
+                    // $9002, the PRG-RAM protect register. $9003 stays undecoded: the page lists
+                    // no register there (MF-LEG-1 step 4, report entry 18-2).
+                    self.prg_ram_protect = value & 0x03;
                 }
             }
             // $A000-$D003: the eight CHR banks.

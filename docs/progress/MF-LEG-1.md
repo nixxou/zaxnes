@@ -176,7 +176,47 @@ the `$x100` addresses are the numbered fill, which is why `prg_windows()` reads 
 
 `cargo test --release -p zax-nes -p zax-harness`: **1162 passed, 0 failed, 10 ignored**.
 `cargo fmt --all -- --check` and clippy `-D warnings --all-targets` on `zax-nes`: clean.
-- [ ] 4/9 Jaleco SS88006 (18-2) — `$9002`
+- [x] 4/9 Jaleco SS88006 (18-2) — `$9002`
+
+### 4/9 — the Jaleco SS88006's `$9002` (entry 18-2)
+
+**The page.** nesdev ("INES Mapper 018") gives `$9002` as `.... ..WR`, bit 0 "PRG RAM chip enable
+(0: disable; 1: enable)" and bit 1 "Write protection (0: deny writes; 1: allow writes)", and names
+the equivalence outright — "same as MMC3", whose `$A001` carries the same pair with the write bit
+inverted. This build handled indices 0 and 1 of the `$9000` group and fell through for `$9002`, so
+the board took the trait defaults: always enabled, always writable.
+
+**What was built**, which is the three-line shape the entry asked for and `Mmc3Board` already has:
+one arm in the `$9000` group storing `value & 0x03`, and `prg_ram_enabled` / `prg_ram_writable`
+reading its two bits. A disabled chip accepts no writes either, so `prg_ram_writable` tests both.
+`$9003` stays undecoded — the page lists no register there.
+
+**Power-on `$03`, both permitted**, which the lot instruction requires and the entry asks for by
+name. Q-175 section 1 records the ambiguity: the page says nothing about power-on, puNES and this
+build's own MMC3 come up permitted, and **Nestopia comes up with both denied** — which only works
+if every mapper-18 game writes the register before touching its save. Permitted is the reading
+under which a game that never writes `$9002` keeps its work RAM at all.
+
+**No feature.** `JalecoSs88006` is its own `Board` variant and both methods are already in the
+dispatch; this fills that board's two arms and touches nothing else. Mapper 18 is in no measured
+set.
+
+**Not in the savestate** (Q-175 section 2), for Q-174 section 2's reason in the same words: the
+board's block has no length prefix, so a byte at its end makes every mapper-18 state written before
+this step one short — and because more blocks follow the cartridge's, the mis-parse would not even
+be a clean error. The third way out, bumping `NesCore::STATE_VERSION` as MF-UNL-9 did for the
+flash, changes the version number in every state file for one board's two bits, which is outside
+what this lot may touch. A state loaded into a running machine keeps the live permissions; a machine
+powered on has `$03`, the state that cannot lose data.
+
+**Tests.** Two. `mf_leg_1_the_ss88006_decodes_9002_as_its_prg_ram_enable_and_write_protect` walks
+power-on, `R`-without-`W` (readable, writes discarded), `R` clear (open bus, nothing latched), both
+back with the pre-protection byte intact, `$9003` undecoded, and the register answering across its
+`$1000` block. `q_175_the_ss88006_prg_ram_protect_is_not_in_the_savestate` pins the omission and
+that the round trip is still byte-identical.
+
+`cargo test --release -p zax-nes -p zax-harness`: **1164 passed, 0 failed, 10 ignored**. fmt and
+clippy `-D warnings --all-targets` on `zax-nes`: clean.
 - [ ] 5/9 MMC1A (MMC1-4) — NES 2.0 submapper 3
 - [ ] 6/9 Irem G-101 (32-1) — *Major League* on the upper page
 - [ ] 7/9 golden-core over the 98 originals

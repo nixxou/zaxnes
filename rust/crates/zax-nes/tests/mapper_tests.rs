@@ -3211,6 +3211,73 @@ fn req_core_100_jaleco_ss88006_loads_its_banks_one_nibble_at_a_time() {
     assert_eq!(Nm::Vertical, core.mirroring());
 }
 
+/// **MF-LEG-1 step 4, report entry 18-2** (REQ-CORE-100): `$9002` is the SS88006's PRG-RAM
+/// protect register, "same as MMC3".
+///
+/// nesdev ("INES Mapper 018") gives it as `.... ..WR` — bit 0 "PRG RAM chip enable (0: disable;
+/// 1: enable)", bit 1 "Write protection (0: deny writes; 1: allow writes)". The board **powers on
+/// with both permitted** (Q-175 section 1), which is puNES's choice and this build's own MMC3's;
+/// Nestopia powers up with both denied, which only works if every mapper-18 game writes the
+/// register before touching its save.
+#[test]
+fn mf_leg_1_the_ss88006_decodes_9002_as_its_prg_ram_enable_and_write_protect() {
+    let mut core = MapperRom::new(18).prg(32).chr(32).load();
+
+    // Power-on: readable and writable, so a game that never writes $9002 keeps its save RAM.
+    core.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    // `R` set, `W` clear: still readable, writes denied.
+    core.write_memory(0x9002, 0x01);
+    core.write_memory(0x6000, 0xA5);
+    assert_eq!(0x5A, core.read_memory(0x6000), "a denied write got through");
+
+    // `R` clear: the chip is deselected and the window is open bus, which this core answers as
+    // zero. Writes are denied with it, a disabled chip latching nothing.
+    core.write_memory(0x9002, 0x02);
+    core.write_memory(0x6000, 0x3C);
+    assert_eq!(0x00, core.read_memory(0x6000), "open bus, not RAM");
+    core.write_memory(0x9002, 0x00);
+    assert_eq!(0x00, core.read_memory(0x6000));
+
+    // Both back: the byte written before the protection went up is still there, so nothing in
+    // between reached the chip.
+    core.write_memory(0x9002, 0x03);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+    core.write_memory(0x6000, 0xC3);
+    assert_eq!(0xC3, core.read_memory(0x6000));
+
+    // $9003 is undecoded: the page lists no register there, so it must not reach the pair.
+    core.write_memory(0x9003, 0x00);
+    assert_eq!(0xC3, core.read_memory(0x6000), "$9003 moved the protection");
+
+    // The register answers across its $1000 block, like the board's other registers.
+    core.write_memory(0x9FF2, 0x00);
+    assert_eq!(0x00, core.read_memory(0x6000));
+}
+
+/// REQ-CORE-091 and Q-175 section 2: `$9002` is **not** in the savestate, so a mapper-18 state
+/// written before MF-LEG-1 step 4 still loads — the board's block is byte for byte what it was.
+/// A state loaded into a running machine leaves the live permissions alone.
+#[test]
+fn q_175_the_ss88006_prg_ram_protect_is_not_in_the_savestate() {
+    let mut core = MapperRom::new(18).prg(32).chr(32).battery().load();
+    core.write_memory(0x6000, 0x5A);
+    core.write_memory(0x9002, 0x00); // Both denied.
+    let state = core.save_state(true).expect("a state");
+
+    core.write_memory(0x9002, 0x03);
+    assert!(core.try_load_state(&state, 0).is_ok());
+    assert_eq!(
+        0x5A,
+        core.read_memory(0x6000),
+        "the state carried the protect register"
+    );
+    // And the round trip is still byte-identical, which is what makes the omission consistent
+    // rather than merely absent.
+    assert_eq!(state, core.save_state(true).expect("a state"));
+}
+
 /// The register offset of VRC register `index` under the wiring of `mapper`.
 fn vrc_register(mapper: usize, index: u16) -> u16 {
     match mapper {
