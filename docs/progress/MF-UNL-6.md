@@ -34,7 +34,7 @@ load with REQ-CORE-011's typed cause rather than run on a layout that is not the
 - [x] **2/8** — the other three banking modes — `$10` (GNROM), `$40` and `$50` (the two "weird"
   ones) — the mixed CHR-ROM/CHR-RAM window of `$xxx4`, and the PRG-RAM window `$xxx3` bit 5 opens
   at $5000-$5FFF.
-- [ ] **3/8** — the size ceiling: a 64 MiB image loads, a bigger declaration is refused, the
+- [x] **3/8** — the size ceiling: a 64 MiB image loads, a bigger declaration is refused, the
   SC0/SC1 half-select, and the `board_memory_sizes` row.
 - [ ] **4/8** — the question tickets, the four sweeps, the save-state round-trip and the feature
   configurations.
@@ -231,3 +231,72 @@ the test pins the write-protected case.
 **1039 passed, 0 failed, 9 ignored** (step 1 left it at 1034/0/9): five tests, one per banking mode
 beyond `$00` plus the mixed chip and the second RAM window. `cargo fmt --all -- --check` clean and
 `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.
+
+---
+
+## Step 3 — the 64 MiB image, and the ceiling there was never any of
+
+§7.2 step 2 is "Lift the PRG/CHR size ceiling in the loader and in `board_memory_sizes` to what a
+64 MiB image needs — a check this build has never had to make, **and the lot's real risk**".
+
+### The finding: there is no ceiling in the loader to lift
+
+**Q-158** records it. Every piece of the path was read and none of them imposes a maximum:
+
+| where | what it does with 64 MiB |
+| --- | --- |
+| `InesHeader::try_parse` | reads NES 2.0's twelve-bit size field, and its **exponent-multiplier** form when the MSB nibble is `$F` — which is the only form that can say 64 MiB, the twelve-bit field topping out at 65 520 KiB |
+| `nes20_rom_size` | `multiplier.wrapping_shl(exponent)` then `usize::try_from(...).unwrap_or(usize::MAX)`: an impossible exponent becomes `usize::MAX`, **not** a panic |
+| `RomImage::try_load` | refuses an announcement the file cannot carry, with `TruncatedFile` — which is REQ-CORE-011's typed cause, so the "declaring more is refused" half of the pair is answered by a check that was already there |
+| `BankWindows::new` | counts banks into an `i32`: **8 192** of them at 64 MiB, and `i32::try_from(len / size)` is the guard |
+| `BankWindows::map_prg_8k` | `bank.rem_euclid(count)`, so every bank number this board composes is in range by construction |
+
+So the step adds **no ceiling and lifts none**; what it adds is the regression test that says so,
+`req_core_011_a_64_mib_image_loads_and_a_larger_declaration_is_refused`: a real 64 MiB image
+loads and banks, a 128 MiB declaration behind a 16-byte file is refused, an exponent of 63 with
+multiplier 7 — the arithmetic that would overflow — is refused the same way, and a 512 MiB CHR
+declaration too. No `panic!`, `unwrap` or `expect` is reachable on any of the four.
+
+### PRG A25, the one row of the page a bank-window core cannot express
+
+nesdev's *64 MiB mapping* is the YH2018A's wiring: SC0 (`$xxx1` bit 0) and SC1 (`$xxx3` bit 0)
+drive PRG A25 through the ASIC's OA0 pin, and the table has three rows —
+
+| `$xxx1.0` | `$xxx3.0` | the page |
+| :-: | :-: | --- |
+| 0 | 0 | "PRG A25=PRG A0, i.e. bytes at even addresses come from the first 32 MiB and bytes at odd addresses come from the second 32 MiB half" |
+| 0 | 1 | "PRG A25=1, i.e. second 32 MiB half" |
+| 1 | x | "PRG A25=0, i.e. first 32 MiB half" |
+
+— of which **the first is not a bank**. A `BankWindows` window is a byte offset plus a length, and
+that row interleaves two 32 MiB chips byte by byte. It is also the *reset* state, and the page
+says what the hardware's users do about that: "either the code at the reset vector must be
+carefully placed with bytes alternating between the two 32 MiB halves, or (as the existing
+multicarts do) **must be duplicated in both 32 MiB halves**."
+
+So the board answers the **first** half for that row — the half every known dump duplicates its
+boot code into — and **Q-158** records it with the observation that would close it.
+`q_158_mapper_268_reads_the_second_32_mib_half_only_when_sc1_is_set_alone` walks all four states
+of the two bits and then shows the line wrapping away on a 512 KiB image, which is what the real
+chip's missing address line does: the line is driven on every image because **no header field
+distinguishes a YH2018A**.
+
+### The `board_memory_sizes` row
+
+`268 => min_prg_ram: 8 KiB`, on the page's "up to 32 MiB of PRG-ROM, 256 KiB of CHR-ROM or -RAM,
+and **8 KiB of WRAM**" and on its whole *WRAM usage* paragraph, which is about a game keeping that
+WRAM behind the register window. A **floor** and not an exact size, which is mapper 190's and
+35's shape in that function: the figure is what REQ-CORE-012's default gives an iNES 1.0 image
+anyway, and an NES 2.0 dump that declares more keeps what it declares.
+
+**The CHR is deliberately the header's**, which is mapper 97's reason in this function rather than
+the TQROM's: the page gives no single figure to state. Its PCB table gives a *maximum* per board —
+"max. 256 KiB CHR-RAM" on the SMD72A, "max. 128 KiB" on the J-852C, "max. 1 MiB CHR-ROM" on the
+JTH-813 — and the rows this build serves are CHR-RAM-only or mixed, which only an NES 2.0 byte 11
+can describe. `req_core_012_mapper_268_keeps_its_8_kib_of_wram_and_takes_its_chr_from_the_header`
+pins both halves, the mixed cartridge with two chips side by side included.
+
+### What it measures to the suites
+
+**1042 passed, 0 failed, 9 ignored** (step 2 left it at 1039/0/9): three tests. `cargo fmt --all
+-- --check` clean and `cargo clippy -p zax-nes --all-targets -- -D warnings` clean.

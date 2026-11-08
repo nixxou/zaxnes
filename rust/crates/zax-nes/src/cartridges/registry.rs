@@ -655,6 +655,26 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             min_prg_ram: BankWindows::PRG_WINDOW_SIZE,
             ..BoardMemorySizes::default()
         },
+        // nesdev ("NES 2.0 Mapper 268"): the AA6023 addresses "up to 32 MiB of PRG-ROM, 256 KiB
+        // of CHR-ROM or -RAM, and **8 KiB of WRAM**", and its *WRAM usage* section is a whole
+        // paragraph about a game keeping that WRAM behind the register window -- so the board has
+        // it, and the row states the figure (MF-UNL-6 step 3).
+        //
+        // **A floor and not an exact size**, which is mapper 190's and 35's shape in this
+        // function: the figure is what REQ-CORE-012's default gives an iNES 1.0 image anyway, and
+        // an NES 2.0 dump that declares more (a MINDKIDS flash cartridge) keeps what it declares.
+        //
+        // **The CHR is deliberately the header's**, which is mapper 97's reason rather than the
+        // TQROM's: the page gives no single figure to state. Its PCB table gives a *maximum* per
+        // board -- "max. 256 KiB CHR-RAM" on the SMD72A, "max. 128 KiB" on the J-852C, "max. 1 MiB
+        // CHR-ROM" on the JTH-813 -- and the row this build serves (submappers 0 and 1) is
+        // CHR-RAM-only or mixed, which only an NES 2.0 byte 11 can describe. So the dump decides,
+        // and `$xxx4`'s mixed mode reads whatever chip it declared.
+        #[cfg(feature = "board-268")]
+        268 => BoardMemorySizes {
+            min_prg_ram: BankWindows::PRG_WINDOW_SIZE,
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 038"): "PRG RAM capacity: **None**", and here the window is in
         // the way as well -- the board's "Bank select ($7000-$7FFF)" is the upper half of it.
         // This is mapper 140's and 184's arm above for both of their reasons at once

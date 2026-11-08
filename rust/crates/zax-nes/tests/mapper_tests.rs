@@ -10567,3 +10567,176 @@ fn q_159_mapper_268_opens_a_second_prg_ram_window_at_5000_from_xxx3_bit_5() {
         "on a MINDKIDS $5400 is still $xxx0"
     );
 }
+
+/// A 16-byte mapper-268 header and nothing behind it, declaring `prg_low`/`prg_msb` bytes of
+/// PRG-ROM and `chr_low`/`chr_msb` of CHR-ROM in NES 2.0's own two fields (MF-UNL-6 step 3).
+///
+/// For the refusal half of the size pair: an image whose header announces more than it carries
+/// must come back with REQ-CORE-011's typed cause rather than panicking, whatever arithmetic the
+/// announcement needs.
+#[cfg(feature = "board-268")]
+fn coolboy_header(prg_low: u8, prg_msb: u8, chr_low: u8, chr_msb: u8) -> Vec<u8> {
+    let mut image = vec![0u8; 16];
+    image[..4].copy_from_slice(&[0x4E, 0x45, 0x53, 0x1A]);
+    image[4] = prg_low;
+    image[5] = chr_low;
+    image[6] = 0xC0;
+    image[7] = 0x08;
+    image[8] = 0x01;
+    image[9] = (chr_msb << 4) | (prg_msb & 0x0F);
+    image
+}
+
+/// §7.2 step 2's own request — "Lift the PRG/CHR size ceiling in the loader and in
+/// `board_memory_sizes` to what a 64 MiB image needs — a check this build has never had to make,
+/// and the lot's real risk" — and step 4's "header-size regression test: an image declaring
+/// 64 MiB of PRG loads, and one declaring more is refused with REQ-CORE-011's message rather than
+/// panicking" (MF-UNL-6 step 3).
+///
+/// **There was no ceiling in the loader to lift**, which is the step's finding and **Q-158**
+/// records it: `InesHeader::try_parse` reads NES 2.0's twelve-bit size field and its
+/// exponent-multiplier form and imposes no maximum of its own, `BankWindows` counts banks in an
+/// `i32` (8 192 of them at 64 MiB), and every bank number is wrapped modulo that count. What
+/// refuses an over-size *declaration* is the truncation check — the header announces more bytes
+/// than the file carries — and what makes a pathological announcement safe rather than fatal is
+/// `nes20_rom_size`'s `wrapping_shl` plus `usize::try_from`, which turn an exponent of 63 into
+/// `usize::MAX` and so into the same refusal.
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_011_a_64_mib_image_loads_and_a_larger_declaration_is_refused() {
+    // The YH2018A's own size, in the only form a header can carry it: multiplier 1, exponent 26.
+    let mut core = coolboy(64 * 1024 * 1024, 0);
+    assert_eq!(
+        64 * 1024 * 1024,
+        core.cartridge().unwrap().memory().rom().prg_rom().len(),
+        "the whole 64 MiB came through the header's exponent form"
+    );
+    assert_eq!(
+        [0, 1, 0x3E, 0x3F],
+        coolboy_banks(&core),
+        "and it is an MMC3"
+    );
+
+    // The two outer lines no image below 32 MiB can show: `CC` of `$xxx0` is PRG A24 and A23.
+    core.mapper_write(0x6000, 0x40); // Every mask bit to the offset.
+    core.mapper_write(0x6001, 0x80);
+    for (value, line, bank) in [
+        (0x40u8, "no line", 0x000u16),
+        (0x50, "A23", 0x400),
+        (0x60, "A24", 0x800),
+        (0x70, "A24 and A23", 0xC00),
+    ] {
+        core.mapper_write(0x6000, value);
+        assert_eq!(
+            [bank, bank | 0x01, bank | 0x0E, bank | 0x0F],
+            coolboy_banks(&core),
+            "{line}: $6000 = {value:#04X}"
+        );
+    }
+
+    // And a declaration this build refuses: 128 MiB announced by a 16-byte file.
+    for (prg_low, prg_msb, chr_low, chr_msb, what) in [
+        (27u8 << 2, 0x0Fu8, 0x00u8, 0x00u8, "128 MiB of PRG-ROM"),
+        // Exponent 63 with multiplier 7, which overflows the shift: `wrapping_shl` plus
+        // `usize::try_from` make it `usize::MAX`, so the refusal is the same one.
+        (0xFF, 0x0F, 0x00, 0x00, "an impossible PRG exponent"),
+        (0x20, 0x00, 29 << 2, 0x0F, "512 MiB of CHR-ROM"),
+    ] {
+        let mut core = NesCore::new();
+        let load = core.load_rom(
+            &coolboy_header(prg_low, prg_msb, chr_low, chr_msb),
+            "Huge.nes",
+        );
+        assert!(!load.success, "{what} must be refused");
+        assert_eq!(
+            zax_nes::rom::RomLoadFailure::TruncatedFile,
+            load.failure,
+            "{what}"
+        );
+        assert!(!core.is_running(), "{what}");
+    }
+}
+
+/// **Q-158**: nesdev's *64 MiB mapping*, which is the one row of this board's own table that a
+/// bank-window core cannot express (MF-UNL-6 step 3).
+///
+/// > The **YH2018A** PCB uses the SC0 (`$6001` bit 0) and SC1 (`$6003` bit 0) bits to address two
+/// > halves of 32 MiB for a total of 64 MiB. … `0`/`0`: PRG A25=PRG A0, i.e. bytes at even
+/// > addresses come from the first 32 MiB and bytes at odd addresses come from the second 32 MiB
+/// > half. `0`/`1`: PRG A25=1, i.e. second 32 MiB half. `1`/`x`: PRG A25=0, i.e. first 32 MiB
+/// > half.
+///
+/// The first row interleaves two chips byte by byte, and a [`zax_nes::cartridges::BankWindows`]
+/// window is a byte offset plus a length. It is also the **reset** state — and the page says what
+/// the hardware's users do about that: "either the code at the reset vector must be carefully
+/// placed with bytes alternating between the two 32 MiB halves, or (as the existing multicarts
+/// do) **must be duplicated in both 32 MiB halves**." So this board answers the *first* half for
+/// that row, the half every known dump duplicates its boot code into, and the ticket records what
+/// would close it.
+#[cfg(feature = "board-268")]
+#[test]
+fn q_158_mapper_268_reads_the_second_32_mib_half_only_when_sc1_is_set_alone() {
+    let mut core = coolboy(64 * 1024 * 1024, 0);
+    core.mapper_write(0x6000, 0x40); // Every mask bit to the offset, every offset line clear.
+
+    for (sc0, sc1, half, why) in [
+        (
+            0u8,
+            0u8,
+            0x0000u16,
+            "PRG A25 = PRG A0, answered as the first half",
+        ),
+        (0, 1, 0x1000, "PRG A25 = 1, the second 32 MiB half"),
+        (1, 0, 0x0000, "PRG A25 = 0"),
+        (1, 1, 0x0000, "PRG A25 = 0 whatever SC1 says"),
+    ] {
+        core.mapper_write(0x6001, 0x80 | sc0);
+        core.mapper_write(0x6003, sc1);
+        assert_eq!(
+            [half, half | 0x01, half | 0x0E, half | 0x0F],
+            coolboy_banks(&core),
+            "SC0 = {sc0}, SC1 = {sc1}: {why}"
+        );
+    }
+
+    // The line is driven on every image and not only on a declared YH2018A, because no header
+    // field distinguishes one — and on a smaller image it wraps away, which is what the missing
+    // address line of the real chip does.
+    let mut core = coolboy(512 * 1024, 0);
+    core.mapper_write(0x6000, 0x40);
+    core.mapper_write(0x6001, 0x80);
+    let first = coolboy_banks(&core);
+    core.mapper_write(0x6003, 0x01);
+    assert_eq!(
+        first,
+        coolboy_banks(&core),
+        "on a 512 KiB image PRG A25 reaches nothing"
+    );
+}
+
+/// `registry::board_memory_sizes`'s row for this number: the page's "8 KiB of WRAM" as a **floor**,
+/// and the CHR left to the header because the page gives a maximum per PCB rather than a figure
+/// (MF-UNL-6 step 3).
+#[cfg(feature = "board-268")]
+#[test]
+fn req_core_012_mapper_268_keeps_its_8_kib_of_wram_and_takes_its_chr_from_the_header() {
+    // The CHR-RAM-only row of the PCB table: 8 KiB declared by byte 11, which is what
+    // `coolboy_image` writes.
+    let core = coolboy(512 * 1024, 0);
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(
+        0x2000,
+        cartridge.memory().chr_ram().len(),
+        "the declared 8 KiB"
+    );
+    assert_eq!(0x2000, cartridge.memory().prg_ram().len(), "and the WRAM");
+
+    // The mixed row, where the same board carries both chips: the CHR-ROM is the image's and the
+    // CHR-RAM is byte 11's, side by side.
+    let mut core = NesCore::new();
+    let load = core.load_rom(&coolboy_chr_image(64), "CoolboyChr.nes");
+    assert!(load.success, "{:?}", load.error);
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(64 * 1024, cartridge.memory().rom().chr_rom().len());
+    assert_eq!(0x2000, cartridge.memory().chr_ram().len());
+}
