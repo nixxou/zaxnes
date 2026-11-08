@@ -114,7 +114,7 @@ end of step 1 below lists each of the five against what it produced.
   census lists that were not here.
 - [x] **2/6** — the four sweeps, the feature configurations, `fmt` and clippy in the four
   configurations the instruction names.
-- [ ] **3/6** — the callgrind campaign against the base commit, and the feature decision.
+- [x] **3/6** — the callgrind campaign against the base commit, and the feature decision.
 - [ ] **4/6** — golden-core against the base commit, and the full `--include-ignored` run with both
   ROM roots.
 - [ ] **5/6** — `BOARD-FEATURES.md`, the census note and the journal.
@@ -260,6 +260,116 @@ The `board_memory_sizes` row for 111 gained a **third** column this lot — `fla
 
 `cargo test --release -p zax-nes -p zax-harness` also passes whole; it is re-run in step 6 against
 the tree that ships.
+
+## Step 3 — the campaign, and a result that is below the instrument's own floor
+
+Binaries built by `build-clean.sh` from their own `git archive` tar into a **fresh** directory with
+its own `CARGO_TARGET_DIR`, each deleted as soon as its binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mfunl9-0-base` | **`7972e5f3`**, the lot's base commit | `cfdf90abb19687f52778442c9865e976` |
+| `mfunl9-1-flash` | **`f18eb44e`**, step 2 — the lot's last code commit | `c390d7a63faee1dc39798825b36ff084` |
+| `mfunl9-0-again` | a byte copy of `mfunl9-0-base`, the **same-behaviour pair** the performance rule asks for | same md5 as the base |
+
+`mfunl9-0-base`'s md5 is **identical to MF-UNL-8 step 7's `unl8` binary**, which that lot built from
+`12efb950`. So the three commits between `12efb950` and `7972e5f3` added nothing a compiler can see
+— they are the progress note, `BOARD-FEATURES.md` and the journal — and this lot's base is that
+lot's measured binary to the byte. The identity has now held for six lots in a row, and this lot
+built the binary rather than assuming it.
+
+### The PR-1 set, thirteen ROMs, 300 frames
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| duelito | 7 380 384 834 | 7 380 423 708 | +38 874 | +0.001 |
+| m0 | 5 517 237 696 | 5 517 235 183 | −2 513 | −0.000 |
+| m1 | 4 880 947 363 | 4 880 987 754 | +40 391 | **+0.001** |
+| m4 | 5 467 701 228 | 5 467 739 753 | +38 525 | +0.001 |
+| metroid | 5 115 555 579 | 5 115 539 593 | −15 986 | −0.000 |
+| mm2 | 6 017 959 790 | 6 017 964 745 | +4 955 | +0.000 |
+| mmc5 | 11 266 800 864 | 11 266 787 743 | −13 121 | −0.000 |
+| oamstr | 3 318 443 134 | 3 318 448 225 | +5 091 | +0.000 |
+| readbuf | 6 834 503 479 | 6 834 507 138 | +3 659 | +0.000 |
+| smb1 | 5 996 321 454 | 5 996 347 642 | +26 188 | +0.000 |
+| smb3 | 7 949 404 848 | 7 949 364 350 | −40 498 | −0.001 |
+| vblnmi | 3 308 270 639 | 3 308 258 838 | −11 801 | −0.000 |
+| z2 | 6 291 555 371 | 6 291 503 343 | −52 028 | −0.001 |
+| **total** | **79 345 086 279** | **79 345 108 015** | **+21 736** | **+0.000** |
+
+Worst ROM **+0.001 %** against a tolerance of **+0.02 %**, six of thirteen below, set total
++0.000 %.
+
+**The floor, measured as MF-UNL-8 step 7 said it must be — the same binary twice.** That lot found
+that `callgrind-set.sh`'s claim of determinism holds for `core` and not for the whole process on
+this machine, and this lot measured it again rather than quoting it:
+
+| | worst ROM | set total | "SLOWER on" |
+| --- | ---: | ---: | ---: |
+| base vs the **same binary** (`mfunl9-0-again`) | m1 **+0.001 %** (+35 782) | **+55 761** | 7 ROMs |
+| base vs the **lot** | m1 **+0.001 %** (+40 391) | +21 736 | 7 ROMs |
+
+The two runs have the same worst ROM, the same percentage, the same count of ROMs over, and the
+floor's set total is **larger** than the lot's. The lot's whole PR-1 result is inside the noise the
+instrument has on an unchanged binary.
+
+**The symbols.** With the threshold at 20 000, exactly one symbol moved anywhere in the thirteen
+ROMs: `getgeneric` — Lua's `ltable.c` — at −21 940 (`mmc5`), +21 892 (`readbuf`) and −37 220
+(`smb3`). **No emulation symbol moved at all**, in either direction.
+
+### Level 2, the five games with their packs, 600 frames in play
+
+| game | `core` base | `core` lot | delta | `total` % |
+| --- | ---: | ---: | ---: | ---: |
+| metroid | 11 146 849 562 | 11 146 849 562 | **+0** | +0.001 |
+| mm2 | 12 037 230 685 | 12 037 230 685 | **+0** | −0.000 |
+| smb1 | 11 515 129 187 | 11 515 129 187 | **+0** | **+0.019** |
+| smb3 | 15 315 040 380 | 15 315 040 380 | **+0** | +0.001 |
+| zelda2 | 12 774 981 932 | 12 774 981 932 | **+0** | −0.009 |
+
+**`core` is identical to the instruction on all five.** Not "inside the tolerance" — equal, zero,
+on every game. That is the strongest statement this instrument can make about a change to the
+emulation, and it is what decision 1 of step 1 was designed to produce: the flash is a side table
+written when a save is written and read by nothing on a bus path.
+
+**`smb1/total` at +0.019 % is inside the +0.02 % tolerance, and the lot's rule asks for the
+same-behaviour pair anyway.** Here it is, the identical binary against itself at level 2:
+
+| | `smb1/total` | `smb3/total` | every `core` |
+| --- | ---: | ---: | :-: |
+| base vs the **same binary** | **+0.009 %** (+1 266 778) | **+0.018 %** (+4 263 745) | **+0** |
+| base vs the **lot** | +0.019 % (+2 649 441) | +0.001 % (+171 842) | **+0** |
+
+An unchanged binary moves `smb3/total` by +0.018 % and `smb1/total` by +0.009 % on this machine,
+with `core` exactly equal both times. The lot's worst `total` figure is that same quantity on a
+different game. The tolerance is **not** redefined — nothing in this lot exceeds it — and the pair
+is recorded because the rule says to show it.
+
+The level-2 symbols say the same thing as PR-1's. Above 200 000, the only movers are
+`luaH_getshortstr` (+1 991 543 on `smb1`), `luaH_set` (+712 899 on `smb1`, −226 138 on `smb3`,
+−696 977 on `zelda2`), `getgeneric` (−691 448 on `zelda2`) — all three are Lua's `ltable.c` — and
+`__memcmp_avx2_movbe` (+231 095 on `smb3`), which is libc. **Not one emulation symbol.**
+
+### The feature decision
+
+| feature | numbers | measured | decision |
+| --- | ---: | --- | --- |
+| `board-111` | 111 | PR-1 worst ROM **+0.001 %** against a **+0.001 %** floor on the same binary; level-2 `core` **identical to the instruction on all five games**; no emulation symbol moved on any of the eighteen ROMs | **stays in `default`**, unchanged |
+
+Three things follow, and each is a decision rather than an omission:
+
+1. **`board-111` stays in `default`.** It was there when the lot opened (MF-CART step 5 put it
+   back) and nothing this lot measured moves it. The brief's "parked boards stay parked" clause has
+   no subject here, as step 0 established.
+2. **The flash does not get a feature of its own.** The owner's rule puts a mechanism of a board
+   behind its own feature "if it costs more than the board itself", the `board-68` /
+   `board-68-chr-nametables` precedent. This one costs nothing a 300-frame or a 600-frame callgrind
+   run can distinguish from zero, so a second feature would buy a switch with no figure behind it
+   — and `BOARD-FEATURES.md`'s note 1 is explicit that "the granularity is the granularity the
+   measurements exist at".
+3. **Nothing moves into `parked-boards`**, which keeps `board-vs-system` as its only entry.
 
 ## Sources consulted
 
