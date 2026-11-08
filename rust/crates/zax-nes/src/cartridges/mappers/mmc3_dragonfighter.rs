@@ -65,19 +65,38 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 ///
 /// [`Mmc3Board::chr_bank_of_window`]: super::Mmc3Board
 ///
-/// # The latch is a new hook, and §7.2's "no new hook" is the one thing its page overrides
+/// # Where the filled byte comes from: the game's zero page, not a bus latch (**Q-172 §2**)
 ///
-/// `docs/review/UNL-census.md` §7.2 says of this step that "`Cartridge::cpu_read` already reaches
-/// that window, so no new hook". The **read** needs none —
-/// [`Mapper::cpu_read_override`] is a `&mut self` hook `Cartridge::try_cpu_read` already calls
-/// first thing — but the *datum* does: the page's own *Latch Register* section makes it "the data
-/// of the last CPU write to **any** address" and says "the game writes the desired values to zero
-/// page". A zero-page write is RAM and never reaches a cartridge in this core, and
-/// `NesBus::data_bus` is not it either — that byte is set by reads as well as writes, so at the
-/// instant of the `$6000` read it holds the high byte of that very address.
+/// The page describes the mechanism twice over, and the two descriptions cost very different
+/// things. Its *Latch Register* section says the mapper "keeps the data of the last CPU write to
+/// **any** address in a temporary latch register"; its last sentence says "**The game writes the
+/// desired values to zero page.**"
 ///
-/// So the hook is [`CartridgeMemory::latch_cpu_write`], one store in
-/// `NesBus::write_internal` behind `board-292`. Recorded as **Q-172**.
+/// MF-UNL-12 step 2 built the latch, which is the general mechanism. It needed a store in
+/// `NesBus::write_internal` — the function every CPU write of every game passes through, where a
+/// `Board` dispatch would be one per write for the whole library — and that store measured
+/// `oamstr` +0.026 % and `mmc5exram` **+1.098 %** (MF-UNL-12 step 6), which is the figure that
+/// parked `board-292`.
+///
+/// **MF-FIX replaced it with the page's last sentence**, which is what the two other
+/// implementations do: Mesen 2 reads `$6A` and `$FF` through its memory manager
+/// (`third_party/mesen2/Core/NES/Mappers/Mmc3Variants/DragonFighter.h:50-58`) and puNES reads them
+/// from RAM directly (`third_party/punes/src/core/mappers/mapper_292.c:86-98`). So the board reads
+/// [`CartridgeMemory::zero_page`], a two-byte snapshot `NesBus::read_wide_window` takes on the
+/// reads that can reach this window and nowhere else — and `NesBus::write_internal` has no
+/// cartridge store at all any more. `docs/review/Q-XCHECK.md` §CHANGE 8.
+///
+/// **What it gives up is generality, and that is the honest shape of it.** The latch is right for
+/// any game on this number; reading `$6A`/`$FF` is right only for one that stages its values
+/// there, which is what the page says the one known game — *Dragon Fighter* — does. If a second
+/// mapper-292 image ever appears that stages elsewhere, the latch is the general answer and its
+/// price is already measured.
+///
+/// **The two implementations' selection condition is stricter than the page's and this build keeps
+/// the page's.** Both test `(index & 0xE0) == 0xC0` — `A` and `B` set *and* `R` clear — where the
+/// page says only that register #0 is filled "when the Extra Index Register's `R` bit is 0". The
+/// two agree on every byte the game writes, because the page also says "The game keeps both bits
+/// enabled at all times"; `R` alone is the page's rule and the weaker claim, so it stays.
 ///
 /// # Where this board sits in `Board`
 ///
@@ -207,19 +226,23 @@ impl Mmc3Dragonfighter {
         self.mmc3.prg_ram_enabled()
     }
 
-    /// The register fill a **read** of `$6000-$7FFF` performs: "It is filled with the value that
-    /// had been latched during the last CPU write to any address."
+    /// The register fill a **read** of `$6000-$7FFF` performs, from the game's zero page: `$6A`
+    /// into Extra Data Register #0 and `$FF` into #1, which is the pairing Mesen 2 and puNES both
+    /// use. The `R` bit of the index register chooses, exactly as the page states it — see the
+    /// type's own note on why that is `R` alone and not the two implementations' stricter
+    /// `(index & 0xE0) == 0xC0`.
     ///
     /// `#[inline(never)]`, for [`Mmc3Dragonfighter::apply_chr`]'s reason, and here it is also what
     /// keeps the arm this board contributes to the inlined `Board::cpu_read_override` jump table
     /// to one `callq`.
+    // Q-172
     #[inline(never)]
     fn fill_data_register(&mut self, memory: &CartridgeMemory) {
-        let latched = memory.cpu_write_latch();
+        let [at_6a, at_ff] = memory.zero_page();
         if self.index & Self::INDEX_SELECT == 0 {
-            self.data0 = latched;
+            self.data0 = at_6a;
         } else {
-            self.data1 = latched;
+            self.data1 = at_ff;
         }
 
         self.refresh();
@@ -242,9 +265,9 @@ impl Mapper for Mmc3Dragonfighter {
     /// The chip's whole block first, then this board's three register bytes behind it. Nothing of
     /// the MMC3's own layout moves and no earlier state can name this number (REQ-CORE-090).
     ///
-    /// The **latch** is not here: it lives on [`CartridgeMemory`] and is a transient bus byte the
-    /// next CPU write overwrites, which that field's own note argues. What has to survive a round
-    /// trip is the two data registers, and they do.
+    /// The **zero-page snapshot** is not here: it lives on [`CartridgeMemory`] and is a transient
+    /// copy of console RAM that the savestate already carries in full, which that field's own note
+    /// argues. What has to survive a round trip is the two data registers, and they do.
     fn save_registers(&self, writer: &mut StateWriter) {
         self.mmc3.save_registers(writer);
         writer.write_u8(self.index);

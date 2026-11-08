@@ -113,16 +113,22 @@ pub struct NesBus {
     /// [`NesBus::write_vs_port`]; `false` for every other image, including every other VS one.
     #[cfg(feature = "board-vs-system")]
     vs_port: bool,
-    /// Whether the cartridge is a board that reads the **cartridge-edge data bus** when it answers
-    /// a CPU read below `$8000` — mapper 143's protection read, whose two top bits the page calls
-    /// open bus (Q-145, MF-FIX). Asked once in [`NesBus::attach`], beside `vs_port` and for the
-    /// same reason: the fill site then asks one `bool` and never the `Board` enum.
+    /// Whether the cartridge is a board that reads something of the **console** when it answers a
+    /// CPU read below `$8000`: mapper 143's protection read, whose two top bits the page calls open
+    /// bus (Q-145), and mapper 292's data registers, which the page fills from "the desired values"
+    /// the game "writes to zero page" (Q-172 §2). Both are MF-FIX.
     ///
-    /// `false` for every other image, so the only thing a game on any other board pays for this
-    /// is this flag's test, in a function that is already `#[cold]`
-    /// ([`NesBus::read_wide_window`]).
-    #[cfg(feature = "board-143-open-bus")]
-    edge_bus_board: bool,
+    /// Asked once in [`NesBus::attach`], beside `vs_port` and for the same reason: the fill site
+    /// then asks one `bool` and never the `Board` enum. `false` for every other image, so the only
+    /// thing a game on any other board pays is this flag's test, in a function that is already
+    /// `#[cold]` ([`NesBus::read_wide_window`]).
+    ///
+    /// **One flag for the two boards, and both snapshots taken together.** A cartridge is one
+    /// board, so at most one of the two ever reads its own snapshot; filling both costs the board
+    /// that does not two loads and two stores on its own window's reads, and saves a second flag
+    /// test for everybody else.
+    #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
+    samples_console: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -180,8 +186,8 @@ impl NesBus {
             expansion_audio: false,
             #[cfg(feature = "board-vs-system")]
             vs_port: false,
-            #[cfg(feature = "board-143-open-bus")]
-            edge_bus_board: false,
+            #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
+            samples_console: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -370,14 +376,15 @@ impl NesBus {
                 .as_ref()
                 .is_some_and(|cartridge| cartridge.mapper_number() == VsBoard::MAPPER);
         }
-        // Q-145 / MF-FIX: mapper 143 is the one board that reads the cartridge-edge data bus,
-        // for the two bits its page calls open bus. Settled here for `read_wide_window`'s reason
-        // the `vs_port` note above gives in the same words.
-        #[cfg(feature = "board-143-open-bus")]
+        // Q-145 and Q-172 section 2 / MF-FIX: the two boards that read something of the console
+        // when they answer a read below $8000 -- mapper 143 the cartridge-edge data bus, mapper 292
+        // the game's zero page. Settled here for `read_wide_window`'s reason, which the `vs_port`
+        // note above gives in the same words.
+        #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
         {
-            self.edge_bus_board = cartridge
+            self.samples_console = cartridge
                 .as_ref()
-                .is_some_and(|cartridge| cartridge.mapper_number() == 143);
+                .is_some_and(|cartridge| matches!(cartridge.mapper_number(), 143 | 292));
         }
         self.cartridge = cartridge;
     }
@@ -1177,23 +1184,37 @@ impl NesBus {
     #[cold]
     #[inline(never)]
     fn read_wide_window(&mut self, address: u16) -> Option<u8> {
-        // Q-145 / MF-FIX: the cartridge-edge data bus, for the one board that answers a read
-        // below $8000 with some of its bits undriven -- mapper 143's `[xxii iiii]`, whose `xx`
-        // the page calls open bus. **The fill is here and the read is in the board** for the
-        // reason `CartridgeMemory::cpu_write_latch` gives from the other direction: this is the
-        // function that already runs on exactly the reads that can reach such a window
-        // ($4020-$7FFF), it is already `#[cold]` and `#[inline(never)]`, and `NesBus` is the
-        // only thing that has the bus in hand.
+        // MF-FIX: what the two boards that read something of the console need, taken before the
+        // cartridge is asked. **The fill is here and the reads are in the boards** because this is
+        // the function that already runs on exactly the reads able to reach a window below $8000
+        // ($4020-$7FFF), it is already `#[cold]` and `#[inline(never)]`, and `NesBus` is the only
+        // thing that has the bus and the work RAM in hand: `Mapper::try_read_prg` and
+        // `Mapper::cpu_read_override` are handed `CartridgeMemory` and an address and nothing else.
         //
-        // No address test: the board's window is $4100-$5FFF under mask $E100, and a store made
-        // on a $6xxx read is simply overwritten by the next $4100 one before anybody reads it,
-        // so the value is always the bus of the cycle before the read that uses it. One `bool`
-        // and nothing else for every other game, and nothing at all with the feature off.
-        #[cfg(feature = "board-143-open-bus")]
-        if self.edge_bus_board {
+        // * **Q-145**, mapper 143: the cartridge-edge data bus, for the `xx` of its `[xxii iiii]`
+        //   that the page annotates "open bus". `external_bus()` and not `data_bus` -- the edge is
+        //   the external bus, and `data_bus` is written *after* `read_internal` returns, so here it
+        //   still holds the previous access, which is what open bus means.
+        // * **Q-172 section 2**, mapper 292: zero page $6A and $FF, which is where the page says
+        //   "the game writes the desired values" that fill its two Extra Data registers. This
+        //   replaces a latch stored on **every CPU write of every game**, which MF-UNL-12 step 6
+        //   measured at `mmc5exram` +1.098 %.
+        //
+        // No address test on either: each board decodes its own window, and a snapshot taken on a
+        // read outside it is overwritten by the next read inside it before anybody looks, so the
+        // value is always that of the access before the read that uses it. One `bool` and nothing
+        // else for every other game, and nothing at all with both features off.
+        #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
+        if self.samples_console {
+            #[cfg(feature = "board-143-open-bus")]
             let edge = self.external_bus();
+            #[cfg(feature = "board-292")]
+            let zero_page = [self.ram[0x6A], self.ram[0xFF]];
             if let Some(cartridge) = self.cartridge.as_mut() {
+                #[cfg(feature = "board-143-open-bus")]
                 cartridge.memory_mut().set_cpu_edge_bus(edge);
+                #[cfg(feature = "board-292")]
+                cartridge.memory_mut().set_zero_page(zero_page);
             }
         }
 
@@ -1213,20 +1234,15 @@ impl NesBus {
         None
     }
 
+    /// **No cartridge latch here, since MF-FIX.** MF-UNL-12 step 2 stored every written byte into
+    /// `CartridgeMemory` on this path, for the one board whose page describes a latch of "the data
+    /// of the last CPU write to any address" (mapper 292) -- a store on every CPU write of every
+    /// game, measured at `oamstr` +0.026 % and `mmc5exram` **+1.098 %**, which is what parked
+    /// `board-292`. The page's own next sentence, "The game writes the desired values to zero
+    /// page", is what made the latch avoidable: the board now reads zero page `$6A`/`$FF` through
+    /// the snapshot [`NesBus::read_wide_window`] takes, on its own window's reads alone. Q-172
+    /// section 2, `docs/review/Q-XCHECK.md` section CHANGE 8.
     fn write_internal(&mut self, address: u16, value: u8) {
-        // MF-UNL-12 step 2: the one board whose page says it latches "the data of the last CPU
-        // write to any address" -- NES 2.0 mapper 292, whose game "writes the desired values to
-        // zero page" and then *reads* $6000-$7FFF to move them into a bank register. So the latch
-        // has to see the RAM half of the address space too, which is why it is here and not in
-        // `Cartridge::cpu_write`, and why it is one store into `CartridgeMemory` rather than a
-        // `Board` dispatch: this function runs on every CPU write of every game.
-        //
-        // Behind `board-292`: with that feature off there is no field and no store at all.
-        #[cfg(feature = "board-292")]
-        if let Some(cartridge) = self.cartridge.as_mut() {
-            cartridge.memory_mut().latch_cpu_write(value);
-        }
-
         if address < 0x2000 {
             self.ram[usize::from(address) & (RAM_SIZE - 1)] = value;
             return;

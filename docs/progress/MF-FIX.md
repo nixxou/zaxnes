@@ -22,7 +22,7 @@ separate lot).
 - [x] 4/10 — CHANGE 6: mapper 12's language bit reads `$01`
 - [x] 5/10 — CHANGE 7: mapper 262's CHR-RAM chip unbanked
 - [x] 6/10 — Q-145: mapper 143's protection read answers open bus in bits 7-6
-- [ ] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
+- [x] 7/10 — CHANGE 8: mapper 292 reads the game's zero page instead of the bus latch
 - [ ] 8/10 — the ticket and report annotations ("Fixed in MF-FIX (`<hash>`)")
 - [ ] 9/10 — the callgrind campaign: `board-292` alone against the tolerance
 - [ ] 10/10 — the final check: fmt, clippy ×4, tests, golden-core, the figures
@@ -300,3 +300,79 @@ Checks: fmt; `cargo test --release -p zax-nes` green; clippy `-D warnings` on
 `zax-nes --all-targets` in default, `--no-default-features`, `--features parked-boards`,
 `--no-default-features --features board-143-open-bus` and `--no-default-features --features
 board-143` (the feature off, where the board's own test still passes).
+
+### 7/10 — CHANGE 8, mapper 292 reads the game's zero page and the write latch is gone
+
+The report's highest-value change after CHANGE 1, because it removes a feature's cost rather than
+fixing a byte.
+
+nesdev ("NES 2.0 Mapper 292") describes the mechanism twice, and the two descriptions cost very
+different things. The *Latch Register* section gives the general one — the mapper "keeps the data of
+the last CPU write to **any** address in a temporary latch register" — and the section's last
+sentence says where the game actually puts them: "**The game writes the desired values to zero
+page.**" MF-UNL-12 step 2 built the first; MF-FIX builds the last, which is what both other
+implementations do (Mesen 2 `Mmc3Variants/DragonFighter.h:50-58` through its memory manager, puNES
+`mapper_292.c:86-98` from RAM directly).
+
+**What was removed.** `CartridgeMemory::cpu_write_latch`, its two accessors, and the store at the
+top of `NesBus::write_internal` that fed it — a store on **every CPU write of every game in the
+library**, which MF-UNL-12 step 6 measured at `oamstr` +0.026 % and `mmc5exram` **+1.098 %**. That
+function now begins at its first address test. A doc comment on it records what was there and why
+it went.
+
+**What replaced it.** `CartridgeMemory::zero_page: [u8; 2]` — the console's `$6A` and `$FF` — filled
+by the same `NesBus::read_wide_window` snapshot step 6 built for mapper 143, under the same single
+`bool`. That flag is now `samples_console` and covers both numbers: a cartridge is one board, so at
+most one of the two ever reads its own snapshot, and filling both costs the board that does not two
+loads and two stores on its own window's reads while saving a second flag test for everybody else.
+`Mmc3Dragonfighter::fill_data_register` reads `memory.zero_page()`: `$6A` into Extra Data Register
+#0 and `$FF` into #1, which is the pairing both implementations use.
+
+**Two things kept deliberately.**
+
+* **The selection stays the page's `R` bit alone.** Mesen 2 and puNES both test
+  `(index & 0xE0) == 0xC0` — `A` and `B` set *and* `R` clear — where the page says only that
+  register #0 is filled "when the Extra Index Register's `R` bit is 0". The two agree on every byte
+  the game writes, because the page also says "The game keeps both bits enabled at all times"; `R`
+  alone is the page's own rule and the weaker claim.
+* **The narrowing is named, not hidden.** The latch is right for any game on this number; reading
+  `$6A`/`$FF` is right only for one that stages its values there. The type's doc comment and the
+  field's both say so, and both record that if a second mapper-292 image ever appears that stages
+  elsewhere the latch is the general answer and its price is already measured.
+
+Nothing in the savestate moves: the snapshot is a transient copy of console RAM the state carries
+in full anyway, nothing is derived from it between two reads, and the two Extra Data registers it
+feeds are saved by the board as before. So no board's block grows by a byte in any configuration.
+
+**Tests.** The board's fill is only reachable through a real bus read now, because the datum comes
+from the snapshot `NesBus::read_wide_window` takes — a call straight to `Cartridge::try_cpu_read`
+leaves that snapshot untouched. So the `cpu_read` helper became `core.bus_mut().read(address)` (a
+real `CpuBus::read`, one CPU cycle, which nothing these tests assert on depends on), and
+`dragon_fill` writes its datum to `DRAGON_SOURCES[register]` — `$6A` or `$FF` — instead of to
+`$0010`.
+
+* `q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included` is renamed
+  `q_172_mapper_292_fills_each_data_register_from_its_own_zero_page_address` and pins the
+  **narrowing from both sides**: `$FF` drives register #1 on every read of the window, and a write
+  to `$0010`, `$0400`, `$07FF` or `$6A` — each a "last CPU write" under the old reading, the first
+  being the very address MF-UNL-12's test used — moves nothing. Then `$6A` is shown to be #0's
+  source and only #0's. The `A`/`B` hypothesis and the "`R` is bit 5, not bit 0" assertions are
+  unchanged, and now also record the two implementations' stricter condition.
+* `req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff` writes `$FF` instead of
+  `$0010`; its structure — write to the window fills nothing, zero page moving on its own fills
+  nothing, the read fills, `$7FFF` is the same window, `$A001` clear disables all of it — is intact.
+* `req_core_090_mapper_292_round_trips_the_two_registers_only_a_read_can_fill`'s last check now
+  writes **both** sources and asserts the post-restore fill takes `$FF`, so it pins that the
+  restored index selects both the register and its address.
+* `req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window` is the one that still asks the
+  **cartridge** rather than the bus, and has to: what it asserts is `try_cpu_read` answering `None`,
+  which through the bus is indistinguishable from the open-bus byte the caller substitutes. A
+  comment says so.
+
+Checks: fmt; `cargo test --release -p zax-nes` and `--features parked-boards` both green (all six
+mapper-292 tests pass under the latter; the number is parked, so they are cfg'd out of the default
+build); clippy `-D warnings` on `zax-nes --all-targets` in default, `--no-default-features`,
+`--features parked-boards`, and each of the three new features alone.
+
+The measurement that decides whether `board-292` can leave `parked-boards` is step 9. R0 decides the
+move itself.

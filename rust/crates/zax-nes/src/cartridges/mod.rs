@@ -64,27 +64,44 @@ pub struct CartridgeMemory {
     /// it off the layout of the fields that *are* read per access (`docs/review/BOARD-FEATURES.md`;
     /// [`flash`]'s own note, decision 1).
     flash: Option<Box<flash::FlashRom>>,
-    /// The datum of the **last CPU write to any address**, for the one board whose page says it
-    /// keeps one (MF-UNL-12 step 2, NES 2.0 mapper 292, Q-172).
+    /// The console's zero page at **`$6A` and `$FF`**, as it stood when the CPU read now being
+    /// answered began, for the one board whose page says its game stages values there
+    /// (MF-UNL-12 step 2, MF-FIX, NES 2.0 mapper 292, Q-172 §2).
     ///
     /// nesdev ("NES 2.0 Mapper 292"): "All CPU writes, including writes to zero page memory, are
     /// visible on the cartridge connector. The mapper keeps the data of the last CPU write to any
     /// address in a temporary latch register, so it can store that data in one of its two Extra
-    /// Data registers when so requested by *reading* from $6000-$7FFF. The game writes the desired
-    /// values to zero page."
+    /// Data registers when so requested by *reading* from $6000-$7FFF. **The game writes the
+    /// desired values to zero page.**"
     ///
-    /// **It lives here and not on the board** because `NesBus::write_internal` is where every CPU
-    /// write passes and a `Board` dispatch there would be one per write for every game in the
-    /// library; `CartridgeMemory` is the one thing that function already has in hand. Behind
-    /// `board-292`, so a build without that feature has neither the field nor the store.
+    /// **MF-UNL-12 built the first sentence and MF-FIX built the last one.** A latch of every CPU
+    /// write is the general mechanism, and it cost a store in `NesBus::write_internal` on every
+    /// write of every game -- `oamstr` +0.026 % and `mmc5exram` **+1.098 %** (MF-UNL-12 step 6),
+    /// the figure that parked `board-292`. Mesen 2 and puNES both read the two zero-page addresses
+    /// instead (`Mmc3Variants/DragonFighter.h:50-58`, `mapper_292.c:86-98`), which is the page's
+    /// own last sentence read one step further on, and that costs two loads on this board's own
+    /// window's reads and **nothing at all** anywhere else. `docs/review/Q-XCHECK.md` §CHANGE 8.
     ///
-    /// **Not in the savestate** (REQ-CORE-090/091), deliberately: it is a transient bus latch that
-    /// the very next CPU write overwrites, no board register is derived from it until a read of
+    /// What it gives up is generality: the latch is right for any game on this number, and reading
+    /// `$6A`/`$FF` is right only for one that stages its values there -- which is what the page
+    /// says the one known game does. **If a second mapper-292 image ever appears that stages
+    /// elsewhere, the latch is the general answer and its price is already measured.**
+    ///
+    /// Index 0 is `$6A`, which fills Extra Data Register #0, and index 1 is `$FF`, which fills
+    /// #1 -- the pairing both implementations use; see `Mmc3Dragonfighter::fill_data_register`.
+    ///
+    /// **Filled by `NesBus::read_wide_window`**, which already runs on exactly the reads able to
+    /// reach this board's window and is already `#[cold]`; a `bool` on `NesBus` settled at `attach`
+    /// keeps it to one test for every other game. Behind `board-292`, so a build without that
+    /// feature has neither the field nor the fill.
+    ///
+    /// **Not in the savestate** (REQ-CORE-090/091), deliberately: it is a transient copy of console
+    /// RAM that the savestate carries in full anyway, nothing is derived from it until a read of
     /// `$6000-$7FFF` asks, and the two Extra Data registers it feeds *are* saved by the board. So
-    /// no board's block grows by a byte in any configuration and golden-core is unmoved -- the
-    /// same argument `flash` above makes for itself one field up, from the other direction.
+    /// no board's block grows by a byte in any configuration and golden-core is unmoved -- the same
+    /// argument `flash` above makes for itself one field up, from the other direction.
     #[cfg(feature = "board-292")]
-    cpu_write_latch: u8,
+    zero_page: [u8; 2],
     /// The byte the **cartridge-edge data bus** was holding when the CPU read now being answered
     /// began, for the one board whose page leaves some of its bits undriven (Q-145, MF-FIX).
     ///
@@ -100,10 +117,10 @@ pub struct CartridgeMemory {
     /// `board-143-open-bus`, so a build without that feature has neither the field nor the fill
     /// and the board answers zero in those two bits, as it did before MF-FIX.
     ///
-    /// **Not in the savestate** (REQ-CORE-090/091), for `cpu_write_latch`'s reason above: it is a
-    /// transient bus byte that the next such read overwrites, nothing is derived from it between
-    /// two reads, and no board register holds it. So no board's block grows by a byte in any
-    /// configuration and golden-core is unmoved.
+    /// **Not in the savestate** (REQ-CORE-090/091), for [`CartridgeMemory::zero_page`]'s reason
+    /// above: it is a transient bus byte that the next such read overwrites, nothing is derived
+    /// from it between two reads, and no board register holds it. So no board's block grows by a
+    /// byte in any configuration and golden-core is unmoved.
     #[cfg(feature = "board-143-open-bus")]
     cpu_edge_bus: u8,
 }
@@ -136,7 +153,7 @@ impl CartridgeMemory {
             battery_offset,
             flash,
             #[cfg(feature = "board-292")]
-            cpu_write_latch: 0,
+            zero_page: [0; 2],
             #[cfg(feature = "board-143-open-bus")]
             cpu_edge_bus: 0,
         };
@@ -203,19 +220,19 @@ impl CartridgeMemory {
         self.mirroring = mirroring;
     }
 
-    /// The datum of the last CPU write to any address; see [`CartridgeMemory::cpu_write_latch`].
+    /// The console's zero page at `$6A` and `$FF`, in that order, as it stood when the CPU read
+    /// now being answered began; see [`CartridgeMemory::zero_page`].
     #[cfg(feature = "board-292")]
     #[must_use]
-    pub const fn cpu_write_latch(&self) -> u8 {
-        self.cpu_write_latch
+    pub const fn zero_page(&self) -> [u8; 2] {
+        self.zero_page
     }
 
-    /// Latches `value` as that datum. Called by `NesBus::write_internal` for **every** CPU write,
-    /// the RAM and the register halves of the address space alike, which is what the page's
-    /// "visible on the cartridge connector" means.
+    /// Records those two bytes. Called by `NesBus::read_wide_window` before the cartridge is asked,
+    /// and only for a cartridge whose board reads them.
     #[cfg(feature = "board-292")]
-    pub fn latch_cpu_write(&mut self, value: u8) {
-        self.cpu_write_latch = value;
+    pub fn set_zero_page(&mut self, bytes: [u8; 2]) {
+        self.zero_page = bytes;
     }
 
     /// The byte the cartridge-edge data bus held when the CPU read now being answered began; see

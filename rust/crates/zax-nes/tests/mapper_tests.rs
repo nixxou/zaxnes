@@ -15988,25 +15988,38 @@ fn q_172_mapper_262_answers_its_title_jumper_under_the_pages_c100_mask() {
 
 // -------------------- MF-UNL-12 step 2: mapper 292, the BMW8544 / UNL-DRAGONFIGHTER
 
-/// A CPU read **with its side effects**, which is the only path that fills one of mapper 292's
-/// data registers: `NesCore::read_memory` is `Cartridge::try_cpu_peek` and goes to
-/// `Mapper::cpu_peek_override`, which this board deliberately leaves side-effect-free.
+/// A **real CPU read**, through the bus, which since MF-FIX is the only path that fills one of
+/// mapper 292's data registers (CHANGE 8, Q-172 §2).
+///
+/// Two reasons it has to be the bus and not `Cartridge::try_cpu_read`. `NesCore::read_memory` is
+/// `Cartridge::try_cpu_peek`, which goes to `Mapper::cpu_peek_override` and is deliberately
+/// side-effect-free — that was already true. And the *datum* now comes from the console's zero
+/// page, which the board sees through the snapshot `NesBus::read_wide_window` takes: a read that
+/// does not go through `NesBus` leaves that snapshot untouched, so it would fill the register with
+/// whatever it last held.
+///
+/// `CpuBus::read` advances the clock by one CPU cycle, as a real read does. Nothing these tests
+/// assert on depends on that.
 #[cfg(feature = "board-292")]
-fn cpu_read(core: &mut NesCore, address: u16) -> Option<u8> {
-    core.cartridge_mut().unwrap().try_cpu_read(address)
+fn cpu_read(core: &mut NesCore, address: u16) -> u8 {
+    use zax_nes::cpu::CpuBus;
+    core.bus_mut().read(address)
 }
 
+/// Mapper 292's two source addresses: nesdev's "The game writes the desired values to zero page",
+/// read as Mesen 2 (`Mmc3Variants/DragonFighter.h:50-58`) and puNES (`mapper_292.c:86-98`) both
+/// read it — `$6A` fills Extra Data Register #0 and `$FF` fills #1.
+#[cfg(feature = "board-292")]
+const DRAGON_SOURCES: [u16; 2] = [0x006A, 0x00FF];
+
 /// What the game does, in the order the page describes it: select a data register with a **write**
-/// to `$6000-$7FFF`, put the datum somewhere in **zero page**, then **read** `$6000-$7FFF` so the
-/// board moves the latched byte into the register.
-///
-/// The order matters and the test would be wrong without it: the `$6000` write is itself a CPU
-/// write and so is itself latched, which is why the zero-page write comes second.
+/// to `$6000-$7FFF`, put the datum in the **zero-page** address that register is filled from, then
+/// **read** `$6000-$7FFF` so the board moves it in.
 #[cfg(feature = "board-292")]
 fn dragon_fill(core: &mut NesCore, register: u8, value: u8) {
     // `A` and `B` are "Always 1" and `R` is bit 5.
     core.mapper_write(0x6000, 0xC0 | (register << 5));
-    core.write_memory(0x0010, value);
+    core.write_memory(DRAGON_SOURCES[usize::from(register)], value);
     cpu_read(core, 0x6000);
 }
 
@@ -16031,9 +16044,10 @@ fn req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff() {
         "power-on: both XOR registers zero, so the chip's own zeroed banks show through"
     );
 
-    // Extra Data Register #1, `.BAA AAAA`: bits 5-0 are the 4 KiB bank at PPU $1000-$1FFF.
+    // Extra Data Register #1, `.BAA AAAA`: bits 5-0 are the 4 KiB bank at PPU $1000-$1FFF, and
+    // $FF is the zero-page address it is filled from.
     core.mapper_write(0x6000, 0xE0); // A, B and R = 1.
-    core.write_memory(0x0010, 0x05); // "The game writes the desired values to zero page."
+    core.write_memory(0x00FF, 0x05); // "The game writes the desired values to zero page."
     assert_eq!(
         [0, 1, 0, 1, 0, 1, 2, 3],
         core.chr_windows(),
@@ -16047,15 +16061,14 @@ fn req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff() {
         "the read does: 4 KiB bank 5 is 1 KiB banks 20-23"
     );
 
-    // The latch moving on its own moves nothing, and a write to the window still moves nothing —
+    // Zero page moving on its own moves nothing, and a write to the window still moves nothing —
     // which together are what make the *read* the trigger.
-    core.write_memory(0x0010, 0x0A);
+    core.write_memory(0x00FF, 0x0A);
     assert_eq!([0, 1, 0, 1, 20, 21, 22, 23], core.chr_windows());
     core.mapper_write(0x6000, 0xE0);
     assert_eq!([0, 1, 0, 1, 20, 21, 22, 23], core.chr_windows());
 
     // And the whole window reads, not just $6000.
-    core.write_memory(0x0010, 0x0A);
     cpu_read(&mut core, 0x7FFF);
     assert_eq!(
         [0, 1, 0, 1, 40, 41, 42, 43],
@@ -16067,7 +16080,7 @@ fn req_core_102_mapper_292_fills_a_data_register_from_a_read_of_6000_7fff() {
     // the page's own condition on all four registers.
     core.mapper_write(0xA001, 0x00);
     core.mapper_write(0x6000, 0xC0); // Would select register 0 if it were decoded.
-    core.write_memory(0x0010, 0x7F);
+    core.write_memory(0x006A, 0x7F);
     cpu_read(&mut core, 0x6000);
     assert_eq!(
         [0, 1, 0, 1, 40, 41, 42, 43],
@@ -16203,48 +16216,82 @@ fn q_172_mapper_292_takes_registers_2_and_3_when_the_chips_chr_inversion_is_set(
     );
 }
 
-/// **Q-172, and the one claim of §7.2 that this page overrides.** The plan says of this step that
-/// "`Cartridge::cpu_read` already reaches that window, so **no new hook**"; the page's *Latch
-/// Register* section says "All CPU writes, **including writes to zero page memory**, are visible
-/// on the cartridge connector. The mapper keeps the data of the last CPU write to any address in a
-/// temporary latch register … The game writes the desired values to zero page."
+/// **Q-172 §2**, rewritten by MF-FIX (`docs/review/Q-XCHECK.md` §CHANGE 8): the datum a read of
+/// `$6000-$7FFF` stores comes from the game's **zero page**, `$6A` for Extra Data Register #0 and
+/// `$FF` for #1, and **not** from a latch of the last CPU write to any address.
 ///
-/// A zero-page write is RAM and reaches no cartridge in this core, so the latch is a new hook:
-/// `CartridgeMemory::latch_cpu_write`, one store in `NesBus::write_internal` behind `board-292`.
-/// This test is what it buys — the value the board stores comes from a write to `$0010`, an
-/// address the cartridge is not mapped at — plus the two things the page says of the index
-/// register's other bits.
+/// The page says both things. Its *Latch Register* section describes the general mechanism — "All
+/// CPU writes, including writes to zero page memory, are visible on the cartridge connector. The
+/// mapper keeps the data of the last CPU write to any address in a temporary latch register" — and
+/// its last sentence says where the game actually puts them: "**The game writes the desired values
+/// to zero page.**" MF-UNL-12 built the first, at a store in `NesBus::write_internal` on every CPU
+/// write of every game (`mmc5exram` +1.098 %, the figure that parked `board-292`); MF-FIX built the
+/// last, which is what Mesen 2 (`Mmc3Variants/DragonFighter.h:50-58`) and puNES
+/// (`mapper_292.c:86-98`) both do, at two loads on this board's own window's reads and nothing
+/// anywhere else.
+///
+/// So what this test pins is the **narrowing**, from both sides: each register follows its own
+/// zero-page address, and a write to any *other* address — including the one MF-UNL-12's version
+/// used, and including the `$6000` select write that was itself latched — moves nothing. Plus the
+/// two things the page says of the index register's other bits, which the fix does not touch.
 #[cfg(feature = "board-292")]
 #[test]
-fn q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included() {
+fn q_172_mapper_292_fills_each_data_register_from_its_own_zero_page_address() {
     let mut core = MapperRom::new(292).prg(32).chr(512).load();
     core.mapper_write(0xA001, 0x80);
-    core.mapper_write(0x6000, 0xE0);
+    core.mapper_write(0x6000, 0xE0); // R = 1: Extra Data Register #1, filled from $FF.
 
-    // Four addresses no cartridge is mapped at, each the "last CPU write" in turn.
-    for (address, value) in [
-        (0x0010u16, 0x05u8),
-        (0x00FF, 0x06),
-        (0x0400, 0x07),
-        (0x07FF, 0x08),
-    ] {
-        core.write_memory(address, value);
+    // $FF is register #1's source, and every read of the window takes it afresh.
+    for value in [0x05u8, 0x06, 0x07, 0x08] {
+        core.write_memory(0x00FF, value);
         cpu_read(&mut core, 0x6000);
         let bank = usize::from(value) * 4;
         assert_eq!(
             [bank, bank + 1, bank + 2, bank + 3].map(|b| b * 1024),
             chr_offsets(&core)[4..],
-            "a write to {address:#06X} is what the next read of $6000 stores"
+            "$FF = {value:#04X} is what the next read of $6000 stores in register #1"
         );
     }
+
+    // And **no other address is**. Each of these was a "last CPU write" under the old reading —
+    // $0010 is the address MF-UNL-12's own test used — and none of them may move the register now.
+    let before = chr_offsets(&core);
+    for (address, value) in [
+        (0x0010u16, 0x15u8),
+        (0x0400, 0x16),
+        (0x07FF, 0x17),
+        (0x006A, 0x18),
+    ] {
+        core.write_memory(address, value);
+        cpu_read(&mut core, 0x6000);
+        assert_eq!(
+            before,
+            chr_offsets(&core),
+            "a write to {address:#06X} must not reach Extra Data Register #1"
+        );
+    }
+
+    // $6A is register #0's source and only register #0's: with R still 1, writing it moved
+    // nothing above, and selecting R = 0 now brings it in.
+    core.mmc3_bank(0, 0x00);
+    core.mapper_write(0x6000, 0xC0); // R = 0: Extra Data Register #0, filled from $6A.
+    cpu_read(&mut core, 0x6000);
+    assert_eq!(
+        [0x18 * 2 * 1024, (0x18 * 2 + 1) * 1024],
+        chr_offsets(&core)[..2],
+        "$6A is Extra Data Register #0's source"
+    );
 
     // "It's hypothesized that clearing the A and B bits may switch the two CHR pattern table
     // halves to normal MMC3 CHR banking, but this has not yet been verified on real hardware.
     // The game keeps both bits enabled at all times." So the two bits are latched into the
-    // register — which puts them in the savestate for free — and drive nothing.
+    // register — which puts them in the savestate for free — and drive nothing. Note that Mesen 2
+    // and puNES both test `(index & 0xE0) == 0xC0` where this build tests `R` alone, which is the
+    // page's own rule; the two agree on every byte the game writes, the page saying A and B are
+    // always set.
     let before = chr_offsets(&core);
     core.mapper_write(0x6000, 0x20); // R = 1, A and B clear.
-    core.write_memory(0x0010, 0x08);
+    core.write_memory(0x00FF, 0x08);
     cpu_read(&mut core, 0x6000);
     assert_eq!(
         before,
@@ -16254,9 +16301,8 @@ fn q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included
 
     // And `R` is bit 5 of the index and not bit 0: a value with bit 0 set and bit 5 clear picks
     // Extra Data Register **#0**, which is the XOR of the other pattern table.
-    core.mmc3_bank(0, 0x00);
     core.mapper_write(0x6000, 0xC1);
-    core.write_memory(0x0010, 0x11);
+    core.write_memory(0x006A, 0x11);
     cpu_read(&mut core, 0x6000);
     assert_eq!(
         [0x11 * 2 * 1024, (0x11 * 2 + 1) * 1024],
@@ -16274,6 +16320,11 @@ fn q_172_mapper_292_latches_the_last_cpu_write_to_any_address_zero_page_included
 /// drives nothing on the bus (`Some(None)`, which leaves the caller's open-bus value), so a game
 /// cannot mistake the register window for save RAM. The dump declares a battery, which is exactly
 /// the case the row has to win against.
+///
+/// This is the one mapper-292 test that asks the **cartridge** rather than the bus, and it has to:
+/// what it asserts is that the board drives nothing, which is `Cartridge::try_cpu_read` answering
+/// `None` — through the bus that answer is indistinguishable from the open-bus byte the caller
+/// then substitutes. The fill it triggers on the way is not looked at.
 #[cfg(feature = "board-292")]
 #[test]
 fn req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window() {
@@ -16288,7 +16339,7 @@ fn req_core_095_mapper_292_has_no_prg_ram_behind_its_register_window() {
         );
         assert_eq!(
             None,
-            cpu_read(&mut core, address),
+            core.cartridge_mut().unwrap().try_cpu_read(address),
             "{address:#06X}: the board decodes it and drives nothing"
         );
     }
@@ -16647,13 +16698,15 @@ fn req_core_090_mapper_292_round_trips_the_two_registers_only_a_read_can_fill() 
     );
 
     // The restored index has to *be* the index: one more fill, with no `$6000` write of its own,
-    // must land in Extra Data Register #1.
-    core.write_memory(0x0010, 0x07);
+    // must land in Extra Data Register #1 -- and so must take its datum from **$FF**, that
+    // register's own zero-page address, and not from $6A.
+    core.write_memory(0x006A, 0x3F); // #0's source, which must not be read here.
+    core.write_memory(0x00FF, 0x07);
     cpu_read(&mut core, 0x6000);
     assert_eq!(
         [0x1C * 1024, 0x1D * 1024, 0x1E * 1024, 0x1F * 1024],
         chr_offsets(&core)[4..],
-        "still selecting register #1 after the restore"
+        "still selecting register #1 after the restore, and still filling it from $FF"
     );
 }
 
