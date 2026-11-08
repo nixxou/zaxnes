@@ -1528,6 +1528,33 @@ const KIRBY_OPTIONS: &[HackOption] = &[
         bit: 4,
         default: true,
     },
+    // The enemies a margin spawns wait there, drawn, their scripts not run, until they are on
+    // the original screen, where the game would spawn them (owner request: the original
+    // gameplay); off, they play at once.
+    HackOption {
+        key: "margin_freeze",
+        label: "Enemies asleep in the margins",
+        label_fr: "Ennemis figés dans les marges",
+        bit: 5,
+        default: true,
+    },
+    // The enemies asleep in the margins drawn in grey.
+    HackOption {
+        key: "margin_freeze_tint",
+        label: "Asleep enemies in grey",
+        label_fr: "Ennemis figés en gris",
+        bit: 6,
+        default: true,
+    },
+    // Kirby and what he throws (star, puffs: slots 0 to 8) drawn and kept on the original
+    // screen only, as in the game: his attacks do not reach the margins.
+    HackOption {
+        key: "kirby_attacks_4_3",
+        label: "Kirby's attacks limited to 4:3",
+        label_fr: "Attaques de Kirby limitées au 4:3",
+        bit: 7,
+        default: false,
+    },
     // Experimental (owner request), in the Hacks: the playfield shifted by the camera's
     // fraction of a pixel, which the pack's code reports (`report_camera`), the sprites that move
     // with the camera left where they are.

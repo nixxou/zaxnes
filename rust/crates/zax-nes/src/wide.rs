@@ -17,7 +17,7 @@
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
 //! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring; bit 4: the PRG window goes on over `$6000`-`$7FFF` (8 KiB more, for a game with nothing there) |
-//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA; `$5101 + 4n` instead: sprite *n*'s flags (bit 0: drawn in the "asleep" tint, light blue), taken the same way |
+//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA; `$5101 + 4n` instead: sprite *n*'s flags (bit 0: drawn in the "asleep" tint, grey), taken the same way |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 //! | `$500B` | R/W | execution zone: bit 7 on, bit 6 its data at `$3000`-`$3FFF` (below), bits 0-5 the page of the pack's code shown at `$2800`-`$3FFF` (`$2FFF` with bit 6) |

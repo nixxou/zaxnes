@@ -35,12 +35,12 @@ const MARGIN_ENTRIES: u8 = 0x20;
 /// (their own entries, `0x10` up, here `TINT_ENTRIES` up).
 const TINT_ENTRIES: u8 = 0x30;
 
-/// The "asleep" tint of NES colour `colour`: its brightness in light blue, the blacks kept.
+/// The "asleep" tint of NES colour `colour`: its brightness in grey, the blacks kept.
 const fn asleep_tint(colour: u8) -> u8 {
     if colour & 0x0F >= 0x0D {
         colour
     } else {
-        (colour & 0x30) | 0x01
+        colour & 0x30
     }
 }
 
