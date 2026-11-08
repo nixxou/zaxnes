@@ -72,7 +72,6 @@ default = [
     "board-208",
     "board-219",
     "board-262",
-    "board-292",
     "board-246",
 ]
 
@@ -272,6 +271,31 @@ board-262 = []
 #
 # It is also the first board of `IrqBoard` to need `Mapper::cpu_read_override`, forwarded
 # `#[inline(never)]` there for the reason `try_read_prg` carries it.
+#
+# **Parked by MF-UNL-12 step 6**, and it is the only board of the twelve MF-UNL lots that is. The
+# figures, against `c02fc02c` and attributed to this feature alone (the lot's tree with it on
+# against the same tree with it off): PR-1's thirteen ROMs **all slower**, `mmc5exram`
+# **+123 750 428, +1.098 %** -- fifty-five times the tolerance -- with `oamstr` +0.026 %,
+# `vblnmi` +0.020 %, `m1` +0.017 % and a set total of +130 067 231 (+0.164 %). Level 2 with it on
+# is `core` **above the base on all five games**, +0.009 % to +0.017 %.
+#
+# **Two causes, and neither has a fix.**
+#
+# * `Board::cpu_read_override` gains a **body**. `IrqBoard` had no forward for it, so it shared
+#   that dispatch's *empty* arm -- and the dispatch carries `#[inline(always)]` (pinned by lot
+#   PR-1 step 3) and folds into `Cartridge::try_cpu_read`, which the MMC5 reaches on **every CPU
+#   read** because it maps PRG-RAM into $8000-$DFFF. That is `Cartridge::try_cpu_read`
+#   +122 851 006 on `mmc5exram`, and it is MF-5b's "the arm that matters is the empty one" one
+#   dispatch further along. A board whose registers a **read** fills needs a `&mut self` read hook
+#   and this build has exactly one.
+# * the latch store in `NesBus::write_internal`: +157 036 to +862 997 on every ROM of the set,
+#   worst `oamstr` **+0.026 %** -- a ROM whose whole run is OAM writes. **Splitting the board into
+#   two features would not help**: `oamstr`'s figure is +862 997 of +874 540, so the latch alone is
+#   already over the tolerance.
+#
+# Gated off it costs nothing: the shipped tree, with this feature in `parked-boards` and the other
+# two in `default`, is PR-1 worst ROM **+0.003 %** (`m4`) and set total +795 012 (+0.001 %).
+# `cargo build -p zax-nes --features parked-boards` is the one flag that turns it on.
 board-292 = []
 
 # iNES mapper 246, the **G0151-1** board of 封神榜 (MF-UNL-12 step 3): four 8 KiB PRG banks at
@@ -948,8 +972,9 @@ board-taito-x1 = ["board-small-boards"]
 #
 # **MF-VS step 7 put `board-vs-system` in it**, so the umbrella is no longer empty: that feature's
 # own note above has the figures, and `--features parked-boards` is the one flag that turns the
-# VS. System on.
-parked-boards = ["board-vs-system"]
+# VS. System on. **MF-UNL-12 step 6 put `board-292` beside it**, the one board of the twelve MF-UNL
+# lots that is over the tolerance; its own note has the figures and the two causes.
+parked-boards = ["board-vs-system", "board-292"]
 
 # **Not a board: the PPU's exact sprite-evaluation pipeline** (lot MF-4e step 3). The owner's rule
 # is written for boards but the reason behind it is the figure, so it is applied here unchanged.

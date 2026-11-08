@@ -538,3 +538,174 @@ the enum on and the list's omission was invisible.
 That is MF-UNL-11 step 5's finding in a different file (there it was `IrqBoard::try_read_prg`'s
 `cfg` list, caught by the `board-208`-alone build), and the rule it gives is the same: **a `cfg`
 list is never implied by the variant it belongs to.**
+
+## Step 6 — the campaign, and the one board of twelve lots that is parked
+
+Binaries built by `build-clean.sh` from their own tar into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`.
+
+| label | tree | md5 |
+| --- | --- | --- |
+| `mfunl12-0-base` | **`c02fc02c`**, the lot's base commit | `d031eddea93ab222efc8cbbf61dd5b67` |
+| `mfunl12-1-lot` | **`b6467bd1`**, step 5 — all three features in `default` | `4ef3ef4797e89da591b641bbd0eaa475` |
+| `mfunl12-2-off` | a probe: all three features in `parked-boards` | — |
+| `mfunl12-3-no292`, `mfunl12-4-ship` | **the shipped configuration**: 262 and 246 in `default`, 292 parked | `aee4243f1e16e7aaf876751751f68262` (two independent builds, same md5) |
+| `mfunl12-0-again` | a byte copy of `mfunl12-0-base`, the **same-binary floor** | same md5 as the base |
+
+The base binary's md5 is **identical to MF-UNL-11's shipped binary** (`zax-harness-mfunl11-2-ship`),
+so this lot's base is that lot's measured binary to the byte — the **ninth** lot in a row for which
+that holds, and built rather than assumed.
+
+### 6.1 The first measurement, all three features on: a real regression
+
+| ROM | base | lot | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| duelito | 7 380 403 016 | 7 380 566 874 | +163 858 | +0.002 |
+| m0 | 5 517 372 614 | 5 517 919 495 | +546 881 | +0.010 |
+| m1 | 4 881 091 252 | 4 881 932 529 | +841 277 | +0.017 |
+| m4 | 5 468 140 245 | 5 468 675 621 | +535 376 | +0.010 |
+| metroid | 5 115 551 905 | 5 116 329 341 | +777 436 | +0.015 |
+| mm2 | 6 017 978 118 | 6 018 322 515 | +344 397 | +0.006 |
+| mmc5 | 11 266 796 431 | 11 390 607 031 | **+123 810 600** | **+1.099** |
+| oamstr | 3 318 523 121 | 3 319 324 968 | +801 847 | **+0.024** |
+| readbuf | 6 834 520 361 | 6 835 187 099 | +666 738 | +0.010 |
+| smb1 | 5 996 351 415 | 5 997 070 808 | +719 393 | +0.012 |
+| smb3 | 7 949 398 009 | 7 949 966 031 | +568 022 | +0.007 |
+| vblnmi | 3 308 266 455 | 3 308 942 824 | +676 369 | **+0.020** |
+| z2 | 6 291 535 122 | 6 291 794 132 | +259 010 | +0.004 |
+| **total** | **79 345 928 064** | **79 476 639 268** | **+130 711 204** | **+0.165** |
+
+Thirteen ROMs slower, three at or above the tolerance, and `mmc5` at **fifty-five times** it. Two
+symbols carry the whole of it: `Cartridge::try_cpu_read` **+122 851 006** on `mmc5exram`, and
+`NesBus::write_internal` **+157 036 to +862 997 on every ROM of the set**.
+
+### 6.2 The attribution: it is `board-292`, entirely
+
+The same tree with `board-292` alone moved out of `default` (`mfunl12-3-no292`) against the tree
+with it in (`mfunl12-1-lot`) — so the difference *is* that feature:
+
+| | worst ROM | set total |
+| --- | --- | ---: |
+| `board-292` alone | `mmc5` **+1.098 %**, `oamstr` +0.026 %, `vblnmi` +0.020 %, `m1` +0.017 % | **+130 067 231** |
+| `board-262` + `board-246` together | `m4` **+0.003 %** | +643 973 (+0.001 %) |
+
+**Two causes, and neither has a fix.**
+
+1. **`Board::cpu_read_override` gains a body.** `IrqBoard` had no forward for it, so it shared that
+   dispatch's **empty** arm — and that dispatch carries `#[inline(always)]`, pinned by lot PR-1
+   step 3, and folds into `Cartridge::try_cpu_read`, which the MMC5 reaches on **every CPU read**
+   because it is the board that maps PRG-RAM into `$8000-$DFFF`. That is the +122.8 M, and it is
+   MF-5b step 1's "the arm that matters is the empty one" one dispatch further along. A board whose
+   registers a **read** fills needs a `&mut self` read hook, and this build has exactly one.
+2. **the latch store in `NesBus::write_internal`**, worst `oamstr` **+0.026 %** — a ROM whose whole
+   run is OAM writes. **Splitting the board into two features would not save it**: `oamstr`'s figure
+   is +862 997 of +874 540, so the latch *on its own* is already over the tolerance.
+
+### 6.3 The decision
+
+* **`board-292` is parked** — moved out of `default` into `parked-boards`, never dropped. Every
+  board stays reachable behind its feature, which is the owner's rule; one flag,
+  `--features parked-boards`, turns it on.
+* **`board-262` and `board-246` stay in `default`**: +0.003 % on their worst ROM.
+
+It is the **first and only board of the twelve MF-UNL lots to be parked**, and the second
+cartridge board of this build after `board-vs-system`.
+
+### 6.4 The shipped configuration on PR-1's thirteen, and the two floors
+
+| ROM | base | ship | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| duelito | 7 380 403 016 | 7 380 523 008 | +119 992 | +0.002 |
+| m0 | 5 517 372 614 | 5 517 362 549 | −10 065 | −0.000 |
+| m1 | 4 881 091 252 | 4 881 121 542 | +30 290 | +0.001 |
+| m4 | 5 468 140 245 | 5 468 326 704 | +186 459 | **+0.003** |
+| metroid | 5 115 551 905 | 5 115 660 128 | +108 223 | +0.002 |
+| mm2 | 6 017 978 118 | 6 018 062 064 | +83 946 | +0.001 |
+| mmc5 | 11 266 796 431 | 11 266 883 281 | +86 850 | +0.001 |
+| oamstr | 3 318 523 121 | 3 318 447 543 | −75 578 | −0.002 |
+| readbuf | 6 834 520 361 | 6 834 584 961 | +64 600 | +0.001 |
+| smb1 | 5 996 351 415 | 5 996 413 457 | +62 042 | +0.001 |
+| smb3 | 7 949 398 009 | 7 949 480 930 | +82 921 | +0.001 |
+| vblnmi | 3 308 266 455 | 3 308 266 977 | +522 | +0.000 |
+| z2 | 6 291 535 122 | 6 291 589 932 | +54 810 | +0.001 |
+| **total** | **79 345 928 064** | **79 346 723 076** | **+795 012** | **+0.001** |
+
+Worst ROM **+0.003 %** against a tolerance of +0.02 %, and `mmc5` — the ROM the parked feature cost
+1.1 % — is back at +0.001 %.
+
+| floor | worst ROM | set total |
+| --- | --- | ---: |
+| the **ship** binary run twice | `duelito` +0.001 % | +151 039 |
+| the **base** binary run twice | `oamstr` −0.002 %, `duelito` +0.001 % | +19 525 |
+
+### 6.5 Level 2, and a valgrind limitation this lot has to work around
+
+**This machine's valgrind 3.22 silently declines to read the shipped binary's symbols.** Verbose
+output shows no `Reading syms from …/zax-harness-mfunl12-4-ship` line at all, no warning, and the
+annotations come out as raw addresses — so `callgrind-l2.sh`'s stage table, which is built by
+matching function names in `callgrind_annotate --inclusive=yes`, is **empty** for it. Two
+independent builds of that tree give the same md5 and the same failure, and `readelf -lW` shows
+what differs from every binary that does work:
+
+    base:  GNU_RELRO  FileSiz 0x0157e0  MemSiz 0x015980   .relro_padding in the .data.rel.ro LOAD
+    ship:  GNU_RELRO  FileSiz 0x0157e0  MemSiz 0x0157e0   .relro_padding in the .data/.bss LOAD
+
+A linker-layout difference, deterministic for that feature set and outside this lot's control. It
+is recorded here because the next lot may meet it: **the whole-process `Ir` is still exact**, and it
+is what the shipped configuration's level-2 row is measured on.
+
+| game | base | ship | delta | % |
+| --- | ---: | ---: | ---: | ---: |
+| metroid | 13 735 989 397 | 13 736 146 552 | +157 155 | +0.001 |
+| mm2 | 18 977 275 426 | 18 977 571 409 | +295 983 | +0.002 |
+| smb1 | 13 586 825 218 | 13 592 319 380 | +5 494 162 | **+0.040** |
+| smb3 | 24 193 127 575 | 24 191 998 195 | −1 129 380 | −0.005 |
+| zelda2 | 15 359 321 035 | 15 360 214 505 | +893 470 | +0.006 |
+| **total** | **85 852 538 651** | **85 858 250 041** | **+5 711 390** | **+0.007** |
+
+Four of five inside the tolerance. **`smb1` is over it, and the lot's performance rule says to show
+the cause with a same-behaviour pair rather than redefine the tolerance.** Three measurements do
+that:
+
+| | smb1 | what it is |
+| --- | ---: | --- |
+| the **same binary** run twice (`3-no292` vs `4-ship`) | **+0.018 %** | the instrument's own spread on this game |
+| the base binary run twice | +0.003 % | the same, on the other binary |
+| **the same-behaviour pair**: base vs `mfunl12-2-off` | **+0.015 %** | the lot's own tree with all three features out of `default`, so the emulation of all five games is the base commit's byte for byte |
+
+and the pair's per-symbol diff names the cause outright: **`luaH_getshortstr` +1 903 930 of a
++2 083 363 whole-game move, 91 % of it**, with `__memcpy_avx_unaligned_erms` +336 778 and
+`_int_malloc` −153 632 beside it and **nothing of this project moving at all**. That is Lua's
+string-key hash table, the column every lot since MF-UNL-1 has recorded a ±0.02 % spread on.
+
+So `smb1`'s +0.040 % is about twice a spread of 0.018 % on a figure whose 91 % mover is `ltable.c`,
+and it is recorded rather than explained away.
+
+### 6.6 The stage table, where it can be read
+
+`mfunl12-2-off` is the identical-emulation tree and `mfunl12-1-lot` the all-features-on one; both
+symbolize.
+
+| | `core` | worst `total` |
+| --- | --- | --- |
+| base vs **`2-off`** (identical emulation) | **+0 on all five games, identical to the instruction** | `smb1` +0.015 %, `smb3` −0.023 % |
+| base vs **`1-lot`** (all three features on) | **above on all five**, +0.009 % to +0.017 % | `metroid` +0.014 % |
+| base vs **the floor** (same binary) | **+0 on all five** | `zelda2` +0.006 %, `smb1` +0.003 % |
+
+The middle row is the park's second justification and the clearest one in the whole campaign: with
+`board-292` on, `NesCore::run_frame` itself is measurably larger on **all five games** — that is
+the latch store, which sits inside the emulated frame — and with it parked `core` is +0 everywhere.
+The behaviour claim is step 7's golden-core, not this table.
+
+### 6.7 What the suites say after the park
+
+| configuration | `mapper_tests` |
+| --- | ---: |
+| `default` (292 parked) | **385** passed / 0 failed |
+| `--features parked-boards` | **392** passed / 0 failed |
+
+385 is 392 less the seven tests that need `board-292`: its five from step 2, its round trip from
+step 4, and the shared reset test, which is `cfg(all(board-262, board-292))`. `cargo fmt --check`
+and clippy `-D warnings` are clean in both.
