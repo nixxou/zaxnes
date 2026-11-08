@@ -64,8 +64,7 @@ with the first and not the second has a module nothing calls. The six below are 
 
 - [x] **0/6** the plan — this note.
 - [x] **1/6** the Microwire device and the board, with Q-170.
-- [ ] **2/6** the tests the census lists from the page, plus §7.1's three common things in every
-      configuration the lot adds.
+- [x] **2/6** the tests the census lists from the page.
 - [ ] **3/6** `BOARD-FEATURES.md` row; fmt and clippy `-D warnings` in the four configurations
       (default, `--no-default-features`, `--features parked-boards`, `board-164` alone).
 - [ ] **4/6** the callgrind campaign against `909c0edd`: PR-1's thirteen ROMs and the five
@@ -150,3 +149,46 @@ unchanged.
 The generic save-state sweep **dirties nothing of this board** — its ports are at `$5000-$5500`
 and the sweep writes `$8000-$E001` and `$6000` — which is the MF-UNL-2 situation and what step 2's
 own round-trip test is for.
+
+## Step 2 — the tests from the page
+
+Nine tests and one helper module, `mapper_tests.rs`. The census lists four things; they are the
+first four rows, and the other five are what the page's own register table asks for.
+
+| census item / page claim | test |
+| --- | --- |
+| "the EEPROM's read and write command sequences, **bit by bit** over the serial line, against the 93C66's documented protocol" | `req_core_102_the_93c66_clocks_the_datasheets_seven_instructions` |
+| "a written word survives a save-state round-trip and reaches the save file" | `req_core_090_mapper_164_round_trips_its_ports_its_two_latches_and_its_eeprom` |
+| "the 1 bpp mode changes which CHR bits a pattern fetch consumes" | `req_core_102_mapper_164_takes_chr_a3_and_a12_from_the_latch_in_1_bpp_mode` |
+| "mirroring from $5300" | `req_core_102_mapper_164_forces_vertical_mirroring_until_5300_takes_over` |
+| both PRG modes, both fixed-bank shapes, the `$5100` outer bits | `req_core_102_mapper_164_banks_prg_in_both_modes_with_two_fixed_banks` |
+| `$5500` bit 2, **inverted**, under mask `$FF00`, nothing else driven | `req_core_102_mapper_164_answers_the_microwire_line_inverted` |
+| Q-170 §2.4, the write path | `q_170_the_1_bpp_substitution_is_on_the_write_path_as_well` |
+| Q-170 §2.3, 2 KiB mirrored, the EEPROM out of the CPU window | `q_170_mapper_164_mirrors_2_kib_of_volatile_ram_and_keeps_the_eeprom_out_of_the_window` |
+| no IRQ, no expansion audio, and **no window moves** on the PPU bus | `req_core_075_mapper_164_has_no_irq_and_moves_no_window_on_the_ppu_bus` |
+
+The `microwire` module is the `i2c` module of MF-6c step 3 for a three-wire bus: `lines`, `clock`,
+`select`/`deselect`, `send`, `receive_bit`, `command`, and one function per instruction. `data_out`
+inverts, because the board does.
+
+Four observations in there are the ones that would catch a wrong reading rather than a typo:
+
+* **nine address bits** — `$1FF` and `$0FF` differ by A8 alone, so the x16 reading §7.2 asked for
+  would alias them (Q-170 §1.1);
+* **MSB-first data** — `$B2` reversed is `$4D`;
+* **one dummy zero per burst**, not one per word, with three words read sequentially and the
+  address wrapping `$1FF` → `$000`;
+* **EWDS at power-on** — the first WRITE of the test, before any EWEN, changes nothing, and after
+  an EWDS neither WRITE nor ERASE nor WRAL does.
+
+And in the 1 bpp test: all four of `$0000`/`$0008`/`$1000`/`$1008` read **one** byte with the mode
+on, the byte the two latches name, **with no register write between the four groups**; `$0234` and
+`$1234` both read `$123C` with both latches set, which is fine Y and the tile index passing
+through; moving the address *inside* `$2000-$3FFF` latches nothing, so it is the rise; and
+`on_ppu_address_bus_without_read` latches too, which is what proves the number belongs in **both**
+of §4.3's lists and not just the first.
+
+`cargo test -p zax-nes --test mapper_tests`: **350 passed, 0 failed** (341 before the lot's tests).
+fmt and clippy `-D warnings` clean on `zax-nes --all-targets`.
+
+[PROGRESS] MF-UNL-10 step 2/6 done: the tests from the page

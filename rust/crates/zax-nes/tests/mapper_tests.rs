@@ -46,6 +46,7 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     feature = "board-119",
     feature = "board-162",
     feature = "board-163",
+    feature = "board-164",
     feature = "board-178",
     feature = "board-218",
     feature = "board-268",
@@ -13716,4 +13717,636 @@ fn amd_061_a_reset_puts_every_board_of_mf_unl_8_back_to_its_power_on_state() {
         assert_eq!(power_on, unl8_layout(&core), "mapper {mapper}");
         assert!(!core.cartridge().unwrap().irq_asserted());
     }
+}
+
+// ------------------------------------------- Dongda PEC-9588 (164), lot MF-UNL-10
+
+/// Drives the three Microwire lines of mapper 164's 93C66 from the CPU side, through `$5200`:
+/// "`.T.S .C.D`" — DI on bit 0, CLK on bit 2, the populated chip's CS on bit 4 and the
+/// unpopulated second chip's on bit 6 (nesdev, "INES Mapper 164"; Microchip DS20001795F
+/// table 1-4). MF-UNL-10 step 2.
+#[cfg(feature = "board-164")]
+mod microwire {
+    use super::{MapperMachine, NesCore};
+
+    /// `10`, `01`, `11` and `00` of table 1-4.
+    pub const READ: u8 = 0b10;
+    pub const WRITE: u8 = 0b01;
+    pub const ERASE: u8 = 0b11;
+    pub const EXTENDED: u8 = 0b00;
+
+    /// The sub-opcode of the extended instructions, which lives in the top two bits of the
+    /// nine-bit address field: EWDS `00`, WRAL `01`, ERAL `10`, EWEN `11`.
+    pub const EWDS: u16 = 0b0_0000_0000;
+    pub const WRAL: u16 = 0b0_1000_0000;
+    pub const ERAL: u16 = 0b1_0000_0000;
+    pub const EWEN: u16 = 0b1_1000_0000;
+
+    pub fn lines(core: &mut NesCore, cs: u8, clk: u8, di: u8) {
+        core.mapper_write(0x5200, (cs << 4) | (clk << 2) | di);
+    }
+
+    /// One clock of `bit`: CLK low with DI set up, then CLK high to clock it in.
+    pub fn clock(core: &mut NesCore, bit: u8) {
+        lines(core, 1, 0, bit);
+        lines(core, 1, 1, bit);
+    }
+
+    /// "When preparing to transmit an instruction, either the CLK or DI signal levels must be at
+    /// a logic low as CS is toggled active high" (DS20001795F section 2.1).
+    pub fn select(core: &mut NesCore) {
+        lines(core, 0, 0, 0);
+        lines(core, 1, 0, 0);
+    }
+
+    /// "DO will enter the High-Z state on the falling edge of CS" (section 2.0).
+    pub fn deselect(core: &mut NesCore) {
+        lines(core, 1, 0, 0);
+        lines(core, 0, 0, 0);
+    }
+
+    /// The `width` bits of `value`, most significant first — `A8 A7 ... A0` and `D7 ... D0`.
+    pub fn send(core: &mut NesCore, value: u16, width: u8) {
+        for index in 0..width {
+            clock(core, ((value >> (width - 1 - index)) & 1) as u8);
+        }
+    }
+
+    /// The chip's DO, which the board presents **inverted** in bit 2 of `$5500`.
+    pub fn data_out(core: &NesCore) -> u8 {
+        (!(core.read_memory(0x5500) >> 2)) & 1
+    }
+
+    /// One clock rise with DI low, and the bit the chip drives after it.
+    pub fn receive_bit(core: &mut NesCore) -> u8 {
+        lines(core, 1, 0, 0);
+        lines(core, 1, 1, 0);
+        data_out(core)
+    }
+
+    /// A start bit, a two-bit opcode and nine address bits. CS stays high afterwards, so a
+    /// caller may go on to clock data.
+    pub fn command(core: &mut NesCore, opcode: u8, address: u16) {
+        select(core);
+        clock(core, 1); // the start bit.
+        send(core, u16::from(opcode), 2);
+        send(core, address, 9);
+    }
+
+    /// The whole of one extended instruction with no data behind it.
+    pub fn extended(core: &mut NesCore, sub_opcode: u16) {
+        command(core, EXTENDED, sub_opcode);
+        deselect(core);
+    }
+
+    pub fn write_word(core: &mut NesCore, address: u16, value: u8) {
+        command(core, WRITE, address);
+        send(core, u16::from(value), 8);
+        deselect(core);
+    }
+
+    pub fn erase_word(core: &mut NesCore, address: u16) {
+        command(core, ERASE, address);
+        deselect(core);
+    }
+
+    pub fn write_all(core: &mut NesCore, value: u8) {
+        command(core, EXTENDED, WRAL);
+        send(core, u16::from(value), 8);
+        deselect(core);
+    }
+
+    /// Eight bits out of the chip, most significant first.
+    pub fn receive_word(core: &mut NesCore) -> u8 {
+        (0..8).fold(0u8, |word, _| (word << 1) | receive_bit(core))
+    }
+
+    /// A read burst: the dummy zero the address's last clock puts on DO, then `count` words
+    /// clocked out sequentially with CS held high.
+    pub fn read_burst(core: &mut NesCore, address: u16, count: usize) -> (u8, Vec<u8>) {
+        command(core, READ, address);
+        let dummy = data_out(core);
+        let words = (0..count).map(|_| receive_word(core)).collect();
+        deselect(core);
+        (dummy, words)
+    }
+
+    /// One word, for the many assertions that want exactly that.
+    pub fn read_word(core: &mut NesCore, address: u16) -> u8 {
+        read_burst(core, address, 1).1[0]
+    }
+}
+
+/// The 93C66's seven instructions, bit by bit over the serial line, against table 1-4 of
+/// Microchip DS20001795F — the **x8** organisation, which is the one the page selects ("The
+/// EEPROM's 'ORG' pin is tied to GND, selecting a word size of 8 bits") and which section 7.2 of
+/// `docs/review/UNL-census.md` gets wrong (Q-170 section 1.1).
+///
+/// The census asks for exactly this: "the EEPROM's read and write command sequences, bit by bit
+/// over the serial line, against the 93C66's documented protocol".
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_102_the_93c66_clocks_the_datasheets_seven_instructions() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).battery().load();
+
+    // The two memories of this board, and which of them REQ-CORE-095 exposes: 2 KiB of volatile
+    // RAM the CPU addresses, then the EEPROM's 512 bytes, which are the whole battery slice.
+    assert_eq!(
+        2 * 1024 + 512,
+        core.cartridge().unwrap().memory().prg_ram().len()
+    );
+    assert_eq!(512, core.cartridge().unwrap().battery_ram().len());
+
+    // "After power-up, the device is automatically in the EWDS mode. Therefore, an EWEN
+    // instruction must be performed before the initial ERASE or WRITE instruction can be
+    // executed" (section 2.6): this write changes nothing.
+    microwire::write_word(&mut core, 0x000, 0x5A);
+    assert_eq!(
+        (0, vec![0x00]),
+        microwire::read_burst(&mut core, 0x000, 1),
+        "a WRITE before an EWEN, and the dummy zero of a READ"
+    );
+
+    // EWEN, and the same write lands. "Execution of a READ instruction is independent of both the
+    // EWEN and EWDS instructions", which the read above already relied on.
+    microwire::extended(&mut core, microwire::EWEN);
+    microwire::write_word(&mut core, 0x000, 0x5A);
+    assert_eq!(0x5A, microwire::read_word(&mut core, 0x000));
+
+    // **Nine address bits**, which is the whole of Q-170 section 1.1: $1FF and $0FF differ by A8
+    // alone, so an eight-bit address field would alias them.
+    microwire::write_word(&mut core, 0x1FF, 0xA5);
+    assert_eq!(0xA5, microwire::read_word(&mut core, 0x1FF));
+    assert_eq!(
+        0x00,
+        microwire::read_word(&mut core, 0x0FF),
+        "A8 is a ninth address bit and not a don't-care"
+    );
+
+    // Data is clocked **most significant bit first** (`D7 ... D0`): $B2 reversed is $4D, so the
+    // byte that comes back tells the two orders apart.
+    microwire::write_word(&mut core, 0x011, 0xB2);
+    assert_eq!(0xB2, microwire::read_word(&mut core, 0x011));
+
+    // "Sequential read is possible when CS is held high. The memory data will automatically cycle
+    // to the next register and output sequentially" (section 2.7) — and figure 2-7 shows **one**
+    // dummy zero for the whole burst, not one per word.
+    for (address, value) in [(0x020u16, 0x11u8), (0x021, 0x22), (0x022, 0x33)] {
+        microwire::write_word(&mut core, address, value);
+    }
+    assert_eq!(
+        (0, vec![0x11, 0x22, 0x33]),
+        microwire::read_burst(&mut core, 0x020, 3)
+    );
+    // The address the chip increments wraps inside the 512 words it has.
+    microwire::write_word(&mut core, 0x000, 0x7B);
+    assert_eq!(
+        (0, vec![0xA5, 0x7B]),
+        microwire::read_burst(&mut core, 0x1FF, 2),
+        "the sequential read wraps $1FF to $000"
+    );
+
+    // "The ERASE instruction forces all data bits of the specified address to the logical 1
+    // state" (section 2.4) — one word, and its neighbours untouched.
+    microwire::erase_word(&mut core, 0x021);
+    assert_eq!(
+        (0, vec![0x11, 0xFF, 0x33]),
+        microwire::read_burst(&mut core, 0x020, 3)
+    );
+
+    // "The Write All (WRAL) instruction will write the entire memory array with the data
+    // specified in the command" (section 2.9).
+    microwire::write_all(&mut core, 0x7E);
+    assert!(
+        core.cartridge()
+            .unwrap()
+            .battery_ram()
+            .iter()
+            .all(|byte| *byte == 0x7E),
+        "WRAL writes all 512 words"
+    );
+
+    // "The Erase All (ERAL) instruction will erase the entire memory array to the logical 1
+    // state" (section 2.5).
+    microwire::extended(&mut core, microwire::ERAL);
+    assert!(
+        core.cartridge()
+            .unwrap()
+            .battery_ram()
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "ERAL erases all 512 words"
+    );
+
+    // EWDS, and "programming remains enabled until an EWDS instruction is executed" the other way
+    // round: nothing the chip is asked to program afterwards moves.
+    microwire::extended(&mut core, microwire::EWDS);
+    microwire::write_word(&mut core, 0x030, 0x01);
+    microwire::erase_word(&mut core, 0x031);
+    microwire::write_all(&mut core, 0x00);
+    assert!(
+        core.cartridge()
+            .unwrap()
+            .battery_ram()
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "every programming instruction is inhibited after EWDS"
+    );
+}
+
+/// `$5500`: "93C66 EEPROM DAT input (**inverted**)" in bit 2, under the same `$FF00` mask the four
+/// write ports use, with nothing else driven (MF-UNL-10 step 2; Q-170 section 2.2 for the idle
+/// level).
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_102_mapper_164_answers_the_microwire_line_inverted() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).battery().load();
+
+    // Idle: DO is undriven, which this build reads as 1 (Q-170 section 2.2), so the inverted bit
+    // is 0 and no other bit of the register is driven either.
+    assert_eq!(0x00, core.read_memory(0x5500));
+    // Mask $FF00: the port answers at every address of $5500-$55FF.
+    assert_eq!(0x00, core.read_memory(0x55FF));
+
+    // A read burst drives DO, and the register shows its inverse. The dummy zero is the first
+    // thing out, so bit 2 is **set** at that moment.
+    microwire::extended(&mut core, microwire::EWEN);
+    microwire::write_word(&mut core, 0x040, 0xFF);
+    microwire::command(&mut core, microwire::READ, 0x040);
+    assert_eq!(0x04, core.read_memory(0x5500), "the dummy zero, inverted");
+    for _ in 0..8 {
+        assert_eq!(1, microwire::receive_bit(&mut core), "$FF, bit by bit");
+        assert_eq!(0x00, core.read_memory(0x5500));
+    }
+    microwire::deselect(&mut core);
+    assert_eq!(0x00, core.read_memory(0x5500), "High-Z again");
+}
+
+/// The two PRG banking modes of `$5000` bit 4, with the two shapes of semi-fixed bank `S` selects
+/// and the outer bits of `$5100` above them (nesdev, "INES Mapper 164").
+///
+/// The page's mode strings are written **A18 first**, which it proves twice: `111p0` is "fixed
+/// bank=1C or 1E", which only holds read that way, and `11111` is bank `$1F`, which its own note
+/// confirms — "the game's reset vectors will be at the end of 16 KiB bank #31".
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_102_mapper_164_banks_prg_in_both_modes_with_two_fixed_banks() {
+    // 2 MiB, which is what seven bank bits address: 256 banks of 8 KiB, each filled with its own
+    // number, so the outer bits of `$5100` are visible instead of wrapping.
+    let mut core = MapperRom::new(164).prg(256).chr(0).load();
+
+    // Power-on. "Because this register is initialized to $00 on reset, thus clearing bit 4 which
+    // causes UxROM mode, the game's reset vectors will be at the end of 16 KiB bank #31":
+    // 16 KiB bank 0 at $8000 and bank $1F -- 8 KiB banks 62 and 63 -- at $C000.
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+
+    // `PPPp` is A17..A14, so the nibble is the low four bits of the 16 KiB bank number.
+    core.mapper_write(0x5000, 0x05);
+    assert_eq!([10, 11, 62, 63], core.prg_windows());
+
+    // `Q` is A18, bit 4 of the bank number: $20 of the port is $10 of the bank.
+    core.mapper_write(0x5000, 0x25);
+    assert_eq!([42, 43, 62, 63], core.prg_windows());
+
+    // `S` set: "PRG A14..A18=111p0 when CPU A14=1 and S=1 (fixed bank=1C or 1E)", `p` being bit 0
+    // of the port. With `p` clear the fixed bank is $1C = 28, i.e. 8 KiB banks 56 and 57.
+    core.mapper_write(0x5000, 0x40);
+    assert_eq!([0, 1, 56, 57], core.prg_windows());
+    // With `p` set it is $1E = 30, and the switchable bank moves to 1 with it.
+    core.mapper_write(0x5000, 0x41);
+    assert_eq!([2, 3, 60, 61], core.prg_windows());
+
+    // "$5100: .... ..PP, PRG A20..A19" -- two bits above A18, i.e. +32 and +64 on a 16 KiB bank,
+    // and they reach the fixed window too.
+    core.mapper_write(0x5000, 0x00);
+    core.mapper_write(0x5100, 0x01);
+    assert_eq!([64, 65, 126, 127], core.prg_windows());
+    core.mapper_write(0x5100, 0x02);
+    assert_eq!([128, 129, 190, 191], core.prg_windows());
+    core.mapper_write(0x5100, 0x03);
+    assert_eq!([192, 193, 254, 255], core.prg_windows());
+
+    // Mode 1: "PRG A14=CPU A14, PRG A15..A18=PPPp (BxROM, 32 KiB switchable bank)" -- the same
+    // nibble is now the 32 KiB bank number, and `$5100` sits two bits above it.
+    core.mapper_write(0x5100, 0x00);
+    core.mapper_write(0x5000, 0x10);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.mapper_write(0x5000, 0x1F);
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+    core.mapper_write(0x5100, 0x03);
+    assert_eq!([252, 253, 254, 255], core.prg_windows());
+
+    // `Q` and `S` are UxROM-mode lines and neither reaches a BxROM bank: the page gives mode 1
+    // four lines and no fixed bank at all.
+    core.mapper_write(0x5000, 0x7F);
+    assert_eq!([252, 253, 254, 255], core.prg_windows());
+
+    // And back: clearing the mode bit restores the pair of windows.
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!([192, 193, 254, 255], core.prg_windows());
+}
+
+/// "`$5000` bit 4 ... Also selects nametable mirroring: 0: Forced vertical mirroring; 1: Mirroring
+/// selected by `$5300`", whose bit 7 is "0=Horizontal, 1=Vertical" — the census's "mirroring from
+/// $5300" (MF-UNL-10 step 2).
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_102_mapper_164_forces_vertical_mirroring_until_5300_takes_over() {
+    // A horizontal header, so that "forced vertical" is visibly the board's doing.
+    let mut core = MapperRom::new(164).prg(16).chr(0).load();
+    assert_eq!(Nm::Vertical, core.mirroring());
+
+    // With the mode bit clear, `$5300` is not consulted at all.
+    for value in [0x80u8, 0x00, 0xFF] {
+        core.mapper_write(0x5300, value);
+        assert_eq!(
+            Nm::Vertical,
+            core.mirroring(),
+            "$5300={value:#04X} while $5000.4 is clear"
+        );
+    }
+
+    // With it set, `$5300` bit 7 decides.
+    core.mapper_write(0x5300, 0x00);
+    core.mapper_write(0x5000, 0x10);
+    assert_eq!(Nm::Horizontal, core.mirroring());
+    core.mapper_write(0x5300, 0x80);
+    assert_eq!(Nm::Vertical, core.mirroring());
+    core.mapper_write(0x5300, 0x7F);
+    assert_eq!(
+        Nm::Horizontal,
+        core.mirroring(),
+        "only bit 7 of $5300 is a mirroring line"
+    );
+
+    // Clearing the mode bit forces vertical again, whatever `$5300` still holds.
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!(Nm::Vertical, core.mirroring());
+}
+
+/// The **1 bpp video mode**: "when PPU A13=0 (pattern table) ... 1: CHR A3=PPU A0, CHR A12=PPU A9,
+/// both latched on last rise of PPU A13".
+///
+/// The census asks that "the 1 bpp mode changes which CHR bits a pattern fetch consumes", which is
+/// what the four groups of fetches below do with no register write between them: the only thing
+/// that moves is the nametable address the latch last saw.
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_102_mapper_164_takes_chr_a3_and_a12_from_the_latch_in_1_bpp_mode() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).load();
+
+    // Four marker bytes at the four addresses the two substituted lines can reach, written with
+    // the mode **off** so that the write path is the identity (Q-170 section 2.4).
+    for (address, value) in [
+        (0x0000u16, 0xC0u8),
+        (0x0008, 0xC1),
+        (0x1000, 0xC2),
+        (0x1008, 0xC3),
+    ] {
+        chr_write(&mut core, address, value);
+    }
+
+    // With the mode off the chip is flat: A3 and A12 are the fetch's own, and no PPU address
+    // changes that.
+    for nametable in [0x2000u16, 0x2001, 0x2200, 0x2201] {
+        latch_a13_rise(&mut core, nametable);
+        assert_eq!(
+            [0xC0, 0xC1, 0xC2, 0xC3],
+            [
+                peek(&core, 0x0000),
+                peek(&core, 0x0008),
+                peek(&core, 0x1000),
+                peek(&core, 0x1008)
+            ],
+            "the mode is off"
+        );
+    }
+
+    // Bit 7 of `$5000` turns it on. Now **all four fetches read one byte** — the one the two
+    // latched bits name — because neither A3 nor A12 follows the fetch any more. PPU A0 is the
+    // nametable address's coarse-X bit 0 and PPU A9 its coarse-Y bit 4.
+    core.mapper_write(0x5000, 0x80);
+    for (nametable, byte) in [
+        (0x2000u16, 0xC0u8), // A0=0, A9=0.
+        (0x2001, 0xC1),      // A0=1, A9=0.
+        (0x2200, 0xC2),      // A0=0, A9=1.
+        (0x2201, 0xC3),      // A0=1, A9=1.
+    ] {
+        latch_a13_rise(&mut core, nametable);
+        assert_eq!(
+            [byte; 4],
+            [
+                peek(&core, 0x0000),
+                peek(&core, 0x0008),
+                peek(&core, 0x1000),
+                peek(&core, 0x1008)
+            ],
+            "1 bpp, latched from {nametable:#06X}"
+        );
+    }
+
+    // **Both bitplanes of a tile read the same eight bytes**, which is what makes the mode 1 bpp:
+    // $0008 is the high plane of tile 0 and it answers the low plane's byte.
+    latch_a13_rise(&mut core, 0x2000);
+    assert_eq!(peek(&core, 0x0000), peek(&core, 0x0008));
+
+    // Everything else of the fetch is untouched: fine Y (A2-A0) and the tile index (A11-A4) still
+    // address the chip, so a fetch of $0234 or $1234 with both latches set reads $123C.
+    core.mapper_write(0x5000, 0x00);
+    chr_write(&mut core, 0x123C, 0x5E);
+    core.mapper_write(0x5000, 0x80);
+    latch_a13_rise(&mut core, 0x2201);
+    assert_eq!(0x5E, peek(&core, 0x0234), "fine Y and the tile index pass");
+    assert_eq!(0x5E, peek(&core, 0x1234));
+
+    // It is the **rise** of A13 and not a decode of it: once the address is inside $2000-$3FFF,
+    // moving it within the range latches nothing.
+    latch_a13_rise(&mut core, 0x2000);
+    for address in [0x2201u16, 0x2601, 0x3E01, 0x2FFF] {
+        core.cartridge_mut().unwrap().on_ppu_address_bus(address, 3);
+        assert_eq!(
+            0xC0,
+            peek(&core, 0x0000),
+            "no second rise at {address:#06X}"
+        );
+    }
+
+    // A bare `$2006` write is such a rise too, the latch being on the address lines and not on
+    // /RD — which is the observation that proves the number is in **both** of section 4.3's
+    // lists.
+    {
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus_without_read(0x0000, 4);
+        cartridge.on_ppu_address_bus_without_read(0x2201, 5);
+    }
+    assert_eq!(0xC3, peek(&core, 0x0000), "a bare $2006 write latches too");
+}
+
+/// **Q-170 section 2.4**: the page describes the 1 bpp substitution as a property of a fetch and
+/// says nothing about a `$2007` write. CHR A3 and CHR A12 are pins on the RAM chip, so a write
+/// lands where a fetch of the same address would read — the reading this build takes, pinned here.
+#[cfg(feature = "board-164")]
+#[test]
+fn q_170_the_1_bpp_substitution_is_on_the_write_path_as_well() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).load();
+
+    core.mapper_write(0x5000, 0x80);
+    latch_a13_rise(&mut core, 0x2201); // A0=1, A9=1: CHR A3=1, CHR A12=1.
+    chr_write(&mut core, 0x0000, 0x9D);
+
+    // The byte is at $1008 and not at $0000, which the flat chip shows once the mode is off.
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!(0x9D, peek(&core, 0x1008));
+    assert_eq!(0x00, peek(&core, 0x0000));
+
+    // And the read side agrees with the write side, which is the point: with the same latch, a
+    // fetch of $0000 reads back what the write put there.
+    core.mapper_write(0x5000, 0x80);
+    latch_a13_rise(&mut core, 0x2201);
+    assert_eq!(0x9D, peek(&core, 0x0000));
+}
+
+/// Section 7.1 item 2 of `docs/review/UNL-census.md` for this lot's one board: a save-state
+/// round-trip with the board's **own** registers dirtied first — which the generic sweep
+/// `req_core_090_the_mapper_state_survives_a_save_and_restore` cannot do, its writes being at
+/// `$8000-$E001` and `$6000` where this board has no register at all.
+///
+/// The census also asks that "a written word survives a save-state round-trip and reaches the save
+/// file", and the state is taken **mid-command** so that the EEPROM's own bus is covered too.
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_090_mapper_164_round_trips_its_ports_its_two_latches_and_its_eeprom() {
+    let mut core = MapperRom::new(164).prg(256).chr(0).battery().load();
+
+    // A word in the EEPROM, which is the save.
+    microwire::extended(&mut core, microwire::EWEN);
+    microwire::write_word(&mut core, 0x123, 0x6C);
+
+    // Every port, the two PPU-bus latches with 1 bpp on so that they reach a fetch, and a byte in
+    // the volatile RAM the CPU addresses.
+    core.mapper_write(0x5100, 0x03);
+    core.mapper_write(0x5300, 0x80);
+    core.mapper_write(0x5000, 0xD5);
+    latch_a13_rise(&mut core, 0x2201);
+    core.write_memory(0x6123, 0x7E);
+    chr_write(&mut core, 0x0000, 0x4B);
+
+    // And the chip left **mid-command**: a start bit, a READ opcode and four of the nine address
+    // bits, so that the mode, the opcode, the partial address and the counter are all non-zero.
+    microwire::select(&mut core);
+    microwire::clock(&mut core, 1);
+    microwire::send(&mut core, u16::from(microwire::READ), 2);
+    microwire::send(&mut core, 0b1010, 4);
+
+    let state = core.save_state(true).unwrap();
+    let windows = core.prg_windows();
+    let chr = core.chr_windows();
+    let mirroring = core.mirroring();
+
+    // Move everything the board has, the EEPROM included, then come back.
+    microwire::send(&mut core, 0b10001, 5);
+    microwire::deselect(&mut core);
+    core.mapper_write(0x5000, 0x00);
+    core.mapper_write(0x5100, 0x00);
+    core.mapper_write(0x5300, 0x00);
+    microwire::write_all(&mut core, 0x00);
+    latch_a13_rise(&mut core, 0x2000);
+    for _ in 0..5 {
+        core.run_frame(0);
+    }
+
+    let loaded = core.try_load_state(&state, 0).unwrap();
+    assert_eq!(state.len(), loaded.consumed);
+    assert_eq!(windows, core.prg_windows(), "the PRG windows");
+    assert_eq!(chr, core.chr_windows(), "the latched 1 bpp addressing");
+    assert_eq!(mirroring, core.mirroring(), "the mirroring");
+    assert_eq!(state, core.save_state(true).unwrap(), "the whole block");
+
+    // The restored chip finishes the command it was in the middle of: the five remaining address
+    // bits make $153, and the dummy zero and that word follow.
+    microwire::send(&mut core, 0b10011, 5);
+    assert_eq!(0, microwire::data_out(&core), "the dummy zero");
+    let word = microwire::receive_word(&mut core);
+    microwire::deselect(&mut core);
+    assert_eq!(0x00, word, "the word the restored bus was addressing");
+
+    // REQ-CORE-095: the written word is in what a host persists, and the volatile RAM is not.
+    assert_eq!(0x6C, microwire::read_word(&mut core, 0x123));
+    let saved = core.export_battery_ram().to_vec();
+    assert_eq!(512, saved.len());
+    assert_eq!(0x6C, saved[0x123]);
+    assert_eq!(0x7E, core.read_memory(0x6123));
+}
+
+/// The volatile RAM at `$6000-$7FFF`: "0-8 KiB unbanked PRG-RAM, **not battery-backed**", which
+/// this build gives as 2 KiB "mirrored three times across the respective address range" (Q-170
+/// section 2.3) — and which the EEPROM behind it is no part of.
+#[cfg(feature = "board-164")]
+#[test]
+fn q_170_mapper_164_mirrors_2_kib_of_volatile_ram_and_keeps_the_eeprom_out_of_the_window() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).battery().load();
+
+    // 2 KiB mirrored four times over the 8 KiB window: the same byte at all four aliases.
+    core.write_memory(0x6001, 0x3A);
+    for address in [0x6001u16, 0x6801, 0x7001, 0x7801] {
+        assert_eq!(0x3A, core.read_memory(address), "{address:#06X}");
+    }
+    core.write_memory(0x7801, 0x4B);
+    assert_eq!(0x4B, core.read_memory(0x6001));
+
+    // The EEPROM is not CPU-addressable: it is behind the volatile chip in the same vector, which
+    // is where REQ-CORE-095's battery slice is, and no address of $6000-$7FFF reaches it.
+    microwire::extended(&mut core, microwire::EWEN);
+    microwire::write_all(&mut core, 0xE7);
+    for address in [0x6001u16, 0x6801, 0x7001, 0x7801] {
+        assert_eq!(0x4B, core.read_memory(address), "{address:#06X}");
+    }
+
+    // And the save is the EEPROM's 512 words and not the RAM, which is the page's own division:
+    // "PRG-RAM is never battery-backed".
+    let saved = core.export_battery_ram().to_vec();
+    assert_eq!(512, saved.len());
+    assert!(saved.iter().all(|byte| *byte == 0xE7));
+}
+
+/// The board has no IRQ, no expansion audio and — unlike the three boards before it in the
+/// PPU-address-bus latch — **moves no window** when that bus changes, which is what keeps its
+/// `on_ppu_address_bus` to two stored bits (MF-UNL-10 step 2).
+#[cfg(feature = "board-164")]
+#[test]
+fn req_core_075_mapper_164_has_no_irq_and_moves_no_window_on_the_ppu_bus() {
+    let mut core = MapperRom::new(164).prg(16).chr(0).load();
+    {
+        let cartridge = core.cartridge().unwrap();
+        assert_eq!(None, cartridge.expansion_audio_output());
+        assert_eq!(Some(i64::MAX), cartridge.ppu_irq_horizon());
+        assert!(!cartridge.irq_asserted());
+    }
+
+    // Eight distinct bytes, one per 1 KiB CHR window, so that a window that did move would show
+    // it. 1 bpp is **off**, which is the configuration in which `chr_windows` reads the windows
+    // and not the substitution.
+    for slot in 0u16..8 {
+        chr_write(&mut core, slot * 0x0400, 0xA0 | slot as u8);
+    }
+    let windows = (core.prg_windows(), core.chr_windows());
+
+    // A whole rendered line's worth of addresses across the latch: 32 nametable fetches, each
+    // with its pattern fetches behind it.
+    for tile in 0u16..32 {
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus(0x2000 | tile, i64::from(tile) * 8);
+        cartridge.on_ppu_address_bus(0x1000 | (tile << 4), i64::from(tile) * 8 + 4);
+    }
+    assert_eq!(
+        windows,
+        (core.prg_windows(), core.chr_windows()),
+        "neither the PRG nor the CHR windows follow the PPU address bus"
+    );
+    assert!(!core.cartridge().unwrap().irq_asserted());
+
+    for _ in 0..10 {
+        core.run_frame(0);
+    }
+    assert!(!core.cartridge().unwrap().irq_asserted());
 }
