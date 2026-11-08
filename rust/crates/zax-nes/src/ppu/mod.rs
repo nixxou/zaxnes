@@ -245,6 +245,9 @@ pub struct Ppu2C02 {
     /// scrolling finds the band that scrolls in it.
     line_scroll: Vec<Option<(u16, u16)>>,
     tracks_line_scroll: bool,
+    /// The OAM sprites of the frame drawn in the "asleep" tint, one bit each
+    /// ([`crate::wide::WideExtension::sprite_tinted`]).
+    tinted_sprites: u64,
     /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
@@ -351,6 +354,7 @@ impl Ppu2C02 {
             wants_playfield_end: false,
             line_scroll: Vec::new(),
             tracks_line_scroll: false,
+            tinted_sprites: 0,
             margin_palette: None,
         }
     }

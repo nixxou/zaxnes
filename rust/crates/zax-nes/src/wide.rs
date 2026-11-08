@@ -17,7 +17,7 @@
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
 //! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring; bit 4: the PRG window goes on over `$6000`-`$7FFF` (8 KiB more, for a game with nothing there) |
-//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
+//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA; `$5101 + 4n` instead: sprite *n*'s flags (bit 0: drawn in the "asleep" tint, light blue), taken the same way |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 //! | `$500B` | R/W | execution zone: bit 7 on, bit 6 its data at `$3000`-`$3FFF` (below), bits 0-5 the page of the pack's code shown at `$2800`-`$3FFF` (`$2FFF` with bit 6) |
@@ -158,6 +158,10 @@ pub struct WideExtension {
     pending_high: [u8; 64],
     /// Sprite x high bytes of the sprites now in OAM.
     active_high: [u8; 64],
+    /// Sprite flags (`$5101 + 4n`) written since the last OAM DMA, and those of the sprites now
+    /// in OAM. Not saved: a display aid the ROM writes again each frame.
+    pending_flags: [u8; 64],
+    active_flags: [u8; 64],
     /// The second sprite page (`$5007` bit 2) latched at the last OAM DMA: 64 sprites in OAM
     /// format, then the high bytes of their x. Not saved: the next DMA latches it again.
     extra_oam: [u8; 256],
@@ -205,6 +209,8 @@ impl WideExtension {
             right_extent: 0xFF,
             pending_high: [0; 64],
             active_high: [0; 64],
+            pending_flags: [0; 64],
+            active_flags: [0; 64],
             extra_oam: [0xFF; 256],
             extra_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
@@ -318,6 +324,17 @@ impl WideExtension {
             return (-margin, 256 + margin);
         }
         self.visible_range()
+    }
+
+    /// Whether OAM sprite `sprite` (0..64) is drawn in the "asleep" tint (`$5101 + 4n` bit 0):
+    /// an enemy a hack keeps waiting in a margin, shown apart from the ones that play.
+    #[must_use]
+    pub fn sprite_tinted(&self, sprite: usize) -> bool {
+        self.rom_margin() > 0
+            && self
+                .active_flags
+                .get(sprite)
+                .is_some_and(|flags| flags & 1 != 0)
     }
 
     /// The screen x of OAM sprite `sprite` (0..64) whose OAM x byte is `low`.
@@ -452,6 +469,9 @@ impl WideExtension {
             0x5008 => self.window_bank = value,
             0x5009 => self.window_page = value,
             0x500B => self.zone = value,
+            0x5100..=0x51FF if address & 3 == 1 => {
+                self.pending_flags[usize::from(address & 0xFF) / 4] = value;
+            }
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -513,11 +533,13 @@ impl WideExtension {
         }
 
         self.active_high = self.pending_high;
+        self.active_flags = self.pending_flags;
         // Bit 3: the ROM writes the high byte of every sprite it places, so they stay with the
         // sprite page as it is, finished or not (a frame the game runs late); otherwise each page
         // starts from 0.
         if self.layout & 8 == 0 {
             self.pending_high = [0; 64];
+            self.pending_flags = [0; 64];
         }
         if self.layout & 4 != 0 {
             let page = usize::from(EXTRA_OAM - FIRST_RAM);

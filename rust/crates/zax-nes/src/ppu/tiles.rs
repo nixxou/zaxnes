@@ -31,6 +31,19 @@ fn column_x(column: i32, fine_x: i32) -> i16 {
 /// PPU's).
 const MARGIN_ENTRIES: u8 = 0x20;
 
+/// In the wide picture's palette entries, the first of the sprites drawn in the "asleep" tint
+/// (their own entries, `0x10` up, here `TINT_ENTRIES` up).
+const TINT_ENTRIES: u8 = 0x30;
+
+/// The "asleep" tint of NES colour `colour`: its brightness in light blue, the blacks kept.
+const fn asleep_tint(colour: u8) -> u8 {
+    if colour & 0x0F >= 0x0D {
+        colour
+    } else {
+        (colour & 0x30) | 0x01
+    }
+}
+
 /// Where a background row of the frame was read from, kept for a margin decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CapturedRow {
@@ -102,6 +115,7 @@ impl Ppu2C02 {
         self.vram_clock = self.vram_clock.wrapping_add(1);
         self.frame_margin = self.wide.margin();
         self.frame_vertical_margin = self.wide.vertical_margin();
+        self.tinted_sprites = 0;
         self.tiles
             .set_extra_area(self.frame_margin / 8, self.frame_vertical_margin / 8);
         #[allow(clippy::cast_possible_truncation)] // At most 128.
@@ -718,7 +732,7 @@ impl Ppu2C02 {
                 });
                 continue;
             }
-            let entry = 0x10 + (record.palette * 4) + pixel;
+            let entry = self.sprite_entry(record, pixel);
             let slot = if record.hidden {
                 &mut behind
             } else {
@@ -737,9 +751,28 @@ impl Ppu2C02 {
         }
     }
 
+    /// Whether sprite record `record` is one of the frame's sprites in the "asleep" tint.
+    fn tinted(&self, record: &TileRecord) -> bool {
+        u32::try_from(record.index % 64).is_ok_and(|n| self.tinted_sprites & (1 << n) != 0)
+            && record.index < 128
+    }
+
+    /// The wide picture's palette entry of pixel `pixel` of sprite record `record`: its own, or
+    /// the "asleep" tint's.
+    fn sprite_entry(&self, record: &TileRecord, pixel: u8) -> u8 {
+        if self.tinted(record) {
+            TINT_ENTRIES + (record.palette * 4) + pixel
+        } else {
+            0x10 + (record.palette * 4) + pixel
+        }
+    }
+
     /// The colour of palette entry `entry` of the wide picture (the margin palette's from
     /// `MARGIN_ENTRIES` up), as the frame ended.
     fn entry_colour(&self, entry: u8) -> u8 {
+        if let Some(sprite) = entry.checked_sub(TINT_ENTRIES) {
+            return asleep_tint(self.shown_palette[palette_index(0x3F10 | u16::from(sprite))]);
+        }
         match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
             (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
             _ => self.shown_palette[palette_index(0x3F00 | u16::from(entry))],
@@ -1015,6 +1048,9 @@ impl Ppu2C02 {
             let tile = u16::from(self.oam[(n * 4) + 1]);
             let attribute = self.oam[(n * 4) + 2];
             let oam_x = self.oam[(n * 4) + 3];
+            if self.frame_margin > 0 && self.wide.sprite_tinted(n) {
+                self.tinted_sprites |= 1 << n;
+            }
             let x = if self.frame_margin > 0 {
                 let x = self.wide.sprite_x(n, oam_x);
                 let (visible_low, visible_high) = self.wide.sprite_range();
@@ -1416,6 +1452,9 @@ impl Ppu2C02 {
         }
 
         let colour = |entry: u8| -> u8 {
+            if let Some(sprite) = entry.checked_sub(TINT_ENTRIES) {
+                return asleep_tint(self.shown_palette[palette_index(0x3F10 | u16::from(sprite))]);
+            }
             match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
                 (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
                 _ => self.shown_palette[palette_index(0x3F00 | u16::from(entry))],
@@ -1519,6 +1558,8 @@ impl Ppu2C02 {
                     // MARGIN_ENTRIES up.
                     *slot = if record.background && record.palette >= 4 {
                         MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                    } else if !record.background && self.tinted(record) {
+                        TINT_ENTRIES + (record.palette * 4) + pixel
                     } else {
                         base + (record.palette * 4) + pixel
                     };
