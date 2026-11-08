@@ -42,6 +42,51 @@ pub struct Mmc1 {
     /// second chip enable for the PRG-RAM: `$10` on an SNROM that is not a mapper 155, `$00`
     /// everywhere else.
     chr_disable_mask: u8,
+    /// Bit 3 of the PRG register, masked: `$08` on an **MMC1A** — NES 2.0 mapper 1 submapper 3 —
+    /// and `$00` on every other board (MF-LEG-1 step 5, report entry MMC1-4).
+    ///
+    /// nesdev ("MMC1") prints the `R` bit of `$E000` as the one place the two ASIC revisions
+    /// differ:
+    ///
+    /// ```text
+    /// 4bit0
+    /// -----
+    /// RPPPP
+    /// |||||
+    /// |++++- Select 16 KiB PRG-ROM bank (low bit ignored in 32 KiB mode)
+    /// +----- MMC1A:
+    ///            0: fixed bank affects A17..A14
+    ///            1: fixed bank only affects A16..A14, bit 3 directly controls A17 across the
+    ///               entire $8000-$FFFF address range
+    ///        MMC1B:
+    ///            0: PRG-RAM enabled
+    ///            1: PRG-RAM disabled
+    /// ```
+    ///
+    /// So on an MMC1A with `R` set, the **fixed** window of PRG mode 2 or 3 — the only window
+    /// whose bank number does not already come from the register — keeps the low three bits its
+    /// own logic gives it (`$0` or `$7`) and takes A17 from bit 3 of the register instead of from
+    /// that logic. The switchable window and 32 KiB mode are unaffected, bit 3 being part of their
+    /// bank number already, which is the other half of "across the entire `$8000-$FFFF` address
+    /// range". And `R` is not a PRG-RAM disable on that revision, which is
+    /// [`Mmc1::prg_disable_mask`] being zero: "PRG-RAM is always enabled at `$6000-$7FFF`".
+    ///
+    /// A **mask**, for the reason [`Mmc1::prg_disable_mask`] gives at length and MF-6a2 step 2
+    /// measured: a `bool` tested beside the register on the commit path cost three plain mapper-1
+    /// games up to +8 001 instructions over 600 frames for a board that was not theirs. Here the
+    /// two fixed-bank numbers are one `and`, one `andn` and two `or`s whatever the revision.
+    ///
+    /// **Behind `board-mmc1a`**, so that with the feature off the field does not exist, this
+    /// struct's layout is the base commit's to the byte — which MF-6b step 1 measured as worth
+    /// +0.009 % to +0.027 % on eleven of PR-1's thirteen ROMs for one byte of displacement — and
+    /// `update_banks` folds the two numbers back to the constants `outer` and `outer | $0F`.
+    ///
+    /// **Mapper 155 is deliberately not given this**, although the page makes it the same
+    /// revision: it is outside this lot's scope ("no change to the emulation of any mapper outside
+    /// the ones listed"), so a mapper-155 dump still gets the suppressed PRG-RAM disable it had
+    /// and no A17. `docs/progress/MF-LEG-1.md` step 5 records it as the follow-up.
+    #[cfg(feature = "board-mmc1a")]
+    mmc1a_fixed_mask: u8,
     /// What [`Mapper::prg_ram_enabled`] answers, recomputed whenever `prg` or `chr0` commits.
     ///
     /// A field rather than an expression because on an SNROM the answer needs *both* registers:
@@ -69,7 +114,17 @@ impl Mmc1 {
         // removed", so on mapper 155 neither wire exists and both masks are zero.
         // `cfg!` and not `#[cfg]`: with `board-155` off this folds to a plain `$10` and
         // the comparison is gone, so the MMC1 proper is the code it always was.
-        let wired = u8::from(!(cfg!(feature = "board-155") && memory.rom().mapper() == 155)) << 4;
+        let is_155 = cfg!(feature = "board-155") && memory.rom().mapper() == 155;
+        // NES 2.0 mapper 1 submapper 3, the MMC1A (MF-LEG-1 step 5): `R` of `$E000` is not a
+        // PRG-RAM disable on that revision -- "PRG-RAM is always enabled at $6000-$7FFF" -- so
+        // `prg_disable_mask` is zero for it too. `chr_disable_mask` is **not**: that bit belongs
+        // to the SNROM *board*, which wires CHR A16 to the RAM's second chip enable whichever
+        // revision of the ASIC is on it, and only mapper 155's page removes a wire. No dump is
+        // known that is both an SNROM and a declared MMC1A, so the two readings have nothing to
+        // disagree about today; see `Mmc1::mmc1a_fixed_mask`.
+        let is_mmc1a = cfg!(feature = "board-mmc1a") && header.is_nes20 && header.submapper == 3;
+        let chr_wired = u8::from(!is_155) << 4;
+        let prg_wired = u8::from(!(is_155 || is_mmc1a)) << 4;
         Self {
             banks: windows_for(memory),
             shift: 0,
@@ -82,8 +137,10 @@ impl Mmc1 {
             fixed_prg: header.is_nes20 && header.submapper == 5,
             ram_bank_shift,
             ram_bank_mask,
-            prg_disable_mask: wired,
-            chr_disable_mask: if Self::is_snrom(memory) { wired } else { 0 },
+            prg_disable_mask: prg_wired,
+            chr_disable_mask: if Self::is_snrom(memory) { chr_wired } else { 0 },
+            #[cfg(feature = "board-mmc1a")]
+            mmc1a_fixed_mask: if is_mmc1a { 0x08 } else { 0 },
             prg_ram_disabled: false,
         }
     }
@@ -249,6 +306,25 @@ impl Mmc1 {
         };
         let bank = i32::from(self.prg & 0x0F) | outer;
 
+        // The two fixed-bank numbers of PRG modes 2 and 3, `$0` and `$F` of the block on every
+        // MMC1B — and on an **MMC1A** whose `R` bit is set, the same numbers with A17 taken from
+        // bit 3 of the PRG register instead of from the fixed-bank logic: "fixed bank only affects
+        // A16..A14, bit 3 directly controls A17" (MF-LEG-1 step 5; see
+        // `Mmc1::mmc1a_fixed_mask`). `r` is `$08` when and only when the board is an MMC1A and
+        // the bit is set, so `$08 & !r` is the logic's own A17 and `prg & r` the register's.
+        #[cfg(feature = "board-mmc1a")]
+        let (fixed_first, fixed_last) = {
+            let r = (self.prg >> 1) & self.mmc1a_fixed_mask;
+            (
+                i32::from(self.prg & r),
+                i32::from((0x08 & !r) | (self.prg & r)) | 0x07,
+            )
+        };
+        // With the feature off the two are the constants they have always been, so the arms below
+        // compile to `outer` and `outer | 0x0F` exactly as the base commit's did.
+        #[cfg(not(feature = "board-mmc1a"))]
+        let (fixed_first, fixed_last) = (0, 0x0F);
+
         // MR-1-4. NES 2.0 submapper 5 is SEROM, SHROM and SH1ROM, which "use a fixed 32k PRG
         // ROM with no banking support" (nesdev, "NES 2.0 submappers"); Dr. Mario is the dump
         // that names the board. The PRG register does nothing there.
@@ -256,17 +332,18 @@ impl Mmc1 {
             self.banks.map_prg_32k(0);
         } else {
             match (self.control >> 2) & 0x03 {
-                // 32 KiB at $8000, the low bit of the bank number ignored.
+                // 32 KiB at $8000, the low bit of the bank number ignored. `R` changes nothing
+                // here: bit 3 is part of this window's own bank number already.
                 0 | 1 => self.banks.map_prg_32k(bank >> 1),
                 // First bank of the block fixed at $8000, switchable at $C000.
                 2 => {
-                    self.banks.map_prg_16k(0, outer);
+                    self.banks.map_prg_16k(0, outer | fixed_first);
                     self.banks.map_prg_16k(2, bank);
                 }
                 // Switchable at $8000, last bank of the block fixed at $C000.
                 _ => {
                     self.banks.map_prg_16k(0, bank);
-                    self.banks.map_prg_16k(2, outer | 0x0F);
+                    self.banks.map_prg_16k(2, outer | fixed_last);
                 }
             }
         }
@@ -312,10 +389,19 @@ impl Mapper for Mmc1 {
         Ok(())
     }
 
-    /// A zero [`Mmc1::prg_disable_mask`] is mapper 155 and nothing else: every other MMC1 board
-    /// wires bit 4 of the PRG register to the PRG-RAM's chip enable.
+    /// A zero [`Mmc1::prg_disable_mask`] is mapper 155 or a declared MMC1A, the two boards that
+    /// do not wire bit 4 of the PRG register to the PRG-RAM's chip enable; a non-zero
+    /// [`Mmc1::mmc1a_fixed_mask`] tells the second from the first, since mapper 155 does not get
+    /// the `R` bit's A17 in this build (MF-LEG-1 step 5).
+    ///
+    /// With `board-mmc1a` off the second term does not exist and this is the one comparison it
+    /// always was.
     fn mapper_number(&self) -> i32 {
-        if self.prg_disable_mask == 0 {
+        #[cfg(feature = "board-mmc1a")]
+        let is_155 = self.prg_disable_mask == 0 && self.mmc1a_fixed_mask == 0;
+        #[cfg(not(feature = "board-mmc1a"))]
+        let is_155 = self.prg_disable_mask == 0;
+        if is_155 {
             155
         } else {
             1

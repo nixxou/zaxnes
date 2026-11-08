@@ -217,7 +217,79 @@ that the round trip is still byte-identical.
 
 `cargo test --release -p zax-nes -p zax-harness`: **1164 passed, 0 failed, 10 ignored**. fmt and
 clippy `-D warnings --all-targets` on `zax-nes`: clean.
-- [ ] 5/9 MMC1A (MMC1-4) — NES 2.0 submapper 3
+- [x] 5/9 MMC1A (MMC1-4) — NES 2.0 submapper 3
+
+### 5/9 — the MMC1A, NES 2.0 mapper 1 submapper 3 (entry MMC1-4)
+
+**What the page actually says**, which is not quite what the entry says. nesdev ("MMC1") prints the
+`R` bit of `$E000` as the one place the two ASIC revisions differ:
+
+```text
+RPPPP
+|++++- Select 16 KiB PRG-ROM bank (low bit ignored in 32 KiB mode)
++----- MMC1A:
+           0: fixed bank affects A17..A14
+           1: fixed bank only affects A16..A14, bit 3 directly controls A17 across the
+              entire $8000-$FFFF address range
+       MMC1B:
+           0: PRG-RAM enabled
+           1: PRG-RAM disabled
+```
+
+and, on the MMC1A, "PRG-RAM is always enabled at `$6000-$7FFF`". The entry reads `R` as "bit 4
+drives PRG A17"; the page makes it **bit 3** that drives A17, and only for the *fixed* window — the
+one window whose bank number does not already come from the register. The switchable window and
+32 KiB mode have bit 3 as A17 already, which is the rest of "across the entire `$8000-$FFFF`
+address range". AMD-061 makes the page prevail, so the page is what was built. The page also names
+the stake: "Two games are known to rely on MMC1A behavior, writing values between `$10` and `$1F`
+to the PRG bank register, write to WRAM at `$6000-$7FFF`, and expect the write to succeed."
+
+**What was built.**
+
+* `prg_disable_mask` is zero on a submapper-3 dump as it is on mapper 155, so `R` is not a disable.
+* `chr_disable_mask` is **not** zeroed by the submapper, which is a deliberate split from the
+  mapper-155 line above it: the SNROM `E` bit is the *board* wiring CHR A16 to the RAM's second
+  chip enable, whichever revision of the ASIC sits on it, and only mapper 155's page removes a
+  wire. No dump is known that is both a declared SNROM and a declared MMC1A, so the two readings
+  have nothing to disagree about today.
+* `mmc1a_fixed_mask: u8` is `$08` on an MMC1A, and `update_banks` computes the two fixed-bank
+  numbers as `prg & r` and `((0x08 & !r) | (prg & r)) | 0x07`, where `r = (prg >> 1) & mask` is
+  `$08` exactly when the board is an MMC1A and `R` is set. A **mask and not a `bool`**, for the
+  reason `prg_disable_mask`'s own note gives and MF-6a2 step 2 measured: a test beside the register
+  on the commit path cost three plain mapper-1 games up to +8 001 instructions over 600 frames for
+  a board that was not theirs.
+* `mapper_number` had to learn the difference: zeroing `prg_disable_mask` would otherwise have made
+  every submapper-3 dump report **155**. It now tests `mmc1a_fixed_mask == 0` beside it, which
+  mapper 155 has and a submapper-3 dump has not.
+
+**Feature `board-mmc1a`, in `default`** pending step 8's figure. **This is the one fix of the lot
+with a layout risk**: the mask is a byte on `Mmc1`, the board of `m1`, `mm2`, `metroid` and `z2`,
+and MF-6b step 1 priced one byte of displacement on a comparable struct at +0.009 % to +0.027 % on
+eleven of PR-1's thirteen ROMs **with no code added at all**. With the feature off the field does
+not exist, the struct's layout is the base commit's to the byte, and the two fixed-bank numbers
+fold to the constants `outer` and `outer | $0F` — the arms the base commit compiled.
+
+**Mapper 155 is deliberately left alone**, although the page makes it the same revision ("iNES
+Mapper 1 and 155 denote the SxROM and 2ME circuit boards mounting the MMC1B (iNES Mapper 1) or
+MMC1A (iNES Mapper 155) revision of the ASIC"). It is outside this lot's scope — "no change to the
+emulation of any mapper outside the ones listed above" — so a mapper-155 dump still gets the
+suppressed PRG-RAM disable it had and no `R`-driven A17. **Follow-up for the owner**: mapper 155
+should get `mmc1a_fixed_mask` too, which is one condition on the same line and no new code. It is a
+new finding of this step; the report's entry MMC1-4 does not mention it.
+
+**Tests.** Three. `req_core_100_an_mmc1a_never_disables_its_prg_ram` runs the page's own sentence —
+`$1A` into the PRG register, then a work-RAM write that must succeed — and checks the same dump
+without the submapper loses its RAM, and that a submapper-3 dump still reports mapper **1**.
+`req_core_100_an_mmc1a_r_bit_drives_a17_of_the_fixed_bank` walks a 256 KiB image through both fixed
+modes with the low nibble held constant: mode 3's fixed window goes `$F`, `$7`, `$F` as `R` and
+bit 3 move, mode 2's goes `$0`, `$8`, `$0`, and 32 KiB mode does not move at all.
+`mf_leg_1_an_mmc1b_fixed_window_ignores_bit_4_of_the_prg_register` is the regression guard and runs
+in **every** configuration.
+
+`cargo test --release -p zax-nes -p zax-harness`: **1167 passed, 0 failed, 10 ignored**.
+`--no-default-features`: 792 passed, 0 failed, 9 ignored. fmt clean; clippy `-D warnings
+--all-targets` clean in all four configurations (default, `--no-default-features`, and each of
+`board-mmc1a` and `board-vrc2-latch` alone).
 - [ ] 6/9 Irem G-101 (32-1) — *Major League* on the upper page
 - [ ] 7/9 golden-core over the 98 originals
 - [ ] 8/9 the callgrind campaign and the feature decisions

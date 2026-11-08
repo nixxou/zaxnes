@@ -633,6 +633,113 @@ fn mf_leg_1_mmc1_the_snrom_e_bit_needs_all_three_nes_20_declarations() {
     assert_eq!(0, snrom.read_memory(0x6000));
 }
 
+// ---------------------------------------------------------------- the MMC1A, submapper 3
+//
+// MF-LEG-1 step 5, report entry MMC1-4. nesdev ("MMC1") prints the one place the two ASIC
+// revisions differ, the `R` bit of $E000:
+//
+//     RPPPP
+//     |++++- Select 16 KiB PRG-ROM bank (low bit ignored in 32 KiB mode)
+//     +----- MMC1A:
+//                0: fixed bank affects A17..A14
+//                1: fixed bank only affects A16..A14, bit 3 directly controls A17 across the
+//                   entire $8000-$FFFF address range
+//            MMC1B:
+//                0: PRG-RAM enabled
+//                1: PRG-RAM disabled
+//
+// and "PRG-RAM is always enabled at $6000-$7FFF" on an MMC1A. "Two games are known to rely on
+// MMC1A behavior, writing values between $10 and $1F to the PRG bank register, write to WRAM at
+// $6000-$7FFF, and expect the write to succeed."
+
+/// REQ-CORE-100: on a declared MMC1A, `R` is not a PRG-RAM disable — the write the page describes
+/// succeeds — and on an MMC1B the same bit still disables the chip.
+#[cfg(feature = "board-mmc1a")]
+#[test]
+fn req_core_100_an_mmc1a_never_disables_its_prg_ram() {
+    let mut mmc1a = MapperRom::new(1)
+        .prg(16)
+        .chr(0)
+        .submapper(3)
+        .battery()
+        .load();
+    assert_eq!(
+        1,
+        mmc1a.cartridge().unwrap().mapper_number(),
+        "a submapper-3 dump is still mapper 1, not 155"
+    );
+
+    // The page's own sentence: a value between $10 and $1F in the PRG register, then a write to
+    // the work RAM, and the write must succeed.
+    mmc1a.mmc1_write(0xE000, 0x1A);
+    mmc1a.write_memory(0x6000, 0x5A);
+    assert_eq!(0x5A, mmc1a.read_memory(0x6000));
+
+    // The same dump without the submapper is an MMC1B and loses its RAM to the same bit.
+    let mut revision_b = MapperRom::new(1).prg(16).chr(0).battery().load();
+    revision_b.write_memory(0x6000, 0x5A);
+    revision_b.mmc1_write(0xE000, 0x1A);
+    assert_eq!(0, revision_b.read_memory(0x6000));
+}
+
+/// REQ-CORE-100: `R` set on an MMC1A makes the **fixed** window keep the low three bits its own
+/// logic gives it and take A17 from bit 3 of the register.
+///
+/// A 256 KiB image, so the sixteen 16 KiB banks are $0 to $F and A17 is bit 3 of that number. In
+/// PRG mode 3 the fixed window is the last bank of the block: `$F` with `R` clear, and `$7` or
+/// `$F` with `R` set according to bit 3. In mode 2 it is the first: `$0` with `R` clear, `$0` or
+/// `$8` with `R` set. 32 KiB mode is unaffected, bit 3 being part of its own bank number.
+#[cfg(feature = "board-mmc1a")]
+#[test]
+fn req_core_100_an_mmc1a_r_bit_drives_a17_of_the_fixed_bank() {
+    let mut core = MapperRom::new(1).prg(32).chr(0).submapper(3).load();
+
+    // Mode 3 (power-on): switchable at $8000, fixed last at $C000. The fixture's 8 KiB banks are
+    // numbered, so a 16 KiB bank N shows as the pair (2N, 2N+1).
+    core.mmc1_write(0xE000, 0x02);
+    assert_eq!([4, 5, 30, 31], core.prg_windows(), "R clear: the last bank");
+    // `R` set with bit 3 clear: the fixed window is $7, the last bank of the low 128 KiB.
+    core.mmc1_write(0xE000, 0x12);
+    assert_eq!([4, 5, 14, 15], core.prg_windows(), "R set, A17 low");
+    // `R` set with bit 3 set: $F again, now because the register said so.
+    core.mmc1_write(0xE000, 0x1A);
+    assert_eq!([20, 21, 30, 31], core.prg_windows(), "R set, A17 high");
+
+    // Mode 2: fixed first at $8000, switchable at $C000.
+    core.mmc1_write(0x8000, 0x08);
+    core.mmc1_write(0xE000, 0x02);
+    assert_eq!([0, 1, 4, 5], core.prg_windows(), "R clear: the first bank");
+    core.mmc1_write(0xE000, 0x1A);
+    assert_eq!([16, 17, 20, 21], core.prg_windows(), "R set, A17 high");
+    core.mmc1_write(0xE000, 0x12);
+    assert_eq!([0, 1, 4, 5], core.prg_windows(), "R set, A17 low");
+
+    // 32 KiB mode: `R` changes nothing, the register's bit 3 already being A17 there.
+    core.mmc1_write(0x8000, 0x00);
+    core.mmc1_write(0xE000, 0x0A);
+    let without_r = core.prg_windows();
+    core.mmc1_write(0xE000, 0x1A);
+    assert_eq!(without_r, core.prg_windows(), "R moved a 32 KiB window");
+}
+
+/// REQ-CORE-100: an MMC1B's fixed windows are untouched by bit 4, which is the regression guard
+/// that step 5 changed the MMC1A and nothing else. Runs in every configuration.
+#[test]
+fn mf_leg_1_an_mmc1b_fixed_window_ignores_bit_4_of_the_prg_register() {
+    let mut core = MapperRom::new(1).prg(32).chr(0).load();
+    core.mmc1_write(0xE000, 0x02);
+    assert_eq!([4, 5, 30, 31], core.prg_windows());
+    core.mmc1_write(0xE000, 0x12);
+    assert_eq!([4, 5, 30, 31], core.prg_windows(), "mode 3, fixed last");
+    core.mmc1_write(0x8000, 0x08);
+    core.mmc1_write(0xE000, 0x02);
+    assert_eq!([0, 1, 4, 5], core.prg_windows());
+    // The low nibble is held at 2 so that only bit 4 moves: the switchable window must not be
+    // what the assertion is reading.
+    core.mmc1_write(0xE000, 0x12);
+    assert_eq!([0, 1, 4, 5], core.prg_windows(), "mode 2, fixed first");
+}
+
 // ---------------------------------------------------------------- UxROM, CNROM, AxROM
 
 #[test]

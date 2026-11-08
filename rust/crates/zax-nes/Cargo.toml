@@ -75,6 +75,7 @@ default = [
     "board-262",
     "board-246",
     "board-vrc2-latch",
+    "board-mmc1a",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -766,6 +767,30 @@ board-298 = []
 # board already had a body for. **No savestate byte**: see `Vrc2Vrc4::microwire_latch` and Q-174
 # section 2.
 board-vrc2-latch = []
+
+# **NES 2.0 mapper 1 submapper 3, the MMC1A** (MF-LEG-1 step 5, report entry MMC1-4). nesdev
+# ("MMC1") prints the one place the two ASIC revisions differ, the `R` bit of $E000: on an MMC1A
+# "1: fixed bank only affects A16..A14, bit 3 directly controls A17 across the entire $8000-$FFFF
+# address range", where on an MMC1B the same bit is the PRG-RAM disable. And "PRG-RAM is always
+# enabled at $6000-$7FFF" on that revision. Two games are known to rely on it, "writing values
+# between $10 and $1F to the PRG bank register, write to WRAM at $6000-$7FFF, and expect the write
+# to succeed".
+#
+# Three of the four cross-checked emulators implement the distinction and **this build already had
+# the machinery**: `Mmc1::prg_disable_mask` exists exactly so that mapper 155 can zero it. What is
+# new is that the submapper is a header field rather than a game-database lookup, and the A17 half,
+# which is one more load-time mask.
+#
+# **A feature of its own**, and it is the one of this lot with a layout risk: the mask is a byte on
+# `Mmc1`, the board of `m1`, `mm2`, `metroid` and `z2`, and MF-6b step 1 priced **one byte of
+# displacement** on a comparable struct at +0.009 % to +0.027 % on eleven of PR-1's thirteen ROMs
+# with no code added at all. With the feature off the field does not exist, the struct's layout is
+# the base commit's to the byte, and `update_banks`'s two fixed-bank numbers fold back to the
+# constants `outer` and `outer | $0F`.
+#
+# **Mapper 155 is deliberately not given the A17**, although the page makes it the same revision:
+# it is outside this lot's scope. `docs/progress/MF-LEG-1.md` step 5 records it as the follow-up.
+board-mmc1a = []
 
 # Mapper 29, the Sealie Computing **RET-CUFROM revD** (MF-UNL-7 step 6): "allocated on 15-nov-2013
 # to implement some homebrew games, including *Glider*".
