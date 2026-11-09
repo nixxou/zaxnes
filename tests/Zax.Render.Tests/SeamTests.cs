@@ -17,12 +17,18 @@ namespace Zax.Render.Tests;
 /// turns up as a column or a row that departs from it.
 /// </para>
 /// <para>
-/// AMD-057 withdrew the sealing variants of AMD-027: every drawn tile carries the whole mesh of
-/// REQ-E3D-501 again, walls included, and it is the depth push of
-/// <see cref="SceneConstants.WallDepthBias"/> that keeps the coincident pair at a joint from
+/// AMD-057 withdrew the sealing variants of AMD-027: every drawn tile of an <b>opaque</b>
+/// surface carries the whole mesh of REQ-E3D-501 again, walls included, and it is the depth push
+/// of <see cref="SceneConstants.WallDepthBias"/> that keeps the coincident pair at a joint from
 /// winning against the face that closes the surface. Each measure below therefore starts by
 /// checking that the walls really are there — a surface drawn without them would pass the pixel
 /// test for the wrong reason.
+/// </para>
+/// <para>
+/// AMD-063 REQ-SCN-087 amends that for a <b>transparent</b> surface of full tiles: there the
+/// inner lateral faces are taken off outright, since the depth pass of REQ-SCN-040 does not
+/// hide the walls that fall on a joint. The translucent measure below checks the removal
+/// instead, and the pixel test it guards is the same one.
 /// </para>
 /// </remarks>
 [Collection(GlCollection.Name)]
@@ -165,11 +171,13 @@ public sealed class SeamTests
     {
         // AMD-012 (Q-020 revised): every tile of one object writes its depth before the object's
         // colour pass, so the walls that close each tile against its neighbours never blend.
+        // AMD-063 REQ-SCN-087 goes further on a transparent surface of full tiles: the walls
+        // that fall on a joint are not drawn at all.
         using GlFixture gl = GlFixture.Create(640, 480);
         using SceneRenderer renderer = new(gl.Gl);
 
         SceneState scene = Translucent();
-        AssertWholeBoxes(scene, expected: 16);
+        AssertInnerFacesRemoved(scene);
 
         // Seen from an angle, so that the walls between the tiles have a real width on screen —
         // head-on they are edge-on and the artefact hides itself — and from the four corners,
@@ -195,6 +203,41 @@ public sealed class SeamTests
                 offenders <= 2,
                 $"seen from ({rx}, {ry}), {offenders} pixel(s) inside the translucent object "
                     + $"differ from {Rgb(surface)} by up to {worst} levels: internal faces show");
+        }
+    }
+
+    /// <summary>
+    /// AMD-063 REQ-SCN-087 — REQ-SCN-065 now covers a <b>transparent</b> surface of full tiles:
+    /// no grid and no crack at the joints. The criterion is measured on a uniform background,
+    /// the "surface colour" being the blended colour the plane is expected to show, and the
+    /// tolerance is the one REQ-SCN-065 states for an opaque surface: not one pixel off.
+    /// </summary>
+    [GlFact] // AMD-063, REQ-SCN-087, REQ-SCN-065, REQ-SCN-040
+    public void REQ_SCN_065_a_transparent_four_by_four_surface_shows_no_grid()
+    {
+        using GlFixture gl = GlFixture.Create(640, 480);
+        using SceneRenderer renderer = new(gl.Gl);
+
+        SceneState scene = Translucent();
+        AssertInnerFacesRemoved(scene);
+
+        // The default view of REQ-SCN-012 and the two the grid used to show on: a pale, regular
+        // lattice at every joint of the plane.
+        foreach ((float rx, float ry) in new[] { (0.81f, 0.81f), (8f, 8f), (-8f, -8f) })
+        {
+            scene.Camera.Current.Angles = new Vector3(rx, ry, 0f);
+            scene.Camera.SnapToSetpoints();
+            Capture capture = gl.Render(renderer, scene);
+
+            // One object of sixteen tiles blended in one pass (AMD-012).
+            Assert.Equal(16, renderer.Statistics.TransparentTiles);
+            Assert.Equal(1, renderer.Statistics.TransparentObjects);
+
+            (int surface, int worst, int offenders) = Measure(capture);
+            Assert.True(
+                offenders == 0,
+                $"seen from ({rx}, {ry}), {offenders} pixel(s) of the transparent surface differ "
+                    + $"from the blended colour {Rgb(surface)} by up to {worst} levels: a grid shows");
         }
     }
 
@@ -303,9 +346,34 @@ public sealed class SeamTests
     // ------------------------------------------------------------------ measures
 
     /// <summary>
+    /// Checks that the 4 × 4 <b>transparent</b> surface of full tiles is drawn with its inner
+    /// lateral faces removed (AMD-063 REQ-SCN-087): 16 vertices on each of the four corner
+    /// tiles, 12 on each of the eight other border tiles and 8 on each of the four inner ones.
+    /// </summary>
+    /// <param name="scene">The scene whose draw list is read.</param>
+    private static void AssertInnerFacesRemoved(SceneState scene)
+    {
+        Assert.NotNull(scene.DrawList);
+        List<DrawTile> tiles = [.. scene.DrawList.Tiles];
+        Assert.Equal(16, tiles.Count);
+
+        int[] counts = [.. tiles.Select(static tile => tile.Mesh!.VertexCount)];
+        Assert.Equal(4, counts.Count(static n => n == 16));
+        Assert.Equal(8, counts.Count(static n => n == 12));
+        Assert.Equal(4, counts.Count(static n => n == 8));
+
+        // Two triangles per remaining quad, as the whole box has twelve for its six.
+        foreach (DrawTile tile in tiles)
+        {
+            Assert.Equal(tile.Mesh!.VertexCount / 2, tile.Mesh.TriangleCount);
+        }
+    }
+
+    /// <summary>
     /// Checks that every tile of the surface is drawn with the whole mesh of REQ-E3D-501 — a
     /// closed box of six rectangles, 24 vertices and 12 triangles — walls between neighbours
-    /// included (AMD-057, which withdraws the sealing variants of AMD-027 §1-2).
+    /// included (AMD-057, which withdraws the sealing variants of AMD-027 §1-2). AMD-063
+    /// restricts that criterion to an <b>opaque</b> object.
     /// </summary>
     /// <param name="scene">The scene whose draw list is read.</param>
     /// <param name="expected">How many tiles the surface has.</param>
