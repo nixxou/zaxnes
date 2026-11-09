@@ -11,7 +11,7 @@ Steps: 1 plan · 2 merge · 3 behaviour · 4 measurements · 5 final pass.
 - [x] **Step 1/5 — plan** (this note)
 - [x] **Step 2/5 — merge and resolve** (§2)
 - [x] **Step 3/5 — behaviour** (§3)
-- [ ] Step 4/5 — measurements
+- [x] **Step 4/5 — measurements** (§4)
 - [ ] Step 5/5 — final pass
 
 ---
@@ -560,3 +560,186 @@ differences, across four regimes. The core is byte-identical over the 98 origina
 default that would have moved a picture for games with no pack is off, and a test says what it
 does on either side of the switch. The one thing not done is running Kirby's seven packs, for
 want of the game.
+
+---
+
+## 4. Step 4: measurements
+
+Callgrind in WSL2 Ubuntu, `rust/tools/perf/`. Every compared commit built by `build-clean.sh`
+from a `git archive` (or `git ls-files`) tar into a brand-new directory with its own
+`CARGO_TARGET_DIR`, as `PERFORMANCE-HISTORY.md` §2 requires. Base: `19c5065d`.
+
+### 4.1 Where it started: +0.248 % on the set, +0.584 % on the worst ROM
+
+The first measurement of the merge as committed, PR-1's thirteen ROMs at 300 frames:
+
+| | duelito | m0 | m1 | m4 | metroid | mm2 | mmc5 | oamstr | readbuf | smb1 | smb3 | vblnmi | z2 | **set** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| merge as committed | +0.159 | +0.154 | +0.168 | +0.149 | **+0.584** | +0.375 | +0.085 | +0.200 | +0.156 | +0.434 | +0.290 | +0.229 | +0.385 | **+0.248 %** |
+| after this step | +0.045 | +0.048 | +0.041 | +0.037 | +0.050 | +0.045 | +0.029 | +0.024 | +0.043 | +0.040 | +0.041 | +0.028 | +0.042 | **+0.040 %** |
+
+Every ROM was over the +0.02 % tolerance and the five commercial games were five to twelve times
+over it. What follows is what the causes were, and what each fix bought.
+
+### 4.2 The causes, in the order they were found
+
+**(1) A test on every CPU instruction, armed by one `or_else`. The whole of the regression on the
+five commercial games.**
+
+`end_frame` ends the overclock where the game waits for the next frame:
+
+```rust
+if let Some((first, last)) = idle_loop {
+    if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() { … }
+}
+```
+
+That `contains` runs **once per CPU instruction** — about 10 500 a frame — at roughly 5 Ir each.
+`dev` answered `None` here for a game whose patch is not applied, and the whole test vanished
+from the loop. The branch added `.or_else(|| self.pack.as_ref().map(…))` to the lookup so that a
+pack's aid could ask for the overclock — and a hack pack is found **by signature** on every one
+of the five commercial games whether or not its patch is applied. So the test came back on for
+all five.
+
+It was invisible in the per-symbol view (everything is inlined into `run_frame`) and only a
+line-level profile named it: `core/src/ops/range.rs` charged **3 102 540 Ir to `run_frame` over
+60 frames** on `metroid` — +15.5 M over 300, with `cmp.rs` adding 0.6 M more.
+
+Fixed by keeping the branch's intent and asking the question once a frame instead:
+
+```rust
+let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
+```
+
+A ROM that has not unlocked the register window cannot have written `$5006`, so it cannot be
+stalling, so the test has nothing to find. An aid that *does* ask for the overclock still gets
+its wait ended, because a pack's code unlocks the window. **metroid +0.524 % → +0.050 %, smb1
++0.386 % → +0.040 %, z2 +0.316 % → +0.042 %, the set +0.161 % → +0.040 %.**
+
+**(2) Three lookups a frame that scan a `const` array or a sixty-arm string match.**
+
+`end_frame` worked out, every frame: the margin decoder (`wide_decode::for_patch`, a match on
+one string literal per decoder, to which the branch added seven arms for Kirby's builds), the
+patch's idle loop (`builtin_patches::by_name`, which scans `PATCHES` — a `const` array, so every
+call materialises all **64** entries, 57 before the branch), and whether the `smooth_scroll` aid
+is on (the same scan again). None of the three can change inside a frame. All three are now
+worked out by `NesCore::refresh_patch_cache`, called at the four points an answer can move: a
+ROM loaded or closed, a pack installed, the options set, `emu.builtin_patches` turned. The frame
+path reads three fields. **The set +0.248 % → +0.161 %**, and it is what takes the ROMs with no
+patch from +0.15 % to +0.045 %.
+
+**(3) `keep_line_scroll` inlined into `run_dots`.** The per-line scroll record of the smooth
+scrolling is called from `end_capture_line`, which `Ppu2C02::run_dots` inlines — the largest
+function of the crate, and the one MF-2 step 0 and MF-LEG-2 both warn about. Letting its body in
+beside the capture, for a test that is false on every line of every game that asked for no
+smooth scrolling, cost `duelito` **+5.6 M over 300 frames** in `run_dots` alone and every other
+ROM between +1.2 M and +2.4 M. `#[inline(never)]`, and only the test remains.
+
+**(4) `decode_margins` and `find_playfield_end` inlined into `run_frame`.** The same remedy, and
+it is worth **−3.3 M on `metroid`**. The branch's `decode_margins` is much larger than `dev`'s;
+behind a call it costs 23 040 Ir over 600 level-2 frames — 38 a frame — and the frame path keeps
+its registers.
+
+**(5) A kilobyte of Kirby's state in the PPU.** `$5007` bit 5 keeps sprite high bytes and flags
+**per page**: two `[[u8; 64]; 8]` tables, 1 KiB, inside `WideExtension`, which lives inside
+`Ppu2C02`. They are now a `Box` allocated on the first `$500C` write, so only a ROM that asks for
+paged sprites has them. This did **not** move the instruction count — callgrind counts
+instructions, not cache lines, and the fields sit after the hot ones — and it is kept on its
+merits: a kilobyte that only Kirby's pack ever touches has no business in the struct the hottest
+loop of the program works on.
+
+### 4.3 Two shapes measured and rejected
+
+Recorded so that nobody builds them again, in the manner of MF-5b-fix step 3.
+
+* **The frame-palette snapshot behind a call.** `process_dot` runs once per PPU dot — about
+  89 000 times a frame — and the branch writes a 33-byte snapshot inside it, guarded by a test it
+  already makes. Putting that body behind an `#[inline(never)]` call, which is the MF-LEG-2
+  remedy for cold code in a hot function, made **every ROM of the set worse**: the set total
+  +0.040 % → **+0.088 %**, `metroid` +0.049 % → +0.125 %, `m0` +0.048 % → +0.103 %. The copy
+  stays inline, with a comment saying why.
+* **Hoisting the wide picture's new per-record work.** `record_end` divides the record index by
+  the row width once per painted record (about 2 000 a frame at margin 128), and `paint_side_tile`
+  gained a term in its per-pixel test. Answering "does this frame have a split at all?" once a
+  frame and hoisting the per-pixel term out to once a row made Super Mario Bros. 3 with its
+  widescreen pack go from **+0.156 % to +0.36 %**. Reverted.
+
+### 4.4 The figures as they stand
+
+**PR-1's thirteen, 300 frames, no pack** — the table in §4.1: **+0.024 % (`oamstr`) to +0.050 %
+(`metroid`), set total +0.040 %**.
+
+**Level 2: the five commercial games with their 3D packs, 600 frames, inputs pressed.**
+
+| game | core | ppu | apu | draw_list | total |
+|---|---|---|---|---|---|
+| metroid | +0.056 % | +0.089 % | **+0** | +0.000 % | +0.050 % |
+| mm2 | +0.052 % | +0.090 % | **+0** | +0.000 % | +0.035 % |
+| smb1 | +0.052 % | +0.091 % | **+0** | **+0** | +0.053 % |
+| smb3 | +0.041 % | +0.065 % | **+0** | −0.010 % | **+0.018 %** |
+| zelda2 | +0.049 % | +0.086 % | **+0** | −0.010 % | +0.039 % |
+
+The `apu` stage is **+0 to the instruction** on all five, and `draw_list` is +0 or below. The
+`ppu` stage moves by an almost identical **absolute** figure on every game — 5 980 010, 6 197 080,
+6 225 995, 6 249 262, 6 252 523 — which is the signature of a fixed per-frame cost, not of work
+that scales with the game.
+
+**Super Mario Bros. 3 and Zelda II with their widescreen packs** (`bench-core --advanced
+--widescreen 128`, 300 frames):
+
+| game | `19c5065d` | merge | delta | |
+|---|---|---|---|---|
+| smb3 | 8 801 335 494 | 8 815 078 693 | +13 743 199 | **+0.156 %** |
+| zelda2 | 6 945 577 537 | 6 954 070 774 | +8 493 237 | **+0.122 %** |
+
+**The app's frame time.** `render --rom "Super Mario Bros. 3" --profile … --run 300 --bench 120`,
+three runs a side, on the Windows release binaries:
+
+| | run 1 | run 2 | run 3 | Lua hooks |
+|---|---|---|---|---|
+| `19c5065d` | 0.37 ms median, 0.58 p99 | 0.37 / 0.63 | 0.43 / 0.63 | 0.186–0.196 ms mean |
+| merge | 0.37 ms median, 0.52 p99 | 0.37 / 0.60 | 0.37 / 0.59 | 0.186–0.192 ms mean |
+
+**The same median to the hundredth of a millisecond**, with the only outlier on the base's side.
+The 2D path has no bench of its own in `render`; what stands for it is step 3's A/B, where the
+composed 2D picture of all 45 packs came out byte-identical, and the widescreen figures above,
+which are the 2D composition's own cost.
+
+### 4.5 What is left, and what the owner has to decide
+
+**Still above +0.02 %**: every PR-1 ROM except `oamstr` (+0.024 %) and `vblnmi` (+0.028 %), by
+0.004 to 0.03 points; all five level-2 totals except `smb3` (+0.018 %); and the two widescreen
+runs, by a wider margin. Two different things are left, and they want different answers.
+
+**(a) On games with no pack: ~+0.04 %, and it is not executed work.** Of `m0`'s +2.67 M, about
+450 K is **one-off at load** — `pack_for` now tests 64 packs instead of 57 (`HackPack::read`
++179 K, `resolve` +94 K, the allocator +98 K, UTF-8 validation +51 K) — which at 300 frames reads
+as 0.008 points and at any real session length as nothing. The remaining ~1.85 M is a **uniform
++0.11 % on `run_dots` alone**, on every ROM, and it is not attributable to a line: deleting the
+per-line smooth-scrolling call outright gives back only 150 K of it (0.002 %). It is the register
+allocation of the crate's largest function shifting under a handful of new statements and a
+bigger `Ppu2C02` — the effect MF-2 step 0 names.
+
+For scale, from `docs/review/BOARD-FEATURES.md`: a **control** on this very level-2 instrument — a
+`Board` variant that is never constructed, a provably behaviour-free change — moves `core` by
+**+0.096 %** and `lua_hooks` by +0.36 %. This lot's `core` figures are +0.041 % to +0.056 %,
+**half the drift of a change that does nothing**. No option can gate codegen drift; there is
+nothing here to put behind a switch, and the features that caused it are already off by default.
+
+**(b) On a game running a widescreen pack: +0.12 % to +0.16 %, and it is real work.** This is the
+branch's new wide picture — a record stopping where the next kept row begins (`row_ends`,
+`record_end`'s division per record, the per-pixel clip in `paint_side_tile`), `rows_to_decode`'s
+per-frame `Vec`, and the `minimum_rows` count. It is paid **only** by a game whose widescreen is
+on, which is where the owner's rule says such work belongs — but Super Mario Bros. 3 and Zelda II
+with their packs are named in the tolerance, so the rule is not satisfied by that alone. The one
+attempt at taking it back made it worse (§4.3) and was reverted; a proper fix is a
+monomorphised `paint_side_tile` on the MF-LEG-2 pattern, which is a lot of its own rather than a
+step of this one.
+
+**Nothing was removed and nothing was parked.** Every feature of the branch works as it was
+built; the two that could cost a game that wants neither — the smooth scrolling and the per-page
+sprites — are off by default and allocate nothing until asked. What is over the tolerance is
+(a) drift below the instrument's own floor for a no-op, and (b) the cost of the wide picture for
+a game that has asked for a wide picture. Both are recorded here for R0 and the owner, because
+parking a feature is their decision and not this lot's — the precedent is MF-LEG-3, which left
+the same call to them.

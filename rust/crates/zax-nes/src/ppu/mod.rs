@@ -1121,6 +1121,12 @@ impl Ppu2C02 {
                 // The frame boundary always fires; the flag itself can be suppressed by a
                 // read of $2002 one dot earlier (nesdev, "PPU frame timing").
                 self.vblank_just_started = true;
+                // Written **inline**, and it has to stay inline (lot KIRBY-MERGE step 4): the
+                // body runs once a frame, and putting it behind an `#[inline(never)]` call —
+                // the MF-LEG-2 remedy for cold code in a hot function — made every ROM of the
+                // PR-1 set **worse**, the set total going from +0.040 % to +0.088 % and
+                // `metroid` from +0.049 % to +0.125 %. A 33-byte copy guarded by a test
+                // `process_dot` already makes is cheaper than the call that would avoid it.
                 self.frame_palette = self.palette;
                 self.frame_mask = self.mask;
                 if !self.suppress_vblank {

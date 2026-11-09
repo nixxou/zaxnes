@@ -406,6 +406,7 @@ impl Ppu2C02 {
     /// game's memory, row by row; a row the decoder does not handle keeps its nametable
     /// columns. The centre 256 pixels are left as captured.
     #[allow(clippy::too_many_lines)] // One pass over the rows, its parts sharing their locals.
+    #[inline(never)]
     pub(crate) fn decode_margins(
         &mut self,
         decoder: &dyn MarginDecoder,
@@ -565,6 +566,7 @@ impl Ppu2C02 {
     /// Without margins, the playfield's bottom only ([`Ppu2C02::playfield_end`]), for the smooth
     /// scrolling without the widescreen: the rows the decoder places, nothing painted. Only when
     /// asked ([`Ppu2C02::set_wants_playfield_end`]): nothing read otherwise.
+    #[inline(never)]
     pub(crate) fn find_playfield_end(
         &mut self,
         decoder: &dyn MarginDecoder,
@@ -603,6 +605,15 @@ impl Ppu2C02 {
 
     /// Keeps the scroll line `line` is drawn with (the left-edge shadow of the internal address
     /// at its end, as the rows: R2-005), or none for a line without background.
+    ///
+    /// **`#[inline(never)]`, and it has to stay** (lot KIRBY-MERGE step 4). Its caller
+    /// `end_capture_line` is inlined into `Ppu2C02::run_dots`, the largest function of the crate
+    /// and the one `docs/progress/MF-2.md` step 0 and MF-LEG-2 both warn about: letting this
+    /// body in beside it, for a test that is false on every line of every game that asked for no
+    /// smooth scrolling, cost `duelito` **+5.6 M instructions over 300 frames** in `run_dots`
+    /// alone and every other ROM of the PR-1 set between +1.2 M and +2.4 M — the register
+    /// pressure of code that never runs. Behind a call, only the test remains.
+    #[inline(never)]
     fn keep_line_scroll(&mut self, line: i32) {
         let Ok(line) = usize::try_from(line) else {
             return;

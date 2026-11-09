@@ -56,6 +56,24 @@ pub const LAST_REGISTER: u16 = 0x5FFF;
 /// `$5007` bit 5: sprite high bytes and flags kept per sprite page (`$500C`).
 const PAGED_SPRITES: u8 = 0x20;
 
+/// The sprite high bytes and flags of each of the eight CPU pages a ROM may build sprites in
+/// (`$5007` bit 5 with `$500C`). Boxed and allocated on first use: see
+/// [`WideExtension::paged`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PagedSprites {
+    high: [[u8; 64]; 8],
+    flags: [[u8; 64]; 8],
+}
+
+impl PagedSprites {
+    fn new() -> Box<Self> {
+        Box::new(Self {
+            high: [[0; 64]; 8],
+            flags: [[0; 64]; 8],
+        })
+    }
+}
+
 /// First address of the RAM of the window.
 const FIRST_RAM: u16 = 0x5200;
 
@@ -167,10 +185,16 @@ pub struct WideExtension {
     pending_flags: [u8; 64],
     active_flags: [u8; 64],
     /// With `$5007` bit 5: the high bytes and flags of each sprite page (CPU page & 7), which an
-    /// OAM DMA takes from its source page, and the page being built (`$500C`). Not saved: the
-    /// ROM writes them again as it builds each page.
-    page_high: [[u8; 64]; 8],
-    page_flags: [[u8; 64]; 8],
+    /// OAM DMA takes from its source page. Not saved: the ROM writes them again as it builds
+    /// each page.
+    ///
+    /// **Behind a `Box`, and allocated only by a ROM that asks for paged sprites** (lot
+    /// KIRBY-MERGE step 4). The two tables are 1 KiB together, and `WideExtension` lives *inside*
+    /// `Ppu2C02`, which is the struct the hottest loop of the program works on: a kilobyte of
+    /// state that only Kirby's pack ever touches has no business sitting in it for every game.
+    /// `None` reads as all zeros, which is what the tables hold until a `$500C` write.
+    paged: Option<Box<PagedSprites>>,
+    /// The page the ROM is building (`$500C`).
     built_page: u8,
     /// The second sprite page (`$5007` bit 2) latched at the last OAM DMA: 64 sprites in OAM
     /// format, then the high bytes of their x. Not saved: the next DMA latches it again.
@@ -221,8 +245,7 @@ impl WideExtension {
             active_high: [0; 64],
             pending_flags: [0; 64],
             active_flags: [0; 64],
-            page_high: [[0; 64]; 8],
-            page_flags: [[0; 64]; 8],
+            paged: None,
             built_page: 0,
             extra_oam: [0xFF; 256],
             extra_high: [0; 64],
@@ -504,16 +527,18 @@ impl WideExtension {
             0x500C => {
                 self.built_page = value;
                 let page = usize::from(value & 7);
-                self.page_high[page] = [0; 64];
-                self.page_flags[page] = [0; 64];
+                let paged = self.paged.get_or_insert_with(PagedSprites::new);
+                paged.high[page] = [0; 64];
+                paged.flags[page] = [0; 64];
             }
             0x5100..=0x51FF if self.layout & PAGED_SPRITES != 0 => {
                 let page = usize::from(self.built_page & 7);
                 let sprite = usize::from(address & 0xFF) / 4;
+                let paged = self.paged.get_or_insert_with(PagedSprites::new);
                 if address & 3 == 1 {
-                    self.page_flags[page][sprite] = value;
+                    paged.flags[page][sprite] = value;
                 } else {
-                    self.page_high[page][sprite] = value;
+                    paged.high[page][sprite] = value;
                 }
             }
             0x5100..=0x51FF if address & 3 == 1 => {
@@ -580,9 +605,13 @@ impl WideExtension {
         }
 
         if self.layout & PAGED_SPRITES != 0 {
-            // Each page keeps its own, whatever page the game builds meanwhile.
-            self.active_high = self.page_high[usize::from(page & 7)];
-            self.active_flags = self.page_flags[usize::from(page & 7)];
+            // Each page keeps its own, whatever page the game builds meanwhile. No table yet
+            // means the ROM has written none of it, which reads as zeros.
+            let page = usize::from(page & 7);
+            (self.active_high, self.active_flags) = self
+                .paged
+                .as_ref()
+                .map_or(([0; 64], [0; 64]), |paged| (paged.high[page], paged.flags[page]));
         } else {
             self.latch_pending();
         }

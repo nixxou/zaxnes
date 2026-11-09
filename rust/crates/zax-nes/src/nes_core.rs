@@ -96,6 +96,22 @@ pub struct NesCore {
     report_age: Option<u8>,
     /// Whether the smooth scrolling from the run-ahead is on (the host's option of each game).
     smooth_ahead: bool,
+    /// Whether the game's own `smooth_scroll` aid is on, worked out when the options, the patch
+    /// or the pack change ([`NesCore::refresh_patch_cache`]) and **never inside a frame**: the
+    /// question costs a scan of `builtin_patches::PATCHES`, and `end_frame` asked it twice a
+    /// frame until lot KIRBY-MERGE step 4.
+    smooth_scroll_on: bool,
+    /// Whether the last frame did any smooth scrolling, so that the frame after the option goes
+    /// off still runs once to put the picture and the PPU's per-line record back.
+    smooth_scroll_live: bool,
+    /// Where the game waits for the next frame, from the patch that runs
+    /// ([`crate::builtin_patches::BuiltinPatch::idle_loop`]): the overclock ends there. Cached
+    /// with [`NesCore::smooth_scroll_on`] and for the same reason — finding it means scanning
+    /// `builtin_patches::PATCHES`, and `end_frame` did that once a frame.
+    idle_loop: Option<(u16, u16)>,
+    /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
+    /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
+    decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
     /// The sprites that move with the camera (Kirby, the camera on him), which the shift must
     /// leave where they are: their record indices in the picture just made, and their screen
     /// places; the camera's pixels the last picture showed, and every sprite's place there.
@@ -147,6 +163,10 @@ impl NesCore {
             last_scroll: None,
             report_age: None,
             smooth_ahead: false,
+            smooth_scroll_on: false,
+            smooth_scroll_live: false,
+            idle_loop: None,
+            decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
             shown_camera: None,
@@ -160,6 +180,7 @@ impl NesCore {
     /// restore; the ROM loaded keeps what it has.
     pub fn set_builtin_patches(&mut self, enabled: bool) {
         self.builtin_patches_enabled = enabled;
+        self.refresh_patch_cache();
     }
 
     /// Turns the advanced patches (`BuiltinPatch::advanced`) on or off for the next
@@ -464,6 +485,8 @@ impl NesCore {
         self.original_image = None;
         self.builtin_patch = None;
         self.rom_crc = None;
+        self.pack = None;
+        self.refresh_patch_cache();
         #[cfg(feature = "board-vs-system")]
         self.bus.set_vs_system(None);
         self.bus.attach(None);
@@ -754,11 +777,32 @@ impl NesCore {
         // The overclock ends once the game waits for the next frame, when its patch says where
         // (the patch applied, or the one whose hack pack gives the ROM its aids: an aid may ask
         // for the overclock).
+        //
+        // **Read, not looked up, and `None` unless a stall is possible** (lot KIRBY-MERGE step
+        // 4). Two separate costs were paid here, and the second was the lot's whole regression
+        // on the five commercial games.
+        //
+        // *The lookup.* Finding the patch means `builtin_patches::by_name`, which scans
+        // `PATCHES` — a `const` array, so each call materialises all of it. A patch's idle loop
+        // cannot change inside a frame, so it is worked out with the rest of the patch's cache
+        // ([`NesCore::refresh_patch_cache`]).
+        //
+        // *The test it arms.* The loop below asks `(first..=last).contains(&self.cpu.pc)` on
+        // **every CPU instruction**, which is about 5 Ir each. `dev` answered `None` here for an
+        // unpatched game and the test vanished; the branch added `.or_else(|| self.pack …)`, and
+        // a hack pack is found by **signature** on every one of the five commercial games
+        // whether or not its patch is applied — so the test came back on for all of them. Line
+        // by line (callgrind, `core/src/ops/range.rs` charged to `run_frame`), that was
+        // **3.1 M Ir over 60 frames on `metroid`**: +24 M over 300, +0.52 % on the ROM, and the
+        // same on `smb1`, `smb3`, `mm2` and `z2`.
+        //
+        // The filter keeps the branch's intent whole — an aid that asks for the overclock still
+        // gets its wait ended — and costs one test a frame. A ROM that has not unlocked the
+        // register window cannot have written `$5006`, so it cannot be stalling, so the test
+        // has nothing to find.
         let idle_loop = self
-            .builtin_patch
-            .and_then(crate::builtin_patches::by_name)
-            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
-            .and_then(|patch| patch.idle_loop);
+            .idle_loop
+            .filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
@@ -777,20 +821,19 @@ impl NesCore {
         if let Some(decoder) = decoder {
             self.decode_margins(decoder);
         }
-        // The smooth scrolling is an aid: without the widescreen (its built-in patches off), the
-        // decoder of the game's hack pack reads the camera and finds the playfield's bottom.
-        let aid_decoder = decoder.or_else(|| {
-            self.pack
-                .as_ref()
-                .and_then(|(patch, _)| crate::wide_decode::for_patch(patch.name))
-        });
-        if decoder.is_none() {
-            if let Some(aid_decoder) = aid_decoder {
-                self.find_playfield_end(aid_decoder);
-            }
+        // **One `or` of three booleans per frame for every game that wants none of this**, and
+        // the whole of the smooth scrolling behind it (lot KIRBY-MERGE step 4). The branch asked
+        // the question per frame instead, and the question was expensive: `hack_option_on`
+        // reaches `builtin_patches::by_name`, which scans `PATCHES` — a `const` array of 64
+        // entries, re-materialised at every call site — so a ROM with a built-in patch paid it
+        // twice a frame. Measured on the PR-1 set, it cost `metroid` **+27.6 M instructions over
+        // 300 frames** inside `run_frame` alone (+0.584 % on the ROM), `smb1` +26.0 M, `z2`
+        // +24.2 M, and about +6 M even on a ROM with no patch at all, where only the rest of the
+        // two functions ran. The answer cannot change inside a frame, so it is worked out when
+        // the options, the patch or the pack change ([`NesCore::refresh_smooth_scroll`]).
+        if self.smooth_scroll_wanted() {
+            self.smooth_scroll_frame(decoder);
         }
-        self.smooth_scroll(aid_decoder);
-        self.smooth_scroll_ahead();
 
         self.frame_count += 1;
 
@@ -907,6 +950,67 @@ impl NesCore {
         self.real_frame_held = false;
     }
 
+    /// Whether a frame has any smooth scrolling to do: the game's own aid, the host's option for
+    /// every game, or — once, after either is turned off — a frame to put the state back.
+    ///
+    /// Three loads and two `or`s, and it is what every game that wants none of this pays per
+    /// frame. See the note at the call site in [`NesCore::end_frame`] for what the per-frame
+    /// question cost before.
+    #[must_use]
+    const fn smooth_scroll_wanted(&self) -> bool {
+        self.smooth_scroll_on || self.smooth_ahead || self.smooth_scroll_live
+    }
+
+    /// The smooth scrolling of one frame, **out of line**: the margin decoder of a pack is found
+    /// by a sixty-arm match on the patch's name, and neither that nor the two passes below has
+    /// any business inside `run_frame` for a game that never reaches them.
+    #[inline(never)]
+    fn smooth_scroll_frame(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
+        // The smooth scrolling is an aid: without the widescreen (its built-in patches off), the
+        // decoder of the game's hack pack reads the camera and finds the playfield's bottom.
+        let aid_decoder = decoder.or_else(|| {
+            self.pack
+                .as_ref()
+                .and_then(|(patch, _)| crate::wide_decode::for_patch(patch.name))
+        });
+        if decoder.is_none() {
+            if let Some(aid_decoder) = aid_decoder {
+                self.find_playfield_end(aid_decoder);
+            }
+        }
+        self.smooth_scroll(aid_decoder);
+        self.smooth_scroll_ahead();
+        // The frame that turns everything off has run; the next one need not come back here.
+        self.smooth_scroll_live = self.smooth_scroll_on || self.smooth_ahead;
+    }
+
+    /// Works out everything the frame path reads of the patch that runs: its margin decoder,
+    /// whether the game's `smooth_scroll` aid is on, and where the game waits for the next
+    /// frame. None of the three can change inside a frame, and each costs a walk of a long
+    /// match or a scan of `builtin_patches::PATCHES` to find; `end_frame` worked all three out
+    /// once a frame until lot KIRBY-MERGE step 4, which is where the lot's whole regression on
+    /// the five commercial games came from. This runs at every point an answer can move: a ROM
+    /// loaded or closed, a pack installed, the options set, `emu.builtin_patches` turned.
+    fn refresh_patch_cache(&mut self) {
+        let on = self.hack_option_on("smooth_scroll");
+        if on && !self.smooth_scroll_on {
+            self.smooth_scroll_live = true;
+        }
+        self.smooth_scroll_on = on;
+        self.idle_loop = self
+            .options_patch_of_the_rom()
+            .and_then(|patch| patch.idle_loop);
+        self.decoder = self.find_margin_decoder();
+    }
+
+    /// The built-in patch whose properties the frame path reads: the one applied, or the one
+    /// whose hack pack gives the ROM its aids.
+    fn options_patch_of_the_rom(&self) -> Option<&'static crate::builtin_patches::BuiltinPatch> {
+        self.builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
+    }
+
     /// Has `decoder` fill the margins of the frame just run from the game's memory.
     /// The experimental smooth scrolling: with the option `smooth_scroll` of the patch running
     /// on, the picture just made is shown shifted left by the fraction of a pixel its camera was
@@ -914,8 +1018,9 @@ impl NesCore {
     /// to the playfield's bottom ([`NesCore::picture_shift`]). Nothing read with the option off.
     fn smooth_scroll(&mut self, decoder: Option<&dyn crate::wide_decode::MarginDecoder>) {
         // An aid of the game's hack pack (in the Hacks), with or without its widescreen patch: the
-        // camera its code reports, else the one a margin decoder reads.
-        let on = self.hack_option_on("smooth_scroll");
+        // camera its code reports, else the one a margin decoder reads. Worked out when the
+        // options change, not here: see `refresh_smooth_scroll`.
+        let on = self.smooth_scroll_on;
         self.picture_motion = None;
         let report = self.bus.ppu_mut().wide_mut().take_camera_report();
         self.bus
@@ -1027,14 +1132,15 @@ impl NesCore {
     /// Turns the smooth scrolling from the run-ahead on or off (an option of the host for every
     /// game; the game's own smooth scrolling from its memory, when on, comes first).
     pub fn set_smooth_scroll_ahead(&mut self, on: bool) {
+        if on && !self.smooth_ahead {
+            self.smooth_scroll_live = true;
+        }
         self.smooth_ahead = on;
     }
 
     /// Whether option `key` of the game's patch, or of its hack pack's aids, is on.
     fn hack_option_on(&self, key: &str) -> bool {
-        self.builtin_patch
-            .and_then(crate::builtin_patches::by_name)
-            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
+        self.options_patch_of_the_rom()
             .and_then(|patch| patch.options.iter().find(|option| option.key == key))
             .is_some_and(|option| self.host_options & (1 << (option.bit & 15)) != 0)
     }
@@ -1048,7 +1154,7 @@ impl NesCore {
     /// late.
     fn smooth_scroll_ahead(&mut self) {
         // The game's own camera, when its hack reads it, comes first (owner request).
-        if !self.smooth_ahead || self.hack_option_on("smooth_scroll") {
+        if !self.smooth_ahead || self.smooth_scroll_on {
             self.last_scroll = None;
             return;
         }
@@ -1136,6 +1242,7 @@ impl NesCore {
         ppu.find_playfield_end(decoder, &memory, Some(cartridge));
     }
 
+    #[inline(never)]
     fn decode_margins(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
         let (ram, ppu, cartridge) = self.bus.decoder_parts();
         let Some(cartridge) = cartridge else {
@@ -1184,6 +1291,20 @@ impl NesCore {
     /// itself, or that of the patch whose hack pack the ROM has the signatures of (another
     /// version of the game, a ROM hack); none while the built-in patches are off.
     fn margin_decoder(&self) -> Option<&'static dyn crate::wide_decode::MarginDecoder> {
+        self.decoder
+    }
+
+    /// Finds the margin decoder of the ROM loaded, for [`NesCore::refresh_patch_cache`].
+    ///
+    /// `wide_decode::for_patch` is a match on **string literals**, one arm per patch of every
+    /// game that has a decoder, and `for_rom` is a match on CRCs; `end_frame` called this once a
+    /// frame until lot KIRBY-MERGE step 4, so every ROM with a built-in patch walked that chain
+    /// 60 times a second. The branch added seven arms to `for_patch` and two to `for_rom` for
+    /// Kirby's builds, which made the walk longer for games that have nothing to do with Kirby:
+    /// `metroid` **+24 M instructions over 300 frames** (+0.52 %), `smb1` +23.2 M, `z2` +19.9 M,
+    /// `smb3` +20.5 M, `mm2` +19.9 M. The answer changes only when the ROM, the pack or
+    /// `emu.builtin_patches` does.
+    fn find_margin_decoder(&self) -> Option<&'static dyn crate::wide_decode::MarginDecoder> {
         if !self.builtin_patches_enabled {
             return None;
         }
@@ -1236,6 +1357,9 @@ impl NesCore {
         self.bus.ppu_mut().wide_mut().set_host_options(rom_bits);
         self.host_options = options;
         self.sync_aids();
+        // One of the bits just written may be the `smooth_scroll` aid's; the frame path reads
+        // the answer and never works it out itself (lot KIRBY-MERGE step 4).
+        self.refresh_patch_cache();
     }
 
     /// Applies to the cartridge's PRG-ROM the hooks of the pack's aids whose option is on, and
@@ -1317,6 +1441,8 @@ impl NesCore {
             wide.boot_zone(patch.zone_data);
         }
         self.sync_aids();
+        // The pack just changed, so the patch whose options count may have too.
+        self.refresh_patch_cache();
     }
 
     /// The built-in patch whose options apply to the ROM loaded: the one applied, or, without it,
@@ -1550,11 +1676,7 @@ impl NesCore {
         if self.bus.cartridge().is_none() {
             return Err(NoRomLoaded);
         }
-        let idle_loop = self
-            .builtin_patch
-            .and_then(crate::builtin_patches::by_name)
-            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
-            .and_then(|patch| patch.idle_loop);
+        let idle_loop = self.idle_loop;
         let mut at_idle = false;
         if let Some((first, last)) = idle_loop {
             // A bound past any vertical blank, for a machine stalled by the overclock.
