@@ -9,6 +9,41 @@
 
 use std::fmt;
 
+use crate::EngineKind;
+
+/// The message REQ-CORE-120 fixes to the character for a state written by another core — one of
+/// the few literal strings of the spec (AMD-002, answer to Q-001). Both engines return it, so it
+/// lives here; `zax_nes::NesCore::FOREIGN_CORE_MESSAGE` is defined as this.
+pub const FOREIGN_CORE_MESSAGE: &str = "Save state used a different core.";
+
+/// The first four bytes of a savestate block name the engine that wrote it.
+///
+/// Zaxnes's value is the one its own blocks have always carried, so every state written before
+/// this lot still identifies itself; FCEUX's is `ZXFX` and was new with lot FCEUX-23. A block of
+/// one engine handed to the other is refused with
+/// [`StateLoadFailure::ForeignCore`] and [`FOREIGN_CORE_MESSAGE`] — which is what makes the
+/// refusal a clear message rather than "corrupt".
+#[must_use]
+pub const fn state_magic(engine: EngineKind) -> u32 {
+    match engine {
+        // `SEN0` little-endian: Zaxnes's blocks have carried it since the C# original.
+        EngineKind::Zaxnes => 0x304E_4553,
+        // `ZXFX` little-endian.
+        EngineKind::Fceux => 0x5846_585A,
+    }
+}
+
+/// Which engine wrote the block that starts at `offset` in `data`, from its first four bytes;
+/// `None` when they name no engine this build knows, or the block is shorter than four bytes.
+#[must_use]
+pub fn engine_of_state(data: &[u8], offset: usize) -> Option<EngineKind> {
+    let head = data.get(offset..offset.checked_add(4)?)?;
+    let magic = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
+    [EngineKind::Zaxnes, EngineKind::Fceux]
+        .into_iter()
+        .find(|&engine| state_magic(engine) == magic)
+}
+
 /// Typed cause of a failed "restore state" (REQ-CORE-091, AREQ-CORE-120; AMD-002 answer to
 /// Q-001). The host picks the text it shows from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

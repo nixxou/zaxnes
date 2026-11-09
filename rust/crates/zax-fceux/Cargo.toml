@@ -15,7 +15,12 @@ publish.workspace = true
 # With it on, the crate links the static library the fork `cleanroom/fceux-zax` builds (see
 # `build.rs` for how it is found) and wraps its C API.
 default = []
-fceux-core = []
+fceux-core = ["dep:zax-core-api"]
+
+# The types and the `Engine` trait both engines share. Optional, so that with `fceux-core` off
+# this crate really has no dependency at all, as the module docs promise.
+[dependencies]
+zax-core-api = { path = "../zax-core-api", optional = true }
 
 [lints]
 workspace = true

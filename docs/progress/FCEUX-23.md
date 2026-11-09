@@ -9,7 +9,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 
 - [x] 1. Bring the FCEUX work onto this branch by cherry-pick; the baseline.
 - [x] 2. `zax-core-api`: the types both engines share, a pure move.
-- [ ] 3. The `Engine` trait, and both implementations.
+- [x] 3. The `Engine` trait, and both implementations.
 - [ ] 4. The application drives the trait.
 - [ ] 5. The per-game choice (FCEUX-3).
 - [ ] 6. The app with FCEUX, end to end.
@@ -208,3 +208,124 @@ and `zax_nes::VisibleRows` each resolve to the **very same type** as the `zax_co
 `cargo build --workspace --all-targets` in **debug** filled G: and failed with `LNK1318 PDB
 LIMIT` and `no space on device`. Use `cargo check --workspace --all-targets` to compile-check and
 `cargo test --release` to run; the release profile strips, so it costs a fraction of the disk.
+
+---
+
+## Step 3 — the `Engine` trait, and both implementations
+
+`zax_core_api::Engine`, shaped by §2 of the design note, with `Capabilities`, `Capability` and
+`EngineKind` beside it. `Send`, **not `Sync`** — FCEUX keeps one machine in process globals, so a
+handle may move to the emulation thread but two threads must never be inside it, and the trait
+must not undo `zax-fceux`'s `PhantomData<Cell<()>>`.
+
+### What is on it, and what is not
+
+On it: load / close / is-running / name, power / reset / soft reset, run a frame, the frame
+counter and its setter, the 2D picture, the frame batch, read audio and the sample rate (set
+**and** get — see below), read and write CPU memory, savestate to and from a buffer with its size
+bound, battery RAM, the region, the port types, `capabilities()`, `kind()`, and
+`as_any()`/`as_any_mut()`.
+
+Off it, and reached by the downcast after the capability flag has said the engine has them:
+`wide_picture_into` and every widescreen field, the hack packs and `options_patch`,
+`set_sprite_limit`, `cartridge()`/`bus()`/`ppu()`, `run_frame_ahead`/`restore_real_frame`, and
+`capture_core_state`/`restore_core_state` — so **rollback keeps using the fast in-memory path on
+Zaxnes**, which is the whole reason this is a downcast and not a trait method FCEUX would have to
+fake. `engine_trait_tests.rs` exercises every one of those through the downcast, and that the
+downcast answers `None` for the wrong type rather than panicking.
+
+`as_any` is a method rather than an `Engine: Any` supertype, because `Any` demands `'static` — a
+promise the trait has no reason to make — and because `&dyn Engine` cannot be upcast to `&dyn Any`
+on the pinned toolchain.
+
+### Three additions to the brief's list, each for a reason found while writing it
+
+1. **`sample_rate()` on the trait.** FCEUX's `FCEUI_Sound` takes only 44 100, 48 000, 96 000 and
+   0 (`driver.h:152-154`), where `zax-nes` resamples anything from 22 050 to 96 000. A rate
+   outside *that* range is refused exactly as `zax-nes` refuses it; a rate inside it that FCEUX
+   cannot produce is **snapped to the nearest one it can**, and `sample_rate()` reports what the
+   core really runs — so a host feeding an audio device stays in tune instead of playing 22 050 Hz
+   samples at 44 100. Without the getter the snap would have been a silent pitch error. **The
+   owner should know**: a user who sets 22 050 or 32 000 and chooses FCEUX for a game gets 44 100
+   or 48 000.
+2. **`export_battery_ram(&self, out: &mut Vec<u8>)` copies** instead of lending `&[u8]`. FCEUX's
+   bytes come across the C API and cannot be lent out of a `&self`. `NesCore::export_battery_ram`
+   still lends, and a caller holding the concrete core still uses it; the trait method is the one
+   place `engine_impl.rs` is not a bare forward.
+3. **Battery RAM needed three calls in the fork** — `zax_battery_ram_size`,
+   `zax_get_battery_ram`, `zax_set_battery_ram`, committed to `fceux-zax` as `61c7b080` and
+   recorded in its `zax/README.md`. FCEUX reaches its save memory only through a `.sav` **file**
+   (`FCEU_SaveGameSave`, `cart.cpp:539`) and the core-only build has nowhere to put one; the three
+   calls hand over the same bytes without the file, the `SaveGame` buffers of `currCartInfo`
+   concatenated, which is the layout `cart.cpp` and `movie.cpp` already use. **No FCEUX file is
+   patched** — all three live in `zax/zaxfceux.cpp` — so the fork's patch set is still the three
+   files §10 of the design note counts. The fork was rebuilt and its self-test re-run:
+   `frames=60 pixels=e455081e6a3eefe9 emphasis=d395e456e4e72325 audio=7fc10a9ce4ed8fcd`,
+   unchanged.
+
+### `impl Engine for NesCore` — `crates/zax-nes/src/engine_impl.rs`
+
+Thin delegation, every method `#[inline]`, **no emulation code touched**. Two things worth naming:
+
+* `power()` and `reset()` are the same call, because `NesCore::reset` **is** the power cycle
+  (DEC-02-Q3). The trait keeps them apart because FCEUX's are two.
+* `NesCore::STATE_MAGIC` and `FOREIGN_CORE_MESSAGE` are now *defined as* `zax-core-api`'s
+  `state_magic(EngineKind::Zaxnes)` and `FOREIGN_CORE_MESSAGE`. Same values — `0x304E_4553` and
+  the spec's literal string — so every block written before this lot still identifies itself, and
+  the two engines cannot drift apart on either.
+
+### `impl Engine for FceuxEngine` — `crates/zax-fceux/src/engine.rs`
+
+`Fceux` stays the bare safe wrapper; `FceuxEngine` is the layer above it, holding what the trait
+needs and FCEUX does not keep. **No `unsafe` in the new file**: every FFI call is still in
+`core.rs`.
+
+| What FCEUX lacks | What the engine does |
+|---|---|
+| the ROM's name | keeps the host's |
+| `NesRegion::Multi` | keeps the host's choice and gives the core NTSC, since Multi *is* NTSC timing (REQ-CORE-015); without this a round trip through `region()` would silently turn Multi into Ntsc |
+| a settable frame counter | an **offset**. FCEUX's counter is the shim's, zeroed on a load and a power cycle but **not** on the RESET line, where AMD-044 REQ-CORE-122 restarts it; computing the offset from whatever the core reports makes all four paths agree without the fork having to change |
+| a cycle count | the region's nominal frame, 29 781 NTSC / 33 248 PAL. The application uses the figure for the audio ratio and the profiler, never for emulation |
+| records it can lend | copies the C callback's ~970 records into its own `Vec` once a frame, which is what §2 of the note predicted (~23 KB a frame) |
+| an audio ring | one of its own, `i16` → `f32` at `/32768`, a fifth of a second deep with the APU's floor of 10 000 (REQ-CORE-071), **entirely or not at all** and an odd stereo buffer refused — `zax-nes`'s two rules, so a host switching engines notices nothing |
+| a default sample rate | starts at 48 000, `Apu2A03::DEFAULT_SAMPLE_RATE`; the core itself starts silent |
+| a typed load failure | reads the cause off the image's header. See the leniency note below |
+| a self-describing state | a header: the engine's magic, a version, the core name, the ROM name, the region, the frame count, then FCEUX's opaque block as a length-prefixed blob. So `consumed` is meaningful (a host may place its own data after it, REQ-CORE-091), `StateLoaded::rom_name` is answerable, and **a Zaxnes block is refused as `ForeignCore` with the spec's own message** rather than as "corrupt" |
+
+The scratch buffers for the audio ring and the state payload are behind a `RefCell`, because
+`read_audio` and `save_state_to` are `&self` on the trait — they are on `zax-nes` too, whose ring
+sits behind a `Mutex` for the same reason. A cell rather than a mutex because this handle is
+`!Sync` by construction, so there is no second thread to lock against; `try_borrow_mut` keeps the
+`panic = deny` lint honest.
+
+**Defaults the engine sets for the application**: the tile capture **on** (the 3D path reads it;
+the harness's own tools use `Fceux` directly and pay nothing) and the RAM fill **zero**, which is
+`zax-nes`'s, and which lot FCEUX-6 measured as worth +6 originals and +15 public ROMs of record
+agreement on its own. `FceuxEngine::set_ram_init` keeps it settable, because `.fm2` playback must
+use the movie's own `RAMInitOption`/`RAMInitSeed` and **never** zero (lot FCEUX-4).
+
+### Two emulation differences the tests found and now record
+
+* **FCEUX is far more lenient about a ROM image.** A header announcing more PRG than the file
+  holds is *loaded* (padded out), and so is a well-formed image on mapper 255 — `zax-nes` refuses
+  the first as `TruncatedFile` and the second as `UnsupportedMapper` (REQ-CORE-011). In practice
+  FCEUX refuses only an image it cannot recognise as any format at all, so `CorruptHeader` is the
+  cause it reports; the classifier's other two branches are there for a refusal of a well-formed
+  image, which neither ROM set has an example of. The test asserts the *leniency* so that a change
+  upstream fails it rather than passing silently.
+* **FCEUX's state block cannot restore without the game loaded.** `zax-nes`'s self-contained block
+  can (REQ-CORE-090); FCEUX's holds the machine, not the cartridge. The engine says so in as many
+  words instead of failing obscurely, and the application's slot wrapper keeps the ROM anyway.
+
+### What it proves
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings`, feature **off** | clean |
+| the same with `fceux-core` on both crates | clean |
+| `cargo test --release --workspace`, feature off | **3 250 passed, 0 failed**, 89 ignored |
+| the same with the feature | **3 293 passed, 0 failed**, 92 ignored |
+| `crates/zax-nes/tests/engine_trait_tests.rs` | 9 tests: the lifecycle, power against soft reset, the frame's three outputs, the region and the ports, the state round trip and its engine stamp, battery RAM against the borrow the core still lends, every capability on, the downcast reaching all six Zaxnes-only features, and that an engine moves to another thread |
+| `crates/zax-fceux/tests/fceux_engine_tests.rs` | 19 tests, all through `Engine`: the load and its typed cause, the batch's records and palette, the picture before the first frame, the audio contract and the rate snap, memory, the frame counter, soft against hard reset, the state round trip inside a larger buffer, a Zaxnes state refused as `ForeignCore`, three corrupt blocks refused with the engine left stopped, `Multi` round-tripping, the Zapper refused, the capability reasons, the downcast, the RAM fill, and battery RAM on a cart without one |
+| **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |

@@ -2102,6 +2102,9 @@ dependencies = [
 [[package]]
 name = "zax-fceux"
 version = "0.5.0"
+dependencies = [
+ "zax-core-api",
+]
 
 [[package]]
 name = "zax-goldens"

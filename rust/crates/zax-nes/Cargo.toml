@@ -1209,4 +1209,5 @@ zax-core-api = { path = "../zax-core-api" }
 
 [dev-dependencies]
 sha2 = "0.10"
+zax-core-api = { path = "../zax-core-api" }
 zax-goldens = { path = "../zax-goldens" }

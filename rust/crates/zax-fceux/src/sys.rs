@@ -101,4 +101,8 @@ extern "C" {
 
     pub fn zax_read_memory(address: u16) -> i32;
     pub fn zax_write_memory(address: u16, value: u8) -> c_int;
+
+    pub fn zax_battery_ram_size() -> i32;
+    pub fn zax_get_battery_ram(out: *mut u8, out_len: usize) -> i32;
+    pub fn zax_set_battery_ram(data: *const u8, data_len: usize) -> i32;
 }

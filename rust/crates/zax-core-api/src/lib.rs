@@ -29,6 +29,7 @@
 //! golden-core came out byte-identical to the lot's baseline.
 
 mod audio;
+mod engine;
 mod frame_batch;
 mod input;
 mod region;
@@ -38,10 +39,14 @@ mod state;
 mod tile_record;
 
 pub use audio::{AudioError, MAX_RATIO_ADJUSTMENT, MAX_SAMPLE_RATE, MIN_SAMPLE_RATE};
+pub use engine::{Capabilities, Capability, Engine, EngineKind};
 pub use frame_batch::{FrameBatch, PaletteSnapshot, VisibleRows, STANDARD_ROWS};
 pub use input::{button, ControllerPortType, InputWord, InvalidPort, PORT_2_SHIFT, PORT_COUNT};
 pub use region::NesRegion;
 pub use rom_load_failure::RomLoadFailure;
 pub use rom_load_result::RomLoadResult;
-pub use state::{InvalidState, NoRomLoaded, StateLoadFailure, StateLoaded};
+pub use state::{
+    engine_of_state, state_magic, InvalidState, NoRomLoaded, StateLoadFailure, StateLoaded,
+    FOREIGN_CORE_MESSAGE,
+};
 pub use tile_record::TileRecord;

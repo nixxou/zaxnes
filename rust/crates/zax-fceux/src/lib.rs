@@ -32,6 +32,11 @@ pub mod sys;
 mod core;
 
 #[cfg(feature = "fceux-core")]
+mod engine;
+
+#[cfg(feature = "fceux-core")]
 pub use core::{
     Error, Fceux, RamInit, Region, Tile, TileCapture, FRAME_HEIGHT, FRAME_LEN, FRAME_WIDTH,
 };
+#[cfg(feature = "fceux-core")]
+pub use engine::FceuxEngine;

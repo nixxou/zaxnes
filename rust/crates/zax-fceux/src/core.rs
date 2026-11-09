@@ -544,6 +544,89 @@ impl Fceux {
         // SAFETY: two by-value arguments; nothing can be out of range.
         check(unsafe { sys::zax_write_memory(address, value) })
     }
+
+    /// Upper bound the core reports on the size of a savestate for the ROM loaded, which a host
+    /// that has to announce a state size before serialising needs (REQ-ARCH-013).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoRom`] when no ROM is loaded, [`Error::State`] if the core could not measure
+    /// one.
+    pub fn state_size_hint(&self) -> Result<usize, Error> {
+        // SAFETY: a query on a live instance, which `&self` proves; negative on error.
+        let hint = unsafe { sys::zax_state_size_hint() };
+        if hint <= 0 {
+            return Err(code_to_error(hint));
+        }
+        Ok(usize::try_from(hint).unwrap_or(0))
+    }
+
+    /// Bytes the cartridge's battery-backed memory occupies, 0 when it has none.
+    ///
+    /// These are the bytes FCEUX itself would write to a `.sav` file; the fork's C API hands
+    /// them over without one (`zax/README.md`, *Battery-backed save memory*).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unexpected`] for a code the C API is not documented to return.
+    pub fn battery_ram_size(&self) -> Result<usize, Error> {
+        // SAFETY: a pure query on a live instance; 0 for a cart without a battery, negative on
+        // an error.
+        let size = unsafe { sys::zax_battery_ram_size() };
+        if size < 0 {
+            return Err(code_to_error(size));
+        }
+        Ok(usize::try_from(size).unwrap_or(0))
+    }
+
+    /// Copies the battery-backed memory into `out`, replacing its contents and keeping its
+    /// allocation. `out` is left empty for a cartridge without a battery.
+    ///
+    /// # Errors
+    ///
+    /// As [`Fceux::battery_ram_size`].
+    pub fn battery_ram_into(&self, out: &mut Vec<u8>) -> Result<(), Error> {
+        let needed = self.battery_ram_size()?;
+        out.clear();
+        if needed == 0 {
+            return Ok(());
+        }
+
+        out.resize(needed, 0);
+        // SAFETY: `out` has just been resized to `needed`, which is the length handed over and
+        // the length the C API was asked for; it writes at most that many bytes and refuses a
+        // short buffer with a code rather than overrunning.
+        let got = unsafe { sys::zax_get_battery_ram(out.as_mut_ptr(), needed) };
+        if got < 0 {
+            out.clear();
+            return Err(code_to_error(got));
+        }
+
+        out.truncate(usize::try_from(got).unwrap_or(0).min(needed));
+        Ok(())
+    }
+
+    /// Restores battery-backed memory saved by [`Fceux::battery_ram_into`]. `false` when the
+    /// cartridge has no battery or `data` is not exactly the length its board registered — in
+    /// which case nothing is written.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unexpected`] for a code the C API is not documented to return.
+    pub fn set_battery_ram(&mut self, data: &[u8]) -> Result<bool, Error> {
+        let needed = self.battery_ram_size()?;
+        if needed == 0 || data.len() != needed {
+            return Ok(false);
+        }
+
+        // SAFETY: `data` is a live slice, so the pointer is valid for `len()` bytes, which is the
+        // length handed over; the C API only reads through it, and demands exactly that length.
+        let written = unsafe { sys::zax_set_battery_ram(data.as_ptr(), data.len()) };
+        if written < 0 {
+            return Err(code_to_error(written));
+        }
+        Ok(usize::try_from(written).unwrap_or(0) == needed)
+    }
 }
 
 impl Drop for Fceux {

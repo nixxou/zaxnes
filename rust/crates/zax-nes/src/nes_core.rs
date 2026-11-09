@@ -283,13 +283,17 @@ impl NesCore {
     /// loadable (Q-070).
     pub const LEGACY_CORE_NAME: &'static str = "Sen";
 
-    /// Message a savestate written by a different core is refused with (REQ-CORE-120).
-    pub const FOREIGN_CORE_MESSAGE: &'static str = "Save state used a different core.";
+    /// Message a savestate written by a different core is refused with (REQ-CORE-120). Defined
+    /// as `zax_core_api`'s since lot FCEUX-23 step 3, because FCEUX's engine returns the same
+    /// one for a block of this core's.
+    pub const FOREIGN_CORE_MESSAGE: &'static str = zax_core_api::FOREIGN_CORE_MESSAGE;
 
     /// Magic that opens a core savestate block, "SEN0". Kept as it is across the rename of
     /// AMD-029: it is a format datum, and changing it would refuse every block written
-    /// before (Q-070).
-    pub const STATE_MAGIC: u32 = 0x304E_4553;
+    /// before (Q-070). It is `zax_core_api::state_magic(EngineKind::Zaxnes)` since lot
+    /// FCEUX-23 step 3, where the first four bytes of a block became how the application tells
+    /// which engine wrote it.
+    pub const STATE_MAGIC: u32 = zax_core_api::state_magic(zax_core_api::EngineKind::Zaxnes);
 
     /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
     /// the APU channel, mixer and resampler state, L1d the mapper bank windows, latches and
