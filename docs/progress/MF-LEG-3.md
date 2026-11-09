@@ -198,7 +198,58 @@ expectation.
 | `cargo test --release -p zax-nes -p zax-harness`, `default` | **1 167 / 0** |
 | the same, `--features zax-nes/board-mmc5-exattr-split` | **1 206 / 0** (+16) |
 | the same, `--features zax-nes/parked-boards` | **1 267 / 0** (+16) |
-- [ ] 3/6 golden-core and the suites with both ROM roots
+- [x] 3/6 golden-core and the suites with both ROM roots
+
+### 3/6 — golden-core over the 98 originals, and the suites with both ROM roots
+
+```
+zax-harness golden-core G:/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+The base commit was extracted with `git archive 04731c86` into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, built there, and the directory deleted as soon as the figures were taken.
+
+| build | md5 of the 98-ROM digest | `cmp` against the base commit's file |
+| --- | --- | --- |
+| `04731c86`, the base commit, fresh tree | `f79e7df842c3ee43e7d9b67861a927b5` | — |
+| this tree, `default` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| this tree, `--features zax-nes/board-mmc5-exattr-split` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| this tree, `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+
+**Byte-identical in all four**, `cmp` on the files and not only on the digests, and identical to the
+digest fifteen lots have now recorded (it is MF-LEG-2 step 3's own). 98 ROMs run, 98 files.
+
+The 98 use mappers 0, 1, 2, 3, 4 and 156 — **none of them is mapper 5** — so what this row rules
+out is that the lot touched a shared path: the thirty-seventh `Board` variant, the
+`dispatch_arms!` rewrite of all thirty-seven arms, the new arm of `Board::intercept_cpu_write` and
+the two post-dispatch tests in `load_registers` and `reset`, all at once.
+
+#### `mmc5exram`, the PR-1 MMC5 ROM, **never arms either mode**
+
+Measured, not assumed, and it decides the shape of step 4's figures: the ROM was run for 300
+frames — the campaign's own length — with the variant read off the cartridge after each, and it is
+**`Board::Mmc5` the whole way**. So the ROM that MF-LEG-2 measured at **+2.522 %** runs
+`04731c86`'s code from power-on to the last frame, and its figure should be the base's.
+
+That is `exram`'s own subject matter: it tests the `$5C00`-`$5FFF` **CPU-side** modes of `$5104`
+(%10 and %11, where `ExRAM` is the CPU's RAM) and the `ExRAM`-as-nametable mode %00, none of which
+is extended attributes, and it never touches `$5200`-`$5202`. The three MMC5 ROMs of the
+collection keep their outcomes in all three configurations
+(`req_core_100_the_mmc5_rom_suites_keep_their_outcomes`, in the runs below).
+
+#### The suites
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`,
+`--no-fail-fast -- --include-ignored`:
+
+| run | result | against MF-LEG-2 step 6 |
+| --- | --- | --- |
+| `default` | **1 177 passed, 0 failed, 0 ignored** | unchanged |
+| `--features zax-nes/board-mmc5-exattr-split` | **1 216 passed, 0 failed, 0 ignored** | +16 |
+| `--features zax-nes/parked-boards` | **1 277 passed, 0 failed, 0 ignored** | +16 |
+
+**All pass; nothing fails and nothing is skipped.** The +16 are this lot's own tests and the
+`default` row is identical, which is the suite's statement of what the feature-off build is.
 - [ ] 4/6 the callgrind campaign
 - [ ] 5/6 the documentation and the decision
 - [ ] 6/6 the final check
