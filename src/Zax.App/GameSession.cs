@@ -186,11 +186,6 @@ internal sealed class GameSession : IDisposable
     /// profil) » entry of AMD-024 REQ-PUB-001 passes: the same empty profile, converted in 3D
     /// with the default geometry of SPEC-04 (Q-065).
     /// </param>
-    /// <param name="tiles">
-    /// The tile table of a « 3dh » profile (AMD-062 REQ-PROF-080), or null for a 3dn one. The
-    /// tiles the ROM gives must already have been resolved (REQ-PROF-078); the ones that are
-    /// still pending are looked for in each displayed frame and in the CHR-RAM.
-    /// </param>
     // Q-065
     public static GameSession Create(
         GameProfile profile,
@@ -199,8 +194,29 @@ internal sealed class GameSession : IDisposable
         IScriptLog? log = null,
         SettingsModel? settingsModel = null,
         bool differentGame = true,
-        bool? twoDimensionalMode = null,
-        HashProfileTiles? tiles = null)
+        bool? twoDimensionalMode = null)
+        => CreateWithTiles(profile, title, scene, log, settingsModel, differentGame, twoDimensionalMode, null);
+
+    /// <summary>
+    /// The same, for a « 3dh » profile: <paramref name="tiles"/> is its tile table (AMD-062
+    /// REQ-PROF-080). The tiles the ROM gives must already have been resolved (REQ-PROF-078);
+    /// the ones that are still pending are looked for in each displayed frame and in the
+    /// cartridge's CHR-RAM.
+    /// </summary>
+    /// <remarks>
+    /// It is a method of its own rather than one more optional parameter of
+    /// <see cref="Create"/>, whose parameter list the round-1 acceptance driver reaches by
+    /// reflection.
+    /// </remarks>
+    public static GameSession CreateWithTiles(
+        GameProfile profile,
+        string title,
+        SceneState scene,
+        IScriptLog? log,
+        SettingsModel? settingsModel,
+        bool differentGame,
+        bool? twoDimensionalMode,
+        HashProfileTiles? tiles)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(scene);

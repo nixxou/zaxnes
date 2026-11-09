@@ -302,7 +302,7 @@ internal sealed partial class EmulationHost
                 // so that the first converted frame already has them.
                 PrepareHashTiles(game, job.RomImage);
 
-                _session ??= GameSession.Create(
+                _session ??= GameSession.CreateWithTiles(
                     game.Profile,
                     game.Title,
                     _scene,
@@ -396,7 +396,7 @@ internal sealed partial class EmulationHost
                 // resolves the rest while the game runs (AMD-062 REQ-PROF-080).
                 PrepareHashTiles(game, romImage: null);
 
-                _session ??= GameSession.Create(
+                _session ??= GameSession.CreateWithTiles(
                     game.Profile,
                     game.Title,
                     _scene,
