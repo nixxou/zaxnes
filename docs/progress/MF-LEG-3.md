@@ -100,7 +100,104 @@ full variant is reached and complete.
 
 The three totals are MF-LEG-2 step 6's own (1 167 / 1 190 / 1 251) to the test: this step moves no
 behaviour that any existing test can see.
-- [ ] 2/6 the mid-frame arming, the save-states and the new tests
+- [x] 2/6 the mid-frame arming, the save-states and the new tests
+
+### 2/6 — the mid-frame arming, the save-states, and sixteen tests
+
+`mf_leg_3_mmc5_runtime_switch_tests.rs`, **sixteen tests**, all behind the feature. The variant is
+read off the cartridge (`NesCore::cartridge_mut` and `Cartridge::board`, both already `pub`) and
+**not** inferred from the picture, because the switch is designed to be invisible from outside: no
+register is lost by a board that has not switched, so "did it switch?" has no answer in the
+frame. What the two modes *do* once armed is MF-LEG-2's twenty-three tests, which now all reach
+the full variant **through** this switch.
+
+| what is pinned | tests |
+| --- | --- |
+| it switches on `$5104` = %01, on `$5200` bit 7, and on `$5201` / `$5202` | 3 |
+| it does **not** switch on `$5104` = 0, 2, 3, on `$5200` with bit 7 clear (three values), or on nine other MMC5 writes — fifteen writes, each on a fresh core — nor after four frames | 2 |
+| no write ever takes it back; a reset does, and it arms again afterwards | 2 |
+| the full variant with neither mode armed renders **exactly** as the light one | 1 |
+| the savestates: equal block length, the light round trip, a full state into a fresh core, each of `$5200`-`$5202` on its own, the variant after a load, the core-state path, run-ahead | 7 |
+| arming **mid-frame** | 1 |
+
+**The equivalence test is the one that guards the one body of `mmc5.rs` that is a copy.**
+`Mmc5Ext::see_ppu_read` has to be a copy of the light board's — the per-tile latching sits between
+the fetch that raises the in-frame flag and the repeat counter that consumes the last read
+address — and no comment keeps two copies in step. So
+`mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode` runs twenty frames with a
+moving scroll through a board that has switched (armed, then disarmed, so every register is the
+light board's again) and one that has not, and compares **every pixel of every frame**, `$5204`
+after each, and the CPU cycle count. It uses **8x16 sprites and two different CHR register sets**,
+so the in-frame flag the scanline detection raises decides which set the background is fetched
+from (MR-5-1) and a drift in the detection is a drift in the picture rather than a silent one.
+
+#### The two state paths, and what each does to the variant
+
+The brief's point 5 asked for a round trip in each variant and across a switch. Writing them
+turned up a distinction worth recording, because the code was documented wrongly until the test
+failed:
+
+| path | what decides the variant |
+| --- | --- |
+| **savestate** (`NesCore::try_load_state`) | the **block alone**. `restore_state` builds a *new* `Cartridge` from the ROM and loads into it, so the live board is never consulted: the board arrives light and `Board::load_registers` promotes it if the block says a mode is armed. The variant is a pure function of the state, which is what makes rewind and run-ahead deterministic. |
+| **core state** (`capture_core_state` / `restore_core_state`, rewind's and run-ahead's own path, REQ-LOOP-067) | the **live board, then the block**. It loads into the cartridge already attached, so a light board is promoted if the block says armed and a full board **stays full** — correct, since the full variant renders a both-modes-off state exactly as the light one does. |
+
+So "it never switches back" is the rule for **writes**, and the first draft's comments that stated
+it unconditionally are corrected in `mmc5.rs`, `board.rs` and here. Both paths are tested, in both
+directions.
+
+**Why the block is the same length in both variants.** The split's three registers ride in the
+spare bits of the `i32` that carries `$5104`'s two: that register only ever holds 0 to 3, so bits
+31-8 have been written as zero by every build there has ever been, and a light board stores the
+word whole with `04731c86`'s own code. MF-LEG-2's shape — three bytes after the sound block — makes
+the block three bytes longer than the default build's, and then **no existing state loads**, which
+is what the owner's point 5 forbids. `mf_leg_3_each_split_register_survives_a_round_trip_on_its_own`
+puts each of the three through a frame, a save and a load on its own, so the packing cannot have
+crossed two fields and passed.
+
+#### Arming mid-frame: exactly one line, and which one
+
+The brief's point 4. The light board does not keep the split's column, its row, mode 1's `ExRAM`
+index or the run of pattern fetches that finds the start of a line's fetch sequence, so a board
+that switches **inside** a line starts all four at zero. What that costs:
+
+* `ex_attr_index` is re-derived by the **next nametable fetch** — within one tile, which is what
+  its own comment promises;
+* `chr_reads_since_nt` starts at 0, so no row start is recognised until the **sixteen sprite
+  pattern fetches of dots 257-320** push it past four and the nametable fetch at **dot 321** — the
+  first of the next line's sequence — reloads the row and puts the column back before 0;
+* so the tiles of the arming line fetched after the write are drawn with a column counter
+  restarted at 0 and a row of 0, and **every line from the next one on is exact**. That is the
+  "a line re-derives it" of `split_column` and `chr_reads_since_nt`, met exactly.
+
+`mf_leg_3_arming_mid_frame_costs_one_line_and_no_more` measures it with three cores on the same
+set-up — one that never arms, one that arms before the frame, and one whose **own 6502 program**
+arms it, polling `$5204` with the IRQ line down and storing `$5200` the moment the scanline
+counter reaches `$5203` = 60. The frame it produces:
+
+| lines | what they are |
+| --: | --- |
+| 0-59 | the never-armed picture, **to the pixel** |
+| **60** | the arming line, and the only line that is neither picture |
+| 61-239 | the armed-before-the-frame picture, **to the pixel** |
+
+The test finds that line from the picture rather than assuming it and then asserts the three
+statements, so a scanline detection that moved by a line would fail on the figure and not on the
+structure. Line 60 rather than 59 is the flag's own line plus the few CPU cycles the poll loop and
+the store take.
+
+**And the case a real game produces is better than the worst case this test takes.** An MMC5 game
+arming the split from a scanline IRQ handler writes in **HBlank** — dots 257 to 320, after the
+line's own fetches and before the dot-321 reload — and then not even that line is wrong. The test
+polls instead, so the write lands inside the visible dots: the one line is the bound, not the
+expectation.
+
+| check at this step | result |
+| --- | --- |
+| fmt, and clippy `--all-targets -- -D warnings` in the four configurations | clean |
+| `cargo test --release -p zax-nes -p zax-harness`, `default` | **1 167 / 0** |
+| the same, `--features zax-nes/board-mmc5-exattr-split` | **1 206 / 0** (+16) |
+| the same, `--features zax-nes/parked-boards` | **1 267 / 0** (+16) |
 - [ ] 3/6 golden-core and the suites with both ROM roots
 - [ ] 4/6 the callgrind campaign
 - [ ] 5/6 the documentation and the decision

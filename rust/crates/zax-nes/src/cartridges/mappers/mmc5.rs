@@ -873,9 +873,15 @@ impl Mapper for Mmc5 {
 // set, and both writes go through this board: until one of them arrives the cartridge holds
 // [`super::super::board::Board::Mmc5`], whose code is `04731c86`'s to the instruction, and the
 // write replaces it with [`super::super::board::Board::Mmc5Ext`] — this board — carrying every
-// register, memory and counter across. It never switches back: [`Mmc5Ext`] is correct with both
-// modes off, which is what `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode`
-// pins.
+// register, memory and counter across. **No write ever switches back**: [`Mmc5Ext`] is correct
+// with both modes off, which is what
+// `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode` pins by running the
+// same twenty frames through both boards and comparing every pixel. Three things do move the
+// variant, and only three: a reset (back to the light board, as a power-on is), a **savestate**
+// load (`NesCore::restore_state` builds a new cartridge, so the variant is a pure function of the
+// block — which is what makes rewind and run-ahead deterministic) and a **core-state** restore
+// (rewind's own path, which loads into the attached cartridge: a light board is promoted if the
+// block says a mode is armed, and a full board stays full).
 //
 // **The three registers of a board that has not switched.** `$5201` and `$5202` say nothing
 // until the split is enabled, and `$5200`'s low bits say nothing until its own bit 7 is set —
@@ -1494,10 +1500,15 @@ impl Mapper for Mmc5Ext {
     ///
     /// A state written by the **light** variant has zeros above bit 7, so this unpacks the three
     /// registers to 0 — which is the light board's own state, since a write to any of them is
-    /// what would have armed this board (see [`Mmc5Ext::write_arms_substitution`]). A board that
-    /// has switched does **not** switch back for such a state: both modes off is a state this
-    /// board renders exactly as the light one does, which
+    /// what would have armed this board (see [`Mmc5Ext::write_arms_substitution`]). This board
+    /// does **not** switch back for such a state: both modes off is a state it renders exactly as
+    /// the light one does, which
     /// `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode` pins.
+    ///
+    /// Reached only through `NesCore::restore_core_state` — rewind's and run-ahead's path, which
+    /// loads into the cartridge already attached (REQ-LOOP-067). A **savestate** load builds a new
+    /// cartridge, so it always starts on the light board and `Board::load_registers` promotes it
+    /// from the block.
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.base.load_registers(reader)?;
         let packed = self.base.ex_ram_mode;

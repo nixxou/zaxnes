@@ -150,8 +150,9 @@ pub enum Board {
     /// A cartridge is created on [`Board::Mmc5`] and stays there until a CPU write arms one of
     /// the two modes, at which point [`Board::intercept_cpu_write`]'s MMC5 arm replaces the
     /// value with this one, every register and memory carried across (see
-    /// [`Mmc5Ext::write_arms_substitution`]). It never goes back, except through a reset, which
-    /// starts on the light variant as a power-on does.
+    /// [`Mmc5Ext::write_arms_substitution`]). **No write ever takes it back**; a reset does, which
+    /// starts on the light variant as a power-on does, and so does a state whose block says
+    /// neither mode is armed — see [`Board::load_registers`].
     ///
     /// **Boxed**, and the box is the point. `Board`'s largest variant is [`Board::Mmc5`] and the
     /// enum's tag lives in a niche inside it (the note above); a second variant holding a second
@@ -253,6 +254,15 @@ impl Mapper for Board {
     /// and hand it the variant it belongs to. A state written by a build of **any** age therefore
     /// loads, packs' idle savestates included, which is what the owner's point 5 asks for.
     ///
+    /// **Which way the variant can move here depends on which state path called.** A savestate
+    /// load (`NesCore::restore_state`) builds a **new** cartridge from the ROM, so the board
+    /// arrives light and the block alone decides — the variant is a pure function of the state,
+    /// which is what makes rewind and run-ahead deterministic. A core-state restore
+    /// (`NesCore::restore_core_state`, rewind's and run-ahead's own path, REQ-LOOP-067) loads
+    /// into the cartridge already attached, so a light board is promoted here and a full board
+    /// stays full — correctly, the full variant rendering a both-modes-off state exactly as the
+    /// light one does.
+    ///
     /// The test is **after** the dispatch and not inside the MMC5's arm, where
     /// [`Board::intercept_cpu_write`]'s is: this function runs once per state load — a rewind
     /// sample or a run-ahead frame — and one compare there is not a figure, where the write path
@@ -270,8 +280,9 @@ impl Mapper for Board {
     }
 
     /// **The third place the MMC5's variant can change** (lot MF-LEG-3), and the only one that
-    /// goes back: a reset starts on the light variant exactly as a power-on does, so a game that
-    /// had armed a mode has to arm it again — as it has to write every other register again.
+    /// takes it back unconditionally: a reset starts on the light variant exactly as a power-on
+    /// does, so a game that had armed a mode has to arm it again — as it has to write every other
+    /// register again.
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         dispatch!(self, b => b.reset(memory));
         #[cfg(feature = "board-mmc5-exattr-split")]
