@@ -10,8 +10,6 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
-**Update 2026-11-09 (owner's decision):** `board-mmc5-exattr-split` is **in `default`** and no longer in `parked-boards`. The owner waived the +0.02 % rule for this feature: under 1 % for a mapper as important as the MMC5 is justified (worst ROM `metroid` +0.101 %, `mmc5` +2.522 %). The paragraphs and rows below keep the history as it was written at MF-LEG-2; three features are now parked.
-
 **Four features are parked**: `board-vs-system`, the Nintendo VS. System (MF-VS step 7);
 `board-292`, *Dragon Fighter*'s BMW8544 (MF-UNL-12 step 6); `board-143-open-bus`, mapper 143's
 two open-bus bits (**MF-FIX step 9**); and `board-mmc5-exattr-split`, the MMC5's extended
