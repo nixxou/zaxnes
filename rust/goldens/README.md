@@ -4,6 +4,8 @@ Produced on Windows x64 from the C# implementation at tag `v0.2.0`. They contain
 
 **Audio digests, since AMD-054 (lot RU-3a).** The `audio_i16_sha256_samples` column of `core-goldens.jsonl` no longer holds the 0.2.0 values: REQ-CORE-073 as amended replaces the linear mix by the non-linear one, so every ROM that makes a sound hashes differently. The column was regenerated with `zax-harness golden-core`; **174 of the 291 rows changed and no other field of any row did** — pixels, tile records, cycles, blargg status and text are still the 0.2.0 values, which is what makes the change checkable. The 117 rows left alone are the ROMs that stay silent over 1200 frames.
 
+**Cycles, pictures and audio of 51 rows, since lots MF-4a, MF-4b and MF-4d (regenerated 2026-11-09).** The core's timing fixes moved 51 rows with `zax-harness golden-core`, and they had not been regenerated: MF-4a (DMA timing and the PAL APU frame sequencer) moved 50 of them, among them both `sprdma_and_dmc_dma` rows, whose blargg status goes from **Failed to Passed**; MF-4b (the DMC DMA during a `$2007` read) one more, `dmc_dma_during_read4/double_2007_read`; and MF-4d (a fetching PPU's `$2007` read and `$2004` write) the picture of `other/8bitpeoples_-_deadline_console_invitro` from frame 600. No other blargg status or text changed, and the other 240 rows are byte-identical. Each lot was found by testing every lot-final commit between `a2d6d479` and `1c2b4639`.
+
 ## core-goldens.jsonl
 
 One JSON object per line, one line per `.nes` file of the public test-ROM set (`rust/test-roms/`, 291 files), sorted by path (ordinal).
