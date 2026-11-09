@@ -12,6 +12,8 @@ mod error;
 pub mod fceux_compare;
 #[cfg(feature = "fceux-core")]
 pub mod fceux_run;
+#[cfg(feature = "fceux-core")]
+pub mod fceux_tiles;
 pub mod golden_core;
 mod json_text;
 pub mod lua_api;

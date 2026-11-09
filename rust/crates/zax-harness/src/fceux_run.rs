@@ -185,7 +185,10 @@ pub fn run_isolated(roms: &Path, out_path: &Path, frames: u32) -> Result<Summary
 /// when started from a shell, but hung for ever as a child of this process — Windows' fault
 /// reporting waiting on something that is never going to answer. Without this, one bad ROM stalls
 /// a 291-ROM sweep instead of costing it one row.
-fn wait_or_kill(mut child: std::process::Child, budget: Duration) -> std::io::Result<ExitStatus> {
+pub(crate) fn wait_or_kill(
+    mut child: std::process::Child,
+    budget: Duration,
+) -> std::io::Result<ExitStatus> {
     let deadline = Instant::now() + budget;
     loop {
         if let Some(status) = child.try_wait()? {
