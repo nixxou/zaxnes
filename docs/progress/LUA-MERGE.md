@@ -28,7 +28,7 @@ Branch `dev`, from `ab68ee48`. Worktree `wt-rust`. No push, no rebase, no amend,
       Anything over: find the cause, and if it is editor-only work done every frame, put it
       behind editor mode or an option **off by default** — never remove a feature. Plus the app's
       main-thread frame time, 2D and 3D, before and after.
-- [ ] **5. Final pass.** fmt; clippy `-D warnings` on every crate touched; `cargo test --release`
+- [x] **5. Final pass.** fmt; clippy `-D warnings` on every crate touched; `cargo test --release`
       on the whole workspace that builds here with `--include-ignored --no-fail-fast` and both
       ROM variables; golden-core over the 98 originals byte-identical to `ab68ee48`'s; the
       Android and PortMaster feature sets `cargo check`.
@@ -416,3 +416,115 @@ per process. On the Lua-bearing stages a single pair of runs cannot resolve anyt
 ±0.04 % on `total`; take a mean of several, and prefer the `core` row, which is exact. This says
 nothing about earlier lots, whose figures on this instrument were one to two orders of magnitude
 above this floor.
+
+### Step 5 — the final pass
+
+| check | result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --release -p zax-app -p zax-harness -p zax-nes -p zax-profiles -p zax-scripting -p zax-settings --all-targets --features zax-app/bundled -- -D warnings` | clean, **after one fix** (below); no `#[allow]` added |
+| `cargo test --release --workspace --features zax-app/bundled --no-fail-fast -- --include-ignored` | **3 300 passed, 0 failed, 0 ignored** over 189 binaries, 7 filtered out (the two groups below) |
+| golden-core over the 98 originals, 1 200 frames | `f79e7df842c3ee43e7d9b67861a927b5`, **byte-identical** to `ab68ee48`'s (`cmp`, not only the digest) |
+| `cargo check -p zax-app --no-default-features --features android` | clean |
+| `cargo check -p zax-app --no-default-features --features firmware-sdl` (PortMaster) | clean |
+| `cargo check -p zax-android --target aarch64-linux-android` | **not checkable here**, as AUDIO-1 recorded: `sdl2-sys`'s `cc` build wants the NDK's `clang`, which this machine has not got. The target itself is installed; the failure is in the C build, not in our code |
+
+#### The one clippy failure, and the proof it was really checked
+
+`run` in `zax-harness/src/main.rs` reached **102 lines of 100 allowed**: `dev` added the
+`test-roms` and `vs` arms to that `match` and `lua-editor` added `classify`, and together they went
+over — the same shape as `EmulationHost::new` at step 3, and fixed the same way. The `help` arm's
+body became a named `print_help()`; the arm is now one call. No `#[allow]`, as AUDIO-2's norm asks.
+
+Worth recording because the run was suspiciously fast: clippy reported *0.26 s* for the six crates
+and 0.77 s for a `touch`ed `zax-app`. That is rustc's incremental cache (cargo re-invokes on mtime,
+rustc then finds its queries green on identical content), not a skipped check — shown by restoring
+the pre-fix `main.rs` and re-running, which fails with
+`error: this function has too many lines (102/100)`. The fix was then put back and the suite re-run.
+
+#### A third asset root the work order does not name
+
+The first whole-workspace run, with only `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS`, came out **69
+failed** — every one of them `ZAXNES_PROFILES is not set`. `--include-ignored` over the *whole*
+workspace wakes the asset-corpus tests of `zax-profiles`, `zax-scripting` and `zax-engine3d` (about
+ninety tests over the 101 built-in profiles), which the two ROM variables do not feed. The run that
+counts therefore adds `ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral` — the folder that holds
+`profiles/` and `profiles.json`, per `rust/LOCAL-CHECKS.md`. Whoever repeats this needs all three.
+
+#### The 7 filtered out, and why neither group is a failure of this lot
+
+**Six: `three_d_sen_real_install_tests`** (`zax-profiles`) need `ZAXNES_3DSEN_INSTALL`, a 3dSen PC
+installation folder. The clean side has none and must not have one, so these six cannot run here at
+all — they are not gated on an asset root this role may hold. They failed with exactly that message
+and nothing else.
+
+**One: `ro_3_write_the_option_tree_golden`** is the only golden **regenerator** in the workspace,
+`#[ignore]`d precisely so that it does not run — and `--include-ignored` runs it. It rewrites
+`goldens/handheld-option-tree.txt` while `ro_3_the_option_tree_matches_its_golden`, in the same
+test binary and therefore on the same thread pool, reads it: the reader saw an **empty** file
+(`left: ""`). It is a race the flag creates, not a moved layout, and it is not this lot's: the
+regenerator is identical at `ab68ee48`, so the same command would fail the same way there. Two
+things settle it rather than argue it — the reader **passes alone** (`--test handheld_tree_tests`:
+5 passed, 1 ignored), and `git status` *after* the regenerator ran shows the golden
+**unmodified**, so the tree the console draws is byte-for-byte the committed golden. Which also
+confirms step 2's deliberate choice: the console option tree still has no `ui.editor_mode` row.
+
+#### The three core-suite failures AUDIO-2 reported are gone
+
+AUDIO-2's note flagged three tests failing already at `1c2b4639`
+(`golden_core_tests::golden_core_reproduces_the_golden_rows` and both `ppu_golden_tests`) and left
+them to whoever owns the core. `ab68ee48` is that answer — it regenerated the 51 rows — and all
+three **pass** in this run. They did not pass vacuously: `rust/test-roms` is present in the tree
+tested (70 entries), which is what those two tests read directly, ignoring `ZAXNES_TEST_ROMS`.
+
+#### golden-core, and a shortcut that is sound
+
+The 98-ROM digest came out `f79e7df842c3ee43e7d9b67861a927b5` — 98 rows, 145 334 bytes — which is
+the figure AUDIO-2 recorded, and `cmp` says the file is byte-identical to the one `ab68ee48`'s own
+binary wrote. The comparison was cheap because the two runs are on different platforms and still
+agree: `ab68ee48`'s output came from step 4's clean Linux build (in WSL) and this tree's from the
+Windows release binary, and the md5 the harness prints is the md5 of the file, the same on both. So
+the digest is a platform-independent handle on this check, not just a local one.
+
+#### The owner's rules, re-checked structurally
+
+`git diff ab68ee48 HEAD` is **empty** over `zax-engine3d`, `zax-render`, `zax-platform`,
+`zax-goldens`, `zax-achievements` and `zax-android`. What the other crates gained:
+
+| crate | what `lua-editor` brought, measured against `ab68ee48` |
+| --- | --- |
+| `zax-nes` | **only the movie readers**: `movie/fm2.rs`, `movie/fcm.rs`, 41 lines of `movie.rs` and one test file — 828 added lines, 0 removed, and no core file touched |
+| `zax-profiles` | `description.rs` (617 lines moved out of `zax-harness`) and one `pub mod` line |
+| `zax-scripting` | `macros.rs`, one `pub mod` line, and three lines of `load_scripts` that pass the source through `macros::expand` first |
+| `zax-settings` | `ui.editor_mode`: one catalogue line, its 15-line descriptor, two test lines |
+
+So the 3D engine, the renderer and the profile decoder are byte-identical to `ab68ee48`'s, which is
+what says **SMB3, Zelda II and the widescreen packs cannot have moved**; golden-core says the core
+did not; and the one change on the scripted path is the `expand` call step 4 showed to be a
+`Cow::Borrowed` no-op on packs without a `#zax` block.
+
+Risk 3 of the plan — the editor is in `zax-app` with no Cargo feature, so its MCP server, pens and
+timeline compile into the Android and PortMaster builds too — is left where the branch put it, and
+it is answered rather than removed: both reduced feature sets `cargo check` clean, and step 4
+measured the per-frame cost at zero with editor mode off, which is its default.
+
+G: was at 19 GB free at the end of the step, above the 5 GB floor throughout.
+
+## Summary
+
+* `dev` carries the editor mode: `.fm2` and `.fcm` movies, the movie bar and its timeline, the
+  movie explorer, script reload, the MCP server (`--mcp`), the pens, the `editor/` folder, and
+  `zax-harness classify` / `profile-build`; the profile descriptions now live in `zax-profiles`.
+* `dev`'s own features are intact: the AUDIO-1/AUDIO-2 outputs and `audio.classic_output`, the RO-1
+  options layout (which gained one row, `ui.editor_mode`, in the Interface tab), the ~140 mappers
+  and their Cargo features, the MF-4 timing and version 0.5.0.
+* The emulation core did not change: golden-core byte-identical to `ab68ee48`'s, and `zax-nes`
+  gained the movie readers and nothing else.
+* Performance within tolerance everywhere, with `core`, `ppu` and `apu` at **+0 Ir exactly** on all
+  five level-2 games and the app's 3D frame time agreeing to the hundredth of a millisecond.
+  Nothing had to be put behind editor mode or an option.
+* Movie synchronisation was not touched and not debugged — the owner's decision of 2026-11-09. No
+  test had to be `#[ignore]`d for it: every movie test in the repository passes on `dev`'s core.
+* 3 300 tests pass in release over the whole workspace with nothing skipped. Open, and neither
+  this lot's: the six `three_d_sen_real_install_tests` cannot run on the clean side, and the editor
+  is still not behind a Cargo feature (EDITOR-1's design note planned `zax-editor`).

@@ -110,26 +110,35 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             Ok(())
         }
         [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
-            // The `vs` usage joins the list only when the command exists.
-            #[cfg(feature = "vs-system")]
-            let vs_usage = format!("\n\n{}", vs::USAGE);
-            #[cfg(not(feature = "vs-system"))]
-            let vs_usage = String::new();
-            println!(
-                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
-                test_roms::USAGE,
-                meshes::USAGE,
-                lua_api::USAGE,
-                render::USAGE,
-                compare::USAGE,
-                bench_core::USAGE,
-                profile_tool::USAGE,
-                classify::USAGE
-            );
+            print_help();
             Ok(())
         }
         _ => Err(HarnessError::Usage(USAGE.to_owned())),
     }
+}
+
+/// The whole help: the one-line usage of every subcommand, then each one's own paragraph.
+///
+/// Apart from `run` (LUA-MERGE: both sides of the merge added subcommands to it — `test-roms`
+/// and `vs` on one side, `classify` on the other — and together they took it past the hundred
+/// lines clippy allows).
+fn print_help() {
+    // The `vs` usage joins the list only when the command exists.
+    #[cfg(feature = "vs-system")]
+    let vs_usage = format!("\n\n{}", vs::USAGE);
+    #[cfg(not(feature = "vs-system"))]
+    let vs_usage = String::new();
+    println!(
+        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
+        test_roms::USAGE,
+        meshes::USAGE,
+        lua_api::USAGE,
+        render::USAGE,
+        compare::USAGE,
+        bench_core::USAGE,
+        profile_tool::USAGE,
+        classify::USAGE
+    );
 }
 
 fn main() -> ExitCode {
