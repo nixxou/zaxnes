@@ -69,11 +69,10 @@ public sealed class HashProfileRewriteTests
     // REQ-PROF-084: DQ3_DW3 and Final_Fantasy_USA keep manifest strings pending for want of a
     // known raw tile, and the rewrite is identical in both cases.
     //
-    // The note of REQ-PROF-084 says 173 and 67. Measured here: 173 and 66. One manifest string
-    // of Final_Fantasy_USA is the **mirror** of a tile its 1.x counterpart carries, and step 2
-    // of REQ-PROF-078 — which is normative — resolves the four mirrorings of every window. With
-    // the un-flipped tiles alone the count is exactly 67, which is what the note measured; the
-    // rule the amendment prescribes gives 66. See Q-178 §3.
+    // 173 and 66, which is what REQ-PROF-084 states since AMD-062 v1.2b. One manifest string of
+    // Final_Fantasy_USA is the **mirror** of a tile its 1.x counterpart carries, and step 2 of
+    // REQ-PROF-078 resolves the four mirrorings of every window: with the un-flipped tiles alone
+    // the count would be 67, the figure the note of v1.2 carried. Q-178 §3 is closed on 66.
     [HashAssetFact]
     public void The_two_unpairable_profiles_are_rewritten_identically()
     {

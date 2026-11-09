@@ -279,14 +279,22 @@ tuile visible est toujours résolue avant la reconnaissance de sa frame. REQ-ARC
 état initial, entrées et run-ahead donnent les mêmes frames.
 - Critère d'acceptation (auto) : cœur piloté par le harnais avec une ROM synthétique à CHR-RAM ;
   le profil 3dh a deux tuiles absentes de la ROM ; à la frame 10 le test écrit l'une en CHR-RAM
-  (alignée, retournée verticalement), à la frame 20 l'autre apparaît seulement à l'écran
-  (sprite) → la première est résolue dès la frame 10, la seconde à la frame 20, avant la
-  reconnaissance de cette frame ; deux exécutions donnent les mêmes captures ; un rollback de 5
-  frames après la frame 20 ne remet aucune des deux en attente.
-- Critère d'acceptation (ROM, facultatif) : `Mega Man 2.bytes` avec `Mega Man 2 (USA).nes`, après
-  l'intro et l'entrée dans un niveau : des tuiles absentes de la ROM sont résolues (compte
-  journalisé) ; sur une frame capturée par `--dump-meshes`, toute tuile dessinée dont le pattern
-  n'a plus de tuile en attente a le même maillage qu'avec `assets-neutral/profiles/Mega Man 2.bytes`.
+  (alignée, retournée verticalement), à la frame 20 il écrit l'autre et l'affiche en sprite → la
+  première est résolue dès la frame 10 et pas avant, la seconde à la frame 20, avant la
+  reconnaissance de cette frame, et son pattern est reconstruit avant le rendu ; deux exécutions
+  donnent les mêmes captures ; un rollback de 5 frames après la frame 20 ne remet aucune des deux
+  en attente.
+- Critère d'acceptation (auto) : chemin « écran » seul — moteur sans source de CHR-RAM, la tuile
+  n'arrive que par les tuiles de la frame → résolue avant la reconnaissance de cette frame, et
+  son pattern est reconnu dans cette frame. (Sur une cartouche dont toute la CHR est de la RAM,
+  une tuile visible est aussi un bloc aligné de la CHR-RAM : les deux chemins se testent donc
+  séparément, Q-178 §1.)
+- Critère d'acceptation (ROM, facultatif) : `Mega Man 2.bytes` avec `Mega Man 2 (USA).nes` : 5 353
+  chaînes résolues au chargement ; après l'intro et l'entrée dans un niveau, **toute tuile
+  dessinée** est résolue (les 144 chaînes restantes ne correspondent à aucune tuile de ce dump et
+  restent en attente sans effet visible, Q-178 §2) ; sur une frame capturée par `--dump-meshes`,
+  toute tuile dessinée dont le pattern n'a plus de tuile en attente a le même maillage qu'avec
+  `assets-neutral/profiles/Mega Man 2.bytes`.
 
 **REQ-PROF-081** — Tuile en attente. Jusqu'à sa résolution, une tuile en attente :
 - n'est égale à aucune tuile de l'écran (elle ne peut pas servir à reconnaître un pattern) ;
@@ -358,7 +366,7 @@ rester un 3dh. L'écrivain canonique 3dh :
 - Critère d'acceptation (auto) : décoder puis réécrire chacun des 101 fichiers de
   `assets-neutral/profiles-2.1` redonne un fichier identique octet pour octet (101 sur 101), sans
   ROM (aucune tuile résolue) et avec les ROMs synthétiques de REQ-PROF-078 pour les 99 profils
-  appariables (toutes tuiles résolues) ; pour `DQ3_DW3` et `Final_Fantasy_USA`, 173 et 67 chaînes
+  appariables (toutes tuiles résolues) ; pour `DQ3_DW3` et `Final_Fantasy_USA`, 173 et 66 chaînes (une 67e est le miroir d'une tuile connue, résolue par l'un des quatre retournements, Q-178 §3)
   du manifeste restent en attente faute de tuile brute connue, et la réécriture est identique dans
   les deux cas.
 - Notes : l'export d'un 3dn (REQ-PROF-052) reste un 3dn. Écrire un 3dh à partir d'un 3dn n'est
@@ -459,3 +467,5 @@ de bord sur l'émulation et sur son déterminisme.
 - 1.2a (2026-11-09) : relecture R2c. §1 repris mot pour mot de la proposition de N-62-7 (97 / 98
   profils, réglages de quatre profils) ; critère de REQ-CORE-123 en mapper 0 (N-62-8) ; index
   0-based au §9 (N-62-9).
+- 1.2b (2026-11-09) : réponse R0 à Q-178 (lot V2-32) : critères de REQ-PROF-080 réécrits (deux
+  chemins testés séparément, 144 chaînes de Mega Man 2 jamais affichées) ; 66 au lieu de 67.
