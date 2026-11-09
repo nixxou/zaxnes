@@ -3,8 +3,12 @@
 // `chr_address`'s choice between the two CHR register sets is Mesen's `chrA` expression
 // (`Core/NES/Mappers/Nintendo/MMC5.h`), read back as "use set B"; see THIRD-PARTY-NOTICES.md.
 
+#[cfg(feature = "board-mmc5-exattr-split")]
+use super::CpuReadWindows;
 use super::{windows_for, Mapper};
 use crate::apu::Mmc5Audio;
+#[cfg(feature = "board-mmc5-exattr-split")]
+use crate::cartridges::ChrView;
 use crate::cartridges::{wrap_offset, BankWindows, CartridgeMemory, ChrFetch};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NesCore;
@@ -13,13 +17,16 @@ use crate::NesCore;
 /// modes with two register sets (sprites and background), `ExRAM`, fill mode, a scanline
 /// IRQ and a hardware multiplier (nesdev, "MMC5").
 ///
-/// **Extended attribute mode (`$5104` = %01) and the vertical split (`$5200`-`$5202`) are
-/// behind the feature `board-mmc5-exattr-split`, off by default** (lot MF-LEG-2, the owner's
-/// decision taken before any measurement). With the feature off this board is the one report
-/// entry MMC5-1 describes — the entry's verdict DIFFERS, five emulators to one and against the
-/// page — and every `#[cfg]` below is absent, so *Castlevania III*, which uses neither, runs
-/// `ca1517dc`'s code to the instruction. See [`Mmc5::background_substitutes`] for the one place
-/// a fetch pays for them, and `docs/review/BOARD-FEATURES.md` for the row and the command.
+/// **Extended attribute mode (`$5104` = %01) and the vertical split (`$5200`-`$5202`) are not
+/// here**: a game that arms one of them stops running this board and runs [`Mmc5Ext`] instead,
+/// from the write that arms it (lot MF-LEG-3, the owner's decision of 2026-11-09; the banner
+/// above that struct has the whole story). So **this** board is the one report entry MMC5-1
+/// describes — the entry's verdict DIFFERS, five emulators to one and against the page — and it
+/// is `04731c86`'s code to the instruction, feature on or off, which is what *Castlevania III*
+/// runs: it uses neither mode, and lot MF-LEG-2 had measured it at **+2.992 %** for them.
+///
+/// With the feature **off** [`Mmc5Ext`] does not exist, the `Board` variant that reaches it is
+/// not compiled, and `$5104` mode %01 renders exactly as mode %00 does.
 ///
 /// The **expansion sound** ($5000-$5015) is emulated as REQ-CORE-075 as amended by AMD-054
 /// requires: two square channels, a PCM channel in write mode and the $5010 / $5015 registers,
@@ -56,103 +63,6 @@ pub struct Mmc5 {
     /// that byte reads the enum tag, which costs every other board 1-2 instructions per CHR
     /// fetch — see `docs/progress/MF-2.md`, step 0.
     background_uses_set_b: bool,
-    /// Whether a **background** fetch has to consult [`Mmc5::ex_ram`] at all: the single test
-    /// that extended attribute mode and the split cost the board's fetch path, derived from
-    /// `in_frame`, `ex_ram_mode` and `$5200` bit 7 by
-    /// [`Mmc5::refresh_background_substitutes`].
-    ///
-    /// It exists for the reason [`Mmc5::background_uses_set_b`] does, and it is declared
-    /// **immediately after it** for the same reason: the trailing run of `bool`s
-    /// (`irq_enabled`, `irq_pending`, `irq_line`, `in_frame`, `need_in_frame`) is left exactly
-    /// as `ca1517dc` had it, so `in_frame` keeps the niche rustc fills with
-    /// [`super::super::board::Board`]'s discriminant and `chr_address` still reads no byte
-    /// holding the enum tag — the trap `docs/progress/MF-2.md` step 0 priced at 1-2
-    /// instructions per CHR fetch **for every other board**.
-    ///
-    /// Not in the savestate: it is derived from registers the block already carries, and
-    /// [`Mapper::load_registers`] recomputes it.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    background_substitutes: bool,
-    /// `$5200`: bit 7 enables the vertical split, bit 6 picks the side (0 left, 1 right) and
-    /// bits 4-0 are the threshold tile count (nesdev, "MMC5"; `ESxW WWWW`).
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_control: u8,
-    /// `$5201`: "all eight bits specify the vertical scroll value to use in split region".
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_scroll: u8,
-    /// `$5202`: "all eight bits select a 4 KB CHR bank", the one the whole split region's
-    /// patterns come from.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_bank: u8,
-    /// The low ten bits of the last background **nametable** fetch — the tile's offset in
-    /// whichever nametable, which is the index of its byte in `ExRAM`: "each byte of the MMC5's
-    /// internal extended RAM is used to enhance the background tile at the corresponding
-    /// nametable address".
-    ///
-    /// Latched here because the *attribute* address does not carry it (it keeps coarse Y bits
-    /// 4-2 and coarse X bits 4-2 only), and the attribute fetch is where mode 1 has to answer.
-    /// Not in the savestate: it is re-derived by the next nametable fetch, i.e. within one tile.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    ex_attr_index: u16,
-    /// The split's own tile counter, 5 bits as the hardware's threshold field is: the screen
-    /// tile column of the tile being fetched. Reset at the dot where the PPU starts a line's
-    /// fetch sequence and pre-incremented by each counted
-    /// nametable fetch, so the first tile of a line is column 0. Reset by
-    /// [`Mmc5::reload_split_row`].
-    ///
-    /// Not in the savestate, for the reason [`Mmc5::nt_read_counter`] is not: a line re-derives
-    /// it.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_column: u8,
-    /// Whether the tile being fetched is in the split region, decided by the counter above at
-    /// the nametable fetch and read again by the attribute and the two pattern fetches of the
-    /// same tile (puNES's `split_in_reg`, Nestopia's `spliter.inside`).
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_in_region: bool,
-    /// `ExRAM` index of the split tile being fetched, `((split_row & 0xF8) << 2) | column` —
-    /// puNES `mapper_005.c:477`, Nestopia `NstBoardMmc5.cpp:860`, Mesen `MMC5.h:502`, the three
-    /// agreeing to the expression.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_tile: u16,
-    /// The split region's current pixel row, 0 to 239: `$5201` plus the line, the region
-    /// scrolling independently of the rest of the screen. See
-    /// [`Mmc5::reload_split_row`] for the one line of it this build had to choose.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_row: u8,
-    /// Pattern fetches ($0000-$1FFF) seen since the last nametable-space read, capped at
-    /// [`Mmc5::CHR_READS_BEFORE_ROW_START`]: how the board finds, **on its own bus**, the dot
-    /// where the PPU begins a line's fetch sequence.
-    ///
-    /// Inside a tile group the PPU reads the nametable byte, the attribute byte and the two
-    /// pattern planes, so exactly **two** pattern fetches separate one nametable-space read from
-    /// the next. Between the last nametable fetch of a line and the first of the next line's
-    /// prefetch lie the **sixteen** sprite pattern fetches of dots 257-320. So a nametable fetch
-    /// that follows four or more pattern fetches is the first of a line's sequence, and nothing
-    /// else is.
-    ///
-    /// Counting it here rather than taking a hook from the PPU is not a stylistic choice: a
-    /// `dot == 321` test inside `Ppu2C02::run_rendering_dot` moved **+5.4 M to +13.6 M
-    /// instructions onto `Ppu2C02::run_dots` for every ROM of PR-1's set** — the function the
-    /// per-dot pipeline inlines into — by changing the inliner's mind, which is `docs/progress/
-    /// MF-2.md` step 0's trap one function further out. See `docs/progress/MF-LEG-2.md` step 4.
-    ///
-    /// Not in the savestate: a line re-derives it, as it does `nt_read_counter`.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    chr_reads_since_nt: u8,
-    /// Whether the per-tile state above was positioned by the **tile capture** rather than by a
-    /// rendered fetch (see [`Mmc5::position_captured_tile`]).
-    ///
-    /// It changes one thing: the split's pattern fetch keeps the PPU's own low three address
-    /// bits instead of substituting the region's fine vertical scroll. The capture reads a
-    /// whole 8x8 tile — its eight rows at once, through
-    /// `Ppu2C02::read_pattern_planes` — and substituting one row number into all eight would
-    /// collapse the tile to a single line. The record it emits is therefore the split's tile as
-    /// a tile, which is what a 3D block is; the sub-tile offset of a fine-scrolled region is the
-    /// one thing the 3D view does not carry, and `docs/progress/MF-LEG-2.md` step 2 says so.
-    ///
-    /// Not in the savestate: the capture sets it and puts it back within one line.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    split_capture: bool,
     irq_target: i32,
     irq_enabled: bool,
     irq_pending: bool,
@@ -202,14 +112,6 @@ impl Mmc5 {
     /// CPU cycles pass without a PPU read having occurred").
     const PPU_IDLE_CYCLES: u8 = 3;
 
-    /// Pattern fetches that must precede a nametable fetch for it to be the first of a line's
-    /// fetch sequence: two separate the nametable-space reads of one tile group, and sixteen
-    /// (eight sprites, two planes) separate the last group of a line from the first of the next
-    /// line's prefetch. Four is the midpoint and any value from three to sixteen gives the same
-    /// answer. See [`Mmc5::chr_reads_since_nt`].
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    const CHR_READS_BEFORE_ROW_START: u8 = 4;
-
     /// Repeats of one nametable address that arm the detection: the counter is incremented by
     /// the second and the third of "three consecutive PPU reads from the same nametable
     /// address", so it reaches 2.
@@ -229,12 +131,12 @@ impl Mmc5 {
     pub(crate) const MAX_PRG_RAM_SIZE: usize = 64 * 1024;
 
     /// Whether this build has extended attribute mode and the vertical split, i.e. whether
-    /// `board-mmc5-exattr-split` is on (lot MF-LEG-2).
+    /// `board-mmc5-exattr-split` is on (lots MF-LEG-2 and MF-LEG-3).
     ///
     /// `pub` and in **every** build, so that one test can assert both sides of the owner's
     /// decision rather than two tests asserting one each: with it `false`, `$5200`-`$5202` are
-    /// ignored and `$5104` mode %01 renders exactly as mode %00 does, which is what report
-    /// entry MMC5-1's verdict DIFFERS describes.
+    /// ignored, `$5104` mode %01 renders exactly as mode %00 does and no write can ever bring
+    /// [`Mmc5Ext`] into being — which is what report entry MMC5-1's verdict DIFFERS describes.
     pub const EXATTR_SPLIT: bool = cfg!(feature = "board-mmc5-exattr-split");
 
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
@@ -258,28 +160,6 @@ impl Mmc5 {
             last_set_was_b: false,
             sprite_size16: false,
             background_uses_set_b: false,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            background_substitutes: false,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_control: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_scroll: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_bank: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            ex_attr_index: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_column: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_in_region: false,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_tile: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_row: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            chr_reads_since_nt: 0,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            split_capture: false,
             irq_target: 0,
             irq_enabled: false,
             irq_pending: false,
@@ -313,11 +193,7 @@ impl Mmc5 {
             0x5101 => self.chr_mode = v & 0x03,
             0x5102 => self.protect1 = v,
             0x5103 => self.protect2 = v,
-            0x5104 => {
-                self.ex_ram_mode = v & 0x03;
-                #[cfg(feature = "board-mmc5-exattr-split")]
-                self.refresh_background_substitutes();
-            }
+            0x5104 => self.ex_ram_mode = v & 0x03,
             0x5105 => self.nametable_mapping = v,
             0x5106 => self.fill_tile = value,
             0x5107 => self.fill_attribute = value & 0x03,
@@ -340,20 +216,6 @@ impl Mmc5 {
                 self.refresh_background_chr_set();
             }
             0x5130 => self.chr_upper = v & 0x03,
-            // The vertical split, nesdev ("MMC5"): "$5200: ESxW WWWW", "$5201: all eight bits
-            // specify the vertical scroll value to use in split region", "$5202: all eight bits
-            // select a 4 KB CHR bank". Nothing is derived here beyond the one `bool` the fetch
-            // path reads — the three fields are decoded where they are used, which is what keeps
-            // the write arms this small.
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            0x5200 => {
-                self.split_control = value;
-                self.refresh_background_substitutes();
-            }
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            0x5201 => self.split_scroll = value,
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            0x5202 => self.split_bank = value,
             0x5203 => self.irq_target = v,
             0x5204 => {
                 self.irq_enabled = value & 0x80 != 0;
@@ -428,45 +290,6 @@ impl Mmc5 {
             self.need_in_frame = false;
             self.in_frame = true;
             self.refresh_background_chr_set();
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            self.refresh_background_substitutes();
-        }
-
-        // The per-tile state of the two substituting modes, latched where the board already
-        // sees every read.
-        //
-        // `address != last_ppu_read_addr` leaves out the **two discarded nametable fetches** of
-        // dots 338 and 340, which repeat dot 337's address: they are not tiles, and counting
-        // them would put the split's column three ahead by the end of a line. It is the same
-        // test the repeat detection below makes.
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        if self.background_substitutes {
-            if address < 0x2000 {
-                // A pattern fetch: the run this counts is what finds the start of a line's
-                // fetch sequence (see `Mmc5::chr_reads_since_nt`).
-                self.chr_reads_since_nt = self
-                    .chr_reads_since_nt
-                    .saturating_add(1)
-                    .min(Self::CHR_READS_BEFORE_ROW_START);
-            } else {
-                if nametable_fetch && address != self.last_ppu_read_addr {
-                    if self.chr_reads_since_nt >= Self::CHR_READS_BEFORE_ROW_START
-                        && self.split_enabled()
-                    {
-                        self.reload_split_row();
-                    }
-
-                    // "Each byte of Expansion RAM is used to enhance the tile at the
-                    // corresponding address in every nametable": the tile's ten-bit offset,
-                    // which the attribute address that follows does not carry.
-                    self.ex_attr_index = address & 0x03FF;
-                    if self.split_enabled() {
-                        self.advance_split_column();
-                    }
-                }
-
-                self.chr_reads_since_nt = 0;
-            }
         }
 
         if self.nt_read_counter >= Self::NT_READS_TO_DETECT {
@@ -523,8 +346,6 @@ impl Mmc5 {
         self.in_frame = false;
         self.need_in_frame = false;
         self.refresh_background_chr_set();
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        self.refresh_background_substitutes();
     }
 
     /// Recomputes [`Mmc5::background_uses_set_b`] from the three inputs MR-5-1 names. Called
@@ -539,282 +360,7 @@ impl Mmc5 {
         self.background_uses_set_b = self.sprite_size16 && (self.in_frame || self.last_set_was_b);
     }
 
-    // ------------------------------------------------------------------------------------
-    // Extended attribute mode and the vertical split — feature `board-mmc5-exattr-split`
-    //
-    // nesdev ("MMC5"), the two features report entry MMC5-1 is about and lot MF-LEG-2
-    // implements. Both substitute data on the **background** fetch path and nowhere else:
-    // sprite patterns, `$2007` accesses and every CPU read are untouched ("CHR mode always
-    // applies to sprite pattern fetches").
-    //
-    // **Extended attribute mode, `$5104` = %01.** "Each byte of Expansion RAM is used to
-    // enhance the tile at the corresponding address in every nametable", as `AACC CCCC`:
-    // bits 7-6 are the palette of the whole 8x8 tile, replacing the attribute byte, and bits
-    // 5-0 pick a 4 KiB CHR bank for the tile's two pattern fetches, with `$5130`'s two bits
-    // as bank bits 7-6 ("the pattern fetches ignore the standard CHR banking bits"). The
-    // nametable fetch itself is **not** replaced — "nametable fetches are processed normally,
-    // and can come from CIRAM nametables, fill mode, or even Expansion RAM".
-    //
-    // **The vertical split, `$5200`-`$5202`.** "Based on nametable fetch count (horizontally)
-    // and scanline count (vertically), the MMC5 makes substitutions to the nametable data,
-    // attribute table data, and the lowest 3 address bits of the pattern data." Inside the
-    // region the nametable byte **and** the attribute byte come from `ExRAM` — "MMC5 internal
-    // extended RAM is always used as the nametable in split screen mode" — and the pattern
-    // from `$5202`'s bank. Outside it, mode 1 still applies if it is on: Nestopia composes the
-    // two in `FetchNtExtSplit` (`NstBoardMmc5.cpp:938-955`) exactly that way, and the page
-    // agrees — "the non-split region gains extended attributes, and the split region does
-    // not".
-    //
-    // **Where the five emulators disagree, and what this build does.**
-    //
-    // * *The region test.* `$5200` bit 6 is the side the split region is on. Left is
-    //   `column < threshold` and right is `column >= threshold` in FCEUX
-    //   (`mmc5.cpp:186-193`), Nestopia (`:856-857`) and Mesen (`MMC5.h:487-495`, a toggle at
-    //   the delimiter starting inside at column 0); puNES alone uses `column <= threshold`
-    //   on the left (`mapper_005.c:475`). **Four to one**, so this build is strict.
-    // * *The split's row.* The page says the counter "resets to the vertical scrolling value
-    //   in `$5201` each v-blank", so visible line L shows row `$5201 + L`: puNES
-    //   (`:396-405`) and Nestopia (`:681-692`) do exactly that, Mesen is one line later
-    //   (`MMC5.h:483-484`, `_scanlineCounter + 1`) and FCEUX one earlier and to tile
-    //   granularity (`:243` with its own `kHack = -1` comment, and `$5201` stored as
-    //   `(V >> 3) & 0x1F` at `:569`). This build takes the page and the two that agree with
-    //   it; **Q-177** records the disagreement.
-    // * *The fine vertical scroll.* Mesen substitutes the pattern address's low three bits
-    //   from the split's row (`MMC5.h:513`), which is the page's "and the lowest 3 address
-    //   bits of the pattern data"; puNES (`:452`) and FCEUX (`:208`) keep the PPU's, so their
-    //   split regions scroll in whole tiles only. This build follows the **page** and Mesen.
-    //
-    // **What a fetch pays for all of it**: one `bool`,
-    // [`Mmc5::background_substitutes`], whose field comment says why it is that `bool` and not
-    // `in_frame`.
-
-    /// Recomputes [`Mmc5::background_substitutes`] from its three inputs. Called wherever one
-    /// of them moves — `$5104`, `$5200`, and the five places `in_frame` does — never on a
-    /// fetch.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn refresh_background_substitutes(&mut self) {
-        // Both features read `ExRAM` through the PPU, which only the two nametable modes
-        // allow: in modes %10 and %11 the 1 KiB is the CPU's RAM and the PPU cannot see it.
-        // Mesen gates both on `_extendedRamMode <= 1` (`MMC5.h:480`) and FCEUX the split on
-        // `!(MMC5HackCHRMode & 2)` (`mmc5.cpp:181`), which is the same test.
-        self.background_substitutes = self.in_frame
-            && self.ex_ram_mode <= 1
-            && (self.ex_ram_mode == 1 || (self.split_control & 0x80) != 0);
-    }
-
-    /// `$5200` bit 7.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    const fn split_enabled(&self) -> bool {
-        (self.split_control & 0x80) != 0
-    }
-
-    /// Whether the screen tile column `column` lies in the split region: `$5200` bit 6 picks
-    /// the side and bits 4-0 the threshold.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    const fn split_covers(&self, column: u8) -> bool {
-        let threshold = self.split_control & 0x1F;
-        if (self.split_control & 0x40) != 0 {
-            column >= threshold
-        } else {
-            column < threshold
-        }
-    }
-
-    /// Reloads the split's row at the start of a line's fetch sequence, and puts the tile
-    /// counter one before column 0. [`Mmc5::see_ppu_read`] is the only caller, which is where
-    /// that dot is recognised — see [`Mmc5::chr_reads_since_nt`].
-    ///
-    /// The row is `$5201 + L` for visible line L, modulo 240 — the page's "resets to the
-    /// vertical scrolling value in `$5201` each v-blank" plus one per line. `scanline_counter`
-    /// is already that L: it is zeroed on the pre-render line's detection and incremented once
-    /// per line afterwards (see [`Mmc5::detect_scanline`] and Q-121), and this runs at the dot
-    /// where the PPU begins fetching the tiles of the **next** line, so the counter read here
-    /// is that line's index — 0 on the pre-render line, whose fetches feed visible line 0.
-    // Q-177
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn reload_split_row(&mut self) {
-        // 0x1F, so that the first counted nametable fetch pre-increments to column 0 — puNES
-        // `mapper_005.c:396` and Nestopia `NstBoardMmc5.cpp:681` both reset to the same 0x1F
-        // for the same reason.
-        self.split_column = 0x1F;
-        self.split_in_region = false;
-        let row = u32::try_from(self.scanline_counter).unwrap_or(0) + u32::from(self.split_scroll);
-        #[allow(clippy::cast_possible_truncation)] // 0..240.
-        {
-            self.split_row = (row % 240) as u8;
-        }
-    }
-
-    /// One counted background nametable fetch: moves the split's tile counter on and decides
-    /// whether this tile is in the region.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn advance_split_column(&mut self) {
-        // Five bits, as the threshold field is: a line's 34th tile is column 33 and wraps to
-        // 1, which is the hardware's own counter and what puNES and Nestopia do.
-        self.split_column = (self.split_column + 1) & 0x1F;
-        self.split_in_region = self.split_covers(self.split_column);
-        if self.split_in_region {
-            self.split_tile =
-                ((u16::from(self.split_row) & 0xF8) << 2) | u16::from(self.split_column);
-        }
-    }
-
-    /// The attribute byte of the split tile being fetched, taken from the attribute table of
-    /// the `ExRAM` nametable and copied into all four quadrants so that the PPU's own shift
-    /// picks it whatever the tile's position (Nestopia `GetSpliterAttribute`, puNES
-    /// `mapper_005.c:479-480`, Mesen `MMC5.h:506-509`, all three the same expression).
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn split_attribute(&self) -> u8 {
-        let tile = self.split_tile;
-        let index = 0x03C0 | ((tile >> 4) & 0x38) | ((tile >> 2) & 0x07);
-        let shift = ((tile >> 4) & 0x04) | (tile & 0x02);
-        let byte = self.ex_ram[usize::from(index)];
-        ((byte >> shift) & 0x03) * 0x55
-    }
-
-    /// The `ExRAM` byte of the tile mode 1 is enhancing, `AACC CCCC`.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn ex_attr_byte(&self) -> u8 {
-        self.ex_ram[usize::from(self.ex_attr_index)]
-    }
-
-    // ------------------------------------------- the tile capture (REQ-CORE-037, the 3D view)
-    //
-    // The tile records the 3D conversion is built from are emitted by
-    // `Ppu2C02::capture_background_row`, which walks the row **out of display order** at the end
-    // of the line and reads each tile's nametable byte, its attribute byte and its two pattern
-    // planes through the inert path. Both substituting modes are per tile, so the board's
-    // per-tile state has to be positioned per captured column — and then put back, because the
-    // tile whose nametable byte was fetched at dot 337 has its attribute and pattern fetches on
-    // the *next* line and would otherwise find the capture's leftovers.
-    //
-    // That is exactly the save/walk/restore the capture already performs for the MMC2 and MMC4
-    // latches (REQ-CORE-039, REQ-CORE-033: "the emulation is identical whether or not the host
-    // registered a video callback"), so these three methods are the same shape as
-    // `chr_latch_state` / `advance_chr_latch` / `set_chr_latch_state` without disturbing that
-    // pair's own contract — `Mmc5::chr_latch_state` stays the trait's 0.
-
-    /// The per-tile state of the two substituting modes, packed so that the capture can hold it
-    /// in one value. `u64` and not `i32`: the six fields are 34 bits.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn capture_state(&self) -> u64 {
-        u64::from(self.ex_attr_index)
-            | (u64::from(self.split_tile) << 10)
-            | (u64::from(self.split_row) << 20)
-            | (u64::from(self.split_column) << 28)
-            | (u64::from(self.split_in_region) << 33)
-            | (u64::from(self.split_capture) << 34)
-    }
-
-    /// Puts back what [`Mmc5::capture_state`] took.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn restore_capture_state(&mut self, state: u64) {
-        self.ex_attr_index = (state & 0x03FF) as u16;
-        self.split_tile = ((state >> 10) & 0x03FF) as u16;
-        self.split_row = ((state >> 20) & 0xFF) as u8;
-        self.split_column = ((state >> 28) & 0x1F) as u8;
-        self.split_in_region = (state >> 33) & 1 != 0;
-        self.split_capture = (state >> 34) & 1 != 0;
-    }
-
-    /// Positions the per-tile state on the tile the capture is about to read: `address` is its
-    /// nametable address, `column` its screen tile column and `line` the screen line its top
-    /// row is drawn on.
-    ///
-    /// `column` may be negative or above 31 — the widescreen extension captures `extra` columns
-    /// on each side — and the split region is a property of the 32 columns the PPU draws, so a
-    /// column outside them is never in it.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn position_captured_tile(&mut self, address: u16, column: i32, line: i32) {
-        self.ex_attr_index = address & 0x03FF;
-        if !self.split_enabled() {
-            return;
-        }
-
-        // The page's row for that line, as `Mmc5::reload_split_row` computes it for a rendered
-        // one. `rem_euclid`, because the row of the band the capture emits is the one drawn on
-        // its **top** line, which is `line - 1` for the first band of a frame.
-        let row = (line + i32::from(self.split_scroll)).rem_euclid(240);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..240.
-        {
-            self.split_row = row as u8;
-        }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..32.
-        let column5 = (column & 0x1F) as u8;
-        self.split_column = column5;
-        self.split_in_region = (0..32).contains(&column) && self.split_covers(column5);
-        self.split_capture = true;
-        if self.split_in_region {
-            self.split_tile = ((u16::from(self.split_row) & 0xF8) << 2) | u16::from(column5);
-        }
-    }
-
-    /// The byte the board puts on the nametable data bus for `address`, with the two features
-    /// on: the split's tile and attribute, mode 1's attribute, and otherwise the byte the PPU
-    /// would have read on its own.
-    ///
-    /// `vram` is the console's, which the board needs because `$5105` may map a table to CIRAM
-    /// page 0 or 1 while this board is answering every fetch — see
-    /// [`Mapper::read_nametable_from_vram`].
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn substituted_nametable_byte(
-        &self,
-        memory: &CartridgeMemory,
-        address: u16,
-        vram: &[u8],
-    ) -> u8 {
-        let attribute_fetch = (address & 0x03FF) >= 0x03C0;
-        if self.split_enabled() && self.split_in_region {
-            return if attribute_fetch {
-                self.split_attribute()
-            } else {
-                self.ex_ram[usize::from(self.split_tile)]
-            };
-        }
-
-        if self.ex_ram_mode == 1 && attribute_fetch {
-            // "Attribute fetches are replaced by data from Expansion RAM": the two bits, in
-            // all four quadrants so that any shift yields them.
-            return (self.ex_attr_byte() >> 6) * 0x55;
-        }
-
-        self.plain_nametable_byte(memory, address, vram)
-    }
-
-    /// The nametable byte the PPU would have read for `address` had the board not been
-    /// answering all four tables: `$5105`'s choice of CIRAM page 0, CIRAM page 1, `ExRAM` or
-    /// fill mode.
-    ///
-    /// The CIRAM pages are the one source the board cannot reach without `vram`; the other two
-    /// are [`Mapper::read_nametable`]'s own body, **called rather than copied** so that the
-    /// `SERVED_BY_CARTRIDGE` path of a build without the feature is left exactly as `ca1517dc`
-    /// compiled it.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn plain_nametable_byte(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
-        let page = self.nametable_mode(address);
-        if page >= 2 {
-            return self.read_nametable(memory, address);
-        }
-
-        // This reproduces `Ppu2C02::read_nametable_as`'s own
-        // `self.vram[(page << 10) | (address & 0x03FF)]`: the MMC5 never answers
-        // `FOLLOW_MIRRORING`, so there is no mirroring left to apply, and the two CIRAM modes
-        // of `$5105` are pages 0 and 1 (`Mmc5::nametable_page`).
-        let index = (usize::try_from(page).unwrap_or(0) << 10) | usize::from(address & 0x03FF);
-        vram.get(index).copied().unwrap_or(0)
-    }
-
     fn chr_address(&self, address: u16, fetch: ChrFetch) -> usize {
-        // The two substituting modes, ahead of the ordinary windows and only for a background
-        // fetch: "CHR mode always applies to sprite pattern fetches". One `bool` — and not
-        // `in_frame`, see the field — plus the fetch kind the caller already holds.
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        if self.background_substitutes && fetch == ChrFetch::Background {
-            if let Some(offset) = self.substituted_chr_offset(address) {
-                return offset;
-            }
-        }
-
         let index = i32::from(address & 0x1FFF);
         // The three MR-5-1 rules, precomputed: everything but the fetch kind is known before
         // the fetch. One bool load, and not the one holding `Board`'s tag (see the field).
@@ -853,45 +399,6 @@ impl Mmc5 {
             }
         };
         usize::try_from(offset).unwrap_or(0)
-    }
-
-    /// The CHR offset of a background pattern fetch the split or mode 1 answers, or `None`
-    /// when neither does and the ordinary windows apply.
-    ///
-    /// **`inline(never)`.** This is the body `chr_address` must *not* grow by: that function is
-    /// the MMC5's whole CHR path and the register pressure of a second bank computation inlined
-    /// into it is the trap `docs/progress/MF-2.md` step 0 and the `see_ppu_read` comment above
-    /// both record. Behind a call, the test in `chr_address` is a `bool` and a compare, and only
-    /// the fetches that are substituted pay the call.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    #[inline(never)]
-    fn substituted_chr_offset(&self, address: u16) -> Option<usize> {
-        if self.split_enabled() && self.split_in_region {
-            // "$5202: all eight bits select a 4 KB CHR bank", with the page's "and the lowest 3
-            // address bits of the pattern data" substituted from the split's own row, which is
-            // the region's fine vertical scroll (Mesen `MMC5.h:513`).
-            //
-            // The tile capture reads the tile's eight rows at once and so keeps the PPU's own
-            // three bits: see [`Mmc5::split_capture`].
-            let bank = usize::from(self.split_bank);
-            let within = if self.split_capture {
-                usize::from(address) & 0x0FFF
-            } else {
-                (usize::from(address) & 0x0FF8) | usize::from(self.split_row & 0x07)
-            };
-            return Some((bank << 12) | within);
-        }
-
-        if self.ex_ram_mode == 1 {
-            // "The pattern fetches ignore the standard CHR banking bits, and instead use the
-            // top two bits of $5130 and the bottom 6 bits from Expansion RAM to choose a 4KB
-            // bank to select the tile from."
-            let bank = usize::from(self.ex_attr_byte() & 0x3F)
-                | (usize::try_from(self.chr_upper).unwrap_or(0) << 6);
-            return Some((bank << 12) | (usize::from(address) & 0x0FFF));
-        }
-
-        None
     }
 
     fn read_chr(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
@@ -955,23 +462,6 @@ impl Mapper for Mmc5 {
         // Last, so that a block written before AMD-054 (format version 4 to 7) reads back
         // without it (REQ-CORE-091).
         self.audio.save_state(writer);
-
-        // The split's three registers, **after** the sound block and only in a build with the
-        // feature, so that the block a build without it writes is `ca1517dc`'s byte for byte.
-        // A state does not cross between the two configurations, which is already true of every
-        // board feature that changes what memories a cartridge has (`board-195-prg-ram-5000`,
-        // `board-vs-system`); `docs/review/BOARD-FEATURES.md` says so in this feature's row.
-        //
-        // Only the three registers: the rest of the split's state — the column, the region
-        // flag, the tile, the row and mode 1's `ExRAM` index — is re-derived inside one line
-        // from the next `on_tile_row_start` and the next nametable fetch, exactly as
-        // `nt_read_counter` is (see `Mmc5::NT_READS_AFTER_LOAD`).
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        {
-            writer.write_u8(self.split_control);
-            writer.write_u8(self.split_scroll);
-            writer.write_u8(self.split_bank);
-        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1020,28 +510,9 @@ impl Mapper for Mmc5 {
         self.nt_read_counter = Self::NT_READS_AFTER_LOAD;
         self.last_ppu_read_addr = 0;
 
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        {
-            self.split_control = reader.read_u8()?;
-            self.split_scroll = reader.read_u8()?;
-            self.split_bank = reader.read_u8()?;
-            // Derived within one line, as the note in `save_registers` says. The region flag
-            // starts clear so that a load cannot substitute a tile before the line that owns
-            // it has started.
-            self.ex_attr_index = 0;
-            self.split_column = 0;
-            self.split_in_region = false;
-            self.split_tile = 0;
-            self.split_row = 0;
-            self.chr_reads_since_nt = 0;
-            self.split_capture = false;
-        }
-
-        // All three are derived from registers the block already carries, so no older block has
-        // to carry them and no format version moves.
+        // Both are derived from registers the block already carries, so no older block has to
+        // carry them and no format version moves.
         self.refresh_background_chr_set();
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        self.refresh_background_substitutes();
         self.refresh_irq_line();
         Ok(())
     }
@@ -1127,21 +598,6 @@ impl Mapper for Mmc5 {
         self.protect2 = 0;
         self.last_set_was_b = false;
         self.sprite_size16 = false;
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        {
-            // Power-on: the split is off, so nothing of it is armed and `$5201`'s row counter
-            // starts where a write will put it.
-            self.split_control = 0;
-            self.split_scroll = 0;
-            self.split_bank = 0;
-            self.ex_attr_index = 0;
-            self.split_column = 0;
-            self.split_in_region = false;
-            self.split_tile = 0;
-            self.split_row = 0;
-            self.chr_reads_since_nt = 0;
-            self.split_capture = false;
-        }
         self.irq_target = 0;
         self.irq_enabled = false;
         self.irq_pending = false;
@@ -1157,8 +613,6 @@ impl Mapper for Mmc5 {
         self.multiplicand = 0;
         self.multiplier = 0;
         self.refresh_background_chr_set();
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        self.refresh_background_substitutes();
         self.update_banks();
     }
 
@@ -1303,93 +757,12 @@ impl Mapper for Mmc5 {
         }
     }
 
-    /// Where `$5105` puts logical table `table`: CIRAM page 0, CIRAM page 1, or
-    /// [`crate::cartridges::Cartridge::SERVED_BY_CARTRIDGE`] for `ExRAM` and fill mode.
-    ///
-    /// **With `board-mmc5-exattr-split` and either substituting mode armed, all four tables
-    /// answer `SERVED_BY_CARTRIDGE`**, so that every nametable-space fetch reaches
-    /// [`Mapper::read_nametable_from_vram`] — which is how the attribute override and the
-    /// split's tiles get onto the bus without a single test being added to any other board's
-    /// fetch path (lot MF-LEG-2). The condition is the two **register** bits alone, never
-    /// `in_frame`: `Cartridge::nametable_pages` is a cache refreshed by a CPU write to the
-    /// cartridge, and a condition that moved inside a frame would leave it stale. The
-    /// in-frame half of the test is made where the byte is answered.
     fn nametable_page(&self, table: i32) -> i32 {
-        #[cfg(feature = "board-mmc5-exattr-split")]
-        if self.ex_ram_mode == 1 || self.split_enabled() {
-            return -2;
-        }
-
         match (self.nametable_mapping >> (table * 2)) & 0x03 {
             0 => 0,
             1 => 1,
             _ => -2,
         }
-    }
-
-    /// Where a **write** to nametable-space `address` lands in console VRAM while the board is
-    /// answering all four tables, or `None` when the board keeps the byte itself (`ExRAM`) or
-    /// drops it (fill mode).
-    ///
-    /// Only the two substituting modes make this necessary: without them a table the board
-    /// answers is never a CIRAM table, so `Ppu2C02::write_nametable_byte`'s
-    /// `SERVED_BY_CARTRIDGE` arm is right as it stands. With them, a `$2007` write to a CIRAM
-    /// table must still reach CIRAM — a detail no cross-checked emulator has to think about,
-    /// their PPUs holding one pointer per table rather than a page number.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn nametable_write_offset(&self, address: u16) -> Option<usize> {
-        let page = self.nametable_mode(address);
-        if page >= 2 {
-            return None;
-        }
-
-        Some((usize::try_from(page).unwrap_or(0) << 10) | usize::from(address & 0x03FF))
-    }
-
-    /// Every nametable-space byte the PPU fetches while either substituting mode is armed: the
-    /// split's tile and attribute, mode 1's per-tile attribute, and otherwise what the PPU
-    /// would have read on its own, `$5105`'s CIRAM pages included — which is why `vram` is
-    /// here (lot MF-LEG-2).
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
-        if self.background_substitutes {
-            self.substituted_nametable_byte(memory, address, vram)
-        } else {
-            // Outside rendering nothing is substituted: the page's two modes are about what the
-            // chip does to the PPU's *fetches*, and a `$2007` access is "treated as sprite
-            // accesses" or as a plain nametable read. Mesen's gate is the same `_ppuInFrame`
-            // (`MMC5.h:480`).
-            self.plain_nametable_byte(memory, address, vram)
-        }
-    }
-
-    /// The PPU is starting the fetch sequence of a line's tiles: the split's tile counter goes
-    /// back before column 0 and its row counter moves on one line (nesdev, "MMC5": "the MMC5
-    /// has a separate v-split scanline counter that resets to the vertical scrolling value in
-    /// `$5201` each v-blank").
-    ///
-    /// Called once per line and on no other board. With the feature off the hook does not
-    /// exist at all.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn substitutes_background_tiles(&self) -> bool {
-        // The two **register** bits, as `Mmc5::nametable_page` reads them: the capture asks once
-        // per row, before the loop, and `in_frame` is settled by then anyway.
-        self.ex_ram_mode == 1 || self.split_enabled()
-    }
-
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn background_capture_state(&self) -> u64 {
-        self.capture_state()
-    }
-
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn set_background_capture_state(&mut self, state: u64) {
-        self.restore_capture_state(state);
-    }
-
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
-        self.position_captured_tile(address, column, line);
     }
 
     fn read_nametable(&self, _memory: &CartridgeMemory, address: u16) -> u8 {
@@ -1438,5 +811,923 @@ impl Mapper for Mmc5 {
     fn on_ppu_control(&mut self, control: u8) {
         self.sprite_size16 = control & 0x20 != 0;
         self.refresh_background_chr_set();
+    }
+}
+
+// ==========================================================================================
+// Extended attribute mode and the vertical split — feature `board-mmc5-exattr-split`
+// ==========================================================================================
+//
+// nesdev ("MMC5"), the two features report entry MMC5-1 is about: lot **MF-LEG-2** implemented
+// them inside [`Mmc5`] and lot **MF-LEG-3** moved them out into the board below, which the
+// enum reaches through its own variant. Both substitute data on the **background** fetch path
+// and nowhere else: sprite patterns, `$2007` accesses and every CPU read are untouched ("CHR
+// mode always applies to sprite pattern fetches").
+//
+// **Extended attribute mode, `$5104` = %01.** "Each byte of Expansion RAM is used to enhance
+// the tile at the corresponding address in every nametable", as `AACC CCCC`: bits 7-6 are the
+// palette of the whole 8x8 tile, replacing the attribute byte, and bits 5-0 pick a 4 KiB CHR
+// bank for the tile's two pattern fetches, with `$5130`'s two bits as bank bits 7-6 ("the
+// pattern fetches ignore the standard CHR banking bits"). The nametable fetch itself is **not**
+// replaced — "nametable fetches are processed normally, and can come from CIRAM nametables,
+// fill mode, or even Expansion RAM".
+//
+// **The vertical split, `$5200`-`$5202`.** "Based on nametable fetch count (horizontally) and
+// scanline count (vertically), the MMC5 makes substitutions to the nametable data, attribute
+// table data, and the lowest 3 address bits of the pattern data." Inside the region the
+// nametable byte **and** the attribute byte come from `ExRAM` — "MMC5 internal extended RAM is
+// always used as the nametable in split screen mode" — and the pattern from `$5202`'s bank.
+// Outside it, mode 1 still applies if it is on: Nestopia composes the two in `FetchNtExtSplit`
+// (`NstBoardMmc5.cpp:938-955`) exactly that way, and the page agrees — "the non-split region
+// gains extended attributes, and the split region does not".
+//
+// **Where the five emulators disagree, and what this build does.**
+//
+// * *The region test.* `$5200` bit 6 is the side the split region is on. Left is
+//   `column < threshold` and right is `column >= threshold` in FCEUX (`mmc5.cpp:186-193`),
+//   Nestopia (`:856-857`) and Mesen (`MMC5.h:487-495`, a toggle at the delimiter starting
+//   inside at column 0); puNES alone uses `column <= threshold` on the left
+//   (`mapper_005.c:475`). **Four to one**, so this build is strict.
+// * *The split's row.* The page says the counter "resets to the vertical scrolling value in
+//   `$5201` each v-blank", so visible line L shows row `$5201 + L`: puNES (`:396-405`) and
+//   Nestopia (`:681-692`) do exactly that, Mesen is one line later (`MMC5.h:483-484`,
+//   `_scanlineCounter + 1`) and FCEUX one earlier and to tile granularity (`:243` with its own
+//   `kHack = -1` comment, and `$5201` stored as `(V >> 3) & 0x1F` at `:569`). This build takes
+//   the page and the two that agree with it; **Q-177** records the disagreement.
+// * *The fine vertical scroll.* Mesen substitutes the pattern address's low three bits from the
+//   split's row (`MMC5.h:513`), which is the page's "and the lowest 3 address bits of the
+//   pattern data"; puNES (`:452`) and FCEUX (`:208`) keep the PPU's, so their split regions
+//   scroll in whole tiles only. This build follows the **page** and Mesen.
+//
+// ------------------------------------------------------------------------------------------
+// **What a game that arms neither mode pays: nothing, because it is not this board.**
+//
+// MF-LEG-2 put both modes inside [`Mmc5`] behind one `bool` test on the fetch path, and the
+// figures are what parked the feature: *Castlevania III*, which uses neither, paid **+2.992 %**
+// and the `mmc5` ROM +2.522 %, while every other board paid up to **+0.110 %** because the
+// MMC5's arm of `Board::ppu_peek` grew by that test and the dispatch's prologue grew with it
+// (`docs/progress/MF-LEG-2.md` step 4; seven shapes were measured and none moved that figure).
+//
+// So the two modes are **armed at run time** (lot MF-LEG-3, the owner's decision of 2026-11-09).
+// A game cannot reach either without first writing `$5104` with mode %01 or `$5200` with bit 7
+// set, and both writes go through this board: until one of them arrives the cartridge holds
+// [`super::super::board::Board::Mmc5`], whose code is `04731c86`'s to the instruction, and the
+// write replaces it with [`super::super::board::Board::Mmc5Ext`] — this board — carrying every
+// register, memory and counter across. It never switches back: [`Mmc5Ext`] is correct with both
+// modes off, which is what `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode`
+// pins.
+//
+// **The three registers of a board that has not switched.** `$5201` and `$5202` say nothing
+// until the split is enabled, and `$5200`'s low bits say nothing until its own bit 7 is set —
+// which is the same write. So a light board has no use for any of them, and the switch is armed
+// by a write to **`$5201` or `$5202` as well**: the light board then drops nothing, and the
+// hardware's "write the bank and the scroll, then enable" order (the natural one) cannot lose a
+// register. `$5200` with bit 7 **clear** does not switch, and neither does `$5104` = 0, 2 or 3.
+
+/// The MMC5 with **extended attribute mode and the vertical split**: [`Mmc5`] verbatim plus the
+/// ten fields the two modes need, reached through [`super::super::board::Board::Mmc5Ext`] from
+/// the write that arms one of them (see the banner above, and [`Mmc5Ext::write_arms_substitution`]).
+///
+/// Every method that the two modes do not touch forwards to `base`, so there is **one**
+/// implementation of the MMC5's PRG decode, sound, IRQ, scanline detection and bank windows and
+/// this board cannot drift from it. The three that are not a forward — `ppu_peek`,
+/// `on_ppu_address_bus` and `read_nametable_from_vram` — are each `#[inline(never)]`, so the arm
+/// this board adds to a `Board` dispatch is a load and a call: the growth MF-LEG-2 measured at
+/// one instruction per CHR fetch *for every board* was the size of the MMC5's arm, and an arm
+/// that is a call does not have it.
+#[cfg(feature = "board-mmc5-exattr-split")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mmc5Ext {
+    /// The light board, **verbatim and whole**: the switch moves it here field for field and
+    /// every forward below reads it, so no register, memory, counter or flag is duplicated.
+    base: Mmc5,
+    /// `$5200`: bit 7 enables the vertical split, bit 6 picks the side (0 left, 1 right) and
+    /// bits 4-0 are the threshold tile count (nesdev, "MMC5"; `ESxW WWWW`).
+    split_control: u8,
+    /// `$5201`: "all eight bits specify the vertical scroll value to use in split region".
+    split_scroll: u8,
+    /// `$5202`: "all eight bits select a 4 KB CHR bank", the one the whole split region's
+    /// patterns come from.
+    split_bank: u8,
+    /// The low ten bits of the last background **nametable** fetch — the tile's offset in
+    /// whichever nametable, which is the index of its byte in `ExRAM`: "each byte of the MMC5's
+    /// internal extended RAM is used to enhance the background tile at the corresponding
+    /// nametable address".
+    ///
+    /// Latched because the *attribute* address does not carry it (it keeps coarse Y bits 4-2 and
+    /// coarse X bits 4-2 only), and the attribute fetch is where mode 1 has to answer. Not in
+    /// the savestate: it is re-derived by the next nametable fetch, i.e. within one tile.
+    ex_attr_index: u16,
+    /// `ExRAM` index of the split tile being fetched, `((split_row & 0xF8) << 2) | column` —
+    /// puNES `mapper_005.c:477`, Nestopia `NstBoardMmc5.cpp:860`, Mesen `MMC5.h:502`, the three
+    /// agreeing to the expression.
+    split_tile: u16,
+    /// The split region's current pixel row, 0 to 239: `$5201` plus the line, the region
+    /// scrolling independently of the rest of the screen. See [`Mmc5Ext::reload_split_row`] for
+    /// the one line of it this build had to choose.
+    split_row: u8,
+    /// The split's own tile counter, 5 bits as the hardware's threshold field is: the screen tile
+    /// column of the tile being fetched. Reset at the dot where the PPU starts a line's fetch
+    /// sequence and pre-incremented by each counted nametable fetch, so the first tile of a line
+    /// is column 0. Not in the savestate, for the reason `Mmc5::nt_read_counter` is not: a line
+    /// re-derives it.
+    split_column: u8,
+    /// Pattern fetches ($0000-$1FFF) seen since the last nametable-space read, capped at
+    /// [`Mmc5Ext::CHR_READS_BEFORE_ROW_START`]: how the board finds, **on its own bus**, the dot
+    /// where the PPU begins a line's fetch sequence.
+    ///
+    /// Inside a tile group the PPU reads the nametable byte, the attribute byte and the two
+    /// pattern planes, so exactly **two** pattern fetches separate one nametable-space read from
+    /// the next. Between the last nametable fetch of a line and the first of the next line's
+    /// prefetch lie the **sixteen** sprite pattern fetches of dots 257-320. So a nametable fetch
+    /// that follows four or more pattern fetches is the first of a line's sequence, and nothing
+    /// else is.
+    ///
+    /// Counting it here rather than taking a hook from the PPU is not a stylistic choice: a
+    /// `dot == 321` test inside `Ppu2C02::run_rendering_dot` moved **+5.4 M to +13.6 M
+    /// instructions onto `Ppu2C02::run_dots` for every ROM of PR-1's set** — the function the
+    /// per-dot pipeline inlines into — by changing the inliner's mind, which is
+    /// `docs/progress/MF-2.md` step 0's trap one function further out. See
+    /// `docs/progress/MF-LEG-2.md` step 4.
+    chr_reads_since_nt: u8,
+    /// Whether the tile being fetched is in the split region, decided by the counter above at the
+    /// nametable fetch and read again by the attribute and the two pattern fetches of the same
+    /// tile (puNES's `split_in_reg`, Nestopia's `spliter.inside`).
+    split_in_region: bool,
+    /// Whether the per-tile state above was positioned by the **tile capture** rather than by a
+    /// rendered fetch (see [`Mmc5Ext::position_captured_tile`]).
+    ///
+    /// It changes one thing: the split's pattern fetch keeps the PPU's own low three address bits
+    /// instead of substituting the region's fine vertical scroll. The capture reads a whole 8x8
+    /// tile — its eight rows at once, through `Ppu2C02::read_pattern_planes` — and substituting
+    /// one row number into all eight would collapse the tile to a single line. The record it
+    /// emits is therefore the split's tile as a tile, which is what a 3D block is; the sub-tile
+    /// offset of a fine-scrolled region is the one thing the 3D view does not carry, and
+    /// `docs/progress/MF-LEG-2.md` step 2 says so.
+    ///
+    /// Not in the savestate: the capture sets it and puts it back within one line.
+    split_capture: bool,
+}
+
+#[cfg(feature = "board-mmc5-exattr-split")]
+impl Mmc5Ext {
+    /// Pattern fetches that must precede a nametable fetch for it to be the first of a line's
+    /// fetch sequence: two separate the nametable-space reads of one tile group, and sixteen
+    /// (eight sprites, two planes) separate the last group of a line from the first of the next
+    /// line's prefetch. Four is the midpoint and any value from three to sixteen gives the same
+    /// answer. See [`Mmc5Ext::chr_reads_since_nt`].
+    const CHR_READS_BEFORE_ROW_START: u8 = 4;
+
+    // --------------------------------------------------------------- the run-time switch
+
+    /// Whether the CPU write of `value` to `address` **arms** one of the two modes, i.e. whether
+    /// the cartridge must stop being [`super::super::board::Board::Mmc5`] and become
+    /// [`super::super::board::Board::Mmc5Ext`]. The one test the light board's write arm makes,
+    /// and the only thing lot MF-LEG-3 puts on a path a game that arms neither mode walks.
+    ///
+    /// `$5104` mode %01 and `$5200` bit 7 are the two the owner's decision names, and they are
+    /// the two the hardware needs: nothing of either mode happens without one of them. `$5201`
+    /// and `$5202` arm it as well, for the reason the banner's last paragraph gives — a light
+    /// board has nowhere to keep them, and "bank, scroll, then enable" is the order a game
+    /// writes them in. `$5200` with bit 7 **clear** does not arm anything: its other bits only
+    /// mean something while bit 7 is set, and the write that sets bit 7 carries them.
+    pub(crate) const fn write_arms_substitution(address: u16, value: u8) -> bool {
+        match address {
+            0x5104 => value & 0x03 == 1,
+            0x5200 => value & 0x80 != 0,
+            0x5201 | 0x5202 => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the block a **light** board has just loaded says that a mode is armed, i.e.
+    /// whether the state was written by this board and the variant has to be restored with it.
+    ///
+    /// The MMC5's savestate block is the **same length in both variants** — which is what lets a
+    /// state written before this lot, packs' idle savestates included, load unchanged — because
+    /// the three registers ride in the spare bits of the `i32` that carries `$5104`'s two
+    /// (see [`Mmc5Ext::packed_ex_ram_mode`]). A light board stores that `i32` whole, as
+    /// `04731c86` does, so this test reads it off a board that has not switched yet: mode %01 in
+    /// the low two bits, or any of the three registers above bit 7.
+    pub(crate) const fn state_arms_substitution(base: &Mmc5) -> bool {
+        (base.ex_ram_mode & 0x03) == 1 || (base.ex_ram_mode >> 8) != 0
+    }
+
+    /// The full board, built from the light one by the write that armed a mode.
+    ///
+    /// **`inline(never)`, and it matters.** `Board::intercept_cpu_write` is inlined into
+    /// `Cartridge::cpu_write` and `NesBus::write_internal` — one body as far as every
+    /// measurement of this project is concerned — so a 1.4 KiB temporary here would be 1.4 KiB
+    /// of stack frame on **every** board's write path. Behind a call it is this function's own
+    /// frame, entered once in the life of a game.
+    #[inline(never)]
+    pub(crate) fn armed_by_write(base: &Mmc5, address: u16, value: u8) -> Box<Self> {
+        let mut board = Self::from_light(base.clone());
+        // $5104's write has already been taken by the light board — it is a register both
+        // variants have. The split's three are not, so the arming write is applied here.
+        board.write_split_register(address, value);
+        Box::new(board)
+    }
+
+    /// The full board, built from the light one that has just loaded a state this board wrote
+    /// (see [`Mmc5Ext::state_arms_substitution`]). `inline(never)` for `armed_by_write`'s reason.
+    #[inline(never)]
+    pub(crate) fn armed_by_state(base: &Mmc5) -> Box<Self> {
+        let mut board = Self::from_light(base.clone());
+        let packed = board.base.ex_ram_mode;
+        board.base.ex_ram_mode = packed & 0x03;
+        board.unpack_split_registers(packed);
+        Box::new(board)
+    }
+
+    /// The light board this one was built from, for the reset that puts the cartridge back on it
+    /// (`Board::reset`): power-on and reset both start on the light variant, so a game that armed
+    /// a mode and was then reset has to arm it again, exactly as it has to write every other
+    /// register again.
+    pub(crate) fn to_light(&self) -> Mmc5 {
+        self.base.clone()
+    }
+
+    fn from_light(base: Mmc5) -> Self {
+        Self {
+            base,
+            split_control: 0,
+            split_scroll: 0,
+            split_bank: 0,
+            ex_attr_index: 0,
+            split_tile: 0,
+            split_row: 0,
+            split_column: 0,
+            chr_reads_since_nt: 0,
+            split_in_region: false,
+            split_capture: false,
+        }
+    }
+
+    /// The per-tile state the two modes derive inside one line, put back where a power-on, a
+    /// reset or a state load leaves it. The region flag starts **clear**, so neither a load nor a
+    /// mid-frame switch can substitute a tile before the line that owns it has started.
+    fn clear_derived_state(&mut self) {
+        self.ex_attr_index = 0;
+        self.split_tile = 0;
+        self.split_row = 0;
+        self.split_column = 0;
+        self.chr_reads_since_nt = 0;
+        self.split_in_region = false;
+        self.split_capture = false;
+    }
+
+    /// `$5200`-`$5202`, the three registers the light board has nowhere to keep.
+    fn write_split_register(&mut self, address: u16, value: u8) {
+        match address {
+            0x5200 => self.split_control = value,
+            0x5201 => self.split_scroll = value,
+            0x5202 => self.split_bank = value,
+            _ => {}
+        }
+    }
+
+    /// `$5104`'s two bits with the split's three registers in the twenty-four above them: what
+    /// this board writes where the light one writes `ex_ram_mode`, so that **the block is the
+    /// same length in both variants** and a state crosses the switch in either direction.
+    ///
+    /// `$5104` only ever holds 0 to 3 (`write_control` masks it), so bits 31-8 of that `i32` have
+    /// been written as zero by every build there has ever been; a light board reads this value
+    /// back whole and [`Mmc5Ext::state_arms_substitution`] then sees that the state is this
+    /// board's. The alternative — three bytes appended, as MF-LEG-2 wrote them — makes the block
+    /// three bytes longer than `04731c86`'s and no existing state loads.
+    fn packed_ex_ram_mode(&self) -> i32 {
+        self.base.ex_ram_mode
+            | (i32::from(self.split_control) << 8)
+            | (i32::from(self.split_scroll) << 16)
+            | (i32::from(self.split_bank) << 24)
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // The three low bytes.
+    fn unpack_split_registers(&mut self, packed: i32) {
+        self.split_control = (packed >> 8) as u8;
+        self.split_scroll = (packed >> 16) as u8;
+        self.split_bank = (packed >> 24) as u8;
+    }
+
+    // ----------------------------------------------------------------- the two modes
+
+    /// Whether a **background** fetch has to consult `ExRAM` at all. MF-LEG-2 cached this in a
+    /// field refreshed at every register write, because the light board's own fetch path read it;
+    /// here it is computed, because only a game that armed a mode runs this board at all and the
+    /// five refresh points were five chances to leave it stale.
+    ///
+    /// Both features read `ExRAM` through the PPU, which only the two nametable modes allow: in
+    /// modes %10 and %11 the 1 KiB is the CPU's RAM and the PPU cannot see it. Mesen gates both
+    /// on `_extendedRamMode <= 1` (`MMC5.h:480`) and FCEUX the split on `!(MMC5HackCHRMode & 2)`
+    /// (`mmc5.cpp:181`), which is the same test.
+    const fn background_substitutes(&self) -> bool {
+        self.base.in_frame
+            && self.base.ex_ram_mode <= 1
+            && (self.base.ex_ram_mode == 1 || self.split_enabled())
+    }
+
+    /// `$5200` bit 7.
+    const fn split_enabled(&self) -> bool {
+        (self.split_control & 0x80) != 0
+    }
+
+    /// Whether the screen tile column `column` lies in the split region: `$5200` bit 6 picks the
+    /// side and bits 4-0 the threshold.
+    const fn split_covers(&self, column: u8) -> bool {
+        let threshold = self.split_control & 0x1F;
+        if (self.split_control & 0x40) != 0 {
+            column >= threshold
+        } else {
+            column < threshold
+        }
+    }
+
+    /// Reloads the split's row at the start of a line's fetch sequence, and puts the tile counter
+    /// one before column 0. [`Mmc5Ext::see_ppu_read`] is the only caller, which is where that dot
+    /// is recognised — see [`Mmc5Ext::chr_reads_since_nt`].
+    ///
+    /// The row is `$5201 + L` for visible line L, modulo 240 — the page's "resets to the vertical
+    /// scrolling value in `$5201` each v-blank" plus one per line. `scanline_counter` is already
+    /// that L: it is zeroed on the pre-render line's detection and incremented once per line
+    /// afterwards (see `Mmc5::detect_scanline` and Q-121), and this runs at the dot where the PPU
+    /// begins fetching the tiles of the **next** line, so the counter read here is that line's
+    /// index — 0 on the pre-render line, whose fetches feed visible line 0.
+    // Q-177
+    fn reload_split_row(&mut self) {
+        // 0x1F, so that the first counted nametable fetch pre-increments to column 0 — puNES
+        // `mapper_005.c:396` and Nestopia `NstBoardMmc5.cpp:681` both reset to the same 0x1F for
+        // the same reason.
+        self.split_column = 0x1F;
+        self.split_in_region = false;
+        let row =
+            u32::try_from(self.base.scanline_counter).unwrap_or(0) + u32::from(self.split_scroll);
+        #[allow(clippy::cast_possible_truncation)] // 0..240.
+        {
+            self.split_row = (row % 240) as u8;
+        }
+    }
+
+    /// One counted background nametable fetch: moves the split's tile counter on and decides
+    /// whether this tile is in the region.
+    fn advance_split_column(&mut self) {
+        // Five bits, as the threshold field is: a line's 34th tile is column 33 and wraps to 1,
+        // which is the hardware's own counter and what puNES and Nestopia do.
+        self.split_column = (self.split_column + 1) & 0x1F;
+        self.split_in_region = self.split_covers(self.split_column);
+        if self.split_in_region {
+            self.split_tile =
+                ((u16::from(self.split_row) & 0xF8) << 2) | u16::from(self.split_column);
+        }
+    }
+
+    /// The attribute byte of the split tile being fetched, taken from the attribute table of the
+    /// `ExRAM` nametable and copied into all four quadrants so that the PPU's own shift picks it
+    /// whatever the tile's position (Nestopia `GetSpliterAttribute`, puNES
+    /// `mapper_005.c:479-480`, Mesen `MMC5.h:506-509`, all three the same expression).
+    fn split_attribute(&self) -> u8 {
+        let tile = self.split_tile;
+        let index = 0x03C0 | ((tile >> 4) & 0x38) | ((tile >> 2) & 0x07);
+        let shift = ((tile >> 4) & 0x04) | (tile & 0x02);
+        let byte = self.base.ex_ram[usize::from(index)];
+        ((byte >> shift) & 0x03) * 0x55
+    }
+
+    /// The `ExRAM` byte of the tile mode 1 is enhancing, `AACC CCCC`.
+    fn ex_attr_byte(&self) -> u8 {
+        self.base.ex_ram[usize::from(self.ex_attr_index)]
+    }
+
+    /// One PPU read, as the board's own bus brings it — `Mmc5::see_ppu_read` with the two modes'
+    /// per-tile state latched in the middle of it.
+    ///
+    /// **The one body of this file that is a copy rather than a forward**, because the latching
+    /// has to happen between two halves of the light board's own work: after the fetch that
+    /// raises `in_frame` (the substitution is gated on it) and before the repeat counter consumes
+    /// `last_ppu_read_addr` (the split's column is gated on that address being a new one). The
+    /// copy is `04731c86`'s `Mmc5::see_ppu_read` line for line, and what keeps the two in step is
+    /// a test rather than a comment:
+    /// `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode` runs the same
+    /// frames through both boards and compares every pixel, which a drifted copy of the scanline
+    /// detection cannot pass.
+    ///
+    /// `inline(never)` for the reason `Mmc5::see_ppu_read` carries it: this is what
+    /// `Board::on_ppu_address_bus` calls on every PPU read, and an arm that is a call does not
+    /// grow the dispatch's prologue.
+    #[inline(never)]
+    fn see_ppu_read(&mut self, address: u16) {
+        // A nametable byte, as opposed to an attribute byte of the same $2xxx page: only this
+        // fetch turns an armed detection into the flag, because it is the first fetch of the
+        // line proper.
+        let nametable_fetch = (0x2000..0x3000).contains(&address) && (address & 0x03FF) < 0x03C0;
+        if nametable_fetch && self.base.need_in_frame {
+            self.base.need_in_frame = false;
+            self.base.in_frame = true;
+            self.base.refresh_background_chr_set();
+        }
+
+        // The per-tile state of the two substituting modes, latched where the board already sees
+        // every read.
+        //
+        // `address != last_ppu_read_addr` leaves out the **two discarded nametable fetches** of
+        // dots 338 and 340, which repeat dot 337's address: they are not tiles, and counting them
+        // would put the split's column three ahead by the end of a line. It is the same test the
+        // repeat detection below makes.
+        if self.background_substitutes() {
+            if address < 0x2000 {
+                // A pattern fetch: the run this counts is what finds the start of a line's fetch
+                // sequence (see `Mmc5Ext::chr_reads_since_nt`).
+                self.chr_reads_since_nt = self
+                    .chr_reads_since_nt
+                    .saturating_add(1)
+                    .min(Self::CHR_READS_BEFORE_ROW_START);
+            } else {
+                if nametable_fetch && address != self.base.last_ppu_read_addr {
+                    if self.chr_reads_since_nt >= Self::CHR_READS_BEFORE_ROW_START
+                        && self.split_enabled()
+                    {
+                        self.reload_split_row();
+                    }
+
+                    // "Each byte of Expansion RAM is used to enhance the tile at the
+                    // corresponding address in every nametable": the tile's ten-bit offset,
+                    // which the attribute address that follows does not carry.
+                    self.ex_attr_index = address & 0x03FF;
+                    if self.split_enabled() {
+                        self.advance_split_column();
+                    }
+                }
+
+                self.chr_reads_since_nt = 0;
+            }
+        }
+
+        if self.base.nt_read_counter >= Mmc5::NT_READS_TO_DETECT {
+            self.base.detect_scanline();
+        } else if (0x2000..0x3000).contains(&address) && self.base.last_ppu_read_addr == address {
+            // "in the range $2xxx": an attribute address would count too, but the three in a row
+            // only ever happen at dots 337, 338 and 340, which read the nametable byte.
+            self.base.nt_read_counter += 1;
+        }
+
+        if self.base.last_ppu_read_addr != address {
+            self.base.nt_read_counter = 0;
+        }
+
+        self.base.last_ppu_read_addr = address;
+        self.base.ppu_idle_counter = Mmc5::PPU_IDLE_CYCLES;
+    }
+
+    /// The byte the board puts on the nametable data bus for `address`: the split's tile and
+    /// attribute, mode 1's attribute, and otherwise the byte the PPU would have read on its own.
+    ///
+    /// `vram` is the console's, which the board needs because `$5105` may map a table to CIRAM
+    /// page 0 or 1 while this board is answering every fetch — see
+    /// [`Mapper::read_nametable_from_vram`].
+    fn substituted_nametable_byte(
+        &self,
+        memory: &CartridgeMemory,
+        address: u16,
+        vram: &[u8],
+    ) -> u8 {
+        let attribute_fetch = (address & 0x03FF) >= 0x03C0;
+        if self.split_enabled() && self.split_in_region {
+            return if attribute_fetch {
+                self.split_attribute()
+            } else {
+                self.base.ex_ram[usize::from(self.split_tile)]
+            };
+        }
+
+        if self.base.ex_ram_mode == 1 && attribute_fetch {
+            // "Attribute fetches are replaced by data from Expansion RAM": the two bits, in all
+            // four quadrants so that any shift yields them.
+            return (self.ex_attr_byte() >> 6) * 0x55;
+        }
+
+        self.plain_nametable_byte(memory, address, vram)
+    }
+
+    /// The nametable byte the PPU would have read for `address` had the board not been answering
+    /// all four tables: `$5105`'s choice of CIRAM page 0, CIRAM page 1, `ExRAM` or fill mode.
+    ///
+    /// The CIRAM pages are the one source the board cannot reach without `vram`; the other two
+    /// are `Mmc5::read_nametable`'s own body, **called rather than copied**.
+    fn plain_nametable_byte(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
+        let page = self.base.nametable_mode(address);
+        if page >= 2 {
+            return self.base.read_nametable(memory, address);
+        }
+
+        // This reproduces `Ppu2C02::read_nametable_as`'s own
+        // `self.vram[(page << 10) | (address & 0x03FF)]`: the MMC5 never answers
+        // `FOLLOW_MIRRORING`, so there is no mirroring left to apply, and the two CIRAM modes of
+        // `$5105` are pages 0 and 1 (`Mmc5Ext::nametable_page`).
+        let index = (usize::try_from(page).unwrap_or(0) << 10) | usize::from(address & 0x03FF);
+        vram.get(index).copied().unwrap_or(0)
+    }
+
+    /// The CHR offset of a background pattern fetch the split or mode 1 answers, or `None` when
+    /// neither does and the light board's ordinary windows apply.
+    fn substituted_chr_offset(&self, address: u16) -> Option<usize> {
+        if self.split_enabled() && self.split_in_region {
+            // "$5202: all eight bits select a 4 KB CHR bank", with the page's "and the lowest 3
+            // address bits of the pattern data" substituted from the split's own row, which is
+            // the region's fine vertical scroll (Mesen `MMC5.h:513`).
+            //
+            // The tile capture reads the tile's eight rows at once and so keeps the PPU's own
+            // three bits: see [`Mmc5Ext::split_capture`].
+            let bank = usize::from(self.split_bank);
+            let within = if self.split_capture {
+                usize::from(address) & 0x0FFF
+            } else {
+                (usize::from(address) & 0x0FF8) | usize::from(self.split_row & 0x07)
+            };
+            return Some((bank << 12) | within);
+        }
+
+        if self.base.ex_ram_mode == 1 {
+            // "The pattern fetches ignore the standard CHR banking bits, and instead use the top
+            // two bits of $5130 and the bottom 6 bits from Expansion RAM to choose a 4KB bank to
+            // select the tile from."
+            let bank = usize::from(self.ex_attr_byte() & 0x3F)
+                | (usize::try_from(self.base.chr_upper).unwrap_or(0) << 6);
+            return Some((bank << 12) | (usize::from(address) & 0x0FFF));
+        }
+
+        None
+    }
+
+    /// The light board's CHR offset, with the two modes' substitution ahead of it and only for a
+    /// background fetch: "CHR mode always applies to sprite pattern fetches".
+    fn chr_address(&self, address: u16, fetch: ChrFetch) -> usize {
+        if fetch == ChrFetch::Background && self.background_substitutes() {
+            if let Some(offset) = self.substituted_chr_offset(address) {
+                return offset;
+            }
+        }
+
+        self.base.chr_address(address, fetch)
+    }
+
+    /// `Mmc5::read_chr` with the offset above: the four lines that choose between CHR-ROM and
+    /// CHR-RAM, which have no behaviour of their own to keep in step.
+    fn read_chr(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        let offset = self.chr_address(address, fetch);
+        let chr_rom = memory.rom().chr_rom();
+        if chr_rom.is_empty() {
+            let ram = memory.chr_ram();
+            return if ram.is_empty() {
+                0
+            } else {
+                ram[wrap_offset(offset, ram.len())]
+            };
+        }
+
+        chr_rom[wrap_offset(offset, chr_rom.len())]
+    }
+
+    // ------------------------------------------- the tile capture (REQ-CORE-037, the 3D view)
+    //
+    // The tile records the 3D conversion is built from are emitted by
+    // `Ppu2C02::capture_background_row`, which walks the row **out of display order** at the end
+    // of the line and reads each tile's nametable byte, its attribute byte and its two pattern
+    // planes through the inert path. Both substituting modes are per tile, so the board's
+    // per-tile state has to be positioned per captured column — and then put back, because the
+    // tile whose nametable byte was fetched at dot 337 has its attribute and pattern fetches on
+    // the *next* line and would otherwise find the capture's leftovers.
+    //
+    // That is exactly the save/walk/restore the capture already performs for the MMC2 and MMC4
+    // latches (REQ-CORE-039, REQ-CORE-033: "the emulation is identical whether or not the host
+    // registered a video callback"), so these three methods are the same shape as
+    // `chr_latch_state` / `advance_chr_latch` / `set_chr_latch_state` without disturbing that
+    // pair's own contract — this board's `chr_latch_state` is the light board's, the trait's 0.
+
+    /// The per-tile state of the two substituting modes, packed so that the capture can hold it
+    /// in one value. `u64` and not `i32`: the six fields are 34 bits.
+    fn capture_state(&self) -> u64 {
+        u64::from(self.ex_attr_index)
+            | (u64::from(self.split_tile) << 10)
+            | (u64::from(self.split_row) << 20)
+            | (u64::from(self.split_column) << 28)
+            | (u64::from(self.split_in_region) << 33)
+            | (u64::from(self.split_capture) << 34)
+    }
+
+    /// Puts back what [`Mmc5Ext::capture_state`] took.
+    #[allow(clippy::cast_possible_truncation)] // Each field is masked to its own width.
+    fn restore_capture_state(&mut self, state: u64) {
+        self.ex_attr_index = (state & 0x03FF) as u16;
+        self.split_tile = ((state >> 10) & 0x03FF) as u16;
+        self.split_row = ((state >> 20) & 0xFF) as u8;
+        self.split_column = ((state >> 28) & 0x1F) as u8;
+        self.split_in_region = (state >> 33) & 1 != 0;
+        self.split_capture = (state >> 34) & 1 != 0;
+    }
+
+    /// Positions the per-tile state on the tile the capture is about to read: `address` is its
+    /// nametable address, `column` its screen tile column and `line` the screen line its top row
+    /// is drawn on.
+    ///
+    /// `column` may be negative or above 31 — the widescreen extension captures `extra` columns
+    /// on each side — and the split region is a property of the 32 columns the PPU draws, so a
+    /// column outside them is never in it.
+    fn position_captured_tile(&mut self, address: u16, column: i32, line: i32) {
+        self.ex_attr_index = address & 0x03FF;
+        if !self.split_enabled() {
+            return;
+        }
+
+        // The page's row for that line, as `Mmc5Ext::reload_split_row` computes it for a rendered
+        // one. `rem_euclid`, because the row of the band the capture emits is the one drawn on its
+        // **top** line, which is `line - 1` for the first band of a frame.
+        let row = (line + i32::from(self.split_scroll)).rem_euclid(240);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..240.
+        {
+            self.split_row = row as u8;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..32.
+        let column5 = (column & 0x1F) as u8;
+        self.split_column = column5;
+        self.split_in_region = (0..32).contains(&column) && self.split_covers(column5);
+        self.split_capture = true;
+        if self.split_in_region {
+            self.split_tile = ((u16::from(self.split_row) & 0xF8) << 2) | u16::from(column5);
+        }
+    }
+}
+
+/// Thirty-eight of the forty-one methods below are a **forward** to [`Mmc5Ext::base`], so the
+/// MMC5's PRG decode, its sound, its IRQ, its scanline detection, its bank windows and its
+/// savestate format have exactly one implementation and this board cannot drift from the light
+/// one. The three that are not — `ppu_peek`, `on_ppu_address_bus` and `read_nametable_from_vram`
+/// — plus the four write and state methods are where the two modes live.
+#[cfg(feature = "board-mmc5-exattr-split")]
+impl Mapper for Mmc5Ext {
+    fn mapper_number(&self) -> i32 {
+        self.base.mapper_number()
+    }
+
+    fn banks(&self) -> Option<&BankWindows> {
+        self.base.banks()
+    }
+
+    fn banks_mut(&mut self) -> Option<&mut BankWindows> {
+        self.base.banks_mut()
+    }
+
+    /// The light board's block with the split's three registers in the spare bits of `$5104`'s
+    /// `i32` — [`Mmc5Ext::packed_ex_ram_mode`] says why there and not in three bytes of its own.
+    ///
+    /// The clone is this board's one indulgence: `save_registers` takes `&self` and the one
+    /// function that knows the block's layout is the light board's, so the value it has to write
+    /// is handed to it through a copy of the board. It costs 1.4 KiB of memcpy per savestate —
+    /// a run-ahead frame or a rewind sample — against a second copy of a twenty-five-field
+    /// format that a future lot would have to keep in step.
+    fn save_registers(&self, writer: &mut StateWriter) {
+        let mut light = self.base.clone();
+        light.ex_ram_mode = self.packed_ex_ram_mode();
+        light.save_registers(writer);
+    }
+
+    /// The light board's parser, then the three registers out of the `i32` it stored whole.
+    ///
+    /// A state written by the **light** variant has zeros above bit 7, so this unpacks the three
+    /// registers to 0 — which is the light board's own state, since a write to any of them is
+    /// what would have armed this board (see [`Mmc5Ext::write_arms_substitution`]). A board that
+    /// has switched does **not** switch back for such a state: both modes off is a state this
+    /// board renders exactly as the light one does, which
+    /// `mf_leg_3_the_full_variant_renders_like_the_light_one_with_neither_mode` pins.
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.base.load_registers(reader)?;
+        let packed = self.base.ex_ram_mode;
+        self.base.ex_ram_mode = packed & 0x03;
+        self.unpack_split_registers(packed);
+        // Derived within one line, as `Mmc5::load_registers` says of `nt_read_counter`.
+        self.clear_derived_state();
+        Ok(())
+    }
+
+    fn reset(&mut self, memory: &mut CartridgeMemory) {
+        self.base.reset(memory);
+        // Power-on: the split is off, so nothing of it is armed and `$5201`'s row counter starts
+        // where a write will put it. `Board::reset` then puts the cartridge back on the light
+        // variant, so these three are the state of a board that is about to stop existing.
+        self.split_control = 0;
+        self.split_scroll = 0;
+        self.split_bank = 0;
+        self.clear_derived_state();
+    }
+
+    fn irq_asserted(&self) -> bool {
+        self.base.irq_asserted()
+    }
+
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        self.base.ppu_irq_horizon()
+    }
+
+    fn expansion_audio_output(&self) -> Option<i32> {
+        self.base.expansion_audio_output()
+    }
+
+    fn prg_ram_enabled(&self) -> bool {
+        self.base.prg_ram_enabled()
+    }
+
+    fn prg_ram_writable(&self) -> bool {
+        self.base.prg_ram_writable()
+    }
+
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        self.base.prg_ram_window(memory)
+    }
+
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        self.base.rom_windows(memory)
+    }
+
+    fn cpu_read_windows(&self, memory: &CartridgeMemory) -> CpuReadWindows {
+        self.base.cpu_read_windows(memory)
+    }
+
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        self.base.try_read_prg(memory, address)
+    }
+
+    fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        self.base.cpu_read_override(memory, address)
+    }
+
+    fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        self.base.cpu_peek_override(memory, address)
+    }
+
+    /// `$5200`-`$5202`, and the light board's decode for everything else. These three are the
+    /// only registers of the MMC5 that exist on this board alone, which is why a write to one of
+    /// them is what brings the board into being.
+    fn intercept_cpu_write(
+        &mut self,
+        memory: &mut CartridgeMemory,
+        address: u16,
+        value: u8,
+    ) -> bool {
+        if (0x5200..=0x5202).contains(&address) {
+            self.write_split_register(address, value);
+            return true;
+        }
+
+        self.base.intercept_cpu_write(memory, address, value)
+    }
+
+    fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        self.base.write_register(memory, address, value);
+    }
+
+    fn chr_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        self.base.chr_view(memory)
+    }
+
+    fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        self.base.chr_peek_view(memory)
+    }
+
+    /// The light board's CHR read with the two modes' substitution ahead of it.
+    ///
+    /// `inline(never)`: `Board::ppu_peek` and `Board::ppu_read` are the dispatches MF-LEG-2
+    /// measured at **+4 528 000 instructions on `metroid`** — one per CHR fetch, on a board that
+    /// has nothing to do with the MMC5 — when the MMC5's arm grew by a single `bool` test. An arm
+    /// that is a load and a call cannot grow the prologue that way, and only a game that armed a
+    /// mode ever takes it.
+    #[inline(never)]
+    fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        self.read_chr(memory, address, fetch)
+    }
+
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if memory.rom().chr_rom().is_empty() {
+            let offset = self.chr_address(address, ChrFetch::Background);
+            let ram = memory.chr_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[wrap_offset(offset, len)] = value;
+            }
+        }
+    }
+
+    fn chr_latch_state(&self) -> i32 {
+        self.base.chr_latch_state()
+    }
+
+    fn set_chr_latch_state(&mut self, state: i32) {
+        self.base.set_chr_latch_state(state);
+    }
+
+    fn advance_chr_latch(&mut self, pattern_table: i32, tile: i32) {
+        self.base.advance_chr_latch(pattern_table, tile);
+    }
+
+    /// Every PPU read — [`Mmc5Ext::see_ppu_read`], which is the light board's body with the two
+    /// modes' per-tile state latched inside it.
+    // Q-116
+    fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
+        self.see_ppu_read(address);
+    }
+
+    fn on_ppu_control(&mut self, control: u8) {
+        self.base.on_ppu_control(control);
+    }
+
+    fn on_ppu_scanline(&mut self, memory: &mut CartridgeMemory, scanline: i32, rendering: bool) {
+        self.base.on_ppu_scanline(memory, scanline, rendering);
+    }
+
+    fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {
+        self.base.on_cpu_cycle(memory);
+    }
+
+    /// Where `$5105` puts logical table `table`, and **`SERVED_BY_CARTRIDGE` for all four as soon
+    /// as either mode is armed**, so that every nametable-space fetch reaches
+    /// [`Mapper::read_nametable_from_vram`] — which is how the attribute override and the split's
+    /// tiles get onto the bus without a single test being added to any other board's fetch path
+    /// (lot MF-LEG-2).
+    ///
+    /// The condition is the two **register** bits alone, never `in_frame`:
+    /// `Cartridge::nametable_pages` is a cache refreshed by a CPU write to the cartridge, and a
+    /// condition that moved inside a frame would leave it stale. The in-frame half of the test is
+    /// made where the byte is answered. The switch itself refreshes the cache: it happens inside
+    /// `Board::intercept_cpu_write`, and `Cartridge::cpu_write` calls `refresh_rom_windows` —
+    /// which refreshes the pages of a board whose tables vary, mapper 5 among them — on every
+    /// write the board takes.
+    fn nametable_page(&self, table: i32) -> i32 {
+        if self.base.ex_ram_mode == 1 || self.split_enabled() {
+            return -2;
+        }
+
+        self.base.nametable_page(table)
+    }
+
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        self.base.read_nametable(memory, address)
+    }
+
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        self.base.write_nametable(memory, address, value);
+    }
+
+    /// Every nametable-space byte the PPU fetches while either mode is armed: the split's tile
+    /// and attribute, mode 1's per-tile attribute, and otherwise what the PPU would have read on
+    /// its own, `$5105`'s CIRAM pages included — which is why `vram` is here (lot MF-LEG-2).
+    ///
+    /// `inline(never)` for `ppu_peek`'s reason: `Board::read_nametable_from_vram` is on every
+    /// nametable fetch of every board.
+    #[inline(never)]
+    fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
+        if self.background_substitutes() {
+            self.substituted_nametable_byte(memory, address, vram)
+        } else {
+            // Outside rendering nothing is substituted: the page's two modes are about what the
+            // chip does to the PPU's *fetches*, and a `$2007` access is "treated as sprite
+            // accesses" or as a plain nametable read. Mesen's gate is the same `_ppuInFrame`
+            // (`MMC5.h:480`).
+            self.plain_nametable_byte(memory, address, vram)
+        }
+    }
+
+    /// Where a **write** to nametable-space `address` lands in console VRAM while the board is
+    /// answering all four tables, or `None` when the board keeps the byte itself (`ExRAM`) or
+    /// drops it (fill mode).
+    ///
+    /// Only the two substituting modes make this necessary: without them a table the board
+    /// answers is never a CIRAM table, so `Ppu2C02::write_nametable_byte`'s
+    /// `SERVED_BY_CARTRIDGE` arm is right as it stands — which is why the light board leaves the
+    /// trait's `None`. With them, a `$2007` write to a CIRAM table must still reach CIRAM, a
+    /// detail no cross-checked emulator has to think about, their PPUs holding one pointer per
+    /// table rather than a page number.
+    fn nametable_write_offset(&self, address: u16) -> Option<usize> {
+        let page = self.base.nametable_mode(address);
+        if page >= 2 {
+            return None;
+        }
+
+        Some((usize::try_from(page).unwrap_or(0) << 10) | usize::from(address & 0x03FF))
+    }
+
+    fn substitutes_background_tiles(&self) -> bool {
+        // The two **register** bits, as `Mmc5Ext::nametable_page` reads them: the capture asks
+        // once per row, before the loop, and `in_frame` is settled by then anyway.
+        self.base.ex_ram_mode == 1 || self.split_enabled()
+    }
+
+    fn background_capture_state(&self) -> u64 {
+        self.capture_state()
+    }
+
+    fn set_background_capture_state(&mut self, state: u64) {
+        self.restore_capture_state(state);
+    }
+
+    fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
+        self.position_captured_tile(address, column, line);
     }
 }

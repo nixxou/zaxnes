@@ -233,6 +233,8 @@ pub use mmc3_txc189::Mmc3Txc189;
 #[cfg(feature = "board-215")]
 pub use mmc3_unl8237::Mmc3Unl8237;
 pub use mmc5::Mmc5;
+#[cfg(feature = "board-mmc5-exattr-split")]
+pub use mmc5::Mmc5Ext;
 pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,
 };

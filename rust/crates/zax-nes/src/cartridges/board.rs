@@ -3,6 +3,8 @@
 
 #[cfg(feature = "board-decode-boards")]
 use super::mappers::DecodeBoard;
+#[cfg(feature = "board-mmc5-exattr-split")]
+use super::mappers::Mmc5Ext;
 #[cfg(feature = "board-namcot108")]
 use super::mappers::Namcot108;
 #[cfg(feature = "board-small-boards")]
@@ -142,18 +144,41 @@ pub enum Board {
     /// `docs/progress/MF-6c.md` step 6 has what it cost.
     #[cfg(feature = "board-decode-boards")]
     DecodeBoard(DecodeBoard),
+    /// Mapper 5 again: the MMC5 **with extended attribute mode or the vertical split armed**
+    /// (lot MF-LEG-3, feature `board-mmc5-exattr-split`).
+    ///
+    /// A cartridge is created on [`Board::Mmc5`] and stays there until a CPU write arms one of
+    /// the two modes, at which point [`Board::intercept_cpu_write`]'s MMC5 arm replaces the
+    /// value with this one, every register and memory carried across (see
+    /// [`Mmc5Ext::write_arms_substitution`]). It never goes back, except through a reset, which
+    /// starts on the light variant as a power-on does.
+    ///
+    /// **Boxed**, and the box is the point. `Board`'s largest variant is [`Board::Mmc5`] and the
+    /// enum's tag lives in a niche inside it (the note above); a second variant holding a second
+    /// MMC5 would be the same 1.4 KiB, overlap that niche, and cost rustc the niche-filling
+    /// layout — which is every dispatch prologue in this file, for all thirty-seven arms. Eight
+    /// bytes fit anywhere. What it costs instead is **one more `Board` discriminant**, which
+    /// MF-6c step 6 measured on its own: `mmc5` −40 814 instructions over 300 frames, the set
+    /// total −136 318 and the worst of PR-1's thirteen +0.000 %.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    Mmc5Ext(Box<Mmc5Ext>),
 }
 
-/// Expands `$body` once per variant with the board bound to `$b`.
-macro_rules! dispatch {
-    ($self:ident, $b:ident => $body:expr) => {
+/// Expands `$body` once per variant with the board bound to `$b`, and `$mmc5body` in the
+/// [`Board::Mmc5`] arm with the board bound to `$m` — which only [`Board::intercept_cpu_write`]
+/// needs, that arm being where the run-time switch to [`Board::Mmc5Ext`] happens.
+///
+/// One list of arms, expanded by both forms, because a second copy of thirty-seven variant names
+/// is a second copy to keep in step.
+macro_rules! dispatch_arms {
+    ($self:ident, $b:ident => $body:expr, mmc5 $m:ident => $mmc5body:expr) => {
         match $self {
             Board::Nrom($b) => $body,
             Board::Mmc1($b) => $body,
             Board::UxRom($b) => $body,
             Board::CnRom($b) => $body,
             Board::Mmc3($b) => $body,
-            Board::Mmc5($b) => $body,
+            Board::Mmc5($m) => $mmc5body,
             Board::AxRom($b) => $body,
             Board::Mmc2($b) => $body,
             Board::ColorDreams($b) => $body,
@@ -187,7 +212,17 @@ macro_rules! dispatch {
             Board::IrqBoard($b) => $body,
             #[cfg(feature = "board-decode-boards")]
             Board::DecodeBoard($b) => $body,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            Board::Mmc5Ext($b) => $body,
         }
+    };
+}
+
+/// [`dispatch_arms`] with the same body in every arm, the MMC5's included: every method of this
+/// file but [`Board::intercept_cpu_write`].
+macro_rules! dispatch {
+    ($self:ident, $b:ident => $body:expr) => {
+        dispatch_arms!($self, $b => $body, mmc5 $b => $body)
     };
 }
 
@@ -208,12 +243,41 @@ impl Mapper for Board {
         dispatch!(self, b => b.save_registers(writer));
     }
 
+    /// **The second of the three places the MMC5's variant can change** (lot MF-LEG-3): a state
+    /// written while a substituting mode was armed restores [`Board::Mmc5Ext`], whatever variant
+    /// the cartridge was running when it was loaded.
+    ///
+    /// The light board has already parsed the block — the two variants write the **same bytes in
+    /// the same order**, the split's three registers riding in the spare bits of `$5104`'s `i32`
+    /// (`Mmc5Ext::packed_ex_ram_mode`) — so all that is left is to read that `i32` off the board
+    /// and hand it the variant it belongs to. A state written by a build of **any** age therefore
+    /// loads, packs' idle savestates included, which is what the owner's point 5 asks for.
+    ///
+    /// The test is **after** the dispatch and not inside the MMC5's arm, where
+    /// [`Board::intercept_cpu_write`]'s is: this function runs once per state load — a rewind
+    /// sample or a run-ahead frame — and one compare there is not a figure, where the write path
+    /// is `NesBus::write_internal`'s own body.
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
-        dispatch!(self, b => b.load_registers(reader))
+        let loaded = dispatch!(self, b => b.load_registers(reader));
+        #[cfg(feature = "board-mmc5-exattr-split")]
+        if let Board::Mmc5(board) = self {
+            if loaded.is_ok() && Mmc5Ext::state_arms_substitution(board) {
+                *self = Board::Mmc5Ext(Mmc5Ext::armed_by_state(board));
+            }
+        }
+
+        loaded
     }
 
+    /// **The third place the MMC5's variant can change** (lot MF-LEG-3), and the only one that
+    /// goes back: a reset starts on the light variant exactly as a power-on does, so a game that
+    /// had armed a mode has to arm it again — as it has to write every other register again.
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         dispatch!(self, b => b.reset(memory));
+        #[cfg(feature = "board-mmc5-exattr-split")]
+        if let Board::Mmc5Ext(board) = self {
+            *self = Board::Mmc5(board.to_light());
+        }
     }
 
     /// **`#[inline(always)]`, and it has to stay: this is the last link of the per-CPU-cycle
@@ -329,13 +393,43 @@ impl Mapper for Board {
         dispatch!(self, b => b.cpu_peek_override(memory, address))
     }
 
+    /// **Where the MMC5's two substituting modes are armed** (lot MF-LEG-3). The cartridge runs
+    /// [`Board::Mmc5`] — `04731c86`'s board, to the instruction — until a write arms one of them,
+    /// and that write is the one chance to notice: a game cannot reach either mode without
+    /// writing `$5104` with mode %01 or `$5200` with bit 7 set, and both go through this board.
+    ///
+    /// **The test is inside the MMC5's own arm, and nowhere else.** This function is inlined into
+    /// `Cartridge::cpu_write` and `NesBus::write_internal`, which are one body as far as every
+    /// measurement of this project is concerned, so a test before or after the dispatch would be
+    /// a test on every board's write path — and MF-LEG-2 step 4 priced a single `bool` on the
+    /// cartridge's common write path at **+610 864 instructions on `smb3`**. No other arm of the
+    /// thirty-seven changes, and with the feature off the `cfg` takes the whole thing out.
+    ///
+    /// The `Board` value is replaced in place and every register, memory, counter and flag goes
+    /// with it ([`Mmc5Ext::armed_by_write`]). `Cartridge::cpu_write` then calls
+    /// `refresh_rom_windows` on the write this returns `true` for, which refreshes the cached
+    /// nametable pages of a board whose tables vary — mapper 5 is in that list — so the new
+    /// variant's `SERVED_BY_CARTRIDGE` answers reach the PPU on the very next fetch.
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
         address: u16,
         value: u8,
     ) -> bool {
-        dispatch!(self, b => b.intercept_cpu_write(memory, address, value))
+        dispatch_arms!(self, b => b.intercept_cpu_write(memory, address, value),
+        mmc5 board => {
+            let handled = board.intercept_cpu_write(memory, address, value);
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            if Mmc5Ext::write_arms_substitution(address, value) {
+                // `board`'s borrow of `*self` ends above; the construction of the full board
+                // is `inline(never)`, so none of its 1.4 KiB lands in this frame.
+                if let Board::Mmc5(light) = &*self {
+                    *self = Board::Mmc5Ext(Mmc5Ext::armed_by_write(light, address, value));
+                }
+            }
+
+            handled
+        })
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
@@ -418,23 +512,28 @@ impl Mapper for Board {
     /// **Not a `dispatch!`, deliberately** (lot MF-LEG-2). The paragraph above is the reason:
     /// `read_nametable`'s dispatch holds exactly two distinct arm bodies and a third makes it a
     /// jump table whose register pressure costs *every* board two instructions per nametable
-    /// fetch. So this one tests for the single board that overrides the method — the MMC5 with
-    /// `board-mmc5-exattr-split` on — and hands everything else to `read_nametable` unchanged,
-    /// which keeps that function and its bitset exactly as they are.
+    /// fetch. So this one tests for the single board that overrides the method — the MMC5 with a
+    /// substituting mode armed, i.e. [`Board::Mmc5Ext`] — and hands everything else to
+    /// `read_nametable` unchanged, which keeps that function and its bitset exactly as they are.
+    ///
+    /// **The test is for the full variant and not for the MMC5** (lot MF-LEG-3), which is what
+    /// makes these six methods free for a game that arms neither mode: that game is
+    /// [`Board::Mmc5`], and [`Board::Mmc5`] takes the same `_` arm as an NROM.
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
         match self {
-            Board::Mmc5(board) => board.read_nametable_from_vram(memory, address, vram),
+            Board::Mmc5Ext(board) => board.read_nametable_from_vram(memory, address, vram),
             _ => self.read_nametable(memory, address),
         }
     }
 
     /// The same shape and the same reason as [`Board::read_nametable_from_vram`]: one test for
-    /// the MMC5, `None` for every other board.
+    /// the full MMC5 variant, `None` for every other board — the light MMC5 included, which
+    /// keeps the byte itself (`ExRAM`) or drops it (fill mode) exactly as it did before.
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn nametable_write_offset(&self, address: u16) -> Option<usize> {
         match self {
-            Board::Mmc5(board) => board.nametable_write_offset(address),
+            Board::Mmc5Ext(board) => board.nametable_write_offset(address),
             _ => None,
         }
     }
@@ -446,7 +545,7 @@ impl Mapper for Board {
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn substitutes_background_tiles(&self) -> bool {
         match self {
-            Board::Mmc5(board) => board.substitutes_background_tiles(),
+            Board::Mmc5Ext(board) => board.substitutes_background_tiles(),
             _ => false,
         }
     }
@@ -454,21 +553,21 @@ impl Mapper for Board {
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn background_capture_state(&self) -> u64 {
         match self {
-            Board::Mmc5(board) => board.background_capture_state(),
+            Board::Mmc5Ext(board) => board.background_capture_state(),
             _ => 0,
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn set_background_capture_state(&mut self, state: u64) {
-        if let Board::Mmc5(board) = self {
+        if let Board::Mmc5Ext(board) = self {
             board.set_background_capture_state(state);
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
-        if let Board::Mmc5(board) = self {
+        if let Board::Mmc5Ext(board) = self {
             board.position_captured_background_tile(address, column, line);
         }
     }
