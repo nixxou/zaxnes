@@ -10,6 +10,8 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
+**2026-11-09, R0: `board-mmc5-exattr-split` is in `default`** and out of `parked-boards`. R0's verification of MF-LEG-3 (`03eb6005`) with the feature on, against `6c253faa`: level 2 worst `smb1` total +0.011 %, PR-1 worst +0.009 % (`metroid`), `mmc5` -0.059 %, *Castlevania III* (USA, 600 frames) **-0.030 %**; golden-core over the 98 originals identical, the owner's smoke sets identical, the A/B of the 61 packs against v0.4.2 identical with and without pack. Three features are now parked.
+
 **2026-11-09, `board-mmc5-exattr-split` stays parked.** The owner allowed it into `default` if it cost under 1 %. It does on every non-MMC5 ROM (worst `metroid` +0.110 % core, +0.090 % total), but a real MMC5 game pays more: *Castlevania III* (USA), 600 frames of `bench-core`, **+2.992 %** (26 081 931 964 -> 26 862 247 359), although it uses neither mode; the `mmc5` PR-1 ROM is +2.522 %. R0 moved it into `default` (01da4943) and reverted that (cb0dc59f) on that figure. Lowering the MMC5's own cost is the condition for un-parking it.
 
 **2026-11-09, lot MF-LEG-3: the condition is met, and the decision is R0's and the owner's.** The

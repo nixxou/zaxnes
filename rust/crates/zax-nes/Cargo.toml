@@ -76,6 +76,9 @@ default = [
     "board-246",
     "board-vrc2-latch",
     "board-mmc1a",
+    # In `default` since 2026-11-09 (R0, on the owner's go): MF-LEG-3 arms the two modes at run
+    # time, worst ROM +0.011 %, Castlevania III -0.030 %. See the feature's own note.
+    "board-mmc5-exattr-split",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -1089,7 +1092,6 @@ parked-boards = [
     "board-vs-system",
     "board-292",
     "board-143-open-bus",
-    "board-mmc5-exattr-split",
 ]
 
 # The MMC5's **extended attribute mode** ($5104 = %01) and its **vertical split**
