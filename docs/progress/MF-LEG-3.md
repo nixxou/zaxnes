@@ -484,4 +484,97 @@ still true of this tree. Its one paragraph this lot could have strengthened is t
 scoring, and the brief asks for `BOARD-FEATURES.md` and the `Cargo.toml` note, not for a second
 pass over the report; the figures that would feed such a pass are in step 4 of this note, where a
 later lot or R0 will find them.
-- [ ] 6/6 the final check
+- [x] 6/6 the final check
+
+### 6/6 — the final check
+
+Everything below was run on the committed tree of step 5 (`9c9c58f4`), not on an earlier shape.
+
+**fmt**: `cargo fmt -p zax-nes -p zax-harness --check` clean.
+
+**clippy `--all-targets -- -D warnings`**, the four configurations the brief names:
+
+| configuration | result |
+| --- | --- |
+| `default` | clean |
+| `--features zax-nes/board-mmc5-exattr-split` (the feature alone) | clean |
+| `--features zax-nes/parked-boards` | clean |
+| `zax-nes --no-default-features` | clean |
+
+**`cargo test --release -p zax-nes -p zax-harness`**:
+
+| configuration | without the ROM roots | with both roots, `--include-ignored --no-fail-fast` |
+| --- | --- | --- |
+| `default` | **1 167 / 0 / 10** | **1 177 / 0 / 0** |
+| `--features zax-nes/board-mmc5-exattr-split` | **1 206 / 0 / 10** | **1 216 / 0 / 0** |
+| `--features zax-nes/parked-boards` | **1 267 / 0 / 10** | **1 277 / 0 / 0** |
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`.
+**All pass; nothing fails and nothing is skipped** in the three runs with the roots set. Against
+MF-LEG-2 step 6's own figures (1 177 / 1 200 / 1 261) that is **`default` unchanged** and **+16**
+in the other two — this lot's sixteen tests, with MF-LEG-2's twenty-three all passing through the
+run-time switch.
+
+**golden-core over the 98 originals**, 1 200 frames each, re-run on the final tree:
+
+| build | md5 | `cmp` against the base commit's file |
+| --- | --- | --- |
+| `04731c86`, fresh tree (step 3) | `f79e7df842c3ee43e7d9b67861a927b5` | — |
+| `default` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| `--features zax-nes/board-mmc5-exattr-split` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+
+**The binary, one last time.** The committed tree was tarred and built clean once more with the
+feature off: md5 **`104030539c326d44d2ac4f6a2b088e79`**, the base commit's binary **whole-file**,
+and MF-LEG-2's measured shipped binary with it. So "with the feature off, identical to the base"
+is settled on the artefact and not on a ROM run, for the fourth time in this note and the last.
+
+**No savestate byte of any other board is touched, and the light MMC5's is not either.** Three
+independent statements: the shipped binary *is* the base commit's, so no `save_registers` of any
+board can have moved; `Mmc5::save_registers` and `Mmc5::load_registers` are `ca1517dc`'s source
+verbatim, without a `#[cfg]` in them, so with the feature on they still write the block the
+default build writes; and the format version does not move, because the full variant's three
+registers ride in bits of a word the block already carried
+(`mf_leg_3_the_savestate_block_is_the_same_length_in_both_variants`, and the five other state
+tests of step 2).
+
+**No mapper outside mapper 5 changes.** Three statements of that too: the same binary with the
+feature off; golden-core identical over the 98 originals (mappers 0, 1, 2, 3, 4 and 156) **with
+the feature on as well**; and level-2 `apu` and `draw_list` +0 with `core` +0.007 % to +0.010 %,
+which is the dispatch and not an emulation difference.
+
+**The callgrind figures and the decision**, from step 4:
+
+| | shipped (feature off) | feature on |
+| --- | --- | --- |
+| PR-1's thirteen, worst ROM | **the same binary** | `metroid` **+0.010 %** |
+| PR-1's thirteen, set total | — | **−3 223 008 (−0.004 %)**, below the base |
+| `mmc5`, which **arms neither mode** | — | **−0.059 %** |
+| level 2, `core` | — | **+0.007 % to +0.010 %** on all five |
+| level 2, `total` | — | −0.005 % to +0.016 % on all five |
+| over the +0.02 % tolerance | **nothing** | **nothing** |
+
+**Decision: the figures pass and `board-mmc5-exattr-split` is left where it is** — out of
+`default` and in `parked-boards`. Un-parking it is R0's and the owner's call (the brief: "R0 will
+do it if the figures below pass"), and the owner's note of 2026-11-09 sets *Castlevania III* as
+the test; this lot's answer to that is structural and measured on the same board and the same
+paths — it arms neither mode, so it runs `04731c86`'s MMC5 and the figure it can pay is `mmc5`'s
+**−0.059 %**, against MF-LEG-2's **+2.992 %**.
+
+**Licence.** No new third-party source was read for this lot: the five GPL emulators in
+`third_party/` informed MF-LEG-2's banner, which this lot **moved** rather than rewrote, with its
+`file:line` citations intact and no line transcribed. `mmc5.rs`'s existing Mesen attribution header
+is unchanged and still accurate.
+
+**Open afterwards**: **Q-177**, MF-LEG-2's three readings where the five emulators disagree,
+still awaiting R0 — this lot moved the code and the `// Q-177` marker with it and changed none of
+the three. Entry MMC5-1's verdict **DIFFERS** still stands for the shipped build by design, and
+the gap its closing paragraph names — no test ROM in the collection can judge these two features —
+is still open: step 3 re-measured that `mmc5exram` does not even arm them.
+
+**One thing a later lot should know**, because it cost this one three builds to find: on this
+enum, at this size, **removing `Board`'s niche-filling layout is cheaper than keeping it**. The
+tag in a niche costs four instructions of prologue (`movzbl 1355(%rcx); subb $2; movl $5;
+cmovael`) where a tagged layout costs one load, and the 16 bytes `Board` grows by are paid once
+at load time. MF-2 step 0's warning is about a reshape that *moves* the tag between variants and
+is not about this.
