@@ -14,7 +14,7 @@ a design note for the lots that would follow.
   `zax-harness` use.
 - [x] 2/8 — The fork and a core-only build: FCEUX's core as a library with no GUI, no Lua, no Qt,
   no SDL, for Windows x64 (MSVC) then Linux x64 (WSL). Fork commit `14ef77cf`.
-- [ ] 3/8 — A minimal C API (`zax/zaxfceux.h` + `.cpp` in the fork).
+- [x] 3/8 — A minimal C API (`zax/zaxfceux.h` + `.cpp` in the fork). Fork commit `d81b904f`.
 - [ ] 4/8 — The Rust side: crate `zax-fceux` behind the Cargo feature `fceux-core` (off by
   default), plus a `zax-harness fceux-run` subcommand writing `golden-core`'s digests.
 - [ ] 5/8 — Compare the engines over the 291 public test ROMs and the 98 originals.
@@ -366,3 +366,112 @@ for step 7's binary-size section: **the whole FCEUX core, all ~270 boards includ
 `zax/scmrev.h` stands in for the revision header `scripts/genGitHdr.bat` generates, which the
 library must not have (it has to be reproducible); it is found through the include path because
 `src/scmrev.h` does not exist, so no FCEUX file is patched for it.
+
+---
+
+# Step 3 — The C API
+
+`zax/zaxfceux.h` + `zax/zaxfceux.cpp` in the fork. Step-3 commit: **`d81b904f`**.
+
+C ABI throughout: no C++ type and no exception crosses it (every entry point is wrapped in a
+catch-all that reports an error code), every buffer comes with its length, and the header includes
+nothing of FCEUX's — the Rust side never sees an FCEUX header.
+
+## The surface
+
+| Call | What it does |
+|---|---|
+| `zax_version` | the FCEUX version forked and the build configuration |
+| `zax_set_log_sink`, `zax_flush_log` | the receiver of the core's diagnostics, including *why* a ROM was refused |
+| `zax_create`, `zax_destroy`, `zax_is_live` | the one instance; `zax_create` returns `ZAX_ERR_ALREADY_LIVE` while one is alive |
+| `zax_load_rom(image, len, name)` | iNES / NES 2.0 bytes from memory; `name` is what FCEUX reports and what it uses with the image's MD5 against its own database. Nothing touches the filesystem |
+| `zax_close_rom`, `zax_has_rom` | |
+| `zax_power`, `zax_reset` | power-cycle and the reset line |
+| `zax_get_region`, `zax_set_region` | `ZAX_REGION_NTSC` / `PAL` / `DENDY`, FCEUX's own values |
+| `zax_set_ram_init(option, seed)` | what power-on writes into the work RAM — the two fields a `.fm2` header carries |
+| `zax_set_input(pad1, pad2)` | A, B, Select, Start, Up, Down, Left, Right from bit 0 to bit 7, the order both engines shift them out in |
+| `zax_run_frame`, `zax_frame_count` | |
+| `zax_get_frame_indices` | 256×240 bytes, one NES colour index 0-63 a pixel |
+| `zax_get_frame_emphasis` | 256×240 bytes, the three `$2001` emphasis bits a pixel |
+| `zax_set_sample_rate`, `zax_get_sample_rate`, `zax_get_audio` | mono `int16` samples; 44100/48000/96000 or 0, FCEUX's own contract |
+| `zax_state_size_hint`, `zax_save_state`, `zax_load_state` | savestate to and from a caller buffer |
+| `zax_read_memory`, `zax_write_memory` | for Lua profiles and achievements |
+
+## The third patch to FCEUX: nine added lines in `src/fceu.cpp`
+
+`FCEUI_LoadGameVirtual` opened its path unconditionally (`fceu.cpp:437`), so there was no way to
+hand the core bytes. The patch is a **consumed-once `FCEUFILE *zax_rom_override`** checked at that
+one point: when `zax/zaxfceux.cpp` has put a file over an `EMUFILE_MEMORY` there, that file is
+used and no path is opened. Everything after it is FCEUX's own load path untouched — the format
+probing, the database lookup, `PowerNES`, the palette, and the `FCEU_fclose` at the end of the
+function, which takes ownership of the file. Zaxnes has already read, decompressed and possibly
+patched the image itself, so this is also the only shape that makes sense.
+
+The alternative considered and rejected: splitting `FCEUI_LoadGameVirtual` in two so that the part
+after the open became a public entry point. Mechanically clean, but a far larger diff across a
+function with a dozen `#ifdef` branches, for no gain.
+
+## Two things FCEUX leaves to a GUI and a library has to do itself
+
+1. **Plug the pads in after every load.** FCEUX expects its *driver* to choose the devices, and
+   the core only ever asks for that through `FCEUD_SetInput` — which it calls when a movie starts
+   and at no other time (`movie.cpp:1116`). Without doing it here both ports stay unset and no
+   button ever reaches the game. The API sets two standard pads reading one `uint32`, which is the
+   layout `UpdateGP` decodes (`input.cpp:246-269`).
+2. **Buffer the diagnostics into lines.** `FCEU_printf` (`fceu.cpp:1116`) formats and forwards
+   straight to `FCEUD_Message`, and the core calls it with *fragments*: a ROM's MD5 arrived as
+   sixteen separate two-character "lines" in the first run of the self-test. Fragments are now
+   accumulated and the sink gets one whole line at a time.
+
+## Decisions worth recording
+
+- **Savestates are written uncompressed** (`FCEUSS_SaveMS(os, 0)`, which takes `state.cpp`'s
+  uncompressed path at `:449-468`). A rollback snapshot is written and thrown away dozens of times
+  a second; deflating it would cost far more than the memory it saves, and Zaxnes compresses
+  nothing in its own states either. `zax_load_state` passes `SSLOADPARAM_NOBACKUP`: FCEUX's backup
+  mode exists for its own undo feature and would double the cost of a rollback.
+- **`zax_state_size_hint` is a measurement, not a declaration.** FCEUX announces no bound of its
+  own, so the hint writes one state and reports what it took plus room to spare. A caller that
+  gets `ZAX_ERR_BUFFER_TOO_SMALL` must still believe the length handed back.
+- **`zax_read_memory` uses `GetMem`** (`debug.cpp:337-371`), FCEUX's own side-effect-free read: it
+  answers the PPU and APU registers from their shadow copies instead of clocking them and raises
+  `fceuindbg` around the cartridge read so no board reacts. `ARead[A](A)` on its own would switch
+  banks under a watch expression. Writes go through `BWrite[A](A, V)` — the CPU's own path, side
+  effects included, which is what a cheat or a Lua poke asks for. (`FCEUI_MemPoke`, declared at
+  `driver.h:240`, has **no definition anywhere in FCEUX** and is unusable.)
+- **The 8-sprite limit stays on** and both render planes stay enabled: the comparison with
+  Zaxnes's core is only meaningful between two machines under the same rule.
+- **`zax_get_audio` clamps to `int16`.** `WaveFinal` is `int32` but already scaled to the 16-bit
+  range — FCEUX's own audio drivers assign the values straight into an `int16`
+  (`drivers/Qt/sdl-sound.cpp:137,160`). The clamp only stops an out-of-range value wrapping to the
+  opposite sign.
+
+## A limit of `zax_set_ram_init`, recorded rather than patched
+
+Options `DEFAULT`, `FF` and `00` are deterministic and ignore the seed. Option `RANDOM` cannot have
+its seed pinned from outside: `PowerNES` reseeds `RAMInitSeed` from `rand()` on every power-on
+unless a movie is active (`fceu.cpp:1031-1039`). That is FCEUX's own behaviour and precisely why a
+`.fm2` header records both fields — a movie replays because playback is a movie mode and the
+reseed is skipped. Nothing is patched for it; **the default option is deterministic**, which is
+what steps 4 and 5 need.
+
+## The self-test, and what it proves
+
+`zax/zaxselftest.c` now drives the whole API on a real ROM (and is still compiled as C, which
+checks the header is usable from C). On `nestest.nes`, 60 frames, **Windows and Linux agree to the
+bit**:
+
+| | Value |
+|---|---|
+| pixels (FNV-1a over 60 frames of indices) | `56d79e3b774c5a2f` |
+| emphasis | `a58e4c7456800383` |
+| audio | `a84e2746a863a81b` over **47917** samples |
+| savestate | hint 93304, written 79296, round trip brings the picture back |
+| memory | `$0010` written and read back |
+
+47917 samples over 60 frames at 48 kHz is 798.6 a frame — NTSC's 48000/60.0988, so the audio
+pipeline is running at the right rate rather than at a nominal 60.
+
+It also checks the two refusals the ABI promises: a second `zax_create` returns
+`ZAX_ERR_ALREADY_LIVE`, and a short frame buffer returns `ZAX_ERR_BUFFER_TOO_SMALL` instead of
+being quietly truncated.
