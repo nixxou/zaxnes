@@ -179,7 +179,9 @@ impl<'a> Area<'a> {
             .prg_rom
             .get(AREA_BANK * BANK_SIZE..(AREA_BANK + 1) * BANK_SIZE)?;
         let bank = usize::from(memory.ram(SCREEN_BANK));
-        let screens = memory.prg_rom.get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE)?;
+        let screens = memory
+            .prg_rom
+            .get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE)?;
         let screen_table = (usize::from(memory.ram(SCREEN_TABLE))
             | (usize::from(memory.ram(SCREEN_TABLE + 1)) << 8))
             .checked_sub(0x8000)?;
