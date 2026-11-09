@@ -112,9 +112,10 @@ provided by the core and is what we may call.
   `zlib/zlib.h:623` and `uncompress` at `:638`), and `src/CMakeLists.txt:352-377` already wires it
   as the "internal zlib" fallback. **No download needed.** On Linux the system zlib is present.
 - **minizip** — only `file.cpp:192-249` (`unzOpen` … `unzClose`), for ROMs inside a `.zip`. The
-  in-tree `src/utils/unzip.cpp` + `ioapi.cpp` are a copy of it, so this too needs no download; but
-  since the C API loads a ROM **from memory**, archive support is dead weight and will be cut with
-  a guard rather than compiled (decided at step 2).
+  in-tree `src/utils/unzip.cpp` + `ioapi.cpp` are a copy of it, so this too needs no download.
+  Since the C API loads a ROM **from memory**, archive support is never reached; whether to cut it
+  with a guard or just compile those two files was left to step 2, which kept them (it needs no
+  patch — see §2).
 - Nothing else: no Qt, no SDL, no Lua (the `_S9XLUA_H` blocks in `fceu.cpp:817-838` vanish when the
   macro is undefined), no libarchive (`vcpkg.json` lists it for the Qt driver only), no x264/libav.
 
