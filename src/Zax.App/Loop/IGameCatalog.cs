@@ -15,6 +15,10 @@ namespace Zax.App.Loop;
 /// same empty profile, but converted in 3D with the default geometry rather than shown as a flat
 /// picture (Q-065).
 /// </param>
+/// <param name="Tiles">
+/// The raw tiles a 3dh profile still waits for, or null for a 3dn profile and for the generic
+/// entries (AMD-062 REQ-PROF-080).
+/// </param>
 internal sealed record ResolvedGame(
     string Id,
     string Title,

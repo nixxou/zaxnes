@@ -15,6 +15,14 @@ public sealed class ObjectGeometry
 {
     private readonly TileMesh[] _meshes;
     private readonly int[] _meshOfImage;
+    private readonly bool[] _full;
+
+    /// <summary>
+    /// The mesh variants REQ-SCN-087 draws, memoised on first use: 16 slots per mesh, one per
+    /// combination of removed lateral sides, slot 0 being the mesh itself. Only a full tile
+    /// ever reaches them.
+    /// </summary>
+    private readonly TileMesh?[] _variants;
 
     internal ObjectGeometry(
         EnginePattern pattern,
@@ -24,7 +32,8 @@ public sealed class ObjectGeometry
         int buildDepth,
         int effectiveDepth,
         TileMesh[] meshes,
-        bool multicolor)
+        bool multicolor,
+        bool[]? fullTiles = null)
     {
         Pattern = pattern;
         Texture = texture;
@@ -34,6 +43,8 @@ public sealed class ObjectGeometry
         EffectiveDepth = effectiveDepth;
         _meshes = meshes;
         Multicolor = multicolor;
+        _full = fullTiles ?? new bool[meshes.Length];
+        _variants = new TileMesh?[meshes.Length * 16];
 
         int highest = 0;
         foreach (TileImage image in pattern.Images)
@@ -119,6 +130,48 @@ public sealed class ObjectGeometry
         ArgumentNullException.ThrowIfNull(image);
         int index = Index(image);
         return index < 0 ? null : _meshes[index];
+    }
+
+    /// <summary>
+    /// Whether <paramref name="image"/> is a <b>full</b> tile of this 3D object
+    /// (AMD-063 REQ-SCN-087): its mesh algorithm is not MARCHING, its depth <c>D</c> is greater
+    /// than 0 and all three slots of every one of its <c>8 × 8 × D</c> voxels are occupied,
+    /// <c>emptyColor</c> included. Only such a tile can lose a lateral face.
+    /// </summary>
+    public bool IsFullTile(TileImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        int index = Index(image);
+        return index >= 0 && _full[index];
+    }
+
+    /// <summary>
+    /// The mesh REQ-SCN-087 draws for <paramref name="image"/> with <paramref name="sides"/>
+    /// taken off. Sides are honoured on a full tile only; any other tile keeps every face it was
+    /// built with, as AMD-057 leaves it.
+    /// </summary>
+    /// <param name="image">The tile image.</param>
+    /// <param name="sides">The lateral sides the frame decided to remove.</param>
+    public TileMesh? Mesh(TileImage image, TileSides sides)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        int index = Index(image);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        TileMesh mesh = _meshes[index];
+        int mask = (int)(sides & TileSides.All);
+        if (mask == 0 || !_full[index])
+        {
+            return mesh;
+        }
+
+        // Memoised: a mesh handed to the renderer keeps the same identity from frame to frame,
+        // which is what lets a host cache its buffers (REQ-E3D-602).
+        int slot = (index * 16) + mask;
+        return _variants[slot] ??= TileSideRemoval.Apply(mesh, sides);
     }
 
     private int Index(TileImage image)

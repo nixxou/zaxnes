@@ -47,6 +47,25 @@ public interface IPatternGeometryBuilder
     TileMesh? MeshOf(PatternInstance instance, TileImage image);
 
     /// <summary>
+    /// The mesh of one tile image with the lateral faces AMD-063 REQ-SCN-087 removes taken off.
+    /// A builder that knows no full tile answers the whole mesh, as AMD-057 drew it.
+    /// </summary>
+    /// <param name="instance">The reference 3D object.</param>
+    /// <param name="image">The tile image.</param>
+    /// <param name="removedSides">The lateral sides the frame decided to remove.</param>
+    TileMesh? MeshOf(PatternInstance instance, TileImage image, TileSides removedSides)
+        => MeshOf(instance, image);
+
+    /// <summary>
+    /// Whether the tile <paramref name="image"/> of <paramref name="instance"/> is <b>full</b>
+    /// in the sense of AMD-063 REQ-SCN-087. False for a builder that has no voxel field to
+    /// answer from, which then removes nothing.
+    /// </summary>
+    /// <param name="instance">The reference 3D object.</param>
+    /// <param name="image">The tile image.</param>
+    bool IsFullTile(PatternInstance instance, TileImage image) => false;
+
+    /// <summary>
     /// The resolved texture of a pattern instance (SPEC-04B REQ-E3D-426, REQ-E3D-641), or null
     /// when its geometry has not been built.
     /// </summary>

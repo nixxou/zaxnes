@@ -340,6 +340,25 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
     }
 
     /// <inheritdoc/>
+    public TileMesh? MeshOf(PatternInstance instance, TileImage image, TileSides removedSides)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(image);
+        return _geometry.TryGetValue(instance, out ObjectGeometry? geometry)
+            ? geometry.Mesh(image, removedSides)
+            : null;
+    }
+
+    /// <inheritdoc/>
+    public bool IsFullTile(PatternInstance instance, TileImage image)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(image);
+        return _geometry.TryGetValue(instance, out ObjectGeometry? geometry)
+            && geometry.IsFullTile(image);
+    }
+
+    /// <inheritdoc/>
     public ObjectTexture? TextureOf(PatternInstance instance)
     {
         ArgumentNullException.ThrowIfNull(instance);
@@ -388,6 +407,7 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
             out int effectiveDepth);
 
         TileMesh[] meshes = new TileMesh[fields.Length];
+        bool[] full = new bool[fields.Length];
         if (algorithm == RenderAlgorithm.Marching)
         {
             PatternVoxels voxels = PatternVoxels.Create(pattern, texture, fields);
@@ -403,6 +423,11 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
             for (int n = 0; n < meshes.Length; n++)
             {
                 meshes[n] = GreedyMesher.Build(fields[n], texture, multicolor);
+
+                // AMD-063 REQ-SCN-087: a variant whose effective algorithm is not MARCHING has
+                // removable inner faces, whatever its opacity and its render style — the
+                // opacity is read on the drawn instance and nowhere else.
+                full[n] = IsFullTile(fields[n]);
             }
         }
 
@@ -418,7 +443,8 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
             requested,
             effectiveDepth,
             meshes,
-            algorithm == RenderAlgorithm.GreedyMulticolor);
+            algorithm == RenderAlgorithm.GreedyMulticolor,
+            full);
 
         _geometry[instance] = built;
         House(instance, built, report: true);
@@ -426,6 +452,41 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
         _pending.Add(instance);
         _built++;
         BuildCount++;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="field"/> is a full tile in the sense of AMD-063 REQ-SCN-087:
+    /// <c>D > 0</c> and all three slots of each of its <c>8 × 8 × D</c> voxels occupied
+    /// (REQ-E3D-422), <c>emptyColor</c> included (REQ-E3D-424).
+    /// </summary>
+    /// <remarks>
+    /// A hollow geometry — <c>CUBE</c>, the cylinders — leaves the inside of the field empty and
+    /// so yields no full tile, which the amendment wants.
+    /// </remarks>
+    private static bool IsFullTile(TileVoxels field)
+    {
+        if (field.Depth <= 0)
+        {
+            return false;
+        }
+
+        for (int k = 0; k < field.Depth; k++)
+        {
+            for (int j = 0; j < TileVoxels.SizeY; j++)
+            {
+                for (int i = 0; i < TileVoxels.SizeX; i++)
+                {
+                    if (!field.Occupied(i, j, k, TileVoxels.AxisX)
+                        || !field.Occupied(i, j, k, TileVoxels.AxisY)
+                        || !field.Occupied(i, j, k, TileVoxels.AxisZ))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
     }
 
     // ----------------------------------------------- AMD-051 REQ-E3D-644 and REQ-E3D-646

@@ -23,6 +23,13 @@ public sealed class DrawListBuilder
 {
     private readonly FrameDrawList _list = new();
 
+    /// <summary>
+    /// The per-frame background cell map of AMD-063 REQ-SCN-087 step 1: at most one instance per
+    /// cell of the 35 × 33 background grid, and the tile it put there.
+    /// </summary>
+    private readonly FrameInstance?[] _cellInstance = new FrameInstance?[ConversionGrid.CellCount];
+    private readonly FrameTile?[] _cellTile = new FrameTile?[ConversionGrid.CellCount];
+
     /// <summary>Builds the draw list of <paramref name="frame"/>.</summary>
     /// <param name="frame">The frame to draw.</param>
     /// <param name="settings">The settings the pipeline consumes.</param>
@@ -42,6 +49,7 @@ public sealed class DrawListBuilder
         ArgumentNullException.ThrowIfNull(geometry);
 
         _list.Begin(frame);
+        MapBackgroundCells(frame);
         foreach (FrameInstance instance in frame.Instances)
         {
             if (instance.Style == RenderStyle.Hidden)
@@ -58,6 +66,92 @@ public sealed class DrawListBuilder
         }
 
         return _list;
+    }
+
+    /// <summary>
+    /// Step 1 of AMD-063 REQ-SCN-087: walking the ordered instance list of the frame
+    /// (REQ-E3D-040), each cell of the background grid keeps at most one instance — the first
+    /// one that claims it, replaced only when the one held is opaque and the new one
+    /// transparent.
+    /// </summary>
+    /// <remarks>
+    /// The map is read for the <b>neighbourhood</b> of a drawn tile, so it is built on the
+    /// instances of the frame and on every tile of their shapes, restored shapes included, as
+    /// the requirement words it — not on the tiles the draw list ends up holding. Q-179.
+    /// </remarks>
+    private void MapBackgroundCells(ConversionFrame frame)
+    {
+        Array.Clear(_cellInstance);
+        Array.Clear(_cellTile);
+
+        foreach (FrameInstance instance in frame.Instances)
+        {
+            FrameShape shape = instance.Shape;
+            if (!shape.Background)
+            {
+                continue;
+            }
+
+            bool transparent = IsTransparent(instance);
+            foreach (FrameTile tile in shape.Tiles)
+            {
+                int index = tile.GridIndex;
+                if ((uint)index >= (uint)_cellInstance.Length)
+                {
+                    continue;
+                }
+
+                // Nothing there yet, or what is there is opaque and this one is transparent.
+                bool claim = _cellInstance[index] is not { } held || (transparent && !IsTransparent(held));
+                if (claim)
+                {
+                    _cellInstance[index] = instance;
+                    _cellTile[index] = tile;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an instance is <b>transparent</b> in the sense of AMD-063 REQ-SCN-087: its own
+    /// opacity is strictly below 1 and its own render style is not 2. An <c>Alpha</c> above 1 is
+    /// therefore opaque, which is the assumed divergence (D) of §4.
+    /// </summary>
+    private static bool IsTransparent(FrameInstance instance)
+        => instance.Alpha < 1f && instance.Style != RenderStyle.ShadowOnly;
+
+    /// <summary>
+    /// Step 2 of AMD-063 REQ-SCN-087: the lateral sides a drawn full tile of a transparent
+    /// background instance loses — those whose 4-neighbour cell holds an instance that is
+    /// transparent and whose tile there is full for <b>its</b> reference 3D object. A cell
+    /// outside the grid removes nothing.
+    /// </summary>
+    private TileSides RemovedSides(FrameTile tile, IPatternGeometryBuilder geometry)
+    {
+        Cell cell = tile.Position;
+        TileSides sides = TileSides.None;
+        sides |= Side(cell.X - 1, cell.Y, TileSides.Left, geometry);
+        sides |= Side(cell.X + 1, cell.Y, TileSides.Right, geometry);
+        sides |= Side(cell.X, cell.Y - 1, TileSides.Top, geometry);
+        sides |= Side(cell.X, cell.Y + 1, TileSides.Bottom, geometry);
+        return sides;
+    }
+
+    /// <summary><paramref name="side"/> when the neighbouring cell takes it away, none otherwise.</summary>
+    private TileSides Side(int x, int y, TileSides side, IPatternGeometryBuilder geometry)
+    {
+        if (!ConversionGrid.Contains(new Cell(x, y)))
+        {
+            return TileSides.None;
+        }
+
+        int index = ConversionGrid.Index(x, y);
+        return _cellInstance[index] is { } neighbour
+            && IsTransparent(neighbour)
+            && _cellTile[index] is { Image: not null } neighbourTile
+            && geometry.IsFullTile(neighbour.Reference, neighbourTile.Image)
+                ? side
+                : TileSides.None;
     }
 
     private void AddInstance(
@@ -116,6 +210,10 @@ public sealed class DrawListBuilder
         // whole 3D object, so it is read once per instance.
         int buildDepth = geometry.MeshDepthOf(instance.Reference);
 
+        // AMD-063 REQ-SCN-087 step 2 only ever applies to a background instance the drawn
+        // instance itself declares transparent; sprites are left out (§4, divergence (D)).
+        bool removable = shape.Background && IsTransparent(instance);
+
         foreach (FrameTile tile in shape.Tiles)
         {
             if (shape.RestoredFromPinnedFrame && !frame.TileOverlapsPinnedRects(tile))
@@ -153,14 +251,20 @@ public sealed class DrawListBuilder
                     tileRelative);
             }
 
+            // AMD-063 REQ-SCN-087: a full tile of a transparent background instance gives up the
+            // lateral faces that fall on a joint with another transparent full tile. Everything
+            // else keeps the whole REQ-E3D-501 mesh, as AMD-057 left it: the sealing variants of
+            // AMD-027 are gone, and the coincident inner walls of an opaque surface are kept
+            // from showing by the renderer alone (SPEC-06 REQ-SCN-065).
+            TileSides removed = removable && geometry.IsFullTile(instance.Reference, tile.Image)
+                ? RemovedSides(tile, geometry)
+                : TileSides.None;
+
             _list.Add(new DrawTile
             {
                 Instance = instance,
                 Tile = tile,
-                // AMD-057: the drawn mesh of a tile is its whole REQ-E3D-501 mesh again — the
-                // sealing variants of AMD-027 are gone, and the inner walls are kept from
-                // showing at the joints by the renderer (SPEC-06 REQ-SCN-065).
-                Mesh = geometry.MeshOf(instance.Reference, tile.Image),
+                Mesh = geometry.MeshOf(instance.Reference, tile.Image, removed),
                 Transform = transform,
                 Anchor = anchor,
                 TileCenter = tileCenter,

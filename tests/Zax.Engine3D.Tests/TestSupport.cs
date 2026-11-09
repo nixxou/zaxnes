@@ -218,7 +218,12 @@ internal sealed class ProfileBuilder
         string? tags = null,
         int depth = 3,
         ProfileLayer layer = ProfileLayer.L1,
-        int instanceCount = 1)
+        int instanceCount = 1,
+        float alpha = 1f,
+        VariantGeometry geometry = VariantGeometry.Default,
+        int emptyColor = 0,
+        bool fullWarp = false,
+        VariantRenderStyle style = VariantRenderStyle.Normal)
     {
         List<ProfileTile?> tiles = [];
         foreach (TileImageKey? cell in cells)
@@ -248,9 +253,12 @@ internal sealed class ProfileBuilder
             {
                 Depth = depth,
                 Layer = layer,
-                Alpha = 1f,
-                RenderStyle = VariantRenderStyle.Normal,
+                Alpha = alpha,
+                RenderStyle = style,
                 TagString = tags,
+                Geometry = geometry,
+                StoredEmptyColor = emptyColor,
+                FullWarp = fullWarp,
             });
         }
 
