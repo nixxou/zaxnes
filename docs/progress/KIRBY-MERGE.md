@@ -10,7 +10,7 @@ Steps: 1 plan · 2 merge · 3 behaviour · 4 measurements · 5 final pass.
 
 - [x] **Step 1/5 — plan** (this note)
 - [x] **Step 2/5 — merge and resolve** (§2)
-- [ ] Step 3/5 — behaviour
+- [x] **Step 3/5 — behaviour** (§3)
 - [ ] Step 4/5 — measurements
 - [ ] Step 5/5 — final pass
 
@@ -414,3 +414,149 @@ is kept to the byte, with a comment on the line, and is a candidate for a lot of
 * Goldens moved: `desktop-options-shown.txt` +2 lines and `handheld-option-tree.txt` +2 lines,
   each exactly the new rows. `rust/goldens/core-goldens.jsonl` **untouched** — step 3 is what
   checks the core against `19c5065d`.
+
+---
+
+## 3. Step 3: behaviour
+
+### 3.1 golden-core over the 98 originals
+
+`zax-harness golden-core G:/3DSen/test-originals <out> ` (1 200 frames each, the default), run on
+the merge:
+
+| | |
+|---|---|
+| ROMs | 98 |
+| rows | 98, 145 334 bytes |
+| md5 | **`f79e7df842c3ee43e7d9b67861a927b5`** |
+
+That is byte for byte the digest LUA-MERGE step 5 recorded at `19c5065d` (itself identical to
+`ab68ee48`'s). **The emulation core did not move for a single commercial original.** Nothing of
+the branch can reach them: none unlocks the widescreen extension, none has a margin decoder, and
+the smooth scrolling is off.
+
+`rust/goldens/core-goldens.jsonl` is untouched by the merge — no row moved, so there was nothing
+to explain and nothing to regenerate.
+
+### 3.2 The widescreen packs, A/B against `19c5065d`
+
+`19c5065d` was rebuilt from `git archive` into a fresh directory and its `zax-harness` built
+there; both binaries were then run over the same ROMs with the same flags, and **every file each
+run wrote** was compared, not only the frame dumps: the periodic frame JSONs, the final frame
+JSON, the 640 × 480 render PNG and `--png-nes`, the composed wide 2D picture, which is where the
+branch's changes to `wide_picture_into` would show.
+
+The pack list is the harness's own: `zax-harness packs G:/3DSen/test-originals` reports 97 of the
+98 originals taking a whole pack, which is **45 distinct packs**; one ROM per pack was taken,
+preferring the one the pack matches by CRC.
+
+| Regime | Packs | Files compared | Differing |
+|---|---|---|---|
+| `--run 300 --advanced --widescreen 128 --dump-every 5` (the owner's A/B) | 45 | 2 925 | **0** |
+| `--run 1500` with an input script (start mashed, then right held with jumps) | 45 | 13 725 | **0** |
+| `--run 1500` + input + **`--run-ahead 1`**, SMB3 / Zelda II / SMB / Castlevania | 4 | 1 220 | **0** |
+| `--run 1500` + input + **`--run-ahead 3`**, the same four | 4 | 1 220 | **0** |
+| **total** | | **19 090** | **0** |
+
+The second regime is not idling: all 45 packs end on a different picture at 1 500 frames than at
+300, and 36 of the 45 produce 50 or more *distinct* frame dumps out of the 301 taken — Castlevania
+289, Super Mario Bros. 3 219, Zelda II 122, Metroid 206. Super Mario Bros. reaches level 1-1 and
+scrolls with scenery drawn in both margins (checked by eye on its `--png-nes`). Super Mario Bros.
+3 reaches its world map, and its title screen already has the decoder filling the margins. Zelda
+II stops at the name-registration screen — its menus did not yield to the generic script — so its
+122 distinct frames are menus and the attract sequence rather than the overworld.
+
+The run-ahead regimes are there for one reason: the branch's change from the PPU's *current*
+palette to the palette the **frame ended with** (`frame_palette`) can only differ when the host
+composes the picture later than the frame, which is exactly what run-ahead does. It differs on
+neither of the owner's two games at N = 1 or N = 3.
+
+**So: nothing moves for SMB3, Zelda II or any of the 45 widescreen packs.** There was therefore
+no difference to explain and nothing to put behind an option on that count.
+
+Two reservations, stated plainly:
+
+* Zelda II never reached gameplay under the generic input script, so its share of the evidence is
+  weaker than the rest. What covers it instead is that its 1 220 run-ahead files and its 610
+  ordinary ones are identical, and that no other pack moved either.
+* The three changes the branch made to the wide picture on purpose — the frame's last palette and
+  PPUMASK, a record stopping where the next kept row begins (`row_ends`/`record_end`), and
+  `rows_to_decode`'s strips — are **reachable** by these runs and did not fire differently on any
+  of them. They are written to bite on a split or a mid-frame palette write that these 45 games
+  do not make at the moments captured; a game that does will show them, and that is the branch's
+  intent, not a regression.
+
+### 3.3 The core's own goldens and the test suites
+
+Covered by step 2's run and re-checked here: 2 589 tests over the five crates both sides touched,
+0 failed. Nothing of `rust/goldens/core-goldens.jsonl` moved.
+
+### 3.4 Kirby's packs — what could be checked, and what could not
+
+**No Kirby's Adventure ROM exists on this machine.** `G:/3DSen/test-originals` (98 commercial
+originals) has none, `G:/3dsen/demo/roms` has none, and a search of the drive finds none. The
+branch's own figures — 37 of its 41 ROMs take a whole pack, 1 all but the invincibility — are
+about a ROM pool this side has not got. **The seven packs were therefore not run**, and
+"No slowdown", "Invincible", "Jump and attack first", "Level select" and the asleep enemies were
+not seen behaving. That is a gap this lot cannot close; whoever has the ROMs should close it.
+
+Everything about the seven packs that does **not** need the game is now held by a new test file,
+`zax-nes/tests/kirby_pack_tests.rs` (6 tests, all passing):
+
+* **a pack per build is registered** — the seven `PATCHES` entries, all naming *Kirby's
+  Adventure*, all plain (not advanced) widescreen, all booting their execution zone from
+  power-on, all with the game's idle loop so the overclock can end; **six** distinct source CRCs
+  for seven packs, Europe and its NTSC twin sharing one by design and told apart by signatures;
+* **every pack parses and carries its components** — each `.zxpk` is a hack pack, each has its
+  `widescreen` component, and every group of every option's component has at least one hook or
+  one check;
+* **the options keep their bits and their defaults** — the eight the owner chose, verbatim:
+  `input_priority` 0 off, `invincible` 1 off, `no_slowdown` 2 **on**, `smooth_scroll` 3 off,
+  `margin_enemies` 4 **on**, `margin_freeze` 5 off, `margin_freeze_tint` 6 off,
+  `kirby_attacks_4_3` 7 off, and `level_select` at **bit 8**, off;
+* **the asleep enemies and their grey tint are off by default** — a test of its own, because that
+  was an owner's decision taken late on the branch (`da13ef77`);
+* **every pack and every build reaches the margin decoder** — through `for_patch` for the seven
+  names, and through `for_rom` for the seven unpatched builds, which is the plain widescreen of a
+  game whose margins a decoder draws;
+* **why the option word had to widen** — Kirby fills the ROM's `$500A` byte exactly (bits 0 to 7,
+  once each), and the ninth option does not fit in a `u8` at all, so a build that narrowed the
+  word back would drop the level select silently.
+
+### 3.5 The smooth scrolling and the run-ahead: what the defaults do
+
+| Setting | Branch | Merge | What the default does to a game with no pack |
+|---|---|---|---|
+| `emu.smooth_scroll_ahead` | **on** | **off** | nothing: no shift, no motion, and the PPU keeps no per-line scroll |
+| `emu.smooth_scroll_view` | off | off | nothing (a debugging tint of the band) |
+| `smooth_scroll` (a pack aid, Kirby only) | off | off | nothing; it needs the pack's code to report a camera |
+| `emu.run_ahead` | 1, domain 0..10 | unchanged | unchanged: the default is still 1 frame, only the ceiling moved from 3 to 10 |
+
+The flip of `emu.smooth_scroll_ahead` is argued in §2.2 (S4). What it protects against is
+concrete: on, with the default run-ahead of 1 and any display above 61 Hz, the core turns on
+`Ppu2C02::set_tracks_line_scroll`, which puts a test and a record on **every visible line of
+every frame of every game**, and the host then draws the 2D playfield shifted between frames.
+Neither is something a game without a pack asked for.
+
+Four new tests in `zax-nes/tests/smooth_scroll_default_tests.rs` hold both halves of that on a
+real scrolling game (Super Mario Bros. from the demo root; they pass silently without it, as
+`ppu_golden_tests` does):
+
+* **off by default, a game with no pack is left alone** — 400 frames, and on every one of them
+  `picture_shift()` and `picture_motion()` are `None`; afterwards the PPU answers no
+  `playfield_scroll()` at all, so `end_capture_line` did the work it did before the merge;
+* **turned on, the same game gets a shifted playfield** — the band that scrolls is found on more
+  than half the frames and runs over at least 16 lines. This is what says the switch is a gate
+  and not a dead option: the feature works, it is simply not on;
+* **turning it off again stops everything** — the switch is not one-way;
+* **the run-ahead bound is ten, and the real frames still match a plain run** — REQ-LOOP-065's
+  invariant checked at the new edge: 120 frames at N = 10, restoring the real frame each time,
+  leave the work RAM exactly where a plain run leaves it.
+
+### 3.6 Verdict on the owner's rule
+
+Nothing moves for SMB3, Zelda II or the widescreen packs: 19 090 compared output files, zero
+differences, across four regimes. The core is byte-identical over the 98 originals. The one
+default that would have moved a picture for games with no pack is off, and a test says what it
+does on either side of the switch. The one thing not done is running Kirby's seven packs, for
+want of the game.
