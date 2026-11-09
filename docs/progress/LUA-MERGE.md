@@ -17,7 +17,7 @@ Branch `dev`, from `ab68ee48`. Worktree `wt-rust`. No push, no rebase, no amend,
       sides' intent, then hunt the semantic ones the markers do not show (list below). The merge
       commit must build the whole workspace and pass the tests of the crates both sides touched
       (`zax-app`, `zax-harness`, `zax-nes`, `zax-scripting`, `zax-settings`, `zax-profiles`).
-- [ ] **3. The editor on `dev`'s core.** `.fm2`/`.fcm` play from power-on and are checked by
+- [x] **3. The editor on `dev`'s core.** `.fm2`/`.fcm` play from power-on and are checked by
       machine digest; `dev`'s core timing moved (MF-4a..e) and its save-states gained board
       state (the MMC5 now has two variants). Check the movie tests, the Metal Force TAS sync
       test, the movie explorer's checkpoints, the script reload against `dev`'s save-states, and
@@ -218,3 +218,81 @@ Two notes for whoever resumes:
   `could not compile zax-harness (test "render_rom_tests")`. Both vanished once
   `rust/target-lm/debug` (24 GB, its figures already recorded) was deleted. A link or PDB error
   here is worth checking `df` for before being believed.
+
+### Step 3 — the editor on `dev`'s core
+
+**Nothing had to be fixed in the editor for the core's sake, and nothing was changed in the core.**
+The one thing the merge broke was a compile error, not a behaviour: `machine_digest` called
+`NesCore::pixel_frame`, which `dev` had split in two. That is recorded under step 2 (it had to be
+fixed for the merge commit to build at all).
+
+#### What was run, and what it says
+
+| check | result |
+| --- | --- |
+| `fm2_movie_tests` (4) — an `.fm2` from power-on at run-ahead zero, a refused `.fm2`, **a seek landing on the same state as playing there**, a movie stopping paused on its last frame | **4 passed**. The third is the movie explorer's checkpoints end to end: it plays 900 frames, waits for the explorer's states to meet the session's own checkpoints (`movie_explorer_trusted() == Some(true)`) and then seeks back, forward, past what was played, and to the start, comparing the work RAM of every landing against a straight play-through |
+| `script_reload_tests` (4) — a reload without a movie, a fast reload keeping the frame, **an exact reload replaying the movie with the new scripts**, scripts that change the core forcing an exact reload | **4 passed**. The third and fourth are the save-state path: `old.core().save_state(true)` into `session.restore_core(&state)` on a session built again |
+| `zax-nes` `fm2_file_tests` + the `.fcm` reader's tests | **passed** — the readers compile and parse (step 2's run, 0 failures over `zax-nes` and `zax-harness`) |
+| the MCP server's own tests (5), `initialize_and_list_answer_without_the_main_thread` among them | **5 passed** — that is the end-to-end one: it drives a real socket through `initialize` and `tools/list` without the main thread serving |
+| **new:** `movie_checkpoint_state_tests` (2) | **2 passed** — see below |
+
+#### The new test, and why the obvious version of it was wrong
+
+`fm2_movie_tests` proves the checkpoint invariant, but on a **synthetic NROM image**, and the
+mapper review is precisely where board state moved. `tests/movie_checkpoint_state_tests.rs` now
+checks the explorer's premise on the real boards of the demo ROMs: for each of fifteen games
+(NROM, MMC1, MMC3, UNROM), run 120 frames, `save_state(true)`, build a **fresh** core from the
+same ROM — which is what the script reload does — load the block into it, and compare. Ten ROMs
+must be found or the test fails rather than quietly passing. All fifteen present pass.
+
+Writing it turned up something worth recording, because it looks like a desynchronisation and is
+not one. The first version compared `machine_digest` straight after the restore and **failed on
+every ROM**. The cause is not `dev`: the picture is deliberately not part of `CoreState` —
+REQ-CORE-121 leaves the frame the host has not finished reading where it is, and `state.rs` names
+no pixel buffer on **either** branch (checked: `git show lua-editor:…/state.rs` has no `pixels`
+either) — while `machine_digest` does hash the picture. So the digest only means anything between
+two cores that have each *run* the frame being compared, which is exactly how the explorer uses
+it: it matches an explored state against the session's checkpoint of the **same frame**, both
+reached by running. The test now compares the frame count, the cycle count and the work RAM
+straight after the restore, and the digest only once both cores have run — and it keeps running
+both for 120 more frames, since a board that restored only partly agrees on the counts and the RAM
+and still diverges in motion. A second test checks the digest separates frames at all (over 80
+distinct values in 90 frames), so the first cannot pass by comparing a constant.
+
+#### The MMC5's two board variants
+
+No MMC5 game is in `G:/3dsen/demo/roms` (that would be Castlevania III), so the new test cannot
+reach one. It is covered where it already was: the editor's checkpoints go through
+`NesCore::save_state` / `try_load_state` and add no serialisation of their own, and `dev`'s
+`zax-nes` tests exercise that same path over the variants —
+`mf_leg_3_mmc5_runtime_switch_tests.rs` and `mf_leg_2_mmc5_exattr_split_tests.rs` both use
+`save_state` and both pass. Risk 2 of the plan is retired at the mechanism, not by sampling.
+
+#### Movie sync — the owner's decision of 2026-11-09
+
+**No test had to be marked `#[ignore]`.** Every movie test in the repository passes on `dev`'s
+core, so there was no desynchronisation to record and none was debugged. The Metal Force TAS is
+**not** an automated test: EDITOR-1 checked it by hand with `zax-harness render --movie`, against
+a ROM and a 47 454-frame `.fm2` that live outside the repository. It was not re-run — the owner's
+decision puts movie sync out of scope, and the readers' own parsing tests are what the work order
+asks for.
+
+#### One clippy failure the merge caused, fixed here
+
+`cargo clippy -p zax-app --all-targets -- -D warnings` refused
+`EmulationHost::new` at **103 lines of 100 allowed**: `dev` added fields to that initialiser
+(`audio`, `classic_audio`, `console_interface`, `suspend_resume`, `emu_stats`, …) and
+`lua-editor` added its own (`movie_timeline`, `movie_after_launch`, `movie_explorer`,
+`annotations`, `editor_request`), and together they went over. No `#[allow]` was added — AUDIO-2
+set that norm. The eleven trailing statements were extracted into a named
+`EmulationHost::start_up`, leaving `new` a field-by-field initialiser and nothing else. Behaviour
+is identical (same statements, same order, immediately after the struct stands) and the suite was
+re-run after it.
+
+#### The gate
+
+| command | result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --release -p zax-app --all-targets --features zax-app/bundled -- -D warnings` | clean, no `#[allow]` added |
+| `cargo test --release -p zax-app -p zax-settings -p zax-profiles -p zax-scripting --features zax-app/bundled --no-fail-fast` | **1 415 passed, 0 failed** over 76 binaries (1 413 over 75 at step 2, plus the two new tests) |

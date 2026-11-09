@@ -449,18 +449,28 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             favorites_only: false,
             library_search: String::new(),
         };
+        host.start_up();
+        host
+    }
+
+    /// What the start-up does once the host stands: the language, the resume point, the speed,
+    /// the achievement settings, and the first published state.
+    ///
+    /// Apart from `new`, which is a field-by-field initialiser and nothing else (LUA-MERGE: both
+    /// sides of the merge added fields to it, and together they took it past the hundred lines
+    /// clippy allows).
+    fn start_up(&mut self) {
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
         // by `on_setting_changed` afterwards. While none is saved, the model's default is the
         // operating-system language (set at start-up), amending AMD-035 §1.
-        let language = host.settings.language();
-        host.events.push(HostEvent::LanguageChanged(language));
+        let language = self.settings.language();
+        self.events.push(HostEvent::LanguageChanged(language));
         // AMD-053 REQ-LOOP-076: what the start-up does with the resume point, before anything can
         // play. It reads one file and no more (Q-102).
-        host.prepare_resume_point();
-        host.apply_speed();
-        host.apply_achievement_settings();
-        host.publish_state();
-        host
+        self.prepare_resume_point();
+        self.apply_speed();
+        self.apply_achievement_settings();
+        self.publish_state();
     }
 
     // ------------------------------------------------------------------ accessors
