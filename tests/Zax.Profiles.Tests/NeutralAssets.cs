@@ -18,12 +18,54 @@ internal static class NeutralAssets
     public static string? ProfilesDirectory
         => Root is null ? null : Path.Combine(Root, "profiles");
 
+    /// <summary>
+    /// Absolute path of <c>assets-neutral/profiles-2.1</c>, the 101 « 3dh » profiles of 3dSen
+    /// 2.1 (AMD-062 §1), or null.
+    /// </summary>
+    public static string? HashProfilesDirectory
+        => Root is null ? null : Path.Combine(Root, "profiles-2.1");
+
     /// <summary>Absolute path of <c>assets-neutral/profiles.json</c>, or null.</summary>
     public static string? CatalogueFile
         => Root is null ? null : Path.Combine(Root, "profiles.json");
 
     /// <summary>True when the profiles folder is available.</summary>
     public static bool Available => ProfilesDirectory is not null && Directory.Exists(ProfilesDirectory);
+
+    /// <summary>True when the « 3dh » profiles folder is available.</summary>
+    public static bool HashProfilesAvailable
+        => HashProfilesDirectory is not null && Directory.Exists(HashProfilesDirectory);
+
+    /// <summary>The 101 « 3dh » profile files, ordered by file name (ordinal).</summary>
+    public static IReadOnlyList<string> HashProfileFiles()
+    {
+        if (HashProfilesDirectory is null || !Directory.Exists(HashProfilesDirectory))
+        {
+            return [];
+        }
+
+        string[] files = Directory.GetFiles(HashProfilesDirectory, "*.bytes");
+        Array.Sort(files, StringComparer.Ordinal);
+        return files;
+    }
+
+    /// <summary>Reads one « 3dh » profile by file name, for example <c>BalloonFight.bytes</c>.</summary>
+    public static byte[] ReadHashProfile(string fileName)
+    {
+        if (HashProfilesDirectory is null)
+        {
+            throw new InvalidOperationException(MissingMessage);
+        }
+
+        return File.ReadAllBytes(Path.Combine(HashProfilesDirectory, fileName));
+    }
+
+    /// <summary>
+    /// The 3dn counterpart of a « 3dh » file name. Two profiles keep the apostrophe in
+    /// <c>profiles-2.1</c> that <c>profiles</c> writes <c>_</c> (AMD-062 §1).
+    /// </summary>
+    public static string CounterpartName(string hashFileName)
+        => hashFileName.Replace('\'', '_');
 
     /// <summary>The message a skipped test reports.</summary>
     public const string MissingMessage =
@@ -103,6 +145,22 @@ public sealed class AssetTheoryAttribute : TheoryAttribute
     public AssetTheoryAttribute()
     {
         if (!NeutralAssets.Available)
+        {
+            Skip = NeutralAssets.MissingMessage;
+        }
+    }
+}
+
+/// <summary>
+/// A fact that is skipped when the « 3dh » profiles of <c>assets-neutral/profiles-2.1</c> are
+/// not available.
+/// </summary>
+public sealed class HashAssetFactAttribute : FactAttribute
+{
+    /// <summary>Creates the attribute.</summary>
+    public HashAssetFactAttribute()
+    {
+        if (!NeutralAssets.Available || !NeutralAssets.HashProfilesAvailable)
         {
             Skip = NeutralAssets.MissingMessage;
         }

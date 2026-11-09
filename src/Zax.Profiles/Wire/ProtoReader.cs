@@ -130,6 +130,15 @@ internal sealed class ProtoReader
         return value;
     }
 
+    /// <summary>Reads a length-delimited field as raw bytes (AMD-062 REQ-PROF-071).</summary>
+    internal byte[] ReadBytes()
+    {
+        int limit = ReadLengthLimit();
+        byte[] value = _data.AsSpan(_position, limit - _position).ToArray();
+        _position = limit;
+        return value;
+    }
+
     /// <summary>Skips a field of the given wire type, groups included.</summary>
     internal void Skip(int fieldNumber, WireType wireType)
     {

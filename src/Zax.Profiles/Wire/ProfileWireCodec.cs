@@ -1,3 +1,5 @@
+using Zax.Profiles.Hash;
+
 namespace Zax.Profiles.Wire;
 
 /// <summary>
@@ -16,6 +18,81 @@ public static class ProfileWireCodec
     /// <exception cref="ProfileFormatException">The bytes are not a well-formed profile.</exception>
     public static ProfileDocument Decode(ReadOnlySpan<byte> bytes)
         => new ProfileWireDecoder(bytes.ToArray()).ReadDocument();
+
+    /// <summary>
+    /// Decodes a « 3dh » profile: the envelope, its validation, then the payload with the three
+    /// differences of REQ-PROF-074 (AMD-062). The tile table is built and the textures of the
+    /// variants are reconstructed, with every tile still pending.
+    /// </summary>
+    /// <exception cref="HashProfileException">
+    /// The envelope or the payload is refused; the message is the log text REQ-PROF-072 and
+    /// REQ-PROF-074 prescribe.
+    /// </exception>
+    /// <exception cref="ProfileFormatException">The bytes are not a well-formed profile.</exception>
+    public static ProfileDocument DecodeHashProfile(ReadOnlySpan<byte> bytes)
+    {
+        HashProfileEnvelope envelope = HashEnvelopeCodec.Decode(bytes);
+        if (!envelope.Validate(out HashProfileManifest? manifest, out string? error))
+        {
+            throw new HashProfileException(HashProfileException.ErrorOf(error!), error!);
+        }
+
+        ProfileDocument document =
+            new ProfileWireDecoder(envelope.Payload!, manifest, envelope).ReadDocument();
+        HashProfileTiles tiles = new(document.Profile, manifest!);
+        tiles.RebuildAllTextures();
+        document.Tiles = tiles;
+        return document;
+    }
+
+    /// <summary>
+    /// Writes a decoded « 3dh » profile back as a « 3dh » profile (REQ-PROF-084): the canonical
+    /// envelope around the canonical payload.
+    /// </summary>
+    /// <exception cref="ArgumentException">The document did not come from a « 3dh » profile.</exception>
+    public static byte[] EncodeHashProfile(ProfileDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document.HashEnvelope is not { } source)
+        {
+            throw new ArgumentException("This profile did not come from a « 3dh » file.", nameof(document));
+        }
+
+        HashProfileEnvelope envelope = new()
+        {
+            Type = source.Type ?? HashProfileEnvelope.Signature,
+            Version = HashProfileEnvelope.CanonicalVersion,
+            Payload = new ProfileWireEncoder(
+                document.Layout, EstimateCapacity(document.Profile), hashMode: true).Write(document.Profile),
+            Id = source.Id,
+            Title = source.Title,
+            Author = source.Author,
+            Publisher = source.Publisher,
+            Description = source.Description,
+        };
+
+        // REQ-PROF-084: the inherited digests and text identifiers still referenced by a tile,
+        // and the identifier table of field 12, which stays the profile's tile table.
+        HashSet<string> referenced = new(StringComparer.Ordinal);
+        foreach (ProfileTile tile in document.HashTiles)
+        {
+            if (tile.Hash is { StoredAsIdentifier: false } hash)
+            {
+                referenced.Add(hash.Text);
+            }
+        }
+
+        foreach (string hash in source.Hashes)
+        {
+            if (referenced.Contains(hash))
+            {
+                envelope.Hashes.Add(hash);
+            }
+        }
+
+        envelope.Ids.AddRange(source.Ids);
+        return HashEnvelopeCodec.Encode(envelope);
+    }
 
     /// <summary>
     /// Encodes a profile with the canonical writer (REQ-PROF-051). Pass the

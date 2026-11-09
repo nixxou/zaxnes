@@ -1,3 +1,5 @@
+using Zax.Profiles.Hash;
+
 namespace Zax.Profiles.Wire;
 
 /// <summary>
@@ -23,18 +25,33 @@ internal sealed class ProfileWireDecoder
     private readonly ProtoReader _reader;
     private readonly ProfileWireLayout _layout = new();
     private readonly Dictionary<int, object> _objectsByKey = [];
+    private readonly HashProfileManifest? _manifest;
+    private readonly HashProfileEnvelope? _envelope;
+    private readonly List<ProfileTile> _hashTiles = [];
     private int _nextKey = 1;
     private int _unknownFieldCount;
 
-    internal ProfileWireDecoder(byte[] data)
+    /// <summary>
+    /// Creates the decoder. Pass the <paramref name="manifest"/> of a « 3dh » envelope to read
+    /// the payload with the three differences of AMD-062 REQ-PROF-074; pass none for a 3dn
+    /// profile, and fields 4, 5, 24 and 25 then count as unknown and are skipped.
+    /// </summary>
+    internal ProfileWireDecoder(
+        byte[] data, HashProfileManifest? manifest = null, HashProfileEnvelope? envelope = null)
     {
         _reader = new ProtoReader(data);
+        _manifest = manifest;
+        _envelope = envelope;
     }
 
     internal ProfileDocument ReadDocument()
     {
         GameProfile profile = ReadRoot(_reader.End);
-        return new ProfileDocument(profile, _layout, _unknownFieldCount);
+        return new ProfileDocument(profile, _layout, _unknownFieldCount)
+        {
+            HashEnvelope = _envelope,
+            HashTiles = _hashTiles,
+        };
     }
 
     private GameProfile ReadRoot(int limit)
@@ -236,6 +253,9 @@ internal sealed class ProfileWireDecoder
         long storedLow = 0;
         long storedHigh = 0;
         int flip = 0;
+        bool hasPlanes = false;
+        string? hashText = null;
+        bool storedAsIdentifier = false;
         ulong present = 0;
         while (_reader.TryReadTag(limit, out int field, out WireType type))
         {
@@ -244,12 +264,22 @@ internal sealed class ProfileWireDecoder
             {
                 case ProfileSchema.TilePlanes.LowPlane:
                     storedLow = _reader.ReadInt64();
+                    hasPlanes = true;
                     break;
                 case ProfileSchema.TilePlanes.HighPlane:
                     storedHigh = _reader.ReadInt64();
+                    hasPlanes = true;
                     break;
                 case ProfileSchema.TilePlanes.Flip:
                     flip = _reader.ReadInt32();
+                    break;
+                case ProfileSchema.TilePlanes.Hash when _manifest is not null:
+                    hashText = _reader.ReadString();
+                    storedAsIdentifier = false;
+                    break;
+                case ProfileSchema.TilePlanes.HashId when _manifest is not null:
+                    hashText = ReadTileIdentifier();
+                    storedAsIdentifier = true;
                     break;
                 default:
                     SkipUnknown(field, type);
@@ -258,12 +288,40 @@ internal sealed class ProfileWireDecoder
             }
         }
 
-        ProfileTile tile = new(
-            TilePlaneCipher.Decode(storedLow),
-            TilePlaneCipher.Decode(storedHigh),
-            (TileFlip)flip);
+        // REQ-PROF-074 point 1: a tile that carries its planes anyway is an ordinary tile.
+        ProfileTile tile;
+        if (hashText is null || hasPlanes)
+        {
+            tile = new ProfileTile(
+                TilePlaneCipher.Decode(storedLow),
+                TilePlaneCipher.Decode(storedHigh),
+                (TileFlip)flip);
+        }
+        else
+        {
+            if (!_manifest!.Contains(hashText))
+            {
+                throw new HashProfileException(HashProfileMessages.TileHashAbsent(hashText));
+            }
+
+            tile = new ProfileTile(new TileHashReference(hashText, storedAsIdentifier), (TileFlip)flip);
+            _hashTiles.Add(tile);
+        }
+
         _layout.Record(tile, present, ProfileSchema.TilePlanes.Mask);
         return tile;
+    }
+
+    private string ReadTileIdentifier()
+    {
+        byte[] raw = _reader.ReadBytes();
+        if (raw.Length != TileId.ByteCount)
+        {
+            throw new ProfileFormatException(
+                $"A tile identifier is {TileId.ByteCount} bytes long, not {raw.Length}.");
+        }
+
+        return TileId.FromBinary(raw).ToText();
     }
 
     private PatternVariant ReadVariantEnvelope(int limit)
@@ -341,11 +399,24 @@ internal sealed class ProfileWireDecoder
                 case ProfileSchema.Variant.EmptyColor:
                     variant.StoredEmptyColor = (sbyte)_reader.ReadInt32();
                     break;
+                case ProfileSchema.Variant.XorTex when _manifest is not null:
+                    variant.XorTexture = ReadTexture(_reader.ReadLengthLimit());
+                    break;
+                case ProfileSchema.Variant.TextureKind when _manifest is not null:
+                    variant.TextureKind = _reader.ReadInt32();
+                    break;
                 default:
                     SkipUnknown(field, type);
                     present &= ~ProfileWireLayout.Bit(field);
                     break;
             }
+        }
+
+        // REQ-PROF-074 point 2: any other textureKind, or 2 without field 24, is invalid.
+        if (variant.TextureKind is { } kind
+            && (kind is < 0 or > 2 || (kind == 2 && variant.XorTexture is null)))
+        {
+            throw new HashProfileException(HashProfileMessages.InvalidXorTexture);
         }
 
         _layout.Record(variant, present, ProfileSchema.Variant.Mask);

@@ -87,6 +87,16 @@ internal sealed class ProtoWriter
         _length += byteCount;
     }
 
+    /// <summary>Writes a length-delimited field of raw bytes (AMD-062 REQ-PROF-071).</summary>
+    internal void WriteBytes(int fieldNumber, ReadOnlySpan<byte> value)
+    {
+        WriteTag(fieldNumber, WireType.Length);
+        WriteVarint((ulong)value.Length);
+        Ensure(value.Length);
+        value.CopyTo(_buffer.AsSpan(_length, value.Length));
+        _length += value.Length;
+    }
+
     /// <summary>
     /// Writes the tag of a nested message and returns the token to pass to
     /// <see cref="EndNested"/> once its body has been written.

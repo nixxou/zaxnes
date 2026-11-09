@@ -87,6 +87,22 @@ public sealed class PatternVariant
     /// </summary>
     public VariantTexture? Texture { get; set; }
 
+    /// <summary>
+    /// How a variant of a « 3dh » profile stores its texture (AMD-062 REQ-PROF-074, field 25):
+    /// 0 no texture, 1 the default texture of the pattern, 2 an explicit texture kept in
+    /// exclusive or with the default one. <see langword="null"/> for a 3dn variant and for the
+    /// patterns of the editor's memorised slots, which carry no texture at all and whose
+    /// <see cref="Texture"/> follows SPEC-03 REQ-PROF-035 unchanged.
+    /// </summary>
+    public int? TextureKind { get; set; }
+
+    /// <summary>
+    /// The stored texture of a <c>textureKind = 2</c> variant (field 24), before the exclusive
+    /// or with the default texture is undone (REQ-PROF-083). <see cref="Texture"/> holds the
+    /// result, which is what the engine reads.
+    /// </summary>
+    public VariantTexture? XorTexture { get; set; }
+
     /// <summary>Raw tag string, or <see langword="null"/> when the field is absent.</summary>
     public string? TagString { get; set; }
 

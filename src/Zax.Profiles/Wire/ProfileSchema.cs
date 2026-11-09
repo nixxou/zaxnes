@@ -27,6 +27,30 @@ internal static class ProfileSchema
         internal static readonly int[] HeaderFields = [Type, Id, Title, Maker, GameDev, Des];
     }
 
+    /// <summary>
+    /// Root message of a « 3dh » profile, <c>HashEnvelope</c> (AMD-062 REQ-PROF-071). Field 5 is
+    /// never written. The fields 7 to 11 keep the numbers and the meaning of the 3dn header,
+    /// which is what REQ-PROF-073 reads.
+    /// </summary>
+    internal static class HashEnvelope
+    {
+        internal const int Type = 1;
+        internal const int Version = 2;
+        internal const int Payload = 3;
+        internal const int Hashes = 4;
+        internal const int PayloadHash = 6;
+        internal const int Id = 7;
+        internal const int Title = 8;
+        internal const int Maker = 9;
+        internal const int GameDev = 10;
+        internal const int Des = 11;
+        internal const int Ids = 12;
+
+        /// <summary>The order the canonical writer uses (REQ-PROF-084).</summary>
+        internal static readonly int[] CanonicalOrder =
+            [Type, Version, Payload, Hashes, PayloadHash, Id, Title, Maker, GameDev, Des, Ids];
+    }
+
     /// <summary>Reference envelope, <c>RefEnvelope</c> (REQ-PROF-010).</summary>
     internal static class Envelope
     {
@@ -80,6 +104,12 @@ internal static class ProfileSchema
         internal const int HighPlane = 2;
         internal const int Flip = 3;
 
+        /// <summary>AMD-062 REQ-PROF-074: a legacy digest, or a 32-digit identifier in text.</summary>
+        internal const int Hash = 4;
+
+        /// <summary>AMD-062 REQ-PROF-074: a tile identifier, sixteen bytes.</summary>
+        internal const int HashId = 5;
+
         internal static readonly ulong Mask = ProfileWireLayout.MaskOf(1, 2, 3);
     }
 
@@ -107,6 +137,12 @@ internal static class ProfileSchema
         internal const int Tex = 19;
         internal const int TagStr = 20;
         internal const int EmptyColor = 23;
+
+        /// <summary>AMD-062 REQ-PROF-074: the texture stored XOR the default texture.</summary>
+        internal const int XorTex = 24;
+
+        /// <summary>AMD-062 REQ-PROF-074: 0 no texture, 1 default texture, 2 explicit in XOR.</summary>
+        internal const int TextureKind = 25;
 
         internal static readonly ulong Mask = ProfileWireLayout.MaskOf(
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 23);

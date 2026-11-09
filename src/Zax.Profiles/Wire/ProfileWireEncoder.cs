@@ -1,3 +1,5 @@
+using Zax.Profiles.Hash;
+
 namespace Zax.Profiles.Wire;
 
 /// <summary>
@@ -18,12 +20,14 @@ internal sealed class ProfileWireEncoder
 {
     private readonly ProtoWriter _writer;
     private readonly ProfileWireLayout? _layout;
+    private readonly bool _hashMode;
     private readonly Dictionary<object, int> _keys = new(ReferenceEqualityComparer.Instance);
     private int _nextKey = 1;
 
-    internal ProfileWireEncoder(ProfileWireLayout? layout, int initialCapacity)
+    internal ProfileWireEncoder(ProfileWireLayout? layout, int initialCapacity, bool hashMode = false)
     {
         _layout = layout;
+        _hashMode = hashMode;
         _writer = new ProtoWriter(initialCapacity);
     }
 
@@ -39,14 +43,11 @@ internal sealed class ProfileWireEncoder
 
     private void WriteRoot(GameProfile profile)
     {
-        if (profile.Signature is not null && Allowed(profile, ProfileSchema.Root.Type))
+        // AMD-062 REQ-PROF-074 point 3: the payload of a « 3dh » profile writes fields 3 to 6
+        // first and the signature and version after them; a 3dn keeps the ascending order.
+        if (!_hashMode)
         {
-            _writer.WriteString(ProfileSchema.Root.Type, profile.Signature);
-        }
-
-        if (profile.VersionText is not null && Allowed(profile, ProfileSchema.Root.Ver))
-        {
-            _writer.WriteString(ProfileSchema.Root.Ver, profile.VersionText);
+            WriteSignatureAndVersion(profile);
         }
 
         foreach (ProfileScript script in profile.Scripts)
@@ -58,12 +59,12 @@ internal sealed class ProfileWireEncoder
 
         foreach (ProfilePattern pattern in profile.PermanentPatterns)
         {
-            WriteEnvelope(ProfileSchema.Root.Patterns, pattern, WritePattern);
+            WriteEnvelope(ProfileSchema.Root.Patterns, pattern, WriteListedPattern);
         }
 
         foreach (ProfilePattern pattern in profile.TemporaryPatterns)
         {
-            WriteEnvelope(ProfileSchema.Root.TempPatterns, pattern, WritePattern);
+            WriteEnvelope(ProfileSchema.Root.TempPatterns, pattern, WriteListedPattern);
         }
 
         if (profile.Settings is not null && Allowed(profile, ProfileSchema.Root.Settings))
@@ -73,11 +74,29 @@ internal sealed class ProfileWireEncoder
             _writer.EndNested(scope);
         }
 
+        if (_hashMode)
+        {
+            WriteSignatureAndVersion(profile);
+        }
+
         WriteOptionalString(profile, ProfileSchema.Root.Id, profile.Id);
         WriteOptionalString(profile, ProfileSchema.Root.Title, profile.Title);
         WriteOptionalString(profile, ProfileSchema.Root.Maker, profile.Author);
         WriteOptionalString(profile, ProfileSchema.Root.GameDev, profile.Publisher);
         WriteOptionalString(profile, ProfileSchema.Root.Des, profile.Description);
+    }
+
+    private void WriteSignatureAndVersion(GameProfile profile)
+    {
+        if (profile.Signature is not null && Allowed(profile, ProfileSchema.Root.Type))
+        {
+            _writer.WriteString(ProfileSchema.Root.Type, profile.Signature);
+        }
+
+        if (profile.VersionText is not null && Allowed(profile, ProfileSchema.Root.Ver))
+        {
+            _writer.WriteString(ProfileSchema.Root.Ver, profile.VersionText);
+        }
     }
 
     private void WriteScript(ProfileScript script)
@@ -100,7 +119,16 @@ internal sealed class ProfileWireEncoder
         WriteOptionalString(script, ProfileSchema.Script.TagStr, script.TagString);
     }
 
-    private void WritePattern(ProfilePattern pattern)
+    /// <summary>
+    /// A pattern of the root lists 4 and 5. In a « 3dh » payload those patterns always carry
+    /// <c>skipGeo</c>, even false, while the patterns of the memorised slots keep the absence
+    /// that was read (REQ-PROF-084).
+    /// </summary>
+    private void WriteListedPattern(ProfilePattern pattern) => WritePattern(pattern, _hashMode);
+
+    private void WritePattern(ProfilePattern pattern) => WritePattern(pattern, forceSkipGeo: false);
+
+    private void WritePattern(ProfilePattern pattern, bool forceSkipGeo)
     {
         if (pattern.Grid is not null
             && pattern.Grid.Cells.Count > 0
@@ -163,7 +191,7 @@ internal sealed class ProfileWireEncoder
             _writer.WriteBool(ProfileSchema.Pattern.SelfConnected, pattern.SelfConnected);
         }
 
-        if (Allowed(pattern, ProfileSchema.Pattern.SkipGeo))
+        if (forceSkipGeo || Allowed(pattern, ProfileSchema.Pattern.SkipGeo))
         {
             _writer.WriteBool(ProfileSchema.Pattern.SkipGeo, pattern.SkipGeometry);
         }
@@ -172,6 +200,31 @@ internal sealed class ProfileWireEncoder
     private void WriteCell(ProfileTile tile)
     {
         int scope = _writer.BeginNested(ProfileSchema.Cell.Planes);
+        if (tile.Hash is { } hash)
+        {
+            // REQ-PROF-084: a tile that names its content keeps naming it, resolved or not;
+            // its planes are never written back.
+            if (Allowed(tile, ProfileSchema.TilePlanes.Flip))
+            {
+                _writer.WriteInt32(ProfileSchema.TilePlanes.Flip, (int)tile.Flip);
+            }
+
+            if (hash.StoredAsIdentifier)
+            {
+                TileId id = TileId.TryParseText(hash.Text, out TileId parsed)
+                    ? parsed
+                    : throw new ProfileFormatException($"\"{hash.Text}\" is not a tile identifier.");
+                _writer.WriteBytes(ProfileSchema.TilePlanes.HashId, id.ToBinary());
+            }
+            else
+            {
+                _writer.WriteString(ProfileSchema.TilePlanes.Hash, hash.Text);
+            }
+
+            _writer.EndNested(scope);
+            return;
+        }
+
         if (Allowed(tile, ProfileSchema.TilePlanes.LowPlane))
         {
             _writer.WriteInt64(ProfileSchema.TilePlanes.LowPlane, TilePlaneCipher.Encode(tile.LowPlane));
@@ -252,7 +305,9 @@ internal sealed class ProfileWireEncoder
             _writer.WriteInt32(ProfileSchema.Variant.RenderStyle, (int)variant.RenderStyle);
         }
 
-        if (variant.Texture is not null && Allowed(variant, ProfileSchema.Variant.Tex))
+        if (variant.Texture is not null
+            && variant.TextureKind is null
+            && Allowed(variant, ProfileSchema.Variant.Tex))
         {
             int scope = _writer.BeginNested(ProfileSchema.Variant.Tex);
             WriteTexture(variant.Texture);
@@ -264,6 +319,19 @@ internal sealed class ProfileWireEncoder
         if (Allowed(variant, ProfileSchema.Variant.EmptyColor))
         {
             _writer.WriteInt32(ProfileSchema.Variant.EmptyColor, variant.StoredEmptyColor);
+        }
+
+        // REQ-PROF-084: field 24 only for textureKind = 2, then field 25.
+        if (variant.TextureKind is { } kind)
+        {
+            if (kind == 2 && variant.XorTexture is { } stored)
+            {
+                int scope = _writer.BeginNested(ProfileSchema.Variant.XorTex);
+                WriteTexture(stored);
+                _writer.EndNested(scope);
+            }
+
+            _writer.WriteInt32(ProfileSchema.Variant.TextureKind, kind);
         }
     }
 

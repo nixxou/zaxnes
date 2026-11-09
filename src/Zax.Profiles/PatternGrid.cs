@@ -57,6 +57,27 @@ public sealed class PatternGrid
     }
 
     /// <summary>
+    /// True when at least one cell holds a tile whose content is still unknown (AMD-062
+    /// REQ-PROF-081). Such a cell draws nothing and takes part in no recognition until the tile
+    /// is resolved.
+    /// </summary>
+    public bool HasPendingTile
+    {
+        get
+        {
+            foreach (ProfileTile? cell in _cells)
+            {
+                if (cell is { IsPending: true })
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The tile at (cx, cy), or <see langword="null"/> when the cell is empty or outside the
     /// stored cells.
     /// </summary>

@@ -1,3 +1,4 @@
+using Zax.Profiles.Hash;
 using Zax.Profiles.Wire;
 
 namespace Zax.Profiles;
@@ -29,8 +30,34 @@ public sealed class ProfileDocument
     /// </summary>
     public int UnknownFieldCount { get; }
 
-    /// <summary>Writes the profile back with the canonical writer.</summary>
-    public byte[] Save() => ProfileWireCodec.Encode(Profile, Layout);
+    /// <summary>
+    /// The « 3dh » envelope the profile came in, or <see langword="null"/> when the file was a
+    /// 3dn profile (AMD-062 REQ-PROF-070). A profile is never converted from one format to the
+    /// other: this is what decides the format it is written back in (REQ-PROF-084).
+    /// </summary>
+    public HashProfileEnvelope? HashEnvelope { get; init; }
+
+    /// <summary>
+    /// The tiles that carry a manifest string instead of their planes, one entry per tile
+    /// object of the file, in file order (REQ-PROF-074). Empty for a 3dn profile.
+    /// </summary>
+    public IReadOnlyList<ProfileTile> HashTiles { get; init; } = [];
+
+    /// <summary>True when the file was a « 3dh » profile.</summary>
+    public bool IsHashProfile => HashEnvelope is not null;
+
+    /// <summary>
+    /// The tile table of a « 3dh » profile: which tiles are still pending, and the resolution
+    /// from the ROM and from the running game (REQ-PROF-078 to 083). <see langword="null"/> for
+    /// a 3dn profile.
+    /// </summary>
+    public HashProfileTiles? Tiles { get; internal set; }
+
+    /// <summary>Writes the profile back in its own format (REQ-PROF-084).</summary>
+    public byte[] Save()
+        => HashEnvelope is null
+            ? ProfileWireCodec.Encode(Profile, Layout)
+            : ProfileWireCodec.EncodeHashProfile(this);
 }
 
 /// <summary>
@@ -58,20 +85,34 @@ public readonly record struct ProfileHeader(
     string? Version = null)
 {
     /// <summary>
-    /// True when the signature is acceptable: <c>"3dn"</c>, or absent, which is not an error
-    /// (REQ-PROF-020).
+    /// True when this header was read from the envelope of a « 3dh » profile, whose field 1 is
+    /// <c>"3dh"</c> (AMD-062 REQ-PROF-070, REQ-PROF-073).
+    /// </summary>
+    public bool IsHashEnvelope
+        => string.Equals(Signature, HashProfileEnvelope.Signature, StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when the signature is acceptable: <c>"3dn"</c>, <c>"3dh"</c>, or absent, which is
+    /// not an error (REQ-PROF-020 as amended by AMD-062 REQ-PROF-070).
     /// </summary>
     public bool HasAcceptableSignature
-        => Signature is null || string.Equals(Signature, GameProfile.RequiredSignature, StringComparison.Ordinal);
+        => Signature is null
+        || string.Equals(Signature, GameProfile.RequiredSignature, StringComparison.Ordinal)
+        || IsHashEnvelope;
 
     /// <summary>True when the file carries a non-empty identifier, which an import requires.</summary>
     public bool HasId => !string.IsNullOrEmpty(Id);
 
     /// <summary>
     /// How <see cref="Version"/> classifies under the rules of REQ-PROF-021. Field 2 being
-    /// optional, an absent version is the current format.
+    /// optional, an absent version is the current format. For a « 3dh » envelope the field is
+    /// the <b>envelope</b> version instead, whose supported values are <c>"1"</c>, <c>"2"</c>
+    /// and <c>"5"</c> (REQ-PROF-072).
     /// </summary>
-    public ProfileFormatVersion FormatVersion => ProfileVersionRules.Classify(Version);
+    public ProfileFormatVersion FormatVersion
+        => IsHashEnvelope
+            ? Version is "1" or "2" or "5" ? ProfileFormatVersion.Current : ProfileFormatVersion.Unsupported
+            : ProfileVersionRules.Classify(Version);
 
     /// <summary>
     /// True when the version is one this build refuses to load — <c>"1"</c>, and anything that
@@ -103,6 +144,23 @@ public enum ProfileLoadError
 
     /// <summary>The settings do not hold exactly six layers (REQ-PROF-043).</summary>
     WrongLayerCount,
+
+    /// <summary>
+    /// The « 3dh » envelope has an unsupported version or no payload (AMD-062 REQ-PROF-072).
+    /// </summary>
+    UnsupportedHashEnvelope,
+
+    /// <summary>The payload does not match the digest the envelope records (REQ-PROF-072).</summary>
+    DamagedHashPayload,
+
+    /// <summary>The manifest is malformed or holds the same string twice (REQ-PROF-072).</summary>
+    InvalidHashManifest,
+
+    /// <summary>
+    /// A tile names a string outside the manifest, or a variant's <c>textureKind</c> is not
+    /// usable (REQ-PROF-074).
+    /// </summary>
+    InvalidHashPayload,
 }
 
 /// <summary>The outcome of loading a profile: all of it, or none of it.</summary>
@@ -215,9 +273,16 @@ public static class ProfileFormat
         => ProfileWireCodec.Encode(profile, layout);
 
     /// <summary>
+    /// True when these bytes are a « 3dh » profile rather than a 3dn one (AMD-062
+    /// REQ-PROF-070). The format is recognised by the content, never by the extension.
+    /// </summary>
+    public static bool IsHashProfile(ReadOnlySpan<byte> bytes) => HashEnvelopeCodec.IsHashProfile(bytes);
+
+    /// <summary>
     /// Reads the header of a profile file (REQ-PROF-062), or returns <see langword="null"/>
     /// when the bytes are unreadable. A file whose signature is wrong is reported through
-    /// <see cref="ProfileHeader.HasAcceptableSignature"/>.
+    /// <see cref="ProfileHeader.HasAcceptableSignature"/>. The header of a « 3dh » profile is
+    /// read from its envelope, without decoding the payload (REQ-PROF-073).
     /// </summary>
     public static ProfileHeader? LoadHeader(
         ReadOnlySpan<byte> bytes,
@@ -226,7 +291,9 @@ public static class ProfileFormat
     {
         try
         {
-            return ProfileWireCodec.DecodeHeader(bytes);
+            return HashEnvelopeCodec.IsHashProfile(bytes)
+                ? HashEnvelopeCodec.Decode(bytes).ToHeader()
+                : ProfileWireCodec.DecodeHeader(bytes);
         }
         catch (Exception exception) when (IsDecodeFailure(exception))
         {
@@ -241,7 +308,14 @@ public static class ProfileFormat
         ProfileDocument document;
         try
         {
-            document = ProfileWireCodec.Decode(bytes);
+            document = HashEnvelopeCodec.IsHashProfile(bytes)
+                ? ProfileWireCodec.DecodeHashProfile(bytes)
+                : ProfileWireCodec.Decode(bytes);
+        }
+        catch (HashProfileException exception)
+        {
+            // AMD-062 REQ-PROF-072 and REQ-PROF-074 prescribe the log text verbatim.
+            return ProfileLoadResult.Failure(exception.Error, exception.Message);
         }
         catch (Exception exception) when (IsDecodeFailure(exception))
         {
