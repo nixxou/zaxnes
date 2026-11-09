@@ -312,6 +312,10 @@ pub struct FrameDiff {
     /// Records with no partner at all on the other side.
     pub unmatched_zaxnes: usize,
     pub unmatched_fceux: usize,
+    /// The background rows each engine emitted, as `y`:count — the first thing to look at when a
+    /// row is emitted on the wrong line, because it says which engine emitted what and where.
+    pub zaxnes_rows: Vec<(i16, usize)>,
+    pub fceux_rows: Vec<(i16, usize)>,
 }
 
 impl FrameDiff {
@@ -421,7 +425,20 @@ pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bo
     rows.sort_unstable();
     rows.dedup();
     diff.rows = rows;
+    diff.zaxnes_rows = background_rows(&left);
+    diff.fceux_rows = background_rows(&right);
     diff
+}
+
+/// The background rows of a record list, as `(y, how many records)` sorted by `y`.
+fn background_rows(records: &[Key]) -> Vec<(i16, usize)> {
+    let mut counts: HashMap<i16, usize> = HashMap::new();
+    for key in records.iter().filter(|key| key.9) {
+        *counts.entry(key.3).or_insert(0) += 1;
+    }
+    let mut rows: Vec<(i16, usize)> = counts.into_iter().collect();
+    rows.sort_unstable();
+    rows
 }
 
 /// How many records appear in both lists with every field equal, counted with multiplicity.
@@ -562,6 +579,8 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
                         "rows": diff.rows,
                         "unmatched_zaxnes": diff.unmatched_zaxnes,
                         "unmatched_fceux": diff.unmatched_fceux,
+                        "zaxnes_rows": rows_text(&diff.zaxnes_rows),
+                        "fceux_rows": rows_text(&diff.fceux_rows),
                     }),
                 );
             }
@@ -809,7 +828,18 @@ fn rom_lines(
             "no"
         };
         let detail = if options.detail {
-            format!(" @y {}", list(diff.get("rows")))
+            format!(
+                " @y {}
+{:>52}   zaxnes rows: {}
+{:>52}   fceux  rows: {}",
+                list(diff.get("rows")),
+                "",
+                diff.get("zaxnes_rows")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                "",
+                diff.get("fceux_rows").and_then(Value::as_str).unwrap_or(""),
+            )
         } else {
             String::new()
         };
@@ -823,6 +853,14 @@ fn rom_lines(
         );
     }
     all_identical
+}
+
+/// `(y, count)` pairs as `193x32 202x33`, which is short enough to read in a table row.
+fn rows_text(rows: &[(i16, usize)]) -> String {
+    rows.iter()
+        .map(|(y, count)| format!("{y}x{count}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A JSON array as `a,b,c`.
