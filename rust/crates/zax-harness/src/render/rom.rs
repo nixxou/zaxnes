@@ -115,7 +115,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     }
     let movie = request
         .movie
-        .map(|path| start_movie(&mut host, path))
+        .map(|path| start_movie(&mut host, path, request.rom))
         .transpose()?;
     if let Some(options) = request.hack_options {
         host.core.set_hack_options(options);
@@ -224,8 +224,50 @@ fn dump_periodic_frame(
 }
 
 /// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
+/// Reads the `.fm2` or `.fcm` movie `path`: it plays from power on, which is the state the host
+/// starts in.
+fn start_fm2(host: &Host, path: &Path, rom: &Path) -> Result<zax_nes::movie::Movie, HarnessError> {
+    let movie = zax_nes::movie::read_fceu(path, &fs::read(path)?)
+        .unwrap_or_else(|| Err("not an fm2 or fcm movie".to_owned()))
+        .map_err(|error| HarnessError::Rom(format!("{}: {error}", path.display())))?;
+    let pal = matches!(
+        host.core.region(),
+        zax_nes::NesRegion::Pal | zax_nes::NesRegion::Dendy
+    );
+    if movie.header.pal != pal {
+        println!("render: warning: the movie's region (palFlag) is not the ROM's");
+    }
+    if movie.rom_matches(&fs::read(rom)?) == Some(false) {
+        println!("render: warning: the movie's romChecksum is not this ROM's");
+    }
+    let resets = movie.resets();
+    if !resets.is_empty() {
+        println!(
+            "render: warning: {} reset(s) in the movie are not replayed (first at frame {})",
+            resets.len(),
+            resets[0].0
+        );
+    }
+    println!(
+        "render: FCEUX movie of {} frames, {} rerecords",
+        movie.frames.len(),
+        movie.header.rerecord_count.unwrap_or(0)
+    );
+    Ok(zax_nes::movie::Movie {
+        inputs: movie.words(),
+        ..zax_nes::movie::Movie::default()
+    })
+}
+
 /// Reads the movie `path`, restores its start state and hack options, and prints its notes.
-fn start_movie(host: &mut Host, path: &Path) -> Result<zax_nes::movie::Movie, HarnessError> {
+fn start_movie(
+    host: &mut Host,
+    path: &Path,
+    rom: &Path,
+) -> Result<zax_nes::movie::Movie, HarnessError> {
+    if zax_nes::movie::fceu_kind(path).is_some() {
+        return start_fm2(host, path, rom);
+    }
     let movie = zax_nes::movie::Movie::read(&fs::read(path)?)
         .ok_or_else(|| HarnessError::Rom(format!("{}: not a movie file", path.display())))?;
     host.core

@@ -95,6 +95,12 @@ from the movie's start; `--run 0` runs none (to read the start state with `--dum
 outputs are those of any run: `<game>.png` (3D view), `<game>-2d.png` (the 2D view, as wide as the
 margins make it), `--dump-mem`, `--dump-frame`, `--png-nes`, `--save-state`.
 
+`--movie` also takes an `.fm2` movie (FCEUX's text format, read from its public documentation,
+`zax-nes/src/movie/fm2.rs`): it plays from power on; a region (`palFlag`) or `romChecksum` that
+differs from the ROM's is warned about, resets in it are not replayed yet, and movies that start
+from a savestate, use the binary encoding, a Zapper, the Four Score, the FDS or VS. commands are
+refused. Checked on a complete Metal Force TAS (47 454 frames): in sync to its end.
+
 To analyse a note: replay to its frame and to the frames around it (a few before, a few after),
 and look at the view the player used (the 2D view for a player in 2D).
 

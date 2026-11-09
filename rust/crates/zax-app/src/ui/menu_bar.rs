@@ -435,8 +435,14 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             item(Command::ToggleMovieRecording),
             MenuItem::sub(text::movies(), Submenu::Movies),
+            item(Command::OpenMovie),
+            item(Command::ReloadScript),
             item(Command::AnnotateMovie),
             item(Command::StopMovie),
+            MenuItem::rule(),
+            item(Command::ToggleEditorMode),
+            item(Command::NewLuaProfile),
+            item(Command::CopyAgentPrompt),
         ],
     };
     vec![file, emulation, video, audio, tools]

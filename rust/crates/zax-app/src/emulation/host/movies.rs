@@ -9,6 +9,11 @@
 use std::path::{Path, PathBuf};
 
 use zax_nes::movie::{Movie, MovieMode};
+use zax_nes::NesRegion;
+
+use crate::emulation::movie_explorer::{ExplorerSetup, MovieExplorer};
+use crate::emulation::movie_timeline::{machine_digest, MovieTimeline, WARM_FRAMES};
+use crate::input::InputAction;
 
 use super::{EmulationHost, GameView};
 use crate::emulation::commands::{Command, CommandArgs};
@@ -55,6 +60,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub(super) fn play_movie(&mut self, path: &str) {
         self.complete_frame_in_flight();
         self.finish_movie();
+        if zax_nes::movie::fceu_kind(Path::new(path)).is_some() {
+            self.play_fm2(path);
+            return;
+        }
         let Some(movie) = std::fs::read(path)
             .ok()
             .and_then(|bytes| Movie::read(&bytes))
@@ -74,6 +83,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         match session.start_movie_playback(movie) {
             Ok(()) => {
                 self.movie_file = Some(PathBuf::from(path));
+                self.start_movie_timeline();
                 self.rollback.clear();
                 self.frame_steps.clear();
                 if wanted_options.is_some_and(|bits| bits != u64::from(self.hack_option_bits())) {
@@ -94,6 +104,331 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.notifications
                     .show_error(save_state_file::CORRUPTED_MESSAGE);
             }
+        }
+    }
+
+    /// Plays the `.fm2` movie `path` (FCEUX's text format) or `.fcm` movie (FCE Ultra's
+    /// binary one): the game is reset as on a power cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
+    /// ROM that differs from the movie's is warned about, not refused: the movie may desync.
+    fn play_fm2(&mut self, path: &str) {
+        let parsed = std::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                zax_nes::movie::read_fceu(Path::new(path), &bytes)
+                    .unwrap_or_else(|| Err("not an fm2 or fcm movie".to_owned()))
+            });
+        let fm2 = match parsed {
+            Ok(fm2) => fm2,
+            Err(error) => {
+                self.log(&format!("fm2 movie refused: {error}"));
+                self.notifications.show_error(&format!(
+                    "{}: {error}",
+                    text("Movie refused", "Film refusé")
+                ));
+                return;
+            }
+        };
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut warnings = Vec::new();
+        let core = session.core();
+        let pal = matches!(core.region(), NesRegion::Pal | NesRegion::Dendy);
+        if fm2.header.pal != pal {
+            warnings.push(text(
+                "the movie was made for another region",
+                "le film a été fait pour une autre région",
+            ));
+        }
+        let rom = core
+            .cartridge()
+            .map(|cartridge| (cartridge.rom().prg_rom(), cartridge.rom().chr_rom()));
+        if rom.and_then(|(prg, chr)| fm2.rom_data_matches(prg, chr)) == Some(false) {
+            warnings.push(text(
+                "the movie was made with another ROM",
+                "le film a été fait avec une autre ROM",
+            ));
+        }
+        let resets = fm2.resets();
+        if let Some(&(frame, _)) = resets.first() {
+            warnings.push(format!(
+                "{} {frame}",
+                text(
+                    "the movie's resets are not replayed, the first at frame",
+                    "les resets du film ne sont pas rejoués, le premier à la frame"
+                )
+            ));
+        }
+        session.reset(&mut self.settings, &mut self.scene);
+        let Ok(start_state) = session.core().save_state(true) else {
+            return;
+        };
+        let header = serde_json::json!({
+            "fm2": Path::new(path).file_name().map(|name| name.to_string_lossy()),
+            "romFilename": fm2.header.rom_filename,
+            "rerecordCount": fm2.header.rerecord_count,
+        });
+        let movie = Movie {
+            header: header.to_string(),
+            start_state,
+            inputs: fm2.words(),
+            annotations: Vec::new(),
+        };
+        let frames = movie.inputs.len();
+        if let Err(error) = session.start_movie_playback(movie) {
+            self.log(&format!("fm2 movie refused: {error}"));
+            return;
+        }
+        self.movie_file = Some(PathBuf::from(path));
+        self.start_movie_timeline();
+        self.rollback.clear();
+        self.frame_steps.clear();
+        self.log(&format!("fm2 movie: {path}, {frames} frames"));
+        if warnings.is_empty() {
+            self.notify(&text("Playing a movie", "Lecture d'un film"));
+        } else {
+            for warning in &warnings {
+                self.log(&format!("fm2 movie: {warning}"));
+            }
+            self.notifications.show(
+                &warnings.join("; "),
+                DEFAULT_SECONDS,
+                NotificationSeverity::Warning,
+            );
+        }
+    }
+
+    /// The timeline of the movie that has just started playing: its start state is the first
+    /// checkpoint (EDITOR-1).
+    fn start_movie_timeline(&mut self) {
+        self.movie_explorer = None;
+        self.movie_timeline = self.session.as_ref().and_then(|session| {
+            let movie = session.movie()?;
+            let core = session.core();
+            let start_frame = core.frame_count();
+            let state = core.save_state(false).ok()?;
+            Some(MovieTimeline::new(
+                start_frame,
+                u32::try_from(movie.movie().inputs.len()).unwrap_or(u32::MAX),
+                state,
+                session.core_follows_the_inputs(),
+            ))
+        });
+        self.start_movie_explorer();
+    }
+
+    /// Starts the thread that runs the whole movie ahead and finds its checkpoints, when the
+    /// scripts leave the core alone (the explorer runs none of them).
+    pub(super) fn start_movie_explorer(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let Some(movie) = session.movie() else {
+            return;
+        };
+        if !session.core_follows_the_inputs() {
+            return;
+        }
+        let core = session.core();
+        let setup = ExplorerSetup {
+            start_state: movie.movie().start_state.clone(),
+            inputs: movie.movie().inputs.clone(),
+            ports: [
+                core.port_type(0).unwrap_or_default(),
+                core.port_type(1).unwrap_or_default(),
+            ],
+            widescreen_margin: core.widescreen_margin(),
+            audio: (
+                core.sample_rate(),
+                core.speed(),
+                core.audio_ratio_adjustment(),
+            ),
+        };
+        match MovieExplorer::start(setup) {
+            Ok(explorer) => self.movie_explorer = Some(explorer),
+            Err(error) => self.log(&format!("movie explorer not started: {error}")),
+        }
+    }
+
+    /// Hands what the explorer found to the timeline, once a tick while it runs.
+    fn drain_movie_explorer(&mut self) {
+        let (Some(explorer), Some(timeline)) =
+            (self.movie_explorer.as_ref(), self.movie_timeline.as_mut())
+        else {
+            return;
+        };
+        let verdicts: Vec<bool> = explorer
+            .take_found()
+            .into_iter()
+            .filter_map(|(frame_count, state, digest)| {
+                timeline.add_explored(frame_count, state, digest)
+            })
+            .collect();
+        if verdicts
+            .into_iter()
+            .any(|trusted| explorer_verdict(Some(trusted)))
+        {
+            self.movie_explorer = None;
+        }
+    }
+
+    /// Whether the explorer's checkpoints are trusted (`None`: not judged yet, or no timeline).
+    #[must_use]
+    pub fn movie_explorer_trusted(&self) -> Option<bool> {
+        self.movie_timeline
+            .as_ref()
+            .and_then(MovieTimeline::explored_trust)
+    }
+
+    /// Drops the timeline, the seek under way with it (the sound given back).
+    fn end_movie_timeline(&mut self) {
+        self.movie_explorer = None;
+        let seeking = self
+            .movie_timeline
+            .take()
+            .is_some_and(|timeline| timeline.seek_target().is_some());
+        if seeking {
+            self.end_seek_sound();
+        }
+    }
+
+    /// Plays the movie `path` once the next game has started (`--movie`).
+    pub fn play_movie_after_launch(&mut self, path: &str) {
+        self.movie_after_launch = Some(path.to_owned());
+    }
+
+    /// Goes to the movie frame `frame` (`tools.seek_movie`): the seek runs over the next ticks.
+    pub(super) fn seek_movie(&mut self, frame: i32) {
+        if let Some(timeline) = self.movie_timeline.as_mut() {
+            timeline.seek(u32::try_from(frame).unwrap_or(0));
+        }
+    }
+
+    /// The drawings over the view (EDITOR-1).
+    #[must_use]
+    pub const fn annotations(&self) -> &crate::emulation::annotations::Annotations {
+        &self.annotations
+    }
+
+    /// The drawings over the view, to draw or wipe.
+    pub const fn annotations_mut(&mut self) -> &mut crate::emulation::annotations::Annotations {
+        &mut self.annotations
+    }
+
+    /// What a command asked of the editor mode since the last call.
+    pub const fn take_editor_request(&mut self) -> Option<super::EditorRequest> {
+        self.editor_request.take()
+    }
+
+    /// The movie frame on screen and the movie's length, while a movie plays with a timeline.
+    #[must_use]
+    pub fn movie_position(&self) -> Option<(u32, u32)> {
+        let timeline = self.movie_timeline.as_ref()?;
+        let frame_count = self.session.as_ref()?.core().frame_count();
+        Some((timeline.movie_frame(frame_count), timeline.length()))
+    }
+
+    /// The seek under way, as the movie frame it is heading for.
+    #[must_use]
+    pub fn movie_seek_target(&self) -> Option<u32> {
+        let timeline = self.movie_timeline.as_ref()?;
+        timeline
+            .seek_target()
+            .map(|target| timeline.movie_frame(target))
+    }
+
+    /// The furthest movie frame that has a checkpoint, for the bar.
+    #[must_use]
+    pub fn movie_explored(&self) -> Option<u32> {
+        let timeline = self.movie_timeline.as_ref()?;
+        Some(timeline.movie_frame(timeline.furthest_checkpoint()))
+    }
+
+    /// Once a tick, before the frames: advances the seek under way for at most
+    /// [`SEEK_BUDGET`] — from a checkpoint, the core alone up to [`WARM_FRAMES`] before the
+    /// target when the scripts leave the core alone, then whole frames (input hook, conversion,
+    /// frame hooks). The sound is off meanwhile. Returns whether a seek took the tick.
+    pub(super) fn advance_movie_seek(&mut self) -> bool {
+        if self.movie_explorer.is_some() {
+            self.drain_movie_explorer();
+        }
+        let Some(target) = self
+            .movie_timeline
+            .as_ref()
+            .and_then(MovieTimeline::seek_target)
+        else {
+            return false;
+        };
+        self.complete_frame_in_flight();
+        let (Some(session), Some(timeline)) = (self.session.as_mut(), self.movie_timeline.as_mut())
+        else {
+            return false;
+        };
+        session
+            .core_mut()
+            .bus_mut()
+            .apu_mut()
+            .set_output_enabled(false);
+        let current = session.core().frame_count();
+        if let Some((_, state)) = timeline.seek_origin(current, target) {
+            if let Err(error) = session.restore_core(state) {
+                timeline.end_seek();
+                self.end_seek_sound();
+                self.log(&format!("movie seek failed: {error}"));
+                return false;
+            }
+        }
+        session.rewind_movie();
+        let deadline = std::time::Instant::now() + SEEK_BUDGET;
+        loop {
+            let (Some(session), Some(timeline)) =
+                (self.session.as_mut(), self.movie_timeline.as_mut())
+            else {
+                return false;
+            };
+            let frame_count = session.core().frame_count();
+            if frame_count >= target {
+                break;
+            }
+            if timeline.wants(frame_count) {
+                if let Ok(state) = session.core().save_state(false) {
+                    let digest = machine_digest(session.core());
+                    if explorer_verdict(timeline.record(frame_count, state, digest)) {
+                        self.movie_explorer = None;
+                    }
+                }
+            }
+            if timeline.core_only_allowed()
+                && !timeline.seek_is_exact()
+                && frame_count < target - WARM_FRAMES
+            {
+                if !session.run_movie_frame_core_only() {
+                    break;
+                }
+            } else {
+                self.run_session_frame(InputAction::NONE, InputAction::NONE);
+                self.complete_frame_in_flight();
+            }
+            if std::time::Instant::now() >= deadline {
+                return true;
+            }
+        }
+        if let Some(timeline) = self.movie_timeline.as_mut() {
+            timeline.end_seek();
+        }
+        self.end_seek_sound();
+        self.rollback.clear();
+        self.frame_steps.clear();
+        self.pacer.reset();
+        true
+    }
+
+    /// The sound comes back after a seek, without the samples of the frames it ran.
+    fn end_seek_sound(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            let apu = session.core_mut().bus_mut().apu_mut();
+            apu.set_output_enabled(true);
+            apu.drop_pending_samples();
         }
     }
 
@@ -136,6 +471,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .as_ref()
             .and_then(GameSession::movie)
             .is_some_and(zax_nes::movie::MovieRun::played_out);
+        if finished && self.movie_timeline.is_some() {
+            // With a timeline (EDITOR-1) the movie stops on its last frame like a video, paused,
+            // until it is stopped; a catch-up may have run a frame past the end, the seek brings
+            // it back.
+            if let Some(timeline) = self.movie_timeline.as_mut() {
+                timeline.seek(timeline.length());
+            }
+            self.pause();
+            self.notify(&text("End of the movie", "Fin du film"));
+            return;
+        }
         if finished {
             self.finish_movie();
             self.notify(&text("Movie finished", "Film terminé"));
@@ -145,6 +491,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Ends the movie being recorded or played, if any: a recording is saved to a new file, the
     /// notes written on a played one to its file.
     pub(super) fn finish_movie(&mut self) {
+        self.end_movie_timeline();
         let mode = self.movie_mode();
         let header = self.movie_header();
         let Some(run) = self.session.as_mut().and_then(|session| {
@@ -161,6 +508,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.new_movie_file()
             }
             _ => match played_file {
+                // An `.fm2` or `.fcm` is never written over: its notes go to a new Zaxnes movie.
+                Some(file) if annotated && zax_nes::movie::fceu_kind(&file).is_some() => {
+                    self.new_movie_file()
+                }
                 Some(file) if annotated => file,
                 _ => {
                     self.notify(&text("Movie stopped", "Film arrêté"));
@@ -283,8 +634,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         next_movie_file(&self.paths, &rom)
     }
 
-    fn notify(&mut self, message: &str) {
+    pub(super) fn notify(&mut self, message: &str) {
         self.notifications.show_normal(message);
+    }
+
+    /// Shows `message` in the notification area, as an error when `error`.
+    pub fn show_notification(&mut self, message: &str, error: bool) {
+        if error {
+            self.notifications.show_error(message);
+        } else {
+            self.notifications.show_normal(message);
+        }
     }
 }
 
@@ -323,3 +683,27 @@ fn text(english: &str, french: &str) -> String {
         english.to_owned()
     }
 }
+
+/// The log line when the explorer's checkpoints are not the session's: they are dropped.
+const EXPLORER_REFUSED: &str =
+    "Zaxnes: movie explorer: its checkpoint differs from the session's own on the same frame; \n     explored checkpoints dropped, seeks run from the played ones.";
+
+/// Logs the timeline's verdict on the explored checkpoints, when it gives one; returns whether
+/// they were refused (the explorer is then stopped).
+pub(super) fn explorer_verdict(verdict: Option<bool>) -> bool {
+    match verdict {
+        Some(true) => {
+            crate::app_log::line("Zaxnes: movie explorer: its checkpoints match the session's.");
+            false
+        }
+        Some(false) => {
+            crate::app_log::line(EXPLORER_REFUSED);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The time a seek may take from one tick, so that the window stays responsive while it runs
+/// through thousands of frames.
+const SEEK_BUDGET: std::time::Duration = std::time::Duration::from_millis(12);

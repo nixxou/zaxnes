@@ -13,6 +13,7 @@ mod binding;
 mod environment;
 mod error;
 mod lua_runtime;
+pub mod macros;
 mod persistent_data;
 mod quaternion;
 mod runtime;

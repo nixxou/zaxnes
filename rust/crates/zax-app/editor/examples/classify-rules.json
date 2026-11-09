@@ -1,0 +1,19 @@
+{
+  "dumps": ["../projects/My Game/dumps/level1"],
+  "classes": [
+    { "name": "hud", "where": { "y": [0, 31], "sprite": false },
+      "pattern": { "layer": 1, "depth": 2 } },
+    { "name": "player", "where": { "sprite": true, "palette": [0] },
+      "pattern": { "depth": 8 } },
+    { "name": "sprites", "where": { "sprite": true },
+      "pattern": { "depth": 6 } },
+    { "name": "back", "where": { "palette": [1], "sprite": false },
+      "pattern": { "depth": 2, "offset": [0, 0, 46] } },
+    { "name": "floor", "where": { "palette": [0, 3], "y": [160, 239] },
+      "pattern": { "depth": 48, "tags": "solid" } },
+    { "name": "walls", "where": { "palette": [0, 3] },
+      "pattern": { "depth": 24 } },
+    { "name": "rest", "where": {},
+      "pattern": { "depth": 8 } }
+  ]
+}

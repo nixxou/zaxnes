@@ -28,7 +28,12 @@ version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$rust_dir/Cargo.toml" | head -n 
 export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/x86_64-sdl2-zig.cmake}"
 (cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app --features firmware-sdl,wgpu \
     --target "$target.$glibc")
+# The harness of the editor mode (the editor folder's AGENT.md): renders from any angle without
+# the window, lists a profile's patterns.
+(cd "$rust_dir" && cargo zigbuild --locked --release -p zax-harness --target "$target.$glibc")
 binary="$target_dir/$target/release/zaxnes"
+harness="$target_dir/$target/release/zax-harness"
+[[ -x "$harness" ]] || { echo "error: $harness was not built" >&2; exit 1; }
 
 [[ -x "$binary" ]] || { echo "error: $binary was not built" >&2; exit 1; }
 
@@ -53,6 +58,7 @@ rm -rf "$stage"
 mkdir -p "$dir/profiles"
 
 install -m 755 "$binary" "$dir/zaxnes"
+install -m 755 "$harness" "$dir/zax-harness"
 install -m 644 "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$root_dir/HOWTO-RUN.md" "$dir/"
 printf '%s\n' "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni." \
@@ -71,7 +77,7 @@ EOF
 
 # The package holds the binary, the documents and profiles/README.txt, and nothing else.
 shipped="$(cd "$dir" && find . -type f | sort | tr '\n' ' ')"
-expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./profiles/README.txt ./zaxnes "
+expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./profiles/README.txt ./zax-harness ./zaxnes "
 if [[ "$shipped" != "$expected" ]]; then
     echo "error: unexpected package contents: $shipped" >&2
     exit 1

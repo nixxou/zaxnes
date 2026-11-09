@@ -15,6 +15,7 @@ mod jobs;
 mod movies;
 mod resume;
 mod save_states;
+mod script_reload;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -106,6 +107,16 @@ pub type LogFn = Box<dyn Fn(&str)>;
 
 /// What the host is made of.
 #[allow(clippy::struct_excessive_bools)] // independent switches, as the C# options record
+/// What a command asks of the editor mode, which the application carries out (it owns the
+/// clipboard and the concrete library).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRequest {
+    /// A blank Lua profile for the game on screen (`tools.new_lua_profile`).
+    NewLuaProfile,
+    /// The prompt for an AI agent into the clipboard (`tools.copy_agent_prompt`).
+    CopyAgentPrompt,
+}
+
 pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// The user data folder.
     pub paths: UserDataPaths,
@@ -207,6 +218,17 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pause_thumbnail: Option<Vec<u8>>,
     /// The file of the movie being played, where the notes written on it go.
     movie_file: Option<std::path::PathBuf>,
+    /// The checkpoints of the movie being played and the seek under way (EDITOR-1); `None`
+    /// unless a movie plays.
+    movie_timeline: Option<super::movie_timeline::MovieTimeline>,
+    /// The movie to play once the next game has started (`--movie`).
+    movie_after_launch: Option<String>,
+    /// The thread exploring the movie being played, while it runs (EDITOR-1).
+    movie_explorer: Option<super::movie_explorer::MovieExplorer>,
+    /// The drawings over the view and the editor's pens (EDITOR-1).
+    annotations: super::annotations::Annotations,
+    /// What the editor mode is asked to do, for the application (`editor_mode.rs`).
+    editor_request: Option<EditorRequest>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -383,6 +405,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             game_options_rom: None,
             pause_thumbnail: None,
             movie_file: None,
+            movie_timeline: None,
+            movie_after_launch: None,
+            movie_explorer: None,
+            annotations: super::annotations::Annotations::default(),
+            editor_request: None,
             job: None,
             loading: false,
             confirmation: None,
@@ -681,6 +708,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.current_game.as_ref().map(|game| game.id.as_str())
     }
 
+    /// Whether the game being played is on one of the two generic entries ("2D Mode", "3D by
+    /// default"), which have no profile of their own.
+    #[must_use]
+    pub fn current_game_is_generic(&self) -> bool {
+        self.current_game
+            .as_ref()
+            .is_some_and(ResolvedGame::is_generic)
+    }
+
+    /// The movie file being played, if any.
+    #[must_use]
+    pub fn movie_file(&self) -> Option<&std::path::Path> {
+        self.movie_file.as_deref()
+    }
+
     /// The title of the game being played.
     #[must_use]
     pub fn current_game_title(&self) -> Option<&str> {
@@ -866,6 +908,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_commands();
+        if self.advance_movie_seek() {
+            // A seek takes the tick: its frames are the movie's, not the pacer's.
+            self.dispatch_setting_changes();
+            self.publish_state();
+            return 0;
+        }
         self.check_movie_end();
         self.follow_the_3d_pause();
         let ahead = self.runs_ahead();
@@ -1055,20 +1103,36 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
             // it carries the 64 `PData` values and the camera state as well, read as they stand
             // at that instant and with no script hook involved.
-            if self.rollback_enabled
+            // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
+            // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
+            if (self.rollback_enabled || self.movie_timeline.is_some())
                 && RollbackHistory::is_snapshot_frame(session.core().frame_count())
             {
-                let started = self.stage_clock.start();
-                let extras = SnapshotExtras {
-                    persistent_data: session.capture_rollback_data(),
-                    camera: Some(self.scene.camera.capture()),
-                };
-                let core = session.core();
-                // A failure (no ROM) leaves the history as it was, as before.
-                let _ = self
-                    .rollback
-                    .capture_with(extras, |buffer| core.save_state_to(false, buffer));
-                self.stage_clock.stop(Stage::Rollback, started);
+                if let Some(timeline) = self.movie_timeline.as_mut() {
+                    let frame_count = session.core().frame_count();
+                    if timeline.wants(frame_count) {
+                        if let Ok(state) = session.core().save_state(false) {
+                            let digest = super::movie_timeline::machine_digest(session.core());
+                            let verdict = timeline.record(frame_count, state, digest);
+                            if movies::explorer_verdict(verdict) {
+                                self.movie_explorer = None;
+                            }
+                        }
+                    }
+                }
+                if self.rollback_enabled {
+                    let started = self.stage_clock.start();
+                    let extras = SnapshotExtras {
+                        persistent_data: session.capture_rollback_data(),
+                        camera: Some(self.scene.camera.capture()),
+                    };
+                    let core = session.core();
+                    // A failure (no ROM) leaves the history as it was, as before.
+                    let _ = self
+                        .rollback
+                        .capture_with(extras, |buffer| core.save_state_to(false, buffer));
+                    self.stage_clock.stop(Stage::Rollback, started);
+                }
             }
             let core = session.core();
             // Every frame, for stepping back one at a time (J).

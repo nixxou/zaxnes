@@ -119,6 +119,8 @@ pub trait AppSettings {
     fn fullscreen(&self) -> bool;
     /// `ui.show_fps`.
     fn show_fps(&self) -> bool;
+    /// `ui.editor_mode`.
+    fn editor_mode(&self) -> bool;
     /// `ui.sort_option`: 0 A-Z, 1 Recent, 2 Favorites first (REQ-PERS-033 as AMD-053 §3 point 8
     /// amends it).
     fn sort_option(&self) -> i32;
@@ -256,6 +258,10 @@ impl AppSettings for SettingsModel {
         self.get(SettingId::UiShowFps).as_bool()
     }
 
+    fn editor_mode(&self) -> bool {
+        self.get(SettingId::UiEditorMode).as_bool()
+    }
+
     fn sort_option(&self) -> i32 {
         self.get(SettingId::UiSortOption).as_int()
     }
@@ -320,6 +326,8 @@ pub trait AppSettingsMut {
     fn set_fullscreen(&mut self, value: bool);
     /// Sets `ui.show_fps`.
     fn set_show_fps(&mut self, value: bool);
+    /// Sets `ui.editor_mode`.
+    fn set_editor_mode(&mut self, value: bool);
     /// Sets `ui.sort_option`, brought into 0 to 2.
     fn set_sort_option(&mut self, value: i32);
     /// Sets `ui.language`.
@@ -412,6 +420,10 @@ impl AppSettingsMut for SettingsModel {
 
     fn set_show_fps(&mut self, value: bool) {
         self.set(SettingId::UiShowFps, value);
+    }
+
+    fn set_editor_mode(&mut self, value: bool) {
+        self.set(SettingId::UiEditorMode, value);
     }
 
     fn set_sort_option(&mut self, value: i32) {

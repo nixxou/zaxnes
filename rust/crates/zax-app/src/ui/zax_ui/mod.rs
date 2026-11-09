@@ -11,8 +11,10 @@ mod dialogs;
 mod hacks;
 mod key_config;
 mod menu;
+mod movie_bar;
 mod options;
 mod overlay;
+mod pens;
 
 use std::path::{Path, PathBuf};
 
@@ -89,6 +91,8 @@ pub enum BrowserPurpose {
     RomsFolder,
     /// A 3dSen installation or bundle to import.
     ThreeDSen,
+    /// A movie to play (EDITOR-1): `.fm2` or Zaxnes's own.
+    Movie,
 }
 
 impl BrowserPurpose {
@@ -154,6 +158,8 @@ pub struct ZaxUi {
     /// The import dialogue of AMD-056 REQ-UI-214 while it is up, with the plan its first button
     /// would carry out. A refusal and an « Already in Zaxnes » carry a plan that writes nothing.
     import_dialog: Option<(ProfileImportPlan, ProfileImportDialog)>,
+    /// The movie bar (EDITOR-1).
+    movie_bar: movie_bar::MovieBar,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -200,6 +206,7 @@ impl ZaxUi {
             held_keys: Vec::new(),
             effects: Vec::new(),
             import_dialog: None,
+            movie_bar: movie_bar::MovieBar::default(),
         }
     }
 
@@ -292,6 +299,10 @@ impl ZaxUi {
         self.chrome_height = if auto_hide { 0.0 } else { bar };
         if self.state.welcome_visible() {
             self.draw_welcome(ui, frame.host);
+        }
+        if self.state.has_current_game {
+            pens::draw_pens(ui, frame.host);
+            self.draw_movie_bar(ui, frame.host);
         }
         if self.state.options {
             self.draw_options(ui, frame.host);
@@ -396,6 +407,7 @@ impl ZaxUi {
                 }
             }
             Command::ImportCover => self.open_browser(host, BrowserPurpose::Cover),
+            Command::OpenMovie => self.open_browser(host, BrowserPurpose::Movie),
             Command::CancelModal => self.cancel_topmost_modal(),
             Command::ShowOptions => self.state.options = true,
             Command::ShowKeyConfig => self.state.key_config = true,
@@ -543,6 +555,7 @@ impl ZaxUi {
             BrowserPurpose::ThreeDSen => text::import_three_d_sen_title(),
             BrowserPurpose::Profile => text::import_profile_title(),
             BrowserPurpose::RomsFolder => text::roms_folder_title(),
+            BrowserPurpose::Movie => text::open_movie_title(),
         }
     }
 
@@ -553,6 +566,7 @@ impl ZaxUi {
             BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
             BrowserPurpose::RomsFolder => Vec::new(),
+            BrowserPurpose::Movie => file_browser::movie_filters(),
         }
     }
 
@@ -641,6 +655,7 @@ impl ZaxUi {
         match self.purpose {
             BrowserPurpose::Rom => host.enqueue(Command::OpenRom, CommandArgs::of_text(path)),
             BrowserPurpose::Cover => host.enqueue(Command::ImportCover, CommandArgs::of_text(path)),
+            BrowserPurpose::Movie => host.enqueue(Command::OpenMovie, CommandArgs::of_text(path)),
             BrowserPurpose::ThreeDSen => self.import_three_d_sen(host, path),
             BrowserPurpose::Profile => self.import_profile(host, path),
             BrowserPurpose::RomsFolder => {

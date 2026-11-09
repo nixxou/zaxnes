@@ -13,6 +13,31 @@
 //! Frames are counted from the start state: frame `n` is the picture after `n` input words, and
 //! an annotation on frame `n` was written while that picture was on screen.
 
+pub mod fcm;
+pub mod fm2;
+
+/// The kind of an FCEUX or FCE Ultra movie file, by its extension: `.fm2` (text) or `.fcm`
+/// (binary). `None` for any other file.
+#[must_use]
+pub fn fceu_kind(path: &std::path::Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    match extension.as_str() {
+        "fm2" => Some("fm2"),
+        "fcm" => Some("fcm"),
+        _ => None,
+    }
+}
+
+/// Reads an FCEUX `.fm2` or FCE Ultra `.fcm` movie (by the extension of `path`) from `bytes`.
+/// `None` when `path` names neither.
+#[must_use]
+pub fn read_fceu(path: &std::path::Path, bytes: &[u8]) -> Option<Result<fm2::Fm2Movie, String>> {
+    Some(match fceu_kind(path)? {
+        "fcm" => fcm::parse(bytes).map_err(|error| error.to_string()),
+        _ => fm2::Fm2Movie::parse(bytes).map_err(|error| error.to_string()),
+    })
+}
+
 /// The signature that opens a movie file.
 pub const SIGNATURE: &[u8; 8] = b"ZAXMOVIE";
 /// The format version this build writes and reads.
@@ -207,6 +232,22 @@ impl MovieRun {
     #[must_use]
     pub fn frame_at(&self, frame_count: i64) -> Option<u32> {
         u32::try_from(frame_count - self.start_frame).ok()
+    }
+
+    /// The movie's word for the frame about to run at the core's frame count `frame_count`, with
+    /// nothing changed: `None` outside the movie or while recording.
+    #[must_use]
+    pub fn word_at(&self, frame_count: i64) -> Option<u16> {
+        if self.mode != MovieMode::Playing {
+            return None;
+        }
+        let frame = self.frame_at(frame_count)?;
+        self.movie.inputs.get(frame as usize).copied()
+    }
+
+    /// A played movie taken back inside its frames (a seek): it is no longer played out.
+    pub fn rewind(&mut self) {
+        self.played_out = false;
     }
 
     /// The input word of the frame about to run at the core's frame count `frame_count`, the

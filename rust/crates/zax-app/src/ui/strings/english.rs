@@ -43,6 +43,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::WINDOW_ABOUT, "About"),
     (keys::WINDOW_PROFILE_CHOOSER, "Choose the 3D profile"),
     (keys::WINDOW_OPEN_ROM, "Open a ROM"),
+    (keys::WINDOW_OPEN_MOVIE, "Open a movie"),
     (keys::WINDOW_IMPORT_PROFILE, "Import a 3D profile"),
     (keys::WINDOW_IMPORT_COVER, "Import a cover"),
     (keys::WINDOW_IMPORT_THREE_DSEN, "Import from 3dSen"),
@@ -209,6 +210,21 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::BROWSER_COMPUTER, "This computer"),
     (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.zip)"),
     (keys::BROWSER_FILTER_NES_FILES, ".nes files"),
+    (keys::BROWSER_FILTER_MOVIES, "Movies (.fm2, .fcm, .mv)"),
+    (keys::MOVIE_BAR_PLAY, "Play"),
+    (keys::MOVIE_BAR_PAUSE, "Pause"),
+    (keys::MOVIE_BAR_SEEKING, "going to"),
+    (keys::PENS_HAND, "Hand: the pointer turns the camera"),
+    (keys::PENS_UNDO, "Undo"),
+    (keys::PENS_CLEAR, "Clear"),
+    (keys::PENS_RED, "Red pen"),
+    (keys::PENS_BLUE, "Blue pen"),
+    (keys::PENS_BLACK, "Black pen"),
+    (keys::PENS_WHITE, "White pen"),
+    (keys::PENS_VIEW_2D, "2D: the NES picture"),
+    (keys::PENS_VIEW_ZAXNES, "3D as Zaxnes draws it"),
+    (keys::PENS_VIEW_3DSEN, "3D as 3dSen draws it (the Zaxnes blocks of the scripts left out)"),
+    (keys::PENS_VIEW_HANDHELD, "3D as Zaxnes draws it on a handheld"),
     (keys::BROWSER_FILTER_ZIP, ".zip archives"),
     (keys::BROWSER_FILTER_PROFILES, "3D profiles (*.3dn)"),
     (keys::BROWSER_FILTER_BUNDLE, "3dSen profile bundle (*.bundle)"),
@@ -290,7 +306,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.tools.record_movie", "Record a movie"),
     ("cmd.tools.play_movie", "Play a movie"),
     ("cmd.tools.stop_movie", "Stop the movie"),
+    ("cmd.tools.seek_movie", "Go to a frame of the movie"),
+    ("cmd.tools.reload_script", "Reload the profile's scripts"),
+    ("cmd.tools.open_movie", "Open a movie file..."),
     ("cmd.tools.annotate_movie", "Note on this frame…"),
+    ("cmd.tools.editor_mode", "Editor mode"),
+    ("cmd.tools.new_lua_profile", "New Lua profile for this game"),
+    ("cmd.tools.copy_agent_prompt", "Copy the prompt for the AI agent"),
     ("cmd.ui.cancel_modal", "Close the modal window"),
     ("cmd.ui.toggle_debug_overlay", "Statistics panel"),
     ("cmd.ui.close_windows", "Close the windows"),
@@ -509,6 +531,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.ui.fullscreen", "Full screen"),
     ("setting.ui.show_fps", "Show the FPS"),
     ("setting.ui.profiler", "Performance measures (log)"),
+    ("setting.ui.editor_mode", "Editor mode (MCP server, pens, editor folder)"),
     ("setting.ui.roms_folder", "ROM folder"),
     ("setting.ui.sort_option", "Library sort order"),
     ("setting.ui.language", "Language"),
@@ -1072,6 +1095,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          draw list, the drawing — and writes the figures beside the frame counter and into \
          logs/zaxnes.log every two seconds. It is a diagnostic, not a setting to play with: the \
          measuring itself takes a little time and the log grows while it is on. Default: off.",
+    ),
+    (
+        "detail.ui.editor_mode",
+        "Turns on what is needed to write a 3D profile with an AI agent: the editor folder of \
+         your user data is laid out with its documents and templates, an MCP server listens on \
+         the loopback so the agent can look at the running game, and the pens let you point at a \
+         pattern on screen. It changes nothing about how a game plays or looks; it is for making \
+         profiles, not for playing. See docs/EDITOR.md. Default: off.",
     ),
 
     // ---------------------------------------------------- RetroAchievements tab

@@ -851,9 +851,10 @@ fn load_scripts(cx: &Cx, profile: &GameProfile) -> mlua::Result<bool> {
             loaded[previous] = None;
         }
 
-        let text = source.source.as_deref().unwrap_or_default();
-        compile(cx, &mut script, text, limit)?;
-        script.light_update_s = light_shapes::update_s_takes_light_shape(text);
+        // The Zaxnes code hidden in the script's comments, read for this host (crate::macros).
+        let text = crate::macros::expand(source.source.as_deref().unwrap_or_default());
+        compile(cx, &mut script, &text, limit)?;
+        script.light_update_s = light_shapes::update_s_takes_light_shape(&text);
         by_name.insert(script.name().to_owned(), loaded.len());
         loaded.push(Some(script));
     }

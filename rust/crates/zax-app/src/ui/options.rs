@@ -296,12 +296,16 @@ const EMULATION: &[LayoutEntry] = &[
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.
+///
+/// The editor mode comes last, after the profiler: like it, it is a tool for whoever makes a
+/// profile rather than for whoever plays (EDITOR-1).
 const INTERFACE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::UiLanguage),
     LayoutEntry::Row(SettingId::UiRomsFolder),
     LayoutEntry::Row(SettingId::UiSortOption),
     LayoutEntry::Row(SettingId::UiShowFps),
     LayoutEntry::Row(SettingId::UiProfiler),
+    LayoutEntry::Row(SettingId::UiEditorMode),
 ];
 
 /// The rows of the **Audio** tab: the volume, then the output itself (AUDIO-1, AUDIO-2).

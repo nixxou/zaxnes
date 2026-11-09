@@ -92,6 +92,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     && args.text.as_deref().is_some_and(|text| !text.is_empty())
             }
             Command::StopMovie | Command::AnnotateMovie => !loading && self.movie_mode().is_some(),
+            Command::OpenMovie | Command::ReloadScript => {
+                !loading && self.session.as_ref().is_some_and(GameSession::has_rom)
+            }
+            Command::NewLuaProfile | Command::CopyAgentPrompt => self.editor_allows(command),
+            Command::SeekMovie => !loading && self.movie_timeline.is_some() && args.number >= 0,
             Command::OpenRecentRom
             | Command::Quit
             | Command::SetSpeed
@@ -111,10 +116,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ShowOptions
             | Command::ShowKeyConfig
             | Command::ShowDataFolder
+            | Command::ToggleEditorMode
             | Command::FilterFavorites
             | Command::SearchLibrary
             | Command::ShowAbout => true,
         }
+    }
+
+    /// Whether a command of the editor mode can run: the mode on, and a game for a new profile.
+    fn editor_allows(&self, command: Command) -> bool {
+        self.settings.editor_mode()
+            && (command != Command::NewLuaProfile
+                || !self.loading && self.session.as_ref().is_some_and(GameSession::has_rom))
     }
 
     /// Whether the toggle `command` is on.
@@ -129,6 +142,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ToggleShadows => self.settings.shadow(),
             Command::ToggleFullscreen => self.settings.fullscreen(),
             Command::ToggleFpsCounter => self.settings.show_fps(),
+            Command::ToggleEditorMode => self.settings.editor_mode(),
             Command::ToggleMute => self.settings.mute(),
             Command::ToggleMovieRecording => {
                 self.movie_mode() == Some(zax_nes::movie::MovieMode::Recording)
@@ -209,7 +223,23 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ToggleMovieRecording => self.toggle_movie_recording(),
             Command::PlayMovie => self.play_movie(args.text.as_deref().unwrap_or_default()),
             Command::StopMovie => self.stop_movie(),
+            Command::SeekMovie => self.seek_movie(args.number),
+            Command::ReloadScript => self.reload_script(args.number == 1),
+            Command::OpenMovie => match args.text.as_deref().filter(|text| !text.is_empty()) {
+                Some(path) => self.play_movie(path),
+                None => self.request_ui(Command::OpenMovie, args),
+            },
             Command::AnnotateMovie => self.annotate_movie(args),
+            Command::ToggleEditorMode => self.update_settings(|model| {
+                let value = !model.editor_mode();
+                model.set_editor_mode(value);
+            }),
+            Command::NewLuaProfile => {
+                self.editor_request = Some(super::EditorRequest::NewLuaProfile);
+            }
+            Command::CopyAgentPrompt => {
+                self.editor_request = Some(super::EditorRequest::CopyAgentPrompt);
+            }
         }
     }
 

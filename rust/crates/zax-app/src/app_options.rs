@@ -30,6 +30,9 @@ Options taken from the original program (single dash; the double-dash forms are 
 
 Options:
   --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
+  --movie <path>          A movie to play once the ROM has started: an FCEUX .fm2,
+                          an FCE Ultra .fcm or a Zaxnes movie (.mv<n>), with its bar
+                          at the bottom.
   --profile <name>        Built-in profile title, or the path of a profile file.
                           Defaults to the "2D Mode" entry (SPEC-06 REQ-SCN-055).
   --assets <dir>          Optional folder of your own asset files (profiles.json,
@@ -85,6 +88,12 @@ pub const RUST_ONLY_USAGE: &str = "
 Rust-only options:
   --handheld              Gamepad-only interface for handheld consoles (also ZAXNES_HANDHELD=1,
                           and automatic on aarch64 Linux without an X11 or Wayland display).
+  --editor                Turns the editor mode on (and keeps it on): the MCP server, the pens,
+                          and the editor folder of the user data, with what an AI agent needs to
+                          write a Lua profile (Tools > Editor mode does the same).
+  --mcp[=<port>]          Starts the MCP server of the profile editor on 127.0.0.1 (default
+                          port 8765), for Claude Code: claude mcp add --transport http
+                          zaxnes http://127.0.0.1:8765/mcp
   --roms <dir>            Folder of .nes files the handheld ROM list shows
                           (default: the ROM folder of the options, else the roms
                           folder of the user data).
@@ -176,6 +185,12 @@ pub struct AppOptions {
     pub list_profiles: bool,
     /// The ROM to start.
     pub rom_path: Option<String>,
+    /// The movie to play once the ROM has started: `.fm2` or Zaxnes's own (EDITOR-1).
+    pub movie_path: Option<String>,
+    /// The port of the MCP server of the editor (`--mcp[=port]`), off without the option.
+    pub mcp_port: Option<u16>,
+    /// `--editor`: the editor mode turned on, and kept on.
+    pub editor: bool,
     /// The 3dSen installation or bundle to import profiles from.
     pub import_three_d_sen_path: Option<String>,
     /// The profile to play: a file, an identifier or a title.
@@ -254,6 +269,9 @@ impl Default for AppOptions {
             show_help: false,
             list_profiles: false,
             rom_path: None,
+            movie_path: None,
+            mcp_port: None,
+            editor: false,
             import_three_d_sen_path: None,
             profile: None,
             asset_root: None,
@@ -294,6 +312,7 @@ impl AppOptions {
     /// # Errors
     ///
     /// An argument is unknown or malformed, or an option is missing its value.
+    #[allow(clippy::too_many_lines)] // one arm per option
     pub fn parse(arguments: &[&str]) -> Result<Self, OptionsError> {
         let mut options = Self::default();
         let mut index = 0;
@@ -316,6 +335,10 @@ impl AppOptions {
                 }
                 "--rom" => {
                     options.rom_path = Some(next_value(arguments, &mut index, "--rom")?.to_owned());
+                }
+                "--movie" => {
+                    options.movie_path =
+                        Some(next_value(arguments, &mut index, "--movie")?.to_owned());
                 }
                 "--profile" => {
                     options.profile =
@@ -464,6 +487,14 @@ impl AppOptions {
             }
             "--catch-up" => {
                 self.catch_up = Some(parse_catch_up(next_value(arguments, index, "--catch-up")?)?);
+            }
+            "--mcp" => self.mcp_port = Some(crate::mcp::DEFAULT_PORT),
+            "--editor" => self.editor = true,
+            mcp if mcp.starts_with("--mcp=") => {
+                let value = &mcp["--mcp=".len()..];
+                self.mcp_port = Some(value.parse().map_err(|_| OptionsError::UnknownArgument {
+                    argument: mcp.to_owned(),
+                })?);
             }
             unknown => {
                 return Err(OptionsError::UnknownArgument {

@@ -8,8 +8,8 @@ use std::process::ExitCode;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
-    bench_core, compare, golden_core, lua_api, meshes, packs, profile_tool, render, test_roms,
-    HarnessError,
+    bench_core, classify, compare, golden_core, lua_api, meshes, packs, profile_tool, render,
+    test_roms, HarnessError,
 };
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
@@ -22,6 +22,7 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness packs <roms dir> (how the built-in hack packs apply to each ROM)
        zax-harness profile-dump <file.3dn> [--tiles] (the patterns and their 3D looks)
        zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)
+       zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
        zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
@@ -93,6 +94,10 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!("{}", bench_core::run(&bench_core::Options::parse(rest)?)?);
             Ok(())
         }
+        [command, rest @ ..] if command == "classify" => {
+            println!("{}", classify::run(&classify::Options::parse(rest)?)?);
+            Ok(())
+        }
         #[cfg(feature = "vs-system")]
         [command, rest @ ..] if command == "vs" => {
             let options = vs::Options::parse(rest)?;
@@ -111,14 +116,15 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             #[cfg(not(feature = "vs-system"))]
             let vs_usage = String::new();
             println!(
-                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
+                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
                 test_roms::USAGE,
                 meshes::USAGE,
                 lua_api::USAGE,
                 render::USAGE,
                 compare::USAGE,
                 bench_core::USAGE,
-                profile_tool::USAGE
+                profile_tool::USAGE,
+                classify::USAGE
             );
             Ok(())
         }

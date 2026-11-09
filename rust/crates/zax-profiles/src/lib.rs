@@ -8,6 +8,7 @@
 //! [`catalogue::ProfileFileSystem`].
 
 pub mod catalogue;
+pub mod description;
 pub mod enums;
 pub mod export;
 pub mod format;

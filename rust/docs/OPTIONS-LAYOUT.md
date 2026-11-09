@@ -11,7 +11,20 @@ Every divergence here is raised with R1 as **Q-107**. §5 is the console tree of
 the two owner requests of RO-5.
 
 Lot **RO-4** (patches always hooked) was **withdrawn by the owner** and is not on this branch; it
-appears in no section here, and no setting has been added to the window or the tree since RO-1.
+appears in no section here.
+
+Three settings have joined the **window** since RO-1, and none the console tree. They are not rows
+of the mapping of §4 — that table records where RO-1 *moved* each setting, and a setting born
+after it has no earlier tab — so they are listed here instead:
+
+| setting | tab | group | lot |
+|---|---|---|---|
+| `audio.latency_ms` | Audio | Advanced | AUDIO-1 |
+| `audio.classic_output` | Audio | Advanced | AUDIO-2 |
+| `ui.editor_mode` | Interface | — | EDITOR-1 |
+
+The editor mode is deliberately absent from the console tree: its MCP server and its pens are
+desktop-only, so `handheld/advanced.rs::ROW_SETTINGS` does not list it.
 
 The window's layout lives in one table, `crates/zax-app/src/ui/options.rs::LAYOUT`: one line per
 tab, one entry per row or group heading, in the order the window draws them. Before RO-1 the

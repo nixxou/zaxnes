@@ -116,6 +116,8 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | `--font <fichier>` | police de l'interface : un fichier, ou un nom dans le dossier des polices du système |
 | `--builtin-font` | force la police intégrée d'ImGui (accents et « ▸ » remplacés par de l'ASCII) |
 | `--userdata <dossier>` | racine des données modifiables (voir §6) |
+| `--editor` | active le mode éditeur et le garde (§9.2) |
+| `--mcp[=<port>]` | démarre seulement le serveur MCP de l'éditeur, le temps du lancement (port 8765 par défaut) |
 | `--size 1600x900` | taille de la fenêtre (défaut 1280 × 720) |
 | `--no-audio` | n'ouvre pas le périphérique audio |
 | `--smoke-test`, `--smoke-frames <n>` | rend un nombre fixe d'images sans interaction, puis quitte avec 0 |
@@ -279,6 +281,9 @@ Volume ▸ (par paliers de 10 %, plus « Volume + » et « Volume − »), Muet,
 | Lire un film ▸ | | les 15 films les plus récents du dossier `movies` ; rend la main au joueur à la fin |
 | Note sur cette frame… | `Ctrl`+`M` | met en pause et demande une note sur l'image affichée (`Ctrl`+`Entrée` écrit, `Échap` annule) |
 | Arrêter le film | | arrête l'enregistrement (et l'écrit) ou la lecture |
+| Mode éditeur | | écrire un profil Lua avec un agent IA (§9.2) |
+| Nouveau profil Lua pour ce jeu | | en mode éditeur : un projet vierge pour le jeu affiché (§9.2) |
+| Copier le prompt pour l'agent IA | | en mode éditeur : le texte à donner à l'agent, dans le presse-papiers |
 
 Un **film** (`.zmv`) garde un état de départ et les touches de chaque image : la partie se
 rejoue à l'identique. Pendant l'enregistrement, charger une sauvegarde ou faire un rollback
@@ -982,6 +987,37 @@ Détails utiles :
 - un profil que le lecteur de `.3dn` refuse est compté en échec et n'interrompt pas l'import ;
 - un fichier tronqué, une signature inconnue ou une compression LZMA donnent un message clair et
   n'écrivent aucun fichier partiel.
+
+### 9.2 Le mode éditeur : écrire un profil Lua avec un agent IA
+
+**Outils ▸ Mode éditeur** (ou `--editor`), gardé d'une session à l'autre :
+
+- le **serveur MCP** de l'éditeur écoute sur `http://127.0.0.1:8765/mcp` (local uniquement) :
+  un agent comme Claude Code pilote la fenêtre (aller à une image d'un film, capturer l'écran,
+  lire les tuiles, recharger les scripts, lire le journal). Il se déclare une fois :
+  `claude mcp add --transport http zaxnes http://127.0.0.1:8765/mcp` ;
+- les **stylos** apparaissent à gauche de la fenêtre : entourez, écrivez, l'agent lit vos dessins ;
+- le dossier **`editor`** des données utilisateur est préparé : `AGENT.md` (à faire lire en
+  premier à l'agent), la documentation de l'éditeur, la méthode, le format des profils, l'API
+  Lua et les spécifications. Les documents sont réécrits quand une nouvelle version les change ;
+  vos projets ne le sont jamais.
+
+Activer le mode pendant qu'un jeu tourne sur « 2D Mode » ou « 3D par défaut » (un jeu sans
+profil) crée un **profil Lua vierge** : un projet `editor/projects/<jeu>/` (`profile.json`,
+`main.lua`, `PROMPT.txt`), son profil importé dans la bibliothèque, le jeu relancé dessus.
+**Outils ▸ Nouveau profil Lua pour ce jeu** fait de même à tout moment ; sur un jeu qui a déjà
+un profil (un `.3dn` importé), le projet part de ce profil, gardé entier (`base.3dn`), avec ses
+scripts en fichiers `.lua` : le profil d'origine n'est pas modifié. En mode éditeur, F5
+reconstruit le profil depuis son projet avant de recharger les scripts : on modifie le projet,
+jamais le `.3dn`.
+
+**Outils ▸ Copier le prompt pour l'agent IA** met dans le presse-papiers le texte à donner à
+l'agent : le jeu, le dossier `editor`, le projet, l'adresse du serveur MCP, le harnais
+(`zax-harness`, livré à côté de `zaxnes`) et le dépôt du code source. Ce texte est aussi écrit
+dans `PROMPT.txt` du projet, et copié à la création d'un projet.
+
+Mode éditeur éteint, rien de tout cela ne tourne : le serveur ferme son port, les stylos
+disparaissent. Le détail : [`rust/docs/EDITOR.md`](rust/docs/EDITOR.md) §7.
 
 ## 10. Captures hors écran, sans fenêtre
 

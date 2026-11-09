@@ -3,6 +3,7 @@
 //! zax-harness: headless tools of the port (port of `tools/Zax.Harness`).
 
 pub mod bench_core;
+pub mod classify;
 pub mod compare;
 mod error;
 pub mod golden_core;

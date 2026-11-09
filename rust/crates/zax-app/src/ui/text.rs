@@ -243,6 +243,12 @@ pub fn open_rom_title() -> String {
     strings::get(keys::WINDOW_OPEN_ROM)
 }
 
+/// Title of the movie dialog (EDITOR-1).
+#[must_use]
+pub fn open_movie_title() -> String {
+    strings::get(keys::WINDOW_OPEN_MOVIE)
+}
+
 /// Title of the profile import dialog (SPEC-10 §4).
 #[must_use]
 pub fn import_profile_title() -> String {

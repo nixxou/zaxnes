@@ -42,6 +42,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::WINDOW_ABOUT, "À propos"),
     (keys::WINDOW_PROFILE_CHOOSER, "Choisir le profil 3D"),
     (keys::WINDOW_OPEN_ROM, "Ouvrir une ROM"),
+    (keys::WINDOW_OPEN_MOVIE, "Ouvrir un film"),
     (keys::WINDOW_IMPORT_PROFILE, "Importer un profil 3D"),
     (keys::WINDOW_IMPORT_COVER, "Importer une jaquette"),
     (keys::WINDOW_IMPORT_THREE_DSEN, "Importer depuis 3dSen"),
@@ -179,6 +180,21 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::BROWSER_COMPUTER, "Poste de travail"),
     (keys::BROWSER_FILTER_NES_ROMS, "ROMs NES (*.nes, *.zip)"),
     (keys::BROWSER_FILTER_NES_FILES, "Fichiers .nes"),
+    (keys::BROWSER_FILTER_MOVIES, "Films (.fm2, .fcm, .mv)"),
+    (keys::MOVIE_BAR_PLAY, "Lecture"),
+    (keys::MOVIE_BAR_PAUSE, "Pause"),
+    (keys::MOVIE_BAR_SEEKING, "vers"),
+    (keys::PENS_HAND, "Main : le pointeur tourne la caméra"),
+    (keys::PENS_UNDO, "Annuler"),
+    (keys::PENS_CLEAR, "Effacer"),
+    (keys::PENS_RED, "Stylo rouge"),
+    (keys::PENS_BLUE, "Stylo bleu"),
+    (keys::PENS_BLACK, "Stylo noir"),
+    (keys::PENS_WHITE, "Stylo blanc"),
+    (keys::PENS_VIEW_2D, "2D : l'image NES"),
+    (keys::PENS_VIEW_ZAXNES, "3D telle que Zaxnes la dessine"),
+    (keys::PENS_VIEW_3DSEN, "3D telle que 3dSen la dessine (sans les blocs Zaxnes des scripts)"),
+    (keys::PENS_VIEW_HANDHELD, "3D telle que Zaxnes la dessine sur une console portable"),
     (keys::BROWSER_FILTER_ZIP, "Archives .zip"),
     (keys::BROWSER_FILTER_PROFILES, "Profils 3D (*.3dn)"),
     (keys::BROWSER_FILTER_BUNDLE, "Bundle de profils 3dSen (*.bundle)"),
@@ -260,7 +276,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.tools.record_movie", "Enregistrer un film"),
     ("cmd.tools.play_movie", "Lire un film"),
     ("cmd.tools.stop_movie", "Arrêter le film"),
+    ("cmd.tools.seek_movie", "Aller à une frame du film"),
+    ("cmd.tools.reload_script", "Recharger les scripts du profil"),
+    ("cmd.tools.open_movie", "Ouvrir un fichier de film..."),
     ("cmd.tools.annotate_movie", "Note sur cette frame…"),
+    ("cmd.tools.editor_mode", "Mode éditeur"),
+    ("cmd.tools.new_lua_profile", "Nouveau profil Lua pour ce jeu"),
+    ("cmd.tools.copy_agent_prompt", "Copier le prompt pour l'agent IA"),
     ("cmd.ui.cancel_modal", "Fermer la fenêtre modale"),
     ("cmd.ui.toggle_debug_overlay", "Panneau de statistiques"),
     ("cmd.ui.close_windows", "Fermer les fenêtres"),
@@ -470,6 +492,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.input.touch_pad", "Pad tactile"),
     ("setting.ui.fullscreen", "Plein écran"),
     ("setting.ui.profiler", "Mesures de performance (journal)"),
+    ("setting.ui.editor_mode", "Mode éditeur (serveur MCP, stylos, dossier editor)"),
     ("setting.ui.roms_folder", "Dossier des ROM"),
     ("setting.ui.show_fps", "Afficher les FPS"),
     ("setting.ui.sort_option", "Tri de la bibliothèque"),
@@ -1067,6 +1090,15 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          logs/zaxnes.log toutes les deux secondes. C'est un outil de diagnostic, pas un réglage de \
          confort : la mesure elle-même prend un peu de temps et le journal grossit tant qu'elle est \
          active. Par défaut : désactivé.",
+    ),
+    (
+        "detail.ui.editor_mode",
+        "Active ce qu'il faut pour écrire un profil 3D avec un agent IA : le dossier editor de vos \
+         données utilisateur est installé avec ses documents et ses modèles, un serveur MCP écoute \
+         sur la boucle locale pour que l'agent puisse observer le jeu en cours, et les stylos \
+         permettent de désigner un motif à l'écran. Ne change rien à la façon dont un jeu se joue \
+         ou s'affiche : c'est pour fabriquer des profils, pas pour jouer. Voir docs/EDITOR.md. \
+         Par défaut : désactivé.",
     ),
 
     // ------------------------------------------------- onglet RetroAchievements

@@ -166,6 +166,21 @@ impl FakeCatalog {
     pub fn remove(&mut self, id: &str) {
         self.entries.remove(id);
     }
+
+    /// Replaces the profile of `id` by one holding one script, `source`, as an edited profile
+    /// file would read after a script reload.
+    pub fn set_script(&mut self, id: &str, source: &str) {
+        let mut profile = GameProfile::create_empty();
+        profile.scripts.push(zax_profiles::script::ProfileScript {
+            name: Some("test".to_owned()),
+            enabled: true,
+            source: Some(source.to_owned()),
+            ..zax_profiles::script::ProfileScript::default()
+        });
+        if let Some(entry) = self.entries.get_mut(id) {
+            entry.profile = Arc::new(profile);
+        }
+    }
 }
 
 impl GameCatalog for FakeCatalog {

@@ -24,6 +24,10 @@ Push-Location $rust
 try {
     cargo build --release -p zax-app --features bundled,wgpu
     if ($LASTEXITCODE -ne 0) { throw "package: cargo build failed ($LASTEXITCODE)" }
+    # The harness of the editor mode (the editor folder's AGENT.md): renders from any angle
+    # without the window, lists a profile's patterns.
+    cargo build --release -p zax-harness
+    if ($LASTEXITCODE -ne 0) { throw "package: cargo build of zax-harness failed ($LASTEXITCODE)" }
 }
 finally {
     Pop-Location
@@ -38,6 +42,7 @@ if (Test-Path $Output) { Remove-Item -Recurse -Force $Output }
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 
 Copy-Item (Join-Path $rust 'target\release\zaxnes.exe') (Join-Path $Output 'zaxnes.exe')
+Copy-Item (Join-Path $rust 'target\release\zax-harness.exe') (Join-Path $Output 'zax-harness.exe')
 foreach ($document in 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item (Join-Path $root $document) (Join-Path $Output $document) -Force
 }
@@ -59,6 +64,8 @@ Build Windows x64 autonome : un seul fichier, ni SDL2.dll ni Visual C++ Redistri
     zaxnes.exe --rom "jeu.nes" --profile "3D par défaut (sans profil)"
     zaxnes.exe --rom "jeu.nes" --profile "2D Mode"
     zaxnes.exe --help
+    zaxnes.exe --editor --rom "jeu.nes"    mode éditeur : écrire un profil Lua avec un agent IA
+                                           (dossier editor des données, Outils ▸ Mode éditeur)
 
 AUCUN ASSET N'EST NÉCESSAIRE NI LIVRÉ. Les skyboxes et les sons d'interface sont produits par
 le code ; la police de l'interface est une police déjà installée sur votre Windows (Segoe UI,
@@ -93,7 +100,7 @@ Vérification non interactive :
 Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 
 # The folder ships the executable, the documents and profiles\README.txt, and nothing else.
-$expected = @('zaxnes.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
+$expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
     'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt')
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
         $_.FullName.Substring($Output.Length + 1)

@@ -155,8 +155,14 @@ commands! {
     ShowAbout => "tools.about", Shortcut::None, false;
     ToggleMovieRecording => "tools.record_movie", Shortcut::None, true;
     PlayMovie => "tools.play_movie", Shortcut::None, false;
+    OpenMovie => "tools.open_movie", Shortcut::None, false;
     StopMovie => "tools.stop_movie", Shortcut::None, false;
+    SeekMovie => "tools.seek_movie", Shortcut::None, false;
+    ReloadScript => "tools.reload_script", Shortcut::Fixed("F5"), false;
     AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;
+    ToggleEditorMode => "tools.editor_mode", Shortcut::None, true;
+    NewLuaProfile => "tools.new_lua_profile", Shortcut::None, false;
+    CopyAgentPrompt => "tools.copy_agent_prompt", Shortcut::None, false;
     CancelModal => "ui.cancel_modal", Shortcut::None, false;
 }
 

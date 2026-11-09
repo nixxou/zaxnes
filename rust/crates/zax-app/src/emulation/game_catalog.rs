@@ -70,6 +70,23 @@ pub trait GameCatalog {
     /// The cover file of the game.
     fn cover(&self, game_id: &str) -> Option<String>;
 
+    /// Forgets the profile of `game_id` read so far, so that the next [`GameCatalog::resolve`]
+    /// reads its file again (the script reload of EDITOR-1). A catalogue that reads nothing
+    /// has nothing to forget.
+    fn forget_profile(&mut self, _game_id: &str) {}
+
+    /// Builds again the profile file of `game_id` from its project of the editor mode
+    /// (`editor_mode.rs`), before a script reload reads it: `None` when it has no project, else
+    /// whether the build went through. A catalogue without files has no project.
+    /// The profile file of `game_id`, when it has one (the generic entries have none).
+    fn profile_file(&self, _game_id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    fn rebuild_from_project(&mut self, _game_id: &str) -> Option<Result<(), String>> {
+        None
+    }
+
     /// Whether the game is marked as a favourite (AMD-053 REQ-UI-210). False for a catalogue that
     /// has no library behind it.
     fn is_favorite(&self, _game_id: &str) -> bool {
