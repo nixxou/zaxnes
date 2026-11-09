@@ -13,7 +13,7 @@ use zax_settings::values::SettingValue;
 
 use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
-use crate::audio::audio_mixer::AudioSampleSource;
+use crate::audio::stream::ApuSamples;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
@@ -409,13 +409,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
-                if let Some(mixer) = &mut self.mixer {
-                    let reader = session.core().audio_reader();
-                    let source: AudioSampleSource = Box::new(move |destination| {
-                        // A mono read cannot be refused; an empty buffer reads as silence.
-                        reader.read_samples(destination, false).unwrap_or(0)
-                    });
-                    mixer.set_emulation_source(Some(source));
+                if let Some(audio) = &self.audio {
+                    // The audio thread reads the core's ring itself from here on (Q-153).
+                    audio.set_console(Some(Box::new(ApuSamples::new(
+                        session.core().audio_reader(),
+                    ))));
                 }
                 session.set_smooth_gc(self.settings.get(SettingId::EmuLuaSmoothGc).as_bool());
                 self.session = Some(session);
@@ -665,12 +663,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.core_mut().reset();
             session.reset_frame_counter();
         }
-        // REQ-AUD-010: no sound of the previous session is ever replayed.
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .drop_pending_samples();
         self.rollback.clear();
         self.frame_steps.clear();
         self.fast_forward.clear();
@@ -679,6 +671,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.start_achievements(job.state.as_ref());
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
+        // REQ-AUD-010: no sound of the previous session is ever replayed. `set_state` has
+        // already done this when the game was not running, but a slot loaded while it plays
+        // leaves the state alone, so it is asked for here too (Q-153 §4). The call empties the
+        // core's ring and makes the stream prefill and ramp in rather than cut.
+        self.resynchronise_audio();
         Step::Finished
     }
 

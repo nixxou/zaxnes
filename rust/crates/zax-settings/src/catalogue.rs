@@ -177,6 +177,7 @@ setting_ids! {
     ConvEmptyTile => "conv.empty_tile",
     AudioVolume => "audio.volume",
     AudioBgMusic => "audio.bg_music",
+    AudioLatencyMs => "audio.latency_ms",
     InputZapperEnable => "input.zapper_enable",
     InputEmulatedMenuButton => "input.emulated_menu_button",
     InputTouchPad => "input.touch_pad",

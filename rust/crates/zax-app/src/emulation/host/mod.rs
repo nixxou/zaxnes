@@ -17,6 +17,7 @@ mod resume;
 mod save_states;
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use time::OffsetDateTime;
 use zax_nes::NesRegion;
@@ -35,6 +36,8 @@ use super::notification_center::NotificationCenter;
 use super::rollback_history::{RollbackHistory, SnapshotExtras};
 use super::speed_setting;
 use crate::achievements::AchievementSystem;
+use crate::audio::rate_control::RateControl;
+use crate::audio::stream::{self as stream, AudioLink};
 use crate::audio::AudioMixer;
 use crate::frame_profiler::{Stage, StageClock, StageTimes};
 use crate::game_session::{GameSession, SessionEvent, SessionFrame};
@@ -124,8 +127,9 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     pub clock: Option<Clock>,
     /// Where the host logs.
     pub log: Option<LogFn>,
-    /// Whether an audio device is open, which turns on the drift correction.
-    pub audio_device_open: bool,
+    /// The handles on the audio thread's stream; none when no device opened, and then the host
+    /// drives no rate control (Q-153).
+    pub audio: Option<AudioLink>,
     /// The settings and game list files; none when nothing is persisted.
     pub settings_store: Option<SettingsStore>,
     /// Whether deletions wait for the interface's confirmation (REQ-UI-110).
@@ -153,7 +157,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             now: None,
             clock: None,
             log: None,
-            audio_device_open: false,
+            audio: None,
             settings_store: None,
             confirm_with_interface: false,
             suspend_resume: false,
@@ -176,7 +180,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     now: Now,
     log: LogFn,
     modal_window_open: bool,
-    audio_device_open: bool,
+    audio: Option<AudioLink>,
+    /// The rate controller of the audio output; it also keeps the correction in force, for the
+    /// overlay.
+    audio_rate: RateControl,
     confirm_with_interface: bool,
     pending: VecDeque<(Command, CommandArgs)>,
     hotkeys: HotkeyTracker,
@@ -323,7 +330,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             now,
             clock,
             log,
-            audio_device_open,
+            audio,
             settings_store,
             confirm_with_interface,
             suspend_resume,
@@ -350,7 +357,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             now,
             log: log.unwrap_or_else(|| Box::new(|_| {})),
             modal_window_open: false,
-            audio_device_open,
+            audio,
+            audio_rate: RateControl::new(),
             confirm_with_interface,
             pending: VecDeque::new(),
             hotkeys: HotkeyTracker::new(),
@@ -485,6 +493,45 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The program's audio mix, for writing.
     pub fn mixer_mut(&mut self) -> Option<&mut AudioMixer> {
         self.mixer.as_mut()
+    }
+
+    /// The handles on the audio thread's stream, when a device is open.
+    #[must_use]
+    pub const fn audio(&self) -> Option<&AudioLink> {
+        self.audio.as_ref()
+    }
+
+    /// One line on the state of the audio output, for the performance overlay and the
+    /// per-second line of the profiler's log: the latency measured against the one asked for,
+    /// the correction in force, the extremes of the ring's fill and the under-runs (Q-153 §6).
+    #[must_use]
+    pub fn audio_report(&self) -> Option<String> {
+        let audio = self.audio.as_ref()?;
+        let rate = audio.sample_rate;
+        let extremes = audio.control.extreme_fill().map_or_else(
+            || "-".to_owned(),
+            |(least, most)| {
+                #[allow(clippy::cast_precision_loss)] // fills are a few thousand frames
+                let (least, most) = (least as f32, most as f32);
+                format!(
+                    "{:.0}-{:.0} ms",
+                    crate::audio::stream::ms_of_frames(rate, least),
+                    crate::audio::stream::ms_of_frames(rate, most)
+                )
+            },
+        );
+        Some(format!(
+            "latency {:.1} / {:.0} ms  [{extremes}]  rate {:+.3} %  underruns {}{}",
+            audio.measured_ms(),
+            audio.target_ms(),
+            self.audio_rate.adjustment() * 100.0,
+            audio.control.underruns(),
+            if audio.control.playing() {
+                ""
+            } else {
+                "  prefilling"
+            }
+        ))
     }
 
     /// The settings and game list files.
@@ -725,7 +772,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // Emulation ahead: the core leaves during the frames, so what reads or changes it
             // runs before them.
             self.advance_battery(real_seconds);
-            self.correct_audio_drift();
+            self.correct_audio_drift(real_seconds);
             self.dispatch_setting_changes();
         }
         let frames = self.run_due_frames(snapshot.player_one, snapshot.player_two);
@@ -736,7 +783,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
         } else {
             self.advance_battery(real_seconds);
-            self.correct_audio_drift();
+            self.correct_audio_drift(real_seconds);
             self.dispatch_setting_changes();
         }
         if let Some(store) = &mut self.settings_store {
@@ -1112,8 +1159,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // capture every time the menu appears.
             self.refresh_two_dimensional_cover();
         }
+        let was_running = self.state == EmulationState::Running;
         self.state = next;
         self.publish_state();
+        if next == EmulationState::Running {
+            // Q-153 §4: the ring is empty or holds a stale fragment of the moment the game
+            // stopped at, so it is emptied and prefilled again rather than played as it is, and
+            // the signal is ramped in. Leaving Running needs nothing: `publish_state` has just
+            // told the audio thread the console has stopped producing, and it ramps out over a
+            // few milliseconds instead of ending on the hard cut of finding 4.
+            self.resynchronise_audio();
+        } else if was_running {
+            // The latency the controller learnt belongs to the fill that is about to drain.
+            self.audio_rate.restart();
+        }
     }
 
     fn publish_state(&mut self) {
@@ -1136,6 +1195,67 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             mixer.set_volume(self.settings.effective_volume());
             mixer.set_menu_music_enabled(self.settings.menu_music());
         }
+        self.publish_audio_state();
+    }
+
+    /// Empties the core's ring and asks the stream to prefill again before it plays: no stale
+    /// fragment of the previous moment is replayed (REQ-AUD-010), and the signal is ramped in
+    /// rather than cut (Q-153 §4). What a resume, a state load, a rewind, a reset or a change
+    /// of the latency needs.
+    pub(super) fn resynchronise_audio(&mut self) {
+        let Some(control) = self.audio.as_ref().map(|audio| Arc::clone(&audio.control)) else {
+            return;
+        };
+        if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+            session
+                .core_mut()
+                .bus_mut()
+                .apu_mut()
+                .drop_pending_samples();
+        }
+        control.request_resync();
+        self.audio_rate.restart();
+    }
+
+    /// Applies `audio.latency_ms`: the target the stream prefills to and the rate controller
+    /// aims at. A value the core's ring cannot hold is clamped and the clamp is logged (Q-153
+    /// §3).
+    fn apply_audio_latency(&mut self) {
+        let Some(audio) = self.audio.clone() else {
+            return;
+        };
+        let wanted = self.settings.audio_latency_ms();
+        let usable = stream::usable_latency_ms(
+            audio.sample_rate,
+            stream::core_ring_samples(audio.sample_rate),
+            wanted,
+        );
+        if usable < wanted - 0.5 {
+            self.log(&format!(
+                "audio latency {wanted:.0} ms is more than the core's ring can hold; using {usable:.0} ms."
+            ));
+        }
+        let before = audio.control.target_frames();
+        audio.set_target_ms(usable);
+        if audio.control.target_frames() != before {
+            self.resynchronise_audio();
+        }
+    }
+
+    /// Tells the audio thread the gain to play the console at and whether to expect samples
+    /// from it (Q-153). The gain is the fade of REQ-AUD-020, which the mixer still owns; the
+    /// audio thread follows it per sample.
+    fn publish_audio_state(&self) {
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        let gain = self.mixer.as_ref().map_or(0.0, AudioMixer::emulation_gain);
+        audio.control.set_console_gain(gain);
+        // A dry ring is only an under-run while a game is actually producing samples; in every
+        // other state it is the silence REQ-AUD-010 asks for.
+        let producing = self.state == EmulationState::Running
+            && self.session.as_ref().is_some_and(GameSession::has_rom);
+        audio.control.set_console_active(producing);
     }
 
     fn apply_speed(&mut self) {
@@ -1241,6 +1361,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => {
                 self.publish_state();
             }
+            SettingId::AudioLatencyMs => self.apply_audio_latency(),
             SettingId::UiLanguage => {
                 // AMD-035 §1: the change applies immediately. Everything the interface draws
                 // reads the table through the language, and the models that cache their labels
@@ -1356,27 +1477,50 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     // ------------------------------------------------------------------ housekeeping
 
-    fn correct_audio_drift(&mut self) {
-        const TARGET: usize = 2 * crate::audio::audio_mixer::BLOCK;
-        if !self.audio_device_open || self.state != EmulationState::Running {
-            return;
-        }
-        let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
+    /// Keeps the core's ring at the configured latency (Q-153 §3, REQ-AUD-005). The error is
+    /// what the **audio thread** measured of the ring, in milliseconds, averaged over about a
+    /// second — not what the main thread sees just after producing a frame — and the correction
+    /// is the dead band, capped proportional and slowly accumulating law of
+    /// [`crate::audio::rate_control`].
+    fn correct_audio_drift(&mut self, real_seconds: f64) {
+        let Some(audio) = self.audio.clone() else {
             return;
         };
-        let available = session.core().apu().available_samples();
-        #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
-        let error = (available as f64 - TARGET as f64) / TARGET as f64;
-        // A proportional correction that saturates at the cap: a full buffer slows the
-        // production down, an empty one speeds it up.
         let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
-        let adjustment = (-error * 0.002).clamp(-cap, cap);
-        if session
-            .core_mut()
-            .set_audio_ratio_adjustment(adjustment)
-            .is_err()
-        {
-            self.log("the core refused the audio ratio adjustment.");
+        // REQ-AUD-011: at any speed other than 100 % the core is retiming its own resampler, so
+        // there is nothing to correct; and a recorded movie must not depend on the drift of
+        // this machine's sound card.
+        let steady = self.state == EmulationState::Running
+            && !self.fast_forward.is_active()
+            && (self.settings.speed_factor() - 1.0).abs() < 1e-9
+            && self.movie_mode() != Some(zax_nes::movie::MovieMode::Recording);
+        let correction = if steady {
+            let error = f64::from(audio.measured_ms() - audio.target_ms());
+            self.audio_rate
+                .step(error, real_seconds, audio.control.playing(), cap)
+        } else {
+            self.audio_rate.idle(real_seconds)
+        };
+        // The window the overlay and the per-second log report on (Q-153 §6).
+        if self.audio_rate.window_closed(real_seconds) {
+            audio.control.close_window();
+        }
+        if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+            if session
+                .core_mut()
+                .set_audio_ratio_adjustment(correction.adjustment)
+                .is_err()
+            {
+                self.log("the core refused the audio ratio adjustment.");
+            }
+        }
+        if correction.resynchronise {
+            self.log(&format!(
+                "audio: the latency drifted to {:.0} ms against {:.0} ms; resynchronising.",
+                audio.measured_ms(),
+                audio.target_ms()
+            ));
+            self.resynchronise_audio();
         }
     }
 
@@ -1405,8 +1549,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if dispose_session {
                 session.dispose(&mut self.settings, &mut self.scene);
                 self.battery.detach();
-                if let Some(mixer) = &mut self.mixer {
-                    mixer.set_emulation_source(None);
+                if let Some(audio) = &self.audio {
+                    audio.set_console(None);
                 }
             } else {
                 self.session = Some(session);

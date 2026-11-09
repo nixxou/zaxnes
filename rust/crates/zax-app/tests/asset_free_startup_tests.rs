@@ -201,7 +201,10 @@ fn req_pub_001_the_command_line_resolves_the_generic_entries_without_assets() {
 }
 
 /// Whether `relative` is inside a Cargo build directory of the workspace: `rust/target` and every
-/// `rust/target-*` beside it (`.gitignore` lists them one by one).
+/// `rust/target-*` beside it (`.gitignore` lists them one by one), whatever `CARGO_TARGET_DIR`
+/// called the one a session happens to use. A path comparison would not do: `starts_with` matches
+/// whole components, so `rust/target` does not cover `rust/target-au2`, and the `.obj` files a
+/// bundled SDL2 leaves there would read as assets of the repository.
 fn is_build_output(relative: &Path) -> bool {
     let mut parts = relative.components();
     parts

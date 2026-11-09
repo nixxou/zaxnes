@@ -490,6 +490,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
     ("setting.audio.mute", "Mute"),
+    ("setting.audio.latency_ms", "Output latency (ms)"),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Touch pad"),
     ("setting.ui.fullscreen", "Full screen"),
@@ -953,6 +954,15 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "The gain applied to everything Zaxnes plays, from 0.00 to 1.00. Mute, in the Audio menu, \
          silences the sound without touching this value, so turning mute off brings the same volume \
          back. Changing it plays no validation sound. Default: 1.00.",
+    ),
+    (
+        "detail.audio.latency_ms",
+        "How much sound is kept buffered ahead of the device, from 20 to 200 milliseconds. A larger \
+         value survives a longer hitch of the main thread without a crackle and delays the sound of \
+         a button press by the same amount; a smaller one is more immediate and less forgiving. \
+         Above what the core's sample ring can hold — about 138 ms at 48 kHz — it is clamped and \
+         the log says so. Changing it empties the buffer and fills it again, which is a short dip. \
+         Default: 60 ms.",
     ),
 
     // ----------------------------------------------------------- Emulation tab

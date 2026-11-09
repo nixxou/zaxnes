@@ -15,6 +15,7 @@ achievements.enabled
 achievements.encore
 achievements.sound
 achievements.unofficial
+audio.latency_ms
 audio.volume
 camera.fov
 emu.auto_tv_mode

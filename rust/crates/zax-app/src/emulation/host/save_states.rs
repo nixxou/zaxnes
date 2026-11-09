@@ -341,6 +341,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // Step 3 applies even when nothing was restored (REQ-LOOP-032, notes).
         self.set_state(EmulationState::Running);
         self.pacer.reset();
+        // The restore emptied the core's ring (REQ-CORE-074), and a rollback taken while the
+        // game was already running leaves the state alone, so the stream is told to prefill and
+        // ramp in. REQ-AUD-012 tolerates the discontinuity and asks for no silence longer than
+        // 50 ms: the mid-stream prefill is half the latency, 30 ms at the default (Q-153 §4).
+        self.resynchronise_audio();
     }
 
     /// Restores one snapshot of the history: the core, then the 64 `PData` values, then the

@@ -304,6 +304,12 @@ const INTERFACE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::UiProfiler),
 ];
 
+/// The rows of the **Audio** tab: the volume, then the output itself (AUDIO-1, AUDIO-2).
+const AUDIO: &[LayoutEntry] = &[
+    LayoutEntry::Row(SettingId::AudioVolume),
+    LayoutEntry::Row(SettingId::AudioLatencyMs),
+];
+
 /// The rows of the **RetroAchievements** tab, under the account block the tab draws itself.
 const ACHIEVEMENTS: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::AchievementsEnabled),
@@ -327,10 +333,7 @@ pub const LAYOUT: [(OptionsTab, &[LayoutEntry]); 9] = [
         OptionsTab::Camera,
         &[LayoutEntry::Row(SettingId::CameraFov)],
     ),
-    (
-        OptionsTab::Audio,
-        &[LayoutEntry::Row(SettingId::AudioVolume)],
-    ),
+    (OptionsTab::Audio, AUDIO),
     (OptionsTab::Emulation, EMULATION),
     (OptionsTab::Interface, INTERFACE),
     (OptionsTab::Achievements, ACHIEVEMENTS),

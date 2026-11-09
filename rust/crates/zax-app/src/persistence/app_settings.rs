@@ -83,6 +83,8 @@ pub trait AppSettings {
     fn menu_music(&self) -> bool;
     /// `audio.mute`.
     fn mute(&self) -> bool;
+    /// `audio.latency_ms`: how much audio the core's ring is held at (Q-153 §2).
+    fn audio_latency_ms(&self) -> f32;
     /// The volume the mixer plays at: 0 when muted.
     fn effective_volume(&self) -> f32;
     /// `video.skip_frame`.
@@ -173,6 +175,15 @@ impl AppSettings for SettingsModel {
 
     fn mute(&self) -> bool {
         self.get(SettingId::AudioMute).as_bool()
+    }
+
+    fn audio_latency_ms(&self) -> f32 {
+        #[allow(clippy::cast_precision_loss)] // the domain bounds it to 20..=200
+        let milliseconds = self.get(SettingId::AudioLatencyMs).as_int() as f32;
+        milliseconds.clamp(
+            crate::audio::stream::MIN_LATENCY_MS,
+            crate::audio::stream::MAX_LATENCY_MS,
+        )
     }
 
     fn effective_volume(&self) -> f32 {

@@ -1,5 +1,12 @@
-//! The mix the audio device plays (SPEC-11): the console, the menu music and the interface
-//! sounds, with the fades of REQ-AUD-020 to REQ-AUD-023.
+//! The programme the audio device plays beside the console (SPEC-11): the menu music and the
+//! interface sounds, with the fades of REQ-AUD-020 to REQ-AUD-023.
+//!
+//! Since AUDIO-1 the console's own samples no longer pass through here: the audio thread reads
+//! the APU's ring itself ([`crate::audio::stream`], Q-153). What is left on the main thread is
+//! everything that cannot run on a real-time thread — the fade state machine, the choice of a
+//! menu track and the file reads it needs — and the mixer produces the programme a few tens of
+//! milliseconds ahead into the stream's stereo ring. The console gain of REQ-AUD-020 is still
+//! computed here and published to the audio thread, which follows it per sample.
 
 use zax_platform::audio::BLOCK_FRAMES;
 use zax_platform::WaveAudio;
@@ -13,10 +20,6 @@ pub const BLOCK: usize = BLOCK_FRAMES;
 pub const MUSIC_GAIN_FACTOR: f32 = 0.02;
 /// Gain of the interface sounds relative to the volume.
 pub const SOUND_GAIN_FACTOR: f32 = 0.07;
-
-/// Where the console's samples come from: fills the mono buffer entirely and returns its length,
-/// or returns less (REQ-AUD-003: all or nothing).
-pub type AudioSampleSource = Box<dyn FnMut(&mut [f32]) -> usize>;
 
 /// A small deterministic generator for the choice of the menu music track.
 #[derive(Debug, Clone, Copy)]
@@ -43,8 +46,8 @@ impl TrackRandom {
     }
 }
 
-/// The mixer. It is driven from the host's thread: the audio device pulls blocks from
-/// [`fill`](Self::fill), the loop sets the state around it.
+/// The mixer. It runs on the host's thread only: the loop sets the state, then asks
+/// [`fill`](Self::fill) for the blocks of programme it sends to the audio thread's ring.
 #[allow(clippy::struct_excessive_bools)] // independent state flags of the mix, as the C# class
 pub struct AudioMixer {
     sample_rate: u32,
@@ -52,7 +55,6 @@ pub struct AudioMixer {
     music_gain: FadeGain,
     assets: Option<Box<dyn UiAudioLibrary>>,
     random: TrackRandom,
-    mono: Vec<f32>,
     volume: f32,
     menu_music_enabled: bool,
     emulation_audible: bool,
@@ -63,9 +65,6 @@ pub struct AudioMixer {
     track_suspended: bool,
     sound: Option<WaveAudio>,
     sound_position: f64,
-    emulation_source: Option<AudioSampleSource>,
-    /// Blocks the console could not fill while it was audible.
-    pub underrun_blocks: u64,
     /// Blocks mixed.
     pub blocks: u64,
     /// How many times a menu track was started.
@@ -92,7 +91,6 @@ impl AudioMixer {
             music_gain: FadeGain::new(0.0),
             assets,
             random,
-            mono: vec![0.0; BLOCK],
             volume,
             menu_music_enabled: true,
             emulation_audible: false,
@@ -103,8 +101,6 @@ impl AudioMixer {
             track_suspended: false,
             sound: None,
             sound_position: 0.0,
-            emulation_source: None,
-            underrun_blocks: 0,
             blocks: 0,
             track_changes: 0,
             sounds_played: 0,
@@ -118,11 +114,6 @@ impl AudioMixer {
     #[must_use]
     pub const fn sample_rate(&self) -> u32 {
         self.sample_rate
-    }
-
-    /// Sets where the console's samples come from, or removes the source.
-    pub fn set_emulation_source(&mut self, source: Option<AudioSampleSource>) {
-        self.emulation_source = source;
     }
 
     /// The volume, 0 to 1.
@@ -251,19 +242,19 @@ impl AudioMixer {
         self.sound_position = 0.0;
     }
 
-    /// Mixes one block of interleaved stereo samples.
+    /// Mixes one block of programme — menu music and interface sounds — as interleaved stereo
+    /// samples, and advances the fades by the block's own duration.
+    ///
+    /// The block is **not** clamped: the console is added to it on the audio thread, which
+    /// clamps the sum once (REQ-AUD-006).
     pub fn fill(&mut self, stereo: &mut [f32]) {
         if stereo.len() < 2 {
             return;
         }
         let frames = stereo.len() / 2;
         stereo.fill(0.0);
-        self.mix_emulation(stereo, frames);
         self.mix_music(stereo, frames);
         self.mix_sound(stereo, frames);
-        for value in stereo.iter_mut() {
-            *value = value.clamp(-1.0, 1.0);
-        }
         #[allow(clippy::cast_precision_loss)] // a block is a few hundred frames
         self.advance(frames as f64 / f64::from(self.sample_rate));
         self.blocks += 1;
@@ -312,33 +303,6 @@ impl AudioMixer {
     fn fade_music(&mut self) {
         let (target, range) = (self.music_target(), self.music_range());
         self.music_gain.fade_to(target, range);
-    }
-
-    fn mix_emulation(&mut self, stereo: &mut [f32], frames: usize) {
-        let Some(source) = self.emulation_source.as_mut() else {
-            return;
-        };
-        if self.mono.len() < frames {
-            self.mono.resize(frames, 0.0);
-        }
-        let mono = &mut self.mono[..frames];
-        let written = source(mono);
-        if written < frames {
-            // REQ-AUD-003: all or nothing. The samples the core did have stay in its buffer for
-            // the next call, so nothing is lost and no block is half filled. Outside Running no
-            // frame produces samples, so an empty buffer is the expected silence of REQ-AUD-010,
-            // not an under-run.
-            if self.emulation_audible {
-                self.underrun_blocks += 1;
-            }
-            return;
-        }
-        let gain = self.emulation_gain.value();
-        for (pair, value) in stereo.chunks_exact_mut(2).zip(mono.iter()) {
-            let scaled = value * gain;
-            pair[0] += scaled;
-            pair[1] += scaled;
-        }
     }
 
     fn mix_music(&mut self, stereo: &mut [f32], frames: usize) {

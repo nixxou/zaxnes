@@ -462,6 +462,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.audio.volume", "Volume général"),
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
+    ("setting.audio.latency_ms", "Latence de sortie (ms)"),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Pad tactile"),
     ("setting.ui.fullscreen", "Plein écran"),
@@ -950,6 +951,15 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Le gain appliqué à tout ce que Zaxnes joue, de 0,00 à 1,00. Muet, dans le menu Audio, \
          coupe le son sans toucher à cette valeur, si bien que désactiver Muet rend le même volume. \
          Le changer ne joue pas le son de validation. Par défaut : 1,00.",
+    ),
+    (
+        "detail.audio.latency_ms",
+        "La quantité de son tenue en réserve devant le périphérique, de 20 à 200 millisecondes. Une \
+         valeur élevée encaisse un à-coup plus long du fil principal sans craquement et retarde \
+         d'autant le son d'un appui sur un bouton ; une valeur basse est plus immédiate et moins \
+         indulgente. Au-delà de ce que l'anneau d'échantillons du cœur peut contenir — environ \
+         138 ms à 48 kHz — elle est bornée et le journal le dit. La changer vide la réserve et la \
+         remplit de nouveau, ce qui fait un bref creux. Par défaut : 60 ms.",
     ),
 
     // -------------------------------------------------------- onglet Émulation
