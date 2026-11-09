@@ -44,9 +44,11 @@ pub const USAGE: &str =
     A directory run gives each ROM its own child process, because FCEUX can take the process
     down on some ROMs (see the module docs); --in-process turns that off.
 
-zax-harness fceux-frame <rom.nes> <out.json> [frames]
+zax-harness fceux-frame <rom.nes> <out.json> [frames] [--ram zero|default|ff]
     Runs a ROM on FCEUX and writes the tile records of the last frame in the format
-    `render --frames <file.json>` reads, so FCEUX's records can go through Zaxnes's 3D path.";
+    `render --frames <file.json>` reads, so FCEUX's records can go through Zaxnes's 3D path.
+    --ram is what FCEUX's power-on writes into the uninitialised memory; it defaults to `zero`,
+    which is what zax-nes does, so that the frame is the one `fceux-tiles` compares.";
 
 /// Frames at which the digests are recorded — `golden_core::CHECKPOINTS`, repeated here because
 /// that one is private to it and the two lists must never drift.
@@ -410,13 +412,64 @@ fn row_for(engine: &mut Fceux, rel: &str, image: &[u8], frames: u32) -> Value {
 /// [`HarnessError::Usage`] on a bad frame count or if FCEUX refuses the ROM; [`HarnessError`] on
 /// an I/O failure.
 pub fn frame_command(rom: &str, out_path: &str, rest: &[String]) -> Result<(), HarnessError> {
-    let frames: u32 = match rest {
-        [] => 120,
-        [count] => count
-            .parse()
-            .map_err(|_| HarnessError::Usage(format!("{count:?} is not a frame count\n{USAGE}")))?,
-        _ => return Err(HarnessError::Usage(USAGE.to_owned())),
-    };
+    frame_command_inner(rom, out_path, rest)
+}
+
+/// `fceux-frame`'s trailing arguments: the frame to stop at, and the power-on fill.
+///
+/// **The fill defaults to `zero`, not to FCEUX's own `Default` pattern** — lot FCEUX-6 step 3's
+/// finding, applied here in step 8. `FCEU_MemoryRand` fills the work RAM *and* the CHR-RAM of a
+/// `chr = 0` cart with `00 00 00 00 FF FF FF FF` (`src/fceu.cpp:990-1022`, `src/ines.cpp:78-79`),
+/// while `zax-nes` clears both (REQ-CORE-004). The two machines then start from different memory,
+/// and a CHR-RAM cart reading a tile it never wrote reads a different tile on each.
+///
+/// This command exists to feed Zaxnes's 3D path with FCEUX's records and have the picture be
+/// comparable to Zaxnes's own, which it cannot be unless the two are the same machine — so it
+/// defaults to the fill `fceux-tiles` compares with, and step 3 measured what that is worth: 47
+/// of 98 originals record-identical at every compared frame against 41 with the `Default` fill,
+/// and 177 of 289 public ROMs against 162.
+fn parse_frame_arguments(rest: &[String]) -> Result<(u32, RamInit), HarnessError> {
+    let mut frames = 120;
+    let mut ram = RamInit::Zero;
+    let mut index = 0;
+    while index < rest.len() {
+        let argument = rest[index].as_str();
+        if argument == "--ram" {
+            let value = rest
+                .get(index + 1)
+                .ok_or_else(|| HarnessError::Usage(USAGE.to_owned()))?;
+            ram = ram_init(value)?;
+            index += 2;
+            continue;
+        }
+        frames = argument.parse().map_err(|_| {
+            HarnessError::Usage(format!("{argument:?} is not a frame count{}", usage_tail()))
+        })?;
+        index += 1;
+    }
+    Ok((frames, ram))
+}
+
+/// One `--ram` spelling.
+fn ram_init(value: &str) -> Result<RamInit, HarnessError> {
+    match value {
+        "zero" => Ok(RamInit::Zero),
+        "default" => Ok(RamInit::Default),
+        "ff" => Ok(RamInit::Ff),
+        other => Err(HarnessError::Usage(format!(
+            "--ram: {other:?} is not zero, default or ff{}",
+            usage_tail()
+        ))),
+    }
+}
+
+/// The usage, on its own line after a message.
+fn usage_tail() -> String {
+    format!("\n{USAGE}")
+}
+
+fn frame_command_inner(rom: &str, out_path: &str, rest: &[String]) -> Result<(), HarnessError> {
+    let (frames, ram) = parse_frame_arguments(rest)?;
 
     let image = fs::read(rom)?;
     let name = Path::new(rom).file_name().map_or_else(
@@ -426,7 +479,7 @@ pub fn frame_command(rom: &str, out_path: &str, rest: &[String]) -> Result<(), H
 
     let mut engine = Fceux::new().map_err(|error| HarnessError::Usage(error.to_string()))?;
     engine
-        .set_ram_init(RamInit::Default)
+        .set_ram_init(ram)
         .and_then(|()| engine.load_rom(&image, &name))
         .map_err(|error| HarnessError::Usage(error.to_string()))?;
     engine.set_tile_capture(true);

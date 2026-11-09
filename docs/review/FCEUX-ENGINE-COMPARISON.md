@@ -533,3 +533,127 @@ The ones that differ, by mapper: **1** x22, **4** x11, **2** x10, **0** x8, **3*
 | Zelda II - The Adventure of Link (USA).nes | 1 | x | x | x | loaded | loaded |
 | Zelda II-TAoL [Europe][Rev 2][!].nes | 1 | x | x | x | loaded | loaded |
 
+
+## FCEUX-6 tile parity
+
+Everything above compares the two engines' **2D pictures**. This section compares what the **3D**
+path actually consumes: the per-frame tile records and the palette that travel with them
+(REQ-CORE-033/034/035/045). It is the deliverable of lot **FCEUX-6 step 8**, and the question it
+answers is the owner's: *does one 3dn profile give the same 3D picture whichever engine produced
+the records?*
+
+Produced by `zax-harness fceux-tiles` (both engines side by side, field by field) and, for the
+pictures, by `zax-harness render` fed each engine's records through the same stateless `--frames`
+path, scored with `zax-harness compare --tolerance 0`. The driving is `fceux-tiles`'s: 1200 or 3000
+frames, no button pressed, a reset after loading, and **the zero RAM fill** — not FCEUX's
+`Default` pattern, because `FCEU_MemoryRand` fills the work RAM *and* a CHR-RAM cart's CHR with
+`00 00 00 00 FF FF FF FF` while `zax-nes` clears both (REQ-CORE-004), and the two machines are
+otherwise not comparable. The figures in the sections above were taken with the `Default` fill and
+a lot that revisits them should expect them to improve for the same reason.
+
+### Every frame classified
+
+Each compared frame is `identical` (records and palette equal), `capture` (the two 2D pictures are
+identical, so the machines agree about what is on screen and only the capture disagrees — **ours**)
+or `emulation` (the pictures already differ, so the two cores are not showing the same frame —
+FCEUX against Zaxnes, out of this lot's scope).
+
+| | 98 originals, frames 60/300/1200/3000 | 291 public ROMs, frames 60/300 |
+|---|---|---|
+| ROMs identical at every compared frame, **before** FCEUX-6 | 7 / 98 | 102 / 289 |
+| ROMs identical at every compared frame, **after** | **37 / 98** | **176 / 291** |
+| frames `identical`, before → after | 85 → **238** / 392 | 234 → **376** / 578 |
+| frames `capture`, before → after | 176 → **34** / 392 | 122 → **3** / 578 |
+| frames `emulation` | 131 → 120 | 222 → 199 |
+
+The `capture` column is the one the lot owned, and it fell from 298 frames to 37. **None of the 37
+is a capture defect:** `fceux-tiles` names a cause for each and reports the count it cannot
+explain, which is **0** on both sets.
+
+| Cause | Originals | Public | Whose |
+|---|---|---|---|
+| `blank-screen` — Zaxnes's picture is one colour, so two identical pictures prove almost nothing | 12 | 2 | undecidable by the pixel test |
+| `oam-rotated-by-k` — every sprite matches after rotating FCEUX's OAM number by a constant | 8 | 1 | emulation: the `$4014` transfer began at a different `$2003`. REQ-CORE-043 numbers a record after its OAM entry, so a capture can neither cause nor cure it |
+| `sprite-oam-slot` — every differing record is a sprite differing on its `index`, with no one rotation | 8 | 0 | emulation: the game put that sprite in another OAM entry |
+| `palette-only` — no record differs; the palettes do | 6 | 1 | emulation |
+| **`unexplained`** | **0** | **0** | |
+
+Every one of the 37 also carries the frame at which the two engines' pictures *first* differed —
+3, 4, 5, 7, 8 or 10 in every case — so their agreeing again at frame 300, 1200 or 3000 is a
+coincidence rather than evidence.
+
+### The palette is part of the answer
+
+A frame batch is the records **and** the 32 palette bytes, and the 3D renderer reads both: it
+colours a mesh from the palette entry a record's sub-palette selects. Comparing the records alone
+is therefore not enough, and *Final Fantasy* frame 300 is the case that proves it: **all 960
+records equal on all ten fields**, `$3F0B` **32 on Zaxnes and 0 on FCEUX**, the two 2D pictures
+**identical** (no pixel on screen uses that entry), and **0.69 % of the 3D picture different**.
+
+| | 98 originals | 291 public ROMs |
+|---|---|---|
+| frames the records call identical and the palette does not | **21** | **8** |
+| ROMs with at least one such frame | 14 | 6 |
+| the entry most often involved | `$3F0B`, 14 frames (every *Final Fantasy* dump at 60 and 300) | spread over most of the 32 |
+
+### The 3D picture, per game
+
+One dump per profile, frames 300 and 1200, both engines' records through the same renderer with the
+same profile. `mesh` is `residentMeshes` and `tri` is `triangles` from `render.json`; `pixels` is
+the share identical at **tolerance 0**; `batch=` is whether the records *and* palette handed to the
+renderer were byte-identical.
+
+| Profile | frame | batch= | mesh z/f | triangles z/f | pixels |
+|---|---|---|---|---|---|
+| Blaster Master | 300 | **yes** | 218/218 | 25 376/25 376 | **100.000 %** |
+| Blaster Master | 1200 | **yes** | 22/22 | 20 464/20 464 | **100.000 %** |
+| Excitebike | 300 | **yes** | 52/52 | 5 916/5 916 | **100.000 %** |
+| Excitebike | 1200 | no | 89/91 | 39 862/39 966 | 86.997 % |
+| Final Fantasy | 300 | no (palette only) | 69/69 | 31 976/31 976 | 99.306 % |
+| Final Fantasy | 1200 | **yes** | 69/69 | 31 976/31 976 | **100.000 %** |
+| Mega Man 1 | 300 | **yes** | 234/234 | 19 292/19 292 | **100.000 %** |
+| Mega Man 1 | 1200 | **yes** | 234/234 | 19 292/19 292 | **100.000 %** |
+| Mega Man 2 | 300 | **yes** | 23/23 | 7 232/7 232 | **100.000 %** |
+| Mega Man 2 | 1200 | **yes** | 116/116 | 43 404/43 404 | **100.000 %** |
+| Mega Man 3 | 300 | **yes** | 0/0 | 0/0 | **100.000 %** (blank on both) |
+| Mega Man 3 | 1200 | **yes** | 147/147 | 11 512/11 512 | **100.000 %** |
+| Metroid | 300 | **yes** | 194/194 | 882 048/882 048 | **100.000 %** |
+| Metroid | 1200 | **yes** | 72/72 | 878 680/878 680 | **100.000 %** |
+| Ninja Gaiden III | 300 | **yes** | 74/74 | 12 252/12 252 | **100.000 %** |
+| Ninja Gaiden III | 1200 | **yes** | 33/33 | 13 984/13 984 | **100.000 %** |
+| Super Mario Bros. | 300 | **yes** | 102/102 | 28 822/28 822 | **100.000 %** |
+| Super Mario Bros. | 1200 | no | 52/52 | 25 836/25 836 | 89.647 % |
+| Adventure Island | 300 | no | 119/119 | 14 460/14 460 | 99.999 % |
+| Adventure Island | 1200 | no | 119/119 | 14 460/14 460 | 99.999 % |
+| Super Mario Bros. 3 | 300 | no | 21/21 | 13 216/13 216 | 98.551 % |
+| Super Mario Bros. 3 | 1200 | no | 305/305 | 34 780/34 780 | 98.532 % |
+| Castlevania | 300 | no | 253/254 | 51 112/51 096 | 99.563 % |
+| Castlevania | 1200 | no | 93/93 | 29 188/28 840 | 89.785 % |
+| Zelda II | 300 | no | 29/29 | 9 560/9 560 | 89.938 % |
+| Zelda II | 1200 | no | 120/120 | 17 928/17 928 | 89.935 % |
+
+Three readings:
+
+* **every cell whose batch is byte-identical renders 100.000 % identical pixels at tolerance 0**,
+  with identical mesh counts, triangles, opaque tiles and draw calls — 14 of the 26. The renderer
+  is a pure function of (records, palette, profile), so the 3D answer for a game follows from the
+  record answer with nothing left over;
+* **mesh counts are identical in 23 of the 26 cells**, the exceptions being *Castlevania* f300
+  (253/254, where the record counts themselves are 1024/1028) and *Excitebike* f1200 (89/91). The
+  same 3dn profile therefore builds the same scene on both engines even on several games whose
+  pictures differ;
+* where the records differ the 3D loses 1 % to 13 %, and the loss tracks the cause: one palette
+  entry 0.7 %, an OAM rotation 0.001 %, the `$2007`-while-rendering rule 1.5 % (*Super Mario Bros.
+  3*) to 10 % (*Zelda II*), sprites in different places 10 % to 13 %.
+
+**Not measured:** the other 65 dumps. `CLAUDE.md` forbids long GPU campaigns, so this is one dump
+per game — 26 cells, 78 renders — and the per-dump answer is derivable from the sweep plus the
+first reading above. Frames 300 and 1200 with no button pressed are a title screen or a transition
+on several of these games (*Mega Man 3* frame 300 is blank on both engines), so this table says
+whether the two engines agree, not how a game looks in play.
+
+**One decision is still the owner's.** *Super Mario Bros. 3* and *Zelda II* cannot agree without
+it: FCEUX applies the hardware rule for a `$2007` access made while rendering unconditionally,
+while `zax-nes` keeps it behind the non-default feature `ppu-2007-render-read` (Q-139) precisely
+because it moves those two games' pictures. With the feature on, the two engines' records for
+*Super Mario Bros. 3* become identical row for row. No change was made to `zax-nes`.

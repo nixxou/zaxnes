@@ -148,35 +148,132 @@ The other three RAM fills are deterministic, which is what let step 5's comparis
 
 ## 6. The tile records, and the honest state of the 3D path
 
-Step 6's prototype is further along than "prototype" suggests, and its limits are specific.
+**Rewritten by lot FCEUX-6, which did the work this section used to list as remaining.** What
+follows is the state after it. The figures are
+`docs/review/FCEUX-ENGINE-COMPARISON.md` § *FCEUX-6 tile parity*, and the working is
+`docs/progress/FCEUX-6.md`.
 
-On Super Mario Bros. frame 200, through Zaxnes's own renderer with its own profile and only the
-records swapped: **969 records on both sides, 863 (89.1 %) identical on all ten fields**, all 9
-sprites identical, the palette identical, **611 opaque quads and 567 shadow casters on both** — the
-same mesh — and a picture 92.867 % of whose pixels are within 2 levels. On ROMs that do not scroll
-mid-frame the records match **100 %** (`instr_test-v5`, `full_palette`) or within three records.
+### What lot FCEUX-1 left, and what became of it
 
-What remains, in the order a lot should take it:
+| FCEUX-1's item | State |
+|---|---|
+| 1. **Mid-frame scroll** — "the one thing standing between 89 % and near-100 %" | **done** (FCEUX-6 step 2). The fork keeps `zax_row_start` / `zax_row_next` beside `RefreshAddr` — `zax-nes`'s own two fields, maintained by the same rules — and captures the row at the **end** of the line (AMD-021 R2-005). *Super Mario Bros.* frame 200 went from 863 of 969 records to **969 of 969**; the originals identical at every compared frame went from 7 to 41 on this step alone |
+| 2. **MMC2/MMC4** latch per column, sprites by x | **done** (step 4), to the requirement (REQ-CORE-039, REQ-CORE-044), and measured to break nothing — but **no mapper 9 or 10 game is in either ROM set**, so it is unproven in use. *Punch-Out!!* has a profile in the catalogue; a lot with the ROM should close this |
+| 3. **MMC5** extended attributes and the vertical split | **done** (step 5), and the one thing any available ROM exercised was different: sprite patterns were being read through `VPage` instead of the chip's **sprite** bank set `MMC5SPRVPage`, which `mmc5test` showed as 13 wrong sprite records a frame. Mode 1 and the split are implemented and gate-checked, but **no mapper-5 ROM here ever enters either** (all four stay in CHR mode 0/2/3 with `$5200` at zero over 1200 frames) |
+| 4. **The new PPU** | still out of scope, and now scoped: see below |
+| 5. **Never** the widescreen fields | unchanged |
 
-1. **Mid-frame scroll.** The old PPU works per line; the capture samples the scroll once per 8-line
-   band. Every differing record on Super Mario Bros. sits on five rows — `y` = 16, 24, 88, 160, 232
-   — which are its status-bar and parallax splits. This is the one thing standing between 89 % and
-   near-100 % on scrolling games, and it is the first thing to fix: capture per line and fold, or
-   follow `RefreshAddr` through `Fixit1`/`Fixit2` instead of sampling it once.
-2. **MMC2/MMC4** need the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), with
-   the sprite-by-x ordering that goes with it (REQ-CORE-044). Not attempted.
-3. **MMC5** extended attributes and the vertical split. Not attempted; FCEUX has its own
-   `MMC5Hack` path (`ppu.cpp:1164-1200`) that a capture would have to mirror.
-4. **The new PPU.** The capture is on the old PPU's `DoLine` only, which is the right default
-   (`NewPPU 0` is what most `.fm2` movies record), but `newppu` has a separate loop
-   (`ppu.cpp:1771`) and would need its own hooks.
-5. **Never** the widescreen fields or the margin decoders: they are Zaxnes's bus, not an emulator
-   feature.
+Two things the lot found that were not on the list:
 
-A judgement for the owner, not a technical finding: **89 % of records and 93 % of pixels is not
-good enough to ship 3D on FCEUX**, and it should not be shipped until item 1 is done. Offering
-FCEUX in **2D only** at first is a coherent product — it already answers the mapper-coverage and
-`.fm2` reasons in full — and it is what this note recommends for the first integration lot.
+* **the palette was never compared.** A frame batch is the records *and* 32 palette bytes
+  (REQ-CORE-045) and the 3D renderer reads both. On *Final Fantasy* frame 300 all 960 records are
+  identical, `$3F0B` is 32 on Zaxnes and 0 on FCEUX, the 2D pictures are identical and **0.69 % of
+  the 3D picture is not**. 21 frames of the originals and 8 of the public ROMs were being called
+  identical on this account;
+* **the RAM fill was wrong for a record comparison.** `FCEU_MemoryRand` fills the work RAM *and* a
+  CHR-RAM cart's CHR with `00 00 00 00 FF FF FF FF` while `zax-nes` clears both, so the two
+  machines were not comparable. The tools now default to a zero fill, worth +6 originals and +15
+  public ROMs on their own.
+
+### Where it stands
+
+| | 98 originals, frames 60/300/1200/3000 | 291 public ROMs, frames 60/300 |
+|---|---|---|
+| ROMs identical at every compared frame | 7 → **37 / 98** | 102 → **176 / 291** |
+| frames `capture` (ours) | 176 → **34 / 392** | 122 → **3 / 578** |
+| of which a capture defect | **0** | **0** |
+
+All 37 remaining capture-class frames are named by cause — a blank screen the pixel test cannot
+judge, an OAM array rotated by a constant, one sprite in another OAM slot, or a palette entry — and
+each carries the frame at which the two engines' pictures first differed, which is 3 to 10 in every
+case. `fceux-tiles` prints the unexplained count, and it is 0.
+
+**Where the records and the palette are identical, the 3D picture is identical**: 14 of 26 rendered
+cells come out at **100.000 % of pixels at tolerance 0**, with identical mesh counts, triangles,
+opaque tiles and draw calls. Mesh counts match in 23 of the 26 cells, including several games whose
+pictures differ. So the 3D question reduces to the record question, with nothing left over.
+
+### Per game: ship-ready for 3D on FCEUX, or not
+
+Judged on the 13 games with a 3dn profile among the 98 originals, frames 300 and 1200.
+
+| Game | 3D on FCEUX | Why |
+|---|---|---|
+| **Mega Man 1** | **ship** | records and palette identical on all 6 dumps at every compared frame; 100.000 % of pixels, 234 meshes on both |
+| **Mega Man 3** | **ship** | identical on all 9 dumps at every frame; 100.000 %, 147 meshes on both |
+| **Ninja Gaiden III** | **ship** | identical on all 4 dumps at every frame; 100.000 %. This is the game whose status bar switches the nametable mirroring mid-frame, so it is the best evidence step 2's rule is right |
+| **Mega Man 2** | **ship** | 6 of 8 dumps identical at every frame, the other two (`Rockman 2-DWnN`) differing only at frame 3000; 100.000 % at both rendered frames |
+| **Metroid** | **ship** | records and palette identical at 300 and 1200 on all 4 dumps; 100.000 %, 194 and 72 meshes on both. 4 of its 16 frames are emulation-class, all at 3000 |
+| **Blaster Master** | **ship** | 5 of 6 dumps identical at every frame; 100.000 % at both rendered frames |
+| **Final Fantasy** | **ship, with one blemish** | all 960 records identical on every dump at every frame. The *only* difference anywhere is palette entry `$3F0B` at frames 60 and 300, worth 0.69 % of the picture; frame 1200 is 100.000 %. An emulation difference (the machines diverge at frame 3), not a capture one |
+| **Adventure Island** | **ship** | 99.999 % at both rendered frames, identical mesh counts and triangles. Its 8 capture-class frames are a 32-entry OAM rotation — the `$4014` transfer starting at a different `$2003` — which renumbers sprites without moving them |
+| **Super Mario Bros.** | **borderline** | frame 300 is 100.000 %; frame 1200 is **89.647 %** with identical mesh counts, from sprites held in different OAM slots. Playable, visibly not the same picture |
+| **Castlevania** | **no** | 89.785 % at 1200, and the record counts themselves differ (1024 against 1028 at 300) — the only game here where the mesh count differs too. Its dumps diverge in 2D from frame 6 or 13; this is FCEUX against Zaxnes, not the capture |
+| **Excitebike** | **no** | 100.000 % at 300 but **86.997 %** at 1200, with 89 meshes against 91. Diverges in 2D from frame 8 |
+| **Super Mario Bros. 3** | **blocked on a decision** | 98.5 % at both frames with identical mesh counts. **Needs `ppu-2007-render-read` on in `zax-nes`**: FCEUX applies the hardware rule for a `$2007` access made while rendering unconditionally, `zax-nes` keeps it behind that non-default feature (Q-139) precisely because it moves this game's picture. With the feature on the two engines' records become identical row for row |
+| **Zelda II** | **blocked on the same decision** | 89.9 % at both frames, identical mesh counts. Same cause as *Super Mario Bros. 3* |
+
+**The recommendation this section used to make — FCEUX in 2D only — no longer holds.** Eight of the
+thirteen games are ship-ready for 3D on FCEUX, two more are one owner decision away, and the three
+that are not are failing on FCEUX's *emulation* differing from Zaxnes's, which no amount of capture
+work can fix and which the per-game engine choice of §4 already handles: offer FCEUX for the games
+in the first group, and Zaxnes for *Castlevania*, *Excitebike* and *Super Mario Bros.*
+
+Two caveats on that recommendation, both stated rather than buried:
+
+* it rests on **one dump per game at frames 300 and 1200 with no button pressed**, which is a title
+  screen or a transition on several of them (*Mega Man 3* frame 300 is blank on both engines). It
+  says the two engines agree; it does not say how a game looks in play. A lot that wants a shipping
+  decision should write `--press` scripts into real gameplay and render those;
+* the other 65 dumps were not rendered, because `CLAUDE.md` forbids long GPU campaigns. Their
+  answer follows from the sweep — a dump whose records and palette are identical renders
+  identically, which is measured, not assumed — but it is derived rather than observed.
+
+### What the capture costs
+
+With the capture **on**, over 20 000 frames each on an i9-13900K, every run alone (FCEUX-6 step 7):
+
+| ROM | Zaxnes, capture on | FCEUX, capture on | FCEUX, capture off |
+|---|---|---|---|
+| *Super Mario Bros. 3* | 881 f/s | **4 964 f/s** | 5 813 f/s |
+| *Super Mario Bros.* | 1 130 f/s | **4 686 f/s** | 5 495 f/s |
+| *Mega Man 3* | 1 009 f/s | **4 504 f/s** | 5 308 f/s |
+
+The capture costs FCEUX a steady **17 %** of its frame — 0.03 ms, near identical across boards, as
+a fixed ~970 records a frame should be — and FCEUX stays **4.1× to 5.6×** faster than Zaxnes with
+both engines capturing. Lot FCEUX-1's "about 6×" was measured with the capture off; the honest
+range with it on is 4× to 6×, varying by board. There is no Zaxnes-without-capture figure because
+REQ-CORE-033 makes its capture unconditional. Part of FCEUX's 17 % is the binding rather than the
+capture: `zax-fceux`'s FFI sink allocates a `Vec` and copies all ~970 records inside the frame,
+which a host could avoid by writing into a reusable buffer as `zax-nes` does.
+
+Through the 3D path, `bench-core` headless gives Zaxnes 742, 865 and 986 f/s on the three games
+with their own profiles, and the cost after the core is dominated by the **profile's Lua** (0.129
+ms on *Super Mario Bros. 3*) rather than by the mesh conversion (0.059 ms) — worth knowing before
+anyone optimises the mesh builder. FCEUX through the same path projects to about **3×** Zaxnes; the
+harness has no continuous 3D loop on FCEUX, so that one is a projection and labelled so.
+
+### The new PPU, scoped
+
+`newppu` is still out of scope and the capture does nothing there. What hooking it would take, from
+reading it:
+
+1. **the two capture moments already exist as positions.** `FCEUX_PPU_Loop` has an explicit
+   `for (int sl = 0; sl < normalscanlines; sl++)` with the 32-tile fetch loop inside it, so the
+   sprite capture goes at the top of the `sl` body and the background row after the `xt` loop —
+   the same two places `DoLine` has them;
+2. **the row address has to be assembled, not shadowed.** `newppu` keeps the scroll as five
+   separate counters (`ppur.fv`, `v`, `h`, `vt`, `ht`, plus `fh`) rather than a packed 15-bit
+   `RefreshAddr`, so step 2's pair becomes a value built from the five at the right instants. Likely
+   *fewer* hook sites than the old PPU's five, because `newppu` keeps the latch install explicit
+   (`ppur.install_latches()`) instead of folding it into `Fixit1` and `Fixit2`;
+3. **the sixteen-byte pattern read transfers unchanged.** `bgdata.main[xt].pt` holds only the two
+   pattern bytes of the line being drawn, so the capture still walks the nametable itself, which is
+   what it already does and is PPU-agnostic;
+4. **the MMC5 half has nothing to mirror.** `newppu` implements **neither** the extended attribute
+   mode nor the vertical split — its only MMC5 references are the `MMC5_hb` scanline hook — so a
+   capture there would be right for free on CHR mode 0 and wrong in exactly the way `newppu`'s own
+   picture is wrong on mode 1 and the split.
 
 ## 7. The FCEUX defect found, and what to do about it
 

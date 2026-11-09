@@ -22,7 +22,7 @@ never edited.
 - [x] 5/9 — MMC5: extended attributes and the vertical split.
 - [x] 6/9 — The rest of the classification.
 - [x] 7/9 — Cost of the capture.
-- [ ] 8/9 — The 3D picture, per original with a profile.
+- [x] 8/9 — The 3D picture, per original with a profile.
 - [ ] 9/9 — Final pass.
 
 ## Environment of the session
@@ -677,6 +677,12 @@ Step 6 takes those three and the 28 on the originals and closes the classificati
 
 # Step 6 — The rest of the classification
 
+> **Superseded in part by step 8.** Every count in this section is **records only**. A frame batch
+> is the records *and* the 32-byte palette (REQ-CORE-045), and step 8 found that comparing the
+> records alone called 21 frames of the originals and 8 of the public ROMs identical while the
+> palette differed. Step 8 carries the corrected tables. The conclusion of this section —
+> `unexplained: 0`, no capture bug left — survives the correction.
+
 Worktree commit below. Nothing in the fork changed at this step: **no capture bug was left to
 fix.** What the step produced instead is the proof of that, in the instrument rather than in prose.
 
@@ -1001,3 +1007,212 @@ difference between "comfortable" and "marginal" once a handheld's clock is a thi
   usage error naming its option);
 * the instrument cross-checked against `bench-core` on the same stage of the same ROM: 1.1349 ms
   against 1.1346 ms.
+
+---
+
+# Step 8 — The 3D picture, and the field step 1 forgot
+
+Worktree commit below. Nothing in the fork changed at this step. Two deliverables, and the first
+one changes step 6's numbers, so it comes first.
+
+## The finding: a frame batch is the records **and the palette**, and only the records were compared
+
+`fceux-tiles` compared the ten record fields. A frame batch is the records *plus the 32-byte
+palette* (REQ-CORE-045), and **the 3D renderer reads both** — it colours a mesh from the palette
+entry a record's sub-palette selects. So the instrument could call a frame identical while the 3D
+picture was not, which is precisely the question this lot exists to answer.
+
+*Final Fantasy* frame 300 is the case that found it, and it is worth stating exactly:
+
+* all **960 records equal on all ten fields**, in order;
+* the palettes differ in **one entry**: `$3F0B` is **32** on Zaxnes and **0** on FCEUX;
+* the two 2D pictures are **identical**, because no pixel on screen at that frame uses background
+  sub-palette 2's colour 3 — which is why the pixel test saw nothing;
+* **0.69 % of the 3D picture's pixels differ.**
+
+Both engines sample the palette at the same instant (the end of the frame: `zax-nes`'s
+`Ppu2C02::snapshot_palette` through `frame_batch`, the fork's sink at the end of its frame) and
+both deliver plain colour indices with the `$3F10`/`$3F14`/`$3F18`/`$3F1C` mirrors filled in and
+no priority bit, so the two are comparable and the difference is real machine state. *Final
+Fantasy*'s two engines **diverged at frame 3** (`first_pixel_diff`), so this is an emulation
+difference and not the capture's — but it was invisible.
+
+`FrameDiff::palette_differences` now carries the differing entries as `$3F0B:32/0`,
+`FrameDiff::class` counts a palette difference against `identical`, and `FrameDiff::cause` gained
+**`palette-only`** for a capture-class frame where no record differs at all. Two unit tests pin it,
+one of them with *Final Fantasy*'s own numbers.
+
+### What the palette is worth, measured
+
+Over both ROM sets, counting frames by what differs:
+
+| | 98 originals, 60/300/1200/3000 | 291 public ROMs, 60/300 |
+|---|---|---|
+| frames with records **and** palette identical | 238 / 392 | 376 / 578 |
+| frames the records call identical and **the palette does not** | **21** | **8** |
+| frames where records differ, palette agrees | 131 | 162 |
+| frames where both differ | 2 | 32 |
+| ROMs with at least one palette-only frame | **14 / 98** | **6 / 291** |
+
+One entry dominates the originals: **`$3F0B` on 14 frames** (every *Final Fantasy* dump at frames
+60 and 300), then `$3F17` on 3 (the three *Mega Man 5* dumps at 1200) and `$3F0A` on 3. The public
+set's eight are spread over most of the 32 entries and belong to six ROMs, `01-implied.nes` among
+them.
+
+### Step 6's table, corrected
+
+**Step 6's figures above are records-only and are superseded by these.** The same sweeps, with the
+palette counted:
+
+| | records only (step 6) | **records + palette (step 8)** |
+|---|---|---|
+| originals identical at every compared frame | 47 / 98 | **37 / 98** |
+| originals: frames identical | 259 / 392 | **238 / 392** |
+| originals: frames `capture` | 28 | **34** |
+| originals: frames `emulation` | 105 | **120** |
+| public ROMs identical at every compared frame | 180 / 291 | **176 / 291** |
+| public ROMs: frames identical | 384 / 578 | **376 / 578** |
+| public ROMs: frames `capture` | 3 | **3** |
+| **`unexplained`** | **0** | **0** |
+
+`unexplained` stays at **0**: all six new capture-class frames on the originals and the one on the
+public set come out `palette-only`, each with the frame the two machines diverged at (3, 4 or 7).
+The claim step 6 makes is therefore unchanged in substance — no capture bug is left — but the
+numbers it makes it with were too kind by 21 and 8 frames, and these are the right ones.
+
+The per-profile table, corrected:
+
+| Profile | dumps | dumps identical at every frame | frames | identical | capture | emulation |
+|---|---|---|---|---|---|---|
+| Adventure Island | 4 | 0 | 16 | 1 | 8 | 7 |
+| Blaster Master | 6 | **5** | 24 | 21 | 0 | 3 |
+| Castlevania | 9 | 0 | 36 | 4 | 0 | 32 |
+| Excitebike | 6 | 0 | 24 | 12 | 0 | 12 |
+| Final Fantasy | 7 | 0 | 28 | 14 | 3 | 11 |
+| Mega Man 1 | 6 | **6** | 24 | **24** | 0 | 0 |
+| Mega Man 2 | 8 | **6** | 32 | 30 | 0 | 2 |
+| Mega Man 3 | 9 | **9** | 36 | **36** | 0 | 0 |
+| Metroid | 4 | 0 | 16 | 12 | 0 | 4 |
+| Ninja Gaiden III | 4 | **4** | 16 | **16** | 0 | 0 |
+| Super Mario Bros. | 4 | 0 | 16 | 10 | 4 | 2 |
+| Super Mario Bros. 3 | 8 | 0 | 32 | 0 | 0 | 32 |
+| Zelda II | 3 | 0 | 12 | 0 | 0 | 12 |
+| (no profile) | 20 | **7** | 80 | 58 | 19 | 3 |
+
+*Final Fantasy* falls from 7 dumps identical to 0, and the reason is the whole of its story: **every
+one of its differing frames has all 960 records identical and exactly one palette entry apart.**
+Three games — *Mega Man 1*, *Mega Man 3*, *Ninja Gaiden III* — are still records-and-palette
+identical on every dump at every compared frame.
+
+## The method, and the trap in it
+
+Per game and per frame:
+
+1. `render --rom <rom> --profile <P> --run <F> --dump-frame zax.json` — Zaxnes's records;
+2. `fceux-frame <rom> fce.json <F>` — FCEUX's records;
+3. `render --frames zax.json --profile <P>` and `render --frames fce.json --profile <P>` — **both**
+   through the same path;
+4. `compare` the two PNGs at **tolerance 0**, and the two `render.json` scene summaries.
+
+**Step 3 is where the trap was.** The first attempt used the `--rom` run's own picture as Zaxnes's
+reference and only rendered FCEUX's records from JSON. That is not a comparison of the records: the
+`--rom` path arrives at frame 1200 carrying 1200 frames of profile state — the profile's Lua hooks
+and the mesh builder's history — which a single-frame `--frames` render cannot have. It made
+*Final Fantasy* look 39 % identical with 55 meshes against 69. Rendering **both** engines' records
+through the stateless `--frames` path leaves the records as the only variable, and *Final Fantasy*
+f1200 then comes out at 69 meshes on both sides and 100.000 %.
+
+The method was validated before being trusted: `--rom` and `--frames` fed the *same* dumped records
+for *Mega Man 3* frame 1200 give pictures **100.000 % identical at tolerance 0**, which is also the
+proof that the renderer is a pure function of (records, palette, profile) — the fact the rest of
+this step leans on.
+
+One limitation of the `--frames` JSON format, stated because it flatters the result: it carries
+`low`, `high`, `x`, `y`, `palette`, the two mirrors, `hidden` and `sprite`, but **not the record
+`index`**. A difference that is only an index — a sprite in another OAM slot — therefore cannot
+show in these pictures. That is why *Adventure Island*'s OAM rotation costs it 0.001 % below.
+
+`fceux-frame` also had to be fixed first: it was still using FCEUX's **`Default`** RAM fill while
+the comparison moved to `zero` in step 3, so it was feeding the 3D path records from a different
+machine than the one step 6 measured. It now takes `--ram` and defaults to `zero`. The fill
+demonstrably matters: on *Mega Man 6* at frame 60 the two fills give different records (identical
+at 300 and 1200).
+
+## The 3D table — one dump per game, frames 300 and 1200
+
+`mesh` is `residentMeshes`, `tri` is `triangles`, both from `render.json`; `px` is the share of
+pixels identical at **tolerance 0**; `batch=` is whether the two frame JSONs (records *and*
+palette) are byte-identical.
+
+| Profile | frame | records z/f | batch= | mesh z/f | triangles z/f | opaque z/f | draws z/f | **pixels** |
+|---|---|---|---|---|---|---|---|---|
+| Adventure Island | 300 | 973/973 | no | 119/119 | 14 460/14 460 | 242/242 | 383/383 | **99.999 %** |
+| Adventure Island | 1200 | 973/973 | no | 119/119 | 14 460/14 460 | 242/242 | 383/383 | **99.999 %** |
+| Blaster Master | 300 | 960/960 | **yes** | 218/218 | 25 376/25 376 | 286/286 | 572/572 | **100.000 %** |
+| Blaster Master | 1200 | 960/960 | **yes** | 22/22 | 20 464/20 464 | 778/778 | 1 556/1 556 | **100.000 %** |
+| Castlevania | 300 | 1024/**1028** | no | 253/**254** | 51 112/51 096 | 868/869 | 1 431/1 433 | 99.563 % |
+| Castlevania | 1200 | 1035/1035 | no | 93/93 | 29 188/28 840 | 895/872 | 1 125/1 096 | 89.785 % |
+| Excitebike | 300 | 961/961 | **yes** | 52/52 | 5 916/5 916 | 204/204 | 241/241 | **100.000 %** |
+| Excitebike | 1200 | 1002/1002 | no | 89/**91** | 39 862/39 966 | 664/664 | 676/676 | 86.997 % |
+| Final Fantasy | 300 | 960/960 | no (palette) | 69/69 | 31 976/31 976 | 1 182/1 182 | 1 404/1 404 | 99.306 % |
+| Final Fantasy | 1200 | 960/960 | **yes** | 69/69 | 31 976/31 976 | 1 182/1 182 | 1 404/1 404 | **100.000 %** |
+| Mega Man 1 | 300 | 960/960 | **yes** | 234/234 | 19 292/19 292 | 275/275 | 531/531 | **100.000 %** |
+| Mega Man 1 | 1200 | 960/960 | **yes** | 234/234 | 19 292/19 292 | 275/275 | 531/531 | **100.000 %** |
+| Mega Man 2 | 300 | 960/960 | **yes** | 23/23 | 7 232/7 232 | 76/76 | 152/152 | **100.000 %** |
+| Mega Man 2 | 1200 | 992/992 | **yes** | 116/116 | 43 404/43 404 | 692/692 | 1 018/1 018 | **100.000 %** |
+| Mega Man 3 | 300 | 0/0 | **yes** | 0/0 | 0/0 | 0/0 | 0/0 | **100.000 %** (blank on both) |
+| Mega Man 3 | 1200 | 961/961 | **yes** | 147/147 | 11 512/11 512 | 156/156 | 312/312 | **100.000 %** |
+| Metroid | 300 | 1000/1000 | **yes** | 194/194 | 882 048/882 048 | 948/948 | 1 890/1 890 | **100.000 %** |
+| Metroid | 1200 | 1000/1000 | **yes** | 72/72 | 878 680/878 680 | 682/682 | 1 358/1 358 | **100.000 %** |
+| Ninja Gaiden III | 300 | 974/974 | **yes** | 74/74 | 12 252/12 252 | 941/941 | 941/941 | **100.000 %** |
+| Ninja Gaiden III | 1200 | 1024/1024 | **yes** | 33/33 | 13 984/13 984 | 928/928 | 960/960 | **100.000 %** |
+| Super Mario Bros. | 300 | 969/969 | **yes** | 102/102 | 28 822/28 822 | 611/611 | 1 178/1 178 | **100.000 %** |
+| Super Mario Bros. | 1200 | 995/995 | no | 52/52 | 25 836/25 836 | 252/252 | 459/459 | 89.647 % |
+| Super Mario Bros. 3 | 300 | 976/976 | no | 21/21 | 13 216/13 216 | 884/884 | 1 048/1 048 | 98.551 % |
+| Super Mario Bros. 3 | 1200 | 972/972 | no | 305/305 | 34 780/34 780 | 612/612 | 862/862 | 98.532 % |
+| Zelda II | 300 | 1086/1086 | no | 29/29 | 9 560/9 560 | 388/388 | 776/776 | 89.938 % |
+| Zelda II | 1200 | 1084/1084 | no | 120/120 | 17 928/17 928 | 485/485 | 962/962 | 89.935 % |
+
+Three results, in order of importance:
+
+1. **Every cell whose frame JSON is byte-identical renders 100.000 % identical pixels at tolerance
+   0**, with identical mesh counts, triangles, opaque tiles and draw calls — 14 of the 26 cells. The
+   construction argument ("same records and palette in, same 3D out") is not an argument, it is
+   measured, and it means the 3D answer for a game follows from the record answer with nothing left
+   over.
+2. **Mesh counts are identical in 23 of the 26 cells.** The three that are not are *Castlevania*
+   f300 (253 against 254, with the record counts themselves 1024 against 1028) and *Excitebike*
+   f1200 (89 against 91); everywhere else the two engines build the same number of meshes even when
+   the picture differs, which is what "the same 3dn profile is valid on both engines" needs.
+3. **Where the records differ, the 3D differs by 1 % to 13 %** and the shape of the loss follows the
+   cause: a palette entry costs 0.7 % (*Final Fantasy* f300), an OAM rotation 0.001 %
+   (*Adventure Island* — and only because the JSON drops the index), a `$2007` scroll rule 1.5 %
+   (*Super Mario Bros. 3*) or 10 % (*Zelda II*), and sprites in different places 10 to 13 %
+   (*Super Mario Bros.* f1200, *Castlevania* f1200, *Excitebike* f1200).
+
+### What was not done, and why
+
+The brief asks for "each original with a profile" — 78 dumps, which is 78 × 2 frames × 3 renders =
+**468 renders**. `CLAUDE.md` forbids long or repeated GPU campaigns (a machine crash happened here
+under sustained GPU load), so this ran **one dump per profile: 13 games, 26 cells, 78 renders**, in
+three short batches. The justification is that the deliverable is a per-**game** verdict — a 3dn
+profile is a per-game choice — and that result 1 above makes the per-dump answer derivable: a dump
+whose records and palette are identical renders identically, and the sweep gives that for all 78.
+A lot with a GPU budget and a reason should run the other 65.
+
+Frames 300 and 1200 with no button pressed are also, for several of these games, a title screen or
+a transition rather than play: *Mega Man 3* frame 300 is blank on **both** engines (0 records), and
+*Mega Man 2* f300 builds 23 meshes against 116 at f1200. The frames are the brief's and the table
+is honest about what they show, but a judgement about how a game *plays* in 3D on FCEUX needs
+`--press` scripts into real gameplay, which no lot has written.
+
+## Verification of this step
+
+* `cargo fmt -p zax-harness -- --check`: clean;
+* `cargo clippy --release -p zax-harness --all-targets -- -D warnings`, with and without
+  `fceux-core`: clean;
+* `cargo test --release -p zax-harness --features fceux-core`: 7 `fceux_tiles` unit tests pass,
+  including the two new palette ones;
+* the render method validated against itself before use (`--rom` against `--frames` on the same
+  records: 100.000 % at tolerance 0);
+* both sweeps re-run end to end with the palette compared: `unexplained: 0` on both.

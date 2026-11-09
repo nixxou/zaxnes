@@ -362,19 +362,48 @@ pub struct FrameDiff {
     /// `$2003` on the two machines — which is an emulation difference and not the capture's:
     /// the capture reads OAM entry `n` on both sides, as REQ-CORE-043 requires.
     pub oam_rotation: Option<i32>,
+    /// Whether the **32-byte palette** the two engines hand over with the records differs, and
+    /// the entries that do.
+    ///
+    /// Lot FCEUX-6 step 8's finding. A frame batch is the records *and* the palette
+    /// (REQ-CORE-045), and the 3D renderer reads both — it colours a mesh from the palette entry
+    /// the record's sub-palette selects — so comparing the records alone can call a frame
+    /// identical when the 3D picture is not. *Final Fantasy* at frame 300 is the case that found
+    /// it: all 960 records equal on all ten fields, `$3F0B` **32 on Zaxnes and 0 on FCEUX**, the
+    /// two 2D pictures identical because no pixel on screen uses that entry, and 0.69 % of the
+    /// 3D picture's pixels different.
+    ///
+    /// Each entry is `(index, zaxnes, fceux)`. Empty when the palettes agree, which is also the
+    /// default, so a `FrameDiff` built by a caller that has no palette to offer claims nothing.
+    pub palette_differences: Vec<(usize, u8, u8)>,
 }
 
 impl FrameDiff {
     /// `identical`, `capture` (ours to fix) or `emulation` (FCEUX against Zaxnes).
+    ///
+    /// The palette counts: a frame whose records all match but whose palette does not is not
+    /// `identical`, because the 3D picture the lot exists to make the same is not the same. See
+    /// [`FrameDiff::palette_differences`].
     #[must_use]
     pub fn class(&self) -> &'static str {
-        if self.zaxnes == self.fceux && self.same_in_order == self.zaxnes {
+        let records_identical = self.zaxnes == self.fceux && self.same_in_order == self.zaxnes;
+        if records_identical && self.palette_differences.is_empty() {
             "identical"
         } else if self.pixels_identical {
             "capture"
         } else {
             "emulation"
         }
+    }
+
+    /// The differing palette entries as `$3F0B:32/0`, or empty when they agree.
+    #[must_use]
+    pub fn palette_summary(&self) -> String {
+        self.palette_differences
+            .iter()
+            .map(|(index, ours, theirs)| format!("$3F{index:02X}:{ours}/{theirs}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Why this frame is **capture**-class without the capture being at fault, or
@@ -406,6 +435,14 @@ impl FrameDiff {
         let diverged = first_pixel_diff.filter(|first| *first < frame);
         let since = diverged.map_or_else(String::new, |first| format!(", diverged at {first}"));
 
+        // The palette first, and only when **no record differs**: the two engines hold a
+        // different colour in palette RAM, which is machine state the capture reads and does not
+        // make. It is named rather than lumped into `unexplained` because the 2D pixel test
+        // cannot see an entry no on-screen pixel uses, while the 3D path colours meshes from all
+        // 32 of them (step 8).
+        if self.by_fields.is_empty() && !self.palette_differences.is_empty() {
+            return format!("palette-only{since}");
+        }
         if let Some(k) = self.oam_rotation {
             return format!("oam-rotated-by-{k}{since}");
         }
@@ -668,6 +705,22 @@ pub struct RomDiff {
 /// The two engines are driven exactly as `golden-core` and `fceux-run` drive them — the file stem
 /// as Zaxnes's name and the basename as FCEUX's, FCEUX's deterministic default RAM fill, a reset
 /// after loading, no button pressed — so a difference here is the engines' and not the harness's.
+/// The entries where the two engines' 32-byte palettes differ, as `(index, zaxnes, fceux)`.
+///
+/// Both sides are plain NES colour indices 0 to 63 by the time they get here: `zax-nes`'s
+/// `Ppu2C02::snapshot_palette` returns the shown palette with the mirrors of `$3F10`, `$3F14`,
+/// `$3F18` and `$3F1C` filled in, and the fork's capture does the same and masks to `0x3F`
+/// (`zax/zaxtiles.cpp`), so neither carries a priority bit and the two are comparable.
+fn palette_differences(zaxnes: &[u8], fceux: &[u8]) -> Vec<(usize, u8, u8)> {
+    zaxnes
+        .iter()
+        .zip(fceux.iter())
+        .enumerate()
+        .filter(|(_, (ours, theirs))| ours != theirs)
+        .map(|(index, (ours, theirs))| (index, *ours, *theirs))
+        .collect()
+}
+
 fn compare_rom(
     engine: &mut Fceux,
     rom: &str,
@@ -723,17 +776,20 @@ fn compare_rom(
         }
 
         let capture = engine.take_tiles().unwrap_or_default();
-        result.frames.push((
-            frame,
-            compare_frame_full(
-                zaxnes.tile_records(),
-                &capture.records,
-                pixels_identical,
-                ours.first()
-                    .is_some_and(|first| ours.iter().all(|p| p == first)),
-                pairs_wanted,
-            ),
-        ));
+        let mut diff = compare_frame_full(
+            zaxnes.tile_records(),
+            &capture.records,
+            pixels_identical,
+            ours.first()
+                .is_some_and(|first| ours.iter().all(|p| p == first)),
+            pairs_wanted,
+        );
+        // The palette travels with the records in a frame batch (REQ-CORE-045) and the 3D
+        // renderer reads both, so a comparison that stops at the records is incomplete -- lot
+        // FCEUX-6 step 8. Taken here because it is the only place that holds both engines.
+        diff.palette_differences =
+            palette_differences(&zaxnes.frame_batch().palette, &capture.palette);
+        result.frames.push((frame, diff));
     }
 
     Ok(result)
@@ -787,6 +843,7 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
                         "zaxnes_rows": rows_text(&diff.zaxnes_rows),
                         "fceux_rows": rows_text(&diff.fceux_rows),
                         "oam_rotation": diff.oam_rotation,
+                        "palette": diff.palette_summary(),
                         "cause": diff.cause(*frame, result.first_pixel_diff),
                         "pairs": diff.pairs.iter().map(|(ours, theirs)| json!([ours, theirs])).collect::<Vec<_>>(),
                     }),
@@ -1066,6 +1123,11 @@ fn rom_lines(
             let _ = write!(detail, " [{cause}]");
             *causes.entry(cause.to_owned()).or_insert(0) += 1;
         }
+        // The differing palette entries, which are not records and so are not in `fields`.
+        let palette = diff.get("palette").and_then(Value::as_str).unwrap_or("");
+        if !palette.is_empty() {
+            let _ = write!(detail, " palette {palette}");
+        }
         if options.detail {
             let _ = write!(detail, " @y {}", list(diff.get("rows")));
             let _ = write!(
@@ -1291,5 +1353,49 @@ mod tests {
         let diff = compare_frame(&[background], &[tile(99, 5, true)], false);
         assert_eq!(diff.class(), "emulation");
         assert_eq!(diff.cause(300, Some(8)), "");
+    }
+
+    /// Lot FCEUX-6 step 8: the palette travels with the records and the 3D renderer reads both,
+    /// so identical records are **not** enough to call a frame identical. *Final Fantasy* at
+    /// frame 300 is the case that found it, and these are its numbers.
+    #[test]
+    fn a_frame_whose_records_match_but_whose_palette_does_not_is_not_identical() {
+        let record = TileRecord::new(1, 2, 3, 4, 5, false, false, false, 1, true);
+        let tile = Tile {
+            plane0: 1,
+            plane1: 2,
+            x: 3,
+            y: 4,
+            index: 5,
+            mirror_h: false,
+            mirror_v: false,
+            hidden: false,
+            palette: 1,
+            background: true,
+        };
+
+        // Every record equal and the palettes equal: identical, and nothing to explain.
+        let mut diff = compare_frame(&[record], &[tile], true);
+        assert_eq!(diff.class(), "identical");
+        assert_eq!(diff.palette_summary(), "");
+        assert_eq!(diff.cause(300, Some(3)), "");
+
+        // The same records, one palette entry apart — Final Fantasy's `$3F0B`, 32 against 0.
+        let mut ours = [0u8; 32];
+        let mut theirs = [0u8; 32];
+        ours[0x0B] = 32;
+        theirs[0x0B] = 0;
+        diff.palette_differences = palette_differences(&ours, &theirs);
+        assert_eq!(diff.palette_summary(), "$3F0B:32/0");
+        assert_eq!(diff.class(), "capture");
+        assert_eq!(diff.cause(300, Some(3)), "palette-only, diverged at 3");
+        // And it is never counted as an unexplained capture bug.
+        assert!(!diff.cause(300, Some(3)).starts_with("unexplained"));
+    }
+
+    #[test]
+    fn identical_palettes_report_no_difference_at_all() {
+        let palette: [u8; 32] = std::array::from_fn(|index| u8::try_from(index).unwrap_or(0));
+        assert_eq!(palette_differences(&palette, &palette), vec![]);
     }
 }
