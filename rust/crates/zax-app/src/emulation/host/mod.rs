@@ -127,9 +127,14 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     pub clock: Option<Clock>,
     /// Where the host logs.
     pub log: Option<LogFn>,
-    /// The handles on the audio thread's stream; none when no device opened, and then the host
-    /// drives no rate control (Q-153).
+    /// The handles on the audio thread's stream; none when no device opened **or** when the
+    /// classic output of AUDIO-2 is the one that opened, and then the host drives no rate
+    /// control of its own (Q-153).
     pub audio: Option<AudioLink>,
+    /// Whether the device that opened is the classic output of `v0.4.2` (AUDIO-2,
+    /// `audio.classic_output`). Decided once, by whoever opened the device; never read from the
+    /// settings again, so the choice costs nothing per frame.
+    pub classic_audio: bool,
     /// The settings and game list files; none when nothing is persisted.
     pub settings_store: Option<SettingsStore>,
     /// Whether deletions wait for the interface's confirmation (REQ-UI-110).
@@ -158,6 +163,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             clock: None,
             log: None,
             audio: None,
+            classic_audio: false,
             settings_store: None,
             confirm_with_interface: false,
             suspend_resume: false,
@@ -181,6 +187,12 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     log: LogFn,
     modal_window_open: bool,
     audio: Option<AudioLink>,
+    /// Whether the classic output of `v0.4.2` is the one that is open (AUDIO-2). One field read
+    /// instead of a settings lookup: the two places that branch on it run once per tick.
+    classic_audio: bool,
+    /// Set when `audio.classic_output` changed and the device is to be reopened under the other
+    /// output; the application drains it once per rendered frame ([`Self::take_audio_reopen`]).
+    audio_reopen: bool,
     /// The rate controller of the audio output; it also keeps the correction in force, for the
     /// overlay.
     audio_rate: RateControl,
@@ -331,6 +343,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             clock,
             log,
             audio,
+            classic_audio,
             settings_store,
             confirm_with_interface,
             suspend_resume,
@@ -358,6 +371,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             log: log.unwrap_or_else(|| Box::new(|_| {})),
             modal_window_open: false,
             audio,
+            classic_audio,
+            audio_reopen: false,
             audio_rate: RateControl::new(),
             confirm_with_interface,
             pending: VecDeque::new(),
@@ -501,11 +516,92 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.audio.as_ref()
     }
 
+    /// Whether the open device is the classic output of `v0.4.2` (AUDIO-2).
+    #[must_use]
+    pub const fn classic_audio(&self) -> bool {
+        self.classic_audio
+    }
+
+    /// Whether `audio.classic_output` changed since this was last asked: the application reopens
+    /// the device when it has (AUDIO-2). One field read and one branch per rendered frame, which
+    /// is the whole run-time cost of the choice.
+    pub const fn take_audio_reopen(&mut self) -> bool {
+        let wanted = self.audio_reopen;
+        self.audio_reopen = false;
+        wanted
+    }
+
+    /// Hands the host the device that has just been (re)opened (AUDIO-2): the stream's handles on
+    /// the default output, `None` and `classic_audio` on the classic one or when nothing opened.
+    ///
+    /// It re-installs the running game's samples on the new path, applies `audio.latency_ms` and
+    /// resynchronises, so that switching outputs while a game plays is a short dip and not a
+    /// silence.
+    pub fn attach_audio(&mut self, audio: Option<AudioLink>, classic_audio: bool) {
+        // The source of the output that is going away, if it was the classic one, before the new
+        // path claims the console.
+        if let Some(mixer) = self.mixer.as_mut() {
+            mixer.set_emulation_source(None);
+        }
+        if let Some(link) = self.audio.as_ref() {
+            link.set_console(None);
+        }
+        self.audio = audio;
+        self.classic_audio = classic_audio;
+        self.audio_rate.restart();
+        self.attach_console();
+        self.publish_state();
+        self.apply_audio_latency();
+        self.resynchronise_audio();
+    }
+
+    /// Installs the running game's samples on whichever output is open (AUDIO-2): the audio
+    /// thread's console slot on the default output ([`stream::ApuSamples`]), the mixer's own
+    /// source on the classic output of `v0.4.2`. A game that is not loaded installs nothing.
+    fn attach_console(&mut self) {
+        let Some(reader) = self
+            .session
+            .as_ref()
+            .filter(|session| session.has_rom())
+            .map(|session| session.core().audio_reader())
+        else {
+            return;
+        };
+        if self.classic_audio {
+            // `v0.4.2`'s source, byte for byte: the mixer reads the ring on the main thread and
+            // the read is all or nothing.
+            if let Some(mixer) = self.mixer.as_mut() {
+                let source: crate::audio::audio_mixer::AudioSampleSource =
+                    Box::new(move |destination| {
+                        // A mono read cannot be refused; an empty buffer reads as silence.
+                        reader.read_samples(destination, false).unwrap_or(0)
+                    });
+                mixer.set_emulation_source(Some(source));
+            }
+        } else if let Some(audio) = &self.audio {
+            // The audio thread reads the core's ring itself from here on (Q-153).
+            audio.set_console(Some(Box::new(stream::ApuSamples::new(reader))));
+        }
+    }
+
     /// One line on the state of the audio output, for the performance overlay and the
     /// per-second line of the profiler's log: the latency measured against the one asked for,
     /// the correction in force, the extremes of the ring's fill and the under-runs (Q-153 §6).
+    ///
+    /// The classic output of AUDIO-2 has none of those — no measured latency, no prefill, no
+    /// ramp — so it reports what it does have: that it is the one running, and the blocks of
+    /// zeros it sent out because the console was late. That count is the defect Q-153 §1
+    /// describes, and the reason the output is a fallback and not the default.
     #[must_use]
     pub fn audio_report(&self) -> Option<String> {
+        if self.classic_audio {
+            let silent = self.mixer.as_ref().map_or(0, |mixer| mixer.underrun_blocks);
+            return Some(format!(
+                "classic output (v0.4.2): {} blocks of {} frames, silence blocks {silent}",
+                zax_platform::audio::BLOCK_COUNT,
+                crate::audio::audio_mixer::BLOCK
+            ));
+        }
         let audio = self.audio.as_ref()?;
         let rate = audio.sample_rate;
         let extremes = audio.control.extreme_fill().map_or_else(
@@ -1362,6 +1458,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.publish_state();
             }
             SettingId::AudioLatencyMs => self.apply_audio_latency(),
+            // AUDIO-2: the choice of output takes effect when the device is (re)opened, and only
+            // the application can reopen an SDL device, so the change is recorded here and
+            // drained by the loop ([`Self::take_audio_reopen`]).
+            SettingId::AudioClassicOutput => {
+                if self.settings.classic_audio_output() != self.classic_audio {
+                    self.audio_reopen = true;
+                }
+            }
             SettingId::UiLanguage => {
                 // AMD-035 §1: the change applies immediately. Everything the interface draws
                 // reads the table through the language, and the models that cache their labels
@@ -1482,7 +1586,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// second — not what the main thread sees just after producing a frame — and the correction
     /// is the dead band, capped proportional and slowly accumulating law of
     /// [`crate::audio::rate_control`].
+    ///
+    /// The classic output of AUDIO-2 has its own, simpler law, in
+    /// [`Self::correct_audio_drift_classic`]: the one branch the choice of output costs on the
+    /// main thread, the other being the pump of the loop.
     fn correct_audio_drift(&mut self, real_seconds: f64) {
+        if self.classic_audio {
+            self.correct_audio_drift_classic();
+            return;
+        }
         let Some(audio) = self.audio.clone() else {
             return;
         };
@@ -1524,6 +1636,38 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// `v0.4.2`'s drift correction, for the classic output of AUDIO-2 only: proportional, with
+    /// no integral term, on what the **main thread** sees of the core's ring just after
+    /// producing a frame, against a target of two blocks.
+    ///
+    /// Finding 2 of Q-153 is right about it — with no accumulating term a steady clock offset
+    /// leaves a steady error, so the latency settles below its target and the deficit is paid in
+    /// the blocks of zeros of finding 1 — and that is the behaviour this output is here to
+    /// reproduce. It is restored unchanged rather than improved.
+    fn correct_audio_drift_classic(&mut self) {
+        const TARGET: usize = 2 * crate::audio::audio_mixer::BLOCK;
+        if self.state != EmulationState::Running {
+            return;
+        }
+        let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
+            return;
+        };
+        let available = session.core().apu().available_samples();
+        #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
+        let error = (available as f64 - TARGET as f64) / TARGET as f64;
+        // A proportional correction that saturates at the cap: a full buffer slows the
+        // production down, an empty one speeds it up.
+        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let adjustment = (-error * 0.002).clamp(-cap, cap);
+        if session
+            .core_mut()
+            .set_audio_ratio_adjustment(adjustment)
+            .is_err()
+        {
+            self.log("the core refused the audio ratio adjustment.");
+        }
+    }
+
     fn advance_battery(&mut self, real_seconds: f64) {
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
@@ -1551,6 +1695,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.battery.detach();
                 if let Some(audio) = &self.audio {
                     audio.set_console(None);
+                }
+                // The classic output's source holds the same ring (AUDIO-2); the core it reads
+                // is going away.
+                if let Some(mixer) = self.mixer.as_mut() {
+                    mixer.set_emulation_source(None);
                 }
             } else {
                 self.session = Some(session);

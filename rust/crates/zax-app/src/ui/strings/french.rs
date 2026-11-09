@@ -140,6 +140,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_NEEDS_CURVATURE, "(sans effet : aucune courbure n'est réglée)"),
     (keys::HINT_REGION_AUTOMATIC, "(fixée par la détection au prochain chargement de ROM)"),
     (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
+    (keys::HINT_CLASSIC_AUDIO, "(sans effet : la sortie audio classique a sa propre réserve fixe)"),
     (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
     (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),
     (keys::HINT_MENU_BUTTON_UNUSED, "(conservé pour 3dSen : Zaxnes n'en tient pas compte)"),
@@ -463,6 +464,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
     ("setting.audio.latency_ms", "Latence de sortie (ms)"),
+    ("setting.audio.classic_output", "Sortie audio classique (v0.4.2)"),
+    ("help.audio.classic_output", "À utiliser si la nouvelle sortie audio se comporte mal sur cet appareil ; elle a l'ancienne réserve, plus courte, et peut craquer."),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Pad tactile"),
     ("setting.ui.fullscreen", "Plein écran"),
@@ -959,7 +962,22 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          d'autant le son d'un appui sur un bouton ; une valeur basse est plus immédiate et moins \
          indulgente. Au-delà de ce que l'anneau d'échantillons du cœur peut contenir — environ \
          138 ms à 48 kHz — elle est bornée et le journal le dit. La changer vide la réserve et la \
-         remplit de nouveau, ce qui fait un bref creux. Par défaut : 60 ms.",
+         remplit de nouveau, ce qui fait un bref creux. Elle ne concerne que la sortie par \
+         défaut : la sortie classique ci-dessous a sa propre réserve fixe, et la ligne est grisée \
+         tant qu'elle est active. Par défaut : 60 ms.",
+    ),
+    (
+        "detail.audio.classic_output",
+        "Rétablit la sortie audio que Zaxnes avait en version 0.4.2 : une réserve de sortie de \
+         quatre blocs de 512 trames, environ 43 ms, réalimentée par le fil principal une fois \
+         par image dessinée. À utiliser si la nouvelle sortie se comporte mal sur cet appareil. \
+         C'est la plus courte des deux réserves, et elle émet un bloc de silence chaque fois que \
+         l'émulation est en retard sur ses échantillons : elle peut donc craquer — ce que la \
+         nouvelle sortie a justement été écrite pour empêcher. Le réglage de latence de sortie et \
+         les compteurs de latence, de correction et de ruptures du panneau de performance \
+         appartiennent à la nouvelle sortie et ne font rien ici. Le choix prend effet à la \
+         réouverture du périphérique audio, ce que cocher cette case fait aussitôt. Par défaut : \
+         désactivé.",
     ),
 
     // -------------------------------------------------------- onglet Émulation

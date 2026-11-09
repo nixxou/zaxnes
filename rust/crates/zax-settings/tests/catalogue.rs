@@ -52,7 +52,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request). audio.latency_ms: the output latency of AUDIO-1
-    // (Q-153 §2).
+    // (Q-153 §2). audio.classic_output: AUDIO-2's fallback to the output of v0.4.2.
     assert_eq!(
         additions,
         [
@@ -63,6 +63,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "achievements.token",
             "achievements.unofficial",
             "achievements.username",
+            "audio.classic_output",
             "audio.latency_ms",
             "audio.mute",
             "emu.builtin_patches",

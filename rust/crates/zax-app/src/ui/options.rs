@@ -305,9 +305,15 @@ const INTERFACE: &[LayoutEntry] = &[
 ];
 
 /// The rows of the **Audio** tab: the volume, then the output itself (AUDIO-1, AUDIO-2).
+///
+/// The latency comes before the fallback and is greyed while the fallback is on: the classic
+/// output has the fixed four blocks it always had, and neither `audio.latency_ms` nor the
+/// counters of Q-153 §6 reach it.
 const AUDIO: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::AudioVolume),
+    LayoutEntry::Group(OptionsGroup::Advanced),
     LayoutEntry::Row(SettingId::AudioLatencyMs),
+    LayoutEntry::Row(SettingId::AudioClassicOutput),
 ];
 
 /// The rows of the **RetroAchievements** tab, under the account block the tab draws itself.
@@ -593,6 +599,10 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // `scene.rs`: the switch chooses between the curvature and the identity, which are the
         // same thing while all three angles are 0.
         SettingId::SceneBend2dMode if !any_curvature(model) => keys::HINT_NEEDS_CURVATURE,
+        // AUDIO-2: the classic output of `v0.4.2` has the fixed four blocks of 512 frames it
+        // always had — `application.rs` never gives it the latency, and `stream.rs`, which is
+        // where the prefill, the ramps and the counters live, is not open at all.
+        SettingId::AudioLatencyMs if model.classic_audio_output() => keys::HINT_CLASSIC_AUDIO,
         // `jobs.rs`: the detection *writes* `emu.tv_mode` at the next ROM load, so whatever is
         // chosen here is overwritten rather than merely ignored.
         SettingId::EmuTvMode if model.get(SettingId::EmuAutoTvMode).as_bool() => {
@@ -670,6 +680,9 @@ pub fn help_of(id: SettingId) -> Option<String> {
         // Zaxnes's own, and worth having because the switch shows nothing on a profile without a
         // backdrop (REQ-SCN-048: it is Lua-driven and off by default).
         SettingId::RenderBackdropLighting => keys::HELP_BACKDROP_LIGHTING,
+        // AUDIO-2: no amendment knows of either audio output, so the one line that says when to
+        // tick this box is Zaxnes's own, as the setting is.
+        SettingId::AudioClassicOutput => keys::HELP_CLASSIC_AUDIO_OUTPUT,
         _ => return None,
     };
     Some(strings::get(key))

@@ -1723,6 +1723,24 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         // slider over the domain on its own.
         .with_label("Output latency (ms)"),
     );
+    // Rust-only (AUDIO-2): the fallback to the output `v0.4.2` had — an SDL queue of four
+    // 512-frame blocks topped up once per rendered frame, with its own rate control on the
+    // core's ring. Off by default: the AUDIO-1 output is the one the program opens, and this is
+    // for a device the callback path misbehaves on. Read **only** when the device opens, so that
+    // the choice costs nothing per frame and nothing per sample. Not exposed to Lua, and no
+    // libretro option: the output is a property of this frontend's device.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::AudioClassicOutput,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Audio,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Classic audio output (v0.4.2)"),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::UiShowFps,

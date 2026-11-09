@@ -74,12 +74,12 @@ pub enum OptionRow {
 }
 
 /// A page of the console options (RO-3, the owner's mockup): the main page climbs to the
-/// *Optimisations* page and to the *Advanced options* hub, and the hub to six pages, two of which
-/// have a page of their own.
+/// *Optimisations* page and to the *Advanced options* hub, and the hub to seven pages — RO-3's six
+/// and the audio one AUDIO-2 adds — two of which have a page of their own.
 ///
 /// The same pages serve the global options and a game's, with a list of their own for each:
 /// [`Self::rows`] and [`Self::game_rows`]. A game cannot set everything the console can, so its
-/// pages are shorter and two of the hub's six do not exist for it.
+/// pages are shorter and three of the hub's seven do not exist for it.
 // Q-107 §6
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsPage {
@@ -103,11 +103,17 @@ pub enum OptionsPage {
     Camera,
     /// The emulation.
     Emulation,
+    /// What comes out of the sound device (AUDIO-2). The volume is the main page's row; what is
+    /// here is the choice of output, which the work order of AUDIO-2 asks the console to offer
+    /// too. It is a page of its own rather than a row of the main page because that page is the
+    /// owner's mockup, pinned row for row by
+    /// `desktop_options_golden_tests::ro_3_the_handheld_main_pages_are_the_mockups`.
+    Audio,
 }
 
 impl OptionsPage {
     /// Every page, for the tests that walk them all.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Optimizations,
         Self::Advanced,
         Self::Display,
@@ -118,6 +124,7 @@ impl OptionsPage {
         Self::NesPicture,
         Self::Camera,
         Self::Emulation,
+        Self::Audio,
     ];
 
     /// The key of the page's title.
@@ -134,6 +141,7 @@ impl OptionsPage {
             Self::NesPicture => keys::TAB_NES_PICTURE,
             Self::Camera => keys::TAB_CAMERA,
             Self::Emulation => keys::TAB_EMULATION,
+            Self::Audio => keys::TAB_AUDIO,
         }
     }
 
@@ -151,6 +159,7 @@ impl OptionsPage {
             Self::NesPicture => &NES_PICTURE_ROWS,
             Self::Camera => &CAMERA_ROWS,
             Self::Emulation => &EMULATION_ROWS,
+            Self::Audio => &AUDIO_ROWS,
         }
     }
 
@@ -221,13 +230,14 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
 /// The *Advanced options* hub: six pages where RO-2 left one flat list of 56 rows. It repeats
 /// nothing the other pages offer — the palette and the shadows are the main page's, the nine
 /// overscan settings the overscan screen's, the performance switches the Optimisations page's.
-pub const ADVANCED_HUB: [OptionRow; 6] = [
+pub const ADVANCED_HUB: [OptionRow; 7] = [
     OptionRow::Page(OptionsPage::Display),
     OptionRow::Page(OptionsPage::Rendering3d),
     OptionRow::Page(OptionsPage::LightShadows),
     OptionRow::Page(OptionsPage::NesPicture),
     OptionRow::Page(OptionsPage::Camera),
     OptionRow::Page(OptionsPage::Emulation),
+    OptionRow::Page(OptionsPage::Audio),
 ];
 
 /// *Advanced options › Display*. The render scale is here **and** on the main page: the one
@@ -309,6 +319,11 @@ pub const EMULATION_ROWS: [OptionRow; 5] = [
     OptionRow::Setting(SettingId::EmuTvMode),
     OptionRow::Setting(SettingId::InputEmulatedMenuButton),
 ];
+
+/// *Advanced options › Audio* (AUDIO-2): the choice of output. The volume stays on the main page,
+/// and `audio.latency_ms` is deliberately not here — AUDIO-1 left it out of the console screen
+/// (owner request: that screen is a short curated list), and nothing of this lot changes that.
+pub const AUDIO_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::AudioClassicOutput)];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
 fn palettes() -> Vec<i32> {

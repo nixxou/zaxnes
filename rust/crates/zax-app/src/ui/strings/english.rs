@@ -159,6 +159,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "(this version has one core: the value is always 0)",
     ),
     (
+        keys::HINT_CLASSIC_AUDIO,
+        "(no effect: the classic audio output has its own fixed buffer)",
+    ),
+    (
         keys::HINT_NEEDS_ACHIEVEMENTS,
         "(no effect: RetroAchievements is off)",
     ),
@@ -491,6 +495,15 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.audio.bg_music", "Menu music"),
     ("setting.audio.mute", "Mute"),
     ("setting.audio.latency_ms", "Output latency (ms)"),
+    (
+        "setting.audio.classic_output",
+        "Classic audio output (v0.4.2)",
+    ),
+    (
+        "help.audio.classic_output",
+        "Use if the new audio output misbehaves on this device; it has the old, shorter buffer \
+         and can crackle.",
+    ),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Touch pad"),
     ("setting.ui.fullscreen", "Full screen"),
@@ -962,7 +975,19 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          a button press by the same amount; a smaller one is more immediate and less forgiving. \
          Above what the core's sample ring can hold — about 138 ms at 48 kHz — it is clamped and \
          the log says so. Changing it empties the buffer and fills it again, which is a short dip. \
-         Default: 60 ms.",
+         It applies to the default output only — the classic one below has its own fixed buffer, \
+         and the row is greyed while that is on. Default: 60 ms.",
+    ),
+    (
+        "detail.audio.classic_output",
+        "Puts back the audio output Zaxnes had in version 0.4.2: an output buffer of four blocks \
+         of 512 frames, about 43 ms, topped up from the main thread once per drawn frame. Use it \
+         if the new output misbehaves on this device. It is the shorter buffer of the two and it \
+         sends out a block of silence whenever the emulation is late with its samples, so it can \
+         crackle — which is what the new output was written to stop. The output latency setting \
+         and the latency, rate and under-run counters of the performance overlay belong to the \
+         new output and do nothing here. The choice takes effect when the sound device is \
+         reopened, which ticking this box does at once. Default: off.",
     ),
 
     // ----------------------------------------------------------- Emulation tab

@@ -89,6 +89,8 @@ options
       emu.auto_tv_mode
       emu.tv_mode
       input.emulated_menu_button
+    page.audio
+      audio.classic_output
   page.controls
   page.achievements
   row.profiler

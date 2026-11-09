@@ -475,8 +475,10 @@ fn ro_1_the_detailed_tooltips_are_desktop_only() {
 /// the rule the computed list of 0b0aa8c applied, which no golden can express.
 #[test]
 fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
-    // The 56 of `336dd8f`: a setting may move in the tree, never leave the console.
-    assert_eq!(56, advanced::ROW_SETTINGS.len());
+    // The 56 of `336dd8f`, and `audio.classic_output` which AUDIO-2 adds: a setting may move in
+    // the tree, never leave the console.
+    assert_eq!(57, advanced::ROW_SETTINGS.len());
+    assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
 
     // Every one of them is still a row the page can actually draw and step: the rule the
     // computed list applied before — a switch, a choice, or a number with bounds or named rungs —

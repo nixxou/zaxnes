@@ -13,7 +13,6 @@ use zax_settings::values::SettingValue;
 
 use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
-use crate::audio::stream::ApuSamples;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
@@ -409,14 +408,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
-                if let Some(audio) = &self.audio {
-                    // The audio thread reads the core's ring itself from here on (Q-153).
-                    audio.set_console(Some(Box::new(ApuSamples::new(
-                        session.core().audio_reader(),
-                    ))));
-                }
                 session.set_smooth_gc(self.settings.get(SettingId::EmuLuaSmoothGc).as_bool());
                 self.session = Some(session);
+                // Whichever output is open takes the new core's samples: the audio thread's
+                // console slot (Q-153), or the mixer's source on the classic output of AUDIO-2.
+                self.attach_console();
                 Ok(())
             }
             Err(error) => {
@@ -663,6 +659,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.core_mut().reset();
             session.reset_frame_counter();
         }
+        // REQ-AUD-010: no sound of the previous session is ever replayed. `v0.4.2` emptied the
+        // ring here, and the classic output of AUDIO-2 has nothing else that would — its mixer
+        // keeps no gate and no ramp. On the default output `resynchronise_audio` below empties it
+        // too, so this is simply the first of two idempotent calls there (AUDIO-2).
+        session
+            .core_mut()
+            .bus_mut()
+            .apu_mut()
+            .drop_pending_samples();
         self.rollback.clear();
         self.frame_steps.clear();
         self.fast_forward.clear();

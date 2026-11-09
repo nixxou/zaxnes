@@ -128,7 +128,9 @@ pub const fn page_rows(page: OptionsPage) -> &'static [OptionRow] {
         OptionsPage::Geometry => &GAME_CURVATURE_ROWS,
         OptionsPage::LightShadows => &GAME_LIGHT_ROWS,
         OptionsPage::Emulation => &GAME_EMULATION_ROWS,
-        OptionsPage::NesPicture | OptionsPage::Camera => &[],
+        // AUDIO-2: the choice of audio output belongs to the device, not to a game, so the Audio
+        // page is not on a game's hub at all.
+        OptionsPage::NesPicture | OptionsPage::Camera | OptionsPage::Audio => &[],
     }
 }
 

@@ -18,7 +18,7 @@ defaults to the new one.
       makes. Resolve the two conflicts keeping both sides' intent; the merge commit builds and
       passes the `zax-app`, `zax-platform` and `zax-settings` tests, and golden-core over the 98
       originals stays byte-identical to `1c2b4639`'s.
-- [ ] **3. The fallback option.** `v0.4.2`'s output — the SDL queue of four 512-frame blocks
+- [x] **3. The fallback option.** `v0.4.2`'s output — the SDL queue of four 512-frame blocks
       refilled once per rendered frame, its own rate control and its silence handling — back
       beside the new one, chosen by a setting in the `audio.` family that defaults to the new
       output, in the desktop options' Audio tab and in the handheld UI, in English and in
@@ -106,3 +106,125 @@ that same digest.
 
 `rust/target-au2/` joined `.gitignore` beside the other session build directories, so that the
 worktree reads clean while this lot builds.
+
+### Step 3 — the fallback option
+
+`audio.classic_output`, a boolean, **default off**: the program opens the AUDIO-1 output unless
+the user ticks the box. Label *"Classic audio output (v0.4.2)"* / *« Sortie audio classique
+(v0.4.2) »*.
+
+#### What was brought back, and from where
+
+`v0.4.2`'s output is three pieces, restored one by one. None of them is a new design: each is that
+version's own code, read with `git show v0.4.2:<path>` and put back beside AUDIO-1's rather than in
+place of it.
+
+| piece | where it is now | what it is |
+| --- | --- | --- |
+| the device | `zax-platform::audio::ClassicAudioOutput` | the `AudioQueue`, `BLOCK_COUNT = 4`, `blocks_to_queue`, `pump`, `flush` — `v0.4.2`'s `AudioOutput`, renamed so that AUDIO-1's keeps its name |
+| the mix | `AudioMixer::fill_with_console` and `mix_emulation` | the console read all-or-nothing, one gain per block, then the music and the sounds, then the clamp |
+| the rate control | `EmulationHost::correct_audio_drift_classic` | proportional only, `-error × 0.002` capped, on `available_samples()` against two blocks |
+
+`AudioMixer::fill` — AUDIO-1's, the programme alone and no clamp — is untouched: the common part of
+the two moved into a private `add_program`, and the two public entries call it. `fill_with_console`
+therefore sums in `v0.4.2`'s order (console, music, sounds), so the fallback's block is
+**bit-identical** to that version's and not merely equivalent.
+
+The defects Q-153 records are kept with it, deliberately: the block of zeros whenever the core's
+ring holds less than 512 samples (§1), the controller that settles below its target for want of an
+integral term (§2), the 43 ms buffer (§3) and the hard cut at a pause (§4). A fallback that behaved
+better than `v0.4.2` would not be a fallback — it would be a third output nobody has measured.
+
+#### What it costs when it is off
+
+The requirement is "nothing on the emulation path: the choice is made when the device opens, at
+most one branch per rendered frame on the main thread, nothing per sample, nothing in `zax-nes`".
+
+* **Nothing in `zax-nes`.** `git diff 1c2b4639 -- rust/crates/zax-nes` is empty.
+* **The choice is made once.** `Running::new` reads `audio.classic_output` and `open_audio` opens
+  one of the two devices. Nothing reads the setting again except `on_setting_changed`, which runs
+  only when it is written.
+* **Two branches per tick, both on an already-decided field.** `pump_audio` matches `AudioPath`,
+  and `correct_audio_drift` tests `self.classic_audio` — one `bool` field of the host, never a
+  settings lookup. A third, `take_audio_reopen`, is one field read and one branch per rendered
+  frame, which is how the reopen is noticed without polling the setting every frame.
+* **Nothing per sample.** With the default output the mixer's `emulation_source` is `None` and
+  `mix_emulation` is never called at all: `fill_with_console` has no caller, `mono` stays an empty
+  `Vec` and no allocation is ever made for it. `ClassicAudioOutput` is not constructed.
+* **No new `unsafe`,** and none was needed: `AudioQueue` and `AudioCallback` are both safe Rust in
+  the `sdl2` crate. AUDIO-1's note is right that the exception the work order allows goes unused,
+  and this lot does not use it either.
+
+#### The reopen
+
+`SettingEffect::Immediate`, so a write reaches `on_setting_changed`, which sets a one-shot
+`audio_reopen` when the setting disagrees with the output that is open. `Application::frame` drains
+it with `reopen_the_audio_output`, beside `follow_the_profiler_setting`: the old device is dropped
+first (which stops SDL's callbacks, and on the default output drops the stream with them), the host
+is told the device has gone, the new one is opened, and `EmulationHost::attach_audio` re-plumbs it —
+the running game's samples onto the new path, `audio.latency_ms` applied, the rate controller
+restarted, a resynchronisation asked for. Switching while a game plays is therefore a dip of a few
+tens of milliseconds, not a silence.
+
+`attach_console` is the one place that knows where a game's samples go: the audio thread's console
+slot on the default output, the mixer's `AudioSampleSource` on the classic one. `jobs.rs` calls it
+at a launch instead of installing the slot itself.
+
+One call `v0.4.2` had and AUDIO-1 removed is back in `finish_launch`: `drop_pending_samples()`
+before `set_state(Running)`. The classic output has nothing else that would empty the ring — no
+gate, no ramp, and `resynchronise_audio` returns early without an `AudioLink` — so REQ-AUD-010
+needs it there. On the default output it is simply the first of two idempotent calls, so that path
+is unchanged.
+
+#### Where the setting appears
+
+* **The desktop options window**, Audio tab, under an *Advanced* heading with the latency: volume,
+  then `audio.latency_ms`, then `audio.classic_output`. The latency row is **greyed** while the
+  fallback is on (`options::inert_reason`, hint `hint.classic_audio` — "(no effect: the classic
+  audio output has its own fixed buffer)"), which is the work order's second option and the better
+  one: that output never sees the latency, and `stream.rs`, where the prefill, the ramps and the
+  counters live, is not open at all.
+* **The handheld UI**, *Options › Advanced options › Audio*, a new page of the RO-3 tree with this
+  one row. Not the main page: that page is the owner's mockup and
+  `ro_3_the_handheld_main_pages_are_the_mockups` pins it row for row, so a row added there would be
+  a layout decision this lot has no mandate for. The page is on the **global** hub only — the
+  choice of output belongs to the device, not to a game. `audio.latency_ms` stays off the console
+  screen, as AUDIO-1 left it (owner request).
+* **The hint.** `help.audio.classic_output` is the one line the work order asks for, in both
+  languages, shown at the head of the tooltip: "Use if the new audio output misbehaves on this
+  device; it has the old, shorter buffer and can crackle." The handheld screen has no per-row help
+  line of any kind — its "hints" are the button bar at the bottom — so there is nowhere to put a
+  second copy there; the label is what it shows.
+* **The detailed tooltip** `detail.audio.classic_output`, in both languages, as RO-1 requires of
+  every shown row: what the buffer is, why it can crackle, that the latency setting and the
+  counters do not apply, and that the choice takes effect when the device is reopened. The
+  latency's own paragraph gained the same note and a mention of the greying.
+* **The performance overlay** (F12) and the profiler's per-second line now report
+  `classic output (v0.4.2): 4 blocks of 512 frames, silence blocks N` instead of AUDIO-1's latency
+  line, which has no meaning there. `N` is the mixer's `underrun_blocks` — the blocks of zeros of
+  Q-153 §1, counted so that the owner can see the defect rather than only hear it.
+
+#### Registrations the new key needed
+
+`SettingId::AudioClassicOutput` / `"audio.classic_output"`, `SettingKind::Bool`, default `false`,
+scope User, effect Immediate, theme Audio, `Domain::switch()`. No libretro core option and nothing
+in Lua: the output is a property of this frontend's device. Beyond the table it had to join
+`zax-settings/tests/catalogue.rs`'s list of Rust-only additions, `ui/options.rs`'s `AUDIO` layout,
+`rust/goldens/desktop-options-shown.txt`, `handheld::advanced::ROW_SETTINGS` (56 → 57) and
+`rust/goldens/handheld-option-tree.txt` (regenerated by the lot's own ignored test — two lines).
+
+#### Checks
+
+| check | result |
+| --- | --- |
+| `cargo test -p zax-app -p zax-platform -p zax-settings --features zax-app/bundled` | **1 056 passed, 0 failed**, 2 ignored |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p zax-platform -p zax-settings -p zax-app --all-targets --features zax-app/bundled -- -D warnings` | clean, and no new `#[allow]` |
+| `cargo check -p zax-app --no-default-features --features android` | clean |
+| `cargo check -p zax-app --no-default-features --features firmware-sdl` | clean |
+
+`cargo check -p zax-android --target aarch64-linux-android` still cannot run on this machine:
+`cc-rs` fails to find `clang.exe` (no NDK), exactly as AUDIO-1 reported. The two feature sets above
+are what those builds compile with, and the surrogate is sound for the same reason it was then: the
+new code contains no `cfg` outside `cfg(test)`, and `SDL_QueueAudio` — what the classic output uses
+— is what `v0.4.2` shipped on both of those builds.

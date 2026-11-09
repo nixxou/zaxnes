@@ -7,6 +7,11 @@
 //! menu track and the file reads it needs — and the mixer produces the programme a few tens of
 //! milliseconds ahead into the stream's stereo ring. The console gain of REQ-AUD-020 is still
 //! computed here and published to the audio thread, which follows it per sample.
+//!
+//! The classic output of `v0.4.2` (AUDIO-2, `audio.classic_output`) needs the console back here,
+//! because that is where it mixed it: [`AudioMixer::fill_with_console`] is that output's whole
+//! block, and it is the only thing that reads [`AudioSampleSource`]. On the default output the
+//! source is `None` and nothing of it runs — not once per block, let alone once per sample.
 
 use zax_platform::audio::BLOCK_FRAMES;
 use zax_platform::WaveAudio;
@@ -20,6 +25,14 @@ pub const BLOCK: usize = BLOCK_FRAMES;
 pub const MUSIC_GAIN_FACTOR: f32 = 0.02;
 /// Gain of the interface sounds relative to the volume.
 pub const SOUND_GAIN_FACTOR: f32 = 0.07;
+
+/// Where the console's samples come from for the **classic output** of `v0.4.2` (AUDIO-2): fills
+/// the mono buffer entirely and returns its length, or returns less (REQ-AUD-003: all or
+/// nothing).
+///
+/// The default output has no use for it — its audio thread reads the core's ring itself
+/// ([`crate::audio::stream`]) — and leaves it `None`.
+pub type AudioSampleSource = Box<dyn FnMut(&mut [f32]) -> usize>;
 
 /// A small deterministic generator for the choice of the menu music track.
 #[derive(Debug, Clone, Copy)]
@@ -65,6 +78,13 @@ pub struct AudioMixer {
     track_suspended: bool,
     sound: Option<WaveAudio>,
     sound_position: f64,
+    /// The classic output's console source (AUDIO-2); `None` on the default output.
+    emulation_source: Option<AudioSampleSource>,
+    /// The mono buffer the classic output reads the console into; never grown on the default
+    /// output, which reads no console here.
+    mono: Vec<f32>,
+    /// Blocks the console could not fill while it was audible (the classic output only).
+    pub underrun_blocks: u64,
     /// Blocks mixed.
     pub blocks: u64,
     /// How many times a menu track was started.
@@ -101,6 +121,10 @@ impl AudioMixer {
             track_suspended: false,
             sound: None,
             sound_position: 0.0,
+            emulation_source: None,
+            // Empty until the classic output asks for a block: the default output never does.
+            mono: Vec::new(),
+            underrun_blocks: 0,
             blocks: 0,
             track_changes: 0,
             sounds_played: 0,
@@ -114,6 +138,12 @@ impl AudioMixer {
     #[must_use]
     pub const fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Sets where the console's samples come from, or removes the source. The **classic output**
+    /// of `v0.4.2` only (AUDIO-2); the default output leaves it `None`.
+    pub fn set_emulation_source(&mut self, source: Option<AudioSampleSource>) {
+        self.emulation_source = source;
     }
 
     /// The volume, 0 to 1.
@@ -251,8 +281,34 @@ impl AudioMixer {
         if stereo.len() < 2 {
             return;
         }
+        stereo.fill(0.0);
+        self.add_program(stereo);
+    }
+
+    /// One block of the **classic output** of `v0.4.2` (AUDIO-2, `audio.classic_output`): the
+    /// console, then the menu music and the interface sounds, clamped once at the end.
+    ///
+    /// This is that output's `fill`, in its order and with its clamp, so that the fallback sounds
+    /// exactly as it did before AUDIO-1 — including the block of zeros a late console costs
+    /// (REQ-AUD-003 to the letter, Q-153 §1), which is the defect the default output exists to
+    /// avoid.
+    pub fn fill_with_console(&mut self, stereo: &mut [f32]) {
+        if stereo.len() < 2 {
+            return;
+        }
         let frames = stereo.len() / 2;
         stereo.fill(0.0);
+        self.mix_emulation(stereo, frames);
+        self.add_program(stereo);
+        for value in stereo.iter_mut() {
+            *value = value.clamp(-1.0, 1.0);
+        }
+    }
+
+    /// The programme — menu music and interface sounds — **added** to what `stereo` already
+    /// holds, with the fades advanced by the block's own duration.
+    fn add_program(&mut self, stereo: &mut [f32]) {
+        let frames = stereo.len() / 2;
         self.mix_music(stereo, frames);
         self.mix_sound(stereo, frames);
         #[allow(clippy::cast_precision_loss)] // a block is a few hundred frames
@@ -303,6 +359,39 @@ impl AudioMixer {
     fn fade_music(&mut self) {
         let (target, range) = (self.music_target(), self.music_range());
         self.music_gain.fade_to(target, range);
+    }
+
+    /// The console, for the classic output of `v0.4.2` only (AUDIO-2). Byte for byte that
+    /// output's `mix_emulation`: the all-or-nothing read, the under-run count and the one gain
+    /// per block.
+    fn mix_emulation(&mut self, stereo: &mut [f32], frames: usize) {
+        let Some(source) = self.emulation_source.as_mut() else {
+            return;
+        };
+        if self.mono.len() < frames {
+            self.mono.resize(frames, 0.0);
+        }
+        let mono = &mut self.mono[..frames];
+        let written = source(mono);
+        if written < frames {
+            // REQ-AUD-003: all or nothing. The samples the core did have stay in its buffer for
+            // the next call, so nothing is lost and no block is half filled. Outside Running no
+            // frame produces samples, so an empty buffer is the expected silence of REQ-AUD-010,
+            // not an under-run.
+            if self.emulation_audible {
+                self.underrun_blocks += 1;
+            }
+            return;
+        }
+        // One gain for the whole block — the staircase of finding 5 of Q-153. The default output
+        // follows the same gain per sample instead; this is the classic output's own behaviour
+        // and is kept as it was.
+        let gain = self.emulation_gain.value();
+        for (pair, value) in stereo.chunks_exact_mut(2).zip(mono.iter()) {
+            let scaled = value * gain;
+            pair[0] += scaled;
+            pair[1] += scaled;
+        }
     }
 
     fn mix_music(&mut self, stereo: &mut [f32], frames: usize) {

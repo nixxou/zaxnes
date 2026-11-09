@@ -186,6 +186,9 @@ pub const HINT_NEEDS_CURVATURE: &str = "hint.needs_curvature";
 pub const HINT_REGION_AUTOMATIC: &str = "hint.region_automatic";
 /// `emu.core`: this version has one core, so the value is always 0.
 pub const HINT_SINGLE_CORE: &str = "hint.single_core";
+/// `audio.latency_ms` while the classic output of `v0.4.2` is on (AUDIO-2): that output has the
+/// fixed buffer it always had and reads no latency.
+pub const HINT_CLASSIC_AUDIO: &str = "hint.classic_audio";
 /// The four RetroAchievements options while RetroAchievements is off.
 pub const HINT_NEEDS_ACHIEVEMENTS: &str = "hint.needs_achievements";
 /// Why a "Style" group shows no row: the style is Classic.
@@ -206,6 +209,10 @@ pub const HELP_BEND_2D_MODE: &str = "help.scene.bend_2d_mode";
 /// The help sentence of the backdrop lighting of AMD-049 REQ-SCN-075. The amendment gives no UI
 /// wording — the original has no such setting — so this is Zaxnes's own, like the setting.
 pub const HELP_BACKDROP_LIGHTING: &str = "help.render.backdrop_lighting";
+
+/// The one-line hint of `audio.classic_output` (AUDIO-2): when to tick the box at all. Zaxnes's
+/// own, like the setting — no amendment knows of either output.
+pub const HELP_CLASSIC_AUDIO_OUTPUT: &str = "help.audio.classic_output";
 
 // ------------------------------- the Style group (AMD-055 §3 point 6 and §4)
 /// The title of the collapsible group that holds the style and its twelve parameters.
@@ -667,6 +674,9 @@ pub const PUBLISHED: &[&str] = &[
     HINT_NEEDS_ACHIEVEMENTS,
     HINT_STYLE_CLASSIC,
     HINT_MENU_BUTTON_UNUSED,
+    // AUDIO-2: the fallback to the output of v0.4.2, and why the latency row is greyed with it.
+    HELP_CLASSIC_AUDIO_OUTPUT,
+    HINT_CLASSIC_AUDIO,
     // AMD-043 §6 and AMD-046 §3: the help sentences of the curvature settings.
     HELP_BEND_LR,
     HELP_BEND_TB,

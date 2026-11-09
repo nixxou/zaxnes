@@ -178,6 +178,7 @@ setting_ids! {
     AudioVolume => "audio.volume",
     AudioBgMusic => "audio.bg_music",
     AudioLatencyMs => "audio.latency_ms",
+    AudioClassicOutput => "audio.classic_output",
     InputZapperEnable => "input.zapper_enable",
     InputEmulatedMenuButton => "input.emulated_menu_button",
     InputTouchPad => "input.touch_pad",

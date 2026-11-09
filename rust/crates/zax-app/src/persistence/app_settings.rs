@@ -85,6 +85,8 @@ pub trait AppSettings {
     fn mute(&self) -> bool;
     /// `audio.latency_ms`: how much audio the core's ring is held at (Q-153 §2).
     fn audio_latency_ms(&self) -> f32;
+    /// `audio.classic_output`: the output of `v0.4.2` instead of the default one (AUDIO-2).
+    fn classic_audio_output(&self) -> bool;
     /// The volume the mixer plays at: 0 when muted.
     fn effective_volume(&self) -> f32;
     /// `video.skip_frame`.
@@ -184,6 +186,10 @@ impl AppSettings for SettingsModel {
             crate::audio::stream::MIN_LATENCY_MS,
             crate::audio::stream::MAX_LATENCY_MS,
         )
+    }
+
+    fn classic_audio_output(&self) -> bool {
+        self.get(SettingId::AudioClassicOutput).as_bool()
     }
 
     fn effective_volume(&self) -> f32 {

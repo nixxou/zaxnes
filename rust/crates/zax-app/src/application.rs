@@ -17,7 +17,9 @@ use zax_platform::icon;
 use zax_platform::input::sdl::SdlInput;
 use zax_platform::pacing::DisplayPacingState;
 use zax_platform::WindowGraphics;
-use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
+use zax_platform::{
+    AudioOutput, ClassicAudioOutput, HostWindow, HostWindowSettings, PlatformError,
+};
 use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
 use zax_render::controls;
@@ -205,14 +207,10 @@ struct Running {
     gpu_queue: Option<GpuFrameQueue>,
     input: SdlInput,
     source: DesktopInputSource,
-    /// The open device. Nothing reads it: it is held so that it outlives the stream it pulls
-    /// from, since dropping it closes the device and stops the callbacks.
-    #[allow(dead_code)]
-    audio: Option<AudioOutput>,
-    /// The main thread's end of the stream's programme ring (menu music, interface sounds).
-    program: Option<ProgramWriter>,
-    /// The block the mixer produces the programme into, allocated once.
-    program_block: Vec<f32>,
+    /// The output that is open and what the main thread needs of it (AUDIO-2). It stands before
+    /// `host` in the field order on purpose: dropping it closes the device, which must happen
+    /// before the mixer and the core it reads go away.
+    audio: AudioPath,
     host: AppHost,
     window: HostWindow,
     pacing: VideoPacing,
@@ -337,14 +335,16 @@ impl Running {
         let bindings = load_bindings(&mut bindings_store, options.handheld);
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
+        // AUDIO-2: which output opens is read here, once. `attach_audio` is what reads the
+        // setting again, and only when the options window changes it.
+        let classic_audio = model.classic_audio_output();
         let latency_ms = model.audio_latency_ms();
-        let opened = open_audio(options, window.sdl(), latency_ms);
         let OpenedAudio {
-            output: audio,
+            path: audio,
             sample_rate,
             link,
-            program,
-        } = opened;
+        } = open_audio(options, window.sdl(), latency_ms, classic_audio);
+        let classic_audio = audio.is_classic();
         let parts = HostParts {
             paths: &paths,
             model,
@@ -354,6 +354,7 @@ impl Running {
             asset_root: asset_root.as_deref(),
             sample_rate,
             audio: link,
+            classic_audio,
             view,
             suspend_resume: options.no_resume,
             emu_stats: options.emu_stats,
@@ -395,9 +396,6 @@ impl Running {
             input,
             source,
             audio,
-            program,
-            // One block of programme, the size the mixer works in.
-            program_block: vec![0.0; crate::audio::audio_mixer::BLOCK * 2],
             host,
             window,
             pacing,
@@ -417,6 +415,7 @@ impl Running {
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
+        self.reopen_the_audio_output();
         self.load_the_asked_state();
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
@@ -483,12 +482,7 @@ impl Running {
         self.close_the_gpu_queue(bounded);
         self.carry_out_ui_effects();
         let mark = self.clock.start();
-        pump_audio(
-            &mut self.host,
-            self.program.as_ref(),
-            &mut self.program_block,
-            real,
-        );
+        pump_audio(&mut self.host, &mut self.audio, real);
         self.clock.stop(Stage::Audio, mark);
         let budget = self.frame_budget();
         self.pipeline
@@ -750,6 +744,31 @@ impl Running {
 
     /// Turns the frame profiler on or off with `ui.profiler` (`ZAXNES_PROFILE=1` keeps it on):
     /// off, the loop measures nothing and writes no profile line.
+    /// AUDIO-2: `audio.classic_output` changed, so the device is closed and reopened under the
+    /// other output — the choice takes effect when the device is (re)opened and at no other
+    /// moment. One `bool` read and one branch per rendered frame; the rest only runs on the
+    /// frame a user ticks the box.
+    fn reopen_the_audio_output(&mut self) {
+        if !self.host.take_audio_reopen() {
+            return;
+        }
+        // The old device first, so that its callbacks have stopped before the host is told
+        // anything: dropping it closes it and, on the default output, drops the stream with it.
+        self.audio = AudioPath::Silent;
+        self.host.attach_audio(None, false);
+        let classic = self.host.settings().classic_audio_output();
+        let latency_ms = self.host.settings().audio_latency_ms();
+        let opened = open_audio(&self.options, self.window.sdl(), latency_ms, classic);
+        let is_classic = opened.path.is_classic();
+        self.audio = opened.path;
+        self.host.attach_audio(opened.link, is_classic);
+        log(if is_classic {
+            "audio output: the classic one of v0.4.2."
+        } else {
+            "audio output: the default one."
+        });
+    }
+
     fn follow_the_profiler_setting(&mut self) {
         let wanted = frame_profiler::requested_by_environment()
             || self.host.settings().get(SettingId::UiProfiler).as_bool();
@@ -1144,6 +1163,8 @@ struct HostParts<'a> {
     asset_root: Option<&'a Path>,
     sample_rate: u32,
     audio: Option<AudioLink>,
+    /// Whether the device that opened is the classic output of `v0.4.2` (AUDIO-2).
+    classic_audio: bool,
     view: SceneView,
     /// `-noresume` (AMD-053 REQ-UI-213).
     suspend_resume: bool,
@@ -1164,6 +1185,7 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.mixer = Some(mixer);
     options.script_log = Some(Box::new(|| Box::new(ConsoleScriptLog)));
     options.audio = parts.audio;
+    options.classic_audio = parts.classic_audio;
     options.log = Some(Box::new(log));
     options.settings_store = Some(parts.store);
     options.confirm_with_interface = true;
@@ -1604,25 +1626,70 @@ fn publish_settings_to_scene(model: &SettingsModel, scene: &mut SceneState) {
     scene.camera.snap_to_setpoints();
 }
 
-/// What opening the audio device produced: the device itself, and the handles the main thread
-/// keeps on the stream it now owns (Q-153).
-struct OpenedAudio {
-    output: Option<AudioOutput>,
-    sample_rate: u32,
-    link: Option<AudioLink>,
-    program: Option<ProgramWriter>,
+/// Which output is open, and everything the main thread needs of it (AUDIO-2).
+///
+/// The choice is made **once**, when the device opens, from `audio.classic_output`; nothing reads
+/// that setting again. What it costs the loop afterwards is the one `match` of [`pump_audio`] per
+/// rendered frame — no second device, no dispatch through a trait object, nothing per sample.
+enum AudioPath {
+    /// No device: either `--no-audio` or a machine SDL found no sound card on.
+    Silent,
+    /// The default output (AUDIO-1, Q-153): SDL's own thread pulls the stream, which reads the
+    /// core's ring itself, and the main thread only keeps the programme ring a few tens of
+    /// milliseconds ahead.
+    Pull {
+        /// The open device. Nothing reads it: it is held so that it outlives the stream it pulls
+        /// from, since dropping it closes the device and stops the callbacks.
+        #[allow(dead_code)]
+        device: AudioOutput,
+        /// The main thread's end of the stream's programme ring (menu music, interface sounds).
+        program: ProgramWriter,
+        /// The block the mixer produces the programme into, allocated once.
+        block: Vec<f32>,
+    },
+    /// The classic output of `v0.4.2` (`audio.classic_output`): the main thread tops an SDL queue
+    /// of four 512-frame blocks up once per rendered frame, mixing the console into each.
+    Classic { device: ClassicAudioOutput },
 }
 
-fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl, latency_ms: f32) -> OpenedAudio {
+impl AudioPath {
+    /// Whether this is the classic output, which is what the host branches on.
+    const fn is_classic(&self) -> bool {
+        matches!(self, Self::Classic { .. })
+    }
+}
+
+/// What opening the audio device produced: the path the loop keeps, the rate it opened at, and
+/// the handles the host needs on the stream when the default output is the one that opened.
+struct OpenedAudio {
+    path: AudioPath,
+    sample_rate: u32,
+    link: Option<AudioLink>,
+}
+
+/// Opens the output `classic` asks for: `false` — the default — the pull output of AUDIO-1,
+/// `true` the queue of `v0.4.2` (AUDIO-2). `latency_ms` belongs to the pull output alone; the
+/// classic one has the fixed four blocks it always had.
+fn open_audio(
+    options: &AppOptions,
+    sdl: &sdl2::Sdl,
+    latency_ms: f32,
+    classic: bool,
+) -> OpenedAudio {
     let default_rate = u32::try_from(PREFERRED_SAMPLE_RATE).unwrap_or(48_000);
     let silent = OpenedAudio {
-        output: None,
+        path: AudioPath::Silent,
         sample_rate: default_rate,
         link: None,
-        program: None,
     };
     if !options.audio {
         return silent;
+    }
+    if classic {
+        return open_classic_audio(sdl, default_rate).unwrap_or_else(|error| {
+            log(&format!("no audio output ({error}); the host runs silent."));
+            silent
+        });
     }
     // The stream is built inside, once SDL has said what rate and block size it gave us: both
     // size its buffers, and the rate turns the latency in milliseconds into frames.
@@ -1651,18 +1718,22 @@ fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl, latency_ms: f32) -> OpenedA
         (render, (link, program))
     });
     match opened {
-        Ok((output, (link, program))) => {
-            let rate = u32::try_from(output.sample_rate()).unwrap_or(default_rate);
+        Ok((device, (link, program))) => {
+            let rate = u32::try_from(device.sample_rate()).unwrap_or(default_rate);
             log(&format!(
                 "audio: {rate} Hz, blocks of {} frames, target latency {:.0} ms.",
-                output.block_frames(),
+                device.block_frames(),
                 link.target_ms()
             ));
             OpenedAudio {
-                output: Some(output),
+                path: AudioPath::Pull {
+                    device,
+                    program,
+                    // One block of programme, the size the mixer works in.
+                    block: vec![0.0; crate::audio::audio_mixer::BLOCK * 2],
+                },
                 sample_rate: rate,
                 link: Some(link),
-                program: Some(program),
             }
         }
         Err(error) => {
@@ -1670,6 +1741,24 @@ fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl, latency_ms: f32) -> OpenedA
             silent
         }
     }
+}
+
+/// The classic output of `v0.4.2` (AUDIO-2): no stream, no link, no latency to negotiate — the
+/// device is an SDL queue and the mixer fills it from the main thread.
+fn open_classic_audio(sdl: &sdl2::Sdl, default_rate: u32) -> Result<OpenedAudio, PlatformError> {
+    let device = ClassicAudioOutput::open(sdl)?;
+    let rate = u32::try_from(device.sample_rate()).unwrap_or(default_rate);
+    log(&format!(
+        "audio: {rate} Hz, the classic output of v0.4.2 ({} blocks of {} frames); \
+         audio.latency_ms and the output counters do not apply to it.",
+        zax_platform::audio::BLOCK_COUNT,
+        zax_platform::audio::BLOCK_FRAMES
+    ));
+    Ok(OpenedAudio {
+        path: AudioPath::Classic { device },
+        sample_rate: rate,
+        link: None,
+    })
 }
 
 fn report_startup_problems(host: &mut AppHost, paths: &UserDataPaths) {
@@ -2093,29 +2182,47 @@ fn forward_events(
     }
 }
 
-/// Keeps the menu music and the interface sounds a few tens of milliseconds ahead of the audio
-/// thread (Q-153). The console's samples do not pass through here any more: the audio thread
-/// reads the core's ring itself, so a long frame on this thread cannot starve the device.
+/// Feeds the output that is open, once per rendered frame — the one branch the choice of output
+/// of AUDIO-2 costs the loop.
 ///
-/// The mixer's clock advances with the programme it produced, and the ring is drained in real
-/// time, so the fades of REQ-AUD-020 and REQ-AUD-022 keep their real-time slope.
-fn pump_audio(host: &mut AppHost, program: Option<&ProgramWriter>, block: &mut [f32], real: f64) {
+/// On the **default** output (Q-153) this keeps the menu music and the interface sounds a few
+/// tens of milliseconds ahead of the audio thread, and nothing else: the console's samples do not
+/// pass through here, the audio thread reading the core's ring itself, so a long frame on this
+/// thread cannot starve the device. The mixer's clock advances with the programme it produced,
+/// and the ring is drained in real time, so the fades of REQ-AUD-020 and REQ-AUD-022 keep their
+/// real-time slope.
+///
+/// On the **classic** output this is `v0.4.2`'s `pump_audio`, unchanged: the device pulls as many
+/// whole blocks as it has free buffers and the mixer fills each with the console, the music and
+/// the sounds, so its clock advances with the audio it produced, which is real time.
+fn pump_audio(host: &mut AppHost, audio: &mut AudioPath, real: f64) {
     let Some(mixer) = host.mixer_mut() else {
         return;
     };
-    let Some(writer) = program else {
+    match audio {
+        AudioPath::Pull { program, block, .. } => {
+            let mut missing = program.missing_frames();
+            while missing > 0 {
+                let frames = missing.min(block.len() / 2);
+                let slice = &mut block[..frames * 2];
+                mixer.fill(slice);
+                program.push(slice);
+                missing -= frames;
+            }
+        }
+        AudioPath::Classic { device } => {
+            match device.pump(|buffer| mixer.fill_with_console(buffer)) {
+                Ok(0) => mixer.advance(real),
+                Ok(_) => {}
+                Err(error) => {
+                    log(&format!("audio output: {error}"));
+                    mixer.advance(real);
+                }
+            }
+        }
         // No device: the fades and the music selection still advance, so the state machine
         // behaves identically in silence.
-        mixer.advance(real);
-        return;
-    };
-    let mut missing = writer.missing_frames();
-    while missing > 0 {
-        let frames = missing.min(block.len() / 2);
-        let slice = &mut block[..frames * 2];
-        mixer.fill(slice);
-        writer.push(slice);
-        missing -= frames;
+        AudioPath::Silent => mixer.advance(real),
     }
 }
 

@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 56] = [
+pub const ROW_SETTINGS: [SettingId; 57] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -89,6 +89,10 @@ pub const ROW_SETTINGS: [SettingId; 56] = [
     SettingId::EmuPause3dIn2d,
     SettingId::EmuCatchUpLast3d,
     SettingId::InputEmulatedMenuButton,
+    // AUDIO-2: the fallback to the output of `v0.4.2`. The work order asks for it on the console
+    // screen as well as in the desktop window, and this is the device the new output is most
+    // likely to misbehave on.
+    SettingId::AudioClassicOutput,
 ];
 
 /// Whether the setting is a whole number the page has to step as a **list** rather than as a

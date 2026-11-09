@@ -57,6 +57,7 @@ fn page_name(page: OptionsPage) -> &'static str {
         OptionsPage::NesPicture => "nes_picture",
         OptionsPage::Camera => "camera",
         OptionsPage::Emulation => "emulation",
+        OptionsPage::Audio => "audio",
     }
 }
 
