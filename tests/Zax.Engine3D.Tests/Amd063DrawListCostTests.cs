@@ -16,32 +16,39 @@ namespace Zax.Engine3D.Tests;
 /// </para>
 /// <para>
 /// Only <see cref="ConversionEngine.BuildDrawList(ConversionFrame)"/> is timed: the conversion
-/// itself is unchanged, and REQ-E3D-360 already measures it (<c>CorpusTests</c>). The bound is
-/// deliberately loose — the point of the test is the number it prints, which the progress file
-/// of the lot records before and after the change.
+/// itself is unchanged, and REQ-E3D-360 already measures it (<c>CorpusTests</c>). The assertion
+/// is on the <b>median</b> against the hard frame limit of 16.6 ms, which catches an
+/// order-of-magnitude regression and nothing else: a tighter bound on a mean would only measure
+/// what else the machine is doing — the cost here is dominated by the thousand
+/// <see cref="DrawTile"/> the list allocates, so the tail is the garbage collector's. The point
+/// of the test is the numbers it prints, which the progress file of the lot records before and
+/// after the change.
 /// </para>
 /// </remarks>
 public sealed class Amd063DrawListCostTests
 {
     private const int Iterations = 300;
 
+    /// <summary>The hard per-frame limit of SPEC-07 §2, 60 frames per second in NTSC.</summary>
+    private const double FrameBudgetMs = 16.6d;
+
     /// <summary>
-    /// Building the draw list of a full transparent frame stays far inside the frame budget of
-    /// 16.6 ms, and the numbers are printed so that a regression is visible.
+    /// Building the draw list of a full transparent frame stays inside one frame, and the
+    /// numbers are printed so that a regression is visible.
     /// </summary>
     [Fact] // AMD-063, REQ-SCN-087, REQ-E3D-641
     public void Building_the_draw_list_of_a_full_transparent_frame_stays_cheap()
     {
-        Assert.True(Measure(alpha: 0.7f, out string transparent) <= 4d, transparent);
-        Assert.True(Measure(alpha: 1f, out string opaque) <= 4d, opaque);
+        Assert.True(Measure(alpha: 0.7f, out string transparent) <= FrameBudgetMs, transparent);
+        Assert.True(Measure(alpha: 1f, out string opaque) <= FrameBudgetMs, opaque);
 
         Console.WriteLine(transparent);
         Console.WriteLine(opaque);
     }
 
     /// <summary>
-    /// Times <see cref="Iterations"/> draw lists of one converted frame and returns the mean in
-    /// milliseconds, with a readable report.
+    /// Times <see cref="Iterations"/> draw lists of one converted frame and returns the median
+    /// in milliseconds, with a readable report.
     /// </summary>
     private static double Measure(float alpha, out string report)
     {
@@ -85,18 +92,19 @@ public sealed class Amd063DrawListCostTests
         }
 
         Array.Sort(samples);
-        double mean = samples.Average();
+        double median = samples[Iterations / 2];
         report = string.Format(
             CultureInfo.InvariantCulture,
             "REQ-SCN-087 draw list, alpha {0}, {1} drawn tiles, {2} builds: "
-                + "mean {3:F4} ms, p99 {4:F4} ms, max {5:F4} ms",
+                + "median {3:F4} ms, mean {4:F4} ms, p99 {5:F4} ms, max {6:F4} ms",
             alpha,
             tiles,
             Iterations,
-            mean,
+            median,
+            samples.Average(),
             samples[(int)(Iterations * 0.99)],
             samples[^1]);
-        return mean;
+        return median;
     }
 
     /// <summary>Four one-cell patterns of full tiles, all at the same opacity.</summary>
