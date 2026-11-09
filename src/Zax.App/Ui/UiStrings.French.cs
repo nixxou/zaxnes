@@ -200,7 +200,7 @@ internal static partial class UiStrings
         [UiKeys.BrowserFilterNesRoms] = "ROMs NES (*.nes, *.zip)",
         [UiKeys.BrowserFilterNesFiles] = "Fichiers .nes",
         [UiKeys.BrowserFilterZip] = "Archives .zip",
-        [UiKeys.BrowserFilterProfiles] = "Profils 3D (*.3dn)",
+        [UiKeys.BrowserFilterProfiles] = "Profils 3D (*.3dn, *.3dh)",
         [UiKeys.BrowserFilterBundle] = "Bundle de profils 3dSen (*.bundle)",
         [UiKeys.BrowserFilterPng] = "Images PNG (*.png)",
         [UiKeys.BrowserFilterAll] = "Tous les fichiers",

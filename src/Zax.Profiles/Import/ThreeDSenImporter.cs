@@ -108,6 +108,13 @@ public sealed class ThreeDSenImportSummary
 /// </summary>
 /// <remarks>
 /// <para>
+/// AMD-062 amends §5: the check accepts a 3dn <b>or</b> a « 3dh » profile, whose envelope,
+/// manifest and payload must decode; no tile is resolved, so the import stays instant. The file
+/// keeps the <c>.3dn</c> extension even when its content is a « 3dh » — that is deliberate, the
+/// format is recognised by the content (REQ-PROF-070). The three generations of 3dSen — 1.x, 2.0
+/// and 2.1 — therefore all import.
+/// </para>
+/// <para>
 /// A profile that does not decode is counted as a failure and the import carries on. A profile
 /// whose bytes are already there, identical, is skipped; one whose file name is taken by
 /// different bytes gets a <c>" (2)"</c>, <c>" (3)"</c>… suffix.

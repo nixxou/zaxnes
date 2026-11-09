@@ -177,6 +177,17 @@ public sealed class UserProfileFolder
     public const string Extension = ".3dn";
 
     /// <summary>
+    /// Extension 3dSen 2.1 gives a « 3dh » profile (AMD-062 REQ-PROF-062). Both extensions are
+    /// scanned; which format a file is in is decided by its <b>content</b>, never by its name
+    /// (REQ-PROF-070), so a « 3dh » profile named <c>.3dn</c> — which is what the import from an
+    /// installation writes — is read just the same.
+    /// </summary>
+    public const string HashExtension = ".3dh";
+
+    /// <summary>The extensions a profile folder is scanned for (REQ-PROF-062).</summary>
+    public static IReadOnlyList<string> Extensions { get; } = [Extension, HashExtension];
+
+    /// <summary>
     /// How many bytes of the SHA-256 digest a derived identifier encodes (AMD-037 §2): nine
     /// bytes, which is twelve base64 characters and no padding.
     /// </summary>
@@ -254,7 +265,12 @@ public sealed class UserProfileFolder
     /// </remarks>
     public IReadOnlyList<UserProfile> Scan(IReadOnlyCollection<string>? reservedIds = null)
     {
-        List<string> paths = [.. _files.ListFiles(Directory, Extension)];
+        List<string> paths = [];
+        foreach (string extension in Extensions)
+        {
+            paths.AddRange(_files.ListFiles(Directory, extension));
+        }
+
         paths.Sort(StringComparer.Ordinal);
 
         HashSet<string> taken = new(reservedIds ?? [], StringComparer.Ordinal);
@@ -340,6 +356,15 @@ public sealed class UserProfileFolder
 
         if (header.Value.HasUnsupportedVersion)
         {
+            // AMD-062 REQ-PROF-063: the causes of a refused « 3dh » are those of REQ-PROF-072 —
+            // here an envelope version outside "1", "2" and "5" — and the cause shown is the
+            // third text of REQ-UI-084, as for a 3dn that cannot be read. The 3dn version
+            // message would name a format version the file does not have.
+            if (header.Value.IsHashEnvelope)
+            {
+                return Refusal(sourcePath, ProfileImportMessages.ObsoleteFormat(sourcePath));
+            }
+
             // Row 2: `Ver` reduces to "1" (REQ-PROF-021). The message carries the version as the
             // sanitising of REQ-PROF-021 reduces it, which AMD-056 §2 read in the 2.0 and which
             // supersedes the answer of Q-089 on this point.

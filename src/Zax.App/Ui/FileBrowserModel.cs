@@ -275,10 +275,13 @@ internal sealed class FileBrowserModel
         (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
-    /// <summary>The filter of the profile import dialog (SPEC-10 §4).</summary>
+    /// <summary>
+    /// The filter of the profile import dialog (SPEC-10 §4). Both extensions are offered
+    /// (AMD-062 REQ-PROF-063); the format is decided by the content of the file.
+    /// </summary>
     public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters =>
     [
-        (UiStrings.Get(UiKeys.BrowserFilterProfiles), ["3dn"]),
+        (UiStrings.Get(UiKeys.BrowserFilterProfiles), ["3dn", "3dh"]),
         (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 

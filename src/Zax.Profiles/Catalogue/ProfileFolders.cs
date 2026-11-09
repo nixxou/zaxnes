@@ -143,14 +143,20 @@ public sealed class ProfileFolders
     }
 
     /// <summary>
-    /// The <c>*.3dn</c> files of a folder; empty when it is missing or cannot be listed, which
-    /// AMD-033 §1 makes a normal case rather than an error.
+    /// The <c>*.3dn</c> and <c>*.3dh</c> files of a folder (AMD-062 REQ-PROF-062); empty when it
+    /// is missing or cannot be listed, which AMD-033 §1 makes a normal case rather than an error.
     /// </summary>
     private IReadOnlyList<string> ListFiles(string directory)
     {
         try
         {
-            return _files.ListFiles(directory, UserProfileFolder.Extension);
+            List<string> paths = [];
+            foreach (string extension in UserProfileFolder.Extensions)
+            {
+                paths.AddRange(_files.ListFiles(directory, extension));
+            }
+
+            return paths;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

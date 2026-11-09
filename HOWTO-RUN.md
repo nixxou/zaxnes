@@ -28,7 +28,8 @@ dans `ASSETS-LICENSES.md`.
 **Aucune ROM et aucun profil de jeu ne sont fournis.** La bibliothèque démarre avec deux entrées
 génériques écrites dans le code : « 2D Mode » (l'image de la console, sans conversion 3D) et
 « 3D par défaut (sans profil) » (la géométrie 3D par défaut, pour n'importe quelle ROM). Si vous
-disposez légalement d'un profil `.3dn`, **Fichier ▸ Importer un profil…** l'ajoute (voir §9).
+disposez légalement d'un profil `.3dn` ou `.3dh`, **Fichier ▸ Importer un profil…** l'ajoute
+(voir §9).
 
 `--assets <dossier>` reste disponible pour lire un dossier de fichiers **que vous fournissez**
 (`profiles.json`, `cubemaps/`, `meshes/`, `textures/`, `audio/`, `fonts/`). Ce dossier n'est
@@ -92,8 +93,9 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | Option | Effet |
 |---|---|
 | `--rom <chemin>` | ouvre cette ROM au démarrage ; sans `--profile`, la résolution de profil ci-dessus s'applique |
-| `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` déjà importé. Sans l'option : « 2D Mode » |
+| `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` ou `.3dh` déjà importé. Sans l'option : « 2D Mode » |
 | `--list-profiles` | liste les entrées de la bibliothèque, puis quitte |
+| `--no-tile-cache` | ne conserve pas les tuiles retrouvées d'un profil `3dh` (§9) : chaque exécution repart de zéro |
 | `--import-3dsen <dossier\|fichier>` | importe les profils de **votre** installation de 3dSen (§9.1), affiche le bilan, puis quitte avec `0` si tout s'est bien passé |
 | `--assets <dossier>` | dossier de fichiers d'assets que vous fournissez (facultatif, jamais cherché tout seul) |
 | `--font <fichier>` | police de l'interface : un fichier, ou un nom dans le dossier des polices du système |
@@ -158,7 +160,7 @@ grisée n'est pas disponible dans l'état courant — « Reset » sans jeu charg
 | Ouvrir une ROM… | `Ctrl`+`O` | boîte de dialogue de fichiers |
 | ROMs récentes ▸ | | les dix derniers fichiers ouverts |
 | Choisir le profil 3D… | | rouvre la sélection de profil pour le jeu en cours |
-| Importer un profil… | | ajoute un fichier `.3dn` à la bibliothèque, sans redémarrage |
+| Importer un profil… | | ajoute un fichier `.3dn` ou `.3dh` à la bibliothèque, sans redémarrage |
 | Importer depuis 3dSen… | | importe d'un coup les profils de votre installation de 3dSen (§9.1) |
 | Supprimer le jeu… | | supprime le jeu courant **s'il vient d'un profil importé**, après confirmation |
 | Créer la jaquette | | la dernière capture de pause devient la jaquette du jeu courant |
@@ -420,7 +422,8 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 | `saves/<n>.state` | fichier de sauvegarde (signature `ZAXNESAV`, l'ancienne `SEN3DSAV` reste lisible) |
 | `saves/<n>.png` | vignette 256 × 192 de l'emplacement |
 | `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
-| `profiles/*.3dn` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
+| `profiles/*.3dn`, `profiles/*.3dh` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
+| `tiles/*.tiles` | tuiles déjà retrouvées pour un profil `3dh` (§9) ; supprimables sans rien perdre |
 | `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
 | `logs/zaxnes.log` | journal du lancement en cours ; celui du lancement précédent est gardé sous `zaxnes.log.1` |
 
@@ -520,10 +523,41 @@ sont toujours disponibles :
 | « 3D par défaut (sans profil) » | convertit n'importe quelle ROM **en 3D** avec la géométrie par défaut |
 
 **Importer un profil que vous détenez légalement** : **Fichier ▸ Importer un profil…**, choisissez
-le fichier `.3dn`. Il est copié dans `<données>/profiles` et l'entrée apparaît aussitôt dans la
-bibliothèque, sans redémarrage. Un fichier dont l'identifiant est absent ou vide est refusé avec
-le message « profil obsolète ou au mauvais format ». Les profils déjà présents dans ce dossier
-au démarrage sont lus automatiquement.
+le fichier `.3dn` ou `.3dh`. Il est copié **tel quel** dans `<données>/profiles` et l'entrée
+apparaît aussitôt dans la bibliothèque, sans redémarrage. Un fichier dont l'identifiant est absent
+ou vide est refusé avec le message « profil obsolète ou au mauvais format ». Les profils déjà
+présents dans ce dossier au démarrage sont lus automatiquement.
+
+### Deux formats de profil, jamais convertis
+
+Zaxnes lit **les deux formats** de profil et n'en convertit jamais un en l'autre
+(`AMD-062`) :
+
+| Format | Ce qu'il contient | Ce qu'il lui faut |
+|---|---|---|
+| `3dn` | les profils de 3dSen jusqu'à la 2.0 : chaque tuile y est écrite en clair | rien de plus que le fichier |
+| `3dh` | les profils de 3dSen 2.1 : chaque tuile y est remplacée par un **identifiant de contenu** de 16 octets | **votre ROM**, où les tuiles sont retrouvées |
+
+Le format se reconnaît **au contenu du fichier, pas à son extension** : un profil `3dh` nommé
+`.3dn` — ce que l'import depuis une installation écrit — est lu comme tel. Le dossier
+`<données>/profiles` est parcouru pour `.3dn` **et** `.3dh`, et le sélecteur d'import propose les
+deux.
+
+Ce que cela change pour un profil `3dh` :
+
+- **la ROM est ce qui résout ses tuiles.** Au lancement, Zaxnes parcourt le fichier de votre ROM
+  et y retrouve les tuiles du profil. Pour la plupart des jeux, tout est trouvé d'un coup ;
+- les jeux qui **compriment** leurs tuiles (Mega Man 2, par exemple) n'en gardent qu'une partie
+  dans le fichier : les autres sont retrouvées **pendant la partie**, au fur et à mesure que le
+  jeu les décomprime en mémoire. Le motif concerné s'affiche avec sa géométrie par défaut en
+  attendant, puis se reconstruit tout seul dès que sa dernière tuile est connue ;
+- ce qui a été retrouvé est **conservé** entre deux sessions, dans `<données>/tiles`, pour que
+  le lancement suivant reparte directement de là. `--no-tile-cache` démarre sans ce cache, ce
+  qui est utile pour comparer deux exécutions à l'identique ;
+- un profil `3dh` lancé avec **une autre ROM** que la sienne ne retrouvera rien : le jeu se joue,
+  mais sans sa conversion 3D ;
+- un profil n'est jamais réécrit dans l'autre format : un `3dn` reste lisible sans ROM et
+  partageable tel quel.
 
 Ce qu'il faut savoir :
 
@@ -536,8 +570,8 @@ Ce qu'il faut savoir :
 - un profil sans aucun script s'affiche sans animation particulière ; `--list-profiles` marque
   d'un `*` les entrées qui n'en ont pas.
 
-**Fichier ▸ Importer un profil…** ajoute un fichier `.3dn` : il est copié dans `profiles/` et la
-bibliothèque le prend en compte sans redémarrage. Un profil dont l'identifiant est déjà celui
+**Fichier ▸ Importer un profil…** ajoute un fichier `.3dn` ou `.3dh` : il est copié dans
+`profiles/` et la bibliothèque le prend en compte sans redémarrage. Un profil dont l'identifiant est déjà celui
 d'un profil utilisateur le remplace ; un identifiant de profil intégré est ignoré. Un fichier
 invalide affiche un message et ne change rien.
 
@@ -553,6 +587,11 @@ lu, et le dossier de 3dSen n'est ni modifié, ni déplacé, ni copié.
   valide le dossier affiché, ou celui que vous avez sélectionné), ou
 - directement le **fichier bundle** des profils, si vous savez où il est :
   `<installation>\<nom>_Data\StreamingAssets\aa\StandaloneWindows*\defaultprofiles_assets_all_*.bundle`.
+
+Les **trois générations** de 3dSen s'importent : 1.x, 2.0 et 2.1. Les profils de la 2.1 sont au
+format `3dh` ; ils sont écrits sans modification, avec l'extension `.3dn` comme les autres — le
+format se reconnaît au contenu. Aucune ROM n'est nécessaire pour importer : la résolution des
+tuiles attend le lancement du jeu.
 
 À la fin, un message donne le bilan : combien de profils ont été importés, combien étaient déjà
 présents (ignorés) et combien ont échoué. Les profils importés apparaissent aussitôt dans la
@@ -574,7 +613,8 @@ Détails utiles :
 - un profil **identique octet pour octet** à un fichier déjà importé est ignoré : réimporter la
   même installation n'ajoute rien ;
 - un profil de même nom mais de contenu différent reçoit un suffixe ` (2)`, ` (3)`… ;
-- un profil que le lecteur de `.3dn` refuse est compté en échec et n'interrompt pas l'import ;
+- un profil que le lecteur refuse — qu'il soit au format `3dn` ou `3dh` — est compté en échec et
+  n'interrompt pas l'import ;
 - un fichier tronqué, une signature inconnue ou une compression LZMA donnent un message clair et
   n'écrivent aucun fichier partiel.
 
@@ -589,7 +629,8 @@ tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
-`--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
+`--distance`, `--mesh`, `--tile-cache <dossier>` (cache de tuiles d'un profil `3dh` ; absent par
+défaut, donc chaque capture repart d'un cache vide), `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
 4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
 et les nuages procéduraux), `--bg-color`, `--no-nes-bg-color` (`scene.use_nes_bg_color` à faux :
 le fond de la scène devient la couleur personnalisée, ce qui rend visible la transparence du
