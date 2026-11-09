@@ -20,7 +20,7 @@ never edited.
 - [x] 4/9 — MMC2/MMC4: the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), and
   the sprite ordering of REQ-CORE-044.
 - [x] 5/9 — MMC5: extended attributes and the vertical split.
-- [ ] 6/9 — The rest of the classification.
+- [x] 6/9 — The rest of the classification.
 - [ ] 7/9 — Cost of the capture.
 - [ ] 8/9 — The 3D picture, per original with a profile.
 - [ ] 9/9 — Final pass.
@@ -672,3 +672,182 @@ Step 6 takes those three and the 28 on the originals and closes the classificati
   `sixty_frames_of_nestest_match_the_c_self_tests_digests`;
 * no Rust source changed at this step, so there is nothing new to `fmt` or `clippy`, and the
   default build (the feature off) is untouched by construction.
+
+---
+
+# Step 6 — The rest of the classification
+
+Worktree commit below. Nothing in the fork changed at this step: **no capture bug was left to
+fix.** What the step produced instead is the proof of that, in the instrument rather than in prose.
+
+## `unexplained: 0`
+
+Steps 2 to 5 took the capture-class frames from 176 + 122 to 28 + 3. Writing "and the 31 that are
+left are all fine, honestly" into a note is worth very little, because nobody can re-run a note.
+So `FrameDiff::cause` now puts the reasoning in the tool: for every capture-class frame it names
+the discriminator that accounts for it, or says **`unexplained`** — and `fceux-tiles` prints the
+tally with the unexplained count on its own last line. That number is the lot's actual acceptance
+criterion, and it is **0** on both ROM sets.
+
+The `capture` class is decided by one question — *do the two engines' pictures agree for this
+frame?* — and that question has three known blind spots. The cause names which one applies:
+
+| Cause | What it means | Why the capture cannot be at fault |
+|---|---|---|
+| `oam-rotated-by-k` | every sprite record matches after turning FCEUX's OAM number `n` into `(n + k) mod 64` | the two OAM arrays are rotations of each other, so the `$4014` transfer started at a different `$2003`. Both engines number a record after its OAM entry (REQ-CORE-043), so a capture cannot produce an offset — and cannot remove one |
+| `sprite-oam-slot` | every differing record is a **sprite** whose differing fields include `index`, with no single `k` rotating the whole array | the game put that one sprite in another OAM entry. Once the slots differ the positional pairing is comparing two different sprites, so the `x` and the planes differing as well is the consequence, not a second defect |
+| `blank-screen` | Zaxnes's picture for the frame is a **single colour** | "the pictures agree" then carries almost no information: a screen blanked with `$2001` and a screenful of blank tiles look exactly the same. The pixel test cannot decide either way |
+| `unexplained` | none of the above | **a capture bug.** Must be 0 |
+
+and every cause carries `, diverged at N` when the two pictures had **already** differed at an
+earlier frame — `first_pixel_diff`, which step 1 recorded for exactly this. That is what turns
+each of the three readings from a plausible story into a decided one: if the machines parted
+company at frame 8, their agreeing again at frame 3000 is a coincidence, not evidence.
+
+`the_cause_names_why_a_capture_class_frame_is_not_the_captures_fault` pins all four verdicts,
+including the one that matters: a **background** record differing on a plane with an informative
+picture comes out `unexplained`, so the discriminators cannot quietly excuse a real bug. (It also
+records that a frame holding a single sprite is trivially a rotation of itself, which is why the
+`sprite-oam-slot` case has to clear `oam_rotation` by hand to reach that branch.)
+
+## The 31 capture-class frames, each with its cause
+
+**98 originals, frames 60/300/1200/3000 — 28 frames:**
+
+| Cause | Frames | ROMs |
+|---|---|---|
+| `blank-screen, diverged at 8` | 12 | the six *Mega Man 4* dumps at frames 60 and 3000 |
+| `oam-rotated-by-32, diverged at 7` | 8 | *Adventure Island* ×2, *Adventure Island Classic* ×2, *Takahashi Meijin no Bouken-jima* ×2, *Kiddy Sun in Fantasia* ×2 |
+| `sprite-oam-slot, diverged at 10` | 4 | *Super Mario Bros.* at 1200 and 3000, two dumps each |
+| `sprite-oam-slot, diverged at 8` | 3 | the three *Rockman 4-AY* dumps at 3000 (`spr.index:52`) |
+| `sprite-oam-slot, diverged at 5` | 1 | *Rockman 6-SSnT* at 3000 (`spr.index:5`) |
+| **`unexplained`** | **0** | |
+
+**291 public ROMs, frames 60/300 — 3 frames:**
+
+| ROM | frame | cause | detail |
+|---|---|---|---|
+| `nes_instr_test/rom_singles/01-implied.nes` | 60 | `blank-screen, diverged at 4` | Zaxnes captures 960 records and FCEUX **none at all** — which is what one engine having `$2001` bit 3 clear for that frame looks like, on a frame whose picture is one colour either way |
+| `other/high-hopes.nes` | 60 | `blank-screen, diverged at 5` | the **top five** rows are one line apart (Zaxnes 7, 15, 23, 31, 39; FCEUX 6, 14, 22, 30, 38) and the other twelve are exact. A one-line disagreement about the scroll at the start of a frame, on a blank screen, 55 frames after the pictures parted |
+| `spritecans-2011/spritecans.nes` | 60 | `oam-rotated-by-15, diverged at 3` | `spr.index:2` |
+| **`unexplained`** | | **0** | |
+
+## Why none of these can be fixed, as opposed to merely being excused
+
+The three readings are not "we could not work out what this is". Each says the difference is in
+**the two machines' state**, which the capture reads and does not create:
+
+* an OAM rotation is the content of a 256-byte array at a different offset. A capture that
+  "corrected" it would have to renumber records against REQ-CORE-043 and would then be wrong on
+  every game that does not have the offset;
+* a sprite in another OAM slot is the same, one entry at a time;
+* a uniform picture is not a capture question at all. It is the *measurement* that fails there,
+  not the capture, and the only honest fix is a better discriminator — which is what
+  `diverged at N` is: all fourteen `blank-screen` frames diverged at frame 4, 5 or 8, long before
+  the frames compared.
+
+The one shape among them that **would** have been the capture's is `other/high-hopes.nes`'s
+one-line row offset — the signature steps 2 and 3 fixed elsewhere. It is not fixable here and the
+reason is specific: the five rows that differ are the only five above the screen's split, the
+twelve below are already exact, the screen is blank, and the pictures diverged 55 frames earlier.
+There is no residual to chase, and a change that moved those five rows would move the twelve that
+are right.
+
+## The emulation-class differences, per ROM, with the first differing frame
+
+Not fixed — these are FCEUX's emulation against Zaxnes's, which lot FCEUX-1 step 5 measured and
+which this lot must not touch. **39 of the 98 originals** have at least one emulation-class frame,
+and every one of them has a profile; the 20 originals without a profile have **no**
+emulation-class frame at all.
+
+| Profile | Dumps | First frame whose pictures differ | Emulation-class frames |
+|---|---|---|---|
+| Adventure Island | 4 | 7 | 60 and 3000 (3000 only on *Kiddy Sun*) |
+| Blaster Master | 1 of 6 (`[Europe][!]`) | 10 | 1200, 3000 |
+| Castlevania | 7 *Castlevania* | 13 | all four |
+| Castlevania | 2 *Akumajou Dracula* | 6 | 1200, 3000 |
+| Excitebike | 6 | 8 | 1200, 3000 |
+| Mega Man 2 | 2 of 8 (`Rockman 2-DWnN`) | 8 | 3000 |
+| Metroid | 4 | 18 | 3000 |
+| Super Mario Bros. | 2 of 4 | 10 | 1200 |
+| Super Mario Bros. 3 | 8 | 12 or 13 | all four |
+| Zelda II | 3 | 9 or 11 | all four |
+
+Public ROMs: 191 of 578 compared frames are emulation-class, and `fceux-tiles` prints the first
+differing frame of every ROM that is not identical, so the full list is the tool's output rather
+than a table transcribed here.
+
+**The two games whose every compared frame is emulation-class — *Super Mario Bros. 3* and *Zelda
+II* — are the step-2 finding and nothing else.** Both need `ppu-2007-render-read` turned on in
+`zax-nes` for the two engines to agree, and step 2 measured that with the feature on *Super Mario
+Bros. 3* becomes capture-class and then record-identical. That is still the one decision in this
+lot that needs the owner, and **no change was made to `zax-nes`**.
+
+## The final per-profile table
+
+98 originals, frames 60/300/1200/3000, after steps 2 to 5:
+
+| Profile | Dumps | dumps identical at every frame | frames | identical | capture | emulation |
+|---|---|---|---|---|---|---|
+| Adventure Island | 4 | 0 | 16 | 1 | 8 | 7 |
+| Blaster Master | 6 | **5** | 24 | 22 | 0 | 2 |
+| Castlevania | 9 | 0 | 36 | 4 | 0 | 32 |
+| Excitebike | 6 | 0 | 24 | 12 | 0 | 12 |
+| Final Fantasy | 7 | **7** | 28 | **28** | 0 | 0 |
+| Mega Man 1 | 6 | **6** | 24 | **24** | 0 | 0 |
+| Mega Man 2 | 8 | **6** | 32 | 30 | 0 | 2 |
+| Mega Man 3 | 9 | **9** | 36 | **36** | 0 | 0 |
+| Metroid | 4 | 0 | 16 | 12 | 0 | 4 |
+| Ninja Gaiden III | 4 | **4** | 16 | **16** | 0 | 0 |
+| Super Mario Bros. | 4 | 0 | 16 | 10 | 4 | 2 |
+| Super Mario Bros. 3 | 8 | 0 | 32 | 0 | 0 | 32 |
+| Zelda II | 3 | 0 | 12 | 0 | 0 | 12 |
+| (no profile) | 20 | **10** | 80 | 64 | 16 | 0 |
+| **total** | **98** | **47** | **392** | **259** | **28** | **105** |
+
+Four games — *Final Fantasy*, *Mega Man 1*, *Mega Man 3*, *Ninja Gaiden III* — are
+record-identical on every dump at every compared frame, and *Blaster Master*, *Mega Man 2* and the
+no-profile set are identical bar their emulation-class or blank-screen frames. Step 8 turns this
+into the 3D answer per game.
+
+## The new PPU, and what its hooks would take
+
+`newppu` (`src/ppu.cpp:2066` onwards, FCEUX's cycle-accurate PPU, off by default and selected by
+`FCEUX_PPU_Loop`) is out of this lot's scope and the capture does nothing there. Everything
+needed to scope it was read, and it is four items, in increasing order of cost:
+
+1. **The two capture moments exist as positions.** `FCEUX_PPU_Loop` has an explicit
+   `for (int sl = 0; sl < normalscanlines; sl++)` with the 32-tile fetch loop inside it
+   (`src/ppu.cpp:2252-2285`), so the sprite capture goes at the top of the `sl` body and the
+   background row after the `xt` loop — the same two places `DoLine` has them. **No new call site
+   problem.**
+2. **The row address has to be assembled, not shadowed.** `newppu` keeps the scroll as *five
+   separate counters* — `ppur.fv`, `v`, `h`, `vt`, `ht`, plus `fh` (`src/ppu.cpp:167-187`) — and
+   not as a packed 15-bit `RefreshAddr`. So step 2's `zax_row_start` / `zax_row_next` pair becomes
+   a packed value built from the five at the right instants. The upside is that this is probably
+   *fewer* hooks than the old PPU's five, because `newppu` keeps the latch install explicit
+   (`ppur.install_latches()`) instead of folding it into `Fixit1` and `Fixit2`.
+3. **The pattern read transfers unchanged.** `bgdata.main[xt].pt` holds only the **two** pattern
+   bytes of the line being drawn, which is `pputile.inc`'s first problem over again, so the
+   capture still has to read all sixteen bytes itself by walking the nametable. That is what
+   `zax/zaxtiles.cpp` already does and it is PPU-agnostic.
+4. **The MMC5 part has nothing to mirror, because `newppu` does not draw it.** After
+   `src/ppu.cpp:2060` the only MMC5 references in the whole new PPU are `MMC5_hb(yp)` and
+   `MMC5_hb(240)` — the scanline hook for the IRQ. **`newppu` implements neither the extended
+   attribute mode nor the vertical split**: it renders an MMC5 game through the ordinary path with
+   the board's CHR windows. So a capture there would be right for free on CHR mode 0 and wrong in
+   exactly the way `newppu`'s own picture is wrong on mode 1 and the split — which, by the rule
+   step 5 settled, is the correct behaviour for a capture, and an emulation difference to record.
+
+Steps 2's row rule and 4's MMC2/MMC4 latch walk transfer as they stand; step 3's "read through the
+board's own pointer table" needs `newppu`'s equivalent named, and `FCEUPPU_GetCHR` is already it.
+
+## Verification of this step
+
+* `cargo fmt -p zax-harness -- --check`: clean;
+* `cargo clippy --release -p zax-harness --all-targets -- -D warnings`, **with and without**
+  `fceux-core`: clean;
+* `cargo test --release -p zax-harness --features fceux-core`: the five `fceux_tiles` unit tests
+  pass, including the new one;
+* both sweeps re-run end to end with the new column: `unexplained: 0` on the 98 originals and on
+  the 291 public ROMs.

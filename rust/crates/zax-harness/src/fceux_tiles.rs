@@ -377,6 +377,61 @@ impl FrameDiff {
         }
     }
 
+    /// Why this frame is **capture**-class without the capture being at fault, or
+    /// `"unexplained"` when nothing here accounts for it — the one value that is a defect.
+    ///
+    /// Lot FCEUX-6 step 6 exists to drive the `unexplained` count to zero, and this is where the
+    /// reasoning lives rather than in a note nobody can re-run. The `capture` class is decided by
+    /// one question — "do the two engines' pictures agree for this frame?" — and that question has
+    /// three known blind spots, each of which this names:
+    ///
+    /// * the two OAM arrays are **rotations** of each other, so every sprite record is right but
+    ///   numbered differently (REQ-CORE-043 numbers a record after its OAM entry, so the capture
+    ///   cannot cause it);
+    /// * every differing record is a **sprite that differs on its `index`**, without one `k`
+    ///   rotating the whole array: the game put that sprite in another OAM slot, which is again
+    ///   the machine's state;
+    /// * Zaxnes's picture is a **single colour**, so "the pictures agree" carries almost no
+    ///   information — a blanked screen and a screenful of blank tiles look identical.
+    ///
+    /// `first_pixel_diff` sharpens all three: when the pictures already differed at an earlier
+    /// frame the two machines have provably diverged, and that they agree again at this one is a
+    /// coincidence rather than evidence. Empty for a frame that is not capture-class.
+    #[must_use]
+    pub fn cause(&self, frame: u32, first_pixel_diff: Option<u32>) -> String {
+        if self.class() != "capture" {
+            return String::new();
+        }
+
+        let diverged = first_pixel_diff.filter(|first| *first < frame);
+        let since = diverged.map_or_else(String::new, |first| format!(", diverged at {first}"));
+
+        if let Some(k) = self.oam_rotation {
+            return format!("oam-rotated-by-{k}{since}");
+        }
+        if self.sprite_index_only() {
+            return format!("sprite-oam-slot{since}");
+        }
+        if self.pixels_uniform {
+            return format!("blank-screen{since}");
+        }
+        format!("unexplained{since}")
+    }
+
+    /// Whether **every** differing record is a sprite whose differing fields include `index`.
+    ///
+    /// The `index` is what makes it conclusive: once the two engines hold the same sprite in
+    /// different OAM entries, the positional pairing is comparing two different sprites, so the
+    /// position and the planes differing as well is the consequence and not a second defect.
+    fn sprite_index_only(&self) -> bool {
+        const INDEX: u16 = 1 << 4;
+        !self.by_fields.is_empty()
+            && self
+                .by_fields
+                .keys()
+                .all(|(background, mask)| !*background && (mask & INDEX) != 0)
+    }
+
     /// The differing-field sets, most frequent first, as `plane0+plane1:106`.
     #[must_use]
     pub fn fields_summary(&self) -> String {
@@ -732,6 +787,7 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
                         "zaxnes_rows": rows_text(&diff.zaxnes_rows),
                         "fceux_rows": rows_text(&diff.fceux_rows),
                         "oam_rotation": diff.oam_rotation,
+                        "cause": diff.cause(*frame, result.first_pixel_diff),
                         "pairs": diff.pairs.iter().map(|(ours, theirs)| json!([ours, theirs])).collect::<Vec<_>>(),
                     }),
                 );
@@ -882,6 +938,7 @@ fn report(rows: &[Value], options: &Options) -> String {
     );
 
     let mut classes: HashMap<&str, usize> = HashMap::new();
+    let mut causes: HashMap<String, usize> = HashMap::new();
     let mut roms_all_identical = 0;
     let mut roms_total = 0;
     let mut crashed = 0;
@@ -910,7 +967,7 @@ fn report(rows: &[Value], options: &Options) -> String {
             continue;
         }
         roms_total += 1;
-        let all_identical = rom_lines(&mut out, row, options, &mut classes);
+        let all_identical = rom_lines(&mut out, row, options, &mut classes, &mut causes);
         if all_identical {
             roms_all_identical += 1;
         } else if let Some(first) = row.get("first_pixel_diff").filter(|v| !v.is_null()) {
@@ -939,6 +996,23 @@ fn report(rows: &[Value], options: &Options) -> String {
     for class in names {
         let _ = writeln!(out, "  {class}: {}", classes[*class]);
     }
+    if !causes.is_empty() {
+        // Why each capture-class frame is capture-class without the capture being at fault
+        // (`FrameDiff::cause`). The last line is the one that matters: a lot that claims the
+        // capture is finished has to show `unexplained: 0`.
+        let _ = writeln!(out, "\nCapture-class frames by cause:");
+        let mut tally: Vec<(&String, &usize)> = causes.iter().collect();
+        tally.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (cause, count) in tally {
+            let _ = writeln!(out, "  {cause}: {count}");
+        }
+        let unexplained: usize = causes
+            .iter()
+            .filter(|(cause, _)| cause.starts_with("unexplained"))
+            .map(|(_, count)| *count)
+            .sum();
+        let _ = writeln!(out, "  => unexplained: {unexplained}");
+    }
     if !emulation_first.is_empty() {
         let _ = writeln!(
             out,
@@ -958,6 +1032,7 @@ fn rom_lines(
     row: &Value,
     options: &Options,
     classes: &mut HashMap<&'static str, usize>,
+    causes: &mut HashMap<String, usize>,
 ) -> bool {
     let name = row.get("rom").and_then(Value::as_str).unwrap_or("?");
     let empty = Map::new();
@@ -982,11 +1057,14 @@ fn rom_lines(
             "no"
         };
         let mut detail = String::new();
-        if diff.get("pixels_uniform") == Some(&Value::Bool(true)) {
-            let _ = write!(detail, " [blank screen]");
-        }
-        if let Some(k) = diff.get("oam_rotation").and_then(Value::as_i64) {
-            let _ = write!(detail, " [OAM rotated by {k}]");
+        // The cause supersedes the two ad-hoc markers this used to print (`[blank screen]` and
+        // `[OAM rotated by k]`): it names the same discriminators and the frame the two pictures
+        // first parted company, and it is `unexplained` when none of them accounts for the frame
+        // — which is the only value that is a defect (lot FCEUX-6 step 6).
+        let cause = diff.get("cause").and_then(Value::as_str).unwrap_or("");
+        if !cause.is_empty() {
+            let _ = write!(detail, " [{cause}]");
+            *causes.entry(cause.to_owned()).or_insert(0) += 1;
         }
         if options.detail {
             let _ = write!(detail, " @y {}", list(diff.get("rows")));
@@ -1159,5 +1237,59 @@ mod tests {
         let diff = compare_frame(&[record], &[], false);
         assert_eq!(diff.class(), "emulation");
         assert_eq!(diff.unmatched_zaxnes, 1);
+    }
+
+    /// Lot FCEUX-6 step 6: the four verdicts [`FrameDiff::cause`] can reach, and the one that
+    /// must stay at zero. A background record that differs on a plane is the capture's and has to
+    /// come out `unexplained`, which is what keeps the discriminators from excusing a real bug.
+    #[test]
+    fn the_cause_names_why_a_capture_class_frame_is_not_the_captures_fault() {
+        let background = TileRecord::new(1, 2, 3, 4, 5, false, false, false, 1, true);
+        let sprite = TileRecord::new(1, 2, 3, 4, 5, false, false, false, 1, false);
+        let tile = |plane1: u64, index: i32, background: bool| Tile {
+            plane0: 1,
+            plane1,
+            x: 3,
+            y: 4,
+            index,
+            mirror_h: false,
+            mirror_v: false,
+            hidden: false,
+            palette: 1,
+            background,
+        };
+
+        // A background plane that differs on an informative picture: ours, and named so.
+        let diff = compare_frame(&[background], &[tile(99, 5, true)], true);
+        assert_eq!(diff.cause(300, None), "unexplained");
+        // ... and the frame the two pictures first parted company is carried through.
+        assert_eq!(diff.cause(300, Some(8)), "unexplained, diverged at 8");
+        // A later divergence than this frame is not a divergence yet.
+        assert_eq!(diff.cause(300, Some(900)), "unexplained");
+
+        // A sprite in another OAM slot: the machine's state, not the capture's. `oam_rotation` is
+        // cleared by hand because a frame holding a *single* sprite is trivially a rotation of
+        // itself — the real frames this branch exists for are the ones where no one `k` moves
+        // every sprite (`Rockman 4-AY`'s 52 records, `Super Mario Bros.`'s 15).
+        let mut diff = compare_frame(&[sprite], &[tile(2, 9, false)], true);
+        assert_eq!(diff.fields_summary(), "spr.index:1");
+        assert_eq!(diff.oam_rotation, Some(60));
+        diff.oam_rotation = None;
+        assert_eq!(diff.cause(300, Some(8)), "sprite-oam-slot, diverged at 8");
+
+        // A uniform picture says almost nothing, so neither does a record difference on it.
+        let mut diff = compare_frame(&[background], &[tile(99, 5, true)], true);
+        diff.pixels_uniform = true;
+        assert_eq!(diff.cause(60, Some(4)), "blank-screen, diverged at 4");
+
+        // A whole-array rotation outranks every other reading.
+        let mut diff = compare_frame(&[sprite], &[tile(2, 9, false)], true);
+        diff.oam_rotation = Some(32);
+        assert_eq!(diff.cause(300, Some(7)), "oam-rotated-by-32, diverged at 7");
+
+        // Nothing is said about a frame that is not capture-class.
+        let diff = compare_frame(&[background], &[tile(99, 5, true)], false);
+        assert_eq!(diff.class(), "emulation");
+        assert_eq!(diff.cause(300, Some(8)), "");
     }
 }
