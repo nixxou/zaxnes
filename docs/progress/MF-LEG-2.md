@@ -592,4 +592,80 @@ have joined it since recorded underneath.
 **Q-177** was written at step 1 and is unchanged: three readings the five emulators disagree on,
 each shipped as the page reads, each a one-expression change if R0 prefers another, and each
 pinned by a test whose message names the alternative.
-- [ ] 6/6 the final check
+- [x] 6/6 the final check
+
+### 6/6 — the final check
+
+Everything below was run on the committed tree of step 5 (`e5b0f188`), not on an earlier shape.
+
+**fmt**: `cargo fmt -p zax-nes -p zax-harness --check` clean.
+
+**clippy `--all-targets -- -D warnings`**, the four configurations the brief names:
+
+| configuration | result |
+| --- | --- |
+| `default` | clean |
+| `--features zax-nes/board-mmc5-exattr-split` (the new feature alone) | clean |
+| `--features zax-nes/parked-boards` | clean |
+| `zax-nes --no-default-features` | clean |
+
+**`cargo test --release -p zax-nes -p zax-harness`**:
+
+| configuration | without the ROM roots | with both roots, `--include-ignored --no-fail-fast` |
+| --- | --- | --- |
+| `default` | **1 167 / 0 / 10** | **1 177 / 0 / 0** |
+| `--features zax-nes/board-mmc5-exattr-split` | **1 190 / 0 / 10** | **1 200 / 0 / 0** |
+| `--features zax-nes/parked-boards` | **1 251 / 0 / 10** | **1 261 / 0 / 0** |
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`.
+**All pass; nothing fails and nothing is skipped** in the three runs with the roots set. Against
+MF-LEG-1B's own final figures (1 176 / — / 1 237) that is **+1 in `default`** — the one
+both-configuration test — and +23 in `parked-boards` and in the feature build, the nineteen of
+step 1 and the four of step 2.
+
+**golden-core over the 98 originals**, 1 200 frames each, re-run on the final tree:
+
+| build | md5 | `cmp` against the base commit's file |
+| --- | --- | --- |
+| `ca1517dc`, fresh tree (step 3) | `f79e7df842c3ee43e7d9b67861a927b5` | — |
+| `default` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| `--features zax-nes/board-mmc5-exattr-split` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+| `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` | **identical** |
+
+**The savestate format of no other board is touched**, and the default build's is not touched at
+all: the three bytes of `$5200`-`$5202` are inside the feature's `cfg`, and `.text` of the
+shipped binary being byte-identical to `ca1517dc`'s (step 4.0) is a stronger statement than any
+test — `Mmc5::save_registers` compiles to the base commit's instructions. With the feature on the
+MMC5's block grows by those three bytes and a state does not cross between the two
+configurations, which the feature's `Cargo.toml` note says and which is already true of every
+board feature that changes what memories a cartridge has.
+
+**No mapper outside mapper 5 changes.** Three independent statements of it: `.text` byte-identical
+in the shipped build; golden-core identical over the 98 originals (mappers 0, 1, 2, 3, 4 and 156)
+**with the feature on as well**; and level-2 `core` +0 on all five games in the shipped build.
+
+**The callgrind figures and the decision**, from step 4:
+
+| | shipped (feature off) | feature on |
+| --- | --- | --- |
+| PR-1's thirteen, worst ROM | `metroid` **+0.001 %** | `metroid` **+0.101 %** |
+| PR-1's thirteen, set total | **−46 137 (−0.000 %)** | +298 642 892 (+0.376 %) |
+| level 2, `core` | **+0 on all five** | `metroid` +0.110 %, `mm2` +0.103 %, `smb1` +0.013 %, `zelda2` −0.015 %, `smb3` −0.061 % |
+| over the +0.02 % tolerance | **nothing** | `m1`, `m4`, `mm2`, `metroid` on PR-1; `mm2`, `metroid` on level 2 |
+
+**Decision: `board-mmc5-exattr-split` is parked** — out of `default` (the owner's decision, taken
+before measurement) and **in `parked-boards`** (the owner's rule, now that there is a figure).
+`cargo build -p zax-nes --features parked-boards` turns it on, as does
+`--features board-mmc5-exattr-split` alone. Whether it ever joins `default` is R0's and the
+owner's call; step 4.5 states the two things worth weighing.
+
+**Licence.** The five GPL emulators in `third_party/` were **read**, never copied: no line is
+transcribed, only descriptions with `file:line`. The nesdev *MMC5* page is quoted verbatim inside
+quotation marks. `mmc5.rs`'s existing Mesen attribution header is unchanged and still accurate —
+this lot adds no adapted code, the fine-Y substitution being the page's own sentence that Mesen
+also implements.
+
+**Open afterwards**: **Q-177**, this lot's three readings, awaiting R0. Entry MMC5-1's verdict
+**DIFFERS** stands for the shipped build by design. The gap its closing paragraph names —
+no test ROM in the collection can judge these two features — is **not** closed and cannot be with
+the ROMs available; step 3 proved that rather than assuming it.
