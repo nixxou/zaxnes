@@ -361,6 +361,82 @@ public sealed class Amd063LuaMemberTests
             StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------- end to end
+
+    /// <summary>
+    /// A profile script that writes and reads <b>each</b> member AMD-063 adds, once, in
+    /// <c>Start</c>, and keeps its hooks for the frames that follow (REQ-LUA-062). This is the
+    /// end-to-end check of the lot: a 2.1 script that uses the whole of the new surface neither
+    /// raises nor loses anything.
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-118, REQ-LUA-119, REQ-LUA-120, REQ-LUA-121, REQ-LUA-062
+    public void A_profile_script_writes_every_new_member_once_and_keeps_its_hooks()
+    {
+        using ScriptSession session = new ScriptProfileBuilder()
+            .Pattern([Img.A], tags: "t")
+            .Script("all", """
+                starts, updates, shapes = 0, 0, 0
+                function Start()
+                  starts = starts + 1
+
+                  -- REQ-LUA-118
+                  version = CS.Nes3D.Info.Version
+                  modern = tonumber(CS.Nes3D.Info.Version:match('^%d+')) >= 2
+
+                  -- REQ-LUA-119, written then read then cleared, with its neighbours of
+                  -- REQ-LUA-117 beside it.
+                  CS.Nes3D.CameraControl.RotOverride = Vector3(-60, 10, 0)
+                  forced = CS.Nes3D.CameraControl.RotOverride.x
+                  CS.Nes3D.CameraControl.RotOverride = nil
+                  cleared = CS.Nes3D.CameraControl.RotOverride == nil
+                  distanceMax = CS.Nes3D.CameraControl.DistanceMax
+                  other = CS.Nes3D.CameraControl.Autre == nil
+
+                  -- REQ-LUA-120 and REQ-LUA-121 on a pattern instance.
+                  local held = Pattern.GetPatternWithTag('t')
+                  placeholders = held.pattern.HasPlaceholders
+                  solid = held:IsSolidTile(3)
+                end
+                function Update() updates = updates + 1 end
+                function UpdateS()
+                  shapes = shapes + 1
+                  -- The two members a frame instance carries, once per frame.
+                  framePlaceholders = shape.refPattern.HasPlaceholders
+                  frameSolid = shape:IsSolidTile(nil)
+                end
+                """)
+            .Start();
+
+        for (int frame = 0; frame < 5; frame++)
+        {
+            session.Frame(new Batch().BgCell(Img.A, 10, 5), frame);
+        }
+
+        // Start ran once and ran to the end: every value it set is there.
+        Assert.Empty(session.Log.Errors);
+        Assert.Equal(1d, session.Runtime.EvaluateNumber("return starts"));
+        Assert.Equal("2.1", session.Runtime.EvaluateText("return version"));
+        Assert.True(Flag(session, "modern"));
+        Assert.Equal(-60d, session.Runtime.EvaluateNumber("return forced"));
+        Assert.True(Flag(session, "cleared"));
+        Assert.Equal(512d, session.Runtime.EvaluateNumber("return distanceMax"));
+        Assert.True(Flag(session, "other"));
+        Assert.False(Flag(session, "placeholders"));
+        Assert.False(Flag(session, "solid"));
+
+        // The frame hooks fired on all five frames: nothing disabled the script.
+        Assert.Equal(5d, session.Runtime.EvaluateNumber("return updates"));
+        Assert.Equal(5d, session.Runtime.EvaluateNumber("return shapes"));
+        Assert.False(Flag(session, "framePlaceholders"));
+        Assert.False(Flag(session, "frameSolid"));
+
+        foreach (LoadedScript script in session.Runtime.Scripts)
+        {
+            Assert.False(script.Failed);
+            Assert.True(script.Active);
+        }
+    }
+
     /// <summary>
     /// The script the two <c>HasPlaceholders</c> criteria run: it reads the property through the
     /// three paths of the criterion on every <c>UpdateS</c>.
