@@ -82,8 +82,15 @@ pub(super) mod tile_planes {
     pub(crate) const LOW_PLANE: u32 = 1;
     pub(crate) const HIGH_PLANE: u32 = 2;
     pub(crate) const FLIP: u32 = 3;
+    /// A "3dh" tile's manifest string as text: a legacy digest, or an identifier in text form
+    /// (AMD-062 REQ-PROF-074 point 1, REQ-PROF-076).
+    pub(crate) const HASH_TEXT: u32 = 4;
+    /// A "3dh" tile's identifier, sixteen bytes (AMD-062 REQ-PROF-074 point 1, REQ-PROF-075).
+    pub(crate) const HASH_ID: u32 = 5;
 
     pub(crate) const MASK: FieldMask = FieldMask::range(1, 3);
+    /// The fields a "3dh" tile carries: the flip and the identifier, the planes being absent.
+    pub(crate) const HASH_MASK: FieldMask = FieldMask::of(&[3, 5]);
 }
 
 pub(super) mod variant {
@@ -110,9 +117,19 @@ pub(super) mod variant {
     pub(crate) const TEX: u32 = 19;
     pub(crate) const TAG_STR: u32 = 20;
     pub(crate) const EMPTY_COLOR: u32 = 23;
+    /// A "3dh" variant's texture, exclusive-ored with the pattern's default texture
+    /// (AMD-062 REQ-PROF-074 point 2).
+    pub(crate) const XOR_TEX: u32 = 24;
+    /// How a "3dh" variant stores its texture (AMD-062 REQ-PROF-074 point 2).
+    pub(crate) const TEXTURE_KIND: u32 = 25;
 
     pub(crate) const MASK: FieldMask = FieldMask::of(&[
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 23,
+    ]);
+    /// The fields a "3dh" variant carries: field 19 is gone and field 25 takes its place; field
+    /// 24 is written only for a `textureKind` of 2, so it is not of the set (REQ-PROF-084).
+    pub(crate) const HASH_MASK: FieldMask = FieldMask::of(&[
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 23, 25,
     ]);
 }
 

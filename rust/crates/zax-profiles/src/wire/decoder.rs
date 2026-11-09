@@ -12,16 +12,30 @@ use crate::enums::{
     ProfileLayer, TextureFormat, TileFlip, TvRegionMode, VariantGeometry, VariantRenderStyle,
 };
 use crate::format::{ProfileDocument, ProfileHeader};
+use crate::hash::envelope::{messages as hash_messages, HashProfileManifest};
+use crate::hash::raw_tile;
+use crate::hash::tile_id::{self, TileId};
 use crate::layout::PresenceRecorder;
 use crate::pattern::{ProfilePattern, RecordedPatternSlot};
 use crate::profile::GameProfile;
 use crate::script::ProfileScript;
 use crate::settings::{LayerSettings, LayerSettingsSet, LightSettings, ProfileSettings};
-use crate::tile::{PatternGrid, ProfileTile};
+use crate::tile::{HashTileField, HashTileIdentity, PatternGrid, ProfileTile};
 use crate::values::{ArgbColor, Mat4F, Vec2I, Vec3F, Vec4F};
-use crate::variant::{PatternVariant, TexturePixels, VariantTexture};
+use crate::variant::{HashTextureKind, PatternVariant, TexturePixels, VariantTexture};
 
 type Result<T> = std::result::Result<T, ProfileFormatError>;
+
+/// The text form of the sixteen bytes of field 5 (REQ-PROF-075). A field of any other length
+/// cannot be an identifier; its plain hexadecimal form is returned, which no manifest holds, so
+/// the tile is refused by REQ-PROF-074 naming the bytes it carried.
+fn identifier_text(bytes: &[u8]) -> String {
+    if bytes.len() != tile_id::BYTE_COUNT {
+        return raw_tile::hex_lowercase(bytes);
+    }
+
+    TileId::from_binary(bytes).map_or_else(|| raw_tile::hex_lowercase(bytes), TileId::to_text)
+}
 
 /// An object registered under a reference key, ready to be named again by a later envelope.
 enum Shared {
@@ -94,11 +108,31 @@ impl Shared {
     }
 }
 
+/// What the decoder needs to read a "3dh" payload (AMD-062 REQ-PROF-074): the manifest strings
+/// the tiles may name, each interned once so that every tile naming it shares one `Arc<str>`.
+struct HashMode {
+    keys: HashMap<String, Arc<str>>,
+}
+
+impl HashMode {
+    fn of(manifest: &HashProfileManifest) -> Self {
+        Self {
+            keys: manifest
+                .keys()
+                .iter()
+                .map(|key| (key.clone(), Arc::from(key.as_str())))
+                .collect(),
+        }
+    }
+}
+
 pub(super) struct Decoder<'a> {
     reader: ProtoReader<'a>,
     objects_by_key: HashMap<i32, Shared>,
     next_key: i32,
     unknown_field_count: usize,
+    /// Set when the bytes are the payload of a "3dh" profile.
+    hash: Option<HashMode>,
 }
 
 /// Reads the header fields of the root message and skips the rest.
@@ -129,6 +163,15 @@ impl<'a> Decoder<'a> {
             objects_by_key: HashMap::new(),
             next_key: 1,
             unknown_field_count: 0,
+            hash: None,
+        }
+    }
+
+    /// A decoder for the payload of a "3dh" profile (AMD-062 REQ-PROF-074).
+    pub(super) fn new_hash(data: &'a [u8], manifest: &HashProfileManifest) -> Self {
+        Self {
+            hash: Some(HashMode::of(manifest)),
+            ..Self::new(data)
         }
     }
 
@@ -295,26 +338,80 @@ impl<'a> Decoder<'a> {
         let mut stored_low = 0;
         let mut stored_high = 0;
         let mut flip = 0;
+        let mut has_planes = false;
+        let mut named: Option<(String, HashTileField)> = None;
         let mut present = PresenceRecorder::default();
         while let Some((field, wire_type)) = self.reader.try_read_tag(limit)? {
             present.saw(field);
             match field {
-                schema::tile_planes::LOW_PLANE => stored_low = self.reader.read_i64()?,
-                schema::tile_planes::HIGH_PLANE => stored_high = self.reader.read_i64()?,
+                schema::tile_planes::LOW_PLANE => {
+                    stored_low = self.reader.read_i64()?;
+                    has_planes = true;
+                }
+                schema::tile_planes::HIGH_PLANE => {
+                    stored_high = self.reader.read_i64()?;
+                    has_planes = true;
+                }
                 schema::tile_planes::FLIP => flip = self.reader.read_i32()?,
+                // REQ-PROF-074 point 1: a "3dh" tile names a manifest string, in field 4 as text
+                // or in field 5 as the sixteen bytes of its identifier.
+                schema::tile_planes::HASH_TEXT if self.hash.is_some() => {
+                    named = Some((self.reader.read_string()?, HashTileField::Text));
+                }
+                schema::tile_planes::HASH_ID if self.hash.is_some() => {
+                    let bytes = self.reader.read_bytes()?;
+                    named = Some((identifier_text(bytes), HashTileField::Identifier));
+                }
                 _ => {
                     self.skip_unknown(field, wire_type)?;
                     present.unknown(field);
                 }
             }
         }
-        let mut tile = ProfileTile::new(
-            cipher::decode(stored_low),
-            cipher::decode(stored_high),
-            TileFlip::from_bits(flip),
-        );
-        tile.recorded_fields = present.finish(schema::tile_planes::MASK);
-        Ok(tile)
+
+        // A tile that carries its planes anyway is an ordinary tile (REQ-PROF-074 point 1); it
+        // keeps the string it names, which the rewrite of REQ-PROF-084 writes back.
+        let identity = match named {
+            Some((key, field)) => Some(HashTileIdentity {
+                key: self.manifest_key(&key)?,
+                field,
+                resolved: has_planes,
+            }),
+            None => None,
+        };
+        let schema = if identity.is_some() && !has_planes {
+            schema::tile_planes::HASH_MASK
+        } else {
+            schema::tile_planes::MASK
+        };
+
+        Ok(ProfileTile {
+            low_plane: if has_planes {
+                cipher::decode(stored_low)
+            } else {
+                0
+            },
+            high_plane: if has_planes {
+                cipher::decode(stored_high)
+            } else {
+                0
+            },
+            flip: TileFlip::from_bits(flip),
+            recorded_fields: present.finish(schema),
+            hash_identity: identity,
+        })
+    }
+
+    /// The shared `Arc<str>` of a manifest string, or the refusal of REQ-PROF-074 when the string
+    /// is not in the manifest.
+    fn manifest_key(&self, key: &str) -> Result<Arc<str>> {
+        self.hash
+            .as_ref()
+            .and_then(|hash| hash.keys.get(key))
+            .map(Arc::clone)
+            .ok_or_else(|| {
+                ProfileFormatError::payload_refusal(hash_messages::tile_hash_absent(key))
+            })
     }
 
     fn read_variant(&mut self, limit: usize) -> Result<PatternVariant> {
@@ -369,13 +466,39 @@ impl<'a> Decoder<'a> {
                     let [low, ..] = self.reader.read_i32()?.to_le_bytes();
                     variant.stored_empty_color = i32::from(i8::from_le_bytes([low]));
                 }
+                // REQ-PROF-074 point 2: fields 24 and 25 replace field 19 in a "3dh" profile.
+                schema::variant::XOR_TEX if self.hash.is_some() => {
+                    let end = self.reader.read_length_limit()?;
+                    variant.xor_texture = Some(self.read_texture(end)?);
+                }
+                schema::variant::TEXTURE_KIND if self.hash.is_some() => {
+                    let raw = self.reader.read_i32()?;
+                    let Some(kind) = HashTextureKind::from_raw(raw) else {
+                        return Err(ProfileFormatError::payload_refusal(
+                            hash_messages::INVALID_XOR_TEXTURE,
+                        ));
+                    };
+                    variant.texture_kind = Some(kind);
+                }
                 _ => {
                     self.skip_unknown(field, wire_type)?;
                     present.unknown(field);
                 }
             }
         }
-        variant.recorded_fields = present.finish(schema::variant::MASK);
+
+        if variant.texture_kind == Some(HashTextureKind::Xor) && variant.xor_texture.is_none() {
+            return Err(ProfileFormatError::payload_refusal(
+                hash_messages::INVALID_XOR_TEXTURE,
+            ));
+        }
+
+        let schema = if self.hash.is_some() {
+            schema::variant::HASH_MASK
+        } else {
+            schema::variant::MASK
+        };
+        variant.recorded_fields = present.finish(schema);
         Ok(variant)
     }
 

@@ -8,6 +8,8 @@
 mod catalogue_and_library_tests;
 mod common;
 mod hash_profile_envelope_tests;
+mod hash_profile_reader_tests;
+mod hash_profile_texture_tests;
 mod lz4_block_tests;
 mod profile_corpus_tests;
 mod profile_export_tests;

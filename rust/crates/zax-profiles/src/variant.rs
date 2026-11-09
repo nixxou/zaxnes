@@ -8,6 +8,45 @@ use crate::layout::FieldMask;
 use crate::tags;
 use crate::values::{Mat4F, Vec3F};
 
+/// How a variant of a "3dh" profile stores its texture: field 25, which replaces field 19
+/// (AMD-062 REQ-PROF-074 point 2).
+///
+/// The three values map onto the three cases of SPEC-03 REQ-PROF-035: [`Self::Absent`] is field
+/// 19 absent, [`Self::Default`] is the null marker, [`Self::Xor`] is an explicit texture, which
+/// REQ-PROF-083 rebuilds from [`PatternVariant::xor_texture`] and the pattern's default texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HashTextureKind {
+    /// 0: no texture.
+    Absent,
+    /// 1: the pattern's default texture.
+    Default,
+    /// 2: an explicit texture, stored exclusive-ored with the default texture.
+    Xor,
+}
+
+impl HashTextureKind {
+    /// The kind field 25 holds, or none for a value REQ-PROF-074 refuses.
+    #[must_use]
+    pub const fn from_raw(raw: i32) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Absent),
+            1 => Some(Self::Default),
+            2 => Some(Self::Xor),
+            _ => None,
+        }
+    }
+
+    /// The value written in field 25.
+    #[must_use]
+    pub const fn to_raw(self) -> i32 {
+        match self {
+            Self::Absent => 0,
+            Self::Default => 1,
+            Self::Xor => 2,
+        }
+    }
+}
+
 /// The pixel words of an explicit variant texture (REQ-PROF-035).
 #[derive(Debug, Clone)]
 pub struct TexturePixels {
@@ -159,8 +198,16 @@ pub struct PatternVariant {
     pub deform_offset: Option<Mat4F>,
     /// How the variant is drawn.
     pub render_style: VariantRenderStyle,
-    /// Explicit texture, when stored.
+    /// Explicit texture, when stored (field 19). A variant read from a "3dh" profile carries
+    /// none: its texture is [`texture_kind`](Self::texture_kind) and
+    /// [`xor_texture`](Self::xor_texture) instead (AMD-062 REQ-PROF-074).
     pub texture: Option<VariantTexture>,
+    /// Field 25 of a "3dh" variant: how its texture is stored. None for a 3dn variant, and for
+    /// the variants of the memorised slots, which carry no texture at all.
+    pub texture_kind: Option<HashTextureKind>,
+    /// Field 24 of a "3dh" variant, kept exactly as read: the texture exclusive-ored with the
+    /// pattern's default texture, which REQ-PROF-083 undoes and REQ-PROF-084 writes back.
+    pub xor_texture: Option<VariantTexture>,
     /// Raw tag string, or none when the field is absent.
     pub tag_string: Option<String>,
     /// The empty colour as stored (`emptyColor`, a signed byte); a negative value is brought

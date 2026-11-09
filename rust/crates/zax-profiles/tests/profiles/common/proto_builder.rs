@@ -40,6 +40,24 @@ impl ProtoBuilder {
         self.bytes.extend_from_slice(value);
     }
 
+    /// Writes `value` as a nested length-delimited message.
+    pub fn message(&mut self, field: u32, value: &ProtoBuilder) {
+        self.raw_bytes(field, &value.bytes);
+    }
+
+    pub fn group_start(&mut self, field: u32) {
+        self.tag(field, 3);
+    }
+
+    pub fn group_end(&mut self, field: u32) {
+        self.tag(field, 4);
+    }
+
+    pub fn int64(&mut self, field: u32, value: i64) {
+        self.tag(field, 0);
+        self.varint(u64::from_le_bytes(value.to_le_bytes()));
+    }
+
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }

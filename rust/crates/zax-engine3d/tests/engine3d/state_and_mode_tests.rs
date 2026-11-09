@@ -11,6 +11,7 @@ use zax_engine3d::palette::FramePalette;
 use zax_engine3d::state_codec;
 use zax_engine3d::vectors::Cell;
 use zax_profiles::enums::TextureFormat;
+use zax_profiles::hash::default_texture::DefaultTexture;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::variant::{TexturePixels, VariantTexture};
 
@@ -425,6 +426,42 @@ fn req_prof_052_the_default_texture_of_a_pattern() {
     let engine = builder.load();
     let pattern = engine.patterns().get(permanent(&engine, 0)).unwrap();
     assert_eq!(texels, default_texture(pattern));
+}
+
+// AMD-062 REQ-PROF-083: the packed default texture the exclusive-or of a "3dh" variant works
+// against is the same texture SPEC-03 REQ-PROF-035 defines, texel for texel.
+#[test]
+fn amd062_req_prof_083_the_packed_default_texture_is_the_engines() {
+    let mut builder = ProfileBuilder::new();
+    builder.pattern(
+        3,
+        2,
+        &[
+            Some(img::pixel(0, 0, false, false)),
+            None,
+            Some(img::pixel(3, 5, true, false)),
+            Some(img::pixel(7, 7, false, true)),
+            Some(img::pixel(1, 2, true, true)),
+            None,
+        ],
+    );
+    let pattern = &builder.build().permanent_patterns[0];
+
+    let texels = default_profile_texture(pattern);
+    let packed = DefaultTexture::of(pattern);
+
+    assert_eq!(24, packed.width);
+    assert_eq!(16, packed.height);
+    assert_eq!(
+        texels.len(),
+        usize::try_from(packed.width * packed.height).unwrap()
+    );
+    assert_eq!(packed.pixels.data.len(), packed.pixels.extra.len());
+    for (n, &expected) in texels.iter().enumerate() {
+        let word = packed.pixels.data[n / 16];
+        let value = (word >> (2 * (n % 16))) & 3;
+        assert_eq!(i32::from(expected), value, "texel {n}");
+    }
 }
 
 #[test]

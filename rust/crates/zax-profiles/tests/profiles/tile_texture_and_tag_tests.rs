@@ -81,7 +81,7 @@ fn req_prof_032_cells_carried_by_different_envelopes_may_still_be_the_same_tile(
     // and object sharing are two different things.
     let document = neutral_assets::load_profile("Super Mario Bros.bytes");
     let objects: Vec<&Arc<ProfileTile>> = document.profile.distinct_tile_objects().collect();
-    let values: HashSet<ProfileTile> = objects.iter().map(|tile| ***tile).collect();
+    let values: HashSet<ProfileTile> = objects.iter().map(|tile| (***tile).clone()).collect();
 
     assert_eq!(783, objects.len());
     assert!(values.len() <= objects.len());

@@ -12,6 +12,7 @@ mod schema;
 mod writer;
 
 use crate::format::{ProfileDocument, ProfileHeader};
+use crate::hash::envelope::HashProfileManifest;
 use crate::layout::FieldPresence;
 use crate::profile::GameProfile;
 
@@ -20,12 +21,23 @@ use crate::profile::GameProfile;
 #[error("{message}")]
 pub struct ProfileFormatError {
     message: String,
+    payload_refusal: bool,
 }
 
 impl ProfileFormatError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            payload_refusal: false,
+        }
+    }
+
+    /// A payload of a "3dh" profile REQ-PROF-074 refuses — a tile outside the manifest, an
+    /// unusable `textureKind`. The message is the log text the requirement prescribes, verbatim.
+    pub(crate) fn payload_refusal(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            payload_refusal: true,
         }
     }
 
@@ -33,6 +45,13 @@ impl ProfileFormatError {
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// True when the bytes decode but the payload is not an acceptable "3dh" profile
+    /// (AMD-062 REQ-PROF-074), as opposed to a byte stream that does not decode at all.
+    #[must_use]
+    pub fn is_payload_refusal(&self) -> bool {
+        self.payload_refusal
     }
 }
 
@@ -43,6 +62,21 @@ impl ProfileFormatError {
 /// The bytes are not a readable profile.
 pub fn decode(bytes: &[u8]) -> Result<ProfileDocument, ProfileFormatError> {
     decoder::Decoder::new(bytes).read_document()
+}
+
+/// Decodes the payload of a "3dh" profile (AMD-062 REQ-PROF-074): tiles named by a manifest
+/// string instead of their planes, and variant textures in fields 24 and 25 instead of field 19.
+///
+/// # Errors
+///
+/// The bytes are not a readable profile, or the payload is not an acceptable "3dh" payload — a
+/// tile outside `manifest`, an unusable `textureKind` — which
+/// [`ProfileFormatError::is_payload_refusal`] tells apart.
+pub fn decode_hash_payload(
+    bytes: &[u8],
+    manifest: &HashProfileManifest,
+) -> Result<ProfileDocument, ProfileFormatError> {
+    decoder::Decoder::new_hash(bytes, manifest).read_document()
 }
 
 /// Encodes a profile; `presence` says whether every scalar is written or only those a decoded
