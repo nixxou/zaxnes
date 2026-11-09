@@ -26,7 +26,7 @@ defaults to the new one.
       Nothing per sample, nothing in `zax-nes`, at most one branch per rendered frame.
 - [x] **4. Tests.** The setting's default and its round-trip, both outputs opening and pumping
       without a device, and the classic output reproducing `v0.4.2`'s block behaviour.
-- [ ] **5. Measurements.** Main-thread frame time at `1c2b4639` and here, 2D and 3D, desktop
+- [x] **5. Measurements.** Main-thread frame time at `1c2b4639` and here, 2D and 3D, desktop
       release build, with each output; golden-core against `1c2b4639`.
 - [ ] **6. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
       with the ROM variables, journal entry.
@@ -256,3 +256,100 @@ documentation. What is left untested is the SDL call itself — which is `v0.4.2
 
 `cargo test -p zax-app -p zax-platform -p zax-settings --features zax-app/bundled`: **1 064
 passed, 0 failed**, 2 ignored. fmt and clippy `-D warnings` clean.
+
+A ninth test joined them in step 5, for the defect that step found — see below.
+
+### Step 5 — the measurements
+
+#### The defect the measurement found, which no test would have
+
+The first bench run came back with `audio latency 0.0 / 60 ms [0-0 ms] rate +0.000 % underruns 0
+prefilling` for the whole twenty seconds. The device had opened — the log says
+`audio: 48000 Hz, blocks of 512 frames, target latency 60 ms` — but the prefill gate never opened,
+which means the callback never saw a single sample.
+
+The cause was step 3's own: `attach_console` filtered the session with `has_rom()`, and at the one
+moment it is called from a launch — `launch_session`, just after `GameSession::create` — the core
+has not been reset yet, so `has_rom()` is still **false**. `v0.4.2` and AUDIO-1 both installed the
+console there with no such test. **The default output would have been silent in every game**, and
+the whole 1 064-test suite passed: the stream's own tests install their console by hand, and the
+host tests of this lot ran with no link at all.
+
+Fixed by dropping the filter — any session has a core, and the reader is a clone of the APU's ring
+handle, which survives the reset — and pinned by
+`audio_2_a_launch_hands_the_game_s_samples_to_the_default_output`: with a detached link, a launch
+fills the console slot, the slot sees more than a block of samples, a read gets them, and the host
+has published the gain and the producing flag. The run after the fix reads
+`latency 65.5 / 60 ms [55-78 ms] rate -0.129 % underruns 0`.
+
+This is the second lot running in which the measurement caught something the unit tests could not;
+AUDIO-1's step 9 found two.
+
+#### Frame time
+
+Release build, `Castlevania [USA][!!]`, 1280×720, vsync on, `ZAXNES_PROFILE=1`,
+`--smoke-emulated 1200` (20 s of play), RTX 3050, 24 CPUs; the last three two-second windows of
+each run. Mean/max milliseconds per **displayed** frame; the `audio` column is the loop's audio
+stage, which is the whole of what either output costs the main thread.
+
+`1c2b4639` was extracted with `git archive` into a throwaway directory inside `target-au2` (nothing
+there is ever staged), built there with its own `CARGO_TARGET_DIR`, and deleted as soon as the
+figures were taken. Its two demo files had to be copied in by hand: `FlappyZaxNes.nes` and
+`flappyzaxnes.3dn` are in the worktree but not in the commit, so `git archive` leaves them out and
+`zax-app` does not compile without them.
+
+| build | audio stage | whole frame |
+| --- | --- | --- |
+| `1c2b4639`, 2D | 0,01 / 0,01-0,03 | 16,66-16,67 / 16,86-16,90 |
+| this tree, **new** output, 2D | **0,00 / 0,00** | 16,66-16,67 / 16,86-17,32 |
+| this tree, **classic** output, 2D | 0,01 / 0,01-0,03 | 16,66-16,67 / 16,84-17,39 |
+| `1c2b4639`, 3D (default profile) | 0,01 / 0,01-0,08 | 16,66-16,67 / 17,81-18,90 |
+| this tree, **new** output, 3D | **0,00 / 0,00-0,01** | 16,66-16,67 / 17,91-18,02 |
+| this tree, **classic** output, 3D | 0,01 / 0,02-0,04 | 16,66-16,67 / 17,96-18,71 |
+
+**Neither output costs more than noise against `1c2b4639`.**
+
+* The **new** output is *cheaper*, in 2D and in 3D, for the reason AUDIO-1's own measurement gave:
+  the main thread no longer mixes the console, converts a block to 16-bit PCM or calls into SDL.
+  The stage reads 0,00 ms.
+* The **classic** output reads 0,01 ms — `1c2b4639`'s figure to the hundredth, in both modes,
+  which is what it should read, since it *is* `1c2b4639`'s output. That it did not come out
+  cheaper or dearer is the evidence that the restoration is faithful.
+* The **whole frame** is pinned at 16,66 ms by vsync in all six runs, and the maxima differ by
+  less than the run-to-run noise (0,5 ms spreads inside a single configuration's own three
+  windows).
+
+#### The counters, from the same runs
+
+```
+new output,     2D:  audio  latency 57.2 / 60 ms  [46-69 ms]  rate +0.023 %  underruns 0
+new output,     3D:  audio  latency 63.4 / 60 ms  [51-86 ms]  rate -0.058 %  underruns 0
+classic output, 2D:  audio  classic output (v0.4.2): 4 blocks of 512 frames, silence blocks 4
+classic output, 3D:  audio  classic output (v0.4.2): 4 blocks of 512 frames, silence blocks 5
+```
+
+Which is finding 1 of Q-153, measured rather than argued: over twenty seconds of the same game, on
+the same machine, the new output under-ran **nothing** and the classic one sent out **four blocks
+of zeros in 2D and five in 3D** — four or five 10,7 ms holes with a discontinuity at each edge.
+That is what the owner will hear if the fallback is ever switched on, and it is why it is the
+fallback.
+
+#### golden-core
+
+```
+f79e7df842c3ee43e7d9b67861a927b5   1c2b4639 (recorded by 75b35900 and MF-LEG-3)
+f79e7df842c3ee43e7d9b67861a927b5   this tree
+cmp: BYTE-IDENTICAL   (98 ROMs, 1 200 frames each)
+```
+
+`cmp` on the files, not only on the digests, against the run of step 2 — itself `1c2b4639`'s.
+`git diff 1c2b4639` over `zax-nes`, `zax-harness`, `zax-goldens`, `zax-engine3d`, `zax-render`,
+`zax-profiles` and `zax-scripting` is **empty**: the core, the 3D engine and the renderer were not
+touched at all, which is also why **SMB3, Zelda II and the widescreen** cannot have moved — nothing
+outside the audio path and the options window changed.
+
+The four profiler logs and the two baseline ones are in the session scratchpad (`bench/after-new-2d.log`,
+`after-new-3d.log`, `after-classic-2d.log`, `after-classic-3d.log`, `before-2d.log`, `before-3d.log`).
+G: was at 4,9 GB when the step began — the floor the work order sets — and `target-au2/debug/incremental`
+(4,3 GB, pure build cache) was dropped before anything was built; it ended at 8,5 GB with the
+baseline tree deleted.

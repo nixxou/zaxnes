@@ -555,14 +555,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.resynchronise_audio();
     }
 
-    /// Installs the running game's samples on whichever output is open (AUDIO-2): the audio
+    /// Installs the loaded game's samples on whichever output is open (AUDIO-2): the audio
     /// thread's console slot on the default output ([`stream::ApuSamples`]), the mixer's own
-    /// source on the classic output of `v0.4.2`. A game that is not loaded installs nothing.
+    /// source on the classic output of `v0.4.2`. With no session there is nothing to install.
+    ///
+    /// Any session will do, and deliberately **not** only one that `has_rom()`: this is called
+    /// from `launch_session`, where the session has just been built from the ROM but the core has
+    /// not been reset yet, so `has_rom` is still false. The reader is a clone of the APU's ring
+    /// handle, which survives that reset; filtering on `has_rom` here left the output with no
+    /// console at all and every game silent.
     fn attach_console(&mut self) {
         let Some(reader) = self
             .session
             .as_ref()
-            .filter(|session| session.has_rom())
             .map(|session| session.core().audio_reader())
         else {
             return;

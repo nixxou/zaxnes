@@ -855,6 +855,36 @@ fn audio_2_both_outputs_pump_and_correct_without_a_device() {
     assert_eq!(silent.host.audio_report(), None);
 }
 
+/// AUDIO-2: `attach_console` is now the one place that hands a game's samples to the output, so
+/// the test that it really does so belongs here. With a detached link — a stream nothing pulls
+/// from — a launch fills the console slot, the slot reports the samples the core produced, and a
+/// read gets them; and the host publishes the gain and the "producing" flag the audio thread needs.
+///
+/// Without this the default output would be **silent** and every other test would still pass: the
+/// stream's own tests install their console by hand.
+#[test]
+fn audio_2_a_launch_hands_the_game_s_samples_to_the_default_output() {
+    let link = zax_app::audio::AudioLink::detached(RATE, frames_of_ms(RATE, 60.0));
+    let for_host = link.clone();
+    let mut harness = LoopHarness::create_with(move |options| options.audio = Some(for_host));
+    harness.launch("g1");
+    harness.run_frames(30);
+
+    assert!(!harness.host.classic_audio());
+    assert!(link.control.console_active(), "the console is producing");
+    near(link.control.console_gain(), 1.0, 1e-6);
+
+    let mut slot = link.console.lock().unwrap();
+    let console = slot.as_mut().expect("the launch installed the console");
+    assert!(
+        console.available() > BLOCK,
+        "the slot sees the core's ring: {} samples",
+        console.available()
+    );
+    let mut out = vec![0.0_f32; BLOCK];
+    assert_eq!(console.read(&mut out), BLOCK);
+}
+
 /// AUDIO-2: the choice takes effect when the device is (re)opened, and the host asks the loop for
 /// that reopening exactly once per change — not once per frame, and not when the setting is
 /// written with the value already in force.
