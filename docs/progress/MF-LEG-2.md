@@ -77,10 +77,16 @@ touched for any game, with the feature on or off.
 | --: | --- | --- |
 | 1 | the feature, the board's registers and state, mode 1 and the split, the nametable hook, the savestate | 1, 2 |
 | 2 | the 3D view: the capture's per-tile palette and the split's tiles, and the 2D-versus-3D agreement test | the 3D view |
-| 3 | the report entry MMC5-1, `BOARD-FEATURES.md`, and any Q ticket | — |
-| 4 | golden-core against the base commit, and the full test run with both ROM roots | the final check |
-| 5 | the callgrind campaign | the final check |
+| 3 | golden-core against the base commit, and the full test run with both ROM roots | the final check |
+| 4 | the callgrind campaign | the final check |
+| 5 | the report entry MMC5-1 and `BOARD-FEATURES.md` | — |
 | 6 | the final check | the final check |
+
+**Steps 3 to 5 are not the order the plan above was written in.** Steps 1 and 2 shipped with the
+documentation step numbered 3; it is **step 5** instead, because entry MMC5-1 and
+`BOARD-FEATURES.md`'s row both have to carry the measured figures, and a row written before the
+campaign would be a row to rewrite. The commit messages of steps 1 and 2 are therefore the only
+place the first numbering survives.
 
 - [x] 1/6 the feature, the board, mode 1, the split, the nametable hook, the savestate
 
@@ -275,7 +281,73 @@ pass.
 | `default` | **1167 passed, 0 failed, 10 ignored** |
 | `--features zax-nes/board-mmc5-exattr-split` | **1190 passed, 0 failed, 10 ignored** |
 | `--features zax-nes/parked-boards` | **1228 passed, 0 failed, 10 ignored** |
-- [ ] 3/6 the report entry, `BOARD-FEATURES.md` and the Q tickets
-- [ ] 4/6 golden-core and the suites with both ROM roots
-- [ ] 5/6 the callgrind campaign
+- [x] 3/6 golden-core and the suites with both ROM roots
+
+### 3/6 — golden-core over the 98 originals, and the suites with both ROM roots
+
+```
+zax-harness golden-core G:/3dsen/test-originals gc98-<label>.jsonl 1200
+```
+
+The base commit was extracted with `git archive ca1517dc` into a **fresh** directory with its own
+`CARGO_TARGET_DIR`, built there, and that directory deleted as soon as the figures were taken.
+
+| build | md5 of the 98-ROM digest |
+| --- | --- |
+| `ca1517dc`, the base commit, fresh tree (binary md5 `b4a3cbdb13b932e77bd9c84f24ba10a6`) | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `default` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/board-mmc5-exattr-split` | `f79e7df842c3ee43e7d9b67861a927b5` |
+| this tree, `--features zax-nes/parked-boards` | `f79e7df842c3ee43e7d9b67861a927b5` |
+
+**Byte-identical in all four** — `cmp` on the files, not only the digests — and identical to the
+digest fourteen lots have now recorded. 98 ROMs run, 98 files.
+
+**Why the feature build is identical too, which is the interesting row.** The 98 originals use
+mappers 0, 1, 2, 3, 4 and 156. **None of them is mapper 5**, so neither substituting mode can be
+reached and the only way the digest could move is if the lot had touched a shared path — which
+is exactly what this row rules out, for the `read_nametable_as` call site, the
+`write_nametable_byte` and `nametable_written_as` branches, the dot-321 hook in
+`run_rendering_dot` and the two capture hooks in `tiles.rs` all at once. *Castlevania III* is not
+in the 98 (it is not in `G:/3dsen/test-originals`), and the MMC5 is covered instead by `mmc5exram`
+in the callgrind set at step 4 and by the twenty-three tests of step 1 and 2.
+
+**The suites**, `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, `--no-fail-fast --
+--include-ignored`:
+
+| run | result |
+| --- | --- |
+| `default` | **1177 passed, 0 failed, 0 ignored** |
+| `--features zax-nes/board-mmc5-exattr-split` | **1200 passed, 0 failed, 0 ignored** |
+| `--features zax-nes/parked-boards` | **1238 passed, 0 failed, 0 ignored** |
+
+Against MF-LEG-1B's own final figures (1176 / — / 1237) that is **+1 in `default` and +1 in
+`parked-boards`** — the one both-configuration test of step 1 — and +23 more with the feature on,
+the nineteen of step 1 plus the four of step 2. **No test-ROM row moves in either direction**, and
+that is worth more than one line, because entry MMC5-1's closing paragraph bets on these ROMs:
+
+> `exram` is about the $5C00-$5FFF modes and `mmc5test_v2` covers the split and the scanline
+> IRQ. **Neither is run by the project today.** Running `exram` would settle MMC5-3 at first
+> hand; running `mmc5test_v2` would quantify MMC5-1 rather than leave it as a feature checklist.
+
+**Half of that is already out of date and the other half does not work.** All three MMC5 ROMs of
+the collection *are* run — lot MF-4c step 4 put them in
+`req_core_100_the_mmc5_rom_suites_keep_their_outcomes`, as `Manual`, "they print a screen with no
+documented verdict" — and this step ran them in both configurations with `--shots` and compared
+the PNGs:
+
+| ROM | default vs feature, final frame |
+| --- | --- |
+| `nes-test-roms/exram/mmc5exram.nes` | **byte-identical** |
+| `nes-test-roms/mmc5test/mmc5test.nes` | **byte-identical** |
+| `nes-test-roms/mmc5test_v2/mmc5test.nes` | **byte-identical** |
+
+`mmc5test_v2` is an **interactive** register test: the frame it lands on is its menu — "bg
+pattern table", "bank set order", "current chr banks", "controls" — and reaching its split
+sub-test needs button presses the campaign does not make. So the collection cannot quantify
+MMC5-1 as the entry hoped, with or without this feature, and the twenty-three tests of steps 1
+and 2 are what pins the behaviour instead. Recorded here so the next lot does not spend the same
+afternoon on it; the entry's own paragraph is corrected at step 5.
+- [ ] 4/6 the callgrind campaign
+- [ ] 5/6 the report entry and `BOARD-FEATURES.md`
 - [ ] 6/6 the final check
