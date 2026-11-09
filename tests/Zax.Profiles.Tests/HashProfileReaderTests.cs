@@ -548,11 +548,24 @@ public sealed class HashProfileReaderTests
 
     internal static IEnumerable<PatternVariant> AllVariants(GameProfile profile, bool includeSlots)
     {
+        foreach ((ProfilePattern _, PatternVariant variant) in AllPatternVariants(profile, includeSlots))
+        {
+            yield return variant;
+        }
+    }
+
+    /// <summary>
+    /// Every variant of the file with the pattern that holds it, in file order — which is what
+    /// the measured counts of AMD-062 are over.
+    /// </summary>
+    internal static IEnumerable<(ProfilePattern Pattern, PatternVariant Variant)> AllPatternVariants(
+        GameProfile profile, bool includeSlots)
+    {
         foreach (ProfilePattern pattern in AllPatterns(profile, includeSlots))
         {
             foreach (PatternVariant variant in pattern.Variants)
             {
-                yield return variant;
+                yield return (pattern, variant);
             }
         }
     }
