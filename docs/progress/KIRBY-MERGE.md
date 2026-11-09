@@ -264,7 +264,9 @@ margin decoder, and golden-core must stay byte-identical to `19c5065d`'s.
 
 ## 2. Step 2: the merge
 
-`git merge --no-ff feat/widescreen-kirby`, message *Merge feat/widescreen-kirby: Kirby's
+Commit `33b5d29b`, which is the merge commit **and** step 2's commit: everything below is
+resolved in it, so there is no separate `KIRBY-MERGE (2/5)` tree change — only this note's step
+marker. `git merge --no-ff feat/widescreen-kirby`, message *Merge feat/widescreen-kirby: Kirby's
 widescreen and its engine work*. Eight textual conflicts, exactly the eight the trial merge
 predicted, and four semantic ones the markers did not show — two of them found only by the
 compiler and the tests, which is why they are numbered on past the plan's list.
