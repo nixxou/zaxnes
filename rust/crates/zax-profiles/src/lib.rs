@@ -12,6 +12,7 @@ pub mod description;
 pub mod enums;
 pub mod export;
 pub mod format;
+pub mod hash;
 pub mod import;
 pub mod layout;
 pub mod library;

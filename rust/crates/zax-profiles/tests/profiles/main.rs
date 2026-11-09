@@ -18,5 +18,6 @@ mod script_order_tests;
 mod setting_application_tests;
 mod three_d_sen_import_tests;
 mod three_d_sen_real_install_tests;
+mod tile_identifier_tests;
 mod tile_texture_and_tag_tests;
 mod unity_bundle_reader_tests;
