@@ -59,6 +59,14 @@ public sealed class HashProfileEnvelope
     public int IdsByteLength { get; set; }
 
     /// <summary>
+    /// Whether field 12 was present at all. It is a <b>bytes</b> field, not a repeated one, so
+    /// an empty table is still a field the writer puts back: <c>empty.bytes</c>, the one profile
+    /// with no tile, carries field 12 with a length of zero, and REQ-PROF-084 asks for its bytes
+    /// unchanged.
+    /// </summary>
+    public bool HasIds { get; set; }
+
+    /// <summary>
     /// True when the version lets a 32-digit entry of <see cref="Hashes"/> stand for a tile
     /// identifier in text form (versions <c>"2"</c> and <c>"5"</c>, REQ-PROF-072).
     /// </summary>

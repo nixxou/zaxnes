@@ -102,6 +102,7 @@ public static class ProfileWireCodec
             }
         }
 
+        envelope.HasIds = source.HasIds;
         envelope.Ids.AddRange(source.Ids);
         return HashEnvelopeCodec.Encode(envelope);
     }

@@ -125,7 +125,9 @@ public static class HashEnvelopeCodec
         WriteOptionalString(writer, ProfileSchema.HashEnvelope.GameDev, envelope.Publisher);
         WriteOptionalString(writer, ProfileSchema.HashEnvelope.Des, envelope.Description);
 
-        if (envelope.Ids.Count > 0)
+        // Field 12 is a bytes field: an empty table is still written when the profile carries
+        // one, which is what keeps empty.bytes identical (REQ-PROF-084).
+        if (envelope.Ids.Count > 0 || envelope.HasIds)
         {
             List<TileId> ids = [.. envelope.Ids];
             ids.Sort(static (left, right) => string.CompareOrdinal(left.ToText(), right.ToText()));
@@ -144,6 +146,7 @@ public static class HashEnvelopeCodec
     private static void ReadIds(ProtoReader reader, HashProfileEnvelope envelope)
     {
         byte[] table = reader.ReadBytes();
+        envelope.HasIds = true;
         envelope.IdsByteLength = table.Length;
         for (int offset = 0; offset + TileId.ByteCount <= table.Length; offset += TileId.ByteCount)
         {

@@ -4,7 +4,7 @@ namespace Zax.Profiles.Tests;
 
 /// <summary>
 /// Synthetic iNES images for the tile resolution of AMD-062 REQ-PROF-078: a header of SPEC-02
-/// §5.1, an empty PRG bank and a CHR zone that holds the raw bytes of chosen tiles, each at a
+/// §5.1, one PRG bank and a CHR zone that holds the raw bytes of chosen tiles, each at a
 /// position that is <b>not</b> aligned on sixteen.
 /// </summary>
 internal static class SyntheticRom
@@ -23,11 +23,11 @@ internal static class SyntheticRom
     /// a position that is not a multiple of sixteen.
     /// </summary>
     /// <remarks>
-    /// The space between two tiles is filled with a deterministic high-entropy filler rather
-    /// than zeros. A window straddling a tile and its padding is then no tile of any profile,
-    /// which is what the second part of the criterion needs: the file without one tile must
-    /// really not hold that tile. The PRG bank stays zero, so the all-zero tile is found there
-    /// as well — the accepted divergence (D) of AMD-062 §9.
+    /// Everything that is not a placed tile — the PRG bank and the space between two tiles — is
+    /// filled with a deterministic high-entropy filler rather than zeros, so that the file holds
+    /// exactly the tiles it was given and nothing else. With zeros, a window straddling a tile
+    /// and its padding happens to be a real tile of some profiles, and the all-zero tile would
+    /// be found in the PRG bank even when it was not placed.
     /// </remarks>
     /// <param name="tiles">The raw tiles to place, sixteen bytes each.</param>
     /// <param name="flip">A mirroring applied to every tile before it is placed.</param>
@@ -42,8 +42,8 @@ internal static class SyntheticRom
 
         int chrStart = 16 + PrgBankSize;
         byte[] file = new byte[chrStart + (chrBanks * ChrBankSize)];
+        Fill(file.AsSpan(16));
         WriteHeader(file, prgBanks: 1, chrBanks: (byte)chrBanks);
-        FillChr(file.AsSpan(chrStart));
 
         for (int index = 0; index < list.Count; index++)
         {
@@ -55,15 +55,15 @@ internal static class SyntheticRom
     }
 
     /// <summary>A deterministic filler: a 64-bit xorshift, so the bytes look like nothing.</summary>
-    private static void FillChr(Span<byte> chr)
+    private static void Fill(Span<byte> payload)
     {
         ulong state = 0x9E37_79B9_7F4A_7C15UL;
-        for (int offset = 0; offset < chr.Length; offset++)
+        for (int offset = 0; offset < payload.Length; offset++)
         {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            chr[offset] = (byte)(state >> 24);
+            payload[offset] = (byte)(state >> 24);
         }
     }
 
