@@ -185,6 +185,29 @@ public sealed class SceneCamera
     /// <summary>Seconds left in the mode transition window (REQ-SCN-006, REQ-SCN-020).</summary>
     public float TransitionRemaining { get; private set; }
 
+    /// <summary>
+    /// The rotation a script forces on the camera, in degrees, or null for the normal behaviour
+    /// (AMD-063 REQ-LUA-119, <c>CS.Nes3D.CameraControl.RotOverride</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// While it is set, every camera update writes it into the rotation setpoint of the
+    /// <b>current</b> mode and shows it at once, without the smoothing of REQ-SCN-019. Put back
+    /// to null, the camera carries on from the setpoint it was left at, which is the last forced
+    /// value.
+    /// </para>
+    /// <para>
+    /// It is a session value: it is not persisted, it is <b>not</b> part of the camera state a
+    /// savestate carries (REQ-SCN-024 unchanged, so neither <see cref="Capture"/> nor
+    /// <see cref="Restore"/> touches it), and the host puts it back to null when a game is
+    /// launched and when the profile changes. A rollback snapshot does carry it
+    /// (AMD-042 REQ-LOOP-069 and REQ-LOOP-070 as AMD-063 amends them), which is why the host
+    /// reads and writes it around <see cref="Capture"/> and <see cref="Restore"/> rather than
+    /// through them.
+    /// </para>
+    /// </remarks>
+    public Vector3? RotOverride { get; set; }
+
     /// <summary>Displayed distance, after smoothing.</summary>
     public float Distance => _distance;
 
@@ -312,6 +335,20 @@ public sealed class SceneCamera
     /// </summary>
     public void Advance(float realSeconds)
     {
+        // AMD-063 REQ-LUA-119, before anything else and whatever the elapsed time: the forced
+        // rotation becomes the setpoint of the current mode and the displayed rotation at once,
+        // the three smoothing filters starting again from there. It is written before the wrap
+        // of AMD-045 REQ-SCN-071, so a forced angle outside ]−180°, 180°] is brought back by
+        // whole turns like any other setpoint and the orientation shown is the one asked for.
+        if (RotOverride is { } forced)
+        {
+            Current.Angles = forced;
+            _angles = forced;
+            _rxFilter.Reset();
+            _ryFilter.Reset();
+            _rzFilter.Reset();
+        }
+
         WrapSetpointAngles();
         if (realSeconds <= 0f)
         {

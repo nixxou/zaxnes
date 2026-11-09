@@ -1,10 +1,12 @@
+using System.Numerics;
 using Zax.Render;
 
 namespace Zax.Harness;
 
 /// <summary>
-/// One entry of the rollback history a <c>render --rom</c> run keeps (AMD-042 REQ-LOOP-069): the
-/// core state, the 64 <c>PData</c> values and the camera state, all taken at the same instant.
+/// One entry of the rollback history a <c>render --rom</c> run keeps (AMD-042 REQ-LOOP-069, with
+/// the fourth element AMD-063 REQ-LUA-119 adds): the core state, the 64 <c>PData</c> values, the
+/// camera state and the forced camera rotation, all taken at the same instant.
 /// </summary>
 /// <param name="Core">
 /// The complete core state; an in-memory one is enough (REQ-CORE-121), so the ROM image is left
@@ -17,10 +19,15 @@ namespace Zax.Harness;
 /// <param name="Camera">
 /// The camera state a savestate carries, REQ-SCN-024 being its single reference.
 /// </param>
+/// <param name="RotOverride">
+/// The value of <c>CS.Nes3D.CameraControl.RotOverride</c> (AMD-063 REQ-LUA-119), a session value
+/// that REQ-SCN-024 does not carry.
+/// </param>
 internal sealed record HarnessRollbackSnapshot(
     byte[] Core,
     byte[] PersistentData,
-    CameraStateData Camera);
+    CameraStateData Camera,
+    Vector3? RotOverride = null);
 
 /// <summary>
 /// The rollback history of SPEC-07 §3.4 for the headless harness: a snapshot every 60 emulated

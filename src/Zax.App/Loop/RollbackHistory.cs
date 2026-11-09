@@ -1,10 +1,12 @@
+using System.Numerics;
 using Zax.Render;
 
 namespace Zax.App.Loop;
 
 /// <summary>
-/// One entry of the rollback history (AMD-042 REQ-LOOP-069): the core state, the 64
-/// <c>PData</c> values and the camera state, all taken at the same instant.
+/// One entry of the rollback history (AMD-042 REQ-LOOP-069, with the fourth element AMD-063
+/// REQ-LUA-119 adds): the core state, the 64 <c>PData</c> values, the camera state and the
+/// forced camera rotation, all taken at the same instant.
 /// </summary>
 /// <param name="Core">
 /// The complete core state; an in-memory one is enough (REQ-CORE-121), so the ROM image is
@@ -17,7 +19,16 @@ namespace Zax.App.Loop;
 /// <param name="Camera">
 /// The camera state a savestate carries, REQ-SCN-024 being its single reference.
 /// </param>
-public sealed record RollbackSnapshot(byte[] Core, byte[] PersistentData, CameraStateData Camera);
+/// <param name="RotOverride">
+/// The value of <c>CS.Nes3D.CameraControl.RotOverride</c> (AMD-063 REQ-LUA-119). It is a session
+/// value, so it is not in <paramref name="Camera"/> — REQ-SCN-024 is unchanged — and it is
+/// carried here on its own.
+/// </param>
+public sealed record RollbackSnapshot(
+    byte[] Core,
+    byte[] PersistentData,
+    CameraStateData Camera,
+    Vector3? RotOverride = null);
 
 /// <summary>
 /// The rollback history of SPEC-07 §3.4: a snapshot every 60 emulated frames, at most 30 of
@@ -25,10 +36,11 @@ public sealed record RollbackSnapshot(byte[] Core, byte[] PersistentData, Camera
 /// </summary>
 /// <remarks>
 /// <para>
-/// A snapshot holds the core, the scripts' 64 <c>PData</c> values and the camera state
-/// (AMD-042 REQ-LOOP-069, which replaces the last sentence of REQ-LOOP-030's notes). It still
-/// holds neither the learned conversion state, nor the converted frames, nor the meshes. The
-/// depth is therefore about 30 s in NTSC and 36 s in PAL/Dendy.
+/// A snapshot holds the core, the scripts' 64 <c>PData</c> values, the camera state and the
+/// forced camera rotation (AMD-042 REQ-LOOP-069, which replaces the last sentence of
+/// REQ-LOOP-030's notes, with the fourth element of AMD-063 REQ-LUA-119). It still holds neither
+/// the learned conversion state, nor the converted frames, nor the meshes. The depth is
+/// therefore about 30 s in NTSC and 36 s in PAL/Dendy.
 /// </para>
 /// <para>
 /// The history is never persisted (SPEC-09 REQ-PERS-058). It is cleared when a game is

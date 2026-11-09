@@ -947,13 +947,15 @@ internal static class RenderExport
             // the core being in its real state — and carries the core, the 64 PData values and
             // the camera state, read as they stand at that instant and with no script hook
             // involved (AMD-042 §3).
+            // AMD-063 REQ-LUA-119 adds the forced camera rotation as a fourth element.
             if (control is { KeepsHistory: true }
                 && HarnessRollbackHistory.IsSnapshotFrame(core.FrameCount))
             {
                 history.Capture(new HarnessRollbackSnapshot(
                     core.SaveState(includeRomImage: false),
                     runtime.CapturePersistentData(),
-                    scene.Camera.Capture()));
+                    scene.Camera.Capture(),
+                    scene.Camera.RotOverride));
             }
 
             ushort word = input.At(counter);
@@ -998,6 +1000,11 @@ internal static class RenderExport
 
         byte[] picture = core.PixelFrame.ToArray();
         byte[] opacity = core.OpacityMask.ToArray();
+
+        // One camera update with no elapsed time: the headless capture has no real clock to
+        // smooth over (REQ-SCN-059), but a camera update is what writes the forced rotation of
+        // AMD-063 REQ-LUA-119 onto the setpoint, so the capture shows what a script imposed.
+        scene.Camera.Advance(0f);
         scene.Camera.SnapToSetpoints();
         scene.GameRunning = true;
         scene.Clipping = engine.Settings.Clipping;
@@ -1084,7 +1091,8 @@ internal static class RenderExport
     /// The rollback of REQ-LOOP-032 and AMD-042 REQ-LOOP-070, as
     /// <c>EmulationHost.PerformRollback</c> applies it: the second-to-last snapshot is restored
     /// — the core, then the 64 <c>PData</c> values, then the camera — and both it and the last
-    /// snapshot leave the history.
+    /// snapshot leave the history. AMD-063 REQ-LUA-119 puts <c>RotOverride</c> back just before
+    /// the camera.
     /// </summary>
     /// <remarks>
     /// The <c>Save</c> and <c>Load</c> hooks are never called: the entries go back the way
@@ -1118,6 +1126,10 @@ internal static class RenderExport
 
         engine.ClearFrames();
         runtime.RestorePersistentData(snapshot.PersistentData);
+
+        // AMD-063 REQ-LUA-119: the forced rotation goes back before the camera, so the restored
+        // setpoints are the ones the camera ends on.
+        scene.Camera.RotOverride = snapshot.RotOverride;
         scene.Camera.Restore(snapshot.Camera);
         Console.Out.WriteLine(
             $"render: rollback after real frame {realFrame} (AMD-042 REQ-LOOP-070) to core "

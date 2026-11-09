@@ -48,6 +48,169 @@ public sealed class Amd063LuaMemberTests
         Assert.Equal("Zaxnes", session.Runtime.EvaluateText("return CS.Nes3D.Info.Title"));
     }
 
+    // ---------------------------------------------------------------- REQ-LUA-119
+
+    /// <summary>
+    /// REQ-LUA-119 — the field is nil by default, takes a <c>Vector3</c>, reads back a
+    /// <c>Vector3</c> copy of the value and takes nil again.
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-119
+    public void Rot_override_reads_nil_or_a_vector_copy()
+    {
+        using ScriptSession session = Plain();
+
+        Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.RotOverride)"));
+
+        session.Runtime.Evaluate("CS.Nes3D.CameraControl.RotOverride = Vector3(-60, 10, 0)");
+
+        Assert.Equal(
+            "userdata",
+            session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.RotOverride)"));
+        Assert.Equal(-60d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.x"));
+        Assert.Equal(10d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.y"));
+        Assert.Equal(0d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.z"));
+
+        // The setpoint of the current mode holds the value (the headless camera has no update of
+        // its own, so it applies it at the write).
+        Assert.Equal(new Vec3(-60f, 10f, 0f), session.Camera.Angles);
+
+        session.Runtime.Evaluate("CS.Nes3D.CameraControl.RotOverride = nil");
+        Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.RotOverride)"));
+
+        // Put back to nil, the camera stays where it was forced (REQ-LUA-119).
+        Assert.Equal(new Vec3(-60f, 10f, 0f), session.Camera.Angles);
+        Assert.Empty(session.Log.Errors);
+    }
+
+    /// <summary>
+    /// REQ-LUA-119 — what is read is a <b>copy</b>: writing into it does not steer the camera,
+    /// unlike the bound vector <c>Camera.Rot</c> gives (REQ-LUA-044).
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-119
+    public void The_value_read_back_is_a_copy()
+    {
+        using ScriptSession session = Plain();
+        session.Runtime.Evaluate("""
+            CS.Nes3D.CameraControl.RotOverride = Vector3(-60, 10, 0)
+            held = CS.Nes3D.CameraControl.RotOverride
+            held.x = 99
+            """);
+
+        Assert.Equal(99d, session.Runtime.EvaluateNumber("return held.x"));
+        Assert.Equal(-60d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.x"));
+        Assert.Equal(-60f, session.Camera.Angles.X);
+        Assert.Empty(session.Log.Errors);
+    }
+
+    /// <summary>
+    /// REQ-LUA-119 — writing anything but a <c>Vector3</c> or nil is a Lua error.
+    /// </summary>
+    [Theory] // AMD-063, REQ-LUA-119
+    [InlineData("1")]
+    [InlineData("'x'")]
+    [InlineData("true")]
+    [InlineData("{}")]
+    [InlineData("Camera")]
+    public void Writing_something_else_than_a_vector_or_nil_raises(string value)
+    {
+        using ScriptSession session = Plain();
+        session.Runtime.Evaluate(
+            $"ok, err = pcall(function () CS.Nes3D.CameraControl.RotOverride = {value} end)");
+
+        Assert.Equal(0d, session.Runtime.EvaluateNumber("if ok then return 1 else return 0 end"));
+        Assert.EndsWith(
+            "invalid arguments to RotOverride",
+            session.Runtime.EvaluateText("return err"),
+            StringComparison.Ordinal);
+        Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.RotOverride)"));
+    }
+
+    /// <summary>
+    /// REQ-LUA-119 — the two values the rest of the API reads as a <c>Vector3</c> are accepted
+    /// here as well: a bound vector such as <c>Camera.Rot</c>, read by copy, and a
+    /// <c>Vector2</c>, whose <c>z</c> is 0. Q-180.
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-119, REQ-LUA-044
+    public void The_two_values_the_api_reads_as_a_vector3_are_accepted()
+    {
+        using ScriptSession session = Plain();
+
+        // Camera.Rot is a bound vector: it is written component by component (REQ-LUA-044).
+        session.Runtime.Evaluate("""
+            Camera.Rot.x = -30
+            Camera.Rot.y = 20
+            Camera.Rot.z = 5
+            CS.Nes3D.CameraControl.RotOverride = Camera.Rot
+            """);
+        Assert.Equal(-30d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.x"));
+        Assert.Equal(5d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.z"));
+
+        session.Runtime.Evaluate("CS.Nes3D.CameraControl.RotOverride = Vector2(7, 8)");
+        Assert.Equal(7d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.x"));
+        Assert.Equal(8d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.y"));
+        Assert.Equal(0d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.RotOverride.z"));
+        Assert.Empty(session.Log.Errors);
+    }
+
+    /// <summary>
+    /// REQ-LUA-119 — it is the <b>only</b> field of <c>CS.Nes3D.CameraControl</c> whose write has
+    /// an effect (which amends AMD-059 REQ-LUA-117): <c>DistanceMax</c> still reads 512, any
+    /// other field still reads nil, and a write anywhere else is still dropped without an error.
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-119, AMD-059 REQ-LUA-117
+    public void Every_other_field_of_the_camera_control_table_is_unchanged()
+    {
+        using ScriptSession session = Plain();
+
+        // The two reads the criterion names.
+        Assert.Equal(512d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.DistanceMax"));
+        Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.Autre)"));
+
+        session.Runtime.Evaluate("""
+            CS.Nes3D.CameraControl.DistanceMax = 7
+            CS.Nes3D.CameraControl.Autre = 7
+            """);
+
+        Assert.Equal(512d, session.Runtime.EvaluateNumber("return CS.Nes3D.CameraControl.DistanceMax"));
+        Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl.Autre)"));
+        Assert.Empty(session.Log.Errors);
+
+        // The metatable stays hidden, so the shield cannot be taken off (REQ-LUA-112).
+        Assert.Equal("CS", session.Runtime.EvaluateText("return getmetatable(CS.Nes3D.CameraControl)"));
+        Assert.Equal("table", session.Runtime.EvaluateText("return type(CS.Nes3D.CameraControl)"));
+    }
+
+    /// <summary>
+    /// REQ-LUA-119 — a script that writes it in a hook keeps its hooks (REQ-LUA-062), and the
+    /// value survives from frame to frame.
+    /// </summary>
+    [Fact] // AMD-063, REQ-LUA-119, REQ-LUA-062
+    public void A_hook_that_writes_it_keeps_its_hooks()
+    {
+        using ScriptSession session = new ScriptProfileBuilder()
+            .Pattern([Img.A], tags: "t")
+            .Script("a", """
+                seen = 0
+                function Update()
+                  seen = seen + 1
+                  if seen == 1 then
+                    CS.Nes3D.CameraControl.RotOverride = Vector3(-60, 10, 0)
+                  end
+                  held = CS.Nes3D.CameraControl.RotOverride.y
+                end
+                """)
+            .Start();
+
+        for (int frame = 0; frame < 3; frame++)
+        {
+            session.Frame(new Batch().BgCell(Img.A, 10, 5), frame);
+        }
+
+        Assert.Empty(session.Log.Errors);
+        Assert.Equal(3d, session.Runtime.EvaluateNumber("return seen"));
+        Assert.Equal(10d, session.Runtime.EvaluateNumber("return held"));
+    }
+
     // ---------------------------------------------------------------- REQ-LUA-121
 
     /// <summary>

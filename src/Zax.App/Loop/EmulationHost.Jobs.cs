@@ -350,7 +350,10 @@ internal sealed partial class EmulationHost
                 _currentGame = game;
 
                 // Nothing per-game is remembered about the camera (REQ-PERS-031): a launch
-                // always starts from the default view.
+                // always starts from the default view. AMD-063 REQ-LUA-119: the forced rotation
+                // is a session value that goes back to nil at a launch and at a change of
+                // profile, both of which come through here.
+                _scene.Camera.RotOverride = null;
                 _scene.Camera.ResetView();
                 _scene.Camera.SnapToSetpoints();
 

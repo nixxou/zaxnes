@@ -378,6 +378,23 @@ internal static class ScriptBridge
             }
         }
 
+        // AMD-063 REQ-LUA-119: the same session value the real host carries, and sealed like
+        // every other camera write once the captured frame is settled.
+        public override Vec3? RotOverride
+        {
+            get => camera.RotOverride is { } forced ? new Vec3(forced.X, forced.Y, forced.Z) : null;
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    camera.RotOverride = value is { } forced
+                        ? new System.Numerics.Vector3(forced.X, forced.Y, forced.Z)
+                        : null;
+                }
+            }
+        }
+
         public override void ResetView()
         {
             if (!seal.Closed)

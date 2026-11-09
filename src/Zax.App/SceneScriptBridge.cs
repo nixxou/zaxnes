@@ -52,6 +52,15 @@ internal sealed class SceneCameraBridge(SceneCamera camera) : ScriptCamera
     }
 
     /// <inheritdoc/>
+    public override Vec3? RotOverride
+    {
+        get => camera.RotOverride is { } forced ? new Vec3(forced.X, forced.Y, forced.Z) : null;
+        set => camera.RotOverride = value is { } forced
+            ? new Vector3(forced.X, forced.Y, forced.Z)
+            : null;
+    }
+
+    /// <inheritdoc/>
     public override void ResetView() => camera.ResetView();
 
     /// <inheritdoc/>

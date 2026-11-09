@@ -245,8 +245,9 @@ internal sealed partial class EmulationHost
 
     /// <summary>
     /// The rollback of REQ-LOOP-032: the notification, the second-to-last snapshot restored —
-    /// the core, then the 64 <c>PData</c> values, then the camera (AMD-042 REQ-LOOP-070) — and
-    /// the state forced to Running with the clock reset.
+    /// the core, then the 64 <c>PData</c> values, then <c>RotOverride</c> and the camera
+    /// (AMD-042 REQ-LOOP-070, in the order AMD-063 REQ-LUA-119 fixes) — and the state forced to
+    /// Running with the clock reset.
     /// </summary>
     /// <remarks>
     /// The <c>Save</c> and <c>Load</c> hooks of the scripts are never called by a rollback: the
@@ -274,6 +275,11 @@ internal sealed partial class EmulationHost
             else
             {
                 session.RestoreRollbackData(snapshot.PersistentData);
+
+                // AMD-063 REQ-LUA-119: the forced rotation is written back before the camera is
+                // restored, so that the setpoints the snapshot carries are the ones the camera
+                // ends on — a rollback restores both the forced value and the setpoint.
+                _scene.Camera.RotOverride = snapshot.RotOverride;
                 _scene.Camera.Restore(snapshot.Camera);
             }
         }

@@ -420,13 +420,15 @@ internal sealed partial class EmulationHost : IDisposable
             // core frame counter is a multiple of 60, so before that frame executes — and the
             // counter is the real one, the core being in the real state R at this point.
             // AMD-042 REQ-LOOP-069: it carries the 64 PData values and the camera state as well,
-            // read as they stand at that instant and with no script hook involved (AMD-042 §3).
+            // read as they stand at that instant and with no script hook involved (AMD-042 §3),
+            // plus the forced camera rotation of AMD-063 REQ-LUA-119, its fourth element.
             if (RollbackHistory.IsSnapshotFrame(session.Core.FrameCount))
             {
                 Rollback.Capture(new RollbackSnapshot(
                     session.Core.SaveState(includeRomImage: false),
                     session.CaptureRollbackData(),
-                    _scene.Camera.Capture()));
+                    _scene.Camera.Capture(),
+                    _scene.Camera.RotOverride));
             }
 
             // AMD-053 REQ-UI-213: with -emustats the emulation time of each frame is measured.

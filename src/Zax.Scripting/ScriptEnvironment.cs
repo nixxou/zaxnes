@@ -123,6 +123,30 @@ public abstract class ScriptCamera
     /// <summary>Aimed point in scene coordinates; <c>(128, 120, 0)</c> by default.</summary>
     public abstract Vec3 LookAt { get; set; }
 
+    /// <summary>
+    /// The rotation a script forces on the camera, or null for the normal behaviour
+    /// (AMD-063 REQ-LUA-119, <c>CS.Nes3D.CameraControl.RotOverride</c>). While it is set, every
+    /// camera update writes it into <see cref="Angles"/> and shows it at once, without the
+    /// smoothing of REQ-SCN-019.
+    /// </summary>
+    /// <remarks>
+    /// A camera that has no update of its own — the headless one below — applies it at the write
+    /// instead, which is the same thing collapsed into one step: a read of <see cref="Angles"/>
+    /// right after gives the forced value.
+    /// </remarks>
+    public virtual Vec3? RotOverride
+    {
+        get;
+        set
+        {
+            field = value;
+            if (value is { } forced)
+            {
+                Angles = forced;
+            }
+        }
+    }
+
     /// <summary>The default view of SPEC-06 REQ-SCN-012 (<c>Camera:ResetView()</c>).</summary>
     public abstract void ResetView();
 

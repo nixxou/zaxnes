@@ -165,7 +165,7 @@ internal static partial class LuaApi
             state.SetGlobal(name);
         }
 
-        InstallInfoTable(binder, state);
+        InstallInfoTable(binder, runtime);
 
         // The constant values are pushed as floats like every other number the host hands to
         // Lua (REQ-LUA-040, REQ-LUA-046).
@@ -214,9 +214,10 @@ internal static partial class LuaApi
     internal const double DefaultMsaa = 2d;
 
     /// <summary>
-    /// Installs the global <c>CS</c> of AMD-040 REQ-LUA-112, completed by AMD-059 REQ-LUA-117:
-    /// <c>CS.Nes3D</c> carries four tables — <c>Info</c> (<c>Version</c>, <c>Title</c>),
-    /// <c>CameraControl</c> (<c>DistanceMax</c>), <c>SettingManager</c> (<c>DefaultMsaa</c>) and
+    /// Installs the global <c>CS</c> of AMD-040 REQ-LUA-112, completed by AMD-059 REQ-LUA-117
+    /// and AMD-063 REQ-LUA-118 and REQ-LUA-119: <c>CS.Nes3D</c> carries four tables —
+    /// <c>Info</c> (<c>Version</c>, <c>Title</c>), <c>CameraControl</c> (<c>DistanceMax</c> and
+    /// the read-write <c>RotOverride</c>), <c>SettingManager</c> (<c>DefaultMsaa</c>) and
     /// <c>VisualStyle</c> (<c>Classic</c>, <c>SoftPixelLight</c>).
     /// </summary>
     /// <remarks>
@@ -225,9 +226,19 @@ internal static partial class LuaApi
     /// anywhere in these tables is dropped — it cannot reach the program, and it cannot
     /// disturb what the next script reads either. The metatable is hidden, so a script cannot
     /// take it off.
+    /// <para>
+    /// <c>RotOverride</c> is the single exception AMD-063 REQ-LUA-119 makes: it is the only
+    /// field of <c>CS.Nes3D.CameraControl</c> whose write has an effect. Its leaf therefore
+    /// carries a pair of bound functions rather than a plain table, and the rest of
+    /// REQ-LUA-117 — every other field nil, every other write dropped — is enforced inside
+    /// them.
+    /// </para>
     /// </remarks>
-    private static void InstallInfoTable(LuaBinder binder, Lua state)
+    private static void InstallInfoTable(LuaBinder binder, ProfileScriptRuntime runtime)
     {
+        Lua state = runtime.State;
+        ScriptCamera camera = runtime.Environment.Camera;
+
         // The four leaves of CS.Nes3D, pushed in the order Group names them.
         Shell(binder, state, s =>
         {
@@ -239,7 +250,52 @@ internal static partial class LuaApi
             s.RawSet(-3);
         });
 
-        Shell(binder, state, static s => Field(s, "DistanceMax", CameraDistanceMax));
+        LiveShell(
+            binder,
+            state,
+            (b, l) =>
+            {
+                // __index(t, k): the key is at index 2.
+                string key = l.Type(2) == LuaType.String ? l.ToString(2) ?? string.Empty : string.Empty;
+                switch (key)
+                {
+                    case "DistanceMax":
+                        return Number(l, CameraDistanceMax);
+
+                    // A copy, never a bound vector: writing through it would be a third way of
+                    // steering the camera, and REQ-LUA-119 asks for « nil or a Vector3 copy ».
+                    case "RotOverride" when camera.RotOverride is { } forced:
+                        b.PushVector3(l, forced);
+                        return 1;
+
+                    default:
+                        l.PushNil();
+                        return 1;
+                }
+            },
+            (b, l) =>
+            {
+                // __newindex(t, k, v): anything but RotOverride is dropped (REQ-LUA-117).
+                if (l.Type(2) != LuaType.String || l.ToString(2) != "RotOverride")
+                {
+                    return 0;
+                }
+
+                if (l.IsNoneOrNil(3))
+                {
+                    camera.RotOverride = null;
+                    return 0;
+                }
+
+                if (!b.TryGetVector3(l, 3, out Vec3 value))
+                {
+                    return b.InvalidArguments(l, "RotOverride");
+                }
+
+                camera.RotOverride = value;
+                return 0;
+            });
+
         Shell(binder, state, static s => Field(s, "DefaultMsaa", DefaultMsaa));
 
         // REQ-LUA-117: the two style identifiers as numbers, so that they compare with
@@ -255,6 +311,25 @@ internal static partial class LuaApi
         Wrap(binder, state, "Nes3D");
         state.SetGlobal("CS");
         return;
+
+        // Leaves a table whose reads and writes are the two bound functions, with the metatable
+        // guard of REQ-LUA-112 on it. Unlike Shell, 'read' is called for every key, so the
+        // table can answer a live value, and 'write' decides itself what it accepts.
+        static void LiveShell(LuaBinder binder, Lua state, LuaInvoke read, LuaInvoke write)
+        {
+            state.NewTable();
+            state.NewTable();
+            state.PushString("__index");
+            binder.PushBoundFunction(state, read);
+            state.RawSet(-3);
+            state.PushString("__newindex");
+            binder.PushBoundFunction(state, write);
+            state.RawSet(-3);
+            state.PushString("__metatable");
+            state.PushString("CS");
+            state.RawSet(-3);
+            state.SetMetaTable(-2);
+        }
 
         // Leaves a sealed table whose fields are the ones 'fill' writes into the table on top
         // of the stack.
