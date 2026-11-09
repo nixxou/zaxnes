@@ -441,5 +441,47 @@ same board and the same paths, which is **−0.059 %**. MF-LEG-2 measured it at 
 
 Whether the feature joins `default` is R0's and the owner's call; step 5 states it for
 `BOARD-FEATURES.md`.
-- [ ] 5/6 the documentation and the decision
+- [x] 5/6 the documentation and the decision
+
+### 5/6 — `BOARD-FEATURES.md`, the `Cargo.toml` note, and what is *not* changed
+
+**`docs/review/BOARD-FEATURES.md`** takes four edits and no deletions:
+
+* a **second dated note of 2026-11-09** under the owner's of the same day, which it answers: the
+  condition that note sets — "lowering the MMC5's own cost is the condition for un-parking it" —
+  is met, with the figures, and the last sentence says plainly that **nothing in the table has
+  moved**: the feature is still out of `default` and still in `parked-boards`;
+* the **row's two measured columns rewritten** to carry MF-LEG-3's figures first and MF-LEG-2's
+  underneath, "for the record and because they are what the parking was for". A row that kept
+  only the new figures would make the parking unreadable;
+* the row's **savestate sentence**, which said a state does not cross between the two
+  configurations and is now the opposite;
+* the closing note on `board-vs-system` ("it is no longer the only one, and no longer the worst"),
+  which MF-LEG-2 had extended with a paragraph on the MMC5's arm growing. That paragraph is kept
+  in the past tense with **the other half of its own claim** beside it: an arm's size is a cost, a
+  *jump table's* size is a cost, and an arm no other board reaches is neither. It also records
+  that `board-mmc5-exattr-split` is the first entry in the table whose parking figure has been
+  **withdrawn by a later lot** rather than confirmed.
+
+**`rust/crates/zax-nes/Cargo.toml`**, the feature's note: the run-time switch and what it means
+for a game that arms neither mode; MF-LEG-3's figures, with MF-LEG-2's kept below them; the
+binary-level statement of the gated-off build (the base commit's binary **md5 for md5, whole
+file**, where MF-LEG-2 could only say `.text` and `.rodata`); and the savestate paragraph
+inverted — a state now crosses, which is what let the switch ship at all.
+
+**The decision.** Every acceptance figure the brief sets is met (step 4.4), so the condition the
+owner's note of 2026-11-09 attaches to un-parking is satisfied. **This lot does not un-park it**:
+the brief gives that to R0 and the owner ("R0 will do it if the figures below pass"), and the
+owner's rule reads on the *figure*, which is now R0's to confirm against *Castlevania III*. What
+the lot can say about that game is structural and is in step 4.4 — it arms neither mode, so it
+runs the base commit's board and the only figure it can pay is `mmc5`'s, **−0.059 %**, against
+MF-LEG-2's +2.992 %.
+
+**Entry MMC5-1 of `LEGACY-XCHECK.md` is left as MF-LEG-2 step 5 wrote it.** Its resolution note
+says both features are implemented behind `board-mmc5-exattr-split`, off in `default` and in
+`parked-boards`, and that the verdict **DIFFERS still stands for the shipped build** — all three
+still true of this tree. Its one paragraph this lot could have strengthened is the "risk of a fix"
+scoring, and the brief asks for `BOARD-FEATURES.md` and the `Cargo.toml` note, not for a second
+pass over the report; the figures that would feed such a pass are in step 4 of this note, where a
+later lot or R0 will find them.
 - [ ] 6/6 the final check

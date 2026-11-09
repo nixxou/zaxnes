@@ -1105,33 +1105,54 @@ parked-boards = [
 # Keibitai SDF* and *Bandit Kings of Ancient China* for the split. **Castlevania III uses
 # neither**, so the most-played MMC5 game is not in the list.
 #
-# **Off by default by the owner's decision, taken before any measurement — and PARKED by the
-# figures, which agree with it.** Measured against `ca1517dc` (MF-LEG-2 step 4), PR-1's thirteen
-# ROMs: eight inside the tolerance (`oamstr` +0.003 % to `smb1` +0.010 %, with `smb3` -0.049 %
-# and `z2` -0.013 %) and **four above it** — `m1` +0.060 %, `m4` +0.061 %, `mm2` +0.085 %,
-# `metroid` **+0.101 %** — plus `mmc5` itself at **+2.522 %**, which is the board paying for its
-# own feature. Level 2's `core`: `smb3` -0.061 %, `zelda2` -0.015 %, `smb1` +0.013 %, and **`mm2`
-# +0.103 % and `metroid` +0.110 %** above. So it is in `parked-boards` below, which is the
-# owner's rule for a board over the tolerance: never dropped, always reachable behind its flag.
+# **Armed at run time since lot MF-LEG-3** (the owner's decision of 2026-11-09), which is what
+# makes the two modes affordable. A game cannot reach either without writing $5104 with mode %01
+# or $5200 with bit 7 set, so the cartridge runs `Board::Mmc5` — `04731c86`'s board, to the
+# instruction — until such a write arrives, and `Board::intercept_cpu_write`'s MMC5 arm then
+# replaces the value with `Board::Mmc5Ext`, which is that same board plus the ten fields the two
+# modes need, every register and memory carried across. It never goes back except through a reset
+# or a state that says neither mode is armed. *Castlevania III*, the most-played MMC5 game, arms
+# neither and therefore never leaves the first variant.
 #
-# **The whole remaining cost is one symbol**: `Board::ppu_peek` +4 528 000 on `metroid` and
-# +4 485 120 on `mm2`, `Board::ppu_read` +3 082 184 on `m4` — about **one instruction per CHR
-# fetch** in the dispatch, because the MMC5's arm grows by the `background_substitutes` test.
-# That is `docs/progress/MF-2.md` step 0's trap, and none of seven measured shapes removed it;
-# step 4 of MF-LEG-2 records all seven, four of which *did* work and are in the shipped code.
+# **Off by default by the owner's decision, taken before any measurement; PARKED by MF-LEG-2's
+# figures; and MF-LEG-3's figures withdraw them.** Measured against `04731c86` with this feature
+# in `default` (MF-LEG-3 step 4), PR-1's thirteen ROMs: **worst `metroid` +0.010 %**, eleven of
+# the twelve non-MMC5 ROMs at or below +0.008 %, the **set total -3 223 008 (-0.004 %)** *below*
+# the base, and **`mmc5` itself -0.059 %** — faster than before the feature existed, because
+# `mmc5exram` arms neither mode (measured over the campaign's own 300 frames). Level 2: **all
+# five games inside +0.02 % on `core` and on `total`**, `core` +0.007 % to +0.010 %, `apu` and
+# `draw_list` +0 to the instruction. For scale, a thirty-seventh `Board` variant that is **never
+# constructed** costs `mmc5` +0.132 % and `metroid` +0.089 % on the same instrument, so these
+# figures are tighter than a behaviour-free change's.
 #
-# **With the feature off the build is the base commit's to the instruction**: `.text` and
-# `.rodata` byte-identical, level-2 `core` +0 on all five games, PR-1 worst ROM +0.000 %.
+# MF-LEG-2's figures, for the record and because they are what the parking was for: `m1`
+# +0.060 %, `m4` +0.061 %, `mm2` +0.085 %, `metroid` **+0.101 %**, `mmc5` **+2.522 %**, level-2
+# `core` `mm2` +0.103 % and `metroid` +0.110 %. The whole of it was one symbol — about one
+# instruction per CHR fetch in `Board::ppu_peek` and `Board::ppu_read`, because the MMC5's
+# *existing* arm grew by the one `bool` a fetch tested — and seven shapes of the fetch path moved
+# it by nothing. A **new** arm costs nothing where a grown one costs every board: with this
+# feature on, those two dispatches are 64 496 640 and 22 674 330 on `m0`, the base commit's to
+# the instruction.
+#
+# **It is still out of `default` and still in `parked-boards`**, because putting it in is R0's
+# and the owner's call; `docs/review/BOARD-FEATURES.md` has the row and both sets of figures.
+#
+# **With the feature off the build is the base commit's binary, md5 for md5** — the whole file,
+# not `.text` alone: nothing of the two modes is compiled, not a field, not a variant, not a
+# macro arm.
 #
 # The implementation hangs on a test `Ppu2C02::read_nametable_as` already makes — the MMC5
 # answers `SERVED_BY_CARTRIDGE` for all four tables while either mode is armed and serves every
 # nametable-space byte through `Mapper::read_nametable_from_vram`, the one new hook. See the
 # banner in `mmc5.rs` for the three points where the five emulators disagree and what this build
-# chose.
+# chose, and for why $5201 and $5202 arm the switch as well.
 #
-# A savestate does not cross between the two configurations: with the feature on the MMC5's
-# block carries $5200-$5202 after its sound state. That is already true of every board feature
-# that changes what memories a cartridge has (`board-195-prg-ram-5000`, `board-vs-system`).
+# **A savestate crosses between the two configurations**, which is why the switch could ship:
+# the MMC5's block is the same length in both variants and in a build without the feature, the
+# split's three registers riding in the spare bits of the i32 that carries $5104's two (that
+# register only ever holds 0 to 3). So packs' idle savestates and every state written before this
+# lot still load. MF-LEG-2 appended three bytes after the sound block instead, and then no
+# existing state loaded.
 board-mmc5-exattr-split = []
 
 # **Not a board: the PPU's exact sprite-evaluation pipeline** (lot MF-4e step 3). The owner's rule
