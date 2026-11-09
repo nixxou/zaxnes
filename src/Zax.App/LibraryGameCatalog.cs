@@ -2,6 +2,7 @@ using Zax.App.Loop;
 using Zax.App.Persistence;
 using Zax.Profiles;
 using Zax.Profiles.Catalogue;
+using Zax.Profiles.Hash;
 using Zax.Profiles.Import;
 using Zax.Profiles.Library;
 
@@ -47,7 +48,12 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     private readonly UserDataPaths _paths;
     private readonly Action<string> _log;
     private readonly IBuiltInProfileIndex? _builtIns;
-    private readonly Dictionary<string, GameProfile> _profiles = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The profiles already read, by game identifier. The tile table of a « 3dh » profile
+    /// (AMD-062 REQ-PROF-080) is kept with it: what has been resolved is session knowledge and
+    /// must survive a relaunch of the same game.
+    /// </summary>
+    private readonly Dictionary<string, LoadedProfile> _profiles = new(StringComparer.Ordinal);
 
     private LibraryGameCatalog(
         GameLibrary library,
@@ -180,18 +186,19 @@ internal sealed class LibraryGameCatalog : IGameCatalog
             return null;
         }
 
-        if (!_profiles.TryGetValue(gameId, out GameProfile? profile))
+        if (!_profiles.TryGetValue(gameId, out LoadedProfile loaded))
         {
-            profile = LoadProfile(entry);
-            _profiles[gameId] = profile;
+            loaded = LoadProfile(entry);
+            _profiles[gameId] = loaded;
         }
 
         return new ResolvedGame(
             entry.Id,
             entry.DisplayTitle,
-            profile,
+            loaded.Profile,
             entry.Is2DMode,
-            entry.IsDefaultThreeDimensional);
+            entry.IsDefaultThreeDimensional,
+            loaded.Tiles);
     }
 
     /// <inheritdoc/>
@@ -527,11 +534,11 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         }
     }
 
-    private GameProfile LoadProfile(GameLibraryEntry entry)
+    private LoadedProfile LoadProfile(GameLibraryEntry entry)
     {
         if (string.IsNullOrEmpty(entry.ProfilePath) || !File.Exists(entry.ProfilePath))
         {
-            return GameProfile.CreateEmpty();
+            return new LoadedProfile(GameProfile.CreateEmpty(), null);
         }
 
         try
@@ -540,9 +547,9 @@ internal sealed class LibraryGameCatalog : IGameCatalog
                 File.ReadAllBytes(entry.ProfilePath),
                 sourceName: entry.ProfilePath);
 
-            if (result.IsSuccess && result.Profile is { } profile)
+            if (result.IsSuccess && result.Document is { } document)
             {
-                return profile;
+                return new LoadedProfile(document.Profile, document.Tiles);
             }
 
             // REQ-PROF-033: a refused profile falls back to the empty profile rather than
@@ -554,6 +561,9 @@ internal sealed class LibraryGameCatalog : IGameCatalog
             _log($"{entry.DisplayTitle}: {exception.Message}");
         }
 
-        return GameProfile.CreateEmpty();
+        return new LoadedProfile(GameProfile.CreateEmpty(), null);
     }
+
+    /// <summary>A profile read from a file, with the tile table of a « 3dh » one.</summary>
+    private readonly record struct LoadedProfile(GameProfile Profile, HashProfileTiles? Tiles);
 }

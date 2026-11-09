@@ -2,6 +2,7 @@ using Zax.App.Audio;
 using Zax.App.Input;
 using Zax.App.Persistence;
 using Zax.Nes;
+using Zax.Profiles.Hash;
 using Zax.Render;
 using Zax.Scripting;
 
@@ -111,6 +112,13 @@ internal sealed class EmulationHostOptions
     /// replays of REQ-ARCH-012 bit-exact.
     /// </summary>
     public bool AudioDeviceOpen { get; init; }
+
+    /// <summary>
+    /// Whether the resolved tiles of a « 3dh » profile are kept between sessions (AMD-062
+    /// REQ-PROF-082). False starts every run with an empty cache, which is what the determinism
+    /// of REQ-PROF-080 is stated at and what the harness option passes.
+    /// </summary>
+    public bool TileCacheEnabled { get; init; } = true;
 }
 
 /// <summary>
@@ -143,6 +151,7 @@ internal sealed partial class EmulationHost : IDisposable
     private readonly Queue<(string Name, CommandArgs Args)> _pending = new();
     private readonly HotkeyTracker _hotkeys = new();
     private readonly BatteryRamStore _battery;
+    private readonly ResolvedTileCache _tileCache;
     private readonly AudioDriftControl _drift;
 
     private GameSession? _session;
@@ -173,6 +182,11 @@ internal sealed partial class EmulationHost : IDisposable
         _now = options.Now ?? (static () => DateTimeOffset.UtcNow);
         _log = options.Log ?? (static _ => { });
         _battery = new BatteryRamStore(options.Paths);
+
+        // AMD-062 REQ-PROF-082: one file per profile identifier beside the save states.
+        _tileCache = options.TileCacheEnabled
+            ? new ResolvedTileCache(Path.Combine(options.Paths.Root, "tiles"))
+            : ResolvedTileCache.Disabled;
         _drift = new AudioDriftControl(_mixer?.SampleRate ?? Zax.Nes.Apu.Apu2A03.DefaultSampleRate);
 
         Settings = options.Settings;

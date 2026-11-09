@@ -3,6 +3,7 @@ using Zax.Engine3D;
 using Zax.Nes;
 using Zax.Nes.Rom;
 using Zax.Profiles;
+using Zax.Profiles.Hash;
 using Zax.Render;
 using Zax.Scripting;
 using Zax.Settings;
@@ -185,6 +186,11 @@ internal sealed class GameSession : IDisposable
     /// profil) » entry of AMD-024 REQ-PUB-001 passes: the same empty profile, converted in 3D
     /// with the default geometry of SPEC-04 (Q-065).
     /// </param>
+    /// <param name="tiles">
+    /// The tile table of a « 3dh » profile (AMD-062 REQ-PROF-080), or null for a 3dn one. The
+    /// tiles the ROM gives must already have been resolved (REQ-PROF-078); the ones that are
+    /// still pending are looked for in each displayed frame and in the CHR-RAM.
+    /// </param>
     // Q-065
     public static GameSession Create(
         GameProfile profile,
@@ -193,7 +199,8 @@ internal sealed class GameSession : IDisposable
         IScriptLog? log = null,
         SettingsModel? settingsModel = null,
         bool differentGame = true,
-        bool? twoDimensionalMode = null)
+        bool? twoDimensionalMode = null,
+        HashProfileTiles? tiles = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(scene);
@@ -254,7 +261,10 @@ internal sealed class GameSession : IDisposable
 
         // Step 3: the patterns with their BuildPattern hooks. The settings were applied above,
         // through the model, so the engine must not copy them a second time.
-        engine.LoadProfile(profile, applySettings: false);
+        // AMD-062 REQ-PROF-080: the conversion looks for the tiles that are still pending in
+        // the frame it is converting and in the cartridge's CHR-RAM (REQ-CORE-123).
+        engine.ChrRamSource = new CoreChrRam(core);
+        engine.LoadProfile(profile, applySettings: false, tiles);
 
         GameSession session = new(core, engine, geometry, runtime, input, title);
         core.VideoCallback = session.OnVideoFrame;

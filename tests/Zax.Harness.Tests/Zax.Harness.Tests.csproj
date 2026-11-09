@@ -19,4 +19,13 @@
     <ProjectReference Include="$(ImplRoot)tools\Zax.Harness\Zax.Harness.csproj" />
   </ItemGroup>
 
+  <!--
+    The locators of assets-neutral and of the user's own dumps, shared with the profile tests
+    rather than written twice. No machine path is committed (AMD-024 REQ-PUB-001).
+  -->
+  <ItemGroup>
+    <Compile Include="$(ImplRoot)tests\Zax.Profiles.Tests\NeutralAssets.cs" Link="Shared\NeutralAssets.cs" />
+    <Compile Include="$(ImplRoot)tests\Zax.Profiles.Tests\UserRoms.cs" Link="Shared\UserRoms.cs" />
+  </ItemGroup>
+
 </Project>

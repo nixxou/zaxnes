@@ -132,6 +132,19 @@ public sealed class NesCore
     /// <summary>The cartridge, or <see langword="null"/> when no ROM is loaded.</summary>
     public Cartridge? Cartridge => _cartridge;
 
+    /// <summary>
+    /// Size of the cartridge's CHR-RAM in bytes, 0 when it has none or when no ROM is loaded
+    /// (AMD-062 REQ-CORE-123).
+    /// </summary>
+    public int ChrRamSize => _cartridge?.ChrRamSize ?? 0;
+
+    /// <summary>
+    /// The cartridge's CHR-RAM, read only, addressed linearly from 0 (AMD-062 REQ-CORE-123).
+    /// Meant to be read between two frames; reading it changes nothing of the emulation, so two
+    /// runs that differ only in whether they read it give the same frames.
+    /// </summary>
+    public ReadOnlySpan<byte> ChrRam => _cartridge is { } cartridge ? cartridge.ChrRamView : [];
+
     /// <summary>Mapper numbers this build accepts (REQ-CORE-100, REQ-CORE-102).</summary>
     public static IReadOnlyList<int> SupportedMappers => MapperRegistry.SupportedMappers;
 

@@ -4,4 +4,13 @@
     <ProjectReference Include="..\..\src\Zax.Engine3D\Zax.Engine3D.csproj" />
   </ItemGroup>
 
+  <!--
+    The synthetic « 3dh » profiles of AMD-062 are built byte by byte, because the production
+    writer is internal to Zax.Profiles and the branches to test are ones no writer produces.
+    The builder is shared with the profile tests rather than written twice.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Zax.Profiles.Tests\SyntheticHashProfile.cs" Link="Shared\SyntheticHashProfile.cs" />
+  </ItemGroup>
+
 </Project>

@@ -20,6 +20,14 @@ public sealed class PatternRegistry
     private readonly List<EnginePattern> _temporary = [];
     private readonly Dictionary<ImageSetKey, EnginePattern> _permanentByKey = [];
     private readonly Dictionary<ImageSetKey, EnginePattern> _temporaryByKey = [];
+
+    /// <summary>
+    /// Which registry pattern each pattern of the profile produced, so that the resolution of a
+    /// tile can rebuild exactly the patterns it changed (AMD-062 REQ-PROF-080). Keyed by
+    /// reference: two profile patterns of equal content are still two patterns.
+    /// </summary>
+    private readonly Dictionary<ProfilePattern, EnginePattern> _fromProfile = [];
+
     private int _nextRegistrationIndex;
 
     /// <summary>The permanent patterns, in registration order.</summary>
@@ -45,15 +53,71 @@ public sealed class PatternRegistry
 
         foreach (ProfilePattern pattern in profile.PermanentPatterns)
         {
-            Register(EnginePattern.FromProfile(pattern, images, permanent: true));
+            EnginePattern registered = EnginePattern.FromProfile(pattern, images, permanent: true);
+            _fromProfile[pattern] = registered;
+            Register(registered);
         }
 
         foreach (ProfilePattern pattern in profile.TemporaryPatterns)
         {
-            Register(EnginePattern.FromProfile(pattern, images, permanent: false));
+            EnginePattern registered = EnginePattern.FromProfile(pattern, images, permanent: false);
+            _fromProfile[pattern] = registered;
+            Register(registered);
         }
 
         ProfilePatternCount = _nextRegistrationIndex;
+    }
+
+    /// <summary>The registry pattern a pattern of the profile produced, or null.</summary>
+    public EnginePattern? FromProfile(ProfilePattern pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        return _fromProfile.TryGetValue(pattern, out EnginePattern? registered) ? registered : null;
+    }
+
+    /// <summary>
+    /// Rebuilds in place the registry pattern of <paramref name="pattern"/> after one of its
+    /// tiles has been resolved (AMD-062 REQ-PROF-080): it keeps its object, its instances, its
+    /// registration index and its place in the lists, while its images, its relations and its
+    /// registry key are taken again from the profile.
+    /// </summary>
+    /// <returns>The pattern that was rebuilt, or null when the profile pattern is not in the registry.</returns>
+    public EnginePattern? Refresh(ProfilePattern pattern, ImageRegistry images)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(images);
+
+        if (!_fromProfile.TryGetValue(pattern, out EnginePattern? registered))
+        {
+            return null;
+        }
+
+        Dictionary<ImageSetKey, EnginePattern> byKey =
+            registered.Permanent ? _permanentByKey : _temporaryByKey;
+
+        foreach (TileImage image in registered.Images)
+        {
+            image.Detach(registered);
+        }
+
+        if (byKey.TryGetValue(registered.Key, out EnginePattern? current)
+            && ReferenceEquals(current, registered))
+        {
+            byKey.Remove(registered.Key);
+        }
+
+        registered.ReloadFromProfile(pattern, images);
+
+        byKey[registered.Key] = registered;
+
+        // Detach remembered the place each image had, so an image the pattern already carried
+        // takes it back and a newly gained one goes to the end (AMD-021 R2-008).
+        foreach (TileImage image in registered.Images)
+        {
+            image.Attach(registered);
+        }
+
+        return registered;
     }
 
     /// <summary>
@@ -263,6 +327,7 @@ public sealed class PatternRegistry
         _temporary.Clear();
         _permanentByKey.Clear();
         _temporaryByKey.Clear();
+        _fromProfile.Clear();
         _nextRegistrationIndex = 0;
         ProfilePatternCount = 0;
     }

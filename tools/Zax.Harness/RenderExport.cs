@@ -6,6 +6,7 @@ using Zax.Nes;
 using Zax.Nes.Rom;
 using Zax.Profiles;
 using Zax.Profiles.Catalogue;
+using Zax.Profiles.Hash;
 using Zax.Render;
 using Zax.Render.Assets;
 using Zax.Scripting;
@@ -33,6 +34,9 @@ internal static class RenderExport
                                    'synthetic:<scene>' renders one of them;
                                    a path renders the frames a JSON file describes.
           --rom <file.nes>         Run a real ROM headless and capture it (REQ-ARCH-031).
+          --tile-cache <dir>       Folder of resolved-tile caches of « 3dh » profiles
+                                   (REQ-PROF-082). Off by default: a capture starts from an
+                                   empty cache, which determinism is stated at.
           --run <n>                Real frames to run before capturing (default 120).
           --run-ahead <n>          Run-ahead frames N, 0 to 3 (default 0, AMD-041). Every real
                                    frame then emulates N + 1 frames and the capture is the
@@ -177,6 +181,7 @@ internal static class RenderExport
         string? profile = null;
         string? assets = null;
         string? rom = null;
+        string? tileCache = null;
         string? press = null;
         string? battery = null;
         string? dumpFrame = null;
@@ -239,6 +244,11 @@ internal static class RenderExport
                     assets = Next(args, ref i);
                     break;
 
+                case "--tile-cache":
+                    // AMD-062 REQ-PROF-082. Off by default: a capture starts from an empty
+                    // cache, which is what the determinism of REQ-PROF-080 is stated at.
+                    tileCache = Next(args, ref i);
+                    break;
                 case "--rom":
                     rom = Next(args, ref i);
                     break;
@@ -504,7 +514,8 @@ internal static class RenderExport
                     battery,
                     dumpFrame,
                     runAhead,
-                    control)];
+                    control,
+                    tileCache)];
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or JsonException
             or InvalidOperationException or ProfileCatalogueException)
@@ -786,9 +797,10 @@ internal static class RenderExport
         string? batteryPath,
         string? dumpFrame,
         int runAhead,
-        RomRunControl? control)
+        RomRunControl? control,
+        string? tileCache)
     {
-        GameProfile profile = LoadProfile(profileName, assets, out string label);
+        GameProfile profile = LoadProfile(profileName, assets, out string label, out HashProfileTiles? tiles);
         return FromRom(
             romPath,
             runFrames,
@@ -799,7 +811,9 @@ internal static class RenderExport
             batteryPath,
             dumpFrame,
             runAhead,
-            control);
+            control,
+            tiles,
+            tileCache);
     }
 
     /// <summary>
@@ -816,7 +830,9 @@ internal static class RenderExport
         string? batteryPath = null,
         string? dumpFrame = null,
         int runAhead = 0,
-        RomRunControl? control = null)
+        RomRunControl? control = null,
+        HashProfileTiles? tiles = null,
+        string? tileCache = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         control?.Validate(runFrames);
@@ -863,9 +879,23 @@ internal static class RenderExport
                 ? ProfileSettingApplication.ToSettingValues(embedded)
                 : []);
 
+        // AMD-062 REQ-PROF-078 and REQ-PROF-082: a « 3dh » profile is given what the cache kept
+        // — nothing unless --tile-cache named a folder, which is the empty cache the
+        // determinism of REQ-PROF-080 is stated at — and then what the ROM holds, before its
+        // patterns are built. What stays pending is looked for in each displayed frame and in
+        // the cartridge's CHR-RAM (REQ-CORE-123).
+        if (tiles is not null)
+        {
+            tiles.PrepareForRom(
+                profile.Id,
+                File.ReadAllBytes(romPath),
+                tileCache is null ? ResolvedTileCache.Disabled : new ResolvedTileCache(tileCache));
+            engine.ChrRamSource = new CoreChrRam(core);
+        }
+
         // Step 3. The settings were applied above, through the model, so the engine must not copy
         // them a second time.
-        engine.LoadProfile(profile, applySettings: false);
+        engine.LoadProfile(profile, applySettings: false, tiles);
 
         // REQ-LUA-015 step 4. ScriptBridge.Create connected the settings to the scene, so every
         // write Start or a later hook makes already reaches it. The push before the hook is the
@@ -1113,14 +1143,19 @@ internal static class RenderExport
     private static GameProfile LoadProfile(string? name, string? assets)
         => LoadProfile(name, assets, out _);
 
+    internal static GameProfile LoadProfile(string? name, string? assets, out string label)
+        => LoadProfile(name, assets, out label, out _);
+
     /// <summary>
     /// Loads the profile <paramref name="name"/> designates and, in
     /// <paramref name="label"/>, how a capture names it. « 2D Mode » is the label of the
     /// <b>absent</b> profile only: a built-in one takes its title from the catalogue, not from
     /// its metadata fields, which are usually empty (REQ-PROF-022, REQ-PROF-060).
     /// </summary>
-    internal static GameProfile LoadProfile(string? name, string? assets, out string label)
+    internal static GameProfile LoadProfile(
+        string? name, string? assets, out string label, out HashProfileTiles? tiles)
     {
+        tiles = null;
         if (string.IsNullOrWhiteSpace(name))
         {
             label = ProfileCatalogue.TwoDimensionalModeTitle;
@@ -1130,9 +1165,11 @@ internal static class RenderExport
         if (File.Exists(name))
         {
             ProfileLoadResult direct = ProfileFormat.Load(File.ReadAllBytes(name), sourceName: name);
-            GameProfile loaded = direct.IsSuccess
-                ? direct.Profile!
+            ProfileDocument document = direct.IsSuccess
+                ? direct.Document!
                 : throw new InvalidOperationException(direct.Message!);
+            GameProfile loaded = document.Profile;
+            tiles = document.Tiles;
 
             // A profile given by path carries its own title; without one the file name is what
             // the user asked for.
@@ -1158,7 +1195,13 @@ internal static class RenderExport
 
             ProfileLoadResult result = catalogue.LoadProfile(PhysicalProfileFileSystem.Instance, entry);
             label = entry.Title;
-            return result.IsSuccess ? result.Profile! : throw new InvalidOperationException(result.Message!);
+            if (!result.IsSuccess)
+            {
+                throw new InvalidOperationException(result.Message!);
+            }
+
+            tiles = result.Document!.Tiles;
+            return result.Document!.Profile;
         }
 
         throw new InvalidOperationException($"no built-in profile is titled '{name}'.");

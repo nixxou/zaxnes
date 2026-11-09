@@ -123,6 +123,18 @@ public sealed class HashProfileTiles
     }
 
     /// <summary>
+    /// What a host does when a « 3dh » profile is loaded for a ROM, before the first converted
+    /// frame: apply what the cache kept (REQ-PROF-082), then look through the ROM
+    /// (REQ-PROF-078). Keeping what the game later resolves is a separate, explicit
+    /// <see cref="ResolvedTileCache.Save"/>.
+    /// </summary>
+    public void PrepareForRom(string? profileId, ReadOnlySpan<byte> romImage, ResolvedTileCache? cache)
+    {
+        cache?.Apply(profileId, this);
+        ResolveFromRom(romImage);
+    }
+
+    /// <summary>
     /// Resolves what the ROM holds (REQ-PROF-078): the PRG zone then the CHR zone, at every byte
     /// position, the four mirrorings of each window. A file that is not iNES resolves nothing.
     /// </summary>

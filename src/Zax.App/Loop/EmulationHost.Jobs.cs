@@ -297,6 +297,11 @@ internal sealed partial class EmulationHost
                 break;
 
             case 1:
+                // AMD-062 REQ-PROF-078 and REQ-PROF-082: the tiles a « 3dh » profile names are
+                // looked for in the cache and then in the ROM *before* the patterns are built,
+                // so that the first converted frame already has them.
+                PrepareHashTiles(game, job.RomImage);
+
                 _session ??= GameSession.Create(
                     game.Profile,
                     game.Title,
@@ -307,7 +312,8 @@ internal sealed partial class EmulationHost
 
                     // Q-065: the same empty profile plays flat as « 2D Mode » and in 3D as
                     // « 3D par défaut (sans profil) »; the entry decides, not the pattern count.
-                    game.IsDefaultThreeDimensional ? false : null);
+                    game.IsDefaultThreeDimensional ? false : null,
+                    game.Tiles);
 
                 // AMD-051 REQ-E3D-644 and REQ-E3D-646: the degradations of the geometry go to
                 // the log file. Attached after the creation, which loads the profile; the
@@ -385,7 +391,11 @@ internal sealed partial class EmulationHost
                 break;
 
             case 1:
-                // Step 4: a profile load creates a new Lua state (REQ-LUA-014).
+                // Step 4: a profile load creates a new Lua state (REQ-LUA-014). A savestate
+                // carries no ROM, so a « 3dh » profile keeps whatever the cache gave it and
+                // resolves the rest while the game runs (AMD-062 REQ-PROF-080).
+                PrepareHashTiles(game, romImage: null);
+
                 _session ??= GameSession.Create(
                     game.Profile,
                     game.Title,
@@ -396,7 +406,8 @@ internal sealed partial class EmulationHost
 
                     // Q-065: the same empty profile plays flat as « 2D Mode » and in 3D as
                     // « 3D par défaut (sans profil) »; the entry decides, not the pattern count.
-                    game.IsDefaultThreeDimensional ? false : null);
+                    game.IsDefaultThreeDimensional ? false : null,
+                    game.Tiles);
 
                 // AMD-051 REQ-E3D-644 and REQ-E3D-646: the degradations of the geometry go to
                 // the log file. Attached after the creation, which loads the profile; the
@@ -676,6 +687,12 @@ internal sealed partial class EmulationHost
             // REQ-PERS-060: the cartridge RAM is written when the game stops.
             _battery.Flush(session.Core.ExportBatteryRam());
 
+            // AMD-062 REQ-PROF-082: what the game resolved is kept for the next launch.
+            if (session.Engine.PendingTiles is { } tiles)
+            {
+                _tileCache.Save(_currentGame?.Profile.Id, tiles);
+            }
+
             session.End();
             session.Engine.ClearFrames();
 
@@ -702,6 +719,23 @@ internal sealed partial class EmulationHost
             _scene.Camera.EndGame();
             SetState(EmulationState.Stopped);
         }
+    }
+
+    /// <summary>
+    /// Gives a « 3dh » profile what the cache kept and what the ROM holds, before its patterns
+    /// are built (AMD-062 REQ-PROF-078, REQ-PROF-082). Does nothing for a 3dn profile, and
+    /// nothing a second time: resolution is monotone and is session knowledge, so relaunching
+    /// the same game keeps what has already been found (REQ-PROF-080).
+    /// </summary>
+    private void PrepareHashTiles(ResolvedGame game, byte[]? romImage)
+    {
+        if (game.Tiles is not { } tiles || tiles.IsFullyResolved)
+        {
+            return;
+        }
+
+        tiles.PrepareForRom(game.Profile.Id, romImage ?? [], _tileCache);
+        _log($"{game.Title}: {tiles.ResolvedCount} of {tiles.TotalCount} profile tiles resolved.");
     }
 
     private void FailJob(string message)

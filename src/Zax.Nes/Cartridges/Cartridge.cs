@@ -111,6 +111,19 @@ public abstract class Cartridge : IExpansionAudio
     /// <summary>CHR-RAM, empty when the cartridge has CHR-ROM.</summary>
     protected Span<byte> ChrRam => _chrRam;
 
+    /// <summary>
+    /// Size of the cartridge's CHR-RAM in bytes, 0 when it has none (AMD-062 REQ-CORE-123).
+    /// </summary>
+    public int ChrRamSize => Rom.ChrRom.Length > 0 ? 0 : _chrRam.Length;
+
+    /// <summary>
+    /// The cartridge's CHR-RAM, read only, addressed linearly from 0 in the order of the
+    /// cartridge's memory and independently of the banks the PPU currently sees
+    /// (AMD-062 REQ-CORE-123). Empty when the cartridge has none. Reading it has no side effect
+    /// on the emulation and none on its determinism.
+    /// </summary>
+    public ReadOnlySpan<byte> ChrRamView => Rom.ChrRom.Length > 0 ? [] : _chrRam;
+
     /// <summary>True when $6000-$7FFF is readable and writable. Mappers may disable it.</summary>
     protected virtual bool PrgRamEnabled => true;
 

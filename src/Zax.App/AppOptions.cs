@@ -60,6 +60,13 @@ public sealed record AppOptions
     public bool EmuStats { get; init; }
 
     /// <summary>
+    /// Whether <c>--no-tile-cache</c> was given: the resolved tiles of a « 3dh » profile are
+    /// neither read nor written this run (AMD-062 REQ-PROF-082), so the session starts from an
+    /// empty resolved set — what the determinism of REQ-PROF-080 is stated at.
+    /// </summary>
+    public bool NoTileCache { get; init; }
+
+    /// <summary>
     /// What the parsing chose to ignore rather than refuse — an out-of-domain slot, for
     /// instance. The host journals them once it has a log (REQ-UI-213: « une valeur invalide est
     /// ignorée et le programme démarre normalement »).
@@ -184,6 +191,9 @@ public sealed record AppOptions
           --assets <dir>          Optional folder of your own asset files (profiles.json,
                                   cubemaps, meshes, textures, audio, fonts). Nothing is
                                   bundled; without it the app uses what the code generates.
+          --no-tile-cache         Do not keep the tiles a « 3dh » profile resolved
+                                  (AMD-062 REQ-PROF-082); every run starts from an empty
+                                  resolved set, which is what determinism is stated at.
           --font <file>           Interface font: a file, or a name in the system font folder.
           --builtin-font          Use the built-in ImGui font (no accents) instead of a
                                   system font.
@@ -431,6 +441,10 @@ public sealed record AppOptions
             case "-emustats":
             case "--emu-stats":
                 options = options with { EmuStats = true };
+                return true;
+
+            case "--no-tile-cache":
+                options = options with { NoTileCache = true };
                 return true;
 
             default:

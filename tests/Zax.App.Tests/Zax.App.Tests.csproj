@@ -16,6 +16,7 @@
   <ItemGroup>
     <Compile Include="..\Zax.Profiles.Tests\SyntheticUnityBundle.cs" Link="Shared\SyntheticUnityBundle.cs" />
     <Compile Include="..\Zax.Profiles.Tests\Lz4Encoder.cs" Link="Shared\Lz4Encoder.cs" />
+    <Compile Include="..\Zax.Profiles.Tests\SyntheticHashProfile.cs" Link="Shared\SyntheticHashProfile.cs" />
   </ItemGroup>
 
 </Project>

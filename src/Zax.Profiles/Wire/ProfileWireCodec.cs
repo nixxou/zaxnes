@@ -39,6 +39,18 @@ public static class ProfileWireCodec
 
         ProfileDocument document =
             new ProfileWireDecoder(envelope.Payload!, manifest, envelope).ReadDocument();
+
+        // REQ-PROF-073: the metadata of a « 3dh » profile live in the envelope. The payload of
+        // most of them carries none, so what it leaves absent is taken from the envelope; a
+        // field the payload does carry is left alone, which keeps the rewrite byte-identical
+        // (REQ-PROF-084). The library reads the envelope directly and is right either way.
+        GameProfile profile = document.Profile;
+        profile.Id ??= NullIfEmpty(envelope.Id);
+        profile.Title ??= NullIfEmpty(envelope.Title);
+        profile.Author ??= NullIfEmpty(envelope.Author);
+        profile.Publisher ??= NullIfEmpty(envelope.Publisher);
+        profile.Description ??= NullIfEmpty(envelope.Description);
+
         HashProfileTiles tiles = new(document.Profile, manifest!);
         tiles.RebuildAllTextures();
         document.Tiles = tiles;
@@ -157,6 +169,8 @@ public static class ProfileWireCodec
 
         return new ProfileHeader(signature, id, title, author, publisher, description, version);
     }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static int EstimateCapacity(GameProfile profile)
     {

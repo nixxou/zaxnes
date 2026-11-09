@@ -136,6 +136,27 @@ public sealed class EnginePattern
         Height = height;
         Permanent = permanent;
         _cells = new TileImage?[width * height];
+        FillFrom(cells);
+    }
+
+    /// <summary>
+    /// Replaces the grid of images, keeping the pattern object, its instances and its place in
+    /// the registry. This is what a tile resolution needs: a cell that was waiting now holds an
+    /// image, so <c>Img(P)</c>, the adjacency relations, the pixel box and the registry key all
+    /// change (AMD-062 REQ-PROF-080). The registry re-keys the pattern around this call.
+    /// </summary>
+    internal void Reload(IEnumerable<TileImage?> cells)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        Array.Clear(_cells);
+        _images.Clear();
+        _horizontal.Clear();
+        _vertical.Clear();
+        FillFrom(cells);
+    }
+
+    private void FillFrom(IEnumerable<TileImage?> cells)
+    {
         int index = 0;
         foreach (TileImage? cell in cells)
         {
@@ -170,7 +191,11 @@ public sealed class EnginePattern
     public bool Permanent { get; }
 
     /// <summary>The registry key: the set of distinct images (REQ-E3D-063).</summary>
-    public ImageSetKey Key { get; }
+    /// <remarks>
+    /// It changes only when a pending tile of a « 3dh » profile is resolved and the pattern is
+    /// rebuilt in place (AMD-062 REQ-PROF-080); the registry re-keys itself then.
+    /// </remarks>
+    public ImageSetKey Key { get; private set; }
 
     /// <summary>
     /// The distinct images of the grid, in first-occurrence order; <c>Img(P)</c>.
@@ -311,27 +336,7 @@ public sealed class EnginePattern
         PatternGrid? grid = pattern.Grid;
         int width = grid?.Width ?? pattern.TileSize?.X ?? 0;
         int height = grid?.Height ?? pattern.TileSize?.Y ?? 0;
-        TileImage?[] cells = new TileImage?[Math.Max(0, width * height)];
-        if (grid is not null)
-        {
-            for (int j = 0; j < height; j++)
-            {
-                for (int i = 0; i < width; i++)
-                {
-                    ProfileTile? tile = grid[i, j];
-                    if (tile is null)
-                    {
-                        continue;
-                    }
-
-                    cells[i + (j * width)] = images.Intern(
-                        tile.LowPlane,
-                        tile.HighPlane,
-                        tile.FlipX,
-                        tile.FlipY);
-                }
-            }
-        }
+        TileImage?[] cells = InternCells(pattern, images, width, height);
 
         EnginePattern result = new(width, height, cells, permanent)
         {
@@ -345,12 +350,72 @@ public sealed class EnginePattern
 
         result.SetSelfConnected(pattern.SelfConnected);
 
+        bool pending = pattern.Grid is { HasPendingTile: true };
         foreach (PatternVariant variant in pattern.Variants)
         {
-            result.AddInstance(PatternInstance.FromVariant(variant));
+            result.AddInstance(PatternInstance.FromVariant(variant, pending));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The images of the cells of a profile pattern. A cell whose tile is still pending interns
+    /// no image at all, so it draws nothing and takes part in no recognition until the tile is
+    /// resolved (AMD-062 REQ-PROF-081).
+    /// </summary>
+    private static TileImage?[] InternCells(
+        ProfilePattern pattern, ImageRegistry images, int width, int height)
+    {
+        TileImage?[] cells = new TileImage?[Math.Max(0, width * height)];
+        if (pattern.Grid is not { } grid)
+        {
+            return cells;
+        }
+
+        for (int j = 0; j < height; j++)
+        {
+            for (int i = 0; i < width; i++)
+            {
+                if (grid[i, j] is not { IsPending: false } tile)
+                {
+                    continue;
+                }
+
+                cells[i + (j * width)] = images.Intern(
+                    tile.LowPlane,
+                    tile.HighPlane,
+                    tile.FlipX,
+                    tile.FlipY);
+            }
+        }
+
+        return cells;
+    }
+
+    /// <summary>
+    /// Takes the grid and the 3D parameters of <paramref name="pattern"/> again after one of
+    /// its tiles has been resolved: the cell that was waiting now holds an image, and every
+    /// instance gets its own geometry back (AMD-062 REQ-PROF-080, REQ-PROF-081).
+    /// </summary>
+    /// <remarks>
+    /// The instance objects are kept, not rebuilt, so the handles the script layer caches on
+    /// them and everything a script has set stay valid; only the two parameters the pending
+    /// state overrode are restored.
+    /// </remarks>
+    internal void ReloadFromProfile(ProfilePattern pattern, ImageRegistry images)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(images);
+
+        Reload(InternCells(pattern, images, Width, Height));
+
+        bool pending = pattern.Grid is { HasPendingTile: true };
+        int count = Math.Min(_instances.Count, pattern.Variants.Count);
+        for (int index = 0; index < count; index++)
+        {
+            PatternInstance.ApplyGeometry(_instances[index], pattern.Variants[index], pending);
+        }
     }
 
     /// <summary>

@@ -20,7 +20,8 @@ internal sealed record ResolvedGame(
     string Title,
     GameProfile Profile,
     bool Is2DMode,
-    bool IsDefaultThreeDimensional = false)
+    bool IsDefaultThreeDimensional = false,
+    Zax.Profiles.Hash.HashProfileTiles? Tiles = null)
 {
     /// <summary>Whether the profile is the built-in empty one, reloaded at every launch.</summary>
     public bool IsGeneric => Is2DMode || IsDefaultThreeDimensional;

@@ -2,8 +2,41 @@
 
 using Zax.Nes;
 using Zax.Profiles;
+using Zax.Profiles.Hash;
 
 namespace Zax.Engine3D;
+
+/// <summary>
+/// Where the conversion reads the cartridge's CHR-RAM between two frames (SPEC-02 REQ-CORE-123),
+/// which the in-game tile resolution of a « 3dh » profile needs (AMD-062 REQ-PROF-080).
+/// </summary>
+public interface IChrRamSource
+{
+    /// <summary>Size of the CHR-RAM in bytes; 0 when the cartridge has none.</summary>
+    int ChrRamSize { get; }
+
+    /// <summary>The CHR-RAM, addressed linearly from 0; empty when there is none.</summary>
+    ReadOnlySpan<byte> ChrRam { get; }
+}
+
+/// <summary>The CHR-RAM of a running core (SPEC-02 REQ-CORE-123).</summary>
+public sealed class CoreChrRam : IChrRamSource
+{
+    private readonly NesCore _core;
+
+    /// <summary>Reads the CHR-RAM of <paramref name="core"/>.</summary>
+    public CoreChrRam(NesCore core)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        _core = core;
+    }
+
+    /// <inheritdoc/>
+    public int ChrRamSize => _core.ChrRamSize;
+
+    /// <inheritdoc/>
+    public ReadOnlySpan<byte> ChrRam => _core.ChrRam;
+}
 
 /// <summary>
 /// The conversion pipeline of SPEC-04: it turns each batch of the core into a frame of
@@ -49,6 +82,27 @@ public sealed class ConversionEngine
 
     /// <summary>The pattern registry (REQ-E3D-060).</summary>
     public PatternRegistry Patterns => _patterns;
+
+    /// <summary>
+    /// The tile table of a loaded « 3dh » profile, or <see langword="null"/> for a 3dn profile
+    /// (AMD-062 REQ-PROF-080). It is session knowledge, like the cache of REQ-PROF-082: a tile
+    /// resolved during the session never goes back to pending, and the resolved set belongs
+    /// neither to the savestates nor to the rollback snapshots.
+    /// </summary>
+    public HashProfileTiles? PendingTiles { get; private set; }
+
+    /// <summary>
+    /// Where to read the cartridge's CHR-RAM, which the games that compress their tiles need
+    /// (REQ-PROF-080). Leave it null for a cartridge with CHR-ROM or when only the tiles of the
+    /// frame should be looked at.
+    /// </summary>
+    public IChrRamSource? ChrRamSource { get; set; }
+
+    /// <summary>
+    /// How many manifest strings of a « 3dh » profile were resolved while the game ran, so that
+    /// the count of the optional criterion of REQ-PROF-080 can be logged.
+    /// </summary>
+    public int TilesResolvedWhilePlaying { get; private set; }
 
     /// <summary>
     /// True in 2D mode, the library entry that plays any ROM without a game profile
@@ -120,13 +174,22 @@ public sealed class ConversionEngine
     /// then mirrors them here: that keeps one source of truth, since the model also carries the
     /// values this slice does not (REQ-PERS-005, REQ-PERS-007).
     /// </param>
-    public void LoadProfile(GameProfile profile, bool applySettings = true)
+    /// <param name="tiles">
+    /// The tile table of a « 3dh » profile (AMD-062 REQ-PROF-080), whose tiles that are still
+    /// pending will be looked for in each displayed frame and in the CHR-RAM. Pass none for a
+    /// 3dn profile. Resolution from the ROM (REQ-PROF-078) belongs to the host and must have
+    /// happened before this call, so that the patterns are built from what the ROM gave.
+    /// </param>
+    public void LoadProfile(GameProfile profile, bool applySettings = true, HashProfileTiles? tiles = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         _patterns.Clear();
         _images.Clear();
         ClearFrames();
+        PendingTiles = tiles;
+        TilesResolvedWhilePlaying = 0;
+        tiles?.TakeChangedPatterns();
         ProfileIsVersion2 = profile.IsV2Format;
         if (applySettings)
         {
@@ -239,6 +302,11 @@ public sealed class ConversionEngine
         // that had no room all come off this clock. It runs before the hooks, so a pattern
         // created by this frame starts its wait at this frame.
         _geometry.OnEmulatedFrame();
+
+        // AMD-062 REQ-PROF-080: on each displayed frame, before the pattern recognition, the
+        // tiles of the frame and the whole CHR-RAM are confronted with the manifest, and a tile
+        // resolved here takes part in the recognition of this very frame.
+        ResolvePendingTiles(batch);
 
         ConversionFrame frame = AcquireFrame();
         _converting = frame;
@@ -724,6 +792,47 @@ public sealed class ConversionEngine
         foreach (EnginePattern pattern in _patterns.Temporary)
         {
             BuildGeometry(pattern);
+        }
+    }
+
+    /// <summary>
+    /// Looks for the tiles a « 3dh » profile is still waiting for, in the tiles of the frame and
+    /// in the CHR-RAM, and rebuilds synchronously whatever a resolution changed — the patterns,
+    /// their variants and their textures — before this frame is recognised and drawn
+    /// (AMD-062 REQ-PROF-080, REQ-PROF-081, §9 divergence (D)).
+    /// </summary>
+    private void ResolvePendingTiles(in FrameBatch batch)
+    {
+        if (PendingTiles is not { } tiles || tiles.IsFullyResolved)
+        {
+            return;
+        }
+
+        int resolved = 0;
+        foreach (TileRecord record in batch.Records)
+        {
+            resolved += tiles.ResolveFromFrameTile(record.Plane0, record.Plane1);
+        }
+
+        if (ChrRamSource is { } source && source.ChrRamSize > 0)
+        {
+            resolved += tiles.ResolveFromChrRam(source.ChrRam);
+        }
+
+        if (resolved == 0)
+        {
+            return;
+        }
+
+        TilesResolvedWhilePlaying += resolved;
+        foreach (ProfilePattern pattern in tiles.TakeChangedPatterns())
+        {
+            HashProfileTiles.RebuildTextures(pattern);
+            if (_patterns.Refresh(pattern, _images) is { } registered)
+            {
+                _geometry.Release(registered);
+                BuildGeometry(registered);
+            }
         }
     }
 

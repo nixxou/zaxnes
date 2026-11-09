@@ -580,6 +580,9 @@ internal sealed class ZaxApplication : IDisposable
             // -noresume, which -slot implies, leaves the resume slot strictly alone (Q-088).
             SuspendResume = _options.NoResume,
 
+            // AMD-062 REQ-PROF-082: --no-tile-cache starts from an empty resolved set.
+            TileCacheEnabled = !_options.NoTileCache,
+
             // AMD-010 REQ-UI-200: the ten recent ROMs, persisted beside the library.
             RomOpened = path =>
             {

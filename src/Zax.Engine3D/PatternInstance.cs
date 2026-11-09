@@ -343,18 +343,24 @@ public class PatternInstance
     /// Reads the 3D parameters of a profile's 3D variant (SPEC-03 §4.4), applying the defaults
     /// of REQ-PROF-034 for the sub-messages a file leaves out.
     /// </summary>
-    public static PatternInstance FromVariant(PatternVariant variant)
+    /// <param name="variant">The 3D variant to read.</param>
+    /// <param name="patternHasPendingTile">
+    /// True when a tile of the pattern is still waiting for its content (AMD-062
+    /// REQ-PROF-081): the instance is then built with the <c>Default</c> geometry and without
+    /// <c>fullWarp</c>, over the resolved cells only, until the last tile is resolved.
+    /// </param>
+    public static PatternInstance FromVariant(PatternVariant variant, bool patternHasPendingTile = false)
     {
         ArgumentNullException.ThrowIfNull(variant);
 
         PatternInstance instance = new()
         {
             Depth = variant.Depth,
-            Geometry = (Geo3DType)(int)variant.Geometry,
+            Geometry = GeometryOf(variant, patternHasPendingTile),
             AntiShadow = variant.AntiShadow,
             Flip = variant.Flip,
             Solid = variant.Solid,
-            FullWarp = variant.FullWarp,
+            FullWarp = !patternHasPendingTile && variant.FullWarp,
             Layer = (ZLayer)(int)variant.Layer,
             Scale = ToVec3(variant.Scale, Vec3.One),
             Rotation = ToVec3(variant.Rotation, Vec3.Zero),
@@ -375,6 +381,20 @@ public class PatternInstance
         instance.Reference = instance;
         return instance;
     }
+
+    /// <summary>
+    /// Puts back the two parameters the pending state of AMD-062 REQ-PROF-081 overrode, without
+    /// touching anything a script may have set.
+    /// </summary>
+    internal static void ApplyGeometry(
+        PatternInstance instance, PatternVariant variant, bool patternHasPendingTile)
+    {
+        instance.Geometry = GeometryOf(variant, patternHasPendingTile);
+        instance.FullWarp = !patternHasPendingTile && variant.FullWarp;
+    }
+
+    private static Geo3DType GeometryOf(PatternVariant variant, bool patternHasPendingTile)
+        => patternHasPendingTile ? Geo3DType.Default : (Geo3DType)(int)variant.Geometry;
 
     private static Vec3 ToVec3(Vec3F? value, Vec3 fallback)
         => value is { } v ? new Vec3(v.X, v.Y, v.Z) : fallback;
