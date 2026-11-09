@@ -10,6 +10,8 @@ five games on `core` *and* `total` — measured against the base commit of the l
 board. A board inside it is in `zax-nes`'s `default`; a board above it is left out, and the
 umbrella feature **`parked-boards`** then enables all the left-out ones at once.
 
+**2026-11-09, `board-mmc5-exattr-split` stays parked.** The owner allowed it into `default` if it cost under 1 %. It does on every non-MMC5 ROM (worst `metroid` +0.110 % core, +0.090 % total), but a real MMC5 game pays more: *Castlevania III* (USA), 600 frames of `bench-core`, **+2.992 %** (26 081 931 964 -> 26 862 247 359), although it uses neither mode; the `mmc5` PR-1 ROM is +2.522 %. R0 moved it into `default` (01da4943) and reverted that (cb0dc59f) on that figure. Lowering the MMC5's own cost is the condition for un-parking it.
+
 **Four features are parked**: `board-vs-system`, the Nintendo VS. System (MF-VS step 7);
 `board-292`, *Dragon Fighter*'s BMW8544 (MF-UNL-12 step 6); `board-143-open-bus`, mapper 143's
 two open-bus bits (**MF-FIX step 9**); and `board-mmc5-exattr-split`, the MMC5's extended
