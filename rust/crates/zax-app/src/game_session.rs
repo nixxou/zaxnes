@@ -307,6 +307,12 @@ struct FramePipeline {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Its experimental smooth scrolling shift ([`NesCore::picture_shift`]).
+    picture_shift: Option<(f32, i32, i32)>,
+    /// Its camera motion to the next frame ([`NesCore::picture_motion`]).
+    picture_motion: Option<f32>,
+    /// Its sprites that move with the camera, moved out of it ([`NesCore::split_steady_sprites`]).
+    overlay: Vec<u8>,
     /// Whether the profile's scripts leave the core alone (no input hook, no memory or port
     /// access), so that the next frame may run while the scripts of the last one do
     /// ([`GameSession::launch_ahead`]).
@@ -819,6 +825,10 @@ impl GameSession {
             .ram
             .copy_from_slice(self.core.bus().ram());
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.pipeline.picture_shift = self.core.picture_shift();
+        self.pipeline.picture_motion = self.core.picture_motion();
+        self.core
+            .split_steady_sprites(&mut self.pipeline.picture, &mut self.pipeline.overlay);
         // Step 5 of REQ-LOOP-065 on the emulation-ahead path: the three things this path reads
         // from the displayed frame — its batch, the RAM copy the scripts' `ReadMem` will serve
         // (REQ-LOOP-067) and its 2D picture — have just been taken, and the next frame has not
@@ -856,6 +866,10 @@ impl GameSession {
                 self.pipeline.pending = Some(captured);
                 self.pipeline.picture_height =
                     self.core.wide_picture_into(&mut self.pipeline.picture);
+                self.pipeline.picture_shift = self.core.picture_shift();
+                self.pipeline.picture_motion = self.core.picture_motion();
+                self.core
+                    .split_steady_sprites(&mut self.pipeline.picture, &mut self.pipeline.overlay);
                 // Step 5 here too, so that the invariant below holds on this path as well. The
                 // frame hooks of this frame run from `finish_captured`, just after this returns,
                 // and on this path alone they read the real frame rather than the displayed one
@@ -1282,6 +1296,10 @@ impl GameSession {
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+            self.pipeline.picture_shift = self.core.picture_shift();
+            self.pipeline.picture_motion = self.core.picture_motion();
+            self.core
+                .split_steady_sprites(&mut self.pipeline.picture, &mut self.pipeline.overlay);
         }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word, self.run_ahead) {
@@ -1562,6 +1580,51 @@ impl GameSession {
         } else {
             self.core.wide_picture_into(destination)
         }
+    }
+
+    /// [`GameSession::copy_nes_picture`] with the sprites the experimental smooth scrolling draws
+    /// apart moved to `overlay` ([`NesCore::split_steady_sprites`]; empty without them).
+    pub fn copy_nes_picture_layers(
+        &self,
+        destination: &mut Vec<u8>,
+        overlay: &mut Vec<u8>,
+    ) -> usize {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            overlay.clear();
+            overlay.extend_from_slice(&self.pipeline.overlay);
+            return self.copy_nes_picture(destination);
+        }
+        let height = self.copy_nes_picture(destination);
+        self.core.split_steady_sprites(destination, overlay);
+        height
+    }
+
+    /// The experimental smooth scrolling's shift of the picture [`GameSession::copy_nes_picture`]
+    /// copies ([`NesCore::picture_shift`]).
+    #[must_use]
+    pub fn nes_picture_shift(&self) -> Option<(f32, i32, i32)> {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.picture_shift
+        } else {
+            self.core.picture_shift()
+        }
+    }
+
+    /// The camera motion to the next frame of the picture [`GameSession::copy_nes_picture`]
+    /// copies ([`NesCore::picture_motion`]).
+    #[must_use]
+    pub fn nes_picture_motion(&self) -> Option<f32> {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.picture_motion
+        } else {
+            self.core.picture_motion()
+        }
+    }
+
+    /// The camera the core's last picture shows ([`NesCore::picture_camera`]), for a debug log.
+    #[must_use]
+    pub fn nes_picture_camera(&self) -> Option<f64> {
+        self.core.picture_camera()
     }
 
     /// The shape the subjective camera follows.

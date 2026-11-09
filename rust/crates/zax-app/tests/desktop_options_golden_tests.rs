@@ -475,10 +475,12 @@ fn ro_1_the_detailed_tooltips_are_desktop_only() {
 /// the rule the computed list of 0b0aa8c applied, which no golden can express.
 #[test]
 fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
-    // The 56 of `336dd8f`, and `audio.classic_output` which AUDIO-2 adds: a setting may move in
-    // the tree, never leave the console.
-    assert_eq!(57, advanced::ROW_SETTINGS.len());
+    // The 56 of `336dd8f`, `audio.classic_output` which AUDIO-2 adds, and
+    // `emu.smooth_scroll_ahead` which KIRBY-MERGE does: a setting may move in the tree, never
+    // leave the console.
+    assert_eq!(58, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
+    assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));
 
     // Every one of them is still a row the page can actually draw and step: the rule the
     // computed list applied before — a switch, a choice, or a number with bounds or named rungs —
@@ -596,8 +598,9 @@ fn ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at() {
     }
 
     // The desktop menu and the console pages of a game walk the same tree, so neither can gain a
-    // row the other has not got: the main screen plus the pages, and nothing else.
-    assert_eq!(30, game_options::all_game_rows().count());
+    // row the other has not got: the main screen plus the pages, and nothing else. Thirty until
+    // KIRBY-MERGE added the smooth scrolling from the run-ahead beside the game's run-ahead.
+    assert_eq!(31, game_options::all_game_rows().count());
 }
 
 /// RO-3 §3: the desktop *Game options* menu follows the console tree, and does so by **walking

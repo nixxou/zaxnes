@@ -1018,11 +1018,19 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         // reads 3 and one of -1 reads 0 (REQ-LOOP-064) — and only the published labels change,
         // which is what turns the row into the list of AMD-041 §3. The interface translates them
         // through `option.<label>`; the value written to the settings file is the number.
-        .with_domain(Domain::stepped(0.0, 3.0, 1.0, 0).with_labels(&[
+        // Rust-only (owner request): up to 10 frames, to try a game's own lag to the absurd.
+        .with_domain(Domain::stepped(0.0, 10.0, 1.0, 0).with_labels(&[
             "Run-ahead off",
             "1 frame (Recommended)",
             "2 frames",
             "3 frames",
+            "4 frames",
+            "5 frames",
+            "6 frames",
+            "7 frames",
+            "8 frames",
+            "9 frames",
+            "10 frames",
         ]))
         .with_lua("RunAheadFrames")
         .with_label("Run-ahead"),
@@ -1030,6 +1038,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     emulation_rust_only(out);
     emulation_pause_3d(out);
     video_rust_only(out);
+    video_smooth_scroll(out);
     video_sprite_limit(out);
     video_overscan(out);
     video_nes_palette(out);
@@ -1929,6 +1938,48 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Video,
         )
         .with_label("Widescreen: wait for whole objects at the drawn edges"),
+    );
+}
+
+/// `emu.smooth_scroll_ahead` (Rust-only).
+fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only, experimental (owner request): the playfield drawn between two frames on a
+    // display faster than the game, from the scroll the PPU drew in the run-ahead's real frame
+    // and the frame shown; in the emulation options (and each game's, with its run-ahead),
+    // without effect unless run-ahead is on and the
+    // display shows more than 60 frames a second. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuSmoothScrollAhead,
+            SettingKind::Bool,
+            // **Off** by default, and the one place this lot overrode the branch's own choice.
+            // The branch shipped it on (owner request), with the handheld's defaults turning it
+            // back off. On, with the default run-ahead of 1 and any display above 61 Hz, it
+            // shifts the 2D playfield of **every game, with no pack at all**, and turns on the
+            // PPU's per-line scroll record — a picture and a cost for a game that asked for
+            // neither. The owner's rule for this lot is that nothing may move for a game
+            // without a pack unless it is behind an option **off by default**, so this is that
+            // option. Nothing else about the feature changed: on, it behaves exactly as the
+            // branch built it (`docs/progress/KIRBY-MERGE.md` §2.4, (S4)).
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_label("Smooth scrolling (interpolated from run-ahead)"),
+    );
+    // Rust-only (owner request): the band the smooth scrolling slides tinted red, the sprites it
+    // keeps still green, to see what it does. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuSmoothScrollView,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_label("Show the smooth scrolling's band"),
     );
 }
 

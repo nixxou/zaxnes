@@ -31,6 +31,19 @@ fn column_x(column: i32, fine_x: i32) -> i16 {
 /// PPU's).
 const MARGIN_ENTRIES: u8 = 0x20;
 
+/// In the wide picture's palette entries, the first of the sprites drawn in the "asleep" tint
+/// (their own entries, `0x10` up, here `TINT_ENTRIES` up).
+const TINT_ENTRIES: u8 = 0x30;
+
+/// The "asleep" tint of NES colour `colour`: its brightness in grey, the blacks kept.
+const fn asleep_tint(colour: u8) -> u8 {
+    if colour & 0x0F >= 0x0D {
+        colour
+    } else {
+        colour & 0x30
+    }
+}
+
 /// Where a background row of the frame was read from, kept for a margin decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CapturedRow {
@@ -102,6 +115,7 @@ impl Ppu2C02 {
         self.vram_clock = self.vram_clock.wrapping_add(1);
         self.frame_margin = self.wide.margin();
         self.frame_vertical_margin = self.wide.vertical_margin();
+        self.tinted_sprites = 0;
         self.tiles
             .set_extra_area(self.frame_margin / 8, self.frame_vertical_margin / 8);
         #[allow(clippy::cast_possible_truncation)] // At most 128.
@@ -144,6 +158,9 @@ impl Ppu2C02 {
 
     /// Emits the background row owed by visible line `line`, at its last dot (R2-005).
     pub(super) fn end_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
+        if self.tracks_line_scroll {
+            self.keep_line_scroll(line);
+        }
         if self.background_enabled() {
             let saved_latch = cart.as_deref().map_or(0, Cartridge::chr_latch_state);
             self.capture_background_row(line, cart);
@@ -388,6 +405,7 @@ impl Ppu2C02 {
     /// Replaces the margins of the frame just captured with the tiles `decoder` reads from the
     /// game's memory, row by row; a row the decoder does not handle keeps its nametable
     /// columns. The centre 256 pixels are left as captured.
+    #[allow(clippy::too_many_lines)] // One pass over the rows, its parts sharing their locals.
     pub(crate) fn decode_margins(
         &mut self,
         decoder: &dyn MarginDecoder,
@@ -396,6 +414,7 @@ impl Ppu2C02 {
     ) {
         let extra = self.frame_margin / 8;
         if extra == 0 {
+            self.find_playfield_end(decoder, memory, cart);
             return;
         }
         let row_width = 33 + (2 * extra);
@@ -417,10 +436,14 @@ impl Ppu2C02 {
         self.margin_palette = decoder.margin_palette(memory);
         // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
         let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
-        for (row_index, captured) in self.captured_rows.iter().enumerate() {
-            let Some(captured) = captured else {
-                continue;
-            };
+        let mut decoded_above = None;
+        let row_ends = self.row_ends();
+        self.playfield_end = None;
+        let strips = decoder.decodes_split_strips();
+        for (row_index, ref captured, strip) in self.rows_to_decode() {
+            if strip && (!strips || decoded_above != Some(row_index)) {
+                continue; // A strip goes with the row above it (its number), once decoded.
+            }
             // The decoder may read the nametables, as the PPU saw them for this row: with the
             // mirroring the row was drawn with, not the one in place now that the frame is over.
             // Until 2026-11 the decoders read them with the frame's last mirroring. Ninja Gaiden
@@ -443,23 +466,24 @@ impl Ppu2C02 {
                 ..*memory
             };
             let fine_x = i32::from(captured.row.fine_x);
-            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
-            // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
+            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose pixels
+            // begin at 256 - fine X, and goes on while it starts left of the edge.
             let last = 32 + extra - i32::from(fine_x == 0);
             let mut columns = (-extra..first_centre).chain(first_right..=last);
             tiles.clear();
             if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
                 continue;
             }
+            decoded_above = Some(row_index);
             decoded_rows[row_index] = true;
+            let end = (captured.y + 8).min(row_ends[row_index]);
+            self.playfield_end = Some(self.playfield_end.map_or(end, |last| last.max(end)));
             if let Some(to) = redrawn_to.get_mut(row_index).filter(|_| left_columns > 0) {
                 *to = column_x(left_columns, fine_x);
             }
             if let Some(from) = redrawn_from.get_mut(row_index).filter(|_| first_right < 32) {
                 *from = column_x(first_right, fine_x);
             }
-            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
-            let row_number = row_index as i32;
             for &DecodedTile {
                 column,
                 tile,
@@ -474,7 +498,7 @@ impl Ppu2C02 {
                     plane1,
                     x,
                     captured.y,
-                    (row_number * row_width) + column + extra,
+                    (i32::try_from(row_index).unwrap_or(0) * row_width) + column + extra,
                     false,
                     false,
                     false,
@@ -484,8 +508,18 @@ impl Ppu2C02 {
             }
         }
 
-        let (edge_rows, centre_lines) =
-            self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+        // Too few rows placed: not the game's screen (the decoder's minimum), no margins at all.
+        let placed = decoded_rows.iter().filter(|decoded| **decoded).count();
+        let (edge_rows, centre_lines) = if placed < decoder.minimum_rows() {
+            records.clear();
+            decoded_rows = [false; 31];
+            redrawn_from = [256; 30];
+            redrawn_to = [0; 30];
+            self.playfield_end = None;
+            (Vec::new(), (0, 240))
+        } else {
+            self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records)
+        };
         self.centre_lines = centre_lines;
         self.hides_overscan = decoder.hides_overscan();
         self.redrawn_from = redrawn_from;
@@ -519,6 +553,321 @@ impl Ppu2C02 {
         }
         if let Some(sprites) = masking {
             self.drop_masking_sprites(sprites);
+        }
+    }
+
+    /// The rows [`Ppu2C02::decode_margins`] decodes, by row number and with whether each is a
+    /// strip: the captured rows, each followed, when the next captured row starts more than 8
+    /// but less than 16 lines below it (a split: a status bar under the playfield), by the strip
+    /// in between, read on with its scroll one tile row down under its number. The PPU keeps a
+    /// row on the line its fine Y scroll is 1, so a strip of a few lines above a split has none,
+    /// and those lines would have no margin.
+    /// Without margins, the playfield's bottom only ([`Ppu2C02::playfield_end`]), for the smooth
+    /// scrolling without the widescreen: the rows the decoder places, nothing painted. Only when
+    /// asked ([`Ppu2C02::set_wants_playfield_end`]): nothing read otherwise.
+    pub(crate) fn find_playfield_end(
+        &mut self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+    ) {
+        self.playfield_end = None;
+        if !self.wants_playfield_end {
+            return;
+        }
+        let row_ends = self.row_ends();
+        let mut tiles = Vec::new();
+        let mut placed = 0;
+        for (row_index, ref captured, strip) in self.rows_to_decode() {
+            if strip {
+                continue;
+            }
+            let layout = captured.layout;
+            let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
+            let written = |address: u16| self.nametable_written_as(address, cart, layout);
+            let memory = &DecoderMemory {
+                nametable: &nametable,
+                nametable_written: &written,
+                ..*memory
+            };
+            if decoder.decode_row(memory, &captured.row, &mut std::iter::empty(), &mut tiles) {
+                placed += 1;
+                let end = (captured.y + 8).min(row_ends[row_index]);
+                self.playfield_end = Some(self.playfield_end.map_or(end, |last| last.max(end)));
+            }
+        }
+        if placed < decoder.minimum_rows() {
+            self.playfield_end = None;
+        }
+    }
+
+    /// Keeps the scroll line `line` is drawn with (the left-edge shadow of the internal address
+    /// at its end, as the rows: R2-005), or none for a line without background.
+    fn keep_line_scroll(&mut self, line: i32) {
+        let Ok(line) = usize::try_from(line) else {
+            return;
+        };
+        if self.line_scroll.len() < 240 {
+            self.line_scroll.resize(240, None);
+        }
+        let v = self.v_row_start;
+        let scroll = self.background_enabled().then(|| {
+            let x = ((v >> 10) & 1) << 8 | (v & 0x1F) << 3 | u16::from(self.fine_x);
+            let y = ((v >> 11) & 1) * 240 + ((v >> 5) & 0x1F) * 8 + ((v >> 12) & 7);
+            (x, y)
+        });
+        // A write the line's end takes (a split's, from an IRQ past its pixels) shows from the line
+        // after: the scroll kept at the end of line L is the one line L + 1 is drawn with; line 0
+        // is drawn with the one it starts with.
+        if line == 0 {
+            self.line_scroll[0] = scroll.map(|(x, y)| (x, (y + 479) % 480));
+        }
+        if let Some(slot) = self.line_scroll.get_mut(line + 1) {
+            *slot = scroll;
+        }
+    }
+
+    /// The band of the picture that scrolls, as the PPU drew it: the most lines in a row drawn
+    /// with one scroll across and going on one line down each (a status bar, at the top, at the
+    /// bottom or both, has a scroll of its own and breaks the run), at least 16. Its scroll across
+    /// on the 512-pixel plane, its first line and the line after its last: what the smooth
+    /// scrolling from the run-ahead knows of a game without reading its memory. `None` while the
+    /// lines' scroll is not kept ([`Ppu2C02::set_tracks_line_scroll`]) or no band is long enough.
+    #[must_use]
+    pub fn playfield_scroll(&self) -> Option<(i32, i16, i16)> {
+        let mut best: Option<(i32, usize, usize)> = None;
+        let mut start = 0;
+        let mut previous: Option<(u16, u16)> = None;
+        let lines = self.line_scroll.len();
+        for line in 0..=lines {
+            let here = self.line_scroll.get(line).copied().flatten();
+            let goes_on = matches!((previous, here), (Some((px, py)), Some((x, y)))
+                if x == px && y == (py + 1) % 480);
+            if !goes_on {
+                if let Some((x, _)) = previous {
+                    let length = line - start;
+                    if length >= 16 && best.is_none_or(|(_, from, to)| length > to - from) {
+                        best = Some((i32::from(x), start, line));
+                    }
+                }
+                start = line;
+            }
+            previous = here;
+        }
+        let (x, from, to) = best?;
+        Some((x, i16::try_from(from).ok()?, i16::try_from(to).ok()?))
+    }
+
+    fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
+        let mut rows = Vec::with_capacity(32);
+        for (index, captured) in self.captured_rows.iter().enumerate() {
+            let Some(captured) = *captured else {
+                continue;
+            };
+            rows.push((index, captured, false));
+            let Some(next_y) = self.captured_rows[index + 1..]
+                .iter()
+                .flatten()
+                .map(|next| next.y)
+                .next()
+            else {
+                continue;
+            };
+            let strip = captured.y + 8;
+            if next_y <= strip || next_y >= strip + 8 {
+                continue;
+            }
+            let v = captured.row.v;
+            let v = match (v >> 5) & 0x1F {
+                29 => (v & !0x03E0) ^ 0x0800,
+                31 => v & !0x03E0,
+                _ => v + 0x20,
+            };
+            let row = BackgroundRow {
+                line: captured.row.line + 8,
+                v,
+                ..captured.row
+            };
+            rows.push((
+                index,
+                CapturedRow {
+                    row,
+                    y: strip,
+                    ..captured
+                },
+                true,
+            ));
+        }
+        rows
+    }
+
+    /// The picture line each background row's records stop at in the wide picture: the start
+    /// of the next row the PPU kept, when it comes before the row's end (a split's row, the
+    /// status bar, begins higher than the row above it ends), by row number.
+    fn row_ends(&self) -> [i16; 31] {
+        let mut ends = [i16::MAX; 31];
+        let mut next = i16::MAX;
+        for (end, row) in ends.iter_mut().zip(self.captured_rows.iter()).rev() {
+            *end = next;
+            if let Some(row) = row {
+                next = row.y;
+            }
+        }
+        ends
+    }
+
+    /// The picture line `record` stops at in the wide picture: a background row stops where the
+    /// next row the PPU kept begins (a split higher than its end: the status bar's top a few
+    /// lines under the playfield's last row); `ends` is [`Ppu2C02::row_ends`].
+    fn record_end(&self, record: &TileRecord, ends: &[i16; 31]) -> i32 {
+        if !record.background {
+            return i32::MAX;
+        }
+        let row_width = 33 + (2 * (self.frame_margin / 8));
+        usize::try_from(record.index / row_width)
+            .ok()
+            .and_then(|row| ends.get(row))
+            .map_or(i32::MAX, |&end| i32::from(end))
+    }
+
+    /// Moves the sprites `steady` (record indices) of the wide picture `picture` (made by
+    /// [`Ppu2C02::wide_picture_into`]) to `overlay`, a picture of the same size, transparent
+    /// (`0xFF`) but for them; where they showed, `picture` gets what is under them. For the
+    /// experimental smooth scrolling: the playfield is shifted by the camera's fraction of a
+    /// pixel, but a sprite that moves with the camera (Kirby, the camera on him) must not be.
+    pub fn split_steady_sprites(&self, picture: &mut [u8], overlay: &mut Vec<u8>, steady: &[i32]) {
+        overlay.clear();
+        overlay.resize(picture.len(), 0xFF);
+        let margin = self.frame_margin;
+        let margin_y = self.frame_vertical_margin;
+        let width = SCREEN_WIDTH_I32 + (2 * margin);
+        let height = i32::try_from(picture.len()).unwrap_or(0) / width.max(1);
+        let is_steady = |record: &TileRecord| !record.background && steady.contains(&record.index);
+        for record in self
+            .tiles
+            .records()
+            .iter()
+            .filter(|record| is_steady(record))
+        {
+            for py in 0..8 {
+                for px in 0..8 {
+                    let (x, y) = (i32::from(record.x) + px, i32::from(record.y) + py);
+                    let (column, row) = (x + margin, y + margin_y);
+                    if !(0..width).contains(&column) || !(0..height).contains(&row) {
+                        continue;
+                    }
+                    let Ok(at) = usize::try_from((row * width) + column) else {
+                        continue;
+                    };
+                    let (entry, steady_chosen) = self.composed_entry(x, y, &is_steady, false);
+                    if !steady_chosen || overlay[at] != 0xFF {
+                        continue;
+                    }
+                    overlay[at] = self.entry_colour(entry);
+                    let (under, _) = self.composed_entry(x, y, &is_steady, true);
+                    picture[at] = self.entry_colour(under);
+                }
+            }
+        }
+    }
+
+    /// The palette entry shown at (`x`, `y`) composed from the records in the NES order, the
+    /// records `skip` says left out when `skipping`, and whether a record `skip` names won.
+    fn composed_entry(
+        &self,
+        x: i32,
+        y: i32,
+        skip: &dyn Fn(&TileRecord) -> bool,
+        skipping: bool,
+    ) -> (u8, bool) {
+        let mut front: Option<(i32, u8, bool)> = None;
+        let mut behind: Option<(i32, u8, bool)> = None;
+        let mut background: Option<u8> = None;
+        for record in self.tiles.records() {
+            let named = skip(record);
+            if skipping && named {
+                continue;
+            }
+            let (Ok(column), Ok(row)) = (
+                usize::try_from(x - i32::from(record.x)),
+                usize::try_from(y - i32::from(record.y)),
+            ) else {
+                continue;
+            };
+            let Some(pixel) = record
+                .displayed_pixel(column, row)
+                .filter(|&pixel| pixel != 0)
+            else {
+                continue;
+            };
+            if record.background {
+                background = Some(if record.palette >= 4 {
+                    MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                } else {
+                    (record.palette * 4) + pixel
+                });
+                continue;
+            }
+            let entry = self.sprite_entry(record, pixel);
+            let slot = if record.hidden {
+                &mut behind
+            } else {
+                &mut front
+            };
+            if slot.is_none_or(|(index, _, _)| record.index < index) {
+                *slot = Some((record.index, entry, named));
+            }
+        }
+        match (front, background, behind) {
+            (Some((_, entry, named)), _, _) | (None, None, Some((_, entry, named))) => {
+                (entry, named)
+            }
+            (None, Some(entry), _) => (entry, false),
+            (None, None, None) => (0, false),
+        }
+    }
+
+    /// Whether sprite record `record` is one of the frame's sprites in the "asleep" tint.
+    fn tinted(&self, record: &TileRecord) -> bool {
+        u32::try_from(record.index % 64).is_ok_and(|n| self.tinted_sprites & (1 << n) != 0)
+            && record.index < 128
+    }
+
+    /// The wide picture's palette entry of pixel `pixel` of sprite record `record`: its own, or
+    /// the "asleep" tint's.
+    fn sprite_entry(&self, record: &TileRecord, pixel: u8) -> u8 {
+        if self.tinted(record) {
+            TINT_ENTRIES + (record.palette * 4) + pixel
+        } else {
+            0x10 + (record.palette * 4) + pixel
+        }
+    }
+
+    /// The colour of palette entry `entry` of the wide picture (the margin palette's from
+    /// `MARGIN_ENTRIES` up), as the frame ended.
+    /// AMD-050 REQ-CORE-049 in the widescreen margins: a composed pixel's palette entry is 0
+    /// exactly where nothing was painted there — the universal backdrop for want of an opaque
+    /// pixel — which is the same rule as `render::span_pixel`'s, so the opacity bit of
+    /// [`super::OPAQUE_PIXEL`] comes from the entry.
+    ///
+    /// Lot KIRBY-MERGE: this is the **one** place the wide picture's entries become colours.
+    /// `dev` had the mapping as a closure of [`Ppu2C02::wide_picture_into`] and the branch added
+    /// this function for [`Ppu2C02::split_steady_sprites`], which writes into the very picture
+    /// that closure produced; two copies would have differed by exactly the opacity bit, and the
+    /// overlay's pixels — bit 6 clear — read as transparent in `gl/picture.rs`.
+    fn entry_colour(&self, entry: u8) -> u8 {
+        let colour = if let Some(sprite) = entry.checked_sub(TINT_ENTRIES) {
+            asleep_tint(self.frame_palette[palette_index(0x3F10 | u16::from(sprite))])
+        } else {
+            match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
+                (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
+                _ => self.frame_palette[palette_index(0x3F00 | u16::from(entry))],
+            }
+        };
+        if entry == 0 {
+            colour
+        } else {
+            colour | super::OPAQUE_PIXEL
         }
     }
 
@@ -791,6 +1140,9 @@ impl Ppu2C02 {
             let tile = u16::from(self.oam[(n * 4) + 1]);
             let attribute = self.oam[(n * 4) + 2];
             let oam_x = self.oam[(n * 4) + 3];
+            if self.frame_margin > 0 && self.wide.sprite_tinted(n) {
+                self.tinted_sprites |= 1 << n;
+            }
             let x = if self.frame_margin > 0 {
                 let x = self.wide.sprite_x(n, oam_x);
                 let (visible_low, visible_high) = self.wide.sprite_range();
@@ -1081,6 +1433,28 @@ impl Ppu2C02 {
     /// middle columns are the PPU's own picture; the sides are composed from the tile records
     /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
     /// sprite number winning) over the universal backdrop.
+    /// The picture line the rows the margin decoder decoded this frame end at (the playfield's
+    /// bottom, a status bar under it), `None` when it decoded none.
+    #[must_use]
+    pub const fn playfield_end(&self) -> Option<i16> {
+        self.playfield_end
+    }
+
+    /// Whether the frames to come find their playfield's bottom without margins too (the smooth
+    /// scrolling without the widescreen).
+    pub fn set_wants_playfield_end(&mut self, wanted: bool) {
+        self.wants_playfield_end = wanted;
+    }
+
+    /// Whether the frames to come keep the scroll of each line ([`Ppu2C02::playfield_scroll`]):
+    /// nothing kept otherwise.
+    pub fn set_tracks_line_scroll(&mut self, tracked: bool) {
+        self.tracks_line_scroll = tracked;
+        if !tracked {
+            self.line_scroll.clear();
+        }
+    }
+
     /// Whether the decoder of the frame just run asks the screen's top and bottom lines hidden
     /// with a vertical margin too ([`crate::wide_decode::MarginDecoder::hides_overscan`]).
     #[must_use]
@@ -1106,7 +1480,16 @@ impl Ppu2C02 {
 
         // The PPU blanks its first 8 columns when the game asks for it, which in a wide picture
         // would be a black band in the middle: they are composed too.
-        let composed_from = if self.left_column_masked() { 8 } else { 0 };
+        //
+        // PPUMASK **as the frame ended** (`frame_mask`), not as it stands now, for the reason
+        // `Ppu2C02::frame_palette` gives: with run-ahead the host composes this picture once the
+        // real frame's state is back, a frame older than the pixels and records it holds. The
+        // test is `left_column_masked`'s, on that snapshot.
+        let composed_from = if (self.frame_mask & 0x06) == 0x06 {
+            0
+        } else {
+            8
+        };
         // The PPU's own lines; a row across the top or bottom edge whose centre was decoded is
         // composed from its records, on the screen too.
         let (top, bottom) = self.centre_lines;
@@ -1142,8 +1525,10 @@ impl Ppu2C02 {
         // of a lower priority does not show there (the NES picks the sprite first, then puts it
         // behind the background; Super Mario Bros. 3 hides its piranha plants in their pipes so).
         let mut behind = vec![i32::MAX; width * height];
+        let row_ends = self.row_ends();
         let mut paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
-            self.paint_side_tile(record, base, out, width, &centres, &mut behind);
+            let end = self.record_end(record, &row_ends);
+            self.paint_side_tile(record, base, out, width, &centres, &mut behind, end);
         };
         let records = self.tiles.records();
         for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
@@ -1162,22 +1547,11 @@ impl Ppu2C02 {
             paint(record, 0x10, out);
         }
 
-        // AMD-050 REQ-CORE-049 in the widescreen margins: a composed pixel's palette entry is 0
-        // exactly where nothing was painted there — the universal backdrop for want of an opaque
-        // pixel — which is the same rule as `render::span_pixel`'s. So the opacity bit comes from
-        // the entry, in a loop that already matched on it per pixel and that only runs for a
-        // frame with a widescreen margin.
-        let colour = |entry: u8| -> u8 {
-            let color = match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
-                (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
-                _ => self.palette[palette_index(0x3F00 | u16::from(entry))],
-            };
-            if entry == 0 {
-                color
-            } else {
-                color | super::OPAQUE_PIXEL
-            }
-        };
+        // The entries of the margins and of the composed centre become colours through the one
+        // mapping [`Ppu2C02::entry_colour`] holds: the margin palette, the "asleep" tint, the
+        // frame's last palette and the opacity bit of AMD-050 REQ-CORE-049, in a loop that only
+        // runs for a frame with a widescreen margin.
+        let colour = |entry: u8| -> u8 { self.entry_colour(entry) };
         for row in 0..height {
             let line = &mut out[row * width..(row + 1) * width];
             // The centre of a screen row is the PPU's picture, copied whole; the rest is turned
@@ -1222,6 +1596,7 @@ impl Ppu2C02 {
         width: usize,
         centres: &[(i32, i32)],
         behind: &mut [i32],
+        end: i32,
     ) {
         let priority = sprite_priority(record.index);
         let top = i32::from(record.y) + self.frame_vertical_margin;
@@ -1236,6 +1611,9 @@ impl Ppu2C02 {
         if hidden {
             return;
         }
+        // In the margins, its lines from `end` on are another row's (picture lines, the record's
+        // own coordinates); in the centre, the columns a decoder redraws keep them whole.
+        let lines = (end - i32::from(record.y)).clamp(0, 8);
         for py in 0..8i32 {
             let Ok(row) = usize::try_from(top + py) else {
                 continue;
@@ -1245,7 +1623,7 @@ impl Ppu2C02 {
             };
             for px in 0..8i32 {
                 let x = left + px;
-                if (from..to).contains(&x) {
+                if (from..to).contains(&x) || (py >= lines && !(0..SCREEN_WIDTH_I32).contains(&x)) {
                     continue;
                 }
                 let Ok(column) = usize::try_from(x + self.frame_margin) else {
@@ -1272,6 +1650,8 @@ impl Ppu2C02 {
                     // MARGIN_ENTRIES up.
                     *slot = if record.background && record.palette >= 4 {
                         MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                    } else if !record.background && self.tinted(record) {
+                        TINT_ENTRIES + (record.palette * 4) + pixel
                     } else {
                         base + (record.palette * 4) + pixel
                     };
@@ -1291,7 +1671,13 @@ impl Ppu2C02 {
         screen_rows: &std::ops::Range<usize>,
     ) {
         let records = self.tiles.records();
-        let backdrop = self.palette[palette_index(0x3F00)];
+        // The frame's last palette, as everywhere in this picture (`Ppu2C02::frame_palette`).
+        // Neither this colour nor the one written below carries the opacity bit of AMD-050
+        // REQ-CORE-049, which is what `dev` wrote here before the merge and is kept to the byte:
+        // changing it would move the picture of the packs that use the second sprite page, and
+        // the owner's rule is that nothing moves for them in this lot. Recorded in
+        // `docs/progress/KIRBY-MERGE.md` §2.4 as found and deliberately left alone.
+        let backdrop = self.frame_palette[palette_index(0x3F00)];
         for record in records
             .iter()
             .filter(|r| !r.background && (r.index >= 128 || r.x < 0))
@@ -1324,7 +1710,7 @@ impl Ppu2C02 {
                     let entry = 0x3F10 | u16::from(record.palette * 4) | u16::from(pixel);
                     let slot = &mut out[(row * width) + column];
                     if !record.hidden || *slot == backdrop {
-                        *slot = self.palette[palette_index(entry)];
+                        *slot = self.frame_palette[palette_index(entry)];
                     }
                 }
             }

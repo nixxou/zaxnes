@@ -443,6 +443,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.1 frame (Recommended)", "1 frame (recommandé)"),
     ("option.2 frames", "2 frames"),
     ("option.3 frames", "3 frames"),
+    ("option.10 frames", "10 frames"),
+    ("option.9 frames", "9 frames"),
+    ("option.8 frames", "8 frames"),
+    ("option.7 frames", "7 frames"),
+    ("option.6 frames", "6 frames"),
+    ("option.5 frames", "5 frames"),
+    ("option.4 frames", "4 frames"),
     ("setting.emu.lua_smooth_gc", "Nettoyage mémoire Lua lissé"),
     ("setting.emu.lua_optimized", "Lua optimisé (unsafe)"),
     (
@@ -460,6 +467,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "setting.video.widescreen_strict_edges",
         "Écran large : attendre les objets entiers aux bords dessinés",
+    ),
+    (
+        "setting.emu.smooth_scroll_ahead",
+        "Défilement lissé (interpolé par run-ahead)",
+    ),
+    (
+        "setting.emu.smooth_scroll_view",
+        "Afficher la zone du défilement lissé (rouge, sprites fixes en vert)",
     ),
     (
         "setting.video.remove_sprite_limit",
@@ -1022,6 +1037,24 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          dont les scripts de profil écrivent dans la console est maintenu à 0 pendant qu'il tourne, \
          et la ligne l'indique à côté. Par défaut : 1 image sur le bureau, désactivé sur une \
          console portable.",
+    ),
+    (
+        "detail.emu.smooth_scroll_ahead",
+        "Expérimental. Sur un affichage plus rapide que la console, dessine la partie qui défile \
+         de l'image 2D entre deux images émulées : l'image est montrée ramenée au défilement que \
+         l'image réelle du run-ahead a dessiné, puis glisse vers le sien au fil de l'image, ce qui \
+         dépense une des images de latence du run-ahead en un mouvement plus fluide. Les barres \
+         d'état et les sprites qui suivent la caméra restent où ils sont. Sans run-ahead, à 60 \
+         images par seconde ou moins, ou dans la scène 3D, rien ne se passe : seule l'image 2D \
+         est interpolée. Un jeu dont le pack de hacks rapporte sa propre caméra utilise celle-ci \
+         à la place. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.smooth_scroll_view",
+        "Une vue de mise au point du réglage ci-dessus : la bande de lignes que le défilement \
+         lissé fait glisser est teintée en rouge et les sprites qu'il laisse immobiles en vert, de \
+         sorte qu'on voit d'un coup d'œil ce qu'il déplace et ce qu'il laisse en place. Rien n'est \
+         teinté tant que le défilement lissé ne fait rien. Par défaut : désactivé.",
     ),
     (
         "detail.emu.auto_tv_mode",

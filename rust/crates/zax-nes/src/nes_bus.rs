@@ -728,7 +728,7 @@ impl NesBus {
                     oam_steps += pairs * 2;
                     if oam_steps == 0x200 {
                         self.dma &= !DMA_OAM;
-                        self.ppu.wide_mut().latch_sprites();
+                        self.ppu.wide_mut().latch_sprites(self.dma_oam_page);
                     }
                     continue;
                 }
@@ -767,7 +767,7 @@ impl NesBus {
                 oam_steps += 1;
                 if oam_steps == 0x200 {
                     self.dma &= !DMA_OAM;
-                    self.ppu.wide_mut().latch_sprites();
+                    self.ppu.wide_mut().latch_sprites(self.dma_oam_page);
                 }
             } else {
                 // A cycle no unit can use: the DMC's dummy read, or an alignment before a get.

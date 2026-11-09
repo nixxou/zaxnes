@@ -294,6 +294,8 @@ pub struct TextureStore {
     free: Vec<u32>,
     by_address: FastMap<*const ObjectTexture, TextureHandle>,
     picture: Option<TextureHandle>,
+    /// The sprites the experimental smooth scrolling draws apart, a second picture.
+    overlay: Option<TextureHandle>,
     picture_pixels: Vec<u8>,
     frame: u64,
     /// Bumped whenever a slot is released or reused, so that the bind groups built on it are
@@ -410,6 +412,36 @@ impl TextureStore {
         indices: &[u8],
         height: usize,
     ) -> Option<TextureHandle> {
+        let slot = self.picture;
+        let handle = self.upload_picture(device, queue, indices, height, slot)?;
+        self.picture = Some(handle);
+        Some(handle)
+    }
+
+    /// Uploads the sprites the experimental smooth scrolling draws apart, a picture as
+    /// [`TextureStore::picture`] takes, to a slot of their own.
+    pub fn overlay(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        indices: &[u8],
+        height: usize,
+    ) -> Option<TextureHandle> {
+        let slot = self.overlay;
+        let handle = self.upload_picture(device, queue, indices, height, slot)?;
+        self.overlay = Some(handle);
+        Some(handle)
+    }
+
+    /// Uploads a picture of the 2D mode to `slot`, or to a new slot.
+    fn upload_picture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        indices: &[u8],
+        height: usize,
+        slot: Option<TextureHandle>,
+    ) -> Option<TextureHandle> {
         let (width, height) = crate::interop::picture_size(indices.len(), height)?;
         self.picture_pixels.resize(width * height * 4, 0);
         for (pixel, &index) in self.picture_pixels.chunks_exact_mut(4).zip(indices) {
@@ -423,7 +455,7 @@ impl TextureStore {
 
         #[allow(clippy::cast_possible_truncation)] // At most 1280 and 720.
         let size = (width as u32, height as u32);
-        if let Some(handle) = self.picture {
+        if let Some(handle) = slot {
             let entry = self.slots[handle.0 as usize]
                 .as_ref()
                 .unwrap_or_else(|| unreachable!("the picture slot is never released"));
@@ -465,7 +497,6 @@ impl TextureStore {
             last_used: u64::MAX,
         };
         let handle = TextureHandle(place(&mut self.slots, &mut self.free, entry));
-        self.picture = Some(handle);
         self.revision += 1;
         Some(handle)
     }

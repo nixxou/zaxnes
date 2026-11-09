@@ -85,6 +85,7 @@ options
       camera.fov
     page.emulation
       emu.run_ahead
+      emu.smooth_scroll_ahead
       emu.game_speed
       emu.auto_tv_mode
       emu.tv_mode
@@ -140,4 +141,5 @@ game options
       render.backdrop_lighting
     page.emulation
       emu.run_ahead
+      emu.smooth_scroll_ahead
   page.hacks

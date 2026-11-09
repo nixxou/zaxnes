@@ -19,6 +19,7 @@ mod castlevania;
 mod excitebike;
 mod ff1;
 pub mod guest;
+mod kirby;
 mod megaman;
 mod megaman1;
 mod megaman2;
@@ -238,6 +239,32 @@ pub trait MarginDecoder: Sync {
     fn masking_sprites(&self, _memory: &DecoderMemory<'_>) -> Option<MaskingSprites> {
         None
     }
+
+    /// The game's camera across, in pixels and the fraction of a pixel past them in 256ths (read
+    /// after the frame: the next picture's), for the experimental smooth scrolling
+    /// (`smooth_scroll`): a camera that moves 1.3 pixels a frame shows steps of 1, 1 and 2, and
+    /// the host shifts the playfield by the fraction to make them even. `None`, as by default,
+    /// when the decoder does not know it.
+    fn camera_position(&self, _memory: &DecoderMemory<'_>) -> Option<(i32, u8)> {
+        None
+    }
+
+    /// Whether the decoder also reads the strip of a few lines between the playfield's last
+    /// row the PPU kept and a split under it (a status bar), which the PPU keeps no row of (it
+    /// keeps a row on the line its fine Y scroll is 1): read on one tile row down with the row
+    /// above's scroll. Off by default (Super Mario Bros. 3's title screen has such a strip that
+    /// is not the playfield's).
+    fn decodes_split_strips(&self) -> bool {
+        false
+    }
+
+    /// The fewest rows of a frame the decoder must place for any of them to get margins: a
+    /// screen that is not the game's (an intro, with the last room played still in the battery
+    /// RAM) can have a blank row or two that happen to match that room, while a room shown has
+    /// most of its rows placed. 0 by default: every row placed gets its margins.
+    fn minimum_rows(&self) -> usize {
+        0
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
@@ -284,6 +311,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman5::SOURCE_CRC_EUROPE => Some(&megaman5::MEGAMAN5_EUROPE),
         megaman6::SOURCE_CRC | megaman6::SOURCE_CRC_JAPAN => Some(&megaman6::MegaMan6),
         metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
+        kirby::SOURCE_CRC => Some(&kirby::Kirby),
+        crc if kirby::OTHER_CRCS.contains(&crc) => Some(&kirby::Kirby),
         _ => None,
     }
 }
@@ -314,6 +343,13 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
             Some(&ng3::NinjaGaiden3)
         }
         crate::builtin_patches::SMB3_USA => Some(&smb3::USA),
+        crate::builtin_patches::KIRBY_USA_REV1
+        | crate::builtin_patches::KIRBY_USA
+        | crate::builtin_patches::KIRBY_CANADA
+        | crate::builtin_patches::KIRBY_JAPAN
+        | crate::builtin_patches::KIRBY_EUROPE
+        | crate::builtin_patches::KIRBY_EUROPE_NTSC
+        | crate::builtin_patches::KIRBY_GERMANY => Some(&kirby::Kirby),
         crate::builtin_patches::SMB3_JAPAN | crate::builtin_patches::SMB3_JAPAN_REV1 => {
             Some(&smb3::JAPAN)
         }

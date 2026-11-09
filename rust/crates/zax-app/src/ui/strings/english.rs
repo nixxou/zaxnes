@@ -479,6 +479,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.1 frame (Recommended)", "1 frame (Recommended)"),
     ("option.2 frames", "2 frames"),
     ("option.3 frames", "3 frames"),
+    ("option.10 frames", "10 frames"),
+    ("option.9 frames", "9 frames"),
+    ("option.8 frames", "8 frames"),
+    ("option.7 frames", "7 frames"),
+    ("option.6 frames", "6 frames"),
+    ("option.5 frames", "5 frames"),
+    ("option.4 frames", "4 frames"),
     ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
     ("setting.emu.lua_optimized", "Optimized Lua (unsafe)"),
     (
@@ -498,6 +505,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "Widescreen: wait for whole objects at the drawn edges",
     ),
     ("setting.video.remove_sprite_limit", "Remove the limit of 8 sprites per line"),
+    (
+        "setting.emu.smooth_scroll_ahead",
+        "Smooth scrolling (interpolated from run-ahead)",
+    ),
+    (
+        "setting.emu.smooth_scroll_view",
+        "Show the smooth scrolling's band (red, still sprites green)",
+    ),
     ("setting.video.overscan_ntsc_top", "Overscan NTSC: top"),
     ("setting.video.overscan_ntsc_bottom", "Overscan NTSC: bottom"),
     ("setting.video.overscan_ntsc_left", "Overscan NTSC: left"),
@@ -1031,6 +1046,23 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          displayed frame — which is why a handheld has it off. A game whose profile scripts write \
          to the console is held at 0 while it runs, and the row says so beside it. Default: 1 frame \
          on the desktop, off on a handheld.",
+    ),
+    (
+        "detail.emu.smooth_scroll_ahead",
+        "Experimental. On a display faster than the console, draws the scrolling part of the 2D \
+         picture between two emulated frames: the picture is shown shifted back to the scroll the \
+         run-ahead's real frame drew, and slides to its own over the frame, which spends one of \
+         the run-ahead's frames of latency on smoother motion. Status bars and the sprites that \
+         move with the camera stay where they are. Nothing happens without run-ahead, at 60 \
+         frames a second or less, or in the 3D scene — only the 2D picture is interpolated. A \
+         game whose hack pack reports its own camera uses that instead. Default: off.",
+    ),
+    (
+        "detail.emu.smooth_scroll_view",
+        "A debugging view of the setting above: the band of lines the smooth scrolling slides is \
+         tinted red and the sprites it holds still are tinted green, so what it moves and what it \
+         leaves alone can be seen at a glance. Nothing is tinted while the smooth scrolling does \
+         nothing. Default: off.",
     ),
     (
         "detail.emu.auto_tv_mode",

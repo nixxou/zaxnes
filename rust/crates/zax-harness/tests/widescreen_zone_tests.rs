@@ -74,6 +74,7 @@ fn smb3_picture(folder: &str, frames: u32) -> Option<(Vec<u8>, usize)> {
         hack_options: None,
         sprite_limit: SpriteLimit::Kept,
         run_ahead: 0,
+        smooth_ahead: false,
         save_state: None,
         dump_mem: None,
         trace_ram: None,

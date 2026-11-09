@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 13] {
+fn defaults() -> [(SettingId, SettingValue); 14] {
     [
         // AMD-055 REQ-SCN-079, the two quality rungs. The style itself is **Classic** on a
         // handheld as on the desktop — that is the setting's own default (REQ-SCN-078) and at
@@ -79,6 +79,11 @@ fn defaults() -> [(SettingId, SettingValue); 13] {
         // measured worse there than both None and 5 once the core had its own thread, because
         // the second frame of a pair waits for the emulation thread in series.
         (SettingId::EmuCatchUp, SettingValue::Enum(5)),
+        // The smooth scrolling from the run-ahead does nothing without run-ahead or at 60 Hz,
+        // and both are the handheld's case. Kept as an explicit handheld default even though
+        // KIRBY-MERGE made the catalogue default `false` as well (`docs/progress/KIRBY-MERGE.md`
+        // §2.4, (S4)): if the global default ever goes back on, the handheld still says no.
+        (SettingId::EmuSmoothScrollAhead, SettingValue::Bool(false)),
     ]
 }
 

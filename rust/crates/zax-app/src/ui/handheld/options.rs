@@ -312,8 +312,14 @@ pub const CAMERA_ROWS: [OptionRow; 2] =
 
 /// *Advanced options › Emulation*. The region row of the main page sets the same two settings in
 /// one step; these are the two apart, as the mockup asks.
-pub const EMULATION_ROWS: [OptionRow; 5] = [
+///
+/// KIRBY-MERGE added the smooth scrolling under the run-ahead, because it spends one of the
+/// run-ahead's frames and does nothing without it. The debugging view that goes with it
+/// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
+/// this screen being a short curated list.
+pub const EMULATION_ROWS: [OptionRow; 6] = [
     OptionRow::Setting(SettingId::EmuRunAhead),
+    OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
     OptionRow::Setting(SettingId::EmuGameSpeed),
     OptionRow::Setting(SettingId::EmuAutoTvMode),
     OptionRow::Setting(SettingId::EmuTvMode),

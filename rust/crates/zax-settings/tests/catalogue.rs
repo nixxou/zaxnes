@@ -49,7 +49,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.builtin_patches, emu.catch_up, emu.catch_up_last_3d, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.editor_mode, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.half_rate_3d, video.widescreen, video.widescreen_advanced,
-    // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
+    // video.remove_sprite_limit, video.widescreen_extra, emu.smooth_scroll_ahead,
+    // video.widescreen_strict_edges,
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request). audio.latency_ms: the output latency of AUDIO-1
     // (Q-153 §2). audio.classic_output: AUDIO-2's fallback to the output of v0.4.2.
@@ -76,6 +77,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.lua_smooth_gc",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
+            "emu.smooth_scroll_ahead",
+            "emu.smooth_scroll_view",
             "input.touch_pad",
             // AMD-049 REQ-SCN-075: a setting of Zaxnes's own (divergence D) — the original
             // always lights the backdrop with the almost-matt model, so it has no such key.

@@ -70,6 +70,7 @@ struct GlResidency<'a> {
     meshes: &'a mut MeshCache,
     textures: &'a mut TextureCache,
     picture: &'a mut NesPictureTexture,
+    overlay: &'a mut NesPictureTexture,
 }
 
 impl Residency for GlResidency<'_> {
@@ -87,6 +88,10 @@ impl Residency for GlResidency<'_> {
 
     fn picture(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
         self.picture.upload(picture, height)
+    }
+
+    fn overlay(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.overlay.upload(picture, height)
     }
 }
 
@@ -364,6 +369,8 @@ pub struct SceneRenderer {
     shadow_map: ShadowMap,
     skybox: SkyboxPass,
     picture: NesPictureTexture,
+    /// The sprites the experimental smooth scrolling draws apart (`SceneState::picture_overlay`).
+    overlay: NesPictureTexture,
     linear: LinearColorBuffer,
     /// The screen-space passes of AMD-055 REQ-SCN-080 and everything they own, created the first
     /// time a frame asks for one and dropped as soon as none does.
@@ -409,6 +416,10 @@ pub struct SceneRenderer {
     /// The subdivision `wide_picture_quad` was built for, so a change of the curvature rebuilds
     /// it (the margin alone no longer tells the two apart).
     wide_picture_cells: u16,
+    /// The two bands of the last 2D picture the experimental smooth scrolling shifted
+    /// (`interop::picture_bands_for`), the playfield's first. Flat quads: see
+    /// `docs/progress/KIRBY-MERGE.md` §2.4 on the bend.
+    picture_bands: Option<interop::PictureBands>,
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
@@ -518,6 +529,7 @@ impl SceneRenderer {
             meshes: MeshCache::new(&gl),
             skybox: SkyboxPass::new(&gl, assets),
             picture: NesPictureTexture::new(&gl),
+            overlay: NesPictureTexture::new(&gl),
             linear: LinearColorBuffer::new(&gl)?,
             screen_effects: None,
             screen_effects_given_up: false,
@@ -533,6 +545,7 @@ impl SceneRenderer {
             picture_quad_bent: None,
             wide_picture_quad: None,
             wide_picture_cells: 1,
+            picture_bands: None,
             plan: FramePlan::default(),
             last_view: CameraView::default(),
             group_opaque: false,
@@ -649,6 +662,7 @@ impl SceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
             picture: &mut self.picture,
+            overlay: &mut self.overlay,
         };
         // AMD-046 REQ-SCN-074: the rectangle of the 2D mode is subdivided while it bends, and
         // only then. `select_bend_variant` has already folded the setting in, so in 2D mode this
@@ -665,6 +679,15 @@ impl SceneRenderer {
             cells,
             self.wide_picture_quad.take(),
         )?;
+        self.picture_bands = match scene.picture_shift.filter(|_| scene.two_dimensional_mode) {
+            Some((_, start, end)) => interop::picture_bands_for(
+                frame.nes_picture,
+                frame.nes_picture_height,
+                (start, end),
+                self.picture_bands.take(),
+            )?,
+            None => None,
+        };
         let fixed = FixedMeshes {
             // REQ-SCN-068: the subdivided box only while something bends.
             unit_box: match &self.unit_box_bent {
@@ -676,6 +699,10 @@ impl SceneRenderer {
                 _ => &self.picture_quad,
             },
             wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
+            picture_bands: self
+                .picture_bands
+                .as_ref()
+                .map(|(_, playfield, rest)| (playfield, rest)),
         };
         let collected = self
             .plan

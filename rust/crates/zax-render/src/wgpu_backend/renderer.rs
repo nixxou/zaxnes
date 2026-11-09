@@ -444,6 +444,9 @@ pub struct WgpuSceneRenderer {
     /// How many cells the cached widescreen quad was built with, so that the curvature going on
     /// or off rebuilds it (REQ-SCN-074).
     wide_picture_cells: u16,
+    /// The two bands of the last 2D picture the experimental smooth scrolling shifted
+    /// (`interop::picture_bands_for`), the playfield's first.
+    picture_bands: Option<interop::PictureBands>,
     plan: FramePlan<MeshHandle, TextureHandle>,
     layouts: Layouts,
     /// The scene module of each variant asked for so far, the plain one built in [`Self::new`].
@@ -570,6 +573,16 @@ impl Residency for WgpuResidency<'_> {
         Ok(self
             .textures
             .picture(self.device, self.queue, picture, height))
+    }
+
+    fn overlay(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<TextureHandle>, Self::Error> {
+        Ok(self
+            .textures
+            .overlay(self.device, self.queue, picture, height))
     }
 }
 
@@ -708,6 +721,7 @@ impl WgpuSceneRenderer {
             picture_quad_bent: None,
             wide_picture_quad: None,
             wide_picture_cells: interop::subdivision_for(false),
+            picture_bands: None,
             plan: FramePlan::default(),
             scene_pipelines: FastMap::default(),
             mask_pipelines: FastMap::default(),
@@ -1172,6 +1186,15 @@ impl WgpuSceneRenderer {
             cells,
             self.wide_picture_quad.take(),
         )?;
+        self.picture_bands = match scene.picture_shift.filter(|_| scene.two_dimensional_mode) {
+            Some((_, start, end)) => interop::picture_bands_for(
+                frame.nes_picture,
+                frame.nes_picture_height,
+                (start, end),
+                self.picture_bands.take(),
+            )?,
+            None => None,
+        };
         let fixed = FixedMeshes {
             // REQ-SCN-068: the subdivided box only while something bends.
             unit_box: match &self.unit_box_bent {
@@ -1183,6 +1206,10 @@ impl WgpuSceneRenderer {
                 _ => &self.picture_quad,
             },
             wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
+            picture_bands: self
+                .picture_bands
+                .as_ref()
+                .map(|(_, playfield, rest)| (playfield, rest)),
         };
         let Ok(()) = self
             .plan

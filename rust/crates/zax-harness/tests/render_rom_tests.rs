@@ -641,18 +641,21 @@ fn req_arch_012_render_records_n_and_the_real_frames_do_not_depend_on_it() {
     }
 }
 
-/// `--run-ahead` is refused outside the domain of REQ-LOOP-064.
+/// `--run-ahead` is refused outside the domain: REQ-LOOP-064's 3, which lot KIRBY-MERGE raised
+/// to `NesCore::MAX_RUN_AHEAD` = 10 (Rust-only, owner request).
 #[test]
-fn req_loop_064_render_refuses_a_run_ahead_outside_zero_to_three() {
-    for value in ["4", "-1", "many"] {
+fn req_loop_064_render_refuses_a_run_ahead_outside_the_domain() {
+    for value in ["11", "-1", "many"] {
         assert!(
             Options::parse(&arguments(&["--out", "x", "--run-ahead", value])).is_err(),
             "--run-ahead {value} was accepted"
         );
     }
-    let options = Options::parse(&arguments(&["--out", "x", "--run-ahead", "3"]))
-        .expect("3 is in the domain");
-    assert_eq!(3, options.run_ahead);
+    for value in ["3", "4", "10"] {
+        let options = Options::parse(&arguments(&["--out", "x", "--run-ahead", value]))
+            .expect("inside the domain");
+        assert_eq!(value.parse::<u8>().unwrap(), options.run_ahead);
+    }
     assert_eq!(
         0,
         Options::parse(&arguments(&["--out", "x"]))

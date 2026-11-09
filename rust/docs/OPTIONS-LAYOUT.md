@@ -133,6 +133,8 @@ now — the Lua API dump is unchanged, and so is the settings file.
 | `audio.volume` | Audio | Audio | — |
 | `emu.game_speed` | Emulation | Emulation | — |
 | `emu.run_ahead` | Emulation | Emulation | — |
+| `emu.smooth_scroll_ahead` | (new, KIRBY-MERGE) | Emulation | — |
+| `emu.smooth_scroll_view` | (new, KIRBY-MERGE) | Emulation | — |
 | `emu.auto_tv_mode` | Emulation | Emulation | Video region |
 | `emu.tv_mode` | Emulation | Emulation | Video region |
 | `input.emulated_menu_button` | Emulation | Emulation | Advanced |

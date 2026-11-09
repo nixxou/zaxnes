@@ -30,6 +30,8 @@ emu.lua_smooth_gc
 emu.pause_3d_in_2d
 emu.pipeline
 emu.run_ahead
+emu.smooth_scroll_ahead
+emu.smooth_scroll_view
 emu.tv_mode
 input.emulated_menu_button
 light.intensity

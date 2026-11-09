@@ -93,6 +93,12 @@ pub fn objects(
         unit_box: &unit_box,
         picture_quad: &picture_quad,
         wide_picture_quad: wide.as_ref().map(|(_, quad)| quad),
+        // KIRBY-MERGE: no bands, so a 2D export is the one whole picture quad whether or not the
+        // experimental smooth scrolling is shifting the playfield on screen. The export answers
+        // the floor and extent criteria of AMD-055 REQ-SCN-084, which a fraction of a pixel of
+        // scrolling does not enter, and `collect_picture_quad` takes its ordinary path without
+        // them.
+        picture_bands: None,
     };
 
     let mut residency = MeshTable::default();
@@ -228,6 +234,10 @@ impl Residency for MeshTable {
     }
 
     fn picture(&mut self, _picture: &[u8], _height: usize) -> Result<Option<usize>, Self::Error> {
+        Ok(Some(0))
+    }
+
+    fn overlay(&mut self, _picture: &[u8], _height: usize) -> Result<Option<usize>, Self::Error> {
         Ok(Some(0))
     }
 }

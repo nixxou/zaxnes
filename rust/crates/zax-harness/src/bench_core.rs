@@ -29,7 +29,7 @@ pub const USAGE: &str = "zax-harness bench-core <rom.nes> [options]
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
   --load-state <file>      restore a state block (with its ROM image) before the run
   --advanced               apply the built-in patches of an advanced widescreen mode too
-  --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so benches stay comparable)
+  --run-ahead <n>          run-ahead frames, 0 to 10 (default 0, so benches stay comparable)
   --hack-options <bits>    the built-in patch's option bits ($500A)";
 
 /// What `bench-core` runs.
@@ -46,7 +46,7 @@ pub struct Options {
     widescreen_y: i32,
     load_state: Option<PathBuf>,
     advanced: bool,
-    patch_bits: Option<u8>,
+    patch_bits: Option<u16>,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), **0 by default** so that a bench taken before
     /// this lot and one taken after it measure the same work (REQ-ARCH-012 amended).
     run_ahead: u8,
@@ -99,12 +99,12 @@ impl Options {
                 "--widescreen" => options.widescreen = i32::try_from(count()?).unwrap_or(0),
                 "--widescreen-y" => options.widescreen_y = i32::try_from(count()?).unwrap_or(0),
                 "--load-state" => options.load_state = Some(PathBuf::from(value)),
-                "--hack-options" => options.patch_bits = u8::try_from(count()?).ok(),
+                "--hack-options" => options.patch_bits = u16::try_from(count()?).ok(),
                 "--run-ahead" => {
                     options.run_ahead = u8::try_from(count()?)
                         .ok()
                         .filter(|frames| *frames <= zax_nes::NesCore::MAX_RUN_AHEAD)
-                        .ok_or_else(|| HarnessError::Usage("--run-ahead: 0 to 3".to_owned()))?;
+                        .ok_or_else(|| HarnessError::Usage("--run-ahead: 0 to 10".to_owned()))?;
                 }
                 _ => return Err(usage()),
             }

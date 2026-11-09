@@ -361,6 +361,19 @@ pub struct Ppu2C02 {
     /// The decoder of the frame just run asks its screen's top and bottom lines hidden with a
     /// vertical margin too ([`crate::wide_decode::MarginDecoder::hides_overscan`]).
     hides_overscan: bool,
+    /// The picture line the rows the margin decoder decoded end at (the playfield's bottom: a
+    /// status bar under it), `None` when it decoded none.
+    playfield_end: Option<i16>,
+    /// Whether [`Ppu2C02::playfield_end`] is found without margins too.
+    wants_playfield_end: bool,
+    /// The scroll of each visible line as it was drawn (x on the 512-pixel plane, y on the
+    /// 480-line one), kept only while [`Ppu2C02::set_tracks_line_scroll`] asks: the smooth
+    /// scrolling finds the band that scrolls in it.
+    line_scroll: Vec<Option<(u16, u16)>>,
+    tracks_line_scroll: bool,
+    /// The OAM sprites of the frame drawn in the "asleep" tint, one bit each
+    /// ([`crate::wide::WideExtension::sprite_tinted`]).
+    tinted_sprites: u64,
     /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
@@ -373,6 +386,20 @@ pub struct Ppu2C02 {
     /// The margin decoder's own background palette for the frame, for the decoded tiles in
     /// sub-palettes 4-7 ([`crate::wide_decode::MarginDecoder::margin_palette`]).
     margin_palette: Option<[u8; 16]>,
+    /// The palette and PPUMASK as the frame just drawn ended (its vblank's first line), which
+    /// the wide 2D picture is coloured with. Not saved: with run-ahead the host composes that
+    /// picture once the real frame's state is back, whose palette is a frame older than the
+    /// pixels and records it keeps; the first column, composed with it, showed a fade a step
+    /// late.
+    ///
+    /// Lot KIRBY-MERGE kept these two **here**, at the cold end of the struct, and not beside
+    /// [`Self::palette`] where the branch wrote them: 33 bytes inserted there move the offset of
+    /// `decay_stamp`, `timing`, `dot` and every other hot field, which is `docs/progress/MF-2.md`
+    /// step 0's trap in `Ppu2C02::run_dots`. The copy below costs the same wherever they sit.
+    /// They are the *frame's last* palette, unrelated to [`Self::shown_palette_entry`], which is
+    /// the VS. System remap of one written byte.
+    frame_palette: [u8; PALETTE_SIZE],
+    frame_mask: u8,
 }
 
 impl Default for Ppu2C02 {
@@ -477,7 +504,14 @@ impl Ppu2C02 {
             frame_vertical_margin: 0,
             centre_lines: (0, 240),
             hides_overscan: false,
+            playfield_end: None,
+            wants_playfield_end: false,
+            line_scroll: Vec::new(),
+            tracks_line_scroll: false,
+            tinted_sprites: 0,
             margin_palette: None,
+            frame_palette: [0; PALETTE_SIZE],
+            frame_mask: 0,
         }
     }
 
@@ -1087,6 +1121,8 @@ impl Ppu2C02 {
                 // The frame boundary always fires; the flag itself can be suppressed by a
                 // read of $2002 one dot earlier (nesdev, "PPU frame timing").
                 self.vblank_just_started = true;
+                self.frame_palette = self.palette;
+                self.frame_mask = self.mask;
                 if !self.suppress_vblank {
                     self.vblank_flag = true;
                 }

@@ -113,7 +113,15 @@ pub const GAME_LIGHT_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::Rende
 
 /// *Advanced options › Emulation* of a game: the run-ahead, whose right value depends on each
 /// game's own lag. Q-103 still holds it at 0 for a profile whose scripts change the core.
-pub const GAME_EMULATION_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::EmuRunAhead)];
+///
+/// KIRBY-MERGE added the second row, the smooth scrolling from the run-ahead: it spends one of
+/// the game's run-ahead frames, so it belongs where the run-ahead is and not on a page of its
+/// own. The branch had written both into a flat `GAME_ROWS` that RO-3 has since replaced; the
+/// run-ahead was already here.
+pub const GAME_EMULATION_ROWS: [OptionRow; 2] = [
+    OptionRow::Setting(SettingId::EmuRunAhead),
+    OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
+];
 
 /// The rows of `page` in the options of one **game**; empty for a page a game has not got.
 // Q-107 §5, §6
@@ -179,9 +187,10 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         OptionRow::HalfRate3d => &[SettingId::VideoHalfRate3d],
         OptionRow::Region => &[SettingId::EmuAutoTvMode, SettingId::EmuTvMode],
         OptionRow::TouchPad => &[SettingId::InputTouchPad],
-        // The fourteen of RO-2, each its own one setting. A `Setting` row that is **not** one of
-        // them — the fifty-six of the console's global advanced page go through the same
-        // variant — names nothing here, so it can never become an option of a game.
+        // The fourteen of RO-2 and the fifteenth of KIRBY-MERGE, each its own one setting. A
+        // `Setting` row that is **not** one of them — the fifty-six of the console's global
+        // advanced page go through the same variant — names nothing here, so it can never
+        // become an option of a game.
         OptionRow::Setting(id) => one_setting(id),
         OptionRow::Language
         | OptionRow::Camera
@@ -197,6 +206,10 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
 const fn one_setting(id: SettingId) -> &'static [SettingId] {
     match id {
         SettingId::EmuRunAhead => &[SettingId::EmuRunAhead],
+        // KIRBY-MERGE: the smooth scrolling spends a frame of the game's own run-ahead, so it is
+        // an option of the game beside it (owner request: a game whose own lag is two frames
+        // takes run-ahead 2, smooth with the latency of 1).
+        SettingId::EmuSmoothScrollAhead => &[SettingId::EmuSmoothScrollAhead],
         SettingId::VideoAntiAlias => &[SettingId::VideoAntiAlias],
         SettingId::VideoMaxQueuedFrames => &[SettingId::VideoMaxQueuedFrames],
         SettingId::RenderVisualStyle => &[SettingId::RenderVisualStyle],
@@ -852,8 +865,9 @@ mod tests {
         assert!(!is_game_row_setting(SettingId::LightIntensity));
     }
 
-    /// Each of the thirty rows a game can have stores a value of its own, "Use Global" takes it
-    /// back, and "Put everything back to global" clears the lot.
+    /// Each of the thirty-one rows a game can have stores a value of its own, "Use Global" takes
+    /// it back, and "Put everything back to global" clears the lot. Thirty until KIRBY-MERGE
+    /// added the smooth scrolling from the run-ahead.
     #[test]
     fn ro_3_every_row_stores_its_own_value_and_goes_back_to_global() {
         let steppable: Vec<OptionRow> = all_game_rows()
@@ -861,7 +875,7 @@ mod tests {
             // own test above.
             .filter(|row| *row != OptionRow::Overscan)
             .collect();
-        assert_eq!(29, steppable.len(), "{steppable:?}");
+        assert_eq!(30, steppable.len(), "{steppable:?}");
         let mut model = model(GameOptions::new());
         for row in &steppable {
             let row = *row;
@@ -1073,5 +1087,27 @@ mod tests {
         }
         assert_eq!(OptionsPage::NesPicture.game_rows(), []);
         assert_eq!(OptionsPage::Camera.game_rows(), []);
+    }
+}
+
+#[cfg(test)]
+mod run_ahead_rows {
+    use zax_settings::values::SettingValue;
+
+    use super::*;
+
+    /// A game's run-ahead offers every value, whether it has one of its own or not.
+    #[test]
+    fn a_game_s_run_ahead_offers_every_value() {
+        let global = SettingsModel::new();
+        for own in [None, Some(0), Some(10)] {
+            let options: GameOptions = own
+                .map(|value| vec![(SettingId::EmuRunAhead, SettingValue::Int(value))])
+                .unwrap_or_default();
+            let model =
+                GameOptionsModel::new(std::path::PathBuf::new(), String::new(), &global, options);
+            let choices = model.choices(OptionRow::Setting(SettingId::EmuRunAhead));
+            assert_eq!(11, choices.len(), "{own:?}: {choices:?}");
+        }
     }
 }

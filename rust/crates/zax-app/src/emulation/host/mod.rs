@@ -248,6 +248,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     stage_clock: StageClock,
     /// The frame clock.
     pub pacer: FramePacer,
+    /// The frames the display shows a second (its refresh over the swap interval, or the frame
+    /// cap), told by the application each frame: the smooth scrolling from the run-ahead does
+    /// nothing at 60 or less.
+    pub display_rate: f64,
     /// The rollback history.
     pub rollback: RollbackHistory,
     /// The last frames one by one, for stepping back (J) and on (K).
@@ -381,6 +385,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 f64::from(RegionTiming::for_region(NesRegion::Ntsc).nominal_frames_per_second),
                 clock.unwrap_or_else(system_clock),
             ),
+            display_rate: 60.0,
             paths,
             scene,
             games,

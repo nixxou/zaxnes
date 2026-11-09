@@ -62,9 +62,10 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
   --no-builtin-patches     restore --load-state without the built-in ROM patches
   --advanced               apply the built-in patches of an advanced widescreen mode too
-  --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
+  --hack-options <bits>    the built-in patch's option bits (decimal, the low byte $500A; default its own)
   --sprite-limit <mode>    kept (default), removed or smart: the 8 sprites per line of the picture
-  --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so captures stay comparable)
+  --run-ahead <n>          run-ahead frames, 0 to 10 (default 0, so captures stay comparable)
+  --smooth-ahead <0|1>     the smooth scrolling from the run-ahead (emu.smooth_scroll_ahead), off by default
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            (and as tall) as the widescreen margins make them
   --load-state <file>      restore a state block (written by --save-state) after the reset
@@ -179,13 +180,15 @@ pub struct Options {
     /// The movie to play.
     pub movie: Option<PathBuf>,
     /// The built-in patch's option bits, when given.
-    pub hack_options: Option<u8>,
+    pub hack_options: Option<u16>,
     /// The limit of eight sprites per line of the picture.
     pub sprite_limit: SpriteLimit,
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 by default: the suites of frames, tiles and
     /// conversion results are only comparable at N equal (REQ-ARCH-012 amended), so a plain
     /// `render` is the campaign's own capture whatever the application's default is.
     pub run_ahead: u8,
+    /// The smooth scrolling from the run-ahead (`emu.smooth_scroll_ahead`), off by default.
+    pub smooth_ahead: bool,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -299,6 +302,7 @@ impl Options {
             hack_options: None,
             sprite_limit: SpriteLimit::Kept,
             run_ahead: 0,
+            smooth_ahead: false,
             save_state: None,
             dump_mem: None,
             trace_ram: None,
@@ -386,7 +390,7 @@ impl Options {
         u8::try_from(frames)
             .ok()
             .filter(|frames| *frames <= zax_nes::NesCore::MAX_RUN_AHEAD)
-            .ok_or_else(|| "--run-ahead: 0 to 3".to_owned())
+            .ok_or_else(|| "--run-ahead: 0 to 10".to_owned())
     }
 
     /// Applies one `key value` option; the error is the message to print.
@@ -442,8 +446,8 @@ impl Options {
             "--movie" => self.movie = Some(PathBuf::from(value)),
             "--hack-options" => {
                 self.hack_options = Some(
-                    u8::try_from(integer(value)?)
-                        .map_err(|_| "--hack-options: 0 to 255".to_owned())?,
+                    u16::try_from(integer(value)?)
+                        .map_err(|_| "--hack-options: 0 to 65535".to_owned())?,
                 );
             }
             "--sprite-limit" => {
@@ -459,6 +463,7 @@ impl Options {
                 };
             }
             "--run-ahead" => self.run_ahead = Self::run_ahead_of(integer(value)?)?,
+            "--smooth-ahead" => self.smooth_ahead = integer(value)? != 0,
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--trace-ram" => self.trace_ram = Some(PathBuf::from(value)),
@@ -922,6 +927,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             hack_options: options.hack_options,
             sprite_limit: options.sprite_limit,
             run_ahead: options.run_ahead,
+            smooth_ahead: options.smooth_ahead,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
             trace_ram: options.trace_ram.as_deref(),

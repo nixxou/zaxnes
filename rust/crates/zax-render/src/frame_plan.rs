@@ -88,7 +88,23 @@ pub trait Residency {
         picture: &[u8],
         height: usize,
     ) -> Result<Option<Self::Texture>, Self::Error>;
+
+    /// The sprites the experimental smooth scrolling draws apart (`SceneState::picture_overlay`),
+    /// uploaded as a second picture of the same kind, or `None` when it has the wrong size.
+    ///
+    /// # Errors
+    ///
+    /// When the GPU object cannot be created.
+    fn overlay(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<Self::Texture>, Self::Error>;
 }
+
+/// How far in front of the 2D picture the sprites the smooth scrolling draws apart are, in
+/// scene units: in front of it for the depth test, too little to show.
+const OVERLAY_NUDGE: f32 = 0.05;
 
 /// One tile, backdrop or picture quad ready to draw.
 #[derive(Debug, Clone, Copy)]
@@ -274,6 +290,9 @@ pub struct FixedMeshes<'a> {
     /// The quad of a widescreen 2D-mode picture, made for the margin of the displayed picture
     /// (`interop::wide_quad_for`); `None` when the picture is 256 pixels wide.
     pub wide_picture_quad: Option<&'a Arc<TileMesh>>,
+    /// The two bands of the 2D picture while the experimental smooth scrolling shifts its
+    /// playfield (`interop::picture_bands_for`), the playfield's first.
+    pub picture_bands: Option<(&'a Arc<TileMesh>, &'a Arc<TileMesh>)>,
 }
 
 impl<M, T> FramePlan<M, T> {
@@ -316,6 +335,8 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 fixed,
                 frame.nes_picture,
                 frame.nes_picture_height,
+                scene.picture_shift.map(|(shift, _, _)| shift),
+                &scene.picture_overlay,
             )?
         {
             return Ok(());
@@ -361,10 +382,55 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         fixed: FixedMeshes<'_>,
         picture: &[u8],
         height: usize,
+        shift: Option<f32>,
+        overlay: &[u8],
     ) -> Result<bool, R::Error> {
         let Some((width, height)) = crate::interop::picture_size(picture.len(), height) else {
             return Ok(false);
         };
+        if let (Some(shift), Some((playfield, rest))) = (shift, fixed.picture_bands) {
+            let Some(texture) = residency.picture(picture, height)? else {
+                return Ok(false);
+            };
+            #[allow(clippy::cast_precision_loss)] // 256 to 1280, 240 to 720.
+            let texture_size = Vector2::new(width as f32, height as f32);
+            let moved = Mat4::translation(Vec3::new(-shift, 0.0, 0.0));
+            for (band, model) in [(playfield, moved), (rest, Mat4::IDENTITY)] {
+                let Some(mesh) = residency.mesh(band)? else {
+                    continue;
+                };
+                self.lists.opaque.push(DrawItem {
+                    color_mode: 1,
+                    texture: Some(texture),
+                    texture_size,
+                    receive_shadow: false,
+                    clip: true,
+                    ..DrawItem::plain(mesh, model, (band.bounds_min(), band.bounds_max()))
+                });
+            }
+            // The sprites that move with the camera, where they are, a little in front.
+            let whole = if (width, height) == (256, 240) {
+                Some(fixed.picture_quad)
+            } else {
+                fixed.wide_picture_quad
+            };
+            if let (Some(quad), false) = (whole, overlay.is_empty()) {
+                if let (Some(texture), Some(mesh)) =
+                    (residency.overlay(overlay, height)?, residency.mesh(quad)?)
+                {
+                    let model = Mat4::translation(Vec3::new(0.0, 0.0, -OVERLAY_NUDGE));
+                    self.lists.opaque.push(DrawItem {
+                        color_mode: 1,
+                        texture: Some(texture),
+                        texture_size,
+                        receive_shadow: false,
+                        clip: true,
+                        ..DrawItem::plain(mesh, model, (quad.bounds_min(), quad.bounds_max()))
+                    });
+                }
+            }
+            return Ok(true);
+        }
         let quad = if (width, height) == (256, 240) {
             fixed.picture_quad
         } else {

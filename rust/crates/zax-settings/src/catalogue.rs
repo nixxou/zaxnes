@@ -152,6 +152,8 @@ setting_ids! {
     VideoWidescreenExtra => "video.widescreen_extra",
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
     VideoWidescreenAdvanced => "video.widescreen_advanced",
+    EmuSmoothScrollAhead => "emu.smooth_scroll_ahead",
+    EmuSmoothScrollView => "emu.smooth_scroll_view",
     VideoRemoveSpriteLimit => "video.remove_sprite_limit",
     VideoOverscanNtscTop => "video.overscan_ntsc_top",
     VideoOverscanNtscBottom => "video.overscan_ntsc_bottom",

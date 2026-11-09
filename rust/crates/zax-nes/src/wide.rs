@@ -16,12 +16,14 @@
 //! | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels |
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
-//! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring; bit 4: the PRG window goes on over `$6000`-`$7FFF` (8 KiB more, for a game with nothing there) |
-//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
+//! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring; bit 5: sprite high bytes and flags kept per sprite page (`$500C`), an OAM DMA taking those of its source page; bit 4: the PRG window goes on over `$6000`-`$7FFF` (8 KiB more, for a game with nothing there) |
+//! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA; `$5101 + 4n` instead: sprite *n*'s flags (bit 0: drawn in the "asleep" tint, grey), taken the same way |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
+//! | `$500C` | R/W | with `$5007` bit 5: the sprite page the ROM builds (its CPU page, `$02` for `$0200`); a write clears that page's high bytes and flags, which `$5100`-`$51FF` then write |
 //! | `$500B` | R/W | execution zone: bit 7 on, bit 6 its data at `$3000`-`$3FFF` (below), bits 0-5 the page of the pack's code shown at `$2800`-`$3FFF` (`$2FFF` with bit 6) |
 //! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it); `$5800`-`$5FFF` shows PRG-ROM instead while the window is on |
+//! | `$57F0`-`$57F7` | R/W | in that RAM: the camera report of a hack's smooth scrolling ([`CameraReport`]), which the core reads and clears after each frame |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
 //! `$5005` are read each time a band of tiles is captured, so a game can hide the sides behind
@@ -50,6 +52,9 @@ pub const FIRST_REGISTER: u16 = 0x5000;
 
 /// Last address of the register window.
 pub const LAST_REGISTER: u16 = 0x5FFF;
+
+/// `$5007` bit 5: sprite high bytes and flags kept per sprite page (`$500C`).
+const PAGED_SPRITES: u8 = 0x20;
 
 /// First address of the RAM of the window.
 const FIRST_RAM: u16 = 0x5200;
@@ -88,6 +93,41 @@ const NAMETABLE_MARGIN: i32 = 128;
 /// The second sprite page in the extension's RAM (`$5007` bit 2), and the high bytes of its
 /// sprites' x (sprite n at `EXTRA_HIGH + 4n`).
 const EXTRA_OAM: u16 = 0x5300;
+
+/// The camera report of a hack's smooth scrolling, in the window's RAM: a status byte the code
+/// writes last, then the camera across, down and the playfield's bottom ([`CameraReport`]).
+const CAMERA_REPORT: u16 = 0x57F0;
+const REPORT_X: u8 = 0x01;
+const REPORT_X_FRACTION: u8 = 0x02;
+const REPORT_Y: u8 = 0x04;
+const REPORT_Y_FRACTION: u8 = 0x08;
+const REPORT_END: u8 = 0x10;
+
+/// What a hack's code reported of the game's camera in the frame just run, for the smooth
+/// scrolling: how the game keeps it is the hack's business (one variable, several modes, a
+/// camera worked out), the core only reads what it was told. Each part is optional; a frame
+/// without a report (status 0) has no smooth scrolling, but a frame or two the game runs late.
+///
+/// | Address | Contents |
+/// |---|---|
+/// | `$57F0` | status, written last: bit 0 the camera across, bit 1 its fraction, bit 2 the camera down, bit 3 its fraction, bit 4 the playfield's bottom |
+/// | `$57F1`-`$57F2` | the camera across, in pixels (low, high) |
+/// | `$57F3` | its fraction of a pixel, in 256ths |
+/// | `$57F4`-`$57F5` | the camera down, in pixels (low, high) |
+/// | `$57F6` | its fraction of a pixel, in 256ths |
+/// | `$57F7` | the first screen line under the scrolled playfield (a status bar's top); without it, the core finds it from the rows the PPU drew |
+///
+/// The camera is the one of the picture the next frame shows (written during the game's logic,
+/// after it moved the camera and before the frame is drawn).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CameraReport {
+    /// The camera across, in pixels, and its fraction (0 when not reported).
+    pub x: Option<(i32, u8)>,
+    /// The camera down, in pixels, and its fraction.
+    pub y: Option<(i32, u8)>,
+    /// The first screen line under the scrolled playfield.
+    pub end: Option<i16>,
+}
 const EXTRA_HIGH: u16 = 0x5400;
 
 /// The widest margin a ROM can ask for or be told of through its 8-bit registers.
@@ -122,6 +162,16 @@ pub struct WideExtension {
     pending_high: [u8; 64],
     /// Sprite x high bytes of the sprites now in OAM.
     active_high: [u8; 64],
+    /// Sprite flags (`$5101 + 4n`) written since the last OAM DMA, and those of the sprites now
+    /// in OAM. Not saved: a display aid the ROM writes again each frame.
+    pending_flags: [u8; 64],
+    active_flags: [u8; 64],
+    /// With `$5007` bit 5: the high bytes and flags of each sprite page (CPU page & 7), which an
+    /// OAM DMA takes from its source page, and the page being built (`$500C`). Not saved: the
+    /// ROM writes them again as it builds each page.
+    page_high: [[u8; 64]; 8],
+    page_flags: [[u8; 64]; 8],
+    built_page: u8,
     /// The second sprite page (`$5007` bit 2) latched at the last OAM DMA: 64 sprites in OAM
     /// format, then the high bytes of their x. Not saved: the next DMA latches it again.
     extra_oam: [u8; 256],
@@ -169,6 +219,11 @@ impl WideExtension {
             right_extent: 0xFF,
             pending_high: [0; 64],
             active_high: [0; 64],
+            pending_flags: [0; 64],
+            active_flags: [0; 64],
+            page_high: [[0; 64]; 8],
+            page_flags: [[0; 64]; 8],
+            built_page: 0,
             extra_oam: [0xFF; 256],
             extra_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
@@ -282,6 +337,17 @@ impl WideExtension {
             return (-margin, 256 + margin);
         }
         self.visible_range()
+    }
+
+    /// Whether OAM sprite `sprite` (0..64) is drawn in the "asleep" tint (`$5101 + 4n` bit 0):
+    /// an enemy a hack keeps waiting in a margin, shown apart from the ones that play.
+    #[must_use]
+    pub fn sprite_tinted(&self, sprite: usize) -> bool {
+        self.rom_margin() > 0
+            && self
+                .active_flags
+                .get(sprite)
+                .is_some_and(|flags| flags & 1 != 0)
     }
 
     /// The screen x of OAM sprite `sprite` (0..64) whose OAM x byte is `low`.
@@ -406,6 +472,7 @@ impl WideExtension {
             0x5009 => Some(self.window_page),
             0x500A => Some(self.host_options),
             0x500B => Some(self.zone),
+            0x500C => Some(self.built_page),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -434,6 +501,24 @@ impl WideExtension {
             0x5008 => self.window_bank = value,
             0x5009 => self.window_page = value,
             0x500B => self.zone = value,
+            0x500C => {
+                self.built_page = value;
+                let page = usize::from(value & 7);
+                self.page_high[page] = [0; 64];
+                self.page_flags[page] = [0; 64];
+            }
+            0x5100..=0x51FF if self.layout & PAGED_SPRITES != 0 => {
+                let page = usize::from(self.built_page & 7);
+                let sprite = usize::from(address & 0xFF) / 4;
+                if address & 3 == 1 {
+                    self.page_flags[page][sprite] = value;
+                } else {
+                    self.page_high[page][sprite] = value;
+                }
+            }
+            0x5100..=0x51FF if address & 3 == 1 => {
+                self.pending_flags[usize::from(address & 0xFF) / 4] = value;
+            }
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -459,20 +544,67 @@ impl WideExtension {
         }
     }
 
-    /// An OAM DMA just copied a new sprite page: the high bytes written for it become the ones
-    /// in use, and the next page starts from zero.
-    pub fn latch_sprites(&mut self) {
+    /// The camera report of the frame just run, if a hack's code wrote one: read and cleared,
+    /// so that a frame without a report has none.
+    pub fn take_camera_report(&mut self) -> Option<CameraReport> {
+        let base = usize::from(CAMERA_REPORT - FIRST_RAM);
+        let report = self.scratch.get_mut(base..base + 8)?;
+        let status = report[0];
+        if status == 0 {
+            return None;
+        }
+        report[0] = 0;
+        let coordinate = |given: u8, fraction: u8, low: usize| {
+            (status & given != 0).then(|| {
+                let pixels = i32::from(u16::from_le_bytes([report[low], report[low + 1]]));
+                let part = if status & fraction != 0 {
+                    report[low + 2]
+                } else {
+                    0
+                };
+                (pixels, part)
+            })
+        };
+        Some(CameraReport {
+            x: coordinate(REPORT_X, REPORT_X_FRACTION, 1),
+            y: coordinate(REPORT_Y, REPORT_Y_FRACTION, 4),
+            end: (status & REPORT_END != 0).then(|| i16::from(report[7])),
+        })
+    }
+
+    /// An OAM DMA just copied a new sprite page, from CPU page `page`: the high bytes written
+    /// for it become the ones in use.
+    pub fn latch_sprites(&mut self, page: u8) {
         if !self.unlocked {
             return;
         }
 
+        if self.layout & PAGED_SPRITES != 0 {
+            // Each page keeps its own, whatever page the game builds meanwhile.
+            self.active_high = self.page_high[usize::from(page & 7)];
+            self.active_flags = self.page_flags[usize::from(page & 7)];
+        } else {
+            self.latch_pending();
+        }
+        self.latch_extra_page();
+    }
+
+    /// Without `$5007` bit 5: the high bytes written since the last DMA become the ones in use,
+    /// and the next page starts from zero.
+    fn latch_pending(&mut self) {
         self.active_high = self.pending_high;
+        self.active_flags = self.pending_flags;
         // Bit 3: the ROM writes the high byte of every sprite it places, so they stay with the
         // sprite page as it is, finished or not (a frame the game runs late); otherwise each page
         // starts from 0.
         if self.layout & 8 == 0 {
             self.pending_high = [0; 64];
+            self.pending_flags = [0; 64];
         }
+    }
+
+    /// `$5007` bit 2: the second sprite page, latched at each OAM DMA.
+    fn latch_extra_page(&mut self) {
         if self.layout & 4 != 0 {
             let page = usize::from(EXTRA_OAM - FIRST_RAM);
             let high = usize::from(EXTRA_HIGH - FIRST_RAM);
@@ -552,6 +684,11 @@ impl WideExtension {
     #[must_use]
     pub const fn stalling(&self) -> bool {
         self.stall > 0
+    }
+
+    /// Clears the overclock register (`$5006`): no extra CPU time from the next frame on.
+    pub fn clear_overclock(&mut self) {
+        self.overclock = 0;
     }
 
     /// Ends the overclock now: the game is waiting for the next frame (see
@@ -727,9 +864,30 @@ mod tests {
         wide.write(0x5003, 88);
         wide.write(0x5100 + 4 * 5 + 3, 0xFF);
         assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
-        wide.latch_sprites();
+        wide.latch_sprites(2);
         assert_eq!(wide.sprite_x(5, 0xF0), -16);
-        wide.latch_sprites();
+        wide.latch_sprites(2);
+        assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
+    }
+
+    #[test]
+    fn paged_sprite_high_bytes_follow_the_page_a_dma_sends() {
+        let mut wide = unlocked(88);
+        wide.write(0x5003, 88);
+        wide.write(0x5007, 0x20);
+        wide.write(0x500C, 2);
+        wide.write(0x5100 + 4 * 5, 0xFF);
+        wide.write(0x5100 + 4 * 5 + 1, 1);
+        wide.write(0x500C, 3);
+        wide.latch_sprites(2);
+        assert_eq!(wide.sprite_x(5, 0xF0), -16);
+        assert!(wide.sprite_tinted(5));
+        wide.latch_sprites(3);
+        assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
+        wide.latch_sprites(2);
+        assert_eq!(wide.sprite_x(5, 0xF0), -16);
+        wide.write(0x500C, 2);
+        wide.latch_sprites(2);
         assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
     }
 

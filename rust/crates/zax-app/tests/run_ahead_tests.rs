@@ -59,16 +59,16 @@ fn core_frames(harness: &LoopHarness) -> i64 {
 
 // ------------------------------------------------------------------ REQ-LOOP-064
 
-/// REQ-LOOP-064, the acceptance criterion of the setting: an empty user root gives 1, a write of
-/// 7 reads 3, a write of −1 reads 0.
+/// REQ-LOOP-064, the acceptance criterion of the setting: an empty user root gives 1, a write
+/// past the bound reads the bound (10, Rust-only, owner request; 3 in AMD-041), −1 reads 0.
 #[test]
 fn req_loop_064_the_setting_has_the_default_and_the_bounds_of_the_amendment() {
     let model = SettingsModel::new();
     assert_eq!(1, model.run_ahead(), "an empty user root gives 1");
 
     let mut model = SettingsModel::new();
-    model.set(SettingId::EmuRunAhead, SettingValue::Int(7));
-    assert_eq!(3, model.run_ahead());
+    model.set(SettingId::EmuRunAhead, SettingValue::Int(17));
+    assert_eq!(10, model.run_ahead());
     model.set(SettingId::EmuRunAhead, SettingValue::Int(-1));
     assert_eq!(0, model.run_ahead());
     for value in 0..=3 {
@@ -111,16 +111,24 @@ fn req_loop_064_the_setting_is_a_labelled_list_in_the_options_window() {
     let descriptor = zax_settings::catalogue::descriptor(SettingId::EmuRunAhead);
     assert!(zax_app::ui::options::is_shown(descriptor));
 
-    // The domain publishes a four-entry list, so the window draws a drop-down and not a slider.
+    // The domain publishes a list (0 to 10, Rust-only, owner request), so the window draws a
+    // drop-down and not a slider.
     let options = descriptor.domain().options().expect("a published list");
-    assert_eq!(4, options.len());
+    assert_eq!(11, options.len());
     let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
     assert_eq!(
         vec![
             "Run-ahead off",
             "1 frame (Recommended)",
             "2 frames",
-            "3 frames"
+            "3 frames",
+            "4 frames",
+            "5 frames",
+            "6 frames",
+            "7 frames",
+            "8 frames",
+            "9 frames",
+            "10 frames"
         ],
         labels
     );
@@ -650,8 +658,8 @@ fn q_103_the_guard_is_decided_when_the_profile_loads() {
     quiet.apply_run_ahead_setting(3);
     assert_eq!(3, quiet.run_ahead());
     // The bounds of REQ-LOOP-064 still hold through the guarded path.
-    quiet.apply_run_ahead_setting(7);
-    assert_eq!(3, quiet.run_ahead());
+    quiet.apply_run_ahead_setting(17);
+    assert_eq!(10, quiet.run_ahead());
     quiet.apply_run_ahead_setting(-1);
     assert_eq!(0, quiet.run_ahead());
 }

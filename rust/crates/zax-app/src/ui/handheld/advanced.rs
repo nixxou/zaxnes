@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 57] = [
+pub const ROW_SETTINGS: [SettingId; 58] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -81,6 +81,11 @@ pub const ROW_SETTINGS: [SettingId; 57] = [
     SettingId::EmuTvMode,
     SettingId::EmuAutoTvMode,
     SettingId::EmuRunAhead,
+    // KIRBY-MERGE: the experimental smooth scrolling from the run-ahead. A console row because
+    // RO-3's trees are one tree — `ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at`
+    // holds every `Setting` row of a game's options to being offered globally too, and this is a
+    // game's option (`game_options::GAME_EMULATION_ROWS`). Its debugging view stays desktop-only.
+    SettingId::EmuSmoothScrollAhead,
     SettingId::EmuCatchUp,
     SettingId::EmuLuaSmoothGc,
     SettingId::EmuLuaOptimized,
@@ -295,6 +300,12 @@ pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
         kind => {
             let increment = if row.step > 0.0 {
                 row.step
+            } else if let Some(step) = row.descriptor.domain().step().filter(|step| *step > 0.0) {
+                // A stepped number the window shows as a list (the run-ahead): its own step.
+                step
+            } else if kind == SettingKind::Int {
+                // A whole number moves by one at least: half a step rounds back where it was.
+                ((row.maximum - row.minimum) / 20.0).max(1.0)
             } else {
                 (row.maximum - row.minimum) / 20.0
             };

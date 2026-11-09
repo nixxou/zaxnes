@@ -63,9 +63,14 @@ fn req_arch_012_the_bench_runs_without_run_ahead_unless_asked() {
         );
     }
 
-    // Out of the domain of REQ-LOOP-064.
+    // Out of the domain: REQ-LOOP-064's bound is 3, which lot KIRBY-MERGE raised to
+    // `NesCore::MAX_RUN_AHEAD` = 10 (Rust-only, owner request: a game's own lag tried to the
+    // absurd). 4 is now inside it, and the two tests below are what pins the new edge.
+    let options = Options::parse(&arguments(&["--frames", "5", "--run-ahead", "10"])).unwrap();
+    let report = bench_core::run(&options).unwrap();
+    assert!(report.contains("run-ahead 10"), "{report}");
     assert!(matches!(
-        Options::parse(&arguments(&["--run-ahead", "4"])),
+        Options::parse(&arguments(&["--run-ahead", "11"])),
         Err(HarnessError::Usage(_))
     ));
     assert!(matches!(

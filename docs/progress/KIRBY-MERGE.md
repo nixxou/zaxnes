@@ -9,7 +9,7 @@ smooth scrolling at 120 Hz, and Kirby's margin decoder with its hack-pack aids.
 Steps: 1 plan · 2 merge · 3 behaviour · 4 measurements · 5 final pass.
 
 - [x] **Step 1/5 — plan** (this note)
-- [ ] Step 2/5 — merge and resolve
+- [x] **Step 2/5 — merge and resolve** (§2)
 - [ ] Step 3/5 — behaviour
 - [ ] Step 4/5 — measurements
 - [ ] Step 5/5 — final pass
@@ -259,3 +259,156 @@ margin decoder, and golden-core must stay byte-identical to `19c5065d`'s.
 * **Step 5** — fmt; clippy `-D warnings` on every crate touched; `cargo test --release` over the
   workspace `--include-ignored --no-fail-fast` with both ROM roots; golden-core byte-identical;
   the Android and PortMaster feature sets `cargo check`.
+
+---
+
+## 2. Step 2: the merge
+
+`git merge --no-ff feat/widescreen-kirby`, message *Merge feat/widescreen-kirby: Kirby's
+widescreen and its engine work*. Eight textual conflicts, exactly the eight the trial merge
+predicted, and four semantic ones the markers did not show — two of them found only by the
+compiler and the tests, which is why they are numbered on past the plan's list.
+
+### 2.1 The eight textual conflicts, per file
+
+**`zax-nes/src/nes_bus.rs`.** `dev` rewrote the whole DMA path into a state machine
+(REQ-CORE-113) in which `latch_sprites()` is called from **two** sites — the fast OAM loop and
+the per-cycle put — where the branch's base had one. Kept `dev`'s two sites, each passing
+`self.dma_oam_page`, which is the same byte the branch's `page` was. The marker itself landed
+inside `after_apu_write`, where `dev`'s rewrite had moved the surrounding text and where the call
+has no business being: the branch's line was dropped there and applied where the transfer
+actually ends.
+
+**`zax-nes/src/ppu/mod.rs`.** `dev` has `palette_marked` and four VS. System fields right after
+`palette`; the branch put `shown_palette`/`shown_mask` in the same place. Both kept, with the
+branch's two **moved to the cold tail** of the struct beside `margin_palette` and renamed
+`frame_palette`/`frame_mask`. The reason is on the field itself: 33 bytes inserted before
+`decay_stamp`, `timing` and `dot` moves every hot field's offset, which is `docs/progress/MF-2.md`
+step 0's trap in `Ppu2C02::run_dots`, and the once-per-frame copy costs the same wherever the
+fields sit. The rename also stops them being read as a plural of `dev`'s `shown_palette_entry`,
+which is the VS remap of one written byte and an unrelated thing. The `new()` conflict is the
+same two initialisers in the same new order.
+
+**`zax-nes/src/ppu/tiles.rs`.** Both sides changed the `colour` closure of `wide_picture_into`:
+`dev` ORs `OPAQUE_PIXEL` on every non-zero entry (AMD-050 REQ-CORE-049), the branch reads the
+frame's last palette and answers the `TINT_ENTRIES` arm. The branch had also added `entry_colour`,
+the same mapping **without** the opacity bit, for `split_steady_sprites`. Resolved into one
+function: `entry_colour` now holds the tint arm, the frame palette *and* the opacity bit, and the
+closure is `|entry| self.entry_colour(entry)`. See (S1). `dev`'s MF-LEG-2 split of
+`capture_background_row` into `capture_background_row_as::<SUBSTITUTED>` plus an
+`#[inline(never)]` cold arm is untouched.
+
+**`zax-render/src/renderer.rs`** and **`wgpu_backend/renderer.rs`.** `dev` added
+`wide_picture_cells` (the bend's subdivision cache) where the branch added `picture_bands`. Both
+fields, both initialisers; `dev`'s `wide_quad_for_subdivided_cached` block stays and the band
+block follows it (that part auto-merged).
+
+**`zax-app/src/ui/handheld/advanced.rs`.** `dev`'s RO-3 rewrite — `ROW_SETTINGS` plus
+`is_named_list`, `rungs_of` and `step_by_rung` — already shows and steps a labelled whole number
+as a list in its `Enum | Int` arm. The branch's second `Int` arm did the same by index where
+`dev`'s matches by value, and its `step_by_domain` fallback became dead once (S2) was resolved
+`dev`'s way; both dropped, so `value_text` and `step` are `dev`'s byte for byte. What was added
+is one line of `ROW_SETTINGS`.
+
+**`zax-app/src/ui/handheld/defaults.rs`.** `dev` has 13 handheld entries, the branch 11 with
+`EmuSmoothScrollAhead` = false as its eleventh. Result: 14 — `dev`'s 13 and the branch's one,
+kept even though the global default is now false as well, so that the handheld still says no if
+the global default ever goes back on.
+
+**`zax-app/src/ui/handheld/game_options.rs`.** The branch wrote a flat `GAME_ROWS` of 18 with two
+new rows; RO-3 has since replaced that list by the `GAME_MAIN` / `GAME_*_ROWS` tree, in which the
+branch's `Setting(EmuRunAhead)` row **already existed** as `GAME_EMULATION_ROWS`. So
+`Setting(EmuSmoothScrollAhead)` joined it there (1 → 2 rows) and `one_setting` gained its arm;
+`dev`'s tree is otherwise untouched.
+
+### 2.2 The semantic conflicts, resolved
+
+* **(S1) `entry_colour` vs `OPAQUE_PIXEL`** — as predicted, and a real defect if left: the
+  sprites `split_steady_sprites` moves into the overlay, and the pixels it writes back under
+  them, would have carried bit 6 clear and read as transparent in `gl/picture.rs`. One function
+  now, with the reason on it.
+* **(S2) the console catalogue** — resolved the **opposite** way to the plan, because `dev`'s own
+  tests state the rule the plan only guessed at:
+  `ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at` and
+  `ro_3_every_setting_row_of_the_tree_is_a_known_console_setting` hold *every* `Setting` row of a
+  game's options to being in `advanced::ROW_SETTINGS` **and** offered by the global tree — RO-3's
+  "one tree, two interfaces", so that "Use Global" has a global value to point at. So
+  `emu.smooth_scroll_ahead` is a console row: `ROW_SETTINGS` 57 → 58,
+  `options::EMULATION_ROWS` 5 → 6 (under the global run-ahead), `GAME_EMULATION_ROWS` 1 → 2, and
+  `goldens/handheld-option-tree.txt` regenerated — **two lines, the two expected ones**, nothing
+  else moved. `step_by_domain` is then unreachable and gone.
+  `emu.smooth_scroll_view` stays desktop-only, as `audio.latency_ms` does: it is a debugging view
+  and no game sets it.
+* **(S3) the options window** — both settings added to `options::EMULATION` under the run-ahead;
+  `goldens/desktop-options-shown.txt` gained its two keys and nothing else (the diff is two
+  lines); `detail.emu.smooth_scroll_ahead` and `detail.emu.smooth_scroll_view` written in English
+  and in French, which `ro_1_every_shown_setting_has_a_detailed_tooltip_in_both_languages`
+  requires and `ro_1_every_detail_text_belongs_to_a_shown_setting` keeps honest;
+  `rust/docs/OPTIONS-LAYOUT.md` took its two rows.
+* **(S4) `emu.smooth_scroll_ahead` was on by default** — now **off**, and this is the one place
+  the lot overrode the branch's own choice. The branch shipped it on (owner request) with the
+  handheld's defaults turning it back off. On, with the default run-ahead of 1 and any display
+  above 61 Hz, it shifts the 2D playfield of **every game with no pack at all** and turns on the
+  PPU's per-line scroll record. The owner's rule for this lot is that nothing may move for a game
+  without a pack unless it is behind an option off by default, and the work order's step 3 names
+  this case word for word. Nothing else about the feature changed: on, it behaves exactly as the
+  branch built it. The reasoning sits in the descriptor's own comment so that it is not undone by
+  accident.
+* **(S5) `u16` option bits** — no change needed on `dev`'s movie path after all: `movies.rs`
+  compares through `u64::from(self.hack_option_bits())`, which widens a `u16` as happily as a
+  `u8`, and writes the same JSON number. A `hackOptions` field recorded before the merge reads
+  back identically for bits 0-7.
+* **(S6) `PATCHES` 57 → 64** — no counted assertion broke. `for_rom(crc)` now answers Kirby's
+  decoder for an **unpatched** Kirby ROM, and the built-in-patch fingerprint changes, so
+  `hack_compat.json` is dropped and every ROM is studied again: intended, and the mechanism was
+  built for it.
+* **(S7) the bend and the bands** — recorded, not changed: `picture_bands_for` builds two flat
+  quads, so with `scene.bend_2d_mode` on (its default) and the smooth scrolling on, the two bands
+  do not curve. The feature is experimental and now off by default; step 3 looks at whether this
+  is visible enough to be worth giving the bands the subdivision `wide_picture_cells` already
+  carries.
+* **(S8)** — a non-issue: the new `overlay` copies `picture`'s signature, not `texture`'s.
+* **(S9) clippy's line limit** — not yet; step 5 settles it.
+* **(S10) `zax-render/src/scene_export.rs`** (new, found by the compiler) — `dev`'s AMD-055
+  geometry export implements `Residency` and builds a `FixedMeshes`, both of which the branch
+  grew. `MeshTable::overlay` answers as its `picture` does, and the export passes
+  `picture_bands: None`: a 2D export is the one whole quad whether or not the playfield is being
+  shifted on screen, since the export answers the floor and extent criteria of AMD-055
+  REQ-SCN-084 and a fraction of a pixel of scrolling does not enter them.
+* **(S11) the harness's run-ahead bound** (found by the tests) — the branch raised
+  `MAX_RUN_AHEAD` to 10 and updated `zax-app/tests/run_ahead_tests.rs`, but two `dev`-side
+  harness tests still asserted that `--run-ahead 4` is refused (`bench_core_tests`'s
+  `req_arch_012_the_bench_runs_without_run_ahead_unless_asked` and `render_rom_tests`'s
+  `req_loop_064_render_refuses_a_run_ahead_outside_zero_to_three`), and four help strings and
+  error messages in `bench_core.rs` and `render/mod.rs` still read "0 to 3" while the code they
+  document already filtered on `MAX_RUN_AHEAD`. Both tests now pin the **new** edge — 10
+  accepted, 11 refused, and the render one checks 3, 4 and 10 all land — and the four strings
+  read "0 to 10". `zax-harness/tests/widescreen_zone_tests.rs` needed the new `smooth_ahead`
+  field.
+
+### 2.3 What was not merged, and what was overridden
+
+No **feature** of the branch was dropped. Three pieces of its *code* were, each because `dev`
+already carried the same intent in a better shape — `advanced::value_text`'s duplicate `Int` arm,
+`advanced::step_by_domain`, and the flat `GAME_ROWS` — and one of its *choices* was overridden:
+the default of `emu.smooth_scroll_ahead`, for the reason in (S4).
+
+### 2.4 Found and deliberately left alone
+
+`Ppu2C02::paint_extra_sprites` writes its colours **without** the opacity bit of AMD-050
+REQ-CORE-049, so the extra sprites of a wide 2D picture — the extension's second sprite page, and
+sprites whose high byte puts them left of x = 0 — come out with alpha 0 in the GL 2D path. That is
+`dev`'s behaviour at `19c5065d` and not something this merge introduces; correcting it would move
+the picture of the packs that use the second page, which the owner's rule forbids in this lot. It
+is kept to the byte, with a comment on the line, and is a candidate for a lot of its own.
+
+### 2.5 Verification of the merge commit
+
+* `cargo build --workspace --all-targets` clean in **debug and release**, and `cargo check -p
+  zax-app --features bundled,wgpu --all-targets` clean.
+* `cargo test --release` over the five crates both sides touched — `zax-nes`, `zax-settings`,
+  `zax-render`, `zax-app`, `zax-harness` — with `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set:
+  **2589 passed, 0 failed, 14 ignored**.
+* Goldens moved: `desktop-options-shown.txt` +2 lines and `handheld-option-tree.txt` +2 lines,
+  each exactly the new rows. `rust/goldens/core-goldens.jsonl` **untouched** — step 3 is what
+  checks the core against `19c5065d`.

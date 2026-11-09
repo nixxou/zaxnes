@@ -237,6 +237,9 @@ struct Running {
     /// stages.
     profiler: Option<FrameProfiler>,
     clock: StageClock,
+    /// The displayed and emulated frames counted since `rate_since`, logged every 5 s.
+    rate_count: (u32, u32),
+    rate_since: Instant,
     /// The pipelined frames (`emu.pipeline`).
     pipeline: Pipelined,
     /// The automatic resolution (`video.dynamic_resolution`).
@@ -430,6 +433,8 @@ impl Running {
             last: Instant::now(),
             profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
             clock: StageClock::new(profiling),
+            rate_count: (0, 0),
+            rate_since: Instant::now(),
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
             pending_state_load: options.slot.clone(),
@@ -458,6 +463,25 @@ impl Running {
     }
 
     /// One displayed frame. Returns false once the application is to close.
+    /// Logs the displayed and emulated frame rates every 5 seconds (the display's own rate
+    /// seen, for the smooth scrolling between frames).
+    fn log_rates(&mut self, emulated: u32) {
+        self.rate_count.0 += 1;
+        self.rate_count.1 += emulated;
+        let seconds = self.rate_since.elapsed().as_secs_f64();
+        if seconds >= 5.0 {
+            let (shown, run) = self.rate_count;
+            log(&format!(
+                "frame rate: {:.1} displayed, {:.1} emulated per second",
+                f64::from(shown) / seconds,
+                f64::from(run) / seconds
+            ));
+            self.rate_count = (0, 0);
+            self.rate_since = Instant::now();
+        }
+    }
+
+    #[allow(clippy::too_many_lines)] // One host frame, its steps in their order.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
         self.reopen_the_audio_output();
@@ -469,6 +493,8 @@ impl Running {
         if self.pump_events() {
             return Ok(false);
         }
+        self.state.frame_time = self.host.pacer.elapsed_seconds();
+        self.host.display_rate = self.display_rate();
         let now = Instant::now();
         let delta = now.duration_since(self.last).as_secs_f64();
         self.last = now;
@@ -494,6 +520,8 @@ impl Running {
         self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
         let emulated = self.host.tick(real, &snapshot);
+        self.log_rates(emulated);
+        self.state.emulated_now = emulated;
         self.source.end_sample();
         if let Some(mark) = mark {
             // The emulated frames' own stages are counted apart from the rest of the tick.
@@ -693,7 +721,7 @@ impl Running {
             self.host.state() == EmulationState::Running,
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
-        );
+        ) && !self.state.picture_between;
         Ok(ViewPlan {
             view_height,
             size: (scene_width, scene_height),
@@ -1197,6 +1225,24 @@ impl Running {
             ));
         }
         self.window.frame_cap()
+    }
+
+    /// The frames the display shows a second: the display's refresh over the swap interval, or
+    /// the frame cap's rate (a high one when nothing caps the frames).
+    fn display_rate(&self) -> f64 {
+        let interval = self.window.vsync_interval();
+        if interval > 0 {
+            let refresh = self
+                .window
+                .window()
+                .display_mode()
+                .map_or(60, |mode| mode.refresh_rate)
+                .max(1);
+            return f64::from(refresh) / f64::from(interval);
+        }
+        self.window
+            .frame_cap()
+            .map_or(1000.0, |period| 1.0 / period.as_secs_f64().max(0.001))
     }
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
@@ -1806,6 +1852,15 @@ struct RunState {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
+    /// every display frame is then drawn, a new emulated frame or not.
+    picture_between: bool,
+    /// The emulated frames of this display frame, and the scrolling debug log
+    /// (`ZAXNES_SCROLL_LOG`, a file path): one line per display frame.
+    emulated_now: u32,
+    /// When this display frame began, on the frame pacer's clock.
+    frame_time: f64,
+    scroll_log: Option<std::fs::File>,
 }
 
 impl RunState {
@@ -1824,7 +1879,42 @@ impl RunState {
             was_two_dimensional: false,
             picture: Vec::new(),
             picture_height: 0,
+            picture_between: false,
+            emulated_now: 0,
+            frame_time: 0.0,
+            scroll_log: std::env::var_os("ZAXNES_SCROLL_LOG")
+                .and_then(|path| std::fs::File::create(path).ok()),
         }
+    }
+}
+
+/// The view of the smooth scrolling (`emu.smooth_scroll_view`): the band it slides of `picture`
+/// (NES colour indexes, `height` rows, its vertical margin centred) in reds, its brightness kept,
+/// the sprites it keeps still (`overlay`) in greens; the blacks stay black.
+fn tint_smooth_band(
+    picture: &mut [u8],
+    height: usize,
+    (start, end): (i32, i32),
+    overlay: &mut [u8],
+) {
+    const HIDDEN: u8 = 0xFF;
+    let recolour = |pixel: &mut u8, hue: u8| {
+        if *pixel != HIDDEN && *pixel & 0x0F < 0x0D {
+            *pixel = (*pixel & !0x0F) | hue;
+        }
+    };
+    let width = picture.len() / height.max(1);
+    let margin_y = height.saturating_sub(240) / 2;
+    let line = |screen: i32| usize::try_from(screen).map_or(0, |screen| margin_y + screen);
+    let from = if start <= 0 { 0 } else { line(start) };
+    let to = if end >= 240 { height } else { line(end) };
+    for row in picture.chunks_mut(width.max(1)).take(to).skip(from) {
+        for pixel in row.iter_mut() {
+            recolour(pixel, 0x06);
+        }
+    }
+    for pixel in overlay.iter_mut() {
+        recolour(pixel, 0x0A);
     }
 }
 
@@ -2252,8 +2342,16 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+#[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
+    let phase = host.pacer.phase_at(state.frame_time);
+    let show_band = host
+        .settings()
+        .get(SettingId::EmuSmoothScrollView)
+        .as_bool();
+    state.picture_between = false;
     let (widescreen, widescreen_y) = widescreen_margin(
         host.settings().get(SettingId::VideoWidescreen).as_int(),
         host.settings()
@@ -2270,6 +2368,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         u8::try_from(host.settings().get(SettingId::VideoNesPalette).as_int()).unwrap_or(0),
     );
     let hack_options = host.hack_option_bits();
+    // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
+    // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
+    let smooth_ahead = host
+        .settings()
+        .get(SettingId::EmuSmoothScrollAhead)
+        .as_bool()
+        && host.settings().get(SettingId::EmuRunAhead).as_int() >= 1
+        && host.display_rate > 61.0;
     let sprite_limit = match host
         .settings()
         .get(SettingId::VideoRemoveSpriteLimit)
@@ -2289,6 +2395,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if let Some(session) = host.session_mut() {
         session.set_overscan(overscan);
         session.core_mut().set_hack_options(hack_options);
+        session.core_mut().set_smooth_scroll_ahead(smooth_ahead);
         session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
         session
@@ -2322,7 +2429,40 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     // the two, and nothing of the session is reloaded to switch.
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
-        state.picture_height = session.copy_nes_picture(&mut state.picture);
+        state.picture_height =
+            session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
+        scene.picture_shift = session.nes_picture_shift();
+        // Experimental (owner request): on a display faster than the game, the playfield drawn
+        // between two frames, along the camera's motion to the next one.
+        if let (Some((shift, start, end)), Some(motion)) =
+            (scene.picture_shift, session.nes_picture_motion())
+        {
+            #[allow(clippy::cast_possible_truncation)] // 0 to 1.
+            let along = motion * phase as f32;
+            scene.picture_shift = Some((shift + along, start, end));
+            state.picture_between = true;
+            if let Some(file) = state.scroll_log.as_mut() {
+                use std::io::Write as _;
+                let camera = session.nes_picture_camera().unwrap_or(0.0);
+                let _ = writeln!(
+                    file,
+                    "{:.5} {} {phase:.4} {camera:.4} {shift:.4} {motion:.4} {:.4}",
+                    state.frame_time,
+                    state.emulated_now,
+                    camera + f64::from(shift) + f64::from(along),
+                );
+            }
+        }
+        if show_band {
+            if let Some((_, start, end)) = scene.picture_shift {
+                tint_smooth_band(
+                    &mut state.picture,
+                    state.picture_height,
+                    (start, end),
+                    &mut scene.picture_overlay,
+                );
+            }
+        }
         // The cut sides left out, the scene's background showing there; in Resize the head-on
         // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
         // whatever margin the 3D conversion was asked for.
@@ -2345,6 +2485,8 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         );
     } else {
         scene.picture_crop = zax_profiles::values::Vec4F::new(0.0, 0.0, 0.0, 0.0);
+        scene.picture_shift = None;
+        scene.picture_overlay.clear();
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();

@@ -127,6 +127,21 @@ pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
 pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
+/// Name of the Kirby's Adventure (USA) (Rev 1) pack: the widescreen's "No slowdown" (the margins
+/// are the margin decoder's).
+pub const KIRBY_USA_REV1: &str = "Kirby's Adventure (USA) (Rev 1) widescreen";
+/// Name of the Kirby's Adventure (USA) widescreen patch.
+pub const KIRBY_USA: &str = "Kirby's Adventure (USA) widescreen";
+/// Name of the Kirby's Adventure (Canada) widescreen patch.
+pub const KIRBY_CANADA: &str = "Kirby's Adventure (Canada) widescreen";
+/// Name of the Hoshi no Kirby - Yume no Izumi no Monogatari (Japan) widescreen patch.
+pub const KIRBY_JAPAN: &str = "Hoshi no Kirby - Yume no Izumi no Monogatari (Japan) widescreen";
+/// Name of the Kirby's Adventure (Europe) widescreen patch.
+pub const KIRBY_EUROPE: &str = "Kirby's Adventure (Europe) widescreen";
+/// Name of the Kirby's Adventure (Europe) widescreen patch.
+pub const KIRBY_EUROPE_NTSC: &str = "Kirby's Adventure (Europe) (NTSC) widescreen";
+/// Name of the Kirby's Adventure (Germany) widescreen patch.
+pub const KIRBY_GERMANY: &str = "Kirby's Adventure (Germany) widescreen";
 /// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -215,7 +230,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 57] = [
+pub const PATCHES: [BuiltinPatch; 64] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1438,6 +1453,144 @@ pub const PATCHES: [BuiltinPatch; 57] = [
         idle_loop: Some((0xC581, 0xC584)),
     },
     BuiltinPatch {
+        name: KIRBY_USA_REV1,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (USA) (Rev 1)",
+        source_crc: 0x5ED6_F221,
+        // A hack pack (`kirbywide`, `tools/build_pack.py`) whose widescreen component is "No
+        // slowdown" (its option bit read by the pack's code), as in the other games: the
+        // gameplay loop's wait for the next frame ($E48C) through the pack's code, which asks for
+        // 255 lines of overclock and goes on at once when the NMI already came while the frame
+        // ran (the game's wait clears that count first, losing a frame). The margins are the
+        // margin decoder's.
+        bps: include_bytes!("../patches/kirby-usa-rev1.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The game's wait ($C067): LDA $39 / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_USA,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (USA)",
+        source_crc: 0xD779_4AFC,
+        // The first USA build (PRG0): its fixed bank as the Rev 1's, banks of the aids moved. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-usa.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_CANADA,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Canada)",
+        source_crc: 0x3708_8EFF,
+        // The Canadian build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-canada.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_JAPAN,
+        game: "Kirby's Adventure",
+        rom_name: "Hoshi no Kirby - Yume no Izumi no Monogatari (Japan)",
+        source_crc: 0xE4A7_D436,
+        // The Japanese build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-japan.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_EUROPE,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Europe)",
+        source_crc: 0x2C08_8DC5,
+        // The European build (PAL), which the French one takes by its signatures (the same code). The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-europe.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_EUROPE_NTSC,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Europe)",
+        source_crc: 0x2C08_8DC5,
+        // The European build's CRC, its PAL entry above taking it first: this one is for the ROMs of the
+        // European code whose header says NTSC, taken by their signatures (`build_pack.py --ntsc`). The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-europe-ntsc.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
+        name: KIRBY_GERMANY,
+        game: "Kirby's Adventure",
+        rom_name: "Kirby's Adventure (Germany)",
+        source_crc: 0x127D_76F4,
+        // The German build (PAL): one of Kirby's checklists apart from the European build's. The same hack built from this build's ROM
+        // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
+        bps: include_bytes!("../patches/kirby-germany.zxpk"),
+        options: KIRBY_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_zone: true,
+        zone_data: false,
+        // The same wait, at the same place.
+        idle_loop: Some((0xC070, 0xC072)),
+    },
+    BuiltinPatch {
         name: NOVA_THE_SQUIRREL,
         game: "Nova the Squirrel",
         rom_name: "Nova the Squirrel",
@@ -1482,6 +1635,93 @@ pub const PATCHES: [BuiltinPatch; 57] = [
 ];
 
 /// The options of the Nova the Squirrel pack: its two testing aids.
+/// The options of the Kirby's Adventure pack.
+const KIRBY_OPTIONS: &[HackOption] = &[
+    // Kirby's checklists of state changes (one per state and ability, banks $14-$19) test the
+    // attack (B) then the jump (A) first: a button pressed on the frame Kirby turns round,
+    // starts walking or crouches is no longer lost. Our own reordering from our disassembly.
+    HackOption {
+        key: "input_priority",
+        label: "Jump and attack first",
+        label_fr: "Saut et attaque prioritaires",
+        bit: 0,
+        default: false,
+    },
+    // A testing aid: no damage and no knock-back from enemies and spikes (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // A testing aid: Select takes Kirby to the next level, through its world's hub door (the
+    // game's own entry), the boss after a world's levels, then the next world. Select no longer
+    // drops the ability. Bit 8: an aid only, the ROM's $500A bits all taken.
+    HackOption {
+        key: "level_select",
+        label: "Level select (Select: next level)",
+        label_fr: "Sélection de niveau (Select : niveau suivant)",
+        bit: 8,
+        default: false,
+    },
+    // 255 lines of overclock and no frame lost to an NMI that came while the frame ran.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+    // The enemies and objects in the margins (owner request): spawned a margin further than
+    // the game does while 3 enemy slots are free at least (else as the game does, at its own
+    // column), kept until they leave the margins, their sprites drawn there.
+    HackOption {
+        key: "margin_enemies",
+        label: "Enemies in the margins",
+        label_fr: "Ennemis dans les marges",
+        bit: 4,
+        default: true,
+    },
+    // The enemies a margin spawns wait there, drawn, their scripts not run, until they are on
+    // the original screen, where the game would spawn them (owner request: the original
+    // gameplay); off (by default, owner's choice), they play at once.
+    HackOption {
+        key: "margin_freeze",
+        label: "Enemies asleep in the margins",
+        label_fr: "Ennemis figés dans les marges",
+        bit: 5,
+        default: false,
+    },
+    // The enemies asleep in the margins drawn in grey.
+    HackOption {
+        key: "margin_freeze_tint",
+        label: "Asleep enemies in grey",
+        label_fr: "Ennemis figés en gris",
+        bit: 6,
+        default: false,
+    },
+    // Kirby and what he throws (star, puffs: slots 0 to 8) drawn and kept on the original
+    // screen only, as in the game: his attacks do not reach the margins.
+    HackOption {
+        key: "kirby_attacks_4_3",
+        label: "Kirby's attacks limited to 4:3",
+        label_fr: "Attaques de Kirby limitées au 4:3",
+        bit: 7,
+        default: false,
+    },
+    // Experimental (owner request), in the Hacks: the playfield shifted by the camera's
+    // fraction of a pixel, which the pack's code reports (`report_camera`), the sprites that move
+    // with the camera left where they are.
+    HackOption {
+        key: "smooth_scroll",
+        label: "Smooth scrolling (from game RAM)",
+        label_fr: "Défilement lissé (RAM du jeu)",
+        bit: 3,
+        default: false,
+    },
+];
+
 const NOVA_OPTIONS: &[HackOption] = &[
     HackOption {
         key: "level_select",
@@ -1871,13 +2111,13 @@ fn zelda2_after_other_way_state(ram: &mut [u8]) {
 }
 
 impl BuiltinPatch {
-    /// The bits of `$500A` with every option as it is by default.
+    /// The option bits with every option as it is by default (the low byte: `$500A`).
     #[must_use]
-    pub fn default_options(&self) -> u8 {
+    pub fn default_options(&self) -> u16 {
         self.options
             .iter()
             .filter(|option| option.default)
-            .fold(0, |bits, option| bits | (1 << (option.bit & 7)))
+            .fold(0, |bits, option| bits | (1 << (option.bit & 15)))
     }
 
     /// Whether option `key` is an aid of the patch's hack pack: a component of its own, applied
@@ -1911,7 +2151,8 @@ pub struct HackOption {
     /// Its label in English and in French.
     pub label: &'static str,
     pub label_fr: &'static str,
-    /// Its bit of `$500A`.
+    /// Its bit: 0-7 the bit of `$500A` the ROM reads; 8-15 an aid's only (a component of the
+    /// pack, its hooks applied or not), which the ROM never sees.
     pub bit: u8,
     /// Whether it is on until the player says otherwise.
     pub default: bool,
