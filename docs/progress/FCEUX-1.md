@@ -23,7 +23,7 @@ a design note for the lots that would follow.
 - [x] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path. Fork
   `c3ddd421`.
 - [x] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`. Fork `3f022b8c`.
-- [ ] 8/8 — Final pass.
+- [x] 8/8 — Final pass.
 
 ## Environment of the session
 
@@ -918,3 +918,118 @@ attempted.** No Android or aarch64 toolchain is installed and the lot was forbid
 one, so §8 is written as expectations with the reasons they are plausible (plain C++17, no
 x86-specific code, built and byte-identical on two platforms already, zlib vendored), and it names
 the one real risk — the `stdc++` link line needs a third case for the NDK's `c++_shared`.
+
+---
+
+# Step 8 — The final pass
+
+Everything below was re-run at the finished state, not quoted from an earlier step.
+
+## The fork builds from a clean directory on both platforms
+
+| Platform | Command | Result |
+|---|---|---|
+| Windows x64 | `zax\build-msvc.cmd` after `rm -rf build-msvc` | MSVC 14.43, CMake 3.30.5, Ninja — clean |
+| Linux x64 | `sh zax/build-linux.sh` after `rm -rf build-linux` | g++ 13.3, CMake 3.28.3, Ubuntu 24.04 (WSL) — clean |
+
+Both include `zaxfceux_linkcheck`, the shared library whose job is to prove every symbol of every
+object resolves (`-Wl,--no-undefined` / `WINDOWS_EXPORT_ALL_SYMBOLS`).
+
+The self-test on `nestest.nes`, 60 frames, **identical on both platforms**:
+
+    pixels=e455081e6a3eefe9  emphasis=d395e456e4e72325  audio=7fc10a9ce4ed8fcd  samples=47917
+    state: hint=93304 written=79296; round trip: picture came back, sentinel was rolled back
+    memory: $0010 = A5 (ok)
+
+Sizes, release: `zaxfceux_linkcheck.dll` **1.5 MB**, `libzaxfceux_linkcheck.so` 1.4 MB; archives
+8.1 MB and 2.9 MB before linking. (The DLL grew from 1.2 MB at step 2 by the tile capture and the
+self-test's own growth.)
+
+## fmt, clippy, tests
+
+| Check | Feature off | Feature on |
+|---|---|---|
+| `cargo fmt --all -- --check` | clean | clean |
+| `cargo clippy -p zax-fceux -p zax-harness --all-targets -- -D warnings` | clean | clean |
+| `cargo test -p zax-fceux -p zax-harness --release -- --include-ignored` | all green | all green |
+
+Run with `ZAXNES_ROMS=/g/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=/g/3dsen/cleanroom/assets-free/test-roms`, and with `--include-ignored` so that
+nothing was skipped — which is how this pass found a real bug of its own (below).
+
+## What the final pass found
+
+`--include-ignored` ran the two `#[ignore]`d measurements of
+`crates/zax-harness/tests/fceux_engine_diff_tests.rs` **together**, on two threads, and the
+process died with `STATUS_ACCESS_VIOLATION`. There is one FCEUX per process; `Fceux::new` refuses
+a second *handle*, but two threads racing to create and drop one are still two threads inside the
+library. The file now takes the same serialising lock `zax-fceux`'s own test file has. Running
+them one at a time — which is all I had done until this pass — never showed it.
+
+## The default build is unchanged
+
+| Check | Result |
+|---|---|
+| `golden-core` over the 291 public ROMs, feature off | **byte-identical** to `rust/goldens/core-goldens.jsonl`, which is the base commit's own recorded output |
+| `golden-core` over the 98 originals, feature off | byte-identical to step 5's run |
+| `git diff c0a97023..HEAD -- rust/crates/zax-nes` | **empty** — the core is untouched |
+| new external package in `rust/Cargo.lock` | **none** (`git diff c0a97023..HEAD -- rust/Cargo.lock` adds no `name =` line but `zax-fceux` itself) |
+| `zax-app` referencing `zax-fceux` | none at all — `grep fceux crates/zax-app/Cargo.toml` is empty |
+
+The 291-row check is a direct comparison against `c0a97023` rather than a proxy: that golden file
+*is* what the base commit produced.
+
+**One thing to know before reading a workspace build log.** `cargo build --workspace --release`
+fails to link `zax-app` with `LNK1181: cannot open input file 'SDL2.lib'`. That is **not** this
+lot's doing: `zax-app` has no reference to `zax-fceux`, and the failure is the crate's existing
+need for `--features bundled` (or a system SDL2) on Windows. `cargo build -p zax-app --release
+--features bundled` succeeds, which is the documented way.
+
+## The comparison tables and the 3D comparison
+
+`docs/review/FCEUX-ENGINE-COMPARISON.md`, per ROM, regenerated from the final runs: of 291 public
+ROMs, 289 load on both, 157 have an identical picture at frames 60, 300 *and* 1200, one takes the
+FCEUX engine down, and one corrupt header is refused by both. Of 98 originals, all 98 load on both
+and 44 match at all three. On the 113 ROMs that report a verdict, **Zaxnes passes 95 and FCEUX 58,
+with 37 one way and none the other**.
+
+The 3D comparison is in step 6: Super Mario Bros. frame 200 through Zaxnes's own renderer and
+profile with only the records swapped — 969 records on both sides, 863 identical on all ten
+fields, the same 611 opaque quads and 567 shadow casters, and a picture 92.867 % of whose pixels
+are within 2 levels.
+
+## What this lot did not do, stated plainly
+
+- **No cross-compilation.** No Android NDK or aarch64 toolchain is installed and the lot was
+  forbidden to download one, so §8 of the design note is expectations with their reasoning, not
+  results.
+- **The `oam3.nes` heap overflow is not fixed.** It is upstream FCEUX's, the one-line candidate
+  fix changes how a sub-1 KiB CHR-RAM cart mirrors, and that is an emulation decision for the
+  owner. It is diagnosed to the line with an ASAN trace and three options are costed.
+- **The tile capture does not handle mid-frame scroll, MMC2/MMC4, MMC5 extended attributes or the
+  new PPU**, and the design note says 3D on FCEUX should not ship until the first of those is
+  done. 2D FCEUX is already useful.
+- **No integration into `zax-app`.** That was never in this lot; the design note sizes it as lot
+  FCEUX-2 and names the one hard part (moving `FrameBatch`/`TileRecord` to a crate both engines
+  can depend on).
+
+## The commits
+
+Worktree `wt-fceux`, branch `feat/fceux-core`, on top of `c0a97023`:
+
+| | |
+|---|---|
+| `43308297` | 1/8 inventory |
+| `9f20611a`, `0a11458b` | 2/8 the fork and the core-only build |
+| `7876a610` | 3/8 the C API |
+| `ed74ea0e`, `84da7674` | 4/8 the Rust side |
+| `653921c7` | 5/8 the engines compared |
+| `18deac62` | 6/8 the tile records and the 3D comparison |
+| `cb42d08b` | 7/8 the design note |
+
+Fork `fceux-zax`, branch `zax`, on top of upstream `ffc23f08`: `14ef77cf`, `d81b904f`,
+`5866fac0`, `237a33b3`, `c3ddd421`, `3f022b8c`. Its whole diff against upstream is **three files
+and 51 added lines** in `src/` — `types.h`, `fceu.cpp`, `ppu.cpp`, every change marked `// ZAX:` —
+plus the self-contained `zax/` directory.
+
+Free space on `G:` at the end: 23 GB.

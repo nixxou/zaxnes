@@ -12,9 +12,24 @@
 #![cfg(feature = "fceux-core")]
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use zax_fceux::{Fceux, RamInit};
 use zax_nes::NesCore;
+
+/// Held for the length of every test here.
+///
+/// **Not belt-and-braces.** There is one FCEUX per process, and with both tests of this file
+/// `--include-ignored` they ran on two threads and took the process down with an access violation
+/// — `Fceux::new` refuses a second *handle*, but two threads racing to create and drop one are
+/// still two threads in the library. This is what makes the file safe to run as a whole.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn lock() -> MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// The frames the comparison table uses, plus frame 1.
 const CHECKPOINTS: [u32; 4] = [1, 60, 300, 1200];
@@ -42,6 +57,7 @@ fn rom_root() -> Option<PathBuf> {
 #[test]
 #[ignore = "a measurement, run it deliberately: cargo test -- --ignored where_the_two"]
 fn where_the_two_engines_pictures_differ() {
+    let _serial = lock();
     let Some(root) = rom_root() else { return };
 
     // One FCEUX for the whole test: there is one per process.
@@ -127,6 +143,7 @@ fn where_the_two_engines_pictures_differ() {
 #[test]
 #[ignore = "a measurement, run it deliberately: cargo test -- --ignored how_close_the_tile"]
 fn how_close_the_tile_records_are() {
+    let _serial = lock();
     let Some(root) = rom_root() else { return };
 
     let mut fceux = Fceux::new().expect("an FCEUX instance");
