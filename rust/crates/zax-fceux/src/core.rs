@@ -578,3 +578,141 @@ fn code_to_error(code: i32) -> Error {
         other => Error::Unexpected(other),
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+// Tile records (lot FCEUX-1 step 6)
+// ------------------------------------------------------------------------------------------------
+
+/// One 8x8 tile of a frame, in the layout Zaxnes's own `TileRecord` uses: the two CHR bit planes
+/// with the flips **not** applied, where the tile sits, its sub-palette and its flags.
+///
+/// This is deliberately a type of its own rather than `zax_nes::TileRecord`: `zax-fceux` must not
+/// depend on the core it is an alternative to. [`TileCapture::records`] is what a caller converts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Four flags, because the record of SPEC-02 §4.1 has four and this type mirrors it field for
+// field; packing them into a bitfield here would only move the unpacking to every caller.
+#[allow(clippy::struct_excessive_bools)]
+pub struct Tile {
+    /// Low bit plane, the eight CHR bytes packed little-endian by row.
+    pub plane0: u64,
+    /// High bit plane, likewise.
+    pub plane1: u64,
+    /// Screen x of the top-left pixel.
+    pub x: i16,
+    /// Screen y of the top-left pixel.
+    pub y: i16,
+    /// Background: row * 33 + column. Sprite: the OAM number, +64 for an 8x16's lower half.
+    pub index: i32,
+    /// Horizontal flip (OAM attribute bit 6); never set on a background tile.
+    pub mirror_h: bool,
+    /// Vertical flip (bit 7); never set on a background tile.
+    pub mirror_v: bool,
+    /// "Behind the background" (bit 5); never set on a background tile.
+    pub hidden: bool,
+    /// Sub-palette, 0 to 3.
+    pub palette: u8,
+    /// True for a background tile, false for a sprite.
+    pub background: bool,
+}
+
+/// One frame's tile records and its palette.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TileCapture {
+    /// The records in capture order: chronological by line, and for one band the sprites before
+    /// the background row.
+    pub records: Vec<Tile>,
+    /// The 32 bytes of `$3F00-$3F1F`, each a NES colour index 0 to 63.
+    pub palette: [u8; 32],
+}
+
+/// Where the sink leaves the frame it was handed, for [`Fceux::take_tiles`] to collect.
+///
+/// A `static` for the same reason [`LOG`] is one: the C API's sink is a plain function pointer
+/// with no Rust closure behind it.
+static TILES: Mutex<Option<TileCapture>> = Mutex::new(None);
+
+/// The sink the C API calls once per frame.
+///
+/// # Safety
+///
+/// `records` must point to `count` valid [`sys::ZaxTileRecord`]s and `palette` to 32 bytes, both
+/// valid for the duration of the call — which is what `zax/zaxtiles.cpp` guarantees (it passes
+/// its own arrays and does not free them until the next frame).
+unsafe extern "C" fn tile_sink(
+    _user: *mut c_void,
+    records: *const sys::ZaxTileRecord,
+    count: usize,
+    palette: *const u8,
+) {
+    if records.is_null() || palette.is_null() {
+        return;
+    }
+
+    // SAFETY: the C API's contract for this callback (zaxfceux.h) is exactly the two slices built
+    // here — `count` records and 32 palette bytes, owned by the library and valid until it
+    // returns. Nothing is kept past the call: both are copied into owned Rust values below.
+    let (raw, palette) = unsafe {
+        (
+            std::slice::from_raw_parts(records, count),
+            std::slice::from_raw_parts(palette, 32),
+        )
+    };
+
+    let mut capture = TileCapture {
+        records: Vec::with_capacity(raw.len()),
+        palette: [0; 32],
+    };
+    capture.palette.copy_from_slice(palette);
+    capture.records.extend(raw.iter().map(|record| Tile {
+        plane0: record.plane0,
+        plane1: record.plane1,
+        x: record.x,
+        y: record.y,
+        index: record.index,
+        mirror_h: (record.flags & sys::ZAX_TILE_MIRROR_H) != 0,
+        mirror_v: (record.flags & sys::ZAX_TILE_MIRROR_V) != 0,
+        hidden: (record.flags & sys::ZAX_TILE_HIDDEN) != 0,
+        palette: record.palette,
+        background: (record.flags & sys::ZAX_TILE_BACKGROUND) != 0,
+    }));
+
+    // A panic must not cross back into C, so a poisoned lock simply drops the frame.
+    if let Ok(mut slot) = TILES.lock() {
+        *slot = Some(capture);
+    }
+}
+
+impl Fceux {
+    /// Turns the tile capture on or off. **Off by default**: with no sink installed the two
+    /// per-scanline hooks in the fork return at once, so a caller that only wants the picture
+    /// pays nothing.
+    pub fn set_tile_capture(&mut self, enabled: bool) {
+        if let Ok(mut slot) = TILES.lock() {
+            *slot = None;
+        }
+
+        // SAFETY: installing or removing the sink is safe at any time per the C API, and
+        // `tile_sink` only reads the two buffers it is handed (see its own safety note).
+        unsafe {
+            if enabled {
+                sys::zax_set_tile_sink(Some(tile_sink), std::ptr::null_mut());
+            } else {
+                sys::zax_set_tile_sink(None, std::ptr::null_mut());
+            }
+        }
+    }
+
+    /// Whether the capture is on.
+    #[must_use]
+    pub fn tile_capture_enabled(&self) -> bool {
+        // SAFETY: a pure query, safe at any time.
+        unsafe { sys::zax_tiles_enabled() == 1 }
+    }
+
+    /// The records of the frame just run, or `None` when the capture is off or no frame has run
+    /// since the last call.
+    #[must_use]
+    pub fn take_tiles(&self) -> Option<TileCapture> {
+        TILES.lock().ok().and_then(|mut slot| slot.take())
+    }
+}

@@ -32,6 +32,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use zax_fceux::{Fceux, RamInit};
 use zax_nes::rom::InesHeader;
+use zax_nes::TileRecord;
 
 use crate::golden_core::{collect_roms, hex, relative_name};
 use crate::HarnessError;
@@ -41,7 +42,11 @@ pub const USAGE: &str =
     Runs every ROM on the FCEUX engine and writes golden-core's digests, so the two engines
     can be compared row by row. Needs the `fceux-core` feature and a built fork.
     A directory run gives each ROM its own child process, because FCEUX can take the process
-    down on some ROMs (see the module docs); --in-process turns that off.";
+    down on some ROMs (see the module docs); --in-process turns that off.
+
+zax-harness fceux-frame <rom.nes> <out.json> [frames]
+    Runs a ROM on FCEUX and writes the tile records of the last frame in the format
+    `render --frames <file.json>` reads, so FCEUX's records can go through Zaxnes's 3D path.";
 
 /// Frames at which the digests are recorded — `golden_core::CHECKPOINTS`, repeated here because
 /// that one is private to it and the two lists must never drift.
@@ -388,4 +393,87 @@ fn row_for(engine: &mut Fceux, rel: &str, image: &[u8], frames: u32) -> Value {
     }
 
     Value::Object(row)
+}
+
+/// `fceux-frame <rom.nes> <out.json> [frames]`: runs a ROM on FCEUX and writes the **tile
+/// records** of the last frame in the format `render --frames <file.json>` reads.
+///
+/// This is how step 6 of lot FCEUX-1 puts FCEUX's records through Zaxnes's own 3D path: the same
+/// renderer, the same profile, the same code — only the records come from the other engine. The
+/// comparison is then two PNGs of the same scene, which `zax-harness compare` can score.
+///
+/// # Errors
+///
+/// [`HarnessError::Usage`] on a bad frame count or if FCEUX refuses the ROM; [`HarnessError`] on
+/// an I/O failure.
+pub fn frame_command(rom: &str, out_path: &str, rest: &[String]) -> Result<(), HarnessError> {
+    let frames: u32 = match rest {
+        [] => 120,
+        [count] => count
+            .parse()
+            .map_err(|_| HarnessError::Usage(format!("{count:?} is not a frame count\n{USAGE}")))?,
+        _ => return Err(HarnessError::Usage(USAGE.to_owned())),
+    };
+
+    let image = fs::read(rom)?;
+    let name = Path::new(rom).file_name().map_or_else(
+        || rom.to_owned(),
+        |base| base.to_string_lossy().into_owned(),
+    );
+
+    let mut engine = Fceux::new().map_err(|error| HarnessError::Usage(error.to_string()))?;
+    engine
+        .set_ram_init(RamInit::Default)
+        .and_then(|()| engine.load_rom(&image, &name))
+        .map_err(|error| HarnessError::Usage(error.to_string()))?;
+    engine.set_tile_capture(true);
+    engine
+        .reset()
+        .map_err(|error| HarnessError::Usage(error.to_string()))?;
+
+    let mut capture = None;
+    for _ in 0..frames.max(1) {
+        engine
+            .set_input(0, 0)
+            .and_then(|()| engine.run_frame())
+            .map_err(|error| HarnessError::Usage(error.to_string()))?;
+        if let Some(got) = engine.take_tiles() {
+            capture = Some(got);
+        }
+    }
+
+    let Some(capture) = capture else {
+        return Err(HarnessError::Usage(
+            "FCEUX captured no tile record: the ROM never turned rendering on".to_owned(),
+        ));
+    };
+
+    let records: Vec<TileRecord> = capture
+        .records
+        .iter()
+        .map(|tile| {
+            TileRecord::new(
+                tile.plane0,
+                tile.plane1,
+                tile.x,
+                tile.y,
+                tile.index,
+                tile.mirror_h,
+                tile.mirror_v,
+                tile.hidden,
+                tile.palette,
+                tile.background,
+            )
+        })
+        .collect();
+
+    fs::write(
+        out_path,
+        crate::render::frame_json::write(&records, &capture.palette)?,
+    )?;
+    println!(
+        "fceux-frame: {} records of frame {frames} of {name} -> {out_path}",
+        records.len()
+    );
+    Ok(())
 }

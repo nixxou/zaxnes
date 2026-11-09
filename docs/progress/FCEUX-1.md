@@ -20,7 +20,8 @@ a design note for the lots that would follow.
   Worktree `ed74ea0e`, fork `5866fac0`.
 - [x] 5/8 — Compare the engines over the 291 public test ROMs and the 98 originals.
   `docs/review/FCEUX-ENGINE-COMPARISON.md`; fork `237a33b3`.
-- [ ] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path.
+- [x] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path. Fork
+  `c3ddd421`.
 - [ ] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`.
 - [ ] 8/8 — Final pass.
 
@@ -757,3 +758,131 @@ and points 2 and 3 are why it extends to any ROM set.
 | `cargo test -p zax-fceux --features fceux-core --release` | 13 passed, 1 ignored |
 | `cargo test -p zax-harness --features fceux-core --release` | all green |
 | the C self-test, Windows and Linux | identical digests: pixels `e455081e6a3eefe9`, emphasis `d395e456e4e72325`, audio `7fc10a9ce4ed8fcd` over 47917 samples |
+
+---
+
+# Step 6 — The tile-capture prototype
+
+Fork commit `c3ddd421`; worktree commit below.
+
+## Where the records come from, and why not from `pputile.inc`
+
+The brief points at FCEUX's own background fetch, `pputile.inc`, and at `FetchSpriteData`. Both
+were examined and **neither is the right capture point**:
+
+1. `pputile.inc` has only the **two** pattern bytes of the line being drawn; a record needs all
+   sixteen — the whole tile.
+2. The pixels it writes at iteration `X1` come from the tiles fetched two iterations earlier (the
+   shift-register pipeline, `pputile.inc:17-41`), so a record built there must undo that offset to
+   know where it is.
+3. `RefreshLine` includes it **ten times over** (`ppu.cpp:1171-1233`), once per MMC5 / hook /
+   PEC586 / VRC5 variant — a hook there is ten hooks.
+4. `FetchSpriteData` runs once per *line* per sprite, and `SPRB` has already dropped the OAM index
+   and `y` by the time it is stored (`ppu.cpp:1473-1480`).
+
+So the capture follows **Zaxnes's own rules** instead, reading the nametable, the attribute table
+and CHR directly at two moments a scanline. That is also the only thing that makes the two
+engines' records comparable at all:
+
+| | Rule (`zax-nes/src/ppu/tiles.rs:100-146`) |
+|---|---|
+| sprites | at the *start* of a visible line where `(line & 7) == 7`: every OAM entry whose 8-pixel band starts in `line / 8`, **all 64** — the eight-per-line hardware limit is deliberately not applied (REQ-CORE-041) |
+| background | at the *start* of a visible line whose fine Y scroll is 1: 33 tiles, at `y = line - 1` (REQ-CORE-037/038, R2-005) |
+| order | sprites before the background row of the same band (REQ-CORE-044) |
+
+Two call sites in `DoLine` drive it (`zax/zaxtiles.cpp` holds all the logic). Both read PPU state
+and touch no emulation state, and both return immediately when no sink is installed — which is
+the default, so a caller that only wants the picture pays nothing.
+
+8x16 sprites are split into two records, the lower half numbered `64 + n`, which is Zaxnes's
+numbering (REQ-CORE-043); a vertical flip swaps the halves as well as flipping each.
+
+## What it is worth: measured, not eyeballed
+
+`crates/zax-harness/tests/fceux_engine_diff_tests.rs` (`#[ignore]`d) asks both engines for the
+same frame's records and compares them **field by field** — a record that matches matches on all
+ten fields, including both 64-bit planes. This is a far sharper instrument than looking at a 3D
+picture, and it is kept.
+
+| ROM | frame | Zaxnes | FCEUX | identical |
+|---|---|---|---|---|
+| `instr_test-v5/official_only.nes` | 60 | 960 | 960 | **960 (100%)** |
+| `full_palette/full_palette.nes` | 60, 300 | 96 | 96 | **96 (100%)** |
+| `scrolltest/scroll.nes` | 60, 300 | 960 | 960 | 957 (99.7%) |
+| `blargg_ppu_tests/palette_ram.nes` | 60, 300 | 960 | 960 | 928 (96.7%) |
+| `other/nestest.nes` | 60, 300 | 960 | 960 | 925 (96.4%) |
+| `other/new-game.nes` | 60 | 1024 | 1024 | 638 (62.3%) |
+| `other/new-game.nes` | 300 | 1024 | 1024 | 706 (69.0%) |
+
+**The record counts match exactly on every ROM**, which is the first thing that had to be true:
+the capture rules fire at the same moments as Zaxnes's.
+
+## Super Mario Bros. through Zaxnes's 3D path
+
+The brief asks for the records to be fed to Zaxnes's 3D renderer and the picture compared. Done
+through the existing `render --frames <file.json>` path, so **the renderer, the profile, the
+scripts and the camera are the same code on both sides** — only the records come from the other
+engine. A new `zax-harness fceux-frame <rom> <out.json> [frames]` writes FCEUX's records in the
+format `--dump-frame` writes and `--frames` reads.
+
+    zax-harness render --out zaxnes --rom "Super Mario Bros. (World).nes" \
+        --profile "Super Mario Bros." --assets <assets-neutral> --run 200 \
+        --dump-frame zaxnes-frame.json
+    zax-harness fceux-frame "Super Mario Bros. (World).nes" fceux-frame.json 200
+    zax-harness render --out fceux --frames fceux-frame.json \
+        --profile "Super Mario Bros." --assets <assets-neutral>
+    zax-harness compare ref cap
+
+Frame 200, Super Mario Bros. with its own profile:
+
+| | Value |
+|---|---|
+| records | **969 on both sides** |
+| identical on all ten fields | **863 (89.1%)** |
+| sprites | 9 on both, **all 9 identical** |
+| background | 960 on both, 854 identical |
+| palette | **identical** (after the fix below) |
+| 3D geometry | **611 opaque quads and 567 shadow casters on both** — the same mesh |
+| 3D picture | **92.867 % of pixels within 2 levels** |
+
+## What is exact, what is approximate, what is missing
+
+**Exact** — for a board whose CHR banks and nametables do not move inside a line: the geometry
+(`x`, `y`, `index`), both pattern planes, the sub-palette, the three flags, the background/sprite
+distinction, the sprite set (all 64, no eight-per-line limit), the 8x16 split and its flip
+semantics, the capture order, and the 32-byte palette.
+
+**Approximate** — the old PPU works **per line** and the capture samples the scroll once per
+8-line band, so a row whose scroll changes mid-frame is captured with whichever scroll the band's
+first line had. On Super Mario Bros. frame 200 that is exactly where the 106 differing records
+sit: five rows, `y` = 16, 24, 88, 160 and 232, which are its status-bar and parallax splits. On
+ROMs that do not split, the records match 100 % or within three records of it. The same applies to
+a mid-line CHR bank switch: `read_planes` goes through `VPage`, so a tile reads whichever bank is
+mapped at the capture moment. FCEUX has no side-effect-free CHR view to ask instead (no equivalent
+of Zaxnes's `chr_peek_view`), though `VPage` is a plain pointer table, so reading it switches
+nothing either.
+
+**Missing, and not attempted** — MMC5 extended attributes and its vertical split (Zaxnes's
+`board-mmc5-exattr-split`); the MMC2/MMC4 `$FD`/`$FE` latch walk, which Zaxnes does per column and
+puts back (REQ-CORE-039, and the sprite-by-x ordering of REQ-CORE-044 that goes with it); every
+widescreen field of the batch (`margin`, `margin_y`, `visible_rows`, `margin_palette`) and the
+margin decoder, which live in Zaxnes's bus and stay Zaxnes-only; `mask_x`/`mask_y`
+(REQ-CORE-046); and CHR-RAM games are untested beyond what the suite above covers.
+
+## The palette needed its own care
+
+FCEUX keeps what a game writes to `$3F04`/`$3F08`/`$3F0C` in `UPALRAM` and leaves the backdrop in
+`PALRAM` at those offsets (`ppu.cpp:378,449`), and it never keeps `$3F10`/`$3F14`/`$3F18`/`$3F1C`
+at all — a `$3F00` write goes to **both** halves (`ppu.cpp:445-446`) and the sprite copies are
+never read back, so they read 0 where a consumer of the raw table expects the backdrop. Both are
+reconstructed in `zax_tiles_end_frame`. Without it four of Super Mario Bros.'s 32 entries
+disagreed with Zaxnes's, which is the kind of difference that would have been blamed on the 3D
+renderer.
+
+## Checks at this step
+
+fmt clean; clippy `-D warnings` clean with the feature off and on; `cargo test -p zax-fceux
+--features fceux-core --release` 13 passed, 1 ignored. One clippy fix was a real one:
+`zax_fceux::Tile` has four flags because the record of SPEC-02 §4.1 has four, so
+`struct_excessive_bools` is allowed there with the reason written down rather than the type bent
+out of shape.

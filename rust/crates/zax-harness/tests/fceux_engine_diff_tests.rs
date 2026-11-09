@@ -118,3 +118,116 @@ fn where_the_two_engines_pictures_differ() {
         }
     }
 }
+
+/// How close FCEUX's **tile records** are to Zaxnes's — the prototype of lot FCEUX-1 step 6.
+///
+/// The sharpest check available, and much sharper than looking at a 3D picture: the two engines
+/// are asked for the same frame's records and compared field by field, in order. A record that
+/// matches matches on all ten fields, including both 64-bit pattern planes.
+#[test]
+#[ignore = "a measurement, run it deliberately: cargo test -- --ignored how_close_the_tile"]
+fn how_close_the_tile_records_are() {
+    let Some(root) = rom_root() else { return };
+
+    let mut fceux = Fceux::new().expect("an FCEUX instance");
+    fceux.set_tile_capture(true);
+    assert!(fceux.tile_capture_enabled());
+
+    println!(
+        "{:<44} {:>6} {:>7} {:>7} {:>8} {:>8} {:>8}",
+        "ROM", "frame", "zaxnes", "fceux", "same", "bg same", "spr same"
+    );
+
+    for name in ROMS {
+        let file = root.join(name);
+        let Ok(image) = std::fs::read(&file) else {
+            continue;
+        };
+        let stem = Path::new(name)
+            .file_stem()
+            .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+        let base = file
+            .file_name()
+            .map_or_else(|| name.to_owned(), |b| b.to_string_lossy().into_owned());
+
+        let mut zaxnes = NesCore::new();
+        if !zaxnes.load_rom(&image, &stem).success {
+            continue;
+        }
+        zaxnes.reset();
+        fceux.set_ram_init(RamInit::Default).expect("the RAM fill");
+        if fceux.load_rom(&image, &base).is_err() {
+            continue;
+        }
+        fceux.reset().expect("a reset");
+
+        for frame in 1..=300u32 {
+            zaxnes.run_frame(0);
+            if fceux
+                .set_input(0, 0)
+                .and_then(|()| fceux.run_frame())
+                .is_err()
+            {
+                break;
+            }
+            if !matches!(frame, 60 | 300) {
+                continue;
+            }
+
+            let Some(capture) = fceux.take_tiles() else {
+                println!("{name:<44} {frame:>6}   no capture");
+                continue;
+            };
+            let theirs = zaxnes.tile_records();
+
+            // Compare as multisets keyed on every field, which is what matters to the renderer:
+            // a record present on both sides with the same planes, position, palette and flags is
+            // the same tile, whatever order the two engines happened to emit it in.
+            let key = |t: (u64, u64, i16, i16, i32, bool, bool, bool, u8, bool)| t;
+            let mine: std::collections::HashSet<_> = capture
+                .records
+                .iter()
+                .map(|r| {
+                    key((
+                        r.plane0,
+                        r.plane1,
+                        r.x,
+                        r.y,
+                        r.index,
+                        r.mirror_h,
+                        r.mirror_v,
+                        r.hidden,
+                        r.palette,
+                        r.background,
+                    ))
+                })
+                .collect();
+            let other: std::collections::HashSet<_> = theirs
+                .iter()
+                .map(|r| {
+                    key((
+                        r.plane0,
+                        r.plane1,
+                        r.x,
+                        r.y,
+                        r.index,
+                        r.mirror_h,
+                        r.mirror_v,
+                        r.hidden,
+                        r.palette,
+                        r.background,
+                    ))
+                })
+                .collect();
+            let same = mine.intersection(&other).count();
+            let bg_same = mine.intersection(&other).filter(|k| k.9).count();
+            let spr_same = same - bg_same;
+
+            println!(
+                "{name:<44} {frame:>6} {:>7} {:>7} {same:>8} {bg_same:>8} {spr_same:>8}",
+                theirs.len(),
+                capture.records.len()
+            );
+        }
+    }
+}

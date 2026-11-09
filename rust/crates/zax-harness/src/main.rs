@@ -27,6 +27,7 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
        zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)
        zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
+       zax-harness fceux-frame <rom.nes> <out.json> [frames] (FCEUX's tile records)
        zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
@@ -105,6 +106,10 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         #[cfg(feature = "fceux-core")]
         [command, roms, out_path, rest @ ..] if command == "fceux-run" => {
             fceux_run::command(roms, out_path, rest)
+        }
+        #[cfg(feature = "fceux-core")]
+        [command, rom, out_path, rest @ ..] if command == "fceux-frame" => {
+            fceux_run::frame_command(rom, out_path, rest)
         }
         #[cfg(feature = "fceux-core")]
         [command, rest @ ..] if command == "fceux-compare" => {

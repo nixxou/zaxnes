@@ -38,6 +38,33 @@ pub const FRAME_LEN: usize = ZAX_SCREEN_WIDTH * ZAX_SCREEN_HEIGHT;
 
 pub type ZaxLogFn = Option<unsafe extern "C" fn(user: *mut c_void, text: *const c_char)>;
 
+pub const ZAX_TILE_MIRROR_H: u8 = 0x01;
+pub const ZAX_TILE_MIRROR_V: u8 = 0x02;
+pub const ZAX_TILE_HIDDEN: u8 = 0x04;
+pub const ZAX_TILE_BACKGROUND: u8 = 0x08;
+
+/// `zax_tile_record` of `zax/zaxfceux.h`, field for field. `repr(C)` is what makes that true.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ZaxTileRecord {
+    pub plane0: u64,
+    pub plane1: u64,
+    pub x: i16,
+    pub y: i16,
+    pub index: i32,
+    pub flags: u8,
+    pub palette: u8,
+}
+
+pub type ZaxTilesFn = Option<
+    unsafe extern "C" fn(
+        user: *mut c_void,
+        records: *const ZaxTileRecord,
+        count: usize,
+        palette: *const u8,
+    ),
+>;
+
 extern "C" {
     pub fn zax_set_log_sink(sink: ZaxLogFn, user: *mut c_void);
     pub fn zax_flush_log();
@@ -68,6 +95,9 @@ extern "C" {
     pub fn zax_state_size_hint() -> i32;
     pub fn zax_save_state(out: *mut u8, out_len: usize, written: *mut usize) -> i32;
     pub fn zax_load_state(data: *const u8, data_len: usize) -> i32;
+
+    pub fn zax_set_tile_sink(sink: ZaxTilesFn, user: *mut c_void);
+    pub fn zax_tiles_enabled() -> i32;
 
     pub fn zax_read_memory(address: u16) -> i32;
     pub fn zax_write_memory(address: u16, value: u8) -> c_int;
