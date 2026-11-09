@@ -23,7 +23,7 @@ never edited.
 - [x] 6/9 — The rest of the classification.
 - [x] 7/9 — Cost of the capture.
 - [x] 8/9 — The 3D picture, per original with a profile.
-- [ ] 9/9 — Final pass.
+- [x] 9/9 — Final pass.
 
 ## Environment of the session
 
@@ -1216,3 +1216,180 @@ is honest about what they show, but a judgement about how a game *plays* in 3D o
 * the render method validated against itself before use (`--rom` against `--frames` on the same
   records: 100.000 % at tolerance 0);
 * both sweeps re-run end to end with the palette compared: `unexplained: 0` on both.
+
+---
+
+# Step 9 — The final pass
+
+Worktree commit below. Nothing changed at this step but this section: it is the record of the
+checks the brief asks for, each one run and its result written down.
+
+## The lot in one table
+
+| | before (base `0ee93af0`) | after |
+|---|---|---|
+| originals identical at every compared frame | 7 / 98 | **37 / 98** |
+| originals: frames `capture` (ours to fix) | 176 / 392 | **34 / 392** |
+| originals: frames `capture` that are a **capture defect** | 176 | **0** |
+| public ROMs identical at every compared frame | 102 / 289 | **176 / 291** |
+| public ROMs: frames `capture` | 122 / 578 | **3 / 578** |
+| public ROMs: frames `capture` that are a capture defect | 122 | **0** |
+| *Super Mario Bros.* frame 200 | 863 of 969 records | **969 of 969** |
+| games (of 13 profiled) ship-ready for 3D on FCEUX | 0 — the recommendation was 2D only | **8**, plus 2 one owner decision away |
+
+Five fixes did it, in the order they were worth: the row's scroll read at the **end** of the line
+(step 2, by far the largest), the zero RAM fill that makes the two machines comparable at all
+(step 3), the line-0 exception under vertical mirroring (step 3), the MMC5's **sprite** bank set
+(step 5), and the palette joining the comparison (step 8). Steps 4 and 5's mode-1, split and
+MMC2/MMC4 work is implemented to the requirement and measured to break nothing, but no ROM
+available in this session exercises it.
+
+## fmt and clippy
+
+Crates touched: **`zax-harness`** (`fceux_tiles.rs`, `fceux_bench.rs` — new, `fceux_run.rs`,
+`fceux_compare.rs`, `lib.rs`, `main.rs`) and **`zax-fceux`** (its test file only).
+
+| Check | Result |
+|---|---|
+| `cargo fmt -p zax-harness -p zax-fceux -- --check` | clean |
+| `cargo clippy --release -p zax-harness -p zax-fceux --features fceux-core --all-targets -- -D warnings` | clean |
+| `cargo clippy --release -p zax-harness -p zax-fceux --all-targets -- -D warnings` (feature off) | clean |
+
+## Tests
+
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, and
+`--include-ignored` so the ROM-driven tests actually run rather than passing vacuously.
+
+| Check | Result |
+|---|---|
+| `cargo test --release -p zax-harness -p zax-fceux --features fceux-core -- --include-ignored` | **91 passed, 0 failed, 0 ignored** |
+| `cargo test --release -p zax-harness -p zax-fceux -- --include-ignored` (feature off) | **64 passed, 0 failed, 0 ignored** |
+
+The two that matter most:
+
+* **`the_tile_capture_does_not_change_what_fceux_draws`** — each ROM run 180 frames with the
+  capture off and hashed, then again with it on, the two digests required equal. This is the guard
+  for every save-and-restore the capture performs (the MMC2/MMC4 latch of step 4, and whatever a
+  later board adds), and without it a wrong restore would silently drift a mapper 9, 10 or 5 game's
+  picture the moment a host asked for records. Passes on all six ROMs it finds;
+* **`sixty_frames_of_nestest_match_the_c_self_tests_digests`** — the Rust side agreeing with the
+  fork's own C self-test.
+
+## The default build is unchanged
+
+| Check | Result |
+|---|---|
+| `golden-core` over the **291 public ROMs**, feature off | SHA-256 `6ECAA1DD…3C07`, **byte-identical** to `rust/goldens/core-goldens.jsonl` — and that file is the base commit's own recorded output, so this is a direct comparison and not a proxy |
+| `golden-core` over the **98 originals**, feature off | runs 98 of 98; SHA-256 `8D508070850B24228285B6F04DF6F98C310DBDAB65E7577921C91AD4D0689773`, recorded here so a later lot can compare |
+| `git diff 0ee93af0..HEAD -- rust/crates/zax-nes` | **empty** — the reference core was read and never edited |
+| `git diff 0ee93af0..HEAD -- rust/crates/zax-harness/src/golden_core.rs` | **empty** |
+| new external package in `rust/Cargo.lock` | **none** |
+| files changed by the whole lot | **10**: three docs, `zax-fceux`'s test file, and six files of `zax-harness`, all of the FCEUX ones behind the feature |
+
+Nothing was downloaded.
+
+## The fork builds clean, and its emulation is bit-identical
+
+Both from an **empty** build directory with the documented command, then the self-test on
+`nestest.nes` over 60 frames:
+
+| | command | `libzaxfceux` | self-test digests |
+|---|---|---|---|
+| Windows, MSVC | `zax\build-msvc.cmd build-check` | `zaxfceux.lib` 7.93 MB | pixels `e455081e6a3eefe9`, emphasis `d395e456e4e72325`, audio `7fc10a9ce4ed8fcd`, 47 917 samples |
+| Linux, WSL Ubuntu 24.04, g++ 13.3 | `sh zax/build-linux.sh build-check-linux` | `libzaxfceux.a` 2.8 MB | **the same four**, to the bit |
+
+Those are the digests lot FCEUX-1 recorded and the ones step 2 recorded, so **all five steps of
+fork changes left FCEUX's own emulation untouched** — which is the point of REQ-CORE-033 and what
+the Rust-side capture-on/off test checks from the other side. The state round trip and the work-RAM
+probe pass in both builds.
+
+Both check directories were deleted afterwards; `build-msvc` and `build-linux` remain. `G:` has
+17.5 GB free, above the 5 GB floor it had to stay above.
+
+## The three tables the brief asks to be repeated here
+
+**Step 1, before and after** (`fceux-tiles`, originals at 60/300/1200/3000, public ROMs at 60/300;
+the "after" column counts the palette, which step 8 added):
+
+| | originals before | originals after | public before | public after |
+|---|---|---|---|---|
+| ROMs identical at every frame | 7 / 98 | **37 / 98** | 102 / 289 | **176 / 291** |
+| frames `identical` | 85 | **238** | 234 | **376** |
+| frames `capture` | 176 | **34** | 122 | **3** |
+| frames `emulation` | 131 | 120 | 222 | 199 |
+| of the `capture` frames, **unexplained** | 176 | **0** | 122 | **0** |
+
+**Step 7, the cost of the capture** (20 000 frames a cell, i9-13900K, each run alone, capture on):
+
+| ROM | Zaxnes (capture unconditional) | FCEUX, capture on | FCEUX, capture off | FCEUX over Zaxnes | the capture's cost |
+|---|---|---|---|---|---|
+| *Super Mario Bros. 3* | 881 f/s | **4 964 f/s** | 5 813 f/s | **5.6×** | +17.1 % |
+| *Super Mario Bros.* | 1 130 f/s | **4 686 f/s** | 5 495 f/s | **4.1×** | +17.3 % |
+| *Mega Man 3* | 1 009 f/s | **4 504 f/s** | 5 308 f/s | **4.5×** | +17.8 % |
+
+and through the 3D path, Zaxnes headless: 742, 865 and 986 f/s, of which the cost after the core is
+0.2135, 0.2376 and 0.1268 ms — dominated by the **profile's Lua**, not the mesh conversion. FCEUX
+through the same path projects to ≈ 3× Zaxnes (a projection, not a measurement: the harness has no
+continuous 3D loop on FCEUX).
+
+**Step 8, the 3D picture** — the full 26-cell table is in step 8 above and in
+`docs/review/FCEUX-ENGINE-COMPARISON.md`. Its three readings:
+
+* every one of the **14 cells whose records and palette are byte-identical renders 100.000 % of
+  pixels identical at tolerance 0**, with identical mesh counts, triangles, opaque tiles and draw
+  calls;
+* **mesh counts identical in 23 of 26 cells**, the exceptions *Castlevania* f300 (253/254) and
+  *Excitebike* f1200 (89/91);
+* where the records differ the 3D loses 1 % to 13 %, tracking the cause.
+
+## What a later lot should pick up
+
+In the order a reader of this note would want it:
+
+1. **The owner's one decision.** *Super Mario Bros. 3* and *Zelda II* cannot agree between the two
+   engines without `ppu-2007-render-read` turned on in `zax-nes` (Q-139). With it on, step 2
+   measured *Super Mario Bros. 3*'s records becoming identical row for row. **No change was made to
+   `zax-nes`** and none should be until the owner has looked at what the feature does to those two
+   games' 2D pictures.
+2. **A mapper 9 or 10 ROM, and an MMC5 game that uses the modes.** Steps 4 and 5 are implemented to
+   the requirement and unexercised: no *Punch-Out!!*, no *Fire Emblem*, and all four mapper-5 images
+   here stay in CHR mode 0/2/3 with `$5200` at zero. *Punch-Out!!* has a profile in the catalogue,
+   so this is a real gap and not a theoretical one.
+3. **3D in play, not on title screens.** Step 8's frames are the brief's 300 and 1200 with no button
+   pressed, which is a title screen or a transition on several games (*Mega Man 3* frame 300 is
+   blank on both engines). A shipping decision wants `--press` scripts into real gameplay, and the
+   other 65 dumps rendered.
+4. **`fceux-run` and the older sections of `FCEUX-ENGINE-COMPARISON.md`** still carry lot FCEUX-1's
+   figures, taken with the `Default` RAM fill. Step 3 showed that fill is the wrong one for
+   comparing the two machines; those pixel-identity figures should improve for the same reason, and
+   re-running them was not in this brief.
+5. **An upstream FCEUX audio defect**, found by step 4 and not patched because it is upstream's:
+   `SexyFilter`'s two DC-blocker accumulators (`src/filter.cpp:51-53`) are `static int64` and
+   nothing ever resets them — not `FCEUSND_Power`, not `MakeFilters`, not loading another game — so
+   a host that plays game A then loads game B gets A's filter tail in B's first samples. One
+   `memset` in `MakeFilters` fixes it. A lot that does audio on the FCEUX engine should.
+6. **The new PPU**, scoped in §6 of `docs/review/FCEUX-ENGINE.md`: four items, of which the
+   interesting ones are that `newppu`'s scroll is five counters rather than a packed address, and
+   that it implements neither MMC5 mode so there is nothing there to mirror.
+7. **The FFI sink's per-frame copy.** Part of the capture's 17 % on FCEUX is `zax-fceux`'s sink
+   allocating a `Vec` and copying ~970 records inside the frame. A reusable buffer, as `zax-nes`
+   uses, would take most of it back.
+
+## Deliverables of the lot
+
+| Where | What |
+|---|---|
+| fork `zax/zaxtiles.cpp`, `src/ppu.cpp`, `src/boards/mmc2and4.cpp` | the capture: the row read at the end of the line with its own `zax_row_start` / `zax_row_next` pair, the line-0 exception, the MMC2/MMC4 latch walked and restored, the MMC5's two bank sets and two hack modes |
+| fork `zax/README.md` | every fork change recorded, including the two places the MMC5 capture follows FCEUX against `zax-nes` and why |
+| `crates/zax-harness/src/fceux_tiles.rs` | the measuring stick: field-by-field comparison, the capture/emulation class, the palette, the four causes and the `unexplained` count |
+| `crates/zax-harness/src/fceux_bench.rs` | what the capture costs, one engine per process |
+| `crates/zax-harness/src/fceux_run.rs` | `fceux-frame` takes `--ram` and defaults to the comparable fill |
+| `crates/zax-fceux/tests/fceux_core_tests.rs` | `the_tile_capture_does_not_change_what_fceux_draws`, the guard for every restore |
+| `docs/review/FCEUX-ENGINE-COMPARISON.md` | new section *FCEUX-6 tile parity* |
+| `docs/review/FCEUX-ENGINE.md` §6 | rewritten: the per-game verdict, the cost, the new PPU scoped |
+| `docs/progress/FCEUX-6.md` | this note |
+
+No Q ticket was opened: nothing in the spec turned out to be ambiguous. The two genuine
+disagreements the lot met — the `$2007`-while-rendering rule and the MMC5's split in CHR mode 1 —
+are differences between two *emulators*, not gaps in the specification, and both are recorded where
+a reader will meet them.
