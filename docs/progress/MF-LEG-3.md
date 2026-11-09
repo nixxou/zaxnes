@@ -41,13 +41,20 @@ were weighed on paper and one of them decided the lot before a line was written:
 | --- | --- |
 | `Mmc5<const EXT: bool>`, both variants **unboxed** | **rejected on `Board`'s layout.** `Board`'s tag lives in a *niche* inside the MMC5 variant (the enum's own doc comment: `movzbl 1355(%rcx)` in every dispatch prologue) because that variant is the largest. A second unboxed 1.4 KiB variant overlaps the niche and rustc falls back to a tagged layout — which rewrites **every** dispatch prologue of the file, for all thirty-seven arms. That is MF-2 step 0's reshape, bought for nothing. |
 | `Mmc5<const EXT: bool>`, the `true` variant **boxed** | layout-safe, but the `false` instantiation still carries the ten fields the modes need (a `#[cfg]` cannot follow a const generic), so the light board is not `04731c86`'s struct and its savestate, `new` and `reset` all grow. |
-| **`Mmc5Ext { base: Mmc5, …10 fields }` in `Board::Mmc5Ext(Box<Mmc5Ext>)`** | **shipped.** `Mmc5` is `ca1517dc`'s file restored byte for byte (`git show ca1517dc:…/mmc5.rs`, then the lot's additions appended below it), so the light board is the base commit's code by construction and not by inspection; the full board *contains* it, so forty-one `Mapper` methods minus seven are a forward and the MMC5's PRG decode, sound, IRQ, scanline detection, bank windows and savestate format have **one** implementation. |
+| **`Mmc5Ext { base: Mmc5, …10 fields }` in `Board::Mmc5Ext(Box<Mmc5Ext>)`** | **this step's choice, and step 4 took the box off it** (the campaign measured the boxed form at `metroid` +0.165 % and the unboxed at +0.010 %, the niche costing more than it saves); the struct and the switch are otherwise what shipped. `Mmc5` is `ca1517dc`'s file restored byte for byte (`git show ca1517dc:…/mmc5.rs`, then the lot's additions appended below it), so the light board is the base commit's code by construction and not by inspection; the full board *contains* it, so forty-one `Mapper` methods minus seven are a forward and the MMC5's PRG decode, sound, IRQ, scanline detection, bank windows and savestate format have **one** implementation. |
 
-**The layout is measured, not assumed**: `size_of::<Board>()` is **1376** in `default` and 1376
-with the feature on, equal to `size_of::<Mmc5>()` in both — so the niche-filling layout survives
-the thirty-seventh variant and the enum has not grown by a byte. The cost of that variant is one
-more `Board` discriminant, which **MF-6c step 6 measured alone**: `mmc5` −40 814 instructions over
-300 frames, PR-1's set total −136 318, worst of thirteen +0.000 %.
+**The layout is measured, not assumed**: with the variant boxed, `size_of::<Board>()` is **1376**
+in `default` and 1376 with the feature on, equal to `size_of::<Mmc5>()` in both — so the
+niche-filling layout survives the thirty-seventh variant and the enum does not grow by a byte.
+The cost of that variant was expected to be one more `Board` discriminant, which **MF-6c step 6
+measured alone** at `mmc5` −40 814 instructions over 300 frames and worst of thirteen +0.000 %.
+
+**Both halves of that paragraph turned out to be the wrong way round, and step 4 is where.** One
+more discriminant is *not* free at thirty-seven (the control: `mmc5` +0.132 %, `metroid` +0.089 %),
+and keeping the niche is *not* worth it (the prologue is four instructions with it and one
+without). The shipped shape is the unboxed variant with the two MMC5 arms sharing one match arm:
+`size_of::<Board>()` **1392** with the feature on, PR-1's worst ROM **+0.010 %** and `mmc5`
+**−0.059 %**. Step 4.3 has the four shapes and their figures.
 
 **What the light board gains: nothing.** `mmc5.rs` is `ca1517dc`'s 792 lines with the ext section
 appended; the only edits inside them are the struct's doc comment, two `#[cfg]`'d `use`
@@ -58,8 +65,9 @@ register, no write arm, no line of `chr_address`, `see_ppu_read`, `save_register
 **The switch, and the three places a variant can change.**
 
 1. `Board::intercept_cpu_write`, **inside the MMC5's own arm** — the hot one. `dispatch!` now
-   expands `dispatch_arms!`, one list of thirty-seven arms with an override hook for
-   `Board::Mmc5`, so no other arm and no path before or after the dispatch changes: MF-LEG-2
+   expands `dispatch_arms!`, one list of arms whose MMC5 clause each caller passes in (step 4
+   turned that into the two forms `dispatch!` and `dispatch_ext!`), so no other arm and no path
+   before or after the dispatch changes: MF-LEG-2
    step 4 priced one `bool` on the cartridge's common write path at **+610 864 on `smb3`**, and
    this function is `NesBus::write_internal`'s own body. The test is
    `Mmc5Ext::write_arms_substitution(address, value)` and the construction behind it is
@@ -250,6 +258,188 @@ collection keep their outcomes in all three configurations
 
 **All pass; nothing fails and nothing is skipped.** The +16 are this lot's own tests and the
 `default` row is identical, which is the suite's statement of what the feature-off build is.
-- [ ] 4/6 the callgrind campaign
+- [x] 4/6 the callgrind campaign
+
+### 4/6 — the callgrind campaign, and the four shapes it took
+
+Binaries built by `rust/tools/perf/build-clean.sh` from their own tar into a **fresh** directory
+with its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`. Each feature variant
+was made from its own shipped tar by adding one line to zax-nes's `default` list.
+
+| label | tree |
+| --- | --- |
+| `leg3-base` | **`04731c86`**, the lot's base commit |
+| `leg3-doc` | **the committed tree**, the feature out of `default` — the figures' own shipped build |
+| `leg3-docfeat` | the committed tree plus **`board-mmc5-exattr-split`** in `default` |
+| `leg3-x37` | the shipped tree plus a thirty-seventh `Board` variant **never constructed**, the control |
+| `leg3-feat`, `leg3-unbox`, `leg3-sharefeat`, `leg3-pinfeat` | the four shapes of 4.3 |
+
+#### 4.0 The shipped build **is** the base commit's binary, md5 for md5
+
+| binary | md5 |
+| --- | --- |
+| `leg3-base` (`04731c86`) | `104030539c326d44d2ac4f6a2b088e79` |
+| `leg3-doc`, the committed tree with the feature off | `104030539c326d44d2ac4f6a2b088e79` |
+| `leg2-ship`, **MF-LEG-2's own measured shipped binary** | `104030539c326d44d2ac4f6a2b088e79` |
+
+**The whole file, not `.text` alone**, which is a stronger statement than MF-LEG-2 could make (its
+shipped build differed from its base by 37 bytes of build-id and `panic::Location` lines). Nothing
+of this lot is compiled with the feature off — not a field, not a variant, not a macro arm — so
+"with the feature off: identical to the base" needs no ROM run at all, and the third row says the
+lot's base is the previous lot's measured binary, the **fourteenth** lot in a row for which that
+holds.
+
+**The figures below are the committed tree's**, re-taken on it rather than carried over from the
+build that settled the design: the tree was tarred after `cargo fmt` *and* after the documentation
+was written, built again (`leg3-doc`, feature off, md5 unchanged by the comments;
+`leg3-docfeat`, feature on, md5 `39f30e0b6144e712ef0bd864daa809bf`), and both the thirteen-ROM set
+and the level-2 run were re-run on it. The build that settled the design gave `metroid` +0.009 %
+and `mmc5` −0.059 %, within an instruction or two of what the committed tree gives below.
+
+#### 4.1 PR-1's thirteen: **every ROM inside the owner's +0.02 %, and the set total below the base**
+
+`leg3-finalfeat` against `leg3-base`, 300 frames, `bench-core`:
+
+| ROM | board | delta | % |
+| --- | :-: | ---: | ---: |
+| `mmc5` | **MMC5** | **−6 644 161** | **−0.059** |
+| `vblnmi` | MMC1 | −2 035 | −0.000 |
+| `oamstr` | NROM | −15 233 | −0.000 |
+| `m4` | MMC3 | −127 608 | −0.002 |
+| `m1` | MMC1 | +93 844 | +0.002 |
+| `m0` | NROM | +245 305 | +0.004 |
+| `readbuf` | CNROM | +397 712 | +0.006 |
+| `smb3` | MMC3 | +474 520 | +0.006 |
+| `smb1` | NROM | +405 123 | +0.007 |
+| `duelito` | NROM | +502 213 | +0.007 |
+| `mm2` | MMC1 | +461 284 | +0.008 |
+| `z2` | MMC1 | +482 938 | +0.008 |
+| `metroid` | MMC1 | +503 090 | **+0.010** |
+| **total** | | **−3 223 008** | **−0.004** |
+
+**Worst ROM +0.010 %, against a tolerance of +0.02 %, and `mmc5` is 6.6 M instructions *below*
+the base.** Against MF-LEG-2's own figures for the same two features — `metroid` +0.101 %, `mm2`
++0.085 %, `m4` +0.061 %, `m1` +0.060 %, `mmc5` **+2.522 %** — every ROM of the set is now inside
+the tolerance and the MMC5 is cheaper than before the feature existed.
+
+**`mmc5` is the row to read twice.** It is `mmc5exram`, and step 3 measured that it **arms neither
+mode** over the campaign's own 300 frames: it runs `Board::Mmc5`, which is `04731c86`'s code, so
+the −0.059 % is not the feature being fast, it is the feature not being *there* — plus the
+cheaper dispatch prologue 4.3 explains. A game that does arm a mode pays for the two modes on its
+own fetches, which is what the 3D-pack titles the feature exists for will see; no ROM of the
+collection drives them (step 3, and MF-LEG-2 step 3 before it).
+
+#### 4.2 Level 2: `core` and `ppu` inside the tolerance, and what `total` cannot measure
+
+Five commercial games with their 3D packs, 600 frames after 120 of warm-up, inputs pressed:
+
+| game | mapper | `core` | `ppu` | `total` | `apu`, `draw_list` |
+| --- | :-: | ---: | ---: | ---: | --- |
+| `smb3` | 4 | **+0.007 %** | +0.012 % | **−0.005 %** | +0 |
+| `mm2` | 1 | **+0.009 %** | +0.016 % | +0.006 % | +0 |
+| `zelda2` | 1 | **+0.009 %** | +0.015 % | +0.013 % | +0 |
+| `smb1` | 0 | **+0.010 %** | +0.016 % | +0.016 % | +0 |
+| `metroid` | 1 | **+0.010 %** | +0.016 % | +0.009 % | +0 |
+
+**All five games are inside +0.02 % on `core` *and* on `total`**, `core` is +0.007 % to +0.010 %,
+and `apu` and `draw_list` are +0 to the instruction. Against MF-LEG-2's `metroid` +0.110 % and
+`mm2` +0.103 % on the same stage, that is the whole point of the lot.
+
+**One thing about `total` is worth recording, because an earlier build of this same code failed
+on it.** The build measured before the documentation was written — the same instructions, three
+doc blocks shorter — gave `smb1/total` +0.029 % and `smb3/total` +0.027 %, with `smb1/lua_hooks`
++0.319 %, `smb3/lua_hooks` +0.327 % and `zelda2/lua_hooks` +0.381 %, while `core` and `apu` did
+not move underneath. **Comments moved that stage by a hundredth of a percent**, so what it
+measures is the layout of the binary and not its emulation — which is not an assertion here, it
+is the **control**:
+
+| stage, `leg3-x37` against `leg3-base` — a `Board` variant that is **never constructed** | |
+| --- | ---: |
+| `zelda2/lua_hooks` | **+0.364 %** |
+| `smb1/lua_hooks` | **+0.241 %** |
+| `zelda2/convert` | +0.204 % |
+| `smb1/convert` | +0.181 % |
+| `smb3/core` | −0.163 % |
+| `metroid/core` | +0.096 % |
+
+A variant that cannot be reached by any code path moves `lua_hooks` by a third of a percent and
+`core` by a sixth, because `Board` changes size, the cartridge's allocation changes with it, and
+mlua's pointer-keyed tables and the converter's allocations land elsewhere. **So neither `total`
+nor `lua_hooks` resolves +0.02 % on this instrument** — which MF-LEG-1B had already measured as
+±0.029 % on `smb1` and MF-LEG-2 repeated — and the shipped build's `core` figures (+0.007 % to
++0.010 %) are *tighter than the control's* on four of the five games, which is the strongest
+statement available here.
+
+#### 4.3 The four shapes, and what each cost
+
+Four shapes of the run-time switch were built and measured. Figures are percentages against
+`leg3-base`; `metroid` and `m1` stand for the twelve non-MMC5 ROMs and `mmc5` for the board
+itself.
+
+| # | shape | `metroid` | `m1` | `mmc5` | set total | kept? |
+| --: | --- | ---: | ---: | ---: | ---: | :-: |
+| 1 | `Board::Mmc5Ext(Box<Mmc5Ext>)`, the boxed variant: the enum keeps its niche-filling layout | +0.165 | +0.183 | +0.634 | +0.159 | no |
+| 2 | **unboxed** `Board::Mmc5Ext(Mmc5Ext)`: the niche goes, the tag becomes a field | −0.004 | −0.004 | +0.218 | +0.032 | step |
+| 3 | unboxed, plus the forwarding dispatches binding `Mmc5Ext`'s `base` field | −0.004 | −0.004 | +0.218 | +0.032 | step |
+| 4 | **one match arm for both MMC5 variants** (`Board::Mmc5(b) \| Board::Mmc5Ext(Mmc5Ext { base: b, .. })`) | **+0.010** | **+0.002** | **−0.059** | **−0.004** | **shipped** |
+| — | the control: a thirty-seventh variant **never constructed** | +0.089 | +0.046 | +0.132 | +0.019 | — |
+| — | shape 3 plus `#[inline(always)]` on `Mmc5::on_cpu_cycle` | −0.003 | −0.003 | +0.250 | +0.037 | no |
+
+Four findings, each measured and none reasoned:
+
+1. **The box was the mistake, and the niche with it.** `Board`'s tag lives in a niche inside the
+   MMC5 variant and every dispatch prologue is `movzbl 1355(%rcx); subb $2; movl $5; cmovael` —
+   four instructions. A second *unboxed* MMC5 variant overlaps that niche, so rustc gives the enum
+   a **tagged** layout (`size_of::<Board>()` 1376 → **1392**) and the prologue becomes **one
+   load**. That is worth more than the niche costs: shape 1 is `metroid` +0.165 % and shape 2 is
+   `metroid` **−0.004 %**, with twelve of thirteen ROMs inside ±0.008 %. `Board`'s own note has
+   been rewritten with this; MF-2 step 0's warning is about a reshape that *moves* the tag, and
+   removing it is not that.
+2. **Any thirty-seventh discriminant costs the MMC5, and the control proves it is the
+   discriminant and not this lot's code.** `leg3-x37` — a variant never constructed, whose arm is
+   textually the NROM's — is `mmc5` **+0.132 %**, `metroid` +0.089 %, `mm2` +0.075 %. So the
+   37-entry jump table is itself the cost, and three of those tables are pinned
+   `#[inline(always)]` chains.
+3. **One match arm for both MMC5 variants removes all of it.** The two variants reach the same
+   `&mut Mmc5` — `Mmc5Ext`'s first field is the light board at offset 0, which a
+   `const _: () = assert!(offset_of!(Mmc5Ext, base) == 0)` now pins — so an **or-pattern** gives
+   the thirty-three forwarding dispatches *one block* for the two entries. The three symbols
+   shape 3 was paying for all go: `Mmc5::on_cpu_cycle` 0 → 310 217 368 (out of line, against
+   −301 285 604 in the dispatch) back to inlined, `NesBus::push_expansion_audio` +8 934 160 back
+   to 0, `Cartridge::try_cpu_read` +6 868 631 back to 0. `mmc5` goes from +0.218 % to **−0.059 %**.
+4. **Pinning `Mmc5::on_cpu_cycle` instead of fixing the arm made it worse** (+0.218 % →
+   +0.250 % on `mmc5`) and was reverted. Forcing a body back inline is not the same as giving the
+   two arms one body: the second copy is still a second copy. It is also *free* with the feature
+   off — the feature-off binary stayed md5-identical to the base with the attribute in place — so
+   the attribute would have been invisible in the shipped build and misleading in the source.
+
+**What the PPU's fetch path cost, which is the question MF-LEG-2 could not answer: nothing.**
+`Board::ppu_peek` and `Board::ppu_read` are **64 496 640** and **22 674 330** on `m0` in the base
+*and* in every feature shape above — identical to the instruction. The three dispatches the full
+variant implements itself (`ppu_peek`, `ppu_read`, `on_ppu_address_bus`) carry a distinct arm and
+it costs nothing, where MF-LEG-2's one `bool` inside the MMC5's *existing* arm cost every board
+one instruction per CHR fetch. The difference is a new arm against a grown one.
+
+#### 4.4 The decision
+
+**Every acceptance figure the brief names is met**, except the one the brief says to record rather
+than meet:
+
+| the brief asks | measured |
+| --- | --- |
+| every PR-1 ROM except `mmc5` within +0.02 %, with the feature on | **worst +0.010 %** (`metroid`); eleven of the twelve at or below +0.008 % |
+| every level-2 game within +0.02 %, totals and cores | **all five inside, on both**: `core` **+0.007 % to +0.010 %**, `total` −0.005 % to +0.016 %, `apu` and `draw_list` +0 |
+| `mmc5` recorded separately, and whether it arms either mode | **−0.059 %**, and it **arms neither** (step 3, measured over the campaign's own 300 frames) |
+| with the feature off, identical to the base | the **same binary**, md5 `104030539c326d44d2ac4f6a2b088e79` |
+
+*Castlevania III* is R0's to measure. What this lot can say about it is structural and was the
+owner's own reason for the switch: it arms neither mode, so it runs `Board::Mmc5` — the base
+commit's code — for its whole life, and the only figure it can pay is the one `mmc5` pays on the
+same board and the same paths, which is **−0.059 %**. MF-LEG-2 measured it at **+2.992 %**.
+
+Whether the feature joins `default` is R0's and the owner's call; step 5 states it for
+`BOARD-FEATURES.md`.
 - [ ] 5/6 the documentation and the decision
 - [ ] 6/6 the final check

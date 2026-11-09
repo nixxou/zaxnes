@@ -906,7 +906,17 @@ impl Mapper for Mmc5 {
 pub struct Mmc5Ext {
     /// The light board, **verbatim and whole**: the switch moves it here field for field and
     /// every forward below reads it, so no register, memory, counter or flag is duplicated.
-    base: Mmc5,
+    ///
+    /// **It is the first field, and the assertion below is load-bearing.** The thirty-three
+    /// `Board` dispatches this board does not override put the two MMC5 variants in **one** match
+    /// arm — `Board::Mmc5(b) | Board::Mmc5Ext(Mmc5Ext { base: b, .. })` — which is only one block
+    /// of code if the light board is at the same address in both, i.e. if this field is at offset
+    /// 0. Two blocks is what lot MF-LEG-3 measured at **+0.218 % on an MMC5 that arms neither
+    /// mode**: `Mmc5::on_cpu_cycle` out of line at +8.9 M, `NesBus::push_expansion_audio`
+    /// +8 934 160 and `Cartridge::try_cpu_read` +6 868 631, the three of them pinned
+    /// `#[inline(always)]` chains that cannot absorb a thirty-seventh block. One block, and that
+    /// ROM comes out −0.059 %. `docs/progress/MF-LEG-3.md` step 4.3.
+    pub(crate) base: Mmc5,
     /// `$5200`: bit 7 enables the vertical split, bit 6 picks the side (0 left, 1 right) and
     /// bits 4-0 are the threshold tile count (nesdev, "MMC5"; `ESxW WWWW`).
     split_control: u8,
@@ -975,6 +985,12 @@ pub struct Mmc5Ext {
     split_capture: bool,
 }
 
+/// [`Mmc5Ext::base`] must be at offset 0: the `Board` dispatches that forward bind that field,
+/// and they are only one block for the two MMC5 arms if its address is the board's own. See the
+/// field's comment.
+#[cfg(feature = "board-mmc5-exattr-split")]
+const _: () = assert!(std::mem::offset_of!(Mmc5Ext, base) == 0);
+
 #[cfg(feature = "board-mmc5-exattr-split")]
 impl Mmc5Ext {
     /// Pattern fetches that must precede a nametable fetch for it to be the first of a line's
@@ -1027,23 +1043,23 @@ impl Mmc5Ext {
     /// of stack frame on **every** board's write path. Behind a call it is this function's own
     /// frame, entered once in the life of a game.
     #[inline(never)]
-    pub(crate) fn armed_by_write(base: &Mmc5, address: u16, value: u8) -> Box<Self> {
+    pub(crate) fn armed_by_write(base: &Mmc5, address: u16, value: u8) -> Self {
         let mut board = Self::from_light(base.clone());
         // $5104's write has already been taken by the light board — it is a register both
         // variants have. The split's three are not, so the arming write is applied here.
         board.write_split_register(address, value);
-        Box::new(board)
+        board
     }
 
     /// The full board, built from the light one that has just loaded a state this board wrote
     /// (see [`Mmc5Ext::state_arms_substitution`]). `inline(never)` for `armed_by_write`'s reason.
     #[inline(never)]
-    pub(crate) fn armed_by_state(base: &Mmc5) -> Box<Self> {
+    pub(crate) fn armed_by_state(base: &Mmc5) -> Self {
         let mut board = Self::from_light(base.clone());
         let packed = board.base.ex_ram_mode;
         board.base.ex_ram_mode = packed & 0x03;
         board.unpack_split_registers(packed);
-        Box::new(board)
+        board
     }
 
     /// The light board this one was built from, for the reset that puts the cartridge back on it
