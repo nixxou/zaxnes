@@ -72,6 +72,7 @@ impl HeadlessGpu {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
             compatible_surface: None,
+            apply_limit_buckets: false,
         }))
         .map_err(|error| HeadlessError::Adapter(api, error))?;
         let (device, queue) =
@@ -216,7 +217,11 @@ impl HeadlessGpu {
         let slice = buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.finish();
-        let mapped = slice.get_mapped_range();
+        // `finish` completed the mapping; were it refused all the same, a black picture of the
+        // right size beats a panic.
+        let Ok(mapped) = slice.get_mapped_range() else {
+            return vec![0; (row * self.height) as usize];
+        };
         let mut pixels = Vec::with_capacity((row * self.height) as usize);
         for line in mapped.chunks_exact(padded as usize) {
             pixels.extend_from_slice(&line[..row as usize]);

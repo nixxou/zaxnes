@@ -130,6 +130,7 @@ impl WgpuDisplay {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                apply_limit_buckets: false,
             }))
             .map_err(|error| PlatformError::new(format!("no {api:?} adapter: {error}")))?,
         };
@@ -164,6 +165,7 @@ impl WgpuDisplay {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
             },
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: width.max(1),
             height: height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
@@ -314,7 +316,7 @@ impl WgpuDisplay {
     /// Presents the frame [`Self::draw`] drew.
     pub fn present(&mut self) {
         if let Some(frame) = self.pending.take() {
-            frame.present();
+            self.queue.present(frame);
         }
     }
 
@@ -419,7 +421,11 @@ pub fn read_rgba(
         submission_index: None,
         timeout: None,
     });
-    let mapped = slice.get_mapped_range();
+    // The wait above completed the mapping; were it refused all the same, a black picture of the
+    // right size beats a panic.
+    let Ok(mapped) = slice.get_mapped_range() else {
+        return vec![0; (row * height) as usize];
+    };
     let mut pixels = Vec::with_capacity((row * height) as usize);
     for line in mapped.chunks_exact(padded as usize) {
         pixels.extend_from_slice(&line[..row as usize]);
@@ -673,11 +679,11 @@ impl InterfaceRenderer {
                 module: &module,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: size_of::<DrawVert>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attributes,
-                }],
+                })],
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,

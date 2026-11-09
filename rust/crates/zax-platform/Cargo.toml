@@ -28,7 +28,7 @@ png = "0.17"
 pollster = { version = "0.4", optional = true }
 sdl2 = "0.38"
 thiserror = "2"
-wgpu = { version = "29.0.4", optional = true, default-features = false, features = [
+wgpu = { version = "30.0.0", optional = true, default-features = false, features = [
     "std",
     "parking_lot",
     "dx12",

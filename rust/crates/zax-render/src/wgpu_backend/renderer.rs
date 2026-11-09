@@ -2871,7 +2871,12 @@ pub(super) fn shader_module(
     wgsl: &str,
     problem: Option<&str>,
 ) -> wgpu::ShaderModule {
-    let mut source = wgsl.to_owned();
+    // Since wgpu 30, a module using texture arrays has to enable them before its first item.
+    let mut source = if wgsl.contains("binding_array<") {
+        format!("enable wgpu_binding_array;\n{wgsl}")
+    } else {
+        wgsl.to_owned()
+    };
     if let Some(problem) = problem {
         use std::fmt::Write as _;
         let _ = write!(
@@ -2953,7 +2958,7 @@ fn scene_pipeline(
             module,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout()],
+            buffers: &[Some(vertex_layout())],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -3025,7 +3030,7 @@ fn mask_pipeline(
             module,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout()],
+            buffers: &[Some(vertex_layout())],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -3076,7 +3081,7 @@ fn shadow_pipeline(
             module,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout()],
+            buffers: &[Some(vertex_layout())],
         },
         // Q-025: only the back faces of the casters fill the map.
         primitive: wgpu::PrimitiveState {
