@@ -554,5 +554,42 @@ Two things R0 may want to weigh against the figures:
   Waters*, *Bandit Kings of Ancient China*, *Yakuman Tengoku* and *Uchuu Keibitai SDF* — which
   render visibly wrong without it. *Castlevania III*, the most-played MMC5 game, needs neither
   and pays the instruction either way.
-- [ ] 5/6 the report entry and `BOARD-FEATURES.md`
+- [x] 5/6 the report entry and `BOARD-FEATURES.md`
+
+### 5/6 — entry MMC5-1, `BOARD-FEATURES.md` and Q-177
+
+**Entry MMC5-1** gains a *resolution note* at its heading and keeps every paragraph it had,
+because three of its predictions can now be checked and one of them is wrong. What was added:
+
+* the note itself — both features implemented, behind `board-mmc5-exattr-split`, off in
+  `default` and **in `parked-boards`**, so **the verdict DIFFERS still stands for the shipped
+  build** and is answered for a build that asks;
+* a marker on *"**This build.** Neither"*, which is now true only of the default configuration,
+  with the three `#[cfg]`s named and the binary-level proof that the sentence is exact there;
+* *"**Risk of a fix**"* marked as written before the fix, and a new section **"What the fix
+  actually looked like"** that scores its four predictions: *(a) and (b) are one feature* — right,
+  and (c) belongs with them; *the interface does not express it* — right about the problem,
+  wrong about the remedy; *the split needs a counter fed from the PPU's fetch sequence* — right
+  that it needs one, wrong that the PPU must feed it, and the `dot == 321` hook that tried cost
+  every ROM of PR-1's set; *a careless implementation could cost every game a few instructions
+  per fetch* — right, and it applies to a careful one too;
+* the 3D view's result and its one limitation;
+* **a correction to the entry's closing paragraph.** It says `exram` and `mmc5test_v2` are "not
+  run by the project today" and that running the latter "would quantify MMC5-1". Both are run,
+  as `Manual`, since **MF-4c step 4** — and running it does **not** quantify anything: step 3
+  ran all three MMC5 ROMs in both configurations and the final frames are byte-identical,
+  `mmc5test_v2` being an interactive register test whose final frame is its menu. The paragraph
+  is kept with that clause struck through and the correction beside it, and the section's count
+  line now says whose DIFFERS it is.
+
+**`BOARD-FEATURES.md`** gains the feature's row — the mechanism, the seven titles, both measured
+columns, the gated-off figures and the command — and four edits elsewhere: "three features are
+parked" becomes four, the umbrella's row and its mapper list take it, the "first entry that is
+not a board" note gains the second and largest such entry, and MF-VS's "the worst figure of the
+one *board* feature that is not in `default`" paragraph is left as written with the two rows that
+have joined it since recorded underneath.
+
+**Q-177** was written at step 1 and is unchanged: three readings the five emulators disagree on,
+each shipped as the page reads, each a one-expression change if R0 prefers another, and each
+pinned by a test whose message names the alternative.
 - [ ] 6/6 the final check

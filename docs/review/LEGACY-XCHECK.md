@@ -1036,7 +1036,23 @@ things MR-1 could only see one side of: the split screen, and the audio's low-pe
   simply summing every channel with one sign, which is a mixer convention rather than a reading
   of the board.
 
-### MMC5-1 — the vertical split and extended attribute mode are not implemented here and are implemented by all five others — DIFFERS
+### MMC5-1 — the vertical split and extended attribute mode are not implemented here and are implemented by all five others — DIFFERS, **now implemented behind `board-mmc5-exattr-split` and parked (MF-LEG-2, `defff9ce`)**
+
+> **Resolution, lot MF-LEG-2 (2026-11-09).** Both features are implemented and tested. They are
+> behind the Cargo feature **`board-mmc5-exattr-split`**, which is **off in `default` and in
+> `parked-boards`**: the owner's decision was taken before measurement, and the measurement
+> agrees with it — four of PR-1's thirteen ROMs and two of level 2's five games are over the
+> +0.02 % tolerance, and the overage is one instruction per CHR fetch in `Board::ppu_peek` /
+> `Board::ppu_read` because the MMC5's dispatch arm grows by the one `bool` a fetch tests.
+> **The entry's verdict therefore stands for the shipped build and is answered for a build that
+> asks**: `cargo build -p zax-nes --features parked-boards`.
+>
+> The paragraphs below are kept as written, because they are the analysis the lot was done
+> against and three of their predictions can now be checked. **Where they are now wrong is
+> marked.** `docs/progress/MF-LEG-2.md` has the implementation, the twenty-three tests, the
+> seven measured shapes of the fetch path and the figures; `docs/review/BOARD-FEATURES.md` has
+> the row; **Q-177** has the three points where the five emulators disagree and what this build
+> chose.
 
 **Point.** Two features of this board that change what is on screen:
 
@@ -1047,9 +1063,15 @@ things MR-1 could only see one side of: the split screen, and the audio's low-pe
   the split region scrolls independently, fetches its nametable from ExRAM only, and takes its
   CHR from the $5202 bank.
 
-**This build.** Neither. The board's own doc comment says so in one sentence
+**This build.** Neither — **as it ships**. The board's own doc comment says so in one sentence
 (`mmc5.rs:12-15`), `write_control` has no $5200-$5202 arm at all (`mmc5.rs:163-204`, which
 falls through to `_ => {}`), and `ex_ram_mode` 1 is treated exactly like mode 0.
+**MF-LEG-2** put all three behind `board-mmc5-exattr-split`: with the feature on, `write_control`
+has the three arms, `ex_ram_mode` 1 answers the attribute fetch from `ExRAM` and
+`Mmc5::nametable_page` reports `SERVED_BY_CARTRIDGE` for all four tables so that every
+nametable-space byte reaches the board. With it off the three `#[cfg]`s are absent and the
+sentence above is exact, which was checked on the binary and not only in the source: `.text` and
+`.rodata` of the shipped build are byte-identical to this entry's own commit.
 
 **The others.** All five implement both:
 
@@ -1083,7 +1105,8 @@ evidence than any of the five implementations:
 - **Not affected**: *Castlevania III* uses the PRG/CHR banking and the scanline IRQ, which are
   implemented, so the most-played MMC5 game is not in this list.
 
-**Risk of a fix.** Contained but not trivial, and this is the part worth being honest about.
+**Risk of a fix** — *written before the fix; the measured outcome follows it below.* Contained
+but not trivial, and this is the part worth being honest about.
 Extended attribute mode needs the PPU's nametable and attribute fetches routed through the
 board per tile, which the current `nametable_page` / `ppu_peek` interface does not express:
 `chr_address` is called with a `ChrFetch` kind but not with the tile index, and the attribute
@@ -1101,6 +1124,58 @@ palette override, which is what the six Koei/Just Breed titles need most visibly
 needs only the attribute fetch to consult ExRAM; (b) the per-tile 4 KiB CHR bank from the same
 byte; (c) $5200-$5202 and the split tile counter, which is two games. (a) and (b) are one
 feature in the hardware and probably one change here.
+
+**What the fix actually looked like (MF-LEG-2).** The three predictions above came out as
+follows.
+
+* **"(a) and (b) are one feature in the hardware and probably one change here"** — right, and
+  (c) turned out to belong with them: all three are one feature, because the split and mode 1
+  read the same 1 KiB and compose on the same fetch (the page: "the non-split region gains
+  extended attributes, and the split region does not use extended attributes").
+* **"the current `nametable_page` / `ppu_peek` interface does not express it"** — right about
+  the problem, wrong about the remedy. `chr_address` still never sees the tile index; the board
+  latches it from `Mmc5::see_ppu_read`, which already sees every PPU read. And the attribute
+  byte is still "not asked of the board" by a new hook: the MMC5 answers
+  `SERVED_BY_CARTRIDGE` for all four tables and serves every nametable-space byte through one
+  new `Mapper` method, `read_nametable_from_vram`, whose only addition is the console VRAM the
+  board needs to go on serving the CIRAM pages `$5105` names. **No new test was added to any
+  other board's fetch path.**
+* **"the split needs a per-line tile counter fed from the PPU's fetch sequence"** — right that
+  it needs one, wrong that the PPU must feed it. A `dot == 321` hook was the first shape and it
+  cost **every ROM of PR-1's set +5.4 M to +13.6 M instructions on `Ppu2C02::run_dots`**, by
+  changing the inliner's mind rather than by doing work. The board finds the dot itself, by
+  counting the pattern fetches between two nametable-space reads: two inside a tile group,
+  sixteen across the sprite window of dots 257 to 320.
+* **"a careless implementation could cost every game a few instructions per fetch"** — right,
+  and it applies to a careful one too. Seven shapes were built and measured; four brought the
+  figure down and are in the code, two made it worse and were reverted, and **none of the seven
+  moved the one that parks the board**: `Board::ppu_peek` +4 528 000 on `metroid`, +4 485 120 on
+  `mm2`, `Board::ppu_read` +3 082 184 on `m4`. That is about one instruction per CHR fetch, and
+  its cause is that the MMC5's arm of those dispatches grows by the single `bool`
+  (`Mmc5::background_substitutes`) that the fetch path tests — this report's own `Board` note on
+  `read_nametable` and `docs/progress/MF-2.md` step 0 both describe the mechanism.
+
+So the feature is **parked**: PR-1 eight of thirteen inside the tolerance (`oamstr` +0.003 % to
+`smb1` +0.010 %) with `smb3` −0.049 % and `z2` −0.013 % below the base, and `m1` +0.060 %, `m4`
++0.061 %, `mm2` +0.085 %, `metroid` +0.101 % above it; level-2 `core` `smb3` −0.061 %, `zelda2`
+−0.015 %, `smb1` +0.013 %, `mm2` +0.103 %, `metroid` +0.110 %; `mmc5` itself +2.522 %, which is
+the board paying for its own feature.
+
+**The 3D view follows the 2D picture.** `zax-engine3d` takes a block's palette from
+`TileRecord::palette`, and the records come from `Ppu2C02::capture_background_row`, which reads
+each tile's attribute byte through the same path — so both substitutions reach the converter with
+no change to its hot path for any game. Four tests compare **all 960 records of a frame against
+the 2D picture pixel for pixel** in mode 1, in the split, in the two composed and in neither. The
+one thing the 3D view does not carry is the split's *fine* vertical scroll: a record is a whole
+8x8 tile, and a region scrolled by part of a tile straddles two `ExRAM` rows inside one band.
+
+**And the two ROMs this entry hoped to be quantified by cannot do it.** The closing paragraph
+below says `exram` and `mmc5test_v2` are "not run by the project today"; they have been run since
+**MF-4c step 4**, as `Manual`. MF-LEG-2 ran all three MMC5 ROMs of the collection in both
+configurations and compared the final frames: **byte-identical in all three**. `mmc5test_v2` is an
+interactive register test whose final frame is its menu, and reaching its split sub-test needs
+button presses the campaign does not make. The behaviour is pinned by the twenty-three tests of
+`mf_leg_2_mmc5_exattr_split_tests.rs` and `mapper_tests.rs` instead.
 
 ### MMC5-2 — the low-period cutoff: this build follows the page and three of the four do not — OK
 
@@ -1171,11 +1246,21 @@ believed it.
 `assets-free/test-roms/nes-test-roms/exram`. These are the only mapper-specific ROM tests in
 the suite besides the MMC3's, and they are the ones that would exercise MMC5-1 and MMC5-3
 directly: `exram` is about the $5C00-$5FFF modes and `mmc5test_v2` covers the split and the
-scanline IRQ. **Neither is run by the project today.** Running `exram` would settle MMC5-3 at
+scanline IRQ. ~~**Neither is run by the project today.**~~ Running `exram` would settle MMC5-3 at
 first hand; running `mmc5test_v2` would quantify MMC5-1 rather than leave it as a feature
 checklist. There is no audio test ROM for the MMC5, so MMC5-2 stays a documentation question.
 
-Count: 16 OK, 1 DIFFERS, 1 OPEN.
+> **Corrected, MF-LEG-2 (2026-11-09).** **All three are run**, and have been since **MF-4c
+> step 4** — `req_core_100_the_mmc5_rom_suites_keep_their_outcomes`, as `Manual`, because they
+> "print a screen with no documented verdict". And **running `mmc5test_v2` does not quantify
+> MMC5-1**: MF-LEG-2 ran all three in `default` and with `board-mmc5-exattr-split` on and
+> compared the final frames, which are **byte-identical in all three**. `mmc5test_v2` is an
+> *interactive* register test — the frame it lands on is its menu, and its split sub-test needs
+> button presses the campaign does not make. So the hope in this paragraph does not work, in
+> either configuration, and MMC5-1 is pinned by the twenty-three tests of MF-LEG-2 instead.
+
+Count: 16 OK, 1 DIFFERS, 1 OPEN. (MMC5-1's DIFFERS is the **shipped** build's; the feature that
+answers it is in `parked-boards` — see the entry's resolution note.)
 
 ---
 
