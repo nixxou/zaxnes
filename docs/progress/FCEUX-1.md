@@ -22,7 +22,7 @@ a design note for the lots that would follow.
   `docs/review/FCEUX-ENGINE-COMPARISON.md`; fork `237a33b3`.
 - [x] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path. Fork
   `c3ddd421`.
-- [ ] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`.
+- [x] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`. Fork `3f022b8c`.
 - [ ] 8/8 — Final pass.
 
 ## Environment of the session
@@ -886,3 +886,35 @@ fmt clean; clippy `-D warnings` clean with the feature off and on; `cargo test -
 `zax_fceux::Tile` has four flags because the record of SPEC-02 §4.1 has four, so
 `struct_excessive_bools` is allowed there with the reason written down rather than the type bent
 out of shape.
+
+---
+
+# Step 7 — The design note
+
+`docs/review/FCEUX-ENGINE.md`. Worktree commit below; fork commit `3f022b8c` (the fork's
+`zax/README.md` still described two patched files and thirteen lines, which was true at step 2 —
+it now describes the three files and 51 lines that are actually there, and lists `zaxtiles.cpp`).
+
+It covers what the brief asked, in ten sections: what FCEUX is for (coverage, not accuracy — the
+measured verdicts settle that); the `Engine` trait, what goes on it and what stays Zaxnes-only;
+rollback and run-ahead over FCEUX savestates with the sizes measured; the per-game choice in the
+UI and settings; `.fm2` playback; the honest state of the 3D path; the FCEUX defect and three
+options for it; Android and PortMaster; binary size; and the lots that would follow, each sized.
+
+Three judgements in it are worth repeating here, because they are recommendations rather than
+findings and the owner may disagree:
+
+1. **FCEUX must never be the default for a game Zaxnes already runs.** 95 passes against 58 on the
+   test ROMs, 37 one way and none the other, is not a close call.
+2. **3D on FCEUX should not ship until the mid-frame scroll is fixed** — 89 % of records and 93 %
+   of pixels is not good enough to put in front of a user. Offering FCEUX in **2D only** at first
+   is a coherent product that already answers the mapper-coverage and `.fm2` reasons in full.
+3. **`FrameBatch` and `TileRecord` should move to a small `zax-core-api` crate** that both engines
+   depend on, rather than `zax-fceux` depending on the core it is an alternative to. That is a
+   mechanical but wide change and it is what makes lot FCEUX-2 large.
+
+It also records one thing the lot could not do and did not pretend to: **no cross-compilation was
+attempted.** No Android or aarch64 toolchain is installed and the lot was forbidden to download
+one, so §8 is written as expectations with the reasons they are plausible (plain C++17, no
+x86-specific code, built and byte-identical on two platforms already, zlib vendored), and it names
+the one real risk — the `stdc++` link line needs a third case for the NDK's `c++_shared`.
