@@ -372,7 +372,7 @@ public class PatternInstance
             DeformPivot = ToVec3(variant.DeformPivot, Vec3.Half),
             Style = (RenderStyle)(int)variant.RenderStyle,
             EmptyColor = variant.EmptyColor,
-            Texture = variant.Texture is { IsNullMarker: false } texture ? texture : null,
+            Texture = TextureOf(variant),
         };
 
         CopyMatrix(variant.DeformSpeed, ref instance.DeformSpeed, 0f);
@@ -383,18 +383,28 @@ public class PatternInstance
     }
 
     /// <summary>
-    /// Puts back the two parameters the pending state of AMD-062 REQ-PROF-081 overrode, without
-    /// touching anything a script may have set.
+    /// Puts back what the pending state of AMD-062 REQ-PROF-081 held back: the two parameters it
+    /// overrode, and the variant's texture, which the resolution rebuilt as a new object
+    /// (REQ-PROF-083). Nothing a script may have set is touched — a script chooses which
+    /// instance supplies a texture (<see cref="TextureSource"/>), never the texels themselves.
     /// </summary>
     internal static void ApplyGeometry(
         PatternInstance instance, PatternVariant variant, bool patternHasPendingTile)
     {
         instance.Geometry = GeometryOf(variant, patternHasPendingTile);
         instance.FullWarp = !patternHasPendingTile && variant.FullWarp;
+        instance.Texture = TextureOf(variant);
     }
 
     private static Geo3DType GeometryOf(PatternVariant variant, bool patternHasPendingTile)
         => patternHasPendingTile ? Geo3DType.Default : (Geo3DType)(int)variant.Geometry;
+
+    /// <summary>
+    /// The texture an instance takes from its variant: the explicit one, or none when the
+    /// variant carries the null marker that stands for the pattern's own image (REQ-PROF-035).
+    /// </summary>
+    private static VariantTexture? TextureOf(PatternVariant variant)
+        => variant.Texture is { IsNullMarker: false } texture ? texture : null;
 
     private static Vec3 ToVec3(Vec3F? value, Vec3 fallback)
         => value is { } v ? new Vec3(v.X, v.Y, v.Z) : fallback;

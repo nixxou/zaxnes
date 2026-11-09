@@ -132,6 +132,27 @@ public sealed class HashProfileTiles
     {
         cache?.Apply(profileId, this);
         ResolveFromRom(romImage);
+
+        // The decoder built the textures while every tile was still waiting, so each of them was
+        // computed against an all-zero default texture: a « textureKind = 2 » variant kept the
+        // stored exclusive-or itself, and one whose shape differs from the default kept the
+        // fallback of REQ-PROF-083. What has just been resolved has to be undone again against
+        // the real default texture, and here is the only place that can do it — the patterns are
+        // built right after this call and no engine exists yet to notice (REQ-PROF-083).
+        RebuildChangedTextures();
+    }
+
+    /// <summary>
+    /// Rebuilds the textures of the patterns a resolution changed since the last time they were
+    /// taken, and forgets those patterns (REQ-PROF-083). Geometry is not concerned: this is the
+    /// load-time path, where the patterns are built from the profile afterwards.
+    /// </summary>
+    public void RebuildChangedTextures()
+    {
+        foreach (ProfilePattern pattern in TakeChangedPatterns())
+        {
+            RebuildTextures(pattern);
+        }
     }
 
     /// <summary>

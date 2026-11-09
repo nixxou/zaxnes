@@ -20,13 +20,18 @@ public sealed class Amd062TileResolutionTests
     /// second <see cref="RawTwo"/>, both pending until they are resolved.
     /// </summary>
     private static byte[] TwoCellProfile(
-        VariantGeometry geometry = VariantGeometry.HorizontalCylinder, bool fullWarp = true)
+        VariantGeometry geometry = VariantGeometry.HorizontalCylinder,
+        bool fullWarp = true,
+        int textureKind = 1,
+        VariantTexture? xorTexture = null)
     {
         TileId first = TileId.Compute(RawOne);
         TileId second = TileId.Compute(RawTwo);
         return SyntheticHashProfile.Build(
             manifest: [first, second],
             tileKeys: [first.ToText(), second.ToText()],
+            textureKind: textureKind,
+            xorTexture: xorTexture,
             geometry: geometry,
             fullWarp: fullWarp);
     }
@@ -113,6 +118,71 @@ public sealed class Amd062TileResolutionTests
         Assert.True(pattern.Instances[0].FullWarp);
         Assert.Single(frame.Shapes);
         Assert.Equal(2, frame.Shapes[0].Tiles.Count);
+    }
+
+    // REQ-PROF-083, V2-34: the texture of a « textureKind = 2 » variant is the exclusive or of
+    // what the file stores with the pattern's default texture, so a resolution rebuilds it as a
+    // new object. The instance has to take that new object: a tile resolved while the game runs
+    // must leave the pattern drawing exactly what an already resolved profile draws.
+    [Fact]
+    public void A_resolution_while_the_game_runs_gives_the_instance_its_rebuilt_texture()
+    {
+        VariantTexture stored = XorPayload();
+
+        // The reference: everything resolved before the engine ever sees the profile, which is
+        // the load-time path of REQ-PROF-078.
+        ProfileDocument ahead = Load(TwoCellProfile(textureKind: 2, xorTexture: XorPayload()));
+        ahead.Tiles!.PrepareForRom(ahead.Profile.Id, Rom([RawOne, RawTwo]), ResolvedTileCache.Disabled);
+        Assert.Equal(0, ahead.Tiles.PendingCount);
+
+        ConversionEngine reference = new();
+        reference.LoadProfile(ahead.Profile, applySettings: false, ahead.Tiles);
+        VariantTexture? expected = reference.Patterns.Permanent[0].Instances[0].Texture;
+        Assert.NotNull(expected);
+
+        // The same profile, loaded with nothing resolved: the second cell contributes zeros to
+        // the default texture, so the texture the instance starts with is not the one above.
+        ProfileDocument late = Load(TwoCellProfile(textureKind: 2, xorTexture: stored));
+        ConversionEngine engine = new();
+        engine.LoadProfile(late.Profile, applySettings: false, late.Tiles);
+
+        PatternInstance instance = engine.Patterns.Permanent[0].Instances[0];
+        Assert.NotNull(instance.Texture);
+        Assert.NotEqual(expected!.Pixels!.Data, instance.Texture!.Pixels!.Data);
+
+        // Both tiles turn up on the frame being converted: the variant's texture is rebuilt and
+        // the instance must be holding the rebuilt one before the frame is drawn.
+        new Batch()
+            .Sprite(Key(RawOne), 48, 56)
+            .Sprite(Key(RawTwo), 56, 56)
+            .Convert(engine, 1);
+
+        Assert.Equal(0, late.Tiles!.PendingCount);
+        instance = engine.Patterns.Permanent[0].Instances[0];
+        Assert.NotNull(instance.Texture);
+        Assert.Equal(expected.Width, instance.Texture!.Width);
+        Assert.Equal(expected.Height, instance.Texture.Height);
+        Assert.Equal(expected.Pixels!.Format, instance.Texture.Pixels!.Format);
+        Assert.Equal(expected.Pixels.Data, instance.Texture.Pixels.Data);
+        Assert.Equal(expected.Pixels.Extra, instance.Texture.Pixels.Extra);
+    }
+
+    /// <summary>
+    /// The stored field 24 of the test variant: an indexed 16 × 8 texture — the shape of the
+    /// 2 × 1 pattern's default texture — whose eight words are all different from zero, so that
+    /// the exclusive or of REQ-PROF-083 cannot give the same answer twice by accident.
+    /// </summary>
+    private static VariantTexture XorPayload()
+    {
+        int[] data = new int[8];
+        int[] extra = new int[8];
+        for (int word = 0; word < data.Length; word++)
+        {
+            data[word] = unchecked((int)(0x9E37_79B9U * (uint)(word + 1)));
+            extra[word] = (word + 1) * 0x1111;
+        }
+
+        return new VariantTexture(16, 8, new TexturePixels(TextureFormat.Indexed, data, extra));
     }
 
     // REQ-PROF-080: the CHR-RAM is read in 16-byte aligned blocks, all four mirrorings tried.
