@@ -95,9 +95,10 @@ pub struct Mmc5 {
     #[cfg(feature = "board-mmc5-exattr-split")]
     ex_attr_index: u16,
     /// The split's own tile counter, 5 bits as the hardware's threshold field is: the screen
-    /// tile column of the tile being fetched. Reset by [`Mapper::on_tile_row_start`] at the dot
-    /// where the PPU starts a line's fetch sequence and pre-incremented by each counted
-    /// nametable fetch, so the first tile of a line is column 0.
+    /// tile column of the tile being fetched. Reset at the dot where the PPU starts a line's
+    /// fetch sequence and pre-incremented by each counted
+    /// nametable fetch, so the first tile of a line is column 0. Reset by
+    /// [`Mmc5::reload_split_row`].
     ///
     /// Not in the savestate, for the reason [`Mmc5::nt_read_counter`] is not: a line re-derives
     /// it.
@@ -118,6 +119,26 @@ pub struct Mmc5 {
     /// [`Mmc5::reload_split_row`] for the one line of it this build had to choose.
     #[cfg(feature = "board-mmc5-exattr-split")]
     split_row: u8,
+    /// Pattern fetches ($0000-$1FFF) seen since the last nametable-space read, capped at
+    /// [`Mmc5::CHR_READS_BEFORE_ROW_START`]: how the board finds, **on its own bus**, the dot
+    /// where the PPU begins a line's fetch sequence.
+    ///
+    /// Inside a tile group the PPU reads the nametable byte, the attribute byte and the two
+    /// pattern planes, so exactly **two** pattern fetches separate one nametable-space read from
+    /// the next. Between the last nametable fetch of a line and the first of the next line's
+    /// prefetch lie the **sixteen** sprite pattern fetches of dots 257-320. So a nametable fetch
+    /// that follows four or more pattern fetches is the first of a line's sequence, and nothing
+    /// else is.
+    ///
+    /// Counting it here rather than taking a hook from the PPU is not a stylistic choice: a
+    /// `dot == 321` test inside `Ppu2C02::run_rendering_dot` moved **+5.4 M to +13.6 M
+    /// instructions onto `Ppu2C02::run_dots` for every ROM of PR-1's set** — the function the
+    /// per-dot pipeline inlines into — by changing the inliner's mind, which is `docs/progress/
+    /// MF-2.md` step 0's trap one function further out. See `docs/progress/MF-LEG-2.md` step 4.
+    ///
+    /// Not in the savestate: a line re-derives it, as it does `nt_read_counter`.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    chr_reads_since_nt: u8,
     /// Whether the per-tile state above was positioned by the **tile capture** rather than by a
     /// rendered fetch (see [`Mmc5::position_captured_tile`]).
     ///
@@ -180,6 +201,14 @@ impl Mmc5 {
     /// CPU cycles without a PPU read after which the in-frame flag drops (nesdev, "MMC5": "3
     /// CPU cycles pass without a PPU read having occurred").
     const PPU_IDLE_CYCLES: u8 = 3;
+
+    /// Pattern fetches that must precede a nametable fetch for it to be the first of a line's
+    /// fetch sequence: two separate the nametable-space reads of one tile group, and sixteen
+    /// (eight sprites, two planes) separate the last group of a line from the first of the next
+    /// line's prefetch. Four is the midpoint and any value from three to sixteen gives the same
+    /// answer. See [`Mmc5::chr_reads_since_nt`].
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    const CHR_READS_BEFORE_ROW_START: u8 = 4;
 
     /// Repeats of one nametable address that arm the detection: the counter is incremented by
     /// the second and the third of "three consecutive PPU reads from the same nametable
@@ -247,6 +276,8 @@ impl Mmc5 {
             split_tile: 0,
             #[cfg(feature = "board-mmc5-exattr-split")]
             split_row: 0,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            chr_reads_since_nt: 0,
             #[cfg(feature = "board-mmc5-exattr-split")]
             split_capture: false,
             irq_target: 0,
@@ -402,18 +433,39 @@ impl Mmc5 {
         }
 
         // The per-tile state of the two substituting modes, latched where the board already
-        // sees every read. `address != last_ppu_read_addr` leaves out the **two discarded
-        // nametable fetches** of dots 338 and 340, which repeat dot 337's address: they are
-        // not tiles, and counting them would put the split's column three ahead by the end of
-        // a line. It is the same test the repeat detection below makes.
+        // sees every read.
+        //
+        // `address != last_ppu_read_addr` leaves out the **two discarded nametable fetches** of
+        // dots 338 and 340, which repeat dot 337's address: they are not tiles, and counting
+        // them would put the split's column three ahead by the end of a line. It is the same
+        // test the repeat detection below makes.
         #[cfg(feature = "board-mmc5-exattr-split")]
-        if self.background_substitutes && nametable_fetch && address != self.last_ppu_read_addr {
-            // "Each byte of Expansion RAM is used to enhance the tile at the corresponding
-            // address in every nametable": the tile's ten-bit offset, which the attribute
-            // address that follows does not carry.
-            self.ex_attr_index = address & 0x03FF;
-            if self.split_enabled() {
-                self.advance_split_column();
+        if self.background_substitutes {
+            if address < 0x2000 {
+                // A pattern fetch: the run this counts is what finds the start of a line's
+                // fetch sequence (see `Mmc5::chr_reads_since_nt`).
+                self.chr_reads_since_nt = self
+                    .chr_reads_since_nt
+                    .saturating_add(1)
+                    .min(Self::CHR_READS_BEFORE_ROW_START);
+            } else {
+                if nametable_fetch && address != self.last_ppu_read_addr {
+                    if self.chr_reads_since_nt >= Self::CHR_READS_BEFORE_ROW_START
+                        && self.split_enabled()
+                    {
+                        self.reload_split_row();
+                    }
+
+                    // "Each byte of Expansion RAM is used to enhance the tile at the
+                    // corresponding address in every nametable": the tile's ten-bit offset,
+                    // which the attribute address that follows does not carry.
+                    self.ex_attr_index = address & 0x03FF;
+                    if self.split_enabled() {
+                        self.advance_split_column();
+                    }
+                }
+
+                self.chr_reads_since_nt = 0;
             }
         }
 
@@ -569,7 +621,8 @@ impl Mmc5 {
     }
 
     /// Reloads the split's row at the start of a line's fetch sequence, and puts the tile
-    /// counter one before column 0. [`Mapper::on_tile_row_start`] is the only caller.
+    /// counter one before column 0. [`Mmc5::see_ppu_read`] is the only caller, which is where
+    /// that dot is recognised — see [`Mmc5::chr_reads_since_nt`].
     ///
     /// The row is `$5201 + L` for visible line L, modulo 240 — the page's "resets to the
     /// vertical scrolling value in `$5201` each v-blank" plus one per line. `scanline_counter`
@@ -980,6 +1033,7 @@ impl Mapper for Mmc5 {
             self.split_in_region = false;
             self.split_tile = 0;
             self.split_row = 0;
+            self.chr_reads_since_nt = 0;
             self.split_capture = false;
         }
 
@@ -1085,6 +1139,7 @@ impl Mapper for Mmc5 {
             self.split_in_region = false;
             self.split_tile = 0;
             self.split_row = 0;
+            self.chr_reads_since_nt = 0;
             self.split_capture = false;
         }
         self.irq_target = 0;
@@ -1316,10 +1371,10 @@ impl Mapper for Mmc5 {
     /// Called once per line and on no other board. With the feature off the hook does not
     /// exist at all.
     #[cfg(feature = "board-mmc5-exattr-split")]
-    fn on_tile_row_start(&mut self) {
-        if self.split_enabled() {
-            self.reload_split_row();
-        }
+    fn substitutes_background_tiles(&self) -> bool {
+        // The two **register** bits, as `Mmc5::nametable_page` reads them: the capture asks once
+        // per row, before the loop, and `in_frame` is settled by then anyway.
+        self.ex_ram_mode == 1 || self.split_enabled()
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]

@@ -439,19 +439,18 @@ impl Mapper for Board {
         }
     }
 
-    /// Likewise: the MMC5's split is the only subscriber, so the other boards do not reach a
-    /// dispatch at all.
-    #[cfg(feature = "board-mmc5-exattr-split")]
-    fn on_tile_row_start(&mut self) {
-        if let Board::Mmc5(board) = self {
-            board.on_tile_row_start();
-        }
-    }
-
     /// One `Board` test rather than a `dispatch!`, for [`Board::read_nametable_from_vram`]'s
     /// reason — and these three are on the **tile capture**'s path, which
     /// `Ppu2C02::read_pattern_planes` sits on: the function lot MF-2 built
     /// `read_nametable_inner`'s `#[inline(never)]` shield for.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    fn substitutes_background_tiles(&self) -> bool {
+        match self {
+            Board::Mmc5(board) => board.substitutes_background_tiles(),
+            _ => false,
+        }
+    }
+
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn background_capture_state(&self) -> u64 {
         match self {

@@ -31,13 +31,21 @@ path and the tile capture are `ca1517dc`'s, line for line. With it on the board 
    own reloaded from `$5201`, the region's nametable **and** attribute bytes from ExRAM, and its
    patterns from `$5202`'s 4 KiB bank with the low three address bits substituted.
 
-### The shape, and why it costs no other board
+### The shape, and what it costs
 
 Entry MMC5-1 names the trap: "a careless implementation could cost every game a few
 instructions per fetch", and the safe shape is "decide everything decidable per *register
-write*, and leave the per-fetch path a load and a branch". This lot goes one better and leaves
-the per-fetch path of every other board **untouched**, feature on or off, by hanging the whole
-thing on a test the PPU already makes.
+write*, and leave the per-fetch path a load and a branch". This lot takes that shape and hangs
+the whole thing on a test the PPU already makes.
+
+**With the feature off that is complete**: `.text` and `.rodata` of the shipped binary are the
+base commit's **byte for byte**, level-2 `core` is +0 on all five games and PR-1's worst ROM is
++0.000 % (step 4). **With it on it is not**, and the figures are what park the board: the MMC5's
+arm of `Board::ppu_peek` and `Board::ppu_read` grows by the one `bool` test, and the dispatch
+then costs **about one instruction per CHR fetch to every board** — `metroid` +0.095 %, `mm2`
++0.085 %, `m4` +0.061 %, `m1` +0.060 % on PR-1, and `metroid`/`mm2` `core` +0.110 %/+0.103 % on
+level 2, against a tolerance of +0.02 %. Step 4 has the seven measured shapes, the four that
+worked and the two that did not.
 
 `Ppu2C02::read_nametable_as` already asks `Cartridge::nametable_page` where a nametable lies
 and already branches on `SERVED_BY_CARTRIDGE`. The MMC5 is the only board whose pages move at
@@ -57,7 +65,8 @@ on it is this one, which changes the generated code of **no board that does not 
 
 The per-tile ExRAM index that mode 1 needs is not in the attribute address, so the board latches
 it where it already sees every PPU read: `Mmc5::see_ppu_read`, behind the feature's `cfg`. The
-split's tile counter is counted in the same place.
+split's tile counter, and the dot where a line's fetch sequence starts, are found in the same
+place — see step 4, which is where the PPU hook step 1 shipped for that was measured and removed.
 
 ### The 3D view
 
@@ -92,8 +101,10 @@ place the first numbering survives.
 
 ### 1/6 — the feature, the board, the two modes, the nametable hook and the savestate
 
-**The feature.** `board-mmc5-exattr-split`, off by default, **not** in `parked-boards` (that
-umbrella is for boards left out *for a figure*; this one is out for a decision). Its
+**The feature.** `board-mmc5-exattr-split`, off by default. (This step shipped it *outside*
+`parked-boards`, on the reading that the umbrella is for boards left out for a figure and this
+one was out for a decision; **step 4 measured a figure and put it in**, so the `Cargo.toml` note
+this paragraph describes has been rewritten there.) Its
 `Cargo.toml` note carries the titles, the shape, and the one consequence worth knowing: a
 savestate does not cross between the two configurations, because with the feature on the MMC5's
 block carries `$5200`-`$5202` after its sound state. That is already true of every board feature
@@ -348,6 +359,200 @@ sub-test needs button presses the campaign does not make. So the collection cann
 MMC5-1 as the entry hoped, with or without this feature, and the twenty-three tests of steps 1
 and 2 are what pins the behaviour instead. Recorded here so the next lot does not spend the same
 afternoon on it; the entry's own paragraph is corrected at step 5.
-- [ ] 4/6 the callgrind campaign
+- [x] 4/6 the callgrind campaign
+
+### 4/6 — the callgrind campaign
+
+Binaries built by `rust/tools/perf/build-clean.sh` from their own tar into a **fresh** directory
+with its own `CARGO_TARGET_DIR`, each deleted as soon as the binary was copied out. Roots:
+`ZAX_TEST_ROMS=…/assets-free/test-roms`, `ZAX_COMM_ROMS=…/demo/roms`,
+`ZAX_L2_ROMS=…/test-originals`, `ZAX_L2_PACKS=…/campaign/play-user/profiles`. The feature variant
+was made from the shipped tar by adding one line to zax-nes's `default` list.
+
+| label | tree |
+| --- | --- |
+| `leg2-base` | **`ca1517dc`**, the lot's base commit, md5 `64edf2c20f580029ca0898bc6a87feb3` |
+| `leg2-ship` | **the shipped configuration**, the feature out of `default` |
+| `leg2-feat` | the shipped tree plus **`board-mmc5-exattr-split`** in `default` |
+| `leg2-ship2` | a byte copy of `leg2-ship`, the **same-binary floor** |
+
+**The base binary's md5 is `64edf2c20f580029ca0898bc6a87feb3`, which is MF-LEG-1B's `leg1b-ship`
+— that lot's own measured shipped binary — to the byte.** So this lot's base is the previous
+lot's measured binary, the **thirteenth** lot in a row for which that holds, and built rather
+than assumed. The ship and feature md5s are deliberately not quoted: five shapes were built and
+measured before the shipped one was settled, so one number would be the last of five rather than
+*the* answer. What each variant measured is below.
+
+#### 4.0 The shipped build is the base commit's code, proved on the binary
+
+Before any ROM was run, `leg2-base` and the shipped binary were compared **section by section**.
+They are the same size (7 897 608 bytes) with the same 6 216 symbols at the same sizes, and
+**37 bytes differ in the whole file**:
+
+| bytes | where | what |
+| --: | --- | --- |
+| 20 | `.note.gnu.build-id`, `0x32c`-`0x33f` | the build-id, a hash of the build inputs, which a changed **comment** moves |
+| 17 | `.data.rel.ro`, 24 bytes apart | `core::panic::Location` records — one decoded as `{len: 31, line: 810, col: 29}` in the base and `{len: 31, line: 837, col: 29}` in the shipped build: the same file and column, the line moved by the comments this lot added |
+
+**`.text` and `.rodata` are byte-identical.** So every instruction of the default build is
+`ca1517dc`'s, which answers the brief's "the release binary's hot functions unchanged" on the
+whole binary rather than on a list of functions. The callgrind figures below are the same
+statement, measured.
+
+#### 4.1 The floors
+
+**PR-1's thirteen**, the shipped binary against its own byte copy: worst ROM **+0.000 %**, set
+total −70 379 (−0.000 %) — so ±0.001 % is noise, as every MF lot has recorded. A second and
+stronger floor is available here: **`leg2-base` against `leg2-ship` is two separately built
+binaries with identical `.text`**, and it gives worst **+0.001 %** (`metroid`) and a set total of
+−46 137.
+
+**Level 2's `core` is exact**: across base and ship it is **+0 on all five games, identical to
+the instruction**, and so is the `ppu` stage. The whole-process `total` moves −0.024 % to
++0.002 %, which is the Lua and conversion noise MF-LEG-1B measured at ±0.029 % on `smb1`.
+
+#### 4.2 The shipped configuration — nothing, as the binary says
+
+| | worst ROM | set total |
+| --- | --- | --- |
+| PR-1's thirteen, ship vs base | `vblnmi` **−0.001 %**; worst *slower* `metroid` **+0.001 %** | **−46 137 (−0.000 %)** |
+| level 2, `core` | **+0 on all five, identical to the instruction** | +0 |
+| level 2, `total` | `smb1` −0.025 %; worst slower `mm2` +0.000 % | — |
+
+#### 4.3 The feature, and the seven shapes it took to get here
+
+The first measured feature build was **+0.538 % on the set, with twelve of thirteen ROMs above
+the tolerance**. The campaign that followed is recorded in full, because four of the seven
+attempts worked and are in the shipped code and two did not and were reverted — the next lot
+should not re-derive either list. Figures are percentages against `leg2-base`.
+
+| # | what was tried | `duelito` | `m0` | `metroid` | `m4` | set total | kept? |
+| --: | --- | ---: | ---: | ---: | ---: | ---: | :-: |
+| 0 | the first build: a `dot == 321` hook in `Ppu2C02::run_rendering_dot` | +0.144 | +0.055 | +0.165 | +0.110 | +0.538 | — |
+| 1 | **the hook removed**, the row start found on the board's own bus | +0.128 | +0.040 | +0.144 | +0.103 | +0.441 | **yes** |
+| 2 | the per-column capture call gated on a `bool` hoisted out of the loop | +0.120 | +0.032 | +0.134 | +0.097 | +0.432 | no |
+| 3 | **the capture row `const`-monomorphised** on `SUBSTITUTED` | +0.096 | +0.008 | +0.100 | +0.081 | +0.411 | **yes** |
+| 4 | **the per-line save/restore folded into** that body | +0.100 | +0.013 | +0.106 | +0.084 | +0.411 | **yes** |
+| 5 | **the substituting body behind `#[inline(never)]`** | −0.033 | −0.081 | −0.020 | +0.167 | +0.394 | **yes** |
+| 6 | the capture's predicate cached as a `bool` on `Cartridge` | +0.101 | +0.013 | +0.106 | +0.087 | +0.411 | no |
+| 7 | **attempt 6 reverted; 1, 3, 4 and 5 kept** | **+0.004** | **+0.002** | +0.095 | +0.058 | **+0.373** | **shipped** |
+
+Four findings, each measured and not reasoned:
+
+1. **A `dot == 321` test inside `run_rendering_dot` cost every ROM of the set.** That function
+   inlines into `Ppu2C02::run_dots`, and the test moved **+5.4 M to +13.6 M instructions** onto
+   it — `duelito` +13 640 525 — by changing the inliner's mind. It is `docs/progress/MF-2.md`
+   step 0's trap one function further out. Attempt 1 removes it: the board finds that dot itself
+   by counting the pattern fetches between two nametable-space reads — two inside a tile group,
+   sixteen across the sprite window of dots 257 to 320 — which is `Mmc5::chr_reads_since_nt`.
+   **The PPU hook and its `Mapper`, `Board` and `Cartridge` forwarders are all gone**, and the
+   split's columns are proved right by
+   `mf_leg_2_the_split_reads_the_ex_ram_cell_of_its_own_column`, which a counter one off cannot
+   pass.
+2. **Gating the capture's per-column call on a `bool` is not enough; monomorphising it is.**
+   Attempt 2 moved `duelito` by 0.008 points. Attempt 3 —
+   `capture_background_row_as<const SUBSTITUTED: bool>`, chosen once per row — moved it by 0.024
+   and `m0` by 0.024, because in the `false` instantiation the `&mut Cartridge` reborrow **does
+   not exist** rather than being skipped.
+3. **The decisive one is `#[inline(never)]` on the substituting body.** With both instantiations
+   inlinable, `run_dots` carried two copies of the capture and paid their register pressure even
+   on an NROM that never reaches one: `duelito` +7.5 M. Behind a call —
+   `Ppu2C02::capture_background_row_substituted` — `run_dots` ends up **smaller than the base's**
+   on ten of the thirteen ROMs, which is why eight of them are now inside ±0.006 %.
+4. **Caching the predicate on `Cartridge` made things worse and was reverted.** A `bool` field
+   beside `nametable_pages` — the shape `watches_ppu_reads` has — made
+   `Cartridge::refresh_rom_windows` too large to inline, putting **+610 864 instructions on
+   `smb3` and +101 088 on `m1`** on a function that runs after every CPU write to the cartridge,
+   and the capture's own figure did not move by an instruction. The `Cartridge` method calls the
+   `Board` dispatch instead, and its doc comment records why.
+
+#### 4.4 The figures that park the board
+
+**PR-1's thirteen, the feature build against the base:**
+
+| ROM | board | delta | % |
+| --- | :-: | ---: | ---: |
+| `smb3` | MMC3 | −3 892 793 | **−0.049** |
+| `z2` | MMC1 | −829 985 | **−0.013** |
+| `oamstr` | NROM | +114 947 | +0.003 |
+| `m0` | NROM | +408 550 | +0.007 |
+| `vblnmi` | MMC1 | +215 718 | +0.007 |
+| `duelito` | NROM | +609 017 | +0.008 |
+| `readbuf` | CNROM | +684 160 | +0.010 |
+| `smb1` | NROM | +597 390 | +0.010 |
+| `m1` | MMC1 | +2 932 206 | **+0.060** |
+| `m4` | MMC3 | +3 351 021 | **+0.061** |
+| `mm2` | MMC1 | +5 132 359 | **+0.085** |
+| `metroid` | MMC1 | +5 147 317 | **+0.101** |
+| `mmc5` | **MMC5** | +284 172 985 | **+2.522** |
+| **total** | | +298 642 892 | +0.376 |
+
+**Eight of thirteen are inside the owner's +0.02 %, two of those below the base, and four are
+above it.** `mmc5` at +2.522 % is the board paying for its own feature and is not a tolerance question:
+`mmc5exram` drives the ExRAM modes, so `Mmc5::see_ppu_read` (+106 726 522) and the newly
+out-of-line `Mmc5::ppu_peek` (+439 047 320, against `Board::ppu_peek` **−113 398 000** and
+`Board::ppu_read` **−149 299 500** as LLVM moves the arm out of the dispatch) are the feature
+doing its work.
+
+**The four that are over the tolerance are one symbol**, and the same one in every variant
+measured above:
+
+| ROM | symbol | delta |
+| --- | --- | ---: |
+| `metroid` | `Board::ppu_peek` | +4 528 000 |
+| `mm2` | `Board::ppu_peek` | +4 485 120 |
+| `m1` | `Board::ppu_peek` | +2 288 640 |
+| `m4` | `Board::ppu_read` | +3 082 184 |
+
+Those are **≈ 1 instruction per CHR fetch** in the dispatch, on about 4.5 M fetches over 300
+frames. The cause is named in `Board`'s own doc comment and in `Mmc5::background_substitutes`:
+the MMC5's arm grows by the `bool` test and the dispatch's prologue grows with it, **for every
+board**. `docs/progress/MF-2.md` step 0 priced the same byte at 1-2 instructions per CHR fetch,
+and `Mmc5::see_ppu_read`'s own comment at +16.6 M on SMB3. **None of the seven attempts moved
+this figure by a single instruction**, in any variant — which is itself the finding: it is not
+the capture, not the hook and not the inliner, it is the size of the arm.
+
+`m1` also carries `NesBus::write_internal` +312 961 (+0.006 % of the ROM), which is
+`Ppu2C02::write_nametable_byte`'s new `nametable_write_offset` branch on the ROM that writes
+`$2007` 219 times a frame — the heaviest `$2007` writer of the set (PR-1 step 1's table).
+
+**Level 2, the `core` stage** — exact; the whole-process `total` is inside the ±0.029 % noise
+MF-LEG-1B measured:
+
+| game | mapper | base `core` | feature `core` | delta | % |
+| --- | :-: | ---: | ---: | ---: | ---: |
+| `smb3` | 4 | 15 315 255 735 | 15 305 861 154 | −9 394 581 | **−0.061** |
+| `zelda2` | 1 | 12 775 020 988 | 12 773 153 103 | −1 867 885 | **−0.015** |
+| `smb1` | 0 | 11 515 129 187 | 11 516 588 456 | +1 459 269 | +0.013 |
+| `mm2` | 1 | 12 037 310 877 | 12 049 767 967 | +12 457 090 | **+0.103** |
+| `metroid` | 1 | 11 146 889 701 | 11 159 173 931 | +12 284 230 | **+0.110** |
+
+Two of five above the tolerance, and the same two MMC1 games PR-1 puts there. The `ppu` stage
+carries all of it — **+0.176 % on both** — which is where the CHR fetches are.
+
+#### 4.5 The decision
+
+**The board is parked.** The owner's rule is that "a board over the tolerance is parked: moved
+out of `default` into `parked-boards`, never dropped", and four of PR-1's thirteen and two of
+level 2's five are over it. `board-mmc5-exattr-split` is in **`parked-boards`** as of this step,
+beside `board-vs-system`, `board-292` and `board-143-open-bus`, and `--features parked-boards`
+is the one flag that turns it on. It was already out of `default` by the owner's decision taken
+before measurement, so **this changes no shipped behaviour**; what it changes is that the
+umbrella now reaches it, which is what the rule asks. The `parked-boards` suite therefore grows
+by the 23 tests of steps 1 and 2 — **1 261 passed, 0 failed, 0 ignored** with both ROM roots set,
+against step 3's 1 238 — and `default` and the feature build are step 3's 1 177 and 1 200
+unchanged, this step having moved no behaviour.
+
+Two things R0 may want to weigh against the figures:
+
+* the cost is **not** in the two features' own code but in the size of the MMC5's dispatch arm,
+  so any implementation of them in this architecture would pay it. Entry MMC5-1's warning that
+  "a careless implementation could cost every game a few instructions per fetch" turns out to
+  apply to a careful one as well, and the seven attempts above are the evidence;
+* it is **one instruction per CHR fetch**, paid by every game, against the seven titles it buys
+  — *Just Breed*, *Nobunaga's Ambition II*, *Romance of the Three Kingdoms II*, *Uncharted
+  Waters*, *Bandit Kings of Ancient China*, *Yakuman Tengoku* and *Uchuu Keibitai SDF* — which
+  render visibly wrong without it. *Castlevania III*, the most-played MMC5 game, needs neither
+  and pays the instruction either way.
 - [ ] 5/6 the report entry and `BOARD-FEATURES.md`
 - [ ] 6/6 the final check

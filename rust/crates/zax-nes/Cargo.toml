@@ -1081,8 +1081,16 @@ board-taito-x1 = ["board-small-boards"]
 # **MF-VS step 7 put `board-vs-system` in it**, so the umbrella is no longer empty: that feature's
 # own note above has the figures, and `--features parked-boards` is the one flag that turns the
 # VS. System on. **MF-UNL-12 step 6 put `board-292` beside it**, the one board of the twelve MF-UNL
-# lots that is over the tolerance; its own note has the figures and the two causes.
-parked-boards = ["board-vs-system", "board-292", "board-143-open-bus"]
+# lots that is over the tolerance; its own note has the figures and the two causes. **MF-LEG-2
+# step 4 put `board-mmc5-exattr-split` beside those**, the MMC5's extended attribute mode and
+# vertical split: over the tolerance on four of PR-1's thirteen and two of level 2's five, its
+# own note above carrying the figures and the one symbol they come from.
+parked-boards = [
+    "board-vs-system",
+    "board-292",
+    "board-143-open-bus",
+    "board-mmc5-exattr-split",
+]
 
 # The MMC5's **extended attribute mode** ($5104 = %01) and its **vertical split**
 # ($5200-$5202), lot MF-LEG-2 — the two features of report entry MMC5-1, whose verdict is
@@ -1097,16 +1105,29 @@ parked-boards = ["board-vs-system", "board-292", "board-143-open-bus"]
 # Keibitai SDF* and *Bandit Kings of Ancient China* for the split. **Castlevania III uses
 # neither**, so the most-played MMC5 game is not in the list.
 #
-# **Off by default by the owner's decision, taken before any measurement** — the figures are in
-# `docs/review/BOARD-FEATURES.md` and `docs/progress/MF-LEG-2.md` step 5, and whether it joins
-# `default` is R0's and the owner's call. It is not in `parked-boards` either: that umbrella is
-# for boards left out *for a figure*, and this one is out for a decision.
+# **Off by default by the owner's decision, taken before any measurement — and PARKED by the
+# figures, which agree with it.** Measured against `ca1517dc` (MF-LEG-2 step 4), PR-1's thirteen
+# ROMs: eight inside the tolerance (`oamstr` +0.003 % to `smb1` +0.010 %, with `smb3` -0.049 %
+# and `z2` -0.013 %) and **four above it** — `m1` +0.060 %, `m4` +0.061 %, `mm2` +0.085 %,
+# `metroid` **+0.101 %** — plus `mmc5` itself at **+2.522 %**, which is the board paying for its
+# own feature. Level 2's `core`: `smb3` -0.061 %, `zelda2` -0.015 %, `smb1` +0.013 %, and **`mm2`
+# +0.103 % and `metroid` +0.110 %** above. So it is in `parked-boards` below, which is the
+# owner's rule for a board over the tolerance: never dropped, always reachable behind its flag.
 #
-# The whole thing hangs on a test `Ppu2C02::read_nametable_as` already makes — the MMC5 answers
-# `SERVED_BY_CARTRIDGE` for all four tables while either mode is armed and serves every
-# nametable-space byte through `Mapper::read_nametable_from_vram`, the one new hook — so **no
-# other board's fetch path changes, feature on or off**. See the banner in `mmc5.rs` for the
-# three points where the five emulators disagree and what this build chose.
+# **The whole remaining cost is one symbol**: `Board::ppu_peek` +4 528 000 on `metroid` and
+# +4 485 120 on `mm2`, `Board::ppu_read` +3 082 184 on `m4` — about **one instruction per CHR
+# fetch** in the dispatch, because the MMC5's arm grows by the `background_substitutes` test.
+# That is `docs/progress/MF-2.md` step 0's trap, and none of seven measured shapes removed it;
+# step 4 of MF-LEG-2 records all seven, four of which *did* work and are in the shipped code.
+#
+# **With the feature off the build is the base commit's to the instruction**: `.text` and
+# `.rodata` byte-identical, level-2 `core` +0 on all five games, PR-1 worst ROM +0.000 %.
+#
+# The implementation hangs on a test `Ppu2C02::read_nametable_as` already makes — the MMC5
+# answers `SERVED_BY_CARTRIDGE` for all four tables while either mode is armed and serves every
+# nametable-space byte through `Mapper::read_nametable_from_vram`, the one new hook. See the
+# banner in `mmc5.rs` for the three points where the five emulators disagree and what this build
+# chose.
 #
 # A savestate does not cross between the two configurations: with the feature on the MMC5's
 # block carries $5200-$5202 after its sound state. That is already true of every board feature

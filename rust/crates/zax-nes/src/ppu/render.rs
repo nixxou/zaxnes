@@ -305,21 +305,6 @@ impl Ppu2C02 {
                 }
             }
             321..=337 => {
-                // Lot MF-LEG-2: dot 321 is where the fetch sequence of the **next** line
-                // starts — its first two tiles are prefetched here and at dot 329, its third
-                // at 337 — so it is where the MMC5's vertical split puts its tile counter back
-                // to column 0 and moves its own scroll counter on a line. puNES resets at the
-                // same dot (`mapper_005.c:391`) and Nestopia at the same point of its own
-                // pipeline (`NstBoardMmc5.cpp:676-692`).
-                //
-                // Once per line, and the hook does not exist without the feature.
-                #[cfg(feature = "board-mmc5-exattr-split")]
-                if dot == 321 {
-                    if let Some(cartridge) = cart.as_deref_mut() {
-                        cartridge.on_tile_row_start();
-                    }
-                }
-
                 self.shift_background();
                 self.background_fetch(dot, cart);
             }

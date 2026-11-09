@@ -146,23 +146,7 @@ impl Ppu2C02 {
     pub(super) fn end_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
         if self.background_enabled() {
             let saved_latch = cart.as_deref().map_or(0, Cartridge::chr_latch_state);
-            // Lot MF-LEG-2, and the same contract as the latch beside it: the MMC5's per-tile
-            // state for extended attribute mode and the split is positioned per column by
-            // `capture_background_row` and has to come back afterwards, because the tile whose
-            // nametable byte was fetched at dot 337 has its attribute and pattern fetches on
-            // the **next** line (REQ-CORE-033). Always 0 on every other board.
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            let saved_capture = cart
-                .as_deref()
-                .map_or(0, Cartridge::background_capture_state);
-
             self.capture_background_row(line, cart);
-
-            #[cfg(feature = "board-mmc5-exattr-split")]
-            if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.set_background_capture_state(saved_capture);
-            }
-
             restore_chr_latch(cart, saved_latch);
         }
     }
@@ -216,6 +200,16 @@ impl Ppu2C02 {
 
     /// Emits the background row of line `line` when the fine Y scroll used to draw it is 1
     /// (REQ-CORE-037, REQ-CORE-038).
+    ///
+    /// **One runtime test per row, and a `const` for the column loop** (lot MF-LEG-2). The MMC5
+    /// with `board-mmc5-exattr-split` and either substituting mode armed needs its per-tile
+    /// state positioned on each captured column, which takes a `&mut Cartridge`; carrying that
+    /// reborrow inside the loop cost `Ppu2C02::run_dots` — the function this capture inlines into
+    /// — **+8.9 M instructions over 300 frames, +0.120 % on `duelito`**, on boards with nothing
+    /// to position, and gating it on a `bool` did not help (+0.128 % → +0.120 %). Monomorphising
+    /// the loop does: in the `false` instantiation the reborrow does not exist, and that
+    /// instantiation is the only one every other board reaches. Step 4 of the progress note has
+    /// the three measurements.
     fn capture_background_row(&mut self, line: i32, cart: Cart<'_, '_>) {
         // AMD-021 R2-005 (supersedes point 3 of the answer to Q-004 and DEC-02-Q4 on this
         // point): the scroll is the left-edge shadow of the internal address read at the END
@@ -234,6 +228,34 @@ impl Ppu2C02 {
             return;
         }
 
+        #[cfg(feature = "board-mmc5-exattr-split")]
+        if cart
+            .as_deref()
+            .is_some_and(Cartridge::substitutes_background_tiles)
+        {
+            self.capture_background_row_substituted(line, cart);
+            return;
+        }
+
+        self.capture_background_row_as::<false>(line, cart);
+    }
+
+    /// The substituting instantiation, **behind a call**: `Ppu2C02::run_dots` inlines the
+    /// capture, and letting the `true` body in beside the `false` one grew that function by
+    /// **+7.5 M instructions over 300 frames (+0.101 % on `duelito`)** even though an NROM never
+    /// reaches it — the register pressure of a second copy, which is `docs/progress/MF-2.md`
+    /// step 0's trap in the largest function of the crate. Only the MMC5 pays the call.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    #[inline(never)]
+    fn capture_background_row_substituted(&mut self, line: i32, cart: Cart<'_, '_>) {
+        self.capture_background_row_as::<true>(line, cart);
+    }
+
+    fn capture_background_row_as<const SUBSTITUTED: bool>(
+        &mut self,
+        line: i32,
+        cart: Cart<'_, '_>,
+    ) {
         let coarse_x = self.v_row_start & 0x1F;
         let coarse_y = (self.v_row_start >> 5) & 0x1F;
         let nametable = (self.v_row_start >> 10) & 0x03;
@@ -269,6 +291,24 @@ impl Ppu2C02 {
             }
         }
 
+        // Lot MF-LEG-2, and the same contract as the MMC2/MMC4 latch `end_capture_line` holds
+        // around this call: the MMC5's per-tile state is positioned per column below and has to
+        // come back, because the tile whose nametable byte was fetched at dot 337 has its
+        // attribute and pattern fetches on the **next** line (REQ-CORE-033).
+        //
+        // It is saved **here**, inside the monomorphised body, and not beside the latch in
+        // `end_capture_line`: a `cart.as_deref_mut()` there is a reborrow in a function
+        // `Ppu2C02::run_dots` inlines, and it cost `duelito` +7.1 M instructions over 300
+        // frames (+0.096 %) with the loop itself already monomorphised. In the `false`
+        // instantiation neither line exists.
+        #[cfg(feature = "board-mmc5-exattr-split")]
+        let saved_capture = if SUBSTITUTED {
+            cart.as_deref()
+                .map_or(0, Cartridge::background_capture_state)
+        } else {
+            0
+        };
+
         for k in -extra..=(32 + extra) {
             let x = (8 * k) - fine_x_scroll;
             if x >= SCREEN_WIDTH_I32 + (8 * extra) {
@@ -299,8 +339,10 @@ impl Ppu2C02 {
             // column before its three reads below. It is restored after the loop, exactly as
             // the MMC2/MMC4 latch is (REQ-CORE-033). No other board has anything to position.
             #[cfg(feature = "board-mmc5-exattr-split")]
-            if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.position_captured_background_tile(nametable_address, k, i32::from(y));
+            if SUBSTITUTED {
+                if let Some(cartridge) = cart.as_deref_mut() {
+                    cartridge.position_captured_background_tile(nametable_address, k, i32::from(y));
+                }
             }
 
             let tile = self.read_nametable_inner(nametable_address, cart.as_deref());
@@ -333,6 +375,13 @@ impl Ppu2C02 {
                 true,
             );
             self.tiles.add(record);
+        }
+
+        #[cfg(feature = "board-mmc5-exattr-split")]
+        if SUBSTITUTED {
+            if let Some(cartridge) = cart.as_deref_mut() {
+                cartridge.set_background_capture_state(saved_capture);
+            }
         }
     }
 

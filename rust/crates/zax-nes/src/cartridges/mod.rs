@@ -1356,11 +1356,22 @@ impl Cartridge {
         self.board.nametable_write_offset(address)
     }
 
-    /// The PPU is starting a line's background fetch sequence (see
-    /// [`Mapper::on_tile_row_start`]). Only the MMC5's vertical split subscribes.
+    /// Whether the board substitutes a background tile's nametable byte, its attribute or its
+    /// pattern bank (see [`Mapper::substitutes_background_tiles`]). `false` on every board but
+    /// the MMC5 with either mode armed.
+    ///
+    /// **Not cached on `Cartridge`, and that was measured.** A `bool` field refreshed beside
+    /// [`Cartridge::nametable_pages`] — the shape [`Cartridge::watches_ppu_reads`] has — made
+    /// `Cartridge::refresh_rom_windows` too large to inline, which put **+610 864 instructions
+    /// on `smb3` and +101 088 on `m1`** on a function that runs after every CPU write to the
+    /// cartridge, and bought nothing: the capture's own figure did not move by an instruction.
+    /// The capture asks once per visible line, and once the substituting body is behind a call
+    /// (`Ppu2C02::capture_background_row_substituted`) that is free. Step 4 of
+    /// `docs/progress/MF-LEG-2.md` has both measurements.
     #[cfg(feature = "board-mmc5-exattr-split")]
-    pub fn on_tile_row_start(&mut self) {
-        self.board.on_tile_row_start();
+    #[must_use]
+    pub fn substitutes_background_tiles(&self) -> bool {
+        self.board.substitutes_background_tiles()
     }
 
     /// Opaque per-tile state of the MMC5's two substituting modes, which the tile capture holds

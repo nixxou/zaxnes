@@ -601,16 +601,18 @@ pub trait Mapper {
         None
     }
 
-    /// The PPU is about to fetch the tiles of a line, at the dot where its fetch sequence for
-    /// that line begins. Only the MMC5's vertical split needs it, for the tile counter the page
-    /// describes as the "nametable fetch count (horizontally)" and the row counter that "resets
-    /// to the vertical scrolling value in `$5201` each v-blank" (lot MF-LEG-2).
+    /// Whether the board substitutes a background tile's nametable byte, its attribute or its
+    /// pattern bank — the MMC5 with `board-mmc5-exattr-split` and either mode armed, and no
+    /// other board ever.
     ///
-    /// Once per rendered line and on no other board — one `bool` test on a path that runs 240
-    /// times a frame, which is why this is a hook of its own rather than a test inside the
-    /// fetch pipeline.
+    /// The tile capture asks **once per row**, before its column loop, so that the loop of every
+    /// other board holds no `&mut Cartridge` reborrow at all: carrying one cost `Ppu2C02::run_dots`
+    /// up to **+9.5 M instructions over 300 frames (+0.128 % on `duelito`)**, measured, and
+    /// `docs/progress/MF-LEG-2.md` step 4 has the attribution.
     #[cfg(feature = "board-mmc5-exattr-split")]
-    fn on_tile_row_start(&mut self) {}
+    fn substitutes_background_tiles(&self) -> bool {
+        false
+    }
 
     /// Opaque per-tile state of the two MMC5 substituting modes, for the tile capture to hold
     /// while it walks a row out of display order and put back afterwards — the same
