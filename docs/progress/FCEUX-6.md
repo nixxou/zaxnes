@@ -21,7 +21,7 @@ never edited.
   the sprite ordering of REQ-CORE-044.
 - [x] 5/9 — MMC5: extended attributes and the vertical split.
 - [x] 6/9 — The rest of the classification.
-- [ ] 7/9 — Cost of the capture.
+- [x] 7/9 — Cost of the capture.
 - [ ] 8/9 — The 3D picture, per original with a profile.
 - [ ] 9/9 — Final pass.
 
@@ -851,3 +851,153 @@ board's own pointer table" needs `newppu`'s equivalent named, and `FCEUPPU_GetCH
   pass, including the new one;
 * both sweeps re-run end to end with the new column: `unexplained: 0` on the 98 originals and on
   the 291 public ROMs.
+
+---
+
+# Step 7 — What the capture costs
+
+Worktree commit below. Nothing in the fork changed at this step.
+
+Lot FCEUX-1 reported FCEUX's core "about 6× faster" than Zaxnes's. That figure was taken with the
+tile capture **off**, which is the one configuration the 3D path cannot use, so it answered the
+wrong question. These figures replace it.
+
+## The instrument
+
+`zax-harness fceux-bench <rom.nes> --engine fceux|zaxnes [--capture on|off] [--frames n]`
+(`crates/zax-harness/src/fceux_bench.rs`), which times one engine over one loop with no `Host`, no
+3D, no Lua and no scene, so the number means exactly one thing. Three rules are in the code rather
+than in this note:
+
+* **`--engine` is required and takes one engine.** A run holds one machine and one set of warm
+  caches; driving both side by side in one process (which is what `fceux-tiles` does, where it is
+  the point) would have each perturb the other. Every cell below is its own process, run alone.
+* **`--capture off` exists only on FCEUX.** On Zaxnes the capture is unconditional — REQ-CORE-033
+  makes it so, precisely so that a savestate cannot depend on whether a host asked for records —
+  so **a Zaxnes figure is always a with-capture figure and there is no without-capture figure to
+  give.** Producing one would mean editing `zax-nes`, which this lot may not do.
+* **two laps a frame**, `run_frame` and then reading the records out, reported separately, because
+  the two engines hand records over differently (below).
+
+The cross-check that the instrument is sound: on *Super Mario Bros. 3* `fceux-bench` measures
+Zaxnes's `run_frame` at **1.1349 ms** and `bench-core`, a different command written in a different
+lot, measures the same stage at **1.1346 ms**. Two independent harnesses, 0.0003 ms apart.
+
+## The machine
+
+| Item | Value |
+|---|---|
+| CPU | 13th Gen Intel Core i9-13900K, 24 cores / 24 threads |
+| RAM | 35.1 GB |
+| Build | `cargo build --release`, fork built by `zax\build-msvc.cmd` (MSVC, Release) |
+| Frames | 20 000 timed after 600 of warm-up, per cell |
+| Input | no button pressed, so each game runs its own attract or demo loop |
+
+## The core, with the capture on — the table that replaces FCEUX-1's
+
+20 000 frames per cell, each cell its own process:
+
+| ROM | board | **Zaxnes**, capture on | **FCEUX**, capture on | FCEUX, capture off |
+|---|---|---|---|---|
+| *Super Mario Bros. 3* `[USA][!!]` | MMC3 | 1.1349 ms — **881 f/s** | 0.2014 ms — **4 964 f/s** | 0.1720 ms — 5 813 f/s |
+| *Super Mario Bros.* `[World][!!]` | NROM | 0.8852 ms — **1 130 f/s** | 0.2134 ms — **4 686 f/s** | 0.1820 ms — 5 495 f/s |
+| *Mega Man 3* `[USA][!!]` | MMC3 | 0.9912 ms — **1 009 f/s** | 0.2220 ms — **4 504 f/s** | 0.1884 ms — 5 308 f/s |
+
+Read three ways:
+
+| | *SMB 3* | *SMB* | *Mega Man 3* |
+|---|---|---|---|
+| **FCEUX over Zaxnes, both capturing** | **5.6×** | **4.1×** | **4.5×** |
+| what the capture costs FCEUX | +0.0294 ms (**+17.1 %**) | +0.0314 ms (**+17.3 %**) | +0.0336 ms (**+17.8 %**) |
+| records a frame (both engines) | 973.3 | 972.0 | 961.0 |
+
+**The headline: switching the capture on does not change the conclusion.** It costs FCEUX a
+steady 17 % of its frame — 0.03 ms, almost identical on all three boards, which is what one
+expects of a fixed amount of work per frame (about 970 records) — and FCEUX is still **4.1× to
+5.6×** faster than Zaxnes *with both engines capturing*. Lot FCEUX-1's "about 6×" was measured on
+the wrong configuration but was not far wrong about the ratio; the honest range, capture included,
+is 4× to 6× and it varies by board.
+
+Part of that 17 % is the **binding** rather than the capture: the FFI sink of `zax-fceux` allocates
+a `Vec` and copies all ~970 records *inside* the frame (`core.rs:661-666`), which is why the cost
+lands in the `run_frame` lap and not in the records lap. `take_tiles` afterwards is
+`slot.take()` — a mutex lock and a move, no copy — which is why the records lap is 0.0001 ms. A
+host that wanted the last few per cent could have the sink write into a reusable buffer, exactly
+as Zaxnes's capture does; nothing in this lot needed it.
+
+Zaxnes's records lap is 0.0000 ms for the opposite reason: `tile_records()` lends the buffer the
+capture already filled.
+
+## The same, through the 3D path
+
+`bench-core` does run headless, including the mesh conversion and the draw-list build, so the 3D
+path is measurable — no GPU work is involved (nothing is presented), which also keeps this well
+clear of the sustained-GPU-load warning. 600 frames after 120 of warm-up, each game with its own
+3dn profile from `assets-neutral`:
+
+| ROM | profile | core `run_frame` | everything after the core | total | frames/s |
+|---|---|---|---|---|---|
+| *Super Mario Bros. 3* | Super Mario Bros. 3 | 1.1346 ms | **0.2135 ms** | 1.3481 ms | **742** |
+| *Super Mario Bros.* | Super Mario Bros. | 0.9186 ms | **0.2376 ms** | 1.1562 ms | **865** |
+| *Mega Man 3* | Mega Man 3 | 0.8872 ms | **0.1268 ms** | 1.0140 ms | **986** |
+
+What "everything after the core" is made of, on *Super Mario Bros. 3*:
+
+| Stage | ms/frame |
+|---|---|
+| Lua frame hooks (the profile's own script) | 0.1291 |
+| mesh conversion, Lua excluded | 0.0588 |
+| draw-list build | 0.0223 |
+| 2D picture copy | 0.0015 |
+| publish + settings sync | 0.0007 |
+| rollback snapshot (one frame in 60) | 0.0006 |
+| tile records copied out of the batch | 0.0006 |
+| **total** | **0.2136** |
+
+**The 3D path is dominated by the profile's Lua, not by the conversion** — 0.129 ms against 0.059
+— which is worth knowing before anyone optimises the mesh builder.
+
+### FCEUX through the 3D path: projected, and why the projection is sound
+
+The harness has no continuous 3D loop on FCEUX: `fceux-frame` writes **one** frame's records to
+JSON for `render --frames` to read, which is file-based and cannot be timed as a loop. Wiring
+`Host` to a second engine is a lot of its own (`docs/review/FCEUX-ENGINE.md`'s `Engine` trait), and
+this step did not do it.
+
+But the projection needs no new measurement, because **the 3D path's input is the records and
+nothing else**, and steps 2 to 6 made those records identical. Same records in, same meshes out,
+same work:
+
+| ROM | Zaxnes, 3D | FCEUX core + the same 3D path | ratio |
+|---|---|---|---|
+| *Super Mario Bros. 3* | 1.3481 ms — 742 f/s | 0.2014 + 0.2135 = 0.4149 ms — **≈ 2 410 f/s** | **3.2×** |
+| *Super Mario Bros.* | 1.1562 ms — 865 f/s | 0.2134 + 0.2376 = 0.4510 ms — **≈ 2 217 f/s** | **2.6×** |
+| *Mega Man 3* | 1.0140 ms — 986 f/s | 0.2220 + 0.1268 = 0.3488 ms — **≈ 2 867 f/s** | **2.9×** |
+
+These are **projections, not measurements**, and they are labelled so. Two honest caveats:
+
+* the projection is exact where the two engines' records are identical, which step 6's table says
+  is *Mega Man 3* on every dump and every frame, and *Super Mario Bros.* on 10 of its 16 compared
+  frames. For **Super Mario Bros. 3 it assumes `ppu-2007-render-read`** — in `zax-nes`'s default
+  build the two engines' records for that game differ (step 2's finding). What makes the number
+  still meaningful there is that the *record count* is the same on both engines to one tenth of a
+  record (973.3), so the conversion does the same quantity of work either way;
+* the figures assume the 3D path costs the same when fed from a second engine, which is true of
+  the conversion and the draw list but adds whatever a real `Engine` indirection costs. Nobody has
+  measured that because it does not exist yet.
+
+**The conclusion either way:** the capture is affordable on both engines, 3D on FCEUX would run
+about **3×** what it runs on Zaxnes, and on a handheld the figure that matters is the first table's
+— 4 500 to 5 000 frames a second against 900 to 1 100 on a desktop i9, which is roughly the
+difference between "comfortable" and "marginal" once a handheld's clock is a third of this one's.
+
+## Verification of this step
+
+* `cargo fmt -p zax-harness -- --check`: clean;
+* `cargo clippy --release -p zax-harness --all-targets -- -D warnings`, with and without
+  `fceux-core`: clean;
+* `cargo test --release -p zax-harness --features fceux-core`: the three new `fceux_bench` option
+  tests pass (the engine has no default, the defaults are the brief's, and every bad value is a
+  usage error naming its option);
+* the instrument cross-checked against `bench-core` on the same stage of the same ROM: 1.1349 ms
+  against 1.1346 ms.

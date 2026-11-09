@@ -12,7 +12,7 @@ use zax_harness::{
     test_roms, HarnessError,
 };
 #[cfg(feature = "fceux-core")]
-use zax_harness::{fceux_compare, fceux_run, fceux_tiles};
+use zax_harness::{fceux_bench, fceux_compare, fceux_run, fceux_tiles};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness test-roms <roms dir> <out.json> [--filter <substring>] [options]
@@ -29,7 +29,8 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
        zax-harness fceux-frame <rom.nes> <out.json> [frames] (FCEUX's tile records)
        zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)
-       zax-harness fceux-tiles <roms dir|rom.nes> <out.jsonl> [options] (the records, field by field)";
+       zax-harness fceux-tiles <roms dir|rom.nes> <out.jsonl> [options] (the records, field by field)
+       zax-harness fceux-bench <rom.nes> --engine fceux|zaxnes [options] (what the capture costs)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -115,11 +116,9 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         #[cfg(feature = "fceux-core")]
         [command, rest @ ..] if command == "fceux-tiles" => fceux_tiles::command(rest),
         #[cfg(feature = "fceux-core")]
-        [command, rest @ ..] if command == "fceux-compare" => {
-            let options = fceux_compare::Options::parse(rest)?;
-            print!("{}", fceux_compare::run(&options)?);
-            Ok(())
-        }
+        [command, rest @ ..] if command == "fceux-bench" => fceux_bench::command(rest),
+        #[cfg(feature = "fceux-core")]
+        [command, rest @ ..] if command == "fceux-compare" => fceux_compare::command(rest),
         #[cfg(feature = "vs-system")]
         [command, rest @ ..] if command == "vs" => {
             let options = vs::Options::parse(rest)?;
@@ -154,10 +153,11 @@ fn print_help() {
     // And the two FCEUX commands only in a build with the engine.
     #[cfg(feature = "fceux-core")]
     let fceux_usage = format!(
-        "\n\n{}\n\n{}\n\n{}",
+        "\n\n{}\n\n{}\n\n{}\n\n{}",
         fceux_run::USAGE,
         fceux_compare::USAGE,
-        fceux_tiles::USAGE
+        fceux_tiles::USAGE,
+        fceux_bench::USAGE
     );
     #[cfg(not(feature = "fceux-core"))]
     let fceux_usage = String::new();

@@ -109,6 +109,17 @@ enum Verdict {
     Missing,
 }
 
+/// The subcommand: parse, run, print. One function so that `main`'s dispatch arm is one line,
+/// which is what keeps that function inside its own line budget.
+///
+/// # Errors
+///
+/// Whatever [`Options::parse`] and [`run`] return.
+pub fn command(arguments: &[String]) -> Result<(), HarnessError> {
+    print!("{}", run(&Options::parse(arguments)?)?);
+    Ok(())
+}
+
 /// Runs the comparison and returns the report.
 ///
 /// # Errors
