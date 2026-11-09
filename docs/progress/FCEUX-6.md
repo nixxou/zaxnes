@@ -19,7 +19,7 @@ never edited.
 - [x] 3/9 — CHR banking at fetch time.
 - [x] 4/9 — MMC2/MMC4: the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), and
   the sprite ordering of REQ-CORE-044.
-- [ ] 5/9 — MMC5: extended attributes and the vertical split.
+- [x] 5/9 — MMC5: extended attributes and the vertical split.
 - [ ] 6/9 — The rest of the classification.
 - [ ] 7/9 — Cost of the capture.
 - [ ] 8/9 — The 3D picture, per original with a profile.
@@ -532,3 +532,143 @@ FCEUX's**, so nothing was patched for it. The test now runs with the sample rate
 perturb anything; `sixty_frames` is green four runs out of four. **A lot that does audio on the
 FCEUX engine should fix this**, and the fix is one `memset` in `MakeFilters` or a reset call on
 the C API — recorded here for whoever gets there.
+
+---
+
+# Step 5 — The MMC5
+
+Fork commit `c9381dac`; worktree commit below. Only `zax/zaxtiles.cpp` changed in the fork — no
+`src/` file is touched, because FCEUX already keeps the chip's whole effect on the PPU's fetches
+in the `MMC5Hack*` globals of `src/ppu.cpp`.
+
+## The one thing that was actually wrong: sprites read the background's banks
+
+The MMC5 has **two CHR bank sets**, one for the background and one for the sprites, and
+`FetchSpriteData` reads through `MMC5SPRVPage` whenever `MMC5Hack` is on (`src/ppu.cpp:1529-1532`
+and `:1582`). The capture read every pattern — background and sprite alike — through `VPage`, so
+on an MMC5 every sprite record carried bytes from the *background* banks.
+
+That is step 3's last open item ("MMC5 sprite planes (`mmc5test`), 2 public frames, **yes — step
+5**"), and it is now closed. Measured by building the capture both ways over the same frames:
+
+| ROM | before step 5 | after step 5 |
+|---|---|---|
+| `mmc5test_v2/mmc5test.nes` | **capture**-class at 60, 300 and 1200: 963 of 976 records identical, `spr.plane0+plane1:13` | **identical on all three**, 976 / 976 |
+| `exram/mmc5exram.nes` | emulation: 833 / 865 / 897 of 961 | unchanged |
+| `mmc5test/mmc5test.nes` (v1) | emulation: 640 of 960, `bg.y:320` | unchanged |
+| `other/firefly.nes` | emulation: 928 / 960 / 960 of 968 | unchanged |
+
+Thirteen sprite records on three frames is a small number, and it is the whole of what any ROM
+available here could show: see below.
+
+## What else the step put in, and the two places FCEUX and `zax-nes` disagree
+
+**Background patterns now go through `FCEUPPU_GetCHR`** (`src/ppu.cpp:419-429`), which is FCEUX's
+own answer to "where does CHR come from under the hack modes": `ExRAM` mode 1's per-tile 4 KiB
+bank, the MMC5's background bank set otherwise, plain `VPage` when no MMC5 is live. One call
+covers every board, so there is no second copy of `pputile.inc`'s banking to keep in step — and
+for a non-MMC5 cart it is `&VPage[vadr >> 10][vadr]`, the expression the capture already used,
+which is why the 98 originals did not move by a single record.
+
+**Mode 1's extended attributes and the vertical split** are `pputile.inc`'s formulas where they
+cannot be called, gated exactly as `RefreshLine` gates them — and three corrections were needed
+against the first draft, each of which would have put records on the screen that FCEUX does not
+draw:
+
+1. **No split outside CHR modes 0 and 1.** `RefreshLine` reaches a split branch only from
+   `MMC5HackCHRMode == 0` or `== 1`; in modes 2 and 3 the plain loop draws the line and `$5200`
+   bit 7 moves no pixel. `zax-nes` gates on the same `ex_ram_mode <= 1`
+   (`Mmc5Ext::background_substitutes`).
+2. **The split's row is taken on the band's top line,** `y = line - 1`, and not on `line`. The
+   eight rows of a captured band are drawn on scanlines `y .. y+7` while FCEUX's split row changes
+   at every multiple of 8, so a band generally spans two split rows and one tile has to stand for
+   the whole band. `zax-nes` makes the same choice — `position_captured_background_tile` is handed
+   `y` — so the two agree on which row that is. The two expressions differ only when `line` is a
+   multiple of 8, which is why this is a correction and not a rewrite.
+3. **The attribute override is gated on `geniestage != 1`** like the renderer's own block, not on
+   `MMC5Hack` alone.
+
+Two disagreements are left that are **not** the capture's to settle, and both are resolved in
+**FCEUX's** favour, so that the records keep describing the picture FCEUX draws (REQ-CORE-033)
+instead of a third picture neither engine shows:
+
+| | FCEUX | `zax-nes` |
+|---|---|---|
+| in CHR mode 1 with the split armed, the split covers | the **whole line**: `RefreshLine` computes `tochange` and then never reads it, `PPUT_MMC5SP` being defined *outside* the loop (`src/ppu.cpp:1214-1225`) | the `$5200` region only (`Mmc5Ext::split_covers`) |
+| `$5201`, the split's vertical scroll | whole tiles — `MMC5HackSPScroll = ($5201 >> 3) & 0x1F` (`src/boards/mmc5.cpp:569`), so the fine part is dropped | pixels, the hardware's own unit: `(line + split_scroll).rem_euclid(240)` |
+
+A game that uses either feature is therefore an **emulation** difference between the two engines
+and not a capture one — the same shape of finding as step 2's `ppu-2007-render-read`, and like it,
+recorded rather than papered over. The alternative (capture the split as `zax-nes` computes it)
+would make the 3D view on FCEUX disagree with FCEUX's own 2D picture, which is worse and would
+break the one invariant REQ-CORE-033 exists to protect.
+
+Nothing needs saving and restoring for the MMC5, unlike the MMC2/MMC4 latch of step 4: FCEUX keeps
+the split's row and column in the capture's own locals rather than in board state, so the capture
+leaves nothing behind. `the_tile_capture_does_not_change_what_fceux_draws` checks that anyway, on
+`mmc5test.nes` and `mmc5exram.nes` among its six ROMs, and still passes.
+
+## No ROM here exercises either mode — measured, not assumed
+
+The brief asks to "verify on what MMC5 ROMs you have; if none have a profile, verify field
+identity anyway". **None of the four has a profile**, and field identity is the table above. But
+the more useful answer is *which code those four ROMs reach*, and it was measured with a temporary
+probe in the capture (built, run, removed — not committed) that printed the first time each gate
+became true over **1 200 frames** of each ROM:
+
+| ROM | `$5104` CHR mode | `$5200` | mode-1 attributes reached | split reached |
+|---|---|---|---|---|
+| `exram/mmc5exram.nes` | 2 | `00` | **never** | **never** |
+| `mmc5test/mmc5test.nes` (v1) | 3 | `00` | **never** | **never** |
+| `mmc5test_v2/mmc5test.nes` | 0 | `00` | **never** | **never** |
+| `other/firefly.nes` | 0 | `00` | **never** | **never** |
+
+So **mode 1 and the vertical split are implemented to the requirement, measured to break nothing,
+and unproven in use** — exactly the position step 4 reached on the MMC2/MMC4 latch walk, and for
+the same reason: the ROMs that would exercise them are not here. `mmc5exram.nes` is named for
+`ExRAM` but exercises mode **2** (`ExRAM` as a nametable), not mode 1. A later lot with
+*Castlevania III*, *Just Breed*, *Laser Invasion* or *Uchuu Keibitai SDF* in hand should close
+this.
+
+It also explains why the ex-attribute and split code moved no number: `mmc5exram.nes` is identical
+to the record before and after the step. **The sprite bank set is the entire measurable content of
+step 5.**
+
+## The mapper-5 differences that are left, all emulation-class
+
+| ROM | frames | records identical | fields | first frame whose pixels differ | cause |
+|---|---|---|---|---|---|
+| `mmc5test/mmc5test.nes` (v1) | 60, 300, 1200 | 640 / 960 | `bg.y:320` | 4 | the ten bottom rows land one line apart (Zaxnes 159, 167, …; FCEUX 160, 168, …): the MMC5's scanline detection fires a line later on FCEUX, so the `$2006` write it triggers lands a line later. Checked **not** to be step 2's `ppu-2007-render-read` — with that feature on, the figures are unchanged |
+| `exram/mmc5exram.nes` | 60, 300, 1200 | 833 / 865 / 897 of 961 | `bg.plane1`, `bg.plane0+palette`, `bg.plane0+plane1+palette` | 5 | `ExRAM` **mode 2** nametable and CHR-window emulation, neither of them the capture's: the capture's own two modes are provably never entered (above) |
+| `other/firefly.nes` | 60, 300, 1200 | 928 / 960 / 960 of 968 | sprite and background `x`, `y`, `index`, planes | 3 | FCEUX against Zaxnes from frame 3 |
+
+## The state of the two ROM sets after this step
+
+| | 98 originals, 60/300/1200/3000 | 291 public ROMs, 60/300 |
+|---|---|---|
+| ROMs identical at every compared frame | 47 / 98 (step 3: 47) | **180 / 291** (step 3: 177) |
+| frames `identical` | 259 / 392 (step 3: 259) | **384 / 578** |
+| frames `capture` | 28 / 392 (step 3: 28) | 6 → **3 / 578** |
+| frames `emulation` | 105 / 392 | 191 / 578 |
+
+The originals are unmoved to the record, which is the check that the `read_planes` refactor cost
+nothing on the 97 non-MMC5 boards among them. On the public set the two MMC5 capture-class frames
+are gone and **three capture-class frames remain in the whole 291-ROM set**:
+
+| ROM | frame | shape | step 3's verdict |
+|---|---|---|---|
+| `nes_instr_test/rom_singles/01-implied.nes` | 60 | FCEUX captures 0 records, Zaxnes 960 | blank screen — the pixel test cannot decide |
+| `other/high-hopes.nes` | 60 | `bg.y+index:160` | blank screen — the pixel test cannot decide |
+| `spritecans-2011/spritecans.nes` | 60 | `spr.index:2` | the game put the sprite in another OAM slot — emulation |
+
+Step 6 takes those three and the 28 on the originals and closes the classification.
+
+## Verification of this step
+
+* the fork builds clean with the documented `zax\build-msvc.cmd`;
+* `cargo test --release -p zax-fceux --features fceux-core`: **14 passed, 1 ignored**, including
+  `the_tile_capture_does_not_change_what_fceux_draws` (capture on and off hash the same 180 frames
+  on `nestest`, `M9`, both `M10`s, `mmc5test` and `mmc5exram`) and
+  `sixty_frames_of_nestest_match_the_c_self_tests_digests`;
+* no Rust source changed at this step, so there is nothing new to `fmt` or `clippy`, and the
+  default build (the feature off) is untouched by construction.
