@@ -221,6 +221,14 @@ public sealed class EnginePattern
     public bool Disabled { get; set; }
 
     /// <summary>
+    /// Whether the grid still holds at least one <b>pending</b> tile of a « 3dh » profile
+    /// (AMD-062 REQ-PROF-081), which is what <c>Pattern.HasPlaceholders</c> reads
+    /// (AMD-063 REQ-LUA-120). Always false for a pattern of a « 3dn » profile and for a pattern
+    /// learned during play, and false again as soon as the last pending tile is resolved.
+    /// </summary>
+    public bool HasPlaceholders { get; private set; }
+
+    /// <summary>
     /// Order of registration in the registry, which is the candidate order of REQ-E3D-091.
     /// </summary>
     public int RegistrationIndex { get; internal set; }
@@ -351,6 +359,7 @@ public sealed class EnginePattern
         result.SetSelfConnected(pattern.SelfConnected);
 
         bool pending = pattern.Grid is { HasPendingTile: true };
+        result.HasPlaceholders = pending;
         foreach (PatternVariant variant in pattern.Variants)
         {
             result.AddInstance(PatternInstance.FromVariant(variant, pending));
@@ -411,6 +420,7 @@ public sealed class EnginePattern
         Reload(InternCells(pattern, images, Width, Height));
 
         bool pending = pattern.Grid is { HasPendingTile: true };
+        HasPlaceholders = pending;
         int count = Math.Min(_instances.Count, pattern.Variants.Count);
         for (int index = 0; index < count; index++)
         {

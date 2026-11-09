@@ -319,6 +319,17 @@ internal static partial class LuaApi
 
         type.Property("permanent", static (b, l) => Boolean(l, PatternOf(b, l)?.Permanent ?? false));
 
+        // AMD-063 REQ-LUA-120: true when the grid still holds a pending tile of a « 3dh »
+        // profile (AMD-062 REQ-PROF-081). A frame pattern answers for the reference pattern of
+        // its shape, which is refPattern of the shape (SPEC-05 §4.2).
+        type.Property(
+            "HasPlaceholders",
+            static (b, l) => Boolean(
+                l,
+                PatternOf(b, l) is { } pattern
+                    ? pattern.HasPlaceholders
+                    : ShapeOf(b, l)?.ReferencePattern?.HasPlaceholders ?? false));
+
         type.ElementType = HostTypeId.Instance;
         type.Indexer = static (b, l) =>
         {

@@ -188,11 +188,11 @@ internal static partial class LuaApi
     }
 
     /// <summary>
-    /// What <c>CS.Nes3D.Info.Version</c> reads (AMD-040 REQ-LUA-112): a string whose leading
-    /// decimal integer is at least 2, which is how a 2.0 script knows it may read
-    /// <c>Camera.ResetDistance</c>.
+    /// What <c>CS.Nes3D.Info.Version</c> reads (AMD-063 REQ-LUA-118, which amends AMD-040
+    /// REQ-LUA-112): a string whose leading decimal integer is at least 2, which is how a 2.0
+    /// script knows it may read <c>Camera.ResetDistance</c>.
     /// </summary>
-    internal const string InfoVersion = "2.0";
+    internal const string InfoVersion = "2.1";
 
     /// <summary>
     /// What <c>CS.Nes3D.Info.Title</c> reads (REQ-LUA-112): the product name of AMD-029, which

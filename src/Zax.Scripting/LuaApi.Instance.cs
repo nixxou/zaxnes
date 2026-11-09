@@ -563,6 +563,12 @@ internal static partial class LuaApi
         type.Function("BuildExportMeshes", static (_, _) => 0);
         type.Function("ReleaseExportMeshes", static (_, _) => 0);
 
+        // AMD-063 REQ-LUA-121: always false, for any argument, without raising. In 3dSen 2.1 the
+        // method answers whether t is a full tile in the sense of REQ-SCN-087; Zaxnes exposes no
+        // tile object at all (SPEC-05 §4.2), so the method exists for the same reason
+        // BuildExportMeshes does — a script that calls it keeps its hooks (REQ-LUA-062).
+        type.Function("IsSolidTile", static (_, l) => Boolean(l, false));
+
         _ = runtime;
     }
 

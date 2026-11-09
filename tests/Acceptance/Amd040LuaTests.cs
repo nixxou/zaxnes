@@ -1,4 +1,4 @@
-using Zax.Scripting;
+﻿using Zax.Scripting;
 
 namespace Zax.Acceptance.Tests;
 
@@ -33,7 +33,9 @@ public sealed class Amd040LuaTests
         Assert.True(run.Flag("tonumber(CS.Nes3D.Info.Version:match('^%d+')) >= 2"));
         Assert.True(run.Flag("CS.Nes3D.Info.Title ~= '3dSenMaker'"));
 
-        Assert.Equal("2.0", run.Text("CS.Nes3D.Info.Version"));
+        // AMD-063 REQ-LUA-118 raised the version to that of 3dSen 2.1; the criterion above is
+        // the one AMD-040 states and it still holds.
+        Assert.Equal("2.1", run.Text("CS.Nes3D.Info.Version"));
         Assert.Equal("Zaxnes", run.Text("CS.Nes3D.Info.Title"));
     }
 
@@ -67,7 +69,7 @@ public sealed class Amd040LuaTests
         Assert.Null(run.Error("CS.Nes3D = nil"));
         Assert.Null(run.Error("CS.Quelque = 1"));
 
-        Assert.Equal("2.0", run.Text("CS.Nes3D.Info.Version"));
+        Assert.Equal("2.1", run.Text("CS.Nes3D.Info.Version"));
         Assert.Equal("Zaxnes", run.Text("CS.Nes3D.Info.Title"));
         Assert.Equal("nil", run.TypeOf("CS.Nes3D.Info.AppId"));
         Assert.Equal("nil", run.TypeOf("CS.Quelque"));

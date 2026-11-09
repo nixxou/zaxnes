@@ -1,6 +1,7 @@
-using Zax.Engine3D;
+﻿using Zax.Engine3D;
 using Zax.Nes;
 using Zax.Profiles;
+using Zax.Profiles.Hash;
 
 namespace Zax.Scripting.Tests;
 
@@ -243,7 +244,11 @@ internal sealed class ScriptSession : IDisposable
     public List<ScriptNotification> Notifications { get; }
 
     /// <summary>Builds engine and runtime for <paramref name="profile"/> (REQ-LUA-015).</summary>
-    public static ScriptSession Create(GameProfile profile)
+    /// <param name="profile">The profile to load.</param>
+    /// <param name="tiles">
+    /// The tile table of a « 3dh » profile (AMD-062 REQ-PROF-080), or none for a 3dn profile.
+    /// </param>
+    public static ScriptSession Create(GameProfile profile, HashProfileTiles? tiles = null)
     {
         ConversionEngine engine = new();
         engine.TwoDimensionalMode = profile.PermanentPatterns.Count == 0
@@ -289,7 +294,7 @@ internal sealed class ScriptSession : IDisposable
         // 1. the chunks, 2. the profile settings and 3. the patterns with BuildPattern.
         ProfileScriptRuntime runtime = ProfileScriptRuntime.Create(profile, environment);
         engine.ScriptHost = runtime;
-        engine.LoadProfile(profile);
+        engine.LoadProfile(profile, applySettings: true, tiles);
 
         return new ScriptSession(engine, runtime, log, camera, backdrop, input, memory, notifications);
     }

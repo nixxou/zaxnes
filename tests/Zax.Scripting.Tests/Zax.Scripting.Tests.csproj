@@ -9,4 +9,13 @@
     <None Include="spec05-api.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    Pattern.HasPlaceholders (AMD-063 REQ-LUA-120) only ever answers true on a « 3dh » profile,
+    so the tests need one. The builder is shared with the profile and engine tests rather than
+    written a third time, exactly as Zax.Engine3D.Tests shares it.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Zax.Profiles.Tests\SyntheticHashProfile.cs" Link="Shared\SyntheticHashProfile.cs" />
+  </ItemGroup>
+
 </Project>

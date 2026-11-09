@@ -120,14 +120,14 @@ public sealed class Amd059CsTableTests
 
     /// <summary>
     /// REQ-LUA-117 — the tables of AMD-040 are still there: adding siblings to <c>Info</c> did
-    /// not displace it.
+    /// not displace it. The version itself is the one AMD-063 REQ-LUA-118 sets.
     /// </summary>
-    [Fact] // REQ-LUA-117, REQ-LUA-112
+    [Fact] // REQ-LUA-117, REQ-LUA-112, AMD-063 REQ-LUA-118
     public void The_info_table_of_AMD_040_is_untouched()
     {
         using ScriptSession session = Session();
 
-        Assert.Equal("2.0", session.Runtime.EvaluateText("return CS.Nes3D.Info.Version"));
+        Assert.Equal("2.1", session.Runtime.EvaluateText("return CS.Nes3D.Info.Version"));
         Assert.Equal("Zaxnes", session.Runtime.EvaluateText("return CS.Nes3D.Info.Title"));
         Assert.Equal("nil", session.Runtime.EvaluateText("return type(CS.Nes3D.Info.AppId)"));
     }
