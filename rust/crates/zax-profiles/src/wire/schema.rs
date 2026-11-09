@@ -18,6 +18,21 @@ pub(super) mod root {
     pub(crate) const MASK: FieldMask = FieldMask::range(1, 11);
 }
 
+/// The root message of a "3dh" profile (AMD-062 REQ-PROF-071). Field 5 is never written.
+pub(super) mod hash_envelope {
+    pub(crate) const TYPE: u32 = 1;
+    pub(crate) const VERSION: u32 = 2;
+    pub(crate) const PAYLOAD: u32 = 3;
+    pub(crate) const HASHES: u32 = 4;
+    pub(crate) const PAYLOAD_HASH: u32 = 6;
+    pub(crate) const ID: u32 = 7;
+    pub(crate) const TITLE: u32 = 8;
+    pub(crate) const MAKER: u32 = 9;
+    pub(crate) const GAME_DEV: u32 = 10;
+    pub(crate) const DES: u32 = 11;
+    pub(crate) const IDS: u32 = 12;
+}
+
 /// The reference envelope that shares an object between several places (REQ-PROF-011).
 pub(super) mod envelope {
     pub(crate) const EXISTING_KEY: u32 = 1;

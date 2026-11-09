@@ -2,6 +2,7 @@
 //! REQ-PROF-025 and REQ-PROF-033.
 
 use crate::enums::ProfileFormatVersion;
+use crate::hash;
 use crate::layout::FieldPresence;
 use crate::pattern::RecordedPatternSlot;
 use crate::profile::{GameProfile, REQUIRED_SIGNATURE};
@@ -47,12 +48,21 @@ pub struct ProfileHeader {
 }
 
 impl ProfileHeader {
-    /// True when the signature is absent or `"3dn"`.
+    /// True when this header was read from the envelope of a "3dh" profile, whose field 1 is
+    /// `"3dh"` (AMD-062 REQ-PROF-070, REQ-PROF-073).
+    #[must_use]
+    pub fn is_hash_envelope(&self) -> bool {
+        self.signature.as_deref() == Some(hash::envelope::SIGNATURE)
+    }
+
+    /// True when the signature is acceptable: absent, `"3dn"`, or `"3dh"`, which REQ-PROF-020 as
+    /// amended by AMD-062 REQ-PROF-070 no longer refuses.
     #[must_use]
     pub fn has_acceptable_signature(&self) -> bool {
         self.signature
             .as_deref()
             .is_none_or(|signature| signature == REQUIRED_SIGNATURE)
+            || self.is_hash_envelope()
     }
 
     /// True when the identifier is present and not empty.
@@ -62,9 +72,19 @@ impl ProfileHeader {
     }
 
     /// How [`Self::version`] classifies under the rules of REQ-PROF-021. Field 2 being optional,
-    /// an absent version is the current format.
+    /// an absent version is the current format. For a "3dh" envelope the field is the
+    /// **envelope** version instead, whose supported values are `"1"`, `"2"` and `"5"`
+    /// (REQ-PROF-072).
     #[must_use]
     pub fn format_version(&self) -> ProfileFormatVersion {
+        if self.is_hash_envelope() {
+            return if matches!(self.version.as_deref(), Some("1" | "2" | "5")) {
+                ProfileFormatVersion::Current
+            } else {
+                ProfileFormatVersion::Unsupported
+            };
+        }
+
         crate::profile::version_rules::classify(self.version.as_deref())
     }
 
@@ -91,6 +111,15 @@ pub enum ProfileLoadErrorKind {
     IncompleteSettings,
     /// The embedded settings do not hold six layers.
     WrongLayerCount,
+    /// The "3dh" envelope has an unsupported version or no payload (AMD-062 REQ-PROF-072).
+    UnsupportedHashEnvelope,
+    /// The payload does not match the digest the envelope records (REQ-PROF-072).
+    DamagedHashPayload,
+    /// The manifest is malformed or holds the same string twice (REQ-PROF-072).
+    InvalidHashManifest,
+    /// A tile names a string outside the manifest, or a variant's `textureKind` is not usable
+    /// (REQ-PROF-074).
+    InvalidHashPayload,
 }
 
 /// A refused profile.
@@ -164,13 +193,23 @@ pub fn save(profile: &GameProfile, presence: FieldPresence) -> Vec<u8> {
 
 /// Reads the identity fields of a profile; none, with a warning on `log`, when the bytes are
 /// unreadable.
+///
+/// For a "3dh" profile the metadata are read from the **envelope**, fields 7 to 11, with the
+/// same numbers and the same meaning as a 3dn header; the payload is not decoded for this
+/// (REQ-PROF-073). A 3dh whose payload is damaged, and which the loader therefore refuses, still
+/// has a readable header and so still appears in the list of games.
 #[must_use]
 pub fn load_header(
     bytes: &[u8],
     log: Option<&dyn ProfileLog>,
     source_name: Option<&str>,
 ) -> Option<ProfileHeader> {
-    match wire::decode_header(bytes) {
+    let decoded = if hash::envelope::is_hash_profile(bytes) {
+        wire::hash_envelope::decode(bytes).map(|envelope| envelope.to_header())
+    } else {
+        wire::decode_header(bytes)
+    };
+    match decoded {
         Ok(header) => Some(header),
         Err(error) => {
             log.unwrap_or(&NULL_PROFILE_LOG).warning(&format!(

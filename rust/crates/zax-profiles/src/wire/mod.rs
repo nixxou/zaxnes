@@ -6,6 +6,7 @@
 pub mod cipher;
 mod decoder;
 mod encoder;
+pub mod hash_envelope;
 mod reader;
 mod schema;
 mod writer;

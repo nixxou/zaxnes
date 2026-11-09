@@ -63,6 +63,14 @@ impl ProtoWriter {
         self.buffer.extend_from_slice(value.as_bytes());
     }
 
+    /// Writes a length-delimited field of raw bytes (the "3dh" envelope's payload and table of
+    /// identifiers, AMD-062 REQ-PROF-071 fields 3 and 12).
+    pub(crate) fn write_bytes(&mut self, field: u32, value: &[u8]) {
+        self.write_tag(field, WireType::Length);
+        self.write_varint(value.len() as u64);
+        self.buffer.extend_from_slice(value);
+    }
+
     /// Opens a length-delimited field; the returned offset goes to [`Self::end_nested`].
     pub(crate) fn begin_nested(&mut self, field: u32) -> usize {
         self.write_tag(field, WireType::Length);

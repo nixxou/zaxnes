@@ -10,5 +10,6 @@
 //! this module reads and rewrites a 3dh as a 3dh, next to the 3dn reader and writer of
 //! [`crate::wire`].
 
+pub mod envelope;
 pub mod raw_tile;
 pub mod tile_id;

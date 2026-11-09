@@ -129,6 +129,15 @@ impl<'a> ProtoReader<'a> {
         Ok(value)
     }
 
+    /// Reads a length-delimited field as raw bytes, which the "3dh" envelope needs for its
+    /// payload and its table of identifiers (AMD-062 REQ-PROF-071, fields 3 and 12).
+    pub(crate) fn read_bytes(&mut self) -> Result<&'a [u8], ProfileFormatError> {
+        let limit = self.read_length_limit()?;
+        let bytes = &self.data[self.position..limit];
+        self.position = limit;
+        Ok(bytes)
+    }
+
     pub(crate) fn skip(
         &mut self,
         field: u32,
