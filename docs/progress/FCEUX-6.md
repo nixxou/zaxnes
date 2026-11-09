@@ -17,7 +17,7 @@ never edited.
 - [x] 2/9 — Mid-frame scroll: the capture follows the scroll as `zax-nes/src/ppu/tiles.rs` samples
   it.
 - [x] 3/9 — CHR banking at fetch time.
-- [ ] 4/9 — MMC2/MMC4: the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), and
+- [x] 4/9 — MMC2/MMC4: the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), and
   the sprite ordering of REQ-CORE-044.
 - [ ] 5/9 — MMC5: extended attributes and the vertical split.
 - [ ] 6/9 — The rest of the classification.
@@ -51,9 +51,11 @@ Worktree commit below. Nothing in the fork changed at this step.
 `zax-harness fceux-tiles <roms dir|rom.nes> <out.jsonl> [--frames a,b,c] [--profiles-only]
 [--in-process] [--detail]` (`crates/zax-harness/src/fceux_tiles.rs`). Both engines run side by
 side in one process, driven exactly as `golden-core` and `fceux-run` drive them — the file stem as
-Zaxnes's ROM name and the basename as FCEUX's, FCEUX's deterministic default RAM fill, a reset
-after loading, no button pressed — so a difference it reports is the engines' and not the
-harness's. A directory sweep gives each ROM its own child process with a deadline, for the reason
+Zaxnes's ROM name and the basename as FCEUX's, a deterministic RAM fill, a reset after loading, no
+button pressed — so a difference it reports is the engines' and not the harness's. (Which fill is
+the comparable one turned out to matter, and step 3 below settles it: `--ram zero`, because
+`zax-nes` clears the work RAM *and* the CHR-RAM. The step-1 baseline below was taken with lot
+FCEUX-1's `Default` fill; step 3 gives both figures.) A directory sweep gives each ROM its own child process with a deadline, for the reason
 lot FCEUX-1 §7 found: `other/oam3.nes` corrupts FCEUX's heap and then **hangs** rather than dying.
 
 Per ROM and per frame it reports:
@@ -439,3 +441,94 @@ accounted for**:
 
 The two `mmc5test` frames are the only remaining capture-class differences anywhere whose cause is
 a mapper feature, and they are step 5's. Steps 4, 5 and 6 pick them up from here.
+
+---
+
+# Step 4 — MMC2 and MMC4
+
+Fork commit `f288a60f`; worktree commit below.
+
+## What REQ-CORE-039 and REQ-CORE-044 ask for, and what was done
+
+On MMC2 and MMC4 the pattern a tile shows depends on the tiles fetched **before it on the line**:
+fetching tile `$FD` or `$FE` from either pattern table flips that table's latch and remaps 4 KiB of
+CHR. A capture that reads sixteen whole tiles out of order therefore reads some of them through
+the wrong bank unless it walks the line in display order and moves the latch as it goes — and it
+must then put the real latch back, because the next line's first fetches would otherwise see a
+latch the capture left behind (REQ-CORE-033).
+
+Three things now do that, mirroring `zax-nes/src/ppu/tiles.rs` call for call:
+
+1. **The background row** is walked left to right (it already was) with
+   `zax_mmc2_advance_latch(pattern_table, tile)` after each tile's planes are read, and the latch
+   saved before the loop and restored after it.
+2. **The sprites of a capture are emitted by increasing x** on those two boards, OAM number
+   breaking ties — because "display order" for sprites is x order, not OAM order. A **stable
+   insertion sort**, which is what `Ppu2C02::sort_sprites_by_x` is and for the same reason: equal
+   x values must keep OAM order or the output is not reproducible (REQ-ARCH-012). The sort only
+   runs when an MMC2/MMC4 cart is live.
+3. **`emit_sprite`** advances the latch after each half, as Zaxnes's does.
+
+`latch0` and `latch1` are file-static in `src/boards/mmc2and4.cpp`, so the three accessors live
+there: read the pair, put it back, and move it on as one pattern fetch would (which is the board's
+own `MMC2and4PPUHook`). All three answer "not this board" unless `PPU_hook` is that hook —
+`ResetGameLoaded` clears `PPU_hook` before every load (`src/fceu.cpp:401`) and each board's `Init`
+installs its own, so the test is exact — which means every other board pays one load and one
+comparison per captured tile and nothing else.
+
+## What could be verified, and what could not
+
+**There is no mapper 9 or 10 game in either ROM set.** The 98 originals are mappers 0, 1, 2, 3, 4
+and 156; the 291 public ROMs are 0, 1, 2, 3, 4, 5, 11, 22, 28 and 34. The MMC2/MMC4 games are
+*Punch-Out!!*, *Mike Tyson's Punch-Out!!* and *Fire Emblem*, and none of them is here. The
+catalogue does have a `Punch Out!!` profile, so this is a gap a later lot should close with the
+ROM in hand.
+
+What **is** here is `assets-free/test-roms/holy-mapperel/testroms/`:
+
+| ROM | Board | frames 60 / 300 / 1200 |
+|---|---|---|
+| `M10_P128K_C64K_S8K.nes` | MMC4, battery WRAM | **identical on all three** |
+| `M10_P128K_C64K_W8K.nes` | MMC4, plain WRAM | **identical on all three** |
+| `M9_P128K_C64K.nes` | MMC2 | 946 of 960 records identical at 300 and 1200; the frames are **emulation**-class (the pictures differ) and the 14 differing records are one row of text, `y` = 48 — the ROM's own printed verdict, which the two engines disagree about. Frame 60 is a blank screen on Zaxnes and a drawn one on FCEUX |
+
+And the latch walk was measured **both ways**, by building the fork once with the advance and the
+sort removed: on these three ROMs the figures are **identical with and without them**. So the walk
+is implemented to the requirement and provably breaks nothing, but *no ROM available in this
+session exercises it* — these test ROMs do not put `$FD`/`$FE` tiles where the latch matters
+mid-row. That is stated rather than dressed up.
+
+## The test that does prove the restore: REQ-CORE-033
+
+`the_tile_capture_does_not_change_what_fceux_draws`
+(`crates/zax-fceux/tests/fceux_core_tests.rs`, **not** `#[ignore]`d) runs each ROM 180 frames with
+the capture **off**, hashes every frame, runs it again with the capture **on**, and requires the
+two digests to be equal. That is the guard for every save-and-restore the capture does — the
+MMC2/MMC4 latch here, and the MMC5's per-tile state in step 5 — and without it a wrong restore
+would silently drift the picture of a mapper 9, 10 or 5 game the moment a host asked for records,
+with nothing else in the suite noticing.
+
+It passes on all six ROMs it can find:
+
+    nestest.nes:              capture on and off agree, pixels 1df943b3a46bc069
+    M9_P128K_C64K.nes:        capture on and off agree, pixels 221428505e199ec5
+    M10_P128K_C64K_S8K.nes:   capture on and off agree, pixels 6ed207f1e2455ad5
+    M10_P128K_C64K_W8K.nes:   capture on and off agree, pixels 6ed207f1e2455ad5
+    mmc5test.nes:             capture on and off agree, pixels 067f912e427b8d64
+    mmc5exram.nes:            capture on and off agree, pixels 52d3f0fe1eb4a004
+
+## An upstream FCEUX finding the new test turned up
+
+Writing that test broke `sixty_frames_of_nestest_match_the_c_self_tests_digests` — but only when
+the suite ran in parallel, and only on the **audio** digest, with the pixel and emphasis digests
+and the sample count all still exact. The cause is `SexyFilter` (`src/filter.cpp:51-53`), the
+output DC blocker: its two accumulators are `static int64` locals and **nothing ever resets them**
+— not `FCEUSND_Power`, not `MakeFilters`, not loading another game. A host that plays game A and
+then loads game B gets the tail of A's filter in B's first samples.
+
+It costs nothing here (the record comparison does not look at audio) and it is **upstream
+FCEUX's**, so nothing was patched for it. The test now runs with the sample rate at 0, where
+`FlushEmulateSound` returns before the filter is reached (`src/sound.cpp:1043-1048`), so it cannot
+perturb anything; `sixty_frames` is green four runs out of four. **A lot that does audio on the
+FCEUX engine should fix this**, and the fix is one `memset` in `MakeFilters` or a reset call on
+the C API — recorded here for whoever gets there.

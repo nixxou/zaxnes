@@ -429,3 +429,102 @@ fn how_many_loads_one_process_survives() {
     }
     eprintln!("400 loads of the same ROM survived");
 }
+
+/// **The capture must change nothing** (REQ-CORE-033): the same ROM run with the tile capture on
+/// and off must produce the same pictures, frame for frame.
+///
+/// This is the test that guards the save-and-restore contract of lot FCEUX-6. Two of the capture's
+/// steps *move emulator state* while they walk a line — the MMC2/MMC4 `$FD`/`$FE` latch
+/// (REQ-CORE-039), which also remaps CHR through `setchr4`, and the MMC5's per-tile state — and
+/// both put it back afterwards. If either restore were wrong, the picture of a mapper 9, 10 or 5
+/// game would drift the moment a host asked for records, and nothing else in the suite would
+/// notice.
+///
+/// `holy-mapperel`'s mapper 9 and 10 ROMs are the ones that matter for the latch and they live in
+/// `assets-free/test-roms`, which `ZAXNES_TEST_ROMS` points at; the MMC5 ones are
+/// `mmc5test_v2/mmc5test.nes` and `exram/mmc5exram.nes` of `rust/test-roms`; and `nestest` is
+/// always checked as the control.
+#[test]
+fn the_tile_capture_does_not_change_what_fceux_draws() {
+    let _serial = lock();
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(rom) = nestest() {
+        candidates.push(rom);
+    }
+    // The MMC2, MMC4 and MMC5 ROMs, whose boards are the ones the capture moves state on.
+    if let Ok(root) = std::env::var("ZAXNES_TEST_ROMS") {
+        let root = Path::new(&root).join("holy-mapperel/testroms");
+        for name in [
+            "M9_P128K_C64K.nes",
+            "M10_P128K_C64K_S8K.nes",
+            "M10_P128K_C64K_W8K.nes",
+        ] {
+            let rom = root.join(name);
+            if rom.is_file() {
+                candidates.push(rom);
+            }
+        }
+    }
+    // The MMC5 ones are in `rust/test-roms`, where `nestest` is.
+    let public = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-roms");
+    for name in ["mmc5test_v2/mmc5test.nes", "exram/mmc5exram.nes"] {
+        let rom = public.join(name);
+        if rom.is_file() {
+            candidates.push(rom);
+        }
+    }
+    if candidates.is_empty() {
+        eprintln!("skipped: no ROM to run");
+        return;
+    }
+
+    let mut fceux = Fceux::new().expect("an instance");
+    // **Silent on purpose, and not only because the audio is not what is being tested.**
+    // `SexyFilter` (`src/filter.cpp:53`) keeps its two DC-blocker accumulators in `static` locals
+    // that nothing resets — not `FCEUSND_Power`, not `MakeFilters`, not a game load — so a test
+    // that runs a thousand frames over six ROMs leaves a tail behind that
+    // `sixty_frames_of_nestest_match_the_c_self_tests_digests` then measures as a different audio
+    // digest. With the rate at 0, `FlushEmulateSound` returns before the filter
+    // (`src/sound.cpp:1043-1048`), so this test cannot perturb it. The carry-over itself is
+    // upstream FCEUX's and is recorded in `docs/progress/FCEUX-6.md`, step 4.
+    let rate = fceux.sample_rate();
+    let _ = fceux.set_sample_rate(0);
+    for rom in &candidates {
+        let image = std::fs::read(rom).expect("the ROM");
+        let name = rom
+            .file_name()
+            .map_or_else(String::new, |base| base.to_string_lossy().into_owned());
+
+        let mut digests = Vec::new();
+        for capture in [false, true] {
+            fceux.set_tile_capture(capture);
+            fceux.set_ram_init(RamInit::Zero).expect("the RAM fill");
+            fceux.load_rom(&image, &name).expect("the load");
+            fceux.reset().expect("a reset");
+
+            let mut hash = FNV_OFFSET;
+            let mut frame = Vec::new();
+            for _ in 0..180 {
+                fceux.set_input(0, 0).expect("the pads");
+                fceux.run_frame().expect("a frame");
+                fceux.frame_indices_into(&mut frame).expect("the picture");
+                hash = digest(&frame, hash);
+            }
+            digests.push(hash);
+        }
+        fceux.set_tile_capture(false);
+
+        assert_eq!(
+            digests[0], digests[1],
+            "{name}: 180 frames differ with the tile capture on ({:016x}) and off ({:016x}) — \
+             something the capture moves is not being put back (REQ-CORE-033)",
+            digests[1], digests[0]
+        );
+        eprintln!(
+            "{name}: capture on and off agree, pixels {:016x}",
+            digests[0]
+        );
+    }
+    let _ = fceux.set_sample_rate(rate);
+}
