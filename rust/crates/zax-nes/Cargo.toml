@@ -76,6 +76,7 @@ default = [
     "board-246",
     "board-vrc2-latch",
     "board-mmc1a",
+    "board-mmc5-exattr-split",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
@@ -1082,14 +1083,13 @@ board-taito-x1 = ["board-small-boards"]
 # own note above has the figures, and `--features parked-boards` is the one flag that turns the
 # VS. System on. **MF-UNL-12 step 6 put `board-292` beside it**, the one board of the twelve MF-UNL
 # lots that is over the tolerance; its own note has the figures and the two causes. **MF-LEG-2
-# step 4 put `board-mmc5-exattr-split` beside those**, the MMC5's extended attribute mode and
+# step 4 put `board-mmc5-exattr-split` beside those** (moved into `default` by the owner, 2026-11-09), the MMC5's extended attribute mode and
 # vertical split: over the tolerance on four of PR-1's thirteen and two of level 2's five, its
 # own note above carrying the figures and the one symbol they come from.
 parked-boards = [
     "board-vs-system",
     "board-292",
     "board-143-open-bus",
-    "board-mmc5-exattr-split",
 ]
 
 # The MMC5's **extended attribute mode** ($5104 = %01) and its **vertical split**
@@ -1105,14 +1105,17 @@ parked-boards = [
 # Keibitai SDF* and *Bandit Kings of Ancient China* for the split. **Castlevania III uses
 # neither**, so the most-played MMC5 game is not in the list.
 #
-# **Off by default by the owner's decision, taken before any measurement — and PARKED by the
-# figures, which agree with it.** Measured against `ca1517dc` (MF-LEG-2 step 4), PR-1's thirteen
+# **In `default` by the owner's decision of 2026-11-09**, which overrides the +0.02 % rule for
+# this one feature: "under 1 % for a mapper as important as the MMC5, it is justified". It was
+# first off by default (owner, before any measurement), then parked by MF-LEG-2 step 4 on the
+# figures below; R0 moved it into `default` on that decision. Measured against `ca1517dc` (MF-LEG-2 step 4), PR-1's thirteen
 # ROMs: eight inside the tolerance (`oamstr` +0.003 % to `smb1` +0.010 %, with `smb3` -0.049 %
 # and `z2` -0.013 %) and **four above it** — `m1` +0.060 %, `m4` +0.061 %, `mm2` +0.085 %,
 # `metroid` **+0.101 %** — plus `mmc5` itself at **+2.522 %**, which is the board paying for its
 # own feature. Level 2's `core`: `smb3` -0.061 %, `zelda2` -0.015 %, `smb1` +0.013 %, and **`mm2`
-# +0.103 % and `metroid` +0.110 %** above. So it is in `parked-boards` below, which is the
-# owner's rule for a board over the tolerance: never dropped, always reachable behind its flag.
+# +0.103 % and `metroid` +0.110 %** above the tolerance, all well under the 1 % the owner allows
+# here. No title other than an MMC5 one changes on screen: SMB3 and Zelda II only get faster.
+# `--no-default-features` plus the rest of `default` is the way to build without it.
 #
 # **The whole remaining cost is one symbol**: `Board::ppu_peek` +4 528 000 on `metroid` and
 # +4 485 120 on `mm2`, `Board::ppu_read` +3 082 184 on `m4` — about **one instruction per CHR
