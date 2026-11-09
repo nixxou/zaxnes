@@ -16,7 +16,7 @@ never edited.
   baseline table.
 - [x] 2/9 — Mid-frame scroll: the capture follows the scroll as `zax-nes/src/ppu/tiles.rs` samples
   it.
-- [ ] 3/9 — CHR banking at fetch time.
+- [x] 3/9 — CHR banking at fetch time.
 - [ ] 4/9 — MMC2/MMC4: the `$FD`/`$FE` latch walked per column and put back (REQ-CORE-039), and
   the sprite ordering of REQ-CORE-044.
 - [ ] 5/9 — MMC5: extended attributes and the vertical split.
@@ -297,3 +297,145 @@ parity here is not the capture's to win).
 The count difference of 32 that the default build also showed (one spurious row at `y` = 192) was
 ours and **is fixed**: it came from letting the borrowed pipeline increment reach `zax_row_start`,
 which the `A2007` fetching-branch rule above now prevents.
+
+---
+
+# Step 3 — CHR banking at fetch time
+
+Fork commit `9c48ca28`; worktree commit below.
+
+## The banks are right, and step 2 is why
+
+A record's pattern planes must be the CHR bytes with **the bank mapping in force when the tile was
+fetched**. After step 2 that holds by construction, and the reason is worth stating because it is
+not obvious:
+
+* the background row of line L is read at the **end of line L**, through `VPage`, which is the same
+  1 KiB-granular pointer table the PPU itself fetches through. `zax-nes` reads its row at the same
+  instant, through the inert `ppu_peek` path. Whatever a board switched during line L — an MMC3
+  status-bar split, an MMC1 CHR bank, a `$2007` write into CHR-RAM — is in force on both sides;
+* the sprites of band `b` are read at the **start of line `8b+7`**, which is where
+  `begin_capture_line` reads them;
+* neither side can be disturbed by the reading: `VPage` is a plain pointer table (no A12 rise, no
+  MMC2/MMC4 latch, no `$2007` buffer), which is the same property `ppu_peek` has by design.
+
+A tile crossing a bank switch **inside** a line is still read with the bank the end of the line
+had, on both engines, so the two agree there as well — the approximation is the old PPU's and it is
+the same approximation `zax-nes` makes.
+
+The measurement, over both ROM sets at frames 60/300/1200/3000 and 60/300:
+
+| | mapper | ROMs | frames | identical | capture | emulation |
+|---|---|---|---|---|---|---|
+| originals | 1 (MMC1) | 27 | 108 | 88 | **0** | 20 |
+| originals | 2 (UxROM) | 16 | 64 | 32 | **0** | 32 |
+| originals | 4 (MMC3) | 40 | 160 | 112 | 16 | 32 |
+| originals | 3 (CNROM) | 4 | 16 | 1 | 8 | 7 |
+| originals | 156 | 1 | 4 | 4 | **0** | 0 |
+| public | 1, 2, 11, 22, 28, 34 | 30 | 60 | 54 | **0** | 6 |
+| public | 4 (MMC3) | 24 | 48 | 8 | 1 | 39 |
+| public | 5 (MMC5) | 4 | 8 | 0 | 2 | 6 |
+
+**Not one** capture-class difference on any board now comes from a background tile's planes. Every
+mapper-4 and mapper-3 capture-class frame left is a sprite `index`, a sprite `x`, or a frame whose
+screen is blank — all three accounted for below — and the two MMC5 frames are step 5's.
+
+The bank-switching and CHR-RAM games verify it directly. **Of the 98 originals, 47 are CHR-RAM
+carts** (`chr = 0` in the header), and of those:
+
+| CHR-RAM game | compared frames | result |
+|---|---|---|
+| *Final Fantasy* (7 dumps) | 28 | **all identical** |
+| *Mega Man 1* (6 dumps) | 24 | **all identical** |
+| *Mega Man 2* (6 dumps) | 24 | **all identical** |
+| *Mega Man 6* (2 dumps) | 8 | **all identical** |
+| *Metroid* (4), *Rockman 2* (2) | 24 | 18 identical, 6 emulation |
+| *Mega Man 4* (6 dumps) | 24 | 12 identical, 12 capture — **all on a blank screen**, below |
+| *Rockman 4* (3), *Rockman 6* (1) | 16 | 12 identical, 4 sprite `index` only |
+| *Castlevania* / *Akumajou Dracula* (9) | 36 | 4 identical, 32 emulation (`first_pixel_diff` 2 to 4) |
+
+and the bank-switching games that are not CHR-RAM: *Mega Man 3* (9 dumps, MMC3, 36 frames) and
+*Ninja Gaiden III* (4 dumps, MMC3 with a mid-frame mirroring switch, 16 frames) are **identical on
+every frame**, *Blaster Master* (6 dumps, MMC1) 22 of 24.
+
+## The finding that moved the numbers: what power-on writes into memory
+
+The comparison was driving FCEUX with its **`Default` RAM fill**, which is what lot FCEUX-1 chose
+for the digest comparison: FCEUX's own `00 00 00 00 FF FF FF FF` pattern. That is the wrong
+setting for a record comparison, and the reason is `FCEU_MemoryRand`
+(`src/fceu.cpp:990-1022`): it fills the **work RAM and the CHR-RAM with the same pattern**
+(`src/ines.cpp:78-79` calls it on the CHR-RAM of every `chr = 0` cart, with `default_zero` left
+false). `zax-nes` clears both — `NesBus::ram` is `[0; RAM_SIZE]` and `CartridgeMemory`'s
+`chr_ram` is `vec![0; …]` (REQ-CORE-004).
+
+So the two machines were starting from different memory, and a CHR-RAM cart that reads a tile it
+never wrote read a different tile on each engine. *Mega Man 6* showed it exactly: 64 sprite records
+whose planes were `0000000000000000` on Zaxnes and `ffffffff00000000` on FCEUX — the pattern,
+read straight out of unwritten CHR-RAM.
+
+`fceux-tiles` now takes `--ram zero|default|ff` and **defaults to `zero`**, which is the setting
+that compares like with like. What it is worth:
+
+| | `--ram default` | `--ram zero` |
+|---|---|---|
+| originals identical at every frame | 41 / 98 | **47 / 98** |
+| public ROMs identical at every frame | 162 / 289 | **177 / 289** |
+| capture-class frames, originals | 30 | **28** |
+| capture-class frames, public ROMs | 18 | **6** |
+
+`fceux-run` and `docs/review/FCEUX-ENGINE-COMPARISON.md` are **not** changed: their figures are
+lot FCEUX-1's and re-running them was not in this brief. But the same reasoning applies to them,
+and a lot that revisits the engine comparison should expect the pixel-identity figures to improve
+for the same reason. Recorded here rather than acted on.
+
+## The capture bug this step found: no row on line 0 under vertical mirroring
+
+`other/high-hopes.nes` at frame 300 was emitting **one row more on FCEUX than on Zaxnes**, at
+`y = -1` (line 0), 32 records of a row the game does not show. `zax-nes` has an explicit exception
+there — REQ-CORE-037's justification, `tiles.rs:227`: *no row is captured on line 0 under vertical
+mirroring* — and the capture did not.
+
+It is now in `zax/zaxtiles.cpp`. FCEUX keeps no mirroring *mode* a board cannot bypass
+(`setmirrorw` and `SetupCartMirroring`'s four-screen arm write `vnapage` directly and never touch
+`setmirror`'s switch), so the layout is read back from the four `vnapage` pointers themselves —
+vertical is `vnapage[0] == vnapage[2] && vnapage[1] == vnapage[3] && vnapage[0] != vnapage[1]` —
+which is true whichever way a board set them. Frame 300 of `high-hopes` became identical.
+
+## Two discriminators the measuring stick gained, and what they settle
+
+Both exist because the same shapes of difference kept appearing and neither is the capture's:
+
+**1. `[OAM rotated by k]`.** Several ROMs showed pairs of sprite records carrying the *same* planes,
+position, palette and flags on both engines but a different `index`, always by a constant. Both
+engines walk OAM entries 0 to 63 and number the record after the entry (REQ-CORE-043), so a
+capture cannot get that wrong: it means the two OAM arrays hold the same sprites at different
+offsets, which is what happens when the `$4014` transfer starts at a different `$2003`. The tool
+now searches for the `k` in 1..64 that turns **every** one of FCEUX's sprite records into one of
+Zaxnes's and names it. It finds one on *Adventure Island* (4 frames), *Takahashi Meijin no
+Bouken-jima* (2), *Kiddy Sun in Fantasia* (2) — all `k = 32`, a 128-byte rotation — and on
+`spritecans-2011` (`k = 15`). Those eight frames are emulation differences wearing a capture
+costume.
+
+**2. `[blank screen]`.** When Zaxnes's picture for the frame is a **single colour**, two identical
+pictures prove almost nothing: a game that blanks the screen with `$2001` and a game that draws a
+screenful of blank tiles look exactly the same, so the pixel test cannot tell a capture difference
+from an emulation one. The tool now says so. It marks eleven of the remaining capture-class
+frames: the six *Mega Man 4* dumps at frames 60 and 3000,
+`nes_instr_test/rom_singles/01-implied.nes` at 60 — where FCEUX captured **no records at all**
+while Zaxnes captured thirty rows, which is exactly what one engine having `$2001` bit 3 clear for
+that frame looks like — and `other/high-hopes.nes` at 60.
+
+## What is left, after this step
+
+28 capture-class frames on the originals and 5 on the public ROMs, and **every one of them is
+accounted for**:
+
+| Cause | Frames | Ours? |
+|---|---|---|
+| OAM rotated (`$2003` at the `$4014` transfer) | 8 originals + 1 public | no — emulation |
+| sprite `index` only, no whole-array rotation (the game put the sprite in another OAM slot) | 8 originals | no — emulation |
+| blank screen, the pixel test cannot decide | 12 originals + 2 public | undecidable |
+| MMC5 sprite planes (`mmc5test`) | 2 public | **yes — step 5** |
+
+The two `mmc5test` frames are the only remaining capture-class differences anywhere whose cause is
+a mapper feature, and they are step 5's. Steps 4, 5 and 6 pick them up from here.

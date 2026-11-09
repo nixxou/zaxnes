@@ -52,7 +52,10 @@ pub const USAGE: &str = "zax-harness fceux-tiles <roms dir|rom.nes> <out.jsonl> 
       --frames a,b,c    the frames to compare (default 60,300,1200,3000)
       --profiles-only   only the ROMs this tool knows a 3dn profile for
       --in-process      do not isolate each ROM in a child process
-      --detail          print the differing fields and rows of every frame that differs";
+      --detail          print the differing fields and rows of every frame that differs
+      --records <n>     print the first n differing record pairs of each frame, field by field
+      --ram zero|default|ff   what FCEUX's power-on writes into the uninitialised memory
+                        (default: zero, which is what zax-nes does -- see the module docs)";
 
 /// The frames the baseline table of lot FCEUX-6 step 1 uses on the originals.
 const DEFAULT_FRAMES: [u32; 4] = [60, 300, 1200, 3000];
@@ -145,6 +148,10 @@ pub struct Options {
     pub profiles_only: bool,
     pub in_process: bool,
     pub detail: bool,
+    /// How many differing record pairs of each frame to print in full. 0 prints none.
+    pub records: usize,
+    /// What FCEUX's power-on writes into the work RAM **and the CHR-RAM**.
+    pub ram: RamInit,
 }
 
 impl Options {
@@ -165,6 +172,8 @@ impl Options {
             profiles_only: false,
             in_process: false,
             detail: false,
+            records: 0,
+            ram: RamInit::Zero,
         };
         let mut rest = rest.iter();
         while let Some(argument) = rest.next() {
@@ -172,6 +181,24 @@ impl Options {
                 "--profiles-only" => options.profiles_only = true,
                 "--in-process" => options.in_process = true,
                 "--detail" => options.detail = true,
+                "--ram" => {
+                    let which = rest.next().ok_or_else(usage)?;
+                    options.ram = match which.as_str() {
+                        "zero" => RamInit::Zero,
+                        "default" => RamInit::Default,
+                        "ff" => RamInit::Ff,
+                        _ => return Err(usage()),
+                    };
+                }
+                "--records" => {
+                    let count = rest.next().ok_or_else(usage)?;
+                    options.records = count.parse().map_err(|_| {
+                        HarnessError::Usage(format!(
+                            "{count:?} is not a count
+{USAGE}"
+                        ))
+                    })?;
+                }
                 "--frames" => {
                     let list = rest.next().ok_or_else(usage)?;
                     options.frames = list
@@ -305,8 +332,18 @@ pub struct FrameDiff {
     pub same_as_multiset: usize,
     /// Whether the two engines' 256×240 index pictures are identical for this frame.
     pub pixels_identical: bool,
-    /// Differing records per set of differing fields.
-    pub by_fields: HashMap<u16, usize>,
+    /// Whether Zaxnes's picture for this frame is a **single colour**. When it is, two identical
+    /// pictures prove much less than usual: a game that blanks the screen with `$2001` and a
+    /// game that draws a screenful of blank tiles look exactly the same, so a record difference
+    /// on such a frame is not evidence about the capture either way. The tool says so rather
+    /// than letting the `capture` class claim it.
+    pub pixels_uniform: bool,
+    /// Differing records per kind of record (`true` = background) and set of differing fields.
+    /// The kind matters: an `index` that differs on a **background** record is the row and
+    /// column numbering and would be the capture's fault, while an `index` that differs on a
+    /// **sprite** is the OAM entry the game put it in, which is the machine's state and not the
+    /// capture's (see [`FrameDiff::oam_rotation`]).
+    pub by_fields: HashMap<(bool, u16), usize>,
     /// Distinct `y` of the differing records, sorted.
     pub rows: Vec<i16>,
     /// Records with no partner at all on the other side.
@@ -316,6 +353,15 @@ pub struct FrameDiff {
     /// row is emitted on the wrong line, because it says which engine emitted what and where.
     pub zaxnes_rows: Vec<(i16, usize)>,
     pub fceux_rows: Vec<(i16, usize)>,
+    /// The differing record pairs, in capture order, each side as one readable line. Only filled
+    /// when `--records` asks for them: it is a diagnostic, not part of the table.
+    pub pairs: Vec<(String, String)>,
+    /// When every sprite record of the frame matches after turning FCEUX's OAM number `n` into
+    /// `(n + k) mod 64`, the `k` that does it. A non-zero `k` means the two engines' **OAM
+    /// arrays are rotations of each other** — the `$4014` transfer started at a different
+    /// `$2003` on the two machines — which is an emulation difference and not the capture's:
+    /// the capture reads OAM entry `n` on both sides, as REQ-CORE-043 requires.
+    pub oam_rotation: Option<i32>,
 }
 
 impl FrameDiff {
@@ -334,12 +380,19 @@ impl FrameDiff {
     /// The differing-field sets, most frequent first, as `plane0+plane1:106`.
     #[must_use]
     pub fn fields_summary(&self) -> String {
-        let mut pairs: Vec<(u16, usize)> = self.by_fields.iter().map(|(m, c)| (*m, *c)).collect();
-        // Count first, then the mask, so the order never depends on the hash map's.
+        let mut pairs: Vec<((bool, u16), usize)> =
+            self.by_fields.iter().map(|(m, c)| (*m, *c)).collect();
+        // Count first, then the key, so the order never depends on the hash map's.
         pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         pairs
             .iter()
-            .map(|(mask, count)| format!("{}:{count}", field_names(*mask)))
+            .map(|((background, mask), count)| {
+                format!(
+                    "{}{}:{count}",
+                    if *background { "bg." } else { "spr." },
+                    field_names(*mask)
+                )
+            })
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -366,6 +419,29 @@ impl FrameDiff {
 /// still names the differing fields instead of reporting a bare count.
 #[must_use]
 pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bool) -> FrameDiff {
+    compare_frame_with(zaxnes, fceux, pixels_identical, 0)
+}
+
+/// [`compare_frame`], keeping the first `pairs_wanted` differing record pairs in full.
+#[must_use]
+pub fn compare_frame_with(
+    zaxnes: &[TileRecord],
+    fceux: &[Tile],
+    pixels_identical: bool,
+    pairs_wanted: usize,
+) -> FrameDiff {
+    compare_frame_full(zaxnes, fceux, pixels_identical, false, pairs_wanted)
+}
+
+/// [`compare_frame_with`], told as well whether the frame's picture is a single colour.
+#[must_use]
+pub fn compare_frame_full(
+    zaxnes: &[TileRecord],
+    fceux: &[Tile],
+    pixels_identical: bool,
+    pixels_uniform: bool,
+    pairs_wanted: usize,
+) -> FrameDiff {
     let left: Vec<Key> = zaxnes.iter().map(key_of_record).collect();
     let right: Vec<Key> = fceux.iter().map(key_of_tile).collect();
 
@@ -373,6 +449,7 @@ pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bo
         zaxnes: left.len(),
         fceux: right.len(),
         pixels_identical,
+        pixels_uniform,
         ..FrameDiff::default()
     };
 
@@ -380,16 +457,19 @@ pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bo
     diff.same_as_multiset = multiset_intersection(&left, &right);
 
     let mut rows = Vec::new();
-    let mut note = |mask: u16, y: i16, rows: &mut Vec<i16>| {
-        *diff.by_fields.entry(mask).or_insert(0) += 1;
-        rows.push(y);
+    let mut note = |mask: u16, pair: (Key, Key), rows: &mut Vec<i16>| {
+        *diff.by_fields.entry((pair.0 .9, mask)).or_insert(0) += 1;
+        rows.push(pair.0 .3);
+        if diff.pairs.len() < pairs_wanted {
+            diff.pairs.push((describe(pair.0), describe(pair.1)));
+        }
     };
 
     if left.len() == right.len() {
         for (a, b) in left.iter().zip(&right) {
             let mask = differing_fields(*a, *b);
             if mask != 0 {
-                note(mask, a.3, &mut rows);
+                note(mask, (*a, *b), &mut rows);
             }
         }
     } else {
@@ -405,7 +485,7 @@ pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bo
             for (a, b) in ours.iter().zip(theirs) {
                 let mask = differing_fields(*a, *b);
                 if mask != 0 {
-                    note(mask, a.3, &mut rows);
+                    note(mask, (*a, *b), &mut rows);
                 }
             }
             if ours.len() > theirs.len() {
@@ -427,7 +507,62 @@ pub fn compare_frame(zaxnes: &[TileRecord], fceux: &[Tile], pixels_identical: bo
     diff.rows = rows;
     diff.zaxnes_rows = background_rows(&left);
     diff.fceux_rows = background_rows(&right);
+    diff.oam_rotation = oam_rotation(&left, &right);
     diff
+}
+
+/// The `k` in 1..64 for which every one of FCEUX's sprite records becomes one of Zaxnes's once its
+/// OAM number `n` is read as `(n + k) mod 64`, when the sprites differ at all and such a `k`
+/// exists.
+///
+/// This exists because of what the measurement kept finding: pairs of sprite records carrying the
+/// *same* planes, position, palette and flags on both engines but a different `index`, the
+/// difference always a constant. That is not something a capture can get wrong — both engines walk
+/// OAM entries 0 to 63 and number the record after the entry (REQ-CORE-043) — it means the two
+/// OAM arrays hold the same sprites at different offsets, which happens when the `$4014` transfer
+/// starts at a different `$2003`. Naming it keeps those frames out of the capture's account.
+fn oam_rotation(left: &[Key], right: &[Key]) -> Option<i32> {
+    let sprites =
+        |records: &[Key]| -> Vec<Key> { records.iter().copied().filter(|key| !key.9).collect() };
+    let (ours, theirs) = (sprites(left), sprites(right));
+    if ours.is_empty() || ours.len() != theirs.len() {
+        return None;
+    }
+    // Nothing to explain when the sprites already agree.
+    let mine: std::collections::HashSet<Key> = ours.iter().copied().collect();
+    if theirs.iter().all(|key| mine.contains(key)) {
+        return None;
+    }
+    (1..64).find(|&k| {
+        theirs.iter().all(|key| {
+            let mut moved = *key;
+            // An 8 x 16 sprite's lower half is numbered 64 + n and moves with its upper half;
+            // the widescreen extension's second page (128 up) is not the console's OAM.
+            moved.4 = match key.4 {
+                n @ 0..64 => (n + k) % 64,
+                n @ 64..128 => 64 + ((n - 64 + k) % 64),
+                n => n,
+            };
+            mine.contains(&moved)
+        })
+    })
+}
+
+/// One record as a line short enough to put two of them side by side.
+fn describe(key: Key) -> String {
+    format!(
+        "{} y={:>4} x={:>4} i={:>5} pal={} flags={}{}{} p0={:016x} p1={:016x}",
+        if key.9 { "bg " } else { "spr" },
+        key.3,
+        key.2,
+        key.4,
+        key.8,
+        u8::from(key.5),
+        u8::from(key.6),
+        u8::from(key.7),
+        key.0,
+        key.1,
+    )
 }
 
 /// The background rows of a record list, as `(y, how many records)` sorted by `y`.
@@ -483,6 +618,8 @@ fn compare_rom(
     rom: &str,
     image: &[u8],
     frames: &[u32],
+    pairs_wanted: usize,
+    ram: RamInit,
 ) -> Result<RomDiff, String> {
     let stem = Path::new(rom)
         .file_stem()
@@ -499,9 +636,7 @@ fn compare_rom(
     zaxnes.reset();
 
     engine.close_rom();
-    engine
-        .set_ram_init(RamInit::Default)
-        .map_err(|e| e.to_string())?;
+    engine.set_ram_init(ram).map_err(|e| e.to_string())?;
     engine.load_rom(image, &base).map_err(|e| e.to_string())?;
     engine.set_tile_capture(true);
     engine.reset().map_err(|e| e.to_string())?;
@@ -535,7 +670,14 @@ fn compare_rom(
         let capture = engine.take_tiles().unwrap_or_default();
         result.frames.push((
             frame,
-            compare_frame(zaxnes.tile_records(), &capture.records, pixels_identical),
+            compare_frame_full(
+                zaxnes.tile_records(),
+                &capture.records,
+                pixels_identical,
+                ours.first()
+                    .is_some_and(|first| ours.iter().all(|p| p == first)),
+                pairs_wanted,
+            ),
         ));
     }
 
@@ -553,7 +695,14 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
     );
     row.insert("profile".into(), json!(profile_for(rom)));
 
-    match compare_rom(engine, rom, image, &options.frames) {
+    match compare_rom(
+        engine,
+        rom,
+        image,
+        &options.frames,
+        options.records,
+        options.ram,
+    ) {
         Err(error) => {
             row.insert("load_ok".into(), json!(false));
             row.insert("load_error".into(), json!(error));
@@ -574,6 +723,7 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
                         "same_in_order": diff.same_in_order,
                         "same_as_multiset": diff.same_as_multiset,
                         "pixels_identical": diff.pixels_identical,
+                        "pixels_uniform": diff.pixels_uniform,
                         "class": diff.class(),
                         "fields": diff.fields_summary(),
                         "rows": diff.rows,
@@ -581,6 +731,8 @@ fn row_for(engine: &mut Fceux, rom: &str, image: &[u8], options: &Options) -> Va
                         "unmatched_fceux": diff.unmatched_fceux,
                         "zaxnes_rows": rows_text(&diff.zaxnes_rows),
                         "fceux_rows": rows_text(&diff.fceux_rows),
+                        "oam_rotation": diff.oam_rotation,
+                        "pairs": diff.pairs.iter().map(|(ours, theirs)| json!([ours, theirs])).collect::<Vec<_>>(),
                     }),
                 );
             }
@@ -660,6 +812,8 @@ fn rows_isolated(options: &Options, roms: &Path) -> Result<Vec<Value>, HarnessEr
             .arg("--frames")
             .arg(frames.join(","))
             .arg("--in-process")
+            .arg("--ram")
+            .arg(ram_name(options.ram))
             .stdout(std::process::Stdio::null())
             .spawn()
             .and_then(|child| crate::fceux_run::wait_or_kill(child, budget));
@@ -827,22 +981,37 @@ fn rom_lines(
         } else {
             "no"
         };
-        let detail = if options.detail {
-            format!(
-                " @y {}
-{:>52}   zaxnes rows: {}
-{:>52}   fceux  rows: {}",
-                list(diff.get("rows")),
-                "",
-                diff.get("zaxnes_rows")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-                "",
-                diff.get("fceux_rows").and_then(Value::as_str).unwrap_or(""),
-            )
-        } else {
-            String::new()
-        };
+        let mut detail = String::new();
+        if diff.get("pixels_uniform") == Some(&Value::Bool(true)) {
+            let _ = write!(detail, " [blank screen]");
+        }
+        if let Some(k) = diff.get("oam_rotation").and_then(Value::as_i64) {
+            let _ = write!(detail, " [OAM rotated by {k}]");
+        }
+        if options.detail {
+            let _ = write!(detail, " @y {}", list(diff.get("rows")));
+            let _ = write!(
+                detail,
+                "\n      zaxnes rows: {}\n      fceux  rows: {}",
+                text(diff, "zaxnes_rows"),
+                text(diff, "fceux_rows"),
+            );
+        }
+        for pair in diff
+            .get("pairs")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_array)
+        {
+            let _ = write!(
+                detail,
+                "\n      zaxnes {}\n      fceux  {}",
+                pair.first().and_then(Value::as_str).unwrap_or(""),
+                pair.get(1).and_then(Value::as_str).unwrap_or(""),
+            );
+        }
         let _ = writeln!(
             out,
             "{name:<52} {frame:>6} {:>6} {:>6} {:>7} {pixels:>6} {class:<10} {}{detail}",
@@ -853,6 +1022,20 @@ fn rom_lines(
         );
     }
     all_identical
+}
+
+/// The `--ram` spelling of a fill, for the child process's command line.
+const fn ram_name(ram: RamInit) -> &'static str {
+    match ram {
+        RamInit::Zero => "zero",
+        RamInit::Ff => "ff",
+        _ => "default",
+    }
+}
+
+/// A string field of a frame's JSON, or the empty string.
+fn text<'a>(value: &'a Value, key: &str) -> &'a str {
+    value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
 /// `(y, count)` pairs as `193x32 202x33`, which is short enough to read in a table row.
@@ -966,7 +1149,7 @@ mod tests {
         let diff = compare_frame(&[record], &[tile], true);
         assert_eq!(diff.class(), "capture");
         assert_eq!(diff.same_in_order, 0);
-        assert_eq!(diff.fields_summary(), "plane1+palette:1");
+        assert_eq!(diff.fields_summary(), "bg.plane1+palette:1");
         assert_eq!(diff.rows, vec![4]);
     }
 
