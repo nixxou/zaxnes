@@ -8,7 +8,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 ## Steps
 
 - [x] 1. Bring the FCEUX work onto this branch by cherry-pick; the baseline.
-- [ ] 2. `zax-core-api`: the types both engines share, a pure move.
+- [x] 2. `zax-core-api`: the types both engines share, a pure move.
 - [ ] 3. The `Engine` trait, and both implementations.
 - [ ] 4. The application drives the trait.
 - [ ] 5. The per-game choice (FCEUX-3).
@@ -121,3 +121,90 @@ has to reproduce at tolerance 0:
 1 ms against 199 and 225 on the two after it, which is the machine and not the code. The figures
 step 4's +1 % is measured against are the **medians of the warm runs**: SMB3 **1.3977 ms** total
 and **1.1722 ms** of core, *Mega Man 3* **1.0326 ms** total and **0.9289 ms** of core.
+
+---
+
+## Step 2 — `zax-core-api`, the types both engines share
+
+A new crate with **no dependencies of its own**, which is the point: `zax-fceux` must not depend
+on the core it is an alternative to, and `zax-nes` is a leaf crate and stays one. It answers the
+open question §2 of the design note left (`frame_batch` returning a type that lived in `zax-nes`)
+the way the note recommended.
+
+### What moved, and what deliberately did not
+
+| In `zax-core-api` | Came from | Why it is on the boundary |
+|---|---|---|
+| `TileRecord` | `zax_nes::tile_record` | the record of SPEC-02 §4.1, which both engines emit |
+| `FrameBatch`, `VisibleRows`, `STANDARD_ROWS` | `zax_nes::frame_batch` | what `Engine::frame_batch` returns |
+| `PaletteSnapshot` (**new name**, `[u8; 32]`) | — | the other half of a batch (REQ-CORE-045). A transparent alias, so no field and no literal changed; it exists because lot FCEUX-6 found 29 frames called identical on their records alone with a palette byte differing |
+| `NesRegion` | `zax_nes::nes_region` | `Engine::region` |
+| `InputWord` (alias), `button::*`, `PORT_2_SHIFT`, `PORT_COUNT` | the doc comment of `NesCore::run_frame` | `Engine::run_frame`'s argument. The layout was only ever prose; it is now a named type with its bits, and a test |
+| `ControllerPortType`, `InvalidPort` | `zax_nes::input` | `Engine::port_type`/`set_port_type` |
+| `RomLoadResult`, `RomLoadFailure` | `zax_nes::rom` | what a load returns |
+| `InvalidState`, `StateLoadFailure`, `StateLoaded`, `NoRomLoaded` | `zax_nes::state`, `zax_nes::nes_core` | what a savestate returns |
+| `AudioError` and the three bounds `MIN_SAMPLE_RATE`, `MAX_SAMPLE_RATE`, `MAX_RATIO_ADJUSTMENT` | `zax_nes::apu` | `Engine::read_audio`. The bounds had to come with it: `AudioError`'s `Display` prints them |
+
+Left in `zax-nes` on purpose, because they are Zaxnes's *machine* and not the boundary: the
+savestate **format** (`StateWriter`, `StateReader`, `CoreState`), `InputPorts` and the Zapper
+(`ZapperPosition`, whose `is_on_screen` reads `RegionTiming`, and which is not on the trait), the
+bus, the PPU, the cartridges, the widescreen extension, the hack packs, the margin decoders and
+the VS. System. `Apu2A03::MIN_BUFFER_SAMPLES` stayed too — that is the APU's own buffer rule, not
+a shared bound.
+
+### How nothing else had to change
+
+`zax-nes` re-exports every moved type **at the path it was at** — `zax_nes::FrameBatch`,
+`zax_nes::rom::RomLoadResult`, `zax_nes::state::InvalidState`, `zax_nes::apu::AudioError`,
+`zax_nes::input::ControllerPortType`, `zax_nes::ControllerPortType`, … — and
+`Apu2A03::MIN_SAMPLE_RATE`/`MAX_SAMPLE_RATE`/`MAX_RATIO_ADJUSTMENT` are now *defined as* the
+crate's constants, so their values and every message are unchanged to the character. The whole
+workspace compiled with that alone, before a single use site was touched.
+
+Then the use sites that only need the types moved to `zax_core_api`: 15 files of `zax-app`
+(including its 5 tests), 13 of `zax-harness`, 3 of `zax-engine3d`, 1 test module each of
+`zax-render` and `zax-scripting`. Everything that needs Zaxnes's *machine* kept naming `zax_nes` —
+`NesCore`, `NesBus`, `ppu::SpriteLimit`, `builtin_patches`, `hack_pack`, `movie`, `cartridges`,
+`vs`, `wide`, `rom::InesHeader`, `ZapperPosition` — which is why several files now import from
+both, and that split is exactly the split §2 of the design note drew.
+
+`zax-scripting`'s `zax-nes` dev-dependency became a `zax-core-api` one: its test support only
+ever built a `FrameBatch`.
+
+### One real change beyond the move
+
+`zax-harness`'s `run` was two lines past clippy's hundred once step 1's merge had put `classify`
+and the five FCEUX arms in the same match — and the budget counts **source** lines, so the
+`#[cfg]` that keeps the five out of a default build does not help. The five moved into their own
+`fceux_command(args) -> Option<Result<…>>`, tried from the fallthrough arm (the command names
+above are all distinct from theirs), with a `#[cfg(not(…))]` twin that returns `None`. No
+behaviour change: same commands, same errors, same usage text.
+
+### What it proves
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| the same `,zax-harness/fceux-core` | clean |
+| `cargo test --release --workspace --features zax-app/bundled` | **3 241 passed, 0 failed**, 89 ignored |
+| the same `,zax-harness/fceux-core` | **3 265 passed, 0 failed**, 92 ignored |
+| `cargo test --release -p zax-core-api` | 9 passed — the new file below |
+| **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |
+
+`crates/zax-core-api/tests/shared_types_tests.rs` pins what the move itself could have broken
+rather than re-testing the types (`zax-nes`'s own tests do that, through the re-exports): the four
+`AudioError` messages to the character and the APU's three constants against the crate's; the
+input word's eight bits and port 2's shift; the region's four persisted numbers; what a load
+result carries on success and on failure; that `ForeignCore` is a cause distinct from
+`CorruptState` (step 5 needs it); that a batch is the records *and* 32 palette bytes; and — the
+one that makes "pure move" checkable rather than asserted — that `zax_nes::TileRecord`,
+`zax_nes::NesRegion`, `zax_nes::rom::RomLoadResult`, `zax_nes::state::StateLoadFailure`,
+`zax_nes::input::ControllerPortType`, `zax_nes::ControllerPortType`, `zax_nes::apu::AudioError`
+and `zax_nes::VisibleRows` each resolve to the **very same type** as the `zax_core_api` one.
+
+### A note on the build, for whoever resumes this
+
+`cargo build --workspace --all-targets` in **debug** filled G: and failed with `LNK1318 PDB
+LIMIT` and `no space on device`. Use `cargo check --workspace --all-targets` to compile-check and
+`cargo test --release` to run; the release profile strips, so it costs a fraction of the disk.

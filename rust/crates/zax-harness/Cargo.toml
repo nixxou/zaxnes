@@ -49,6 +49,7 @@ ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 
 [dependencies]
 serde_json.workspace = true
+zax-core-api = { path = "../zax-core-api" }
 sha2 = "0.10"
 zax-engine3d = { path = "../zax-engine3d" }
 zax-fceux = { path = "../zax-fceux", optional = true }

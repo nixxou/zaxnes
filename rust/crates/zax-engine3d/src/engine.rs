@@ -6,7 +6,7 @@
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
-use zax_nes::{FrameBatch, TileRecord};
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_profiles::profile::GameProfile;
 use zax_profiles::values::Vec4F;
 

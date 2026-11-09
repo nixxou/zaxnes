@@ -6,7 +6,7 @@
 //! ([`Submenu`]) and a choice names what makes it selected ([`Selection`]); the model reads the
 //! host it is given at the moment it builds the children or answers.
 
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 use zax_render::camera::CameraMode;
 use zax_settings::catalogue::{self, SettingId};
 

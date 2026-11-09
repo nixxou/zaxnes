@@ -8,8 +8,8 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use zax_core_api::FrameBatch;
 use zax_engine3d::settings::RenderAlgorithm;
-use zax_nes::FrameBatch;
 
 use crate::render::input_script::InputScript;
 use crate::render::profile;

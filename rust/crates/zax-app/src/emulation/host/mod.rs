@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use time::OffsetDateTime;
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_nes::RegionTiming;
 use zax_scripting::{HookTime, NullScriptLog, ScriptLog};
 use zax_settings::catalogue::SettingId;
@@ -831,10 +831,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// The device plugged into `port` of the game being played.
     #[must_use]
-    pub fn port_type(&self, port: usize) -> zax_nes::ControllerPortType {
+    pub fn port_type(&self, port: usize) -> zax_core_api::ControllerPortType {
         self.session
             .as_ref()
-            .map_or(zax_nes::ControllerPortType::Controller, |session| {
+            .map_or(zax_core_api::ControllerPortType::Controller, |session| {
                 session.port_type(port)
             })
     }
@@ -1682,7 +1682,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(audio) = self.audio.clone() else {
             return;
         };
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         // REQ-AUD-011: at any speed other than 100 % the core is retiming its own resampler, so
         // there is nothing to correct; and a recorded movie must not depend on the drift of
         // this machine's sound card.
@@ -1741,7 +1741,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let error = (available as f64 - TARGET as f64) / TARGET as f64;
         // A proportional correction that saturates at the cap: a full buffer slows the
         // production down, an empty one speeds it up.
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         let adjustment = (-error * 0.002).clamp(-cap, cap);
         if session
             .core_mut()

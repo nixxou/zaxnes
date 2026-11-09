@@ -16,7 +16,7 @@ use zax_app::input::libretro_input_map::{self, RetroAnalogAxis, RetroPadButton};
 use zax_app::input::menu_navigation::{MenuNavigation, MenuNavigationEvents};
 use zax_app::input::routing;
 use zax_app::input::zapper::RELEASED_BYTE;
-use zax_nes::ControllerPortType::{Controller, Zapper};
+use zax_core_api::ControllerPortType::{Controller, Zapper};
 use zax_platform::input::{calibration, standard_gamepad, GamepadDevice};
 use zax_render::camera::SceneCamera;
 use zax_render::controls::{self, CameraAction};

@@ -1,7 +1,7 @@
 //! The settings the loop and the interface read by name: typed accessors over the model
 //! (SPEC-09 §4). The model itself is the single source of truth (REQ-PERS-007).
 
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_profiles::library::LibrarySortOption;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;

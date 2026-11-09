@@ -829,7 +829,7 @@ fn audio_2_both_outputs_pump_and_correct_without_a_device() {
     assert!(core.apu().available_samples() > 2 * BLOCK);
     assert_eq!(
         core.audio_ratio_adjustment(),
-        -zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT
+        -zax_core_api::MAX_RATIO_ADJUSTMENT
     );
     // Its report says which output is open and counts the blocks of zeros, the latency, the rate
     // and the under-runs of Q-153 §6 having no meaning for it.

@@ -17,26 +17,10 @@ pub type VideoCallback = Box<dyn FnMut(&FrameBatch<'_>) + Send>;
 /// (REQ-CORE-060).
 pub type ZapperPositionSource = Box<dyn FnMut(usize) -> ZapperPosition + Send>;
 
-/// What a successful "restore state" reports (REQ-CORE-091).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StateLoaded {
-    /// Bytes the block occupied, so the host can read on.
-    pub consumed: usize,
-    /// The ROM name stored in the block.
-    pub rom_name: String,
-}
-
-/// Why a savestate could not be written: no ROM is loaded, so there is no state to save.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NoRomLoaded;
-
-impl std::fmt::Display for NoRomLoaded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("No ROM is loaded: there is no state to save.")
-    }
-}
-
-impl std::error::Error for NoRomLoaded {}
+// What a restore reports and why a save had nothing to write are on the `Engine` trait, so they
+// live in `zax-core-api` since lot FCEUX-23 step 2; re-exported here at the paths they were at
+// (`zax_nes::StateLoaded`, `zax_nes::NoRomLoaded`) through `lib.rs`.
+pub use zax_core_api::{NoRomLoaded, StateLoaded};
 
 /// One NES machine, seen from the host (REQ-CORE-001, REQ-CORE-002).
 ///

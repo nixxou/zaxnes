@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use zax_core_api::NesRegion;
 use zax_nes::movie::{Movie, MovieMode};
-use zax_nes::NesRegion;
 
 use crate::emulation::movie_explorer::{ExplorerSetup, MovieExplorer};
 use crate::emulation::movie_timeline::{machine_digest, MovieTimeline, WARM_FRAMES};

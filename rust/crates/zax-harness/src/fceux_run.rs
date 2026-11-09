@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use zax_core_api::TileRecord;
 use zax_fceux::{Fceux, RamInit};
 use zax_nes::rom::InesHeader;
-use zax_nes::TileRecord;
 
 use crate::golden_core::{collect_roms, hex, relative_name};
 use crate::HarnessError;

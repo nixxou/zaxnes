@@ -46,45 +46,11 @@ pub(crate) use sunsoft5b_audio::Sunsoft5bAudio;
 pub(crate) use vrc6_audio::Vrc6Audio;
 pub(crate) use vrc7_audio::Vrc7Audio;
 
-/// A rejected audio setting or read (the C# throws `ArgumentException` for these).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AudioError {
-    /// The sample rate is outside [`Apu2A03::MIN_SAMPLE_RATE`, `Apu2A03::MAX_SAMPLE_RATE`].
-    SampleRateOutOfRange(i32),
-    /// The speed factor is zero or negative.
-    SpeedNotPositive(f64),
-    /// The fine ratio adjustment exceeds [`Apu2A03::MAX_RATIO_ADJUSTMENT`].
-    RatioAdjustmentOutOfRange(f64),
-    /// A stereo buffer must hold an even number of values.
-    OddStereoBuffer(usize),
-}
-
-impl std::fmt::Display for AudioError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SampleRateOutOfRange(rate) => write!(
-                f,
-                "sample rate {rate} is outside {}..={}",
-                Apu2A03::MIN_SAMPLE_RATE,
-                Apu2A03::MAX_SAMPLE_RATE
-            ),
-            Self::SpeedNotPositive(speed) => write!(f, "speed {speed} must be positive"),
-            Self::RatioAdjustmentOutOfRange(value) => write!(
-                f,
-                "ratio adjustment {value} exceeds ±{}",
-                Apu2A03::MAX_RATIO_ADJUSTMENT
-            ),
-            Self::OddStereoBuffer(len) => {
-                write!(
-                    f,
-                    "a stereo buffer must hold an even number of values, not {len}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for AudioError {}
+// A rejected audio setting or read is on the `Engine` trait (`read_audio`), so it lives in
+// `zax-core-api` since lot FCEUX-23 step 2, with the three bounds its messages print; re-exported
+// here at the path it was at, and `Apu2A03`'s three associated constants are defined as those
+// bounds, so every message is unchanged to the character.
+pub use zax_core_api::AudioError;
 
 /// Four-step frame sequencer, NTSC, in CPU cycles after the sequencer reset (nesdev, "APU
 /// Frame Counter"). The last entry closes the sequence and restarts it.
@@ -339,15 +305,15 @@ impl Default for Apu2A03 {
 
 impl Apu2A03 {
     /// Lowest output sample rate the core accepts (REQ-CORE-070).
-    pub const MIN_SAMPLE_RATE: i32 = 22_050;
+    pub const MIN_SAMPLE_RATE: i32 = zax_core_api::MIN_SAMPLE_RATE;
     /// Highest output sample rate the core accepts (REQ-CORE-070).
-    pub const MAX_SAMPLE_RATE: i32 = 96_000;
+    pub const MAX_SAMPLE_RATE: i32 = zax_core_api::MAX_SAMPLE_RATE;
     /// Default output sample rate (REQ-CORE-070, SPEC-11 REQ-AUD-001).
     pub const DEFAULT_SAMPLE_RATE: i32 = 48_000;
     /// Minimum capacity of the output buffer, in mono samples (REQ-CORE-071).
     pub const MIN_BUFFER_SAMPLES: usize = 10_000;
     /// Largest fine adjustment of the resampling ratio a frontend may ask for (REQ-CORE-070).
-    pub const MAX_RATIO_ADJUSTMENT: f64 = 0.005;
+    pub const MAX_RATIO_ADJUSTMENT: f64 = zax_core_api::MAX_RATIO_ADJUSTMENT;
     // The linear steps and the 1.526 gain of REQ-CORE-073 before AMD-054 are gone: the mixing
     // is the non-linear form of `mixer`.
 

@@ -105,20 +105,6 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!("{}", classify::run(&classify::Options::parse(rest)?)?);
             Ok(())
         }
-        #[cfg(feature = "fceux-core")]
-        [command, roms, out_path, rest @ ..] if command == "fceux-run" => {
-            fceux_run::command(roms, out_path, rest)
-        }
-        #[cfg(feature = "fceux-core")]
-        [command, rom, out_path, rest @ ..] if command == "fceux-frame" => {
-            fceux_run::frame_command(rom, out_path, rest)
-        }
-        #[cfg(feature = "fceux-core")]
-        [command, rest @ ..] if command == "fceux-tiles" => fceux_tiles::command(rest),
-        #[cfg(feature = "fceux-core")]
-        [command, rest @ ..] if command == "fceux-bench" => fceux_bench::command(rest),
-        #[cfg(feature = "fceux-core")]
-        [command, rest @ ..] if command == "fceux-compare" => fceux_compare::command(rest),
         #[cfg(feature = "vs-system")]
         [command, rest @ ..] if command == "vs" => {
             let options = vs::Options::parse(rest)?;
@@ -134,8 +120,37 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             print_help();
             Ok(())
         }
-        _ => Err(HarnessError::Usage(USAGE.to_owned())),
+        // The FCEUX engine's five, which only exist in a build with it; their own function,
+        // tried last, because the command names above are all distinct from theirs.
+        _ => fceux_command(args).unwrap_or_else(|| Err(HarnessError::Usage(USAGE.to_owned()))),
     }
+}
+
+/// The FCEUX engine's own subcommands, or `None` when `args` names none of them.
+///
+/// Its own function for the reason [`print_help`] is one: `run` is two lines inside clippy's
+/// hundred with the five here, and five past it with them inlined — and the budget counts the
+/// source lines, so `#[cfg]`-ing them out of the build does not help.
+#[cfg(feature = "fceux-core")]
+fn fceux_command(args: &[String]) -> Option<Result<(), HarnessError>> {
+    match args {
+        [command, roms, out_path, rest @ ..] if command == "fceux-run" => {
+            Some(fceux_run::command(roms, out_path, rest))
+        }
+        [command, rom, out_path, rest @ ..] if command == "fceux-frame" => {
+            Some(fceux_run::frame_command(rom, out_path, rest))
+        }
+        [command, rest @ ..] if command == "fceux-tiles" => Some(fceux_tiles::command(rest)),
+        [command, rest @ ..] if command == "fceux-bench" => Some(fceux_bench::command(rest)),
+        [command, rest @ ..] if command == "fceux-compare" => Some(fceux_compare::command(rest)),
+        _ => None,
+    }
+}
+
+/// Without the engine there are none, so every one of its names falls through to the usage.
+#[cfg(not(feature = "fceux-core"))]
+fn fceux_command(_args: &[String]) -> Option<Result<(), HarnessError>> {
+    None
 }
 
 /// The whole help: the one-line usage of every subcommand, then each one's own paragraph.

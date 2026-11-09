@@ -8,7 +8,7 @@ use common::{LoopHarness, SyntheticRom};
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::input::{InputAction, InputSnapshot};
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 
 fn ports(harness: &LoopHarness) -> (u8, u8) {
     let session = harness.host.session().unwrap();

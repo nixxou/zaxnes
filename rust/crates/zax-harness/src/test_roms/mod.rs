@@ -33,8 +33,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde_json::{json, Map, Value};
+use zax_core_api::NesRegion;
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::NesCore;
 
 use crate::HarnessError;
 

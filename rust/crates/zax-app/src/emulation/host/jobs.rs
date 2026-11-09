@@ -4,9 +4,10 @@
 
 use std::path::Path;
 
+use zax_core_api::NesRegion;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::NesCore;
 use zax_profiles::enums::TvRegionMode;
 use zax_settings::catalogue::SettingId;
 use zax_settings::values::SettingValue;

@@ -1,7 +1,7 @@
 //! The command model over the host: whether a command can run, its toggle state, and what
 //! running it does (SPEC-10 REQ-UI-205).
 
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 use zax_render::camera::CameraMode;
 
 use super::{EmulationHost, GameView, HostEvent};

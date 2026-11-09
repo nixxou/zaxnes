@@ -17,7 +17,8 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use zax_nes::{ControllerPortType, NesCore};
+use zax_core_api::ControllerPortType;
+use zax_nes::NesCore;
 
 use super::movie_timeline::{machine_digest, CHECKPOINT_INTERVAL};
 

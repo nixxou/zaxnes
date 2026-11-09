@@ -16,6 +16,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+use zax_core_api::{ControllerPortType, FrameBatch, RomLoadResult, TileRecord};
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::error::EngineError;
@@ -23,8 +24,7 @@ use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
-use zax_nes::rom::RomLoadResult;
-use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
+use zax_nes::{NesBus, NesCore, ZapperPosition};
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -236,7 +236,7 @@ pub struct SessionFrame {
 
 /// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palettes
 /// (the PPU's and a margin decoder's own), edge masks, widescreen margin and visible rows.
-type CapturedBatch = (Palettes, i32, i32, (i32, zax_nes::VisibleRows, i32));
+type CapturedBatch = (Palettes, i32, i32, (i32, zax_core_api::VisibleRows, i32));
 
 /// A frame's PPU palette and the margin decoder's own background palette, if any.
 type Palettes = ([u8; 32], Option<[u8; 16]>);
@@ -1468,7 +1468,7 @@ impl GameSession {
         clock: &mut StageClock,
         (palette, margin_palette): Palettes,
         (mask_x, mask_y): (i32, i32),
-        (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
+        (margin, visible_rows, margin_y): (i32, zax_core_api::VisibleRows, i32),
     ) {
         if (self.paused_3d || self.catching_up) && self.pipeline.ahead_allowed {
             // Kept for when the 3D comes back; the scripts' clock goes on.

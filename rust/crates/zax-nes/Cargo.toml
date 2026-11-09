@@ -1202,6 +1202,11 @@ ppu-exact-sprite-eval = []
 # left-out *boards*. `docs/review/BOARD-FEATURES.md` has the row and the command.
 ppu-2007-render-read = []
 
+# The types the two engines share (lot FCEUX-23 step 2). Everything of it is re-exported below at
+# the path it used to be at, so a consumer of this crate need not know it moved.
+[dependencies]
+zax-core-api = { path = "../zax-core-api" }
+
 [dev-dependencies]
 sha2 = "0.10"
 zax-goldens = { path = "../zax-goldens" }

@@ -9,7 +9,7 @@
 //!
 //! * the record count on each side;
 //! * the records identical on **all ten fields** — in order (which is what
-//!   [`zax_nes::FrameBatch`] promises the renderer) and as a multiset (which is what the mesh
+//!   [`zax_core_api::FrameBatch`] promises the renderer) and as a multiset (which is what the mesh
 //!   builder would accept);
 //! * for every differing record the set of fields that differ, with the record's row and column;
 //! * the **class** of the frame:
@@ -39,9 +39,10 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use zax_core_api::TileRecord;
 use zax_fceux::{Fceux, RamInit, Tile};
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, TileRecord};
+use zax_nes::NesCore;
 
 use crate::golden_core::{collect_roms, hex, relative_name};
 use crate::HarnessError;

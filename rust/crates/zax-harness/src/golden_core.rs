@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use zax_core_api::TileRecord;
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, TileRecord};
+use zax_nes::NesCore;
 
 use crate::HarnessError;
 

@@ -30,6 +30,7 @@ android = ["zax-platform/android"]
 wgpu = ["dep:wgpu", "zax-render/wgpu", "zax-platform/wgpu"]
 
 [dependencies]
+zax-core-api = { path = "../zax-core-api" }
 zax-nes = { path = "../zax-nes" }
 zax-settings = { path = "../zax-settings" }
 zax-profiles = { path = "../zax-profiles" }
