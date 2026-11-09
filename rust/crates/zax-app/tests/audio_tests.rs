@@ -10,13 +10,17 @@ use std::sync::{Arc, Mutex};
 
 use common::{LoopHarness, TemporaryRoot};
 use zax_app::audio::audio_assets::{AudioAssets, TRACK_FILE_NAMES};
-use zax_app::audio::audio_mixer::{BLOCK, MUSIC_GAIN_FACTOR, SOUND_GAIN_FACTOR};
+use zax_app::audio::audio_mixer::{AudioSampleSource, BLOCK, MUSIC_GAIN_FACTOR, SOUND_GAIN_FACTOR};
 use zax_app::audio::fade_gain::FULL_FADE_SECONDS;
 use zax_app::audio::stream::{frames_of_ms, AudioControl, AudioStream, ConsoleSamples, RAMP_MS};
 use zax_app::audio::{AudioMixer, TrackRandom, UiAudioLibrary, UiSound};
 use zax_app::emulation::commands::Command;
 use zax_app::persistence::app_settings::{AppSettings, AppSettingsMut};
+use zax_platform::audio::{blocks_to_queue, BLOCK_COUNT};
 use zax_platform::WaveAudio;
+use zax_settings::catalogue::SettingId;
+use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
 
 const RATE: u32 = 48_000;
 
@@ -665,4 +669,259 @@ fn req_aud_006_mute_silences_everything_without_losing_the_volume() {
 
     harness.run(Command::ToggleMute);
     near(harness.host.mixer().unwrap().volume(), 0.8, 1e-6);
+}
+
+// ------------------------------------------------- AUDIO-2: the classic output of v0.4.2
+
+/// A console source for the classic output: `available` samples are there to be read, and the
+/// read is all-or-nothing, which is what `AudioReader::read_samples` does
+/// (`zax-nes/src/apu/mod.rs`, `Ok(0)` without consuming when the ring is short).
+fn classic_source(available: Arc<Mutex<usize>>, value: f32) -> AudioSampleSource {
+    Box::new(move |out| {
+        let mut left = available.lock().unwrap();
+        if *left < out.len() {
+            return 0;
+        }
+        *left -= out.len();
+        out.fill(value);
+        out.len()
+    })
+}
+
+/// AUDIO-2: the output the program opens is the **new** one. `audio.classic_output` is a
+/// fallback, so a fresh profile never gets `v0.4.2`'s behaviour by accident.
+#[test]
+fn audio_2_the_new_output_is_the_default() {
+    let model = SettingsModel::new();
+    assert!(!model.classic_audio_output());
+    assert!(!model.get(SettingId::AudioClassicOutput).as_bool());
+    // And the host a device-less run builds is on the default path, so nothing of the classic
+    // one is armed.
+    let harness = LoopHarness::create();
+    assert!(!harness.host.classic_audio());
+}
+
+/// AUDIO-2: the queue rule of `v0.4.2`, which is what "four blocks, refilled once per rendered
+/// frame" means — `pump` queues exactly `blocks_to_queue(size)` blocks and no more.
+///
+/// The SDL queue itself cannot be opened without a sound device, so the test drives the rule and
+/// a replica of `pump`'s six-line loop over a queue it drains by hand. What it pins is the
+/// arithmetic the real `pump` passes straight to SDL: never more than four blocks pending, a
+/// partly played block counting as a whole one, and one frame's consumption refilled at the next
+/// frame.
+#[test]
+fn audio_2_the_classic_output_keeps_four_blocks_and_refills_once_per_frame() {
+    let block_bytes = BLOCK * 2 * std::mem::size_of::<i16>();
+
+    // The first frame fills the whole buffer: four blocks, about 43 ms at 48 kHz.
+    assert_eq!(BLOCK_COUNT, 4);
+    assert_eq!(blocks_to_queue(0), 4);
+
+    // A partly played block counts as pending, so a queue holding four blocks less one byte asks
+    // for nothing: this is the `div_ceil` of `v0.4.2` and the reason the real floor of the buffer
+    // is nearer 32 ms than 43 (finding 3 of Q-153).
+    assert_eq!(blocks_to_queue(block_bytes * 4 - 1), 0);
+    assert_eq!(blocks_to_queue(block_bytes * 4), 0);
+    assert_eq!(blocks_to_queue(block_bytes * 3 + 1), 0);
+    assert_eq!(blocks_to_queue(block_bytes * 3), 1);
+    // And a queue the device over-drained is never asked for more than the four.
+    assert_eq!(blocks_to_queue(block_bytes * 99), 0);
+
+    // `pump`'s loop, over a device that plays one whole block per rendered frame.
+    let mut mixer = mixer();
+    let mut pending = 0_usize;
+    let mut blocks = Vec::new();
+    let mut buffer = vec![0.0_f32; BLOCK * 2];
+    for frame in 0..10 {
+        let wanted = blocks_to_queue(pending);
+        for _ in 0..wanted {
+            mixer.fill_with_console(&mut buffer);
+            pending += block_bytes;
+        }
+        blocks.push(wanted);
+        assert_eq!(pending, block_bytes * 4, "frame {frame} left four pending");
+        // The device plays one block before the next frame.
+        pending -= block_bytes;
+    }
+    // Four at the start, then exactly what was consumed.
+    assert_eq!(blocks, vec![4, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    assert_eq!(mixer.blocks, 13);
+}
+
+/// AUDIO-2: the classic output's block, as `v0.4.2` mixed it — the console on both channels at
+/// the gain of the moment, the programme added, the sum clamped once (REQ-AUD-002, REQ-AUD-006).
+#[test]
+fn audio_2_the_classic_block_is_the_console_on_both_channels_clamped_once() {
+    let mut mixer = mixer();
+    mixer.set_volume(1.0);
+    mixer.set_emulation_audible(true);
+    let available = Arc::new(Mutex::new(BLOCK * 4));
+    mixer.set_emulation_source(Some(classic_source(Arc::clone(&available), 0.25)));
+
+    let mut block = vec![0.0_f32; BLOCK * 2];
+    mixer.fill_with_console(&mut block);
+    for pair in block.chunks_exact(2) {
+        near(pair[0], 0.25, 1e-6);
+        assert_eq!(pair[0], pair[1], "REQ-AUD-002: the same on both channels");
+    }
+    assert_eq!(mixer.underrun_blocks, 0);
+
+    // Beyond full scale the block is clamped, once, on the sum (SPEC-11 §4).
+    mixer.set_emulation_source(Some(classic_source(Arc::clone(&available), 1.75)));
+    mixer.fill_with_console(&mut block);
+    for value in &block {
+        near(*value, 1.0, 1e-6);
+    }
+}
+
+/// AUDIO-2: the defect the classic output is kept **with** — finding 1 of Q-153. One sample short
+/// of a block, `v0.4.2` sent out a whole block of zeros and left the samples in the ring, which is
+/// a 10.7 ms hole with a discontinuity at each edge.
+///
+/// The control is `req_aud_003_a_late_console_is_held_and_faded_rather_than_zeroed` above: the
+/// default output, in the same situation, plays what there was and ramps.
+#[test]
+fn audio_2_a_late_console_costs_the_classic_output_a_whole_block_of_zeros() {
+    let mut mixer = mixer();
+    mixer.set_volume(1.0);
+    mixer.set_emulation_audible(true);
+    let available = Arc::new(Mutex::new(BLOCK - 1));
+    mixer.set_emulation_source(Some(classic_source(Arc::clone(&available), 0.5)));
+
+    let mut block = vec![0.0_f32; BLOCK * 2];
+    mixer.fill_with_console(&mut block);
+    assert!(
+        block.iter().all(|value| *value == 0.0),
+        "v0.4.2 wrote a whole block of zeros rather than the samples it had"
+    );
+    assert_eq!(mixer.underrun_blocks, 1);
+    // Nothing was consumed: the short read is all-or-nothing, so the samples are still waiting.
+    assert_eq!(*available.lock().unwrap(), BLOCK - 1);
+
+    // The sample that completes the block ends the hole, with no ramp of any kind — the signal is
+    // switched on at full gain, which is the discontinuity of the finding.
+    *available.lock().unwrap() = BLOCK;
+    mixer.fill_with_console(&mut block);
+    near(block[0], 0.5, 1e-6);
+    assert_eq!(mixer.underrun_blocks, 1);
+
+    // Outside Running an empty ring is the silence of REQ-AUD-010 and not an under-run.
+    mixer.set_emulation_audible(false);
+    *available.lock().unwrap() = 0;
+    mixer.fill_with_console(&mut block);
+    assert_eq!(mixer.underrun_blocks, 1);
+}
+
+/// AUDIO-2: both outputs run the whole loop without a sound device, which is where the existing
+/// tests of this file already drive the default one. The classic path takes `v0.4.2`'s rate
+/// control — proportional on what the main thread sees of the core's ring — and the default path,
+/// with no device open, asks the core for nothing at all.
+#[test]
+fn audio_2_both_outputs_pump_and_correct_without_a_device() {
+    // The classic output: nobody drains the core's ring here, so it fills far above the two
+    // blocks `v0.4.2` aimed at and the proportional law saturates at the cap, slowing the
+    // production down.
+    let mut classic = LoopHarness::create_with(|options| options.classic_audio = true);
+    classic.launch("g1");
+    classic.run_frames(30);
+    assert!(classic.host.classic_audio());
+    let core = classic.host.session().unwrap().core();
+    assert!(core.apu().available_samples() > 2 * BLOCK);
+    assert_eq!(
+        core.audio_ratio_adjustment(),
+        -zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT
+    );
+    // Its report says which output is open and counts the blocks of zeros, the latency, the rate
+    // and the under-runs of Q-153 §6 having no meaning for it.
+    let report = classic.host.audio_report().expect("the classic report");
+    assert!(report.starts_with("classic output (v0.4.2):"), "{report}");
+    assert!(report.contains("silence blocks"), "{report}");
+
+    // The default output with no device: no link, so no correction is asked of the core and no
+    // report is drawn.
+    let mut silent = LoopHarness::create();
+    silent.launch("g1");
+    silent.run_frames(30);
+    assert!(!silent.host.classic_audio());
+    assert_eq!(
+        silent
+            .host
+            .session()
+            .unwrap()
+            .core()
+            .audio_ratio_adjustment(),
+        0.0
+    );
+    assert_eq!(silent.host.audio_report(), None);
+}
+
+/// AUDIO-2: the choice takes effect when the device is (re)opened, and the host asks the loop for
+/// that reopening exactly once per change — not once per frame, and not when the setting is
+/// written with the value already in force.
+#[test]
+fn audio_2_changing_the_setting_asks_for_one_reopening() {
+    let mut harness = LoopHarness::create();
+    assert!(!harness.host.take_audio_reopen());
+
+    harness.host.update_settings(|model| {
+        model.set(SettingId::AudioClassicOutput, SettingValue::Bool(true))
+    });
+    assert!(harness.host.take_audio_reopen(), "the change asks for one");
+    assert!(
+        !harness.host.take_audio_reopen(),
+        "and only one: the loop drains the request"
+    );
+
+    // Written again with the value it already holds: no change at all, so nothing reaches the
+    // host.
+    harness.host.update_settings(|model| {
+        model.set(SettingId::AudioClassicOutput, SettingValue::Bool(true))
+    });
+    assert!(
+        !harness.host.take_audio_reopen(),
+        "the same value twice is not a change"
+    );
+
+    // Back to `false` — a real change, and it agrees with the output that is open, since no
+    // reopening happened (only the loop can reopen: it owns the SDL device). Nothing to do.
+    harness.host.update_settings(|model| {
+        model.set(SettingId::AudioClassicOutput, SettingValue::Bool(false));
+    });
+    assert!(!harness.host.classic_audio());
+    assert!(
+        !harness.host.take_audio_reopen(),
+        "back to the output that is open: nothing to reopen"
+    );
+}
+
+/// REQ-AUD-010 on the classic path: it has no prefill gate and no `resynchronise_audio` of its
+/// own, so the ring must be emptied where `v0.4.2` emptied it — at the end of a launch. Without
+/// that call the fragment of the previous session would be the first thing the mixer played.
+#[test]
+fn audio_2_a_new_game_drops_the_pending_audio_on_the_classic_output_too() {
+    let mut harness = LoopHarness::create_with(|options| options.classic_audio = true);
+    harness.launch("g1");
+    harness.run_frames(60);
+    assert!(
+        harness
+            .host
+            .session()
+            .unwrap()
+            .core()
+            .apu()
+            .available_samples()
+            > 0
+    );
+
+    harness.launch("g2");
+    assert_eq!(
+        harness
+            .host
+            .session()
+            .unwrap()
+            .core()
+            .apu()
+            .available_samples(),
+        0
+    );
 }

@@ -66,6 +66,42 @@ fn user_preferences_are_written_and_read_back() {
     );
 }
 
+/// AUDIO-2: `audio.classic_output` defaults to **off** — the new output is the one the program
+/// opens — and survives a round trip through the settings file by key, like every other
+/// preference (REQ-PERS-020). The test asks the written file for the key as well, so that a
+/// default-valued setting dropped from the file would be caught here and not only in the model.
+#[test]
+fn audio_2_the_classic_output_defaults_off_and_round_trips() {
+    let mut written = SettingsModel::new();
+    assert!(
+        !written.get(SettingId::AudioClassicOutput).as_bool(),
+        "the default output is the new one"
+    );
+    written.set(SettingId::AudioClassicOutput, true);
+    written.set(SettingId::AudioLatencyMs, SettingValue::Int(90));
+
+    let mut file = SettingsFile::new(MemoryStorage::new());
+    file.save(&written).expect("the store accepts the write");
+    let values = stored_values(file.storage()).expect("the file holds its values");
+    assert_eq!(values["audio.classic_output"], Value::Bool(true));
+
+    let mut read = SettingsModel::new();
+    let mut again = SettingsFile::new(file.storage().clone());
+    let result = again.load(&mut read, now());
+    assert_eq!(result.status, SettingsLoadStatus::Loaded);
+    assert!(read.get(SettingId::AudioClassicOutput).as_bool());
+    assert_eq!(read.get(SettingId::AudioLatencyMs).as_int(), 90);
+
+    // And back off again, so that the round trip is not a one-way write of `true`.
+    read.set(SettingId::AudioClassicOutput, false);
+    let mut back = SettingsFile::new(MemoryStorage::new());
+    back.save(&read).expect("the store accepts the write");
+    let mut last = SettingsModel::new();
+    let mut reread = SettingsFile::new(back.storage().clone());
+    reread.load(&mut last, now());
+    assert!(!last.get(SettingId::AudioClassicOutput).as_bool());
+}
+
 /// REQ-PERS-002: an absent file leaves every default in place.
 #[test]
 fn an_absent_file_leaves_the_defaults() {

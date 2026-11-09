@@ -24,7 +24,7 @@ defaults to the new one.
       output, in the desktop options' Audio tab and in the handheld UI, in English and in
       French, taking effect when the device is (re)opened and reopening it when it changes.
       Nothing per sample, nothing in `zax-nes`, at most one branch per rendered frame.
-- [ ] **4. Tests.** The setting's default and its round-trip, both outputs opening and pumping
+- [x] **4. Tests.** The setting's default and its round-trip, both outputs opening and pumping
       without a device, and the classic output reproducing `v0.4.2`'s block behaviour.
 - [ ] **5. Measurements.** Main-thread frame time at `1c2b4639` and here, 2D and 3D, desktop
       release build, with each output; golden-core against `1c2b4639`.
@@ -228,3 +228,31 @@ in Lua: the output is a property of this frontend's device. Beyond the table it 
 are what those builds compile with, and the surrogate is sound for the same reason it was then: the
 new code contains no `cfg` outside `cfg(test)`, and `SDL_QueueAudio` — what the classic output uses
 — is what `v0.4.2` shipped on both of those builds.
+
+### Step 4 — the tests
+
+Eight new tests, none of them needing a sound device. Seven are in
+`zax-app/tests/audio_tests.rs` beside AUDIO-1's, which is where the default output is already
+driven without one; the round trip is in `zax-settings/tests/settings_file.rs`, with the other
+settings-file tests.
+
+| test | what the work order asked for, and what it pins |
+| --- | --- |
+| `audio_2_the_new_output_is_the_default` | **the default.** `audio.classic_output` reads `false` on a fresh model, and a host built without the flag reports `classic_audio() == false` |
+| `audio_2_the_classic_output_defaults_off_and_round_trips` (`zax-settings`) | **the round trip.** Off by default; written, found in the file's `values` as `"audio.classic_output": true`, read back by a fresh model; `audio.latency_ms` beside it; then back to `false` and round-tripped again, so the test is not a one-way write of `true` |
+| `audio_2_the_classic_output_keeps_four_blocks_and_refills_once_per_frame` | **`v0.4.2`'s block behaviour.** `BLOCK_COUNT == 4`; the `div_ceil` that makes a partly played block count as a whole one (which is why the real floor of the buffer is nearer 32 ms than 43 — finding 3); an over-drained queue asked for no more than four; and ten frames of the pump's own loop over a device playing one block a frame give `[4, 1, 1, 1, 1, 1, 1, 1, 1, 1]`, with four pending at the end of every frame |
+| `audio_2_the_classic_block_is_the_console_on_both_channels_clamped_once` | the block itself: the console on both channels at the gain of the moment (REQ-AUD-002), and a signal beyond full scale clamped once on the sum (SPEC-11 §4) |
+| `audio_2_a_late_console_costs_the_classic_output_a_whole_block_of_zeros` | the defect the fallback is kept **with** (Q-153 §1): one sample short of a block, the whole block is exact zeros, nothing is consumed, one silence block is counted; the sample that completes it switches the signal on at full gain with no ramp; and outside Running a dry ring counts nothing (REQ-AUD-010). Its control is AUDIO-1's `req_aud_003_a_late_console_is_held_and_faded_rather_than_zeroed`, which shows the default output holding and ramping in exactly that situation |
+| `audio_2_both_outputs_pump_and_correct_without_a_device` | **both outputs without a device.** The classic path, 30 frames of a real game: the ring fills past two blocks, `v0.4.2`'s proportional law saturates at `-MAX_RATIO_ADJUSTMENT` and the core takes it, and `audio_report()` is the classic line. The default path with no device: no correction at all (`audio_ratio_adjustment() == 0`) and no report |
+| `audio_2_changing_the_setting_asks_for_one_reopening` | the reopening is asked for **once** per real change, drained by the loop, and not asked for at all when the value written agrees with the output that is open |
+| `audio_2_a_new_game_drops_the_pending_audio_on_the_classic_output_too` | REQ-AUD-010 on the classic path, which has no gate and no `resynchronise_audio`: the launch empties the ring, as `v0.4.2` did, so no fragment of the previous session is the first thing heard |
+
+**On the one thing a test cannot reach.** `ClassicAudioOutput::pump` wraps `blocks_to_queue` in six
+lines around `AudioQueue::queue_audio`, and an `AudioQueue` cannot be made without a sound device.
+The test therefore drives the rule and a replica of those six lines, and says so in its own
+documentation. What is left untested is the SDL call itself — which is `v0.4.2`'s, and was shipped.
+`zax-platform`'s own `the_classic_queue_is_kept_at_four_blocks` is that version's unit test of
+`blocks_to_queue`, restored with the function.
+
+`cargo test -p zax-app -p zax-platform -p zax-settings --features zax-app/bundled`: **1 064
+passed, 0 failed**, 2 ignored. fmt and clippy `-D warnings` clean.
