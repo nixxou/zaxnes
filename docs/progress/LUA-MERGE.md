@@ -22,7 +22,7 @@ Branch `dev`, from `ab68ee48`. Worktree `wt-rust`. No push, no rebase, no amend,
       state (the MMC5 now has two variants). Check the movie tests, the Metal Force TAS sync
       test, the movie explorer's checkpoints, the script reload against `dev`'s save-states, and
       the MCP server's end-to-end test. Fix in the editor's code, never in the core.
-- [ ] **4. Measurements.** Callgrind in WSL (`rust/tools/perf/`) on the five level-2 games with
+- [x] **4. Measurements.** Callgrind in WSL (`rust/tools/perf/`) on the five level-2 games with
       their 3D profiles and the thirteen PR-1 ROMs, against `ab68ee48`, each commit built from
       `git archive` in a fresh directory. Tolerance **+0.02 % per ROM**, totals included.
       Anything over: find the cause, and if it is editor-only work done every frame, put it
@@ -296,3 +296,123 @@ re-run after it.
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --release -p zax-app --all-targets --features zax-app/bundled -- -D warnings` | clean, no `#[allow]` added |
 | `cargo test --release -p zax-app -p zax-settings -p zax-profiles -p zax-scripting --features zax-app/bundled --no-fail-fast` | **1 415 passed, 0 failed** over 76 binaries (1 413 over 75 at step 2, plus the two new tests) |
+
+### Step 4 — measurements
+
+**The verdict: within tolerance everywhere, and the core is instruction-identical.** Nothing had
+to be moved behind editor mode or an option. But the two scripted verdicts both said "ABOVE", and
+the reason they are wrong is the substance of this step, so it is written out.
+
+#### What was built
+
+`ab68ee48` (label `base`) and the merge `3579b2c6` (label `head`), each from `git archive` into a
+brand-new directory with its own `CARGO_TARGET_DIR`, as `build-clean.sh` does it; both trees
+deleted as soon as their binary was out.
+
+#### The thirteen PR-1 ROMs (`callgrind-set.sh`, 300 frames, no pack)
+
+| | |
+| --- | --- |
+| TOTAL | 79,343,182,333 to 79,343,013,992, **−168,341 (−0.000 %)** |
+| per ROM | twelve of thirteen lower; `readbuf` +57,395 (**+0.00084 %**) |
+| the script's verdict | `SLOWER on 1 ROM(s): readbuf` |
+
+`readbuf`'s +0.00084 % is **24 times under** the +0.02 % tolerance, so the owner's rule is met
+whatever else is true. But the verdict is PR-1's stricter rule — *no ROM slower, to the
+instruction* — and that rule rests on a premise this measurement no longer satisfies.
+
+**The premise has failed: the Ir count is no longer deterministic.** `callgrind-set.sh`'s own
+comment says "the same binary twice gives the same number". It does not. The same `base` binary,
+same ROM, same frames, six times: 6,834,878,034 / 6,834,892,671 / 6,834,888,008 / 6,834,906,400 /
+6,834,921,385 / 6,834,894,743 — a spread of **43,351**, and `head`'s six span **62,937**. The
+noise floor (about ±50,000 Ir, ±0.0007 %) is *larger than every delta in the table above*, and
+over six samples `head`'s mean is **4,300 lower** than `base`'s on the very ROM the verdict names.
+
+The cause is visible in which symbols moved. At a 5,000-instruction threshold, every single one is
+Lua's string and table machinery (`luaH_getshortstr`, `getgeneric`, `luaS_newlstr`) or libc
+`memcpy`/`memset` — and it moves **both ways**: `readbuf` gains +52,870 on `luaH_getshortstr`
+while `smb1` *loses* 48,749 on the same symbol. That is Lua 5.4's per-process randomised string
+hashing changing bucket distribution, not a code change. No symbol of the emulated core moved at
+all.
+
+#### The five level-2 games (`callgrind-l2.sh`, 600 frames, 3D pack loaded, inputs pressed)
+
+The stage table, which is the instrument that matters here because the pack makes the Lua path run:
+
+| stage | result |
+| --- | --- |
+| **`core`, `ppu`, `apu`** | **+0 Ir, exactly, on all five games** |
+| `total` | metroid −0.006 %, mm2 −0.001 %, smb1 −0.000 %, **zelda2 +0.014 %**, **smb3 +0.043 %** |
+| `lua_hooks` | metroid −0.344 %, smb1 −0.005 %, mm2 +0.027 %, zelda2 +0.361 %, smb3 +0.567 % |
+
+`core`, `ppu` and `apu` at **+0 Ir** is the owner's first rule, met exactly and not approximately:
+the emulated core executes the identical instruction stream on all five games. And those three
+stages are perfectly reproducible — `core` read 15,316,326,163 on **all six** smb3 runs and
+12,776,155,979 on all six zelda2 runs. **The core is deterministic; the Lua path is not.** The
+noise is confined to exactly the stages that are not deterministic.
+
+`smb3/total` at +0.043 % is over tolerance on that single pair of runs, so it was chased two ways.
+
+**Statistically.** Four runs of each binary on the two games that flagged:
+
+| | base spread | head spread | mean delta | ranges overlap |
+| --- | --- | --- | --- | --- |
+| smb3/total | 9,280,737 | 6,024,169 | **+0.0142 %** | yes |
+| zelda2/total | 701,688 | 2,085,270 | **+0.0039 %** | yes |
+
+`base`'s own spread on smb3 (9,280,737) is nearly the whole single-run delta that triggered the
+verdict (10,469,553), the two binaries' ranges overlap, and the four-run mean is **+0.0142 %**,
+under the +0.02 % tolerance. The `lua_hooks` ranges overlap too: base's maximum (1,723,292,568) is
+above head's minimum (1,717,827,072).
+
+**Structurally, which settles it.** The only thing `lua-editor` adds to the Lua path is one call in
+`load_scripts`: `crate::macros::expand(source)` before `compile`. `expand` begins
+
+    if !enabled() || !source.contains("#zax") { return Cow::Borrowed(source); }
+
+and **none of the five packs contains `#zax` or `#legacy-begin`** (checked on each `.3dn`). So for
+these five games `expand` is one `str::contains` per script at load time, allocates nothing, and
+hands `compile` a **byte-identical** source. The compiled chunk is therefore identical and the
+per-frame Lua work *cannot* have changed. Any `lua_hooks` difference is measurement noise by
+construction, which is also why it comes out negative on two of the five games.
+
+What `expand` does cost lands in `load_profile`, once per load, and it is +0.016 % on smb3 and
++0.009 % on zelda2 — under tolerance, and not per frame.
+
+#### The app's main-thread frame time
+
+Release builds of both commits (`ab68ee48` extracted with `git archive`, its two untracked demo
+files `FlappyZaxNes.nes` and `flappyzaxnes.3dn` copied in by hand or `zax-app` does not compile,
+built with its own `CARGO_TARGET_DIR` and deleted after). `Super Mario Bros. 3 [USA][Rev 1][!!]` —
+the one game that came near tolerance above — 1280x720, vsync 1, `ZAXNES_PROFILE=1`,
+`--smoke-emulated 1200` (20 s), RTX 3050. Mean ms per **displayed** frame over the last three
+two-second windows. Editor mode is **off**, which is its default and so the shipped configuration.
+
+| mode | build | frame | core | conv | lua | list | scene | ui |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2D | `ab68ee48` | 16.663 | 2.207 | 0.103 | 0.010 | 0.00 | 0.01 | 14.133 |
+| 2D | this tree | 16.663 | 2.213 | 0.107 | 0.010 | 0.00 | 0.01 | 14.117 |
+| 3D | `ab68ee48` | 16.667 | **2.200** | **0.070** | **0.160** | 0.03 | 0.19 | 13.290 |
+| 3D | this tree | 16.663 | **2.200** | **0.070** | **0.160** | 0.04 | 0.19 | 13.297 |
+
+In 3D every stage agrees **to the hundredth of a millisecond**; in 2D the differences are
+±0.006 ms on `core` and `conv`, well inside the spread of a single configuration's own three
+windows. Risk 4 of the plan — `advance_movie_seek()`, the second `bool` in the rollback-snapshot
+condition, the `run_ahead_held_at_zero` read — costs nothing measurable on the main thread, which
+is what those `Option` tests should cost when no movie plays.
+
+A trap worth recording: `--profile <path>` is **not** enough to get a 3D run. A pack that is not in
+the user folder's `profiles` is refused with "is not in the library ... Falling back to 2D Mode",
+and the run then silently measures 2D. The first 3D attempt here did exactly that; the figures
+above are from runs with the pack copied into `<userdata>/profiles` first, and the logs were
+checked for that message. The 2D/3D difference in `lua` (0.010 to 0.160) and `scene` (0.01 to
+0.19) is what says a run really loaded the pack.
+
+#### Note for whoever measures next
+
+The perf scripts' "deterministic to the instruction" premise holds for `core`, `ppu` and `apu` and
+**not** for `total`, `convert`, `lua_hooks` or `load_profile`, because Lua seeds its string hashing
+per process. On the Lua-bearing stages a single pair of runs cannot resolve anything below roughly
+±0.04 % on `total`; take a mean of several, and prefer the `core` row, which is exact. This says
+nothing about earlier lots, whose figures on this instrument were one to two orders of magnitude
+above this floor.
