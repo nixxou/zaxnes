@@ -12,7 +12,7 @@ Branch `dev`, from `ab68ee48`. Worktree `wt-rust`. No push, no rebase, no amend,
 ## Plan — 5 steps
 
 - [x] **1. Plan.** This file.
-- [ ] **2. Merge `lua-editor` into `dev`.** `git merge --no-ff lua-editor`, message
+- [x] **2. Merge `lua-editor` into `dev`.** `git merge --no-ff lua-editor`, message
       `Merge lua-editor: the editor mode`. Resolve the three textual conflicts keeping both
       sides' intent, then hunt the semantic ones the markers do not show (list below). The merge
       commit must build the whole workspace and pass the tests of the crates both sides touched
@@ -130,3 +130,91 @@ and the places `dev` enumerates things are:
    app and of the Android build: its tests belong to step 2's list.
 
 ## Notes per step
+
+### Step 2 — the merge (`30d92cd4`)
+
+A merge was already in progress when this session opened: an earlier session had resolved the
+three conflicted files in the working tree but had staged none of them and had committed nothing.
+The resolutions were checked hunk by hunk against both stages (`git diff :2:<path>` and
+`:3:<path>`) before being kept; all three were correct and complete. The merge was continued, not
+restarted.
+
+#### The three textual conflicts — what each side had, what was kept
+
+| # | file | `dev` had | `lua-editor` had | kept |
+| --- | --- | --- | --- | --- |
+| 1a | `zax-app/src/application.rs`, the `zax_platform` import | `ClassicAudioOutput` in the list (AUDIO-2) | `ProfileImportOutcome` from `zax_profiles::catalogue` | **both** — they are two different `use` lines, not one list |
+| 1b | … the `Running` fields | `audio_logged_at: Instant` | `mcp: Option<McpBridge>`, `editor: EditorState` | **all three** |
+| 1c | … the initialiser | `audio_logged_at: Instant::now()` | the `mcp` start block and `editor: EditorState{…}` | **all three** |
+| 1d | … the first calls of `frame` | `self.reopen_the_audio_output()` | `self.follow_the_editor_setting()` | **both**, audio first (it is `dev`'s existing order and the editor's call does not depend on it) |
+| 2a | `zax-harness/src/main.rs`, the `use` list | `test_roms` | `classify` | **both**, plus `dev`'s `#[cfg(feature = "vs-system")] use … vs` above |
+| 2b | … the `USAGE` last lines | the `test-roms` and `vs` lines | the `classify` line | **all three lines** |
+| 2c | … the subcommand arms | `test-roms`, and `vs` under `#[cfg]` | `classify` | **all three arms** |
+| 2d | … the `help` format string | 7 `{}` + `{vs_usage}`, 7 arguments | 7 `{}`, 7 arguments | **8 `{}` + `{vs_usage}` and 8 arguments** (`test_roms`, `meshes`, `lua_api`, `render`, `compare`, `bench_core`, `profile_tool`, `classify`) |
+| 3 | `zax-settings/tests/catalogue.rs` | `render.backdrop_lighting` in the addition list, and the two audio keys in the comment | `ui.editor_mode` in both | **both**, in sorted order |
+
+#### The semantic conflicts no marker showed
+
+Five were found. Four are the ones the plan predicted — all of them `dev` enumerating the options
+window in a way a setting born before RO-1 cannot satisfy — and the fifth was not predicted and is
+the only one that was a *compile* error.
+
+| what broke | `dev` | `lua-editor` | what was done |
+| --- | --- | --- | --- |
+| **`NesCore::pixel_frame` is gone** (`movie_timeline.rs:37`, `machine_digest`) | AMD-050 REQ-CORE-049 split it into `pixel_frame_with_mask()` (the same `&self.pixels`, the opacity bit now in bit 6) and `pixel_frame_indices_into(&mut Vec)` (a masked copy) | called `core.pixel_frame()` to hash the last picture into the checkpoint digest | the digest now calls **`pixel_frame_with_mask()`**: it is the same borrow, so it costs the same and keeps the digest's meaning, and the extra bit only makes it finer. `pixel_frame_indices_into` was rejected — it allocates and copies 61 440 bytes per digest. Fixed in the editor's code, as the work order requires; `zax-nes` untouched |
+| `options.rs::LAYOUT` had no row for `ui.editor_mode` (`ro_1_the_layout_table_places_every_shown_setting_exactly_once`, `req_ui_202_every_user_preference_is_shown`) | the nine-tab `LAYOUT` of RO-1, every shown setting placed exactly once | a `User`/`Interface`/`Immediate` setting, so `is_shown` accepts it, with no row anywhere | a row added to `INTERFACE`, **last, after `ui.profiler`** — the tab is ordered most-common-to-most-advanced and the editor mode is, like the profiler, a tool for whoever makes a profile |
+| `goldens/desktop-options-shown.txt` (`ro_1_the_desktop_window_shows_exactly_the_settings_it_showed_before`) | the golden's own header: "no key may join it without leaving this list in the same commit" | — | `ui.editor_mode` added, plain, in sorted order — the same way the merge of AUDIO-1 added `audio.latency_ms` (`6c8ee59c`) |
+| `ro_1_every_shown_setting_has_a_detailed_tooltip_in_both_languages` | every shown setting needs a `detail.*` paragraph over 80 characters in **both** tables | wrote `setting.ui.editor_mode` in both, but no `detail.*` | `detail.ui.editor_mode` written in `english.rs` and `french.rs`, saying what the mode turns on (the editor folder, the MCP server on the loopback, the pens), that it changes nothing about how a game plays or looks, and the default |
+| `docs/OPTIONS-LAYOUT.md` claimed "no setting has been added to the window or the tree since RO-1" | the claim, already false since AUDIO-1/AUDIO-2 added two audio keys without correcting it | — | the claim replaced by a small table of the **three** settings that have joined the window since RO-1 (`audio.latency_ms`, `audio.classic_output`, `ui.editor_mode`), with a line saying why the editor mode is deliberately absent from the console tree. They are *not* rows of the §4 mapping: that table records where RO-1 **moved** each setting, and a setting born after it has no earlier tab — which is why AUDIO-2 added no row either |
+
+The places that were checked and deliberately **left alone**, as the plan asked:
+
+- `handheld/advanced.rs::ROW_SETTINGS` and `goldens/handheld-option-tree.txt` — the editor mode is
+  desktop-only (its MCP server and its pens have no console interface), so it does not join the
+  console tree and `ro_3_every_console_setting_is_a_row_the_console_can_step` still counts 57.
+- `options.rs::EXCLUDED` — excluding the key would have silenced
+  `req_ui_202_every_user_preference_is_shown` by hiding the row, and would have broken
+  `ro_1_the_excluded_list_is_unchanged` (19 ids).
+
+Everything else the plan listed as "to check" passed untouched: the five Tools menu entries
+(`req_ui_200_every_entry_of_the_table_exists_and_names_a_command`,
+`…each_entry_shows_its_default_shortcut`), the eight commands
+(`req_ui_205_the_model_enumerates_every_menu_command`), the two label tables (the four `amd_035_*`
+tests, the new `detail.*` keys being in both), the `editor/` folder against
+`req_pub_002_the_repository_carries_no_asset_file`, the app's CLI (`--movie`, `--editor`,
+`--mcp[=port]`, which `dev` never touched) and the movie formats.
+
+#### One more difference, not a conflict: rustfmt
+
+`cargo fmt --all -- --check` was dirty on two of `lua-editor`'s files —
+`zax-nes/src/movie/fcm.rs` (an import list sorted the other way round:
+`{COMMAND_HARD_RESET, …, Fm2Frame}` where this toolchain wants `{Fm2Frame, …, COMMAND_HARD_RESET}`)
+and `zax-app/src/emulation/host/movies.rs` (one blank line). Neither branch has a `rustfmt.toml`,
+so the cause is the rustfmt **version** the branch was written with. `cargo fmt --all` was run and
+the tree's own toolchain won; both changes are cosmetic, and the workspace was re-checked after.
+
+#### The gate
+
+| command | result |
+| --- | --- |
+| `cargo build --workspace --all-targets --features zax-app/bundled` | clean |
+| `cargo check --release --workspace --all-targets --features zax-app/bundled` (after `cargo fmt`) | clean |
+| `cargo test --release -p zax-app -p zax-settings -p zax-profiles -p zax-scripting --features zax-app/bundled --no-fail-fast` | **1 413 passed, 0 failed**, 70 ignored, 75 binaries |
+| `cargo test --release -p zax-nes -p zax-harness --no-fail-fast` | **0 failed** over 60 binaries |
+
+Both runs with `ZAXNES_ROMS=G:/3dsen/demo/roms` and
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`.
+
+Two notes for whoever resumes:
+
+- **`--features zax-app/bundled` is required** for anything that links SDL2 (`zax-platform`'s and
+  `zax-app`'s test binaries): there is no `SDL2.lib` on this machine and no `.cargo/config.toml`
+  pointing at one. Without it the link fails with `LNK1181: cannot open input file 'SDL2.lib'`.
+  This is the convention AUDIO-2 used.
+- **`-j 2`.** Linking the 69 debug test binaries of `zax-app` at full job count exhausted the
+  linker's memory (`LNK1102`). Two jobs link them all.
+- **The disk filled during the step** (G: reached 1.1 MB free), which showed up as two bogus
+  failures — `LNK1318: unexpected PDB error; LIMIT (12)` on the harness binary and a phantom
+  `could not compile zax-harness (test "render_rom_tests")`. Both vanished once
+  `rust/target-lm/debug` (24 GB, its figures already recorded) was deleted. A link or PDB error
+  here is worth checking `df` for before being believed.
