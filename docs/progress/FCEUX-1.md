@@ -12,8 +12,8 @@ a design note for the lots that would follow.
 - [x] 1/8 — Inventory (read only): the FCEUX core/driver boundary, its build system and its
   dependencies, its global-state model; and the public API of `zax-nes` that `zax-app` and
   `zax-harness` use.
-- [ ] 2/8 — The fork and a core-only build: FCEUX's core as a library with no GUI, no Lua, no Qt,
-  no SDL, for Windows x64 (MSVC) then Linux x64 (WSL).
+- [x] 2/8 — The fork and a core-only build: FCEUX's core as a library with no GUI, no Lua, no Qt,
+  no SDL, for Windows x64 (MSVC) then Linux x64 (WSL). Fork commit `14ef77cf`.
 - [ ] 3/8 — A minimal C API (`zax/zaxfceux.h` + `.cpp` in the fork).
 - [ ] 4/8 — The Rust side: crate `zax-fceux` behind the Cargo feature `fceux-core` (off by
   default), plus a `zax-harness fceux-run` subcommand writing `golden-core`'s digests.
@@ -258,3 +258,110 @@ the trait step 7 has to propose.
    bit planes are all still in scope.
 6. The one-instance rule is a hard constraint of the design, not a simplification: `create` must
    enforce it and the Rust handle must not be `Sync`.
+
+---
+
+# Step 2 — The fork and a core-only build
+
+The fork is `cleanroom/fceux-zax`, created with
+`git clone --no-hardlinks cleanroom/third_party/fceux cleanroom/fceux-zax` (local, no network),
+branch **`zax`** off upstream `ffc23f08`. FCEUX's history is intact, so every change of ours is
+`git diff ffc23f08..zax`. Step-2 commit in the fork: **`14ef77cf`**.
+
+## What the library is
+
+`zax/CMakeLists.txt` builds **`zaxfceux`**, a static library: upstream's `SRC_CORE`
+(`src/CMakeLists.txt:382-619`) minus `lua-engine.cpp` and `utils/backward.cpp`, plus three files
+upstream's own CMake omits and nothing links without:
+
+| Added file | Why |
+|---|---|
+| `utils/ConvertUTF.c` | `utils/xstring.cpp` calls `ConvertUTF8toUTF16`/`ConvertUTF16toUTF8`. Upstream's vcxproj lists it; its CMake build gets away with the omission because the Qt driver drags it in. |
+| `utils/unzip.cpp`, `utils/ioapi.cpp` | the in-tree minizip `file.cpp:48,192-249` uses. Kept rather than cut: the C API loads from memory and never reaches this path, but they cost nothing, need no patch, and leave FCEUX's file loading as FCEUX wrote it. |
+| `drivers/common/os_utils.cpp` | filed under `drivers/` upstream but core in every practical sense — `src/fceu.h:5`, the core's own main header, includes `drivers/common/os_utils.h`, and `CheckFileExists` at `fceu.h:141` calls straight into it. |
+
+No Qt, no SDL, no Lua, no GUI, no debugger windows, no netplay transport, no AVI. `_S9XLUA_H`,
+`__QT_DRIVER__` and `__WIN_DRIVER__` are all undefined; `ZAX_FCEUX_CORE` is defined.
+
+**zlib**: the system one when CMake finds it (Linux: 1.3), otherwise the copy FCEUX already
+vendors at `src/drivers/win/zlib` (1.1.4), in its own target so its objects cannot collide with
+the core's `utils/crc32.cpp` and so its provenance stays separate. **Nothing was downloaded.**
+
+## Static, not shared — and why the static archive was not enough
+
+Static: it is what Rust links most simply (`cargo:rustc-link-lib=static=zaxfceux`), there is no
+DLL beside the executable, no `__declspec(dllexport)` on every entry point, and no loader-path
+problem on Android or PortMaster later. With the whole machine in file-scope globals there is one
+instance per process either way, so a shared object would buy no isolation. Licence-wise it
+changes nothing: FCEUX is GPL-2.0-**or-later** and Zaxnes GPL-3.0-only, so the combined work is
+GPL-3.0 whichever way the two are joined, and the fork's sources must travel with the binary in
+both cases.
+
+**The mistake this step made, and how it was caught.** The first Windows build linked on the
+second try and the self-test executable ran — which proved nothing. A static archive only resolves
+the objects something happens to *reference*, and the self-test referenced one function. The build
+now also produces **`zaxfceux_linkcheck`, a shared library from the same sources**
+(`-Wl,--no-undefined` on Linux, `WINDOWS_EXPORT_ALL_SYMBOLS` on Windows): a shared object must
+resolve every symbol of every object it contains. That target immediately turned up fifteen
+symbols the archive had hidden — `dendy`, `turbo`, `swapDuty`, `eoptions`, `closeFinishedMovie`,
+`KillFCEUXonFrame`, `FCEUD_GetTime`, `FCEUD_GetTimeFreq`, `GetKeyboard`, `GetMouseData`,
+`FCEUI_UseInputPreset`, `paldeemphswap`, `ModernDeemphColorMap`, `fceu_file_exists` and the
+minizip set — and one duplicate definition (`FCEUI_UTF8fopen_C`, which the core defines itself at
+`fceu.cpp:274`). It is built and thrown away; what Zaxnes links is the static `zaxfceux`.
+
+## The patches to FCEUX: two files, thirteen added lines
+
+Both carry a `// ZAX:` comment. `git diff ffc23f08..zax -- src/` is the whole of it.
+
+| File | Change | Why |
+|---|---|---|
+| `src/types.h:147` | `&& !defined(ZAX_FCEUX_CORE)` added to the condition that auto-defines `__WIN_DRIVER__` | **the one real trap of this step.** `WIN32` is defined by any MSVC build, so `types.h` was handing the "no GUI" library the *Windows UI* driver: the whole GUI branch of `fceu.cpp` (including `UpdateCheatList`, `Update_RAM_Search` and `RamChange`, called once a frame at `fceu.cpp:847-850`), `input.cpp`, `state.cpp` and `video.cpp` compiled in. The static archive never pulled those objects, so it linked anyway. |
+| `src/fceu.cpp:78` | a `ZAX_FCEUX_CORE` branch in the driver-header `#if`, taking `#include "driver.h"` and `extern int pal_emulation` directly | every other build reaches one of `drivers/{win,Qt,sdl}`'s headers there. `driver.h` and `pal_emulation` are the only two things `fceu.cpp` was getting through that include and nowhere else. |
+
+Nothing else in FCEUX is touched: CPU, both PPUs, APU, the ~270 boards, cartridge loading,
+save-states and movie playback are byte-for-byte upstream's.
+
+## The driver side, in `zax/zaxstubs.cpp`
+
+Everything that would open a window, a dialog or a file picker does nothing; the debugger views,
+the trace logger, AVI and the netplay transport do nothing (the two transport calls report
+failure rather than succeeding on a socket that does not exist). Four things are implemented for
+real, because the core reads an answer back:
+
+- `FCEUD_UTF8fopen` / `FCEUD_UTF8_fstream` — the core still opens `disksys.rom`, a palette file
+  and `.fm2` movies through them;
+- `FCEUD_SetPalette` / `FCEUD_GetPalette` — the core's palette pipeline round-trips through the
+  driver;
+- `FCEUD_ScanArchive` returns type -1, which is how `FCEU_fopen` is told "not an archive" and
+  takes its plain-file path;
+- `FCEUD_PrintError` / `FCEUD_Message` route to a callback the C API installs, so a Rust caller
+  can see *why* a ROM was refused.
+
+The driver-owned globals (`pal_emulation`, `dendy`, `turbo`, `swapDuty`, `eoptions`,
+`closeFinishedMovie`, `KillFCEUXonFrame`, `paldeemphswap`) are defined with the types and initial
+values `drivers/Qt/fceuWrapper.cpp:86-95` gives them, so the core starts from the state it starts
+from under the Qt driver.
+
+One stub is a deliberate loss of function, recorded here: **`ModernDeemphColorMap`** returns the
+plain palette colour with no deemphasis blending. Its only caller is FCEUX's own PPM screenshot
+writer (`video.cpp:584`), which this library never invokes — Zaxnes takes the raw indices of
+`XBuf` and the emphasis bits of `XDBuf` and does its own colour. The real one lives in
+`drivers/common/vidblit.cpp`, which would drag in `scalebit`, `hq2x`, `hq3x` and `nes_ntsc`: the
+whole host scaler set this build exists to leave out.
+
+## Build results
+
+Both from a **clean** build directory, with the documented command.
+
+| Platform | Command | Toolchain | Result |
+|---|---|---|---|
+| Windows x64 | `zax\build-msvc.cmd` | MSVC 14.43, CMake 3.30.5, Ninja | `zaxfceux.lib` 7.3 MB (archive), `zaxfceux_linkcheck.dll` **1.2 MB**, self-test runs |
+| Linux x64 | `sh zax/build-linux.sh` | g++ 13.3, CMake 3.28.3, Ubuntu 24.04 (WSL) | `libzaxfceux.a` 2.8 MB (archive), `libzaxfceux_linkcheck.so` **1.4 MB**, self-test runs |
+
+Both print `zaxfceux (FCEUX 2.8.0 core, release)`. The shared-object figures are the useful ones
+for step 7's binary-size section: **the whole FCEUX core, all ~270 boards included, is about
+1.2 MB of code.**
+
+`zax/scmrev.h` stands in for the revision header `scripts/genGitHdr.bat` generates, which the
+library must not have (it has to be reproducible); it is found through the include path because
+`src/scmrev.h` does not exist, so no FCEUX file is patched for it.
