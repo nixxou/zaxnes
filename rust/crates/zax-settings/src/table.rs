@@ -1002,9 +1002,11 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_libretro(enabled_disabled()),
     );
     // The run-ahead of AMD-041 REQ-LOOP-064, which AMD-040 REQ-LUA-114 exposes as
-    // `RunAheadFrames`: 0 to 3, a write outside brought back to the nearest bound. Not exposed
+    // `RunAheadFrames`: a write outside the domain brought back to the nearest bound. Not exposed
     // in libretro (AMD-041 §4). The frames it asks the loop to run ahead are RU-3's; until then
     // it is left out of the options window.
+    // The domain is **0 to 10**, not the spec's 0 to 3 (owner request, `NesCore::MAX_RUN_AHEAD`):
+    // see `Q-181`, which asks for the two requirements to be amended on that number.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuRunAhead,
@@ -1014,10 +1016,11 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::Immediate,
             SettingTheme::Emulation,
         )
-        // The bounds, the step and the `Snap` rule stay those of a stepped domain — a write of 7
-        // reads 3 and one of -1 reads 0 (REQ-LOOP-064) — and only the published labels change,
-        // which is what turns the row into the list of AMD-041 §3. The interface translates them
-        // through `option.<label>`; the value written to the settings file is the number.
+        // The bounds, the step and the `Snap` rule stay those of a stepped domain — a write of 11
+        // reads 10 and one of -1 reads 0 (REQ-LOOP-064's rule at the bound Q-181 records) — and
+        // only the published labels change, which is what turns the row into the list of AMD-041
+        // §3. The interface translates them through `option.<label>`; the value written to the
+        // settings file is the number.
         // Rust-only (owner request): up to 10 frames, to try a game's own lag to the absurd.
         .with_domain(Domain::stepped(0.0, 10.0, 1.0, 0).with_labels(&[
             "Run-ahead off",

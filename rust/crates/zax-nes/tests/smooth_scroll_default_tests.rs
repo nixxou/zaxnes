@@ -10,6 +10,8 @@
 //! They need a real scrolling game. `ZAXNES_ROMS` is the demo root; without it they pass
 //! silently, as `ppu_golden_tests` does.
 
+#![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)] // test code
+
 use zax_nes::NesCore;
 
 /// Super Mario Bros., which scrolls as soon as the attract demo starts, and which has no hack
@@ -40,7 +42,11 @@ fn off_by_default_a_game_with_no_pack_is_left_alone() {
     let mut core = core_of(&image, &name);
     for _ in 0..FRAMES {
         core.run_frame(0);
-        assert_eq!(None, core.picture_shift(), "the playfield must not be shifted");
+        assert_eq!(
+            None,
+            core.picture_shift(),
+            "the playfield must not be shifted"
+        );
         assert_eq!(None, core.picture_motion(), "no motion is published");
     }
     assert_eq!(

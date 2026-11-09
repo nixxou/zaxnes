@@ -1077,8 +1077,8 @@ C# counterpart: `src/Zax.App/Loop` (frame clock, emulation host, game session).
 - **Not to be confused with run-ahead** (next entry). "Emulation ahead" is pipelining and changes
   no latency; AMD-041's run-ahead re-simulates frames to cut input latency. They compose.
 
-**Run-ahead** (setting `emu.run_ahead`: 0 to 3, **desktop 1**, handheld 0; AMD-041 REQ-LOOP-064
-to 068; RU-3b)
+**Run-ahead** (setting `emu.run_ahead`: 0 to 10 since KIRBY-MERGE — the spec says 0 to 3, see
+`Q-181` — **desktop 1**, handheld 0; AMD-041 REQ-LOOP-064 to 068; RU-3b)
 - The displayed frame is N frames in the future of the **real** frame, computed with the current
   inputs; the real state then comes back. The player sees their pad N frames earlier. A real frame
   therefore emulates **N + 1** frames: measured 2.02x at N = 1, 3.04x at N = 2 and 4.09x at N = 3

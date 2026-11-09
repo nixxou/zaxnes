@@ -6,6 +6,8 @@
 //! The branch's own figures — 37 of its 41 ROMs take a whole pack, 1 all but the invincibility —
 //! are about a ROM pool this side has not got, and are left to whoever has it.
 
+#![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)] // test code
+
 use zax_nes::builtin_patches::{self, BuiltinPatch};
 use zax_nes::hack_pack::{HackPack, WIDESCREEN};
 
@@ -31,9 +33,18 @@ fn a_pack_per_build_is_registered() {
     for name in KIRBY_PATCHES {
         let patch = patch(name);
         assert_eq!("Kirby's Adventure", patch.game, "{name}");
-        assert!(!patch.advanced, "{name}: the plain widescreen, as the other decoders");
-        assert!(patch.boot_zone, "{name}: the pack's code runs from power-on");
-        assert!(patch.idle_loop.is_some(), "{name}: the overclock needs the game's wait");
+        assert!(
+            !patch.advanced,
+            "{name}: the plain widescreen, as the other decoders"
+        );
+        assert!(
+            patch.boot_zone,
+            "{name}: the pack's code runs from power-on"
+        );
+        assert!(
+            patch.idle_loop.is_some(),
+            "{name}: the overclock needs the game's wait"
+        );
     }
     // Six distinct source CRCs for seven packs: Europe and its NTSC twin are the same data, told
     // apart by the signatures of the pack (`build_pack.py --ntsc`), so the PAL entry takes the
@@ -41,7 +52,11 @@ fn a_pack_per_build_is_registered() {
     let mut crcs: Vec<u32> = KIRBY_PATCHES.iter().map(|n| patch(n).source_crc).collect();
     crcs.sort_unstable();
     crcs.dedup();
-    assert_eq!(6, crcs.len(), "one CRC per build, the two European entries sharing theirs");
+    assert_eq!(
+        6,
+        crcs.len(),
+        "one CRC per build, the two European entries sharing theirs"
+    );
     assert_eq!(
         patch(builtin_patches::KIRBY_EUROPE).source_crc,
         patch(builtin_patches::KIRBY_EUROPE_NTSC).source_crc
@@ -102,7 +117,11 @@ fn the_options_keep_their_bits_and_their_defaults() {
     ];
     for name in KIRBY_PATCHES {
         let patch = patch(name);
-        assert_eq!(9, patch.options.len(), "{name}: eight options and the level select");
+        assert_eq!(
+            9,
+            patch.options.len(),
+            "{name}: eight options and the level select"
+        );
         for (key, bit, default) in expected {
             let option = patch
                 .options
@@ -117,8 +136,14 @@ fn the_options_keep_their_bits_and_their_defaults() {
             .iter()
             .find(|option| option.key == "level_select")
             .unwrap_or_else(|| panic!("{name}: no level select"));
-        assert_eq!(8, level_select.bit, "{name}: the level select is an aid of the host");
-        assert!(!level_select.default, "{name}: the level select is off by default");
+        assert_eq!(
+            8, level_select.bit,
+            "{name}: the level select is an aid of the host"
+        );
+        assert!(
+            !level_select.default,
+            "{name}: the level select is off by default"
+        );
     }
 }
 
@@ -184,7 +209,10 @@ fn the_rom_s_eight_bits_are_full_and_the_ninth_option_needs_the_wider_word() {
             .iter()
             .find(|option| option.key == "level_select")
             .expect("the level select");
-        assert!(host_only.bit > 7, "{name}: the ninth option is above the ROM's byte");
+        assert!(
+            host_only.bit > 7,
+            "{name}: the ninth option is above the ROM's byte"
+        );
         assert!(
             u8::try_from(1u16 << host_only.bit).is_err(),
             "{name}: its bit does not fit in the u8 the option word used to be"

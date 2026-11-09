@@ -270,7 +270,8 @@ pub struct GameSession {
     overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
-    /// Run-ahead N, 0 to 3 (AMD-041 REQ-LOOP-064): the frames of a real frame the core runs in
+    /// Run-ahead N, 0 to `NesCore::MAX_RUN_AHEAD` (AMD-041 REQ-LOOP-064, and `Q-181` for the
+    /// bound the owner raised to 10): the frames of a real frame the core runs in
     /// advance of it. 0 — what a freshly created session carries — runs the frame of
     /// REQ-LOOP-060 unchanged, so a host that drives the session itself gets no run-ahead unless
     /// it asks for one (AMD-041 §4, the libretro frontend).
@@ -720,7 +721,7 @@ impl GameSession {
     }
 
     /// Sets the run-ahead of AMD-041 REQ-LOOP-064: the number of frames the core runs in advance
-    /// of the real one, brought into `[0, 3]`.
+    /// of the real one, brought into `[0, NesCore::MAX_RUN_AHEAD]` (`Q-181`).
     ///
     /// The loop writes it before every real frame, which is how "applied at the next real frame"
     /// is honoured: the value is a property of the session rather than an argument of
@@ -730,7 +731,7 @@ impl GameSession {
     /// [`GameSession::apply_run_ahead_setting`], which is what the loop calls. A host that drives
     /// the session itself (the frame steps, the tests, a frontend) gets exactly the N it asks for.
     pub fn set_run_ahead(&mut self, frames: i32) {
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // Clamped to 0..=3.
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // Clamped to the domain.
         {
             self.run_ahead = frames.clamp(0, i32::from(NesCore::MAX_RUN_AHEAD)) as u8;
         }

@@ -164,15 +164,24 @@ fn req_lua_112_the_shape_a_two_zero_profile_reads_runs_without_error() {
 
 // REQ-LUA-114: the new members of Setting
 
-/// The criteria of REQ-LUA-114 on the two scalar members: a run-ahead of 7 comes back as 3, a
-/// style of 5 as 0.
+/// The criteria of REQ-LUA-114 on the two scalar members: a run-ahead outside its domain comes
+/// back to the nearest bound, a style of 5 to 0.
+///
+/// The criterion's own figure — "a write of 7 reads 3" — cannot be checked to the letter any
+/// more: the owner's run-ahead goes up to `NesCore::MAX_RUN_AHEAD` = 10, so 7 is a value of the
+/// domain and reads back as itself. What the criterion is *about* is checked at the new edge
+/// instead: 11 reads 10, −2 reads 0, 7 reads 7, and the default is still 1. See `Q-181`, which
+/// asks for AMD-041 REQ-LOOP-064 and AMD-040 REQ-LUA-114 to be amended on that one number.
 #[test]
 fn req_lua_114_run_ahead_and_visual_style_are_brought_into_their_domain() {
     let mut session = blank();
 
     assert_eq!(1.0, session.number("return Setting.RunAheadFrames"));
+    // Q-181: the upper bound of the domain, which the owner moved from 3 to 10.
+    session.evaluate("Setting.RunAheadFrames = 11");
+    assert_eq!(10.0, session.number("return Setting.RunAheadFrames"));
     session.evaluate("Setting.RunAheadFrames = 7");
-    assert_eq!(3.0, session.number("return Setting.RunAheadFrames"));
+    assert_eq!(7.0, session.number("return Setting.RunAheadFrames"));
     session.evaluate("Setting.RunAheadFrames = -2");
     assert_eq!(0.0, session.number("return Setting.RunAheadFrames"));
     session.evaluate("Setting.RunAheadFrames = 2");

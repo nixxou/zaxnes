@@ -800,9 +800,7 @@ impl NesCore {
         // gets its wait ended — and costs one test a frame. A ROM that has not unlocked the
         // register window cannot have written `$5006`, so it cannot be stalling, so the test
         // has nothing to find.
-        let idle_loop = self
-            .idle_loop
-            .filter(|_| self.bus.ppu().wide().unlocked());
+        let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();

@@ -12,7 +12,7 @@ Steps: 1 plan · 2 merge · 3 behaviour · 4 measurements · 5 final pass.
 - [x] **Step 2/5 — merge and resolve** (§2)
 - [x] **Step 3/5 — behaviour** (§3)
 - [x] **Step 4/5 — measurements** (§4)
-- [ ] Step 5/5 — final pass
+- [x] **Step 5/5 — final pass** (§5)
 
 ---
 
@@ -743,3 +743,156 @@ sprites — are off by default and allocate nothing until asked. What is over th
 a game that has asked for a wide picture. Both are recorded here for R0 and the owner, because
 parking a feature is their decision and not this lot's — the precedent is MF-LEG-3, which left
 the same call to them.
+
+---
+
+## 5. Step 5: the final pass
+
+The owner's decision of 2026-11-09 settles step 4's residue: what is left above +0.02 % — the
+`run_dots` codegen drift of about +0.04 % and the wide picture's +0.12 % to +0.16 % on SMB3 and
+Zelda II with their packs — is **accepted**, the project's budget now being under +1 % between
+two releases. No measurement was redone in this step and nothing was reshaped for performance.
+
+| check | result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean (one `#[allow]`, §5.2) |
+| `cargo clippy -p zax-render --features wgpu,offscreen --all-targets -- -D warnings` | clean |
+| `cargo clippy -p zax-app --features bundled,wgpu --all-targets -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled --no-fail-fast -- --include-ignored` | **3 313 passed, 0 failed, 0 ignored**, 7 filtered out, over 180 test binaries and 11 doc-test runs — **after the one fix of §5.1** |
+| golden-core over the 98 originals, 1 200 frames | `f79e7df842c3ee43e7d9b67861a927b5`, 98 rows, 145 334 bytes — **byte-identical** (`fc /b`, not only the digest) to step 3's file and to the figure recorded at `19c5065d` and `ab68ee48` |
+| `cargo check -p zax-app --no-default-features --features android` | clean |
+| `cargo check -p zax-app --no-default-features --features firmware-sdl` (PortMaster) | clean |
+| `cargo check -p zax-android --target aarch64-linux-android` | **still not checkable here**, as AUDIO-1 and LUA-MERGE recorded: the C build of `mlua-sys` wants the NDK's `clang`, which this machine has not got. The target is installed; the failure is in the C build, not in our code |
+
+The three asset roots LUA-MERGE's step 5 identified are all needed, and were all set:
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS` on `assets-free/test-roms`, and
+`ZAXNES_PROFILES` on `assets-neutral` (without the third, `--include-ignored` over the *whole*
+workspace wakes about ninety asset-corpus tests of `zax-profiles`, `zax-scripting` and
+`zax-engine3d`). `rust/test-roms` is present in the tree tested — 71 entries — which is what
+`ppu_golden_tests` and `golden_core_tests` read **directly**, ignoring `ZAXNES_TEST_ROMS`; all
+three ran and passed, so none of them passed vacuously.
+
+### 5.1 (S12) A twelfth semantic conflict, and the only failure of the step
+
+`zax-scripting`'s `two_zero_api_tests::req_lua_114_run_ahead_and_visual_style_are_brought_into_their_domain`
+failed: `left: 3.0, right: 7.0`.
+
+| | |
+|---|---|
+| `dev`'s side | the test pins AMD-041 REQ-LOOP-064's acceptance criterion word for word — «`Setting.RunAheadFrames = 7` → 3» — and AMD-040 REQ-LUA-114's line «écriture ramenée dans [0, 3]» |
+| the branch's side | `NesCore::MAX_RUN_AHEAD` 3 → 10 (owner request), the catalogue domain `stepped(0, 10, 1)` with eleven labels |
+| kept | the branch's domain, because this lot may not remove a feature the owner asked for; the test now pins the **new** edge |
+
+It is the same shape as (S11), and it was missed for the same reason (S11) was caught: step 2 ran
+the tests of the **five crates both sides touched**, and `zax-scripting` is not one of them — the
+branch never touched it, and `dev` touched it only in LUA-MERGE. The Lua binding itself
+(`api/settings.rs`: `whole(definition, "RunAheadFrames", SettingId::EmuRunAhead)`) reads the
+descriptor's domain, so nothing of the code was wrong; what was wrong was a test, and three
+comments, still stating the old bound.
+
+What this step did, and deliberately did **not** do:
+
+* **`spec/changes/Q-181.md`** (new) — the spec is not ambiguous here, it is *superseded*: the
+  domain of REQ-LOOP-064 and the `RunAheadFrames` line of REQ-LUA-114 both say [0, 3], and the
+  criterion names the number 7. The ticket records the owner's [0, 10], the provisional choice
+  (keep it), what is unaffected (default 1, a negative write → 0, persistence, and the clamp
+  **rule** itself — only the upper bound moved), and what R0 has to amend if the owner confirms.
+  The code points at it with `// Q-181`, as CLAUDE.md requires.
+* **the test** now checks the rule at the bound that exists — `= 11` → 10, `= 7` → 7, `= -2` → 0,
+  default 1 — with the criterion's own figure explained in the doc comment rather than deleted.
+* **three stale comments** corrected, all of them prose the branch's auto-merge left behind: the
+  `emu.run_ahead` descriptor (`zax-settings/src/table.rs`, which still said "0 to 3" and "a write
+  of 7 reads 3" **directly above a domain of 0..10**), `GameSession::run_ahead` and its setter,
+  and `AppSettings::run_ahead`. Plus the feature's line in `rust/docs/PERFORMANCE-HISTORY.md`.
+* **not** done: lowering `MAX_RUN_AHEAD` back to 3 to satisfy the criterion literally. That is
+  removing a feature, which this lot's rules forbid; it is in Q-181 as the alternative, for the
+  owner.
+
+### 5.2 (S9) clippy's line limit: one allow, and the proof it is needed
+
+Step 2 left (S9) to this step. Only **one** function needed anything: `Ppu2C02::new`, which both
+sides' new fields took to **101 lines of the 100 allowed** — shown by removing the attribute and
+re-running, which gives `warning: this function has too many lines (101/100)`. LUA-MERGE's remedy,
+giving the tail to another function as `EmulationHost::new` and the harness's `run` did, does not
+apply: the body is a **single struct literal**, one line per field, and the only way to shorten it
+is to break `Ppu2C02` into sub-structs, which moves the field offsets `docs/progress/MF-2.md`
+step 0 measured in `run_dots`. So an `#[allow(clippy::too_many_lines)]` with its reason on the
+line, in the idiom `cpu::opcode_table` and `cartridges::registry` already use for a flat list.
+Six of those 101 lines are the `#[cfg(feature = …)]` attributes of the VS System and
+exact-sprite-eval fields, which the lint counts whether or not the features are on.
+
+The four allows the branch already carried (`decode_margins`, `Running::frame`, `update_scene`,
+`render::rom::capture`) were enough on `dev`'s longer bodies; nothing else was added and nothing
+was extracted. Besides that, the step's only other changes were `cargo fmt`'s reflow of three
+lines written by hand in step 4 (`nes_core.rs`, `wide.rs`) and of four assertion blocks in the two
+test files step 3 added.
+
+### 5.3 The 7 filtered out, each re-verified rather than taken on trust
+
+The same two groups LUA-MERGE recorded, checked again here because this lot regenerated a golden.
+
+**Six: `three_d_sen_real_install_tests`** (`zax-profiles`). Run on purpose: 0 passed, 6 failed,
+and every one of the six prints exactly `ZAXNES_3DSEN_INSTALL is not set: it names a 3dSen
+installation (or a stand-in) folder` and nothing else. The clean side has no 3dSen installation
+and must not have one, so these six cannot run here at all.
+
+**One: `ro_3_write_the_option_tree_golden`**, the workspace's only golden **regenerator**,
+`#[ignore]`d precisely so that it does not run — and `--include-ignored` runs it, racing the
+reader in the same binary. Two things settle it, and the second matters more for this lot than it
+did for LUA-MERGE, because step 2 **did** move that golden by two lines: the reader passes alone
+(`--test handheld_tree_tests`: 5 passed, 1 ignored), and running the regenerator on purpose
+leaves `git status -- rust/goldens` **empty**. So the console option tree the code draws is
+byte-for-byte the committed golden, the two new `emu.smooth_scroll_ahead` lines included.
+
+### 5.4 The owner's rules, re-checked structurally
+
+`git diff 19c5065d HEAD` is **empty** over `zax-engine3d`, `zax-platform`, `zax-profiles`,
+`zax-goldens`, `zax-achievements` and `zax-android` — the 3D engine, the platform layer and the
+profile decoder are byte-identical to the base — and over `zax-scripting` it is the one test of
+§5.1. `rust/goldens/core-goldens.jsonl` is untouched: no row moved, so there was nothing to
+explain and nothing was regenerated. Version still 0.5.0, the 62 `board-*` Cargo features intact,
+`PATCHES` at 64 (`dev`'s 57 and Kirby's seven). The two goldens that did move are step 2's, two
+lines each and exactly the new rows.
+
+Nothing moves for SMB3, Zelda II or the 45 widescreen packs (step 3: 19 090 compared output
+files, zero differences, four regimes); the core is byte-identical over the 98 commercial
+originals; `emu.smooth_scroll_ahead`, the one default that would have moved a picture for a game
+with no pack, is off, with four tests saying what the switch does on either side of it.
+
+G: was between 18.4 and 12.8 GB free throughout, above the 5 GB floor. Step 4's clean-build tars
+in `rust/target-km/` were deleted once this note had their figures; `target-km/base19` (the
+`19c5065d` clean build) is kept until the lot is closed, and `target-km` is untracked and was
+never staged.
+
+### 5.5 What is left for someone else
+
+* **Kirby's seven packs were never run** — there is no Kirby's Adventure ROM on this machine
+  (§3.4). Ten tests hold everything about them that does not need the game; "No slowdown",
+  "Invincible", "Jump and attack first", "Level select" and the asleep enemies have not been seen
+  behaving. Whoever has the ROM should close that gap.
+* **Q-181** — for R0 and the owner: amend AMD-041 REQ-LOOP-064 (its value list, its interval, the
+  number in its criterion, the eleven labels of its §3) and AMD-040 REQ-LUA-114's
+  `RunAheadFrames` line, or decide to go back to [0, 3].
+* **Step 4's two residues**, accepted by the owner on 2026-11-09 and recorded in §4.5: the
+  `run_dots` codegen drift, and the wide picture's cost for a game whose widescreen is on. The
+  second has a known remedy — a monomorphised `paint_side_tile` on the MF-LEG-2 pattern — which is
+  a lot of its own.
+* **§2.4** — `Ppu2C02::paint_extra_sprites` writes its colours without AMD-050 REQ-CORE-049's
+  opacity bit. That is `dev`'s behaviour at `19c5065d`, kept to the byte because correcting it
+  would move the picture of the packs that use the extension's second sprite page. A lot of its
+  own.
+
+## Summary
+
+`dev` carries `feat/widescreen-kirby`: Kirby's margin decoder and its seven packs with their nine
+options, the widescreen extension's per-page sprite high bytes (`$5007` bit 5, `$500C`) and its
+16-bit option word, the wide 2D picture's margins ending at a split with the frame's last palette
+and PPUMASK, run-ahead up to 10 frames with a run-ahead per game, and the experimental smooth
+scrolling at 120 Hz — the last **off by default**, which is the one choice of the branch this lot
+overrode and the only way the owner's "nothing moves for a game with no pack" could be kept.
+
+`dev`'s own work is intact: the ~140 mappers and their Cargo features, the MMC5 two-variant
+switch, the AUDIO-1/AUDIO-2 outputs, the RO-1/RO-3 options layout, the editor mode, and the
+measured shapes of the three core files — the DMA state machine's two latch sites, `Ppu2C02`'s
+field order, and MF-LEG-2's split of `capture_background_row`.

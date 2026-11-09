@@ -410,7 +410,15 @@ impl Default for Ppu2C02 {
 
 impl Ppu2C02 {
     /// Creates a PPU; the core calls [`Ppu2C02::reset`] before running it.
+    ///
+    /// Lot KIRBY-MERGE: both sides' new fields took the body to 101 lines of clippy's 100, as
+    /// LUA-MERGE's `EmulationHost::new` was taken past it. There a tail could be given to another
+    /// function; here the body is a **single struct literal**, one line per field, so the only way
+    /// to shorten it is to break `Ppu2C02` into sub-structs — which moves the field offsets the
+    /// mapper lots measured (`docs/progress/MF-2.md` step 0). Hence the allow, in the idiom
+    /// `cpu::opcode_table` already uses for a flat list.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // One line per field, kept as a flat literal.
     pub fn new() -> Self {
         Self {
             vram: [0; VRAM_SIZE],

@@ -608,10 +608,10 @@ impl WideExtension {
             // Each page keeps its own, whatever page the game builds meanwhile. No table yet
             // means the ROM has written none of it, which reads as zeros.
             let page = usize::from(page & 7);
-            (self.active_high, self.active_flags) = self
-                .paged
-                .as_ref()
-                .map_or(([0; 64], [0; 64]), |paged| (paged.high[page], paged.flags[page]));
+            (self.active_high, self.active_flags) =
+                self.paged.as_ref().map_or(([0; 64], [0; 64]), |paged| {
+                    (paged.high[page], paged.flags[page])
+                });
         } else {
             self.latch_pending();
         }

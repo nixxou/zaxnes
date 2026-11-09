@@ -100,7 +100,8 @@ pub trait AppSettings {
     /// `video.max_queued_frames`: rendered frames the GPU may keep waiting for display, 1 or 2
     /// (AMD-052 REQ-LOOP-077).
     fn max_queued_frames(&self) -> i32;
-    /// `emu.run_ahead`: frames of run-ahead, 0 to 3 (AMD-041 REQ-LOOP-064). The loop reads it
+    /// `emu.run_ahead`: frames of run-ahead, 0 to 10 (AMD-041 REQ-LOOP-064 and `Q-181`, which is
+    /// where the bound the owner raised from 3 is recorded). The loop reads it
     /// once per real frame, so a change applies at the next one and never in the middle of one.
     fn run_ahead(&self) -> i32;
     /// `video.render_method`.
