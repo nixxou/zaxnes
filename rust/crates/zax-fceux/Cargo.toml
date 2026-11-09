@@ -1,0 +1,21 @@
+[package]
+name = "zax-fceux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# **Off by default, and that is the whole point.** With `fceux-core` off this crate compiles to an
+# empty library: no `unsafe`, no link directive, no C, no dependency, and the build script does
+# nothing. The shipped binaries do not reference it at all, so the default build is byte-identical
+# to one made before this crate existed.
+#
+# With it on, the crate links the static library the fork `cleanroom/fceux-zax` builds (see
+# `build.rs` for how it is found) and wraps its C API.
+default = []
+fceux-core = []
+
+[lints]
+workspace = true

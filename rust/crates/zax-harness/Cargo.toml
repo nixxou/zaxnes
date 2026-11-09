@@ -26,6 +26,12 @@ wgpu = ["zax-render/wgpu"]
 # build whose core has no VS layer wants. `docs/review/BOARD-FEATURES.md` has the switch.
 vs-system = ["zax-nes/board-vs-system"]
 
+# `zax-harness fceux-run` and `fceux-compare`, the FCEUX engine's two commands (lot FCEUX-1
+# step 4). Off by default like everything of that engine: with it off `zax-fceux` is not a
+# dependency at all, no C is linked, and the binary is the one it always was. On, it needs the
+# fork `cleanroom/fceux-zax` built first - `zax-fceux/build.rs` says how.
+fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
+
 # The core's exact sprite-evaluation pipeline (lot MF-4e step 3), out of `default` because it is
 # above the owner's tolerance on both runs. A pass-through for the same reason `vs-system` is one:
 # Cargo cannot see a dependency's feature from a test, and
@@ -45,6 +51,7 @@ ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 serde_json.workspace = true
 sha2 = "0.10"
 zax-engine3d = { path = "../zax-engine3d" }
+zax-fceux = { path = "../zax-fceux", optional = true }
 zax-nes = { path = "../zax-nes" }
 zax-profiles = { path = "../zax-profiles" }
 zax-render = { path = "../zax-render", features = ["offscreen"] }

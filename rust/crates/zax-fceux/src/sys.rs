@@ -1,0 +1,74 @@
+//! The raw declarations of the fork's C API (`zax/zaxfceux.h`), and nothing else.
+//!
+//! This is the **only** place in the whole workspace where `extern "C"` appears for FCEUX. Every
+//! item here mirrors one declaration of that header; if the two ever drift, the link fails rather
+//! than the behaviour changing, because every symbol is resolved at link time against the static
+//! library the fork built.
+//!
+//! The constants are copied rather than generated: `bindgen` would be a new dependency, a C
+//! toolchain requirement for every build of this crate, and a moving target between its versions,
+//! for a header of thirty declarations that changes when we change it. `tests::codes_match_header`
+//! reads the fork's header and checks every constant against it, so a drift is a test failure.
+
+use std::os::raw::{c_char, c_int, c_void};
+
+pub const ZAX_OK: i32 = 0;
+pub const ZAX_ERR_ALREADY_LIVE: i32 = -1;
+pub const ZAX_ERR_NO_INSTANCE: i32 = -2;
+pub const ZAX_ERR_NO_ROM: i32 = -3;
+pub const ZAX_ERR_BAD_ARGUMENT: i32 = -4;
+pub const ZAX_ERR_LOAD_FAILED: i32 = -5;
+pub const ZAX_ERR_BUFFER_TOO_SMALL: i32 = -6;
+pub const ZAX_ERR_STATE_FAILED: i32 = -7;
+
+pub const ZAX_REGION_NTSC: i32 = 0;
+pub const ZAX_REGION_PAL: i32 = 1;
+pub const ZAX_REGION_DENDY: i32 = 2;
+
+pub const ZAX_RAM_INIT_DEFAULT: i32 = 0;
+pub const ZAX_RAM_INIT_FF: i32 = 1;
+pub const ZAX_RAM_INIT_00: i32 = 2;
+pub const ZAX_RAM_INIT_RANDOM: i32 = 3;
+
+pub const ZAX_SCREEN_WIDTH: usize = 256;
+pub const ZAX_SCREEN_HEIGHT: usize = 240;
+
+/// The frame buffers' length: one byte a pixel, no padding.
+pub const FRAME_LEN: usize = ZAX_SCREEN_WIDTH * ZAX_SCREEN_HEIGHT;
+
+pub type ZaxLogFn = Option<unsafe extern "C" fn(user: *mut c_void, text: *const c_char)>;
+
+extern "C" {
+    pub fn zax_set_log_sink(sink: ZaxLogFn, user: *mut c_void);
+    pub fn zax_flush_log();
+    pub fn zax_version() -> *const c_char;
+
+    pub fn zax_create() -> i32;
+    pub fn zax_destroy();
+    pub fn zax_is_live() -> i32;
+
+    pub fn zax_load_rom(image: *const u8, image_len: usize, name: *const c_char) -> i32;
+    pub fn zax_close_rom();
+    pub fn zax_has_rom() -> i32;
+    pub fn zax_power() -> i32;
+    pub fn zax_reset() -> i32;
+    pub fn zax_get_region() -> i32;
+    pub fn zax_set_region(region: i32) -> i32;
+    pub fn zax_set_ram_init(option: i32, seed: i32) -> i32;
+
+    pub fn zax_set_input(pad1: u8, pad2: u8) -> i32;
+    pub fn zax_run_frame() -> i32;
+    pub fn zax_frame_count() -> i64;
+    pub fn zax_get_frame_indices(out: *mut u8, out_len: usize) -> i32;
+    pub fn zax_get_frame_emphasis(out: *mut u8, out_len: usize) -> i32;
+    pub fn zax_set_sample_rate(rate: i32) -> i32;
+    pub fn zax_get_sample_rate() -> i32;
+    pub fn zax_get_audio(out: *mut i16, out_len: usize) -> i32;
+
+    pub fn zax_state_size_hint() -> i32;
+    pub fn zax_save_state(out: *mut u8, out_len: usize, written: *mut usize) -> i32;
+    pub fn zax_load_state(data: *const u8, data_len: usize) -> i32;
+
+    pub fn zax_read_memory(address: u16) -> i32;
+    pub fn zax_write_memory(address: u16, value: u8) -> c_int;
+}

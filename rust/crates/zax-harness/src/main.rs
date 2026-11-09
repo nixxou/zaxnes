@@ -11,6 +11,8 @@ use zax_harness::{
     bench_core, classify, compare, golden_core, lua_api, meshes, packs, profile_tool, render,
     test_roms, HarnessError,
 };
+#[cfg(feature = "fceux-core")]
+use zax_harness::{fceux_compare, fceux_run};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness test-roms <roms dir> <out.json> [--filter <substring>] [options]
@@ -23,7 +25,9 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness profile-dump <file.3dn> [--tiles] (the patterns and their 3D looks)
        zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)
        zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
-       zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)";
+       zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)
+       zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
+       zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -98,6 +102,16 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!("{}", classify::run(&classify::Options::parse(rest)?)?);
             Ok(())
         }
+        #[cfg(feature = "fceux-core")]
+        [command, roms, out_path, rest @ ..] if command == "fceux-run" => {
+            fceux_run::command(roms, out_path, rest)
+        }
+        #[cfg(feature = "fceux-core")]
+        [command, rest @ ..] if command == "fceux-compare" => {
+            let options = fceux_compare::Options::parse(rest)?;
+            print!("{}", fceux_compare::run(&options)?);
+            Ok(())
+        }
         #[cfg(feature = "vs-system")]
         [command, rest @ ..] if command == "vs" => {
             let options = vs::Options::parse(rest)?;
@@ -121,15 +135,21 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
 ///
 /// Apart from `run` (LUA-MERGE: both sides of the merge added subcommands to it — `test-roms`
 /// and `vs` on one side, `classify` on the other — and together they took it past the hundred
-/// lines clippy allows).
+/// lines clippy allows). Each command's paragraph joins the list only when it exists in this
+/// build.
 fn print_help() {
     // The `vs` usage joins the list only when the command exists.
     #[cfg(feature = "vs-system")]
     let vs_usage = format!("\n\n{}", vs::USAGE);
     #[cfg(not(feature = "vs-system"))]
     let vs_usage = String::new();
+    // And the two FCEUX commands only in a build with the engine.
+    #[cfg(feature = "fceux-core")]
+    let fceux_usage = format!("\n\n{}\n\n{}", fceux_run::USAGE, fceux_compare::USAGE);
+    #[cfg(not(feature = "fceux-core"))]
+    let fceux_usage = String::new();
     println!(
-        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
+        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
         test_roms::USAGE,
         meshes::USAGE,
         lua_api::USAGE,

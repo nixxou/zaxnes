@@ -67,7 +67,7 @@ pub fn run(roms_dir: &Path, out_path: &Path, frames: u32) -> Result<Summary, Har
     })
 }
 
-fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError> {
+pub(crate) fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
         if path.is_dir() {
@@ -84,7 +84,7 @@ fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError
 }
 
 /// The path of `file` below `root`, with `/` separators.
-fn relative_name(root: &Path, file: &Path) -> String {
+pub(crate) fn relative_name(root: &Path, file: &Path) -> String {
     file.strip_prefix(root)
         .unwrap_or(file)
         .components()
@@ -254,7 +254,7 @@ fn tiles_hash(records: &[TileRecord]) -> String {
     format!("{}:{}", records.len(), hex(&hasher.finalize()))
 }
 
-fn hex(digest: &[u8]) -> String {
+pub(crate) fn hex(digest: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     digest
         .iter()

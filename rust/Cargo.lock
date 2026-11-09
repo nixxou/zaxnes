@@ -2091,6 +2091,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-fceux"
+version = "0.5.0"
+
+[[package]]
 name = "zax-goldens"
 version = "0.5.0"
 dependencies = [
@@ -2105,6 +2109,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "zax-engine3d",
+ "zax-fceux",
  "zax-goldens",
  "zax-nes",
  "zax-profiles",
