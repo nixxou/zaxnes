@@ -172,7 +172,10 @@ fn sixty_frames_of_nestest_match_the_c_self_tests_digests() {
     assert_eq!(
         (pixel_hash, emphasis_hash, audio_hash, samples),
         (
-            0x41b3_9d5f_f800_2a11,
+            // The pixel digest moved once step 5 stopped FCEUX drawing its own "Power on" and
+            // "Reset" captions into the frame (`vidGuiMsgEna`); the emphasis and audio digests
+            // did not, which is exactly what an OSD-only change predicts.
+            0xe455_081e_6a3e_efe9,
             0xd395_e456_e4e7_2325,
             0x7fc1_0a9c_e4ed_8fcd,
             47_917
@@ -398,4 +401,31 @@ fn the_error_codes_match_the_forks_header() {
     }
 
     assert_eq!(FRAME_LEN, zax_fceux::FRAME_WIDTH * zax_fceux::FRAME_HEIGHT);
+}
+
+/// How many ROMs one process can load before FCEUX falls over.
+///
+/// Not a feature test: a **measurement** of a limit lot FCEUX-1 found the hard way, when
+/// `fceux-run` segfaulted part-way through the 291 public ROMs. `#[ignore]`d because it is slow
+/// and because its job is to be run deliberately and have its number read.
+#[test]
+#[ignore = "a measurement, run it deliberately: cargo test -- --ignored how_many"]
+fn how_many_loads_one_process_survives() {
+    let _serial = lock();
+    let Some(rom) = nestest() else { return };
+    let image = std::fs::read(&rom).expect("nestest.nes");
+
+    let mut fceux = Fceux::new().expect("an instance");
+    for load in 1..=400u32 {
+        if let Err(error) = fceux.load_rom(&image, "nestest.nes") {
+            panic!("load {load} failed: {error}");
+        }
+        for _ in 0..2 {
+            fceux.run_frame().expect("a frame");
+        }
+        if load % 50 == 0 {
+            eprintln!("{load} loads of the same ROM survived");
+        }
+    }
+    eprintln!("400 loads of the same ROM survived");
 }

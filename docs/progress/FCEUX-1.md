@@ -18,7 +18,8 @@ a design note for the lots that would follow.
 - [x] 4/8 — The Rust side: crate `zax-fceux` behind the Cargo feature `fceux-core` (off by
   default), plus `zax-harness fceux-run` writing `golden-core`'s digests and `fceux-compare`.
   Worktree `ed74ea0e`, fork `5866fac0`.
-- [ ] 5/8 — Compare the engines over the 291 public test ROMs and the 98 originals.
+- [x] 5/8 — Compare the engines over the 291 public test ROMs and the 98 originals.
+  `docs/review/FCEUX-ENGINE-COMPARISON.md`; fork `237a33b3`.
 - [ ] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path.
 - [ ] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`.
 - [ ] 8/8 — Final pass.
@@ -610,3 +611,149 @@ and nothing else, GPL-2.0-**or-later** may be used under Zaxnes's GPL-3.0 so the
 GPL-3.0 either way of linking — and that **distributing a binary with the library requires the
 fork's complete corresponding source to travel with it**, which is why FCEUX's history is kept
 intact there. The vendored zlib 1.1.4 and minizip the fork compiles are named too.
+
+---
+
+# Step 5 — Comparing the engines
+
+The tables are `docs/review/FCEUX-ENGINE-COMPARISON.md` (535 lines, per ROM). Worktree commit
+below; fork commit `237a33b3`.
+
+Both engines are driven identically — 1200 frames, no button pressed, a reset after loading,
+48 kHz, FCEUX's deterministic default RAM fill — so a difference is the engines' and not the
+harness's. The pictures compared are the **same quantity on both sides**: the SHA-256 of the
+256×240 image of NES colour indices, 0-63 a pixel.
+
+## The headline numbers
+
+| | 291 public test ROMs | 98 original games |
+|---|---|---|
+| loaded by both | 289 | 98 |
+| refused by both | 1 (`other/LINUSMUS.NES`, a corrupt header both reject) | 0 |
+| took the FCEUX engine down | **1** (`other/oam3.nes`) | 0 |
+| identical picture at frame 1 | 287 / 289 (99%) | 98 / 98 (100%) |
+| identical at frame 60 | 183 / 289 (63%) | 65 / 98 (66%) |
+| identical at frame 300 | 161 / 289 (56%) | 61 / 98 (62%) |
+| identical at frame 1200 | 162 / 289 (56%) | 65 / 98 (66%) |
+| identical at **60, 300 and 1200** | **157 / 289** | **44 / 98** |
+
+**The test ROMs' own verdicts**, which outrank every digest — 113 ROMs run blargg's `$6000`
+protocol and report on both engines:
+
+| | Zaxnes | FCEUX |
+|---|---|---|
+| passed | **95** | **58** |
+
+Same status code on both: 70. Passed by Zaxnes but not FCEUX: **37**. Passed by FCEUX but not
+Zaxnes: **0**. On this suite Zaxnes's core is the more accurate of the two everywhere the ROMs can
+tell, which is worth knowing before FCEUX is offered as a fallback: it is a fallback for
+*coverage* (the ~270 mappers, the `.fm2` movies), not for accuracy.
+
+Where they differ, by mapper: on the originals, MMC1 ×22, MMC3 ×11, UxROM ×10, NROM ×8, CNROM ×3 —
+no single board stands out, which is what one expects of CPU/PPU timing rather than a mapper bug.
+Among the games whose pictures agree at all three checkpoints are the whole *Mega Man 3/4/5/6* and
+*Blaster Master* families; among those that differ, every *Castlevania* dump (at all three) and
+every *Excitebike* (at 1200 only).
+
+## The two real findings
+
+### 1. FCEUX was drawing its own captions into the frame
+
+The first run of the comparison was unreadable: **no** ROM matched at frame 1 or frame 60, yet
+over half matched at frame 300. A hash cannot tell a one-pixel timing difference from a wholly
+different screen, so a measurement was needed, and it is now a kept tool —
+`crates/zax-harness/tests/fceux_engine_diff_tests.rs`, `#[ignore]`d, which runs both engines in one
+process and *counts* differing pixels and rows.
+
+It gave the answer immediately: **exactly 307 differing pixels over 11 rows on every ROM**, the
+same count for a still screen and a scrolling one, gone by frame 300. No emulation difference
+looks like that. `FCEU_PutImage` runs at the end of every frame (`fceu.cpp:840`) and draws FCEUX's
+own message text straight into `XBuf` — "Power on", "Reset", "NTSC mode set" — each for 180 frames
+(`video.cpp:404-406`), which is where the expiry at frame 300 comes from.
+
+Fixed in the fork by clearing `vidGuiMsgEna` and `movieSubtitles` in `zax_create`
+(`video.cpp:75`, `fceu.cpp:116`). A host that takes the frame for its own compositing must not be
+handed emulator captions baked into the picture — this was a defect in the C API, not merely a
+comparison artefact. Afterwards five of the six measured ROMs agree with Zaxnes
+**pixel-for-pixel** at frames 1, 60, 300 and 1200, and the suite goes from 0 to 287 of 289 at
+frame 1. The only digest that moved was the pixel one; emphasis and audio were untouched, exactly
+as an OSD-only change predicts.
+
+### 2. FCEUX corrupts the heap on `other/oam3.nes`, and hangs rather than dying
+
+`other/oam3.nes` (mapper 7, AxROM) kills the process from about 300 frames in. On Windows it is
+`0xC0000374`, `STATUS_HEAP_CORRUPTION`. An ASAN build of the fork on Linux
+(`build-asan`, `-fsanitize=address`) named it exactly:
+
+```
+ERROR: AddressSanitizer: heap-buffer-overflow ... WRITE of size 1
+    #0 B2007                 src/ppu.cpp:978
+    #1 WrMem                 src/x6502.cpp:173
+    ...
+0x519000000e80 is located 0 bytes after 1024-byte region
+allocated by thread T0 here:
+    #3 iNES_Init             src/ines.cpp:1220
+```
+
+A **one-byte overflow** in `$2007`'s CHR-RAM write, `VPage[tmp >> 10][tmp] = V`
+(`ppu.cpp:978`), past the end of the CHR-RAM `iNES_Init` allocated. The cause is visible at
+`ines.cpp:1217-1222`: the allocation is padded up to 1 KiB — the comment there says the padding
+exists "to prevent malicious access from NES software" — but `SetupCartCHRMapping` is then called
+with the **unpadded** `CHRRAMSize`, so a 1 KiB-granular `VPage` index can still reach
+`VROM[1024]`.
+
+**This is upstream FCEUX's, not ours.** Every frame of the trace is FCEUX's own code; no stub and
+no patch of this fork appears in it, and the path is reached by the plain API with nothing unusual
+asked of it. The obvious one-line fix is to pass `mCHRRAMSize` to `SetupCartCHRMapping` — but that
+changes how a cart with sub-1 KiB CHR-RAM mirrors, which is an emulation decision on exotic
+hardware, so it is **recorded here and left to the owner** rather than taken unilaterally in a
+proof-of-concept lot.
+
+What *was* done is to make the harness survive it, which it has to either way:
+
+- `fceux-run` over a directory now gives **each ROM its own child process**, so a ROM FCEUX cannot
+  survive costs one row (`engine_crashed: true`, with the name, hash and mapper the parent can
+  record without running it) instead of the whole sweep. `--in-process` turns it off.
+- Each child gets a **deadline** (`wait_or_kill`). This is not belt-and-braces: started from a
+  shell the crashing child aborted in two seconds, but as a child of the harness it **hung for
+  ever** — Windows' fault reporting waiting on something that was never going to answer. Without
+  the deadline one bad ROM stalls a 291-ROM sweep, which is how it was first seen (two runs
+  stopping dead at exactly 210 rows).
+
+Before the isolation, a single in-process sweep lost everything after row 210. With it, all 291
+rows are produced in 1 min 26 s.
+
+### An aside that was *not* a finding
+
+A measurement early on suggested state accumulating across loads, because the crash moved
+depending on which ROMs had run. It was a red herring: `how_many_loads_one_process_survives`
+(kept, `#[ignore]`d) loads the same ROM **400 times** in one process without trouble. Heap
+corruption is simply detected at an arbitrary later allocation, so the ROM named in the truncated
+row was never the culprit.
+
+## The default build is unchanged
+
+The guarantee the owner asked for, established three ways:
+
+1. `golden-core` over the **291 public ROMs** with the feature off is **byte-identical** to
+   `rust/goldens/core-goldens.jsonl` — and that file *is* the base commit's own recorded output,
+   so this is a direct comparison against `c0a97023`, not a proxy. `cmp -s` reports no difference
+   across all 291 rows.
+2. `git diff c0a97023..HEAD -- rust/crates/zax-nes` is **empty**. The core is untouched.
+3. The only change to `golden_core.rs` is three `fn` → `pub(crate) fn` markers on `collect_roms`,
+   `relative_name` and `hex`, so that `fceux-run` walks the ROMs through the *same* code and the
+   two engines can never disagree about the order. No logic changed; the diff is three lines.
+
+The 98 originals were run at HEAD with the feature off (98/98 loaded) and are the input to the
+table above; there is no committed baseline for them, so point 1 above is the byte-for-byte proof
+and points 2 and 3 are why it extends to any ROM set.
+
+## Checks at this step
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| clippy `-D warnings`, feature off and on | clean both ways |
+| `cargo test -p zax-fceux --features fceux-core --release` | 13 passed, 1 ignored |
+| `cargo test -p zax-harness --features fceux-core --release` | all green |
+| the C self-test, Windows and Linux | identical digests: pixels `e455081e6a3eefe9`, emphasis `d395e456e4e72325`, audio `7fc10a9ce4ed8fcd` over 47917 samples |

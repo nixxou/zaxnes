@@ -25,6 +25,8 @@
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::process::{Command, ExitStatus};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -34,9 +36,12 @@ use zax_nes::rom::InesHeader;
 use crate::golden_core::{collect_roms, hex, relative_name};
 use crate::HarnessError;
 
-pub const USAGE: &str = "zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames]
+pub const USAGE: &str =
+    "zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] [--in-process]
     Runs every ROM on the FCEUX engine and writes golden-core's digests, so the two engines
-    can be compared row by row. Needs the `fceux-core` feature and a built fork.";
+    can be compared row by row. Needs the `fceux-core` feature and a built fork.
+    A directory run gives each ROM its own child process, because FCEUX can take the process
+    down on some ROMs (see the module docs); --in-process turns that off.";
 
 /// Frames at which the digests are recorded — `golden_core::CHECKPOINTS`, repeated here because
 /// that one is private to it and the two lists must never drift.
@@ -45,10 +50,13 @@ const CHECKPOINTS: [u32; 7] = [1, 60, 300, 600, 1200, 1800, 3600];
 /// What an `fceux-run` did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
-    /// ROMs that loaded and ran.
+    /// ROMs that loaded and ran to the end.
     pub run: usize,
     /// `.nes` files found.
     pub files: usize,
+    /// ROMs whose child process did not come back (always 0 for an in-process run, which has no
+    /// way to survive one).
+    pub crashed: usize,
 }
 
 /// The command line: `<roms dir|rom.nes> <out.jsonl> [frames]`, run and reported.
@@ -57,20 +65,160 @@ pub struct Summary {
 ///
 /// [`HarnessError::Usage`] when the frame count is not a number, or whatever [`run`] returns.
 pub fn command(roms: &str, out_path: &str, rest: &[String]) -> Result<(), HarnessError> {
-    let frames = match rest {
-        [] => crate::golden_core::DEFAULT_FRAMES,
-        [count] => count
-            .parse()
-            .map_err(|_| HarnessError::Usage(format!("{count:?} is not a frame count\n{USAGE}")))?,
-        _ => return Err(HarnessError::Usage(USAGE.to_owned())),
+    let mut frames = crate::golden_core::DEFAULT_FRAMES;
+    let mut in_process = false;
+    for argument in rest {
+        if argument == "--in-process" {
+            in_process = true;
+        } else {
+            frames = argument.parse().map_err(|_| {
+                HarnessError::Usage(format!("{argument:?} is not a frame count\n{USAGE}"))
+            })?;
+        }
+    }
+
+    let roms = Path::new(roms);
+    let summary = if roms.is_dir() && !in_process {
+        run_isolated(roms, Path::new(out_path), frames)?
+    } else {
+        run(roms, Path::new(out_path), frames)?
     };
 
-    let summary = run(Path::new(roms), Path::new(out_path), frames)?;
     println!(
-        "fceux-run: {} ROMs run, {} files, {frames} frames each -> {out_path}",
-        summary.run, summary.files
+        "fceux-run: {} ROMs run, {} files, {frames} frames each{} -> {out_path}",
+        summary.run,
+        summary.files,
+        if summary.crashed == 0 {
+            String::new()
+        } else {
+            format!(", {} took the engine down", summary.crashed)
+        }
     );
     Ok(())
+}
+
+/// One child process per ROM, so that a ROM FCEUX cannot survive costs one row instead of the
+/// whole run.
+///
+/// The child is this same executable with the single-ROM form of the command, which is why that
+/// form exists. A child that dies gets a row of its own saying so, built from what the parent
+/// knows (the name, the image's hash, the header's mapper) — enough for the comparison to show
+/// the ROM and what happened to it.
+///
+/// # Errors
+///
+/// [`HarnessError`] when the ROM directory cannot be walked, or the output cannot be written.
+pub fn run_isolated(roms: &Path, out_path: &Path, frames: u32) -> Result<Summary, HarnessError> {
+    let mut files = Vec::new();
+    collect_roms(roms, &mut files)?;
+    files.sort_by_key(|file| relative_name(roms, file));
+
+    let executable = std::env::current_exe()?;
+    let scratch = out_path.with_extension("one.jsonl");
+
+    let mut writer = BufWriter::new(fs::File::create(out_path)?);
+    let mut ran = 0;
+    let mut crashed = 0;
+    // A child must not be able to stall the sweep. A healthy ROM takes well under a second for
+    // 1200 frames, so this is generous by three orders of magnitude and only ever hits a child
+    // that is not coming back.
+    let budget = Duration::from_secs(60 + u64::from(frames) / 20);
+
+    for file in &files {
+        let name = relative_name(roms, file);
+        let status = Command::new(&executable)
+            .arg("fceux-run")
+            .arg(file)
+            .arg(&scratch)
+            .arg(frames.to_string())
+            .arg("--in-process")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .and_then(|child| wait_or_kill(child, budget));
+
+        // The child wrote the row under the ROM's own file name; put the name the directory walk
+        // gives it back, so both engines' files key on the same string.
+        let row = match (status, fs::read_to_string(&scratch)) {
+            (Ok(status), Ok(text)) if status.success() => text
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .and_then(|line| serde_json::from_str::<Value>(line).ok())
+                .map(|mut row| {
+                    if let Value::Object(fields) = &mut row {
+                        fields.insert("rom".into(), json!(name));
+                    }
+                    row
+                }),
+            _ => None,
+        };
+
+        let row = row.unwrap_or_else(|| {
+            crashed += 1;
+            crashed_row(&name, file, frames)
+        });
+        if row.get("load_ok") == Some(&Value::Bool(true)) && row.get("engine_crashed").is_none() {
+            ran += 1;
+        }
+
+        serde_json::to_writer(&mut writer, &row).map_err(std::io::Error::from)?;
+        writer.write_all(b"\n")?;
+    }
+
+    writer.flush()?;
+    let _ = fs::remove_file(&scratch);
+    Ok(Summary {
+        run: ran,
+        files: files.len(),
+        crashed,
+    })
+}
+
+/// Waits for `child`, killing it if it outstays `budget`.
+///
+/// `std` has no wait-with-timeout, so this polls. It exists because a crashing child does **not**
+/// reliably die: when FCEUX corrupted the heap under `other/oam3.nes` the child aborted cleanly
+/// when started from a shell, but hung for ever as a child of this process — Windows' fault
+/// reporting waiting on something that is never going to answer. Without this, one bad ROM stalls
+/// a 291-ROM sweep instead of costing it one row.
+fn wait_or_kill(mut child: std::process::Child, budget: Duration) -> std::io::Result<ExitStatus> {
+    let deadline = Instant::now() + budget;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            return child.wait();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The row of a ROM whose child process did not come back: everything the parent can know
+/// without running it, plus the fact that the engine died.
+fn crashed_row(name: &str, file: &Path, frames: u32) -> Value {
+    let mut row = Map::new();
+    row.insert("rom".into(), json!(name));
+    match fs::read(file) {
+        Ok(image) => {
+            row.insert("rom_sha256".into(), json!(hex(&Sha256::digest(&image))));
+            row.insert(
+                "mapper".into(),
+                InesHeader::try_parse(&image).map_or(Value::Null, |header| json!(header.mapper)),
+            );
+        }
+        Err(error) => {
+            row.insert("rom_read_error".into(), json!(error.to_string()));
+        }
+    }
+    row.insert("load_ok".into(), json!(false));
+    row.insert("frames".into(), json!(frames));
+    row.insert("engine_crashed".into(), json!(true));
+    row.insert(
+        "run_error".into(),
+        json!("the FCEUX engine took its process down or stopped answering; the row is what the               parent could record without running it"),
+    );
+    Value::Object(row)
 }
 
 /// Runs the command: one row per `.nes` file under `roms`, in the same ordinal path order
@@ -113,6 +261,7 @@ pub fn run(roms: &Path, out_path: &Path, frames: u32) -> Result<Summary, Harness
     Ok(Summary {
         run: ran,
         files: files.len(),
+        crashed: 0,
     })
 }
 
