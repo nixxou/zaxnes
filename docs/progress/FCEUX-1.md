@@ -15,8 +15,9 @@ a design note for the lots that would follow.
 - [x] 2/8 — The fork and a core-only build: FCEUX's core as a library with no GUI, no Lua, no Qt,
   no SDL, for Windows x64 (MSVC) then Linux x64 (WSL). Fork commit `14ef77cf`.
 - [x] 3/8 — A minimal C API (`zax/zaxfceux.h` + `.cpp` in the fork). Fork commit `d81b904f`.
-- [ ] 4/8 — The Rust side: crate `zax-fceux` behind the Cargo feature `fceux-core` (off by
-  default), plus a `zax-harness fceux-run` subcommand writing `golden-core`'s digests.
+- [x] 4/8 — The Rust side: crate `zax-fceux` behind the Cargo feature `fceux-core` (off by
+  default), plus `zax-harness fceux-run` writing `golden-core`'s digests and `fceux-compare`.
+  Worktree `ed74ea0e`, fork `5866fac0`.
 - [ ] 5/8 — Compare the engines over the 291 public test ROMs and the 98 originals.
 - [ ] 6/8 — Tile-capture prototype in the fork (old PPU), fed to Zaxnes's 3D path.
 - [ ] 7/8 — Design note `docs/review/FCEUX-ENGINE.md`.
@@ -475,3 +476,137 @@ pipeline is running at the right rate rather than at a nominal 60.
 It also checks the two refusals the ABI promises: a second `zax_create` returns
 `ZAX_ERR_ALREADY_LIVE`, and a short frame buffer returns `ZAX_ERR_BUFFER_TOO_SMALL` instead of
 being quietly truncated.
+
+---
+
+# Step 4 — The Rust side
+
+Worktree commit `ed74ea0e`; fork commit `5866fac0`.
+
+## `zax-fceux`, and what "off by default" actually costs
+
+`rust/crates/zax-fceux` wraps the fork's C API. With the feature **off**:
+
+- `src/lib.rs` is three `#[cfg]`s and nothing else — no `unsafe`, no FFI, no module compiled;
+- `build.rs` returns before emitting a single link directive (it checks
+  `CARGO_FEATURE_FCEUX_CORE`, because Cargo runs a build script whatever the features are);
+- `Cargo.lock` gains **only the workspace crate itself** — `git diff rust/Cargo.lock` is four
+  added lines and one dependency edge, no new external package;
+- `zax-nes` is untouched, and `zax-app` does not reference the crate at all.
+
+`unsafe` lives in exactly two files, `src/sys.rs` (the `extern "C"` declarations) and
+`src/core.rs` (the calls), each block with a `// SAFETY:` comment naming the C API precondition it
+leans on. `#![cfg_attr(not(feature = "fceux-core"), forbid(unsafe_code))]` makes the feature-off
+build prove it.
+
+The safe handle is `Fceux`: `Send` but **not `Sync`**, through a `PhantomData<Cell<()>>`. That is
+exactly the C API's rule — the handle may *move* between threads, which is what `zax-app` does
+with `Box<NesCore>` (`core_worker.rs:83`), but the library must never be entered from two at once.
+`Fceux::new` returns `Error::AlreadyLive` while another handle exists, and `Drop` destroys the
+instance so a new one can be made.
+
+## Why the build script does not build the library
+
+FCEUX's sources live only in the fork, and the fork's CMake project is the one build system for
+them. Duplicating its ~240-file source list in Rust would be a second place to keep right, and
+driving CMake from inside `cargo build` would need CMake on `PATH` — on Windows it ships inside
+Visual Studio and is not there. So the script **finds** the built library and links it, looking in
+`ZAX_FCEUX_LIB`, then `ZAX_FCEUX_DIR`, then a `fceux-zax` directory beside any ancestor of the
+crate (the fork is a sibling of the worktree in a normal checkout). Not found ⇒ it prints the
+exact command to run and exits 1. Nothing is ever downloaded.
+
+## The one real trap of this step: the CRT
+
+`rust/.cargo/config.toml` links the MSVC C runtime **statically** (`+crt-static`) on purpose, so
+that no `VCRUNTIME140.dll` or UCRT redistributable has to sit beside `zaxnes.exe`. The fork's CMake
+defaulted to `/MD`. A `/MD` static library does not link into a `/MT` binary: its objects ask for
+the `__imp_*` import symbols of the dynamic CRT, which the static one does not provide, and the
+result was **47 unresolved externals** on `toupper`, `realloc`, `fgets`, `_aligned_malloc` and
+friends — a wall of errors with nothing in it to suggest the cause. The fork now sets
+`CMAKE_MSVC_RUNTIME_LIBRARY` to the static runtime, under
+`option(ZAX_MSVC_STATIC_RUNTIME ... ON)` so a host that links the CRT dynamically can turn it off.
+
+## `zax-harness fceux-run` and `fceux-compare`
+
+Both behind the harness's own `fceux-core` pass-through (`dep:zax-fceux` + the crate's feature),
+so with it off neither module nor the dependency exists.
+
+`fceux-run <roms dir|rom.nes> <out.jsonl> [frames]` writes `golden-core`'s rows from FCEUX, in the
+same ordinal path order (it reuses `golden_core`'s own `collect_roms` and `relative_name`, now
+`pub(crate)`, so the two engines can never walk the ROMs differently). Comparable key by key:
+
+| Key | Comparable? |
+|---|---|
+| `pixel_sha256` | **yes** — both engines hash the identical 256×240 image of NES colour indices (0-63 a pixel) |
+| `audio_i16_sha256_samples` | the *format* is identical (little-endian `i16`, running hash, `"<hex>:<count>"`); the values differ by design, so only the counts are compared |
+| `blargg_status`, `blargg_text` | **yes**, and these outrank every digest: it is the ROM's own verdict |
+| `rom`, `rom_sha256`, `mapper`, `load_ok`, `region`, `sample_rate`, `frames` | yes |
+| `emphasis_sha256` | new here; Zaxnes's goldens have no counterpart |
+
+Three keys are **absent by necessity**, and `fceux_run.rs` says so at the top rather than leaving
+a reader to wonder: `tiles_sha256` (FCEUX produces no tile records — that is step 6), `cycles`
+(the C API exposes no cycle count, and the two cores count from different origins, so a number
+there would compare unlike things; `frames_run` is published instead), and `region` is reported as
+*the region the frames actually ran at* on each side, since FCEUX applies the ROM's region at load
+while `zax-nes` detects one without applying it.
+
+Determinism: the RAM fill is pinned to FCEUX's deterministic default pattern and the rate to
+48 kHz, `zax-nes`'s own default (`apu::DEFAULT_SAMPLE_RATE`), so two runs give the same file.
+
+`fceux-compare <zaxnes.jsonl> <fceux.jsonl> [--frames a,b,c] [--all]` puts the two side by side.
+**Information, not a gate** — two independent emulators disagreeing on a pixel is the expected
+case. It leads with the test ROMs' own verdicts, then the pictures, then the sample counts.
+
+## The tests, and what the failing one found
+
+13 tests, all passing, serialised by a `Mutex` because there is one emulator per process whatever
+`--test-threads` says. They cover the one-instance rule, a frame before any ROM, a bad image (and
+that the refusal carries the core's own words), an empty image and a name with a NUL, the
+savestate round trip, memory, the three deterministic RAM fills, the region override, the four
+accepted sample rates, and `the_error_codes_match_the_forks_header` — which reads the fork's
+`zaxfceux.h` and checks all nineteen constants, so a drift in the hand-copied `sys.rs` is a test
+failure rather than a wrong answer at run time.
+
+The important one is `sixty_frames_of_nestest_match_the_c_self_tests_digests`: the wrapper must see
+**exactly** what `zax/zaxselftest.c` sees over the same 60 frames.
+
+| | Value |
+|---|---|
+| pixels | `41b39d5ff8002a11` |
+| emphasis | `d395e456e4e72325` |
+| audio | `7fc10a9ce4ed8fcd` over **47917** samples |
+
+It failed the first time with the sample count matching exactly and all three content digests
+differing — which is the signature of a hashing difference, not an emulation one. The cause was in
+the **C** program: its FNV-1a offset basis was written `1469598103934665603`, one digit short of
+`14695981039346656037`, so its digests were its own and comparable with nothing. The Rust side was
+right. Two smaller things came out of the same look: the self-test now passes the ROM's *basename*
+rather than the path it was found at (a digest must not depend on where a file sits), and both
+sides keep a sentinel in work RAM across the savestate round trip — nestest's menu is a still
+picture, so comparing two frames of it proved nothing at all.
+
+## Checks at this step
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy -p zax-fceux -p zax-harness --all-targets -- -D warnings`, feature **off** | clean |
+| the same with `--features zax-harness/fceux-core` | clean |
+| `cargo test -p zax-fceux -p zax-harness --release`, feature off | all green, nothing failed |
+| `cargo test -p zax-fceux --features fceux-core --release` | 13 passed |
+
+Two clippy fixes worth naming, since both changed real code rather than silencing it:
+`save_state_into`'s retry was written as a two-element `for` loop every branch of which returned
+(`never_loops`), and is now a plain first attempt plus one retry on `BufferTooSmall`, with the
+needed length carried in the error; and `zax-harness`'s `run` had reached clippy's 100-line
+budget, so the long help text moved into its own `help()` and the `fceux-run` arm's body into
+`fceux_run::command`.
+
+## A licence entry
+
+`THIRD-PARTY-NOTICES.md` gains an FCEUX section (in the document's language), saying what matters:
+no FCEUX code is in Zaxnes's sources, it lives only in the fork, the Rust side talks to the C API
+and nothing else, GPL-2.0-**or-later** may be used under Zaxnes's GPL-3.0 so the combined work is
+GPL-3.0 either way of linking — and that **distributing a binary with the library requires the
+fork's complete corresponding source to travel with it**, which is why FCEUX's history is kept
+intact there. The vendored zlib 1.1.4 and minizip the fork compiles are named too.
