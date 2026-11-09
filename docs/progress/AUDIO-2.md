@@ -28,7 +28,7 @@ defaults to the new one.
       without a device, and the classic output reproducing `v0.4.2`'s block behaviour.
 - [x] **5. Measurements.** Main-thread frame time at `1c2b4639` and here, 2D and 3D, desktop
       release build, with each output; golden-core against `1c2b4639`.
-- [ ] **6. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
+- [x] **6. Final pass.** fmt, clippy `-D warnings`, `cargo test --release`, the ignored tests
       with the ROM variables, journal entry.
 
 The protocol's "progress file in the same commit" cannot hold for step 2: that step's commit
@@ -353,3 +353,52 @@ The four profiler logs and the two baseline ones are in the session scratchpad (
 G: was at 4,9 GB when the step began — the floor the work order sets — and `target-au2/debug/incremental`
 (4,3 GB, pure build cache) was dropped before anything was built; it ended at 8,5 GB with the
 baseline tree deleted.
+
+### Step 6 — the final pass
+
+| check | result |
+| --- | --- |
+| `cargo fmt --check` | clean |
+| `cargo clippy --release -p zax-platform -p zax-settings -p zax-app --all-targets --features zax-app/bundled -- -D warnings` | clean, and no `#[allow]` was added to silence anything |
+| `cargo test --release -p zax-platform -p zax-settings -p zax-app --features zax-app/bundled --no-fail-fast -- --include-ignored`, with `ZAXNES_ROMS=G:/3dsen/demo/roms` and `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` | **1 067 passed, 0 failed, 0 ignored** over 69 test binaries |
+| golden-core over the 98 originals | `f79e7df842c3ee43e7d9b67861a927b5`, **byte-identical to `1c2b4639`'s**, `cmp` on the files |
+| frame time, both outputs | see step 5: neither costs more than noise; the classic one reads `1c2b4639`'s own 0,01 ms |
+| Android / `PortMaster` | the two feature sets `cargo check` clean; the `aarch64-linux-android` target is not checkable here |
+| journal | `G:/3dsen/cleanroom/journal/JOURNAL.md`, entry of 2026-11-09 |
+
+The ignored count came out at **zero**, so nothing passed vacuously: every ROM-gated test really
+ran with both roots.
+
+#### Three failures of the core suite that are not this lot's
+
+`cargo test --release -p zax-nes -p zax-harness -- --include-ignored` was run as well, although the
+work order does not ask for it (neither crate is touched), and it comes out **1 213 passed, 3
+failed**:
+
+* `zax-harness::golden_core_tests::golden_core_reproduces_the_golden_rows`
+* `zax-nes::ppu_golden_tests::golden_pixels_tiles_audio_and_cycles_match_up_to_frame_60`
+* `zax-nes::ppu_golden_tests::golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200`
+
+**They fail identically at `1c2b4639`.** Measured, not assumed: `1c2b4639` was extracted again with
+`git archive`, `rust/test-roms` copied in (the two tests read that path directly and ignore
+`ZAXNES_TEST_ROMS`, which is why they *skip* in a bare archive and why a careless comparison would
+have read as a pass), and the suite run there — **1 213 passed, 3 failed**, the same three names,
+the same list of 43 mismatching ROMs to the line, and the same row
+`mmc3_irq_tests/1.Clocking.nes` with the golden's 1 786 833 cycles against the tree's 1 786 835 and
+the same audio digests on both sides.
+
+So the goldens of `rust/goldens/core-goldens.jsonl` — last written by `a2d6d479` (RU-3a) — disagree
+with the core as `dev` now stands, on IRQ-timing test ROMs. This lot cannot be the cause:
+`git diff 1c2b4639` over `zax-nes`, `zax-harness` and `zax-goldens` is empty, and golden-core over
+the 98 originals is byte-identical. It is raised here for whoever owns the core, and left alone:
+touching a core golden is not this lot's business.
+
+#### Summary
+
+* `dev` carries the AUDIO-1 output, and it is what the program opens.
+* `v0.4.2`'s output is beside it, behind `audio.classic_output`, off by default, in both
+  interfaces and both languages, reopening the device when it changes.
+* The emulation core did not change: golden-core byte-identical, `zax-nes` untouched.
+* Neither output costs more than noise on the main thread.
+* One real defect was found and fixed on the way (step 5), and it was the measurement that found
+  it.
