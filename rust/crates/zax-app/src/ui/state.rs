@@ -31,6 +31,8 @@ pub struct UiState {
     pub hacks: bool,
     /// The achievements of the game in play (Rust-only).
     pub achievements: bool,
+    /// The shaders window (Rust-only).
+    pub shaders: bool,
 }
 
 impl UiState {
@@ -75,6 +77,7 @@ impl UiState {
             || self.movie_note
             || self.hacks
             || self.achievements
+            || self.shaders
     }
 
     /// Closes every window (Escape).
@@ -88,5 +91,6 @@ impl UiState {
         self.movie_note = false;
         self.hacks = false;
         self.achievements = false;
+        self.shaders = false;
     }
 }

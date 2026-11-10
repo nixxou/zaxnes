@@ -15,6 +15,7 @@ mod movie_bar;
 mod options;
 mod overlay;
 mod pens;
+mod shaders;
 
 use std::path::{Path, PathBuf};
 
@@ -160,6 +161,8 @@ pub struct ZaxUi {
     import_dialog: Option<(ProfileImportPlan, ProfileImportDialog)>,
     /// The movie bar (EDITOR-1).
     movie_bar: movie_bar::MovieBar,
+    /// The fields of the shaders window.
+    shader_window: shaders::ShaderWindow,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -207,6 +210,7 @@ impl ZaxUi {
             effects: Vec::new(),
             import_dialog: None,
             movie_bar: movie_bar::MovieBar::default(),
+            shader_window: shaders::ShaderWindow::default(),
         }
     }
 
@@ -306,6 +310,9 @@ impl ZaxUi {
         }
         if self.state.options {
             self.draw_options(ui, frame.host);
+        }
+        if self.state.shaders {
+            self.draw_shaders(ui, frame.host);
         }
         if self.state.key_config {
             self.draw_key_config(ui, frame);
@@ -437,6 +444,7 @@ impl ZaxUi {
             }
             // RO-2 part 1: the RetroAchievements account, which must stay reachable without a
             // game, is an entry of the Tools menu now. It opens the window where it always was.
+            UiCommand::ShowShaders => self.state.shaders = true,
             UiCommand::AchievementsAccount => {
                 self.state.options = true;
                 self.force_options_tab = Some(crate::ui::options::OptionsTab::Achievements);

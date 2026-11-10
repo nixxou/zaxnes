@@ -114,6 +114,41 @@ pub struct CameraView {
 }
 
 impl CameraView {
+    /// The same view narrowed on `corners` (points of the scene): the projection keeps the
+    /// camera and its aspect but shows the smallest centred rectangle of that aspect holding
+    /// every corner, as a zoom into the picture (Rust-only, owner request: the 3D scene framed
+    /// on the game's picture for a slang preset). A corner behind the eye leaves it whole.
+    #[must_use]
+    pub fn framed_on(mut self, corners: &[Vector3]) -> Self {
+        let m = Matrix4x4::multiply(&self.view, &self.projection);
+        let (mut low, mut high) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for p in corners {
+            let x = p.x * m.m11 + p.y * m.m21 + p.z * m.m31 + m.m41;
+            let y = p.x * m.m12 + p.y * m.m22 + p.z * m.m32 + m.m42;
+            let w = p.x * m.m14 + p.y * m.m24 + p.z * m.m34 + m.m44;
+            if w.is_nan() || w <= 1e-4 {
+                return self;
+            }
+            low = (low.0.min(x / w), low.1.min(y / w));
+            high = (high.0.max(x / w), high.1.max(y / w));
+        }
+        // Half the side of the square in device units, which the aspect makes a rectangle of
+        // its own shape on the target.
+        let half = ((high.0 - low.0).max(high.1 - low.1) / 2.0).max(1e-4);
+        if !half.is_finite() {
+            return self;
+        }
+        let centre = (f32::midpoint(low.0, high.0), f32::midpoint(low.1, high.1));
+        let zoom = Matrix4x4::from_rows([
+            [1.0 / half, 0.0, 0.0, 0.0],
+            [0.0, 1.0 / half, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-centre.0 / half, -centre.1 / half, 0.0, 1.0],
+        ]);
+        self.projection = Matrix4x4::multiply(&self.projection, &zoom);
+        self
+    }
+
     /// The combined view-projection matrix, OpenGL frame.
     #[must_use]
     pub fn view_projection(&self) -> Matrix4x4 {

@@ -31,6 +31,7 @@ pub mod program;
 pub mod render_scaling;
 pub mod render_skip;
 pub mod scene_script_bridge;
+pub mod shader_pack;
 pub mod single_instance;
 pub mod three_d_sen_command;
 pub mod ui;

@@ -287,6 +287,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub fast_forward: FastForwardState,
     /// The notification area.
     pub notifications: NotificationCenter,
+    /// What the renderer does with the slang shaders, for the shaders window (Rust-only).
+    pub shader_report: crate::ui::shader_panel::ShaderReport,
     /// The save slots of the game chosen (owner request: its ROM's files; none without a game).
     pub slots: SaveSlotIndex,
     /// The slots shared by every game before the files were named after the ROM: a game's
@@ -451,6 +453,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             core_ahead: true,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
+            shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
             legacy_slots,
             slot_patch_cache: std::cell::RefCell::default(),

@@ -23,7 +23,7 @@ pollster = { version = "0.4", optional = true }
 thiserror = "2"
 zax-engine3d = { path = "../zax-engine3d" }
 zax-profiles = { path = "../zax-profiles" }
-wgpu = { version = "29.0.4", optional = true, default-features = false, features = [
+wgpu = { version = "30.0.0", optional = true, default-features = false, features = [
     "std",
     "parking_lot",
     "dx12",

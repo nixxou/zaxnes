@@ -391,6 +391,7 @@ impl Graphics {
                 let layer = match view {
                     Some(SceneView::Wgpu(view)) => Some(zax_platform::wgpu_display::SceneLayer {
                         view: &view.view,
+                        texture: &view.texture,
                         height: size(view_height),
                     }),
                     _ => None,

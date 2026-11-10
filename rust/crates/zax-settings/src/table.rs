@@ -1170,6 +1170,9 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Graphics API"),
     );
+    // Rust-only (owner request): the slang shaders of the wgpu renderer, one slot per display
+    // mode. Not exposed to Lua or libretro. See `crate::shader_slots`.
+    shader_slots(out);
     // Rust-only (owner request): the scene's render scale follows the GPU time, between native
     // and 1/2, instead of `video.res_scale` (render texture method only). Not exposed to Lua.
     out.push(
@@ -2177,5 +2180,107 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::Immediate,
             SettingTheme::Achievements,
         ));
+    }
+}
+
+/// The four slots of the slang shaders (`shader.<slot>.*`): the 2D one is off or on, the
+/// others also follow their fallback (2D wide -> 2D, 3D -> 2D, 3D wide -> 3D). The 2D slots
+/// read the picture at the 240 lines of the console, the 3D ones at the window's own (0).
+fn shader_slots(out: &mut Vec<SettingDescriptor>) {
+    use crate::shader_slots::{
+        ShaderSlot, AREA_AUTO, AREA_PICTURE, AREA_WINDOW, FOLLOW, FRAME_AUTO, FRAME_PICTURE,
+        FRAME_WINDOW, MAXIMUM_LINES, OFF, PRESET,
+    };
+    for slot in ShaderSlot::ALL {
+        let ids = slot.ids();
+        let (default_mode, modes) = match slot.fallback() {
+            None => (OFF, vec![opt(OFF, "Off"), opt(PRESET, "Preset")]),
+            Some(parent) => (
+                FOLLOW,
+                vec![
+                    opt(FOLLOW, parent.follow_label()),
+                    opt(OFF, "Off"),
+                    opt(PRESET, "Preset"),
+                ],
+            ),
+        };
+        out.push(
+            SettingDescriptor::new(
+                ids.mode,
+                SettingKind::Enum,
+                SettingValue::Enum(default_mode),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(modes))
+            .with_label("Shader"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.preset,
+                SettingKind::Text,
+                SettingValue::from(""),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_label("Shader preset"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.lines,
+                SettingKind::Int,
+                SettingValue::Int(slot.default_lines()),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::range(0.0, f64::from(MAXIMUM_LINES)))
+            .with_label("Shader source lines"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.params,
+                SettingKind::Text,
+                SettingValue::from(""),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_label("Shader parameters"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.area,
+                SettingKind::Enum,
+                SettingValue::Enum(AREA_AUTO),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(AREA_AUTO, "Auto"),
+                opt(AREA_PICTURE, "Picture"),
+                opt(AREA_WINDOW, "Whole window"),
+            ]))
+            .with_label("Shader area"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.frame,
+                SettingKind::Enum,
+                SettingValue::Enum(FRAME_AUTO),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(FRAME_AUTO, "Auto"),
+                opt(FRAME_WINDOW, "Whole window"),
+                opt(FRAME_PICTURE, "Game picture"),
+            ]))
+            .with_label("Shader framing"),
+        );
     }
 }

@@ -20,15 +20,18 @@ android = ["sdl2/bundled"]
 # A window drawn through wgpu (Vulkan, DirectX 12) instead of GL, desktop only: the handheld
 # package never turns it on.
 wgpu = ["dep:wgpu", "dep:pollster", "sdl2/raw-window-handle"]
+# RetroArch slang shaders on the game picture (librashader), on the wgpu window only.
+shaders = ["wgpu", "dep:librashader"]
 
 [dependencies]
 glow = "0.16"
 imgui = "0.12"
+librashader = { version = "0.12", default-features = false, features = ["runtime-wgpu", "presets", "preprocess", "stable"], optional = true }
 png = "0.17"
 pollster = { version = "0.4", optional = true }
 sdl2 = "0.38"
 thiserror = "2"
-wgpu = { version = "29.0.4", optional = true, default-features = false, features = [
+wgpu = { version = "30.0.0", optional = true, default-features = false, features = [
     "std",
     "parking_lot",
     "dx12",

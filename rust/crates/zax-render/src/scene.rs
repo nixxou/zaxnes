@@ -310,6 +310,10 @@ pub struct SceneState {
     /// `(left, bottom, right, top)` in scene units: the overscan in Resize (Rust-only, owner
     /// request), the rest enlarged to fill the view.
     pub picture_crop: Vec4F,
+    /// The 3D view is framed on the game's picture ([`Self::picture_corners`]) rather than drawn
+    /// through the whole camera: the scene a slang preset reads, a TV holding the game alone
+    /// (Rust-only, owner request).
+    pub picture_framed: bool,
     /// The experimental smooth scrolling of the 2D picture: the fraction of a pixel to move the
     /// playfield left by and the screen line it ends at (the status bar under it stays), or
     /// `None` (Rust-only, owner request).
@@ -348,6 +352,7 @@ impl Default for SceneState {
             picture_head_on: false,
             picture_tilt: [0.0; 2],
             picture_crop: Vec4F::new(0.0, 0.0, 0.0, 0.0),
+            picture_framed: false,
             picture_shift: None,
             picture_overlay: Vec::new(),
             followed_shape: None,
@@ -415,6 +420,60 @@ impl SceneState {
             self.clipping.z.max(self.picture_crop.z),
             self.clipping.w.max(self.picture_crop.w),
         )
+    }
+
+    /// The width over the height of the head-on 2D picture, as the head-on view frames it (the
+    /// rows of `SceneCamera::picture_view`, the clipped columns and the widescreen margins):
+    /// the scene drawn at this aspect holds the picture and nothing around it.
+    #[must_use]
+    pub fn picture_aspect(&self) -> f32 {
+        let (width, height) = self.picture_size();
+        width / height
+    }
+
+    /// The corners of the game's picture in the scene, in the `z = 0` plane the voxels stand on:
+    /// the rectangle [`Self::picture_size`] measures (the clipped columns and rows, the
+    /// widescreen margins).
+    #[must_use]
+    pub fn picture_corners(&self) -> [crate::numerics::Vector3; 4] {
+        use crate::numerics::Vector3;
+        let rect = VisibleRect::from_clipping(self.picture_clipping());
+        let top = rect.max_y.min(geometry::SCENE_HEIGHT);
+        let bottom = rect
+            .min_y
+            .max(geometry::SCENE_HEIGHT - geometry::FRAME_HEIGHT);
+        let margin = self.margin.max(0.0);
+        let (left, right) = (rect.min_x - margin, rect.max_x + margin);
+        [
+            Vector3::new(left, bottom, 0.0),
+            Vector3::new(right, bottom, 0.0),
+            Vector3::new(left, top, 0.0),
+            Vector3::new(right, top, 0.0),
+        ]
+    }
+
+    /// The view of the frame for a target of `aspect`: the 3D camera's, framed on the game's
+    /// picture when [`Self::picture_framed`] asks for it.
+    #[must_use]
+    pub fn framed_view(&self, view: crate::camera::CameraView) -> crate::camera::CameraView {
+        if self.picture_framed {
+            view.framed_on(&self.picture_corners())
+        } else {
+            view
+        }
+    }
+
+    /// The size of the head-on 2D picture in console pixels (the columns, widescreen margins
+    /// included, and the rows `picture_aspect` frames), at least one of each.
+    #[must_use]
+    pub fn picture_size(&self) -> (f32, f32) {
+        let rect = VisibleRect::from_clipping(self.picture_clipping());
+        let top = rect.max_y.min(geometry::SCENE_HEIGHT);
+        let bottom = rect
+            .min_y
+            .max(geometry::SCENE_HEIGHT - geometry::FRAME_HEIGHT);
+        let width = rect.width() + 2.0 * self.margin.max(0.0);
+        (width.max(1.0), (top - bottom).max(1.0))
     }
 }
 

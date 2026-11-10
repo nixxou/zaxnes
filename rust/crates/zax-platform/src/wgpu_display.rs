@@ -49,9 +49,18 @@ const BATCHING_FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANC
 
 /// The scene picture and the height of the window it fills, from the bottom up (the menu bar
 /// keeps the rest).
+/// What the slang shaders use when the GPU has it: presets such as Mega Bezel filter 32-bit
+/// float pictures.
+#[cfg(feature = "shaders")]
+const SHADER_FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE;
+#[cfg(not(feature = "shaders"))]
+const SHADER_FEATURES: wgpu::Features = wgpu::Features::empty();
+
 #[derive(Debug, Clone, Copy)]
 pub struct SceneLayer<'a> {
     pub view: &'a wgpu::TextureView,
+    /// The texture of `view`, which the slang shaders read.
+    pub texture: &'a wgpu::Texture,
     pub height: u32,
 }
 
@@ -60,6 +69,9 @@ pub struct WgpuDisplay {
     // Field order is drop order: everything made on the device goes before the surface.
     compositor: Compositor,
     interface: InterfaceRenderer,
+    /// The slang preset filtering the scene picture.
+    #[cfg(feature = "shaders")]
+    shaders: crate::slang_chain::SlangShaders,
     pending: Option<wgpu::SurfaceTexture>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -130,13 +142,16 @@ impl WgpuDisplay {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                apply_limit_buckets: false,
             }))
             .map_err(|error| PlatformError::new(format!("no {api:?} adapter: {error}")))?,
         };
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("zax display"),
             required_features: adapter.features()
-                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | BATCHING_FEATURES),
+                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                    | BATCHING_FEATURES
+                    | SHADER_FEATURES),
             required_limits: wgpu::Limits {
                 max_binding_array_elements_per_shader_stage:
                     adapter.limits().max_binding_array_elements_per_shader_stage,
@@ -164,6 +179,7 @@ impl WgpuDisplay {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
             },
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: width.max(1),
             height: height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
@@ -174,9 +190,13 @@ impl WgpuDisplay {
         config.present_mode = present_mode(&capabilities.present_modes, vsync);
         surface.configure(&device, &config);
 
+        #[cfg(feature = "shaders")]
+        let shaders = crate::slang_chain::SlangShaders::new(&device, &queue, &adapter);
         Ok(Self {
             compositor: Compositor::new(&device, format),
             interface: InterfaceRenderer::new(&device, format),
+            #[cfg(feature = "shaders")]
+            shaders,
             pending: None,
             surface,
             config,
@@ -212,7 +232,22 @@ impl WgpuDisplay {
     #[must_use]
     pub fn report(&self) -> String {
         let info = self.adapter.get_info();
-        format!(
+        #[cfg(feature = "shaders")]
+        let shader = match self.shaders.status() {
+            crate::slang_chain::ShaderStatus::Active(preset) => {
+                format!("; slang preset {}", preset.display())
+            }
+            crate::slang_chain::ShaderStatus::Compiling(preset) => {
+                format!("; slang preset {} compiling", preset.display())
+            }
+            crate::slang_chain::ShaderStatus::Refused(_, problem) => {
+                format!("; slang preset refused: {problem}")
+            }
+            crate::slang_chain::ShaderStatus::None => String::new(),
+        };
+        #[cfg(not(feature = "shaders"))]
+        let shader = String::new();
+        let line = format!(
             "wgpu {:?} on '{}' ({:?}, driver '{} {}'), surface {:?} {:?}; adapters: {} \
              (ZAXNES_GPU=<part of a name> picks one)",
             info.backend,
@@ -223,7 +258,49 @@ impl WgpuDisplay {
             self.config.format,
             self.config.present_mode,
             self.adapters.join(", ")
-        )
+        );
+        line + shader.as_str()
+    }
+
+    /// The width over the height the scene has to be drawn at for the slang preset in use, none
+    /// for the window's.
+    #[must_use]
+    pub fn shader_scene_aspect(&self) -> Option<f32> {
+        #[cfg(feature = "shaders")]
+        {
+            self.shaders.scene_aspect()
+        }
+        #[cfg(not(feature = "shaders"))]
+        {
+            None
+        }
+    }
+
+    /// The lines the scene has to be drawn at for the slang preset in use: none without one,
+    /// 0 for the window's own.
+    #[must_use]
+    pub fn shader_lines(&self) -> Option<u32> {
+        #[cfg(feature = "shaders")]
+        {
+            self.shaders.lines()
+        }
+        #[cfg(not(feature = "shaders"))]
+        {
+            None
+        }
+    }
+
+    /// The slang shaders, which the application asks for the preset of the display mode.
+    #[cfg(feature = "shaders")]
+    pub const fn shaders_mut(&mut self) -> &mut crate::slang_chain::SlangShaders {
+        &mut self.shaders
+    }
+
+    /// The slang shaders, for their status.
+    #[cfg(feature = "shaders")]
+    #[must_use]
+    pub const fn shaders(&self) -> &crate::slang_chain::SlangShaders {
+        &self.shaders
     }
 
     /// The renderer name the statistics show.
@@ -282,6 +359,9 @@ impl WgpuDisplay {
         if let Some(interface) = interface {
             self.interface.prepare(&self.device, &self.queue, interface);
         }
+        // The slang shaders draw the scene picture themselves (clearing the window to black),
+        // before the window pass; the interface then goes over them unfiltered.
+        let filtered = scene.and_then(|scene| self.filter_scene(&view, scene, (width, height)));
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("zax window"),
@@ -290,7 +370,11 @@ impl WgpuDisplay {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: if filtered.is_some() {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -299,7 +383,7 @@ impl WgpuDisplay {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if let Some(scene) = scene {
+            if let Some(scene) = scene.filter(|_| filtered.is_none()) {
                 self.compositor
                     .draw(&self.device, &mut pass, scene, (width, height));
             }
@@ -307,14 +391,60 @@ impl WgpuDisplay {
                 self.interface.draw(&mut pass, interface, (width, height));
             }
         }
-        self.queue.submit([encoder.finish()]);
+        // The shader passes write the window before the window pass loads it.
+        self.queue
+            .submit(filtered.into_iter().chain([encoder.finish()]));
         self.pending = Some(frame);
+    }
+
+    /// The commands drawing `scene` through the slang preset onto `view`, the scene rectangle
+    /// at the bottom of the window: none without a preset or when it failed (the problem is
+    /// kept for the log and the preset dropped), and the compositor draws the picture instead.
+    #[cfg(feature = "shaders")]
+    fn filter_scene(
+        &mut self,
+        view: &wgpu::TextureView,
+        scene: SceneLayer<'_>,
+        (width, height): (u32, u32),
+    ) -> Option<wgpu::CommandBuffer> {
+        let layer = scene.height.clamp(1, height);
+        // The picture's rectangle, centred in the scene's: the final pass clears the rest.
+        let rectangle = match self.shaders.picture_aspect() {
+            Some(aspect) if aspect.is_finite() && aspect > 0.0 => {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss
+                )] // Window sizes.
+                let inner = ((layer as f32 * aspect).round() as u32).clamp(1, width);
+                ((width - inner) / 2, height - layer, inner, layer)
+            }
+            _ => (0, height - layer, width, layer),
+        };
+        self.shaders.record(
+            scene.texture,
+            view,
+            self.config.format,
+            rectangle,
+            (width, height),
+        )
+    }
+
+    #[cfg(not(feature = "shaders"))]
+    #[allow(clippy::unused_self)]
+    const fn filter_scene(
+        &self,
+        _view: &wgpu::TextureView,
+        _scene: SceneLayer<'_>,
+        _size: (u32, u32),
+    ) -> Option<wgpu::CommandBuffer> {
+        None
     }
 
     /// Presents the frame [`Self::draw`] drew.
     pub fn present(&mut self) {
         if let Some(frame) = self.pending.take() {
-            frame.present();
+            self.queue.present(frame);
         }
     }
 
@@ -419,7 +549,11 @@ pub fn read_rgba(
         submission_index: None,
         timeout: None,
     });
-    let mapped = slice.get_mapped_range();
+    // The wait above completed the mapping; were it refused all the same, a black picture of the
+    // right size beats a panic.
+    let Ok(mapped) = slice.get_mapped_range() else {
+        return vec![0; (row * height) as usize];
+    };
     let mut pixels = Vec::with_capacity((row * height) as usize);
     for line in mapped.chunks_exact(padded as usize) {
         pixels.extend_from_slice(&line[..row as usize]);
@@ -673,11 +807,11 @@ impl InterfaceRenderer {
                 module: &module,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: size_of::<DrawVert>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attributes,
-                }],
+                })],
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,

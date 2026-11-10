@@ -653,7 +653,7 @@ impl SceneRenderer {
                 crate::numerics::Vector3::new(scene.picture_tilt[0], scene.picture_tilt[1], 0.0),
             )
         } else {
-            scene.camera.build_view(scene.view_clipping(), aspect)
+            scene.framed_view(scene.camera.build_view(scene.view_clipping(), aspect))
         };
         self.last_view = view;
 
@@ -1336,6 +1336,9 @@ impl SceneRenderer {
                 self.passes.instance_alignment,
                 scene.camera.local_camera,
             );
+        } else {
+            // The floor runs of an earlier frame index its own opaque bucket (see the wgpu twin).
+            self.plan.floor_runs.clear();
         }
         let passes = &mut self.passes;
         passes.upload_instances(&self.plan.instance_data);

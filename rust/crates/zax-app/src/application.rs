@@ -290,6 +290,8 @@ impl Running {
         let paths = resolve_user_data(options);
         let (store, model) = load_settings(options, &paths);
         let demo_rom = install_demo_game(&paths, &model);
+        #[cfg(feature = "shaders")]
+        install_shader_pack(&paths);
         let mut catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
         if let Some(rom) = demo_rom {
             catalog.set_rom_path(demo_game::PROFILE_ID, &rom.to_string_lossy());
@@ -689,6 +691,111 @@ impl Running {
         snapshot
     }
 
+    /// Asks the wgpu window for the slang preset of the display mode: the one `ZAXNES_SHADER`
+    /// names, otherwise the slot of the mode (2D or 3D, widescreen or not) after its fallbacks.
+    #[cfg(feature = "shaders")]
+    fn request_shader(&mut self) {
+        use crate::ui::shader_panel::{ShaderReport, ShaderState};
+        use zax_platform::slang_chain::{preset_from_environment, ShaderRequest, ShaderStatus};
+        let scene = self.host.scene();
+        let three_d = !scene.two_dimensional_mode;
+        let wide = scene.margin > 0.0 || scene.margin_y > 0.0;
+        // No tab is the one on screen without a game.
+        let mode_slot = self
+            .host
+            .session()
+            .map(|_| zax_settings::shader_slots::ShaderSlot::of(three_d, wide));
+        let Some(display) = self.window.wgpu_mut() else {
+            self.host.shader_report = ShaderReport {
+                state: ShaderState::NoWgpu,
+                mode_slot,
+                ..ShaderReport::default()
+            };
+            return;
+        };
+        let request = match preset_from_environment() {
+            Some(preset) => {
+                let fills = zax_settings::shader_slots::fills_window(
+                    zax_settings::shader_slots::AREA_AUTO,
+                    &preset.to_string_lossy(),
+                );
+                Some(ShaderRequest {
+                    preset,
+                    lines: zax_settings::shader_slots::CONSOLE_LINES.unsigned_abs(),
+                    parameters: Vec::new(),
+                    picture_aspect: (!three_d && !fills).then(|| scene.picture_aspect()),
+                    scene_aspect: None,
+                })
+            }
+            None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
+                |choice| {
+                    // The 3D scene framed on the game's picture: drawn at its aspect, and placed
+                    // in its rectangle by a preset that does not draw over the whole window.
+                    let framed = three_d && choice.frames_picture;
+                    let mut parameters = choice.parameters;
+                    // The Mega Bezel guesses the screen's shape from the lines it reads: the
+                    // console's 240 give a 4:3 TV, the window's lines of the framed 3D scene a
+                    // square-pixel one. Framed in 4:3, the 3D TV takes the 2D picture's shape
+                    // (4:3) unless the player picked a shape; the widescreen tabs start on PAR.
+                    if framed
+                        && !wide
+                        && choice.preset.to_ascii_lowercase().contains("mega_bezel")
+                        && !parameters
+                            .iter()
+                            .any(|(name, _)| name == "HSM_ASPECT_RATIO_MODE")
+                    {
+                        parameters.push(("HSM_ASPECT_RATIO_MODE".to_owned(), 2.0));
+                    }
+                    ShaderRequest {
+                        preset: crate::shader_pack::resolve(
+                            &self.host.paths().root,
+                            &choice.preset,
+                        ),
+                        lines: choice.lines,
+                        parameters,
+                        picture_aspect: ((!three_d || framed) && !choice.fills_window)
+                            .then(|| scene.picture_aspect()),
+                        scene_aspect: framed.then(|| scene.picture_aspect()),
+                    }
+                },
+            ),
+        };
+        let shaders = display.shaders_mut();
+        shaders.request(request.as_ref());
+        if let Some(line) =
+            shaders.update(usize::try_from(self.host.emulated_frames()).unwrap_or(0))
+        {
+            crate::app_log::line(&line);
+        }
+        let (state, preset, problem) = match shaders.status() {
+            ShaderStatus::None => (ShaderState::None, String::new(), String::new()),
+            ShaderStatus::Compiling(preset) => (
+                ShaderState::Compiling,
+                preset.display().to_string(),
+                String::new(),
+            ),
+            ShaderStatus::Active(preset) => (
+                ShaderState::Active,
+                preset.display().to_string(),
+                String::new(),
+            ),
+            ShaderStatus::Refused(preset, problem) => (
+                ShaderState::Refused,
+                preset.display().to_string(),
+                problem.to_owned(),
+            ),
+        };
+        let report = &mut self.host.shader_report;
+        if report.state != state || report.preset != preset || report.mode_slot != mode_slot {
+            *report = ShaderReport {
+                state,
+                preset,
+                problem,
+                mode_slot,
+            };
+        }
+    }
+
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
@@ -706,6 +813,46 @@ impl Running {
             self.host.settings().render_method(),
             factor,
         );
+        // A slang preset is written for a resolution of its own (the console's 240 lines in
+        // 2D): the scene is drawn at the window's aspect but at that line count, and the preset
+        // scales it up to the window. 0 lines keeps the window's own.
+        #[cfg(feature = "shaders")]
+        let scene_aspect = self
+            .window
+            .wgpu()
+            .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_scene_aspect);
+        #[cfg(feature = "shaders")]
+        {
+            let scene = self.host.scene_mut();
+            scene.picture_framed =
+                scene_aspect.is_some() && !(scene.two_dimensional_mode && scene.picture_head_on);
+        }
+        #[cfg(feature = "shaders")]
+        let (scene_width, scene_height) = match self
+            .window
+            .wgpu()
+            .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_lines)
+        {
+            // In 2D the preset gets the game picture alone, as in RetroArch: the scene is drawn
+            // at the console's own pixels (240 lines) or a multiple, and the preset places it in
+            // the window (a bezel around it, or the picture centred).
+            Some(lines)
+                if self.host.scene().two_dimensional_mode && self.host.scene().picture_head_on =>
+            {
+                render_scaling::picture_lines(self.host.scene().picture_size(), lines, view_height)
+            }
+            // The 3D scene framed on the game's picture: drawn at the picture's aspect, the
+            // window's height or the lines asked for.
+            Some(lines) if scene_aspect.is_some() => render_scaling::aspect_lines(
+                scene_aspect.unwrap_or(1.0),
+                lines,
+                (width.max(1), view_height),
+            ),
+            Some(lines) if lines > 0 => {
+                render_scaling::shader_lines(width.max(1), view_height, lines)
+            }
+            _ => (scene_width, scene_height),
+        };
         let view = self
             .host
             .view_mut()
@@ -1359,6 +1506,8 @@ impl Running {
     /// Draws the scene into the offscreen buffer (unless the render-skip rule keeps the
     /// previous image), blits it under the interface and draws the interface.
     fn draw(&mut self, emulated: u32, width: i32, height: i32, real: f32) -> Result<(), String> {
+        #[cfg(feature = "shaders")]
+        self.request_shader();
         let ViewPlan {
             view_height,
             size: (scene_width, scene_height),
@@ -1558,6 +1707,25 @@ fn install_demo_game(paths: &UserDataPaths, model: &SettingsModel) -> Option<Pat
             log(&format!("FlappyZaxNes could not be installed: {error}"));
             None
         }
+    }
+}
+
+/// The slang shader pack into the user folder, when this version is not there yet.
+#[cfg(feature = "shaders")]
+fn install_shader_pack(paths: &UserDataPaths) {
+    if !paths.is_writable {
+        return;
+    }
+    let started = std::time::Instant::now();
+    match crate::shader_pack::install(&paths.root) {
+        Ok(true) => log(&format!(
+            "Shader pack {} written to '{}' in {} ms.",
+            crate::shader_pack::version(),
+            crate::shader_pack::folder(&paths.root).display(),
+            started.elapsed().as_millis()
+        )),
+        Ok(false) => {}
+        Err(error) => log(&format!("The shader pack could not be written: {error}")),
     }
 }
 
@@ -2491,7 +2659,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
             in_force.crop()[3],
         );
     } else {
-        scene.picture_crop = zax_profiles::values::Vec4F::new(0.0, 0.0, 0.0, 0.0);
+        // The 3D scene framed on the game's picture for a slang preset leaves the same sides
+        // out: the overscan's in Resize, none in Fit (the cut sides show the scene there).
+        #[allow(clippy::cast_possible_truncation)] // A margin of 0..=128.
+        let crop = overscan.in_force(scene.margin.max(0.0) as i32).crop();
+        scene.picture_crop = zax_profiles::values::Vec4F::new(crop[0], crop[1], crop[2], crop[3]);
         scene.picture_shift = None;
         scene.picture_overlay.clear();
     }
