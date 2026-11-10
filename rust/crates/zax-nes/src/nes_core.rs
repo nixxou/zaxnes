@@ -5,8 +5,10 @@ use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
+use crate::timing_profile::{NesHawkCompat, Standard, TimingProfile};
 use crate::{
-    FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, TileRecord, VideoInfo,
+    FrameBatch, NametableMirroring, NesBus, NesBusOf, NesRegion, RegionTiming, TileRecord,
+    VideoInfo,
 };
 
 /// Receives one frame batch per emulated frame (REQ-CORE-030). The emulation behaves
@@ -27,10 +29,18 @@ pub use zax_core_api::{NoRomLoaded, StateLoaded};
 /// Everything an instance needs lives in the instance, so two cores in one process are
 /// independent (REQ-ARCH-011, REQ-CORE-001). Nothing advances unless the host calls
 /// [`NesCore::run_frame`]: the core owns no clock and no thread (REQ-ARCH-010).
+///
+/// **`P` is the console chip's timing profile** ([`TimingProfile`]): `NesCoreOf<Standard>` — which
+/// is what [`NesCore`] names — is Zaxnes's own 2A03, and `NesCoreOf<NesHawkCompat>` is the one a
+/// `.bk2` recorded on BizHawk's NesHawk is replayed on. The core carries the parameter because it
+/// owns the bus, which is where the DMA is; the PPU, the cartridge, the CPU and the controller
+/// ports do not, nothing the two profiles disagree about reaching them.
+///
+/// [`NesHawkCompat`]: crate::NesHawkCompat
 #[allow(clippy::struct_excessive_bools)] // Independent switches of the machine and of the host.
-pub struct NesCore {
+pub struct NesCoreOf<P: TimingProfile> {
     cpu: Cpu6502,
-    bus: NesBus,
+    bus: NesBusOf<P>,
     region: NesRegion,
     battery_ram_imported: bool,
     frame_count: i64,
@@ -111,19 +121,73 @@ pub struct NesCore {
     real_frame_held: bool,
 }
 
-impl Default for NesCore {
+/// The core every caller outside this lot means: [`NesCoreOf`] with Zaxnes's own 2A03.
+///
+/// A plain alias rather than a default type parameter, for the reason [`NesBus`] carries: Rust
+/// resolves neither `NesCore::STATE_VERSION` nor `NesCore::new()` through a default.
+pub type NesCore = NesCoreOf<Standard>;
+
+/// The frame entry point, **once per profile and concrete**.
+///
+/// It is deliberately not a method of the generic `impl` above, and the reason is code generation
+/// rather than design. Threading a type parameter through the core changes nothing a program can
+/// observe — `golden-core` over the 98 originals is byte-identical — but it does change what LLVM
+/// does with the frame loop, and lot NESHAWK-PROFILE step 2 measured two separate costs on the way
+/// to charging nothing for it. Both are recorded because a future lot that adds a hot entry point
+/// will meet them again.
+///
+/// *The crate the monomorphisation lands in.* Rust monomorphises a generic function in the crate
+/// that **calls** it, so a generic `run_frame` moved the whole per-cycle chain under it —
+/// `Cpu6502::step`, `CpuBus::read`, `NesBusOf::tick`, the DMA — out of this crate and into every
+/// consumer's code generation. `bench-core`, five interleaved rounds against the parent commit:
+/// **+3.8 % on Super Mario Bros. 3, +2.4 % on Mega Man 3**. Declared per instantiation, as below,
+/// `run_frame` is an ordinary cross-crate call again.
+///
+/// *The inlining.* That alone left **+1.5 % on Super Mario Bros. 3 and +3.2 % on Mega Man 2**
+/// (twelve interleaved rounds, slower in twelve of twelve), because a generic body with one call
+/// site is inlined **into** its wrapper, which the parent's `run_frame` — reached through
+/// `Box<dyn Engine>` and so never inlinable — was not. `#[inline(never)]` on
+/// [`NesCoreOf::run_frame_profiled`] puts that structure back; six interleaved rounds on five ROMs
+/// then read −3.0 %, −3.0 %, −2.2 %, +0.5 % and +0.6 %, inside the lot's +1 % budget, and `.text`
+/// grows by 5 440 bytes of 4.9 MB.
+///
+/// Every other entry point of the core is cold — a reset, a savestate, a register peek, a frame
+/// buffer copy — or lies under this one, so none of them needs the same treatment. A new hot entry
+/// point would.
+impl NesCoreOf<Standard> {
+    /// Runs one frame with `input_word` (REQ-CORE-020, REQ-CORE-022): port 1 in bits 0 to
+    /// 7, port 2 in bits 8 to 15; for a controller the order is A, B, Select, Start, Up,
+    /// Down, Left, Right (SPEC-02 §4.4).
+    ///
+    /// The frame runs from where the previous one stopped to the start of the next vblank;
+    /// the video callback is then invoked once, synchronously, even when the batch is empty
+    /// (REQ-CORE-021). Returns the CPU cycles the frame took, 0 when no ROM is loaded
+    /// (REQ-CORE-005).
+    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
+impl NesCoreOf<NesHawkCompat> {
+    /// As [`NesCore::run_frame`], on the NesHawk-compatible chip.
+    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
+impl<P: TimingProfile> Default for NesCoreOf<P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl NesCore {
+impl<P: TimingProfile> NesCoreOf<P> {
     /// Creates a machine with no ROM loaded, in NTSC.
     #[must_use]
     pub fn new() -> Self {
         Self {
             cpu: Cpu6502::new(),
-            bus: NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
+            bus: NesBusOf::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
             region: NesRegion::Ntsc,
             battery_ram_imported: false,
             frame_count: 0,
@@ -759,7 +823,12 @@ impl NesCore {
     /// the video callback is then invoked once, synchronously, even when the batch is empty
     /// (REQ-CORE-021). Returns the CPU cycles the frame took, 0 when no ROM is loaded
     /// (REQ-CORE-005).
-    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+    ///
+    /// The body of each profile's `run_frame`, which is the public name; `#[inline(never)]` keeps
+    /// it out of its two thin wrappers, and the measurements that asked for that are on the
+    /// [`NesCoreOf<Standard>`] block those wrappers live in.
+    #[inline(never)]
+    pub(crate) fn run_frame_profiled(&mut self, input_word: u16) -> i64 {
         if self.bus.cartridge().is_none() {
             return 0;
         }
@@ -879,7 +948,7 @@ impl NesCore {
     /// Never: the capture can only fail with no ROM loaded, which is checked first.
     pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
         if ahead == 0 {
-            return self.run_frame(input_word);
+            return self.run_frame_profiled(input_word);
         }
 
         self.run_ahead_sequence(input_word, ahead)
@@ -899,7 +968,7 @@ impl NesCore {
         let callback = self.video_callback.take();
         self.bus.apu_mut().set_output_enabled(false);
 
-        self.run_frame(input_word);
+        self.run_frame_profiled(input_word);
 
         // Step 2: the complete state of the real frame, in memory. The buffer is lent out and
         // put back, which moves three words and allocates nothing.
@@ -910,13 +979,13 @@ impl NesCore {
         debug_assert!(captured, "a ROM is loaded, so the capture cannot fail");
 
         for _ in 1..ahead.min(Self::MAX_RUN_AHEAD) {
-            self.run_frame(input_word);
+            self.run_frame_profiled(input_word);
         }
 
         // Step 4: the displayed frame, with its sound and its picture.
         self.bus.apu_mut().set_output_enabled(true);
         self.video_callback = callback;
-        self.run_frame(input_word)
+        self.run_frame_profiled(input_word)
     }
 
     /// Step 5 of REQ-LOOP-065: puts the state of the real frame back, the sound the displayed
@@ -1602,18 +1671,18 @@ impl NesCore {
     }
 
     /// The CPU and the bus, mutably, to step instructions by hand.
-    pub fn cpu_and_bus_mut(&mut self) -> (&mut Cpu6502, &mut NesBus) {
+    pub fn cpu_and_bus_mut(&mut self) -> (&mut Cpu6502, &mut NesBusOf<P>) {
         (&mut self.cpu, &mut self.bus)
     }
 
     /// The bus.
     #[must_use]
-    pub const fn bus(&self) -> &NesBus {
+    pub const fn bus(&self) -> &NesBusOf<P> {
         &self.bus
     }
 
     /// The bus, mutably.
-    pub fn bus_mut(&mut self) -> &mut NesBus {
+    pub fn bus_mut(&mut self) -> &mut NesBusOf<P> {
         &mut self.bus
     }
 

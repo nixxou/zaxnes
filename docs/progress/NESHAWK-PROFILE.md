@@ -15,7 +15,7 @@ source actually shows.
 ## Steps
 
 - [x] 1. Verify the differences verbatim.
-- [ ] 2. The architecture.
+- [x] 2. The architecture.
 - [ ] 3. The NesHawk profile.
 - [ ] 4. The engine variant and its selection.
 - [ ] 5. The experiment.
@@ -331,3 +331,189 @@ parameter, and `NesCore` takes it because it owns the bus. `Ppu2C02`, `Cartridge
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE step 1/6 done: verify the differences verbatim
+
+---
+
+## Step 2 — the architecture
+
+The core is now **generic over the timing profile**, both instantiations build and run, and the
+`Standard` one costs nothing it did not cost before. What the step actually took is two surprises
+about how Rust and LLVM treat a type parameter, both measured and both recorded here because the
+next lot that adds a hot entry point will meet them again.
+
+### What was built
+
+| | |
+|---|---|
+| `crates/zax-nes/src/timing_profile.rs` | the `TimingProfile` trait and the two zero-sized types `Standard` and `NesHawkCompat`. Members are **associated constants only** (`NAME`, `STATE_ID` so far), so nothing is stored, passed or compared at run time. |
+| `nes_bus.rs` | `pub struct NesBusOf<P: TimingProfile>`, with a `PhantomData<P>` field and `impl<P> CpuBus for NesBusOf<P>` — the bus carries the parameter because the DMA is here **and** because `CpuBus::read`/`write` are trait methods that cannot take one. |
+| `nes_core.rs` | `pub struct NesCoreOf<P: TimingProfile>`, holding `bus: NesBusOf<P>`. |
+| both files | `pub type NesBus = NesBusOf<Standard>;` and `pub type NesCore = NesCoreOf<Standard>;` |
+| `tests/timing_profile_tests.rs` | four tests (below). |
+| `clippy.toml` | `BizHawk`, `NesHawk`, `QuickNes` added to `doc-valid-idents`. |
+
+`Ppu2C02`, `Cartridge`, `Cpu6502`, `InputPorts`, `Apu2A03` and `DmcChannel` are **not** generic
+types. The last two were going to be, and are not: see surprise 1.
+
+### Surprise 1 — a default type parameter does not do what the brief assumed
+
+The brief's plan was `NesCore<P: TimingProfile = Standard>`, "so every existing use compiles
+unchanged". **It does not.** Rust applies a type parameter's default when it resolves a *type*, and
+not when it resolves a path through it, so with a default on the struct:
+
+| | |
+|---|---|
+| `NesCore::STATE_VERSION` and its fourteen siblings | **E0283**, "type annotations needed" |
+| `NesBus::RAM_SIZE`, `NesCore::MAX_RUN_AHEAD`, `NesCore::SUPPORTED_MAPPERS`, ... | the same |
+| `NesCore::new()`, `NesCore::state_builtin_patch(...)` | the same |
+| `[u8; NesBus::RAM_SIZE]` | the same, and not fixable by an annotation |
+
+Measured on this tree: 24 call sites in `zax-app`, `zax-settings`, `zax-scripting`, `zax-core-api`
+and `zax-harness`, plus a dozen in `zax-nes`'s own integration tests, every one of them a path
+through a constant or an associated function. Two further shapes were tried before the one that
+works:
+
+1. moving the constants into an `impl NesCore<Standard>` block — a concrete instantiation **does**
+   resolve `NesCore::STATE_VERSION`, in const position too. It fixes the constants, leaves the
+   associated *functions* broken, and costs 33 `Self::X` edits inside `nes_core.rs`;
+2. a **parameterised** alias, `pub type NesCore<P = Standard> = NesCoreOf<P>;`. It fixes the
+   constants *and* the functions in expression position, and still fails in const position
+   (`[u8; NesBus::RAM_SIZE]`);
+3. a **plain** alias, `pub type NesCore = NesCoreOf<Standard>;`. Everything resolves, in every
+   position. Adopted.
+
+So the generic structs are `NesCoreOf<P>` and `NesBusOf<P>`, and the old names are aliases to the
+`Standard` instantiation. The result is what the brief wanted and what the default could not give:
+**not one line outside `zax-nes` changed**, and the public API — including every savestate
+constant — is the parent commit's.
+
+The brief writes `NesCore<NesHawkCompat>`; the spelling in the code is `NesCoreOf<NesHawkCompat>`,
+for that reason and no other.
+
+### Surprise 2 — a type parameter is not free unless it is placed carefully
+
+`golden-core` said the emulation had not moved, from the very first build. `bench-core` said the
+*program* had, twice, and the two causes are different.
+
+**2a. A generic function is monomorphised in the crate that calls it.** A generic `run_frame`
+therefore moved the whole per-cycle chain under it — `Cpu6502::step`, `CpuBus::read`,
+`NesBusOf::tick`, `run_dma` — out of `zax-nes`'s code generation and into every consumer's, where
+it is partitioned and inlined against different neighbours. Five interleaved rounds against the
+parent commit, with not one instruction of emulation changed:
+
+| | parent | generic `run_frame` | |
+|---|---|---|---|
+| Super Mario Bros. 3 | 1.1297 ms/frame | 1.1728 | **+3.8 %** |
+| Mega Man 3 `[USA][!!]` | 0.9072 | 0.9294 | **+2.4 %** |
+
+The fix is to declare `run_frame` **once per instantiation** — `impl NesCoreOf<Standard>` and
+`impl NesCoreOf<NesHawkCompat>`, each a one-line forward to the generic
+`NesCoreOf::run_frame_profiled` — so that a consumer makes an ordinary cross-crate call again.
+
+**2b. A generic body with one call site is inlined into its wrapper.** The parent's `run_frame` was
+reached through `Box<dyn Engine>` and so was never inlined into anything; the new one had a wrapper
+to be inlined *into*, and LLVM took it. That left:
+
+| | parent | wrapped, still inlined | |
+|---|---|---|---|
+| Super Mario Bros. 3 | 1.15560 ms/frame | 1.17304 | **+1.5 %** |
+| Mega Man 2 | 0.72803 | 0.75133 | **+3.2 %** |
+
+twelve interleaved rounds each, the new build slower in **twelve of twelve** on Super Mario Bros. 3
+— far outside the plus or minus 1.5 % spread of either binary on its own, and so not noise.
+`#[inline(never)]` on `run_frame_profiled` puts the parent's structure back.
+
+### The proof the step owes
+
+**`golden-core`, the 98 originals, 1 200 frames each, release, feature off:**
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names (lot FCEUX-23's baseline, and EVAL-SYNC's,
+EVAL-SYNC-2's, -3's and -4's). Run twice: once on the first generic build and once on the final
+one, the same hash both times — which is the point, because between those two runs the *program*
+changed by 1.5 to 3 per cent and the *emulation* did not change at all.
+
+**`bench-core`, final build against the parent, six interleaved rounds per ROM** (`--frames 1200
+--warmup 120`, the `core run_frame` line only, the two binaries alternating which goes first so
+that neither always gets the cold slot):
+
+| ROM | parent | this commit | |
+|---|---|---|---|
+| Super Mario Bros. 3 | 1.13933 ms/frame | 1.10465 | **-3.0 %** |
+| Mega Man 3 `[USA][!!]` | 0.91257 | 0.88537 | **-3.0 %** |
+| Tetris | 0.86203 | 0.84290 | **-2.2 %** |
+| Mega Man 2 | 0.72932 | 0.73300 | **+0.5 %** |
+| Metroid | 0.74215 | 0.74675 | **+0.6 %** |
+
+Worst case **+0.6 %**, inside the owner's +1 % budget; three of the five ROMs come out about 3 %
+*faster*. The mixed signs are what a 5 440-byte shift of `.text` does to code placement, and they
+are the reason the two regressions above were believed instead of being written off: a layout
+effect changes sign from game to game, while 2a and 2b were one-sided and twelve-for-twelve.
+
+**Machine code.** `cargo asm` is not installed and was not installed. `objdump`, `nm` and
+`llvm-objdump` are absent from this machine too, so the substitute is `dumpbin /HEADERS` on the
+release `zax-harness.exe` (`lto = "fat"`, `codegen-units = 1`, `strip = true`, so there are no
+per-function symbols left to compare):
+
+| | `.text` virtual size |
+|---|---|
+| parent commit | `0x4B0FC0` (4 919 232) |
+| generic, no `#[inline(never)]` | `0x4B2DC0` (4 924 864) |
+| **this commit** | `0x4B2700` (4 924 672), **+5 440 bytes, +0.11 %** |
+
+The last figure is the same with and without the `impl NesCoreOf<NesHawkCompat>` block — `0x4B2700`
+both ways — which says the second core is **not in the binary at all** yet: `/OPT:REF` drops it
+because nothing calls it. So the +5 440 bytes is the `Standard` side's own code, and the honest
+statement is the narrow one: **the `Standard` path's behaviour is identical to the byte and its
+speed is inside the budget, but its machine code is not claimed to be identical instruction for
+instruction** — the instrument that would settle that does not exist on this machine. Step 4, where
+the second core becomes reachable, re-measures both numbers.
+
+### The tests
+
+`crates/zax-nes/tests/timing_profile_tests.rs`, four of them:
+
+| | |
+|---|---|
+| `the_two_profiles_are_named_and_numbered_apart` | the names and the savestate bytes |
+| `the_plain_core_name_is_the_standard_profile` | `NesCore` and `NesCoreOf<Standard>` are one type |
+| `a_profile_costs_the_core_no_memory` | both profiles are zero-sized and the two cores are the same size |
+| `a_rom_that_plays_no_dpcm_runs_identically_on_both_profiles` | 20 frames of the minimal ROM, the same cycle count and the same picture |
+
+The last is the **durable** one, and that is why it is written this way. Every item the NesHawk
+profile will carry is about the DMC's sample-fetch DMA, so a ROM that starts no sample must run
+identically on the two profiles for ever; the day it does not, an item was put in front of the
+profile instead of behind it.
+
+### Suites
+
+| | passed | ignored |
+|---|---|---|
+| `zax-nes`, release | **1 181** | 10 |
+| `zax-harness`, release, feature off | **125** | 1 |
+
+`zax-nes` is EVAL-SYNC-4's 1 187 `--include-ignored` total plus this step's four new tests
+(1 181 + 10 = 1 191). `zax-harness` is unchanged (125 + 1 = 126). `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets -- -D warnings` are clean.
+
+### One thing this machine cannot do, recorded once
+
+`cargo build --workspace` **cannot link the `zaxnes` binary here**: `LNK1181: cannot open input
+file 'SDL2.lib'`, and there is no `SDL2.lib` anywhere on the machine. It is not a regression of
+this lot — nothing in this commit touches the application's linking — and it is why the suites
+above are run per crate, as EVAL-SYNC-4's were. `cargo clippy --workspace --all-targets` does not
+link, so it still covers the application and every one of its test targets.
+
+### Proposed requirement wording (the spec is not edited, per the brief)
+
+> **REQ-CORE-124** — The core emulates one of two **timing profiles** of the 2A03: the standard
+> profile, and a NesHawk-compatible profile whose differences from it are listed in
+> `docs/review/NESHAWK-PROFILE.md`. The profile is fixed when a core is created and cannot change
+> while a ROM is loaded. The standard profile's behaviour is the behaviour of every requirement
+> elsewhere in this specification; a savestate records its profile, and a restore into a core of
+> the other profile is refused (REQ-CORE-091).
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE step 2/6 done: the architecture

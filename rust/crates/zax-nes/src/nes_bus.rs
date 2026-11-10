@@ -6,7 +6,9 @@ use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
 use crate::state::{InvalidState, StateReader, StateWriter};
+use crate::timing_profile::{Standard, TimingProfile};
 use crate::wide::WideExtension;
+use core::marker::PhantomData;
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -60,9 +62,17 @@ const DMA_DMC_WAIT: u8 = 0x10;
 ///
 /// The bus owns the other chips and the cartridge; the PPU is handed the cartridge on each
 /// call that needs it.
+///
+/// **`P` is the console chip's timing profile** ([`TimingProfile`]), and it is the bus that
+/// carries it: the DMA — the whole of what the two profiles disagree about — lives here, and
+/// [`CpuBus::read`] and [`CpuBus::write`] are trait methods, so they cannot take a profile
+/// argument. Making the profile part of the type is what gives each of the two cores its own
+/// copy of them, with every `P::SOMETHING` folded to a constant.
+///
+/// [`NesBus`] is this type at [`Standard`], which is what every caller outside this lot means.
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)] // Independent flags of the chips and of the batching.
-pub struct NesBus {
+pub struct NesBusOf<P: TimingProfile> {
     ram: [u8; RAM_SIZE],
     ppu: Ppu2C02,
     apu: Apu2A03,
@@ -139,9 +149,20 @@ pub struct NesBus {
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
     zone_instruction: bool,
+    /// The timing profile: a type, zero-sized, so the two cores differ in their code and not by
+    /// a byte of their state.
+    profile: PhantomData<P>,
 }
 
-impl NesBus {
+/// The bus every caller outside this lot means: [`NesBusOf`] with Zaxnes's own 2A03.
+///
+/// A plain alias and not a default type parameter on the struct, because Rust applies a default
+/// type parameter neither when it resolves an associated constant nor when it resolves an
+/// associated function: `NesBus::RAM_SIZE` and `NesBus::new()` would both stop compiling. Through
+/// an alias to a concrete instantiation they resolve as they always did.
+pub type NesBus = NesBusOf<Standard>;
+
+impl<P: TimingProfile> NesBusOf<P> {
     /// Size of CPU work RAM.
     pub const RAM_SIZE: usize = RAM_SIZE;
 
@@ -191,6 +212,7 @@ impl NesBus {
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
+            profile: PhantomData,
         }
     }
 
@@ -1364,7 +1386,7 @@ impl NesBus {
     }
 }
 
-impl NesBus {
+impl<P: TimingProfile> NesBusOf<P> {
     /// The **read** of a CPU read cycle whose cycle has just run, and the DMA units' only chance
     /// to halt it (see [`NesBus::run_dma`]).
     ///
@@ -1504,7 +1526,7 @@ impl NesBus {
     }
 }
 
-impl CpuBus for NesBus {
+impl<P: TimingProfile> CpuBus for NesBusOf<P> {
     /// One **read** cycle: the cycle, then the read it carries — which the DMA units may turn
     /// into a halt (see [`NesBus::read_cycle`]). Two calls and one materialisation of the
     /// address, which is what this was before MF-4a.
@@ -1617,7 +1639,7 @@ impl CpuBus for NesBus {
     }
 }
 
-impl NesBus {
+impl<P: TimingProfile> NesBusOf<P> {
     /// Appends the bus state (work RAM, open bus, clock and DMA counters) to `writer`
     /// (REQ-CORE-090). The chips and the cartridge the bus owns save themselves.
     pub fn save_state(&self, writer: &mut StateWriter) {
