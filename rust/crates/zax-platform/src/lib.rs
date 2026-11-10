@@ -11,6 +11,8 @@ pub mod imgui_glyphs;
 pub mod imgui_renderer;
 pub mod input;
 pub mod pacing;
+#[cfg(feature = "shaders")]
+pub mod slang_chain;
 pub mod ui_image;
 pub mod wave;
 #[cfg(feature = "wgpu")]

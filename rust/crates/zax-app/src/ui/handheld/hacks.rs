@@ -303,13 +303,14 @@ impl HacksModel {
                     &file,
                     &crc,
                 ],
-            ) + &if self.forceable {
+            ) + (if self.forceable {
                 String::new()
             } else if hack_pack::is_pack(patch.bps) {
                 format!(" {}", strings::get(keys::HACKS_PACK_SIGNATURES))
             } else {
                 format!(" {}", strings::get(keys::HACKS_FORCE_SIZE))
-            },
+            })
+            .as_str(),
         )
     }
 

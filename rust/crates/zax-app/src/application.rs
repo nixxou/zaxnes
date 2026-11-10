@@ -706,6 +706,19 @@ impl Running {
             self.host.settings().render_method(),
             factor,
         );
+        // A slang preset (prototype, `ZAXNES_SHADER`) is written for the console's resolution:
+        // the scene is drawn at the window's aspect but at the console's line count, and the
+        // preset scales it up to the window.
+        #[cfg(feature = "shaders")]
+        let (scene_width, scene_height) = if self
+            .window
+            .wgpu()
+            .is_some_and(zax_platform::wgpu_display::WgpuDisplay::filters_scene)
+        {
+            render_scaling::console_lines(width.max(1), view_height)
+        } else {
+            (scene_width, scene_height)
+        };
         let view = self
             .host
             .view_mut()

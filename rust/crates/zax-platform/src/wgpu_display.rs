@@ -52,6 +52,8 @@ const BATCHING_FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANC
 #[derive(Debug, Clone, Copy)]
 pub struct SceneLayer<'a> {
     pub view: &'a wgpu::TextureView,
+    /// The texture of `view`, which the slang shaders read.
+    pub texture: &'a wgpu::Texture,
     pub height: u32,
 }
 
@@ -60,6 +62,12 @@ pub struct WgpuDisplay {
     // Field order is drop order: everything made on the device goes before the surface.
     compositor: Compositor,
     interface: InterfaceRenderer,
+    /// The slang preset filtering the scene picture, when `ZAXNES_SHADER` names one.
+    #[cfg(feature = "shaders")]
+    shader: Option<crate::slang_chain::SlangChain>,
+    /// Why the preset is not used, for the log.
+    #[cfg(feature = "shaders")]
+    shader_problem: Option<String>,
     pending: Option<wgpu::SurfaceTexture>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -176,9 +184,15 @@ impl WgpuDisplay {
         config.present_mode = present_mode(&capabilities.present_modes, vsync);
         surface.configure(&device, &config);
 
+        #[cfg(feature = "shaders")]
+        let (shader, shader_problem) = load_shader(&device, &queue, &adapter);
         Ok(Self {
             compositor: Compositor::new(&device, format),
             interface: InterfaceRenderer::new(&device, format),
+            #[cfg(feature = "shaders")]
+            shader,
+            #[cfg(feature = "shaders")]
+            shader_problem,
             pending: None,
             surface,
             config,
@@ -214,7 +228,15 @@ impl WgpuDisplay {
     #[must_use]
     pub fn report(&self) -> String {
         let info = self.adapter.get_info();
-        format!(
+        #[cfg(feature = "shaders")]
+        let shader = match (&self.shader, &self.shader_problem) {
+            (Some(shader), _) => format!("; slang preset {}", shader.preset.display()),
+            (None, Some(problem)) => format!("; slang preset refused: {problem}"),
+            (None, None) => String::new(),
+        };
+        #[cfg(not(feature = "shaders"))]
+        let shader = String::new();
+        let line = format!(
             "wgpu {:?} on '{}' ({:?}, driver '{} {}'), surface {:?} {:?}; adapters: {} \
              (ZAXNES_GPU=<part of a name> picks one)",
             info.backend,
@@ -225,7 +247,22 @@ impl WgpuDisplay {
             self.config.format,
             self.config.present_mode,
             self.adapters.join(", ")
-        )
+        );
+        line + shader.as_str()
+    }
+
+    /// Whether a slang preset filters the scene picture, which then wants the low resolution
+    /// its shaders were written for.
+    #[must_use]
+    pub const fn filters_scene(&self) -> bool {
+        #[cfg(feature = "shaders")]
+        {
+            self.shader.is_some()
+        }
+        #[cfg(not(feature = "shaders"))]
+        {
+            false
+        }
     }
 
     /// The renderer name the statistics show.
@@ -284,6 +321,10 @@ impl WgpuDisplay {
         if let Some(interface) = interface {
             self.interface.prepare(&self.device, &self.queue, interface);
         }
+        // The slang shaders draw the scene picture themselves (clearing the window to black),
+        // before the window pass; the interface then goes over them unfiltered.
+        let filtered = scene
+            .is_some_and(|scene| self.filter_scene(&mut encoder, &view, scene, (width, height)));
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("zax window"),
@@ -292,7 +333,11 @@ impl WgpuDisplay {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: if filtered {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -301,7 +346,7 @@ impl WgpuDisplay {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if let Some(scene) = scene {
+            if let Some(scene) = scene.filter(|_| !filtered) {
                 self.compositor
                     .draw(&self.device, &mut pass, scene, (width, height));
             }
@@ -311,6 +356,51 @@ impl WgpuDisplay {
         }
         self.queue.submit([encoder.finish()]);
         self.pending = Some(frame);
+    }
+
+    /// Draws `scene` through the slang preset onto `view`, the scene's rectangle at the bottom
+    /// of the window: `false` when there is no preset or it failed (the problem is kept for the
+    /// log and the preset dropped), and the compositor draws the picture instead.
+    #[cfg(feature = "shaders")]
+    fn filter_scene(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        scene: SceneLayer<'_>,
+        (width, height): (u32, u32),
+    ) -> bool {
+        let Some(shader) = self.shader.as_mut() else {
+            return false;
+        };
+        let layer = scene.height.clamp(1, height);
+        let rectangle = (0, height - layer, width, layer);
+        match shader.record(
+            encoder,
+            scene.texture,
+            view,
+            self.config.format,
+            rectangle,
+            (width, height),
+        ) {
+            Ok(()) => true,
+            Err(problem) => {
+                self.shader_problem = Some(problem);
+                self.shader = None;
+                false
+            }
+        }
+    }
+
+    #[cfg(not(feature = "shaders"))]
+    #[allow(clippy::unused_self)]
+    const fn filter_scene(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _view: &wgpu::TextureView,
+        _scene: SceneLayer<'_>,
+        _size: (u32, u32),
+    ) -> bool {
+        false
     }
 
     /// Presents the frame [`Self::draw`] drew.
@@ -363,6 +453,19 @@ impl WgpuDisplay {
 }
 
 /// Fifo with vsync; without, the first of Immediate and Mailbox the surface offers.
+/// The slang preset `ZAXNES_SHADER` names, or why it was refused.
+#[cfg(feature = "shaders")]
+fn load_shader(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    adapter: &wgpu::Adapter,
+) -> (Option<crate::slang_chain::SlangChain>, Option<String>) {
+    match crate::slang_chain::SlangChain::from_environment(device, queue, adapter) {
+        Ok(shader) => (shader, None),
+        Err(problem) => (None, Some(problem)),
+    }
+}
+
 fn present_mode(available: &[wgpu::PresentMode], vsync: bool) -> wgpu::PresentMode {
     if vsync {
         return wgpu::PresentMode::Fifo;

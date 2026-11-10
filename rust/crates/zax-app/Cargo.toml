@@ -28,6 +28,8 @@ android = ["zax-platform/android"]
 # The Vulkan and DirectX 12 renderer (`video.backend`, `--backend`), desktop only: the handheld
 # package never turns it on.
 wgpu = ["dep:wgpu", "zax-render/wgpu", "zax-platform/wgpu"]
+# RetroArch slang shaders on the game picture (prototype: `ZAXNES_SHADER=<preset.slangp>`).
+shaders = ["wgpu", "zax-platform/shaders"]
 
 [dependencies]
 zax-nes = { path = "../zax-nes" }

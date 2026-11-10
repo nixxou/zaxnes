@@ -342,7 +342,7 @@ pub fn export_project(folder: &Path, game: &str, source: &Path) -> Result<NewPro
     let text = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
     std::fs::write(description_file(&project), text + "\n").map_err(fail)?;
     let notes = TEMPLATE_NOTES.replace("<game>", &name)
-        + &format!(
+        + format!(
             "\n## Origin\n\nMade from the profile \"{original}\" ({} permanent and {} temporary \
              patterns, {} scripts), kept whole as `base.3dn`: its patterns and settings stay, the \
              patterns of `profile.json` are added to them, its scripts are the `.lua` files here. \
@@ -351,7 +351,8 @@ pub fn export_project(folder: &Path, game: &str, source: &Path) -> Result<NewPro
             profile.permanent_patterns.len(),
             profile.temporary_patterns.len(),
             profile.scripts.len()
-        );
+        )
+        .as_str();
     std::fs::write(project.join("NOTES.md"), notes).map_err(fail)?;
     let built = build_project(&project)?;
     let build_folder = project.join("build");

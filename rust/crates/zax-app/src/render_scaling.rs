@@ -40,6 +40,20 @@ pub fn scene_size(
     (scaled(width, factor), scaled(height, factor))
 }
 
+/// The lines of the console's picture, which a slang preset is written for.
+#[cfg(feature = "shaders")]
+const CONSOLE_LINES: i32 = 240;
+
+/// A view of `view_width` x `view_height` at the console's line count, keeping its aspect.
+#[cfg(feature = "shaders")]
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // view sizes < 2^24
+pub fn console_lines(view_width: i32, view_height: i32) -> (i32, i32) {
+    let width = (view_width.max(1) as f32 * CONSOLE_LINES as f32 / view_height.max(1) as f32)
+        .round() as i32;
+    (width.max(1), CONSOLE_LINES)
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 // the C# `(int)MathF.Round(size * factor)` of a view size below 2^24
 fn scaled(size: i32, factor: f32) -> i32 {
