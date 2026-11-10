@@ -31,6 +31,13 @@ const DMA_DMC: u8 = 0x04;
 /// [`NesBus::dma`]: an OAM transfer is pending or running.
 const DMA_OAM: u8 = 0x08;
 
+/// [`NesBus::dma`]: the DMC's fetch owes a **second** re-read cycle — the `NesHawkCompat`
+/// profile's item 1b, where a fetch is a fixed four cycles (halt, two re-reads, fetch) with no
+/// get/put alignment. Never set on the `Standard` profile, which spends its fourth cycle on an
+/// alignment instead and decides it by parity; every site that sets or tests this bit is behind
+/// `P::DMC_FETCH_HAS_TWO_DUMMIES`, so the `Standard` masks are the masks of the parent commit.
+const DMA_DUMMY2: u8 = 0x20;
+
 /// [`NesBus::dma`]: the DMC's memory reader has asked for a byte, but no halt may land before
 /// [`NesBus::dmc_ready_cycle`]. Every DMC request passes through this state:
 ///
@@ -149,6 +156,11 @@ pub struct NesBusOf<P: TimingProfile> {
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
     zone_instruction: bool,
+    /// Whether the DMC request now held or running came from a `$4015` **write**: the
+    /// `NesHawkCompat` profile's item 3, where such a fetch is displaced by two or three cycles
+    /// and then costs **three** cycles rather than the four of a reload. Never set on the
+    /// `Standard` profile, whose load fetch costs three or four by parity like any other.
+    dmc_from_write: bool,
     /// The timing profile: a type, zero-sized, so the two cores differ in their code and not by
     /// a byte of their state.
     profile: PhantomData<P>,
@@ -212,6 +224,7 @@ impl<P: TimingProfile> NesBusOf<P> {
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
+            dmc_from_write: false,
             profile: PhantomData,
         }
     }
@@ -427,6 +440,7 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.dma = 0;
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;
+        self.dmc_from_write = false;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
@@ -546,10 +560,10 @@ impl<P: TimingProfile> NesBusOf<P> {
         }
 
         if self.apu_lag > 0 {
-            self.apu.run_cpu_cycles(self.apu_lag);
+            self.apu.run_cpu_cycles::<P>(self.apu_lag);
             self.apu_lag = 0;
         }
-        self.apu_quiet = self.apu.quiet_cycles();
+        self.apu_quiet = self.apu.quiet_cycles::<P>();
         self.poll_dmc_dma();
     }
 
@@ -563,6 +577,18 @@ impl<P: TimingProfile> NesBusOf<P> {
     /// is exactly what the test it replaces in `tick` cost (MF-4a step 1).
     fn poll_dmc_dma(&mut self) {
         if self.apu.needs_dmc_dma() && (self.dma & (DMA_DMC | DMA_DMC_WAIT)) == 0 {
+            self.dmc_from_write = false;
+            if P::DMC_HALT_ON_REQUEST_CYCLE {
+                // **Item 1a.** NesHawk lowers `RDY` inside `DMCUnit.Run()`, which runs before
+                // `cpu.ExecuteOne()`, so the cycle the memory reader ran dry on is itself the
+                // halt cycle. `self.cycles` is that cycle — the APU runs inside the `tick` that
+                // has just advanced it — so the request is held for *this* cycle rather than for
+                // the next one, and `halted_read_cycle`'s `promote_dmc_wait(self.cycles)` takes
+                // it at once.
+                self.dmc_ready_cycle = self.cycles;
+                self.dma |= DMA_DMC_WAIT;
+                return;
+            }
             // The request is raised inside this cycle's `tick`, so the earliest cycle its halt
             // can land on is the next one — which is the whole reason the request is *held*
             // rather than armed (see [`DMA_DMC_WAIT`] and [`NesBus::read_cycle`]).
@@ -594,6 +620,14 @@ impl<P: TimingProfile> NesBusOf<P> {
 
         self.dma &= !DMA_DMC_WAIT;
         if self.apu.needs_dmc_dma() {
+            if P::DMC_FETCH_HAS_TWO_DUMMIES && !self.dmc_from_write {
+                // **Item 1b.** A reload is a fixed four cycles — the halt, two re-reads of the
+                // CPU's own address, the fetch — so it owes one re-read more than the `Standard`
+                // profile does, and no alignment. A fetch a `$4015` write started is item 3's
+                // three cycles instead and keeps the single re-read.
+                self.dma |= DMA_DMC | DMA_DUMMY | DMA_DUMMY2 | DMA_HALT;
+                return;
+            }
             self.dma |= DMA_DMC | DMA_DUMMY | DMA_HALT;
         } else if (self.dma & DMA_OAM) == 0 {
             self.dma &= !DMA_HALT;
@@ -614,7 +648,7 @@ impl<P: TimingProfile> NesBusOf<P> {
             if self.expansion_audio {
                 self.push_expansion_audio();
             }
-            self.apu.run_cpu_cycles(self.apu_lag);
+            self.apu.run_cpu_cycles::<P>(self.apu_lag);
             self.apu_lag = 0;
         }
         self.apu_quiet = 0;
@@ -765,17 +799,28 @@ impl<P: TimingProfile> NesBusOf<P> {
 
             let get_cycle = (self.cycles & 1) != 0;
 
-            if get_cycle && (self.dma & (DMA_HALT | DMA_DUMMY | DMA_DMC)) == DMA_DMC {
+            // **Item 1b** again, for the case an OAM transfer is running beside the fetch: the
+            // `NesHawkCompat` profile owes a second re-read and tests no parity, so the gate is
+            // "nothing else owed" alone. The `Standard` arm is the parent commit's condition, and
+            // `DMA_DUMMY2` is never set on it.
+            let dmc_may_read = if P::DMC_FETCH_HAS_TWO_DUMMIES {
+                (self.dma & (DMA_HALT | DMA_DUMMY | DMA_DUMMY2 | DMA_DMC)) == DMA_DMC
+            } else {
+                get_cycle && (self.dma & (DMA_HALT | DMA_DUMMY | DMA_DMC)) == DMA_DMC
+            };
+
+            if dmc_may_read {
                 // The memory reader has had its halt and its dummy cycle: it reads.
                 self.dma_cycle();
                 self.dmc_dma_count += 1;
                 let address = self.apu.dmc_dma_address();
                 let value = self.dmc_fetch_read(address, internal, &mut decoded_before);
                 self.sync_apu();
-                self.apu.supply_dmc_byte(value);
+                self.apu.supply_dmc_byte::<P>(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
                 // until the byte lands.
                 self.dma &= !DMA_DMC;
+                self.dmc_from_write = false;
             } else if get_cycle && (self.dma & DMA_OAM) != 0 {
                 self.dma_cycle();
                 let address = (u16::from(self.dma_oam_page) << 8) | u16::from(oam_index);
@@ -890,8 +935,18 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.tick();
         self.dma_repeat_read::<ZONE>(read_address);
 
-        // An alignment cycle when the cycle after this one would not be a get cycle.
-        if (self.cycles & 1) == 0 {
+        if P::DMC_FETCH_HAS_TWO_DUMMIES {
+            // **Item 1b.** NesHawk spends `RunDMCHaltFetch()` twice and tests no parity at all:
+            // the whole fetch is the halt, two re-reads and the read, whatever cycle it started
+            // on. A fetch item 3's `$4015` write started is the exception — three cycles — and
+            // `dmc_from_write` says so.
+            if (self.dma & DMA_DUMMY2) != 0 {
+                self.dma &= !DMA_DUMMY2;
+                self.tick();
+                self.dma_repeat_read::<ZONE>(read_address);
+            }
+        } else if (self.cycles & 1) == 0 {
+            // An alignment cycle when the cycle after this one would not be a get cycle.
             self.tick();
             self.dma_repeat_read::<ZONE>(read_address);
         }
@@ -903,10 +958,11 @@ impl<P: TimingProfile> NesBusOf<P> {
         let mut decoded_before = read_address;
         let value = self.dmc_fetch_read(address, false, &mut decoded_before);
         self.sync_apu();
-        self.apu.supply_dmc_byte(value);
+        self.apu.supply_dmc_byte::<P>(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
         // byte lands.
         self.dma &= !DMA_DMC;
+        self.dmc_from_write = false;
     }
 
     /// How many of the `wanted` byte pairs an OAM transfer still owes may run in
@@ -981,6 +1037,10 @@ impl<P: TimingProfile> NesBusOf<P> {
             self.dma &= !DMA_HALT;
         } else if (self.dma & DMA_DUMMY) != 0 {
             self.dma &= !DMA_DUMMY;
+        } else if P::DMC_FETCH_HAS_TWO_DUMMIES && (self.dma & DMA_DUMMY2) != 0 {
+            // The `NesHawkCompat` profile's second re-read cycle (item 1b); the bit is never set
+            // on the `Standard` profile, so this arm is unreachable there and folds away.
+            self.dma &= !DMA_DUMMY2;
         }
         self.tick();
     }
@@ -1293,7 +1353,7 @@ impl<P: TimingProfile> NesBusOf<P> {
                 }
                 _ => {
                     self.sync_apu();
-                    let dmc_load_delay = self.apu.write(address, value);
+                    let dmc_load_delay = self.apu.write::<P>(address, value);
                     self.after_apu_write(dmc_load_delay);
                 }
             }
@@ -1335,10 +1395,16 @@ impl<P: TimingProfile> NesBusOf<P> {
     ///
     /// A write that **starts** a sample does not raise the request either: its load fetch waits
     /// two or three cycles, which this turns into the one absolute cycle [`DMA_DMC_WAIT`] holds.
+    ///
+    /// On the `NesHawkCompat` profile the same delay also arrives for a write that found the
+    /// sample buffer empty **mid-sample** (item 3, `DmcChannel::set_enabled`), and the fetch it
+    /// leads to is the short one: [`NesBus::dmc_from_write`] records that so that
+    /// [`NesBus::promote_dmc_wait`] does not give it item 1b's second re-read cycle.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     fn after_apu_write(&mut self, dmc_load_delay: u32) {
         if dmc_load_delay > 0 {
             // `self.cycles` is the write's own cycle: the bus ticks, then performs the access.
+            self.dmc_from_write = P::DMC_ENABLE_WRITES_MID_SAMPLE;
             self.hold_dmc_dma(dmc_load_delay);
             return;
         }
@@ -1346,7 +1412,8 @@ impl<P: TimingProfile> NesBusOf<P> {
         if self.apu.needs_dmc_dma() {
             self.poll_dmc_dma();
         } else if (self.dma & (DMA_DMC | DMA_DMC_WAIT)) != 0 {
-            self.dma &= !(DMA_DMC | DMA_DMC_WAIT | DMA_DUMMY);
+            self.dma &= !(DMA_DMC | DMA_DMC_WAIT | DMA_DUMMY | DMA_DUMMY2);
+            self.dmc_from_write = false;
             if (self.dma & DMA_OAM) == 0 {
                 self.dma &= !DMA_HALT;
             }
@@ -1429,6 +1496,23 @@ impl<P: TimingProfile> NesBusOf<P> {
         }
     }
 
+    /// Whether `dma` says "a lone DMC fetch, nothing else owed", which is the fast path of
+    /// [`NesBus::halted_read_cycle`].
+    ///
+    /// On the `NesHawkCompat` profile a reload also owes its second re-read cycle (item 1b), so
+    /// the pattern it compares against has `DMA_DUMMY2` in it; a fetch item 3's `$4015` write
+    /// started does not, and matches the `Standard` pattern. Written as two whole comparisons so
+    /// that the `Standard` profile emits the parent commit's single `cmpb` against the parent
+    /// commit's immediate.
+    #[allow(clippy::inline_always)] // One `cmpb` on a path entered on every halted read cycle.
+    #[inline(always)]
+    fn is_a_lone_dmc_fetch(&self) -> bool {
+        if P::DMC_FETCH_HAS_TWO_DUMMIES && !self.dmc_from_write {
+            return self.dma == (DMA_DMC | DMA_DUMMY | DMA_DUMMY2 | DMA_HALT);
+        }
+        self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT)
+    }
+
     /// The cold half of [`NesBus::read_cycle`]: the cycle that has just run becomes the DMA's
     /// halt cycle, the units take the bus, and the CPU then gets the cycle it was denied and
     /// reads again. Separate so that its argument shuffling and its frame never reach the other
@@ -1444,7 +1528,7 @@ impl<P: TimingProfile> NesBusOf<P> {
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
             return self.read_internal(address);
         }
-        if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) && (address & 0xFFE0) != 0x4000 {
+        if self.is_a_lone_dmc_fetch() && (address & 0xFFE0) != 0x4000 {
             // A lone DMC fetch, which is most of what a game playing DPCM comes here for, and a
             // fixed three or four cycles rather than a state machine (lot MF-4a-ter step 3).
             self.dmc_only_dma::<false>(address);
@@ -1516,7 +1600,7 @@ impl<P: TimingProfile> NesBusOf<P> {
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
             return;
         }
-        if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) {
+        if self.is_a_lone_dmc_fetch() {
             self.dmc_only_dma::<true>(address);
         } else {
             self.run_dma::<true>(address);
@@ -1689,6 +1773,7 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.dma = 0;
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;
+        self.dmc_from_write = false;
         self.ppu_lag = 0;
         self.ppu_deadline = 0;
         Ok(())

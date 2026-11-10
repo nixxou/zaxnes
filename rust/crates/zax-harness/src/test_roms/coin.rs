@@ -52,7 +52,7 @@
 //! as passes, and the row names each one.
 
 use serde_json::{json, Map, Value};
-use zax_nes::NesCore;
+use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
 
 use super::screen::{self, Font};
 use super::{Outcome, Verdict};
@@ -1184,7 +1184,7 @@ impl TestResult {
 
 /// Runs the ROM's "run every test" path, retiring any test it hangs on, and reads the 147
 /// result bytes.
-pub fn run(nes: &mut NesCore, budget: u32) -> Verdict {
+pub fn run<P: TimingProfile>(nes: &mut NesCoreOf<P>, budget: u32) -> Verdict {
     let mut retired: Vec<Retired> = Vec::new();
     let mut frames = 0u32;
     let mut attempts = 0u32;
@@ -1338,7 +1338,7 @@ fn verdict_of(
 ///
 /// In the all-test mode the ROM writes nothing before a test and its result afterwards, so
 /// this is the test it never came back from.
-fn first_not_run(core: &NesCore) -> Option<Test> {
+fn first_not_run<P: TimingProfile>(core: &NesCoreOf<P>) -> Option<Test> {
     TESTS
         .iter()
         .find(|test| TestResult::of(core.read_memory(test.result)) == TestResult::NotRun)
@@ -1368,7 +1368,7 @@ struct Run {
 /// README says to ("Pressing A will run the highlighted test"), and watching seven of them pass.
 ///
 /// The result bytes are at `$0403`-`$0498`, in page 4, which no test touches but its own.
-fn run_count(core: &NesCore) -> usize {
+fn run_count<P: TimingProfile>(core: &NesCoreOf<P>) -> usize {
     TESTS
         .iter()
         .filter(|test| TestResult::of(core.read_memory(test.result)) != TestResult::NotRun)
@@ -1384,7 +1384,7 @@ fn run_count(core: &NesCore) -> usize {
 /// frames the run will not finish. Which of the two ways it ended is told apart by
 /// `RunningAllTests`: a test that took the CPU out of the loop leaves it at zero for the whole
 /// wait, where a test that is merely looping inside the loop does not.
-fn drive(core: &mut NesCore, budget: u32, retired: &[Test]) -> Run {
+fn drive<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32, retired: &[Test]) -> Run {
     /// Frames run after the ROM clears `RunningAllTests`, so that it finishes drawing its
     /// result table and recomputing the two tallies.
     const AFTER: u32 = 30;

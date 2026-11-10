@@ -127,6 +127,25 @@ pub struct NesCoreOf<P: TimingProfile> {
 /// resolves neither `NesCore::STATE_VERSION` nor `NesCore::new()` through a default.
 pub type NesCore = NesCoreOf<Standard>;
 
+/// `run_frame` for a caller that is itself generic over the profile.
+///
+/// The inherent `run_frame` is declared once per instantiation and not on the generic `impl` (the
+/// note below says why, with the measurements), and a generic caller cannot name an inherent method
+/// that the generic `impl` does not carry. So it names this one instead; it is the same function,
+/// and in concrete code the inherent method wins by the ordinary rule, so nothing a caller writes
+/// today changes. The harness's `test-roms` and `movie-sync` are what asked for it.
+pub trait RunFrame {
+    /// As [`NesCore::run_frame`], on whichever profile `Self` carries.
+    fn run_frame(&mut self, input_word: u16) -> i64;
+}
+
+impl<P: TimingProfile> RunFrame for NesCoreOf<P> {
+    #[inline]
+    fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
 /// The frame entry point, **once per profile and concrete**.
 ///
 /// It is deliberately not a method of the generic `impl` above, and the reason is code generation
@@ -1826,7 +1845,7 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.save_state(&mut writer);
         self.cpu.save_state(&mut writer);
         self.bus.ppu().save_state(&mut writer);
-        self.bus.apu().save_state(&mut writer);
+        self.bus.apu().save_state::<P>(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         if wide.unlocked() {
@@ -1899,7 +1918,7 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.save_state(&mut writer);
         self.cpu.save_state(&mut writer);
         self.bus.ppu().save_machine_state(&mut writer);
-        self.bus.apu().save_state(&mut writer);
+        self.bus.apu().save_state::<P>(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         self.bus.ppu().wide().save_state(&mut writer);
@@ -1944,7 +1963,9 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.load_state(&mut reader)?;
         self.cpu.load_state(&mut reader)?;
         self.bus.ppu_mut().load_machine_state(&mut reader)?;
-        self.bus.apu_mut().load_state_keeping_samples(&mut reader)?;
+        self.bus
+            .apu_mut()
+            .load_state_keeping_samples::<P>(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         // The cartridge is the one already attached: the ROM never left, so there is nothing to
         // rebuild. `Cartridge::load_state` refreshes the fast ROM windows itself.
@@ -2072,7 +2093,7 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.load_state(&mut reader)?;
         self.cpu.load_state(&mut reader)?;
         self.bus.ppu_mut().load_state(&mut reader)?;
-        self.bus.apu_mut().load_state(&mut reader)?;
+        self.bus.apu_mut().load_state::<P>(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
         // A state of the hack restored without it: the original ROM never unlocks the

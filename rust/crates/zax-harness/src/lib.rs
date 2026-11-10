@@ -28,6 +28,7 @@ pub mod meshes;
 pub mod movie_file;
 pub mod movie_sync;
 pub mod packs;
+pub mod profile_choice;
 pub mod profile_tool;
 // The work-RAM trace of lot EVAL-SYNC-2, in the shape the owner's `BizHawk` Lua script writes it,
 // so that a Zaxnes run can be held against a third machine's. Not behind `fceux-core` either.

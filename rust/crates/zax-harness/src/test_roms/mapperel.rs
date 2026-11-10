@@ -38,7 +38,7 @@
 //! blank screen and the PNG shows it.
 
 use serde_json::json;
-use zax_nes::NesCore;
+use zax_nes::{NesCoreOf, TimingProfile};
 
 use super::screen::{self, Font};
 use super::{Outcome, Verdict};
@@ -50,7 +50,11 @@ const DETAILED: &str = "DETAILED TEST RESULT:";
 ///
 /// `header_mapper` is the iNES mapper of the file, so a board the ROM detects as something else
 /// is caught: that is the whole point of the suite.
-pub fn run(core: &mut NesCore, header_mapper: Option<i32>, budget: u32) -> Verdict {
+pub fn run<P: TimingProfile>(
+    core: &mut NesCoreOf<P>,
+    header_mapper: Option<i32>,
+    budget: u32,
+) -> Verdict {
     let frames = screen::run_until_settled(core, budget);
     let rows = screen::rows(core, Font::Ascii6);
     let text = screen::joined(&rows);

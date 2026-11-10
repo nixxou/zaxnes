@@ -28,7 +28,7 @@ pub mod wide_decode;
 pub use input::{ControllerPortType, ZapperPosition};
 pub use nametable_mirroring::NametableMirroring;
 pub use nes_bus::{NesBus, NesBusOf};
-pub use nes_core::{NesCore, NesCoreOf, VideoCallback, ZapperPositionSource};
+pub use nes_core::{NesCore, NesCoreOf, RunFrame, VideoCallback, ZapperPositionSource};
 pub use region_timing::RegionTiming;
 pub use timing_profile::{NesHawkCompat, Standard, TimingProfile};
 pub use video_info::VideoInfo;

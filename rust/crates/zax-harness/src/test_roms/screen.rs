@@ -21,7 +21,7 @@
 //! row and nothing else.
 
 use serde_json::json;
-use zax_nes::NesCore;
+use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
 
 use super::{Outcome, Verdict};
 
@@ -64,7 +64,7 @@ impl Font {
 /// MMC5's `ExRAM` or its fill mode — reads correctly instead of through console VRAM that it
 /// never wrote. The accessor is documented as having no side effect.
 #[must_use]
-pub fn rows_at(core: &NesCore, base: u16, font: Font) -> Vec<String> {
+pub fn rows_at<P: TimingProfile>(core: &NesCoreOf<P>, base: u16, font: Font) -> Vec<String> {
     let ppu = core.ppu();
     let cartridge = core.cartridge();
     (0..ROWS)
@@ -90,7 +90,7 @@ pub fn rows_at(core: &NesCore, base: u16, font: Font) -> Vec<String> {
 /// test on the other, and the debris wins on character count. The other three pages are only
 /// tried when the shown one is blank.
 #[must_use]
-pub fn rows(core: &NesCore, font: Font) -> Vec<String> {
+pub fn rows<P: TimingProfile>(core: &NesCoreOf<P>, font: Font) -> Vec<String> {
     let shown = 0x2000u16 + 0x400 * u16::from(core.ppu().control() & 0x03);
     let rows = rows_at(core, shown, font);
     if score(&rows) > 0 {
@@ -113,7 +113,7 @@ pub fn rows(core: &NesCore, font: Font) -> Vec<String> {
 /// gaps rather than words, so the count of alphanumeric characters separates them cleanly. The
 /// chosen font is recorded in the row, so a reader of the report can check the call.
 #[must_use]
-pub fn best(core: &NesCore) -> (Font, Vec<String>) {
+pub fn best<P: TimingProfile>(core: &NesCoreOf<P>) -> (Font, Vec<String>) {
     [Font::Ascii, Font::Ascii6]
         .into_iter()
         .map(|font| (font, rows(core, font)))
@@ -147,7 +147,7 @@ pub fn joined(rows: &[String]) -> String {
 /// leaves an almost blank screen up for seconds while the CHR and WRAM passes buzz, and a
 /// reader that stops at the first stable frame reads that blank screen instead of the result.
 /// Returns the frames run.
-pub fn run_until_settled(core: &mut NesCore, budget: u32) -> u32 {
+pub fn run_until_settled<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32) -> u32 {
     /// Frames of an unchanging screen that mean the ROM has finished drawing. Two seconds:
     /// Holy Mapperel leaves a part-drawn screen up while the CHR and WRAM passes buzz.
     const SETTLED: u32 = 120;
@@ -264,7 +264,7 @@ impl Kind {
 }
 
 /// Runs `core` for `budget` frames and reads the verdict off its screen the way `kind` says.
-pub fn run(nes: &mut NesCore, budget: u32, kind: Kind) -> Verdict {
+pub fn run<P: TimingProfile>(nes: &mut NesCoreOf<P>, budget: u32, kind: Kind) -> Verdict {
     let frames = run_until_settled(nes, budget);
     let (font, rows) = best(nes);
     let text = joined(&rows);

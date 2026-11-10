@@ -16,7 +16,7 @@ source actually shows.
 
 - [x] 1. Verify the differences verbatim.
 - [x] 2. The architecture.
-- [ ] 3. The NesHawk profile.
+- [x] 3. The NesHawk profile.
 - [ ] 4. The engine variant and its selection.
 - [ ] 5. The experiment.
 - [ ] 6. Report and final pass.
@@ -517,3 +517,122 @@ link, so it still covers the application and every one of its test targets.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE step 2/6 done: the architecture
+
+---
+
+## Step 3 — the NesHawk profile
+
+Items 1, 2 and 3 of step 1 are implemented on `NesHawkCompat`, each behind its own associated
+constant, with the `Standard` arm of every site written as the parent commit's code so that arm is
+not merely equivalent but the same source. Items 5 and 6 stay candidates, as step 1 planned.
+
+### The four constants, and the one site each reads
+
+| constant | where it is read | what it does |
+|---|---|---|
+| `DMC_HALT_ON_REQUEST_CYCLE` | `nes_bus.rs` `poll_dmc_dma` | holds the request for **this** cycle rather than the next, so the cycle the memory reader ran dry on is itself the halt cycle (item 1a) |
+| `DMC_FETCH_HAS_TWO_DUMMIES` | `nes_bus.rs` `promote_dmc_wait`, `dmc_fetch_cycles`, `run_dma`, `dma_cycle`, `is_a_lone_dmc_fetch` | a sixth `dma` bit, `DMA_DUMMY2`: a fetch is a fixed four cycles — halt, two re-reads, fetch — and no parity is tested anywhere (item 1b) |
+| `DMC_LENGTH_LAGS_THE_FETCH` | `apu/dmc_channel.rs` `supply_byte`, `step_reload_countdown`, `quiet_clocks`, `save_state`/`load_state`; `apu/mod.rs` `step_cpu_cycle` | a three-cycle reload countdown: the length, the loop and the IRQ land at the end of the fetch's cycle plus two (item 2) |
+| `DMC_ENABLE_WRITES_MID_SAMPLE` | `apu/dmc_channel.rs` `set_enabled`; `nes_bus.rs` `after_apu_write` | a `$4015` enable with the buffer empty starts a write-style fetch even mid-sample: displaced by the **DMC timer's** parity, and three cycles rather than four (item 3) |
+
+Two pieces of state were added, both inert on the `Standard` profile: `DmcChannel::reload_countdown`
+(item 2) and `NesBus::dmc_from_write` (item 3, "the pending request came from a `$4015` write, so it
+is the short fetch").
+
+**No savestate format moved.** The countdown is written **only** on the `NesHawkCompat` profile
+(`if P::DMC_LENGTH_LAGS_THE_FETCH` in `DmcChannel::save_state`), so a `Standard` block is byte for
+byte the block every earlier version wrote and `NesCore::STATE_VERSION` stays at 10. Telling the two
+profiles' blocks apart is step 4's, and will rest on the core name at the head of the block rather
+than on a version bump.
+
+### Three findings worth their own lines
+
+**`$4015` bit 4's window is three cycles wide and two of them are visible.** The fetch's own cycle
+is a halted cycle on either machine, so no program can read `$4015` on it; the reads a program can
+make are on `F + 1` and `F + 2`, and both show bit 4 **set** on `NesHawkCompat` where `Standard`
+shows it clear. The test does that by making the read the DMA halts be a read of `$4015` itself,
+which is the only way to see `F + 1` at all.
+
+**The countdown is stepped once at the fetch, not three times after it.** NesHawk sets
+`dmc_reload_countdown = 3` inside `Fetch()` and spends the first of the three in `RunOneLast()` of
+the fetch's **own** cycle. This core performs a DMA read *after* the cycle's APU step, so
+`supply_byte` sets 3 and immediately calls `step_reload_countdown` once; without that the window
+would land a cycle late. It is one line and it is the difference between matching NesHawk and being
+off by one on every sample end.
+
+**A reload's get/put parity is not live on this core either, in practice.** Item 1b says NesHawk
+tests no parity. Measuring the `Standard` profile's reload fetch at sixteen phases of the DMC timer
+gave **four cycles every time**: every entry of both rate tables is even and `DmcChannel::reset`
+fixes the output unit's phase on purpose (for blargg's `sync_dmc`), so a reload's dry cycle always
+has the same parity and the alignment cycle is always spent. The 3-cycle fetch is reachable — the
+`$4015` **load**, whose delay is chosen by the APU cycle's parity, and a reload whose dry cycle
+passes on a write so that the halt lands a cycle later — and the item-1b test moves the parity that
+second way. **Item 1b therefore costs the two profiles nothing against each other on an ordinary
+reload**; what separates them there is item 1a alone, one cycle earlier.
+
+### Unit tests — `crates/zax-nes/tests/neshawk_profile_tests.rs`, six
+
+Every one is **differential**: it measures the same thing on both profiles and asserts the gap the
+item predicts, so a regression on the `Standard` profile fails it too.
+
+| | |
+|---|---|
+| `item_1a_the_halt_lands_on_the_request_cycle_itself` | sixteen timer phases: on `NesHawkCompat` the dry cycle's own read is halted and costs 5 (four halted cycles and the read); on `Standard` it costs 1 and the **next** read cycle is the halted one |
+| `item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity` | the dry cycle passed on a write and the read displaced one cycle either way: `NesHawkCompat` 5 and 5, `Standard` 4 and 5 |
+| `item_2_bit_4_of_4015_stays_set_after_the_last_fetch` | the four `$4015` values after a one-byte sample's only fetch: `Standard` never shows bit 4, `NesHawkCompat` shows it set, set, clear |
+| `item_2_the_dmc_irq_is_raised_three_cycles_late` | bit 7 over the same window: `Standard` from the first read, `NesHawkCompat` from the third |
+| `item_3_a_mid_sample_4015_enable_displaces_the_fetch_and_shortens_it` | after a mid-sample `$4015 = $10`: `Standard` halts the very next read cycle for 4 or 5 cycles, `NesHawkCompat` lets two or more read cycles pass and then costs 4 (three halted cycles and the read) |
+| `the_reload_countdown_survives_a_savestate_round_trip` | the NesHawk core reads back every byte it wrote |
+
+### The public test ROMs, on both profiles
+
+`zax-harness test-roms` grew `--profile standard|neshawk` (the new `profile_choice` module, which
+step 4 reuses for `movie-sync` and `frame-trace`); its five readers are now generic over the
+profile, with one `match` at the top of `run_one`. Generic code cannot name the per-instantiation
+`run_frame`, so `zax-nes` gained the small public trait `RunFrame` whose method **is** that
+function.
+
+**The `Standard` column is unchanged, ROM for ROM and row for row** — including `AccuracyCoin`'s
+128/147, which is EVAL-SYNC-4 §4's figure to the test.
+
+| suite | `Standard` | `NesHawkCompat` |
+|---|---|---|
+| `dmc_dma_during_read4` (5) | 3 pass, 2 manual | **2 pass, 1 fail**, 2 manual |
+| `sprdma_and_dmc_dma` (2) | 2 pass | **0 pass, 2 fail** |
+| `apu_test` (19, singles + the combined ROM + `pal_apu_tests`) | 19 pass | **17 pass, 2 fail** |
+| `dmc_tests` (4) | 4 manual | 4 manual |
+| `AccuracyCoin` | **128/147** | **120/147** |
+
+The five ROMs and the eight `AccuracyCoin` rows that change, each against the item that moves it:
+
+| what fails on `NesHawkCompat` | the item, and why it must |
+|---|---|
+| `apu_test/7-dmc_basics` #19, and `apu_test.nes` at its test 7 | the ROM's own text is *"There should be a one-byte buffer that's filled immediately if empty"*. Item 3 is exactly the denial of that: a `$4015` enable with the buffer empty queues a fetch two or three cycles out instead of at once. |
+| `dmc_dma_during_read4/dma_4016_read` | prints `08 08 08 08 07` where the hardware prints `08 08 07 08 08`: the extra controller clock the halt causes lands one read later. That is item 1a, one cycle earlier, read out of a program. |
+| `sprdma_and_dmc_dma`, `sprdma_and_dmc_dma_512` | blargg's fine-synchronisation loop is *written* to be one cycle longer than the DMC's byte so that it drifts into alignment ("3421+4 clocks per iter"). A chip whose fetch is a fixed four cycles has no alignment to drift into, so the loop cannot converge on it. This is a deduction from item 1b and the ROM's own documentation, not a claim about any particular build of BizHawk. |
+| `AccuracyCoin`: `DMA + $2002 Read`, `DMA + $4015 Read`, `DMC DMA + OAM DMA`, `Delta Modulation Channel`, `DMC Reload Timing`, `DMA Landing on Write`, `Implied Dummy Reads` | seven rows that each place a DMC fetch against another access to the cycle. Items 1a and 1b move every one of those placements. |
+| `AccuracyCoin`: `Interrupt flag latency` | item 2: the DMC IRQ is raised at the end of the fetch's cycle plus two, so the cycle the CPU first samples it on moves with it. |
+| `dmc_dma_during_read4/dma_2007_read` (no documented verdict, so **manual** on both) | its screen moves from `11 22 / 11 22 / 44 55 / 11 22 / 11 22` to `11 22 / 11 22 / 11 22 / 11 22 / 44 55` — the same one-read displacement as `dma_4016_read`, recorded because the row's verdict cannot record it. |
+
+**These are not regressions and they are not excused either.** The brief allows the
+`NesHawkCompat` profile to fail what NesHawk itself would fail, and every failure above is traced
+to an item that NesHawk's source does and the hardware does not. The profile exists to replay a
+`.bk2`, not to be more accurate: `docs/review/NESHAWK-PROFILE.md` (step 6) says so in the place a
+reader will look.
+
+### The `Standard` profile, re-proved after the items were written
+
+| | |
+|---|---|
+| `golden-core`, 98 originals, 1 200 frames | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical** |
+| `zax-nes`, release, `--include-ignored` | **1 187** passed, 0 failed |
+| `zax-harness`, release, feature off | **125** passed, 1 ignored |
+| `AccuracyCoin` | 128/147, the same 19 failures as EVAL-SYNC-4 |
+| `cargo fmt --all --check`, clippy `-D warnings --all-targets` | clean |
+
+`zax-nes` goes from EVAL-SYNC-4's 1 187 by step 2's four tests and this step's six, and back to
+1 187 because the ten new ones replace nothing: 1 181 + 10 ignored at step 2, 1 187 + 10 here.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE step 3/6 done: the NesHawk profile

@@ -35,8 +35,9 @@ use std::time::Instant;
 use serde_json::{json, Map, Value};
 use zax_core_api::NesRegion;
 use zax_nes::rom::InesHeader;
-use zax_nes::NesCore;
+use zax_nes::{NesCoreOf, NesHawkCompat, Standard, TimingProfile};
 
+use crate::profile_choice::ProfileChoice;
 use crate::HarnessError;
 
 /// The options of `test-roms`.
@@ -49,7 +50,8 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
   --merge <file.json>   start from that campaign's rows; the ROMs run now replace theirs
                         (with --filter, re-measures one suite without re-running the rest)
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
-  --quiet               do not print one line per ROM";
+  --quiet               do not print one line per ROM
+  --profile <name>      timing profile: standard|neshawk (default standard)";
 
 /// The environment variable the gated `cargo test` subset reads.
 pub const ROMS_DIR_VARIABLE: &str = "ZAXNES_TEST_ROMS";
@@ -67,6 +69,8 @@ pub struct Options {
     merge: Option<PathBuf>,
     frame_cap: Option<u32>,
     quiet: bool,
+    /// Which 2A03 to run every ROM on (lot NESHAWK-PROFILE step 3's matrix).
+    profile: ProfileChoice,
 }
 
 impl Options {
@@ -93,6 +97,7 @@ impl Options {
             merge: None,
             frame_cap: None,
             quiet: false,
+            profile: ProfileChoice::Standard,
         };
         while let Some((name, tail)) = rest.split_first() {
             if matches!(name.as_str(), "--no-shots" | "--quiet" | "--reuse") {
@@ -108,6 +113,7 @@ impl Options {
                 "--shots" => options.shots = Some(PathBuf::from(value)),
                 "--markdown" => options.markdown = Some(PathBuf::from(value)),
                 "--merge" => options.merge = Some(PathBuf::from(value)),
+                "--profile" => options.profile = ProfileChoice::parse(value)?,
                 "--frames" => {
                     options.frame_cap = Some(
                         value
@@ -430,7 +436,10 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     let mut results = Vec::with_capacity(named.len());
     for (name, file) in named {
         let image = fs::read(&file)?;
-        let mut result = run_one(&name, &image, options.frame_cap);
+        let mut result = match options.profile {
+            ProfileChoice::Standard => run_one::<Standard>(&name, &image, options.frame_cap),
+            ProfileChoice::NesHawk => run_one::<NesHawkCompat>(&name, &image, options.frame_cap),
+        };
         if let Some(dir) = &shots {
             result.result.shot = write_shot(dir, &name, &result.frame)?;
         }
@@ -456,7 +465,10 @@ struct Finished {
 }
 
 /// Loads `image`, runs it with the reader its suite documents and returns the row.
-fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
+///
+/// Generic over the timing profile so that `--profile neshawk` runs the whole collection on the
+/// NesHawk-compatible chip; `ProfileChoice` above is where the one dispatch happens.
+fn run_one<P: TimingProfile>(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
     let started = Instant::now();
     let header = InesHeader::try_parse(image).ok();
     let mut result = RomResult {
@@ -477,7 +489,7 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
         shot: None,
     };
 
-    let mut core = NesCore::new();
+    let mut core = NesCoreOf::<P>::new();
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);

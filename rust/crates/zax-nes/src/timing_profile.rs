@@ -32,6 +32,50 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// The byte a savestate records so that restoring one into the other profile can be refused
     /// rather than silently drifting. Stable across versions: it is a file format.
     const STATE_ID: u8;
+
+    // ------------------------------------------------------- the DMC's sample-fetch DMA
+    //
+    // Item numbers are `docs/progress/NESHAWK-PROFILE.md` step 1's, where each is quoted against
+    // the NesHawk function it was read from. Every one of them is `false` on `Standard`, and every
+    // site that reads one writes the `Standard` arm as the code this core had before the profile
+    // existed — so that arm is not merely equivalent, it is the same source.
+
+    /// **Item 1a.** The halt of a DMC **reload** request — the sample buffer running dry — lands
+    /// on the **request cycle itself** rather than on the first read cycle after it.
+    ///
+    /// NesHawk lowers `RDY` inside `DMCUnit.Run()`, which `APU.RunOneFirst()` calls before
+    /// `cpu.ExecuteOne()`, so the cycle the memory reader ran dry on is already halted. Zaxnes —
+    /// and Mesen 2, and the nesdev *DMA* page read the other way — raise the request inside the
+    /// cycle and halt the next one.
+    const DMC_HALT_ON_REQUEST_CYCLE: bool;
+
+    /// **Item 1b.** A DMC fetch costs a **fixed four** cycles — the halt, two re-reads of the
+    /// CPU's own address, the fetch — with no get/put alignment cycle and so no dependence on the
+    /// parity of the cycle it started on.
+    ///
+    /// NesHawk's `dmc_dma_countdown = 3` and the two `RunDMCHaltFetch()` calls it spends; there is
+    /// no `% 2` anywhere on that path. Zaxnes spends three cycles or four by parity
+    /// (`NesBus::DMC_DMA_CYCLES_ALIGNED` and `NesBus::DMC_DMA_CYCLES`).
+    const DMC_FETCH_HAS_TWO_DUMMIES: bool;
+
+    /// **Item 2.** The sample length, the loop and the DMC IRQ are applied **three CPU cycles
+    /// after** the fetch instead of at the fetch, so bit 4 of `$4015` stays set for three cycles
+    /// after the last byte of a sample has been read.
+    ///
+    /// NesHawk's `DMCUnit.Fetch()` only sets `apu.dmc_reload_countdown = 3`; `RunOneLast()` spends
+    /// it. Zaxnes does all of it in `DmcChannel::supply_byte`, as Mesen 2 does.
+    const DMC_LENGTH_LAGS_THE_FETCH: bool;
+
+    /// **Item 3.** A `$4015` write with bit 4 set starts a **write-style** fetch whenever the
+    /// sample buffer is empty — *including while a sample is already playing* — and that fetch is
+    /// displaced by two or three cycles and costs **three** cycles rather than four.
+    ///
+    /// NesHawk's `set_lenctr_en` tests `!sample_buffer_filled` as a **sibling** of the restart and
+    /// not as a child of it, so `call_from_write` is set mid-sample; `Run()` then takes its `else`
+    /// branch, which never lowers `RDY` and lets `RunCpuOne` start the halting a cycle later.
+    /// Zaxnes's `DmcChannel::set_enabled` delays only a fetch that a write actually **started**
+    /// (`bytes_remaining == 0`), and a mid-sample write leaves the plain four-cycle reload alone.
+    const DMC_ENABLE_WRITES_MID_SAMPLE: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -45,6 +89,11 @@ pub struct Standard;
 impl TimingProfile for Standard {
     const NAME: &'static str = "standard";
     const STATE_ID: u8 = 0;
+
+    const DMC_HALT_ON_REQUEST_CYCLE: bool = false;
+    const DMC_FETCH_HAS_TWO_DUMMIES: bool = false;
+    const DMC_LENGTH_LAGS_THE_FETCH: bool = false;
+    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -59,4 +108,9 @@ pub struct NesHawkCompat;
 impl TimingProfile for NesHawkCompat {
     const NAME: &'static str = "neshawk";
     const STATE_ID: u8 = 1;
+
+    const DMC_HALT_ON_REQUEST_CYCLE: bool = true;
+    const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
+    const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
+    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
 }
