@@ -65,6 +65,8 @@ pub struct UserDataPaths {
     pub logs_directory: PathBuf,
     /// Folder of the movies (`.zmv`).
     pub movies_directory: PathBuf,
+    /// Folder of the resolved-tile caches of the "3dh" profiles (AMD-062 REQ-PROF-082).
+    pub tiles_directory: PathBuf,
     /// Whether the root accepts writes (REQ-PERS-073).
     pub is_writable: bool,
     /// The legacy root this root was copied from, when it was.
@@ -88,6 +90,7 @@ impl UserDataPaths {
             covers_directory: root.join("covers"),
             logs_directory: root.join("logs"),
             movies_directory: root.join("movies"),
+            tiles_directory: root.join("tiles"),
             root,
             kind,
             executable_directory,
@@ -150,6 +153,13 @@ impl UserDataPaths {
     #[must_use]
     pub fn movie_file(&self, rom: &str, number: u32) -> PathBuf {
         self.movies_directory.join(format!("{rom}.mv{number}"))
+    }
+
+    /// The resolved-tile cache of the profile `id`: `tiles/<id>.tiles` (AMD-062 REQ-PROF-082).
+    #[must_use]
+    pub fn tile_cache_file(&self, id: &str) -> PathBuf {
+        self.tiles_directory
+            .join(zax_profiles::hash::tile_cache::file_name(id))
     }
 
     /// Resolves the root, in this order: the explicit root, the portable folder when the marker

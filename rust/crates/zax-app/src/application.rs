@@ -381,6 +381,7 @@ impl Running {
             view,
             suspend_resume: options.no_resume,
             emu_stats: options.emu_stats,
+            tile_cache: !options.no_tile_cache,
         };
         let mut host = build_host(parts);
         // REQ-UI-213: a value the command line could not use is logged, never refused.
@@ -1479,6 +1480,7 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     (store, model)
 }
 
+#[allow(clippy::struct_excessive_bools)] // The independent flags a launch carries.
 struct HostParts<'a> {
     paths: &'a UserDataPaths,
     model: SettingsModel,
@@ -1495,6 +1497,9 @@ struct HostParts<'a> {
     suspend_resume: bool,
     /// `-emustats` (AMD-053 REQ-UI-213).
     emu_stats: bool,
+    /// Whether the resolved tiles of a "3dh" profile are kept between runs (AMD-062
+    /// REQ-PROF-082); `--no-tile-cache` turns it off.
+    tile_cache: bool,
 }
 
 fn build_host(parts: HostParts<'_>) -> AppHost {
@@ -1521,6 +1526,8 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.emu_stats = parts
         .emu_stats
         .then(|| Box::new(app_log::file_line) as crate::emulation::host::LogFn);
+    // AMD-062 REQ-PROF-082: `--no-tile-cache` starts from an empty resolved set.
+    options.tile_cache = parts.tile_cache;
     EmulationHost::new(options)
 }
 

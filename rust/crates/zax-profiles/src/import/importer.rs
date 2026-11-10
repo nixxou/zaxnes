@@ -1,6 +1,13 @@
 //! The import of the profiles of a 3dSen bundle into the user's profiles folder (AMD-030 §2,
 //! §5): each profile is checked with the decoder of SPEC-03 and written unmodified under its
 //! `m_Name`, never replacing a file and never leaving a partial one.
+//!
+//! AMD-062 amends §5: the check accepts a 3dn **or** a "3dh" profile, whose envelope, manifest
+//! and payload must decode — [`crate::format::load`] recognises the format by the content
+//! (REQ-PROF-070) and does both. No tile is resolved, so the import stays instant, and the file
+//! keeps the `.3dn` extension even when its content is a "3dh": that is deliberate, the name
+//! never decides the format. The three generations of 3dSen — 1.x, 2.0 and 2.1 — therefore all
+//! import.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -200,8 +207,10 @@ impl<'a> ThreeDSenImporter<'a> {
             }
         };
 
-        // AMD-030 §5: the payload is checked with the decoder of SPEC-03; a profile that does
-        // not decode is a failure and the import carries on.
+        // AMD-030 §5 as amended by AMD-062: the payload is checked with the decoder of SPEC-03
+        // for a 3dn and with the envelope, manifest and payload of REQ-PROF-070 to 074 for a
+        // "3dh", `format::load` telling the two apart by the content. A profile that does not
+        // decode is a failure and the import carries on.
         if let Err(error) = format::load(&asset.script, None, Some(&asset.name)) {
             return failed(format!(
                 "\"{}\" is not a usable profile: {}",

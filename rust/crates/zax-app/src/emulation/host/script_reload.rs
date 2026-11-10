@@ -59,7 +59,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         old.end(&mut self.settings, &mut self.scene);
         old.dispose(&mut self.settings, &mut self.scene);
 
-        if let Err(message) = self.ensure_session(&game, true) {
+        if let Err(message) = self.ensure_session(&game, true, None) {
             self.log(&format!("script reload failed: {message}"));
             self.notifications.show_error(&message);
             self.current_game = None;

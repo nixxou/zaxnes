@@ -16,6 +16,8 @@ use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::ppu::SpriteLimit;
 use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
+use zax_profiles::hash::tile_cache;
+use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
 use zax_render::assets::png_image;
 use zax_render::camera::{CameraMode, SceneCamera};
@@ -85,6 +87,36 @@ pub struct RomRequest<'a> {
     pub trace_ram: Option<&'a Path>,
     /// `--delay-mesh <frames>`: emulated frames the meshes are held back (AMD-051 REQ-E3D-646).
     pub delay_mesh: i32,
+    /// Which manifest strings of a "3dh" profile have their sixteen bytes, the cache of
+    /// REQ-PROF-082 and the walk through the ROM of REQ-PROF-078 already applied; none for a
+    /// 3dn profile (AMD-062 REQ-PROF-080).
+    pub tiles: Option<TileResolver>,
+    /// Where the tiles this run resolves are kept, the file `--tile-cache <dir>` names for this
+    /// profile (REQ-PROF-082). None — the default — keeps nothing, which is what the determinism
+    /// of REQ-PROF-080 is stated at.
+    pub tile_cache_file: Option<&'a Path>,
+}
+
+/// Keeps the tiles the run resolved, when `--tile-cache <dir>` named a file for this profile
+/// (AMD-062 REQ-PROF-082). Nothing is written for a 3dn profile, nor without the option.
+fn write_tile_cache(host: &Host, request: &RomRequest<'_>) -> Result<(), HarnessError> {
+    let Some(file) = request.tile_cache_file else {
+        return Ok(());
+    };
+    let Some(tiles) = host.engine.hash_tiles() else {
+        return Ok(());
+    };
+
+    if let Some(folder) = file.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    fs::write(file, tile_cache::write(tiles.resolver().entries()))?;
+    println!(
+        "render: {} resolved tiles kept in {}",
+        tiles.resolver().resolved_count(),
+        file.display()
+    );
+    Ok(())
 }
 
 /// The smooth scrolling of the picture just made: its shift and the sprites it keeps still, told.
@@ -123,6 +155,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         force_three_dimensional: false,
         advanced: request.advanced,
         delay_mesh: request.delay_mesh,
+        tiles: request.tiles.clone(),
     })?;
     host.core.set_builtin_patches(request.builtin_patches);
     host.core.set_widescreen_margin(request.widescreen);
@@ -171,6 +204,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             path.display()
         );
     }
+
+    write_tile_cache(&host, request)?;
 
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
     report_scripts(&host.engine);
@@ -448,6 +483,9 @@ pub(crate) struct Startup<'a> {
     /// `--delay-mesh <frames>`: emulated frames the meshes of every 3D object are held back
     /// before they reach the renderer, the test case of AMD-051 REQ-E3D-646. 0 holds nothing.
     pub delay_mesh: i32,
+    /// Which manifest strings of a "3dh" profile have their sixteen bytes; none for a 3dn
+    /// profile (AMD-062 REQ-PROF-080). What the ROM and the cache gave is already in it.
+    pub tiles: Option<TileResolver>,
 }
 
 /// The machine and the engine; the scene and the machine are lent to the Lua
@@ -518,7 +556,7 @@ impl Host {
             delay_mesh: startup.delay_mesh,
         };
         host.install_runtime(profile, model, &mut scene)?;
-        host.load_profile(profile, &mut scene)?;
+        host.load_profile(profile, &mut scene, startup.tiles.clone())?;
         if let Some(model) = host.model() {
             push_settings(model, &mut scene);
         }
@@ -583,12 +621,16 @@ impl Host {
         &mut self,
         profile: &GameProfile,
         scene: &mut SceneState,
+        tiles: Option<TileResolver>,
     ) -> Result<(), HarnessError> {
         // What the chunks wrote reaches the engine first, so the profile's settings win over it.
         self.sync_settings(scene);
         let mut loaded = Ok(());
+        let mut tiles = tiles;
         self.scripted(scene, |engine| {
-            loaded = engine.load_profile(profile, true);
+            // AMD-062 REQ-PROF-080: the tiles still waiting are looked for in each frame and in
+            // the cartridge's CHR-RAM from here on.
+            loaded = engine.load_profile_with_tiles(profile, true, tiles.take());
         });
         loaded?;
         self.sync_settings(scene);
@@ -630,6 +672,11 @@ impl Host {
                 builder.commit();
             }
         }
+        // AMD-062 REQ-PROF-080: before the recognition of this frame, the tiles a "3dh" profile
+        // is still waiting for are looked for in the cartridge's CHR-RAM (REQ-CORE-123); the
+        // tiles of the frame itself the conversion reads from the batch.
+        let chr_ram = self.core.chr_ram();
+        self.engine.offer_chr_ram(chr_ram);
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);
         });

@@ -73,11 +73,12 @@ pub fn movie_filters() -> Vec<FileFilter> {
     ]
 }
 
-/// The filters of the profile import dialog.
+/// The filters of the profile import dialog. Both extensions are offered (AMD-062
+/// REQ-PROF-063); which format a file holds is decided by its content, never by its name.
 #[must_use]
 pub fn profile_filters() -> Vec<FileFilter> {
     vec![
-        filter(keys::BROWSER_FILTER_PROFILES, &["3dn"]),
+        filter(keys::BROWSER_FILTER_PROFILES, &["3dn", "3dh"]),
         filter(keys::BROWSER_FILTER_ALL, &[]),
     ]
 }

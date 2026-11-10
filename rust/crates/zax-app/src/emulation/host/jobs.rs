@@ -402,10 +402,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         &mut self,
         game: &ResolvedGame,
         reload_profile: bool,
+        rom_image: Option<&[u8]>,
     ) -> Result<(), String> {
         if self.session.is_some() {
             return Ok(());
         }
+        // AMD-062 REQ-PROF-078 and REQ-PROF-082: the tiles a "3dh" profile names are looked for
+        // in the cache and then in the ROM **before** its patterns are built, so that the first
+        // converted frame already has them. Nothing happens for a 3dn profile.
+        let game = &self.prepare_hash_tiles(game, rom_image);
         let request = SessionRequest {
             profile: &game.profile,
             title: &game.title,
@@ -416,6 +421,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // default (no profile)"; the entry decides, not the pattern count.
             two_dimensional_mode: game.is_default_three_dimensional.then_some(false),
             console_interface: self.console_interface,
+            tiles: game.tiles.clone(),
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
@@ -431,6 +437,38 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 Err(INVALID_ROM_MESSAGE.to_owned())
             }
         }
+    }
+
+    /// Gives a "3dh" profile what the cache of REQ-PROF-082 kept and what the ROM image holds
+    /// (REQ-PROF-078), before its patterns are built, and returns the game as the resolution
+    /// left it. A 3dn profile, and a profile with nothing waiting, come back unchanged and cost
+    /// nothing.
+    ///
+    /// The cache is keyed by the identifier of the library entry, which for a profile file is
+    /// the `Id` its header carries — the envelope's for a "3dh" (REQ-PROF-073) — and the
+    /// identifier derived from the content when it has none (AMD-037).
+    fn prepare_hash_tiles(
+        &mut self,
+        game: &ResolvedGame,
+        rom_image: Option<&[u8]>,
+    ) -> ResolvedGame {
+        if !game.has_waiting_tiles() {
+            return game.clone();
+        }
+
+        let kept = self.tile_cache.read(&self.paths, &game.id);
+        let Some(counts) = self
+            .games
+            .prepare_hash_tiles(&game.id, &kept, rom_image.unwrap_or(&[]))
+        else {
+            return game.clone();
+        };
+
+        self.log(&format!(
+            "{}: {} of {} profile tiles resolved.",
+            game.title, counts.resolved, counts.total
+        ));
+        self.games.resolve(&game.id).unwrap_or_else(|| game.clone())
     }
 
     fn advance_launch(&mut self, job: &mut LoadJob) -> Step {
@@ -454,7 +492,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             1 => {
                 self.apply_game_options(&game.id);
-                if let Err(message) = self.ensure_session(&game, job.reload_profile) {
+                let rom_image = job.rom.as_ref().map(|rom| rom.image.clone());
+                if let Err(message) =
+                    self.ensure_session(&game, job.reload_profile, rom_image.as_deref())
+                {
                     return Step::Failed(message);
                 }
                 // Step 4: the ROM goes to the core, which cold-starts; the region may change.
@@ -532,7 +573,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             1 => {
                 // Step 4: a profile load creates a new Lua state (REQ-LUA-014).
                 self.apply_game_options(&game.id);
-                if let Err(message) = self.ensure_session(&game, job.reload_profile) {
+                // A savestate carries no ROM, so a "3dh" profile keeps what the cache gave it
+                // and resolves the rest while the game runs (AMD-062 REQ-PROF-080).
+                if let Err(message) = self.ensure_session(&game, job.reload_profile, None) {
                     return Step::Failed(message);
                 }
                 if job.reload_profile {

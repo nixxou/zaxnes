@@ -79,6 +79,8 @@ fn smb3_picture(folder: &str, frames: u32) -> Option<(Vec<u8>, usize)> {
         dump_mem: None,
         trace_ram: None,
         delay_mesh: 0,
+        tiles: None,
+        tile_cache_file: None,
     })
     .unwrap();
     Some((scene.nes_picture, scene.nes_picture_height))

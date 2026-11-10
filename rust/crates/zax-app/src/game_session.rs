@@ -25,6 +25,7 @@ use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
 use zax_nes::rom::RomLoadResult;
 use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
+use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -219,6 +220,12 @@ pub struct SessionRequest<'a> {
     /// Whether this run shows the gamepad-only interface (RO-2 part 4): a Lua write of
     /// `Setting.Msaa` leaves the anti-aliasing alone there.
     pub console_interface: bool,
+    /// Which manifest strings of a "3dh" profile have their sixteen bytes, or none for a 3dn
+    /// profile (AMD-062 REQ-PROF-080). The cache of REQ-PROF-082 and the walk through the ROM of
+    /// REQ-PROF-078 happen before the session is made, so that the patterns are built from what
+    /// the ROM gave; what is still waiting is looked for in each displayed frame and in the
+    /// cartridge's CHR-RAM.
+    pub tiles: Option<TileResolver>,
 }
 
 /// The inputs of one emulated frame.
@@ -396,6 +403,7 @@ impl GameSession {
             different_game,
             two_dimensional_mode,
             console_interface,
+            tiles,
         } = request;
         let mut core = NesCore::new();
         let mut input = ScriptInputState::default();
@@ -486,7 +494,7 @@ impl GameSession {
             );
         }
         // The runtime holds the model from here until the last line of this function.
-        let loaded = session.load_profile(profile, different_game, scene);
+        let loaded = session.load_profile(profile, different_game, scene, tiles);
         session.exchange_model(model);
         loaded?;
         Ok(session)
@@ -502,6 +510,7 @@ impl GameSession {
         profile: &GameProfile,
         different_game: bool,
         scene: &mut SceneState,
+        tiles: Option<TileResolver>,
     ) -> Result<(), SessionError> {
         let ports = self
             .engine
@@ -534,12 +543,23 @@ impl GameSession {
         // through the model, so the engine must not copy them a second time.
         self.sync_runtime_settings(scene);
         let mut loaded = Ok(());
+        let mut tiles = tiles;
         self.scripted(scene, |engine| {
-            loaded = engine.load_profile(profile, false);
+            // AMD-062 REQ-PROF-080: from here on the conversion looks for the tiles that are
+            // still waiting, in the frame it converts and in the cartridge's CHR-RAM.
+            loaded = engine.load_profile_with_tiles(profile, false, tiles.take());
         });
         loaded?;
         self.sync_runtime_settings(scene);
         Ok(())
+    }
+
+    /// Offers the cartridge's CHR-RAM to the resolution of a "3dh" profile's waiting tiles
+    /// (AMD-062 REQ-PROF-080, SPEC-02 REQ-CORE-123). The read costs nothing for a 3dn profile,
+    /// for a cartridge without CHR-RAM, and once nothing waits any more.
+    fn offer_chr_ram(&mut self) {
+        let chr_ram = self.core.chr_ram();
+        self.engine.offer_chr_ram(chr_ram);
     }
 
     /// Runs `operation` on the engine with the scene, the core and the script inputs lent to the
@@ -1508,6 +1528,11 @@ impl GameSession {
             visible_rows,
             margin_y,
         };
+        // AMD-062 REQ-PROF-080: on each displayed frame, before the recognition, the tiles a
+        // "3dh" profile is still waiting for are looked for in the cartridge's CHR-RAM
+        // (SPEC-02 REQ-CORE-123) as well as in the tiles of the frame, which the conversion
+        // reads from the batch itself. Nothing at all happens for a 3dn profile.
+        self.offer_chr_ram();
         let started = clock.start();
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);

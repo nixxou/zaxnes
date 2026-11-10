@@ -19,9 +19,25 @@ const HEADER: &str = "zaxnes-tile-cache 1";
 pub const EXTENSION: &str = "tiles";
 
 /// The file name of the cache of the profile `id`.
+///
+/// Every character a file name cannot be sure to carry is replaced by `_`: the derived
+/// identifier of AMD-037 is standard base64 and may hold `/` and `+`. Two identifiers can then
+/// share a file, which costs nothing — an entry a profile does not wait for is ignored, and an
+/// entry it does wait for carries the bytes that string recomputes from, whichever profile wrote
+/// it (REQ-PROF-082).
 #[must_use]
 pub fn file_name(id: &str) -> String {
-    format!("{id}.{EXTENSION}")
+    let safe: String = id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{safe}.{EXTENSION}")
 }
 
 /// Writes the cache of the resolved tiles `entries` gives, in the order it gives them.
@@ -48,6 +64,13 @@ pub fn read(text: &str) -> Vec<(String, RawTile)> {
     }
 
     lines.filter_map(entry_of).collect()
+}
+
+/// True when `text` is a cache that holds at least one entry, which is what makes it worth
+/// writing: a profile that resolved nothing leaves no file behind.
+#[must_use]
+pub fn has_entry(text: &str) -> bool {
+    !read(text).is_empty()
 }
 
 /// Reads a cache file held as bytes; bytes that are not UTF-8 give no entry.

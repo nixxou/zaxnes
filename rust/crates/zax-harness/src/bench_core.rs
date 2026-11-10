@@ -238,6 +238,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         force_three_dimensional: options.three_dimensional,
         advanced: options.advanced,
         delay_mesh: 0,
+        tiles: None,
     })?;
     widen(&mut host, options)?;
     let mut records = Vec::new();

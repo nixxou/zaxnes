@@ -226,7 +226,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::PENS_VIEW_3DSEN, "3D as 3dSen draws it (the Zaxnes blocks of the scripts left out)"),
     (keys::PENS_VIEW_HANDHELD, "3D as Zaxnes draws it on a handheld"),
     (keys::BROWSER_FILTER_ZIP, ".zip archives"),
-    (keys::BROWSER_FILTER_PROFILES, "3D profiles (*.3dn)"),
+    (keys::BROWSER_FILTER_PROFILES, "3D profiles (*.3dn, *.3dh)"),
     (keys::BROWSER_FILTER_BUNDLE, "3dSen profile bundle (*.bundle)"),
     (keys::BROWSER_FILTER_PNG, "PNG images (*.png)"),
     (keys::BROWSER_FILTER_ALL, "All files"),

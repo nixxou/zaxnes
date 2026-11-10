@@ -118,6 +118,9 @@ struct Entry {
     is_2d_mode: bool,
     rom_path: Option<String>,
     cover: Option<String>,
+    /// Which manifest strings of a "3dh" profile have their sixteen bytes (AMD-062
+    /// REQ-PROF-080); none for the 3dn profiles every other test uses.
+    tiles: Option<zax_profiles::hash::tiles::TileResolver>,
     /// AMD-053 REQ-UI-210. The real catalogue persists it in `library.json`; this one keeps it in
     /// memory, which is what the host's `favorite.toggle` needs to be exercised.
     favorite: bool,
@@ -154,6 +157,7 @@ impl FakeCatalog {
                 is_2d_mode,
                 rom_path: rom_path.map(str::to_owned),
                 cover: None,
+                tiles: None,
                 favorite: false,
             },
         );
@@ -191,6 +195,7 @@ impl GameCatalog for FakeCatalog {
             profile: Arc::clone(&entry.profile),
             is_2d_mode: entry.is_2d_mode,
             is_default_three_dimensional: false,
+            tiles: entry.tiles.clone(),
         })
     }
 

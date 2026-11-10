@@ -38,6 +38,9 @@ Options:
   --assets <dir>          Optional folder of your own asset files (profiles.json,
                           cubemaps, meshes, textures, audio, fonts). Nothing is
                           bundled; without it the app uses what the code generates.
+  --no-tile-cache         Do not keep the tiles a 3dh profile resolved (AMD-062
+                          REQ-PROF-082); every run then starts from an empty resolved
+                          set, which is what determinism is stated at.
   --font <file>           Interface font: a file, or a name in the system font folder.
   --builtin-font          Use the built-in ImGui font (no accents) instead of a
                           system font.
@@ -258,6 +261,10 @@ pub struct AppOptions {
     /// `-emustats` (AMD-053 REQ-UI-213): one line per emulated frame, with its emulation time,
     /// in the log file.
     pub emu_stats: bool,
+    /// `--no-tile-cache` (AMD-062 REQ-PROF-082): the tiles a "3dh" profile resolved are neither
+    /// read nor written this run, so every session starts from an empty resolved set — which is
+    /// what the determinism of REQ-PROF-080 is stated at.
+    pub no_tile_cache: bool,
     /// What the command line held that was ignored, for the log: an out-of-domain `-slot`, for
     /// instance. A value that is not accepted never refuses the start-up (REQ-UI-213).
     pub notices: Vec<String>,
@@ -301,6 +308,7 @@ impl Default for AppOptions {
             slot: None,
             no_resume: false,
             emu_stats: false,
+            no_tile_cache: false,
             notices: Vec::new(),
         }
     }
@@ -351,6 +359,9 @@ impl AppOptions {
                 "--font" => {
                     options.font_file =
                         Some(next_value(arguments, &mut index, "--font")?.to_owned());
+                }
+                "--no-tile-cache" => {
+                    options.no_tile_cache = true;
                 }
                 "--builtin-font" => {
                     options.built_in_font = true;

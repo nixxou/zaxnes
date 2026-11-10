@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use zax_profiles::hash::raw_tile::RawTile;
+use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
 
 /// A game resolved to what a launch needs.
@@ -18,6 +20,10 @@ pub struct ResolvedGame {
     pub is_2d_mode: bool,
     /// Whether this is the "3D by default (no profile)" entry.
     pub is_default_three_dimensional: bool,
+    /// Which manifest strings of a "3dh" profile have their sixteen bytes; none for a 3dn
+    /// profile (AMD-062 REQ-PROF-080). The catalogue keeps it with the profile, so that what a
+    /// session resolved survives a relaunch of the same game.
+    pub tiles: Option<TileResolver>,
 }
 
 impl ResolvedGame {
@@ -26,6 +32,24 @@ impl ResolvedGame {
     pub const fn is_generic(&self) -> bool {
         self.is_2d_mode || self.is_default_three_dimensional
     }
+
+    /// Whether a "3dh" profile still has a cell waiting for its sixteen bytes (REQ-PROF-081).
+    #[must_use]
+    pub fn has_waiting_tiles(&self) -> bool {
+        self.tiles
+            .as_ref()
+            .is_some_and(|tiles| !tiles.is_complete())
+    }
+}
+
+/// How many manifest strings of a "3dh" profile have their sixteen bytes, out of how many
+/// (AMD-062 REQ-PROF-078, logged at every launch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HashTileCounts {
+    /// Strings that have their bytes.
+    pub resolved: usize,
+    /// Strings of the manifest.
+    pub total: usize,
 }
 
 /// The library as the loop sees it.
@@ -96,6 +120,37 @@ pub trait GameCatalog {
     /// Flips the favourite mark of the game and persists it (`favorite.toggle`); returns its new
     /// value, or none when the game does not exist or the catalogue has no library.
     fn toggle_favorite(&mut self, _game_id: &str) -> Option<bool> {
+        None
+    }
+
+    /// Gives the waiting tiles of a "3dh" profile what the cache of REQ-PROF-082 kept —
+    /// `cache` is the text of its cache file, empty when there is none — and then what the ROM
+    /// image holds (REQ-PROF-078), and rebuilds the patterns that gained a tile. Both happen
+    /// **before** the patterns are registered, so that the first converted frame already has
+    /// them.
+    ///
+    /// Returns how many manifest strings have their bytes out of how many, or none for a 3dn
+    /// profile and for a catalogue that reads no profile file. Resolution is monotone, so
+    /// calling it again on the same game only adds.
+    fn prepare_hash_tiles(
+        &mut self,
+        _game_id: &str,
+        _cache: &str,
+        _rom_image: &[u8],
+    ) -> Option<HashTileCounts> {
+        None
+    }
+
+    /// Keeps what a session resolved while it ran (AMD-062 REQ-PROF-080): the pairs are applied
+    /// to the profile the catalogue holds, so that a relaunch of the same game starts from them,
+    /// and the text of the cache file of REQ-PROF-082 is returned for the host to write.
+    ///
+    /// None for a 3dn profile and for a catalogue that reads no profile file.
+    fn absorb_hash_tiles(
+        &mut self,
+        _game_id: &str,
+        _entries: &[(String, RawTile)],
+    ) -> Option<String> {
         None
     }
 }

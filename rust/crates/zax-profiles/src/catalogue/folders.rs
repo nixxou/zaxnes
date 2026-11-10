@@ -138,11 +138,10 @@ impl<'a> ProfileFolders<'a> {
         Ok(profiles)
     }
 
+    /// The `.3dn` and `.3dh` files of a folder (AMD-062 REQ-PROF-062); empty when it is missing
+    /// or cannot be listed, which AMD-033 §1 makes a normal case rather than an error.
     fn list_files(&self, directory: &Path) -> Vec<PathBuf> {
-        match self
-            .files
-            .list_files(directory, UserProfileFolder::EXTENSION)
-        {
+        match UserProfileFolder::list_profile_files(self.files, directory) {
             Ok(paths) => paths,
             Err(error) => {
                 self.log.warning(&format!(

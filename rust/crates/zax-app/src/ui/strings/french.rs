@@ -196,7 +196,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::PENS_VIEW_3DSEN, "3D telle que 3dSen la dessine (sans les blocs Zaxnes des scripts)"),
     (keys::PENS_VIEW_HANDHELD, "3D telle que Zaxnes la dessine sur une console portable"),
     (keys::BROWSER_FILTER_ZIP, "Archives .zip"),
-    (keys::BROWSER_FILTER_PROFILES, "Profils 3D (*.3dn)"),
+    (keys::BROWSER_FILTER_PROFILES, "Profils 3D (*.3dn, *.3dh)"),
     (keys::BROWSER_FILTER_BUNDLE, "Bundle de profils 3dSen (*.bundle)"),
     (keys::BROWSER_FILTER_PNG, "Images PNG (*.png)"),
     (keys::BROWSER_FILTER_ALL, "Tous les fichiers"),

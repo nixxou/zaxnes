@@ -11,11 +11,15 @@ use zax_profiles::catalogue::{
     ProfileImportResult, ProfileOrigin, UserProfile, UserProfileFolder,
 };
 use zax_profiles::format::{self, ProfileLog};
+use zax_profiles::hash::raw_tile::RawTile;
+use zax_profiles::hash::tile_cache;
+use zax_profiles::hash::tiles::TileResolver;
+use zax_profiles::hash::{self};
 use zax_profiles::import::{ThreeDSenImportError, ThreeDSenImportSummary, ThreeDSenImporter};
 use zax_profiles::library::{GameLibrary, GameLibraryEntry, GameLibraryStore, GameProfileSource};
 use zax_profiles::profile::GameProfile;
 
-use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
+use crate::emulation::game_catalog::{GameCatalog, HashTileCounts, ResolvedGame};
 use crate::neutral_assets;
 use crate::persistence::game_art;
 use crate::physical_file_system::PhysicalProfileFileSystem;
@@ -49,12 +53,31 @@ impl ProfileLog for ProfileLogAdapter<'_> {
     }
 }
 
+/// A profile read from a file, with the tiles a "3dh" one is still waiting for.
+///
+/// The two travel together because a resolution changes both: the strings that have their bytes,
+/// and the patterns whose cells hold them (AMD-062 REQ-PROF-080).
+#[derive(Debug, Clone)]
+struct LoadedProfile {
+    profile: Arc<GameProfile>,
+    tiles: Option<TileResolver>,
+}
+
+impl LoadedProfile {
+    fn empty() -> Self {
+        Self {
+            profile: Arc::new(GameProfile::create_empty()),
+            tiles: None,
+        }
+    }
+}
+
 /// The library, its file, and the profiles read so far.
 pub struct LibraryGameCatalog {
     library: GameLibrary,
     paths: UserDataPaths,
     log: LogSink,
-    profiles: HashMap<String, Arc<GameProfile>>,
+    profiles: HashMap<String, LoadedProfile>,
     /// The bytes of the built-in profile files: a user copy of one adds no game (AMD-037).
     built_in_contents: Vec<Vec<u8>>,
 }
@@ -312,14 +335,22 @@ impl LibraryGameCatalog {
         }
     }
 
-    fn load_profile(&self, entry: &GameLibraryEntry) -> GameProfile {
+    fn load_profile(&self, entry: &GameLibraryEntry) -> LoadedProfile {
         let path = entry.profile_path();
         if path.as_os_str().is_empty() || !path.is_file() {
-            return GameProfile::create_empty();
+            return LoadedProfile::empty();
         }
         match std::fs::read(path) {
             Ok(bytes) => match format::load(&bytes, None, Some(&path.to_string_lossy())) {
-                Ok(document) => return document.profile,
+                Ok(document) => {
+                    // AMD-062: a "3dh" profile carries the strings its tiles name; nothing is
+                    // resolved yet, the cache and the ROM come at the launch (REQ-PROF-080).
+                    let tiles = document.hash_state().map(|state| state.tiles.clone());
+                    return LoadedProfile {
+                        profile: Arc::new(document.profile),
+                        tiles,
+                    };
+                }
                 // REQ-PROF-033: a refused profile falls back to the empty profile rather than
                 // stopping the launch.
                 Err(error) => (self.log)(&format!(
@@ -330,7 +361,18 @@ impl LibraryGameCatalog {
             },
             Err(error) => (self.log)(&format!("{}: {error}", entry.display_title())),
         }
-        GameProfile::create_empty()
+        LoadedProfile::empty()
+    }
+
+    /// The profile of `game_id` as it has been read, reading its file on first need.
+    fn loaded(&mut self, game_id: &str) -> Option<&mut LoadedProfile> {
+        if !self.profiles.contains_key(game_id) {
+            let entry = self.library.find(game_id)?;
+            let loaded = self.load_profile(entry);
+            self.profiles.insert(game_id.to_owned(), loaded);
+        }
+
+        self.profiles.get_mut(game_id)
     }
 }
 
@@ -359,26 +401,60 @@ fn user_profile_of(entry: &GameLibraryEntry) -> UserProfile {
 
 impl GameCatalog for LibraryGameCatalog {
     fn resolve(&mut self, game_id: &str) -> Option<ResolvedGame> {
+        let loaded = self.loaded(game_id)?.clone();
         let entry = self.library.find(game_id)?;
-        let profile = if let Some(profile) = self.profiles.get(game_id) {
-            Arc::clone(profile)
-        } else {
-            let profile = Arc::new(self.load_profile(entry));
-            self.profiles
-                .insert(game_id.to_owned(), Arc::clone(&profile));
-            profile
-        };
         Some(ResolvedGame {
             id: entry.id().to_owned(),
             title: entry.display_title().to_owned(),
-            profile,
+            profile: loaded.profile,
             is_2d_mode: entry.is_2d_mode(),
             is_default_three_dimensional: entry.is_default_three_dimensional(),
+            tiles: loaded.tiles,
         })
     }
 
     fn exists(&self, game_id: &str) -> bool {
         self.library.find(game_id).is_some()
+    }
+
+    fn prepare_hash_tiles(
+        &mut self,
+        game_id: &str,
+        cache: &str,
+        rom_image: &[u8],
+    ) -> Option<HashTileCounts> {
+        let loaded = self.loaded(game_id)?;
+        let tiles = loaded.tiles.as_mut()?;
+        if !tiles.is_complete() {
+            // REQ-PROF-082 then REQ-PROF-078: what was kept, then what the ROM holds. An
+            // unreadable, truncated or arbitrary cache gives nothing and is no error.
+            let kept = tile_cache::read(cache);
+            tiles.apply_cache(kept.iter().map(|(key, raw)| (key.as_str(), *raw)));
+            tiles.resolve_from_rom(rom_image);
+            hash::tiles::apply(Arc::make_mut(&mut loaded.profile), tiles);
+        }
+
+        Some(HashTileCounts {
+            resolved: tiles.resolved_count(),
+            total: tiles.resolved_count() + tiles.waiting_count(),
+        })
+    }
+
+    fn absorb_hash_tiles(
+        &mut self,
+        game_id: &str,
+        entries: &[(String, RawTile)],
+    ) -> Option<String> {
+        let loaded = self.loaded(game_id)?;
+        let tiles = loaded.tiles.as_mut()?;
+        // Every pair is verifiable, and `apply_cache` is what verifies it (REQ-PROF-082): what
+        // the session resolved goes through the same gate as what a file holds.
+        let added = tiles.apply_cache(entries.iter().map(|(key, raw)| (key.as_str(), *raw)));
+        if added > 0 {
+            hash::tiles::apply(Arc::make_mut(&mut loaded.profile), tiles);
+        }
+
+        Some(tile_cache::write(tiles.entries()))
     }
 
     fn forget_profile(&mut self, game_id: &str) {

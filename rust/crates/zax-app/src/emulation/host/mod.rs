@@ -49,6 +49,8 @@ use crate::persistence::app_settings::AppSettings;
 use crate::persistence::battery_ram_store::BatteryRamStore;
 use crate::persistence::save_slots::SaveSlotIndex;
 use crate::persistence::settings_store::SettingsStore;
+use crate::persistence::tile_cache_store::TileCacheStore;
+use zax_profiles::hash::raw_tile::RawTile;
 use zax_render::scene::SceneState;
 
 use crate::scene_script_bridge;
@@ -117,6 +119,7 @@ pub enum EditorRequest {
     CopyAgentPrompt,
 }
 
+#[allow(clippy::struct_excessive_bools)] // The independent flags of the host, as the C# record.
 pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// The user data folder.
     pub paths: UserDataPaths,
@@ -156,6 +159,10 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// `-emustats` (AMD-053 REQ-UI-213): where the one line per emulated frame goes. `None` —
     /// the default — means the option is off, and the frame path then does nothing extra.
     pub emu_stats: Option<LogFn>,
+    /// Whether the tiles a "3dh" profile resolved are kept between runs (AMD-062 REQ-PROF-082).
+    /// False — what `--no-tile-cache` gives — starts every run from an empty resolved set, which
+    /// is what the determinism of REQ-PROF-080 is stated at.
+    pub tile_cache: bool,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
@@ -179,6 +186,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             confirm_with_interface: false,
             suspend_resume: false,
             emu_stats: None,
+            tile_cache: true,
         }
     }
 }
@@ -211,6 +219,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pending: VecDeque<(Command, CommandArgs)>,
     hotkeys: HotkeyTracker,
     battery: BatteryRamStore,
+    /// The resolved tiles of the "3dh" profiles, kept between runs (AMD-062 REQ-PROF-082).
+    tile_cache: TileCacheStore,
     session: Option<GameSession>,
     current_game: Option<ResolvedGame>,
     /// The `games.json` key of the ROM whose options are in force, while a game plays.
@@ -356,6 +366,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Creates the host: loads the slot index, reconciles it with the library, reads the
     /// language and the speed from the settings.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // One field per option, in the order of the struct.
     pub fn new(options: EmulationHostOptions<C, V>) -> Self {
         let EmulationHostOptions {
             paths,
@@ -374,6 +385,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             confirm_with_interface,
             suspend_resume,
             emu_stats,
+            tile_cache,
         } = options;
         let now: Now = now.unwrap_or_else(|| Box::new(OffsetDateTime::now_utc));
         let persisted = settings_store.is_some();
@@ -405,6 +417,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             pending: VecDeque::new(),
             hotkeys: HotkeyTracker::new(),
             battery: BatteryRamStore::new(),
+            tile_cache: TileCacheStore::new(tile_cache),
             session: None,
             current_game: None,
             game_options_rom: None,
@@ -1752,6 +1765,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// Keeps the tiles the session resolved while it ran (AMD-062 REQ-PROF-080): the catalogue
+    /// takes them, so a relaunch of the same game starts from them, and the cache file of
+    /// REQ-PROF-082 is written so the next run does too. Nothing happens for a 3dn profile.
+    fn keep_resolved_tiles(&mut self, session: &GameSession) {
+        let Some(tiles) = session.engine().hash_tiles() else {
+            return;
+        };
+        let Some(game) = self.current_game.as_ref().map(|game| game.id.clone()) else {
+            return;
+        };
+
+        let entries: Vec<(String, RawTile)> = tiles
+            .resolver()
+            .entries()
+            .into_iter()
+            .map(|(key, raw)| (key.to_owned(), *raw))
+            .collect();
+        if let Some(cache) = self.games.absorb_hash_tiles(&game, &entries) {
+            // A cache that could not be written costs nothing: the tiles are found again.
+            let _written = self.tile_cache.write(&self.paths, &game, &cache);
+        }
+    }
+
     fn advance_battery(&mut self, real_seconds: f64) {
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
@@ -1772,6 +1808,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let core = session.core();
                 self.battery.flush(&self.paths, core.export_battery_ram());
             }
+            // AMD-062 REQ-PROF-082: what the game resolved is kept for the next launch, and the
+            // catalogue keeps it for a relaunch of the same game (REQ-PROF-080).
+            self.keep_resolved_tiles(&session);
             session.end(&mut self.settings, &mut self.scene);
             session.engine_mut().clear_frames();
             if dispose_session {

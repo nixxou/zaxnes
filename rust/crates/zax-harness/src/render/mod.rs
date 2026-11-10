@@ -26,6 +26,7 @@ use zax_engine3d::palette::{nes_color, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::space_bend::SpaceBend;
 use zax_nes::ppu::SpriteLimit;
+use zax_profiles::hash::tile_cache;
 use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
 use zax_render::camera::CameraView;
 use zax_render::geometry;
@@ -82,6 +83,9 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
                            the buttons being a|b|select|start|up|down|left|right joined by '+'
                            (for example 200:start,260:start,400-700:right)
   --profile <title|file>   profile file, or title of an entry of <assets>/profiles.json
+  --tile-cache <dir>       folder of the resolved-tile caches of the 3dh profiles
+                           (REQ-PROF-082); off by default, so a capture starts from an
+                           empty cache, which determinism is stated at
   --assets <dir>           folder holding profiles.json (profile lookup) and the cubemaps the
                            scene uses; without it the skyboxes are the procedural ones
                            (REQ-PUB-003)
@@ -197,6 +201,10 @@ pub struct Options {
     pub trace_ram: Option<PathBuf>,
     /// The profile file or title.
     pub profile: Option<String>,
+    /// `--tile-cache <dir>`: the folder of the resolved-tile caches of the "3dh" profiles
+    /// (AMD-062 REQ-PROF-082). None — the default — reads and writes nothing, which is what the
+    /// determinism of REQ-PROF-080 is stated at.
+    pub tile_cache: Option<PathBuf>,
     /// Asset folder for the skybox cubemaps.
     pub assets: Option<PathBuf>,
     /// Capture width.
@@ -307,6 +315,7 @@ impl Options {
             dump_mem: None,
             trace_ram: None,
             profile: None,
+            tile_cache: None,
             assets: None,
             width: 640,
             height: 480,
@@ -468,6 +477,7 @@ impl Options {
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--trace-ram" => self.trace_ram = Some(PathBuf::from(value)),
             "--profile" => self.profile = Some(value.to_owned()),
+            "--tile-cache" => self.tile_cache = Some(PathBuf::from(value)),
             "--assets" => self.assets = Some(PathBuf::from(value)),
             "--size" => (self.width, self.height) = parse_size(value)?,
             "--fov" => self.fov = number(value)?,
@@ -907,10 +917,39 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
     let profile = || profile::load(options.profile.as_deref(), options.assets.as_deref());
     if let Some(rom) = &options.rom {
         let frames = u32::try_from(options.run_frames.max(0)).unwrap_or(1);
+        // AMD-062 REQ-PROF-082 then REQ-PROF-078: a "3dh" profile is given what the cache kept
+        // and then what the ROM holds, before its patterns are built. A 3dn profile has nothing
+        // of either and pays nothing.
+        let mut document =
+            profile::load_document(options.profile.as_deref(), options.assets.as_deref())?;
+        let cache_file = options
+            .tile_cache
+            .as_ref()
+            .zip(document.tile_cache_file_name())
+            .map(|(folder, name)| folder.join(name));
+        if document.is_hash_profile() {
+            if let Some(file) = &cache_file {
+                let kept = tile_cache::read(&fs::read_to_string(file).unwrap_or_default());
+                let applied =
+                    document.apply_tile_cache(kept.iter().map(|(key, raw)| (key.as_str(), *raw)));
+                println!(
+                    "render: {applied} profile tiles came from {}",
+                    file.display()
+                );
+            }
+            let resolved = document.resolve_from_rom(&fs::read(rom)?);
+            println!(
+                "render: {resolved} profile tiles resolved from the ROM, {} still waiting",
+                document.waiting_keys().len()
+            );
+        }
+        let tiles = document.hash_state().map(|state| state.tiles.clone());
         return Ok(vec![rom::capture(&RomRequest {
             rom,
             frames,
-            profile: &profile()?,
+            profile: &document.profile,
+            tiles,
+            tile_cache_file: cache_file.as_deref(),
             mesh: options.mesh,
             input: &options.press,
             pokes: &options.pokes,

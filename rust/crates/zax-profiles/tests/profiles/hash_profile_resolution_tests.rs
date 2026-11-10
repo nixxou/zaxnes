@@ -325,6 +325,11 @@ fn the_cache_file_is_named_after_the_profile_identifier() {
         Some("SyntheticId.tiles".to_owned()),
         read.tile_cache_file_name()
     );
+
+    // The derived identifier of AMD-037 is standard base64: `/` and `+` cannot be part of a file
+    // name and are replaced (REQ-PROF-082, the folder being the application's business).
+    assert_eq!("ab_cd_ef12.tiles", tile_cache::file_name("ab/cd+ef12"));
+    assert_eq!("plain-id_1.tiles", tile_cache::file_name("plain-id_1"));
 }
 
 // REQ-PROF-078, acceptance criterion: for each of the 99 pairable profiles, a synthetic iNES

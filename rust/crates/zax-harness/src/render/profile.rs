@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use zax_profiles::catalogue::{ProfileCatalogue, ProfileFileSystem, FULL_EDITION};
-use zax_profiles::format;
+use zax_profiles::format::{self, ProfileDocument};
 use zax_profiles::profile::GameProfile;
 
 use crate::HarnessError;
@@ -102,12 +102,30 @@ impl ProfileFileSystem for ReadOnlyFiles {
 /// [`HarnessError::Profile`] when the file or the entry is refused, the catalogue cannot be
 /// found or read, or no entry has that title.
 pub fn load(name: Option<&str>, assets: Option<&Path>) -> Result<GameProfile, HarnessError> {
+    Ok(load_document(name, assets)?.profile)
+}
+
+/// [`load`] with what a "3dh" profile carries besides the model: its envelope, its manifest and
+/// the tiles resolved so far, which the resolution of AMD-062 REQ-PROF-078 and REQ-PROF-080
+/// needs. A 3dn profile carries none of it.
+///
+/// # Errors
+///
+/// As [`load`].
+pub fn load_document(
+    name: Option<&str>,
+    assets: Option<&Path>,
+) -> Result<ProfileDocument, HarnessError> {
     let Some(name) = name.filter(|name| !name.trim().is_empty()) else {
-        return Ok(GameProfile::create_empty());
+        return Ok(ProfileDocument {
+            profile: GameProfile::create_empty(),
+            unknown_field_count: 0,
+            hash: None,
+        });
     };
 
     if Path::new(name).is_file() {
-        return Ok(format::load(&fs::read(name)?, None, Some(name))?.profile);
+        return Ok(format::load(&fs::read(name)?, None, Some(name))?);
     }
 
     let root = locate_assets(assets).ok_or_else(|| {
@@ -125,10 +143,14 @@ pub fn load(name: Option<&str>, assets: Option<&Path>) -> Result<GameProfile, Ha
         .ok_or_else(|| HarnessError::Profile(format!("no built-in profile is titled '{name}'.")))?;
     // The built-in entries without a file ("2D Mode") are the empty profile.
     if entry.file.is_empty() {
-        return Ok(GameProfile::create_empty());
+        return Ok(ProfileDocument {
+            profile: GameProfile::create_empty(),
+            unknown_field_count: 0,
+            hash: None,
+        });
     }
 
-    Ok(catalogue.load_profile(&ReadOnlyFiles, entry, None)?.profile)
+    Ok(catalogue.load_profile(&ReadOnlyFiles, entry, None)?)
 }
 
 /// The folder `--assets` names, or, without the option, the first `assets-neutral` holding a

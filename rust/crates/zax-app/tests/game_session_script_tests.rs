@@ -53,6 +53,7 @@ impl Session {
             different_game: true,
             two_dimensional_mode: None,
             console_interface,
+            tiles: None,
         };
         let mut game = GameSession::create(request, &mut model).unwrap();
         assert!(game.load_rom(&SyntheticRom::counter(), "test.nes").success);

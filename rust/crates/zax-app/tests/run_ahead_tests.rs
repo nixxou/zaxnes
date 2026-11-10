@@ -634,6 +634,7 @@ fn session_of(source: &str) -> GameSession {
             different_game: true,
             two_dimensional_mode: None,
             console_interface: false,
+            tiles: None,
         },
         &mut model,
     )

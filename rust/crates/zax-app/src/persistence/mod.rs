@@ -11,3 +11,4 @@ pub mod rom_crc_cache;
 pub mod save_slots;
 pub mod save_state_file;
 pub mod settings_store;
+pub mod tile_cache_store;

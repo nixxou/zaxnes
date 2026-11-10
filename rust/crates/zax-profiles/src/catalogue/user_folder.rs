@@ -154,8 +154,36 @@ pub struct UserProfileFolder<'a> {
 }
 
 impl<'a> UserProfileFolder<'a> {
-    /// File extension of a profile.
+    /// File extension of a profile, and the one a file imported into the folder is written with.
     pub const EXTENSION: &'static str = ".3dn";
+
+    /// The extension 3dSen 2.1 gives a "3dh" profile (AMD-062 REQ-PROF-062).
+    pub const HASH_EXTENSION: &'static str = ".3dh";
+
+    /// The extensions a profiles folder is scanned for (REQ-PROF-062 as amended by AMD-062).
+    ///
+    /// Which format a file holds is decided by its **content**, never by its name
+    /// (REQ-PROF-070): a "3dh" profile named `.3dn` — which is what the import from a 3dSen
+    /// installation writes — is read just the same.
+    pub const EXTENSIONS: [&'static str; 2] = [Self::EXTENSION, Self::HASH_EXTENSION];
+
+    /// The profile files of `directory`, both extensions, in the order the file system gives
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// The folder exists but could not be listed.
+    pub fn list_profile_files(
+        files: &dyn ProfileFileSystem,
+        directory: &Path,
+    ) -> io::Result<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        for extension in Self::EXTENSIONS {
+            paths.extend(files.list_files(directory, extension)?);
+        }
+
+        Ok(paths)
+    }
 
     /// The folder `directory`, read through `files`; `origin` is stamped on what it yields.
     #[must_use]
@@ -190,6 +218,9 @@ impl<'a> UserProfileFolder<'a> {
     /// `reserved_ids` (the built-in profiles) are taken; unreadable, foreign and identifier-less
     /// files are skipped with a warning.
     ///
+    /// Both extensions are read (AMD-062 REQ-PROF-062), and a 3dh profile's `Id` is the one of
+    /// its envelope, AMD-037 applying to it as to a 3dn's (REQ-PROF-073).
+    ///
     /// # Errors
     ///
     /// The folder exists but could not be listed.
@@ -208,7 +239,7 @@ impl<'a> UserProfileFolder<'a> {
         reserved_ids: &[&str],
         built_in_contents: &[Vec<u8>],
     ) -> io::Result<Vec<UserProfile>> {
-        let mut paths = self.files.list_files(&self.directory, Self::EXTENSION)?;
+        let mut paths = Self::list_profile_files(self.files, &self.directory)?;
         sort_ordinal(&mut paths);
 
         let mut taken: HashSet<String> = reserved_ids.iter().map(|id| (*id).to_owned()).collect();
@@ -299,6 +330,17 @@ impl<'a> UserProfileFolder<'a> {
         }
         // Row 2: `Ver` reduces to "1" (REQ-PROF-021).
         if header.has_unsupported_version() {
+            // AMD-062 REQ-PROF-063: the causes of a refused "3dh" are those of REQ-PROF-072 —
+            // here an envelope version outside "1", "2" and "5" — and the cause **shown** is the
+            // third text of REQ-UI-084, as for a 3dn that cannot be read at all. The 3dn version
+            // message would name a format version this file does not have.
+            if header.is_hash_envelope() {
+                return Ok(refusal(
+                    source_path,
+                    import_messages::obsolete_format(source_path),
+                ));
+            }
+
             let message =
                 import_messages::unsupported_version(header.version.as_deref().unwrap_or_default());
             return Ok(refusal(source_path, message));
