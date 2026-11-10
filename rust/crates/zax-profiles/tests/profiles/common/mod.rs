@@ -9,3 +9,4 @@ pub mod proto_builder;
 pub mod recording_log;
 pub mod synthetic_bundle;
 pub mod synthetic_hash_profile;
+pub mod synthetic_rom;

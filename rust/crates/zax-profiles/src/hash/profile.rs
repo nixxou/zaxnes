@@ -9,6 +9,9 @@ use std::collections::BTreeSet;
 
 use crate::format::{ProfileDocument, ProfileLoadErrorKind};
 use crate::hash::envelope::{HashProfileEnvelope, HashProfileError, HashProfileManifest};
+use crate::hash::raw_tile::RawTile;
+use crate::hash::tile_cache;
+use crate::hash::tiles::{self, TileResolver};
 use crate::wire;
 
 /// A "3dh" profile as read.
@@ -20,9 +23,55 @@ pub struct HashProfile {
     pub manifest: HashProfileManifest,
     /// The decoded payload (REQ-PROF-074).
     pub document: ProfileDocument,
+    /// Which of the manifest's strings have their sixteen bytes (REQ-PROF-078 to 082). Session
+    /// knowledge: no savestate and no rollback snapshot carries it.
+    pub tiles: TileResolver,
 }
 
 impl HashProfile {
+    /// Resolves the tiles from the cache of REQ-PROF-082, then rebuilds the patterns it filled.
+    /// Returns how many manifest strings the cache resolved.
+    pub fn apply_tile_cache<'a>(
+        &mut self,
+        entries: impl IntoIterator<Item = (&'a str, RawTile)>,
+    ) -> usize {
+        let resolved = self.tiles.apply_cache(entries);
+        if resolved > 0 {
+            tiles::apply(&mut self.document.profile, &self.tiles);
+        }
+
+        resolved
+    }
+
+    /// Resolves the tiles from the bytes of an iNES ROM file and rebuilds the patterns it filled,
+    /// which is what REQ-PROF-078 asks for before the first converted frame. Returns how many
+    /// manifest strings the ROM resolved.
+    pub fn resolve_from_rom(&mut self, file: &[u8]) -> usize {
+        let resolved = self.tiles.resolve_from_rom(file);
+        if resolved > 0 {
+            tiles::apply(&mut self.document.profile, &self.tiles);
+        }
+
+        resolved
+    }
+
+    /// The cache of REQ-PROF-082 for this profile, as a file's contents.
+    #[must_use]
+    pub fn tile_cache(&self) -> String {
+        tile_cache::write(self.tiles.entries())
+    }
+
+    /// The name of this profile's cache file, from the `Id` of its envelope; none when the
+    /// envelope carries no identifier, which has no cache of its own.
+    #[must_use]
+    pub fn tile_cache_file_name(&self) -> Option<String> {
+        self.envelope
+            .id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .map(tile_cache::file_name)
+    }
+
     /// The manifest strings whose tiles are still waiting for their planes, in ordinal order
     /// (REQ-PROF-081). A string of the manifest that no tile names is not of this set: there is
     /// nothing waiting for it.
@@ -70,10 +119,12 @@ pub fn read(bytes: &[u8]) -> Result<HashProfile, HashProfileError> {
         }
     })?;
 
+    let tiles = TileResolver::of(&manifest);
     Ok(HashProfile {
         envelope,
         manifest,
         document,
+        tiles,
     })
 }
 

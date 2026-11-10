@@ -62,6 +62,30 @@ pub fn flipped(source: &RawTile, flip: TileFlip) -> RawTile {
     result
 }
 
+/// The planes in clear of a mirrored tile, straight from the planes (REQ-PROF-079).
+///
+/// Bit `y * 8 + (7 - x)` of a plane is pixel (x, y), so row `y` is byte `y` of the plane read
+/// little-endian and column `x` is bit `7 - x` of that byte. The vertical mirror therefore
+/// reverses the eight bytes — `swap_bytes` — and the horizontal mirror reverses the eight bits of
+/// each byte, which is `reverse_bits` (the whole 64-bit order) undone byte-wise by `swap_bytes`.
+/// A scan of a ROM needs only this, since the mixing prefix of REQ-PROF-077 is a function of the
+/// planes: the sixteen bytes are rebuilt only for a window the prefix has let through.
+#[must_use]
+pub const fn flipped_planes(low: u64, high: u64, flip: TileFlip) -> (u64, u64) {
+    match (
+        flip.contains(TileFlip::HORIZONTAL),
+        flip.contains(TileFlip::VERTICAL),
+    ) {
+        (false, false) => (low, high),
+        (true, false) => (
+            low.reverse_bits().swap_bytes(),
+            high.reverse_bits().swap_bytes(),
+        ),
+        (false, true) => (low.swap_bytes(), high.swap_bytes()),
+        (true, true) => (low.reverse_bits(), high.reverse_bits()),
+    }
+}
+
 /// The four flips of REQ-PROF-079, in the order of the `flip` bits (0, 1, 2, 3).
 #[must_use]
 pub fn all_flips(source: &RawTile) -> [RawTile; 4] {

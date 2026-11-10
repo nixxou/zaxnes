@@ -14,4 +14,7 @@ pub mod default_texture;
 pub mod envelope;
 pub mod profile;
 pub mod raw_tile;
+pub mod rom_zones;
+pub mod tile_cache;
 pub mod tile_id;
+pub mod tiles;
