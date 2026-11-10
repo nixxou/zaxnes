@@ -43,6 +43,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(game) = self.games.resolve(&game_id) else {
             return;
         };
+        let own_movie = self.own_movie_playing();
+        let Ok(rom) = self.rom_for_reload(&game) else {
+            return;
+        };
         let Some(mut old) = self.session.take() else {
             return;
         };
@@ -57,6 +61,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         };
         old.end(&mut self.settings, &mut self.scene);
+        // `dispose` takes the session **by value**, so the old engine is freed here and not at
+        // the end of this function. That is what makes a reload work on an engine keeping one
+        // machine per process (lot FCEUX-48 step 4): `ensure_session` below would otherwise find
+        // the old one alive and fall back to Zaxnes's core with a line in the log, silently
+        // changing engines under an author editing a profile during an `.fm2` playback.
         old.dispose(&mut self.settings, &mut self.scene);
 
         if let Err(message) = self.ensure_session(&game, true) {
@@ -65,6 +74,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.current_game = None;
             self.set_state(EmulationState::Stopped);
             return;
+        }
+        if let Some(rom) = rom.as_ref() {
+            if let Err(message) = self.load_rom_into_new_session(&game, rom) {
+                self.log(&format!("script reload: the ROM does not load: {message}"));
+                self.notifications.show_error(&message);
+                return;
+            }
         }
         let builtin_patches = self.builtin_patches_wanted();
         let advanced = self.advanced_patches_wanted();
@@ -87,18 +103,76 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
         }
         session.core_mut().set_widescreen_margin(margin);
-        let has_movie = run.is_some();
+        let mut has_movie = run.is_some();
         session.put_movie_run(run);
         let new_drives_the_core =
             !session.core_follows_the_inputs() || session.scripts_change_the_core();
+        // A movie the engine played itself: the state restore above brought the machine back but
+        // not the movie, FCEUX's block being the machine and not the movie mode. It is loaded
+        // again, which re-powers the machine and puts its clock at 0 — so the reload is **always
+        // exact** for one of these, the frame on screen being reachable only by replaying.
+        let own_movie_again = own_movie && self.replay_own_movie_after_rebuild().is_some();
+        has_movie = has_movie || own_movie_again;
+        if own_movie && !own_movie_again {
+            self.movie_timeline = None;
+            self.movie_file = None;
+            self.notifications.show_error(&text(
+                "The movie could not be put back after the reload.",
+                "Le film n'a pas pu être remis en place après le rechargement.",
+            ));
+        }
         self.apply_profile_scene();
         if let Some(session) = self.session.as_mut() {
             session.start(&mut self.settings, &mut self.scene);
         }
         self.rollback.clear();
         self.frame_steps.clear();
+        self.finish_reload(
+            exact || own_movie_again,
+            old_drives_the_core || new_drives_the_core,
+            has_movie,
+            frame_count,
+        );
+    }
 
-        let drives_the_core = old_drives_the_core || new_drives_the_core;
+    /// The ROM to put back into the session a reload makes, when the engine's savestate does not
+    /// carry the cartridge — every engine but Zaxnes's own (lot FCEUX-48 step 4). `None` means
+    /// the state carries it, as it always did; `Err` means the file could not be read, which is
+    /// reported here and leaves the game alone.
+    fn rom_for_reload(
+        &mut self,
+        game: &crate::emulation::game_catalog::ResolvedGame,
+    ) -> Result<Option<crate::emulation::rom_file::RomData>, ()> {
+        let carries_its_rom = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.core().kind() == zax_core_api::EngineKind::Zaxnes);
+        if carries_its_rom {
+            return Ok(None);
+        }
+        match self.read_rom_of(game) {
+            Ok(rom) => Ok(Some(rom)),
+            Err(message) => {
+                self.log(&format!("script reload: the ROM cannot be read: {message}"));
+                self.notifications.show_error(&message);
+                Err(())
+            }
+        }
+    }
+
+    /// The last act of a reload: whether it is exact, what that does to the timeline, and what to
+    /// say about it. Its own function so that `reload_script` stays inside clippy's line budget.
+    ///
+    /// `exact` is what the caller asked for **or** what a movie the engine plays itself forces
+    /// (lot FCEUX-48 step 4): that movie was loaded again by the rebuild, which puts its clock at
+    /// 0, so the frame the author was on is reachable only by replaying to it.
+    fn finish_reload(
+        &mut self,
+        exact: bool,
+        drives_the_core: bool,
+        has_movie: bool,
+        frame_count: i64,
+    ) {
         let exact = has_movie && (exact || drives_the_core);
         if let Some(timeline) = self.movie_timeline.as_mut() {
             if drives_the_core {

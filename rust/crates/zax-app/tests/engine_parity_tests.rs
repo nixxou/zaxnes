@@ -138,3 +138,44 @@ fn the_applications_zaxnes_path_prints_the_same_digest_in_both_builds() {
     assert_eq!(frames, i64::from(FRAMES));
     assert!(records > 0 && tiles > 0);
 }
+
+/// Lot FCEUX-48 step 4: **Zaxnes plays no movie of its own**, in either build.
+///
+/// That one fact is what keeps the default build's `.fm2` behaviour exactly as it was: the
+/// application asks the engine, and Zaxnes's answer sends every `.fm2` through the clean-room
+/// importer of `zax_nes::movie::fm2` as before. A build without `fceux-core` has only this
+/// engine, so the question never arises there at all.
+#[test]
+fn zaxnes_plays_no_movie_of_its_own_so_the_fm2_path_is_the_one_it_always_was() {
+    let core = zax_app::emulation::engine_handle::EngineHandle::zaxnes_core();
+    assert_eq!(core.kind(), EngineKind::Zaxnes);
+    assert!(
+        !core.plays_its_own_movies(),
+        "Zaxnes's own core must send an .fm2 to the importer, not to a movie mode"
+    );
+    assert_eq!(core.own_movie_position(), None);
+    // The four calls answer "not me" rather than failing, which is what lets the host ask without
+    // knowing which engine it holds.
+    let movie = b"version 3\nport0 1\n|0|........|........||\n";
+    assert!(core.inspect_own_movie(movie).is_none());
+    let mut core = core;
+    assert!(core.play_own_movie(movie).is_none());
+    core.stop_own_movie();
+    assert_eq!(core.own_movie_position(), None);
+}
+
+/// And the engine a build has decides it: with `fceux-core` there is an engine that does play its
+/// own movies, without it there is not. Stated as a test so that the two builds disagree here on
+/// purpose and nowhere else.
+#[test]
+fn only_a_build_with_the_feature_has_an_engine_that_plays_its_own_movies() {
+    let fceux = zax_app::emulation::engine_handle::EngineHandle::of_kind(EngineKind::Fceux);
+    if cfg!(feature = "fceux-core") {
+        assert_eq!(fceux.kind(), EngineKind::Fceux);
+        assert!(fceux.plays_its_own_movies());
+    } else {
+        // Without the feature `of_kind` falls back to Zaxnes's core with a line in the log.
+        assert_eq!(fceux.kind(), EngineKind::Zaxnes);
+        assert!(!fceux.plays_its_own_movies());
+    }
+}

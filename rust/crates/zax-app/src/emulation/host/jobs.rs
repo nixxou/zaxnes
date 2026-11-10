@@ -409,7 +409,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return Ok(());
         }
         // Read before the mutable borrow of `self.scene` below.
-        let engine = self.chosen_engine();
+        // Lot FCEUX-48 step 4: a `.fm2` playback forces the engine that can replay it for this
+        // session, over the game's own choice, which is left stored as it was.
+        let engine = self.movie_engine.unwrap_or_else(|| self.chosen_engine());
         let request = SessionRequest {
             profile: &game.profile,
             title: &game.title,
@@ -742,7 +744,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// Q-031: the region of the ROM when the automatic mode is on, the profile's otherwise.
-    fn apply_region_on_load(
+    pub(super) fn apply_region_on_load(
         &mut self,
         detected: NesRegion,
         profile_reloaded: bool,
@@ -920,7 +922,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         ))
     }
 
-    fn attach_battery(&mut self, import_saved: bool) {
+    pub(super) fn attach_battery(&mut self, import_saved: bool) {
         let Some(fingerprint) = self.current_rom_fingerprint() else {
             return;
         };

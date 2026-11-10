@@ -19,7 +19,7 @@ use zax_core_api::{
     STANDARD_ROWS,
 };
 
-use crate::core::{Error, Fceux, RamInit, Region};
+use crate::core::{Error, Fceux, MovieHeader, MovieMode, RamInit, Region};
 
 /// The sample rates FCEUX's own `FCEUI_Sound` accepts (`driver.h:152-154`), which is the whole
 /// list: anything else is snapped to the nearest of these. See [`FceuxEngine::set_sample_rate`].
@@ -772,5 +772,66 @@ impl FceuxEngine {
         }
 
         Ok(StateLoaded { consumed, rom_name })
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// `.fm2` movie playback (lot FCEUX-48 step 4)
+// ------------------------------------------------------------------------------------------------
+
+impl FceuxEngine {
+    /// Reads a `.fm2` header without touching the machine — see [`Fceux::inspect_movie`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MovieFormat`] when the bytes are not a version-3 `.fm2`.
+    pub fn inspect_movie(&self, movie: &[u8]) -> Result<MovieHeader, Error> {
+        self.fceux.inspect_movie(movie)
+    }
+
+    /// Plays a `.fm2` through FCEUX's own movie mode. The load re-powers the machine (or restores
+    /// the savestate the movie carries), so the engine's own per-power state is forgotten with
+    /// it: the frame counter restarts at 0, as it does on [`Engine::power`], and the captured
+    /// frame and the unread samples go.
+    ///
+    /// # Errors
+    ///
+    /// As [`Fceux::play_movie`]: the format, the ROM, or the one thing the header asks for that
+    /// this build has not. On a refusal the machine is left exactly as it was, and so is this
+    /// handle.
+    pub fn play_movie(&mut self, movie: &[u8]) -> Result<MovieHeader, Error> {
+        let header = self.fceux.play_movie(movie)?;
+        self.forget_frame_state();
+        // The movie's own region is now in force on the core (the fork re-asserts it), so the
+        // handle's copy has to agree or `region()` would report the host's last choice and the
+        // host would pace the video at the wrong rate.
+        self.region = match header.region {
+            Region::Pal => NesRegion::Pal,
+            Region::Dendy => NesRegion::Dendy,
+            Region::Ntsc => NesRegion::Ntsc,
+        };
+        Ok(header)
+    }
+
+    /// Stops playback and unloads the movie; the machine goes on from where it is.
+    ///
+    /// # Errors
+    ///
+    /// Only an unexpected code from the core. Not an error with no movie loaded.
+    pub fn stop_movie(&mut self) -> Result<(), Error> {
+        self.fceux.stop_movie()
+    }
+
+    /// Where playback is — see [`MovieMode`] for the one-frame lag of `Finished`.
+    #[must_use]
+    pub fn movie_mode(&self) -> MovieMode {
+        self.fceux.movie_mode()
+    }
+
+    /// The movie's length and the frame it is at, or `None` with no movie loaded. See
+    /// [`Fceux::movie_position`]: the clock counts past the end, so "over" is `frame >= length`.
+    #[must_use]
+    pub fn movie_position(&self) -> Option<(u32, u32)> {
+        self.fceux.movie_position()
     }
 }

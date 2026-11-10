@@ -13,6 +13,7 @@ mod hack_options;
 mod hacks;
 mod jobs;
 mod movies;
+mod own_movies;
 mod resume;
 mod save_states;
 mod script_reload;
@@ -225,6 +226,11 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_after_launch: Option<String>,
     /// The thread exploring the movie being played, while it runs (EDITOR-1).
     movie_explorer: Option<super::movie_explorer::MovieExplorer>,
+    /// The engine a `.fm2` playback forced on this session (lot FCEUX-48 step 4), `None`
+    /// otherwise. It is **not** the game's stored `emu.engine`: a movie only replays on the
+    /// engine that recorded it, so opening one forces that engine for the session and leaves the
+    /// user's choice alone. `ensure_session` reads it in place of the game's own.
+    movie_engine: Option<zax_core_api::EngineKind>,
     /// The drawings over the view and the editor's pens (EDITOR-1).
     annotations: super::annotations::Annotations,
     /// What the editor mode is asked to do, for the application (`editor_mode.rs`).
@@ -413,6 +419,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_timeline: None,
             movie_after_launch: None,
             movie_explorer: None,
+            movie_engine: None,
             annotations: super::annotations::Annotations::default(),
             editor_request: None,
             job: None,

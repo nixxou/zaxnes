@@ -26,9 +26,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ImportProfile
             | Command::ImportThreeDSen
             | Command::SetCameraMode => !loading,
-            Command::LaunchGame => {
-                !loading && args.text.as_deref().is_some_and(|text| !text.is_empty())
-            }
+            Command::LaunchGame => !loading && has_text(args),
             Command::DeleteGame => {
                 let game = args
                     .text
@@ -89,9 +87,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::PlayMovie => {
                 !loading
                     && self.session.as_ref().is_some_and(GameSession::has_rom)
-                    && args.text.as_deref().is_some_and(|text| !text.is_empty())
+                    && has_text(args)
             }
-            Command::StopMovie | Command::AnnotateMovie => !loading && self.movie_mode().is_some(),
+            Command::StopMovie => !loading && self.movie_mode().is_some(),
+            // FCEUX-48: a note needs a movie of ours; an `.fm2` is never written over.
+            Command::AnnotateMovie => !loading && self.movie_takes_notes(),
             Command::OpenMovie | Command::ReloadScript => {
                 !loading && self.session.as_ref().is_some_and(GameSession::has_rom)
             }
@@ -539,4 +539,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.resume();
         }
     }
+}
+
+/// Whether a command carries a non-empty text argument — the check two arms of
+/// [`EmulationHost::can_execute`] make, lifted out so that the match stays inside clippy's line
+/// budget.
+fn has_text(args: &CommandArgs) -> bool {
+    args.text.as_deref().is_some_and(|text| !text.is_empty())
 }

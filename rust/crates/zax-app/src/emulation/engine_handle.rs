@@ -366,6 +366,12 @@ impl EngineHandle {
     /// what its frames reported, which is what the audio ratio and the frame profiler use them
     /// for.
     #[must_use]
+    ///
+    /// **Not comparable across a state restore on an engine without a counter of its own** (lot
+    /// FCEUX-48 step 4): the sum is of the frames this *session* has run, so a movie seek that
+    /// replays two hundred frames a second time leaves it two hundred frames higher than an
+    /// uninterrupted run at the same frame. What it is used for — the audio ratio and the frame
+    /// profiler — wants exactly that; comparing two paths to the same frame does not.
     pub fn cycle_count(&self) -> i64 {
         match self.zaxnes() {
             Some(core) => core.cycle_count(),
@@ -810,4 +816,172 @@ impl DerefMut for EngineHandle {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.engine.as_mut()
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Movies the engine plays itself (lot FCEUX-48 step 4)
+// ------------------------------------------------------------------------------------------------
+
+/// What a `.fm2` header says, as much of it as the application needs.
+///
+/// A record of plain values rather than the engine's own type, for the same reason the rest of
+/// this file exists: no FCEUX type may appear in a build without `fceux-core`, and the
+/// application must read the same shape whichever engine answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnMovieHeader {
+    /// Input records, which is the movie's length in frames.
+    pub frames: u32,
+    /// The region the movie was recorded at, which playback puts in force.
+    pub region: zax_core_api::NesRegion,
+    /// The movie starts from a savestate it carries rather than from power-on.
+    pub from_savestate: bool,
+    /// The header's re-record count, for a host that shows it.
+    pub rerecord_count: i32,
+    /// Whether the movie's stated ROM checksum is the loaded ROM's; `None` when it states none.
+    pub rom_matches: Option<bool>,
+}
+
+/// The movie operations an engine may have of its own.
+///
+/// **Two whole definitions, one per build**, rather than one body with a `cfg` block inside it:
+/// a build without `fceux-core` must name no FCEUX type at all, and a `cfg` inside a function
+/// leaves an early `return` that reads as dead code in the other build. It is the idiom
+/// `EngineHandle::fceux_core` above already uses.
+#[cfg(feature = "fceux-core")]
+impl EngineHandle {
+    /// Whether this engine plays `.fm2` movies **itself**, through a movie mode of its own.
+    ///
+    /// True on FCEUX and false on Zaxnes, and the difference is not a gap: a movie only replays
+    /// on the engine that recorded it, and FCEUX's movie mode is the only way to honour a
+    /// movie's `RAMInitSeed` at all (§5 of `docs/review/FCEUX-ENGINE.md`). Zaxnes plays an
+    /// `.fm2` through its own clean-room importer instead, which is a different and older path
+    /// the application keeps unchanged.
+    #[must_use]
+    pub fn plays_its_own_movies(&self) -> bool {
+        self.own_movie_engine().is_some()
+    }
+
+    /// Reads a `.fm2` header **without touching the machine**; `None` on an engine that plays no
+    /// movie of its own, `Some(Err)` with the reason when the movie cannot be played.
+    ///
+    /// The error text is the engine's own message, which names the one thing the movie needs and
+    /// the build has not, so a host can say which rather than "unsupported".
+    #[must_use]
+    pub fn inspect_own_movie(&self, movie: &[u8]) -> Option<Result<OwnMovieHeader, String>> {
+        let engine = self.own_movie_engine()?;
+        Some(match engine.inspect_movie(movie) {
+            Ok(header) => own_header(&header).ok_or_else(|| {
+                header
+                    .refusal()
+                    .map_or_else(|| "the movie was refused".to_owned(), |why| why.to_string())
+            }),
+            Err(error) => Err(error.to_string()),
+        })
+    }
+
+    /// Plays a `.fm2` through the engine's own movie mode, from the movie's own beginning: the
+    /// machine is re-powered with the region and the RAM fill the header asks for, so the frame
+    /// counter starts again at 0.
+    ///
+    /// `None` on an engine that plays no movie of its own; `Some(Err)` with the reason on a
+    /// refusal, in which case **the machine is left exactly as it was**.
+    pub fn play_own_movie(&mut self, movie: &[u8]) -> Option<Result<OwnMovieHeader, String>> {
+        self.cycles = 0;
+        let engine = self.own_movie_engine_mut()?;
+        Some(match engine.play_movie(movie) {
+            Ok(header) => own_header(&header).ok_or_else(|| "the movie was refused".to_owned()),
+            Err(error) => Err(error.to_string()),
+        })
+    }
+
+    /// Stops the engine's own movie, if it has one; the machine goes on from where it is.
+    pub fn stop_own_movie(&mut self) {
+        if let Some(engine) = self.own_movie_engine_mut() {
+            let _ = engine.stop_movie();
+        }
+    }
+
+    /// The movie frame the next [`zax_core_api::Engine::run_frame`] will play and the movie's
+    /// length, in **that** order — the host's own convention, which is the reverse of the
+    /// engine's. `None` with no movie of the engine's own loaded.
+    ///
+    /// The frame counts **past** the length while the movie stays loaded, so "over" is
+    /// `frame >= length` (`zax_fceux::Fceux::movie_position` says why).
+    #[must_use]
+    pub fn own_movie_position(&self) -> Option<(u32, u32)> {
+        let (length, frame) = self.own_movie_engine()?.movie_position()?;
+        Some((frame, length))
+    }
+
+    /// FCEUX's engine, or `None` on another one. The mirror of [`EngineHandle::zaxnes`], and
+    /// only for the handful of operations FCEUX has and Zaxnes has not.
+    fn own_movie_engine(&self) -> Option<&zax_fceux::FceuxEngine> {
+        self.engine
+            .as_any()
+            .downcast_ref::<zax_fceux::FceuxEngine>()
+    }
+
+    /// The same, mutably.
+    fn own_movie_engine_mut(&mut self) -> Option<&mut zax_fceux::FceuxEngine> {
+        self.engine
+            .as_any_mut()
+            .downcast_mut::<zax_fceux::FceuxEngine>()
+    }
+}
+
+/// The same five, in a build whose only engine is Zaxnes's own core: there is no engine with a
+/// movie mode of its own, so every one of them is a constant. The application's `.fm2` path then
+/// never leaves Zaxnes's clean-room importer, which is the behaviour of before this lot.
+#[cfg(not(feature = "fceux-core"))]
+impl EngineHandle {
+    /// Always false: this build has one engine and it plays no movie of its own.
+    #[must_use]
+    pub const fn plays_its_own_movies(&self) -> bool {
+        false
+    }
+
+    /// Always `None`.
+    #[must_use]
+    pub const fn inspect_own_movie(&self, _movie: &[u8]) -> Option<Result<OwnMovieHeader, String>> {
+        None
+    }
+
+    /// Always `None`.
+    #[must_use]
+    pub const fn play_own_movie(
+        &mut self,
+        _movie: &[u8],
+    ) -> Option<Result<OwnMovieHeader, String>> {
+        None
+    }
+
+    /// Nothing to stop.
+    pub const fn stop_own_movie(&mut self) {}
+
+    /// Always `None`.
+    #[must_use]
+    pub const fn own_movie_position(&self) -> Option<(u32, u32)> {
+        None
+    }
+}
+
+/// The engine's header as the application reads it, or `None` when the header is one the engine
+/// would refuse — which `play_own_movie` has already checked, and `inspect_own_movie` turns into
+/// the named reason.
+#[cfg(feature = "fceux-core")]
+fn own_header(header: &zax_fceux::MovieHeader) -> Option<OwnMovieHeader> {
+    if header.refusal().is_some() {
+        return None;
+    }
+    Some(OwnMovieHeader {
+        frames: header.frames,
+        region: match header.region {
+            zax_fceux::Region::Pal => zax_core_api::NesRegion::Pal,
+            zax_fceux::Region::Dendy => zax_core_api::NesRegion::Dendy,
+            zax_fceux::Region::Ntsc => zax_core_api::NesRegion::Ntsc,
+        },
+        from_savestate: header.from_savestate,
+        rerecord_count: header.rerecord_count,
+        rom_matches: header.rom_matches,
+    })
 }

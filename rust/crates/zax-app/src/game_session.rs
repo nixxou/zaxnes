@@ -1030,6 +1030,20 @@ impl GameSession {
     /// no conversion, no frame hook (a seek, when [`GameSession::core_follows_the_inputs`]).
     /// Returns `false`, running nothing, outside the movie.
     pub fn run_movie_frame_core_only(&mut self) -> bool {
+        // Lot FCEUX-48 step 4: a movie the **engine** plays itself needs no word from us — its
+        // movie mode loads each frame's record over the pad state inside `run_frame` — and has no
+        // `MovieRun` to take one from. The word handed over is therefore ignored, and the only
+        // question is whether the movie still has a frame.
+        if self.movie.is_none() {
+            if let Some((frame, length)) = self.core.own_movie_position() {
+                if frame >= length {
+                    return false;
+                }
+                self.core.run_frame(0);
+                return true;
+            }
+            return false;
+        }
         let frame_count = self.core.frame_count();
         let Some(word) = self
             .movie
