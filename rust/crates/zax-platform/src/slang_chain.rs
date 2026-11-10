@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::Instant;
 
 use librashader::presets::ShaderFeatures;
 use librashader::runtime::wgpu::{FilterChain, FilterChainOptions, WgpuOutputView};
@@ -93,6 +94,7 @@ impl Active {
 /// A preset compiling on its thread.
 struct Loading {
     preset: PathBuf,
+    started: Instant,
     result: Receiver<Result<FilterChain, String>>,
 }
 
@@ -130,7 +132,6 @@ impl SlangShaders {
     /// Asks for `request` (none for no shader). The same preset again only updates its lines
     /// and parameters; another one starts compiling.
     pub fn request(&mut self, request: Option<&ShaderRequest>) {
-        self.poll();
         if self.wanted.as_ref() == request {
             return;
         }
@@ -188,43 +189,55 @@ impl SlangShaders {
             // The window may have gone, or asked for another preset since.
             let _ = sender.send(chain);
         });
-        Loading { preset, result }
+        Loading {
+            preset,
+            started: Instant::now(),
+            result,
+        }
     }
 
-    /// Takes the preset that finished compiling, if one did.
-    fn poll(&mut self) {
-        let Some(loading) = &self.loading else {
-            return;
-        };
+    /// Takes the preset that finished compiling, if one did, with a line for the log.
+    fn poll(&mut self) -> Option<String> {
+        let loading = self.loading.as_ref()?;
         let result = match loading.result.try_recv() {
             Ok(result) => result,
-            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Empty) => return None,
             Err(TryRecvError::Disconnected) => Err(format!(
                 "{}: the compilation stopped",
                 loading.preset.display()
             )),
         };
         let preset = loading.preset.clone();
+        let elapsed = loading.started.elapsed();
         self.loading = None;
         match result {
             Ok(chain) => {
+                let line = format!(
+                    "slang preset {} compiled in {} ms",
+                    preset.display(),
+                    elapsed.as_millis()
+                );
                 let mut active = Active::new(chain, preset);
                 if let Some(wanted) = &self.wanted {
                     active.apply(&wanted.parameters);
                 }
                 self.active = Some(active);
+                Some(line)
             }
             Err(problem) => {
+                let line = format!("slang preset refused: {problem}");
                 self.active = None;
                 self.refused = Some((preset, problem));
+                Some(line)
             }
         }
     }
 
-    /// Takes a finished compilation; called once a frame before drawing.
-    pub fn update(&mut self, frame: usize) {
+    /// Takes a finished compilation, called once a frame before drawing with the emulated
+    /// frame count: the line for the log when a preset was compiled or refused.
+    pub fn update(&mut self, frame: usize) -> Option<String> {
         self.frame = frame;
-        self.poll();
+        self.poll()
     }
 
     /// The lines the scene has to be drawn at for the preset in use: none without a preset, 0
@@ -286,7 +299,7 @@ impl SlangShaders {
             Ok(()) => true,
             Err(error) => {
                 let preset = active.preset.clone();
-                self.refused = Some((preset, error.to_string()));
+                self.refused = Some((preset, format!("a pass failed: {error}")));
                 self.active = None;
                 false
             }

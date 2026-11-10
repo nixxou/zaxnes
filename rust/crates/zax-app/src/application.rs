@@ -716,7 +716,11 @@ impl Running {
         };
         let shaders = display.shaders_mut();
         shaders.request(request.as_ref());
-        shaders.update(usize::try_from(self.host.emulated_frames()).unwrap_or(0));
+        if let Some(line) =
+            shaders.update(usize::try_from(self.host.emulated_frames()).unwrap_or(0))
+        {
+            crate::app_log::line(&line);
+        }
     }
 
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
