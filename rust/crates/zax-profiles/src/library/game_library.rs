@@ -356,12 +356,12 @@ impl GameLibrary {
     ) -> Option<&GameLibraryEntry> {
         let log = log.unwrap_or(&NULL_PROFILE_LOG);
         let incoming = user_entry(profile);
-        let position = self.entries.iter().position(|entry| entry.id == profile.id);
-        if let Some(position) = position {
+        let same_id = self
+            .entries
+            .iter()
+            .position(|entry| entry.id == profile.id && entry.source == GameProfileSource::User);
+        if let Some(position) = same_id {
             let existing = &self.entries[position];
-            if existing.source != GameProfileSource::User {
-                return None;
-            }
             // REQ-PROF-087: a 3dn does not take the entry of the 3dh of the same game over, even
             // when the two files agree on their `Id`, which is the case for 56 of the 101.
             if existing.generation().is_two_point_one() && !incoming.generation().is_two_point_one()
@@ -383,12 +383,10 @@ impl GameLibrary {
             return Some(&self.entries[position]);
         }
 
-        if let Some(position) = self.same_game_position(&incoming) {
-            return self.replace_same_game(position, incoming, log);
-        }
-
-        self.add(incoming, log);
-        self.entries.last()
+        // Anything else — a new identifier, or one a built-in profile holds — follows the rules
+        // of the build: REQ-PROF-087 first, then REQ-PERS-030's refusal.
+        let position = self.add(incoming, log)?;
+        Some(&self.entries[position])
     }
 
     /// Sets the ROM of game `id`; false when there is no such game.
@@ -509,14 +507,14 @@ impl GameLibrary {
         }
     }
 
-    fn add(&mut self, entry: GameLibraryEntry, log: &dyn ProfileLog) {
+    /// Adds `entry` and returns where it landed; none when it added nothing.
+    fn add(&mut self, entry: GameLibraryEntry, log: &dyn ProfileLog) -> Option<usize> {
         // REQ-PROF-087 is asked first: a profile of generation 2.1 takes the entry of the same
         // game over whatever the identifiers, which AMD-065 puts before REQ-PERS-030. The test
         // below only fires when one of the two profiles is a 2.1, so nothing of the rule between
         // two profiles of an earlier generation moves.
         if let Some(position) = self.same_game_position(&entry) {
-            self.replace_same_game(position, entry, log);
-            return;
+            return self.replace_same_game(position, entry, log);
         }
         if let Some(existing) = self.find(&entry.id) {
             // A built-in profile always wins; between user profiles the first one wins
@@ -526,9 +524,10 @@ impl GameLibrary {
                  ignoring \"{}\"",
                 entry.id, existing.source, existing.title, entry.title
             ));
-            return;
+            return None;
         }
         self.entries.push(entry);
+        Some(self.entries.len() - 1)
     }
 
     /// The entry `incoming` replaces, or is dropped for, under REQ-PROF-087: one that designates
@@ -546,13 +545,14 @@ impl GameLibrary {
             .position(|existing| one_is_2_1(existing) && existing.designates(&incoming.identity))
     }
 
-    /// REQ-PROF-087 on the entry at `position`, which `incoming` designates the same game as.
+    /// REQ-PROF-087 on the entry at `position`, which `incoming` designates the same game as;
+    /// `position` again when the incoming profile took the entry over, none when it added nothing.
     fn replace_same_game(
         &mut self,
         position: usize,
         incoming: GameLibraryEntry,
         log: &dyn ProfileLog,
-    ) -> Option<&GameLibraryEntry> {
+    ) -> Option<usize> {
         let existing = &self.entries[position];
         // Several profiles of generation 2.1: the existing rules decide — the user profile wins
         // over the built-in, then the first read.
@@ -569,7 +569,7 @@ impl GameLibrary {
         }
         log.information(&replacement_message(&existing.id, &incoming, existing));
         self.entries[position].take_over(incoming);
-        Some(&self.entries[position])
+        Some(position)
     }
 
     fn apply(&mut self, persisted: &GameLibraryFile, log: &dyn ProfileLog) {

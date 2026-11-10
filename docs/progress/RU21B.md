@@ -7,7 +7,7 @@ Lot of three steps. Normative source: `spec/changes/AMD-065-generation-remplace.
   reaches `rom.json`, the saves and the cover.
 - [x] 2/3 — Implementation and tests: REQ-PROF-085 to 087, AMD-065 §3's automatic criteria,
   and the real-install test made to hold for a 2.0 **and** a 2.1 installation.
-- [ ] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
+- [x] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
   touched, performance note.
 
 ## Step 1 — the plan
@@ -162,3 +162,51 @@ since the test only fires when one of the two profiles is a 2.1.
 passed, 6 failed — the six that need `ZAXNES_3DSEN_INSTALL`, which this machine's clean side does
 not have (R0 runs them). `cargo test --release -p zax-app --features bundled`: all green.
 `cargo clippy -D warnings` clean on both crates, `cargo fmt --check` clean.
+
+## Step 3 — the final pass
+
+`GameLibrary::add` now returns where the entry landed, so `add_user_profile` no longer guesses
+`entries.last()` and an identifier a built-in profile holds falls through to REQ-PROF-087 before
+REQ-PERS-030 refuses it. No behaviour of the lot changed with it; it removed a case the old shape
+would have answered with the wrong entry.
+
+### What was run, in `--release`
+
+- `cargo fmt --all --check`: clean.
+- `cargo clippy -p zax-profiles -p zax-app --all-targets -- -D warnings`: clean.
+- `cargo test --release --no-fail-fast -p zax-profiles -- --include-ignored` with
+  `ZAXNES_PROFILES`, `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `rust/test-roms` present: **350 passed,
+  6 failed**, and the six are exactly the `three_d_sen_real_install_tests` that panic on
+  `ZAXNES_3DSEN_INSTALL is not set` — an installation of 3dSen this machine's clean side does not
+  have, and which R0 runs.
+- `cargo test --release --no-fail-fast -p zax-app --features bundled -- --include-ignored`:
+  **808 passed, 0 failed**. (`--features bundled` is what links SDL2 statically on this machine;
+  without it the `zaxnes` binary does not link, which is unrelated to this lot.)
+
+The Windows debug profile cannot link `zaxnes.exe` here (`SDL2.lib` is only produced by the
+`bundled` feature), so every run above is the release profile the lot asks for.
+
+### Performance
+
+No callgrind run, and none is needed: nothing of this lot is on a per-frame path. The whole of
+AMD-065 lives where the library is **built** or where a profile is **added**, both of which happen
+at start-up or at an import, never inside the emulation or render loop. Concretely:
+
+- `read_built_in_profiles` reads the same 101 files that `built_in_contents` already read at
+  start-up, and adds one header decode per file — the envelope or the header fields alone, no
+  payload. The application reads them **once** now (it took the bytes and the headers from the same
+  read), where before it read them once for the bytes alone.
+- the same-game search is linear in the entries already added, so building a 101-entry library
+  costs about 101 × 101 short string comparisons, a few tens of microseconds.
+- the folder scan's duplicate check moved from a `HashSet` insertion to a `HashMap` lookup: the
+  same cost, plus a one-byte-prefix generation test on bytes already in hand.
+- `GameLibraryEntry` grows by one `GameIdentity` and one empty `Vec`; the library holds about 101
+  of them.
+
+Measured end to end: the three `#[ignore]`d AMD-065 tests, which between them read the 41 MB of
+built-in profiles twice and the 43 MB of 2.1 profiles, decode 101 + 101 headers and build the
+library 103 times (the 101 real pairs one by one, plus the two whole-catalogue builds), run in
+**0.25 s** in release.
+
+The core and the renderer were not touched, so the golden runs of SMB3, Zelda II and the
+widescreen packs cannot move: no file of `zax-nes`, `zax-engine3d` or `zax-render` is in the diff.
