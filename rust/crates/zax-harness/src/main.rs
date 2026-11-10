@@ -8,8 +8,8 @@ use std::process::ExitCode;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
-    bench_core, classify, compare, golden_core, lua_api, meshes, packs, profile_tool, render,
-    test_roms, HarnessError,
+    bench_core, classify, compare, golden_core, lua_api, meshes, movie_sync, packs, profile_tool,
+    render, test_roms, HarnessError,
 };
 #[cfg(feature = "fceux-core")]
 use zax_harness::{fceux_bench, fceux_compare, fceux_run, fceux_tiles};
@@ -26,6 +26,7 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)
        zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
        zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)
+       zax-harness movie-sync <movie.fm2> <rom.nes> [options] (where the engines part on a TAS)
        zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
        zax-harness fceux-frame <rom.nes> <out.json> [frames] (FCEUX's tile records)
        zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)
@@ -111,6 +112,7 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             print!("{}", vs::run(&options)?);
             Ok(())
         }
+        [command, rest @ ..] if command == "movie-sync" => movie_sync::command(rest),
         [command, rest @ ..] if command == "compare" => {
             let options = compare::Options::parse(rest)?;
             println!("{}", compare::run(&options)?);
@@ -177,7 +179,7 @@ fn print_help() {
     #[cfg(not(feature = "fceux-core"))]
     let fceux_usage = String::new();
     println!(
-        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
+        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
         test_roms::USAGE,
         meshes::USAGE,
         lua_api::USAGE,
@@ -185,7 +187,8 @@ fn print_help() {
         compare::USAGE,
         bench_core::USAGE,
         profile_tool::USAGE,
-        classify::USAGE
+        classify::USAGE,
+        movie_sync::USAGE
     );
 }
 

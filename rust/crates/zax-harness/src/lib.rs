@@ -20,6 +20,10 @@ pub mod golden_core;
 mod json_text;
 pub mod lua_api;
 pub mod meshes;
+// The movie instrument of lot EVAL-SYNC. **Not** behind `fceux-core`: `--engine zaxnes` is a
+// measurement the default build can make, and the FCEUX half of the module is `cfg`'d inside it.
+pub mod movie_file;
+pub mod movie_sync;
 pub mod packs;
 pub mod profile_tool;
 pub mod render;
