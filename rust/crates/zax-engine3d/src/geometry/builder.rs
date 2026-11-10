@@ -14,7 +14,7 @@ use crate::geometry::pattern_voxels::PatternVoxels;
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
 use crate::geometry::tile_sides::TileSides;
-use crate::geometry::tile_voxels::{self, TileVoxels, MAX_DEPTH};
+use crate::geometry::tile_voxels::MAX_DEPTH;
 use crate::geometry::voxel_construction;
 use crate::image::TileImage;
 use crate::instance::{InstanceRef, PatternInstance};
@@ -88,8 +88,13 @@ pub trait PatternGeometryBuilder: Send {
 
     /// The mesh of `image` for `instance` with the lateral faces AMD-063 REQ-SCN-087 removes
     /// taken off. A builder that knows no full tile answers the whole mesh, as AMD-057 draws it.
+    ///
+    /// It takes `&self` and not `&mut self` on purpose: the draw list calls it once per drawn
+    /// tile, and a unique reborrow there makes LLVM reload what the tile loop holds across the
+    /// call, which step 12 measured at +0.26 % of the whole process on a ROM with no profile.
+    /// The memoisation of the variants lives behind a cell instead.
     fn mesh_of_without(
-        &mut self,
+        &self,
         instance: InstanceRef,
         image: &TileImage,
         _removed: TileSides,
@@ -282,10 +287,12 @@ impl GeometryBuilder {
             self.background_color,
         );
         let built = voxel_construction::build(pattern, &texture, parameters, algorithm);
-        // AMD-063 REQ-SCN-087: a variant whose effective algorithm is not MARCHING has
-        // removable inner faces, whatever its opacity and its render style — the opacity is read
-        // on the drawn instance and nowhere else.
-        let mut full_tiles = vec![false; built.fields.len()];
+        // AMD-063 REQ-SCN-087 asks which of these meshes are full tiles, and the answer is a walk
+        // over the 8 × 8 × D voxels of a field. It is **not** computed here: a profile that never
+        // shows a see-through 3D object never needs it, and step 12 measured the eager scan at
+        // +0.43 % of a 600-frame Mega Man 2 run on its own 3dn pack — a profile with no
+        // transparency in it at all. `ObjectGeometry` scans a field the first time it is asked
+        // about it and remembers the answer; the fields are kept either way.
         let meshes = if algorithm == RenderAlgorithm::Marching {
             let voxels = PatternVoxels::new(pattern, &texture, &built.fields);
             let empty = ObjectTexture::empty_color(parameters.empty_color);
@@ -297,16 +304,11 @@ impl GeometryBuilder {
             built
                 .fields
                 .iter()
-                .enumerate()
-                .map(|(n, field)| {
-                    full_tiles[n] = is_full_tile(field);
-                    Arc::new(greedy::build(field, &texture, multicolor))
-                })
+                .map(|field| Arc::new(greedy::build(field, &texture, multicolor)))
                 .collect()
         };
 
         let object = BuiltObject {
-            full_tiles,
             texture: Arc::new(texture),
             algorithm,
             requested_depth: requested,
@@ -363,13 +365,13 @@ impl PatternGeometryBuilder for GeometryBuilder {
     }
 
     fn mesh_of_without(
-        &mut self,
+        &self,
         instance: InstanceRef,
         image: &TileImage,
         removed: TileSides,
     ) -> Option<Arc<TileMesh>> {
         self.geometry
-            .get_mut(&instance)
+            .get(&instance)
             .and_then(|geometry| geometry.drawn_mesh_without(image, removed))
     }
 
@@ -402,31 +404,4 @@ impl PatternGeometryBuilder for GeometryBuilder {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-}
-
-/// Whether `field` is a **full** tile in the sense of AMD-063 REQ-SCN-087: `D > 0` and all three
-/// slots of each of its `8 × 8 × D` voxels occupied (REQ-E3D-422), `emptyColor` included
-/// (REQ-E3D-424).
-///
-/// A hollow geometry — `CUBE`, the cylinders — leaves the inside of the field empty and so yields
-/// no full tile, which the amendment wants.
-fn is_full_tile(field: &TileVoxels) -> bool {
-    if field.depth() <= 0 {
-        return false;
-    }
-
-    for k in 0..field.depth() {
-        for j in 0..tile_voxels::SIZE_Y {
-            for i in 0..tile_voxels::SIZE_X {
-                if !field.occupied(i, j, k, tile_voxels::AXIS_X)
-                    || !field.occupied(i, j, k, tile_voxels::AXIS_Y)
-                    || !field.occupied(i, j, k, tile_voxels::AXIS_Z)
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
-    true
 }

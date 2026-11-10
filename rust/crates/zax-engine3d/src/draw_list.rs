@@ -347,6 +347,13 @@ impl DrawListBuilder {
     /// Nothing is built unless a background instance of the frame is transparent **and** holds a
     /// full tile: without that no face can be removed, so the whole of REQ-SCN-087 costs one
     /// pass over the instance list.
+    ///
+    /// It runs **before** the drawing loop and not inside it, on purpose. Building the map on
+    /// demand, at the first drawn instance that could lose a face, would spare an opaque picture
+    /// even this pass — but it puts a call to a `&mut self` method in the loop, and step 12
+    /// measured the whole tile loop de-inlining around it: `push_tiles`, `InstanceLook::tile`,
+    /// the `Mat4` product and a `memcpy` all left `build` and the cost went to +0.149 % on a ROM
+    /// that gains nothing from the amendment, against +0.049 % for this shape.
     fn map_background_cells(&mut self, frame: &ConversionFrame, sources: &DrawSources<'_>) {
         self.cells.clear();
         if !Self::has_removable_tile(frame, sources) {
@@ -380,12 +387,16 @@ impl DrawListBuilder {
 
     /// Whether any background instance of the frame is transparent and holds a full tile, which
     /// is the only case in which REQ-SCN-087 removes anything.
+    /// The opacity is tested **first**, before the shape is even looked up: this runs over every
+    /// instance of every frame, and on a picture with nothing see-through in it — which is every
+    /// frame of a 3dn profile that uses no transparency — the two field reads of
+    /// [`is_transparent`] are then the whole of what the amendment costs the frame.
     fn has_removable_tile(frame: &ConversionFrame, sources: &DrawSources<'_>) -> bool {
         frame.instances().iter().any(|&id| {
             let instance = frame.instance(id);
-            frame.shape(id.shape).background()
+            is_transparent(instance)
                 && instance.style != RenderStyle::Hidden
-                && is_transparent(instance)
+                && frame.shape(id.shape).background()
                 && frame.shape_tiles(id.shape).any(|tile| {
                     sources
                         .geometry
@@ -487,10 +498,41 @@ impl DrawListBuilder {
         let instance = frame.instance(id);
         let shape = frame.shape(id.shape);
         let look = InstanceLook::of(instance, shape, sources);
-        // REQ-SCN-087 step 2 only ever applies to a background instance the drawn instance
-        // itself declares transparent; the sprites are left out.
-        let removable = !self.cells.is_empty() && shape.background() && is_transparent(instance);
 
+        // REQ-SCN-087 step 2 only ever applies to a background instance the drawn instance
+        // itself declares transparent, and only when the map of step 1 was built at all; the
+        // sprites are left out. The empty map is tested first, so a frame that can lose no face
+        // reaches the loop on one `is_empty` and nothing else.
+        //
+        // The decision is per **instance**, so it picks one of two monomorphisations of the tile
+        // loop instead of being tested inside a single one. A loop that *may* call
+        // `removed_sides` pays, on every tile it draws, the spills and reloads that call needs
+        // around it — even on a frame where the branch is never taken: step 12 measured one
+        // shared loop at **+0.26 %** of the whole process on a ROM with no profile at all, which
+        // is above the owner's +0.05 % bar for a picture with nothing transparent in it. With
+        // `REMOVAL = false` the removal is dead code, the mesh comes from `mesh_of` as AMD-057
+        // asks for it, and the loop is instruction for instruction the one before the amendment.
+        if self.cells.is_empty() || !shape.background() || !is_transparent(instance) {
+            self.push_tiles::<false>(frame, id, instance, shape, &look, sources);
+        } else {
+            self.push_tiles::<true>(frame, id, instance, shape, &look, sources);
+        }
+    }
+
+    /// Pushes the drawn tiles of one instance, in the tile order of its shape.
+    ///
+    /// `REMOVAL` turns on step 2 of AMD-063 REQ-SCN-087, which only a transparent background
+    /// instance of a frame whose map was built ever needs; [`DrawListBuilder::add_instance`]
+    /// says why it is a type parameter and not an argument.
+    fn push_tiles<const REMOVAL: bool>(
+        &mut self,
+        frame: &ConversionFrame,
+        id: FrameInstanceId,
+        instance: &FrameInstance,
+        shape: &FrameShape,
+        look: &InstanceLook,
+        sources: &mut DrawSources<'_>,
+    ) {
         for tile in frame.shape_tiles(id.shape) {
             if shape.restored_from_pinned_frame() && !frame.tile_overlaps_pinned_rects(tile) {
                 continue;
@@ -502,22 +544,22 @@ impl DrawListBuilder {
             // the inner walls in the scene vertex shader instead.
             //
             // AMD-063 REQ-SCN-087: a full tile of a transparent background instance gives up the
-            // lateral faces that fall on a joint with another transparent full tile. The map is
-            // empty unless some background instance of the frame can lose one, so an opaque
-            // picture does not even test its tiles.
-            let removed = if removable
-                && sources
+            // lateral faces that fall on a joint with another transparent full tile.
+            let mesh = if REMOVAL {
+                let removed = if sources
                     .geometry
                     .is_full_tile(instance.reference(), tile.image())
-            {
-                self.removed_sides(frame, tile, sources)
-            } else {
-                TileSides::NONE
-            };
-            let mesh =
+                {
+                    self.removed_sides(frame, tile, sources)
+                } else {
+                    TileSides::NONE
+                };
                 sources
                     .geometry
-                    .mesh_of_without(instance.reference(), tile.image(), removed);
+                    .mesh_of_without(instance.reference(), tile.image(), removed)
+            } else {
+                sources.geometry.mesh_of(instance.reference(), tile.image())
+            };
             self.list
                 .tiles
                 .push(look.tile(id, instance, shape, tile, mesh));

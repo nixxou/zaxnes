@@ -76,6 +76,32 @@ impl TileVoxels {
         self.slots.is_empty()
     }
 
+    /// Whether the field is a **full** tile in the sense of AMD-063 REQ-SCN-087: `D > 0` and all
+    /// three slots of each of its `8 × 8 × D` voxels occupied (REQ-E3D-422), `emptyColor`
+    /// included (REQ-E3D-424). Only such a tile can lose a lateral face.
+    ///
+    /// A hollow geometry — `CUBE`, the cylinders — leaves the inside of the field empty and so
+    /// yields no full tile, which the amendment wants. A MARCHING field has one slot per voxel
+    /// and is never full either, which its single-slot shape gives for free.
+    #[must_use]
+    pub fn is_full(&self) -> bool {
+        if self.depth <= 0 || self.slots_per_voxel != 3 {
+            return false;
+        }
+
+        // The whole field, three slots a voxel, and no slot may be empty; it stops at the first
+        // one that is, which is what makes the answer cheap for the great majority of tiles.
+        (0..self.depth).all(|k| {
+            (0..SIZE_Y).all(|j| {
+                (0..SIZE_X).all(|i| {
+                    self.occupied(i, j, k, AXIS_X)
+                        && self.occupied(i, j, k, AXIS_Y)
+                        && self.occupied(i, j, k, AXIS_Z)
+                })
+            })
+        })
+    }
+
     /// True when `(i, j, k)` is inside `[0,8) × [0,8) × [0,D)`.
     #[must_use]
     pub const fn contains(&self, i: i32, j: i32, k: i32) -> bool {

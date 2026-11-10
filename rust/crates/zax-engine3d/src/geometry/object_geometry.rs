@@ -2,6 +2,7 @@
 
 //! The geometry of one 3D object (SPEC-04B §3.4, §3.7).
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::geometry::texture::ObjectTexture;
@@ -31,9 +32,6 @@ pub struct BuiltObject {
     pub meshes: Vec<Arc<TileMesh>>,
     /// The voxel fields, in the same order.
     pub fields: Vec<TileVoxels>,
-    /// Whether each mesh is that of a **full** tile in the sense of AMD-063 REQ-SCN-087, in the
-    /// same order. All false for a MARCHING object, whose faces are not removable.
-    pub full_tiles: Vec<bool>,
 }
 
 /// The geometry of one 3D object: its resolved texture, the mesh of each distinct tile image
@@ -52,18 +50,36 @@ pub struct ObjectGeometry {
     /// set of removed lateral sides, slot 0 being the mesh itself. Only a full tile ever reaches
     /// them, and a variant keeps its identity from frame to frame, which is what lets the
     /// renderer keep its buffers (REQ-E3D-602).
-    variants: Vec<Option<Arc<TileMesh>>>,
+    ///
+    /// **Empty until a face is actually removed**, and behind a [`RefCell`] so that the lookup
+    /// takes `&self`: the draw list asks for a mesh once per drawn tile, and a `&mut` borrow
+    /// there costs every picture — transparent or not — the reloads a unique reborrow forces on
+    /// the whole of the tile loop. Measured at step 12: +0.26 % of the whole process on a ROM
+    /// with no profile at all. The cell is borrowed only on the removal path, after the two
+    /// tests that send an ordinary tile straight back with its mesh.
+    variants: RefCell<Vec<Option<Arc<TileMesh>>>>,
+    /// Which meshes are those of a **full** tile (AMD-063 REQ-SCN-087), answered on demand: the
+    /// test walks the `8 × 8 × D` voxels of a field, and a profile that never shows a see-through
+    /// 3D object never asks. `None` is "not yet looked at".
+    ///
+    /// **Empty until the first question**, like [`ObjectGeometry::variants`]. Step 12 measured
+    /// the scan done eagerly at build time at +0.43 % of a 600-frame Mega Man 2 run on its own
+    /// 3dn pack, a profile with nothing transparent in it.
+    full_tiles: RefCell<Vec<Option<bool>>>,
 }
 
 impl ObjectGeometry {
     pub(crate) fn new(pattern_id: PatternId, pattern: &EnginePattern, built: BuiltObject) -> Self {
-        let variants = vec![None; built.meshes.len() * TileSides::COMBINATIONS];
         Self {
             pattern: pattern_id,
             mesh_of_image: image_index(pattern),
             built,
             ready: false,
-            variants,
+            // Nothing is reserved: an object no transparent instance ever covers — every object
+            // of a picture without a see-through 3D object — keeps no variant storage at all,
+            // and is never asked which of its tiles are full.
+            variants: RefCell::new(Vec::new()),
+            full_tiles: RefCell::new(Vec::new()),
         }
     }
 
@@ -161,29 +177,54 @@ impl ObjectGeometry {
     #[must_use]
     pub fn is_full_tile(&self, image: &TileImage) -> bool {
         self.index(image)
-            .is_some_and(|index| self.built.full_tiles.get(index).copied().unwrap_or(false))
+            .is_some_and(|index| self.full_tile_at(index))
+    }
+
+    /// Whether the mesh at `index` is a full tile, scanning its voxel field the first time it is
+    /// asked and remembering the answer (see [`ObjectGeometry::full_tiles`]).
+    fn full_tile_at(&self, index: usize) -> bool {
+        // A MARCHING object has one slot per voxel and no removable face, and `TileVoxels::is_full`
+        // says so by itself; the check is here so such an object never allocates the cache.
+        if self.built.algorithm == RenderAlgorithm::Marching {
+            return false;
+        }
+
+        let mut known = self.full_tiles.borrow_mut();
+        if known.is_empty() {
+            known.resize(self.built.fields.len(), None);
+        }
+        let Some(slot) = known.get_mut(index) else {
+            return false;
+        };
+        if let Some(answer) = *slot {
+            return answer;
+        }
+
+        let answer = self.built.fields[index].is_full();
+        *slot = Some(answer);
+        answer
     }
 
     /// The mesh REQ-SCN-087 draws for `image` with `sides` taken off. The sides are honoured on
     /// a full tile only; any other tile keeps every face it was built with, as AMD-057 leaves it.
-    pub fn drawn_mesh_without(
-        &mut self,
-        image: &TileImage,
-        sides: TileSides,
-    ) -> Option<Arc<TileMesh>> {
+    pub fn drawn_mesh_without(&self, image: &TileImage, sides: TileSides) -> Option<Arc<TileMesh>> {
         let index = self.index(image)?;
-        if sides.is_none() || !self.built.full_tiles.get(index).copied().unwrap_or(false) {
+        if sides.is_none() || !self.full_tile_at(index) {
             return self.built.meshes.get(index).map(Arc::clone);
         }
 
         let slot = (index * TileSides::COMBINATIONS) + usize::from(sides.bits());
-        let variant = self.variants.get(slot)?;
-        if let Some(mesh) = variant {
+        let mut variants = self.variants.borrow_mut();
+        if variants.is_empty() {
+            // First face removed on this object: the sixteen slots per mesh come into being now.
+            variants.resize(self.built.meshes.len() * TileSides::COMBINATIONS, None);
+        }
+        if let Some(mesh) = variants.get(slot).and_then(Option::as_ref) {
             return Some(Arc::clone(mesh));
         }
 
         let built = Arc::new(self.built.meshes.get(index)?.without_sides(sides));
-        self.variants[slot] = Some(Arc::clone(&built));
+        *variants.get_mut(slot)? = Some(Arc::clone(&built));
         Some(built)
     }
 
