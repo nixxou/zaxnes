@@ -309,6 +309,10 @@ impl FrameRamDiff {
 /// How many live differences a frame's line names before it only counts them.
 const LIVE_LISTED: usize = 16;
 /// How many frames with a live difference the report lists.
+///
+/// The *report* is a paragraph a reader reads, so it stops; the **table** of
+/// [`RamCompare::keep_table`] does not, which is what a window of several hundred frames with
+/// isolated one-frame differences needs (EVAL-SYNC-4 step 1).
 const FRAMES_LISTED: usize = 12;
 
 /// Holds a run's work RAM against a reference that carries its own, **byte for byte**.
@@ -334,6 +338,12 @@ pub struct RamCompare {
     pub first_live_diff: Option<FrameRamDiff>,
     /// The first [`FRAMES_LISTED`] frames with a live difference, for the report.
     pub live_frames: Vec<FrameRamDiff>,
+    /// **Every** compared frame's difference, when [`RamCompare::keep_table`] asked for it.
+    ///
+    /// Off by default because it is one entry per frame and a movie is 156 312 of them; on, it is
+    /// what turns "the first live difference is at frame 645" into the per-frame table a window of
+    /// seven hundred frames needs.
+    table: Option<Vec<FrameRamDiff>>,
     /// What the reference holds: frame to 2 KiB.
     want: std::collections::BTreeMap<u32, Vec<u8>>,
 }
@@ -356,6 +366,46 @@ impl RamCompare {
     #[must_use]
     pub fn available(&self) -> u32 {
         u32::try_from(self.want.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Asks for every compared frame's difference to be kept, not only the first
+    /// [`FRAMES_LISTED`] with a live one.
+    pub fn keep_table(&mut self) {
+        self.table = Some(Vec::new());
+    }
+
+    /// Every compared frame's difference, in frame order, when [`Self::keep_table`] asked for it.
+    #[must_use]
+    pub fn table(&self) -> &[FrameRamDiff] {
+        self.table.as_deref().unwrap_or_default()
+    }
+
+    /// The table as a file: one line per compared frame, the frames with a live difference naming
+    /// their addresses.
+    ///
+    /// Blank-separated columns in the reference's own spirit, so that `grep` and `awk` read it:
+    /// `<frame> total=<n> live=<n> stack=<n> temp=<n>` and then, for a frame with live
+    /// differences, ` live:$ADDR=<ours>/<theirs>` for each one named.
+    #[must_use]
+    pub fn table_text(&self) -> String {
+        let mut text = format!(
+            "# the run's own 2 KiB against the reference's, byte for byte, at offset {}\n\
+             # <frame> total=<bytes differing> live=<outside $0100-$01FF and $0000-$001F> \
+             stack=<in $0100-$01FF> temp=<below $0020>\n",
+            self.offset
+        );
+        for diff in self.table() {
+            let _ = write!(
+                text,
+                "{} total={} live={} stack={} temp={}",
+                diff.frame, diff.total, diff.live, diff.stack, diff.temporaries
+            );
+            for (address, ours, theirs) in &diff.first_live {
+                let _ = write!(text, " live:${address:04X}={ours:02X}/{theirs:02X}");
+            }
+            text.push('\n');
+        }
+        text
     }
 
     /// Takes our machine after `frame` frames.
@@ -404,7 +454,10 @@ impl RamCompare {
             }
         }
         if diff.total > 0 && self.first_diff.is_none() {
-            self.first_diff = Some(diff);
+            self.first_diff = Some(diff.clone());
+        }
+        if let Some(table) = self.table.as_mut() {
+            table.push(diff);
         }
     }
 
@@ -889,6 +942,73 @@ mod tests {
         // into a refusal: a comparison against nothing would report perfect agreement.
         let plain = Reference::parse("1 00000001 lag=0\n").unwrap_or_default();
         assert!(RamCompare::new(&plain, 0).is_none());
+    }
+
+    /// The per-frame table keeps **every** compared frame, where the report keeps the first
+    /// [`FRAMES_LISTED`]. EVAL-SYNC-4 step 1: a window of several hundred frames holding isolated
+    /// one-frame differences cannot be read off a paragraph that stops at twelve.
+    #[test]
+    fn the_table_keeps_every_compared_frame_and_the_report_still_stops() {
+        let hex = |bytes: &[u8]| -> String {
+            bytes.iter().fold(String::new(), |mut text, byte| {
+                let _ = write!(text, "{byte:02x}");
+                text
+            })
+        };
+        // Twenty frames whose live byte differs on every one of them, which is more than the
+        // report lists.
+        let frames = 20u32;
+        let mut text = String::new();
+        for frame in 1..=frames {
+            let ram = vec![0u8; 2048];
+            let _ = writeln!(
+                text,
+                "{frame} {:08x} lag=0 ram={}",
+                checksum(&ram),
+                hex(&ram)
+            );
+        }
+        let reference = Reference::parse(&text).unwrap_or_default();
+
+        let mut plain = RamCompare::new(&reference, 0).unwrap_or_default();
+        let mut tabled = RamCompare::new(&reference, 0).unwrap_or_default();
+        tabled.keep_table();
+        for frame in 1..=frames {
+            let mut ram = vec![0u8; 2048];
+            ram[0x0400] = u8::try_from(frame).unwrap_or(0);
+            plain.frame(frame, &ram);
+            tabled.frame(frame, &ram);
+        }
+
+        // The two agree about what they measured; they differ only in how much they kept.
+        assert_eq!(plain.compared, frames);
+        assert_eq!(tabled.compared, frames);
+        assert_eq!(plain.live_frames.len(), FRAMES_LISTED);
+        assert_eq!(plain.table().len(), 0, "off by default");
+        assert_eq!(tabled.table().len(), usize::try_from(frames).unwrap_or(0));
+        assert_eq!(plain.report(), tabled.report());
+
+        let table = tabled.table_text();
+        assert!(table.starts_with("# the run's own 2 KiB"), "{table}");
+        assert!(table.contains("\n1 total=1 live=1 stack=0 temp=0 live:$0400=01/00\n"));
+        assert!(table.contains("\n20 total=1 live=1 stack=0 temp=0 live:$0400=14/00\n"));
+        assert_eq!(
+            table.lines().filter(|line| !line.starts_with('#')).count(),
+            usize::try_from(frames).unwrap_or(0)
+        );
+
+        // A frame with no difference at all is still a line, which is what makes the table a
+        // table rather than a list of complaints.
+        let mut quiet = RamCompare::new(&reference, 0).unwrap_or_default();
+        quiet.keep_table();
+        quiet.frame(1, &vec![0u8; 2048]);
+        assert!(
+            quiet
+                .table_text()
+                .contains("\n1 total=0 live=0 stack=0 temp=0\n"),
+            "{}",
+            quiet.table_text()
+        );
     }
 
     /// The offset is honoured the same way [`compare`] honours it: the reference's frame *f* is

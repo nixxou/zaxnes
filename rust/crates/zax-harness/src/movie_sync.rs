@@ -107,6 +107,10 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
                            is held against it BYTE FOR BYTE at every frame it has, and the first
                            difference outside the stack page and $0000-$001F is named with its
                            addresses (one engine at a time)
+      --ram-ref-table <file>  write EVERY --ram-ref frame's own line there, not only the first
+                           twelve with a live difference: `<frame> total= live= stack= temp=`
+                           and the live addresses. What a window of several hundred frames with
+                           isolated one-frame differences needs
       --ram-ref-offset <n> the frame offset --ram-ref compares at (default 0, as --trace-ref
                            measures it on the same file)
       --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG
@@ -253,6 +257,9 @@ pub struct Options {
     /// This one needs the whole 2 KiB **during** the run, so it is streamed, and it is what turns
     /// "the trace parts at frame *f*" into an address and two values.
     pub ram_ref: Option<PathBuf>,
+    /// Where to write every [`Self::ram_ref`] frame's own line, rather than only the first few
+    /// with a live difference that the printed report has room for.
+    pub ram_ref_table: Option<PathBuf>,
     /// The offset [`Self::ram_ref`] compares at.
     pub ram_ref_offset: i64,
     /// What the movie's reset column is allowed to do.
@@ -320,6 +327,7 @@ impl Default for Options {
             trace_step: 100,
             trace_ref: None,
             ram_ref: None,
+            ram_ref_table: None,
             ram_ref_offset: 0,
             resets: Resets::On,
             builtin_patches: false,
@@ -396,6 +404,9 @@ impl Options {
                 }
                 "--ram-ref" => {
                     options.ram_ref = Some(PathBuf::from(value_at(args, &mut index)));
+                }
+                "--ram-ref-table" => {
+                    options.ram_ref_table = Some(PathBuf::from(value_at(args, &mut index)));
                 }
                 "--ram-ref-offset" => {
                     let text = value_at(args, &mut index);
@@ -1654,6 +1665,11 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
         Engines::Fceux => run_fceux_alone(options, &movie, &machines, &mut measurement)?,
     }
     finish_traces(options, &mut measurement)?;
+    if let Some(path) = &options.ram_ref_table {
+        for (_, compare) in &measurement.ram_against_reference {
+            fs::write(path, compare.table_text())?;
+        }
+    }
 
     if let Some(path) = &options.report {
         fs::write(path, format!("{:#}\n", measurement.to_json()))?;
@@ -2229,7 +2245,12 @@ fn ram_comparer(options: &Options) -> Result<Option<RamCompare>, HarnessError> {
                 path.display()
             ))
         })
-        .map(Some)
+        .map(|mut compare| {
+            if options.ram_ref_table.is_some() {
+                compare.keep_table();
+            }
+            Some(compare)
+        })
 }
 
 fn progress(options: &Options, frame: u32, total: u32, measurement: &Measurement) {
