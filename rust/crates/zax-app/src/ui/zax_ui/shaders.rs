@@ -399,7 +399,8 @@ impl ZaxUi {
             .parameters
             .want(std::path::Path::new(file));
         let overrides = shader_slots::parse_parameters(host.settings().get(ids.params).as_text());
-        let starting = shader_slots::parse_parameters(&shader_panel::starting_parameters(stored));
+        let starting =
+            shader_slots::parse_parameters(&shader_panel::starting_parameters(stored, slot));
         let changed_count = overrides
             .iter()
             .filter(|entry| !starting.contains(entry))
@@ -436,7 +437,7 @@ impl ZaxUi {
         drop(width);
         ui.same_line();
         if ui.button(tr("shaders.reset_all")) && changed_count > 0 {
-            let text = shader_panel::starting_parameters(stored);
+            let text = shader_panel::starting_parameters(stored, slot);
             host.update_settings(|model| model.set(ids.params, text.as_str()));
             play(host, UiSound::Confirm);
         }
@@ -494,8 +495,7 @@ impl ZaxUi {
             if (current - default).abs() > f32::EPSILON {
                 ui.same_line();
                 if ui.small_button(tr("shaders.reset")) {
-                    let kept =
-                        ((default - info.initial).abs() > f32::EPSILON).then_some(default);
+                    let kept = ((default - info.initial).abs() > f32::EPSILON).then_some(default);
                     text = shader_slots::with_parameter(&text, &info.name, kept);
                     changed = true;
                 }

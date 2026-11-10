@@ -804,11 +804,7 @@ impl Running {
             Some(lines)
                 if self.host.scene().two_dimensional_mode && self.host.scene().picture_head_on =>
             {
-                render_scaling::picture_lines(
-                    self.host.scene().picture_size(),
-                    lines,
-                    view_height,
-                )
+                render_scaling::picture_lines(self.host.scene().picture_size(), lines, view_height)
             }
             Some(lines) if lines > 0 => {
                 render_scaling::shader_lines(width.max(1), view_height, lines)

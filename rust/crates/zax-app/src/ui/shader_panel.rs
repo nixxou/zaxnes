@@ -97,14 +97,17 @@ pub struct CatalogPreset {
     pub cost: Cost,
     /// Where it is recommended.
     pub featured: Featured,
-    /// The parameters it starts with, beside the preset's own.
+    /// The parameters it starts with in the 4:3 modes, beside the preset's own.
     pub parameters: &'static [(&'static str, f32)],
+    /// The parameters it starts with in the widescreen modes.
+    pub wide_parameters: &'static [(&'static str, f32)],
     /// Where it draws (`shader_slots::AREA_*`).
     pub area: i32,
 }
 
-/// The Mega Bezel screen at the aspect of the picture it reads (PAR): a widescreen picture
-/// gets a widescreen TV, where the preset's own guess would squeeze it into 4:3.
+/// The Mega Bezel screen at the aspect of the picture it reads (PAR), for the widescreen modes:
+/// a widescreen picture gets a widescreen TV, where the preset's own guess squeezes it into 4:3
+/// (which suits the 4:3 modes, left at the preset's own).
 const MEGA_BEZEL_TV: &[(&str, f32)] = &[("HSM_ASPECT_RATIO_MODE", 5.0)];
 /// The Mega Bezel screen over the whole area it draws in (the picture, of any aspect).
 const MEGA_BEZEL_SCREEN: &[(&str, f32)] = &[("HSM_ASPECT_RATIO_MODE", 6.0)];
@@ -123,13 +126,14 @@ const fn entry(
         cost,
         featured,
         parameters: &[],
+        wide_parameters: &[],
         area: shader_slots::AREA_AUTO,
     }
 }
 
 const fn tv(entry: CatalogPreset) -> CatalogPreset {
     CatalogPreset {
-        parameters: MEGA_BEZEL_TV,
+        wide_parameters: MEGA_BEZEL_TV,
         ..entry
     }
 }
@@ -137,6 +141,7 @@ const fn tv(entry: CatalogPreset) -> CatalogPreset {
 const fn screen(entry: CatalogPreset) -> CatalogPreset {
     CatalogPreset {
         parameters: MEGA_BEZEL_SCREEN,
+        wide_parameters: MEGA_BEZEL_SCREEN,
         area: shader_slots::AREA_PICTURE,
         ..entry
     }
@@ -321,17 +326,21 @@ pub fn catalogue_entry(path: &str) -> Option<&'static CatalogPreset> {
     CATALOGUE.iter().find(|preset| preset.path == path)
 }
 
-/// The parameters a preset of the catalogue starts with, as the settings store them (none for
-/// a preset outside it): what `Reset all` returns it to.
+/// The parameters a preset of the catalogue starts with in `slot`, as the settings store them
+/// (none for a preset outside it): what `Reset all` returns it to.
 #[must_use]
-pub fn starting_parameters(path: &str) -> String {
+pub fn starting_parameters(path: &str, slot: ShaderSlot) -> String {
+    let (_, wide) = mode_of(slot);
     let parameters: Vec<(String, f32)> = catalogue_entry(path)
         .map(|preset| {
-            preset
-                .parameters
-                .iter()
-                .map(|(name, value)| ((*name).to_owned(), *value))
-                .collect()
+            if wide {
+                preset.wide_parameters
+            } else {
+                preset.parameters
+            }
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), *value))
+            .collect()
         })
         .unwrap_or_default();
     shader_slots::format_parameters(&parameters)
@@ -344,7 +353,7 @@ pub fn choose_preset(model: &mut SettingsModel, slot: ShaderSlot, path: &str) {
     let area = catalogue_entry(path).map_or(shader_slots::AREA_AUTO, |preset| preset.area);
     model.set(ids.mode, SettingValue::Enum(PRESET));
     model.set(ids.preset, path);
-    model.set(ids.params, starting_parameters(path).as_str());
+    model.set(ids.params, starting_parameters(path, slot).as_str());
     model.set(ids.area, SettingValue::Enum(area));
 }
 
@@ -620,7 +629,10 @@ mod tests {
             .expect("a widescreen preset");
         choose_preset(&mut model, ShaderSlot::TwoDWide, screen.path);
         assert_eq!(model.get(SettingId::Shader2dWsMode).as_int(), PRESET);
-        assert_eq!(model.get(SettingId::Shader2dWsPreset).as_text(), screen.path);
+        assert_eq!(
+            model.get(SettingId::Shader2dWsPreset).as_text(),
+            screen.path
+        );
         assert_eq!(
             model.get(SettingId::Shader2dWsParams).as_text(),
             "HSM_ASPECT_RATIO_MODE=6"
@@ -629,7 +641,16 @@ mod tests {
             model.get(SettingId::Shader2dWsArea).as_int(),
             shader_slots::AREA_PICTURE
         );
-        assert_eq!(starting_parameters(screen.path), "HSM_ASPECT_RATIO_MODE=6");
+        assert_eq!(
+            starting_parameters(screen.path, ShaderSlot::TwoD),
+            "HSM_ASPECT_RATIO_MODE=6"
+        );
+        let tv = catalogue_entry("bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp").expect("the TV");
+        assert_eq!(starting_parameters(tv.path, ShaderSlot::TwoD), "");
+        assert_eq!(
+            starting_parameters(tv.path, ShaderSlot::ThreeDWide),
+            "HSM_ASPECT_RATIO_MODE=5"
+        );
         choose_preset(&mut model, ShaderSlot::TwoDWide, "crt/other.slangp");
         assert_eq!(model.get(SettingId::Shader2dWsParams).as_text(), "");
         assert!(featured_for(screen, ShaderSlot::ThreeDWide));
