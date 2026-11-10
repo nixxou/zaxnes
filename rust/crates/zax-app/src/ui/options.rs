@@ -27,6 +27,7 @@ use zax_settings::model::SettingsModel;
 use super::keys;
 use super::strings;
 use super::text;
+use crate::emulation::fceux_validated;
 use crate::persistence::app_settings::AppSettings as _;
 use crate::render_scaling;
 
@@ -1024,6 +1025,31 @@ pub fn is_folder(row: &OptionsRow) -> bool {
 #[must_use]
 pub fn forced_run_ahead_note(id: SettingId, forced: bool) -> Option<String> {
     (forced && id == SettingId::EmuRunAhead).then(text::run_ahead_forced_to_zero)
+}
+
+/// Lot FCEUX-48 step 2: the note the window shows beside the **engine** row, once FCEUX is the
+/// engine chosen for the game, saying whether lot FCEUX-6's sweep validated this ROM for 3D on it
+/// — `None` for every other row, for Zaxnes, and for a ROM whose CRC the application has not read
+/// (`Status::Unknown`: "nothing is known" is not "not validated").
+///
+/// The row itself stays **live**, like `forced_run_ahead_note` and unlike `inert_note`: the engine
+/// option is available for every game, which is the owner's choice (§7 of
+/// `docs/review/FCEUX-ENGINE.md`), so there is nothing to grey out, only something to say.
+// FCEUX-48
+#[must_use]
+pub fn fceux_validation_note(
+    id: SettingId,
+    model: &SettingsModel,
+    status: fceux_validated::Status,
+) -> Option<String> {
+    if id != SettingId::EmuEngine || !fceux_is_the_engine(model) {
+        return None;
+    }
+    match status {
+        fceux_validated::Status::Validated(_) => Some(text::fceux_validated()),
+        fceux_validated::Status::NotValidated => Some(text::fceux_not_validated()),
+        fceux_validated::Status::Unknown => None,
+    }
 }
 
 fn is_editable(descriptor: &SettingDescriptor) -> bool {

@@ -2,9 +2,11 @@
 //! loop, the renderer and the mixer are doing.
 
 use imgui::{Condition, Ui};
+use zax_core_api::EngineKind;
 use zax_render::statistics::RenderStatistics;
 
 use crate::application::AppHost;
+use crate::emulation::fceux_validated;
 use crate::emulation::rollback_history;
 use crate::persistence::app_settings::AppSettings as _;
 use crate::persistence::save_slots::QUICK_SLOT_ID;
@@ -27,6 +29,25 @@ pub struct DebugInfo<'a> {
     pub statistics: &'a RenderStatistics,
     /// The name of the GL renderer.
     pub gl_renderer: &'a str,
+}
+
+/// What the machine line adds after the engine's name.
+///
+/// Lot FCEUX-23 step 5 put the engine itself here, which is the HUD half of the visible marker —
+/// the other half is the notification at load and the row in the game's options. Lot FCEUX-48
+/// step 2 adds whether this ROM is one lot FCEUX-6 validated for 3D on that engine, so that a
+/// user who reports "the 3D is wrong" can say both which engine drew it and whether anybody had
+/// checked. Empty on Zaxnes, where the question does not arise, and empty for a ROM whose CRC was
+/// never read — "nothing is known" is not "not validated".
+fn engine_validation(host: &AppHost, engine: EngineKind) -> &'static str {
+    if engine == EngineKind::Zaxnes {
+        return "";
+    }
+    match host.fceux_validation() {
+        fceux_validated::Status::Validated(_) => "  validated",
+        fceux_validated::Status::NotValidated => "  NOT validated for 3D",
+        fceux_validated::Status::Unknown => "",
+    }
 }
 
 /// Draws the panel.
@@ -90,12 +111,10 @@ pub fn draw(ui: &Ui, host: &AppHost, chrome_height: f32, info: &DebugInfo<'_>) {
         ui.separator();
         ui.text_wrapped(title);
         if let Some(session) = host.session() {
-            // Lot FCEUX-23 step 5: the engine names itself here, which is the HUD half of the
-            // visible marker — the other half is the notification at load and the row in the
-            // game's options.
             ui.text(format!(
-                "{} engine  {:?}  {} fps nominal  frame {}",
+                "{} engine{}  {:?}  {} fps nominal  frame {}",
                 session.core().kind(),
+                engine_validation(host, session.core().kind()),
                 session.core().region(),
                 session.nominal_frame_rate(),
                 session.core().frame_count()

@@ -16,6 +16,7 @@ use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
+use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
 use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
 use crate::game_session::{GameSession, SessionRequest};
@@ -712,11 +713,23 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // matters), so a game that is **not** on Zaxnes's own core says so at every load; the
         // performance overlay names the engine from then on, and the game's options carry the row
         // itself. Zaxnes is the default and says nothing, as it always did.
+        // Lot FCEUX-48 step 2 adds the second half of the sentence: whether lot FCEUX-6's sweep
+        // validated this ROM for 3D on that engine. It is a marker and not a gate (§7), so a game
+        // nobody checked still plays — it is just told so, once, where the user will read it.
         if let Some(engine) = self
             .running_engine()
             .filter(|kind| *kind != EngineKind::Zaxnes)
         {
-            let message = format!("Playing on the {engine} engine.");
+            let message = match self.fceux_validation() {
+                fceux_validated::Status::Validated(rom) => format!(
+                    "Playing on the {engine} engine; this ROM is validated for 3D ({}).",
+                    rom.game
+                ),
+                fceux_validated::Status::NotValidated => format!(
+                    "Playing on the {engine} engine; this ROM is not validated for 3D on it."
+                ),
+                fceux_validated::Status::Unknown => format!("Playing on the {engine} engine."),
+            };
             self.log(&message);
             self.notifications.show_normal(&message);
         }

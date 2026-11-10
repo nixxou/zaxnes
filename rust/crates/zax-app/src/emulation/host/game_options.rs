@@ -1,11 +1,14 @@
 //! The options of a game (Rust-only, owner request): the few settings the user set for one ROM
 //! file, kept in `games.json` beside the profile chosen for it, put in force while it plays.
 
+use std::path::Path;
+
 use zax_core_api::EngineKind;
 use zax_settings::catalogue::SettingId;
 use zax_settings::games::GameOptions;
 
 use super::{EmulationHost, GameView};
+use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::GameCatalog;
 
 /// The key of a ROM file in `games.json`: its absolute path, as a launch records it.
@@ -109,6 +112,28 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     #[must_use]
     pub fn running_engine(&self) -> Option<EngineKind> {
         self.session.as_ref().map(|session| session.core().kind())
+    }
+
+    /// The CRC-32 of the data of the game whose options are in force — the identity lot FCEUX-48
+    /// step 2's table of validated games is keyed by, and the one the built-in patches already
+    /// use. Read from the **cache**, which a launch always fills (`certify_rom`, before the job
+    /// begins), so that the interface reads no file while it draws a frame; `None` with no game,
+    /// or for a ROM the cache has not seen as it is.
+    #[must_use]
+    pub fn current_rom_data_crc(&self) -> Option<u32> {
+        self.known_rom_crc(Path::new(self.current_rom_path()?))
+    }
+
+    /// Whether the game in play is one lot FCEUX-6's sweep validated for **3D on FCEUX** (lot
+    /// FCEUX-48 step 2). It is a marker and not a gate: the engine option works for every game,
+    /// and this is what the engine row, the notification at load and the performance overlay say
+    /// about it.
+    ///
+    /// `Unknown` rather than `NotValidated` when there is no game or the CRC was never read —
+    /// "nothing is known" must not be printed as "not validated".
+    #[must_use]
+    pub fn fceux_validation(&self) -> fceux_validated::Status {
+        fceux_validated::status_of(self.current_rom_data_crc())
     }
 
     /// Puts in force the options of the game the job starts, before its session is made: some

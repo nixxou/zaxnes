@@ -5,6 +5,7 @@ pub mod commands;
 pub mod emulation_state;
 pub mod engine_handle;
 pub mod fast_forward_state;
+pub mod fceux_validated;
 pub mod frame_pacer;
 pub mod frame_steps;
 pub mod game_catalog;

@@ -197,6 +197,12 @@ pub const HINT_FCEUX_NO_SPRITE_LIMIT: &str = "hint.fceux_no_sprite_limit";
 pub const HINT_FCEUX_NO_RUN_AHEAD: &str = "hint.fceux_no_run_ahead";
 /// The marker the status line and the game's options show while FCEUX is the engine.
 pub const STATUS_ENGINE_FCEUX: &str = "status.engine_fceux";
+/// The engine row, while FCEUX is chosen for a game lot FCEUX-6 validated for 3D on it
+/// (lot FCEUX-48 step 2).
+pub const HINT_FCEUX_VALIDATED: &str = "hint.fceux_validated";
+/// The engine row, while FCEUX is chosen for a game nobody validated for 3D on it. The option
+/// still works — this is a marker, not a refusal.
+pub const HINT_FCEUX_NOT_VALIDATED: &str = "hint.fceux_not_validated";
 /// `audio.latency_ms` while the classic output of `v0.4.2` is on (AUDIO-2): that output has the
 /// fixed buffer it always had and reads no latency.
 pub const HINT_CLASSIC_AUDIO: &str = "hint.classic_audio";
@@ -707,6 +713,8 @@ pub const PUBLISHED: &[&str] = &[
     HINT_FCEUX_NO_SPRITE_LIMIT,
     HINT_FCEUX_NO_RUN_AHEAD,
     STATUS_ENGINE_FCEUX,
+    HINT_FCEUX_VALIDATED,
+    HINT_FCEUX_NOT_VALIDATED,
     HINT_NEEDS_ACHIEVEMENTS,
     HINT_STYLE_CLASSIC,
     HINT_MENU_BUTTON_UNUSED,

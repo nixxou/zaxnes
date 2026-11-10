@@ -146,6 +146,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_FCEUX_NO_SPRITE_LIMIT, "(le moteur FCEUX garde les 8 sprites par ligne : choisissez le moteur Zaxnes pour ce jeu)"),
     (keys::HINT_FCEUX_NO_RUN_AHEAD, "(l'avance de trames n'est pas implémentée sur le moteur FCEUX)"),
     (keys::STATUS_ENGINE_FCEUX, "moteur FCEUX"),
+    (keys::HINT_FCEUX_VALIDATED, "(cette ROM est validée pour la 3D sur le moteur FCEUX)"),
+    (keys::HINT_FCEUX_NOT_VALIDATED, "(cette ROM n'est pas validée pour la 3D sur le moteur FCEUX : la 3D peut différer de celle de Zaxnes)"),
     (keys::HINT_CLASSIC_AUDIO, "(sans effet : la sortie audio classique a sa propre réserve fixe)"),
     (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
     (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),

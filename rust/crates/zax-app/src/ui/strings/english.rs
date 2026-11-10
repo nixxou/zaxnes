@@ -177,6 +177,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (keys::STATUS_ENGINE_FCEUX, "FCEUX engine"),
     (
+        keys::HINT_FCEUX_VALIDATED,
+        "(this ROM is validated for 3D on the FCEUX engine)",
+    ),
+    (
+        keys::HINT_FCEUX_NOT_VALIDATED,
+        "(this ROM is not validated for 3D on the FCEUX engine: the 3D may differ from Zaxnes's)",
+    ),
+    (
         keys::HINT_CLASSIC_AUDIO,
         "(no effect: the classic audio output has its own fixed buffer)",
     ),

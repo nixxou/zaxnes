@@ -288,6 +288,20 @@ pub fn run_ahead_forced_to_zero() -> String {
     strings::get(keys::HINT_RUN_AHEAD_FORCED)
 }
 
+/// Whether this ROM is one lot FCEUX-6's sweep validated for 3D on the FCEUX engine (lot
+/// FCEUX-48 step 2). The row stays live either way: the engine option works for every game, and
+/// this only says what is known about the 3D it will draw.
+#[must_use]
+pub fn fceux_validated() -> String {
+    strings::get(keys::HINT_FCEUX_VALIDATED)
+}
+
+/// The same, for a ROM nobody validated. Not a refusal.
+#[must_use]
+pub fn fceux_not_validated() -> String {
+    strings::get(keys::HINT_FCEUX_NOT_VALIDATED)
+}
+
 /// Generic close button.
 #[must_use]
 pub fn close() -> String {
