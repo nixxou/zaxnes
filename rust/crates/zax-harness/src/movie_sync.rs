@@ -79,7 +79,7 @@ use zax_nes::{NesCore, NesRegion};
 
 use crate::golden_core::hex;
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
-use crate::ram_trace::{best_match, Comparison, RamTrace, Reference};
+use crate::ram_trace::{best_match, Comparison, RamCompare, RamTrace, Reference};
 use crate::HarnessError;
 
 pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options]
@@ -103,10 +103,18 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
       --trace-step <n>     how often a trace line is written (default 100)
       --trace-ref <file>   a BizHawk reference trace to hold the run against, line for line; the
                            frame offset between the two numberings is measured, not assumed
+      --ram-ref <file>     a reference trace whose lines carry `ram=<hex>`: the run's own 2 KiB
+                           is held against it BYTE FOR BYTE at every frame it has, and the first
+                           difference outside the stack page and $0000-$001F is named with its
+                           addresses (one engine at a time)
+      --ram-ref-offset <n> the frame offset --ram-ref compares at (default 0, as --trace-ref
+                           measures it on the same file)
       --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG
       --dump <dir> --dump-frames a,b,c  write those frames' 2 KiB of work RAM, per engine, raw
-      --resets on|off|early|late   what the movie's reset column does: honoured (default),
-                           ignored, or honoured one frame before or after the frame it is on
+      --resets on|off|early|late   what the movie's reset column does: honoured where its own
+                           format puts it (default), ignored, or one frame either side of that.
+                           An .fm2's commands are valid at the start of the flagged frame; a
+                           .bk2's Reset happens AFTER it (both measured, see the module docs)
       --ppu-warmup         EXPERIMENT: undo the game's PPUCTRL/PPUMASK writes of the frame after
                            each reset, the ~29 658-cycle window nesdev says the hardware ignores
                            them in and `zax-nes` does not model (`--engine zaxnes` only)
@@ -135,21 +143,27 @@ const DETAIL_FRAMES: usize = 8;
 
 /// What the movie's reset column is allowed to do to the machine.
 ///
-/// A diagnostic, and only a diagnostic: `On` is what a movie asks for and everything else exists
-/// to answer "is this divergence the reset, and is it the reset's *timing*". A `.bk2`'s reset
-/// column is one frame wide and the public description of the format does not say at what point
-/// of the frame `BizHawk` taps the line, so a one-frame uncertainty is real and worth being able
-/// to measure rather than argue about.
+/// A diagnostic, and only a diagnostic: `On` is what the movie's own format asks for and
+/// everything else exists to answer "is this divergence the reset, and is it the reset's
+/// *timing*". The reset column of both formats is one frame wide and neither public description
+/// says at what point of the frame the line is tapped, so a one-frame uncertainty is real and
+/// worth being able to measure rather than argue about.
+///
+/// The three honouring values are **relative to the format's own placement**, which
+/// [`MovieFile::reset_after_frame`] carries and which differs between the two formats: an
+/// `.fm2`'s commands are valid at the start of the flagged frame, a `.bk2`'s `Reset` happens
+/// after it. `On` is whichever of the two the file asks for, and `Early`/`Late` are the ±1 frame
+/// either side of that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Resets {
-    /// Honoured on the frame the movie puts them on, before that frame runs.
+    /// Honoured where the movie's own format puts them (default).
     #[default]
     On,
     /// Not replayed at all — what the movie is worth without them.
     Off,
-    /// Honoured one frame earlier.
+    /// Honoured one frame earlier than the format's placement.
     Early,
-    /// Honoured one frame later.
+    /// Honoured one frame later than the format's placement.
     Late,
 }
 
@@ -164,7 +178,8 @@ impl Resets {
         }
     }
 
-    /// How many frames the commands move by, and whether they happen at all.
+    /// How many frames the commands move **from the format's own placement**, and whether they
+    /// happen at all.
     const fn shift(self) -> Option<i64> {
         match self {
             Self::On => Some(0),
@@ -221,6 +236,16 @@ pub struct Options {
     pub trace_step: u32,
     /// A reference trace to hold the run against.
     pub trace_ref: Option<PathBuf>,
+    /// A reference trace carrying `ram=` fields, to hold the run's own 2 KiB against byte for
+    /// byte.
+    ///
+    /// Separate from [`Self::trace_ref`] on purpose: that one is a checksum comparison done at
+    /// the end, over a trace that keeps four bytes a frame, and it is what measures the offset.
+    /// This one needs the whole 2 KiB **during** the run, so it is streamed, and it is what turns
+    /// "the trace parts at frame *f*" into an address and two values.
+    pub ram_ref: Option<PathBuf>,
+    /// The offset [`Self::ram_ref`] compares at.
+    pub ram_ref_offset: i64,
     /// What the movie's reset column is allowed to do.
     pub resets: Resets,
     /// Imitate the PPU's write-inhibition window after a reset. See
@@ -281,6 +306,8 @@ impl Default for Options {
             trace: None,
             trace_step: 100,
             trace_ref: None,
+            ram_ref: None,
+            ram_ref_offset: 0,
             resets: Resets::On,
             ppu_warmup: false,
             ppu_ram: None,
@@ -353,6 +380,17 @@ impl Options {
                 "--trace-ref" => {
                     options.trace_ref = Some(PathBuf::from(value_at(args, &mut index)));
                 }
+                "--ram-ref" => {
+                    options.ram_ref = Some(PathBuf::from(value_at(args, &mut index)));
+                }
+                "--ram-ref-offset" => {
+                    let text = value_at(args, &mut index);
+                    options.ram_ref_offset = text.parse().map_err(|_| {
+                        HarnessError::Usage(format!(
+                            "--ram-ref-offset {text:?} is not a whole number\n{USAGE}"
+                        ))
+                    })?;
+                }
                 "--ppu-warmup" => options.ppu_warmup = true,
                 "--ppu-ram" => options.ppu_ram = Some(pattern(&value_at(args, &mut index))?),
                 "--prg-ram" => options.prg_ram = Some(pattern(&value_at(args, &mut index))?),
@@ -369,18 +407,7 @@ impl Options {
                 "--dump" => options.dump = Some(PathBuf::from(value_at(args, &mut index))),
                 "--dump-frames" => options.dump_frames = frame_list(&value_at(args, &mut index))?,
                 "--warm-up" => {
-                    let text = value_at(args, &mut index);
-                    let (engine, count) = text.split_once(':').unwrap_or((text.as_str(), ""));
-                    let count = number(count, "--warm-up")?;
-                    match engine {
-                        "zaxnes" => options.warm_up.0 = count,
-                        "fceux" => options.warm_up.1 = count,
-                        _ => {
-                            return Err(HarnessError::Usage(format!(
-                                "--warm-up {text:?} is not zaxnes:<n> or fceux:<n>\n{USAGE}"
-                            )))
-                        }
-                    }
+                    options.warm_up = parse_warm_up(&value_at(args, &mut index), options.warm_up)?;
                 }
                 other if other.starts_with("--") => {
                     return Err(HarnessError::Usage(format!(
@@ -424,6 +451,23 @@ fn pattern(text: &str) -> Result<RamPattern, HarnessError> {
 fn number(text: &str, flag: &str) -> Result<u32, HarnessError> {
     text.parse()
         .map_err(|_| HarnessError::Usage(format!("{flag} {text:?} is not a number\n{USAGE}")))
+}
+
+/// `--warm-up zaxnes:<n>` or `--warm-up fceux:<n>`, applied over the pair it already holds so
+/// that both engines can be named on one command line.
+fn parse_warm_up(text: &str, mut warm_up: (u32, u32)) -> Result<(u32, u32), HarnessError> {
+    let (engine, count) = text.split_once(':').unwrap_or((text, ""));
+    let count = number(count, "--warm-up")?;
+    match engine {
+        "zaxnes" => warm_up.0 = count,
+        "fceux" => warm_up.1 = count,
+        _ => {
+            return Err(HarnessError::Usage(format!(
+                "--warm-up {text:?} is not zaxnes:<n> or fceux:<n>\n{USAGE}"
+            )))
+        }
+    }
+    Ok(warm_up)
 }
 
 fn frame_list(text: &str) -> Result<Vec<u32>, HarnessError> {
@@ -1197,6 +1241,8 @@ pub struct Measurement {
     /// What holding each trace against `--trace-ref` found: the engine, the best offset's
     /// comparison, and the runner-up offset's.
     pub against_reference: Vec<(String, Comparison, Option<Comparison>)>,
+    /// What holding each run's own 2 KiB against `--ram-ref` found, byte for byte.
+    pub ram_against_reference: Vec<(String, RamCompare)>,
 }
 
 /// How many visibly differing frames the report names before it only counts them.
@@ -1291,6 +1337,10 @@ impl Measurement {
                     runner_up.offset, runner_up.agreeing, runner_up.matched
                 );
             }
+        }
+        for (engine, compare) in &self.ram_against_reference {
+            let _ = writeln!(text, "  {engine} against the reference's own work RAM:");
+            let _ = writeln!(text, "{}", compare.report());
         }
         let _ = write!(text, "{}", self.divergence_report());
         text
@@ -1501,6 +1551,16 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
             )));
         }
     }
+    // The byte-for-byte comparison is a property of **one** run against a third machine's bytes,
+    // and the lockstep loop is a comparison of two runs against each other: there is one work-RAM
+    // buffer per machine there and no sensible place to put two verdicts.
+    if options.ram_ref.is_some() && options.engine == Engines::Both {
+        return Err(HarnessError::Usage(
+            "--ram-ref holds one run against a reference's own bytes, so it takes one engine: \
+             use `--engine zaxnes` or `--engine fceux`"
+                .to_owned(),
+        ));
+    }
     let image = fs::read(&options.rom)?;
     let movie_bytes = fs::read(&options.movie)?;
     // A header that parses *is* the "this is a cartridge" answer the `.fm2` reader needs for the
@@ -1550,9 +1610,13 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
             }
             machine.ppu_warmup = options.ppu_warmup;
             machine.ppu_ram = options.ppu_ram;
-            let (run, trace) = run_alone(options, &movie, &mut machine, ram)?;
+            let (run, trace, bytes) = run_alone(options, &movie, &mut machine, ram)?;
+            let engine = run.engine.clone();
             measurement.runs.push(run);
             measurement.traces.extend(trace);
+            measurement
+                .ram_against_reference
+                .extend(bytes.map(|bytes| (engine, bytes)));
         }
         Engines::Fceux => run_fceux_alone(options, &movie, &machines, &mut measurement)?,
     }
@@ -1622,39 +1686,67 @@ struct Machines<'a> {
     ram: RamPattern,
 }
 
-/// Moves or drops the movie's reset commands, as `--resets` asks.
+/// Puts the movie's reset commands where they are to be applied, as the format and `--resets` ask.
+///
+/// Two shifts, added together. Every `FrameInput::command` in a [`MovieFile`] means "applied
+/// before this frame runs", which is [`step`]'s one invariant — so a format whose column means
+/// *after* the flagged frame ([`MovieFile::reset_after_frame`], which a `.bk2` sets) is moved
+/// `+1` here, and `--resets` then adds its own ±1 on top of that. `--resets on` is the format's
+/// own placement and nothing else.
 ///
 /// The input words are left exactly where they are: only the command column moves, so the machine
 /// is still fed the movie's own inputs and the only thing under test is the reset.
 fn relocate_resets(mut movie: MovieFile, resets: Resets) -> MovieFile {
-    if resets == Resets::On {
+    // What the file itself asks for: 0 when its column means "before this frame", 1 when it means
+    // "after it".
+    let native = i64::from(movie.reset_after_frame);
+    if resets == Resets::On && native == 0 {
         return movie;
     }
     let was: Vec<FrameCommand> = movie.frames.iter().map(|frame| frame.command).collect();
     for frame in &mut movie.frames {
         frame.command = FrameCommand::None;
     }
-    let Some(shift) = resets.shift() else {
+    let Some(asked) = resets.shift() else {
         movie
             .notes
             .push("`--resets off`: the movie's reset commands are NOT replayed".to_owned());
         return movie;
     };
+    let shift = native + asked;
+    let mut dropped = 0u32;
     for (index, command) in was.iter().enumerate() {
         if *command == FrameCommand::None {
             continue;
         }
-        let Ok(moved) = usize::try_from(i64::try_from(index).unwrap_or(0) + shift) else {
-            continue;
-        };
-        if let Some(frame) = movie.frames.get_mut(moved) {
-            frame.command = *command;
+        let moved = usize::try_from(i64::try_from(index).unwrap_or(0) + shift);
+        match moved.ok().and_then(|moved| movie.frames.get_mut(moved)) {
+            Some(frame) => frame.command = *command,
+            // A reset the shift pushes off either end of the movie. Off the *far* end is the
+            // ordinary case — a `.bk2` whose last frame carries a Reset asks for a reset after a
+            // movie that has ended — and it is counted and said rather than passed over.
+            None => dropped += 1,
         }
     }
-    movie.notes.push(format!(
-        "`--resets {}`: every reset command was moved {shift:+} frame",
-        if shift < 0 { "early" } else { "late" }
-    ));
+    if native != 0 {
+        movie.notes.push(format!(
+            "the {} column means \"after the flagged frame\", so each command is applied before \
+             the frame {native} later",
+            movie.kind
+        ));
+    }
+    if asked != 0 {
+        movie.notes.push(format!(
+            "`--resets {}`: every reset command was moved {asked:+} frame from the placement the \
+             movie's own format asks for",
+            if asked < 0 { "early" } else { "late" }
+        ));
+    }
+    if dropped > 0 {
+        movie.notes.push(format!(
+            "{dropped} reset command(s) fall outside the movie once moved, and are not replayed"
+        ));
+    }
     movie
 }
 
@@ -1923,13 +2015,17 @@ fn run_fceux_alone(
     let mut machine = FceuxMachine::new(machines.image, machines.name, machines.region)
         .map_err(HarnessError::Rom)?;
     if options.movie_mode {
-        measurement
-            .runs
-            .push(run_fceux_movie_mode(options, movie, &mut machine)?);
-    } else {
-        let (run, trace) = run_alone(options, movie, &mut machine, machines.ram)?;
+        let (run, trace) = run_fceux_movie_mode(options, movie, &mut machine)?;
         measurement.runs.push(run);
         measurement.traces.extend(trace);
+    } else {
+        let (run, trace, bytes) = run_alone(options, movie, &mut machine, machines.ram)?;
+        let engine = run.engine.clone();
+        measurement.runs.push(run);
+        measurement.traces.extend(trace);
+        measurement
+            .ram_against_reference
+            .extend(bytes.map(|bytes| (engine, bytes)));
     }
     Ok(())
 }
@@ -1952,20 +2048,32 @@ fn run_fceux_alone(
 /// The input-sensitivity probe is **not** run here, and that is not laziness: movie mode loads
 /// each record over the pad state inside the frame, so the probe's alternate word would be
 /// overwritten before the frame ran and every frame would measure insensitive.
+///
+/// The **work-RAM trace is** written, and it is what makes this mode a reference rather than a
+/// demonstration: FCEUX's own movie player decides for itself when a frame's command column
+/// takes effect, so holding a fed-inputs run against this one settles the question of `.fm2`
+/// reset timing by measurement (lot EVAL-SYNC-3 step 1) instead of by reading a sentence.
 #[cfg(feature = "fceux-core")]
 fn run_fceux_movie_mode(
     options: &Options,
     movie: &MovieFile,
     machine: &mut FceuxMachine,
-) -> Result<EngineRun, HarnessError> {
+) -> Result<(EngineRun, Option<RamTrace>), HarnessError> {
     let bytes = fs::read(&options.movie)?;
     let header = machine
         .core
         .play_movie(&bytes)
         .map_err(|error| HarnessError::Format(format!("FCEUX refused the movie: {error}")))?;
+    let engine = "fceux-movie-mode";
     let mut tracker = RunTracker::new("fceux (movie mode)");
+    let mut trace = tracer(options, engine);
     let total = frame_count(options, movie).min(header.frames);
     let mut picture = Vec::with_capacity(PICTURE_LEN);
+    let mut work_ram = Vec::with_capacity(RAM_LEN);
+    if let Some(trace) = trace.as_mut() {
+        machine.ram_into(&mut work_ram).map_err(HarnessError::Rom)?;
+        trace.frame(&work_ram, None);
+    }
     for frame in 1..=total {
         if let Err(why) = machine.core.run_frame() {
             tracker.run.stopped = Some((frame, why.to_string()));
@@ -1975,8 +2083,18 @@ fn run_fceux_movie_mode(
             tracker.run.stopped = Some((frame, why.to_string()));
             break;
         }
+        if trace.is_some() || options.dump.is_some() {
+            if let Err(why) = machine.ram_into(&mut work_ram) {
+                tracker.run.stopped = Some((frame, why));
+                break;
+            }
+            if let Some(trace) = trace.as_mut() {
+                trace.frame(&work_ram, None);
+            }
+            write_ram(options, engine, frame, &work_ram)?;
+        }
         tracker.frame(frame, &picture, None);
-        write_picture(options, "fceux-movie-mode", frame, &picture)?;
+        write_picture(options, engine, frame, &picture)?;
         if options.progress > 0 && frame % options.progress == 0 {
             println!("  movie mode: frame {frame} of {total}");
         }
@@ -1987,7 +2105,7 @@ fn run_fceux_movie_mode(
     if let Some((frame, length)) = machine.core.movie_position() {
         run.engine = format!("fceux (movie mode, clock {frame}/{length})");
     }
-    Ok(run)
+    Ok((run, trace))
 }
 
 /// One machine, run alone over the movie's inputs.
@@ -1996,18 +2114,24 @@ fn run_alone(
     movie: &MovieFile,
     machine: &mut dyn Machine,
     ram: RamPattern,
-) -> Result<(EngineRun, Option<RamTrace>), HarnessError> {
+) -> Result<(EngineRun, Option<RamTrace>, Option<RamCompare>), HarnessError> {
     machine.power(ram).map_err(HarnessError::Rom)?;
     let total = frame_count(options, movie);
     let mut tracker = RunTracker::new(machine.name());
     let mut trace = tracer(options, machine.name());
+    let mut bytes = ram_comparer(options)?;
     let mut picture = Vec::with_capacity(PICTURE_LEN);
     let mut work_ram = Vec::with_capacity(RAM_LEN);
     // Frame 0 of a trace is the machine at power-on, before an input word: the reference's own
     // numbering starts from a `framecount` of 0, so there must be an entry for it to line up with.
-    if let Some(trace) = trace.as_mut() {
+    if trace.is_some() || bytes.is_some() {
         machine.ram_into(&mut work_ram).map_err(HarnessError::Rom)?;
-        trace.frame(&work_ram, None);
+        if let Some(trace) = trace.as_mut() {
+            trace.frame(&work_ram, None);
+        }
+        if let Some(bytes) = bytes.as_mut() {
+            bytes.frame(0, &work_ram);
+        }
     }
     for frame in 1..=total {
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
@@ -2023,13 +2147,16 @@ fn run_alone(
             tracker.run.stopped = Some((frame, why));
             break;
         }
-        if trace.is_some() || options.dump.is_some() {
+        if trace.is_some() || bytes.is_some() || options.dump.is_some() {
             if let Err(why) = machine.ram_into(&mut work_ram) {
                 tracker.run.stopped = Some((frame, why));
                 break;
             }
             if let Some(trace) = trace.as_mut() {
                 trace.frame(&work_ram, sensitive);
+            }
+            if let Some(bytes) = bytes.as_mut() {
+                bytes.frame(frame, &work_ram);
             }
             write_ram(options, machine.name(), frame, &work_ram)?;
         }
@@ -2039,7 +2166,32 @@ fn run_alone(
             println!("  {}: frame {frame} of {total}", machine.name());
         }
     }
-    Ok((tracker.finish(), trace))
+    Ok((tracker.finish(), trace, bytes))
+}
+
+/// The byte-for-byte comparison `--ram-ref` asks for, or `None` when it was not asked for.
+///
+/// # Errors
+/// The file cannot be read, is not a trace, or is a trace whose lines carry no `ram=` field — the
+/// last one being a refusal rather than an empty comparison, because a reference without RAM
+/// silently answering "nothing differs" is exactly the failure mode this instrument is built to
+/// avoid.
+fn ram_comparer(options: &Options) -> Result<Option<RamCompare>, HarnessError> {
+    let Some(path) = &options.ram_ref else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(path)?;
+    let reference = Reference::parse(&text)
+        .map_err(|why| HarnessError::Format(format!("{}: {why}", path.display())))?;
+    RamCompare::new(&reference, options.ram_ref_offset)
+        .ok_or_else(|| {
+            HarnessError::Format(format!(
+                "{}: no line of this reference carries a `ram=<hex digits>` field, so there is \
+                 nothing to compare the work RAM against",
+                path.display()
+            ))
+        })
+        .map(Some)
 }
 
 fn progress(options: &Options, frame: u32, total: u32, measurement: &Measurement) {
@@ -2484,6 +2636,72 @@ mod tests {
             ..MovieFile::default()
         };
         assert_eq!(relocate_resets(first, Resets::Early).commands(), Vec::new());
+    }
+
+    /// A format whose column means "**after** the flagged frame" — a `.bk2` — has its commands
+    /// applied one frame later, and `--resets` is then relative to *that*.
+    ///
+    /// This is the measurement of step 1 of lot EVAL-SYNC-3 turned into a contract: `on` must be
+    /// `BizHawk`'s own reading, `early` must be the one lot EVAL-SYNC-2 ran with, and the input
+    /// words must not move whichever is chosen.
+    #[test]
+    fn a_bk2_resets_after_the_flagged_frame_and_the_option_is_relative_to_that() {
+        let movie = MovieFile {
+            kind: "bk2",
+            reset_after_frame: true,
+            frames: (0..6u16)
+                .map(|index| FrameInput {
+                    word: index + 1,
+                    command: if index == 3 {
+                        FrameCommand::SoftReset
+                    } else {
+                        FrameCommand::None
+                    },
+                })
+                .collect(),
+            ..MovieFile::default()
+        };
+        let words = |file: &MovieFile| file.frames.iter().map(|f| f.word).collect::<Vec<_>>();
+        for (resets, at) in [
+            (Resets::On, Some(4)),
+            (Resets::Early, Some(3)),
+            (Resets::Late, Some(5)),
+            (Resets::Off, None),
+        ] {
+            let moved = relocate_resets(movie.clone(), resets);
+            assert_eq!(
+                moved.commands(),
+                at.map_or_else(Vec::new, |frame| vec![(frame, FrameCommand::SoftReset)]),
+                "{resets:?}"
+            );
+            assert_eq!(words(&moved), [1, 2, 3, 4, 5, 6], "{resets:?}");
+            assert!(
+                !moved.notes.is_empty(),
+                "the report has to say it: {resets:?}"
+            );
+        }
+
+        // The ordinary edge case of the format: a Reset on the movie's last frame asks for a
+        // reset after a movie that has ended, which is said rather than passed over.
+        let last = MovieFile {
+            kind: "bk2",
+            reset_after_frame: true,
+            frames: vec![
+                FrameInput::default(),
+                FrameInput {
+                    word: 0,
+                    command: FrameCommand::SoftReset,
+                },
+            ],
+            ..MovieFile::default()
+        };
+        let moved = relocate_resets(last, Resets::On);
+        assert_eq!(moved.commands(), Vec::new());
+        assert!(
+            moved.notes.iter().any(|note| note.contains("outside")),
+            "{:?}",
+            moved.notes
+        );
     }
 
     #[test]

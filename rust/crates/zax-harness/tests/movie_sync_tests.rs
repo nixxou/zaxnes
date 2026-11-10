@@ -432,7 +432,7 @@ fn a_file_that_is_not_a_movie_is_refused_by_name() {
 mod both {
     use super::{options, rom, scratch, write_movie, AGREES, PARTS, POLLS};
     use zax_harness::movie_file::RamPattern;
-    use zax_harness::movie_sync::{self, Engines, Options};
+    use zax_harness::movie_sync::{self, Engines, Options, Resets};
 
     #[test]
     #[ignore = "needs the FCEUX library; one machine per process, so run it alone"]
@@ -461,6 +461,70 @@ mod both {
         assert!(measurement
             .report()
             .contains("agree at every one of the 121 frames"));
+    }
+
+    /// **When an `.fm2`'s command column takes effect**, settled against FCEUX itself.
+    ///
+    /// The public format page says a frame's commands are "interpreted as a bit field
+    /// corresponding to miscellaneous input states which are **valid at the start of the frame**",
+    /// and that is a sentence rather than a measurement — so this test plays the *same* synthetic
+    /// movie twice: once through `FCEUI_LoadMovie`, where FCEUX's own movie player decides when
+    /// the reset happens, and once through this instrument's fed inputs at each of the three
+    /// placements. Only one of the three can reproduce the reference, and the test asserts both
+    /// halves: that `Resets::On` reproduces it **frame for frame over the whole 2 KiB**, and that
+    /// the two neighbours do not — without which "they all match" would pass vacuously on a ROM
+    /// whose RAM the reset does not reach.
+    ///
+    /// Lot EVAL-SYNC-3 step 1 ran it at three reset frames (5, 20 and 45) with the same answer;
+    /// one of the three is kept here, because the slow part is FCEUX.
+    #[test]
+    #[ignore = "needs the FCEUX library; one machine per process, so run it alone"]
+    fn an_fm2_resets_before_the_flagged_frame_and_fceuxs_own_movie_mode_says_so() {
+        let Some(rom) = rom(POLLS) else { return };
+        let dir = scratch("movie-sync-fm2-reset");
+        // One soft reset (command 1) on frame 20, and an A press on frame 30 so that the movie
+        // is not silent.
+        let movie = write_movie(&dir, "reset20.fm2", 60, "", &[(20, 1)], |frame| {
+            u8::from(frame == 30)
+        });
+        // The traces are compared through the files the run writes, which is also how the lot's
+        // own command line did it.
+        let numbers = |name: &str, resets, movie_mode| -> Vec<String> {
+            let path = dir.join(name);
+            movie_sync::run(&Options {
+                trace: Some(path.clone()),
+                trace_step: 1,
+                movie_mode,
+                resets,
+                ..options(&movie, &rom, Engines::Fceux, 60)
+            })
+            .expect("the run");
+            std::fs::read_to_string(&path)
+                .expect("the trace")
+                .lines()
+                .filter(|line| line.starts_with(|first: char| first.is_ascii_digit()))
+                .map(ToOwned::to_owned)
+                .collect()
+        };
+
+        let reference = numbers("own.txt", Resets::On, true);
+        assert_eq!(reference.len(), 60, "one line a frame");
+        assert_eq!(
+            numbers("fed-on.txt", Resets::On, false),
+            reference,
+            "FCEUX's own movie mode applies a frame's command BEFORE that frame, so the \
+             instrument's default placement has to reproduce it exactly"
+        );
+        for (name, resets) in [
+            ("fed-early.txt", Resets::Early),
+            ("fed-late.txt", Resets::Late),
+        ] {
+            assert_ne!(
+                numbers(name, resets, false),
+                reference,
+                "{resets:?} must NOT reproduce movie mode, or this test proves nothing"
+            );
+        }
     }
 
     #[test]

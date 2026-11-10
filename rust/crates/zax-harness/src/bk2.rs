@@ -47,6 +47,31 @@
 //! * non-empty **`BoardProperties`**, which are per-board overrides this reader cannot apply;
 //! * a `LogKey` naming a button, an analog axis or a controller this reader has no word for.
 //!
+//! # When a `Reset` takes effect, which the description does not say and a measurement does
+//!
+//! The `LogKey` names `Reset` as a console button and the frame lines carry one character per
+//! frame for it, so a reset is a **per-frame boolean**. What the public description does not say
+//! is *where inside the frame* `BizHawk` taps the line — and the answer turns out to be neither
+//! "inside" nor the obvious one: **the frame whose bit is set is emulated normally and the reset
+//! happens after it.**
+//!
+//! That is a measurement, on the owner's per-frame run of the *Kirby* `.bk2`
+//! (`bizhawk-runs/kirby-jp-step1.txt`: the whole 2 KiB and the cumulative lag count at the start
+//! of each of the first 400 frames). The movie's first Reset bit is on frame 3, and the two
+//! readings are told apart by what frame 3 does:
+//!
+//! | | resetting **before** frame 3 | resetting **after** it |
+//! |---|---|---|
+//! | the work RAM changes during frame 3 | no — nothing moves until frame 6 | **yes, as `BizHawk`'s does** |
+//! | frame 3 is a lag frame | yes | **no, as in `BizHawk`'s counter** |
+//! | the lag column, frames 1-400 | parts at once | **matches frame for frame** |
+//! | the 2 KiB | — | **matches to frame 246**, bar the stack page and the temporaries below `$0020` |
+//!
+//! So this reader places the command on the frame **after** the one the bit is on, and
+//! `movie-sync`'s `--resets early` is what restores the other reading. Lot EVAL-SYNC-2 ran with
+//! the other one and reported `--resets late` as the one that matched; `late` is now one frame
+//! further on again, the base having moved.
+//!
 //! # What is *not* refused
 //!
 //! A stated `SHA1` that does not match the ROM. The format description says the header carries
@@ -129,6 +154,16 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
          taken from the ROM's own iNES header"
             .to_owned(),
     );
+    notes.push(
+        "the `Reset` column is read as *the console is reset AFTER the frame whose bit is set*, \
+         which is measured rather than assumed: against BizHawk's per-frame run of the Kirby \
+         .bk2 (`kirby-jp-step1.txt`, 400 frames of work RAM and of the lag counter) that reading \
+         matches the lag count frame for frame and the 2 KiB to frame 246, while resetting \
+         *before* the flagged frame leaves the RAM untouched until frame 6 and counts the flagged \
+         frame as a lag frame where BizHawk does not. `--resets early` restores the other \
+         reading, `--resets late` moves one frame further on again"
+            .to_owned(),
+    );
 
     Ok(MovieFile {
         kind: "bk2",
@@ -143,6 +178,10 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
         rom_md5: None,
         rom_sha1: header.get("SHA1").map(String::as_str).and_then(hex20),
         frames,
+        // The frame whose `Reset` bit is set runs **first**, and the console is reset after it.
+        // Measured, and the note above carries the measurement; `MovieFile::reset_after_frame`
+        // carries the reasoning for both formats.
+        reset_after_frame: true,
         header,
         notes,
     })
@@ -531,6 +570,17 @@ mod tests {
                 // Both at once is a power cycle: it is the stronger of the two.
                 (3, FrameCommand::HardReset),
             ]
+        );
+        // The frame indices above are the frames the **bits** are on, which is what the file
+        // says. Where the reset is *applied* is one frame later, and the reader says so twice:
+        // through the flag `movie-sync` reads and in a note that carries the measurement.
+        assert!(file.reset_after_frame);
+        assert!(
+            file.notes
+                .iter()
+                .any(|note| note.contains("AFTER the frame") && note.contains("frame 246")),
+            "{:?}",
+            file.notes
         );
     }
 

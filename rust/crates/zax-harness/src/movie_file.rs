@@ -176,6 +176,23 @@ pub struct MovieFile {
     pub rom_sha1: Option<[u8; 20]>,
     /// One entry per frame, from power-on.
     pub frames: Vec<FrameInput>,
+    /// Whether the file's command column means "**after** this frame" rather than "before it".
+    ///
+    /// The two formats differ, and both answers were measured rather than read off a sentence:
+    ///
+    /// * an **`.fm2`**'s commands are "interpreted as a bit field corresponding to miscellaneous
+    ///   input states which are **valid at the start of the frame**" (the public format page), and
+    ///   FCEUX's own movie mode confirms it — lot EVAL-SYNC-3 step 1 plays the same synthetic
+    ///   movie through `FCEUI_LoadMovie` and through this instrument's fed inputs and gets the
+    ///   same 2 KiB at every frame only with the reset applied **before** the flagged frame. So
+    ///   this is `false`;
+    /// * a **`.bk2`**'s `Reset` column is the other way round: `BizHawk` runs the flagged frame
+    ///   normally and resets after it. See [`crate::bk2::read`], whose note carries the
+    ///   measurement.
+    ///
+    /// `movie-sync` turns this into the base placement of the command, which `--resets` then
+    /// probes ±1 around.
+    pub reset_after_frame: bool,
     /// The header, key by key, as the file wrote it — for the report, and for nothing else.
     pub header: BTreeMap<String, String>,
     /// What the reader had to decide for itself, each a sentence. A reader that cannot honour
@@ -250,6 +267,10 @@ impl MovieFile {
             rom_md5: movie.header.rom_md5,
             rom_sha1: None,
             frames,
+            // Measured in step 1 of lot EVAL-SYNC-3 against FCEUX's own movie mode, and what the
+            // public format page says in words: a frame's commands are "valid at the start of the
+            // frame".
+            reset_after_frame: false,
             header,
             notes,
         })

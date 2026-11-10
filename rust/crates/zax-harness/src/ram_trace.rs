@@ -194,6 +194,14 @@ pub struct Reference {
     pub header: Vec<String>,
     /// The numeric lines, in file order.
     pub lines: Vec<TraceLine>,
+    /// The whole 2 KiB, for the frames whose line carries a `ram=` field.
+    ///
+    /// A checksum says two machines differ and only the bytes say **how**, so a reference that
+    /// carries its RAM is worth far more than one that does not — it turns "the trace parts at
+    /// frame *f*" into "`$004B` is `01` here and `00` there". The owner's finer script writes it;
+    /// the 100-frame runs do not, and an absent field is simply an absent entry rather than an
+    /// error.
+    pub ram: std::collections::BTreeMap<u32, Vec<u8>>,
 }
 
 impl Reference {
@@ -206,6 +214,9 @@ impl Reference {
         for line in text.lines() {
             let line = line.trim_end_matches('\r');
             if let Some(parsed) = TraceLine::parse(line) {
+                if let Some(ram) = parse_ram(line) {
+                    reference.ram.insert(parsed.frame, ram);
+                }
                 reference.lines.push(parsed);
             } else if !line.trim().is_empty() {
                 reference.header.push(line.to_owned());
@@ -221,6 +232,218 @@ impl Reference {
     #[must_use]
     pub fn last_frame(&self) -> u32 {
         self.lines.last().map_or(0, |line| line.frame)
+    }
+}
+
+/// The `ram=<hex>` field of a reference line, as bytes, or `None` when the line carries none.
+///
+/// An odd number of digits, a non-hex digit or an empty field is `None` rather than a partial
+/// read: a half-decoded 2 KiB would be compared against and would look like a divergence.
+fn parse_ram(line: &str) -> Option<Vec<u8>> {
+    let digits = line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("ram="))?;
+    if digits.is_empty() || digits.len() % 2 != 0 {
+        return None;
+    }
+    let value = |byte: u8| match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    };
+    digits
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| Some((value(pair[0])? << 4) | value(pair[1])?))
+        .collect()
+}
+
+/// The stack page, whose bytes below the stack pointer are leftovers of pushes already popped.
+const STACK: std::ops::Range<u16> = 0x0100..0x0200;
+/// The low zero page, where a 6502 program keeps the scratch of whatever it is doing right now.
+///
+/// Both ranges are **artefact classes**, not excused differences: EVAL-SYNC-2 measured that the
+/// two machines read the 2 KiB at a slightly different point inside the frame, so the bytes a
+/// routine is in the middle of using differ on a run that is otherwise in step. *Faxanadu*, which
+/// syncs exactly, shows the same signature. A difference anywhere else is a difference in what the
+/// game has **decided**, and that is what [`RamCompare::first_live_diff`] is for.
+const TEMPORARIES: std::ops::Range<u16> = 0x0000..0x0020;
+
+/// One frame's byte-level difference from the reference.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FrameRamDiff {
+    /// The reference's frame number.
+    pub frame: u32,
+    /// Addresses differing, in total.
+    pub total: u32,
+    /// Of those, in the stack page.
+    pub stack: u32,
+    /// Of those, in the low zero page.
+    pub temporaries: u32,
+    /// Of those, anywhere else — memory the game is using.
+    pub live: u32,
+    /// The first few differing addresses outside the two artefact classes, as
+    /// (address, ours, theirs). Empty when every difference is an artefact.
+    pub first_live: Vec<(u16, u8, u8)>,
+}
+
+impl FrameRamDiff {
+    /// The report's one line for this frame.
+    #[must_use]
+    pub fn line(&self) -> String {
+        let mut text = format!(
+            "    frame {}: {} byte(s) differ -- {} live, {} in the stack page, {} below $0020",
+            self.frame, self.total, self.live, self.stack, self.temporaries
+        );
+        for (address, ours, theirs) in &self.first_live {
+            let _ = write!(
+                text,
+                "\n      ${address:04X} = {ours:02X} here, {theirs:02X} there"
+            );
+        }
+        text
+    }
+}
+
+/// How many live differences a frame's line names before it only counts them.
+const LIVE_LISTED: usize = 16;
+/// How many frames with a live difference the report lists.
+const FRAMES_LISTED: usize = 12;
+
+/// Holds a run's work RAM against a reference that carries its own, **byte for byte**.
+///
+/// Fed one frame at a time during the run so that nothing has to keep 2 KiB a frame: the
+/// reference's bytes are already in memory and ours are the buffer the trace is reading anyway.
+#[derive(Debug, Clone, Default)]
+pub struct RamCompare {
+    /// The reference's frame *f* is held against our machine after *f + offset* frames, the same
+    /// convention as [`compare`].
+    pub offset: i64,
+    /// Frames the reference carries RAM for and the run reached.
+    pub compared: u32,
+    /// Of those, frames whose 2 KiB is identical to the byte.
+    pub identical: u32,
+    /// Of those, frames with no difference outside the two artefact classes.
+    pub live_agreeing: u32,
+    /// The last frame with no live difference, which is the marker of sync.
+    pub last_live_agreeing: Option<u32>,
+    /// The first frame differing anywhere at all.
+    pub first_diff: Option<FrameRamDiff>,
+    /// The first frame differing **outside** the stack page and the low zero page.
+    pub first_live_diff: Option<FrameRamDiff>,
+    /// The first [`FRAMES_LISTED`] frames with a live difference, for the report.
+    pub live_frames: Vec<FrameRamDiff>,
+    /// What the reference holds: frame to 2 KiB.
+    want: std::collections::BTreeMap<u32, Vec<u8>>,
+}
+
+impl RamCompare {
+    /// A comparison against whatever RAM `reference` carries, or `None` when it carries none.
+    #[must_use]
+    pub fn new(reference: &Reference, offset: i64) -> Option<Self> {
+        if reference.ram.is_empty() {
+            return None;
+        }
+        Some(Self {
+            offset,
+            want: reference.ram.clone(),
+            ..Self::default()
+        })
+    }
+
+    /// Frames the reference carries RAM for at all, whether or not the run reached them.
+    #[must_use]
+    pub fn available(&self) -> u32 {
+        u32::try_from(self.want.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Takes our machine after `frame` frames.
+    pub fn frame(&mut self, frame: u32, ram: &[u8]) {
+        // Our frame *f + offset* answers for the reference's frame *f*.
+        let Ok(theirs_frame) = u32::try_from(i64::from(frame) - self.offset) else {
+            return;
+        };
+        let Some(theirs) = self.want.get(&theirs_frame) else {
+            return;
+        };
+        self.compared += 1;
+        let mut diff = FrameRamDiff {
+            frame: theirs_frame,
+            ..FrameRamDiff::default()
+        };
+        for (index, (&ours, &them)) in ram.iter().zip(theirs.iter()).enumerate() {
+            if ours == them {
+                continue;
+            }
+            let address = u16::try_from(index).unwrap_or(u16::MAX);
+            diff.total += 1;
+            if STACK.contains(&address) {
+                diff.stack += 1;
+            } else if TEMPORARIES.contains(&address) {
+                diff.temporaries += 1;
+            } else {
+                diff.live += 1;
+                if diff.first_live.len() < LIVE_LISTED {
+                    diff.first_live.push((address, ours, them));
+                }
+            }
+        }
+        if diff.total == 0 {
+            self.identical += 1;
+        }
+        if diff.live == 0 {
+            self.live_agreeing += 1;
+            self.last_live_agreeing = Some(theirs_frame);
+        } else {
+            if self.first_live_diff.is_none() {
+                self.first_live_diff = Some(diff.clone());
+            }
+            if self.live_frames.len() < FRAMES_LISTED {
+                self.live_frames.push(diff.clone());
+            }
+        }
+        if diff.total > 0 && self.first_diff.is_none() {
+            self.first_diff = Some(diff);
+        }
+    }
+
+    /// The paragraph the report prints.
+    #[must_use]
+    pub fn report(&self) -> String {
+        let mut text = format!(
+            "  the reference's own 2 KiB, byte for byte, at offset {}: {} of {} frames compared, \
+             {} identical to the byte, {} with no difference outside the stack page and $0000-$001F",
+            self.offset,
+            self.compared,
+            self.available(),
+            self.identical,
+            self.live_agreeing
+        );
+        let _ = write!(
+            text,
+            "\n    the last frame with no live difference is {}",
+            self.last_live_agreeing
+                .map_or_else(|| "none".to_owned(), |frame| frame.to_string())
+        );
+        match &self.first_live_diff {
+            None => text.push_str(
+                "\n    NO live difference at any compared frame: every byte outside those two \
+                 ranges agrees",
+            ),
+            Some(first) => {
+                let _ = write!(
+                    text,
+                    "\n    the FIRST LIVE difference is at frame {}:\n{}",
+                    first.frame,
+                    first.line()
+                );
+                for frame in self.live_frames.iter().skip(1) {
+                    let _ = write!(text, "\n{}", frame.line());
+                }
+            }
+        }
+        text
     }
 }
 
@@ -554,6 +777,144 @@ mod tests {
         assert_eq!(out.compared, 2, "frames 100 and 200 only");
         assert_eq!(out.matched, 2);
         assert_eq!(out.first_diff, None);
+    }
+
+    /// The `ram=` field of the finer reference, and the refusals that keep a half-read 2 KiB from
+    /// being compared against.
+    #[test]
+    fn the_references_own_bytes_are_read_when_it_carries_them() {
+        let line = "7 0000002a lag=1 ram=00ff10";
+        assert_eq!(parse_ram(line), Some(vec![0x00, 0xFF, 0x10]));
+        // Upper case too: the owner's script writes lower case, but the field is hex either way.
+        assert_eq!(
+            parse_ram("7 0000002a ram=00FF10"),
+            Some(vec![0, 0xFF, 0x10])
+        );
+        for not_bytes in [
+            "7 0000002a lag=1",      // the 100-frame references carry no RAM at all
+            "7 0000002a ram=",       // an empty field
+            "7 0000002a ram=00f",    // an odd number of digits
+            "7 0000002a ram=00gg10", // not hex
+        ] {
+            assert_eq!(parse_ram(not_bytes), None, "{not_bytes:?}");
+        }
+        // And the line itself still parses as a trace line, so a reference with RAM is also a
+        // reference the checksum comparison can use -- which is what lets one file measure the
+        // offset and supply the bytes.
+        let parsed = TraceLine::parse(line).unwrap_or(TraceLine {
+            frame: 0,
+            checksum: 0,
+            lag: None,
+        });
+        assert_eq!(
+            (parsed.frame, parsed.checksum, parsed.lag),
+            (7, 42, Some(1))
+        );
+
+        let reference = Reference::parse(&format!("romhash ABCD\n{line}\n8 0000002b lag=1\n"))
+            .unwrap_or_default();
+        assert_eq!(reference.lines.len(), 2);
+        assert_eq!(reference.ram.len(), 1, "only frame 7 carries bytes");
+        assert_eq!(reference.ram.get(&7), Some(&vec![0x00, 0xFF, 0x10]));
+    }
+
+    /// The byte-for-byte comparison: what it counts, where it draws the artefact line, and that a
+    /// reference with no RAM is refused rather than answering "nothing differs".
+    #[test]
+    fn the_byte_comparison_separates_the_artefact_pages_from_the_game_s_own_memory() {
+        let hex = |bytes: &[u8]| -> String {
+            bytes.iter().fold(String::new(), |mut text, byte| {
+                let _ = write!(text, "{byte:02x}");
+                text
+            })
+        };
+        // Four frames of a 2 KiB machine, the reference's own.
+        let theirs = |frame: u32| -> Vec<u8> {
+            let mut ram = vec![0u8; 2048];
+            ram[0x0400] = u8::try_from(frame).unwrap_or(0);
+            ram
+        };
+        let mut text = String::new();
+        for frame in 1..=4u32 {
+            let ram = theirs(frame);
+            let _ = writeln!(
+                text,
+                "{frame} {:08x} lag=0 ram={}",
+                checksum(&ram),
+                hex(&ram)
+            );
+        }
+        let reference = Reference::parse(&text).unwrap_or_default();
+        let mut compare = RamCompare::new(&reference, 0).unwrap_or_default();
+        assert_eq!(compare.available(), 4);
+
+        for frame in 1..=4u32 {
+            let mut ram = theirs(frame);
+            // Frame 2 differs only in the two artefact classes; frame 3 differs in one live byte
+            // as well; frame 4 is identical.
+            if frame == 2 || frame == 3 {
+                ram[0x01F0] ^= 0xFF; // the stack page
+                ram[0x0005] ^= 0xFF; // below $0020
+            }
+            if frame == 3 {
+                ram[0x004B] = 0x01; // the one that matters
+            }
+            compare.frame(frame, &ram);
+        }
+
+        assert_eq!(compare.compared, 4);
+        assert_eq!(compare.identical, 2, "frames 1 and 4");
+        assert_eq!(compare.live_agreeing, 3, "every frame but 3");
+        assert_eq!(compare.last_live_agreeing, Some(4));
+        assert_eq!(
+            compare.first_diff.as_ref().map(|diff| diff.frame),
+            Some(2),
+            "the first difference of any kind is the artefact one"
+        );
+        let live = compare.first_live_diff.clone().unwrap_or_default();
+        assert_eq!(live.frame, 3);
+        assert_eq!(
+            (live.total, live.live, live.stack, live.temporaries),
+            (3, 1, 1, 1)
+        );
+        assert_eq!(live.first_live, [(0x004B, 0x01, 0x00)]);
+        let report = compare.report();
+        assert!(
+            report.contains("the FIRST LIVE difference is at frame 3"),
+            "{report}"
+        );
+        assert!(report.contains("$004B = 01 here, 00 there"), "{report}");
+
+        // A reference whose lines carry no RAM gives no comparison at all, which the caller turns
+        // into a refusal: a comparison against nothing would report perfect agreement.
+        let plain = Reference::parse("1 00000001 lag=0\n").unwrap_or_default();
+        assert!(RamCompare::new(&plain, 0).is_none());
+    }
+
+    /// The offset is honoured the same way [`compare`] honours it: the reference's frame *f* is
+    /// our machine after *f + offset* frames.
+    #[test]
+    fn the_byte_comparison_honours_the_offset() {
+        let mut ram = vec![0u8; 2048];
+        ram[0x0400] = 0x42;
+        let digits = ram.iter().fold(String::new(), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+        let reference = Reference::parse(&format!("5 {:08x} ram={digits}\n", checksum(&ram)))
+            .unwrap_or_default();
+
+        // At offset 1 our frame 6 answers for their frame 5.
+        let mut compare = RamCompare::new(&reference, 1).unwrap_or_default();
+        compare.frame(5, &ram);
+        assert_eq!(compare.compared, 0, "our frame 5 answers for their frame 4");
+        compare.frame(6, &ram);
+        assert_eq!(compare.compared, 1);
+        assert_eq!(compare.identical, 1);
+        assert_eq!(compare.first_live_diff, None);
+        assert!(compare
+            .report()
+            .contains("NO live difference at any compared frame"));
     }
 
     #[test]
