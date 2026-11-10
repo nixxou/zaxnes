@@ -452,7 +452,6 @@ impl WgpuDisplay {
     }
 }
 
-/// Fifo with vsync; without, the first of Immediate and Mailbox the surface offers.
 /// The slang preset `ZAXNES_SHADER` names, or why it was refused.
 #[cfg(feature = "shaders")]
 fn load_shader(
@@ -466,6 +465,7 @@ fn load_shader(
     }
 }
 
+/// Fifo with vsync; without, the first of Immediate and Mailbox the surface offers.
 fn present_mode(available: &[wgpu::PresentMode], vsync: bool) -> wgpu::PresentMode {
     if vsync {
         return wgpu::PresentMode::Fifo;
