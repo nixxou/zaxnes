@@ -12,7 +12,7 @@ Read first: `docs/progress/FCEUX-48.md` (how `.fm2` plays on both engines),
 
 - [x] 1. The divergence instrument (`zax-harness movie-sync`).
 - [x] 2. Run it on the four movies; the table.
-- [ ] 3. Explain each first divergence, and classify it.
+- [x] 3. Explain each first divergence, and classify it.
 - [ ] 4. `.bk2` reading.
 - [ ] 5. The report, `docs/review/MOVIE-SYNC.md`.
 - [ ] 6. Final pass.
@@ -287,3 +287,185 @@ So, in the terms the brief asks for:
 3. **Kirby parts at frame 3 with 82 bytes at once**, and on FCEUX's side most of the differing
    bytes are still the power-on `00`/`FF` pattern while Zaxnes's hold data — so Zaxnes has run
    *further* through the game's initialisation by frame 3, rather than having run it differently.
+
+---
+
+## Step 3 — why each movie parts, and what class it is
+
+The short answer, before the working: **all three are class (b)** — an FCEUX inaccuracy the movie
+was recorded on. **No class (a) was found**: not one of the three divergences lands on a mechanism
+where Zaxnes is the one failing a public test. The one class (c) item that still bites is in the
+**application**, not in `zax-nes`, and it is written up at the end with its size.
+
+### The setup differences were settled before the first measurement (class c)
+
+Step 1 found four of them by reading, and the instrument honours all four on both machines: the
+region, the power-on work RAM, the per-frame reset commands, and the `FDS 1` claim on a cartridge.
+What each is worth was then **measured** rather than assumed — the same movie on Zaxnes alone under
+the three deterministic fills, 2 000 frames (47 454 for *Metal Force*):
+
+| | `--ram zero` | `--ram default` | `--ram ff` |
+|---|---|---|---|
+| Metal Force | `3de90a647172d715` | the same | the same |
+| Kabuki | `eb96fb9d5d6fc02d` | the same | the same |
+| **Kirby** | `34f0ab4acf20a98d` | **`107d27b697e2aa5c`** | **`04648ed5dc58ca23`** |
+
+So the power-on pattern changes nothing for two of the three games — they clear their own RAM — and
+for *Kirby* it changes the run outright. It is still **not** the cause of *Kirby*'s first
+divergence: with both machines on `zero`, on `ff` and on `default` the two engines part at
+**frame 3 in all three cases**.
+
+### Metal Force — 5 frames of 47 454, and none of them is in the CPU
+
+**What it is.** Frame 5 is one pixel: (231,79), Zaxnes black, FCEUX grey. The frame is a flat
+screen — frame 4 is **61 440 pixels of one colour** and frame 6 is 61 440 of another — so rendering
+is off and what is on screen is the backdrop. Scanline 79 is where the backdrop changes, and the
+two engines put the change **one dot apart**: Zaxnes from x=231, FCEUX from x=232. Work RAM is
+identical, before and after.
+
+The other four (20 313, 26 278, 26 298, 29 735) are all on **row 0 only**, 6 to 15 pixels in the
+middle of the row, again with the work RAM identical. They are the top scanline of a frame whose
+sub-scanline phase differs.
+
+**Why.** A sub-scanline difference in PPU phase. The two engines' measured disagreement on exactly
+this is on the record: of the ten `ppu_vbl_nmi` singles, Zaxnes passes nine and FCEUX fails all
+ten, and the two that are about the dot count of a frame are `09-even_odd_frames` (Zaxnes
+`00 01 01 02`, passed; FCEUX `04`, **Failed #2**) and `10-even_odd_timing` (Zaxnes `08 08 09 07`,
+passed; FCEUX `02`, **Failed #2**) — the skipped dot of the odd pre-render line, which is a one-dot
+shift of the whole frame.
+
+**Class (b)**, and the mildest possible one: the CPU never diverges, the movie syncs, the last
+picture of the 47 454 is byte-identical on the two engines. Nothing to fix on either side.
+
+### Kabuki — an interrupt taken a few cycles apart, and 33 000 frames of consequences
+
+**What it is, frame by frame**, with the work RAM read at every one:
+
+| frame | what differs |
+|---|---|
+| 1 | nothing |
+| **2** | **one byte, `$01FB`: `56` on Zaxnes, `53` on FCEUX** — in the stack page |
+| 3-8 | nothing at all |
+| 9 | `$01E5 00/3A, $01E6 00/F9, $01E7 3A/00, $01E8 F9/00` — **the same two bytes (`3A F9`), two addresses apart** |
+| 258 | the first bytes outside the stack: `$0018`, and `$0072`-`$0079` — eight consecutive bytes |
+| **787** | the first pixels: five, at (209,191) |
+| 1 167 | the last frame on which the two pictures are ever the same again |
+
+Three readings, in order of how much they say:
+
+1. **Frame 2's byte is in the stack, and that is the most informative place it could be.** The
+   bytes an interrupt pushes are the return address and the flags. One byte differing by **3** is a
+   return address whose low half is three bytes further along the instruction stream: the two
+   machines **took the interrupt at a different point in the same loop**, a couple of CPU cycles
+   apart.
+2. **Frame 9 says how much apart.** `3A F9` is written at `$01E7`/`$01E8` on Zaxnes and at
+   `$01E5`/`$01E6` on FCEUX — the same value, **two bytes lower on FCEUX**. Two bytes is one return
+   address: at that moment the two machines' stacks are at a different depth, which is what an
+   interrupt taken on one and not on the other leaves behind.
+3. **Frames 3 to 8 are identical**, which rules out a steady drift. It is one event, not a clock
+   running at a different rate.
+
+**Why.** FCEUX takes the NMI at the wrong cycle, and the public test says so by how much:
+`ppu_vbl_nmi/rom_singles/05-nmi_timing` — **Zaxnes `00 4`, passed; FCEUX `00 3`, Failed #1**. The
+test prints the cycle at which the NMI was taken; the two answers are **one CPU cycle apart**, and
+Zaxnes's is the right one. The rest of that family is the same story — `01-vbl_basics`,
+`02-vbl_set_time`, `03-vbl_clear_time`, `06-suppression`, `07-nmi_on_timing`, `08-nmi_off_timing`:
+Zaxnes passes every one, FCEUX fails every one.
+
+*Kabuki* is MMC3, so there is a second interrupt in play, and FCEUX is wrong about that one too:
+it fails **all five** of `mmc3_test` 1 to 5 and all five of `mmc3_test_2`, each with a named
+message (`Should decrement when A12 is toggled via PPUADDR`, `Counter isn't working when reloaded
+with 255`, `Should be clocked when A12 changes to 1 via PPUADDR write`, **`Scanline 0 IRQ should
+occur later when $2000=$08`**, `Should reload and set IRQ every clock when reload is 0`), and
+Zaxnes passes every one. The instrument was run on `mmc3_test/4-scanline_timing.nes` itself with a
+blank movie: the two engines part at frame 4, and at frame 2 000 the screen says, in so many
+words, **Zaxnes `4-scanline_timing / Passed`** and **FCEUX `Scanline 0 IRQ should occur later when
+$2000=$08 / 4-scanline_timing / Failed #2`**.
+
+Which of the two interrupts fires at frame 2 is not settled here, and saying which would need
+cycle-level tracing this lot has no hook for. It does not change the class: both candidates are
+mechanisms Zaxnes passes the public test on and FCEUX fails it on.
+
+**Class (b).** Nothing in `zax-nes` to fix. For this TAS to sync on Zaxnes, Zaxnes would have to
+take the NMI one cycle early and clock the MMC3 counter wrongly in five specific ways — that is,
+fail ten public tests it currently passes.
+
+### Kirby — the vblank the game waits for at boot
+
+**What it is.** Frames 1 and 2 are identical. **Frame 3 differs in 82 bytes**, 68 of them outside
+the stack. Reading the two sides tells which machine is where: at almost every differing address
+**FCEUX still holds the power-on `00`/`FF` pattern and Zaxnes holds data** — `$0627`-`$0636` is
+`0E` sixteen times on Zaxnes and `FF FF 00 00 00 00 FF FF …` on FCEUX, which is the pattern
+untouched. And at frame 4 it is the same one step on: Zaxnes has filled `$0200`-`$02FD` with `F0`
+(the sprite table pushed off-screen) and written `4B 49 52 42 59` — `KIRBY` — at `$0517`, and
+FCEUX has done neither yet.
+
+So the two machines are not doing different things; **Zaxnes is one step further through the same
+initialisation**.
+
+Two things that are *not* the cause, both measured rather than argued:
+
+* **not the power-on RAM.** With both machines on `zero`, on `ff` and on `default`, the first
+  divergence is frame 3 in all three;
+* **not a whole-frame offset of the boot.** `--warm-up` was added to the instrument for exactly
+  this question — blank frames on one engine before the movie starts. `fceux:1`, `fceux:2`,
+  `fceux:3` and `zaxnes:1` were all tried: none of them makes the two agree, and none of them
+  moves the first divergence past frame 3. Whatever is apart is apart **inside** a frame.
+
+**Why.** *Kirby* waits for vblank at boot with the background off, and that is the one thing the
+public test names: `ppu_vbl_nmi/rom_singles/01-vbl_basics` — Zaxnes `01-vbl_basics / Passed`,
+FCEUX **`VBL period is too short with BG off / 01-vbl_basics / Failed #7`**. Both screens were
+captured and read. A vblank period that is too short with the background off is precisely a boot
+loop that finishes at the wrong time, which is precisely "one step further through the same
+initialisation".
+
+**Class (b).**
+
+### The class (c) item that is left, and it is in the application
+
+The instrument honours the movie's header; **`zax-app`'s own `.fm2` path on the Zaxnes engine does
+not**, and that is a defect in the shipping application rather than in this evaluation:
+
+| what the header says | the harness | `zax-app`'s `play_fm2` (`emulation/host/movies.rs`) |
+|---|---|---|
+| `RAMInitOption` / `RAMInitSeed` | applied to the machine | **ignored** — the core powers on all-zero |
+| a reset command on a frame | replayed (`soft_reset` / power) | **not replayed**; it warns "les resets du film ne sont pas rejoués, le premier à la frame N" (`movies.rs:174-183`) |
+| `palFlag` | applied | **compared and warned about**, not applied (`movies.rs:158-164`) |
+
+What it is worth, measured: of the three games the RAM pattern changes the run for **one** —
+*Kirby*, three fills and three different runs — and the reset matters for the same one, its movie
+carrying a soft reset at frame 5. Fixing it would **not** make either movie sync, because the
+reason they do not sync is class (b); it would remove a second, avoidable reason.
+
+The size of the fix, for whoever takes it: `Movie`'s start state is built by `session.reset(...)`
+then `core.save_state(true)` (`movies.rs:184-187`), so the pattern would be written over
+`bus_mut().ram_mut()` between those two lines — three lines — and the region set from the header
+on the line above. The resets are the real work: `MovieRun` has no notion of a command on a frame,
+so replaying them means carrying `Fm2Movie::resets()` into the movie and acting on it in the frame
+loop. It is a change to the application's movie player and **not** to `zax-nes`, and it is left for
+the owner to schedule rather than made here, because this lot is an evaluation and the fix changes
+what a shipped feature does.
+
+### What was *not* found, said plainly
+
+**No class (a).** On the 113 public ROMs that report a verdict on both engines, Zaxnes passes 95
+and FCEUX 58, and the count passed by FCEUX and not by Zaxnes is **0** (lot FCEUX-1 step 5, and
+unchanged since). Every mechanism the three divergences land on is one of the 37 Zaxnes passes and
+FCEUX fails. That is not a proof that Zaxnes has no error here — it is the strongest evidence
+available short of hardware, and it points the other way.
+
+The one public test both engines fail is `mmc3_test/6-MMC6`, and Zaxnes's failure there is a
+**decision**, not a defect: REQ-CORE-100 pins mapper 4 to MMC3 revision B and `6-MMC6` is the
+revision A half of a contradictory pair (AMD-061, Q-114). `test_roms_tests` already records it as
+an expected failure.
+
+### No Q ticket was opened, and why
+
+`spec/SPEC-GUIDE.md` is explicit about what a ticket is for: *"Quand une ambiguïté bloque,
+l'implémenteur ouvre un ticket `spec/changes/Q-NNN.md` et ne devine pas en silence"* — a **blocking
+ambiguity in the spec**, with the provisional choice the implementer made. Nothing here is that:
+the spec is not ambiguous about any of the
+three mechanisms — REQ-CORE-015/020 and REQ-CORE-100 say what the machine does, `zax-nes` does it,
+and the public tests agree with `zax-nes`. The findings are about **FCEUX**, which the spec does
+not govern. So there is no ticket to write, and writing one would put a claim about another
+emulator into the project's specification.

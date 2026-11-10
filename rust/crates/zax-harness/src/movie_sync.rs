@@ -97,7 +97,10 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2> <rom.nes> [options]
       --progress <n>       print a line every n frames (default 0, none)
       --movie-mode         `--engine fceux` only: play through FCEUX's own movie mode
       --report <file.json> write the whole measurement as JSON
-      --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG";
+      --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG
+      --warm-up zaxnes:<n> | fceux:<n>
+                           blank frames on one engine before the movie starts; the experiment
+                           that tells a difference of boot phase from one of emulation";
 
 /// Pixels in a picture (256 x 240, REQ-CORE-048).
 const PICTURE_LEN: usize = 256 * 240;
@@ -156,6 +159,16 @@ pub struct Options {
     pub png: Option<PathBuf>,
     /// Which frames' pictures to write.
     pub png_frames: Vec<u32>,
+    /// Blank frames run on (Zaxnes, FCEUX) **before** the movie starts, to test whether a
+    /// divergence is a difference of boot phase rather than of emulation.
+    ///
+    /// The two engines do not start their first frame at the same place in the PPU's scan —
+    /// `zax-nes` powers on at the start of vblank (REQ-CORE-020 notes, Q-003) and FCEUX does
+    /// not — so a game that waits for vblank at boot can have its whole initialisation land one
+    /// frame apart. Giving the engine that is behind one blank frame of head start is the
+    /// experiment that says whether that is what happened: if the two runs then agree, the
+    /// divergence was the phase and not the emulation.
+    pub warm_up: (u32, u32),
 }
 
 impl Default for Options {
@@ -176,6 +189,7 @@ impl Default for Options {
             report: None,
             png: None,
             png_frames: Vec::new(),
+            warm_up: (0, 0),
         }
     }
 }
@@ -228,6 +242,20 @@ impl Options {
                 "--report" => options.report = Some(PathBuf::from(value_at(args, &mut index))),
                 "--png" => options.png = Some(PathBuf::from(value_at(args, &mut index))),
                 "--png-frames" => options.png_frames = frame_list(&value_at(args, &mut index))?,
+                "--warm-up" => {
+                    let text = value_at(args, &mut index);
+                    let (engine, count) = text.split_once(':').unwrap_or((text.as_str(), ""));
+                    let count = number(count, "--warm-up")?;
+                    match engine {
+                        "zaxnes" => options.warm_up.0 = count,
+                        "fceux" => options.warm_up.1 = count,
+                        _ => {
+                            return Err(HarnessError::Usage(format!(
+                                "--warm-up {text:?} is not zaxnes:<n> or fceux:<n>\n{USAGE}"
+                            )))
+                        }
+                    }
+                }
                 other if other.starts_with("--") => {
                     return Err(HarnessError::Usage(format!(
                         "unknown option {other:?}\n{USAGE}"
@@ -1338,6 +1366,13 @@ fn run_lockstep(
         .map_err(HarnessError::Rom)?;
     ours.power(ram).map_err(HarnessError::Rom)?;
     theirs.power(ram).map_err(HarnessError::Rom)?;
+    // The head start of `--warm-up`, before frame 0 is compared: blank frames, no input.
+    for _ in 0..options.warm_up.0 {
+        ours.run(0).map_err(HarnessError::Rom)?;
+    }
+    for _ in 0..options.warm_up.1 {
+        theirs.run(0).map_err(HarnessError::Rom)?;
+    }
 
     let total = frame_count(options, movie);
     let mut trackers = (RunTracker::new("zaxnes"), RunTracker::new("fceux"));
@@ -1863,6 +1898,23 @@ mod tests {
         assert!(!options.lag);
         assert_eq!(options.keep_going, Some(40));
         assert_eq!(options.png_frames, [10, 20, 30]);
+        // The warm-up names its engine, and only that engine moves.
+        let warmed = Options::parse(
+            &["a.fm2", "b.nes", "--warm-up", "fceux:3"]
+                .iter()
+                .map(|text| (*text).to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
+        assert_eq!(warmed.warm_up, (0, 3));
+        assert!(Options::parse(
+            &["a.fm2", "b.nes", "--warm-up", "neither:1"]
+                .iter()
+                .map(|text| (*text).to_owned())
+                .collect::<Vec<_>>()
+        )
+        .is_err());
+
         let plain = Options::parse(&["a.fm2".to_owned(), "b.nes".to_owned()]).unwrap_or_default();
         assert_eq!(plain.engine, Engines::Both);
         assert!(plain.lag);
