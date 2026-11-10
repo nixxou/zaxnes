@@ -367,7 +367,8 @@ impl ImguiFrontend {
             // of each one itself.
             UiCommand::ToggleDebugOverlay
             | UiCommand::CloseWindows
-            | UiCommand::AchievementsAccount => {}
+            | UiCommand::AchievementsAccount
+            | UiCommand::ShowShaders => {}
         }
     }
 

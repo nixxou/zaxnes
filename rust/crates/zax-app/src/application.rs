@@ -693,13 +693,20 @@ impl Running {
     /// names, otherwise the slot of the mode (2D or 3D, widescreen or not) after its fallbacks.
     #[cfg(feature = "shaders")]
     fn request_shader(&mut self) {
-        use zax_platform::slang_chain::{preset_from_environment, ShaderRequest};
-        let Some(display) = self.window.wgpu_mut() else {
-            return;
-        };
+        use crate::ui::shader_panel::{ShaderReport, ShaderState};
+        use zax_platform::slang_chain::{preset_from_environment, ShaderRequest, ShaderStatus};
         let scene = self.host.scene();
         let three_d = !scene.two_dimensional_mode;
         let wide = scene.margin > 0.0 || scene.margin_y > 0.0;
+        let mode_slot = Some(zax_settings::shader_slots::ShaderSlot::of(three_d, wide));
+        let Some(display) = self.window.wgpu_mut() else {
+            self.host.shader_report = ShaderReport {
+                state: ShaderState::NoWgpu,
+                mode_slot,
+                ..ShaderReport::default()
+            };
+            return;
+        };
         let request = match preset_from_environment() {
             Some(preset) => {
                 let fills = zax_settings::shader_slots::fills_window(
@@ -729,6 +736,33 @@ impl Running {
             shaders.update(usize::try_from(self.host.emulated_frames()).unwrap_or(0))
         {
             crate::app_log::line(&line);
+        }
+        let (state, preset, problem) = match shaders.status() {
+            ShaderStatus::None => (ShaderState::None, String::new(), String::new()),
+            ShaderStatus::Compiling(preset) => (
+                ShaderState::Compiling,
+                preset.display().to_string(),
+                String::new(),
+            ),
+            ShaderStatus::Active(preset) => (
+                ShaderState::Active,
+                preset.display().to_string(),
+                String::new(),
+            ),
+            ShaderStatus::Refused(preset, problem) => (
+                ShaderState::Refused,
+                preset.display().to_string(),
+                problem.to_owned(),
+            ),
+        };
+        let report = &mut self.host.shader_report;
+        if report.state != state || report.preset != preset || report.mode_slot != mode_slot {
+            *report = ShaderReport {
+                state,
+                preset,
+                problem,
+                mode_slot,
+            };
         }
     }
 

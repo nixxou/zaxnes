@@ -170,6 +170,7 @@ setting_ids! {
     Shader3dWsLines => "shader.3d_ws.lines",
     Shader3dWsParams => "shader.3d_ws.params",
     Shader3dWsArea => "shader.3d_ws.area",
+    ShaderLibrary => "shader.library",
     VideoWidescreen => "video.widescreen",
     VideoWidescreenExtra => "video.widescreen_extra",
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",

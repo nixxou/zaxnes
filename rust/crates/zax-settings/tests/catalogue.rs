@@ -104,6 +104,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "shader.3d_ws.mode",
             "shader.3d_ws.params",
             "shader.3d_ws.preset",
+            "shader.library",
             // EDITOR-1 (owner request): the editor mode, Zaxnes's own as well.
             "ui.editor_mode",
             "ui.language",

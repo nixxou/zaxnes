@@ -21,6 +21,9 @@ pub const LOAD_STATES: &str = "ui.load_states";
 /// menu is data, so the entry needs a command to name).
 pub const ACHIEVEMENTS_ACCOUNT: &str = "ui.achievements_account";
 
+/// Opens the shaders window (Rust-only, owner request): the slang preset of each display mode.
+pub const SHOW_SHADERS: &str = "ui.show_shaders";
+
 /// A command the interface owns, beside the commands of the host's model (REQ-UI-205).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiCommand {
@@ -36,17 +39,20 @@ pub enum UiCommand {
     LoadStates,
     /// The options window on its RetroAchievements tab, where the account is.
     AchievementsAccount,
+    /// The shaders window.
+    ShowShaders,
 }
 
 impl UiCommand {
     /// Every command of the interface.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::ToggleDebugOverlay,
         Self::CloseWindows,
         Self::ToggleConsole,
         Self::SaveStates,
         Self::LoadStates,
         Self::AchievementsAccount,
+        Self::ShowShaders,
     ];
 
     /// The stable name of the command.
@@ -59,6 +65,7 @@ impl UiCommand {
             Self::SaveStates => SAVE_STATES,
             Self::LoadStates => LOAD_STATES,
             Self::AchievementsAccount => ACHIEVEMENTS_ACCOUNT,
+            Self::ShowShaders => SHOW_SHADERS,
         }
     }
 

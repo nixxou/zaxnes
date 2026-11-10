@@ -2190,6 +2190,16 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
     use crate::shader_slots::{
         ShaderSlot, AREA_AUTO, AREA_PICTURE, AREA_WINDOW, FOLLOW, MAXIMUM_LINES, OFF, PRESET,
     };
+    // The folder of the slang-shaders collection the window picks from (empty: looked for
+    // beside the program and in the user folder).
+    out.push(SettingDescriptor::new(
+        SettingId::ShaderLibrary,
+        SettingKind::Text,
+        SettingValue::from(""),
+        SettingScope::User,
+        SettingEffect::Immediate,
+        SettingTheme::Video,
+    ));
     for slot in ShaderSlot::ALL {
         let ids = slot.ids();
         let (default_mode, modes) = match slot.fallback() {
