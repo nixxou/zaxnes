@@ -13,7 +13,7 @@ It named the measurement that would close it, and the owner made it:
 - [x] 1. Reproduce the comparison, and the per-frame table.
 - [x] 2. The isolated differences of 645-875.
 - [x] 3. Frame 926.
-- [ ] 4. What the hardware does there.
+- [x] 4. What the hardware does there.
 - [ ] 5. The report.
 - [ ] 6. The final pass.
 
@@ -504,4 +504,233 @@ for f in 925 926 927 928; do
   $H frame-trace "$K" "$KR" --frame $f --out g$f.txt >/dev/null
   grep -A4 'LDA \$4015' g$f.txt | head -5
 done
+```
+
+---
+
+## Step 4 — what the hardware does there, and the classification
+
+### The sample, named from the game's own writes
+
+Frame **923** starts it, and the three writes say everything:
+
+| the write | at | value | what it means |
+|---|---|---|---|
+| `STA $4012` | `$83CE` | `$F4` | sample address `$C000 + $F4 × 64` = `$FD00` |
+| `STA $4013` | `$83D4` | `$10` | sample length `$10 × 16 + 1` = **257 bytes** |
+| `STA $4010` | `$8278` | `$0F` | **rate index `$F`**, loop **off**, IRQ **off** |
+| `STA $4015` | `$827D`, `$8282` | `$0F`, `$1F` | bit 4 set: start the DMC |
+
+nesdev, *APU DMC*, NTSC rate table: index `$F` is a period of **54 CPU cycles**, and a byte is
+eight timer periods, so the memory reader asks for one byte every **432 CPU cycles**:
+29 780.5 / 432 = **68.9 a frame**. Zaxnes's own counters read **69** in a full frame — and the
+four frames of this sample read **63 + 69 + 69 + 56 = 257**, which is the sample length to the
+byte. So the *number* of fetches Zaxnes performs is exactly the documented one; the only thing
+left to disagree about is what each one costs and where its halt lands.
+
+### What a fetch costs, from nesdev
+
+nesdev, *DMA*:
+
+> *"DMC DMA normally takes 3 or 4 cycles, depending on whether alignment is needed."*
+> *"After the halt, DMC DMA always performs a dummy cycle where no work is done. If the next
+> cycle is not a get cycle, then a cycle will be spent on alignment."*
+> *"The CPU alternates between cycles on which DMA can get (read) and cycles on which DMA can
+> put (write)."*
+> *"The CPU only allows this on read cycles. If the CPU is writing, it ignores the halt and the
+> DMA unit waits until the next cycle to try again, repeating until successful."*
+> *"When the DMA process completes, the CPU performs the read it attempted when halted."*
+
+Three things follow, and they are the whole of step 3's arithmetic:
+
+1. the cost is **conditional** — three cycles or four, on the get/put parity of the cycle the
+   halt lands on — so two machines that model it differently differ by a cycle **sometimes**, in
+   either direction, and the difference does not accumulate into a constant;
+2. the halt **slips** when the CPU is writing, so the cost also depends on the instruction mix
+   the fetch falls in;
+3. per frame the budget is **69 × 3 to 69 × 4 = 207 to 276 cycles**, and over the whole 257-byte
+   sample **771 to 1 028**. Step 3 measured displacements of **≥45** cycles (frame 926, after 257
+   fetches) and **170** (frame 733, after 128 fetches since that sample began). Both are a
+   **fraction of a cycle per fetch** — 0.2 and 1.3 — so the mechanism has the budget for them
+   several times over, and nothing else in the frame does.
+
+And what a console cannot do, which bounds it from the other side: nesdev's *Cycle reference
+chart* puts NTSC at one 21.477272 MHz crystal divided by 12 for the CPU and 4 for the PPU,
+**29 780.5 CPU cycles a frame**, with DMA the only thing that moves CPU time against PPU time —
+and DMA *takes* cycles, never grants them. Zaxnes's frames in this window measure **29 778 to
+29 785** (the spread is one whole instruction either side of the boundary test), and the overclock
+is locked with **0** free instructions in every frame traced.
+
+### The public tests that cover it, run on Zaxnes for this step
+
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`, this lot's own binary:
+
+| suite | ROMs | pass | fail | no documented verdict |
+|---|---|---|---|---|
+| `dmc_dma_during_read4` | 5 | **3** | 0 | 2 (`dma_2007_read`, `double_2007_read`) |
+| `sprdma_and_dmc_dma` | 2 | **2** | 0 | 0 |
+| `dmc_tests` | 4 | 0 | 0 | 4 (nothing readable on screen) |
+| `apu_test` (suite + 8 singles + …) | 19 | **19** | 0 | 0 |
+| `blargg_apu_2005.07.30` | 11 | **11** | 0 | 0 |
+| `apu_reset` | 6 | **6** | 0 | 0 |
+| `cpu_interrupts_v2` | 6 | **6** | 0 | 0 |
+| `instr_misc` | 5 | **5** | 0 | 0 |
+| **total** | **58** | **52** | **0** | **6** |
+
+**No failure anywhere, on any ROM that reports a verdict**, and the ones that matter print their
+own measurement rather than a verdict alone:
+
+| | what it prints on Zaxnes |
+|---|---|
+| `sprdma_and_dmc_dma` | `0F 526 / SPRDMA and DMC DMA / Passed` |
+| `sprdma_and_dmc_dma_512` | `0F 528 / Passed` |
+| `dmc_dma_during_read4/dma_4016_read` | `08 08 07 08 08 / Passed` — the `$4016` collision, counted |
+| `dmc_dma_during_read4/read_write_2007` | `33 11 22 33 09 55 66 77` twice over / `Passed` |
+| `cpu_interrupts_v2/4-irq_and_dma` | `9 +527 / Passed` |
+| `apu_test/7-dmc_basics`, `8-dmc_rates` | `Passed` |
+| `apu_reset/4017_timing` | `Delay after effective $4017 write: 10 / Passed` |
+| `instr_misc/04-dummy_reads_apu` | `Passed` |
+
+`AccuracyCoin` scores **128 of 147**, which is the tally `docs/review/MF-T-test-roms.md` records
+for this tree — reproduced here character for character, so the suite is being run the same way
+earlier lots ran it. Nineteen rows fail, and **three of them are on its *APU Registers and DMA
+tests* page**: `DMC DMA Bus Conflicts`, `Explicit DMA Abort`, `Implicit DMA Abort`.
+
+### The one named Zaxnes gap on this mechanism — and it is too small, and is not to be fixed
+
+`docs/progress/MF-4a.md` §Step 3 already diagnosed all three, which is why this step does not have
+to. Two of them are the same thing and it is the right kind of thing:
+
+> **The hardware** (nesdev, *DMA*): *"When sample playback is stopped during the APU cycle before
+> a reload DMA would schedule (that is, on the 2nd or 3rd CPU cycle before the halt attempt), the
+> DMA starts, but is aborted after a single cycle."* Either explicitly — the enable bit cleared by
+> a `$4015` write — or **implicitly, when the sample ends just before a reload would trigger**.
+>
+> **Zaxnes**: `NesBus::run_dma` (`rust/crates/zax-nes/src/nes_bus.rs:682`) owns every cycle from
+> the halt onwards, and a `$4015` write is a write cycle, so the only abort it can see is one
+> *before* the halt, which `after_apu_write` handles. The post-halt abort it cannot reach: the
+> fetch either costs its full three or four cycles or none. The missing piece is a two-or-three
+> cycle delay on the `$4015` **stop**, matching the one `DmcChannel::set_enabled`
+> (`rust/crates/zax-nes/src/apu/dmc_channel.rs:218`) already returns for the **start**, plus an
+> abort check inside the DMA loop.
+>
+> **Reproduction**: `AccuracyCoin.nes`, rows `Explicit DMA Abort` and `Implicit DMA Abort`, code 2
+> each — `zax-harness test-roms <roms> out.json --filter AccuracyCoin`.
+>
+> **Size of the fix**: written once, measured, and **taken back out** in lot MF-4a step 3 — it
+> moved no `AccuracyCoin` row, it changes what `$4015` bit 4 reads back for two to three cycles
+> after a disable, and nothing in the public suites pins the new behaviour. REQ touched:
+> **REQ-CORE-113** (DMA), with REQ-CORE-110 beside it; `Q-119` is the open ticket on this code and
+> its own §3 records that the DMA cycles are 0.011 % of a run.
+>
+> **Not fixed here**, and the owner's rule is not the only reason: **it is the wrong size.** The
+> implicit abort happens **once per sample end** — this sample does not loop (`$4010` bit 6 clear)
+> — and is worth **one to three cycles**. Frame 926 needs **forty-five to fifty-five**. So even if
+> `NesHawk` were right and Zaxnes wrong here, it accounts for at most a twentieth of the
+> displacement.
+
+The third row, `DMC DMA Bus Conflicts`, is about the *byte* a colliding fetch returns, not about
+cycles, and MF-4a's diagnosis is that it needs a per-controller-port open-bus mask `InputPorts`
+does not have — a controller-port change, not a DMA one. It cannot move the CPU's position at all.
+
+### The classification
+
+**Undetermined, and much more sharply than EVAL-SYNC-3 could put it.**
+
+| | |
+|---|---|
+| the eight isolated frames of 645-875 | **not an error of either machine.** A reading-point artefact, and step 2 puts a number on it for the first time: **5 to 17 CPU cycles**, the reference reading earlier |
+| **frames 733 and 926** | **undetermined.** A difference in the two machines' CPU position inside the frame of **170** and **≥45** cycles, re-synchronised every frame by the game's own spin at `$C070` and visible only in the two frames of 526 whose work ends within that distance of vblank |
+| what it is **not** | the overclock (locked, 0 stalls, every frame); `$2002`, sprite 0, sprite overflow (**not read once**); the OAM transfer (one a frame, in every frame, `sprdma_and_dmc_dma` passing on both counts); the MMC3 IRQ (same scanline 174, dots 288 and 296); the mapper's soft reset (no reset in this window); the power-on RAM (400 frames of agreement before it); an open-bus or unmapped read (every differing value is in the reference's own RAM too) |
+| what is left, by size | the **DMC sample-fetch DMA**, 207-276 cycles a frame and 771-1 028 over the sample, whose per-fetch cost is conditional in the hardware. **Every live-difference frame in which the DMC is idle agrees to within ten cycles** (six of them); both frames tens or hundreds of cycles out have a sample playing |
+| Zaxnes's standing on it | **52 of 58 public ROMs pass and none fails**, the DMA-cycle ROMs printing their own counts; `AccuracyCoin` 128/147 with **two** DMA rows that are a known, already-diagnosed gap worth one to three cycles a sample |
+| `NesHawk`'s standing on it | **not published.** No figure for its DMC halt cost, its get/put alignment or its abort behaviour is available from a public source, and its source may not be read |
+
+So this is **not** classified (a): no hardware behaviour has been found that Zaxnes gets wrong by
+anything like the measured size, and on every public measurement of this mechanism Zaxnes prints
+the documented answer. Neither is it classified (b): to say "a `NesHawk` behaviour Zaxnes is right
+not to share" would need `NesHawk`'s figure, and there is none. It is **undetermined**, with one
+candidate mechanism identified by size and by correlation, and one measurement that would close
+it.
+
+### What to ask `BizHawk` for, in order of what it settles
+
+Four additions, all to the script that already produced `kirby-jp-step1b.txt`. Function names are
+from `BizHawk`'s public *Lua Functions List*; the spellings should be checked against the list of
+the version in use, since it has grown between releases.
+
+**1. The reading instant itself — this settles step 2 completely and gives step 3 its sign.**
+On the same hook that already writes the `ram=` field, add two fields:
+
+```lua
+-- appended to each existing line, frames 400-1100
+local cyc = emu.totalexecutedcycles()
+local pc  = emu.getregister("PC")
+-- ... write "cyc=" .. cyc .. " pc=" .. string.format("%04X", pc)
+```
+
+Zaxnes can then stop *inferring* the reading point from which bytes moved and read it off: `pc`
+alone decides eight of the nine frames of step 2 (the copy loop at `$C221`-`$C22A` is six
+instructions, so the PC says which iteration), and `cyc` gives the rest. **This is the single
+most valuable line in the list** — it converts every figure of steps 2 and 3 from a bounded
+inference into a measurement.
+
+**2. The frame-sync point, which is frame 926's own question.** `$C06E` is the `STA $39` that
+clears the semaphore and `$C37C` is the `INC $39` that sets it:
+
+```lua
+event.onmemoryexecute(function()
+  -- "C06E f=<framecount> cyc=<totalexecutedcycles>"
+end, 0xC06E)
+event.onmemoryexecute(function()
+  -- "C37C f=<framecount> cyc=<totalexecutedcycles>"
+end, 0xC37C)
+```
+
+for frames **900 to 950**. Two outcomes, and they point opposite ways: if frame 926 has **no**
+`C06E` line then `NesHawk` did not reach it either and the three bytes have another explanation
+entirely; if it has one, `cyc(C06E) − cyc(C37C)` is the cycle count `NesHawk` needed for frame
+926's work, against Zaxnes's — *which never finished it* — and the difference is the number this
+lot could only bound at ≥45.
+
+**3. The `$4015` read, which is the branch.** The value `NesHawk` returns at `$823C` decides
+`BNE $8248` at `$8241`:
+
+```lua
+event.onmemoryread(function(addr, val)
+  -- "4015 f=<framecount> cyc=<totalexecutedcycles> val=<val>"
+end, 0x4015)
+```
+
+for frames **900 to 950** and **720 to 745**. Zaxnes reads `$1F` at frames 925 and 926 and `$0F`
+at 927 and 928 (step 3's table). If `NesHawk` reads `$0F` at frame 926, the two machines took
+**different arms of a branch** there and the divergence is a code-path difference rather than a
+few cycles of slack — and the quantity that decided it is the DMC's bytes-remaining counter, which
+is the candidate of §4 named directly.
+
+**4. The frame length, to say whether the drift is inside a frame or between frames.**
+`emu.totalexecutedcycles()` logged once a frame at `event.onframeend` (or at the same hook as 1)
+over frames **400-1100**: the first differences give `NesHawk`'s cycles per frame against Zaxnes's
+29 778-29 785. Equal totals put the drift **inside** the frame, which is where the DMC is; unequal
+totals would mean something about the frame itself and would change the whole diagnosis.
+
+If 1 and 4 come back and the drift is inside the frame with the reading instant pinned, the
+remaining ask is narrow: **the cycle at which `NesHawk` performs each DMC fetch** for one frame.
+`event.onmemoryread` on the sample's own range (`$FD00`-`$FE00` for this sample, from the
+`$4012` = `$F4` and `$4013` = `$10` above) logging `emu.totalexecutedcycles()` gives 69 numbers
+for a frame; Zaxnes's own 69 are already available from `frame-trace`, and the two lists either
+agree or name the cycle at which they first do not.
+
+### The commands
+
+```sh
+export ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+for f in dmc_dma_during_read4 sprdma_and_dmc_dma dmc_tests apu_test blargg_apu_2005 \
+         apu_reset cpu_interrupts_v2 instr_misc AccuracyCoin; do
+  $H test-roms "$ZAXNES_TEST_ROMS" "tr-$f.json" --filter "$f" --no-shots --quiet
+done
+
+# the sample the game starts, and its rate
+$H frame-trace "$K" "$KR" --frame 923 --out f923.txt
+grep -E 'ST[AXY] \$40(10|11|12|13|15)' f923.txt
 ```
