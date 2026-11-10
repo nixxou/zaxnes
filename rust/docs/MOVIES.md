@@ -118,3 +118,73 @@ variable's course), instead of one replay per frame looked at.
   settings in the middle of a recording is not replayed.
 * Lua scripts of a profile that change the input are part of the recorded word (the word is
   taken after them); scripts that write memory run again as they did.
+
+## 6. `.fm2` on the FCEUX engine (lot FCEUX-48)
+
+**A build with the `fceux-core` feature plays an `.fm2` on FCEUX**, which is the only engine it
+stays in sync on, and that is the owner's own reason for having the engine at all: *play a complete
+TAS and edit the 3dn profile on the fly*.
+
+### How to open one
+
+Exactly as before — **Tools ▸ Play a movie**, the file browser (`.fm2` is already in its filter),
+`--movie <file.fm2>` on the command line, or `tools.open_movie` over MCP. Nothing new to learn: the
+engine is chosen by the file, not by the user.
+
+What happens then, and it is said on screen:
+
+* the game's session **switches to FCEUX** for that playback. The game's own **Emulation engine**
+  option is *not* changed — in the options window, in `games.json`, or at the next load. A movie is
+  not a change of mind;
+* the machine is re-powered with the region (`palFlag`) and the RAM fill (`RAMInitOption`,
+  `RAMInitSeed`) the movie's header asks for, which is the whole reason playback goes through
+  FCEUX's own movie mode: FCEUX reseeds its random RAM fill on every power-on *unless a movie is
+  active*, so a movie's seed cannot be honoured any other way;
+* **stopping the movie does not switch back.** The game goes on from the frame it is on, on FCEUX,
+  until it is loaded again — an engine change re-powers the machine and must never happen mid-game,
+  and a stop has no reason to throw away the frame you are looking at. The message says so.
+
+Everything around the playback is what it always was: the movie bar, pause, frame step, seeking
+(backwards through savestates taken while it plays, forwards by replaying), the 3D view live, the
+profile's Lua hooks, and **the profile editor** — `F5` / `tools.reload_script` while the movie plays
+or is paused reads the profile again and comes back to the same frame with the new scripts.
+
+Three differences from a Zaxnes movie, each for a reason:
+
+| | |
+|---|---|
+| **no note on a frame** (`Ctrl`+`M`) | a note is written to a Zaxnes movie file and an `.fm2` is never written over. The entry is not offered |
+| **no "explored" share on the bar** | the share comes from a thread replaying the movie in a *second* core, and FCEUX keeps one machine per process. The checkpoints come from the playback itself instead |
+| a reload is always **exact** | the movie is loaded again by the reload, so the frame is reached by replaying to it. On a Zaxnes movie a reload is fast unless you ask for exact |
+
+### What is refused, and why
+
+A movie whose header asks for something this build has not is **refused with the reason named**, and
+your game is left running. There is no half-switched state: the header is read and judged before
+anything is committed.
+
+| the header says | the message says |
+|---|---|
+| `FDS 1` | a Famicom Disk System disk — this build loads iNES images and has no disk BIOS |
+| `NewPPU 1` | FCEUX's new PPU — the tile capture the 3D needs does nothing there |
+| `fourscore 1` | a Four Score (four pads) — the engine drives two |
+| `microphone 1` | the Famicom microphone |
+| `port0`/`port1` not a standard pad, or `port2` set | an input device other than a standard pad / an expansion-port device |
+| a `romChecksum` that is not this ROM's | recorded on another ROM, so it would not replay |
+| anything that is not a version-3 `.fm2` | not a version 3 .fm2 movie (or the file is truncated) |
+
+A movie that states **no** ROM checksum is played rather than refused: claiming nothing is not
+claiming the wrong thing.
+
+A **`.fcm`** (FCE Ultra's binary format) is *not* played on FCEUX — FCEUX's own movie code refuses
+that format outright — so it keeps Zaxnes's clean-room importer of §4, as does every `.fm2` in a
+build without the feature. Nothing about the default build's movie behaviour changed.
+
+### Measured
+
+*Super Mario Bros.* with its 3dn profile, a 5 400-frame movie, through the real host headless
+(`docs/progress/FCEUX-48.md` step 5): the `.fm2` replays the recorded run **identically at every
+one of the 5 400 frames**; an interrupted playback (pause, frame steps, a 300-frame seek back, a
+resume) shows the same frames as an uninterrupted one; a profile reload at frame 2 000 comes back
+to a byte-identical machine; and playback with the whole 3D path runs at **1 726 frames/s**, about
+28× real time.

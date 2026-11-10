@@ -185,6 +185,10 @@ a particular game. That suggests:
 
 ## 5. `.fm2` playback
 
+> **Done by lot FCEUX-48 (FCEUX-4), steps 3 to 5.** The working is `docs/progress/FCEUX-48.md`;
+> the user-facing half is `rust/docs/MOVIES.md` §6 and `HOWTO-RUN.md`. What follows is this section
+> as it was written, with what the outcome added.
+
 This is the clearest win and the easiest lot. FCEUX's `movie.cpp` plays `.fm2` itself; the C API
 needs three more calls (open a movie from a buffer, report the frame count and whether playback has
 finished, stop) and the RAM-initialisation fields are **already** on the API precisely because a
@@ -197,6 +201,71 @@ it is why a movie replays at all, and it means `.fm2` playback has to go through
 mode rather than through our own frame feeding.
 
 The other three RAM fills are deterministic, which is what let step 5's comparison mean anything.
+
+### What it became
+
+The reason above held, and it is now a test rather than an argument: two movies with the same
+`RAMInitSeed` leave byte-identical work RAM over all 2 KiB and two with different seeds do not,
+which **cannot be arranged from outside movie mode at all**.
+
+**Six C API calls, not three.** The three the plan named, plus a `zax_movie_inspect` that reads a
+header **without touching the machine**, and the length and the frame as separate queries. The
+extra one is the important one: `FCEUI_LoadMovie` re-powers the machine as its third act, so a
+refusal decided after it would leave the player's game restarted — and a host that can only say
+"unsupported" is no better than one that plays the movie wrong. One patch of `src/`:
+`zax_movie_override`, the same consumed-once `FCEUFILE` mechanism `zax_rom_override` already was,
+because this build has no filesystem to put a movie file on.
+
+**What is refused**, judged from the header before anything is committed, each with the thing
+named: `FDS`, `NewPPU`, `fourscore`, `microphone`, a port device other than a standard pad on each
+pad port with nothing on the expansion port, a stated `romChecksum` that is not the loaded ROM's,
+and anything that is not a version-3 `.fm2`. A movie that states **no** checksum is played:
+claiming nothing is not claiming the wrong thing. The port refusal is also what makes the fork's
+no-op `FCEUD_SetInput` stub *correct* rather than merely harmless.
+
+**In the application**, opening an `.fm2` plays it on FCEUX and switches the **session's** engine
+for that playback, leaving the game's own `emu.engine` untouched — a movie is not a change of mind.
+Stopping does not switch back, deliberately: §4's rule is that an engine change re-powers the
+machine and never happens mid-game, and a movie's load re-powers anyway while a stop does not. A
+`.fcm` keeps Zaxnes's own importer, FCEUX's movie code refusing that format outright.
+Everything around the frames is EDITOR-1's machinery reused untouched — the timeline's checkpoints
+and seek, the movie bar, pause and frame step, the 3D conversion, the profile's Lua hooks, the
+script reload — with three stated exceptions: no movie explorer (it needs a second core), no notes
+(an `.fm2` is never written over), and no input hook of ours (FCEUX's movie mode loads each record
+over the pad state itself).
+
+**Three things the plan did not foresee**, all three found by measuring:
+
+1. **FCEUX's movie clock has two behaviours a host must not guess at.** `FinishPlayback` runs at
+   the *top* of a frame rather than the bottom of the last one (`movie.cpp:1245-1250`), so the mode
+   lags the end by one frame and **the clock, not the mode, is the signal**; and
+   `currFrameCounter++` is unconditional while a movie is loaded, so the clock counts *past* the
+   end and "over" is `frame >= length`.
+2. **The region, in the same shape as the defect §2 warns about.** `FCEUI_LoadMovie` applies
+   `palFlag` through `FCEUI_SetVidSystem`, which reaches the emulation but **not** `pal_emulation`,
+   the driver global `FCEUI_GetRegion` reads — so a PAL movie would have run at PAL while the API
+   reported NTSC and the host paced at 60 Hz. The fork re-asserts the region after the load.
+3. **Two defects in the application's own code that only an engine like FCEUX exposes**, both
+   pre-existing. A savestate of an engine other than Zaxnes's does **not** carry the cartridge, so
+   `script_reload` — which rebuilds the session and restores a state — left a session with no ROM:
+   **F5 during an FCEUX game could not have worked at all.** And a movie the engine plays itself
+   cannot survive a state restore either, the block being the machine and not the movie mode, so
+   the reload loads the movie again — which is what makes a reload during such a playback *always
+   exact*.
+
+### End to end, measured
+
+*Super Mario Bros.* with its own 3dn profile, a **5 400-frame** movie, headless through the real
+host (`docs/progress/FCEUX-48.md` step 5):
+
+| | |
+|---|---|
+| the scripted sequence fed to FCEUX, then the `.fm2` written from it and replayed | **identical at every one of the 5 400 frames** |
+| records reaching the 3D path | every frame that has anything to draw; 164 frames have none and **every one is a blank screen** (a death or a level change, the PPU's rendering off), 0 with a picture and no record |
+| the draw list at frame 5 400 | 282 tiles, 282 with a mesh |
+| pause, two frame steps, a 300-frame seek back and a resume, against an uninterrupted playback | **identical** at frames 1 200, 2 400, 3 600 and 5 000 |
+| reloading the profile at movie frame 2 000 | the engine and the movie kept, the frame returned to, **the machine byte-identical** |
+| **movie playback with the 3D on FCEUX** | **1 726 frames/s, 0.5795 ms a frame** — the application's own loop, so core, capture, conversion and draw list; about **28× real time** |
 
 ## 6. The tile records, and the honest state of the 3D path
 
@@ -464,11 +533,11 @@ Sizes are relative to lot FCEUX-1, which was one session and covered steps 1-8 o
 |---|---|---|
 | **FCEUX-2** | ~~The `Engine` trait and the type move to `zax-core-api`~~ — **done, lot FCEUX-23 steps 2 to 4.** | ~~large~~ |
 | **FCEUX-3** | ~~The per-game choice~~ — **done, lot FCEUX-23 step 5.** | ~~medium~~ |
-| **FCEUX-4** | `.fm2` playback: three more C API calls over FCEUX's own movie mode, the RAM-init fields already being in place, and the UI to open a movie. | small — the easiest real win |
+| **FCEUX-4** | ~~`.fm2` playback over FCEUX's own movie mode, and the UI to open a movie~~ — **done, lot FCEUX-48 steps 3 to 5.** | ~~small~~ |
 | **FCEUX-5** | Rollback and run-ahead over FCEUX states, with the measurements §3 asks for before a history depth is chosen. | medium |
 | **FCEUX-6** | The tile capture finished: mid-frame scroll first (item 1 of §6), then MMC2/MMC4, then MMC5, then the new PPU. 3D on FCEUX ships at the end of this, not before. | large, and best split in two |
 | **FCEUX-7** | Android and PortMaster cross-builds of the fork, and the size question of §8. | small to medium, mostly toolchain |
-| **FCEUX-8** | The `oam3.nes` fix, reported upstream, and whatever vetting §7 settles on. | small |
+| **FCEUX-8** | ~~The `oam3.nes` fix, reported upstream, and whatever vetting §7 settles on~~ — **done, lot FCEUX-48 steps 1 and 2.** | ~~small~~ |
 
 The order matters: FCEUX-2 gates everything, FCEUX-4 is the cheapest thing with visible value, and
 FCEUX-6 is the only one that should hold up shipping — because 2D FCEUX is already useful and 3D
@@ -493,6 +562,25 @@ FCEUX is not yet right.
   per-game option lets a user choose FCEUX for any game in the library, and §7's one-byte heap
   overflow is still live in the fork.
 
+**What lot FCEUX-48 leaves for the two that remain**, from having done FCEUX-4 and FCEUX-8:
+
+* **FCEUX-5** (rollback and run-ahead over FCEUX states) is where it was and now has one more
+  thing in its favour and one more thing to be careful of. In its favour: step 5 measured movie
+  playback with the whole 3D path at **1 726 frames/s on FCEUX**, so the state churn §3 worried
+  about is cheap at this speed — a rollback second is ~4.8 MB and the engine is doing 28× real
+  time. To be careful of: **`EngineHandle::cycle_count` on an engine without a counter of its own
+  is the sum of the frames this *session* has run**, not the cycles since power-on, so it does not
+  come back with a restored state (step 4 records this in its doc comment). Anything that compares
+  two paths to the same frame — which run-ahead does by construction — must not use it, and
+  `movie_timeline::machine_digest` hashes it.
+* **FCEUX-7** (Android, PortMaster) gains two small things to cross-compile and loses nothing: the
+  six movie calls of step 3, which are plain C++ over FCEUX's own `movie.cpp`, and the `ines.cpp`
+  fix of step 1, which is three lines of allocation arithmetic. Both are architecture-blind.
+* And one thing neither lot owns, which belongs to a release lot: **the fork's patch set over
+  `src/` grew from three files to five** (§10), so the "complete corresponding source" duty now
+  covers `movie.cpp` and `ines.cpp` as well. The `ines.cpp` one is a bug fix the owner is to submit
+  upstream, and carries no `// ZAX:` marker for that reason.
+
 ## 10. Licence, and what shipping the library requires
 
 FCEUX is **GPL-2.0-or-later**; "or later" lets it be used under Zaxnes's GPL-3.0, so the combined
@@ -511,6 +599,20 @@ end of lot FCEUX-1 is **three files and 51 added lines** in `src/` — `types.h`
 `zax_battery_ram_size`, `zax_get_battery_ram` and `zax_set_battery_ram`, and all three live in
 `zax/zaxfceux.cpp` — **no FCEUX file was patched**, so `git diff <upstream-base>..zax` over `src/`
 is still the same three files, and the fork's own `zax/` directory grew by about 120 lines.
+
+**After lot FCEUX-48 the figure has moved**, and this is the one place in this note it is
+recorded: `src/` is now **six files** — the three above, `src/boards/mmc2and4.cpp` which lot
+FCEUX-6 added and the figure above never counted, and two from this lot. The fork's own
+`zax/README.md` has the full table and is what makes a tarball reviewable.
+
+* `src/movie.cpp` — `zax_movie_override`, the consumed-once `FCEUFILE` of the movie load, the same
+  mechanism `src/fceu.cpp` already had for a cartridge image. Marked `// ZAX:`, an adaptation;
+* `src/ines.cpp` — the CHR-RAM allocation padded to 8 KiB (§7). **A bug fix in FCEUX itself**, and
+  deliberately **not** marked `// ZAX:` so that it can be submitted upstream as it stands. The
+  upstream report is the owner's to make.
+
+A release lot therefore owes the tarball over a slightly larger diff, and owes the upstream report
+as a separate, non-blocking act.
 
 A release lot therefore owes one more thing nobody has built yet: the fork's source has to be
 **published or packaged** with each release that includes the library. A tarball of the fork at the

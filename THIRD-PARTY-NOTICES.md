@@ -232,7 +232,7 @@ Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 ### FCEUX — (c) les auteurs de FCEUX — GNU GPL v2 ou ultérieure
 
 Zaxnes peut être construit avec **FCEUX** comme second moteur d'émulation, choisi jeu par jeu par
-l'option `emu.engine` (lots FCEUX-1 et FCEUX-23). Cette possibilité est derrière la fonctionnalité
+l'option `emu.engine` (lots FCEUX-1, FCEUX-23 et FCEUX-48). Cette possibilité est derrière la fonctionnalité
 Cargo `fceux-core`, **désactivée par défaut** — à la fois pour `zax-app` et pour `zax-harness` :
 les binaires livrés ne contiennent aucun code de FCEUX, l'option n'est pas affichée, et le
 constructeur qui n'active pas cette fonctionnalité n'a rien à faire de cette section.
@@ -251,9 +251,24 @@ bibliothèque soit liée statiquement ou dynamiquement.
 bibliothèque de ce fork, les **sources complètes correspondantes du fork** doivent voyager avec
 lui (offertes aux mêmes conditions, à côté du binaire). C'est la raison pour laquelle
 l'historique de FCEUX est conservé intact dans le fork : chacune de nos modifications est un
-`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère — au terme du lot FCEUX-23,
-trois fichiers de `src/` et le répertoire `zax/`, que ce lot a seulement agrandi (trois appels de
-plus pour la mémoire de sauvegarde, aucun fichier de FCEUX touché).
+`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère, et c'est lui qui fait foi : au
+terme du lot **FCEUX-48**, **six fichiers de `src/`** et le répertoire `zax/`.
+
+Le lot FCEUX-23 n'avait fait qu'agrandir `zax/` (trois appels de plus pour la mémoire de
+sauvegarde, aucun fichier de FCEUX touché). Le lot FCEUX-48 ajoute deux fichiers de `src/`, et la
+distinction entre les deux compte :
+
+- `src/movie.cpp` — un `FCEUFILE` consommé une fois, pour ouvrir un film `.fm2` depuis la mémoire
+  plutôt que depuis un chemin, exactement comme `src/fceu.cpp` le fait déjà pour une image de
+  cartouche. C'est une **adaptation** pour Zaxnes, marquée `// ZAX:` comme les autres ;
+- `src/ines.cpp` — un **correctif d'un défaut de FCEUX lui-même** : l'allocation de la CHR-RAM est
+  complétée à 8 Kio, parce que `setchr8()` installe une fenêtre linéaire de 8 Kio quelle que soit
+  la taille de la puce et qu'une CHR-RAM plus petite faisait donc écrire hors du tampon. Il ne
+  porte **pas** de marque `// ZAX:`, volontairement : il est écrit pour être proposé tel quel en
+  amont de FCEUX, et ce signalement revient au propriétaire du projet.
+
+Le lot ajoute aussi six appels de film à l'interface C (`zax/zaxfceux.cpp`), qui ne touchent aucun
+fichier de FCEUX.
 
 Le fork compile aussi la copie de **zlib** que FCEUX embarque déjà
 (`src/drivers/win/zlib`, zlib 1.1.4, licence zlib) quand aucune zlib système n'est trouvée, et la

@@ -328,6 +328,59 @@ Dans une version sans cette fonctionnalité, la ligne n'apparaît pas, aucun cod
 présent, et une valeur déjà enregistrée pour un jeu est relue et réécrite sans erreur mais ignorée
 — un `games.json` passe donc d'une version à l'autre sans rien perdre.
 
+La ligne dit aussi, quand FCEUX est choisi, **si cette ROM est validée pour la 3D sur ce moteur** :
+la liste est celle des jeux mesurés jeu par jeu (neuf jeux, 47 dumps, reconnus par le CRC de leurs
+données et jamais par leur nom de fichier). L'option reste disponible pour **tous** les jeux, c'est
+un repère et non un refus ; un jeu absent de la liste se charge et se joue, en disant que sa 3D sur
+FCEUX n'a été vérifiée par personne et peut différer de celle de Zaxnes. Le message au chargement
+et le panneau `F12` le répètent.
+
+### Lire un film `.fm2` sur FCEUX
+
+*Seulement dans une version construite avec `fceux-core`* : un film **`.fm2`** (le format texte de
+FCEUX) se lit **sur le moteur FCEUX**, le seul sur lequel il reste en phase. Rien ne change pour
+l'ouvrir — **Outils ▸ Lire un film**, le navigateur de fichiers, `--movie <fichier.fm2>`, ou
+`tools.open_movie` — c'est le fichier qui choisit le moteur, pas vous. C'est la raison d'être du
+moteur FCEUX : **jouer un TAS complet et modifier le profil 3dn en direct**.
+
+Ce qui se passe alors, et qui est annoncé à l'écran :
+
+- la session passe **sur FCEUX pour cette lecture seulement**. L'option **Moteur d'émulation** du
+  jeu n'est **pas** modifiée : ni dans la fenêtre d'options, ni dans `games.json`, ni au prochain
+  chargement. Un film n'est pas un changement d'avis ;
+- la machine est rallumée avec la région (`palFlag`) et le remplissage de la RAM
+  (`RAMInitOption`, `RAMInitSeed`) que demande l'en-tête du film — c'est pour cela que la lecture
+  passe par le mode film de FCEUX lui-même : FCEUX retire au hasard sa RAM de départ à chaque
+  allumage *sauf* pendant un film, donc la graine d'un film ne peut être honorée autrement ;
+- **arrêter le film ne revient pas au moteur d'avant** : la partie continue sur FCEUX à l'image
+  affichée jusqu'au prochain chargement. Changer de moteur rallume la machine et ne doit jamais
+  arriver en cours de partie, et un arrêt n'a aucune raison de jeter l'image que vous regardez.
+  Le message le dit.
+
+Tout le reste est inchangé : la barre de film, la pause, l'avance image par image, la navigation
+(en arrière par des sauvegardes d'état prises pendant la lecture, en avant en rejouant), la vue 3D
+en direct, les scripts Lua du profil, et **l'éditeur de profil** — `F5` pendant la lecture ou en
+pause relit le profil et revient à la même image avec les nouveaux scripts.
+
+Trois différences avec un film Zaxnes, chacune pour une raison :
+
+| | |
+|---|---|
+| pas de **note sur une image** (`Ctrl`+`M`) | une note s'écrit dans un fichier de film Zaxnes, et un `.fm2` n'est jamais réécrit. L'entrée n'est pas proposée |
+| pas de part « explorée » sur la barre | cette part vient d'un fil qui rejoue le film dans un **second** cœur, et FCEUX n'en garde qu'un par processus. Les points de reprise viennent de la lecture elle-même |
+| un rechargement de profil est toujours **exact** | le film est rechargé, donc l'image est atteinte en rejouant jusqu'à elle |
+
+Un film dont l'en-tête demande quelque chose que cette version n'a pas est **refusé en nommant la
+raison**, et la partie continue : un disque **FDS**, le **nouveau PPU** de FCEUX, un **Four Score**,
+le **micro** de la Famicom, un périphérique autre qu'une manette standard sur l'un des deux ports
+ou quoi que ce soit sur le port d'extension, un `romChecksum` qui n'est pas celui de la ROM
+chargée, ou un fichier qui n'est pas un `.fm2` version 3. Un film qui n'annonce **aucun**
+`romChecksum` est lu : ne rien affirmer n'est pas affirmer le faux.
+
+Un **`.fcm`** (le format binaire de FCE Ultra) ne passe **pas** par FCEUX — le code film de FCEUX
+refuse ce format — et garde donc le lecteur propre de Zaxnes, comme tous les `.fm2` dans une
+version sans la fonctionnalité. Le comportement de la version par défaut n'a pas changé.
+
 ### Notifications
 
 Les messages du programme — `Quick Save`, `Roll Back`, `Fast Forward`, les erreurs de chargement —

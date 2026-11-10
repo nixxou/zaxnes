@@ -17,7 +17,7 @@ them, and the 3D on FCEUX matches Zaxnes's wherever the two machines agree (§6 
 - [x] 3. `.fm2` playback on FCEUX, in the core.
 - [x] 4. `.fm2` in the application.
 - [x] 5. The app with a real movie, end to end.
-- [ ] 6. Docs.
+- [x] 6. Docs.
 - [ ] 7. Final pass.
 
 ## The environment this lot ran in
@@ -513,3 +513,102 @@ Zaxnes; movie playback on FCEUX is therefore about **28× real time**, which is 
 a 5 000-frame TAS in the profile editor usable.
 
 ---
+
+## Step 6 — the docs
+
+### `docs/review/FCEUX-ENGINE.md`
+
+* **§5** opens with what this lot did and keeps the plan as written, with what the outcome added
+  after it: six C API calls rather than three and why the extra one matters (a refusal has to be
+  nameable, and `FCEUI_LoadMovie` re-powers the machine as its third act, so a refusal decided
+  after it would restart the player's game); the table of what is refused; the application's side
+  with the engine forced for the playback and not for the game; the three things the plan did not
+  foresee (FCEUX's movie clock's two behaviours, the region global again, and the two defects in
+  the application's own code that only an engine like FCEUX exposes); and the end-to-end figures.
+* **§7** was rewritten in step 1 — the real cause, the fix, what it is not, what it was checked
+  against, and that **the upstream report is the owner's**. §1's claim that the overflow is live
+  was struck at the same time.
+* **§9** strikes **FCEUX-4** and **FCEUX-8** from the lot table and records what this lot leaves
+  the two that remain: FCEUX-5 gains an argument in its favour (1 726 frames/s makes the state
+  churn §3 worried about cheap) and one thing to be careful of (`cycle_count` does not come back
+  with a restored state on FCEUX, and `machine_digest` hashes it); FCEUX-7 gains the six movie
+  calls and the `ines.cpp` fix to cross-compile, both architecture-blind. Plus the one thing
+  neither owns: the patch set over `src/` grew.
+* **§10** records that growth, which is the licence-relevant figure: `src/` is now **six files**,
+  and the two this lot adds are of **different kinds** — `movie.cpp` is an adaptation marked
+  `// ZAX:`, `ines.cpp` is a fix to FCEUX itself and deliberately unmarked so that it can be
+  submitted upstream as it stands.
+
+### `rust/docs/MOVIES.md` — a new §6, "`.fm2` on the FCEUX engine"
+
+How to open one (**nothing new to learn** — the file chooses the engine, not the user), what
+happens then and what is said on screen, that stopping does not switch back and why, the three
+differences from a Zaxnes movie each with its reason, the full table of what is refused with the
+message each one gives, that a `.fcm` and a build without the feature keep Zaxnes's own importer,
+and the measured figures.
+
+### `HOWTO-RUN.md` (French, the user's guide)
+
+Two additions, both in §3 beside the options they belong with:
+
+* the **engine row** now also says whether the ROM is validated for the 3D on FCEUX, that the list
+  is nine games and 47 dumps recognised by the CRC of their data and never by a file name, and
+  that it is a marker and not a refusal — a game absent from it loads and plays, and says that
+  nobody checked its 3D;
+* a new **"Lire un film `.fm2` sur FCEUX"**: that it is the engine's reason for being (play a
+  complete TAS and edit the 3dn live), that the three ways of opening a movie are unchanged, the
+  three things that happen and are announced, that stopping does not switch back and why, what is
+  unchanged (the bar, the pause, the frame step, seeking, the 3D, the Lua, `F5`), the three
+  differences in a table, the list of what is refused, and that nothing about the default build
+  changed.
+
+### `THIRD-PARTY-NOTICES.md`
+
+The FCEUX entry names lot FCEUX-48 and carries the one figure a distributor needs: **six files of
+`src/`**, with the two this lot adds separated by kind — the adaptation and the upstream fix — and
+the note that the signalling of the fix upstream is the owner's.
+
+---
+
+## What is left after this lot
+
+**FCEUX-5 — rollback and run-ahead over FCEUX states.** §3 of the design note asks for a
+measurement before a history depth is chosen, and this lot has given it a free one: movie playback
+with the whole 3D path runs at **1 726 frames/s** on FCEUX, so the ~4.8 MB a rollback second costs
+is nothing at that speed. The seam is still the one lot FCEUX-23 cut — one capability flag to
+raise and one method to fill — and **rollback already works**, the history having always used the
+serialised state. One warning this lot leaves: **`EngineHandle::cycle_count` does not come back
+with a restored state** on an engine without a counter of its own (it is the sum of the frames the
+session has run), so run-ahead — which compares two paths to the same frame by construction — must
+not use it, nor `movie_timeline::machine_digest`, which hashes it.
+
+**FCEUX-7 — Android and PortMaster cross-builds.** Unchanged, and this lot adds nothing hard to
+it: six movie calls of plain C++ over FCEUX's own `movie.cpp`, and three lines of allocation
+arithmetic in `ines.cpp`. Both are architecture-blind. §8's expectation of "a day of toolchain
+work rather than a week of porting" stands.
+
+**What the owner must decide**, in addition to the four lot FCEUX-23 listed (whether `fceux-core`
+is on in a release, which is a licence decision first; the sample rate FCEUX cannot produce; which
+games FCEUX is worth offering for):
+
+1. **Whether to submit the `ines.cpp` fix upstream, and when.** It is written to be submitted as
+   it stands and carries no `// ZAX:` marker for that reason. Until it is upstream, the fork
+   carries a divergence in a file it did not before, which a release tarball has to include.
+2. **Whether the validated-games list should ever become a gate.** This lot made it a *marker*,
+   which was §7's recommendation plus the owner's own rule that the option stays available for
+   every game. With the heap overflow closed there is no safety argument left for a gate; what
+   remains is a judgement about how much an unvetted 3D picture costs the project in support.
+3. **Whether `Super Mario Bros. 3` and `Zelda II` join the list**, which is the
+   `ppu-2007-render-read` decision of Q-139 and §6 and not a measurement — with that feature on in
+   `zax-nes`, the two engines' records become identical row for row and both games would be
+   validated for 3D on FCEUX.
+
+**Two things stated rather than left implied**, as lot FCEUX-23 did:
+
+* the validated list rests on §6's own caveats, which have not moved: one dump per game at frames
+  300 and 1 200 **with no button pressed**, and 65 of the 91 dumps never rendered. This lot's own
+  5 400-frame run on *Super Mario Bros.* is the first long play-through either engine has been
+  compared on, and *Super Mario Bros.* is **not** on the validated list;
+* `.fm2` playback is read-only. There is no `.fm2` **writer** anywhere in the workspace, so
+  Zaxnes cannot record a movie another emulator can play. Nobody has asked for one; it is recorded
+  here because a user who can play a TAS will reasonably expect to be able to make one.
