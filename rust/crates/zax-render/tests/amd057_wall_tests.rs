@@ -42,6 +42,14 @@ fn surface_over_two_objects() -> Built {
         .build()
 }
 
+/// `solid(3, 0)` with the pixel at bit 0 left transparent: a tile AMD-063 REQ-SCN-087 does **not**
+/// call full, so no lateral face is taken off it and the wall bias is still the means that holds
+/// REQ-SCN-040 for it.
+fn holed() -> (u64, u64) {
+    let (low, high) = solid(3, 0);
+    (low & !1, high & !1)
+}
+
 /// How many pixels of the interior of the drawn shape depart from its commonest colour by more
 /// than two levels — the measure of REQ-SCN-065 and AMD-012.
 fn offenders(capture: &Capture) -> usize {
@@ -147,14 +155,20 @@ fn amd_057_a_surface_split_over_two_objects_passes_too() {
 /// `WallDepthBias = 0` les deux tests de jointure passent encore mais
 /// `REQ_SCN_040_…_shows_no_internal_face` échoue"). On real scenes, which hold hundreds of
 /// objects of different depths, it also erases the one-pixel dark lines Q-067 reported.
+///
+/// **Amended by AMD-063 REQ-SCN-087**: on a transparent object of **full** tiles the coincident
+/// walls are no longer drawn at all, so the bias has nothing left to hold there — that is what
+/// `req_scn_087_a_transparent_surface_of_full_tiles_needs_no_bias` below shows. The surface here
+/// is therefore made of tiles that are **not** full (one pixel of colour 0), the case the
+/// removal leaves alone and where the bias is still the means.
 #[test]
 fn req_scn_040_the_wall_depth_is_what_keeps_a_coincident_wall_out_of_the_blend() {
     let gl = GlFixture::create(640, 480);
     let mut built = SceneFixture::new()
         .background(0x0F)
         .palette(3, 0x30)
-        .pattern_block(solid(3, 0), 4, 4, 24, ProfileLayer::L1, 0.5)
-        .rect(solid(3, 0), 14, 14, 4, 4)
+        .pattern_block(holed(), 4, 4, 24, ProfileLayer::L1, 0.5)
+        .rect(holed(), 14, 14, 4, 4)
         .build();
 
     // Seen from a corner, so the walls between the tiles have a real width on screen: head-on
@@ -184,6 +198,41 @@ fn req_scn_040_the_wall_depth_is_what_keeps_a_coincident_wall_out_of_the_blend()
     let mut larger = gl.renderer();
     larger.set_wall_depth_bias(geometry::WALL_DEPTH_BIAS * 4.0);
     assert!(offenders(&gl.render_built(&mut larger, &built)) <= 2);
+}
+
+/// AMD-063 REQ-SCN-087 and REQ-SCN-065 on a **transparent** surface: the same scene made of
+/// **full** tiles shows no joint even with the wall bias at 0, because the coincident walls are
+/// no longer in the drawn mesh at all. That is the amendment's own reading of REQ-SCN-040 — "its
+/// depth pass is not enough to hide the walls that fall on a joint; REQ-SCN-087 removes them".
+#[test]
+fn req_scn_087_a_transparent_surface_of_full_tiles_needs_no_bias() {
+    let gl = GlFixture::create(640, 480);
+    let mut built = SceneFixture::new()
+        .background(0x0F)
+        .palette(3, 0x30)
+        .pattern_block(solid(3, 0), 4, 4, 24, ProfileLayer::L1, 0.5)
+        .rect(solid(3, 0), 14, 14, 4, 4)
+        .build();
+
+    built.scene.camera.current_mut().angles = Vector3::new(8.0, 8.0, 0.0);
+    built.scene.camera.snap_to_setpoints();
+
+    let mut renderer = gl.renderer();
+    assert_eq!(0, offenders(&gl.render_built(&mut renderer, &built)));
+    assert_eq!(1, renderer.statistics().transparent_objects);
+    assert_eq!(16, renderer.statistics().transparent_tiles);
+
+    // With no bias at all: still nothing, the walls being gone rather than pushed.
+    let mut plain = gl.renderer();
+    plain.set_wall_depth_bias(0.0);
+    assert_eq!(0, offenders(&gl.render_built(&mut plain, &built)));
+
+    // And the drawn surface is still the same silhouette: the removal takes faces that fall on a
+    // joint, never one of the outline (the block is 32 by 32 pixels of the picture).
+    let capture = gl.render_built(&mut plain, &built);
+    let (first_x, last_x) = capture.column_span(BLACK);
+    let (first_y, last_y) = capture.row_span(BLACK);
+    assert!(last_x - first_x > 24 && last_y - first_y > 24);
 }
 
 /// AMD-057 forbids reaching REQ-SCN-065 by taking the walls out, so the geometry has to be

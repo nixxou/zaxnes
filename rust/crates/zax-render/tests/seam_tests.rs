@@ -187,7 +187,11 @@ fn req_scn_040_a_translucent_multi_tile_object_shows_no_internal_face() {
         .pattern_block(solid(3, 0), 4, 4, 24, ProfileLayer::L1, 0.5)
         .rect(solid(3, 0), 14, 14, 4, 4)
         .build();
-    assert_whole_boxes(&built);
+    // AMD-063 REQ-SCN-087 amends AMD-057 §2 here: this object is **transparent** and made of
+    // full tiles, so its drawn tiles have given up the lateral faces that fall on a joint - 16
+    // vertices on a corner, 12 on an edge, 8 inside. "Each has 24 vertices" is now the criterion
+    // of an **opaque** object, which the three other measures of this file still read.
+    assert_inner_faces_removed(&built);
 
     // Seen from an angle, so that the walls between the tiles have a real width on screen —
     // head-on they are edge-on and the artefact hides itself — and from the four corners,
@@ -292,6 +296,21 @@ fn moved(
 /// AMD-057 §2, first criterion: every drawn tile of a surface whose tiles touch is the complete
 /// box of REQ-E3D-501 — 24 vertices, 12 triangles. Asserted before each pixel measure below, so
 /// that none of them can pass because the walls were taken out (the means AMD-057 forbids).
+/// The drawn tiles of a 4 x 4 transparent object of full tiles after AMD-063 REQ-SCN-087: four
+/// corners of 16 vertices, eight edges of 12 and four inner tiles of 8.
+fn assert_inner_faces_removed(built: &Built) {
+    let mut counts = std::collections::HashMap::new();
+    for tile in built.draw_list.tiles() {
+        let mesh = tile.mesh.as_ref().expect("a mesh");
+        *counts.entry(mesh.vertex_count()).or_insert(0usize) += 1;
+    }
+
+    assert_eq!(Some(&4), counts.get(&16), "four corners of 16 vertices");
+    assert_eq!(Some(&8), counts.get(&12), "eight edges of 12 vertices");
+    assert_eq!(Some(&4), counts.get(&8), "four inner tiles of 8 vertices");
+    assert_eq!(3, counts.len());
+}
+
 fn assert_whole_boxes(built: &Built) {
     assert!(!built.draw_list.tiles().is_empty(), "the surface is drawn");
     for tile in built.draw_list.tiles() {

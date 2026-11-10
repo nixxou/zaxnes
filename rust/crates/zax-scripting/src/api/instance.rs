@@ -1034,6 +1034,12 @@ fn overlap_and_deformation_methods(definition: &mut TypeDef) {
     // every hook it registered (REQ-LUA-062). They take no argument and mean nothing.
     definition.function("BuildExportMeshes", |_| Ok(None), None);
     definition.function("ReleaseExportMeshes", |_| Ok(None), None);
+
+    // AMD-063 REQ-LUA-121: in 3dSen 2.1 the method answers whether `t` is a full tile in the
+    // sense of REQ-SCN-087. Zaxnes exposes no tile object (SPEC-05 §4.2), so it answers **false**
+    // for every argument, without an error **(D)** — a script that called a missing method would
+    // lose every hook it registered (REQ-LUA-062), as with `BuildExportMeshes` above.
+    definition.function("IsSolidTile", |_| Ok(Some(Value::Boolean(false))), None);
 }
 
 /// A vector computed from the frame instance the method was called on, zero when there is none.

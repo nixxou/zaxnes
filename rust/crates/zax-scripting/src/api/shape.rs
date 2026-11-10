@@ -602,6 +602,33 @@ fn pattern_constraints(definition: &mut TypeDef) {
 
 /// The family of the pattern and the indexing of its instances.
 fn pattern_kind_and_indexing(definition: &mut TypeDef) {
+    // AMD-063 REQ-LUA-120: true exactly when the grid of the pattern holds a tile still waiting
+    // for its sixteen bytes (AMD-062 REQ-PROF-081), which only a "3dh" profile can have. A frame
+    // pattern answers for the reference pattern of its shape.
+    definition.read_only(
+        "HasPlaceholders",
+        |cx, this| {
+            let Some(target) = pattern_target(this) else {
+                return Ok(boolean(false));
+            };
+            let id = match target {
+                PatternTarget::Registry(id) => Some(id),
+                PatternTarget::Frame(shape) => cx
+                    .with_shape(&shape, |data, _, _| data.reference_pattern())?
+                    .flatten(),
+            };
+            let Some(id) = id else {
+                return Ok(boolean(false));
+            };
+
+            Ok(boolean(
+                cx.with_pattern(id, |pattern, _| pattern.has_placeholders())?
+                    .unwrap_or(false),
+            ))
+        },
+        None,
+    );
+
     definition.read_only(
         "permanent",
         |cx, this| {

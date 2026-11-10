@@ -157,6 +157,9 @@ pub struct SceneCamera {
     transition_remaining: f32,
     /// Characteristic smoothing time `Tₛ`, 0.4 s by default (REQ-SCN-019).
     pub smooth_time: f32,
+    /// The rotation a script forces, or none (AMD-063 REQ-LUA-119). A session value: no
+    /// savestate carries it, the rollback snapshots do.
+    rot_override: Option<Vector3>,
     /// The local camera profile setting (REQ-SCN-009): the rotation becomes `R_Z(ry) · R_X(rx)`
     /// and the camera no longer aims at `P*`.
     pub local_camera: bool,
@@ -197,6 +200,7 @@ impl SceneCamera {
             target_x_filter: CriticalSmoothing::default(),
             target_y_filter: CriticalSmoothing::default(),
             target_z_filter: CriticalSmoothing::default(),
+            rot_override: None,
         };
         camera.reset_view();
         camera.snap_to_setpoints();
@@ -253,6 +257,30 @@ impl SceneCamera {
     #[must_use]
     pub const fn transition_remaining(&self) -> f32 {
         self.transition_remaining
+    }
+
+    /// The rotation a script forces on the camera, in degrees, or none for the normal behaviour
+    /// (AMD-063 REQ-LUA-119, `CS.Nes3D.CameraControl.RotOverride`).
+    #[must_use]
+    pub const fn rot_override(&self) -> Option<Vector3> {
+        self.rot_override
+    }
+
+    /// Forces the rotation of the current mode, or gives the camera its normal behaviour back.
+    ///
+    /// While it is set, every camera update writes it into the rotation setpoint of the
+    /// **current** mode and shows it at once, without the smoothing of REQ-SCN-019. Put back to
+    /// none, the camera carries on from the setpoint it was left at, which is the last forced
+    /// value.
+    ///
+    /// It is a session value: it is not persisted, it is **not** part of the camera state a
+    /// savestate carries (REQ-SCN-024 unchanged, so neither [`Self::capture`] nor
+    /// [`Self::restore`] touches it), and the host puts it back to none when a game is launched
+    /// and when the profile changes. A rollback snapshot does carry it (AMD-042 REQ-LOOP-069 and
+    /// REQ-LOOP-070 as AMD-063 amends them), which is why the host reads and writes it around
+    /// the capture and the restore rather than through them.
+    pub const fn set_rot_override(&mut self, angles: Option<Vector3>) {
+        self.rot_override = angles;
     }
 
     /// Displayed distance, after smoothing.
@@ -348,6 +376,8 @@ impl SceneCamera {
     /// Ends a game (REQ-SCN-013): back to TPV, smoothing time back to 0.4 s, then a view reset.
     /// The speed setting is the host's business (SPEC-07).
     pub fn end_game(&mut self) {
+        // AMD-063 REQ-LUA-119: a session value, back to none when the game stops.
+        self.rot_override = None;
         self.mode = CameraMode::Tpv;
         self.transition_remaining = 0.0;
         self.smooth_time = CriticalSmoothing::DEFAULT_SMOOTH_TIME;
@@ -429,6 +459,19 @@ impl SceneCamera {
     /// the target is always smoothed; in FPV it is smoothed only during the transition window,
     /// and followed instantly afterwards (REQ-SCN-020).
     pub fn advance(&mut self, real_seconds: f32) {
+        // AMD-063 REQ-LUA-119, before anything else and whatever the elapsed time: the forced
+        // rotation becomes the setpoint of the current mode and the displayed rotation at once,
+        // the three smoothing filters starting again from there. It is written before the wrap of
+        // AMD-045 REQ-SCN-071, so a forced angle outside ]-180, 180] is brought back by whole
+        // turns like any other setpoint and the orientation shown is the one asked for.
+        if let Some(forced) = self.rot_override {
+            self.current_mut().angles = forced;
+            self.angles = forced;
+            self.rx_filter.reset();
+            self.ry_filter.reset();
+            self.rz_filter.reset();
+        }
+
         self.wrap_setpoint_angles();
         if real_seconds <= 0.0 {
             return;

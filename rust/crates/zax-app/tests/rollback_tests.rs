@@ -285,6 +285,7 @@ fn req_loop_069_the_extras_travel_with_the_core_buffer_that_is_recycled() {
                 SnapshotExtras {
                     persistent_data: Some([byte; 256]),
                     camera: Some(camera),
+                    rot_override: None,
                 },
                 |buffer| {
                     buffer.push(byte);
@@ -301,6 +302,7 @@ fn req_loop_069_the_extras_travel_with_the_core_buffer_that_is_recycled() {
             SnapshotExtras {
                 persistent_data: Some([99; 256]),
                 camera: None,
+                rot_override: None,
             },
             |buffer| {
                 assert_eq!(&[0], buffer.as_slice());
@@ -343,4 +345,43 @@ fn req_pers_058_the_history_is_not_persisted() {
                 .contains("rollback")
         });
     assert!(!found);
+}
+
+/// AMD-063 REQ-LUA-119, acceptance criterion: the forced camera rotation is the fourth element of
+/// a snapshot (AMD-042 REQ-LOOP-069 as amended). Written at frame 50 and rolled back to 45, it is
+/// `nil` again, and the camera is back on the setpoints of the snapshot.
+#[test]
+fn req_lua_119_a_rollback_puts_the_forced_rotation_back() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    // Two snapshots: the one at frame 60 is what a rollback restores, and it was taken with no
+    // forced rotation.
+    harness.run_frames(120);
+    let before = harness.host.scene().camera.capture();
+
+    // A script would do this through CS.Nes3D.CameraControl.RotOverride; what the host carries is
+    // the value on the camera, and what the camera does with it is `zax-render`'s side
+    // (`amd063_rot_override_tests`), the emulation loop advancing no smoothing of its own.
+    harness
+        .host
+        .scene_mut()
+        .camera
+        .set_rot_override(Some(Vector3::new(-60.0, 10.0, 0.0)));
+    harness.run_frames(60);
+    assert_eq!(
+        Some(Vector3::new(-60.0, 10.0, 0.0)),
+        harness.host.scene().camera.rot_override()
+    );
+
+    harness.run(Command::Rollback);
+
+    // Back to nil, and the camera is on the setpoints of the snapshot rather than on the forced
+    // value the frame it left was showing.
+    assert_eq!(None, harness.host.scene().camera.rot_override());
+    let after = harness.host.scene().camera.capture();
+    assert_eq!(before.tpv.angles, after.tpv.angles);
+
+    // And the camera goes on normally: the forced value is not written again.
+    harness.run_frames(10);
+    assert_eq!(None, harness.host.scene().camera.rot_override());
 }

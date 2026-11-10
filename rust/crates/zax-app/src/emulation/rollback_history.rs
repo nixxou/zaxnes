@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 
 use zax_render::camera::CameraStateData;
+use zax_render::numerics::Vector3;
 use zax_scripting::persistent::BLOCK_SIZE;
 
 /// Highest number of snapshots kept (REQ-LOOP-030).
@@ -19,9 +20,9 @@ pub const CAPACITY: usize = 30;
 /// A snapshot is taken on every frame counter that is a multiple of 60.
 pub const INTERVAL_FRAMES: i64 = 60;
 
-/// What a snapshot carries besides the core state (AMD-042 REQ-LOOP-069): the 64 `PData` values
-/// as the block of SPEC-05 §4.6, and the camera state a savestate holds, REQ-SCN-024 being its
-/// single reference.
+/// What a snapshot carries besides the core state (AMD-042 REQ-LOOP-069, with the fourth element
+/// AMD-063 REQ-LUA-119 adds): the 64 `PData` values as the block of SPEC-05 §4.6, the camera state
+/// a savestate holds — REQ-SCN-024 being its single reference — and the forced camera rotation.
 ///
 /// Both are fixed-size and `Copy`, so the steady state of the history still allocates nothing:
 /// only the core state is a buffer, and that buffer is reused ([`RollbackHistory::capture_with`]).
@@ -32,6 +33,10 @@ pub struct SnapshotExtras {
     pub persistent_data: Option<[u8; BLOCK_SIZE]>,
     /// The camera state, or `None` when the snapshot was taken with no camera at hand.
     pub camera: Option<CameraStateData>,
+    /// The value of `CS.Nes3D.CameraControl.RotOverride` (AMD-063 REQ-LUA-119). It is a session
+    /// value, so it is **not** part of `camera` — REQ-SCN-024 is unchanged — and travels here on
+    /// its own; a rollback puts it back before the camera state it was taken with.
+    pub rot_override: Option<Vector3>,
 }
 
 impl SnapshotExtras {
@@ -39,6 +44,7 @@ impl SnapshotExtras {
     pub const NONE: Self = Self {
         persistent_data: None,
         camera: None,
+        rot_override: None,
     };
 }
 

@@ -8,6 +8,7 @@
 #![allow(clippy::float_cmp)]
 
 mod amd047_clipping_tests;
+mod amd063_lua_member_tests;
 mod api_behaviour_tests;
 mod api_coverage_tests;
 mod api_engine_tests;

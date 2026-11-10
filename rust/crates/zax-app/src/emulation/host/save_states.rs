@@ -369,6 +369,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.restore_rollback_data(block);
         }
 
+        // AMD-063 REQ-LUA-119: REQ-LOOP-070 writes the forced rotation back as well, **before**
+        // the camera state, so the restored setpoints are the snapshot's and not the forced value
+        // of the frame the rollback left.
+        self.scene
+            .camera
+            .set_rot_override(snapshot.extras.rot_override);
         if let Some(camera) = snapshot.extras.camera.as_ref() {
             self.scene.camera.restore(camera);
         }

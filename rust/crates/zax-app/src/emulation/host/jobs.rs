@@ -537,6 +537,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 // starts from the default view.
                 {
                     let scene = &mut self.scene;
+                    // AMD-063 REQ-LUA-119: the forced rotation is a session value that goes back
+                    // to none at a launch and at a change of profile, both of which come here.
+                    scene.camera.set_rot_override(None);
                     scene.camera.reset_view();
                     scene.camera.snap_to_setpoints();
                 }

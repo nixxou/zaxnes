@@ -825,6 +825,15 @@ impl ScriptCamera for SceneCameraBridge<'_> {
         self.0.current_mut().angles = angles.into();
     }
 
+    fn rot_override(&self) -> Option<Vec3> {
+        self.0.rot_override().map(Into::into)
+    }
+
+    fn set_rot_override(&mut self, angles: Option<Vec3>) {
+        // AMD-063 REQ-LUA-119: the camera takes it on its next update, without the smoothing.
+        self.0.set_rot_override(angles.map(Into::into));
+    }
+
     fn distance(&self) -> f32 {
         self.0.current().distance()
     }

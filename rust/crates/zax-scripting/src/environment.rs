@@ -183,6 +183,19 @@ pub trait ScriptCamera: Send {
     /// The default view of SPEC-06 REQ-SCN-012 (`Camera:ResetView()`).
     fn reset_view(&mut self);
 
+    /// The rotation a script forces on the camera, in degrees, or none for the normal behaviour
+    /// (AMD-063 REQ-LUA-119, `CS.Nes3D.CameraControl.RotOverride`).
+    fn rot_override(&self) -> Option<Vec3> {
+        None
+    }
+
+    /// Forces the rotation of the current mode, or gives the camera its normal behaviour back.
+    /// While it is set, every camera update takes it as the setpoint and shows it at once,
+    /// without the smoothing of REQ-SCN-019.
+    fn set_rot_override(&mut self, angles: Option<Vec3>) {
+        let _ = angles;
+    }
+
     /// The upper bound of the distance, `512 × SceneScale`.
     fn max_distance(&self) -> f32 {
         MAX_CAMERA_DISTANCE
@@ -213,6 +226,9 @@ pub trait ScriptCamera: Send {
 #[derive(Debug, Clone)]
 pub struct DetachedScriptCamera {
     angles: Vec3,
+    /// The forced rotation of AMD-063 REQ-LUA-119. This camera has no update of its own, so it
+    /// writes the angles as the real one would, which is what the acceptance criterion reads.
+    rot_override: Option<Vec3>,
     distance: f32,
     mode: i32,
     look_at: Vec3,
@@ -231,6 +247,7 @@ impl DetachedScriptCamera {
     pub const fn new() -> Self {
         Self {
             angles: Self::DEFAULT_ANGLES,
+            rot_override: None,
             distance: 260.0,
             mode: 0,
             look_at: Self::DEFAULT_LOOK_AT,
@@ -283,6 +300,19 @@ impl ScriptCamera for DetachedScriptCamera {
 
     fn set_look_at(&mut self, target: Vec3) {
         self.look_at = target;
+    }
+
+    fn rot_override(&self) -> Option<Vec3> {
+        self.rot_override
+    }
+
+    fn set_rot_override(&mut self, angles: Option<Vec3>) {
+        self.rot_override = angles;
+        // No update loop here: the angles of the current mode take the forced value at once, as
+        // the real camera does on its next update (REQ-LUA-119).
+        if let Some(forced) = angles {
+            self.angles = forced;
+        }
     }
 
     fn reset_view(&mut self) {

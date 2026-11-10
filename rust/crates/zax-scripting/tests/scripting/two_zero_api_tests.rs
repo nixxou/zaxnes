@@ -26,7 +26,9 @@ fn req_lua_112_a_two_zero_script_sees_a_version_of_at_least_two() {
         session.number(r#"return tonumber(CS.Nes3D.Info.Version:match("^%d+"))"#)
     );
     assert_eq!(1.0, session.truth(r#"CS.Nes3D.Info.Title ~= "3dSenMaker""#));
-    assert_eq!("2.0", session.text("return CS.Nes3D.Info.Version"));
+    // AMD-063 REQ-LUA-118 raises it to "2.1"; the criterion above is what AMD-040 asks and it
+    // still holds.
+    assert_eq!("2.1", session.text("return CS.Nes3D.Info.Version"));
     assert_eq!("Zaxnes", session.text("return CS.Nes3D.Info.Title"));
 }
 
@@ -70,7 +72,7 @@ fn req_lua_112_a_write_into_cs_is_dropped() {
         "#,
     );
 
-    assert_eq!("2.0", session.text("return CS.Nes3D.Info.Version"));
+    assert_eq!("2.1", session.text("return CS.Nes3D.Info.Version"));
     assert_eq!("Zaxnes", session.text("return CS.Nes3D.Info.Title"));
     assert_eq!("nil", session.text("return type(CS.Nes3D.Info.Nouveau)"));
     assert_eq!("nil", session.text("return type(CS.Autre)"));
@@ -92,7 +94,7 @@ fn req_lua_112_the_metatable_of_cs_is_hidden() {
     assert!(session
         .try_evaluate("setmetatable(CS.Nes3D.Info, {})")
         .is_err());
-    assert_eq!("2.0", session.text("return CS.Nes3D.Info.Version"));
+    assert_eq!("2.1", session.text("return CS.Nes3D.Info.Version"));
 }
 
 // REQ-LUA-113: Camera.ResetDistance

@@ -1153,6 +1153,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     let extras = SnapshotExtras {
                         persistent_data: session.capture_rollback_data(),
                         camera: Some(self.scene.camera.capture()),
+                        // AMD-063 REQ-LUA-119, the fourth element of REQ-LOOP-069.
+                        rot_override: self.scene.camera.rot_override(),
                     };
                     let core = session.core();
                     // A failure (no ROM) leaves the history as it was, as before.
