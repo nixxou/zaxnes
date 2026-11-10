@@ -54,6 +54,28 @@ pub fn shader_lines(view_width: i32, view_height: i32, lines: u32) -> (i32, i32)
     (width.max(1), lines)
 }
 
+/// The 2D picture of `aspect` drawn at `lines` lines (0: the view's own height), never more
+/// lines than the view has.
+#[cfg(feature = "shaders")]
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // view sizes < 2^24
+pub fn picture_lines(aspect: f32, lines: u32, view_height: i32) -> (i32, i32) {
+    let view_height = view_height.max(1);
+    let lines = if lines == 0 {
+        view_height
+    } else {
+        i32::try_from(lines)
+            .unwrap_or(i32::MAX)
+            .clamp(1, view_height)
+    };
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        4.0 / 3.0
+    };
+    (((lines as f32) * aspect).round().max(1.0) as i32, lines)
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 // the C# `(int)MathF.Round(size * factor)` of a view size below 2^24
 fn scaled(size: i32, factor: f32) -> i32 {

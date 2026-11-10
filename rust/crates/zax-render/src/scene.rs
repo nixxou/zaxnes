@@ -416,6 +416,20 @@ impl SceneState {
             self.clipping.w.max(self.picture_crop.w),
         )
     }
+
+    /// The width over the height of the head-on 2D picture, as the head-on view frames it (the
+    /// rows of `SceneCamera::picture_view`, the clipped columns and the widescreen margins):
+    /// the scene drawn at this aspect holds the picture and nothing around it.
+    #[must_use]
+    pub fn picture_aspect(&self) -> f32 {
+        let rect = VisibleRect::from_clipping(self.picture_clipping());
+        let top = rect.max_y.min(geometry::SCENE_HEIGHT);
+        let bottom = rect
+            .min_y
+            .max(geometry::SCENE_HEIGHT - geometry::FRAME_HEIGHT);
+        let width = rect.width() + 2.0 * self.margin.max(0.0);
+        width.max(1.0) / (top - bottom).max(1.0)
+    }
 }
 
 /// What one displayed frame lends the renderer: the tile list the 3D engine produced

@@ -108,18 +108,33 @@ fn a_parameter_is_set_changed_and_reset() {
 }
 
 #[test]
-fn the_sixteen_keys_are_in_the_catalogue() {
+fn the_twenty_keys_are_in_the_catalogue() {
     let keys: Vec<String> = catalogue::descriptors()
         .map(|descriptor| descriptor.key().into_owned())
         .filter(|key| key.starts_with("shader."))
         .collect();
-    assert_eq!(keys.len(), 16);
+    assert_eq!(keys.len(), 20);
     for slot in ["2d", "2d_ws", "3d", "3d_ws"] {
-        for part in ["mode", "preset", "lines", "params"] {
+        for part in ["mode", "preset", "lines", "params", "area"] {
             assert!(
                 keys.contains(&format!("shader.{slot}.{part}")),
                 "{slot}.{part}"
             );
         }
     }
+}
+
+#[test]
+fn a_bezel_preset_fills_the_window_unless_told_otherwise() {
+    use zax_settings::shader_slots::{fills_window, AREA_AUTO, AREA_PICTURE, AREA_WINDOW};
+    let bezel = "G:/slang-shaders/bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp";
+    let crt = "G:/slang-shaders/crt/crt-easymode.slangp";
+    assert!(fills_window(AREA_AUTO, bezel));
+    assert!(!fills_window(AREA_AUTO, crt));
+    assert!(!fills_window(AREA_PICTURE, bezel));
+    assert!(fills_window(AREA_WINDOW, crt));
+    assert!(fills_window(
+        AREA_AUTO,
+        "C:\\shaders\\bezel\\koko-aio\\x.slangp"
+    ));
 }

@@ -701,16 +701,25 @@ impl Running {
         let three_d = !scene.two_dimensional_mode;
         let wide = scene.margin > 0.0 || scene.margin_y > 0.0;
         let request = match preset_from_environment() {
-            Some(preset) => Some(ShaderRequest {
-                preset,
-                lines: zax_settings::shader_slots::CONSOLE_LINES.unsigned_abs(),
-                parameters: Vec::new(),
-            }),
+            Some(preset) => {
+                let fills = zax_settings::shader_slots::fills_window(
+                    zax_settings::shader_slots::AREA_AUTO,
+                    &preset.to_string_lossy(),
+                );
+                Some(ShaderRequest {
+                    preset,
+                    lines: zax_settings::shader_slots::CONSOLE_LINES.unsigned_abs(),
+                    parameters: Vec::new(),
+                    picture_aspect: (!three_d && !fills).then(|| scene.picture_aspect()),
+                })
+            }
             None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
                 |choice| ShaderRequest {
                     preset: choice.preset.into(),
                     lines: choice.lines,
                     parameters: choice.parameters,
+                    picture_aspect: (!three_d && !choice.fills_window)
+                        .then(|| scene.picture_aspect()),
                 },
             ),
         };
@@ -749,6 +758,18 @@ impl Running {
             .wgpu()
             .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_lines)
         {
+            // In 2D the preset gets the game picture alone, as in RetroArch: the scene is drawn
+            // at the picture's aspect, and the preset places it in the window (a bezel around it,
+            // or the picture centred).
+            Some(lines)
+                if self.host.scene().two_dimensional_mode && self.host.scene().picture_head_on =>
+            {
+                render_scaling::picture_lines(
+                    self.host.scene().picture_aspect(),
+                    lines,
+                    view_height,
+                )
+            }
             Some(lines) if lines > 0 => {
                 render_scaling::shader_lines(width.max(1), view_height, lines)
             }

@@ -394,7 +394,19 @@ impl WgpuDisplay {
         (width, height): (u32, u32),
     ) -> Option<wgpu::CommandBuffer> {
         let layer = scene.height.clamp(1, height);
-        let rectangle = (0, height - layer, width, layer);
+        // The picture's rectangle, centred in the scene's: the final pass clears the rest.
+        let rectangle = match self.shaders.picture_aspect() {
+            Some(aspect) if aspect.is_finite() && aspect > 0.0 => {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss
+                )] // Window sizes.
+                let inner = ((layer as f32 * aspect).round() as u32).clamp(1, width);
+                ((width - inner) / 2, height - layer, inner, layer)
+            }
+            _ => (0, height - layer, width, layer),
+        };
         self.shaders.record(
             scene.texture,
             view,

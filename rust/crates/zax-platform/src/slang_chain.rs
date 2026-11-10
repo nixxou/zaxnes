@@ -40,6 +40,9 @@ pub struct ShaderRequest {
     pub lines: u32,
     /// The parameters the player changed, over the preset's own values.
     pub parameters: Vec<(String, f32)>,
+    /// The width over the height of the picture the preset draws in, centred in the window;
+    /// none for the whole window (a bezel around the picture, or the 3D scene).
+    pub picture_aspect: Option<f32>,
 }
 
 /// A compiled preset.
@@ -273,6 +276,13 @@ impl SlangShaders {
     pub fn update(&mut self, frame: usize) -> Option<String> {
         self.frame = frame;
         self.poll()
+    }
+
+    /// The width over the height of the rectangle the preset draws in (see
+    /// [`ShaderRequest::picture_aspect`]).
+    #[must_use]
+    pub fn picture_aspect(&self) -> Option<f32> {
+        self.wanted.as_ref()?.picture_aspect
     }
 
     /// The lines the scene has to be drawn at for the preset in use: none without a preset, 0

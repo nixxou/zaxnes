@@ -2187,7 +2187,9 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
 /// others also follow their fallback (2D wide -> 2D, 3D -> 2D, 3D wide -> 3D). The 2D slots
 /// read the picture at the 240 lines of the console, the 3D ones at the window's own (0).
 fn shader_slots(out: &mut Vec<SettingDescriptor>) {
-    use crate::shader_slots::{ShaderSlot, FOLLOW, MAXIMUM_LINES, OFF, PRESET};
+    use crate::shader_slots::{
+        ShaderSlot, AREA_AUTO, AREA_PICTURE, AREA_WINDOW, FOLLOW, MAXIMUM_LINES, OFF, PRESET,
+    };
     for slot in ShaderSlot::ALL {
         let ids = slot.ids();
         let (default_mode, modes) = match slot.fallback() {
@@ -2246,6 +2248,22 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
                 SettingTheme::Video,
             )
             .with_label("Shader parameters"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.area,
+                SettingKind::Enum,
+                SettingValue::Enum(AREA_AUTO),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(AREA_AUTO, "Auto"),
+                opt(AREA_PICTURE, "Picture"),
+                opt(AREA_WINDOW, "Whole window"),
+            ]))
+            .with_label("Shader area"),
         );
     }
 }

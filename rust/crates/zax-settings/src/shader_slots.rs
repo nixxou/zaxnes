@@ -20,6 +20,15 @@ pub const OFF: i32 = 1;
 /// `shader.<slot>.mode`: the preset of `shader.<slot>.preset`.
 pub const PRESET: i32 = 2;
 
+/// `shader.<slot>.area`: the whole window for a preset that draws a bezel around the picture,
+/// the picture's own rectangle otherwise (see [`fills_window`]).
+pub const AREA_AUTO: i32 = 0;
+/// `shader.<slot>.area`: the preset draws in the picture's rectangle, black bands around it.
+pub const AREA_PICTURE: i32 = 1;
+/// `shader.<slot>.area`: the preset draws over the whole window (a bezel, a TV around the
+/// picture).
+pub const AREA_WINDOW: i32 = 2;
+
 /// The lines of the console's picture, the default of the 2D slots.
 pub const CONSOLE_LINES: i32 = 240;
 /// The most lines `shader.<slot>.lines` takes (0 is the window's own).
@@ -45,6 +54,7 @@ pub struct SlotIds {
     pub preset: SettingId,
     pub lines: SettingId,
     pub params: SettingId,
+    pub area: SettingId,
 }
 
 impl ShaderSlot {
@@ -114,24 +124,28 @@ impl ShaderSlot {
                 preset: SettingId::Shader2dPreset,
                 lines: SettingId::Shader2dLines,
                 params: SettingId::Shader2dParams,
+                area: SettingId::Shader2dArea,
             },
             Self::TwoDWide => SlotIds {
                 mode: SettingId::Shader2dWsMode,
                 preset: SettingId::Shader2dWsPreset,
                 lines: SettingId::Shader2dWsLines,
                 params: SettingId::Shader2dWsParams,
+                area: SettingId::Shader2dWsArea,
             },
             Self::ThreeD => SlotIds {
                 mode: SettingId::Shader3dMode,
                 preset: SettingId::Shader3dPreset,
                 lines: SettingId::Shader3dLines,
                 params: SettingId::Shader3dParams,
+                area: SettingId::Shader3dArea,
             },
             Self::ThreeDWide => SlotIds {
                 mode: SettingId::Shader3dWsMode,
                 preset: SettingId::Shader3dWsPreset,
                 lines: SettingId::Shader3dWsLines,
                 params: SettingId::Shader3dWsParams,
+                area: SettingId::Shader3dWsArea,
             },
         }
     }
@@ -149,6 +163,8 @@ pub struct ShaderChoice {
     pub lines: u32,
     /// The parameters the player changed, in the order they were written.
     pub parameters: Vec<(String, f32)>,
+    /// Whether the preset draws over the whole window rather than the picture's rectangle.
+    pub fills_window: bool,
 }
 
 /// The shader of the display mode (`three_d`, `wide`), or none: a slot that is off, a preset
@@ -167,15 +183,34 @@ pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<Shade
                     return None;
                 }
                 let parameters = parse_parameters(model.get(ids.params).as_text());
+                let fills_window = fills_window(model.get(ids.area).as_int(), &preset);
                 return Some(ShaderChoice {
                     slot,
                     preset,
                     lines,
                     parameters,
+                    fills_window,
                 });
             }
             FOLLOW => slot = slot.fallback()?,
             _ => return None,
+        }
+    }
+}
+
+/// Whether a preset of `area` (`shader.<slot>.area`) draws over the whole window: in Auto, the
+/// presets that draw a bezel around the picture do (their path names a bezel folder, as the
+/// Mega Bezel, koko-aio and uborder ones of `RetroArch`'s collection do).
+#[must_use]
+pub fn fills_window(area: i32, preset: &str) -> bool {
+    match area {
+        AREA_PICTURE => false,
+        AREA_WINDOW => true,
+        _ => {
+            let path = preset.to_ascii_lowercase().replace('\\', "/");
+            ["bezel", "koko-aio", "uborder"]
+                .iter()
+                .any(|word| path.contains(word))
         }
     }
 }
