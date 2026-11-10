@@ -23,11 +23,13 @@ not by FCEUX, and **none the other way round**. FCEUX must therefore never becom
 a game Zaxnes already runs: it is the engine you reach for when Zaxnes cannot run a game at all,
 or runs it wrongly.
 
-One further fact belongs in any decision to ship it: on the 291 public ROMs, **one takes the FCEUX
-process down** — `other/oam3.nes`, through a one-byte heap overflow in FCEUX's own `$2007` write
-path (`ppu.cpp:978`, diagnosed with ASAN; §7 below). An engine that can corrupt the heap on a
-cartridge image cannot be given an arbitrary ROM in the same process as the user's unsaved game
-without a decision about that first.
+One further fact belonged in any decision to ship it, and lot FCEUX-48 has since closed it: on the
+291 public ROMs, **one took the FCEUX process down** — `other/oam3.nes`, through a heap overflow in
+FCEUX's own `$2007` write path, reachable from a cartridge image. It is **fixed** in the fork (§7,
+rewritten: the cause was not what lot FCEUX-1 thought), so an arbitrary ROM is no longer a
+memory-safety question. What is left of the decision is a judgement about *quality* — which games
+the 3D on FCEUX is worth offering for — and §6 and the validated-games marker of lot FCEUX-48 are
+that.
 
 ## 2. The engine abstraction `zax-app` needed
 
@@ -328,37 +330,93 @@ reading it:
 
 ## 7. The FCEUX defect found, and what to do about it
 
-`other/oam3.nes` (mapper 7) corrupts the heap from about 300 frames in. ASAN on the fork's Linux
-build:
+> **Done by lot FCEUX-48 step 1 (FCEUX-8), and lot FCEUX-1's diagnosis below was wrong.** It is
+> not a one-byte overflow and it is not fixed by passing `mCHRRAMSize` to `SetupCartCHRMapping`.
+> This section is rewritten; the working is `docs/progress/FCEUX-48.md` step 1 and the fork's
+> `zax/README.md` § *The CHR-RAM overflow*. The **upstream report is the owner's** to make: the
+> fix in the fork is written to be submitted as it stands, and carries no `// ZAX:` marker for
+> that reason.
+
+`other/oam3.nes` (mapper 7) corrupted the heap from about 300 frames in. ASAN on the fork's Linux
+build, before the fix:
 
     heap-buffer-overflow, WRITE of size 1
-      #0 B2007      src/ppu.cpp:978
+      #0 B2007      src/ppu.cpp:1008
       #1 WrMem      src/x6502.cpp:173
     0 bytes after a 1024-byte region allocated by iNES_Init, src/ines.cpp:1220
 
-`VPage[tmp >> 10][tmp] = V` writes one byte past the CHR-RAM. `ines.cpp:1217-1222` pads the
-allocation up to 1 KiB — its own comment says the padding is there "to prevent malicious access
-from NES software" — but then calls `SetupCartCHRMapping` with the **unpadded** `CHRRAMSize`, so a
-1 KiB-granular `VPage` index can still reach `VROM[1024]`.
+### The real cause
+
+ASAN reports the *first* byte outside the buffer, which is what made this look like a one-byte
+overflow. It is not: **the whole of `$0400-$1FFF` is outside it.**
+
+`setchr8()` (`src/cart.cpp:262-274`) points all eight 1 KiB `VPage` slots at one **linear** 8 KiB
+window from the chip base — `VPageR[x] = &CHRptr[r][V << 13]` for every `x`, with no per-slot
+offset — and `SetupCartCHRMapping` (`src/cart.cpp:126-139`) computes `CHRmask8 = (size >> 13) - 1`
+and then **clamps it to 0** when that underflows. So for a chip smaller than 8 KiB the window is
+still 8 KiB wide while the buffer is not. `setchr4` and `setchr2` clamp the same way below 4 KiB
+and 2 KiB. At or above the window the mask is sound even for a size that is not a power of two,
+since `V <= (size >> n) - 1` gives `(V + 1) << n <= size`.
+
+A chip that small comes from exactly one place: the iNES loader's NES 2.0 branch
+(`src/ines.cpp:1215`), where byte 11 encodes each half of the CHR-RAM as `64 << shift` and may
+declare as little as 64 bytes. `oam3.nes` declares 1 KiB and is mapper 7 (ANROM), which calls
+`setchr8`. The loader padded the allocation to **1 KiB** — `VPage`'s *granularity*, not the width
+of the window `setchr8` installs — which is why its own comment about preventing "malicious access
+from NES software" did not.
 
 This is **upstream FCEUX's**, not the fork's: every frame of the trace is FCEUX's own code, no stub
-or patch of ours appears in it, and the path is reached by the plain API. The apparent one-line fix
-is to pass `mCHRRAMSize` to `SetupCartCHRMapping`, but that changes how a cart with sub-1 KiB
-CHR-RAM mirrors — an emulation decision about exotic hardware — so lot FCEUX-1 recorded it and
-**left it to the owner** rather than taking it unilaterally.
+or patch of ours appears in it, and the path is reached by the plain API.
 
-Three options, in increasing cost:
+### The fix taken
 
-1. take the one-line fix in the fork and report it upstream (cheapest; needs a judgement on the
-   mirroring);
-2. run FCEUX in a child process in the shipped application too, as the harness now does
-   (robust, and it also bounds any future such bug — but it means a frame and audio transport
-   across a process boundary, which is a lot of work and latency);
-3. ship FCEUX only for games on a vetted list (cheap, and defensible given that FCEUX exists for
-   specific games anyway).
+Pad the allocation to **8 KiB** in `iNES_Init` and leave everything else alone: the **declared**
+size still goes to `SetupCartCHRMapping` and to `AddExState`, and `FCEU_MemoryRand` still fills
+exactly the declared size. All three matter —
 
-This note recommends **1 plus 3**: fix it in the fork, report it, and still not hand FCEUX an
-arbitrary ROM silently.
+* `FCEU_MemoryRand` draws one `xoroshiro128plus` value per byte under `RAMInitOption` 3, so the
+  random RAM-init option consumes the same values as before. **A movie must not be affected**, and
+  §5's whole point is that a movie's header carries that option;
+* `AddExState(VROM, CHRRAMSize, …)` keeps the `CHRR` block at its old length, so savestates do not
+  move either;
+* the padding is zeroed and never read back as cartridge data.
+
+**The apparent one-line fix does not work.** Passing `mCHRRAMSize` to `SetupCartCHRMapping` leaves
+`CHRmask8` at 0 for an 8 KiB chip — so the window is unchanged and the overflow stands — and it
+*would* change how a sub-8 KiB chip mirrors under `setchr1`/`setchr2`, which is the emulation
+decision lot FCEUX-1 rightly did not want to take.
+
+What the fix is **not**: it makes the access safe, not accurate. Above the declared size the PPU now
+sees the zero padding where the hardware — and `zax-nes`, which wraps every CHR access modulo the
+buffer (`cartridges/mod.rs`'s `wrap_offset`) — would mirror the chip. Making `setchr8` mirror per
+slot is a change to a function every board uses; it is not needed to close the memory error and it
+was not taken.
+
+### What it was checked against
+
+| | |
+|---|---|
+| `oam3.nes` under ASAN | **3 000 frames clean**; it faults at about frame 300 without the fix |
+| `oam3.nes` on MSVC and on Linux | the **same digests**, which it could not give before — the overflow read whatever the allocator had put there |
+| `nestest.nes`, 60 frames | unchanged digest for digest, state hint and length included |
+| every other CHR-RAM registration in FCEUX | checked by reading; **none has the defect**. The UNIF path's floor is 8 KiB, mapper 77's 6 KiB chip is addressed only by `setchr2r`/`setchr4r` whose windows fit, and every other sub-8 KiB chip is addressed only by `setchr1r`. The full table is in the fork's `zax/README.md` |
+| the ROM sets | of **446** iNES images across the three sets, **exactly one** declares a NES 2.0 CHR-RAM under 8 KiB, and it is `oam3.nes`. Nothing else can have moved |
+| the two engines on `oam3.nes` | `fceux-tiles` at frames 60, 300, 1 200 and 3 000: **identical in order at every one**, 1 024 records, pictures identical. Their pictures first part at frame 3, so the padding-against-mirroring difference above is latent on this ROM rather than absent |
+
+### The vetting, which is the other half
+
+Three options were on the table, in increasing cost:
+
+1. take the fix in the fork and report it upstream;
+2. run FCEUX in a child process in the shipped application too, as the harness does;
+3. ship FCEUX only for games on a vetted list.
+
+This note recommended **1 plus 3**, and lot FCEUX-48 did both: step 1 is the fix, and step 2 is the
+vetted list as a **marker** rather than a gate — a table of the games validated for 3D on FCEUX,
+identified by ROM hash, with the engine row and the HUD saying "not validated on FCEUX" for
+anything else. The option stays available for every game, which is the owner's call and is recorded
+as such: with the overflow closed, an arbitrary ROM is no longer a memory-safety question, and
+offering the engine with an honest marker is better than a list that silently refuses a game.
 
 Note also that a crashing FCEUX child **hung** rather than dying when started by the harness
 (Windows fault reporting waiting on something that never answers), which is why `fceux-run` gives
