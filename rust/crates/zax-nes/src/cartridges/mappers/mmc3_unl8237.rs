@@ -386,6 +386,21 @@ impl Mapper for Mmc3Unl8237 {
         self.refresh();
     }
 
+    /// **The one board of this build that reacts to a press on RESET**, and the page says so in
+    /// the same breath as it gives the power-up value: *"The Outer Bank Register is reset to its
+    /// power-up value if a Reset has been detected via an interruption of the M2 signal. This
+    /// makes it difficult to dump these cartridges using a Kazzo device."*
+    ///
+    /// So `$5001` alone goes back, and that is the whole of it: the page says nothing about the
+    /// mode register, the scramble register or the MMC3 chip behind them, and the connector has
+    /// no reset pin for them to see (see [`Mapper::soft_reset`]). A reset-based multicart is
+    /// exactly a board that changes the game it offers when the player presses RESET, so taking
+    /// the outer bank away is the behaviour and not a side effect of one.
+    fn soft_reset(&mut self, _memory: &mut CartridgeMemory) {
+        self.outer = Self::OUTER_POWER_ON;
+        self.refresh();
+    }
+
     fn irq_asserted(&self) -> bool {
         self.mmc3.irq_asserted()
     }

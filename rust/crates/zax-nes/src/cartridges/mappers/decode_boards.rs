@@ -296,6 +296,13 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.reset(memory));
     }
 
+    /// A press on RESET, forwarded so that a **reset-detecting multicart** inside this dispatch
+    /// hears it: see [`Mapper::soft_reset`], whose default is to do nothing. One cold body in a
+    /// dispatch nothing hot inlines — this is called once per reset, not once per cycle.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        inner!(self, b => b.soft_reset(memory));
+    }
+
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_register(memory, address, value));
     }

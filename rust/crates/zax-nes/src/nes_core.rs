@@ -524,8 +524,15 @@ impl NesCore {
     /// The **soft** reset of AMD-044 REQ-CORE-122, which imitates a press on the console's
     /// RESET button: the internal RAM, the save RAM and the CHR RAM are **kept**, the CPU keeps
     /// A, X, Y and every flag but `I` while S drops by 3 and PC comes from the reset vector,
-    /// and the PPU, the APU, the mapper and the controller ports go to their documented
-    /// *after reset* state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    /// and the PPU, the APU and the controller ports go to their documented *after reset*
+    /// state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    ///
+    /// **The mapper is left alone**, which is the one way this differs from REQ-CORE-122 as
+    /// written ("le PPU, l'APU *et le mapper* suivent leur état documenté *after reset*"): the
+    /// mapper half of that clause has no documented state behind it, because the cartridge
+    /// connector has no `/RESET` pin for a mapper to see. The amendment the clause needs is
+    /// written up in `docs/review/AMD-REQ-CORE-122-mapper-reset.md`; the code implements the
+    /// hardware, on the owner's decision of 2026-11-10.
     ///
     /// The hard reset of [`Self::reset`] is unchanged: it stays a power cycle (DEC-02-Q3),
     /// which is why `cpu_reset/ram_after_reset` fails under it on purpose (REQ-CORE-004) and
@@ -546,12 +553,20 @@ impl NesCore {
         // read again on the next frame (AMD-044 §2).
         self.bus.input_mut().reset();
 
-        // The mapper follows its documented after-reset state; the volatile RAM it owns —
-        // PRG-RAM and CHR-RAM — is deliberately not cleared.
-        // `Cartridge::reset` refreshes the fast ROM windows the bus reads through itself
-        // (performance history §5.1, "plain PRG-ROM windows").
+        // **The mapper is left alone** (lot EVAL-SYNC-3 step 4, owner's decision of 2026-11-10).
+        // The NES cartridge connector has no `/RESET` pin — nesdev's "Cartridge connector" lists
+        // every pin of both edges and there is none — so a mapper cannot see the reset button:
+        // its bank registers, its IRQ unit and its A12 watcher hold whatever the game last wrote
+        // into them, across as many resets as the player presses. The boards that *do* react are
+        // the reset-detecting multicarts, which notice the absence of M2 rather than a wire, and
+        // they say so by overriding `Mapper::soft_reset`; `Cartridge::soft_reset` is the call
+        // that reaches them and that refreshes the bus's fast windows afterwards.
+        //
+        // Until this lot `Cartridge::reset` was called here, which put every board back to
+        // power-on. See `docs/review/AMD-REQ-CORE-122-mapper-reset.md` for the amendment this
+        // asks of REQ-CORE-122, whose current wording covers the mapper.
         if let Some(cartridge) = self.bus.cartridge_mut() {
-            cartridge.reset();
+            cartridge.soft_reset();
         }
 
         self.cpu.soft_reset(&mut self.bus);

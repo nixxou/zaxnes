@@ -20,7 +20,7 @@ is to be **fixed**, which makes this the first lot of the three to change `zax-n
 - [x] 1. The Reset semantics in the `.bk2` reader, and the same question for `.fm2`.
 - [x] 2. What frame 246 does, on Zaxnes.
 - [x] 3. What the hardware does there.
-- [ ] 4. The mapper's soft reset.
+- [x] 4. The mapper's soft reset.
 - [ ] 5. The report.
 - [ ] 6. The final pass.
 
@@ -492,3 +492,126 @@ second thing to ask for is a per-scanline log of that one frame:
 
 Zaxnes can produce all four from `frame-trace --out` today: the IRQ entry is marked in the trace
 and every line carries its scanline, dot and `CYC`.
+
+---
+
+## Step 4 — the mapper's soft reset
+
+The owner's decision of 2026-11-10, and the one emulation change this lot makes.
+
+### What changed, in five places
+
+| | |
+|---|---|
+| `Mapper::soft_reset` (`cartridges/mappers/mod.rs`) | **new**, and it does **nothing** by default, with the nesdev references in its own doc comment |
+| `NesCore::soft_reset` (`nes_core.rs`) | calls `Cartridge::soft_reset` instead of `Cartridge::reset` |
+| `Cartridge::soft_reset` (`cartridges/mod.rs`) | **new**: `board.soft_reset(memory)`, then the two cache refreshes. The mirroring and the M2 cycle counter are **no longer zeroed**; `Cartridge::reset` still zeroes both |
+| `Mmc3Unl8237::soft_reset` (`mappers/mmc3_unl8237.rs`) | the **only** override: `$5001` back to `$0F` |
+| `IrqBoard`, `SmallBoard`, `DecodeBoard`, `Mmc3ChrRam` | forward the call, so that the 215 hears it through their dispatches |
+
+The four forwards are what the first run of the multicart test caught: those enums forward `reset`
+by hand, so without a `soft_reset` arm the default no-op answered for every board behind them and
+the 215 never heard the reset. One cold body each, in a dispatch nothing hot inlines — `soft_reset`
+runs once per reset and not once per cycle, which is why the performance notes those files carry
+about `irq_asserted` and `chr_view` do not apply.
+
+### Which boards react, and why only one
+
+The default is the hardware's. nesdev's "Cartridge connector" lists every pin of both edges — the
+60-pin Famicom and the 72-pin NES: power and ground, the CPU's address, data and control lines, the
+PPU's lines, CIRAM, audio, `/IRQ`, `M2`, `/ROMSEL`, `SYSTEM CLK`, the expansion pins and the CIC's
+two — and **no `/RESET` among them**. nesdev's "CPU power up state", *after reset*, says the
+internal RAM is "unchanged" and does not mention the cartridge at all.
+
+The boards that do react see the reset as the **absence of M2**. nesdev, "NES 2.0 Mapper 313"
+(reset-based multicarts around the MMC3 ASIC): *"When an interruption of the M2 signal is detected,
+the higher address lines are automatically incremented."* Of those numbers — 60, 313, 331, 343,
+349, 350, 351, 356 and the rest of the reset-based family — **this build implements none**, with one
+exception: mapper **215**, whose own page states the behaviour in so many words:
+
+> *"The Outer Bank Register is reset to its power-up value if a Reset has been detected via an
+> interruption of the M2 signal. This makes it difficult to dump these cartridges using a Kazzo
+> device."*
+
+So one override, of one register, with the page's sentence beside it. Nothing else in the build
+claims a documented reset reaction — searched for, not assumed: the only other mentions of a
+register cleared "on reset" are mapper 163's and the PEC-9588's, and both are power-on language
+(the sentence that follows each is about where the game's **reset vectors** are found, i.e. what
+the board must present at power-up).
+
+### The spec, which this lot may not edit
+
+`docs/review/AMD-REQ-CORE-122-mapper-reset.md` carries the proposed amendment: the exact new
+wording of REQ-CORE-122's third tiret, in French, with the nesdev citations and the rationale. It
+is built on the moule of **AMD-061 §5**, which is the same discovery made once already for the
+*hard* reset (Q-112: "sauf pour une carte dont la documentation publique prescrit que son état
+survit au signal RESET ; la liste de ces cartes est tenue par la spec", list of one — mapper 28).
+The proposed clause is its mirror image: for the soft reset the default is **conservation** and the
+exception is **reaction**, and its list is also of one — mapper 215.
+
+REQ-CORE-004 and DEC-02-Q3 are untouched: a hard reset stays a power cycle.
+
+### Tests
+
+Three new in `zax-nes`'s own `soft_reset_tests.rs`, which is where REQ-CORE-122 is measured:
+
+| | |
+|---|---|
+| `req_core_122_a_soft_reset_leaves_the_mmc3_alone` | four bank registers and the mirroring survive a soft reset on a mapper-4 image; a **power cycle still takes them away** |
+| `req_core_122_a_soft_reset_keeps_the_mmc3_irq_armed` | measured through the `/IRQ` **line**, with rendering off and the A12 rises made by hand as the other MMC3-clone IRQ tests make them: the latch and the enable survive, so the counter fires again with no further write — and a power cycle silences it however long it is clocked |
+| `req_core_122_a_reset_detecting_multicart_puts_its_outer_bank_back` | mapper 215: `$5001` back to `$0F` and the MMC3 registers behind it untouched. `#[cfg(feature = "board-215")]` |
+
+The multicart test uses the synthetic image `MapperRom` builds, because **there is no mapper-215
+image under `assets-free/test-roms`** — §3.4 of `docs/review/MF-6-inventory.md`: 48 MMC3-clone
+numbers, none with a licensed title. That is checked rather than assumed: every `.nes` under
+`assets-free/test-roms` was read and its mapper number taken from its header, and none is 215.
+Every other mapper-215 test of this workspace uses the same synthetic image.
+
+And EVAL-SYNC-2's `soft_reset_mapper_tests.rs` is **flipped**, as its own module comment said
+whoever fixed this should do. It is now a contract rather than a reproduction:
+`a_soft_reset_puts_the_mmc3_bank_registers_back_to_power_on` becomes
+`a_soft_reset_keeps_the_mmc3_bank_registers_and_a_power_cycle_does_not`, on the same public
+`mmc3_test/1-clocking.nes` and with the power cycle asserted beside the soft reset.
+
+### Checked
+
+| | |
+|---|---|
+| `zax-nes`, the whole suite | **1 177 passed, 0 failed, 10 ignored** |
+| `zax-harness soft_reset_mapper_tests` | 3 passed |
+| **`golden-core`**, 98 originals, 1 200 frames | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` |
+
+The golden-core digest is **byte-identical** to FCEUX-23's baseline and to EVAL-SYNC's and
+EVAL-SYNC-2's. That is the expected answer and it is also the bound on the change: `golden-core`
+drives `NesCore::reset`, the power cycle, which this lot does not touch. No power-on behaviour
+moved, so nothing had to be explained away.
+
+### Kirby, re-run to the end
+
+| | |
+|---|---|
+| frames run | **156 312**, the whole movie, all seven resets, no stop |
+| the seven resets land on | frames 4, 22 555, 25 799, 29 799, 62 577, 87 951 and 92 438 (the `.bk2` semantics of step 1) |
+| checksum lines agreeing | 2 of 1 563, the last at frame 200 |
+| **lag counts agreeing** | **all 1 563**, and the total is **24** — `BizHawk`'s own figure |
+| the first 400 frames, byte for byte | **190 of 400 identical, and all 400 with no live difference** |
+| the six screenshots | **byte-identical to step 2's run, at all six frames** |
+
+So the mapper fix changes **nothing at all** on this movie, and that is not a disappointment but
+the expected result twice over. The only reset before the divergence is the one on frame 4, three
+frames into a boot that has not yet written a bank register worth keeping — EVAL-SYNC-2 measured
+that too. And the six later resets land after frame 22 000, by which time the two machines are
+already apart, so nothing there can be held against anything.
+
+**What the six later resets now do** is still worth stating, because it is new behaviour:
+
+* the machine survives all six — the movie runs its 156 312 frames with no stop, and the picture
+  keeps moving after each one (frames 22 554, 22 556 and 22 700 around the second reset are three
+  different pictures);
+* the resets **matter**: with `--resets off` the pictures at frames 22 556, 22 560 and 22 700 all
+  differ from the honoured run, so dropping them is not a no-op this far into the movie — unlike
+  at frame 400, where EVAL-SYNC-2 found dropping them changed nothing;
+* and the game now re-enters its reset vector with the **MMC3 banks it had chosen** still mapped,
+  which is what the hardware does and the reason nesdev requires an MMC3 game's reset vector to
+  point into `$E000-$FFFF` — the one window the chip cannot move. *Kirby* does, which is why the
+  six resets are survivable at all.

@@ -408,6 +408,13 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.reset(memory));
     }
 
+    /// A press on RESET, forwarded so that a **reset-detecting multicart** inside this dispatch
+    /// hears it: see [`Mapper::soft_reset`], whose default is to do nothing. One cold body in a
+    /// dispatch nothing hot inlines — this is called once per reset, not once per cycle.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        inner!(self, b => b.soft_reset(memory));
+    }
+
     /// **`#[inline(never)]`, and it is the whole performance story of this lot.**
     ///
     /// Inlined, this one body is the thirteenth in the dispatch `Cpu6502::branch` folds

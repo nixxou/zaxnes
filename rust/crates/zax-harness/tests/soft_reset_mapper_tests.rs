@@ -1,22 +1,23 @@
-//! **What a press on RESET does to the cartridge**, measured on `zax-nes` and held against the
-//! hardware (lot EVAL-SYNC-2 step 3a).
+//! **What a press on RESET does to the cartridge**, measured on `zax-nes` on a *public MMC3 ROM*
+//! and held against the hardware (lot EVAL-SYNC-2 step 3a, **flipped by EVAL-SYNC-3 step 4**).
 //!
 //! The NES cartridge connector has **no reset line**. nesdev's "Cartridge connector" lists every
 //! pin of both the 60-pin Famicom and the 72-pin NES edge — power, the CPU address, data and
-//! control lines, the PPU lines, CIRAM, audio, /IRQ, the CIC pins — and no `/RESET` among them.
-//! A mapper therefore cannot see the console's reset button at all: its registers hold whatever
-//! the game last wrote into them, across as many resets as the player presses.
+//! control lines, the PPU lines, CIRAM, audio, /IRQ, M2, /ROMSEL, SYSTEM CLK, the expansion pins
+//! and the CIC's two — and no `/RESET` among them. A mapper therefore cannot see the console's
+//! reset button at all: its registers hold whatever the game last wrote into them, across as
+//! many resets as the player presses.
 //!
-//! `NesCore::soft_reset` (`crates/zax-nes/src/nes_core.rs`) calls `Cartridge::reset`, and for
-//! mapper 4 that is `Mmc3Board::reset` (`crates/zax-nes/src/cartridges/mappers/mmc3.rs:1162`),
-//! which puts the eight bank registers, the bank-select latch, the PRG-RAM protect byte, the
-//! whole IRQ unit and the A12 watcher back to their power-on values. This file is the smallest
-//! demonstration of that: it needs no movie, no reference and no commercial game.
+//! EVAL-SYNC-2 found that `NesCore::soft_reset` called `Cartridge::reset`, which put every board
+//! back to power-on, and recorded it here as a **reproduction** with a note saying that whoever
+//! fixed it should rewrite this file the other way round. The owner decided to fix it on
+//! 2026-11-10; `NesCore::soft_reset` now calls `Cartridge::soft_reset`, which reaches
+//! `Mapper::soft_reset` — a no-op for every board but a reset-detecting multicart — and this
+//! file is now a **contract**.
 //!
-//! It is a **reproduction, not a contract.** It asserts what the core does today so that the
-//! finding of `docs/review/MOVIE-SYNC.md` can be re-checked in one command; whoever changes
-//! `soft_reset` to leave the mapper alone should expect this file to fail and should rewrite it
-//! the other way round.
+//! It is the complement of `zax-nes`'s own `soft_reset_tests.rs`, which measures the same thing
+//! on synthetic images and adds the multicart and the IRQ unit: this one does it on a ROM a
+//! person can download, and needs no movie and no commercial game.
 
 // A test: a missing ROM should fail it outright rather than be smoothed over.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -60,10 +61,10 @@ fn select_bank(core: &mut NesCore, register: u8, bank: u8) {
     core.write_memory(0x8001, bank);
 }
 
-/// A soft reset puts the MMC3's bank registers back to power-on, and hardware cannot: there is
-/// no reset pin on the cartridge connector for the chip to see.
+/// A soft reset **keeps** the MMC3's bank registers, because the chip never sees the reset line;
+/// a power cycle still takes them away (REQ-CORE-004, DEC-02-Q3).
 #[test]
-fn a_soft_reset_puts_the_mmc3_bank_registers_back_to_power_on() {
+fn a_soft_reset_keeps_the_mmc3_bank_registers_and_a_power_cycle_does_not() {
     let Some(image) = mmc3_rom() else {
         return;
     };
@@ -88,9 +89,16 @@ fn a_soft_reset_puts_the_mmc3_bank_registers_back_to_power_on() {
     core.soft_reset();
     assert_eq!(
         window(&core),
+        chosen,
+        "bank {bank} was selected and the RESET button must not take it away: on hardware the \
+         MMC3 never sees the reset line, so it is still mapped"
+    );
+
+    core.reset();
+    assert_eq!(
+        window(&core),
         power_on,
-        "bank {bank} was selected and the RESET button took it away; on hardware the MMC3 \
-         never sees the reset line, so it would still be mapped"
+        "a power cycle is a power cycle: the board does come back (REQ-CORE-004, DEC-02-Q3)"
     );
 }
 
@@ -145,14 +153,14 @@ fn a_debug_write_to_the_ppu_registers_reaches_the_palette_and_oam() {
     );
 }
 
-/// The other half of the comparison, and the half `zax-nes` gets right: a soft reset **keeps**
-/// the console's 2 KiB and the cartridge's PRG-RAM.
+/// The other half, which `zax-nes` always got right: a soft reset **keeps** the console's 2 KiB
+/// and the cartridge's PRG-RAM.
 ///
 /// nesdev, "CPU power up state": internal RAM *"is unchanged after a reset"*. The two are
-/// asserted together on purpose — the finding of the test above is that the mapper is treated
-/// as state to be reset while the memories beside it are not, and a reader needs both halves to
-/// see that the line is drawn in the wrong place rather than that the reset is simply too
-/// violent.
+/// asserted together on purpose — EVAL-SYNC-2's finding was that the mapper was treated as state
+/// to be reset while the memories beside it were not, and a reader needs both halves to see that
+/// the line was drawn in the wrong place rather than that the reset was simply too violent. With
+/// the fix the two halves say the same thing, which is the point.
 #[test]
 fn a_soft_reset_keeps_the_work_ram_and_the_cartridges_prg_ram() {
     let Some(image) = mmc3_rom() else {

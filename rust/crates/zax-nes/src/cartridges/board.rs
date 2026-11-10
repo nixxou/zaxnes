@@ -346,6 +346,14 @@ impl Mapper for Board {
         }
     }
 
+    /// A press on the console's RESET button, which **no** cartridge connector pin carries: see
+    /// [`Mapper::soft_reset`]. The variant is deliberately *not* taken back here as `reset`
+    /// takes it back above — a mapper that cannot see the reset cannot forget a mode the game
+    /// armed, so the MMC5's armed variant survives a reset exactly as its registers do.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        dispatch_ext!(self, b => b.soft_reset(memory));
+    }
+
     /// **`#[inline(always)]`, and it has to stay: this is the last link of the per-CPU-cycle
     /// /IRQ sample, and the only one MF-5b left to the cost model.** `<NesBus as CpuBus>::`
     /// and `Cartridge::irq_asserted` above it carry the attribute; this dispatch did not, so
