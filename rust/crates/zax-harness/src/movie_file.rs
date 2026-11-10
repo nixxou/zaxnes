@@ -152,8 +152,17 @@ fn xoroshiro128plus_next(state: &mut [u64; 2]) -> u64 {
 pub struct MovieFile {
     /// `fm2` or `bk2`.
     pub kind: &'static str,
-    /// The movie was recorded on a PAL console (`palFlag`, or `BizHawk`'s `PAL` sync setting).
+    /// The movie was recorded on a PAL console.
+    ///
+    /// Meaningless unless [`Self::pal_stated`] is true.
     pub pal: bool,
+    /// Whether the file **states** a region at all.
+    ///
+    /// An `.fm2` always does, in `palFlag`. A `.bk2` does not: the region comes from the core's
+    /// own game database, and the only thing the movie carries is a `RegionOverride` that
+    /// [`crate::bk2`] refuses unless it is 0. So when this is false the caller takes the region
+    /// from the ROM's own iNES header, which is `InesHeader`'s rule and REQ-CORE-013's.
+    pub pal_stated: bool,
     /// What the machine's work RAM holds at power-on.
     pub ram: RamPattern,
     /// The MD5 of the ROM data the movie names, when it names one (`.fm2`'s `romChecksum`).
@@ -231,6 +240,7 @@ impl MovieFile {
         Ok(Self {
             kind: "fm2",
             pal: movie.header.pal,
+            pal_stated: true,
             ram,
             rom_md5: movie.header.rom_md5,
             rom_sha1: None,

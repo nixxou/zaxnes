@@ -81,7 +81,7 @@ use crate::golden_core::hex;
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
 use crate::HarnessError;
 
-pub const USAGE: &str = "zax-harness movie-sync <movie.fm2> <rom.nes> [options]
+pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options]
     Plays a TAS movie and says where the two engines part, frame by frame. With `both` it runs
     them in lockstep and compares the work RAM, the picture and each frame's input sensitivity.
       --engine zaxnes|fceux|both   which machine(s) (default: both)
@@ -1194,10 +1194,18 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
     let movie = read_movie(&options.movie, &movie_bytes, header.is_some())?;
 
     let ram = options.ram.unwrap_or(movie.ram);
-    let region = if movie.pal {
-        NesRegion::Pal
+    // A `.bk2` states no region, so the ROM's own header decides — `InesHeader`'s rule, which is
+    // REQ-CORE-013's "report, do not apply" read from the other end.
+    let region = if movie.pal_stated {
+        if movie.pal {
+            NesRegion::Pal
+        } else {
+            NesRegion::Ntsc
+        }
     } else {
-        NesRegion::Ntsc
+        header
+            .as_ref()
+            .map_or(NesRegion::Ntsc, |header| header.region)
     };
     let name = options
         .rom
@@ -1251,9 +1259,10 @@ fn read_movie(
         .unwrap_or_default();
     let read = match extension.as_str() {
         "fm2" => MovieFile::read_fm2(bytes, rom_is_cartridge),
+        "bk2" => crate::bk2::read(bytes),
         _ => {
             return Err(HarnessError::Usage(format!(
-                "{} is not an .fm2 movie\n{USAGE}",
+                "{} is neither an .fm2 nor a .bk2 movie\n{USAGE}",
                 path.display()
             )))
         }
@@ -1269,6 +1278,14 @@ fn summarise(
     ram: RamPattern,
 ) -> MovieSummary {
     let mut notes = movie.notes.clone();
+    if movie.rom_sha1.is_some() && rom_matches(movie, image).is_none() {
+        notes.push(
+            "the movie states a SHA-1 that is neither this image's nor its data's after the iNES \
+             header. What BizHawk takes that digest over is not in the public description of the \
+             format, so this is reported as unverified rather than as the wrong ROM"
+                .to_owned(),
+        );
+    }
     if options.ram.is_some() {
         notes.push(format!(
             "the power-on work RAM was overridden on the command line; the movie asks for {}",
@@ -1299,10 +1316,20 @@ fn file_name(path: &Path) -> String {
 }
 
 /// Whether the image is the one the movie names, by whichever fingerprint the movie carries.
+///
+/// The `.fm2` rule is exact: the MD5 covers the data after the 16-byte iNES header. `BizHawk`'s
+/// is not published — the format description says the header carries "SHA1 (also CRC32 or MD5)"
+/// and does not say what it is taken over — so **both** the whole file and the data after the
+/// header are tried, and a movie that matches neither is *unverified* rather than wrong.
 fn rom_matches(movie: &MovieFile, image: &[u8]) -> Option<bool> {
     let data = image.get(16..)?;
-    let expected = movie.rom_md5?;
-    Some(zax_nes::movie::fm2::md5(data) == expected)
+    if let Some(expected) = movie.rom_md5 {
+        return Some(zax_nes::movie::fm2::md5(data) == expected);
+    }
+    let expected = movie.rom_sha1?;
+    // A match is a match; a non-match is **not** evidence of the wrong ROM, because what the
+    // digest is taken over is not published. The caller says so in a note instead.
+    (crate::bk2::sha1(image) == expected || crate::bk2::sha1(data) == expected).then_some(true)
 }
 
 /// The window of frames the input-sensitivity probe covers.

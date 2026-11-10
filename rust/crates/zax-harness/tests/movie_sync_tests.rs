@@ -266,7 +266,10 @@ fn a_file_that_is_not_a_movie_is_refused_by_name() {
     let odd = dir.join("movie.zmv");
     std::fs::write(&odd, b"ZAXMOVIE").expect("writing the file");
     let error = movie_sync::run(&options(&odd, &rom, Engines::Zaxnes, 1)).expect_err("refused");
-    assert!(error.to_string().contains("not an .fm2"), "{error}");
+    assert!(
+        error.to_string().contains("neither an .fm2 nor a .bk2"),
+        "{error}"
+    );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -512,4 +515,130 @@ mod both {
         RamPattern::Random(12345).fill(&mut ours);
         assert!(ours.iter().any(|&byte| byte != 0 && byte != 0xFF));
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// `.bk2`, hand-built by the test to the documented layout
+// ------------------------------------------------------------------------------------------------
+
+/// The same inputs written as an `.fm2` and as a `.bk2` must drive the machine to the same place.
+///
+/// This is the test the two formats deserve, because **their pad orders are different**: `.fm2`
+/// writes `RLDUTSBA` with bit 7 first, and a `.bk2`'s `LogKey` names
+/// `Up Down Left Right Start Select B A`. A reader that mapped either onto the other would be
+/// wrong in a way no amount of reading the file would show — but it would send the machine
+/// somewhere else, and 400 frames of a scripted sequence is enough for that to be visible.
+#[test]
+fn a_bk2_and_an_fm2_of_the_same_inputs_drive_the_machine_to_the_same_place() {
+    const FRAMES: u32 = 400;
+    let Some(rom) = rom(POLLS) else { return };
+    let dir = scratch("movie-sync-bk2");
+    // A sequence that presses every button, so that a mis-mapped bit cannot hide.
+    let button = |frame: u32| -> u8 { (1u8 << (frame % 8)) | u8::from(frame % 5 == 0) };
+
+    let fm2 = write_movie(&dir, "same.fm2", FRAMES, "RAMInitOption 2\n", &[], button);
+    let bk2 = dir.join("same.bk2");
+    std::fs::write(&bk2, bk2_of(FRAMES, button)).expect("writing the .bk2");
+
+    let from_fm2 = movie_sync::run(&options(&fm2, &rom, Engines::Zaxnes, FRAMES)).expect("the fm2");
+    let from_bk2 = movie_sync::run(&options(&bk2, &rom, Engines::Zaxnes, FRAMES)).expect("the bk2");
+
+    assert_eq!(from_bk2.movie.kind, "bk2");
+    assert_eq!(from_bk2.movie.length, FRAMES);
+    assert_eq!(
+        from_fm2.runs[0].last_picture, from_bk2.runs[0].last_picture,
+        "the two readers do not agree about what the inputs are"
+    );
+    assert_eq!(
+        from_fm2.runs[0].last_picture_change,
+        from_bk2.runs[0].last_picture_change
+    );
+    // The control, without which the agreement above would mean nothing: a `.bk2` of the same
+    // length whose pads are never pressed goes somewhere else. So this ROM's picture at frame
+    // 400 *does* depend on the inputs, and the two readers agreeing about it is a statement.
+    let silent = dir.join("silent.bk2");
+    std::fs::write(&silent, bk2_of(FRAMES, |_| 0)).expect("writing it");
+    let nothing_pressed =
+        movie_sync::run(&options(&silent, &rom, Engines::Zaxnes, FRAMES)).expect("the silent bk2");
+    assert_ne!(
+        from_bk2.runs[0].last_picture, nothing_pressed.runs[0].last_picture,
+        "the picture does not depend on the inputs, so this test would prove nothing"
+    );
+}
+
+#[test]
+fn a_bk2_that_cannot_be_honoured_is_refused_with_its_reason() {
+    let Some(rom) = rom(POLLS) else { return };
+    let dir = scratch("movie-sync-bk2-refused");
+    let anchored = dir.join("anchored.bk2");
+    let mut members = bk2_members(4, |_| 0);
+    members.push(("CoreState".to_owned(), "a state of another core".to_owned()));
+    std::fs::write(&anchored, zip_of(&members)).expect("writing it");
+    let error = movie_sync::run(&options(&anchored, &rom, Engines::Zaxnes, 4))
+        .expect_err("a savestate-anchored movie is refused");
+    assert!(error.to_string().contains("CoreState"), "{error}");
+    assert!(error.to_string().contains("anchored.bk2"), "{error}");
+}
+
+/// A `.bk2` of `frames` frames whose pad-1 byte is `button(frame)` in `NesCore`'s bit order.
+fn bk2_of(frames: u32, button: impl Fn(u32) -> u8) -> Vec<u8> {
+    zip_of(&bk2_members(frames, button))
+}
+
+/// The members of such a movie, as the format describes them.
+fn bk2_members(frames: u32, button: impl Fn(u32) -> u8) -> Vec<(String, String)> {
+    // The LogKey of a real NES `.bk2`, read off `invariel-faxanadu.bk2`.
+    const KEY: &str = "#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 Start|P1 Select|P1 B|P1 A|\
+                       #P2 Up|P2 Down|P2 Left|P2 Right|P2 Start|P2 Select|P2 B|P2 A|";
+    // The bit of `NesCore::run_frame`'s word each character of a pad field stands for, in the
+    // key's own order.
+    const BITS: [u8; 8] = [0x10, 0x20, 0x40, 0x80, 0x08, 0x04, 0x02, 0x01];
+    const LETTERS: [char; 8] = ['U', 'D', 'L', 'R', 'S', 's', 'B', 'A'];
+
+    let mut log = format!("[Input]\r\nLogKey:{KEY}\r\n");
+    for frame in 0..frames {
+        let byte = button(frame);
+        let pad: String = BITS
+            .iter()
+            .zip(LETTERS)
+            .map(|(bit, letter)| if byte & bit == 0 { '.' } else { letter })
+            .collect();
+        let _ = writeln!(log, "|..|{pad}|........|");
+    }
+    log.push_str("[/Input]\r\n");
+    vec![
+        (
+            "Header.txt".to_owned(),
+            "MovieVersion BizHawk v2.0 Tasproj v1.0\r\nPlatform NES\r\nGameName Test\r\n\
+             Core NesHawk\r\nrerecordCount 1\r\n"
+                .to_owned(),
+        ),
+        (
+            "SyncSettings.json".to_owned(),
+            r#"{"o":{"BoardProperties":{},"RegionOverride":0,"Controls":{"Famicom":false,
+               "NesLeftPort":"ControllerNES","NesRightPort":"ControllerNES",
+               "FamicomExpPort":"UnpluggedFam"}}}"#
+                .to_owned(),
+        ),
+        ("Input Log.txt".to_owned(), log),
+        ("Comments.txt".to_owned(), String::new()),
+        ("Subtitles.txt".to_owned(), String::new()),
+    ]
+}
+
+/// A zip of those members, which is what a `.bk2` is.
+fn zip_of(members: &[(String, String)]) -> Vec<u8> {
+    use std::io::{Cursor, Write as _};
+    let mut out = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut out));
+        let options: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, body) in members {
+            writer.start_file(name.as_str(), options).expect("a member");
+            writer.write_all(body.as_bytes()).expect("its body");
+        }
+        writer.finish().expect("the archive");
+    }
+    out
 }

@@ -13,7 +13,7 @@ Read first: `docs/progress/FCEUX-48.md` (how `.fm2` plays on both engines),
 - [x] 1. The divergence instrument (`zax-harness movie-sync`).
 - [x] 2. Run it on the four movies; the table.
 - [x] 3. Explain each first divergence, and classify it.
-- [ ] 4. `.bk2` reading.
+- [x] 4. `.bk2` reading.
 - [ ] 5. The report, `docs/review/MOVIE-SYNC.md`.
 - [ ] 6. Final pass.
 
@@ -469,3 +469,141 @@ three mechanisms — REQ-CORE-015/020 and REQ-CORE-100 say what the machine does
 and the public tests agree with `zax-nes`. The findings are about **FCEUX**, which the spec does
 not govern. So there is no ticket to write, and writing one would put a claim about another
 emulator into the project's specification.
+
+---
+
+## Step 4 — `.bk2`, and the result that decides the lot
+
+A `.bk2` arrived in `G:/3DSen/test-movies/bk2/` while this lot was running, together with the two
+*Faxanadu* dumps it needs and — which turned out to matter more than the movie —
+**`bizhawk-runs/`, the owner's own `BizHawk` run of it**: screenshots at frames 1 000, 10 000,
+30 000, 60 000, 83 000 and the last frame, for each dump, and a log of a CRC every 100 frames with
+a running lag count.
+
+That makes this step something better than a format exercise. The question *"can Zaxnes play a
+`.bk2`"* stops being "does the file parse" and becomes **"does the run match the one the movie was
+recorded from"**, and there is a reference to answer it against.
+
+### The answer
+
+**Zaxnes's run of the 83 218-frame movie is the same run `BizHawk` made**, at every frame compared:
+
+| frame | Zaxnes against `BizHawk`'s own screenshot |
+|---|---|
+| 1 000 | **identical** |
+| 10 000 | **identical** |
+| 30 000 | **identical** |
+| 60 000 | **identical** |
+| 83 000 | **identical** |
+| 83 218 (last) | **identical** |
+
+"Identical" is measured rather than eyeballed. `BizHawk` writes 256×224 (the overscan crop) and
+its NES colour table is not Zaxnes's, so the comparison takes this run's rows 8 to 231 against the
+reference's rows 0 to 223 and asks whether **every colour of one picture maps to exactly one
+colour of the other**. It does, at all six frames, on 9 to 14 distinct colours. A single pixel of
+genuinely different *content* would break that mapping, because the colour that pixel took would
+then have two images.
+
+And it holds for **both dumps**. The owner ran the movie on `[USA][!!]` and on `[USA][Rev 1][!!]`
+and the two `BizHawk` runs differ from frame 100 onwards; Zaxnes run on each dump matches that
+dump's reference, and the two Zaxnes runs end on different pictures (`03d7e6a1…` and
+`13920624…`). So this is not a movie that would look right whatever the machine did.
+
+### The lag count, which is a second and independent check
+
+The owner's log carries `BizHawk`'s own **lag counter**: `lag=13398` at frame 83 200, the run
+ending at 83 218.
+
+This lot's input-sensitivity probe, run over the whole movie on Zaxnes alone, reports **69 820 of
+83 218 frames input-sensitive** — that is **13 398 insensitive frames**. The same number.
+
+Two things follow, and the second is the one worth keeping:
+
+1. Zaxnes agrees with `NesHawk` about *which* frames the game polled the pad on, over 83 218
+   frames, not only about what is on screen;
+2. **the probe is a faithful stand-in for a lag flag.** Step 1 had to invent it because neither
+   engine publishes one, and said plainly that it is an operational definition that could differ
+   from `lagFlag` in a known direction. On the one run where a real emulator's counter is
+   available to check it against, it is exact.
+
+### And FCEUX cannot play this movie at all
+
+The same `.bk2` fed to FCEUX, frame for frame:
+
+| | |
+|---|---|
+| the two engines part at | frame **3** |
+| the first frame that would be seen | frame **12**, 61 435 pixels of 61 440 |
+| FCEUX's picture | **does not change for 10 768 frames from frame 14** |
+| FCEUX at frame 1 000 | still on the **title screen**, "START / CONTINUE" |
+| FCEUX at frame 83 218 | the **password screen**, with nonsense typed into it |
+| Zaxnes at frame 1 000, and at every other frame compared | `BizHawk`'s own picture |
+
+FCEUX never gets past the title: the movie's press of Start does not take on it. So on this movie
+the roles of steps 2 and 3 are **exactly reversed** — the engine that fails is FCEUX, the engine
+that follows the movie is Zaxnes, and it is the same class (b) finding seen from the other side.
+`--engine fceux --movie-mode` is not even an option here: FCEUX's movie code reads `.fm2` and
+nothing else.
+
+### What the reader does, and what it refuses
+
+`crates/zax-harness/src/bk2.rs`, read from the **public description of the format on TASVideos**
+and from the file's own self-description. No `BizHawk` source of any kind was consulted.
+
+**The input log describes itself, and that is the whole design.** The `LogKey:` line names every
+button in the order the frame lines write them, `#` starting a new pipe-separated field:
+
+```text
+LogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 Start|P1 Select|P1 B|P1 A|#P2 Up|…|P2 A|
+```
+
+so `|..|........|........|` is two console buttons and then eight per pad. The reader **builds the
+mapping from the key** rather than hard-coding a layout, and refuses by name any button it has no
+word for. That is not fastidiousness: a `.bk2`'s pad order is `Up Down Left Right Start Select B
+A` and an `.fm2`'s is `RLDUTSBA` with bit 7 first, so a reader that assumed either would replay
+the wrong buttons and look perfectly healthy doing it.
+`a_bk2_and_an_fm2_of_the_same_inputs_drive_the_machine_to_the_same_place` is that risk as a test:
+400 frames of a sequence that presses every button, written in both formats, must leave `nestest`
+on the same picture — with a silent `.bk2` of the same length as the control, because without it
+the agreement would prove nothing.
+
+Refused, each with the thing named:
+
+| the movie needs | the message names |
+|---|---|
+| a `CoreState` member | "anchored to a savestate … a state of another emulator's core" |
+| `StartsFromSavestate` / `StartsFromSaveRam` | "starts from a savestate" / "from a battery save" |
+| `Platform` other than `NES` | the system it is of |
+| a `RegionOverride` other than 0 | the value, and that the public description does not say what it means |
+| non-empty `BoardProperties` | the properties, by key |
+| `Famicom`, or a port that is not `ControllerNES`/`UnpluggedNES`, or anything on `FamicomExpPort` | the device |
+| a `LogKey` naming anything else | the names it could not read |
+
+The format description is explicit that a movie is savestate-anchored by the **existence** of
+`CoreState` whatever the header says, so both are checked and the member wins.
+
+**One thing is deliberately not refused.** The header's `SHA1` is checked against the whole image
+and against the data after the iNES header, and when it matches neither the movie is reported
+**unverified** rather than "recorded on another ROM". The description says the header carries
+"SHA1 (also CRC32 or MD5)" and does **not** say what the digest is taken over, so a refusal would
+be a claim this lot cannot support — and the one real `.bk2` in hand proves the point: its
+`9A8BF108…` is neither dump's whole-file SHA-1 nor either dump's data SHA-1, and the movie
+nevertheless replays on both of them exactly.
+
+Two things the format does not carry, each turned into a note on the report rather than a guess:
+
+* **no power-on work RAM.** There is no `RAMInitOption` in a `.bk2` the way there is in an `.fm2`,
+  so the machine's own fill is used — all zero, which is `zax-nes`'s (REQ-CORE-004). *Faxanadu*
+  does not read it, as the exact match proves;
+* **no region.** `RegionOverride` 0 means the core decides, so the region is taken from the ROM's
+  own iNES header — `InesHeader`'s rule. Any other value is refused rather than guessed.
+
+### Checked
+
+| | |
+|---|---|
+| `bk2` unit tests | **9**, on archives the tests build themselves to the documented layout |
+| `movie_sync_tests` | **13** with the feature (2 of them `.bk2`), **6** without |
+| `zax-harness` lib tests | **41** |
+| `cargo fmt --check`, clippy `-D warnings --all-targets`, both builds | clean |
+| the two new dependencies | `zip 7.3` and `sha1 0.11`, **already `zax-app`'s own at those versions**; the build was made with `--offline` to prove nothing is fetched |

@@ -26,7 +26,7 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)
        zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
        zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)
-       zax-harness movie-sync <movie.fm2> <rom.nes> [options] (where the engines part on a TAS)
+       zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options] (where the engines part on a TAS)
        zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
        zax-harness fceux-frame <rom.nes> <out.json> [frames] (FCEUX's tile records)
        zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)

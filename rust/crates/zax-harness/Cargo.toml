@@ -51,6 +51,11 @@ ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 serde_json.workspace = true
 zax-core-api = { path = "../zax-core-api" }
 sha2 = "0.10"
+# `.bk2` movies (lot EVAL-SYNC step 4): a zip of text files, whose header states a SHA-1.
+# Both are already `zax-app`'s own dependencies at these versions, so this adds nothing to the
+# lock file and nothing to fetch.
+sha1 = { version = "0.11.0", default-features = false }
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
 zax-engine3d = { path = "../zax-engine3d" }
 zax-fceux = { path = "../zax-fceux", optional = true }
 zax-nes = { path = "../zax-nes" }
