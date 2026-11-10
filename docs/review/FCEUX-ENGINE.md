@@ -188,6 +188,17 @@ a particular game. That suggests:
 > **Done by lot FCEUX-48 (FCEUX-4), steps 3 to 5.** The working is `docs/progress/FCEUX-48.md`;
 > the user-facing half is `rust/docs/MOVIES.md` §6 and `HOWTO-RUN.md`. What follows is this section
 > as it was written, with what the outcome added.
+>
+> **Why an `.fm2` is played on FCEUX and not on Zaxnes's own engine has since been measured, and
+> the answer is not the one this section assumes.** Lot EVAL-SYNC (`docs/review/MOVIE-SYNC.md`)
+> ran three real TASes of 33 000 to 124 000 frames through both engines in lockstep: they part at
+> frames 2, 3 and 5, and in every case on a mechanism **FCEUX is wrong about and Zaxnes is right
+> about** — the NMI taken one CPU cycle early, a vblank period too short with the background off,
+> an MMC3 scanline counter wrong in five named ways. So forcing the engine for an `.fm2` is right,
+> and the reason to tell a user is that the movie was recorded on an inaccurate machine rather
+> than that Zaxnes cannot keep up. The same lot found the converse for `BizHawk`'s `.bk2`: an
+> 83 218-frame movie recorded on `NesHawk` replays on **Zaxnes's own engine** identically to
+> `BizHawk`'s run, lag count included, and **does not play on FCEUX at all**.
 
 This is the clearest win and the easiest lot. FCEUX's `movie.cpp` plays `.fm2` itself; the C API
 needs three more calls (open a movie from a buffer, report the frame count and whether playback has

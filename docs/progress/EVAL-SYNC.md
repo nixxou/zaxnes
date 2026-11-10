@@ -14,7 +14,7 @@ Read first: `docs/progress/FCEUX-48.md` (how `.fm2` plays on both engines),
 - [x] 2. Run it on the four movies; the table.
 - [x] 3. Explain each first divergence, and classify it.
 - [x] 4. `.bk2` reading.
-- [ ] 5. The report, `docs/review/MOVIE-SYNC.md`.
+- [x] 5. The report, `docs/review/MOVIE-SYNC.md`.
 - [ ] 6. Final pass.
 
 ## The environment this lot runs in
@@ -607,3 +607,109 @@ Two things the format does not carry, each turned into a note on the report rath
 | `zax-harness` lib tests | **41** |
 | `cargo fmt --check`, clippy `-D warnings --all-targets`, both builds | clean |
 | the two new dependencies | `zip 7.3` and `sha1 0.11`, **already `zax-app`'s own at those versions**; the build was made with `--offline` to prove nothing is fetched |
+
+---
+
+## Step 5 — the report
+
+`docs/review/MOVIE-SYNC.md`: the instrument and what it was shown to be able to do, the table of
+step 2, every divergence of step 3 with its class and its evidence, the `.bk2` support with its
+limits and the `BizHawk` comparison, **what is still unknown** (§5, which bounds the `.bk2`
+result rather than leaving it to be over-read), and the recommendation on `NesHawk` (§6: **no**,
+with four reasons and three things to do instead, in order of what they are worth).
+
+`docs/review/FCEUX-ENGINE.md` §5 gains a pointer to it, because a reader who has just read how
+`.fm2` playback works on the FCEUX engine is exactly the reader who should be told that the
+movies do **not** sync on Zaxnes's own and why.
+
+## The commands, to re-run everything
+
+Set up once:
+
+```sh
+export CARGO_TARGET_DIR=<worktree>/rust/target-ev
+export CARGO_INCREMENTAL=0
+export TMP=<worktree>/rust/target-ev/tmp TEMP="$TMP"
+cd <worktree>/rust
+cargo build --release -p zax-harness --features fceux-core
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies           # Windows-style paths: the ROM names hold [ ] and !, which a
+R=$M/roms                        # Git-Bash path conversion mangles
+```
+
+### The four `.fm2` movies (step 2), whole movie, probe on
+
+About 1½ minutes each, 5½ for *Kirby*:
+
+```sh
+$H movie-sync "$M/Kabuki-NTSC-no-FDS.fm2"            "$R/Kabuki - Quantum Fighter (USA).nes" --engine both --lag
+$H movie-sync "$M/Kabuki - Quantum Fighter_mod_mod2.fm2" "$R/Kabuki - Quantum Fighter (USA).nes" --engine both --lag
+$H movie-sync "$M/MetalForce-DTC5CompV8.fm2"         "$R/Metal Force [Korea][Unl][!].nes"     --engine both --lag
+$H movie-sync "$M/taseditor-kirbysadventure.fm2"     "$R/Kirby's Adventure [USA][!!].nes"     --engine both --lag
+```
+
+Add `--report <file.json>` for the whole measurement, `--progress 20000` for a line now and then.
+
+### How far FCEUX plays each one, through its own movie mode
+
+```sh
+$H movie-sync "$M/<movie>.fm2" "$R/<rom>.nes" --engine fceux --movie-mode --no-lag
+```
+
+The `_mod_mod2` file is refused here by name, its header claiming `FDS 1`.
+
+### The pictures, to look at rather than hash
+
+```sh
+$H movie-sync "$M/Kabuki-NTSC-no-FDS.fm2" "$R/Kabuki - Quantum Fighter (USA).nes" \
+    --engine both --no-lag --png <dir> --png-frames 1000,10000,20000,33306
+```
+
+### Step 3's own experiments
+
+```sh
+# what the power-on pattern is worth, per game
+for r in zero default ff; do $H movie-sync "$M/<movie>.fm2" "$R/<rom>.nes" --engine zaxnes --no-lag --ram $r --frames 2000; done
+# is it a whole-frame offset of the boot?
+for w in fceux:1 fceux:2 fceux:3 zaxnes:1; do $H movie-sync "$M/taseditor-kirbysadventure.fm2" "$R/Kirby's Adventure [USA][!!].nes" --engine both --no-lag --frames 600 --from 1 --warm-up $w; done
+# the verdicts, read off the screen (write a blank .fm2 of 2000 frames first)
+T=G:/3dsen/cleanroom/assets-free/test-roms/nes-test-roms
+$H movie-sync blank2000.fm2 "$T/ppu_vbl_nmi/rom_singles/01-vbl_basics.nes" --engine both --no-lag --frames 2000 --png <dir> --png-frames 2000
+$H movie-sync blank2000.fm2 "$T/mmc3_test/4-scanline_timing.nes"           --engine both --no-lag --frames 2000 --png <dir> --png-frames 2000
+```
+
+A blank `.fm2` of *n* frames is `version 3` / `palFlag 0` / `port0 1` / `port1 0` / `port2 0` and
+then *n* lines of `|0|........|||`.
+
+### The `.bk2` (step 4)
+
+```sh
+$H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$R/Faxanadu [USA][!!].nes" --engine both --no-lag \
+    --png <dir> --png-frames 1000,10000,30000,60000,83000,83218
+$H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$R/Faxanadu [USA][!!].nes" --engine zaxnes --lag
+```
+
+The second prints `69820 of 83218 probed frames were input-sensitive`, which is **13 398**
+insensitive — `BizHawk`'s own `lag=13398`.
+
+The comparison against `BizHawk`'s screenshots is a short script that reads the two PNGs, takes
+this run's rows 8 to 231 against the reference's 224, and checks that every colour of one maps to
+exactly one colour of the other. It is not committed (it reads pictures of a commercial game);
+the rule is one paragraph and the §4 of the report states it.
+
+**To run a new `.bk2` the owner adds**, the whole of steps 2 to 4 for it is:
+
+```sh
+$H movie-sync "$M/bk2/<new>.bk2" "$R/<its rom>.nes" --engine both --lag --report <out.json> --progress 20000
+```
+
+If the reader refuses it, the message names the one thing it cannot honour.
+
+### The tests
+
+```sh
+export ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+cargo test --release -p zax-harness --features fceux-core --lib
+cargo test --release -p zax-harness --features fceux-core --test movie_sync_tests -- --include-ignored --test-threads 1
+cargo test --release -p zax-harness --test movie_sync_tests -- --include-ignored    # feature off
+```
