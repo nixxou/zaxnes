@@ -8,7 +8,8 @@ use serde_json::Value;
 
 use super::ProfileFileSystem;
 use crate::format::{
-    self, ProfileDocument, ProfileLoadError, ProfileLoadErrorKind, ProfileLog, NULL_PROFILE_LOG,
+    self, ProfileDocument, ProfileHeader, ProfileLoadError, ProfileLoadErrorKind, ProfileLog,
+    NULL_PROFILE_LOG,
 };
 
 /// Title of the "2D Mode" entry, which plays a ROM without conversion.
@@ -77,6 +78,34 @@ pub enum ProfileCatalogueError {
     /// The JSON has no such edition.
     #[error("the catalogue has no \"{0}\" edition")]
     NoEdition(String),
+}
+
+/// The built-in profile files as the start-up reads them (AMD-037, AMD-065 §2).
+#[derive(Debug, Clone, Default)]
+pub struct BuiltInProfiles {
+    contents: Vec<Vec<u8>>,
+    headers: HashMap<String, ProfileHeader>,
+}
+
+impl BuiltInProfiles {
+    /// The bytes of every file that could be read, for AMD-037's byte-for-byte comparison.
+    #[must_use]
+    pub fn contents(&self) -> &[Vec<u8>] {
+        &self.contents
+    }
+
+    /// The bytes, to keep for the whole session without copying them.
+    #[must_use]
+    pub fn into_contents(self) -> Vec<Vec<u8>> {
+        self.contents
+    }
+
+    /// The identity fields the file of the catalogue entry `catalogue_id` carries; none when the
+    /// entry has no file or its header could not be read.
+    #[must_use]
+    pub fn header(&self, catalogue_id: &str) -> Option<&ProfileHeader> {
+        self.headers.get(catalogue_id)
+    }
 }
 
 /// The built-in catalogue of one edition.
@@ -203,11 +232,31 @@ impl ProfileCatalogue {
     /// profile (AMD-037). Entries without a file, and files that cannot be read, are left out.
     #[must_use]
     pub fn built_in_contents(&self, files: &dyn ProfileFileSystem) -> Vec<Vec<u8>> {
-        self.entries
-            .iter()
-            .filter(|entry| !entry.file.is_empty())
-            .filter_map(|entry| files.read_all_bytes(&self.profile_path(entry)).ok())
-            .collect()
+        self.read_built_in_profiles(files).contents
+    }
+
+    /// The profile files of the entries, read **once** for the two uses the start-up has for
+    /// them: their bytes, which AMD-037 compares a user file against, and the identity fields
+    /// each carries, which decide the same game and the generation (AMD-065 REQ-PROF-085,
+    /// REQ-PROF-086).
+    ///
+    /// Entries without a file, and files that cannot be read, are left out of the bytes;
+    /// a file whose header cannot be read keeps its bytes and gets no header, its name alone
+    /// then deciding the game.
+    #[must_use]
+    pub fn read_built_in_profiles(&self, files: &dyn ProfileFileSystem) -> BuiltInProfiles {
+        let mut read = BuiltInProfiles::default();
+        for entry in self.entries.iter().filter(|entry| !entry.file.is_empty()) {
+            let path = self.profile_path(entry);
+            let Ok(bytes) = files.read_all_bytes(&path) else {
+                continue;
+            };
+            if let Some(header) = format::load_header(&bytes, None, Some(&path.to_string_lossy())) {
+                read.headers.insert(entry.id.clone(), header);
+            }
+            read.contents.push(bytes);
+        }
+        read
     }
 
     /// Loads the profile of `entry`.

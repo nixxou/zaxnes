@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use super::search;
 use super::store::{GameLibraryFile, GameLibraryRecord, RomPathRecord};
 use crate::catalogue::{
-    shown_title, ProfileCatalogue, ProfileOrigin, UserProfile, DEFAULT_THREE_DIMENSIONAL_TITLE,
-    TWO_DIMENSIONAL_MODE_TITLE,
+    shown_title, BuiltInProfiles, GameIdentity, ProfileCatalogue, ProfileGeneration, ProfileOrigin,
+    UserProfile, DEFAULT_THREE_DIMENSIONAL_TITLE, TWO_DIMENSIONAL_MODE_TITLE,
 };
 use crate::format::{ProfileLog, NULL_PROFILE_LOG};
 use crate::text;
@@ -85,6 +85,13 @@ pub struct GameLibraryEntry {
     /// Whether the user marked the game as a favourite (AMD-053 REQ-UI-210, §3 point 11). False
     /// by default, and false for every entry of a file migrated from schema version 1.
     pub favorite: bool,
+    /// The identity of the profile whose content the entry shows (AMD-065 REQ-PROF-086) and its
+    /// generation (REQ-PROF-085).
+    identity: GameIdentity,
+    /// The identities of the profiles this entry has replaced (REQ-PROF-087). A third profile of
+    /// the same game must still find the entry by what any of them carried: a built-in paired by
+    /// its `Id` with a 2.1 profile of another name stays reachable under that name.
+    replaced: Vec<GameIdentity>,
 }
 
 impl GameLibraryEntry {
@@ -105,6 +112,7 @@ impl GameLibraryEntry {
         source: GameProfileSource,
         profile_path: PathBuf,
         origin: ProfileOrigin,
+        identity: GameIdentity,
     ) -> Self {
         Self {
             id: id.to_owned(),
@@ -118,6 +126,8 @@ impl GameLibraryEntry {
             last_played: 0,
             cover: None,
             favorite: false,
+            identity,
+            replaced: Vec::new(),
         }
     }
 
@@ -192,6 +202,46 @@ impl GameLibraryEntry {
     pub fn can_delete(&self) -> bool {
         self.source == GameProfileSource::User && self.origin == ProfileOrigin::User
     }
+
+    /// The identity of the profile the entry shows (AMD-065 REQ-PROF-086).
+    #[must_use]
+    pub const fn identity(&self) -> &GameIdentity {
+        &self.identity
+    }
+
+    /// The generation of the profile the entry shows (REQ-PROF-085).
+    #[must_use]
+    pub const fn generation(&self) -> ProfileGeneration {
+        self.identity.generation()
+    }
+
+    /// REQ-PROF-086: whether this entry is the game `identity` designates — by what the profile
+    /// it shows carries, or by what any profile it has replaced carried.
+    #[must_use]
+    pub fn designates(&self, identity: &GameIdentity) -> bool {
+        self.identity.same_game(identity)
+            || self
+                .replaced
+                .iter()
+                .any(|replaced| replaced.same_game(identity))
+    }
+
+    /// REQ-PROF-087: the 2.1 profile `incoming` takes this entry over. The **identifier** stays —
+    /// `rom.json`, the saves and the cover are keyed on it — and everything that is content
+    /// comes from the new profile, its title included. What the entry has replaced so far is
+    /// kept, so that a later profile of the same game still finds it.
+    fn take_over(&mut self, incoming: Self) {
+        let replaced = std::mem::replace(&mut self.identity, incoming.identity);
+        if !self.replaced.contains(&replaced) {
+            self.replaced.push(replaced);
+        }
+        self.title = incoming.title;
+        self.source = incoming.source;
+        self.profile_path = incoming.profile_path;
+        self.origin = incoming.origin;
+        self.is_2d_mode = incoming.is_2d_mode;
+        self.is_default_three_dimensional = incoming.is_default_three_dimensional;
+    }
 }
 
 impl std::fmt::Display for GameLibraryEntry {
@@ -211,9 +261,37 @@ impl GameLibrary {
     /// library file. A built-in profile always wins over a user profile of the same identifier,
     /// and between user profiles the first one wins (SPEC-09 REQ-PERS-030); persisted entries
     /// that match no available profile are dropped.
+    ///
+    /// A profile of generation 2.1 replaces the entry of the profile of an earlier generation of
+    /// the same game (AMD-065 REQ-PROF-087). The built-in profiles are known here by the file
+    /// names the catalogue gives them, which decides condition 2 of REQ-PROF-086 but not
+    /// condition 1: the `Id` a built-in **file** carries is only known once that file is read,
+    /// which is what [`Self::build_with_built_in_profiles`] is for. Between two user profiles
+    /// both conditions are decided, their headers travelling with them.
     #[must_use]
     pub fn build(
         catalogue: &ProfileCatalogue,
+        user_profiles: &[UserProfile],
+        persisted: Option<&GameLibraryFile>,
+        log: Option<&dyn ProfileLog>,
+    ) -> Self {
+        Self::build_with_built_in_profiles(
+            catalogue,
+            &BuiltInProfiles::default(),
+            user_profiles,
+            persisted,
+            log,
+        )
+    }
+
+    /// [`Self::build`] knowing what the built-in profile **files** carry, as
+    /// `ProfileCatalogue::read_built_in_profiles` reads them: the `Id` of each is what pairs the
+    /// 56 games whose 3dn and 3dh agree on an identifier and disagree on the file name
+    /// (AMD-065 REQ-PROF-086 point 1).
+    #[must_use]
+    pub fn build_with_built_in_profiles(
+        catalogue: &ProfileCatalogue,
+        built_in: &BuiltInProfiles,
         user_profiles: &[UserProfile],
         persisted: Option<&GameLibraryFile>,
         log: Option<&dyn ProfileLog>,
@@ -228,6 +306,7 @@ impl GameLibrary {
                 GameProfileSource::BuiltIn,
                 catalogue.profile_path(entry),
                 ProfileOrigin::User,
+                GameIdentity::of_catalogue(entry, built_in.header(&entry.id)),
             );
             game.is_2d_mode = entry.is_2d_mode();
             game.is_default_three_dimensional = entry.is_default_three_dimensional();
@@ -264,25 +343,51 @@ impl GameLibrary {
     /// Adds a user profile as a game. A profile of an identifier a built-in profile holds is
     /// refused (none); one of an identifier another user profile holds takes over that entry
     /// (AMD-033 §2: the user folder wins).
+    ///
+    /// A profile of generation 2.1 also takes over the entry of a profile of an earlier
+    /// generation of the same game, whatever its identifier, and an earlier one adds nothing to a
+    /// game a 2.1 profile already holds (AMD-065 REQ-PROF-087). This is the path the interface
+    /// import (AMD-056 REQ-UI-214) and the import of a whole installation take, so that neither
+    /// has to wait for a restart to show one entry per game.
     pub fn add_user_profile(
         &mut self,
         profile: &UserProfile,
         log: Option<&dyn ProfileLog>,
     ) -> Option<&GameLibraryEntry> {
+        let log = log.unwrap_or(&NULL_PROFILE_LOG);
+        let incoming = user_entry(profile);
         let position = self.entries.iter().position(|entry| entry.id == profile.id);
         if let Some(position) = position {
-            let existing = &mut self.entries[position];
+            let existing = &self.entries[position];
             if existing.source != GameProfileSource::User {
                 return None;
             }
+            // REQ-PROF-087: a 3dn does not take the entry of the 3dh of the same game over, even
+            // when the two files agree on their `Id`, which is the case for 56 of the 101.
+            if existing.generation().is_two_point_one() && !incoming.generation().is_two_point_one()
+            {
+                log.information(&replacement_message(&existing.id, existing, &incoming));
+                return None;
+            }
+            if incoming.generation().is_two_point_one() && !existing.generation().is_two_point_one()
+            {
+                self.entries[position].take_over(incoming);
+                return Some(&self.entries[position]);
+            }
             // A profile imported into the user folder takes over the entry of a profile of the
             // same identifier found next to the executable.
+            let existing = &mut self.entries[position];
             existing.profile_path.clone_from(&profile.file_path);
             existing.origin = profile.origin;
+            existing.identity = incoming.identity;
             return Some(&self.entries[position]);
         }
 
-        self.add(user_entry(profile), log.unwrap_or(&NULL_PROFILE_LOG));
+        if let Some(position) = self.same_game_position(&incoming) {
+            return self.replace_same_game(position, incoming, log);
+        }
+
+        self.add(incoming, log);
         self.entries.last()
     }
 
@@ -405,6 +510,14 @@ impl GameLibrary {
     }
 
     fn add(&mut self, entry: GameLibraryEntry, log: &dyn ProfileLog) {
+        // REQ-PROF-087 is asked first: a profile of generation 2.1 takes the entry of the same
+        // game over whatever the identifiers, which AMD-065 puts before REQ-PERS-030. The test
+        // below only fires when one of the two profiles is a 2.1, so nothing of the rule between
+        // two profiles of an earlier generation moves.
+        if let Some(position) = self.same_game_position(&entry) {
+            self.replace_same_game(position, entry, log);
+            return;
+        }
         if let Some(existing) = self.find(&entry.id) {
             // A built-in profile always wins; between user profiles the first one wins
             // (SPEC-09 REQ-PERS-030).
@@ -416,6 +529,47 @@ impl GameLibrary {
             return;
         }
         self.entries.push(entry);
+    }
+
+    /// The entry `incoming` replaces, or is dropped for, under REQ-PROF-087: one that designates
+    /// the same game (REQ-PROF-086) when **at least one of the two** is of generation 2.1.
+    ///
+    /// Between two profiles of an earlier generation nothing changes, which is what keeps the
+    /// four profiles of AMD-039 §5 — a 2.0 whose Lua scripts differ from the built-in of the same
+    /// name — each with their own entry (AMD-037, AMD-065 §2 last paragraph).
+    fn same_game_position(&self, incoming: &GameLibraryEntry) -> Option<usize> {
+        let one_is_2_1 = |existing: &GameLibraryEntry| {
+            existing.generation().is_two_point_one() || incoming.generation().is_two_point_one()
+        };
+        self.entries
+            .iter()
+            .position(|existing| one_is_2_1(existing) && existing.designates(&incoming.identity))
+    }
+
+    /// REQ-PROF-087 on the entry at `position`, which `incoming` designates the same game as.
+    fn replace_same_game(
+        &mut self,
+        position: usize,
+        incoming: GameLibraryEntry,
+        log: &dyn ProfileLog,
+    ) -> Option<&GameLibraryEntry> {
+        let existing = &self.entries[position];
+        // Several profiles of generation 2.1: the existing rules decide — the user profile wins
+        // over the built-in, then the first read.
+        let wins = if existing.generation().is_two_point_one() {
+            incoming.generation().is_two_point_one()
+                && existing.source == GameProfileSource::BuiltIn
+                && incoming.source == GameProfileSource::User
+        } else {
+            incoming.generation().is_two_point_one()
+        };
+        if !wins {
+            log.information(&replacement_message(&existing.id, existing, &incoming));
+            return None;
+        }
+        log.information(&replacement_message(&existing.id, &incoming, existing));
+        self.entries[position].take_over(incoming);
+        Some(&self.entries[position])
     }
 
     fn apply(&mut self, persisted: &GameLibraryFile, log: &dyn ProfileLog) {
@@ -447,6 +601,29 @@ fn user_entry(profile: &UserProfile) -> GameLibraryEntry {
         GameProfileSource::User,
         profile.file_path.clone(),
         profile.origin,
+        GameIdentity::of_user(profile),
+    )
+}
+
+/// What the log says of a replacement (AMD-065 REQ-PROF-087): the identifier the entry keeps,
+/// which profile it is shown from, and which one adds none. Nothing is deleted or rewritten, and
+/// the line says so.
+fn replacement_message(
+    entry_id: &str,
+    kept: &GameLibraryEntry,
+    dropped: &GameLibraryEntry,
+) -> String {
+    format!(
+        "\"{}\" and \"{}\" are the same game: the entry \"{entry_id}\" shows the {} profile {} \
+         and the other adds none; its file stays on the disk",
+        kept.display_title(),
+        dropped.display_title(),
+        if kept.generation().is_two_point_one() {
+            "2.1"
+        } else {
+            "earlier"
+        },
+        kept.profile_path.display()
     )
 }
 

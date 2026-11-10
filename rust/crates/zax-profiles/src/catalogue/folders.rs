@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::game_identity::ProfileGeneration;
 use super::user_folder::{
     import_messages, same_path, sort_ordinal, ProfileOrigin, UserProfile, UserProfileFolder,
 };
@@ -96,10 +97,11 @@ impl<'a> ProfileFolders<'a> {
             .map(|path| file_name(path).to_uppercase())
             .collect();
 
-        let mut taken: HashSet<String> = reserved_ids.iter().map(|id| (*id).to_owned()).collect();
+        let reserved: HashSet<&str> = reserved_ids.iter().copied().collect();
+        let mut kept: HashMap<String, usize> = HashMap::new();
         let mut path_by_id: HashMap<String, PathBuf> = HashMap::new();
-        for profile in &profiles {
-            taken.insert(profile.id.clone());
+        for (position, profile) in profiles.iter().enumerate() {
+            kept.insert(profile.id.clone(), position);
             path_by_id.insert(profile.id.clone(), profile.file_path.clone());
         }
 
@@ -123,7 +125,29 @@ impl<'a> ProfileFolders<'a> {
             if program.is_built_in_copy(&path, &bytes, built_in_contents) {
                 continue;
             }
-            if !taken.insert(profile.id.clone()) {
+            if reserved.contains(profile.id.as_str()) {
+                self.log
+                    .warning(&import_messages::duplicated_profile(&path, &profile.id));
+                continue;
+            }
+            if let Some(position) = kept.get(&profile.id).copied() {
+                // AMD-065 REQ-PROF-087: a profile of generation 2.1 is the one the game is shown
+                // from, even against the user folder's own file of the same identifier — AMD-033
+                // §2 decides between two profiles of the same generation, not between two
+                // generations.
+                if ProfileGeneration::of_bytes(&bytes).is_two_point_one()
+                    && !ProfileGeneration::of_header(&profiles[position].header).is_two_point_one()
+                {
+                    self.log.information(&format!(
+                        "{}: same game as \"{}\" and of generation 2.1; it is the one shown, and \
+                         the other file stays on the disk",
+                        path.display(),
+                        profiles[position].file_path.display()
+                    ));
+                    path_by_id.insert(profile.id.clone(), path);
+                    profiles[position] = profile;
+                    continue;
+                }
                 // Byte-identical files are the same profile twice and appear once, with nothing
                 // to report; two different files for one identifier are worth a line.
                 if !self.have_same_content(&path, path_by_id.get(&profile.id)) {
@@ -132,6 +156,7 @@ impl<'a> ProfileFolders<'a> {
                 }
                 continue;
             }
+            kept.insert(profile.id.clone(), profiles.len());
             path_by_id.insert(profile.id.clone(), path);
             profiles.push(profile);
         }

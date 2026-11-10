@@ -7,6 +7,7 @@
 
 mod catalogue_and_library_tests;
 mod common;
+mod generation_replacement_tests;
 mod hash_profile_envelope_tests;
 mod hash_profile_library_tests;
 mod hash_profile_reader_tests;

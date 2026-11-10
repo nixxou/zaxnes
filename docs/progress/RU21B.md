@@ -5,7 +5,7 @@ Lot of three steps. Normative source: `spec/changes/AMD-065-generation-remplace.
 
 - [x] 1/3 — Plan: where "same game" is decided, and how the replaced entry's identifier
   reaches `rom.json`, the saves and the cover.
-- [ ] 2/3 — Implementation and tests: REQ-PROF-085 to 087, AMD-065 §3's automatic criteria,
+- [x] 2/3 — Implementation and tests: REQ-PROF-085 to 087, AMD-065 §3's automatic criteria,
   and the real-install test made to hold for a 2.0 **and** a 2.1 installation.
 - [ ] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
   touched, performance note.
@@ -104,3 +104,61 @@ different games. `Hogan's Alley` (envelope `Id` `3348a6f46bb7`) pairs with the b
   entry no longer uses.
 - **A title the user chose still wins.** `library.json`'s title is applied after the build, as it
   already was for every user profile; REQ-PROF-087's title is the one derived from the profile.
+
+## Step 2 — the implementation and its tests
+
+New in `zax-profiles`:
+
+- `catalogue/game_identity.rs` — `ProfileGeneration` (REQ-PROF-085, read at the content through
+  `hash::envelope::is_hash_profile`, never at the extension) and `GameIdentity` (REQ-PROF-086: the
+  `Id` read in the file, which never holds a derived identifier, and the normalised profile name —
+  case folded, `'` as `_`).
+- `ProfileCatalogue::read_built_in_profiles` returns `BuiltInProfiles`: the bytes AMD-037 compares
+  a user file against **and** the header each built-in file carries, read once for the two uses.
+  `built_in_contents` is kept and is now a thin wrapper over it.
+- `GameLibraryEntry` remembers the identity of the profile it shows and of those it has replaced,
+  and `take_over` applies REQ-PROF-087: the identifier stays, the title, the file, the source and
+  the origin come from the 2.1 profile. `GameLibrary::build_with_built_in_profiles` is `build`
+  plus condition 1 for the built-in profiles.
+
+### A fourth place the rule had to reach
+
+Step 1's plan named three. A failing test found the fourth: the **folder scan** yields one profile
+per identifier (REQ-PROF-062, « the first read wins »), so for the 56 games whose 3dn and 3dh carry
+the *same* `Id` it dropped one of the two files before the library ever saw it — and which one
+depended on the file names. `UserProfileFolder::scan_excluding` and `ProfileFolders::scan_excluding`
+now keep the 2.1 file when the two generations differ, and log a line saying the other file stays
+on the disk. Between two profiles of the same generation they are unchanged.
+
+`GameLibrary::add` now asks REQ-PROF-087 **before** REQ-PERS-030's duplicated-identifier rule,
+since the test only fires when one of the two profiles is a 2.1.
+
+### Tests
+
+- `catalogue/game_identity.rs` unit tests: the name normalisation, condition 1, condition 2,
+  neither, and the generation read at the content.
+- `tests/profiles/generation_replacement_tests.rs`, 15 tests: both directions of REQ-PROF-085
+  (a 3dh named `.3dn` replaces, a 3dn named `.3dh` does not), the two conditions of REQ-PROF-086
+  with the apostrophe case, a derived identifier that is not a file `Id`, the generic entries that
+  designate no game, and for REQ-PROF-087 the kept identifier through `apply_rom_paths` and
+  `to_file`, the title, the single entry for a user 3dn plus a user 3dh with the 3dn still byte for
+  byte on the disk, both read orders, the unchanged behaviour between two earlier generations
+  (AMD-039 §5), the run-time import in both directions, and an entry still found under the name it
+  was replaced under. Two `#[ignore]`d tests run AMD-065 §3's first criteria on `assets-neutral/`:
+  three 2.1 profiles (one by `Id`, two by name) and then **all 101**, which leave exactly the
+  catalogue's entries, each shown from its 2.1 profile, nothing derived and nothing ignored.
+- `hash_profile_library_tests::amd_039_a_two_zero_and_a_two_one_profile_of_the_same_game_keep_their_identifiers`
+  encoded the sentence AMD-065 §4 replaces (two entries accepted). It is now
+  `amd_065_a_two_zero_and_a_two_one_profile_of_the_same_game_make_one_entry`, and checks the 101
+  real pairs under the names their two installations give them: 56 paired by their `Id`, 45 by
+  their name, one entry each, the 3dn untouched.
+- `three_d_sen_real_install_tests::amd_037_…` now reads the generation at the content of what the
+  import wrote, and expects, on a 2.1, 0 derived identifiers and a library of exactly the
+  catalogue's size with every entry 2.1; on a 2.0 and a 1.x, exactly what it expected before.
+
+### What was run
+
+`cargo test -p zax-profiles --test profiles -- --include-ignored` with `ZAXNES_PROFILES`: 350
+passed, 6 failed — the six that need `ZAXNES_3DSEN_INSTALL`, which this machine's clean side does
+not have (R0 runs them). `cargo test --release -p zax-app --features bundled`: all green.
+`cargo clippy -D warnings` clean on both crates, `cargo fmt --check` clean.

@@ -4,12 +4,13 @@
 use std::path::{Path, PathBuf};
 
 use zax_profiles::catalogue::{
-    derived_id, import_messages, ProfileImportOutcome, ProfileOrigin, UserProfile,
-    UserProfileFolder,
+    derived_id, import_messages, ProfileCatalogue, ProfileImportOutcome, ProfileOrigin,
+    UserProfile, UserProfileFolder,
 };
 use zax_profiles::format::{self, ProfileLoadErrorKind};
 use zax_profiles::hash::envelope::messages;
 use zax_profiles::import::{read_text_assets, ThreeDSenImporter};
+use zax_profiles::library::GameLibrary;
 use zax_profiles::wire::hash_envelope;
 
 use zax_profiles::catalogue::ProfileFileSystem;
@@ -211,46 +212,80 @@ fn amd_030_a_bundle_carrying_a_hash_profile_imports_it_byte_for_byte() {
     assert_eq!(1, again.already_present);
 }
 
-// AMD-039 §4, last bullet: a 2.0 profile and a 2.1 one of the same game imported in turn. For a
-// game whose 3dn carries an `Id`, both files carry the same one; otherwise the 3dn takes the
-// derived identifier of AMD-037 and the "3dh" the one of its envelope — two library entries.
+// AMD-065 REQ-PROF-086, REQ-PROF-087, on the 101 pairs of the extracted assets: a 2.0 profile and
+// a 2.1 one of the same game, side by side in the user folder with the names their installation
+// gives them. Whichever of the two conditions pairs them, the library has **one** entry, the 2.1
+// one, and the 3dn file stays on the disk.
+//
+// This replaces what AMD-039 §4 last bullet and AMD-062 §8 accepted — two entries for the 45 games
+// whose files carry different identifiers (AMD-065 §4).
 #[test]
 #[ignore = "needs the built-in profiles: set ZAXNES_PROFILES to the folder that holds profiles/ and profiles-2.1/"]
-fn amd_039_a_two_zero_and_a_two_one_profile_of_the_same_game_keep_their_identifiers() {
+fn amd_065_a_two_zero_and_a_two_one_profile_of_the_same_game_make_one_entry() {
+    // No built-in profile at all: the two user files are alone, which is AMD-065 §3's third
+    // criterion.
+    let catalogue = ProfileCatalogue::from_entries(Path::new(""), Vec::new());
     let mut same_id = 0;
-    let mut distinct = 0;
+    let mut same_name = 0;
     for file in neutral_assets::hash_profile_files() {
         let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let stem = name.trim_end_matches(".bytes");
         let hash_bytes = std::fs::read(&file).unwrap();
+        let plain_name = neutral_assets::counterpart_name(stem);
         let plain_bytes = neutral_assets::read_profile(&neutral_assets::counterpart_name(&name));
 
         let files = FakeProfileFileSystem::new();
-        files.add_file(&destination().join("a.3dn"), &plain_bytes);
-        files.add_file(&destination().join("b.3dh"), &hash_bytes);
+        let plain_path = destination().join(format!("{plain_name}.3dn"));
+        let hash_path = destination().join(format!("{stem}.3dh"));
+        files.add_file(&plain_path, &plain_bytes);
+        files.add_file(&hash_path, &hash_bytes);
 
         let profiles = folder(&files, &destination()).scan(&[]).unwrap();
         let envelope = envelope_id(&hash_bytes);
         let header = format::load_header(&plain_bytes, None, None).unwrap();
 
         if header.has_id() {
-            // Both files carry the same identifier, so the second is the duplicate of the first
-            // and one library entry remains (REQ-PROF-062, unchanged).
+            // Both files carry the same identifier (REQ-PROF-086 point 1), so the scan already
+            // yields one profile — and it must be the 2.1 one.
             assert_eq!(header.id.clone().unwrap_or_default(), envelope, "{name}");
             assert_eq!(1, profiles.len(), "{name}");
             assert_eq!(envelope, profiles[0].id);
-            assert!(profiles[0].file_path.ends_with("a.3dn"));
+            assert!(
+                profiles[0].file_path.ends_with(format!("{stem}.3dh")),
+                "{name}"
+            );
             same_id += 1;
         } else {
-            // The 3dn takes the derived identifier of AMD-037, the "3dh" the one of its
-            // envelope: two distinct entries, which AMD-039 §4 accepts.
+            // The 3dn takes the derived identifier of AMD-037, the "3dh" the one of its envelope:
+            // two profiles, which the name then pairs (REQ-PROF-086 point 2).
             assert_eq!(2, profiles.len(), "{name}");
-            assert_eq!(derived_id(&plain_bytes), find(&profiles, "a.3dn").id);
-            assert_eq!(envelope, find(&profiles, "b.3dh").id);
-            distinct += 1;
+            assert_eq!(
+                derived_id(&plain_bytes),
+                find(&profiles, &format!("{plain_name}.3dn")).id,
+                "{name}"
+            );
+            assert_eq!(
+                envelope,
+                find(&profiles, &format!("{stem}.3dh")).id,
+                "{name}"
+            );
+            same_name += 1;
         }
+
+        // REQ-PROF-087: one entry, shown from the 2.1 profile, and nothing deleted or rewritten.
+        let library = GameLibrary::build(&catalogue, &profiles, None, None);
+        assert_eq!(1, library.entries().len(), "{name}");
+        assert_eq!(envelope, library.entries()[0].id(), "{name}");
+        assert!(
+            library.entries()[0]
+                .profile_path()
+                .ends_with(format!("{stem}.3dh")),
+            "{name}"
+        );
+        assert_eq!(plain_bytes, files.read_all_bytes(&plain_path).unwrap());
     }
 
     // REQ-PROF-073, notes: 56 of the 101 counterparts carry an identifier.
     assert_eq!(56, same_id);
-    assert_eq!(45, distinct);
+    assert_eq!(45, same_name);
 }

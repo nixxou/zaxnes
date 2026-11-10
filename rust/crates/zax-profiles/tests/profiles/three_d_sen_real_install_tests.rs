@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use zax_profiles::catalogue::{
-    built_in, ProfileCatalogue, ProfileOrigin, UserProfileFolder, FULL_EDITION,
+    built_in, ProfileCatalogue, ProfileGeneration, ProfileOrigin, UserProfileFolder, FULL_EDITION,
 };
 use zax_profiles::format;
 use zax_profiles::import::{
@@ -225,13 +225,103 @@ fn the_imported_profiles_are_those_of_the_reference_inventory() {
     }
 }
 
-/// AMD-037: after the import, every one of the 101 profiles is a game (45 of them carry no
-/// identifier and get a derived one) without assets, and no game appears twice with them.
+/// The second half of the test below: the imported folder read against the **catalogue** of
+/// `assets-neutral/`.
 ///
-/// On a 2.0 installation four of the 101 are not byte-for-byte the catalogue's own, their Lua
-/// scripts differing (AMD-039 §5): those four stay user profiles, the other 97 are reported
-/// identical, and each of the four adds a library entry, its identifier not being one of the
-/// catalogue's. What the interface is to show then is Q-076.
+/// Each file is one of the catalogue's own profiles and adds no game — but for the four of
+/// AMD-039 §5 on a 2.0, which differ by their Lua scripts (Q-076). On a 2.1 no file is a built-in
+/// copy, so the scan keeps all 101, and each of them replaces the built-in profile of its game
+/// (AMD-065 REQ-PROF-087).
+fn the_library_with_the_catalogue_assets(
+    files: &PhysicalProfileFileSystem,
+    folder: &UserProfileFolder<'_>,
+    is_2_1: bool,
+    log: &RecordingProfileLog,
+) {
+    let catalogue =
+        ProfileCatalogue::load(files, &neutral_assets::catalogue_file(), FULL_EDITION).unwrap();
+    let built_in_profiles = catalogue.read_built_in_profiles(files);
+    let profiles = folder
+        .scan_excluding(&catalogue.ids(), built_in_profiles.contents())
+        .unwrap();
+    let mut kept: Vec<String> = profiles
+        .iter()
+        .filter_map(|profile| profile.file_path.file_stem())
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .collect();
+    kept.sort();
+    if is_2_1 {
+        assert_eq!(PROFILE_COUNT, kept.len());
+    } else {
+        let expected_kept: Vec<String> = if is_version_2() {
+            LUA_DIFFERING_PROFILES
+                .iter()
+                .map(|&name| name.to_owned())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        assert_eq!(expected_kept, kept);
+    }
+    let library = GameLibrary::build_with_built_in_profiles(
+        &catalogue,
+        &built_in_profiles,
+        &profiles,
+        None,
+        Some(log),
+    );
+
+    // Whichever version: one entry per identifier, nothing hidden by a clash.
+    let mut ids: Vec<&str> = library.entries().iter().map(GameLibraryEntry::id).collect();
+    let distinct: HashSet<&str> = ids.iter().copied().collect();
+    assert_eq!(ids.len(), distinct.len());
+    if !is_2_1 {
+        assert_eq!(catalogue.entries().len() + kept.len(), ids.len());
+        return;
+    }
+
+    // AMD-065: every one of the 101 replaces the built-in profile of its game, so the library is
+    // exactly the catalogue — its identifiers included, which is what keeps `rom.json`, the saves
+    // and the cover attached — and every entry is shown from its 2.1 profile.
+    assert_eq!(catalogue.entries().len(), ids.len());
+    let mut expected: Vec<&str> = catalogue
+        .entries()
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    ids.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(expected, ids);
+    for entry in library.entries() {
+        assert_eq!(
+            ProfileGeneration::TwoPointOne,
+            entry.generation(),
+            "{}: {}",
+            entry.id(),
+            entry.display_title()
+        );
+        assert_eq!(GameProfileSource::User, entry.source());
+    }
+}
+
+/// AMD-037 and AMD-065, on whichever installation `ZAXNES_3DSEN_INSTALL` names.
+///
+/// After the import, every one of the 101 profiles is a game without assets, and no game appears
+/// twice with them. What differs is the generation the installation writes (REQ-PROF-085), which
+/// is read at the content of the imported files, not at the version of the bundle:
+///
+/// - **1.x and 2.0** (3dn): 45 of the 101 carry no identifier and get a derived one (AMD-037). On
+///   a 2.0, four of the 101 are not byte-for-byte the catalogue's own, their Lua scripts differing
+///   (AMD-039 §5): those four stay user profiles, the other 97 are reported identical, and each of
+///   the four adds a library entry, its identifier not being one of the catalogue's. What the
+///   interface is to show then is Q-076.
+/// - **2.1** (3dh): all 101 envelopes carry an `Id`, so nothing is derived; none of the files is
+///   byte-for-byte a built-in profile, so all 101 are kept by the scan; and each of them is the
+///   same game as a built-in profile — 56 by their `Id`, 45 by their name — so the library counts
+///   exactly the entries of the catalogue alone, each shown from its 2.1 profile (AMD-065
+///   REQ-PROF-087).
+///
+/// In both cases no file is ignored and none is rewritten.
 // Q-076
 #[test]
 #[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
@@ -247,6 +337,17 @@ fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_
             .unwrap()
             .map(|entry| fs::read(entry.unwrap().path()).unwrap())
             .collect();
+
+        // REQ-PROF-085: the generation is read at the content of what was written, the import
+        // naming a 3dh `<name>.3dn` just as it names a 3dn (AMD-062 §8).
+        let is_2_1 = before
+            .iter()
+            .all(|bytes| ProfileGeneration::of_bytes(bytes).is_two_point_one());
+        println!(
+            "ZAXNES_3DSEN_INSTALL writes {} profiles (bundle format {})",
+            if is_2_1 { "2.1 \"3dh\"" } else { "3dn" },
+            bundle_format_version()
+        );
 
         // Without assets: the generic catalogue, 101 games, nothing ignored.
         let log = RecordingProfileLog::new();
@@ -264,8 +365,9 @@ fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_
             .filter(|line| line.contains("derived from its content"))
             .count();
         assert_eq!(
-            45, derived,
-            "the owner's install has 45 profiles without Id"
+            if is_2_1 { 0 } else { 45 },
+            derived,
+            "a 2.1 install carries an `Id` in all 101 envelopes; a 3dn install has 45 without one"
         );
         let library = GameLibrary::build(&generic, &profiles, None, Some(&log));
         let user_games = library
@@ -275,36 +377,7 @@ fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_
             .count();
         assert_eq!(PROFILE_COUNT, user_games);
 
-        // With assets: each file is one of the catalogue's own profiles and adds no game — but
-        // for the four of AMD-039 §5 on a 2.0, which differ by their Lua scripts (Q-076).
-        let catalogue =
-            ProfileCatalogue::load(&files, &neutral_assets::catalogue_file(), FULL_EDITION)
-                .unwrap();
-        let profiles = folder
-            .scan_excluding(&catalogue.ids(), &catalogue.built_in_contents(&files))
-            .unwrap();
-        let mut kept: Vec<String> = profiles
-            .iter()
-            .filter_map(|profile| profile.file_path.file_stem())
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .collect();
-        kept.sort();
-        let expected_kept: Vec<String> = if is_version_2() {
-            LUA_DIFFERING_PROFILES
-                .iter()
-                .map(|&n| n.to_owned())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        assert_eq!(expected_kept, kept);
-        let library = GameLibrary::build(&catalogue, &profiles, None, Some(&log));
-
-        // Whichever version: one entry per identifier, nothing hidden by a clash.
-        let ids: Vec<&str> = library.entries().iter().map(GameLibraryEntry::id).collect();
-        let distinct: HashSet<&str> = ids.iter().copied().collect();
-        assert_eq!(ids.len(), distinct.len());
-        assert_eq!(catalogue.entries().len() + kept.len(), ids.len());
+        the_library_with_the_catalogue_assets(&files, &folder, is_2_1, &log);
 
         // The import left the files byte-identical (AMD-030): scanning rewrote nothing.
         let after: Vec<Vec<u8>> = fs::read_dir(&destination)

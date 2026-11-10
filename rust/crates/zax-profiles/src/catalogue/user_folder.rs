@@ -1,12 +1,13 @@
 //! The user profiles folder and the import of `.3dn` files into it (SPEC-03 REQ-PROF-062,
 //! REQ-PROF-063).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::game_identity::ProfileGeneration;
 use super::ProfileFileSystem;
 use crate::format::{self, ProfileHeader, ProfileLog, NULL_PROFILE_LOG};
 use crate::text;
@@ -242,8 +243,9 @@ impl<'a> UserProfileFolder<'a> {
         let mut paths = Self::list_profile_files(self.files, &self.directory)?;
         sort_ordinal(&mut paths);
 
-        let mut taken: HashSet<String> = reserved_ids.iter().map(|id| (*id).to_owned()).collect();
-        let mut profiles = Vec::new();
+        let reserved: HashSet<&str> = reserved_ids.iter().copied().collect();
+        let mut kept: HashMap<String, usize> = HashMap::new();
+        let mut profiles: Vec<UserProfile> = Vec::new();
         for path in paths {
             let Some((profile, bytes)) = self.read(&path) else {
                 continue;
@@ -251,12 +253,34 @@ impl<'a> UserProfileFolder<'a> {
             if self.is_built_in_copy(&path, &bytes, built_in_contents) {
                 continue;
             }
-            if !taken.insert(profile.id.clone()) {
+            if reserved.contains(profile.id.as_str()) {
                 self.log
                     .warning(&import_messages::duplicated_profile(&path, &profile.id));
                 continue;
             }
-            profiles.push(profile);
+            let Some(position) = kept.get(&profile.id).copied() else {
+                kept.insert(profile.id.clone(), profiles.len());
+                profiles.push(profile);
+                continue;
+            };
+            // AMD-065 REQ-PROF-087: between two files of one identifier the first read wins
+            // (REQ-PROF-062), **unless** the later one is of generation 2.1 and the kept one is
+            // not — the game must be shown from its 2.1 profile. Which is the case for 56 of the
+            // 101 games, whose 3dn and 3dh carry the same `Id`.
+            if ProfileGeneration::of_bytes(&bytes).is_two_point_one()
+                && !ProfileGeneration::of_header(&profiles[position].header).is_two_point_one()
+            {
+                self.log.information(&format!(
+                    "{}: same game as \"{}\" and of generation 2.1; it is the one shown, and the \
+                     other file stays on the disk",
+                    path.display(),
+                    profiles[position].file_path.display()
+                ));
+                profiles[position] = profile;
+                continue;
+            }
+            self.log
+                .warning(&import_messages::duplicated_profile(&path, &profile.id));
         }
         Ok(profiles)
     }

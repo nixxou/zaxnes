@@ -103,9 +103,12 @@ impl LibraryGameCatalog {
             .load(&paths.library_file, OffsetDateTime::now_utc());
         // AMD-033 §1: the user folder and the read-only "profiles" folder next to the
         // executable, in every mode.
-        let built_in_contents = catalogue.built_in_contents(&files);
+        // Read once: the bytes a user copy of a built-in profile is recognised by (AMD-037) and
+        // the `Id` each built-in file carries, which pairs it with the 2.1 profile of the same
+        // game (AMD-065 REQ-PROF-086 point 1).
+        let built_in = catalogue.read_built_in_profiles(&files);
         let user_profiles = match profile_folders(&files, paths, &adapter)
-            .scan_excluding(&catalogue.ids(), &built_in_contents)
+            .scan_excluding(&catalogue.ids(), built_in.contents())
         {
             Ok(profiles) => profiles,
             Err(error) => {
@@ -115,14 +118,15 @@ impl LibraryGameCatalog {
                 Vec::new()
             }
         };
-        let library = GameLibrary::build(
+        let library = GameLibrary::build_with_built_in_profiles(
             &catalogue,
+            &built_in,
             &user_profiles,
             persisted.as_ref(),
             Some(&adapter),
         );
         let mut catalog = Self::from_library(library, paths.clone(), log);
-        catalog.built_in_contents = built_in_contents;
+        catalog.built_in_contents = built_in.into_contents();
         catalog
     }
 
