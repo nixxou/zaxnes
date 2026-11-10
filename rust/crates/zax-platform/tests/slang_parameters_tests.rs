@@ -36,7 +36,9 @@ fn mega_bezel_reads_with_its_headings() {
     let parameters =
         preset_parameters(&root.join("bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp")).unwrap();
     assert!(parameters.len() > 100, "{}", parameters.len());
-    assert!(parameters.iter().any(|p| p.is_heading()));
+    assert!(parameters
+        .iter()
+        .any(zax_platform::slang_chain::ParameterInfo::is_heading));
     // Declared order: the first one is not simply the alphabetical first.
     let mut sorted: Vec<&str> = parameters.iter().map(|p| p.name.as_str()).collect();
     sorted.sort_unstable();
