@@ -521,6 +521,9 @@ pub struct FrameDiff {
     pub frame: u32,
     /// How many of the 2 KiB differ.
     pub ram_count: u32,
+    /// How many of those are **outside page 1**, the stack — memory the game is using rather
+    /// than a leftover below the stack pointer. Counted whole, unlike [`Self::ram`].
+    pub ram_outside_stack: u32,
     /// The first few differing addresses, as (address, Zaxnes, FCEUX).
     pub ram: Vec<(u16, u8, u8)>,
     /// How many pixels differ.
@@ -540,6 +543,23 @@ impl FrameDiff {
             && self.sensitivity.is_none_or(|(ours, theirs)| ours == theirs)
     }
 
+    /// Whether what differs would be **seen**: the picture, or the two machines disagreeing about
+    /// whether the frame reacted to the pad.
+    #[must_use]
+    pub fn is_visible(&self) -> bool {
+        self.pixels > 0
+            || self
+                .sensitivity
+                .is_some_and(|(ours, theirs)| ours != theirs)
+    }
+
+    /// Whether the difference reaches memory the game is using, rather than only the leftovers
+    /// of page 1 below the stack pointer.
+    #[must_use]
+    pub fn is_outside_the_stack(&self) -> bool {
+        self.ram_outside_stack > 0 || self.is_visible()
+    }
+
     /// The one-line description the report prints.
     #[must_use]
     pub fn line(&self) -> String {
@@ -547,7 +567,11 @@ impl FrameDiff {
         if self.ram_count == 0 {
             text.push_str(" work RAM identical;");
         } else {
-            let _ = write!(text, " {} RAM byte(s) differ (", self.ram_count);
+            let _ = write!(
+                text,
+                " {} RAM byte(s) differ, {} outside the stack page (",
+                self.ram_count, self.ram_outside_stack
+            );
             for (index, (address, ours, theirs)) in self.ram.iter().enumerate() {
                 let separator = if index == 0 { "" } else { ", " };
                 let _ = write!(text, "{separator}${address:04X} {ours:02X}/{theirs:02X}");
@@ -593,6 +617,7 @@ impl FrameDiff {
         json!({
             "frame": self.frame,
             "ram_bytes_differing": self.ram_count,
+            "ram_bytes_differing_outside_the_stack_page": self.ram_outside_stack,
             "ram": self.ram.iter().map(|(address, ours, theirs)| json!({
                 "address": address, "zaxnes": ours, "fceux": theirs,
             })).collect::<Vec<_>>(),
@@ -622,10 +647,13 @@ pub fn compare_frame(
     };
     for (address, (ours, theirs)) in ram.0.iter().zip(ram.1.iter()).enumerate() {
         if ours != theirs {
+            let address = u16::try_from(address).unwrap_or(u16::MAX);
             diff.ram_count += 1;
+            if !STACK_PAGE.contains(&address) {
+                diff.ram_outside_stack += 1;
+            }
             if diff.ram.len() < ram_bytes {
-                diff.ram
-                    .push((u16::try_from(address).unwrap_or(u16::MAX), *ours, *theirs));
+                diff.ram.push((address, *ours, *theirs));
             }
         }
     }
@@ -876,11 +904,50 @@ pub struct Measurement {
     pub ram_agreed_after: u32,
     /// A few frames' worth of detail after the divergence, for the report.
     pub detail: Vec<FrameDiff>,
+    /// The first frame at which the difference is **visible**: pixels differ, or the two machines
+    /// disagree about the frame's input sensitivity.
+    ///
+    /// Kept beside [`Self::first_divergence`] because on a real TAS the two are rarely the same
+    /// frame and the distance between them is the interesting quantity. The strict first
+    /// divergence is usually a byte of work RAM; whether and when it reaches the screen is a
+    /// different fact.
+    pub first_visible: Option<FrameDiff>,
+    /// The first frame whose work RAM differs **outside page 1** (`$0100-$01FF`), or which is
+    /// visible.
+    ///
+    /// Page 1 is the stack, and a byte of it below the stack pointer is a leftover no game reads
+    /// — but it is *not* noise: the bytes an interrupt pushes are the program counter, so a
+    /// difference there says the two machines took the interrupt at different points. Both are
+    /// worth having separately: this one is the first difference in memory the game is using.
+    pub first_outside_stack: Option<FrameDiff>,
+    /// How many compared frames are visibly different, over the whole run.
+    pub visible_count: u32,
+    /// The first [`VISIBLE_FRAMES_LISTED`] of them, by frame. On a movie that nearly syncs this
+    /// is the whole answer — "five frames of 47 454, and these are the five".
+    pub visible_at: Vec<u32>,
 }
+
+/// How many visibly differing frames the report names before it only counts them.
+const VISIBLE_FRAMES_LISTED: usize = 32;
+
+/// The page the stack lives in, whose bytes below the stack pointer are leftovers.
+const STACK_PAGE: std::ops::Range<u16> = 0x0100..0x0200;
 
 impl Measurement {
     /// Takes one compared frame. Answers `true` when the caller should stop comparing.
     fn record(&mut self, diff: FrameDiff, keep_going: Option<u32>) -> bool {
+        if diff.is_visible() {
+            self.visible_count += 1;
+            if self.visible_at.len() < VISIBLE_FRAMES_LISTED {
+                self.visible_at.push(diff.frame);
+            }
+            if self.first_visible.is_none() {
+                self.first_visible = Some(diff.clone());
+            }
+        }
+        if self.first_outside_stack.is_none() && diff.is_outside_the_stack() {
+            self.first_outside_stack = Some(diff.clone());
+        }
         if self.first_divergence.is_none() {
             if diff.agrees() {
                 self.agreed_frames += 1;
@@ -967,6 +1034,45 @@ impl Measurement {
         for diff in &self.detail {
             let _ = writeln!(text, "    {}", diff.line());
         }
+        for (what, which) in [
+            (
+                "the first difference outside the stack page (memory the game is using)",
+                self.first_outside_stack.as_ref(),
+            ),
+            (
+                "the first difference that would be SEEN (pixels, or one machine reacting to the \
+                 pad and the other not)",
+                self.first_visible.as_ref(),
+            ),
+        ] {
+            match which {
+                None => {
+                    let _ = writeln!(text, "  {what}: none in what was compared");
+                }
+                Some(diff) if diff.frame == first.frame => {
+                    let _ = writeln!(text, "  {what}: the same frame");
+                }
+                Some(diff) => {
+                    let _ = writeln!(text, "  {what}:\n    {}", diff.line());
+                }
+            }
+        }
+        let listed = self
+            .visible_at
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            text,
+            "  {} compared frame(s) differ visibly: {listed}{}",
+            self.visible_count,
+            if self.visible_count as usize > self.visible_at.len() {
+                ", ..."
+            } else {
+                ""
+            }
+        );
         let (compared, same_picture, last) = self.after;
         let _ = writeln!(
             text,
@@ -1019,11 +1125,19 @@ impl Measurement {
             json!(self.agreed_frames),
         );
         root.insert(
-            "first_divergence".into(),
-            self.first_divergence
-                .as_ref()
-                .map_or(Value::Null, FrameDiff::to_json),
+            "frames_visibly_different".into(),
+            json!({ "count": self.visible_count, "first": self.visible_at }),
         );
+        for (key, which) in [
+            ("first_divergence", self.first_divergence.as_ref()),
+            (
+                "first_divergence_outside_the_stack",
+                self.first_outside_stack.as_ref(),
+            ),
+            ("first_visible_divergence", self.first_visible.as_ref()),
+        ] {
+            root.insert(key.into(), which.map_or(Value::Null, FrameDiff::to_json));
+        }
         root.insert(
             "after_the_divergence".into(),
             json!({
@@ -1635,6 +1749,89 @@ mod tests {
         // And `--keep-going` stops the caller.
         let diff = compare_frame(7, (&ram, &other), (&picture, &picture), None, 16);
         assert!(measurement.record(diff, Some(3)));
+    }
+
+    /// The stack page is told apart from the rest, and the two extra markers follow it: a
+    /// leftover below the stack pointer is a divergence but not one the game can see.
+    #[test]
+    fn a_difference_only_in_the_stack_page_is_not_counted_as_one_the_game_can_see() {
+        let ours = [0u8; RAM_LEN];
+        let picture = vec![0u8; PICTURE_LEN];
+        let stack_only = {
+            let mut theirs = ours;
+            theirs[0x01FB] = 0x56;
+            theirs[0x0100] = 0x01;
+            compare_frame(2, (&ours, &theirs), (&picture, &picture), None, 16)
+        };
+        assert_eq!(stack_only.ram_count, 2);
+        assert_eq!(stack_only.ram_outside_stack, 0);
+        assert!(!stack_only.agrees(), "it is still a divergence");
+        assert!(!stack_only.is_outside_the_stack());
+        assert!(!stack_only.is_visible());
+
+        let elsewhere = {
+            let mut theirs = ours;
+            theirs[0x01FB] = 0x56;
+            theirs[0x0345] = 0x01;
+            compare_frame(9, (&ours, &theirs), (&picture, &picture), None, 16)
+        };
+        assert_eq!(elsewhere.ram_count, 2);
+        assert_eq!(elsewhere.ram_outside_stack, 1);
+        assert!(elsewhere.is_outside_the_stack());
+        assert!(!elsewhere.is_visible(), "no pixel differs");
+
+        // And the cap on named addresses must not be able to hide one: 20 stack bytes differ
+        // before the one that is not in the stack, and the count still finds it.
+        let hidden = {
+            let mut theirs = ours;
+            for byte in &mut theirs[0x0100..0x0114] {
+                *byte = 0xAA;
+            }
+            theirs[0x0700] = 0xAA;
+            compare_frame(9, (&ours, &theirs), (&picture, &picture), None, 4)
+        };
+        assert_eq!(hidden.ram.len(), 4, "only four are named");
+        assert_eq!(hidden.ram_count, 21);
+        assert_eq!(hidden.ram_outside_stack, 1);
+        assert!(hidden.is_outside_the_stack());
+
+        // The three markers in a measurement: all three move independently.
+        let mut measurement = Measurement {
+            runs: vec![EngineRun::default(), EngineRun::default()],
+            ..Measurement::default()
+        };
+        let _ = measurement.record(stack_only, None);
+        let _ = measurement.record(elsewhere, None);
+        let mut lit = picture.clone();
+        lit[0] = 1;
+        let visible = compare_frame(
+            30,
+            (&ours, &ours),
+            (&picture, &lit),
+            Some((true, false)),
+            16,
+        );
+        let _ = measurement.record(visible, None);
+        assert_eq!(
+            measurement.first_divergence.as_ref().map(|diff| diff.frame),
+            Some(2)
+        );
+        assert_eq!(
+            measurement.first_outside_stack.as_ref().map(|d| d.frame),
+            Some(9)
+        );
+        assert_eq!(
+            measurement.first_visible.as_ref().map(|d| d.frame),
+            Some(30)
+        );
+        assert_eq!(measurement.visible_count, 1);
+        assert_eq!(measurement.visible_at, [30]);
+        let report = measurement.report();
+        assert!(report.contains("would be SEEN"), "{report}");
+        assert!(
+            report.contains("1 compared frame(s) differ visibly: 30"),
+            "{report}"
+        );
     }
 
     #[test]

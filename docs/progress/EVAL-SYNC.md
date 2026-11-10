@@ -11,7 +11,7 @@ Read first: `docs/progress/FCEUX-48.md` (how `.fm2` plays on both engines),
 ## Steps
 
 - [x] 1. The divergence instrument (`zax-harness movie-sync`).
-- [ ] 2. Run it on the four movies; the table.
+- [x] 2. Run it on the four movies; the table.
 - [ ] 3. Explain each first divergence, and classify it.
 - [ ] 4. `.bk2` reading.
 - [ ] 5. The report, `docs/review/MOVIE-SYNC.md`.
@@ -202,3 +202,88 @@ is a measurement, not an assumption: `the_two_fceux_paths_give_the_same_frames`,
 | `movie_sync_tests`, feature **on**, `--include-ignored --test-threads 1` | **11 passed**, 0 failed |
 | the same, feature **off** | **4 passed** (the seven lockstep ones are `cfg`'d out) |
 | `zax-harness` lib tests, feature off | 21 passed |
+
+---
+
+## Step 2 — the four movies
+
+Every figure below is one `movie-sync --engine both --lag` run over the **whole** movie, with the
+input-sensitivity probe on every frame. The exact commands are at the end of this note.
+
+### The table
+
+| | Kabuki ×2 | Metal Force | Kirby |
+|---|---|---|---|
+| frames | 33 306 | 47 454 | 123 937 |
+| mapper | 4 (MMC3) | 156 (Daou) | 4 (MMC3) |
+| **first divergence, anything** | frame **2** | frame **5** | frame **3** |
+| what it is | 1 byte, `$01FB` `56`/`53` — **in the stack page** | **1 pixel** at (231,79) | **82 RAM bytes**, 68 of them outside the stack |
+| first divergence **outside the stack page** | frame **258** | the same frame | the same frame |
+| first divergence that would be **seen** | frame **787** (5 pixels at (209,191)) | the same frame | frame **4** (a lag frame on FCEUX, not on Zaxnes) |
+| compared frames that differ visibly | **32 395** of 33 304 | **5** of 47 449 | **123 646** of 123 934 |
+| which ones, when they are few | — | **5, 20 313, 26 278, 26 298, 29 735** | — |
+| last frame with the same picture | 1 167 | **47 454, the last** | 100 488 |
+| final picture, Zaxnes | `1ded20b9…` | `3de90a64…` | `6e842956…` |
+| final picture, FCEUX | `a3cbc349…` | **`3de90a64…` — the same** | `939584ae…` |
+
+The two *Kabuki* files are **the same movie**: their 33 306 frame lines are byte-identical and the
+only difference between the files is the one line `FDS 1`. Their two runs are identical figure for
+figure, which is what `MovieFile::read_fm2` dropping that line is supposed to produce.
+
+### How far FCEUX plays each one — confirmed, not assumed
+
+`--engine fceux --movie-mode` hands the file to FCEUX's own `FCEUI_LoadMovie`, which is what the
+application does:
+
+| movie | FCEUX's own movie clock at the end | final picture |
+|---|---|---|
+| Kabuki (`-no-FDS`) | **33 306 / 33 306** | `a3cbc349…` |
+| Kabuki (`_mod_mod2`) | **refused**: "this movie needs a Famicom Disk System disk, which the FCEUX engine cannot play here" | — |
+| Metal Force | **47 454 / 47 454** | `3de90a64…` |
+| Kirby | **123 937 / 123 937** | `939584ae…` |
+
+Each of those three digests is **the same digest the lockstep run's FCEUX side ends on**. That is
+the check the instrument needed and did not have before: feeding FCEUX the inputs directly — which
+the lockstep run must do, movie mode overwriting the pads inside the frame — gives the same machine
+as FCEUX's own movie mode, on real movies of 33 000 to 124 000 frames rather than on a 150-frame
+synthetic one.
+
+So **FCEUX plays all three to the end**, and the one it refuses it refuses because of the header
+contradiction the owner already knew about, not because of anything in the movie.
+
+### How far Zaxnes plays each one — looked at, not only hashed
+
+A digest says two runs differ; it does not say whether the run is still a game. The pictures were
+written out and read.
+
+| | frame | Zaxnes | FCEUX |
+|---|---|---|---|
+| **Kabuki** | 1 000 | stage 1, score 50, TIME 246 | **the same picture** |
+| | 10 000 | still in a level, score 180 | an **inter-stage cutscene** (four characters round a table) |
+| | 33 306 (last) | still in stage 1, **score 100**, TIME 116 | the **ending**: the red-haired character, the credits pane |
+| **Metal Force** | 47 454 (last) | the player mid-level with a boss sprite | **the same picture, byte for byte** |
+| **Kirby** | 123 937 (last) | a grass level, 1 life, score 17 800 | the **star corridor** of the endgame, 8 lives, an ENEMY bar |
+
+Kabuki's Zaxnes run also has a **380-frame stretch from frame 29 187 in which the picture does not
+change at all**, which FCEUX's run does not have — the shape of a run that has stopped being
+played rather than one that is merely different.
+
+So, in the terms the brief asks for:
+
+| movie | how far FCEUX plays it | how far Zaxnes plays it |
+|---|---|---|
+| Kabuki | **to the end, correctly** (the ending is on screen) | **to frame ~787 of 33 306**, after which the two runs are different games. The inputs go on being fed for another 32 500 frames and the run ends in stage 1 |
+| Metal Force | **to the end, correctly** | **to the end** — 5 frames of 47 454 differ visibly and the last picture is byte-identical |
+| Kirby | **to the end, correctly** | **to frame 3** |
+
+### Three things this step establishes before step 3 starts
+
+1. **Metal Force is not a failure to explain, it is a near-sync to explain.** Five differing frames
+   over 47 454, no drift, the same last picture. Whatever happens at frame 5 does not compound.
+2. **Kabuki's first divergence is in the stack, and that is not noise.** The byte at `$01FB` is one
+   of the three an interrupt pushes — a program counter and the flags. A different byte there means
+   the two machines **took the interrupt at a different point**, which is the most useful single
+   fact this step produced.
+3. **Kirby parts at frame 3 with 82 bytes at once**, and on FCEUX's side most of the differing
+   bytes are still the power-on `00`/`FF` pattern while Zaxnes's hold data — so Zaxnes has run
+   *further* through the game's initialisation by frame 3, rather than having run it differently.
