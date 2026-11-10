@@ -15,8 +15,8 @@ them, and the 3D on FCEUX matches Zaxnes's wherever the two machines agree (§6 
 - [x] 1. The FCEUX-8 fix in the fork.
 - [x] 2. The validated-games marker.
 - [x] 3. `.fm2` playback on FCEUX, in the core.
-- [ ] 4. `.fm2` in the application.
-- [ ] 5. The app with a real movie, end to end.
+- [x] 4. `.fm2` in the application.
+- [x] 5. The app with a real movie, end to end.
 - [ ] 6. Docs.
 - [ ] 7. Final pass.
 
@@ -349,5 +349,167 @@ cannot drift from the header without a test failure.
 | `cargo fmt --check` | clean |
 | clippy `-D warnings`, whole workspace, feature on and off | clean |
 | the fork's `nestest` digests, 60 frames | `pixels=e455081e6a3eefe9 emphasis=d395e456e4e72325 audio=7fc10a9ce4ed8fcd`, `state: hint=93304 written=79296` — unchanged |
+
+---
+
+## Step 4 — `.fm2` in the application
+
+Commit `5e6397f9`. `emulation/host/own_movies.rs` is the new module; the module's own doc comment
+holds the design and is the thing to read first.
+
+### What was found before writing anything
+
+The application already had an `.fm2` path, and reading it first — as the brief asked — turned up
+**two** independent `.fm2` implementations in the workspace, which is worth recording because the
+names are the same:
+
+| | where | what it is |
+|---|---|---|
+| Zaxnes's own importer | `zax-nes/src/movie/fm2.rs` (439 lines), with `fcm.rs` beside it | a clean-room reader "from its public documentation (TASVideos)", which `movies.rs`'s `play_fm2` turns into a Zaxnes `Movie` (a synthetic start state plus `fm2.words()`) and plays through `MovieRun` |
+| FCEUX's own | `zax-fceux`, step 3 of this lot | FCEUX's movie mode, which is the only one that honours `RAMInitOption`/`RAMInitSeed` |
+
+The second was not wired into the application at all before this step. Everything **around** the
+frames, on the other hand, was already built by lot EDITOR-1 and needed nothing: the
+`MovieTimeline` and its checkpoints and seek, the movie bar, the pause and the frame step, the 3D
+conversion, the profile's Lua hooks (all of which hang off `run_frame`) and `script_reload`. So the
+step is a *second source of frames*, not a second movie system.
+
+### The dispatch, and what the default build does
+
+`play_movie` gains one test before the old one: an **`.fm2`** plays on the engine that recorded it
+when the build has one. A **`.fcm`** does not — FCEUX's own `LoadFM2` refuses that format outright
+("FCM File format is no longer supported. Please use Tools > Convert FCM") — so it keeps Zaxnes's
+importer, and so does every `.fm2` in a build without `fceux-core`.
+
+The discriminator is `EngineHandle::plays_its_own_movies()`, which is the five-method group added
+to the handle in **two whole `cfg`'d definitions**, one per build, as `EngineHandle::fceux_core`
+already was: a build without the feature names no FCEUX type at all and every one of the five is a
+constant. Two tests in `engine_parity_tests.rs`, compiled in **both** builds, pin exactly that:
+Zaxnes's core plays no movie of its own and answers all five with "not me" rather than failing, and
+only a build with the feature has an engine that does.
+
+### The engine the playback forces
+
+`movie_engine: Option<EngineKind>` on the host, read by `ensure_session` in place of
+`chosen_engine()`. The game's own `emu.engine` is **never written**, which the test checks through
+`engine_for_game` as well as through the store.
+
+Stopping the movie does **not** switch back, and that is a decision rather than an omission: §4's
+rule is that an engine change means re-powering the machine and never happens mid-game. A movie
+load re-powers anyway, so forcing the engine for it costs nothing; stopping does not, so switching
+back would throw away the frame the author is looking at. The game returns to its own engine at the
+next load, and the notification says so. A launch needs nothing special for that: stage 0 compares
+`session.core().kind()` with `engine_for_game`, which differ, so the session is rebuilt.
+
+### Three things that differ from Zaxnes's movie path, each with its reason
+
+* **no movie explorer.** It replays the movie in a *second* core and FCEUX keeps one machine per
+  process (`movie_explorer.rs` says so itself); a Zaxnes explorer would replay the inputs on the
+  wrong machine and the timeline's own trust check would throw the work away. Guarded on
+  `core.plays_its_own_movies()`;
+* **no notes.** An annotation belongs to a Zaxnes movie file and an `.fm2` is never written over,
+  so `Ctrl+M` is no longer *offered* (`can_execute` asks the new `movie_takes_notes()`) and the
+  command says why if it is reached anyway;
+* **no input hook of ours.** `FCEUMOV_AddInputState` loads each record over the pad state inside
+  `run_frame`, so the loop feeds its usual word and the engine ignores it. The end-to-end test
+  deliberately hands over `InputAction::NONE` during playback, so a path that needed our word
+  would fail rather than pass by luck.
+
+### Two defects in existing code that only an engine like FCEUX exposes
+
+Both found by the tests rather than by reading, and both were already there before this step:
+
+**1. `script_reload` left a session with no ROM on any engine but Zaxnes's.** It rebuilds the
+session and restores a state taken with `save_state(true)` — and `FceuxEngine::save_state_to`
+answers `include_rom_image` as **"no" whatever it is asked**, FCEUX's block being the machine and
+not the cartridge. So F5 during an FCEUX game could not have worked at all: the restore would have
+been handed a machine with no cartridge. It now reads the ROM again for such an engine, through
+`load_rom_into_new_session`, which is the launch's own stage 4 in the same order (patches, ROM,
+region, battery) and is shared with the movie path.
+
+*A hazard checked and found absent, recorded so that nobody has to check it again:* the one-FCEUX-
+per-process rule could have made the rebuild fall back to Zaxnes silently. It does not —
+`GameSession::dispose` takes `self` **by value**, so the old engine is freed before
+`ensure_session` runs. Both call sites now say so in a comment, because the opposite would be a
+silent engine change under the author.
+
+**2. A movie the engine plays itself cannot survive a state restore either**, for the same reason:
+the block is the machine, not the movie mode. The reload therefore **loads the movie again**, which
+puts its clock at 0 — and that is what makes a reload during such a playback **always exact**: the
+frame the author was on is reachable only by replaying to it with the new scripts, which is what
+`timeline.seek_exactly` already does. A movie that can no longer be played after the reload is said
+rather than silently dropped.
+
+### Tests
+
+`crates/zax-app/tests/fceux_movie_app_tests.rs`, 6 `#[ignore]`d tests over `LoopHarness` and the
+real host, movies built by hand in the file. All green.
+
+| test | what it holds |
+|---|---|
+| `opening_an_fm2_plays_it_on_fceux_without_changing_the_games_own_engine` | the game launched on **Zaxnes** by its own setting, the movie played on **FCEUX**, `engine_for_game` still Zaxnes, the clock following and the draw list all tiles with meshes |
+| `the_movie_pauses_steps_and_resumes` | a paused movie's clock does not advance, `FrameAdvance` moves it exactly one, a resume moves it on |
+| `a_backward_seek_replays_the_same_frames` | a seek from frame 300 back to 90 through the engine's own checkpoints, forward again, and the same machine |
+| `reloading_the_profile_mid_movie_keeps_the_movie_and_the_engine` | F5 at frame 200 keeps the engine and the movie, seeks back to 200 of its own accord and goes on |
+| `a_movie_the_build_cannot_play_is_refused_with_its_reason` | four headers refused with the thing **named in the notification**, the game still running after each |
+| `stopping_the_movie_leaves_the_game_running_and_the_next_load_restores_the_engine` | stop, the game goes on on FCEUX, and the next launch is back on Zaxnes |
+
+One measurement note the tests forced, now in `EngineHandle::cycle_count`'s doc comment:
+**`cycle_count` on an engine without a counter of its own is the sum of the frames this *session*
+has run**, not the cycles since power-on. A seek that replays 200 frames a second time leaves it
+200 frames higher than an uninterrupted run at the same frame, so `movie_timeline::machine_digest`
+— which hashes it — cannot be used to compare two paths to the same frame on FCEUX. The tests hash
+the work RAM and the picture instead, and say why.
+
+---
+
+## Step 5 — the application with a real movie, end to end
+
+`crates/zax-app/tests/fceux_movie_end_to_end_tests.rs`, 4 `#[ignore]`d tests, **all green**.
+*Super Mario Bros.* with its own 3dn profile, a movie of **5 400 frames**, headless through
+`LoopHarness` over the real `EmulationHost`.
+
+### The movie is a recording, not a file built to the format
+
+The brief asked for a movie "built by recording a scripted input sequence on FCEUX — no download",
+and that is literally what the first test does, in this order:
+
+1. the scripted sequence — Start at the title screen, then right with a jump every 96 frames — is
+   **fed to FCEUX frame by frame** through the application's own loop, and every frame is hashed;
+2. the `.fm2` is written from that same sequence;
+3. it is played back through `Command::OpenMovie`, and the two runs are compared **frame for
+   frame**.
+
+**The 5 400 digests are identical**, so the file replays the run it was recorded from — which is
+the only property a recording has that a hand-written file does not. FCEUX's own recorder was not
+used and could not be: it writes to a *path* (`openRecordingMovie`) and the fork's build has no
+filesystem.
+
+Two things had to be right for the comparison to mean anything, and the first cost a failing run:
+
+* **the recording has to start at power-on.** A launch leaves the frame counter wherever the pacer
+  left it, while a movie's load puts it at 0, and three frames of *Super Mario Bros.* attract mode
+  is enough to part the two runs — the first attempt parted at frame 39, the frame before the
+  scripted Start. The recording now power-cycles first and asserts the counter is 0;
+* **the frames have to be run one at a time**, through `run_session_frame` rather than the pacer,
+  so that one call is exactly one frame with exactly that input.
+
+### What the end-to-end run says
+
+| | |
+|---|---|
+| the movie | **5 400 frames**, *Super Mario Bros.* with `assets-neutral/profiles/Super Mario Bros.bytes` through the catalogue |
+| the recording against the playback | **identical at every one of the 5 400 frames** |
+| **the 3D path receives records every frame that has anything to draw** | 164 of the 5 400 frames have **no** record, and **every one of them is a blank screen** — the picture is a single colour. *Super Mario Bros.* blanks the screen at a death and between levels, the PPU's rendering off, and this run dies; frames with something on screen and no record: **0** |
+| the draw list at frame 5 400 | **282 tiles, 282 with a mesh** |
+| pause, step, seek and resume against an uninterrupted playback | **identical** at frames 1 200, 2 400, 3 600 and 5 000, with a pause, 30 idle ticks, two frame steps, a 300-frame seek back and a resume between each pair — and each mark checked again on the way back as well as against the straight run |
+| reloading the profile mid-movie | at movie frame 2 000: the engine and the movie kept, the reload seeks back to 2 000 of its own accord, **the machine at 2 000 is byte-identical to the one before the reload**, and the draw list is 272 tiles before and 272 after |
+| **frames per second of movie playback with 3D on FCEUX** | **1 726 frames/s, 0.5795 ms a frame** (3 000 timed frames after 240 of warm-up; a second run gave 1 695 f/s) |
+
+The frame-rate figure is the application's own loop, so it carries the core, the tile capture, the
+3D conversion and the draw-list build — everything but the renderer. For scale, lot FCEUX-23 step 6
+measured the same loop at **2 410 f/s** on *Super Mario Bros. 3* without a movie and **407 f/s** on
+Zaxnes; movie playback on FCEUX is therefore about **28× real time**, which is what makes scrubbing
+a 5 000-frame TAS in the profile editor usable.
 
 ---
