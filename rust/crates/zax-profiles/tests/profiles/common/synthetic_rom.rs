@@ -1,7 +1,8 @@
 //! Synthetic iNES files and the "3dh" profiles that go with them, for the resolution of
 //! AMD-062 REQ-PROF-078 and the cache of REQ-PROF-082.
 
-use zax_profiles::hash::profile::{self, HashProfile};
+use zax_profiles::format::ProfileDocument;
+use zax_profiles::hash::profile;
 use zax_profiles::hash::raw_tile::{self, RawTile};
 use zax_profiles::hash::tile_id::TileId;
 
@@ -70,13 +71,13 @@ pub fn hash_profile_bytes(tiles: &[RawTile]) -> Vec<u8> {
 }
 
 /// The same profile, read.
-pub fn hash_profile_of(tiles: &[RawTile]) -> HashProfile {
+pub fn hash_profile_of(tiles: &[RawTile]) -> ProfileDocument {
     let bytes = hash_profile_bytes(tiles);
     profile::read(&bytes).unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// A "3dh" profile whose cells name their tiles by their legacy digest (field 4).
-pub fn hash_profile_named_by_digest(tiles: &[RawTile]) -> HashProfile {
+pub fn hash_profile_named_by_digest(tiles: &[RawTile]) -> ProfileDocument {
     let digests: Vec<String> = tiles.iter().map(raw_tile::legacy_digest).collect();
     let cells = digests
         .iter()

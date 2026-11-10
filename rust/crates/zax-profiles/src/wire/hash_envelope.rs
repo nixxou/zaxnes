@@ -56,22 +56,21 @@ pub fn field_order(bytes: &[u8]) -> Result<Vec<u32>, ProfileFormatError> {
 }
 
 /// Writes the canonical envelope of REQ-PROF-084: fields 1, 2, 3, 4, 6 to 12 in that order, null
-/// strings and empty lists left out, `Ids` and `Hashes` sorted by their text form (ordinal) and
-/// `PayloadHash` recomputed.
+/// strings and empty lists left out, `Version = "5"`, `Ids` and `Hashes` sorted by their text
+/// form (ordinal) and `PayloadHash` recomputed.
+///
+/// The version is the canonical one whatever the file carried: versions `"1"` and `"2"` are
+/// readable but `"5"` accepts everything they do (REQ-PROF-072), so writing it loses nothing. All
+/// 101 built-in profiles of 3dSen 2.1 are already `"5"`, which is what keeps their rewrite
+/// byte-identical.
 #[must_use]
 pub fn encode(envelope: &HashProfileEnvelope) -> Vec<u8> {
     let payload = envelope.payload.as_deref().unwrap_or_default();
     let mut writer =
         ProtoWriter::with_capacity(payload.len() + envelope.ids.len() * tile_id::BYTE_COUNT + 1024);
 
-    writer.write_string(
-        field::TYPE,
-        envelope.signature.as_deref().unwrap_or(SIGNATURE),
-    );
-    writer.write_string(
-        field::VERSION,
-        envelope.version.as_deref().unwrap_or(CANONICAL_VERSION),
-    );
+    writer.write_string(field::TYPE, SIGNATURE);
+    writer.write_string(field::VERSION, CANONICAL_VERSION);
     writer.write_bytes(field::PAYLOAD, payload);
 
     let mut hashes: Vec<&str> = envelope.hashes.iter().map(String::as_str).collect();

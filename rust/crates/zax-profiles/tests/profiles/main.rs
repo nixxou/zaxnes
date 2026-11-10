@@ -10,6 +10,7 @@ mod common;
 mod hash_profile_envelope_tests;
 mod hash_profile_reader_tests;
 mod hash_profile_resolution_tests;
+mod hash_profile_rewrite_tests;
 mod hash_profile_texture_tests;
 mod lz4_block_tests;
 mod profile_corpus_tests;

@@ -3,6 +3,7 @@
 
 use crate::enums::ProfileFormatVersion;
 use crate::hash;
+use crate::hash::profile::HashProfileState;
 use crate::layout::FieldPresence;
 use crate::pattern::RecordedPatternSlot;
 use crate::profile::{GameProfile, REQUIRED_SIGNATURE};
@@ -16,13 +17,21 @@ pub struct ProfileDocument {
     pub profile: GameProfile,
     /// Number of fields the decoder skipped because the schema does not know them.
     pub unknown_field_count: usize,
+    /// What a "3dh" profile carries beyond the model: the envelope, the manifest and the tiles
+    /// resolved so far (AMD-062). None for a 3dn. A profile is never converted from one format to
+    /// the other (AMD-062 §2), so this is also what decides which writer [`Self::save`] uses.
+    pub hash: Option<HashProfileState>,
 }
 
 impl ProfileDocument {
-    /// Writes the profile back, each node with the fields it was read with (REQ-PROF-051).
+    /// Writes the profile back, each node with the fields it was read with (REQ-PROF-051), in
+    /// **its own** format: a 3dh stays a 3dh (AMD-062 REQ-PROF-084).
     #[must_use]
     pub fn save(&self) -> Vec<u8> {
-        wire::encode(&self.profile, FieldPresence::AsRecorded)
+        match &self.hash {
+            Some(state) => state.write(&self.profile),
+            None => wire::encode(&self.profile, FieldPresence::AsRecorded),
+        }
     }
 }
 
@@ -184,8 +193,11 @@ pub fn load(
     result
 }
 
-/// Encodes `profile`; `presence` says whether every scalar is written or only those a decoded
-/// file carried (REQ-PROF-051).
+/// Encodes `profile` as a 3dn; `presence` says whether every scalar is written or only those a
+/// decoded file carried (REQ-PROF-051).
+///
+/// A profile read from a "3dh" file is rewritten by [`ProfileDocument::save`], which keeps its
+/// own format: writing a 3dh from a model alone is not asked for (AMD-062 REQ-PROF-084, notes).
 #[must_use]
 pub fn save(profile: &GameProfile, presence: FieldPresence) -> Vec<u8> {
     wire::encode(profile, presence)
@@ -222,12 +234,20 @@ pub fn load_header(
 }
 
 fn load_core(bytes: &[u8]) -> Result<ProfileDocument, ProfileLoadError> {
-    let mut document = wire::decode(bytes).map_err(|error: ProfileFormatError| {
-        ProfileLoadError::new(
-            ProfileLoadErrorKind::Malformed,
-            format!("not a readable profile ({error})"),
-        )
-    })?;
+    // The format is recognised by the content, not by the extension (AMD-062 REQ-PROF-070). The
+    // rules below are the same for both: the payload of a 3dh is a profile of the schema of
+    // SPEC-03, and REQ-PROF-033 asks for the same "all or nothing".
+    let mut document = if hash::envelope::is_hash_profile(bytes) {
+        hash::profile::read(bytes)
+            .map_err(|error| ProfileLoadError::new(error.kind, error.message))?
+    } else {
+        wire::decode(bytes).map_err(|error: ProfileFormatError| {
+            ProfileLoadError::new(
+                ProfileLoadErrorKind::Malformed,
+                format!("not a readable profile ({error})"),
+            )
+        })?
+    };
     let profile = &mut document.profile;
 
     if let Some(signature) = &profile.signature {

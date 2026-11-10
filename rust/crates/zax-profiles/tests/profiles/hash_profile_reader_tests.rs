@@ -6,14 +6,15 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use zax_profiles::enums::{TextureFormat, TileFlip};
-use zax_profiles::format::ProfileLoadErrorKind;
-use zax_profiles::hash::profile::{self, HashProfile};
+use zax_profiles::format::{ProfileDocument, ProfileLoadErrorKind};
+use zax_profiles::hash::profile;
 use zax_profiles::hash::raw_tile::{self, RawTile};
 use zax_profiles::hash::tile_id::TileId;
 use zax_profiles::tile::{HashTileField, ProfileTile};
 use zax_profiles::variant::HashTextureKind;
 use zax_profiles::wire::hash_envelope;
 
+use super::common::hash_state;
 use super::common::neutral_assets;
 use super::common::synthetic_hash_profile::{
     EnvelopeSpec, PatternSpec, PayloadSpec, TextureSpec, TileName, TileSpec, VariantSpec,
@@ -39,13 +40,13 @@ fn hash_profile(hashes: Vec<String>, ids: Vec<TileId>, payload: &PayloadSpec) ->
     .encode()
 }
 
-fn read(bytes: &[u8]) -> HashProfile {
+fn read(bytes: &[u8]) -> ProfileDocument {
     profile::read(bytes).unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// The single tile of the single cell of the single pattern.
-fn only_tile(read: &HashProfile) -> Arc<ProfileTile> {
-    let patterns: Vec<_> = read.document.profile.all_patterns().collect();
+fn only_tile(read: &ProfileDocument) -> Arc<ProfileTile> {
+    let patterns: Vec<_> = read.profile.all_patterns().collect();
     assert_eq!(1, patterns.len());
     let cells = patterns[0].grid.as_ref().unwrap().cells();
     assert_eq!(1, cells.len());
@@ -59,7 +60,7 @@ fn only_tile(read: &HashProfile) -> Arc<ProfileTile> {
 #[ignore = "needs the built-in profiles: set ZAXNES_PROFILES to the folder that holds profiles/ and profiles-2.1/"]
 fn mega_man_2_has_the_partition_of_req_prof_074() {
     let read = read(&neutral_assets::read_hash_profile("Mega Man 2.bytes"));
-    let model = &read.document.profile;
+    let model = &read.profile;
     assert_eq!(Some("3dn"), model.signature.as_deref());
     assert_eq!(Some("2"), model.version_text.as_deref());
 
@@ -123,7 +124,7 @@ fn the_101_payloads_have_the_measured_partition() {
         let bytes = std::fs::read(&file).unwrap();
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
         let read = profile::read(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
-        let model = &read.document.profile;
+        let model = &read.profile;
 
         tiles += model.distinct_tile_objects().count();
         for tile in model.distinct_tile_objects() {
@@ -194,12 +195,16 @@ fn the_root_field_order_of_the_101_payloads_puts_3_to_6_first() {
     for file in neutral_assets::hash_profile_files() {
         let bytes = std::fs::read(&file).unwrap();
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
-        let read = profile::read(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
-        let payload = read.envelope.payload.as_deref().unwrap();
+        // The payload as read: `profile::read` does not keep it, the rewrite of REQ-PROF-084
+        // encoding a fresh one, so the envelope is decoded here for its bytes alone.
+        let payload = hash_envelope::decode(&bytes)
+            .unwrap_or_else(|error| panic!("{name}: {error}"))
+            .payload
+            .unwrap();
 
         // A repeated field carries one tag per element; the order of the field *numbers* is what
         // the requirement describes.
-        let mut order = hash_envelope::field_order(payload).unwrap();
+        let mut order = hash_envelope::field_order(&payload).unwrap();
         order.dedup();
 
         let first: Vec<u32> = order
@@ -221,8 +226,11 @@ fn the_root_field_order_of_the_101_payloads_puts_3_to_6_first() {
     assert!(orders.contains(&vec![3, 6, 1, 2]));
     assert!(orders.contains(&vec![3, 4, 5, 6, 1, 2, 7, 8, 9, 10]));
 
-    let empty = read(&neutral_assets::read_hash_profile("empty.bytes"));
-    let mut order = hash_envelope::field_order(empty.envelope.payload.as_deref().unwrap()).unwrap();
+    let empty = hash_envelope::decode(&neutral_assets::read_hash_profile("empty.bytes"))
+        .unwrap()
+        .payload
+        .unwrap();
+    let mut order = hash_envelope::field_order(&empty).unwrap();
     order.dedup();
     assert_eq!(vec![3, 6, 1, 2], order);
 }
@@ -236,16 +244,18 @@ fn every_built_in_payload_names_only_manifest_strings() {
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
         let read = profile::read(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
 
-        for tile in read.document.profile.distinct_tile_objects() {
+        for tile in read.profile.distinct_tile_objects() {
             let key = tile.hash_key().unwrap_or_else(|| panic!("{name}"));
-            assert!(read.manifest.contains(key), "{name}: {key}");
+            assert!(hash_state(&read).manifest.contains(key), "{name}: {key}");
             assert!(tile.is_waiting(), "{name}: {key}");
         }
 
         let waiting = read.waiting_keys();
-        assert!(waiting.len() <= read.manifest.len(), "{name}");
+        assert!(waiting.len() <= hash_state(&read).manifest.len(), "{name}");
         assert!(
-            waiting.iter().all(|key| read.manifest.contains(key)),
+            waiting
+                .iter()
+                .all(|key| hash_state(&read).manifest.contains(key)),
             "{name}"
         );
     }
@@ -380,7 +390,7 @@ fn the_three_texture_kinds_are_read() {
     ])]);
 
     let read = read(&hash_profile(Vec::new(), Vec::new(), &payload));
-    let patterns: Vec<_> = read.document.profile.all_patterns().collect();
+    let patterns: Vec<_> = read.profile.all_patterns().collect();
     let variants = &patterns[0].variants;
     assert_eq!(
         vec![
@@ -411,7 +421,7 @@ fn the_tiles_of_a_payload_share_one_string_per_manifest_entry() {
     ])]);
 
     let read = read(&hash_profile(Vec::new(), vec![id], &payload));
-    let patterns: Vec<_> = read.document.profile.all_patterns().collect();
+    let patterns: Vec<_> = read.profile.all_patterns().collect();
     let cells = patterns[0].grid.as_ref().unwrap().cells();
     let left = cells[0].as_ref().unwrap().hash_identity.as_ref().unwrap();
     let right = cells[1].as_ref().unwrap().hash_identity.as_ref().unwrap();

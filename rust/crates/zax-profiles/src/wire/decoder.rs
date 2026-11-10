@@ -14,7 +14,7 @@ use crate::enums::{
 use crate::format::{ProfileDocument, ProfileHeader};
 use crate::hash::envelope::{messages as hash_messages, HashProfileManifest};
 use crate::hash::raw_tile;
-use crate::hash::tile_id::{self, TileId};
+use crate::hash::tile_id::TileId;
 use crate::layout::PresenceRecorder;
 use crate::pattern::{ProfilePattern, RecordedPatternSlot};
 use crate::profile::GameProfile;
@@ -26,15 +26,17 @@ use crate::variant::{HashTextureKind, PatternVariant, TexturePixels, VariantText
 
 type Result<T> = std::result::Result<T, ProfileFormatError>;
 
-/// The text form of the sixteen bytes of field 5 (REQ-PROF-075). A field of any other length
-/// cannot be an identifier; its plain hexadecimal form is returned, which no manifest holds, so
-/// the tile is refused by REQ-PROF-074 naming the bytes it carried.
-fn identifier_text(bytes: &[u8]) -> String {
-    if bytes.len() != tile_id::BYTE_COUNT {
-        return raw_tile::hex_lowercase(bytes);
+/// The manifest string of field 5 and the field the rewrite of REQ-PROF-084 puts it back in.
+///
+/// Sixteen bytes are an identifier (REQ-PROF-075), whose text form is the manifest string. A
+/// field of any other length cannot be one: its plain hexadecimal form is compared to the
+/// manifest instead, which only a declared legacy digest can match, and it is called a field-4
+/// string so that the rewrite writes it as text rather than as sixteen bytes it does not have.
+fn named_by_identifier(bytes: &[u8]) -> (String, HashTileField) {
+    match TileId::from_binary(bytes) {
+        Some(id) => (id.to_text(), HashTileField::Identifier),
+        None => (raw_tile::hex_lowercase(bytes), HashTileField::Text),
     }
-
-    TileId::from_binary(bytes).map_or_else(|| raw_tile::hex_lowercase(bytes), TileId::to_text)
 }
 
 /// An object registered under a reference key, ready to be named again by a later envelope.
@@ -181,6 +183,8 @@ impl<'a> Decoder<'a> {
         Ok(ProfileDocument {
             profile,
             unknown_field_count: self.unknown_field_count,
+            // The envelope and the manifest are the caller's: `hash::profile::read` puts them in.
+            hash: None,
         })
     }
 
@@ -360,7 +364,7 @@ impl<'a> Decoder<'a> {
                 }
                 schema::tile_planes::HASH_ID if self.hash.is_some() => {
                     let bytes = self.reader.read_bytes()?;
-                    named = Some((identifier_text(bytes), HashTileField::Identifier));
+                    named = Some(named_by_identifier(bytes));
                 }
                 _ => {
                     self.skip_unknown(field, wire_type)?;

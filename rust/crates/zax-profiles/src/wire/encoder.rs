@@ -1,6 +1,11 @@
 //! The canonical writer of the profile messages (SPEC-03 REQ-PROF-010 to REQ-PROF-013 and
 //! REQ-PROF-051): one pass, shared objects named by reference after their first occurrence,
 //! group-encoded cells and a field written out of order.
+//!
+//! The same writer produces the payload of a "3dh" profile (AMD-062 REQ-PROF-084) with the four
+//! deviations REQ-PROF-074 lists: the root field order, a tile written by the string it names
+//! instead of its planes, fields 24 and 25 in place of field 19, and `skipGeo` written for every
+//! pattern of the root lists.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,14 +13,16 @@ use std::sync::Arc;
 use super::cipher;
 use super::schema;
 use super::writer::ProtoWriter;
+use crate::hash::default_texture::{self, DefaultTexture};
+use crate::hash::tile_id::TileId;
 use crate::layout::{is_present, FieldMask, FieldPresence};
 use crate::pattern::{ProfilePattern, RecordedPatternSlot};
 use crate::profile::GameProfile;
 use crate::script::ProfileScript;
 use crate::settings::{LayerSettings, LayerSettingsSet, LightSettings, ProfileSettings};
-use crate::tile::ProfileTile;
+use crate::tile::{HashTileField, ProfileTile};
 use crate::values::{ArgbColor, Mat4F, Vec2I, Vec3F, Vec4F};
-use crate::variant::{PatternVariant, TexturePixels, VariantTexture};
+use crate::variant::{HashTextureKind, PatternVariant, TexturePixels, VariantTexture};
 
 pub(super) struct Encoder {
     writer: ProtoWriter,
@@ -23,6 +30,14 @@ pub(super) struct Encoder {
     /// Reference keys by object address: the objects of a profile that are shared.
     keys: HashMap<usize, i32>,
     next_key: i32,
+    /// Set when the profile is written as the payload of a "3dh" profile (REQ-PROF-084).
+    hash: bool,
+    /// True while a pattern of the root lists 4 and 5 is written, where REQ-PROF-084 asks for
+    /// field 12 even when it is false; the patterns of the memorised slots keep the absence read.
+    root_pattern: bool,
+    /// The default texture of the pattern being written, built only for a variant that carries
+    /// field 19 and must have its field 24 derived (REQ-PROF-083).
+    default_texture: Option<DefaultTexture>,
 }
 
 /// Capacity hint of the output: 4 KiB plus half a kilobyte per pattern, at most 32 MiB.
@@ -38,6 +53,17 @@ impl Encoder {
             presence,
             keys: HashMap::new(),
             next_key: 1,
+            hash: false,
+            root_pattern: false,
+            default_texture: None,
+        }
+    }
+
+    /// A writer for the payload of a "3dh" profile (AMD-062 REQ-PROF-084).
+    pub(super) fn new_hash(profile: &GameProfile, presence: FieldPresence) -> Self {
+        Self {
+            hash: true,
+            ..Self::new(profile, presence)
         }
     }
 
@@ -51,22 +77,41 @@ impl Encoder {
         is_present(self.presence, recorded, field)
     }
 
+    /// The root message. A 3dn writes its fields in ascending order; the payload of a "3dh"
+    /// writes 3, 4, 5, 6 first and only then 1, 2 and 7 to 11 (REQ-PROF-074 point 3).
     fn write_root(&mut self, profile: &GameProfile) {
+        if self.hash {
+            self.write_root_lists(profile);
+            self.write_root_signature(profile);
+        } else {
+            self.write_root_signature(profile);
+            self.write_root_lists(profile);
+        }
+        self.write_root_metadata(profile);
+    }
+
+    fn write_root_signature(&mut self, profile: &GameProfile) {
         let recorded = profile.recorded_fields;
         self.optional_string(recorded, schema::root::TYPE, profile.signature.as_deref());
         self.optional_string(recorded, schema::root::VER, profile.version_text.as_deref());
+    }
 
+    fn write_root_lists(&mut self, profile: &GameProfile) {
+        let recorded = profile.recorded_fields;
         for script in &profile.scripts {
             let scope = self.writer.begin_nested(schema::root::SCRIPTS);
             self.write_script(script);
             self.writer.end_nested(scope);
         }
+        self.root_pattern = true;
         for pattern in &profile.permanent_patterns {
             self.envelope(schema::root::PATTERNS, pattern, Self::write_pattern);
         }
         for pattern in &profile.temporary_patterns {
             self.envelope(schema::root::TEMP_PATTERNS, pattern, Self::write_pattern);
         }
+        self.root_pattern = false;
+
         if let Some(settings) = &profile.settings {
             if self.allowed(recorded, schema::root::SETTINGS) {
                 let scope = self.writer.begin_nested(schema::root::SETTINGS);
@@ -74,7 +119,10 @@ impl Encoder {
                 self.writer.end_nested(scope);
             }
         }
+    }
 
+    fn write_root_metadata(&mut self, profile: &GameProfile) {
+        let recorded = profile.recorded_fields;
         self.optional_string(recorded, schema::root::ID, profile.id.as_deref());
         self.optional_string(recorded, schema::root::TITLE, profile.title.as_deref());
         self.optional_string(recorded, schema::root::MAKER, profile.author.as_deref());
@@ -103,6 +151,16 @@ impl Encoder {
 
     fn write_pattern(&mut self, pattern: &ProfilePattern) {
         let recorded = pattern.recorded_fields;
+        // A variant that carries field 19 instead of fields 24 and 25 — one this program gave a
+        // texture — has its field 24 derived, which needs the pattern's default texture. No
+        // variant of a profile read from a 3dh is in that case, so nothing is built for them.
+        self.default_texture = (self.hash
+            && pattern
+                .variants
+                .iter()
+                .any(|variant| Self::needs_derived_xor(variant)))
+        .then(|| DefaultTexture::of(pattern));
+
         if let Some(grid) = &pattern.grid {
             if !grid.cells().is_empty() && self.allowed(recorded, schema::pattern::GRID) {
                 for cell in grid.cells() {
@@ -148,25 +206,49 @@ impl Encoder {
             schema::pattern::SELF_CONNECTED,
             pattern.self_connected,
         );
-        self.bool_field(recorded, schema::pattern::SKIP_GEO, pattern.skip_geometry);
+        // REQ-PROF-084: every pattern of the root lists of a "3dh" writes field 12, even when it
+        // is false, where a 3dn reproduces the absence read. A memorised slot's pattern keeps the
+        // absence read on both sides.
+        if self.hash && self.root_pattern {
+            self.writer
+                .write_bool(schema::pattern::SKIP_GEO, pattern.skip_geometry);
+        } else {
+            self.bool_field(recorded, schema::pattern::SKIP_GEO, pattern.skip_geometry);
+        }
     }
 
     fn write_cell(&mut self, tile: &ProfileTile) {
         let recorded = tile.recorded_fields;
         let scope = self.writer.begin_nested(schema::cell::PLANES);
-        if self.allowed(recorded, schema::tile_planes::LOW_PLANE) {
-            self.writer.write_i64(
-                schema::tile_planes::LOW_PLANE,
-                cipher::encode(tile.low_plane),
-            );
+        // REQ-PROF-084: a tile of a "3dh" is written `3` then `5` (or `4`) and never by its
+        // planes, whether it is resolved or still waiting; the string it names is the value read.
+        // One of the two fields is always written, even when the tile was read with the other one,
+        // which is what a tile named by a field 5 of the wrong length needs.
+        if let Some(identity) = tile.hash_identity.as_ref().filter(|_| self.hash) {
+            self.i32_field(recorded, schema::tile_planes::FLIP, tile.flip.bits());
+            match (identity.field, TileId::parse_text(&identity.key)) {
+                (HashTileField::Identifier, Some(id)) => self
+                    .writer
+                    .write_bytes(schema::tile_planes::HASH_ID, &id.to_binary()),
+                _ => self
+                    .writer
+                    .write_string(schema::tile_planes::HASH_TEXT, &identity.key),
+            }
+        } else {
+            if self.allowed(recorded, schema::tile_planes::LOW_PLANE) {
+                self.writer.write_i64(
+                    schema::tile_planes::LOW_PLANE,
+                    cipher::encode(tile.low_plane),
+                );
+            }
+            if self.allowed(recorded, schema::tile_planes::HIGH_PLANE) {
+                self.writer.write_i64(
+                    schema::tile_planes::HIGH_PLANE,
+                    cipher::encode(tile.high_plane),
+                );
+            }
+            self.i32_field(recorded, schema::tile_planes::FLIP, tile.flip.bits());
         }
-        if self.allowed(recorded, schema::tile_planes::HIGH_PLANE) {
-            self.writer.write_i64(
-                schema::tile_planes::HIGH_PLANE,
-                cipher::encode(tile.high_plane),
-            );
-        }
-        self.i32_field(recorded, schema::tile_planes::FLIP, tile.flip.bits());
         self.writer.end_nested(scope);
     }
 
@@ -191,15 +273,78 @@ impl Encoder {
         self.optional_mat4(recorded, v::DELTA_SPEED, variant.deform_speed);
         self.optional_mat4(recorded, v::DELTA_OFFSET, variant.deform_offset);
         self.i32_field(recorded, v::RENDER_STYLE, variant.render_style.raw());
-        if let Some(texture) = &variant.texture {
-            if self.allowed(recorded, v::TEX) {
-                let scope = self.writer.begin_nested(v::TEX);
-                self.write_texture(texture);
-                self.writer.end_nested(scope);
+        // Field 19 is gone from a "3dh" variant; fields 24 and 25 after field 23 take its place.
+        if !self.hash {
+            if let Some(texture) = &variant.texture {
+                if self.allowed(recorded, v::TEX) {
+                    let scope = self.writer.begin_nested(v::TEX);
+                    self.write_texture(texture);
+                    self.writer.end_nested(scope);
+                }
             }
         }
         self.optional_string(recorded, v::TAG_STR, variant.tag_string.as_deref());
         self.i32_field(recorded, v::EMPTY_COLOR, variant.stored_empty_color);
+        if self.hash {
+            self.write_hash_texture(variant);
+        }
+    }
+
+    /// Fields 24 and 25 of a "3dh" variant (REQ-PROF-084): the texture is written according to
+    /// its kind — 1 when it is the pattern's default texture, 2 (exclusive-ored with that default)
+    /// otherwise, 0 when absent — and field 24 only for a kind of 2.
+    ///
+    /// A variant read from a 3dh carries both as read and they go back untouched, which is what
+    /// makes the rewrite lossless: the model holds the kind itself, never a computed texture that
+    /// could go stale (REQ-PROF-083). A variant that carries field 19 instead has its kind read
+    /// off that texture and its field 24 derived. A variant with neither — the memorised slots,
+    /// which carry no texture at all — writes nothing.
+    fn write_hash_texture(&mut self, variant: &PatternVariant) {
+        use schema::variant as v;
+        let Some(kind) = variant
+            .texture_kind
+            .or_else(|| Self::derived_texture_kind(variant))
+        else {
+            return;
+        };
+
+        if kind == HashTextureKind::Xor {
+            let derived = match (
+                &variant.xor_texture,
+                &variant.texture,
+                &self.default_texture,
+            ) {
+                (None, Some(texture), Some(default)) => {
+                    Some(default_texture::exclusive_or(texture, default))
+                }
+                _ => None,
+            };
+            if let Some(stored) = derived.as_ref().or(variant.xor_texture.as_ref()) {
+                let scope = self.writer.begin_nested(v::XOR_TEX);
+                self.write_texture(stored);
+                self.writer.end_nested(scope);
+            }
+        }
+
+        self.i32_field(variant.recorded_fields, v::TEXTURE_KIND, kind.to_raw());
+    }
+
+    /// The kind of a variant that carries field 19 rather than field 25; none when it carries no
+    /// texture at all, which is how the memorised slots stay without a field 25.
+    fn derived_texture_kind(variant: &PatternVariant) -> Option<HashTextureKind> {
+        match &variant.texture {
+            None => None,
+            Some(texture) if texture.is_null_marker() => Some(HashTextureKind::Default),
+            Some(_) => Some(HashTextureKind::Xor),
+        }
+    }
+
+    /// True when this variant's field 24 has to be computed from field 19 and the pattern's
+    /// default texture.
+    fn needs_derived_xor(variant: &PatternVariant) -> bool {
+        variant.texture_kind.is_none()
+            && variant.xor_texture.is_none()
+            && Self::derived_texture_kind(variant) == Some(HashTextureKind::Xor)
     }
 
     fn write_texture(&mut self, texture: &VariantTexture) {

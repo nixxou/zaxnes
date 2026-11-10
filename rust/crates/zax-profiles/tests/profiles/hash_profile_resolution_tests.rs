@@ -5,8 +5,9 @@
 use std::collections::HashSet;
 
 use zax_profiles::enums::{TextureFormat, TileFlip};
+use zax_profiles::format::ProfileDocument;
 use zax_profiles::hash::default_texture::PatternTextures;
-use zax_profiles::hash::profile::{self, HashProfile};
+use zax_profiles::hash::profile;
 use zax_profiles::hash::raw_tile::{self, RawTile};
 use zax_profiles::hash::rom_zones::RomZones;
 use zax_profiles::hash::tile_cache;
@@ -14,6 +15,7 @@ use zax_profiles::hash::tile_id::TileId;
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::variant::VariantTexture;
 
+use super::common::hash_state;
 use super::common::neutral_assets;
 use super::common::synthetic_rom;
 
@@ -92,10 +94,10 @@ fn a_file_that_is_not_ines_has_no_zones() {
 
     let id = TileId::compute(&raw(1));
     let mut read = synthetic_rom::hash_profile_of(&[raw(1)]);
-    assert_eq!(1, read.tiles.waiting_count());
+    assert_eq!(1, hash_state(&read).tiles.waiting_count());
     assert_eq!(0, read.resolve_from_rom(&[0_u8; 4096]));
-    assert_eq!(1, read.tiles.waiting_count());
-    assert!(read.tiles.bytes_of(&id.to_text()).is_none());
+    assert_eq!(1, hash_state(&read).tiles.waiting_count());
+    assert!(hash_state(&read).tiles.bytes_of(&id.to_text()).is_none());
 }
 
 // REQ-PROF-079: the mirrorings taken from the planes, which is what a scan computes, are the
@@ -123,15 +125,17 @@ fn the_mirrored_planes_are_the_mirrored_bytes() {
 fn a_rom_holding_the_tiles_unaligned_resolves_them_all() {
     let tiles = [raw(1), raw(2), raw(3)];
     let mut read = synthetic_rom::hash_profile_of(&tiles);
-    assert_eq!(3, read.tiles.waiting_count());
+    assert_eq!(3, hash_state(&read).tiles.waiting_count());
 
     let rom = synthetic_rom::chr_rom_with_tiles(&tiles);
     assert_eq!(3, read.resolve_from_rom(&rom));
-    assert!(read.tiles.is_complete());
+    assert!(hash_state(&read).tiles.is_complete());
     for tile in &tiles {
         assert_eq!(
             Some(tile),
-            read.tiles.bytes_of(&TileId::compute(tile).to_text())
+            hash_state(&read)
+                .tiles
+                .bytes_of(&TileId::compute(tile).to_text())
         );
     }
     assert_eq!(0, read.waiting_tile_count());
@@ -146,7 +150,7 @@ fn a_rom_without_one_tile_leaves_that_one_waiting() {
     assert_eq!(2, read.resolve_from_rom(&rom));
     assert_eq!(
         vec![TileId::compute(&tiles[2]).to_text()],
-        read.tiles.waiting_keys()
+        hash_state(&read).tiles.waiting_keys()
     );
 }
 
@@ -162,7 +166,9 @@ fn a_tile_the_rom_holds_mirrored_is_resolved() {
     assert_eq!(1, read.resolve_from_rom(&rom));
     assert_eq!(
         Some(&wanted),
-        read.tiles.bytes_of(&TileId::compute(&wanted).to_text())
+        hash_state(&read)
+            .tiles
+            .bytes_of(&TileId::compute(&wanted).to_text())
     );
 }
 
@@ -171,13 +177,15 @@ fn a_tile_the_rom_holds_mirrored_is_resolved() {
 fn a_legacy_digest_is_resolved_by_the_same_scan() {
     let wanted = raw(6);
     let mut read = synthetic_rom::hash_profile_named_by_digest(&[wanted]);
-    assert_eq!(1, read.tiles.waiting_count());
+    assert_eq!(1, hash_state(&read).tiles.waiting_count());
 
     let rom = synthetic_rom::chr_rom_with_tiles(&[wanted]);
     assert_eq!(1, read.resolve_from_rom(&rom));
     assert_eq!(
         Some(&wanted),
-        read.tiles.bytes_of(&raw_tile::legacy_digest(&wanted))
+        hash_state(&read)
+            .tiles
+            .bytes_of(&raw_tile::legacy_digest(&wanted))
     );
 }
 
@@ -224,7 +232,6 @@ fn resolution_rebuilds_only_the_patterns_it_changes() {
     let tiles = [raw(9), raw(10)];
     let mut read = synthetic_rom::hash_profile_of(&tiles);
     let before: Vec<*const ProfilePattern> = read
-        .document
         .profile
         .permanent_patterns
         .iter()
@@ -236,7 +243,6 @@ fn resolution_rebuilds_only_the_patterns_it_changes() {
         read.resolve_from_rom(&synthetic_rom::chr_rom_with_tiles(&[]))
     );
     let after: Vec<*const ProfilePattern> = read
-        .document
         .profile
         .permanent_patterns
         .iter()
@@ -246,7 +252,6 @@ fn resolution_rebuilds_only_the_patterns_it_changes() {
 
     read.resolve_from_rom(&synthetic_rom::chr_rom_with_tiles(&tiles));
     let rebuilt: Vec<*const ProfilePattern> = read
-        .document
         .profile
         .permanent_patterns
         .iter()
@@ -262,8 +267,8 @@ fn the_cache_gives_the_tiles_back_without_a_rom() {
     let tiles = [raw(11), raw(12), raw(13)];
     let mut resolved = synthetic_rom::hash_profile_of(&tiles);
     resolved.resolve_from_rom(&synthetic_rom::chr_rom_with_tiles(&tiles));
-    assert!(resolved.tiles.is_complete());
-    let cache = resolved.tile_cache();
+    assert!(hash_state(&resolved).tiles.is_complete());
+    let cache = resolved.tile_cache().unwrap();
 
     // A ROM that holds none of its tiles, and the cache: everything is resolved all the same.
     let mut read = synthetic_rom::hash_profile_of(&tiles);
@@ -272,7 +277,7 @@ fn the_cache_gives_the_tiles_back_without_a_rom() {
         3,
         read.apply_tile_cache(entries.iter().map(|(key, raw)| (key.as_str(), *raw)))
     );
-    assert!(read.tiles.is_complete());
+    assert!(hash_state(&read).tiles.is_complete());
     assert_eq!(0, read.waiting_tile_count());
     assert_eq!(
         0,
@@ -306,13 +311,16 @@ fn an_unreadable_or_wrong_cache_is_ignored() {
     // And a cache that holds nothing leaves every tile waiting.
     let mut read = synthetic_rom::hash_profile_of(&tiles);
     assert_eq!(0, read.apply_tile_cache(Vec::new()));
-    assert_eq!(1, read.tiles.waiting_count());
+    assert_eq!(1, hash_state(&read).tiles.waiting_count());
 }
 
 #[test]
 fn the_cache_file_is_named_after_the_profile_identifier() {
     let read = synthetic_rom::hash_profile_of(&[raw(16)]);
-    assert_eq!(Some("SyntheticId".to_owned()), read.envelope.id);
+    assert_eq!(
+        Some("SyntheticId".to_owned()),
+        hash_state(&read).envelope.id
+    );
     assert_eq!(
         Some("SyntheticId.tiles".to_owned()),
         read.tile_cache_file_name()
@@ -337,9 +345,9 @@ fn the_99_pairable_profiles_resolve_whole_from_their_counterparts_tiles() {
         let rom = synthetic_rom::chr_rom_with_tiles(&counterpart_tiles(&name));
         read.resolve_from_rom(&rom);
         assert!(
-            read.tiles.is_complete(),
+            hash_state(&read).tiles.is_complete(),
             "{name}: {} strings still waiting",
-            read.tiles.waiting_count()
+            hash_state(&read).tiles.waiting_count()
         );
         assert_eq!(0, read.waiting_tile_count(), "{name}");
     }
@@ -367,10 +375,10 @@ fn the_textures_of_the_99_pairable_profiles_come_back_whole() {
         read.resolve_from_rom(&synthetic_rom::chr_rom_with_tiles(&counterpart_tiles(
             &name,
         )));
-        assert!(read.tiles.is_complete(), "{name}");
+        assert!(hash_state(&read).tiles.is_complete(), "{name}");
 
         let plain = neutral_assets::load_profile(&neutral_assets::counterpart_name(&name));
-        let hash_patterns: Vec<_> = read.document.profile.all_patterns().collect();
+        let hash_patterns: Vec<_> = read.profile.all_patterns().collect();
         let plain_patterns: Vec<_> = plain.profile.all_patterns().collect();
         assert_eq!(plain_patterns.len(), hash_patterns.len(), "{name}");
 
@@ -420,7 +428,7 @@ fn the_textures_of_the_99_pairable_profiles_come_back_whole() {
     assert_eq!(68_127, markers + same_shape + direct + other_size);
 }
 
-fn read_hash(name: &str) -> HashProfile {
+fn read_hash(name: &str) -> ProfileDocument {
     let bytes = neutral_assets::read_hash_profile(name);
     profile::read(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"))
 }
@@ -437,8 +445,8 @@ fn counterpart_tiles(name: &str) -> Vec<RawTile> {
         .collect()
 }
 
-fn first_pattern(read: &HashProfile) -> &ProfilePattern {
-    read.document.profile.permanent_patterns[0].as_ref()
+fn first_pattern(read: &ProfileDocument) -> &ProfilePattern {
+    read.profile.permanent_patterns[0].as_ref()
 }
 
 /// Two textures are the same when their size, their format and their words agree; an absent

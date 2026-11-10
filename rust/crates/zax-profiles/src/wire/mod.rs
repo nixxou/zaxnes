@@ -86,6 +86,13 @@ pub fn encode(profile: &GameProfile, presence: FieldPresence) -> Vec<u8> {
     encoder::Encoder::new(profile, presence).write(profile)
 }
 
+/// Encodes a profile as the payload of a "3dh" profile (AMD-062 REQ-PROF-084): the canonical
+/// writer of REQ-PROF-051 with the four deviations of REQ-PROF-074.
+#[must_use]
+pub fn encode_hash_payload(profile: &GameProfile, presence: FieldPresence) -> Vec<u8> {
+    encoder::Encoder::new_hash(profile, presence).write(profile)
+}
+
 /// Reads the identity fields of a profile without decoding the rest.
 ///
 /// # Errors
