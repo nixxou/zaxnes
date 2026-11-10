@@ -14,7 +14,7 @@ It named the measurement that would close it, and the owner made it:
 - [x] 2. The isolated differences of 645-875.
 - [x] 3. Frame 926.
 - [x] 4. What the hardware does there.
-- [ ] 5. The report.
+- [x] 5. The report.
 - [ ] 6. The final pass.
 
 ## The environment this lot runs in
@@ -734,3 +734,29 @@ done
 $H frame-trace "$K" "$KR" --frame 923 --out f923.txt
 grep -E 'ST[AXY] \$40(10|11|12|13|15)' f923.txt
 ```
+
+---
+
+## Step 5 — the report
+
+`docs/review/MOVIE-SYNC.md` now covers all four lots. What was added, and where:
+
+| | |
+|---|---|
+| the preamble | the fourth lot named, with a pointer to its three sections and the statement that it changes no emulation at all |
+| **The short version** | a sixth paragraph: in step to frame 925 with ten screenshots matching, the parting at 926, the artefact measured at 5-17 cycles, the semaphore, the `$4015` branch and the DMC |
+| **§1d** (new) | the two instruments — `--ram-ref-table` and `--converge-window` — each with the reason it exists (a report that stops at twelve; a count that has no sign), and the two DMA counters `frame-trace` now reports |
+| **§4c** | the "measurement that would decide it" block gains a **Superseded** note: the owner made it, §4e is the answer, and its *second* ask — the per-scanline log — is **not** what is needed and why |
+| **§4e** (new, placed after §4d so the lettering reads c, d, e) | the whole of this lot: where it parts, the pictures, the nine isolated frames with the cycle table, where `AA` comes from, frame 926 instruction by instruction, `--converge` on 925/926/927, the `$4015` branch, the sample named from the game's own writes, what a fetch costs from nesdev, the 58 public ROMs, the one named gap and why it is too small, the classification, and the four `BizHawk` Lua additions |
+| **§5** | EVAL-SYNC-3's first two unknowns struck through and answered — the divergence **located**, the reading point **measured** — and three new ones, each a real bound: the DMC sized but not proved, the post-halt abort unmeasured on a game, and frame 733 still the odd one out |
+| **§6** | a new subsection, *"the window is closed, and the answer is still no"*: reason 1 stronger than it was, reasons 2-4 untouched with reason 4 in its sharper form, and EVAL-SYNC-2's argument at its third demonstration. The to-do list is renumbered again: item 0 is now **four lines of Lua rather than a lot**, item 1 is the post-halt DMA abort decision, and EVAL-SYNC-3's item 0 is struck as done |
+| **§6, commands** | every command of this lot, including the two new options, the DPCM census and the nine public suites |
+
+The strike-throughs are the document's own convention: a reader who was told something was unknown
+is owed the answer in the place they were told it.
+
+One correction of an earlier lot's figure, made in the place it was said: §4c's screenshot table
+read "0 of 6, the nearest 275 pixels of 57 344". That stands for the six frames it measured
+(1 000 and later), and §4e now shows that the eleven frames **before** 950 are a different story —
+ten of them match exactly. Nothing in §4c was wrong; its window simply began after the agreement
+ended.

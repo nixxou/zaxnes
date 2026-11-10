@@ -1,13 +1,14 @@
 # Playing TAS movies on Zaxnes — where its engine parts from one, and whether `.bk2` is the answer
 
-Lots **EVAL-SYNC**, **EVAL-SYNC-2** and **EVAL-SYNC-3**, branch `eval/bk2`, base `432492c4` (lot
-FCEUX-48, which gave the application a second engine and `.fm2` playback on it). The first two are
-**evaluations**: they measure and explain, and they change no emulation in `zax-nes`. The third
-makes **one** emulation change, on the owner's decision: see §4d.
+Lots **EVAL-SYNC**, **EVAL-SYNC-2**, **EVAL-SYNC-3** and **EVAL-SYNC-4**, branch `eval/bk2`, base
+`432492c4` (lot FCEUX-48, which gave the application a second engine and `.fm2` playback on it).
+All of them are **evaluations** — they measure and explain — except the third, which makes **one**
+emulation change on the owner's decision: see §4d. **EVAL-SYNC-4 changes no emulation at all.**
 
 The working, with every command, is `docs/progress/EVAL-SYNC.md`,
-`docs/progress/EVAL-SYNC-2.md` and `docs/progress/EVAL-SYNC-3.md`. The instruments are
-`zax-harness movie-sync` and `zax-harness frame-trace`.
+`docs/progress/EVAL-SYNC-2.md`, `docs/progress/EVAL-SYNC-3.md` and
+`docs/progress/EVAL-SYNC-4.md`. The instruments are `zax-harness movie-sync` and
+`zax-harness frame-trace`.
 
 **EVAL-SYNC-2 is the second `.bk2`**, the one §6 of the first lot named as the measurement that
 would reopen the question — an MMC3 game with seven resets that syncs on `BizHawk` and **does
@@ -20,6 +21,13 @@ widescreen hack instead of the ROM the movie was recorded on. Its sections are �
 instruments it added and the Reset semantics it measured), §4c (*Kirby* after the fix), §4d (the
 mapper's soft reset, the one emulation change) and the amendments marked *EVAL-SYNC-3* in §5
 and §6.
+
+**EVAL-SYNC-4 is the 600-frame window closed**, from the second per-frame reference the owner
+produced (frames 400 to 1 100). It finds the divergence — frame **926** — names the byte, the
+instruction and the branch, and puts a **number** on the artefact class that the three earlier lots
+could only name: the two machines read the 2 KiB **5 to 17 CPU cycles apart**. Its sections are
+§1d (the two instruments it added), §4e (frames 400-1 100, frame 926 and the DMC) and the
+amendments marked *EVAL-SYNC-4* in §5 and §6.
 
 ---
 
@@ -63,6 +71,21 @@ figure, where the earlier lots read 25. A second, much smaller divergence remain
 400 and 1 000 (§4c), and the two candidates EVAL-SYNC-2 left are now eliminated by measurement.
 EVAL-SYNC-2's class (a) — the mapper and the RESET button — **is fixed** (§4d). **Reason 1 of §6 is
 restored.**
+
+**EVAL-SYNC-4 closes that window and the divergence is twelve bytes wide.** The owner's second
+per-frame reference (frames 400 to 1 100) puts *Kirby* in step with `NesHawk` to frame **925** —
+ten of eleven screenshots in that stretch now match **exactly**, where EVAL-SYNC-3 had 0 of 6 — and
+the parting is at the start of frame **926**, in three bytes. Two of them are the reading-instant
+artefact again, and this lot stops calling it a class and measures it: **the reference reads the
+2 KiB 5 to 17 CPU cycles before Zaxnes's frame boundary**, eight independent frames agreeing. The
+third byte is `$0039`, the game's own frame-sync semaphore, and it differs because Zaxnes's
+frame-926 work ran about **sixty CPU cycles** behind `NesHawk`'s and the NMI caught it seventeen
+instructions short of the `STA $39` at `$C06E` that clears it. The branch that then turns sixty
+cycles into two different games is `BNE $8248` at **`$8241`**, on a read of **`$4015`** — whose
+bit 4 is *"the DMC still has bytes to fetch"*. And the only mechanism in the frame of the right
+size is the **DMC's own sample-fetch DMA**: a 257-byte DPCM sample at rate `$F`, 69 fetches a
+frame, 3 or 4 halt cycles each. Zaxnes passes **52 of 58** public DMA/APU ROMs and fails none; it
+is **undetermined**, and §4e names the four lines of `BizHawk` Lua that would close it.
 
 ---
 
@@ -237,6 +260,36 @@ that lot's default.
 
 `ZaxnesMachine::new` now turns the 3D built-in patches **off** before `load_rom`, as
 `zax-harness test-roms` has always done. `--builtin-patches` turns them back on. See §4c.
+
+---
+
+## 1d. Two more instruments, and both exist because a count has no sign (EVAL-SYNC-4)
+
+### `movie-sync --ram-ref-table <file>`: the whole table, not the first twelve frames
+
+`--ram-ref`'s printed report lists the first twelve frames with a live difference, which is the
+right length for a paragraph and the wrong length for a window of seven hundred frames holding
+nine isolated differences and then a hundred and seventy-five in a row. `--ram-ref-table` writes
+**every** compared frame's own line — `<frame> total= live= stack= temp=` and the live addresses —
+so that `awk` can answer "which frames parted" instead of a reader counting. `RamCompare::keep_table`
+is off unless asked for: a movie is 156 312 frames of entries.
+
+### `frame-trace --converge-window <n>`: which addresses, and on which side of the boundary
+
+`--converge` says **how far** our 2 KiB is from the reference's at every instruction and never
+**in which direction**. Three bytes differing at a frame boundary can as easily be writes our own
+frame has not reached yet as writes the reference's machine never made — and those are opposite
+diagnoses. `--converge-window` prints the live difference instruction by instruction for *n*
+instructions either side of the boundary, **with the addresses named** and each line marked `<`,
+`=` or `>` by its side of the boundary. §4e's frame 926 is what it was built for, and it is what
+ruled out the first explanation that fitted.
+
+`frame-trace` also now reports, per frame, `NesBus`'s own two DMA counters — **DMC sample fetches
+and OAM transfers**. Both getters (`dmc_dma_count`, `oam_dma_count`) already existed and are
+public, for the DMA timing tests; nothing in `zax-nes` changed. A DMC fetch halts the CPU for
+three or four cycles, so a frame's count is the size of the one mechanism that moves the program's
+position inside a frame with no read and no branch deciding it — which is the whole of §4e's last
+half.
 
 ---
 
@@ -690,6 +743,13 @@ scanline **and dot** at which `/IRQ` is asserted and at which the handler's firs
 and the CPU cycle count at the start of each scanline. Zaxnes can produce all four from
 `frame-trace --out` today.
 
+> **Superseded, EVAL-SYNC-4.** The owner made that measurement —
+> `kirby-jp-step1b.txt`, frames 400 to 1 100 — and §4e is what it says. The window is closed:
+> *Kirby* is in step to frame **925** and parts at **926**. The second ask, the per-scanline log of
+> one frame, is **not** what is needed: the first live difference is not in pages `$0400`-`$05FF`
+> and the MMC3 IRQ lands on the same scanline and nearly the same dot in the frames either side of
+> it. §4e names what to ask for instead.
+
 ---
 
 ## 4d. The mapper and the RESET button: §4b's class (a), fixed (EVAL-SYNC-3)
@@ -726,6 +786,242 @@ after each — and that they now **matter**: with `--resets off` the pictures at
 them changed nothing. The game re-enters its reset vector with the MMC3 banks it chose still
 mapped, which is what the hardware does and why nesdev requires an MMC3 game's reset vector to
 point into `$E000-$FFFF`.
+
+---
+
+## 4e. The window closed: frame 926, the frame semaphore, and the DMC (EVAL-SYNC-4)
+
+`kirby-jp-step1b.txt` is `kirby-jp-step1.txt`'s format exactly — 701 lines
+`<f> <checksum> lag=<n> ram=<4096 hex digits>` for frames **400 to 1 100** — so `--ram-ref` took it
+unchanged, and the two files overlap on line 400 **byte for byte**, which is the cheapest check
+that the owner's two runs are one run.
+
+### Where it parts
+
+| | |
+|---|---|
+| frames compared, byte for byte | **701 of 701** |
+| with **no live difference** | **517** |
+| the last frame with no live difference | **925** |
+| frames with a live difference | **184**: nine isolated between 645 and 875, then **926 to 1 100 without a gap** |
+| **lag counts** | **all 701 agree** |
+
+And the pictures say the same from the other side. The owner's screenshots every fifty frames,
+under §4's colour-bijection rule, with the pairing **measured** rather than assumed (our frame *f*
+against `s<f>.png` scores 10 MATCHes of 15; our frame *f-1* scores 1):
+
+| frame | 400 | 450-900, every 50 | 950 | 1 000 | 1 050 | 1 100 |
+|---|---|---|---|---|---|---|
+| verdict | no, by **1 pixel** | **MATCH, all ten** | no | no | no | no |
+| pixels breaking the bijection | 1 | 0 | 38 195 | 335 | 45 088 | 52 156 |
+
+**Ten of eleven shots in the agreeing stretch match exactly** — the first *Kirby* screenshot ever
+to match at all; EVAL-SYNC-3 scored 0 of 6, the nearest being 275 pixels. Frame 400's single pixel
+is at (209, 167) on a frame whose work RAM has **no** live difference, which is the same class as
+the stack page: one object's rendering caught a few cycles apart. Frame 1 000's 335 pixels are
+inside x 147-171, y 97-113 — the same 25×17 box EVAL-SYNC-3 measured, now known to be downstream
+of frame 926 rather than a thing of its own. At 1 050 the reference's picture is **one colour** and
+ours is twelve: two machines playing different games.
+
+### The nine isolated frames, and the artefact finally has a number
+
+Eight of the nine (645, 680, 714, 740, 796, 821, 837, 875) are the same instruction in the same
+routine: `STA $0400,X` at **`$C223`**, inside a **job-queue drain** at `$C221`-`$C22E` that copies
+bytes into the page-`$04` buffer the NMI handler flushes to the PPU, running on scanlines ~213 to
+240. The frame boundary falls **inside a copy**, and whichever machine reads its 2 KiB later has
+copied one byte more.
+
+`--converge` turns that into a figure, because our own boundary sits at cycle **29 775-29 780** of
+the frame in all nine while the last instant at which no live byte differs moves:
+
+| frame | 645 | 680 | 714 | 740 | 796 | 821 | 837 | 875 | **733** |
+|---|---|---|---|---|---|---|---|---|---|
+| the reference reads this many CPU cycles early | 6 | 5 | **17** | 5 | 5 | 10 | 10 | 5 | **170** |
+
+**Five to seventeen cycles — less than one 6502 instruction, 15 to 51 PPU dots.** That answers one
+of the things §5 listed as out of reach from this side, and it answers it eight times
+independently. It also explains why only nine of 526 frames show anything: the drain has to still
+be running in those last twenty cycles.
+
+**`AA` is the program's own data**, not open bus, not DMA and not an unmapped read, and the
+reference proves it: `$044B`-`$044E` are `AA AA AA AA` *in the reference* at frame 821,
+`$04FA`-`$04FD` at 837, `$0491`-`$0492` at 733. Both machines copied the same bytes from the same
+table (`LDA ($16),Y` from the cartridge's PRG-RAM at `$671A`, `$674A`, `$6747`-`$674C`) and stopped
+one byte apart. `AA` is in none of the four power-on fills either. Frame 714 is the mirror image,
+with `AA` on `BizHawk`'s side: there `AA` is what the *previous* frame's copy left at `$0405`.
+
+Frame **733** is the one that is not settled: same routine, same instruction, and an instant of our
+own frame still holds the reference's live memory **exactly** — but 170 cycles before our boundary
+instead of twenty.
+
+### Frame 926, instruction by instruction
+
+Three live bytes, and the first two are the artefact again:
+
+| | written by | at | scanline/dot | ours | theirs |
+|---|---|---|---|---|---|
+| `$0038` | `STA $38` at `$F049` | instruction 8 899 | SL 238 dot 225 | `86` | `87` |
+| `$0049` | `STA $49` at `$F075` | 8 884 | SL 238 dot 57 | `13` | `00` |
+| **`$0039`** | **`INC $39` at `$C37C`** | **133** | **SL 249 dot 120** | **`01`** | **`00`** |
+
+`$0038` and `$0049` are the MMC3 bank-select and bank-data shadows the game keeps beside every
+`$8000`/`$8001` write — 22 and 9 changes in frame 926 alone. `$0039` is the **frame semaphore**:
+
+```
+    $C37C  E6 39     INC $39     ; set, in the NMI path, scanline 249
+    $C06A  10 0A     BPL $C076   ; the wait is enabled by bit 7 of $35
+    $C06C  A9 00     LDA #$00
+    $C06E  85 39     STA $39     ; cleared: this frame's work is done
+    $C070  A5 39     LDA $39
+    $C072  F0 FC     BEQ $C070   ; and spin until the next frame's NMI sets it
+```
+
+Traced over frames 918-929, every frame clears it between scanline 146 and 235 and then spins to
+the frame's end — **except 926, which never reaches `$C06E` at all**. Our frame 926 ends at
+instruction 8 977, `$F061 STA $8001`, **scanline 240 dot 338**, and `$C06E` is **seventeen
+instructions and 61 CPU cycles** further on. Those seventeen instructions write exactly the
+reference's three values (`$F07D STA $38` ← `#$87`; `$F085 STA $49` ← `$0576` = `00`; `$C06E
+STA $39` ← `00`), and frame 925's instructions 6001-6015 are the same seventeen with the same
+three values, which is the control. So **the reference's frame-926 state is Zaxnes's own state
+seventeen instructions later**: `NesHawk` was **ahead**, by at least 61 cycles less the 5-to-17
+reading offset — **about 45 to 55 CPU cycles**. (That is the opposite sign from frame 733's 170
+behind. The game's spin at `$C070` re-synchronises the two machines every frame, which is why the
+drift is invisible except in the two frames of 526 whose work ends within that distance of vblank.)
+
+`--converge` on the three frames:
+
+| frame | |
+|---|---|
+| **925** | no live byte differs at **2 466 instants**, from instruction 6 741 (−2 405) to 9 206 (+60) — the whole spin, the boundary included |
+| **926** | **at no instant of the frame does the live memory agree**; the closest is **1** live byte, `$0039` alone |
+| 927 | **56** live bytes differ at every instant, and `$0039` goes `01` → **`02`**: the semaphore is now a count of frames owed, and from here the two machines run different code |
+
+### What decided it: `$4015`, and the DMC
+
+Nothing read anything to decide whether the frame's work fits in a frame. What turns sixty cycles
+into two different games is a read, and it is in the frame on both machines:
+
+```
+    $823C  AD 15 40  LDA $4015    ; bit 4 = the DMC has bytes left to fetch
+    $823F  29 10     AND #$10
+    $8241  D0 05     BNE $8248    ; taken: a sample is still playing, leave it alone
+    $8243  A9 7F     LDA #$7F
+    $8245  8D 11 40  STA $4011
+```
+
+| frame | our `$4015` | the branch at `$8241` |
+|---|---|---|
+| 925, **926** | **`$1F`**, bit 4 **set** | taken, `RTS` |
+| 927, 928 | `$0F`, bit 4 clear | **not taken**, `STA $4011` |
+
+And the sample is named from the game's own writes at frame 923: `$4012` = `$F4` (address
+`$FD00`), `$4013` = `$10` (**257 bytes**), `$4010` = `$0F` (**rate `$F`**, no loop, no IRQ). nesdev
+puts rate `$F` at a 54-cycle period, so a byte every **432** cycles — 68.9 a frame. Zaxnes's own
+counters read **69** in a full frame and **63 + 69 + 69 + 56 = 257** over the four frames of the
+sample, the sample length to the byte.
+
+So the *number* of fetches is exactly the documented one. What is left to disagree about is what
+each costs: nesdev, *DMA* — *"DMC DMA normally takes 3 or 4 cycles, depending on whether alignment
+is needed"*, the halt landing only on a read cycle and slipping when the CPU writes. That is
+**207 to 276 cycles a frame** and **771 to 1 028 over the sample**, and a disagreement of a
+fraction of a cycle per fetch — 0.2 at frame 926, 1.3 at frame 733 — covers both measured
+displacements. Nothing else in the frame has the budget:
+
+| | |
+|---|---|
+| the 3D extension | **locked**, 0 instructions costing no cycle, every frame |
+| `$2002`, sprite 0, sprite overflow | **not read once** in any frame examined |
+| the OAM transfer | **one a frame, in every frame**, at the same dot in 925 and 926 |
+| the MMC3 IRQ | one, entering its handler at scanline **174**, dots 288 and 296 |
+| the mapper's soft reset | no reset anywhere in this window |
+| an open-bus or unmapped read | every differing value is in the reference's own RAM too |
+
+And the correlation that makes the DMC the candidate rather than a guess:
+
+| frames | DPCM playing | the offset |
+|---|---|---|
+| 645, 680, 740, 821, 837, 875 | **no, 0 fetches** | **5, 5, 5, 6, 10, 10 cycles** |
+| 714, 796 | yes, 49 and 61 | 17 and 5 |
+| **733**, **926** | yes, **69** and **56** | **170**, and **≥45** |
+
+**Every frame in which the DMC is idle agrees to within ten cycles; both frames that are tens or
+hundreds out have a sample playing.** 212 of the window's 701 frames have one, in 42 runs, so a
+sample playing is common and mostly harmless — it is the coincidence of a sample with a frame
+whose work ends near vblank that shows.
+
+### Zaxnes's standing on that mechanism, and the one named gap
+
+| suite | ROMs | pass | fail | no verdict |
+|---|---|---|---|---|
+| `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `dmc_tests` | 11 | 5 | **0** | 6 |
+| `apu_test`, `blargg_apu_2005.07.30`, `apu_reset` | 36 | **36** | **0** | 0 |
+| `cpu_interrupts_v2`, `instr_misc` | 11 | **11** | **0** | 0 |
+| **total** | **58** | **52** | **0** | **6** |
+
+No failure on any ROM that reports a verdict, and the ones that matter print their own
+measurement: `sprdma_and_dmc_dma` `0F 526` and `_512` `0F 528`, `dma_4016_read`
+`08 08 07 08 08`, `4-irq_and_dma` `9 +527`, `apu_reset/4017_timing` `Delay … 10`, and both
+`7-dmc_basics` and `8-dmc_rates` passed. `AccuracyCoin` scores **128 of 147**, the tally
+`docs/review/MF-T-test-roms.md` records for this tree, reproduced character for character.
+
+Three of its nineteen failures are on its *APU Registers and DMA tests* page, and
+`docs/progress/MF-4a.md` §Step 3 diagnosed all three already:
+
+> **One named Zaxnes gap on this mechanism, and it is the wrong size.** nesdev, *DMA*: *"When
+> sample playback is stopped during the APU cycle before a reload DMA would schedule (that is, on
+> the 2nd or 3rd CPU cycle before the halt attempt), the DMA starts, but is aborted after a single
+> cycle"* — explicitly by a `$4015` write, or **implicitly when the sample ends**.
+> `NesBus::run_dma` (`rust/crates/zax-nes/src/nes_bus.rs:682`) owns every cycle from the halt
+> onwards and cannot reach that state: a fetch costs its full three or four cycles or none. Rows
+> `Explicit DMA Abort` and `Implicit DMA Abort` of `AccuracyCoin`, code 2 each, are the
+> reproduction. The fix is a two-or-three-cycle delay on the `$4015` **stop** matching the one
+> `DmcChannel::set_enabled` (`apu/dmc_channel.rs:218`) already returns for the start, plus an abort
+> check in the DMA loop; it was **written, measured and taken back out** in lot MF-4a because it
+> moved no `AccuracyCoin` row and nothing public pins the new behaviour. REQ touched:
+> **REQ-CORE-113**, with REQ-CORE-110 beside it; the open ticket is `Q-119`.
+>
+> **Not fixed here**, and not only because this lot may not: the implicit abort happens **once per
+> sample end** — this sample does not loop — and is worth **one to three cycles**. Frame 926 needs
+> forty-five to fifty-five.
+>
+> The third row, `DMC DMA Bus Conflicts`, is about the *byte* a colliding fetch returns and needs a
+> per-controller-port open-bus mask `InputPorts` does not have. It cannot move the CPU's position
+> at all.
+
+### The classification, and what would close it
+
+**Undetermined.** Not class (a): no hardware behaviour has been found that Zaxnes gets wrong by
+anything like the measured size, and on every public measurement of this mechanism Zaxnes prints
+the documented answer. Not class (b) either: "a `NesHawk` behaviour Zaxnes is right not to share"
+would need `NesHawk`'s figure for its DMC halt cost, its get/put alignment or its abort behaviour,
+and none is published — its source may not be read.
+
+**Four additions to the owner's existing Lua script would close it.** Names are from `BizHawk`'s
+public *Lua Functions List* and should be checked against the version in use:
+
+1. **The reading instant**, which settles the whole artefact class and gives frame 926 its sign:
+   `emu.totalexecutedcycles()` and `emu.getregister("PC")` written on the same hook that already
+   writes `ram=`. The copy loop at `$C221`-`$C22A` is six instructions, so `pc` alone decides eight
+   of the nine isolated frames and `cyc` gives the rest. **The single most valuable line in the
+   list** — it converts every figure of §4e from a bounded inference into a measurement.
+2. **The frame-sync point**, which is frame 926's own question: `event.onmemoryexecute` on
+   **`$C06E`** and on **`$C37C`**, logging `emu.framecount()` and `emu.totalexecutedcycles()`, for
+   frames 900-950. No `C06E` line at frame 926 means `NesHawk` did not reach it either and the
+   three bytes have another explanation; one line means `cyc(C06E) − cyc(C37C)` is the cycle count
+   `NesHawk` needed for that frame's work, against Zaxnes's — which never finished it.
+3. **The branch's own read**: `event.onmemoryread` on **`$4015`** logging the value and
+   `emu.totalexecutedcycles()`, frames 900-950 and 720-745. If `NesHawk` reads `$0F` at frame 926
+   where Zaxnes reads `$1F`, the two took different arms at `$8241` and the quantity that decided
+   it is the DMC's bytes-remaining counter.
+4. **The frame length**: `emu.totalexecutedcycles()` once a frame at `event.onframeend` over
+   400-1 100. Equal per-frame totals put the drift **inside** the frame, where the DMC is; unequal
+   totals would change the diagnosis entirely.
+
+If 1 and 4 come back and the drift is inside the frame, the remaining ask is narrow: the cycle at
+which `NesHawk` performs each DMC fetch for one frame — `event.onmemoryread` on the sample's own
+range (`$FD00`-`$FE00`, from `$4012` = `$F4` and `$4013` = `$10`) with
+`emu.totalexecutedcycles()`. Zaxnes's own 69 are available from `frame-trace` today, and the two
+lists either agree or name the cycle at which they first do not.
 
 ---
 
@@ -772,18 +1068,42 @@ Three new ones, all from EVAL-SYNC-2 and all about §4b:
 
 Three new ones, from EVAL-SYNC-3:
 
-* **Where *Kirby* parts now is still unknown**, but the window is **frames 401 to 1 000** instead
+* ~~**Where *Kirby* parts now is still unknown**, but the window is **frames 401 to 1 000** instead
   of the first sixty, and the first difference is one object on screen rather than a different
   game. §4c names the measurement that would close it — the same Lua script over frames 400 to
-  1 100 — and says that nothing is needed from this side first.
-* **The reference's reading point inside the frame is not published.** Every figure of the form
-  "*n* of 400 frames identical to the byte" is bounded by it: §1b and §4c both measure that the
-  two machines read the 2 KiB at slightly different moments, so the stack page and `$0000-$001F`
-  differ on runs that are in step. `--converge` can *prove* a frame is a reading artefact rather
-  than a divergence, but it cannot say by how many dots the two reading points are apart.
+  1 100 — and says that nothing is needed from this side first.~~ **Located, EVAL-SYNC-4:** the
+  start of frame **926**, three live bytes, of which two are the artefact and one is the game's own
+  frame-sync semaphore `$0039` (§4e). *Why* it parts is still undetermined, but it is now one
+  mechanism and one number: Zaxnes's frame-926 work ran about **sixty CPU cycles** behind
+  `NesHawk`'s.
+* ~~**The reference's reading point inside the frame is not published.** … `--converge` can
+  *prove* a frame is a reading artefact rather than a divergence, but it cannot say by how many
+  dots the two reading points are apart.~~ **Measured, EVAL-SYNC-4**, and it can: **5 to 17 CPU
+  cycles** — 15 to 51 PPU dots — the reference reading *earlier*, on eight independent frames whose
+  frame boundary falls inside the same copy loop (§4e). What is still not published is the *rule*
+  behind that offset, which is why item 1 of §4e's list asks for it directly.
 * **No other game with a built-in 3D patch has been held against a reference.** The fix of §4c is
   general — the patches are off for every `movie-sync` run now — but *Kirby* is the only movie in
   hand whose game has one, so the only evidence that the fix is *sufficient* is *Kirby*'s own.
+
+Three new ones, from EVAL-SYNC-4:
+
+* **Whether the DMC's sample-fetch DMA is the cause is not proved, only sized.** It is the only
+  mechanism in the frame with the budget (207-276 cycles a frame), every live-difference frame in
+  which it is idle agrees to within ten cycles, and both frames that are tens or hundreds out have
+  a sample playing — but frame 796 has 61 fetches and is 5 cycles out, so the correlation is not
+  one-to-one. §4e's items 3 and 4 are what would turn it into a cause.
+* **Zaxnes's post-halt DMA abort is a known gap and its worth on a real game is unmeasured.**
+  `AccuracyCoin`'s `Explicit DMA Abort` and `Implicit DMA Abort` have failed since lot MF-4a with a
+  written diagnosis; the arithmetic of §4e says one to three cycles per sample end, which is
+  twenty times too small for frame 926 — but "too small for *this* divergence" is not "harmless",
+  and no lot has yet measured it on a game.
+* **Frame 733 remains the odd one out.** It is the same routine and the same instruction as the
+  other eight isolated frames, an instant of our frame holds the reference's live memory exactly,
+  and yet the offset is **170** cycles where the other eight are 5 to 17. Either the reading point
+  is not at a fixed offset from vblank — which item 1 of §4e's list would say outright — or the
+  same mechanism as frame 926 was at work three hundred frames earlier without changing the
+  program's path.
 
 ---
 
@@ -910,10 +1230,45 @@ lots have now looked for one and found: one class (b) family in FCEUX, one class
 one class (c) in the instrument, one class (a) in `zax-nes` (fixed, §4d), and one window of 600
 frames still open.
 
+### EVAL-SYNC-4: the window is closed, and the answer is still no
+
+The measurement item 0 asked for arrived, and it moved *Kirby* from "in step for 400 frames" to
+**"in step for 925, with ten screenshots matching exactly"** — and then named the frame, the byte,
+the instruction and the branch at which it parts (§4e).
+
+**Reason 1 is stronger than it was.** *Faxanadu* replays identically at every frame compared on
+both dumps with the lag count exact; *Kirby* now agrees with `NesHawk`'s work RAM in **every live
+address at 517 of the 701 frames** the second reference covers, with no live difference at all
+through frame 925, **all 701 lag counts** agreeing, and ten of eleven screenshots in that stretch
+matching under the colour-bijection rule. What is left is **three bytes at frame 926**, two of them
+a reading artefact now measured at five to seventeen cycles.
+
+**Reasons 2, 3 and 4 are untouched**, and reason 4 gains a sharper form: what remains is a
+difference of **tens of CPU cycles inside one frame**, on a mechanism where Zaxnes passes 52 of 58
+public ROMs and fails none, and `NesHawk`'s own figure is unpublished. Integrating a third engine
+to make that difference go away would hide the one open accuracy question on the list rather than
+answer it — which is EVAL-SYNC-2's own argument, now at its third demonstration.
+
+### What to do instead — revised order (EVAL-SYNC-4)
+
+0. **Close frame 926, and it is four lines of Lua rather than a lot.** §4e names them: the reading
+   instant (`emu.totalexecutedcycles`, `emu.getregister("PC")`) beside each `ram=` line; the
+   frame-sync point (`event.onmemoryexecute` on `$C06E` and `$C37C`); the `$4015` read
+   (`event.onmemoryread`); and the per-frame cycle total (`event.onframeend`). The first of them
+   alone settles the whole artefact class and gives frame 926 its sign. **Nothing is needed from
+   this side first, and in particular no change to `zax-nes`.**
+1. **Decide whether the post-halt DMA abort is worth a lot of its own** (§4e). It is a named
+   Zaxnes gap with a written diagnosis (MF-4a §Step 3), two failing `AccuracyCoin` rows, a fix that
+   was built and withdrawn, and an open ticket (`Q-119`). It is **not** frame 926's cause — it is
+   twenty times too small — but it is the only DMA behaviour this build is known to get wrong, and
+   it has never been measured on a game.
+
 ### What to do instead — revised order (EVAL-SYNC-3)
 
-0. **Finish locating the *Kirby* divergence.** Still the only defect on the list, and still the
-   owner's cheapest move: the same Lua script over frames **400 to 1 100** with `step = 1` (§4c).
+0. ~~**Finish locating the *Kirby* divergence.** Still the only defect on the list, and still the
+   owner's cheapest move: the same Lua script over frames **400 to 1 100** with `step = 1`
+   (§4c).~~ **Done, EVAL-SYNC-4 §4e**: the owner ran it and the divergence is the start of frame
+   926. The list above replaces this one.
    The `cfg`-gated experiment of §4b is **struck**: its two candidates are eliminated.
 1. ~~**The soft reset should leave the mapper alone.**~~ **Done, EVAL-SYNC-3 §4d**, with the
    proposed amendment of REQ-CORE-122 written up in
@@ -1038,3 +1393,66 @@ pictures of a commercial game). EVAL-SYNC-3 validated it before believing it: on
 `[USA][!!]` it reports MATCH at all six frames with §4's own colour counts (9, 14, 11, 13, 12, 12),
 and it reports the count of differing pixels so that "275 of 57 344" and "50 537 of 57 344" can be
 told apart.
+
+### The commands (EVAL-SYNC-4)
+
+```sh
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+R=$B/kirby-jp-step1b.txt      # the second per-frame reference: frames 400 to 1100
+
+# the whole window, byte for byte and lag for lag, with the per-frame table
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 1100 --trace-step 1 \
+    --trace-ref "$R" --ram-ref "$R" --ram-ref-table table.txt
+awk '!/^#/ && $3 != "live=0"' table.txt        # the 184 frames, nine of them isolated
+
+# the pictures, at the owner's fifty-frame grid and one frame either side of it, so that the
+# pairing of `s<f>.png` is measured rather than assumed
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 1100 --png shots \
+    --png-frames 399,400,449,450,...,1099,1100
+
+# the eight isolated frames: the instruction, and the cycles the reference reads early
+for fa in 645:04BE 680:04E0 714:0405 740:04AE 796:0490 821:044F 837:04FE 875:042C; do
+  f=${fa%%:*}; a=${fa##*:}
+  $H frame-trace "$K" "$KR" --frame $f --watch $a --converge "$R" --extra 1500 --out f$f.txt
+done
+$H frame-trace "$K" "$KR" --frame 733 --watch 0040 --watch 0048 --watch 0493 --watch 0498 \
+    --converge "$R" --extra 1500 --out f733.txt
+$H frame-trace "$K" "$KR" --frame 733 --watch 0004 --converge "$R" --extra 10
+
+# frame 926: the three bytes, then the live difference either side of the boundary
+$H frame-trace "$K" "$KR" --frame 926 --watch 0038 --watch 0039 --watch 0049 \
+    --converge "$R" --extra 2000 --context 14 --out f926.txt
+$H frame-trace "$K" "$KR" --frame 926 --converge "$R" --extra 200 --converge-window 26
+$H frame-trace "$K" "$KR" --frame 925 --frames 3 --converge "$R" --extra 60 --converge-window 4
+
+# what $0039 is, and the one frame of twelve that never clears it
+$H frame-trace "$K" "$KR" --frame 918 --frames 12 --watch 0039 --watch 01A5 --context 2
+
+# the DPCM census of the whole window -- 701 frames, five seconds
+$H frame-trace "$K" "$KR" --frame 400 --frames 701 | grep -E '^  frame|DMC sample'
+
+# the $4015 read and the branch it decides
+for f in 925 926 927 928; do
+  $H frame-trace "$K" "$KR" --frame $f --out g$f.txt >/dev/null
+  grep -A4 'LDA \$4015' g$f.txt | head -5
+done
+
+# the sample the game starts at frame 923, and its rate
+$H frame-trace "$K" "$KR" --frame 923 --out f923.txt
+grep -E 'ST[AXY] \$40(10|11|12|13|15)' f923.txt
+
+# the hardware side: every public suite that covers DMC DMA, the APU and DMA cycles
+export ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+for f in dmc_dma_during_read4 sprdma_and_dmc_dma dmc_tests apu_test blargg_apu_2005 \
+         apu_reset cpu_interrupts_v2 instr_misc AccuracyCoin; do
+  $H test-roms "$ZAXNES_TEST_ROMS" "tr-$f.json" --filter "$f" --no-shots --quiet
+done
+```
+
+The screenshot comparison is still the same uncommitted script, and EVAL-SYNC-4 revalidated it a
+second way: it scores **10** MATCHes of 15 on one pairing of the owner's screenshots and **1** on
+the other, which a script that said MATCH indiscriminately could not do.
