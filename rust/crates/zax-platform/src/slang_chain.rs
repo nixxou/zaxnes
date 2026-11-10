@@ -96,6 +96,26 @@ struct Loading {
     preset: PathBuf,
     started: Instant,
     result: Receiver<Result<FilterChain, String>>,
+    /// The thread, joined when it ends without an answer to tell why.
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Runs `work` with the validation errors of `device` caught instead of panicking, and returns
+/// them as text. Error scopes belong to the thread that pushes them.
+fn validated<T>(device: &wgpu::Device, work: impl FnOnce() -> T) -> (T, Option<String>) {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let value = work();
+    let error = pollster::block_on(scope.pop()).map(|error| error.to_string());
+    (value, error)
+}
+
+/// The text of a thread's panic.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic without a message".to_owned())
 }
 
 /// The slang shaders of the window: the preset in use, the one compiling and the last refusal.
@@ -177,35 +197,50 @@ impl SlangShaders {
             adapter_info: Some(self.adapter_info.clone()),
         };
         let path = preset.clone();
-        std::thread::spawn(move || {
-            let chain = FilterChain::load_from_path(
-                &path,
-                ShaderFeatures::NONE,
-                &device,
-                &queue,
-                Some(&options),
-            )
-            .map_err(|error| format!("{}: {error}", path.display()));
-            // The window may have gone, or asked for another preset since.
-            let _ = sender.send(chain);
-        });
+        // Without a thread the receiver reads a disconnection, reported as a stopped compilation.
+        let thread = std::thread::Builder::new()
+            .name("zax slang".to_owned())
+            .spawn(move || {
+                let (chain, error) = validated(&device, || {
+                    FilterChain::load_from_path(
+                        &path,
+                        ShaderFeatures::NONE,
+                        &device,
+                        &queue,
+                        Some(&options),
+                    )
+                    .map_err(|error| error.to_string())
+                });
+                let chain = match (chain, error) {
+                    (Ok(chain), None) => Ok(chain),
+                    (Ok(_), Some(error)) | (Err(error), _) => Err(error),
+                }
+                .map_err(|error| format!("{}: {error}", path.display()));
+                // The window may have gone, or asked for another preset since.
+                let _ = sender.send(chain);
+            })
+            .ok();
         Loading {
             preset,
             started: Instant::now(),
             result,
+            thread,
         }
     }
 
     /// Takes the preset that finished compiling, if one did, with a line for the log.
     fn poll(&mut self) -> Option<String> {
-        let loading = self.loading.as_ref()?;
+        let loading = self.loading.as_mut()?;
         let result = match loading.result.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Disconnected) => Err(format!(
-                "{}: the compilation stopped",
-                loading.preset.display()
-            )),
+            Err(TryRecvError::Disconnected) => {
+                let why = match loading.thread.take().map(std::thread::JoinHandle::join) {
+                    Some(Err(payload)) => panic_text(payload.as_ref()),
+                    _ => "the compilation stopped".to_owned(),
+                };
+                Err(format!("{}: {why}", loading.preset.display()))
+            }
         };
         let preset = loading.preset.clone();
         let elapsed = loading.started.elapsed();
@@ -269,22 +304,20 @@ impl SlangShaders {
         ShaderStatus::None
     }
 
-    /// Records the passes filtering `input` into `output` (of `format`), over the rectangle at
-    /// (`x`, `y`) of `width` x `height` pixels: `false` without a preset. A pass that fails
-    /// drops the preset (the frame is then drawn without it) and keeps the problem.
+    /// The commands filtering `input` into `output` (of `format`), over the rectangle at
+    /// (`x`, `y`) of `width` x `height` pixels, to submit before the window's: none without a
+    /// preset. A preset whose passes fail (or do not validate) is dropped with its problem, and
+    /// nothing of it is submitted; the frame is then drawn without it.
     #[allow(clippy::cast_precision_loss)] // Window sizes are far below 2^24.
     pub fn record(
         &mut self,
-        encoder: &mut wgpu::CommandEncoder,
         input: &wgpu::Texture,
         output: &wgpu::TextureView,
         format: wgpu::TextureFormat,
         (x, y, width, height): (u32, u32, u32, u32),
         target: (u32, u32),
-    ) -> bool {
-        let Some(active) = self.active.as_mut() else {
-            return false;
-        };
+    ) -> Option<wgpu::CommandBuffer> {
+        let active = self.active.as_mut()?;
         let viewport = Viewport {
             x: x as f32,
             y: y as f32,
@@ -292,18 +325,26 @@ impl SlangShaders {
             output: WgpuOutputView::new_from_raw(output, Size::new(target.0, target.1), format),
             size: Size::new(width.max(1), height.max(1)),
         };
-        match active
-            .chain
-            .frame(input, &viewport, encoder, self.frame, None)
-        {
-            Ok(()) => true,
-            Err(error) => {
-                let preset = active.preset.clone();
-                self.refused = Some((preset, format!("a pass failed: {error}")));
-                self.active = None;
-                false
-            }
-        }
+        let frame = self.frame;
+        let device = &self.device;
+        let ((result, commands), error) = validated(device, || {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("zax slang"),
+            });
+            let result = active
+                .chain
+                .frame(input, &viewport, &mut encoder, frame, None);
+            (result, encoder.finish())
+        });
+        let problem = match (result, error) {
+            (Ok(()), None) => return Some(commands),
+            (Err(error), _) => format!("a pass failed: {error}"),
+            (Ok(()), Some(error)) => error,
+        };
+        let preset = active.preset.clone();
+        self.refused = Some((preset, problem));
+        self.active = None;
+        None
     }
 }
 
@@ -318,4 +359,81 @@ pub enum ShaderStatus<'a> {
     Active(&'a Path),
     /// The preset asked for failed, and why.
     Refused(&'a Path, &'a str),
+}
+
+/// A parameter a preset's shaders declare (`#pragma parameter`), for the interface.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterInfo {
+    /// The name the shaders read it by.
+    pub name: String,
+    /// The text the shader gives it.
+    pub description: String,
+    /// The value the preset gives it (the shader's own unless the `.slangp` sets another).
+    pub initial: f32,
+    /// The lowest value.
+    pub minimum: f32,
+    /// The highest value.
+    pub maximum: f32,
+    /// The step of a slider (0 for none).
+    pub step: f32,
+}
+
+impl ParameterInfo {
+    /// Whether the parameter only titles the ones after it: presets such as Mega Bezel declare
+    /// headings as parameters that cannot move.
+    #[must_use]
+    pub fn is_heading(&self) -> bool {
+        self.maximum <= self.minimum
+    }
+}
+
+/// The parameters of `preset`, in the order its passes declare them (the first pass that
+/// declares one gives its place). Reads the preset and its shader files; compiles nothing.
+///
+/// # Errors
+///
+/// The message of librashader when the preset or one of its shaders cannot be read.
+pub fn preset_parameters(preset: &Path) -> Result<Vec<ParameterInfo>, String> {
+    use librashader::preprocess::ShaderSource;
+    use librashader::presets::ShaderPreset;
+
+    let parsed = ShaderPreset::try_parse(preset, ShaderFeatures::NONE)
+        .map_err(|error| format!("{}: {error}", preset.display()))?;
+    let mut order: Vec<String> = Vec::new();
+    let mut found: HashMap<String, ParameterInfo> = HashMap::new();
+    for pass in &parsed.passes {
+        let source = ShaderSource::load(&pass.path, parsed.features)
+            .map_err(|error| format!("{}: {error}", pass.path.display()))?;
+        for line in source.vertex.lines().chain(source.fragment.lines()) {
+            let Some(rest) = line.trim_start().strip_prefix("#pragma parameter ") else {
+                continue;
+            };
+            if let Some(name) = rest.split_whitespace().next() {
+                if !order.iter().any(|known| known == name) {
+                    order.push(name.to_owned());
+                }
+            }
+        }
+        for (name, parameter) in source.parameters {
+            found.entry(name.to_string()).or_insert(ParameterInfo {
+                name: name.to_string(),
+                description: parameter.description.trim().to_owned(),
+                initial: parameter.initial,
+                minimum: parameter.minimum,
+                maximum: parameter.maximum,
+                step: parameter.step,
+            });
+        }
+    }
+    for set in &parsed.parameters {
+        if let Some(info) = found.get_mut(set.name.as_str()) {
+            info.initial = set.value;
+        }
+    }
+    let mut parameters: Vec<ParameterInfo> =
+        order.iter().filter_map(|name| found.remove(name)).collect();
+    let mut rest: Vec<ParameterInfo> = found.into_values().collect();
+    rest.sort_by(|a, b| a.name.cmp(&b.name));
+    parameters.extend(rest);
+    Ok(parameters)
 }

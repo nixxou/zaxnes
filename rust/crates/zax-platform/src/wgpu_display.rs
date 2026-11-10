@@ -49,6 +49,13 @@ const BATCHING_FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANC
 
 /// The scene picture and the height of the window it fills, from the bottom up (the menu bar
 /// keeps the rest).
+/// What the slang shaders use when the GPU has it: presets such as Mega Bezel filter 32-bit
+/// float pictures.
+#[cfg(feature = "shaders")]
+const SHADER_FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE;
+#[cfg(not(feature = "shaders"))]
+const SHADER_FEATURES: wgpu::Features = wgpu::Features::empty();
+
 #[derive(Debug, Clone, Copy)]
 pub struct SceneLayer<'a> {
     pub view: &'a wgpu::TextureView,
@@ -142,7 +149,9 @@ impl WgpuDisplay {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("zax display"),
             required_features: adapter.features()
-                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | BATCHING_FEATURES),
+                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                    | BATCHING_FEATURES
+                    | SHADER_FEATURES),
             required_limits: wgpu::Limits {
                 max_binding_array_elements_per_shader_stage:
                     adapter.limits().max_binding_array_elements_per_shader_stage,
@@ -338,8 +347,7 @@ impl WgpuDisplay {
         }
         // The slang shaders draw the scene picture themselves (clearing the window to black),
         // before the window pass; the interface then goes over them unfiltered.
-        let filtered = scene
-            .is_some_and(|scene| self.filter_scene(&mut encoder, &view, scene, (width, height)));
+        let filtered = scene.and_then(|scene| self.filter_scene(&view, scene, (width, height)));
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("zax window"),
@@ -348,7 +356,7 @@ impl WgpuDisplay {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: if filtered {
+                        load: if filtered.is_some() {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK)
@@ -361,7 +369,7 @@ impl WgpuDisplay {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if let Some(scene) = scene.filter(|_| !filtered) {
+            if let Some(scene) = scene.filter(|_| filtered.is_none()) {
                 self.compositor
                     .draw(&self.device, &mut pass, scene, (width, height));
             }
@@ -369,25 +377,25 @@ impl WgpuDisplay {
                 self.interface.draw(&mut pass, interface, (width, height));
             }
         }
-        self.queue.submit([encoder.finish()]);
+        // The shader passes write the window before the window pass loads it.
+        self.queue
+            .submit(filtered.into_iter().chain([encoder.finish()]));
         self.pending = Some(frame);
     }
 
-    /// Draws `scene` through the slang preset onto `view`, the scene's rectangle at the bottom
-    /// of the window: `false` when there is no preset or it failed (the problem is kept for the
-    /// log and the preset dropped), and the compositor draws the picture instead.
+    /// The commands drawing `scene` through the slang preset onto `view`, the scene rectangle
+    /// at the bottom of the window: none without a preset or when it failed (the problem is
+    /// kept for the log and the preset dropped), and the compositor draws the picture instead.
     #[cfg(feature = "shaders")]
     fn filter_scene(
         &mut self,
-        encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         scene: SceneLayer<'_>,
         (width, height): (u32, u32),
-    ) -> bool {
+    ) -> Option<wgpu::CommandBuffer> {
         let layer = scene.height.clamp(1, height);
         let rectangle = (0, height - layer, width, layer);
         self.shaders.record(
-            encoder,
             scene.texture,
             view,
             self.config.format,
@@ -400,12 +408,11 @@ impl WgpuDisplay {
     #[allow(clippy::unused_self)]
     const fn filter_scene(
         &self,
-        _encoder: &mut wgpu::CommandEncoder,
         _view: &wgpu::TextureView,
         _scene: SceneLayer<'_>,
         _size: (u32, u32),
-    ) -> bool {
-        false
+    ) -> Option<wgpu::CommandBuffer> {
+        None
     }
 
     /// Presents the frame [`Self::draw`] drew.

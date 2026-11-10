@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.5.0"
@@ -37,3 +38,8 @@ opt-level = 2
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# librashader-runtime-wgpu with the naga module handed to wgpu directly (Mega Bezel), see
+# vendor/librashader-runtime-wgpu/README.md.
+[patch.crates-io]
+librashader-runtime-wgpu = { path = "vendor/librashader-runtime-wgpu" }
