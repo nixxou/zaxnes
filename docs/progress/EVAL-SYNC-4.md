@@ -15,7 +15,7 @@ It named the measurement that would close it, and the owner made it:
 - [x] 3. Frame 926.
 - [x] 4. What the hardware does there.
 - [x] 5. The report.
-- [ ] 6. The final pass.
+- [x] 6. The final pass.
 
 ## The environment this lot runs in
 
@@ -760,3 +760,118 @@ read "0 of 6, the nearest 275 pixels of 57 344". That stands for the six frames 
 (1 000 and later), and §4e now shows that the eleven frames **before** 950 are a different story —
 ten of them match exactly. Nothing in §4c was wrong; its window simply began after the agreement
 ended.
+
+---
+
+## Step 6 — the final pass
+
+Everything the brief's final check asks for, re-run at the end rather than trusted from the step
+that produced it.
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, **whole workspace**, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core,zax-harness/fceux-core,zax-fceux/fceux-core`) | clean |
+
+### The tests, `--include-ignored`
+
+With `ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`
+and `ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| **`zax-harness`**, feature off | **126** | 0 | 0 |
+| **`zax-harness`**, feature on (`--test-threads 1`) | **146** | 0 | 0 |
+| **`zax-nes`** (untouched; run to show it) | **1 187** | 0 | 0 |
+
+EVAL-SYNC-3's figures move by exactly this lot's two new unit tests: the `zax-harness` lib goes
+from 50 to **52**, its feature-off total from 124 to **126** and its feature-on total from 144 to
+**146**. The two are
+`ram_trace::tests::the_table_keeps_every_compared_frame_and_the_report_still_stops` and
+`frame_trace::tests::the_converge_window_names_the_live_addresses_and_which_side_of_the_boundary`.
+`zax-nes`'s 1 187 is EVAL-SYNC-3's number to the test, which it has to be: nothing in that crate
+moved.
+
+**One trap worth recording for whoever runs this next.** `compare_tests` calls
+`std::env::temp_dir()`, which on Windows reads `TMP`/`TEMP` — and the brief's `TMP` must therefore
+be given as a **Windows** path (`G:\…\target-ev\tmp`), not as the MSYS `/g/…` form. With the MSYS
+form all four of its tests fail at `fs::create_dir_all`, which looks like a regression of this lot
+and is not one. (A first attempt at the suite also died with `LNK1104` while the host's `C:` was
+full; it linked and passed on the next attempt with `TEMP` on `G:`.)
+
+### golden-core
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, feature off, 98 ROMs,
+1 min 45 s:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names, which is lot FCEUX-23's baseline and EVAL-SYNC's,
+EVAL-SYNC-2's and EVAL-SYNC-3's. It is the expected answer rather than a result this time, and the
+reason is in the next section: `zax-nes` did not move.
+
+### The two movies, re-run with the final binary
+
+| | |
+|---|---|
+| *Faxanadu* `[USA][!!]` against `fax-usa.txt` | **207** of 832 checksum lines, **every** lag count agrees, last agreeing line **83 200**, last picture `03d7e6a1…` |
+| *Faxanadu* `[Rev 1][!!]` against `fax-rev1.txt` | **220** of 832, every lag count, last agreeing line **83 200**, last picture `13920624…` |
+| *Kirby* against `kirby-jp.txt`, the whole movie | **156 312** frames run, **every** one of the 1 563 lag counts agrees, **24** input-insensitive frames — `BizHawk`'s own figure — 2 of 1 563 checksum lines, the last at frame 200 |
+| *Kirby* against `kirby-jp-step1b.txt`, frames 400-1 100 | **701 of 701** compared, **517** with no live difference, the last at **925**, **701 of 701** lag counts |
+
+Every one of those figures is EVAL-SYNC-3's, to the digit and to the digest. That is what it should
+be: this lot's only code change is a new option on each of two subcommands, and both are off unless
+asked for.
+
+### What moved
+
+`git diff --stat 301aa3d5..HEAD` over `zax-nes`, `zax-app`, `zax-fceux`, `zax-render`,
+`zax-engine3d`, `zax-core-api` **and `Cargo.lock`** is **empty**. No new dependency, and every
+cargo command of this pass was run `--offline`.
+
+| | lines |
+|---|---|
+| `docs/progress/EVAL-SYNC-4.md` | +762 |
+| `docs/review/MOVIE-SYNC.md` | +448 |
+| `rust/crates/zax-harness/src/frame_trace.rs` | +168 |
+| `rust/crates/zax-harness/src/ram_trace.rs` | +122 |
+| `rust/crates/zax-harness/src/movie_sync.rs` | +23 |
+| **`rust/crates/zax-nes`** | **0 — the owner's rule, and it holds to the byte** |
+
+Both new options use only public API that already existed: `NesBus::dmc_dma_count` and
+`oam_dma_count` are `pub const fn` there for the DMA timing tests, and nothing else was needed.
+
+### The disk
+
+The pass began with **9.8 GB** free on `G:` and ended with **9.8 GB**, well above the brief's 5 GB
+stop; the release tree under `rust/target-ev` is 1.8 GB. No debug tree was built — every cargo
+command was `--release` — and no GPU campaign was run (the four `*_wgpu*` test targets have no
+tests enabled in this configuration).
+
+**The host's `C:` is full**, 0 bytes free, with 2.9 GB of it in
+`AppData\Local\Temp\claude` from earlier sessions. It cost this pass one spurious `LNK1104` and
+several commands that could not write their output. Nothing was deleted; it is the owner's disk.
+
+### What is left for the owner
+
+1. **Close frame 926, and it is four lines of Lua rather than a lot.** §4e of the report names
+   them; step 4 above gives the code. The first alone — `emu.totalexecutedcycles()` and
+   `emu.getregister("PC")` beside each existing `ram=` line — settles the whole artefact class and
+   gives frame 926 its sign. **Nothing is needed from this side first, and in particular no change
+   to `zax-nes`.**
+2. **Decide whether the post-halt DMA abort is worth a lot of its own.** A named gap with a written
+   diagnosis (MF-4a §Step 3), two failing `AccuracyCoin` rows, a fix built and withdrawn, and an
+   open ticket (`Q-119`). It is **not** frame 926's cause — twenty times too small — but it is the
+   only DMA behaviour this build is known to get wrong, and it has never been measured on a game.
+3. **Adopt or amend REQ-CORE-122**, unchanged from EVAL-SYNC-3:
+   `docs/review/AMD-REQ-CORE-122-mapper-reset.md` has the exact wording.
+4. **`.bk2` in the application**, unchanged, with the reader's three additions (the
+   `00 00 00 00 FF FF FF FF` power-on pattern, the refusal of a non-`null`
+   `InitialWRamStatePattern`, and a `.bk2`'s `Reset` happening **after** the flagged frame). The
+   caveat softens again: an MMC3 `.bk2` now holds for **925** frames rather than 400.
+5. **The warning for the next harness author**, unchanged and now cheap to state: `NesCore` powers
+   on with the 3D built-in patches **enabled**.
+6. The three `.fm2` header fields `zax-app`'s Zaxnes path ignores, unchanged from EVAL-SYNC.
