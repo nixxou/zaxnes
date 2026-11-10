@@ -9,5 +9,6 @@ pub mod object_geometry;
 pub mod pattern_voxels;
 pub mod texture;
 pub mod tile_mesh;
+pub mod tile_sides;
 pub mod tile_voxels;
 pub mod voxel_construction;

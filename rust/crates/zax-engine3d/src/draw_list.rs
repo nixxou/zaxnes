@@ -10,12 +10,13 @@ use crate::frame::{ConversionFrame, FrameInstance, FrameInstanceId, FrameShape, 
 use crate::geometry::builder::PatternGeometryBuilder;
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
+use crate::geometry::tile_sides::TileSides;
 use crate::grid;
 use crate::instance::{InstanceRef, PatternInstance, RenderStyle};
 use crate::palette::{FramePalette, Rgb24};
 use crate::registry::{PatternId, PatternRegistry};
 use crate::settings::{ConversionSettings, RenderAlgorithm, ZLayer};
-use crate::vectors::{Mat4, Vec2, Vec3};
+use crate::vectors::{Cell, Mat4, Vec2, Vec3};
 
 /// Where an instance is attached in the scene (SPEC-04B REQ-E3D-409, REQ-E3D-641).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -237,6 +238,12 @@ pub struct DrawListBuilder {
     /// Objects that have outstayed [`LATE_OBJECT_FRAMES`], newest last. Drained by the host,
     /// which logs them; never read on the drawing path.
     late: Vec<InstanceRef>,
+    /// The per-frame background cell map of AMD-063 REQ-SCN-087 step 1: for each cell of the
+    /// background grid, at most one instance and the tile it put there.
+    ///
+    /// **Left empty unless some background instance of the frame can lose a face**, which is
+    /// what keeps a picture without a transparent object paying nothing for the amendment.
+    cells: Vec<Option<(FrameInstanceId, FrameTile)>>,
 }
 
 /// Emulated frames a 3D object may stay undrawable before REQ-E3D-646 asks for a diagnostic:
@@ -282,6 +289,16 @@ impl DrawListBuilder {
         &self.list
     }
 
+    /// Whether the background cell map of AMD-063 REQ-SCN-087 was built for the last frame.
+    ///
+    /// False unless a background instance of that frame was transparent **and** held a full
+    /// tile, which is the cost rule of the amendment: a picture without a transparent object
+    /// pays one pass over the instance list and nothing more.
+    #[must_use]
+    pub fn background_map_built(&self) -> bool {
+        !self.cells.is_empty()
+    }
+
     /// Swaps the list of the last build with `list`: the caller keeps the built list while the
     /// builder fills the other one next time (its storage is reused).
     pub fn exchange(&mut self, list: &mut FrameDrawList) {
@@ -296,6 +313,7 @@ impl DrawListBuilder {
     ) -> &FrameDrawList {
         self.list.begin(frame);
         let counter = frame.counter();
+        self.map_background_cells(frame, sources);
         for &id in frame.instances() {
             let instance = frame.instance(id);
             if instance.style == RenderStyle::Hidden {
@@ -314,6 +332,120 @@ impl DrawListBuilder {
         self.forget_ready_objects(counter);
 
         &self.list
+    }
+
+    /// Step 1 of AMD-063 REQ-SCN-087: walking the ordered instance list of the frame
+    /// (REQ-E3D-040), each cell of the background grid keeps at most one instance - the first
+    /// one that claims it, replaced only when the one held is opaque and the new one
+    /// transparent.
+    ///
+    /// The map is read for the **neighbourhood** of a drawn tile, so it is built on the
+    /// instances of the frame and on every tile of their shapes, restored shapes and hidden
+    /// instances included, as the requirement words it - not on the tiles the draw list ends up
+    /// holding (Q-179).
+    ///
+    /// Nothing is built unless a background instance of the frame is transparent **and** holds a
+    /// full tile: without that no face can be removed, so the whole of REQ-SCN-087 costs one
+    /// pass over the instance list.
+    fn map_background_cells(&mut self, frame: &ConversionFrame, sources: &DrawSources<'_>) {
+        self.cells.clear();
+        if !Self::has_removable_tile(frame, sources) {
+            return;
+        }
+
+        self.cells.resize(grid::CELL_COUNT, None);
+        for &id in frame.instances() {
+            let instance = frame.instance(id);
+            if !frame.shape(id.shape).background() {
+                continue;
+            }
+
+            let transparent = is_transparent(instance);
+            for tile in frame.shape_tiles(id.shape) {
+                let Some(slot) = grid::slot(tile.grid_index()) else {
+                    continue;
+                };
+
+                // Nothing there yet, or what is there is opaque and this one is transparent.
+                let claim = match self.cells[slot] {
+                    None => true,
+                    Some((held, _)) => transparent && !is_transparent(frame.instance(held)),
+                };
+                if claim {
+                    self.cells[slot] = Some((id, *tile));
+                }
+            }
+        }
+    }
+
+    /// Whether any background instance of the frame is transparent and holds a full tile, which
+    /// is the only case in which REQ-SCN-087 removes anything.
+    fn has_removable_tile(frame: &ConversionFrame, sources: &DrawSources<'_>) -> bool {
+        frame.instances().iter().any(|&id| {
+            let instance = frame.instance(id);
+            frame.shape(id.shape).background()
+                && instance.style != RenderStyle::Hidden
+                && is_transparent(instance)
+                && frame.shape_tiles(id.shape).any(|tile| {
+                    sources
+                        .geometry
+                        .is_full_tile(instance.reference(), tile.image())
+                })
+        })
+    }
+
+    /// Step 2 of AMD-063 REQ-SCN-087: the lateral sides a drawn full tile of a transparent
+    /// background instance loses - those whose four-neighbour cell holds an instance that is
+    /// transparent and whose tile there is full for **its** reference 3D object. A cell outside
+    /// the grid removes nothing.
+    fn removed_sides(
+        &self,
+        frame: &ConversionFrame,
+        tile: &FrameTile,
+        sources: &DrawSources<'_>,
+    ) -> TileSides {
+        let cell = tile.position();
+        let neighbours = [
+            (Cell::new(cell.x - 1, cell.y), TileSides::LEFT),
+            (Cell::new(cell.x + 1, cell.y), TileSides::RIGHT),
+            (Cell::new(cell.x, cell.y - 1), TileSides::TOP),
+            (Cell::new(cell.x, cell.y + 1), TileSides::BOTTOM),
+        ];
+
+        let mut removed = TileSides::NONE;
+        for (neighbour, side) in neighbours {
+            if self.neighbour_removes(frame, neighbour, sources) {
+                removed = removed.with(side);
+            }
+        }
+
+        removed
+    }
+
+    /// Whether the cell `neighbour` takes its shared side away: it is inside the grid, the
+    /// instance the map kept there is transparent, and its tile of that cell is a full tile of
+    /// its own reference 3D object.
+    fn neighbour_removes(
+        &self,
+        frame: &ConversionFrame,
+        neighbour: Cell,
+        sources: &DrawSources<'_>,
+    ) -> bool {
+        if !grid::contains(neighbour) {
+            return false;
+        }
+
+        let Some(slot) = grid::slot(grid::index_of(neighbour)) else {
+            return false;
+        };
+        let Some((id, tile)) = self.cells.get(slot).copied().flatten() else {
+            return false;
+        };
+        let instance = frame.instance(id);
+        is_transparent(instance)
+            && sources
+                .geometry
+                .is_full_tile(instance.reference(), tile.image())
     }
 
     /// Counts one more frame of waiting for `reference` and reports it once it has waited
@@ -355,6 +487,9 @@ impl DrawListBuilder {
         let instance = frame.instance(id);
         let shape = frame.shape(id.shape);
         let look = InstanceLook::of(instance, shape, sources);
+        // REQ-SCN-087 step 2 only ever applies to a background instance the drawn instance
+        // itself declares transparent; the sprites are left out.
+        let removable = !self.cells.is_empty() && shape.background() && is_transparent(instance);
 
         for tile in frame.shape_tiles(id.shape) {
             if shape.restored_from_pinned_frame() && !frame.tile_overlaps_pinned_rects(tile) {
@@ -365,7 +500,24 @@ impl DrawListBuilder {
             // per-instance neighbour map Q-067 needed to find the covered walls — a hash insert
             // and a hash lookup per tile — is gone with it; REQ-SCN-065 is held by the depth of
             // the inner walls in the scene vertex shader instead.
-            let mesh = sources.geometry.mesh_of(instance.reference(), tile.image());
+            //
+            // AMD-063 REQ-SCN-087: a full tile of a transparent background instance gives up the
+            // lateral faces that fall on a joint with another transparent full tile. The map is
+            // empty unless some background instance of the frame can lose one, so an opaque
+            // picture does not even test its tiles.
+            let removed = if removable
+                && sources
+                    .geometry
+                    .is_full_tile(instance.reference(), tile.image())
+            {
+                self.removed_sides(frame, tile, sources)
+            } else {
+                TileSides::NONE
+            };
+            let mesh =
+                sources
+                    .geometry
+                    .mesh_of_without(instance.reference(), tile.image(), removed);
             self.list
                 .tiles
                 .push(look.tile(id, instance, shape, tile, mesh));
@@ -594,4 +746,12 @@ fn deform_pivot(
             (grid::SCENE_HEIGHT - shape.pixel_end().y) as f32 - h0,
             -instance.depth as f32 / 2.0,
         )
+}
+
+/// Whether a frame instance is **transparent** in the sense of AMD-063 REQ-SCN-087: its own
+/// opacity is strictly below 1 and its own render style is not "shadow only". An `alpha` above 1
+/// is therefore opaque. Only the drawn instance decides: the `alpha` of the profile reaches this
+/// through it and nowhere else.
+fn is_transparent(instance: &FrameInstance) -> bool {
+    instance.alpha < 1.0 && instance.style != RenderStyle::ShadowOnly
 }

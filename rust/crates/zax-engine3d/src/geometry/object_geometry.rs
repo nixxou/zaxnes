@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
+use crate::geometry::tile_sides::TileSides;
 use crate::geometry::tile_voxels::TileVoxels;
 use crate::geometry::voxel_construction::image_index;
 use crate::image::TileImage;
@@ -30,6 +31,9 @@ pub struct BuiltObject {
     pub meshes: Vec<Arc<TileMesh>>,
     /// The voxel fields, in the same order.
     pub fields: Vec<TileVoxels>,
+    /// Whether each mesh is that of a **full** tile in the sense of AMD-063 REQ-SCN-087, in the
+    /// same order. All false for a MARCHING object, whose faces are not removable.
+    pub full_tiles: Vec<bool>,
 }
 
 /// The geometry of one 3D object: its resolved texture, the mesh of each distinct tile image
@@ -44,15 +48,22 @@ pub struct ObjectGeometry {
     built: BuiltObject,
     mesh_of_image: Vec<Option<usize>>,
     ready: bool,
+    /// The mesh variants REQ-SCN-087 draws, built on first need: sixteen slots per mesh, one per
+    /// set of removed lateral sides, slot 0 being the mesh itself. Only a full tile ever reaches
+    /// them, and a variant keeps its identity from frame to frame, which is what lets the
+    /// renderer keep its buffers (REQ-E3D-602).
+    variants: Vec<Option<Arc<TileMesh>>>,
 }
 
 impl ObjectGeometry {
     pub(crate) fn new(pattern_id: PatternId, pattern: &EnginePattern, built: BuiltObject) -> Self {
+        let variants = vec![None; built.meshes.len() * TileSides::COMBINATIONS];
         Self {
             pattern: pattern_id,
             mesh_of_image: image_index(pattern),
             built,
             ready: false,
+            variants,
         }
     }
 
@@ -136,10 +147,44 @@ impl ObjectGeometry {
 
     /// The mesh of `image` as the draw list asks for it. AMD-057 withdrew the variants of
     /// Q-067, so **this is [`ObjectGeometry::mesh`]**: the drawn mesh of a tile is its mesh of
-    /// REQ-E3D-501, every wall included.
+    /// REQ-E3D-501, every wall included — unless AMD-063 REQ-SCN-087 takes lateral faces off it,
+    /// which is [`ObjectGeometry::drawn_mesh_without`].
     #[must_use]
     pub fn drawn_mesh(&self, image: &TileImage) -> Option<Arc<TileMesh>> {
         self.mesh(image).map(Arc::clone)
+    }
+
+    /// Whether `image` is a **full** tile of this 3D object (AMD-063 REQ-SCN-087): its effective
+    /// mesh algorithm is not MARCHING, its depth `D` is above 0, and all three slots of every one
+    /// of its `8 × 8 × D` voxels are occupied, `emptyColor` included. Only such a tile can lose a
+    /// lateral face.
+    #[must_use]
+    pub fn is_full_tile(&self, image: &TileImage) -> bool {
+        self.index(image)
+            .is_some_and(|index| self.built.full_tiles.get(index).copied().unwrap_or(false))
+    }
+
+    /// The mesh REQ-SCN-087 draws for `image` with `sides` taken off. The sides are honoured on
+    /// a full tile only; any other tile keeps every face it was built with, as AMD-057 leaves it.
+    pub fn drawn_mesh_without(
+        &mut self,
+        image: &TileImage,
+        sides: TileSides,
+    ) -> Option<Arc<TileMesh>> {
+        let index = self.index(image)?;
+        if sides.is_none() || !self.built.full_tiles.get(index).copied().unwrap_or(false) {
+            return self.built.meshes.get(index).map(Arc::clone);
+        }
+
+        let slot = (index * TileSides::COMBINATIONS) + usize::from(sides.bits());
+        let variant = self.variants.get(slot)?;
+        if let Some(mesh) = variant {
+            return Some(Arc::clone(mesh));
+        }
+
+        let built = Arc::new(self.built.meshes.get(index)?.without_sides(sides));
+        self.variants[slot] = Some(Arc::clone(&built));
+        Some(built)
     }
 
     fn index(&self, image: &TileImage) -> Option<usize> {

@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::geometry::tile_sides::TileSides;
 use crate::vectors::{Vec2, Vec3};
 
 /// One vertex of a tile mesh (SPEC-04B §4.2). Colour is *not* carried by the vertices: it is
@@ -118,6 +119,53 @@ impl TileMesh {
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    /// The same mesh with the lateral faces of `sides` taken off, which is what AMD-063
+    /// REQ-SCN-087 draws for a **full** tile of a transparent background instance. The local
+    /// frame, and therefore the construction depth, are kept.
+    ///
+    /// For a full tile the work is a filter on the face normals and nothing more. A face of
+    /// normal `−x` exists at the plane `i` only where the voxel `i` carries its x slot and the
+    /// voxel `i − 1` does not (REQ-E3D-501); in a full tile every voxel of
+    /// `[0, 8) × [0, 8) × [0, D)` carries all three slots, so the only such plane is `i = 0` —
+    /// the tile's own boundary. The same holds for the three other lateral directions. Dropping
+    /// every triangle whose normal is that direction therefore removes exactly the boundary
+    /// wall, and nothing else, whichever greedy algorithm built the mesh.
+    #[must_use]
+    pub fn without_sides(&self, sides: TileSides) -> Self {
+        if sides.is_none() || self.is_empty() {
+            return self.clone();
+        }
+
+        let mut kept: Vec<MeshVertex> = Vec::with_capacity(self.vertices.len());
+        let mut triangles: Vec<u32> = Vec::with_capacity(self.triangles.len());
+        let mut moved = vec![u32::MAX; self.vertices.len()];
+        for triangle in self.triangles.chunks_exact(3) {
+            let first = triangle[0] as usize;
+            if self
+                .vertices
+                .get(first)
+                .is_some_and(|vertex| is_removed(vertex.normal, sides))
+            {
+                continue;
+            }
+
+            for &index in triangle {
+                let source = index as usize;
+                if moved[source] == u32::MAX {
+                    moved[source] = u32::try_from(kept.len()).unwrap_or(u32::MAX);
+                    kept.push(self.vertices[source]);
+                }
+                triangles.push(moved[source]);
+            }
+        }
+
+        if triangles.is_empty() {
+            return Self::default();
+        }
+
+        Self::with_bounds(kept, triangles, self.build_depth)
     }
 
     /// The vertices.
@@ -276,4 +324,26 @@ impl TileMeshBuilder {
     fn push_triangle(&mut self, a: u32, b: u32, c: u32) {
         self.triangles.extend([a, b, c]);
     }
+}
+
+/// Whether a face whose normal is `normal` belongs to one of `sides`. The greedy meshes carry
+/// axis-aligned unit normals (REQ-E3D-505), so an exact comparison is the right one.
+fn is_removed(normal: Vec3, sides: TileSides) -> bool {
+    if normal.z != 0.0 {
+        return false;
+    }
+    if normal.x < 0.0 {
+        return sides.contains(TileSides::LEFT);
+    }
+    if normal.x > 0.0 {
+        return sides.contains(TileSides::RIGHT);
+    }
+    if normal.y < 0.0 {
+        return sides.contains(TileSides::BOTTOM);
+    }
+    if normal.y > 0.0 {
+        return sides.contains(TileSides::TOP);
+    }
+
+    false
 }

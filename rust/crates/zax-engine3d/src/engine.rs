@@ -426,6 +426,13 @@ impl ConversionEngine {
         self.draw_list_builder.list()
     }
 
+    /// Whether the last draw list built the background cell map of AMD-063 REQ-SCN-087, which it
+    /// does only for a frame holding a transparent background instance of full tiles.
+    #[must_use]
+    pub fn background_map_built(&self) -> bool {
+        self.draw_list_builder.background_map_built()
+    }
+
     /// Relaunches the same game without reloading the profile: the frames are emptied and the
     /// pinned frame released (REQ-E3D-281), while the image registry, the learned patterns and
     /// the temporary patterns stay active from the first frame (REQ-E3D-008).

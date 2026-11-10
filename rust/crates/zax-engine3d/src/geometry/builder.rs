@@ -13,7 +13,8 @@ use crate::geometry::object_geometry::{BuiltObject, ObjectGeometry};
 use crate::geometry::pattern_voxels::PatternVoxels;
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
-use crate::geometry::tile_voxels::MAX_DEPTH;
+use crate::geometry::tile_sides::TileSides;
+use crate::geometry::tile_voxels::{self, TileVoxels, MAX_DEPTH};
 use crate::geometry::voxel_construction;
 use crate::image::TileImage;
 use crate::instance::{InstanceRef, PatternInstance};
@@ -84,6 +85,23 @@ pub trait PatternGeometryBuilder: Send {
     /// available. AMD-057: this is the mesh of REQ-E3D-501, every wall included — the rendering
     /// variants of Q-067 are withdrawn.
     fn mesh_of(&self, instance: InstanceRef, image: &TileImage) -> Option<Arc<TileMesh>>;
+
+    /// The mesh of `image` for `instance` with the lateral faces AMD-063 REQ-SCN-087 removes
+    /// taken off. A builder that knows no full tile answers the whole mesh, as AMD-057 draws it.
+    fn mesh_of_without(
+        &mut self,
+        instance: InstanceRef,
+        image: &TileImage,
+        _removed: TileSides,
+    ) -> Option<Arc<TileMesh>> {
+        self.mesh_of(instance, image)
+    }
+
+    /// Whether the tile `image` of `instance` is **full** in the sense of AMD-063 REQ-SCN-087.
+    /// False for a builder with no voxel field to answer from, which then removes nothing.
+    fn is_full_tile(&self, _instance: InstanceRef, _image: &TileImage) -> bool {
+        false
+    }
 
     /// The resolved texture of a pattern instance (SPEC-04B REQ-E3D-426, REQ-E3D-641), or
     /// `None` when its geometry has not been built.
@@ -264,6 +282,10 @@ impl GeometryBuilder {
             self.background_color,
         );
         let built = voxel_construction::build(pattern, &texture, parameters, algorithm);
+        // AMD-063 REQ-SCN-087: a variant whose effective algorithm is not MARCHING has
+        // removable inner faces, whatever its opacity and its render style — the opacity is read
+        // on the drawn instance and nowhere else.
+        let mut full_tiles = vec![false; built.fields.len()];
         let meshes = if algorithm == RenderAlgorithm::Marching {
             let voxels = PatternVoxels::new(pattern, &texture, &built.fields);
             let empty = ObjectTexture::empty_color(parameters.empty_color);
@@ -275,11 +297,16 @@ impl GeometryBuilder {
             built
                 .fields
                 .iter()
-                .map(|field| Arc::new(greedy::build(field, &texture, multicolor)))
+                .enumerate()
+                .map(|(n, field)| {
+                    full_tiles[n] = is_full_tile(field);
+                    Arc::new(greedy::build(field, &texture, multicolor))
+                })
                 .collect()
         };
 
         let object = BuiltObject {
+            full_tiles,
             texture: Arc::new(texture),
             algorithm,
             requested_depth: requested,
@@ -335,6 +362,23 @@ impl PatternGeometryBuilder for GeometryBuilder {
             .and_then(|geometry| geometry.drawn_mesh(image))
     }
 
+    fn mesh_of_without(
+        &mut self,
+        instance: InstanceRef,
+        image: &TileImage,
+        removed: TileSides,
+    ) -> Option<Arc<TileMesh>> {
+        self.geometry
+            .get_mut(&instance)
+            .and_then(|geometry| geometry.drawn_mesh_without(image, removed))
+    }
+
+    fn is_full_tile(&self, instance: InstanceRef, image: &TileImage) -> bool {
+        self.geometry
+            .get(&instance)
+            .is_some_and(|geometry| geometry.is_full_tile(image))
+    }
+
     fn texture_of(&self, instance: InstanceRef) -> Option<Arc<ObjectTexture>> {
         self.geometry
             .get(&instance)
@@ -358,4 +402,31 @@ impl PatternGeometryBuilder for GeometryBuilder {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+/// Whether `field` is a **full** tile in the sense of AMD-063 REQ-SCN-087: `D > 0` and all three
+/// slots of each of its `8 × 8 × D` voxels occupied (REQ-E3D-422), `emptyColor` included
+/// (REQ-E3D-424).
+///
+/// A hollow geometry — `CUBE`, the cylinders — leaves the inside of the field empty and so yields
+/// no full tile, which the amendment wants.
+fn is_full_tile(field: &TileVoxels) -> bool {
+    if field.depth() <= 0 {
+        return false;
+    }
+
+    for k in 0..field.depth() {
+        for j in 0..tile_voxels::SIZE_Y {
+            for i in 0..tile_voxels::SIZE_X {
+                if !field.occupied(i, j, k, tile_voxels::AXIS_X)
+                    || !field.occupied(i, j, k, tile_voxels::AXIS_Y)
+                    || !field.occupied(i, j, k, tile_voxels::AXIS_Z)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
 }

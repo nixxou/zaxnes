@@ -11,6 +11,7 @@
 mod amd055_build_depth_tests;
 mod amd057_wall_tests;
 mod amd062_tile_resolution_tests;
+mod amd063_transparent_faces_tests;
 mod corpus_tests;
 mod cylinder_vector_tests;
 mod geometry_corpus_tests;
