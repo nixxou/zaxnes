@@ -732,13 +732,27 @@ impl Running {
                     // The 3D scene framed on the game's picture: drawn at its aspect, and placed
                     // in its rectangle by a preset that does not draw over the whole window.
                     let framed = three_d && choice.frames_picture;
+                    let mut parameters = choice.parameters;
+                    // The Mega Bezel guesses the screen's shape from the lines it reads: the
+                    // console's 240 give a 4:3 TV, the window's lines of the framed 3D scene a
+                    // square-pixel one. Framed in 4:3, the 3D TV takes the 2D picture's shape
+                    // (4:3) unless the player picked a shape; the widescreen tabs start on PAR.
+                    if framed
+                        && !wide
+                        && choice.preset.to_ascii_lowercase().contains("mega_bezel")
+                        && !parameters
+                            .iter()
+                            .any(|(name, _)| name == "HSM_ASPECT_RATIO_MODE")
+                    {
+                        parameters.push(("HSM_ASPECT_RATIO_MODE".to_owned(), 2.0));
+                    }
                     ShaderRequest {
                         preset: crate::shader_pack::resolve(
                             &self.host.paths().root,
                             &choice.preset,
                         ),
                         lines: choice.lines,
-                        parameters: choice.parameters,
+                        parameters,
                         picture_aspect: ((!three_d || framed) && !choice.fills_window)
                             .then(|| scene.picture_aspect()),
                         scene_aspect: framed.then(|| scene.picture_aspect()),
