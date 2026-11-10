@@ -276,7 +276,8 @@ impl NesCore {
 
     /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
     /// exactly one core.
-    pub const CORE_NAME: &'static str = "Zaxnes";
+    pub const CORE_NAME: &'static str =
+        zax_core_api::state_core_name(zax_core_api::EngineKind::Zaxnes);
 
     /// The name the core carried under the « Sen » working name. Still accepted when reading
     /// a state block, never written: AMD-029 §2 keeps states written before the rename

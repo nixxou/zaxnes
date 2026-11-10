@@ -25,6 +25,7 @@
 //! comparison and `bench-core` are measured against in `docs/progress/FCEUX-23.md` step 4.
 
 use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
 
 use zax_core_api::{Capabilities, Capability, Engine, EngineKind, InputWord, NoRomLoaded};
 use zax_nes::apu::AudioReader;
@@ -37,6 +38,13 @@ use zax_nes::{NesBus, NesCore, RegionTiming, ZapperPosition, ZapperPositionSourc
 /// The rows of a standard NES picture, which is what the widescreen-less picture has.
 const STANDARD_ROWS: usize = 240;
 
+/// The version of FCEUX's own savestate block. Named here rather than reached through the crate
+/// so that the figure is one line to find in a build without the engine.
+#[cfg(feature = "fceux-core")]
+const FCEUX_BLOCK_VERSION: i32 = zax_fceux::BLOCK_VERSION;
+#[cfg(not(feature = "fceux-core"))]
+const FCEUX_BLOCK_VERSION: i32 = 0;
+
 /// One emulation engine, as the application holds it.
 pub struct EngineHandle {
     engine: Box<dyn Engine>,
@@ -48,6 +56,68 @@ pub struct EngineHandle {
     /// CPU cycles the frames run have taken, accumulated from [`Engine::run_frame`]'s return so
     /// that an engine without a cycle counter still answers [`EngineHandle::cycle_count`].
     cycles: i64,
+    /// Where [`EngineHandle::pump_audio`] puts the frame's samples for the audio thread to read,
+    /// on an engine that has no ring of its own to share. `None` on Zaxnes, whose APU ring *is*
+    /// shared and is used unchanged.
+    shared_audio: Option<Arc<Mutex<SharedRing>>>,
+}
+
+/// A ring of samples the main thread fills a frame at a time and the audio thread drains, for an
+/// engine whose own samples are behind a `!Sync` handle.
+///
+/// The rules are `zax-nes`'s (SPEC-11 REQ-AUD-005, REQ-CORE-071): the oldest sample goes when it
+/// is full, and a read takes what it can rather than all or nothing — `ConsoleSamples::read` is
+/// documented to return a partial read, which is what lets the stream hold and fade instead of
+/// emitting a block of zeros.
+#[derive(Debug, Default)]
+pub struct SharedRing {
+    samples: std::collections::VecDeque<f32>,
+}
+
+impl SharedRing {
+    /// A fifth of a second at 96 kHz, the ceiling of what one engine can hand over before the
+    /// audio thread has read any of it.
+    const CAPACITY: usize = 19_200;
+
+    fn write(ring: &Arc<Mutex<Self>>, samples: &[f32]) {
+        let Ok(mut ring) = ring.lock() else {
+            return;
+        };
+        for &sample in samples {
+            if ring.samples.len() >= Self::CAPACITY {
+                ring.samples.pop_front();
+            }
+            ring.samples.push_back(sample);
+        }
+    }
+
+    fn read_into(ring: &Arc<Mutex<Self>>, out: &mut [f32]) -> usize {
+        let Ok(mut ring) = ring.lock() else {
+            return 0;
+        };
+        let count = ring.samples.len().min(out.len());
+        for (slot, sample) in out.iter_mut().zip(ring.samples.drain(..count)) {
+            *slot = sample;
+        }
+        count
+    }
+
+    fn available(ring: &Arc<Mutex<Self>>) -> usize {
+        ring.lock().map_or(0, |ring| ring.samples.len())
+    }
+}
+
+/// [`crate::audio::ConsoleSamples`] over a [`SharedRing`].
+struct SharedRingSamples(Arc<Mutex<SharedRing>>);
+
+impl crate::audio::ConsoleSamples for SharedRingSamples {
+    fn available(&self) -> usize {
+        SharedRing::available(&self.0)
+    }
+
+    fn read(&mut self, out: &mut [f32]) -> usize {
+        SharedRing::read_into(&self.0, out)
+    }
 }
 
 impl std::fmt::Debug for EngineHandle {
@@ -60,6 +130,7 @@ impl std::fmt::Debug for EngineHandle {
             .field("running", &self.engine.is_running())
             .field("cycles", &self.cycles)
             .field("image", &self.loaded_image.as_ref().map(Vec::len))
+            .field("shared_audio", &self.shared_audio.is_some())
             .finish()
     }
 }
@@ -69,11 +140,16 @@ impl EngineHandle {
     #[must_use]
     pub fn new(engine: Box<dyn Engine>) -> Self {
         let capabilities = engine.capabilities();
+        // Zaxnes's APU ring is already shared with the audio thread and is used unchanged; an
+        // engine that keeps its samples behind a `!Sync` handle gets one of ours.
+        let shared_audio = (capabilities.kind != EngineKind::Zaxnes)
+            .then(|| Arc::new(Mutex::new(SharedRing::default())));
         Self {
             engine,
             capabilities,
             loaded_image: None,
             cycles: 0,
+            shared_audio,
         }
     }
 
@@ -82,6 +158,106 @@ impl EngineHandle {
     #[must_use]
     pub fn zaxnes_core() -> Self {
         Self::new(Box::new(NesCore::new()))
+    }
+
+    /// A handle over a fresh engine of `kind` (lot FCEUX-23 step 5).
+    ///
+    /// Falls back to Zaxnes's core, with a line in the log saying why, when the engine asked for
+    /// cannot be made: a build without the `fceux-core` feature has only one engine, and FCEUX
+    /// keeps one machine per process so a second handle is refused while the first lives. The
+    /// fallback is never silent, and it is a fallback rather than a failure because a game the
+    /// user asked for must still start.
+    #[must_use]
+    pub fn of_kind(kind: EngineKind) -> Self {
+        match kind {
+            EngineKind::Zaxnes => Self::zaxnes_core(),
+            EngineKind::Fceux => Self::fceux_core(),
+        }
+    }
+
+    #[cfg(feature = "fceux-core")]
+    fn fceux_core() -> Self {
+        match zax_fceux::FceuxEngine::new() {
+            Ok(engine) => Self::new(Box::new(engine)),
+            Err(error) => {
+                crate::app_log::error(&format!(
+                    "Zaxnes: the FCEUX engine could not be created ({error}); this game plays on \
+                     Zaxnes's own core."
+                ));
+                Self::zaxnes_core()
+            }
+        }
+    }
+
+    #[cfg(not(feature = "fceux-core"))]
+    fn fceux_core() -> Self {
+        crate::app_log::line(
+            "Zaxnes: this build has no FCEUX engine; the game plays on Zaxnes's own core.",
+        );
+        Self::zaxnes_core()
+    }
+
+    /// The samples of this engine, for the audio thread's console slot — `None` on an engine
+    /// whose samples nothing can read from another thread.
+    ///
+    /// On Zaxnes this is the APU's own ring behind [`zax_nes::apu::AudioReader`], exactly the
+    /// path of before this lot. On FCEUX the samples are in the handle, which is `!Sync`, so
+    /// they are pumped into a shared ring once a frame by [`EngineHandle::pump_audio`] and this
+    /// reads that.
+    #[must_use]
+    pub fn console_samples(&self) -> Option<Box<dyn crate::audio::ConsoleSamples>> {
+        if let Some(reader) = self.audio_reader() {
+            return Some(Box::new(crate::audio::ApuSamples::new(reader)));
+        }
+        self.shared_audio
+            .clone()
+            .map(|ring| Box::new(SharedRingSamples(ring)) as Box<dyn crate::audio::ConsoleSamples>)
+    }
+
+    /// The same samples as a plain closure, for the classic output's mixer source.
+    #[must_use]
+    pub fn audio_source(&self) -> Option<crate::audio::audio_mixer::AudioSampleSource> {
+        if let Some(reader) = self.audio_reader() {
+            return Some(Box::new(move |destination| {
+                // A mono read cannot be refused; an empty buffer reads as silence.
+                reader.read_samples(destination, false).unwrap_or(0)
+            }));
+        }
+        let ring = self.shared_audio.clone()?;
+        Some(Box::new(move |destination| {
+            SharedRing::read_into(&ring, destination)
+        }))
+    }
+
+    /// Moves the frame's samples out of the engine into the shared ring, for an engine that keeps
+    /// them where another thread cannot read them. A no-op on Zaxnes, whose ring *is* shared.
+    ///
+    /// Called once per real frame by the session, right after the frame.
+    pub fn pump_audio(&mut self) {
+        let Some(ring) = self.shared_audio.clone() else {
+            return;
+        };
+        // One frame is about 800 samples at 48 kHz; the engine's own read is all-or-nothing, so
+        // the chunk is asked for in halves down to a sample while anything is left.
+        let mut chunk = [0.0_f32; 1024];
+        loop {
+            let mut taken = 0;
+            let mut wanted = chunk.len();
+            while wanted > 0 {
+                match self.engine.read_audio(&mut chunk[..wanted], false) {
+                    Ok(0) => wanted /= 2,
+                    Ok(count) => {
+                        taken = count;
+                        break;
+                    }
+                    Err(_) => return,
+                }
+            }
+            if taken == 0 {
+                return;
+            }
+            SharedRing::write(&ring, &chunk[..taken]);
+        }
     }
 
     /// The engine behind the handle, for a caller that wants the trait and nothing else.
@@ -314,6 +490,11 @@ impl EngineHandle {
         if let Some(core) = self.zaxnes_mut() {
             core.bus_mut().apu_mut().drop_pending_samples();
         }
+        if let Some(ring) = &self.shared_audio {
+            if let Ok(mut ring) = ring.lock() {
+                ring.samples.clear();
+            }
+        }
     }
 
     /// Silences or unsilences the output while frames run that the player must not hear — a
@@ -327,10 +508,10 @@ impl EngineHandle {
     /// Mono samples waiting to be read (REQ-CORE-071), which the audio clock steers on.
     #[must_use]
     pub fn audio_available(&self) -> usize {
-        match self.apu() {
-            Some(apu) => apu.available_samples(),
-            None => 0,
+        if let Some(apu) = self.apu() {
+            return apu.available_samples();
         }
+        self.shared_audio.as_ref().map_or(0, SharedRing::available)
     }
 
     /// The speed factor in force (REQ-CORE-072); 1.0 on an engine without one.
@@ -382,6 +563,23 @@ impl EngineHandle {
     }
 
     // -------------------------------------------------------------- savestates
+
+    /// The engine's name, which a savestate slot records so that it can refuse a state written by
+    /// the other engine (lot FCEUX-23 step 5). On Zaxnes it is `NesCore::CORE_NAME`, the string
+    /// its slots have always carried.
+    #[must_use]
+    pub const fn state_core_id(&self) -> &'static str {
+        zax_core_api::state_core_name(self.capabilities.kind)
+    }
+
+    /// The version of the engine's own block format, recorded beside the name.
+    #[must_use]
+    pub const fn state_version(&self) -> i32 {
+        match self.capabilities.kind {
+            EngineKind::Zaxnes => NesCore::STATE_VERSION,
+            EngineKind::Fceux => FCEUX_BLOCK_VERSION,
+        }
+    }
 
     /// A savestate as a new vector, which is what every caller outside the rollback history
     /// wants. Both engines answer it, through [`Engine::save_state_to`].

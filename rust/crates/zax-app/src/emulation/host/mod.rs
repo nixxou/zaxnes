@@ -607,29 +607,26 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// handle, which survives that reset; filtering on `has_rom` here left the output with no
     /// console at all and every game silent.
     fn attach_console(&mut self) {
-        let Some(reader) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.core().audio_reader())
-        else {
-            // No session, or an engine whose samples are not in a shared ring: nothing to
-            // install. Lot FCEUX-23 step 5 gives FCEUX its own `ConsoleSamples`.
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         if self.classic_audio {
-            // `v0.4.2`'s source, byte for byte: the mixer reads the ring on the main thread and
-            // the read is all or nothing.
+            // `v0.4.2`'s source, byte for byte on Zaxnes: the mixer reads the APU's ring on the
+            // main thread and the read is all or nothing. Lot FCEUX-23 step 5: on an engine whose
+            // samples are behind a `!Sync` handle the source reads the handle's shared ring,
+            // which the session fills once a frame.
+            let Some(source) = session.core().audio_source() else {
+                return;
+            };
             if let Some(mixer) = self.mixer.as_mut() {
-                let source: crate::audio::audio_mixer::AudioSampleSource =
-                    Box::new(move |destination| {
-                        // A mono read cannot be refused; an empty buffer reads as silence.
-                        reader.read_samples(destination, false).unwrap_or(0)
-                    });
                 mixer.set_emulation_source(Some(source));
             }
         } else if let Some(audio) = &self.audio {
-            // The audio thread reads the core's ring itself from here on (Q-153).
-            audio.set_console(Some(Box::new(stream::ApuSamples::new(reader))));
+            // The audio thread reads the engine's ring itself from here on (Q-153).
+            let Some(samples) = session.core().console_samples() else {
+                return;
+            };
+            audio.set_console(Some(samples));
         }
     }
 

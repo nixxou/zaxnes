@@ -27,6 +27,13 @@ pub const FORMAT_VERSION: i32 = 1;
 /// Notification text of an unreadable state (REQ-LOOP-046).
 pub const CORRUPTED_MESSAGE: &str = "Corrupted save state.";
 
+/// Shown when a slot was written by the **other** emulation engine (lot FCEUX-23 step 5): the two
+/// engines' state blocks have nothing in common, so one is never offered to the other. The message
+/// says what to do about it, because the fix is a per-game setting the user owns.
+pub const OTHER_ENGINE_MESSAGE: &str =
+    "This save state was made with the other emulation engine. Set this game's engine back to \
+     the one that wrote it to load the state.";
+
 /// The message shown when a state was made with the built-in ROM patches set the other way.
 pub const OTHER_PATCH_MESSAGE: &str =
     "This save state was made with the built-in ROM patches set the other way.";

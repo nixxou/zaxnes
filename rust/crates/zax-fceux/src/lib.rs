@@ -39,4 +39,4 @@ pub use core::{
     Error, Fceux, RamInit, Region, Tile, TileCapture, FRAME_HEIGHT, FRAME_LEN, FRAME_WIDTH,
 };
 #[cfg(feature = "fceux-core")]
-pub use engine::FceuxEngine;
+pub use engine::{FceuxEngine, BLOCK_VERSION};

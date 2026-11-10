@@ -16,6 +16,19 @@ use crate::EngineKind;
 /// lives here; `zax_nes::NesCore::FOREIGN_CORE_MESSAGE` is defined as this.
 pub const FOREIGN_CORE_MESSAGE: &str = "Save state used a different core.";
 
+/// The name an engine writes into its savestate block, and that a slot of the application
+/// records so it can refuse one written by the other engine.
+///
+/// Zaxnes's is the one its blocks have always carried (`NesCore::CORE_NAME`), so nothing written
+/// before this lot changes meaning.
+#[must_use]
+pub const fn state_core_name(engine: EngineKind) -> &'static str {
+    match engine {
+        EngineKind::Zaxnes => "Zaxnes",
+        EngineKind::Fceux => "FCEUX",
+    }
+}
+
 /// The first four bytes of a savestate block name the engine that wrote it.
 ///
 /// Zaxnes's value is the one its own blocks have always carried, so every state written before

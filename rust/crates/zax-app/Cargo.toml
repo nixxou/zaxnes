@@ -28,9 +28,17 @@ android = ["zax-platform/android"]
 # The Vulkan and DirectX 12 renderer (`video.backend`, `--backend`), desktop only: the handheld
 # package never turns it on.
 wgpu = ["dep:wgpu", "zax-render/wgpu", "zax-platform/wgpu"]
+# FCEUX as a second emulation engine, chosen per game (`emu.engine`); lot FCEUX-23. **Off by
+# default**: with it off `zax-fceux` is not a dependency at all, no C is linked, the engine row is
+# not shown and the per-game value is read and written without error but ignored — the binary is
+# the one it always was. On, it needs the fork `cleanroom/fceux-zax` built first
+# (`zax-fceux/build.rs` says how), and shipping it carries the licence duty of §10 of
+# `docs/review/FCEUX-ENGINE.md`.
+fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
 
 [dependencies]
 zax-core-api = { path = "../zax-core-api" }
+zax-fceux = { path = "../zax-fceux", optional = true }
 zax-nes = { path = "../zax-nes" }
 zax-settings = { path = "../zax-settings" }
 zax-profiles = { path = "../zax-profiles" }

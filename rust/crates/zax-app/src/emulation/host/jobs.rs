@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use zax_core_api::NesRegion;
+use zax_core_api::{EngineKind, NesRegion};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
 use zax_nes::NesCore;
@@ -407,6 +407,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if self.session.is_some() {
             return Ok(());
         }
+        // Read before the mutable borrow of `self.scene` below.
+        let engine = self.chosen_engine();
         let request = SessionRequest {
             profile: &game.profile,
             title: &game.title,
@@ -417,6 +419,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // default (no profile)"; the entry decides, not the pattern count.
             two_dimensional_mode: game.is_default_three_dimensional.then_some(false),
             console_interface: self.console_interface,
+            // `apply_game_options` has just run, so the model carries this game's own choice.
+            engine,
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
@@ -447,8 +451,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 // profile data is unloaded only when the game differs or is "2D Mode"
                 // (REQ-LOOP-021, REQ-PERS-006).
                 job.different_game = self.current_game_id() != Some(game.id.as_str());
-                job.reload_profile =
-                    self.session.is_none() || job.different_game || game.is_generic();
+                job.reload_profile = self.session.is_none()
+                    || job.different_game
+                    || game.is_generic()
+                    // Lot FCEUX-23 step 5: a changed engine is a new machine, so the session
+                    // cannot be kept. The choice takes effect on load and never mid-game.
+                    || self.session.as_ref().is_some_and(|session| {
+                        session.core().kind() != self.engine_for_game(&game.id)
+                    });
                 self.stop_current_game(false, job.reload_profile);
                 job.stage = 1;
                 Step::Continue
@@ -569,6 +579,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
+        // Lot FCEUX-23 step 5: a state written by the other engine is refused **here**, before
+        // the engine is asked to read it, and with a message that says what to do. The two
+        // engines' blocks have nothing in common; each would also refuse the other's itself (its
+        // first four bytes name its engine), but "corrupted" is not what happened and not what a
+        // user can act on.
+        let wrote_it = session.core().state_core_id();
+        if !state.header.core_id.is_empty() && state.header.core_id != wrote_it {
+            self.log(&format!(
+                "savestate refused: it was written by {} and the engine in play is {wrote_it}",
+                state.header.core_id
+            ));
+            return Step::Failed(save_state_file::OTHER_ENGINE_MESSAGE.to_owned());
+        }
         // The state carries the original ROM: the hack applies to it as the setting says now.
         session.core_mut().set_builtin_patches(builtin_patches);
         session.core_mut().set_advanced_patches(advanced);
@@ -684,6 +707,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.start_achievements(job.state.as_ref());
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
+        // Lot FCEUX-23 step 5: the visible marker. A user who reports "the 3D is wrong" has to be
+        // able to say which engine drew it (§6 of `docs/review/FCEUX-ENGINE.md` is why that
+        // matters), so a game that is **not** on Zaxnes's own core says so at every load; the
+        // performance overlay names the engine from then on, and the game's options carry the row
+        // itself. Zaxnes is the default and says nothing, as it always did.
+        if let Some(engine) = self
+            .running_engine()
+            .filter(|kind| *kind != EngineKind::Zaxnes)
+        {
+            let message = format!("Playing on the {engine} engine.");
+            self.log(&message);
+            self.notifications.show_normal(&message);
+        }
         // REQ-AUD-010: no sound of the previous session is ever replayed. `set_state` has
         // already done this when the game was not running, but a slot loaded while it plays
         // leaves the state alone, so it is asked for here too (Q-153 §4). The call empties the

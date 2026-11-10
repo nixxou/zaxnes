@@ -28,8 +28,13 @@ const FCEUX_RATES: [i32; 3] = [44_100, 48_000, 96_000];
 /// The engine's savestate format, bumped if the header below changes.
 const STATE_VERSION: i32 = 1;
 
-/// What the header writes as the core's name, and what a block must carry to be accepted.
-const CORE_NAME: &str = "FCEUX";
+/// What the header writes as the core's name, and what a block must carry to be accepted. The
+/// shared crate owns it, because the application's savestate slots record the same string to
+/// refuse a block of the other engine (lot FCEUX-23 step 5).
+const CORE_NAME: &str = zax_core_api::state_core_name(EngineKind::Fceux);
+
+/// The format version of this engine's own block, which a slot records beside the name.
+pub const BLOCK_VERSION: i32 = STATE_VERSION;
 
 /// The rate the engine starts at, which is `zax_nes::apu::Apu2A03::DEFAULT_SAMPLE_RATE`
 /// (REQ-CORE-070, SPEC-11 REQ-AUD-001) and one FCEUX supports as it is.

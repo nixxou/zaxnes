@@ -90,8 +90,12 @@ pub fn draw(ui: &Ui, host: &AppHost, chrome_height: f32, info: &DebugInfo<'_>) {
         ui.separator();
         ui.text_wrapped(title);
         if let Some(session) = host.session() {
+            // Lot FCEUX-23 step 5: the engine names itself here, which is the HUD half of the
+            // visible marker — the other half is the notification at load and the row in the
+            // game's options.
             ui.text(format!(
-                "{:?}  {} fps nominal  frame {}",
+                "{} engine  {:?}  {} fps nominal  frame {}",
+                session.core().kind(),
                 session.core().region(),
                 session.nominal_frame_rate(),
                 session.core().frame_count()

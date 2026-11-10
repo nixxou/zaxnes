@@ -27,6 +27,7 @@ use zax_nes::movie::{Movie, MovieRun};
 use zax_nes::{NesBus, NesCore, ZapperPosition};
 
 use crate::emulation::engine_handle::EngineHandle;
+use zax_core_api::EngineKind;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -221,6 +222,11 @@ pub struct SessionRequest<'a> {
     /// Whether this run shows the gamepad-only interface (RO-2 part 4): a Lua write of
     /// `Setting.Msaa` leaves the anti-aliasing alone there.
     pub console_interface: bool,
+    /// The engine this game plays on (lot FCEUX-23 step 5, `emu.engine`). It is chosen **here**,
+    /// when the session is made, because changing engines means a new machine: the host decides
+    /// to rebuild the session when the choice changed, and the setting's effect is
+    /// `NextRomLoad`.
+    pub engine: EngineKind,
 }
 
 /// The inputs of one emulated frame.
@@ -402,8 +408,9 @@ impl GameSession {
             different_game,
             two_dimensional_mode,
             console_interface,
+            engine: engine_kind,
         } = request;
-        let mut core = EngineHandle::zaxnes_core();
+        let mut core = EngineHandle::of_kind(engine_kind);
         let mut input = ScriptInputState::default();
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
@@ -827,6 +834,7 @@ impl GameSession {
         clock.add_thread(Thread::Emulation, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
+        self.core.pump_audio();
         self.core.work_ram_into(&mut self.pipeline.memory.ram);
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         self.pipeline.picture_shift = self.core.picture_shift();

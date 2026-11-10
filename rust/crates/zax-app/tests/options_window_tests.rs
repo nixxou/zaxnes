@@ -43,6 +43,9 @@ fn req_ui_202_every_user_preference_is_shown() {
                 && !options::EXCLUDED.contains(&descriptor.id())
                 // The graphics API is only offered where Vulkan and DirectX 12 are built in.
                 && (cfg!(feature = "wgpu") || descriptor.id() != SettingId::VideoBackend)
+                // And the emulation engine only where there is a second one (lot FCEUX-23
+                // step 5): a build without `fceux-core` would offer a choice of one.
+                && (cfg!(feature = "fceux-core") || descriptor.id() != SettingId::EmuEngine)
                 && !matches!(
                     descriptor.theme(),
                     SettingTheme::Vr

@@ -11,7 +11,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 - [x] 2. `zax-core-api`: the types both engines share, a pure move.
 - [x] 3. The `Engine` trait, and both implementations.
 - [x] 4. The application drives the trait.
-- [ ] 5. The per-game choice (FCEUX-3).
+- [x] 5. The per-game choice (FCEUX-3).
 - [ ] 6. The app with FCEUX, end to end.
 - [ ] 7. Docs.
 - [ ] 8. Final pass.
@@ -466,3 +466,144 @@ A first attempt at this measurement used 3 and then 7 rounds of 4 000 frames and
 −20 %, +16 % and +39 % — one hiccup inside one half of a long round swings the ratio by tens of
 per cent. That is why the test runs many short rounds and reports a median and quartiles instead
 of a single ratio; the rejected shape is recorded here so that nobody repeats it.
+
+---
+
+## Step 5 — the per-game engine choice (FCEUX-3)
+
+§4 of the design note, line by line.
+
+### The setting
+
+`emu.engine`, a new `SettingId::EmuEngine`: an **Enum** of exactly two values — `0 Zaxnes`,
+`1 FCEUX`, and **no "auto"**, because an automatic choice would need a quality judgement the
+application cannot make. Scope `User`, which is what makes it both a per-game option (the model
+layers a game's own value over the preference, and `games.json` stores it beside the other
+per-game options) and a **global default**, which is `zaxnes` too. Effect `NextRomLoad`, so the
+options window prints "(at the next load)" beside the row *of its own accord* — that is "the UI
+says so", using the mechanism that was already there rather than a new sentence.
+
+**The descriptor is in every build.** Only the row is gated: `options::is_shown` drops
+`emu.engine` off a build without `fceux-core`, exactly as it drops `video.backend` off one without
+`wgpu`. So a `games.json` written by a build with FCEUX loads in one without it and is written
+back unchanged — the value is read and written without error and ignored, which is what the brief
+asks for.
+
+### How it takes effect
+
+`EmulationHost::engine_for_game(game_id)` reads the **store** rather than the model, because the
+launch has to know at stage 0, before `apply_game_options` has put the new game's options in
+force: that is the moment it decides whether the session can be kept. A changed engine joins "a
+different game" and "a generic profile" as a reason to rebuild the session, so the machine is
+re-powered and the choice never applies mid-game. `chosen_engine()` is the model's value — what
+the *next* load will use, and what the options window greys its rows from. `running_engine()` is
+what the machine in play actually is, for the marker.
+
+`SessionRequest` gained an `engine` field, and `GameSession::create` builds
+`EngineHandle::of_kind(engine)`. `of_kind` **falls back to Zaxnes with a line in the log** when the
+engine asked for cannot be made — a build without the feature, or FCEUX already alive — because a
+game the user asked for must still start, and the fallback is never silent.
+
+### The disabled controls, and the marker
+
+`options::inert_reason` is the hook that greys a row and prints why beside it, and it was already
+there for nine other cases. Four groups join it while FCEUX is the chosen engine, each with its own
+reason in English and French:
+
+| rows | key |
+|---|---|
+| `video.widescreen`, `…_extra`, `…_advanced`, `…_strict_edges` | `hint.fceux_no_widescreen` |
+| `emu.builtin_patches`, `emu.forced_patch`, `emu.hack_options` | `hint.fceux_no_hacks` |
+| `video.remove_sprite_limit` | `hint.fceux_no_sprite_limit` |
+| `emu.run_ahead`, `emu.smooth_scroll_ahead`, `emu.smooth_scroll_view` | `hint.fceux_no_run_ahead` |
+
+**Shown disabled, not hidden** — §4's "a hidden control reads as a bug" — and each reason names
+the fix, which is a per-game setting the user owns ("choose the Zaxnes engine for this game").
+They read the *setting* rather than the live engine, deliberately: a user who has just chosen
+FCEUX should see the consequence at once rather than after reloading.
+
+The **visible marker** has three places, because §6 of the design note is why it matters — a user
+who reports "the 3D is wrong" must be able to say which engine drew it:
+
+* a notification **at every load** on an engine other than Zaxnes's, "Playing on the FCEUX
+  engine.", with the same line in the log;
+* the performance overlay's machine line, which now opens with the engine's name on **either**
+  engine (`Zaxnes engine  Ntsc  60 fps nominal  frame 1234`);
+* the row itself in the game's options, with its detailed tooltip in both languages.
+
+### Savestates and rollback
+
+The slot header already carried `core_id` and `core_state_version`, hard-coded to
+`NesCore::CORE_NAME` and `STATE_VERSION`. They are now **the live engine's**, through
+`EngineHandle::state_core_id()` / `state_version()` — on Zaxnes the same two strings and numbers
+as before, so every slot written before this lot still matches.
+
+`restore_slot` refuses a mismatch **before** the engine is asked to read the block, with
+`save_state_file::OTHER_ENGINE_MESSAGE`: *"This save state was made with the other emulation
+engine. Set this game's engine back to the one that wrote it to load the state."* Not
+`CORRUPTED_MESSAGE` — the state is not corrupt, and "corrupted" is not something a user can act
+on. Each engine would also refuse the other's block itself (its first four bytes name its engine,
+`zax_core_api::state_magic`), which is the belt to that braces: a slot whose header was lost
+cannot be mistaken either.
+
+**Rollback needed nothing.** The application's history has always used
+`core.save_state_to(false, buffer)` with **one reused buffer per slot** — `capture_with` hands the
+oldest snapshot's allocation back to be overwritten — so it is the serialised path §3 of the design
+note asks for, and it works on FCEUX through the trait unchanged. The cheap in-memory snapshot
+(`capture_core_state`) is used *inside* `zax-nes` by `run_frame_ahead`, which `EngineHandle` routes
+to for Zaxnes and nowhere else; `Capability::FastCoreSnapshot` is the flag that says so.
+
+**Run-ahead on FCEUX is off** (`Capabilities::FCEUX.run_ahead == false`), as lot FCEUX-5's brief
+expects: `EngineHandle::run_frame_ahead` runs the plain frame there and the three run-ahead rows
+are greyed with that reason, rather than being slow and silent.
+
+### FCEUX's audio reaches the audio thread
+
+A problem the step had to solve rather than inherit: the audio thread holds a cloned
+`zax_nes::apu::AudioReader`, which is `Arc<Mutex<…>>` **into Zaxnes's APU**. FCEUX's samples are in
+the engine handle, which is `!Sync` by construction.
+
+So the handle grew a `SharedRing` — `Arc<Mutex<VecDeque<f32>>>`, a fifth of a second at 96 kHz,
+oldest sample out when full — which exists **only** on an engine that has no ring of its own. The
+session fills it once per real frame (`pump_audio`), and `console_samples()` / `audio_source()`
+hand the audio thread either the APU's reader (Zaxnes, the path of before this lot byte for byte)
+or a `ConsoleSamples` over that ring. `audio_available()` and `drop_pending_samples()` answer for
+both. **The Zaxnes path is unchanged**: same reader, same reads, and `pump_audio` returns at once.
+
+### `RAMInit`
+
+Already settled in step 3 and worth repeating here because the brief asks for it: the engine sets
+**zero**, which is `zax-nes`'s fill, in `FceuxEngine::new`, and `set_ram_init` keeps it settable
+because `.fm2` playback must use the movie's own `RAMInitOption`/`RAMInitSeed` — or FCEUX's default
+fill for a movie that records neither — and **never** zero (lot FCEUX-4).
+
+### Tests, goldens and what they said
+
+`crates/zax-app/tests/engine_choice_tests.rs`, 8 tests that pass **in both builds** and assert the
+difference between them: the descriptor's kind, scope, effect, default and its two choices with no
+third; the two numeric values and their names; that the setting is stored and read back and
+layered as a game's option while the row exists exactly in a build with the feature; that
+`of_kind(Fceux)` falls back rather than refusing the game where there is no FCEUX; that the four
+groups of rows are greyed with their reason and that each reason is a real sentence in both
+languages; that the capability flags and the rows say the same thing; that a slot records its
+engine and the refusal is not the corruption message; and that the two block magics differ and
+identify themselves, Zaxnes's still being `SEN0`.
+
+Five existing goldens and tests had to learn about the new row, each in the way the file already
+handled `video.backend`:
+
+| | |
+|---|---|
+| `zax-settings/tests/catalogue.rs` | `emu.engine` joins the named list of this reimplementation's own additions (REQ-PERS-001) |
+| `goldens/desktop-options-shown.txt` | `emu.engine [fceux-core]`, a second tag beside `[wgpu]`; the test's tag reader became a two-entry table, because clippy folds an `if` on two `cfg!`s into a constant and then objects to it |
+| `desktop_options_golden_tests.rs` | the engine joins the graphics API as a row a feature gates, in three places: the layout check, the orphan-tooltip check and the tag reader |
+| `options_window_tests.rs` | REQ-UI-202's "every user preference is shown" excepts it in a build with one engine, as it excepts the graphics API without `wgpu` |
+| the two string tables | the label, the detailed tooltip and the five new hint texts, in English and French |
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings`, both feature sets | clean |
+| `cargo test --release --workspace`, feature off | **3 264 passed, 0 failed**, 90 ignored |
+| the same with `zax-app/fceux-core` and `zax-harness/fceux-core` | **3 307 passed, 0 failed**, 93 ignored |
+| **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |

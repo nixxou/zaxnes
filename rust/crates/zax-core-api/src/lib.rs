@@ -46,7 +46,7 @@ pub use region::NesRegion;
 pub use rom_load_failure::RomLoadFailure;
 pub use rom_load_result::RomLoadResult;
 pub use state::{
-    engine_of_state, state_magic, InvalidState, NoRomLoaded, StateLoadFailure, StateLoaded,
-    FOREIGN_CORE_MESSAGE,
+    engine_of_state, state_core_name, state_magic, InvalidState, NoRomLoaded, StateLoadFailure,
+    StateLoaded, FOREIGN_CORE_MESSAGE,
 };
 pub use tile_record::TileRecord;

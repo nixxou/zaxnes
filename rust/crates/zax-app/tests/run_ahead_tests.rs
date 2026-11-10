@@ -635,6 +635,7 @@ fn session_of(source: &str) -> GameSession {
             different_game: true,
             two_dimensional_mode: None,
             console_interface: false,
+            engine: zax_core_api::EngineKind::Zaxnes,
         },
         &mut model,
     )

@@ -297,6 +297,9 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Group(OptionsGroup::Advanced),
     LayoutEntry::Row(SettingId::InputEmulatedMenuButton),
     LayoutEntry::Row(SettingId::EmuCore),
+    // Lot FCEUX-23 step 5: the per-game engine. `is_shown` drops it off a build without the
+    // `fceux-core` feature, as it drops the graphics API off a build without `wgpu`.
+    LayoutEntry::Row(SettingId::EmuEngine),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.
@@ -611,6 +614,34 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // always had — `application.rs` never gives it the latency, and `stream.rs`, which is
         // where the prefill, the ramps and the counters live, is not open at all.
         SettingId::AudioLatencyMs if model.classic_audio_output() => keys::HINT_CLASSIC_AUDIO,
+        // Lot FCEUX-23 step 5, §4 of `docs/review/FCEUX-ENGINE.md`: with FCEUX chosen for this
+        // game the widescreen extension, the hack packs, the sprite limit and the run-ahead are
+        // **shown disabled with the reason, not hidden** — "a hidden control reads as a bug".
+        // Each is Zaxnes's own bus or PPU rather than a feature of an emulator, so
+        // `EngineHandle` ignores it on the other engine (`Capabilities::FCEUX`).
+        SettingId::VideoWidescreen
+        | SettingId::VideoWidescreenExtra
+        | SettingId::VideoWidescreenAdvanced
+        | SettingId::VideoWidescreenStrictEdges
+            if fceux_is_the_engine(model) =>
+        {
+            keys::HINT_FCEUX_NO_WIDESCREEN
+        }
+        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions
+            if fceux_is_the_engine(model) =>
+        {
+            keys::HINT_FCEUX_NO_HACKS
+        }
+        SettingId::VideoRemoveSpriteLimit if fceux_is_the_engine(model) => {
+            keys::HINT_FCEUX_NO_SPRITE_LIMIT
+        }
+        SettingId::EmuRunAhead
+        | SettingId::EmuSmoothScrollAhead
+        | SettingId::EmuSmoothScrollView
+            if fceux_is_the_engine(model) =>
+        {
+            keys::HINT_FCEUX_NO_RUN_AHEAD
+        }
         // `jobs.rs`: the detection *writes* `emu.tv_mode` at the next ROM load, so whatever is
         // chosen here is overwritten rather than merely ignored.
         SettingId::EmuTvMode if model.get(SettingId::EmuAutoTvMode).as_bool() => {
@@ -636,6 +667,20 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         }
         _ => return None,
     })
+}
+
+/// Whether the engine in force for the game in play is FCEUX, which is what greys the four
+/// groups of controls above.
+///
+/// Reads the setting rather than the live engine, deliberately: the options window is drawn from
+/// the model, the setting is what the *next* load will use, and a user who has just chosen FCEUX
+/// should see the consequence at once rather than after reloading. A build without `fceux-core`
+/// never shows the row and ignores the value, so this is always false there.
+fn fceux_is_the_engine(model: &SettingsModel) -> bool {
+    cfg!(feature = "fceux-core")
+        && zax_core_api::EngineKind::from_u8(
+            u8::try_from(model.get(SettingId::EmuEngine).as_int()).unwrap_or(0),
+        ) == Some(zax_core_api::EngineKind::Fceux)
 }
 
 /// Whether any of the three curvature angles of AMD-043 is set.
@@ -880,6 +925,12 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     }
     // The graphics API is a choice only where Vulkan and DirectX 12 are built in.
     if id == SettingId::VideoBackend && !cfg!(feature = "wgpu") {
+        return false;
+    }
+    // And the engine only where there is a second one (lot FCEUX-23 step 5): a build without
+    // `fceux-core` has one engine, so the row would be a choice of one. The *key* is still in the
+    // catalogue in every build, so a `games.json` that carries it loads and saves without error.
+    if id == SettingId::EmuEngine && !cfg!(feature = "fceux-core") {
         return false;
     }
     if INCLUDED_PROFILE.contains(&id) {

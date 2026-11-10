@@ -187,6 +187,16 @@ pub const HINT_NEEDS_CURVATURE: &str = "hint.needs_curvature";
 pub const HINT_REGION_AUTOMATIC: &str = "hint.region_automatic";
 /// `emu.core`: this version has one core, so the value is always 0.
 pub const HINT_SINGLE_CORE: &str = "hint.single_core";
+/// The widescreen rows while FCEUX is the engine chosen for the game (lot FCEUX-23 step 5).
+pub const HINT_FCEUX_NO_WIDESCREEN: &str = "hint.fceux_no_widescreen";
+/// The hack-pack rows, likewise.
+pub const HINT_FCEUX_NO_HACKS: &str = "hint.fceux_no_hacks";
+/// The sprite-limit row, likewise.
+pub const HINT_FCEUX_NO_SPRITE_LIMIT: &str = "hint.fceux_no_sprite_limit";
+/// The run-ahead rows, likewise (lot FCEUX-5 is what would implement it).
+pub const HINT_FCEUX_NO_RUN_AHEAD: &str = "hint.fceux_no_run_ahead";
+/// The marker the status line and the game's options show while FCEUX is the engine.
+pub const STATUS_ENGINE_FCEUX: &str = "status.engine_fceux";
 /// `audio.latency_ms` while the classic output of `v0.4.2` is on (AUDIO-2): that output has the
 /// fixed buffer it always had and reads no latency.
 pub const HINT_CLASSIC_AUDIO: &str = "hint.classic_audio";
@@ -692,6 +702,11 @@ pub const PUBLISHED: &[&str] = &[
     HINT_NEEDS_CURVATURE,
     HINT_REGION_AUTOMATIC,
     HINT_SINGLE_CORE,
+    HINT_FCEUX_NO_WIDESCREEN,
+    HINT_FCEUX_NO_HACKS,
+    HINT_FCEUX_NO_SPRITE_LIMIT,
+    HINT_FCEUX_NO_RUN_AHEAD,
+    STATUS_ENGINE_FCEUX,
     HINT_NEEDS_ACHIEVEMENTS,
     HINT_STYLE_CLASSIC,
     HINT_MENU_BUTTON_UNUSED,

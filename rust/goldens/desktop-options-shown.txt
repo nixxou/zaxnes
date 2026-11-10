@@ -6,7 +6,8 @@
 # A set, not an order: the file is sorted by key. The tab each one was in before is recorded in
 # `rust/docs/OPTIONS-LAYOUT.md`, which is where the old → new mapping lives.
 #
-# A line tagged [wgpu] is only a row in a build carrying that feature (`options::is_shown`).
+# A line tagged [wgpu] or [fceux-core] is only a row in a build carrying that feature
+# (`options::is_shown`).
 #
 # Checked by `crates/zax-app/tests/desktop_options_golden_tests.rs`.
 
@@ -23,6 +24,7 @@ emu.auto_tv_mode
 emu.catch_up
 emu.catch_up_last_3d
 emu.core
+emu.engine [fceux-core]
 emu.game_speed
 emu.lua_experimental
 emu.lua_optimized

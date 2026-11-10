@@ -160,6 +160,23 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "(this version has one core: the value is always 0)",
     ),
     (
+        keys::HINT_FCEUX_NO_WIDESCREEN,
+        "(the FCEUX engine has no widescreen: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_HACKS,
+        "(the FCEUX engine applies no hack pack: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_SPRITE_LIMIT,
+        "(the FCEUX engine keeps the 8 sprites a line: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_RUN_AHEAD,
+        "(run-ahead is not implemented on the FCEUX engine)",
+    ),
+    (keys::STATUS_ENGINE_FCEUX, "FCEUX engine"),
+    (
         keys::HINT_CLASSIC_AUDIO,
         "(no effect: the classic audio output has its own fixed buffer)",
     ),
@@ -472,6 +489,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.auto_tv_mode", "Region detected automatically"),
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
+    ("setting.emu.engine", "Emulation engine (this game)"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     // AMD-041 §3: the title and the four values of the Run-ahead list.
     ("setting.emu.run_ahead", "Run-ahead"),
@@ -1091,6 +1109,16 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          single core, so the value is taken modulo 1: anything written here reads back as 0 and \
          nothing uses it. The row is kept because the key is part of the settings file and of the \
          script surface (Setting.Core). Default: 0.",
+    ),
+    (
+        "detail.emu.engine",
+        "Which emulator plays this game: Zaxnes's own core, or FCEUX. It is a choice per game, \
+         not a preference, because the reason to reach for FCEUX is always a particular game — \
+         one Zaxnes runs badly, or on a board it does not have. It takes effect at the next load, \
+         since changing engines means starting the machine again. FCEUX has no widescreen, no \
+         hack pack, no sprite-limit control and no run-ahead: those are part of Zaxnes's own \
+         machine, and their rows say so while FCEUX is chosen. A save state made on one engine \
+         cannot be loaded on the other. Default: Zaxnes.",
     ),
 
     // ----------------------------------------------------------- Interface tab

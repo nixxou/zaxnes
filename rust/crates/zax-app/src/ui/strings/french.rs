@@ -141,6 +141,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_NEEDS_CURVATURE, "(sans effet : aucune courbure n'est réglée)"),
     (keys::HINT_REGION_AUTOMATIC, "(fixée par la détection au prochain chargement de ROM)"),
     (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
+    (keys::HINT_FCEUX_NO_WIDESCREEN, "(le moteur FCEUX n'a pas de panoramique : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_HACKS, "(le moteur FCEUX n'applique aucun pack de hack : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_SPRITE_LIMIT, "(le moteur FCEUX garde les 8 sprites par ligne : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_RUN_AHEAD, "(l'avance de trames n'est pas implémentée sur le moteur FCEUX)"),
+    (keys::STATUS_ENGINE_FCEUX, "moteur FCEUX"),
     (keys::HINT_CLASSIC_AUDIO, "(sans effet : la sortie audio classique a sa propre réserve fixe)"),
     (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
     (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),
@@ -497,6 +502,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
+    ("setting.emu.engine", "Moteur d'émulation (ce jeu)"),
     ("setting.audio.volume", "Volume général"),
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
@@ -1085,6 +1091,17 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          n'en a qu'un, si bien que la valeur est prise modulo 1 : tout ce qu'on écrit ici se relit \
          comme 0 et rien ne s'en sert. La ligne est conservée parce que la clé fait partie du \
          fichier de réglages et de la surface de script (Setting.Core). Par défaut : 0.",
+    ),
+    (
+        "detail.emu.engine",
+        "Quel émulateur exécute ce jeu : le cœur de Zaxnes, ou FCEUX. C'est un choix par jeu et \
+         non une préférence, parce que la raison de passer à FCEUX est toujours un jeu précis — \
+         un jeu que Zaxnes exécute mal, ou dont la carte lui manque. Il prend effet au prochain \
+         chargement, changer de moteur voulant dire redémarrer la machine. FCEUX n'a ni \
+         panoramique, ni pack de hack, ni réglage de la limite de sprites, ni avance de trames : \
+         ce sont des pièces de la machine de Zaxnes, et leurs lignes le disent tant que FCEUX est \
+         choisi. Une sauvegarde d'état faite sur un moteur ne se charge pas sur l'autre. Par \
+         défaut : Zaxnes.",
     ),
 
     // -------------------------------------------------------- onglet Interface
