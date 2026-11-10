@@ -116,16 +116,30 @@ pub struct UiHarness {
 impl UiHarness {
     /// A library of "2D Mode" and the given titles, which get the identifiers `g0`, `g1`...
     pub fn new(titles: &[&str]) -> Self {
+        Self::over(|paths| {
+            LibraryGameCatalog::from_library(
+                GameLibrary::build(&catalogue(titles), &[], None, None),
+                paths.clone(),
+                Box::new(|_| {}),
+            )
+        })
+    }
+
+    /// A library read from the asset folder `asset_root` — its `profiles.json` and the profile
+    /// files it names — as the application reads it at start-up. Unlike [`Self::new`], the
+    /// catalogue then holds the **bytes** of the built-in profiles, which is what AMD-066
+    /// REQ-PROF-088 recognises a chosen file by.
+    pub fn with_asset_root(asset_root: &std::path::Path) -> Self {
+        Self::over(|paths| LibraryGameCatalog::open(Some(asset_root), paths, Box::new(|_| {})))
+    }
+
+    fn over(catalog: impl FnOnce(&UserDataPaths) -> LibraryGameCatalog) -> Self {
         let root = TemporaryRoot::new("zax-ui-");
         let paths = UserDataPaths::resolve(Some(root.path()), None, None);
         let mut store = SettingsStore::new(&paths);
         let mut settings = zax_settings::model::SettingsModel::new();
         store.load(&mut settings, instant(START_UNIX_SECONDS));
-        let catalog = LibraryGameCatalog::from_library(
-            GameLibrary::build(&catalogue(titles), &[], None, None),
-            paths.clone(),
-            Box::new(|_| {}),
-        );
+        let catalog = catalog(&paths);
         let clock = Rc::new(Cell::new(0.0));
         let mut options =
             EmulationHostOptions::new(paths.clone(), settings, SceneState::default(), catalog);

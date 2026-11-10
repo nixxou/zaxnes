@@ -199,8 +199,11 @@ impl LibraryGameCatalog {
             Some(&adapter),
             ProfileOrigin::User,
         );
+        // AMD-066 REQ-PROF-088: the bytes read once at start-up, which are how a chosen file
+        // identical to a built-in profile is recognised — the only way for the 45 that carry no
+        // `Id`, and for the 56 whose own `Id` is not a catalogue identifier either.
         folder
-            .inspect(path, &built_in, &known)
+            .inspect(path, &built_in, &self.built_in_contents, &known)
             .unwrap_or_else(|_| ProfileImportPlan {
                 outcome: ProfileImportOutcome::Rejected,
                 source_path: path.to_path_buf(),

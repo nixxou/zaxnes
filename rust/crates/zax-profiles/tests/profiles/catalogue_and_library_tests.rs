@@ -348,26 +348,167 @@ fn amd_037_a_copy_of_a_built_in_profile_adds_no_game_with_or_without_identifier(
     assert!(log.any_contains("identical to a built-in profile"));
 }
 
+/// AMD-066 REQ-PROF-089, which replaces the refusal AMD-037 §2 kept: a chosen file with no `Id`
+/// that is not one of the built-in profiles is accepted, copied byte for byte, and keyed by the
+/// identifier derived from its content — the one the next reading of the folder gives it.
 #[test]
-fn req_prof_063_importing_a_profile_without_an_identifier_is_refused() {
+fn req_prof_089_importing_a_profile_without_an_identifier_uses_its_derived_one() {
     let files = FakeProfileFileSystem::new();
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
-    let source = Path::new("/downloads/Broken.3dn");
-    files.add_file(source, &make_profile(None, None));
+    let source = Path::new("/downloads/Nameless.3dn");
+    let bytes = make_profile(None, None);
+    files.add_file(source, &bytes);
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let result = folder.import(source, &[], &[]).unwrap();
+    let result = folder.import(source, &[], &[], &[]).unwrap();
 
-    assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
-    // AMD-056 §2: a space after the path, and « obsolete ».
-    assert_eq!(
-        format!(
-            "{} has an obsolete or wrong profile format. This profile is not compatible with the current version of Zaxnes.",
-            source.display()
+    assert_eq!(ProfileImportOutcome::Added, result.outcome);
+    let imported = result.profile.expect("the imported profile");
+    assert_eq!(derived_id(&bytes), imported.id);
+    // « Titre. Inchangé : `Title`, sinon le nom du fichier sans extension » (AMD-037 §2).
+    assert_eq!("Nameless", imported.title);
+
+    // Copied byte for byte, and never rewritten.
+    let written = layout.profiles_directory().join("Nameless.3dn");
+    assert!(files.file_exists(&written));
+    assert_eq!(bytes, files.read_all_bytes(&written).unwrap());
+
+    // The identifier of the issue is the one the folder scan gives the copy.
+    let scanned = folder.scan(&[]).unwrap();
+    assert_eq!(1, scanned.len());
+    assert_eq!(derived_id(&bytes), scanned[0].id);
+
+    // « la bibliothèque a une entrée de plus » (AMD-066 §3, second criterion).
+    let catalogue = catalogue_of(&files, &[]);
+    let mut library = GameLibrary::build(&catalogue, &[], None, None);
+    let before = library.entries().len();
+    library.add_user_profile(&imported, None).unwrap();
+    assert_eq!(before + 1, library.entries().len());
+    assert!(library.find(&derived_id(&bytes)).is_some());
+}
+
+/// AMD-066 §3, third criterion: the same file imported again replaces its own entry, under the
+/// same identifier; the library never gains a second one.
+#[test]
+fn req_prof_089_reimporting_the_same_identifier_less_file_replaces_its_entry() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let source = Path::new("/downloads/Nameless.3dn");
+    let bytes = make_profile(None, Some("Nameless"));
+    files.add_file(source, &bytes);
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    folder.import(source, &[], &[], &[]).unwrap();
+    let known = folder.scan(&[]).unwrap();
+    let again = folder.import(source, &[], &[], &known).unwrap();
+
+    assert_eq!(ProfileImportOutcome::Replaced, again.outcome);
+    assert_eq!(derived_id(&bytes), again.profile.unwrap().id);
+    assert_eq!(1, folder.scan(&[]).unwrap().len());
+}
+
+/// AMD-066 REQ-PROF-088: a chosen file whose **bytes** are those of a built-in profile is
+/// « already built-in » and nothing is copied — with or without an `Id`. Neither of the two can
+/// be recognised through `built_in_ids`, which holds the short catalogue identifiers.
+#[test]
+fn req_prof_088_importing_the_bytes_of_a_built_in_profile_imports_nothing() {
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    for (name, bytes) in [
+        ("Nameless.3dn", make_profile(None, Some("Built-in"))),
+        (
+            "Named.3dn",
+            make_profile(Some("ABCDEFGHIJKL"), Some("Also")),
         ),
-        result.message
+    ] {
+        let files = FakeProfileFileSystem::new();
+        let source = Path::new("/downloads").join(name);
+        files.add_file(&source, &bytes);
+
+        let folder = user_folder(&files, layout.profiles_directory(), None);
+        let result = folder
+            .import(&source, &[], std::slice::from_ref(&bytes), &[])
+            .unwrap();
+
+        assert_eq!(
+            ProfileImportOutcome::AlreadyBuiltIn,
+            result.outcome,
+            "{name}"
+        );
+        assert!(result.profile.is_none(), "{name}");
+        assert!(
+            !files.file_exists(&layout.profiles_directory().join(name)),
+            "{name}"
+        );
+    }
+}
+
+/// AMD-066 §3, first criterion, which is the reported case: `Contra.bytes` — one of the 45
+/// built-in profiles of 2.0 that carry no `Id` (AMD-037 §1) — chosen as `Contra.3dn` against the
+/// catalogue of `assets-neutral/` is « already built-in », and nothing lands in the user folder.
+#[test]
+#[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
+fn req_prof_088_the_bytes_of_the_built_in_contra_are_already_in_the_catalogue() {
+    let catalogue = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        FULL_EDITION,
+    )
+    .unwrap();
+    let contents = catalogue.built_in_contents(&PhysicalProfileFileSystem);
+    let bytes = neutral_assets::read_profile("Contra.bytes");
+    // The constat of AMD-066 §1: a sound 3dn of version "2" that carries no identifier.
+    let header = format::load_header(&bytes, None, None).unwrap();
+    assert!(header.has_acceptable_signature());
+    assert!(!header.has_unsupported_version());
+    assert!(!header.has_id(), "Contra.bytes carries an Id");
+
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let source = Path::new("/downloads/Contra.3dn");
+    files.add_file(source, &bytes);
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let ids = catalogue.ids();
+    let result = folder.import(source, &ids, &contents, &[]).unwrap();
+
+    assert_eq!(ProfileImportOutcome::AlreadyBuiltIn, result.outcome);
+    assert!(result.profile.is_none());
+    assert_eq!(
+        UserProfileFolder::list_profile_files(&files, layout.profiles_directory()).unwrap(),
+        [] as [PathBuf; 0]
     );
-    assert!(!files.file_exists(&layout.profiles_directory().join("Broken.3dn")));
+}
+
+/// AMD-066 REQ-PROF-090 and AMD-066 §3, fourth criterion: a truncated file and a malformed
+/// protobuf keep the « obsolete or wrong profile format » text; a foreign signature keeps its
+/// own. The absence of an identifier is no longer one of the causes.
+#[test]
+fn req_prof_090_an_unreadable_file_keeps_the_obsolete_format_message() {
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let whole = make_profile(Some("ABCDEFGHIJKL"), Some("Mine"));
+    let truncated = whole[..whole.len() / 2].to_vec();
+    for (name, bytes) in [
+        ("Truncated.3dn", truncated),
+        ("Malformed.3dn", vec![0xff, 0xff, 0xff, 0xff, 0xff]),
+    ] {
+        let files = FakeProfileFileSystem::new();
+        let source = Path::new("/downloads").join(name);
+        files.add_file(&source, &bytes);
+
+        let folder = user_folder(&files, layout.profiles_directory(), None);
+        let result = folder.import(&source, &[], &[], &[]).unwrap();
+
+        assert_eq!(ProfileImportOutcome::Rejected, result.outcome, "{name}");
+        assert_eq!(
+            import_messages::obsolete_format(&source),
+            result.message,
+            "{name}"
+        );
+        assert!(
+            !files.file_exists(&layout.profiles_directory().join(name)),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -378,7 +519,7 @@ fn req_prof_063_importing_a_new_identifier_copies_the_file_and_adds_a_game() {
     files.add_file(source, &make_profile(Some("mine01"), Some("My Game")));
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let result = folder.import(source, &["1", "47"], &[]).unwrap();
+    let result = folder.import(source, &["1", "47"], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::Added, result.outcome);
     assert_eq!("My Game", result.profile.unwrap().title);
@@ -386,7 +527,7 @@ fn req_prof_063_importing_a_new_identifier_copies_the_file_and_adds_a_game() {
 
     // Importing the same file twice creates one game, not two.
     let known = folder.scan(&[]).unwrap();
-    let again = folder.import(source, &["1", "47"], &known).unwrap();
+    let again = folder.import(source, &["1", "47"], &[], &known).unwrap();
     assert_eq!(ProfileImportOutcome::Replaced, again.outcome);
     assert_eq!(1, folder.scan(&[]).unwrap().len());
 }
@@ -403,7 +544,7 @@ fn req_prof_063_importing_over_a_user_profile_replaces_its_file() {
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
     let known = folder.scan(&[]).unwrap();
-    let result = folder.import(source, &[], &known).unwrap();
+    let result = folder.import(source, &[], &[], &known).unwrap();
 
     assert_eq!(ProfileImportOutcome::Replaced, result.outcome);
     assert!(!files.file_exists(&installed));
@@ -421,7 +562,7 @@ fn req_prof_063_importing_the_identifier_of_a_built_in_profile_does_nothing() {
     files.add_file(source, &make_profile(Some("1"), Some("Not Arkanoid")));
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let result = folder.import(source, &["1"], &[]).unwrap();
+    let result = folder.import(source, &["1"], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::AlreadyBuiltIn, result.outcome);
     assert_eq!(
@@ -440,7 +581,7 @@ fn req_prof_063_importing_a_file_that_is_not_a_profile_is_refused() {
     files.add_file(source, &[0x0a, 0x03, 0x33, 0x64, 0x78]);
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let result = folder.import(source, &[], &[]).unwrap();
+    let result = folder.import(source, &[], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
     assert_eq!(import_messages::NOT_A_3DN_FILE, result.message);
@@ -460,7 +601,7 @@ fn req_ui_212_a_profile_of_an_unsupported_version_names_its_sanitised_version() 
     files.add_file(source, &format::save(&profile, FieldPresence::All));
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let result = folder.import(source, &[], &[]).unwrap();
+    let result = folder.import(source, &[], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
     assert_eq!("3dn format version 1  is not supported", result.message);
@@ -478,7 +619,7 @@ fn req_ui_214_inspecting_an_import_writes_nothing_and_applying_it_does() {
     let destination = layout.profiles_directory().join("Mine.3dn");
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let plan = folder.inspect(source, &[], &[]).unwrap();
+    let plan = folder.inspect(source, &[], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::Added, plan.outcome);
     assert!(plan.writes());
@@ -510,7 +651,7 @@ fn req_ui_214_a_replacement_plan_names_the_profile_it_would_take_over() {
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
     let known = folder.scan(&[]).unwrap();
-    let plan = folder.inspect(source, &[], &known).unwrap();
+    let plan = folder.inspect(source, &[], &[], &known).unwrap();
 
     assert_eq!(ProfileImportOutcome::Replaced, plan.outcome);
     assert_eq!(
@@ -541,7 +682,7 @@ fn req_ui_214_a_built_in_identifier_plan_carries_the_title_of_the_file() {
     files.add_file(source, &make_profile(Some("10"), Some("Foo")));
 
     let folder = user_folder(&files, layout.profiles_directory(), None);
-    let plan = folder.inspect(source, &["10"], &[]).unwrap();
+    let plan = folder.inspect(source, &["10"], &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::AlreadyBuiltIn, plan.outcome);
     assert!(!plan.writes());

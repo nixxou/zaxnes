@@ -232,6 +232,62 @@ fn req_ui_214_an_unknown_identifier_shows_nothing_and_is_selected() {
     );
 }
 
+/// AMD-066 §3, last criterion: the reported case. `Contra.bytes`, one of the 45 built-in
+/// profiles of 2.0 that carry no `Id`, chosen as `Contra.3dn` against the catalogue of
+/// `assets-neutral/` shows « already built-in » — the dialogue of row 2 of REQ-UI-214 — in
+/// English and in French, and nothing is copied. Before AMD-066 it was refused as an obsolete
+/// format (REQ-PROF-090).
+#[test]
+#[ignore = "needs ZAXNES_PROFILES (the folder that holds profiles/ and profiles.json)"]
+fn req_prof_088_the_built_in_contra_is_already_in_zaxnes_in_both_languages() {
+    let assets = PathBuf::from(
+        std::env::var_os("ZAXNES_PROFILES").expect("ZAXNES_PROFILES names the asset folder"),
+    );
+    let bytes = std::fs::read(assets.join("profiles").join("Contra.bytes")).expect("Contra.bytes");
+    // The constat of AMD-066 §1: the file carries no identifier.
+    let header = format::load_header(&bytes, None, None).expect("a readable profile");
+    assert!(!header.has_id(), "Contra.bytes carries an Id");
+    let shown = header
+        .title
+        .clone()
+        .unwrap_or_else(|| "Contra.3dn".to_owned());
+
+    for (language, title, body) in [
+        (
+            UiLanguage::English,
+            "Already in Zaxnes",
+            format!("{shown} is a built-in profile, so Contra.3dn was not imported."),
+        ),
+        (
+            UiLanguage::French,
+            "Déjà dans Zaxnes",
+            format!("{shown} est un profil embarqué ; Contra.3dn n'a pas été importé."),
+        ),
+    ] {
+        let mut harness = UiHarness::with_asset_root(&assets);
+        let _language = UiLanguageScope::new(language);
+        let before = harness.host.games().library().entries().len();
+        // The catalogue of `assets-neutral/` really was read: without it there would be no
+        // built-in bytes to compare against and the file would simply be added.
+        assert_eq!(
+            101, before,
+            "the catalogue of the asset folder was not read"
+        );
+        let chosen = write(&harness, "Contra.3dn", &bytes);
+
+        choose(&mut harness, &chosen);
+
+        let dialog = harness.ui.import_dialog().expect("a dialogue").clone();
+        assert_eq!(ProfileImportDialogKind::AlreadyBuiltIn, dialog.kind);
+        assert_eq!(title, dialog.title);
+        assert_eq!(body, dialog.body);
+        assert_eq!(None, dialog.cancel_label);
+        // Nothing was copied, and the library did not grow.
+        assert_eq!(0, profile_files(&harness));
+        assert_eq!(before, harness.host.games().library().entries().len());
+    }
+}
+
 /// AMD-035 and AMD-036: the three dialogues follow the interface language.
 #[test]
 fn amd_036_the_import_dialogues_follow_the_interface_language() {

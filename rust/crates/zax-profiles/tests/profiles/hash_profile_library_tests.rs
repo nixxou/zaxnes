@@ -96,7 +96,7 @@ fn req_prof_063_an_imported_hash_profile_is_copied_as_it_is() {
     files.add_file(&chosen, &bytes);
 
     let result = folder(&files, &destination())
-        .import(&chosen, &[], &[])
+        .import(&chosen, &[], &[], &[])
         .unwrap();
 
     assert_eq!(ProfileImportOutcome::Added, result.outcome);
@@ -130,7 +130,7 @@ fn req_prof_063_a_refused_hash_profile_shows_the_obsolete_format_message() {
     files.add_file(&chosen, &bytes);
 
     let plan = folder(&files, &destination())
-        .inspect(&chosen, &[], &[])
+        .inspect(&chosen, &[], &[], &[])
         .unwrap();
 
     assert_eq!(ProfileImportOutcome::Rejected, plan.outcome);

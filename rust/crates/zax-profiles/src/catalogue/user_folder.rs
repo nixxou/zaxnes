@@ -43,7 +43,8 @@ pub enum ProfileImportOutcome {
     Added,
     /// An existing profile of the same identifier was replaced.
     Replaced,
-    /// The identifier belongs to a built-in profile; nothing was imported.
+    /// The catalogue in use already holds the profile — by its identifier, or by its bytes
+    /// (AMD-066 REQ-PROF-088); nothing was imported.
     AlreadyBuiltIn,
     /// The file was refused.
     Rejected,
@@ -72,7 +73,8 @@ pub struct ProfileImportPlan {
     pub source_path: PathBuf,
     /// The reason of a refusal, empty otherwise.
     pub message: String,
-    /// The identifier the file carries, empty for a refusal.
+    /// The identifier the file carries, or the one derived from its content when it carries
+    /// none (AMD-066 REQ-PROF-089, AMD-037). Empty for a refusal.
     pub id: String,
     /// The title of the file: its `Title`, else its file name without extension.
     pub title: String,
@@ -124,9 +126,11 @@ pub mod import_messages {
         )
     }
 
-    /// The file is unreadable or has no identifier. AMD-029 §3, closing Q-068: the last words
-    /// name the product, « Zaxnes ». AMD-056 §2 adds the space after the path and the correct
-    /// spelling of « obsolete ».
+    /// The file is unreadable. AMD-029 §3, closing Q-068: the last words name the product,
+    /// « Zaxnes ». AMD-056 §2 adds the space after the path and the correct spelling of
+    /// « obsolete ». AMD-066 REQ-PROF-090 takes the missing identifier out of its causes: it
+    /// stays the text of a missing, unreadable or malformed file, and of the 3dh causes of
+    /// REQ-PROF-072.
     #[must_use]
     pub fn obsolete_format(path: &Path) -> String {
         format!(
@@ -302,9 +306,10 @@ impl<'a> UserProfileFolder<'a> {
         &self,
         source_path: &Path,
         built_in_ids: &[&str],
+        built_in_contents: &[Vec<u8>],
         user_profiles: &[UserProfile],
     ) -> io::Result<ProfileImportResult> {
-        let plan = self.inspect(source_path, built_in_ids, user_profiles)?;
+        let plan = self.inspect(source_path, built_in_ids, built_in_contents, user_profiles)?;
         self.apply(&plan)
     }
 
@@ -312,10 +317,20 @@ impl<'a> UserProfileFolder<'a> {
     /// (AMD-056 REQ-UI-214).
     ///
     /// AMD-053 REQ-UI-212: the file is read as REQ-PROF-062 reads one — the header alone, no
-    /// pattern and no script — and the message of a refusal is chosen by its **cause**. The four
-    /// rows of the table are, in the order they can be told apart: an unreadable file or a
-    /// malformed protobuf, a signature that is not `"3dn"`, an unsupported version, and a missing
-    /// identifier.
+    /// pattern and no script — and the message of a refusal is chosen by its **cause**. The three
+    /// rows of the table left by AMD-066 REQ-PROF-090 are, in the order they can be told apart:
+    /// an unreadable file or a malformed protobuf, a signature that is not `"3dn"`, and an
+    /// unsupported version. A missing identifier was the fourth and is one no longer.
+    ///
+    /// `built_in_contents` holds the bytes of the profile files of the catalogue in use, as
+    /// [`Self::scan_excluding`] takes them: a chosen file identical to one of them is « already
+    /// built-in » whatever identifier it carries (AMD-066 REQ-PROF-088). It has to be the bytes
+    /// and not `built_in_ids`, which holds the **catalogue** identifiers — `"1"` to `"101"` —
+    /// and never the 12-character `Id` a built-in profile file carries.
+    ///
+    /// A file that carries no identifier is accepted under the one derived from its content
+    /// (AMD-066 REQ-PROF-089, AMD-037): the same [`derived_id`] the next reading of the folder
+    /// will give the copy, since the copy is byte for byte.
     ///
     /// # Errors
     ///
@@ -324,6 +339,7 @@ impl<'a> UserProfileFolder<'a> {
         &self,
         source_path: &Path,
         built_in_ids: &[&str],
+        built_in_contents: &[Vec<u8>],
         user_profiles: &[UserProfile],
     ) -> io::Result<ProfileImportPlan> {
         if !self.files.file_exists(source_path) {
@@ -333,11 +349,9 @@ impl<'a> UserProfileFolder<'a> {
             ));
         }
 
-        let header = format::load_header(
-            &self.files.read_all_bytes(source_path)?,
-            Some(self.log),
-            Some(&source_path.to_string_lossy()),
-        );
+        let bytes = self.files.read_all_bytes(source_path)?;
+        let header =
+            format::load_header(&bytes, Some(self.log), Some(&source_path.to_string_lossy()));
         // Row 3 of the table: a malformed protobuf, or a file that could not be read at all.
         let Some(header) = header else {
             return Ok(refusal(
@@ -369,27 +383,21 @@ impl<'a> UserProfileFolder<'a> {
                 import_messages::unsupported_version(header.version.as_deref().unwrap_or_default());
             return Ok(refusal(source_path, message));
         }
-        // Row 4: an absent or empty identifier is refused — there would be no way to key the
-        // library entry, the slots or the cover art on it (REQ-PROF-063, REQ-PERS-041 point 1).
-        if !header.has_id() {
-            return Ok(refusal(
-                source_path,
-                import_messages::obsolete_format(source_path),
-            ));
-        }
 
-        let id = header.id.clone().unwrap_or_default();
+        // AMD-066 REQ-PROF-088: the bytes of a built-in profile, with or without an `Id`. The
+        // 45 built-in profiles of 2.0 that carry none (AMD-037 §1) can be recognised no other
+        // way, and the 56 that carry one carry a 12-character identifier the catalogue does not
+        // know either. Nothing is copied, as for an identifier already built in.
+        let id = match header.id.as_deref() {
+            Some(id) if !id.is_empty() => id.to_owned(),
+            // AMD-066 REQ-PROF-089, AMD-037: the identifier of a profile that carries none.
+            _ => derived_id(&bytes),
+        };
+        if built_in_contents.contains(&bytes) {
+            return Ok(already_built_in(source_path, id, header));
+        }
         if built_in_ids.contains(&id.as_str()) {
-            return Ok(ProfileImportPlan {
-                outcome: ProfileImportOutcome::AlreadyBuiltIn,
-                source_path: source_path.to_path_buf(),
-                message: String::new(),
-                title: title_of(&header, source_path),
-                id,
-                header,
-                replaced: None,
-                destination: PathBuf::new(),
-            });
+            return Ok(already_built_in(source_path, id, header));
         }
 
         let destination = self
@@ -437,10 +445,13 @@ impl<'a> UserProfileFolder<'a> {
                 });
             }
             ProfileImportOutcome::AlreadyBuiltIn => {
+                // The identifier is not named: since AMD-066 REQ-PROF-088 a file can be built in
+                // by its **bytes** under an identifier of its own, which belongs to no built-in
+                // profile at all.
                 self.log.information(&format!(
-                    "{}: the identifier \"{}\" belongs to a built-in profile; nothing imported",
+                    "{}: \"{}\" is already a built-in profile; nothing imported",
                     plan.source_path.display(),
-                    plan.id
+                    plan.title
                 ));
                 return Ok(ProfileImportResult {
                     outcome: ProfileImportOutcome::AlreadyBuiltIn,
@@ -550,6 +561,21 @@ impl<'a> UserProfileFolder<'a> {
             ));
         }
         copy
+    }
+}
+
+/// A plan that writes nothing because the catalogue in use already holds the profile — by its
+/// identifier, or by its bytes since AMD-066 REQ-PROF-088.
+fn already_built_in(source_path: &Path, id: String, header: ProfileHeader) -> ProfileImportPlan {
+    ProfileImportPlan {
+        outcome: ProfileImportOutcome::AlreadyBuiltIn,
+        source_path: source_path.to_path_buf(),
+        message: String::new(),
+        title: title_of(&header, source_path),
+        id,
+        header,
+        replaced: None,
+        destination: PathBuf::new(),
     }
 }
 

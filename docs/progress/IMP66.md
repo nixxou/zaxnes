@@ -6,7 +6,7 @@ AMD-053/AMD-056 REQ-UI-212 and REQ-UI-214.
 
 - [ ] 1/3 — Plan: where the built-in bytes must reach `inspect`, and which tests assert the
   refusal AMD-066 removes.
-- [ ] 2/3 — Implementation and tests: REQ-PROF-088 to 090 and AMD-066 §3's automatic criteria.
+- [x] 2/3 — Implementation and tests: REQ-PROF-088 to 090 and AMD-066 §3's automatic criteria.
 - [ ] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
   touched, performance note.
 
@@ -103,3 +103,47 @@ interface criterion of AMD-066 §3 needs a harness built over a real asset folde
 
 Import-time only: one `Vec<u8>` comparison per built-in profile, on bytes already in memory,
 and one SHA-256 of the chosen file when it carries no `Id`. No per-frame cost.
+
+## Step 2 — what was written
+
+### `zax-profiles/src/catalogue/user_folder.rs`
+
+- `inspect` and `import` take a fourth argument, `built_in_contents: &[Vec<u8>]`, between
+  `built_in_ids` and `user_profiles`. The bytes the chosen file is read with are kept rather
+  than dropped after `load_header`, since both new rules need them.
+- Order of the decisions, after the three causes of refusal that remain: **bytes against
+  `built_in_contents`** (REQ-PROF-088) → identifier, carried or `derived_id` of the bytes
+  (REQ-PROF-089) → `built_in_ids` → replaced/added. The byte test comes first because the `Id`
+  a built-in file carries is never a catalogue identifier.
+- The `!header.has_id()` refusal is gone (REQ-PROF-090), and with it row 4 of the table of
+  causes in the doc comment and the second half of the doc of `import_messages::obsolete_format`.
+- New private `already_built_in(source, id, header)`, the plan the two ways of recognising a
+  built-in profile share.
+- The `apply` log line of an `AlreadyBuiltIn` no longer claims that the identifier belongs to a
+  built-in profile — untrue of a file recognised by its bytes under a derived identifier. It
+  names the title instead.
+
+### `zax-app`
+
+- `LibraryGameCatalog::inspect_profile_import` passes `&self.built_in_contents`, the bytes
+  `LibraryGameCatalog::open` already keeps from the start-up reading.
+- `UiHarness::with_asset_root` (test support): a harness whose library comes from
+  `LibraryGameCatalog::open` over a real asset folder, so the built-in **bytes** are there.
+  `UiHarness::new` and it share a new private `over`.
+
+### Tests, one per criterion of AMD-066 §3
+
+| Criterion | Test |
+|---|---|
+| 1 — `Contra.bytes` as `Contra.3dn`, catalogue of `assets-neutral/` | `catalogue_and_library_tests::req_prof_088_the_bytes_of_the_built_in_contra_are_already_in_the_catalogue` (ignored, needs `ZAXNES_PROFILES`) |
+| 2 — a synthetic 3dn with no `Id` | `req_prof_089_importing_a_profile_without_an_identifier_uses_its_derived_one` |
+| 3 — the same file imported again | `req_prof_089_reimporting_the_same_identifier_less_file_replaces_its_entry` |
+| 4 — truncated and malformed files | `req_prof_090_an_unreadable_file_keeps_the_obsolete_format_message` |
+| 5 — the dialogue in English and French | `zax-app` `profile_import_dialog_tests::req_prof_088_the_built_in_contra_is_already_in_zaxnes_in_both_languages` (ignored, needs `ZAXNES_PROFILES`) |
+
+`req_prof_088_importing_the_bytes_of_a_built_in_profile_imports_nothing` covers the two halves
+of REQ-PROF-088 — with and without an `Id` — on synthetic bytes.
+
+The one test of the old rule,
+`req_prof_063_importing_a_profile_without_an_identifier_is_refused`, is replaced by the second
+of these; the thirteen other call sites of `inspect`/`import` gained a `&[]`.

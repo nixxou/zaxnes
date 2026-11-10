@@ -280,7 +280,7 @@ fn amd_033_an_import_writes_to_the_user_folder_and_takes_over_the_entry() {
     // the file next to the executable stays where it is.
     let user_folder =
         UserProfileFolder::new(&files, Path::new(USER_FOLDER), None, ProfileOrigin::User);
-    let result = user_folder.import(source, &[], &[]).unwrap();
+    let result = user_folder.import(source, &[], &[], &[]).unwrap();
 
     assert_eq!(
         zax_profiles::catalogue::ProfileImportOutcome::Added,
