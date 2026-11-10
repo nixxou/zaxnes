@@ -19,7 +19,7 @@ is to be **fixed**, which makes this the first lot of the three to change `zax-n
 
 - [x] 1. The Reset semantics in the `.bk2` reader, and the same question for `.fm2`.
 - [x] 2. What frame 246 does, on Zaxnes.
-- [ ] 3. What the hardware does there.
+- [x] 3. What the hardware does there.
 - [ ] 4. The mapper's soft reset.
 - [ ] 5. The report.
 - [ ] 6. The final pass.
@@ -333,3 +333,162 @@ changes nothing about it, which is what makes it the control.
 | `cargo fmt --all --check` | clean |
 | clippy `-D warnings --all-targets`, feature **off** and **on** | clean |
 | `zax-harness` lib tests | **50**, up from 48: 2 new in `frame_trace` |
+
+---
+
+## Step 3 — what the hardware does there
+
+Two questions came out of step 2, and they have different kinds of answer.
+
+### (1) `$004B` at frame 247: the hardware does nothing, because no read is involved
+
+The brief asked which read's value would have to differ for `$004B` to be `00`. The answer is
+**none**. `$004B` is a loop counter that one routine increments at `$E94F` and restores from the
+stack at `$E6D3`, twenty-two instructions later; it holds `01` only between those two points.
+Our frame ends inside that window and `BizHawk`'s 2 KiB was read before it — and `--converge`
+measures exactly that: **1 020 instants of our own frame 247 hold the reference's live memory, the
+last of them 19 instructions before our frame boundary.**
+
+That is the same class as the stack-page residuals EVAL-SYNC-2 measured on *Faxanadu*, which syncs
+exactly. Neither needs a hardware explanation: the hardware has a frame boundary, and a Lua script
+has a moment at which it reads RAM, and nothing says the two are the same instant. With the
+built-in patches off (step 2) the whole thing disappears anyway: `$004B` goes `00`→`01`→`00`
+**inside** frame 247, as it does on `BizHawk`.
+
+### (2) The overclock at frame 248: the hardware has no such thing, and that is the point
+
+The 9 689 instructions of frame 248 that cost no CPU cycle are the 3D extension freezing the PPU,
+the APU and the clock while the CPU runs. nesdev's *Cycle reference chart* is unambiguous about
+whether a console can do that:
+
+| | NTSC |
+|---|---|
+| master clock | 21.477272 MHz |
+| CPU | master ÷ **12** → 1.789773 MHz |
+| PPU | master ÷ **4**, one dot per 4 master clocks |
+| CPU cycles per frame | **29 780.5** |
+
+The two clocks are divided from one crystal by fixed integers. There is no register, no pin and no
+documented condition under which the 6502 advances and the 2C02 does not; the only thing that
+moves CPU time relative to PPU time on real hardware is **DMA**, which *takes* cycles from the CPU
+and never grants them. So the overclock is not a behaviour a real NES has and not one any emulator
+could be right or wrong about: it is a deliberate feature of the 3D application, and the error was
+that a *measurement* ran with it on.
+
+> **Conclusion for both: not a Zaxnes emulation error.** Nothing in `zax-nes` was wrong at frame
+> 247 or 248. The fault was `movie-sync`'s, and §Step 2 fixed it in `zax-harness`: the built-in
+> patches are off unless `--builtin-patches` asks. The figures either side of that line are in
+> step 2's own table, and `zax-nes` is byte-identical to `5091ccb6` as far as this step is
+> concerned.
+
+Zaxnes's own frames measure **29 778 to 29 784 CPU cycles**, averaging the 29 780.5 above — the
+29 781 of the overclocked frames is the same number, which is how the trace could tell that the
+extra 9 689 instructions were free rather than real.
+
+### What *Kirby* actually uses mid-frame, measured rather than guessed
+
+Before naming candidates for the divergence that remains, the trace says which machinery is even
+in play. Frame 1 000, traced with the patches off:
+
+| | |
+|---|---|
+| reads of `$2002` | **0** — no vblank polling, no sprite-0 hit, no sprite overflow, in the whole frame |
+| NMI | one, at scanline 241 dot 28 |
+| **MMC3 IRQ** | **one, at scanline 174 dot 287**, and its handler runs from zero page (`PC = $0029`) |
+| the MMC3 IRQ registers | `$C000` = `$AF` and `$C001`, `$E001` written in vblank at scanline 247; `$E000` written in the IRQ handler and in the NMI handler |
+
+So the game's one piece of mid-frame timing is the **MMC3 scanline counter**, latched at `$AF`.
+nesdev, *MMC3*: *"The exact number of scanlines between IRQs is N+1, where N is the value written
+to `$C000`"* — 176 scanlines — and the counter is clocked *"on each rising edge of filtered A12,
+no matter what caused it"*, the filter being *"rising edge after the line has remained low for
+three falling edges of M2"*. That is what `A12Watcher` is written from (MR-A12-1), and the IRQ
+landing on scanline 174 is consistent with a reload requested in vblank.
+
+### The public tests that cover it, re-run on Zaxnes for this step
+
+| suite | ROMs | pass | the failures |
+|---|---|---|---|
+| `mmc3_test` | 6 | 5 | `6-MMC6` — *"IRQ shouldn't occur when reloading after counter normally reached 0"* |
+| `mmc3_test_2/rom_singles` | 6 | 5 | `6-MMC3_alt` — *"IRQ shouldn't be set when reloading to 0 due to counter naturally…"* |
+| `ppu_vbl_nmi` (the suite and its ten singles) | 11 | **11** | — |
+| `instr_timing` | 3 | **3** | — |
+| `cpu_timing_test6` | 1 | **1** | — |
+| `dmc_dma_during_read4` and the DMA ROMs | 8 | **6**, 2 *manual* | neither is a failure: the two have no documented verdict |
+
+`1-clocking`, `2-details`, `3-A12_clocking`, `4-scanline_timing` and `5-MMC3` pass on **both**
+suites — which is the public check of exactly the mechanism *Kirby* uses, scanline timing
+included.
+
+The two failures are the **revision-A** half of a contradictory pair, and REQ-CORE-100 pins mapper
+4 to revision B (AMD-061, Q-114). **They cannot be *Kirby*'s cause**, and that is a measurement
+rather than an assumption: nesdev puts the whole A-against-B difference at `$C000` = `$00` —
+revision B *"generates IRQs when the scanline counter is equal to 0"* and revision A *"only
+generates IRQs when the scanline counter changes (decrements) to zero from a non-zero value"* —
+and *Kirby* writes `$AF`. A game that never latches `$00` cannot tell the two revisions apart.
+
+### Two of EVAL-SYNC-2's candidates are now eliminated
+
+§4b of the report left two survivors, both about the boot, and both needing a `cfg`-gated
+experiment inside `zax-nes` to test. **Neither is needed any more**, because the 400 frames the
+fine reference covers include the whole boot and **every live byte of all 400 agrees**:
+
+| the candidate | what it predicted | what was measured |
+|---|---|---|
+| the PPU's power-on dot (Q-003, REQ-CORE-020) | the boot's chain of vblank waits comes out a frame boundary apart, so the one-frame A press at frame 63 lands differently | frames 1-400 agree in every live byte, the A presses at 63, 97 and 212 included |
+| the `$2005`/`$2006` write-inhibition window (Q-078 §1) | the same | the same |
+
+So the `cfg`-gated experiment EVAL-SYNC-2 asked for **should not be written**: the question it was
+to answer has been answered the other way by the reference the owner produced.
+
+### What remains, and exactly what would decide it
+
+**Undetermined**, and much smaller than it was. The movie still parts: the pictures differ at all
+six frames, and at frame 1 000 the difference is **275 pixels of 57 344, every one of them inside a
+single 25×17 box** — one object, with the background, the HUD and the score identical. So the
+divergence is somewhere in **frames 401 to 1 000** and begins as one object's state.
+
+Three things bound what it can be:
+
+* it is **not** in the boot or the first 400 frames (above);
+* it is **not** the overclock or any other part of the 3D extension, which is now locked and
+  measurably idle (0 stalled instructions a frame);
+* it is **not** `$2002`, sprite 0 or sprite overflow, which *Kirby* does not read at all.
+
+What is left, in order of what the trace makes plausible:
+
+1. **the dot at which the MMC3 IRQ lands.** Zaxnes puts it at scanline 174 dot 287 of frame 1 000.
+   `4-scanline_timing` passes on both suites, so Zaxnes is right by the public test; `NesHawk`'s
+   dot is not published, and a handful of dots either way moves where the game's handler runs
+   relative to the picture it is rewriting;
+2. **an open-bus or decay read.** The IRQ handler runs from zero page and the game writes
+   `$E000` from two places, which is the shape of code that reads back a bus it does not drive;
+   nothing in the frame-1 000 trace shows one, but the trace was not searched exhaustively for it;
+3. **a DMC or OAM DMA cycle landing differently.** Every public DMA ROM passes, so this is last.
+
+**The measurement that would decide it**, and it is the owner's to make — the same script that
+produced `kirby-jp-step1.txt`, pointed at a later window:
+
+| | |
+|---|---|
+| the frames | **400 to 1 100**, `step = 1` |
+| the format | exactly `kirby-jp-step1.txt`'s: `<f> <checksum> lag=<n> ram=<4096 hex digits>` |
+| why that window | it brackets the first picture difference from both sides: frame 400 is the last frame known to agree and frame 1 000 is the first known to differ |
+| what it answers in one run | the frame of the first live difference and its addresses, exactly as `kirby-jp-step1.txt` gave frame 247 and `$004B` |
+
+Held against `movie-sync --ram-ref`, that names the frame; `frame-trace --frame <f> --watch <addr>
+--converge` then names the instruction, as it did in step 2. **Nothing else is needed from this
+side first** — and in particular no change to `zax-nes`.
+
+If that trace shows the first live difference is in pages `$0400`-`$05FF` (where frame 249's 167
+bytes were concentrated: 124 in page 04, 28 in page 05) **and** the frame before it agrees, the
+second thing to ask for is a per-scanline log of that one frame:
+
+| per scanline 0-261, for the one frame | |
+|---|---|
+| `$2000` and `$2001` as the game last wrote them | the split's own state |
+| the MMC3 IRQ counter, its latch, whether a reload is pending and whether IRQs are enabled | the counter Zaxnes and `NesHawk` could disagree about |
+| the scanline **and dot** at which `/IRQ` is asserted, and at which the handler's first instruction runs | the one figure candidate 1 turns on |
+| the CPU cycle count at the start of the scanline | so that the two machines' frames can be lined up cycle for cycle rather than frame for frame |
+
+Zaxnes can produce all four from `frame-trace --out` today: the IRQ entry is marked in the trace
+and every line carries its scanline, dot and `CYC`.
