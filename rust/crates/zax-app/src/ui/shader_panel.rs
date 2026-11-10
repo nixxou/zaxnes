@@ -1,84 +1,404 @@
 //! The model of the shaders window (Rust-only, owner request), kept apart from its `ImGui` drawing
-//! so that the console mode can show the same choices with a gamepad later: the quick presets,
-//! the folder of the slang shaders, copying one slot to another, the state of the preset in use
-//! and the parameters of a preset, read on a thread of their own.
+//! so that the console mode can show the same choices with a gamepad later: the catalogue of
+//! presets of the shader pack, the menu of every preset of the pack, copying one slot to
+//! another, the state of the preset in use and the parameters of a preset, read on a thread of
+//! their own.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use zax_settings::model::SettingsModel;
 use zax_settings::shader_slots::{self, ShaderSlot, OFF, PRESET};
 use zax_settings::values::SettingValue;
 
-/// A preset the window offers in one click, from the folder of the slang shaders.
+/// The kind of look a preset of the catalogue gives, its submenu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QuickPreset {
+pub enum Family {
+    /// A cathode-ray tube: scanlines, mask, glow.
+    Crt,
+    /// A tube fed by a composite (NTSC) signal: the colour bleed of the console's own output.
+    Composite,
+    /// A TV around the picture (Mega Bezel), or its screen alone.
+    Bezel,
+    /// A handheld's LCD.
+    Lcd,
+    /// Pixel art smoothed or scaled sharp, without a tube.
+    Smoothing,
+}
+
+impl Family {
+    /// The families in the order of the menu.
+    pub const ALL: [Self; 5] = [
+        Self::Crt,
+        Self::Composite,
+        Self::Bezel,
+        Self::Lcd,
+        Self::Smoothing,
+    ];
+
+    /// The key of its name in the string tables.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Crt => "shaders.family.crt",
+            Self::Composite => "shaders.family.composite",
+            Self::Bezel => "shaders.family.bezel",
+            Self::Lcd => "shaders.family.lcd",
+            Self::Smoothing => "shaders.family.smoothing",
+        }
+    }
+}
+
+/// What a preset asks of the graphics card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cost {
+    /// Fit for a weak card or a handheld.
+    Light,
+    /// A desktop card.
+    Medium,
+    /// A strong card.
+    Heavy,
+}
+
+impl Cost {
+    /// The key of its name in the string tables.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Light => "shaders.cost.light",
+            Self::Medium => "shaders.cost.medium",
+            Self::Heavy => "shaders.cost.heavy",
+        }
+    }
+}
+
+/// The display modes a preset is put forward for, in the recommended part of the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Featured {
+    /// Not put forward.
+    No,
+    /// In every mode.
+    Always,
+    /// In the 4:3 modes.
+    Narrow,
+    /// In the widescreen modes.
+    Wide,
+}
+
+/// A preset of the catalogue: a path in the shader pack and what choosing it sets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CatalogPreset {
     /// The key of its name in the string tables.
     pub label: &'static str,
-    /// Its path in `libretro/slang-shaders`.
+    /// Its path in the pack (libretro/slang-shaders).
     pub path: &'static str,
+    /// Its submenu.
+    pub family: Family,
+    /// What it asks of the card.
+    pub cost: Cost,
+    /// Where it is recommended.
+    pub featured: Featured,
+    /// The parameters it starts with, beside the preset's own.
+    pub parameters: &'static [(&'static str, f32)],
+    /// Where it draws (`shader_slots::AREA_*`).
+    pub area: i32,
 }
 
-/// The quick presets: a few of the most used ones, from the light to the heavy.
-pub const QUICK_PRESETS: [QuickPreset; 5] = [
-    QuickPreset {
-        label: "shaders.quick.crt",
-        path: "crt/crt-easymode.slangp",
-    },
-    QuickPreset {
-        label: "shaders.quick.guest",
-        path: "crt/crt-guest-advanced.slangp",
-    },
-    QuickPreset {
-        label: "shaders.quick.mega_bezel",
-        path: "bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp",
-    },
-    QuickPreset {
-        label: "shaders.quick.mega_bezel_light",
-        path: "bezel/Mega_Bezel/Presets/MBZ__5__POTATO.slangp",
-    },
-    QuickPreset {
-        label: "shaders.quick.lcd",
-        path: "handheld/lcd-grid-v2.slangp",
-    },
+/// The Mega Bezel screen at the aspect of the picture it reads (PAR): a widescreen picture
+/// gets a widescreen TV, where the preset's own guess would squeeze it into 4:3.
+const MEGA_BEZEL_TV: &[(&str, f32)] = &[("HSM_ASPECT_RATIO_MODE", 5.0)];
+/// The Mega Bezel screen over the whole area it draws in (the picture, of any aspect).
+const MEGA_BEZEL_SCREEN: &[(&str, f32)] = &[("HSM_ASPECT_RATIO_MODE", 6.0)];
+
+const fn entry(
+    label: &'static str,
+    path: &'static str,
+    family: Family,
+    cost: Cost,
+    featured: Featured,
+) -> CatalogPreset {
+    CatalogPreset {
+        label,
+        path,
+        family,
+        cost,
+        featured,
+        parameters: &[],
+        area: shader_slots::AREA_AUTO,
+    }
+}
+
+const fn tv(entry: CatalogPreset) -> CatalogPreset {
+    CatalogPreset {
+        parameters: MEGA_BEZEL_TV,
+        ..entry
+    }
+}
+
+const fn screen(entry: CatalogPreset) -> CatalogPreset {
+    CatalogPreset {
+        parameters: MEGA_BEZEL_SCREEN,
+        area: shader_slots::AREA_PICTURE,
+        ..entry
+    }
+}
+
+/// The catalogue: the presets most played with NES-era consoles, from the light to the heavy
+/// (the guides and the libretro forums put forward Guest Advanced and its NTSC variant, Mega
+/// Bezel, Royale, Lottes, Easymode, and zfast or CRT-Pi for the weak cards).
+pub const CATALOGUE: [CatalogPreset; 22] = [
+    entry(
+        "shaders.preset.guest",
+        "crt/crt-guest-advanced.slangp",
+        Family::Crt,
+        Cost::Medium,
+        Featured::Always,
+    ),
+    entry(
+        "shaders.preset.easymode",
+        "crt/crt-easymode.slangp",
+        Family::Crt,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.zfast",
+        "crt/zfast-crt.slangp",
+        Family::Crt,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.crt_pi",
+        "crt/crt-pi.slangp",
+        Family::Crt,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.nes_mini",
+        "crt/crt-nes-mini.slangp",
+        Family::Crt,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.lottes",
+        "crt/crt-lottes.slangp",
+        Family::Crt,
+        Cost::Medium,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.hyllian",
+        "crt/crt-hyllian.slangp",
+        Family::Crt,
+        Cost::Medium,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.geom",
+        "crt/crt-geom.slangp",
+        Family::Crt,
+        Cost::Medium,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.royale",
+        "crt/crt-royale.slangp",
+        Family::Crt,
+        Cost::Heavy,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.guest_ntsc",
+        "crt/crt-guest-advanced-ntsc.slangp",
+        Family::Composite,
+        Cost::Medium,
+        Featured::Always,
+    ),
+    entry(
+        "shaders.preset.ntsc_nes",
+        "ntsc/ntsc-256px-composite-scanline.slangp",
+        Family::Composite,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.blargg",
+        "ntsc/blargg.slangp",
+        Family::Composite,
+        Cost::Light,
+        Featured::No,
+    ),
+    tv(entry(
+        "shaders.preset.mega_bezel",
+        "bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp",
+        Family::Bezel,
+        Cost::Heavy,
+        Featured::Narrow,
+    )),
+    tv(entry(
+        "shaders.preset.mega_bezel_light",
+        "bezel/Mega_Bezel/Presets/MBZ__5__POTATO.slangp",
+        Family::Bezel,
+        Cost::Medium,
+        Featured::No,
+    )),
+    tv(entry(
+        "shaders.preset.mega_bezel_reflect",
+        "bezel/Mega_Bezel/Presets/MBZ__1__ADV.slangp",
+        Family::Bezel,
+        Cost::Heavy,
+        Featured::No,
+    )),
+    screen(entry(
+        "shaders.preset.mega_bezel_screen",
+        "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_4__STD-SCREEN-ONLY.slangp",
+        Family::Bezel,
+        Cost::Medium,
+        Featured::Wide,
+    )),
+    screen(entry(
+        "shaders.preset.mega_bezel_screen_ntsc",
+        "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_4__STD-SCREEN-ONLY__NTSC.slangp",
+        Family::Bezel,
+        Cost::Medium,
+        Featured::No,
+    )),
+    screen(entry(
+        "shaders.preset.mega_bezel_screen_light",
+        "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_5__POTATO.slangp",
+        Family::Bezel,
+        Cost::Light,
+        Featured::No,
+    )),
+    entry(
+        "shaders.preset.lcd",
+        "handheld/lcd-grid-v2.slangp",
+        Family::Lcd,
+        Cost::Light,
+        Featured::Narrow,
+    ),
+    entry(
+        "shaders.preset.sharp",
+        "pixel-art-scaling/sharp-bilinear-simple.slangp",
+        Family::Smoothing,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.xbrz",
+        "edge-smoothing/xbrz/xbrz-freescale.slangp",
+        Family::Smoothing,
+        Cost::Medium,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.scalefx",
+        "edge-smoothing/scalefx/scalefx.slangp",
+        Family::Smoothing,
+        Cost::Medium,
+        Featured::No,
+    ),
 ];
 
-/// Where the slang-shaders collection is looked for when `shader.library` is empty, under the
-/// folder of the program and under the user folder.
-const LIBRARY_NAMES: [&str; 2] = ["shaders", "slang-shaders"];
-
-/// The folder of the slang shaders: `shader.library` when set, otherwise the first of
-/// `shaders` or `slang-shaders` beside the program or in the user folder `user_root`.
+/// Whether `preset` is put forward for `slot`.
 #[must_use]
-pub fn library_folder(model: &SettingsModel, user_root: &Path) -> Option<PathBuf> {
-    let chosen = model
-        .get(zax_settings::catalogue::SettingId::ShaderLibrary)
-        .as_text()
-        .trim()
-        .to_owned();
-    if !chosen.is_empty() {
-        return Some(PathBuf::from(chosen));
+pub const fn featured_for(preset: &CatalogPreset, slot: ShaderSlot) -> bool {
+    let (_, wide) = mode_of(slot);
+    match preset.featured {
+        Featured::No => false,
+        Featured::Always => true,
+        Featured::Narrow => !wide,
+        Featured::Wide => wide,
     }
-    let program = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf));
-    program
-        .into_iter()
-        .chain(std::iter::once(user_root.to_path_buf()))
-        .flat_map(|root| LIBRARY_NAMES.map(|name| root.join(name)))
-        .find(|folder| folder.is_dir())
 }
 
-/// The quick presets found in `library`, with their full paths.
+/// The catalogue entry of the stored preset `path`, if it is one.
 #[must_use]
-pub fn available_quick_presets(library: Option<&Path>) -> Vec<(QuickPreset, PathBuf)> {
-    let Some(library) = library else {
-        return Vec::new();
-    };
-    QUICK_PRESETS
-        .into_iter()
-        .map(|quick| (quick, library.join(quick.path)))
-        .filter(|(_, path)| path.is_file())
-        .collect()
+pub fn catalogue_entry(path: &str) -> Option<&'static CatalogPreset> {
+    let path = path.replace('\\', "/");
+    CATALOGUE.iter().find(|preset| preset.path == path)
+}
+
+/// The parameters a preset of the catalogue starts with, as the settings store them (none for
+/// a preset outside it): what `Reset all` returns it to.
+#[must_use]
+pub fn starting_parameters(path: &str) -> String {
+    let parameters: Vec<(String, f32)> = catalogue_entry(path)
+        .map(|preset| {
+            preset
+                .parameters
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), *value))
+                .collect()
+        })
+        .unwrap_or_default();
+    shader_slots::format_parameters(&parameters)
+}
+
+/// Sets `slot` to the preset `path` of the pack, with the catalogue's parameters and area when
+/// it is one of its entries (none and the automatic area otherwise).
+pub fn choose_preset(model: &mut SettingsModel, slot: ShaderSlot, path: &str) {
+    let ids = slot.ids();
+    let area = catalogue_entry(path).map_or(shader_slots::AREA_AUTO, |preset| preset.area);
+    model.set(ids.mode, SettingValue::Enum(PRESET));
+    model.set(ids.preset, path);
+    model.set(ids.params, starting_parameters(path).as_str());
+    model.set(ids.area, SettingValue::Enum(area));
+}
+
+/// A folder of the shader pack, for the menu of every preset.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PresetFolder {
+    /// Its name.
+    pub name: String,
+    /// Its folders that hold presets, by name.
+    pub folders: Vec<PresetFolder>,
+    /// Its presets: the name shown and the path in the pack.
+    pub presets: Vec<(String, String)>,
+}
+
+impl PresetFolder {
+    /// The presets (`*.slangp`) under `folder`, `relative` being its path in the pack.
+    #[must_use]
+    pub fn read(folder: &Path, relative: &str) -> Self {
+        let mut node = Self {
+            name: folder
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            ..Self::default()
+        };
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            return node;
+        };
+        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = if relative.is_empty() {
+                name.clone()
+            } else {
+                format!("{relative}/{name}")
+            };
+            if entry.path().is_dir() {
+                let child = Self::read(&entry.path(), &path);
+                if !child.is_empty() {
+                    node.folders.push(child);
+                }
+            } else if let Some(stem) = name.strip_suffix(".slangp") {
+                node.presets.push((stem.to_owned(), path));
+            }
+        }
+        node
+    }
+
+    /// Whether it holds no preset at any depth.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.presets.is_empty() && self.folders.iter().all(Self::is_empty)
+    }
 }
 
 /// The display mode of `slot`: (3D, widescreen).
@@ -120,18 +440,6 @@ pub fn copy_slot(model: &mut SettingsModel, from: ShaderSlot, to: ShaderSlot) {
     }
 }
 
-/// `preset` relative to `library` when it is inside, for a shorter display.
-#[must_use]
-pub fn display_path(preset: &str, library: Option<&Path>) -> String {
-    let path = Path::new(preset);
-    library
-        .and_then(|library| path.strip_prefix(library).ok())
-        .map_or_else(
-            || preset.to_owned(),
-            |relative| relative.display().to_string(),
-        )
-}
-
 /// What the renderer is doing with the shaders, which the application writes every frame for
 /// the window to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -154,7 +462,7 @@ pub enum ShaderState {
 pub struct ShaderReport {
     /// What the renderer is doing.
     pub state: ShaderState,
-    /// The preset concerned.
+    /// The preset concerned, as a file.
     pub preset: String,
     /// Why it was refused.
     pub problem: String,
@@ -304,12 +612,39 @@ mod tests {
     }
 
     #[test]
-    fn a_path_inside_the_library_shows_relative() {
-        let library = Path::new("G:/slang-shaders");
+    fn choosing_a_catalogue_preset_sets_its_parameters_and_area() {
+        let mut model = SettingsModel::new();
+        let screen = CATALOGUE
+            .iter()
+            .find(|preset| preset.featured == Featured::Wide)
+            .expect("a widescreen preset");
+        choose_preset(&mut model, ShaderSlot::TwoDWide, screen.path);
+        assert_eq!(model.get(SettingId::Shader2dWsMode).as_int(), PRESET);
+        assert_eq!(model.get(SettingId::Shader2dWsPreset).as_text(), screen.path);
         assert_eq!(
-            display_path("G:/slang-shaders/crt/crt-easymode.slangp", Some(library)),
-            Path::new("crt/crt-easymode.slangp").display().to_string()
+            model.get(SettingId::Shader2dWsParams).as_text(),
+            "HSM_ASPECT_RATIO_MODE=6"
         );
-        assert_eq!(display_path("D:/x.slangp", Some(library)), "D:/x.slangp");
+        assert_eq!(
+            model.get(SettingId::Shader2dWsArea).as_int(),
+            shader_slots::AREA_PICTURE
+        );
+        assert_eq!(starting_parameters(screen.path), "HSM_ASPECT_RATIO_MODE=6");
+        choose_preset(&mut model, ShaderSlot::TwoDWide, "crt/other.slangp");
+        assert_eq!(model.get(SettingId::Shader2dWsParams).as_text(), "");
+        assert!(featured_for(screen, ShaderSlot::ThreeDWide));
+        assert!(!featured_for(screen, ShaderSlot::TwoD));
+    }
+
+    #[test]
+    fn the_catalogue_is_in_the_pack_list() {
+        let list = include_str!("../../shaders/pack-files.txt");
+        for preset in &CATALOGUE {
+            assert!(
+                list.lines().any(|line| line == preset.path),
+                "{}",
+                preset.path
+            );
+        }
     }
 }

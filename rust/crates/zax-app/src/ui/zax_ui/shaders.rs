@@ -1,6 +1,8 @@
 //! The shaders window (Rust-only, owner request): one tab per display mode (2D, 2D widescreen,
-//! 3D, 3D widescreen), each with its slang preset, the quick presets, a copy from another tab,
-//! the lines and area of the picture, and a slider per parameter of the preset.
+//! 3D, 3D widescreen), each with its slang preset picked from the shader pack Zaxnes carries
+//! (the recommended ones of the mode as buttons, a menu of the catalogue by family, and a menu of
+//! every preset of the pack), a copy from another tab, the lines and area of the picture, and a
+//! slider per parameter of the preset.
 
 use imgui::{Condition, TabItem, Ui, WindowFlags};
 use zax_settings::catalogue::SettingId;
@@ -11,10 +13,11 @@ use zax_settings::shader_slots::{
 };
 use zax_settings::values::SettingValue;
 
-use super::{centre, play, BrowserPurpose, ZaxUi};
+use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
-use crate::ui::shader_panel::{self, ShaderState};
+use crate::shader_pack;
+use crate::ui::shader_panel::{self, Family, PresetFolder, ShaderState, CATALOGUE};
 use crate::ui::strings;
 
 /// The window's default size.
@@ -32,17 +35,11 @@ const HEADING: [f32; 4] = [0.6, 0.75, 1.0, 1.0];
 /// The fields of the window that live between frames.
 #[derive(Default)]
 pub struct ShaderWindow {
-    /// The preset field of the tab shown, while it is being typed.
-    preset_text: String,
-    preset_editing: bool,
-    /// The folder field, while it is being typed.
-    library_text: String,
-    library_editing: bool,
     /// The filter of the parameter list.
     #[cfg(feature = "shaders")]
     filter: String,
-    /// The slot whose preset the file dialog chooses.
-    browsing: Option<ShaderSlot>,
+    /// The presets of the pack, read when their menu first opens.
+    pack: Option<PresetFolder>,
     /// The parameters of the preset shown.
     #[cfg(feature = "shaders")]
     parameters: shader_panel::ParameterCache,
@@ -61,6 +58,12 @@ fn slot_label(slot: ShaderSlot) -> String {
     })
 }
 
+/// The name a stored preset is shown by: its catalogue name, or its path in the pack.
+fn preset_label(stored: &str) -> String {
+    shader_panel::catalogue_entry(stored)
+        .map_or_else(|| stored.to_owned(), |preset| tr(preset.label))
+}
+
 /// A combo over `values` with `labels`; the value chosen when it changed.
 fn choice(ui: &Ui, label: &str, current: i32, values: &[i32], labels: &[String]) -> Option<i32> {
     let mut index = values
@@ -71,6 +74,29 @@ fn choice(ui: &Ui, label: &str, current: i32, values: &[i32], labels: &[String])
         return values.get(index).copied().filter(|value| *value != current);
     }
     None
+}
+
+/// The menu of a folder of the pack: its folders as submenus, then its presets; the path of
+/// the preset clicked.
+fn folder_menu(ui: &Ui, folder: &PresetFolder, stored: &str) -> Option<String> {
+    let mut chosen = None;
+    for child in &folder.folders {
+        if let Some(_menu) = ui.begin_menu(&child.name) {
+            if let Some(path) = folder_menu(ui, child, stored) {
+                chosen = Some(path);
+            }
+        }
+    }
+    for (name, path) in &folder.presets {
+        if ui
+            .menu_item_config(format!("{name}##{path}"))
+            .selected(path == stored)
+            .build()
+        {
+            chosen = Some(path.clone());
+        }
+    }
+    chosen
 }
 
 impl ZaxUi {
@@ -87,10 +113,12 @@ impl ZaxUi {
             .opened(&mut open)
             .begin();
         if let Some(_window) = window {
-            if cfg!(feature = "shaders") {
-                self.draw_shader_contents(ui, host);
-            } else {
+            if !cfg!(feature = "shaders") {
                 ui.text_wrapped(tr("shaders.not_built"));
+            } else if !shader_pack::carried() {
+                ui.text_wrapped(tr("shaders.pack_missing"));
+            } else {
+                self.draw_shader_contents(ui, host);
             }
         }
         self.state.shaders = open;
@@ -112,8 +140,6 @@ impl ZaxUi {
             }
             ui.separator();
         }
-        self.draw_library_row(ui, host);
-        ui.separator();
         if let Some(_bar) = ui.tab_bar("##shader_slots") {
             for slot in ShaderSlot::ALL {
                 let mut label = slot_label(slot);
@@ -126,42 +152,6 @@ impl ZaxUi {
                 };
                 self.draw_slot(ui, host, slot, &report);
             }
-        }
-    }
-
-    fn draw_library_row(&mut self, ui: &Ui, host: &mut AppHost) {
-        let stored = host
-            .settings()
-            .get(SettingId::ShaderLibrary)
-            .as_text()
-            .to_owned();
-        if !self.shader_window.library_editing {
-            self.shader_window.library_text.clone_from(&stored);
-        }
-        let found = shader_panel::library_folder(host.settings(), &host.paths().root);
-        let hint = found.as_ref().map_or_else(
-            || tr("shaders.library_hint"),
-            |path| path.display().to_string(),
-        );
-        let width = ui.push_item_width(-ui.calc_text_size(tr("shaders.browse"))[0] - 160.0);
-        let entered = ui
-            .input_text(tr("shaders.library"), &mut self.shader_window.library_text)
-            .hint(&hint)
-            .enter_returns_true(true)
-            .build();
-        drop(width);
-        self.shader_window.library_editing = ui.is_item_active();
-        let left = ui.is_item_deactivated_after_edit();
-        if (entered || left) && self.shader_window.library_text.trim() != stored {
-            let value = self.shader_window.library_text.trim().to_owned();
-            host.update_settings(|model| model.set(SettingId::ShaderLibrary, value.as_str()));
-        }
-        ui.same_line();
-        if ui.button(format!("{}##library", tr("shaders.browse"))) {
-            self.open_browser(host, BrowserPurpose::ShaderLibrary);
-        }
-        if found.is_none() {
-            ui.text_wrapped(tr("shaders.library_missing"));
         }
     }
 
@@ -195,12 +185,10 @@ impl ZaxUi {
         let lines = host.settings().get(ids.lines).as_int();
         let line_labels: Vec<String> = LINE_CHOICES
             .iter()
-            .map(|lines| {
-                if *lines == 0 {
-                    tr("shaders.lines.window")
-                } else {
-                    lines.to_string()
-                }
+            .map(|lines| match *lines {
+                0 => tr("shaders.lines.window"),
+                240 => tr("shaders.lines.console"),
+                lines => lines.to_string(),
             })
             .collect();
         if let Some(value) = choice(ui, &tr("shaders.lines"), lines, &LINE_CHOICES, &line_labels) {
@@ -210,6 +198,7 @@ impl ZaxUi {
             ui.tooltip_text(tr("shaders.lines.help"));
         }
         ui.separator();
+        Self::draw_quick_row(ui, host, slot);
         match host.settings().get(ids.mode).as_int() {
             FOLLOW => {
                 if let Some(parent) = slot.fallback() {
@@ -245,6 +234,106 @@ impl ZaxUi {
         }
     }
 
+    /// The presets the catalogue recommends for the mode of `slot`, one button each; a click
+    /// gives the slot that preset.
+    fn draw_quick_row(ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
+        let ids = slot.ids();
+        let using = host.settings().get(ids.mode).as_int() == PRESET;
+        let stored = host.settings().get(ids.preset).as_text().to_owned();
+        ui.text(tr("shaders.quick"));
+        for (index, preset) in CATALOGUE
+            .iter()
+            .filter(|preset| shader_panel::featured_for(preset, slot))
+            .enumerate()
+        {
+            ui.same_line();
+            let chosen = using && stored == preset.path;
+            let _style = chosen
+                .then(|| ui.push_style_color(imgui::StyleColor::Button, [0.25, 0.5, 0.3, 1.0]));
+            if ui.button(format!("{}##quick{index}", tr(preset.label))) && !chosen {
+                host.update_settings(|model| {
+                    shader_panel::choose_preset(model, slot, preset.path);
+                });
+                play(host, UiSound::Confirm);
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(format!(
+                    "{}\n{}",
+                    tr(&format!("{}.help", preset.label)),
+                    tr(preset.cost.label())
+                ));
+            }
+        }
+    }
+
+    /// The preset of the slot, and the menu that changes it.
+    fn draw_preset_menu(&mut self, ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
+        let ids = slot.ids();
+        let stored = host.settings().get(ids.preset).as_text().to_owned();
+        let shown = if stored.is_empty() {
+            tr("shaders.preset.choose")
+        } else {
+            preset_label(&stored)
+        };
+        let combo = ui.begin_combo(tr("shaders.preset"), &shown);
+        if combo.is_none() && ui.is_item_hovered() && !stored.is_empty() {
+            ui.tooltip_text(&stored);
+        }
+        let Some(_combo) = combo else {
+            return;
+        };
+        let mut chosen: Option<String> = None;
+        ui.text_disabled(tr("shaders.menu.recommended"));
+        for preset in CATALOGUE
+            .iter()
+            .filter(|preset| shader_panel::featured_for(preset, slot))
+        {
+            if ui
+                .menu_item_config(format!("{}##rec{}", tr(preset.label), preset.path))
+                .selected(stored == preset.path)
+                .build()
+            {
+                chosen = Some(preset.path.to_owned());
+            }
+        }
+        ui.separator();
+        for family in Family::ALL {
+            let Some(_menu) = ui.begin_menu(tr(family.label())) else {
+                continue;
+            };
+            for preset in CATALOGUE.iter().filter(|preset| preset.family == family) {
+                let clicked = ui
+                    .menu_item_config(format!("{}##cat{}", tr(preset.label), preset.path))
+                    .shortcut(tr(preset.cost.label()))
+                    .selected(stored == preset.path)
+                    .build();
+                if ui.is_item_hovered() {
+                    ui.tooltip_text(tr(&format!("{}.help", preset.label)));
+                }
+                if clicked {
+                    chosen = Some(preset.path.to_owned());
+                }
+            }
+        }
+        ui.separator();
+        if let Some(_menu) = ui.begin_menu(tr("shaders.menu.all")) {
+            let pack = self.shader_window.pack.get_or_insert_with(|| {
+                PresetFolder::read(&shader_pack::folder(&host.paths().root), "")
+            });
+            if pack.is_empty() {
+                ui.text_disabled(tr("shaders.menu.empty"));
+            } else if let Some(path) = folder_menu(ui, pack, &stored) {
+                chosen = Some(path);
+            }
+        }
+        if let Some(path) = chosen {
+            if path != stored {
+                host.update_settings(|model| shader_panel::choose_preset(model, slot, &path));
+                play(host, UiSound::Confirm);
+            }
+        }
+    }
+
     fn draw_preset(
         &mut self,
         ui: &Ui,
@@ -253,61 +342,8 @@ impl ZaxUi {
         report: &shader_panel::ShaderReport,
     ) {
         let ids = slot.ids();
-        let library = shader_panel::library_folder(host.settings(), &host.paths().root);
-        let quick = shader_panel::available_quick_presets(library.as_deref());
+        self.draw_preset_menu(ui, host, slot);
         let stored = host.settings().get(ids.preset).as_text().to_owned();
-        if !quick.is_empty() {
-            ui.text(tr("shaders.quick"));
-            for (index, (preset, path)) in quick.iter().enumerate() {
-                if index > 0 {
-                    ui.same_line();
-                }
-                let chosen = std::path::Path::new(&stored) == path.as_path();
-                let path = path.display().to_string();
-                let label = format!("{}##quick{index}", tr(preset.label));
-                let _style = chosen
-                    .then(|| ui.push_style_color(imgui::StyleColor::Button, [0.25, 0.5, 0.3, 1.0]));
-                if ui.button(label) && !chosen {
-                    host.update_settings(|model| {
-                        model.set(ids.preset, path.as_str());
-                        model.set(ids.params, "");
-                    });
-                    play(host, UiSound::Confirm);
-                }
-            }
-        }
-        if !self.shader_window.preset_editing {
-            self.shader_window.preset_text =
-                shader_panel::display_path(&stored, library.as_deref());
-        }
-        let width = ui.push_item_width(-ui.calc_text_size(tr("shaders.browse"))[0] - 120.0);
-        let entered = ui
-            .input_text(tr("shaders.preset"), &mut self.shader_window.preset_text)
-            .enter_returns_true(true)
-            .build();
-        drop(width);
-        self.shader_window.preset_editing = ui.is_item_active();
-        let left = ui.is_item_deactivated_after_edit();
-        if entered || left {
-            let typed = self.shader_window.preset_text.trim().to_owned();
-            let full = match &library {
-                Some(library) if !std::path::Path::new(&typed).is_absolute() => {
-                    library.join(&typed).display().to_string()
-                }
-                _ => typed,
-            };
-            if full != stored {
-                host.update_settings(|model| {
-                    model.set(ids.preset, full.as_str());
-                    model.set(ids.params, "");
-                });
-            }
-        }
-        ui.same_line();
-        if ui.button(format!("{}##preset", tr("shaders.browse"))) {
-            self.shader_window.browsing = Some(slot);
-            self.open_browser(host, BrowserPurpose::ShaderPreset);
-        }
         let area = host.settings().get(ids.area).as_int();
         if let Some(value) = choice(
             ui,
@@ -325,7 +361,10 @@ impl ZaxUi {
         if ui.is_item_hovered() {
             ui.tooltip_text(tr("shaders.area.help"));
         }
-        if !stored.is_empty() && report.preset == stored {
+        let file = shader_pack::resolve(&host.paths().root, &stored)
+            .display()
+            .to_string();
+        if !stored.is_empty() && report.preset == file {
             match report.state {
                 ShaderState::Compiling => ui.text_colored(YELLOW, tr("shaders.state.compiling")),
                 ShaderState::Active => ui.text_colored(GREEN, tr("shaders.state.active")),
@@ -337,22 +376,39 @@ impl ZaxUi {
             }
         }
         if !stored.is_empty() {
-            self.draw_parameters(ui, host, slot, &stored);
+            self.draw_parameters(ui, host, slot, &stored, &file);
         }
     }
 
     #[cfg(not(feature = "shaders"))]
     #[allow(clippy::unused_self)]
-    fn draw_parameters(&mut self, _ui: &Ui, _host: &mut AppHost, _slot: ShaderSlot, _: &str) {}
+    fn draw_parameters(&mut self, _: &Ui, _: &mut AppHost, _: ShaderSlot, _: &str, _: &str) {}
 
     #[cfg(feature = "shaders")]
-    fn draw_parameters(&mut self, ui: &Ui, host: &mut AppHost, slot: ShaderSlot, preset: &str) {
+    #[allow(clippy::too_many_lines)] // The list of sliders and its buttons.
+    fn draw_parameters(
+        &mut self,
+        ui: &Ui,
+        host: &mut AppHost,
+        slot: ShaderSlot,
+        stored: &str,
+        file: &str,
+    ) {
         let ids = slot.ids();
         self.shader_window
             .parameters
-            .want(std::path::Path::new(preset));
+            .want(std::path::Path::new(file));
         let overrides = shader_slots::parse_parameters(host.settings().get(ids.params).as_text());
-        let title = strings::format(&tr("shaders.parameters"), &[&overrides.len().to_string()]);
+        let starting = shader_slots::parse_parameters(&shader_panel::starting_parameters(stored));
+        let changed_count = overrides
+            .iter()
+            .filter(|entry| !starting.contains(entry))
+            .count()
+            + starting
+                .iter()
+                .filter(|(name, _)| !overrides.iter().any(|(known, _)| known == name))
+                .count();
+        let title = strings::format(&tr("shaders.parameters"), &[&changed_count.to_string()]);
         if !ui.collapsing_header(
             format!("{title}###parameters"),
             imgui::TreeNodeFlags::DEFAULT_OPEN,
@@ -379,8 +435,9 @@ impl ZaxUi {
             .build();
         drop(width);
         ui.same_line();
-        if ui.button(tr("shaders.reset_all")) && !overrides.is_empty() {
-            host.update_settings(|model| model.set(ids.params, ""));
+        if ui.button(tr("shaders.reset_all")) && changed_count > 0 {
+            let text = shader_panel::starting_parameters(stored);
+            host.update_settings(|model| model.set(ids.params, text.as_str()));
             play(host, UiSound::Confirm);
         }
         let filter = self.shader_window.filter.trim().to_lowercase();
@@ -402,9 +459,10 @@ impl ZaxUi {
                 }
                 continue;
             }
+            // The value a reset returns to: the catalogue's, or the preset's own.
+            let default = shader_panel::parameter_value(&starting, &info.name, info.initial);
             let current = shader_panel::parameter_value(&overrides, &info.name, info.initial);
             let mut value = current;
-            let modified = overrides.iter().any(|(name, _)| *name == info.name);
             let _id = ui.push_id(info.name.as_str());
             let width = ui.push_item_width(-150.0);
             let label = if info.description.is_empty() {
@@ -422,7 +480,7 @@ impl ZaxUi {
                     "{}\n{} {}",
                     info.name,
                     tr("shaders.parameters.default"),
-                    info.initial
+                    default
                 ));
             }
             if moved {
@@ -433,10 +491,12 @@ impl ZaxUi {
                     changed = true;
                 }
             }
-            if modified {
+            if (current - default).abs() > f32::EPSILON {
                 ui.same_line();
                 if ui.small_button(tr("shaders.reset")) {
-                    text = shader_slots::with_parameter(&text, &info.name, None);
+                    let kept =
+                        ((default - info.initial).abs() > f32::EPSILON).then_some(default);
+                    text = shader_slots::with_parameter(&text, &info.name, kept);
                     changed = true;
                 }
             }
@@ -444,18 +504,5 @@ impl ZaxUi {
         if changed {
             host.update_settings(|model| model.set(ids.params, text.as_str()));
         }
-    }
-
-    /// The file dialog answered with the preset of the slot it was opened for.
-    pub(super) fn shader_preset_chosen(&mut self, host: &mut AppHost, path: &str) {
-        let Some(slot) = self.shader_window.browsing.take() else {
-            return;
-        };
-        let ids = slot.ids();
-        host.update_settings(|model| {
-            model.set(ids.mode, SettingValue::Enum(PRESET));
-            model.set(ids.preset, path);
-            model.set(ids.params, "");
-        });
     }
 }

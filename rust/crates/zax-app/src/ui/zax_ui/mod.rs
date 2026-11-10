@@ -94,19 +94,12 @@ pub enum BrowserPurpose {
     ThreeDSen,
     /// A movie to play (EDITOR-1): `.fm2` or Zaxnes's own.
     Movie,
-    /// The slang preset of a shader slot (Rust-only).
-    ShaderPreset,
-    /// The folder of the slang-shaders collection (Rust-only).
-    ShaderLibrary,
 }
 
 impl BrowserPurpose {
     /// Whether the answer is a folder rather than a file.
     const fn wants_folder(self) -> bool {
-        matches!(
-            self,
-            Self::ThreeDSen | Self::RomsFolder | Self::ShaderLibrary
-        )
+        matches!(self, Self::ThreeDSen | Self::RomsFolder)
     }
 }
 
@@ -571,8 +564,6 @@ impl ZaxUi {
             BrowserPurpose::Profile => text::import_profile_title(),
             BrowserPurpose::RomsFolder => text::roms_folder_title(),
             BrowserPurpose::Movie => text::open_movie_title(),
-            BrowserPurpose::ShaderPreset => crate::ui::strings::get("shaders.browse_preset"),
-            BrowserPurpose::ShaderLibrary => crate::ui::strings::get("shaders.browse_library"),
         }
     }
 
@@ -582,9 +573,8 @@ impl ZaxUi {
             BrowserPurpose::Cover => file_browser::cover_filters(),
             BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
-            BrowserPurpose::RomsFolder | BrowserPurpose::ShaderLibrary => Vec::new(),
+            BrowserPurpose::RomsFolder => Vec::new(),
             BrowserPurpose::Movie => file_browser::movie_filters(),
-            BrowserPurpose::ShaderPreset => file_browser::shader_filters(),
         }
     }
 
@@ -678,10 +668,6 @@ impl ZaxUi {
             BrowserPurpose::Profile => self.import_profile(host, path),
             BrowserPurpose::RomsFolder => {
                 host.update_settings(|model| model.set(SettingId::UiRomsFolder, path));
-            }
-            BrowserPurpose::ShaderPreset => self.shader_preset_chosen(host, path),
-            BrowserPurpose::ShaderLibrary => {
-                host.update_settings(|model| model.set(SettingId::ShaderLibrary, path));
             }
         }
     }

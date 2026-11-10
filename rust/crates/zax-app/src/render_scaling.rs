@@ -54,27 +54,34 @@ pub fn shader_lines(view_width: i32, view_height: i32, lines: u32) -> (i32, i32)
     (width.max(1), lines)
 }
 
-/// The 2D picture of `aspect` drawn at `lines` lines (0: the view's own height), never more
-/// lines than the view has.
+/// The 2D picture of `size` console pixels (`Scene::picture_size`) for a preset that reads
+/// `lines` lines: 240 give the console's own pixels one for one, 480 twice as many, 0 the
+/// view's height; never more lines than the view has.
 #[cfg(feature = "shaders")]
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // view sizes < 2^24
-pub fn picture_lines(aspect: f32, lines: u32, view_height: i32) -> (i32, i32) {
-    let view_height = view_height.max(1);
-    let lines = if lines == 0 {
-        view_height
+pub fn picture_lines(size: (f32, f32), lines: u32, view_height: i32) -> (i32, i32) {
+    let view_height = view_height.max(1) as f32;
+    let (width, height) = if size.0.is_finite() && size.1.is_finite() && size.1 >= 1.0 {
+        (size.0.max(1.0), size.1)
     } else {
-        i32::try_from(lines)
-            .unwrap_or(i32::MAX)
-            .clamp(1, view_height)
+        (256.0, 240.0)
     };
-    let aspect = if aspect.is_finite() && aspect > 0.0 {
-        aspect
+    let scale = if lines == 0 {
+        view_height / height
     } else {
-        4.0 / 3.0
-    };
-    (((lines as f32) * aspect).round().max(1.0) as i32, lines)
+        lines as f32 / CONSOLE_LINES
+    }
+    .min(view_height / height);
+    (
+        (width * scale).round().max(1.0) as i32,
+        (height * scale).round().max(1.0) as i32,
+    )
 }
+
+/// The lines of the console's picture.
+#[cfg(feature = "shaders")]
+const CONSOLE_LINES: f32 = 240.0;
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 // the C# `(int)MathF.Round(size * factor)` of a view size below 2^24

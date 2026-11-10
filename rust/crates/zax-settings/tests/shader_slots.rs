@@ -113,8 +113,7 @@ fn the_twenty_keys_are_in_the_catalogue() {
         .map(|descriptor| descriptor.key().into_owned())
         .filter(|key| key.starts_with("shader."))
         .collect();
-    assert_eq!(keys.len(), 21);
-    assert!(keys.contains(&"shader.library".to_owned()));
+    assert_eq!(keys.len(), 20);
     for slot in ["2d", "2d_ws", "3d", "3d_ws"] {
         for part in ["mode", "preset", "lines", "params", "area"] {
             assert!(

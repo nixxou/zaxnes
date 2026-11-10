@@ -200,7 +200,8 @@ pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<Shade
 
 /// Whether a preset of `area` (`shader.<slot>.area`) draws over the whole window: in Auto, the
 /// presets that draw a bezel around the picture do (their path names a bezel folder, as the
-/// Mega Bezel, koko-aio and uborder ones of `RetroArch`'s collection do).
+/// Mega Bezel, koko-aio and uborder ones of `RetroArch`'s collection do), save the Mega Bezel
+/// presets that draw the screen alone (`Screen-Only`).
 #[must_use]
 pub fn fills_window(area: i32, preset: &str) -> bool {
     match area {
@@ -211,6 +212,7 @@ pub fn fills_window(area: i32, preset: &str) -> bool {
             ["bezel", "koko-aio", "uborder"]
                 .iter()
                 .any(|word| path.contains(word))
+                && !path.contains("screen-only")
         }
     }
 }

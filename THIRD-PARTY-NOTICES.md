@@ -238,6 +238,20 @@ menu** (REQ-PUB-005, révisée le 2026-10-21). Les profils de jeu et les ROMs ne
 L'inventaire complet, fichier par fichier, est dans
 [`ASSETS-LICENSES.md`](ASSETS-LICENSES.md).
 
+### Shaders slang — libretro/slang-shaders (fonctionnalité `shaders`)
+
+Les versions construites avec la fonctionnalité `shaders` embarquent une partie de la collection
+**libretro/slang-shaders** (<https://github.com/libretro/slang-shaders>, commit `2345ee9`) : les
+dossiers `crt`, `ntsc`, `pixel-art-scaling`, `interpolation`, `edge-smoothing/xbrz`,
+`edge-smoothing/scalefx`, `handheld` et les presets de `bezel/Mega_Bezel` (**Mega Bezel**, par
+HyperspaceMadness, GNU GPL v3), avec les shaders et les textures qu'ils utilisent. La liste exacte
+des fichiers est `rust/crates/zax-app/shaders/pack-files.txt` (produite par
+`rust/tools/shader_pack.py`). Chaque shader garde l'en-tête de licence de son auteur (GPL v2 ou
+plus, GPL v3, MIT, domaine public selon les fichiers) ; les fichiers sont livrés sans
+modification et écrits tels quels dans le dossier utilisateur (`shaders/slang`) au lancement.
+Le shader NTSC de MAME (`ntsc/mame-ntsc`), dont la licence était non commerciale, n'est pas
+livré.
+
 ## Paquets livrés avec cette version
 
 Le binaire `zaxnes` des versions de bureau est lié aux paquets suivants (graphe de dépendances

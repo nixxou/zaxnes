@@ -9,6 +9,7 @@ pub mod application;
 pub mod audio;
 pub mod core_worker;
 pub mod demo_game;
+pub mod shader_pack;
 pub mod editor_mode;
 pub mod emulation;
 mod flags;

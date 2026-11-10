@@ -290,6 +290,8 @@ impl Running {
         let paths = resolve_user_data(options);
         let (store, model) = load_settings(options, &paths);
         let demo_rom = install_demo_game(&paths, &model);
+        #[cfg(feature = "shaders")]
+        install_shader_pack(&paths);
         let mut catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
         if let Some(rom) = demo_rom {
             catalog.set_rom_path(demo_game::PROFILE_ID, &rom.to_string_lossy());
@@ -726,7 +728,7 @@ impl Running {
             }
             None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
                 |choice| ShaderRequest {
-                    preset: choice.preset.into(),
+                    preset: crate::shader_pack::resolve(&self.host.paths().root, &choice.preset),
                     lines: choice.lines,
                     parameters: choice.parameters,
                     picture_aspect: (!three_d && !choice.fills_window)
@@ -797,13 +799,13 @@ impl Running {
             .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_lines)
         {
             // In 2D the preset gets the game picture alone, as in RetroArch: the scene is drawn
-            // at the picture's aspect, and the preset places it in the window (a bezel around it,
-            // or the picture centred).
+            // at the console's own pixels (240 lines) or a multiple, and the preset places it in
+            // the window (a bezel around it, or the picture centred).
             Some(lines)
                 if self.host.scene().two_dimensional_mode && self.host.scene().picture_head_on =>
             {
                 render_scaling::picture_lines(
-                    self.host.scene().picture_aspect(),
+                    self.host.scene().picture_size(),
                     lines,
                     view_height,
                 )
@@ -1667,6 +1669,25 @@ fn install_demo_game(paths: &UserDataPaths, model: &SettingsModel) -> Option<Pat
             log(&format!("FlappyZaxNes could not be installed: {error}"));
             None
         }
+    }
+}
+
+/// The slang shader pack into the user folder, when this version is not there yet.
+#[cfg(feature = "shaders")]
+fn install_shader_pack(paths: &UserDataPaths) {
+    if !paths.is_writable {
+        return;
+    }
+    let started = std::time::Instant::now();
+    match crate::shader_pack::install(&paths.root) {
+        Ok(true) => log(&format!(
+            "Shader pack {} written to '{}' in {} ms.",
+            crate::shader_pack::version(),
+            crate::shader_pack::folder(&paths.root).display(),
+            started.elapsed().as_millis()
+        )),
+        Ok(false) => {}
+        Err(error) => log(&format!("The shader pack could not be written: {error}")),
     }
 }
 

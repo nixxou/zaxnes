@@ -1,0 +1,16 @@
+# The presets of the slang shader pack (tools/shader_pack.py): a preset, or a folder for every
+# preset under it, relative to libretro/slang-shaders. Their shaders and textures follow.
+README.md
+crt
+ntsc
+pixel-art-scaling
+interpolation
+edge-smoothing/xbrz
+edge-smoothing/scalefx
+handheld
+bezel/Mega_Bezel/README.md
+bezel/Mega_Bezel/Presets
+stock.slang
+# Left out ("!" and a file or folder): the licence of MAME's NTSC shader was non-commercial.
+!ntsc/mame-ntsc.slangp
+!ntsc/shaders/mame-ntsc

@@ -46,15 +46,6 @@ fn filter(label_key: &str, extensions: &[&'static str]) -> FileFilter {
     }
 }
 
-/// The filters of the slang preset dialog (Rust-only).
-#[must_use]
-pub fn shader_filters() -> Vec<FileFilter> {
-    vec![
-        filter("shaders.file_filter", &["slangp"]),
-        filter(keys::BROWSER_FILTER_ALL, &[]),
-    ]
-}
-
 /// The filters of the ROM dialog (REQ-UI-201).
 #[must_use]
 pub fn rom_filters() -> Vec<FileFilter> {

@@ -422,13 +422,21 @@ impl SceneState {
     /// the scene drawn at this aspect holds the picture and nothing around it.
     #[must_use]
     pub fn picture_aspect(&self) -> f32 {
+        let (width, height) = self.picture_size();
+        width / height
+    }
+
+    /// The size of the head-on 2D picture in console pixels (the columns, widescreen margins
+    /// included, and the rows `picture_aspect` frames), at least one of each.
+    #[must_use]
+    pub fn picture_size(&self) -> (f32, f32) {
         let rect = VisibleRect::from_clipping(self.picture_clipping());
         let top = rect.max_y.min(geometry::SCENE_HEIGHT);
         let bottom = rect
             .min_y
             .max(geometry::SCENE_HEIGHT - geometry::FRAME_HEIGHT);
         let width = rect.width() + 2.0 * self.margin.max(0.0);
-        width.max(1.0) / (top - bottom).max(1.0)
+        (width.max(1.0), (top - bottom).max(1.0))
     }
 }
 
