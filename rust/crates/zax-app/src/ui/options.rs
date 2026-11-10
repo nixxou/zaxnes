@@ -885,6 +885,11 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     if INCLUDED_PROFILE.contains(&id) {
         return true;
     }
+    // The slang shader slots have a section of their own (the preset file, its parameters),
+    // not one row per key.
+    if descriptor.key().starts_with("shader.") {
+        return false;
+    }
     descriptor.scope() == SettingScope::User
         && has_a_tab(descriptor.theme())
         && is_editable(descriptor)
