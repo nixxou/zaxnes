@@ -22,7 +22,7 @@ is to be **fixed**, which makes this the first lot of the three to change `zax-n
 - [x] 3. What the hardware does there.
 - [x] 4. The mapper's soft reset.
 - [x] 5. The report.
-- [ ] 6. The final pass.
+- [x] 6. The final pass.
 
 ## The environment this lot runs in
 
@@ -637,3 +637,110 @@ already apart, so nothing there can be held against anything.
 The strike-throughs are the document's own convention: a reader who was told something was unknown
 is owed the answer in the place they were told it, and the strike-through is how they can tell
 which lot answered it.
+
+---
+
+## Step 6 — the final pass
+
+Everything the brief's final check asks for, re-run at the end rather than trusted from the step
+that produced it.
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, **whole workspace**, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core,zax-harness/fceux-core,zax-fceux/fceux-core`) | clean |
+
+### The tests, `--include-ignored`
+
+With `ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`
+and `ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| **`zax-nes`**, feature off | **1 187** | 0 | 0 |
+| **`zax-harness`**, feature off | **124** | 0 | 0 |
+| **`zax-harness`**, feature on (`--test-threads 1`) | **144** | 0 | 0 |
+
+The two crates this lot touches, and no other. The feature-on run is single-threaded because FCEUX
+keeps one machine per process.
+
+Of those, this lot's own: **5** new unit tests (1 in `movie_sync`, 2 in `ram_trace`, 2 in
+`frame_trace`), **1** new integration test in `movie_sync_tests` (the `.fm2` reset timing against
+FCEUX's own movie mode, `#[ignore]`d and feature-gated) and **3** in `zax-nes`'s
+`soft_reset_tests.rs`. EVAL-SYNC-2's figures move accordingly: `zax-harness`'s lib goes from 45 to
+50, its feature-off total from 118 to 124 and its feature-on total from 137 to 144;
+`soft_reset_tests.rs` goes from 9 to 12.
+
+`rust/test-roms/nestest.nes` was still in place from EVAL-SYNC-2 and did not have to be copied in
+again. It is gitignored, four `bench_core_tests` load it, and it is byte-identical to
+`assets-free/test-roms/nes-test-roms/other/nestest.nes`.
+
+### golden-core
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, feature off, 98 ROMs:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names, which is lot FCEUX-23's baseline and EVAL-SYNC's
+and EVAL-SYNC-2's — and this is the lot that changed `zax-nes`, so the digest is a result rather
+than a formality. It is the expected one: `golden-core` drives `NesCore::reset`, the power cycle,
+and step 4 changed only `NesCore::soft_reset`. **No change to explain.**
+
+### The two movies, re-run with the final binary
+
+| | |
+|---|---|
+| *Faxanadu* `[USA][!!]` against `fax-usa.txt` | offset **0**; **207** of 832 checksum lines, **832** of 832 lag counts, last agreeing line **83 200**, last picture `03d7e6a1…` |
+| *Faxanadu* `[Rev 1][!!]` against `fax-rev1.txt` | **220** of 832, **832** of 832, last agreeing line **83 200**, last picture `13920624…` |
+| both dumps' six screenshots | **12 of 12 MATCH**, with EVAL-SYNC's own colour counts (9, 14, 11, 13, 12, 12) |
+| *Kirby* against `kirby-jp-step1.txt`, 400 frames | **400 of 400 frames with no live difference**, 190 identical to the byte, **400 of 400 lag counts** |
+| *Kirby* against `kirby-jp.txt`, 156 312 frames | **all 1 563 lag counts agree**, 24 input-insensitive frames — `BizHawk`'s own figure; 0 of 6 screenshots, the nearest 275 pixels of 57 344 |
+| the mapper fix | `zax-nes --test soft_reset_tests` — 12 passed; `zax-harness --test soft_reset_mapper_tests` — 3 passed |
+
+### What moved
+
+`git diff --stat 5091ccb6..HEAD` over `zax-engine3d`, `zax-render`, `zax-core-api`, `zax-fceux`
+**and `zax-app`** is **empty**. `Cargo.lock` does not move either — no new dependency, and every
+cargo command of this pass was run `--offline`.
+
+| | lines |
+|---|---|
+| `docs/progress/EVAL-SYNC-3.md` | +639 |
+| `docs/review/MOVIE-SYNC.md` | +407 |
+| `docs/review/AMD-REQ-CORE-122-mapper-reset.md` | +126 |
+| `rust/crates/zax-harness/src/frame_trace.rs` | +919 (new) |
+| `rust/crates/zax-harness/src/movie_sync.rs` | +376 |
+| `rust/crates/zax-harness/src/ram_trace.rs` | +361 |
+| `rust/crates/zax-harness/src/{bk2,movie_file,lib,main}.rs` | +83 |
+| `rust/crates/zax-harness/tests/{movie_sync,soft_reset_mapper}_tests.rs` | +124 |
+| **`rust/crates/zax-nes`, the emulation change** | **+121 in eight source files, +151 in its tests** |
+
+The `zax-nes` half is the whole of step 4 and nothing else: `Mapper::soft_reset` and its four
+forwards, `Cartridge::soft_reset`, `Mmc3Unl8237::soft_reset`, one call site in `NesCore::soft_reset`
+and two doc comments. Most of the +121 is prose.
+
+### The disk
+
+The pass began with 11 GB free on G: and ended with **9.8 GB**, above the brief's 5 GB stop. The
+release tree under `rust/target-ev` is about 8 GB; no debug tree was ever built, every cargo
+command having been run `--release`, and no GPU campaign was run.
+
+### What is left for the owner
+
+1. **Finish locating the *Kirby* divergence**, and it is one Lua run: the same script that produced
+   `kirby-jp-step1.txt`, over frames **400 to 1 100** with `step = 1`. §4c of the report says what
+   to log and what Zaxnes will do with it. Nothing is needed from this side first, and in
+   particular **no change to `zax-nes`** — the `cfg`-gated PPU experiment EVAL-SYNC-2 asked for is
+   struck, both its candidates having been eliminated.
+2. **Adopt or amend REQ-CORE-122.** The code now implements the hardware and the clause still says
+   the mapper follows an *after reset* state it has none of.
+   `docs/review/AMD-REQ-CORE-122-mapper-reset.md` has the exact wording.
+3. **`.bk2` in the application**, as the two earlier lots said, with the reader's third
+   EVAL-SYNC-3 addition: a `.bk2`'s `Reset` happens **after** the frame whose bit is set.
+4. **A warning worth putting somewhere the next harness author will read it**: `NesCore` powers on
+   with the 3D built-in patches **enabled**, so any measurement that loads a recognised commercial
+   ROM without turning them off is measuring the widescreen hack. It cost this campaign two lots.
+5. The three `.fm2` header fields `zax-app`'s Zaxnes path ignores, unchanged from EVAL-SYNC.
