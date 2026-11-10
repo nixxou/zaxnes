@@ -108,14 +108,14 @@ fn a_parameter_is_set_changed_and_reset() {
 }
 
 #[test]
-fn the_twenty_keys_are_in_the_catalogue() {
+fn the_twenty_four_keys_are_in_the_catalogue() {
     let keys: Vec<String> = catalogue::descriptors()
         .map(|descriptor| descriptor.key().into_owned())
         .filter(|key| key.starts_with("shader."))
         .collect();
-    assert_eq!(keys.len(), 20);
+    assert_eq!(keys.len(), 24);
     for slot in ["2d", "2d_ws", "3d", "3d_ws"] {
-        for part in ["mode", "preset", "lines", "params", "area"] {
+        for part in ["mode", "preset", "lines", "params", "area", "frame"] {
             assert!(
                 keys.contains(&format!("shader.{slot}.{part}")),
                 "{slot}.{part}"
