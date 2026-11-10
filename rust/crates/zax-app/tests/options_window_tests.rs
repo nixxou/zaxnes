@@ -43,6 +43,8 @@ fn req_ui_202_every_user_preference_is_shown() {
                 && !options::EXCLUDED.contains(&descriptor.id())
                 // The graphics API is only offered where Vulkan and DirectX 12 are built in.
                 && (cfg!(feature = "wgpu") || descriptor.id() != SettingId::VideoBackend)
+                // The slang shader slots have a section of their own, not one row per key.
+                && !descriptor.key().starts_with("shader.")
                 && !matches!(
                     descriptor.theme(),
                     SettingTheme::Vr

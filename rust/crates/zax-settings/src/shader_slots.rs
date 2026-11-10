@@ -3,7 +3,8 @@
 //! the preset reads and the parameters the player changed.
 //!
 //! A slot other than 2D can follow another one (2D wide -> 2D, 3D -> 2D, 3D wide -> 3D): it then
-//! takes that slot's whole choice, which is how one preset set once covers every mode.
+//! takes that slot's preset and parameters, which is how one preset set once covers every mode.
+//! The lines stay the mode's own: 240 suit the flat picture, the 3D scene keeps the window's.
 //!
 //! The parameters are kept as the differences from the preset, `NAME=VALUE` pairs separated by
 //! `;`: a preset that changes its defaults keeps the player's own values, and a parameter the
@@ -139,11 +140,12 @@ impl ShaderSlot {
 /// The shader a display mode uses, once the fallbacks are followed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShaderChoice {
-    /// The slot that holds the choice (the mode's own, or the one it follows).
+    /// The slot that holds the preset (the mode's own, or the one it follows).
     pub slot: ShaderSlot,
     /// The `.slangp` file.
     pub preset: String,
-    /// The lines of the picture the preset reads, 0 for the window's own.
+    /// The lines of the picture the preset reads, 0 for the window's own: those of the
+    /// display mode's slot, even when it follows another one.
     pub lines: u32,
     /// The parameters the player changed, in the order they were written.
     pub parameters: Vec<(String, f32)>,
@@ -153,7 +155,9 @@ pub struct ShaderChoice {
 /// mode without a file, or a 2D slot left to follow.
 #[must_use]
 pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<ShaderChoice> {
-    let mut slot = ShaderSlot::of(three_d, wide);
+    let own = ShaderSlot::of(three_d, wide);
+    let lines = u32::try_from(model.get(own.ids().lines).as_int()).unwrap_or(0);
+    let mut slot = own;
     loop {
         let ids = slot.ids();
         match model.get(ids.mode).as_int() {
@@ -162,7 +166,6 @@ pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<Shade
                 if preset.is_empty() {
                     return None;
                 }
-                let lines = u32::try_from(model.get(ids.lines).as_int()).unwrap_or(0);
                 let parameters = parse_parameters(model.get(ids.params).as_text());
                 return Some(ShaderChoice {
                     slot,

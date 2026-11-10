@@ -62,12 +62,9 @@ pub struct WgpuDisplay {
     // Field order is drop order: everything made on the device goes before the surface.
     compositor: Compositor,
     interface: InterfaceRenderer,
-    /// The slang preset filtering the scene picture, when `ZAXNES_SHADER` names one.
+    /// The slang preset filtering the scene picture.
     #[cfg(feature = "shaders")]
-    shader: Option<crate::slang_chain::SlangChain>,
-    /// Why the preset is not used, for the log.
-    #[cfg(feature = "shaders")]
-    shader_problem: Option<String>,
+    shaders: crate::slang_chain::SlangShaders,
     pending: Option<wgpu::SurfaceTexture>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -185,14 +182,12 @@ impl WgpuDisplay {
         surface.configure(&device, &config);
 
         #[cfg(feature = "shaders")]
-        let (shader, shader_problem) = load_shader(&device, &queue, &adapter);
+        let shaders = crate::slang_chain::SlangShaders::new(&device, &queue, &adapter);
         Ok(Self {
             compositor: Compositor::new(&device, format),
             interface: InterfaceRenderer::new(&device, format),
             #[cfg(feature = "shaders")]
-            shader,
-            #[cfg(feature = "shaders")]
-            shader_problem,
+            shaders,
             pending: None,
             surface,
             config,
@@ -229,10 +224,17 @@ impl WgpuDisplay {
     pub fn report(&self) -> String {
         let info = self.adapter.get_info();
         #[cfg(feature = "shaders")]
-        let shader = match (&self.shader, &self.shader_problem) {
-            (Some(shader), _) => format!("; slang preset {}", shader.preset.display()),
-            (None, Some(problem)) => format!("; slang preset refused: {problem}"),
-            (None, None) => String::new(),
+        let shader = match self.shaders.status() {
+            crate::slang_chain::ShaderStatus::Active(preset) => {
+                format!("; slang preset {}", preset.display())
+            }
+            crate::slang_chain::ShaderStatus::Compiling(preset) => {
+                format!("; slang preset {} compiling", preset.display())
+            }
+            crate::slang_chain::ShaderStatus::Refused(_, problem) => {
+                format!("; slang preset refused: {problem}")
+            }
+            crate::slang_chain::ShaderStatus::None => String::new(),
         };
         #[cfg(not(feature = "shaders"))]
         let shader = String::new();
@@ -251,18 +253,31 @@ impl WgpuDisplay {
         line + shader.as_str()
     }
 
-    /// Whether a slang preset filters the scene picture, which then wants the low resolution
-    /// its shaders were written for.
+    /// The lines the scene has to be drawn at for the slang preset in use: none without one,
+    /// 0 for the window's own.
     #[must_use]
-    pub const fn filters_scene(&self) -> bool {
+    pub fn shader_lines(&self) -> Option<u32> {
         #[cfg(feature = "shaders")]
         {
-            self.shader.is_some()
+            self.shaders.lines()
         }
         #[cfg(not(feature = "shaders"))]
         {
-            false
+            None
         }
+    }
+
+    /// The slang shaders, which the application asks for the preset of the display mode.
+    #[cfg(feature = "shaders")]
+    pub const fn shaders_mut(&mut self) -> &mut crate::slang_chain::SlangShaders {
+        &mut self.shaders
+    }
+
+    /// The slang shaders, for their status.
+    #[cfg(feature = "shaders")]
+    #[must_use]
+    pub const fn shaders(&self) -> &crate::slang_chain::SlangShaders {
+        &self.shaders
     }
 
     /// The renderer name the statistics show.
@@ -369,26 +384,16 @@ impl WgpuDisplay {
         scene: SceneLayer<'_>,
         (width, height): (u32, u32),
     ) -> bool {
-        let Some(shader) = self.shader.as_mut() else {
-            return false;
-        };
         let layer = scene.height.clamp(1, height);
         let rectangle = (0, height - layer, width, layer);
-        match shader.record(
+        self.shaders.record(
             encoder,
             scene.texture,
             view,
             self.config.format,
             rectangle,
             (width, height),
-        ) {
-            Ok(()) => true,
-            Err(problem) => {
-                self.shader_problem = Some(problem);
-                self.shader = None;
-                false
-            }
-        }
+        )
     }
 
     #[cfg(not(feature = "shaders"))]
@@ -449,19 +454,6 @@ impl WgpuDisplay {
             }
         }
         None
-    }
-}
-
-/// The slang preset `ZAXNES_SHADER` names, or why it was refused.
-#[cfg(feature = "shaders")]
-fn load_shader(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    adapter: &wgpu::Adapter,
-) -> (Option<crate::slang_chain::SlangChain>, Option<String>) {
-    match crate::slang_chain::SlangChain::from_environment(device, queue, adapter) {
-        Ok(shader) => (shader, None),
-        Err(problem) => (None, Some(problem)),
     }
 }
 

@@ -689,6 +689,36 @@ impl Running {
         snapshot
     }
 
+    /// Asks the wgpu window for the slang preset of the display mode: the one `ZAXNES_SHADER`
+    /// names, otherwise the slot of the mode (2D or 3D, widescreen or not) after its fallbacks.
+    #[cfg(feature = "shaders")]
+    fn request_shader(&mut self) {
+        use zax_platform::slang_chain::{preset_from_environment, ShaderRequest};
+        let Some(display) = self.window.wgpu_mut() else {
+            return;
+        };
+        let scene = self.host.scene();
+        let three_d = !scene.two_dimensional_mode;
+        let wide = scene.margin > 0.0 || scene.margin_y > 0.0;
+        let request = match preset_from_environment() {
+            Some(preset) => Some(ShaderRequest {
+                preset,
+                lines: zax_settings::shader_slots::CONSOLE_LINES.unsigned_abs(),
+                parameters: Vec::new(),
+            }),
+            None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
+                |choice| ShaderRequest {
+                    preset: choice.preset.into(),
+                    lines: choice.lines,
+                    parameters: choice.parameters,
+                },
+            ),
+        };
+        let shaders = display.shaders_mut();
+        shaders.request(request.as_ref());
+        shaders.update(usize::try_from(self.host.emulated_frames()).unwrap_or(0));
+    }
+
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
@@ -706,18 +736,19 @@ impl Running {
             self.host.settings().render_method(),
             factor,
         );
-        // A slang preset (prototype, `ZAXNES_SHADER`) is written for the console's resolution:
-        // the scene is drawn at the window's aspect but at the console's line count, and the
-        // preset scales it up to the window.
+        // A slang preset is written for a resolution of its own (the console's 240 lines in
+        // 2D): the scene is drawn at the window's aspect but at that line count, and the preset
+        // scales it up to the window. 0 lines keeps the window's own.
         #[cfg(feature = "shaders")]
-        let (scene_width, scene_height) = if self
+        let (scene_width, scene_height) = match self
             .window
             .wgpu()
-            .is_some_and(zax_platform::wgpu_display::WgpuDisplay::filters_scene)
+            .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_lines)
         {
-            render_scaling::console_lines(width.max(1), view_height)
-        } else {
-            (scene_width, scene_height)
+            Some(lines) if lines > 0 => {
+                render_scaling::shader_lines(width.max(1), view_height, lines)
+            }
+            _ => (scene_width, scene_height),
         };
         let view = self
             .host
@@ -1372,6 +1403,8 @@ impl Running {
     /// Draws the scene into the offscreen buffer (unless the render-skip rule keeps the
     /// previous image), blits it under the interface and draws the interface.
     fn draw(&mut self, emulated: u32, width: i32, height: i32, real: f32) -> Result<(), String> {
+        #[cfg(feature = "shaders")]
+        self.request_shader();
         let ViewPlan {
             view_height,
             size: (scene_width, scene_height),

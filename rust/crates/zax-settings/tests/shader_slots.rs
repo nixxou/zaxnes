@@ -33,7 +33,8 @@ fn a_2d_preset_covers_every_mode_that_follows() {
         let choice = resolve(&model, three_d, wide).unwrap();
         assert_eq!(choice.slot, ShaderSlot::TwoD);
         assert_eq!(choice.preset, "crt/crt-easymode.slangp");
-        assert_eq!(choice.lines, 240);
+        // The lines stay the mode's own: the console's in 2D, the window's in 3D.
+        assert_eq!(choice.lines, if three_d { 0 } else { 240 });
     }
 }
 
@@ -47,8 +48,9 @@ fn a_slot_of_its_own_wins_and_the_wide_3d_follows_the_3d() {
     let wide_3d = resolve(&model, true, true).unwrap();
     assert_eq!(
         (wide_3d.slot, wide_3d.preset.as_str(), wide_3d.lines),
-        (ShaderSlot::ThreeD, "b.slangp", 480)
+        (ShaderSlot::ThreeD, "b.slangp", 0)
     );
+    assert_eq!(resolve(&model, true, false).unwrap().lines, 480);
 }
 
 #[test]
