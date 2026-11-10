@@ -7,7 +7,7 @@ AMD-053/AMD-056 REQ-UI-212 and REQ-UI-214.
 - [ ] 1/3 — Plan: where the built-in bytes must reach `inspect`, and which tests assert the
   refusal AMD-066 removes.
 - [x] 2/3 — Implementation and tests: REQ-PROF-088 to 090 and AMD-066 §3's automatic criteria.
-- [ ] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
+- [x] 3/3 — Final pass: fmt, clippy `-D warnings`, `cargo test --release` of the crates
   touched, performance note.
 
 ## Step 1 — the plan
@@ -147,3 +147,55 @@ of REQ-PROF-088 — with and without an `Id` — on synthetic bytes.
 The one test of the old rule,
 `req_prof_063_importing_a_profile_without_an_identifier_is_refused`, is replaced by the second
 of these; the thirteen other call sites of `inspect`/`import` gained a `&[]`.
+
+## Step 3 — the final pass
+
+### What was run
+
+All of it in the foreground, with `TMP`/`TEMP` and `CARGO_TARGET_DIR` under `rust/target-66`
+and `CARGO_INCREMENTAL=0`, and with `ZAXNES_PROFILES`, `ZAXNES_ROMS` and `ZAXNES_TEST_ROMS` set.
+`zax-app` needs `--features bundled` on this machine: without it the `zaxnes` binary does not
+link (no `SDL2.lib` on the system), which stops the test targets too.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy -p zax-profiles --all-targets -- -D warnings` | clean |
+| `cargo clippy -p zax-app --features bundled --all-targets -- -D warnings` | clean |
+| `cargo test --release -p zax-profiles --no-fail-fast -- --include-ignored` | **362 passed, 6 failed** |
+| `cargo test --release -p zax-app --features bundled --no-fail-fast -- --include-ignored` | **809 passed, 0 failed** |
+
+The six failures are the `three_d_sen_real_install_tests`, every one of them panicking in
+`install_root()` for want of `ZAXNES_3DSEN_INSTALL`: they need a 3dSen installation this
+machine's clean side does not have, and R0 runs them. They were failing the same way before
+this lot (RU21-B closed on 350 / 6).
+
+The counts move by what the lot wrote: `zax-profiles` 350 → 354 passing integration tests
+(five added, one replaced) plus the eight unchanged unit tests, and `zax-app` 808 → 809.
+
+One clippy fix on the way: `built_in_contents.iter().any(|c| *c == bytes)` became
+`built_in_contents.contains(&bytes)` (`clippy::manual_contains`).
+
+### Performance
+
+Nothing the lot adds runs per frame. The whole of it is in
+`UserProfileFolder::inspect`, which the interface calls once per chosen file:
+
+- REQ-PROF-088 costs one `Vec<u8>` equality per built-in profile — at most 101, short-circuiting
+  on the length — against bytes already in memory since start-up
+  (`LibraryGameCatalog::built_in_contents`, read for AMD-037 and AMD-065). Nothing is read from
+  the disk for it.
+- REQ-PROF-089 costs one SHA-256 over the chosen file, and only when it carries no `Id`. The
+  file was read whole already, to parse its header; the lot keeps those bytes instead of
+  dropping them, so the import reads the file once, as before.
+
+No crate of the core or of the rendering is in the diff (`zax-nes`, `zax-engine3d`,
+`zax-render` untouched), so the core goldens cannot move and SMB3, Zelda II and the widescreen
+packs are not affected.
+
+### For R0
+
+- The six `three_d_sen_real_install_tests` are still due on an installation.
+- The two tests that read the real `assets-neutral/` (`req_prof_088_the_bytes_of_the_built_in_contra_…`
+  and the dialogue one) are `#[ignore]`d and need `ZAXNES_PROFILES`.
+- No new Q ticket: AMD-066 answers everything the implementation had to decide.
