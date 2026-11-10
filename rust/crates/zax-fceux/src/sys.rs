@@ -20,6 +20,14 @@ pub const ZAX_ERR_BAD_ARGUMENT: i32 = -4;
 pub const ZAX_ERR_LOAD_FAILED: i32 = -5;
 pub const ZAX_ERR_BUFFER_TOO_SMALL: i32 = -6;
 pub const ZAX_ERR_STATE_FAILED: i32 = -7;
+pub const ZAX_ERR_MOVIE_FORMAT: i32 = -8;
+pub const ZAX_ERR_MOVIE_ROM: i32 = -9;
+pub const ZAX_ERR_MOVIE_UNSUPPORTED: i32 = -10;
+pub const ZAX_ERR_NO_MOVIE: i32 = -11;
+
+pub const ZAX_MOVIE_NONE: i32 = 0;
+pub const ZAX_MOVIE_PLAYING: i32 = 1;
+pub const ZAX_MOVIE_FINISHED: i32 = 2;
 
 pub const ZAX_REGION_NTSC: i32 = 0;
 pub const ZAX_REGION_PAL: i32 = 1;
@@ -65,6 +73,30 @@ pub type ZaxTilesFn = Option<
     ),
 >;
 
+/// `zax_movie_info` of `zax/zaxfceux.h`, field for field. `repr(C)` is what makes that true.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ZaxMovieInfo {
+    pub version: i32,
+    pub frames: i32,
+    pub region: i32,
+    pub ram_init_option: i32,
+    pub ram_init_seed: i32,
+    pub new_ppu: i32,
+    pub fds: i32,
+    pub fourscore: i32,
+    pub microphone: i32,
+    pub port0: i32,
+    pub port1: i32,
+    pub port2: i32,
+    pub from_savestate: i32,
+    pub from_saveram: i32,
+    pub rerecord_count: i32,
+    pub rom_md5: [u8; 16],
+    pub rom_md5_known: i32,
+    pub rom_md5_matches: i32,
+}
+
 extern "C" {
     pub fn zax_set_log_sink(sink: ZaxLogFn, user: *mut c_void);
     pub fn zax_flush_log();
@@ -105,4 +137,11 @@ extern "C" {
     pub fn zax_battery_ram_size() -> i32;
     pub fn zax_get_battery_ram(out: *mut u8, out_len: usize) -> i32;
     pub fn zax_set_battery_ram(data: *const u8, data_len: usize) -> i32;
+
+    pub fn zax_movie_inspect(data: *const u8, data_len: usize, out: *mut ZaxMovieInfo) -> i32;
+    pub fn zax_movie_play(data: *const u8, data_len: usize) -> i32;
+    pub fn zax_movie_stop() -> i32;
+    pub fn zax_movie_mode() -> i32;
+    pub fn zax_movie_length() -> i64;
+    pub fn zax_movie_frame() -> i64;
 }

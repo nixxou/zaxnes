@@ -14,7 +14,7 @@ them, and the 3D on FCEUX matches Zaxnes's wherever the two machines agree (§6 
 
 - [x] 1. The FCEUX-8 fix in the fork.
 - [x] 2. The validated-games marker.
-- [ ] 3. `.fm2` playback on FCEUX, in the core.
+- [x] 3. `.fm2` playback on FCEUX, in the core.
 - [ ] 4. `.fm2` in the application.
 - [ ] 5. The app with a real movie, end to end.
 - [ ] 6. Docs.
@@ -220,5 +220,134 @@ measurement rather than about the `fceux-core` feature. Only the row's note is g
 | `fceux_validated_tests` | 5 tests, green in **both** builds — the engine-row branch asserts the note with the feature and its absence without |
 | the module's unit tests | 6 more: no duplicate CRC, sorted by CRC, the nine games with their dump counts, the five rejected games absent, a lookup giving the game and the deviation, and the three statuses told apart |
 | `desktop_options_golden_tests`, `options_window_tests`, `engine_choice_tests` | 32 tests green — the shown-rows golden is unchanged, the marker adding no row |
+
+---
+
+## Step 3 — `.fm2` playback in the core
+
+Fork commit `a864bf52`; the Rust side is the commit this section is in. The fork's
+`zax/README.md` § *`.fm2` movie playback* has the C side's whole reasoning.
+
+### The C API, and the one patch
+
+Six calls: `zax_movie_inspect`, `zax_movie_play`, `zax_movie_stop`, `zax_movie_mode`,
+`zax_movie_length`, `zax_movie_frame`, plus a `zax_movie_info` struct. §5 of the design note
+estimated "three more C API calls"; it is six because a **refusal has to be nameable** — a host
+that can only say "unsupported" is no better than one that plays the movie wrong — so inspecting a
+header without touching the machine is its own call, and the length and the frame are separate
+queries rather than one.
+
+One patch of `src/`: `zax_movie_override`, a consumed-once `FCEUFILE *` checked where
+`FCEUI_LoadMovie` opens its path, which is the mechanism `zax_rom_override` already was for a
+cartridge image. The alternative would have been to reimplement `FCEUI_LoadMovie`'s tail in
+`zax/`, which §5 rules out by asking for FCEUX's own movie mode, and which would have had to be
+kept in step with it for ever.
+
+### Why FCEUX's movie mode, confirmed rather than assumed
+
+§5's reason is `PowerNES` reseeding the random fill from `rand()` on every power-on **unless a
+movie is active**. `a_seeded_random_fill_is_reproducible_from_inside_a_movie` is that claim as a
+test: two movies with `RAMInitSeed 12345` give byte-identical work RAM over all 2 KiB, a third with
+seed 999 does not, and the fill is neither all zero nor all `$FF`. Outside movie mode the API
+cannot do that at all, which is why `RamInit::Random`'s own doc comment warns about it.
+
+### What the header decides, and what is refused
+
+Everything §5 lists, and all of it is FCEUX's own `FCEUI_LoadMovie` rather than ours: `palFlag`,
+`RAMInitOption`/`RAMInitSeed`, the port devices, and the power-on-or-savestate start.
+
+Refused, with the thing **named** — and judged from the header *before* anything is committed,
+because `FCEUI_LoadMovie` re-powers the machine as its third act and a refusal after that would
+leave the player's game restarted:
+
+| the header says | the message names |
+|---|---|
+| `FDS 1` | "a Famicom Disk System disk" |
+| `NewPPU 1` | "FCEUX's new PPU" |
+| `fourscore 1` | "a Four Score (four pads)" |
+| `microphone 1` | "the Famicom microphone" |
+| `port0`/`port1` not `SI_GAMEPAD` | "an input device other than a standard pad" |
+| `port2` not `SIFC_NONE` | "an expansion-port device" |
+| a `romChecksum` that is not the loaded ROM's | "recorded on another ROM, so it would not replay" |
+| not a version-3 `.fm2`, or truncated | "not a version 3 .fm2 movie" |
+
+A movie that states **no** checksum is played rather than refused: claiming nothing is not
+claiming the wrong thing, and a hand-written movie states none.
+
+The port refusal is also what makes the fork's no-op `FCEUD_SetInput` stub **correct** rather than
+merely harmless. That stub is called from exactly one place in this build — `movie.cpp:1116`, where
+a movie asks for its ports — so refusing every arrangement but two standard pads is what guarantees
+the pads `zax_load_rom` installed are the ones the movie wanted.
+
+### Two things the work found
+
+**1. The region again, in the same shape as lot FCEUX-23 step 8's defect.** `FCEUI_LoadMovie`
+applies `palFlag` with `FCEUI_SetVidSystem`, which reaches the *emulation* — `PAL`, the scanline
+counts, the sound — but **not** `pal_emulation`, the driver-owned global `FCEUI_GetRegion` reads.
+So a PAL movie played on a machine last set to NTSC would have run at PAL while the API reported
+NTSC, and the host would have paced the video at 60 Hz. `zax_movie_play` now re-asserts the
+movie's region with `FCEUI_SetRegion` (which ends in `FCEUI_SetVidSystem` itself) before any frame
+runs. `the_region_of_the_header_is_applied` is the test, and it also checks the way back: an NTSC
+movie after a PAL one brings the machine back rather than leaving the last one's.
+
+**2. FCEUX's movie clock has two behaviours a host must not guess at**, both now in the wrapper's
+doc comments and both pinned by tests:
+
+* `FinishPlayback` runs at the **top** of a frame rather than the bottom of the last one
+  (`movie.cpp:1245-1250`), so after a movie's last frame `movie_mode()` still says `Playing` and
+  only becomes `Finished` when another frame is asked for. **The clock, not the mode, is the
+  signal** a host should use;
+* `currFrameCounter++` (`movie.cpp:1329`) is **unconditional** while a movie is loaded, so the
+  clock goes on counting past the end — a 5-frame movie reads `(5, 7)` after seven frames. "Over"
+  is `frame >= length`, and a host computing a remaining count has to saturate.
+
+Neither is a defect; both would have been a defect in the application had step 4 assumed otherwise.
+
+### The Rust side
+
+`sys.rs` gains four error codes, three mode constants, the `repr(C)` `ZaxMovieInfo` and the six
+declarations; `core.rs` gains `MovieMode`, `MovieHeader` with `refusal()`, and
+`inspect_movie` / `play_movie` / `stop_movie` / `movie_mode` / `movie_position`. Four new `Error`
+variants, `MovieUnsupported` carrying the named reason. Every new `unsafe` block is one FFI call
+with a `// SAFETY:` note, in `zax-fceux` and behind `fceux-core`, as the owner's rule requires.
+
+`play_movie` inspects first and refuses in Rust from `MovieHeader::refusal()`, *and* the C side
+judges again before committing. The double check is deliberate: the C API is the one that must be
+safe whoever calls it, and the Rust side is the one that can name the reason.
+
+### The tests
+
+`crates/zax-fceux/tests/fceux_movie_tests.rs`, **11 tests**, all green. The movies are **built by
+hand** in the test file to the `.fm2` format `src/movie.cpp`'s own parser accepts — a version-3
+text header and one `|commands|RLDUTSBA|RLDUTSBA||` line a frame, the eight characters being
+`MovieRecord::mnemonics` indexed by bit with bit 7 printed first. The brief offered recording
+through FCEUX's own recorder instead; that was not taken because its recorder writes to a **path**
+(`openRecordingMovie`) and would have needed a second patch of the fork for a build with no
+filesystem, and because a hand-built movie pins the format rather than a round trip through our own
+writer.
+
+| test | what it holds |
+|---|---|
+| `a_movie_plays_back_to_the_same_frames_as_the_same_inputs_fed_directly` | the brief's own check: 240 frames of a scripted sequence on `nestest`, fed directly and then played as a movie, give **the same picture digest at every one of the 240 frames**. The pads are held at `0x55`/`0xAA` during playback — a value in no frame of the script — so a movie that failed to override them could not accidentally agree |
+| `the_ram_init_option_of_the_header_is_honoured` | `RAMInitOption` 1 and 2, each with the engine deliberately set to the *other* fill beforehand, read back as `$FF` and `$00` at four addresses before a frame has run |
+| `a_seeded_random_fill_is_reproducible_from_inside_a_movie` | the same seed gives the same 2 KiB, a different seed does not |
+| `the_header_is_read_without_touching_the_machine` | every field of a header read while a game runs; no movie loaded, the frame counter and the picture unmoved |
+| `a_movie_the_build_cannot_play_is_refused_by_name_and_changes_nothing` | the six unsupported headers, each refused by `refusal()` *and* by `play_movie`, with the reason in the message — and after all six the frame counter and the picture are where they were |
+| `a_movie_recorded_on_another_rom_is_refused` | a stated wrong checksum refused; the same movie without one played |
+| `rubbish_is_refused_as_a_format_error_and_a_movie_needs_a_rom` | empty, prose, `version 2`, a truncated magic; and a movie with no ROM loaded |
+| `stopping_unloads_the_movie_and_gives_the_pads_back` | stopping mid-movie, twice, and the host's pads live again with the machine where the movie left it |
+| `the_region_of_the_header_is_applied` | finding 1 above, both ways |
+| `playback_finishes_at_the_last_record_and_says_so` | finding 2 above, both halves |
+| `a_savestate_during_playback_carries_the_movies_clock` | a state at movie frame 40, 60 frames on, the state reloaded, and the **same 60 picture digests** replayed — which is the seam step 4's backward seek stands on, measured here rather than hoped for |
+
+`fceux_core_tests.rs`'s header-drift test grew from 19 constants to 26, so the seven new `#define`s
+cannot drift from the header without a test failure.
+
+| | |
+|---|---|
+| `cargo test --release -p zax-fceux --features fceux-core`, ignored included | **46 passed**, 0 failed (35 before this step) |
+| `cargo fmt --check` | clean |
+| clippy `-D warnings`, whole workspace, feature on and off | clean |
+| the fork's `nestest` digests, 60 frames | `pixels=e455081e6a3eefe9 emphasis=d395e456e4e72325 audio=7fc10a9ce4ed8fcd`, `state: hint=93304 written=79296` — unchanged |
 
 ---

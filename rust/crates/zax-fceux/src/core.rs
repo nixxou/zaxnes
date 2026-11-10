@@ -37,6 +37,15 @@ pub enum Error {
     BufferTooSmall(usize),
     /// A savestate could not be written, or could not be read back.
     State,
+    /// The bytes are not a version-3 `.fm2`, or the file is truncated.
+    MovieFormat,
+    /// The movie states a ROM checksum and it is not the loaded ROM's.
+    MovieRom,
+    /// The movie's header asks for something this build cannot play. The text names the thing,
+    /// so that a host can say which one rather than "unsupported".
+    MovieUnsupported(&'static str),
+    /// A call that needs a movie, with none loaded.
+    NoMovie,
     /// A code the C API is not documented to return.
     Unexpected(i32),
 }
@@ -65,6 +74,19 @@ impl std::fmt::Display for Error {
                 )
             }
             Self::State => write!(formatter, "the savestate could not be written or read"),
+            Self::MovieFormat => write!(
+                formatter,
+                "this is not a version 3 .fm2 movie (or the file is truncated)"
+            ),
+            Self::MovieRom => write!(
+                formatter,
+                "this movie was recorded on another ROM, so it would not replay"
+            ),
+            Self::MovieUnsupported(what) => write!(
+                formatter,
+                "this movie needs {what}, which the FCEUX engine cannot play here"
+            ),
+            Self::NoMovie => write!(formatter, "no movie is loaded"),
             Self::Unexpected(code) => write!(formatter, "the FCEUX core returned {code}"),
         }
     }
@@ -629,6 +651,238 @@ impl Fceux {
     }
 }
 
+// ------------------------------------------------------------------------------------------------
+// `.fm2` movie playback (lot FCEUX-48 step 3)
+// ------------------------------------------------------------------------------------------------
+
+/// Where playback is.
+///
+/// One thing to know before using [`MovieMode::Finished`] as "the movie is over": FCEUX decides
+/// that at the **top of a frame**, not at the bottom of the last one. `FCEUMOV_AddInputState`
+/// calls `FinishPlayback` when it finds `currFrameCounter` past the last record
+/// (movie.cpp:1245-1250), so after running a movie's last frame the mode is still `Playing` and it
+/// becomes `Finished` only once another frame is run. [`Fceux::movie_position`] is the signal that
+/// does not lag: the clock reaching the length *is* the end of the movie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovieMode {
+    /// No movie loaded.
+    None,
+    /// A movie is loaded and has frames left — or has just run its last one; see above.
+    Playing,
+    /// A movie is loaded and a frame was asked for past its last record. The machine keeps
+    /// running, which is FCEUX's own behaviour, with the pads live again.
+    Finished,
+}
+
+/// A `.fm2` header, as the core reads it without touching the machine.
+///
+/// This is what makes a refusal nameable: the host reads the header, says *which* thing the movie
+/// needs that this build has not, and only then asks for playback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // the `.fm2` header's own independent flags, key by key
+pub struct MovieHeader {
+    /// The `.fm2` format version. Only 3 can be played.
+    pub version: i32,
+    /// Input records, which is the movie's length in frames.
+    pub frames: u32,
+    /// The region the movie was recorded at (`palFlag`), which playback applies.
+    pub region: Region,
+    /// The RAM fill the movie was recorded with, seed included.
+    pub ram_init: RamInit,
+    /// The header asks for FCEUX's new PPU.
+    pub new_ppu: bool,
+    /// The movie is of a Famicom Disk System game.
+    pub fds: bool,
+    /// Four pads are logged per frame.
+    pub fourscore: bool,
+    /// The Famicom microphone is logged.
+    pub microphone: bool,
+    /// FCEUX's device numbers for the two pad ports and the expansion port (`ESI`, `ESI`,
+    /// `ESIFC`); 1, 1 and 0 is two standard pads with nothing on the expansion port, which is
+    /// the only arrangement this build plays.
+    pub ports: [i32; 3],
+    /// The movie carries a savestate to start from, rather than starting at power-on.
+    pub from_savestate: bool,
+    /// The movie carries battery RAM to start from.
+    pub from_saveram: bool,
+    /// The header's re-record count, for a host that shows it.
+    pub rerecord_count: i32,
+    /// The MD5 the movie states for the ROM it was recorded on; `None` when it states none.
+    pub rom_md5: Option<[u8; 16]>,
+    /// Whether the stated MD5 is the loaded ROM's: `None` when the movie states none, or when no
+    /// ROM is loaded.
+    pub rom_matches: Option<bool>,
+}
+
+impl MovieHeader {
+    /// Why this movie cannot be played here, naming the one thing — `None` when it can.
+    ///
+    /// The order is the order a user would want to hear about them in: the format first, then
+    /// what the movie is of, then the hardware it logs.
+    #[must_use]
+    pub fn refusal(&self) -> Option<Error> {
+        if self.version != 3 {
+            return Some(Error::MovieFormat);
+        }
+        if self.fds {
+            return Some(Error::MovieUnsupported("a Famicom Disk System disk"));
+        }
+        if self.new_ppu {
+            return Some(Error::MovieUnsupported("FCEUX's new PPU"));
+        }
+        if self.fourscore {
+            return Some(Error::MovieUnsupported("a Four Score (four pads)"));
+        }
+        if self.microphone {
+            return Some(Error::MovieUnsupported("the Famicom microphone"));
+        }
+        // `SI_GAMEPAD` is 1 and `SIFC_NONE` is 0 (`src/git.h`); anything else is a device this
+        // build has no word for, so the movie's records would be replayed against a standard pad.
+        if self.ports[0] != 1 || self.ports[1] != 1 {
+            return Some(Error::MovieUnsupported(
+                "an input device other than a standard pad",
+            ));
+        }
+        if self.ports[2] != 0 {
+            return Some(Error::MovieUnsupported("an expansion-port device"));
+        }
+        if self.rom_matches == Some(false) {
+            return Some(Error::MovieRom);
+        }
+        None
+    }
+}
+
+impl Fceux {
+    /// Reads the header of a `.fm2` **without touching the machine**: nothing is loaded, no
+    /// power-on happens, and a movie already playing is undisturbed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MovieFormat`] when the bytes are not a version-3 `.fm2`.
+    pub fn inspect_movie(&self, movie: &[u8]) -> Result<MovieHeader, Error> {
+        if movie.is_empty() {
+            return Err(Error::MovieFormat);
+        }
+
+        let mut info = sys::ZaxMovieInfo::default();
+        // SAFETY: `movie` is a live slice, so the pointer is valid for `len()` bytes, which is
+        // the length handed over and the only thing the C API reads through it; `info` is a live
+        // `repr(C)` mirror of `zax_movie_info`, which the call fills and does not keep.
+        let code = unsafe { sys::zax_movie_inspect(movie.as_ptr(), movie.len(), &raw mut info) };
+        if code != sys::ZAX_OK {
+            return Err(code_to_error(code));
+        }
+
+        Ok(MovieHeader {
+            version: info.version,
+            frames: u32::try_from(info.frames).unwrap_or(0),
+            region: Region::from_code(info.region).unwrap_or(Region::Ntsc),
+            ram_init: match info.ram_init_option {
+                sys::ZAX_RAM_INIT_FF => RamInit::Ff,
+                sys::ZAX_RAM_INIT_00 => RamInit::Zero,
+                sys::ZAX_RAM_INIT_RANDOM => RamInit::Random(info.ram_init_seed),
+                _ => RamInit::Default,
+            },
+            new_ppu: info.new_ppu != 0,
+            fds: info.fds != 0,
+            fourscore: info.fourscore != 0,
+            microphone: info.microphone != 0,
+            ports: [info.port0, info.port1, info.port2],
+            from_savestate: info.from_savestate != 0,
+            from_saveram: info.from_saveram != 0,
+            rerecord_count: info.rerecord_count,
+            rom_md5: (info.rom_md5_known != 0).then_some(info.rom_md5),
+            rom_matches: match info.rom_md5_matches {
+                1 => Some(true),
+                0 => Some(false),
+                _ => None,
+            },
+        })
+    }
+
+    /// Loads a `.fm2` and starts playing it from its own beginning, through FCEUX's own movie
+    /// mode: the machine is re-powered (or restored from the movie's savestate) with the region
+    /// and the RAM fill the header asks for, and the next [`Fceux::run_frame`] plays frame 0.
+    ///
+    /// The header is read and judged **before** anything is committed, so a movie this build
+    /// cannot play is refused with the reason named and the machine left as it was. That is also
+    /// why the error is the specific one rather than "unsupported": the header says which.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MovieFormat`], [`Error::MovieRom`], [`Error::MovieUnsupported`] as
+    /// [`MovieHeader::refusal`] gives them, or [`Error::NoRom`] with no cartridge loaded.
+    pub fn play_movie(&mut self, movie: &[u8]) -> Result<MovieHeader, Error> {
+        let header = self.inspect_movie(movie)?;
+        if let Some(refusal) = header.refusal() {
+            return Err(refusal);
+        }
+
+        // SAFETY: `movie` is a live slice, so the pointer is valid for `len()` bytes, which is
+        // the length handed over; the C API only reads through it, and copies what it keeps
+        // (FCEUX parses the bytes into its own `MovieData`) before returning.
+        let code = unsafe { sys::zax_movie_play(movie.as_ptr(), movie.len()) };
+        if code != sys::ZAX_OK {
+            return Err(code_to_error(code));
+        }
+        Ok(header)
+    }
+
+    /// Stops playback and unloads the movie. The machine keeps running from where it is, which is
+    /// FCEUX's own behaviour; a caller that wants the game from the start calls [`Fceux::power`].
+    ///
+    /// Not an error with no movie loaded, so that stopping twice is harmless.
+    ///
+    /// # Errors
+    ///
+    /// Only an unexpected code from the core.
+    pub fn stop_movie(&mut self) -> Result<(), Error> {
+        // SAFETY: documented as safe whatever movie state the core is in, on a live instance.
+        let code = unsafe { sys::zax_movie_stop() };
+        if code != sys::ZAX_OK {
+            return Err(code_to_error(code));
+        }
+        Ok(())
+    }
+
+    /// Where playback is.
+    #[must_use]
+    pub fn movie_mode(&self) -> MovieMode {
+        // SAFETY: a pure query on a live instance.
+        match unsafe { sys::zax_movie_mode() } {
+            sys::ZAX_MOVIE_PLAYING => MovieMode::Playing,
+            sys::ZAX_MOVIE_FINISHED => MovieMode::Finished,
+            _ => MovieMode::None,
+        }
+    }
+
+    /// The movie's length in frames, and the frame the next [`Fceux::run_frame`] will play —
+    /// FCEUX's own `currFrameCounter`, which is the movie's clock and not
+    /// [`Fceux::frame_count`]'s. `None` with no movie loaded.
+    ///
+    /// Two facts about that clock, both measured rather than assumed, and both of which a host
+    /// has to know (`fceux_movie_tests.rs` pins them):
+    ///
+    /// * the clock reaching the length **is** the end of the movie, and it gets there one frame
+    ///   before [`Fceux::movie_mode`] says [`MovieMode::Finished`] — see that type;
+    /// * the clock **goes on counting past the end** while the movie stays loaded
+    ///   (`currFrameCounter++` at movie.cpp:1329 is unconditional). So the test for "over" is
+    ///   `frame >= length`, and a host computing a remaining count has to saturate.
+    #[must_use]
+    pub fn movie_position(&self) -> Option<(u32, u32)> {
+        // SAFETY: two pure queries on a live instance; both answer negatively with no movie.
+        let (length, frame) = unsafe { (sys::zax_movie_length(), sys::zax_movie_frame()) };
+        if length < 0 || frame < 0 {
+            return None;
+        }
+        Some((
+            u32::try_from(length).unwrap_or(0),
+            u32::try_from(frame).unwrap_or(0),
+        ))
+    }
+}
+
 impl Drop for Fceux {
     fn drop(&mut self) {
         // SAFETY: documented as idempotent and safe whatever state the core is in; this is the
@@ -658,6 +912,13 @@ fn code_to_error(code: i32) -> Error {
         sys::ZAX_ERR_LOAD_FAILED => Error::LoadFailed(take_log()),
         sys::ZAX_ERR_BUFFER_TOO_SMALL => Error::BufferTooSmall(0),
         sys::ZAX_ERR_STATE_FAILED => Error::State,
+        sys::ZAX_ERR_MOVIE_FORMAT => Error::MovieFormat,
+        sys::ZAX_ERR_MOVIE_ROM => Error::MovieRom,
+        // The C API has one code for every unsupported header; the caller of `play_movie` turns
+        // it into the named reason by inspecting the header first, so this is the fallback for a
+        // path that did not.
+        sys::ZAX_ERR_MOVIE_UNSUPPORTED => Error::MovieUnsupported("something this build has not"),
+        sys::ZAX_ERR_NO_MOVIE => Error::NoMovie,
         other => Error::Unexpected(other),
     }
 }

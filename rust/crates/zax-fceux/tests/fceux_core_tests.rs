@@ -355,7 +355,7 @@ fn the_error_codes_match_the_forks_header() {
     };
     let text = std::fs::read_to_string(&header).expect("the fork's header");
 
-    let expected: [(&str, i64); 19] = [
+    let expected: [(&str, i64); 26] = [
         ("ZAX_OK", 0),
         ("ZAX_ERR_ALREADY_LIVE", -1),
         ("ZAX_ERR_NO_INSTANCE", -2),
@@ -364,6 +364,14 @@ fn the_error_codes_match_the_forks_header() {
         ("ZAX_ERR_LOAD_FAILED", -5),
         ("ZAX_ERR_BUFFER_TOO_SMALL", -6),
         ("ZAX_ERR_STATE_FAILED", -7),
+        // Lot FCEUX-48 step 3: `.fm2` playback.
+        ("ZAX_ERR_MOVIE_FORMAT", -8),
+        ("ZAX_ERR_MOVIE_ROM", -9),
+        ("ZAX_ERR_MOVIE_UNSUPPORTED", -10),
+        ("ZAX_ERR_NO_MOVIE", -11),
+        ("ZAX_MOVIE_NONE", 0),
+        ("ZAX_MOVIE_PLAYING", 1),
+        ("ZAX_MOVIE_FINISHED", 2),
         ("ZAX_REGION_NTSC", 0),
         ("ZAX_REGION_PAL", 1),
         ("ZAX_REGION_DENDY", 2),
