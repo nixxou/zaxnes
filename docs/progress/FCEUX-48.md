@@ -13,7 +13,7 @@ them, and the 3D on FCEUX matches Zaxnes's wherever the two machines agree (§6 
 ## Steps
 
 - [x] 1. The FCEUX-8 fix in the fork.
-- [ ] 2. The validated-games marker.
+- [x] 2. The validated-games marker.
 - [ ] 3. `.fm2` playback on FCEUX, in the core.
 - [ ] 4. `.fm2` in the application.
 - [ ] 5. The app with a real movie, end to end.
@@ -124,5 +124,101 @@ claimed to be harmless in general.
 And the scope of the whole change, measured rather than argued: of the **446** iNES images in
 `assets-free/test-roms`, `demo/roms` and `test-originals`, **exactly one** declares a NES 2.0
 CHR-RAM under 8 KiB — `oam3.nes`, 1 024 bytes, mapper 7. No other ROM in reach can have moved.
+
+---
+
+## Step 2 — the validated-games marker
+
+Commit `ec55c48a`. `crates/zax-app/src/emulation/fceux_validated.rs` and the three places the
+marker shows, with `tests/fceux_validated_tests.rs` beside the module's own unit tests.
+
+### What identifies a game, and why that one
+
+The **CRC-32 of the ROM data** — PRG and CHR with the iNES header, a trainer and any overdump left
+out, which is the CRC the No-Intro set gives: `zax_nes::builtin_patches::data_crc`. The brief asked
+for "the way the app identifies a ROM for its profile — CRC/hash — never by file name", and reading
+the application first turned up four different identifiers, which is worth recording for the next
+lot:
+
+| identifier | where | what it keys |
+|---|---|---|
+| the absolute ROM **path** | `host/game_options.rs:13` `game_options_key` | the per-game options and the per-game profile in `games.json` |
+| a profile **id** (SHA-256 of the *profile file* when the `.3dn` carries none) | `zax-profiles/.../user_folder.rs:508` | a library entry |
+| the ROM data **CRC-32** | `zax_nes::builtin_patches::data_crc`, cached per file in `persistence/rom_crc_cache.rs` | the built-in patches and the widescreen hack certificates |
+| the ROM **SHA-1** of PRG+CHR | `persistence/save_state_file.rs:389` | savestates, movies, battery RAM |
+
+So "the way the app identifies a ROM for its profile" is literally its **path**, which is exactly
+what the brief forbids. The CRC is the one the application already uses for **per-ROM facts about
+the bytes** — a patch fits this image, a hack pack is present in it — which is what a validation
+verdict is, so that is the one taken. It also costs nothing: `certify_rom` already fills the cache
+at every launch, before the load job begins, so the interface reads no file while it draws.
+
+### What is in the table
+
+The **nine games §6 of the design note marks ship**, by the dumps each verdict rests on: *Mega Man*
+6, *Mega Man 2* 8, *Mega Man 3* 9, *Ninja Gaiden III* 4, *Metroid* 4, *Blaster Master* 5 of its 6,
+*Final Fantasy* 7, *Adventure Island* 3, *Punch-Out!!* 1 — **47 dumps**.
+
+The membership was **measured rather than copied from the prose**: `fceux-tiles` was re-run over
+the 98 originals at frames 60, 300, 1 200 and 3 000 after step 1's fork change, and it gives
+**37 of 98 identical at every compared frame** — §6's own figure, to the ROM, which is also a
+re-verification that step 1 moved nothing. Two things that reading settled, and that a lot working
+from §6's prose alone would have got wrong:
+
+* *Blaster Master*'s "5 of 6 dumps" are four `Blaster Master` dumps **plus `Chou-WS-M [Japan]`**,
+  which is the Japanese release of the same game; the one that is not identical is `[Europe]`, and
+  it is **not** in the table;
+* *Adventure Island*'s three dumps include `Takahashi Meijin no Bouken-jima [Japan]`, and **none**
+  of the three is `identical` at every frame — all three are the OAM rotation §6 names. So all
+  three carry the deviation rather than one of them being clean.
+
+Three dumps' worth of deviation, each written once and attached to the dumps that have it:
+
+| deviation | dumps | what §6 says |
+|---|---|---|
+| the two cores part at frame 3 000 | *Metroid* ×4, *Punch-Out!!*, *Rockman 2* ×2 | identical at 60, 300 and 1 200 |
+| palette entry `$3F0B` early | every *Final Fantasy* dump | all 960 records identical; 0.69 % of the 3D picture, and frame 1 200 is 100.000 % |
+| the OAM rotated by a constant | *Adventure Island* ×3 | renumbers sprites without moving them; 99.999 % |
+
+What is **not** in it is in the module's doc comment with the reason, because the absence is the
+information: *Super Mario Bros.* (borderline, 89.647 % at 1 200), *Castlevania* and *Excitebike*
+(no), *Super Mario Bros. 3* and *Zelda II* (**blocked on the `ppu-2007-render-read` decision** —
+a *decision* away from the table rather than a measurement away), the one *Blaster Master* dump,
+and every game with no 3dn profile.
+
+### A marker, not a gate
+
+The engine option stays available for **every** game, which is the owner's choice. The marker has
+three places:
+
+1. **the engine row**, which stays **live** and carries a note beside it, in both languages — the
+   mechanism is `options::fceux_validation_note`, built on the same pattern as
+   `forced_run_ahead_note` (a note on a live row) and deliberately **not** `inert_reason`, which is
+   what greys the four rows FCEUX cannot honour. A test asserts `inert_reason(EmuEngine, …)` is
+   still `None`, so the option cannot become a refusal by accident;
+2. **the notification at every load** on an engine other than Zaxnes's, which lot FCEUX-23 started
+   and which now finishes its sentence: "Playing on the FCEUX engine; this ROM is not validated for
+   3D on it.";
+3. **the performance overlay's machine line**, which gains `validated` or `NOT validated for 3D`
+   after the engine's name.
+
+**"Not validated" and "nothing is known" are kept apart** everywhere — `Status::NotValidated`
+against `Status::Unknown` — because a ROM whose CRC was never read deserves no claim either way,
+and printing the second as the first would be a false statement about a measurement. `Unknown`
+prints nothing.
+
+The table and its tests are compiled in **both** builds, which is deliberate: it is a fact about a
+measurement rather than about the `fceux-core` feature. Only the row's note is gated, through the
+`fceux_is_the_engine` predicate that was already there.
+
+### Checked
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| clippy `-D warnings`, whole workspace, feature **on** and **off** | clean (the overlay's machine line moved into `engine_validation` to stay inside the line budget) |
+| `fceux_validated_tests` | 5 tests, green in **both** builds — the engine-row branch asserts the note with the feature and its absence without |
+| the module's unit tests | 6 more: no duplicate CRC, sorted by CRC, the nine games with their dump counts, the five rejected games absent, a lookup giving the game and the deviation, and the three statuses told apart |
+| `desktop_options_golden_tests`, `options_window_tests`, `engine_choice_tests` | 32 tests green — the shown-rows golden is unchanged, the marker adding no row |
 
 ---
