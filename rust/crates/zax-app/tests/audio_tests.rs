@@ -650,7 +650,7 @@ fn req_aud_010_a_new_game_drops_the_pending_audio() {
     harness.launch("g2");
 
     let session = harness.host.session().unwrap();
-    assert_eq!(session.core().apu().available_samples(), 0);
+    assert_eq!(session.core().audio_available(), 0);
 }
 
 /// REQ-AUD-006: `V = 0` silences everything, which is also what the Mute toggle of AMD-010 does
@@ -826,7 +826,7 @@ fn audio_2_both_outputs_pump_and_correct_without_a_device() {
     classic.run_frames(30);
     assert!(classic.host.classic_audio());
     let core = classic.host.session().unwrap().core();
-    assert!(core.apu().available_samples() > 2 * BLOCK);
+    assert!(core.audio_available() > 2 * BLOCK);
     assert_eq!(
         core.audio_ratio_adjustment(),
         -zax_core_api::MAX_RATIO_ADJUSTMENT
@@ -932,26 +932,8 @@ fn audio_2_a_new_game_drops_the_pending_audio_on_the_classic_output_too() {
     let mut harness = LoopHarness::create_with(|options| options.classic_audio = true);
     harness.launch("g1");
     harness.run_frames(60);
-    assert!(
-        harness
-            .host
-            .session()
-            .unwrap()
-            .core()
-            .apu()
-            .available_samples()
-            > 0
-    );
+    assert!(harness.host.session().unwrap().core().audio_available() > 0);
 
     harness.launch("g2");
-    assert_eq!(
-        harness
-            .host
-            .session()
-            .unwrap()
-            .core()
-            .apu()
-            .available_samples(),
-        0
-    );
+    assert_eq!(harness.host.session().unwrap().core().audio_available(), 0);
 }

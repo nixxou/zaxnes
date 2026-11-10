@@ -322,7 +322,7 @@ fn req_arch_012_the_real_states_do_not_depend_on_n() {
         let session = harness.host.session().unwrap();
         let state = (
             session.core().frame_count(),
-            session.core().bus().ram().to_vec(),
+            session.core().bus().expect("Zaxnes's bus").ram().to_vec(),
         );
         match &reference {
             None => reference = Some(state),
@@ -515,7 +515,8 @@ const ONLY_READS_THE_CORE: &str = r"
 /// frame drew, k + N (the acceptance criterion of REQ-LOOP-065).
 fn effective_run_ahead(harness: &LoopHarness) -> i64 {
     let session = harness.host.session().expect("a session");
-    i64::from(rom::displayed(session.core())) + 1 - i64::from(counter(harness))
+    let core = session.core().zaxnes().expect("Zaxnes's core");
+    i64::from(rom::displayed(core)) + 1 - i64::from(counter(harness))
 }
 
 /// Q-103, point 2 of the answer: a profile whose scripts change the core from a frame hook runs
@@ -786,8 +787,8 @@ fn run_ahead_and_emulation_ahead_give_the_same_real_frames() {
         let left = serial.host.session().unwrap();
         let right = threaded.host.session().unwrap();
         assert_eq!(
-            left.core().bus().ram(),
-            right.core().bus().ram(),
+            left.core().bus().expect("Zaxnes's bus").ram(),
+            right.core().bus().expect("Zaxnes's bus").ram(),
             "N = {ahead}: the work RAM of the two paths parted"
         );
     }

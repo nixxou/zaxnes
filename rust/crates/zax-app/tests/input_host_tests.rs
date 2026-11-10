@@ -13,7 +13,7 @@ use zax_core_api::ControllerPortType;
 fn ports(harness: &LoopHarness) -> (u8, u8) {
     let session = harness.host.session().unwrap();
     let core = session.core();
-    let input = core.bus().input();
+    let input = core.bus().expect("Zaxnes's bus").input();
     (input.port_byte(0), input.port_byte(1))
 }
 
@@ -140,17 +140,7 @@ fn req_inp_120_injected_snapshots_move_the_zapper() {
         pointer_size: viewport,
         ..InputSnapshot::EMPTY
     };
-    let handed = |harness: &LoopHarness| {
-        harness
-            .host
-            .session()
-            .unwrap()
-            .core()
-            .bus()
-            .input()
-            .zapper_position(1)
-            .unwrap()
-    };
+    let handed = |harness: &LoopHarness| harness.host.session().unwrap().core().zapper_position(1);
     harness.tick_snapshot(1.0 / 60.0, &aim([10.0, 10.0]));
     let top_left = harness.host.zapper.position();
     assert_eq!(top_left, handed(&harness));

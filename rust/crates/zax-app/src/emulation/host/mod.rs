@@ -610,8 +610,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(reader) = self
             .session
             .as_ref()
-            .map(|session| session.core().audio_reader())
+            .and_then(|session| session.core().audio_reader())
         else {
+            // No session, or an engine whose samples are not in a shared ring: nothing to
+            // install. Lot FCEUX-23 step 5 gives FCEUX its own `ConsoleSamples`.
             return;
         };
         if self.classic_audio {
@@ -1387,11 +1389,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         };
         if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
-            session
-                .core_mut()
-                .bus_mut()
-                .apu_mut()
-                .drop_pending_samples();
+            session.core_mut().drop_pending_samples();
         }
         control.request_resync();
         self.audio_rate.restart();
@@ -1736,7 +1734,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
         };
-        let available = session.core().apu().available_samples();
+        let available = session.core().audio_available();
         #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
         let error = (available as f64 - TARGET as f64) / TARGET as f64;
         // A proportional correction that saturates at the cap: a full buffer slows the
@@ -1759,7 +1757,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // REQ-PERS-060: written at most every 30 s, and only when the content changed.
         let core = session.core();
         self.battery
-            .advance(&self.paths, real_seconds, core.export_battery_ram());
+            .advance(&self.paths, real_seconds, &core.battery_ram());
     }
 
     /// Stops the game being played: the cartridge RAM is written (REQ-PERS-060), the `End`
@@ -1770,7 +1768,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(mut session) = self.session.take() {
             {
                 let core = session.core();
-                self.battery.flush(&self.paths, core.export_battery_ram());
+                self.battery.flush(&self.paths, &core.battery_ram());
             }
             session.end(&mut self.settings, &mut self.scene);
             session.engine_mut().clear_frames();

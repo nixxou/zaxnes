@@ -319,16 +319,7 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
         ..InputSnapshot::EMPTY
     };
     harness.tick_snapshot(1.0 / 60.0, &held);
-    let port_byte = |harness: &LoopHarness| {
-        harness
-            .host
-            .session()
-            .unwrap()
-            .core()
-            .bus()
-            .input()
-            .port_byte(1)
-    };
+    let port_byte = |harness: &LoopHarness| harness.host.session().unwrap().core().port_byte(1);
     assert_eq!(0x00, port_byte(&harness));
     assert!(harness.host.zapper.trigger_held());
     let position = harness.host.zapper.position();

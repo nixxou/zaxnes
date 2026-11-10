@@ -675,11 +675,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // ring here, and the classic output of AUDIO-2 has nothing else that would — its mixer
         // keeps no gate and no ramp. On the default output `resynchronise_audio` below empties it
         // too, so this is simply the first of two idempotent calls there (AUDIO-2).
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .drop_pending_samples();
+        session.core_mut().drop_pending_samples();
         self.rollback.clear();
         self.frame_steps.clear();
         self.fast_forward.clear();

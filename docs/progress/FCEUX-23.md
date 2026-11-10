@@ -10,7 +10,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 - [x] 1. Bring the FCEUX work onto this branch by cherry-pick; the baseline.
 - [x] 2. `zax-core-api`: the types both engines share, a pure move.
 - [x] 3. The `Engine` trait, and both implementations.
-- [ ] 4. The application drives the trait.
+- [x] 4. The application drives the trait.
 - [ ] 5. The per-game choice (FCEUX-3).
 - [ ] 6. The app with FCEUX, end to end.
 - [ ] 7. Docs.
@@ -329,3 +329,140 @@ use the movie's own `RAMInitOption`/`RAMInitSeed` and **never** zero (lot FCEUX-
 | `crates/zax-nes/tests/engine_trait_tests.rs` | 9 tests: the lifecycle, power against soft reset, the frame's three outputs, the region and the ports, the state round trip and its engine stamp, battery RAM against the borrow the core still lends, every capability on, the downcast reaching all six Zaxnes-only features, and that an engine moves to another thread |
 | `crates/zax-fceux/tests/fceux_engine_tests.rs` | 19 tests, all through `Engine`: the load and its typed cause, the batch's records and palette, the picture before the first frame, the audio contract and the rate snap, memory, the frame counter, soft against hard reset, the state round trip inside a larger buffer, a Zaxnes state refused as `ForeignCore`, three corrupt blocks refused with the engine left stopped, `Multi` round-tripping, the Zapper refused, the capability reasons, the downcast, the RAM fill, and battery RAM on a cart without one |
 | **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |
+
+---
+
+## Step 4 — the application drives the trait
+
+The application used to hold `Box<NesCore>`. It now holds **`EngineHandle`**
+(`crates/zax-app/src/emulation/engine_handle.rs`), which wraps a `Box<dyn Engine>` and puts every
+Zaxnes-only operation the application makes in one file.
+
+### The shape, and why the diff is small
+
+`EngineHandle` implements `Deref<Target = dyn Engine>`, so every call site that only wants the
+trait — `frame_count()`, `run_frame()`, `read_memory()`, `try_load_state()`, … — reads exactly as
+it did. The Zaxnes-only operations are **inherent** methods on the handle, and an inherent method
+wins over a `Deref` one, so `self.core.wide_picture_into(…)` now resolves to the façade's version
+without the call site moving. Each of those is a checked `Any` downcast
+(`zaxnes()` / `zaxnes_mut()`) with a stated answer for an engine that has not got the feature:
+
+| | on Zaxnes | on another engine |
+|---|---|---|
+| `wide_picture_into` | the widened picture | the plain 256 x 240 one, 240 rows |
+| `picture_shift`, `picture_motion`, `picture_camera` | the core's | `None` |
+| `split_steady_sprites` | the split | the picture untouched, the overlay cleared |
+| `run_frame_ahead(word, n)` | the exact sequence | the plain frame (run-ahead is off, and the interface says why) |
+| `holds_a_real_frame`, `restore_real_frame` | the core's | `false` |
+| `bus`, `bus_mut`, `ppu`, `cartridge`, `apu`, `pixel_frame_with_mask` | `Some(…)` | `None` |
+| `set_widescreen_margin`, `…_vertical_margin`, `set_sprite_limit`, `set_smooth_scroll_ahead`, `set_builtin_patches`, `set_advanced_patches`, `set_forced_patch`, `set_hack_options`, `set_zapper_position_source` | applied | ignored |
+| `builtin_patch`, `options_patch` | the core's | `None` |
+| `hack_options`, `applied_components`, `export_flash_save` | the core's | empty |
+| `capture_core_state` / `restore_core_state` | the fast in-memory snapshot, `Ok(true)` | `Ok(false)`, and `Capability::FastCoreSnapshot` is what the caller checks |
+| `drop_pending_samples`, `set_audio_output_enabled` | the APU's | ignored |
+| `audio_reader` | the APU's ring | `None` |
+| `speed`, `audio_ratio_adjustment` | the core's | 1.0 and 0.0 |
+| `set_speed`, `set_audio_ratio_adjustment` | applied | accepted and ignored: one frame's samples a frame whatever the factor says |
+
+Four of them are **derived rather than refused**, so both engines answer:
+
+* `timing()` is `RegionTiming::for_region(region())` — it was `NesCore::timing()`, which is the
+  same expression;
+* `cycle_count()` is the core's on Zaxnes and the sum of what the frames reported otherwise, which
+  is what the audio ratio and the frame profiler use it for;
+* `work_ram_into(out)` is `bus().ram()` where there is a bus and 2 048 `read_memory` calls where
+  there is not — the snapshot the scripts' `ReadMem` serves while the emulation thread has the
+  engine (REQ-LOOP-067);
+* `original_image()` is the core's on Zaxnes and the image the handle kept at `load_rom`
+  otherwise, so the achievements' ROM hash and the save-state header work on either.
+
+`battery_ram()` returns a `Cow`: **borrowed** on Zaxnes, so the default build copies nothing where
+it copied nothing before, owned where the bytes have to come across a C API.
+
+### Where the engine now moves rather than being shared
+
+`CoreWorker` takes an `EngineHandle` instead of a `Box<NesCore>` and hands it back. That is what
+makes `Engine: Send` without `Sync` enough: the engine *moves* to the emulation thread for one
+frame, which was already the design, and is exactly the rule FCEUX's process-global machine needs.
+
+Two second machines in the application are now **documented as Zaxnes-only**, because FCEUX cannot
+have two instances in one process:
+
+* `FramePipeline::spare`, the ROM-less engine that stands in the moved-out field. Nothing is ever
+  asked of it, so it is always `EngineHandle::zaxnes_core()`.
+* the **movie explorer**, which replays a movie's timeline in a second machine on its own thread.
+  It builds its own Zaxnes engine, which is consistent with what `Capabilities` already says about
+  a movie's exactness.
+
+### Call sites changed
+
+`achievements` (`CoreMemory`, `start_game`, `reset`, `restore_progress`, `after_frame`, `tick`,
+`request_game`, `on_event`, `on_login`, `on_game_loaded`, `hash_image`) and
+`movie_timeline::machine_digest` take `&EngineHandle` instead of `&NesCore`, so **the memory the
+achievements read is whichever engine's is live** — which is what step 6 checks. `hash_image` kept
+the Zaxnes order of preference (the cartridge where there is one and no patch rewrote the ROM,
+`original_image` otherwise) rather than being simplified, so the hash of a patched game does not
+move.
+
+`host/mod.rs`, `jobs.rs`, `movies.rs`, `save_states.rs`, `script_reload.rs`, `application.rs`,
+`movie_explorer.rs`, `game_session.rs` and nine test files follow the façade. Two substitutions
+are worth naming because they had to be checked rather than assumed:
+
+* the 2D path's backdrop colour was `core.ppu().snapshot_palette()[0] & 0x3F` and is now
+  `core.frame_batch().palette[0] & 0x3F`. `NesCore::frame_batch` builds its `palette` field *from*
+  `snapshot_palette()`, so it is the same byte;
+* `bus_mut().apu_mut().drop_pending_samples()` / `set_output_enabled(…)`, in four places, became
+  `drop_pending_samples()` / `set_audio_output_enabled(…)` on the handle rather than an
+  `Option<&mut Apu2A03>` every caller would have to unwrap.
+
+### What it proves
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings`, both feature sets | clean |
+| `cargo test --release --workspace`, feature off | **3 250 passed, 0 failed**, 89 ignored |
+| the same with `fceux-core` | **3 299 passed, 0 failed**, 93 ignored |
+| **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |
+| **the `render` comparison, tolerance 0, minimum 100 %** | *Super Mario Bros.*, *Super Mario Bros. 3* and *Mega Man 3* at frames 300 and 1 200: **12 of 12 captures 100.000 % within 0 levels**, 0 off |
+
+`crates/zax-app/tests/engine_handle_tests.rs` adds 6 tests and one `#[ignore]`d measurement: that
+the default build holds Zaxnes with every capability on, that the trait arrives through `Deref`,
+that each Zaxnes-only method gives the core's own answer, that `timing()` follows the region and
+`cycle_count()` the frames, that the work-RAM snapshot *is* the bus's bytes, and that a savestate
+through the handle is byte-for-byte the core's own block.
+
+### Performance, and what `bench-core` can and cannot say
+
+`bench-core` on the two games, four runs each, every run alone:
+
+| ROM | `core run_frame` ms | `total` ms | frames/s | against the baseline's warm median |
+|---|---|---|---|---|
+| *Super Mario Bros. 3* | 1.1415 / 1.1390 / 1.1453 / 1.1251 | 1.3660 / 1.3599 / 1.3761 / 1.3428 | 732 / 735 / 727 / 745 | median 1.3630 ms against 1.3977 ms: **−2.5 %** |
+| *Mega Man 3* | 0.8861 / 0.8947 / 0.8897 / 0.8902 | 0.9895 / 1.0008 / 0.9948 / 0.9939 | 1011 / 999 / 1005 / 1006 | median 0.9944 ms against 1.0326 ms: **−3.7 %** |
+
+Inside the owner's +1 % — on the fast side of it — but **the figure does not measure this step**,
+and saying so matters more than the number: `zax-harness`'s `bench-core` drives `NesCore`
+**directly**, not through `EngineHandle`, so it times `zax-nes`, which this lot does not touch.
+The two negative figures are therefore machine drift between the step-1 run and this one, and they
+also say what this machine's noise floor is: a couple of per cent.
+
+So the +1 % question was measured where the abstraction actually is, by
+`what_the_abstraction_costs_on_the_applications_own_path`: the same frames of *Super Mario Bros.*
+through `EngineHandle` and through `Box<NesCore>`, with the four Zaxnes-only reads the session
+makes of every frame, 21 rounds of 1 000 frames each way, alternating:
+
+    EngineHandle against Box<NesCore> over 21 000 frames each:
+      median +0.401 %, quartiles -1.662 % to +1.363 %, all rounds together -0.724 %
+
+**The cost is below this machine's measurement floor.** The median is +0.40 %, the pooled figure
+is −0.72 %, and the round-to-round spread is ±1.7 % — so the honest statement is not "it costs
+0.4 %" but "it is smaller than the noise". That agrees with what the code does: one indirect call
+and four `TypeId` comparisons per frame, which is single-digit nanoseconds against a 1.2 ms frame.
+**No enum dispatch is needed**, which is the alternative the brief allowed if `dyn` had cost more
+than 1 %.
+
+A first attempt at this measurement used 3 and then 7 rounds of 4 000 frames and produced +0.8 %,
+−20 %, +16 % and +39 % — one hiccup inside one half of a long round swings the ratio by tens of
+per cent. That is why the test runs many short rounds and reports a median and quartiles instead
+of a single ratio; the rejected shape is recorded here so that nobody repeats it.

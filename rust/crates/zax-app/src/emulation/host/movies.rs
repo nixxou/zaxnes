@@ -364,11 +364,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         else {
             return false;
         };
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .set_output_enabled(false);
+        session.core_mut().set_audio_output_enabled(false);
         let current = session.core().frame_count();
         if let Some((_, state)) = timeline.seek_origin(current, target) {
             if let Err(error) = session.restore_core(state) {
@@ -426,9 +422,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The sound comes back after a seek, without the samples of the frames it ran.
     fn end_seek_sound(&mut self) {
         if let Some(session) = self.session.as_mut() {
-            let apu = session.core_mut().bus_mut().apu_mut();
-            apu.set_output_enabled(true);
-            apu.drop_pending_samples();
+            let core = session.core_mut();
+            core.set_audio_output_enabled(true);
+            core.drop_pending_samples();
         }
     }
 

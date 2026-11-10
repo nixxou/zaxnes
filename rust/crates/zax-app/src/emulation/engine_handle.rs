@@ -1,0 +1,611 @@
+//! [`EngineHandle`]: the application's one way of holding an emulation engine.
+//!
+//! The application used to hold `Box<NesCore>`. Since lot FCEUX-23 step 4 it holds this, which
+//! wraps a `Box<dyn Engine>` and adds, in **one place**, every Zaxnes-only operation the
+//! application makes — each one asking [`Capabilities`] first and giving a stated answer when the
+//! engine does not have it.
+//!
+//! # Why a façade and not scattered downcasts
+//!
+//! §2 of `docs/review/FCEUX-ENGINE.md` splits what the application asks of a core in two: what
+//! both engines can do, which is the [`Engine`] trait, and what is *Zaxnes's machine* rather than
+//! an emulator's — the widescreen extension, the hack packs, the sprite limit, the exact
+//! run-ahead, the bus and the PPU. The second list is reached here through
+//! [`EngineHandle::zaxnes`] / [`EngineHandle::zaxnes_mut`], a checked `Any` downcast: safe Rust,
+//! no `unsafe`, and no panic on the other engine. Putting all of them in this file means a reader
+//! can see what FCEUX does instead of each one without reading the whole application, and means
+//! the call sites did not have to change: the trait's methods arrive through [`Deref`], the
+//! Zaxnes-only ones are inherent methods here, and an inherent method wins over a `Deref` one.
+//!
+//! # The default build
+//!
+//! With the `fceux-core` feature off, `Box<dyn Engine>` can only ever hold a `NesCore`: the other
+//! implementation is not compiled. Every `zaxnes()` below then succeeds, every fallback is dead
+//! at run time, and the application behaves exactly as it did — which golden-core, the render
+//! comparison and `bench-core` are measured against in `docs/progress/FCEUX-23.md` step 4.
+
+use std::ops::{Deref, DerefMut};
+
+use zax_core_api::{Capabilities, Capability, Engine, EngineKind, InputWord, NoRomLoaded};
+use zax_nes::apu::AudioReader;
+use zax_nes::builtin_patches::{BuiltinPatch, HackOption};
+use zax_nes::cartridges::Cartridge;
+use zax_nes::ppu::{Ppu2C02, SpriteLimit};
+use zax_nes::state::{CoreState, InvalidState};
+use zax_nes::{NesBus, NesCore, RegionTiming, ZapperPosition, ZapperPositionSource};
+
+/// The rows of a standard NES picture, which is what the widescreen-less picture has.
+const STANDARD_ROWS: usize = 240;
+
+/// One emulation engine, as the application holds it.
+pub struct EngineHandle {
+    engine: Box<dyn Engine>,
+    capabilities: Capabilities,
+    /// The image the host handed to [`EngineHandle::load_rom`], kept so that an engine which
+    /// does not keep one — FCEUX — can still answer [`EngineHandle::original_image`], which the
+    /// achievements' ROM hash and the save-state header need.
+    loaded_image: Option<Vec<u8>>,
+    /// CPU cycles the frames run have taken, accumulated from [`Engine::run_frame`]'s return so
+    /// that an engine without a cycle counter still answers [`EngineHandle::cycle_count`].
+    cycles: i64,
+}
+
+impl std::fmt::Debug for EngineHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The engine itself is not `Debug` and the kept image is a megabyte of ROM, so this
+        // prints what identifies the handle: which engine, and whether it has a game.
+        formatter
+            .debug_struct("EngineHandle")
+            .field("engine", &self.capabilities.kind)
+            .field("running", &self.engine.is_running())
+            .field("cycles", &self.cycles)
+            .field("image", &self.loaded_image.as_ref().map(Vec::len))
+            .finish()
+    }
+}
+
+impl EngineHandle {
+    /// A handle over `engine`.
+    #[must_use]
+    pub fn new(engine: Box<dyn Engine>) -> Self {
+        let capabilities = engine.capabilities();
+        Self {
+            engine,
+            capabilities,
+            loaded_image: None,
+            cycles: 0,
+        }
+    }
+
+    /// A handle over a fresh Zaxnes core, which is what every caller that does not choose an
+    /// engine gets — and the only engine a build without `fceux-core` has.
+    #[must_use]
+    pub fn zaxnes_core() -> Self {
+        Self::new(Box::new(NesCore::new()))
+    }
+
+    /// The engine behind the handle, for a caller that wants the trait and nothing else.
+    #[must_use]
+    pub fn engine(&self) -> &dyn Engine {
+        self.engine.as_ref()
+    }
+
+    /// The same, mutably.
+    pub fn engine_mut(&mut self) -> &mut dyn Engine {
+        self.engine.as_mut()
+    }
+
+    /// Which engine this is, for the marker the interface shows and for a savestate's stamp.
+    #[must_use]
+    pub const fn kind(&self) -> EngineKind {
+        self.capabilities.kind
+    }
+
+    /// What this engine can do beyond the trait.
+    #[must_use]
+    pub const fn capabilities(&self) -> Capabilities {
+        self.capabilities
+    }
+
+    /// Whether `capability` is supported, which is the check every method below makes.
+    #[must_use]
+    pub const fn has(&self, capability: Capability) -> bool {
+        self.capabilities.has(capability)
+    }
+
+    /// Why a control is disabled on this engine, or `None` when it is not.
+    #[must_use]
+    pub const fn refusal(&self, capability: Capability) -> Option<&'static str> {
+        self.capabilities.refusal(capability)
+    }
+
+    // ------------------------------------------------------------- the downcast
+
+    /// Zaxnes's own core, or `None` on another engine.
+    #[must_use]
+    pub fn zaxnes(&self) -> Option<&NesCore> {
+        self.engine.as_any().downcast_ref::<NesCore>()
+    }
+
+    /// The same, mutably.
+    pub fn zaxnes_mut(&mut self) -> Option<&mut NesCore> {
+        self.engine.as_any_mut().downcast_mut::<NesCore>()
+    }
+
+    // ------------------------------------------------------------------ the game
+
+    /// Loads a ROM and keeps the image, so that [`EngineHandle::original_image`] can answer on
+    /// an engine that does not keep one.
+    pub fn load_rom(&mut self, image: &[u8], name: &str) -> zax_core_api::RomLoadResult {
+        self.cycles = 0;
+        let result = self.engine.load_rom(image, name);
+        self.loaded_image = result.success.then(|| image.to_vec());
+        result
+    }
+
+    /// The image the host handed over, as the achievements' ROM hash and the save-state header
+    /// want it: on Zaxnes the core's own answer (the unpatched original when a built-in patch
+    /// changed the ROM in memory), on another engine the image this handle kept.
+    #[must_use]
+    pub fn original_image(&self) -> Option<&[u8]> {
+        match self.zaxnes() {
+            Some(core) => core.original_image(),
+            None => self.loaded_image.as_deref(),
+        }
+    }
+
+    /// The cartridge, `None` on an engine that does not expose one.
+    #[must_use]
+    pub fn cartridge(&self) -> Option<&Cartridge> {
+        self.zaxnes().and_then(NesCore::cartridge)
+    }
+
+    /// The bus, `None` on an engine that does not expose one.
+    #[must_use]
+    pub fn bus(&self) -> Option<&NesBus> {
+        self.zaxnes().map(NesCore::bus)
+    }
+
+    /// The same, mutably.
+    pub fn bus_mut(&mut self) -> Option<&mut NesBus> {
+        self.zaxnes_mut().map(NesCore::bus_mut)
+    }
+
+    /// The PPU, `None` on an engine that does not expose one.
+    #[must_use]
+    pub fn ppu(&self) -> Option<&Ppu2C02> {
+        self.zaxnes().map(NesCore::ppu)
+    }
+
+    /// Timings of the region in force (REQ-CORE-015). Derived from the region, so both engines
+    /// answer it.
+    #[must_use]
+    pub fn timing(&self) -> RegionTiming {
+        RegionTiming::for_region(self.engine.region())
+    }
+
+    /// CPU cycles since the last power-on. Zaxnes counts them; another engine's are the sum of
+    /// what its frames reported, which is what the audio ratio and the frame profiler use them
+    /// for.
+    #[must_use]
+    pub fn cycle_count(&self) -> i64 {
+        match self.zaxnes() {
+            Some(core) => core.cycle_count(),
+            None => self.cycles,
+        }
+    }
+
+    /// The work RAM, `$0000-$07FF`, copied into `out` — the snapshot the scripts read from while
+    /// the emulation thread has the engine. Read through the engine on a core that does not lend
+    /// its RAM.
+    pub fn work_ram_into(&self, out: &mut [u8]) {
+        match self.bus() {
+            Some(bus) => out.copy_from_slice(bus.ram()),
+            None => {
+                for (address, byte) in out.iter_mut().enumerate() {
+                    *byte = u16::try_from(address)
+                        .map_or(0, |address| self.engine.read_memory(address));
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ a frame
+
+    /// One frame (REQ-CORE-020). An inherent method rather than the trait's through [`Deref`],
+    /// so that the cycle total [`EngineHandle::cycle_count`] falls back on is kept whichever way
+    /// a frame was run.
+    pub fn run_frame(&mut self, word: InputWord) -> i64 {
+        let cycles = self.engine.run_frame(word);
+        self.cycles = self.cycles.saturating_add(cycles);
+        cycles
+    }
+
+    /// One frame with `ahead` frames of run-ahead (AMD-041 REQ-LOOP-065), which is exact on
+    /// Zaxnes. An engine without run-ahead runs the plain frame: lot FCEUX-5 is what would make
+    /// it save, run N, take the frame and load, and until then the interface shows the control
+    /// disabled with that reason rather than running it slowly and silently.
+    pub fn run_frame_ahead(&mut self, word: InputWord, ahead: u8) -> i64 {
+        let cycles = match self.zaxnes_mut() {
+            Some(core) => core.run_frame_ahead(word, ahead),
+            None => self.engine.run_frame(word),
+        };
+        self.cycles = self.cycles.saturating_add(cycles);
+        cycles
+    }
+
+    /// Whether the engine still holds the real frame a run-ahead computed past; `false` on an
+    /// engine without run-ahead, which never does.
+    #[must_use]
+    pub fn holds_a_real_frame(&self) -> bool {
+        self.zaxnes().is_some_and(NesCore::holds_a_real_frame)
+    }
+
+    /// Puts the real frame back after a run-ahead; `false` when there was none.
+    pub fn restore_real_frame(&mut self) -> bool {
+        self.zaxnes_mut().is_some_and(NesCore::restore_real_frame)
+    }
+
+    /// The frame's picture widened by its widescreen margins, into `out`; the number of rows.
+    /// An engine without the widescreen extension gives the plain 256 x 240 picture, which is
+    /// what its frames are.
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        if let Some(core) = self.zaxnes() {
+            return core.wide_picture_into(out);
+        }
+        self.engine.pixel_frame_indices_into(out);
+        STANDARD_ROWS
+    }
+
+    /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
+    #[must_use]
+    pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {
+        self.zaxnes().and_then(NesCore::picture_shift)
+    }
+
+    /// The frame's camera motion to the next one; `None` on an engine that has none.
+    #[must_use]
+    pub fn picture_motion(&self) -> Option<f32> {
+        self.zaxnes().and_then(NesCore::picture_motion)
+    }
+
+    /// The camera position the frame's own scroll implies; `None` on an engine that has none.
+    #[must_use]
+    pub fn picture_camera(&self) -> Option<f64> {
+        self.zaxnes().and_then(NesCore::picture_camera)
+    }
+
+    /// Moves the sprites that travel with the camera out of `picture` into `overlay`. An engine
+    /// without the split leaves the picture alone and clears the overlay, which is what "no
+    /// sprite was moved out" means to the caller.
+    pub fn split_steady_sprites(&self, picture: &mut [u8], overlay: &mut Vec<u8>) {
+        match self.zaxnes() {
+            Some(core) => core.split_steady_sprites(picture, overlay),
+            None => overlay.clear(),
+        }
+    }
+
+    /// Whether the frame's margin decoder asks the top and bottom 8 lines hidden; `false` on an
+    /// engine without the decoders.
+    #[must_use]
+    pub fn hides_overscan(&self) -> bool {
+        self.zaxnes().is_some_and(NesCore::hides_overscan)
+    }
+
+    /// The picture with its opacity mask, which the movie timeline hashes; `None` on an engine
+    /// that does not keep one.
+    #[must_use]
+    pub fn pixel_frame_with_mask(&self) -> Option<&[u8]> {
+        self.zaxnes().map(NesCore::pixel_frame_with_mask)
+    }
+
+    // -------------------------------------------------------------------- audio
+
+    /// The APU, `None` on an engine that does not expose one.
+    #[must_use]
+    pub fn apu(&self) -> Option<&zax_nes::apu::Apu2A03> {
+        self.zaxnes().map(NesCore::apu)
+    }
+
+    /// Throws away the samples of frames already run, so that none of a previous game or of a
+    /// seek's frames is ever replayed (REQ-AUD-010). A no-op on an engine whose samples the host
+    /// has already taken frame by frame.
+    pub fn drop_pending_samples(&mut self) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.bus_mut().apu_mut().drop_pending_samples();
+        }
+    }
+
+    /// Silences or unsilences the output while frames run that the player must not hear — a
+    /// movie seek. Likewise a no-op where the host takes the samples itself.
+    pub fn set_audio_output_enabled(&mut self, on: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.bus_mut().apu_mut().set_output_enabled(on);
+        }
+    }
+
+    /// Mono samples waiting to be read (REQ-CORE-071), which the audio clock steers on.
+    #[must_use]
+    pub fn audio_available(&self) -> usize {
+        match self.apu() {
+            Some(apu) => apu.available_samples(),
+            None => 0,
+        }
+    }
+
+    /// The speed factor in force (REQ-CORE-072); 1.0 on an engine without one.
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        self.zaxnes().map_or(1.0, NesCore::speed)
+    }
+
+    /// The fine resampling-ratio adjustment in force; 0.0 on an engine without a resampler.
+    #[must_use]
+    pub fn audio_ratio_adjustment(&self) -> f64 {
+        self.zaxnes().map_or(0.0, NesCore::audio_ratio_adjustment)
+    }
+
+    /// A handle the host's audio thread can read samples from (REQ-CORE-071); `None` on an engine
+    /// whose samples are not in a shared ring.
+    #[must_use]
+    pub fn audio_reader(&self) -> Option<AudioReader> {
+        self.zaxnes().map(NesCore::audio_reader)
+    }
+
+    /// The speed factor, which only retimes the audio and never the emulation (REQ-CORE-072).
+    ///
+    /// # Errors
+    ///
+    /// As `NesCore::set_speed`. An engine with no speed control accepts the call and ignores it:
+    /// it produces one frame's samples per frame whatever the factor says.
+    pub fn set_speed(&mut self, value: f64) -> Result<(), zax_core_api::AudioError> {
+        match self.zaxnes_mut() {
+            Some(core) => core.set_speed(value),
+            None => Ok(()),
+        }
+    }
+
+    /// The fine resampling-ratio adjustment the audio clock asks for.
+    ///
+    /// # Errors
+    ///
+    /// As `NesCore::set_audio_ratio_adjustment`; ignored on an engine without a resampler of its
+    /// own, for the reason above.
+    pub fn set_audio_ratio_adjustment(
+        &mut self,
+        value: f64,
+    ) -> Result<(), zax_core_api::AudioError> {
+        match self.zaxnes_mut() {
+            Some(core) => core.set_audio_ratio_adjustment(value),
+            None => Ok(()),
+        }
+    }
+
+    // -------------------------------------------------------------- savestates
+
+    /// A savestate as a new vector, which is what every caller outside the rollback history
+    /// wants. Both engines answer it, through [`Engine::save_state_to`].
+    ///
+    /// # Errors
+    ///
+    /// [`NoRomLoaded`] when no ROM is loaded.
+    pub fn save_state(&self, include_rom_image: bool) -> Result<Vec<u8>, NoRomLoaded> {
+        let mut block = Vec::new();
+        self.engine.save_state_to(include_rom_image, &mut block)?;
+        Ok(block)
+    }
+
+    /// A savestate taken at a CPU instruction boundary where the machine is idle, with whether it
+    /// found one. An engine without the idle search answers its ordinary state and `false`.
+    ///
+    /// # Errors
+    ///
+    /// [`NoRomLoaded`] when no ROM is loaded.
+    pub fn save_state_at_idle(
+        &mut self,
+        include_rom_image: bool,
+    ) -> Result<(Vec<u8>, bool), NoRomLoaded> {
+        match self.zaxnes_mut() {
+            Some(core) => core.save_state_at_idle(include_rom_image),
+            None => Ok((self.save_state(include_rom_image)?, false)),
+        }
+    }
+
+    /// The in-memory snapshot of AMD-041 REQ-CORE-121 — the cheap path rollback uses on Zaxnes.
+    /// `false` on an engine without it, and [`Capability::FastCoreSnapshot`] says which.
+    ///
+    /// # Errors
+    ///
+    /// [`NoRomLoaded`] when no ROM is loaded.
+    pub fn capture_core_state(&self, state: &mut CoreState) -> Result<bool, NoRomLoaded> {
+        match self.zaxnes() {
+            Some(core) => core.capture_core_state(state).map(|()| true),
+            None => Ok(false),
+        }
+    }
+
+    /// Reads a snapshot back; `false` on an engine without the fast path.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidState`] when the buffer does not fit the machine.
+    pub fn restore_core_state(&mut self, state: &CoreState) -> Result<bool, InvalidState> {
+        match self.zaxnes_mut() {
+            Some(core) => core.restore_core_state(state).map(|()| true),
+            None => Ok(false),
+        }
+    }
+
+    /// Upper bound on a snapshot's size; 0 on an engine without the fast path.
+    #[must_use]
+    pub fn max_core_state_size(&self) -> usize {
+        self.zaxnes().map_or(0, NesCore::max_core_state_size)
+    }
+
+    /// Which built-in components a savestate of this machine carries, for the slot's header;
+    /// empty on an engine with no built-in patches.
+    #[must_use]
+    pub fn applied_components(&self) -> Vec<&'static str> {
+        self.zaxnes()
+            .map(NesCore::applied_components)
+            .unwrap_or_default()
+    }
+
+    // --------------------------------------------------------- flash and battery
+
+    /// The battery-backed PRG-RAM to persist (REQ-CORE-095).
+    ///
+    /// Borrowed on Zaxnes, which lends it — so the default build copies nothing, as it did
+    /// before this lot; owned on an engine whose bytes come across a C API.
+    #[must_use]
+    pub fn battery_ram(&self) -> std::borrow::Cow<'_, [u8]> {
+        if let Some(core) = self.zaxnes() {
+            return std::borrow::Cow::Borrowed(core.export_battery_ram());
+        }
+        let mut bytes = Vec::new();
+        self.engine.export_battery_ram(&mut bytes);
+        std::borrow::Cow::Owned(bytes)
+    }
+
+    /// A flash chip's changed sectors, for a host that persists them; empty on an engine without
+    /// a flash cartridge of its own.
+    #[must_use]
+    pub fn export_flash_save(&self) -> Vec<u8> {
+        self.zaxnes()
+            .map(NesCore::export_flash_save)
+            .unwrap_or_default()
+    }
+
+    /// Restores them; `false` on an engine without them.
+    pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
+        match self.zaxnes_mut() {
+            Some(core) => core.import_flash_save(data),
+            None => false,
+        }
+    }
+
+    // ------------------------------------------------- the widescreen extension
+
+    /// The widescreen margin the host offers, in NES pixels a side; ignored on an engine without
+    /// the extension, whose frames stay 256 wide.
+    pub fn set_widescreen_margin(&mut self, pixels: i32) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_widescreen_margin(pixels);
+        }
+    }
+
+    /// The same above and below.
+    pub fn set_widescreen_vertical_margin(&mut self, pixels: i32) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_widescreen_vertical_margin(pixels);
+        }
+    }
+
+    /// The margin in force; 0 on an engine without the extension.
+    #[must_use]
+    pub fn widescreen_margin(&self) -> i32 {
+        self.zaxnes().map_or(0, NesCore::widescreen_margin)
+    }
+
+    /// The smooth scrolling of the run-ahead (`emu.smooth_scroll_ahead`); ignored without it.
+    pub fn set_smooth_scroll_ahead(&mut self, on: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_smooth_scroll_ahead(on);
+        }
+    }
+
+    /// The 8-sprites-per-line limit of the picture; ignored on an engine whose PPU is not ours.
+    pub fn set_sprite_limit(&mut self, limit: SpriteLimit) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_sprite_limit(limit);
+        }
+    }
+
+    // ---------------------------------------------------------- the hack packs
+
+    /// Whether the built-in patches apply at all; ignored on an engine they cannot patch.
+    pub fn set_builtin_patches(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_builtin_patches(enabled);
+        }
+    }
+
+    /// Whether the advanced widescreen patches apply too; likewise.
+    pub fn set_advanced_patches(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_advanced_patches(enabled);
+        }
+    }
+
+    /// The patch to force on a ROM none is made for; likewise.
+    pub fn set_forced_patch(&mut self, patch: Option<&'static BuiltinPatch>) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_forced_patch(patch);
+        }
+    }
+
+    /// The built-in patch applied to the ROM loaded; `None` on an engine without them.
+    #[must_use]
+    pub fn builtin_patch(&self) -> Option<&'static str> {
+        self.zaxnes().and_then(NesCore::builtin_patch)
+    }
+
+    /// The pack whose options the game offers; `None` on an engine without them.
+    #[must_use]
+    pub fn options_patch(&self) -> Option<&'static str> {
+        self.zaxnes().and_then(NesCore::options_patch)
+    }
+
+    /// Those options; empty on an engine without them.
+    #[must_use]
+    pub fn hack_options(&self) -> Vec<HackOption> {
+        self.zaxnes().map(NesCore::hack_options).unwrap_or_default()
+    }
+
+    /// The option bits the pack reads at `$500A`; ignored without a pack.
+    pub fn set_hack_options(&mut self, options: u16) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_hack_options(options);
+        }
+    }
+
+    // ------------------------------------------------------------- the Zapper
+
+    /// Where the Zapper is aimed, asked once a frame; ignored on an engine without one, whose
+    /// ports only ever hold a pad.
+    pub fn set_zapper_position_source(&mut self, source: Option<ZapperPositionSource>) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_zapper_position_source(source);
+        }
+    }
+
+    /// The aim of the gun on `port`; off screen on an engine without one.
+    #[must_use]
+    pub fn zapper_position(&self, port: usize) -> ZapperPosition {
+        self.bus()
+            .and_then(|bus| bus.input().zapper_position(port).ok())
+            .unwrap_or(ZapperPosition::OFF_SCREEN)
+    }
+
+    /// The byte the scripts read for `port`'s buttons; 0 on an engine that does not lend its
+    /// ports.
+    #[must_use]
+    pub fn port_byte(&self, port: usize) -> u8 {
+        self.bus().map_or(0, |bus| bus.input().port_byte(port))
+    }
+}
+
+/// The trait's own methods, so that every call site that only needs them reads as it did.
+impl Deref for EngineHandle {
+    type Target = dyn Engine;
+
+    fn deref(&self) -> &Self::Target {
+        self.engine.as_ref()
+    }
+}
+
+impl DerefMut for EngineHandle {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.engine.as_mut()
+    }
+}
