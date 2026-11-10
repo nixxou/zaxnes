@@ -231,10 +231,11 @@ Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 
 ### FCEUX — (c) les auteurs de FCEUX — GNU GPL v2 ou ultérieure
 
-Zaxnes peut être construit avec **FCEUX** comme second moteur d'émulation, choisi jeu par jeu
-(lot FCEUX-1). Cette possibilité est derrière la fonctionnalité Cargo `fceux-core`, **désactivée
-par défaut** : les binaires livrés ne contiennent aucun code de FCEUX, et le constructeur qui
-n'active pas cette fonctionnalité n'a rien à faire de cette section.
+Zaxnes peut être construit avec **FCEUX** comme second moteur d'émulation, choisi jeu par jeu par
+l'option `emu.engine` (lots FCEUX-1 et FCEUX-23). Cette possibilité est derrière la fonctionnalité
+Cargo `fceux-core`, **désactivée par défaut** — à la fois pour `zax-app` et pour `zax-harness` :
+les binaires livrés ne contiennent aucun code de FCEUX, l'option n'est pas affichée, et le
+constructeur qui n'active pas cette fonctionnalité n'a rien à faire de cette section.
 
 **Aucun code de FCEUX n'est repris dans les sources de Zaxnes.** Il vit uniquement dans un fork
 séparé, `cleanroom/fceux-zax` (branche `zax`), qui conserve l'historique complet de FCEUX amont ;
@@ -250,7 +251,9 @@ bibliothèque soit liée statiquement ou dynamiquement.
 bibliothèque de ce fork, les **sources complètes correspondantes du fork** doivent voyager avec
 lui (offertes aux mêmes conditions, à côté du binaire). C'est la raison pour laquelle
 l'historique de FCEUX est conservé intact dans le fork : chacune de nos modifications est un
-`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère.
+`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère — au terme du lot FCEUX-23,
+trois fichiers de `src/` et le répertoire `zax/`, que ce lot a seulement agrandi (trois appels de
+plus pour la mémoire de sauvegarde, aucun fichier de FCEUX touché).
 
 Le fork compile aussi la copie de **zlib** que FCEUX embarque déjà
 (`src/drivers/win/zlib`, zlib 1.1.4, licence zlib) quand aucune zlib système n'est trouvée, et la

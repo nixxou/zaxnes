@@ -13,7 +13,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 - [x] 4. The application drives the trait.
 - [x] 5. The per-game choice (FCEUX-3).
 - [x] 6. The app with FCEUX, end to end.
-- [ ] 7. Docs.
+- [x] 7. Docs.
 - [ ] 8. Final pass.
 
 ## The environment this lot ran in
@@ -711,3 +711,95 @@ doing Zaxnes-only work** — the widescreen picture, the steady-sprite split and
 shift are all skipped there — and this is the application's loop rather than `bench-core`, so it
 carries the settings sync and the draw-list build as well as the core. The two columns were
 measured the same way, which is what makes the ratio worth anything.
+
+---
+
+## Step 7 — the docs
+
+### `docs/review/FCEUX-ENGINE.md`
+
+* **§2** opens with what lot FCEUX-23 did, and keeps the plan as it was written with the three
+  places the outcome differs marked: `sample_rate()` on the trait as well as its setter (FCEUX
+  takes three rates and a silent snap would be a pitch error), `export_battery_ram` copying rather
+  than lending, and the three battery calls the fork needed. Plus the one thing the plan did not
+  have at all: FCEUX's samples are behind a `!Sync` handle while the audio thread holds a clone of
+  Zaxnes's APU ring, so the handle keeps a shared ring for an engine without one.
+* **§4** opens with what step 5 built, naming `emu.engine`, its effect, the gating of the row
+  rather than the key, the greying mechanism and the three places the marker appears.
+* **§6** — the substantive change. Item 2 of "what FCEUX-1 left" said the MMC2/MMC4 latch was
+  done to the requirement but **unproven in use**, no mapper 9 or 10 game being in either ROM set,
+  and that "a lot with the ROM should close this". It is **closed**: *Punch-Out!!* is mapper 9 and
+  its records are identical in order at frames 60, 300 and 1 200. The per-game table gains a
+  *Punch-Out!!* row marked **ship**.
+* **§9** strikes FCEUX-2 and FCEUX-3 from the lot table and adds what this lot leaves the other
+  four: FCEUX-4 unblocked and still small, FCEUX-5 with its seam already cut (one flag to raise,
+  one method to fill — and **rollback needed nothing**), FCEUX-7 unchanged, and FCEUX-8 still the
+  lot that decides whether an arbitrary ROM may be handed to FCEUX, which this lot did **not**
+  settle.
+* **§10** records that the patch set is unchanged where it matters: the three battery calls live in
+  `zax/zaxfceux.cpp`, **no FCEUX file was patched**, so `git diff <upstream-base>..zax` over `src/`
+  is still the same three files.
+
+### `HOWTO-RUN.md`
+
+A new sub-section **"Moteur d'émulation (par jeu)"** in §3, beside the per-game options it belongs
+with: where the row is, that it is per game and not a preference and why, that there is no
+"automatic", that it takes effect at the next load, the three places the marker shows, the four
+groups of controls shown greyed with their reason, that a savestate does not cross engines while
+rollback works on both, and what a build without the feature does with a value already stored.
+
+### `THIRD-PARTY-NOTICES.md`
+
+The FCEUX entry names `emu.engine` and both lots, says the feature is off by default for
+`zax-harness` as well as `zax-app`, and records that lot FCEUX-23 only *grew* the fork's `zax/`
+directory — three calls, no FCEUX file touched — so the "complete corresponding source" duty is
+the same duty over the same diff.
+
+---
+
+## What the owner must decide before this ships
+
+Four things, none of which this lot could decide for them.
+
+### 1. Whether `fceux-core` is on in a release build
+
+It is **off** by default, for `zax-app` and for `zax-harness`. Off, there is no FCEUX code in the
+binary at all, the engine row is not shown, and a stored `emu.engine` is ignored — the default
+build is the one it always was, which golden-core, the render comparison and the parity digest of
+step 6 all say in their own way.
+
+Turning it on in a release is a **licence decision before it is a technical one**: §10 of the
+design note and `THIRD-PARTY-NOTICES.md` require the **complete corresponding source of the fork
+to travel with every binary** that carries the library, offered under the same terms. Nobody has
+built that yet. The least that satisfies it is a tarball of `cleanroom/fceux-zax` at the built
+commit with its hash in the release notes, and it has to be part of the release process rather
+than a thing somebody remembers.
+
+### 2. Whether FCEUX may be offered for an **arbitrary** ROM
+
+Lot FCEUX-23 did **not** vet anything. The per-game option lets a user choose FCEUX for any game
+in their library, and §7's one-byte heap overflow in FCEUX's own `$2007` write path
+(`ppu.cpp:978`, mapper 7, `other/oam3.nes`) is still live in the fork. That is a heap corruption
+reachable from a cartridge image, in the same process as the player's unsaved game.
+
+§7 recommends the one-line fix in the fork plus a vetted game list, and leaves the mirroring
+judgement the fix implies to the owner. **Lot FCEUX-8 is where that belongs**, and until it is
+done, offering the option to every game is a decision rather than an oversight.
+
+### 3. The sample rate FCEUX cannot produce
+
+FCEUX's core takes 44 100, 48 000 and 96 000 Hz and nothing else. A user whose `audio.sample_rate`
+is 22 050 or 32 000 and who chooses FCEUX for a game gets the **nearest rate FCEUX can produce**
+(44 100 or 48 000), and `Engine::sample_rate` reports the truth so the host stays in tune. That is
+the honest behaviour and it is not a silent one, but it *is* a setting quietly not honoured. The
+alternative — refusing the rate and leaving the game silent — seemed worse. If the owner disagrees,
+the change is three lines in `FceuxEngine::set_sample_rate`.
+
+### 4. Which games FCEUX is worth offering for
+
+§6 of the design note judges 13 games with a profile; lot FCEUX-23 adds *Punch-Out!!* to the "ship"
+list and leaves *Castlevania*, *Excitebike* and *Super Mario Bros.* where they were — failing on
+FCEUX's **emulation** differing from Zaxnes's, which no capture work can fix. The option is
+per-game precisely so that this is the user's call, but a shipped build may want a default
+recommendation, and §6's two caveats still stand: the judgement rests on one dump per game at two
+frames with no button pressed, and 65 of the 91 dumps were never rendered.

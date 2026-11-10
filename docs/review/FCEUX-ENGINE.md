@@ -29,7 +29,13 @@ path (`ppu.cpp:978`, diagnosed with ASAN; §7 below). An engine that can corrupt
 cartridge image cannot be given an arbitrary ROM in the same process as the user's unsaved game
 without a decision about that first.
 
-## 2. The engine abstraction `zax-app` would need
+## 2. The engine abstraction `zax-app` needed
+
+> **Done by lot FCEUX-23 (steps 2 to 4).** `zax-core-api` holds the shared types and the `Engine`
+> trait; `zax-nes` and `zax-fceux` both implement it; the application holds one `EngineHandle`
+> over a `Box<dyn Engine>`. What follows is this section as it was written, with the three places
+> the outcome differs from the plan marked **[FCEUX-23]**. The working is
+> `docs/progress/FCEUX-23.md` steps 2 to 4.
 
 ### What the application actually uses
 
@@ -91,6 +97,27 @@ types alone. The first is cleaner and is what this note recommends; it is a mech
 wide-reaching change (every `use zax_nes::{FrameBatch, TileRecord, …}` in the app, the renderer and
 the harness).
 
+**[FCEUX-23]** The recommendation was taken: `zax-core-api` exists, has no dependencies of its
+own, and `zax-nes` re-exports every moved type at the path it was at — so the whole workspace
+compiled on the re-exports alone before a single use site was touched. Three things the plan above
+did not foresee, each with its reason:
+
+1. **`sample_rate()` is on the trait too**, not only `set_sample_rate`. FCEUX's core takes 44 100,
+   48 000, 96 000 and nothing else, where `zax-nes` resamples anything from 22 050; a rate inside
+   that range which FCEUX cannot produce is snapped to the nearest it can, and without a getter
+   that snap would be a silent pitch error in the host's audio device.
+2. **`export_battery_ram` copies** into a `&mut Vec<u8>` instead of lending `&[u8]`: FCEUX's bytes
+   come across the C API and cannot be lent out of a `&self`.
+3. **Battery RAM needed three calls in the fork** — `zax_battery_ram_size`,
+   `zax_get_battery_ram`, `zax_set_battery_ram` — because FCEUX reaches its save memory only
+   through a `.sav` *file* and the core-only build has nowhere to put one. They add no patch to
+   any FCEUX file; `zax/README.md` records them.
+
+And one thing the application needed that is not on the trait at all: FCEUX's samples are behind a
+`!Sync` handle, while the audio thread holds a clone of **Zaxnes's APU ring**. `EngineHandle` keeps
+a shared ring for an engine that has none of its own and fills it once a frame; the Zaxnes path is
+the one of before this lot, byte for byte.
+
 ## 3. Rollback and run-ahead over FCEUX savestates
 
 Both already work in principle: `zax_save_state`/`zax_load_state` write to and read from a caller
@@ -115,6 +142,19 @@ What differs from Zaxnes:
   FCEUX's own `FCSX` magic is a help but not enough, since the app's wrapper is its own format.
 
 ## 4. The per-game choice, in the UI and in the settings
+
+> **Done by lot FCEUX-23 step 5**, as the five points below ask. In the settings it is
+> `emu.engine`, an enumeration of two values with the global default `zaxnes`, effect
+> `NextRomLoad` — which is what makes the options window print "(at the next load)" of its own
+> accord. The descriptor is in **every** build and only the *row* is gated on the `fceux-core`
+> feature, so a `games.json` written by a build with FCEUX loads in one without it; there, the
+> value is read and written without error and ignored. The four groups of controls are greyed with
+> a reason that names the fix, through `options::inert_reason`, the mechanism that already greyed
+> nine other rows. The marker has three places: a notification at every load on an engine other
+> than Zaxnes's, the engine's name opening the performance overlay's machine line, and the row
+> itself with its tooltip in both languages. Savestate slots record the engine that wrote them in
+> the `coreId` field they already had, and a mismatch is refused **before** the engine is asked to
+> read the block, with a message that says what to do rather than "corrupted".
 
 The engine is a **per-game** setting, not a global one, because the reason to use FCEUX is always
 a particular game. That suggests:
@@ -158,7 +198,7 @@ follows is the state after it. The figures are
 | FCEUX-1's item | State |
 |---|---|
 | 1. **Mid-frame scroll** — "the one thing standing between 89 % and near-100 %" | **done** (FCEUX-6 step 2). The fork keeps `zax_row_start` / `zax_row_next` beside `RefreshAddr` — `zax-nes`'s own two fields, maintained by the same rules — and captures the row at the **end** of the line (AMD-021 R2-005). *Super Mario Bros.* frame 200 went from 863 of 969 records to **969 of 969**; the originals identical at every compared frame went from 7 to 41 on this step alone |
-| 2. **MMC2/MMC4** latch per column, sprites by x | **done** (step 4), to the requirement (REQ-CORE-039, REQ-CORE-044), and measured to break nothing — but **no mapper 9 or 10 game is in either ROM set**, so it is unproven in use. *Punch-Out!!* has a profile in the catalogue; a lot with the ROM should close this |
+| 2. **MMC2/MMC4** latch per column, sprites by x | **done** (step 4), to the requirement (REQ-CORE-039, REQ-CORE-044), and **proven in use by lot FCEUX-23 step 6**: `test-originals-extra` has *Punch-Out!!*, which is mapper 9, and its records are **identical in order** at frames 60, 300 and 1 200 — 1 021 and 988 of them — with identical pictures. Frame 3 000 is emulation-class, the two machines having parted in 2D at frame 4. This item is closed |
 | 3. **MMC5** extended attributes and the vertical split | **done** (step 5), and the one thing any available ROM exercised was different: sprite patterns were being read through `VPage` instead of the chip's **sprite** bank set `MMC5SPRVPage`, which `mmc5test` showed as 13 wrong sprite records a frame. Mode 1 and the split are implemented and gate-checked, but **no mapper-5 ROM here ever enters either** (all four stay in CHR mode 0/2/3 with `$5200` at zero over 1200 frames) |
 | 4. **The new PPU** | still out of scope, and now scoped: see below |
 | 5. **Never** the widescreen fields | unchanged |
@@ -207,6 +247,7 @@ Judged on the 13 games with a 3dn profile among the 98 originals, frames 300 and
 | **Blaster Master** | **ship** | 5 of 6 dumps identical at every frame; 100.000 % at both rendered frames |
 | **Final Fantasy** | **ship, with one blemish** | all 960 records identical on every dump at every frame. The *only* difference anywhere is palette entry `$3F0B` at frames 60 and 300, worth 0.69 % of the picture; frame 1200 is 100.000 %. An emulation difference (the machines diverge at frame 3), not a capture one |
 | **Adventure Island** | **ship** | 99.999 % at both rendered frames, identical mesh counts and triangles. Its 8 capture-class frames are a 32-entry OAM rotation — the `$4014` transfer starting at a different `$2003` — which renumbers sprites without moving them |
+| **Punch-Out!!** | **ship** | *added by lot FCEUX-23 step 6*, and the ROM that closed item 2 above: records identical in order at 60, 300 and 1 200, pictures identical, and the application's 3D path hands the renderer 189 tiles all with meshes. Mapper 9, so it is the only evidence the MMC2 latch work has |
 | **Super Mario Bros.** | **borderline** | frame 300 is 100.000 %; frame 1200 is **89.647 %** with identical mesh counts, from sprites held in different OAM slots. Playable, visibly not the same picture |
 | **Castlevania** | **no** | 89.785 % at 1200, and the record counts themselves differ (1024 against 1028 at 300) — the only game here where the mesh count differs too. Its dumps diverge in 2D from frame 6 or 13; this is FCEUX against Zaxnes, not the capture |
 | **Excitebike** | **no** | 100.000 % at 300 but **86.997 %** at 1200, with 89 meshes against 91. Diverges in 2D from frame 8 |
@@ -353,8 +394,8 @@ Sizes are relative to lot FCEUX-1, which was one session and covered steps 1-8 o
 
 | Lot | What | Size |
 |---|---|---|
-| **FCEUX-2** | The `Engine` trait and the type move to `zax-core-api`; `zax-nes` and `zax-fceux` both implement it; `zax-app` drives the trait. No new behaviour, wide diff. | large — the type move touches the app, the renderer and the harness |
-| **FCEUX-3** | The per-game choice: setting, UI, capability flags disabling widescreen/hacks/run-ahead, the engine marker, and the savestate slots recording their engine. | medium |
+| **FCEUX-2** | ~~The `Engine` trait and the type move to `zax-core-api`~~ — **done, lot FCEUX-23 steps 2 to 4.** | ~~large~~ |
+| **FCEUX-3** | ~~The per-game choice~~ — **done, lot FCEUX-23 step 5.** | ~~medium~~ |
 | **FCEUX-4** | `.fm2` playback: three more C API calls over FCEUX's own movie mode, the RAM-init fields already being in place, and the UI to open a movie. | small — the easiest real win |
 | **FCEUX-5** | Rollback and run-ahead over FCEUX states, with the measurements §3 asks for before a history depth is chosen. | medium |
 | **FCEUX-6** | The tile capture finished: mid-frame scroll first (item 1 of §6), then MMC2/MMC4, then MMC5, then the new PPU. 3D on FCEUX ships at the end of this, not before. | large, and best split in two |
@@ -364,6 +405,25 @@ Sizes are relative to lot FCEUX-1, which was one session and covered steps 1-8 o
 The order matters: FCEUX-2 gates everything, FCEUX-4 is the cheapest thing with visible value, and
 FCEUX-6 is the only one that should hold up shipping — because 2D FCEUX is already useful and 3D
 FCEUX is not yet right.
+
+**What lot FCEUX-23 leaves for the rest**, from having done FCEUX-2 and FCEUX-3:
+
+* **FCEUX-4** (`.fm2`) is unblocked and still small. The engine's RAM fill is already settable
+  (`FceuxEngine::set_ram_init`) for exactly the reason §5 gives, and the C API still needs its
+  three movie calls.
+* **FCEUX-5** (run-ahead over FCEUX states) has its place reserved:
+  `Capabilities::run_ahead` is `false` on FCEUX, `EngineHandle::run_frame_ahead` runs the plain
+  frame there, and the three run-ahead rows are greyed with that reason — so the lot has to raise
+  one flag and fill one method rather than find a seam. **Rollback needed nothing at all**: the
+  application's history has always used `save_state_to` with one reused buffer a slot, which is
+  what §3 asks for, so it already works on FCEUX.
+* **FCEUX-7** (Android, PortMaster) is unchanged, except that the three battery calls are now part
+  of the fork's surface and so part of what has to cross-compile — which is nothing, being plain
+  C++ over globals FCEUX already exports.
+* **FCEUX-8** (`oam3.nes`, the vetting of §7) is unchanged and is still the thing that decides
+  whether an **arbitrary** ROM may be handed to FCEUX. Lot FCEUX-23 did not vet anything: the
+  per-game option lets a user choose FCEUX for any game in the library, and §7's one-byte heap
+  overflow is still live in the fork.
 
 ## 10. Licence, and what shipping the library requires
 
@@ -378,6 +438,11 @@ keeps FCEUX's history intact: every change of ours is `git diff <upstream-base>.
 end of lot FCEUX-1 is **three files and 51 added lines** in `src/` — `types.h`, `fceu.cpp` and
 `ppu.cpp`, each change marked `// ZAX:` — plus the self-contained `zax/` directory.
 `zax/README.md` lists them.
+
+**After lot FCEUX-23** the figure is unchanged where it matters: that lot added
+`zax_battery_ram_size`, `zax_get_battery_ram` and `zax_set_battery_ram`, and all three live in
+`zax/zaxfceux.cpp` — **no FCEUX file was patched**, so `git diff <upstream-base>..zax` over `src/`
+is still the same three files, and the fork's own `zax/` directory grew by about 120 lines.
 
 A release lot therefore owes one more thing nobody has built yet: the fork's source has to be
 **published or packaged** with each release that includes the library. A tarball of the fork at the

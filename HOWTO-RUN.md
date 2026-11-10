@@ -302,6 +302,32 @@ cyan quand le jeu en a ; « Tout remettre en global » les efface toutes. Change
 partie, dans la fenêtre d'options, une option que le jeu a en propre change la valeur du jeu,
 pas le réglage global.
 
+### Moteur d'émulation (par jeu)
+
+*Seulement dans une version construite avec la fonctionnalité `fceux-core`* : la ligne **Moteur
+d'émulation (ce jeu)** de l'onglet **Émulation** de la fenêtre d'options (groupe *Avancé*) choisit
+l'émulateur qui exécute **ce jeu** : **Zaxnes** (son propre cœur, par défaut) ou **FCEUX**. C'est
+un choix par jeu et non une préférence, parce que la raison de passer à FCEUX est toujours un jeu
+précis — un jeu que Zaxnes exécute mal, ou dont la carte lui manque. Il n'y a **pas** de choix
+« automatique » : la décision demande un jugement que le programme ne peut pas porter.
+
+Le choix prend effet **au prochain chargement** (la ligne le dit), changer de moteur voulant dire
+redémarrer la machine. Tant que FCEUX est choisi :
+
+- un message le rappelle **à chaque chargement**, le panneau de statistiques (`F12`) nomme le
+  moteur sur sa ligne de machine, et la ligne reste visible dans les options du jeu ;
+- l'**écran large**, les **packs de hack**, la **limite de sprites** et l'**avance de trames** sont
+  affichés **grisés avec leur raison** et non masqués : ce sont des pièces de la machine de Zaxnes
+  et non des fonctions d'un émulateur, et FCEUX ne peut pas les fournir. Choisir le moteur Zaxnes
+  pour ce jeu les rend ;
+- une **sauvegarde d'état** faite sur un moteur ne se charge pas sur l'autre : l'emplacement
+  retient le moteur qui l'a écrite et refuse l'autre avec un message qui dit quoi faire. Le
+  rollback, lui, fonctionne sur les deux.
+
+Dans une version sans cette fonctionnalité, la ligne n'apparaît pas, aucun code de FCEUX n'est
+présent, et une valeur déjà enregistrée pour un jeu est relue et réécrite sans erreur mais ignorée
+— un `games.json` passe donc d'une version à l'autre sans rien perdre.
+
 ### Notifications
 
 Les messages du programme — `Quick Save`, `Roll Back`, `Fast Forward`, les erreurs de chargement —
