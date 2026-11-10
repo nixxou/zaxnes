@@ -21,7 +21,7 @@ is to be **fixed**, which makes this the first lot of the three to change `zax-n
 - [x] 2. What frame 246 does, on Zaxnes.
 - [x] 3. What the hardware does there.
 - [x] 4. The mapper's soft reset.
-- [ ] 5. The report.
+- [x] 5. The report.
 - [ ] 6. The final pass.
 
 ## The environment this lot runs in
@@ -615,3 +615,25 @@ already apart, so nothing there can be held against anything.
   which is what the hardware does and the reason nesdev requires an MMC3 game's reset vector to
   point into `$E000-$FFFF` — the one window the chip cannot move. *Kirby* does, which is why the
   six resets are survivable at all.
+
+---
+
+## Step 5 — the report
+
+`docs/review/MOVIE-SYNC.md` now covers all three lots. What was added, and where:
+
+| | |
+|---|---|
+| the preamble | the third lot named, with a pointer to its four sections and the warning that it is the one that changes emulation |
+| **The short version** | a fifth paragraph: the cause was the instrument and not the engine, *Kirby*'s new figures, and "reason 1 of §6 is restored" |
+| **§1c** (new) | the three instruments — `--ram-ref`, `frame-trace`, `--converge` — the Reset semantics of both formats with the measurement behind each, and `--builtin-patches` |
+| **§4b** | the "what is left" block gains a **Superseded** note: both candidates eliminated, the `cfg`-gated experiment is not to be written |
+| **§4c** (new) | why *Kirby* did not sync: `$004B` is a reading artefact, frame 248's 9 689 free instructions, the overclock, the class (c), what the fix is worth, *Kirby*'s standing, and the measurement that would close the 600-frame window |
+| **§4d** (new) | the mapper's soft reset: what changed, the one board that reacts, the tests, golden-core, the amendment, and what it is worth on *Kirby* (nothing, twice over) |
+| **§5** | EVAL-SYNC-2's two new bullets struck through and answered; three new ones, each a real bound rather than a to-do |
+| **§6** | a new subsection: reason 1 restored, reasons 2-4 untouched, and EVAL-SYNC-2's own prediction about what a third engine would have hidden now **demonstrated**. The to-do list is renumbered: item 0 narrowed to frames 400-1 100, item 1 struck as done, and a **new item 3** warning whoever next measures accuracy that `NesCore` powers on with the 3D patches enabled |
+| **§6, commands** | every command of this lot, including the `.fm2` measurement against FCEUX's own movie mode and the six public suites |
+
+The strike-throughs are the document's own convention: a reader who was told something was unknown
+is owed the answer in the place they were told it, and the strike-through is how they can tell
+which lot answered it.

@@ -1,16 +1,25 @@
 # Playing TAS movies on Zaxnes — where its engine parts from one, and whether `.bk2` is the answer
 
-Lots **EVAL-SYNC** and **EVAL-SYNC-2**, branch `eval/bk2`, base `432492c4` (lot FCEUX-48, which
-gave the application a second engine and `.fm2` playback on it). These are **evaluations**: they
-measure and explain, and they change no emulation in `zax-nes`.
+Lots **EVAL-SYNC**, **EVAL-SYNC-2** and **EVAL-SYNC-3**, branch `eval/bk2`, base `432492c4` (lot
+FCEUX-48, which gave the application a second engine and `.fm2` playback on it). The first two are
+**evaluations**: they measure and explain, and they change no emulation in `zax-nes`. The third
+makes **one** emulation change, on the owner's decision: see §4d.
 
-The working, with every command, is `docs/progress/EVAL-SYNC.md` and
-`docs/progress/EVAL-SYNC-2.md`. The instrument is `zax-harness movie-sync`.
+The working, with every command, is `docs/progress/EVAL-SYNC.md`,
+`docs/progress/EVAL-SYNC-2.md` and `docs/progress/EVAL-SYNC-3.md`. The instruments are
+`zax-harness movie-sync` and `zax-harness frame-trace`.
 
 **EVAL-SYNC-2 is the second `.bk2`**, the one §6 of the first lot named as the measurement that
 would reopen the question — an MMC3 game with seven resets that syncs on `BizHawk` and **does
 not sync on Zaxnes**. Its sections are §1b (the work-RAM trace), §4b (the result) and the
 amendments marked *EVAL-SYNC-2* in §5 and §6.
+
+**EVAL-SYNC-3 is why it did not sync**, from a per-frame reference the owner produced afterwards,
+and it is **not** what EVAL-SYNC-2 expected: the instrument had been playing the game's own 3D
+widescreen hack instead of the ROM the movie was recorded on. Its sections are §1c (the three
+instruments it added and the Reset semantics it measured), §4c (*Kirby* after the fix), §4d (the
+mapper's soft reset, the one emulation change) and the amendments marked *EVAL-SYNC-3* in §5
+and §6.
 
 ---
 
@@ -42,6 +51,18 @@ sixty frames. The hunt for it is §4b; it ends with the gap **not found** and si
 eliminated by measurement. One real Zaxnes error came out of the hunt on the way — **a soft reset
 puts the MMC3's registers back to power-on, and the hardware's cartridge connector has no reset
 pin** — and it is not the one. The recommendation of §6 does not change, but its reasoning does.
+
+**EVAL-SYNC-3 found the cause, and it was the instrument rather than the engine.** `NesCore`
+powers on with the **3D built-in patches enabled**, so `load_rom` hands a recognised commercial
+game its *widescreen hack* instead of the image it was given — and that hack's **overclock** grants
+the CPU thousands of free cycles a frame, which no NES does. `movie-sync` never turned it off, so
+every Zaxnes measurement of *Kirby* in the two earlier lots was of the hack. With it off, Zaxnes
+matches `BizHawk`'s work RAM **in every live address at every one of the 400 frames the finest
+reference covers**, and its lag count over the whole 156 312 frames is **24** — `BizHawk`'s own
+figure, where the earlier lots read 25. A second, much smaller divergence remains between frames
+400 and 1 000 (§4c), and the two candidates EVAL-SYNC-2 left are now eliminated by measurement.
+EVAL-SYNC-2's class (a) — the mapper and the RESET button — **is fixed** (§4d). **Reason 1 of §6 is
+restored.**
 
 ---
 
@@ -132,6 +153,90 @@ now asks for it, with the measurement in the note it prints. The format's one fi
 2 KiB, `InitialWRamStatePattern`, is read too and **refused by name** when it is not `null`.
 Neither *Faxanadu* run's picture changed: §4's twelve screenshot matches are twelve of twelve
 after the fix as before it.
+
+---
+
+## 1c. Three more instruments, and when a reset happens (EVAL-SYNC-3)
+
+The owner's finer reference — `kirby-jp-step1.txt`, the whole 2 KiB **and** the lag count at the
+start of each of the first 400 frames — is a different kind of evidence from a checksum per hundred
+frames, and it needed different instruments.
+
+### `--ram-ref`: the bytes, not the checksum
+
+`movie-sync --ram-ref <file>` holds a run's own work RAM against a reference's `ram=<hex>` field
+**byte for byte at every frame it has**, streamed so that nothing keeps 2 KiB a frame. Each
+differing address is sorted into one of three classes:
+
+| class | addresses | why it is a class and not an excuse |
+|---|---|---|
+| the stack page | `$0100-$01FF` | leftovers below the stack pointer. §1b measured 54 of 54 single-byte residuals here on *Faxanadu*, which syncs exactly |
+| the temporaries | `$0000-$001F` | the scratch of whatever routine is running at the instant the 2 KiB is read |
+| **live** | everything else | what the game has *decided* — the only class a divergence can be read off |
+
+A reference that carries no `ram=` field is **refused by name** rather than compared against
+nothing, and `--engine both` is refused too: this is one run against a third machine's bytes.
+
+### `frame-trace`: one frame, instruction by instruction
+
+`zax-harness frame-trace <movie> <rom> --frame <n>` plays a movie to a chosen frame with
+`movie-sync`'s own machinery and then drives that one frame by hand, reporting the state before
+every instruction with the PPU's scanline and dot, the NMI and IRQ handler entries, and every
+change of a `--watch`ed address with the instruction that made it.
+
+It is **entirely outside `zax-nes`** — no `cfg`, no feature, no new core API: `CpuTracer::capture`
+exists for `nestest.log` (REQ-CORE-110) and reads only through `CpuBus::peek` (REQ-CORE-081),
+`NesCore::cpu_and_bus_mut`'s own doc comment says "to step instructions by hand", and
+`Ppu2C02::vblank_just_started` is what `run_frame`'s own loop breaks on. And it **checks itself**:
+every run prints the work-RAM checksum of the traced frame beside the same frame played the
+ordinary way from the same state, and they have to be equal.
+
+### `--converge`: telling a divergence from a reading artefact
+
+The measurement that mattered most, and the one a checksum trace can never make. A reference line
+says what the 2 KiB held at the start of a frame; it does **not** say at which dot of the previous
+frame the reading was taken. So `--converge <reference>` compares the run's own 2 KiB against the
+reference's bytes for that frame at **every instruction** of the frame, and reports where it comes
+closest. If some instant of our frame holds the reference's **live** memory, the two machines ran
+the same frame and only wrote it down at different moments.
+
+The count is of live bytes alone, because the dead stack below the stack pointer never agrees again
+once two machines' interrupts have landed even slightly apart — "identical to the byte" is
+unreachable by construction, and "no live byte differs" is exactly the question.
+
+### When a `Reset` takes effect, in each of the two formats
+
+Neither public description says, and the two answers are different. Both were measured.
+
+| | the file's column means | base shift in the reader | `--resets on` |
+|---|---|---|---|
+| **`.fm2`** | before the flagged frame | 0 | the flagged frame |
+| **`.bk2`** | **after** the flagged frame | **+1** | one after the flagged frame |
+
+**The `.bk2` answer** is the owner's per-frame run of the *Kirby* movie. Its first Reset bit is on
+frame 3, and the two readings are told apart by what frame 3 does: resetting **after** it leaves
+frame 3 a normal frame and all 400 of `BizHawk`'s lag counts agree, while resetting **before** it
+makes frame 3 a lag frame — the counter then reads 4 where `BizHawk`'s reads 3 — and leaves the
+2 KiB untouched until frame 6 where the reference's moves during frame 3.
+
+**The `.fm2` answer** is FCEUX itself. The format page says a frame's commands are "interpreted as
+a bit field corresponding to miscellaneous input states which are **valid at the start of the
+frame**", which does not quite say *which* frame — so the same synthetic movie (60 frames on
+`nestest.nes`, one soft reset, one A press) was played through `FCEUI_LoadMovie`, where FCEUX's own
+movie player decides, and through fed inputs at each of the three placements. Of the 60 frames
+compared over the whole 2 KiB, `on` differs on **0** and the two neighbours on 9 to 55, at each of
+three reset frames tried. It is kept as a test, with the *negative* half asserted too so that it
+cannot pass vacuously.
+
+`--resets` is therefore now **relative to the format's own placement**, and still brackets the
+one-frame uncertainty either side of it. Anyone re-running EVAL-SYNC-2's commands should know that
+that lot's `--resets late` on a `.bk2` is this lot's default, and this lot's `--resets early` is
+that lot's default.
+
+### `--builtin-patches`, which is off, and §4c is why
+
+`ZaxnesMachine::new` now turns the 3D built-in patches **off** before `load_rom`, as
+`zax-harness test-roms` has always done. `--builtin-patches` turns them back on. See §4c.
 
 ---
 
@@ -482,6 +587,146 @@ golden-core unchanged — a power-on dot the harness can choose, and a cycle cou
 that drops writes to the four registers for 29 658 cycles. Twenty or thirty lines in `Ppu2C02`,
 and then one `--trace-ref` run says which of the two it was, or that it is neither.
 
+> **Superseded, EVAL-SYNC-3.** Neither candidate survives and the experiment **should not be
+> written**: the 400 frames the owner's finer reference covers include the whole boot, the one-frame
+> A presses at 63, 97 and 212 included, and **every live byte of all 400 agrees** (§4c). Both
+> candidates predicted a boot that comes out a frame apart, and it does not. The cause was
+> elsewhere entirely.
+
+---
+
+## 4c. Why it did not sync: the instrument was playing the hack (EVAL-SYNC-3)
+
+The owner produced the measurement §5 asked for — `kirby-jp-step1.txt`, `step = 1` over the first
+400 frames with the whole 2 KiB and the lag count — and it put the first live difference at the
+start of frame 247: **`$004B` = `01` on Zaxnes, `00` on `BizHawk`**, then 12 bytes at 248 and 167
+at 249.
+
+### `$004B` was not it
+
+`frame-trace --frame 247 --watch 004B` names the instruction: `INC $4B` at **`$E94F`**, nineteen
+instructions before the frame boundary, in a routine that restores the byte from the stack at
+`$E6D3` twenty-two instructions later. `--converge` then settles what that means: **1 020 instants
+of our own frame 247 hold the reference's live memory**, the last of them 19 instructions before our
+boundary. So no read decides `$004B`; **where the frame ends relative to the program** does, which
+is §1b's artefact class at an address above `$001F`. The frame has no `$2002` read at all.
+
+### Frame 248 was not an emulation difference either
+
+| frame | instructions | CPU cycles | instructions costing **no** cycle |
+|---|---|---|---|
+| 244-247 | 8 283 - 9 120 | 29 778 - 29 784 | 0 |
+| **248** | **19 280** | 29 781 | **9 689** |
+| 249, 250 | 18 886, 19 265 | 29 781 | 9 689 each |
+
+19 280 instructions cannot fit in 29 781 CPU cycles — the shortest 6502 instruction is two — and
+the trace says why: from instruction 9 552 the PPU stands at scanline 240 dot 0 and the clock does
+not move for 9 689 instructions. One thing in this core does that: `WideExtension::take_stall_cycle`,
+the **3D extension's overclock**, armed at the start of line 240 and worth `$5006` scanlines of CPU
+time with the PPU, the APU and the clock held still. nesdev's *Cycle reference chart* is
+unambiguous that no console can: NTSC is one 21.477272 MHz crystal divided by 12 for the CPU and by
+4 for the PPU, 29 780.5 CPU cycles a frame, and the only thing that moves CPU time against PPU time
+on hardware is DMA, which *takes* cycles and never grants them.
+
+The extension was unlocked because **`NesCore` powers on with `builtin_patches_enabled` true**, so
+`load_rom` gives a recognised commercial game its widescreen patch rather than the image it was
+handed — and `builtin_patches::KIRBY_JAPAN` is exactly that patch for this ROM. `test_roms` has
+always turned it off; `movie-sync` never did.
+
+> **Class (c) — a setup difference of the instrument, fixed in `zax-harness`.**
+> `ZaxnesMachine::new` now calls `set_builtin_patches(false)` and `set_advanced_patches(false)`
+> before `load_rom`. `--builtin-patches` turns them back on, which is how the figures below were
+> measured either side of the line rather than asserted. **Nothing in `zax-nes` changed for this.**
+
+### What the fix is worth
+
+| | patches **on** (the two earlier lots) | patches **off** |
+|---|---|---|
+| frames of 400 with **no live difference** | 246 | **400 of 400** |
+| the first live difference | frame 247 | **there is none** |
+| checksum lines agreeing exactly, of 400 | 89 | **190** |
+| lag counts agreeing, of 400 | 400 | 400 |
+| over the whole movie: lag counts agreeing | all but three resets' lines | **all 1 563** |
+| over the whole movie: input-insensitive frames | **25** | **24 — `BizHawk`'s own figure** |
+| the 3D extension during the run | UNLOCKED, 9 689 free instructions a frame from 248 | **locked, 0** |
+
+Frame 247 traced again with the patches off says the same from the inside: the extension is locked,
+no instruction costs no cycle, `$004B` goes `00`→`01`→`00` **inside** the frame as it does on
+`BizHawk`, and **4** bytes differ in the whole 2 KiB with **0** of them live.
+
+### *Kirby*'s standing now, and what still parts
+
+**In step with `NesHawk` for the whole reach of the finest reference there is**, and with
+`BizHawk`'s own lag count exact over 156 312 frames. It still does not sync to the end:
+
+| frame | 1 000 | 10 000 | 30 000 | 60 000 | 83 000 | 156 312 |
+|---|---|---|---|---|---|---|
+| the screenshot | no match | no | no | no | no | no |
+| pixels differing of 57 344 | **275** | 50 537 | 15 445 | 48 207 | 46 435 | 22 912 |
+
+275 pixels is not a desynchronised game: at frame 1 000 every differing pixel is inside **one 25×17
+box** — a single object — with the background, the HUD and the score identical. (Before the fix,
+frame 1 000 was a different screen altogether.) The comparison was validated before being believed:
+the same script says **MATCH at all six frames** on *Faxanadu*, with §4's own colour counts.
+
+So one divergence remains, in **frames 401 to 1 000**, and three things bound it: it is not in the
+boot (all 400 frames agree), not the extension (locked and measurably idle), and not `$2002`,
+sprite 0 or sprite overflow (*Kirby* reads `$2002` not once in a frame). What the trace shows it
+**does** use mid-frame is the **MMC3 scanline IRQ**: `$C000` = `$AF` and `$C001`, `$E001` written
+in vblank, the IRQ taken at scanline 174 dot 287, its handler running from zero page. Zaxnes passes
+`1-clocking`, `2-details`, `3-A12_clocking`, `4-scanline_timing` and `5-MMC3` on **both** public
+MMC3 suites and all eleven of `ppu_vbl_nmi`; the two it fails are the revision-A half of a
+contradictory pair, and nesdev puts the whole A-against-B difference at `$C000` = `$00`, which
+*Kirby* never writes.
+
+**The measurement that would decide it** is the same script again, pointed at frames **400 to
+1 100** with `step = 1` in exactly `kirby-jp-step1.txt`'s format — the window that brackets the
+first picture difference from both sides. `--ram-ref` then names the frame and `frame-trace
+--converge` the instruction, as they did for 247. Nothing is needed from this side first, and in
+particular no change to `zax-nes`. If the first live difference lands in pages `$0400`-`$05FF`
+(where frame 249's 167 bytes were concentrated), the second thing to ask for is a per-scanline log
+of that one frame: `$2000`/`$2001`, the MMC3 counter with its latch, reload and enable, the
+scanline **and dot** at which `/IRQ` is asserted and at which the handler's first instruction runs,
+and the CPU cycle count at the start of each scanline. Zaxnes can produce all four from
+`frame-trace --out` today.
+
+---
+
+## 4d. The mapper and the RESET button: §4b's class (a), fixed (EVAL-SYNC-3)
+
+The owner decided on 2026-11-10 to fix it, which makes this the one emulation change of the three
+lots.
+
+`NesCore::soft_reset` now calls a new `Cartridge::soft_reset`, which calls a new
+`Mapper::soft_reset` — **a no-op for every board**, because the cartridge connector has no
+`/RESET` pin for a mapper to see. The mirroring and the M2 cycle counter are no longer zeroed by a
+soft reset either; `Cartridge::reset`, the power cycle, still zeroes everything.
+
+**One board overrides it**, and only on the strength of its own page. nesdev, "NES 2.0 Mapper 313":
+the reset-detecting multicarts see a reset as *"an interruption of the M2 signal"*, not as a wire.
+Of that family this build implements one number — **215**, the UNL-8237 — whose page says it in so
+many words: *"The Outer Bank Register is reset to its power-up value if a Reset has been detected
+via an interruption of the M2 signal."* So `$5001` goes back and nothing else does.
+
+| | |
+|---|---|
+| tests | **3 new** in `zax-nes`'s `soft_reset_tests.rs`: the MMC3's banks and mirroring survive, its IRQ unit stays armed and fires again with no further write, and the 215's outer bank goes back while the chip behind it does not. There is **no public mapper-215 image** (checked: every `.nes` under `assets-free/test-roms` read and none is 215), so that one uses the synthetic image the workspace's other mapper-215 tests use |
+| EVAL-SYNC-2's own test file | **flipped**, as its module comment said whoever fixed this should do: `soft_reset_mapper_tests.rs` is now a contract, with the power cycle asserted beside the soft reset |
+| `zax-nes`, the whole suite | **1 177 passed, 0 failed** |
+| **golden-core**, 98 originals | `8d50807085…` — **byte-identical** to FCEUX-23's baseline, which is both the expected answer and the bound on the change: golden-core drives the power cycle, which is untouched |
+| the spec | **not edited.** The proposed amendment of REQ-CORE-122 — the exact new French wording, with the nesdev citations and the rationale — is `docs/review/AMD-REQ-CORE-122-mapper-reset.md`. It is built on the moule of **AMD-061 §5**, which made the same discovery once already for the *hard* reset (Q-112, list of one: mapper 28) |
+
+**It changes nothing on *Kirby***, which is the expected result twice over: the six screenshots are
+byte-identical to §4c's run. The only reset before the divergence is on frame 4, three frames into
+a boot that has not yet written a bank register worth keeping, and the six later ones land after
+frame 22 000 where the two machines are already apart. What is new and worth saying is that the six
+are still survivable — the movie runs its 156 312 frames with no stop and the picture keeps moving
+after each — and that they now **matter**: with `--resets off` the pictures at frames 22 556,
+22 560 and 22 700 all differ from the honoured run, where at frame 400 EVAL-SYNC-2 found dropping
+them changed nothing. The game re-enters its reset vector with the MMC3 banks it chose still
+mapped, which is what the hardware does and why nesdev requires an MMC3 game's reset vector to
+point into `$E000-$FFFF`.
+
 ---
 
 ## 5. What is still unknown
@@ -510,15 +755,35 @@ Said plainly, because the result in §4 is strong enough to be worth bounding.
 
 Three new ones, all from EVAL-SYNC-2 and all about §4b:
 
-* **Why *Kirby* parts is not known.** Six candidate causes were eliminated by measurement and two
+* ~~**Why *Kirby* parts is not known.** Six candidate causes were eliminated by measurement and two
   remain that cannot be reached from outside the core. Until the `cfg`-gated experiment of §4b is
-  written, "a Zaxnes accuracy gap in the first sixty frames" is a location, not a diagnosis.
-* **The reference cannot see below frame 100.** Everything §4b says about *where* rests on one
+  written, "a Zaxnes accuracy gap in the first sixty frames" is a location, not a diagnosis.~~
+  **Answered, EVAL-SYNC-3, and it was not an accuracy gap at all:** the instrument was playing the
+  game's 3D widescreen hack, whose overclock grants the CPU free cycles no NES gives (§4c). The two
+  surviving candidates are eliminated and the `cfg`-gated experiment should not be written.
+* ~~**The reference cannot see below frame 100.** Everything §4b says about *where* rests on one
   line of a 100-frame grid plus the structure of the movie. A trace at a finer step over the
   first few hundred frames — the owner's script with `step = 1` — would turn a hundred-frame
-  window into a one-frame answer, and it is the cheapest thing anyone could do next.
+  window into a one-frame answer, and it is the cheapest thing anyone could do next.~~
+  **Done, EVAL-SYNC-3**: the owner's `step = 1` trace of the first 400 frames is what found it, and
+  it took one run of `--ram-ref` to read.
 * **Two `.bk2` movies is still two.** One syncs exactly and one does not; the sample does not say
   what fraction of published `.bk2` movies Zaxnes would replay.
+
+Three new ones, from EVAL-SYNC-3:
+
+* **Where *Kirby* parts now is still unknown**, but the window is **frames 401 to 1 000** instead
+  of the first sixty, and the first difference is one object on screen rather than a different
+  game. §4c names the measurement that would close it — the same Lua script over frames 400 to
+  1 100 — and says that nothing is needed from this side first.
+* **The reference's reading point inside the frame is not published.** Every figure of the form
+  "*n* of 400 frames identical to the byte" is bounded by it: §1b and §4c both measure that the
+  two machines read the 2 KiB at slightly different moments, so the stack page and `$0000-$001F`
+  differ on runs that are in step. `--converge` can *prove* a frame is a reading artefact rather
+  than a divergence, but it cannot say by how many dots the two reading points are apart.
+* **No other game with a built-in 3D patch has been held against a reference.** The fix of §4c is
+  general — the patches are off for every `movie-sync` run now — but *Kirby* is the only movie in
+  hand whose game has one, so the only evidence that the fix is *sufficient* is *Kirby*'s own.
 
 ---
 
@@ -614,6 +879,59 @@ reach.
 3. **The three header fields the application's Zaxnes `.fm2` path ignores**, unchanged.
 4. **Say the `.fm2` situation out loud in the interface**, unchanged.
 
+### EVAL-SYNC-3: reason 1 is restored, and the answer is still no
+
+The movie EVAL-SYNC-2 called "a bug of ours to find" was a bug of ours — in the **instrument**, not
+the engine (§4c). So the paragraphs above need correcting in the place a reader met them.
+
+**Reason 1 holds again.** "The job `NesHawk` would be integrated to do, Zaxnes already does" is
+once more the plain statement it was in §6: *Faxanadu* replays identically at every frame compared
+on both dumps with the lag count exact, and *Kirby* now matches `NesHawk`'s work RAM **in every
+live address at every one of the 400 frames** the owner's finest reference covers, with its own lag
+count over 156 312 frames reading **24** — `BizHawk`'s figure to the frame. What is left of
+*Kirby*'s divergence is one object on screen from somewhere in frames 401-1 000, and §4c names the
+single measurement that would locate it.
+
+**Reasons 2, 3 and 4 are untouched.** FCEUX is still the engine the `.fm2` movies need and still
+the one that recorded them; a C# core inside a Rust desktop build still costs what it cost; and the
+menu a user has to be able to read is unchanged.
+
+**And the argument has gained one reason it did not have.** EVAL-SYNC-2's own sentence — "a third
+engine is the one response that would make finding it *less* likely: the movie would play, the gap
+would stay, and every future `.bk2` would route around an accuracy difference nobody had measured"
+— is now a **demonstrated** claim rather than a prediction. The difference `NesHawk` would have
+routed around was not in the emulation at all: it was `movie-sync` handing the core a widescreen
+hack. A third engine would have replayed the movie perfectly and buried that, and the two earlier
+lots would have had nothing to find.
+
+**So: no third engine.** The thing that would change it is unchanged from §6's own formulation — a
+`.bk2` that fails on Zaxnes for a reason that turns out **not** to be fixable on this side. Three
+lots have now looked for one and found: one class (b) family in FCEUX, one class (c) in the reader,
+one class (c) in the instrument, one class (a) in `zax-nes` (fixed, §4d), and one window of 600
+frames still open.
+
+### What to do instead — revised order (EVAL-SYNC-3)
+
+0. **Finish locating the *Kirby* divergence.** Still the only defect on the list, and still the
+   owner's cheapest move: the same Lua script over frames **400 to 1 100** with `step = 1` (§4c).
+   The `cfg`-gated experiment of §4b is **struck**: its two candidates are eliminated.
+1. ~~**The soft reset should leave the mapper alone.**~~ **Done, EVAL-SYNC-3 §4d**, with the
+   proposed amendment of REQ-CORE-122 written up in
+   `docs/review/AMD-REQ-CORE-122-mapper-reset.md` for the spec owner to adopt. golden-core is
+   byte-identical.
+2. **Make the application play `.bk2`** — as before, on the Zaxnes engine, with the reader's two
+   EVAL-SYNC-2 additions and one of EVAL-SYNC-3's: a `.bk2`'s `Reset` happens **after** the frame
+   whose bit is set. The caveat softens but does not go away: an MMC3 `.bk2` now holds for at
+   least 400 frames rather than fewer than 100, and item 0 is what would let the feature be sold
+   as "plays TAS movies".
+3. **A note for whoever next measures accuracy against a reference**, and it is not about movies:
+   `NesCore` powers on with the 3D built-in patches **enabled**, so any harness that loads a
+   recognised commercial ROM and does not turn them off is measuring the widescreen hack.
+   `test-roms` turns them off, `movie-sync` and `frame-trace` now do, and anything written next
+   should too.
+4. **The three header fields the application's Zaxnes `.fm2` path ignores**, unchanged.
+5. **Say the `.fm2` situation out loud in the interface**, unchanged.
+
 ### The commands (EVAL-SYNC-2)
 
 ```sh
@@ -649,3 +967,74 @@ cargo test --release -p zax-harness --test soft_reset_mapper_tests
 
 The screenshot comparison is the same short script as §4 and is not committed (it reads pictures
 of a commercial game); the rule is the paragraph in §4.
+
+### The commands (EVAL-SYNC-3)
+
+```sh
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+R=$B/kirby-jp-step1.txt      # the per-frame reference: checksum, lag AND the 2 KiB
+
+# the first 400 frames, byte for byte and lag for lag -- the whole of 4c's first table
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 400 --trace-step 1 \
+    --trace-ref "$R" --ram-ref "$R"
+# and what it was before the fix, which is the other half of that table
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 400 --trace-step 1 \
+    --trace-ref "$R" --ram-ref "$R" --builtin-patches
+
+# the Reset semantics: the default against the three alternatives
+for r in on early late off; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 400 --trace-step 1 --resets $r \
+      --trace-ref "$R" --ram-ref "$R"
+done
+
+# frame 247, instruction by instruction, with $004B watched and the convergence probe
+$H frame-trace "$K" "$KR" --frame 247 --watch 004B --out f247.txt --context 16 \
+    --converge "$R" --extra 600
+# the same with the hack on, which is where the 9 689 free instructions are
+$H frame-trace "$K" "$KR" --frame 244 --frames 9 --converge "$R" --extra 1500 --builtin-patches
+# what the game uses mid-frame: no $2002 read, one NMI, one MMC3 IRQ at scanline 174
+$H frame-trace "$K" "$KR" --frame 1000 --out f1000.txt
+grep -c '\$2002' f1000.txt; grep handler f1000.txt
+
+# the whole movie, the lag count and the six pictures
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --trace kirby.txt \
+    --trace-ref "$B/kirby-jp.txt" --progress 50000 \
+    --png shots --png-frames 1000,10000,30000,60000,83000,156312
+
+# Faxanadu, the control: no built-in patch, so nothing about it can change
+for d in "USA" "USA][Rev 1"; do
+  $H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [$d][!!].nes" \
+      --engine zaxnes --lag --trace-ref "$B/fax-usa.txt"
+done
+
+# the .fm2 half: FCEUX's own movie mode as the reference for its own command timing
+#   (a synthetic 60-frame movie on nestest.nes with one soft reset; the test does this too)
+$H movie-sync reset20.fm2 "$ROMS/nestest.nes" --engine fceux --movie-mode --no-lag \
+    --trace-step 1 --trace own.txt
+for r in early on late off; do
+  $H movie-sync reset20.fm2 "$ROMS/nestest.nes" --engine fceux --no-lag \
+      --trace-step 1 --resets $r --trace fed-$r.txt
+  diff <(grep -E '^[0-9]' own.txt) <(grep -E '^[0-9]' fed-$r.txt) | grep -c '^<'
+done
+
+# the hardware side: the public suites that cover what Kirby uses
+for f in mmc3_test mmc3_test_2 ppu_vbl_nmi instr_timing cpu_timing_test dma; do
+  $H test-roms G:/3dsen/cleanroom/assets-free/test-roms "tr-$f.json" \
+      --filter "$f" --no-shots --quiet
+done
+
+# the mapper's soft reset
+cargo test --release -p zax-nes --test soft_reset_tests
+cargo test --release -p zax-harness --test soft_reset_mapper_tests
+$H golden-core "G:/3DSen/test-originals" golden.jsonl 1200   # 8d50807085...
+```
+
+The screenshot comparison is the same short script as §4 and is still not committed (it reads
+pictures of a commercial game). EVAL-SYNC-3 validated it before believing it: on *Faxanadu*
+`[USA][!!]` it reports MATCH at all six frames with §4's own colour counts (9, 14, 11, 13, 12, 12),
+and it reports the count of differing pixels so that "275 of 57 344" and "50 537 of 57 344" can be
+told apart.
