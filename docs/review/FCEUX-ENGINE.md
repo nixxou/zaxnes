@@ -217,11 +217,16 @@ refusal decided after it would leave the player's game restarted — and a host 
 because this build has no filesystem to put a movie file on.
 
 **What is refused**, judged from the header before anything is committed, each with the thing
-named: `FDS`, `NewPPU`, `fourscore`, `microphone`, a port device other than a standard pad on each
-pad port with nothing on the expansion port, a stated `romChecksum` that is not the loaded ROM's,
-and anything that is not a version-3 `.fm2`. A movie that states **no** checksum is played:
-claiming nothing is not claiming the wrong thing. The port refusal is also what makes the fork's
-no-op `FCEUD_SetInput` stub *correct* rather than merely harmless.
+named: `FDS`, `NewPPU`, `fourscore`, `microphone`, a port device that is neither a standard pad nor
+an empty socket, anything on the expansion port, a stated `romChecksum` that is not the loaded
+ROM's, and anything that is not a version-3 `.fm2`. A movie that states **no** checksum is played:
+claiming nothing is not claiming the wrong thing.
+
+**An empty socket is accepted, and that is not a detail**: a one-player `.fm2` records `port1 0`,
+so refusing it would have refused a large share of real TASes. Step 7's own suite run is what
+found that, and accepting it needed the fork to *install* the devices the header asks for —
+FCEUX asks its driver to, and this build's driver is a stub, so an empty socket would otherwise
+have been replayed with the API's own pad on port 2.
 
 **In the application**, opening an `.fm2` plays it on FCEUX and switches the **session's** engine
 for that playback, leaving the game's own `emu.engine` untouched — a movie is not a change of mind.
@@ -245,13 +250,17 @@ over the pad state itself).
    `palFlag` through `FCEUI_SetVidSystem`, which reaches the emulation but **not** `pal_emulation`,
    the driver global `FCEUI_GetRegion` reads — so a PAL movie would have run at PAL while the API
    reported NTSC and the host paced at 60 Hz. The fork re-asserts the region after the load.
-3. **Two defects in the application's own code that only an engine like FCEUX exposes**, both
-   pre-existing. A savestate of an engine other than Zaxnes's does **not** carry the cartridge, so
+3. **Three defects in the application's own code that only an engine like FCEUX exposes**, two of
+   them pre-existing. A savestate of an engine other than Zaxnes's does **not** carry the cartridge, so
    `script_reload` — which rebuilds the session and restores a state — left a session with no ROM:
    **F5 during an FCEUX game could not have worked at all.** And a movie the engine plays itself
    cannot survive a state restore either, the block being the machine and not the movie mode, so
    the reload loads the movie again — which is what makes a reload during such a playback *always
-   exact*.
+   exact*. And the third, this lot's own and found by a test written long before the engine
+   existed: **a refused movie reset the game**, the engine switch re-powering the machine before
+   the refusal was decided. The movie is now judged on a throw-away engine first, which also tells
+   the host whether the ROM loads there at all — a ROM it cannot load is about the *game* and falls
+   back to the other engine's reader rather than refusing a playable movie.
 
 ### End to end, measured
 

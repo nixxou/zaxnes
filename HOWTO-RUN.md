@@ -371,11 +371,16 @@ Trois différences avec un film Zaxnes, chacune pour une raison :
 | un rechargement de profil est toujours **exact** | le film est rechargé, donc l'image est atteinte en rejouant jusqu'à elle |
 
 Un film dont l'en-tête demande quelque chose que cette version n'a pas est **refusé en nommant la
-raison**, et la partie continue : un disque **FDS**, le **nouveau PPU** de FCEUX, un **Four Score**,
-le **micro** de la Famicom, un périphérique autre qu'une manette standard sur l'un des deux ports
-ou quoi que ce soit sur le port d'extension, un `romChecksum` qui n'est pas celui de la ROM
-chargée, ou un fichier qui n'est pas un `.fm2` version 3. Un film qui n'annonce **aucun**
-`romChecksum` est lu : ne rien affirmer n'est pas affirmer le faux.
+raison**, et **la partie continue exactement où elle était** : un disque **FDS**, le **nouveau
+PPU** de FCEUX, un **Four Score**, le **micro** de la Famicom, un périphérique qui n'est ni une
+manette standard ni une prise vide sur l'un des deux ports, quoi que ce soit sur le port
+d'extension, un `romChecksum` qui n'est pas celui de la ROM chargée, ou un fichier qui n'est pas un
+`.fm2` version 3. Un film qui n'annonce **aucun** `romChecksum` est lu : ne rien affirmer n'est pas
+affirmer le faux. Un film **à un joueur** se lit : il annonce `port1 0` pour la prise vide, et
+cette prise est bien vide pendant la lecture plutôt que reliée à votre propre manette.
+
+Si ce moteur ne peut pas charger la ROM du tout — ce qui concerne le jeu et non le film — le film
+est lu par le lecteur de Zaxnes, avec un avertissement : il peut se désynchroniser.
 
 Un **`.fcm`** (le format binaire de FCE Ultra) ne passe **pas** par FCEUX — le code film de FCEUX
 refuse ce format — et garde donc le lecteur propre de Zaxnes, comme tous les `.fm2` dans une

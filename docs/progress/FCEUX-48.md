@@ -18,7 +18,7 @@ them, and the 3D on FCEUX matches Zaxnes's wherever the two machines agree (§6 
 - [x] 4. `.fm2` in the application.
 - [x] 5. The app with a real movie, end to end.
 - [x] 6. Docs.
-- [ ] 7. Final pass.
+- [x] 7. Final pass.
 
 ## The environment this lot ran in
 
@@ -612,3 +612,174 @@ games FCEUX is worth offering for):
 * `.fm2` playback is read-only. There is no `.fm2` **writer** anywhere in the workspace, so
   Zaxnes cannot record a movie another emulator can play. Nobody has asked for one; it is recorded
   here because a user who can play a TAS will reasonably expect to be able to make one.
+
+## Step 7 — the final pass
+
+Everything the brief's "final check" asks for, re-run at the end rather than trusted from the step
+that first produced it. **Three real things came out of it**, all three found by running the whole
+suite in the **feature-on** build — which no earlier step had done end to end — and none of them a
+flaky test.
+
+### The three things the pass found
+
+**1. The port rule refused every one-player `.fm2`.** A one-player movie records `port1 0` for the
+socket nothing is plugged into; step 3's rule demanded `SI_GAMEPAD` on both pad ports, so such a
+movie was refused with a message about an input device other than a standard pad. A large share of
+real TASes are one-player. `SI_NONE` is now accepted on either pad port.
+
+Accepting it needed a second change, or it would have been the wrong kind of permissive: FCEUX asks
+its **driver** to install the devices a movie's header wants (`FCEUD_SetInput`, `movie.cpp:1116`)
+and this build's driver is a no-op stub, so the movie would have been replayed with the API's own
+pad still on port 2 and a game that polls that port would have seen buttons the movie never
+recorded. `zax_movie_play` now installs what the header asks for and `zax_movie_stop` puts the two
+standard pads back. The test is the one that would have caught it: a one-player movie, built with
+**no field for port 2** as FCEUX's own format has it, played twice — once with every button of both
+pads held down, once with none — and the two runs are identical picture for picture.
+
+**2. A refused movie reset the game.** Switching the session's engine re-powers the machine, and
+the refusal was decided *after* the switch, so opening the wrong file cost the player the game they
+were playing. `fm2_movie_tests`'s **`a_refused_fm2_leaves_the_game_alone`** is exactly that
+contract and is what caught it — a test written long before this engine existed.
+
+The movie is now judged **before anything is committed**: with that engine already in play it is
+asked directly (nothing to lose), and otherwise the question goes to a **throw-away engine** of
+that kind with the game's ROM loaded into it, dropped before the answer is used. That earned a
+distinction worth having:
+
+| | |
+|---|---|
+| a **header** this engine cannot play | refused, the game untouched, the thing named |
+| a **ROM** it cannot load | about the *game*, not the movie — so the other engine's own reader takes the movie, with a warning that a reader which is not the one it was recorded on can drift. Refusing there would leave a playable movie unplayable |
+
+**3. Four tests describe a path a feature-on build no longer takes.** Three in `fm2_movie_tests`
+and one in `script_reload_tests` assert Zaxnes's `MovieRun`, its explorer's trust, or a *fast*
+reload during a movie — none of which exists when an `.fm2` goes to FCEUX's own movie mode. They
+are now compiled only without the feature, each with the reason written where it is, and
+`fceux_movie_app_tests` / `fceux_movie_end_to_end_tests` cover the same ground there. **Two
+assertions were kept in both builds** because they are about the application rather than about one
+engine: the refusal leaving the game alone, and `script_reload_tests`'s "the movie was lost", which
+now asks `movie_mode()` rather than `session.movie()`.
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| clippy `-D warnings`, whole workspace, `--all-targets`, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core`, `zax-harness/fceux-core`, `zax-fceux/fceux-core`) | clean |
+
+One note on how, for whoever repeats it: the final clippy runs were made with **`--release`**
+rather than in the default dev profile. The disk was at 4.9 GB when the pass began — under the
+brief's own 5 GB stop — and a dev-profile `clippy` of this workspace writes a 2.8 GB `debug` tree,
+so it was deleted and the release profile used, which reuses the release tree and costs nothing.
+The dev-profile run was made too: feature **off** at the start of this pass (clean), and the whole
+workspace feature **on** at the end of step 4 and `-p zax-app` at the end of step 5, both clean.
+
+### The test suites
+
+`cargo test --release --workspace` with `--include-ignored`,
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` and
+`ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`, `--skip three_d_sen_real_install_tests` (those
+six want an installation of the original program, which this role must never touch):
+
+| | passed | failed | ignored | FCEUX-23's figure |
+|---|---|---|---|---|
+| feature **off** | **3 363** | 0 | 0 | 3 349 |
+| feature **on** | **3 434** | 0 | 0 | 3 402 |
+
+The feature-on run is `--test-threads 1`: FCEUX keeps one machine per process, and the lot's own
+test files serialise themselves, but a single-threaded run is the honest way to take the figure.
+
+### golden-core
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, feature off:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to lot FCEUX-23's baseline, which is the owner's rule.
+
+### `bench-core`, and how the +1 % was actually settled
+
+First, the structural answer: `git diff --stat c9c73033..HEAD` over `zax-nes`, `zax-engine3d`,
+`zax-render`, `zax-core-api` **and `zax-harness`** is **empty**. `bench-core` lives in `zax-harness`
+and drives `NesCore` directly, so it compiles from byte-identical source and cannot have moved.
+
+That is an argument, so it was measured as well — and the first measurement looked bad: 1.4593 ms
+on *Super Mario Bros. 3* against FCEUX-23 step 8's 1.3464, **+8.4 %**. The machine was busy
+(something external freed 12 GB of disk mid-pass). The right answer was to measure the baseline in
+the **same session**, as step 1 of lot FCEUX-23 did for golden-core: `git archive c9c73033` into a
+scratch tree, `cargo build --release -p zax-harness` there, and run the two binaries **interleaved**.
+
+| *Super Mario Bros. 3*, 8 interleaved runs each | min | median | max | spread |
+|---|---|---|---|---|
+| baseline `c9c73033` | 1.3400 | **1.3522** | 1.3677 | 2.07 % |
+| this lot | 1.3416 | **1.3522** | 1.3665 | 1.86 % |
+
+**Median against median: +0.000 %. Min against min: +0.119 %.**
+
+| *Mega Man 3*, 3 interleaved runs each | min | median | max |
+|---|---|---|---|
+| baseline `c9c73033` | 0.9943 | **0.9972** | 1.0129 |
+| this lot | 0.9938 | **0.9990** | 1.0276 |
+
+**Median +0.181 %, min −0.050 %.** Both inside the owner's +1 %, and the lesson for the next lot is
+the method rather than the figure: a lone run of this benchmark on this machine carries up to 10 %
+of noise, and interleaving two binaries in one session removes it.
+
+### The fork, from clean build directories
+
+| | |
+|---|---|
+| **MSVC**, `build-msvc` deleted, `zax\build-msvc.cmd` | ok, 500 targets, `zaxfceux.lib` 8 382 750 bytes |
+| **Linux (WSL)**, `build-linux` deleted, `sh zax/build-linux.sh` | ok, `libzaxfceux.a` 2 922 224 bytes |
+| **ASan (WSL)**, `build-asan` deleted and reconfigured with `-fsanitize=address -g` | ok |
+
+And the digests from all three, which is the point of building them:
+
+| ROM | MSVC | Linux | ASan |
+|---|---|---|---|
+| `nestest.nes`, 60 frames | `e455081e6a3eefe9` / `d395e456e4e72325` / `7fc10a9ce4ed8fcd`, 47 917 samples, state 93 304 / 79 296 | the same | the same |
+| `oam3.nes`, 3 000 frames | `f2810f098f36bc51` / `0f7bf6886a9c2325` / `3d5558af9c5e2ee5`, 2 395 928 samples, state 85 250 / 72 137 | the same | the same, **and no ASan report** |
+
+**The ASan result of step 1 holds from a clean tree**: `oam3.nes` runs 3 000 frames with no
+heap-buffer-overflow, where it faulted at about frame 300 before the fix. That the same ROM now
+gives the same digests on MSVC, on Linux and under ASan is the strongest statement available: the
+overflow used to read whatever the allocator had put after the block, which no two allocators agree
+about.
+
+### The end-to-end results of step 5 and step 6, re-run against the clean library
+
+All 28 FCEUX tests green (`zax-fceux` 12 + `fceux_end_to_end` 6 + `fceux_movie_app` 6 +
+`fceux_movie_end_to_end` 4), with the figures reproduced:
+
+| | |
+|---|---|
+| the 5 400-frame movie against the run it was recorded from | **identical at every frame** |
+| frames with no record | 164, **every one a blank screen**; 0 with a picture and no record |
+| the draw list at frame 5 400 | 282 tiles, 282 with a mesh |
+| interrupted against uninterrupted playback | **identical** at frames 1 200, 2 400, 3 600, 5 000 |
+| a profile reload at movie frame 2 000 | 272 draw tiles before and after, **the machine identical** |
+| **movie playback with 3D on FCEUX** | **1 888 frames/s (0.5295 ms a frame)** — against step 5's 1 726 and 1 695, the machine being quieter now. About **31× real time** |
+| step 6 of lot FCEUX-23, re-run | *Super Mario Bros.* 995 records → **252** draw tiles, 252 with a mesh; 19 200 samples after 120 frames; 8 snapshots in 240 frames with the rollback leaving frame 300 |
+
+### The application starts, both builds
+
+| | feature off | feature on |
+|---|---|---|
+| `zaxnes --help` | exit 0, 91 lines | exit 0, 91 lines, **byte-identical** |
+| `zaxnes --list-profiles --assets assets-neutral` | exit 0, 104 lines | exit 0, 104 lines, **byte-identical** |
+
+Both identical between the builds, which is the right answer: the engine is a per-game *setting*
+and a movie chooses its own engine from the file, so neither of these two outputs should mention
+either.
+
+### The disk
+
+The pass began with **4.9 GB** free on G:, under the brief's own 5 GB stop, and the first thing it
+did was free space rather than carry on: `target-fx/debug` (2.8 GB, which only `cargo check` and a
+dev-profile `clippy` want) and lot FCEUX-23's `base-591836cc` scratch tree (25 MB) were deleted,
+giving 7.6 GB. Something external then freed about 12 GB during the run, and the pass finished with
+23 GB. The baseline tree built for the `bench-core` comparison was deleted after it was used.
+
+Anyone repeating this on a tight disk: delete `target-fx/debug` first, use `cargo clippy --release`
+and `cargo test --release`, and expect the release tree alone to be about 5.8 GB.

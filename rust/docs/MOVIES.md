@@ -169,12 +169,17 @@ anything is committed.
 | `NewPPU 1` | FCEUX's new PPU — the tile capture the 3D needs does nothing there |
 | `fourscore 1` | a Four Score (four pads) — the engine drives two |
 | `microphone 1` | the Famicom microphone |
-| `port0`/`port1` not a standard pad, or `port2` set | an input device other than a standard pad / an expansion-port device |
+| `port0`/`port1` neither a standard pad nor an empty socket, or `port2` set | an input device other than a standard pad / an expansion-port device. A **one-player** movie, which records `port1 0` for the empty socket, plays: that socket reads as empty rather than as your own pad |
 | a `romChecksum` that is not this ROM's | recorded on another ROM, so it would not replay |
 | anything that is not a version-3 `.fm2` | not a version 3 .fm2 movie (or the file is truncated) |
 
 A movie that states **no** ROM checksum is played rather than refused: claiming nothing is not
 claiming the wrong thing.
+
+And a movie the engine refuses **leaves your game exactly as it was**: the judgement is made on a
+throw-away engine before the session's own is switched, because switching re-powers the machine. If
+that engine turns out not to be able to load the ROM at all — which is about the game and not about
+the movie — the movie is played by Zaxnes's own reader instead, with a warning that it may drift.
 
 A **`.fcm`** (FCE Ultra's binary format) is *not* played on FCEUX — FCEUX's own movie code refuses
 that format outright — so it keeps Zaxnes's clean-room importer of §4, as does every `.fm2` in a
