@@ -54,6 +54,34 @@ pub fn shader_lines(view_width: i32, view_height: i32, lines: u32) -> (i32, i32)
     (width.max(1), lines)
 }
 
+/// The scene at the width over the height `aspect` for a preset that reads `lines` lines (0:
+/// the view's height), never more lines than the view has nor wider than it.
+#[cfg(feature = "shaders")]
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // view sizes < 2^24
+pub fn aspect_lines(aspect: f32, lines: u32, (view_width, view_height): (i32, i32)) -> (i32, i32) {
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        4.0 / 3.0
+    };
+    let view_height = view_height.max(1);
+    let mut height = if lines == 0 {
+        view_height
+    } else {
+        i32::try_from(lines)
+            .unwrap_or(i32::MAX)
+            .clamp(1, view_height)
+    };
+    let mut width = (height as f32 * aspect).round() as i32;
+    let view_width = view_width.max(1);
+    if width > view_width && lines == 0 {
+        width = view_width;
+        height = ((width as f32 / aspect).round() as i32).clamp(1, view_height);
+    }
+    (width.max(1), height.max(1))
+}
+
 /// The 2D picture of `size` console pixels (`Scene::picture_size`) for a preset that reads
 /// `lines` lines: 240 give the console's own pixels one for one, 480 twice as many, 0 the
 /// view's height; never more lines than the view has.
@@ -247,6 +275,15 @@ impl AutomaticScale {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "shaders")]
+    #[test]
+    fn the_framed_scene_keeps_the_picture_aspect() {
+        assert_eq!(aspect_lines(4.0 / 3.0, 0, (1920, 1080)), (1440, 1080));
+        assert_eq!(aspect_lines(4.0 / 3.0, 240, (1920, 1080)), (320, 240));
+        // A picture wider than the window fits its width.
+        assert_eq!(aspect_lines(2.0, 0, (1000, 1080)), (1000, 500));
+    }
 
     const BUDGET: Duration = Duration::from_micros(16_667);
 

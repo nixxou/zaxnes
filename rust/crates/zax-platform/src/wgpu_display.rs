@@ -262,6 +262,20 @@ impl WgpuDisplay {
         line + shader.as_str()
     }
 
+    /// The width over the height the scene has to be drawn at for the slang preset in use, none
+    /// for the window's.
+    #[must_use]
+    pub fn shader_scene_aspect(&self) -> Option<f32> {
+        #[cfg(feature = "shaders")]
+        {
+            self.shaders.scene_aspect()
+        }
+        #[cfg(not(feature = "shaders"))]
+        {
+            None
+        }
+    }
+
     /// The lines the scene has to be drawn at for the slang preset in use: none without one,
     /// 0 for the window's own.
     #[must_use]

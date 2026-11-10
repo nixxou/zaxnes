@@ -2188,7 +2188,8 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
 /// read the picture at the 240 lines of the console, the 3D ones at the window's own (0).
 fn shader_slots(out: &mut Vec<SettingDescriptor>) {
     use crate::shader_slots::{
-        ShaderSlot, AREA_AUTO, AREA_PICTURE, AREA_WINDOW, FOLLOW, MAXIMUM_LINES, OFF, PRESET,
+        ShaderSlot, AREA_AUTO, AREA_PICTURE, AREA_WINDOW, FOLLOW, FRAME_AUTO, FRAME_PICTURE,
+        FRAME_WINDOW, MAXIMUM_LINES, OFF, PRESET,
     };
     for slot in ShaderSlot::ALL {
         let ids = slot.ids();
@@ -2264,6 +2265,22 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
                 opt(AREA_WINDOW, "Whole window"),
             ]))
             .with_label("Shader area"),
+        );
+        out.push(
+            SettingDescriptor::new(
+                ids.frame,
+                SettingKind::Enum,
+                SettingValue::Enum(FRAME_AUTO),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(FRAME_AUTO, "Auto"),
+                opt(FRAME_WINDOW, "Whole window"),
+                opt(FRAME_PICTURE, "Game picture"),
+            ]))
+            .with_label("Shader framing"),
         );
     }
 }

@@ -197,6 +197,30 @@ impl ZaxUi {
         if ui.is_item_hovered() {
             ui.tooltip_text(tr("shaders.lines.help"));
         }
+        // The 2D head-on picture is always the game's alone; the 3D scene can be framed on it.
+        if matches!(slot, ShaderSlot::ThreeD | ShaderSlot::ThreeDWide) {
+            let frame = host.settings().get(ids.frame).as_int();
+            if let Some(value) = choice(
+                ui,
+                &tr("shaders.frame"),
+                frame,
+                &[
+                    zax_settings::shader_slots::FRAME_AUTO,
+                    zax_settings::shader_slots::FRAME_WINDOW,
+                    zax_settings::shader_slots::FRAME_PICTURE,
+                ],
+                &[
+                    tr("shaders.frame.auto"),
+                    tr("shaders.frame.window"),
+                    tr("shaders.frame.picture"),
+                ],
+            ) {
+                host.update_settings(|model| model.set(ids.frame, SettingValue::Enum(value)));
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(tr("shaders.frame.help"));
+            }
+        }
         ui.separator();
         Self::draw_quick_row(ui, host, slot);
         match host.settings().get(ids.mode).as_int() {

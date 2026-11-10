@@ -724,15 +724,25 @@ impl Running {
                     lines: zax_settings::shader_slots::CONSOLE_LINES.unsigned_abs(),
                     parameters: Vec::new(),
                     picture_aspect: (!three_d && !fills).then(|| scene.picture_aspect()),
+                    scene_aspect: None,
                 })
             }
             None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
-                |choice| ShaderRequest {
-                    preset: crate::shader_pack::resolve(&self.host.paths().root, &choice.preset),
-                    lines: choice.lines,
-                    parameters: choice.parameters,
-                    picture_aspect: (!three_d && !choice.fills_window)
-                        .then(|| scene.picture_aspect()),
+                |choice| {
+                    // The 3D scene framed on the game's picture: drawn at its aspect, and placed
+                    // in its rectangle by a preset that does not draw over the whole window.
+                    let framed = three_d && choice.frames_picture;
+                    ShaderRequest {
+                        preset: crate::shader_pack::resolve(
+                            &self.host.paths().root,
+                            &choice.preset,
+                        ),
+                        lines: choice.lines,
+                        parameters: choice.parameters,
+                        picture_aspect: ((!three_d || framed) && !choice.fills_window)
+                            .then(|| scene.picture_aspect()),
+                        scene_aspect: framed.then(|| scene.picture_aspect()),
+                    }
                 },
             ),
         };
@@ -793,6 +803,17 @@ impl Running {
         // 2D): the scene is drawn at the window's aspect but at that line count, and the preset
         // scales it up to the window. 0 lines keeps the window's own.
         #[cfg(feature = "shaders")]
+        let scene_aspect = self
+            .window
+            .wgpu()
+            .and_then(zax_platform::wgpu_display::WgpuDisplay::shader_scene_aspect);
+        #[cfg(feature = "shaders")]
+        {
+            let scene = self.host.scene_mut();
+            scene.picture_framed =
+                scene_aspect.is_some() && !(scene.two_dimensional_mode && scene.picture_head_on);
+        }
+        #[cfg(feature = "shaders")]
         let (scene_width, scene_height) = match self
             .window
             .wgpu()
@@ -806,6 +827,13 @@ impl Running {
             {
                 render_scaling::picture_lines(self.host.scene().picture_size(), lines, view_height)
             }
+            // The 3D scene framed on the game's picture: drawn at the picture's aspect, the
+            // window's height or the lines asked for.
+            Some(lines) if scene_aspect.is_some() => render_scaling::aspect_lines(
+                scene_aspect.unwrap_or(1.0),
+                lines,
+                (width.max(1), view_height),
+            ),
             Some(lines) if lines > 0 => {
                 render_scaling::shader_lines(width.max(1), view_height, lines)
             }
@@ -2617,7 +2645,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
             in_force.crop()[3],
         );
     } else {
-        scene.picture_crop = zax_profiles::values::Vec4F::new(0.0, 0.0, 0.0, 0.0);
+        // The 3D scene framed on the game's picture for a slang preset leaves the same sides
+        // out: the overscan's in Resize, none in Fit (the cut sides show the scene there).
+        #[allow(clippy::cast_possible_truncation)] // A margin of 0..=128.
+        let crop = overscan.in_force(scene.margin.max(0.0) as i32).crop();
+        scene.picture_crop = zax_profiles::values::Vec4F::new(crop[0], crop[1], crop[2], crop[3]);
         scene.picture_shift = None;
         scene.picture_overlay.clear();
     }

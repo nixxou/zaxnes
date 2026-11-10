@@ -974,3 +974,29 @@ fn req_scn_024_the_restored_distances_stay_inside_their_bounds() {
     close(0.0, camera.setpoints(CameraMode::Fpv).distance(), 5e-4);
     close(0.0, camera.transition_remaining(), 5e-4);
 }
+
+/// The view framed on the picture puts its corners inside the target, one side touching it.
+#[test]
+fn framed_view_holds_the_picture() {
+    let camera = SceneCamera::default();
+    let view = camera.build_view(DEFAULT_CLIPPING, 4.0 / 3.0);
+    let corners = [
+        Vector3::new(0.0, 8.0, 0.0),
+        Vector3::new(256.0, 8.0, 0.0),
+        Vector3::new(0.0, 248.0, 0.0),
+        Vector3::new(256.0, 248.0, 0.0),
+    ];
+    let framed = view.framed_on(&corners);
+    let m = zax_render::numerics::Matrix4x4::multiply(&framed.view, &framed.projection);
+    let mut widest = 0.0f32;
+    for p in corners {
+        let x = p.x * m.m11 + p.y * m.m21 + p.z * m.m31 + m.m41;
+        let y = p.x * m.m12 + p.y * m.m22 + p.z * m.m32 + m.m42;
+        let w = p.x * m.m14 + p.y * m.m24 + p.z * m.m34 + m.m44;
+        assert!(w > 0.0);
+        let (x, y) = (x / w, y / w);
+        assert!(x.abs() <= 1.0001 && y.abs() <= 1.0001, "{x} {y}");
+        widest = widest.max(x.abs()).max(y.abs());
+    }
+    assert!((widest - 1.0).abs() < 1e-3, "{widest}");
+}

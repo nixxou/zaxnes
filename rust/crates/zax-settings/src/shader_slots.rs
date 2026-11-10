@@ -29,6 +29,15 @@ pub const AREA_PICTURE: i32 = 1;
 /// picture).
 pub const AREA_WINDOW: i32 = 2;
 
+/// `shader.<slot>.frame`: the game's picture for a preset that draws a TV or a bezel around
+/// it (one that fills the window), the whole window otherwise (see [`frames_picture`]).
+pub const FRAME_AUTO: i32 = 0;
+/// `shader.<slot>.frame`: the preset reads the whole window's scene.
+pub const FRAME_WINDOW: i32 = 1;
+/// `shader.<slot>.frame`: the preset reads the scene framed on the game's picture (the NES
+/// picture's aspect, about 4:3, or the widescreen picture's), the 3D scene around it left out.
+pub const FRAME_PICTURE: i32 = 2;
+
 /// The lines of the console's picture, the default of the 2D slots.
 pub const CONSOLE_LINES: i32 = 240;
 /// The most lines `shader.<slot>.lines` takes (0 is the window's own).
@@ -55,6 +64,7 @@ pub struct SlotIds {
     pub lines: SettingId,
     pub params: SettingId,
     pub area: SettingId,
+    pub frame: SettingId,
 }
 
 impl ShaderSlot {
@@ -125,6 +135,7 @@ impl ShaderSlot {
                 lines: SettingId::Shader2dLines,
                 params: SettingId::Shader2dParams,
                 area: SettingId::Shader2dArea,
+                frame: SettingId::Shader2dFrame,
             },
             Self::TwoDWide => SlotIds {
                 mode: SettingId::Shader2dWsMode,
@@ -132,6 +143,7 @@ impl ShaderSlot {
                 lines: SettingId::Shader2dWsLines,
                 params: SettingId::Shader2dWsParams,
                 area: SettingId::Shader2dWsArea,
+                frame: SettingId::Shader2dWsFrame,
             },
             Self::ThreeD => SlotIds {
                 mode: SettingId::Shader3dMode,
@@ -139,6 +151,7 @@ impl ShaderSlot {
                 lines: SettingId::Shader3dLines,
                 params: SettingId::Shader3dParams,
                 area: SettingId::Shader3dArea,
+                frame: SettingId::Shader3dFrame,
             },
             Self::ThreeDWide => SlotIds {
                 mode: SettingId::Shader3dWsMode,
@@ -146,6 +159,7 @@ impl ShaderSlot {
                 lines: SettingId::Shader3dWsLines,
                 params: SettingId::Shader3dWsParams,
                 area: SettingId::Shader3dWsArea,
+                frame: SettingId::Shader3dWsFrame,
             },
         }
     }
@@ -165,6 +179,10 @@ pub struct ShaderChoice {
     pub parameters: Vec<(String, f32)>,
     /// Whether the preset draws over the whole window rather than the picture's rectangle.
     pub fills_window: bool,
+    /// Whether the preset reads the scene framed on the game's picture rather than the whole
+    /// window's (the display mode's own `shader.<slot>.frame`; the 2D head-on picture is always
+    /// framed on the game).
+    pub frames_picture: bool,
 }
 
 /// The shader of the display mode (`three_d`, `wide`), or none: a slot that is off, a preset
@@ -173,6 +191,7 @@ pub struct ShaderChoice {
 pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<ShaderChoice> {
     let own = ShaderSlot::of(three_d, wide);
     let lines = u32::try_from(model.get(own.ids().lines).as_int()).unwrap_or(0);
+    let frame = model.get(own.ids().frame).as_int();
     let mut slot = own;
     loop {
         let ids = slot.ids();
@@ -190,6 +209,7 @@ pub fn resolve(model: &SettingsModel, three_d: bool, wide: bool) -> Option<Shade
                     lines,
                     parameters,
                     fills_window,
+                    frames_picture: frames_picture(frame, fills_window),
                 });
             }
             FOLLOW => slot = slot.fallback()?,
@@ -214,6 +234,18 @@ pub fn fills_window(area: i32, preset: &str) -> bool {
                 .any(|word| path.contains(word))
                 && !path.contains("screen-only")
         }
+    }
+}
+
+/// Whether a preset of `frame` (`shader.<slot>.frame`) reads the scene framed on the game's
+/// picture: in Auto, the presets that fill the window do, as a TV around the whole 3D scene
+/// would squeeze it into its screen.
+#[must_use]
+pub const fn frames_picture(frame: i32, fills_window: bool) -> bool {
+    match frame {
+        FRAME_WINDOW => false,
+        FRAME_PICTURE => true,
+        _ => fills_window,
     }
 }
 

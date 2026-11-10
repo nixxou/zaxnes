@@ -138,3 +138,23 @@ fn a_bezel_preset_fills_the_window_unless_told_otherwise() {
         "C:\\shaders\\bezel\\koko-aio\\x.slangp"
     ));
 }
+
+/// The framing of the 3D scene: Auto frames the presets that fill the window on the picture.
+#[test]
+fn framing_follows_the_presets_that_fill_the_window() {
+    use zax_settings::shader_slots::{frames_picture, FRAME_AUTO, FRAME_PICTURE, FRAME_WINDOW};
+    assert!(frames_picture(FRAME_AUTO, true));
+    assert!(!frames_picture(FRAME_AUTO, false));
+    assert!(frames_picture(FRAME_PICTURE, false));
+    assert!(!frames_picture(FRAME_WINDOW, true));
+    let mut model = SettingsModel::new();
+    set_preset(
+        &mut model,
+        ShaderSlot::TwoD,
+        "bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp",
+    );
+    let choice = resolve(&model, true, false).expect("3D follows 2D");
+    assert!(choice.fills_window && choice.frames_picture);
+    model.set(SettingId::Shader3dFrame, SettingValue::Enum(FRAME_WINDOW));
+    assert!(!resolve(&model, true, false).expect("3D").frames_picture);
+}

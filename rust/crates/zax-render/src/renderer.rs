@@ -653,7 +653,7 @@ impl SceneRenderer {
                 crate::numerics::Vector3::new(scene.picture_tilt[0], scene.picture_tilt[1], 0.0),
             )
         } else {
-            scene.camera.build_view(scene.view_clipping(), aspect)
+            scene.framed_view(scene.camera.build_view(scene.view_clipping(), aspect))
         };
         self.last_view = view;
 
