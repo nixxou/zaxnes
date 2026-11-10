@@ -25,7 +25,7 @@ This is an **evaluation**, like EVAL-SYNC: it measures and explains, and it chan
 - [x] 3. The cause, with a class for each finding.
 - [x] 4. Re-check: Kirby after any player fix, and *Faxanadu* to show nothing regressed.
 - [x] 5. The report.
-- [ ] 6. The final pass.
+- [x] 6. The final pass.
 
 ## The environment this lot runs in
 
@@ -599,3 +599,99 @@ cargo test --release --offline -p zax-harness --lib
 cargo test --release --offline -p zax-harness --test movie_sync_tests
 cargo test --release --offline -p zax-harness --test soft_reset_mapper_tests
 ```
+
+---
+
+## Step 6 — the final pass
+
+Everything the brief's final check asks for, re-run at the end rather than trusted from the step
+that produced it.
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| clippy `-D warnings --all-targets`, **whole workspace**, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core,zax-harness/fceux-core,zax-fceux/fceux-core`) | clean |
+
+### The tests
+
+`cargo test --release --offline -p zax-harness -- --include-ignored`, with
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` and
+`ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| feature **off** | **118** | 0 | 0 |
+| feature **on** (`--test-threads 1`) | **137** | 0 | 0 |
+
+`zax-harness` is the only crate this lot touches. The feature-on run is single-threaded because
+FCEUX keeps one machine per process.
+
+Of those, this lot's own: **13** new unit tests (9 in `ram_trace`, 2 in `bk2`, 2 in
+`movie_sync`), **3** new integration tests in `movie_sync_tests` and the **3** of
+`soft_reset_mapper_tests`. EVAL-SYNC's figures move accordingly: the lib goes from 31 to 44 with
+the feature off, `movie_sync_tests` from 6 to 9.
+
+`rust/test-roms/nestest.nes` had to be copied in again, as EVAL-SYNC step 6 recorded: it is
+gitignored, four `bench_core_tests` load it, and a fresh worktree does not have it. The file is
+byte-identical to `assets-free/test-roms/nes-test-roms/other/nestest.nes` and nothing is staged
+by copying it.
+
+### golden-core
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, feature off, 98 ROMs:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names, which is lot FCEUX-23's baseline and EVAL-SYNC's.
+
+### Nothing of the emulation moved, measured rather than asserted
+
+`git diff --stat f1061097..HEAD` over `zax-nes`, `zax-engine3d`, `zax-render`, `zax-core-api`,
+`zax-fceux` **and `zax-app`** is **empty**. The whole lot is `zax-harness` and three documents:
+
+| | lines |
+|---|---|
+| `docs/progress/EVAL-SYNC-2.md` | +601 |
+| `docs/review/MOVIE-SYNC.md` | +287 |
+| `docs/review/FCEUX-ENGINE.md` | +6 |
+| `rust/crates/zax-harness/src/ram_trace.rs` | +581 |
+| `rust/crates/zax-harness/src/movie_sync.rs` | +570 |
+| `rust/crates/zax-harness/tests/soft_reset_mapper_tests.rs` | +190 |
+| `rust/crates/zax-harness/tests/movie_sync_tests.rs` | +152 |
+| `rust/crates/zax-harness/src/{bk2,movie_file,lib}.rs` | +89 |
+
+No new dependency, so `Cargo.lock` does not move at all; every cargo command of this pass was
+run `--offline`.
+
+### The headline figures, reproduced with the final binary
+
+| | |
+|---|---|
+| *Faxanadu* `[USA][!!]` against `fax-usa.txt` | offset **0**; **207** of 832 checksum lines, **832** of 832 lag counts, last agreeing line **83 200** |
+| *Faxanadu* `[Rev 1][!!]` against `fax-rev1.txt` | **220** of 832, **832** of 832, last agreeing line **83 200** |
+| both dumps' six screenshots | **12 of 12 match** |
+| *Kirby* against `kirby-jp.txt`, 156 312 frames | **0** of 1 563 lines; 25 insensitive frames against `lag=24`; **0 of 6** screenshots |
+| the class (a) | `cargo test -p zax-harness --test soft_reset_mapper_tests` — 3 passed |
+
+### The disk
+
+The pass began with 18 GB free on G: and ended with **11 GB**, well above the brief's 5 GB stop.
+The release tree under `rust/target-ev` is about 7 GB; no debug tree was ever built, every cargo
+command having been run `--release`, and no GPU campaign was run.
+
+### What is left for the owner
+
+1. **Find the *Kirby* divergence.** The cheapest next move is not ours: the owner's Lua script on
+   *Kirby* with `step = 1` over the first few hundred frames turns §4b's hundred-frame window
+   into one frame. After it, the `cfg`-gated experiment inside `zax-nes` (a chosen power-on PPU
+   dot, and the 29 658-cycle write-inhibition window), feature off by default.
+2. **The soft reset should leave the mapper alone** — one line, plus the amendment to
+   REQ-CORE-122 that the clause needs and that only the owner can make.
+3. **`.bk2` in the application**, as EVAL-SYNC said, with the two things this lot added to the
+   reader — the `00 00 00 00 FF FF FF FF` power-on fill and the refusal of a non-`null`
+   `InitialWRamStatePattern` — and with the caveat that an MMC3 `.bk2` may desync until item 1
+   is closed.
+4. The three `.fm2` header fields `zax-app`'s Zaxnes path ignores, unchanged from EVAL-SYNC.
