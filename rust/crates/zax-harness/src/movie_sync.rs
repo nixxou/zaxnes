@@ -110,6 +110,9 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
       --ppu-warmup         EXPERIMENT: undo the game's PPUCTRL/PPUMASK writes of the frame after
                            each reset, the ~29 658-cycle window nesdev says the hardware ignores
                            them in and `zax-nes` does not model (`--engine zaxnes` only)
+      --ppu-ram default|ff|zero|random:<seed>
+                           what OAM, the palette RAM and the nametable RAM hold at power-on,
+                           which nesdev calls unspecified (`--engine zaxnes` only)
       --prg-ram default|ff|zero|random:<seed>
                            the power-on contents of the **cartridge's** PRG-RAM, which is a
                            different 8 KiB from --ram's 2 KiB (`--engine zaxnes` only)
@@ -223,6 +226,8 @@ pub struct Options {
     /// Imitate the PPU's write-inhibition window after a reset. See
     /// `ZaxnesMachine::apply_ppu_warmup`.
     pub ppu_warmup: bool,
+    /// The power-on contents of the PPU's OAM, palette RAM and nametable RAM.
+    pub ppu_ram: Option<RamPattern>,
     /// The power-on contents of the cartridge's PRG-RAM, when the command line names one.
     ///
     /// A **different** 8 KiB from [`Self::ram`]'s 2 KiB, and the distinction is not pedantry:
@@ -278,6 +283,7 @@ impl Default for Options {
             trace_ref: None,
             resets: Resets::On,
             ppu_warmup: false,
+            ppu_ram: None,
             prg_ram: None,
             png: None,
             png_frames: Vec::new(),
@@ -348,6 +354,7 @@ impl Options {
                     options.trace_ref = Some(PathBuf::from(value_at(args, &mut index)));
                 }
                 "--ppu-warmup" => options.ppu_warmup = true,
+                "--ppu-ram" => options.ppu_ram = Some(pattern(&value_at(args, &mut index))?),
                 "--prg-ram" => options.prg_ram = Some(pattern(&value_at(args, &mut index))?),
                 "--resets" => {
                     let text = value_at(args, &mut index);
@@ -462,6 +469,8 @@ struct ZaxnesMachine {
     prg_ram: Option<RamPattern>,
     /// Undo the game's PPUCTRL/PPUMASK writes of the frame after a reset (`--ppu-warmup`).
     ppu_warmup: bool,
+    /// What OAM, the palette and the nametable RAM hold after every power-on (`--ppu-ram`).
+    ppu_ram: Option<RamPattern>,
     /// Frames run since the last power-on or reset.
     since_reset: u32,
 }
@@ -482,6 +491,7 @@ impl ZaxnesMachine {
             state,
             prg_ram: None,
             ppu_warmup: false,
+            ppu_ram: None,
             since_reset: 0,
         })
     }
@@ -531,6 +541,40 @@ impl ZaxnesMachine {
         self.fill_prg_ram()
     }
 
+    /// Fills the PPU's own three memories — OAM, palette RAM and the 2 KiB of nametable RAM —
+    /// with `pattern`, through CPU writes to `$2003`/`$2004` and `$2006`/`$2007`.
+    ///
+    /// nesdev, "PPU power up state", calls OAM, the palette and VRAM *unspecified* at power-on;
+    /// `zax-nes` zeroes all three (`Ppu2C02::reset`) and what `NesHawk` does is not published,
+    /// so this is the third thing a movie can be held against. The writes go through
+    /// `NesCore::write_memory`, which is the bus's real write path, so they reach the PPU
+    /// exactly as the CPU's would.
+    ///
+    /// `v`, `t` and the `$2005`/`$2006` write latch are put back to 0 afterwards — the two
+    /// `$2006` writes that set the fill address left `v` elsewhere, and a machine that started
+    /// its first frame with a different `v` would be a second change wearing this one's name.
+    fn fill_ppu_ram(&mut self, pattern: RamPattern) {
+        let mut oam = [0u8; 256];
+        pattern.fill(&mut oam);
+        self.core.write_memory(0x2003, 0);
+        for byte in oam {
+            self.core.write_memory(0x2004, byte);
+        }
+        let mut nametables = [0u8; 2048];
+        pattern.fill(&mut nametables);
+        let mut palette = [0u8; 32];
+        pattern.fill(&mut palette);
+        for (start, bytes) in [(0x2000u16, &nametables[..]), (0x3F00, &palette[..])] {
+            self.core.write_memory(0x2006, (start >> 8) as u8);
+            self.core.write_memory(0x2006, (start & 0xFF) as u8);
+            for byte in bytes {
+                self.core.write_memory(0x2007, *byte);
+            }
+        }
+        self.core.write_memory(0x2006, 0);
+        self.core.write_memory(0x2006, 0);
+    }
+
     fn fill_prg_ram(&mut self) -> Result<(), String> {
         let Some(pattern) = self.prg_ram else {
             return Ok(());
@@ -558,6 +602,9 @@ impl Machine for ZaxnesMachine {
         // for `zero` the bytes written are the ones already there.
         ram.fill(self.core.bus_mut().ram_mut());
         self.since_reset = 0;
+        if let Some(pattern) = self.ppu_ram {
+            self.fill_ppu_ram(pattern);
+        }
         // And the power-on zeroed the cartridge's PRG-RAM too, which is a second 8 KiB with its
         // own power-on contents.
         self.fill_prg_ram()
@@ -1437,6 +1484,11 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
              given the same one",
         ),
         (
+            options.ppu_ram.is_some(),
+            "--ppu-ram",
+            "no FCEUX API call reaches the PPU's own memories, so the two machines could not be              given the same ones",
+        ),
+        (
             options.ppu_warmup,
             "--ppu-warmup",
             "it is an experiment on this core's own PPU and there is nothing to give the other \
@@ -1497,6 +1549,7 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
                 machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
             }
             machine.ppu_warmup = options.ppu_warmup;
+            machine.ppu_ram = options.ppu_ram;
             let (run, trace) = run_alone(options, &movie, &mut machine, ram)?;
             measurement.runs.push(run);
             measurement.traces.extend(trace);
