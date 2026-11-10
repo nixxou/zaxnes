@@ -36,8 +36,8 @@ mod engine;
 
 #[cfg(feature = "fceux-core")]
 pub use core::{
-    Error, Fceux, MovieHeader, MovieMode, RamInit, Region, Tile, TileCapture, FRAME_HEIGHT,
-    FRAME_LEN, FRAME_WIDTH,
+    judge_movie, Error, Fceux, MovieHeader, MovieMode, RamInit, Region, Tile, TileCapture,
+    FRAME_HEIGHT, FRAME_LEN, FRAME_WIDTH,
 };
 #[cfg(feature = "fceux-core")]
 pub use engine::{FceuxEngine, BLOCK_VERSION};

@@ -40,6 +40,7 @@ use std::path::{Path, PathBuf};
 use zax_core_api::EngineKind;
 
 use super::{EmulationHost, GameView};
+use crate::emulation::engine_handle::{EngineHandle, OwnMovieHeader};
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::movie_timeline::MovieTimeline;
 use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS};
@@ -76,19 +77,23 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Plays the `.fm2` in `path` on the engine that can replay it.
     ///
-    /// The order matters and is the only order that is right: the session is rebuilt on that
-    /// engine first (so the profile's `Start` hook has run and the 3D scene is the game's), and
-    /// the movie is loaded second — its load re-powers the machine, which is what a movie needs
-    /// and what wipes anything a `Start` hook wrote. A refusal leaves the machine as the rebuild
-    /// left it, which is the game at power-on on the forced engine, and says which thing the
-    /// movie needed.
+    /// Two orders matter here, and both are the only right one.
+    ///
+    /// **The movie is judged before anything is committed.** Switching the session's engine
+    /// re-powers the machine, so a refusal decided afterwards would cost the player the game they
+    /// were playing — which is the contract `fm2_movie_tests`'s *a refused fm2 leaves the game
+    /// alone* states, and which this path broke until step 7 of the lot found it.
+    ///
+    /// **The session is rebuilt before the movie is loaded**, so that the profile's `Start` hook
+    /// has run and the 3D scene is the game's; the movie's own load then re-powers the machine,
+    /// which is what a movie needs and what wipes anything a `Start` hook wrote.
     pub(super) fn play_fm2_on_its_own_engine(&mut self, path: &str) {
         let movie = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.notifications.show_error(&format!(
                     "{}: {error}",
-                    text("Movie refused", "Film refusé")
+                    text("Movie refused", "Film refuse")
                 ));
                 return;
             }
@@ -99,16 +104,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(game) = self.games.resolve(&game_id) else {
             return;
         };
-
-        // The engine the movie needs, in force for this session only. Set before the rebuild,
-        // because `ensure_session` reads it.
-        self.movie_engine = Some(EngineKind::Fceux);
+        let rom = match self.read_rom_of(&game) {
+            Ok(rom) => rom,
+            Err(message) => {
+                self.notifications.show_error(&message);
+                return;
+            }
+        };
+        // With that engine already in play there is nothing to lose, so it is asked directly;
+        // otherwise the question goes to a throw-away engine of that kind with this game's ROM in
+        // it, which also answers whether the ROM loads there at all.
         let already = self
             .session
             .as_ref()
             .is_some_and(|session| session.core().kind() == EngineKind::Fceux);
+        if !self.movie_is_for_its_own_engine(&rom, &movie, already, path) {
+            return;
+        }
+
+        // Only now is anything committed: the engine the movie needs, in force for this session
+        // only, set before the rebuild because `ensure_session` reads it.
+        self.movie_engine = Some(EngineKind::Fceux);
         if !already {
-            if let Err(message) = self.rebuild_session_for_the_movie(&game) {
+            if let Err(message) = self.rebuild_session_for_the_movie(&game, &rom) {
                 self.movie_engine = None;
                 self.log(&format!(
                     "fm2 movie: the engine could not be made: {message}"
@@ -122,67 +140,122 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.movie_engine = None;
             return;
         };
-        let played = session.core_mut().play_own_movie(&movie);
-        match played {
+        match session.core_mut().play_own_movie(&movie) {
             Some(Ok(header)) => {
                 self.movie_file = Some(PathBuf::from(path));
                 self.start_own_movie_timeline(header.frames);
                 self.rollback.clear();
                 self.frame_steps.clear();
+                self.report_own_movie_started(path, &header);
+            }
+            other => {
+                // A backstop. The judgement above already refused everything the engine would,
+                // so reaching here means the two disagreed, which is worth a line rather than a
+                // silent difference.
+                let why = match other {
+                    Some(Err(why)) => why,
+                    _ => "the engine would not take the movie".to_owned(),
+                };
                 self.log(&format!(
-                    "fm2 movie on the {} engine: {path}, {} frames, {:?}, {} re-records",
-                    EngineKind::Fceux,
-                    header.frames,
-                    header.region,
-                    header.rerecord_count,
+                    "fm2 movie refused after the judgement passed: {why}"
                 ));
-                // A movie that states no checksum claims nothing, so there is nothing to warn
-                // about; one that states the wrong one was refused before it got here.
-                let message = format!(
-                    "{} ({} {})",
-                    text(
-                        "Playing the movie on the FCEUX engine",
-                        "Lecture du film sur le moteur FCEUX"
+                self.notifications
+                    .show_error(&format!("{}: {why}", text("Movie refused", "Film refuse")));
+                self.movie_engine = None;
+            }
+        }
+    }
+
+    /// Whether the movie may be played on the engine that plays its own, judged **without
+    /// touching the machine**; the refusal or the fall-back is reported here.
+    ///
+    /// A `false` means the caller must do nothing more: either the movie was refused, or it has
+    /// already been handed to the other engine's own reader. The second case is the one worth
+    /// naming — a ROM that will not load on that engine is about the **game** and not about the
+    /// movie, so refusing would leave a playable movie unplayable; the other reader takes it with
+    /// a warning, a reader that is not the one the movie was recorded on being able to drift.
+    fn movie_is_for_its_own_engine(
+        &mut self,
+        rom: &rom_file::RomData,
+        movie: &[u8],
+        already: bool,
+        path: &str,
+    ) -> bool {
+        let judged = if already {
+            self.session
+                .as_ref()
+                .and_then(|session| session.core().inspect_own_movie(movie))
+        } else {
+            EngineHandle::judge_own_movie(&rom.image, &rom.name, movie)
+        };
+        match judged {
+            Some(Ok(_)) => true,
+            Some(Err(why)) if EngineHandle::judgement_is_about_the_rom(&why) => {
+                self.log(&format!(
+                    "fm2 movie: the FCEUX engine cannot load this ROM ({why}); Zaxnes's own reader takes the movie"
+                ));
+                self.notifications.show(
+                    &text(
+                        "The FCEUX engine cannot load this ROM: the movie plays on Zaxnes's own reader and may drift out of sync.",
+                        "Le moteur FCEUX ne peut pas charger cette ROM : le film est lu par le lecteur de Zaxnes et peut se desynchroniser.",
                     ),
-                    header.frames,
-                    text("frames", "trames")
+                    DEFAULT_SECONDS,
+                    NotificationSeverity::Warning,
                 );
-                if header.from_savestate {
-                    self.notifications.show(
-                        &format!(
-                            "{message} — {}",
-                            text(
-                                "it starts from a savestate it carries, not from power-on",
-                                "il démarre d'une sauvegarde d'état qu'il contient, pas de l'allumage"
-                            )
-                        ),
-                        DEFAULT_SECONDS,
-                        NotificationSeverity::Warning,
-                    );
-                } else {
-                    self.notify(&message);
-                }
+                self.play_fm2(path);
+                false
             }
             Some(Err(why)) => {
                 self.log(&format!("fm2 movie refused: {why}"));
                 self.notifications
-                    .show_error(&format!("{}: {why}", text("Movie refused", "Film refusé")));
-                // The engine stays forced only while a movie plays; a refusal is not a playback.
-                // The game is left where the rebuild left it — at power-on on that engine — which
-                // the next load puts back to its own choice.
-                self.movie_engine = None;
+                    .show_error(&format!("{}: {why}", text("Movie refused", "Film refuse")));
+                false
             }
             None => {
-                // The engine turned out not to play its own movies after all, which only a
-                // fallback to Zaxnes can cause (one FCEUX per process). Say so rather than
-                // silently importing the movie on the other engine.
-                self.movie_engine = None;
                 self.log("fm2 movie: the engine that plays its own movies could not be made");
                 self.notifications.show_error(&text(
                     "The FCEUX engine is not available, so this movie cannot be played in sync.",
-                    "Le moteur FCEUX n'est pas disponible, ce film ne peut pas être lu en phase.",
+                    "Le moteur FCEUX n'est pas disponible, ce film ne peut pas etre lu en phase.",
                 ));
+                false
             }
+        }
+    }
+
+    /// What the log and the notification say once the movie is playing. A movie that states no
+    /// checksum claims nothing, so there is nothing to warn about there; one that states the wrong
+    /// one never reaches this.
+    fn report_own_movie_started(&mut self, path: &str, header: &OwnMovieHeader) {
+        self.log(&format!(
+            "fm2 movie on the {} engine: {path}, {} frames, {:?}, {} re-records",
+            EngineKind::Fceux,
+            header.frames,
+            header.region,
+            header.rerecord_count,
+        ));
+        let message = format!(
+            "{} ({} {})",
+            text(
+                "Playing the movie on the FCEUX engine",
+                "Lecture du film sur le moteur FCEUX"
+            ),
+            header.frames,
+            text("frames", "trames")
+        );
+        if header.from_savestate {
+            self.notifications.show(
+                &format!(
+                    "{message} - {}",
+                    text(
+                        "it starts from a savestate it carries, not from power-on",
+                        "il demarre d'une sauvegarde d'etat qu'il contient, pas de l'allumage"
+                    )
+                ),
+                DEFAULT_SECONDS,
+                NotificationSeverity::Warning,
+            );
+        } else {
+            self.notify(&message);
         }
     }
 
@@ -193,12 +266,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     fn rebuild_session_for_the_movie(
         &mut self,
         game: &crate::emulation::game_catalog::ResolvedGame,
+        rom: &rom_file::RomData,
     ) -> Result<(), String> {
-        // The ROM is read from its file rather than carried over in a savestate: a state belongs
-        // to the engine that wrote it and is refused by the other one, which is the whole point
-        // of the engine stamp lot FCEUX-23 step 5 put in the block. `script_reload` can carry a
-        // state across because the engine there does not change.
-        let rom = self.read_rom_of(game)?;
+        // The ROM is handed in rather than carried over in a savestate: a state belongs to the
+        // engine that wrote it and is refused by the other one, which is the whole point of the
+        // engine stamp lot FCEUX-23 step 5 put in the block. `script_reload` can carry a state
+        // across because the engine there does not change.
 
         if let Some(mut old) = self.session.take() {
             old.end(&mut self.settings, &mut self.scene);
@@ -211,7 +284,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         self.ensure_session(game, true)?;
 
-        self.load_rom_into_new_session(game, &rom)?;
+        self.load_rom_into_new_session(game, rom)?;
         self.apply_profile_scene();
         if let Some(session) = self.session.as_mut() {
             session.start(&mut self.settings, &mut self.scene);

@@ -409,7 +409,7 @@ fn a_movie_the_build_cannot_play_is_refused_by_name_and_changes_nothing() {
     fceux.frame_indices_into(&mut before).expect("the picture");
     let frames_before = fceux.frame_count();
 
-    let cases: [(Fm2, &str); 6] = [
+    let cases: [(Fm2, &str); 7] = [
         (
             Fm2 {
                 fds: 1,
@@ -446,6 +446,15 @@ fn a_movie_the_build_cannot_play_is_refused_by_name_and_changes_nothing() {
             Fm2 {
                 // SI_ZAPPER on port 1.
                 ports: [1, 2, 0],
+                frames: vec![(0, 0); 2],
+                ..Fm2::default()
+            },
+            "an input device other than a standard pad",
+        ),
+        (
+            Fm2 {
+                // SI_POWERPADA on port 0.
+                ports: [3, 1, 0],
                 frames: vec![(0, 0); 2],
                 ..Fm2::default()
             },
@@ -726,4 +735,96 @@ fn a_savestate_during_playback_carries_the_movies_clock() {
     }
     assert_eq!(again, expected, "a seek back must replay identically");
     assert_eq!(fceux.movie_mode(), MovieMode::Playing);
+}
+
+/// **A one-player `.fm2` records `port1 0`** — an empty socket on port 2 — and that is the common
+/// case, not an exotic one. It must play, and the empty socket must read as empty rather than as
+/// the host's own pad: a game that polls port 2 would otherwise see buttons the movie never
+/// recorded.
+///
+/// The frame lines of such a movie have **no field** for port 2, which is FCEUX's own format
+/// (`MovieRecord::parse` only reads a pad field for a port set to `SI_GAMEPAD`).
+#[test]
+fn a_one_player_movie_plays_and_its_empty_socket_reads_as_empty() {
+    let _serial = lock();
+    let Some(rom) = nestest() else { return };
+
+    // Built by hand rather than through `Fm2`, whose frame lines always carry two pad fields.
+    let mut text = String::from(
+        "version 3
+emuVersion 20000
+palFlag 0
+port0 1
+port1 0
+port2 0
+FDS 0
+         NewPPU 0
+fourscore 0
+microphone 0
+RAMInitOption 2
+RAMInitSeed 0
+",
+    );
+    for frame in 0..90 {
+        text.push_str(if (30..60).contains(&frame) {
+            "|0|.......A|||
+"
+        } else {
+            "|0|........|||
+"
+        });
+    }
+    let movie = text.into_bytes();
+
+    let mut fceux = Fceux::new().expect("an instance");
+    loaded(&mut fceux, &rom, RamInit::Zero);
+
+    let header = fceux.inspect_movie(&movie).expect("the header");
+    assert_eq!(header.ports, [1, 0, 0]);
+    assert_eq!(header.frames, 90);
+    assert_eq!(
+        header.refusal(),
+        None,
+        "a one-player movie must not be refused",
+    );
+
+    fceux.play_movie(&movie).expect("it plays");
+    assert_eq!(fceux.movie_mode(), MovieMode::Playing);
+
+    // The host's pads are held at every button down on **both** pads throughout. Port 1 is
+    // overridden by the movie's records, and port 2 is an empty socket, so neither reaches the
+    // game: a picture that depended on them would differ from the one a zero word gives.
+    let mut picture = vec![0_u8; FRAME_LEN];
+    let mut held = Vec::new();
+    for _ in 0..90 {
+        fceux.set_input(0xFF, 0xFF).expect("the pads");
+        fceux.run_frame().expect("a frame");
+        fceux.frame_indices_into(&mut picture).expect("the picture");
+        held.push(digest(&picture));
+    }
+    assert_eq!(fceux.movie_position(), Some((90, 90)));
+
+    drop(fceux);
+    let mut fceux = Fceux::new().expect("an instance");
+    loaded(&mut fceux, &rom, RamInit::Zero);
+    fceux.play_movie(&movie).expect("it plays");
+    let mut quiet = Vec::new();
+    for _ in 0..90 {
+        fceux.set_input(0, 0).expect("the pads");
+        fceux.run_frame().expect("a frame");
+        fceux.frame_indices_into(&mut picture).expect("the picture");
+        quiet.push(digest(&picture));
+    }
+    assert_eq!(
+        held, quiet,
+        "the host's pads reached the game through a movie's ports",
+    );
+
+    // And stopping gives both pads back, so the host drives the game again.
+    fceux.stop_movie().expect("it stops");
+    assert_eq!(fceux.movie_mode(), MovieMode::None);
+    let before = fceux.frame_count();
+    fceux.set_input(0x08, 0).expect("the pads");
+    fceux.run_frame().expect("a frame");
+    assert_eq!(fceux.frame_count(), before + 1);
 }

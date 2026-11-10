@@ -85,7 +85,16 @@ fn reload(harness: &mut LoopHarness, exact: bool) {
     panic!("the exact reload did not arrive");
 }
 
+/// A **fast** reload during a movie, which is the Zaxnes movie path's own case.
+///
+/// Compiled only without `fceux-core`, and for a reason rather than to go green: a movie the
+/// engine plays itself is loaded again by the reload (FCEUX's state block is the machine, not the
+/// movie mode), so its clock goes to 0 and the frame on screen is reachable only by replaying to
+/// it — the reload there is **always exact**, which lot FCEUX-48 step 4 records and
+/// `fceux_movie_app_tests::reloading_the_profile_mid_movie_keeps_the_movie_and_the_engine` holds.
+/// `a_reload_without_a_movie_is_fast` below still covers the fast path in both builds.
 #[test]
+#[cfg(not(feature = "fceux-core"))]
 fn a_fast_reload_keeps_the_frame_and_starts_the_new_scripts_there() {
     let (mut harness, path) = playing(&counting(1, 1));
     harness.run(Command::Pause);
@@ -96,10 +105,11 @@ fn a_fast_reload_keeps_the_frame_and_starts_the_new_scripts_there() {
     reload(&mut harness, false);
     let _ = std::fs::remove_file(&path);
     assert_eq!(ram(&harness), before, "the core moved");
-    assert!(
-        harness.host.session().unwrap().movie().is_some(),
-        "the movie was lost"
-    );
+    // `movie_mode` rather than `session.movie()`: lot FCEUX-48 step 4 gave the application a
+    // second source of movie frames — FCEUX's own movie mode, which an `.fm2` goes to in a build
+    // with `fceux-core` and which keeps no `MovieRun` — and "the movie was lost" is the question
+    // either way.
+    assert!(harness.host.movie_mode().is_some(), "the movie was lost");
 
     harness.run(Command::Resume);
     harness.tick_frame();

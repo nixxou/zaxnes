@@ -132,7 +132,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Plays the `.fm2` movie `path` (FCEUX's text format) or `.fcm` movie (FCE Ultra's
     /// binary one): the game is reset as on a power cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
     /// ROM that differs from the movie's is warned about, not refused: the movie may desync.
-    fn play_fm2(&mut self, path: &str) {
+    pub(super) fn play_fm2(&mut self, path: &str) {
         let parsed = std::fs::read(path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {

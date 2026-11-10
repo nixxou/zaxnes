@@ -698,8 +698,8 @@ pub struct MovieHeader {
     /// The Famicom microphone is logged.
     pub microphone: bool,
     /// FCEUX's device numbers for the two pad ports and the expansion port (`ESI`, `ESI`,
-    /// `ESIFC`); 1, 1 and 0 is two standard pads with nothing on the expansion port, which is
-    /// the only arrangement this build plays.
+    /// `ESIFC`). A pad port may be 1 (`SI_GAMEPAD`) or 0 (`SI_NONE`, an empty socket, which is
+    /// what a one-player `.fm2` records for port 2); the expansion port must be 0 (`SIFC_NONE`).
     pub ports: [i32; 3],
     /// The movie carries a savestate to start from, rather than starting at power-on.
     pub from_savestate: bool,
@@ -736,9 +736,12 @@ impl MovieHeader {
         if self.microphone {
             return Some(Error::MovieUnsupported("the Famicom microphone"));
         }
-        // `SI_GAMEPAD` is 1 and `SIFC_NONE` is 0 (`src/git.h`); anything else is a device this
-        // build has no word for, so the movie's records would be replayed against a standard pad.
-        if self.ports[0] != 1 || self.ports[1] != 1 {
+        // `SI_GAMEPAD` is 1 and `SI_NONE` is 0 (`src/git.h`), and **both are fine**: a one-player
+        // `.fm2` records `port1 0` for the empty socket, which is the common case rather than an
+        // exotic one, and the core installs what the header asks for so an empty socket reads as
+        // empty. Anything else is a device this build has no word for, and the movie's records
+        // would be replayed against a standard pad.
+        if !matches!(self.ports[0], 0 | 1) || !matches!(self.ports[1], 0 | 1) {
             return Some(Error::MovieUnsupported(
                 "an input device other than a standard pad",
             ));
@@ -1058,5 +1061,31 @@ impl Fceux {
     #[must_use]
     pub fn take_tiles(&self) -> Option<TileCapture> {
         TILES.lock().ok().and_then(|mut slot| slot.take())
+    }
+}
+
+/// Judges a `.fm2` against the ROM `image` **without disturbing anything** (lot FCEUX-48 step 7).
+///
+/// A throw-away engine is created, the ROM loaded into it, the movie's header read and judged
+/// against that ROM, and the engine dropped before this returns. Nothing the caller holds is
+/// touched — which is the point: a host must be able to refuse a movie *before* it switches a
+/// player's game to another engine, and switching engines re-powers the machine.
+///
+/// It answers two questions a header alone cannot: whether this engine can **load the ROM** at
+/// all (an `Err(Error::LoadFailed)`, which is about the game and not about the movie), and
+/// whether the movie's stated checksum is that ROM's.
+///
+/// # Errors
+///
+/// [`Error::AlreadyLive`] when an engine of this kind is already alive — the caller holds one and
+/// should ask *it* instead, there being nothing to lose by then. [`Error::LoadFailed`] when the
+/// ROM will not load on this engine. Otherwise what [`MovieHeader::refusal`] gives.
+pub fn judge_movie(image: &[u8], name: &str, movie: &[u8]) -> Result<MovieHeader, Error> {
+    let mut engine = Fceux::new()?;
+    engine.load_rom(image, name)?;
+    let header = engine.inspect_movie(movie)?;
+    match header.refusal() {
+        Some(refusal) => Err(refusal),
+        None => Ok(header),
     }
 }

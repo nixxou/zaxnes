@@ -913,6 +913,40 @@ impl EngineHandle {
         Some((frame, length))
     }
 
+    /// Judges a `.fm2` against `image` **without disturbing anything**, on a throw-away engine of
+    /// the kind that plays its own movies: the ROM is loaded into it, the header read and judged,
+    /// and the engine dropped before this returns.
+    ///
+    /// That is what lets a host refuse a movie *before* it switches a player's game to another
+    /// engine — which re-powers the machine, so a refusal decided afterwards would have cost the
+    /// game. `Err` carries the engine's own message, which names the one thing that is wrong.
+    ///
+    /// `None` only in a build with no such engine. `Some(Err(…))` when an engine of that kind is
+    /// already alive, in which case the caller holds it and should ask it with
+    /// [`EngineHandle::inspect_own_movie`] instead: there is nothing left to lose by then.
+    #[must_use]
+    pub fn judge_own_movie(
+        image: &[u8],
+        name: &str,
+        movie: &[u8],
+    ) -> Option<Result<OwnMovieHeader, String>> {
+        Some(match zax_fceux::judge_movie(image, name, movie) {
+            Ok(header) => own_header(&header).ok_or_else(|| "the movie was refused".to_owned()),
+            Err(error) => Err(error.to_string()),
+        })
+    }
+
+    /// Whether the message of [`EngineHandle::judge_own_movie`] is about the **ROM not loading on
+    /// that engine** rather than about the movie.
+    ///
+    /// The two call for different answers: a movie this engine cannot play is refused, while a
+    /// *game* it cannot load is a reason to fall back to the other engine's own reader. The
+    /// distinction is made here so that the host does not have to know the engine's error type.
+    #[must_use]
+    pub fn judgement_is_about_the_rom(message: &str) -> bool {
+        message.starts_with("FCEUX refused the ROM image")
+    }
+
     /// FCEUX's engine, or `None` on another one. The mirror of [`EngineHandle::zaxnes`], and
     /// only for the handful of operations FCEUX has and Zaxnes has not.
     fn own_movie_engine(&self) -> Option<&zax_fceux::FceuxEngine> {
@@ -962,6 +996,22 @@ impl EngineHandle {
     #[must_use]
     pub const fn own_movie_position(&self) -> Option<(u32, u32)> {
         None
+    }
+
+    /// Always `None`: this build has no engine that plays its own movies to judge one with.
+    #[must_use]
+    pub const fn judge_own_movie(
+        _image: &[u8],
+        _name: &str,
+        _movie: &[u8],
+    ) -> Option<Result<OwnMovieHeader, String>> {
+        None
+    }
+
+    /// Never, there being no such judgement to classify.
+    #[must_use]
+    pub const fn judgement_is_about_the_rom(_message: &str) -> bool {
+        false
     }
 }
 
