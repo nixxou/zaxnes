@@ -26,11 +26,13 @@ enum Screen {
     About,
     /// The window of the game's achievements (Rust-only).
     AchievementList,
+    /// The shaders window (Rust-only).
+    Shaders,
     /// A screen of the handheld interface.
     Handheld(HandheldScreen),
 }
 
-const DESKTOP_PLAN: [(&str, Screen); 9] = [
+const DESKTOP_PLAN: [(&str, Screen); 10] = [
     ("accueil", Screen::Welcome),
     ("menu-fichier", Screen::FileMenu),
     ("options", Screen::Options),
@@ -40,6 +42,7 @@ const DESKTOP_PLAN: [(&str, Screen); 9] = [
     ("profil", Screen::ProfileChooser),
     ("a-propos", Screen::About),
     ("succes", Screen::AchievementList),
+    ("shaders", Screen::Shaders),
 ];
 
 /// The handheld screens, photographed at the size of the window (640x480 for the devices).
@@ -178,5 +181,6 @@ fn arrange(ui: &mut ZaxUi, screen: Screen) {
         Screen::ProfileChooser => ui.open_profile_chooser_for_capture(),
         Screen::About => ui.state.about = true,
         Screen::AchievementList => ui.state.achievements = true,
+        Screen::Shaders => ui.state.shaders = true,
     }
 }

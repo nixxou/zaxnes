@@ -262,9 +262,9 @@ impl ZaxUi {
                 if index > 0 {
                     ui.same_line();
                 }
+                let chosen = std::path::Path::new(&stored) == path.as_path();
                 let path = path.display().to_string();
                 let label = format!("{}##quick{index}", tr(preset.label));
-                let chosen = path == stored;
                 let _style = chosen
                     .then(|| ui.push_style_color(imgui::StyleColor::Button, [0.25, 0.5, 0.3, 1.0]));
                 if ui.button(label) && !chosen {

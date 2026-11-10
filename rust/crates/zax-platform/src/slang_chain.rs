@@ -371,6 +371,37 @@ pub enum ShaderStatus<'a> {
     Refused(&'a Path, &'a str),
 }
 
+/// Adds the parameter names `file` declares (`#pragma parameter NAME ...`) to `order`, in the
+/// order of the text, the files it includes (`#include "..."`, relative to it) at their place.
+/// The preprocessed source of librashader no longer has the pragma lines, hence this reading of
+/// the files themselves; a file that does not read only loses the order of its parameters.
+fn declared_names(file: &Path, order: &mut Vec<String>, visited: &mut Vec<PathBuf>) {
+    if visited.iter().any(|known| known == file) || visited.len() > 256 {
+        return;
+    }
+    visited.push(file.to_path_buf());
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return;
+    };
+    for line in text.lines() {
+        let line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("#pragma parameter ") {
+            if let Some(name) = rest.split_whitespace().next() {
+                if !order.iter().any(|known| known == name) {
+                    order.push(name.to_owned());
+                }
+            }
+        } else if let Some(rest) = line.strip_prefix("#include") {
+            let included = rest
+                .trim()
+                .trim_matches(|c| c == '"' || c == '<' || c == '>');
+            if let Some(folder) = file.parent() {
+                declared_names(&folder.join(included), order, visited);
+            }
+        }
+    }
+}
+
 /// A parameter a preset's shaders declare (`#pragma parameter`), for the interface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParameterInfo {
@@ -414,16 +445,7 @@ pub fn preset_parameters(preset: &Path) -> Result<Vec<ParameterInfo>, String> {
     for pass in &parsed.passes {
         let source = ShaderSource::load(&pass.path, parsed.features)
             .map_err(|error| format!("{}: {error}", pass.path.display()))?;
-        for line in source.vertex.lines().chain(source.fragment.lines()) {
-            let Some(rest) = line.trim_start().strip_prefix("#pragma parameter ") else {
-                continue;
-            };
-            if let Some(name) = rest.split_whitespace().next() {
-                if !order.iter().any(|known| known == name) {
-                    order.push(name.to_owned());
-                }
-            }
-        }
+        declared_names(&pass.path, &mut order, &mut Vec::new());
         for (name, parameter) in source.parameters {
             found.entry(name.to_string()).or_insert(ParameterInfo {
                 name: name.to_string(),

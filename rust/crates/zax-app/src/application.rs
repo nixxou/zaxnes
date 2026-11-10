@@ -698,7 +698,11 @@ impl Running {
         let scene = self.host.scene();
         let three_d = !scene.two_dimensional_mode;
         let wide = scene.margin > 0.0 || scene.margin_y > 0.0;
-        let mode_slot = Some(zax_settings::shader_slots::ShaderSlot::of(three_d, wide));
+        // No tab is the one on screen without a game.
+        let mode_slot = self
+            .host
+            .session()
+            .map(|_| zax_settings::shader_slots::ShaderSlot::of(three_d, wide));
         let Some(display) = self.window.wgpu_mut() else {
             self.host.shader_report = ShaderReport {
                 state: ShaderState::NoWgpu,
