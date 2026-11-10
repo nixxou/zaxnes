@@ -23,7 +23,7 @@ This is an **evaluation**, like EVAL-SYNC: it measures and explains, and it chan
 - [x] 1. A RAM trace in `movie-sync`, calibrated on the two *Faxanadu* references.
 - [x] 2. The first divergence on Kirby, narrowed to the frame.
 - [x] 3. The cause, with a class for each finding.
-- [ ] 4. Re-check: Kirby after any player fix, and *Faxanadu* to show nothing regressed.
+- [x] 4. Re-check: Kirby after any player fix, and *Faxanadu* to show nothing regressed.
 - [ ] 5. The report.
 - [ ] 6. The final pass.
 
@@ -434,3 +434,57 @@ provisional choice they made: nothing is blocked here, the clause was implemente
 — a decision by the owner that the clause should not cover the mapper — not a question from an
 evaluator. It is written up in `docs/review/MOVIE-SYNC.md` with its size so that the owner can
 raise one.
+
+---
+
+## Step 4 — the re-check
+
+One player fix was made (step 1: a `.bk2` is read as asking for the `00 00 00 00 FF FF FF FF`
+work RAM, not zeroes), so both movies were run again from the top.
+
+### Kirby, with the fix
+
+| | |
+|---|---|
+| frames run | **156 312**, the whole movie, no stop |
+| checksum lines agreeing | **0 of 1 563** |
+| lag counts agreeing | all but the lines around three of the seven resets; **25** against **24** |
+| the picture, against `BizHawk`'s own six screenshots | **none of the six matches** |
+
+The same colour-bijection rule as EVAL-SYNC, on this run's rows 8-231 against the reference's
+224, at frames 1 000, 10 000, 30 000, 60 000, 83 000 and 156 312: no match at any of them. The
+last frame says what that means better than a digest does — `BizHawk` ends in the **star corridor
+of the final Nightmare fight**, with the `KIRBY` and `ENEMY` bars and four lives; Zaxnes ends in
+**a grass level, `SCORE : 0005500`, three lives**. It is the shape EVAL-SYNC found on the three
+`.fm2` movies, from the other side.
+
+So the fix changes nothing for *Kirby*, which step 2 had already measured (all three fills give
+0 lines). It was made because it is **right**, not because it was going to help here.
+
+### Faxanadu, to show nothing regressed
+
+The six screenshots of each dump, by the same rule, on the runs the fix changed:
+
+| frame | 1 000 | 10 000 | 30 000 | 60 000 | 83 000 | 83 218 |
+|---|---|---|---|---|---|---|
+| `[USA][!!]` | MATCH (9 colours) | MATCH (14) | MATCH (11) | MATCH (13) | MATCH (12) | MATCH (12) |
+| `[USA][Rev 1][!!]` | MATCH (9) | MATCH (14) | MATCH (11) | MATCH (13) | MATCH (12) | MATCH (12) |
+
+**Twelve of twelve**, as in EVAL-SYNC, and the last pictures are the same digests it recorded
+(`03d7e6a1…` and `13920624…`). The trace gains what step 1 measured — 207 and 220 lines of 832
+exactly equal where the old reading gave 0 — and the lag counts are still 832 of 832. Nothing
+regressed; the same run is now also readable at the level of its work RAM.
+
+### Does the fix belong in the application?
+
+**Yes, and the application has nowhere to put it yet.** `zax-app` has no `.bk2` path at all —
+making one is item 1 of EVAL-SYNC's "what is left for the owner" — so this is a line to write
+into that work rather than a line to change today: whatever builds the movie's start state must
+write the `00 00 00 00 FF FF FF FF` pattern over `bus_mut().ram_mut()` between
+`session.reset(...)` and `core.save_state(true)`, which is the same **three lines** EVAL-SYNC
+already costed for the `.fm2` path's ignored `RAMInitOption` (`emulation/host/movies.rs:184-187`).
+One change serves both: `.fm2` takes the pattern from its header, `.bk2` takes this one.
+
+The other half of the step-1 change — refusing a `.bk2` whose `InitialWRamStatePattern` is not
+`null` — belongs there too, and is a refusal rather than a behaviour: four lines beside the ones
+that already refuse a savestate-anchored movie.
