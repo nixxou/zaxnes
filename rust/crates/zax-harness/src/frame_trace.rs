@@ -61,6 +61,10 @@ pub const USAGE: &str = "zax-harness frame-trace <movie.fm2|.bk2> <rom.nes> --fr
                            the same frame and only wrote it down at different moments
       --extra <n>          instructions past the frame boundary --converge carries on for
                            (default 256)
+      --converge-window <n>   print --converge's live difference instruction by instruction for
+                           n instructions either side of the frame boundary, with the addresses
+                           named. A count says how far apart two machines are; the addresses say
+                           in which direction
       --builtin-patches    load a recognised commercial ROM with its 3D widescreen patch, as the
                            application does; off by default, as in movie-sync";
 
@@ -94,6 +98,21 @@ fn diff_counts(ours: &[u8], theirs: &[u8]) -> (u32, u32) {
     (total, live)
 }
 
+/// How many live addresses one window line names before it only counts them.
+const WINDOW_LISTED: usize = 8;
+
+/// The addresses outside the two artefact ranges at which the two 2 KiB differ, up to
+/// [`WINDOW_LISTED`] of them.
+fn live_addresses(ours: &[u8], theirs: &[u8]) -> Vec<u16> {
+    ours.iter()
+        .zip(theirs.iter())
+        .enumerate()
+        .filter(|(address, (ours, theirs))| ours != theirs && !is_artefact(*address))
+        .take(WINDOW_LISTED)
+        .map(|(address, _)| u16::try_from(address).unwrap_or(u16::MAX))
+        .collect()
+}
+
 /// The command line of `frame-trace`.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
@@ -120,6 +139,8 @@ pub struct Options {
     pub converge: Option<PathBuf>,
     /// Instructions past the frame boundary that `--converge` carries on comparing.
     pub extra: usize,
+    /// Instructions either side of the boundary whose live difference is printed in full.
+    pub converge_window: usize,
     /// Load a recognised commercial ROM with its 3D built-in patch, as `movie-sync`'s own
     /// `--builtin-patches` does. Off by default, for the same reason.
     pub builtin_patches: bool,
@@ -199,6 +220,15 @@ pub struct FrameTrace {
     /// Whether the 3D extension is unlocked on this machine (`$5000` has been written `WIDE`,
     /// or a built-in patch booted it).
     pub unlocked: bool,
+    /// DMC sample fetches during the frame, and OAM transfers, from `NesBus`'s own counters.
+    ///
+    /// A DMC fetch **halts the CPU** for three or four cycles (nesdev, "DMA"), so a frame's count
+    /// is the size of the one mechanism that moves the program's position inside the frame without
+    /// any read or branch deciding it. EVAL-SYNC-4 step 3 needed the number; both getters are
+    /// public and exist for the DMA timing tests.
+    pub dmc_fetches: i64,
+    /// OAM transfers asked for by a `$4014` write during the frame.
+    pub oam_transfers: i64,
     /// What `--converge` found: where inside this frame the run's own 2 KiB comes closest to the
     /// reference's recorded 2 KiB for the same frame.
     pub converge: Option<Converge>,
@@ -239,6 +269,21 @@ pub struct Converge {
     pub exact_live: Vec<usize>,
     /// Live bytes differing at the frame boundary.
     pub live_at_boundary: u32,
+    /// How many instructions either side of the boundary [`Self::window`] keeps.
+    pub window_half: usize,
+    /// `(index, total, live, the live addresses)` for the instants near the boundary.
+    ///
+    /// The counts alone say *how far* two machines are apart and never *in which direction*. A
+    /// frame whose three differing bytes turn out to be exactly what the next seventeen
+    /// instructions write is a frame whose reference was read **later** than our boundary, and
+    /// that cannot be read off a count. EVAL-SYNC-4 step 3 is the frame it was built for.
+    pub window: Vec<(usize, u32, u32, Vec<u16>)>,
+    /// Whether [`Self::take`] has passed the frame boundary, so that the window stops sliding.
+    past_boundary: bool,
+    /// Instants kept past the boundary.
+    window_after: usize,
+    /// Whether the window has all it asked for.
+    window_done: bool,
 }
 
 /// What a run found.
@@ -261,6 +306,19 @@ impl Converge {
     fn take(&mut self, index: usize, ram: &[u8], wanted: &[u8]) -> (u32, u32) {
         let (total, live) = diff_counts(ram, wanted);
         self.compared += 1;
+        // The window wanted is [boundary - half, boundary + half], and the boundary is not known
+        // until it arrives: so before it, the last `half + 1` instants are kept as a sliding
+        // tail, and after it the window fills up once and stops.
+        if self.window_half > 0 && !self.window_done {
+            self.window
+                .push((index, total, live, live_addresses(ram, wanted)));
+            if self.past_boundary {
+                self.window_after += 1;
+                self.window_done = self.window_after >= self.window_half;
+            } else if self.window.len() > self.window_half + 1 {
+                self.window.drain(..1);
+            }
+        }
         if total < self.best.0 {
             self.best = (total, index);
         }
@@ -336,6 +394,29 @@ impl Converge {
                 away(*first)
             );
         }
+        if !found.window.is_empty() {
+            let _ = writeln!(
+                text,
+                "      the live difference instruction by instruction across the boundary \
+                     (`<` before it, `>` after):"
+            );
+            for (index, total, live, addresses) in &found.window {
+                let marker = match index.cmp(&found.boundary) {
+                    std::cmp::Ordering::Less => '<',
+                    std::cmp::Ordering::Equal => '=',
+                    std::cmp::Ordering::Greater => '>',
+                };
+                let named = addresses.iter().fold(String::new(), |mut text, address| {
+                    let _ = write!(text, " ${address:04X}");
+                    text
+                });
+                let _ = writeln!(
+                    text,
+                    "      {marker} {index} ({:+}): {total} byte(s), {live} live{named}",
+                    away(*index)
+                );
+            }
+        }
         text
     }
 }
@@ -385,6 +466,12 @@ impl Report {
                 "    {} CPU cycles, {interrupts} interrupt handler entries, the 3D extension {}",
                 frame.cycles,
                 if frame.unlocked { "UNLOCKED" } else { "locked" }
+            );
+            let _ = writeln!(
+                text,
+                "    {} DMC sample fetch(es) and {} OAM transfer(s): a fetch halts the CPU for \
+                 3 or 4 cycles and a transfer for 513 or 514",
+                frame.dmc_fetches, frame.oam_transfers
             );
             if frame.stalled > 0 {
                 let _ = writeln!(
@@ -549,6 +636,7 @@ pub fn run(options: &Options) -> Result<Report, HarnessError> {
             input.word,
             &options.watch,
             probing.map(|bytes| (bytes.as_slice(), options.extra)),
+            options.converge_window,
         );
         traced.frame = frame;
         report.frames.push(traced);
@@ -597,6 +685,7 @@ fn trace_frame(
     word: u16,
     watch: &[u16],
     probe: Option<(&[u8], usize)>,
+    window_half: usize,
 ) -> FrameTrace {
     let mut out = FrameTrace {
         word,
@@ -609,6 +698,7 @@ fn trace_frame(
     bus.ppu_mut().clear_frame_boundary();
     out.unlocked = bus.ppu().wide().unlocked();
     let first_cycle = bus.cycle_count();
+    let (first_dmc, first_oam) = (bus.dmc_dma_count(), bus.oam_dma_count());
 
     let mut held: Vec<u8> = watch.iter().map(|address| bus.peek(*address)).collect();
     let mut converge = probe.map(|(wanted, extra)| {
@@ -618,6 +708,7 @@ fn trace_frame(
             Converge {
                 best: (u32::MAX, 0),
                 best_live: (u32::MAX, 0),
+                window_half,
                 ..Converge::default()
             },
         )
@@ -670,12 +761,16 @@ fn trace_frame(
         if boundary.is_none() && bus.ppu().vblank_just_started() {
             out.checksum = checksum(bus.ram());
             out.cycles = bus.cycle_count() - first_cycle;
+            out.dmc_fetches = bus.dmc_dma_count() - first_dmc;
+            out.oam_transfers = bus.oam_dma_count() - first_oam;
             boundary = Some(index);
             if let Some((_, _, found)) = converge.as_mut() {
                 found.boundary = index;
                 let (total, live) = differing.unwrap_or((0, 0));
                 found.at_boundary = total;
                 found.live_at_boundary = live;
+                // From here the window stops sliding and fills forward instead.
+                found.past_boundary = true;
             }
         }
         match (boundary, converge.as_ref()) {
@@ -690,6 +785,8 @@ fn trace_frame(
         out.overran = true;
         out.checksum = checksum(bus.ram());
         out.cycles = bus.cycle_count() - first_cycle;
+        out.dmc_fetches = bus.dmc_dma_count() - first_dmc;
+        out.oam_transfers = bus.oam_dma_count() - first_oam;
     }
     out.converge = converge.map(|(_, _, mut found)| {
         found.extra = found.compared.saturating_sub(found.boundary + 1);
@@ -744,6 +841,15 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
             }
             "--out" => options.out = Some(PathBuf::from(value(&mut index))),
             "--converge" => options.converge = Some(PathBuf::from(value(&mut index))),
+            "--converge-window" => {
+                let text = value(&mut index);
+                options.converge_window = text.parse().map_err(|_| {
+                    HarnessError::Usage(format!(
+                        "--converge-window {text:?} is not a whole number
+{USAGE}"
+                    ))
+                })?;
+            }
             "--builtin-patches" => options.builtin_patches = true,
             "--extra" => {
                 options.extra =
@@ -915,5 +1021,67 @@ mod tests {
         assert_eq!(file.lines().filter(|line| line.contains("LDA")).count(), 5);
         assert!(file.contains("=== frame 246"), "{file}");
         assert!(file.contains("--- $004B: 00 -> 01"), "{file}");
+    }
+
+    /// `--converge-window`'s two halves: which addresses are *live*, and the line that says on
+    /// which side of the frame boundary an instant sits.
+    ///
+    /// EVAL-SYNC-4 step 3: a count says how far two machines are apart and never in which
+    /// direction, and the direction is the whole question when three bytes could as easily be
+    /// writes our own frame had not reached yet.
+    #[test]
+    fn the_converge_window_names_the_live_addresses_and_which_side_of_the_boundary() {
+        let ours = {
+            let mut ram = vec![0u8; 2048];
+            ram[0x0005] = 1; // below $0020: an artefact, never named
+            ram[0x0038] = 1; // live
+            ram[0x01F0] = 1; // the stack page: an artefact, never named
+            ram[0x0493] = 1; // live
+            ram
+        };
+        let theirs = vec![0u8; 2048];
+        assert_eq!(diff_counts(&ours, &theirs), (4, 2));
+        assert_eq!(live_addresses(&ours, &theirs), [0x0038, 0x0493]);
+        assert_eq!(live_addresses(&theirs, &theirs), [] as [u16; 0]);
+
+        let found = Converge {
+            compared: 3,
+            boundary: 11,
+            at_boundary: 4,
+            live_at_boundary: 2,
+            window_half: 1,
+            window: vec![
+                (10, 4, 2, vec![0x0038, 0x0493]),
+                (11, 4, 2, vec![0x0038, 0x0493]),
+                (12, 2, 1, vec![0x0038]),
+            ],
+            best: (2, 12),
+            best_live: (1, 12),
+            ..Converge::default()
+        };
+        let report = found.report();
+        assert!(
+            report.contains("< 10 (-1): 4 byte(s), 2 live $0038 $0493"),
+            "{report}"
+        );
+        assert!(
+            report.contains("= 11 (+0): 4 byte(s), 2 live $0038 $0493"),
+            "{report}"
+        );
+        assert!(
+            report.contains("> 12 (+1): 2 byte(s), 1 live $0038"),
+            "{report}"
+        );
+        // With no window asked for, the report does not grow the block at all.
+        let plain = Converge {
+            window: Vec::new(),
+            window_half: 0,
+            ..found
+        };
+        assert!(
+            !plain.report().contains("instruction by instruction"),
+            "{}",
+            plain.report()
+        );
     }
 }
