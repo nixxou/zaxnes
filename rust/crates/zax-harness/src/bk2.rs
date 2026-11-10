@@ -116,8 +116,12 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
         ));
     }
     notes.push(
-        "the format states no power-on work RAM, so the machine's own is used; BizHawk's NES \
-         cores do not carry a RAM-fill option in the movie the way an `.fm2` does"
+        "the format carries no RAM-fill option the way an `.fm2`'s `RAMInitOption` does, and what \
+         `NesHawk` powers the work RAM on with is not published, so it was measured: of the three \
+         deterministic fills only `00 00 00 00 FF FF FF FF` keeps the two Faxanadu traces in step \
+         with BizHawk's own (207 and 220 of 832 checksum lines exactly equal, against 0 of 832 \
+         for all-$00 and for all-$FF), so that is what a `.bk2` is read as asking for. `--ram` \
+         overrides it"
             .to_owned(),
     );
     notes.push(
@@ -130,7 +134,12 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
         kind: "bk2",
         pal: false,
         pal_stated: false,
-        ram: RamPattern::Zero,
+        // Measured, not assumed, and the note above carries the measurement: `NesHawk`'s
+        // power-on work RAM is the `00 00 00 00 FF FF FF FF` pattern, the same one FCEUX's
+        // `RAMInitOption 0` writes. Lot EVAL-SYNC read it as all-$00 (the machine's own, which is
+        // what `zax-nes` powers on with, REQ-CORE-004) because it had nothing to check it
+        // against; the reference traces are that check.
+        ram: RamPattern::FceuxDefault,
         rom_md5: None,
         rom_sha1: header.get("SHA1").map(String::as_str).and_then(hex20),
         frames,
@@ -213,6 +222,19 @@ fn check_sync_settings(text: &str, notes: &mut Vec<String>) -> Result<(), String
             return Err(format!(
                 "the sync settings override the region with `RegionOverride {other}`, and the \
                  public description of the format does not say which region that is"
+            ))
+        }
+    }
+    // The one field that *does* speak about the power-on work RAM. `null` (or absent) is the
+    // core's own pattern, which the caller's note records as measured; anything else names a
+    // pattern whose shape the public description of the format does not fix, so it is refused by
+    // name rather than guessed at — a wrong 2 KiB cannot be recovered from by any emulation.
+    match settings.get("InitialWRamStatePattern") {
+        None | Some(serde_json::Value::Null) => {}
+        Some(other) => {
+            return Err(format!(
+                "the sync settings set `InitialWRamStatePattern` to {other}, and the public \
+                 description of the format does not say how that names a 2 KiB fill"
             ))
         }
     }
@@ -579,6 +601,57 @@ mod tests {
                 "case {index} should name {expected:?}, said {error:?}"
             );
         }
+    }
+
+    /// The power-on work RAM a `.bk2` asks for, and the one field that can override it.
+    ///
+    /// The pattern is not a reading of any source — the format does not carry one and `NesHawk`'s
+    /// own is not published — it is lot EVAL-SYNC-2's measurement against the owner's `BizHawk`
+    /// runs of *Faxanadu*, where of the three deterministic fills only this one puts any line of
+    /// the trace in step at all. The note has to carry that, because a reader of the report
+    /// otherwise has no way to tell a measurement from a guess.
+    #[test]
+    fn the_power_on_work_ram_is_the_measured_pattern_and_the_note_says_how_it_is_known() {
+        let file = read(&movie("", SYNC, &["|..|........|........|"])).unwrap_or_default();
+        assert_eq!(file.ram, RamPattern::FceuxDefault);
+        let mut ram = [0x55u8; 16];
+        file.ram.fill(&mut ram);
+        assert_eq!(
+            ram,
+            [0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        let note = file
+            .notes
+            .iter()
+            .find(|note| note.contains("00 00 00 00 FF FF FF FF"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(note.contains("measured"), "{note}");
+        assert!(note.contains("207"), "the figure has to be in it: {note}");
+    }
+
+    /// `InitialWRamStatePattern` is the one sync setting that speaks about the 2 KiB. `null` is
+    /// the core's own pattern; anything else names a fill whose shape the public description does
+    /// not fix, and a wrong 2 KiB is not something emulation can recover from, so it is refused.
+    #[test]
+    fn an_explicit_initial_work_ram_pattern_is_refused_by_name() {
+        let line = "|..|........|........|";
+        for null in [
+            r#"{"o":{"RegionOverride":0,"InitialWRamStatePattern":null}}"#,
+            r#"{"o":{"RegionOverride":0}}"#,
+        ] {
+            let file = read(&movie("", null, &[line])).unwrap_or_default();
+            assert_eq!(file.ram, RamPattern::FceuxDefault, "{null}");
+        }
+        let error = read(&movie(
+            "",
+            r#"{"o":{"RegionOverride":0,"InitialWRamStatePattern":[0,255,0,255]}}"#,
+            &[line],
+        ))
+        .err()
+        .unwrap_or_default();
+        assert!(error.contains("InitialWRamStatePattern"), "{error}");
+        assert!(error.contains("2 KiB fill"), "{error}");
     }
 
     #[test]

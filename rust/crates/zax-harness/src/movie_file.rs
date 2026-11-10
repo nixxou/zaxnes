@@ -116,7 +116,12 @@ impl RamPattern {
 impl fmt::Display for RamPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FceuxDefault => f.write_str("FCEUX default (00 00 00 00 FF FF FF FF)"),
+            // Named by its bytes rather than by one emulator, because lot EVAL-SYNC-2 measured
+            // the same pattern on `NesHawk`: it is FCEUX's `RAMInitOption 0` *and* what a `.bk2`
+            // turns out to want.
+            Self::FceuxDefault => {
+                f.write_str("the 00 00 00 00 FF FF FF FF pattern (FCEUX `RAMInitOption 0`)")
+            }
             Self::Ff => f.write_str("all $FF"),
             Self::Zero => f.write_str("all $00"),
             Self::Random(seed) => write!(f, "xoroshiro128+ from seed {seed}"),

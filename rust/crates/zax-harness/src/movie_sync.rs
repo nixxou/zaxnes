@@ -79,6 +79,7 @@ use zax_nes::{NesCore, NesRegion};
 
 use crate::golden_core::hex;
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
+use crate::ram_trace::{best_match, Comparison, RamTrace, Reference};
 use crate::HarnessError;
 
 pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options]
@@ -97,7 +98,13 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
       --progress <n>       print a line every n frames (default 0, none)
       --movie-mode         `--engine fceux` only: play through FCEUX's own movie mode
       --report <file.json> write the whole measurement as JSON
+      --trace <file.txt>   write a work-RAM checksum every --trace-step frames, with the running
+                           count of input-insensitive frames, in the reference traces' own shape
+      --trace-step <n>     how often a trace line is written (default 100)
+      --trace-ref <file>   a BizHawk reference trace to hold the run against, line for line; the
+                           frame offset between the two numberings is measured, not assumed
       --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG
+      --dump <dir> --dump-frames a,b,c  write those frames' 2 KiB of work RAM, per engine, raw
       --warm-up zaxnes:<n> | fceux:<n>
                            blank frames on one engine before the movie starts; the experiment
                            that tells a difference of boot phase from one of emulation";
@@ -155,10 +162,25 @@ pub struct Options {
     pub movie_mode: bool,
     /// Where to write the JSON.
     pub report: Option<PathBuf>,
+    /// Where to write the work-RAM trace. With two engines the name gains the engine's.
+    pub trace: Option<PathBuf>,
+    /// How often a trace line is written out.
+    pub trace_step: u32,
+    /// A reference trace to hold the run against.
+    pub trace_ref: Option<PathBuf>,
     /// Where to write pictures.
     pub png: Option<PathBuf>,
     /// Which frames' pictures to write.
     pub png_frames: Vec<u32>,
+    /// Where to write raw work-RAM dumps.
+    ///
+    /// A checksum says two machines differ; only the bytes say *how*. The reference traces carry
+    /// a checksum and nothing else, so when a line of one does not match, the 2 KiB behind it is
+    /// the only thing that can settle whether the run is out of step or the checksum is being
+    /// taken over something else.
+    pub dump: Option<PathBuf>,
+    /// Which frames' work RAM to write.
+    pub dump_frames: Vec<u32>,
     /// Blank frames run on (Zaxnes, FCEUX) **before** the movie starts, to test whether a
     /// divergence is a difference of boot phase rather than of emulation.
     ///
@@ -187,8 +209,13 @@ impl Default for Options {
             progress: 0,
             movie_mode: false,
             report: None,
+            trace: None,
+            trace_step: 100,
+            trace_ref: None,
             png: None,
             png_frames: Vec::new(),
+            dump: None,
+            dump_frames: Vec::new(),
             warm_up: (0, 0),
         }
     }
@@ -240,8 +267,23 @@ impl Options {
                 }
                 "--movie-mode" => options.movie_mode = true,
                 "--report" => options.report = Some(PathBuf::from(value_at(args, &mut index))),
+                "--trace" => options.trace = Some(PathBuf::from(value_at(args, &mut index))),
+                "--trace-step" => {
+                    let step = number(&value_at(args, &mut index), "--trace-step")?;
+                    if step == 0 {
+                        return Err(HarnessError::Usage(format!(
+                            "--trace-step 0 would write a line at no frame\n{USAGE}"
+                        )));
+                    }
+                    options.trace_step = step;
+                }
+                "--trace-ref" => {
+                    options.trace_ref = Some(PathBuf::from(value_at(args, &mut index)));
+                }
                 "--png" => options.png = Some(PathBuf::from(value_at(args, &mut index))),
                 "--png-frames" => options.png_frames = frame_list(&value_at(args, &mut index))?,
+                "--dump" => options.dump = Some(PathBuf::from(value_at(args, &mut index))),
+                "--dump-frames" => options.dump_frames = frame_list(&value_at(args, &mut index))?,
                 "--warm-up" => {
                     let text = value_at(args, &mut index);
                     let (engine, count) = text.split_once(':').unwrap_or((text.as_str(), ""));
@@ -953,6 +995,11 @@ pub struct Measurement {
     /// The first [`VISIBLE_FRAMES_LISTED`] of them, by frame. On a movie that nearly syncs this
     /// is the whole answer — "five frames of 47 454, and these are the five".
     pub visible_at: Vec<u32>,
+    /// One work-RAM trace per engine run, when `--trace` or `--trace-ref` asked for one.
+    pub traces: Vec<RamTrace>,
+    /// What holding each trace against `--trace-ref` found: the engine, the best offset's
+    /// comparison, and the runner-up offset's.
+    pub against_reference: Vec<(String, Comparison, Option<Comparison>)>,
 }
 
 /// How many visibly differing frames the report names before it only counts them.
@@ -1035,6 +1082,18 @@ impl Measurement {
         }
         for run in &self.runs {
             let _ = writeln!(text, "{}", run.report());
+        }
+        for (engine, best, runner_up) in &self.against_reference {
+            let _ = writeln!(text, "  {engine} against the reference trace:");
+            let _ = writeln!(text, "{}", best.report());
+            if let Some(runner_up) = runner_up {
+                let _ = writeln!(
+                    text,
+                    "    (the next best offset, {}, agrees on {} line(s), {} of them leading — \
+                     the winner is a measurement only if this is far behind it)",
+                    runner_up.offset, runner_up.agreeing, runner_up.matched
+                );
+            }
         }
         let _ = write!(text, "{}", self.divergence_report());
         text
@@ -1167,6 +1226,36 @@ impl Measurement {
             root.insert(key.into(), which.map_or(Value::Null, FrameDiff::to_json));
         }
         root.insert(
+            "against_the_reference_trace".into(),
+            Value::Array(
+                self.against_reference
+                    .iter()
+                    .map(|(engine, best, runner_up)| {
+                        json!({
+                            "engine": engine,
+                            "offset": best.offset,
+                            "lines_compared": best.compared,
+                            "lines_agreeing": best.agreeing,
+                            "leading_lines_agreeing": best.matched,
+                            "last_agreeing_frame": best.last_match,
+                            "first_differing_line": best.first_diff.map(|(frame, ours, theirs)| {
+                                json!({"frame": frame, "ours": ours, "reference": theirs})
+                            }),
+                            "first_differing_lag": best.first_lag_diff.map(
+                                |(frame, ours, theirs)| json!({
+                                    "frame": frame, "ours": ours, "reference": theirs,
+                                }),
+                            ),
+                            "runner_up_offset": runner_up.as_ref().map(|other| json!({
+                                "offset": other.offset,
+                                "leading_lines_agreeing": other.matched,
+                            })),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+        root.insert(
             "after_the_divergence".into(),
             json!({
                 "frames_compared": self.after.0,
@@ -1227,16 +1316,68 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
         Engines::Zaxnes => {
             let mut machine =
                 ZaxnesMachine::new(&image, &name, region).map_err(HarnessError::Rom)?;
-            let run = run_alone(options, &movie, &mut machine, ram)?;
+            let (run, trace) = run_alone(options, &movie, &mut machine, ram)?;
             measurement.runs.push(run);
+            measurement.traces.extend(trace);
         }
         Engines::Fceux => run_fceux_alone(options, &movie, &machines, &mut measurement)?,
     }
+    finish_traces(options, &mut measurement)?;
 
     if let Some(path) = &options.report {
         fs::write(path, format!("{:#}\n", measurement.to_json()))?;
     }
     Ok(measurement)
+}
+
+/// How far either side of zero the calibration looks for the offset between the two frame
+/// numberings. Three frames is far more than a convention can plausibly differ by, and keeping it
+/// small is what makes a win at one offset evidence rather than a search over possibilities.
+const OFFSETS_TRIED: std::ops::RangeInclusive<i64> = -3..=3;
+
+/// Writes `--trace` and holds the traces against `--trace-ref`.
+fn finish_traces(options: &Options, measurement: &mut Measurement) -> Result<(), HarnessError> {
+    if let Some(path) = &options.trace {
+        for trace in &measurement.traces {
+            // With two engines one path cannot hold two traces, so the engine's name goes into
+            // the file name rather than one run quietly overwriting the other.
+            let path = if measurement.traces.len() > 1 {
+                let stem = path
+                    .file_stem()
+                    .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+                let extension = path.extension().map_or_else(
+                    || "txt".to_owned(),
+                    |ext| ext.to_string_lossy().into_owned(),
+                );
+                path.with_file_name(format!("{stem}-{}.{extension}", trace.engine))
+            } else {
+                path.clone()
+            };
+            fs::write(
+                path,
+                trace.text(&measurement.movie.file, &measurement.movie.rom),
+            )?;
+        }
+    }
+    let Some(path) = &options.trace_ref else {
+        return Ok(());
+    };
+    let text = fs::read_to_string(path)?;
+    let reference = Reference::parse(&text)
+        .map_err(|why| HarnessError::Format(format!("{}: {why}", path.display())))?;
+    for trace in &measurement.traces {
+        let (best, runner_up) = best_match(trace, &reference, OFFSETS_TRIED);
+        measurement
+            .against_reference
+            .push((trace.engine.clone(), best, runner_up));
+    }
+    Ok(())
+}
+
+/// A trace of this engine's run, when one was asked for.
+fn tracer(options: &Options, engine: &str) -> Option<RamTrace> {
+    (options.trace.is_some() || options.trace_ref.is_some())
+        .then(|| RamTrace::new(engine, options.trace_step))
 }
 
 /// What a machine needs to be built.
@@ -1403,7 +1544,17 @@ fn run_lockstep(
 
     let total = frame_count(options, movie);
     let mut trackers = (RunTracker::new("zaxnes"), RunTracker::new("fceux"));
+    let mut traces = (tracer(options, "zaxnes"), tracer(options, "fceux"));
     let mut buffers = Buffers::default();
+    if traces.0.is_some() || traces.1.is_some() {
+        buffers.fill(&ours, &theirs).map_err(HarnessError::Rom)?;
+        if let Some(trace) = traces.0.as_mut() {
+            trace.frame(&buffers.ram.0, None);
+        }
+        if let Some(trace) = traces.1.as_mut() {
+            trace.frame(&buffers.ram.1, None);
+        }
+    }
 
     // Frame 0 is the machine at power-on, before an input word has been fed: the work RAM the
     // movie's header asked for, on both sides. It is compared first because a movie that starts
@@ -1447,8 +1598,16 @@ fn run_lockstep(
         trackers
             .1
             .frame(frame, &buffers.picture.1, sensitivity.map(|pair| pair.1));
+        if let Some(trace) = traces.0.as_mut() {
+            trace.frame(&buffers.ram.0, sensitivity.map(|pair| pair.0));
+        }
+        if let Some(trace) = traces.1.as_mut() {
+            trace.frame(&buffers.ram.1, sensitivity.map(|pair| pair.1));
+        }
         write_picture(options, "zaxnes", frame, &buffers.picture.0)?;
         write_picture(options, "fceux", frame, &buffers.picture.1)?;
+        write_ram(options, "zaxnes", frame, &buffers.ram.0)?;
+        write_ram(options, "fceux", frame, &buffers.ram.1)?;
 
         if frame >= options.from {
             let diff = compare_frame(
@@ -1467,6 +1626,8 @@ fn run_lockstep(
 
     measurement.runs.push(trackers.0.finish());
     measurement.runs.push(trackers.1.finish());
+    measurement.traces.extend(traces.0);
+    measurement.traces.extend(traces.1);
     Ok(())
 }
 
@@ -1491,12 +1652,15 @@ fn run_fceux_alone(
 ) -> Result<(), HarnessError> {
     let mut machine = FceuxMachine::new(machines.image, machines.name, machines.region)
         .map_err(HarnessError::Rom)?;
-    let run = if options.movie_mode {
-        run_fceux_movie_mode(options, movie, &mut machine)?
+    if options.movie_mode {
+        measurement
+            .runs
+            .push(run_fceux_movie_mode(options, movie, &mut machine)?);
     } else {
-        run_alone(options, movie, &mut machine, machines.ram)?
-    };
-    measurement.runs.push(run);
+        let (run, trace) = run_alone(options, movie, &mut machine, machines.ram)?;
+        measurement.runs.push(run);
+        measurement.traces.extend(trace);
+    }
     Ok(())
 }
 
@@ -1562,11 +1726,19 @@ fn run_alone(
     movie: &MovieFile,
     machine: &mut dyn Machine,
     ram: RamPattern,
-) -> Result<EngineRun, HarnessError> {
+) -> Result<(EngineRun, Option<RamTrace>), HarnessError> {
     machine.power(ram).map_err(HarnessError::Rom)?;
     let total = frame_count(options, movie);
     let mut tracker = RunTracker::new(machine.name());
+    let mut trace = tracer(options, machine.name());
     let mut picture = Vec::with_capacity(PICTURE_LEN);
+    let mut work_ram = Vec::with_capacity(RAM_LEN);
+    // Frame 0 of a trace is the machine at power-on, before an input word: the reference's own
+    // numbering starts from a `framecount` of 0, so there must be an entry for it to line up with.
+    if let Some(trace) = trace.as_mut() {
+        machine.ram_into(&mut work_ram).map_err(HarnessError::Rom)?;
+        trace.frame(&work_ram, None);
+    }
     for frame in 1..=total {
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
         let probe = probes(options, frame);
@@ -1581,13 +1753,23 @@ fn run_alone(
             tracker.run.stopped = Some((frame, why));
             break;
         }
+        if trace.is_some() || options.dump.is_some() {
+            if let Err(why) = machine.ram_into(&mut work_ram) {
+                tracker.run.stopped = Some((frame, why));
+                break;
+            }
+            if let Some(trace) = trace.as_mut() {
+                trace.frame(&work_ram, sensitive);
+            }
+            write_ram(options, machine.name(), frame, &work_ram)?;
+        }
         tracker.frame(frame, &picture, sensitive);
         write_picture(options, machine.name(), frame, &picture)?;
         if options.progress > 0 && frame % options.progress == 0 {
             println!("  {}: frame {frame} of {total}", machine.name());
         }
     }
-    Ok(tracker.finish())
+    Ok((tracker.finish(), trace))
 }
 
 fn progress(options: &Options, frame: u32, total: u32, measurement: &Measurement) {
@@ -1601,6 +1783,20 @@ fn progress(options: &Options, frame: u32, total: u32, measurement: &Measurement
             first.frame, measurement.after.1, measurement.after.0
         ),
     }
+}
+
+/// Writes one machine's 2 KiB of work RAM when `--dump` and `--dump-frames` ask for this frame.
+fn write_ram(options: &Options, engine: &str, frame: u32, ram: &[u8]) -> Result<(), HarnessError> {
+    let Some(directory) = &options.dump else {
+        return Ok(());
+    };
+    if !options.dump_frames.contains(&frame) {
+        return Ok(());
+    }
+    fs::create_dir_all(directory)?;
+    let engine = engine.replace([' ', '(', ')', '/', ','], "-");
+    fs::write(directory.join(format!("{engine}-ram-{frame:06}.bin")), ram)?;
+    Ok(())
 }
 
 /// Writes one picture as a PNG when `--png` and `--png-frames` ask for this frame.

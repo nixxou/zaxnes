@@ -239,6 +239,158 @@ fn a_movie_recorded_on_another_rom_is_reported_and_still_played() {
     assert!(quiet.report().contains("unverified"));
 }
 
+// ------------------------------------------------------------------------------------------------
+// The work-RAM trace, and the offset calibration it rests on (lot EVAL-SYNC-2 step 1)
+// ------------------------------------------------------------------------------------------------
+
+/// A run's own trace, written out and then read back as the reference for the same run, has to
+/// come out at **offset 0 with every line and every lag count agreeing**.
+///
+/// It is a round trip rather than a tautology: the writer emits one line every `--trace-step`
+/// frames from a per-frame array, and the comparison reads those line numbers back through a
+/// different path (`Reference::parse`, then `RamTrace::at`). An off-by-one in either half shows
+/// up here as a win at offset ±1 or as nothing matching at all — which is exactly the mistake the
+/// calibration on the real `BizHawk` traces exists to rule out.
+#[test]
+fn a_runs_own_trace_read_back_as_its_reference_lands_on_offset_zero() {
+    let Some(rom) = rom(POLLS) else {
+        return;
+    };
+    let dir = scratch("movie-sync-trace");
+    let movie = write_movie(&dir, "trace.fm2", 300, "", &[], |frame| {
+        if frame % 16 == 0 {
+            0x08
+        } else {
+            0
+        }
+    });
+    let path = dir.join("own.txt");
+    let written = movie_sync::run(&Options {
+        lag: true,
+        trace: Some(path.clone()),
+        trace_step: 50,
+        ..options(&movie, &rom, Engines::Zaxnes, 300)
+    })
+    .expect("the traced run");
+    assert_eq!(written.traces.len(), 1);
+    assert_eq!(written.traces[0].engine, "zaxnes");
+    assert_eq!(written.traces[0].length(), 300);
+
+    let text = std::fs::read_to_string(&path).expect("the trace back");
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with(|c: char| c.is_ascii_digit()))
+        .collect();
+    assert_eq!(lines.len(), 6, "one line every 50 frames of 300: {text}");
+    assert!(lines[0].starts_with("50 "), "{text}");
+    assert!(
+        lines[0].contains(" lag="),
+        "the probe ran, so the column is there: {text}"
+    );
+    // The trace's final lag count is the same quantity the one-engine report counts, arrived at
+    // by a different route: frames probed minus frames input-sensitive.
+    let insensitive = written.runs[0].probed.0 - written.runs[0].probed.1;
+    let last = written.traces[0].at(300).expect("the last frame");
+    assert_eq!(last.lag, Some(insensitive));
+
+    let against = movie_sync::run(&Options {
+        lag: true,
+        trace_ref: Some(path.clone()),
+        trace_step: 50,
+        ..options(&movie, &rom, Engines::Zaxnes, 300)
+    })
+    .expect("the compared run");
+    let (engine, best, _) = against
+        .against_reference
+        .first()
+        .expect("a comparison was made");
+    assert_eq!(engine, "zaxnes");
+    assert_eq!(best.offset, 0, "the two numberings line up at 0");
+    assert_eq!(best.compared, 6);
+    assert_eq!(best.matched, 6, "every line agrees");
+    assert_eq!(best.first_diff, None);
+    assert_eq!(best.first_lag_diff, None);
+    assert!(
+        against.report().contains("every compared line agrees"),
+        "{}",
+        against.report()
+    );
+}
+
+/// And a reference whose frames are numbered one higher is found at offset **-1** rather than
+/// silently reported as a divergence. This is the calibration doing its job on real emulator
+/// output instead of on a synthetic one.
+#[test]
+fn a_reference_numbered_one_frame_out_is_found_at_the_offset_it_is_out_by() {
+    let Some(rom) = rom(POLLS) else {
+        return;
+    };
+    let dir = scratch("movie-sync-trace-offset");
+    let movie = write_movie(&dir, "offset.fm2", 300, "", &[], |frame| {
+        if frame % 16 == 0 {
+            0x08
+        } else {
+            0
+        }
+    });
+    let own = dir.join("own.txt");
+    movie_sync::run(&Options {
+        trace: Some(own.clone()),
+        trace_step: 50,
+        ..options(&movie, &rom, Engines::Zaxnes, 300)
+    })
+    .expect("the traced run");
+
+    // The same checksums, every frame number one higher.
+    let shifted: String = std::fs::read_to_string(&own)
+        .expect("the trace back")
+        .lines()
+        .filter_map(|line| {
+            let (frame, rest) = line.split_once(' ')?;
+            let frame: u32 = frame.parse().ok()?;
+            Some(format!("{} {rest}\n", frame + 1))
+        })
+        .collect();
+    let path = dir.join("shifted.txt");
+    std::fs::write(&path, shifted).expect("writing the shifted reference");
+
+    let against = movie_sync::run(&Options {
+        trace_ref: Some(path),
+        trace_step: 50,
+        ..options(&movie, &rom, Engines::Zaxnes, 300)
+    })
+    .expect("the compared run");
+    let (_, best, runner_up) = against.against_reference.first().expect("a comparison");
+    assert_eq!(best.offset, -1);
+    assert_eq!(best.matched, 6, "all six lines, once the shift is undone");
+    let runner_up = runner_up.as_ref().expect("a second offset was tried");
+    assert_eq!(
+        runner_up.matched, 0,
+        "no other offset matches a line, which is what makes the winner a measurement"
+    );
+}
+
+#[test]
+fn a_reference_that_is_not_a_trace_is_refused_by_name() {
+    let Some(rom) = rom(POLLS) else {
+        return;
+    };
+    let dir = scratch("movie-sync-trace-refusal");
+    let movie = write_movie(&dir, "refusal.fm2", 10, "", &[], |_| 0);
+    let path = dir.join("prose.txt");
+    std::fs::write(&path, "this is not a trace at all\n").expect("writing the file");
+    let error = movie_sync::run(&Options {
+        trace_ref: Some(path),
+        ..options(&movie, &rom, Engines::Zaxnes, 10)
+    })
+    .expect_err("a reference with no numeric line is refused");
+    assert!(error.to_string().contains("prose.txt"), "{error}");
+    assert!(
+        error.to_string().contains("<frame> <checksum>"),
+        "the refusal has to say what it wanted: {error}"
+    );
+}
+
 #[test]
 fn a_file_that_is_not_a_movie_is_refused_by_name() {
     let Some(rom) = rom(POLLS) else {
