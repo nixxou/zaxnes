@@ -58,9 +58,45 @@ fn a_load_reports_the_region_and_the_name_it_was_given() {
 
     assert!(engine.is_running());
     assert_eq!(engine.rom_name(), Some("nestest.nes"));
-    // nestest is an NTSC image, and FCEUX applies the image's own region on load.
+    // nestest is an NTSC image, and a fresh engine runs NTSC: REQ-CORE-013 has the load *report*
+    // the region and the host apply it, which is `NesCore::load_rom`'s contract too.
     assert_eq!(engine.region(), NesRegion::Ntsc);
     assert_eq!(engine.frame_count(), 0);
+}
+
+/// REQ-CORE-013: the region a load reports comes from the **image**, not from the region the
+/// previous game in this process was left running.
+///
+/// FCEUX keeps its region in a process global and a plain iNES load does not touch it, so an
+/// engine that read the region back off the core reported the last game's. This test is the one
+/// that would have caught it: it leaves the core at PAL exactly as a previous game would, then
+/// loads an NTSC image with a new engine and asks both questions — what the load reported, and
+/// what the machine is actually running.
+#[test]
+fn a_load_reports_the_images_region_whatever_the_previous_game_left_behind() {
+    let _guard = lock();
+    let Some(rom) = nestest() else { return };
+    let image = std::fs::read(&rom).unwrap();
+
+    // A previous game, played in PAL, and dropped.
+    {
+        let mut played = FceuxEngine::new().unwrap();
+        assert!(played.load_rom(&image, "nestest.nes").success);
+        played.set_region(NesRegion::Pal);
+        assert_eq!(played.run_frame(0), 33_248);
+    }
+
+    let mut engine = FceuxEngine::new().unwrap();
+    let loaded = engine.load_rom(&image, "nestest.nes");
+    assert!(loaded.success, "{:?}", loaded.error);
+    assert_eq!(
+        loaded.region,
+        NesRegion::Ntsc,
+        "the load reported the previous game's region instead of the image's"
+    );
+    assert_eq!(engine.region(), NesRegion::Ntsc);
+    // And the core really is running it, not just the engine's own field.
+    assert_eq!(engine.run_frame(0), 29_781);
 }
 
 /// REQ-CORE-011: what FCEUX actually refuses, and the cause the engine reports for it.

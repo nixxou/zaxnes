@@ -14,7 +14,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 - [x] 5. The per-game choice (FCEUX-3).
 - [x] 6. The app with FCEUX, end to end.
 - [x] 7. Docs.
-- [ ] 8. Final pass.
+- [x] 8. Final pass.
 
 ## The environment this lot ran in
 
@@ -91,8 +91,9 @@ and the row itself: `"zaxnes":969,"fceux":969,"same_in_order":969,"same_as_multi
 verified rather than assumed. That digest is this lot's golden-core baseline; every later step is
 measured against it.
 
-**`render` baseline** (`--assets assets-neutral`, 640x480, defaults otherwise), the captures step 4
-has to reproduce at tolerance 0:
+**`render` baseline** (`--assets assets-neutral`, 640x480, **each game with its own profile file**
+— step 8 found this line said "defaults otherwise", which reproduces nothing; the three paths and
+the whole command line are in step 8), the captures step 4 has to reproduce at tolerance 0:
 
 | capture | sha256 |
 |---|---|
@@ -290,6 +291,7 @@ needs and FCEUX does not keep. **No `unsafe` in the new file**: every FFI call i
 | an audio ring | one of its own, `i16` → `f32` at `/32768`, a fifth of a second deep with the APU's floor of 10 000 (REQ-CORE-071), **entirely or not at all** and an odd stereo buffer refused — `zax-nes`'s two rules, so a host switching engines notices nothing |
 | a default sample rate | starts at 48 000, `Apu2A03::DEFAULT_SAMPLE_RATE`; the core itself starts silent |
 | a typed load failure | reads the cause off the image's header. See the leniency note below |
+| a region of its own on load | **corrected in step 8**: this row originally said the engine took the region FCEUX reported after the load, on the belief that FCEUX applies the image's own. It does not for a plain iNES image — its region is a process global a load leaves alone — so the engine now reads the header itself and re-asserts its own region on the core. See step 8 |
 | a self-describing state | a header: the engine's magic, a version, the core name, the ROM name, the region, the frame count, then FCEUX's opaque block as a length-prefixed blob. So `consumed` is meaningful (a host may place its own data after it, REQ-CORE-091), `StateLoaded::rom_name` is answerable, and **a Zaxnes block is refused as `ForeignCore` with the spec's own message** rather than as "corrupt" |
 
 The scratch buffers for the audio ring and the state payload are behind a `RefCell`, because
@@ -754,6 +756,200 @@ The FCEUX entry names `emu.engine` and both lots, says the feature is off by def
 `zax-harness` as well as `zax-app`, and records that lot FCEUX-23 only *grew* the fork's `zax/`
 directory — three calls, no FCEUX file touched — so the "complete corresponding source" duty is
 the same duty over the same diff.
+
+---
+
+## Step 8 — the final pass
+
+Everything the brief's "final check" asks for, re-run at the end of the lot rather than trusted
+from the step that first produced it. Two things came out of it that were not there before: a
+**real defect in `zax-fceux`** that only a particular test order exposes, and a **correction to the
+step-1 note's description of the render baseline**, which cost an hour and would have cost the next
+person the same.
+
+### The defect: FCEUX's region is a process global, and a load does not touch it
+
+`cargo test --release --workspace` with the feature on failed once, on
+`a_load_reports_the_region_and_the_name_it_was_given`: `left: Pal, right: Ntsc`. It had passed in
+steps 3 to 7 and it passed again on the next run, which is the shape of an ordering problem rather
+than a regression — and the file *does* serialise itself, so the mutex was not the hole.
+
+What leaks is **FCEUX's own state, not the test's**. `the_region_can_be_chosen_and_multi_round_trips`
+ends with the core set to PAL and drops its engine; `FceuxEngine::load_rom` then read the region
+back off the core and believed it was the one the image announced. The claim in step 3 that "FCEUX
+applies the image's own region on load" is **false for a plain iNES image**: FCEUX keeps its region
+in a process global that a cartridge load leaves alone. So whichever of the two tests won the lock
+first decided whether the other passed.
+
+Measured rather than assumed, by running the two against each other at two threads:
+
+| | |
+|---|---|
+| before the fix, the two tests racing, 12 runs | **1 failed** |
+| after the fix, the whole file at four threads, 30 runs | **0 failed** |
+
+**This was never only a test problem.** `EmulationHost` loads a game, then calls
+`set_region(settings.region())` — and with the TV mode on *automatic* the setting it applies is the
+region the load reported. So in one session: play a PAL game, switch to an NTSC one, and the second
+game was detected as PAL and played at PAL timing. The savestate header carries the region too,
+which is how it would have reached a file.
+
+The fix, in `FceuxEngine::load_rom`, is to do what `NesCore::load_rom` documents and does —
+REQ-CORE-013's "the detected region is **returned, not applied**":
+
+* the region is read off the **image**, by a new `announced_region`, with `InesHeader`'s own rule:
+  a dirty header (not NES 2.0, bytes 12 to 15 not all zero) is NTSC with bytes 7 to 15 unread
+  (REQ-CORE-012), an NES 2.0 header carries it in the low two bits of byte 12, an iNES one in bit 0
+  of byte 9;
+* `self.region` is **not** touched by a load, and the engine's own region is re-asserted on the
+  core instead, so the machine runs what `region()` says whatever the previous game left behind;
+* `host_region` is gone with its last caller: nothing reads the core's region any more, which is
+  the point.
+
+`a_load_reports_the_images_region_whatever_the_previous_game_left_behind` is the test that would
+have caught it: it leaves the core at PAL exactly as a previous game would, then loads an NTSC
+image with a new engine and asks both questions — what the load reported, and what the machine is
+actually running (29 781 cycles, not 33 248). The old test's misleading comment is corrected, and
+step 3's table above carries a pointer here.
+
+Nothing else moved: `fceux-tiles` on the three games is identical row for row to step 6's table,
+and the end-to-end figures are unchanged, both re-run below.
+
+### The correction to the step-1 render baseline
+
+Step 1 records the twelve render captures as "`--assets assets-neutral`, 640x480, **defaults
+otherwise**". That is wrong, and reproducing it from the note alone gives twelve captures that
+share no pixels with the baseline — 70 % to 92 % within 0 levels, with `render.json` showing **1
+opaque tile and 2 triangles** against the baseline's hundreds. The captures were made with each
+game's **own profile file**, passed as a path; the `render.json` description says `profile '2D Mode'`
+only because a profile loaded from a file has no title and that is the string printed for one
+without.
+
+The three profiles, so that nobody has to find them again:
+
+| game | `--profile` |
+|---|---|
+| *Super Mario Bros.* | `assets-neutral/profiles/Super Mario Bros.bytes` |
+| *Super Mario Bros. 3* | `assets-neutral/profiles/Super Mario Bros 3 (U) (PRG1).bytes` |
+| *Mega Man 3* | `assets-neutral/profiles/Rockman 3 - Dr Wily no Saigo(J).bytes` |
+
+    zax-harness render --out <dir> --rom <rom> --run <300|1200> \
+        --profile <the profile above> --assets G:/3dsen/cleanroom/assets-neutral --size 640x480
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| the same `,zax-app/fceux-core,zax-harness/fceux-core` | clean |
+
+Both re-run after the region fix, with `zax-fceux`'s fingerprint invalidated by hand first so that
+the recheck was a real one and not a cache hit.
+
+### The test suites
+
+`cargo test --release --workspace --features zax-app/bundled[,…fceux-core]`:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| feature **off** | **3 264** | 0 | 91 |
+| feature **on** | **3 308** | 0 | 100 |
+
+and the same with `-- --include-ignored`, with
+`ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` and
+**`ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`** — the third is not in the brief's list and
+six `zax-engine3d` corpus tests fail outright without it rather than skipping, which is worth
+knowing:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| feature **off**, ignored included | **3 349** | 0 | 0 |
+| feature **on**, ignored included | **3 402** | 0 | 0 |
+
+`--skip three_d_sen_real_install_tests` in both: those six need `ZAXNES_3DSEN_INSTALL`, which names
+an installation of **the original program**. The clean side must never touch it, so they are the one
+group of tests this role cannot run, and they are skipped by name rather than left to fail.
+
+### golden-core, the render comparison and `bench-core`
+
+**golden-core over the 98 originals** (`G:/3DSen/test-originals`, 1 200 frames, feature off):
+`8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical to the step-1
+baseline**, as at every step of this lot.
+
+**The render comparison**, the twelve captures of *Super Mario Bros.*, *Super Mario Bros. 3* and
+*Mega Man 3* at frames 300 and 1 200, against the step-1 baseline: **12 of 12 at 100.000 % within 0
+levels, 0 off** — and every one of the twelve sha256 figures in step 1's table matches the new file
+exactly, which is the stronger statement of the two.
+
+**`bench-core`**, each game with its own profile, three runs each, every run alone:
+
+| ROM | `core run_frame` ms | `total` ms | frames/s | against the step-1 warm median |
+|---|---|---|---|---|
+| *Super Mario Bros. 3* | 1.1285 / 1.1260 / 1.1138 | 1.3494 / 1.3464 / 1.3378 | 741 / 743 / 748 | median 1.3464 against 1.3977: **−3.7 %** |
+| *Mega Man 3* | 0.8821 / 0.8754 / 0.8765 | 0.9875 / 0.9784 / 0.9768 | 1013 / 1022 / 1024 | median 0.9784 against 1.0326: **−5.2 %** |
+
+Inside the owner's +1 %, on the fast side, and with step 4's caveat still the honest one: this tool
+drives `NesCore` **directly**, not through `EngineHandle`, so it times `zax-nes`, which this lot does
+not touch. The two negative figures are machine drift. The +1 % question was answered where the
+abstraction actually is, in step 4: a median of +0.401 % against a round-to-round spread of 1.7 %.
+
+### The end-to-end results of step 6, re-run
+
+All six `#[ignore]`d FCEUX end-to-end tests, and the parity test in both builds:
+
+| | |
+|---|---|
+| the 3D path | *Super Mario Bros.* 995 records → **252** draw tiles, 252 with a mesh; *Mega Man 3* 961 → **164** / 164; *Punch-Out!!* 988 → **189** / 189 |
+| audio | 19 200 samples waiting after 120 frames |
+| a state round trip and a rollback step | 8 snapshots in 240 frames, rollback left frame 300 |
+| Lua and the achievements on FCEUX's RAM, a Zaxnes state refused, switching back to `zaxnes` | all green |
+| `fceux-tiles` at frames 60 / 300 / 1 200 | *Super Mario Bros.* identical (969/969), identical (969/969), emulation (995/995, 137 in order, `bg.x` row 858); *Mega Man 3* identical (960/960), identical (blank), **identical (961/961)**; *Punch-Out!!* identical (blank), **identical (1 021/1 021)**, **identical (988/988)** |
+
+Every figure is step 6's, to the record — which is what the region fix had to leave alone and did.
+
+The parity line, printed by the same test compiled in both builds:
+
+    zaxnes path, fceux-core off: frames 600 cycles 17868303 records 982
+                                 machine 55644641f905f4e0 draw tiles 767 meshes 767
+    zaxnes path, fceux-core on:  frames 600 cycles 17868303 records 982
+                                 machine 55644641f905f4e0 draw tiles 767 meshes 767
+
+**Frames per second of the application's core + 3D path** on *Super Mario Bros. 3*, measured again:
+Zaxnes **346 frames/s** (2.8903 ms), FCEUX **2 200 frames/s** (0.4544 ms) — **6.4×**, against step
+6's 407 / 2 410 and 6.0×. Both columns moved the same way, so the ratio is the figure worth keeping
+and the absolute numbers are this machine on this afternoon. Step 6's two caveats stand: part of the
+margin is FCEUX not doing Zaxnes-only work, and this is the application's loop, not `bench-core`.
+
+### The application starts, both builds
+
+`cargo build --release -p zax-app --features bundled[,fceux-core]`, then the two paths that print
+and exit:
+
+| | feature off | feature on |
+|---|---|---|
+| `zaxnes --help` | exit 0, 91 lines | exit 0, 91 lines, **identical** |
+| `zaxnes --list-profiles --assets assets-neutral` | exit 0, 104 lines | exit 0, 104 lines, **identical** |
+
+Both identical between the builds, which is the right answer: the engine is a per-game *setting*,
+not a command-line flag, so neither of these two outputs should mention it.
+
+One note for whoever repeats this: `zaxnes.exe` is a Windows **GUI** binary, and redirecting its
+output with PowerShell's `>` captures **nothing** — the process attaches to the parent console
+rather than writing the inherited handle. Redirect from a POSIX shell (or read the console) instead;
+`§7` of `rust/LOCAL-CHECKS.md` asks for the redirection to work and it does, just not from that
+shell.
+
+### The disk, which stopped a run
+
+The first feature-off suite failed on
+`req_arch_012_render_records_n_and_the_real_frames_do_not_depend_on_it` with
+`Os { code: 112, kind: StorageFull }` — not a code failure. G: was at 8.8 GB free with `target-fx`
+holding 6.5 GB of it. It recovered to ~29 GB and every run above was made with that headroom.
+`target-fx` holds four scratch capture sets from this lot (`baseline`, `step4`, `step8`,
+`base-591836cc`) which are cheap, and a `debug` tree of 1.45 GB which `cargo check`/`clippy` want;
+the release tree is 5 GB. Anyone resuming on a tighter disk should delete `debug` first and keep
+using `cargo check` + `cargo test --release`, as step 2's note already says.
 
 ---
 

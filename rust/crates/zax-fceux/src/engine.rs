@@ -223,6 +223,33 @@ impl FceuxEngine {
         RomLoadFailure::UnsupportedMapper
     }
 
+    /// The region the image's own header announces (REQ-CORE-013), by the rule
+    /// `zax_nes::rom::InesHeader` applies: a **dirty** header — not NES 2.0, with something other
+    /// than zero in bytes 12 to 15, which old tools used as free text — is NTSC with bytes 7 to 15
+    /// unread (REQ-CORE-012); an NES 2.0 header carries the region in the low two bits of byte 12;
+    /// an iNES one in bit 0 of byte 9.
+    ///
+    /// Read here rather than asked of the core, because **FCEUX's region is a process global and
+    /// a plain iNES load does not touch it**: asking the core would report whatever the last game
+    /// in this process was set to. `zax-nes` reports the header's region and leaves the machine's
+    /// own alone, and this is the same answer by the same rule.
+    fn announced_region(image: &[u8]) -> NesRegion {
+        let Some(header) = image.get(..16) else {
+            return NesRegion::Ntsc;
+        };
+        let is_nes20 = (header[7] & 0x0C) == 0x08;
+        let is_dirty = !is_nes20 && (header[12] | header[13] | header[14] | header[15]) != 0;
+        if is_dirty {
+            NesRegion::Ntsc
+        } else if is_nes20 {
+            NesRegion::from_u8(header[12] & 0x03).unwrap_or(NesRegion::Ntsc)
+        } else if (header[9] & 0x01) != 0 {
+            NesRegion::Pal
+        } else {
+            NesRegion::Ntsc
+        }
+    }
+
     /// The region FCEUX runs for `region`: `Multi` is NTSC timing (REQ-CORE-015), and FCEUX has
     /// no `Multi` of its own.
     const fn core_region(region: NesRegion) -> Region {
@@ -230,15 +257,6 @@ impl FceuxEngine {
             NesRegion::Ntsc | NesRegion::Multi => Region::Ntsc,
             NesRegion::Pal => Region::Pal,
             NesRegion::Dendy => Region::Dendy,
-        }
-    }
-
-    /// The other way: what the core says it is running.
-    const fn host_region(region: Region) -> NesRegion {
-        match region {
-            Region::Ntsc => NesRegion::Ntsc,
-            Region::Pal => NesRegion::Pal,
-            Region::Dendy => NesRegion::Dendy,
         }
     }
 
@@ -373,15 +391,17 @@ impl Engine for FceuxEngine {
         }
 
         self.rom_name = Some(name.to_owned());
-        // FCEUX applies the image's own region on load, so what it reports now *is* the detected
-        // one. REQ-CORE-013 has the host choose; it does so by calling `set_region` next, and
-        // until it does the engine runs what the ROM asked for — which is what `zax-nes` also
-        // ends up doing, by a different route.
-        let detected = self
-            .fceux
-            .region()
-            .map_or(NesRegion::Ntsc, Self::host_region);
-        self.region = detected;
+        // REQ-CORE-013: the detected region is **reported, not applied** — `NesCore::load_rom`'s
+        // own contract, and the one the host relies on, since it calls `set_region` next with the
+        // player's setting (or with this answer when the TV mode is automatic).
+        //
+        // So the region is read off the image and the engine's own is re-asserted on the core
+        // rather than read back from it. FCEUX keeps its region in a process global that a plain
+        // iNES load leaves alone, so reading it back reported the *previous* game's region — a
+        // second game loaded in one process came out PAL if the first had been set to PAL, and
+        // with an automatic TV mode that is what it would then have been played at.
+        let detected = Self::announced_region(image);
+        let _ = self.fceux.set_region(Self::core_region(self.region));
 
         let log = self.fceux.take_log();
         let note = (!log.is_empty()).then(|| log.join("; "));

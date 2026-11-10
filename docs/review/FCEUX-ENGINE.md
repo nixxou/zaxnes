@@ -36,6 +36,16 @@ without a decision about that first.
 > over a `Box<dyn Engine>`. What follows is this section as it was written, with the three places
 > the outcome differs from the plan marked **[FCEUX-23]**. The working is
 > `docs/progress/FCEUX-23.md` steps 2 to 4.
+>
+> One rule of the trait that cost a defect and is worth stating for the lots that follow:
+> **`load_rom` reports the detected region, it does not apply it** (REQ-CORE-013), which is
+> `NesCore::load_rom`'s own contract. FCEUX keeps its region in a **process global that a
+> cartridge load leaves alone**, so an engine that reads the region back off the core after a load
+> reports the *previous* game's — and with the TV mode on automatic the application would then
+> have played the new game at it. `FceuxEngine` reads the region off the image's header by
+> `InesHeader`'s rule and re-asserts its own on the core. Anything else in `zax-fceux` that is
+> tempted to ask FCEUX what it is set to should assume the same about process-global state
+> (step 8).
 
 ### What the application actually uses
 
