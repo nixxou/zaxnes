@@ -18,7 +18,7 @@ is to be **fixed**, which makes this the first lot of the three to change `zax-n
 ## Steps
 
 - [x] 1. The Reset semantics in the `.bk2` reader, and the same question for `.fm2`.
-- [ ] 2. What frame 246 does, on Zaxnes.
+- [x] 2. What frame 246 does, on Zaxnes.
 - [ ] 3. What the hardware does there.
 - [ ] 4. The mapper's soft reset.
 - [ ] 5. The report.
@@ -159,3 +159,177 @@ Byte for byte EVAL-SYNC-2's figures, including the two picture digests.
 | `zax-harness` lib tests | **48**, up from 45: 3 new (1 in `movie_sync`, 2 in `ram_trace`) |
 | `movie_sync_tests`, feature off | 9 | 
 | `movie_sync_tests`, feature on, `--ignored --test-threads 1` | **8**, one of them new |
+
+---
+
+## Step 2 — what that frame does, and what it turned out to be
+
+Said first, because it is the lot's result: **`$004B` was never the divergence, and the divergence
+was not an emulation error.** `movie-sync` had been playing *Hoshi no Kirby*'s **3D widescreen
+hack** instead of the ROM the movie was recorded on, and the hack's **overclock** — extra CPU time
+each frame, which no NES gives — is what parted the run. With the patches off the first 400 frames
+agree with `BizHawk` **byte for byte in every live address**, and the lag count over the whole
+156 312 frames is **24**, exactly `BizHawk`'s.
+
+### The numbering, settled before anything was traced
+
+The reference's line *f* is the 2 KiB at the **start** of its frame *f*, which is the machine after
+*f* frames. So "the difference appears at the start of frame 247" means it was written during the
+**247th frame run**, which is `frame-trace --frame 247` and `movie-sync`'s frame 247. The brief's
+"frame 246" is the same frame in the reference's own 0-based naming. Tracing 246 first found
+nothing, which is how the convention was pinned rather than assumed.
+
+### The instrument: `zax-harness frame-trace`
+
+A new subcommand, and **entirely outside `zax-nes`** — no `cfg`, no feature, no new core API. It
+plays a movie to a chosen frame through `movie-sync`'s own machinery, then drives that one frame by
+hand with four public pieces that already existed:
+
+| what it needs | what it uses |
+|---|---|
+| the state before an instruction, disassembled | `zax_nes::cpu::CpuTracer::capture` — there for `nestest.log` (REQ-CORE-110), and it reads only through `CpuBus::peek` (REQ-CORE-081) |
+| one instruction at a time | `NesCore::cpu_and_bus_mut`, whose doc comment says "to step instructions by hand" |
+| where the frame ends | `Ppu2C02::vblank_just_started`, what `run_frame`'s own loop breaks on |
+| where the PPU is | `Ppu2C02::scanline` and `dot` |
+
+Options: `--watch <addr>` (every change of an address, with the instruction that made it and the
+preceding `--context` lines), `--out` (the whole frame, one line per instruction, with the PPU's
+scanline and dot and the NMI/IRQ handler entries marked), `--frames <n>`, and `--converge` below.
+
+**It checks itself.** The run takes the work-RAM checksum of the traced frame and of the same
+frame played the ordinary way from the same state, and prints both. Every run of this step
+reported `IDENTICAL, so tracing changed nothing`.
+
+### `--converge`: the measurement that tells a divergence from a reading artefact
+
+A reference line says what the 2 KiB held at the start of a frame; it does **not** say at which dot
+of the previous frame the reading was taken. So `--converge <reference>` compares the run's own
+2 KiB against the reference's bytes for that frame at **every instruction** of the frame (and
+`--extra` instructions past its boundary), and reports where it comes closest. If some instant of
+our frame holds the reference's bytes, the two machines ran the same frame and only wrote it down
+at different moments.
+
+The count that decides is **live bytes alone** — outside the stack page and `$0000-$001F`. The
+stack below the stack pointer is *dead*: two machines whose interrupts landed even slightly apart
+never agree on it again, so "identical to the byte" is unreachable by construction while "no live
+byte differs" is exactly the question.
+
+### What it found at frame 247, with the patches still on
+
+| | |
+|---|---|
+| the frame | 8 283 instructions, 29 780 CPU cycles, one NMI, no `$2002` read at all |
+| `$004B` | `INC $4B` at **`$E94F`**, instruction 8 264 — **19 instructions before the frame boundary** |
+| what restores it | `PLA` / `STA $4B` at **`$E6D2`-`$E6D3`**, which the frame ends before reaching |
+| the context | `$E91E: LDA $4B / CMP $67EE / BCS $E948 … $E94F: INC $4B` — a loop counter, saved and restored around a call |
+| live bytes differing at the boundary | **1** (`$004B`) |
+| live bytes differing at instruction 8 263 and for the 1 020 instants before it | **0** |
+
+So **nothing a read could have decided**: `$004B` is `01` only inside a 22-instruction window of
+one routine, and our frame boundary falls inside it while `BizHawk`'s reading was taken before it.
+The answer to "which read would have to differ" is *none* — it is where the frame ends relative to
+the program, which is the same artefact class as the stack page.
+
+That closed the question the brief asked and opened the real one: frames 244-246 had **0** live
+differences, 247 had the one explained above, **248 had 12 and 249 had 167, and from 249 onwards no
+instant of the frame agreed at all.** So the real divergence is in frame 248 or 249.
+
+### And frame 248 was not an emulation difference either
+
+Three figures of the traced frames made it obvious, and none of them is about the 6502:
+
+| frame | instructions | CPU cycles | instructions costing **no** cycle |
+|---|---|---|---|
+| 244-247 | 8 283 - 9 120 | 29 778 - 29 784 | 0 |
+| **248** | **19 280** | 29 781 | **9 689** |
+| 249, 250 | 18 886, 19 265 | 29 781 | 9 689, 9 689 |
+
+19 280 instructions cannot fit in 29 781 CPU cycles — the shortest 6502 instruction is two. The
+trace says where they came from: from instruction 9 552 the PPU stands at **scanline 240, dot 0**
+and the cycle counter does not move for 9 689 instructions, then both resume. There is exactly one
+thing in this core that does that — `WideExtension::take_stall_cycle`
+(`crates/zax-nes/src/wide.rs:731`), the **3D extension's overclock**, armed at the start of line
+240 (`ppu/mod.rs:1096`) and worth `$5006` scanlines of CPU time with the PPU, the APU and the clock
+held still.
+
+`frame-trace` now reports both, and the report named the cause in one word: **the 3D extension
+UNLOCKED**. It is unlocked because `NesCore` powers on with `builtin_patches_enabled` **true**
+(`nes_core.rs:134`), so `load_rom` hands a recognised commercial game its *widescreen patch*
+instead of the image the host passed in. `builtin_patches::KIRBY_JAPAN` is exactly that patch for
+this ROM. `test_roms` has always turned it off (`test_roms/mod.rs:482`); **`movie-sync` never
+did** — so every Zaxnes measurement of lots EVAL-SYNC and EVAL-SYNC-2 on this game was of the hack,
+not of the game.
+
+> **Class (c) — a setup difference of the instrument, and it is fixed here.**
+> `ZaxnesMachine::new` now calls `set_builtin_patches(false)` and `set_advanced_patches(false)`
+> before `load_rom`, for `movie-sync` and for `frame-trace`. `--builtin-patches` turns them back
+> on, which is how the difference above is shown rather than asserted. Nothing in `zax-nes`
+> changed.
+
+### What the fix is worth, measured
+
+*Kirby*, `--resets on`, against the per-frame reference over its whole 400 frames:
+
+| | patches **on** | patches **off** |
+|---|---|---|
+| checksum lines agreeing exactly | 89 of 400 | **190 of 400** |
+| lag counts agreeing | 400 of 400 | **400 of 400** |
+| frames with **no live difference** | 246 | **400 of 400** |
+| the first live difference | frame 247 | **there is none** |
+| the 3D extension | UNLOCKED, 9 689 free instructions a frame from 248 | **locked, 0** |
+
+And over the whole movie, against `kirby-jp.txt`:
+
+| | patches on (EVAL-SYNC-2) | patches off |
+|---|---|---|
+| frames run | 156 312 | 156 312 |
+| lag counts agreeing | all but three resets' lines | **all 1 563** |
+| input-insensitive frames | **25** | **24 — `BizHawk`'s own figure** |
+
+Frame 247 traced again with the patches off says the same thing from the inside: the extension is
+**locked**, no instruction costs no cycle, `$004B` goes `00`→`01`→`00` **inside** the frame as it
+does on `BizHawk`, **4** bytes differ in the whole 2 KiB and **0** of them are live.
+
+### What still parts, and it is much smaller than what did
+
+The movie does not sync to the end yet. The pictures, under the colour-bijection rule (this run's
+rows 8-231 against the reference's 224, every colour of one mapping to exactly one colour of the
+other):
+
+| frame | 1 000 | 10 000 | 30 000 | 60 000 | 83 000 | 156 312 |
+|---|---|---|---|---|---|---|
+| verdict | no | no | no | no | no | no |
+| pixels differing of 57 344 | **275** | 50 537 | 15 445 | 48 207 | 46 435 | 22 912 |
+
+275 pixels is not a desynchronised game: at frame 1 000 every differing pixel is inside **one
+25x17 box** at x 147-171, y 97-113 — a single object — and the background, the HUD and the score
+are identical. (Before the fix, frame 1 000 was a different screen altogether: `BizHawk` playing
+Vegetable Valley with 3 400 points against Zaxnes still on the level-intro card.)
+
+The comparison script was validated before being believed: on *Faxanadu* `[USA][!!]` it says
+**MATCH at all six frames**, with the same colour counts EVAL-SYNC-2 recorded (9, 14, 11, 13, 12,
+12). It is not committed, for the reason EVAL-SYNC-2 gives.
+
+So a second divergence remains, between frame 400 — where the finest reference stops — and frame
+1 000. Step 3 says what would locate it.
+
+### Faxanadu, to show nothing regressed
+
+| | `[USA][!!]` | `[USA][Rev 1][!!]` |
+|---|---|---|
+| checksum lines agreeing, of 832 | **207** | **220** |
+| lag counts agreeing | **832 of 832** | **832 of 832** |
+| the last agreeing line | 83 200 | 83 200 |
+| the last picture | `03d7e6a1…` | `13920624…` |
+| the six screenshots | **6 of 6 MATCH** | — |
+
+Identical to EVAL-SYNC-2's figures: this game has no built-in patch, so turning the patches off
+changes nothing about it, which is what makes it the control.
+
+### Checked
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, feature **off** and **on** | clean |
+| `zax-harness` lib tests | **50**, up from 48: 2 new in `frame_trace` |

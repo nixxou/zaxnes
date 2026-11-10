@@ -124,6 +124,9 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
       --prg-ram default|ff|zero|random:<seed>
                            the power-on contents of the **cartridge's** PRG-RAM, which is a
                            different 8 KiB from --ram's 2 KiB (`--engine zaxnes` only)
+      --builtin-patches    load a recognised commercial ROM with its 3D widescreen patch, as the
+                           application does. OFF here: a movie comparison must be of the ROM the
+                           movie was recorded on
       --warm-up zaxnes:<n> | fceux:<n>
                            blank frames on one engine before the movie starts; the experiment
                            that tells a difference of boot phase from one of emulation";
@@ -168,7 +171,9 @@ pub enum Resets {
 }
 
 impl Resets {
-    fn parse(text: &str) -> Option<Self> {
+    /// The value a command line names, or `None` when it names none of the four.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
         match text {
             "on" => Some(Self::On),
             "off" => Some(Self::Off),
@@ -202,6 +207,10 @@ pub enum Engines {
 }
 
 /// The command line of `movie-sync`.
+// A command line is a bag of flags, and six of this one's are booleans. Grouping them into a
+// struct of their own would move the names one level further from the `match` that parses them
+// and buy nothing.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct Options {
     /// The movie file.
@@ -248,6 +257,10 @@ pub struct Options {
     pub ram_ref_offset: i64,
     /// What the movie's reset column is allowed to do.
     pub resets: Resets,
+    /// Load a recognised commercial ROM with its 3D built-in patch, as the application does.
+    ///
+    /// **False by default**, unlike `NesCore`'s own power-on value: see [`ZaxnesMachine::new`].
+    pub builtin_patches: bool,
     /// Imitate the PPU's write-inhibition window after a reset. See
     /// `ZaxnesMachine::apply_ppu_warmup`.
     pub ppu_warmup: bool,
@@ -309,6 +322,7 @@ impl Default for Options {
             ram_ref: None,
             ram_ref_offset: 0,
             resets: Resets::On,
+            builtin_patches: false,
             ppu_warmup: false,
             ppu_ram: None,
             prg_ram: None,
@@ -391,6 +405,7 @@ impl Options {
                         ))
                     })?;
                 }
+                "--builtin-patches" => options.builtin_patches = true,
                 "--ppu-warmup" => options.ppu_warmup = true,
                 "--ppu-ram" => options.ppu_ram = Some(pattern(&value_at(args, &mut index))?),
                 "--prg-ram" => options.prg_ram = Some(pattern(&value_at(args, &mut index))?),
@@ -486,7 +501,7 @@ fn frame_list(text: &str) -> Result<Vec<u32>, HarnessError> {
 /// A trait rather than an enum so that the lockstep loop is written once and reads the same for
 /// both sides — which is the whole point of a comparison instrument. Nothing here is a capability
 /// one engine has and the other has not.
-trait Machine {
+pub(crate) trait Machine {
     /// `zaxnes` or `fceux`.
     fn name(&self) -> &'static str;
     /// Power-cycles and puts `ram` into the work RAM.
@@ -505,8 +520,8 @@ trait Machine {
     fn restore(&mut self) -> Result<(), String>;
 }
 
-struct ZaxnesMachine {
-    core: Box<NesCore>,
+pub(crate) struct ZaxnesMachine {
+    pub(crate) core: Box<NesCore>,
     region: NesRegion,
     state: CoreState,
     /// What the cartridge's PRG-RAM is filled with after every power-on, when `--prg-ram` asks.
@@ -520,8 +535,26 @@ struct ZaxnesMachine {
 }
 
 impl ZaxnesMachine {
-    fn new(image: &[u8], name: &str, region: NesRegion) -> Result<Self, String> {
+    /// A machine for `image`, with the **3D built-in patches off** unless `patches` asks for them.
+    ///
+    /// `NesCore` powers on with `builtin_patches_enabled` **true** (`nes_core.rs:134`), which is
+    /// right for the application and wrong for every measurement: `load_rom` then hands a
+    /// recognised commercial game its *widescreen hack* instead of the ROM the host passed in,
+    /// and the hack unlocks the 3D extension and may ask for the **overclock** — extra CPU time
+    /// each frame that no NES gives. `test_roms` has always turned both off
+    /// (`test_roms/mod.rs:482`); `movie-sync` did not, and lot EVAL-SYNC-3 step 2 is where that
+    /// cost a measurement: *Hoshi no Kirby* has a built-in patch, and its overclock is what parts
+    /// the `.bk2` from `BizHawk`. `--builtin-patches` turns them back on, which is how the
+    /// difference is shown rather than asserted.
+    pub(crate) fn new(
+        image: &[u8],
+        name: &str,
+        region: NesRegion,
+        patches: bool,
+    ) -> Result<Self, String> {
         let mut core = Box::new(NesCore::new());
+        core.set_builtin_patches(patches);
+        core.set_advanced_patches(false);
         if !core.load_rom(image, name).success {
             return Err("Zaxnes refused the image".to_owned());
         }
@@ -1603,8 +1636,8 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
     match options.engine {
         Engines::Both => run_lockstep(options, &movie, &machines, &mut measurement)?,
         Engines::Zaxnes => {
-            let mut machine =
-                ZaxnesMachine::new(&image, &name, region).map_err(HarnessError::Rom)?;
+            let mut machine = ZaxnesMachine::new(&image, &name, region, options.builtin_patches)
+                .map_err(HarnessError::Rom)?;
             if let Some(pattern) = options.prg_ram {
                 machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
             }
@@ -1696,7 +1729,7 @@ struct Machines<'a> {
 ///
 /// The input words are left exactly where they are: only the command column moves, so the machine
 /// is still fed the movie's own inputs and the only thing under test is the reset.
-fn relocate_resets(mut movie: MovieFile, resets: Resets) -> MovieFile {
+pub(crate) fn relocate_resets(mut movie: MovieFile, resets: Resets) -> MovieFile {
     // What the file itself asks for: 0 when its column means "before this frame", 1 when it means
     // "after it".
     let native = i64::from(movie.reset_after_frame);
@@ -1751,7 +1784,7 @@ fn relocate_resets(mut movie: MovieFile, resets: Resets) -> MovieFile {
 }
 
 /// Reads the movie by its extension.
-fn read_movie(
+pub(crate) fn read_movie(
     path: &Path,
     bytes: &[u8],
     rom_is_cartridge: bool,
@@ -1890,8 +1923,13 @@ fn run_lockstep(
     measurement: &mut Measurement,
 ) -> Result<(), HarnessError> {
     let ram = machines.ram;
-    let mut ours = ZaxnesMachine::new(machines.image, machines.name, machines.region)
-        .map_err(HarnessError::Rom)?;
+    let mut ours = ZaxnesMachine::new(
+        machines.image,
+        machines.name,
+        machines.region,
+        options.builtin_patches,
+    )
+    .map_err(HarnessError::Rom)?;
     let mut theirs = FceuxMachine::new(machines.image, machines.name, machines.region)
         .map_err(HarnessError::Rom)?;
     ours.power(ram).map_err(HarnessError::Rom)?;

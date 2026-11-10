@@ -18,6 +18,7 @@ pub mod fceux_compare;
 pub mod fceux_run;
 #[cfg(feature = "fceux-core")]
 pub mod fceux_tiles;
+pub mod frame_trace;
 pub mod golden_core;
 mod json_text;
 pub mod lua_api;
