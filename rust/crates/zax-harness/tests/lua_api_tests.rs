@@ -25,7 +25,10 @@ fn the_api_dump_is_identical_to_the_golden() {
     assert_eq!(
         message
             .as_deref()
-            .map(|text| text.starts_with("wrote 513 lines")),
+            // 513 before AMD-063, which adds `Instance.IsSolidTile` (REQ-LUA-121) and
+            // `Pattern.HasPlaceholders` (REQ-LUA-120); `RotOverride` and `Info.Version` live on
+            // the `CS` table, which this dump does not cover.
+            .map(|text| text.starts_with("wrote 515 lines")),
         Some(true)
     );
     assert_eq!(

@@ -133,6 +133,7 @@ member Instance.GetOriginalPos appel - Vector3
 member Instance.GetPos appel - Vector3
 member Instance.GetPosWoLayer appel - Vector3
 member Instance.Index prop L 
+member Instance.IsSolidTile appel - 
 member Instance.IsStatic prop LE 
 member Instance.LAxis prop LE 
 member Instance.Layer prop LE 
@@ -248,6 +249,7 @@ member Pattern.BL prop L Vector2
 member Pattern.BottomLeft prop L Vector2
 member Pattern.CSize prop LE IntVector2
 member Pattern.Disable prop LE 
+member Pattern.HasPlaceholders prop L 
 member Pattern.SelfConnected prop LE 
 member Pattern.Size prop L Vector2
 member Pattern.SkipGeo prop LE 
@@ -510,4 +512,4 @@ member XRState.acc prop LE Vector3
 member XRState.pos prop LE Vector3
 member XRState.rot prop LE Vector3
 member XRState.vel prop LE Vector3
-# 35 globals, 46 types, 446 members
+# 35 globals, 46 types, 448 members

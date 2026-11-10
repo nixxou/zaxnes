@@ -18,6 +18,30 @@ fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../goldens/render-synthetic")
 }
 
+/// The triangles `alpha` draws once AMD-063 REQ-SCN-087 has taken its inner walls away.
+///
+/// `alpha` is a 4 × 4 block of **full** transparent tiles, so the requirement removes every
+/// lateral face that falls on a joint between two of them: the C# capture's 2 208 triangles
+/// become **1 904**, −304. It is the only scene of this golden set whose geometry the amendment
+/// moves — the six before it and the four after hold no transparent full tile, and their
+/// triangle counts are unchanged.
+const ALPHA_TRIANGLES: u32 = 1904;
+
+/// The mesh variants the removal builds for `alpha`: a corner, an edge and an inner tile each
+/// need their own version of the mesh the sixteen tiles share, and they are **memoised** so that
+/// a variant keeps its identity from frame to frame (which is what lets the renderer keep its
+/// vertex buffers, REQ-E3D-602).
+///
+/// Memoised means resident: the eight stay in the renderer for the rest of the run, so every
+/// scene **from `alpha` on** reports eight more `resident_meshes` than the C# capture did —
+/// `alpha` 12 → 20, `hud` 13 → 21, and so on. The scenes before it are untouched.
+const REQ_SCN_087_VARIANTS: u32 = 8;
+
+/// Index of `triangles` in [`counts`].
+const TRIANGLES: usize = 7;
+/// Index of `resident_meshes` in [`counts`].
+const RESIDENT_MESHES: usize = 8;
+
 /// The counts that do not depend on the rasteriser.
 fn counts(scene: &RenderScene) -> [u32; 13] {
     [
@@ -65,10 +89,25 @@ fn synthetic_captures_match_the_csharp_goldens() {
     assert_eq!(expected.len(), actual.len());
 
     let mut failures = Vec::new();
+    // Set once `alpha` has been drawn: its mesh variants stay resident from then on.
+    let mut alpha_seen = false;
     for (golden, mine) in expected.iter().zip(&actual) {
         assert_eq!(golden.scene, mine.scene);
         assert_eq!(golden.description, mine.description);
-        assert_eq!(counts(golden), counts(mine), "counts of '{}'", golden.scene);
+
+        // The golden is **not** regenerated for AMD-063: it is the C# harness's own capture, kept
+        // as an independent reference of the state it was made in (see the note above), so what
+        // REQ-SCN-087 changes is stated as a correction to it and asserted exactly — a *further*
+        // change to the removal still fails this test.
+        let mut expected = counts(golden);
+        if golden.scene == "alpha" {
+            expected[TRIANGLES] = ALPHA_TRIANGLES;
+        }
+        if golden.scene == "alpha" || alpha_seen {
+            expected[RESIDENT_MESHES] += REQ_SCN_087_VARIANTS;
+        }
+        assert_eq!(expected, counts(mine), "counts of '{}'", golden.scene);
+        alpha_seen |= golden.scene == "alpha";
 
         let file = format!("{}.png", golden.scene);
         let reference = png_image::load(&goldens().join(&file)).unwrap();

@@ -228,7 +228,9 @@ mod tests {
     #[test]
     fn loads_lua_api() {
         let api = read_lua_api(&goldens_dir().join("lua-api.txt")).unwrap();
-        assert_eq!(api.lines.len(), 512);
+        // 512 before AMD-063, which adds `Instance.IsSolidTile` (REQ-LUA-121) and
+        // `Pattern.HasPlaceholders` (REQ-LUA-120).
+        assert_eq!(api.lines.len(), 514);
         assert_eq!(api.lines.iter().filter(|l| l.kind == "global").count(), 35);
     }
 }
