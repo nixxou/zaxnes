@@ -1036,6 +1036,20 @@ impl Cartridge {
         }
     }
 
+    /// The cartridge's CHR-RAM, read only, addressed linearly from 0 in the order of the
+    /// cartridge's memory and whatever banks the PPU currently sees; empty when the cartridge
+    /// has none (AMD-062 REQ-CORE-123).
+    ///
+    /// This is a plain borrow of the buffer the boards write through, so reading it has no
+    /// effect on the emulation or on its determinism: nothing is latched, no bank is switched
+    /// and no cycle is spent. It is what the tile resolution of AMD-062 REQ-PROF-080 confronts
+    /// with a "3dh" profile's manifest between two frames, for the games that build their tiles
+    /// in CHR-RAM instead of carrying them in CHR-ROM.
+    #[must_use]
+    pub fn chr_ram(&self) -> &[u8] {
+        self.memory.chr_ram()
+    }
+
     /// Reads a byte the cartridge drives on the CPU bus, in $4020-$FFFF; `None` when it does
     /// not drive the bus there and the caller keeps the open-bus value (REQ-CORE-081).
     /// A CPU read of $8000-$FFFF that is a plain PRG-ROM read, without asking the board; `None`

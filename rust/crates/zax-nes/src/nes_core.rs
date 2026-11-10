@@ -1630,6 +1630,18 @@ impl NesCore {
         self.bus.cartridge_mut()
     }
 
+    /// The cartridge's CHR-RAM, read only, addressed linearly from 0 in the order of the
+    /// cartridge's memory (AMD-062 REQ-CORE-123). Its length is the size the requirement asks
+    /// for: zero for a cartridge with CHR-ROM, and zero when no ROM is loaded.
+    ///
+    /// Meant to be read between two frames. It is a borrow of the buffer the boards write
+    /// through, so a host that reads it every frame and one that never reads it run the same
+    /// emulation: nothing is latched and no bank is switched.
+    #[must_use]
+    pub fn chr_ram(&self) -> &[u8] {
+        self.cartridge().map_or(&[], Cartridge::chr_ram)
+    }
+
     // ---------------------------------------------------------------- savestates
 
     /// The savestate format version, as a host writes it in the metadata header of a
