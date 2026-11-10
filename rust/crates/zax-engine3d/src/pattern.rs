@@ -4,6 +4,8 @@ use crate::hashing::FastSet;
 use std::borrow::Borrow;
 use std::fmt;
 
+use zax_profiles::hash::default_texture::PatternTextures;
+use zax_profiles::hash::tiles;
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::tile::PatternGrid;
 
@@ -133,6 +135,12 @@ pub struct EnginePattern {
     pub stored_tile_density: i32,
     /// Stored pixel density of the profile, kept as read (REQ-E3D-341).
     pub stored_pixel_density: i32,
+    /// True while a cell of the pattern holds a tile of a "3dh" profile still waiting for its
+    /// sixteen bytes (AMD-062 REQ-PROF-081): the cell has no image, so it draws nothing and
+    /// recognises nothing, and every instance is built with the `Default` geometry and without
+    /// `fullWarp` until the last tile is resolved. Always false for a 3dn profile and for a
+    /// pattern learned while playing.
+    has_placeholders: bool,
 }
 
 impl EnginePattern {
@@ -177,10 +185,35 @@ impl EnginePattern {
             stored_color_flags: 0,
             stored_tile_density: 0,
             stored_pixel_density: 0,
+            has_placeholders: false,
         };
         pattern.build_relations();
         pattern.build_pixel_box();
         pattern
+    }
+
+    /// Replaces the grid of images, keeping the pattern, its instances and its place in the
+    /// registry. This is what the resolution of a waiting tile needs: a cell that was waiting now
+    /// holds an image, so `Img(P)`, the adjacency relations, the pixel box and the registry key
+    /// all change (AMD-062 REQ-PROF-080). The registry re-keys the pattern around this call.
+    fn reload(&mut self, cells: Vec<Option<TileImage>>) {
+        let count = usize::try_from(self.width.max(0) * self.height.max(0)).unwrap_or(0);
+        self.cells = cells;
+        self.cells.truncate(count);
+        self.cells.resize(count, None);
+
+        self.images.clear();
+        for cell in self.cells.iter().flatten() {
+            if !self.images.contains(cell) {
+                self.images.push(*cell);
+            }
+        }
+
+        self.key = ImageSetKey::new(&self.images);
+        self.horizontal.clear();
+        self.vertical.clear();
+        self.build_relations();
+        self.build_pixel_box();
     }
 
     /// Grid width in cells (`W`).
@@ -376,21 +409,7 @@ impl EnginePattern {
         let grid_width = u16::try_from(width).map_err(|_| size_error())?;
         let grid_height = u16::try_from(height).map_err(|_| size_error())?;
 
-        let mut cells = Vec::with_capacity(usize::from(grid_width) * usize::from(grid_height));
-        for j in 0..height {
-            for i in 0..width {
-                let tile = grid.and_then(|grid| grid.get(i, j));
-                cells.push(tile.map(|tile| {
-                    images.intern(TileImageKey::new(
-                        tile.low_plane,
-                        tile.high_plane,
-                        tile.flip_x(),
-                        tile.flip_y(),
-                    ))
-                }));
-            }
-        }
-
+        let cells = intern_cells(grid, images, width, height);
         let mut result = Self::new(grid_width, grid_height, cells, permanent);
         result.skip_geometry = pattern.skip_geometry;
         result.constraint_size = Cell::new(pattern.constraint_size.x, pattern.constraint_size.y);
@@ -400,11 +419,47 @@ impl EnginePattern {
         result.stored_pixel_density = pattern.pixel_density.raw();
         result.set_self_connected(pattern.self_connected);
 
+        let textures = PatternTextures::of(pattern);
+        result.has_placeholders = tiles::has_waiting_tile(pattern);
         for variant in &pattern.variants {
-            result.add_instance(PatternInstance::from_variant(variant));
+            result.add_instance(PatternInstance::from_variant(
+                variant,
+                &textures,
+                result.has_placeholders,
+            ));
         }
 
         Ok(result)
+    }
+
+    /// True while a cell holds a tile of a "3dh" profile still waiting for its sixteen bytes
+    /// (AMD-062 REQ-PROF-081, SPEC-05 REQ-LUA-120).
+    #[must_use]
+    pub const fn has_placeholders(&self) -> bool {
+        self.has_placeholders
+    }
+
+    /// Takes the grid and the 3D parameters of `pattern` again, after a resolution has filled one
+    /// of its waiting tiles (AMD-062 REQ-PROF-080, REQ-PROF-081): the cell that was waiting now
+    /// holds an image, and every instance gets its own geometry, its `fullWarp` and its texture
+    /// back — the texture of a variant of `textureKind = 2` is the exclusive-or of field 24 with
+    /// the pattern's default texture, so it changes with the tiles (REQ-PROF-083).
+    ///
+    /// The instances are kept, not rebuilt, so the handles the script layer caches on them and
+    /// everything a script has set stay valid.
+    pub(crate) fn reload_from_profile(
+        &mut self,
+        pattern: &ProfilePattern,
+        images: &mut ImageRegistry,
+    ) {
+        let cells = intern_cells(pattern.grid.as_ref(), images, self.width, self.height);
+        self.reload(cells);
+
+        let textures = PatternTextures::of(pattern);
+        self.has_placeholders = tiles::has_waiting_tile(pattern);
+        for (instance, variant) in self.instances.iter_mut().zip(&pattern.variants) {
+            instance.apply_variant_geometry(variant, &textures, self.has_placeholders);
+        }
     }
 
     /// Sets `selfConnected` and rebuilds the adjacency relations, which depend on it
@@ -480,6 +535,37 @@ impl fmt::Display for EnginePattern {
             self.key.count()
         )
     }
+}
+
+/// The images of the cells of a profile pattern's grid, row by row.
+///
+/// A cell whose tile is still waiting for its sixteen bytes interns no image at all, so it draws
+/// nothing and takes part in no recognition until the tile is resolved (AMD-062 REQ-PROF-081).
+fn intern_cells(
+    grid: Option<&PatternGrid>,
+    images: &mut ImageRegistry,
+    width: i32,
+    height: i32,
+) -> Vec<Option<TileImage>> {
+    let count = usize::try_from(width.max(0) * height.max(0)).unwrap_or(0);
+    let mut cells = Vec::with_capacity(count);
+    for j in 0..height {
+        for i in 0..width {
+            let tile = grid
+                .and_then(|grid| grid.get(i, j))
+                .filter(|tile| !tile.is_waiting());
+            cells.push(tile.map(|tile| {
+                images.intern(TileImageKey::new(
+                    tile.low_plane,
+                    tile.high_plane,
+                    tile.flip_x(),
+                    tile.flip_y(),
+                ))
+            }));
+        }
+    }
+
+    cells
 }
 
 const fn pair(a: u32, b: u32) -> u64 {

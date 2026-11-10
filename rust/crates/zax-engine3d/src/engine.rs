@@ -4,9 +4,12 @@
 //! recognised shapes and instances, ready for the geometry of SPEC-04B.
 
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use zax_nes::{FrameBatch, TileRecord};
+use zax_profiles::hash::tiles::TileResolver;
+use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::values::Vec4F;
 
@@ -17,6 +20,7 @@ use crate::geometry::builder::{
     GeometryBuilder, NullPatternGeometryBuilder, PatternGeometryBuilder,
 };
 use crate::grid;
+use crate::hash_tiles::HashProfileTiles;
 use crate::image::{ImageRegistry, TileImageKey};
 use crate::instance::InstanceRef;
 use crate::palette::Rgb24;
@@ -77,6 +81,10 @@ pub struct ConversionEngine {
     draw_list_builder: DrawListBuilder,
     /// How long the frame hooks of the last conversion took, when they are timed.
     hook_time: Option<Duration>,
+    /// The tiles a loaded "3dh" profile is still waiting for; none for a 3dn profile
+    /// (AMD-062 REQ-PROF-080). Session knowledge: neither the savestates nor the rollback
+    /// snapshots carry it.
+    hash_tiles: Option<HashProfileTiles>,
 }
 
 impl Default for ConversionEngine {
@@ -140,6 +148,7 @@ impl ConversionEngine {
             segmenter: Segmenter::default(),
             draw_list_builder: DrawListBuilder::new(),
             hook_time: None,
+            hash_tiles: None,
         }
     }
 
@@ -282,6 +291,31 @@ impl ConversionEngine {
         profile: &GameProfile,
         apply_settings: bool,
     ) -> Result<(), EngineError> {
+        self.load_profile_with_tiles(profile, apply_settings, None)
+    }
+
+    /// Loads a profile whose tiles may still be waiting for their sixteen bytes, which is what a
+    /// "3dh" profile carries (AMD-062 REQ-PROF-080).
+    ///
+    /// `tiles` is the resolver of the loaded profile: which manifest strings already have their
+    /// bytes. The cache of REQ-PROF-082 and the walk through the ROM of REQ-PROF-078 are the
+    /// host's business and must have happened **before** this call, so that the patterns are
+    /// built from what the ROM gave. Pass `None` for a 3dn profile, which waits for nothing.
+    ///
+    /// From here on, every call of [`ConversionEngine::convert`] confronts the tiles of the frame
+    /// with the strings still waiting, and [`ConversionEngine::offer_chr_ram`] does the same with
+    /// the cartridge's CHR-RAM; a tile resolved that way takes part in the recognition of the
+    /// very frame that resolved it.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::PatternSize`] when a pattern of the profile declares an invalid grid.
+    pub fn load_profile_with_tiles(
+        &mut self,
+        profile: &GameProfile,
+        apply_settings: bool,
+        tiles: Option<TileResolver>,
+    ) -> Result<(), EngineError> {
         let state = &mut self.state;
         state.patterns.clear(&mut state.images);
         state.images.clear();
@@ -291,10 +325,51 @@ impl ConversionEngine {
             state.settings.apply_profile(profile.settings.as_ref());
         }
 
-        let loaded = state.patterns.load_profile(profile, &mut state.images);
+        self.hash_tiles = tiles.map(|resolver| HashProfileTiles::new(resolver, profile));
+        let mut registered = Vec::new();
+        let state = &mut self.state;
+        let loaded = state
+            .patterns
+            .load_profile(profile, &mut state.images, &mut registered);
+        if let Some(tiles) = self.hash_tiles.as_mut() {
+            tiles.bind(registered);
+        }
+
+        let state = &mut self.state;
         state.profile_image_count = state.images.count();
         self.rebuild_all_geometry();
         loaded
+    }
+
+    /// The tiles a loaded "3dh" profile is still waiting for, or none for a 3dn profile
+    /// (AMD-062 REQ-PROF-080). The host writes the cache of REQ-PROF-082 from it.
+    #[must_use]
+    pub const fn hash_tiles(&self) -> Option<&HashProfileTiles> {
+        self.hash_tiles.as_ref()
+    }
+
+    /// Confronts every aligned sixteen-byte block of the cartridge's CHR-RAM (SPEC-02
+    /// REQ-CORE-123) with the strings a "3dh" profile is still waiting for, and rebuilds
+    /// synchronously what that resolved (AMD-062 REQ-PROF-080). Returns how many strings it
+    /// resolved; 0 for a 3dn profile, for a cartridge without CHR-RAM, and once nothing waits.
+    ///
+    /// A host with a running core calls it on each **displayed** frame, right before
+    /// [`ConversionEngine::convert`], so that a tile the game has just written takes part in the
+    /// recognition of that frame.
+    pub fn offer_chr_ram(&mut self, chr_ram: &[u8]) -> usize {
+        let Some(tiles) = self.hash_tiles.as_mut() else {
+            return 0;
+        };
+        if !tiles.is_waiting() {
+            return 0;
+        }
+
+        let resolved = tiles.offer_chr_ram(chr_ram);
+        if resolved > 0 {
+            self.rebuild_resolved_patterns();
+        }
+
+        resolved
     }
 
     /// The list of tiles to draw for the published frame, or for the frame being converted
@@ -372,6 +447,9 @@ impl ConversionEngine {
         state.images.clear();
         state.profile_image_count = 0;
         state.clear_frames();
+        // A change of game drops the tiles a "3dh" profile was waiting for with the profile
+        // itself; what the session resolved is kept by the cache of REQ-PROF-082, not here.
+        self.hash_tiles = None;
     }
 
     /// Rebuilds the geometry of one pattern, hooks included. Used when a savestate's learned
@@ -403,6 +481,12 @@ impl ConversionEngine {
     /// [`ConversionEngine::publish`] to hand it over. `frame_counter` is the number of emulated
     /// frames since the game started (REQ-E3D-043).
     pub fn convert(&mut self, batch: &FrameBatch<'_>, frame_counter: i32) -> &ConversionFrame {
+        // AMD-062 REQ-PROF-080: before the recognition, the tiles of the frame are confronted
+        // with the strings a "3dh" profile is still waiting for, and what that resolves is
+        // rebuilt at once — so a tile resolved here is recognised in this very frame and its
+        // pattern is drawn with its own geometry and its own texture from this frame on.
+        self.resolve_from_frame_tiles(batch.records);
+
         let state = &mut self.state;
         let index = state.acquire_frame();
         state.converting = index;
@@ -482,6 +566,65 @@ impl ConversionEngine {
             if result.is_err() {
                 state.converting_frame_mut().count_script_error();
             }
+        }
+    }
+
+    /// The tiles of the frame confronted with the strings a "3dh" profile is still waiting for
+    /// (AMD-062 REQ-PROF-080). Nothing at all happens for a 3dn profile, and nothing once every
+    /// cell of the profile has its tile.
+    fn resolve_from_frame_tiles(&mut self, records: &[TileRecord]) {
+        let Some(tiles) = self.hash_tiles.as_mut() else {
+            return;
+        };
+        if !tiles.is_waiting() {
+            return;
+        }
+
+        if tiles.offer_frame_tiles(records) > 0 {
+            self.rebuild_resolved_patterns();
+        }
+    }
+
+    /// Rebuilds what the last resolution changed: the patterns that held a waiting tile, their
+    /// variants and their textures (AMD-062 REQ-PROF-080, REQ-PROF-081, REQ-PROF-083).
+    fn rebuild_resolved_patterns(&mut self) {
+        let Some(tiles) = self.hash_tiles.as_mut() else {
+            return;
+        };
+
+        let changed = tiles.rebuild_changed().to_vec();
+        self.refresh_patterns(&changed);
+    }
+
+    /// Takes again every pattern an in-game resolution has rebuilt (AMD-062 REQ-PROF-080).
+    ///
+    /// A state load drops the images met while playing and re-interns the ones the state
+    /// recorded; the image a resolved cell gained is not among them, since the resolved set is
+    /// session knowledge no savestate carries. The tiles stay resolved — the rule is monotone —
+    /// so their patterns intern their images again here, after the restore.
+    pub(crate) fn refresh_resolved_patterns(&mut self) {
+        let Some(tiles) = self.hash_tiles.as_ref() else {
+            return;
+        };
+
+        let resolved = tiles.resolved_patterns();
+        self.refresh_patterns(&resolved);
+    }
+
+    /// Rebuilds each registry pattern from the profile pattern a resolution has filled, and its
+    /// geometry with it, before the frame being converted is recognised.
+    fn refresh_patterns(&mut self, changed: &[(PatternId, Arc<ProfilePattern>)]) {
+        for (id, pattern) in changed {
+            let state = &mut self.state;
+            if !state.patterns.refresh(*id, pattern, &mut state.images) {
+                continue;
+            }
+
+            if let Some(registered) = state.patterns.get(*id) {
+                self.geometry.release(*id, registered);
+            }
+
+            self.rebuild_geometry_of(*id);
         }
     }
 

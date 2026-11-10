@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use zax_profiles::enums::VariantRenderStyle;
+use zax_profiles::hash::default_texture::PatternTextures;
 use zax_profiles::tags;
 use zax_profiles::values::{Mat4F, Vec3F};
 use zax_profiles::variant::{PatternVariant, VariantTexture};
@@ -352,15 +353,25 @@ impl PatternInstance {
 
     /// Reads the 3D parameters of a profile's 3D variant (SPEC-03 §4.4), applying the
     /// defaults of REQ-PROF-034 for the sub-messages a file leaves out.
+    ///
+    /// `textures` gives the texture the variant uses, which for a "3dh" profile is derived from
+    /// `textureKind` and field 24 rather than stored (AMD-062 REQ-PROF-083).
+    /// `pattern_has_placeholders` says that a tile of the pattern is still waiting for its
+    /// sixteen bytes (REQ-PROF-081): the instance is then built with the `Default` geometry and
+    /// without `fullWarp`, over the resolved cells only, until the last tile is resolved.
     #[must_use]
-    pub fn from_variant(variant: &PatternVariant) -> Self {
+    pub fn from_variant(
+        variant: &PatternVariant,
+        textures: &PatternTextures<'_>,
+        pattern_has_placeholders: bool,
+    ) -> Self {
         let mut instance = Self {
             depth: variant.depth,
-            geometry: Geo3DType::from_profile(variant.geometry),
+            geometry: geometry_of(variant, pattern_has_placeholders),
             anti_shadow: variant.anti_shadow,
             flip: variant.flip,
             solid: variant.solid,
-            full_warp: variant.full_warp,
+            full_warp: !pattern_has_placeholders && variant.full_warp,
             layer: ZLayer::from_profile(variant.layer),
             scale: to_vec3(variant.scale, Vec3::ONE),
             rotation: to_vec3(variant.rotation, Vec3::ZERO),
@@ -372,11 +383,7 @@ impl PatternInstance {
             deform_pivot: to_vec3(variant.deform_pivot, Vec3::HALF),
             style: RenderStyle::from_profile(variant.render_style),
             empty_color: variant.empty_color(),
-            texture: variant
-                .texture
-                .as_ref()
-                .filter(|texture| !texture.is_null_marker())
-                .map(|texture| Arc::new(texture.clone())),
+            texture: texture_of(variant, textures),
             ..Self::default()
         };
 
@@ -393,6 +400,44 @@ impl PatternInstance {
         instance.set_tag_string(variant.tag_string.as_deref().unwrap_or_default());
         instance
     }
+
+    /// Puts back what the waiting state of AMD-062 REQ-PROF-081 held back: the two parameters it
+    /// overrode, and the variant's texture, which a resolution changes when `textureKind` is 2
+    /// (REQ-PROF-083). Nothing a script may have set is touched — a script chooses which
+    /// instance supplies a texture ([`PatternInstance::texture_source`]), never the texels.
+    pub(crate) fn apply_variant_geometry(
+        &mut self,
+        variant: &PatternVariant,
+        textures: &PatternTextures<'_>,
+        pattern_has_placeholders: bool,
+    ) {
+        self.geometry = geometry_of(variant, pattern_has_placeholders);
+        self.full_warp = !pattern_has_placeholders && variant.full_warp;
+        self.texture = texture_of(variant, textures);
+    }
+}
+
+/// The geometry an instance takes from its variant: `Default` while a tile of the pattern is
+/// waiting, since the variant's own geometry needs every cell (AMD-062 REQ-PROF-081).
+fn geometry_of(variant: &PatternVariant, pattern_has_placeholders: bool) -> Geo3DType {
+    if pattern_has_placeholders {
+        Geo3DType::Default
+    } else {
+        Geo3DType::from_profile(variant.geometry)
+    }
+}
+
+/// The texture an instance takes from its variant: the explicit one, or none when the variant
+/// uses the pattern's own image — which the null marker of SPEC-03 REQ-PROF-035 stands for, and
+/// which is what a "3dh" variant of `textureKind = 1` derives to (AMD-062 REQ-PROF-083).
+fn texture_of(
+    variant: &PatternVariant,
+    textures: &PatternTextures<'_>,
+) -> Option<Arc<VariantTexture>> {
+    textures
+        .texture_of(variant)
+        .filter(|texture| !texture.is_null_marker())
+        .map(|texture| Arc::new(texture.into_owned()))
 }
 
 fn to_vec3(value: Option<Vec3F>, fallback: Vec3) -> Vec3 {

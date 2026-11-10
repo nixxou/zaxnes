@@ -160,6 +160,11 @@ pub fn read(engine: &mut ConversionEngine, block: &[u8]) -> Result<(), EngineErr
         .tracker_mut()
         .restore(running, sprites, position, included, excluded);
 
+    // AMD-062 REQ-PROF-080: a tile a "3dh" profile resolved while the game ran never goes back
+    // to waiting, a state load included. The images those cells gained were interned after the
+    // profile's, so the restore above dropped them: their patterns take them again here.
+    engine.refresh_resolved_patterns();
+
     for id in restored {
         engine.rebuild_geometry_of(id);
     }

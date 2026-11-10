@@ -220,6 +220,69 @@ pub fn recomputes(key: &str, raw: &RawTile) -> bool {
     false
 }
 
+/// True when at least one cell of `pattern` holds a tile still waiting for its planes
+/// (REQ-PROF-081): the cell draws nothing, takes part in no recognition, and the variants of the
+/// pattern are built with the `Default` geometry until the last tile is resolved.
+#[must_use]
+pub fn has_waiting_tile(pattern: &ProfilePattern) -> bool {
+    pattern
+        .grid
+        .as_ref()
+        .is_some_and(|grid| grid.cells().iter().flatten().any(|tile| tile.is_waiting()))
+}
+
+/// The manifest strings the tiles of `pattern` are still waiting for, one entry per waiting cell
+/// (REQ-PROF-081). The same string may come out twice, once per cell that names it.
+pub fn waiting_keys_of(pattern: &ProfilePattern) -> impl Iterator<Item = &str> {
+    pattern.grid.as_ref().into_iter().flat_map(|grid| {
+        grid.cells()
+            .iter()
+            .flatten()
+            .filter(|tile| tile.is_waiting())
+            .filter_map(|tile| tile.hash_key())
+    })
+}
+
+/// The grid of a pattern with every waiting tile `resolver` can now fill turned into an ordinary
+/// tile, or none when the resolver fills none of them.
+///
+/// One new [`Arc`] per distinct old one, so two cells that shared a waiting tile still share the
+/// resolved one.
+#[must_use]
+pub fn resolved_grid(grid: &PatternGrid, resolver: &TileResolver) -> Option<PatternGrid> {
+    let mut rebuilt: HashMap<*const ProfileTile, Arc<ProfileTile>> = HashMap::new();
+    for tile in grid.cells().iter().flatten() {
+        let Some(raw) = tile
+            .hash_key()
+            .filter(|_| tile.is_waiting())
+            .and_then(|key| resolver.bytes_of(key))
+        else {
+            continue;
+        };
+        let (low, high) = raw_tile::to_planes(raw);
+        rebuilt
+            .entry(Arc::as_ptr(tile))
+            .or_insert_with(|| Arc::new(tile.with_planes(low, high)));
+    }
+
+    if rebuilt.is_empty() {
+        return None;
+    }
+
+    let cells = grid
+        .cells()
+        .iter()
+        .map(|cell| {
+            cell.as_ref().map(|tile| {
+                rebuilt
+                    .get(&Arc::as_ptr(tile))
+                    .map_or_else(|| Arc::clone(tile), Arc::clone)
+            })
+        })
+        .collect();
+    Some(PatternGrid::new(grid.width(), grid.height(), cells))
+}
+
 /// Rebuilds the patterns of `profile` whose waiting tiles `resolver` can now fill, and returns
 /// how many tile objects that turned into ordinary tiles.
 ///
@@ -303,39 +366,11 @@ pub fn apply(profile: &mut GameProfile, resolver: &TileResolver) -> usize {
 
 /// Substitutes the resolved tiles of a pattern held by value.
 fn substitute_in_place(pattern: &mut ProfilePattern, resolver: &TileResolver) {
-    let Some(grid) = pattern.grid.as_ref() else {
-        return;
-    };
-
-    let mut rebuilt: HashMap<*const ProfileTile, Arc<ProfileTile>> = HashMap::new();
-    for tile in grid.cells().iter().flatten() {
-        let Some(raw) = tile
-            .hash_key()
-            .filter(|_| tile.is_waiting())
-            .and_then(|key| resolver.bytes_of(key))
-        else {
-            continue;
-        };
-        let (low, high) = raw_tile::to_planes(raw);
-        rebuilt
-            .entry(Arc::as_ptr(tile))
-            .or_insert_with(|| Arc::new(tile.with_planes(low, high)));
+    if let Some(grid) = pattern
+        .grid
+        .as_ref()
+        .and_then(|grid| resolved_grid(grid, resolver))
+    {
+        pattern.grid = Some(grid);
     }
-
-    if rebuilt.is_empty() {
-        return;
-    }
-
-    let cells = grid
-        .cells()
-        .iter()
-        .map(|cell| {
-            cell.as_ref().map(|tile| {
-                rebuilt
-                    .get(&Arc::as_ptr(tile))
-                    .map_or_else(|| Arc::clone(tile), Arc::clone)
-            })
-        })
-        .collect();
-    pattern.grid = Some(PatternGrid::new(grid.width(), grid.height(), cells));
 }

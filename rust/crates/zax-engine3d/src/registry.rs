@@ -5,6 +5,7 @@
 
 use crate::hashing::FastMap;
 
+use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 
 use crate::error::EngineError;
@@ -128,6 +129,10 @@ impl PatternRegistry {
     /// Registers the patterns of a profile: every permanent one in file order, then every
     /// temporary one in file order (REQ-E3D-060).
     ///
+    /// `registered` receives the handle of each pattern in that same order, which is what the
+    /// in-game tile resolution of a "3dh" profile needs to find again the registry pattern a
+    /// pattern of the profile produced (AMD-062 REQ-PROF-080).
+    ///
     /// # Errors
     ///
     /// [`EngineError::PatternSize`] when a pattern declares an invalid grid; the patterns
@@ -136,17 +141,73 @@ impl PatternRegistry {
         &mut self,
         profile: &GameProfile,
         images: &mut ImageRegistry,
+        registered: &mut Vec<PatternId>,
     ) -> Result<(), EngineError> {
-        for pattern in &profile.permanent_patterns {
-            self.register(EnginePattern::from_profile(pattern, images, true)?, images);
-        }
-
-        for pattern in &profile.temporary_patterns {
-            self.register(EnginePattern::from_profile(pattern, images, false)?, images);
+        registered.clear();
+        registered.reserve(profile.permanent_patterns.len() + profile.temporary_patterns.len());
+        for (patterns, permanent) in [
+            (&profile.permanent_patterns, true),
+            (&profile.temporary_patterns, false),
+        ] {
+            for pattern in patterns {
+                let pattern = EnginePattern::from_profile(pattern, images, permanent)?;
+                registered.push(self.register(pattern, images));
+            }
         }
 
         self.profile_pattern_count = self.next_registration_index();
         Ok(())
+    }
+
+    /// Rebuilds in place the registry pattern `id` after a resolution has filled one of its
+    /// waiting tiles (AMD-062 REQ-PROF-080): it keeps its slot, its instances, its registration
+    /// index and its place in the lists, while its images, its adjacency relations, its pixel box
+    /// and its registry key are taken again from `pattern`.
+    ///
+    /// False when the handle names no pattern of the registry, which is what a pattern a script
+    /// has removed (SPEC-05 `Pattern.RemoveWithTag`) reads as: nothing is put back.
+    pub fn refresh(
+        &mut self,
+        id: PatternId,
+        pattern: &ProfilePattern,
+        images: &mut ImageRegistry,
+    ) -> bool {
+        let Some(slot) = self.slot_of(id).filter(|_| self.is_registered(id)) else {
+            return false;
+        };
+
+        let permanent = self.store[slot].permanent();
+        for image in self.store[slot].images() {
+            images.detach(image, id, permanent);
+        }
+
+        let by_key = if permanent {
+            &mut self.permanent_by_key
+        } else {
+            &mut self.temporary_by_key
+        };
+        let key = self.store[slot].key();
+        if by_key.get(key) == Some(&id) {
+            let key = key.clone();
+            by_key.remove(&key);
+        }
+
+        self.store[slot].reload_from_profile(pattern, images);
+
+        let key = self.store[slot].key().clone();
+        if permanent {
+            self.permanent_by_key.insert(key, id);
+        } else {
+            self.temporary_by_key.insert(key, id);
+        }
+
+        // Each detach above remembered the place the image gave this pattern, so an image it
+        // already carried takes it back and a newly gained one goes to the end (AMD-021 R2-008).
+        for image in self.store[slot].images() {
+            images.attach(image, id, permanent);
+        }
+
+        true
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // C# int index.

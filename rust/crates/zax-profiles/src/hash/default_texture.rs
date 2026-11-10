@@ -173,12 +173,9 @@ impl<'a> PatternTextures<'a> {
     /// True when at least one cell of the pattern holds a tile still waiting for its planes
     /// (REQ-PROF-081).
     pub fn has_waiting_tile(&self) -> bool {
-        *self.waiting.get_or_init(|| {
-            self.pattern
-                .grid
-                .as_ref()
-                .is_some_and(|grid| grid.cells().iter().flatten().any(|tile| tile.is_waiting()))
-        })
+        *self
+            .waiting
+            .get_or_init(|| crate::hash::tiles::has_waiting_tile(self.pattern))
     }
 
     /// The texture `variant` actually uses (REQ-PROF-083). A 3dn variant uses the texture it
