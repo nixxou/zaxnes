@@ -15,7 +15,7 @@ Read first: `docs/progress/FCEUX-48.md` (how `.fm2` plays on both engines),
 - [x] 3. Explain each first divergence, and classify it.
 - [x] 4. `.bk2` reading.
 - [x] 5. The report, `docs/review/MOVIE-SYNC.md`.
-- [ ] 6. Final pass.
+- [x] 6. Final pass.
 
 ## The environment this lot runs in
 
@@ -328,8 +328,9 @@ middle of the row, again with the work RAM identical. They are the top scanline 
 sub-scanline phase differs.
 
 **Why.** A sub-scanline difference in PPU phase. The two engines' measured disagreement on exactly
-this is on the record: of the ten `ppu_vbl_nmi` singles, Zaxnes passes nine and FCEUX fails all
-ten, and the two that are about the dot count of a frame are `09-even_odd_frames` (Zaxnes
+this is on the record: of the ten `ppu_vbl_nmi` singles Zaxnes passes **all ten** and FCEUX fails
+**nine** (the one both pass is `04-nmi_control`), and the two that are about the dot count of a
+frame are `09-even_odd_frames` (Zaxnes
 `00 01 01 02`, passed; FCEUX `04`, **Failed #2**) and `10-even_odd_timing` (Zaxnes `08 08 09 07`,
 passed; FCEUX `02`, **Failed #2**) — the skipped dot of the odd pre-render line, which is a one-dot
 shift of the whole frame.
@@ -378,9 +379,9 @@ message (`Should decrement when A12 is toggled via PPUADDR`, `Counter isn't work
 with 255`, `Should be clocked when A12 changes to 1 via PPUADDR write`, **`Scanline 0 IRQ should
 occur later when $2000=$08`**, `Should reload and set IRQ every clock when reload is 0`), and
 Zaxnes passes every one. The instrument was run on `mmc3_test/4-scanline_timing.nes` itself with a
-blank movie: the two engines part at frame 4, and at frame 2 000 the screen says, in so many
-words, **Zaxnes `4-scanline_timing / Passed`** and **FCEUX `Scanline 0 IRQ should occur later when
-$2000=$08 / 4-scanline_timing / Failed #2`**.
+blank movie: the two engines part at frame **2** and the difference is on screen by frame **4**,
+and at frame 2 000 the picture says, in so many words, **Zaxnes `4-scanline_timing / Passed`** and
+**FCEUX `Scanline 0 IRQ should occur later when $2000=$08 / 4-scanline_timing / Failed #2`**.
 
 Which of the two interrupts fires at frame 2 is not settled here, and saying which would need
 cycle-level tracing this lot has no hook for. It does not change the class: both candidates are
@@ -713,3 +714,112 @@ cargo test --release -p zax-harness --features fceux-core --lib
 cargo test --release -p zax-harness --features fceux-core --test movie_sync_tests -- --include-ignored --test-threads 1
 cargo test --release -p zax-harness --test movie_sync_tests -- --include-ignored    # feature off
 ```
+
+---
+
+## Step 6 — the final pass
+
+Everything the brief's final check asks for, re-run at the end rather than trusted from the step
+that produced it. **One thing came out of it that is not a tick**, and two corrections to the
+prose, both found by checking a figure against the table it came from rather than against memory.
+
+### What the pass found
+
+**1. Four tests of `bench_core_tests` fail in a fresh worktree, and it is nothing to do with this
+lot.** They load `rust/test-roms/nestest.nes`, and `rust/test-roms/` is in `rust/.gitignore` — it
+is a local directory every older worktree happens to have and a new one does not. The file is the
+public `nestest.nes`, SHA-1 `5b608f02…`, byte-identical to
+`assets-free/test-roms/nes-test-roms/other/nestest.nes`; copying it in makes the four pass. Worth
+recording because the next lot to make a worktree will meet it: **copy that one ROM first**, and
+nothing is staged by doing so.
+
+**2. Two figures in the prose were wrong, and both were about counting a table rather than about a
+measurement.** `ppu_vbl_nmi` has ten singles and the text said "Zaxnes passes nine and FCEUX fails
+all ten"; it is the other way round — **Zaxnes passes all ten and FCEUX fails nine**, the one both
+pass being `04-nmi_control`. And the two engines part on `mmc3_test/4-scanline_timing.nes` at
+frame **2**, with the difference on screen by frame 4, not "at frame 4". Both are corrected in
+this note and in the report. Neither changes a class or a conclusion.
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| clippy `-D warnings --all-targets`, **whole workspace**, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core,zax-harness/fceux-core,zax-fceux/fceux-core`) | clean |
+
+### The tests
+
+`cargo test --release -p zax-harness` with `--include-ignored`, `ZAXNES_ROMS=G:/3dsen/demo/roms`,
+`ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms` and
+`ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`:
+
+| | passed | failed | ignored |
+|---|---|---|---|
+| feature **off** | **99** | 0 | 0 |
+| feature **on** (`--test-threads 1`) | **118** | 0 | 0 |
+
+`zax-harness` is the only crate this lot touches. The feature-on run is single-threaded because
+FCEUX keeps one machine per process.
+
+Of those, this lot's own: **41** unit tests in the lib (14 in `movie_file`/`movie_sync`, 9 in
+`bk2`, the rest pre-existing), **13** integration tests with the feature and **6** without.
+
+### golden-core
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, feature off, 98 ROMs:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names, which is lot FCEUX-23's baseline.
+
+### Nothing of the emulation moved, measured rather than asserted
+
+`git diff --stat 432492c4..HEAD` over `zax-nes`, `zax-engine3d`, `zax-render`, `zax-core-api`,
+`zax-fceux` **and `zax-app`** is **empty**. The whole lot is `zax-harness`, two documents and two
+lines of `Cargo.lock`:
+
+| | lines |
+|---|---|
+| `docs/progress/EVAL-SYNC.md` | +715 |
+| `docs/review/MOVIE-SYNC.md` | +389 |
+| `docs/review/FCEUX-ENGINE.md` | +11 |
+| `rust/crates/zax-harness/src/{movie_sync,movie_file,bk2}.rs` | +3 115 |
+| `rust/crates/zax-harness/tests/movie_sync_tests.rs` | +644 |
+| `rust/crates/zax-harness/{Cargo.toml,src/lib.rs,src/main.rs}` | +22 |
+| `rust/Cargo.lock` | **+2**, both of them a name in `zax-harness`'s own dependency list |
+
+So the FCEUX FFI exception stays where it was, `zax-harness` keeps its `#![forbid(unsafe_code)]`
+with the two new modules inside it, and the owner's "no change to emulation in `zax-nes`" is a
+fact about the diff rather than a claim about intent.
+
+The two new dependencies add **no package** to the lock file: `zip 7.3` and `sha1 0.11` are
+already `zax-app`'s own at those versions. Every cargo command of this pass was run `--offline`.
+
+### The headline figures, reproduced with the final binary
+
+Not taken from the step that first produced them:
+
+| | |
+|---|---|
+| Metal Force, whole movie | first divergence frame 5; **5** frames of 47 449 differ visibly — 5, 20 313, 26 278, 26 298, 29 735; **the last picture byte-identical on the two engines** |
+| Kabuki, whole movie | first divergence frame 2 (`$01FB` `56`/`53`), first outside the stack frame 258, first seen frame 787, 32 395 frames differ visibly |
+| `.bk2` *Faxanadu* on Zaxnes against `BizHawk`'s own screenshots | **identical at all six frames** (1 000, 10 000, 30 000, 60 000, 83 000, 83 218) |
+| its lag count | 69 820 of 83 218 input-sensitive — **13 398** insensitive, which is `BizHawk`'s own `lag=13398` |
+
+### The disk
+
+The pass began and ended with **18 GB** free on G:, well above the brief's 5 GB stop. The release
+tree under `rust/target-ev` is about 5 GB; no debug tree was ever built, every cargo command
+having been run `--release`.
+
+### What is left for the owner
+
+1. **Make the application play `.bk2`** — the one item in the report with a user-visible win and
+   no risk. On the **Zaxnes** engine, not FCEUX's, which is the opposite of what an `.fm2` needs.
+2. **The three header fields `zax-app`'s Zaxnes `.fm2` path ignores** (step 3's last section):
+   `RAMInitOption`, the region, and a movie's resets. It will not make a TAS sync; it removes a
+   reason that is ours.
+3. **Decide nothing about a third engine** — the report's §6 recommends against `NesHawk` and
+   names the one measurement that would reopen the question: a `.bk2` of a game with a mapper IRQ
+   that does *not* sync on Zaxnes. The command for it is in this note.

@@ -154,7 +154,8 @@ four (20 313, 26 278, 26 298, 29 735) are 6 to 15 pixels on **row 0 only**.
 
 A sub-scanline difference of PPU phase. FCEUX fails `ppu_vbl_nmi/09-even_odd_frames` and
 `10-even_odd_timing` — the skipped dot of the odd pre-render line, which is a one-dot shift of a
-whole frame — and Zaxnes passes both.
+whole frame — and Zaxnes passes both. Of that suite's ten singles Zaxnes passes **all ten** and
+FCEUX fails **nine**; the one both pass is `04-nmi_control`.
 
 **Nothing to fix on either side.** The movie syncs.
 
