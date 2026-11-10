@@ -1527,6 +1527,10 @@ impl WgpuSceneRenderer {
             if reflects {
                 mark_floors(&mut self.plan, scene.camera.local_camera);
                 self.prepare_mask(scene.settings.cull_back_faces, variant);
+            } else {
+                // The floor runs of an earlier frame index its own opaque bucket: a frame without
+                // the reflections (the 2D picture, a style without them) has none.
+                self.plan.floor_runs.clear();
             }
             self.upload_draws(&constants, batched);
             self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched, variant);

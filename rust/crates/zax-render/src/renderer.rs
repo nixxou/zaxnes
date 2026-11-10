@@ -1336,6 +1336,9 @@ impl SceneRenderer {
                 self.passes.instance_alignment,
                 scene.camera.local_camera,
             );
+        } else {
+            // The floor runs of an earlier frame index its own opaque bucket (see the wgpu twin).
+            self.plan.floor_runs.clear();
         }
         let passes = &mut self.passes;
         passes.upload_instances(&self.plan.instance_data);

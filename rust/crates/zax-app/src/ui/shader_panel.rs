@@ -327,7 +327,8 @@ pub fn catalogue_entry(path: &str) -> Option<&'static CatalogPreset> {
 }
 
 /// The parameters a preset of the catalogue starts with in `slot`, as the settings store them
-/// (none for a preset outside it): what `Reset all` returns it to.
+/// (none for a preset outside it, save the Mega Bezel intro turned off): what `Reset all`
+/// returns it to.
 #[must_use]
 pub fn starting_parameters(path: &str, slot: ShaderSlot) -> String {
     let (_, wide) = mode_of(slot);
@@ -343,8 +344,22 @@ pub fn starting_parameters(path: &str, slot: ShaderSlot) -> String {
             .collect()
         })
         .unwrap_or_default();
+    // The Mega Bezel presets open on an animated intro of their own at every game loaded: the
+    // pack starts them without it (owner request), the player can turn it back on.
+    let mut parameters = parameters;
+    if path
+        .to_ascii_lowercase()
+        .replace('\\', "/")
+        .contains("mega_bezel/")
+        && !parameters.iter().any(|(name, _)| name == MEGA_BEZEL_INTRO)
+    {
+        parameters.insert(0, (MEGA_BEZEL_INTRO.to_owned(), 0.0));
+    }
     shader_slots::format_parameters(&parameters)
 }
+
+/// The Mega Bezel parameter of its intro: off, at the game's load, at the preset's, repeated.
+const MEGA_BEZEL_INTRO: &str = "HSM_INTRO_WHEN_TO_SHOW";
 
 /// Sets `slot` to the preset `path` of the pack, with the catalogue's parameters and area when
 /// it is one of its entries (none and the automatic area otherwise).
@@ -635,7 +650,7 @@ mod tests {
         );
         assert_eq!(
             model.get(SettingId::Shader2dWsParams).as_text(),
-            "HSM_ASPECT_RATIO_MODE=6"
+            "HSM_INTRO_WHEN_TO_SHOW=0;HSM_ASPECT_RATIO_MODE=6"
         );
         assert_eq!(
             model.get(SettingId::Shader2dWsArea).as_int(),
@@ -643,13 +658,16 @@ mod tests {
         );
         assert_eq!(
             starting_parameters(screen.path, ShaderSlot::TwoD),
-            "HSM_ASPECT_RATIO_MODE=6"
+            "HSM_INTRO_WHEN_TO_SHOW=0;HSM_ASPECT_RATIO_MODE=6"
         );
         let tv = catalogue_entry("bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp").expect("the TV");
-        assert_eq!(starting_parameters(tv.path, ShaderSlot::TwoD), "");
+        assert_eq!(
+            starting_parameters(tv.path, ShaderSlot::TwoD),
+            "HSM_INTRO_WHEN_TO_SHOW=0"
+        );
         assert_eq!(
             starting_parameters(tv.path, ShaderSlot::ThreeDWide),
-            "HSM_ASPECT_RATIO_MODE=5"
+            "HSM_INTRO_WHEN_TO_SHOW=0;HSM_ASPECT_RATIO_MODE=5"
         );
         choose_preset(&mut model, ShaderSlot::TwoDWide, "crt/other.slangp");
         assert_eq!(model.get(SettingId::Shader2dWsParams).as_text(), "");
