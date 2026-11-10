@@ -232,8 +232,10 @@ impl EngineHandle {
     /// Moves the frame's samples out of the engine into the shared ring, for an engine that keeps
     /// them where another thread cannot read them. A no-op on Zaxnes, whose ring *is* shared.
     ///
-    /// Called once per real frame by the session, right after the frame.
-    pub fn pump_audio(&mut self) {
+    /// Called by [`EngineHandle::run_frame`] and [`EngineHandle::run_frame_ahead`] rather than by
+    /// the session, so that it cannot be missed on one of the session's several frame paths. On
+    /// Zaxnes it is one `Option::is_none` and a return.
+    fn pump_audio(&mut self) {
         let Some(ring) = self.shared_audio.clone() else {
             return;
         };
@@ -394,6 +396,7 @@ impl EngineHandle {
     pub fn run_frame(&mut self, word: InputWord) -> i64 {
         let cycles = self.engine.run_frame(word);
         self.cycles = self.cycles.saturating_add(cycles);
+        self.pump_audio();
         cycles
     }
 
@@ -407,6 +410,7 @@ impl EngineHandle {
             None => self.engine.run_frame(word),
         };
         self.cycles = self.cycles.saturating_add(cycles);
+        self.pump_audio();
         cycles
     }
 

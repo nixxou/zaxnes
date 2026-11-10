@@ -12,7 +12,7 @@ choice), §6 (the 3D state). Previous lots: `docs/progress/FCEUX-1.md`, `docs/pr
 - [x] 3. The `Engine` trait, and both implementations.
 - [x] 4. The application drives the trait.
 - [x] 5. The per-game choice (FCEUX-3).
-- [ ] 6. The app with FCEUX, end to end.
+- [x] 6. The app with FCEUX, end to end.
 - [ ] 7. Docs.
 - [ ] 8. Final pass.
 
@@ -607,3 +607,107 @@ handled `video.backend`:
 | `cargo test --release --workspace`, feature off | **3 264 passed, 0 failed**, 90 ignored |
 | the same with `zax-app/fceux-core` and `zax-harness/fceux-core` | **3 307 passed, 0 failed**, 93 ignored |
 | **golden-core over the 98 originals, feature off** | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, **byte-identical to the step-1 baseline** |
+
+---
+
+## Step 6 — the application with FCEUX, end to end
+
+### The headless path, found rather than invented
+
+The brief asked for "whatever headless or scripted path the app and harness offer (find it; do not
+rely on a human)". The application's command line has none: `--help`, `--list-profiles` and
+`--import-3dsen` print and exit, and everything else opens a window. The headless path is the one
+the application's **own integration tests** use — `LoopHarness` in
+`crates/zax-app/tests/common/mod.rs` drives the real `EmulationHost` with the real session, the
+real conversion engine, the real settings and the real save slots, with a stub view and no GPU
+context. That is what step 6 uses, in two new files:
+
+* `crates/zax-app/tests/fceux_end_to_end_tests.rs` — the whole file behind
+  `#![cfg(feature = "fceux-core")]`, six `#[ignore]`d tests that serialise themselves (one FCEUX
+  per process);
+* `crates/zax-app/tests/engine_parity_tests.rs` — compiled in **both** builds, which is the point
+  of it.
+
+One thing the harness needed: `LoopHarness::create` builds its host **without** a settings store,
+so `set_game_options` has nowhere to write and a launch would see the global default. The tests ask
+for one (`create_with`), which is what makes the **per-game** option the thing under test rather
+than the preference. Finding that cost a first run where every launch reported Zaxnes.
+
+### The three games, 1 200 frames each, on FCEUX with their own 3D profile
+
+| game | records in the last frame | draw tiles the renderer is handed | of them with a mesh |
+|---|---|---|---|
+| *Super Mario Bros.* | 995 | 252 | 252 |
+| *Mega Man 3* | 961 | 164 | 164 |
+| *Punch-Out!!* | 988 | 189 | 189 |
+
+The draw list is what the renderer would be given, so counting its tiles is the 3D path's own
+answer and not an inference about it. Every tile has a mesh, the machine is still running at frame
+1 200 in all three, the palette reached the batch, and the widescreen fields of the batch are at
+their standard values — which is what `Capabilities::FCEUX` promises.
+
+### The record comparison at tolerance 0, and **Punch-Out!! closes an open item of FCEUX-6**
+
+`fceux-tiles` on the three, which is the comparison of §8 of lot FCEUX-6:
+
+| game | frame 60 | 300 | 1 200 | 3 000 |
+|---|---|---|---|---|
+| *Super Mario Bros.* | — | **identical** | emulation (995/995 records, 137 in order, `bg.x` differs on row 858) | — |
+| *Mega Man 3* | — | **identical** | **identical** | — |
+| *Punch-Out!!* (mapper **9**) | **identical** | **identical**, 1 021 records | **identical**, 988 records | emulation (1 062/1 062, 1 036 in order) |
+
+*Super Mario Bros.* at 1 200 is the "borderline" lot FCEUX-6 already recorded, and the cause is
+FCEUX's emulation differing from Zaxnes's rather than the capture — its two pictures part at frame
+10.
+
+***Punch-Out!!* is the result worth naming.** Item 2 of §6 of the design note says the MMC2/MMC4
+latch capture was implemented to the requirement (REQ-CORE-039, REQ-CORE-044) and measured to break
+nothing, but that **no mapper 9 or 10 game is in either ROM set**, so it was unproven in use, and
+that "a lot with the ROM should close this". `test-originals-extra` has that ROM. Its records are
+**identical in order** at frames 60, 300 and 1 200 — 1 021 and 988 of them — with identical
+pictures. The latch walked per column and put back is therefore **proven on a real mapper-9 game**,
+and §6 of the design note is updated in step 7 accordingly. Frame 3 000 is emulation-class, the
+two machines having parted in 2D at frame 4.
+
+### Everything else the step asked
+
+| | |
+|---|---|
+| **audio is produced** | 19 200 samples waiting after 120 frames — the shared ring at its ceiling, which is right in a headless run with no audio thread draining it. `sample_rate()` reports 48 000, and the samples read back inside `-1.0..=1.0` |
+| **Lua reads FCEUX's RAM** | a profile script whose `Update` does `Script:WriteMem(0x0010, 0xA5)` then prints `Script:ReadMem(0x0010)` prints `ram 165` |
+| **the achievements read FCEUX's RAM** | `CoreMemory(session.core()).read(0x0010)` is `Some(0xA5)`, the same byte, and `achievements::hash_image` answers on this engine from the image the handle kept |
+| **a savestate round trip** | the block names its engine (`engine_of_state` → `Fceux`), the frame count comes back, and a sentinel written after the save is rolled back — so the restore cannot pass by doing nothing |
+| **a rollback step** | 8 snapshots in 240 frames (one every 60), `Rollback` leaves the machine running at frame 300. No change was needed: the history has always used the serialised state |
+| **a Zaxnes state is refused** | `restore_core` of a block whose magic is Zaxnes's returns exactly `Save state used a different core.` |
+| **switching back to `zaxnes`** | the option set to 0 and the game relaunched gives `EngineKind::Zaxnes`, `Capabilities::ZAXNES`, and the machine runs |
+
+### `fceux-core` on with `engine = zaxnes` is the feature-off build
+
+`engine_parity_tests.rs` plays *Super Mario Bros. 3* for 600 frames through the real host with the
+engine stored as `zaxnes`, and prints the machine and the 3D path:
+
+    zaxnes path, fceux-core off: frames 600 cycles 17868303 records 982
+                                 machine 55644641f905f4e0 draw tiles 767 meshes 767
+    zaxnes path, fceux-core on:  frames 600 cycles 17868303 records 982
+                                 machine 55644641f905f4e0 draw tiles 767 meshes 767
+
+**The same line**, digest included — the digest being the work RAM, every tile record of the frame
+and its palette. Beside it: every test that does not need the feature passes in the feature-on
+build too (3 264 of the 3 307), and golden-core is byte-identical to the baseline.
+
+### Frames per second of the application's own core + 3D path
+
+*Super Mario Bros. 3* with its profile, 1 200 timed frames after 120 of warm-up, headless, three
+runs, each alone:
+
+| engine | frames/s | ms a frame |
+|---|---|---|
+| **Zaxnes** | 407 / 399 / 402 | 2.4598 / 2.5070 / 2.4883 |
+| **FCEUX** | 2 410 / 2 463 / 2 444 | 0.4149 / 0.4060 / 0.4091 |
+
+**About 6.0×**, which sits at the top of the 4× to 6× range §6 of the design note gives for the two
+cores with both capturing. Two honest caveats on the figure: part of the margin is FCEUX **not
+doing Zaxnes-only work** — the widescreen picture, the steady-sprite split and the smooth-scroll
+shift are all skipped there — and this is the application's loop rather than `bench-core`, so it
+carries the settings sync and the draw-list build as well as the core. The two columns were
+measured the same way, which is what makes the ratio worth anything.

@@ -834,7 +834,6 @@ impl GameSession {
         clock.add_thread(Thread::Emulation, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
-        self.core.pump_audio();
         self.core.work_ram_into(&mut self.pipeline.memory.ram);
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         self.pipeline.picture_shift = self.core.picture_shift();
