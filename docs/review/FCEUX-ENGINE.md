@@ -199,6 +199,12 @@ a particular game. That suggests:
 > than that Zaxnes cannot keep up. The same lot found the converse for `BizHawk`'s `.bk2`: an
 > 83 218-frame movie recorded on `NesHawk` replays on **Zaxnes's own engine** identically to
 > `BizHawk`'s run, lag count included, and **does not play on FCEUX at all**.
+>
+> **Lot EVAL-SYNC-2 qualifies that last sentence** (§4b of the same report): a *second* `.bk2`,
+> an MMC3 game with seven resets that syncs on `BizHawk`, **does not sync on Zaxnes** — it parts
+> inside its first hundred frames for a reason six measured experiments did not find. So a `.bk2`
+> still belongs on Zaxnes's own engine rather than on FCEUX, and "Zaxnes replays a `.bk2`" is one
+> movie of two rather than a rule.
 
 This is the clearest win and the easiest lot. FCEUX's `movie.cpp` plays `.fm2` itself; the C API
 needs three more calls (open a movie from a buffer, report the frame count and whether playback has

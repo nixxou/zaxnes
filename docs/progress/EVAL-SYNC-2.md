@@ -24,7 +24,7 @@ This is an **evaluation**, like EVAL-SYNC: it measures and explains, and it chan
 - [x] 2. The first divergence on Kirby, narrowed to the frame.
 - [x] 3. The cause, with a class for each finding.
 - [x] 4. Re-check: Kirby after any player fix, and *Faxanadu* to show nothing regressed.
-- [ ] 5. The report.
+- [x] 5. The report.
 - [ ] 6. The final pass.
 
 ## The environment this lot runs in
@@ -488,3 +488,114 @@ One change serves both: `.fm2` takes the pattern from its header, `.bk2` takes t
 The other half of the step-1 change — refusing a `.bk2` whose `InitialWRamStatePattern` is not
 `null` — belongs there too, and is a refusal rather than a behaviour: four lines beside the ones
 that already refuse a savestate-anchored movie.
+
+---
+
+## Step 5 — the report
+
+`docs/review/MOVIE-SYNC.md` now covers both lots. What was added, and where:
+
+| | |
+|---|---|
+| the preamble | both lots named, and a pointer to the three EVAL-SYNC-2 sections |
+| **The short version** | a fourth paragraph: one `.bk2` of two syncs, the gap is ours, and it was not found |
+| **§1b** (new) | the work-RAM trace, the measured offset, what a run *in step* scores in this instrument, and the `NesHawk` power-on pattern the calibration found |
+| **§4b** (new) | *Kirby*: the result, the narrowing, the six eliminations, the class (a) that came out of the hunt, and what is left |
+| **§5** | the first and last bullets struck through and answered; three new ones |
+| **§6** | the "one thing that would change this recommendation" **happened**, so the recommendation is re-argued with the new fact; the to-do list gains item 0 (find the divergence) and item 1 (the soft reset and the mapper), the old items keeping their order below them |
+| **§6, commands** | every command of this lot, including the eliminations as five `for` loops |
+
+The two earlier bullets of §5 are struck through rather than deleted: a reader who was told
+something was unknown is owed the answer in the place they were told it, and the strike-through
+is how they can tell which lot answered it.
+
+## The commands, to re-run everything
+
+Set up once (as EVAL-SYNC):
+
+```sh
+export CARGO_TARGET_DIR=<worktree>/rust/target-ev
+export CARGO_INCREMENTAL=0
+export TMP=<worktree>/rust/target-ev/tmp TEMP="$TMP"
+cd <worktree>/rust
+cargo build --release --offline -p zax-harness --features fceux-core
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+```
+
+### Step 1, the calibration (about 2½ minutes each)
+
+```sh
+$H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [USA][!!].nes" \
+    --engine zaxnes --lag --trace fax-usa.txt  --trace-ref "$B/fax-usa.txt"
+$H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [USA][Rev 1][!!].nes" \
+    --engine zaxnes --lag --trace fax-rev1.txt --trace-ref "$B/fax-rev1.txt"
+```
+
+What the fill is worth, which is how the pattern was found (20 lines each, seconds):
+
+```sh
+for r in zero ff default; do
+  $H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [USA][!!].nes" \
+      --engine zaxnes --no-lag --frames 2000 --ram $r --trace-ref "$B/fax-usa.txt"
+done
+```
+
+### Step 2, Kirby (5½ minutes with the probe, 1½ without)
+
+```sh
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --trace kirby.txt \
+    --trace-ref "$B/kirby-jp.txt" --progress 50000
+# every frame of the first 5 000, to look for a time shift
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 5000 --trace-step 1 --trace fine.txt
+# the 2 KiB behind a line, to size the difference
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 600 --dump <dir> \
+    --dump-frames 100,200,300,400,500,600
+```
+
+### Step 3, the eliminations (seconds each)
+
+```sh
+for r in on off early late;        do $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --resets  $r --trace-ref "$B/kirby-jp.txt"; done
+for p in default zero ff;          do $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --ram     $p --trace-ref "$B/kirby-jp.txt"; done
+for p in default zero ff;          do $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --prg-ram $p --trace-ref "$B/kirby-jp.txt"; done
+for p in default zero ff random:0; do $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --ppu-ram $p --trace-ref "$B/kirby-jp.txt"; done
+for w in 1 2 3 4;                  do $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --warm-up zaxnes:$w --trace-ref "$B/kirby-jp.txt"; done
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 3000 --ppu-warmup --trace-ref "$B/kirby-jp.txt"
+```
+
+"`--resets off` changes the run but not the picture" is two runs and a `diff`:
+
+```sh
+for r in on off; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 1200 --resets $r \
+      --trace-step 1 --trace k-$r.txt --png shots-$r --png-frames 400,1000
+done
+diff <(grep -E '^[0-9]' k-on.txt) <(grep -E '^[0-9]' k-off.txt) | head
+```
+
+### Step 4, the pictures
+
+```sh
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --png <dir> \
+    --png-frames 1000,10000,30000,60000,83000,156312
+$H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [USA][!!].nes" \
+    --engine zaxnes --no-lag --png <dir> --png-frames 1000,10000,30000,60000,83000,83218
+```
+
+The comparison against `BizHawk`'s screenshots is the same short script as EVAL-SYNC's — this
+run's rows 8 to 231 against the reference's 224, every colour of one mapping to exactly one
+colour of the other — and it is **not committed**, because it reads pictures of a commercial
+game. It is about fifteen lines and §4 of the report states the rule in a paragraph.
+
+### The tests
+
+```sh
+export ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+cargo test --release --offline -p zax-harness --lib
+cargo test --release --offline -p zax-harness --test movie_sync_tests
+cargo test --release --offline -p zax-harness --test soft_reset_mapper_tests
+```
