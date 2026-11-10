@@ -21,7 +21,7 @@ This is an **evaluation**, like EVAL-SYNC: it measures and explains, and it chan
 ## Steps
 
 - [x] 1. A RAM trace in `movie-sync`, calibrated on the two *Faxanadu* references.
-- [ ] 2. The first divergence on Kirby, narrowed to the frame.
+- [x] 2. The first divergence on Kirby, narrowed to the frame.
 - [ ] 3. The cause, with a class for each finding.
 - [ ] 4. Re-check: Kirby after any player fix, and *Faxanadu* to show nothing regressed.
 - [ ] 5. The report.
@@ -189,3 +189,103 @@ agreeing to the end. **The last agreeing line is the marker**, not the first dif
 | clippy `-D warnings --all-targets`, feature **off** and **on** | clean |
 | `zax-harness` lib tests | **42**, up from 31: 9 new in `ram_trace`, 2 new in `bk2` |
 | `movie_sync_tests`, feature off | **9**, 3 of them new |
+
+---
+
+## Step 2 — where Kirby parts, and what it is not
+
+### The run
+
+`movie-sync --engine zaxnes --lag`, the whole 156 312 frames, against `kirby-jp.txt`:
+
+| | |
+|---|---|
+| checksum lines agreeing | **0 of 1 563** |
+| the first differing line | **100**: `bc167b92` here, `e8fc3340` in the reference |
+| the last agreeing line | **none** |
+| distinct deltas over the 1 563 lines | **1 563** — every line its own |
+| input-insensitive frames | **25**, against the reference's **24** |
+
+Beside *Faxanadu*'s 207 agreeing lines with every residual in the stack page, this is not a
+sampling artefact: **the machines are running different games by frame 100.**
+
+### What the lag column says, which is less than it looks
+
+The two lag counters step at the same lines and on the same cause — a reset — and only three of
+the seven resets are counted differently:
+
+| line | 22 600 | 25 800 | 25 900 | 29 800 | 29 900 | 62 600 | 88 000 | 92 500 |
+|---|---|---|---|---|---|---|---|---|
+| reference | 6→9 | 9→**10** | 10→**12** | 12→**13** | 13→**15** | 15→18 | 18→**21** | 21→**24** |
+| Zaxnes | 6→9 | 9→**11** | 11→**12** | 12→**14** | 14→**15** | 15→18 | 18→**22** | 22→**25** |
+
+A reset costs **three** lag frames on both machines; at 25 800 and 29 800 the two engines only
+split those three across the 100-frame boundary differently and are back in agreement one line
+later. The one real difference is the reset at frame 87 950, where Zaxnes spends **four** —
+which is the whole of the 25-against-24.
+
+That agreement is **not** evidence of sync here, and saying so matters. *Kirby* lags 24 frames in
+156 312 and 6 of them are in the first 100: outside the resets the counter never moves, so it
+cannot distinguish two runs. On *Faxanadu*, with 13 398 lag frames, it could and did.
+
+### It is not a time shift
+
+If Zaxnes were simply running the same game late or early, some frame of ours would hold the
+reference's 2 KiB. Every frame of the first 5 000 was checksummed (`--trace-step 1`) and looked
+up against each reference value from 100 to 5 000: **no frame of ours matches any line of
+theirs.** The difference is of content, not of phase.
+
+### How big the difference at line 100 is
+
+The solver of step 1 was run on the first six lines. Where *Faxanadu* gave 54 single-byte
+explanations all in the stack page, *Kirby* gives:
+
+| line | 100 | 200 | 300 | 400 | 500 | 600 |
+|---|---|---|---|---|---|---|
+| one-byte explanations | 0 | 0 | 0 | 0 | 0 | 0 |
+| two-byte solutions | 29 | 30 | 32 | 28 | 32 | 20 |
+
+Thirty two-byte solutions is what **chance** produces (step 1's own figure on a run known to be in
+step), so they are noise: many bytes differ by frame 100, not one or two.
+
+### What is on screen
+
+| frame 1 000 | |
+|---|---|
+| `BizHawk` (`kirby-jp-f1000.png`) | Vegetable Valley, playing, `SCORE : 0003400` |
+| Zaxnes | the **LEVEL 1 : VEGETABLE VALLEY** intro card, Kirby flying in over the wipe |
+
+Zaxnes is behind — but not merely behind. Our frames **900 to 2 600, every tenth**, were written
+out and held against `kirby-jp-f1000.png` under the colour-bijection rule EVAL-SYNC used (this
+run's rows 8-231 against the reference's 224, every colour of one mapping to exactly one colour
+of the other). **None of the 171 matches.** The same script says `MATCH` on *Faxanadu* at frames
+1 000 (9 colours) and 10 000 (14 colours), so it is a test that can pass.
+
+### So the divergence is inside frames 1 to 100
+
+The reference has no line before 100 and no screenshot before 1 000, so that is the floor the
+data itself imposes. Inside that window the movie does exactly four things: a **Reset on frame 3**
+(0-based; this instrument's frame 4) and three **one-frame A presses at frames 63, 97 and 212**.
+
+Everything else in the window was then eliminated by measurement, each a run of 3 000 frames
+against the reference (none of them puts a single line in step):
+
+| what was varied | values tried | lines agreeing |
+|---|---|---|
+| the power-on work RAM (`--ram`) | `default`, `zero`, `ff` | 0, 0, 0 |
+| the cartridge's PRG-RAM (`--prg-ram`) | `default`, `zero`, `ff` | 0, 0, 0 |
+| the reset column (`--resets`) | `on`, `off`, `early`, `late` | 0, 0, 0, 0 |
+| all twelve combinations of the first and third | | 0 |
+| blank frames before the movie (`--warm-up zaxnes:`) | 1, 2, 3, 4 | 0, 0, 0, 0 |
+| the PPU write-inhibition window (`--ppu-warmup`) | on | 0 |
+
+Two of those are worth more than a zero:
+
+* **`--resets off` changes the run from frame 4** (its per-frame trace parts there from the
+  honoured one) **and yet changes nothing that can be seen**: the pictures at frames 400 and
+  1 000 are identical with and without every reset in the movie. So the first reset is real but
+  not where the two machines part;
+* **`--ppu-warmup` changes the run not at all** — 1 200 frames of per-frame checksums, byte for
+  byte identical to the run without it. That is a result, not a null: it says *Kirby* writes
+  neither PPUCTRL nor PPUMASK in the frame after power-on or after the frame-4 reset, so the
+  window `zax-nes` does not model (step 3) is not what parts this movie.

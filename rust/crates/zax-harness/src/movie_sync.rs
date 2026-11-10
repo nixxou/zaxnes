@@ -105,6 +105,14 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
                            frame offset between the two numberings is measured, not assumed
       --png <dir> --png-frames a,b,c   write those frames' pictures, per engine, as PNG
       --dump <dir> --dump-frames a,b,c  write those frames' 2 KiB of work RAM, per engine, raw
+      --resets on|off|early|late   what the movie's reset column does: honoured (default),
+                           ignored, or honoured one frame before or after the frame it is on
+      --ppu-warmup         EXPERIMENT: undo the game's PPUCTRL/PPUMASK writes of the frame after
+                           each reset, the ~29 658-cycle window nesdev says the hardware ignores
+                           them in and `zax-nes` does not model (`--engine zaxnes` only)
+      --prg-ram default|ff|zero|random:<seed>
+                           the power-on contents of the **cartridge's** PRG-RAM, which is a
+                           different 8 KiB from --ram's 2 KiB (`--engine zaxnes` only)
       --warm-up zaxnes:<n> | fceux:<n>
                            blank frames on one engine before the movie starts; the experiment
                            that tells a difference of boot phase from one of emulation";
@@ -121,6 +129,48 @@ const RAM_LEN: usize = 2048;
 const FROZEN_RUN: u32 = 240;
 /// How many frames of detail after the first divergence the text report carries.
 const DETAIL_FRAMES: usize = 8;
+
+/// What the movie's reset column is allowed to do to the machine.
+///
+/// A diagnostic, and only a diagnostic: `On` is what a movie asks for and everything else exists
+/// to answer "is this divergence the reset, and is it the reset's *timing*". A `.bk2`'s reset
+/// column is one frame wide and the public description of the format does not say at what point
+/// of the frame `BizHawk` taps the line, so a one-frame uncertainty is real and worth being able
+/// to measure rather than argue about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Resets {
+    /// Honoured on the frame the movie puts them on, before that frame runs.
+    #[default]
+    On,
+    /// Not replayed at all — what the movie is worth without them.
+    Off,
+    /// Honoured one frame earlier.
+    Early,
+    /// Honoured one frame later.
+    Late,
+}
+
+impl Resets {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            "early" => Some(Self::Early),
+            "late" => Some(Self::Late),
+            _ => None,
+        }
+    }
+
+    /// How many frames the commands move by, and whether they happen at all.
+    const fn shift(self) -> Option<i64> {
+        match self {
+            Self::On => Some(0),
+            Self::Off => None,
+            Self::Early => Some(-1),
+            Self::Late => Some(1),
+        }
+    }
+}
 
 /// Which machine(s) to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +218,20 @@ pub struct Options {
     pub trace_step: u32,
     /// A reference trace to hold the run against.
     pub trace_ref: Option<PathBuf>,
+    /// What the movie's reset column is allowed to do.
+    pub resets: Resets,
+    /// Imitate the PPU's write-inhibition window after a reset. See
+    /// `ZaxnesMachine::apply_ppu_warmup`.
+    pub ppu_warmup: bool,
+    /// The power-on contents of the cartridge's PRG-RAM, when the command line names one.
+    ///
+    /// A **different** 8 KiB from [`Self::ram`]'s 2 KiB, and the distinction is not pedantry:
+    /// `BizHawk`'s NES core calls the console's 2 KiB *RAM* and the cartridge's *WRAM*, and the
+    /// one sync setting a `.bk2` carries about either of them —
+    /// `InitialWRamStatePattern` — is named after the second. A battery game that boots
+    /// differently out of its save RAM parts from its movie at frame 1 and nothing downstream
+    /// can recover it.
+    pub prg_ram: Option<RamPattern>,
     /// Where to write pictures.
     pub png: Option<PathBuf>,
     /// Which frames' pictures to write.
@@ -212,6 +276,9 @@ impl Default for Options {
             trace: None,
             trace_step: 100,
             trace_ref: None,
+            resets: Resets::On,
+            ppu_warmup: false,
+            prg_ram: None,
             png: None,
             png_frames: Vec::new(),
             dump: None,
@@ -279,6 +346,16 @@ impl Options {
                 }
                 "--trace-ref" => {
                     options.trace_ref = Some(PathBuf::from(value_at(args, &mut index)));
+                }
+                "--ppu-warmup" => options.ppu_warmup = true,
+                "--prg-ram" => options.prg_ram = Some(pattern(&value_at(args, &mut index))?),
+                "--resets" => {
+                    let text = value_at(args, &mut index);
+                    options.resets = Resets::parse(&text).ok_or_else(|| {
+                        HarnessError::Usage(format!(
+                            "--resets {text:?} is not on, off, early or late\n{USAGE}"
+                        ))
+                    })?;
                 }
                 "--png" => options.png = Some(PathBuf::from(value_at(args, &mut index))),
                 "--png-frames" => options.png_frames = frame_list(&value_at(args, &mut index))?,
@@ -381,6 +458,12 @@ struct ZaxnesMachine {
     core: Box<NesCore>,
     region: NesRegion,
     state: CoreState,
+    /// What the cartridge's PRG-RAM is filled with after every power-on, when `--prg-ram` asks.
+    prg_ram: Option<RamPattern>,
+    /// Undo the game's PPUCTRL/PPUMASK writes of the frame after a reset (`--ppu-warmup`).
+    ppu_warmup: bool,
+    /// Frames run since the last power-on or reset.
+    since_reset: u32,
 }
 
 impl ZaxnesMachine {
@@ -397,7 +480,68 @@ impl ZaxnesMachine {
             core,
             region,
             state,
+            prg_ram: None,
+            ppu_warmup: false,
+            since_reset: 0,
         })
+    }
+
+    /// The **experiment** of `--ppu-warmup`, and the one place in this lot where the instrument
+    /// imitates a hardware behaviour `zax-nes` does not have.
+    ///
+    /// nesdev, "PPU power up state": *writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR are
+    /// ignored for about 29 658 CPU cycles (about 30 000) after reset*. `zax-nes` does not model
+    /// that window — Q-078 chose not to, for the soft reset *and* for the power-on, and says so
+    /// in `Ppu2C02::soft_reset`'s own comment. 29 658 cycles is **0.996 of an NTSC frame**, so
+    /// to a very good approximation the window is "the first frame after a reset", and undoing
+    /// those two registers at the end of that frame leaves the PPU where ignoring every write to
+    /// them would have left it.
+    ///
+    /// What it does **not** imitate: `$2005` and `$2006`, whose effect is in `v`, `t` and
+    /// `fine_x`, and the only way to zero those from outside the core is two `$2006` writes
+    /// after a *side-effecting* read of `$2002` to clear the write latch — which would also
+    /// clear the vblank flag the game is about to read, and so would break more than it fixes.
+    /// And the undo lands at the end of the frame rather than at each write, so an NMI the game
+    /// enabled inside the window still fires once.
+    fn apply_ppu_warmup(&mut self) {
+        if !self.ppu_warmup || self.since_reset != 1 {
+            return;
+        }
+        // `NesCore::write_memory` is the debug write of REQ-CORE-082 and goes through the bus's
+        // real write path, so these reach the PPU registers exactly as a CPU write would.
+        self.core.write_memory(0x2000, 0);
+        self.core.write_memory(0x2001, 0);
+    }
+
+    /// Asks for the cartridge's PRG-RAM to hold `pattern` after every power-on.
+    ///
+    /// `NesCore::import_battery_ram` is the public way in — a host loading a save file — and it
+    /// is also exactly the right one: it writes the bytes and marks them as not to be cleared,
+    /// which is what a cartridge whose battery has been in place does.
+    ///
+    /// # Errors
+    /// The cartridge has no battery-backed PRG-RAM to fill.
+    fn want_prg_ram(&mut self, pattern: RamPattern) -> Result<(), String> {
+        if self.core.export_battery_ram().is_empty() {
+            return Err(
+                "--prg-ram: this cartridge has no battery-backed PRG-RAM to fill".to_owned(),
+            );
+        }
+        self.prg_ram = Some(pattern);
+        self.fill_prg_ram()
+    }
+
+    fn fill_prg_ram(&mut self) -> Result<(), String> {
+        let Some(pattern) = self.prg_ram else {
+            return Ok(());
+        };
+        let mut bytes = vec![0u8; self.core.export_battery_ram().len()];
+        pattern.fill(&mut bytes);
+        if self.core.import_battery_ram(&bytes) {
+            Ok(())
+        } else {
+            Err("--prg-ram: the core would not take the PRG-RAM".to_owned())
+        }
     }
 }
 
@@ -413,16 +557,22 @@ impl Machine for ZaxnesMachine {
         // This writes memory, not emulation: no core behaviour changes, and with the movie asking
         // for `zero` the bytes written are the ones already there.
         ram.fill(self.core.bus_mut().ram_mut());
-        Ok(())
+        self.since_reset = 0;
+        // And the power-on zeroed the cartridge's PRG-RAM too, which is a second 8 KiB with its
+        // own power-on contents.
+        self.fill_prg_ram()
     }
 
     fn soft_reset(&mut self) -> Result<(), String> {
         self.core.soft_reset();
+        self.since_reset = 0;
         Ok(())
     }
 
     fn run(&mut self, word: u16) -> Result<(), String> {
         self.core.run_frame(word);
+        self.since_reset += 1;
+        self.apply_ppu_warmup();
         Ok(())
     }
 
@@ -1275,12 +1425,39 @@ impl Measurement {
 /// [`HarnessError`] when a file cannot be read, an engine refuses the ROM, or the movie is not
 /// one this instrument reads.
 pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
+    // The two experiments touch one core only — no FCEUX API call reaches a cartridge's PRG-RAM,
+    // and the PPU warm-up one is about this core's own PPU — so a two-engine run with either of
+    // them would compare a machine that got the experiment with one that did not, which is worse
+    // than not comparing. Both are refused here, before a file is read.
+    for (asked, what, why) in [
+        (
+            options.prg_ram.is_some(),
+            "--prg-ram",
+            "no FCEUX API call reaches a cartridge's PRG-RAM, so the two machines could not be \
+             given the same one",
+        ),
+        (
+            options.ppu_warmup,
+            "--ppu-warmup",
+            "it is an experiment on this core's own PPU and there is nothing to give the other \
+             machine",
+        ),
+    ] {
+        if asked && options.engine != Engines::Zaxnes {
+            return Err(HarnessError::Usage(format!(
+                "{what} works with `--engine zaxnes` only: {why}"
+            )));
+        }
+    }
     let image = fs::read(&options.rom)?;
     let movie_bytes = fs::read(&options.movie)?;
     // A header that parses *is* the "this is a cartridge" answer the `.fm2` reader needs for the
     // `FDS 1` contradiction: an iNES image is a cartridge whatever the movie's header claims.
     let header = InesHeader::try_parse(&image).ok();
-    let movie = read_movie(&options.movie, &movie_bytes, header.is_some())?;
+    let movie = relocate_resets(
+        read_movie(&options.movie, &movie_bytes, header.is_some())?,
+        options.resets,
+    );
 
     let ram = options.ram.unwrap_or(movie.ram);
     // A `.bk2` states no region, so the ROM's own header decides — `InesHeader`'s rule, which is
@@ -1316,6 +1493,10 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
         Engines::Zaxnes => {
             let mut machine =
                 ZaxnesMachine::new(&image, &name, region).map_err(HarnessError::Rom)?;
+            if let Some(pattern) = options.prg_ram {
+                machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
+            }
+            machine.ppu_warmup = options.ppu_warmup;
             let (run, trace) = run_alone(options, &movie, &mut machine, ram)?;
             measurement.runs.push(run);
             measurement.traces.extend(trace);
@@ -1386,6 +1567,42 @@ struct Machines<'a> {
     name: &'a str,
     region: NesRegion,
     ram: RamPattern,
+}
+
+/// Moves or drops the movie's reset commands, as `--resets` asks.
+///
+/// The input words are left exactly where they are: only the command column moves, so the machine
+/// is still fed the movie's own inputs and the only thing under test is the reset.
+fn relocate_resets(mut movie: MovieFile, resets: Resets) -> MovieFile {
+    if resets == Resets::On {
+        return movie;
+    }
+    let was: Vec<FrameCommand> = movie.frames.iter().map(|frame| frame.command).collect();
+    for frame in &mut movie.frames {
+        frame.command = FrameCommand::None;
+    }
+    let Some(shift) = resets.shift() else {
+        movie
+            .notes
+            .push("`--resets off`: the movie's reset commands are NOT replayed".to_owned());
+        return movie;
+    };
+    for (index, command) in was.iter().enumerate() {
+        if *command == FrameCommand::None {
+            continue;
+        }
+        let Ok(moved) = usize::try_from(i64::try_from(index).unwrap_or(0) + shift) else {
+            continue;
+        };
+        if let Some(frame) = movie.frames.get_mut(moved) {
+            frame.command = *command;
+        }
+    }
+    movie.notes.push(format!(
+        "`--resets {}`: every reset command was moved {shift:+} frame",
+        if shift < 0 { "early" } else { "late" }
+    ));
+    movie
 }
 
 /// Reads the movie by its extension.
@@ -2163,6 +2380,90 @@ mod tests {
         ] {
             assert!(Options::parse(&bad).is_err(), "{bad:?} should be refused");
         }
+    }
+
+    /// `--resets` moves or drops the command column and **leaves the input words alone**, which
+    /// is what makes it an experiment about the reset rather than about the movie.
+    #[test]
+    fn the_reset_column_can_be_moved_or_dropped_without_touching_the_inputs() {
+        let movie = MovieFile {
+            frames: (0..6u16)
+                .map(|index| FrameInput {
+                    word: index + 1,
+                    command: if index == 3 {
+                        FrameCommand::SoftReset
+                    } else {
+                        FrameCommand::None
+                    },
+                })
+                .collect(),
+            ..MovieFile::default()
+        };
+        let words = |file: &MovieFile| file.frames.iter().map(|f| f.word).collect::<Vec<_>>();
+        let untouched = relocate_resets(movie.clone(), Resets::On);
+        assert_eq!(untouched.commands(), [(3, FrameCommand::SoftReset)]);
+        assert_eq!(words(&untouched), [1, 2, 3, 4, 5, 6]);
+
+        for (resets, at) in [
+            (Resets::Off, None),
+            (Resets::Early, Some(2)),
+            (Resets::Late, Some(4)),
+        ] {
+            let moved = relocate_resets(movie.clone(), resets);
+            assert_eq!(
+                moved.commands(),
+                at.map_or_else(Vec::new, |frame| vec![(frame, FrameCommand::SoftReset)]),
+                "{resets:?}"
+            );
+            assert_eq!(words(&moved), [1, 2, 3, 4, 5, 6], "{resets:?}");
+            assert_eq!(moved.notes.len(), 1, "the report has to say it: {resets:?}");
+        }
+
+        // A reset on frame 0 moved earlier falls off the front rather than wrapping round.
+        let first = MovieFile {
+            frames: vec![
+                FrameInput {
+                    word: 0,
+                    command: FrameCommand::SoftReset,
+                },
+                FrameInput::default(),
+            ],
+            ..MovieFile::default()
+        };
+        assert_eq!(relocate_resets(first, Resets::Early).commands(), Vec::new());
+    }
+
+    #[test]
+    fn the_experiments_are_refused_on_the_engines_they_cannot_be_run_on() {
+        for argument in ["--ppu-warmup", "--prg-ram"] {
+            let mut args = vec!["a.bk2".to_owned(), "b.nes".to_owned(), argument.to_owned()];
+            if argument == "--prg-ram" {
+                args.push("ff".to_owned());
+            }
+            let options = Options::parse(&args).unwrap_or_default();
+            assert_eq!(options.engine, Engines::Both, "the default is still both");
+            // `run` refuses before it loads anything, so the paths need not exist.
+            let error = run(&Options {
+                engine: Engines::Both,
+                ..options
+            })
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+            assert!(
+                error.contains("`--engine zaxnes` only"),
+                "{argument}: {error}"
+            );
+        }
+        assert_eq!(Resets::parse("off"), Some(Resets::Off));
+        assert_eq!(Resets::parse("sideways"), None);
+        assert!(Options::parse(&[
+            "a.bk2".to_owned(),
+            "b.nes".to_owned(),
+            "--resets".to_owned(),
+            "sideways".to_owned()
+        ])
+        .is_err());
     }
 
     #[test]
