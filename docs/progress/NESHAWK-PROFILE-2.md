@@ -574,3 +574,122 @@ RAM has no live difference at all** (`8500 total=1 live=0 stack=1 temp=0`, and i
 same). So it is the class NESHAWK-PROFILE met at frame 400 — one pixel there, four here — a picture
 difference on a frame whose memory agrees byte for byte, which is a PPU or sprite-evaluation
 difference and not a timing one. It is not this lot's and it is recorded rather than absorbed.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-2 step 4/6 done: add it to the profile, and iterate
+
+---
+
+## Step 5 — no regression
+
+### The `Standard` profile's behaviour
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to lot FCEUX-23's baseline and to NESHAWK-PROFILE's |
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test`, `dmc_tests`, `--profile standard` | **24 pass, 0 fail, 6 manual** — NESHAWK-PROFILE's and EVAL-SYNC-4's column, ROM for ROM |
+| `AccuracyCoin`, `--profile standard` | **128/147**, the same 19 failures |
+
+### The `Standard` profile's speed
+
+`bench-core --frames 1200 --warmup 120`, the `core run_frame` line only, **six interleaved rounds
+per ROM** against the parent commit `428c50e6` built from a clean `git archive` copy, the two
+binaries alternating which goes first:
+
+| ROM | parent | this commit | |
+|---|---|---|---|
+| Super Mario Bros. 3 `[USA][!!]` | 1.17028 ms/frame | 1.14410 | **−2.24 %** |
+| Mega Man 3 `[USA][!!]` | 0.90518 | 0.89578 | **−1.04 %** |
+
+Both faster, so the +1 % budget is not touched. Per-round figures: SMB3 parent 1.1720 / 1.1656 /
+1.1707 / 1.1732 / 1.1758 / 1.1644 against 1.1417 / 1.1402 / 1.1394 / 1.1368 / 1.1607 / 1.1458;
+Mega Man 3 parent 0.9061 / 0.9053 / 0.9046 / 0.8879 / 0.9075 / 0.9197 against 0.8949 / 0.8933 /
+0.8990 / 0.8923 / 0.9045 / 0.8907. **This commit is faster in eleven of the twelve rounds**, which
+is a layout effect of the same kind step 2 of NESHAWK-PROFILE measured and not a claim that the
+items made anything quicker: the `Standard` arms are untouched source.
+
+### The `NesHawkCompat` profile on the public ROMs, and it went **up**
+
+| | NESHAWK-PROFILE | this lot |
+|---|---|---|
+| the 30 DMC/DMA/APU ROMs | 19 pass, 5 fail, 6 manual | **19 pass, 5 fail, 6 manual** — unchanged |
+| `AccuracyCoin` | 120/147 | **122/147** |
+
+The two rows gained are **`DMA + $2002 Read`** and **`DMA + $4015 Read`**, which NESHAWK-PROFILE's
+step 3 listed among the eight the profile cost. Six are still failing against the standard
+profile's column — `DMA Landing on Write`, `DMC DMA + OAM DMA`, `DMC Reload Timing`, `Delta
+Modulation Channel`, `Implied Dummy Reads`, `Interrupt flag latency` — and every one of them places
+a DMC fetch against another access to the cycle, which items 1a, 1b, 1c and 7 all move.
+
+That the NesHawk profile became *more* accurate on two rows is reported as the measurement it is,
+not as a goal: it is still the profile that fails five public ROMs the standard one passes, and the
+reason the two rows moved is that item 1c takes a cycle off a fetch whose request landed on a write
+cycle, which is what those two rows are built to place.
+
+### *Faxanadu*, both dumps, both profiles
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| `[USA][!!]` against `fax-usa.txt` | **207** of 832 lines, last agreeing **83 200** | **207** of 832, last agreeing **83 200** |
+| `[USA][Rev 1][!!]` against `fax-rev1.txt` | **220** of 832, last agreeing **83 200** | **220** of 832, last agreeing **83 200** |
+| all 832 lag counts, both dumps | agree | agree |
+| the final picture, `[USA][!!]` | `03d7e6a1…` | `03d7e6a1…` |
+| the final picture, `[Rev 1]` | `13920624…` | `13920624…` |
+
+Every figure is EVAL-SYNC-4's and NESHAWK-PROFILE's, to the line and to the hash, and the two
+profiles' final pictures are **the same bytes** — on this movie the profile still never fires.
+
+### The suites
+
+| | passed | failed |
+|---|---|---|
+| **`zax-nes`**, release, `--include-ignored` | **1 201** | 0 |
+| **`zax-harness`**, release, feature off, `--include-ignored` | **127** | 0 |
+| the same with **`dma-census`** | **127** | 0 |
+| the same with **`fceux-core`** (`--test-threads 1`) | **147** | 0 |
+
+`zax-nes` goes from NESHAWK-PROFILE's 1 199 by this lot's two new item tests (1c and 7).
+`zax-harness` is unchanged at 127 and 147: the census adds an option, not a test target, and it is
+behind a feature.
+
+`cargo fmt --all --check` is clean and `cargo clippy --workspace --all-targets -- -D warnings` is
+clean in **three** configurations: feature off, with `fceux-core`, and with `dma-census`.
+
+### The whole movie, for the record
+
+`--trace-step 100` over all 156 312 frames against `kirby-jp.txt`, which carries a checksum and a
+lag count every hundred frames and **no `ram=` field**:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| checksum lines agreeing | 2 of 1 563 | 1 of 1 563 |
+| all 1 563 lag counts | agree | agree |
+| the five long-run screenshots (1 000, 10 000, 30 000, 60 000, 83 000) | 0 MATCH (335 px at 1 000) | **1 MATCH** (frame 1 000) |
+
+The checksum column cannot discriminate and is reported only so that it is not missing: a checksum
+covers the whole 2 KiB including the stack page and `$0000-$001F`, which is exactly the
+reading-instant artefact, so it disagrees on nearly every line *in the stretch where the live
+memory agrees byte for byte* — 8 175 of 8 901 frames of that stretch have no live difference at all.
+
+### A note the owner needs: the disk
+
+`G:` had **9.8 GB** free when this lot started and **2.1 GB** at step 5, which is under the brief's
+5 GB stop. Of that, this lot's own artefacts account for well under a gigabyte — the second
+`zax-nes` rlib the `dma-census` feature needs, the parent commit's `git archive` copy and its build
+for `bench-core` (333 MB, deleted again), and about 25 MB of tables and traces. Measured along the
+way: 9.8 at the start, 9.0 after step 1, 6.5 mid-step-2, **8.3 after deleting a 1.9 GB `debug`
+build cache left in `target-ev` by an earlier lot**, 8.0 after step 4's pictures, and 2.1 by the
+end of step 5 — a six-gigabyte fall during runs that write a handful of PNGs and no build at all.
+So something outside this worktree is consuming `G:`, and it is flagged rather than absorbed. What
+the stop rule cost: nothing was skipped — `golden-core`, `bench-core` against a clean parent build,
+the test ROMs on both profiles, *Faxanadu* on both dumps and both profiles, and all four suites ran
+— but no further build was made after it was noticed, and the three clippy configurations above
+were run before any of them could be.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-2 step 5/6 done: no regression
+
+---
+
