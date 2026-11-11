@@ -189,8 +189,8 @@ fn the_pack_says_its_states_carry_and_keeps_its_version() {
 }
 
 /// Every pack says how its states carry (`tools/pack_states.py`, checked by the survey of
-/// `portable_pack_survey_tests.rs`): both ways, but Kirby's only from without the hack to with it
-/// (its rooms are laid out otherwise in video memory, and redrawn only at the next room); Zelda
+/// `portable_pack_survey_tests.rs`): both ways. Kirby's hack calls the game's wait from its own
+/// code: a state made there loses that return without the hack (unwind 1, the wait's PHA); Zelda
 /// II's world map is redrawn by the game's own map initialisation (`$0736` 05 -> 02).
 #[test]
 fn every_pack_says_how_its_states_carry() {
@@ -202,7 +202,8 @@ fn every_pack_says_how_its_states_carry() {
         let states = patch.states();
         let kirby = patch.name.contains("Kirby");
         assert!(states.to_on, "{}", patch.name);
-        assert_eq!(states.to_off, !kirby, "{}", patch.name);
+        assert!(states.to_off, "{}", patch.name);
+        assert_eq!(states.unwind, kirby.then_some(1), "{}", patch.name);
         let redraw: &[RedrawStep] = if patch.game == "Zelda II" {
             &[RedrawStep {
                 address: 0x0736,

@@ -94,13 +94,17 @@ which already holds every field but the context (Mega Man 6's damage hook, `$8F7
   already built by `tools/pack_states.py`): `to_off`, a state made with the hack at the idle loop
   loads without it, no question asked; `to_on`, one made without it loads with it; `redraw`, CPU
   RAM writes run on a state restored the other way, to send the game to a step that redraws its
-  screen. The section is not part of the pack's version, so adding one keeps old states valid.
+  screen; `unwind`, for a hack that calls the game's wait from its own code, the bytes the wait
+  pushes above its return address: a state made there with the hack, restored without it, loses
+  the return into the hack's code (`$2000-$3FFF`), which the original ROM would run as garbage.
+  The section is not part of the pack's version, so adding one keeps old states valid.
   Packs without it, and states not made at the idle loop, keep the question (load as set, or
   set the hack as the state had it). Every built-in pack has it, from a survey of each game
   played on with and without its hack (`zax-nes/tests/portable_pack_survey_tests.rs`, pictures
-  checked by eye where they differed): both ways, but Kirby's only from without the hack to with
-  it (a hack state loaded without it shows the room laid out for the hack until the next room);
-  Zelda II's world map redrawn by `$0736` 05 -> 02 (moved from `builtin_patches.rs`).
+  checked by eye where they differed, gameplay reached with TASVideos movies where the generic pad
+  stayed in menus): both ways. Kirby's with `unwind 1` (its "No slowdown" calls the wait `$C067`,
+  whose PHA is the byte above; without it the stack returned into `$2018`, the picture broken until
+  the next room); Zelda II's world map redrawn by `$0736` 05 -> 02 (moved from `builtin_patches.rs`).
   `portable_state_tests.rs` checks every pack says so: a pack rebuilt from its repository without
   `Pack.states` fails it.
 

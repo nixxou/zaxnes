@@ -1275,10 +1275,12 @@ impl NesCore {
     }
 
     /// Runs the `after_other_way_state` of `patch` (the built-in patch made for the ROM of a
-    /// state restored the other way), then the redraw recipe of its pack, on CPU RAM.
+    /// state restored the other way), then the redraw recipe of its pack, on CPU RAM; a state of
+    /// the hack restored without it (`to_off`) also loses the hack's return (its pack's unwind).
     fn put_right_other_way_state(
         &mut self,
         patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
+        to_off: bool,
     ) {
         let Some(known) = patch else {
             return;
@@ -1286,7 +1288,11 @@ impl NesCore {
         if let Some(fix) = known.after_other_way_state {
             fix(self.bus.ram_mut());
         }
-        known.states().redraw(self.bus.ram_mut());
+        let states = known.states();
+        if to_off {
+            states.unwind(self.bus.ram_mut(), &mut self.cpu.s);
+        }
+        states.redraw(self.bus.ram_mut());
     }
 
     /// The margin decoder of the game loaded: its built-in patch's, or one made for the ROM
@@ -2035,7 +2041,7 @@ impl NesCore {
         // A state made the other way (the patch ran and does not now, or the reverse).
         let made_with_patch = Self::is_wide_state_version(version);
         if made_with_patch != patch.1.is_some() {
-            self.put_right_other_way_state(rom_patch);
+            self.put_right_other_way_state(rom_patch, made_with_patch);
         }
         // A patch that boots the extension needs its window, whatever the state left it as.
         if !self.bus.ppu().wide().unlocked() {

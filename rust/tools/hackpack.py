@@ -26,7 +26,9 @@ each other.
 `states` adds the states section after the hack: `to_off`, a state made with the hack at the
 game's wait for the next frame loads without it, no question asked; `to_on`, one made without it
 loads with it; `redraw`, the CPU RAM writes that put right a state restored the other way, each
-(address, byte expected there or None, byte written). `tools/pack_states.py` sets the section of
+(address, byte expected there or None, byte written); `unwind`, for a hack that calls the game's
+wait from its own code, the bytes the wait pushes above its return address (a state made there with
+the hack loses the hack's return when restored without it). `tools/pack_states.py` sets the section of
 a pack already built. The section is not part of the pack's version: adding one keeps the states made
 with the pack valid.
 """
@@ -99,12 +101,14 @@ class Pack:
         self.to_off = False
         self.to_on = False
         self.redraw = []
+        self.unwind = None
 
-    def states(self, to_off=False, to_on=False, redraw=()):
+    def states(self, to_off=False, to_on=False, redraw=(), unwind=None):
         """The states section: see the module."""
         self.to_off = to_off
         self.to_on = to_on
         self.redraw = list(redraw)
+        self.unwind = unwind
 
     def component(self, name):
         """The component called `name` ('widescreen', or the key of an aid's option)."""
@@ -147,18 +151,22 @@ class Pack:
                 for bank, address, length in group.checks:
                     offset = offset_of(bank, address)
                     out += place(bank, address, banks) + bytes([length]) + bytes(data[offset:offset + length])
-        if self.to_off or self.to_on or self.redraw:
-            out += section(STATES_SECTION, states(self.to_off, self.to_on, self.redraw))
+        if self.to_off or self.to_on or self.redraw or self.unwind is not None:
+            out += section(STATES_SECTION, states(self.to_off, self.to_on, self.redraw, self.unwind))
         return bytes(out)
 
 
-def states(to_off, to_on, redraw):
+def states(to_off, to_on, redraw, unwind=None):
     """The payload of the states section."""
     assert len(redraw) < 256
-    out = bytearray([(1 if to_off else 0) | (2 if to_on else 0), len(redraw)])
+    flags = (1 if to_off else 0) | (2 if to_on else 0) | (0 if unwind is None else 4)
+    out = bytearray([flags, len(redraw)])
     for address, expected, value in redraw:
         assert 0 <= address < 0x800, f'${address:04X}: not CPU RAM'
         out += struct.pack('<HBBB', address, 0 if expected is None else 1, expected or 0, value)
+    if unwind is not None:
+        assert 0 <= unwind < 254, unwind
+        out.append(unwind)
     return bytes(out)
 
 

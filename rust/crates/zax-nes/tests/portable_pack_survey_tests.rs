@@ -40,12 +40,14 @@ fn movie() -> Option<&'static [u16]> {
 
 /// The frames the states are made at: `ZAXNES_SURVEY_AT` (`,`-separated) or [`SAVES`].
 fn saves() -> Vec<usize> {
-    std::env::var("ZAXNES_SURVEY_AT")
-        .ok()
-        .map_or_else(
-            || SAVES.to_vec(),
-            |list| list.split(',').filter_map(|f| f.trim().parse().ok()).collect(),
-        )
+    std::env::var("ZAXNES_SURVEY_AT").ok().map_or_else(
+        || SAVES.to_vec(),
+        |list| {
+            list.split(',')
+                .filter_map(|f| f.trim().parse().ok())
+                .collect()
+        },
+    )
 }
 
 fn input(frame: usize) -> u16 {

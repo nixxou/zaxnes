@@ -43,12 +43,18 @@
 //!
 //! | Field | Contents |
 //! |---|---|
-//! | flags | u8, bit 0: a state made with the hack, at the game's wait for the next frame, goes on without it; bit 1: one made without it goes on with it (no question asked on loading either) |
+//! | flags | u8, bit 0: a state made with the hack, at the game's wait for the next frame, goes on without it; bit 1: one made without it goes on with it (no question asked on loading either); bit 2: an unwind byte follows the redraw steps |
 //! | redraw | u8 count, each: u16 CPU RAM address, u8 condition (0 always, 1 when the byte there is the next one), u8 the byte compared, u8 the byte written |
 //!
 //! The redraw steps run on a state restored the other way (made with the widescreen while it is
 //! off, or the other way round): they send the game back to a step that redraws the screen, the
 //! video memory of one mode not being laid out as the other expects.
+//!
+//! The unwind byte is for a hack whose code calls the game's wait itself (a hook in place of the
+//! game's own call): a state made there with the hack has, under the bytes the wait pushed (that
+//! many), a return into the hack's code, which the original ROM does not have. Restored without
+//! the hack, that return is taken off the stack, the game's wait then returning where its own
+//! call would.
 
 /// The magic a pack starts with (a BPS patch starts with `BPS1`).
 pub const MAGIC: &[u8; 4] = b"ZXPK";
@@ -88,6 +94,9 @@ pub struct States {
     pub to_on: bool,
     /// The writes that put right a state restored the other way.
     pub redraw: Vec<RedrawStep>,
+    /// The bytes the game's wait pushed above its return address, when the hack calls the wait
+    /// from its own code (see the module's documentation).
+    pub unwind: Option<u8>,
 }
 
 /// A write to CPU RAM of a pack's redraw recipe.
@@ -117,6 +126,25 @@ impl States {
         }
     }
 
+    /// A state made with the hack restored without it: when the return under the bytes the
+    /// wait pushed goes into the hack's code (the execution zone, $2000-$3FFF), it is taken off
+    /// the stack (`ram`, CPU RAM; `s`, the stack pointer).
+    pub fn unwind(&self, ram: &mut [u8], s: &mut u8) {
+        let Some(depth) = self.unwind else {
+            return;
+        };
+        let top = 0x0101 + usize::from(*s);
+        let at = top + usize::from(depth);
+        let Some(&[_, high]) = ram.get(at..at + 2).filter(|_| at < 0x01FF) else {
+            return;
+        };
+        if !(0x20..0x40).contains(&high) {
+            return;
+        }
+        ram.copy_within(top..at, top + 2);
+        *s = s.wrapping_add(2);
+    }
+
     fn read(payload: &'static [u8]) -> Option<Self> {
         let mut reader = Reader {
             bytes: payload,
@@ -140,10 +168,16 @@ impl States {
                 value,
             });
         }
+        let unwind = if flags & 4 != 0 {
+            Some(reader.u8()?)
+        } else {
+            None
+        };
         (reader.at == payload.len()).then_some(Self {
             to_off: flags & 1 != 0,
             to_on: flags & 2 != 0,
             redraw,
+            unwind,
         })
     }
 }
@@ -791,6 +825,25 @@ mod tests {
         assert!(HackPack::read(&PACK[..PACK.len() - 1]).is_none());
         let bare = HackPack::read(&PACK[..12]).expect("the hack alone");
         assert_eq!(bare.states, States::default());
+    }
+
+    /// The unwind byte: a return into the execution zone under the wait's pushed byte is taken
+    /// off the stack; one into the ROM is left.
+    #[test]
+    fn the_unwind_byte_takes_the_hack_off_the_stack() {
+        const PACK: &[u8] = &[
+            b'Z', b'X', b'P', b'K', 1, 1, b'T', 0, 0, 0, 0, 0, // the hack
+            1, 3, 0, 5, 0, 1, // states: to_off, unwind, no step, 1 byte pushed
+        ];
+        let states = HackPack::read(PACK).expect("a pack with an unwind").states;
+        assert_eq!(states.unwind, Some(1));
+        let mut ram = vec![0; 0x800];
+        ram[0x01FB..0x0200].copy_from_slice(&[0x07, 0x18, 0x20, 0x8E, 0xE4]);
+        let mut s = 0xFA;
+        states.unwind(&mut ram, &mut s);
+        assert_eq!((s, &ram[0x01FD..0x0200]), (0xFC, &[0x07, 0x8E, 0xE4][..]));
+        states.unwind(&mut ram, &mut s);
+        assert_eq!(s, 0xFC, "a return into the ROM stays");
     }
 
     /// A format 2 pack: NTSC, mapper 1; component widescreen: group "core" (a hook in the last
