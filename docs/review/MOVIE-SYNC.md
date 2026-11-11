@@ -121,6 +121,13 @@ compared, on both dumps, and Zaxnes's lag count over those 83 218 frames is **13
 **So a third engine would buy nothing.** `NesHawk` would be integrated to play `.bk2` movies
 accurately, and Zaxnes already does. The recommendation is §6.
 
+**Lot NESHAWK-PROFILE-6 is where the *Kirby* `.bk2` stands now: frame 45 095 of 156 312.** Q-182,
+the one question lot NESHAWK-PROFILE-5 could not answer, is answered by measurement against the
+item that raised it — a NesHawk DMC reload costs **four** cycles at every slip, so item 1c is
+retracted and item 11 is on — and the movie goes from 8 005 to **45 095**. What it parts on now is
+not a DMA cost at all but the DMC output unit's **bit phase** at a `$4015` restart, which is item
+6's ground. §4k.
+
 **EVAL-SYNC-2 qualifies the second answer and leaves the third standing.** A second `.bk2` — an
 MMC3 game, *Hoshi no Kirby*, 156 312 frames with **seven resets**, which syncs to its ending on
 `BizHawk` 2.11.1 — **does not sync on Zaxnes**: the two machines are already running different
@@ -1659,6 +1666,63 @@ is item 10's 7 165 dots over three. NESHAWK-PROFILE-4's reported "1 142 passed, 
 count of a run that **aborted** on it. Fixed in the stronger form — the gap must now be *exactly*
 item 10's — so the invariant still fails the moment a DMC item reaches the common path. The suite
 is **1 205** passing.
+
+---
+
+## 4k. Q-182 answered, item 1c retracted, item 11 on: frame 45 095 (NESHAWK-PROFILE-6)
+
+### The result first
+
+**The question §4j shipped item 11 off and waiting for is answered, against the item that asked
+it.** A NesHawk DMC reload fetch costs the CPU **four** cycles whatever the CPU was writing on the
+request cycle, so **item 1c is retracted** and **item 11 goes on** — and *Kirby* goes from parting
+at frame 8 005 to parting at frame **45 095**.
+
+| | |
+|---|---|
+| what Q-182 asked | whether a reload whose request lands on an **odd** run of write cycles costs NesHawk three cycles (item 1c, derived from `DMCUnit.Run`, `RunCpuOne`'s `+2` and `MOS6502X`'s write microstep) or four (what one frame-11 measurement said), when the number that would settle it — the cycle BizHawk's Lua reports a **DMA** read on — was not pinned |
+| how it is answered without that number | by **two CPU accesses that bracket one fetch**. Of frame 11's `$40xx` accesses, every **write** lands at residual **0** against BizHawk's own up to and including the `$4007` write the disputed request falls on, and the `$4015` read 252 cycles later lands at **+1**. Exactly one fetch lies between them. Both figures are differences of two CPU accesses *within* each machine, so no DMA-read calibration enters |
+| the whole table, by slip | 0 → **4**, 1 → **4**, 2 → **4**, 3 → **4**. `PLP` is a four-cycle instruction and takes **eight** across the disputed fetch, on BizHawk's own bus stream |
+| what the derivation missed | `RunCpuOne`'s closing `if (!cpu.RDY && !dmc_dma_exec && !oam_dma_exec) cpu.RDY = true;`. `DMCUnit.Run()` lowers `RDY` from `RunOneFirst()`, before `ExecuteOne()`, but `dmc_dma_exec` is still false on the request cycle — so `RDY` goes straight back up at the end of it, and the write microstep the odd-slip cycle hung on decides nothing. The `+2` still fires while the CPU writes through the countdown, and it buys back exactly what letting those writes through cost |
+| the movie | `step1` **400**, `step1b` **1 100**, `step1c` **10 000**, `step1d` **30 000**, `step1e` **45 095**. **8 005 → 45 095**, 5.6 times further |
+| the cost | **one** `AccuracyCoin` row of the NesHawk profile, `DMA + $4015 Read`: 122/147 → **121/147**. `Standard` keeps it (128/147 unchanged) |
+| and `Standard` | `golden-core` **byte-identical**, every suite unchanged, and the bench **−0.86 %** and **−0.35 %** against `428c50e6` |
+
+**This is the third time in this series that a reading of the source lost to a measurement of the
+program** — item 8 (§4i), the branch-interrupt quirk (§4h) and now item 1c — and all three
+readings were verbatim and checked. The rule the recipe already states is earning its place:
+build the experiment before implementing what the source seems to say.
+
+### The instrument that made it answerable
+
+`q182b.lua` logs BizHawk's **complete** System Bus stream — reads, writes and execute-flagged
+fetches, each with `emu.totalexecutedcycles()` — for a list of **whole frames**, where `q182.lua`
+logged 14 cycles after one write. The frames are chosen from this core's own census rather than
+guessed: over frames 10-2 000 the reload slips are 0 (34 275), 1 (2 114), 2 (416) and 3 (2), and
+**frame 11 alone carries 0, 1 and 2**. `q182c.lua` is the same with the callbacks registered
+**late**, which is what makes a window at frame 45 000 affordable at all. Both texts are in
+`docs/review/NESHAWK-PROFILE-6-SCRIPTS.md`.
+
+The census grew one column to meet them, under the `dma-census` feature: a fetch line now carries
+the **PC of the instruction it happened inside and that instruction's opcode-to-opcode gap**, so
+`gap_bizhawk - (gap - cost)` is what NesHawk charged — no opcode cycle table, no calibration.
+
+### Where the movie now parts, and what it is not
+
+Frame **45 096**, and the round that chased it says plainly that **the residual is no longer a DMA
+cost**:
+
+| | |
+|---|---|
+| the ledgers | frames 45 080-45 083 are **exact**, every event. The jitter starts on frame 45 085 — the frame whose NMI handler starts a 449-byte DPCM sample at **rate 15**, 54 cycles a bit — and it is **±4 cycles on individual `$4016` strobes**, not a drift |
+| the first differing event | the `$4015` write that restarts the sample, the CPU stream and the write-started fetch of `$FCC0` are all **exact to the cycle**. The **next** fetch is 111 cycles later here and **372** on NesHawk: the DMC **output unit** owed 3 bits where NesHawk's owed about 7 |
+| so what it is | the output unit's **bit phase** at a `$4015` restart — five bit periods, 270 cycles. No cost item can move it |
+| and what moves it | **item 6**, the end-of-sample aborts (`fill_glitch`, `fill_glitch_2`, `pending_disable`), which `docs/review/NESHAWK-PROFILE.md` already names as *"the item to try"* for a game at rate 14-15 with a short sample — which is exactly what frame 45 085 is. The arithmetic that eliminated item 6 for frames 1-10 000 does not hold here |
+
+Item 6 is a change to `DmcChannel`'s end-of-sample state and its savestate, with thirty ROMs and
+`AccuracyCoin` to re-measure on both profiles: a lot of its own. What this one leaves for it is the
+frame (**45 085**, not 45 096), the quantity (**bits owed at a `$4015` restart: 3 against ~7**) and
+the instrument that measures it at any frame.
 
 ---
 

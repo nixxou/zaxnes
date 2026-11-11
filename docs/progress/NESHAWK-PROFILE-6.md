@@ -13,9 +13,12 @@ the measurement instead of re-reading the source, and the measurement is unambig
       whole chosen frames; joined with this core's own census it gives, per fetch, what each machine
       charged. **A NesHawk reload costs four cycles at every slip, 0 to 3** — item 1c is
       **retracted**, item 11 goes **on**.
-- [ ] 2. Rounds against the references.
-- [ ] 3. No regression.
-- [ ] 4. Report and final pass.
+- [x] 2. Rounds against the references. **One of five.** It isolates the residual to the DMC
+      **output unit's bit phase** at a `$4015` restart — not a DMA cost — and names **item 6** as
+      what moves it. *Kirby* parts at **45 095**.
+- [x] 3. No regression. `Standard` **byte-identical** and **faster** than `428c50e6`; the NesHawk
+      profile keeps every ROM NesHawk passes and loses **one** `AccuracyCoin` row, named.
+- [x] 4. Report and final pass.
 
 ## The environment this lot runs in
 
@@ -352,3 +355,57 @@ disk changed is **where** the parent was built. `C:` ended at 12 GB and `G:` at 
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-6 step 3 done: Standard byte-identical and faster, one AccuracyCoin row named
+
+---
+
+## Step 4 — report and final pass
+
+### The documents
+
+| | |
+|---|---|
+| `docs/review/MOVIE-SYNC.md` | **§4k** added — Q-182 answered, item 1c retracted, item 11 on, frame 45 095, and what the movie parts on now. The short version's *Kirby* paragraph updated to 45 095 |
+| `docs/review/NESHAWK-PROFILE.md` | the banner, the three-sentence summary, the item table (item 1c's row **gone**, item 11's marked on), the "which item closed *Kirby*" table (a frame-45 095 row), the candidates table (item 1c moved there as a **retraction**, with what the derivation missed), the `AccuracyCoin` history (121/147 and which row), three new traps, and the cost-of-two-chips table |
+| `docs/review/NESHAWK-PROFILE-6-SCRIPTS.md` | **new**: `q182b.lua` and `q182c.lua` in full, `bk2cyc3.lua`'s three changed lines, the census column's contract, and how to read a reload out of the stream (an opcode fetch is reported twice, a DMA re-read only once, and a write shares its cycle with the re-read the `+2` is paying for) |
+| `spec/changes/Q-182.md` | **not touched** — this lot's rules say not to edit `spec/`. The answer is in §4k, in this note and at the retracted item's place in `timing_profile.rs`; closing the ticket is the owner's |
+
+### fmt, clippy and the suites
+
+| | |
+|---|---|
+| `cargo fmt -p zax-nes -p zax-harness -- --check` | clean |
+| `cargo clippy -p zax-nes -p zax-harness --release --all-targets -- -D warnings` | clean; and again with `--features dma-census`, which is the only build the new census column exists in |
+| `cargo test -p zax-nes -p zax-harness --release` | **75 targets, 1 321 passed, 0 failed, 12 ignored** — counted by summing the per-target `test result:` lines and grepping for `failed` and `FAILED`, which is the trap NESHAWK-PROFILE-4's short count set |
+| the same `--features zax-harness/fceux-core` | **75 targets, 1 331 passed, 0 failed, 22 ignored** |
+| the same `-- --ignored`, with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `ZAXNES_PROFILES` set | **12 passed, 0 failed** |
+
+### The brief's rules, checked
+
+| | |
+|---|---|
+| the `Standard` path must not change behaviour or speed | `golden-core` **byte-identical**; the bench **−0.86 %** and **−0.35 %** against `428c50e6`. Both removed reads were inside a `false` constant's arm, so nothing was emitted to remove |
+| safe Rust only | no `unsafe` added; `zax-nes` keeps `#![forbid(unsafe_code)]` |
+| generics and associated constants, no runtime flags in hot paths | the lot **removes** an associated constant and adds none. Item 11 is read at one site, `DmcChannel::reset`, once per machine |
+| diagnostic hooks behind an off-by-default cfg/feature | the census's new `pc$XXXX gap=` group is inside `#[cfg(feature = "dma-census")]` code, on a `DmcFetch` line alone; nothing else was added |
+| no downloads | none. BizHawk read through `raw.githubusercontent.com` and run from `ext-tools` |
+| nothing staged that must not be | the four commits carry source, tests and documents only. `git status` shows `rust/target-ev/` untracked and nothing else |
+| no user-name paths in committed files | the Lua scripts' own `G:/3DSen/...` output paths are the owner's shared folders, not a user directory; the scratch paths used while measuring are in no committed file |
+
+### What this lot did not do, said plainly
+
+* **It did not reach frame 156 312**, and it stopped the rounds at one of five. The reason is in
+  step 2: the residual stopped being a DMA cost, and what it became — the DMC output unit's bit
+  phase at a `$4015` restart — is **item 6**, a lot's worth of work on `DmcChannel`'s
+  end-of-sample state and its savestate with thirty ROMs to re-measure on both profiles. A second
+  round would have re-measured the same five bit periods.
+* **It did not close Q-182's ticket**, only answered it; `spec/` is out of this lot's bounds.
+* **It did not keep item 1c under question.** The item is gone, not disabled: a constant whose
+  value is `false` on both profiles is not an item, and the whole derivation is preserved in the
+  candidates table so that nobody re-derives it.
+* **The one `AccuracyCoin` row is a real cost and is not smoothed.** `DMA + $4015 Read` was
+  passing on the NesHawk profile and now fails. `Standard` keeps it, NesHawk's own run never
+  reaches that page, and the trade is 37 090 frames of the movie the profile exists for.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-6 step 4 done: the documents, the Lua texts, and the final pass

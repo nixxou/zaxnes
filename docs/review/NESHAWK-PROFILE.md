@@ -1,20 +1,21 @@
 # The two timing profiles of the 2A03, and how to add an item to the NesHawk one
 
-Lots **NESHAWK-PROFILE**, **NESHAWK-PROFILE-2**, **NESHAWK-PROFILE-3**, **NESHAWK-PROFILE-4** and
-**NESHAWK-PROFILE-5**, branch `feat/neshawk-profile`, base `b604dc83` (lot EVAL-SYNC-4). The
-working is `docs/progress/NESHAWK-PROFILE.md`, `-2.md`, `-3.md`, `-4.md` and `-5.md`; the result in
-context is `docs/review/MOVIE-SYNC.md` §4f to §4j, and the instruments the third lot needed — which
-the fourth and fifth reused unchanged — are in `docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`.
+Lots **NESHAWK-PROFILE** through **NESHAWK-PROFILE-6**, branch `feat/neshawk-profile`, base
+`b604dc83` (lot EVAL-SYNC-4). The working is `docs/progress/NESHAWK-PROFILE.md` and `-2` to `-6`;
+the result in context is `docs/review/MOVIE-SYNC.md` §4f to §4k, and the instruments are in
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`, `-5-SCRIPTS.md` and `-6-SCRIPTS.md`.
 
-> **NESHAWK-PROFILE-5 added an item and did not enable it, which is the lot's whole result.** Item
-> 11, the DMC's power-on timer, is NesHawk's behaviour beyond doubt — `DMCUnit`'s constructor sets
-> `timer = 1020`, and with it every sample fetch of *Kirby*'s frame 11 lands at a constant offset
-> from BizHawk's own per-byte ledger where this core drifts 211 cycles out of it. Enabled on its
-> own it takes that movie from frame **8 005** back to frame **925**, which is where it parted
-> before this profile existed, and moves **no other measurement on either profile at all**. So it
-> ships implemented, tested and **off** (`NesHawkCompat::DMC_POWER_ON_TIMER = 0`), and **Q-182** is
-> the one question that has to be answered before it can be turned on. §4j of
-> `docs/review/MOVIE-SYNC.md` has the trade.
+> **NESHAWK-PROFILE-6 answered Q-182 by measurement, retracted item 1c, and turned item 11 on.**
+> A NesHawk DMC reload fetch costs the CPU **four** cycles whatever the CPU was writing on the
+> request cycle, so item 1c's odd-slip cycle is not a NesHawk behaviour at all — and with it gone
+> item 11 (`DMC_POWER_ON_TIMER = 1019`) pays: *Kirby* goes from parting at frame **8 005** to frame
+> **45 095**. The measurement is calibration-free, which is what Q-182 was waiting for: of frame
+> 11's `$40xx` accesses every **write** lands at residual 0 against BizHawk's own up to and
+> including the `$4007` write the disputed request falls on, and the `$4015` read 252 cycles later
+> lands at +1, with exactly one fetch between them. It costs **one** `AccuracyCoin` row of this
+> profile (`DMA + $4015 Read`, 122/147 → 121/147; `Standard` keeps it). §4k of
+> `docs/review/MOVIE-SYNC.md` has the trade, and NesHawk's own `AccuracyCoin` run leaves that row
+> `NOT RUN`, so the recipe's gate does not fire.
 
 ## What this is, in three sentences
 
@@ -22,9 +23,9 @@ Zaxnes's core is generic over a **timing profile**: `zax_nes::Standard` is the 2
 emulated, and `zax_nes::NesHawkCompat` is one that makes BizHawk NesHawk's choices where they
 differ. The `.bk2` player selects the second automatically when a movie's `Core` header says
 `NesHawk`, and nothing else ever does. With it, the *Hoshi no Kirby* `.bk2` that parted at frame
-926 replays with **no live difference from BizHawk's own work RAM until frame 8 005**, and both
-*Faxanadu* dumps agree on **247** and **314** of their 832 checksum lines where the standard
-profile manages 207 and 220.
+926 replays with **no live difference from BizHawk's own work RAM until frame 45 095** of 156 312,
+and both *Faxanadu* dumps agree on **247** and **314** of their 832 checksum lines where the
+standard profile manages 207 and 220.
 
 > **NESHAWK-PROFILE-4 changed the headline, and downwards for one movie.** Lot NESHAWK-PROFILE-3
 > took *Kirby* to frame **18 321** with item 8, a one-CPU-cycle lag of the whole /NMI line, and
@@ -40,11 +41,12 @@ profile manages 207 and 220.
 
 **The NesHawk profile is not the more accurate chip.** On every item below, Zaxnes's own profile
 agrees with Mesen 2 and with the nesdev wiki and the NesHawk one does not; the NesHawk profile
-**fails five public test ROMs and five `AccuracyCoin` rows that the standard profile passes**
+**fails five public test ROMs and seven `AccuracyCoin` rows that the standard profile passes**
 (`docs/progress/NESHAWK-PROFILE.md` step 3 has the first table, each failure traced to the item
 that causes it). `AccuracyCoin` went 120/147 at NESHAWK-PROFILE, 122/147 at NESHAWK-PROFILE-2,
 **118/147** at NESHAWK-PROFILE-3's item 8, **back to 122/147** when NESHAWK-PROFILE-4 retracted it,
-and **122/147** still after NESHAWK-PROFILE-5, which moved no suite at all; `ppu_vbl_nmi`,
+**122/147** still after NESHAWK-PROFILE-5, which moved no suite at all, and **121/147** after
+NESHAWK-PROFILE-6 retracted item 1c — the one row being `DMA + $4015 Read`; `ppu_vbl_nmi`,
 `vbl_nmi_timing` and `cpu_interrupts_v2` are **11/11, 7/7 and 6/6 on both
 profiles** again. It exists so that a movie recorded against those choices can be replayed against
 them, which is a different job from being right.
@@ -64,9 +66,8 @@ before the profile existed — not an equivalent of it, the same source.
 | `DMC_FETCH_HAS_TWO_DUMMIES` (1b) | a fetch is a **fixed four** cycles — halt, two re-reads, fetch — with no get/put alignment, there being no `% 2` on that path | `APU.cs` `dmc_dma_countdown = 3`, `RunDMCHaltFetch` | `nes_bus.rs` `promote_dmc_wait`, `dmc_fetch_cycles`, `run_dma`, `dma_cycle`, `is_a_lone_dmc_fetch` |
 | `DMC_LENGTH_LAGS_THE_FETCH` (2) | the sample length, the loop and the IRQ land **three cycles after** the fetch, so `$4015` bit 4 stays set across them | `APU.cs` `DMCUnit.Fetch` (`dmc_reload_countdown = 3`) and `RunOneLast` | `apu/dmc_channel.rs` `supply_byte`, `step_reload_countdown`, `quiet_clocks`, the savestate; `apu/mod.rs` `step_cpu_cycle` |
 | `DMC_ENABLE_WRITES_MID_SAMPLE` (3) | a `$4015` enable with the buffer empty starts a write-style fetch **even mid-sample**, delayed by the **DMC timer's** parity and three cycles long | `APU.cs` `set_lenctr_en` (the `!sample_buffer_filled` sibling test) and `Run`'s `else` branch | `apu/dmc_channel.rs` `set_enabled`; `nes_bus.rs` `after_apu_write` |
-| `DMC_HALT_LANDS_ON_A_WRITE_CYCLE` (1c) | the halt lands on the request cycle **even when the CPU is writing on it**, so a request that falls on a run of an **odd** number of write cycles costs the fetch one cycle less than waiting for the next read cycle | `APU.cs` `DMCUnit.Run` (`RDY` lowered unconditionally), `NES.Core.cs` `RunCpuOne` (`if (!cpu.RDY && !cpu.rdy_freeze && countdown == DMC_RDY_check) countdown += 2`), `MOS6502X` `Execute.cs` (a write microstep never sets `rdy_freeze`) | `nes_bus.rs` `promote_dmc_wait`, `is_a_lone_dmc_fetch` |
 | `PPU_START_UP_DOTS_SKIPPED` (10) | the PPU's **first frame after a power-on and after a soft reset is a start-up frame of `241 * 341 - 4 = 82 177` dots**, not a whole one of 89 342 — so the first frame boundary comes **2 389 CPU cycles earlier**, and the reset does it again from the top of the frame. 7 165 dots on the NesHawk profile, which is `89 342 - 82 177` | `NES/PPU.cs` `Reset()` (`ppudead = 1`, `start_up_offset = 4`, and `regs_reset()`'s `ppur = new PPUREGS()`), `NES/PPU.run.cs` `NewDeadPPU()`, `PPU.cs` `runppu()` (which clocks the CPU throughout) — against this core's power-on at the start of vblank (Q-003) and its `Ppu2C02::soft_reset`, which does not restart the frame (Q-078) | `nes_core.rs` `power_on` and `soft_reset`, through `NesBusOf::run_ppu_start_up_dots` and `Ppu2C02::run_start_up_dots` |
-| `DMC_POWER_ON_TIMER` (11) — **implemented and OFF** | the DMC's timer powers on at a flat **1 020 CPU cycles** rather than one period of the rate in force, putting the output unit's whole phase — and the cycle every sample fetch of a game lands on — `1020 - 428 = 592` cycles further on. NesHawk's `timer = 1020` is this core's `1019`, the convention being NesHawk's-plus-one. **The shipped value is `0`**, which is one period and the line `DmcChannel::reset` always had: see the constant's note and Q-182 | `APU.cs` `DMCUnit`'s constructor (`timer = 1020` beside `timer_reload = DMC_RATE[0]`) and `Run()`; `NESSoftReset()` and `NESHardReset()`, neither of which re-seeds it | `apu/dmc_channel.rs` `reset`, reached from `nes_core.rs` `power_on` alone |
+| `DMC_POWER_ON_TIMER` (11) — **on since NESHAWK-PROFILE-6** | the DMC's timer powers on at a flat **1 020 CPU cycles** rather than one period of the rate in force, putting the output unit's whole phase — and the cycle every sample fetch of a game lands on — `1020 - 428 = 592` cycles further on. NesHawk's `timer = 1020` is this core's `1019`, the convention being NesHawk's-plus-one. **The shipped value is `0`**, which is one period and the line `DmcChannel::reset` always had: see the constant's note and Q-182 | `APU.cs` `DMCUnit`'s constructor (`timer = 1020` beside `timer_reload = DMC_RATE[0]`) and `Run()`; `NESSoftReset()` and `NESHardReset()`, neither of which re-seeds it | `apu/dmc_channel.rs` `reset`, reached from `nes_core.rs` `power_on` alone |
 | `DMC_FETCH_STALLS_AN_OAM_TRANSFER` (7) | a DMC fetch that falls **inside an OAM transfer** costs that transfer **two** cycles where this core's loses one, because NesHawk's `dmc_realign` also skips the OAM cycle *after* the fetch | `NES.Core.cs` `RunCpuOne` (the OAM block's `dmc_dma_countdown != 1 && !dmc_realign` gate, and `dmc_realign = true` on the fetch cycle) | `nes_bus.rs` `run_dma`, the `dmc_may_read` arm |
 
 **BizHawk is MIT** and nothing is copied from it: each item is written from the behaviour its source
@@ -81,6 +82,7 @@ and the standard arms, which agree with it, carry their attribution where they a
 | frame **4666** | **1c** does it, and the movie goes from parting at 4 665 to parting at **9 355** — 3 531 clean frames to 8 175 of 8 901, and 5 370 frames with a live difference to 726. **3's parity correction and 7 are *exactly* inert**: each leaves the 8 901-frame table byte-identical. `docs/progress/NESHAWK-PROFILE-2.md` step 4 |
 | frame **9354** | **8** did it, and the movie went from parting at 9 353 to running out of the reference entirely — 8 175 clean frames to 8 792 of 8 901 and 0 frames identical to the byte to 213, and a second reference then took it to 18 321. **Item 8 has since been retracted**: it is not a NesHawk difference (see below), and with it gone the movie parts at 8 005 again. The OAM alignment that looked like the next item is **eliminated by arithmetic**. `docs/progress/NESHAWK-PROFILE-3.md` steps 2 and 3 |
 | frame **8005**, and the reason it is still 8 005 | **11 does not do it, and that is a measurement and not a shrug.** The DMC's power-on phase was the first thing in the whole movie whose cycle differs once item 10 removed the drift: frames 1 to 10 — the power-on, the movie's soft reset and the first ten frames — are identical event for event and cycle for cycle on both machines, and frame 11, the first that plays a DPCM sample, has NesHawk fetching the sample's second byte 211 cycles earlier. Item 11 fixes exactly that, to the cycle, on all thirteen fetches of the frame — and **costs the movie 7 080 frames**, because the wrong phase was cancelling one cycle elsewhere. The cycle is isolated (the one reload fetch whose request lands on a write cycle) and the source refuses the item that would pay it, which is **Q-182**. `docs/progress/NESHAWK-PROFILE-5.md` steps 1 to 4 |
+| frame **45 095** | **item 1c's retraction**, with item 11. *Kirby* goes from 8 005 to 45 095 — the `step1c` and `step1d` windows reached in full and `step1e` parting at 45 095. What it parts on now is **not a DMA cost**: the `$4015` write that restarts frame 45 085's sample, the CPU stream and the write-started fetch are exact to the cycle, and the **next** fetch is 111 cycles later here against 372 on NesHawk — the DMC output unit owed 3 bits where NesHawk's owed about 7. That is **item 6**'s ground. `docs/progress/NESHAWK-PROFILE-6.md` steps 1 and 2 |
 | the **4 778-cycle drift**, and every ROM item 8 cost | **10** does it. BizHawk's own cycle ledger says its first frame is 27 392 cycles and so is the frame the movie's first reset lands in, where this core runs a whole 29 781 — and `2 * (29 781 - 27 392) = 4 778` is the constant drift NESHAWK-PROFILE-3 measured and could not explain. With item 10 the drift of the NMI entry over frames 2-1 201 is **-2 ± 5** instead of 4 776 ± 5, every one of the eleven ROMs and four `AccuracyCoin` rows item 8 cost is back, and *Faxanadu* goes to **247** and **314** of 832 — past the standard profile's own 207 and 220. *Kirby* parts at **8 005**. `docs/progress/NESHAWK-PROFILE-4.md` steps 1 and 2 |
 
 **A parity trap, written down because it cost a lot a round.** NesHawk's DMC `timer` is **this
@@ -104,7 +106,7 @@ scratch (NESHAWK-PROFILE step 1 items 5 and 6, and NESHAWK-PROFILE-2 step 3):
 | the **OAM transfer's alignment** | `NES.Core.cs`'s `sprdma_countdown` block: `if (apu.dmc.timer % 2 == 0) cpu_deadcounter = 2; else cpu_deadcounter = 1;`, so the extra cycle is decided by the parity of the **DMC's timer** and nothing in the decision looks at the cycle, where this core waits for the first get cycle | **Eliminated by arithmetic, and for every game rather than for one movie.** The DMC's timer counts down one per CPU cycle and reloads to `rates[i] - 1`, so its period is `rates[i]` — and all sixteen NTSC rates and all sixteen PAL ones are **even**. The timer's parity is therefore locked to the CPU cycle's from power-on, no reload and no `$4010` write can unlock it, and NesHawk's rule is a different *expression* of this core's rule. It was implemented, measured byte-identical over 81 frames, and reverted: a constant whose two arms are provably the same function cannot be given a differential test |
 | the **branch interrupt quirk** | `Execute.cs` `RelBranch_Stage3` sets `branch_irq_hack` for every taken non-page-crossing branch (`interrupt_pending` is assigned `false` in `Fetch1` and never assigned `true` anywhere), and `Fetch1` then skips the whole interrupt test on the instruction that follows | **Eliminated by measurement against a reading that predicted the opposite.** The interrupt-phase ROM of NESHAWK-PROFILE-3 step 2 puts every `LDA` boundary of its spin loop immediately after such a branch, and NesHawk names the `LDA` as the displaced instruction on **20 of 64** frames. This core's own rule — a taken non-page-crossing branch polls one cycle earlier, `Cpu6502::branch` — is what `cpu_interrupts_v2` `5-branch_delays_irq` states in words, and both cores pass it |
 | **item 8**, the CPU's view of /NMI a cycle late | `PPU.run.cs` `TickPPU_VBL` latches `nmi_destiny` and an `NMI_offset` read off `cpu_stepcounter` at cycle 0 of the NMI scanline and assigns `nes.cpu.NMI = true` at cycle `3 + NMI_offset`, so the assignment always lands on the dot after a CPU-cycle boundary and `Fetch1` reads it at the next one | **Implemented by NESHAWK-PROFILE-3, retracted by NESHAWK-PROFILE-4, and the retraction is the stronger result.** `ppu_vbl_nmi` `05-nmi_timing` prints *which instruction* the vblank NMI displaced, over ten lines that each move the whole test one PPU dot later, and checks the ten answers against a CRC — so it sweeps all three alignments at one-dot resolution. **NesHawk passes it**, and so does the standard profile, so NesHawk takes that NMI on the cycle this core does and no item that moves it can pass. Three shapes were implemented and measured before the conclusion was drawn (the table is `docs/progress/NESHAWK-PROFILE-4.md` step 1); all three fail it. What item 8 was really standing in for is **item 10**, the boot |
-| **item 1c's odd-slip cycle**, re-opened | `NES.Core.cs`'s `if (!cpu.RDY && !cpu.rdy_freeze && apu.dmc_dma_countdown == apu.DMC_RDY_check) apu.dmc_dma_countdown += 2;` with `DMC_RDY_check = 2`, against `MOS 6502X` `Execute.cs` where a read microstep is `rdy_freeze = !RDY; if (RDY) { … }` and a write microstep executes unconditionally and never assigns it | **Kept, and under question — Q-182.** Once item 11 put the DMC's phase on NesHawk's, *Kirby*'s frame 11 is exact on every tag except one cycle, lost at the single reload fetch whose request falls on a write cycle; charging that fetch four cycles instead of item 1c's three makes the frame exact, takes the movie from 925 to 1 100, improves three ledger counts and costs the thirty DMC/DMA ROMs nothing. **But the derivation holds**: for a slip of 1 the write on `A` leaves `rdy_freeze` false, the read on `A+1` sets it true, the `+2` is suppressed on `A+2`, and both machines resume on `A+4` — which is exactly what item 1c buys. What is **not** pinned is the cycle BizHawk's Lua reports a *DMA* read on; this tree's calibration was measured on CPU accesses only. Q-182 names the one three-line Lua run that settles it, and until then item 1c and item 11 move together or not at all |
+| **item 1c**, the odd-slip cycle — **retracted** | `NES.Core.cs`'s `if (!cpu.RDY && !cpu.rdy_freeze && apu.dmc_dma_countdown == apu.DMC_RDY_check) apu.dmc_dma_countdown += 2;` with `DMC_RDY_check = 2`, against `MOS 6502X` `Execute.cs` where a read microstep is `rdy_freeze = !RDY; if (RDY) { … }` and a write microstep executes unconditionally and never assigns it | **Retracted by NESHAWK-PROFILE-6, by measurement, and the reading was verbatim.** The item said an **odd** slip costs a reload one cycle less; NesHawk charges **four at every slip**, 0 to 3. The derivation missed `RunCpuOne`'s closing `if (!cpu.RDY && !dmc_dma_exec && !oam_dma_exec) cpu.RDY = true;` — `dmc_dma_exec` is still false on the request cycle, so `RDY` goes straight back up at the end of it and the write microstep decides nothing; the `+2` still fires while the CPU writes through the countdown and buys back exactly what letting those writes through cost. **Q-182 is answered** by two CPU accesses bracketing one fetch (every frame-11 write at residual 0 through the disputed `$4007`, the `$4015` read after it at +1), so the DMA-read calibration the ticket hung on never had to be pinned. Worth **37 090 frames** of *Kirby* and one `AccuracyCoin` row of this profile |
 | the **power-on PPU position**, **`$2002` read timing** | — | the `$2002` read timing is ruled out by measurement in NESHAWK-PROFILE step 1: *Kirby* makes **zero** `$2002` reads in the frames measured. The **power-on PPU position** was ruled out there too — "a power-on offset would have parted at frame 1" — and that was **wrong**: it is item 10, and the reason frame 1 does not part is that the game spends its first frames in a wait loop. NESHAWK-PROFILE-4 step 2 measured it instead of arguing from it |
 
 ## The instrument: `frame-trace --dmc-census`
@@ -233,9 +235,28 @@ compared only its *shape*, and the shape is all it has.
   therefore the interleaving of the whole frame, which is not a sum over fetches. Size an item to
   decide what to read next, never to decide whether to implement it.
 * **A differential test of one item can be an instrument for another.** Item 1b's test measured
-  slips 1 and 2 and asserted `[5, 5]`; item 1c makes slip 1 cost 4, so the test had to move to the
+  slips 1 and 2 and asserted `[5, 5]`; item 1c made slip 1 cost 4, so the test had to move to the
   **even** slips 2 and 4 to go on testing item 1b's own claim. That the test failed is the system
-  working: hold each item's test to a condition the *other* items do not vary.
+  working: hold each item's test to a condition the *other* items do not vary. (With item 1c
+  retracted every slip answers 5 again, and the test stays on the even slips so that it and
+  `the_reload_costs_four_cycles_at_every_slip_item_1c_retracted` keep failing for different
+  reasons.)
+
+* **Three readings of the source have now lost to a measurement of the program, and all three were
+  verbatim.** The branch-interrupt quirk, item 8 and item 1c. Each was read off the 2.11.1 tag,
+  re-checked, and wrong about what NesHawk *does* — item 1c because `RunCpuOne`'s closing
+  `cpu.RDY = true` undoes the `RDY` the request cycle lowered, which is three lines below the two
+  the derivation quoted. The lesson is not "do not read the source": it is that a reading
+  predicts and a measurement decides, and **the experiment is usually cheaper than the third
+  re-read**. Item 1c's cost two lots of a profile fitted around it.
+
+* **Measure the quantity in the frame where the two machines are still in step.** Item 1c's
+  retraction was nearly missed because the stall-by-slip table *disagreed with itself*: slip 1
+  came out 4 six times and 3 ten times. A slip is read off this core's own census, so it means
+  something only while the two CPU streams are aligned — and they are aligned only up to the
+  **first** fetch the two machines charge differently, after which the stream drifts and every
+  later slip in that frame is read against the wrong cycle. Frame 11 is the one frame known to
+  *start* in step; its first slip-1 fetch is the only trustworthy row in the table, and it says 4.
 
 * **An item whose two arms are the same function is not an item.** NesHawk expresses an OAM
   transfer's alignment on the parity of the DMC's timer and this core on the parity of the cycle,
@@ -318,9 +339,9 @@ to the game's own engine setting, and said on screen, which is what lot FCEUX-48
 
 | | |
 |---|---|
-| speed, standard profile | within the +1 % budget all five lots were held to **cumulatively**: NESHAWK-PROFILE's `bench-core` on five ROMs read -3.0 %, -3.0 %, -2.2 %, +0.5 %, +0.6 % against its parent, NESHAWK-PROFILE-2's on Super Mario Bros. 3 and Mega Man 3 read **-2.24 %** and **-1.04 %**, NESHAWK-PROFILE-3's read **+0.77 %** and **+0.40 %**, NESHAWK-PROFILE-4's **-1.25 %** and **+0.27 %**, and NESHAWK-PROFILE-5's **+2.68 %** and **+1.24 %** against its own parent, with `golden-core` byte-identical throughout. **Cumulatively since `428c50e6`, the parent of the last four lots: -1.85 % and -1.65 %** — the whole series is still faster than it started. **The amplitude of the last two lots' figures, in opposite directions, is the honest measure of what this bench can resolve**: neither lot changed a per-frame path at all, so both numbers are code layout on a machine that drifts within a run (`428c50e6`, unchanged, rose 2 % across NESHAWK-PROFILE-5's own six rounds). The cumulative figure against a fixed reference is the one to trust |
-| behaviour, standard profile | `golden-core` over 98 ROMs x 1 200 frames **byte-identical** in all five lots (`8d508070...`); `AccuracyCoin` 128/147 unchanged; 24 of 24 DMC/DMA ROMs unchanged; `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7 and `cpu_interrupts_v2` 6/6 unchanged |
+| speed, standard profile | within the +1 % budget all five lots were held to **cumulatively**: NESHAWK-PROFILE's `bench-core` on five ROMs read -3.0 %, -3.0 %, -2.2 %, +0.5 %, +0.6 % against its parent, NESHAWK-PROFILE-2's on Super Mario Bros. 3 and Mega Man 3 read **-2.24 %** and **-1.04 %**, NESHAWK-PROFILE-3's read **+0.77 %** and **+0.40 %**, NESHAWK-PROFILE-4's **-1.25 %** and **+0.27 %**, NESHAWK-PROFILE-5's **+2.68 %** and **+1.24 %** against its own parent, and NESHAWK-PROFILE-6's **-0.86 %** and **-0.35 %** against `428c50e6` itself over three interleaved rounds, with `golden-core` byte-identical throughout. **Cumulatively since `428c50e6`, the parent of the last five lots: -0.86 % and -0.35 %** — the whole series is still faster than it started. **The amplitude of the last two lots' figures, in opposite directions, is the honest measure of what this bench can resolve**: neither lot changed a per-frame path at all, so both numbers are code layout on a machine that drifts within a run (`428c50e6`, unchanged, rose 2 % across NESHAWK-PROFILE-5's own six rounds). The cumulative figure against a fixed reference is the one to trust |
+| behaviour, standard profile | `golden-core` over 98 ROMs x 1 200 frames **byte-identical** in all six lots (`8d508070...`); `AccuracyCoin` 128/147 unchanged; 24 of 24 DMC/DMA ROMs unchanged; `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7 and `cpu_interrupts_v2` 6/6 unchanged |
 | memory | none: a profile is a zero-sized type, and the two cores are the same size |
 | binary | **+147 408 bytes of `.text`** (+3.0 %) for a whole second CPU, bus, APU and DMA — a fourteenth of the 2 MB that would have put it behind a feature, so it is behind none |
 | savestates | unchanged for the standard profile, to the byte and to the version |
-| tests | `zax-nes` **1 205** passing with the ignored ones, of which **nine** are the items' own differential tests in `tests/neshawk_profile_tests.rs` and six the architecture's in `tests/timing_profile_tests.rs`. The earlier lots' "1 142" was short: `timing_profile_tests.rs`'s no-DPCM invariant **had been failing since NESHAWK-PROFILE-4 added a PPU item** and the aborted target took the rest of its count with it, which NESHAWK-PROFILE-5 step 3 found and fixed — the test now asserts the two profiles differ by **exactly** item 10's start-up frame, so it still fails the moment a DMC item reaches the common path |
+| tests | `zax-nes` passing with the ignored ones, of which **eleven** targets' worth are the items' own differential tests in `tests/neshawk_profile_tests.rs` and six the architecture's in `tests/timing_profile_tests.rs`. The earlier lots' "1 142" was short: `timing_profile_tests.rs`'s no-DPCM invariant **had been failing since NESHAWK-PROFILE-4 added a PPU item** and the aborted target took the rest of its count with it, which NESHAWK-PROFILE-5 step 3 found and fixed — the test now asserts the two profiles differ by **exactly** item 10's start-up frame, so it still fails the moment a DMC item reaches the common path |
