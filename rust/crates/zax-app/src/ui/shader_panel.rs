@@ -23,16 +23,19 @@ pub enum Family {
     Lcd,
     /// Pixel art smoothed or scaled sharp, without a tube.
     Smoothing,
+    /// Several presets one after the other: a pre-filter, then a tube (owner request).
+    Combination,
 }
 
 impl Family {
     /// The families in the order of the menu.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Crt,
         Self::Composite,
         Self::Bezel,
         Self::Lcd,
         Self::Smoothing,
+        Self::Combination,
     ];
 
     /// The key of its name in the string tables.
@@ -44,6 +47,7 @@ impl Family {
             Self::Bezel => "shaders.family.bezel",
             Self::Lcd => "shaders.family.lcd",
             Self::Smoothing => "shaders.family.smoothing",
+            Self::Combination => "shaders.family.combination",
         }
     }
 }
@@ -150,7 +154,7 @@ const fn screen(entry: CatalogPreset) -> CatalogPreset {
 /// The catalogue: the presets most played with NES-era consoles, from the light to the heavy
 /// (the guides and the libretro forums put forward Guest Advanced and its NTSC variant, Mega
 /// Bezel, Royale, Lottes, Easymode, and zfast or CRT-Pi for the weak cards).
-pub const CATALOGUE: [CatalogPreset; 28] = [
+pub const CATALOGUE: [CatalogPreset; 32] = [
     entry(
         "shaders.preset.guest",
         "crt/crt-guest-advanced.slangp",
@@ -346,6 +350,37 @@ pub const CATALOGUE: [CatalogPreset; 28] = [
         Family::Smoothing,
         Cost::Medium,
         Featured::Always,
+    ),
+    // The combinations (owner request), stored as the presets one after the other
+    // (`shader_pack::COMBINATION_SEPARATOR`): ScaleFX before the Guest tube made for a smoothed
+    // picture, the one the libretro forums give, and the owner's three with nnedi3.
+    entry(
+        "shaders.preset.scalefx_guest_hd",
+        "edge-smoothing/scalefx/scalefx.slangp|crt/crt-guest-advanced-hd.slangp",
+        Family::Combination,
+        Cost::Heavy,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.nnedi3_hyllian",
+        "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp|crt/crt-hyllian.slangp",
+        Family::Combination,
+        Cost::Heavy,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.nnedi3_easymode",
+        "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp|crt/crt-easymode.slangp",
+        Family::Combination,
+        Cost::Heavy,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.nnedi3_mattias",
+        "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp|crt/crt-mattias.slangp|scanlines/scanline.slangp",
+        Family::Combination,
+        Cost::Heavy,
+        Featured::No,
     ),
 ];
 
@@ -820,7 +855,12 @@ mod tests {
             return;
         };
         for preset in &CATALOGUE {
-            let parameters = zax_platform::slang_chain::preset_parameters(&root.join(preset.path));
+            let resolved: Vec<String> = crate::shader_pack::parts(preset.path)
+                .into_iter()
+                .map(|part| root.join(part).to_string_lossy().into_owned())
+                .collect();
+            let path = std::path::PathBuf::from(resolved.join("|"));
+            let parameters = zax_platform::slang_chain::preset_parameters(&path);
             assert!(parameters.is_ok(), "{}: {parameters:?}", preset.path);
         }
     }
@@ -829,11 +869,9 @@ mod tests {
     fn the_catalogue_is_in_the_pack_list() {
         let list = include_str!("../../shaders/pack-files.txt");
         for preset in &CATALOGUE {
-            assert!(
-                list.lines().any(|line| line == preset.path),
-                "{}",
-                preset.path
-            );
+            for part in crate::shader_pack::parts(preset.path) {
+                assert!(list.lines().any(|line| line == part), "{part}");
+            }
         }
     }
 }

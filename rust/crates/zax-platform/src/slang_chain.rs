@@ -208,14 +208,9 @@ impl SlangShaders {
             .name("zax slang".to_owned())
             .spawn(move || {
                 let (chain, error) = validated(&device, || {
-                    FilterChain::load_from_path(
-                        &path,
-                        ShaderFeatures::NONE,
-                        &device,
-                        &queue,
-                        Some(&options),
-                    )
-                    .map_err(|error| error.to_string())
+                    let preset = parse_combination(&path)?;
+                    FilterChain::load_from_preset(preset, &device, &queue, Some(&options))
+                        .map_err(|error| error.to_string())
                 });
                 let chain = match (chain, error) {
                     (Ok(chain), None) => Ok(chain),
@@ -447,10 +442,8 @@ impl ParameterInfo {
 /// The message of librashader when the preset or one of its shaders cannot be read.
 pub fn preset_parameters(preset: &Path) -> Result<Vec<ParameterInfo>, String> {
     use librashader::preprocess::ShaderSource;
-    use librashader::presets::ShaderPreset;
 
-    let parsed = ShaderPreset::try_parse(preset, ShaderFeatures::NONE)
-        .map_err(|error| format!("{}: {error}", preset.display()))?;
+    let parsed = parse_combination(preset)?;
     let mut order: Vec<String> = Vec::new();
     let mut found: HashMap<String, ParameterInfo> = HashMap::new();
     for pass in &parsed.passes {
@@ -479,4 +472,66 @@ pub fn preset_parameters(preset: &Path) -> Result<Vec<ParameterInfo>, String> {
     rest.sort_by(|a, b| a.name.cmp(&b.name));
     parameters.extend(rest);
     Ok(parameters)
+}
+
+/// What separates the presets of a combination in a stored preset: "a.slangp|b.slangp". The bar
+/// cannot be in a Windows file name, and no preset of the pack has one in its path.
+pub const COMBINATION_SEPARATOR: char = '|';
+
+/// The preset `path` names, parsed: one file, or a combination of several (owner request: a
+/// pre-filter such as `ScaleFX` or nnedi3 before a CRT, as `RetroArch`'s "Append" builds it). The
+/// passes of each preset follow those of the one before; its textures and parameters are added
+/// (a parameter set twice keeps the later value).
+///
+/// The last pass of every preset but the last one stops being the end of the chain. When it drew
+/// at the size of the window (`viewport`, the final resampling of nnedi3 and xBRZ), it draws at
+/// the size of its own input instead: the next preset is written for the picture, and would draw
+/// one scanline per pixel of the window otherwise.
+///
+/// # Errors
+///
+/// The message of librashader when one of the presets cannot be read.
+pub fn parse_combination(path: &Path) -> Result<librashader::presets::ShaderPreset, String> {
+    use librashader::presets::{ScaleFactor, ScaleType, ShaderPreset};
+
+    let text = path.to_string_lossy();
+    let mut parts = text.split(COMBINATION_SEPARATOR).map(Path::new);
+    let parse = |part: &Path| {
+        ShaderPreset::try_parse(part, ShaderFeatures::NONE)
+            .map_err(|error| format!("{}: {error}", part.display()))
+    };
+    let mut combined = parse(parts.next().unwrap_or(path))?;
+    for part in parts {
+        let next = parse(part)?;
+        if let Some(last) = combined.passes.last_mut() {
+            let scaling = &mut last.meta.scaling;
+            if scaling.valid
+                && (matches!(scaling.x.scale_type, ScaleType::Viewport)
+                    || matches!(scaling.y.scale_type, ScaleType::Viewport))
+            {
+                for axis in [&mut scaling.x, &mut scaling.y] {
+                    axis.scale_type = ScaleType::Input;
+                    axis.factor = ScaleFactor::Float(1.0);
+                }
+            }
+        }
+        let first = i32::try_from(combined.passes.len()).unwrap_or(i32::MAX);
+        for mut pass in next.passes {
+            pass.meta.id = pass.meta.id.saturating_add(first);
+            combined.passes.push(pass);
+        }
+        for texture in next.textures {
+            if !combined
+                .textures
+                .iter()
+                .any(|known| known.meta.name == texture.meta.name)
+            {
+                combined.textures.push(texture);
+            }
+        }
+        combined.parameters.extend(next.parameters);
+        combined.features |= next.features;
+        combined.pass_count = i32::try_from(combined.passes.len()).unwrap_or(i32::MAX);
+    }
+    Ok(combined)
 }

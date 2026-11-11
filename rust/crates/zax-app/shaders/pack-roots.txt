@@ -9,6 +9,7 @@ edge-smoothing/xbrz
 edge-smoothing/scalefx
 # The pre-filter of the combinations (lot 3): light, 0.5 MB.
 edge-smoothing/nnedi3
+scanlines/scanline.slangp
 handheld
 bezel/Mega_Bezel/README.md
 bezel/Mega_Bezel/Presets

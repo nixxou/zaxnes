@@ -11,15 +11,35 @@ pub fn folder(user_root: &Path) -> PathBuf {
     user_root.join("shaders").join("slang")
 }
 
-/// `preset` as a file: a relative path is one of the pack.
+/// `preset` as a file: a relative path is one of the pack. A combination ("a.slangp|b.slangp",
+/// the presets one after the other) gives each of its presets resolved, joined by the same bar.
 #[must_use]
 pub fn resolve(user_root: &Path, preset: &str) -> PathBuf {
-    let path = Path::new(preset);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        folder(user_root).join(path)
+    let one = |part: &str| {
+        let path = Path::new(part);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            folder(user_root).join(path)
+        }
+    };
+    if !preset.contains(COMBINATION_SEPARATOR) {
+        return one(preset);
     }
+    let parts: Vec<String> = preset
+        .split(COMBINATION_SEPARATOR)
+        .map(|part| one(part).to_string_lossy().into_owned())
+        .collect();
+    PathBuf::from(parts.join(&COMBINATION_SEPARATOR.to_string()))
+}
+
+/// What separates the presets of a combination (`zax_platform::slang_chain`, which reads it).
+pub const COMBINATION_SEPARATOR: char = '|';
+
+/// The presets of a stored preset, one for a plain preset, several for a combination.
+#[must_use]
+pub fn parts(preset: &str) -> Vec<&str> {
+    preset.split(COMBINATION_SEPARATOR).collect()
 }
 
 /// The file, in the folder of the pack, that records the version written.

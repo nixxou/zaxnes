@@ -1984,6 +1984,8 @@ reshade/shaders/bloom/LensSprite.png
 reshade/shaders/bloom/LightingCombine.slang
 reshade/shaders/bloom/frag_funcs.inc
 reshade/shaders/bloom/params.inc
+scanlines/scanline.slangp
+scanlines/shaders/scanline.slang
 sharpen/shaders/fast-sharpen.slang
 sharpen/shaders/rcas.slang
 stock.slang
