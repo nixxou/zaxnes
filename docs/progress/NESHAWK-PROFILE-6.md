@@ -189,3 +189,88 @@ window the next step works on.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-6 step 1 done: item 1c retracted from measurement, item 11 on, Kirby 8 005 -> 45 095
+
+---
+
+## Step 2 — one round, and it isolates the next item rather than shipping one
+
+### The answer first
+
+The round ran the loop the brief sets — references in order, first live-difference frame, both
+machines ledgered around it, first differing event isolated, mechanism confirmed by **BizHawk
+measurement first** — and it ends one step short of an item, for a reason worth more than a
+guess: the residual is **not** a DMA *cost* any more. It is the DMC **output unit's bit phase**,
+which has drifted **five bit periods** by frame 45 085 while the CPU stream is still exact to the
+cycle. That is **item 6**'s ground — the end-of-sample aborts — which
+`docs/review/NESHAWK-PROFILE.md` already names as "the item to try" for a game at rate 14-15 with
+a short sample, which is exactly what this is.
+
+### Round 1
+
+| | |
+|---|---|
+| parting frame before | **45 095** (`step1e`, after step 1) |
+| the first live difference | frame **45 096**: 22 live bytes at once, all in `$061F`-`$06A1` — the object table — and from 45 098 the game's own counters run **one apart** (`$0647` 17 against 18, `$0665` FD against FE), so it is one event's worth of timing and not a divergence of state |
+| the lag count | **15 on both machines** across the boundary, so it is not a lag frame |
+| parting frame after | **45 095**, unchanged: no item was added |
+
+### The ledgers, and what they say
+
+`bk2cyc3.lua` (a copy of `bk2cyc2.lua` with the window moved to frames 45 080-45 110; callbacks
+registered once and gated, so the 45 000 frames before it cost one short Lua call per watched
+access) against `frame-trace --event-log --dmc-census` over the same frames. Residuals are
+NMI-anchored per frame, and a register write's own calibration is **+1**:
+
+| frames | what the ledger says |
+|---|---|
+| 45 080 - 45 083 | **exact**, every event, register writes at +1 and the `$4016` strobes with them |
+| 45 084 | the frame the sample is **about** to start: `pc$C3A1` −1, `pc$C074` −4 |
+| 45 085 - 45 096 | the `$4016` strobes jitter by **±4 cycles** — individually, not cumulatively (frame 45 089 reads +5 +5 +5 +5 +1 +1 +5 +5) — and `pc$C3A1`, the NMI handler's `RTI`, by −4 to +5, with one frame at **−325** |
+| 45 097 | the register **sequence** itself parts: this core writes `$4008` where NesHawk writes `$400A`/`$400B`, so the music driver has taken a different path |
+| the frame it starts in | **45 085**, the frame whose NMI handler writes `$4012 F3`, `$4013 1C`, `$4010 0F`, `$4015 0F`, `$4015 1F` — a 449-byte DPCM sample at **rate 15**, 54 cycles a bit, restarted by a `$4015` write |
+
+Frames 45 080-45 084 play **no DPCM at all** (`dmc=0/0`) and are exact. The jitter begins on the
+cycle the sample does.
+
+### The first differing event, measured
+
+`q182c.lua` — `q182b.lua` with the callbacks registered **late**, which is what makes a window at
+frame 45 000 affordable at all (q182b's pre-roll would be four billion Lua calls; this one advances
+with nothing registered and arms at the window) — dumped BizHawk's whole bus stream for frames
+45 083-45 096. Aligned per frame on the `$4017` write the NMI handler makes:
+
+| | this core | **NesHawk** |
+|---|---|---|
+| the `$4015` write that restarts the sample | aligned to the cycle | — |
+| the write-started fetch of `$FCC0` (item 3) | cycle 2 414 | the same cycle, **±1** |
+| the **next** fetch, `$FCC1` | **111 cycles later** | **372 cycles later** |
+| so the output unit's bits owed at the restart | **3** (`dmc(1,3,449)` at the halt) | **~7** (372 / 54) |
+| every fetch after it | 432 cycles apart | 432 cycles apart |
+
+**The fetch train's period agrees and its phase does not.** The `$4015` write, the CPU stream and
+the write-started fetch are all exact; what differs is how many bits the output unit still owed
+when the write filled the buffer — five bit periods, 270 cycles. It is not a cost and no cost item
+can move it.
+
+### Why the round stops here, and what the next one does
+
+The phase of the output unit's bit counter is set where a sample **ends**: `DMCUnit.Clock`'s
+behaviour with an empty buffer, and `set_lenctr_en(false)`'s three arms — `fill_glitch`,
+`fill_glitch_2` and `pending_disable` — which are **item 6**, read in lot NESHAWK-PROFILE step 1
+and deferred with a written reason: *"Eliminated by arithmetic for Kirby, not by choice… For a game
+at rate 14-15 (72 or 54 cycles a bit) with a short sample they are reachable, and this is the item
+to try there."* Frame 45 085 is a rate-15 sample restarted mid-byte, so the arithmetic that
+eliminated them for frames 1-10 000 does not hold here, and the deferral's own condition is met.
+
+Implementing item 6 is a change to `DmcChannel`'s end-of-sample state and its savestate, with the
+thirty DMC/DMA ROMs and `AccuracyCoin` to re-measure on **both** profiles; it is a lot of its own,
+not a round of this one. What this round delivers instead is the thing the next lot needs and did
+not have: the frame (45 085, not 45 096), the quantity (the output unit's bits owed at a `$4015`
+restart: 3 against ~7), the instrument that measures it (`q182c.lua`, which can be pointed at any
+frame), and the item's name.
+
+So the rounds stop at **one of five**, with the movie at **45 095**.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-6 step 2 done: one round, the residual isolated to the DMC output unit's bit phase, item 6 named
