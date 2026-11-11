@@ -18,7 +18,7 @@ source actually shows.
 - [x] 2. The architecture.
 - [x] 3. The NesHawk profile.
 - [x] 4. The engine variant and its selection.
-- [ ] 5. The experiment.
+- [x] 5. The experiment.
 - [ ] 6. Report and final pass.
 
 ## The environment this lot runs in
@@ -743,3 +743,194 @@ one — which the test below pins.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE step 4/6 done: the engine variant and its selection
+
+---
+
+## Step 5 — the experiment
+
+**Frame 926 is closed.** The *Kirby* `.bk2` now replays on Zaxnes with **no live difference from
+BizHawk's own work RAM at any frame the per-frame reference covers** — frames 1 to 1 100 — where
+the standard profile parted at 925 and never came back. One round was needed, not four.
+
+### The measurement
+
+`movie-sync --engine zaxnes --lag --trace-step 1`, against `kirby-jp-step1.txt` (frames 1-400) and
+`kirby-jp-step1b.txt` (frames 400-1 100), both profiles, every figure from the same command with
+only `--profile` changed:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| frames 1-400: frames with a live difference | 0 | 0 |
+| frames 1-400: lines identical to the byte | 190 of 400 | **194** of 400 |
+| frames 400-1 100: **frames with a live difference** | **184** — nine isolated between 645 and 875, then **926 to 1 100 without a gap** | **8**, every one of them isolated |
+| frames 400-1 100: frames with no difference outside the stack page and `$0000-$001F` | 517 of 701 | **693** of 701 |
+| **the last frame with no live difference** | **925** | **1 100** — the end of the reference |
+| all 701 lag counts | agree | agree |
+
+And the pictures, the owner's screenshots every fifty frames from 400 to 1 100 under EVAL-SYNC §4's
+colour-bijection rule (a match is a bijection between our colours and the reference's, so the two
+palettes do not matter and everything else does):
+
+| | 400 | 450-900, every 50 | 950 | 1 000 | 1 050 | 1 100 | matches |
+|---|---|---|---|---|---|---|---|
+| `standard` | no, by **1** pixel | **MATCH**, all ten | no, 29 039 px | no, 301 px | no, 45 088 px | no, 47 270 px | **10** of 15 |
+| `neshawk` | no, by **1** pixel | **MATCH**, all ten | **MATCH** | **MATCH** | **MATCH** | **MATCH** | **14** of 15 |
+
+Frame 400's single pixel is the one EVAL-SYNC-4 §4e already measured and classed apart: a frame
+whose work RAM has **no** live difference at all. Both profiles have it, and it is not this lot's.
+
+The bijection script is a re-implementation (the original was not committed, because it reads
+pictures of a commercial game), so its pixel counts for the *failing* frames are its own: 29 039
+and 47 270 where EVAL-SYNC-4 read 38 195 and 52 156. Every **verdict** agrees with EVAL-SYNC-4's,
+including the ten matches, frame 400's single pixel and frame 1 050's 45 088 to the pixel — which is
+what the instrument is being trusted for.
+
+### `frame-trace` on frame 926, which says it in one line
+
+Same command, same reference, `--profile` the only difference:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| instructions in the frame | 8 978 | 8 971 |
+| CPU cycles | 29 783 | 29 782 |
+| DMC sample fetches | 56 | 56 |
+| live bytes differing at the frame boundary | **3** | **0** |
+| the verdict | *"at **NO** instant of this frame does the live memory agree, so the two machines did not run the same frame"* | *"**NO live byte differs at 293 instruction(s)** of this frame, from 8 934 (−36 from the boundary) to 9 226 (+256): the two machines ran the same frame and read the 2 KiB at different moments"* |
+
+That is the whole of EVAL-SYNC-4 §3's open question, answered: the two machines **do** run the same
+frame 926, and the 2 KiB the reference carries is Zaxnes's own, read 36 instructions before the
+boundary.
+
+### Which item did it — the attribution, because the honest answer is not the expected one
+
+Each item was turned on alone, built, and run over frames 400-1 100. Five builds:
+
+| items on | last frame with no live difference | frames with no difference outside the two artefact ranges | frames with a live difference |
+|---|---|---|---|
+| none (the `standard` profile) | 925 | 517 of 701 | 184 |
+| **1a** alone — the halt on the request cycle | **1 100** | 684 | 17 |
+| **1a + 1b** — and the fixed four cycles | **1 100** | **693** | **8** |
+| **2** alone — `$4015` bit 4 three cycles late | **925** | **517** | **184** |
+| **3** alone — the mid-sample `$4015` enable | **1 100** | 690 | 11 |
+| 1a + 1b + 2 | 1 100 | 693 | 8 |
+| **all four** (what ships) | **1 100** | **693** | **8** |
+
+Three things in that table, and two of them correct a step-1 expectation:
+
+1. **Item 1a is the cause.** The halt landing on the DMC's request cycle rather than on the next
+   read cycle closes frame 926 on its own. Item 1b then takes the remaining 17 differing frames to
+   8, which is the best any combination reaches.
+2. **Item 2 is inert on this movie — exactly inert.** 184 differing frames, last clean frame 925,
+   517 of 701: the `standard` profile's three figures to the digit. EVAL-SYNC-4 §3 named
+   `LDA $4015` at `$823C` and the `BNE` at `$8241` as what turns a few cycles of slack into two
+   different games, and that reading stands; what this measures is that *Kirby*'s read never lands
+   inside the three-cycle window the item opens. The amplifier is real and this movie never trips
+   it.
+3. **Item 3 closes frame 926 on its own too**, which step 1 did not expect ("for *Kirby* this may
+   fire rarely… the item is implemented because the source does it, not because it is expected to
+   move this movie"). The reason is visible in the code rather than in the movie: NesHawk's
+   `set_lenctr_en` picks a load's delay from **`timer % 2`**, the DMC timer's parity, where this
+   core picks it from the APU cycle's — so item 3 moves the start of *every* sample by a cycle, not
+   only the mid-sample case the item is named for. That is part of the item as the source writes it
+   and it is kept; it is also why the item's name undersells what it does.
+
+**And the arithmetic that "pointed the wrong way" is settled.** Step 1 recorded that a lone reload
+costs NesHawk a fixed 4 cycles against this core's 3 or 4, so NesHawk should fall *behind* — the
+opposite sign from a reference that EVAL-SYNC-4 read as 45 to 55 cycles *ahead*. The trace above
+shows why that reasoning could not decide anything: the NesHawk-compatible run does **7 fewer
+instructions and 1 fewer cycle** in frame 926, so it is not a phase shift in either direction. What
+item 1a moves is **which cycle each of the 56 fetches lands on**, and with it the whole interleaving
+of the frame's DMA with its instructions. Step 1 said that in as many words — *"that is not a sum
+over fetches"* — and declined to predict; the measurement is the arbiter it was left to.
+
+### What is left, and why there is no second round
+
+**The 8 frames.** 680, 714, 733, 740, 767, 821, 837 and 957, every one isolated and seven of them a
+single live byte; 714 and 733 carry 5 and 7. Six are the same frames the `standard` profile has
+(680, 714, 733, 740, 821, 837), and EVAL-SYNC-4 §2 measured that class: the reference records its
+2 KiB at a different instant inside the frame, five to seventeen cycles from where this core reads
+it. The profile clears 645, 796 and 875 and moves two others in (767, 957), which is what a change
+of the reading instant does. Frame 733 goes from 8 live bytes to 7, frame 714 from 1 to 5.
+
+**Beyond frame 1 100 there is nothing to measure against.** `kirby-jp-step1.txt` covers frames
+1-400 per frame and `kirby-jp-step1b.txt` frames 400-1 100; `kirby-jp.txt` carries a checksum and a
+lag count every hundred frames and **no `ram=` field**, which is what `frame-trace --converge` and
+`--ram-ref` need. So:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| full length, 1 563 checksum lines every 100 frames | 2 agree, last at frame 200 | 1 agrees, last at frame 200 |
+| all 1 563 lag counts | agree | agree |
+| screenshot at frame **1 000** (`kirby-jp-f1000.png`) | no, 301 px | **MATCH** |
+| screenshots at 10 000, 30 000, 60 000, 83 000 and the end | no | no |
+
+The checksum column cannot discriminate and is reported only so that it is not missing: a checksum
+is taken over the whole 2 KiB including the stack page and `$0000-$001F`, which is exactly the
+reading-instant artefact, so it disagrees on nearly every line *in the stretch where the live
+memory agrees byte for byte*. The movie is 156 312 frames long and has seven soft resets; the
+picture at 10 000 already differs, so the two machines part somewhere between 1 100 and 10 000, and
+**no reference exists in that interval** to narrow it or to run `frame-trace --converge` against.
+
+So round 1 closed the frame the lot was built for and rounds 2 to 4 have no data to run on. That is
+a limit of the references, not of the architecture: a per-frame `ram=` dump of frames 1 100 to
+10 000 from BizHawk would localise the next difference in one command, and adding the item it names
+is the half-day `docs/review/NESHAWK-PROFILE.md` describes.
+
+### *Faxanadu*: no regression, and the profile is provably inert on it
+
+`invariel-faxanadu.bk2` on both dumps, both profiles:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| `[USA][!!]` against `fax-usa.txt` | **207** of 832 lines, last agreeing **83 200** | **207** of 832, last agreeing **83 200** |
+| `[USA][Rev 1][!!]` against `fax-rev1.txt` | **220** of 832, last agreeing **83 200** | **220** of 832, last agreeing **83 200** |
+| all 832 lag counts, both dumps | agree | agree |
+| final picture, `[USA][!!]` | `03d7e6a1…` | `03d7e6a1…` |
+| the five screenshots (1 000, 10 000, 30 000, 60 000, 83 000) against `fax-usa-f*.png` | **MATCH, all five** | **MATCH, all five** |
+| our picture at those five frames, profile against profile | — | **byte-identical PNGs** |
+
+Every figure is EVAL-SYNC-4's, to the line and to the hash, and the last row is the strongest form
+of "no regression" available: on this movie the two profiles produce the **same bytes**, so the
+NesHawk profile is not merely harmless here, it never fires.
+
+### The commands
+
+```sh
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+F="$M/bk2/invariel-faxanadu.bk2"
+
+# the per-frame windows, both profiles (--profile is the only difference)
+for p in standard neshawk; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 400 --trace-step 1 \
+      --trace-ref "$M/bizhawk-runs/kirby-jp-step1.txt" \
+      --ram-ref "$M/bizhawk-runs/kirby-jp-step1.txt" --ram-ref-table t1-$p.txt --profile $p
+  $H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 1100 --trace-step 1 \
+      --trace-ref "$M/bizhawk-runs/kirby-jp-step1b.txt" \
+      --ram-ref "$M/bizhawk-runs/kirby-jp-step1b.txt" --ram-ref-table t2-$p.txt --profile $p
+  awk '!/^#/ && $3 != "live=0"' t2-$p.txt            # the frames with a live difference
+done
+
+# frame 926 instruction by instruction
+$H frame-trace "$K" "$KR" --frame 926 --converge "$M/bizhawk-runs/kirby-jp-step1b.txt" --profile neshawk
+
+# the pictures
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 1100 --png shots \
+    --png-frames 400,450,500,550,600,650,700,750,800,850,900,950,1000,1050,1100 --profile neshawk
+
+# Faxanadu, both dumps
+$H movie-sync "$F" "$M/roms/Faxanadu [USA][!!].nes" --engine zaxnes --lag --trace-step 100 \
+    --trace-ref "$M/bizhawk-runs/fax-usa.txt" --profile neshawk
+```
+
+The screenshot comparison is **not committed** — it reads pictures of a commercial game. It is the
+colour-bijection rule of EVAL-SYNC §4, re-implemented, with one addition this lot had to make:
+BizHawk writes 256×224 and this core's picture is the whole 256×240 (REQ-CORE-048), so the eight
+overscan rows at the top and the bottom are cropped before the comparison. Its verdicts were
+validated against EVAL-SYNC-4's table, which it reproduces (see above).
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE step 5/6 done: the experiment
