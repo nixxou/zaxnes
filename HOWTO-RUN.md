@@ -795,9 +795,15 @@ mouvement ; la visée continue de fonctionner curseur masqué.
 
 ## 6. Où Zaxnes écrit ses fichiers
 
-Par défaut, la racine utilisateur est `%LOCALAPPDATA%\Zaxnes\` — **Outils ▸ Dossier des données**
-l'ouvre dans l'explorateur. Un fichier `portable.txt` placé à côté de l'exécutable la déplace
-dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte sur les deux.
+La version Windows publiée est **portable** : elle contient un fichier `portable.txt`, à côté de
+`zaxnes.exe`, qui place la racine utilisateur dans `userdata\`, au même endroit. Au premier
+lancement portable, le contenu de `%LOCALAPPDATA%\Zaxnes\`, s'il existe, y est **copié** (sans
+toucher à l'original), pour retrouver les sauvegardes d'une version précédente.
+
+Sans `portable.txt` (supprimez-le pour ça), la racine est `%LOCALAPPDATA%\Zaxnes\`. Elle l'est
+aussi quand le dossier de `zaxnes.exe` refuse l'écriture (dans `Program Files`, par exemple) :
+le journal le signale. **Outils ▸ Dossier des données** ouvre la racine en usage dans
+l'explorateur, et `--userdata <dossier>` l'emporte sur tout le reste.
 
 > **Vous veniez d'une version « Sen ».** Le programme s'appelait « Sen » pendant son
 > développement et écrivait dans `%LOCALAPPDATA%\Sen\`. Au premier lancement, si

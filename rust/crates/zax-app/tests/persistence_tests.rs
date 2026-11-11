@@ -62,13 +62,53 @@ fn req_pers_071_portable_mode_uses_the_userdata_folder() {
     let executable = root.path().join("bin");
     std::fs::create_dir_all(&executable).unwrap();
     std::fs::write(executable.join(PORTABLE_MARKER_NAME), "").unwrap();
-    let portable = UserDataPaths::resolve(None, Some(&executable), None);
+    let portable = UserDataPaths::resolve(None, Some(&executable), Some(&root.path().join("none")));
     assert_eq!(UserDataRootKind::Portable, portable.kind);
     assert_eq!(executable.join(PORTABLE_FOLDER_NAME), portable.root);
     let forced = root.path().join("forced");
     let overridden = UserDataPaths::resolve(Some(&forced), Some(&executable), None);
     assert_eq!(UserDataRootKind::Explicit, overridden.kind);
     assert_eq!(std::path::absolute(&forced).unwrap(), overridden.root);
+}
+
+/// Owner request: a portable start with no `userdata` yet takes along the per-user root, so that
+/// the saves of a version that was not portable are still there.
+#[test]
+fn the_first_portable_start_copies_the_per_user_root() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let executable = root.path().join("bin");
+    std::fs::create_dir_all(&executable).unwrap();
+    std::fs::write(executable.join(PORTABLE_MARKER_NAME), "").unwrap();
+    let local = root.path().join("local");
+    std::fs::create_dir_all(local.join(PRODUCT_NAME)).unwrap();
+    std::fs::write(local.join(PRODUCT_NAME).join("settings.json"), "mine").unwrap();
+    let paths = UserDataPaths::resolve(None, Some(&executable), Some(&local));
+    assert_eq!(UserDataRootKind::Portable, paths.kind);
+    assert_eq!(Some(local.join(PRODUCT_NAME)), paths.migrated_from);
+    assert_eq!(
+        "mine",
+        std::fs::read_to_string(&paths.settings_file).unwrap()
+    );
+    // The next start finds its own folder and copies nothing.
+    let again = UserDataPaths::resolve(None, Some(&executable), Some(&local));
+    assert!(again.migrated_from.is_none());
+}
+
+/// Owner request: a portable folder that takes no writes (Program Files) leaves the data in the
+/// per-user root.
+#[test]
+fn an_unwritable_portable_folder_falls_back_to_the_per_user_root() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let executable = root.path().join("bin");
+    std::fs::create_dir_all(&executable).unwrap();
+    std::fs::write(executable.join(PORTABLE_MARKER_NAME), "").unwrap();
+    // A file where the folder would be: nothing can be created under it.
+    std::fs::write(executable.join(PORTABLE_FOLDER_NAME), "").unwrap();
+    let local = root.path().join("local");
+    let paths = UserDataPaths::resolve(None, Some(&executable), Some(&local));
+    assert_eq!(UserDataRootKind::LocalAppData, paths.kind);
+    assert_eq!(local.join(PRODUCT_NAME), paths.root);
+    assert!(paths.is_writable);
 }
 
 #[test]

@@ -99,7 +99,8 @@ Vérification non interactive :
 "@
 Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 
-# The folder ships the executable, the documents and profiles\README.txt, and nothing else.
+# The folder ships the executable, the documents and profiles\README.txt, and nothing else
+# (portable.txt is added after these checks).
 $expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
     'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt')
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
@@ -115,6 +116,23 @@ if ($unexpected.Count -gt 0) {
 if ($LASTEXITCODE -ne 0) { throw "package: zaxnes.exe --help exited with $LASTEXITCODE" }
 & (Join-Path $Output 'zaxnes.exe') --list-profiles | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "package: zaxnes.exe --list-profiles exited with $LASTEXITCODE" }
+
+# Owner request: portable by default. The marker goes in once the checks above have run, so that
+# they leave no userdata folder in the package. Without write access to the folder (Program
+# Files), Zaxnes keeps its data in %LOCALAPPDATA%\Zaxnes; deleting the marker does the same.
+Set-Content -Path (Join-Path $Output 'portable.txt') -Encoding utf8 -Value @"
+Ce fichier rend Zaxnes portable : ses données (réglages, sauvegardes, profils importés)
+vont dans le dossier userdata, à côté de zaxnes.exe.
+Au premier lancement, celles de %LOCALAPPDATA%\Zaxnes, s'il y en a, y sont copiées.
+
+Supprimez-le pour les garder dans %LOCALAPPDATA%\Zaxnes, comme une installation classique
+(déplacez alors le contenu de userdata dans ce dossier pour les retrouver).
+Si le dossier de Zaxnes n'accepte pas l'écriture (Program Files), les données vont
+d'elles-mêmes dans %LOCALAPPDATA%\Zaxnes.
+
+This file makes Zaxnes portable: its data goes to the userdata folder next to zaxnes.exe.
+Delete it to keep the data in %LOCALAPPDATA%\Zaxnes instead.
+"@
 
 $zip = "$Output.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }

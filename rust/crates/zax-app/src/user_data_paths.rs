@@ -177,33 +177,53 @@ impl UserDataPaths {
         let base =
             executable_directory.map_or_else(default_executable_directory, Path::to_path_buf);
         let explicit_root = explicit_root.filter(|root| !root.as_os_str().is_empty());
+        let local = || {
+            local_app_data_directory
+                .map(Path::to_path_buf)
+                .or_else(default_local_app_data)
+                .unwrap_or_else(|| base.clone())
+        };
         let mut paths = match explicit_root {
             Some(root) => Self::new(absolute(root), UserDataRootKind::Explicit, base),
-            None if base.join(PORTABLE_MARKER_NAME).is_file() => Self::new(
-                base.join(PORTABLE_FOLDER_NAME),
-                UserDataRootKind::Portable,
-                base,
-            ),
-            None => {
-                let local = local_app_data_directory
-                    .map(Path::to_path_buf)
-                    .or_else(default_local_app_data)
-                    .unwrap_or_else(|| base.clone());
+            None if base.join(PORTABLE_MARKER_NAME).is_file() => {
+                // Owner request: the Windows package is portable by default. Its first start
+                // takes along what the per-user folder holds, so that the saves of a version
+                // that was not portable are still there; a folder that takes no writes (Program
+                // Files) leaves the data in the per-user folder.
                 let mut paths = Self::new(
-                    local.join(PRODUCT_NAME),
-                    UserDataRootKind::LocalAppData,
-                    base,
+                    base.join(PORTABLE_FOLDER_NAME),
+                    UserDataRootKind::Portable,
+                    base.clone(),
                 );
-                // Before `ensure_directories`, which would create the new root and make it look
-                // as if it had always been there (AMD-029 §2).
-                let legacy = local.join(LEGACY_PRODUCT_NAME);
-                if try_copy_legacy_root(&legacy, &paths.root) {
-                    paths.migrated_from = Some(legacy);
+                let per_user = local().join(PRODUCT_NAME);
+                if try_copy_legacy_root(&per_user, &paths.root) {
+                    paths.migrated_from = Some(per_user);
                 }
-                paths
+                paths.ensure_directories();
+                if paths.is_writable {
+                    return paths;
+                }
+                Self::per_user(&local(), base)
             }
+            None => Self::per_user(&local(), base),
         };
         paths.ensure_directories();
+        paths
+    }
+
+    /// The per-user root under `local`, the legacy root copied into it first.
+    fn per_user(local: &Path, base: PathBuf) -> Self {
+        let mut paths = Self::new(
+            local.join(PRODUCT_NAME),
+            UserDataRootKind::LocalAppData,
+            base,
+        );
+        // Before `ensure_directories`, which would create the new root and make it look as if it
+        // had always been there (AMD-029 §2).
+        let legacy = local.join(LEGACY_PRODUCT_NAME);
+        if try_copy_legacy_root(&legacy, &paths.root) {
+            paths.migrated_from = Some(legacy);
+        }
         paths
     }
 

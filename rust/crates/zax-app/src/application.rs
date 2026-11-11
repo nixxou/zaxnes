@@ -1767,10 +1767,23 @@ fn resolve_user_data(options: &AppOptions) -> UserDataPaths {
             paths = fallback;
         }
     }
-    // AMD-029 §2: the first run after the rename seeds the new root from the old one.
+    if explicit.is_none()
+        && paths.kind == crate::user_data_paths::UserDataRootKind::LocalAppData
+        && paths
+            .executable_directory
+            .join(crate::user_data_paths::PORTABLE_MARKER_NAME)
+            .is_file()
+    {
+        log(&format!(
+            "the portable folder next to the program refuses writes; the user data is in '{}'.",
+            paths.root.display()
+        ));
+    }
+    // AMD-029 §2: the first run after the rename seeds the new root from the old one; the first
+    // portable start, from the per-user root.
     if let Some(legacy) = &paths.migrated_from {
         log(&format!(
-            "user data copied from '{}' to '{}'; the old folder was left untouched (AMD-029).",
+            "user data copied from '{}' to '{}'; the old folder was left untouched.",
             legacy.display(),
             paths.root.display()
         ));
