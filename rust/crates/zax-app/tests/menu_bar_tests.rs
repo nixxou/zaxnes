@@ -201,9 +201,10 @@ fn req_ui_200_each_entry_shows_its_default_shortcut() {
     assert_eq!("Ctrl+Q", shown[&Command::Quit]);
     assert_eq!("Ctrl+F1…F10", shown[&Command::LoadSlot]);
     assert_eq!("Shift+F1…F10", shown[&Command::SaveSlot]);
-    assert_eq!("FastForward shortcut", shown[&Command::FastForward]);
-    assert_eq!("RollBack shortcut", shown[&Command::Rollback]);
-    assert_eq!("long press on Menu", shown[&Command::ResetView]);
+    // The default keys of the hotkeys of SPEC-08, as REQ-UI-204 names them.
+    assert_eq!(".", shown[&Command::FastForward]);
+    assert_eq!(",", shown[&Command::Rollback]);
+    assert_eq!("hold Esc", shown[&Command::ResetView]);
 }
 
 #[test]

@@ -28,11 +28,25 @@ enum Screen {
     AchievementList,
     /// The shaders window (Rust-only).
     Shaders,
+    /// Another tab of the options window, for the review of every row before a release.
+    Tab(OptionsTab),
+    /// Another menu of the bar: 1 Emulation, 2 Video, 3 Audio, 4 Tools.
+    Menu(u8),
     /// A screen of the handheld interface.
     Handheld(HandheldScreen),
 }
 
-const DESKTOP_PLAN: [(&str, Screen); 10] = [
+const DESKTOP_PLAN: [(&str, Screen); 20] = [
+    ("options-image-nes", Screen::Tab(OptionsTab::NesPicture)),
+    ("options-rendu-3d", Screen::Tab(OptionsTab::Render3d)),
+    ("options-lumiere", Screen::Tab(OptionsTab::Light)),
+    ("options-camera", Screen::Tab(OptionsTab::Camera)),
+    ("options-audio", Screen::Tab(OptionsTab::Audio)),
+    ("options-emulation", Screen::Tab(OptionsTab::Emulation)),
+    ("menu-emulation", Screen::Menu(1)),
+    ("menu-video", Screen::Menu(2)),
+    ("menu-audio", Screen::Menu(3)),
+    ("menu-outils", Screen::Menu(4)),
     ("accueil", Screen::Welcome),
     ("menu-fichier", Screen::FileMenu),
     ("options", Screen::Options),
@@ -182,5 +196,17 @@ fn arrange(ui: &mut ZaxUi, screen: Screen) {
         Screen::About => ui.state.about = true,
         Screen::AchievementList => ui.state.achievements = true,
         Screen::Shaders => ui.state.shaders = true,
+        Screen::Tab(tab) => {
+            ui.state.options = true;
+            ui.force_options_tab = Some(tab);
+        }
+        Screen::Menu(menu) => {
+            ui.force_open_menu = Some(match menu {
+                1 => text::menu_emulation(),
+                2 => text::menu_video(),
+                3 => text::menu_audio(),
+                _ => text::menu_tools(),
+            });
+        }
     }
 }

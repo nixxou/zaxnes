@@ -299,13 +299,13 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     drop(disabled);
     if let Some(note) = inert_note {
         ui.same_line();
-        ui.text_disabled(note);
+        side_note(ui, &note);
     }
     // Q-103: the Run-ahead row says so while the running game holds it at 0. The row stays live —
     // the setting is kept and applies again to the next game.
     if let Some(note) = options::forced_run_ahead_note(id, run_ahead_forced) {
         ui.same_line();
-        ui.text_disabled(note);
+        side_note(ui, &note);
     }
     if hovered {
         draw_tooltip(ui, id);
@@ -319,21 +319,27 @@ fn draw_switch(ui: &Ui, host: &AppHost, row: &OptionsRow) -> Option<SettingValue
         .then_some(SettingValue::Int(i32::from(on)))
 }
 
+/// A note in grey at the end of a row, wrapped at the window's edge rather than cut there.
+fn side_note(ui: &Ui, note: &str) {
+    let _wrap = ui.push_text_wrap_pos_with_pos(0.0);
+    ui.text_disabled(note);
+}
+
 fn draw_row_hint(ui: &Ui, row: &OptionsRow) {
     match row.descriptor.effect() {
         SettingEffect::Restart => {
             ui.same_line();
-            ui.text_disabled(text::at_next_start());
+            side_note(ui, &text::at_next_start());
         }
         SettingEffect::NextGameLoad | SettingEffect::NextRomLoad => {
             ui.same_line();
-            ui.text_disabled(text::at_next_load());
+            side_note(ui, &text::at_next_load());
         }
         _ => {}
     }
     if row.is_profile_scoped() {
         ui.same_line();
-        ui.text_disabled(text::profile_setting());
+        side_note(ui, &text::profile_setting());
     }
 }
 

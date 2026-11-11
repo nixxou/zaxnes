@@ -242,11 +242,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::SHORTCUT_SHIFT_PREFIX, "Shift"),
     (keys::SHORTCUT_QUICK_SAVE, "QuickSave shortcut"),
     (keys::SHORTCUT_QUICK_LOAD, "QuickLoad shortcut"),
-    (keys::SHORTCUT_FAST_FORWARD, "FastForward shortcut"),
-    (keys::SHORTCUT_ROLLBACK, "RollBack shortcut"),
+    // The default keys of the FastForward and RollBack actions (owner review before 0.5.0: the
+    // action names were shown instead), as the --help text gives them.
+    (keys::SHORTCUT_FAST_FORWARD, "."),
+    (keys::SHORTCUT_ROLLBACK, ","),
     (keys::SHORTCUT_SAVE_SLOTS, "Shift+F1…F10"),
     (keys::SHORTCUT_LOAD_SLOTS, "Ctrl+F1…F10"),
-    (keys::SHORTCUT_LONG_PRESS_MENU, "long press on Menu"),
+    (keys::SHORTCUT_LONG_PRESS_MENU, "hold Esc"),
     // ------------------------------------------- commands of REQ-UI-205
     ("cmd.file.open_rom", "Open a ROM…"),
     ("cmd.file.open_recent_rom", "Recent ROMs"),

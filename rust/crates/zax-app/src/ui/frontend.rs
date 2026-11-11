@@ -118,6 +118,7 @@ impl ImguiFrontend {
     // The wgpu variant hands over a unique borrow; the GL one, the only one without the
     // feature, a shared one.
     #[cfg_attr(not(feature = "wgpu"), allow(clippy::needless_pass_by_value))]
+    #[allow(clippy::too_many_lines)] // The start of the interface, step by step in its order.
     pub fn new(
         graphics: UiGraphics<'_>,
         host: &AppHost,
@@ -131,6 +132,9 @@ impl ImguiFrontend {
         // Dear ImGui would otherwise drop an imgui.ini next to the working directory.
         context.set_ini_filename(None);
         context.set_log_filename(None);
+        // Owner review before 0.5.0: the windows were 94 % opaque, the Dear ImGui default, so the
+        // welcome window's text showed through the options. They are opaque now.
+        context.style_mut()[imgui::StyleColor::WindowBg][3] = 1.0;
         let fonts = UiFonts::load_sized(
             context.fonts(),
             options.font_file.as_deref(),
