@@ -384,6 +384,21 @@ pub const CATALOGUE: [CatalogPreset; 32] = [
     ),
 ];
 
+/// The presets of the catalogue the pack of this build holds: every one on the desktop, the
+/// light ones in the Android package (`shader_pack::contains`).
+pub fn catalogue() -> impl Iterator<Item = &'static CatalogPreset> {
+    CATALOGUE
+        .iter()
+        .filter(|preset| crate::shader_pack::contains(preset.path))
+}
+
+/// The pre-filters the pack of this build holds.
+pub fn pre_filters() -> impl Iterator<Item = &'static PreFilter> {
+    PRE_FILTERS
+        .iter()
+        .filter(|filter| crate::shader_pack::contains(filter.path))
+}
+
 /// The name of `slot`, in the language in force.
 #[must_use]
 pub fn slot_label(slot: ShaderSlot) -> String {
@@ -527,11 +542,7 @@ pub fn slot_picks(slot: ShaderSlot) -> Vec<SlotPick> {
         picks.push(SlotPick::Follow);
     }
     picks.push(SlotPick::Off);
-    picks.extend(
-        CATALOGUE
-            .iter()
-            .map(|preset| SlotPick::Preset(preset.path.to_owned())),
-    );
+    picks.extend(catalogue().map(|preset| SlotPick::Preset(preset.path.to_owned())));
     picks
 }
 

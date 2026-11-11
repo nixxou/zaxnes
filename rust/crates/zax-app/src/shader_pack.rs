@@ -36,6 +36,32 @@ pub fn resolve(user_root: &Path, preset: &str) -> PathBuf {
 /// What separates the presets of a combination (`zax_platform::slang_chain`, which reads it).
 pub const COMBINATION_SEPARATOR: char = '|';
 
+/// The names the pack inside the executable holds, one per line (empty without the pack).
+#[cfg(feature = "shaders")]
+const PACKED: &str = include_str!(concat!(env!("OUT_DIR"), "/slang-pack-files.txt"));
+
+/// Whether every preset of `preset` (one, or the parts of a combination) is in the pack the
+/// executable carries: the Android package carries the light one (owner decision), and the
+/// catalogue shows only what it can draw. A build without a pack keeps every preset, its
+/// settings being the ones a desktop shares.
+#[must_use]
+pub fn contains(preset: &str) -> bool {
+    #[cfg(feature = "shaders")]
+    {
+        if PACKED.is_empty() {
+            return true;
+        }
+        parts(preset)
+            .into_iter()
+            .all(|part| PACKED.lines().any(|line| line == part))
+    }
+    #[cfg(not(feature = "shaders"))]
+    {
+        let _ = preset;
+        true
+    }
+}
+
 /// The presets of a stored preset, one for a plain preset, several for a combination.
 #[must_use]
 pub fn parts(preset: &str) -> Vec<&str> {

@@ -17,7 +17,7 @@ use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
 use crate::shader_pack;
-use crate::ui::shader_panel::{self, Family, PresetFolder, ShaderState, CATALOGUE};
+use crate::ui::shader_panel::{self, Family, PresetFolder, ShaderState};
 use crate::ui::strings;
 
 /// The window's default size.
@@ -254,8 +254,7 @@ impl ZaxUi {
         ui.text(tr("shaders.quick"));
         let spacing = ui.clone_style().item_spacing[0];
         let padding = ui.clone_style().frame_padding[0] * 2.0;
-        for (index, preset) in CATALOGUE
-            .iter()
+        for (index, preset) in shader_panel::catalogue()
             .filter(|preset| shader_panel::featured_for(preset, slot))
             .enumerate()
         {
@@ -298,7 +297,7 @@ impl ZaxUi {
             return;
         };
         let mut chosen = None;
-        let choices = std::iter::once(None).chain(shader_panel::PRE_FILTERS.iter().map(Some));
+        let choices = std::iter::once(None).chain(shader_panel::pre_filters().map(Some));
         for (index, filter) in choices.enumerate() {
             if ui
                 .menu_item_config(format!(
@@ -343,9 +342,8 @@ impl ZaxUi {
         };
         let mut chosen: Option<String> = None;
         ui.text_disabled(tr("shaders.menu.recommended"));
-        for preset in CATALOGUE
-            .iter()
-            .filter(|preset| shader_panel::featured_for(preset, slot))
+        for preset in
+            shader_panel::catalogue().filter(|preset| shader_panel::featured_for(preset, slot))
         {
             if ui
                 .menu_item_config(format!("{}##rec{}", tr(preset.label), preset.path))
@@ -360,7 +358,7 @@ impl ZaxUi {
             let Some(_menu) = ui.begin_menu(tr(family.label())) else {
                 continue;
             };
-            for preset in CATALOGUE.iter().filter(|preset| preset.family == family) {
+            for preset in shader_panel::catalogue().filter(|preset| preset.family == family) {
                 let clicked = ui
                     .menu_item_config(format!("{}##cat{}", tr(preset.label), preset.path))
                     .shortcut(tr(preset.cost.label()))

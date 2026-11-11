@@ -56,7 +56,19 @@ fn environment(name: &str) -> std::io::Result<PathBuf> {
 /// is empty and the shaders window says so.
 fn shader_pack() -> std::io::Result<()> {
     let manifest = environment("CARGO_MANIFEST_DIR")?;
-    let list = manifest.join("shaders").join("pack-files.txt");
+    // The Android package carries the light pack (owner decision: the full one is 35 MB);
+    // `ZAXNES_SHADER_PACK=light` or `full` chooses for any build.
+    println!("cargo:rerun-if-env-changed=ZAXNES_SHADER_PACK");
+    let light = match std::env::var("ZAXNES_SHADER_PACK").as_deref() {
+        Ok("light") => true,
+        Ok("full") => false,
+        _ => std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android"),
+    };
+    let list = manifest.join("shaders").join(if light {
+        "pack-files-light.txt"
+    } else {
+        "pack-files.txt"
+    });
     println!("cargo:rerun-if-changed={}", list.display());
     let out = environment("OUT_DIR")?.join("slang-pack.zip");
     let names: Vec<String> = std::fs::read_to_string(&list)?
@@ -105,6 +117,13 @@ fn shader_pack() -> std::io::Result<()> {
         );
     }
     zip.finish().map_err(std::io::Error::other)?;
+    // The names the pack holds, for the catalogue to show only the presets it can draw.
+    let packed = if written == 0 {
+        String::new()
+    } else {
+        names.join("\n")
+    };
+    std::fs::write(environment("OUT_DIR")?.join("slang-pack-files.txt"), packed)?;
     let version = if written == 0 {
         "none".to_owned()
     } else {

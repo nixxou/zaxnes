@@ -50,6 +50,7 @@ options
       [group.advanced]
         video.max_queued_frames
     page.shaders
+      video.backend
       row.shader.shader.2d.mode
       row.shader_pre_filter.shader.2d.preset
       row.shader.shader.2d_ws.mode

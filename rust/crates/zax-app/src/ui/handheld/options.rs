@@ -73,6 +73,9 @@ pub enum OptionRow {
     /// The pre-filter of a slot of the slang shaders: none, then those of
     /// [`shader_panel::PRE_FILTERS`] (owner request).
     ShaderPreFilter(ShaderSlot),
+    /// The graphics API of the shaders page: OpenGL draws none, Vulkan draws them (owner
+    /// decision: the slang shaders are offered on Vulkan only). Applied at the next start.
+    ShaderBackend,
     /// A row that climbs to another page of the tree (RO-3).
     Page(OptionsPage),
     /// A group title: a label and nothing else (RO-3). Up and down skip it, and it is drawn
@@ -242,7 +245,8 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
 /// The rows of the *Shaders* page: the four slots, as the desktop's window has them (owner
 /// request). They are the same in a build without the shaders, which keeps the settings the
 /// desktop shares; such a build simply draws none.
-pub const SHADER_ROWS: [OptionRow; 8] = [
+pub const SHADER_ROWS: [OptionRow; 9] = [
+    OptionRow::ShaderBackend,
     OptionRow::Shader(ShaderSlot::TwoD),
     OptionRow::ShaderPreFilter(ShaderSlot::TwoD),
     OptionRow::Shader(ShaderSlot::TwoDWide),
@@ -693,9 +697,14 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = cycled(&picks, &shader_panel::slot_pick(settings, slot), step).clone();
             shader_panel::set_slot_pick(settings, slot, &next);
         }
+        OptionRow::ShaderBackend => {
+            // OpenGL (0) and Vulkan (1); DirectX 12 is the desktop's, and a console is not one.
+            let next = i32::from(settings.get(SettingId::VideoBackend).as_int() != 1);
+            settings.set(SettingId::VideoBackend, SettingValue::Enum(next));
+        }
         OptionRow::ShaderPreFilter(slot) => {
             let choices: Vec<Option<&shader_panel::PreFilter>> = std::iter::once(None)
-                .chain(shader_panel::PRE_FILTERS.iter().map(Some))
+                .chain(shader_panel::pre_filters().map(Some))
                 .collect();
             let next = *cycled(&choices, &shader_panel::pre_filter_of(settings, slot), step);
             shader_panel::set_pre_filter(settings, slot, next);
@@ -740,6 +749,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Group(key) => strings::get(key),
         OptionRow::Shader(slot) => shader_panel::slot_label(slot),
         OptionRow::ShaderPreFilter(_) => format!("  {}", strings::get("shaders.prefilter")),
+        OptionRow::ShaderBackend => strings::get("shaders.backend"),
     }
 }
 
@@ -801,6 +811,13 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::ShaderPreFilter(slot) => {
             shader_panel::pre_filter_label(shader_panel::pre_filter_of(settings, slot))
         }
+        OptionRow::ShaderBackend => strings::get(if !cfg!(feature = "wgpu") {
+            "shaders.backend.not_built"
+        } else if settings.get(SettingId::VideoBackend).as_int() == 0 {
+            "shaders.backend.gl"
+        } else {
+            "shaders.backend.vulkan"
+        }),
     }
 }
 

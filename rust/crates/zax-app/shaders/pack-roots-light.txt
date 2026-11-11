@@ -1,0 +1,29 @@
+# The presets of the Android package's slang shader pack (tools/shader_pack.py <slang-shaders>
+# light): the light ones the RetroArch guides recommend for phones and tablets, the pre-filters,
+# and the one Mega Bezel a mobile GPU runs (the POTATO screen). Their shaders and textures follow.
+# The catalogue shows a preset only when its files are in the pack the build carries.
+README.md
+stock.slang
+crt/zfast-crt.slangp
+crt/zfast-crt-composite.slangp
+crt/crt-pi.slangp
+crt/crt-nes-mini.slangp
+crt/crt-easymode.slangp
+crt/fakelottes.slangp
+crt/crt-hyllian.slangp
+crt/crt-lottes.slangp
+crt/crt-guest-advanced.slangp
+crt/crt-guest-advanced-ntsc.slangp
+ntsc/ntsc-256px-composite-scanline.slangp
+ntsc/blargg.slangp
+presets/crt-plus-signal/fakelottes-ntsc-composite.slangp
+handheld/lcd-grid-v2.slangp
+pixel-art-scaling/sharp-bilinear-simple.slangp
+edge-smoothing/xbrz/2xbrz-linear.slangp
+edge-smoothing/xbrz/4xbrz-linear.slangp
+edge-smoothing/xbrz/xbrz-freescale.slangp
+edge-smoothing/scalefx/scalefx.slangp
+edge-smoothing/nnedi3/nnedi3-nns16-2x-rgb.slangp
+edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp
+scanlines/scanline.slangp
+bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_5__POTATO.slangp
