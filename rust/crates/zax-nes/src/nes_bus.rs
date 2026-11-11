@@ -161,6 +161,15 @@ pub struct NesBusOf<P: TimingProfile> {
     /// and then costs **three** cycles rather than the four of a reload. Never set on the
     /// `Standard` profile, whose load fetch costs three or four by parity like any other.
     dmc_from_write: bool,
+    /// The /NMI line as the CPU saw it **one cycle ago** — the `NesHawkCompat` profile's item 8,
+    /// and untouched on the `Standard` profile, where [`NesBusOf::nmi_asserted`] reads the PPU's
+    /// own sample directly as it always did.
+    ///
+    /// NesHawk's PPU assigns `nes.cpu.NMI` at scanline 241 PPU cycle `3 + NMI_offset` where this
+    /// core's CPU can already see the assertion from the cycle containing dot 1 or 2, so its CPU
+    /// meets the line one CPU cycle later. Kept here rather than in the PPU because the PPU is
+    /// not generic over the profile and this is a difference of the *chip*, not of the picture.
+    nmi_seen: bool,
     /// The DMA census, an **instrument** and not emulation: present only under the `dma-census`
     /// feature, which is off by default and which every one of its call sites also carries on the
     /// statement itself (see [`crate::dma_census`]).
@@ -230,6 +239,7 @@ impl<P: TimingProfile> NesBusOf<P> {
             apu_quiet: 0,
             zone_instruction: false,
             dmc_from_write: false,
+            nmi_seen: false,
             #[cfg(feature = "dma-census")]
             census: crate::dma_census::DmaCensus::new(),
             profile: PhantomData,
@@ -488,6 +498,7 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;
         self.dmc_from_write = false;
+        self.nmi_seen = false;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
@@ -506,6 +517,14 @@ impl<P: TimingProfile> NesBusOf<P> {
                 cartridge.step_cpu_cycle();
             }
             return;
+        }
+
+        // Item 8, and it is taken **before** the PPU runs this cycle's dots: what it keeps is
+        // therefore the line as the previous cycle's sample left it, which is one cycle of lag
+        // and nothing else. The `Standard` arm is empty, so that profile's `tick` is the
+        // function it always was.
+        if P::NMI_SEEN_A_CYCLE_LATE {
+            self.nmi_seen = self.ppu.nmi_line_sample();
         }
 
         self.cycles += 1;
@@ -567,6 +586,13 @@ impl<P: TimingProfile> NesBusOf<P> {
         // The PPU's sample of /NMI lags its line by a dot or two: when they differ, the
         // next cycle must be run in step.
         if self.ppu.nmi_line_sample() != self.ppu.nmi_asserted() {
+            return 1;
+        }
+
+        // Item 8 puts one more cycle of lag between the sample and the CPU, so the cycle on
+        // which the CPU's own copy changes has to be run in step too — otherwise `tick` would
+        // copy a sample the PPU had already moved past and the batching would stop being exact.
+        if P::NMI_SEEN_A_CYCLE_LATE && self.nmi_seen != self.ppu.nmi_line_sample() {
             return 1;
         }
 
@@ -1834,8 +1860,15 @@ impl<P: TimingProfile> CpuBus for NesBusOf<P> {
 
     /// The CPU sees the /NMI line as it stood near the start of the cycle, not after the
     /// cycle's own register access (see `Ppu2C02::nmi_line_sample`).
+    ///
+    /// **Item 8** on the `NesHawkCompat` profile: one cycle later still. See
+    /// [`TimingProfile::NMI_SEEN_A_CYCLE_LATE`] and [`NesBusOf::nmi_seen`].
     fn nmi_asserted(&self) -> bool {
-        self.ppu.nmi_line_sample()
+        if P::NMI_SEEN_A_CYCLE_LATE {
+            self.nmi_seen
+        } else {
+            self.ppu.nmi_line_sample()
+        }
     }
 
     /// **`#[inline(always)]`, and it has to stay: a `callq` here costs about 170 M instructions
@@ -1879,6 +1912,14 @@ impl<P: TimingProfile> NesBusOf<P> {
         writer.write_i64(self.cycles);
         writer.write_i64(self.oam_dma_count);
         writer.write_i64(self.dmc_dma_count);
+        // Item 8's one-cycle copy of /NMI, and **only on the profile that has one** — so a
+        // `Standard` block stays byte for byte what it always was and `NesCore::STATE_VERSION`
+        // does not move. It is not transient the way `dma` is: `Cpu6502` saves `nmi_line`, so a
+        // copy that reloaded as `false` against a line that is asserted would manufacture an
+        // edge on the cycle after the restore and take the NMI twice.
+        if P::NMI_SEEN_A_CYCLE_LATE {
+            writer.write_bool(self.nmi_seen);
+        }
     }
 
     /// Restores the bus state from `reader` (REQ-CORE-091).
@@ -1923,6 +1964,9 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.dmc_from_write = false;
         self.ppu_lag = 0;
         self.ppu_deadline = 0;
+        if P::NMI_SEEN_A_CYCLE_LATE {
+            self.nmi_seen = reader.read_bool()?;
+        }
         Ok(())
     }
 }

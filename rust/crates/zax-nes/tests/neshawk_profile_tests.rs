@@ -477,3 +477,272 @@ fn the_reload_countdown_survives_a_savestate_round_trip() {
         "the NesHawk core reads back every byte it wrote, the countdown among them"
     );
 }
+
+/// **Item 8**: the CPU meets the vblank /NMI one CPU cycle later on the NesHawk profile.
+///
+/// Differential, and of the one quantity the item is about: how many cycles after a profile's
+/// own power-on the CPU's view of the line first goes true. The PPU is the same chip on both
+/// profiles, so its own `nmi_asserted` and its own `nmi_line_sample` must come out identical and
+/// only the **bus's** answer — the one `Cpu6502::end_cycle` reads — may differ, by exactly one.
+#[test]
+fn item_8_the_cpu_sees_the_vblank_nmi_one_cycle_later() {
+    /// `(the cycle the CPU first sees it, the cycle the PPU's own sample first has it)`, counted
+    /// from the `$2000` write that enabled the NMI.
+    fn first_seen<P: TimingProfile>() -> (i64, i64) {
+        let mut bus = loaded_bus::<P>();
+        bus.write(0x2000, 0x80);
+        let from = bus.cycle_count();
+        let (mut cpu_at, mut ppu_at) = (None, None);
+        // A frame is under 29 781 cycles, so the first vblank after the write is well inside
+        // this; the panic below is the loop being broken rather than the frame being long.
+        for _ in 0..40_000 {
+            if ppu_at.is_none() && bus.ppu().nmi_line_sample() {
+                ppu_at = Some(bus.cycle_count() - from);
+            }
+            if cpu_at.is_none() && CpuBus::nmi_asserted(&bus) {
+                cpu_at = Some(bus.cycle_count() - from);
+            }
+            if cpu_at.is_some() && ppu_at.is_some() {
+                break;
+            }
+            bus.read(0x8000);
+        }
+        (
+            cpu_at.expect("the CPU saw the vblank NMI"),
+            ppu_at.expect("the PPU sampled the line"),
+        )
+    }
+
+    let plain = first_seen::<Standard>();
+    let hawk = first_seen::<NesHawkCompat>();
+
+    // The PPU is not the profile's: both chips assert and sample the line on the same cycle.
+    assert_eq!(
+        plain.1, hawk.1,
+        "the PPU's own sample is the same on both profiles ({} and {})",
+        plain.1, hawk.1
+    );
+    // On the standard profile the CPU reads that sample directly, as this core always did.
+    assert_eq!(
+        plain.0, plain.1,
+        "standard: the CPU sees the line on the cycle the PPU sampled it"
+    );
+    // And the whole of item 8 is this one cycle.
+    assert_eq!(
+        hawk.0,
+        plain.0 + 1,
+        "neshawk: the CPU meets the line one cycle later ({} against {})",
+        hawk.0,
+        plain.0
+    );
+}
+
+// ---------------------------------------------------------------- the interrupt-phase ROM
+//
+// Lot NESHAWK-PROFILE-3 step 2. The *Kirby* `.bk2` parts because the two machines take the
+// vblank NMI at different instruction boundaries of the game's frame-sync spin loop, which is
+// `LDA $39` / `BEQ` taken. This ROM is that construct isolated, with the one variable the game
+// cannot vary: whether the taken branch crosses a page.
+//
+// It is a ROM of this tree's own, written from the public 6502 documentation; nothing about it
+// comes from BizHawk. The same bytes are what BizHawk is given (see
+// `the_interrupt_phase_rom_is_written_out_for_bizhawk`), so the two machines answer the same
+// program rather than two copies of it.
+
+/// Where in the 32 KiB PRG the NMI handler and the two spin loops sit, as CPU addresses.
+const PHASE_NMI: u16 = 0x8080;
+const PHASE_SPIN_A: u16 = 0x8100;
+const PHASE_SPIN_B: u16 = 0x81FE;
+
+/// Frames each variant is measured over. A frame is 29 780 or 29 781 CPU cycles and the loop's
+/// period is 6 or 7, so the loop's phase relative to the vblank walks by itself and 64 frames
+/// cover every phase many times — no delay slide has to be written.
+const PHASE_FRAMES: usize = 0x40;
+
+/// The program of the interrupt-phase ROM, as the 32 KiB PRG image starting at `$8000`.
+///
+/// `docs/progress/NESHAWK-PROFILE-3.md` step 2 carries the same listing with its comments.
+fn phase_program() -> Vec<u8> {
+    let mut prg = vec![0u8; 0x8000];
+    let mut put = |at: u16, bytes: &[u8]| {
+        let start = usize::from(at) - 0x8000;
+        prg[start..start + bytes.len()].copy_from_slice(bytes);
+    };
+    put(
+        0x8000,
+        &[
+            0x78, // SEI
+            0xD8, // CLD
+            0xA2, 0xFF, // LDX #$FF
+            0x9A, // TXS
+            0xA9, 0x00, // LDA #$00
+            0x8D, 0x00, 0x20, // STA $2000   NMI off while warming up
+            0x8D, 0x01, 0x20, // STA $2001
+            0xAD, 0x02, 0x20, // LDA $2002   two vblanks
+            0x10, 0xFB, // BPL $800D
+            0xAD, 0x02, 0x20, // LDA $2002
+            0x10, 0xFB, // BPL $8012
+            0xA9, 0x00, // LDA #$00    ($02) = $0300: variant A's answers
+            0x85, 0x02, // STA $02
+            0xA9, 0x03, // LDA #$03
+            0x85, 0x03, // STA $03
+            0xA0, 0x00, // LDY #$00
+            0xA9, 0x80, // LDA #$80
+            0x8D, 0x00, 0x20, // STA $2000   NMI on
+            // variant A, at $8026
+            0xA9, 0x00, // LDA #$00
+            0x85, 0x00, // STA $00     lower the semaphore
+            0x4C, 0x00, 0x81, // JMP $8100
+            0xC8, // INY         <- $802D, the handler raised it
+            0xC0, 0x40, // CPY #$40
+            0xD0, 0xF4, // BNE $8026
+            // variant B, at $8032
+            0xA9, 0x04, // LDA #$04    ($02) = $0400
+            0x85, 0x03, // STA $03
+            0xA0, 0x00, // LDY #$00
+            0xA9, 0x00, // LDA #$00    <- $8038
+            0x85, 0x00, // STA $00
+            0x4C, 0xFE, 0x81, // JMP $81FE
+            0xC8, // INY         <- $803F
+            0xC0, 0x40, // CPY #$40
+            0xD0, 0xF4, // BNE $8038
+            // done, at $8044
+            0xA9, 0x00, // LDA #$00
+            0x8D, 0x00, 0x20, // STA $2000   NMI off: nothing writes past the two tables
+            0xA9, 0x5A, // LDA #$5A
+            0x8D, 0xFF, 0x02, // STA $02FF   the host's "finished" flag
+            0x4C, 0x4E, 0x80, // JMP $804E
+        ],
+    );
+    put(
+        PHASE_NMI,
+        &[
+            0x48, // PHA
+            0x8A, // TXA
+            0x48, // PHA
+            0xBA, // TSX          S = s-5, so the pushed PCL is at $0104+X
+            0xBD, 0x04, 0x01, // LDA $0104,X
+            0x91, 0x02, // STA ($02),Y  the answer: the interrupted PC's low byte
+            0xA9, 0x01, // LDA #$01
+            0x85, 0x00, // STA $00      raise the semaphore
+            0x68, // PLA
+            0xAA, // TAX
+            0x68, // PLA
+            0x40, // RTI
+        ],
+    );
+    // Variant A: `(byte)PC` is $04 and the displacement -4, so the sum does not borrow and the
+    // branch does NOT cross a page: three cycles, and NesHawk's `branch_irq_hack` applies.
+    put(
+        PHASE_SPIN_A,
+        &[
+            0xA5, 0x00, // LDA $00
+            0xF0, 0xFC, // BEQ $8100
+            0x4C, 0x2D, 0x80, // JMP $802D
+        ],
+    );
+    // Variant B: `(byte)PC` is $02 and the displacement -4, so the sum borrows and the branch
+    // DOES cross a page: four cycles, and NesHawk's `branch_irq_hack` does not apply.
+    put(
+        PHASE_SPIN_B,
+        &[
+            0xA5, 0x00, // LDA $00
+            0xF0, 0xFC, // BEQ $81FE
+            0x4C, 0x3F, 0x80, // JMP $803F
+        ],
+    );
+    prg
+}
+
+/// The whole `.nes` image of the interrupt-phase ROM.
+fn phase_rom() -> Vec<u8> {
+    minimal_rom(0x01, Some(&phase_program()), Some(PHASE_NMI))
+}
+
+/// Runs the interrupt-phase ROM on profile `P` and answers its two tables of 64 answers:
+/// variant A's (`$0300`) and variant B's (`$0400`).
+fn phase_tables<P: TimingProfile>() -> (Vec<u8>, Vec<u8>) {
+    use zax_nes::{NesCoreOf, RunFrame as _};
+
+    let mut core = NesCoreOf::<P>::new();
+    assert!(core.load_rom(&phase_rom(), "InterruptPhase.nes").success);
+    // Two variants of 64 frames each, plus the warm-up: 200 is comfortably enough, and the
+    // ROM's own flag says whether it finished rather than the count being trusted.
+    for _ in 0..200 {
+        core.run_frame(0);
+        if core.read_memory(0x02FF) == 0x5A {
+            break;
+        }
+    }
+    assert_eq!(
+        0x5A,
+        core.read_memory(0x02FF),
+        "{}: the phase ROM finished both variants",
+        P::NAME
+    );
+    let read = |base: u16| {
+        (0..PHASE_FRAMES)
+            .map(|i| core.read_memory(base + u16::try_from(i).unwrap()))
+            .collect::<Vec<u8>>()
+    };
+    (read(0x0300), read(0x0400))
+}
+
+/// What the two profiles answer the interrupt-phase ROM — printed, so that step 2's table can be
+/// read, and asserted on the shape both machines must have.
+#[test]
+fn interrupt_phase_the_two_profiles_answer_the_spin_loop() {
+    let (standard_a, standard_b) = phase_tables::<Standard>();
+    let (neshawk_a, neshawk_b) = phase_tables::<NesHawkCompat>();
+    let show = |name: &str, table: &[u8]| {
+        let text: Vec<String> = table.iter().map(|byte| format!("{byte:02X}")).collect();
+        println!("  {name}: {}", text.join(" "));
+    };
+    show("standard A (no page cross)", &standard_a);
+    show("neshawk  A (no page cross)", &neshawk_a);
+    show("standard B (page cross)   ", &standard_b);
+    show("neshawk  B (page cross)   ", &neshawk_b);
+
+    // Variant A can only ever report the `LDA` at $8100 or the `BEQ` at $8102 as the instruction
+    // the NMI displaced; variant B the `LDA` at $81FE or the `BEQ` at $8200.
+    for (name, table, wanted) in [
+        ("standard A", &standard_a, [0x00, 0x02]),
+        ("neshawk A", &neshawk_a, [0x00, 0x02]),
+        ("standard B", &standard_b, [0xFE, 0x00]),
+        ("neshawk B", &neshawk_b, [0xFE, 0x00]),
+    ] {
+        assert!(
+            table.iter().all(|byte| wanted.contains(byte)),
+            "{name}: every answer is one of the loop's two instructions, got {table:02X?}"
+        );
+    }
+    // And both profiles must exercise both answers, or the ROM measured nothing: the loop's
+    // phase walks because a frame is not a multiple of its period.
+    for (name, table) in [
+        ("standard A", &standard_a),
+        ("neshawk A", &neshawk_a),
+        ("standard B", &standard_b),
+        ("neshawk B", &neshawk_b),
+    ] {
+        assert!(
+            table.iter().any(|byte| *byte != table[0]),
+            "{name}: the phase walked, so the table is not one value, got {table:02X?}"
+        );
+    }
+}
+
+/// Writes the interrupt-phase ROM out, so that BizHawk can be given **the bytes this test ran**.
+///
+/// Ignored by default because it writes a file. `ZAXNES_DUMP_ROM=<path> cargo test -p zax-nes
+/// --test neshawk_profile_tests interrupt_phase_rom -- --ignored`.
+#[test]
+#[ignore = "writes a file; the instrument of NESHAWK-PROFILE-3 step 2"]
+fn the_interrupt_phase_rom_is_written_out_for_bizhawk() {
+    let Ok(path) = std::env::var("ZAXNES_DUMP_ROM") else {
+        println!("  set ZAXNES_DUMP_ROM to the .nes path to write");
+        return;
+    };
+    let image = phase_rom();
+    std::fs::write(&path, &image).expect("the path is writable");
+    println!("  wrote {} bytes to {path}", image.len());
+}

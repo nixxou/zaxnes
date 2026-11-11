@@ -129,6 +129,41 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     ///
     /// Read at `nes_bus.rs` `run_dma`, in the `dmc_may_read` arm.
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool;
+
+    // ------------------------------------------------------- when the CPU sees the vblank NMI
+
+    /// **Item 8** (lot NESHAWK-PROFILE-3 step 2). The CPU's view of /NMI lags the PPU's own
+    /// sample of the line by **one CPU cycle**, so an assertion this core would act on at the
+    /// next instruction boundary is acted on at the boundary after that.
+    ///
+    /// **Where it comes from.** This core raises /NMI when the vblank flag is set at scanline
+    /// 241 dot 1 and the CPU reads the line through `Ppu2C02::nmi_line_sample`, taken
+    /// `NMI_SAMPLE_LEAD = 2` dots before the end of each CPU cycle — so the first cycle whose
+    /// sample sees the assertion is the one containing dot 1 or 2, and `Cpu6502::end_cycle`
+    /// makes the edge usable at the very next boundary. NesHawk's PPU (`NES/PPU.run.cs`)
+    /// latches a `nmi_destiny` flag at cycle 0 of scanline 241 and only then assigns
+    /// `nes.cpu.NMI = true`, at scanline 241 PPU cycle **`3 + NMI_offset`**; its
+    /// `MOS6502X.Fetch1()` reads `NMI` at the cycle the next opcode would be fetched on. One
+    /// CPU cycle later, therefore.
+    ///
+    /// **Why one cycle is worth three.** The cycle itself is never what a program sees. A game
+    /// that waits for the frame in a two-instruction spin loop — *Hoshi no Kirby*'s
+    /// `C070 LDA $39` / `C072 BEQ $C070`, and it is far from alone — has an instruction boundary
+    /// every three cycles, so one cycle of recognition moves the handler's entry, and with it
+    /// the whole of the frame's work, by **three** cycles against the PPU and the APU. That is
+    /// what then decides which cycle each DMC fetch's halt lands on and whether the frame's OAM
+    /// transfer costs 513 cycles or 514 (lot NESHAWK-PROFILE-3 step 1 measured it on 8 901
+    /// frames).
+    ///
+    /// **It is not the branch quirk**, which was the first suspect and is eliminated by
+    /// measurement: NesHawk takes the NMI at the boundary immediately after a taken
+    /// non-page-crossing branch on 20 of 64 frames of the interrupt-phase ROM, so its
+    /// `branch_irq_hack` does not suppress it. Both cores pass `ppu_vbl_nmi` 5 to 8 and
+    /// `cpu_interrupts_v2` 5, which is why this is below the resolution of every public test.
+    ///
+    /// Read at `nes_bus.rs` `nmi_asserted`, with the one-cycle copy kept by `tick` and the
+    /// batching horizon that copy needs in `ppu_horizon`.
+    const NMI_SEEN_A_CYCLE_LATE: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -151,6 +186,7 @@ impl TimingProfile for Standard {
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = false;
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
+    const NMI_SEEN_A_CYCLE_LATE: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -173,4 +209,5 @@ impl TimingProfile for NesHawkCompat {
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
+    const NMI_SEEN_A_CYCLE_LATE: bool = true;
 }
