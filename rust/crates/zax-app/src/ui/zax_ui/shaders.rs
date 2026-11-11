@@ -284,14 +284,55 @@ impl ZaxUi {
         }
     }
 
+    /// The pre-filter of the slot (owner request): none, or one of
+    /// [`shader_panel::PRE_FILTERS`] in front of the preset.
+    fn draw_pre_filter(ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
+        let current = shader_panel::pre_filter_of(host.settings(), slot);
+        let Some(_combo) = ui.begin_combo(
+            tr("shaders.prefilter"),
+            shader_panel::pre_filter_label(current),
+        ) else {
+            if ui.is_item_hovered() {
+                ui.tooltip_text(tr("shaders.prefilter.help"));
+            }
+            return;
+        };
+        let mut chosen = None;
+        let choices = std::iter::once(None).chain(shader_panel::PRE_FILTERS.iter().map(Some));
+        for (index, filter) in choices.enumerate() {
+            if ui
+                .menu_item_config(format!(
+                    "{}##pre{index}",
+                    shader_panel::pre_filter_label(filter)
+                ))
+                .selected(filter == current)
+                .build()
+                && filter != current
+            {
+                chosen = Some(filter);
+            }
+        }
+        if let Some(filter) = chosen {
+            host.update_settings(|model| shader_panel::set_pre_filter(model, slot, filter));
+            play(host, UiSound::Confirm);
+        }
+    }
+
     /// The preset of the slot, and the menu that changes it.
     fn draw_preset_menu(&mut self, ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
         let ids = slot.ids();
+        Self::draw_pre_filter(ui, host, slot);
         let stored = host.settings().get(ids.preset).as_text().to_owned();
+        // The preset behind the pre-filter, which the row above shows; a combination of the
+        // catalogue keeps its own name.
+        let (_, behind) = shader_panel::split_pre_filter(&stored);
+        let behind = behind.to_owned();
         let shown = if stored.is_empty() {
             tr("shaders.preset.choose")
-        } else {
+        } else if shader_panel::catalogue_entry(&stored).is_some() {
             preset_label(&stored)
+        } else {
+            preset_label(&behind)
         };
         let combo = ui.begin_combo(tr("shaders.preset"), &shown);
         if combo.is_none() && ui.is_item_hovered() && !stored.is_empty() {
@@ -308,7 +349,7 @@ impl ZaxUi {
         {
             if ui
                 .menu_item_config(format!("{}##rec{}", tr(preset.label), preset.path))
-                .selected(stored == preset.path)
+                .selected(stored == preset.path || behind == preset.path)
                 .build()
             {
                 chosen = Some(preset.path.to_owned());
@@ -323,7 +364,7 @@ impl ZaxUi {
                 let clicked = ui
                     .menu_item_config(format!("{}##cat{}", tr(preset.label), preset.path))
                     .shortcut(tr(preset.cost.label()))
-                    .selected(stored == preset.path)
+                    .selected(stored == preset.path || behind == preset.path)
                     .build();
                 if ui.is_item_hovered() {
                     ui.tooltip_text(tr(&format!("{}.help", preset.label)));

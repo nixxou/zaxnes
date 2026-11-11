@@ -359,7 +359,7 @@ pub const CATALOGUE: [CatalogPreset; 32] = [
         "edge-smoothing/scalefx/scalefx.slangp|crt/crt-guest-advanced-hd.slangp",
         Family::Combination,
         Cost::Heavy,
-        Featured::No,
+        Featured::Always,
     ),
     entry(
         "shaders.preset.nnedi3_hyllian",
@@ -373,7 +373,7 @@ pub const CATALOGUE: [CatalogPreset; 32] = [
         "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp|crt/crt-easymode.slangp",
         Family::Combination,
         Cost::Heavy,
-        Featured::No,
+        Featured::Always,
     ),
     entry(
         "shaders.preset.nnedi3_mattias",
@@ -395,13 +395,115 @@ pub fn slot_label(slot: ShaderSlot) -> String {
     })
 }
 
-/// The name a stored preset is shown by: its catalogue name, or its path in the pack.
+/// The name a stored preset is shown by: its catalogue name; for a combination outside the
+/// catalogue, the names of its presets joined by " + " (a preset outside the catalogue by its
+/// file name).
 #[must_use]
 pub fn preset_label(stored: &str) -> String {
-    catalogue_entry(stored).map_or_else(
-        || stored.to_owned(),
-        |preset| crate::ui::strings::get(preset.label),
-    )
+    if let Some(preset) = catalogue_entry(stored) {
+        return crate::ui::strings::get(preset.label);
+    }
+    if !stored.contains(crate::shader_pack::COMBINATION_SEPARATOR) {
+        return stored.to_owned();
+    }
+    crate::shader_pack::parts(stored)
+        .into_iter()
+        .map(|part| {
+            catalogue_entry(part).map_or_else(
+                || {
+                    Path::new(part).file_stem().map_or_else(
+                        || part.to_owned(),
+                        |stem| stem.to_string_lossy().into_owned(),
+                    )
+                },
+                |preset| crate::ui::strings::get(preset.label),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+/// A pre-filter (owner request): a preset that enlarges or smooths the picture before the
+/// preset of the slot, stored in front of it as a combination ("pre-filter|preset").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreFilter {
+    /// The key of its name in the string tables.
+    pub label: &'static str,
+    /// Its path in the pack.
+    pub path: &'static str,
+}
+
+/// The pre-filters a slot offers, from the lightest. Each ends larger than the picture it reads,
+/// once the resampling to the window that ends nnedi3 and xBRZ draws at its own input's size
+/// (`zax_platform::slang_chain::parse_combination`).
+pub const PRE_FILTERS: [PreFilter; 5] = [
+    PreFilter {
+        label: "shaders.prefilter.xbrz2",
+        path: "edge-smoothing/xbrz/2xbrz-linear.slangp",
+    },
+    PreFilter {
+        label: "shaders.prefilter.xbrz4",
+        path: "edge-smoothing/xbrz/4xbrz-linear.slangp",
+    },
+    PreFilter {
+        label: "shaders.prefilter.scalefx",
+        path: "edge-smoothing/scalefx/scalefx.slangp",
+    },
+    PreFilter {
+        label: "shaders.prefilter.nnedi3_2",
+        path: "edge-smoothing/nnedi3/nnedi3-nns16-2x-rgb.slangp",
+    },
+    PreFilter {
+        label: "shaders.prefilter.nnedi3_4",
+        path: "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp",
+    },
+];
+
+/// The pre-filter in front of the stored preset `stored`, if it has one of [`PRE_FILTERS`], and
+/// the preset behind it (the whole of `stored` otherwise).
+#[must_use]
+pub fn split_pre_filter(stored: &str) -> (Option<&'static PreFilter>, &str) {
+    if let Some((first, rest)) = stored.split_once(crate::shader_pack::COMBINATION_SEPARATOR) {
+        let first = first.replace('\\', "/");
+        if let Some(filter) = PRE_FILTERS.iter().find(|filter| filter.path == first) {
+            return (Some(filter), rest);
+        }
+    }
+    (None, stored)
+}
+
+/// `preset` behind the pre-filter `filter`, as the settings store it.
+#[must_use]
+pub fn with_pre_filter(filter: Option<&PreFilter>, preset: &str) -> String {
+    match filter {
+        Some(filter) if !preset.is_empty() => format!(
+            "{}{}{preset}",
+            filter.path,
+            crate::shader_pack::COMBINATION_SEPARATOR
+        ),
+        _ => preset.to_owned(),
+    }
+}
+
+/// The pre-filter of `slot` in `model`.
+#[must_use]
+pub fn pre_filter_of(model: &SettingsModel, slot: ShaderSlot) -> Option<&'static PreFilter> {
+    split_pre_filter(model.get(slot.ids().preset).as_text()).0
+}
+
+/// Puts `filter` in front of the preset of `slot`, or takes the one there away; the preset and
+/// its parameters stay.
+pub fn set_pre_filter(model: &mut SettingsModel, slot: ShaderSlot, filter: Option<&PreFilter>) {
+    let ids = slot.ids();
+    let stored = model.get(ids.preset).as_text().to_owned();
+    let (_, preset) = split_pre_filter(&stored);
+    model.set(ids.preset, with_pre_filter(filter, preset).as_str());
+}
+
+/// The name of `filter`, "None" for none.
+#[must_use]
+pub fn pre_filter_label(filter: Option<&PreFilter>) -> String {
+    crate::ui::strings::get(filter.map_or("shaders.prefilter.none", |filter| filter.label))
 }
 
 /// What a slot shows, as the console's row of it steps through: the slot it follows, nothing,
@@ -439,7 +541,17 @@ pub fn slot_pick(model: &SettingsModel, slot: ShaderSlot) -> SlotPick {
     let ids = slot.ids();
     match model.get(ids.mode).as_int() {
         shader_slots::FOLLOW if slot.fallback().is_some() => SlotPick::Follow,
-        PRESET => SlotPick::Preset(model.get(ids.preset).as_text().to_owned()),
+        // A combination of the catalogue is one of the picks; otherwise the preset behind the
+        // pre-filter, which has a row of its own.
+        PRESET => {
+            let value = model.get(ids.preset);
+            let stored = value.as_text();
+            if catalogue_entry(stored).is_some() {
+                SlotPick::Preset(stored.to_owned())
+            } else {
+                SlotPick::Preset(split_pre_filter(stored).1.to_owned())
+            }
+        }
         _ => SlotPick::Off,
     }
 }
@@ -497,7 +609,9 @@ pub fn catalogue_entry(path: &str) -> Option<&'static CatalogPreset> {
 #[must_use]
 pub fn starting_parameters(path: &str, slot: ShaderSlot) -> String {
     let (_, wide) = mode_of(slot);
+    // A catalogue preset behind a pre-filter starts as the preset alone does.
     let parameters: Vec<(String, f32)> = catalogue_entry(path)
+        .or_else(|| catalogue_entry(split_pre_filter(path).1))
         .map(|preset| {
             if wide {
                 preset.wide_parameters
@@ -527,10 +641,23 @@ pub fn starting_parameters(path: &str, slot: ShaderSlot) -> String {
 const MEGA_BEZEL_INTRO: &str = "HSM_INTRO_WHEN_TO_SHOW";
 
 /// Sets `slot` to the preset `path` of the pack, with the catalogue's parameters and area when
-/// it is one of its entries (none and the automatic area otherwise).
+/// it is one of its entries (none and the automatic area otherwise). A preset without a
+/// pre-filter of its own keeps the one of the slot (owner request: the pre-filter is a row of its
+/// own); a combination of the catalogue brings its own, or none.
 pub fn choose_preset(model: &mut SettingsModel, slot: ShaderSlot, path: &str) {
     let ids = slot.ids();
-    let area = catalogue_entry(path).map_or(shader_slots::AREA_AUTO, |preset| preset.area);
+    let kept = if split_pre_filter(path).0.is_some()
+        || catalogue_entry(path).is_some_and(|preset| preset.family == Family::Combination)
+    {
+        None
+    } else {
+        pre_filter_of(model, slot)
+    };
+    let path = with_pre_filter(kept, path);
+    let path = path.as_str();
+    let area = catalogue_entry(path)
+        .or_else(|| catalogue_entry(split_pre_filter(path).1))
+        .map_or(shader_slots::AREA_AUTO, |preset| preset.area);
     model.set(ids.mode, SettingValue::Enum(PRESET));
     model.set(ids.preset, path);
     model.set(ids.params, starting_parameters(path, slot).as_str());

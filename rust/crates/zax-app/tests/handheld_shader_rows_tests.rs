@@ -13,12 +13,7 @@ fn the_page_hangs_on_the_advanced_hub_with_the_four_slots() {
     assert!(ADVANCED_HUB.contains(&OptionRow::Page(OptionsPage::Shaders)));
     assert_eq!(
         OptionsPage::Shaders.rows(),
-        [
-            OptionRow::Shader(ShaderSlot::TwoD),
-            OptionRow::Shader(ShaderSlot::TwoDWide),
-            OptionRow::Shader(ShaderSlot::ThreeD),
-            OptionRow::Shader(ShaderSlot::ThreeDWide),
-        ]
+        zax_app::ui::handheld::options::SHADER_ROWS
     );
 }
 
@@ -85,4 +80,53 @@ fn a_preset_of_the_catalogue_brings_its_parameters_and_area() {
         .get(SettingId::Shader2dWsParams)
         .as_text()
         .contains("HSM_ASPECT_RATIO_MODE=6"));
+}
+
+/// The pre-filter (owner request): a row of its own in front of the preset, kept when the preset
+/// changes, replaced by a combination of the catalogue, taken away with "None".
+#[test]
+fn the_pre_filter_stays_in_front_of_the_preset() {
+    use zax_app::ui::shader_panel::{pre_filter_of, PRE_FILTERS};
+
+    let mut settings = SettingsModel::new();
+    let slot = ShaderSlot::TwoD;
+    shader_panel::choose_preset(&mut settings, slot, "crt/crt-easymode.slangp");
+    step_row(OptionRow::ShaderPreFilter(slot), &mut settings, 1);
+    assert_eq!(pre_filter_of(&settings, slot), Some(&PRE_FILTERS[0]));
+    assert_eq!(
+        settings.get(SettingId::Shader2dPreset).as_text(),
+        format!("{}|crt/crt-easymode.slangp", PRE_FILTERS[0].path)
+    );
+    // The preset row still names the preset behind it.
+    assert_eq!(
+        shader_panel::slot_pick(&settings, slot),
+        SlotPick::Preset("crt/crt-easymode.slangp".to_owned())
+    );
+    shader_panel::choose_preset(&mut settings, slot, "crt/zfast-crt.slangp");
+    assert_eq!(
+        settings.get(SettingId::Shader2dPreset).as_text(),
+        format!("{}|crt/zfast-crt.slangp", PRE_FILTERS[0].path)
+    );
+    // A combination of the catalogue brings its own.
+    let combination = "edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp|crt/crt-easymode.slangp";
+    shader_panel::choose_preset(&mut settings, slot, combination);
+    assert_eq!(
+        settings.get(SettingId::Shader2dPreset).as_text(),
+        combination
+    );
+    assert_eq!(pre_filter_of(&settings, slot), Some(&PRE_FILTERS[4]));
+    // "None" leaves the preset alone.
+    shader_panel::set_pre_filter(&mut settings, slot, None);
+    assert_eq!(
+        settings.get(SettingId::Shader2dPreset).as_text(),
+        "crt/crt-easymode.slangp"
+    );
+    assert_eq!(
+        value_text(
+            OptionRow::ShaderPreFilter(slot),
+            &settings,
+            CameraPreset::Orbit
+        ),
+        shader_panel::pre_filter_label(None)
+    );
 }

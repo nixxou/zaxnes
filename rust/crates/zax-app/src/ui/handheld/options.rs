@@ -70,6 +70,9 @@ pub enum OptionRow {
     /// A slot of the slang shaders (owner request: the console mode offers them as the desktop's
     /// window does): it steps through following, nothing and the presets of the catalogue.
     Shader(ShaderSlot),
+    /// The pre-filter of a slot of the slang shaders: none, then those of
+    /// [`shader_panel::PRE_FILTERS`] (owner request).
+    ShaderPreFilter(ShaderSlot),
     /// A row that climbs to another page of the tree (RO-3).
     Page(OptionsPage),
     /// A group title: a label and nothing else (RO-3). Up and down skip it, and it is drawn
@@ -239,11 +242,15 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
 /// The rows of the *Shaders* page: the four slots, as the desktop's window has them (owner
 /// request). They are the same in a build without the shaders, which keeps the settings the
 /// desktop shares; such a build simply draws none.
-pub const SHADER_ROWS: [OptionRow; 4] = [
+pub const SHADER_ROWS: [OptionRow; 8] = [
     OptionRow::Shader(ShaderSlot::TwoD),
+    OptionRow::ShaderPreFilter(ShaderSlot::TwoD),
     OptionRow::Shader(ShaderSlot::TwoDWide),
+    OptionRow::ShaderPreFilter(ShaderSlot::TwoDWide),
     OptionRow::Shader(ShaderSlot::ThreeD),
+    OptionRow::ShaderPreFilter(ShaderSlot::ThreeD),
     OptionRow::Shader(ShaderSlot::ThreeDWide),
+    OptionRow::ShaderPreFilter(ShaderSlot::ThreeDWide),
 ];
 
 /// The *Advanced options* hub: six pages where RO-2 left one flat list of 56 rows. It repeats
@@ -686,6 +693,13 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = cycled(&picks, &shader_panel::slot_pick(settings, slot), step).clone();
             shader_panel::set_slot_pick(settings, slot, &next);
         }
+        OptionRow::ShaderPreFilter(slot) => {
+            let choices: Vec<Option<&shader_panel::PreFilter>> = std::iter::once(None)
+                .chain(shader_panel::PRE_FILTERS.iter().map(Some))
+                .collect();
+            let next = *cycled(&choices, &shader_panel::pre_filter_of(settings, slot), step);
+            shader_panel::set_pre_filter(settings, slot, next);
+        }
     }
     None
 }
@@ -725,6 +739,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Page(page) => strings::get(page.title_key()),
         OptionRow::Group(key) => strings::get(key),
         OptionRow::Shader(slot) => shader_panel::slot_label(slot),
+        OptionRow::ShaderPreFilter(_) => format!("  {}", strings::get("shaders.prefilter")),
     }
 }
 
@@ -782,6 +797,9 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
         OptionRow::Shader(slot) => {
             shader_panel::pick_label(slot, &shader_panel::slot_pick(settings, slot))
+        }
+        OptionRow::ShaderPreFilter(slot) => {
+            shader_panel::pre_filter_label(shader_panel::pre_filter_of(settings, slot))
         }
     }
 }

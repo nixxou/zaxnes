@@ -43,6 +43,9 @@ fn row_key(row: OptionRow) -> String {
         OptionRow::Achievements => "page.achievements".to_owned(),
         OptionRow::TouchPad => "row.touch_pad".to_owned(),
         OptionRow::Shader(slot) => format!("row.shader.{}", slot.ids().mode.key()),
+        OptionRow::ShaderPreFilter(slot) => {
+            format!("row.shader_pre_filter.{}", slot.ids().preset.key())
+        }
     }
 }
 

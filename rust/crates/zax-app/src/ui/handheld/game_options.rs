@@ -201,6 +201,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Achievements
         | OptionRow::Page(_)
         | OptionRow::Shader(_)
+        | OptionRow::ShaderPreFilter(_)
         | OptionRow::Group(_) => &[],
     }
 }
