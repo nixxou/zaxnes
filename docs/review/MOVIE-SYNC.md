@@ -39,6 +39,18 @@ byte-identical) and needs no third engine, which sharpens §6's answer rather th
 section is §4f, with the amendments marked *NESHAWK-PROFILE* in §5 and §6;
 `docs/review/NESHAWK-PROFILE.md` is how to add an item.
 
+**NESHAWK-PROFILE-2 closes frame 4666 and the 4 688 frames after it**, from the third per-frame
+reference the owner produced (frames 1 100 to 10 000). It built the instrument the diagnosis needed
+— `frame-trace --dmc-census`, behind a feature that is off by default — found that frame 4666's DMA
+is entirely ordinary and that the missing difference was **item 1's third half**, the one
+NESHAWK-PROFILE named and did not implement: NesHawk halts on the request cycle *even when the CPU
+is writing on it*. *Kirby* now replays with **no live difference until frame 9 353**, 8 175 of
+8 901 frames clean against 3 531, and **15 of the owner's 18 screenshots match against 0** for the
+standard profile. It also corrects a parity in item 3 and adds `dmc_realign`, both of which turn
+out to be *exactly* inert on this movie, and it eliminates the end-of-sample aborts from *Kirby*'s
+candidates by arithmetic rather than by experiment. The standard profile is again byte-identical
+and about 2 % faster. Its section is §4g, with the amendments marked *NESHAWK-PROFILE-2* in §5.
+
 ---
 
 ## The short version
@@ -1147,6 +1159,116 @@ eight-step recipe for adding an item.
 
 ---
 
+## 4g. Frame 4666, and the 4 688 frames after it: item 1's third half (NESHAWK-PROFILE-2)
+
+§4f ended by asking for exactly one thing: *"A per-frame `ram=` dump of frames 1 100 to 10 000
+would localise the next difference in one command."* The owner produced it
+(`kirby-jp-step1c.txt`, 8 901 frames, and a screenshot every 500), and it said the profile parted
+again at frame **4666** with frame 926's own four bytes — the frame semaphore `$0039` still set when
+the next NMI landed.
+
+**The result first**, same command, `--profile` the only difference:
+
+| | `standard` | `neshawk`, §4f's four items | `neshawk`, with item 1c |
+|---|---|---|---|
+| frames compared (1 100-10 000) | 8 901 | 8 901 | 8 901 |
+| **the last frame with no live difference** | 925 | **4 665** | **9 353** |
+| frames with no difference outside the stack page and `$0000-$001F` | — | 3 531 of 8 901 | **8 175** of 8 901 |
+| frames with a live difference | — | 5 370 | **726** |
+| all 8 901 lag counts | agree | agree | agree |
+| the owner's 18 screenshots, 1 500 to 10 000 | **0** MATCH | — | **15** MATCH |
+
+### The instrument, because aggregate counts could not do it
+
+`frame-trace` could say *"52 DMC sample fetch(es)"* for frame 4666 and no more. This lot built
+**`frame-trace --dmc-census`**: every DMC request with the earliest cycle its halt was allowed on,
+every halt, every fetch with the cycles it cost, the OAM transfers, every APU register write and
+every `$4015` and `$2002` read, each placed against the instruction it happened inside and carrying
+the DMC's own `(timer, bits_remaining, bytes_remaining)`.
+
+It is behind the `dma-census` feature, **off by default, with `#[cfg]` on each of its nine call
+statements** so the shipped core is the core without them — which is what keeps `golden-core` and
+`bench-core` answerable at all.
+
+### What it said, which was a negative and the most useful thing in the lot
+
+**Frame 4666 is entirely ordinary.** 52 fetches, every one a plain reload costing exactly four
+cycles (`the costs: 52x4`), one OAM transfer, **no `$4015` write, no `$4010`-`$4013` write, no
+`$2002` read**, one `$4015` read — and that read is `LDA $4015` at **`$823C`**, §4e's amplifier,
+which returns `1F` so that the `BNE` at `$8241` is taken, the arm that does nothing.
+
+So **neither of the two candidates §4f left standing has a site in that frame**: no sample end for
+item 6's aborts, no register write for item 5's alignment, no mid-sample enable for item 3. And the
+miss was measured: `$0039` is raised by `INC $39` at `$C37C` in the NMI handler and cleared by
+`STA $39` at `$C06E` when the frame's work finishes; frame 4666 never reaches `$C06E`, and the
+stretch from `$F06F` to `$C06E` costs **394 cycles** where the frame has slack against the **177**
+frame 4666 has left when it gets there. **About 220 cycles short, against a whole-frame DMA bill of
+721** — so no change to the cost of a fetch could close it by arithmetic.
+
+### The item, which is item 1's third half
+
+Item 1 was split into **1a** (the halt lands on the request cycle) and **1b** (a fixed four
+cycles), both shipped in §4f. The `+2` that NESHAWK-PROFILE step 1 quoted was never implemented,
+and with it the reason for it:
+
+* `DMCUnit.Run()` lowers `RDY` on the request cycle **whatever the CPU is doing there**, and
+  `MOS6502X`'s write microstep runs unconditionally and never sets `rdy_freeze`;
+* `RunCpuOne`'s `if (!cpu.RDY && !cpu.rdy_freeze && countdown == DMC_RDY_check) countdown += 2`
+  then gives the fetch two cycles back once the CPU has been writing for three cycles.
+
+Zaxnes has neither half: a request raised on a write cycle waits for the **next read cycle**. Let
+`w` be that wait — how many cycles in a row the CPU was writing. NesHawk's stalled read runs
+`w + 3` cycles after the request for odd `w` and `w + 4` for even; this core always spends `w + 4`.
+So they agree on an even `w` and NesHawk is **one cycle ahead on an odd one** — and a 6502 never
+writes on more than three cycles in a row (the three pushes of an interrupt or `BRK`; two for
+`JSR` and for a read-modify-write), so `w ≤ 3` and one bit of `w` is the whole rule rather than an
+approximation. `DMC_HALT_LANDS_ON_A_WRITE_CYCLE` drops the second re-read on an odd `w`.
+
+In frame 4666 it fires **six** times — `the costs: 6x3 46x4`, 202 cycles instead of 208 — which is
+a thirty-seventh of the 220-cycle miss. **The arithmetic was written down in advance, was right
+about the size, and was wrong about what it meant, for the second lot running**: item 1a closed
+frame 926 against an arithmetic of the wrong *sign*, and item 1c closes frame 4666 against one two
+orders of magnitude too small. What these items move is *which cycle* each fetch lands on, and with
+it the interleaving of a whole frame.
+
+### Two items that are real and exactly inert, and two eliminated
+
+| | |
+|---|---|
+| **item 3's parity, corrected** | NesHawk's DMC timer is **this core's plus one** — it reloads to `DMC_RATE[i]` (428) where this core reloads to `rates[i] - 1` (427), both read after the same cycle's clock — so every `timer % 2` taken from its source has to be inverted. Item 3 shipped with the source's text and the wrong convention. Corrected, it moves the sample's whole phase by a cycle (`d=3` where it read `d=2`) and leaves the **8 901-frame table byte-identical** |
+| **item 7, `dmc_realign`** | NesHawk's OAM block is gated on `dmc_dma_countdown != 1 && !dmc_realign` and the DMC sets `dmc_realign` on the fetch cycle, so a transfer a fetch falls inside loses **two** cycles where this core's loses one. Implemented, tested, and the table is again **byte-identical**: *Kirby* has one such fetch a frame |
+| **item 6's end-of-sample aborts, eliminated** | `fill_glitch` and `fill_glitch_2` are set only at a fetch that *completes* with `out_bits_remaining == 0`, and `DMCUnit.Clock` makes that the last bit period of a byte — seven bit periods from where a fetch can complete at *Kirby*'s 72 and 106 cycles a bit. **Neither can ever fire on this movie**, proved from the source and the measured rate rather than tried |
+| **item 5, not implemented** | the `pending_reg` dispatch defers every APU register but `$4003`, `$4007`, `$4010`, `$4015` and `$4017` to an even DMC timer, and a second write while one is pending **loses the first**. Of those only `$4012`/`$4013` can move a fetch, and the address they set is not read for hundreds of cycles — so it is **CPU-timing-neutral here** and would touch `Apu2A03::write` for every game. It stays the first item to add for a game whose *audio* differs |
+
+### Where it parts now: frame 9355, and it is the sound engine
+
+`frame-trace --converge` classifies 9354 as the **artefact** class (an instant of our frame holds
+the reference's 2 KiB exactly) and **9355 as real**. `$0641,X` is the per-channel note-duration
+counter of the music driver at `$80xx`-`$83xx`; this core writes two of its channels at
+instructions 8 697 and **8 733 of frame 9354, seven instructions before the frame boundary**, and
+the reference's 2 KiB holds the state before them. In frame 9355 the driver reads one back and
+branches on it, and the sound state never converges again.
+
+So it is frame 4666's shape one routine over — a per-frame pass crossing the vblank — **with the
+sign reversed**: there this core was late, here it is early by about **thirty cycles** in a frame
+whose bill is 274 DMC cycles and one 513-cycle OAM transfer. No difference NesHawk's source shows
+supplies thirty cycles on that frame, which is why this lot stops at three rounds of its allowed
+five and says so.
+
+### No regression, and the standard profile is faster
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames | `8d508070…`, **byte-identical** |
+| `bench-core`, six interleaved rounds against `428c50e6` | Super Mario Bros. 3 **−2.24 %**, Mega Man 3 **−1.04 %**, faster in eleven of twelve rounds |
+| the 30 DMC/DMA/APU ROMs, `--profile standard` | 24 pass, 6 manual — unchanged |
+| `AccuracyCoin`, `--profile standard` | 128/147 — unchanged |
+| `AccuracyCoin`, `--profile neshawk` | 120/147 → **122/147**: `DMA + $2002 Read` and `DMA + $4015 Read` now pass |
+| *Faxanadu*, both dumps, both profiles | 207 and 220 of 832, last agreeing line 83 200, every lag count agreeing, the same final picture hashes — §4's figures to the hash |
+| the suites | `zax-nes` **1 201**, `zax-harness` **127** (and 127 with `dma-census`, 147 with `fceux-core`), 0 failures |
+
+---
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
@@ -1230,18 +1352,49 @@ Three new ones, from EVAL-SYNC-4:
 
 Two new ones, from NESHAWK-PROFILE:
 
-* **Where *Kirby* parts now is beyond frame 1 100, and no reference can see it.** The per-frame
-  dumps stop at 1 100; `kirby-jp.txt` carries no `ram=` field, so neither `--ram-ref` nor
-  `frame-trace --converge` can run past it. The picture at frame 1 000 matches and the picture at
-  10 000 does not, so the next divergence is in that interval and nothing in hand localises it. **A
+* ~~**Where *Kirby* parts now is beyond frame 1 100, and no reference can see it.** … **A
   per-frame `ram=` dump of frames 1 100 to 10 000 would name it in one command**, and that is the
-  single most valuable thing the owner could produce for this question now.
+  single most valuable thing the owner could produce for this question now.~~ **Produced, and it
+  did exactly that (NESHAWK-PROFILE-2):** `kirby-jp-step1c.txt` named frame **4666** in one
+  command, and item 1c then took the last clean frame to **9 353** (§4g).
 * **Items 2 and 3 are implemented on a reading, and only item 3 has been seen to fire.** Item 2
   changes nothing on either movie in hand, so the only evidence that it is right is NesHawk's
-  source; a movie whose `$4015` read lands inside its three-cycle window would be the test. The two
-  candidates the reading turned up and this lot did **not** implement — `$4011`/`$4012`/`$4013`
-  landing on an even DMC-timer cycle, and the `fill_glitch` family of end-of-sample aborts — are
-  unmeasured for the same reason (`docs/progress/NESHAWK-PROFILE.md` step 1, items 5 and 6).
+  source; a movie whose `$4015` read lands inside its three-cycle window would be the test.
+  NESHAWK-PROFILE-2 adds item 3 to that list: with its parity corrected to the source's own
+  convention it moves every sample's phase by a cycle and changes **not one byte** of 8 901 frames,
+  so it too rests on the source alone.
+
+Four new ones, from NESHAWK-PROFILE-2:
+
+* **Where *Kirby* parts now is frame 9 355, and the reference covers it — so the gap is a
+  mechanism, not data.** The sound driver's per-frame pass crosses the vblank about thirty cycles
+  differently in frame 9 354, and **nothing in NesHawk's DMC, DMA or APU-register paths supplies
+  thirty cycles on that frame**: item 1c is worth six, item 7 one, items 3 and 5 nothing, and item 6
+  cannot fire at these rates. So the next difference is probably **not** on the paths these two lots
+  read, and the next lot should read somewhere else — the frame sequencer and `$4017` (written every
+  frame, and what decides the four length-counter bits of the `$4015` the driver reads), or the
+  `$4016` strobe delay `RunOneLast` applies on an odd DMC timer, are the two the reading passed over
+  because *Kirby*'s DMA did not need them.
+* **The reference's reading point is not at a fixed offset after all.** EVAL-SYNC-4 measured 5 to 17
+  CPU cycles on eight frames and §5 already recorded frame 733's **170** as the odd one out. The
+  third window makes that the rule rather than the exception: of the 79 isolated artefact frames
+  below 9 354, most match at −6 to −1 instructions but frames 1 254, 2 082, 2 893 and 9 354 match
+  at **−58, −89, −1 486 and −97 to −44**. Until the rule behind the offset is published, a
+  `--converge` verdict of "artefact" on a frame with a large offset is weaker evidence than one at
+  −6, and frame 9 354 is exactly such a frame.
+* **Eleven frames below 4 666 were real, transient divergences and nobody knows what they were.**
+  §4g's window has 79 isolated differing frames; before item 1c there were 35, and
+  `frame-trace --converge` found **11 of them real** (no instant of the frame agrees) **and
+  self-healing** — 1 752, 1 776, 2 072, 3 355, 3 356, 4 168, 4 338, 4 402, 4 475, 4 576, 4 616.
+  Every one had a DPCM sample playing and the artefact class included frames with none, which is
+  what pointed this lot at the DMA; frame 4 475 even carries frame 4666's four bytes with the signs
+  reversed. Item 1c moved the set rather than emptying it (a cluster at 1 751-1 763 is new and
+  heals), and **no lot has explained a self-healing one-frame divergence**.
+* **A frame whose work RAM agrees byte for byte can still differ by four pixels.** Frame 8 500 is
+  the one disagreement among the 15 matching screenshots and its line is `live=0`, as frame 400's
+  single pixel was in §4f. Two instances now, both on frames with no live difference at all, so it
+  is a PPU or sprite-evaluation difference rather than a timing one — and it is the only thing in
+  this series that the work-RAM instrument cannot see at all.
 
 ---
 
@@ -1608,3 +1761,61 @@ done
 The screenshot comparison is still the same uncommitted script, and EVAL-SYNC-4 revalidated it a
 second way: it scores **10** MATCHes of 15 on one pairing of the owner's screenshots and **1** on
 the other, which a script that said MATCH indiscriminately could not do.
+
+### The commands (NESHAWK-PROFILE-2)
+
+```sh
+H=./target-ev/release/zax-harness.exe
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+R=$B/kirby-jp-step1c.txt       # the third per-frame reference: frames 1 100 to 10 000
+
+# the window, byte for byte and lag for lag, with the per-frame table (no --profile: the .bk2's
+# own Core header picks the NesHawk chip, and the run prints `zaxnes/neshawk`)
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 10001 --trace-step 1 \
+    --trace-ref "$R" --ram-ref "$R" --ram-ref-table c-table.txt
+awk '!/^#/ && $3 != "live=0"' c-table.txt        # the differing frames
+
+# each isolated frame: artefact or real
+for f in $(awk '!/^#/ && $3 != "live=0" && $1 < 9354 {print $1}' c-table.txt); do
+  $H frame-trace "$K" "$KR" --frame $f --converge "$R"
+done
+
+# frame 4666: the live difference either side of the boundary, and the semaphore
+$H frame-trace "$K" "$KR" --frame 4666 --converge "$R" --converge-window 40 \
+    --watch 0038 --watch 0039 --watch 0048 --watch 0049
+$H frame-trace "$K" "$KR" --frame 4664 --frames 4 --out t4664.txt
+grep -E 'C06E  85 39|F06F  85 38' t4664.txt       # the deadline, and where the frame ran out
+
+# the DMA census -- an instrument behind a feature that is off by default
+cargo build -p zax-harness --release --features dma-census
+$H frame-trace "$K" "$KR" --frame 4666 --dmc-census
+$H frame-trace "$K" "$KR" --frame 4640 --frames 31 --dmc-census   # a line per frame
+
+# the pictures, at the owner's 500-frame grid, both profiles from the same command
+for p in neshawk standard; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 10000 --profile $p \
+      --png shots-$p --png-frames 1500,2000,2500,3000,3500,4000,4500,5000,5500,6000,6500,7000,7500,8000,8500,9000,9500,10000
+done
+
+# the regression set
+$H golden-core "G:/3DSen/test-originals" golden.jsonl 1200 && sha256sum golden.jsonl
+for p in standard neshawk; do
+  for f in dmc_dma_during_read4 sprdma_and_dmc_dma dmc_tests apu_test AccuracyCoin; do
+    $H test-roms "$ZAXNES_TEST_ROMS" "tr-$f-$p.json" --filter "$f" --no-shots --quiet --profile $p
+  done
+done
+$H bench-core "G:/3DSen/test-originals/Super Mario Bros. 3 [USA][!!].nes" --frames 1200 --warmup 120
+F="$M/bk2/invariel-faxanadu.bk2"
+$H movie-sync "$F" "$M/roms/Faxanadu [USA][!!].nes" --engine zaxnes --lag --trace-step 100 \
+    --trace-ref "$B/fax-usa.txt" --profile neshawk
+```
+
+The screenshot comparison is still **not committed** — it reads pictures of a commercial game. It
+is EVAL-SYNC §4's colour-bijection rule with the eight overscan rows cropped top and bottom
+(BizHawk writes 256×224, this core the whole 256×240, REQ-CORE-048). NESHAWK-PROFILE-2 revalidated
+it a third way: **15 MATCHes of 18 on the NesHawk profile and 0 of 18 on the standard one**, whose
+eighteen misses run from 38 914 to 54 963 pixels — which a script that said MATCH indiscriminately
+could not produce.

@@ -693,3 +693,51 @@ were run before any of them could be.
 
 ---
 
+## Step 6 — report and final pass
+
+### The two documents
+
+| | |
+|---|---|
+| `docs/review/MOVIE-SYNC.md` **§4g** | *Frame 4666, and the 4 688 frames after it: item 1's third half.* The result against the third reference, the instrument and why it was needed, the negative that frame 4666 is ordinary, the item with its two halves of source and the `w ≤ 3` argument, the two items that are real and exactly inert, the two eliminated, where it parts now and why that is a mechanism rather than a data gap, and the regression set. The header's lot list gained a NESHAWK-PROFILE-2 paragraph; §5 struck the request §4f made (the dump the owner then produced), extended the item-2/3 unknown to cover item 3's corrected parity, and added **four** of its own; the commands block has this lot's, with the screenshot script's third validation |
+| `docs/review/NESHAWK-PROFILE.md` | the item table gained **1c** and **7** with their sources and sites; the per-movie attribution is now a two-row table (frame 926 and frame 4666); a new section lists the **five candidates that are not implemented and why**, each with the condition under which it *would* be worth adding; a section documents `frame-trace --dmc-census`; the recipe's two traps are now **four** (the inverted `timer % 2`, and that the arithmetic never decides); and the cost table carries this lot's figures |
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, whole workspace, feature **off** | clean |
+| the same with **`fceux-core`** (`zax-app`, `zax-harness`, `zax-fceux`) | clean |
+| the same with **`dma-census`** | clean |
+
+### What this lot did not do, said plainly
+
+| | |
+|---|---|
+| **rounds 4 and 5** | not run. Item 5 is source-confirmed and **measured as CPU-timing-neutral on this movie** (only `$4012`/`$4013` of the registers it defers can move a fetch, and the address they set is not read for hundreds of cycles); item 6 is **eliminated by arithmetic** at *Kirby*'s rates. Spending the rounds on a provably inert item at real regression risk is not what the brief's "iterate until it syncs" is for, and §4g names where the next lot should read instead |
+| **frame 9 355** | located and diagnosed — the sound driver's per-frame pass crossing the vblank by about thirty cycles in frame 9 354 — and **not closed**. The reference covers it, so this is a missing mechanism and not missing data |
+| **the eleven self-healing real frames** | measured and listed, not explained |
+| **frame 8 500's four pixels** | recorded as the class frame 400's single pixel belongs to (a picture difference on a frame whose work RAM agrees), not investigated: it is a PPU question |
+| **item 5 and item 6** | both left as candidates, each now with the exact condition under which it would fire, in `docs/review/NESHAWK-PROFILE.md` |
+| **the spec** | not edited. NESHAWK-PROFILE step 2's proposed REQ-CORE-124 wording still stands unchanged: the items are listed in `docs/review/NESHAWK-PROFILE.md`, which is what it points at |
+| **a `cargo test --workspace`** | impossible here (`LNK1181: cannot open input file 'SDL2.lib'`, and there is no `SDL2.lib` on the machine), so the suites are run per crate as the three lots before this one did. `cargo clippy --workspace --all-targets` does not link, so it still covers `zax-app` and `zax-platform` and every one of their test targets, in all three configurations |
+
+### The brief's rules, checked
+
+| | |
+|---|---|
+| the `Standard` path's behaviour | `golden-core` byte-identical; 24 of 24 DMC/DMA ROMs and `AccuracyCoin` 128/147 unchanged; savestates unchanged to the byte and to the version (no new state on that profile) |
+| the `Standard` path's speed | **−2.24 %** and **−1.04 %** on the two ROMs the brief names, faster in eleven of twelve interleaved rounds — the +1 % budget is not touched |
+| no `if profile == NesHawk` in a hot path | items 1c and 7 are read as `if P::ITEM` at three sites, folded at compile time; the two cores stay separate monomorphisations |
+| safe Rust only | no `unsafe` added anywhere; `zax-nes` keeps `#![forbid(unsafe_code)]` |
+| diagnostic hooks behind a cfg/feature off by default | `dma-census`, with `#[cfg]` on **each of the nine call statements** and not merely on the module and the field, so the default build is the build without them |
+| no downloads | none. BizHawk was read through `raw.githubusercontent.com`; nothing cloned, nothing fetched |
+| nothing staged that must not be | no ROM, movie, trace, dump, screenshot, `rust/target-*`, `.claude/` or `CLAUDE.md`; every commit staged files by name |
+| no absolute path with a user name in a committed file | checked across all six commits |
+| `spec/` not edited | checked |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-2 step 6/6 done: report and final pass
+
