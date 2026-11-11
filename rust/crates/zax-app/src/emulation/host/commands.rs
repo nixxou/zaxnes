@@ -17,6 +17,7 @@ use crate::persistence::save_slots::{is_valid_slot_id, numbered_slot_id, QUICK_S
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Whether `command` can run now with `args`.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // One arm per command family, the enumeration kept exhaustive.
     pub fn can_execute(&self, command: Command, args: &CommandArgs) -> bool {
         let loading = self.loading;
         let stopped = self.state == EmulationState::Stopped;
@@ -106,6 +107,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SetSkybox
             | Command::ToggleLocalCamera
             | Command::ToggleShadows
+            | Command::ToggleReflections
             | Command::ToggleFullscreen
             | Command::ToggleFpsCounter
             | Command::SetVolume
@@ -140,6 +142,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ToggleTwoDimensional => self.showing_two_dimensional(),
             Command::ToggleLocalCamera => self.settings.local_camera(),
             Command::ToggleShadows => self.settings.shadow(),
+            Command::ToggleReflections => self.settings.reflections(),
             Command::ToggleFullscreen => self.settings.fullscreen(),
             Command::ToggleFpsCounter => self.settings.show_fps(),
             Command::ToggleEditorMode => self.settings.editor_mode(),
@@ -207,6 +210,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SetCameraMode
             | Command::ToggleLocalCamera
             | Command::ToggleShadows
+            | Command::ToggleReflections
             | Command::ToggleHackOption
             | Command::ToggleFullscreen
             | Command::ToggleFpsCounter => self.execute_video(command, args),
@@ -377,6 +381,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let value = !model.shadow();
                 model.set_shadow(value);
             }),
+            Command::ToggleReflections => {
+                self.update_settings(|model| model.set_reflections(!model.reflections()));
+            }
             Command::ToggleFullscreen => {
                 self.update_settings(|model| {
                     let value = !model.fullscreen();

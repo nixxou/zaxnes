@@ -154,6 +154,7 @@ fn req_ui_200_every_entry_of_the_table_exists_and_names_a_command() {
         (text::menu_video(), Command::ResetView),
         (text::menu_video(), Command::SetSkybox),
         (text::menu_video(), Command::ToggleShadows),
+        (text::menu_video(), Command::ToggleReflections),
         (text::menu_video(), Command::ToggleFullscreen),
         (text::menu_video(), Command::ToggleFpsCounter),
         (text::menu_audio(), Command::SetVolume),

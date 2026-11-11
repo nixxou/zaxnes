@@ -291,6 +291,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.video.toggle_local_camera", "Top-down view"),
     ("cmd.video.set_skybox", "Skybox"),
     ("cmd.video.toggle_shadows", "Shadows"),
+    ("cmd.video.toggle_reflections", "Reflections"),
     ("cmd.video.toggle_hack_option", "Hack option"),
     ("cmd.video.toggle_fullscreen", "Full screen"),
     ("cmd.video.toggle_fps", "Show the FPS"),

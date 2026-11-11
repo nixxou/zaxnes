@@ -110,6 +110,9 @@ pub trait AppSettings {
     fn res_scale_factor(&self) -> f32;
     /// `render.shadow`.
     fn shadow(&self) -> bool;
+    /// Whether the floor reflections show: `render.style.reflections` on and the style Enhanced,
+    /// the only style that draws them (AMD-055 REQ-SCN-079).
+    fn reflections(&self) -> bool;
     /// `scene.skybox`.
     fn skybox(&self) -> i32;
     /// `camera.fov`.
@@ -239,6 +242,12 @@ impl AppSettings for SettingsModel {
         self.get(SettingId::RenderShadow).as_bool()
     }
 
+    fn reflections(&self) -> bool {
+        zax_settings::styles::canonical_style(self.get(SettingId::RenderVisualStyle).as_int())
+            == zax_settings::styles::ENHANCED_STYLE
+            && self.get(SettingId::RenderStyleReflections).as_int() != 0
+    }
+
     fn skybox(&self) -> i32 {
         self.get(SettingId::SceneSkybox).as_int()
     }
@@ -317,6 +326,9 @@ pub trait AppSettingsMut {
     fn set_render_method(&mut self, value: i32);
     /// Sets `render.shadow`.
     fn set_shadow(&mut self, value: bool);
+    /// Turns the floor reflections on or off. On also selects the Enhanced style when the
+    /// Classic one is set, since Classic draws no reflection and the switch would do nothing.
+    fn set_reflections(&mut self, value: bool);
     /// Sets `scene.skybox`.
     fn set_skybox(&mut self, value: i32);
     /// Sets `camera.fov`.
@@ -401,6 +413,23 @@ impl AppSettingsMut for SettingsModel {
 
     fn set_shadow(&mut self, value: bool) {
         self.set(SettingId::RenderShadow, value);
+    }
+
+    fn set_reflections(&mut self, value: bool) {
+        if value
+            && zax_settings::styles::canonical_style(
+                self.get(SettingId::RenderVisualStyle).as_int(),
+            ) != zax_settings::styles::ENHANCED_STYLE
+        {
+            self.set(
+                SettingId::RenderVisualStyle,
+                SettingValue::Int(zax_settings::styles::ENHANCED_STYLE),
+            );
+        }
+        self.set(
+            SettingId::RenderStyleReflections,
+            SettingValue::Int(i32::from(value)),
+        );
     }
 
     fn set_skybox(&mut self, value: i32) {

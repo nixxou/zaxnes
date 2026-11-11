@@ -67,6 +67,7 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         ToggleLocalCamera,
         SetSkybox,
         ToggleShadows,
+        ToggleReflections,
         // Rust-only (owner request): the options of the game's built-in patch.
         ToggleHackOption,
         ToggleFullscreen,
@@ -173,6 +174,30 @@ fn req_ui_205_the_toggles_report_their_state() {
     assert!(!harness.host.is_checked(Command::ToggleShadows));
     assert!(!harness.host.settings().shadow());
     assert!(!harness.host.scene().settings.shadows);
+    // The reflections: off by default; ticking them selects the Enhanced style, which is the only
+    // style that draws them; unticking keeps the style.
+    assert!(Command::ToggleReflections.is_toggle());
+    assert!(!harness.host.is_checked(Command::ToggleReflections));
+    harness.run(Command::ToggleReflections);
+    assert!(harness.host.is_checked(Command::ToggleReflections));
+    assert_eq!(
+        4,
+        harness
+            .host
+            .settings()
+            .get(zax_settings::catalogue::SettingId::RenderVisualStyle)
+            .as_int()
+    );
+    harness.run(Command::ToggleReflections);
+    assert!(!harness.host.is_checked(Command::ToggleReflections));
+    assert_eq!(
+        4,
+        harness
+            .host
+            .settings()
+            .get(zax_settings::catalogue::SettingId::RenderVisualStyle)
+            .as_int()
+    );
     assert!(Command::ToggleMenuMusic.is_toggle());
     assert!(harness.host.is_checked(Command::ToggleMenuMusic));
     harness.run(Command::ToggleMenuMusic);

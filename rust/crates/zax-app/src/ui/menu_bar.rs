@@ -403,6 +403,7 @@ fn build_menus() -> Vec<Menu> {
                 Submenu::Skybox,
             ),
             item(Command::ToggleShadows),
+            item(Command::ToggleReflections),
             MenuItem::of_ui(UiCommand::ShowShaders, ""),
             MenuItem::rule(),
             item(Command::ToggleFullscreen),

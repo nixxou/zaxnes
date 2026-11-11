@@ -261,6 +261,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.video.toggle_local_camera", "Vue de dessus"),
     ("cmd.video.set_skybox", "Skybox"),
     ("cmd.video.toggle_shadows", "Ombres"),
+    ("cmd.video.toggle_reflections", "Reflets"),
     ("cmd.video.toggle_hack_option", "Option du hack"),
     ("cmd.video.toggle_fullscreen", "Plein écran"),
     ("cmd.video.toggle_fps", "Afficher les FPS"),
