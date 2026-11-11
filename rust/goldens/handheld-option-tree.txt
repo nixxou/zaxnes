@@ -51,6 +51,7 @@ options
         video.max_queued_frames
     page.shaders
       video.backend
+      video.shader_resolution
       row.shader.shader.2d.mode
       row.shader_pre_filter.shader.2d.preset
       row.shader.shader.2d_ws.mode

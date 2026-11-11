@@ -693,6 +693,17 @@ impl Running {
 
     /// Asks the wgpu window for the slang preset of the display mode: the one `ZAXNES_SHADER`
     /// names, otherwise the slot of the mode (2D or 3D, widescreen or not) after its fallbacks.
+    /// The share of the window the shaders draw at (`video.shader_resolution`, a percentage).
+    #[cfg(feature = "shaders")]
+    #[allow(clippy::cast_precision_loss)] // 50 to 100.
+    fn shader_resolution(&self) -> f32 {
+        self.host
+            .settings()
+            .get(SettingId::VideoShaderResolution)
+            .as_int() as f32
+            / 100.0
+    }
+
     #[cfg(feature = "shaders")]
     fn request_shader(&mut self) {
         use crate::ui::shader_panel::{ShaderReport, ShaderState};
@@ -705,6 +716,7 @@ impl Running {
             .host
             .session()
             .map(|_| zax_settings::shader_slots::ShaderSlot::of(three_d, wide));
+        let resolution = self.shader_resolution();
         let Some(display) = self.window.wgpu_mut() else {
             self.host.shader_report = ShaderReport {
                 state: ShaderState::NoWgpu,
@@ -725,6 +737,7 @@ impl Running {
                     parameters: Vec::new(),
                     picture_aspect: (!three_d && !fills).then(|| scene.picture_aspect()),
                     scene_aspect: None,
+                    resolution,
                 })
             }
             None => zax_settings::shader_slots::resolve(self.host.settings(), three_d, wide).map(
@@ -756,6 +769,7 @@ impl Running {
                         picture_aspect: ((!three_d || framed) && !choice.fills_window)
                             .then(|| scene.picture_aspect()),
                         scene_aspect: framed.then(|| scene.picture_aspect()),
+                        resolution,
                     }
                 },
             ),

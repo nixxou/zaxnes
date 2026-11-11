@@ -147,6 +147,7 @@ setting_ids! {
     EmuCatchUpLast3d => "emu.catch_up_last_3d",
     VideoHalfRate3d => "video.half_rate_3d",
     VideoDynamicResolution => "video.dynamic_resolution",
+    VideoShaderResolution => "video.shader_resolution",
     VideoBackend => "video.backend",
     // Rust-only (owner request): the RetroArch slang preset of each of the four display
     // modes, with its fallback, the lines of the picture it reads and its parameters.

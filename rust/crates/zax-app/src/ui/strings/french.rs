@@ -462,6 +462,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.catch_up_last_3d", "Rattrapage : 3D de l'image affichée seulement"),
     ("setting.video.half_rate_3d", "3D à 30 i/s (jeu à pleine vitesse)"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
+    ("setting.video.shader_resolution", "Résolution du shader"),
+    (
+        "detail.video.shader_resolution",
+        "La part de l'écran à laquelle les shaders slang dessinent, étirée ensuite sur l'écran : \
+         50 % coûte environ quatre fois moins au processeur graphique (Mega Bezel fluide sur un \
+         téléphone), pour un masque CRT et des lignes de balayage plus doux. Par défaut : 100 %.",
+    ),
     ("setting.video.backend", "API graphique (au prochain démarrage)"),
     ("setting.video.widescreen", "Écran large (ROM prévues pour)"),
     ("setting.video.widescreen_extra", "Largeur supplémentaire de l'écran large"),

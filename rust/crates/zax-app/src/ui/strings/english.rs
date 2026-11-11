@@ -500,6 +500,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.catch_up_last_3d", "Catch-up: 3D of the shown frame only"),
     ("setting.video.half_rate_3d", "3D at 30 fps (game at full speed)"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
+    ("setting.video.shader_resolution", "Shader resolution"),
+    (
+        "detail.video.shader_resolution",
+        "The share of the screen the slang shaders draw at, stretched over it afterwards: 50 % \
+         costs the GPU about a quarter as much (Mega Bezel in time on a phone), for a softer CRT \
+         mask and scanlines. Default: 100 %.",
+    ),
     ("setting.video.backend", "Graphics API (at the next start)"),
     ("setting.video.widescreen", "Widescreen (ROMs made for it)"),
     ("setting.video.widescreen_extra", "Widescreen extra width"),

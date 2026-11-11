@@ -245,8 +245,9 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
 /// The rows of the *Shaders* page: the four slots, as the desktop's window has them (owner
 /// request). They are the same in a build without the shaders, which keeps the settings the
 /// desktop shares; such a build simply draws none.
-pub const SHADER_ROWS: [OptionRow; 9] = [
+pub const SHADER_ROWS: [OptionRow; 10] = [
     OptionRow::ShaderBackend,
+    OptionRow::Setting(SettingId::VideoShaderResolution),
     OptionRow::Shader(ShaderSlot::TwoD),
     OptionRow::ShaderPreFilter(ShaderSlot::TwoD),
     OptionRow::Shader(ShaderSlot::TwoDWide),

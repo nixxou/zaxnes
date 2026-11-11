@@ -27,3 +27,4 @@ edge-smoothing/nnedi3/nnedi3-nns16-2x-rgb.slangp
 edge-smoothing/nnedi3/nnedi3-nns32-4x-rgb.slangp
 scanlines/scanline.slangp
 bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_5__POTATO.slangp
+bezel/Mega_Bezel/Presets/MBZ__5__POTATO.slangp

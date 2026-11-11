@@ -476,9 +476,9 @@ fn ro_1_the_detailed_tooltips_are_desktop_only() {
 #[test]
 fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // The 56 of `336dd8f`, `audio.classic_output` which AUDIO-2 adds, and
-    // `emu.smooth_scroll_ahead` which KIRBY-MERGE does: a setting may move in the tree, never
-    // leave the console.
-    assert_eq!(58, advanced::ROW_SETTINGS.len());
+    // `emu.smooth_scroll_ahead` which KIRBY-MERGE does, and `video.shader_resolution` (the
+    // shaders' share of the window): a setting may move in the tree, never leave the console.
+    assert_eq!(59, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));
 

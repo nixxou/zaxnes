@@ -46,6 +46,8 @@ pub struct ShaderRequest {
     /// The width over the height the scene is drawn at for the preset, none for the window's:
     /// the 3D scene framed on the game's picture.
     pub scene_aspect: Option<f32>,
+    /// The share of the window the preset draws at (0.5 to 1), stretched over it afterwards.
+    pub resolution: f32,
 }
 
 /// A compiled preset.
@@ -292,6 +294,17 @@ impl SlangShaders {
     pub fn scene_aspect(&self) -> Option<f32> {
         self.active.as_ref()?;
         self.wanted.as_ref()?.scene_aspect
+    }
+
+    /// The share of the window the preset in use draws at (1 without one).
+    #[must_use]
+    pub fn resolution(&self) -> f32 {
+        if self.active.is_none() {
+            return 1.0;
+        }
+        self.wanted
+            .as_ref()
+            .map_or(1.0, |wanted| wanted.resolution.clamp(0.25, 1.0))
     }
 
     /// The lines the scene has to be drawn at for the preset in use: none without a preset, 0

@@ -68,6 +68,7 @@ ui.sort_option
 video.anti_alias
 video.backend [wgpu]
 video.dynamic_resolution
+video.shader_resolution
 video.frame_rate
 video.max_queued_frames
 video.nes_palette

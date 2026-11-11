@@ -2195,15 +2195,8 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
         let ids = slot.ids();
         let (default_mode, modes) = match slot.fallback() {
             None => (OFF, vec![opt(OFF, "Off"), opt(PRESET, "Preset")]),
-            // On Android the 3D scene does not take the 2D preset by default: it is filtered at
-            // the window's own size, which a 2D preset such as Mega Bezel is too heavy for on a
-            // phone GPU (Adreno 610: 0.5 fps, Adreno 650: 22 fps). It is chosen for 3D on purpose.
             Some(parent) => (
-                if cfg!(target_os = "android") && slot == ShaderSlot::ThreeD {
-                    OFF
-                } else {
-                    FOLLOW
-                },
+                follow_default(slot),
                 vec![
                     opt(FOLLOW, parent.follow_label()),
                     opt(OFF, "Off"),
@@ -2289,5 +2282,40 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
             ]))
             .with_label("Shader framing"),
         );
+    }
+    shader_resolution(out);
+}
+
+/// `video.shader_resolution`.
+fn shader_resolution(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): the slang shaders draw at this share of the window and are
+    // stretched over it (a phone GPU runs Mega Bezel in time at 50 %). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoShaderResolution,
+            SettingKind::Int,
+            SettingValue::Int(100),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(100, "100 %"),
+            opt(75, "75 %"),
+            opt(50, "50 %"),
+        ]))
+        .with_label("Shader resolution"),
+    );
+}
+
+/// The mode a slot with a fallback starts at: following it, but on Android the 3D scene does
+/// not take the 2D preset (it is filtered at the window's own size, which a 2D preset such as
+/// Mega Bezel is too heavy for on a phone GPU: Adreno 610 0.5 fps, Adreno 650 22 fps).
+fn follow_default(slot: crate::shader_slots::ShaderSlot) -> i32 {
+    use crate::shader_slots::{ShaderSlot, FOLLOW, OFF};
+    if cfg!(target_os = "android") && slot == ShaderSlot::ThreeD {
+        OFF
+    } else {
+        FOLLOW
     }
 }

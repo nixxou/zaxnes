@@ -82,6 +82,9 @@ pub struct WgpuDisplay {
     /// The slang preset filtering the scene picture.
     #[cfg(feature = "shaders")]
     shaders: crate::slang_chain::SlangShaders,
+    /// The picture the preset drew at a share of the window (`video.shader_resolution`).
+    #[cfg_attr(not(feature = "shaders"), allow(dead_code))]
+    reduced: Reduced,
     pending: Option<wgpu::SurfaceTexture>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -207,6 +210,7 @@ impl WgpuDisplay {
             interface: InterfaceRenderer::new(&device, format),
             #[cfg(feature = "shaders")]
             shaders,
+            reduced: Reduced::default(),
             pending: None,
             surface,
             config,
@@ -380,7 +384,7 @@ impl WgpuDisplay {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: if filtered.is_some() {
+                        load: if filtered.is_some() && self.reduced_layer(height).is_none() {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK)
@@ -396,6 +400,10 @@ impl WgpuDisplay {
             if let Some(scene) = scene.filter(|_| filtered.is_none()) {
                 self.compositor
                     .draw(&self.device, &mut pass, scene, (width, height));
+            } else if let Some(reduced) = self.reduced_layer(height) {
+                // The preset's picture at a share of the window, stretched over it.
+                self.compositor
+                    .draw(&self.device, &mut pass, reduced, (width, height));
             }
             if let Some(interface) = interface {
                 self.interface.draw(&mut pass, interface, (width, height));
@@ -417,7 +425,51 @@ impl WgpuDisplay {
         scene: SceneLayer<'_>,
         (width, height): (u32, u32),
     ) -> Option<wgpu::CommandBuffer> {
-        let layer = scene.height.clamp(1, height);
+        // At a share of the window: the preset draws a smaller picture, stretched over the
+        // window by the window pass (`video.shader_resolution`).
+        let share = self.shaders.resolution();
+        self.reduced.drawn = share < 1.0;
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Window sizes.
+        let (width, height, scene_height) = if self.reduced.drawn {
+            let scale = |value: u32| ((value as f32 * share).round() as u32).max(1);
+            (scale(width), scale(height), scale(scene.height))
+        } else {
+            (width, height, scene.height)
+        };
+        let reduced_view = if self.reduced.drawn {
+            let fits = self.reduced.target.as_ref().is_some_and(|(texture, _)| {
+                (texture.width(), texture.height()) == (width, height)
+                    && texture.format() == self.config.format
+            });
+            if !fits {
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("zax slang reduced"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.config.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                self.reduced.target = Some((texture, view));
+            }
+            self.reduced.target.as_ref().map(|(_, view)| view.clone())
+        } else {
+            None
+        };
+        let view = reduced_view.as_ref().unwrap_or(view);
+        let layer = scene_height.clamp(1, height);
         // The picture's rectangle, centred in the scene's: the final pass clears the rest.
         let rectangle = match self.shaders.picture_aspect() {
             Some(aspect) if aspect.is_finite() && aspect > 0.0 => {
@@ -438,6 +490,28 @@ impl WgpuDisplay {
             rectangle,
             (width, height),
         )
+    }
+
+    /// The picture the preset drew at a share of the window this frame, to stretch over its
+    /// `height` pixels; none when it drew on the window itself.
+    #[cfg(feature = "shaders")]
+    fn reduced_layer(&self, height: u32) -> Option<SceneLayer<'_>> {
+        let (texture, view) = self
+            .reduced
+            .target
+            .as_ref()
+            .filter(|_| self.reduced.drawn)?;
+        Some(SceneLayer {
+            view,
+            texture,
+            height,
+        })
+    }
+
+    #[cfg(not(feature = "shaders"))]
+    #[allow(clippy::unused_self)]
+    const fn reduced_layer(&self, _height: u32) -> Option<SceneLayer<'_>> {
+        None
     }
 
     #[cfg(not(feature = "shaders"))]
@@ -599,6 +673,14 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     return textureSample(picture, picture_sampler, in.uv);
 }
 ";
+
+/// The picture a slang preset drew at a share of the window, and whether this frame's is in it.
+#[derive(Default)]
+#[cfg_attr(not(feature = "shaders"), allow(dead_code))]
+struct Reduced {
+    target: Option<(wgpu::Texture, wgpu::TextureView)>,
+    drawn: bool,
+}
 
 /// Stretches the scene picture over its part of the window, filtered bilinearly.
 struct Compositor {

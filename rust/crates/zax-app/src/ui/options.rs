@@ -200,6 +200,7 @@ const DISPLAY: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoRenderMethod),
     LayoutEntry::Row(SettingId::VideoResScale),
     LayoutEntry::Row(SettingId::VideoDynamicResolution),
+    LayoutEntry::Row(SettingId::VideoShaderResolution),
     LayoutEntry::Row(SettingId::VideoAntiAlias),
     LayoutEntry::Group(OptionsGroup::Performance),
     LayoutEntry::Row(SettingId::VideoSkipFrame),
