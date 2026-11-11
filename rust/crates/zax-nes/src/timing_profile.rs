@@ -115,6 +115,20 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// Read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`. Only a **reload** is
     /// affected: a fetch item 3's `$4015` write started is not halted on its request cycle at all.
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool;
+
+    /// **Item 7** (lot NESHAWK-PROFILE-2 step 3), NesHawk's `dmc_realign`: a DMC fetch that falls
+    /// **inside an OAM transfer** makes that transfer one cycle longer than the fetch alone does.
+    ///
+    /// `RunCpuOne`'s OAM block is gated on `oam_dma_exec && apu.dmc_dma_countdown != 1 &&
+    /// !dmc_realign`, and the DMC block sets `dmc_realign = true` on the cycle its countdown
+    /// reaches 1 — the fetch cycle. So the transfer does not advance on the fetch cycle (which it
+    /// cannot anyway, the DMC has the bus) **nor on the cycle after it**, and NesHawk's transfer
+    /// loses two cycles per inside-fetch where this core's loses one: Zaxnes's `run_dma` lets the
+    /// DMC's halt and re-read cycles double as the transfer's own, and only the fetch cycle itself
+    /// is taken from it.
+    ///
+    /// Read at `nes_bus.rs` `run_dma`, in the `dmc_may_read` arm.
+    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -136,6 +150,7 @@ impl TimingProfile for Standard {
     const DMC_LENGTH_LAGS_THE_FETCH: bool = false;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = false;
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
+    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -157,4 +172,5 @@ impl TimingProfile for NesHawkCompat {
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
+    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
 }

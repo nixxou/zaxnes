@@ -459,3 +459,118 @@ why rather than just editing it: it measured slips 1 and 2 and asserted `[5, 5]`
 slip 1 cost 4. The test now measures the **even** slips 2 and 4, so that it is item 1b's parity
 being tested and not item 1c's slip. Its claim is unchanged; its instrument needed the other
 column. Its helper is now shared with 1c's.
+
+### Where it parts now, and what it is: frame **9355**
+
+`frame-trace --converge` on the frames after 9353:
+
+| frame | verdict |
+|---|---|
+| 9354 | **artefact** — "NO live byte differs at 54 instruction(s) of this frame, from 8 643 (−97 from the boundary) to 8 696 (−44)". Two live bytes at the boundary, `$0643` and `$0644` |
+| **9355** | **real** — "at NO instant of this frame does the live memory agree". 23 live bytes |
+| 9356, 9357 | real, 54 and 11 live bytes |
+
+**It is the game's sound engine, and it is frame 4666's shape one routine over.** `$0641,X` is a
+per-channel note-duration counter of the music driver at `$80xx`-`$83xx`, and `$0643`/`$0644` are
+two of its channels. In frame 9354 this core runs `STA $0641,X` for them at instructions 8 697
+(SL 239 dot 144) and **8 733 (SL 240 dot 238, seven instructions before the frame boundary)**; the
+reference's 2 KiB holds the state *before* those two stores. In frame 9355 the driver reads
+`$0644` back at instruction 1 241 (`LDA $0641,X` / `BEQ`) and branches on it, so the two machines
+take different arms from there and the sound state never converges again.
+
+So the deadline this time is the **sound driver's own per-frame pass** crossing the vblank, by
+about **thirty cycles**, and the sign is the other way round from frame 4666: there this core was
+late, here it is **early** — it needs to be about thirty cycles *slower* in frame 9354, whose bill
+is 274 DMC cycles (69 fetches: 63 at slip 0, 3 at slip 1, 3 at slip 2 or more) and one 513-cycle
+OAM transfer.
+
+### Round 2 — item 3's parity was inverted, and correcting it changes nothing here
+
+Reading `set_lenctr_en` for frame 9355 turned up a **misreading in NESHAWK-PROFILE's item 3**, and
+it is corrected whatever it does to the movie because the source is unambiguous:
+
+| | |
+|---|---|
+| NesHawk | `timer_reload = DMC_RATE[val & 0xF]` (428 for index 0), and `Run()` does `if (timer > 0) timer--; if (timer == 0) { timer = timer_reload; Clock(); }` — so its timer runs **428 → 1** |
+| this core | `clock_timer` stores `rates[i] - 1` and runs **427 → 0** |
+| so | **NesHawk's timer is this one plus one at every instant**, both read after the same cycle's clock (NesHawk's `set_lenctr_en` is reached from `_WriteReg` inside `RunOneLast`, after `RunOneFirst` ran `dmc.Run()`), and the parity is **inverted** |
+
+Item 3 was written `if self.timer % 2 == 0 { 3 } else { 2 }` against NesHawk's
+`if (timer % 2 == 0) delay = 3; else delay = 2;` — the same text, the other convention. It is now
+`if self.timer % 2 == 1 { 3 } else { 2 }`.
+
+It does fire: frame 4665's `$4015` = 1F now reports `d=3` where it reported `d=2`, and the whole
+sample's phase moves by a cycle (halt 2 820 instead of 2 819, fetch 2 822 instead of 2 821). And
+the result is that **the 8 901-frame table is byte-identical to round 1's** — the same 9 353, the
+same 726, the same 8 175, the same live addresses on every line. Item 3's parity is *exactly* inert
+on this movie, which is the same verdict NESHAWK-PROFILE's step 5 reached for item 2 and reached it
+the same way: by measuring rather than reasoning.
+
+### Round 3 — item 7, `dmc_realign`, also real and also inert
+
+`DMC_FETCH_STALLS_AN_OAM_TRANSFER`, read at `nes_bus.rs` `run_dma`'s `dmc_may_read` arm: after the
+fetch, one more cycle on which the OAM transfer does not advance. NesHawk's OAM block is gated on
+`dmc_dma_countdown != 1 && !dmc_realign` and the DMC block sets `dmc_realign` on the fetch cycle,
+so its transfer loses **two** cycles per inside-fetch where this core's loses **one** — this core
+lets the DMC's halt and re-read cycles double as the transfer's own (`dma_cycle` consumes one owed
+bit per cycle while the OAM arm runs beside it).
+
+`item_7_a_fetch_inside_an_oam_transfer_costs_the_transfer_a_cycle_more` measures it on both
+profiles at the fastest DMC rate, asks the bus how many fetches landed inside the transfer, and
+holds the total against `513/514 + 1` per fetch on `Standard` and `+ 2` per fetch on
+`NesHawkCompat`. It passes, so the item fires.
+
+And again **the 8 901-frame table is byte-identical to round 1's**. *Kirby* has one OAM transfer a
+frame with one DMC fetch inside it, so the item is worth one cycle a frame, and one cycle a frame
+is not what frame 9354 needs.
+
+### Why the rounds stop at three
+
+The brief allows five. Rounds 4 and 5 are not run, and the reason is a measurement rather than a
+budget:
+
+* **item 5** (every APU register except `$4003`, `$4007`, `$4010`, `$4015`, `$4017` waiting for an
+  even DMC timer) is source-confirmed and implementable, and step 3 showed it **cannot move the
+  CPU on this movie**: of the registers it defers, only `$4012` and `$4013` can change a DMC fetch,
+  they are written once per sample *run* rather than per trigger, and the sample address they set is
+  not read until the next fetch hundreds of cycles later. Frame 9355's own `$4012` write is at a
+  NesHawk timer of 31 — odd, so it *is* deferred a cycle — and there is no fetch in that cycle for
+  it to move. Implementing it would touch `Apu2A03::write` for every game and grow a pending-write
+  register, a dispatch in `step_cpu_cycle` and a savestate field, for a provably zero effect on the
+  thing being measured. It stays a candidate, with its exact register list now written down;
+* **item 6** (`fill_glitch`, `fill_glitch_2`, `pending_disable`) is **eliminated by arithmetic** in
+  step 3: both flags are set only at a fetch that completes with `out_bits_remaining == 0`, which
+  at *Kirby*'s rates (72 and 106 cycles a bit) is seven bit periods away from where a fetch can
+  complete, and the one `$4015` = 0F of the window arrives with `sample_length` already zero so
+  that `set_lenctr_en(false)`'s first three arms cannot fire;
+* nothing else in `APU.cs` or `NES.Core.cs`'s DMC and DMA paths is left unimplemented. The one
+  further difference the reading found is in `RunOneLast`'s **first** action — a `$4016` strobe is
+  applied on the next cycle with `dmc.timer % 2 == 1` — which is a controller item, not a DMA one,
+  and *Kirby* strobes once a frame many cycles before it reads.
+
+So what frame 9354 needs is about thirty cycles that **no difference NesHawk's source shows** can
+supply on that frame, and §5 of the review says what would localise it instead.
+
+### The pictures — the owner's eighteen screenshots, 1 500 to 10 000
+
+Under EVAL-SYNC §4's colour-bijection rule (a match is a bijection between our colours and the
+reference's, so the two palettes do not matter and everything else does), with the eight overscan
+rows cropped top and bottom because BizHawk writes 256×224 and this core writes the whole 256×240
+(REQ-CORE-048). Both columns from the same command with only `--profile` changed:
+
+| | 1500 | 2000 | 2500 | 3000 | 3500 | 4000 | 4500 | 5000 | 5500 | 6000 | 6500 | 7000 | 7500 | 8000 | 8500 | 9000 | 9500 | 10000 | matches |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `neshawk` | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | no, **4 px** | ✔ | no | no | **15** of 18 |
+| `standard` | no | no | no | no | no | no | no | no | no | no | no | no | no | no | no | no | no | no | **0** of 18 |
+
+The standard profile's eighteen misses run from 38 914 to 54 963 pixels — it has been playing a
+different game since frame 926 — and that **0 of 18 against 15 of 18** is also the validation of
+the instrument, which is a re-implementation (the original was not committed, because it reads
+pictures of a commercial game): a script that said MATCH indiscriminately could not produce both
+columns.
+
+**Frame 8500's four pixels are the only disagreement inside the synchronised stretch, and its work
+RAM has no live difference at all** (`8500 total=1 live=0 stack=1 temp=0`, and its neighbours the
+same). So it is the class NESHAWK-PROFILE met at frame 400 — one pixel there, four here — a picture
+difference on a frame whose memory agrees byte for byte, which is a PPU or sprite-evaluation
+difference and not a timing one. It is not this lot's and it is recorded rather than absorbed.

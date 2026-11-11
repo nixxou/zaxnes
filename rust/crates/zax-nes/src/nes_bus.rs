@@ -915,6 +915,18 @@ impl<P: TimingProfile> NesBusOf<P> {
                 // until the byte lands.
                 self.dma &= !DMA_DMC;
                 self.dmc_from_write = false;
+                if P::DMC_FETCH_STALLS_AN_OAM_TRANSFER && (self.dma & DMA_OAM) != 0 {
+                    // **Item 7**, NesHawk's `dmc_realign`: the fetch cycle sets it and the OAM
+                    // block of the **next** cycle is then skipped, so a transfer a fetch falls
+                    // inside loses two cycles to it where this core's loses only the fetch
+                    // cycle. Nothing is owed on this extra cycle, so it is a plain `tick` and the
+                    // CPU's own read happening again — the idle arm below, without its `dma`
+                    // bookkeeping.
+                    self.tick();
+                    if !input_port {
+                        self.dma_repeat_read::<ZONE>(read_address);
+                    }
+                }
             } else if get_cycle && (self.dma & DMA_OAM) != 0 {
                 self.dma_cycle();
                 let address = (u16::from(self.dma_oam_page) << 8) | u16::from(oam_index);

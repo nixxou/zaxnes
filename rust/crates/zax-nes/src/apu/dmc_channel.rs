@@ -255,7 +255,17 @@ impl DmcChannel {
                 self.restart();
             }
             if self.buffer_empty {
-                return if self.timer % 2 == 0 { 3 } else { 2 };
+                // NesHawk writes `if (timer % 2 == 0) delay = 3; else delay = 2;` — and **its
+                // timer is this one plus one**, so the test here is the opposite parity. Its
+                // `timer_reload` is the rate table's own value (`DMC_RATE[val & 0xF]`, 428 for
+                // index 0) and `Run()` reloads to it, so its timer runs 428 → 1; this core stores
+                // `rates[i] - 1` and runs 427 → 0 (`clock_timer`). Both are read after the same
+                // cycle's clock — NesHawk's `set_lenctr_en` is reached from `_WriteReg` inside
+                // `RunOneLast`, after `RunOneFirst` ran `dmc.Run()` — so the two values differ by
+                // exactly one at every instant and nothing else has to move.
+                // Lot NESHAWK-PROFILE-2 step 4 round 2; the parity was the other way round when
+                // item 3 was first written and that was a misreading of the convention.
+                return if self.timer % 2 == 1 { 3 } else { 2 };
             }
             return 0;
         }

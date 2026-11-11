@@ -391,6 +391,66 @@ fn item_3_a_mid_sample_4015_enable_displaces_the_fetch_and_shortens_it() {
     );
 }
 
+/// **Item 7** — a DMC fetch that falls inside an OAM transfer makes that transfer **one cycle
+/// longer** than it costs this core.
+///
+/// NesHawk's `RunCpuOne` gates its OAM block on `apu.dmc_dma_countdown != 1 && !dmc_realign`, and
+/// the DMC block sets `dmc_realign` on the fetch cycle, so the transfer stands still on the fetch
+/// cycle *and on the one after it*. This core's `run_dma` lets the DMC's halt and re-read cycles
+/// double as the transfer's own and only the fetch cycle is taken from it.
+///
+/// Measured at the fastest DMC rate, so that a fetch certainly lands inside the 513 cycles: the
+/// test asks the bus how many fetches ran inside the transfer and holds the total against
+/// `513/514 + 1` per fetch on `Standard` and `+ 2` per fetch on `NesHawkCompat`.
+#[test]
+fn item_7_a_fetch_inside_an_oam_transfer_costs_the_transfer_a_cycle_more() {
+    /// `(the halted read's cost, the fetches that ran inside it)`.
+    fn transfer_with_a_fetch_inside<P: TimingProfile>() -> (i64, i64) {
+        let mut bus = loaded_bus::<P>();
+        bus.write(0x4010, 0x0F); // The fastest rate: 54 cycles a bit, 432 a byte.
+        bus.write(0x4012, 0x00);
+        bus.write(0x4013, 0x0F);
+        bus.write(0x4015, 0x10);
+        // Three bytes of the sample, so that the output unit is in its periodic rhythm and the
+        // next request is a whole shift register (432 cycles) away rather than wherever the
+        // power-on timer phase left it — `$4010` sets the rate index and does not reload the
+        // timer, as the hardware does not.
+        for _ in 0..4000 {
+            if bus.dmc_dma_count() >= 3 {
+                break;
+            }
+            bus.read(0x8000);
+        }
+        let fetches = bus.dmc_dma_count();
+        assert_eq!(3, fetches, "{}: the sample is playing", P::NAME);
+        bus.write(0x4014, 0x02); // The transfer: it halts the next read cycle.
+        let cost = cost_of_a_read(&mut bus, 0x8000);
+        (cost, bus.dmc_dma_count() - fetches)
+    }
+
+    let (standard, standard_fetches) = transfer_with_a_fetch_inside::<Standard>();
+    let (neshawk, neshawk_fetches) = transfer_with_a_fetch_inside::<NesHawkCompat>();
+
+    assert!(
+        standard_fetches > 0 && neshawk_fetches > 0,
+        "the test needs a fetch inside the transfer: {standard_fetches} fetch(es) in {standard} \
+         cycles and {neshawk_fetches} in {neshawk}"
+    );
+    // 513 or 514 for the transfer, the CPU's own read, and the fetch cycles taken from it.
+    let base = standard - standard_fetches;
+    assert!(
+        (514..=515).contains(&base),
+        "standard: a transfer plus one cycle per inside fetch, got {standard} with \
+         {standard_fetches} fetch(es)"
+    );
+    assert_eq!(
+        base + 2 * neshawk_fetches,
+        neshawk,
+        "neshawk: two cycles per inside fetch, got {neshawk} with {neshawk_fetches} fetch(es) \
+         against a {base}-cycle transfer"
+    );
+}
+
 /// The profile's state travels in a savestate, and only on the profile that has any.
 ///
 /// Item 2's reload countdown is the one piece of state the two profiles do not share. It is
