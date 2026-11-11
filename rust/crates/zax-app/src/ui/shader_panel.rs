@@ -646,7 +646,13 @@ const MEGA_BEZEL_INTRO: &str = "HSM_INTRO_WHEN_TO_SHOW";
 /// own); a combination of the catalogue brings its own, or none.
 pub fn choose_preset(model: &mut SettingsModel, slot: ShaderSlot, path: &str) {
     let ids = slot.ids();
-    let kept = if split_pre_filter(path).0.is_some()
+    // Owner review: a pre-filter that came with a combination of the catalogue goes with it; only
+    // one the player put on the pre-filter row stays.
+    let current = model.get(ids.preset).as_text().to_owned();
+    let came_with_combination =
+        catalogue_entry(&current).is_some_and(|preset| preset.family == Family::Combination);
+    let kept = if came_with_combination
+        || split_pre_filter(path).0.is_some()
         || catalogue_entry(path).is_some_and(|preset| preset.family == Family::Combination)
     {
         None

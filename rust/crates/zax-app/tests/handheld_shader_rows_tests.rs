@@ -115,6 +115,13 @@ fn the_pre_filter_stays_in_front_of_the_preset() {
         combination
     );
     assert_eq!(pre_filter_of(&settings, slot), Some(&PRE_FILTERS[4]));
+    // Owner review: a plain preset after a combination drops the pre-filter that came with it.
+    shader_panel::choose_preset(&mut settings, slot, "crt/zfast-crt.slangp");
+    assert_eq!(
+        settings.get(SettingId::Shader2dPreset).as_text(),
+        "crt/zfast-crt.slangp"
+    );
+    shader_panel::choose_preset(&mut settings, slot, combination);
     // "None" leaves the preset alone.
     shader_panel::set_pre_filter(&mut settings, slot, None);
     assert_eq!(
