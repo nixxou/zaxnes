@@ -114,6 +114,17 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     ///
     /// Read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`. Only a **reload** is
     /// affected: a fetch item 3's `$4015` write started is not halted on its request cycle at all.
+    ///
+    /// **Q-182.** Lot NESHAWK-PROFILE-5 measured that charging the odd-slip reload **four** cycles
+    /// instead of three — that is, dropping this item — makes *Kirby*'s frame 11 exact on every
+    /// tag, takes its 400-1 100 window from 925 back to 1 100 and the 1-1 100 ledger from 920
+    /// frames off-anchor to 861, and costs the thirty DMC/DMA ROMs nothing. The derivation above
+    /// was re-checked verbatim against both sources and **holds** (`Execute.cs`: a read microstep
+    /// is `rdy_freeze = !RDY; if (RDY) { … }`, a write microstep executes unconditionally and
+    /// never assigns it, so for a slip of 1 the `+2` is suppressed and both machines resume on
+    /// `A+4`), so the item is left as it is and the conflict is the ticket's. What is not pinned is
+    /// the cycle BizHawk's Lua reports a **DMA** read on; the lot's calibration was measured for
+    /// CPU accesses only.
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool;
 
     /// **Item 7** (lot NESHAWK-PROFILE-2 step 3), NesHawk's `dmc_realign`: a DMC fetch that falls

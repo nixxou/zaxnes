@@ -23,7 +23,9 @@ frame 1 100 — a frame with no DMC DMA at all — shows as exactly one event of
       from 1 100 to 925.** So the baseline's wrong power-on phase was compensating for something,
       and step 4 names it. A stale test of lot NESHAWK-PROFILE-4's was also found failing at
       `63f937ea` and is fixed here.
-- [ ] 4. Iterate.
+- [x] 4. Iterate. **One round.** It isolates the remaining cycle of frame 11 to the odd-slip
+      reload fetch and finds the source and the measurement in **conflict**, which is Q-182; item
+      1c is left as it is and nothing is changed.
 - [ ] 5. No regression.
 - [ ] 6. Report and final pass.
 
@@ -383,3 +385,104 @@ moves by more than one). `cargo fmt --all --check` clean; `cargo clippy --releas
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-5 step 3 done: item 11 is exact, it costs the movie, and item 1c is why
+
+---
+
+## Step 4 — one round, and the source and the measurement disagree (**Q-182**)
+
+### The answer first
+
+The round did its job: it isolated the remaining cycle of frame 11 to **one fetch**, read the
+source on it — and the source says this core is **already right**. So the round ends in a
+documented conflict rather than an item, and **nothing is changed on either profile**.
+
+### The ledger, and the first event that differs
+
+With item 11 in, frame 11's events against BizHawk's own (`drift.py`, census ledger against
+`kirby-jp-dmc1.txt` with the fetch rows dropped so the sequences match):
+
+| | residual |
+|---|---|
+| `nmi`, `oam`, every `$40xx` write to and including `w$4007` | **0** |
+| `r$4015` | **−1** |
+| `pc$C3A1`, the NMI handler's `RTI` | **−1** |
+| `pc$C074` | **−1** |
+
+Every write of the frame is exact and the cycle goes missing between the last write and the
+`$4015` read. There is exactly one DMA in that stretch:
+
+    8470  request  $FCC8  ready 8470      <- the CPU is writing $4007 on this very cycle
+    8470  write    $4007
+    8471  halt     $FCC8  ready 8470      <- slip 1: an ODD run of write cycles
+    8473  fetch    $FCC8  cost 3          <- item 1c's three cycles rather than four
+
+### The measurement, which is unambiguous
+
+Charging that fetch **four** cycles — `DMC_HALT_LANDS_ON_A_WRITE_CYCLE = false`, item 1c dropped,
+item 11 kept — was built and run:
+
+| | baseline | item 11 | **item 11, item 1c dropped** |
+|---|---|---|---|
+| *Kirby* 1-400, last frame with no live difference | 400 | 400 | **400** |
+| *Kirby* 400-1 100, the same | **1 100** | 925 | **1 100** |
+| 1-1 100, frames with an event off the anchor | 867 | 920 | **861** |
+| `pc$C3A1` at residual 0 | 514 | 499 | **580** of 1 094 |
+| `pc$C074` at 0 | 277 | 233 | **307** |
+| the first frame with a residual | 11 | 11 | **13** — frame 11 is exact on every tag |
+| the thirty DMC/DMA/APU ROMs, `--profile neshawk` | 19/5/6 | 19/5/6 | **19/5/6**, ROM for ROM |
+
+So it is better on five counts and costs the ROM suite nothing.
+
+### And the source says three is right
+
+Read verbatim at tag 2.11.1 (MIT) for this round, which is the reason the measurement was not
+simply taken:
+
+| | |
+|---|---|
+| `NES.Core.cs` `RunCpuOne` | runs the DMC countdown block, **then** `apu.RunOneFirst()`, **then** `cpu.ExecuteOne()` |
+| `APU.cs` `DMCUnit.Run()` | on the request cycle `A` lowers `RDY` and sets `dmc_dma_countdown = 3`, `DMC_RDY_check = 2`. Its own comment: *"VisualNES and test roms verify that DMC DMA is 1 cycle shorter for calls from writes / however, if the third cycle lands on a write, there is a 2 cycle delay even if the instruction only has a single write / therefore, the RDY_check is 2 in both cases"* |
+| `NES.Core.cs` | `if (!cpu.RDY && !cpu.rdy_freeze && apu.dmc_dma_countdown == apu.DMC_RDY_check) apu.dmc_dma_countdown += 2;` — so the `+2` can first fire on `A+2` |
+| `MOS 6502X/Execute.cs` | a **read** microstep is `rdy_freeze = !RDY; if (RDY) { … }`; a **write** microstep executes unconditionally and **never assigns `rdy_freeze`** |
+
+For the slip of 1 this frame actually has: the write on `A` leaves `rdy_freeze` false, the read on
+`A+1` sets it **true**, the `+2` is therefore suppressed on `A+2`, the fetch is on `A+3` and the
+CPU's stalled read on **`A+4`**. This core halts on the first read cycle `A+1` and spends three, so
+its read is on `A+4` as well. **The two machines agree, and item 1c's odd-slip cycle is what makes
+them agree.** The same derivation gives `A+4` for a slip of 0, `A+6` for 2 and `A+6` for 3, and
+this core's halt-at-`A+w`-plus-four reproduces all four.
+
+The item's "wrong sign" reading of NesHawk's comment — that the `+2` only ever *lengthens* a fetch,
+so a three-cycle one cannot be NesHawk's — was the round's first conclusion and it is **wrong**:
+the `+2` is how NesHawk pays for having let the writes through from `A`, and this core pays for the
+same thing by starting four cycles later at `A+w`. The two bookkeepings meet.
+
+### What is not pinned, and the provisional choice
+
+**The cycle BizHawk's Lua reports a DMA read on.** Lot NESHAWK-PROFILE-3's calibration — an
+execute at 0, a read or a write at 1 — was measured on **CPU** accesses (`r$4015 -> w$4011` at
+exactly 0 on 75 of 75) and does not transfer to a read performed by a DMA unit. With item 11 the
+thirteen reload fetches of frame 11 sit at a **constant 3** from BizHawk's reported cycles and the
+one write-started fetch at **0**; whether that 3 is bookkeeping or three real cycles is what decides
+whether the missing cycle is at this fetch at all.
+
+**Q-182** records both readings, the measurement, the derivation and the one Lua run that would
+settle it (the fetch's own callback cycle *and* the cycle the stalled read executes on, for one
+known reload — the gap is 1 under one reading and 2 under the other). Referenced in code at
+`nes_bus.rs` `promote_dmc_wait` and at `timing_profile.rs`'s `DMC_HALT_LANDS_ON_A_WRITE_CYCLE`.
+
+**Item 1c stays exactly as it is.** A measurement that improves one movie and three ledger counts
+does not overturn a derivation that is verbatim from three files of both sources, and the lot will
+not ship a behaviour change it cannot explain.
+
+### Why the rounds stop at one
+
+The round loop is *ledger → first differing event → source → item*, and this round completed every
+step but the last: the event is isolated to one fetch, the source is read, and the source refuses
+the item. A second round would re-measure the same cycle with the same unpinned calibration. What
+the next lot needs is not another ledger but the **one Lua run in Q-182**, which is three lines of
+script and no new reference.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-5 step 4 done: one round, the cycle isolated to one fetch, and Q-182

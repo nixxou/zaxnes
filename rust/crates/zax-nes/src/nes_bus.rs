@@ -716,6 +716,12 @@ impl<P: TimingProfile> NesBusOf<P> {
                 // ahead on an odd one; dropping the second re-read is exactly that cycle. The
                 // `DMA_OAM` test is because inside an OAM transfer the CPU is not writing at all:
                 // it is already halted, and the slip is the transfer's, not the opcode's.
+                //
+                // Q-182: once item 11 put the DMC's power-on phase on NesHawk's, *Kirby*'s frame 11
+                // measures one cycle better with this arm removed. The derivation above was
+                // re-checked verbatim against `APU.cs`, `NES.Core.cs` and `MOS 6502X/Execute.cs`
+                // and holds, so the arm stays and the ticket names the one number that would
+                // settle it.
                 if P::DMC_HALT_LANDS_ON_A_WRITE_CYCLE
                     && (self.dma & DMA_OAM) == 0
                     && ((halt_cycle - self.dmc_ready_cycle) & 1) == 1
