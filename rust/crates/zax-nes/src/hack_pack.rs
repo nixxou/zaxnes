@@ -35,6 +35,20 @@
 //! checks all finding their bytes); each other group of it then applies on its own when it finds
 //! its bytes and every group it requires applies. Components never depend on each other: the
 //! widescreen and an aid are judged apart.
+//!
+//! Either format may end with sections, each a u8 kind, a u16 length and that many bytes; a
+//! kind this core does not know is skipped. They are not part of the hack: the pack's version
+//! (the CRC-32 its states are checked against) is that of the bytes before them, so a pack that
+//! gains one still loads the states its earlier build made. Kind 1, states:
+//!
+//! | Field | Contents |
+//! |---|---|
+//! | flags | u8, bit 0: a state made at the game's wait for the next frame goes on with the hack as it is set, whether it was made with or without it (no question asked on loading it) |
+//! | redraw | u8 count, each: u16 CPU RAM address, u8 condition (0 always, 1 when the byte there is the next one), u8 the byte compared, u8 the byte written |
+//!
+//! The redraw steps run on a state restored the other way (made with the widescreen while it is
+//! off, or the other way round): they send the game back to a step that redraws the screen, the
+//! video memory of one mode not being laid out as the other expects.
 
 /// The magic a pack starts with (a BPS patch starts with `BPS1`).
 pub const MAGIC: &[u8; 4] = b"ZXPK";
@@ -59,6 +73,74 @@ pub struct HackPack {
     pub code: &'static [u8],
     /// Its components, in the pack's order.
     pub components: Vec<Component>,
+    /// How the game's states stand against the hack (its states section, if it has one).
+    pub states: States,
+    /// The length of the hack itself: the pack's bytes before its sections.
+    pub hack_len: usize,
+}
+
+/// How the states of a pack's game stand against its hack.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct States {
+    /// A state made at the game's wait for the next frame goes on with the hack as it is set,
+    /// made with or without it.
+    pub portable: bool,
+    /// The writes that put right a state restored the other way.
+    pub redraw: Vec<RedrawStep>,
+}
+
+/// A write to CPU RAM of a pack's redraw recipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RedrawStep {
+    /// The CPU RAM address.
+    pub address: u16,
+    /// The byte that must be there for the write to happen; `None` for always.
+    pub when: Option<u8>,
+    /// The byte written.
+    pub value: u8,
+}
+
+/// The kind of the states section.
+const STATES_SECTION: u8 = 1;
+
+impl States {
+    /// Runs the redraw recipe on `ram` (CPU RAM, its first 2 KiB).
+    pub fn redraw(&self, ram: &mut [u8]) {
+        for step in &self.redraw {
+            if let Some(byte) = ram
+                .get_mut(usize::from(step.address))
+                .filter(|byte| step.when.is_none_or(|expected| **byte == expected))
+            {
+                *byte = step.value;
+            }
+        }
+    }
+
+    fn read(payload: &'static [u8]) -> Option<Self> {
+        let mut reader = Reader {
+            bytes: payload,
+            at: 0,
+        };
+        let portable = reader.u8()? & 1 != 0;
+        let mut redraw = Vec::new();
+        for _ in 0..reader.u8()? {
+            let address = reader.u16()?;
+            let condition = reader.u8()?;
+            let compared = reader.u8()?;
+            let value = reader.u8()?;
+            let when = match condition {
+                0 => None,
+                1 => Some(compared),
+                _ => return None,
+            };
+            redraw.push(RedrawStep {
+                address,
+                when,
+                value,
+            });
+        }
+        (reader.at == payload.len()).then_some(Self { portable, redraw })
+    }
 }
 
 /// The region a pack was made for.
@@ -263,12 +345,28 @@ impl HackPack {
             return None;
         }
         let format = reader.u8()?;
-        let pack = match format {
+        let mut pack = match format {
             1 => Self::read_v1(&mut reader)?,
             2 => Self::read_v2(&mut reader)?,
             _ => return None,
         };
-        (reader.at == bytes.len()).then_some(pack)
+        pack.hack_len = reader.at;
+        while reader.at < bytes.len() {
+            let kind = reader.u8()?;
+            let length = usize::from(reader.u16()?);
+            let payload = reader.take(length)?;
+            if kind == STATES_SECTION {
+                pack.states = States::read(payload)?;
+            }
+        }
+        Some(pack)
+    }
+
+    /// The bytes of the hack in the pack `bytes`: those before its sections (all of them when
+    /// they are not a pack this core reads).
+    #[must_use]
+    pub fn hack_bytes(bytes: &'static [u8]) -> &'static [u8] {
+        Self::read(bytes).map_or(bytes, |pack| &bytes[..pack.hack_len])
     }
 
     fn read_v1(reader: &mut Reader) -> Option<Self> {
@@ -308,6 +406,8 @@ impl HackPack {
             mappers: Vec::new(),
             code,
             components,
+            states: States::default(),
+            hack_len: 0,
         })
     }
 
@@ -382,6 +482,8 @@ impl HackPack {
             mappers,
             code,
             components,
+            states: States::default(),
+            hack_len: 0,
         })
     }
 
@@ -656,6 +758,34 @@ mod tests {
         );
         assert!(HackPack::read(&PACK[..PACK.len() - 1]).is_none());
         assert!(is_pack(PACK) && !is_pack(b"BPS1"));
+    }
+
+    /// A states section after the hack: read, run on RAM, left out of the hack's bytes; an
+    /// unknown section skipped, a section cut short refused.
+    #[test]
+    fn a_states_section_follows_the_hack() {
+        const PACK: &[u8] = &[
+            b'Z', b'X', b'P', b'K', 1, 1, b'T', 0, 0, 0, 0,
+            0, // format 1, no code, no component
+            9, 2, 0, 0xEE, 0xEE, // an unknown kind, skipped
+            1, 12, 0, 1, 2, // states: portable, two steps
+            0x36, 0x07, 1, 0x05, 0x02, // $0736: 05 -> 02
+            0x10, 0x00, 0, 0x00, 0x7F, // $0010 = 7F
+        ];
+        let pack = HackPack::read(PACK).expect("a pack with sections");
+        assert_eq!(pack.hack_len, 12);
+        assert_eq!(HackPack::hack_bytes(PACK), &PACK[..12]);
+        assert!(pack.states.portable);
+        let mut ram = vec![0; 0x800];
+        ram[0x0736] = 0x05;
+        pack.states.redraw(&mut ram);
+        assert_eq!((ram[0x0736], ram[0x0010]), (0x02, 0x7F));
+        ram[0x0736] = 0x03;
+        pack.states.redraw(&mut ram);
+        assert_eq!(ram[0x0736], 0x03, "the condition holds the write back");
+        assert!(HackPack::read(&PACK[..PACK.len() - 1]).is_none());
+        let bare = HackPack::read(&PACK[..12]).expect("the hack alone");
+        assert_eq!(bare.states, States::default());
     }
 
     /// A format 2 pack: NTSC, mapper 1; component widescreen: group "core" (a hook in the last

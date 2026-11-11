@@ -2238,12 +2238,22 @@ impl BuiltinPatch {
         crate::hack_pack::HackPack::read(self.bps).is_some_and(|pack| pack.component(key).is_some())
     }
 
+    /// How the game's states stand against the hack: the states section of its pack (none for
+    /// a BPS patch).
+    #[must_use]
+    pub fn states(&self) -> crate::hack_pack::States {
+        crate::hack_pack::HackPack::read(self.bps)
+            .map(|pack| pack.states)
+            .unwrap_or_default()
+    }
+
     /// The patch's version: the CRC-32 of the ROM data it produces, which any change to the
     /// hack changes (read from the BPS footer); for a hack pack, the pack's CRC-32.
     #[must_use]
     pub fn version(&self) -> u32 {
         if crate::hack_pack::is_pack(self.bps) {
-            return crc32(self.bps);
+            // The hack only: a states section added later leaves the states made before valid.
+            return crc32(crate::hack_pack::HackPack::hack_bytes(self.bps));
         }
         self.bps
             .len()

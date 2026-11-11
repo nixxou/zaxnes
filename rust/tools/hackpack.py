@@ -20,6 +20,14 @@ start otherwise, so a ROM whose banks were added to (a translation, a ROM hack) 
 A component applies to a ROM when its first group does; each other group on its own, with the
 groups it requires. Components are judged apart: the widescreen and each aid never depend on
 each other.
+
+    pack.states(portable=True, redraw=[(0x0736, 0x05, 0x02)])
+
+`states` adds the states section after the hack: `portable`, a state made at the game's wait for
+the next frame loads with the hack as it is set, made with it or without it; `redraw`, the CPU RAM
+writes that put right a state restored the other way, each (address, byte expected there or None,
+byte written). The section is not part of the pack's version: adding one keeps the states made
+with the pack valid.
 """
 
 import struct
@@ -27,6 +35,7 @@ import struct
 FORMAT = 2
 BANK = 0x4000
 REGIONS = {'ntsc': 0, 'pal': 1, 'any': 0xFF}
+STATES_SECTION = 1
 
 
 class Group:
@@ -86,6 +95,13 @@ class Pack:
         self.region = REGIONS[region]
         self.mappers = list(mappers)
         self.components = []
+        self.portable = False
+        self.redraw = []
+
+    def states(self, portable=False, redraw=()):
+        """The states section: see the module."""
+        self.portable = portable
+        self.redraw = list(redraw)
 
     def component(self, name):
         """The component called `name` ('widescreen', or the key of an aid's option)."""
@@ -128,7 +144,24 @@ class Pack:
                 for bank, address, length in group.checks:
                     offset = offset_of(bank, address)
                     out += place(bank, address, banks) + bytes([length]) + bytes(data[offset:offset + length])
+        if self.portable or self.redraw:
+            out += section(STATES_SECTION, states(self.portable, self.redraw))
         return bytes(out)
+
+
+def states(portable, redraw):
+    """The payload of the states section."""
+    assert len(redraw) < 256
+    out = bytearray([1 if portable else 0, len(redraw)])
+    for address, expected, value in redraw:
+        assert 0 <= address < 0x800, f'${address:04X}: not CPU RAM'
+        out += struct.pack('<HBBB', address, 0 if expected is None else 1, expected or 0, value)
+    return bytes(out)
+
+
+def section(kind, payload):
+    assert len(payload) < 0x10000
+    return bytes([kind]) + struct.pack('<H', len(payload)) + payload
 
 
 def offset_of(bank, address):

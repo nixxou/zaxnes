@@ -170,3 +170,20 @@ fn a_state_without_the_hack_goes_on_with_it() {
     );
     assert!(picture == with.picture, "the picture with the hack");
 }
+
+/// The pack says its states carry (its states section), and the section leaves the hack's
+/// version as it was: the states made with the pack before it keep loading.
+#[test]
+fn the_pack_says_its_states_carry_and_keeps_its_version() {
+    let patch = zax_nes::builtin_patches::PATCHES
+        .iter()
+        .find(|patch| patch.name == zax_nes::builtin_patches::FLAPPYZAXNES)
+        .expect("the FlappyZaxNes patch");
+    assert!(patch.states().portable);
+    assert_eq!(patch.states().redraw, []);
+    assert_eq!(
+        patch.version(),
+        0x540D_CBDF,
+        "the version of the pack before its section"
+    );
+}

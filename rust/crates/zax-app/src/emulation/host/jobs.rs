@@ -805,7 +805,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         now.sort();
         saved.sort();
-        if now == saved {
+        // A pack whose states carry across (its states section): a state made at the game's wait
+        // for the next frame goes on with the hack as it is set, no question asked.
+        let carries = state.header.at_idle == Some(true) && patch.states().portable;
+        if now == saved || carries {
             SlotPatchStatus::Fits
         } else {
             SlotPatchStatus::OtherComponents

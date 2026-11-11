@@ -1275,14 +1275,18 @@ impl NesCore {
     }
 
     /// Runs the `after_other_way_state` of `patch` (the built-in patch made for the ROM of a
-    /// state restored the other way) on CPU RAM.
+    /// state restored the other way), then the redraw recipe of its pack, on CPU RAM.
     fn put_right_other_way_state(
         &mut self,
         patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     ) {
-        if let Some(fix) = patch.and_then(|known| known.after_other_way_state) {
+        let Some(known) = patch else {
+            return;
+        };
+        if let Some(fix) = known.after_other_way_state {
             fix(self.bus.ram_mut());
         }
+        known.states().redraw(self.bus.ram_mut());
     }
 
     /// The margin decoder of the game loaded: its built-in patch's, or one made for the ROM
