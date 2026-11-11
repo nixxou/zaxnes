@@ -10,12 +10,12 @@ semaphore still set when the NMI lands, Zaxnes late. This lot finds the item beh
 
 ## Steps
 
-- [ ] 1. Reproduce, and classify the isolated differences between 1 100 and 4 665.
-- [ ] 2. Frame 4666, instruction by instruction.
-- [ ] 3. The NesHawk source for it.
-- [ ] 4. Add it to the profile, and iterate 2-4 up to five rounds.
-- [ ] 5. No regression.
-- [ ] 6. Report and final pass.
+- [x] 1. Reproduce, and classify the isolated differences between 1 100 and 4 665.
+- [x] 2. Frame 4666, instruction by instruction.
+- [x] 3. The NesHawk source for it.
+- [x] 4. Add it to the profile, and iterate 2-4 up to five rounds (three were run; step 4 says why).
+- [x] 5. No regression.
+- [x] 6. Report and final pass.
 
 ## The environment this lot runs in
 
