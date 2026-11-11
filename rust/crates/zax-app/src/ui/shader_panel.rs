@@ -150,7 +150,7 @@ const fn screen(entry: CatalogPreset) -> CatalogPreset {
 /// The catalogue: the presets most played with NES-era consoles, from the light to the heavy
 /// (the guides and the libretro forums put forward Guest Advanced and its NTSC variant, Mega
 /// Bezel, Royale, Lottes, Easymode, and zfast or CRT-Pi for the weak cards).
-pub const CATALOGUE: [CatalogPreset; 22] = [
+pub const CATALOGUE: [CatalogPreset; 28] = [
     entry(
         "shaders.preset.guest",
         "crt/crt-guest-advanced.slangp",
@@ -170,13 +170,27 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
         "crt/zfast-crt.slangp",
         Family::Crt,
         Cost::Light,
-        Featured::No,
+        Featured::Always,
     ),
     entry(
         "shaders.preset.crt_pi",
         "crt/crt-pi.slangp",
         Family::Crt,
         Cost::Light,
+        Featured::Always,
+    ),
+    entry(
+        "shaders.preset.fakelottes",
+        "crt/fakelottes.slangp",
+        Family::Crt,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.mattias",
+        "crt/crt-mattias.slangp",
+        Family::Crt,
+        Cost::Medium,
         Featured::No,
     ),
     entry(
@@ -235,6 +249,27 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
         Cost::Light,
         Featured::No,
     ),
+    entry(
+        "shaders.preset.zfast_composite",
+        "crt/zfast-crt-composite.slangp",
+        Family::Composite,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.fakelottes_ntsc",
+        "presets/crt-plus-signal/fakelottes-ntsc-composite.slangp",
+        Family::Composite,
+        Cost::Light,
+        Featured::No,
+    ),
+    entry(
+        "shaders.preset.royale_nes_rf",
+        "presets/crt-royale-fast/crt-royale-fast-ntsc-rf-slotmask-nes.slangp",
+        Family::Composite,
+        Cost::Heavy,
+        Featured::No,
+    ),
     tv(entry(
         "shaders.preset.mega_bezel",
         "bezel/Mega_Bezel/Presets/MBZ__3__STD.slangp",
@@ -261,7 +296,7 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
         "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_4__STD-SCREEN-ONLY.slangp",
         Family::Bezel,
         Cost::Medium,
-        Featured::Wide,
+        Featured::Always,
     )),
     screen(entry(
         "shaders.preset.mega_bezel_screen_ntsc",
@@ -275,6 +310,13 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
         "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_5__POTATO.slangp",
         Family::Bezel,
         Cost::Light,
+        Featured::Always,
+    )),
+    screen(entry(
+        "shaders.preset.mega_bezel_screen_smooth",
+        "bezel/Mega_Bezel/Presets/Base_CRT_Presets/MBZ__0__SMOOTH-ADV-SCREEN-ONLY__GDV.slangp",
+        Family::Bezel,
+        Cost::Heavy,
         Featured::No,
     )),
     entry(
@@ -303,7 +345,7 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
         "edge-smoothing/scalefx/scalefx.slangp",
         Family::Smoothing,
         Cost::Medium,
-        Featured::No,
+        Featured::Always,
     ),
 ];
 
@@ -726,10 +768,10 @@ mod tests {
     #[test]
     fn choosing_a_catalogue_preset_sets_its_parameters_and_area() {
         let mut model = SettingsModel::new();
-        let screen = CATALOGUE
-            .iter()
-            .find(|preset| preset.featured == Featured::Wide)
-            .expect("a widescreen preset");
+        let screen = catalogue_entry(
+            "bezel/Mega_Bezel/Presets/Variations/Screen-Only/Default/_4__STD-SCREEN-ONLY.slangp",
+        )
+        .expect("the Mega Bezel screen");
         choose_preset(&mut model, ShaderSlot::TwoDWide, screen.path);
         assert_eq!(model.get(SettingId::Shader2dWsMode).as_int(), PRESET);
         assert_eq!(
@@ -759,8 +801,28 @@ mod tests {
         );
         choose_preset(&mut model, ShaderSlot::TwoDWide, "crt/other.slangp");
         assert_eq!(model.get(SettingId::Shader2dWsParams).as_text(), "");
+        // Owner review before 0.5.0: the tube without the TV is put forward in every slot, the
+        // TV only where a 4:3 picture has room for it.
         assert!(featured_for(screen, ShaderSlot::ThreeDWide));
-        assert!(!featured_for(screen, ShaderSlot::TwoD));
+        assert!(featured_for(screen, ShaderSlot::TwoD));
+        assert!(featured_for(tv, ShaderSlot::TwoD));
+        assert!(!featured_for(tv, ShaderSlot::TwoDWide));
+    }
+
+    /// Every preset of the catalogue reads with librashader from the copy of slang-shaders the
+    /// pack is made of (`ZAXNES_SLANG_SHADERS`): its passes, its textures and its parameters. No
+    /// card is needed; a missing copy skips the test, as the pack build does.
+    #[cfg(feature = "shaders")]
+    #[test]
+    fn every_preset_of_the_catalogue_reads() {
+        let Some(root) = std::env::var_os("ZAXNES_SLANG_SHADERS").map(std::path::PathBuf::from)
+        else {
+            return;
+        };
+        for preset in &CATALOGUE {
+            let parameters = zax_platform::slang_chain::preset_parameters(&root.join(preset.path));
+            assert!(parameters.is_ok(), "{}: {parameters:?}", preset.path);
+        }
     }
 
     #[test]

@@ -7,10 +7,15 @@ pixel-art-scaling
 interpolation
 edge-smoothing/xbrz
 edge-smoothing/scalefx
+# The pre-filter of the combinations (lot 3): light, 0.5 MB.
+edge-smoothing/nnedi3
 handheld
 bezel/Mega_Bezel/README.md
 bezel/Mega_Bezel/Presets
 stock.slang
+# Ready-made combinations of slang-shaders that suit the NES.
+presets/crt-plus-signal/fakelottes-ntsc-composite.slangp
+presets/crt-royale-fast/crt-royale-fast-ntsc-rf-slotmask-nes.slangp
 # Left out ("!" and a file or folder): the licence of MAME's NTSC shader was non-commercial.
 !ntsc/mame-ntsc.slangp
 !ntsc/shaders/mame-ntsc
