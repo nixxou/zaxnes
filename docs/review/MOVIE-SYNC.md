@@ -51,6 +51,24 @@ out to be *exactly* inert on this movie, and it eliminates the end-of-sample abo
 candidates by arithmetic rather than by experiment. The standard profile is again byte-identical
 and about 2 % faster. Its section is §4g, with the amendments marked *NESHAWK-PROFILE-2* in §5.
 
+**NESHAWK-PROFILE-3 closes frame 9354 and the 8 968 frames after it**, and it found its item by
+**measuring both machines** rather than by reading one. It built a **cycle ledger** that this core
+and a BizHawk Lua script both write in the same format, aligned them event for event over 8 901
+frames, and bisected the three cycles it found in a frame with no DMC DMA at all down to two
+instructions: the two machines take the vblank NMI at **different instruction boundaries of the
+game's frame-sync spin loop**, NesHawk one boundary — three cycles — later. The item is one cycle
+of NMI recognition (`NMI_SEEN_A_CYCLE_LATE`), and with it *Kirby* runs out of the third reference
+entirely, so the lot produced the **fourth** itself (frames 10 000 to 30 000) and the movie holds
+to **frame 18 321**: 8 792 of 8 901 frames clean against 8 175, **213 identical to the byte against
+none**, 22 of 28 screenshots. Two candidates die on the way: the branch interrupt quirk, by a ROM
+written for the purpose against a reading that predicted the opposite, and the OAM transfer's
+alignment, by the parity of the DMC rate table — for every game rather than for one movie. The item
+is also **the most expensive on this profile**, costing it six public ROMs and four `AccuracyCoin`
+rows that NesHawk itself passes, and *Faxanadu*'s checksum column; §4h says so first and §5 says
+what would settle it. The standard profile is again byte-identical, at +0.77 %. Its section is §4h,
+with the amendments marked *NESHAWK-PROFILE-3* in §5, and its instruments are
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`.
+
 ---
 
 ## The short version
@@ -1269,6 +1287,152 @@ five and says so.
 
 ---
 
+## 4h. Frame 9354, and the 8 968 frames after it: one cycle of the NMI (NESHAWK-PROFILE-3)
+
+§4g ended with a negative and a direction: the sound driver's per-frame pass crossed the vblank
+about thirty cycles differently in frame 9 354, **nothing in NesHawk's DMC, DMA or APU-register
+paths could supply thirty cycles there**, and the next lot should read somewhere else. It did not
+read — it **measured**, and the thing that differs turned out to be one cycle of the NMI.
+
+**The result first**, same command, `--profile` the only difference:
+
+| | `standard` | `neshawk`, §4g's seven items | `neshawk`, with item 8 |
+|---|---|---|---|
+| frames compared (1 100-10 000) | 8 901 | 8 901 | 8 901 |
+| **the last frame with no live difference** | 925 | 9 353 | **10 000** — the window's last frame |
+| frames with no difference outside the stack page and `$0000-$001F` | — | 8 175 of 8 901 | **8 792** of 8 901 |
+| frames with a live difference | — | 726 | **109**, every one isolated |
+| frames **identical to the byte**, dead stack included | — | **0** | **213** |
+| the 10 000-30 000 window (this lot's own reference) | — | — | **the last clean frame is 18 321**, 8 261 of 20 001 clean, 61 isolated below it |
+| all lag counts, both windows and the whole 156 312 frames | agree | agree | agree |
+| the pictures, 1 500-10 000 every 500 | 0 of 18 | 15 of 18 | **16 of 18** |
+| the pictures, 12 000-30 000 every 2 000 | — | — | **6 of 10** (12 000 to 18 000, all of them) |
+
+The **213** is the row to stop on. Before this item not one of the 8 901 frames agreed to the
+byte: §4g recorded the stack page as differing on every frame since 1 100, with a block of fifteen
+bytes sitting **one address higher** in the reference at frames 4 663-4 665, and called it "the
+fossil of the two machines' stack pointers having been one byte apart". It was the NMI having been
+taken one instruction apart.
+
+### The instrument, because the census could not say what a cycle was doing
+
+`--dmc-census` could price a frame's DMA and no more. This lot built the **cycle ledger**
+(`frame-trace --event-log`) and, on the other side, a BizHawk Lua script that writes **the same
+file** — a line per frame with the CPU cycle it started on, a line per event with the cycle it
+happened on: every NMI and IRQ handler entry, every chosen PC, every `$40xx` access. 8 901 frames
+cost 19 s on this side and 66 s on BizHawk's. Both scripts' text, and the two Python analysers, are
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`; the API names and the memory domain were **validated by
+a fifth script first**, because nothing in a measurement should rest on a guessed call.
+
+Two calibrations the alignment needed, both measured: an *execute* is reported at the cycle the
+instruction begins on and a *read* or *write* one cycle later (with the +1 applied,
+`r$4015 -> w$4011` is exactly 0 on **75 of 75** occurrences), and a frame's own `start` is not
+comparable at all — so every frame is anchored on its **own NMI handler entry**.
+
+### What it said, and the bisection that followed
+
+The brief's first question, whether a whole-frame cycle total ever differs, is **no, never**: the
+accumulated cycles from frame 1 100 to frame 10 000 are 265 046 497 on BizHawk and 265 046 494
+here, the 3 being the two ends' own quantisation, and BizHawk's frame lengths over the span are
+exactly 29 780 (4 403 frames) and 29 781 (4 497). The two PPUs run in lockstep.
+
+**Frame 1100 was taken first because it is the ideal case**: `dmc=0/0` — no DMC DMA at all — and
+its one OAM transfer is over before the frame's work starts. Every event of it is on the same cycle
+on both machines **except** `$C06E`, the `STA $39` with which the main loop says the frame's work is
+done, which this core reaches **3 cycles early**. Three cycles over 11 740 cycles of plain CPU
+execution with no DMA and no interrupt: not on any path §4f or §4g read.
+
+Three rounds of bisection, with the skeleton of watched PCs picked mechanically each time (every PC
+executed exactly once in the frame, sampled evenly by instruction index, so no round depended on
+reading the game's code), put the three cycles between the NMI handler's `RTI` at `$C3A1` and the
+instruction after it. The game's frame-sync loop is
+
+```
+C070  A5 39     LDA $39      3 cycles          \  the spin, 6 cycles round,
+C072  F0 FC     BEQ $C070    3 cycles, taken   /  with a boundary every 3
+```
+
+and in frame 1113 — chosen because frame 1112's work ended at the *same* cycle on both machines, so
+the two loops are in the same phase — the vblank is asserted at scanline 241 **dot 1**, inside the
+second cycle of a `BEQ`, before the `LDA` after it has begun. Both machines decline the NMI at the
+`BEQ`'s boundary. At the `LDA`'s, **this core takes it and NesHawk does not**; NesHawk takes it at
+the next boundary, three cycles later.
+
+### The item, and the one it is not
+
+**Item 8, `NMI_SEEN_A_CYCLE_LATE`**: the CPU's view of /NMI lags the PPU's own sample by one CPU
+cycle. This core raises /NMI when the vblank flag is set at scanline 241 dot 1 and the CPU reads
+the line two dots before the end of each cycle (`NMI_SAMPLE_LEAD`, which is what `ppu_vbl_nmi`
+tests 5-8 measure, REQ-CORE-116); NesHawk's `PPU.run.cs` latches a `nmi_destiny` flag at cycle 0 of
+scanline 241 and only then assigns `nes.cpu.NMI = true`, at scanline 241 PPU cycle
+**`3 + NMI_offset`**, and its `Fetch1()` reads `NMI` at the cycle the next opcode would be fetched
+on. One cycle, which a 3-cycle instruction turns into three.
+
+**It is not the branch quirk**, and that is worth the sentence because the reading said it was.
+NesHawk's `branch_irq_hack` is set for every taken non-page-crossing branch and `Fetch1` then skips
+the interrupt test on the instruction after it — so it could never take the NMI at the boundary
+before Kirby's `LDA`. A ROM written to ask says it does: the **interrupt-phase ROM** (this tree's
+own, in `neshawk_profile_tests.rs`, with the `.nes` BizHawk runs written out *by the Rust test* so
+that both machines answer the same bytes) is that spin loop isolated in two variants differing only
+in whether the branch crosses a page, and NesHawk names the `LDA` as the displaced instruction on
+**20 of 64** frames of the non-crossing one. Both cores also pass `cpu_interrupts_v2`
+`5-branch_delays_irq`, whose source states the hardware rule in words.
+
+### The OAM alignment, eliminated for every game rather than for one movie
+
+Round 2's candidate was the brief's last named one and it looked strong: with item 8 in, the
+`$4014` request is on the same cycle as NesHawk's on **71 of 72** frames of a window while `$C37C`,
+one OAM transfer later, is on only **40 of 72**. And NesHawk's source says it outright — its
+`sprdma_countdown` block does `if (apu.dmc.timer % 2 == 0) cpu_deadcounter = 2; else
+cpu_deadcounter = 1;`, deciding the transfer's alignment on the parity of the **DMC's timer** where
+this core waits for the first get cycle.
+
+It was implemented, and the 81-frame ledger came out **byte-identical**. The reason is arithmetic
+and it holds for every game: the DMC's timer counts down one per CPU cycle and reloads to
+`rates[i] - 1`, so its period is `rates[i]` — and **all sixteen NTSC rates and all sixteen PAL ones
+are even**, so the timer's parity is locked to the cycle's from power-on and nothing can unlock it.
+NesHawk's rule is a different *expression* of this core's rule. It was **reverted rather than
+shipped**: a constant whose two arms are provably the same function cannot be given the
+differential test the recipe requires.
+
+### What it cost, said before anything else about it
+
+Item 8 is the most expensive item on this profile, and the parent commit's own column is the
+measure:
+
+| `--profile neshawk` | parent `7c0b88b1` | with item 8 |
+|---|---|---|
+| `ppu_vbl_nmi` | 11 pass | 9 pass, 2 fail |
+| `vbl_nmi_timing` | 7 pass | 6 pass, 1 fail |
+| `cpu_interrupts_v2` | 6 pass | 3 pass, 3 fail |
+| `AccuracyCoin` | 122/147 | **118/147** |
+| *Faxanadu*, the two dumps' checksum columns | 207 and 220 of 832 | **136** and **169** |
+
+Every lost ROM measures the NMI at CPU-cycle resolution, which is the one cycle the item
+introduces, so they fail by construction — but step 2 measured **NesHawk itself passing all of
+them**. So NesHawk is one cycle later at the *instruction boundary* a movie sees and not one cycle
+later at the *cycle* a test ROM sees, and item 8 is a coarser model than NesHawk's mechanism: right
+about the effect, blunt about the shape. The finer shape was tried rather than argued about —
+lagging only the line's rise, which its one-shot `NMI = false` suggests — and it left both movies
+exactly where they were while taking `ppu_vbl_nmi` to 6 of 11. It was reverted.
+
+*Faxanadu* is the counter-indication and is reported as one. Its lag count is still frame-exact on
+both dumps and its final picture still the same bytes, and the column that moved is the one §4f
+said cannot discriminate (a checksum over the whole 2 KiB, stack page included) — but it moved
+*down*, on a movie also recorded on NesHawk. What it is probably about: **Faxanadu does not wait on
+an NMI semaphore at all.** Its frame 1000 is a tight `$2002` polling loop, a read every seven
+cycles, where *Kirby* reads `$2002` not once — and every such read clears the vblank flag, so its
+sync is decided by the *deassertion* of /NMI, which is exactly where a blanket one-cycle lag is
+coarsest. A per-frame `ram=` reference for *Faxanadu* would settle it in one command and does not
+exist.
+
+The standard profile is untouched: `golden-core` **byte-identical** (`8d508070…`), `AccuracyCoin`
+128/147, 24 of 24 DMC/DMA ROMs, `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `cpu_interrupts_v2` 6/6,
+*Faxanadu* 207 and 220, and `bench-core` **+0.77 %** and **+0.40 %** against the parent over six
+interleaved rounds — a layout effect of the one `bool` item 8 adds, inside the +1 % budget.
+
+---
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
@@ -1366,7 +1530,7 @@ Two new ones, from NESHAWK-PROFILE:
 
 Four new ones, from NESHAWK-PROFILE-2:
 
-* **Where *Kirby* parts now is frame 9 355, and the reference covers it — so the gap is a
+* ~~**Where *Kirby* parts now is frame 9 355, and the reference covers it — so the gap is a
   mechanism, not data.** The sound driver's per-frame pass crosses the vblank about thirty cycles
   differently in frame 9 354, and **nothing in NesHawk's DMC, DMA or APU-register paths supplies
   thirty cycles on that frame**: item 1c is worth six, item 7 one, items 3 and 5 nothing, and item 6
@@ -1374,7 +1538,11 @@ Four new ones, from NESHAWK-PROFILE-2:
   read, and the next lot should read somewhere else — the frame sequencer and `$4017` (written every
   frame, and what decides the four length-counter bits of the `$4015` the driver reads), or the
   `$4016` strobe delay `RunOneLast` applies on an odd DMC timer, are the two the reading passed over
-  because *Kirby*'s DMA did not need them.
+  because *Kirby*'s DMA did not need them.~~ **Answered, NESHAWK-PROFILE-3, and it was neither of
+  them:** the difference is one cycle of **NMI recognition**, which a 3-cycle spin loop turns into
+  three cycles of the whole frame's work (§4h). Both named candidates are eliminated by the cycle
+  ledger — the `$4017` write and all eight `$4016` strobes of a frame land at the NMI entry's own
+  residual, never at one of their own.
 * **The reference's reading point is not at a fixed offset after all.** EVAL-SYNC-4 measured 5 to 17
   CPU cycles on eight frames and §5 already recorded frame 733's **170** as the odd one out. The
   third window makes that the rule rather than the exception: of the 79 isolated artefact frames
@@ -1395,6 +1563,49 @@ Four new ones, from NESHAWK-PROFILE-2:
   single pixel was in §4f. Two instances now, both on frames with no live difference at all, so it
   is a PPU or sprite-evaluation difference rather than a timing one — and it is the only thing in
   this series that the work-RAM instrument cannot see at all.
+
+Five new ones, from NESHAWK-PROFILE-3:
+
+* **Item 8 is right about the effect and blunt about the shape, and that is the lot's own main
+  unknown.** Lagging the CPU's whole view of /NMI by a cycle takes *Kirby* 8 968 frames further and
+  makes 213 frames agree to the byte where none did, but it costs the NesHawk profile
+  `ppu_vbl_nmi` `05-nmi_timing`, `vbl_nmi_timing` `7.nmi_timing`, `cpu_interrupts_v2`
+  `2-nmi_and_brk` and `3-nmi_and_irq` and four `AccuracyCoin` rows — **and NesHawk itself passes
+  every one of them** (§4h measured that directly, by running them on NesHawk through a config
+  that forces the core). So the real mechanism is one cycle later at the *instruction boundary* and
+  not one cycle later at the *cycle*, and nobody has written down what shape does both. Lagging
+  only the line's rise was tried and is worse. What would settle it: a BizHawk Lua script that
+  reports, for a sweep of PPU dots, the exact cycle at which `cpu.NMI` becomes true and the exact
+  cycle its `Fetch1` first reads it — which needs an `event.onmemoryread` on a register NesHawk
+  touches in that window, or a hand-written ROM in the shape of `05-nmi_timing` with a
+  one-instruction spin loop instead of its own.
+* **~~The frame sequencer and `$4017`, and the `$4016` strobe delay, are where the next lot should
+  read.~~ Both eliminated** by the cycle ledger: the `$4017` write and all eight `$4016` strobes of
+  a frame land at the NMI entry's own residual, never at one of their own. They are downstream of
+  the NMI.
+* **The *Faxanadu* `.bk2` now replays *worse* on the profile built for it, and nothing in hand can
+  say whether that matters.** 207 and 220 of 832 checksum lines become 136 and 169, with every lag
+  count still frame-exact and both final pictures still the same bytes. The column is the one §4f
+  said cannot discriminate — a checksum over the whole 2 KiB, stack page included — and *Faxanadu*
+  syncs on a tight `$2002` poll where *Kirby* never reads `$2002` at all, so the two movies exercise
+  opposite halves of the NMI. **A per-frame `ram=` reference for *Faxanadu* would answer it in one
+  command**, and it is now the single most valuable thing the owner could produce: one of the two
+  movies in hand is currently evidence against the item that moved the other one eight thousand
+  frames.
+* **What parts *Kirby* at frame 18 322 is the *phase*, not a rule.** It is frame 4666's and frame
+  926's signature a third time — `$0038`, `$0039`, `$0048`, `$0049`, the frame semaphore and its
+  counters — with the frame's work crossing the vblank again. But the ledger over frames
+  18 250-18 330 finds no event of a frame off its own anchor by more than the ±1 of an OAM
+  transfer's alignment and the ±4 of a DMC fetch's placement, and 213 frames identical to the byte
+  say the rules now agree. The two machines' spin loops are still a multiple of three cycles apart
+  on most frames, and that offset was seeded long before frame 1 100: step 1 measured the absolute
+  drift jumping **2 382 cycles at frame 6**, where the movie's first reset lands. So the next thing
+  worth measuring is **the boot and the reset**, not another item on the DMA or the APU, and
+  `kirby-jp-step1.txt` (frames 1-400, which already exists) is the reference for it.
+* **A frame whose work RAM agrees byte for byte can still differ by four pixels, and there are now
+  three of them.** Frame 5 500 joins frame 8 500 (§4g) and frame 400 (§4f): the picture misses by
+  one to four pixels on a frame whose line is `live=0`. Three instances is a pattern rather than a
+  curiosity, and it is the only thing in this series the work-RAM instrument cannot see at all.
 
 ---
 
@@ -1819,3 +2030,91 @@ is EVAL-SYNC §4's colour-bijection rule with the eight overscan rows cropped to
 it a third way: **15 MATCHes of 18 on the NesHawk profile and 0 of 18 on the standard one**, whose
 eighteen misses run from 38 914 to 54 963 pixels — which a script that said MATCH indiscriminately
 could not produce.
+
+### The commands (NESHAWK-PROFILE-3)
+
+```sh
+H=./target-ev/release/zax-harness.exe
+HC=./target-ev/zax-harness-census.exe      # the same, --features dma-census
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+S=G:/3DSen/ext-tools/scripts               # the Lua, never in the worktree
+E=G:/3DSen/ext-tools/BizHawk-2.11.1/EmuHawk.exe
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+R=$B/kirby-jp-step1c.txt                   # the third reference, frames 1 100 to 10 000
+R4=$B/kirby-jp-step1d.txt                  # the fourth, this lot's own, 10 000 to 30 000
+
+# -------- the instruments. The API names FIRST, so nothing rests on a guess.
+$E --movie="$K" --lua=$S/cyccheck.lua "$KR"          # domains, registers, vectors, 3 hook kinds
+
+# the cycle ledger, both machines, same format (edit the four config lines of the Lua)
+$E --movie="$K" --lua=$S/bk2cyc1.lua "$KR"           # -> $B/kirby-jp-cyc1.txt, 66 s
+$HC frame-trace "$K" "$KR" --frame 1100 --frames 8901 --dmc-census \
+    --event-pc C37C --event-pc C06E --event-pc 80FC --event-pc 804C \
+    --event-log zax-cyc1.txt                          # 19 s
+python drift.py $B/kirby-jp-cyc1.txt zax-cyc1.txt 1100 10000   # the residuals, per tag
+python align.py $B/kirby-jp-cyc1.txt zax-cyc1.txt 1100 1200 1  # the intervals, per pair
+
+# the bisection: pick the skeleton MECHANICALLY from a full trace of the frame
+$H frame-trace "$K" "$KR" --frame 1100 --out trace-1100.txt
+# -> every PC executed exactly once in the frame, sampled evenly by instruction index,
+#    into the Lua's `watched_pc` and into --event-pc; three rounds narrowed 729-4266 to two
+#    instructions
+
+# -------- the interrupt-phase ROM: the same bytes on both machines
+cargo test -p zax-nes --release --test neshawk_profile_tests interrupt_phase -- --nocapture
+ZAXNES_DUMP_ROM=phase.nes cargo test -p zax-nes --release --test neshawk_profile_tests \
+    the_interrupt_phase_rom_is_written -- --ignored
+$E --config=$S/config-neshawk.ini --lua=$S/phaserom.lua phase.nes   # -> $B/phaserom.txt
+
+# -------- what NesHawk does with the test ROMs that state the rules
+#    NOTE: BizHawk's config names quickerNES for a plain ROM; only a .bk2 forces NesHawk.
+T=G:/3dsen/cleanroom/assets-free/test-roms/nes-test-roms
+for r in cpu_interrupts_v2/rom_singles/5-branch_delays_irq ppu_vbl_nmi/rom_singles/05-nmi_timing \
+         ppu_vbl_nmi/rom_singles/06-suppression ppu_vbl_nmi/rom_singles/07-nmi_on_timing \
+         ppu_vbl_nmi/rom_singles/08-nmi_off_timing; do
+  $E --config=$S/config-neshawk.ini --lua=$S/romresult.lua "$T/$r.nes"
+  cat $B/romresult.txt                               # all five: status=00 sig=DE B0 61
+done
+
+# -------- the movie, both windows, both profiles
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 10001 --trace-step 1 \
+    --trace-ref "$R" --ram-ref "$R" --ram-ref-table c-table.txt
+$E --movie="$K" --lua=$S/bk2trace1d.lua "$KR"        # the fourth reference, 2 m 36 s, 82 MB
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --frames 30001 --trace-step 1 \
+    --trace-ref "$R4" --ram-ref "$R4" --ram-ref-table d-table.txt
+$H movie-sync "$K" "$KR" --engine zaxnes --lag --trace-step 100 --trace-ref "$B/kirby-jp.txt"
+
+# frame 18322, the third time the semaphore pair has been the signature
+$H frame-trace "$K" "$KR" --frame 18322 --frames 3 --converge "$R4" --converge-window 4
+
+# -------- the pictures, 28 of them, and the standard column that validates the script
+$H movie-sync "$K" "$KR" --engine zaxnes --no-lag --frames 30001 --png shots-nh \
+    --png-frames 1500,2000,...,10000,12000,14000,...,30000
+$H movie-sync "$K" "$KR" --engine zaxnes --profile standard --no-lag --frames 10001 \
+    --png shots-std --png-frames 1500,2000,...,10000
+python shots.py shots-nh f $B kirby-jp-c 1500 2000 ...   # 16 of 18, and 0 of 18 for standard
+
+# -------- the regression set
+$H golden-core "G:/3DSen/test-originals" golden.jsonl 1200      # 8d50807085...
+export ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms
+for p in standard neshawk; do
+  for f in dmc_dma_during_read4 sprdma_and_dmc_dma apu_test dmc_tests AccuracyCoin \
+           ppu_vbl_nmi vbl_nmi_timing cpu_interrupts_v2; do
+    $H test-roms "$ZAXNES_TEST_ROMS" "tr-$p-$f.json" --filter "$f" --no-shots --quiet --profile $p
+  done
+done
+for d in "USA][!!" "USA][Rev 1][!!"; do for p in standard neshawk; do
+  $H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [$d].nes" \
+      --engine zaxnes --lag --profile $p --trace-ref "$B/fax-usa.txt"
+done; done
+# bench-core: six interleaved rounds against a clean `git archive` of 7c0b88b1, built on C:
+#   and deleted again -> +0.77 % and +0.40 %
+```
+
+The Lua scripts' and the two Python analysers' text is
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`. `shots.py` is the colour-bijection comparison and is
+**still not committed**, for the reason it never has been: it reads pictures of a commercial game.
+NESHAWK-PROFILE-3 revalidated it a fourth way — **16 MATCHes of 18 against 0 of 18** on the
+standard profile, whose eighteen misses run from 38 914 to 54 963 pixels.
