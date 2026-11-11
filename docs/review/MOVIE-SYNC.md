@@ -29,6 +29,16 @@ could only name: the two machines read the 2 KiB **5 to 17 CPU cycles apart**. I
 §1d (the two instruments it added), §4e (frames 400-1 100, frame 926 and the DMC) and the
 amendments marked *EVAL-SYNC-4* in §5 and §6.
 
+**NESHAWK-PROFILE closes frame 926**, and it is the first lot of this series on branch
+`feat/neshawk-profile` rather than `eval/bk2`. It was allowed to read NesHawk's source, found four
+timing choices the core makes that Zaxnes does not, and put them behind a **timing profile** of
+Zaxnes's own core — `zax_nes::NesHawkCompat`, selected automatically by a `.bk2` whose header names
+`NesHawk`. *Kirby* then replays with **no live difference at any of the 1 100 frames** the
+references cover. It changes the standard profile's behaviour **not at all** (`golden-core`
+byte-identical) and needs no third engine, which sharpens §6's answer rather than reversing it. Its
+section is §4f, with the amendments marked *NESHAWK-PROFILE* in §5 and §6;
+`docs/review/NESHAWK-PROFILE.md` is how to add an item.
+
 ---
 
 ## The short version
@@ -1025,6 +1035,118 @@ lists either agree or name the cycle at which they first do not.
 
 ---
 
+## 4f. The window closed for good: a NesHawk-compatible chip, not a NesHawk engine (NESHAWK-PROFILE)
+
+§4e left frame 926 **undetermined**, and said why: *"`NesHawk`'s standing on it: **not published**"*
+— no figure for its DMC DMA's halt cost, its alignment or its abort behaviour was available, and
+its source was out of scope for that lot. This lot was allowed to read it, and the answer turns out
+to need **no third engine at all**: four lines of NesHawk's own behaviour, put behind a *timing
+profile* of Zaxnes's own core, close the frame.
+
+**The result first.** The *Kirby* `.bk2`, same command, same references, `--profile` the only
+difference:
+
+| | `standard` | `neshawk` |
+|---|---|---|
+| frames 1-400 (`kirby-jp-step1.txt`): frames with a live difference | 0 | 0 |
+| frames 400-1 100 (`kirby-jp-step1b.txt`): frames with a live difference | **184** — nine isolated, then **926 to 1 100 without a gap** | **8**, every one isolated |
+| frames with no difference outside the stack page and `$0000-$001F` | 517 of 701 | **693** of 701 |
+| **the last frame with no live difference** | **925** | **1 100**, the end of the reference |
+| all 701 lag counts | agree | agree |
+| the owner's fifteen screenshots, 400 to 1 100, under §4's colour-bijection rule | **10** MATCH | **14** MATCH |
+| the screenshot at frame 1 000 of the long run | no, 301 px | **MATCH** |
+
+And `frame-trace` on frame 926 says it in one line. Standard profile: *"at **NO** instant of this
+frame does the live memory agree, so the two machines did not run the same frame."* NesHawk profile:
+*"**NO live byte differs at 293 instruction(s)** of this frame, from 8 934 (−36 from the boundary)
+to 9 226: the two machines ran the same frame and read the 2 KiB at different moments."* Frame 926's
+three bytes were the last thing §4e left standing, and they are gone.
+
+**No regression.** *Faxanadu* on both dumps gives **207** and **220** of 832 lines with the last
+agreeing line at **83 200** and every lag count matching — §4's figures to the line — on *both*
+profiles, and our pictures at frames 1 000, 10 000, 30 000, 60 000 and 83 000 are **byte-identical
+between the two profiles**. On that movie the profile never fires.
+
+### The four items, and that Zaxnes is the one that is right about them
+
+Read from BizHawk's `src/BizHawk.Emulation.Cores/Consoles/Nintendo/NES/APU.cs` and `NES.Core.cs`
+(MIT), nothing copied, each named against its function so the reading can be checked. On **every
+one of them Zaxnes agrees with Mesen 2 and with the nesdev wiki and NesHawk does not**:
+
+| | NesHawk | Zaxnes, Mesen 2, nesdev |
+|---|---|---|
+| **1a** the halt of a DMC reload | lands on the **request cycle itself**: `DMCUnit.Run()` lowers `RDY` and `RunOneFirst()` runs before `cpu.ExecuteOne()` | the request is sampled before the cycle, so the **next** read cycle is halted |
+| **1b** a fetch's length | a **fixed four** cycles — halt, two re-reads, fetch — with no `% 2` anywhere on the path | three or four, by the get/put parity ("DMC DMA normally takes 3 or 4 cycles, depending on whether alignment is needed") |
+| **2** the sample length, loop and IRQ | **three cycles after** the fetch (`dmc_reload_countdown`, spent in `RunOneLast`), so `$4015` bit 4 stays set across them | at the fetch |
+| **3** a `$4015` enable with the buffer empty | starts a write-style fetch **even mid-sample**, delayed by the DMC timer's parity and three cycles long (`set_lenctr_en` tests `!sample_buffer_filled` as a *sibling* of the restart) | only a write that actually starts a sample is delayed; a mid-sample write leaves the reload alone |
+
+So the profile is **not** the more accurate chip, and it is not offered as one: it fails five public
+test ROMs and eight `AccuracyCoin` rows that the standard profile passes, each failure traced to the
+item that causes it (`docs/progress/NESHAWK-PROFILE.md` step 3). `apu_test/7-dmc_basics`'s own text
+is *"There should be a one-byte buffer that's filled immediately if empty"*, which is precisely what
+item 3 denies. The standard profile's column is unchanged, ROM for ROM and row for row, and
+`golden-core` over the 98 originals is byte-identical.
+
+### Which item closed it, which is not the item §4e pointed at
+
+Each item alone, built and run over frames 400-1 100:
+
+| items on | last clean frame | frames differing |
+|---|---|---|
+| none | 925 | 184 |
+| **1a** | **1 100** | 17 |
+| **1a + 1b** | **1 100** | **8** |
+| **2** | **925** | **184** — the standard profile's figures to the digit |
+| **3** | **1 100** | 11 |
+
+**Item 1a is the cause**, and **item 2 is exactly inert on this movie.** §4e named `LDA $4015` at
+`$823C` and the `BNE` at `$8241` as the amplifier that turns a few cycles of slack into two
+different games, and that reading stands — but *Kirby*'s read never lands inside the three-cycle
+window item 2 opens. What moved the machine is **which cycle each of the 56 fetches of that frame
+lands on**, not what any of them read. Item 3 closes it independently, because NesHawk picks a
+load's delay from the DMC timer's parity where this core picks it from the APU cycle's, which moves
+the start of every sample by a cycle.
+
+The arithmetic §4e could not settle is settled too. A lone reload costs NesHawk a fixed 4 cycles
+against this core's 3 or 4, so NesHawk should fall *behind* — the opposite sign from a reference
+read as 45 to 55 cycles *ahead*. The trace shows why that could not decide anything: the
+NesHawk-compatible run does **7 fewer instructions and 1 fewer cycle** in frame 926. It is not a
+phase shift in either direction, and a sum over fetches was never going to predict it.
+
+### What is left
+
+**Eight frames**, every one isolated and seven of them a single live byte: 680, 714, 733, 740, 767,
+821, 837, 957. Six are the same frames the standard profile has, and they are §4e's measured
+artefact class — the reference records its 2 KiB five to seventeen cycles from where this core reads
+it. The profile clears 645, 796 and 875 and moves 767 and 957 in, which is what a change of the
+reading instant does.
+
+**And beyond frame 1 100 there is nothing to measure against.** `kirby-jp.txt` carries a checksum
+and a lag count every hundred frames and no `ram=` field, which is what `--ram-ref` and
+`frame-trace --converge` need; a checksum is taken over the whole 2 KiB including the two artefact
+ranges, so it disagrees on nearly every line *even in the stretch where the live memory agrees byte
+for byte* (2 of 1 563 lines on the standard profile, 1 on the other, all 1 563 lag counts agreeing
+on both). The picture at frame 1 000 matches and the picture at 10 000 does not, so the two machines
+part somewhere in between, and no reference exists in that interval. **A per-frame `ram=` dump of
+frames 1 100 to 10 000 would localise the next difference in one command** — and adding the item it
+names is now a half-day's work rather than a lot's, which is the point of the architecture.
+
+### What this cost the standard profile: nothing that can be measured
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames | **byte-identical** to lot FCEUX-23's baseline |
+| `bench-core`, five ROMs, six interleaved rounds against the parent | −3.0 %, −3.0 %, −2.2 %, **+0.5 %**, **+0.6 %** — worst case inside the +1 % budget |
+| `AccuracyCoin` and the 24 DMC/DMA ROMs | unchanged, row for row |
+| savestates | unchanged, to the byte and to the format version |
+| memory | none — a profile is a zero-sized type |
+| binary | +147 408 bytes of `.text` for a whole second core, so it is behind no feature |
+
+`docs/review/NESHAWK-PROFILE.md` is the how-to: what the profile is, what it is not, and the
+eight-step recipe for adding an item.
+
+---
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
@@ -1088,11 +1210,12 @@ Three new ones, from EVAL-SYNC-3:
 
 Three new ones, from EVAL-SYNC-4:
 
-* **Whether the DMC's sample-fetch DMA is the cause is not proved, only sized.** It is the only
-  mechanism in the frame with the budget (207-276 cycles a frame), every live-difference frame in
-  which it is idle agrees to within ten cycles, and both frames that are tens or hundreds out have
-  a sample playing — but frame 796 has 61 fetches and is 5 cycles out, so the correlation is not
-  one-to-one. §4e's items 3 and 4 are what would turn it into a cause.
+* ~~**Whether the DMC's sample-fetch DMA is the cause is not proved, only sized.** It is the only
+  mechanism in the frame with the budget … §4e's items 3 and 4 are what would turn it into a
+  cause.~~ **Proved, NESHAWK-PROFILE:** it is the cause, and the item is **which cycle the halt
+  lands on** rather than how many cycles the fetch costs. Item 1a alone takes the last frame with
+  no live difference from 925 to 1 100; item 2 — the `$4015` bit-4 window §4e named as the
+  amplifier — is *exactly* inert on this movie (§4f).
 * **Zaxnes's post-halt DMA abort is a known gap and its worth on a real game is unmeasured.**
   `AccuracyCoin`'s `Explicit DMA Abort` and `Implicit DMA Abort` have failed since lot MF-4a with a
   written diagnosis; the arithmetic of §4e says one to three cycles per sample end, which is
@@ -1104,6 +1227,21 @@ Three new ones, from EVAL-SYNC-4:
   is not at a fixed offset from vblank — which item 1 of §4e's list would say outright — or the
   same mechanism as frame 926 was at work three hundred frames earlier without changing the
   program's path.
+
+Two new ones, from NESHAWK-PROFILE:
+
+* **Where *Kirby* parts now is beyond frame 1 100, and no reference can see it.** The per-frame
+  dumps stop at 1 100; `kirby-jp.txt` carries no `ram=` field, so neither `--ram-ref` nor
+  `frame-trace --converge` can run past it. The picture at frame 1 000 matches and the picture at
+  10 000 does not, so the next divergence is in that interval and nothing in hand localises it. **A
+  per-frame `ram=` dump of frames 1 100 to 10 000 would name it in one command**, and that is the
+  single most valuable thing the owner could produce for this question now.
+* **Items 2 and 3 are implemented on a reading, and only item 3 has been seen to fire.** Item 2
+  changes nothing on either movie in hand, so the only evidence that it is right is NesHawk's
+  source; a movie whose `$4015` read lands inside its three-cycle window would be the test. The two
+  candidates the reading turned up and this lot did **not** implement — `$4011`/`$4012`/`$4013`
+  landing on an even DMC-timer cycle, and the `fill_glitch` family of end-of-sample aborts — are
+  unmeasured for the same reason (`docs/progress/NESHAWK-PROFILE.md` step 1, items 5 and 6).
 
 ---
 
@@ -1117,6 +1255,15 @@ engine was: `.bk2` movies are published by TAS sites, they are recorded on a cyc
 and Zaxnes's own engine is cycle-accurate too, so they ought to sync. They do — §4 is that, at
 83 218 frames, on two dumps, with the lag count matching to the frame. Adding `NesHawk` to play
 movies Zaxnes already plays exactly would buy nothing.
+
+> **Stronger still, NESHAWK-PROFILE.** The one movie that did not sync now does, for the whole
+> 1 100 frames any reference covers, and it took **four constants** rather than an engine: the
+> four NesHawk timing choices of §4f, behind a timing profile of Zaxnes's own core. That settles
+> the shape of the answer for good. What a `.bk2` needs from `NesHawk` is not `NesHawk`; it is the
+> handful of places where `NesHawk` differs, and each of those can be read, written down, tested
+> against the public ROMs on both profiles, and switched on by the movie's own header — at **no**
+> cost to the standard chip (`golden-core` byte-identical, worst bench +0.6 %, savestates
+> unchanged). A CLR host or a port would have bought the same sync and a licence question with it.
 
 **2. The thing that does not sync cannot be fixed by an engine at all.** The `.fm2` movies fail
 because FCEUX is wrong and they were recorded on it. The *existing* second engine already solves
@@ -1141,6 +1288,11 @@ Zaxnes is already right about is a row in a menu that nobody can be told how to 
    path — plus the refusals, which are already written and already name what they refuse.
    **Opening a `.bk2` must not switch the engine**: unlike an `.fm2`, this is a movie that syncs
    on Zaxnes's own.
+   *NESHAWK-PROFILE:* it must switch the **timing profile** instead, which is a different thing and
+   already built — `Engine` is implemented for both profiles and `MovieFile::recorded_profile` is
+   the one-line rule. As with FCEUX-48's engine switch it is for that playback only, is never
+   written to the game's own setting, and is said on screen. Nothing in the application names
+   `.bk2` today (§4f), so this is still the whole of the work.
 2. **Fix the three header fields the application's Zaxnes `.fm2` path ignores** (§3, last
    section). It will not make a TAS sync, and it removes a reason that is ours rather than FCEUX's.
 3. **Say the `.fm2` situation out loud in the interface.** A user who opens a TAS of an MMC3 game

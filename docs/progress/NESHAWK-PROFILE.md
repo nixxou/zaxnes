@@ -19,7 +19,7 @@ source actually shows.
 - [x] 3. The NesHawk profile.
 - [x] 4. The engine variant and its selection.
 - [x] 5. The experiment.
-- [ ] 6. Report and final pass.
+- [x] 6. Report and final pass.
 
 ## The environment this lot runs in
 
@@ -934,3 +934,109 @@ validated against EVAL-SYNC-4's table, which it reproduces (see above).
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE step 5/6 done: the experiment
+
+---
+
+## Step 6 — report and final pass
+
+### The two documents
+
+| | |
+|---|---|
+| `docs/review/MOVIE-SYNC.md` **§4f** | *The window closed for good: a NesHawk-compatible chip, not a NesHawk engine.* The result against both references, the four items with the function each was read from and the statement that on every one of them Zaxnes is the one that agrees with Mesen 2 and nesdev, the per-item attribution, what is left, and what the standard profile paid. The header's lot list gained a NESHAWK-PROFILE paragraph; §5 struck the EVAL-SYNC-4 unknown this lot answered and added two of its own; §6's reason 1 gained the paragraph that **sharpens** its answer — what a `.bk2` needs from NesHawk is not NesHawk, it is four constants — and its "what to do instead" item 1 now says that the application's future `.bk2` path must switch the **profile** rather than the engine. |
+| `docs/review/NESHAWK-PROFILE.md` (new) | What the profile is, **what it is not** (it fails five public ROMs the standard profile passes; never make it a default, never fix a game with it), the four items with their sources and their sites, the **eight-step recipe** for adding an item, the two traps that cost this lot time, where the selection lives, and the cost of having two chips. |
+
+### fmt and clippy
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, whole workspace, feature **off** | clean |
+| the same, feature **on** (`zax-app/fceux-core,zax-harness/fceux-core,zax-fceux/fceux-core`) | clean |
+
+### The tests, `--include-ignored`
+
+With `ZAXNES_ROMS=G:/3dsen/demo/roms`, `ZAXNES_TEST_ROMS=G:/3dsen/cleanroom/assets-free/test-roms`
+and `ZAXNES_PROFILES=G:/3dsen/cleanroom/assets-neutral`:
+
+| | passed | failed |
+|---|---|---|
+| **`zax-nes`** | **1 199** | 0 |
+| **`zax-harness`**, feature off | **127** | 0 |
+| **`zax-harness`**, feature on (`--test-threads 1`) | **147** | 0 |
+| `zax-settings` | 261 | 0 |
+| `zax-render` | 310 | 0 |
+| `zax-engine3d` | 235 | 0 |
+| `zax-profiles` | 180 | 0 |
+| `zax-scripting` | 176 | 0 |
+| `zax-core-api` | 9 | 0 |
+| `zax-goldens` | 3 | 0 |
+| `zax-achievements` | 3 | 0 |
+
+`zax-nes` goes from EVAL-SYNC-4's **1 187** to **1 199** by this lot's twelve new tests — six on the
+architecture (`timing_profile_tests.rs`) and six on the items (`neshawk_profile_tests.rs`).
+`zax-harness` goes from 126 to **127** by the `.bk2` profile-selection test, and its feature-on
+total is **147**, EVAL-SYNC-4's 146 plus the same one.
+
+**`zax-app` and `zax-platform` cannot be tested on this machine**, and it is not a regression:
+`LNK1181: cannot open input file 'SDL2.lib'`, and there is no `SDL2.lib` anywhere on it. Nothing in
+this lot touches either crate. `cargo clippy --workspace --all-targets` does not link, so it still
+covers both and every one of their test targets, with and without the feature.
+
+### `golden-core`
+
+`zax-harness golden-core "G:/3DSen/test-originals" <out.jsonl> 1200`, release, feature off, 98
+ROMs:
+
+    8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773
+
+**Byte-identical** to the value the brief names — lot FCEUX-23's baseline, and EVAL-SYNC's,
+EVAL-SYNC-2's, -3's and -4's. Run four times across this lot: on the first generic build, on the
+final step-2 build, after step 3 wrote the four items, and here. The same hash every time, which is
+the whole claim about the standard profile.
+
+### The public ROMs, both profiles, re-run with the final binary
+
+| | `standard` | `NesHawkCompat` |
+|---|---|---|
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test` and `dmc_tests` | **24 pass, 0 fail**, 6 manual | 19 pass, **5 fail**, 6 manual |
+| `AccuracyCoin` | **128/147** | 120/147 |
+
+The standard column is EVAL-SYNC-4 §4's, ROM for ROM and row for row. The NesHawk column's five
+ROMs and eight rows are each traced to the item that moves them in step 3's table, and §4f says in
+the place a reader will look that this profile is not the accurate one.
+
+### The movies, re-run with the final binary
+
+| | |
+|---|---|
+| *Kirby* `.bk2`, frames 1-1 100, `--profile neshawk` | **8** frames with a live difference, all isolated; last frame with no live difference **1 100**; all 701 lag counts agree; **14** of 15 screenshots MATCH |
+| the same, `--profile standard` | 184; last clean frame 925; 10 of 15 |
+| *Faxanadu* `[USA][!!]` / `[Rev 1]`, both profiles | **207** and **220** of 832 lines, last agreeing line **83 200**, every lag count agreeing, final picture `03d7e6a1…`, five of five screenshots MATCH — and the two profiles' pictures **byte-identical** |
+
+### What this lot did not do, said plainly
+
+| | |
+|---|---|
+| **the application's `.bk2` playback** | there is none to switch: nothing in `zax-app` names `.bk2` and its movie dialog admits `.fm2`, `.fcm`, `.mv`. Step 4 has the check and what an importer would need; nothing was added to the application |
+| **items 5 and 6 of the reading** | the `$4011`/`$4012`/`$4013` write alignment, and the `fill_glitch` / `fill_glitch_2` / `pending_disable` end-of-sample aborts. Both are candidates with their sources written down in step 1, and neither was needed: round 1 closed frame 926. Item 6 remains the first thing to add if a reference beyond frame 1 100 ever names another difference |
+| **rounds 2 to 4 of step 5** | not run, because there is no data for them: the per-frame references stop at frame 1 100 and `kirby-jp.txt` carries no `ram=` field. §5 of the review asks for the dump that would unblock them |
+| **a `cargo test --workspace`** | impossible here (`SDL2.lib`), so the suites are run per crate as EVAL-SYNC-4's were |
+| **`cargo asm`** | not installed, and not installed by this lot. Step 2 used `dumpbin /HEADERS` on the release binary instead and says what that can and cannot claim |
+| **the spec** | not edited. The proposed REQ-CORE-124 wording is in step 2 |
+
+### The brief's rules, checked
+
+| | |
+|---|---|
+| the `Standard` path's behaviour | `golden-core` byte-identical; 24 of 24 DMC/DMA ROMs and `AccuracyCoin` 128/147 unchanged; savestates unchanged to the byte and to the version |
+| the `Standard` path's speed | worst of five ROMs **+0.6 %**, inside the +1 % budget; three come out about 3 % faster |
+| no `if profile == NesHawk` in a hot path | every item is an associated constant read as `if P::ITEM`, folded at compile time; the two cores are separate monomorphisations |
+| safe Rust only | no `unsafe` added anywhere; `zax-nes` keeps `#![forbid(unsafe_code)]` |
+| no downloads | none. BizHawk and Mesen 2 were read through `raw.githubusercontent.com`; nothing cloned, nothing fetched |
+| nothing staged that must not be | no ROM, movie, trace, dump, screenshot, `rust/target-*`, `.claude/` or `CLAUDE.md`; every commit staged files by name |
+| no absolute path with a user name in a committed file | checked across all six commits |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE step 6/6 done: report and final pass
