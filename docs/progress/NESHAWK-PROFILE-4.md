@@ -23,9 +23,9 @@ This lot has two problems, in this order:
       **The answer is that it cannot be refined: it is not an NMI difference at all, and it is
       retracted.** Step 2 found what it was standing in for.
 - [x] 2. The boot and the reset, ledgered on both machines over frames 0-12 — **item 10**.
-- [ ] 3. Kirby, iterating, and then the whole movie.
-- [ ] 4. No regression.
-- [ ] 5. Report and final pass.
+- [x] 3. Kirby, iterating — **one round**, and it told the drift and the phase apart.
+- [x] 4. No regression, and the standard profile is **faster** than both parents.
+- [x] 5. Report and final pass.
 
 ## The environment this lot runs in
 
@@ -286,3 +286,216 @@ at the top of the frame or 1 234 cycles into it.
     [PROGRESS] NESHAWK-PROFILE-4 step 2 done: the boot and the reset - item 10, the start-up frame
 
 ---
+
+## Step 3 — Kirby, one round, and why the rounds stop there
+
+### Round 1 — the three cycles survive item 10, and that is the finding
+
+The cycle ledger of frames 1 100 to 10 000 was taken again on the new configuration and aligned
+against BizHawk's `kirby-jp-cyc1.txt` with `drift.py`. Two things came out of it.
+
+**The drift is gone.** The NMI entry's absolute drift `zaxnes - bizhawk` was a constant
+**4 776 ± 5** for three lots; it is now centred on **0** — 1 838 of 8 901 frames at exactly 0, the
+spread running −9 to +4. There is no longer an offset between the two machines' clocks, which is
+what item 10 was for.
+
+**And the three cycles are still there, unchanged.** Frame 1 100 is the frame NESHAWK-PROFILE-3
+step 1 bisected because it is the ideal case — `dmc=0/0`, no DMC DMA at all, its one OAM transfer
+over before the frame's work starts — and on the new configuration it has **exactly one** event
+off its own anchor:
+
+    frame 1100: pc$C06E@32738587 (-3)
+    frame 1101: pc$C06E@32768169 (-3)
+
+which is §4h's signature to the cycle. The `nmi` tag's residual is 0 on **1 169 of 1 169** frames,
+so the handler is entered on the same cycle on both machines — and its `RTI` still returns to a
+different instruction of the spin loop, which means the phase is carried in the **pushed PC** from
+the frame before. So:
+
+> **The 4 778-cycle drift and the 3-cycle spin-loop phase were two different things wearing one
+> number.** NESHAWK-PROFILE-3 §5 named the boot as the phase's seed because the drift jumped
+> there. The drift was the boot, item 10 removes it, and the phase is untouched.
+
+### Why the rounds stop at one
+
+* the brief's round loop is *ledger → first differing event → source → item*, and this round's
+  first differing event is one NESHAWK-PROFILE-3 already bisected to two instructions of the spin
+  loop and already explained — as a **fixed point**, not as a rule. A 3-cycle phase difference in
+  a 6-cycle loop reproduces itself exactly, feeds the ±1 of an OAM transfer's alignment and the ±4
+  of a DMC fetch's placement, and mostly heals. There is no *new* event to read a source about;
+* the item that closes it is **not** on the NMI, and this lot spent its first step proving that
+  rather than assuming it. Item 8 moved the NMI and closed the phase on most frames, and
+  `05-nmi_timing` says NesHawk's NMI is this core's. What is left is where the *program's* position
+  in the frame is set, and the two candidates nobody has measured are named in §5: the **6502's own
+  reset sequence** (NesHawk's `MOS 6502X` reset against this core's seven cycles) and the **cycle
+  the `.bk2`'s `Reset` command is applied on**. Both are now measurable in a way they were not
+  before, because the drift is zero;
+* and the brief's own precondition for going further — *"while Kirby keeps at least 18 321"* — is
+  not met and cannot be met by this lot's result. Producing further references for 30 000-60 000
+  would be measuring a movie that parts at 8 005 against frames it cannot reach, so **no new
+  reference was produced and no disk was spent on one.** The three that exist cover everything
+  this configuration can say.
+
+### Kirby, measured, every window that exists
+
+| | `standard` | `neshawk`, item 8 (`92b23d71`) | `neshawk`, item 10 |
+|---|---|---|---|
+| the last frame with no live difference, 1-400 | 400 | 400 | **400** |
+| the same, 400-1 100 | 925 | 1 100 | **1 100** |
+| the same, 1 100-10 000 | 925 | **10 000** | 8 005 |
+| the same, 10 000-30 000 | — | **18 321** | none |
+| frames with no live difference, 1 100-10 000 | — | **8 792** of 8 901 | 6 839 of 8 901 |
+| frames identical to the byte, 1 100-10 000 | 0 | 213 | **349** |
+| frames identical to the byte, 1-400 | — | 192 | **275** |
+| all lag counts, every window | agree | agree | **agree** |
+
+The 1-400 and 400-1 100 windows — the ones that contain the boot and the reset — are **clean on
+both**, and item 10 takes the first of them from 192 frames identical to the byte to **275**. The
+windows that lose are the later ones, where item 8's compensation was doing the work.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-4 step 3 done: one round, and the drift and the phase told apart
+
+---
+
+## Step 4 — no regression, and the standard profile is faster
+
+### The `Standard` profile's behaviour: nothing moved
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to lot FCEUX-23's baseline and to all three earlier NESHAWK lots' |
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test`, `dmc_tests`, `--profile standard` | **24 pass, 0 fail, 6 manual** — ROM for ROM, the same column |
+| `AccuracyCoin`, `--profile standard` | **128/147** — unchanged |
+| `ppu_vbl_nmi`, `vbl_nmi_timing`, `cpu_interrupts_v2`, `--profile standard` | **11/11, 7/7, 6/6** — unchanged |
+| *Faxanadu*, both dumps, `--profile standard` | **207** and **220** of 832 lines, every lag count agreeing — §4's figures |
+| savestates | unchanged **to the byte and to the version**, and this time trivially: item 10 adds no field on either profile, and item 8's byte is gone from the NesHawk block |
+
+### The `Standard` profile's speed: faster than both parents
+
+`bench-core --frames 1200 --warmup 120`, the `core run_frame` line only, **six interleaved rounds
+per ROM** against two clean `git archive` builds — `92b23d71` (this lot's parent) and `428c50e6`
+(the parent of all four NESHAWK-PROFILE lots' code) — the three binaries run in the same order
+inside each round:
+
+| ROM | `428c50e6` | `92b23d71` | this commit | vs the parent | **cumulative** |
+|---|---|---|---|---|---|
+| Super Mario Bros. 3 `[USA][!!]` | 1.17347 ms/frame | 1.15337 | **1.13893** | **−1.25 %** | **−2.94 %** |
+| Mega Man 3 `[USA][!!]` | 0.91843 | 0.90222 | **0.90463** | **+0.27 %** | **−1.50 %** |
+
+Per-round figures, in `428c50e6` / `92b23d71` / this order — SMB3: 1.1661/1.1448/1.1434,
+1.1645/1.1526/1.1408, 1.1696/1.1582/1.1400, 1.1934/1.1605/1.1366, 1.1661/1.1515/1.1292,
+1.1811/1.1526/1.1436. Mega Man 3: 0.9134/0.8948/0.8952, 0.9339/0.9081/0.9292,
+0.9164/0.8974/0.9067, 0.9027/0.8968/0.8989, 0.9090/0.9003/0.8939, 0.9352/0.9159/0.9039.
+
+**The owner's budget is +1 % cumulative since the last release and the cumulative figures are
+−2.94 % and −1.50 %**, so there is nothing to stop for. SMB3 is faster than the parent in all six
+rounds, which is the layout effect NESHAWK-PROFILE-3 paid +0.77 % for being handed back: item 8's
+`bool` is gone from `NesBusOf` and item 10 adds no field. The parent builds were put on a **short**
+path and deleted afterwards — a `git archive` under the session's own scratchpad makes `link.exe`
+fail with `LNK1104`, which cost one build before it was noticed.
+
+### The `NesHawkCompat` profile: eleven ROMs and four rows back
+
+| | parent `92b23d71` | this commit |
+|---|---|---|
+| the 30 DMC/DMA/APU ROMs | 19 pass, 5 fail, 6 manual | **19 pass, 5 fail, 6 manual** — unchanged |
+| `ppu_vbl_nmi` | 9 pass, 2 fail | **11 pass, 0 fail** |
+| `vbl_nmi_timing` | 6 pass, 1 fail | **7 pass, 0 fail** |
+| `cpu_interrupts_v2` | 3 pass, 3 fail | **6 pass, 0 fail** |
+| `AccuracyCoin` | 118/147 | **122/147** |
+| *Faxanadu* `[USA][!!]` | 136 of 832 | **247** of 832 |
+| *Faxanadu* `[USA][Rev 1][!!]` | 169 of 832 | **314** of 832 |
+
+The four `AccuracyCoin` rows back are `NMI Timing`, `NMI Suppression`, `NMI Overlap BRK` and
+`NMI Overlap IRQ` — the four item 8 cost. 122/147 is NESHAWK-PROFILE-2's figure, so the profile is
+back to the score it had before item 8 and no further: item 10 costs that suite nothing either way.
+
+**Both *Faxanadu* dumps are now better than the `Standard` profile's own 207 and 220.** That is the
+first time anything on this profile has beaten the standard chip on that movie, and §5 records that
+it cannot be read as proof of anything: the column is a checksum over the whole 2 KiB, stack page
+included, which §4f said cannot discriminate.
+
+### The suites
+
+| | passed | failed |
+|---|---|---|
+| **`zax-nes`**, release, `--include-ignored` | **1 142** | 0 |
+| **`zax-harness`**, release, feature off, `--include-ignored` | **128** | 0 |
+| the same with **`dma-census`** | **128** | 0 |
+| the same with **`fceux-core`** (`--test-threads 1`) | **148** | 0 |
+
+`zax-nes`'s total is reported as this lot measured it; the tree has the **same 1 269 `#[test]`
+items** as `92b23d71` (item 8's differential test out, item 10's in), so the earlier lots' "1 204"
+was a different invocation and not a different suite.
+
+`cargo fmt --all --check` is clean and `cargo clippy --workspace --all-targets -- -D warnings` is
+clean in **three** configurations: feature off, with `dma-census`, and with `fceux-core`.
+
+### The disk
+
+`G:` had 8.8 GB free at the start and **8.8 GB** at the end; `C:` 7.6 and 7.6. The low point was
+8.2 GB on `G:`, reached by the two parent commits' `git archive` copies and builds, which were
+deleted again. Nothing was skipped for want of space, and **no new per-frame reference was
+produced**, which is where the earlier lots spent theirs.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-4 step 4 done: no regression, and the standard profile is faster
+
+---
+
+## Step 5 — report and final pass
+
+### The documents
+
+| | |
+|---|---|
+| `docs/review/MOVIE-SYNC.md` **§4i** | *Item 8 was not a difference, and the boot was.* The result against every window first, then why item 8 has no finer shape (`05-nmi_timing` at one-dot resolution over all three alignments, which NesHawk passes), the three shapes that were implemented and measured before that was concluded, the boot out of a ledger the third lot had already written, item 10 with its source on both sides, the repositioning measured by the one movie that presses RESET, and the three cycles that survive. The header's lot list gained a NESHAWK-PROFILE-4 paragraph; §4h's and §5's two main unknowns are struck and answered — one of them *"the next thing worth measuring is the boot"*, which is what this lot did; §5 gained **five** of its own, the first of which is a **choice for the owner** rather than an unknown; the commands block has this lot's |
+| `docs/review/NESHAWK-PROFILE.md` | the item table loses **8** and gains **10**; "what it is **not**" now says five ROMs and five `AccuracyCoin` rows rather than eleven and nine, because the profile's score went back up; the per-movie attribution gains item 10's row; the candidate list gains **item 8 itself**, with the ROM that closed it, and corrects NESHAWK-PROFILE step 1's "a power-on offset would have parted at frame 1", which was wrong; the interrupt-phase ROM gains a paragraph on **what it cannot do**; the recipe's traps are now **eight**, the two new ones being *an item can be real on one movie and not be a difference* and *a ledger already taken is worth reading before a new one is taken*; step 7 of the recipe gains the check that would have caught item 8; the cost table carries this lot's figures and the cumulative ones |
+| `docs/review/NESHAWK-PROFILE-3-SCRIPTS.md` | **unchanged, and that is the point.** This lot added no instrument: it ran the third lot's `bk2cyc1.lua` output and its `drift.py` and `align.py`, and the ROMs. There is no fourth scripts document to commit |
+
+### fmt, clippy and the suites
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, whole workspace, feature **off** | clean |
+| the same with **`dma-census`** | clean |
+| the same with **`fceux-core`** | clean |
+| `zax-nes` release, `--include-ignored` | **1 142** passed, 0 failed (with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `ZAXNES_PROFILES` set) |
+| `zax-harness` release, `--include-ignored` | **128** passed, 0 failed; **128** with `dma-census`; **148** with `fceux-core` |
+
+### What this lot did not do, said plainly
+
+| | |
+|---|---|
+| **the brief's own precondition** | *"while Kirby keeps at least 18 321"* is **not met**: the movie parts at 8 005. It cannot be met together with the brief's other precondition — that the profile match NesHawk on `ppu_vbl_nmi` 05, `vbl_nmi_timing` 7, `cpu_interrupts_v2` 2 and 3 and the four `AccuracyCoin` rows — because the 18 321 was bought by item 8 and item 8 is what fails those ROMs. The two were measured against each other rather than one being assumed, the evidence is §4i's and step 1's, and §5 puts the choice to the owner in one paragraph. **If the owner wants the 18 321 back it is one `bool`**, and the price list is §4i's table |
+| **item 8 and item 10 together** | measured and worse: the last clean frame of 1 100-10 000 falls to **4 064**. Both supply the same missing three cycles on most frames and together they overshoot. Measured in the shape item 10 had before its repositioning was added; not re-measured in the final shape, because item 8 fails the ROMs whatever item 10 does |
+| **rounds 2 to 5 of step 3** | not run, and step 3 says why: this round's first differing event is one NESHAWK-PROFILE-3 had already bisected and explained as a fixed point, and there is no new event to read a source about. The two unmeasured candidates are named in §5 |
+| **further per-frame references** | **not produced.** 30 000-60 000 would be 30 001 frames × 4.2 KiB = 126 MB of reference for a configuration that parts at 8 005 and could not reach them. The disk was left where it was found |
+| **the whole 156 312 frames against `kirby-jp.txt`** | not run. The checksum column cannot discriminate (§4f) and it would have been four hours of movie for a figure the note could not interpret; the four `--ram-ref` windows are what this lot reports |
+| **the pictures** | not taken. The screenshot comparison reads pictures of a commercial game, it has been validated four ways in the three earlier lots, and on a configuration that parts at 8 005 it would have measured the parting rather than the item |
+| **item 10's structure** | an approximation of NesHawk's, exact in its dot count and not in its mechanism: NesHawk's dead frame ignores register writes and does not render, and this core's 7 165 dots do neither. §5 records it. The ~29 658-cycle window the hardware ignores PPUCTRL in is still unmodelled on both profiles (Q-078) |
+| **the spec** | not edited. NESHAWK-PROFILE step 2's proposed REQ-CORE-124 wording still stands: it points at `docs/review/NESHAWK-PROFILE.md`, which is where the items are |
+| **a `cargo test --workspace`** | impossible here (`LNK1181: cannot open input file 'SDL2.lib'`), so the suites are run per crate as the four lots before this one did. `cargo clippy --workspace --all-targets` does not link, so it still covers `zax-app` and `zax-platform` and all their test targets, in all three configurations |
+
+### The brief's rules, checked
+
+| | |
+|---|---|
+| the `Standard` path's behaviour | `golden-core` byte-identical; 24 of 24 DMC/DMA ROMs, `AccuracyCoin` 128/147, `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `cpu_interrupts_v2` 6/6 and both *Faxanadu* dumps unchanged; savestates unchanged to the byte and to the version |
+| the `Standard` path's speed | **−1.25 %** and **+0.27 %** over six interleaved rounds against a clean build of the parent, and **−2.94 %** and **−1.50 %** cumulatively since `428c50e6` — inside the +1 % budget with room, and reported cumulatively as the brief asked |
+| no `if profile == NesHawk` in a hot path | item 10 is read as `if P::PPU_START_UP_DOTS_SKIPPED > 0` at **two** sites, both of them `power_on` and `soft_reset`, which run once a reset. Item 8's three sites — one of them `tick`, which runs every CPU cycle — are gone |
+| safe Rust only | no `unsafe` added anywhere; `zax-nes` keeps `#![forbid(unsafe_code)]` |
+| diagnostic hooks behind a cfg/feature off by default | none added. The cycle ledger needs no feature, as before; the temporary env-var hook used for the dot sweep is **not in the commit**, and the commands block says so |
+| no downloads | none. BizHawk was read through `raw.githubusercontent.com` at tag **2.11.1**; nothing cloned, nothing fetched. The test ROMs and their **sources** are `assets-free`'s, already in the tree |
+| nothing staged that must not be | no ROM, movie, trace, dump, screenshot, `rust/target-*`, `.claude/` or `CLAUDE.md`; every commit staged files by name |
+| no absolute path with a user name in a committed file | checked across both commits and all three documents |
+| `spec/` not edited | checked |
+| scripts and outputs outside the worktree | the Lua scripts and the forced-NesHawk config stay in `G:/3DSen/ext-tools/scripts/`, every output in `G:/3DSen/test-movies/bizhawk-runs/`, and the two Python analysers were regenerated from `docs/review/NESHAWK-PROFILE-3-SCRIPTS.md` into the session's scratchpad rather than into the tree |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-4 step 5 done: report and final pass

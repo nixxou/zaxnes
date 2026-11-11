@@ -69,6 +69,26 @@ what would settle it. The standard profile is again byte-identical, at +0.77 %. 
 with the amendments marked *NESHAWK-PROFILE-3* in §5, and its instruments are
 `docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`.
 
+**NESHAWK-PROFILE-4 retracts item 8 and puts the boot in its place**, and it is the first lot of
+this series whose headline result is a **negative**. It was sent to find item 8's finer shape; what
+it found is that item 8 is not a NesHawk difference at all. `ppu_vbl_nmi` `05-nmi_timing` prints
+which instruction the vblank NMI displaced and runs **one PPU clock later on each of ten lines**,
+so it sweeps every alignment of the CPU's cycle grid at one-dot resolution — and **NesHawk passes
+it**, as the standard profile does, so NesHawk takes that NMI on the cycle this core does and no
+item that moves it can pass. Three finer shapes were implemented and measured before that was
+concluded; all three fail it. What item 8 was standing in for came out of a ledger the third lot
+had already written and never read: **BizHawk's first frame is 27 392 CPU cycles and so is the
+frame the movie's first reset lands in**, where this core runs a whole 29 781 — NesHawk's dead PPU
+frame of `241 * 341 - start_up_offset` dots, run at a power-on and again at every soft reset with
+the PPU put back to the top of the frame. Twice 2 389 is the **4 778-cycle drift** §4h measured and
+could not explain. Item 10 (`PPU_START_UP_DOTS_SKIPPED`) adds **no state on either profile**, buys
+back all eleven public ROMs and all four `AccuracyCoin` rows item 8 cost, and takes both *Faxanadu*
+dumps to **247 and 314** of 832 — past the standard profile's own 207 and 220. It costs *Kirby*:
+8 005 where item 8 reached 18 321, and §5 puts that trade to the owner as a choice rather than a
+conclusion. The standard profile is byte-identical again and **faster**: -1.25 % and +0.27 %
+against the parent, -2.94 % and -1.50 % cumulatively since `428c50e6`. Its section is §4i, with
+the amendments marked *NESHAWK-PROFILE-4* in §5; it added no instrument of its own.
+
 ---
 
 ## The short version
@@ -1433,6 +1453,114 @@ interleaved rounds — a layout effect of the one `bool` item 8 adds, inside the
 
 ---
 
+## 4i. Item 8 was not a difference, and the boot was: the PPU's start-up frame (NESHAWK-PROFILE-4)
+
+§4h shipped item 8 — a one-CPU-cycle lag of the whole /NMI line — and said in the same paragraph
+that it was **right about the effect and blunt about the shape**, because it cost the NesHawk
+profile six public ROMs and four `AccuracyCoin` rows *that NesHawk itself passes*. This lot was
+sent to find the finer shape. **There is none: item 8 is not a NesHawk difference at all**, and
+what it was standing in for is the **boot**.
+
+**The result first**, same commands, `--profile` the only difference:
+
+| | `standard` | `neshawk`, item 8 (§4h) | `neshawk`, item 10 |
+|---|---|---|---|
+| `ppu_vbl_nmi` | 11 pass | 9 pass, 2 fail | **11 pass, 0 fail** |
+| `vbl_nmi_timing` | 7 pass | 6 pass, 1 fail | **7 pass, 0 fail** |
+| `cpu_interrupts_v2` | 6 pass | 3 pass, 3 fail | **6 pass, 0 fail** |
+| `AccuracyCoin` | 128/147 | 118/147 | **122/147** |
+| the 30 DMC/DMA/APU ROMs | 24 pass, 6 manual | 19 pass, 5 fail, 6 manual | 19 pass, 5 fail, 6 manual |
+| *Faxanadu* `[USA][!!]`, checksum lines | 207 of 832 | 136 | **247** |
+| *Faxanadu* `[USA][Rev 1][!!]` | 220 of 832 | 169 | **314** |
+| *Kirby*, the last frame with no live difference, 1-400 | 400 | 400 | 400 |
+| the same, 400-1 100 | 925 | 1 100 | 1 100 |
+| the same, 1 100-10 000 | 925 | **10 000** | 8 005 |
+| the same, 10 000-30 000 | — | **18 321** | — |
+| *Kirby*, frames identical to the byte, 1 100-10 000 | — | 213 | **349** |
+| the absolute drift of the NMI entry, frames 2-1 201 | — | 4 773 … 4 783 | **-7 … +3** |
+| every lag count, every window, both movies | agree | agree | agree |
+
+**Eleven public ROMs and four `AccuracyCoin` rows and 111 and 145 *Faxanadu* checksum lines
+bought back; 10 316 *Kirby* frames given up.** That is the trade, it is the owner's to rule on,
+and §5 asks the question directly.
+
+### Why item 8 cannot be refined
+
+`ppu_vbl_nmi` **`05-nmi_timing`** prints *which instruction the vblank NMI displaced* and runs
+**one PPU clock later on each of ten lines**, checking the ten answers against a CRC — its own
+source says so. Ten one-dot steps sweep all three alignments of the CPU's three-dot cycle grid
+against the scanline. **NesHawk passes it** (§4h measured that directly, `status=00
+sig=DE B0 61`), and so does the standard profile. So on every alignment that ROM probes, NesHawk
+takes the vblank NMI **on the cycle this core does**, and any item that moves the arrival fails it.
+
+The shape of item 8's price is the same argument from the other side, and it is what makes this a
+measurement rather than an opinion: a **uniform** cycle of lag preserves every *relative* question
+— did the NMI happen, was it suppressed, was it disabled in time — and breaks every *absolute*
+one. That is exactly the split §4h recorded: `06-suppression`, `07-nmi_on_timing`,
+`08-nmi_off_timing` and `vbl_nmi_timing` 5 and 6 kept; `05-nmi_timing`, `7.nmi_timing`,
+`2-nmi_and_brk` and `3-nmi_and_irq` lost.
+
+Three finer shapes were implemented and run before the conclusion was drawn, not instead of it:
+four dots of lead on the whole line (which NesHawk's `nmi_destiny` latch and its
+alignment-dependent `3 + NMI_offset` predict, and which is one cycle later on two alignments of
+three rather than all three); the same with the **enable** bit left at this core's own lead,
+because all four of `ppu_vbl_nmi` 05 to 08 write `$2000` within a couple of cycles of the vblank;
+and item 8 as shipped. **All three fail `05-nmi_timing`.** The table is
+`docs/progress/NESHAWK-PROFILE-4.md` step 1.
+
+### What the boot does, and it is one line of BizHawk's own ledger
+
+The cycle ledger of frames 2 to 1 201 — written by §4h's own `bk2cyc1.lua` and never analysed —
+carries the absolute CPU cycle each frame started on:
+
+| | BizHawk `start` | its frame's length |
+|---|---|---|
+| frame 2 | 27 392 | **frame 1 is 27 392 cycles**, where this core runs 29 781 |
+| frame 5 | 116 734 | **27 392 again** — and frame 5 is the frame the movie's first reset lands in |
+
+`29 781 - 27 392 = 2 389`, twice, and `2 * 2 389 = 4 778`: **the whole of the constant drift §4h
+measured at 4 774 to 4 783 and could not explain.** It does not "jump at frame 6" because anything
+happens at frame 6; it is 2 389 from the power-on and 2 389 more from the reset.
+
+NesHawk's source says it outright. `PPU.cs` `Reset()` sets `ppudead = 1` and `start_up_offset = 4`
+and calls `regs_reset()`, which does `ppur = new PPUREGS()`; `PPU.run.cs` `NewDeadPPU()` then
+counts dots until `ppur.status.cycle == 241 * 341 - start_up_offset` — **82 177 dots**, with
+`runppu()` clocking the CPU on every third one, so **27 392 CPU cycles** — raises the vblank flag,
+calls `ppu_init_frame()` and sets `nes.frame_is_done`. Its own comment: *"not quite emulating all
+the NES power up behavior … it needs to wait for vblank"*. And `Reset()` is what a **soft** reset
+calls, so the reset does it again, from the top of the frame.
+
+This core does neither: its PPU powers on at the start of vblank (Q-003) so its first frame is a
+whole one, and `Ppu2C02::soft_reset` deliberately does not restart the frame (Q-078).
+
+### The item
+
+**Item 10, `PPU_START_UP_DOTS_SKIPPED`** = 0 on `Standard`, **7 165** on `NesHawkCompat`:
+`89 342 - 82 177`, the dots the PPU is advanced by at a power-on and at every soft reset after
+being put back to the top of the frame. Two numbers, both of them the two machines' own; nothing
+is tuned. It is read at `nes_core.rs` `power_on` and `soft_reset`, **adds no state to either
+profile** — so savestates are untouched to the byte and `NesCore::STATE_VERSION` does not move —
+and the standard profile's two functions and PPU are the source they were.
+
+**The repositioning is half the item and was measured, not assumed.** Counting the dots from
+wherever the reset found the PPU takes *Faxanadu*, which never presses RESET, to its best figures
+ever and *Kirby*, which presses it after frame 5, to **no agreement at all** — 0 of 8 901 frames.
+With the position put back first, *Kirby* comes back and *Faxanadu* does not move, which is what a
+difference only a reset can see looks like.
+
+### What still parts *Kirby*, and it is the same three cycles
+
+With item 10 in and the drift gone, the ledger of frame 1 100 — the ideal frame, `dmc=0/0`, its
+OAM transfer over before the work starts — has **exactly one** event off its own anchor, and it is
+`$C06E` at **-3**: §4h's signature, unchanged. So the 3-cycle phase of the two machines' frame-sync
+spin loops is **not** the boot's absolute drift, which is now zero: the handler is entered on the
+same cycle on both machines and its `RTI` still returns to a different instruction of the loop,
+which means the phase is carried in the pushed PC from the frame before. It is a fixed point, as
+§4h said, and nobody has found what seeds it. Item 8 compensated it on most frames by moving the
+NMI; that is why it worked and why it had to go.
+
+---
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
@@ -1566,6 +1694,10 @@ Four new ones, from NESHAWK-PROFILE-2:
 
 Five new ones, from NESHAWK-PROFILE-3:
 
+* ~~**Item 8 is right about the effect and blunt about the shape, and that is the lot's own main
+  unknown.**~~ **Answered, NESHAWK-PROFILE-4, and the answer is that it has no shape:** the ROMs
+  it costs are ROMs NesHawk passes because NesHawk's NMI is this core's, and item 8 is retracted
+  (§4i). What it was standing in for is the boot. The original text follows.
 * **Item 8 is right about the effect and blunt about the shape, and that is the lot's own main
   unknown.** Lagging the CPU's whole view of /NMI by a cycle takes *Kirby* 8 968 frames further and
   makes 213 frames agree to the byte where none did, but it costs the NesHawk profile
@@ -1592,6 +1724,10 @@ Five new ones, from NESHAWK-PROFILE-3:
   command**, and it is now the single most valuable thing the owner could produce: one of the two
   movies in hand is currently evidence against the item that moved the other one eight thousand
   frames.
+* ~~**What parts *Kirby* at frame 18 322 is the *phase*, not a rule.**~~ **Half answered,
+  NESHAWK-PROFILE-4**: the 2 382-cycle "jump at frame 6" is two of NesHawk's PPU start-up frames
+  (§4i, item 10) and is gone, and the **phase is still three cycles** with it gone — so the boot
+  is eliminated as the seed rather than confirmed as it. The original text follows.
 * **What parts *Kirby* at frame 18 322 is the *phase*, not a rule.** It is frame 4666's and frame
   926's signature a third time — `$0038`, `$0039`, `$0048`, `$0049`, the frame semaphore and its
   counters — with the frame's work crossing the vblank again. But the ledger over frames
@@ -1606,6 +1742,46 @@ Five new ones, from NESHAWK-PROFILE-3:
   three of them.** Frame 5 500 joins frame 8 500 (§4g) and frame 400 (§4f): the picture misses by
   one to four pixels on a frame whose line is `live=0`. Three instances is a pattern rather than a
   curiosity, and it is the only thing in this series the work-RAM instrument cannot see at all.
+
+Five new ones, from NESHAWK-PROFILE-4:
+
+* **The owner has a choice to make, and it is the only question in this report that work cannot
+  settle.** Item 8 takes *Kirby* to frame 18 321 and costs eleven public ROMs, four `AccuracyCoin`
+  rows and 111 and 145 *Faxanadu* checksum lines. Item 10 takes *Kirby* to 8 005 and costs none of
+  them. They cannot be combined: both supply the same missing three cycles on most frames, and
+  together they overshoot (the last clean frame falls to 4 064). **This lot shipped item 10,
+  because item 8 is provably not NesHawk's mechanism and item 10 provably is** — but a profile
+  whose job is replaying one movie could reasonably be asked to prefer the movie. If the owner
+  wants the 18 321 back, the change is one `bool` and §4i's table is the price list.
+* **What seeds the 3-cycle spin-loop phase is still unknown, and the boot is now eliminated as the
+  answer.** §4h said the phase "was seeded at frame 6, where the movie's first reset lands and the
+  absolute drift jumps 2 382 cycles". The drift was two start-up frames (item 10) and it is now
+  zero — and the phase is **still three cycles**, with frame 1 100's only differing event being
+  `$C06E` at -3, exactly as it was. So the drift and the phase were two different things wearing
+  one number. What is left to measure: the 6502's own reset sequence on both machines
+  (NesHawk's `MOS 6502X` reset against this core's seven cycles), the cycle the `.bk2`'s `Reset`
+  command is applied on, and the first frame in which the two machines' spin loops are *known* to
+  be in phase — which the cycle ledger of frames 2 to 1 201 can now answer, the drift being zero.
+* **`ppu_vbl_nmi` 05 to 08 and `cpu_interrupts_v2` 2 and 3 are a sharper instrument than any
+  movie, and this series did not use them until its fourth lot.** They decided item 8 in one
+  afternoon after two lots had reasoned about it. The recipe in
+  `docs/review/NESHAWK-PROFILE.md` now says so as a step: run the public ROM that measures your
+  item's own quantity **on the other machine** before shipping the item.
+* **Item 10's dot count is exact but its *structure* is an approximation.** NesHawk's dead frame
+  is a flat count of 82 177 dots with no rendering and with register writes ignored; this core
+  reproduces it by advancing the PPU through 7 165 real dots from the top of the frame, which
+  renders (into a picture nothing reads, with PPUMASK at 0) and does not ignore anything. The two
+  are the same for every game that leaves rendering off until it has seen a vblank, which is every
+  game there is — but the ~29 658-cycle window in which the hardware ignores PPUCTRL, PPUMASK,
+  PPUSCROLL and PPUADDR is still not modelled on either profile (Q-078), and item 10 does not
+  change that.
+* **Whether *Faxanadu* at 247 and 314 is agreement or luck cannot be told.** Those are the best
+  figures any configuration of this profile has produced, and they are **better than the standard
+  profile's own** 207 and 220 — which, if the column meant what it looks like, would make the
+  NesHawk chip the more accurate one for that movie. §4f already said the column cannot
+  discriminate (a checksum over the whole 2 KiB, stack page included), and the per-frame `ram=`
+  reference that would settle it still does not exist. It is still the single most valuable thing
+  the owner could produce.
 
 ---
 
@@ -2118,3 +2294,76 @@ The Lua scripts' and the two Python analysers' text is
 **still not committed**, for the reason it never has been: it reads pictures of a commercial game.
 NESHAWK-PROFILE-3 revalidated it a fourth way — **16 MATCHes of 18 against 0 of 18** on the
 standard profile, whose eighteen misses run from 38 914 to 54 963 pixels.
+
+### The commands (NESHAWK-PROFILE-4)
+
+This lot added no instrument. Its two measurements are a ledger lot NESHAWK-PROFILE-3 had already
+written (`kirby-jp-cyc0.txt`, frames 2 to 1 201 — the boot window) read through that lot's own
+`drift.py`, and the public ROMs run on both machines.
+
+```sh
+H=./target-ev/release/zax-harness.exe
+HC=./target-ev/zax-harness-census.exe      # the same, --features dma-census
+M=G:/3DSen/test-movies
+B=$M/bizhawk-runs
+S=G:/3DSen/ext-tools/scripts               # the Lua, never in the worktree
+E=G:/3DSen/ext-tools/BizHawk-2.11.1/EmuHawk.exe
+K="$M/bk2/keyword-kirbysadventure-noabilities.bk2"
+KR="$M/roms/Hoshi no Kirby - Yume no Izumi no Monogatari [Japan][!!].nes"
+T=G:/3dsen/cleanroom/assets-free/test-roms
+
+# -------- step 1: what each ROM measures, from its own source, before anything is implemented
+sed -n '1,20p' $T/nes-test-roms/ppu_vbl_nmi/source/05-nmi_timing.s     # "one PPU clock later each line"
+sed -n '1,20p' $T/nes-test-roms/ppu_vbl_nmi/source/0{6,7,8}-*.s        # all three write $2000 at the vblank
+# and what NesHawk does with them (NESHAWK-PROFILE-3's own runs: status=00 sig=DE B0 61)
+$E --config=$S/config-neshawk.ini --lua=$S/romresult.lua \
+    "$T/nes-test-roms/ppu_vbl_nmi/rom_singles/05-nmi_timing.nes"
+
+# the three refinements, each built and run against all four suites and the movie
+for p in standard neshawk; do
+  for f in ppu_vbl_nmi vbl_nmi_timing cpu_interrupts_v2 AccuracyCoin; do
+    $H test-roms "$T" "tr-$p-$f.json" --filter "$f" --no-shots --quiet --profile $p
+  done
+done
+
+# -------- step 2: the boot, out of a ledger that already existed
+awk '/^F /&&$2<=8' $B/kirby-jp-cyc0.txt       # frame 1 is 27 392 cycles, and so is frame 5
+$H frame-trace "$K" "$KR" --frame 2 --frames 18 --event-log zax-boot.txt
+awk '/^F /' zax-boot.txt                      # 29 781 and 29 774 before item 10
+$HC frame-trace "$K" "$KR" --frame 2 --frames 1200 --dmc-census \
+    --event-pc C37C --event-pc C06E --event-pc 80FC --event-pc 804C --event-log zax-cyc0b.txt
+python drift.py $B/kirby-jp-cyc0.txt zax-cyc0b.txt 2 1201      # 4 776 +- 5  ->  -2 +- 5
+
+# the dot count is the two machines' own: 89 342 - (241 * 341 - 4) = 7 165. It was still swept,
+# 7 160 to 7 173, with a temporary env hook that is not in the commit -- the sync metric is
+# chaotic in it (8 005 / 9 353 / none with no pattern), which is why the source decides and not
+# the sweep. Faxanadu agrees with the source: 7 165 is its best value by 65 lines.
+
+# -------- step 3: the round, and the three cycles that survive item 10
+$HC frame-trace "$K" "$KR" --frame 1100 --frames 8901 --dmc-census \
+    --event-pc C37C --event-pc C06E --event-pc 80FC --event-pc 804C --event-log zax-cyc1b.txt
+python drift.py $B/kirby-jp-cyc1.txt zax-cyc1b.txt 1100 1101   # pc$C06E at -3, and nothing else
+
+# -------- the movie, every window, and Faxanadu against its own reference per dump
+for r in step1:400 step1b:1100 step1c:10001 step1d:30001; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --lag --frames ${r##*:} --trace-step 1 \
+      --trace-ref "$B/kirby-jp-${r%%:*}.txt" --ram-ref "$B/kirby-jp-${r%%:*}.txt"
+done
+for d in "USA][!!":fax-usa "USA][Rev 1][!!":fax-rev1; do for p in standard neshawk; do
+  $H movie-sync "$M/bk2/invariel-faxanadu.bk2" "$M/roms/Faxanadu [${d%%:*}].nes" \
+      --engine zaxnes --lag --profile $p --trace-ref "$B/${d##*:}.txt"
+done; done
+
+# -------- the regression set, and the bench against BOTH parents
+$H golden-core "G:/3DSen/test-originals" golden.jsonl 1200      # 8d50807085...
+# git archive 92b23d71 and 428c50e6 to a SHORT path and build each: a path as long as the
+# session scratchpad's makes link.exe fail with LNK1104, which cost one build.
+for round in 1 2 3 4 5 6; do for who in 428c50e6 92b23d71 this; do
+  <that binary> bench-core "G:/3DSen/test-originals/Super Mario Bros. 3 [USA][!!].nes" \
+      --frames 1200 --warmup 120
+done; done
+```
+
+`fax-rev1.txt` and not `fax-usa.txt` for the Rev 1 dump: the earlier commands blocks show one
+reference for both, and a Rev 1 run against the USA reference scores **0 of 832**, which looks
+like a catastrophe and is a wrong command.
