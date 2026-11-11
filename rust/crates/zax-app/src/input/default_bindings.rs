@@ -256,3 +256,18 @@ pub fn create_handheld_gamepad(standard: bool) -> BindingSet {
     }
     set
 }
+
+/// The gamepad set of the Android package (owner request: as the desktop's console mode): the
+/// handheld defaults, the face buttons by their labels as Android reports them, and the rollback
+/// on the right stick's click as on the desktop.
+#[must_use]
+pub fn create_android_gamepad(standard: bool) -> BindingSet {
+    let mut set = create_handheld_gamepad(standard);
+    if standard {
+        set.set_action(
+            InputAction::ROLL_BACK,
+            PhysicalControl::button(standard_gamepad::RIGHT_STICK),
+        );
+    }
+    set
+}

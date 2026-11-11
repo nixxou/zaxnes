@@ -26,6 +26,17 @@ options
     video.overscan_pal_right
     video.overscan_mode
   row.region
+  page.shaders
+    video.backend
+    video.shader_resolution
+    row.shader.shader.2d.mode
+    row.shader_pre_filter.shader.2d.preset
+    row.shader.shader.2d_ws.mode
+    row.shader_pre_filter.shader.2d_ws.preset
+    row.shader.shader.3d.mode
+    row.shader_pre_filter.shader.3d.preset
+    row.shader.shader.3d_ws.mode
+    row.shader_pre_filter.shader.3d_ws.preset
   page.optimizations
     row.frame_cap
     row.half_rate_3d
@@ -49,17 +60,6 @@ options
         video.anti_alias
       [group.advanced]
         video.max_queued_frames
-    page.shaders
-      video.backend
-      video.shader_resolution
-      row.shader.shader.2d.mode
-      row.shader_pre_filter.shader.2d.preset
-      row.shader.shader.2d_ws.mode
-      row.shader_pre_filter.shader.2d_ws.preset
-      row.shader.shader.3d.mode
-      row.shader_pre_filter.shader.3d.preset
-      row.shader.shader.3d_ws.mode
-      row.shader_pre_filter.shader.3d_ws.preset
     page.rendering_3d
       render.visual_style
       page.enhanced_effects

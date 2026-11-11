@@ -162,6 +162,16 @@ impl SdlPlatform {
     /// A game-controller event: the button or the stick reaches the pad state and `ImGui`.
     fn handle_gamepad_event(&mut self, io: &mut Io, event: &Event) {
         match event {
+            // Android's Back (its Home is the system's): the handheld's Menu button.
+            Event::KeyDown {
+                scancode: Some(Scancode::AcBack),
+                repeat: false,
+                ..
+            } => self.pad.set(PadButton::Menu, true),
+            Event::KeyUp {
+                scancode: Some(Scancode::AcBack),
+                ..
+            } => self.pad.set(PadButton::Menu, false),
             Event::ControllerButtonDown { button, .. } => self.press(io, *button, true),
             Event::ControllerButtonUp { button, .. } => self.press(io, *button, false),
             Event::ControllerAxisMotion { axis, value, .. } => {

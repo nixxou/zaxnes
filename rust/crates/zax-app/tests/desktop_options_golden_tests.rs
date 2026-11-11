@@ -510,7 +510,7 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
 }
 
 /// RO-3: the console's main page, its Android variant and its Optimisations page, row for row, as
-/// the owner's mockup lays them out. The pages of the *Advanced options* hub are pinned by
+/// the owner's mockup lays them out, with the shaders' page come up from the hub (owner request). The pages of the *Advanced options* hub are pinned by
 /// `goldens/handheld-option-tree.txt` with the rest of the tree.
 #[test]
 fn ro_3_the_handheld_main_pages_are_the_mockups() {
@@ -527,6 +527,7 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Palette,
             OptionRow::Overscan,
             OptionRow::Region,
+            OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
@@ -544,6 +545,7 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Palette,
             OptionRow::Overscan,
             OptionRow::Region,
+            OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,

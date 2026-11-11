@@ -153,6 +153,8 @@ impl HostWindow {
             sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
             // The accelerometer is not a gamepad: it would hide the touch pad of the "Auto" mode.
             sdl2::hint::set("SDL_ACCELEROMETER_AS_JOYSTICK", "0");
+            // Back reaches the application (the in-game menu) instead of leaving the activity.
+            sdl2::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
         }
 
         let sdl = sdl2::init()?;

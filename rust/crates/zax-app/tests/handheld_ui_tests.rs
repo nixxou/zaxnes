@@ -317,8 +317,8 @@ fn the_options_change_the_settings_of_the_host() {
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Options, handheld.screen());
     // RO-3: Show FPS and the camera view left the main page for the *Advanced options* hub, so
-    // the region and the optimisations are the next two rows.
-    for _ in 0..2 {
+    // the region, the shaders (come up from the hub) and the optimisations are the next rows.
+    for _ in 0..3 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     // The optimizations page, on its frame cap row.

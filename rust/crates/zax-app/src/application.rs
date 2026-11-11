@@ -1606,7 +1606,9 @@ impl Running {
 fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore, SettingsModel) {
     let mut store = SettingsStore::new(paths);
     let mut model = SettingsModel::new();
-    if options.handheld {
+    // The economical defaults of a PortMaster handheld; the Android package keeps the desktop's
+    // (owner request: some devices are powerful, each player tunes for his own).
+    if options.handheld && !cfg!(target_os = "android") {
         handheld::defaults::apply(&mut model);
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
@@ -1895,8 +1897,9 @@ fn open_log_file(paths: &UserDataPaths) {
 /// emulation ahead.
 fn configure_pacing(host: &mut AppHost, options: &AppOptions) {
     host.catch_up = options.catch_up;
-    // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
-    host.rollback_enabled = !options.handheld;
+    // No rewind on a PortMaster handheld (owner request): its snapshot every 60 frames costs a
+    // spike. The Android package has it, as the desktop (owner request).
+    host.rollback_enabled = !options.handheld || cfg!(target_os = "android");
     host.separate_core = separate_core(options);
     // RO-2 part 4: a handheld build, `--handheld`, or a desktop opened in its console mode. It
     // is the launch-time choice of interface; F1 switching the presentation later does not make
@@ -1947,7 +1950,9 @@ fn load_bindings(store: &mut FileInputBindingStore, device: bool) -> crate::inpu
     let mut bindings = crate::input::InputBindings::new();
     store.load(&mut bindings);
     let loaded = bindings.revision();
-    if device {
+    if cfg!(target_os = "android") {
+        bindings.use_android_defaults();
+    } else if device {
         bindings.use_handheld_defaults();
     } else {
         bindings.use_desktop_console_defaults();

@@ -186,8 +186,8 @@ impl OptionsPage {
 }
 
 /// The rows of the main page, in order (RO-3: the owner's mockup). "Camera view" and "Show FPS"
-/// left it for the *Advanced options* hub.
-pub const ROWS: [OptionRow; 12] = [
+/// left it for the *Advanced options* hub; the shaders came up from it (owner request).
+pub const ROWS: [OptionRow; 13] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -195,6 +195,7 @@ pub const ROWS: [OptionRow; 12] = [
     OptionRow::Palette,
     OptionRow::Overscan,
     OptionRow::Region,
+    OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Optimizations),
     OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
@@ -204,7 +205,7 @@ pub const ROWS: [OptionRow; 12] = [
 
 /// The rows of the main page where the touch pad is offered (Android): its row after the
 /// controls, which is where it was before RO-3.
-pub const TOUCH_ROWS: [OptionRow; 13] = [
+pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -212,6 +213,7 @@ pub const TOUCH_ROWS: [OptionRow; 13] = [
     OptionRow::Palette,
     OptionRow::Overscan,
     OptionRow::Region,
+    OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Optimizations),
     OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
@@ -261,9 +263,8 @@ pub const SHADER_ROWS: [OptionRow; 10] = [
 /// The *Advanced options* hub: six pages where RO-2 left one flat list of 56 rows. It repeats
 /// nothing the other pages offer — the palette and the shadows are the main page's, the nine
 /// overscan settings the overscan screen's, the performance switches the Optimisations page's.
-pub const ADVANCED_HUB: [OptionRow; 8] = [
+pub const ADVANCED_HUB: [OptionRow; 7] = [
     OptionRow::Page(OptionsPage::Display),
-    OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Rendering3d),
     OptionRow::Page(OptionsPage::LightShadows),
     OptionRow::Page(OptionsPage::NesPicture),

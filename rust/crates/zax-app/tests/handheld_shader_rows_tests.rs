@@ -1,7 +1,9 @@
 //! The *Shaders* page of the console options (owner request): a row per slot that steps through
 //! following, nothing and the presets of the catalogue, as the desktop's window sets them.
 
-use zax_app::ui::handheld::options::{step_row, value_text, OptionRow, OptionsPage, ADVANCED_HUB};
+use zax_app::ui::handheld::options::{
+    step_row, value_text, OptionRow, OptionsPage, ADVANCED_HUB, ROWS, TOUCH_ROWS,
+};
 use zax_app::ui::handheld::overlay::CameraPreset;
 use zax_app::ui::shader_panel::{self, SlotPick, CATALOGUE};
 use zax_settings::catalogue::SettingId;
@@ -9,8 +11,11 @@ use zax_settings::model::SettingsModel;
 use zax_settings::shader_slots::{resolve, ShaderSlot, FOLLOW, OFF, PRESET};
 
 #[test]
-fn the_page_hangs_on_the_advanced_hub_with_the_four_slots() {
-    assert!(ADVANCED_HUB.contains(&OptionRow::Page(OptionsPage::Shaders)));
+fn the_page_is_on_the_main_options_with_the_four_slots() {
+    // Owner request: on the main page (with and without the touch pad), no longer in the hub.
+    assert!(ROWS.contains(&OptionRow::Page(OptionsPage::Shaders)));
+    assert!(TOUCH_ROWS.contains(&OptionRow::Page(OptionsPage::Shaders)));
+    assert!(!ADVANCED_HUB.contains(&OptionRow::Page(OptionsPage::Shaders)));
     assert_eq!(
         OptionsPage::Shaders.rows(),
         zax_app::ui::handheld::options::SHADER_ROWS

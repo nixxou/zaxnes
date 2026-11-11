@@ -18,6 +18,9 @@ pub struct InputBindings {
     /// Whether those defaults go by the positions of a handheld's buttons rather than by their
     /// labels (the desktop, `default_bindings::create_desktop_console_gamepad`).
     positional: bool,
+    /// Whether the handheld defaults also hold the rollback (the Android package,
+    /// `default_bindings::create_android_gamepad`).
+    android: bool,
 }
 
 impl Default for InputBindings {
@@ -53,6 +56,7 @@ impl InputBindings {
             structure_revision: 0,
             handheld: false,
             positional: false,
+            android: false,
         }
     }
 
@@ -66,6 +70,25 @@ impl InputBindings {
         for (_, set) in &mut self.gamepads {
             if same_bindings(set, &desktop) {
                 set.replace(handheld.bindings().iter().cloned());
+            }
+        }
+    }
+
+    /// Gives the pads the defaults of the Android package from now on: the handheld's and the
+    /// rollback on the right stick's click, as the desktop's console mode has it (owner request).
+    /// A pad whose saved set is still the desktop's or the handheld's default gets them at once; a
+    /// set the player changed is kept.
+    pub fn use_android_defaults(&mut self) {
+        self.handheld = true;
+        self.android = true;
+        let former = [
+            default_bindings::create_gamepad(true),
+            default_bindings::create_handheld_gamepad(true),
+        ];
+        let android = default_bindings::create_android_gamepad(true);
+        for (_, set) in &mut self.gamepads {
+            if former.iter().any(|default| same_bindings(set, default)) {
+                set.replace(android.bindings().iter().cloned());
             }
         }
     }
@@ -101,6 +124,8 @@ impl InputBindings {
     fn default_gamepad(&self, standard: bool) -> BindingSet {
         if self.positional {
             default_bindings::create_desktop_console_gamepad(standard)
+        } else if self.android {
+            default_bindings::create_android_gamepad(standard)
         } else if self.handheld {
             default_bindings::create_handheld_gamepad(standard)
         } else {
