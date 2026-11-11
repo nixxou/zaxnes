@@ -252,12 +252,19 @@ impl ZaxUi {
         let using = host.settings().get(ids.mode).as_int() == PRESET;
         let stored = host.settings().get(ids.preset).as_text().to_owned();
         ui.text(tr("shaders.quick"));
+        let spacing = ui.clone_style().item_spacing[0];
+        let padding = ui.clone_style().frame_padding[0] * 2.0;
         for (index, preset) in CATALOGUE
             .iter()
             .filter(|preset| shader_panel::featured_for(preset, slot))
             .enumerate()
         {
-            ui.same_line();
+            // The buttons wrap at the window's edge (owner review: the eighth one was cut).
+            let width = ui.calc_text_size(tr(preset.label))[0] + padding;
+            let right = ui.item_rect_max()[0] + spacing + width;
+            if right <= ui.window_pos()[0] + ui.window_content_region_max()[0] {
+                ui.same_line();
+            }
             let chosen = using && stored == preset.path;
             let _style = chosen
                 .then(|| ui.push_style_color(imgui::StyleColor::Button, [0.25, 0.5, 0.3, 1.0]));
