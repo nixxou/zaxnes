@@ -37,10 +37,11 @@ use std::path::PathBuf;
 
 use zax_nes::cpu::{CpuBus, CpuTracer};
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::{NesCoreOf, NesHawkCompat, NesRegion, Standard, TimingProfile};
 
-use crate::movie_file::RamPattern;
+use crate::movie_file::{MovieFile, RamPattern};
 use crate::movie_sync::{read_movie, relocate_resets, Machine, Resets, ZaxnesMachine};
+use crate::profile_choice::ProfileChoice;
 use crate::ram_trace::{checksum, Reference};
 use crate::HarnessError;
 
@@ -66,7 +67,10 @@ pub const USAGE: &str = "zax-harness frame-trace <movie.fm2|.bk2> <rom.nes> --fr
                            named. A count says how far apart two machines are; the addresses say
                            in which direction
       --builtin-patches    load a recognised commercial ROM with its 3D widescreen patch, as the
-                           application does; off by default, as in movie-sync";
+                           application does; off by default, as in movie-sync
+      --profile standard|neshawk
+                           which 2A03 to trace on. Default: the one the movie was recorded on —
+                           the NesHawk-compatible chip for a `.bk2` whose Core is NesHawk";
 
 /// Instructions one traced frame is allowed, before the loop is called broken rather than slow.
 ///
@@ -144,6 +148,8 @@ pub struct Options {
     /// Load a recognised commercial ROM with its 3D built-in patch, as `movie-sync`'s own
     /// `--builtin-patches` does. Off by default, for the same reason.
     pub builtin_patches: bool,
+    /// Which 2A03 to trace on, or `None` for the one the movie was recorded on.
+    pub profile: Option<ProfileChoice>,
 }
 
 /// One traced instruction.
@@ -573,7 +579,32 @@ pub fn run(options: &Options) -> Result<Report, HarnessError> {
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
 
-    let mut machine = ZaxnesMachine::new(&image, &name, region, options.builtin_patches)
+    match options.profile.unwrap_or_else(|| movie.recorded_profile()) {
+        ProfileChoice::Standard => {
+            trace_on::<Standard>(options, &movie, &image, &name, region, ram, last)
+        }
+        ProfileChoice::NesHawk => {
+            trace_on::<NesHawkCompat>(options, &movie, &image, &name, region, ram, last)
+        }
+    }
+}
+
+/// The trace itself, on the timing profile the caller chose.
+///
+/// Generic over the profile because the trace reaches into the core — `cpu_and_bus_mut`, the PPU's
+/// scan position, the bus's DMA counters — rather than driving it through `Machine`, so there is no
+/// `dyn` to hide the chip behind. `run` above makes the one choice and this runs on it.
+#[allow(clippy::too_many_arguments)] // Seven, and every one of them is read by the loop below.
+fn trace_on<P: TimingProfile>(
+    options: &Options,
+    movie: &MovieFile,
+    image: &[u8],
+    name: &str,
+    region: NesRegion,
+    ram: RamPattern,
+    last: u32,
+) -> Result<Report, HarnessError> {
+    let mut machine = ZaxnesMachine::<P>::new(image, name, region, options.builtin_patches)
         .map_err(HarnessError::Rom)?;
     machine.power(ram).map_err(HarnessError::Rom)?;
     // Everything before the first traced frame is the ordinary path, so the state the trace
@@ -653,8 +684,8 @@ pub fn run(options: &Options) -> Result<Report, HarnessError> {
 }
 
 /// One frame of the ordinary path, command and all.
-fn play(
-    machine: &mut ZaxnesMachine,
+fn play<P: TimingProfile>(
+    machine: &mut ZaxnesMachine<P>,
     input: crate::movie_file::FrameInput,
 ) -> Result<(), HarnessError> {
     match input.command {
@@ -680,8 +711,8 @@ fn play(
 ///
 /// `probe` is the reference's own 2 KiB for this frame and how many instructions to carry on
 /// past the frame boundary; see [`Converge`].
-fn trace_frame(
-    core: &mut NesCore,
+fn trace_frame<P: TimingProfile>(
+    core: &mut NesCoreOf<P>,
     word: u16,
     watch: &[u16],
     probe: Option<(&[u8], usize)>,
@@ -851,6 +882,9 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                 })?;
             }
             "--builtin-patches" => options.builtin_patches = true,
+            "--profile" => {
+                options.profile = Some(ProfileChoice::parse(&value(&mut index))?);
+            }
             "--extra" => {
                 options.extra =
                     usize::try_from(number(&value(&mut index), "--extra")?).unwrap_or(0);

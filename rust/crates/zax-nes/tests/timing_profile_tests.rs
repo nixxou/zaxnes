@@ -15,6 +15,7 @@
 
 mod common;
 
+use zax_core_api::Engine;
 use zax_nes::{NesCore, NesCoreOf, NesHawkCompat, Standard, TimingProfile};
 
 /// Runs `frames` frames of the minimal ROM on profile `P` and reports the CPU cycle count and a
@@ -113,4 +114,68 @@ fn a_rom_that_plays_no_dpcm_runs_identically_on_both_profiles() {
     );
     assert_eq!(standard.1, neshawk.1, "and leave the same picture behind");
     assert!(standard.0 > 0, "the frames actually ran");
+}
+
+/// **Both profiles are an `Engine`** (step 4), from one generic `impl`, so the application and the
+/// harness reach either through `Box<dyn Engine>` exactly as they reach the one engine today.
+#[test]
+fn each_profile_is_an_engine_of_its_own() {
+    let engines: [Box<dyn Engine>; 2] = [
+        Box::new(NesCoreOf::<Standard>::new()),
+        Box::new(NesCoreOf::<NesHawkCompat>::new()),
+    ];
+    for engine in &engines {
+        assert!(!engine.is_running(), "no ROM is loaded yet");
+        assert_eq!(engine.frame_count(), 0);
+    }
+
+    // And the standard one is still reachable by the name every caller uses, which is what keeps
+    // `EngineHandle::zaxnes()`'s downcast working.
+    assert!(
+        engines[0].as_any().downcast_ref::<NesCore>().is_some(),
+        "`NesCore` is the standard engine"
+    );
+    assert!(
+        engines[1].as_any().downcast_ref::<NesCore>().is_none(),
+        "and the NesHawk engine is not it"
+    );
+}
+
+/// A savestate of one profile is **refused** by the other, with the message REQ-CORE-120 fixes for
+/// a block of a foreign core — because that is what it is: the two chips disagree about the DMC's
+/// DMA by cycles, so a block of one restored into the other would drift from the next frame.
+///
+/// The refusal rides on the core name at the head of the block, so `NesCore::STATE_VERSION` did
+/// not move and every block written before this lot still loads: the companion assertion below is
+/// that a standard block is accepted by a standard core, which is the same path.
+#[test]
+fn a_savestate_of_one_profile_is_refused_by_the_other() {
+    let mut standard = NesCoreOf::<Standard>::new();
+    let mut neshawk = NesCoreOf::<NesHawkCompat>::new();
+    assert!(standard.load_rom(&common::minimal(), "Minimal.nes").success);
+    assert!(neshawk.load_rom(&common::minimal(), "Minimal.nes").success);
+
+    let mut from_standard = Vec::new();
+    let mut from_neshawk = Vec::new();
+    Engine::save_state_to(&standard, false, &mut from_standard).expect("a ROM is loaded");
+    Engine::save_state_to(&neshawk, false, &mut from_neshawk).expect("a ROM is loaded");
+
+    // Each core reads its own block.
+    assert!(standard.try_load_state(&from_standard, 0).is_ok());
+    assert!(neshawk.try_load_state(&from_neshawk, 0).is_ok());
+
+    // And refuses the other's, by name and with the spec's message.
+    for (core_name, data) in [("standard", &from_neshawk), ("neshawk", &from_standard)] {
+        let refused = if core_name == "standard" {
+            standard.try_load_state(data, 0)
+        } else {
+            neshawk.try_load_state(data, 0)
+        };
+        let error = refused.expect_err("the other profile's block is refused");
+        assert_eq!(
+            error.message,
+            NesCore::FOREIGN_CORE_MESSAGE,
+            "{core_name}: the spec's own message, to the character"
+        );
+    }
 }

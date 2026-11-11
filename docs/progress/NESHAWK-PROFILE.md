@@ -17,7 +17,7 @@ source actually shows.
 - [x] 1. Verify the differences verbatim.
 - [x] 2. The architecture.
 - [x] 3. The NesHawk profile.
-- [ ] 4. The engine variant and its selection.
+- [x] 4. The engine variant and its selection.
 - [ ] 5. The experiment.
 - [ ] 6. Report and final pass.
 
@@ -636,3 +636,110 @@ reader will look.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE step 3/6 done: the NesHawk profile
+
+---
+
+## Step 4 — the engine variant and its selection
+
+### One generic `impl`, two engines
+
+`engine_impl.rs` became `impl<P: TimingProfile> Engine for NesCoreOf<P>`, so the file is still
+written once and each profile is an `Engine` with its own vtable. `run_frame` reaches the
+per-instantiation function through the `RunFrame` trait (step 3 added it for the same reason in
+`test-roms`); everything else was already a plain forward.
+
+**No feature gate.** The brief set 2 MB of binary growth as the threshold. Measured on the release
+`zax-harness.exe`, with the second core genuinely reachable this time:
+
+| | parent commit | this commit | |
+|---|---|---|---|
+| `.text` virtual size | `0x4B0FC0` (4 919 232) | `0x4D4F90` (5 066 640) | **+147 408 bytes, +3.0 %** |
+| file size | 6 646 272 | 6 822 912 | +176 640 |
+
+144 KiB of `.text` for a whole second CPU, bus, APU and DMA — a fourteenth of the threshold — so
+the engine is behind nothing. (Step 2's build measured `+5 440` bytes because `/OPT:REF` dropped
+the second core entirely: nothing called it yet. The difference between the two figures *is* the
+second core.)
+
+### Savestates: the profile is recorded, and a mismatch is refused
+
+`TimingProfile::STATE_CORE_NAME` — `"Zaxnes"` for the standard profile, `"Zaxnes-NesHawk"` for the
+other — is what `save_state_to` writes at the head of the block and what `restore_state` checks
+(through the new `NesCoreOf::check_core_name`).
+
+Riding on the **core name** rather than on a new field is what makes this free in both directions:
+
+* `NesCore::STATE_VERSION` does not move, so every block written before this lot loads into the
+  standard core byte for byte, and the standard profile's block is byte for byte the block this core
+  has always written;
+* the refusal is the one REQ-CORE-120 already fixes a message for, so a mismatch is reported with
+  the spec's own sentence and no new string was invented;
+* the first four bytes stay `state_magic(EngineKind::Zaxnes)`, because it is the same *engine* — and
+  that is what the application reads them for when it decides which engine a state belongs to.
+
+The « Sen » working name is accepted only by the profile whose own name is `CORE_NAME`, the standard
+one, because no block was ever written under both.
+
+### The selection
+
+| | |
+|---|---|
+| **the rule** | `MovieFile::recorded_profile`: a `.bk2` whose `Core` header is exactly `NesHawk`, and nothing else |
+| **not** `QuickNes` | a movie of a third core, whose timing this lot did not read; running it on the NesHawk chip would be a guess dressed as a measurement |
+| **not** an `.fm2` | FCEUX's format, which lot FCEUX-48 already gives its own engine switch |
+| **not** a header with no `Core` line | it names no core at all |
+| **the override** | `--profile standard\|neshawk` on `movie-sync` and on `frame-trace` (and on `test-roms`, from step 3), through the shared `profile_choice` module. An unknown value is a **usage error** naming both: a silent fall-back would make a mistyped option look like a measurement of the other chip |
+
+`movie-sync` makes the choice in exactly one place, `zaxnes_machine`, whose two arms differ only in
+the type and which hands back a `Box<dyn Machine>` so that the rest of the command cannot know
+which chip it holds. `frame-trace` reaches into the core — `cpu_and_bus_mut`, the PPU's scan
+position, the bus's DMA counters — so it has no `dyn` to hide behind; its body was split into a
+profile-generic `trace_on::<P>` with the one `match` above it.
+
+**Every report line names the chip.** `ZaxnesMachine::name()` answers `zaxnes` on the standard
+profile and `zaxnes/neshawk` on the other, so no figure in a report, a trace file or a PNG name can
+be mistaken for the other chip's. Smoke-tested on the Kirby `.bk2` with no option at all:
+
+    zaxnes/neshawk: 60 frames run
+
+and with `--profile standard`:
+
+    zaxnes: 20 frames run
+
+### The application: there is nothing to switch, and that is a finding
+
+The brief asks for "the application's movie playback (the same switch FCEUX-48 made for `.fm2` →
+FCEUX)". **The application cannot open a `.bk2` at all**, so there is no playback to switch and no
+UI line to add. Checked rather than assumed:
+
+| | |
+|---|---|
+| `grep -rn bk2 crates/zax-app/src/` | **no match**, in any file |
+| the movie dialog's filter | `Movies (.fm2, .fcm, .mv)` — `file_browser.rs`'s `BROWSER_FILTER_MOVIES`, in both languages |
+| where `.bk2` *is* read | `zax-harness/src/bk2.rs` alone, which lot EVAL-SYNC built as an instrument |
+
+So the format is a harness format. Giving the application `.bk2` playback is a lot of its own — the
+reader's power-on RAM pattern, its reset placement, its SHA-1 check and its seven notes all have to
+reach a user interface, and the movie bar, the explorer and the notes each have to be told what a
+`.bk2` is — and it is **not** this lot's step 4, which presupposed a playback that exists. Nothing
+was added to the application; what the application *would* need is the paragraph above.
+
+The piece of step 4 that does reach the application is already done and costs it nothing: the
+`Engine` impl is generic, so the day a `.bk2` importer lands it has a `Box<dyn Engine>` of the right
+chip to hand, and `EngineHandle::zaxnes()`'s downcast to `NesCore` still finds only the standard
+one — which the test below pins.
+
+### Tests
+
+| | |
+|---|---|
+| `zax-nes` `each_profile_is_an_engine_of_its_own` | both profiles in a `Box<dyn Engine>`; `downcast_ref::<NesCore>()` finds the standard one and **not** the other |
+| `zax-nes` `a_savestate_of_one_profile_is_refused_by_the_other` | each core reads its own block and refuses the other's, with `NesCore::FOREIGN_CORE_MESSAGE` to the character |
+| `zax-harness` `a_neshawk_movie_asks_for_the_neshawk_profile_and_nothing_else_does` | `NesHawk` → the NesHawk chip; `QuickNes` and a header with no `Core` line → the standard one |
+
+`cargo fmt --all --check` and clippy `-D warnings --all-targets` are clean **with and without**
+`fceux-core`.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE step 4/6 done: the engine variant and its selection

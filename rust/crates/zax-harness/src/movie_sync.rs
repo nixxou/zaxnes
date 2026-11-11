@@ -75,10 +75,11 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use zax_nes::rom::InesHeader;
 use zax_nes::state::CoreState;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::{NesCoreOf, NesHawkCompat, NesRegion, RunFrame, Standard, TimingProfile};
 
 use crate::golden_core::hex;
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
+use crate::profile_choice::ProfileChoice;
 use crate::ram_trace::{best_match, Comparison, RamCompare, RamTrace, Reference};
 use crate::HarnessError;
 
@@ -133,7 +134,11 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
                            movie was recorded on
       --warm-up zaxnes:<n> | fceux:<n>
                            blank frames on one engine before the movie starts; the experiment
-                           that tells a difference of boot phase from one of emulation";
+                           that tells a difference of boot phase from one of emulation
+      --profile standard|neshawk
+                           which 2A03 Zaxnes runs. Default: the one the movie was recorded on —
+                           the NesHawk-compatible chip for a `.bk2` whose Core is NesHawk, the
+                           standard one for everything else (`--engine zaxnes`/`both`)";
 
 /// Pixels in a picture (256 x 240, REQ-CORE-048).
 const PICTURE_LEN: usize = 256 * 240;
@@ -305,6 +310,9 @@ pub struct Options {
     /// experiment that says whether that is what happened: if the two runs then agree, the
     /// divergence was the phase and not the emulation.
     pub warm_up: (u32, u32),
+    /// Which 2A03 Zaxnes runs, or `None` for "the one the movie was recorded on"
+    /// (`MovieFile::recorded_profile`).
+    pub profile: Option<ProfileChoice>,
 }
 
 impl Default for Options {
@@ -339,6 +347,7 @@ impl Default for Options {
             dump: None,
             dump_frames: Vec::new(),
             warm_up: (0, 0),
+            profile: None,
         }
     }
 }
@@ -355,6 +364,7 @@ impl Options {
     ///
     /// # Errors
     /// [`HarnessError::Usage`] for a missing or unreadable argument.
+    #[allow(clippy::too_many_lines)] // One arm per option, as `app_options.rs` has.
     pub fn parse(args: &[String]) -> Result<Self, HarnessError> {
         let mut options = Self::default();
         let mut positional = 0;
@@ -434,6 +444,9 @@ impl Options {
                 "--dump-frames" => options.dump_frames = frame_list(&value_at(args, &mut index))?,
                 "--warm-up" => {
                     options.warm_up = parse_warm_up(&value_at(args, &mut index), options.warm_up)?;
+                }
+                "--profile" => {
+                    options.profile = Some(ProfileChoice::parse(&value_at(args, &mut index))?);
                 }
                 other if other.starts_with("--") => {
                     return Err(HarnessError::Usage(format!(
@@ -531,8 +544,8 @@ pub(crate) trait Machine {
     fn restore(&mut self) -> Result<(), String>;
 }
 
-pub(crate) struct ZaxnesMachine {
-    pub(crate) core: Box<NesCore>,
+pub(crate) struct ZaxnesMachine<P: TimingProfile = Standard> {
+    pub(crate) core: Box<NesCoreOf<P>>,
     region: NesRegion,
     state: CoreState,
     /// What the cartridge's PRG-RAM is filled with after every power-on, when `--prg-ram` asks.
@@ -545,7 +558,7 @@ pub(crate) struct ZaxnesMachine {
     since_reset: u32,
 }
 
-impl ZaxnesMachine {
+impl<P: TimingProfile> ZaxnesMachine<P> {
     /// A machine for `image`, with the **3D built-in patches off** unless `patches` asks for them.
     ///
     /// `NesCore` powers on with `builtin_patches_enabled` **true** (`nes_core.rs:134`), which is
@@ -563,7 +576,7 @@ impl ZaxnesMachine {
         region: NesRegion,
         patches: bool,
     ) -> Result<Self, String> {
-        let mut core = Box::new(NesCore::new());
+        let mut core = Box::new(NesCoreOf::<P>::new());
         core.set_builtin_patches(patches);
         core.set_advanced_patches(false);
         if !core.load_rom(image, name).success {
@@ -677,9 +690,15 @@ impl ZaxnesMachine {
     }
 }
 
-impl Machine for ZaxnesMachine {
+impl<P: TimingProfile> Machine for ZaxnesMachine<P> {
+    /// `zaxnes` on the standard profile, `zaxnes/neshawk` on the other, so that every report line
+    /// and every trace file names the chip the figures were taken on.
     fn name(&self) -> &'static str {
-        "zaxnes"
+        if P::NAME == Standard::NAME {
+            "zaxnes"
+        } else {
+            "zaxnes/neshawk"
+        }
     }
 
     fn power(&mut self, ram: RamPattern) -> Result<(), String> {
@@ -705,7 +724,7 @@ impl Machine for ZaxnesMachine {
     }
 
     fn run(&mut self, word: u16) -> Result<(), String> {
-        self.core.run_frame(word);
+        RunFrame::run_frame(&mut *self.core, word);
         self.since_reset += 1;
         self.apply_ppu_warmup();
         Ok(())
@@ -1647,14 +1666,8 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
     match options.engine {
         Engines::Both => run_lockstep(options, &movie, &machines, &mut measurement)?,
         Engines::Zaxnes => {
-            let mut machine = ZaxnesMachine::new(&image, &name, region, options.builtin_patches)
-                .map_err(HarnessError::Rom)?;
-            if let Some(pattern) = options.prg_ram {
-                machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
-            }
-            machine.ppu_warmup = options.ppu_warmup;
-            machine.ppu_ram = options.ppu_ram;
-            let (run, trace, bytes) = run_alone(options, &movie, &mut machine, ram)?;
+            let mut machine = zaxnes_machine(options, &movie, &machines)?;
+            let (run, trace, bytes) = run_alone(options, &movie, machine.as_mut(), ram)?;
             let engine = run.engine.clone();
             measurement.runs.push(run);
             measurement.traces.extend(trace);
@@ -1939,13 +1952,7 @@ fn run_lockstep(
     measurement: &mut Measurement,
 ) -> Result<(), HarnessError> {
     let ram = machines.ram;
-    let mut ours = ZaxnesMachine::new(
-        machines.image,
-        machines.name,
-        machines.region,
-        options.builtin_patches,
-    )
-    .map_err(HarnessError::Rom)?;
+    let mut ours = zaxnes_machine(options, movie, machines)?;
     let mut theirs = FceuxMachine::new(machines.image, machines.name, machines.region)
         .map_err(HarnessError::Rom)?;
     ours.power(ram).map_err(HarnessError::Rom)?;
@@ -1963,7 +1970,9 @@ fn run_lockstep(
     let mut traces = (tracer(options, "zaxnes"), tracer(options, "fceux"));
     let mut buffers = Buffers::default();
     if traces.0.is_some() || traces.1.is_some() {
-        buffers.fill(&ours, &theirs).map_err(HarnessError::Rom)?;
+        buffers
+            .fill(ours.as_ref(), &theirs)
+            .map_err(HarnessError::Rom)?;
         if let Some(trace) = traces.0.as_mut() {
             trace.frame(&buffers.ram.0, None);
         }
@@ -1976,7 +1985,9 @@ fn run_lockstep(
     // movie's header asked for, on both sides. It is compared first because a movie that starts
     // from two different 2 KiB has already lost, and there is no picture yet to compare.
     if options.from == 0 {
-        buffers.fill(&ours, &theirs).map_err(HarnessError::Rom)?;
+        buffers
+            .fill(ours.as_ref(), &theirs)
+            .map_err(HarnessError::Rom)?;
         let diff = compare_frame(
             0,
             (&buffers.ram.0, &buffers.ram.1),
@@ -1991,7 +2002,7 @@ fn run_lockstep(
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
         let probe = probes(options, frame);
         let sensitivity = match (
-            step(&mut ours, input, ram, probe),
+            step(ours.as_mut(), input, ram, probe),
             step(&mut theirs, input, ram, probe),
         ) {
             (Ok(our_lag), Ok(their_lag)) => our_lag.zip(their_lag),
@@ -2004,7 +2015,7 @@ fn run_lockstep(
                 break;
             }
         };
-        if let Err(why) = buffers.fill(&ours, &theirs) {
+        if let Err(why) = buffers.fill(ours.as_ref(), &theirs) {
             trackers.0.run.stopped = Some((frame, why));
             break;
         }
@@ -2160,6 +2171,43 @@ fn run_fceux_movie_mode(
         run.engine = format!("fceux (movie mode, clock {frame}/{length})");
     }
     Ok((run, trace))
+}
+
+/// The Zaxnes machine `options` and `movie` ask for, on the timing profile they ask for.
+///
+/// **This is the one place the profile is chosen** (lot NESHAWK-PROFILE step 4): `--profile` if it
+/// was given, otherwise `MovieFile::recorded_profile`, which is the NesHawk-compatible chip for a
+/// `.bk2` whose `Core` header says `NesHawk` and the standard one for everything else. The two
+/// arms are identical but for the type, and the result is boxed because the rest of the command
+/// drives a `dyn Machine` and has no business knowing which chip it holds.
+fn zaxnes_machine(
+    options: &Options,
+    movie: &MovieFile,
+    machines: &Machines<'_>,
+) -> Result<Box<dyn Machine>, HarnessError> {
+    fn build<P: TimingProfile>(
+        options: &Options,
+        machines: &Machines<'_>,
+    ) -> Result<Box<dyn Machine>, HarnessError> {
+        let mut machine = ZaxnesMachine::<P>::new(
+            machines.image,
+            machines.name,
+            machines.region,
+            options.builtin_patches,
+        )
+        .map_err(HarnessError::Rom)?;
+        if let Some(pattern) = options.prg_ram {
+            machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
+        }
+        machine.ppu_warmup = options.ppu_warmup;
+        machine.ppu_ram = options.ppu_ram;
+        Ok(Box::new(machine))
+    }
+
+    match options.profile.unwrap_or_else(|| movie.recorded_profile()) {
+        ProfileChoice::Standard => build::<Standard>(options, machines),
+        ProfileChoice::NesHawk => build::<NesHawkCompat>(options, machines),
+    }
 }
 
 /// One machine, run alone over the movie's inputs.

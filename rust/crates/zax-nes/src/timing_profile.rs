@@ -33,6 +33,19 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// rather than silently drifting. Stable across versions: it is a file format.
     const STATE_ID: u8;
 
+    /// The core name a savestate written by this profile carries at the head of its block, and
+    /// the only one a core of this profile accepts.
+    ///
+    /// The two profiles are two machines — their DMC DMA differs by cycles — so a block of one
+    /// restored into the other would drift silently from the frame after the restore. Refusing it
+    /// through the **core name** is what makes that free: it is the field REQ-CORE-120 already has
+    /// a message for, the check is the one `try_load_state` already makes, and
+    /// `NesCore::STATE_VERSION` does not move, so every block written before this lot still loads
+    /// into the standard core byte for byte. The first four bytes of the block stay
+    /// `state_magic(EngineKind::Zaxnes)` either way: it is the same *engine*, and that is what the
+    /// application reads them for.
+    const STATE_CORE_NAME: &'static str;
+
     // ------------------------------------------------------- the DMC's sample-fetch DMA
     //
     // Item numbers are `docs/progress/NESHAWK-PROFILE.md` step 1's, where each is quoted against
@@ -89,6 +102,8 @@ pub struct Standard;
 impl TimingProfile for Standard {
     const NAME: &'static str = "standard";
     const STATE_ID: u8 = 0;
+    const STATE_CORE_NAME: &'static str =
+        zax_core_api::state_core_name(zax_core_api::EngineKind::Zaxnes);
 
     const DMC_HALT_ON_REQUEST_CYCLE: bool = false;
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = false;
@@ -108,6 +123,7 @@ pub struct NesHawkCompat;
 impl TimingProfile for NesHawkCompat {
     const NAME: &'static str = "neshawk";
     const STATE_ID: u8 = 1;
+    const STATE_CORE_NAME: &'static str = "Zaxnes-NesHawk";
 
     const DMC_HALT_ON_REQUEST_CYCLE: bool = true;
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;

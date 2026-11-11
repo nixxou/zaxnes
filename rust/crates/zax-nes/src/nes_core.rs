@@ -1834,7 +1834,11 @@ impl<P: TimingProfile> NesCoreOf<P> {
         } else {
             Self::STATE_VERSION
         });
-        writer.write_string(Self::CORE_NAME);
+        // `P::STATE_CORE_NAME`, not `Self::CORE_NAME`: the two profiles are two machines, and a
+        // block of one restored into the other would drift from the frame after the restore. The
+        // standard profile's value *is* `CORE_NAME`, so a block it writes is byte for byte the
+        // block this core has always written.
+        writer.write_string(P::STATE_CORE_NAME);
         writer.write_bool(include_rom_image);
         writer.write_string(rom.name());
         let image = self.original_image.as_deref().unwrap_or_else(|| rom.raw());
@@ -2007,6 +2011,26 @@ impl<P: TimingProfile> NesCoreOf<P> {
         loaded
     }
 
+    /// Refuses a savestate block written by a different core, which since lot NESHAWK-PROFILE
+    /// includes **the other timing profile**: the two are two machines, and a block of one
+    /// restored into the other would drift from the frame after the restore.
+    ///
+    /// The « Sen » working name is accepted only by the profile whose own name is `CORE_NAME` —
+    /// the standard one — because no block was ever written under both.
+    fn check_core_name(core_name: &str) -> Result<(), InvalidState> {
+        let legacy_name =
+            P::STATE_CORE_NAME == Self::CORE_NAME && core_name == Self::LEGACY_CORE_NAME;
+        if core_name != P::STATE_CORE_NAME && !legacy_name {
+            // REQ-CORE-120 fixes this message to the character; it is one of the few
+            // literal strings of the spec (AMD-002, answer to Q-001).
+            return Err(InvalidState {
+                failure: StateLoadFailure::ForeignCore,
+                message: Self::FOREIGN_CORE_MESSAGE.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
         let mut reader = StateReader::new(data, offset)?;
 
@@ -2027,15 +2051,7 @@ impl<P: TimingProfile> NesCoreOf<P> {
         // MMC5's sound registers are written only from `STATE_VERSION` on.
         reader.set_format_version(version);
 
-        let core_name = reader.read_string()?;
-        if core_name != Self::CORE_NAME && core_name != Self::LEGACY_CORE_NAME {
-            // REQ-CORE-120 fixes this message to the character; it is one of the few
-            // literal strings of the spec (AMD-002, answer to Q-001).
-            return Err(InvalidState {
-                failure: StateLoadFailure::ForeignCore,
-                message: Self::FOREIGN_CORE_MESSAGE.to_owned(),
-            });
-        }
+        Self::check_core_name(&reader.read_string()?)?;
 
         let has_rom_image = reader.read_bool()?;
         let stored_name = reader.read_string()?;
