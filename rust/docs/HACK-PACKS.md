@@ -89,6 +89,14 @@ which already holds every field but the context (Mega Man 6's damage hook, `$8F7
   pointers taken from the game's), as after a load today. The core's check that a state was made
   with or without the extension (`state_fits_builtin_patches`) gives way to this one. Movies stay
   bound to their pack's version: any difference of behaviour makes them drift.
+* **States section (done, 2026-11).** What a pack says of it, after its components (format in
+  `zax-nes/src/hack_pack.rs`, written by `tools/hackpack.py` `Pack.states`): `portable`, a state
+  made at the idle loop loads with the hack as set, made with it or without it, no question
+  asked (checked per game by a round trip, `zax-nes/tests/portable_state_tests.rs`); `redraw`,
+  CPU RAM writes run on a state restored the other way, to send the game to a step that redraws
+  its screen. The section is not part of the pack's version, so adding one keeps old states
+  valid. Packs without it keep the question (load as set, or set the hack as the state had it).
+  First: `FlappyZaxNes`.
 
 ## 4. Moved code (later step)
 
