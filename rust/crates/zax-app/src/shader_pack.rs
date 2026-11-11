@@ -41,7 +41,7 @@ pub const COMBINATION_SEPARATOR: char = '|';
 const PACKED: &str = include_str!(concat!(env!("OUT_DIR"), "/slang-pack-files.txt"));
 
 /// Whether every preset of `preset` (one, or the parts of a combination) is in the pack the
-/// executable carries: the Android package carries the light one (owner decision), and the
+/// executable carries (a build with `ZAXNES_SHADER_PACK=light` has the light one), and the
 /// catalogue shows only what it can draw. A build without a pack keeps every preset, its
 /// settings being the ones a desktop shares.
 #[must_use]

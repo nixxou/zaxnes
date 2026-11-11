@@ -56,14 +56,11 @@ fn environment(name: &str) -> std::io::Result<PathBuf> {
 /// is empty and the shaders window says so.
 fn shader_pack() -> std::io::Result<()> {
     let manifest = environment("CARGO_MANIFEST_DIR")?;
-    // The Android package carries the light pack (owner decision: the full one is 35 MB);
-    // `ZAXNES_SHADER_PACK=light` or `full` chooses for any build.
+    // Every build carries the full pack, the Android package too (owner decision: some devices
+    // run the heavy presets, each player picks for his own); `ZAXNES_SHADER_PACK=light` builds
+    // with the light one (`pack-files-light.txt`).
     println!("cargo:rerun-if-env-changed=ZAXNES_SHADER_PACK");
-    let light = match std::env::var("ZAXNES_SHADER_PACK").as_deref() {
-        Ok("light") => true,
-        Ok("full") => false,
-        _ => std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android"),
-    };
+    let light = std::env::var("ZAXNES_SHADER_PACK").as_deref() == Ok("light");
     let list = manifest.join("shaders").join(if light {
         "pack-files-light.txt"
     } else {
