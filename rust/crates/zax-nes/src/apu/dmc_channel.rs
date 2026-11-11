@@ -101,6 +101,15 @@ impl DmcChannel {
         self.current_address
     }
 
+    /// The timer, the bits the output unit still owes and the bytes left of the sample — the three
+    /// numbers NesHawk's own `fill_glitch` tests, for the DMA census of the `dma-census` feature
+    /// (an instrument, off by default: see [`crate::dma_census`]).
+    #[cfg(feature = "dma-census")]
+    #[must_use]
+    pub const fn census_state(&self) -> (i32, i32, i32) {
+        (self.timer, self.bits_remaining, self.bytes_remaining)
+    }
+
     /// CPU cycles from the channel's own position until [`Self::needs_sample_fetch`] could next
     /// turn true, or `None` while no sample is playing.
     ///

@@ -6,6 +6,8 @@ pub mod apu;
 pub mod builtin_patches;
 pub mod cartridges;
 pub mod cpu;
+#[cfg(feature = "dma-census")]
+pub mod dma_census;
 mod engine_impl;
 pub mod hack_pack;
 pub mod input;

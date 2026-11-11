@@ -161,6 +161,11 @@ pub struct NesBusOf<P: TimingProfile> {
     /// and then costs **three** cycles rather than the four of a reload. Never set on the
     /// `Standard` profile, whose load fetch costs three or four by parity like any other.
     dmc_from_write: bool,
+    /// The DMA census, an **instrument** and not emulation: present only under the `dma-census`
+    /// feature, which is off by default and which every one of its call sites also carries on the
+    /// statement itself (see [`crate::dma_census`]).
+    #[cfg(feature = "dma-census")]
+    census: crate::dma_census::DmaCensus,
     /// The timing profile: a type, zero-sized, so the two cores differ in their code and not by
     /// a byte of their state.
     profile: PhantomData<P>,
@@ -225,8 +230,50 @@ impl<P: TimingProfile> NesBusOf<P> {
             apu_quiet: 0,
             zone_instruction: false,
             dmc_from_write: false,
+            #[cfg(feature = "dma-census")]
+            census: crate::dma_census::DmaCensus::new(),
             profile: PhantomData,
         }
+    }
+
+    /// The DMA census of everything since the last [`NesBusOf::clear_dma_census`] — an instrument,
+    /// compiled only under the `dma-census` feature.
+    #[cfg(feature = "dma-census")]
+    #[must_use]
+    pub fn dma_census(&self) -> &[crate::dma_census::DmaEvent] {
+        self.census.events()
+    }
+
+    /// Starts the DMA census over, so the next frame is measured on its own.
+    #[cfg(feature = "dma-census")]
+    pub fn clear_dma_census(&mut self) {
+        self.census.clear();
+    }
+
+    /// Records one census event, with the DMC's own state at the moment it happened.
+    ///
+    /// Reached at most once per sample fetch, per OAM transfer or per register access — never per
+    /// cycle — and only from a statement that itself carries `#[cfg(feature = "dma-census")]`.
+    #[cfg(feature = "dma-census")]
+    fn note_dma(
+        &mut self,
+        kind: crate::dma_census::DmaEventKind,
+        address: u16,
+        value: u8,
+        ready_cycle: i64,
+    ) {
+        let (dmc_timer, dmc_bits, dmc_bytes) = self.apu.dmc_census_state();
+        self.census.push(crate::dma_census::DmaEvent {
+            kind,
+            cycle: self.cycles,
+            ready_cycle,
+            address,
+            value,
+            from_write: self.dmc_from_write,
+            dmc_timer,
+            dmc_bits,
+            dmc_bytes,
+        });
     }
 
     /// Last value seen on the **external** data bus, which is what an unmapped read returns.
@@ -587,12 +634,26 @@ impl<P: TimingProfile> NesBusOf<P> {
                 // it at once.
                 self.dmc_ready_cycle = self.cycles;
                 self.dma |= DMA_DMC_WAIT;
+                #[cfg(feature = "dma-census")]
+                self.note_dma(
+                    crate::dma_census::DmaEventKind::DmcRequest,
+                    self.apu.dmc_dma_address(),
+                    0,
+                    self.dmc_ready_cycle,
+                );
                 return;
             }
             // The request is raised inside this cycle's `tick`, so the earliest cycle its halt
             // can land on is the next one — which is the whole reason the request is *held*
             // rather than armed (see [`DMA_DMC_WAIT`] and [`NesBus::read_cycle`]).
             self.hold_dmc_dma(0);
+            #[cfg(feature = "dma-census")]
+            self.note_dma(
+                crate::dma_census::DmaEventKind::DmcRequest,
+                self.apu.dmc_dma_address(),
+                0,
+                self.dmc_ready_cycle,
+            );
         }
     }
 
@@ -619,6 +680,23 @@ impl<P: TimingProfile> NesBusOf<P> {
         }
 
         self.dma &= !DMA_DMC_WAIT;
+        #[cfg(feature = "dma-census")]
+        if self.apu.needs_dmc_dma() {
+            // `halt_cycle` and not `self.cycles`: the halt lands on the cycle the caller names,
+            // which inside an OAM transfer is the cycle about to run rather than the last one.
+            let (dmc_timer, dmc_bits, dmc_bytes) = self.apu.dmc_census_state();
+            self.census.push(crate::dma_census::DmaEvent {
+                kind: crate::dma_census::DmaEventKind::DmcHalt,
+                cycle: halt_cycle,
+                ready_cycle: self.dmc_ready_cycle,
+                address: self.apu.dmc_dma_address(),
+                value: 0,
+                from_write: self.dmc_from_write,
+                dmc_timer,
+                dmc_bits,
+                dmc_bytes,
+            });
+        }
         if self.apu.needs_dmc_dma() {
             if P::DMC_FETCH_HAS_TWO_DUMMIES && !self.dmc_from_write {
                 // **Item 1b.** A reload is a fixed four cycles — the halt, two re-reads of the
@@ -815,6 +893,8 @@ impl<P: TimingProfile> NesBusOf<P> {
                 self.dmc_dma_count += 1;
                 let address = self.apu.dmc_dma_address();
                 let value = self.dmc_fetch_read(address, internal, &mut decoded_before);
+                #[cfg(feature = "dma-census")]
+                self.note_dma(crate::dma_census::DmaEventKind::DmcFetch, address, value, 0);
                 self.sync_apu();
                 self.apu.supply_dmc_byte::<P>(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
@@ -957,6 +1037,8 @@ impl<P: TimingProfile> NesBusOf<P> {
         let address = self.apu.dmc_dma_address();
         let mut decoded_before = read_address;
         let value = self.dmc_fetch_read(address, false, &mut decoded_before);
+        #[cfg(feature = "dma-census")]
+        self.note_dma(crate::dma_census::DmaEventKind::DmcFetch, address, value, 0);
         self.sync_apu();
         self.apu.supply_dmc_byte::<P>(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
@@ -1182,7 +1264,17 @@ impl<P: TimingProfile> NesBusOf<P> {
             self.sync_ppu();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
-            return self.ppu.read(address & 0x07, self.cartridge.as_mut());
+            let value = self.ppu.read(address & 0x07, self.cartridge.as_mut());
+            #[cfg(feature = "dma-census")]
+            if (address & 0x07) == 2 {
+                self.note_dma(
+                    crate::dma_census::DmaEventKind::PpuStatusRead,
+                    address,
+                    value,
+                    0,
+                );
+            }
+            return value;
         }
 
         if address < 0x4020 {
@@ -1235,7 +1327,15 @@ impl<P: TimingProfile> NesBusOf<P> {
                 // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
                 // (see [`NesBus::external_bus`]).
                 self.hold_external_bus();
-                self.apu.read_status(self.data_bus)
+                let status = self.apu.read_status(self.data_bus);
+                #[cfg(feature = "dma-census")]
+                self.note_dma(
+                    crate::dma_census::DmaEventKind::ApuStatusRead,
+                    0x4015,
+                    status,
+                    0,
+                );
+                status
             }
             // A controller port answers on the internal bus too, and its three open-bus bits
             // come from there — which is how `Implied Dummy Reads` can take the operands of a
@@ -1354,6 +1454,13 @@ impl<P: TimingProfile> NesBusOf<P> {
                 _ => {
                     self.sync_apu();
                     let dmc_load_delay = self.apu.write::<P>(address, value);
+                    #[cfg(feature = "dma-census")]
+                    self.note_dma(
+                        crate::dma_census::DmaEventKind::ApuWrite,
+                        address,
+                        value,
+                        i64::from(dmc_load_delay),
+                    );
                     self.after_apu_write(dmc_load_delay);
                 }
             }
@@ -1383,6 +1490,8 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.oam_dma_count += 1;
         self.dma_oam_page = page;
         self.dma |= DMA_OAM | DMA_HALT;
+        #[cfg(feature = "dma-census")]
+        self.note_dma(crate::dma_census::DmaEventKind::OamRequest, 0x4014, page, 0);
     }
 
     /// Notices what a write to an APU register did to the DMC's memory reader; `dmc_load_delay`

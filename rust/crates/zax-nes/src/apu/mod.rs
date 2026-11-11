@@ -421,6 +421,14 @@ impl Apu2A03 {
         self.dmc.fetch_address()
     }
 
+    /// The DMC's timer, output bits owed and bytes left, for the `dma-census` instrument
+    /// (`DmcChannel::census_state`).
+    #[cfg(feature = "dma-census")]
+    #[must_use]
+    pub const fn dmc_census_state(&self) -> (i32, i32, i32) {
+        self.dmc.census_state()
+    }
+
     /// CPU cycles from the APU's own position until the DMC's memory reader could next ask for a
     /// byte, or `None` while no sample is playing (`DmcChannel::cycles_until_fetch`).
     ///

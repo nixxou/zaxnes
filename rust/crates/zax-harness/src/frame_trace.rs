@@ -70,7 +70,12 @@ pub const USAGE: &str = "zax-harness frame-trace <movie.fm2|.bk2> <rom.nes> --fr
                            application does; off by default, as in movie-sync
       --profile standard|neshawk
                            which 2A03 to trace on. Default: the one the movie was recorded on —
-                           the NesHawk-compatible chip for a `.bk2` whose Core is NesHawk";
+                           the NesHawk-compatible chip for a `.bk2` whose Core is NesHawk
+      --dmc-census         every DMC sample fetch of the frame with its request cycle, its kind
+                           (reload or started by a $4015 write) and its cost, every OAM transfer,
+                           every APU register write and every $4015 and $2002 read, placed against
+                           the instruction each happened inside. Needs the `dma-census` feature
+                           (an instrument: `cargo build -p zax-harness --features dma-census`)";
 
 /// Instructions one traced frame is allowed, before the loop is called broken rather than slow.
 ///
@@ -150,6 +155,9 @@ pub struct Options {
     pub builtin_patches: bool,
     /// Which 2A03 to trace on, or `None` for the one the movie was recorded on.
     pub profile: Option<ProfileChoice>,
+    /// Print the DMA census of every traced frame (`--dmc-census`), which needs the
+    /// `dma-census` feature.
+    pub dmc_census: bool,
 }
 
 /// One traced instruction.
@@ -161,6 +169,9 @@ pub struct Step {
     pub scanline: i32,
     /// The PPU's dot before the instruction.
     pub dot: i32,
+    /// The bus cycle the instruction began on, which is what places a core event — a DMA census
+    /// line, say — against the instruction it happened inside.
+    pub cycle: i64,
     /// The line, in `nestest.log`'s own shape.
     pub line: String,
     /// `NMI` or `IRQ` when this instruction is the first of an interrupt's handler.
@@ -238,6 +249,38 @@ pub struct FrameTrace {
     /// What `--converge` found: where inside this frame the run's own 2 KiB comes closest to the
     /// reference's recorded 2 KiB for the same frame.
     pub converge: Option<Converge>,
+    /// What `--dmc-census` found: every DMC sample fetch of the frame with its request cycle, its
+    /// kind and its cost, every OAM transfer, every APU register write and every `$4015` and
+    /// `$2002` read. Only under the `dma-census` feature.
+    #[cfg(feature = "dma-census")]
+    pub census: Vec<CensusLine>,
+}
+
+/// One line of `--dmc-census`: a core event placed against the instruction it happened inside.
+///
+/// The core's own event ([`zax_nes::dma_census::DmaEvent`]) carries absolute bus cycles, which say
+/// nothing to a reader. This is the same event with the frame's own cycle, the instruction index
+/// and the PPU position put beside it, which is what makes two runs comparable line for line.
+#[cfg(feature = "dma-census")]
+#[derive(Debug, Clone)]
+pub struct CensusLine {
+    /// The core's event.
+    pub event: zax_nes::dma_census::DmaEvent,
+    /// The event's cycle counted from the frame's first.
+    pub cycle: i64,
+    /// The earliest cycle the halt was allowed on, counted the same way; `None` when the event
+    /// does not carry one.
+    pub ready: Option<i64>,
+    /// The instruction the event happened inside, and its PPU position.
+    pub index: usize,
+    /// The PPU scanline at the start of that instruction.
+    pub scanline: i32,
+    /// The PPU dot at the start of that instruction.
+    pub dot: i32,
+    /// For a `DmcFetch`, the cycles the CPU lost to the fetch it ends — the halt cycle, every
+    /// cycle between and the fetch cycle. `None` for every other kind, and for a fetch whose halt
+    /// is not in this frame's census.
+    pub cost: Option<i64>,
 }
 
 /// Where inside a frame a run's work RAM comes closest to a reference's recorded 2 KiB.
@@ -489,6 +532,10 @@ impl Report {
             if let Some(found) = &frame.converge {
                 text.push_str(&found.report());
             }
+            #[cfg(feature = "dma-census")]
+            if options.dmc_census {
+                text.push_str(&census_report(&frame.census));
+            }
             if frame.changes.is_empty() && !options.watch.is_empty() {
                 let _ = writeln!(text, "    no watched address changed in this frame");
             }
@@ -668,6 +715,7 @@ fn trace_on<P: TimingProfile>(
             &options.watch,
             probing.map(|bytes| (bytes.as_slice(), options.extra)),
             options.converge_window,
+            options.dmc_census,
         );
         traced.frame = frame;
         report.frames.push(traced);
@@ -717,6 +765,7 @@ fn trace_frame<P: TimingProfile>(
     watch: &[u16],
     probe: Option<(&[u8], usize)>,
     window_half: usize,
+    census: bool,
 ) -> FrameTrace {
     let mut out = FrameTrace {
         word,
@@ -728,9 +777,12 @@ fn trace_frame<P: TimingProfile>(
     bus.input_mut().begin_frame(word);
     bus.ppu_mut().clear_frame_boundary();
     out.unlocked = bus.ppu().wide().unlocked();
-    let first_cycle = bus.cycle_count();
-    let (first_dmc, first_oam) = (bus.dmc_dma_count(), bus.oam_dma_count());
-
+    let first = (bus.cycle_count(), bus.dmc_dma_count(), bus.oam_dma_count());
+    // The census is a per-frame record, so it starts empty here and is read at the boundary.
+    #[cfg(feature = "dma-census")]
+    if census {
+        bus.clear_dma_census();
+    }
     let mut held: Vec<u8> = watch.iter().map(|address| bus.peek(*address)).collect();
     let mut converge = probe.map(|(wanted, extra)| {
         (
@@ -759,6 +811,7 @@ fn trace_frame<P: TimingProfile>(
                 index,
                 scanline: bus.ppu().scanline(),
                 dot: bus.ppu().dot(),
+                cycle: bus.cycle_count(),
                 line: captured.format(),
                 interrupt,
             });
@@ -790,10 +843,7 @@ fn trace_frame<P: TimingProfile>(
             .map(|(wanted, _, found)| found.take(index, bus.ram(), wanted));
 
         if boundary.is_none() && bus.ppu().vblank_just_started() {
-            out.checksum = checksum(bus.ram());
-            out.cycles = bus.cycle_count() - first_cycle;
-            out.dmc_fetches = bus.dmc_dma_count() - first_dmc;
-            out.oam_transfers = bus.oam_dma_count() - first_oam;
+            close_frame(&mut out, bus, first, census);
             boundary = Some(index);
             if let Some((_, _, found)) = converge.as_mut() {
                 found.boundary = index;
@@ -814,16 +864,189 @@ fn trace_frame<P: TimingProfile>(
     }
     if boundary.is_none() {
         out.overran = true;
-        out.checksum = checksum(bus.ram());
-        out.cycles = bus.cycle_count() - first_cycle;
-        out.dmc_fetches = bus.dmc_dma_count() - first_dmc;
-        out.oam_transfers = bus.oam_dma_count() - first_oam;
+        close_frame(&mut out, bus, first, census);
     }
     out.converge = converge.map(|(_, _, mut found)| {
         found.extra = found.compared.saturating_sub(found.boundary + 1);
         found
     });
     out
+}
+
+/// The `--dmc-census` section: one line per event, then the totals that say where a frame's
+/// cycles went.
+///
+/// The totals are the point. A frame is a fixed 29 780 or 29 781 CPU cycles, so two machines that
+/// run the same frame and get different amounts of work done differ by **what the DMA charged
+/// them**, and nothing else — which is exactly the quantity lot NESHAWK-PROFILE-2 step 2 is after.
+#[cfg(feature = "dma-census")]
+fn census_report(lines: &[CensusLine]) -> String {
+    use core::fmt::Write as _;
+    use zax_nes::dma_census::DmaEventKind;
+
+    let mut text = String::new();
+    let _ = writeln!(
+        text,
+        "    the DMA census of this frame: {} event(s)\n      \
+         cyc        kind     instr  SL:DOT     addr val  ready  cost  dmc(timer,bits,bytes)",
+        lines.len()
+    );
+    for line in lines {
+        let ready = match line.ready {
+            Some(cycle) => format!("{cycle:>6}"),
+            None if line.event.kind == DmaEventKind::ApuWrite && line.event.ready_cycle != 0 => {
+                format!("d={:<4}", line.event.ready_cycle)
+            }
+            None => "     -".to_owned(),
+        };
+        let cost = match line.cost {
+            Some(cost) => format!("{cost:>4}"),
+            None => "   -".to_owned(),
+        };
+        let _ = writeln!(
+            text,
+            "      {:<9} {} {:>6} {:>3}:{:<4} ${:04X} {:02X}  {ready} {cost}  ({},{},{}){}",
+            line.cycle,
+            line.event.kind.tag(),
+            line.index,
+            line.scanline,
+            line.dot,
+            line.event.address,
+            line.event.value,
+            line.event.dmc_timer,
+            line.event.dmc_bits,
+            line.event.dmc_bytes,
+            if line.event.from_write { "  write" } else { "" }
+        );
+    }
+
+    let fetches: Vec<&CensusLine> = lines
+        .iter()
+        .filter(|line| line.event.kind == DmaEventKind::DmcFetch)
+        .collect();
+    let charged: i64 = fetches.iter().filter_map(|line| line.cost).sum();
+    let from_write = fetches.iter().filter(|line| line.event.from_write).count();
+    let mut histogram = [0_usize; 8];
+    for cost in fetches.iter().filter_map(|line| line.cost) {
+        if let Ok(slot) = usize::try_from(cost) {
+            if let Some(count) = histogram.get_mut(slot) {
+                *count += 1;
+            }
+        }
+    }
+    let _ = writeln!(
+        text,
+        "      {} DMC fetch(es) ({from_write} started by a $4015 write) costing {charged} CPU \
+         cycle(s) in all",
+        fetches.len()
+    );
+    let spread: Vec<String> = histogram
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count > 0)
+        .map(|(cost, count)| format!("{count}x{cost}"))
+        .collect();
+    let _ = writeln!(text, "      the costs: {}", spread.join(" "));
+    text
+}
+
+/// What the end of a frame records: the checksum, the cycles, the DMA counts and, when the
+/// instrument is compiled in and asked for, the census.
+///
+/// One function because the frame can end two ways — at its own boundary, or by overrunning
+/// [`MAX_INSTRUCTIONS`] — and both must record the same things.
+///
+/// `first` is the bus cycle, the DMC fetch count and the OAM transfer count the frame started at.
+fn close_frame<P: TimingProfile>(
+    out: &mut FrameTrace,
+    bus: &zax_nes::NesBusOf<P>,
+    first: (i64, i64, i64),
+    census: bool,
+) {
+    out.checksum = checksum(bus.ram());
+    out.cycles = bus.cycle_count() - first.0;
+    out.dmc_fetches = bus.dmc_dma_count() - first.1;
+    out.oam_transfers = bus.oam_dma_count() - first.2;
+    // Taken here and not after `--converge`'s extra instructions: the census is of the frame, and
+    // those instructions belong to the next one.
+    #[cfg(feature = "dma-census")]
+    if census {
+        out.census = census_lines(bus.dma_census(), &out.steps, first.0);
+    }
+    #[cfg(not(feature = "dma-census"))]
+    let _ = census;
+}
+
+/// Places every core event against the instruction it happened inside, and gives each `DmcFetch`
+/// the cost of the halt that started it.
+///
+/// The instruction an event belongs to is the last one that began on or before its cycle, found by
+/// [`slice::partition_point`] over the frame's own steps rather than by a scan: a frame has nine
+/// thousand instructions and a hundred events.
+#[cfg(feature = "dma-census")]
+fn census_lines(
+    events: &[zax_nes::dma_census::DmaEvent],
+    steps: &[Step],
+    first_cycle: i64,
+) -> Vec<CensusLine> {
+    use zax_nes::dma_census::DmaEventKind;
+
+    let mut lines: Vec<CensusLine> = Vec::with_capacity(events.len());
+    // The halt of the fetch now in flight, so a fetch can be charged for it.
+    let mut halt: Option<i64> = None;
+    for event in events {
+        let at = steps.partition_point(|step| step.cycle <= event.cycle);
+        let (index, scanline, dot) = steps
+            .get(at.saturating_sub(1))
+            .map_or((0, -1, -1), |step| (step.index, step.scanline, step.dot));
+        let cost = match event.kind {
+            DmaEventKind::DmcHalt => {
+                halt = Some(event.cycle);
+                None
+            }
+            DmaEventKind::DmcFetch => halt.take().map(|from| event.cycle - from + 1),
+            _ => None,
+        };
+        lines.push(CensusLine {
+            event: *event,
+            cycle: event.cycle - first_cycle,
+            // Only a request and a halt carry an absolute ready cycle; on an `ApuWrite` the same
+            // field is the `$4015` load delay the write returned, which the printer reads raw.
+            ready: matches!(event.kind, DmaEventKind::DmcRequest | DmaEventKind::DmcHalt)
+                .then(|| event.ready_cycle - first_cycle),
+            index,
+            scanline,
+            dot,
+            cost,
+        });
+    }
+    lines
+}
+
+/// What `--dmc-census` means in this build.
+///
+/// A build without the `dma-census` feature must **say so** rather than print an empty section: a
+/// silent nothing would read as "this frame has no DMA", which is the opposite of what it means.
+///
+/// # Errors
+/// Never in this configuration; the `Result` is the other one's, which always errors.
+#[cfg(feature = "dma-census")]
+#[allow(clippy::unnecessary_wraps)] // The signature belongs to the configuration below.
+const fn census_asked() -> Result<bool, HarnessError> {
+    Ok(true)
+}
+
+/// As above, for a build the instrument is not in.
+///
+/// # Errors
+/// Always.
+#[cfg(not(feature = "dma-census"))]
+fn census_asked() -> Result<bool, HarnessError> {
+    Err(HarnessError::Usage(
+        "--dmc-census needs this binary built with the `dma-census` feature: \
+         cargo build -p zax-harness --release --features dma-census"
+            .to_owned(),
+    ))
 }
 
 /// The subcommand.
@@ -882,6 +1105,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                 })?;
             }
             "--builtin-patches" => options.builtin_patches = true,
+            "--dmc-census" => options.dmc_census = census_asked()?,
             "--profile" => {
                 options.profile = Some(ProfileChoice::parse(&value(&mut index))?);
             }
@@ -1013,6 +1237,7 @@ mod tests {
             index,
             scanline: 10,
             dot: 20,
+            cycle: i64::try_from(index).unwrap_or(0),
             line: format!("C{index:03X}  A9 01     LDA #$01"),
             interrupt: None,
         };

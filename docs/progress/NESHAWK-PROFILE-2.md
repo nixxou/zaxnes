@@ -105,3 +105,144 @@ Two of the eleven are worth naming:
     [PROGRESS] NESHAWK-PROFILE-2 step 1/6 done: reproduce, and classify the isolated differences
 
 ---
+
+## Step 2 — frame 4666, and what it is *not*
+
+The headline is a negative, and it is the step's most useful result: **there is nothing unusual in
+frame 4666 at all.** Its DMA is fifty-two textbook reloads, and the frame contains no site for
+either of the two candidates the brief named. What the frame does say is *where* the item has to be
+— and it is not inside it.
+
+### The instrument this needed, because none existed
+
+`frame-trace` could say "52 DMC sample fetch(es)" and no more. Frame 4666 needed *which* of the
+fifty-two cost what, so this step built the census the brief asks for:
+
+| | |
+|---|---|
+| `crates/zax-nes/src/dma_census.rs` | `DmaEvent` / `DmaEventKind` / `DmaCensus`: the request (with the earliest cycle its halt is allowed on), the halt, the fetch, the OAM request, every APU register write, every `$4015` read and every `$2002` read, each with the DMC's own `(timer, bits_remaining, bytes_remaining)` |
+| `nes_bus.rs` | a `census` field and a `note_dma` helper, and **nine call sites, every one of them with `#[cfg(feature = "dma-census")]` on the statement itself** |
+| `apu/dmc_channel.rs`, `apu/mod.rs` | `census_state()` / `dmc_census_state()`, the three numbers NesHawk's own `fill_glitch` tests |
+| `zax-harness` | `frame-trace --dmc-census`, which places each event against the instruction it happened inside and charges each fetch the halt that started it |
+
+**The feature is off by default and the hooks are `#[cfg]`-ed at the statement**, not merely inside
+a function, so with it off they are removed before type-checking: the shipped core is the core
+without them, which is what keeps step 5's `golden-core` and `bench-core` answerable. Every site is
+reached at most once per fetch, once per transfer or once per register access — never per cycle.
+
+    cargo build -p zax-harness --release --features dma-census
+
+Without the feature, `--dmc-census` is a **usage error naming the flag to rebuild with**: an empty
+section would read as "this frame has no DMA", which is the opposite of what it would mean.
+
+### Frame 4666's census, in full
+
+52 fetches, **every one a plain reload, every one costing exactly 4 cycles** — `the costs: 52x4`,
+208 cycles in all — one OAM transfer at cycle 61, and:
+
+| | |
+|---|---|
+| `$4015` **writes** | **none** |
+| `$4010`, `$4011`, `$4012`, `$4013` writes | **none** |
+| `$2002` reads | **none** (EVAL-SYNC-4 measured the same for the frame-926 window) |
+| `$4015` reads | **one**, at cycle 7 417, and it is `LDA $4015` at **`$823C`** — EVAL-SYNC-4 §4e's amplifier. It reads `1F`, `AND #$10` gives `10` and the `BNE` at `$8241` is **taken**, which is the arm that does not write |
+| other APU writes | `$4017`=C0 at 3 465; `$4004`, `$4006`, `$4007`, `$400C`, `$400E` between 7 024 and 7 405 |
+| NMI | handler entered at instruction 1, **SL 241 dot 30** |
+| MMC3 IRQ | handler entered at instruction 7 096, **SL 174 dot 288** |
+| a sample end, an enable mid-sample, a register write at an alignment | **none of them is in this frame** |
+
+So the two candidates the brief sends step 3 at — item 6's end-of-sample aborts and item 5's
+`$4011`/`$4012`/`$4013` alignment — **have no site in frame 4666**. Neither does item 3's
+mid-sample enable. Whatever is missing did not happen in this frame.
+
+The one thing the census does show is the class that **is** present: five of the 52 fetches have
+their halt land **later than the cycle the request allowed** — four by one cycle and one by more.
+Those are the cycles on which the CPU was *writing*, which this core answers by moving the halt to
+the next read cycle. They are NesHawk's `+2` sites, and step 3 reads what NesHawk charges for them.
+
+### What frame 4666 is: the frame whose work overran, by about 220 cycles
+
+`$0039` is the frame semaphore and the trace reads it straight off the game:
+
+* the NMI handler does `INC $39` at **`$C37C`** — frame 4666, instruction 599;
+* the main loop, when it has finished the frame's work, does `LDA #$00` / `STA $39` at **`$C06E`**
+  and then spins at `$C070`/`$C072` (`BEQ $C070`) until the next NMI raises it again.
+
+In frame 4665 that happens at instruction 5 042 and the remaining 4 271 instructions are the spin.
+**In frame 4666 `$C06E` is never reached**: `$0039` stays at the 01 the NMI left, and the four live
+bytes are what the work was in the middle of when the frame ran out:
+
+| instruction | SL:dot | | |
+|---|---|---|---|
+| 8 877 | 239:181 | `F06F  STA $38` | `$0038` ← **87** |
+| 8 880 | 239:214 | `F075  STA $49` | `$0049` ← **13** |
+| 8 892 | 240:14 | `F042  STA $0575` | `$0575` ← 1C |
+| 8 895 | 240:41 | `F049  STA $38` | `$0038` ← **86** |
+| 8 898 | 240:74 | `F04F  STA $48` | `$0048` ← **12** |
+| 8 925 | 240:338 | `B206  CMP $66E6` | the frame ends here |
+
+and the reference's four bytes — `$0038`=87, `$0039`=00, `$0048`=1C, `$0049`=00 — are a state in
+which `$C06E` **has** run: the reference finished frame 4666's work and this core did not.
+(`--converge` confirms it is not a reading artefact: `$0049`=00 needs instruction 8 880 not to have
+run and `$0575`=1C needs 8 892 to have run, so no single instant of our frame holds the reference's
+2 KiB.)
+
+**The size of the miss.** The stretch `$F06F` → `$C06E` costs **394** cycles where the frame has
+slack (measured on a frame of the same run that does reach it: instructions 3 912 to 4 025,
+cycles 138 939 185 to 138 939 579). Frame 4666 reaches `$F06F` at cycle 138 955 673 and its NMI
+lands at 138 955 850 — **177 cycles of room for 394 cycles of work, so this core is about 220
+cycles short.**
+
+That number is the step's second useful result, and it rules something out: **220 cycles cannot be
+bought inside frame 4666.** The frame's entire DMC DMA bill is 208 cycles, so even a chip that
+fetched DPCM for free would not close it. The difference must therefore be **earlier than the
+frame's own boundary** — which is possible precisely because the live RAM agreeing at the end of
+frame 4665 says nothing about the middle of frame 4665.
+
+### Where it has to be: the sample start, and the census says a sample starts every six frames
+
+The census over frames 4 640-4 670 and 4 468-4 480 (one line per frame: fetches, cycles, OAM, how
+many halts slipped, and which APU registers were written) shows the game's DPCM as a **177-byte
+sample re-triggered every six frames**, and nothing else:
+
+| | |
+|---|---|
+| the trigger | `$4010` = 0E (rate index 14, 72 cycles a bit, 576 a byte), `$4015` = 0F, then `$4015` = 1F |
+| at 4 665 | cycle 2 804 `$4010`, 2 810 `$4015`=0F, **2 816 `$4015`=1F** with a load delay of **2** (`d=2`), halt 2 819, fetch 2 821, **cost 3**, `from_write` — item 3's own path |
+| the sample | `$FE80`, 177 bytes; 47 + 52 + 52 + 26 = **177** fetches over frames 4 665-4 668 |
+| the one before | started at 4 659, 47 + 52 + 52 + 26 over 4 659-4 662 |
+| `$4012`/`$4013` | written only at the *first* trigger of a run (4 659, 4 647, 4 641, 4 479), not at a re-trigger |
+| `$4011` | once a frame, on the frames with no sample (4 663, 4 664, 4 669, 4 670, …) |
+
+So **frame 4665 is the frame the sample starts, and it is the last frame with no live difference.**
+Every mechanism the brief lists has a site there and not in 4666: the `$4015` disable at 2 810
+(item 6's `set_lenctr_en(false)`, with the DMC's timer at **3** and one bit left in the output
+unit — which is the neighbourhood of `fill_glitch_2`'s `timer == 3 || timer == 2`), the `$4015`
+enable at 2 816 (item 3), and the sample end three frames before at 4 662 (item 6's
+`pending_disable`).
+
+The near-miss confirms the shape rather than contradicting it: **frame 4475** carries the same four
+bytes with the signs reversed (`$0038`=87/86, `$0048`=22/12, `$0049`=24/13 — there *we* finished and
+the reference did not) and it is inside the sample that starts at **4473**, the same
+`$4010`/`$4015`/`$4015` trigger. Two frames of the same sample run, opposite signs, one healing and
+one not: a phase difference of a sample, not a per-frame cost.
+
+### What step 3 is sent to read, in this order
+
+1. the **`+2`** of `RunCpuOne` — the only class the census finds in frame 4666, and the one half of
+   step 1's item 1 that NESHAWK-PROFILE **did not implement** (it has no constant: 1a and 1b
+   shipped, the `+2` did not);
+2. `set_lenctr_en(false)` and `fill_glitch_2` — there *is* a `$4015` = 0F at frame 4665 cycle 2 810
+   with the DMC timer at 3;
+3. `set_lenctr_en(true)`'s own delay and what NesHawk's fetch costs after it — frame 4665's
+   `d=2`/cost-3 fetch is the one event of the whole window that is not a plain reload;
+4. the `$4011`/`$4012`/`$4013` alignment (item 5) — a site at every *first* trigger, and `$4011`
+   once a frame;
+5. `dmc_realign`, because frame 4666's **first** fetch is requested at cycle 106, inside the OAM
+   transfer that started at 61.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-2 step 2/6 done: frame 4666, instruction by instruction
+
+---
