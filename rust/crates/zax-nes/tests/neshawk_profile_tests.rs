@@ -138,40 +138,44 @@ fn item_1a_the_halt_lands_on_the_request_cycle_itself() {
     }
 }
 
+/// The halted read's cost when the memory reader's dry cycle passes on a **write** cycle — which
+/// no DMA unit may halt — and the read comes `writes - 1` further write cycles after it.
+///
+/// `writes` is therefore the **slip**: how many cycles in a row the CPU was writing on from the
+/// request, which is the quantity item 1c is about. It is also the only way to move the parity of
+/// the cycle a reload's halt lands on, which is what item 1b is about — burning cycles before the
+/// dry cycle does not, because the dry cycle is set by the DMC timer and a cycle burnt before it
+/// takes a cycle off the horizon, so the sum is constant; and every entry of both rate tables is
+/// even, so a reload's dry cycle always has the same parity (the phase `DmcChannel::reset` fixes
+/// on purpose, for blargg's `sync_dmc`).
+fn cost_with_the_read_displaced<P: TimingProfile>(writes: u32) -> i64 {
+    let mut bus = loaded_bus::<P>();
+    start_a_dmc_sample(&mut bus);
+    step_to_the_cycle_before_the_reader_runs_dry(&mut bus, 0);
+    for _ in 0..writes {
+        bus.write(0x0000, 0x00);
+    }
+    assert_eq!(1, bus.dmc_dma_count(), "{}: no fetch on a write", P::NAME);
+    let cost = cost_of_a_read(&mut bus, 0x8000);
+    assert_eq!(2, bus.dmc_dma_count(), "{}: the fetch ran", P::NAME);
+    cost
+}
+
 /// **Item 1b** — a fetch is a **fixed four** cycles, with no get/put alignment.
 ///
 /// `dmc_dma_countdown = 3` plus the request cycle, and there is no `% 2` anywhere on NesHawk's DMC
 /// DMA path. On `Standard` the alignment cycle is spent when the cycle after the dummy read is not
 /// a get cycle, so the fetch is three cycles or four.
 ///
-/// **How the parity is moved.** Burning cycles does not move it: the memory reader's dry cycle is
-/// set by the DMC timer, which counts down once per CPU cycle, so a cycle burnt before it takes a
-/// cycle off the horizon and the sum is constant — and every entry of both rate tables is even, so
-/// a reload's dry cycle always has the same parity (which is the phase `DmcChannel::reset` fixes
-/// on purpose, for blargg's `sync_dmc`). What *does* move it is letting the dry cycle itself pass
-/// on a **write** cycle, which no DMA may halt, and then putting the read one or two cycles later:
-/// the halt moves with the read and the alignment follows it.
+/// Measured at **even** slips alone (2 and 4), so that it is item 1b's parity being tested and not
+/// item 1c's slip: 1c takes a cycle off an *odd* slip, and the test below is the one that says so.
 #[test]
 fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
-    /// The halted read's cost when the dry cycle passes on a write and the read comes `late`
-    /// cycles after it.
-    fn cost_with_the_read_displaced<P: TimingProfile>(late: u32) -> i64 {
-        let mut bus = loaded_bus::<P>();
-        start_a_dmc_sample(&mut bus);
-        step_to_the_cycle_before_the_reader_runs_dry(&mut bus, 0);
-        for _ in 0..=late {
-            bus.write(0x0000, 0x00);
-        }
-        assert_eq!(1, bus.dmc_dma_count(), "{}: no fetch on a write", P::NAME);
-        let cost = cost_of_a_read(&mut bus, 0x8000);
-        assert_eq!(2, bus.dmc_dma_count(), "{}: the fetch ran", P::NAME);
-        cost
-    }
-
-    let neshawk: Vec<i64> = (0..2)
+    let neshawk: Vec<i64> = [2, 4]
+        .into_iter()
         .map(cost_with_the_read_displaced::<NesHawkCompat>)
         .collect();
-    let standard: Vec<i64> = (0..2)
+    let standard: Vec<i64> = (1..5)
         .map(cost_with_the_read_displaced::<Standard>)
         .collect();
 
@@ -184,6 +188,46 @@ fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
         standard.contains(&4) && standard.contains(&5),
         "standard: the alignment cycle is spent at one parity and not at the other, got \
          {standard:?}"
+    );
+}
+
+/// **Item 1c** — the halt lands on the request cycle **even when the CPU is writing on it**, so an
+/// **odd** slip costs one cycle less than an even one.
+///
+/// NesHawk lowers `RDY` on the request cycle whatever the CPU is doing there and its write
+/// microstep runs anyway; `RunCpuOne`'s `+2` then gives the fetch two cycles back once the CPU has
+/// been writing for three cycles. The arithmetic (`timing_profile.rs`) is that NesHawk's stalled
+/// read runs `slip + 3` cycles after the request for an odd slip and `slip + 4` for an even one,
+/// where this core waits for the first read cycle and always spends `slip + 4`.
+///
+/// Slips 1 to 4 — a 6502 never writes on more than three cycles in a row, so 4 is past anything a
+/// program can produce and is measured only to show the rule is the slip's parity and nothing
+/// else.
+#[test]
+fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
+    let neshawk: Vec<i64> = (1..5)
+        .map(cost_with_the_read_displaced::<NesHawkCompat>)
+        .collect();
+    let standard: Vec<i64> = (1..5)
+        .map(cost_with_the_read_displaced::<Standard>)
+        .collect();
+
+    assert_eq!(
+        vec![4, 5, 4, 5],
+        neshawk,
+        "neshawk: three halted cycles and the read at an odd slip, four and the read at an even one"
+    );
+    assert_ne!(
+        neshawk, standard,
+        "the item must be visible: the two profiles answer the same four slips differently"
+    );
+    // What `Standard` does instead, pinned so that a change to *its* rule fails here too: the
+    // halt lands on the first read cycle and the alignment cycle is spent or not by **that
+    // cycle's** parity, which is a different function of the slip from the one above.
+    assert_eq!(
+        vec![5, 4, 5, 4],
+        standard,
+        "standard: the alignment follows the halted read's own parity"
     );
 }
 

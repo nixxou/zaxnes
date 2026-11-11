@@ -404,3 +404,58 @@ the live classification, that predates frame 4666.
     [PROGRESS] NESHAWK-PROFILE-2 step 3/6 done: the NesHawk source for it
 
 ---
+
+## Step 4 — item 1c, and the rounds
+
+### Round 1 — item 1c, `DMC_HALT_LANDS_ON_A_WRITE_CYCLE`
+
+**Frame 4666 is closed, and the next 4 688 frames with it.** The movie now holds to **frame 9353**,
+where the per-frame reference has 647 frames left to run.
+
+| | before (NESHAWK-PROFILE's four items) | with item 1c |
+|---|---|---|
+| frames compared (1 100-10 000) | 8 901 | 8 901 |
+| **the last frame with no live difference** | **4 665** | **9 353** |
+| frames with no difference outside the stack page and `$0000-$001F` | 3 531 of 8 901 | **8 175** of 8 901 |
+| frames with a live difference | 5 370 | **726** |
+| …of them below the parting frame | 35 isolated | **79** isolated |
+| all 8 901 lag counts | agree | agree |
+
+Frame 4666's own census moves from `52x4` to **`6x3 46x4`** — 202 cycles instead of 208 — so the
+item is worth six cycles in that frame, which is a thirty-seventh of the 220 step 2 measured as the
+miss. **The arithmetic step 3 wrote down in advance was right about the size and wrong about what
+it meant**, exactly as NESHAWK-PROFILE's item 1a was: what moves the machine is *which cycle* each
+fetch lands on and therefore the interleaving of the whole frame, not the sum of the fetches' costs.
+Step 3's caveat is left standing above rather than quietly deleted, because being wrong about this
+twice in two lots is the finding.
+
+### The implementation, and the two sites
+
+`TimingProfile::DMC_HALT_LANDS_ON_A_WRITE_CYCLE`, `false` on `Standard`, `true` on
+`NesHawkCompat`, read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`.
+
+The rule is one bit of arithmetic and it is **exact**, not an approximation. With `w` the slip —
+how many cycles in a row the CPU was writing on from the request — NesHawk's stalled read runs
+`w + 3` cycles after the request for odd `w` and `w + 4` for even `w` (its `+2` fires once the CPU
+has been writing for three cycles and not before), while this core waits for the first read cycle
+and always spends `w + 4`. So the two agree on an even slip and NesHawk is one cycle ahead on an
+odd one, and **a 6502 never writes on more than three cycles in a row** — the three pushes of an
+interrupt or `BRK`, two for `JSR` and for a read-modify-write — so `w <= 3` and the four cases are
+all of them. Dropping `DMA_DUMMY2` on an odd slip is that one cycle.
+
+`(self.dma & DMA_OAM) == 0` gates it: inside an OAM transfer the CPU is not writing at all, it is
+already halted, and the slip there is the transfer's and not the opcode's.
+
+### The test, and what it does to item 1b's
+
+`item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less` measures slips 1 to 4 on both
+profiles and gets **exactly opposite vectors** — `NesHawkCompat` `[4, 5, 4, 5]` against `Standard`
+`[5, 4, 5, 4]` — which is as differential as a test of this gets: the `Standard` rule is the
+alignment of the **halted read's own** cycle and the NesHawk rule is the parity of the **slip**, and
+the two are different functions of the same input.
+
+`item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity` had to move, and it is worth saying
+why rather than just editing it: it measured slips 1 and 2 and asserted `[5, 5]`, and item 1c makes
+slip 1 cost 4. The test now measures the **even** slips 2 and 4, so that it is item 1b's parity
+being tested and not item 1c's slip. Its claim is unchanged; its instrument needed the other
+column. Its helper is now shared with 1c's.

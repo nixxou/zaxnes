@@ -89,6 +89,32 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// Zaxnes's `DmcChannel::set_enabled` delays only a fetch that a write actually **started**
     /// (`bytes_remaining == 0`), and a mid-sample write leaves the plain four-cycle reload alone.
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool;
+
+    /// **Item 1c** (lot NESHAWK-PROFILE-2 step 3). The halt lands on the request cycle **even when
+    /// the CPU is writing on it**, so a request that falls on a run of an *odd* number of write
+    /// cycles gives the CPU its cycle back **one cycle earlier** than waiting for the next read
+    /// cycle does.
+    ///
+    /// This is item 1's third half, which NESHAWK-PROFILE named in its step 1 and did not
+    /// implement. NesHawk has it in two pieces: `DMCUnit.Run()` lowers `RDY` whatever the CPU is
+    /// doing on the request cycle, and `MOS6502X`'s write microstep runs unconditionally and never
+    /// sets `rdy_freeze`; then `RunCpuOne`'s
+    /// `if (!cpu.RDY && !cpu.rdy_freeze && dmc_dma_countdown == DMC_RDY_check) countdown += 2`
+    /// gives the fetch two more cycles when no read microstep has stalled by then — that is, when
+    /// the CPU has been writing throughout.
+    ///
+    /// **Why one bit of the slip is the whole of it.** Let the request fall on a run of `w`
+    /// consecutive write cycles. NesHawk's stalled read then executes `w + 4` cycles after the
+    /// request for `w` of 0 or 2, and `w + 3` for `w` of 1 or 3 (the `+2` fires for `w >= 2`, and
+    /// the run ends before the countdown needs it for `w <= 1`). Zaxnes halts the first read cycle
+    /// instead, `w` cycles on, and spends four — `w + 4` always. So the two agree on an even `w`
+    /// and differ by exactly one cycle on an odd one, and **a 6502 never writes on more than three
+    /// cycles in a row** (the three pushes of an interrupt or `BRK`; `JSR` and a read-modify-write
+    /// make two), so `w <= 3` and the rule below is exact rather than an approximation.
+    ///
+    /// Read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`. Only a **reload** is
+    /// affected: a fetch item 3's `$4015` write started is not halted on its request cycle at all.
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -109,6 +135,7 @@ impl TimingProfile for Standard {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = false;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = false;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = false;
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -129,4 +156,5 @@ impl TimingProfile for NesHawkCompat {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
 }
