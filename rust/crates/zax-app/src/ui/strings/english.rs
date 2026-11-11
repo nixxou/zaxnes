@@ -1214,6 +1214,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_HINT_RESET_ALL, "Reset all"),
     (keys::HACKS_TITLE, "Hacks — {0}"),
     (keys::HACKS_NONE, "No hack is made for this game."),
+    (keys::HACKS_PATCH_LIVE_NOTE, "The ROM patch follows the widescreen: turned on or off during a game, it switches at once and the game goes on where it was."),
     (keys::HACKS_PATCH_NOTE, "The ROM patch follows the widescreen when the game starts: turned on or off during a game, it takes effect at the next start."),
     (keys::HACK_WIDESCREEN, "Widescreen"),
     (keys::HACK_RATIO, "Ratio"),

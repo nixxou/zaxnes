@@ -95,10 +95,10 @@ impl ZaxUi {
                     }
                 }
             }
-            if hacks.patch().is_some() {
+            if let Some(note) = hacks.patch_note() {
                 ui.separator();
                 let _wrap = ui.push_text_wrap_pos_with_pos(440.0);
-                ui.text_disabled(strings::get(keys::HACKS_PATCH_NOTE));
+                ui.text_disabled(strings::get(note));
             }
         }
         drop(window);

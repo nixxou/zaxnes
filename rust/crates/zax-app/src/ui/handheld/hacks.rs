@@ -339,6 +339,23 @@ impl HacksModel {
             .or_else(|| self.other_rom.filter(|_| self.forced()))
     }
 
+    /// The key of the note under the rows: the patch switches while the game plays when its own
+    /// pack carries the game's states both ways, else at the next start; none without a patch.
+    #[must_use]
+    pub fn patch_note(&self) -> Option<&'static str> {
+        let live = self.patch.is_some_and(|patch| {
+            let states = patch.states();
+            states.to_off && states.to_on
+        });
+        self.patch().map(|_| {
+            if live {
+                keys::HACKS_PATCH_LIVE_NOTE
+            } else {
+                keys::HACKS_PATCH_NOTE
+            }
+        })
+    }
+
     /// The rows: none when no hack is made for the game; for another version of a game one is
     /// made for, the forcing first, then the rest once it is forced.
     #[must_use]

@@ -385,6 +385,7 @@ pub const SHORTCUT_HOME: &str = "shortcut.home";
 pub const HACKS_TITLE: &str = "hacks.title";
 pub const HACKS_NONE: &str = "hacks.none";
 pub const HACKS_PATCH_NOTE: &str = "hacks.patch_note";
+pub const HACKS_PATCH_LIVE_NOTE: &str = "hacks.patch_live_note";
 pub const HACK_WIDESCREEN: &str = "hacks.widescreen";
 pub const HACK_RATIO: &str = "hacks.ratio";
 pub const HACK_MARGIN: &str = "hacks.margin";
@@ -843,6 +844,7 @@ pub const PUBLISHED: &[&str] = &[
     HACKS_TITLE,
     HACKS_NONE,
     HACKS_PATCH_NOTE,
+    HACKS_PATCH_LIVE_NOTE,
     HACK_ADVANCED,
     HACK_WIDESCREEN,
     HACK_RATIO,

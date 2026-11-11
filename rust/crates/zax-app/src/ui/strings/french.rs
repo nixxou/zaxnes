@@ -1212,6 +1212,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_HINT_RESET_ALL, "Tout remettre"),
     (keys::HACKS_TITLE, "Hacks — {0}"),
     (keys::HACKS_NONE, "Aucun hack n'est fait pour ce jeu."),
+    (keys::HACKS_PATCH_LIVE_NOTE, "Le patch de la ROM suit l'écran large : activé ou désactivé en cours de partie, il bascule tout de suite et le jeu reprend où il en était."),
     (keys::HACKS_PATCH_NOTE, "Le patch de la ROM suit l'écran large au lancement du jeu : activé ou désactivé en cours de partie, il prend effet au prochain lancement."),
     (keys::HACK_WIDESCREEN, "Écran large"),
     (keys::HACK_RATIO, "Ratio"),

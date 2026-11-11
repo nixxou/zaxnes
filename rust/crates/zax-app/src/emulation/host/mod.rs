@@ -10,6 +10,7 @@ mod commands;
 mod game_options;
 mod games;
 mod hack_options;
+mod hack_switch;
 mod hacks;
 mod jobs;
 mod movies;
@@ -1553,6 +1554,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 }
                 self.apply_speed();
             }
+            // The widescreen hack switched while its game plays (see `hack_switch`).
+            SettingId::VideoWidescreen
+            | SettingId::VideoWidescreenAdvanced
+            | SettingId::EmuBuiltinPatches => self.follow_patch_switch(),
             SettingId::AchievementsEnabled
             | SettingId::AchievementsEncore
             | SettingId::AchievementsUnofficial => self.apply_achievement_settings(),

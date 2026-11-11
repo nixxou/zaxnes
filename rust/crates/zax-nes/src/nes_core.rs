@@ -183,6 +183,13 @@ impl NesCore {
         self.refresh_patch_cache();
     }
 
+    /// Whether the built-in patches and the advanced ones are on for the next load, as
+    /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
+    #[must_use]
+    pub const fn patch_switches(&self) -> (bool, bool) {
+        (self.builtin_patches_enabled, self.advanced_patches_enabled)
+    }
+
     /// Turns the advanced patches (`BuiltinPatch::advanced`) on or off for the next
     /// [`NesCore::load_rom`] and state restore: off, a ROM whose patch is advanced loads as it
     /// is, widened by its margin decoder alone.

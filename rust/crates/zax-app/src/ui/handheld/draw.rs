@@ -818,8 +818,8 @@ impl HandheldUi {
         }
         if let Some(other) = other {
             painter.note(visible, &other);
-        } else if hacks.patch().is_some() {
-            painter.note(visible, &strings::get(keys::HACKS_PATCH_NOTE));
+        } else if let Some(note) = hacks.patch_note() {
+            painter.note(visible, &strings::get(note));
         }
         painter.hints(layout::hints(Screen::Hacks));
     }
