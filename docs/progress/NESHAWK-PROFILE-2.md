@@ -246,3 +246,161 @@ one not: a phase difference of a sample, not a per-frame cost.
     [PROGRESS] NESHAWK-PROFILE-2 step 2/6 done: frame 4666, instruction by instruction
 
 ---
+
+## Step 3 — the NesHawk source, and two candidates eliminated by arithmetic
+
+Read through `raw.githubusercontent.com` (BizHawk, **MIT**; nothing cloned, downloaded or copied):
+`src/BizHawk.Emulation.Cores/Consoles/Nintendo/NES/APU.cs` — `DMCUnit.Run`, `DMCUnit.Clock`,
+`DMCUnit.Fetch`, `DMCUnit.set_lenctr_en`, `APU.RunOneLast` — and `.../NES.Core.cs` — `RunCpuOne`.
+Each item below names the function it came from so the reading can be checked.
+
+### `RunCpuOne`'s DMC block, in the order it tests things
+
+```
+1. the OAM DMA block      if (oam_dma_exec && apu.dmc_dma_countdown != 1 && !dmc_realign)
+                            cpu_deadcounter > 0 ? cpu_deadcounter-- : one OAM get-or-put cycle
+                            oam_dma_index == 512 -> oam_dma_exec = false
+2. dmc_realign = false
+3. the DMC DMA block      if (apu.dmc_dma_countdown > 0)
+                            if (countdown == 1) dmc_realign = true
+                            if (!cpu.RDY && !cpu.rdy_freeze && countdown == apu.DMC_RDY_check)
+                                countdown += 2
+                            cpu.RDY = false; dmc_dma_exec = true; countdown--
+                            countdown == 0 ? RunDMCFetch() (+ the two glitch tests) : RunDMCHaltFetch()
+4. apu.RunOneFirst()      -> ... dmc.Run()
+5. cpu.IRQ = _irq_apu || Board.IrqSignal
+6. the fill_glitch_2 abort        if (apu.dmc.fill_glitch_2_end)
+7. cpu.ExecuteOne()
+8. Board.ClockCpu();  9. the sample emit;  10. apu.RunOneLast()
+11. if (!cpu.RDY && !dmc_dma_exec && !oam_dma_exec) cpu.RDY = true
+```
+
+This confirms NESHAWK-PROFILE step 1's reading of items 1a and 1b to the line, and adds three
+things that lot did not have.
+
+### Candidate A — the `+2`, which is item 1's missing half and **has no constant**
+
+NESHAWK-PROFILE step 1 described the `+2` and then split item 1 into **1a** (the halt lands on the
+request cycle) and **1b** (a fixed four cycles). `DMC_HALT_ON_REQUEST_CYCLE` and
+`DMC_FETCH_HAS_TWO_DUMMIES` shipped; **the `+2` did not** — there is no third constant. The source
+says it in two halves:
+
+* `DMCUnit.Run` lowers `nes.cpu.RDY` on the request cycle **whatever the CPU is doing there**, and
+  `MOS6502X`'s write microstep executes unconditionally and never touches `rdy_freeze`. So on
+  NesHawk a request raised on a **write** cycle halts from that cycle and the write still happens;
+* three cycles later, on the cycle `countdown == DMC_RDY_check == 2`, `!cpu.rdy_freeze` says *no
+  read microstep has stalled yet*, i.e. the CPU has been writing throughout — and the countdown
+  gains **2**, so the fetch lands two cycles later and the whole thing costs **six**.
+
+**Zaxnes has neither half**: `halted_read_cycle` is the only caller of `promote_dmc_wait` on a lone
+fetch, so a request raised on a write cycle waits for the **next read cycle** and then costs its
+ordinary four. Step 2's census counts that class: in frame 4666 **five** of the 52 fetches slip —
+four by one cycle and one by more — and across frames 4 640-4 670 the count runs from 1 to 12 a
+frame. Net, per slipped fetch, NesHawk gives the CPU its cycle back **one cycle earlier**, which is
+the direction frame 4666 needs.
+
+### Candidate B — item 5, with the exact register list
+
+`APU.RunOneLast`, in order: the **joypad strobe** when `dmc.timer % 2 == 1`, the sequencer IRQ
+clear when it is even, the length-clock flags, the **`dmc_reload_countdown`** block (item 2,
+already implemented), and then
+
+```
+if (pending_reg != -1)
+    if (pending_reg is 0x4003, 0x4007, 0x4010, 0x4015 or 0x4017) _WriteReg(...); pending_reg = -1
+    else if (dmc.timer % 2 == 0)                                  _WriteReg(...); pending_reg = -1
+```
+
+So the five registers above are applied at the end of the write's own cycle and **every other APU
+register waits for the first cycle on which `dmc.timer` is even** — `$4000`-`$4002`, `$4004`-`$4006`,
+`$4008`, `$400A`-`$400E`, `$4011`, `$4012`, `$4013`. NESHAWK-PROFILE step 1 named `$4011`/`$4012`/
+`$4013`; the list is wider than that, and `$4010` (the rate) is on the *immediate* side.
+
+Step 2's census says *Kirby* writes several of the deferred registers every frame (`$4004`,
+`$4006`, `$400C`, `$400E`, `$4000`) and `$4011` once a frame. **Only `$4012` and `$4013` can move
+the CPU**, and they are written only at the *first* trigger of a sample run (4 641, 4 647, 4 659,
+4 479 in the window), never at a re-trigger.
+
+### Candidate C — `dmc_realign`, which lengthens an OAM transfer
+
+`countdown == 1` sets `dmc_realign`, and the OAM block's gate is
+`dmc_dma_countdown != 1 && !dmc_realign`. So on the two cycles around the DMC's fetch the OAM
+transfer does **not** advance: a DMC fetch that falls inside an OAM transfer makes that transfer
+**two cycles longer**. Zaxnes's `run_dma` does the opposite — "the transfer's own cycles then stand
+in for its halt and dummy cycles" — so the fetch costs the transfer almost nothing.
+
+Frame 4666 has exactly one site: the OAM transfer starts at cycle 61 and the first DMC request is
+at 106, inside it.
+
+### Candidate D — `fill_glitch` and `fill_glitch_2` are **arithmetically impossible on this movie**
+
+This is the step's firmest result, and it closes NESHAWK-PROFILE's item 6 for *Kirby* without an
+experiment. The two flags are set in `RunCpuOne`, on the cycle the fetch **completes**:
+
+| set | condition at the completing fetch |
+|---|---|
+| `fill_glitch` | `apu.dmc.timer == 2 && apu.dmc.out_bits_remaining == 0 && sample_length != 0` |
+| `fill_glitch_2` | `timer == 4 && out_bits_remaining == 0 && sample_length == 1` |
+
+and `set_lenctr_en(false)` sets `fill_glitch_2` when
+`((timer == 3) \|\| (timer == 2)) && out_bits_remaining == 0 && sample_length != 0`, or
+`pending_disable` when `(timer == 1) && out_bits_remaining == 0 && sample_length != 0`, or — third
+in the chain — `pending_disable` (and `dmc_irq_glitch`) when a DMA, a `delay` or a
+`dmc_reload_countdown` is in flight.
+
+`DMCUnit.Clock` is what decides `out_bits_remaining`: it is reloaded to **7** and the sample buffer
+is emptied on the same clock, then counted 7 → 0, so **`out_bits_remaining == 0` is the last bit
+period of a byte and the buffer is full throughout it**. The request appears on the clock that
+reloads it, when `out_bits_remaining == 7` and `timer == timer_reload`.
+
+*Kirby* writes `$4010` = 0E, so `timer_reload` is **72** CPU cycles and a byte is 576 (step 2
+measured exactly 576 between fetches). A fetch completes three cycles after its request, with
+`timer == 69` and `out_bits_remaining == 7`. For either flag to be set the fetch would have to
+complete with `timer` at 2 or 4 **and** `out_bits_remaining` at 0 — seven bit periods and seventy
+cycles away. **Neither flag can ever be set at this rate**, and `set_lenctr_en(false)`'s first two
+arms need `out_bits_remaining == 0 && sample_length != 0`, which step 2 measured as
+`bits_remaining = 1` (NesHawk's 0) with `bytes_remaining = 0` at the one `$4015` = 0F of the
+window — `sample_length` already zero, so the third arm's `else` is taken and it is what this core
+does today.
+
+So **item 6 is not frame 4666's item**, and that is proved from the source and the measured rate
+rather than guessed. (It stays a real difference for a game with a fast rate — index 15 is 54
+cycles a bit — and a candidate for whoever meets one.)
+
+### Candidate E — the IRQ sampling point, and a new one for the controller
+
+`cpu.IRQ = _irq_apu || Board.IrqSignal` is step 5 of `RunCpuOne`: after the DMA block and
+`RunOneFirst`, **before** `ExecuteOne`. EVAL-SYNC-4 measured *Kirby*'s MMC3 IRQ entering its
+handler at the same dot on both machines and step 2 measured it again (SL 174 dot 288), so this is
+not this movie's.
+
+`RunOneLast`'s **first** action is new and is recorded for whoever needs it: a `$4016` strobe is
+not applied at the write but on the first cycle with **`dmc.timer % 2 == 1`**
+(`nes.joypadStrobed` → `nes.strobe_joyport()`). That is a *controller* item, not a DMA one, and
+*Kirby* strobes once a frame many cycles before it reads, so it cannot move this movie; it is
+written down because nothing else in this tree records it.
+
+### What step 4 implements, and the arithmetic it is up against
+
+A, B and C, each behind its own associated constant, in that order. And the honest caveat, stated
+before the measurement rather than after it: **step 2 measured the miss at about 220 cycles and the
+whole of frame 4666's DMA at 721** (208 DMC + 513 OAM), so **no change to the cost of a DMC fetch
+can close frame 4666 by arithmetic** — A is worth about one cycle per slipped fetch (five in that
+frame), B nothing at all unless `$4012`/`$4013` are written, C about two cycles once a frame.
+
+What the arithmetic does **not** decide is the same thing it did not decide in NESHAWK-PROFILE,
+where item 1a closed frame 926 against an arithmetic that pointed the other way: these items move
+**which cycle** each fetch lands on, and with it the interleaving of the whole frame. And step 2
+found a second reason to measure rather than predict — **the two machines have differed in the
+stack page on every one of the 3 566 frames from 1 100 on**, and at frames 4 663-4 665 the
+difference is not noise but a **one-address shift** of a block of fifteen bytes (ours
+`$01E7`-`$01F5` = `E2 40 85 32 33 E2 F8 00 12 86 83 C3 22 01 00`, the reference's the same bytes
+one address higher). A shifted block of dead stack is the fossil of the two machines' stack
+pointers having been one byte apart when that routine pushed — a real transient difference, below
+the live classification, that predates frame 4666.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-2 step 3/6 done: the NesHawk source for it
+
+---
